@@ -94,6 +94,7 @@ val executor = ContainedExecutors.wrap(
 val myPolicy = Policy.builder()
     .block(Syscall.PTRACE)
     .block(Syscall.INIT_MODULE, Syscall.FINIT_MODULE)
+    .block(Syscall.MEMFD_CREATE) // Close the memfd_create bypass (see below)
     .build()
 ```
 
@@ -124,6 +125,8 @@ Or equivalently via the `IO_CONTAINED_FALLBACK` environment variable.
 ## Virtual Threads
 
 Seccomp filters are **per-thread**. Virtual threads multiplex onto carrier threads from the shared ForkJoinPool — which means you cannot contain a virtual thread by wrapping its executor. The filter must be installed on the carrier.
+
+**Important:** Calling `installOnCurrentThread()` from inside a virtual thread will throw `IllegalStateException`. The library detects this misuse at runtime to prevent accidental carrier contamination.
 
 The correct pattern for virtual threads:
 
@@ -159,7 +162,7 @@ virtualPool.submit { vulnerableLogger.log(input) }
 
 - **Not a replacement for input validation.** Blocking exec after the fact is defense in depth. Validate your inputs first.
 
-- **Not compatible with virtual thread executors using the default shared scheduler** without the dedicated carrier pattern described above.
+- **Not compatible with virtual thread executors using the default shared scheduler** without the dedicated carrier pattern described above. Calling `installOnCurrentThread()` inside a virtual thread throws `IllegalStateException`.
 
 - **Blocking `clone` can cause JVM crashes.** The `clone` and `clone3` syscalls are available in the API but are **not** blocked by the default `NO_EXEC` or `PURE_COMPUTE` policies. 
   - **Why it is safe:** This is not an escape hatch. In Linux, seccomp filters are strictly inherited by all child processes and threads created via `clone` or `fork`. If an attacker compromises a thread and spawns a new thread, that new thread is born inside the exact same sandbox and cannot escalate privileges.
@@ -168,6 +171,11 @@ virtualPool.submit { vulnerableLogger.log(input) }
 - **Not available on macOS or Windows.** The library degrades gracefully on non-Linux platforms, with a clear warning. Production deployments should always be Linux.
 
 - **Not all syscalls are blockable with simple number checks.** `mmap` with `PROT_EXEC` is dangerous only when backed by a file descriptor; blocking it outright breaks the JIT. v0.1 takes a conservative approach and does not block `mmap`. Future versions may inspect arguments.
+
+- **`NO_EXEC` does not block `memfd_create`.** An attacker can use `memfd_create` + `mmap(PROT_EXEC)` to execute shellcode in memory without calling `execve`. To close this bypass, add `Syscall.MEMFD_CREATE` to your policy:
+  ```kotlin
+  val policy = Policy.combine(Policy.NO_EXEC, Policy.builder().block(Syscall.MEMFD_CREATE).build())
+  ```
 
 ---
 

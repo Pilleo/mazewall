@@ -21,6 +21,14 @@ object ContainedExecutors {
      * Installs the given policies onto the current thread immediately.
      */
     fun installOnCurrentThread(vararg policies: Policy) {
+        if (Thread.currentThread().isVirtual) {
+            throw IllegalStateException(
+                "Cannot install seccomp on a virtual thread. " +
+                "Use a dedicated platform thread pool as a scheduler. " +
+                "See the Virtual Threads section in the README for the correct pattern."
+            )
+        }
+
         val policy = Policy.combine(*policies)
         
         if (!Platform.isSupported()) {
@@ -61,13 +69,46 @@ object ContainedExecutors {
      * caused by a seccomp containment violation (e.g. EPERM).
      */
     internal fun isContainmentViolation(t: Throwable): Boolean {
+        return isDirectContainmentViolation(t) || isViolationInCauseChain(t) || isViolationInSuppressed(t)
+    }
+
+    internal fun findViolationCause(t: Throwable): Throwable? {
+        if (isDirectContainmentViolation(t)) return t
+        var current = t.cause
+        while (current != null && current !== t) {
+            if (isDirectContainmentViolation(current)) return current
+            current = current.cause
+        }
+        for (suppressed in t.suppressedExceptions) {
+            if (isDirectContainmentViolation(suppressed)) return suppressed
+        }
+        return null
+    }
+
+    private fun isDirectContainmentViolation(t: Throwable): Boolean {
         val msg = t.message ?: return false
-        
+
         return msg.contains("Operation not permitted")
             || msg.contains("Permission denied")
             || (t is SocketException && msg.contains("Permission"))
             || (t is AccessDeniedException)
             || (t is IOException && msg.contains("Cannot run"))
+    }
+
+    private fun isViolationInCauseChain(t: Throwable): Boolean {
+        var current = t.cause
+        while (current != null && current !== t) {
+            if (isDirectContainmentViolation(current)) return true
+            current = current.cause
+        }
+        return false
+    }
+
+    private fun isViolationInSuppressed(t: Throwable): Boolean {
+        for (suppressed in t.suppressedExceptions) {
+            if (isDirectContainmentViolation(suppressed)) return true
+        }
+        return false
     }
 
     internal class ContainedExecutorWrapper(

@@ -39,8 +39,15 @@ If a restricted thread (e.g., using `Policy.PURE_COMPUTE`) is the first thread i
 The current implementation does not block `mmap` or `mprotect` because the JIT compiler requires these to create executable memory. However, an attacker can use `memfd_create` and `mmap` with `PROT_EXEC` to load and execute binary shellcode directly in memory, bypassing `NO_EXEC` (which only blocks `execve`).
 
 ### Mitigation
-*   **W^X Enforcement:** Future versions should use seccomp argument inspection to allow `mmap`, but block calls where `(prot & PROT_WRITE) && (prot & PROT_EXEC)` is true.
-*   **Note:** Standard seccomp cannot inspect the content of string paths, so it cannot distinguish between the JIT mapping memory and an attacker mapping a malicious library.
+* **Block `memfd_create`:** The `Syscall.MEMFD_CREATE` syscall is available in the policy builder. Blocking it prevents the most common vector for in-memory code execution without `execve`:
+  ```kotlin
+  val policy = Policy.combine(
+      Policy.NO_EXEC,
+      Policy.builder().block(Syscall.MEMFD_CREATE).build()
+  )
+  ```
+* **W^X Enforcement:** Future versions should use seccomp argument inspection to allow `mmap`, but block calls where `(prot & PROT_WRITE) && (prot & PROT_EXEC)` is true.
+* **Note:** Standard seccomp cannot inspect the content of string paths, so it cannot distinguish between the JIT mapping memory and an attacker mapping a malicious library.
 
 ---
 

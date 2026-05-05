@@ -20,6 +20,7 @@ data class Arch(
     val socket: Int,
     val initModule: Int,
     val finitModule: Int,
+    val memfdCreate: Int,
     val seccompSyscallNumber: Int
 ) {
     companion object {
@@ -44,9 +45,10 @@ data class Arch(
             mmap = 9,
             ptrace = 101,
             socket = 41,
-            initModule = 175,
-            finitModule = 313,
-            seccompSyscallNumber = 317
+        initModule = 175,
+        finitModule = 313,
+        memfdCreate = 319,
+        seccompSyscallNumber = 317
         )
 
         val AARCH64 = Arch(
@@ -67,9 +69,10 @@ data class Arch(
             mmap = 222,
             ptrace = 117,
             socket = 198,
-            initModule = 105,
-            finitModule = 273,
-            seccompSyscallNumber = 277
+        initModule = 105,
+        finitModule = 273,
+        memfdCreate = 279,
+        seccompSyscallNumber = 277
         )
 
         fun current(): Arch {

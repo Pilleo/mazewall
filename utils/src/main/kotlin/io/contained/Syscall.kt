@@ -21,7 +21,8 @@ enum class Syscall {
     PTRACE,
     SOCKET,
     INIT_MODULE,
-    FINIT_MODULE;
+    FINIT_MODULE,
+    MEMFD_CREATE;
 
     /** Returns the syscall number for the given [arch], or -1 if not available. */
     fun numberFor(arch: Arch): Int = when (this) {
@@ -39,7 +40,8 @@ enum class Syscall {
         MMAP         -> arch.mmap
         PTRACE       -> arch.ptrace
         SOCKET       -> arch.socket
-        INIT_MODULE  -> arch.initModule
+        INIT_MODULE -> arch.initModule
         FINIT_MODULE -> arch.finitModule
+        MEMFD_CREATE -> arch.memfdCreate
     }
 }
