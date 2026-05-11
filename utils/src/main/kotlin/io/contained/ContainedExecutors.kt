@@ -90,6 +90,7 @@ object ContainedExecutors {
 
         return msg.contains("Operation not permitted")
             || msg.contains("Permission denied")
+            || msg.contains("error=1,")
             || (t is SocketException && msg.contains("Permission"))
             || (t is AccessDeniedException)
             || (t is IOException && msg.contains("Cannot run"))

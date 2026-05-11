@@ -70,7 +70,7 @@ object BpfFilter {
                 is Insn.Jmp -> {
                     val jt = resolveOffset(i, insn.jtTarget, labels)
                     val jf = resolveOffset(i, insn.jfTarget, labels)
-                    SockFilter(insn.code.toShort(), jt.toByte(), jf.toByte(), insn.k)
+                    SockFilter(insn.code.toShort(), jt.toShort(), jf.toShort(), insn.k)
                 }
             }
         }.toTypedArray()

@@ -13,6 +13,10 @@ enum class Syscall {
     EXECVE,
     EXECVEAT,
     CONNECT,
+    BIND,
+    LISTEN,
+    ACCEPT,
+    ACCEPT4,
     SENDTO,
     SENDMSG,
     OPEN,
@@ -33,6 +37,10 @@ enum class Syscall {
         EXECVE       -> arch.execve
         EXECVEAT     -> arch.execveat
         CONNECT      -> arch.connect
+        BIND         -> arch.bind
+        LISTEN       -> arch.listen
+        ACCEPT       -> arch.accept
+        ACCEPT4      -> arch.accept4
         SENDTO       -> arch.sendto
         SENDMSG      -> arch.sendmsg
         OPEN         -> arch.open

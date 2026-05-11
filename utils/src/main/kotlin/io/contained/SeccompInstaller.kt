@@ -39,10 +39,12 @@ object SeccompInstaller {
             val prog = LinuxNative.newSockFProg(arena, filters)
 
             // Step 4: Try seccomp(2) syscall first (preferred modern path)
+            // We use 0 for flags because SECCOMP_FILTER_FLAG_TSYNC would apply the filter
+            // to all threads in the process, defeating per-executor isolation.
             val r3 = LinuxNative.syscall(
                 arch.seccompSyscallNumber.toLong(),
                 LinuxNative.SECCOMP_SET_MODE_FILTER.toLong(),
-                LinuxNative.SECCOMP_FILTER_FLAG_TSYNC.toLong(),
+                0L,
                 prog
             )
 

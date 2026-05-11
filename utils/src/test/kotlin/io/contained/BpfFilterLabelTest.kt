@@ -21,23 +21,23 @@ class BpfFilterLabelTest {
 
         assertEquals(0x15.toShort(), filter[1].code)
         assertEquals(Arch.AUDIT_ARCH_X86_64, filter[1].k)
-        assertEquals(0, filter[1].jt)
-        assertEquals((n + 3).toByte(), filter[1].jf)
+        assertEquals(0.toShort(), filter[1].jt)
+        assertEquals((n + 3).toShort(), filter[1].jf)
 
         assertEquals(0x20.toShort(), filter[2].code)
         assertEquals(0, filter[2].k)
 
         assertEquals(0x25.toShort(), filter[3].code)
         assertEquals(amd64.limit, filter[3].k)
-        assertEquals((n + 1).toByte(), filter[3].jt)
-        assertEquals(0, filter[3].jf)
+        assertEquals((n + 1).toShort(), filter[3].jt)
+        assertEquals(0.toShort(), filter[3].jf)
 
         for (i in 0 until n) {
             val insn = filter[4 + i]
             assertEquals(0x15.toShort(), insn.code, "insn[${4 + i}] opcode")
             assertEquals(blocked[i], insn.k, "insn[${4 + i}] syscall nr")
-            assertEquals((n - i).toByte(), insn.jt, "insn[${4 + i}] jt offset")
-            assertEquals(0, insn.jf, "insn[${4 + i}] jf offset")
+            assertEquals((n - i).toShort(), insn.jt, "insn[${4 + i}] jt offset")
+            assertEquals(0.toShort(), insn.jf, "insn[${4 + i}] jf offset")
         }
 
         assertEquals(0x06.toShort(), filter[4 + n].code)
@@ -59,8 +59,8 @@ class BpfFilterLabelTest {
             val insn = filter[4 + i]
             assertEquals(0x15.toShort(), insn.code)
             assertEquals(blocked[i], insn.k)
-            assertEquals((n - i).toByte(), insn.jt)
-            assertEquals(0, insn.jf)
+            assertEquals((n - i).toShort(), insn.jt)
+            assertEquals(0.toShort(), insn.jf)
         }
     }
 
@@ -76,8 +76,8 @@ class BpfFilterLabelTest {
             val insn = filter[4 + i]
             assertEquals(0x15.toShort(), insn.code)
             assertEquals(blocked[i], insn.k)
-            assertEquals((n - i).toByte(), insn.jt)
-            assertEquals(0, insn.jf)
+            assertEquals((n - i).toShort(), insn.jt)
+            assertEquals(0.toShort(), insn.jf)
         }
     }
 
@@ -97,8 +97,8 @@ class BpfFilterLabelTest {
             val insn = filter[4 + i]
             assertEquals(0x15.toShort(), insn.code)
             assertEquals(blocked[i], insn.k)
-            assertEquals((n - i).toByte(), insn.jt)
-            assertEquals(0, insn.jf)
+            assertEquals((n - i).toShort(), insn.jt)
+            assertEquals(0.toShort(), insn.jf)
         }
     }
 
@@ -112,13 +112,13 @@ class BpfFilterLabelTest {
 
         assertEquals(0x15.toShort(), filter[1].code)
         assertEquals(Arch.AUDIT_ARCH_AARCH64, filter[1].k)
-        assertEquals(0, filter[1].jt)
-        assertEquals((n + 3).toByte(), filter[1].jf)
+        assertEquals(0.toShort(), filter[1].jt)
+        assertEquals((n + 3).toShort(), filter[1].jf)
 
         assertEquals(0x25.toShort(), filter[3].code)
         assertEquals(aarch64.limit, filter[3].k)
-        assertEquals((n + 1).toByte(), filter[3].jt)
-        assertEquals(0, filter[3].jf)
+        assertEquals((n + 1).toShort(), filter[3].jt)
+        assertEquals(0.toShort(), filter[3].jf)
     }
 
     @Test

@@ -46,4 +46,27 @@ class ContainedExecutorsTest {
         assertTrue(future.get() == "success")
         executor.shutdown()
     }
+
+    @Test
+    fun `test per-thread isolation (TSYNC bug fix)`() {
+        val osName = System.getProperty("os.name")
+        if (!osName.equals("Linux", ignoreCase = true)) return
+
+        val executor = Executors.newSingleThreadExecutor()
+        val safeExecutor = ContainedExecutors.wrap(executor, Policy.NO_EXEC)
+
+        // 1. Run a task on the safe executor to install the seccomp filter on that specific thread
+        val future = safeExecutor.submit(java.util.concurrent.Callable {
+            "installed"
+        })
+        kotlin.test.assertEquals("installed", future.get())
+
+        // 2. Now the main thread (uncontained) should still be able to exec!
+        // If SECCOMP_FILTER_FLAG_TSYNC was used, the main thread would be permanently blocked here.
+        val process = Runtime.getRuntime().exec(arrayOf("echo", "uncontained"))
+        process.waitFor()
+        kotlin.test.assertEquals(0, process.exitValue())
+        
+        executor.shutdown()
+    }
 }

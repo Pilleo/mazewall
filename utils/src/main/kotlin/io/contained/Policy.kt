@@ -15,12 +15,14 @@ class Policy private constructor(internal val blocked: Set<Syscall>) {
         blocked
             .map { it.numberFor(arch) }
             .filter { it >= 0 } // -1 means "not available on this arch"
+            .sorted()
             .toIntArray()
 
     companion object {
         /** Blocks all network I/O, process execution, and file opens. Suitable for pure computation tasks. */
         val PURE_COMPUTE: Policy = builder()
             .block(Syscall.CONNECT, Syscall.SENDTO, Syscall.SENDMSG, Syscall.SOCKET)
+            .block(Syscall.BIND, Syscall.LISTEN, Syscall.ACCEPT, Syscall.ACCEPT4)
             .block(Syscall.EXECVE, Syscall.EXECVEAT)
             .block(Syscall.OPEN, Syscall.OPENAT)
             .build()
@@ -28,6 +30,7 @@ class Policy private constructor(internal val blocked: Set<Syscall>) {
         /** Blocks outbound network syscalls only. */
         val NO_NETWORK: Policy = builder()
             .block(Syscall.CONNECT, Syscall.SENDTO, Syscall.SENDMSG, Syscall.SOCKET)
+            .block(Syscall.BIND, Syscall.LISTEN, Syscall.ACCEPT, Syscall.ACCEPT4)
             .build()
 
         /** Blocks process execution syscalls only. */

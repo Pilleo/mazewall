@@ -11,6 +11,10 @@ data class Arch(
     val execve: Int,
     val execveat: Int,
     val connect: Int,
+    val bind: Int,
+    val listen: Int,
+    val accept: Int,
+    val accept4: Int,
     val sendto: Int,
     val sendmsg: Int,
     val openat: Int,
@@ -38,6 +42,10 @@ data class Arch(
             execve = 59,
             execveat = 322,
             connect = 42,
+            bind = 49,
+            listen = 50,
+            accept = 43,
+            accept4 = 288,
             sendto = 44,
             sendmsg = 46,
             openat = 257,
@@ -45,10 +53,10 @@ data class Arch(
             mmap = 9,
             ptrace = 101,
             socket = 41,
-        initModule = 175,
-        finitModule = 313,
-        memfdCreate = 319,
-        seccompSyscallNumber = 317
+            initModule = 175,
+            finitModule = 313,
+            memfdCreate = 319,
+            seccompSyscallNumber = 317
         )
 
         val AARCH64 = Arch(
@@ -62,6 +70,10 @@ data class Arch(
             execve = 221,
             execveat = 281,
             connect = 203,
+            bind = 200,
+            listen = 201,
+            accept = 202,
+            accept4 = 242,
             sendto = 206,
             sendmsg = 211,
             openat = 56,
@@ -69,10 +81,10 @@ data class Arch(
             mmap = 222,
             ptrace = 117,
             socket = 198,
-        initModule = 105,
-        finitModule = 273,
-        memfdCreate = 279,
-        seccompSyscallNumber = 277
+            initModule = 105,
+            finitModule = 273,
+            memfdCreate = 279,
+            seccompSyscallNumber = 277
         )
 
         fun current(): Arch {

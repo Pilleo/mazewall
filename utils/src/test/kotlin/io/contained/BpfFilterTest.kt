@@ -89,9 +89,9 @@ class BpfFilterTest {
             assertEquals(blocked[i], insn.k, "insn[${4 + i}] wrong syscall nr")
             // jt should jump over remaining checks + ALLOW to land on DENY
             // jt = n - i
-            assertEquals((n - i).toByte(), insn.jt, "insn[${4 + i}] wrong jt")
+            assertEquals((n - i).toShort(), insn.jt, "insn[${4 + i}] wrong jt")
             // jf = 0 (fall through to next check)
-            assertEquals(0, insn.jf)
+            assertEquals(0.toShort(), insn.jf)
         }
     }
 

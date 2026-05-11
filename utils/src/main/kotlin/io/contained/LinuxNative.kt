@@ -4,7 +4,12 @@ import java.lang.foreign.*
 import java.lang.invoke.MethodHandle
 
 // Corresponds to struct sock_filter
-data class SockFilter(val code: Short, val jt: Byte, val jf: Byte, val k: Int)
+data class SockFilter(val code: Short, val jt: Short, val jf: Short, val k: Int) {
+    init {
+        require(jt in 0..255) { "jt offset must be an unsigned 8-bit value (0-255), got $jt" }
+        require(jf in 0..255) { "jf offset must be an unsigned 8-bit value (0-255), got $jf" }
+    }
+}
 
 object LinuxNative {
     private val linker = Linker.nativeLinker()
@@ -64,8 +69,8 @@ object LinuxNative {
             val f = filters[i]
             val offset = i * 8L
             filterArraySeg.set(ValueLayout.JAVA_SHORT, offset, f.code)
-            filterArraySeg.set(ValueLayout.JAVA_BYTE, offset + 2, f.jt)
-            filterArraySeg.set(ValueLayout.JAVA_BYTE, offset + 3, f.jf)
+            filterArraySeg.set(ValueLayout.JAVA_BYTE, offset + 2, f.jt.toByte())
+            filterArraySeg.set(ValueLayout.JAVA_BYTE, offset + 3, f.jf.toByte())
             filterArraySeg.set(ValueLayout.JAVA_INT, offset + 4, f.k)
         }
 
