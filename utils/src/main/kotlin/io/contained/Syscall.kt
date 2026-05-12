@@ -21,12 +21,24 @@ enum class Syscall {
     SENDMSG,
     OPEN,
     OPENAT,
+    OPENAT2,
     MMAP,
     PTRACE,
     SOCKET,
     INIT_MODULE,
     FINIT_MODULE,
-    MEMFD_CREATE;
+    MEMFD_CREATE,
+    IO_URING_SETUP,
+    BPF,
+    PROCESS_VM_WRITEV,
+    PROCESS_VM_READV,
+    USERFAULTFD,
+    UNSHARE,
+    SETNS,
+    MOUNT,
+    UMOUNT2,
+    PIVOT_ROOT,
+    CHROOT;
 
     /** Returns the syscall number for the given [arch], or -1 if not available. */
     fun numberFor(arch: Arch): Int = when (this) {
@@ -45,11 +57,23 @@ enum class Syscall {
         SENDMSG      -> arch.sendmsg
         OPEN         -> arch.open
         OPENAT       -> arch.openat
+        OPENAT2      -> arch.openat2
         MMAP         -> arch.mmap
         PTRACE       -> arch.ptrace
         SOCKET       -> arch.socket
         INIT_MODULE -> arch.initModule
         FINIT_MODULE -> arch.finitModule
         MEMFD_CREATE -> arch.memfdCreate
+        IO_URING_SETUP -> arch.ioUringSetup
+        BPF           -> arch.bpf
+        PROCESS_VM_WRITEV -> arch.processVmWritev
+        PROCESS_VM_READV -> arch.processVmReadv
+        USERFAULTFD  -> arch.userfaultfd
+        UNSHARE      -> arch.unshare
+        SETNS        -> arch.setns
+        MOUNT        -> arch.mount
+        UMOUNT2      -> arch.umount2
+        PIVOT_ROOT   -> arch.pivotRoot
+        CHROOT       -> arch.chroot
     }
 }

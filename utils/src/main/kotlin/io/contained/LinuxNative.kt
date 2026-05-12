@@ -77,16 +77,17 @@ object LinuxNative {
         // struct sock_fprog {
         //     unsigned short len;
         //     struct sock_filter *filter;
-        // }; // 16 bytes (due to alignment padding)
+        // };
+        // We use structLayout to let the Linker handle alignment (e.g. padding after 'len')
         val progLayout = MemoryLayout.structLayout(
             ValueLayout.JAVA_SHORT.withName("len"),
-            MemoryLayout.paddingLayout(6),
+            MemoryLayout.paddingLayout(ValueLayout.ADDRESS.byteSize() - 2), // Ensure pointer is aligned
             ValueLayout.ADDRESS.withName("filter")
         )
 
         val progSeg = arena.allocate(progLayout)
         progSeg.set(ValueLayout.JAVA_SHORT, 0, filters.size.toShort())
-        progSeg.set(ValueLayout.ADDRESS, 8, filterArraySeg)
+        progSeg.set(ValueLayout.ADDRESS, ValueLayout.ADDRESS.byteSize(), filterArraySeg)
 
         return progSeg
     }

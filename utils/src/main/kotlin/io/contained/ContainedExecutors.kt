@@ -86,14 +86,21 @@ object ContainedExecutors {
     }
 
     private fun isDirectContainmentViolation(t: Throwable): Boolean {
+        // EPERM (1) and EACCES (13) are the most common seccomp return codes.
+        // On Linux, these map to specific exception types in the JDK.
+        if (t is AccessDeniedException || t is java.nio.file.FileSystemException && t.message?.contains("Operation not permitted") == true) {
+            return true
+        }
+
         val msg = t.message ?: return false
 
-        return msg.contains("Operation not permitted")
-            || msg.contains("Permission denied")
-            || msg.contains("error=1,")
-            || (t is SocketException && msg.contains("Permission"))
-            || (t is AccessDeniedException)
-            || (t is IOException && msg.contains("Cannot run"))
+        // Common patterns for EPERM across different JVM versions and some locales
+        return msg.contains("Operation not permitted") // English
+            || msg.contains("Permission denied")       // English / EACCES
+            || msg.contains("error=1,")                // Common in ProcessBuilder
+            || msg.contains("error=13,")               // EACCES in ProcessBuilder
+            || (t is SocketException && (msg.contains("Permission") || msg.contains("denied")))
+            || (t is IOException && (msg.contains("Cannot run") || msg.contains("error=1")))
     }
 
     private fun isViolationInCauseChain(t: Throwable): Boolean {
@@ -144,6 +151,17 @@ object ContainedExecutors {
         }
 
         private fun applyContainment() {
+            if (Thread.currentThread().isVirtual) {
+                // We MUST NOT attempt to install seccomp from a virtual thread task.
+                // It would contaminate the shared carrier thread for ALL other virtual threads.
+                // The user must follow the "Dedicated Carrier Pool" pattern instead.
+                throw IllegalStateException(
+                    "Attempted to apply seccomp containment inside a virtual thread. " +
+                    "This would poison the shared carrier thread. " +
+                    "Use a dedicated platform thread pool and ContainedExecutors.installOnCurrentThread() on carriers instead."
+                )
+            }
+
             if (!supported) {
                 when (fallback) {
                     Platform.FallbackBehavior.FAIL -> 

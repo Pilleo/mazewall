@@ -24,7 +24,12 @@ class Policy private constructor(internal val blocked: Set<Syscall>) {
             .block(Syscall.CONNECT, Syscall.SENDTO, Syscall.SENDMSG, Syscall.SOCKET)
             .block(Syscall.BIND, Syscall.LISTEN, Syscall.ACCEPT, Syscall.ACCEPT4)
             .block(Syscall.EXECVE, Syscall.EXECVEAT)
-            .block(Syscall.OPEN, Syscall.OPENAT)
+            .block(Syscall.OPEN, Syscall.OPENAT, Syscall.OPENAT2)
+            .block(Syscall.MEMFD_CREATE, Syscall.PTRACE)
+            .block(Syscall.IO_URING_SETUP, Syscall.BPF)
+            .block(Syscall.PROCESS_VM_WRITEV, Syscall.PROCESS_VM_READV)
+            .block(Syscall.USERFAULTFD, Syscall.UNSHARE, Syscall.SETNS)
+            .block(Syscall.MOUNT, Syscall.UMOUNT2, Syscall.PIVOT_ROOT, Syscall.CHROOT)
             .build()
 
         /** Blocks outbound network syscalls only. */

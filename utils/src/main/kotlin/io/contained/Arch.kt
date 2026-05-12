@@ -18,6 +18,7 @@ data class Arch(
     val sendto: Int,
     val sendmsg: Int,
     val openat: Int,
+    val openat2: Int,
     val open: Int,
     val mmap: Int,
     val ptrace: Int,
@@ -25,6 +26,17 @@ data class Arch(
     val initModule: Int,
     val finitModule: Int,
     val memfdCreate: Int,
+    val ioUringSetup: Int,
+    val bpf: Int,
+    val processVmWritev: Int,
+    val processVmReadv: Int,
+    val userfaultfd: Int,
+    val unshare: Int,
+    val setns: Int,
+    val mount: Int,
+    val umount2: Int,
+    val pivotRoot: Int,
+    val chroot: Int,
     val seccompSyscallNumber: Int
 ) {
     companion object {
@@ -49,6 +61,7 @@ data class Arch(
             sendto = 44,
             sendmsg = 46,
             openat = 257,
+            openat2 = 437,
             open = 2,
             mmap = 9,
             ptrace = 101,
@@ -56,6 +69,17 @@ data class Arch(
             initModule = 175,
             finitModule = 313,
             memfdCreate = 319,
+            ioUringSetup = 425,
+            bpf = 321,
+            processVmWritev = 311,
+            processVmReadv = 310,
+            userfaultfd = 323,
+            unshare = 272,
+            setns = 308,
+            mount = 165,
+            umount2 = 166,
+            pivotRoot = 155,
+            chroot = 161,
             seccompSyscallNumber = 317
         )
 
@@ -77,6 +101,7 @@ data class Arch(
             sendto = 206,
             sendmsg = 211,
             openat = 56,
+            openat2 = 437,
             open = -1,
             mmap = 222,
             ptrace = 117,
@@ -84,6 +109,17 @@ data class Arch(
             initModule = 105,
             finitModule = 273,
             memfdCreate = 279,
+            ioUringSetup = 425,
+            bpf = 280,
+            processVmWritev = 271,
+            processVmReadv = 270,
+            userfaultfd = 282,
+            unshare = 97,
+            setns = 268,
+            mount = 40,
+            umount2 = 39,
+            pivotRoot = 41,
+            chroot = 51,
             seccompSyscallNumber = 277
         )
 

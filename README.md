@@ -51,6 +51,12 @@ When a blocked syscall is attempted, the kernel returns `EPERM`. This surfaces a
 
 ## Quick Start
 
+### Try It Live (No Setup Required)
+
+Want to see it in action without configuring a Linux VM and JDK 22?
+- **[Interactive Playground on Killercoda](https://killercoda.com/YOUR_USERNAME/scenario/jsecomp)** – A free, browser-based Linux environment where you can run the tests, tweak `Policy.kt`, and experiment with the containment yourself.
+- **[Watch the Demo](#)** *(Recording coming soon)* – A 30-second terminal recording of the exploit succeeding, then being blocked by the kernel.
+
 ### Requirements
 
 - **Linux** (x86_64 or aarch64) — seccomp is a Linux kernel feature
