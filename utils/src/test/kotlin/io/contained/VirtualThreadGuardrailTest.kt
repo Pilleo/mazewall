@@ -1,55 +1,64 @@
 package io.contained
 
 import org.junit.jupiter.api.Test
-import java.util.concurrent.atomic.AtomicReference
-import kotlin.test.assertNotNull
+import java.util.concurrent.Executors
+import java.util.concurrent.ExecutionException
+import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
 class VirtualThreadGuardrailTest {
 
     @Test
     fun `installOnCurrentThread throws IllegalStateException on virtual thread`() {
-        val errorRef = AtomicReference<Throwable>(null)
+        if (!Platform.isSupported()) return
 
-        val vt = Thread.ofVirtual().name("test-vt").start {
-            try {
+        val executor = Executors.newVirtualThreadPerTaskExecutor()
+        try {
+            val future = executor.submit {
                 ContainedExecutors.installOnCurrentThread(Policy.NO_EXEC)
-            } catch (e: IllegalStateException) {
-                errorRef.set(e)
             }
+            val exception = assertFailsWith<ExecutionException> {
+                future.get()
+            }
+            assertTrue(exception.cause is IllegalStateException)
+            assertTrue(exception.cause!!.message!!.contains("virtual thread"))
+        } finally {
+            executor.shutdown()
         }
-        vt.join()
-
-        val ex = errorRef.get()
-        assertNotNull(ex, "Expected IllegalStateException from virtual thread")
-        assertTrue(ex.message!!.contains("virtual thread"), "Expected message about virtual threads, got: ${ex.message}")
     }
 
     @Test
     fun `installOnCurrentThread succeeds on platform thread`() {
-        if (!System.getProperty("os.name").equals("Linux", ignoreCase = true)) return
+        if (!Platform.isSupported()) return
 
-        var error: Throwable? = null
-        val thread = Thread {
-            try {
+        val executor = Executors.newSingleThreadExecutor()
+        try {
+            executor.submit {
                 ContainedExecutors.installOnCurrentThread(Policy.NO_EXEC)
-            } catch (e: Throwable) {
-                error = e
-            }
+                // If it doesn't throw, it succeeds
+            }.get()
+        } finally {
+            executor.shutdown()
         }
-        thread.start()
-        thread.join()
-        error?.let { throw it }
     }
 
     @Test
     fun `wrap does not throw on virtual thread submission`() {
-        val executor = java.util.concurrent.Executors.newSingleThreadExecutor()
-        val safeExecutor = ContainedExecutors.wrap(executor, Policy.NO_EXEC)
-
-        val future = safeExecutor.submit { "hello" }
-        future.get()
-
-        executor.shutdown()
+        // Even if the executor uses virtual threads, wrap() itself should be safe.
+        // The guardrail only kicks in when the task actually runs.
+        val vExecutor = Executors.newVirtualThreadPerTaskExecutor()
+        try {
+            val safeExecutor = ContainedExecutors.wrap(vExecutor, Policy.NO_EXEC)
+            
+            val future = safeExecutor.submit {
+                // This task will fail when it tries to apply containment
+            }
+            
+            assertFailsWith<ExecutionException> {
+                future.get()
+            }
+        } finally {
+            vExecutor.shutdown()
+        }
     }
 }

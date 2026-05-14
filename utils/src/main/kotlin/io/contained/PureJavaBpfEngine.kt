@@ -14,7 +14,7 @@ object PureJavaBpfEngine : SeccompEngine {
     override fun install(policy: Policy) {
         // Step 1: Set no_new_privs (mandatory for non-root seccomp)
         val r1 = LinuxNative.prctl(LinuxNative.PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0)
-        if (r1.returnValue != 0) {
+        if (r1.returnValue != 0L) {
             throw IllegalStateException("prctl(PR_SET_NO_NEW_PRIVS) failed: ${LinuxNative.strerror(r1.errno)}")
         }
 
@@ -28,11 +28,11 @@ object PureJavaBpfEngine : SeccompEngine {
             val r3 = LinuxNative.syscall(
                 arch.seccompSyscallNumber.toLong(),
                 LinuxNative.SECCOMP_SET_MODE_FILTER.toLong(),
-                0L,
+                0L, // Do NOT use TSYNC by default, to keep filters thread-local
                 prog
             )
 
-            if (r3.returnValue != 0) {
+            if (r3.returnValue != 0L) {
                 // Fall back to prctl for older kernels
                 val errno1 = r3.errno
                 val r4 = LinuxNative.prctl(
@@ -42,7 +42,7 @@ object PureJavaBpfEngine : SeccompEngine {
                     0, 0
                 )
                 
-                if (r4.returnValue != 0) {
+                if (r4.returnValue != 0L) {
                     throw IllegalStateException(
                         "seccomp installation failed: seccomp(2) errno=${LinuxNative.strerror(errno1)}, prctl errno=${LinuxNative.strerror(r4.errno)}"
                     )
@@ -52,7 +52,7 @@ object PureJavaBpfEngine : SeccompEngine {
         
         // Verify filter is actually installed
         val r5 = LinuxNative.prctl(LinuxNative.PR_GET_SECCOMP, 0, 0, 0, 0)
-        if (r5.returnValue != 2) {
+        if (r5.returnValue != 2L) {
             throw IllegalStateException(
                 "Seccomp filter verification failed: expected mode 2, got ${r5.returnValue}"
             )

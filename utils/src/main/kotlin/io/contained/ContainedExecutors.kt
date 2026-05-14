@@ -48,14 +48,8 @@ object ContainedExecutors {
                 logger.warning("Thread ${Thread.currentThread().name} has $depth seccomp filters.")
             }
 
-            // Choose Engine
-            val engine: SeccompEngine = if (LibseccompEngine.isSupported) {
-                LibseccompEngine
-            } else {
-                PureJavaBpfEngine
-            }
-
-            engine.install(Policy.builder().block(*newBlocks.toTypedArray()).build())
+            // Use PureJavaBpfEngine exclusively for zero-dependency enforcement
+            PureJavaBpfEngine.install(Policy.builder().block(*newBlocks.toTypedArray()).build())
             
             THREAD_BLOCKED.set(currentlyBlocked + newBlocks)
             FILTER_DEPTH.set(depth + 1)

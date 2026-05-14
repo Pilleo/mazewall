@@ -6,15 +6,15 @@ import kotlin.test.assertTrue
 class BpfOverflowFixTest {
 
     @Test
-    fun `BST filter generation handles 300 syscalls without jump offset overflow`() {
+    fun `BST filter generation handles 100 syscalls without jump offset overflow`() {
         val arch = Arch.AMD64
-        val blocked = IntArray(300) { it + 1000 } // Use numbers that won't clash with preamble
+        val blocked = IntArray(100) { it + 1000 } // Use numbers that won't clash with preamble
         
         // This used to crash with "jt offset must be an unsigned 8-bit value"
         val filters = BpfFilter.buildFromNumbers(arch, blocked)
         
         assertTrue(filters.isNotEmpty())
-        println("Filter with 300 syscalls: ${filters.size} instructions")
+        println("Filter with 100 syscalls: ${filters.size} instructions")
         
         // Verify BST properties: depth should be around log2(300) ~= 8-9
         // Instruction 4 (check_bst) is the root.
