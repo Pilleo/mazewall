@@ -3,7 +3,8 @@ package io.contained
 import java.util.logging.Logger
 
 /**
- * Builds seccomp-bpf programs using a hybrid BST + Linear Scan approach.
+ * Builds seccomp-bpf programs using a robust strictly-forward linear scan approach.
+ * This avoids all jump offset overflow and backward-jump issues.
  */
 object BpfFilter {
     private val logger = Logger.getLogger(BpfFilter::class.java.name)
@@ -14,120 +15,63 @@ object BpfFilter {
     private const val BPF_W = 0x00
     private const val BPF_ABS = 0x20
     private const val BPF_JEQ = 0x10
-    private const val BPF_JGT = 0x20
     private const val BPF_K = 0x00
 
     private const val SECCOMP_DATA_NR_OFFSET = 0
     private const val SECCOMP_DATA_ARCH_OFFSET = 4
     private const val SECCOMP_DATA_ARGS_OFFSET = 16
-    
-    private const val MAX_BLOCK_SIZE = 100
-
-    private sealed class Insn {
-        data class Stmt(val code: Int, val k: Int) : Insn()
-        data class Jmp(val code: Int, val k: Int, val jtTarget: String, val jfTarget: String) : Insn()
-    }
-
-    private fun stmt(code: Int, k: Int): Insn.Stmt = Insn.Stmt(code, k)
-    private fun jmp(code: Int, k: Int, jt: String, jf: String): Insn.Jmp = Insn.Jmp(code, k, jt, jf)
 
     fun build(arch: Arch, policy: Policy): Array<SockFilter> =
         buildFromNumbers(arch, policy.blockedSyscalls(arch))
 
     internal fun buildFromNumbers(arch: Arch, blocked: IntArray): Array<SockFilter> {
-        val insns = mutableListOf<Insn>()
-        val labels = mutableMapOf<String, Int>()
-        
-        // Use EPERM for all blocks
+        val filters = mutableListOf<SockFilter>()
         val denyAction = LinuxNative.SECCOMP_RET_ERRNO or LinuxNative.EPERM
+        val allowAction = LinuxNative.SECCOMP_RET_ALLOW
+        val enosysAction = LinuxNative.SECCOMP_RET_ERRNO or 38
 
-        // 1. Prologue: Check Architecture
-        insns.add(stmt(BPF_LD or BPF_W or BPF_ABS, SECCOMP_DATA_ARCH_OFFSET))
-        insns.add(jmp(BPF_JMP or BPF_JEQ or BPF_K, arch.audit, "arch_ok", "deny_prologue"))
-        
-        labels["arch_ok"] = insns.size
-        insns.add(stmt(BPF_LD or BPF_W or BPF_ABS, SECCOMP_DATA_NR_OFFSET))
+        // 1. Check Architecture
+        filters.add(SockFilter((BPF_LD or BPF_W or BPF_ABS).toShort(), 0, 0, SECCOMP_DATA_ARCH_OFFSET))
+        // If arch matches, skip 1 instruction (the ret kill/deny)
+        filters.add(SockFilter((BPF_JMP or BPF_JEQ or BPF_K).toShort(), 1, 0, arch.audit))
+        filters.add(SockFilter((BPF_RET or BPF_K).toShort(), 0, 0, denyAction))
 
-        // 2. High-Bound Check
-        insns.add(jmp(BPF_JMP or BPF_JGT or BPF_K, arch.limit, "deny_prologue", "check_special"))
-
-        labels["deny_prologue"] = insns.size
-        insns.add(stmt(BPF_RET or BPF_K, denyAction))
+        // 2. Load Syscall Number
+        filters.add(SockFilter((BPF_LD or BPF_W or BPF_ABS).toShort(), 0, 0, SECCOMP_DATA_NR_OFFSET))
 
         // 3. Special Syscall Argument Checks
-        labels["check_special"] = insns.size
-        
-        // mmap with PROT_EXEC
-        insns.add(jmp(BPF_JMP or BPF_JEQ or BPF_K, arch.mmap, "check_mmap_prot", "check_clone"))
-        labels["check_mmap_prot"] = insns.size
-        insns.add(stmt(BPF_LD or BPF_W or BPF_ABS, SECCOMP_DATA_ARGS_OFFSET + 16)) 
-        insns.add(jmp(BPF_JMP or 0x40 or BPF_K, 0x04, "deny_special", "allow_special"))
+        // mmap
+        filters.add(SockFilter((BPF_JMP or BPF_JEQ or BPF_K).toShort(), 0, 4, arch.mmap))
+        filters.add(SockFilter((BPF_LD or BPF_W or BPF_ABS).toShort(), 0, 0, SECCOMP_DATA_ARGS_OFFSET + 16))
+        // if PROT_EXEC (0x04) is NOT set, skip 1 instruction (the ret deny)
+        filters.add(SockFilter((BPF_JMP or 0x40 or BPF_K).toShort(), 0, 1, 0x04)) 
+        filters.add(SockFilter((BPF_RET or BPF_K).toShort(), 0, 0, denyAction))
+        filters.add(SockFilter((BPF_LD or BPF_W or BPF_ABS).toShort(), 0, 0, SECCOMP_DATA_NR_OFFSET)) // Restore NR
 
-        // clone / clone3
-        labels["check_clone"] = insns.size
-        insns.add(jmp(BPF_JMP or BPF_JEQ or BPF_K, arch.clone, "check_clone_flags", "check_clone3"))
-        labels["check_clone_flags"] = insns.size
-        insns.add(stmt(BPF_LD or BPF_W or BPF_ABS, SECCOMP_DATA_ARGS_OFFSET)) 
-        insns.add(jmp(BPF_JMP or 0x40 or BPF_K, 0x00010100, "allow_special", "deny_special"))
+        // clone
+        filters.add(SockFilter((BPF_JMP or BPF_JEQ or BPF_K).toShort(), 0, 4, arch.clone))
+        filters.add(SockFilter((BPF_LD or BPF_W or BPF_ABS).toShort(), 0, 0, SECCOMP_DATA_ARGS_OFFSET))
+        // if flags set, skip 1 instruction (the ret deny)
+        filters.add(SockFilter((BPF_JMP or 0x40 or BPF_K).toShort(), 1, 0, 0x00010100)) 
+        filters.add(SockFilter((BPF_RET or BPF_K).toShort(), 0, 0, denyAction))
+        filters.add(SockFilter((BPF_LD or BPF_W or BPF_ABS).toShort(), 0, 0, SECCOMP_DATA_NR_OFFSET))
 
-        labels["check_clone3"] = insns.size
-        insns.add(jmp(BPF_JMP or BPF_JEQ or BPF_K, arch.clone3, "deny_clone3_legacy", "check_blocks"))
-        labels["deny_clone3_legacy"] = insns.size
-        insns.add(stmt(BPF_RET or BPF_K, LinuxNative.SECCOMP_RET_ERRNO or 38)) // ENOSYS
+        // clone3
+        filters.add(SockFilter((BPF_JMP or BPF_JEQ or BPF_K).toShort(), 0, 1, arch.clone3))
+        filters.add(SockFilter((BPF_RET or BPF_K).toShort(), 0, 0, enosysAction))
 
-        labels["deny_special"] = insns.size
-        insns.add(stmt(BPF_RET or BPF_K, denyAction))
-        
-        labels["allow_special"] = insns.size
-        insns.add(stmt(BPF_RET or BPF_K, LinuxNative.SECCOMP_RET_ALLOW))
-
-        // 4. Block-based checks
-        labels["check_blocks"] = insns.size
-        if (blocked.isEmpty()) {
-            insns.add(stmt(BPF_RET or BPF_K, LinuxNative.SECCOMP_RET_ALLOW))
-        } else {
-            generateBlocks(blocked, 0, blocked.size, insns, labels, denyAction)
+        // 4. Block-based checks (Linear Scan)
+        // Since BPF jump offsets are only 8-bit (max 255), and we have ~100 syscalls, 
+        // a linear scan with individual RETs is safe and simple.
+        for (nr in blocked.sortedArray()) {
+            // If nr matches, skip 1 (don't ret allow), hit ret deny
+            filters.add(SockFilter((BPF_JMP or BPF_JEQ or BPF_K).toShort(), 0, 1, nr))
+            filters.add(SockFilter((BPF_RET or BPF_K).toShort(), 0, 0, denyAction))
         }
 
-        return resolve(insns, labels)
-    }
+        // 5. Default Allow
+        filters.add(SockFilter((BPF_RET or BPF_K).toShort(), 0, 0, allowAction))
 
-    private fun generateBlocks(blocked: IntArray, start: Int, end: Int, insns: MutableList<Insn>, labels: MutableMap<String, Int>, denyAction: Int) {
-        val count = end - start
-        if (count <= MAX_BLOCK_SIZE) {
-            val localDeny = "deny_block_${start}_${end}"
-            val localAllow = "allow_block_${start}_${end}"
-            for (i in start until end) {
-                val nextLabel = if (i + 1 < end) "next_${start}_${i}" else localAllow
-                insns.add(jmp(BPF_JMP or BPF_JEQ or BPF_K, blocked[i], localDeny, nextLabel))
-                if (i + 1 < end) labels[nextLabel] = insns.size
-            }
-            labels[localDeny] = insns.size
-            insns.add(stmt(BPF_RET or BPF_K, denyAction))
-            labels[localAllow] = insns.size
-            insns.add(stmt(BPF_RET or BPF_K, LinuxNative.SECCOMP_RET_ALLOW))
-            return
-        }
-        val mid = start + count / 2
-        val leftLabel = "block_${start}_${mid}"
-        val rightLabel = "block_${mid}_${end}"
-        insns.add(jmp(BPF_JMP or BPF_JGT or BPF_K, blocked[mid - 1], rightLabel, leftLabel))
-        labels[leftLabel] = insns.size
-        generateBlocks(blocked, start, mid, insns, labels, denyAction)
-        labels[rightLabel] = insns.size
-        generateBlocks(blocked, mid, end, insns, labels, denyAction)
-    }
-
-    private fun resolve(insns: List<Insn>, labels: Map<String, Int>): Array<SockFilter> {
-        return insns.mapIndexed { i, insn ->
-            when (insn) {
-                is Insn.Stmt -> SockFilter(insn.code.toShort(), 0, 0, insn.k)
-                is Insn.Jmp -> {
-                    val targetIdxJt = labels[insn.jtTarget] ?: throw IllegalStateException("Unresolved label: ${insn.jtTarget}")
-                    val targetIdxJf = labels[insn.jfTarget] ?: throw IllegalStateException("Unresolved label: ${insn.jfTarget}")
-                    SockFilter(insn.code.toShort(), (targetIdxJt - i - 1).toShort(), (targetIdxJf - i - 1).toShort(), insn.k)
-                }
-            }
-        }.toTypedArray()
+        return filters.toTypedArray()
     }
 }

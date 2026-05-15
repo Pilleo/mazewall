@@ -72,7 +72,7 @@ object LinuxNative {
             GETTID.invokeExact() as Int
         } catch (e: Throwable) {
             val SYS_gettid = if (Arch.current() == Arch.AMD64) 186L else 178L
-            syscall(SYS_gettid, 0, 0, MemorySegment.NULL).returnValue
+            syscall(SYS_gettid, 0, 0, MemorySegment.NULL).returnValue.toInt()
         }
     }
 
@@ -121,7 +121,7 @@ object LinuxNative {
             val capturedState = arena.allocate(ERRNO_LAYOUT)
             val ret = PRCTL.invokeExact(capturedState, option, arg2, arg3, arg4, arg5) as Int
             val errno = capturedState.get(ValueLayout.JAVA_INT, ERRNO_LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("errno")))
-            return SyscallResult(ret, errno)
+            return SyscallResult(ret.toLong(), errno)
         }
     }
 
@@ -133,9 +133,15 @@ object LinuxNative {
             val capturedState = arena.allocate(ERRNO_LAYOUT)
             val ret = SYSCALL.invokeExact(capturedState, number, arg1, arg2, arg3) as Long
             val errno = capturedState.get(ValueLayout.JAVA_INT, ERRNO_LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("errno")))
-            return SyscallResult(ret.toInt(), errno)
+            return SyscallResult(ret, errno)
         }
     }
+
+    val SOCK_FPROG_LAYOUT: StructLayout = MemoryLayout.structLayout(
+        ValueLayout.JAVA_SHORT.withName("len"),
+        MemoryLayout.paddingLayout(6), // Align pointer to 8 bytes
+        ValueLayout.ADDRESS.withName("filter")
+    )
 
     fun newSockFProg(arena: Arena, filters: Array<SockFilter>): MemorySegment {
         val filterArraySeg = arena.allocate(MemoryLayout.sequenceLayout(filters.size.toLong(), SOCK_FILTER_LAYOUT))
@@ -148,13 +154,14 @@ object LinuxNative {
             filterArraySeg.set(ValueLayout.JAVA_BYTE, offset + 3, (f.jf.toInt() and 0xFF).toByte())
             filterArraySeg.set(ValueLayout.JAVA_INT, offset + 4, f.k)
         }
+        
         val progSeg = arena.allocate(SOCK_FPROG_LAYOUT)
-        progSeg.set(ValueLayout.JAVA_SHORT, 0, filters.size.toShort())
-        progSeg.set(ValueLayout.ADDRESS, ValueLayout.ADDRESS.byteSize(), filterArraySeg)
+        progSeg.set(ValueLayout.JAVA_SHORT, SOCK_FPROG_LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("len")), filters.size.toShort())
+        progSeg.set(ValueLayout.ADDRESS, SOCK_FPROG_LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("filter")), filterArraySeg)
         return progSeg
     }
 
-    data class SyscallResult(val returnValue: Int, val errno: Int)
+    data class SyscallResult(val returnValue: Long, val errno: Int)
 
     const val PR_SET_NO_NEW_PRIVS = 38
     const val PR_GET_NO_NEW_PRIVS = 39
