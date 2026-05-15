@@ -37,7 +37,10 @@ Prohibited syscalls trigger a `SECCOMP_RET_ERRNO` with `EPERM`, causing standard
 ### Local Development
 - **Linux** (x86_64 or aarch64)
 - **JDK 22+** (requires FFM API)
-- **Docker Compose:** `docker compose up -d && docker compose exec jseccomp ./gradlew test`
+- **Docker:** `docker compose up -d && docker compose exec jseccomp ./gradlew test`
+- **Podman:** `podman run --security-opt seccomp=unconfined -it --rm -v $(pwd):/app:Z -w /app fedora:40 ./gradlew test`
+
+> **Note:** Containers must run with `seccomp=unconfined` because the project applies its own nested filters.
 
 ## Usage
 
@@ -56,10 +59,10 @@ ContainedExecutors.installOnProcess(Policy.NO_NETWORK)
 
 **Built-in policies:**
 
-| Policy | Blocked syscalls |
-|---|---|
-| `Policy.NO_EXEC` | `execve`, `fork`, etc. |
-| `Policy.NO_NETWORK` | `connect`, `socket`, `bind`, etc. |
+| Policy                | Blocked syscalls                            |
+|-----------------------|---------------------------------------------|
+| `Policy.NO_EXEC`      | `execve`, `fork`, etc.                      |
+| `Policy.NO_NETWORK`   | `connect`, `socket`, `bind`, etc.           |
 | `Policy.PURE_COMPUTE` | All of the above + `open`, `ioctl`, `prctl` |
 
 > **Important:** Seccomp filters are permanent. Never share a contained thread pool with uncontained tasks. See the **Javadocs in `ContainedExecutors`** for critical details on thread pool poisoning and virtual thread limitations.
@@ -70,7 +73,7 @@ ContainedExecutors.installOnProcess(Policy.NO_NETWORK)
 ./gradlew build
 ```
 
-| Module | Purpose |
-|---|---|
-| `utils` | The `io.contained` library |
-| `demo` | Log4Shell exploit/protection demonstration |
+| Module  | Purpose                                    |
+|---------|--------------------------------------------|
+| `utils` | The `io.contained` library                 |
+| `demo`  | Log4Shell exploit/protection demonstration |

@@ -17,7 +17,11 @@ package io.contained
  * val p = Policy.combine(Policy.NO_NETWORK, Policy.NO_EXEC)
  * ```
  */
-class Policy private constructor(internal val blocked: Set<Syscall>) {
+class Policy private constructor(
+    internal val blocked: Set<Syscall>,
+    internal val allowMmapExec: Boolean = false,
+    internal val allowNonThreadClone: Boolean = false
+) {
 
     /** Returns the concrete syscall numbers to block for the given [arch]. */
     fun blockedSyscalls(arch: Arch): IntArray =
@@ -59,18 +63,40 @@ class Policy private constructor(internal val blocked: Set<Syscall>) {
         /** Returns a new Policy that is the union of all blocked syscalls in the given [policies]. */
         fun combine(vararg policies: Policy): Policy {
             val union = policies.flatMap { it.blocked }.toSet()
-            return Policy(union)
+            val mmapExec = policies.any { !it.allowMmapExec }
+            val cloneNonThread = policies.any { !it.allowNonThreadClone }
+            return Policy(union, allowMmapExec = !mmapExec, allowNonThreadClone = !cloneNonThread)
         }
     }
 
     class Builder {
         private val blocked = mutableSetOf<Syscall>()
+        private var allowMmapExec = false
+        private var allowNonThreadClone = false
 
         fun block(vararg syscalls: Syscall): Builder {
             blocked.addAll(syscalls)
             return this
         }
 
-        fun build(): Policy = Policy(blocked.toSet())
+        /** 
+         * Allows `mmap` with `PROT_EXEC`. By default, this is blocked for all policies 
+         * to prevent shellcode execution.
+         */
+        fun allowMmapExec(): Builder {
+            this.allowMmapExec = true
+            return this
+        }
+
+        /**
+         * Allows `clone` without `CLONE_THREAD`. By default, this is blocked to prevent
+         * process forking while allowing JVM thread creation.
+         */
+        fun allowNonThreadClone(): Builder {
+            this.allowNonThreadClone = true
+            return this
+        }
+
+        fun build(): Policy = Policy(blocked.toSet(), allowMmapExec, allowNonThreadClone)
     }
 }

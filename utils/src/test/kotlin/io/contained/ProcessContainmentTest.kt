@@ -13,9 +13,17 @@ class ProcessContainmentTest {
     fun `installOnProcess applies containment globally`() {
         if (!Platform.isSupported()) return
 
+        // Use a policy that blocks something obvious (EXECVE) but allows the JVM to 
+        // keep its JIT/threads happy during the test.
+        val safeGlobalPolicy = Policy.builder()
+            .block(Syscall.EXECVE, Syscall.EXECVEAT)
+            .allowMmapExec()
+            .allowNonThreadClone()
+            .build()
+
         // Spawn a thread to install process-wide containment
         val installerThread = Thread {
-            ContainedExecutors.installOnProcess(Policy.NO_EXEC)
+            ContainedExecutors.installOnProcess(safeGlobalPolicy)
         }
         installerThread.start()
         installerThread.join()

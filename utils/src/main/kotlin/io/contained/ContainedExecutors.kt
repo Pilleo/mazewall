@@ -82,10 +82,18 @@ object ContainedExecutors {
             }
 
             // Use PureJavaBpfEngine exclusively for zero-dependency enforcement
+            val incrementalPolicy = Policy.builder()
+                .block(*newBlocks.toTypedArray())
+            
+            if (policy.allowMmapExec) incrementalPolicy.allowMmapExec()
+            if (policy.allowNonThreadClone) incrementalPolicy.allowNonThreadClone()
+            
+            val toInstall = incrementalPolicy.build()
+
             if (processWide) {
-                PureJavaBpfEngine.installOnProcess(Policy.builder().block(*newBlocks.toTypedArray()).build())
+                PureJavaBpfEngine.installOnProcess(toInstall)
             } else {
-                PureJavaBpfEngine.install(Policy.builder().block(*newBlocks.toTypedArray()).build())
+                PureJavaBpfEngine.install(toInstall)
             }
             
             THREAD_BLOCKED.set(currentlyBlocked + newBlocks)

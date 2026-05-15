@@ -22,9 +22,14 @@ object BpfFilter {
     private const val SECCOMP_DATA_ARGS_OFFSET = 16
 
     fun build(arch: Arch, policy: Policy): Array<SockFilter> =
-        buildFromNumbers(arch, policy.blockedSyscalls(arch))
+        buildFromNumbers(arch, policy.blockedSyscalls(arch), policy.allowMmapExec, policy.allowNonThreadClone)
 
-    internal fun buildFromNumbers(arch: Arch, blocked: IntArray): Array<SockFilter> {
+    internal fun buildFromNumbers(
+        arch: Arch, 
+        blocked: IntArray, 
+        allowMmapExec: Boolean = false, 
+        allowNonThreadClone: Boolean = false
+    ): Array<SockFilter> {
         val filters = mutableListOf<SockFilter>()
         val denyAction = LinuxNative.SECCOMP_RET_ERRNO or LinuxNative.EPERM
         val allowAction = LinuxNative.SECCOMP_RET_ALLOW
@@ -41,20 +46,24 @@ object BpfFilter {
 
         // 3. Special Syscall Argument Checks
         // mmap
-        filters.add(SockFilter((BPF_JMP or BPF_JEQ or BPF_K).toShort(), 0, 4, arch.mmap))
-        filters.add(SockFilter((BPF_LD or BPF_W or BPF_ABS).toShort(), 0, 0, SECCOMP_DATA_ARGS_OFFSET + 16))
-        // if PROT_EXEC (0x04) is NOT set, skip 1 instruction (the ret deny)
-        filters.add(SockFilter((BPF_JMP or 0x40 or BPF_K).toShort(), 0, 1, 0x04)) 
-        filters.add(SockFilter((BPF_RET or BPF_K).toShort(), 0, 0, denyAction))
-        filters.add(SockFilter((BPF_LD or BPF_W or BPF_ABS).toShort(), 0, 0, SECCOMP_DATA_NR_OFFSET)) // Restore NR
+        if (!allowMmapExec) {
+            filters.add(SockFilter((BPF_JMP or BPF_JEQ or BPF_K).toShort(), 0, 4, arch.mmap))
+            filters.add(SockFilter((BPF_LD or BPF_W or BPF_ABS).toShort(), 0, 0, SECCOMP_DATA_ARGS_OFFSET + 16))
+            // if PROT_EXEC (0x04) is NOT set, skip 1 instruction (the ret deny)
+            filters.add(SockFilter((BPF_JMP or 0x40 or BPF_K).toShort(), 0, 1, 0x04)) 
+            filters.add(SockFilter((BPF_RET or BPF_K).toShort(), 0, 0, denyAction))
+            filters.add(SockFilter((BPF_LD or BPF_W or BPF_ABS).toShort(), 0, 0, SECCOMP_DATA_NR_OFFSET)) // Restore NR
+        }
 
         // clone
-        filters.add(SockFilter((BPF_JMP or BPF_JEQ or BPF_K).toShort(), 0, 4, arch.clone))
-        filters.add(SockFilter((BPF_LD or BPF_W or BPF_ABS).toShort(), 0, 0, SECCOMP_DATA_ARGS_OFFSET))
-        // if flags set, skip 1 instruction (the ret deny)
-        filters.add(SockFilter((BPF_JMP or 0x40 or BPF_K).toShort(), 1, 0, 0x00010100)) 
-        filters.add(SockFilter((BPF_RET or BPF_K).toShort(), 0, 0, denyAction))
-        filters.add(SockFilter((BPF_LD or BPF_W or BPF_ABS).toShort(), 0, 0, SECCOMP_DATA_NR_OFFSET))
+        if (!allowNonThreadClone) {
+            filters.add(SockFilter((BPF_JMP or BPF_JEQ or BPF_K).toShort(), 0, 4, arch.clone))
+            filters.add(SockFilter((BPF_LD or BPF_W or BPF_ABS).toShort(), 0, 0, SECCOMP_DATA_ARGS_OFFSET))
+            // if flags set, skip 1 instruction (the ret deny)
+            filters.add(SockFilter((BPF_JMP or 0x40 or BPF_K).toShort(), 1, 0, 0x00010100)) 
+            filters.add(SockFilter((BPF_RET or BPF_K).toShort(), 0, 0, denyAction))
+            filters.add(SockFilter((BPF_LD or BPF_W or BPF_ABS).toShort(), 0, 0, SECCOMP_DATA_NR_OFFSET))
+        }
 
         // clone3
         filters.add(SockFilter((BPF_JMP or BPF_JEQ or BPF_K).toShort(), 0, 1, arch.clone3))
