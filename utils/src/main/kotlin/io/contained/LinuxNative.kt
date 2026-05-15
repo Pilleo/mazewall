@@ -26,6 +26,23 @@ object LinuxNative {
     private val POLL: MethodHandle
 
     val ERRNO_LAYOUT: StructLayout = Linker.Option.captureStateLayout()
+    private val ERRNO_OFFSET = ERRNO_LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("errno"))
+
+    val SOCK_FILTER_LAYOUT: StructLayout = MemoryLayout.structLayout(
+        ValueLayout.JAVA_SHORT.withName("code"),
+        ValueLayout.JAVA_BYTE.withName("jt"),
+        ValueLayout.JAVA_BYTE.withName("jf"),
+        ValueLayout.JAVA_INT.withName("k")
+    )
+    private val SOCK_FILTER_SIZE = SOCK_FILTER_LAYOUT.byteSize()
+
+    val SOCK_FPROG_LAYOUT: StructLayout = MemoryLayout.structLayout(
+        ValueLayout.JAVA_SHORT.withName("len"),
+        MemoryLayout.paddingLayout(6), // Align pointer to 8 bytes
+        ValueLayout.ADDRESS.withName("filter")
+    )
+    private val SOCK_FPROG_LEN_OFFSET = SOCK_FPROG_LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("len"))
+    private val SOCK_FPROG_FILTER_OFFSET = SOCK_FPROG_LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("filter"))
 
     init {
         PRCTL = downcall("prctl", FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.JAVA_INT, ValueLayout.JAVA_LONG, ValueLayout.JAVA_LONG, ValueLayout.JAVA_LONG, ValueLayout.JAVA_LONG), Linker.Option.captureCallState("errno"))
@@ -82,7 +99,7 @@ object LinuxNative {
             return try {
                 val ret = IOCTL.invokeExact(capturedState, fd, request, arg) as Int
                 if (ret != 0) {
-                    val errno = capturedState.get(ValueLayout.JAVA_INT, ERRNO_LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("errno")))
+                    val errno = capturedState.get(ValueLayout.JAVA_INT, ERRNO_OFFSET)
                     return -errno
                 }
                 ret
@@ -120,7 +137,7 @@ object LinuxNative {
         Arena.ofConfined().use { arena ->
             val capturedState = arena.allocate(ERRNO_LAYOUT)
             val ret = PRCTL.invokeExact(capturedState, option, arg2, arg3, arg4, arg5) as Int
-            val errno = capturedState.get(ValueLayout.JAVA_INT, ERRNO_LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("errno")))
+            val errno = capturedState.get(ValueLayout.JAVA_INT, ERRNO_OFFSET)
             return SyscallResult(ret.toLong(), errno)
         }
     }
@@ -132,23 +149,16 @@ object LinuxNative {
         Arena.ofConfined().use { arena ->
             val capturedState = arena.allocate(ERRNO_LAYOUT)
             val ret = SYSCALL.invokeExact(capturedState, number, arg1, arg2, arg3) as Long
-            val errno = capturedState.get(ValueLayout.JAVA_INT, ERRNO_LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("errno")))
+            val errno = capturedState.get(ValueLayout.JAVA_INT, ERRNO_OFFSET)
             return SyscallResult(ret, errno)
         }
     }
 
-    val SOCK_FPROG_LAYOUT: StructLayout = MemoryLayout.structLayout(
-        ValueLayout.JAVA_SHORT.withName("len"),
-        MemoryLayout.paddingLayout(6), // Align pointer to 8 bytes
-        ValueLayout.ADDRESS.withName("filter")
-    )
-
     fun newSockFProg(arena: Arena, filters: Array<SockFilter>): MemorySegment {
         val filterArraySeg = arena.allocate(MemoryLayout.sequenceLayout(filters.size.toLong(), SOCK_FILTER_LAYOUT))
-        val filterSize = SOCK_FILTER_LAYOUT.byteSize()
         for (i in filters.indices) {
             val f = filters[i]
-            val offset = i * filterSize
+            val offset = i * SOCK_FILTER_SIZE
             filterArraySeg.set(ValueLayout.JAVA_SHORT, offset, f.code)
             filterArraySeg.set(ValueLayout.JAVA_BYTE, offset + 2, (f.jt.toInt() and 0xFF).toByte())
             filterArraySeg.set(ValueLayout.JAVA_BYTE, offset + 3, (f.jf.toInt() and 0xFF).toByte())
@@ -156,8 +166,8 @@ object LinuxNative {
         }
         
         val progSeg = arena.allocate(SOCK_FPROG_LAYOUT)
-        progSeg.set(ValueLayout.JAVA_SHORT, SOCK_FPROG_LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("len")), filters.size.toShort())
-        progSeg.set(ValueLayout.ADDRESS, SOCK_FPROG_LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("filter")), filterArraySeg)
+        progSeg.set(ValueLayout.JAVA_SHORT, SOCK_FPROG_LEN_OFFSET, filters.size.toShort())
+        progSeg.set(ValueLayout.ADDRESS, SOCK_FPROG_FILTER_OFFSET, filterArraySeg)
         return progSeg
     }
 
@@ -194,16 +204,4 @@ object LinuxNative {
     val SECCOMP_NOTIF_RESP_LAYOUT: StructLayout = MemoryLayout.structLayout(ValueLayout.JAVA_LONG.withName("id"), ValueLayout.JAVA_LONG.withName("val"), ValueLayout.JAVA_INT.withName("error"), ValueLayout.JAVA_INT.withName("flags"))
     val IOVEC_LAYOUT: StructLayout = MemoryLayout.structLayout(ValueLayout.ADDRESS.withName("iov_base"), ValueLayout.JAVA_LONG.withName("iov_len"))
     val POLLFD_LAYOUT: StructLayout = MemoryLayout.structLayout(ValueLayout.JAVA_INT.withName("fd"), ValueLayout.JAVA_SHORT.withName("events"), ValueLayout.JAVA_SHORT.withName("revents"))
-
-    val SOCK_FILTER_LAYOUT: StructLayout = MemoryLayout.structLayout(
-        ValueLayout.JAVA_SHORT.withName("code"),
-        ValueLayout.JAVA_BYTE.withName("jt"),
-        ValueLayout.JAVA_BYTE.withName("jf"),
-        ValueLayout.JAVA_INT.withName("k")
-    )
-    val SOCK_FPROG_LAYOUT: StructLayout = MemoryLayout.structLayout(
-        ValueLayout.JAVA_SHORT.withName("len"),
-        MemoryLayout.paddingLayout(ValueLayout.ADDRESS.byteSize() - 2),
-        ValueLayout.ADDRESS.withName("filter")
-    )
 }

@@ -45,8 +45,7 @@ bin/
 ### Mac OS ###
 .DS_Store
 /.idea/
-/.idea/
-/.idea/
 .idea/gradle.xml
 .idea/misc.xml
 plan.md
+/killercoda/

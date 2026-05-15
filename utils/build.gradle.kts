@@ -9,6 +9,8 @@ kotlin {
 tasks.test {
     useJUnitPlatform()
     jvmArgs("--enable-native-access=ALL-UNNAMED")
+    // Force a fresh JVM for every test to ensure seccomp filters don't contaminate the environment
+    forkEvery = 1
 }
 
 dependencies {
