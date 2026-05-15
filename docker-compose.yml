@@ -1,0 +1,12 @@
+services:
+  jseccomp:
+    build: .
+    volumes:
+      - .:/workspace
+    # The application applies its own seccomp filters. 
+    # Docker's default seccomp profile may interfere with these tests.
+    security_opt:
+      - seccomp=unconfined
+    working_dir: /workspace
+    # Default to keeping the container alive for execution
+    command: tail -f /dev/null

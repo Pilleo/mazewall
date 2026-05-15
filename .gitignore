@@ -49,3 +49,5 @@ bin/
 .idea/misc.xml
 plan.md
 /killercoda/
+/node_modules/
+/.gradle_home/

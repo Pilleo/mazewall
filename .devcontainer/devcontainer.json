@@ -1,0 +1,22 @@
+{
+  "name": "jseccomp Dev Environment",
+  "dockerComposeFile": "../docker-compose.yml",
+  "service": "jseccomp",
+  "workspaceFolder": "/workspace",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "vscjava.vscode-java-pack",
+        "vscjava.vscode-gradle",
+        "fwcd.kotlin"
+      ]
+    }
+  },
+  "features": {
+    "ghcr.io/devcontainers/features/common-utils:1": {
+      "installZsh": true,
+      "configureZshAsDefaultShell": true,
+      "upgradePackages": true
+    }
+  }
+}

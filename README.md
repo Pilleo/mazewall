@@ -57,6 +57,28 @@ Want to see it in action without configuring a Linux VM and JDK 22?
 - **[Interactive Playground on Killercoda](https://killercoda.com/YOUR_USERNAME/scenario/jsecomp)** – A free, browser-based Linux environment where you can run the tests, tweak `Policy.kt`, and experiment with the containment yourself.
 - **[Watch the Demo](#)** *(Recording coming soon)* – A 30-second terminal recording of the exploit succeeding, then being blocked by the kernel.
 
+### Running on Windows / macOS (via Containers)
+
+Since **seccomp** is a Linux-specific feature, developers on non-Linux platforms must run the project in a container.
+
+#### Option 1: Dev Containers (Recommended)
+If you use **VS Code** or **IntelliJ IDEA**, you can use the provided Dev Container configuration for a seamless development experience:
+1. Open the project in your IDE.
+2. Click **"Reopen in Container"** (VS Code) or **"Open in Dev Container"** (IntelliJ).
+3. The environment will automatically set up the JDK and required security privileges.
+
+#### Option 2: Docker Compose
+Alternatively, use the provided Docker Compose setup from your terminal:
+```bash
+# Start the container
+docker compose up -d
+
+# Run the tests
+docker compose exec jseccomp ./gradlew test
+```
+
+> **Note:** Both setups run with `--security-opt seccomp=unconfined`. This is required because the project applies its own nested seccomp filters, which would otherwise be blocked by Docker's default restrictive security profile.
+
 ### Requirements
 
 - **Linux** (x86_64 or aarch64) — seccomp is a Linux kernel feature
