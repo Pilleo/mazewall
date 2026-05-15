@@ -3,6 +3,15 @@ package io.contained
 /**
  * Defines which syscalls to block. Create via [builder] or use the built-in presets.
  *
+ * ### Modern Syscall Handling
+ * This library uses BPF argument inspection to allow critical JVM operations while blocking
+ * malicious ones:
+ * - **`mmap`:** Standard memory mappings are allowed, but requests with `PROT_EXEC` (executable
+ *   memory) are blocked to prevent shellcode execution.
+ * - **`clone`:** Thread creation (`CLONE_THREAD`) is allowed to keep the JVM stable, but
+ *   process forking (`fork`) is blocked.
+ * - **`clone3`:** Blocked with `ENOSYS` to force runtimes to fallback to the inspectable legacy `clone`.
+ *
  * Policies can be combined with [combine]:
  * ```kotlin
  * val p = Policy.combine(Policy.NO_NETWORK, Policy.NO_EXEC)

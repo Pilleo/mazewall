@@ -8,12 +8,32 @@ import java.util.logging.Logger
 
 /**
  * Public API for wrapping an existing [ExecutorService] to enforce seccomp containment.
+ *
+ * ### Security & Scope
+ * Seccomp is a "blast radius" mitigator for I/O and execution. It is **not** a replacement
+ * for internal Java security boundaries (like module exports) or data isolation. A contained
+ * thread can still read the heap and any static variables it has access to. For resource
+ * isolation (CPU, memory), use Linux cgroups.
+ *
+ * ### The "Lazy Initialization" Trap
+ * The JVM performs many operations lazily (class loading, JIT, JNI loading). If a restricted
+ * thread is the first to trigger a specific lazy initialization path (e.g. loading a provider
+ * that needs to read a config file blocked by [Policy.PURE_COMPUTE]), the operation will fail.
+ * **Mitigation:** Ensure critical classes and native libraries are loaded during application
+ * startup before containment is applied.
  */
 object ContainedExecutors {
     private val logger = Logger.getLogger(ContainedExecutors::class.java.name)
 
     /**
      * Installs the given policies onto the current thread immediately.
+     *
+     * ### Virtual Thread Warning
+     * Seccomp filters are per-thread. Virtual threads multiplex onto a small pool of OS
+     * "carrier" threads. Installing a filter from within a virtual thread would sandbox
+     * the carrier, inadvertently affecting all other virtual threads scheduled on it.
+     * To prevent this "carrier contamination", this method throws [IllegalStateException]
+     * if called from a virtual thread.
      */
     fun installOnCurrentThread(vararg policies: Policy) {
         installInternal(false, *policies)
@@ -21,7 +41,8 @@ object ContainedExecutors {
 
     /**
      * Installs the given policies onto the entire process (all threads) immediately.
-     * This acts as a global security lockdown and cannot be undone.
+     * This acts as a global security lockdown and cannot be undone. All future threads
+     * created by this process will inherit these restrictions.
      */
     fun installOnProcess(vararg policies: Policy) {
         installInternal(true, *policies)
@@ -75,6 +96,14 @@ object ContainedExecutors {
     /**
      * Wraps an [ExecutorService] so that any task submitted to it will have the given
      * [policies] applied before execution.
+     *
+     * ### Thread Pool Poisoning
+     * Seccomp filters are **immutable and permanent** for the lifetime of an OS thread.
+     * If you wrap a shared [ExecutorService], the worker threads will be permanently
+     * restricted after their first contained task. **Do not share the same pool between
+     * contained and uncontained tasks.**
+     *
+     * For best results, always use a dedicated [ExecutorService] for restricted tasks.
      */
     fun wrap(delegate: ExecutorService, vararg policies: Policy): ExecutorService {
         val combinedPolicy = Policy.combine(*policies)
