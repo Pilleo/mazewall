@@ -25,9 +25,25 @@ We recommend a two-tiered defense-in-depth model:
 1.  **Tier 1: Global Lockdown (`installOnProcess`):** Apply `Policy.NO_EXEC` process-wide at startup to permanently disable shell spawning. This prevents the "pivot" attack because no unrestricted threads remain.
 2.  **Tier 2: Surgical Restrictions (`wrap`):** Apply stricter policies (like `Policy.NO_NETWORK` or `Policy.PURE_COMPUTE`) to specific worker pools handling untrusted data (e.g., XML parsers, image processors). This stops **Data-Oriented Attacks** (SSRF, XXE, Path Traversal) where the attacker lacks the ACE required to pivot.
 
+## 3. Advanced Syscall Evasion & Modern Attack Vectors
+
+Blocking `execve` (spawning a shell) is a foundational defense, but sophisticated attackers use several techniques to bypass simple syscall filters.
+
+### Fileless Malware (`memfd_create`)
+Attackers can create anonymous, memory-backed file descriptors using `memfd_create`. They can then download an ELF binary into this "fileless" descriptor and execute it using `fexecve` or `execveat`. Because the binary never touches the disk, it bypasses traditional filesystem-based security scanners.
+*   **Mitigation:** `jseccomp` includes `MEMFD_CREATE` in its strict policies (e.g., `PURE_COMPUTE`) and recommends blocking it wherever possible, as the standard JVM does not require it for normal operation.
+
+### Modern Execution Variants (`execveat`)
+Attackers may use `execveat` to execute programs relative to a directory file descriptor. This can sometimes bypass filters that only monitor the absolute path arguments of the classic `execve`.
+*   **Mitigation:** `jseccomp` explicitly blocks `EXECVEAT` in all `NO_EXEC` policies.
+
+### Binary Shellcode Injection
+If an attacker cannot spawn a process, they will attempt to inject raw machine code (shellcode) into the JVM's memory. To run this code, they must mark the memory as executable using `mprotect` or `mmap`.
+*   **Mitigation:** As detailed in the "Argument Inspection" section, `jseccomp` monitors the `PROT_EXEC` bit. It allows the JVM to manage its memory but physically prevents any thread under a policy from making a memory region executable.
+
 ---
 
-## 3. Escaping Process-Level Containment
+## 4. Escaping Process-Level Containment
 
 Even with process-wide `NO_EXEC`, an attacker with ACE can theoretically escape to the host OS if other security layers are missing:
 
