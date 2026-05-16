@@ -49,7 +49,7 @@ But it is important to distinguish between **observation** and **enforcement**. 
  
 This is no longer a speculative academic exercise. The building blocks are already in production.
  
-In the open ecosystem, projects like **Kubescape** are pushing strongly into runtime profiling for Kubernetes workloads. Using eBPF, Kubescape observes how workloads actually behave to build profiles around that behavior. This makes it a natural home for BoB-related ideas and standards.
+In the open ecosystem, projects like **Kubescape** are pushing strongly into runtime profiling for Kubernetes workloads. Using eBPF, Kubescape observes how workloads actually behave to build profiles around that behavior. This makes it a natural home for BoB-related ideas and standards, such as the emerging **[Bill of Behavior (BoB) specification](https://github.com/k8sstormcenter/bob)**.
  
 On the commercial side, companies like **Oligo Security** have proven that library-level and application-level runtime profiling is directly useful for security operations. By observing what libraries do inside running applications, their platform uses behavioral context to detect suspicious activity.
  
@@ -59,13 +59,11 @@ The message is clear: the runtime security stack is already here. What is still 
  
 If an SBOM is the bill of materials for software composition, a BoB (Bill of Behavior) is its behavioral companion. In practical terms, a BoB captures expected runtime boundaries: network communication, file access, process execution, and Linux capabilities.
  
-But the most significant architectural shift with BoB isn't just that this profile exists. It is who authors it.
- 
 Today, runtime security forces the end user to infer safe behavior after deployment. Platform engineers watch logs, tune detection rules, silence false positives, and slowly assemble a fragile model of what the software seems to be doing.
  
-**BoB introduces a different model: The producer of the software should ship the first behavioral contract.**
+BoB introduces a different model: the producer of the software should ship the first behavioral contract. 
  
-The vendor is the party that actually knows what the software is intended to do, what the test coverage looks like, and which behaviors are essential. Instead of forcing thousands of customers to reverse-engineer the same runtime policy from scratch, the software producer ships a reviewable baseline.
+The vendor is the party that actually knows what the software is intended to do, what the test coverage looks like, and which behaviors are essential. Instead of forcing thousands of customers to reverse-engineer the same runtime policy from scratch, the software producer ships a reviewable baseline. This moves runtime security from a "guess" to a **verifiable attestation of intent.**
 
 ## Beyond "Allow/Deny": Closing the Evasion Loopholes
  
@@ -91,16 +89,16 @@ BoB is emerging, not universal. But teams don't have to wait to start adopting a
  
 *   **Run rootless:** Drop unnecessary Linux capabilities.
 *   **Constrain the filesystem:** Use read-only root filesystems and explicitly declare writable locations.
-*   **Audit first:** Adopt runtime tooling in audit mode before moving toward strict blocking.
+*   **Audit first:** Adopt runtime tooling like Kubescape in audit mode
  
 These practices don't replace BoB. They train engineering teams to think in the exact behavioral terms that BoB formalizes.
 
 ---
 
-### Next Up: The JVM Deep-Dive
+### Next Up: Exploring Kernel Boundaries
  
-In Part 2 of this series, we move from theory to implementation. We will explore how to apply these behavioral contracts to one of the most dynamic and complex runtimes: the Java Virtual Machine (JVM).
+In Part 2 of this series, we move from theory to practice. We will use a tool designed to block syscalls at the thread level to explore the fundamental principles of kernel-level security. 
  
-We will look at how to use thread-level kernel enforcement to stop RCE and shellcode injection dead in its tracks—without breaking the JVM's JIT compiler.
+Using the Java Virtual Machine (JVM) as our laboratory, we will see how to surgically neutralize threats like shellcode injection while maintaining application stability. This hands-on exploration will help you understand the core mechanics that modern security modules (like LSM) rely on to enforce behavioral integrity.
  
-**[Read Part 2: Securing the JVM at the Kernel Level](#)** (Coming Soon)
+**[Read Part 2: Hands-on with Syscall Enforcement](#)** (Coming Soon)
