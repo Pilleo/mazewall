@@ -71,4 +71,56 @@ class ContainedExecutorsTest {
         
         executor.shutdown()
     }
+
+    @Test
+    fun `invokeAll applies containment to all tasks`() {
+        val osName = System.getProperty("os.name")
+        if (!osName.equals("Linux", ignoreCase = true)) return
+        if (!Platform.isSupported()) return
+
+        val executor = Executors.newFixedThreadPool(2)
+        val safeExecutor = ContainedExecutors.wrap(executor, Policy.NO_EXEC)
+
+        try {
+            val tasks = listOf(
+                java.util.concurrent.Callable { Runtime.getRuntime().exec(arrayOf("echo", "1")) },
+                java.util.concurrent.Callable { Runtime.getRuntime().exec(arrayOf("echo", "2")) }
+            )
+
+            val futures = safeExecutor.invokeAll(tasks)
+            for (future in futures) {
+                val ex = assertFailsWith<ExecutionException> {
+                    future.get()
+                }
+                assertTrue(ex.cause is ContainmentViolationException)
+            }
+        } finally {
+            executor.shutdown()
+        }
+    }
+
+    @Test
+    fun `invokeAny applies containment`() {
+        val osName = System.getProperty("os.name")
+        if (!osName.equals("Linux", ignoreCase = true)) return
+        if (!Platform.isSupported()) return
+
+        val executor = Executors.newFixedThreadPool(2)
+        val safeExecutor = ContainedExecutors.wrap(executor, Policy.NO_EXEC)
+
+        try {
+            val tasks = listOf(
+                java.util.concurrent.Callable { 
+                    Runtime.getRuntime().exec(arrayOf("echo", "fail"))
+                    "should not reach here"
+                }
+            )
+
+            assertFailsWith<ExecutionException> {
+                safeExecutor.invokeAny(tasks)
+            }
+        } finally {
+            executor.shutdown()
+        }
+    }
 }

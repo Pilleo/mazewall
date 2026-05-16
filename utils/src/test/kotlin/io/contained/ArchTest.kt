@@ -49,4 +49,16 @@ class ArchTest {
         assertEquals(-1, Syscall.VFORK.numberFor(aarch64))
         assertEquals(-1, Syscall.OPEN.numberFor(aarch64))
     }
+
+    @Test
+    fun `critical security syscalls are available on all architectures`() {
+        for (arch in listOf(Arch.AMD64, Arch.AARCH64)) {
+            assertTrue(Syscall.EXECVE.numberFor(arch) >= 0, "EXECVE missing on ${arch.name}")
+            assertTrue(Syscall.EXECVEAT.numberFor(arch) >= 0, "EXECVEAT missing on ${arch.name}")
+            assertTrue(Syscall.MPROTECT.numberFor(arch) >= 0, "MPROTECT missing on ${arch.name}")
+            assertTrue(Syscall.MMAP.numberFor(arch) >= 0, "MMAP missing on ${arch.name}")
+            assertTrue(Syscall.CLONE.numberFor(arch) >= 0, "CLONE missing on ${arch.name}")
+            assertTrue(Syscall.PRCTL.numberFor(arch) >= 0, "PRCTL missing on ${arch.name}")
+        }
+    }
 }

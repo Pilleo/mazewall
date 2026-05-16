@@ -23,6 +23,7 @@ enum class Syscall {
     OPENAT,
     OPENAT2,
     MMAP,
+    MPROTECT,
     PTRACE,
     SOCKET,
     INIT_MODULE,
@@ -40,7 +41,38 @@ enum class Syscall {
     PIVOT_ROOT,
     CHROOT,
     IOCTL,
-    PRCTL;
+    PRCTL,
+    
+    // Harmless/Utility syscalls for fine-grained control and testing
+    GETPID,
+    GETPPID,
+    GETUID,
+    GETEUID,
+    GETGID,
+    GETEGID,
+    GETTID,
+    GETCWD,
+    UMASK,
+    CHOWN,
+    LCHOWN,
+    FCHOWN,
+    UTIME,
+    UTIMES,
+    MKDIR,
+    RMDIR,
+    RENAME,
+    LINK,
+    UNLINK,
+    SYMLINK,
+    READLINK,
+    CHMOD,
+    FCHMOD,
+    FSYNC,
+    FDATASYNC,
+    TRUNCATE,
+    FTRUNCATE,
+    PAUSE,
+    NANOSLEEP;
 
     /** Returns the syscall number for the given [arch], or -1 if not available. */
     fun numberFor(arch: Arch): Int = when (this) {
@@ -61,6 +93,7 @@ enum class Syscall {
         OPENAT       -> arch.openat
         OPENAT2      -> arch.openat2
         MMAP         -> arch.mmap
+        MPROTECT     -> arch.mprotect
         PTRACE       -> arch.ptrace
         SOCKET       -> arch.socket
         INIT_MODULE -> arch.initModule
@@ -79,5 +112,35 @@ enum class Syscall {
         CHROOT       -> arch.chroot
         IOCTL        -> arch.ioctl
         PRCTL        -> arch.prctl
+        
+        GETPID -> arch.getpid
+        GETPPID -> arch.getppid
+        GETUID -> arch.getuid
+        GETEUID -> arch.geteuid
+        GETGID -> arch.getgid
+        GETEGID -> arch.getegid
+        GETTID -> arch.gettid
+        GETCWD -> arch.getcwd
+        UMASK -> arch.umask
+        CHOWN -> arch.chown
+        LCHOWN -> arch.lchown
+        FCHOWN -> arch.fchown
+        UTIME -> arch.utime
+        UTIMES -> arch.utimes
+        MKDIR -> arch.mkdir
+        RMDIR -> arch.rmdir
+        RENAME -> arch.rename
+        LINK -> arch.link
+        UNLINK -> arch.unlink
+        SYMLINK -> arch.symlink
+        READLINK -> arch.readlink
+        CHMOD -> arch.chmod
+        FCHMOD -> arch.fchmod
+        FSYNC -> arch.fsync
+        FDATASYNC -> arch.fdatasync
+        TRUNCATE -> arch.truncate
+        FTRUNCATE -> arch.ftruncate
+        PAUSE -> arch.pause
+        NANOSLEEP -> arch.nanosleep
     }
 }

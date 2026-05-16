@@ -50,7 +50,7 @@ class BpfFilterTest {
                 val prog = LinuxNative.newSockFProg(arena, filter)
                 LinuxNative.prctl(LinuxNative.PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0)
                 val r = LinuxNative.prctl(LinuxNative.PR_SET_SECCOMP, LinuxNative.SECCOMP_MODE_FILTER.toLong(), prog, 0, 0)
-                assertEquals(0L, r.returnValue, "Kernel rejected BPF: ${LinuxNative.strerror(r.errno)}")
+                assertEquals(0L, r.returnValue, "Kernel rejected BPF: errno ${r.errno}")
             }
         }
         thread.start()

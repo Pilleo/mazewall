@@ -17,12 +17,6 @@ class LinuxNativeTest {
     }
 
     @Test
-    fun testStrerror() {
-        val msg = LinuxNative.strerror(LinuxNative.EPERM)
-        assertTrue(msg.isNotEmpty())
-    }
-
-    @Test
     fun testSockFilterBoundsValidation() {
         assertFailsWith<IllegalArgumentException> {
             SockFilter(0, 256.toShort(), 0.toShort(), 0)

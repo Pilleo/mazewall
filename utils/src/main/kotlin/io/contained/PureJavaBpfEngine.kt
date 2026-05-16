@@ -23,7 +23,7 @@ object PureJavaBpfEngine : SeccompEngine {
         // Step 1: Set no_new_privs (mandatory for non-root seccomp)
         val r1 = LinuxNative.prctl(LinuxNative.PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0)
         if (r1.returnValue != 0L) {
-            throw IllegalStateException("prctl(PR_SET_NO_NEW_PRIVS) failed: ${LinuxNative.strerror(r1.errno)}")
+            throw IllegalStateException("prctl(PR_SET_NO_NEW_PRIVS) failed with errno ${r1.errno}")
         }
 
         val arch = Arch.current()
@@ -50,7 +50,7 @@ object PureJavaBpfEngine : SeccompEngine {
                 // silently falling back to thread-local behavior.
                 if (useTsync) {
                      throw IllegalStateException(
-                        "Process-wide seccomp installation (TSYNC) failed: seccomp(2) errno=${LinuxNative.strerror(errno1)}. Your kernel may be too old to support SECCOMP_FILTER_FLAG_TSYNC."
+                        "Process-wide seccomp installation (TSYNC) failed: seccomp(2) failed with errno $errno1. Your kernel may be too old to support SECCOMP_FILTER_FLAG_TSYNC."
                     )
                 }
 
@@ -63,7 +63,7 @@ object PureJavaBpfEngine : SeccompEngine {
                 
                 if (r4.returnValue != 0L) {
                     throw IllegalStateException(
-                        "seccomp installation failed: seccomp(2) errno=${LinuxNative.strerror(errno1)}, prctl errno=${LinuxNative.strerror(r4.errno)}"
+                        "seccomp installation failed: seccomp(2) errno=$errno1, prctl errno=${r4.errno}"
                     )
                 }
             }

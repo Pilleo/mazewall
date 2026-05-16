@@ -24,6 +24,21 @@ object BpfFilter {
     fun build(arch: Arch, policy: Policy): Array<SockFilter> =
         buildFromNumbers(arch, policy.blockedSyscalls(arch), policy.allowMmapExec, policy.allowNonThreadClone)
 
+    /**
+     * Constructs the BPF bytecode using a linear scan approach.
+     * 
+     * ### Performance Rationale
+     * While an O(log N) Binary Search Tree (BST) is theoretically faster for large sets, 
+     * we intentionally use a linear scan (O(N)) here for several reasons:
+     * 1. **Simplicity:** The logic is trivial to audit and maintain.
+     * 2. **Jump Limits:** BPF jump offsets are limited to 8 bits (max 255 instructions). 
+     *    A BST for a large syscall list can easily exceed this limit, leading to 
+     *    complex instruction reordering requirements.
+     * 3. **Practicality:** Most security policies (e.g. blocking process execution or 
+     *    network) only target <10 syscalls. Even a heavy policy like [Policy.PURE_COMPUTE] 
+     *    only targets ~40 syscalls, which results in ~80 BPF instructions—well within 
+     *    both performance and jump limit budgets.
+     */
     internal fun buildFromNumbers(
         arch: Arch, 
         blocked: IntArray, 
@@ -53,6 +68,14 @@ object BpfFilter {
             filters.add(SockFilter((BPF_JMP or 0x40 or BPF_K).toShort(), 0, 1, 0x04)) 
             filters.add(SockFilter((BPF_RET or BPF_K).toShort(), 0, 0, denyAction))
             filters.add(SockFilter((BPF_LD or BPF_W or BPF_ABS).toShort(), 0, 0, SECCOMP_DATA_NR_OFFSET)) // Restore NR
+
+            // mprotect
+            filters.add(SockFilter((BPF_JMP or BPF_JEQ or BPF_K).toShort(), 0, 4, arch.mprotect))
+            filters.add(SockFilter((BPF_LD or BPF_W or BPF_ABS).toShort(), 0, 0, SECCOMP_DATA_ARGS_OFFSET + 16))
+            // if PROT_EXEC (0x04) is NOT set, skip 1 instruction (the ret deny)
+            filters.add(SockFilter((BPF_JMP or 0x40 or BPF_K).toShort(), 0, 1, 0x04)) 
+            filters.add(SockFilter((BPF_RET or BPF_K).toShort(), 0, 0, denyAction))
+            filters.add(SockFilter((BPF_LD or BPF_W or BPF_ABS).toShort(), 0, 0, SECCOMP_DATA_NR_OFFSET))
         }
 
         // clone
