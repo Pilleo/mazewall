@@ -54,6 +54,18 @@ To load a BPF-LSM program into the kernel, the process requires high privileges 
 
 Seccomp, on the other hand, allows an entirely unprivileged application to *self-restrict*. As long as the `NoNewPrivileges` flag is set, a worker thread can unilaterally strip away its own capabilities. `jseccomp` requires zero external agents, daemonsets, or cluster-level privileges—it is pure, developer-driven "shift left" security.
 
+## The Future: Seccomp + Landlock
+
+While Seccomp is the ultimate "fast path" for blocking risky behaviors, it has one major limitation: it is blind to file paths. Because Seccomp only sees raw memory pointers, it is vulnerable to Time-of-Check to Time-of-Use (TOCTOU) attacks where an attacker swaps a file path string in memory just as the kernel is validating it.
+
+This is where **Landlock** comes in. Landlock is a relatively new Linux Security Module (LSM) that provides the deep, path-aware visibility of BPF-LSM but with the same **zero-privilege** profile as Seccomp. 
+
+Like Seccomp, Landlock relies on the `NoNewPrivileges` flag, allowing any thread to restrict its own access to the filesystem without needing cluster-level permissions or root access. In the near future, tools like `jseccomp` will combine both:
+* **Seccomp** to block risky *mechanisms* (like `execve`, `io_uring`, or executable memory).
+* **Landlock** to restrict *data access* (ensuring a thread can only read or write to specific, approved directories).
+
+Together, they provide a multi-layered defense that is both surgically precise and entirely unprivileged.
+
 ## Internal Micro-segmentation: The Scalpel vs. The Shield
 
 A common question is: *If I use a cluster-wide tool like Kubescape with eBPF, do I still need thread-level containment?*
