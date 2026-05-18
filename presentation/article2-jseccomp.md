@@ -1,6 +1,6 @@
 # Securing the JVM at the Kernel Level: Thread-Scoped Syscall Containment
  
-In [Part 1](#), we explored the concept of the **Bill of Behavior (BoB)**—a shift from broad container boundaries to granular behavioral contracts. We discussed how eBPF provides the visibility to build these contracts and how modern evasion techniques like fileless malware necessitate surgical enforcement.
+In [Part 1](#), we explored the concept of the **Software Bill of Behavior (SBoB)**—a shift from broad container boundaries to granular behavioral contracts. We discussed how eBPF provides the visibility to build these contracts and how modern evasion techniques like fileless malware necessitate surgical enforcement.
  
 Now, we are going to get practical. We’re going to look at one of the most dynamic, complex, and "over-privileged" runtimes in the modern data center: the **Java Virtual Machine (JVM)**.
  
@@ -18,10 +18,11 @@ The Linux kernel provides a powerful but underutilized capability: **Seccomp fil
  
 This is the core philosophy behind `jseccomp`. We advocate for a tiered "Defense-in-Depth" model that combines process-wide safety with surgical thread-level containment:
  
-1.  **Tier 1: Global Process Lockdown:** At application startup, we apply a minimal `Policy.NO_EXEC` filter to the entire JVM process. This permanently disables the ability to spawn a shell (`execve`), providing a massive security baseline with almost zero stability risk.
-2.  **Tier 2: Surgical Thread Containment:** For specific worker pools handling untrusted data (like a JSON parser or an image processor), we apply much stricter policies—blocking network access (`Policy.NO_NETWORK`) or even all file operations (`Policy.PURE_COMPUTE`).
+1.  **Tier 1: Global Process Lockdown (The Production Baseline):** At application startup, we apply a minimal `Policy.NO_EXEC` filter to the entire JVM process. This permanently disables the ability to spawn a shell (`execve`), providing a massive security baseline with almost zero stability risk. 
+    *   **Battle-Tested in Production:** This isn't just theory. For years, industry leaders like **Elasticsearch** have used this exact approach to neutralize RCEs. By locking the process at the kernel level, even a flaw like Log4Shell is rendered toothless—the attacker simply cannot spawn a shell.
+2.  **Tier 2: Surgical Thread Containment (The Experimental Frontier):** For specific worker pools handling untrusted data (like a JSON parser or an image processor), we apply much stricter policies—blocking network access (`Policy.NO_NETWORK`) or even all file operations (`Policy.PURE_COMPUTE`).
  
-By isolating these high-risk tasks into "Contained Executors," the worker thread enters a restricted state that it can never leave, while the main JVM threads (GC, JIT, API listeners) remain unconstrained.
+While the process-level lockdown is a mature standard, `jseccomp` explores the "experimental frontier" of thread-scoped enforcement. By isolating these high-risk tasks into "Contained Executors," the worker thread enters a restricted state that it can never leave, while the main JVM threads (GC, JIT, API listeners) remain unconstrained.
  
 ### Stopping the "Shellcode" without Breaking the JIT
  
@@ -109,7 +110,7 @@ safeExecutor.submit {
 
 ### Try It Locally
  
-You can reproduce this containment yourself. The repository includes a demonstration of a Log4Shell exploit being neutralized by `jseccomp` at the kernel level.
+You can reproduce this containment yourself using the included Docker environment.
  
 1.  **Clone & Run:**
     ```bash
@@ -128,6 +129,6 @@ Thread attempted a prohibited system call (EPERM).
 
 ## Conclusion
  
-The "Bill of Behavior" isn't just a conceptual ideal; it is a technically feasible engineering strategy. By moving from process-level boundaries to thread-scoped kernel enforcement, we can build dynamic applications that are secure by design.
+The **Software Bill of Behavior (SBoB)** isn't just a conceptual ideal; it is a technically feasible engineering strategy. By moving from process-level boundaries to thread-scoped kernel enforcement, we can build dynamic applications that are secure by design.
  
 Syscalls are the ultimate source of truth. By controlling them at the thread level, we ensure that even when our code is compromised, our system remains intact.

@@ -1,6 +1,6 @@
-# Generating an SBoB for Java: A GraalVM Thought Experiment
+# Generating an SBoB for Java: A Blueprint for the Future
 
-In [Part 1](#), we explored the transition from compositional transparency (SBOM) to behavioral transparency (BoB) and how eBPF makes observing runtime behavior practical. In [Part 2](#), we applied these concepts to the JVM, using seccomp to neutralize threats like fileless malware and shellcode.
+In [Part 1](#), we explored the transition from compositional transparency (SBOM) to behavioral transparency (SBoB) and how eBPF makes observing runtime behavior practical. In [Part 2](#), we applied these concepts to the JVM, using Seccomp and Landlock to neutralize threats like fileless malware and shellcode.
 
 Now, we face the operational reality: How do we actually create the Bill of Behavior? Let’s conduct a thought experiment on generating a meaningful SBoB for a real-world Spring Boot application.
 
@@ -8,11 +8,18 @@ Now, we face the operational reality: How do we actually create the Bill of Beha
 
 When defining behavior, the first instinct is to rely on static analysis. For isolated, well-defined libraries, static analysis works well. We can analyze a JSON parser's bytecode and confidently assert it never calls `java.net.Socket`.
 
-However, for a full-scale Java application, static analysis fails entirely. Modern frameworks rely heavily on reflection, dynamic proxies, Java Native Interface (JNI), and configuration-driven dispatch. A static analyzer cannot definitively prove what a Spring Boot application will do at runtime because the behavior is constructed dynamically based on classpath scanning and configuration files. Besides different jvm versions may use different sys calls for the same functionality.
+However, for a full-scale Java application, static analysis faces an uphill battle. Modern frameworks rely heavily on reflection, dynamic proxies, Java Native Interface (JNI), and configuration-driven dispatch. A static analyzer cannot definitively prove what a Spring Boot application will do at runtime because the behavior is constructed dynamically based on classpath scanning and configuration files. 
+
+### The Platform Variability Problem
+Even more challenging is the **JVM inconsistency**. Because the SBoB is enforced at the kernel level (syscalls), it is inextricably tied to the underlying runtime. 
+*   **JVM Versions:** Different versions of the JVM (e.g., Java 17 vs Java 21) may use entirely different system calls to achieve the same functionality (like memory allocation or thread management). 
+*   **Compiler Differences:** The syscall profile of a standard OpenJDK JIT-compiled application will look radically different from a GraalVM Native Image binary.
+
+This means the same library, with the exact same application code, will require different SBoBs depending on the specific VM and compiler version it runs on. A "static" SBoB for a library is therefore an approximation at best.
 
 Conversely, dynamic analysis (observing the application as it runs) suffers from the coverage problem. No test suite exercises every possible state space or error-handling path.
 
-The conclusion is unavoidable: we will likely rely on a combination of static analysis, dynamic observation, and manual review. 
+The conclusion is unavoidable: we will likely rely on a combination of static analysis, dynamic observation, and manual review to build a BoB for behavioral security. This is actively developing at the moment, you may see crucial updates at billofbehavior.com
 
 ## The Dynamic Generation Blueprint
 

@@ -14,9 +14,9 @@ And in many cases, the honest answer is uncomfortable: we don’t really know.
  
 An SBOM can tell you that a compression library is present. It cannot tell you that this same library has suddenly started interfering with authentication flows. It can tell you that a logging framework is installed. It cannot tell you that the logger is currently opening outbound network sockets. Composition transparency is valuable, but it is not behavioral transparency.
  
-That gap is exactly where a new, emerging concept starts to matter: **BoB—the Bill of Behavior.**
+That gap is exactly where a new, emerging concept starts to matter: **SBoB—the Software Bill of Behavior.**
  
-*(A quick note on expectations: This article is not a tutorial for fixing your runtime security today. BoB is still emerging, tooling is early, and standards are actively forming. What follows is a picture of where cloud-native security is heading—a direction that is becoming technically feasible and strategically hard to ignore.)*
+*(A quick note on expectations: This article is not a tutorial for fixing your runtime security today. SBoB (often referred to simply as **BoB**) is still emerging, tooling is early, and standards are actively forming. What follows is a picture of where cloud-native security is heading—a direction that is becoming technically feasible and strategically hard to ignore.)*
 
 ## From Boundaries to Contracts
  
@@ -25,9 +25,9 @@ For the last decade, cloud-native security has relied on boundaries. We wrap app
 The shift we are seeing today is from **boundaries** to **contracts**.
  
 In a boundary-based model, we ask: "Is this container allowed to talk to the internet?" 
-In a contract-based model (BoB), we ask: "Is this specific library, at this specific moment, allowed to perform this specific action?"
+In a contract-based model (SBoB), we ask: "Is this specific library, at this specific moment, allowed to perform this specific action?"
  
-To be precise, BoB is the declaration—the clipboard of expected behaviors. Enforcement is handled by a runtime engine that observes behavior and decides whether to alert, learn, or block. But the industry is rapidly moving toward a world where these pieces interlock: software ships with a behavioral contract, and the runtime knows exactly how to act on it.
+To be precise, the SBoB is the declaration—the clipboard of expected behaviors. Enforcement is handled by a runtime engine that observes behavior and decides whether to alert, learn, or block. But the industry is rapidly moving toward a world where these pieces interlock: software ships with a behavioral contract, and the runtime knows exactly how to act on it.
  
 Without this explicit contract, runtime security is forced into unsatisfying compromises: broad generic rules, noisy anomaly detection, or painstakingly hand-crafted policies that no development team has the time to maintain.
 
@@ -35,7 +35,7 @@ Without this explicit contract, runtime security is forced into unsatisfying com
  
 For a long time, precise runtime behavioral security was too expensive, too invasive, or too brittle to apply at scale. That changed with eBPF.
  
-If BoB is the clipboard, eBPF is the engine that makes the observation practical.
+If the SBoB is the clipboard, eBPF is the engine that makes the observation practical.
  
 At a high level, eBPF gives modern Linux systems a safe, highly performant way to observe and react to what is happening at runtime. Syscalls, process executions, network behaviors, and file accesses become instantly visible and actionable.
  
@@ -43,7 +43,24 @@ A useful mental model is this: **eBPF is to the Linux kernel what JavaScript is 
  
 It is a programmable extension layer. You don't have to rebuild the entire operating system every time you need a new capability. You inject carefully verified logic into a controlled runtime to observe, measure, and intervene. eBPF turned the OS from a rigid substrate into something security tools can dynamically extend.
  
-But it is important to distinguish between **observation** and **enforcement**. While eBPF provides the unprecedented visibility needed to *generate* a Bill of Behavior, enforcement often still relies on standard Linux primitives like Seccomp or Linux Security Modules (LSM) to physically block unauthorized actions.
+But it is important to distinguish between **observation** and **enforcement**. While eBPF provides the unprecedented visibility needed to *generate* a Bill of Behavior, physical enforcement relies on a set of core Linux primitives.
+
+## The Primitives: How BoB Is Enforced
+
+If BoB is the declaration of intent, the Linux kernel provides three primary mechanisms to turn that intent into a hard boundary:
+
+### 1. Seccomp (Secure Computing)
+Seccomp is the industry's "fast path" for blocking system calls. It is fast, unprivileged (via `NoNewPrivileges`), and extremely reliable. However, it is "path-blind"—it sees the system call being made, but it cannot easily inspect the file paths or network addresses involved.
+*   **Where you use it today:** You are likely using it right now. Modern web browsers like **Chrome** and **Firefox** use Seccomp to sandbox their renderer processes, ensuring that a compromised tab cannot escape to the rest of your system. Docker also applies a default Seccomp profile to every container to block high-risk operations.
+
+### 2. Landlock
+Landlock is a relatively new and revolutionary Linux Security Module (LSM). It provides the path-aware visibility that Seccomp lacks, but it remains **unprivileged**. This allows a standard application to sandbox its own access to the filesystem (e.g., "This process can only read from `/app/data`") without needing root permissions or cluster-level agents.
+
+### 3. Linux Security Modules (LSM)
+LSMs like AppArmor, SELinux, and the modern **BPF-LSM** provide the deepest level of security. They hook into the kernel at a very granular level, allowing for complex, context-aware rules.
+*   **The Trade-off:** Unlike Seccomp or Landlock, managing LSMs usually requires high privileges (`root` or `CAP_MAC_ADMIN`). This makes them ideal for platform-level security (like Android's application sandbox or Kubernetes Pod Security Standards) but harder for individual developers to use for "self-restriction."
+
+By combining these primitives, we move from blunt "allow/deny" container rules to surgical, intent-based security.
 
 ## The Runtime Security Stack Is Already Here
  
@@ -55,34 +72,34 @@ On the commercial side, companies like **Oligo Security** have proven that libra
  
 The message is clear: the runtime security stack is already here. What is still missing is a standardized, portable, vendor-supplied way to describe what software is expected to do.
 
-## What BoB Actually Is (and Why Vendor Authorship Matters)
+## What SBoB Actually Is (and Why Vendor Authorship Matters)
  
-If an SBOM is the bill of materials for software composition, a BoB (Bill of Behavior) is its behavioral companion. In practical terms, a BoB captures expected runtime boundaries: network communication, file access, process execution, and Linux capabilities.
+If an SBOM is the bill of materials for software composition, an SBoB (Software Bill of Behavior) is its behavioral companion. In practical terms, an SBoB captures expected runtime boundaries: network communication, file access, process execution, and Linux capabilities.
  
 Today, runtime security forces the end user to infer safe behavior after deployment. Platform engineers watch logs, tune detection rules, silence false positives, and slowly assemble a fragile model of what the software seems to be doing.
  
-BoB introduces a different model: the producer of the software should ship the first behavioral contract. 
+SBoB introduces a different model: the producer of the software should ship the first behavioral contract. 
  
 The vendor is the party that actually knows what the software is intended to do, what the test coverage looks like, and which behaviors are essential. Instead of forcing thousands of customers to reverse-engineer the same runtime policy from scratch, the software producer ships a reviewable baseline. This moves runtime security from a "guess" to a **verifiable attestation of intent.**
 
 ## The First Step: VEX (Vulnerability Exploitability eXchange)
-We are already seeing a "BoB-lite" emerge in the form of **VEX**. While an SBOM tells you a vulnerable library exists on your disk, a VEX document—often generated by runtime tools like **Kubescape** using eBPF—tells you if that library is actually loaded and reachable at runtime. VEX is the industry's first standardized realization that composition is a poor proxy for risk; only behavior matters.
+We are already seeing a "SBoB-lite" emerge in the form of **VEX**. While an SBOM tells you a vulnerable library exists on your disk, a VEX document—often generated by runtime tools like **Kubescape** using eBPF—tells you if that library is actually loaded and reachable at runtime. VEX is the industry's first standardized realization that composition is a poor proxy for risk; only behavior matters.
 
 ## Beyond "Allow/Deny": Closing the Evasion Loopholes
  
-It’s tempting to view BoB simply as a tool to reduce false positives in anomaly detection. And yes, instead of asking a vague statistical question—*"Is this weird?"*—the runtime can ask a concrete one: *"Is this expected behavior for this specific artifact?"*
+It’s tempting to view SBoB simply as a tool to reduce false positives in anomaly detection. And yes, instead of asking a vague statistical question—*"Is this weird?"*—the runtime can ask a concrete one: *"Is this expected behavior for this specific artifact?"*
  
-But BoB also addresses the reality of modern syscall evasion. 
+But SBoB also addresses the reality of modern syscall evasion. 
  
 Traditional security often focuses on blocking `execve` (spawning a shell). But sophisticated attackers don't need a shell. They use **fileless malware**—malicious code that lives entirely in RAM, using Linux features like `memfd_create` to execute binaries that never touch the disk. Because there is no file, traditional disk-based scanning is blind.
  
 More advanced attackers use **`io_uring`**, a high-performance asynchronous I/O API. By submitting operations via shared memory rings rather than direct syscalls, they can often "blind" traditional security monitors.
  
-A BoB allows us to express fine-grained intent that stops these techniques: *"This application is strictly forbidden from using `memfd_create`, `io_uring_setup`, or mapping executable memory."* We move from blunt "allow/deny" container rules to surgical, intent-based security.
+An SBoB allows us to express fine-grained intent that stops these techniques: *"This application is strictly forbidden from using `memfd_create`, `io_uring_setup`, or mapping executable memory."* We move from blunt "allow/deny" container rules to surgical, intent-based security.
 
 ## The Concept of Scopes: When is a Behavior Expected?
  
-A Bill of Behavior (BoB) isn't just a flat list of syscalls; to be effective, it must be context-aware. This is where the concept of **Scopes** becomes critical. We can categorize these into two main groups: those that are practically achievable today, and those that remain aspirational.
+A Software Bill of Behavior (SBoB) isn't just a flat list of syscalls; to be effective, it must be context-aware. This is where the concept of **Scopes** becomes critical. We can categorize these into two main groups: those that are practically achievable today, and those that remain aspirational.
  
 ### 1. Lifecycle Scopes (The Pragmatic Path)
 The most realistic way to implement Scopes is by aligning with the application's natural lifecycle. This approach is currently being implemented in **Kubescape**:
@@ -108,17 +125,17 @@ If declaring upfront capabilities sounds like a radical shift, it isn’t. In fa
  
 Think about mobile apps. An Android `AndroidManifest.xml` or an iOS Entitlement explicitly declares what the application is allowed to do (access the camera, read contacts, use the network). Web browsers work the same way, explicitly asking for permission before a script can access your location or clipboard. WebAssembly (Wasm) takes this even further, running in a default-deny sandbox where modules cannot touch the network or file system without explicit host capabilities being granted.
  
-In this context, server-side Linux containers are the anomaly. BoB is simply bringing capability-based security to the cloud-native server side.
+In this context, server-side Linux containers are the anomaly. SBoB is simply bringing capability-based security to the cloud-native server side.
 
 ## What You Can Do Today
  
-BoB is emerging, not universal. But teams don't have to wait to start adopting a "behavior-aligned" mindset. You can move your architecture in this direction today:
+SBoB is emerging, not universal. But teams don't have to wait to start adopting a "behavior-aligned" mindset. You can move your architecture in this direction today:
  
 *   **Run rootless:** Drop unnecessary Linux capabilities.
 *   **Constrain the filesystem:** Use read-only root filesystems and explicitly declare writable locations.
 *   **Audit first:** Adopt runtime tooling like Kubescape in audit mode
  
-These practices don't replace BoB. They train engineering teams to think in the exact behavioral terms that BoB formalizes.
+These practices don't replace SBoB. They train engineering teams to think in the exact behavioral terms that SBoB formalizes.
 
 ---
 
