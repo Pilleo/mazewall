@@ -18,6 +18,9 @@ object LinuxNative {
 
     private val PRCTL: MethodHandle
     private val SYSCALL: MethodHandle
+    private val SYSCALL4: MethodHandle
+    private val OPEN: MethodHandle
+    private val CLOSE: MethodHandle
 
     val ERRNO_LAYOUT: StructLayout = Linker.Option.captureStateLayout()
     private val ERRNO_OFFSET = ERRNO_LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("errno"))
@@ -41,6 +44,9 @@ object LinuxNative {
     init {
         PRCTL = downcall("prctl", FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.JAVA_INT, ValueLayout.JAVA_LONG, ValueLayout.JAVA_LONG, ValueLayout.JAVA_LONG, ValueLayout.JAVA_LONG), Linker.Option.captureCallState("errno"))
         SYSCALL = downcall("syscall", FunctionDescriptor.of(ValueLayout.JAVA_LONG, ValueLayout.JAVA_LONG, ValueLayout.JAVA_LONG, ValueLayout.JAVA_LONG, ValueLayout.ADDRESS), Linker.Option.captureCallState("errno"), Linker.Option.firstVariadicArg(1))
+        SYSCALL4 = downcall("syscall", FunctionDescriptor.of(ValueLayout.JAVA_LONG, ValueLayout.JAVA_LONG, ValueLayout.JAVA_LONG, ValueLayout.JAVA_LONG, ValueLayout.ADDRESS, ValueLayout.JAVA_INT), Linker.Option.captureCallState("errno"), Linker.Option.firstVariadicArg(1))
+        OPEN = downcall("open", FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.ADDRESS, ValueLayout.JAVA_INT), Linker.Option.captureCallState("errno"))
+        CLOSE = downcall("close", FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.JAVA_INT), Linker.Option.captureCallState("errno"))
     }
 
     private fun downcall(name: String, desc: FunctionDescriptor, vararg options: Linker.Option): MethodHandle {
@@ -78,6 +84,33 @@ object LinuxNative {
         }
     }
 
+    fun syscall(number: Long, arg1: Long, arg2: Long, arg3: MemorySegment, arg4: Int): SyscallResult {
+        Arena.ofConfined().use { arena ->
+            val capturedState = arena.allocate(ERRNO_LAYOUT)
+            val ret = SYSCALL4.invokeExact(capturedState, number, arg1, arg2, arg3, arg4) as Long
+            val errno = capturedState.get(ValueLayout.JAVA_INT, ERRNO_OFFSET)
+            return SyscallResult(ret, errno)
+        }
+    }
+
+    fun open(path: MemorySegment, flags: Int): SyscallResult {
+        Arena.ofConfined().use { arena ->
+            val capturedState = arena.allocate(ERRNO_LAYOUT)
+            val ret = OPEN.invokeExact(capturedState, path, flags) as Int
+            val errno = capturedState.get(ValueLayout.JAVA_INT, ERRNO_OFFSET)
+            return SyscallResult(ret.toLong(), errno)
+        }
+    }
+
+    fun close(fd: Int): SyscallResult {
+        Arena.ofConfined().use { arena ->
+            val capturedState = arena.allocate(ERRNO_LAYOUT)
+            val ret = CLOSE.invokeExact(capturedState, fd) as Int
+            val errno = capturedState.get(ValueLayout.JAVA_INT, ERRNO_OFFSET)
+            return SyscallResult(ret.toLong(), errno)
+        }
+    }
+
     fun newSockFProg(arena: Arena, filters: Array<SockFilter>): MemorySegment {
         val filterArraySeg = arena.allocate(MemoryLayout.sequenceLayout(filters.size.toLong(), SOCK_FILTER_LAYOUT))
         for (i in filters.indices) {
@@ -96,6 +129,33 @@ object LinuxNative {
     }
 
     data class SyscallResult(val returnValue: Long, val errno: Int)
+
+    // Landlock Layouts
+    val LANDLOCK_RULESET_ATTR_LAYOUT = MemoryLayout.structLayout(
+        ValueLayout.JAVA_LONG.withName("handled_access_fs"),
+        ValueLayout.JAVA_LONG.withName("handled_access_net")
+    )
+    val LANDLOCK_RULESET_ATTR_FS_OFFSET = LANDLOCK_RULESET_ATTR_LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("handled_access_fs"))
+    val LANDLOCK_RULESET_ATTR_NET_OFFSET = LANDLOCK_RULESET_ATTR_LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("handled_access_net"))
+
+    val LANDLOCK_PATH_BENEATH_ATTR_LAYOUT = MemoryLayout.structLayout(
+        ValueLayout.JAVA_LONG.withName("allowed_access"),
+        ValueLayout.JAVA_INT.withName("parent_fd")
+        // kernel struct is __attribute__((packed)) so no padding here
+    )
+    val LANDLOCK_PATH_BENEATH_ATTR_ACCESS_OFFSET = LANDLOCK_PATH_BENEATH_ATTR_LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("allowed_access"))
+    val LANDLOCK_PATH_BENEATH_ATTR_FD_OFFSET = LANDLOCK_PATH_BENEATH_ATTR_LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("parent_fd"))
+
+    const val LANDLOCK_CREATE_RULESET_NR = 444L
+    const val LANDLOCK_ADD_RULE_NR = 445L
+    const val LANDLOCK_RESTRICT_SELF_NR = 446L
+
+    const val LANDLOCK_CREATE_RULESET_VERSION = 1L
+    const val LANDLOCK_RULE_PATH_BENEATH = 1
+
+    const val O_PATH = 2097152
+    const val O_CLOEXEC = 524288
+    const val O_NOFOLLOW = 131072
 
     const val PR_SET_NO_NEW_PRIVS = 38
     const val PR_GET_NO_NEW_PRIVS = 39

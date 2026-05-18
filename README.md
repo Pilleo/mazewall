@@ -34,6 +34,36 @@ Prohibited syscalls trigger a `SECCOMP_RET_ERRNO` with `EPERM`, causing standard
 - **[Interactive Playground on Killercoda](https://killercoda.com/YOUR_USERNAME/scenario/jsecomp)** – A free, browser-based Linux environment.
 - **[Watch the Demo](#)** – 30-second terminal recording.
 
+### 2. Configure a Thread Pool with File Restrinctions (Landlock)
+
+Modern Linux kernels support [Landlock LSM](https://landlock.io/), which allows unprivileged processes to sandbox their own filesystem access. `jseccomp` automatically applies Landlock rules alongside Seccomp:
+
+```kotlin
+// Allow processing files in /data/incoming, but strictly block network and execution
+val policy = Policy.builder()
+    .base(Policy.PURE_COMPUTE)
+    .allowJvmClasspath() // Crucial: allow lazy loading of JVM classes
+    .allowFsRead("/data/incoming")
+    .allowFsWrite("/data/processed")
+    .build()
+
+val executor = ContainedExecutors.wrap(
+    Executors.newFixedThreadPool(4),
+    policy
+)
+
+executor.submit {
+    // This will work:
+    val data = File("/data/incoming/task1.json").readText()
+    File("/data/processed/result.json").writeText(data)
+    
+    // This will throw AccessDeniedException:
+    File("/etc/passwd").readText()
+}
+```
+
+### 3. Graceful Degradation
+
 ### Local Development
 - **Linux** (x86_64 or aarch64)
 - **JDK 22+** (requires FFM API)

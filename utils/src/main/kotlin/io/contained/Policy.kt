@@ -12,6 +12,13 @@ package io.contained
  *   process forking (`fork`) is blocked.
  * - **`clone3`:** Blocked with `ENOSYS` to force runtimes to fallback to the inspectable legacy `clone`.
  *
+ * ### JVM Classloading & JIT (Landlock Risks)
+ * When using `allowFsRead` or `allowFsWrite`, the thread is restricted by Landlock. If a restricted worker 
+ * thread triggers the loading of a new class, the JVM must read `.jar` or `.class` files from the filesystem. 
+ * If Landlock blocks access to the classpath, the JVM will throw a `NoClassDefFoundError`.
+ * **Mitigation:** Ensure all necessary classes are loaded before containment is applied, or explicitly
+ * allow read access to the JVM classpath directories.
+ *
  * Policies can be combined with [combine]:
  * ```kotlin
  * val p = Policy.combine(Policy.NO_NETWORK, Policy.NO_EXEC)
@@ -20,7 +27,9 @@ package io.contained
 class Policy private constructor(
     internal val blocked: Set<Syscall>,
     internal val allowMmapExec: Boolean = false,
-    internal val allowNonThreadClone: Boolean = false
+    internal val allowNonThreadClone: Boolean = false,
+    internal val allowedFsReadPaths: Set<String> = emptySet(),
+    internal val allowedFsWritePaths: Set<String> = emptySet()
 ) {
 
     /** Returns the concrete syscall numbers to block for the given [arch]. */
@@ -65,7 +74,15 @@ class Policy private constructor(
             val union = policies.flatMap { it.blocked }.toSet()
             val mmapExec = policies.any { !it.allowMmapExec }
             val cloneNonThread = policies.any { !it.allowNonThreadClone }
-            return Policy(union, allowMmapExec = !mmapExec, allowNonThreadClone = !cloneNonThread)
+            val fsReads = policies.flatMap { it.allowedFsReadPaths }.toSet()
+            val fsWrites = policies.flatMap { it.allowedFsWritePaths }.toSet()
+            return Policy(
+                union, 
+                allowMmapExec = !mmapExec, 
+                allowNonThreadClone = !cloneNonThread,
+                allowedFsReadPaths = fsReads,
+                allowedFsWritePaths = fsWrites
+            )
         }
     }
 
@@ -73,9 +90,62 @@ class Policy private constructor(
         private val blocked = mutableSetOf<Syscall>()
         private var allowMmapExec = false
         private var allowNonThreadClone = false
+        private val allowedFsReadPaths = mutableSetOf<String>()
+        private val allowedFsWritePaths = mutableSetOf<String>()
 
         fun block(vararg syscalls: Syscall): Builder {
             blocked.addAll(syscalls)
+            return this
+        }
+
+        /**
+         * Inherits all settings (blocked syscalls, allowed paths, etc.) from the given [policy].
+         */
+        fun base(policy: Policy): Builder {
+            blocked.addAll(policy.blocked)
+            if (policy.allowMmapExec) allowMmapExec = true
+            if (policy.allowNonThreadClone) allowNonThreadClone = true
+            allowedFsReadPaths.addAll(policy.allowedFsReadPaths)
+            allowedFsWritePaths.addAll(policy.allowedFsWritePaths)
+            return this
+        }
+
+        /** 
+         * Allows reading from the specified file or directory path (and its children).
+         * Note: Setting any FS paths enables Landlock enforcement for this policy.
+         */
+        fun allowFsRead(path: String): Builder {
+            allowedFsReadPaths.add(path)
+            return this
+        }
+
+        /**
+         * Convenience method to allow reading from the JVM's classpath.
+         * This is CRITICAL if your worker threads might trigger lazy classloading 
+         * after the Landlock ruleset is applied.
+         */
+        fun allowJvmClasspath(): Builder {
+            val javaHome = System.getProperty("java.home")
+            if (javaHome != null) allowFsRead(javaHome)
+            
+            val classPath = System.getProperty("java.class.path")
+            if (classPath != null) {
+                classPath.split(java.io.File.pathSeparator).forEach {
+                    val file = java.io.File(it)
+                    if (file.exists()) {
+                        allowFsRead(if (file.isDirectory) file.absolutePath else file.parent)
+                    }
+                }
+            }
+            return this
+        }
+
+        /** 
+         * Allows writing to the specified file or directory path (and its children).
+         * Note: Setting any FS paths enables Landlock enforcement for this policy.
+         */
+        fun allowFsWrite(path: String): Builder {
+            allowedFsWritePaths.add(path)
             return this
         }
 
@@ -97,6 +167,12 @@ class Policy private constructor(
             return this
         }
 
-        fun build(): Policy = Policy(blocked.toSet(), allowMmapExec, allowNonThreadClone)
+        fun build(): Policy = Policy(
+            blocked.toSet(), 
+            allowMmapExec, 
+            allowNonThreadClone,
+            allowedFsReadPaths.toSet(),
+            allowedFsWritePaths.toSet()
+        )
     }
 }

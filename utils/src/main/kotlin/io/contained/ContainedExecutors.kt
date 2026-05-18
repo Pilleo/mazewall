@@ -200,6 +200,7 @@ object ContainedExecutors {
     private val THREAD_ALLOWS_MMAP_EXEC = ThreadLocal.withInitial { true }
     private val THREAD_ALLOWS_NON_THREAD_CLONE = ThreadLocal.withInitial { true }
     private val FILTER_DEPTH = ThreadLocal.withInitial { 0 }
+    private val THREAD_LANDLOCK_APPLIED = ThreadLocal.withInitial { false }
 
     internal class ContainedExecutorWrapper(
         private val delegate: ExecutorService,
@@ -234,6 +235,12 @@ object ContainedExecutors {
 
         private fun applyContainment() {
             try {
+                // Apply Landlock only once per OS thread to prevent intersective stacking
+                // (the kernel limit is ~16 layers before E2BIG).
+                if (!THREAD_LANDLOCK_APPLIED.get()) {
+                    Landlock.applyRuleset(policy)
+                    THREAD_LANDLOCK_APPLIED.set(true)
+                }
                 installOnCurrentThread(policy)
             } catch (e: UnsupportedOperationException) {
                 throw e

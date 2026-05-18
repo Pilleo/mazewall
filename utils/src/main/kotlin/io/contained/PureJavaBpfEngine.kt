@@ -69,6 +69,10 @@ object PureJavaBpfEngine : SeccompEngine {
             }
         }
         
+        if (policy.blocked.contains(Syscall.PRCTL)) {
+            return // Cannot verify because prctl itself is blocked
+        }
+
         // Verify filter is actually installed
         val r5 = LinuxNative.prctl(LinuxNative.PR_GET_SECCOMP, 0, 0, 0, 0)
         if (r5.returnValue != 2L) {
