@@ -20,13 +20,6 @@ class DemoAppTest {
         // Running main() without arguments should trigger the "both" mode
         main(emptyArray())
 
-        // Wait a bit for the async unsafe exploit to finish (it uses Runtime.exec)
-        var attempts = 0
-        while (!unsafeMarker.exists() && attempts < 50) {
-            Thread.sleep(100)
-            attempts++
-        }
-
         assertTrue(unsafeMarker.exists(), "Unsafe demo should have created the marker")
         assertFalse(safeMarker.exists(), "Safe demo should NOT have created the marker")
 

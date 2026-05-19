@@ -38,7 +38,7 @@ class LandlockTest {
         })
 
         assertEquals("secret", future.get())
-        
+
         executor.shutdown()
         tempDir.toFile().deleteRecursively()
     }
@@ -50,7 +50,7 @@ class LandlockTest {
         if (!Platform.isSupported()) return
 
         val tempDir = createTempDirectory("landlock_test_allowed")
-        
+
         val policy = Policy.builder()
             .base(Policy.NO_EXEC)
             .allowJvmClasspath()
@@ -68,8 +68,11 @@ class LandlockTest {
             future.get()
         }
 
-        assertTrue(ex.cause is AccessDeniedException || ex.cause is ContainmentViolationException, "Expected AccessDeniedException, got ${ex.cause}")
-        
+        assertTrue(
+            ex.cause is AccessDeniedException || ex.cause is ContainmentViolationException,
+            "Expected AccessDeniedException, got ${ex.cause}"
+        )
+
         executor.shutdown()
         tempDir.toFile().deleteRecursively()
     }
@@ -224,7 +227,7 @@ class LandlockTest {
         val safeExecutor = ContainedExecutors.wrap(executor, policy)
 
         val future = safeExecutor.submit(java.util.concurrent.Callable {
-            Runtime.getRuntime().exec(arrayOf("/bin/echo", "escaped"))
+            ProcessBuilder("/bin/echo", "escaped").start()
         })
 
         val ex = assertFailsWith<ExecutionException> { future.get() }

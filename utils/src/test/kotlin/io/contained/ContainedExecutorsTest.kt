@@ -19,7 +19,7 @@ class ContainedExecutorsTest {
 
         val future = safeExecutor.submit {
             // Attempt to spawn a process
-            Runtime.getRuntime().exec(arrayOf("echo", "hello"))
+            ProcessBuilder("echo", "hello").start()
         }
 
         val ex = assertFailsWith<ExecutionException> {
@@ -27,7 +27,7 @@ class ContainedExecutorsTest {
         }
 
         assertTrue(ex.cause is ContainmentViolationException, "Expected ContainmentViolationException, got ${ex.cause}")
-        
+
         executor.shutdown()
     }
 
@@ -35,7 +35,7 @@ class ContainedExecutorsTest {
     fun `test graceful degradation fallback`() {
         val osName = System.getProperty("os.name")
         if (osName.equals("Linux", ignoreCase = true)) return // Only test fallback logic on non-Linux
-        
+
         val executor = Executors.newSingleThreadExecutor()
         val safeExecutor = ContainedExecutors.wrap(executor, Policy.NO_EXEC)
 
@@ -43,7 +43,7 @@ class ContainedExecutorsTest {
         val future = safeExecutor.submit {
             "success"
         }
-        
+
         assertTrue(future.get() == "success")
         executor.shutdown()
     }
@@ -65,10 +65,10 @@ class ContainedExecutorsTest {
 
         // 2. Now the main thread (uncontained) should still be able to exec!
         // If SECCOMP_FILTER_FLAG_TSYNC was used, the main thread would be permanently blocked here.
-        val process = Runtime.getRuntime().exec(arrayOf("echo", "uncontained"))
+        val process = ProcessBuilder("echo", "uncontained").start()
         process.waitFor()
         kotlin.test.assertEquals(0, process.exitValue())
-        
+
         executor.shutdown()
     }
 
@@ -83,8 +83,8 @@ class ContainedExecutorsTest {
 
         try {
             val tasks = listOf(
-                java.util.concurrent.Callable { Runtime.getRuntime().exec(arrayOf("echo", "1")) },
-                java.util.concurrent.Callable { Runtime.getRuntime().exec(arrayOf("echo", "2")) }
+                java.util.concurrent.Callable { ProcessBuilder("echo", "1").start() },
+                java.util.concurrent.Callable { ProcessBuilder("echo", "2").start() }
             )
 
             val futures = safeExecutor.invokeAll(tasks)
@@ -110,7 +110,7 @@ class ContainedExecutorsTest {
 
         try {
             val tasks = listOf(
-                java.util.concurrent.Callable { 
+                java.util.concurrent.Callable {
                     Runtime.getRuntime().exec(arrayOf("echo", "fail"))
                     "should not reach here"
                 }

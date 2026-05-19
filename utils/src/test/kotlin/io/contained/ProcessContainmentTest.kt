@@ -8,7 +8,7 @@ import kotlin.test.assertTrue
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 
-/** 
+/**
  * Helper object used to run seccomp installation tests in an isolated JVM process.
  * This prevents the Gradle Test Worker from being permanently "poisoned" by
  * irreversible seccomp filters.
@@ -17,7 +17,7 @@ object SeccompIsolatedTestApp {
     @JvmStatic
     fun main(args: Array<String>) {
         if (!Platform.isSupported()) System.exit(0)
-        
+
         val mode = args.firstOrNull() ?: "process-wide"
         when (mode) {
             "process-wide" -> testProcessWide()
@@ -35,7 +35,7 @@ object SeccompIsolatedTestApp {
 
         ContainedExecutors.installOnProcess(safeGlobalPolicy)
         try {
-            Runtime.getRuntime().exec(arrayOf("echo", "should-fail"))
+            ProcessBuilder("echo", "should-fail").start()
             System.exit(1) // Should have failed
         } catch (e: Exception) {
             if (ContainedExecutors.isContainmentViolation(e)) {
@@ -47,13 +47,24 @@ object SeccompIsolatedTestApp {
     }
 
     private fun testThreadDepth() {
-        val safeSyscalls = Syscall.entries.filter { 
-            it !in listOf(
-                Syscall.MMAP, Syscall.MPROTECT, Syscall.PRCTL, Syscall.IOCTL, 
-                Syscall.OPEN, Syscall.OPENAT, Syscall.OPENAT2, Syscall.GETTID,
-                Syscall.EXECVE, Syscall.EXECVEAT, Syscall.CLONE, Syscall.CLONE3
-            ) 
-        }
+        // Explicit list of syscalls that are safe to block for depth-testing:
+        // - No PRCTL (required for NO_NEW_PRIVS before each seccomp install)
+        // - No MMAP / MPROTECT (required by JVM JIT and GC)
+        // - No CLONE (required for JVM thread creation)
+        // - No CLONE3 (must remain blockable via ENOSYS for the clone fallback to work)
+        val safeSyscalls = listOf(
+            Syscall.EXECVE, Syscall.EXECVEAT, Syscall.FORK, Syscall.VFORK,
+            Syscall.CONNECT, Syscall.SOCKET, Syscall.BIND, Syscall.LISTEN,
+            Syscall.ACCEPT, Syscall.ACCEPT4, Syscall.SENDTO, Syscall.SENDMSG,
+            Syscall.MEMFD_CREATE, Syscall.IO_URING_SETUP, Syscall.BPF, Syscall.PTRACE,
+            Syscall.PROCESS_VM_WRITEV, Syscall.PROCESS_VM_READV,
+            Syscall.USERFAULTFD, Syscall.UNSHARE, Syscall.SETNS,
+            Syscall.MOUNT, Syscall.UMOUNT2, Syscall.PIVOT_ROOT, Syscall.CHROOT,
+            Syscall.INIT_MODULE, Syscall.FINIT_MODULE,
+            Syscall.GETPID, Syscall.GETPPID, Syscall.GETUID,
+            Syscall.GETEUID, Syscall.GETGID, Syscall.GETEGID,
+            Syscall.GETTID, Syscall.GETCWD, Syscall.UMASK
+        )
 
         // Install 32 thread-local filters
         for (i in 0 until 32) {

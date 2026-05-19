@@ -27,8 +27,10 @@ object ContainedExecutors {
     private val logger = Logger.getLogger(ContainedExecutors::class.java.name)
 
     private val PROCESS_BLOCKED = CopyOnWriteArraySet<Syscall>()
-    @Volatile private var PROCESS_ALLOWS_MMAP_EXEC = true
-    @Volatile private var PROCESS_ALLOWS_NON_THREAD_CLONE = true
+    @Volatile
+    private var PROCESS_ALLOWS_MMAP_EXEC = true
+    @Volatile
+    private var PROCESS_ALLOWS_NON_THREAD_CLONE = true
     private val PROCESS_FILTER_DEPTH = AtomicInteger(0)
     private val processLock = Any()
 
@@ -59,19 +61,21 @@ object ContainedExecutors {
         if (Thread.currentThread().isVirtual) {
             throw IllegalStateException(
                 "Attempted to apply seccomp containment inside a virtual thread. " +
-                "Use a dedicated platform thread pool and install containment on its carrier threads instead."
+                        "Use a dedicated platform thread pool and install containment on its carrier threads instead."
             )
         }
 
         val policy = Policy.combine(*policies)
-        
+
         if (!Platform.isSupported()) {
             val fallback = Platform.configuredFallback()
             when (fallback) {
-                Platform.FallbackBehavior.FAIL -> 
+                Platform.FallbackBehavior.FAIL ->
                     throw UnsupportedOperationException("Platform does not support seccomp")
-                Platform.FallbackBehavior.WARN_AND_BYPASS -> 
+
+                Platform.FallbackBehavior.WARN_AND_BYPASS ->
                     logger.warning("Platform does not support seccomp. Code will run uncontained.")
+
                 Platform.FallbackBehavior.SILENT_BYPASS -> {}
             }
             return
@@ -101,10 +105,10 @@ object ContainedExecutors {
                 // Use PureJavaBpfEngine exclusively for zero-dependency enforcement
                 val incrementalPolicy = Policy.builder()
                     .block(*newBlocks.toTypedArray())
-                
+
                 if (policy.allowMmapExec) incrementalPolicy.allowMmapExec()
                 if (policy.allowNonThreadClone) incrementalPolicy.allowNonThreadClone()
-                
+
                 val toInstall = incrementalPolicy.build()
 
                 if (processWide) {
@@ -142,7 +146,7 @@ object ContainedExecutors {
         val combinedPolicy = Policy.combine(*policies)
         val fallback = Platform.configuredFallback()
         val supported = Platform.isSupported()
-        
+
         return ContainedExecutorWrapper(delegate, combinedPolicy, supported, fallback)
     }
 
@@ -167,7 +171,8 @@ object ContainedExecutors {
         return null
     }
 
-    private val VIOLATION_MESSAGE_REGEX = Regex("(?i)Operation not permitted|Permission denied|error=1\\b|error=13\\b|denied|refusé|verweigert|negado")
+    private val VIOLATION_MESSAGE_REGEX =
+        Regex("(?i)Operation not permitted|Permission denied|error=1\\b|error=13\\b|\\bdenied\\b|refusé|verweigert|negado")
 
     private fun isDirectContainmentViolation(t: Throwable): Boolean {
         // EPERM (1) is the standard seccomp return code.
@@ -177,12 +182,17 @@ object ContainedExecutors {
 
         val msg = t.message ?: return false
 
+        // Check for explicit JVM error codes first to avoid locale-fragile string matching
+        if (msg.contains("error=1\b") || msg.contains("error=13\b") || (t is IOException && msg.contains("error=1"))) {
+            return true
+        }
+
         if (VIOLATION_MESSAGE_REGEX.containsMatchIn(msg)) {
             return true
         }
 
         return (t is SocketException && (msg.contains("Permission") || msg.contains("denied")))
-            || (t is IOException && (msg.contains("Cannot run") || msg.contains("error=1")))
+                || (t is IOException && msg.contains("Cannot run"))
     }
 
     private fun isViolationInCauseChain(t: Throwable): Boolean {
@@ -213,12 +223,18 @@ object ContainedExecutors {
         private val supported: Boolean,
         private val fallback: Platform.FallbackBehavior
     ) : ExecutorService by delegate {
-        
+
         private fun <T> wrapCallable(task: Callable<T>): Callable<T> = Callable {
+            // applyContainment() failures (e.g. landlock_create_ruleset errno, depth limit)
+            // propagate as-is — they are not containment violations by the user task.
             applyContainment()
             try {
                 task.call()
+            } catch (e: Error) {
+                // Critical JVM errors (OOM, StackOverflow) should propagate immediately
+                throw e
             } catch (e: Exception) {
+                // Only inspect exceptions thrown by the user task body.
                 if (isContainmentViolation(e)) {
                     throw ContainmentViolationException("Task violated containment policy", e)
                 }
@@ -230,6 +246,8 @@ object ContainedExecutors {
             applyContainment()
             try {
                 task.run()
+            } catch (e: Error) {
+                throw e
             } catch (e: Exception) {
                 if (isContainmentViolation(e)) {
                     throw ContainmentViolationException("Task violated containment policy", e)

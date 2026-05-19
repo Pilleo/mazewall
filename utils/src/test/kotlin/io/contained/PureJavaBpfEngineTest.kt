@@ -17,7 +17,7 @@ class PureJavaBpfEngineTest {
             val result = executor.submit<Boolean> {
                 PureJavaBpfEngine.install(Policy.NO_EXEC)
                 try {
-                    Runtime.getRuntime().exec(arrayOf("echo", "hello"))
+                    ProcessBuilder("echo", "hello").start()
                     false
                 } catch (e: Exception) {
                     true
