@@ -45,7 +45,7 @@ It is a programmable extension layer. You don't have to rebuild the entire opera
  
 But it is important to distinguish between **observation** and **enforcement**. While eBPF provides the unprecedented visibility needed to *generate* a Bill of Behavior, physical enforcement relies on a set of core Linux primitives. This distinction is critical because of a fundamental architectural trade-off: **Privilege.** 
 
-While eBPF-based enforcement (like BPF-LSM) is extremely powerful, it typically requires high system privileges (`CAP_SYS_ADMIN` or `CAP_BPF`). In contrast, Seccomp and Landlock are designed to be **unprivileged**, allowing a standard application to "self-restrict" its own capabilities without needing root access or cluster-level agents. This makes them the ideal "fast path" for developer-driven security.
+While eBPF-based enforcement (like BPF-LSM) is extremely powerful, it requires high system privileges (`CAP_SYS_ADMIN` or `CAP_BPF`). In contrast, Seccomp and Landlock are designed to be **unprivileged**, allowing a standard application to "self-restrict" its own capabilities without needing root access or cluster-level agents. This makes them the ideal "fast path" for developer-driven security.
 
 ## The Primitives: How BoB Is Enforced
 
@@ -57,7 +57,7 @@ Seccomp is the industry's "fast path" for blocking system calls. It is fast, unp
 
 ### 2. Landlock
 Landlock is a relatively new and revolutionary Linux Security Module (LSM). It provides the path-aware visibility that Seccomp lacks, but it remains **unprivileged**. This allows a standard application to sandbox its own access to the filesystem (e.g., "This process can only read from `/app/data`") without needing root permissions or cluster-level agents. 
-*   **Networking Update:** As of Linux Kernel 6.7, Landlock has begun expanding into networking, allowing threads to restrict themselves to specific **TCP ports** for `bind` and `connect` operations. While it currently lacks the deep IP-level or endpoint visibility of BPF-LSM, it provides a powerful, unprivileged "port-level" restrictor that was previously unavailable.
+*  As of Linux Kernel 6.7, Landlock has begun expanding into networking, allowing threads to restrict themselves to specific **TCP ports** for `bind` and `connect` operations. While it currently lacks the deep IP-level or endpoint visibility of BPF-LSM, it provides a powerful, unprivileged "port-level" restrictor that was previously unavailable.
 
 ### 3. Linux Security Modules (LSM)
 LSMs like AppArmor, SELinux, and the modern **BPF-LSM** provide the deepest level of security. They hook into the kernel at a very granular level, allowing for complex, context-aware rules.

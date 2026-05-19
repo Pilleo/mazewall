@@ -1,136 +1,172 @@
-# Securing the JVM at the Kernel Level: Thread-Scoped Syscall Containment
- 
-In [Part 1](#), we explored the concept of the **Software Bill of Behavior (SBoB)**—a shift from broad container boundaries to granular behavioral contracts. We discussed how eBPF provides the visibility to build these contracts and how modern evasion techniques like fileless malware necessitate surgical enforcement.
- 
-Now, we are going to get practical. We’re going to look at one of the most dynamic, complex, and "over-privileged" runtimes in the modern data center: the **Java Virtual Machine (JVM)**.
- 
+# The Global Sandbox Fallacy: Thread-Scoped Seccomp in the JVM
+
+> **Series overview:** This is Part 2 of a 4-part series on behavioral security for cloud-native applications.
+
+
+In Part 1, we established that the Linux kernel gives us three unprivileged enforcement primitives — Seccomp, Landlock, and (for platform agents) BPF-LSM — and that a Software Bill of Behavior describes what software is *expected* to do so these primitives have something authoritative to enforce.
+
+Now we get practical. The JVM is one of the most capability-rich processes in the modern data center. Let's examine why the standard approach to securing it leaves significant attack surface, and how thread-scoped enforcement closes the gap.
+
+---
+
+## Why Not BPF-LSM?
+
+Before anything else: if you've been following kernel security, your first question is probably *"why Seccomp and not BPF-LSM?"*
+
+BPF-LSM is unambiguously more powerful. While Seccomp sees raw memory addresses and is TOCTOU-vulnerable for path-based decisions (Part 1), BPF-LSM hooks *after* kernel objects are fully resolved — it inspects the canonical path `/etc/passwd`, the resolved destination IP, the resolved inode. It enables complex, context-aware enforcement that Seccomp cannot match.
+
+**The architectural blocker is privilege.** Loading a BPF-LSM program requires `CAP_BPF` or `CAP_MAC_ADMIN`. A production JVM running as a non-root user in a container should never hold these capabilities. Using BPF-LSM for application-level self-restriction means deploying a highly privileged node agent (a Kubernetes DaemonSet) to manage policies on the JVM's behalf — a significant operational dependency.
+
+Seccomp and Landlock are **self-restriction primitives**. With `NoNewPrivileges` set, any thread can unilaterally strip its own capabilities — no agents, no cluster-level permissions. `jseccomp` requires zero external infrastructure. That architectural purity has a cost (TOCTOU on path inspection), but it's the right trade-off for developer-driven "shift left" security.
+
+---
+
 ## The Global Sandbox Fallacy
- 
-Most JVM security today relies on a global sandbox. We apply a Seccomp profile or an AppArmor policy to the entire Linux process (the Pod). 
- 
-The problem? A typical Spring Boot application is a monolith of behavior. The main process needs to open network sockets for the API, read configuration files from the disk, and map memory for the JIT compiler. Because the *process* needs these capabilities, the *entire process* is granted them.
- 
-If an attacker triggers a Remote Code Execution (RCE) vulnerability (like Log4Shell) inside a worker thread, they inherit the full privileges of the JVM. They don’t need to break out of the container; they can simply "live off the land" using the network and file access the JVM is already allowed to have.
- 
+
+The standard approach to JVM security is a global seccomp profile applied to the entire Linux process — the Docker default profile, an AppArmor policy on the pod, or a custom seccomp JSON in the `securityContext`.
+
+This is not worthless. Docker's default profile already blocks ~40 dangerous syscalls: `keyctl`, `add_key`, `request_key`, `ptrace` in certain modes, and others. That baseline matters.
+
+**But the remaining allowed syscalls are the problem.** A typical Spring Boot application — even after Docker's default restrictions — still requires:
+- `socket` + `connect` + `sendmsg` for its API and database connections
+- `openat` + `read` for reading config files and loading classes
+- `mmap` with `PROT_EXEC` for the JIT compiler to generate native code
+
+Because the *process* needs these capabilities, *every thread* in the process has them — including threads processing untrusted data.
+
+When an attacker triggers an RCE vulnerability (Log4Shell, a deserialization gadget chain, an XXE payload that reaches JNDI), they inherit the full capability set of the worker thread. They don't need to escape the container. They can use the network socket the JVM already has open to exfiltrate data, the filesystem access it already has to read `/etc/passwd`, the process execution it already has to... wait, that's where it gets interesting.
+
+---
+
 ## The Solution: Tiered Enforcement
- 
-The Linux kernel provides a powerful but underutilized capability: **Seccomp filters can be applied per-thread.**
- 
-This is the core philosophy behind `jseccomp`. We advocate for a tiered "Defense-in-Depth" model that combines process-wide safety with surgical thread-level containment:
- 
-1.  **Tier 1: Global Process Lockdown (The Production Baseline):** At application startup, we apply a minimal `Policy.NO_EXEC` filter to the entire JVM process. This permanently disables the ability to spawn a shell (`execve`), providing a massive security baseline with almost zero stability risk. 
-    *   **Battle-Tested in Production:** This isn't just theory. For years, industry leaders like **Elasticsearch** have used this exact approach to neutralize RCEs. By locking the process at the kernel level, even a flaw like Log4Shell is rendered toothless—the attacker simply cannot spawn a shell.
-2.  **Tier 2: Surgical Thread Containment (The Experimental Frontier):** For specific worker pools handling untrusted data (like a JSON parser or an image processor), we apply much stricter policies—blocking network access (`Policy.NO_NETWORK`) or even all file operations (`Policy.PURE_COMPUTE`).
- 
-While the process-level lockdown is a mature standard, `jseccomp` explores the "experimental frontier" of thread-scoped enforcement. By isolating these high-risk tasks into "Contained Executors," the worker thread enters a restricted state that it can never leave, while the main JVM threads (GC, JIT, API listeners) remain unconstrained.
- 
-### Stopping the "Shellcode" without Breaking the JIT
- 
-The biggest challenge with kernel-level JVM security is the JIT (Just-In-Time) compiler. The JVM must frequently call `mmap` or `mprotect` to mark memory as executable (`PROT_EXEC`) so it can run optimized code. 
- 
-A blunt Seccomp filter that blocks `PROT_EXEC` will crash the JVM instantly.
- 
-`jseccomp` solves this using **BPF argument inspection**. When a thread calls `mmap`, the kernel-level BPF filter doesn't just look at the syscall name; it inspects the memory protection flags. 
- 
-*   **Standard Mapping:** Allowed. The worker thread can allocate memory for data.
-*   **Executable Mapping (`PROT_EXEC`):** Blocked. If an attacker tries to inject binary shellcode and mark it as executable, the kernel returns `EPERM`.
- 
-Because this filter is applied only to the worker thread, the background JIT threads on the same JVM continue to function perfectly. We have surgically neutralized shellcode execution without affecting application performance.
- 
-*   **The ROP/JOP Reality Check:** It is important to note that while blocking `PROT_EXEC` prevents the introduction of *new* malicious binary code (shellcode), it is not a silver bullet. Sophisticated attackers may use **Return-Oriented Programming (ROP)** or **Jump-Oriented Programming (JOP)** to chain together existing, valid code snippets (gadgets) already present in the JVM's memory to achieve their goals. Modern systems rely on complementary defenses like **ASLR (Address Space Layout Randomization)** and **CFI (Control Flow Integrity)** to mitigate these risks. Seccomp is the lock on the door for new code; these other layers are the internal motion sensors.
 
-## Neutralizing Fileless Malware
- 
-In Part 1, we mentioned **fileless malware** using `memfd_create`. By creating an anonymous file in RAM and executing it via `execveat`, attackers bypass all disk-based security.
- 
-In a `jseccomp` environment, these syscalls are blocked by default in restricted policies. Even if an attacker gains code execution, the kernel physically prevents them from creating these memory descriptors or spawning new processes. They are trapped inside a purely computational sandbox.
+The Linux kernel provides a capability that is underutilized: **Seccomp filters can be applied per-thread.**
 
-## Seccomp vs. BPF-LSM: The Privilege Trade-off
+`jseccomp` is built around a two-tier model:
 
-If you are following the bleeding edge of Linux kernel security, you might be asking: *Why use Seccomp instead of the newer BPF-LSM (Linux Security Modules)?* 
+**Tier 1 — Global Process Lockdown:** At application startup, apply `Policy.NO_EXEC` to the entire JVM process via `ContainedExecutors.installOnProcess()`. This permanently disables shell spawning (`execve`, `execveat`, `fork`, `vfork`, `memfd_create`) for every thread, present and future.
 
-BPF-LSM is undeniably more powerful. While Seccomp only sees raw memory addresses and is vulnerable to Time-of-Check to Time-of-Use (TOCTOU) attacks when inspecting file paths or IP addresses, BPF-LSM hooks deep into the kernel *after* these objects are safely resolved. A BPF-LSM program can inspect the exact canonical file path (`/etc/passwd`) or destination IP and enforce surgical policies.
+This mimics the approach Elasticsearch has used in production for years — a minimal, process-wide filter that renders Log4Shell-style RCE toothless. The attacker can reach your vulnerable code; they simply cannot spawn a shell. The filter is permanent and cannot be undone.
 
-However, there is a massive architectural trade-off: **Privilege**.
+> [!WARNING]
+> **Experimental and Untested Code.** The entire `jseccomp` library — including both the process-wide (`installOnProcess()`) and thread-scoped (`wrap()`) mechanisms — is an **experimental proof-of-concept**. None of this code has been tested or validated for production environments. Do not use any part of this library in production.
 
-To load a BPF-LSM program into the kernel, the process requires high privileges (like `CAP_BPF` or `CAP_MAC_ADMIN`). A standard, secure JVM should never run with these capabilities. Therefore, to use BPF-LSM, you must deploy a highly privileged node agent (like a Kubernetes DaemonSet) to manage the policies on behalf of the application.
 
-Seccomp, on the other hand, allows an entirely unprivileged application to *self-restrict*. As long as the `NoNewPrivileges` flag is set, a worker thread can unilaterally strip away its own capabilities. `jseccomp` requires zero external agents, daemonsets, or cluster-level privileges—it is pure, developer-driven "shift left" security.
 
-## The Future: Seccomp + Landlock
+**Tier 2 — Surgical Thread Containment:** For specific worker pools handling untrusted data — JSON parsers, image processors, XML deserializers, report generators — apply stricter policies. `ContainedExecutors.wrap()` creates an `ExecutorService` decorator that installs the chosen policy on each worker thread before it runs its first task. These restrictions are permanent for the lifetime of that thread.
 
-While Seccomp is the ultimate "fast path" for blocking risky behaviors, it has one major limitation: it is blind to file paths. Because Seccomp only sees raw memory pointers, it is vulnerable to Time-of-Check to Time-of-Use (TOCTOU) attacks where an attacker swaps a file path string in memory just as the kernel is validating it.
-
-This is where **Landlock** comes in. Landlock is a relatively new Linux Security Module (LSM) that provides the deep, path-aware visibility of BPF-LSM but with the same **zero-privilege** profile as Seccomp. 
-
-Like Seccomp, Landlock relies on the `NoNewPrivileges` flag, allowing any thread to restrict its own access to the filesystem without needing cluster-level permissions or root access. In the near future, tools like `jseccomp` will combine both:
-* **Seccomp** to block risky *mechanisms* (like `execve`, `io_uring`, or executable memory).
-* **Landlock** to restrict *data access* (ensuring a thread can only read or write to specific, approved directories).
-
-Together, they provide a multi-layered defense that is both surgically precise and entirely unprivileged.
-
-## Internal Micro-segmentation: The Scalpel vs. The Shield
-
-A common question is: *If I use a cluster-wide tool like Kubescape with eBPF, do I still need thread-level containment?*
-
-The answer is **Defense-in-Depth**. Think of cluster-wide security as the "shield" protecting the perimeter of your building. It’s essential, but it’s blunt. `jseccomp` is the "scalpel" used for internal micro-segmentation. 
-
-External tools see your container as a black box; they don't know when a specific high-risk worker thread is processing untrusted data. `jseccomp` allows you to lock the individual safes inside the rooms of your building, applying restrictions based on internal application logic that an external orchestrator simply cannot see.
-
-## Beyond Java: The Portability Trade-off
-While the principles of syscall containment are universal, the implementation strategy—process-level vs. thread-level—depends heavily on your language's runtime.
-
-### Process-Level: Universally Portable
-Process-level enforcement (`installOnProcess`) works in virtually any language—Go, Rust, Python, Node.js, or C++. Because the filter applies to the entire OS process, it doesn't matter how the language manages its internal concurrency. If you block `execve` for the process, no part of that application can ever spawn a shell. This remains the strongest baseline for any backend service.
-
-### Thread-Level: The Scheduler Challenge
-Surgical, thread-scoped containment is much more selective. It relies on a stable 1:1 mapping between your application's concurrency primitive and the underlying OS thread.
-
-*   **Logical Choices (Rust, C++, Python, Node.js):** These environments use native OS threads or explicit worker processes. You can "poison" a specific worker thread with a restrictive seccomp filter and be confident that only the untrusted task will be affected.
-*   **The Go Problem (M:N Scheduling):** Go is a notable example where thread-scoped enforcement is currently impractical. Because Go uses an M:N scheduler, thousands of **goroutines** are multiplexed onto a small pool of OS threads. If you apply a seccomp filter to an OS thread to secure one specific goroutine, the Go runtime might context-switch a completely different, trusted goroutine onto that "poisoned" thread. The trusted goroutine would then instantly crash the moment it tries to perform a valid syscall that the previous goroutine was forbidden from using. 
-
-Without major refactoring to the Go runtime (or using performance-killing workarounds like `runtime.LockOSThread()`), surgical thread-level containment remains a specialized tool for runtimes with predictable thread affinity, like the JVM or Rust.
-
-## See It in Action
- 
-The `jseccomp` library provides a simple, idiomatic wrapper around standard Java `Executors`. 
- 
 ```kotlin
-// Wrap a standard thread pool with a "No Execution" policy
-val safeExecutor = ContainedExecutors.wrap(
+// Global lockdown at startup — all threads, forever
+ContainedExecutors.installOnProcess(Policy.NO_EXEC)
+
+// Per-pool surgical restriction for untrusted-data workers
+val imageProcessor = ContainedExecutors.wrap(
     Executors.newFixedThreadPool(4),
-    Policy.NO_EXEC
+    Policy.PURE_COMPUTE  // no network, no file open, no exec, no mmap(PROT_EXEC)
 )
-
-// This task can perform computation, but if it tries to spawn 
-// a shell or a reverse shell, the kernel will kill the action.
-safeExecutor.submit {
-    // Malicious payload here...
-    Runtime.getRuntime().exec("/bin/sh") // Throws ContainmentViolationException
-}
 ```
 
-### Try It Locally
- 
-You can reproduce this containment yourself using the included Docker environment.
- 
-1.  **Clone & Run:**
-    ```bash
-    git clone https://github.com/leanid/jseccomp.git
-    cd jseccomp
-    docker compose up -d
-    docker compose exec jseccomp ./gradlew test
-    ```
-*(Note: The container runs with `seccomp=unconfined` so our nested Java filters can be applied).*
+---
 
-When you explore the `demo` module, you'll see the kernel physically rejecting the attack. The JVM doesn't just fail to spawn the shell; the OS throws a hard `EPERM` (Operation not permitted), surfaced cleanly in Java:
-```text
-java.util.concurrent.ExecutionException: io.contained.ContainmentViolationException: 
-Thread attempted a prohibited system call (EPERM).
+## Stopping Shellcode Without Breaking the JIT
+
+The JVM's JIT compiler is the most obvious obstacle to strict memory protection. The JIT must call `mmap` with `PROT_EXEC` to allocate executable memory for optimized native code. A naive Seccomp filter blocking all `PROT_EXEC` will crash the JVM immediately.
+
+`jseccomp` solves this with **BPF argument inspection**. The BPF filter doesn't just check the syscall number — it checks the `prot` argument to `mmap`. Specifically, it loads the lower 32 bits of `prot` and tests whether the `PROT_EXEC` bit (0x4) is set:
+
+- `mmap(addr, len, PROT_READ | PROT_WRITE, ...)` → **Allowed.** Worker thread allocates data memory normally.
+- `mmap(addr, len, PROT_READ | PROT_EXEC, ...)` → **Blocked. EPERM.** Shellcode injection attempt stopped.
+
+Because this filter is applied only to the contained worker threads, the JIT threads running on the same JVM continue operating without restriction. We've surgically neutralized shellcode execution — thread-scoped, zero JVM stability impact.
+
+> **32-bit truncation note:** BPF operates on 32-bit words. The filter loads the lower 32 bits of `prot`. Since the Linux kernel casts the `prot` argument to `unsigned long` but only honors the standard lower bits defined in POSIX, this truncation is architecturally correct and matches kernel behavior.
+
+---
+
+## The Limits: ROP and JOP
+
+Blocking `mmap(PROT_EXEC)` prevents the *introduction of new malicious code* (shellcode). It does not stop an attacker who reuses *existing* code already mapped in the JVM's address space.
+
+**Return-Oriented Programming (ROP)** and **Jump-Oriented Programming (JOP)** chain together short existing code sequences ("gadgets") from the JVM binary, loaded libraries, and the JDK itself. These chains can implement arbitrary computation without ever calling `mmap` or `mprotect`. Seccomp cannot see CPU instruction flow — only syscalls.
+
+This is not a flaw in `jseccomp`; it is the honest limit of the syscall interception model. The complementary defenses are:
+- **ASLR** — randomizes the base addresses of loaded code, making gadget chain addresses unpredictable
+- **Stack Canaries** — detect stack corruption before a ROP chain can pivot
+- **CFI (Control Flow Integrity)** — hardware enforcement of valid branch targets (Intel CET Shadow Stacks, ARM BTI)
+
+Seccomp is the lock on the door for *new* code. ASLR + CFI are the internal sensors for gadget chain attacks.
+
+---
+
+## Seccomp + Landlock: The Complete Picture
+
+Seccomp's TOCTOU vulnerability for path inspection (it sees raw pointers, not resolved paths) means it cannot safely enforce "this thread may only read from `/app/data`."
+
+**Landlock** fills that gap. It provides path-aware filesystem access control at the inode level, with the same zero-privilege profile as Seccomp. `jseccomp` combines both:
+
+```kotlin
+val policy = Policy.builder()
+    .base(Policy.PURE_COMPUTE)
+    .allowJvmClasspath()          // allow lazy classloading (critical — see below)
+    .allowFsRead("/data/incoming")
+    .allowFsWrite("/data/processed")
+    .build()
+
+val executor = ContainedExecutors.wrap(
+    Executors.newFixedThreadPool(4),
+    policy
+)
 ```
 
-## Conclusion
- 
-The **Software Bill of Behavior (SBoB)** isn't just a conceptual ideal; it is a technically feasible engineering strategy. By moving from process-level boundaries to thread-scoped kernel enforcement, we can build dynamic applications that are secure by design.
- 
-Syscalls are the ultimate source of truth. By controlling them at the thread level, we ensure that even when our code is compromised, our system remains intact.
+**Critical JVM gotcha:** Landlock is applied at the OS thread level, permanently. If a restricted worker thread is the first to trigger the JVM's lazy classloading for a new class, the JVM will attempt to open the `.jar` or `.class` file from the classpath. If Landlock blocks that read, the JVM throws `NoClassDefFoundError`. `allowJvmClasspath()` pre-authorizes `java.home` and all classpath entries to prevent this. Calling it is not optional when using Landlock.
+
+Unlike Seccomp's `TSYNC` flag, Landlock's `landlock_restrict_self` only affects the calling thread — not existing JVM threads. True process-wide Landlock requires applying the ruleset *before* `execve`-ing the JVM (from a launcher), so all threads inherit it from birth.
+
+---
+
+## Internal Micro-segmentation: Scalpel vs. Shield
+
+A common question: *"If I already run Kubescape or Falco cluster-wide, why do I need thread-level containment?"*
+
+The answer is Defense-in-Depth, and the distinction is *visibility*.
+
+Cluster-wide tools see your container as a black box. They observe the process boundary — what syscalls the JVM process makes, what network connections it opens. They cannot see *which thread inside the JVM* is making those calls, *which library* is on the call stack, or *what data* triggered the behavior. A worker thread processing a malicious JSON payload looks identical to a thread processing a legitimate request from the outside.
+
+`jseccomp` applies restrictions based on internal application logic that no external orchestrator can see. The cluster-wide tool is the building's perimeter security; `jseccomp` is the lock on each individual safe inside.
+
+---
+
+## Beyond Java: The Scheduler Constraint
+
+The principles here are universal, but thread-level enforcement is only meaningful if there is a stable 1:1 mapping between your application's concurrency primitive and an OS thread.
+
+**Go goroutines:** Go's M:N scheduler multiplexes thousands of goroutines onto a small pool of OS threads. If you apply a Seccomp filter to an OS thread to sandbox one goroutine, the Go runtime may schedule a different, completely unrelated goroutine onto that "poisoned" thread — which then crashes the moment it attempts a syscall the previous goroutine was forbidden from using. `runtime.LockOSThread()` prevents scheduling but cripples Go's concurrency model. `GOMAXPROCS=1` doesn't help — the scheduler is still non-deterministic with respect to thread assignment. Thread-level containment is currently impractical for Go.
+
+**Java virtual threads (Project Loom, Java 21+):** Loom's virtual threads have exactly the same M:N scheduler problem as Go goroutines. `jseccomp` detects virtual threads at runtime and immediately throws `IllegalStateException` with a clear diagnostic message — preventing silent policy bypass on carrier threads. If you use `Executors.newVirtualThreadPerTaskExecutor()`, the library will tell you explicitly that it cannot safely contain those threads.
+
+```
+java.lang.IllegalStateException: Attempted to apply seccomp containment inside a virtual thread.
+Use a dedicated platform thread pool and install containment on its carrier threads instead.
+```
+
+**Rust and C++ with native OS threads:** These use predictable 1:1 thread models and are excellent candidates for thread-level containment. Process-level enforcement (`prctl(PR_SET_SECCOMP, ...)`) is universally portable regardless of thread model.
+
+---
+
+## The `seccomp=unconfined` Requirement Explained
+
+The Docker example in Part 3 requires running with `--security-opt seccomp=unconfined`. This warrants an explanation, because the instruction to disable seccomp in a security-focused demo is counterintuitive.
+
+Linux enforces a **monotonicity invariant** for seccomp filters: each new filter can only be *more restrictive* than the existing one, never more permissive. When Docker applies its default seccomp profile to a container at startup, that profile becomes the floor. Any attempt by the JVM inside the container to install its own (different) seccomp filter would fail, because the kernel cannot verify that the new filter is strictly a subset of the existing one.
+
+Running with `seccomp=unconfined` removes the host-provided floor, allowing `jseccomp` to install its own filters from a clean state. In production, you would instead provide a custom Docker seccomp profile that is a superset of everything `jseccomp` needs to block — but that is an operational concern, not a fundamental limitation.
+
+---
+
+While process-wide lockdown (Tier 1) is a proven conceptual model (demonstrated by Elasticsearch's native lockdown mechanisms), its implementation in `jseccomp` is entirely experimental. 
+
+Similarly, thread-scoped surgical containment (Tier 2) provides a targeted proof-of-concept isolation boundary. However, the entire library — including both process-wide and thread-scoped modes — remains an **untested research experiment** that should not be used in any production environments.
+
+*Next up: Part 3: The Attacks jseccomp Stops*
+
+

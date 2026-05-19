@@ -1,88 +1,174 @@
-# Generating an SBoB for Java: A Blueprint for the Future
+# Generating an SBoB for Java: Where We Are and What's Missing
 
-In [Part 1](#), we explored the transition from compositional transparency (SBOM) to behavioral transparency (SBoB) and how eBPF makes observing runtime behavior practical. In [Part 2](#), we applied these concepts to the JVM, using Seccomp and Landlock to neutralize threats like fileless malware and shellcode.
+> **Series overview:** This is Part 4 of a 4-part series on behavioral security for cloud-native applications.
 
-Now, we face the operational reality: How do we actually create the Bill of Behavior? Let’s conduct a thought experiment on generating a meaningful SBoB for a real-world Spring Boot application.
+
+Parts 1–3 established the *enforcement* side: what a Software Bill of Behavior is, how the kernel primitives enforce it, and what attacks they concretely stop.
+
+Now the harder question: **how do you actually create the contract?**
+
+This is where honesty is required. The generation tooling is immature, the standards are forming, and the current best path is narrower than you'd like. Let's map it precisely.
+
+---
 
 ## Static vs. Dynamic: The Honest Trade-off
 
-When defining behavior, the first instinct is to rely on static analysis. For isolated, well-defined libraries, static analysis works well. We can analyze a JSON parser's bytecode and confidently assert it never calls `java.net.Socket`.
+The first instinct is static analysis. For an isolated, well-defined library — a pure JSON parser, a cryptography primitive — static analysis works reasonably well. We can analyze bytecode, trace call graphs, and assert that `org.json:json` never calls `java.net.Socket`.
 
-However, for a full-scale Java application, static analysis faces an uphill battle. Modern frameworks rely heavily on reflection, dynamic proxies, Java Native Interface (JNI), and configuration-driven dispatch. A static analyzer cannot definitively prove what a Spring Boot application will do at runtime because the behavior is constructed dynamically based on classpath scanning and configuration files. 
+For a full-scale Java application, static analysis runs into a wall. Modern frameworks rely on:
+- **Reflection** for dependency injection and dynamic dispatch
+- **Dynamic proxies** for AOP (Spring transactions, interceptors)
+- **JNI** for native bridge libraries
+- **Configuration-driven dispatch** where the active beans depend on environment variables at runtime
 
-### The Platform Variability Problem
-Even more challenging is the **JVM inconsistency**. Because the SBoB is enforced at the kernel level (syscalls), it is inextricably tied to the underlying runtime. 
-*   **JVM Versions:** Different versions of the JVM (e.g., Java 17 vs Java 21) may use entirely different system calls to achieve the same functionality (like memory allocation or thread management). 
-*   **Compiler Differences:** The syscall profile of a standard OpenJDK JIT-compiled application will look radically different from a GraalVM Native Image binary.
+A static analyzer cannot definitively determine what a Spring Boot application will do at startup, because the behavior is constructed dynamically from classpath scanning and configuration files. The set of active endpoints, enabled features, and loaded providers isn't known until the context is initialized.
 
-This means the same library, with the exact same application code, will require different SBoBs depending on the specific VM and compiler version it runs on. A "static" SBoB for a library is therefore an approximation at best.
+**Dynamic analysis** — observing the application as it runs — avoids these problems but introduces its own: coverage. No test suite exercises every possible state. Kafka consumers, scheduled jobs, error-handling paths, and admin endpoints are routinely absent from integration test coverage.
 
-Conversely, dynamic analysis (observing the application as it runs) suffers from the coverage problem. No test suite exercises every possible state space or error-handling path.
+The conclusion is unavoidable: generating a meaningful SBoB requires combining static analysis, dynamic observation, and manual review. No single approach is sufficient.
 
-The conclusion is unavoidable: we will likely rely on a combination of static analysis, dynamic observation, and manual review to build a BoB for behavioral security. This is actively developing at the moment, you may see crucial updates at billofbehavior.com
+---
 
-## The Dynamic Generation Blueprint
+## The Three-Step Blueprint
 
-To generate a pragmatic SBoB for a complex application, we can follow a three-step blueprint:
+Here is the most practical path available today:
 
-**Step 1: Generated SBoBs per Dependency**
-In a perfect world, library vendors would ship a BoB. In reality, we won't have that anytime soon. Instead, we must generate them ourselves. At the library scope, this is tractable. We need a way to map abstract Java bytecode execution paths to concrete Linux syscall boundaries. 
+### Step 1: Generate Per-Dependency SBoBs
 
-A practical way to start this "exercise" today is by using tools like **Inspektor Gadget**. By running a library through a harness that forces execution down all branches while tracing with the `trace_exec` or `trace_open` gadgets, you can begin to catalog the resulting syscall profile. This can be combined with existing feedback-directed fuzzing tools like **JQF (Java QuickCheck Foundation)**, random test generators like **Randoop**, or AI-driven generators like **Diffblue Cover**. By isolating this generation at the dependency level, we create a baseline. Without this, trying to trigger every possible branch across a full application to map behavior is unrealistic.
+At the library scope, behavioral analysis is tractable. A library has a finite, testable API surface that doesn't depend on the caller's configuration.
 
-**Step 2: Dynamic Coverage for the App**
-We then observe the application's behavior dynamically to capture the framework-level wiring and emergent behavior. This requires a multi-layered approach to maximize coverage:
-*   **Integration Tests:** Exercising known business logic.
-*   **Chaos Inputs:** Feeding malformed or unexpected data to trigger error-handling paths.
-*   **Production Shadow Traffic Recording:** Replaying real-world traffic in a controlled staging environment.
-*   **API Fuzzing:** Using tools like **EvoMaster**, which uses evolutionary algorithms to automatically generate test cases. It explores your REST API endpoints, generates complex inputs, and learns from responses to maximize code coverage.
+The approach: instrument each library through a comprehensive test harness, forcing execution down all branches, while tracing at the syscall level with tools like **Inspektor Gadget** (`trace_exec`, `trace_open` gadgets). The resulting syscall profile is the library's BoB baseline.
 
-*(It is critical to explicitly acknowledge the blind spots here: REST fuzzers won't trigger asynchronous behaviors driven by Kafka consumers, scheduled background jobs, file watchers, or administrative endpoints. These require dedicated, workload-specific observation.)*
+To maximize branch coverage of libraries: use feedback-directed fuzzing (**JQF**, **Jazzer**), random test generators (**Randoop**), and evolutionary API fuzzing (**EvoMaster**). The goal is to exercise every code path through the library's public API under adversarial and edge-case inputs.
 
-**Step 3: Merge, Then Prune**
-We combine the static library SBoBs with the dynamic application profile. However, this step introduces a critical architectural challenge.
+This generates a per-dependency BoB: *"This JSON parser calls `openat`, `read`, `mmap`, `brk`. It never calls `socket`, `connect`, `execve`, or `memfd_create`."*
+
+### Step 2: Dynamic Coverage for the Application
+
+Layer dynamic observation on top of the library baselines to capture framework-level behavior:
+
+- **Integration tests:** Known business flows under real framework initialization
+- **Chaos inputs:** Malformed and unexpected data to exercise error-handling paths
+- **Production shadow traffic:** Replay real-world requests in a controlled staging environment against a BoB-instrumented instance
+- **API fuzzing:** EvoMaster or similar tools that use evolutionary algorithms to generate complex inputs and maximize endpoint coverage
+
+**Acknowledge the blind spots explicitly.** REST fuzzers don't trigger:
+- Kafka/RabbitMQ consumer paths
+- Scheduled jobs (`@Scheduled`, Quartz)
+- File watchers and inotify-driven processing
+- JMX and admin endpoints
+- Shutdown hooks
+
+These require dedicated, workload-specific observation campaigns separate from API coverage.
+
+### Step 3: Merge, Then Prune
+
+Combine the library baselines (Step 1) with the application observation profile (Step 2). This merge is where most real-world BoB implementations fail.
+
+---
 
 ## The Merge Fallacy
 
-The most common mistake in defining security capabilities is the naive merge. 
+The most common mistake in BoB generation is the naive merge.
 
-If you simply concatenate the SBoBs of all dependencies, you produce a bloated super-permission set. Consider the AWS SDK. The SDK's static SBoB correctly declares that it *may* open outbound connections to S3, DynamoDB, and SQS. 
+If you concatenate the SBoBs of all dependencies, you produce a bloated super-permission set. Consider the AWS SDK. The SDK's BoB correctly declares that it *may* open outbound connections to S3, DynamoDB, SQS, Kinesis, and dozens of other services.
 
-If your application only uses the SDK to write to DynamoDB, but you naively merge the SDK's SBoB into your application's profile, you have just granted your application permission to talk to S3 and SQS. You have re-introduced exactly the broad, permissive boundaries that SBoB was supposed to eliminate.
+If your application only uses DynamoDB — and DynamoDB is the only endpoint ever observed in production — but you naively merged the full SDK BoB, you have just granted your application permission to talk to S3, SQS, and Kinesis. You have re-introduced exactly the broad, permissive permissions that BoB was supposed to eliminate.
 
-A useful SBoB must represent the application's *actual* behavior, not the theoretical maximum behavior of its dependencies. This means the merged profile must be aggressively pruned.
+**A useful SBoB must represent the application's *actual* behavior, not the theoretical maximum behavior of its dependencies.** The merged profile must be aggressively pruned to what dynamic observation actually confirmed.
 
-## Lazy Init, Hot Reload, Dynamic Config — the Honest Limits
+This pruning is technically hard. It requires correlating library-level call sites with application-level execution paths, then computing which capability grants are reachable given the pruned call graph. This tooling does not exist as a production-ready product today.
 
-To make enforcement practical, we rely on establishing a steady-state. Kubernetes readiness probes give us a clean boundary: there is an initialization phase (where behavior is complex and broad) and a steady-state phase (where behavior should be narrow and predictable).
+---
 
-This model forces us to acknowledge several honest limitations and anti-patterns in modern Java development:
+## The Limits: Lazy Init, Hot Reload, Dynamic Config
 
-*   **Lazy Initialization:** Deferring the initialization of heavy components (like establishing database connection pools or warming caches) until the first tenant logs in—hours after startup—is fundamentally incompatible with tight steady-state SBoB enforcement. In this model, lazy initialization is an anti-pattern.
-*   **Dynamic Configuration:** Hot-reloading configurations, toggling feature flags, or pushing hot deploys break the steady-state assumption. If behavior can change arbitrarily without a restart, creating a restrictive, static behavioral contract is nearly impossible.
+Making BoB enforcement practical requires establishing a stable steady-state. Kubernetes readiness probes give a clean boundary: behavior during initialization is broad and complex; after the first successful health check, behavior should be narrow and predictable.
 
-These are the current limits of the approach. Adopting strict behavioral contracts requires architectural discipline.
+But several common Java patterns break this assumption:
 
-## GraalVM as the Best-Case PoC Platform
+**Lazy initialization:** Deferring startup of heavy components (connection pools, cache warmup) until the first tenant request — potentially hours after startup — means the "steady-state" BoB must still include the initialization-phase behaviors indefinitely. In a strict BoB model, lazy initialization is an anti-pattern.
 
-If standard JVMs make generating and pruning an SBoB incredibly difficult, where do we prove the concept? **GraalVM Native Image.**
+**Dynamic configuration and hot reload:** Feature flags, runtime config pushes, and hot deploys break the steady-state assumption. If behavior can change arbitrarily without a restart, creating a restrictive static behavioral contract is nearly impossible.
 
-GraalVM is not the only path forward, but it is currently the cleanest platform to prove the concept and the strongest argument for a Proof of Concept (PoC).
+These are real constraints that require architectural discipline. **For the PoC work ahead, the answer is GraalVM** — it sidesteps most of these problems by making the binary static. Standard JIT-compiled applications are the harder next step.
 
-**Dead Code Elimination (DCE)**
-GraalVM's aggressive Dead Code Elimination is not primarily a security feature, but it meaningfully shrinks the attack surface. More importantly, DCE provides a mechanical basis for pruning the "Merge Fallacy" permissions. If every capability in a library's SBoB carries stacktrace attribution, and GraalVM's compiler statically eliminates the code at the tip of that stacktrace (because your app doesn't use S3), the associated capability can be mechanically, confidently dropped from the final SBoB. While this exact tooling does not exist yet, GraalVM provides the foundational architecture to build it. This is precisely the PoC opportunity.
+---
 
-**Reachability Metadata**
-The GraalVM ecosystem has spent years solving the dynamic proxy, reflection, and JNI resolution problem through Reachability Metadata. Instead of reinventing how to trace dynamic behavior, a robust SBoB generation tool can piggyback on this maturity.
+## GraalVM: The Clearest PoC Platform
 
-**eBPF Visibility via Native Binaries and DWARF Symbols**
-Profiling a standard JVM with eBPF is incredibly noisy because of the JIT compiler. The JIT constantly executes syscalls like `mmap` (requesting `PROT_EXEC` memory) and `mprotect` to allocate, optimize, and manage dynamically generated bytecode. A GraalVM native binary bypasses this entirely, acting like a standard, predictable Linux executable. 
+If the goal is to prove that automated SBoB generation is architecturally feasible, GraalVM Native Image is currently the strongest platform to attempt it on.
 
-While DWARF support in GraalVM is still an emerging area—aligning symbols perfectly with kernel-level eBPF tracing tools remains a complex challenge today—it represents the most promising path toward deep, clean introspection. By treating the application as a static binary, we move closer to the "golden image" of behavioral security.
+### Dead Code Elimination as a Pruning Mechanism
 
-Furthermore, this AOT (Ahead-of-Time) approach allows the application to fully benefit from hardware-level **Control Flow Integrity (CFI)** features—such as **Intel CET (Shadow Stacks)** and **ARM BTI (Branch Target Identification)**—which are notoriously difficult to implement in dynamic JIT-compiled runtimes that must constantly modify executable memory. GraalVM transforms the JVM from a dynamic moving target into a hardened, static fortress that the CPU can physically protect.
+GraalVM's Ahead-of-Time (AOT) compiler performs aggressive Dead Code Elimination (DCE). If your application uses the AWS SDK but never calls the S3 client, the S3 code paths — and their associated syscall behaviors — are eliminated from the binary at compile time.
 
-**The Counter-Argument**
-The obvious counter-argument is: *"Most Java applications don't run on GraalVM Native Image yet."*
+This is not primarily a security feature, but it has a direct BoB implication: **DCE provides a mechanical basis for pruning the Merge Fallacy.** In a hypothetical future tooling pipeline:
 
-This is true. But the demand for rigorous security is becoming another serious reason to reconsider. Teams that dismiss GraalVM outright are implicitly stating they don't prioritize security hardening. Some engineering organizations will. Those teams are the early adopters and the first customers for this level of behavioral enforcement.
+1. Each library's BoB capability carries stacktrace attribution: *"This `connect()` call is reachable via `S3Client.putObject() → SdkHttpClient.execute() → ...`"*
+2. GraalVM's compiler statically determines that `S3Client` is not instantiated in the application's call graph
+3. DCE eliminates `S3Client` code from the binary
+4. The associated `connect()` capability is mechanically dropped from the merged BoB
+
+This exact tooling does not exist yet. What GraalVM provides is the foundational architecture to build it — a static, closed-world binary where unreachable code is genuinely absent, not just unlikely to execute.
+
+> *Oligo Security is doing something adjacent in the JIT world — library-level runtime profiling that correlates observed behaviors with library attribution. Their approach relies on dynamic observation rather than static elimination, but it's the closest existence proof that this category of tooling is viable.*
+
+### Reachability Metadata
+
+GraalVM's [Reachability Metadata](https://www.graalvm.org/latest/reference-manual/native-image/metadata/) solves the reflection, dynamic proxy, and JNI resolution problem — the primary reason static analysis fails on standard JVM applications. The metadata tells the AOT compiler which reflective paths are actually used, enabling correct DCE even for dynamically dispatched code.
+
+An SBoB generation tool targeting GraalVM could piggyback on this metadata maturity rather than solving dynamic dispatch resolution from scratch.
+
+**The limitation to state clearly:** Reachability metadata tells GraalVM what code to *include*. It doesn't tell you what that code *does* at the kernel level. You still need syscall-level observation; GraalVM just makes the target more tractable.
+
+### eBPF Profiling: Cleaner Than JIT
+
+Profiling a standard JVM with eBPF-based syscall tracers is extremely noisy. The JIT compiler constantly calls `mmap(PROT_EXEC)`, `mprotect`, and related syscalls to allocate, optimize, and garbage-collect compiled code. Distinguishing JIT-internal syscalls from application-level ones requires filtering that is currently manual and error-prone.
+
+A GraalVM native binary eliminates this noise almost entirely. The binary behaves more like a standard C executable — startup syscalls are predictable, steady-state syscalls are stable, and there are no ongoing JIT recompilation events.
+
+**The gap to acknowledge:** DWARF debug symbol support in GraalVM Native Image is still maturing. Specifically, **inlined functions lose call-site attribution** — a function inlined by the AOT compiler does not appear as a distinct frame in the symbol table, making it impossible to attribute syscalls to the original source-level call site via `uprobes`. This directly limits the precision of a BoB generation tool that relies on stacktrace attribution of syscalls. You can observe the syscall; attributing it to the exact library-level call site is harder than it sounds.
+
+This is the most significant open engineering challenge for GraalVM-based BoB generation today.
+
+### Control Flow Integrity
+
+GraalVM AOT compilation positions native Image binaries to benefit from hardware CFI features — **Intel CET (Shadow Stacks, IBT)** and **ARM BTI (Branch Target Identification)** — that are extremely difficult to support in JIT environments where executable code is constantly being modified.
+
+These features enforce that the CPU only branches to valid, declared targets — making ROP/JOP gadget chains dramatically harder to execute even if an attacker achieves arbitrary write. The JIT compiler's requirement to frequently modify executable memory conflicts fundamentally with the kernel's ability to enforce control flow integrity at that memory.
+
+GraalVM's static compilation *positions* the application to benefit from these protections. Whether full CET/BTI is enabled depends on the GraalVM version, the target OS, and the toolchain. As of 2025, GraalVM's CET support is in active development — treat this as "closer than standard JVM, not yet production-complete."
+
+---
+
+## The Counter-Argument and Its Limits
+
+The obvious objection: *"Most Java applications don't run on GraalVM Native Image."*
+
+True. GraalVM has real costs: longer build times, more complex debugging (no runtime reflection, more explicit configuration), ecosystem compatibility issues (libraries that don't yet provide reachability metadata), and cold-start trade-offs in some workloads.
+
+These are legitimate engineering objections, not security denialism. Many organizations have rational reasons to stay on JIT-compiled JVMs.
+
+The point is narrower: for the *PoC problem* of "can we generate a high-confidence, pruned SBoB automatically," GraalVM is currently the clearest path because it eliminates the hardest sources of noise. Standard JIT-compiled SBoB generation is the harder next problem — not a reason to abandon the idea, but a reason to sequence the work correctly.
+
+---
+
+## What Comes Next
+
+While the underlying Linux kernel primitives (Seccomp and Landlock) are production-ready, the JVM-level integration in `jseccomp` is entirely experimental and untested. The entire codebase is a research proof-of-concept.
+
+
+If you are working on:
+- Syscall attribution tooling for GraalVM native binaries
+- Automated per-dependency BoB generation using Inspektor Gadget + fuzzing pipelines
+...
+
+...the author is interested in collaborating on these engineering challenges.
+
+- **Do not deploy process-wide lockdowns with this library yet:** The process-wide lockdown capability (`installOnProcess`) in `jseccomp` is **not production-ready** and has not been tested sufficiently. For now, restrict the library's use to thread-scoped containment of untrusted worker pools in staging/non-production environments.
+- **Instrument your CI pipeline with Inspektor Gadget** and start profiling your application's syscall footprint — regardless of whether you run GraalVM. Every application benefits from knowing its actual runtime footprint.
+- **Watch and contribute to the emerging Software Bill of Behavior (BoB) specification:** Visit [billofbehavior.com](https://billofbehavior.com) and follow the open specification work at [github.com/k8sstormcenter/bob](https://github.com/k8sstormcenter/bob).
+
+
+
