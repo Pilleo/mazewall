@@ -3,10 +3,11 @@ services:
     build: .
     volumes:
       - .:/workspace
-    # Use our custom seccomp profile that whitelists filter stacking
-    # rather than running completely unconfined in production.
-    security_opt:
-      - seccomp=./docker-seccomp.json
+    # Workaround for Podman: Use annotation instead of security_opt
+    # to prevent Docker Compose from reading and passing the raw JSON string
+    # which causes an ENAMETOOLONG "file name too long" error in Podman.
+    annotations:
+      io.podman.annotations.seccomp: ${PWD}/docker-seccomp.json
     working_dir: /workspace
     # Default to keeping the container alive for execution
     command: tail -f /dev/null
