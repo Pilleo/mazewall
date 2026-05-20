@@ -116,8 +116,60 @@ A potential architectural alternative for OCI specifications would be to permit 
 
 ---
 
+## 5. The `prctl(2)` Double-Edged Sword: Requirements, Attack Surface, and Mitigations
 
-## 5. Escaping Process-Level Containment
+The `prctl(2)` (Process Control) system call is central to the setup and execution of `jseccomp` sandboxes. However, because of its incredibly broad capability set, it represents a unique security-critical attack surface.
+
+### A. Why `prctl(2)` is Technically Required
+Even if `jseccomp` only used the modern `seccomp(2)` system call to load and stack BPF filters, the library still cannot function without `prctl(2)` due to Linux kernel invariants:
+1. **`PR_SET_NO_NEW_PRIVS`:** To prevent privilege escalation attacks, the kernel strictly blocks unprivileged processes from loading seccomp filters or Landlock rules unless `PR_SET_NO_NEW_PRIVS` is set to `1` beforehand. This transition is accomplished solely via `prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0)`.
+2. **Seccomp State Verification:** To verify that the seccomp filters are properly loaded and stacked in mode 2, `jseccomp` queries the kernel state at initialization using `prctl(PR_GET_SECCOMP, 0, 0, 0, 0)`.
+3. **Legacy Kernel Stacking:** On pre-Linux 3.17 kernels where the modern `seccomp(2)` system call is absent, calling `prctl(PR_SET_SECCOMP, SECCOMP_MODE_FILTER, ...)` remains the only mechanism to load BPF filters.
+
+### B. The Attack Surface: Broad Process Control Operations
+`prctl(2)` acts as a generic "Swiss Army knife" multiplexer for process and thread properties. If an attacker achieves native Arbitrary Code Execution (ACE) inside a sandboxed thread and `prctl(2)` is left completely allowed by the active policy, they can manipulate highly sensitive kernel parameters:
+*   **Virtual Memory Layout (`PR_SET_MM`):** Allows modifying specific memory-mapping boundaries of the running process (e.g. text/data segment addresses).
+*   **Tree & Process Interception (`PR_SET_CHILD_SUBREAPER`):** Allows the thread to declare itself a subreaper, altering how orphaned child processes are inherited.
+*   **Resource & Behavior Management (`PR_SET_TSC` / `PR_SET_THP_DISABLE`):** Disables or enables CPU time-stamp counters or Transparent Huge Pages.
+
+**Kernel Invariant Safety:** Note that `prctl` does *not* expose options to disable active seccomp filters or unset `no_new_privs` once enabled. The kernel enforces these transitions as strictly monotonic and irreversible.
+
+### C. Mitigation Strategies in `jseccomp`
+To neutralize the attack surface of generic process control without breaking initialization or nesting, `jseccomp` employs two primary mitigation strategies:
+
+#### Strategy 1: Post-Installation System Call Blocking
+In strict, non-stackable policies (such as `Policy.PURE_COMPUTE`), `prctl(2)` is explicitly blocked at the system call level. Because `no_new_privs` and the BPF filters are applied *during* thread executor setup, the thread successfully configures its sandbox first. Once the final BPF filter is loaded, the `prctl(2)` system call becomes blocked permanently for subsequent task execution, completely eliminating this attack surface:
+```kotlin
+// Inside Policy.kt
+val PURE_COMPUTE = Policy.builder()
+    .block(Syscall.IOCTL, Syscall.PRCTL) // prctl is permanently blocked after setup
+    ...
+```
+
+#### Strategy 2: BPF Argument Inspection (Fine-Grained Whitelisting)
+For policies where thread-level stack-nesting is still required (allowing worker threads to establish their own child sandboxes), standard `prctl` can be permitted but strictly constrained via BPF argument inspection. 
+
+Instead of blocking the system call outright, the seccomp-BPF filter inspects the first argument (`option`, which maps to `args[0]` in `seccomp_data`):
+*   **Allow** if `args[0]` matches `PR_SET_NO_NEW_PRIVS` (`38`), `PR_GET_NO_NEW_PRIVS` (`39`), or `PR_GET_SECCOMP` (`21`).
+*   **Block** with `EPERM` for any other option values (e.g., `PR_SET_MM` or `PR_SET_CHILD_SUBREAPER`).
+
+### D. JVM Internal Usage of `prctl(2)` and Diagnostic Implications
+
+It is critical to recognize that the HotSpot JVM itself invokes `prctl(2)` internally for non-critical runtime operations:
+1. **Thread Renaming (`PR_SET_NAME` / `PR_GET_NAME`):** The JVM calls `prctl(PR_SET_NAME, ...)` inside `os::set_native_thread_name` whenever a Java thread is renamed (e.g., via `Thread.currentThread().setName(...)`) or during internal thread pool management.
+2. **Transparent Huge Pages (`PR_SET_THP_DISABLE`):** GC threads may query or disable Transparent Huge Pages (THP) for specific allocation arenas.
+
+#### Impact of Complete `prctl` Blocking
+When using **Strategy 1** (completely blocking the `prctl` syscall after setup, such as in `Policy.PURE_COMPUTE`):
+* **No JVM Crashes:** Fortunately, the HotSpot JVM executes `prctl(PR_SET_NAME)` and other process control options defensively and silently discards the return value. A blocked `prctl` call will return `EPERM` safely without crashing the JVM.
+* **Loss of OS-Level Diagnostics:** Any thread renaming performed *after* the sandbox is armed will fail silently. As a result, native OS-level tracing tools (`top -H`, `htop`, `/proc/self/task/<tid>/comm`) and Java diagnostic thread dumps (`jstack`) will continue to show the thread's *original* name from before sandboxing, which can hinder debugging.
+
+#### Recommendation for Diagnostic-Critical Environments
+If maintaining accurate OS-level thread names is a production requirement, developers should avoid Strategy 1. Instead, they should utilize **Strategy 2 (BPF Argument Inspection)** to whitelist `PR_SET_NAME` (15) and `PR_GET_NAME` (16) alongside `PR_SET_NO_NEW_PRIVS` (38), while keeping hazardous process-manipulation options (like `PR_SET_MM`) blocked.
+
+---
+
+## 6. Escaping Process-Level Containment
 
 Even with process-wide `NO_EXEC`, an attacker with ACE can theoretically escape to the host OS if other security layers are missing:
 
@@ -127,7 +179,7 @@ Even with process-wide `NO_EXEC`, an attacker with ACE can theoretically escape 
 
 ---
 
-## 6. Defense-in-Depth Requirements
+## 7. Defense-in-Depth Requirements
 
 To make seccomp an effective barrier, the host environment **must** implement these complementary controls:
 
@@ -137,7 +189,7 @@ To make seccomp an effective barrier, the host environment **must** implement th
 
 ---
 
-## 7. Technical Safeguards: Argument Inspection
+## 8. Technical Safeguards: Argument Inspection
 
 `jseccomp` uses BPF argument inspection to provide fine-grained control over critical syscalls, allowing the JVM to function while blocking malicious actions.
 
@@ -150,7 +202,7 @@ We inspect the `flags` argument of `clone`. We allow `clone` only if it includes
 
 ---
 
-## 8. HotSpot JVM Whitelist Risks (Safepoints & GC Deadlocks)
+## 9. HotSpot JVM Whitelist Risks (Safepoints & GC Deadlocks)
 
 A critical technical risk of thread-scoped seccomp sandboxing in the JVM is **Safepoint and GC deadlock**. 
 
@@ -169,7 +221,7 @@ If a custom `jseccomp` policy aggressively blocks any of these coordination sysc
 
 ---
 
-## 9. The Trapping Architecture: Native `SIGSYS` Signal Interception
+## 10. The Trapping Architecture: Native `SIGSYS` Signal Interception
 
 The default mode of `jseccomp` is to return `SECCOMP_RET_ERRNO` with `EPERM` (1) upon a policy violation. While robust and secure, detecting these violations in Java relies on parsing exception String messages (e.g. "Operation not permitted"), which is fragile and locale-sensitive.
 
@@ -183,17 +235,17 @@ The ultimate production roadmap for the library is to pivot to a native **`SECCO
        │
        ▼ (Intercepted by Native Signal Handler)
 [ C Signal Handler (FFM/sigaction) ]
- ├── 1. Capture ucontext_t (registers, rip, rax, si_syscall)
- ├── 2. Write structured, async-signal-safe audit log to stderr/disk
- ├── 3. Modify ucontext_t context:
- │      ├── Set rax = -EPERM (simulate syscall error return)
- │      └── Advance rip += 2 (skip the 2-byte syscall instruction)
- └── 4. Set thread-local violation flag
-       │
-       ▼ (Return from Signal Handler)
+  ├── 1. Capture ucontext_t (registers, rip, rax, si_syscall)
+  ├── 2. Write structured, async-signal-safe audit log to stderr/disk
+  ├── 3. Modify ucontext_t context:
+  │      ├── Set rax = -EPERM (simulate syscall error return)
+  │      └── Advance rip += 2 (skip the 2-byte syscall instruction)
+  └── 4. Set thread-local violation flag
+        │
+        ▼ (Return from Signal Handler)
 [ Java Task Execution Resumes ]
- ├── Syscall returns EPERM in Java
- └── Java raises IOException → jseccomp reads thread-local flag → Throws deterministic exception
+  ├── Syscall returns EPERM in Java
+  └── Java raises IOException → jseccomp reads thread-local flag → Throws deterministic exception
 ```
 
 ### Technical implementation requirements for `SIGSYS`:
@@ -203,7 +255,7 @@ The ultimate production roadmap for the library is to pivot to a native **`SECCO
 
 ---
 
-## 10. Known Limitations & Caveats
+## 11. Known Limitations & Caveats
 
 ### Inherited File Descriptors
 Seccomp filtering applies to *syscalls*, not *data structures*. If a thread inherits an open socket file descriptor (or receives one via `SCM_RIGHTS`) before the `NO_NETWORK` policy is applied, it can still call `recvmsg`, `recvfrom`, `write`, or `writev` on that existing descriptor. `NO_NETWORK` prevents the creation of *new* sockets (`socket`, `connect`, `bind`, `accept`), but does not block generic read/write syscalls which are essential for standard JVM I/O.
@@ -217,7 +269,7 @@ Seccomp-BPF and Landlock are Linux-only features. The library safely performs an
 
 ---
 
-## 11. Information Leaks (Side Channels)
+## 12. Information Leaks (Side Channels)
 
 Seccomp restricts **actions** (syscalls), but it does not provide **data isolation**. 
 *   A contained thread can still read any static variable or heap object it can reference.
@@ -235,7 +287,7 @@ Seccomp restricts **actions** (syscalls), but it does not provide **data isolati
 
 ---
 
-## 12. Kubernetes (K8s) Production Deployment Pattern
+## 13. Kubernetes (K8s) Production Deployment Pattern
 
 To run a containerized JVM using `jseccomp` securely inside a Kubernetes cluster, you must avoid running pods with privileged security contexts (e.g. `privileged: true` or running unconfined). 
 
@@ -286,6 +338,23 @@ In your application’s Pod or Deployment manifest, specify the custom profile w
 
 Additionally, you **must** configure `allowPrivilegeEscalation: false`. This ensures the container sets `PR_SET_NO_NEW_PRIVS`, which is a kernel requirement for unprivileged threads to load/stack their own nested seccomp filters.
 
+> [!WARNING]
+> **The `allowPrivilegeEscalation` (NoNewPrivs) Trap:**
+> While `allowPrivilegeEscalation: false` is required for unprivileged seccomp stacking, it completely disables `setuid`/`setgid` bits and Linux File Capabilities during execution. Because this breaks legacy tools, vanilla Docker and Kubernetes **do not** enable this by default (for backward compatibility). However, modern hardening frameworks (like K8s "Restricted" Pod Security Standards or OpenShift `restricted-v2` SCC) **do** enforce it.
+> 
+> **What breaks when this is enabled?**
+> 1. **`sudo`, `su`, `doas`:** Scripts attempting to elevate privileges using `sudo` from a non-root user will fail (`sudo: effective uid is not 0`).
+> 2. **File Capabilities:** Non-root binaries that rely on `setcap` (e.g., a web server using `cap_net_bind_service=+ep` to bind port 80) will get `Permission denied`.
+> 3. **Legacy Networking Tools:** `ping`, `traceroute`, or `tcpdump` run by non-root users will fail (`socket: Operation not permitted`) because they rely on `setuid` or file capabilities to open raw sockets.
+> 
+> **How to audit your container image:**
+> Before enabling `allowPrivilegeEscalation: false`, run these commands inside your image to identify potential landmines:
+> *   `find / -type f \( -perm -4000 -o -perm -2000 \) 2>/dev/null` (Finds binaries that rely on `setuid`/`setgid`)
+> *   `getcap -r / 2>/dev/null` (Finds binaries relying on file capabilities)
+> 
+> If your application relies on executing any of the returned binaries, turning on this security context will crash those specific workflows.
+
+
 ```yaml
 apiVersion: apps/v1
 kind: Deployment
@@ -312,7 +381,7 @@ spec:
           runAsUser: 10001
           capabilities:
             drop:
-            - ALL
+              - ALL
 ```
 
 ### Compatibility with K8s Pod Security Standards (PSA)
