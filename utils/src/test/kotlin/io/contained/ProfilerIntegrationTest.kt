@@ -37,8 +37,10 @@ class ProfilerIntegrationTest {
 
         // Assert that the stackProfile contains the trace event and its stack trace has our test class name!
         assertTrue(bob.stackProfile.isNotEmpty(), "Stack profile should not be empty")
-        val hasOurClass = bob.stackProfile.values.any { frames ->
-            frames.any { frame -> frame.className.contains("ProfilerIntegrationTest") }
+        val hasOurClass = bob.stackProfile.values.any { traces ->
+            traces.any { frames ->
+                frames.any { frame -> frame.className.contains("ProfilerIntegrationTest") }
+            }
         }
         assertTrue(hasOurClass, "Stack trace should contain the ProfilerIntegrationTest call frame")
     }
@@ -139,14 +141,51 @@ class ProfilerIntegrationTest {
 
     @Test
     fun `test wrap() executor with multiple threads does not duplicate audit events`() {
+        // We simulate multiple threads opening the same file.
+        // Even if Landlock audit was enabled, the sharedPathCache should deduplicate them
+        // if they happen within the 500ms window.
         val pool = Executors.newFixedThreadPool(4)
-        // Enable JSECCOMP_PROFILER_AUDIT to trigger Landlock Audit events
-        // We use a custom environment variable for the process starting the daemon
-        // But here we need to ensure the daemon started by wrap() sees it.
-        // Actually, Profiler.kt checks System.getenv("JSECCOMP_PROFILER_AUDIT")
-        // So we can't easily set it for the daemon from here without reflection or global env change.
-        // Let's assume the developer can set it, or we find another way.
-        // For this test, let's just use the fact that the daemon broadcasts to ALL sockets.
-        // We can simulate multiple connections to the daemon.
+        val wrapped = Profiler.wrap(pool, Policy.PURE_COMPUTE)
+        try {
+            val target = File("/etc/hostname")
+            val tasks = (1..10).map {
+                wrapped.submit(Callable {
+                    target.readText()
+                })
+            }
+            tasks.forEach { it.get(5, TimeUnit.SECONDS) }
+
+            val bob = BobCompiler.compile(wrapped.recentLogs)
+            // The number of OPEN/OPENAT events in recentLogs for /etc/hostname should be low
+            // due to deduplication, even if triggered from different threads.
+            val openEvents = wrapped.recentLogs.filter { it.paths.contains("/etc/hostname") }
+            // Since they all run almost concurrently, most should be deduplicated.
+            assertTrue(openEvents.size < 10, "Should have deduplicated some events. Observed: ${openEvents.size}")
+        } finally {
+            wrapped.shutdownNow()
+        }
+    }
+
+    @Test
+    fun `test wrap() executor shutdown waits for pending tasks and avoids ENOSYS`() {
+        val pool = Executors.newSingleThreadExecutor()
+        val wrapped = Profiler.wrap(pool, Policy.PURE_COMPUTE)
+        val latch = java.util.concurrent.CountDownLatch(1)
+        val finished = java.util.concurrent.atomic.AtomicBoolean(false)
+
+        val future = wrapped.submit(Callable {
+            latch.countDown()
+            Thread.sleep(1000) // Simulate long-running syscall or operation
+            val text = File("/etc/hostname").readText()
+            finished.set(true)
+            text
+        })
+
+        latch.await()
+        wrapped.shutdown() // Should not kill daemon immediately
+
+        val result = future.get(5, TimeUnit.SECONDS)
+        assertTrue(result.isNotEmpty())
+        assertTrue(finished.get(), "Task should have finished even after shutdown() was called")
     }
 }

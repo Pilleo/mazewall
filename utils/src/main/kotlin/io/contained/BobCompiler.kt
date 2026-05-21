@@ -56,13 +56,24 @@ object BobCompiler {
     }
 
     private fun isFileSystemMutation(syscallName: String): Boolean {
-        return syscallName in setOf("MKDIR", "RMDIR", "UNLINK", "RENAME", "LINK", "SYMLINK", "CHMOD", "CHOWN", "LCHOWN")
+        return syscallName in setOf(
+            "MKDIR", "MKDIRAT",
+            "RMDIR",
+            "UNLINK", "UNLINKAT",
+            "RENAME", "RENAMEAT", "RENAMEAT2",
+            "LINK", "LINKAT",
+            "SYMLINK", "SYMLINKAT",
+            "CHMOD", "FCHMODAT",
+            "CHOWN", "LCHOWN", "FCHOWNAT"
+        )
     }
 
     private fun isOpenWrite(syscallName: String, args: LongArray): Boolean {
+        if (syscallName == "OPENAT2") return true // Pointer to struct open_how, conservatively treat as write
+
         val flags = when (syscallName) {
             "OPEN" -> if (args.size > 1) args[1] else 0L
-            "OPENAT", "OPENAT2" -> if (args.size > 2) args[2] else 0L
+            "OPENAT" -> if (args.size > 2) args[2] else 0L
             else -> 0L
         }
         val accessMode = flags and 3L

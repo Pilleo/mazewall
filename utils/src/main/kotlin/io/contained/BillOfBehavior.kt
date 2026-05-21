@@ -72,7 +72,7 @@ data class BillOfBehavior(
      * Keyed by [TraceEvent] identity; multiple events for the same syscall name
      * may produce different stack entries if triggered from different call sites.
      */
-    val stackProfile: Map<TraceEvent, Array<StackTraceElement>> = emptyMap()
+    val stackProfile: Map<TraceEvent, List<Array<StackTraceElement>>> = emptyMap()
 ) {
     /**
      * Compiles this bill of behavior into a [Policy] starting from [base].
@@ -99,8 +99,10 @@ data class BillOfBehavior(
      * Emits a copy-pasteable Kotlin DSL snippet that reproduces the compiled policy.
      * [basePolicyName] is used as the string label in the emitted code.
      */
-    fun toDsl(basePolicyName: String = "Policy.PURE_COMPUTE",
-              base: Policy = Policy.PURE_COMPUTE): String {
+    fun toDsl(
+        basePolicyName: String = "Policy.PURE_COMPUTE",
+        base: Policy = Policy.PURE_COMPUTE
+    ): String {
         val sb = StringBuilder()
         sb.append("val policy = Policy.builder()\n")
         sb.append("    .base($basePolicyName)\n")
@@ -125,11 +127,18 @@ data class BillOfBehavior(
      * Useful for compiling a single policy across multiple profiling runs
      * covering different code paths of the same application.
      */
-    operator fun plus(other: BillOfBehavior): BillOfBehavior = BillOfBehavior(
-        opens = opens + other.opens,
-        fsWritePaths = fsWritePaths + other.fsWritePaths,
-        syscalls = syscalls + other.syscalls,
-        execs = execs + other.execs,
-        stackProfile = stackProfile + other.stackProfile
-    )
+    operator fun plus(other: BillOfBehavior): BillOfBehavior {
+        val mergedStackProfile = stackProfile.toMutableMap()
+        for ((event, traces) in other.stackProfile) {
+            mergedStackProfile[event] = (mergedStackProfile[event] ?: emptyList()) + traces
+        }
+
+        return BillOfBehavior(
+            opens = opens + other.opens,
+            fsWritePaths = fsWritePaths + other.fsWritePaths,
+            syscalls = syscalls + other.syscalls,
+            execs = execs + other.execs,
+            stackProfile = mergedStackProfile
+        )
+    }
 }

@@ -8,7 +8,7 @@ class BobCompilerTest {
 
     companion object {
         private const val O_WRONLY = 1L
-        private const val O_CREAT  = 64L
+        private const val O_CREAT = 64L
     }
 
     @Test
@@ -115,5 +115,44 @@ val policy = Policy.builder()
         """.trimIndent()
 
         assertEquals(expectedDsl.trim(), dsl.trim())
+    }
+
+    @Test
+    fun `test OPENAT2 and AT variants categorization`() {
+        val events = listOf(
+            TraceEvent(
+                12345,
+                "OPENAT2",
+                longArrayOf(0, 0, 0x12345678, 0, 0, 0), // args[2] is a pointer
+                listOf("/tmp/openat2-test.txt")
+            ),
+            TraceEvent(
+                12345,
+                "UNLINKAT",
+                longArrayOf(0, 0, 0, 0, 0, 0),
+                listOf("/tmp/deleted-file.txt")
+            ),
+            TraceEvent(
+                12345,
+                "MKDIRAT",
+                longArrayOf(0, 0, 0, 0, 0, 0),
+                listOf("/tmp/new-subdir")
+            ),
+            TraceEvent(
+                12345,
+                "RENAMEAT2",
+                longArrayOf(0, 0, 0, 0, 0, 0),
+                listOf("/tmp/old-name", "/tmp/new-name")
+            )
+        )
+
+        val bob = BobCompiler.compile(events)
+
+        assertTrue(bob.fsWritePaths.contains("/tmp/openat2-test.txt"), "OPENAT2 should be treated as write")
+        assertTrue(bob.fsWritePaths.contains("/tmp/deleted-file.txt"), "UNLINKAT should be treated as write")
+        assertTrue(bob.fsWritePaths.contains("/tmp/new-subdir"), "MKDIRAT should be treated as write")
+        assertTrue(bob.fsWritePaths.contains("/tmp/old-name"), "RENAMEAT2 should be treated as write")
+        assertTrue(bob.fsWritePaths.contains("/tmp/new-name"), "RENAMEAT2 target should be treated as write")
+        assertTrue(bob.opens.isEmpty(), "No paths should be categorized as simple opens in this test")
     }
 }

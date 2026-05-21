@@ -93,7 +93,9 @@ object Profiler {
         Runtime.getRuntime().addShutdownHook(shutdownHook)
 
         val localLogs = java.util.concurrent.CopyOnWriteArrayList<TraceEvent>()
-        val localStackProfile = java.util.concurrent.ConcurrentHashMap<TraceEvent, Array<StackTraceElement>>()
+        val localStackProfile =
+            java.util.concurrent.ConcurrentHashMap<TraceEvent, MutableList<Array<StackTraceElement>>>()
+        val localPathCache = java.util.concurrent.ConcurrentHashMap<String, Long>()
 
         var workerThread: Thread? = null
 
@@ -107,7 +109,8 @@ object Profiler {
                     socketPath,
                     Policy.PURE_COMPUTE,
                     localLogs,
-                    localStackProfile
+                    localStackProfile,
+                    localPathCache
                 ) { workerThread }
 
                 // Apply Landlock profiling ruleset if requested
@@ -258,7 +261,8 @@ object Profiler {
         socketPath: String,
         policy: Policy,
         accumulatedLogs: MutableList<TraceEvent>,
-        stackTracesMap: MutableMap<TraceEvent, Array<StackTraceElement>>?,
+        stackTracesMap: MutableMap<TraceEvent, MutableList<Array<StackTraceElement>>>?,
+        pathCache: MutableMap<String, Long>,
         workerThreadProvider: () -> Thread?
     ) {
         val installLatch = java.util.concurrent.CountDownLatch(1)
@@ -292,7 +296,7 @@ object Profiler {
                     }
 
                     // Start listener thread for this socket to receive TraceEvents
-                    startTraceListener(socketFd, accumulatedLogs, stackTracesMap, workerThreadProvider)
+                    startTraceListener(socketFd, accumulatedLogs, stackTracesMap, pathCache, workerThreadProvider)
                 } catch (e: Exception) {
                     LinuxNative.close(socketFd)
                     throw e
@@ -351,15 +355,10 @@ object Profiler {
     private fun startTraceListener(
         socketFd: Int,
         accumulatedLogs: MutableList<TraceEvent>,
-        stackTracesMap: MutableMap<TraceEvent, Array<StackTraceElement>>?,
+        stackTracesMap: MutableMap<TraceEvent, MutableList<Array<StackTraceElement>>>?,
+        pathCache: MutableMap<String, Long>,
         workerThreadProvider: () -> Thread?
     ) {
-        val pathCache = object : java.util.LinkedHashMap<String, Long>(100, 0.75f, true) {
-            override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Long>): Boolean {
-                return size > 100
-            }
-        }
-
         val inputStream = object : InputStream() {
             override fun read(): Int {
                 Arena.ofConfined().use { arena ->
@@ -391,7 +390,8 @@ object Profiler {
 
         Thread {
             try {
-                val dis = DataInputStream(inputStream)
+                // Wrap in BufferedInputStream to avoid per-byte Arena/FMM allocations in DataInputStream
+                val dis = DataInputStream(java.io.BufferedInputStream(inputStream))
                 while (true) {
                     val pid = dis.readInt()
                     val syscallNameLen = dis.readInt()
@@ -442,7 +442,9 @@ object Profiler {
                         val workerThread = workerThreadProvider()
                         if (workerThread != null) {
                             val frames = workerThread.stackTrace
-                            stackTracesMap[event] = frames
+                            stackTracesMap.computeIfAbsent(event) {
+                                java.util.concurrent.CopyOnWriteArrayList<Array<StackTraceElement>>()
+                            }.add(frames)
                         }
                     }
 
@@ -476,6 +478,7 @@ object Profiler {
 
         private val threadApplied = ThreadLocal.withInitial { false }
         val recentLogs = java.util.concurrent.CopyOnWriteArrayList<TraceEvent>()
+        private val sharedPathCache = java.util.concurrent.ConcurrentHashMap<String, Long>()
 
         override fun execute(command: Runnable) {
             delegate.execute {
@@ -512,7 +515,8 @@ object Profiler {
                     socketPath,
                     policy,
                     recentLogs,
-                    null
+                    null,
+                    sharedPathCache
                 ) { currentThread }
 
                 // Landlock Audit is non-transparent (denies and logs).
@@ -532,7 +536,15 @@ object Profiler {
                 // Ignore if already shutting down
             } finally {
                 delegate.shutdown()
-                daemonProcess.destroy()
+                // Do NOT destroy daemon immediately, as worker threads may still be in-kernel!
+                // Instead, wait for termination in a separate daemon thread to release resources cleanly.
+                Thread {
+                    try {
+                        delegate.awaitTermination(1, TimeUnit.MINUTES)
+                    } finally {
+                        daemonProcess.destroy()
+                    }
+                }.apply { isDaemon = true; name = "profiler-shutdown-waiter" }.start()
             }
         }
 
