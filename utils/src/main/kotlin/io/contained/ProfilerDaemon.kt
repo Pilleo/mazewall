@@ -137,10 +137,10 @@ object ProfilerDaemon {
                 if (socketRes.returnValue < 0) {
                     System.err.println(
                         "[DAEMON] WARN: Netlink Audit socket unavailable (errno=${socketRes.errno}). " +
-                        "io_uring syscall visibility is DISABLED for this session. " +
-                        "All USER_NOTIF events are still captured normally. " +
-                        "To restore io_uring coverage, run with CAP_AUDIT_READ or grant the " +
-                        "necessary kernel audit permissions."
+                                "io_uring syscall visibility is DISABLED for this session. " +
+                                "All USER_NOTIF events are still captured normally. " +
+                                "To restore io_uring coverage, run with CAP_AUDIT_READ or grant the " +
+                                "necessary kernel audit permissions."
                     )
                     return@Thread
                 }
@@ -190,7 +190,7 @@ object ProfilerDaemon {
                                         val path = match.groupValues[2]
                                         val syscallName = if (blockers.contains("fs.execute")) "EXECVE" else "OPENAT"
                                         val event = TraceEvent(0, syscallName, LongArray(6), listOf(path))
-                                        for (client in clientSockets) {
+                                        clientSockets.firstOrNull()?.let { client ->
                                             try {
                                                 sendTraceEvent(client, event)
                                             } catch (e: Exception) {

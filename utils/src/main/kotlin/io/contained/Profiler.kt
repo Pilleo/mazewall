@@ -138,11 +138,13 @@ object Profiler {
         } finally {
             try {
                 Runtime.getRuntime().removeShutdownHook(shutdownHook)
-            } catch (e: Exception) {}
+            } catch (e: Exception) {
+            }
             daemonProcess.destroyForcibly()
             try {
                 socketFile.delete()
-            } catch (e: Exception) {}
+            } catch (e: Exception) {
+            }
         }
     }
 
@@ -184,11 +186,12 @@ object Profiler {
         }.apply { isDaemon = true; name = "profiler-daemon-stderr" }.start()
 
         // Ensure daemon process is cleaned up on JVM exit
-        Runtime.getRuntime().addShutdownHook(Thread {
+        val shutdownHook = Thread {
             daemonProcess.destroyForcibly()
-        })
+        }
+        Runtime.getRuntime().addShutdownHook(shutdownHook)
 
-        return ProfilerExecutorWrapper(delegate, policy, socketPath, daemonProcess)
+        return ProfilerExecutorWrapper(delegate, policy, socketPath, daemonProcess, shutdownHook)
     }
 
     private fun connectWithRetry(socketPath: String, maxRetries: Int = 30, delayMs: Long = 100): Int {
@@ -351,7 +354,11 @@ object Profiler {
         stackTracesMap: MutableMap<TraceEvent, Array<StackTraceElement>>?,
         workerThreadProvider: () -> Thread?
     ) {
-        val pathCache = java.util.concurrent.ConcurrentHashMap<String, Long>()
+        val pathCache = object : java.util.LinkedHashMap<String, Long>(100, 0.75f, true) {
+            override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Long>): Boolean {
+                return size > 100
+            }
+        }
 
         val inputStream = object : InputStream() {
             override fun read(): Int {
@@ -417,10 +424,13 @@ object Profiler {
                         if (now - lastSeen < 500) {
                             println("[PROFILER] Deduplicated duplicate event for $cacheKey")
                             // Write ACK to daemon so the daemon doesn't hang!
-                            Arena.ofConfined().use { arena ->
-                                val ack = arena.allocate(1)
-                                ack.set(ValueLayout.JAVA_BYTE, 0L, 0x41.toByte()) // ACK byte
-                                LinuxNative.write(socketFd, ack, 1)
+                            // ONLY if it's a Seccomp event (pid != 0).
+                            if (pid != 0) {
+                                Arena.ofConfined().use { arena ->
+                                    val ack = arena.allocate(1)
+                                    ack.set(ValueLayout.JAVA_BYTE, 0L, 0x41.toByte()) // ACK byte
+                                    LinuxNative.write(socketFd, ack, 1)
+                                }
                             }
                             continue // Skip duplicate within 500ms window
                         }
@@ -439,10 +449,13 @@ object Profiler {
                     accumulatedLogs.add(event)
 
                     // Send ACK back to the daemon so it can release the worker thread!
-                    Arena.ofConfined().use { arena ->
-                        val ack = arena.allocate(1)
-                        ack.set(ValueLayout.JAVA_BYTE, 0L, 0x41.toByte()) // ACK byte
-                        LinuxNative.write(socketFd, ack, 1)
+                    // ONLY if it's a Seccomp event (pid != 0). Audit events (pid=0) don't expect ACKs.
+                    if (pid != 0) {
+                        Arena.ofConfined().use { arena ->
+                            val ack = arena.allocate(1)
+                            ack.set(ValueLayout.JAVA_BYTE, 0L, 0x41.toByte()) // ACK byte
+                            LinuxNative.write(socketFd, ack, 1)
+                        }
                     }
                 }
             } catch (e: Exception) {
@@ -457,7 +470,8 @@ object Profiler {
         private val delegate: ExecutorService,
         private val policy: Policy,
         private val socketPath: String,
-        private val daemonProcess: Process
+        private val daemonProcess: Process,
+        private val shutdownHook: Thread
     ) : ExecutorService by delegate {
 
         private val threadApplied = ThreadLocal.withInitial { false }
@@ -493,12 +507,13 @@ object Profiler {
                 throw IllegalStateException("Seccomp profiling is not supported on Loom virtual threads.")
             }
             if (!threadApplied.get()) {
+                val currentThread = Thread.currentThread()
                 installProfilingFilterForThread(
                     socketPath,
                     policy,
                     recentLogs,
                     null
-                ) { Thread.currentThread() }
+                ) { currentThread }
 
                 // Landlock Audit is non-transparent (denies and logs).
                 // Only enable if explicitly requested for io_uring profiling.
@@ -512,7 +527,9 @@ object Profiler {
 
         override fun shutdown() {
             try {
-                // Graceful cleanup
+                Runtime.getRuntime().removeShutdownHook(shutdownHook)
+            } catch (e: Exception) {
+                // Ignore if already shutting down
             } finally {
                 delegate.shutdown()
                 daemonProcess.destroy()
@@ -520,9 +537,15 @@ object Profiler {
         }
 
         override fun shutdownNow(): List<Runnable> {
-            val tasks = delegate.shutdownNow()
-            daemonProcess.destroyForcibly()
-            return tasks
+            try {
+                Runtime.getRuntime().removeShutdownHook(shutdownHook)
+            } catch (e: Exception) {
+                // Ignore if already shutting down
+            } finally {
+                val tasks = delegate.shutdownNow()
+                daemonProcess.destroyForcibly()
+                return tasks
+            }
         }
     }
 }
