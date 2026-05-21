@@ -8,6 +8,7 @@ import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import kotlin.test.assertTrue
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 
 @EnabledOnOs(OS.LINUX)
 class ProfilerIntegrationTest {
@@ -33,23 +34,15 @@ class ProfilerIntegrationTest {
                 targetFile.readText()
             })
 
-            // Wait for completion. Under standard seccomp block, this would throw EPERM/IOException.
-            // Under Profiler, the daemon intercepts it, reads the path, logs it, and continues it.
+            // Wait for completion. Under Profiler, the daemon intercepts it, reads the path, logs it, and continues it.
             val content = future.get(10, TimeUnit.SECONDS)
             assertTrue(content.isNotEmpty())
 
-            // Give a short delay for background daemon logs to be piped
-            Thread.sleep(1000)
-
-            val logs = Profiler.recentLogs
-            println("Captured logs in open test: $logs")
-
-            // Check if any log line successfully captured the OPEN/OPENAT syscall and the path /etc/hostname
-            val foundOpen = logs.any { line ->
-                (line.contains("syscall=OPEN") || line.contains("syscall=OPENAT")) && 
-                line.contains("paths=/etc/hostname")
+            // Polling loop for trace events
+            awaitTrace { event ->
+                (event.syscallName == "OPEN" || event.syscallName == "OPENAT") &&
+                        event.paths.contains("/etc/hostname")
             }
-            assertTrue(foundOpen, "Expected to find intercepted file open for /etc/hostname. Got: $logs")
 
         } finally {
             profilerExecutor.shutdownNow()
@@ -76,17 +69,9 @@ class ProfilerIntegrationTest {
             // Wait for completion.
             future.get(10, TimeUnit.SECONDS)
 
-            // Let the logs stream
-            Thread.sleep(1000)
-
-            val logs = Profiler.recentLogs
-            println("Captured logs in process test: $logs")
-
-            // Even if ptrace_scope restricts process_vm_readv on grandchild, the syscall must be intercepted and successfully continued.
-            val foundExec = logs.any { line ->
-                line.contains("syscall=EXECVE") || line.contains("syscall=EXECVEAT")
+            awaitTrace { event ->
+                event.syscallName == "EXECVE" || event.syscallName == "EXECVEAT"
             }
-            assertTrue(foundExec, "Expected to find intercepted EXECVE/EXECVEAT in logs. Got: $logs")
 
         } finally {
             profilerExecutor.shutdownNow()
@@ -99,7 +84,7 @@ class ProfilerIntegrationTest {
         if (!Platform.isSupported()) return
 
         val baseExecutor = Executors.newSingleThreadExecutor()
-        
+
         // PURE_COMPUTE blocks file open and network
         val profilerExecutor = Profiler.wrap(baseExecutor, Policy.PURE_COMPUTE)
 
@@ -117,8 +102,10 @@ class ProfilerIntegrationTest {
             val content = future.get(10, TimeUnit.SECONDS)
             assertTrue(content.isNotEmpty())
 
-            // Wait for trace message piping
-            Thread.sleep(1000)
+            awaitTrace { event ->
+                (event.syscallName == "OPEN" || event.syscallName == "OPENAT" || event.syscallName == "OPENAT2") &&
+                        event.paths.contains("/etc/hostname")
+            }
 
             // Let's compile!
             val compiledPolicy = Profiler.compilePolicy()
@@ -136,7 +123,10 @@ class ProfilerIntegrationTest {
             assertTrue(openUnblocked, "At least one of OPEN or OPENAT should be unblocked in compiled policy")
 
             // The compiled policy should allow reading from /etc/hostname
-            assertTrue(compiledPolicy.allowedFsReadPaths.contains("/etc/hostname"), "Should contain read-path for /etc/hostname")
+            assertTrue(
+                compiledPolicy.allowedFsReadPaths.contains("/etc/hostname"),
+                "Should contain read-path for /etc/hostname"
+            )
 
             // Verify DSL has the correct builder and allowFsRead
             assertTrue(dsl.contains("Policy.builder()"))
@@ -146,5 +136,30 @@ class ProfilerIntegrationTest {
             profilerExecutor.shutdownNow()
             baseExecutor.shutdownNow()
         }
+    }
+
+    @Test
+    fun `test profiler rejects wrapping virtual thread executors`() {
+        val vExecutor = Executors.newVirtualThreadPerTaskExecutor()
+        try {
+            val profilerExecutor = Profiler.wrap(vExecutor, Policy.PURE_COMPUTE)
+            val future = profilerExecutor.submit { println("running") }
+            val ex = org.junit.jupiter.api.assertThrows<java.util.concurrent.ExecutionException> {
+                future.get(5, TimeUnit.SECONDS)
+            }
+            assertTrue(ex.cause is IllegalStateException)
+            assertTrue(ex.cause?.message?.contains("virtual threads") == true)
+        } finally {
+            vExecutor.shutdownNow()
+        }
+    }
+
+    private fun awaitTrace(timeoutMs: Long = 5000, condition: (TraceEvent) -> Boolean) {
+        val start = System.currentTimeMillis()
+        while (System.currentTimeMillis() - start < timeoutMs) {
+            if (Profiler.recentLogs.any(condition)) return
+            Thread.sleep(100)
+        }
+        throw AssertionError("Timed out waiting for expected trace event. Current events: ${Profiler.recentLogs}")
     }
 }

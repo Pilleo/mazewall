@@ -9,9 +9,13 @@ import java.nio.charset.StandardCharsets
 
 /**
  * Standalone Profiler Daemon Process.
+ *
+ * Communicates with the parent JVM via a Unix Domain Socket, sending binary [TraceEvent]
+ * structures. Ingests structured audit events from [NETLINK_AUDIT].
  */
 object ProfilerDaemon {
     private val syscallMap = mutableMapOf<Int, String>()
+    private val clientSockets = java.util.concurrent.CopyOnWriteArrayList<Int>()
 
     @JvmStatic
     fun main(args: Array<String>) {
@@ -21,21 +25,18 @@ object ProfilerDaemon {
         }
         val socketPath = args[0]
 
-        // Map syscall numbers to names
         val arch = Arch.current()
-        for (s in Syscall.values()) {
+        for (s in Syscall.entries) {
             val nr = s.numberFor(arch)
-            if (nr >= 0) {
-                syscallMap[nr] = s.name
-            }
+            if (nr >= 0) syscallMap[nr] = s.name
         }
 
-        // Stdin closure check to auto-exit when parent terminates
+        startGlobalAuditListener()
+
         Thread {
             try {
                 System.`in`.read()
             } catch (e: Exception) {
-                // ignore
             }
             System.exit(0)
         }.apply { isDaemon = true }.start()
@@ -46,184 +47,276 @@ object ProfilerDaemon {
     private fun run(socketPath: String) {
         Arena.ofConfined().use { arena ->
             val bindRes = LinuxNative.socket(1 /* AF_UNIX */, 1 /* SOCK_STREAM */, 0)
-            if (bindRes.returnValue < 0) {
-                throw IllegalStateException("Failed to create daemon socket: errno=${bindRes.errno}")
-            }
+            if (bindRes.returnValue < 0) throw IllegalStateException("Failed to create daemon socket: errno=${bindRes.errno}")
             val serverFd = bindRes.returnValue.toInt()
 
             val addr = arena.allocate(LinuxNative.SOCKADDR_UN_LAYOUT)
             addr.fill(0)
-            addr.set(ValueLayout.JAVA_SHORT, 0, 1.toShort()) // AF_UNIX = 1
-            
+            addr.set(ValueLayout.JAVA_SHORT, 0L, 1.toShort()) // AF_UNIX = 1
+
             val pathBytes = socketPath.toByteArray(StandardCharsets.UTF_8)
-            if (pathBytes.size >= 108) {
-                throw IllegalArgumentException("Unix socket path too long")
-            }
             val pathSeg = addr.asSlice(2, 108)
-            for (i in pathBytes.indices) {
-                pathSeg.set(ValueLayout.JAVA_BYTE, i.toLong(), pathBytes[i])
-            }
+            for (i in pathBytes.indices) pathSeg.set(ValueLayout.JAVA_BYTE, i.toLong(), pathBytes[i])
 
             File(socketPath).delete()
-            val bindRes2 = LinuxNative.bind(serverFd, addr, 110)
-            if (bindRes2.returnValue < 0) {
-                throw IllegalStateException("Failed to bind to socket at $socketPath: errno=${bindRes2.errno}")
-            }
-
-            val listenRes = LinuxNative.listen(serverFd, 128)
-            if (listenRes.returnValue < 0) {
-                throw IllegalStateException("Failed to listen: errno=${listenRes.errno}")
-            }
+            if (LinuxNative.bind(serverFd, addr, 110).returnValue < 0) throw IllegalStateException("Failed to bind")
+            if (LinuxNative.listen(serverFd, 128).returnValue < 0) throw IllegalStateException("Failed to listen")
 
             val addrLen = arena.allocate(ValueLayout.JAVA_INT)
-            addrLen.set(ValueLayout.JAVA_INT, 0, 110)
+            addrLen.set(ValueLayout.JAVA_INT, 0L, 110)
 
             while (true) {
                 val acceptRes = LinuxNative.accept(serverFd, addr, addrLen)
-                if (acceptRes.returnValue < 0) {
-                    break
-                }
+                if (acceptRes.returnValue < 0) break
                 val clientFd = acceptRes.returnValue.toInt()
                 Thread {
                     try {
                         handleConnection(clientFd)
                     } catch (e: Exception) {
-                        e.printStackTrace()
+                    } finally {
+                        LinuxNative.close(clientFd)
                     }
                 }.start()
             }
         }
     }
 
-    private fun recvDescriptor(socketFd: Int): Int {
-        Arena.ofConfined().use { arena ->
-            val dummyByte = arena.allocate(ValueLayout.JAVA_BYTE)
-
-            val iov = arena.allocate(LinuxNative.IOVEC_LAYOUT)
-            iov.set(ValueLayout.ADDRESS, LinuxNative.IOVEC_LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("iov_base")), dummyByte)
-            iov.set(ValueLayout.JAVA_LONG, LinuxNative.IOVEC_LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("iov_len")), 1L)
-
-            val controlBuf = arena.allocate(24)
-            controlBuf.fill(0)
-
-            val msg = arena.allocate(LinuxNative.MSGHDR_LAYOUT)
-            msg.fill(0)
-            msg.set(ValueLayout.ADDRESS, LinuxNative.MSGHDR_LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("msg_iov")), iov)
-            msg.set(ValueLayout.JAVA_LONG, LinuxNative.MSGHDR_LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("msg_iovlen")), 1L)
-            msg.set(ValueLayout.ADDRESS, LinuxNative.MSGHDR_LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("msg_control")), controlBuf)
-            msg.set(ValueLayout.JAVA_LONG, LinuxNative.MSGHDR_LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("msg_controllen")), 24L)
-
-            val res = LinuxNative.recvmsg(socketFd, msg, 0)
-            if (res.returnValue < 0) {
-                return -1
+    private fun handleConnection(socketFd: Int) {
+        clientSockets.add(socketFd)
+        try {
+            val listenerFd = recvDescriptor(socketFd) ?: return
+            Arena.ofConfined().use { arena ->
+                val ack = arena.allocate(1); ack.set(ValueLayout.JAVA_BYTE, 0L, 0xAC.toByte())
+                LinuxNative.write(socketFd, ack, 1)
             }
+            Arena.ofConfined().use { arena ->
+                val notif = arena.allocate(LinuxNative.SECCOMP_NOTIF_LAYOUT)
+                val resp = arena.allocate(LinuxNative.SECCOMP_NOTIF_RESP_LAYOUT)
 
-            return controlBuf.get(ValueLayout.JAVA_INT, 16)
+                while (true) {
+                    notif.fill(0)
+                    val ioctlRes = LinuxNative.ioctl(listenerFd, LinuxNative.SECCOMP_IOCTL_NOTIF_RECV, notif)
+                    if (ioctlRes.returnValue < 0) break
+
+                    val id = notif.get(ValueLayout.JAVA_LONG, 0L)
+                    val pid = notif.get(ValueLayout.JAVA_INT, 8L)
+                    val nr = notif.get(ValueLayout.JAVA_INT, 16L)
+                    val args = LongArray(6)
+                    for (i in 0..5) args[i] = notif.get(ValueLayout.JAVA_LONG, 32L + i * 8L)
+
+                    val syscallName = syscallMap[nr] ?: "SYSCALL_$nr"
+                    val paths = getPathArgs(syscallName, args, pid)
+                    sendTraceEvent(socketFd, TraceEvent(pid, syscallName, args, paths))
+
+                    resp.fill(0)
+                    resp.set(ValueLayout.JAVA_LONG, 0L, id)
+                    resp.set(ValueLayout.JAVA_LONG, 8L, 0L)
+                    resp.set(ValueLayout.JAVA_INT, 16L, 0)
+                    resp.set(ValueLayout.JAVA_INT, 20L, LinuxNative.SECCOMP_USER_NOTIF_FLAG_CONTINUE.toInt())
+                    LinuxNative.ioctl(listenerFd, LinuxNative.SECCOMP_IOCTL_NOTIF_SEND, resp)
+                }
+            }
+        } finally {
+            clientSockets.remove(socketFd)
         }
     }
 
-    private fun handleConnection(socketFd: Int) {
-        val listenerFd = recvDescriptor(socketFd)
-        LinuxNative.close(socketFd)
-        if (listenerFd < 0) {
-            return
-        }
+    private fun startGlobalAuditListener() {
+        Thread {
+            Arena.ofConfined().use { arena ->
+                val socketRes = LinuxNative.socket(LinuxNative.AF_NETLINK, 3 /* SOCK_RAW */, LinuxNative.NETLINK_AUDIT)
 
-        Arena.ofConfined().use { arena ->
-            val notif = arena.allocate(LinuxNative.SECCOMP_NOTIF_LAYOUT)
-            val resp = arena.allocate(LinuxNative.SECCOMP_NOTIF_RESP_LAYOUT)
-
-            while (true) {
-                notif.fill(0)
-                val ioctlRes = LinuxNative.ioctl(listenerFd, LinuxNative.SECCOMP_IOCTL_NOTIF_RECV, notif)
-                if (ioctlRes.returnValue < 0) {
-                    break
+                if (socketRes.returnValue < 0) {
+                    val failOnMissingAudit = System.getenv("JSECCOMP_PROFILER_FAIL_ON_AUDIT_ERROR") ?: "true"
+                    if (failOnMissingAudit.lowercase() == "true") {
+                        System.err.println("[DAEMON] FATAL: Failed to open Netlink Audit socket (errno=${socketRes.errno}). io_uring support disabled.")
+                        System.exit(1)
+                    }
+                    return@Thread
                 }
+                val auditFd = socketRes.returnValue.toInt()
 
-                val id = notif.get(ValueLayout.JAVA_LONG, 0)
-                val pid = notif.get(ValueLayout.JAVA_INT, 8)
-                
-                val nr = notif.get(ValueLayout.JAVA_INT, 16)
-                val args = LongArray(6)
-                for (i in 0..5) {
-                    args[i] = notif.get(ValueLayout.JAVA_LONG, 32 + i * 8L)
+                try {
+                    val addr = arena.allocate(LinuxNative.SOCKADDR_NL_LAYOUT)
+                    addr.fill(0); addr.set(ValueLayout.JAVA_SHORT, 0L, LinuxNative.AF_NETLINK.toShort())
+                    if (LinuxNative.bind(auditFd, addr, 12).returnValue < 0) return@Thread
+
+                    // Enable kernel audit (AUDIT_SET = 1001)
+                    val status = arena.allocate(40); status.fill(0)
+                    status.set(ValueLayout.JAVA_INT, 0L, 1)
+                    status.set(ValueLayout.JAVA_INT, 4L, 1)
+                    sendNetlinkMsg(auditFd, 1001, status)
+
+                    val buf = arena.allocate(32768)
+                    val iov = arena.allocate(LinuxNative.IOVEC_LAYOUT)
+                    iov.set(ValueLayout.ADDRESS, 0L, buf); iov.set(ValueLayout.JAVA_LONG, 8L, 32768L)
+                    val msg = arena.allocate(LinuxNative.MSGHDR_LAYOUT)
+                    msg.fill(0); msg.set(ValueLayout.ADDRESS, 16L, iov); msg.set(ValueLayout.JAVA_LONG, 24L, 1L)
+
+                    val landlockRegex =
+                        Regex("""type=(?:LANDLOCK_ACCESS|1423).*?\bblockers=([\w.,\s]+)\b.*?\bpath="([^"]+)"""")
+
+                    while (true) {
+                        val res = LinuxNative.recvmsg(auditFd, msg, 0)
+                        if (res.returnValue <= 16) continue
+
+                        var offset = 0L
+                        while (offset + 16 <= res.returnValue) {
+                            val nlmsgLen = buf.get(ValueLayout.JAVA_INT, offset)
+                            val nlmsgType = buf.get(ValueLayout.JAVA_SHORT, offset + 4).toInt() and 0xFFFF
+
+                            if (nlmsgLen < 16) break
+
+                            if (nlmsgType >= 1100) {
+                                val payloadLen = nlmsgLen - 16
+                                if (payloadLen > 0) {
+                                    val payloadBytes =
+                                        buf.asSlice(offset + 16, payloadLen.toLong()).toArray(ValueLayout.JAVA_BYTE)
+                                    val payload = String(payloadBytes, StandardCharsets.UTF_8)
+
+                                    val match = landlockRegex.find(payload)
+                                    if (match != null) {
+                                        val blockers = match.groupValues[1]
+                                        val path = match.groupValues[2]
+                                        val syscallName = if (blockers.contains("fs.execute")) "EXECVE" else "OPENAT"
+                                        val event = TraceEvent(0, syscallName, LongArray(6), listOf(path))
+                                        for (client in clientSockets) {
+                                            try {
+                                                sendTraceEvent(client, event)
+                                            } catch (e: Exception) {
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            offset += (nlmsgLen + 3) and 3.inv()
+                        }
+                    }
+                } finally {
+                    LinuxNative.close(auditFd)
                 }
-
-                val syscallName = syscallMap[nr] ?: "SYSCALL_$nr"
-                val paths = getPathArgs(syscallName, args, pid)
-
-                val pathStr = if (paths.isNotEmpty()) " paths=${paths.joinToString(", ")}" else ""
-                println("[PROFILER] pid=$pid syscall=$syscallName args=[${args.joinToString(", ")}]$pathStr")
-                System.out.flush()
-
-                resp.fill(0)
-                resp.set(ValueLayout.JAVA_LONG, 0, id)
-                resp.set(ValueLayout.JAVA_LONG, 8, 0L)
-                resp.set(ValueLayout.JAVA_INT, 16, 0)
-                resp.set(ValueLayout.JAVA_INT, 20, LinuxNative.SECCOMP_USER_NOTIF_FLAG_CONTINUE)
-
-                LinuxNative.ioctl(listenerFd, LinuxNative.SECCOMP_IOCTL_NOTIF_SEND, resp)
             }
+        }.apply { isDaemon = true; name = "netlink-audit-listener" }.start()
+    }
+
+    private fun sendNetlinkMsg(fd: Int, type: Int, payload: MemorySegment) {
+        Arena.ofConfined().use { arena ->
+            val totalLen = 16 + payload.byteSize().toInt()
+            val buf = arena.allocate(totalLen.toLong())
+            buf.set(ValueLayout.JAVA_INT, 0L, totalLen)
+            buf.set(ValueLayout.JAVA_SHORT, 4L, type.toShort())
+            buf.set(ValueLayout.JAVA_SHORT, 6L, 1)
+            buf.set(ValueLayout.JAVA_INT, 8L, 1)
+            buf.set(ValueLayout.JAVA_INT, 12L, 0)
+            MemorySegment.copy(payload, 0, buf, 16, payload.byteSize())
+            LinuxNative.write(fd, buf, totalLen.toLong())
+        }
+    }
+
+    private fun sendTraceEvent(socketFd: Int, event: TraceEvent) {
+        val outputStream = object : java.io.OutputStream() {
+            override fun write(b: Int) {
+                Arena.ofConfined().use { arena ->
+                    val buf = arena.allocate(1); buf.set(ValueLayout.JAVA_BYTE, 0L, b.toByte())
+                    LinuxNative.write(socketFd, buf, 1)
+                }
+            }
+
+            override fun write(b: ByteArray, off: Int, len: Int) {
+                if (len == 0) return
+                Arena.ofConfined().use { arena ->
+                    val buf = arena.allocate(len.toLong())
+                    for (i in 0 until len) buf.set(ValueLayout.JAVA_BYTE, i.toLong(), b[off + i])
+                    LinuxNative.write(socketFd, buf, len.toLong())
+                }
+            }
+        }
+        val dos = java.io.DataOutputStream(outputStream)
+        dos.writeInt(event.pid)
+        val syscallBytes = event.syscallName.toByteArray(StandardCharsets.UTF_8)
+        dos.writeInt(syscallBytes.size); dos.write(syscallBytes)
+        dos.writeInt(event.args.size)
+        for (arg in event.args) dos.writeLong(arg)
+        dos.writeInt(event.paths.size)
+        for (path in event.paths) {
+            val pBytes = path.toByteArray(StandardCharsets.UTF_8)
+            dos.writeInt(pBytes.size); dos.write(pBytes)
+        }
+        dos.flush()
+    }
+
+    private fun recvDescriptor(socketFd: Int): Int? {
+        Arena.ofConfined().use { arena ->
+            val dummyByte = arena.allocate(ValueLayout.JAVA_BYTE)
+            val iov = arena.allocate(LinuxNative.IOVEC_LAYOUT)
+            iov.set(ValueLayout.ADDRESS, 0L, dummyByte); iov.set(ValueLayout.JAVA_LONG, 8L, 1L)
+            val controlBuf = arena.allocate(24); controlBuf.fill(0)
+            val msg = arena.allocate(LinuxNative.MSGHDR_LAYOUT)
+            msg.fill(0)
+            msg.set(ValueLayout.ADDRESS, 16L, iov); msg.set(ValueLayout.JAVA_LONG, 24L, 1L)
+            msg.set(ValueLayout.ADDRESS, 32L, controlBuf); msg.set(ValueLayout.JAVA_LONG, 40L, 24L)
+            if (LinuxNative.recvmsg(socketFd, msg, 0).returnValue < 0) return null
+            return controlBuf.get(ValueLayout.JAVA_INT, 16L)
         }
     }
 
     private fun readStringFromProcess(pid: Int, remoteAddress: Long, maxLen: Int = 4096): String? {
         Arena.ofConfined().use { arena ->
-            val localBuf = arena.allocate(maxLen.toLong())
-            localBuf.fill(0)
-
+            val localBuf = arena.allocate(maxLen.toLong()); localBuf.fill(0)
             val localIov = arena.allocate(LinuxNative.IOVEC_LAYOUT)
-            localIov.set(ValueLayout.ADDRESS, 0, localBuf)
-            localIov.set(ValueLayout.JAVA_LONG, 8, maxLen.toLong())
-
+            localIov.set(ValueLayout.ADDRESS, 0L, localBuf); localIov.set(ValueLayout.JAVA_LONG, 8L, maxLen.toLong())
             val remoteIov = arena.allocate(LinuxNative.IOVEC_LAYOUT)
-            remoteIov.set(ValueLayout.ADDRESS, 0, MemorySegment.ofAddress(remoteAddress))
-            remoteIov.set(ValueLayout.JAVA_LONG, 8, maxLen.toLong())
-
+            remoteIov.set(ValueLayout.ADDRESS, 0L, MemorySegment.ofAddress(remoteAddress))
+            remoteIov.set(ValueLayout.JAVA_LONG, 8L, maxLen.toLong())
             val res = LinuxNative.processVmReadv(pid, localIov, 1, remoteIov, 1, 0)
-            if (res.returnValue < 0) {
-                System.err.println("processVmReadv failed for pid $pid at addr 0x${java.lang.Long.toHexString(remoteAddress)}: ret=${res.returnValue}, errno=${res.errno}")
-                System.err.flush()
-                return null
-            }
-
+            if (res.returnValue < 0) return null
             val bytesRead = res.returnValue.toInt()
             var len = 0
-            while (len < bytesRead && localBuf.get(ValueLayout.JAVA_BYTE, len.toLong()) != 0.toByte()) {
-                len++
-            }
+            while (len < bytesRead && localBuf.get(ValueLayout.JAVA_BYTE, len.toLong()) != 0.toByte()) len++
             val bytes = ByteArray(len)
-            for (i in 0 until len) {
-                bytes[i] = localBuf.get(ValueLayout.JAVA_BYTE, i.toLong())
-            }
+            for (i in 0 until len) bytes[i] = localBuf.get(ValueLayout.JAVA_BYTE, i.toLong())
             return String(bytes, StandardCharsets.UTF_8)
         }
     }
 
     private fun getPathArgs(syscallName: String, args: LongArray, pid: Int): List<String> {
         val paths = mutableListOf<String>()
-        
-        fun tryRead(addr: Long) {
-            if (addr != 0L) {
-                val path = readStringFromProcess(pid, addr)
-                if (path != null) {
-                    paths.add(path)
-                }
+        fun tryRead(addr: Long, dirfd: Long = -100L): String? {
+            if (addr == 0L) return null
+            val path = readStringFromProcess(pid, addr) ?: return null
+            if (path.startsWith("/") || dirfd == -100L) return path
+            if (dirfd >= 0) {
+                val dirPath = resolveFdPath(pid, dirfd.toInt())
+                if (dirPath != null) return if (dirPath.endsWith("/")) "$dirPath$path" else "$dirPath/$path"
             }
+            return path
         }
-
         when (syscallName) {
-            "OPEN", "EXECVE", "MKDIR", "RMDIR", "CHMOD", "CHOWN", "LCHOWN", "UNLINK", "READLINK" -> {
-                tryRead(args[0])
+            "OPEN", "EXECVE", "MKDIR", "RMDIR", "CHMOD", "CHOWN", "LCHOWN", "UNLINK", "READLINK" -> tryRead(args[0])?.let {
+                paths.add(
+                    it
+                )
             }
-            "OPENAT", "OPENAT2", "EXECVEAT" -> {
-                tryRead(args[1])
-            }
+
+            "OPENAT", "EXECVEAT", "OPENAT2" -> tryRead(args[1], args[0])?.let { paths.add(it) }
             "RENAME", "LINK", "SYMLINK" -> {
-                tryRead(args[0])
-                tryRead(args[1])
+                tryRead(args[0])?.let { paths.add(it) }; tryRead(args[1])?.let { paths.add(it) }
             }
         }
         return paths
+    }
+
+    private fun resolveFdPath(pid: Int, fd: Int): String? {
+        val procPath = "/proc/$pid/fd/$fd"
+        Arena.ofConfined().use { arena ->
+            val pathSeg = arena.allocateFrom(procPath)
+            val buf = arena.allocate(4096)
+            val res = LinuxNative.readlink(pathSeg, buf, 4096)
+            if (res.returnValue < 0) return null
+            val len = res.returnValue.toInt()
+            val bytes = ByteArray(len)
+            for (i in 0 until len) bytes[i] = buf.get(ValueLayout.JAVA_BYTE, i.toLong())
+            return String(bytes, StandardCharsets.UTF_8)
+        }
     }
 }

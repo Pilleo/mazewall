@@ -27,10 +27,13 @@ object ContainedExecutors {
     private val logger = Logger.getLogger(ContainedExecutors::class.java.name)
 
     private val PROCESS_BLOCKED = CopyOnWriteArraySet<Syscall>()
+
     @Volatile
     private var PROCESS_ALLOWS_MMAP_EXEC = true
+
     @Volatile
     private var PROCESS_ALLOWS_NON_THREAD_CLONE = true
+
     @Volatile
     private var PROCESS_ALLOWS_UNSAFE_PRCTL = true
     private val PROCESS_FILTER_DEPTH = AtomicInteger(0)
@@ -179,7 +182,8 @@ object ContainedExecutors {
     }
 
     // Priority 1: JVM-encoded errno (most reliable — locale-independent)
-    private val ERRNO_REGEX = Regex("\\berror=(1|13)\\b")
+    // Matches both "error=1" and "error: 1"
+    private val ERRNO_REGEX = Regex("\\berror[=:]\\s*(1|13)\\b")
 
     // Priority 2: OS message fallback (locale-sensitive, narrowed to known safe patterns)
     private val OS_MSG_REGEX = Regex(
@@ -188,12 +192,7 @@ object ContainedExecutors {
 
     private fun isDirectContainmentViolation(t: Throwable): Boolean {
         // AccessDeniedException is a direct native translation of EACCES/EPERM for path operations
-        if (t is AccessDeniedException) return true
-
-        // FileSystemException from java.nio.file has structured OS translation
-        if (t is java.nio.file.FileSystemException && t.message?.contains("Operation not permitted") == true) {
-            return true
-        }
+        if (t is java.nio.file.AccessDeniedException) return true
 
         val msg = t.message ?: return false
 
@@ -203,7 +202,7 @@ object ContainedExecutors {
         }
 
         // Restrict OS message parsing to I/O and networking contexts to avoid false positives in business logic
-        if (t is IOException || t is SocketException) {
+        if (t is java.io.IOException || t is java.net.SocketException) {
             if (OS_MSG_REGEX.containsMatchIn(msg)) {
                 return true
             }

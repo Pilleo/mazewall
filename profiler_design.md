@@ -57,18 +57,24 @@ To bypass these constraints, we designed a **Tiered Profiling System** that prov
 |   USER_NOTIF     |           | (Zero-Privilege) |            | (Aspirational)   |
 +------------------+           +------------------+            +------------------+
 ```
-
 ### Tier S: Out-of-Process `USER_NOTIF` Supervisor (The Production Default)
-Placing the supervisor thread inside the *same* JVM leads to fatal safepoint deadlocks. Relying on `strace` leads to noisy, process-wide telemetry and brittle text scraping. Instead, we use `SECCOMP_RET_USER_NOTIF` backed by a lightweight sidecar process communicating via Unix Domain Sockets.
+Placing the supervisor thread inside the *same* JVM leads to fatal safepoint deadlocks. Relying on `strace` leads to noisy, process-wide telemetry and brittle text scraping. Instead, we use `SECCOMP_RET_USER_NOTIF` backed by a lightweight sidecar process communicating via Unix Domain Sockets using a structured binary protocol to prevent log injection.
+
+**Audit-Assisted Asynchronous Profiling (`io_uring`):**
+Because Seccomp-BPF is blind to operations submitted via `io_uring` rings, the Profiler automatically enables an **Audit-Assisted Sensor**. By applying a restrictive Landlock ruleset (denying everything except essential JVM classpath), the kernel is forced to emit `LANDLOCK_ACCESS` audit records for every other VFS or Network operation, including those originating from `io_uring` kernel worker threads. The `ProfilerDaemon` asynchronously ingests these kernel audit logs, extracts absolute paths, and merges them into the trace stream. This allows the profiler to correctly build Bills of Behavior for high-performance async applications while remaining unprivileged (to install).
 
 *   **Targeted Filtering:** The JVM installs a `USER_NOTIF` seccomp filter *only* on the specific worker thread executing the task.
+...
 *   **FD Exfiltration:** Using FFM API and `sendmsg` (`SCM_RIGHTS`), the worker JVM passes the seccomp file descriptor to an external, lightweight Java daemon process.
 *   **Deadlock Immunity:** Because the supervisor runs in a completely separate OS process, its JVM safepoints are physically isolated from the main JVM. It cannot cause a safepoint deadlock.
-*   **Zero-Crash Execution (`FLAG_CONTINUE`):** When a worker thread blocks on a syscall, the external supervisor reads the notification struct. If the syscall takes pointer arguments (like `openat` file paths), the supervisor inspects the worker's memory via `process_vm_readv()`. After logging the operation, the supervisor replies to the kernel with `SECCOMP_USER_NOTIF_FLAG_CONTINUE` (Linux 5.5+). This guarantees the kernel executes the syscall natively without requiring dangerous user-space emulation.
+*   **Zero-Crash Execution (`FLAG_CONTINUE`):** When a worker thread blocks on a syscall, the external supervisor reads the notification struct. If the syscall takes pointer arguments (like `openat` file paths), the supervisor inspects the worker's memory via `process_vm_readv()` and resolves absolute paths by inspecting `/proc/[pid]/fd/`. After logging the operation to a binary stream back to the JVM, the supervisor replies to the kernel with `SECCOMP_USER_NOTIF_FLAG_CONTINUE` (Linux 5.5+). This guarantees the kernel executes the syscall natively without requiring dangerous user-space emulation.
+
+### Multi-Thread Synchronization (`TSYNC`) Hazard
+While `LANDLOCK_RESTRICT_SELF_TSYNC` (ABI 8) provides process-wide atomic sandboxing, it is **unsuitable for standard JVM test runners**. Because it sandboxes sibling threads, it breaks Gradle worker transparency and causes `Permission Denied` crashes on unrelated tasks. The profiler maintains TSYNC implementation for production baselines but disables it by default during profiling and testing to maintain suite stability.
 
 ```
 Worker Thread (JVM 1)         Kernel            Supervisor Daemon (JVM 2)
-      │                         │                         │
+...
       ├─ sys_openat() ─────────►│                         │
       │                         ├─ USER_NOTIF ───────────►│
       │   (Paused)              │                         ├─ Read syscall & args
@@ -181,8 +187,8 @@ At the end of a profiling run (regardless of the Tier chosen), the accumulated J
 // Automatically compiled and emitted by BobCompiler:
 val policy = Policy.builder()
     .base(Policy.PURE_COMPUTE)
-    // Syscall whitelists compiled from trace logs:
-    .allowSyscalls(
+    // Syscall whitelists compiled from trace events:
+    .unblock(
         Syscall.READ, 
         Syscall.WRITE, 
         Syscall.EPOLL_WAIT,

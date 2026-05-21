@@ -47,10 +47,19 @@ Attackers may use `execveat` to execute programs relative to a directory file de
 *   **Mitigation:** `jseccomp` explicitly blocks `EXECVEAT` in all `NO_EXEC` policies.
 
 ### Asynchronous Evasion (`io_uring`)
-Modern Linux systems support `io_uring` for high-performance asynchronous I/O. Attackers increasingly abuse this subsystem to bypass seccomp filters. Because operations are submitted via a shared memory ring queue rather than individual syscalls, a standard seccomp profile might not "see" the read/write/exec operations happening inside the ring.
+Modern Linux systems support `io_uring` for high-performance asynchronous I/O. Attackers increasingly abuse this subsystem to bypass seccomp filters. Because operations are submitted via a shared memory ring queue and executed by kernel worker threads (`io-wq`), a standard seccomp filter on the application thread is completely blind to the operations happening inside the ring.
 
-A useful mental model is this: **eBPF sees the action; Seccomp only sees the ring.** Because Seccomp is "blind" to the contents of these shared memory buffers, `jseccomp` adopts a conservative stance: *"Since I can't see into your rings, you aren't allowed to have rings."*
-*   **Mitigation:** `jseccomp` explicitly blocks `io_uring_setup` in its strict policies. The standard JVM (currently) relies heavily on standard NIO/epoll and does not require `io_uring` for application-level worker threads.
+**The Dual-Sensor Solution:**
+To build accurate policies for `io_uring` applications, `jseccomp` implements an **Audit-Assisted Profiler**.
+1.  **Seccomp Sensor:** Intercepts synchronous syscalls using `USER_NOTIF`.
+2.  **Landlock Audit Sensor:** By applying a restrictive Landlock ruleset (denying everything except the JVM classpath), the kernel is forced to emit `AUDIT_LANDLOCK_ACCESS` records to the kernel audit subsystem for every other operation, including those originating from `io_uring`.
+
+**The Audit Privilege Barrier:**
+While Landlock itself is unprivileged to *install*, the kernel audit subsystem is a global resource. Reading these logs (e.g. from `/dev/kmsg`) requires `CAP_SYSLOG` or `CAP_AUDIT_READ`. 
+*   **Production Implication:** `io_uring` profiling is best suited for hardened CI environments where these capabilities can be granted to the profiler daemon. 
+*   **Fail-Closed Mandate:** By default, the profiler will fail if it cannot initialize the audit sensor, ensuring no asynchronous operations are silently missed unless explicitly configured via `JSECCOMP_PROFILER_FAIL_ON_AUDIT_ERROR=false`.
+
+*   **Mitigation:** In production, `jseccomp` explicitly blocks `io_uring_setup` in its strict policies. The standard JVM (currently) relies heavily on standard NIO/epoll and does not require `io_uring` for application-level worker threads.
 
 ### Binary Shellcode Injection
 If an attacker cannot spawn a process, they will attempt to inject raw machine code (shellcode) into the JVM's memory. To run this code, they must mark the memory as executable using `mprotect` or `mmap`.
@@ -113,6 +122,13 @@ However, the necessity of this OCI-level block can be evaluated against kernel-l
 Given these kernel-level invariants, blocking unprivileged seccomp filter installation inside containers does not prevent privilege escalation, since the kernel already enforces an immutable boundary. The primary risk re-introduced by whitelisting `seccomp` and `prctl(PR_SET_SECCOMP)` is a minor increase in BPF verifier exposure. 
 
 A potential architectural alternative for OCI specifications would be to permit nested filter installation by default whenever the container is configured with `allowPrivilegeEscalation: false` (which pre-emptively enforces `PR_SET_NO_NEW_PRIVS`). This would allow secure, application-level sandboxing (such as thread-scoped containment) to be deployed natively within standardized container environments without requiring custom profiles.
+
+### Landlock Multi-Thread Synchronization (`TSYNC`) Hazards
+Linux 7.0+ (ABI 8) introduces `LANDLOCK_RESTRICT_SELF_TSYNC`, which allows applying a Landlock ruleset to all threads in a process atomically. While highly secure for production baselines, it introduces significant technical debt in JVM environments:
+
+*   **Sibling Thread Transparency:** The JVM is a massive, multi-threaded engine. Sibling threads (like Gradle workers, background GC threads, or JIT threads) may need to perform operations (like managing `build/tmp`) that the sandboxed worker thread is restricted from. 
+*   **Test Suite Collisions:** Standard JVM test runners assume they have full control over the process memory space. Applying TSYNC inside a test will sandbox the entire runner process, leading to `AccessDeniedException` and `Permission Denied` crashes on completely unrelated sibling threads.
+*   **Architecture Decision:** For these reasons, `jseccomp` keeps TSYNC **disabled by default**. It is reserved for Tier 1 (Process-Wide) startup lockdowns where the entire JVM life-cycle is intended to be constrained.
 
 ---
 
@@ -386,3 +402,37 @@ spec:
 
 ### Compatibility with K8s Pod Security Standards (PSA)
 This custom configuration is **100% compliant with the strict "Restricted" Pod Security Standard** (PSA). The Restricted standard requires pods to enforce `seccompProfile.type: RuntimeDefault` or `Localhost` with a profile. Because we use a verified `Localhost` custom profile that drops standard system privileges while leaving stacking whitelisted, the deployment remains secure, compliant, and unprivileged.
+
+---
+
+## 14. Yama ptrace_scope & Out-of-Process Memory Profiling (Tier S)
+
+To implement safe, precise system call profiling without triggering JVM safepoint deadlocks, `jseccomp` implements the out-of-process BPF supervisor architecture utilizing the kernel's `SECCOMP_RET_USER_NOTIF` interface. This supervisor is spawned as a sibling daemon process and reads the memory of the sandboxed target JVM process via `process_vm_readv` to extract file paths and socket addresses.
+
+However, modern Linux distributions and container environments harden inter-process access using the Yama Linux Security Module (LSM).
+
+### The Yama ptrace_scope Trap
+By default, Yama restricts which processes can perform ptrace operations (including `process_vm_readv` and `process_vm_writev`) by configuring `/proc/sys/kernel/yama/ptrace_scope` (typically set to `1` on modern systems):
+- **ptrace_scope = 0 (Classic):** A process can ptrace/read memory of any other process running under the same UID.
+- **ptrace_scope = 1 (Restricted):** A process may only attach to or read memory of descendant processes (e.g., its children or grandchildren), unless explicitly authorized.
+
+Because our profiling daemon is spawned as a **child** process of the main JVM (making the main JVM the parent), standard Yama restrictions prevent the child daemon from calling `process_vm_readv` on its parent JVM process, resulting in `EPERM` (Operation not permitted).
+
+### The Mitigation: PR_SET_PTRACER
+To resolve this permission boundary without requiring elevated privileges or broad CAP_SYS_PTRACE capabilities, the parent JVM process must explicitly declare the child daemon as an authorized tracer.
+
+Immediately upon spawning the daemon process, `jseccomp` invokes `prctl` with the `PR_SET_PTRACER` option:
+
+```kotlin
+// Set the daemon process as our allowed ptrace tracer under Yama
+val daemonPid = daemonProcess.pid()
+LinuxNative.prctl(0x59616d61, daemonPid, 0, 0, 0)
+```
+
+This instructs the Yama LSM to allow the specified daemon process to read the parent's memory, enabling high-performance, out-of-process argument resolution for all thread-scoped sandboxed operations.
+
+### Grandchild Process Boundaries
+Note that grandchild processes (e.g. processes spawned by `ProcessBuilder` within a sandboxed thread pool, like `echo` or helper scripts) do not inherit this ptrace tracer permission, and cannot easily invoke `prctl` to declare the daemon as a tracer. As a result, the daemon's `process_vm_readv` calls on grandchild processes will still return `EPERM` under `ptrace_scope = 1`.
+
+The `jseccomp` supervisor handles this constraint gracefully: if a `process_vm_readv` call returns `EPERM` on a grandchild process (like during `execve`), the supervisor intercepts the system call, logs the raw address registers, and continues executing it natively without crashing or blocking the worker.
+

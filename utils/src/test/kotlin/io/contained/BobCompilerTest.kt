@@ -7,17 +7,26 @@ import kotlin.test.assertTrue
 class BobCompilerTest {
 
     @Test
-    fun `test compiling various logs to policy and DSL`() {
-        val logs = listOf(
-            "[PROFILER] pid=12345 syscall=CONNECT args=[3, 139626353982016, 16, 0, 0, 0]",
-            "[PROFILER] pid=12345 syscall=OPENAT args=[0, 139626353983000, 0, 0, 0, 0] paths=/etc/hostname", // O_RDONLY
-            "[PROFILER] pid=12345 syscall=OPEN args=[139626353983000, 1, 0, 0, 0, 0] paths=/tmp/write-test.txt", // O_WRONLY
-            "[PROFILER] pid=12345 syscall=MKDIR args=[139626353983000, 0, 0, 0, 0, 0] paths=/tmp/new-dir",
-            "Random unrelated garbage log message"
+    fun `test compiling various events to policy and DSL`() {
+        val events = listOf(
+            TraceEvent(12345, "CONNECT", longArrayOf(3, 139626353982016, 16, 0, 0, 0), emptyList()),
+            TraceEvent(
+                12345,
+                "OPENAT",
+                longArrayOf(0, 139626353983000, 0, 0, 0, 0),
+                listOf("/etc/hostname")
+            ), // O_RDONLY
+            TraceEvent(
+                12345,
+                "OPEN",
+                longArrayOf(139626353983000, 1, 0, 0, 0, 0),
+                listOf("/tmp/write-test.txt")
+            ), // O_WRONLY
+            TraceEvent(12345, "MKDIR", longArrayOf(139626353983000, 0, 0, 0, 0, 0), listOf("/tmp/new-dir"))
         )
 
         // Compile to Policy
-        val policy = BobCompiler.compile(logs, Policy.PURE_COMPUTE)
+        val policy = BobCompiler.compile(events, Policy.PURE_COMPUTE)
 
         // Verify unblocked syscalls
         // PURE_COMPUTE blocks CONNECT, OPEN, OPENAT. They should be unblocked now.
@@ -38,7 +47,7 @@ class BobCompilerTest {
         assertTrue(policy.allowedFsWritePaths.contains("/tmp/new-dir"), "Should contain write path")
 
         // Compile to DSL
-        val dsl = BobCompiler.compileToDsl(logs, "Policy.PURE_COMPUTE")
+        val dsl = BobCompiler.compileToDsl(events, "Policy.PURE_COMPUTE")
         println("Generated DSL:\n$dsl")
 
         val expectedDsl = """
@@ -60,7 +69,7 @@ val policy = Policy.builder()
     }
 
     @Test
-    fun `test empty logs returns unmodified base policy`() {
+    fun `test empty events returns unmodified base policy`() {
         val policy = BobCompiler.compile(emptyList(), Policy.PURE_COMPUTE)
         val arch = Arch.current()
         val blocked = policy.blockedSyscalls(arch).toSet()

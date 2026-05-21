@@ -3,9 +3,15 @@ services:
     build: .
     volumes:
       - .:/workspace
+    # Audit subsystem requires sharing the host network namespace and initial user namespace.
+    # This is necessary for the Profiler to ingest asynchronous io_uring operations.
+    network_mode: host
+    userns: host
+    cap_add:
+      - AUDIT_READ
+      - AUDIT_CONTROL
     # Workaround for Podman: Use annotation instead of security_opt
-    # to prevent Docker Compose from reading and passing the raw JSON string
-    # which causes an ENAMETOOLONG "file name too long" error in Podman.
+    # to prevent Docker Compose from reading and passing the raw JSON string.
     annotations:
       io.podman.annotations.seccomp: ${PWD}/docker-seccomp.json
     working_dir: /workspace

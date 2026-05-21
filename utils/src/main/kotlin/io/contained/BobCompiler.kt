@@ -3,26 +3,24 @@ package io.contained
 import java.util.Locale
 
 /**
- * BobCompiler parses system call trace logs produced by the Profiler session
+ * BobCompiler parses system call trace events produced by the Profiler session
  * and aggregates them into a live Policy object or a beautiful, copy-pasteable Kotlin DSL snippet.
  */
 object BobCompiler {
 
     /**
-     * Parses the given profiler trace logs and returns a live Policy object.
+     * Parses the given profiler trace events and returns a live Policy object.
      * Starts from the given basePolicy, and unblocks the system calls that were intercepted.
      */
-    fun compile(logs: List<String>, basePolicy: Policy = Policy.PURE_COMPUTE): Policy {
+    fun compile(events: List<TraceEvent>, basePolicy: Policy = Policy.PURE_COMPUTE): Policy {
         val interceptedSyscalls = mutableSetOf<Syscall>()
         val fsReadPaths = mutableSetOf<String>()
         val fsWritePaths = mutableSetOf<String>()
 
-        for (line in logs) {
-            val trace = parseLine(line) ?: continue
-            
+        for (event in events) {
             // Map the syscall name to Syscall enum
             val syscall = try {
-                Syscall.valueOf(trace.syscallName.uppercase(Locale.US))
+                Syscall.valueOf(event.syscallName.uppercase(Locale.US))
             } catch (e: IllegalArgumentException) {
                 null
             }
@@ -32,8 +30,8 @@ object BobCompiler {
             }
 
             // Categorize paths
-            val isWrite = isFileSystemMutation(trace.syscallName) || isOpenWrite(trace.syscallName, trace.args)
-            for (path in trace.paths) {
+            val isWrite = isFileSystemMutation(event.syscallName) || isOpenWrite(event.syscallName, event.args)
+            for (path in event.paths) {
                 if (isWrite) {
                     fsWritePaths.add(path)
                 } else {
@@ -44,7 +42,7 @@ object BobCompiler {
 
         // We only unblock syscalls that were actually blocked by the base policy!
         val builder = Policy.builder().base(basePolicy)
-        
+
         // Remove intercepted syscalls from blocklist
         builder.unblock(*interceptedSyscalls.toTypedArray())
 
@@ -60,25 +58,24 @@ object BobCompiler {
     }
 
     /**
-     * Compiles the profiler logs into a clean, ready-to-use Kotlin DSL code string.
+     * Compiles the profiler events into a clean, ready-to-use Kotlin DSL code string.
      */
-    fun compileToDsl(logs: List<String>, basePolicyName: String = "Policy.PURE_COMPUTE"): String {
+    fun compileToDsl(events: List<TraceEvent>, basePolicyName: String = "Policy.PURE_COMPUTE"): String {
         val interceptedSyscalls = mutableSetOf<Syscall>()
         val fsReadPaths = mutableSetOf<String>()
         val fsWritePaths = mutableSetOf<String>()
 
-        for (line in logs) {
-            val trace = parseLine(line) ?: continue
+        for (event in events) {
             val syscall = try {
-                Syscall.valueOf(trace.syscallName.uppercase(Locale.US))
+                Syscall.valueOf(event.syscallName.uppercase(Locale.US))
             } catch (e: IllegalArgumentException) {
                 null
             }
             if (syscall != null) {
                 interceptedSyscalls.add(syscall)
             }
-            val isWrite = isFileSystemMutation(trace.syscallName) || isOpenWrite(trace.syscallName, trace.args)
-            for (path in trace.paths) {
+            val isWrite = isFileSystemMutation(event.syscallName) || isOpenWrite(event.syscallName, event.args)
+            for (path in event.paths) {
                 if (isWrite) {
                     fsWritePaths.add(path)
                 } else {
@@ -133,54 +130,4 @@ object BobCompiler {
         val hasCreateOrTrunc = (flags and 64L) != 0L || (flags and 512L) != 0L // O_CREAT = 64, O_TRUNC = 512
         return isWriteMode || hasCreateOrTrunc
     }
-
-    private fun parseLine(line: String): TraceInfo? {
-        if (!line.contains("[PROFILER]")) return null
-        
-        val syscallStartIndex = line.indexOf("syscall=")
-        if (syscallStartIndex == -1) return null
-        val syscallEndIndex = line.indexOf(" ", syscallStartIndex)
-        val syscallName = if (syscallEndIndex == -1) {
-            line.substring(syscallStartIndex + 8)
-        } else {
-            line.substring(syscallStartIndex + 8, syscallEndIndex)
-        }
-
-        val argsStartIndex = line.indexOf("args=[")
-        val args = if (argsStartIndex != -1) {
-            val argsEndIndex = line.indexOf("]", argsStartIndex)
-            if (argsEndIndex != -1) {
-                val argsStr = line.substring(argsStartIndex + 6, argsEndIndex)
-                if (argsStr.trim().isEmpty()) {
-                    LongArray(0)
-                } else {
-                    argsStr.split(",").map { it.trim().toLongOrNull() ?: 0L }.toLongArray()
-                }
-            } else {
-                LongArray(0)
-            }
-        } else {
-            LongArray(0)
-        }
-
-        val pathsStartIndex = line.indexOf("paths=")
-        val paths = if (pathsStartIndex != -1) {
-            val pathsStr = line.substring(pathsStartIndex + 6)
-            if (pathsStr.trim().isEmpty()) {
-                emptyList<String>()
-            } else {
-                pathsStr.split(",").map { it.trim() }.filter { it.isNotEmpty() }
-            }
-        } else {
-            emptyList<String>()
-        }
-
-        return TraceInfo(syscallName, args, paths)
-    }
-
-    private class TraceInfo(
-        val syscallName: String,
-        val args: LongArray,
-        val paths: List<String>
-    )
 }

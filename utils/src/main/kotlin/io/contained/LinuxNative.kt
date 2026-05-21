@@ -18,7 +18,6 @@ object LinuxNative {
 
     private val PRCTL: MethodHandle
     private val SYSCALL: MethodHandle
-    private val SYSCALL4: MethodHandle
     private val OPEN: MethodHandle
     private val CLOSE: MethodHandle
     private val SOCKETPAIR: MethodHandle
@@ -32,6 +31,9 @@ object LinuxNative {
     private val IOCTL_ADDR: MethodHandle
     private val IOCTL_LONG: MethodHandle
     private val PROCESS_VM_READV: MethodHandle
+    private val READLINK: MethodHandle
+    private val READ: MethodHandle
+    private val WRITE: MethodHandle
 
     val ERRNO_LAYOUT: StructLayout = Linker.Option.captureStateLayout()
     private val ERRNO_OFFSET = ERRNO_LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("errno"))
@@ -81,6 +83,26 @@ object LinuxNative {
         MemoryLayout.sequenceLayout(108, ValueLayout.JAVA_BYTE).withName("sun_path")
     )
 
+    // Netlink constants & layouts
+    const val AF_NETLINK = 16
+    const val NETLINK_AUDIT = 9
+
+    val NLMSGHDR_LAYOUT = MemoryLayout.structLayout(
+        ValueLayout.JAVA_INT.withName("nlmsg_len"),
+        ValueLayout.JAVA_SHORT.withName("nlmsg_type"),
+        ValueLayout.JAVA_SHORT.withName("nlmsg_flags"),
+        ValueLayout.JAVA_INT.withName("nlmsg_seq"),
+        ValueLayout.JAVA_INT.withName("nlmsg_pid")
+    )
+    val NLMSG_HDRLEN = NLMSGHDR_LAYOUT.byteSize()
+    
+    val SOCKADDR_NL_LAYOUT = MemoryLayout.structLayout(
+        ValueLayout.JAVA_SHORT.withName("nl_family"),
+        ValueLayout.JAVA_SHORT.withName("nl_pad"),
+        ValueLayout.JAVA_INT.withName("nl_pid"),
+        ValueLayout.JAVA_INT.withName("nl_groups")
+    )
+
     // Seccomp User Notification Layouts
     val SECCOMP_DATA_LAYOUT: StructLayout = MemoryLayout.structLayout(
         ValueLayout.JAVA_INT.withName("nr"),
@@ -104,72 +126,168 @@ object LinuxNative {
     )
 
     init {
-        PRCTL = downcall("prctl", FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.JAVA_INT, ValueLayout.JAVA_LONG, ValueLayout.JAVA_LONG, ValueLayout.JAVA_LONG, ValueLayout.JAVA_LONG), Linker.Option.captureCallState("errno"))
-        SYSCALL = downcall("syscall", FunctionDescriptor.of(ValueLayout.JAVA_LONG, ValueLayout.JAVA_LONG, ValueLayout.JAVA_LONG, ValueLayout.JAVA_LONG, ValueLayout.ADDRESS), Linker.Option.captureCallState("errno"), Linker.Option.firstVariadicArg(1))
-        SYSCALL4 = downcall("syscall", FunctionDescriptor.of(ValueLayout.JAVA_LONG, ValueLayout.JAVA_LONG, ValueLayout.JAVA_LONG, ValueLayout.JAVA_LONG, ValueLayout.ADDRESS, ValueLayout.JAVA_INT), Linker.Option.captureCallState("errno"), Linker.Option.firstVariadicArg(1))
-        OPEN = downcall("open", FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.ADDRESS, ValueLayout.JAVA_INT), Linker.Option.captureCallState("errno"))
-        CLOSE = downcall("close", FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.JAVA_INT), Linker.Option.captureCallState("errno"))
-        SOCKETPAIR = downcall("socketpair", FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.JAVA_INT, ValueLayout.JAVA_INT, ValueLayout.JAVA_INT, ValueLayout.ADDRESS), Linker.Option.captureCallState("errno"))
-        SOCKET = downcall("socket", FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.JAVA_INT, ValueLayout.JAVA_INT, ValueLayout.JAVA_INT), Linker.Option.captureCallState("errno"))
-        BIND = downcall("bind", FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.JAVA_INT, ValueLayout.ADDRESS, ValueLayout.JAVA_INT), Linker.Option.captureCallState("errno"))
-        LISTEN = downcall("listen", FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.JAVA_INT, ValueLayout.JAVA_INT), Linker.Option.captureCallState("errno"))
-        ACCEPT = downcall("accept", FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.JAVA_INT, ValueLayout.ADDRESS, ValueLayout.ADDRESS), Linker.Option.captureCallState("errno"))
-        CONNECT = downcall("connect", FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.JAVA_INT, ValueLayout.ADDRESS, ValueLayout.JAVA_INT), Linker.Option.captureCallState("errno"))
-        SENDMSG = downcall("sendmsg", FunctionDescriptor.of(ValueLayout.JAVA_LONG, ValueLayout.JAVA_INT, ValueLayout.ADDRESS, ValueLayout.JAVA_INT), Linker.Option.captureCallState("errno"))
-        RECVMSG = downcall("recvmsg", FunctionDescriptor.of(ValueLayout.JAVA_LONG, ValueLayout.JAVA_INT, ValueLayout.ADDRESS, ValueLayout.JAVA_INT), Linker.Option.captureCallState("errno"))
-        IOCTL_ADDR = downcall("ioctl", FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.JAVA_INT, ValueLayout.JAVA_LONG, ValueLayout.ADDRESS), Linker.Option.captureCallState("errno"))
-        IOCTL_LONG = downcall("ioctl", FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.JAVA_INT, ValueLayout.JAVA_LONG, ValueLayout.JAVA_LONG), Linker.Option.captureCallState("errno"))
-        PROCESS_VM_READV = downcall("process_vm_readv", FunctionDescriptor.of(ValueLayout.JAVA_LONG, ValueLayout.JAVA_INT, ValueLayout.ADDRESS, ValueLayout.JAVA_LONG, ValueLayout.ADDRESS, ValueLayout.JAVA_LONG, ValueLayout.JAVA_LONG), Linker.Option.captureCallState("errno"))
+        PRCTL = downcall(
+            "prctl",
+            FunctionDescriptor.of(
+                ValueLayout.JAVA_INT,
+                ValueLayout.JAVA_INT,
+                ValueLayout.JAVA_LONG,
+                ValueLayout.JAVA_LONG,
+                ValueLayout.JAVA_LONG,
+                ValueLayout.JAVA_LONG
+            ),
+            Linker.Option.captureCallState("errno")
+        )
+        // Correct syscall(2) downcall: fixed signature with 7 long arguments.
+        // number + 6 args. This is more reliable for kernel calls than variadic FFM.
+        SYSCALL = downcall(
+            "syscall",
+            FunctionDescriptor.of(
+                ValueLayout.JAVA_LONG,
+                ValueLayout.JAVA_LONG, // nr
+                ValueLayout.JAVA_LONG, // a1
+                ValueLayout.JAVA_LONG, // a2
+                ValueLayout.JAVA_LONG, // a3
+                ValueLayout.JAVA_LONG, // a4
+                ValueLayout.JAVA_LONG, // a5
+                ValueLayout.JAVA_LONG  // a6
+            ),
+            Linker.Option.captureCallState("errno")
+        )
+        OPEN = downcall(
+            "open",
+            FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.ADDRESS, ValueLayout.JAVA_INT),
+            Linker.Option.captureCallState("errno")
+        )
+        CLOSE = downcall(
+            "close",
+            FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.JAVA_INT),
+            Linker.Option.captureCallState("errno")
+        )
+        SOCKETPAIR = downcall(
+            "socketpair",
+            FunctionDescriptor.of(
+                ValueLayout.JAVA_INT,
+                ValueLayout.JAVA_INT,
+                ValueLayout.JAVA_INT,
+                ValueLayout.JAVA_INT,
+                ValueLayout.ADDRESS
+            ),
+            Linker.Option.captureCallState("errno")
+        )
+        SOCKET = downcall(
+            "socket",
+            FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.JAVA_INT, ValueLayout.JAVA_INT, ValueLayout.JAVA_INT),
+            Linker.Option.captureCallState("errno")
+        )
+        BIND = downcall(
+            "bind",
+            FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.JAVA_INT, ValueLayout.ADDRESS, ValueLayout.JAVA_INT),
+            Linker.Option.captureCallState("errno")
+        )
+        LISTEN = downcall(
+            "listen",
+            FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.JAVA_INT, ValueLayout.JAVA_INT),
+            Linker.Option.captureCallState("errno")
+        )
+        ACCEPT = downcall(
+            "accept",
+            FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.JAVA_INT, ValueLayout.ADDRESS, ValueLayout.ADDRESS),
+            Linker.Option.captureCallState("errno")
+        )
+        CONNECT = downcall(
+            "connect",
+            FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.JAVA_INT, ValueLayout.ADDRESS, ValueLayout.JAVA_INT),
+            Linker.Option.captureCallState("errno")
+        )
+        SENDMSG = downcall(
+            "sendmsg",
+            FunctionDescriptor.of(ValueLayout.JAVA_LONG, ValueLayout.JAVA_INT, ValueLayout.ADDRESS, ValueLayout.JAVA_INT),
+            Linker.Option.captureCallState("errno")
+        )
+        RECVMSG = downcall(
+            "recvmsg",
+            FunctionDescriptor.of(ValueLayout.JAVA_LONG, ValueLayout.JAVA_INT, ValueLayout.ADDRESS, ValueLayout.JAVA_INT),
+            Linker.Option.captureCallState("errno")
+        )
+        IOCTL_ADDR = downcall(
+            "ioctl",
+            FunctionDescriptor.of(
+                ValueLayout.JAVA_INT,
+                ValueLayout.JAVA_INT,
+                ValueLayout.JAVA_LONG,
+                ValueLayout.ADDRESS
+            ),
+            Linker.Option.captureCallState("errno")
+        )
+        IOCTL_LONG = downcall(
+            "ioctl",
+            FunctionDescriptor.of(
+                ValueLayout.JAVA_INT,
+                ValueLayout.JAVA_INT,
+                ValueLayout.JAVA_LONG,
+                ValueLayout.JAVA_LONG
+            ),
+            Linker.Option.captureCallState("errno")
+        )
+        PROCESS_VM_READV = downcall(
+            "process_vm_readv",
+            FunctionDescriptor.of(
+                ValueLayout.JAVA_LONG,
+                ValueLayout.JAVA_INT,
+                ValueLayout.ADDRESS,
+                ValueLayout.JAVA_LONG,
+                ValueLayout.ADDRESS,
+                ValueLayout.JAVA_LONG,
+                ValueLayout.JAVA_LONG
+            ),
+            Linker.Option.captureCallState("errno")
+        )
+        READLINK = downcall(
+            "readlink",
+            FunctionDescriptor.of(ValueLayout.JAVA_LONG, ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.JAVA_LONG),
+            Linker.Option.captureCallState("errno")
+        )
+        READ = downcall(
+            "read",
+            FunctionDescriptor.of(ValueLayout.JAVA_LONG, ValueLayout.JAVA_INT, ValueLayout.ADDRESS, ValueLayout.JAVA_LONG),
+            Linker.Option.captureCallState("errno")
+        )
+        WRITE = downcall(
+            "write",
+            FunctionDescriptor.of(ValueLayout.JAVA_LONG, ValueLayout.JAVA_INT, ValueLayout.ADDRESS, ValueLayout.JAVA_LONG),
+            Linker.Option.captureCallState("errno")
+        )
     }
 
-    private fun downcall(name: String, desc: FunctionDescriptor, vararg options: Linker.Option): MethodHandle {
-        val symbol = stdlib.find(name).orElse(null) ?: run {
-            val ex = UnsupportedOperationException("Symbol $name not found in libc")
-            val throwingHandle = MethodHandles.insertArguments(
-                MethodHandles.throwException(desc.returnLayout().get().javaWithFallback(), UnsupportedOperationException::class.java),
-                0, ex
-            )
-            val argTypes = desc.argumentLayouts().map { it.javaWithFallback() }.toTypedArray()
-            return MethodHandles.dropArguments(throwingHandle, 0, *argTypes)
-        }
-        return linker.downcallHandle(symbol, desc, *options)
+    data class SyscallResult(val returnValue: Long, val errno: Int)
+
+    private fun Any?.toLong(): Long = when(this) {
+        is Number -> this.toLong()
+        is MemorySegment -> this.address()
+        null -> 0L
+        else -> throw IllegalArgumentException("Unsupported native call argument type: ${this.javaClass.name}")
     }
 
-    private fun MemoryLayout.javaWithFallback(): Class<*> = when (this) {
-        is ValueLayout.OfInt -> Int::class.javaPrimitiveType!!
-        is ValueLayout.OfLong -> Long::class.javaPrimitiveType!!
-        else -> MemorySegment::class.java
-    }
-
-    fun prctl(option: Int, arg2: Long, arg3: Long, arg4: Long, arg5: Long): SyscallResult {
+    fun prctl(option: Int, arg2: Any? = 0L, arg3: Any? = 0L, arg4: Any? = 0L, arg5: Any? = 0L): SyscallResult {
         Arena.ofConfined().use { arena ->
             val capturedState = arena.allocate(ERRNO_LAYOUT)
-            val ret = PRCTL.invokeExact(capturedState, option, arg2, arg3, arg4, arg5) as Int
+            val ret = PRCTL.invokeExact(capturedState, option, arg2.toLong(), arg3.toLong(), arg4.toLong(), arg5.toLong()) as Int
             val errno = capturedState.get(ValueLayout.JAVA_INT, ERRNO_OFFSET)
             return SyscallResult(ret.toLong(), errno)
         }
     }
 
-    fun prctl(option: Int, arg2: Long, arg3ptr: MemorySegment, arg4: Long, arg5: Long): SyscallResult =
-        prctl(option, arg2, arg3ptr.address(), arg4, arg5)
-
-    fun syscall(number: Long, arg1: Long, arg2: Long, arg3: MemorySegment): SyscallResult {
+    fun syscall(nr: Long, a1: Any? = 0L, a2: Any? = 0L, a3: Any? = 0L, a4: Any? = 0L, a5: Any? = 0L, a6: Any? = 0L): SyscallResult {
         Arena.ofConfined().use { arena ->
             val capturedState = arena.allocate(ERRNO_LAYOUT)
-            val ret = SYSCALL.invokeExact(capturedState, number, arg1, arg2, arg3) as Long
+            val ret = SYSCALL.invokeExact(capturedState, nr, a1.toLong(), a2.toLong(), a3.toLong(), a4.toLong(), a5.toLong(), a6.toLong()) as Long
             val errno = capturedState.get(ValueLayout.JAVA_INT, ERRNO_OFFSET)
             return SyscallResult(ret, errno)
         }
     }
-
-    fun syscall(number: Long, arg1: Long, arg2: Long, arg3: MemorySegment, arg4: Int): SyscallResult {
-        Arena.ofConfined().use { arena ->
-            val capturedState = arena.allocate(ERRNO_LAYOUT)
-            val ret = SYSCALL4.invokeExact(capturedState, number, arg1, arg2, arg3, arg4) as Long
-            val errno = capturedState.get(ValueLayout.JAVA_INT, ERRNO_OFFSET)
-            return SyscallResult(ret, errno)
-        }
-    }
+    
+    fun syscall4(nr: Long, a1: Any?, a2: Any?, a3: Any?, a4: Any?): SyscallResult = syscall(nr, a1, a2, a3, a4)
 
     fun open(path: MemorySegment, flags: Int): SyscallResult {
         Arena.ofConfined().use { arena ->
@@ -288,76 +406,122 @@ object LinuxNative {
         }
     }
 
+    fun readlink(path: MemorySegment, buf: MemorySegment, bufsiz: Long): SyscallResult {
+        Arena.ofConfined().use { arena ->
+            val capturedState = arena.allocate(ERRNO_LAYOUT)
+            val ret = READLINK.invokeExact(capturedState, path, buf, bufsiz) as Long
+            val errno = capturedState.get(ValueLayout.JAVA_INT, ERRNO_OFFSET)
+            return SyscallResult(ret, errno)
+        }
+    }
+
+    fun read(fd: Int, buf: MemorySegment, count: Long): SyscallResult {
+        Arena.ofConfined().use { arena ->
+            val capturedState = arena.allocate(ERRNO_LAYOUT)
+            val ret = READ.invokeExact(capturedState, fd, buf, count) as Long
+            val errno = capturedState.get(ValueLayout.JAVA_INT, ERRNO_OFFSET)
+            return SyscallResult(ret, errno)
+        }
+    }
+
+    fun write(fd: Int, buf: MemorySegment, count: Long): SyscallResult {
+        Arena.ofConfined().use { arena ->
+            val capturedState = arena.allocate(ERRNO_LAYOUT)
+            val ret = WRITE.invokeExact(capturedState, fd, buf, count) as Long
+            val errno = capturedState.get(ValueLayout.JAVA_INT, ERRNO_OFFSET)
+            return SyscallResult(ret, errno)
+        }
+    }
+
     fun newSockFProg(arena: Arena, filters: Array<SockFilter>): MemorySegment {
         val filterArraySeg = arena.allocate(MemoryLayout.sequenceLayout(filters.size.toLong(), SOCK_FILTER_LAYOUT))
         for (i in filters.indices) {
             val f = filters[i]
             val offset = i * SOCK_FILTER_SIZE
             filterArraySeg.set(ValueLayout.JAVA_SHORT, offset, f.code)
-            filterArraySeg.set(ValueLayout.JAVA_BYTE, offset + 2, (f.jt.toInt() and 0xFF).toByte())
-            filterArraySeg.set(ValueLayout.JAVA_BYTE, offset + 3, (f.jf.toInt() and 0xFF).toByte())
+            filterArraySeg.set(ValueLayout.JAVA_BYTE, offset + 2, f.jt.toByte())
+            filterArraySeg.set(ValueLayout.JAVA_BYTE, offset + 3, f.jf.toByte())
             filterArraySeg.set(ValueLayout.JAVA_INT, offset + 4, f.k)
         }
-        
-        val progSeg = arena.allocate(SOCK_FPROG_LAYOUT)
-        progSeg.set(ValueLayout.JAVA_SHORT, SOCK_FPROG_LEN_OFFSET, filters.size.toShort())
-        progSeg.set(ValueLayout.ADDRESS, SOCK_FPROG_FILTER_OFFSET, filterArraySeg)
-        return progSeg
+        val prog = arena.allocate(SOCK_FPROG_LAYOUT)
+        prog.set(ValueLayout.JAVA_SHORT, SOCK_FPROG_LEN_OFFSET, filters.size.toShort())
+        prog.set(ValueLayout.ADDRESS, SOCK_FPROG_FILTER_OFFSET, filterArraySeg)
+        return prog
     }
 
-    data class SyscallResult(val returnValue: Long, val errno: Int)
+    private fun downcall(name: String, fd: FunctionDescriptor, vararg options: Linker.Option): MethodHandle {
+        val symbol = stdlib.find(name).orElse(null) ?: run {
+            val ex = UnsupportedOperationException("Symbol $name not found in libc")
+            val throwingHandle = MethodHandles.insertArguments(
+                MethodHandles.throwException(Int::class.java, UnsupportedOperationException::class.java),
+                0,
+                ex
+            )
+            return MethodHandles.dropArguments(throwingHandle, 0, *fd.argumentLayouts().map { it.javaType() }.toTypedArray())
+        }
+        return linker.downcallHandle(symbol, fd, *options)
+    }
+
+    private fun MemoryLayout.javaType(): Class<*> = when (this) {
+        is ValueLayout.OfByte -> Byte::class.java
+        is ValueLayout.OfShort -> Short::class.java
+        is ValueLayout.OfInt -> Int::class.java
+        is ValueLayout.OfLong -> Long::class.java
+        is ValueLayout.OfFloat -> Float::class.java
+        is ValueLayout.OfDouble -> Double::class.java
+        else -> MemorySegment::class.java
+    }
 
     // Landlock Layouts
     val LANDLOCK_RULESET_ATTR_LAYOUT = MemoryLayout.structLayout(
         ValueLayout.JAVA_LONG.withName("handled_access_fs"),
         ValueLayout.JAVA_LONG.withName("handled_access_net")
     )
-    val LANDLOCK_RULESET_ATTR_FS_OFFSET = LANDLOCK_RULESET_ATTR_LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("handled_access_fs"))
-    val LANDLOCK_RULESET_ATTR_NET_OFFSET = LANDLOCK_RULESET_ATTR_LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("handled_access_net"))
+    val LANDLOCK_RULESET_ATTR_FS_OFFSET =
+        LANDLOCK_RULESET_ATTR_LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("handled_access_fs"))
+    val LANDLOCK_RULESET_ATTR_NET_OFFSET =
+        LANDLOCK_RULESET_ATTR_LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("handled_access_net"))
 
-    val LANDLOCK_PATH_BENEATH_ATTR_LAYOUT = MemoryLayout.structLayout(
+    val LANDLOCK_PATH_BENEATH_ATTR_LAYOUT: StructLayout = MemoryLayout.structLayout(
         ValueLayout.JAVA_LONG.withByteAlignment(1).withName("allowed_access"),
         ValueLayout.JAVA_INT.withByteAlignment(1).withName("parent_fd")
         // unaligned values prevent Java from adding padding, matching kernel packed struct
     )
-    val LANDLOCK_PATH_BENEATH_ATTR_ACCESS_OFFSET = LANDLOCK_PATH_BENEATH_ATTR_LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("allowed_access"))
-    val LANDLOCK_PATH_BENEATH_ATTR_FD_OFFSET = LANDLOCK_PATH_BENEATH_ATTR_LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("parent_fd"))
+    val LANDLOCK_PATH_BENEATH_ATTR_ACCESS_OFFSET =
+        LANDLOCK_PATH_BENEATH_ATTR_LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("allowed_access"))
+    val LANDLOCK_PATH_BENEATH_ATTR_FD_OFFSET =
+        LANDLOCK_PATH_BENEATH_ATTR_LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("parent_fd"))
 
+    // Landlock system call numbers & constants
     const val LANDLOCK_CREATE_RULESET_NR = 444L
     const val LANDLOCK_ADD_RULE_NR = 445L
     const val LANDLOCK_RESTRICT_SELF_NR = 446L
-
-    const val LANDLOCK_CREATE_RULESET_VERSION = 1L
     const val LANDLOCK_RULE_PATH_BENEATH = 1
-
-    const val O_PATH = 2097152
-    const val O_CLOEXEC = 524288
-    const val O_NOFOLLOW = 131072
+    const val LANDLOCK_CREATE_RULESET_VERSION = (1L shl 0)
 
     const val PR_SET_NO_NEW_PRIVS = 38
-    const val PR_GET_NO_NEW_PRIVS = 39
-    const val PR_SET_SECCOMP = 22
-    const val PR_GET_SECCOMP = 21
-    const val SECCOMP_MODE_FILTER = 2
-    const val SECCOMP_RET_ERRNO = 0x00050000
-    const val SECCOMP_RET_ALLOW = 0x7fff0000
-    const val SECCOMP_RET_KILL_THREAD = 0x00000000
-    const val SECCOMP_RET_TRAP = 0x00030000
-    const val SECCOMP_RET_USER_NOTIF = 0x7fc00000
     const val SECCOMP_SET_MODE_FILTER = 1
-    const val SECCOMP_FILTER_FLAG_TSYNC = 1
+    const val SECCOMP_FILTER_FLAG_NEW_LISTENER = (1L shl 3)
+    const val SECCOMP_USER_NOTIF_FLAG_CONTINUE = (1L shl 0)
 
-    // Seccomp User Notification Constants
-    const val SECCOMP_FILTER_FLAG_NEW_LISTENER = 8
-    const val SECCOMP_USER_NOTIF_FLAG_CONTINUE = 1
-
-    // Ioctl macros
-    // SECCOMP_IOCTL_NOTIF_RECV = _IOWR('!', 0, struct seccomp_notif) = 0xc0502100 (size is 80 bytes = 0x50)
-    // SECCOMP_IOCTL_NOTIF_SEND = _IOWR('!', 1, struct seccomp_notif_resp) = 0xc0182101 (size is 24 bytes = 0x18)
-    // SECCOMP_IOCTL_NOTIF_ID_VALID = _IOW('!', 2, __u64) = 0x40082102 (size is 8 bytes = 0x08)
+    // ioctl codes for seccomp notification
+    // _IOW(0x21, 2, __u64) = 0x40082102 (size is 8 bytes = 0x08)
     const val SECCOMP_IOCTL_NOTIF_RECV = 0xc0502100L
     const val SECCOMP_IOCTL_NOTIF_SEND = 0xc0182101L
     const val SECCOMP_IOCTL_NOTIF_ID_VALID = 0x40082102L
 
     const val EPERM = 1
+    
+    const val PR_SET_SECCOMP = 22
+    const val PR_GET_SECCOMP = 21
+    const val SECCOMP_MODE_FILTER = 2
+    const val SECCOMP_FILTER_FLAG_TSYNC = 1
+    
+    const val SECCOMP_RET_ALLOW = 0x7fff0000
+    const val SECCOMP_RET_ERRNO = 0x00050000
+    const val SECCOMP_RET_USER_NOTIF = 0x7fc00000
+    
+    const val O_PATH = 0x01000000
+    const val O_CLOEXEC = 0x00080000
+    const val O_NOFOLLOW = 0x00020000
 }
