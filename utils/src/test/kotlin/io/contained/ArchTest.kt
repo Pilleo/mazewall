@@ -61,4 +61,30 @@ class ArchTest {
             assertTrue(Syscall.PRCTL.numberFor(arch) >= 0, "PRCTL missing on ${arch.name}")
         }
     }
+
+    @Test
+    fun `test Arch constants and audit identifiers`() {
+        assertNotNull(Arch.AMD64)
+        assertNotNull(Arch.AARCH64)
+        assertEquals("amd64", Arch.AMD64.name)
+        assertEquals("aarch64", Arch.AARCH64.name)
+
+        assertEquals(0xC000003E.toInt(), Arch.AUDIT_ARCH_X86_64)
+        assertEquals(0xC00000B7.toInt(), Arch.AUDIT_ARCH_AARCH64)
+
+        assertTrue(Arch.AMD64.audit != 0)
+        assertTrue(Arch.AARCH64.audit != 0)
+    }
+
+    @Test
+    fun `test Arch companion access`() {
+        // Exercise the Companion property access for coverage
+        val comp = Arch.Companion
+        assertNotNull(comp.AMD64)
+        assertNotNull(comp.AARCH64)
+
+        // This exercises the current() branch logic better
+        val current = Arch.current()
+        assertNotNull(current)
+    }
 }

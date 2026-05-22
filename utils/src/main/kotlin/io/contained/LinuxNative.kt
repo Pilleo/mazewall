@@ -617,6 +617,8 @@ object LinuxNative {
     const val LANDLOCK_CREATE_RULESET_VERSION = (1L shl 0)
 
     const val PR_SET_NO_NEW_PRIVS = 38
+    const val PR_SET_NAME = 15
+    const val PR_GET_NAME = 16
     const val SECCOMP_SET_MODE_FILTER = 1
     const val SECCOMP_FILTER_FLAG_NEW_LISTENER = (1L shl 3)
     const val SECCOMP_USER_NOTIF_FLAG_CONTINUE = (1L shl 0)

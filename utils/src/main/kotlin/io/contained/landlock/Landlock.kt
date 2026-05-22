@@ -146,7 +146,12 @@ object Landlock {
             val size = if (abi >= 4) LinuxNative.LANDLOCK_RULESET_ATTR_LAYOUT.byteSize() else 16L
 
             val rulesetFdResult =
-                LinuxNative.syscall(LinuxNative.LANDLOCK_CREATE_RULESET_NR, rulesetAttr.address(), size, MemorySegment.NULL)
+                LinuxNative.syscall(
+                    LinuxNative.LANDLOCK_CREATE_RULESET_NR,
+                    rulesetAttr.address(),
+                    size,
+                    MemorySegment.NULL
+                )
             if (rulesetFdResult.returnValue < 0) return
 
             val rulesetFd = rulesetFdResult.returnValue.toInt()
@@ -207,7 +212,12 @@ object Landlock {
             val size = if (abi >= 4) LinuxNative.LANDLOCK_RULESET_ATTR_LAYOUT.byteSize() else 16L
 
             val rulesetFdResult =
-                LinuxNative.syscall(LinuxNative.LANDLOCK_CREATE_RULESET_NR, rulesetAttr.address(), size, MemorySegment.NULL)
+                LinuxNative.syscall(
+                    LinuxNative.LANDLOCK_CREATE_RULESET_NR,
+                    rulesetAttr.address(),
+                    size,
+                    MemorySegment.NULL
+                )
             if (rulesetFdResult.returnValue < 0) return
 
             val rulesetFd = rulesetFdResult.returnValue.toInt()
@@ -220,7 +230,13 @@ object Landlock {
                 // DISABLED: TSYNC breaks sibling thread transparency in the test suite.
                 val flags = 0L // if (abi >= 8) LANDLOCK_RESTRICT_SELF_TSYNC else 0L
                 val restrictResult =
-                    LinuxNative.syscall(LinuxNative.LANDLOCK_RESTRICT_SELF_NR, rulesetFd.toLong(), flags, MemorySegment.NULL, 0)
+                    LinuxNative.syscall(
+                        LinuxNative.LANDLOCK_RESTRICT_SELF_NR,
+                        rulesetFd.toLong(),
+                        flags,
+                        MemorySegment.NULL,
+                        0
+                    )
 
                 if (restrictResult.returnValue < 0) {
                     logger.warning("Failed to apply Landlock profiling ruleset (flags=$flags): errno ${restrictResult.errno}")
@@ -349,7 +365,12 @@ object Landlock {
             val size = if (abi >= 4) LinuxNative.LANDLOCK_RULESET_ATTR_LAYOUT.byteSize() else 8L
 
             val rulesetFdResult =
-                LinuxNative.syscall(LinuxNative.LANDLOCK_CREATE_RULESET_NR, rulesetAttr.address(), size, MemorySegment.NULL)
+                LinuxNative.syscall(
+                    LinuxNative.LANDLOCK_CREATE_RULESET_NR,
+                    rulesetAttr.address(),
+                    size,
+                    MemorySegment.NULL
+                )
             if (rulesetFdResult.returnValue < 0) {
                 throw RuntimeException("landlock_create_ruleset failed with errno ${rulesetFdResult.errno}")
             }
@@ -383,7 +404,13 @@ object Landlock {
                 // DISABLED: TSYNC breaks sibling thread transparency in the test suite.
                 val flags = 0L // if (abi >= 8) LANDLOCK_RESTRICT_SELF_TSYNC else 0L
                 val restrictResult =
-                    LinuxNative.syscall(LinuxNative.LANDLOCK_RESTRICT_SELF_NR, rulesetFd.toLong(), flags, MemorySegment.NULL, 0)
+                    LinuxNative.syscall(
+                        LinuxNative.LANDLOCK_RESTRICT_SELF_NR,
+                        rulesetFd.toLong(),
+                        flags,
+                        MemorySegment.NULL,
+                        0
+                    )
                 if (restrictResult.returnValue < 0) {
                     throw RuntimeException("landlock_restrict_self failed (flags=$flags) with errno ${restrictResult.errno}")
                 }

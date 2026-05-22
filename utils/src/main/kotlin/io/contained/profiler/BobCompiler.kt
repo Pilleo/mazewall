@@ -25,12 +25,9 @@ object BobCompiler {
 
         for (event in events) {
             // Map the syscall name to Syscall enum
-            val syscall = try {
+            val syscall = runCatching {
                 Syscall.valueOf(event.syscallName.uppercase(Locale.US))
-            } catch (e: IllegalArgumentException) {
-                e.printStackTrace()
-                null
-            }
+            }.getOrNull()
 
             if (syscall != null) {
                 syscalls.add(syscall)

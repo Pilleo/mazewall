@@ -5,8 +5,10 @@ import io.contained.enforcer.ContainmentViolationException
 import org.junit.jupiter.api.Test
 import java.util.concurrent.Executors
 import java.util.concurrent.ExecutionException
+import java.util.concurrent.TimeUnit
 import kotlin.test.assertTrue
 import kotlin.test.assertFailsWith
+import kotlin.test.assertEquals
 
 class ContainedExecutorsTest {
 
@@ -63,13 +65,13 @@ class ContainedExecutorsTest {
         val future = safeExecutor.submit(java.util.concurrent.Callable {
             "installed"
         })
-        kotlin.test.assertEquals("installed", future.get())
+        assertEquals("installed", future.get())
 
         // 2. Now the main thread (uncontained) should still be able to exec!
         // If SECCOMP_FILTER_FLAG_TSYNC was used, the main thread would be permanently blocked here.
         val process = ProcessBuilder("echo", "uncontained").start()
         process.waitFor()
-        kotlin.test.assertEquals(0, process.exitValue())
+        assertEquals(0, process.exitValue())
 
         executor.shutdown()
     }
@@ -124,5 +126,25 @@ class ContainedExecutorsTest {
         } finally {
             executor.shutdown()
         }
+    }
+
+    @Test
+    fun `test wrap() executor invokeAll and invokeAny with timeouts`() {
+        val executor = Executors.newFixedThreadPool(2)
+        val safeExecutor = ContainedExecutors.wrap(executor, Policy.PURE_COMPUTE)
+
+        val tasks = listOf(
+            java.util.concurrent.Callable { "task1" },
+            java.util.concurrent.Callable { "task2" }
+        )
+
+        val results = safeExecutor.invokeAll(tasks, 5, TimeUnit.SECONDS)
+        assertEquals(2, results.size)
+        assertEquals("task1", results[0].get())
+
+        val any = safeExecutor.invokeAny(tasks, 5, TimeUnit.SECONDS)
+        assertTrue(any == "task1" || any == "task2")
+
+        executor.shutdown()
     }
 }
