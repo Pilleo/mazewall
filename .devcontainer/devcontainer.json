@@ -1,24 +1,24 @@
 {
   "name": "jseccomp Dev Environment",
   "build": {
-    "dockerfile": "../Dockerfile",
-    "context": ".."
+    "dockerfile": "../Containerfile",
+    "context": "..",
   },
   "workspaceFolder": "/workspace",
   "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
   "runArgs": [
-    "--security-opt", "seccomp=unconfined"
+    "--annotation=io.podman.annotations.seccomp=/workspace/podman-seccomp.json",
   ],
   "remoteEnv": {
-    "JAVA_HOME": "/opt/java/openjdk"
+    "JAVA_HOME": "/opt/java/openjdk",
   },
   "customizations": {
     "vscode": {
       "extensions": [
         "vscjava.vscode-java-pack",
         "vscjava.vscode-gradle",
-        "fwcd.kotlin"
-      ]
-    }
-  }
+        "fwcd.kotlin",
+      ],
+    },
+  },
 }

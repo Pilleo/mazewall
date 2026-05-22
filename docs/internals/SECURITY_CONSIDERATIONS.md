@@ -23,7 +23,7 @@ If an attacker achieves native code execution (e.g., via a buffer overflow in a 
 2. **Dynamic Thread Injection / Task Poisoning:** Accessing the JVM's internal structures (like the `ForkJoinPool.commonPool()` queue or JVM scheduler queues) directly in memory using pointer arithmetic, and injecting malicious tasks to be executed by unrestricted threads.
 3. **Internal JVM Structure Hijacking:** Overwriting JVM function tables, class metadata, or garbage collector structures to trigger code execution on unrestricted helper threads.
 
-**The Architectural Floor:** Therefore, thread-level seccomp must **never** be treated as a strong VM boundary (like a Docker container or gVisor sandbox). It is a highly effective, low-overhead shield that prevents contained libraries from making direct system calls (e.g. initiating SSRF or spawning shells), but process-wide `NO_EXEC` (Tier 1) remains mandatory to prevent the attacker from escalating an ACE pivot.
+**The Architectural Floor:** Therefore, thread-level seccomp must **never** be treated as a strong VM boundary (like a Podman container or gVisor sandbox). It is a highly effective, low-overhead shield that prevents contained libraries from making direct system calls (e.g. initiating SSRF or spawning shells), but process-wide `NO_EXEC` (Tier 1) remains mandatory to prevent the attacker from escalating an ACE pivot.
 
 ---
 
@@ -112,7 +112,7 @@ Developers must understand the exact boundaries this locking mechanism establish
 
 ### Security Analysis of Nested Seccomp in OCI Runtimes
 
-OCI runtimes (such as `runc`, `containerd`, and Docker) restrict the `seccomp(2)` system call and specific `prctl(2)` options within their default profiles. This design decision is part of a defense-in-depth strategy aimed at reducing the host kernel's attack surface, preventing untrusted processes within containers from interacting with the kernel's BPF verifier or constructing arbitrary syscall filters.
+OCI runtimes (such as `runc`, `containerd`, Podman, and Docker) restrict the `seccomp(2)` system call and specific `prctl(2)` options within their default profiles. This design decision is part of a defense-in-depth strategy aimed at reducing the host kernel's attack surface, preventing untrusted processes within containers from interacting with the kernel's BPF verifier or constructing arbitrary syscall filters.
 
 However, the necessity of this OCI-level block can be evaluated against kernel-level invariants:
 1.  **Enforced State Monotonicity:** The Linux kernel strictly requires the `PR_SET_NO_NEW_PRIVS` flag to be set before an unprivileged process can load a seccomp filter. Once active, the process and all descendants are permanently barred from privilege transitions (such as setuid, setgid, or file capability elevations).
@@ -198,7 +198,7 @@ If maintaining accurate OS-level thread names is a production requirement, devel
 Even with process-wide `NO_EXEC`, an attacker with ACE can theoretically escape to the host OS if other security layers are missing:
 
 *   **File System Pivot:** If the JVM user has write access to directories like `/etc/cron.d/`, an attacker can write a malicious script that the host OS will eventually execute with full privileges.
-*   **Local Network Pivot:** If the JVM can access local unauthenticated APIs (e.g., the Docker socket at `/var/run/docker.sock`), it can command the host to spawn a new, unconstrained container.
+*   **Local Network Pivot:** If the JVM can access local unauthenticated APIs (e.g., the Podman socket at `/run/user/1000/podman/podman.sock`), it can command the host to spawn a new, unconstrained container.
 *   **Persistence & Restart:** If the attacker can modify application binaries or configuration and then force a JVM crash, they may trick an orchestrator (Systemd/Kubernetes) into restarting the JVM without the seccomp filter enabled.
 
 ---
@@ -328,7 +328,7 @@ Instead, configure Kubernetes to use the **Localhost custom seccomp profile** pa
 Kubelet looks for custom seccomp profiles in its local filesystem at:
 `/var/lib/kubelet/seccomp/`
 
-You must place a copy of `docker-seccomp.json` into a subdirectory on each host node (for example, as `/var/lib/kubelet/seccomp/profiles/jseccomp.json`).
+You must place a copy of `podman-seccomp.json` into a subdirectory on each host node (for example, as `/var/lib/kubelet/seccomp/profiles/jseccomp.json`).
 
 *   **Automation tip:** Use a lightweight Kubernetes **DaemonSet** with a `hostPath` mount to distribute and keep this profile file synchronized across all nodes automatically. **The YAML below is illustrative only.** For production, use a GitOps-managed DaemonSet with image signing, or the [Security Profiles Operator](https://github.com/kubernetes-sigs/security-profiles-operator) which handles profile distribution with integrity verification. The `busybox` + raw `hostPath` pattern shown below has no integrity check and is not suitable for a hardened environment:
     ```yaml
@@ -371,7 +371,7 @@ Additionally, you **must** configure `allowPrivilegeEscalation: false`. This ens
 
 > [!WARNING]
 > **The `allowPrivilegeEscalation` (NoNewPrivs) Trap:**
-> While `allowPrivilegeEscalation: false` is required for unprivileged seccomp stacking, it completely disables `setuid`/`setgid` bits and Linux File Capabilities during execution. Because this breaks legacy tools, vanilla Docker and Kubernetes **do not** enable this by default (for backward compatibility). However, modern hardening frameworks (like K8s "Restricted" Pod Security Standards or OpenShift `restricted-v2` SCC) **do** enforce it.
+> While `allowPrivilegeEscalation: false` is required for unprivileged seccomp stacking, it completely disables `setuid`/`setgid` bits and Linux File Capabilities during execution. Because this breaks legacy tools, vanilla OCI runtimes **do not** enable this by default (for backward compatibility). However, modern hardening frameworks (like K8s "Restricted" Pod Security Standards or OpenShift `restricted-v2` SCC) **do** enforce it.
 > 
 > **What breaks when this is enabled?**
 > 1. **`sudo`, `su`, `doas`:** Scripts attempting to elevate privileges using `sudo` from a non-root user will fail (`sudo: effective uid is not 0`).

@@ -161,14 +161,14 @@ Always call `isContainmentViolation(t)` (the full cause-chain traversal), not `i
 *   **Testing is Mandatory.** Untested code in a security library is a vulnerability. Any bugfix, behavioral change, or new architectural detail **must** be accompanied by an automated test.
 *   **Running Tests:** Always run using the custom OCI profile:
     ```bash
-    docker compose up -d
-    docker compose exec jseccomp ./gradlew test
+    podman compose up -d
+    podman compose exec jseccomp ./gradlew test
     ```
-    The container is named `jseccomp` (see `docker-compose.yml`). The profile (`docker-seccomp.json`) whitelists `seccomp(2)` for unprivileged filter stacking.
+    The container is named `jseccomp` (see `compose.yml`). The profile (`podman-seccomp.json`) whitelists `seccomp(2)` for unprivileged filter stacking.
 
 *   **Test tier requirements:**
 
-    | Test File | Requires Docker? | Requires Linux? | Kernel min |
+    | Test File | Requires Podman? | Requires Linux? | Kernel min |
     |-----------|-----------------|-----------------|------------|
     | `BpfFilterTest.kt` | No | No (pure unit) | — |
     | `PolicyTest.kt` | No | No (pure unit) | — |

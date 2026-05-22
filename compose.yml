@@ -10,12 +10,10 @@ services:
     cap_add:
       - AUDIT_READ
       - AUDIT_CONTROL
-    security_opt:
-      - seccomp=unconfined
-    # Workaround for Podman: Use annotation instead of security_opt
-    # to prevent Docker Compose from reading and passing the raw JSON string.
+    # Use a custom seccomp profile via annotation to whitelist filter stacking.
+    # This maintains container isolation while allowing nested sandboxes.
     annotations:
-      io.podman.annotations.seccomp: ${PWD}/docker-seccomp.json
+      io.podman.annotations.seccomp: ${PWD}/podman-seccomp.json
     working_dir: /workspace
     # Default to keeping the container alive for execution
     command: tail -f /dev/null

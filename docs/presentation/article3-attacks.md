@@ -11,9 +11,9 @@ This article shows — with actual syscall sequences, policy definitions, and ke
 git clone https://github.com/leanid/jseccomp.git
 cd jseccomp
 # Linux x86_64 or aarch64, JDK 22+
-# Docker needed for nested seccomp (see Part 2 for the reason)
-docker compose up -d
-docker compose exec jseccomp ./gradlew test
+# Podman needed for nested seccomp (see Part 2 for the reason)
+podman compose up -d
+podman compose exec jseccomp ./gradlew test
 ```
 
 ---
@@ -270,7 +270,7 @@ executor.submit {
 
     // Blocked by Landlock (EACCES):
     File("/etc/passwd").readText()
-    File("/var/run/docker.sock").readText()
+    File("/run/user/1000/podman/podman.sock").readText()
 }.get()
 ```
 
@@ -299,7 +299,7 @@ The defense: always create a fresh thread pool for contained tasks, never reuse 
 | Kernel module injection (`init_module`, `finit_module`) | Seccomp | `NO_EXEC` |
 | Network exfiltration (`connect`, `socket`) | Seccomp | `NO_NETWORK` |
 | Filesystem snooping (`/etc/passwd`) | Landlock | Custom policy |
-| Pivot to docker socket | Landlock | Custom policy |
+| Pivot to podman socket | Landlock | Custom policy |
 
 > **`fork`/`clone` note:** On modern Linux (glibc 2.3.3+), the `fork(2)` libc wrapper is implemented via `clone(SIGCHLD)`, not the legacy `fork` syscall. `NO_EXEC` explicitly blocks `fork` and `vfork` syscalls. The `clone` syscall itself is handled by BPF argument inspection: `clone` with `CLONE_THREAD` (thread creation) is allowed to keep the JVM stable; `clone` without `CLONE_THREAD` (process forking) is blocked. This is transparent to the caller \u2014 `ProcessBuilder.start()` ultimately fails with `EPERM` regardless of which kernel path it takes.
 
@@ -311,7 +311,7 @@ The defense: always create a fresh thread pool for contained tasks, never reuse 
 - **ROP/JOP gadget chains** — reusing existing mapped code. Seccomp cannot see CPU instruction flow; only syscalls. Complementary defences: ASLR, stack canaries, CFI (Intel CET, ARM BTI).
 - **In-process heap reads** — a contained thread still shares the JVM heap with all other threads and can read any object it can reach via references. This is the Shared-Memory ACE caveat from Part 2: it is why Tier 1 (process-wide `NO_EXEC`) is mandatory as a backstop against escalation.
 - **Pre-established network channels** — inherited open file descriptors. `NO_NETWORK` blocks *creation* of new sockets, not reads and writes on sockets already open.
-- **Orchestrator-level escapes** — if the JVM user has write access to `/etc/cron.d/` or the Docker socket, those escapes happen outside the syscall filter.
+- **Orchestrator-level escapes** — if the JVM user has write access to `/etc/cron.d/` or the Podman socket, those escapes happen outside the syscall filter.
 - **Cluster-level visibility gaps** — `jseccomp` is not a replacement for cluster-wide tools like Kubescape or Falco. Those tools provide host-level and cross-container visibility that thread-scoped seccomp cannot offer. The correct model is defence-in-depth: cluster tools observe the container boundary; `jseccomp` enforces policy inside threads that the cluster tools cannot introspect.
 
 `jseccomp` is one layer in a stack, not a total sandbox.

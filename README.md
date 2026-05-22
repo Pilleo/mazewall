@@ -11,7 +11,7 @@
 
 ## The Problem
 
-The JVM process security model is binary: every thread in the process shares the same OS-level permissions. A vulnerability in one library exploited on one thread has access to everything the entire process holds — open network sockets, file descriptors, exec permissions. Container-level seccomp profiles (like Docker's default) are applied to the entire process; they cannot distinguish between the trusted framework thread and the worker thread parsing a malicious payload.
+The JVM process security model is binary: every thread in the process shares the same OS-level permissions. A vulnerability in one library exploited on one thread has access to everything the entire process holds — open network sockets, file descriptors, exec permissions. Container-level seccomp profiles (like the OCI default) are applied to the entire process; they cannot distinguish between the trusted framework thread and the worker thread parsing a malicious payload.
 
 When Log4Shell hit, the attacker's code ran on the same thread as the vulnerable logger — a thread that already had `execve` permission because the rest of the JVM needed it.
 
@@ -102,16 +102,16 @@ To run the integration suite in a contained environment with nested seccomp supp
 
 ```bash
 # Start the container under the custom seccomp profile
-docker compose up -d
-docker compose exec jseccomp ./gradlew test
+podman compose up -d
+podman compose exec jseccomp ./gradlew test
 ```
 
 > [!IMPORTANT]
-> **Podman + Docker Compose V2 Compatibility:** This project's `docker-compose.yml` is specifically optimized for **Podman** using the `docker compose` V2 binary. 
+> **Podman Native Integration:** This project is optimized for **rootless Podman**.
 > 
-> Standard `security_opt: seccomp=...` triggers a bug where the full JSON profile is passed as a string over the socket, causing Podman to fail with a "file name too long" (`ENAMETOOLONG`) error. We bypass this using the Podman-native annotation `io.podman.annotations.seccomp`. If you are using standard Docker, you must manually revert this to a standard `security_opt` block.
+> Standard `security_opt: seccomp=...` triggers a bug in some orchestrators where the full JSON profile is passed as a string over the socket, causing a "file name too long" (`ENAMETOOLONG`) error. We bypass this using the Podman-native annotation `io.podman.annotations.seccomp` in `compose.yml`.
 
-> **Note on Container Security:** Rather than running completely unconfined (which is insecure), `jseccomp` includes a custom [docker-seccomp.json](docker-seccomp.json) profile that is automatically configured in [docker-compose.yml](docker-compose.yml). This profile whitelists `seccomp(2)` filter stacking, enabling the JVM inside the container to apply nested thread-level policies while keeping the container fully isolated from the host.
+> **Note on Container Security:** Rather than running completely unconfined (which is insecure), `jseccomp` includes a custom [podman-seccomp.json](podman-seccomp.json) profile that is automatically configured in [compose.yml](compose.yml). This profile whitelists `seccomp(2)` filter stacking, enabling the JVM inside the container to apply nested thread-level policies while keeping the container fully isolated from the host.
 
 ### 2. Configure a Path-Restricted Thread Pool (Landlock)
 

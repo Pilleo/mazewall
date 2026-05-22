@@ -39,11 +39,11 @@ Seccomp and Landlock are **self-restriction primitives**. With `NoNewPrivileges`
 
 ## The Global Sandbox Fallacy
 
-The standard approach to JVM security is a global seccomp profile applied to the entire Linux process — the Docker default profile, an AppArmor policy on the pod, or a custom seccomp JSON in the `securityContext`.
+The standard approach to JVM security is a global seccomp profile applied to the entire Linux process — the Podman/Docker default profile, an AppArmor policy on the pod, or a custom seccomp JSON in the `securityContext`.
 
-This is not worthless. Docker's default profile already blocks ~40 dangerous syscalls: `keyctl`, `add_key`, `request_key`, `ptrace` in certain modes, and others. That baseline matters.
+This is not worthless. The default OCI profile already blocks ~40 dangerous syscalls: `keyctl`, `add_key`, `request_key`, `ptrace` in certain modes, and others. That baseline matters.
 
-**But the remaining allowed syscalls are the problem.** A typical Spring Boot application — even after Docker's default restrictions — still requires:
+**But the remaining allowed syscalls are the problem.** A typical Spring Boot application — even after Podman/Docker's default restrictions — still requires:
 - `socket` + `connect` + `sendmsg` for its API and database connections
 - `openat` + `read` for reading config files and loading classes
 - `mmap` with `PROT_EXEC` for the JIT compiler to generate native code
@@ -216,30 +216,34 @@ Use a dedicated platform thread pool and install containment on its carrier thre
 
 ---
 
-## Configuring Docker: Custom Seccomp Profiles vs. Unconfined
+## Configuring Podman: The Custom Profile Approach
 
-The hands-on examples in Part 3 require running Docker containers with `--security-opt seccomp=unconfined`. This instruction is often misunderstood by developers and system administrators as a security hazard. Let's look at what is actually happening.
+To enable nested seccomp stacking inside a container, you have two choices. 
 
-A common misconception is that the kernel prevents the installation of new seccomp filters because it cannot verify "monotonicity compatibility." This is technically incorrect: **the Linux kernel supports filter stacking natively**. You can stack as many filters as you want (up to a depth limit of 32, or a BPF instruction count limit), and the kernel will run all of them in reverse order, applying the most restrictive action returned.
+1. **The "Unconfined" Hack (Discouraged):** Running with `--security-opt seccomp=unconfined` disables the host-side seccomp sandbox entirely. This is often used in local development but is **highly discouraged for production environments** as it leaves the container boundary wide open to kernel-level attacks.
 
-**The actual blocker is Docker's default Seccomp profile.** By default, Docker blocks the `seccomp(2)` system call and restricts the `prctl(2)` system call arguments to prevent containers from modifying their own security filters. When the JVM inside a standard container attempts to call `prctl(PR_SET_SECCOMP)` or `seccomp(SECCOMP_SET_MODE_FILTER)`, the host kernel blocks the call at the outer Docker container boundary, causing an immediate `EPERM`.
+2. **The Hardened Custom Profile (Recommended):** Instead of running unconfined, you run your container with a **custom OCI seccomp JSON profile** that is identical to the standard profile but explicitly whitelists the installation syscalls. This project utilizes this approach via the `podman-seccomp.json` profile.
 
-Running with `seccomp=unconfined` disables the host-side seccomp sandbox entirely to let our demo install filters. However, **this is highly discouraged for production environments**.
+### Why a Custom Profile is Needed
 
-### The Production Solution: Custom Docker JSON Profile
+**The actual blocker is Podman's default Seccomp profile.** By default, Podman blocks the `seccomp(2)` system call and restricts the `prctl(2)` system call arguments to prevent containers from modifying their own security filters. When the JVM inside a standard container attempts to call `prctl(PR_SET_SECCOMP)` or `seccomp(SECCOMP_SET_MODE_FILTER)`, the host kernel blocks the call at the outer Podman container boundary, causing an immediate `EPERM`.
 
-Instead of running unconfined, you should run your container with a **custom Docker seccomp JSON profile** that is identical to the standard Docker profile but explicitly whitelists the installation syscalls:
+By whitelisting `seccomp` and the necessary `prctl` flags in a custom profile, we maintain a robust container-level security floor (blocking access to dangerous host-level calls like `keyctl` or kernel namespace mutations) while empowering the JVM inside the container to dynamically apply its own unprivileged thread-level sandboxes.
+
+### The Production Solution: Custom Podman JSON Profile
+
+Specifically, the `podman-seccomp.json` profile provided in this repository ensures:
 
 1. **`seccomp`**: Allowed with zero restrictions.
 2. **`prctl`**: Allowed, specifically whitelisting `PR_SET_SECCOMP` (22) and `PR_SET_NO_NEW_PRIVS` (38) in the arguments list.
 
-This maintains Docker's robust container-level security floor (blocking access to dangerous host-level calls like `keyctl` or kernel namespace mutations) while empowering the JVM inside the container to dynamically apply its own unprivileged thread-level sandboxes.
+This configuration is the architectural floor for `jseccomp`.
 
 ### Author's Analysis: Nested Seccomp in OCI Runtimes
 
 > *The following is the author's architectural argument, not an established industry position.*
 
-OCI runtimes (such as `runc`, `containerd`, and Docker) restrict the `seccomp(2)` system call and specific `prctl(2)` options within their default profiles. This design decision is part of a defense-in-depth strategy aimed at reducing the host kernel's attack surface, preventing untrusted processes within containers from interacting with the kernel's BPF verifier or constructing arbitrary syscall filters.
+OCI runtimes (such as `runc`, `containerd`, Podman, and Docker) restrict the `seccomp(2)` system call and specific `prctl(2)` options within their default profiles. This design decision is part of a defense-in-depth strategy aimed at reducing the host kernel's attack surface, preventing untrusted processes within containers from interacting with the kernel's BPF verifier or constructing arbitrary syscall filters.
 
 However, the necessity of this OCI-level block can be evaluated against kernel-level invariants:
 1.  **Enforced State Monotonicity:** The Linux kernel strictly requires the `PR_SET_NO_NEW_PRIVS` flag to be set before an unprivileged process can load a seccomp filter. Once active, the process and all descendants are permanently barred from privilege transitions (such as setuid, setgid, or file capability elevations).
