@@ -136,4 +136,27 @@ class ContainedExecutorsTest {
 
         executor.shutdown()
     }
+
+    @Test
+    fun `isContainmentViolation handles nested exceptions with error code`() {
+        // error=1 is EPERM
+        val root = java.io.IOException("something went wrong (error=1)")
+        val nested = RuntimeException("wrapper", root)
+        val deeplyNested = RuntimeException("outer", nested)
+
+        assertTrue(
+            ContainedExecutors.isContainmentViolation(deeplyNested),
+            "Should find violation in nested exception chain"
+        )
+    }
+
+    @Test
+    fun `isContainmentViolation handles suppressed exceptions with error code`() {
+        // error: 13 is EACCES
+        val root = java.io.IOException("failed (error: 13)")
+        val main = RuntimeException("main")
+        main.addSuppressed(root)
+
+        assertTrue(ContainedExecutors.isContainmentViolation(main), "Should find violation in suppressed exceptions")
+    }
 }

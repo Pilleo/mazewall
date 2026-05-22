@@ -291,6 +291,13 @@ On non-English locales, if the JVM translates these messages entirely, a blocked
 ### Platform Support
 Seccomp-BPF and Landlock are Linux-only features. The library safely performs an OS-level check (`Platform.isSupported()`) before initializing native FFM bindings. On macOS or Windows, the library degrades gracefully based on the `IO_CONTAINED_FALLBACK` policy (failing fast or logging a warning and running uncontained) without throwing `UnsatisfiedLinkError` or `WrongMethodTypeException`.
 
+### Known Inconsistencies
+
+#### Landlock Path Combination (Union vs. Intersection)
+The `Policy.combine()` method currently uses a **union** of all allowed filesystem paths from the input policies. However, when the Linux kernel stacks multiple Landlock rulesets on a thread (e.g., via nested `ContainedExecutors` or stacking multiple policies), the resulting filesystem view is an **intersection**—the thread is restricted to paths that are allowed by *every* ruleset in the stack. 
+
+While `ContainedExecutors` prevents permission expansion during stacking (throwing `IllegalStateException` if a new layer attempts to add paths not allowed by the previous one), the behavior of `Policy.combine(p1, p2)` may produce a policy that appears broader than what would result from sequentially applying `p1` and then `p2`. Always verify that your combined policy matches your intended security contract at the kernel level.
+
 ---
 
 ## 12. Information Leaks (Side Channels)
