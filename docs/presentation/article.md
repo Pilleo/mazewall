@@ -21,17 +21,18 @@ That gap is exactly where a new, emerging concept starts to matter: **SBoB—the
 *(A quick note on expectations: This article is not a tutorial for fixing your runtime security today. SBoB (often referred to simply as **BoB**) is still emerging, tooling is early, and standards are actively forming. What follows is a picture of where cloud-native security is heading—a direction that is becoming technically feasible and strategically hard to ignore.)*
 
 ## From Boundaries to Contracts
- 
-For the last decade, cloud-native security has relied on boundaries. We wrap applications in containers, put them in namespaces, and apply global security profiles to the entire pod. This "outer shell" approach is valuable, but it is increasingly insufficient against modern, sophisticated attacks.
- 
-The shift we are seeing today is from **boundaries** to **contracts**.
- 
-In a boundary-based model, we ask: "Is this container allowed to talk to the internet?" 
-In a contract-based model (SBoB), we ask: "Is this specific library, at this specific moment, allowed to perform this specific action?"
- 
-To be precise, the SBoB is the declaration—the clipboard of expected behaviors. Enforcement is handled by a runtime engine that observes behavior and decides whether to alert, learn, or block. But the industry is rapidly moving toward a world where these pieces interlock: software ships with a behavioral contract, and the runtime knows exactly how to act on it.
- 
-Without this explicit contract, runtime security is forced into unsatisfying compromises: broad generic rules, noisy anomaly detection, or painstakingly hand-crafted policies that no development team has the time to maintain.
+
+For the last decade, cloud-native security has relied on **boundaries**—wrapping apps in containers and namespaces, applying a global security profile at the outer shell. 
+
+But for developers, this boundary model has a fundamental blind spot: it treats the runtime like an **open field surrounded by a perimeter fence**. The internal "walls" (your code's modules and architecture) are structurally present, but provide zero physical enforcement. If an attacker achieves Arbitrary Code Execution (ACE) inside the application, they can wander freely within the fence, exfiltrate data, or execute payload code. 
+
+The shift to **contracts** (SBoB) turns the OS from a passive boundary fence into an **active runtime maze**. 
+
+Instead of letting an app roam an open field, we lay down rigid, kernel-enforced rails. Every legitimate path through your code represents a corridor in the maze; every system call, filesystem path, or socket access is a locked gate. Under this contract:
+1. **The Sandbox is a Maze:** An attacker who compromises a worker thread cannot wander to forbidden system calls or sensitive files—they are physically blocked by the nearest wall (e.g., Seccomp or Landlock).
+2. **The OS Enforces the Logic:** The kernel actively verifies that execution strictly matches the application's expected topology at the instruction level.
+
+We move from asking *"Is this container allowed to talk to the internet?"* to *"Is this specific library, at this specific millisecond, allowed to perform this specific system call?"*
 
 ## The Catalyst: Practical Runtime Observation with eBPF
  
