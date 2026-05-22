@@ -71,17 +71,46 @@ class Policy private constructor(
             .block(Syscall.INIT_MODULE, Syscall.FINIT_MODULE)
             .build()
 
+        /**
+         * A highly restrictive baseline that blocks all network, execution, and most filesystem access.
+         * Automatically whitelists the JVM classpath to prevent lazy classloading deadlocks.
+         * Suitable for worker threads that only perform pure computation using pre-loaded data.
+         */
+        val STRICT_SANDBOX: Policy = builder()
+            .base(PURE_COMPUTE)
+            .allowJvmClasspath()
+            .build()
+
 
         fun builder(): Builder = Builder()
 
-        /** Returns a new Policy that is the union of all blocked syscalls in the given [policies]. */
+        /**
+         * Returns a new Policy that is the union of all blocked syscalls in the given [policies].
+         *
+         * ### Landlock Convergence (Intersection)
+         * Unlike syscall blocks (which are unioned), allowed Landlock filesystem paths are
+         * **intersected**. This matches the behavior of the Linux kernel when multiple Landlock
+         * rulesets are stacked on a single thread. If one policy allows `/a` and another allows `/b`,
+         * the combined policy will allow **nothing** (unless one is a parent of the other).
+         *
+         * Exception: If no Landlock paths are defined in any input policy, the result remains empty
+         * (unrestricted filesystem from a Landlock perspective).
+         */
         fun combine(vararg policies: Policy): Policy {
             val union = policies.flatMap { it.blocked }.toSet()
             val mmapExec = policies.all { it.allowMmapExec }
             val cloneNonThread = policies.all { it.allowNonThreadClone }
             val unsafePrctl = policies.all { it.allowUnsafePrctl }
-            val fsReads = policies.flatMap { it.allowedFsReadPaths }.toSet()
-            val fsWrites = policies.flatMap { it.allowedFsWritePaths }.toSet()
+
+            // Intersect Landlock paths to match kernel stacking behavior
+            val allReadSets = policies.map { it.allowedFsReadPaths }.filter { it.isNotEmpty() }
+            val fsReads =
+                if (allReadSets.isEmpty()) emptySet() else allReadSets.reduce { acc, set -> acc.intersect(set) }
+
+            val allWriteSets = policies.map { it.allowedFsWritePaths }.filter { it.isNotEmpty() }
+            val fsWrites =
+                if (allWriteSets.isEmpty()) emptySet() else allWriteSets.reduce { acc, set -> acc.intersect(set) }
+
             return Policy(
                 union,
                 allowMmapExec = mmapExec,

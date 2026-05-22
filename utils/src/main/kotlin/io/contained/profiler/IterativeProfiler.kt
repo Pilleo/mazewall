@@ -42,11 +42,25 @@ object IterativeProfiler {
 
             val path = extractViolationPath(t)
             if (path != null) {
-                // Conservative write-path discovery: grant both read and write for the denied path.
-                // AccessDeniedException from Landlock does not carry the access mode that was denied,
-                // so we conservatively grant both read and write access to guarantee convergence.
-                builder.allowFsRead(path)
-                builder.allowFsWrite(path)
+                // Heuristic-based access discovery.
+                // AccessDeniedException from Landlock does not explicitly carry the access mode that was denied.
+                // To avoid over-granting write access, we check if the path is already readable by the current
+                // process (ignoring Landlock). If it is already readable but we still got a violation, it was
+                // likely a Write attempt.
+                val file = java.io.File(path)
+                val isReadableOutsideSandbox = file.exists() && file.canRead()
+                val isCurrentlyReadAllowed = currentPolicy.allowedFsReadPaths.any { path.startsWith(it) }
+
+                if (isReadableOutsideSandbox && isCurrentlyReadAllowed) {
+                    // It was already readable, so it's probably a write denial
+                    builder.allowFsWrite(path)
+                } else {
+                    // Conservative fallback: grant both to guarantee convergence.
+                    // This covers cases where the file doesn't exist (Write needed for creation)
+                    // or where Read itself was the reason for denial.
+                    builder.allowFsRead(path)
+                    builder.allowFsWrite(path)
+                }
                 currentPolicy = builder.build()
                 continue
             }

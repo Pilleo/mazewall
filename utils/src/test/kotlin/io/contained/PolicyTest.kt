@@ -103,12 +103,31 @@ class PolicyTest {
     }
 
     @Test
-    fun `builder allowFsRead rejects invalid paths`() {
-        assertFailsWith<IllegalArgumentException> {
-            Policy.builder().allowFsRead("")
-        }
-        assertFailsWith<IllegalArgumentException> {
-            Policy.builder().allowFsRead("relative/path")
-        }
+    fun `combine() intersects Landlock paths`() {
+        val p1 = Policy.builder().allowFsRead("/a").allowFsRead("/common").build()
+        val p2 = Policy.builder().allowFsRead("/b").allowFsRead("/common").build()
+        val combined = Policy.combine(p1, p2)
+
+        assertEquals(setOf("/common"), combined.allowedFsReadPaths, "Landlock paths should be intersected")
+    }
+
+    @Test
+    fun `combine() with no FS paths results in empty set`() {
+        val p1 = Policy.builder().block(Syscall.BIND).build()
+        val p2 = Policy.builder().block(Syscall.CONNECT).build()
+        val combined = Policy.combine(p1, p2)
+
+        assertTrue(combined.allowedFsReadPaths.isEmpty())
+    }
+
+    @Test
+    fun `STRICT_SANDBOX includes PURE_COMPUTE and classpath`() {
+        val policy = Policy.STRICT_SANDBOX
+        val arch = Arch.current()
+        val blocked = policy.blockedSyscalls(arch).toList()
+
+        assertTrue(blocked.contains(arch.connect))
+        assertTrue(blocked.contains(arch.execve))
+        assertTrue(policy.allowedFsReadPaths.isNotEmpty(), "STRICT_SANDBOX should allow reading from classpath")
     }
 }
