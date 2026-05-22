@@ -10,14 +10,15 @@ integrates with the seccomp pipeline. Read this before modifying `ContainedExecu
 ## 1. The Enforcement Pipeline
 
 ```
-Policy (blocked: Set<Syscall>, allowMmapExec, allowNonThreadClone, ...)
+Policy (syscalls: Set<Syscall>, mode: Mode, allowMmapExec, ...)
     │
     ▼
 BpfFilter.build(arch, policy)
     │  - architecture check prologue (AUDIT_ARCH_* constant)
-    │  - argument-inspection sequences for mmap/mprotect, clone, clone3, prctl
-    │  - linear scan over blocked syscall numbers (sorted IntArray)
-    │  - default ALLOW at the tail
+    │  - clone3 ENOSYS trap (unconditional)
+    │  - argument-inspection sequences for mmap/mprotect, clone, prctl
+    │  - linear scan over restricted syscall numbers (sorted IntArray)
+    │  - default ALLOW (DENY_LIST) or DENY (ALLOW_LIST) at the tail
     │
     ▼  Array<SockFilter>
 PureJavaBpfEngine.install(policy)  /  installOnProcess(policy)
@@ -44,11 +45,21 @@ A Binary Search Tree layout for even a moderately sized syscall set (e.g. `PURE_
 ~40 syscalls) can require jumps that exceed this limit, requiring complex instruction
 rewriting or label patching.
 
-The linear scan emits two instructions per blocked syscall number:
+The linear scan emits two instructions per restricted syscall number. The logic
+is inverted based on the policy mode:
+
+**DENY_LIST mode:**
 ```
 BPF_JEQ(nr)  → jt=0, jf=1     # if nr matches: jt=0 (no skip) → fall into RET_DENY
 BPF_RET(DENY)                  # if nr does not match: jf=1 (skip this RET_DENY)
 ```
+
+**ALLOW_LIST mode:**
+```
+BPF_JEQ(nr)  → jt=0, jf=1     # if nr matches: jt=0 (no skip) → fall into RET_ALLOW
+BPF_RET(ALLOW)                 # if nr does not match: jf=1 (skip this RET_ALLOW)
+```
+
 In Classic BPF, `jt` and `jf` are **instruction skip counts** (not jump labels).
 `jt=0` means "if condition is true, skip 0 instructions" (execute the next instruction immediately).
 `jf=1` means "if condition is false, skip 1 instruction" (skip over the `RET_DENY`).
@@ -183,7 +194,7 @@ executor wrapping or the profiler) without wasting filter slots.
 | *(identical pattern for clone, prctl)* | | |
 
 Before installing, `installInternal` computes:
-- `newBlocks = policy.blocked - (THREAD_BLOCKED + PROCESS_BLOCKED)` → only truly new syscalls
+- `newBlocks = policy.syscalls - (THREAD_BLOCKED + PROCESS_BLOCKED)` → only truly new syscalls
 - `needsMmapProtection`, `needsCloneProtection`, `needsPrctlProtection` → argument-inspection gates
 
 If `newBlocks` is empty and no gates need updating, **no filter is installed** — the

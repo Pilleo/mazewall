@@ -39,18 +39,18 @@ class BobCompilerTest {
         // Transpile to Policy
         val policy = bob.toPolicy(Policy.PURE_COMPUTE)
 
-        // Verify unblocked syscalls
-        // PURE_COMPUTE blocks CONNECT, OPEN, OPENAT. They should be unblocked now.
+        // Verify unrestricted syscalls
+        // PURE_COMPUTE blocks CONNECT, OPEN, OPENAT. They should be unrestricted now.
         val arch = Arch.current()
-        val blocked = policy.blockedSyscalls(arch).toSet()
+        val restricted = policy.syscallNumbers(arch).toSet()
 
         val connectNr = Syscall.CONNECT.numberFor(arch)
         val openNr = Syscall.OPEN.numberFor(arch)
         val openatNr = Syscall.OPENAT.numberFor(arch)
 
-        assertTrue(connectNr !in blocked, "CONNECT should be unblocked")
-        assertTrue(openNr !in blocked, "OPEN should be unblocked")
-        assertTrue(openatNr !in blocked, "OPENAT should be unblocked")
+        assertTrue(connectNr !in restricted, "CONNECT should be unrestricted")
+        assertTrue(openNr !in restricted, "OPEN should be unrestricted")
+        assertTrue(openatNr !in restricted, "OPENAT should be unrestricted")
 
         // Verify fs paths
         assertTrue(policy.allowedFsReadPaths.contains("/etc/hostname"), "Should contain read path")
@@ -84,9 +84,9 @@ val policy = Policy.builder()
         val bob = BobCompiler.compile(emptyList())
         val policy = bob.toPolicy(Policy.PURE_COMPUTE)
         val arch = Arch.current()
-        val blocked = policy.blockedSyscalls(arch).toSet()
+        val restricted = policy.syscallNumbers(arch).toSet()
 
-        assertTrue(Syscall.CONNECT.numberFor(arch) in blocked)
+        assertTrue(Syscall.CONNECT.numberFor(arch) in restricted)
         assertTrue(policy.allowedFsReadPaths.isEmpty())
         assertTrue(policy.allowedFsWritePaths.isEmpty())
 
@@ -100,9 +100,9 @@ val policy = Policy.builder()
     }
 
     @Test
-    fun `test C-1 bug fix - syscall observed but not blocked by base policy is absent from compiled policy`() {
-        // GETPID is generally not blocked by Policy.PURE_COMPUTE.
-        // If we observe GETPID, compiling against PURE_COMPUTE should NOT list it in the unblocked list of the DSL
+    fun `test C-1 bug fix - syscall observed but not restricted by base policy is absent from compiled policy`() {
+        // GETPID is generally not restricted by Policy.PURE_COMPUTE.
+        // If we observe GETPID, compiling against PURE_COMPUTE should NOT list it in the unrestricted list of the DSL
         // and should not have any effect.
         val events = listOf(
             TraceEvent(12345, "GETPID", longArrayOf(0, 0, 0, 0, 0, 0), emptyList())
@@ -110,7 +110,7 @@ val policy = Policy.builder()
 
         val bob = BobCompiler.compile(events)
 
-        // Generate DSL - GETPID should not be listed as unblocked since PURE_COMPUTE does not block it.
+        // Generate DSL - GETPID should not be listed as unrestricted since PURE_COMPUTE does not block it.
         val dsl = bob.toDsl("Policy.PURE_COMPUTE", Policy.PURE_COMPUTE)
         val expectedDsl = """
 val policy = Policy.builder()

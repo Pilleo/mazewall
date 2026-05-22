@@ -24,6 +24,7 @@ enum class Syscall {
     OPENAT2,
     MMAP,
     MPROTECT,
+    MADVISE,
     PTRACE,
     SOCKET,
     INIT_MODULE,
@@ -42,6 +43,25 @@ enum class Syscall {
     CHROOT,
     IOCTL,
     PRCTL,
+    READ,
+    WRITE,
+    CLOSE,
+    FSTAT,
+    LSEEK,
+    MUNMAP,
+    BRK,
+    RT_SIGACTION,
+    RT_SIGPROCMASK,
+    RT_SIGRETURN,
+    PREAD64,
+    PWRITE64,
+    FCNTL,
+    FUTEX,
+    SCHED_YIELD,
+    GETRANDOM,
+    CLOCK_GETTIME,
+    EXIT,
+    EXIT_GROUP,
 
     // Harmless/Utility syscalls for fine-grained control and testing
     GETPID,
@@ -78,6 +98,7 @@ enum class Syscall {
     FCHMOD,
     FCHMODAT,
     FSTATAT,
+    STATX,
     FSYNC,
     FDATASYNC,
     TRUNCATE,
@@ -105,6 +126,7 @@ enum class Syscall {
         OPENAT2 -> arch.openat2
         MMAP -> arch.mmap
         MPROTECT -> arch.mprotect
+        MADVISE -> arch.madvise
         PTRACE -> arch.ptrace
         SOCKET -> arch.socket
         INIT_MODULE -> arch.initModule
@@ -123,6 +145,25 @@ enum class Syscall {
         CHROOT -> arch.chroot
         IOCTL -> arch.ioctl
         PRCTL -> arch.prctl
+        READ -> arch.read
+        WRITE -> arch.write
+        CLOSE -> arch.close
+        FSTAT -> arch.fstat
+        LSEEK -> arch.lseek
+        MUNMAP -> arch.munmap
+        BRK -> arch.brk
+        RT_SIGACTION -> arch.rt_sigaction
+        RT_SIGPROCMASK -> arch.rt_sigprocmask
+        RT_SIGRETURN -> arch.rt_sigreturn
+        PREAD64 -> arch.pread64
+        PWRITE64 -> arch.pwrite64
+        FCNTL -> arch.fcntl
+        FUTEX -> arch.futex
+        SCHED_YIELD -> arch.sched_yield
+        GETRANDOM -> arch.getrandom
+        CLOCK_GETTIME -> arch.clock_gettime
+        EXIT -> arch.exit
+        EXIT_GROUP -> arch.exit_group
 
         GETPID -> arch.getpid
         GETPPID -> arch.getppid
@@ -158,6 +199,7 @@ enum class Syscall {
         FCHMOD -> arch.fchmod
         FCHMODAT -> arch.fchmodat
         FSTATAT -> arch.fstatat
+        STATX -> arch.statx
         FSYNC -> arch.fsync
         FDATASYNC -> arch.fdatasync
         TRUNCATE -> arch.truncate

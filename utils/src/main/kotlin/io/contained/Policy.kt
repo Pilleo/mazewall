@@ -25,7 +25,8 @@ package io.contained
  * ```
  */
 class Policy private constructor(
-    internal val blocked: Set<Syscall>,
+    internal val syscalls: Set<Syscall>,
+    val mode: Mode = Mode.DENY_LIST,
     internal val allowMmapExec: Boolean = false,
     internal val allowNonThreadClone: Boolean = false,
     internal val allowUnsafePrctl: Boolean = false,
@@ -33,13 +34,23 @@ class Policy private constructor(
     internal val allowedFsWritePaths: Set<String> = emptySet()
 ) {
 
-    /** Returns the concrete syscall numbers to block for the given [arch]. */
-    fun blockedSyscalls(arch: Arch): IntArray =
-        blocked
+    enum class Mode {
+        /** Only explicitly allowed syscalls are permitted. Default deny. */
+        ALLOW_LIST,
+
+        /** All syscalls except those explicitly blocked are permitted. Default allow. */
+        DENY_LIST
+    }
+
+
+    /** Returns the concrete syscall numbers to restrict for the given [arch]. */
+    fun syscallNumbers(arch: Arch): IntArray =
+        syscalls
             .map { it.numberFor(arch) }
             .filter { it >= 0 } // -1 means "not available on this arch"
             .sorted()
             .toIntArray()
+
 
     companion object {
         /** Blocks all network I/O, process execution, and file opens. Suitable for pure computation tasks. */
@@ -92,7 +103,12 @@ class Policy private constructor(
         fun builder(): Builder = Builder()
 
         /**
-         * Returns a new Policy that is the union of all blocked syscalls in the given [policies].
+         * Returns a new Policy that is the combination of all given [policies].
+         *
+         * ### Combination Logic
+         * - If all policies are [Mode.DENY_LIST], the result is the **union** of blocked syscalls.
+         * - If all policies are [Mode.ALLOW_LIST], the result is the **intersection** of allowed syscalls.
+         * - Mixed modes are currently not supported in `combine` and will throw [IllegalArgumentException].
          *
          * ### Landlock Convergence (Intersection)
          * Unlike syscall blocks (which are unioned), allowed Landlock filesystem paths are
@@ -104,7 +120,16 @@ class Policy private constructor(
          * (unrestricted filesystem from a Landlock perspective).
          */
         fun combine(vararg policies: Policy): Policy {
-            val union = policies.flatMap { it.blocked }.toSet()
+            require(policies.isNotEmpty()) { "At least one policy is required" }
+            val mode = policies.first().mode
+            require(policies.all { it.mode == mode }) { "Cannot combine policies with different modes: ${policies.map { it.mode }}" }
+
+            val combinedSyscalls = if (mode == Mode.DENY_LIST) {
+                policies.flatMap { it.syscalls }.toSet()
+            } else {
+                policies.map { it.syscalls }.reduce { acc, set -> acc.intersect(set) }
+            }
+
             val mmapExec = policies.all { it.allowMmapExec }
             val cloneNonThread = policies.all { it.allowNonThreadClone }
             val unsafePrctl = policies.all { it.allowUnsafePrctl }
@@ -119,7 +144,8 @@ class Policy private constructor(
                 if (allWriteSets.isEmpty()) emptySet() else allWriteSets.reduce { acc, set -> acc.intersect(set) }
 
             return Policy(
-                union,
+                combinedSyscalls,
+                mode = mode,
                 allowMmapExec = mmapExec,
                 allowNonThreadClone = cloneNonThread,
                 allowUnsafePrctl = unsafePrctl,
@@ -130,28 +156,42 @@ class Policy private constructor(
     }
 
     class Builder {
-        private val blocked = mutableSetOf<Syscall>()
+        private val syscalls = mutableSetOf<Syscall>()
+        private var mode = Mode.DENY_LIST
         private var allowMmapExec = false
         private var allowNonThreadClone = false
         private var allowUnsafePrctl = false
         private val allowedFsReadPaths = mutableSetOf<String>()
         private val allowedFsWritePaths = mutableSetOf<String>()
 
+        fun mode(mode: Mode): Builder {
+            this.mode = mode
+            return this
+        }
+
+        /** Alias for [block] when in [Mode.DENY_LIST] or simply adds to the restricted set. */
         fun block(vararg syscalls: Syscall): Builder {
-            blocked.addAll(syscalls)
+            this.syscalls.addAll(syscalls)
+            return this
+        }
+
+        /** Alias for [block]. In [Mode.ALLOW_LIST], this explicitly allows the syscalls. */
+        fun allow(vararg syscalls: Syscall): Builder {
+            this.syscalls.addAll(syscalls)
             return this
         }
 
         fun unblock(vararg syscalls: Syscall): Builder {
-            blocked.removeAll(syscalls.toSet())
+            this.syscalls.removeAll(syscalls.toSet())
             return this
         }
 
         /**
-         * Inherits all settings (blocked syscalls, allowed paths, etc.) from the given [policy].
+         * Inherits all settings (syscalls, mode, allowed paths, etc.) from the given [policy].
          */
         fun base(policy: Policy): Builder {
-            blocked.addAll(policy.blocked)
+            this.mode = policy.mode
+            this.syscalls.addAll(policy.syscalls)
             if (policy.allowMmapExec) allowMmapExec = true
             if (policy.allowNonThreadClone) allowNonThreadClone = true
             if (policy.allowUnsafePrctl) allowUnsafePrctl = true
@@ -159,6 +199,7 @@ class Policy private constructor(
             allowedFsWritePaths.addAll(policy.allowedFsWritePaths)
             return this
         }
+
 
         /**
          * Allows reading from the specified file or directory path (and its children).
@@ -237,7 +278,8 @@ class Policy private constructor(
         }
 
         fun build(): Policy = Policy(
-            blocked.toSet(),
+            syscalls.toSet(),
+            mode,
             allowMmapExec,
             allowNonThreadClone,
             allowUnsafePrctl,

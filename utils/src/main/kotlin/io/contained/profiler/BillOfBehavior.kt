@@ -92,8 +92,12 @@ data class BillOfBehavior(
      */
     fun toPolicy(base: Policy = Policy.PURE_COMPUTE): Policy {
         val builder = Policy.builder().base(base)
-        val toUnblock = syscalls.filter { base.blocked.contains(it) }
-        builder.unblock(*toUnblock.toTypedArray())
+        if (base.mode == Policy.Mode.DENY_LIST) {
+            val toUnblock = syscalls.filter { base.syscalls.contains(it) }
+            builder.unblock(*toUnblock.toTypedArray())
+        } else {
+            builder.allow(*syscalls.toTypedArray())
+        }
         for (path in opens) builder.allowFsRead(path)
         for (path in fsWritePaths) builder.allowFsWrite(path)
         return builder.build()
@@ -110,15 +114,29 @@ data class BillOfBehavior(
         val sb = StringBuilder()
         sb.append("val policy = Policy.builder()\n")
         sb.append("    .base($basePolicyName)\n")
-        val toUnblock = syscalls.filter { base.blocked.contains(it) }.sortedBy { it.name }
-        if (toUnblock.isNotEmpty()) {
-            sb.append("    .unblock(\n")
-            toUnblock.forEachIndexed { i, s ->
-                sb.append("        Syscall.${s.name}")
-                if (i < toUnblock.size - 1) sb.append(",")
-                sb.append("\n")
+
+        if (base.mode == Policy.Mode.DENY_LIST) {
+            val toUnblock = syscalls.filter { base.syscalls.contains(it) }.sortedBy { it.name }
+            if (toUnblock.isNotEmpty()) {
+                sb.append("    .unblock(\n")
+                toUnblock.forEachIndexed { i, s ->
+                    sb.append("        Syscall.${s.name}")
+                    if (i < toUnblock.size - 1) sb.append(",")
+                    sb.append("\n")
+                }
+                sb.append("    )\n")
             }
-            sb.append("    )\n")
+        } else {
+            val toAllow = syscalls.sortedBy { it.name }
+            if (toAllow.isNotEmpty()) {
+                sb.append("    .allow(\n")
+                toAllow.forEachIndexed { i, s ->
+                    sb.append("        Syscall.${s.name}")
+                    if (i < toAllow.size - 1) sb.append(",")
+                    sb.append("\n")
+                }
+                sb.append("    )\n")
+            }
         }
         for (path in opens.sorted()) sb.append("    .allowFsRead(\"$path\")\n")
         for (path in fsWritePaths.sorted()) sb.append("    .allowFsWrite(\"$path\")\n")

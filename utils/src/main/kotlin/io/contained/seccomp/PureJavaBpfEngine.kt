@@ -13,7 +13,7 @@ import java.lang.foreign.Arena
  * Generates BPF filters manually and installs them using Downcalls.
  */
 object PureJavaBpfEngine : SeccompEngine {
-    
+
     override val isSupported: Boolean
         get() = Platform.isSupported()
 
@@ -34,7 +34,7 @@ object PureJavaBpfEngine : SeccompEngine {
 
         val arch = Arch.current()
         val filters = BpfFilter.build(arch, policy)
-        
+
         Arena.ofConfined().use { arena ->
             val prog = LinuxNative.newSockFProg(arena, filters)
 
@@ -50,12 +50,12 @@ object PureJavaBpfEngine : SeccompEngine {
             if (r3.returnValue != 0L) {
                 // Fall back to prctl for older kernels
                 val errno1 = r3.errno
-                
+
                 // Note: prctl SECCOMP_MODE_FILTER does not support TSYNC directly in the same way.
-                // If the user requested TSYNC and seccomp(2) failed, we must fail rather than 
+                // If the user requested TSYNC and seccomp(2) failed, we must fail rather than
                 // silently falling back to thread-local behavior.
                 if (useTsync) {
-                     throw IllegalStateException(
+                    throw IllegalStateException(
                         "Process-wide seccomp installation (TSYNC) failed: seccomp(2) failed with errno $errno1. Your kernel may be too old to support SECCOMP_FILTER_FLAG_TSYNC."
                     )
                 }
@@ -66,7 +66,7 @@ object PureJavaBpfEngine : SeccompEngine {
                     prog,
                     0, 0
                 )
-                
+
                 if (r4.returnValue != 0L) {
                     throw IllegalStateException(
                         "seccomp installation failed: seccomp(2) errno=$errno1, prctl errno=${r4.errno}"
@@ -74,9 +74,15 @@ object PureJavaBpfEngine : SeccompEngine {
                 }
             }
         }
-        
-        if (policy.blocked.contains(Syscall.PRCTL)) {
-            return // Cannot verify because prctl itself is blocked
+
+        val canVerify = if (policy.mode == Policy.Mode.DENY_LIST) {
+            !policy.syscalls.contains(Syscall.PRCTL)
+        } else {
+            policy.syscalls.contains(Syscall.PRCTL)
+        }
+
+        if (!canVerify) {
+            return // Cannot verify because prctl itself is restricted
         }
 
         // Verify filter is actually installed

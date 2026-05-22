@@ -41,10 +41,10 @@ The repository is organized as a multi-module Gradle project. The **`/utils`** m
 
 | File | Responsibility |
 |------|----------------|
-| `Policy.kt` | Composable security policies (`PURE_COMPUTE`, `NO_NETWORK`, `NO_EXEC`). Builder pattern. Holds blocked `Syscall` set, argument-inspection flags, and Landlock FS paths. |
+| `Policy.kt` | Composable security policies. Supports `ALLOW_LIST` (default-deny) and `DENY_LIST` (default-allow) modes. Builder pattern. |
 | `Syscall.kt` | `enum class Syscall` with `numberFor(arch)` dispatch. |
 | `Arch.kt` | Architecture maps: CPU AUDIT identifiers, seccomp syscall numbers, per-syscall numbers for x86_64 and aarch64. |
-| `BpfFilter.kt` | Compiles a `Policy` to a raw BPF instruction stream. Linear scan (not BST) to stay within 8-bit jump limit. Contains argument-inspection sequences for `mmap`/`mprotect`, `clone`, `clone3`, and `prctl`. See `containment_design.md §2-3`. |
+| `BpfFilter.kt` | Compiles a `Policy` to a raw BPF instruction stream. Inverted linear scan for `ALLOW_LIST` mode to stay within 8-bit jump limit. Contains argument-inspection sequences for `mmap`/`mprotect`, `clone`, and `prctl`. |
 | `SeccompEngine.kt` | Interface: `install(policy)`, `installOnProcess(policy)`, `isSupported`. |
 | `PureJavaBpfEngine.kt` | `SeccompEngine` implementation. Sets `PR_SET_NO_NEW_PRIVS`, installs via `seccomp(2)` (falls back to `prctl(PR_SET_SECCOMP)` for old kernels), verifies with `PR_GET_SECCOMP`. If TSYNC fails, fails hard. See `containment_design.md §6`. |
 | `LinuxNative.kt` | FFM-based syscall bindings. All calls capture `errno` via `Linker.Option.captureCallState("errno")`. |

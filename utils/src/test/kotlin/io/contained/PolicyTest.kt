@@ -9,28 +9,28 @@ import kotlin.test.assertFailsWith
 class PolicyTest {
 
     @Test
-    fun `blockedSyscalls returns sorted array`() {
+    fun `syscallNumbers returns sorted array`() {
         val policy = Policy.builder()
             .block(Syscall.SENDTO, Syscall.ACCEPT, Syscall.CONNECT, Syscall.BIND)
             .build()
 
-        val blocked = policy.blockedSyscalls(Arch.current())
-        val sorted = blocked.sortedArray()
+        val restricted = policy.syscallNumbers(Arch.current())
+        val sorted = restricted.sortedArray()
 
-        assertTrue(blocked.contentEquals(sorted), "blockedSyscalls should return a sorted array")
+        assertTrue(restricted.contentEquals(sorted), "syscallNumbers should return a sorted array")
     }
 
     @Test
     fun `NO_NETWORK policy includes all network server syscalls`() {
         val policy = Policy.NO_NETWORK
         val arch = Arch.current()
-        val blocked = policy.blockedSyscalls(arch).toList()
+        val restricted = policy.syscallNumbers(arch).toList()
 
-        assertTrue(blocked.contains(arch.bind), "NO_NETWORK should block bind")
-        assertTrue(blocked.contains(arch.listen), "NO_NETWORK should block listen")
-        assertTrue(blocked.contains(arch.accept), "NO_NETWORK should block accept")
-        assertTrue(blocked.contains(arch.accept4), "NO_NETWORK should block accept4")
-        assertTrue(blocked.contains(arch.connect), "NO_NETWORK should block connect")
+        assertTrue(restricted.contains(arch.bind), "NO_NETWORK should block bind")
+        assertTrue(restricted.contains(arch.listen), "NO_NETWORK should block listen")
+        assertTrue(restricted.contains(arch.accept), "NO_NETWORK should block accept")
+        assertTrue(restricted.contains(arch.accept4), "NO_NETWORK should block accept4")
+        assertTrue(restricted.contains(arch.connect), "NO_NETWORK should block connect")
     }
 
     @Test
@@ -66,10 +66,10 @@ class PolicyTest {
             .build()
 
         val arch = Arch.current()
-        val blocked = policy.blockedSyscalls(arch).toList()
+        val restricted = policy.syscallNumbers(arch).toList()
 
-        assertTrue(blocked.contains(arch.bind))
-        assertFalse(blocked.contains(arch.connect))
+        assertTrue(restricted.contains(arch.bind))
+        assertFalse(restricted.contains(arch.connect))
     }
 
     @Test
@@ -79,9 +79,28 @@ class PolicyTest {
         val combined = Policy.combine(p1, p2)
 
         val arch = Arch.current()
-        val blocked = combined.blockedSyscalls(arch).toList()
-        assertTrue(blocked.contains(arch.bind))
-        assertTrue(blocked.contains(arch.connect))
+        val restricted = combined.syscallNumbers(arch).toList()
+        assertTrue(restricted.contains(arch.bind))
+        assertTrue(restricted.contains(arch.connect))
+    }
+
+    @Test
+    fun `combine() with different modes fails`() {
+        val p1 = Policy.builder().mode(Policy.Mode.DENY_LIST).build()
+        val p2 = Policy.builder().mode(Policy.Mode.ALLOW_LIST).build()
+        assertFailsWith<IllegalArgumentException> {
+            Policy.combine(p1, p2)
+        }
+    }
+
+    @Test
+    fun `combine() intersects ALLOW_LIST syscalls`() {
+        val p1 = Policy.builder().mode(Policy.Mode.ALLOW_LIST).allow(Syscall.READ, Syscall.WRITE).build()
+        val p2 = Policy.builder().mode(Policy.Mode.ALLOW_LIST).allow(Syscall.WRITE, Syscall.CLOSE).build()
+        val combined = Policy.combine(p1, p2)
+
+        assertEquals(Policy.Mode.ALLOW_LIST, combined.mode)
+        assertEquals(setOf(Syscall.WRITE), combined.syscalls)
     }
 
     @Test
@@ -90,7 +109,7 @@ class PolicyTest {
             .unblock(Syscall.OPEN)
             .unblock(Syscall.OPEN)
             .build()
-        assertTrue(!policy.blockedSyscalls(Arch.current()).toList().contains(Arch.current().open))
+        assertTrue(!policy.syscallNumbers(Arch.current()).toList().contains(Arch.current().open))
     }
 
     @Test
@@ -140,7 +159,7 @@ class PolicyTest {
         assertTrue(p2.allowUnsafePrctl)
         assertTrue(p2.allowedFsReadPaths.contains("/r"))
         assertTrue(p2.allowedFsWritePaths.contains("/w"))
-        assertTrue(p2.blocked.contains(Syscall.OPEN))
+        assertTrue(p2.syscalls.contains(Syscall.OPEN))
     }
 
     @Test
@@ -174,10 +193,10 @@ class PolicyTest {
     fun `STRICT_SANDBOX includes PURE_COMPUTE and classpath`() {
         val policy = Policy.STRICT_SANDBOX
         val arch = Arch.current()
-        val blocked = policy.blockedSyscalls(arch).toList()
+        val restricted = policy.syscallNumbers(arch).toList()
 
-        assertTrue(blocked.contains(arch.connect))
-        assertTrue(blocked.contains(arch.execve))
+        assertTrue(restricted.contains(arch.connect))
+        assertTrue(restricted.contains(arch.execve))
         assertTrue(policy.allowedFsReadPaths.isNotEmpty(), "STRICT_SANDBOX should allow reading from classpath")
     }
 }

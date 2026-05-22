@@ -84,12 +84,12 @@ class ProfilerIntegrationTest {
 
         // The compiled policy should have the open variant unblocked!
         val arch = Arch.current()
-        val blocked = compiledPolicy.blockedSyscalls(arch).toSet()
+        val restricted = compiledPolicy.syscallNumbers(arch).toSet()
 
         val openNr = Syscall.OPEN.numberFor(arch)
         val openatNr = Syscall.OPENAT.numberFor(arch)
 
-        val openUnblocked = (openNr >= 0 && openNr !in blocked) || (openatNr >= 0 && openatNr !in blocked)
+        val openUnblocked = (openNr >= 0 && openNr !in restricted) || (openatNr >= 0 && openatNr !in restricted)
         assertTrue(openUnblocked, "At least one of OPEN or OPENAT should be unblocked in compiled policy")
 
         // The compiled policy should allow reading from /etc/hostname

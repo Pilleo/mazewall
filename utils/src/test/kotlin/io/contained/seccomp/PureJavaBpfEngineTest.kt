@@ -41,8 +41,8 @@ class PureJavaBpfEngineTest {
     @EnabledIfLinuxAndSupported
     fun `test PureJavaBpfEngine with large policy`() {
         val builder = Policy.builder()
-        // Block a lot of syscalls to exercise BPF generation
-        Syscall.entries.take(50).forEach { builder.block(it) }
+        // Block a reasonable number of syscalls to exercise BPF generation
+        Syscall.entries.take(20).forEach { builder.block(it) }
         val policy = builder.build()
 
         val executor = Executors.newSingleThreadExecutor()

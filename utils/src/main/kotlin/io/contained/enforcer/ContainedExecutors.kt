@@ -138,12 +138,23 @@ object ContainedExecutors {
             val currentlyAllowsUnsafePrctl = THREAD_ALLOWS_UNSAFE_PRCTL.get() && PROCESS_ALLOWS_UNSAFE_PRCTL
             val currentDepth = FILTER_DEPTH.get() + PROCESS_FILTER_DEPTH.get()
 
-            val newBlocks = policy.blocked - currentlyBlocked
+            val newBlocks = if (policy.mode == Policy.Mode.DENY_LIST) {
+                policy.syscalls - currentlyBlocked
+            } else {
+                emptySet()
+            }
+
             val needsMmapProtection = !policy.allowMmapExec && currentlyAllowsMmapExec
             val needsCloneProtection = !policy.allowNonThreadClone && currentlyAllowsNonThreadClone
             val needsPrctlProtection = !policy.allowUnsafePrctl && currentlyAllowsUnsafePrctl
 
-            if (newBlocks.isNotEmpty() || needsMmapProtection || needsCloneProtection || needsPrctlProtection) {
+            val needsNewFilter = policy.mode == Policy.Mode.ALLOW_LIST ||
+                    newBlocks.isNotEmpty() ||
+                    needsMmapProtection ||
+                    needsCloneProtection ||
+                    needsPrctlProtection
+
+            if (needsNewFilter) {
                 if (currentDepth >= 32) {
                     throw IllegalStateException("Cannot install more than 32 seccomp filters on a single thread (including process-wide filters).")
                 }
@@ -151,15 +162,18 @@ object ContainedExecutors {
                     logger.warning("Thread ${Thread.currentThread().name} has $currentDepth seccomp filters.")
                 }
 
-                // Use PureJavaBpfEngine exclusively for zero-dependency enforcement
-                val incrementalPolicy = Policy.builder()
-                    .block(*newBlocks.toTypedArray())
+                val toInstall = if (policy.mode == Policy.Mode.ALLOW_LIST) {
+                    policy
+                } else {
+                    // Use PureJavaBpfEngine exclusively for zero-dependency enforcement
+                    val incremental = Policy.builder()
+                        .block(*newBlocks.toTypedArray())
 
-                if (policy.allowMmapExec) incrementalPolicy.allowMmapExec()
-                if (policy.allowNonThreadClone) incrementalPolicy.allowNonThreadClone()
-                if (policy.allowUnsafePrctl) incrementalPolicy.allowUnsafePrctl()
-
-                val toInstall = incrementalPolicy.build()
+                    if (policy.allowMmapExec) incremental.allowMmapExec()
+                    if (policy.allowNonThreadClone) incremental.allowNonThreadClone()
+                    if (policy.allowUnsafePrctl) incremental.allowUnsafePrctl()
+                    incremental.build()
+                }
 
                 if (processWide) {
                     PureJavaBpfEngine.installOnProcess(toInstall)

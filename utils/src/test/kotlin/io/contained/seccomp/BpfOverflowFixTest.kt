@@ -14,13 +14,13 @@ class BpfOverflowFixTest {
         val blocked = IntArray(100) { it + 1000 } // Use numbers that won't clash with preamble
 
         // This used to crash with "jt offset must be an unsigned 8-bit value"
-        val filters = BpfFilter.buildFromNumbers(arch, blocked)
+        val filters = BpfFilter.buildFromNumbers(arch, blocked, Policy.Mode.DENY_LIST)
 
         assertTrue(filters.isNotEmpty())
         println("Filter with 100 syscalls: ${filters.size} instructions")
 
         // Verify linear scan properties:
-        // A linear scan is robust against jump offset limit overflows because 
+        // A linear scan is robust against jump offset limit overflows because
         // each check is localized with a small relative jump offset.
         // The fact that it didn't throw IllegalStateException (offset > 255) is the key.
     }

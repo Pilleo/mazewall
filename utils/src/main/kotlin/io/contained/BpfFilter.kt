@@ -28,7 +28,8 @@ object BpfFilter {
     fun build(arch: Arch, policy: Policy, profilingMode: Boolean = false): Array<SockFilter> =
         buildFromNumbers(
             arch,
-            policy.blockedSyscalls(arch),
+            policy.syscallNumbers(arch),
+            policy.mode,
             policy.allowMmapExec,
             policy.allowNonThreadClone,
             policy.allowUnsafePrctl,
@@ -52,7 +53,8 @@ object BpfFilter {
      */
     internal fun buildFromNumbers(
         arch: Arch,
-        blocked: IntArray,
+        syscallNumbers: IntArray,
+        mode: Policy.Mode,
         allowMmapExec: Boolean = false,
         allowNonThreadClone: Boolean = false,
         allowUnsafePrctl: Boolean = false,
@@ -63,6 +65,8 @@ object BpfFilter {
             if (profilingMode) LinuxNative.SECCOMP_RET_USER_NOTIF else (LinuxNative.SECCOMP_RET_ERRNO or LinuxNative.EPERM)
         val allowAction = LinuxNative.SECCOMP_RET_ALLOW
         val enosysAction = LinuxNative.SECCOMP_RET_ERRNO or 38
+
+        val syscallSet = syscallNumbers.toSet()
 
         // 1. Check Architecture
         filters.add(SockFilter((BPF_LD or BPF_W or BPF_ABS).toShort(), 0, 0, SECCOMP_DATA_ARCH_OFFSET))
@@ -76,16 +80,33 @@ object BpfFilter {
         // 3. Special Syscall Argument Checks
         val handledNrs = mutableSetOf<Int>()
 
+        /** Helper to decide whether to allow or deny a syscall that passed its argument inspection. */
+        fun addInspectionResult(nr: Int) {
+            if (mode == Policy.Mode.DENY_LIST) {
+                if (nr in syscallSet) {
+                    filters.add(SockFilter((BPF_RET or BPF_K).toShort(), 0, 0, denyAction))
+                } else {
+                    filters.add(SockFilter((BPF_RET or BPF_K).toShort(), 0, 0, allowAction))
+                }
+            } else {
+                if (nr in syscallSet) {
+                    filters.add(SockFilter((BPF_RET or BPF_K).toShort(), 0, 0, allowAction))
+                } else {
+                    filters.add(SockFilter((BPF_RET or BPF_K).toShort(), 0, 0, denyAction))
+                }
+            }
+        }
+
         // mmap
         if (!allowMmapExec && arch.mmap >= 0) {
             handledNrs.add(arch.mmap)
             filters.add(SockFilter((BPF_JMP or BPF_JEQ or BPF_K).toShort(), 0, 4, arch.mmap))
             filters.add(SockFilter((BPF_LD or BPF_W or BPF_ABS).toShort(), 0, 0, SECCOMP_ARGS2_OFFSET))
             // BPF_JSET: jt=0 -> if (ACC & 0x04) != 0 (PROT_EXEC set): execute next instr (RET_DENY)
-            //           jf=1 -> if (ACC & 0x04) == 0 (PROT_EXEC not set): skip 1 instr (the RET_DENY)
+            //           jf=1 -> if (ACC & 0x04) == 0 (PROT_EXEC not set): skip 1 instr (the result)
             filters.add(SockFilter((BPF_JMP or BPF_JSET or BPF_K).toShort(), 0, 1, 0x04))
             filters.add(SockFilter((BPF_RET or BPF_K).toShort(), 0, 0, denyAction))
-            filters.add(SockFilter((BPF_LD or BPF_W or BPF_ABS).toShort(), 0, 0, SECCOMP_DATA_NR_OFFSET)) // Restore NR
+            addInspectionResult(arch.mmap)
         }
 
         // mprotect
@@ -93,29 +114,23 @@ object BpfFilter {
             handledNrs.add(arch.mprotect)
             filters.add(SockFilter((BPF_JMP or BPF_JEQ or BPF_K).toShort(), 0, 4, arch.mprotect))
             filters.add(SockFilter((BPF_LD or BPF_W or BPF_ABS).toShort(), 0, 0, SECCOMP_ARGS2_OFFSET))
-            // BPF_JSET: jt=0 -> if (ACC & 0x04) != 0 (PROT_EXEC set): execute next instr (RET_DENY)
-            //           jf=1 -> if (ACC & 0x04) == 0 (PROT_EXEC not set): skip 1 instr (the RET_DENY)
             filters.add(SockFilter((BPF_JMP or BPF_JSET or BPF_K).toShort(), 0, 1, 0x04))
             filters.add(SockFilter((BPF_RET or BPF_K).toShort(), 0, 0, denyAction))
-            filters.add(SockFilter((BPF_LD or BPF_W or BPF_ABS).toShort(), 0, 0, SECCOMP_DATA_NR_OFFSET))
+            addInspectionResult(arch.mprotect)
         }
 
         // clone
         if (!allowNonThreadClone && arch.clone >= 0) {
             handledNrs.add(arch.clone)
             filters.add(SockFilter((BPF_JMP or BPF_JEQ or BPF_K).toShort(), 0, 5, arch.clone))
-            // Note: BPF_LD | BPF_W | BPF_ABS only loads a 32-bit word. On 64-bit kernels, seccomp_data.args[]
-            // are 64-bit values. For clone flags, they are in the lower 32 bits, so 32-bit truncation here is safe.
             filters.add(SockFilter((BPF_LD or BPF_W or BPF_ABS).toShort(), 0, 0, SECCOMP_DATA_ARGS_OFFSET))
-            // AND the flags with our mask (CLONE_VM | CLONE_THREAD)
             filters.add(SockFilter((BPF_ALU or BPF_AND or BPF_K).toShort(), 0, 0, 0x00010100))
-            // JEQ: if result equals the mask (both bits are set), skip 1 (the ret deny)
             filters.add(SockFilter((BPF_JMP or BPF_JEQ or BPF_K).toShort(), 1, 0, 0x00010100))
             filters.add(SockFilter((BPF_RET or BPF_K).toShort(), 0, 0, denyAction))
-            filters.add(SockFilter((BPF_LD or BPF_W or BPF_ABS).toShort(), 0, 0, SECCOMP_DATA_NR_OFFSET))
+            addInspectionResult(arch.clone)
         }
 
-        // clone3
+        // clone3 -> Always return ENOSYS to force fallback
         if (arch.clone3 >= 0) {
             handledNrs.add(arch.clone3)
             filters.add(SockFilter((BPF_JMP or BPF_JEQ or BPF_K).toShort(), 0, 1, arch.clone3))
@@ -123,9 +138,6 @@ object BpfFilter {
         }
 
         // prctl argument-inspection
-        // Note: Even if allowUnsafePrctl is false, we always whitelist safe options
-        // like PR_SET_NAME and PR_GET_SECCOMP. The latter is required by PureJavaBpfEngine
-        // to verify that the filter was successfully installed.
         if (!allowUnsafePrctl && arch.prctl >= 0) {
             handledNrs.add(arch.prctl)
             filters.add(SockFilter((BPF_JMP or BPF_JEQ or BPF_K).toShort(), 0, 9, arch.prctl))
@@ -137,21 +149,22 @@ object BpfFilter {
             filters.add(SockFilter((BPF_JMP or BPF_JEQ or BPF_K).toShort(), 2, 0, 38)) // PR_SET_NO_NEW_PRIVS
             filters.add(SockFilter((BPF_JMP or BPF_JEQ or BPF_K).toShort(), 1, 0, 39)) // PR_GET_NO_NEW_PRIVS
             filters.add(SockFilter((BPF_RET or BPF_K).toShort(), 0, 0, denyAction))
-            filters.add(SockFilter((BPF_LD or BPF_W or BPF_ABS).toShort(), 0, 0, SECCOMP_DATA_NR_OFFSET))
+            addInspectionResult(arch.prctl)
         }
 
         // 4. Block-based checks (Linear Scan)
-        // Since BPF jump offsets are only 8-bit (max 255), and we have ~100 syscalls,
-        // a linear scan with individual RETs is safe and simple.
-        for (nr in blocked.sortedArray()) {
-            if (nr in handledNrs) continue // already handled by argument inspection or special rules
-            // If nr matches, skip 1 (don't ret allow), hit ret deny
+        for (nr in syscallNumbers.sortedArray()) {
+            if (nr in handledNrs) continue
+            // If nr matches, execute next (RET), else skip 1
             filters.add(SockFilter((BPF_JMP or BPF_JEQ or BPF_K).toShort(), 0, 1, nr))
-            filters.add(SockFilter((BPF_RET or BPF_K).toShort(), 0, 0, denyAction))
+
+            val action = if (mode == Policy.Mode.DENY_LIST) denyAction else allowAction
+            filters.add(SockFilter((BPF_RET or BPF_K).toShort(), 0, 0, action))
         }
 
-        // 5. Default Allow
-        filters.add(SockFilter((BPF_RET or BPF_K).toShort(), 0, 0, allowAction))
+        // 5. Default Action
+        val tailAction = if (mode == Policy.Mode.ALLOW_LIST) denyAction else allowAction
+        filters.add(SockFilter((BPF_RET or BPF_K).toShort(), 0, 0, tailAction))
 
         return filters.toTypedArray()
     }

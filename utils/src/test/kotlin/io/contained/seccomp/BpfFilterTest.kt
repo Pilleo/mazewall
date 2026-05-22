@@ -5,6 +5,7 @@ import io.contained.BpfFilter
 import io.contained.EnabledIfLinuxAndSupported
 import io.contained.LinuxNative
 import io.contained.Policy
+import io.contained.Syscall
 import org.junit.jupiter.api.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -41,6 +42,60 @@ class BpfFilterTest {
         val last = filter.last()
         assertEquals(0x06.toShort(), last.code, "Last instruction should be RET")
         assertEquals(LinuxNative.SECCOMP_RET_ALLOW, last.k, "Last instruction should return ALLOW")
+    }
+
+    @Test
+    fun `ALLOW_LIST mode has RET DENY as default`() {
+        val policy = Policy.builder().mode(Policy.Mode.ALLOW_LIST).build()
+        val filter = BpfFilter.build(arch, policy)
+        val last = filter.last()
+        assertEquals(0x06.toShort(), last.code)
+        assertEquals(LinuxNative.SECCOMP_RET_ERRNO or LinuxNative.EPERM, last.k)
+    }
+
+    @Test
+    fun `ALLOW_LIST mode generates RET ALLOW for listed syscalls`() {
+        val policy = Policy.builder()
+            .mode(Policy.Mode.ALLOW_LIST)
+            .allow(Syscall.READ)
+            .build()
+        val filter = BpfFilter.build(arch, policy)
+
+        // Find JEQ read -> RET ALLOW
+        val readNr = Syscall.READ.numberFor(arch)
+        var found = false
+        for (i in filter.indices) {
+            val f = filter[i]
+            if (f.code == 0x15.toShort() && f.k == readNr) {
+                // jt=0 (match), next instruction should be RET ALLOW
+                val next = filter[i + 1]
+                if (next.code == 0x06.toShort() && next.k == LinuxNative.SECCOMP_RET_ALLOW) {
+                    found = true
+                    break
+                }
+            }
+        }
+        assertTrue(found, "Filter should return ALLOW for listed syscall in ALLOW_LIST mode")
+    }
+
+    @Test
+    fun `clone3 always returns ENOSYS even in ALLOW_LIST`() {
+        val policy = Policy.builder().mode(Policy.Mode.ALLOW_LIST).build()
+        val filter = BpfFilter.build(arch, policy)
+
+        val clone3Nr = arch.clone3
+        var found = false
+        for (i in filter.indices) {
+            val f = filter[i]
+            if (f.code == 0x15.toShort() && f.k == clone3Nr) {
+                val next = filter[i + 1]
+                if (next.code == 0x06.toShort() && next.k == (LinuxNative.SECCOMP_RET_ERRNO or 38)) {
+                    found = true
+                    break
+                }
+            }
+        }
+        assertTrue(found, "clone3 should always return ENOSYS")
     }
 
     @Test
