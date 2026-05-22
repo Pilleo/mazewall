@@ -10,6 +10,8 @@ services:
     cap_add:
       - AUDIT_READ
       - AUDIT_CONTROL
+    security_opt:
+      - seccomp=unconfined
     # Workaround for Podman: Use annotation instead of security_opt
     # to prevent Docker Compose from reading and passing the raw JSON string.
     annotations:
