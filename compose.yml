@@ -1,6 +1,8 @@
 services:
-  jseccomp:
-    build: .
+  mazewall:
+    build:
+      context: .
+      dockerfile: Containerfile
     volumes:
       - .:/workspace
     # Audit subsystem requires sharing the host network namespace and initial user namespace.

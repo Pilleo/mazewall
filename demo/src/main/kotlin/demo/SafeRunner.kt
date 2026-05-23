@@ -1,8 +1,8 @@
 package demo
 
-import io.contained.enforcer.ContainedExecutors
-import io.contained.enforcer.ContainmentViolationException
-import io.contained.Policy
+import io.mazewall.enforcer.ContainedExecutors
+import io.mazewall.enforcer.ContainmentViolationException
+import io.mazewall.Policy
 import java.util.concurrent.ExecutionException
 import java.util.concurrent.Executors
 

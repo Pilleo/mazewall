@@ -117,7 +117,7 @@ By using Kubernetes health checks as a trigger, the runtime engine can automatic
 ### 2. Granular Scopes (The Experimental Frontier)
 Beyond lifecycle phases, we can theoretically define scopes at a much deeper level. While these make for powerful Proofs of Concept (PoC), turning them into stable, production-ready technology faces significant architectural challenges:
  
-*   **Process/Thread Scopes:** Restricting behavior based on which specific OS thread is executing (the core of the `jseccomp` experiment).
+*   **Process/Thread Scopes:** Restricting behavior based on which specific OS thread is executing (the core of the `mazewall` experiment).
 *   **Module/Library Scopes:** Restricting behavior based on which JAR or package is currently on the stack.
 *   **Stacktrace Scopes:** Using the calling context to decide if a syscall is valid (e.g., "Allow `socket()` only if called via the AWS SDK").
  
@@ -149,4 +149,4 @@ In Part 2 of this series, we move from theory to practice. We will use a tool de
  
 Using the Java Virtual Machine (JVM) as our laboratory, we will see how to surgically neutralize threats like shellcode injection while maintaining application stability. This hands-on exploration will help you understand the core mechanics that modern security modules (like LSM) rely on to enforce behavioral integrity.
  
-**[Read Part 2: Thread-Scoped Syscall Containment in the JVM](article2-jseccomp.md)**
+**[Read Part 2: Thread-Scoped Syscall Containment in the JVM](article2-mazewall.md)**

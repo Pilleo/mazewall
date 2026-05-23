@@ -6,7 +6,7 @@ Using seccomp-bpf within the JVM introduces specific architectural risks. This d
 
 ## 1. Thread-Level vs. Process-Level Isolation
 
-Seccomp filters on Linux can be applied to a single thread or the entire process. `jseccomp` supports both via `installOnCurrentThread` (Tier 2) and `installOnProcess` (Tier 1).
+Seccomp filters on Linux can be applied to a single thread or the entire process. `mazewall` supports both via `installOnCurrentThread` (Tier 2) and `installOnProcess` (Tier 1).
 
 ### The "Elasticsearch Approach" (Process-Wide)
 For years, industry leaders like **Elasticsearch** have successfully used a minimal, process-wide seccomp filter to prevent Remote Code Execution (RCE). By blocking a small set of syscalls (`fork`, `vfork`, `execve`, `execveat`) globally at startup, they ensure that even if a vulnerability like Log4Shell is exploited, the attacker cannot spawn a shell.
@@ -40,33 +40,33 @@ Blocking `execve` (spawning a shell) is a foundational defense, but sophisticate
 
 ### Fileless Malware (`memfd_create`)
 Attackers can create anonymous, memory-backed file descriptors using `memfd_create`. They can then download an ELF binary into this "fileless" descriptor and execute it using `fexecve` or `execveat`. Because the binary never touches the disk, it bypasses traditional filesystem-based security scanners.
-*   **Mitigation:** `jseccomp` includes `MEMFD_CREATE` in its strict policies (e.g., `PURE_COMPUTE`) and recommends blocking it wherever possible, as the standard JVM does not require it for normal operation.
+*   **Mitigation:** `mazewall` includes `MEMFD_CREATE` in its strict policies (e.g., `PURE_COMPUTE`) and recommends blocking it wherever possible, as the standard JVM does not require it for normal operation.
 
 ### Modern Execution Variants (`execveat`)
 Attackers may use `execveat` to execute programs relative to a directory file descriptor. This can sometimes bypass filters that only monitor the absolute path arguments of the classic `execve`.
-*   **Mitigation:** `jseccomp` explicitly blocks `EXECVEAT` in all `NO_EXEC` policies.
+*   **Mitigation:** `mazewall` explicitly blocks `EXECVEAT` in all `NO_EXEC` policies.
 
 ### Asynchronous Evasion (`io_uring`)
 Modern Linux systems support `io_uring` for high-performance asynchronous I/O. Attackers increasingly abuse this subsystem to bypass seccomp filters. Because operations are submitted via a shared memory ring queue and executed by kernel worker threads (`io-wq`), a standard seccomp filter on the application thread is completely blind to the operations happening inside the ring.
 
 **The Dual-Sensor Solution:**
-To build accurate policies for `io_uring` applications, `jseccomp` implements an **Audit-Assisted Profiler**.
+To build accurate policies for `io_uring` applications, `mazewall` implements an **Audit-Assisted Profiler**.
 1.  **Seccomp Sensor:** Intercepts synchronous syscalls using `USER_NOTIF`.
 2.  **Landlock Audit Sensor:** By applying a restrictive Landlock ruleset (denying everything except the JVM classpath), the kernel is forced to emit `AUDIT_LANDLOCK_ACCESS` records to the kernel audit subsystem for every other operation, including those originating from `io_uring`.
 
 **The Audit Privilege Barrier:**
 While Landlock itself is unprivileged to *install*, the kernel audit subsystem is a global resource. Reading these logs (e.g. from `/dev/kmsg`) requires `CAP_SYSLOG` or `CAP_AUDIT_READ`. 
 *   **Production Implication:** `io_uring` profiling is best suited for hardened CI environments where these capabilities can be granted to the profiler daemon. 
-*   **Fail-Closed Mandate:** By default, the profiler will fail if it cannot initialize the audit sensor, ensuring no asynchronous operations are silently missed unless explicitly configured via `JSECCOMP_PROFILER_FAIL_ON_AUDIT_ERROR=false`.
+*   **Fail-Closed Mandate:** By default, the profiler will fail if it cannot initialize the audit sensor, ensuring no asynchronous operations are silently missed unless explicitly configured via `MAZEWALL_PROFILER_FAIL_ON_AUDIT_ERROR=false`.
 
-*   **Mitigation:** In production, `jseccomp` explicitly blocks `io_uring_setup` in its strict policies. The standard JVM (currently) relies heavily on standard NIO/epoll and does not require `io_uring` for application-level worker threads.
+*   **Mitigation:** In production, `mazewall` explicitly blocks `io_uring_setup` in its strict policies. The standard JVM (currently) relies heavily on standard NIO/epoll and does not require `io_uring` for application-level worker threads.
 
 ### Binary Shellcode Injection
 If an attacker cannot spawn a process, they will attempt to inject raw machine code (shellcode) into the JVM's memory. To run this code, they must mark the memory as executable using `mprotect` or `mmap`.
-*   **Mitigation:** As detailed in the "Argument Inspection" section, `jseccomp` monitors the `PROT_EXEC` bit. It allows the JVM to manage its memory but physically prevents any thread under a policy from making a memory region executable.
+*   **Mitigation:** As detailed in the "Argument Inspection" section, `mazewall` monitors the `PROT_EXEC` bit. It allows the JVM to manage its memory but physically prevents any thread under a policy from making a memory region executable.
 
 ### ROP/JOP & Existing Memory
-It is critical to understand that Seccomp monitors **system calls**, not internal CPU instruction flow. While `jseccomp` effectively blocks the introduction of *new* executable memory (shellcode), it cannot prevent an attacker from reusing **existing** executable code already mapped in the JVM's memory (e.g., from the JVM itself or its dependencies). 
+It is critical to understand that Seccomp monitors **system calls**, not internal CPU instruction flow. While `mazewall` effectively blocks the introduction of *new* executable memory (shellcode), it cannot prevent an attacker from reusing **existing** executable code already mapped in the JVM's memory (e.g., from the JVM itself or its dependencies). 
 By chaining together existing snippets of code (gadgets), an attacker can perform **Return-Oriented Programming (ROP)** or **Jump-Oriented Programming (JOP)** to execute arbitrary logic without ever calling `mprotect` or `mmap`. 
 *   **Mitigation:** Protection against ROP/JOP relies on complementary OS and compiler-level features such as **ASLR (Address Space Layout Randomization)**, **Stack Canaries**, and **Control Flow Integrity (CFI)**. Seccomp provides a hard barrier against environment-altering actions (spawn shell, network access), but it is not a complete solution for all memory corruption exploitation techniques.
 
@@ -106,7 +106,7 @@ Security modules like AppArmor and SELinux are often configured to transition a 
 ### Operational Implications for the Application
 Developers must understand the exact boundaries this locking mechanism establishes:
 
-1.  **You CAN start the JVM as root:** If you run your application as `root` (e.g. `sudo java -jar app.jar`), it starts at the highest privilege level. When `jseccomp` sets `no_new_privs`, it locks you at root. The app will run fine as root (subject to your seccomp filters), but it cannot go "above" root.
+1.  **You CAN start the JVM as root:** If you run your application as `root` (e.g. `sudo java -jar app.jar`), it starts at the highest privilege level. When `mazewall` sets `no_new_privs`, it locks you at root. The app will run fine as root (subject to your seccomp filters), but it cannot go "above" root.
 2.  **You CAN execute standard child processes:** Spawning standard helper scripts or binaries (e.g. calling `ls` or executing a python utility via `ProcessBuilder`) works perfectly. They inherit the exact unprivileged context and seccomp filters of the parent JVM.
 3.  **You CANNOT escalate using sudo/su inside Java code:** If your JVM runs as a standard unprivileged user (e.g. `leanid`), calling `Runtime.getRuntime().exec("sudo systemctl restart nginx")` will **fail immediately**, even if the user is fully authorized in the host's `/etc/sudoers` file. The `sudo` binary will execute but will be denied root transition by the kernel.
 
@@ -133,18 +133,18 @@ While highly secure for production baselines, it introduces significant technica
 
 *   **Sibling Thread Transparency:** The JVM is a massive, multi-threaded engine. Sibling threads (like Gradle workers, background GC threads, or JIT threads) may need to perform operations (like managing `build/tmp`) that the sandboxed worker thread is restricted from. 
 *   **Test Suite Collisions:** Standard JVM test runners assume they have full control over the process memory space. Applying TSYNC inside a test will sandbox the entire runner process, leading to `AccessDeniedException` and `Permission Denied` crashes on completely unrelated sibling threads.
-*   **Architecture Decision:** For these reasons, `jseccomp` keeps TSYNC **disabled by default**. It is reserved for Tier 1 (Process-Wide) startup lockdowns where the entire JVM life-cycle is intended to be constrained.
+*   **Architecture Decision:** For these reasons, `mazewall` keeps TSYNC **disabled by default**. It is reserved for Tier 1 (Process-Wide) startup lockdowns where the entire JVM life-cycle is intended to be constrained.
 
 ---
 
 ## 5. The `prctl(2)` Double-Edged Sword: Requirements, Attack Surface, and Mitigations
 
-The `prctl(2)` (Process Control) system call is central to the setup and execution of `jseccomp` sandboxes. However, because of its incredibly broad capability set, it represents a unique security-critical attack surface.
+The `prctl(2)` (Process Control) system call is central to the setup and execution of `mazewall` sandboxes. However, because of its incredibly broad capability set, it represents a unique security-critical attack surface.
 
 ### A. Why `prctl(2)` is Technically Required
-Even if `jseccomp` only used the modern `seccomp(2)` system call to load and stack BPF filters, the library still cannot function without `prctl(2)` due to Linux kernel invariants:
+Even if `mazewall` only used the modern `seccomp(2)` system call to load and stack BPF filters, the library still cannot function without `prctl(2)` due to Linux kernel invariants:
 1. **`PR_SET_NO_NEW_PRIVS`:** To prevent privilege escalation attacks, the kernel strictly blocks unprivileged processes from loading seccomp filters or Landlock rules unless `PR_SET_NO_NEW_PRIVS` is set to `1` beforehand. This transition is accomplished solely via `prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0)`.
-2. **Seccomp State Verification:** To verify that the seccomp filters are properly loaded and stacked in mode 2, `jseccomp` queries the kernel state at initialization using `prctl(PR_GET_SECCOMP, 0, 0, 0, 0)`.
+2. **Seccomp State Verification:** To verify that the seccomp filters are properly loaded and stacked in mode 2, `mazewall` queries the kernel state at initialization using `prctl(PR_GET_SECCOMP, 0, 0, 0, 0)`.
 3. **Legacy Kernel Stacking:** On pre-Linux 3.17 kernels where the modern `seccomp(2)` system call is absent, calling `prctl(PR_SET_SECCOMP, SECCOMP_MODE_FILTER, ...)` remains the only mechanism to load BPF filters.
 
 ### B. The Attack Surface: Broad Process Control Operations
@@ -155,8 +155,8 @@ Even if `jseccomp` only used the modern `seccomp(2)` system call to load and sta
 
 **Kernel Invariant Safety:** Note that `prctl` does *not* expose options to disable active seccomp filters or unset `no_new_privs` once enabled. The kernel enforces these transitions as strictly monotonic and irreversible.
 
-### C. Mitigation Strategies in `jseccomp`
-To neutralize the attack surface of generic process control without breaking initialization or nesting, `jseccomp` employs two primary mitigation strategies:
+### C. Mitigation Strategies in `mazewall`
+To neutralize the attack surface of generic process control without breaking initialization or nesting, `mazewall` employs two primary mitigation strategies:
 
 #### Strategy 1: Post-Installation System Call Blocking
 In strict, non-stackable policies (such as `Policy.PURE_COMPUTE`), dangerous `prctl` options are restricted via BPF argument inspection — **not** by adding `Syscall.PRCTL` to the block-list. Adding `Syscall.PRCTL` to the block-list would inadvertently block the whitelisted safe options (`PR_SET_NAME`, `PR_SET_NO_NEW_PRIVS`, `PR_GET_SECCOMP`) that the JVM needs, and could prevent filter installation itself.
@@ -215,7 +215,7 @@ To make seccomp an effective barrier, the host environment **must** implement th
 
 ## 8. Technical Safeguards: Argument Inspection
 
-`jseccomp` uses BPF argument inspection to provide fine-grained control over critical syscalls, allowing the JVM to function while blocking malicious actions.
+`mazewall` uses BPF argument inspection to provide fine-grained control over critical syscalls, allowing the JVM to function while blocking malicious actions.
 
 ### Executable Memory Protection (`mmap` & `mprotect`)
 We inspect the `prot` argument (the 3rd argument, `args[2]` in `seccomp_data`) of both `mmap` and `mprotect`. Standard mappings are allowed, but the library triggers an immediate `EPERM` if the `PROT_EXEC` (0x04) bit is set. This blocks binary shellcode execution while allowing the JIT and GC to function normally on other threads.
@@ -237,7 +237,7 @@ JVM application threads are not fully isolated; they must periodically synchroni
 * `madvise` / `mprotect`: Invoked by garbage collection threads (e.g. ZGC or G1) to manage page tables and memory barriers.
 * `gettid`: Used to identify native threads.
 
-If a custom `jseccomp` policy aggressively blocks any of these coordination syscalls, the next safepoint or GC sweep will cause a **catastrophic, permanent deadlock of the entire JVM**.
+If a custom `mazewall` policy aggressively blocks any of these coordination syscalls, the next safepoint or GC sweep will cause a **catastrophic, permanent deadlock of the entire JVM**.
 
 ### JVM Platform Comparison: JIT vs. AOT
 * **HotSpot JVM (JIT):** Requires a highly permissive system call floor. Because of dynamic compilation, runtime stack walking, and lazy classloading, application threads must leave synchronization, timing, and memory management syscalls unblocked to avoid deadlocks.
@@ -247,7 +247,7 @@ If a custom `jseccomp` policy aggressively blocks any of these coordination sysc
 
 ## 10. The Trapping Architecture: Native `SIGSYS` Signal Interception
 
-The default mode of `jseccomp` is to return `SECCOMP_RET_ERRNO` with `EPERM` (1) upon a policy violation. While robust and secure, detecting these violations in Java relies on parsing exception String messages (e.g. "Operation not permitted"), which is fragile and locale-sensitive.
+The default mode of `mazewall` is to return `SECCOMP_RET_ERRNO` with `EPERM` (1) upon a policy violation. While robust and secure, detecting these violations in Java relies on parsing exception String messages (e.g. "Operation not permitted"), which is fragile and locale-sensitive.
 
 The ultimate production roadmap for the library is to pivot to a native **`SECCOMP_RET_TRAP`** architecture:
 
@@ -269,7 +269,7 @@ The ultimate production roadmap for the library is to pivot to a native **`SECCO
         ▼ (Return from Signal Handler)
 [ Java Task Execution Resumes ]
   ├── Syscall returns EPERM in Java
-  └── Java raises IOException → jseccomp reads thread-local flag → Throws deterministic exception
+  └── Java raises IOException → mazewall reads thread-local flag → Throws deterministic exception
 ```
 
 ### Technical implementation requirements for `SIGSYS`:
@@ -285,11 +285,11 @@ The ultimate production roadmap for the library is to pivot to a native **`SECCO
 Seccomp filtering applies to *syscalls*, not *data structures*. If a thread inherits an open socket file descriptor (or receives one via `SCM_RIGHTS`) before the `NO_NETWORK` policy is applied, it can still call `recvmsg`, `recvfrom`, `write`, or `writev` on that existing descriptor. `NO_NETWORK` prevents the creation of *new* sockets (`socket`, `connect`, `bind`, `accept`), but does not block generic read/write syscalls which are essential for standard JVM I/O.
 
 ### Non-English Locales and Violation Exceptions
-Java's core `IOException` classes do not expose the raw OS `errno` values. Under the current experimental `SECCOMP_RET_ERRNO` approach, `jseccomp` detects containment violations by matching localized exception messages (e.g., "Operation not permitted" or "Permission denied") combined with specific JVM error codes (`error=1` or `error=13`).
+Java's core `IOException` classes do not expose the raw OS `errno` values. Under the current experimental `SECCOMP_RET_ERRNO` approach, `mazewall` detects containment violations by matching localized exception messages (e.g., "Operation not permitted" or "Permission denied") combined with specific JVM error codes (`error=1` or `error=13`).
 On non-English locales, if the JVM translates these messages entirely, a blocked syscall will still be successfully intercepted by the kernel, but the application may throw a generic `IOException` rather than the specific `ContainmentViolationException`. The security guarantee remains intact; only the exception wrapping is affected.
 
 ### Platform Support
-Seccomp-BPF and Landlock are Linux-only features. The library safely performs an OS-level check (`Platform.isSupported()`) before initializing native FFM bindings. On macOS or Windows, the library degrades gracefully based on the `IO_CONTAINED_FALLBACK` policy (failing fast or logging a warning and running uncontained) without throwing `UnsatisfiedLinkError` or `WrongMethodTypeException`.
+Seccomp-BPF and Landlock are Linux-only features. The library safely performs an OS-level check (`Platform.isSupported()`) before initializing native FFM bindings. On macOS or Windows, the library degrades gracefully based on the `IO_MAZEWALL_FALLBACK` policy (failing fast or logging a warning and running uncontained) without throwing `UnsatisfiedLinkError` or `WrongMethodTypeException`.
 
 ### Known Inconsistencies
 
@@ -320,7 +320,7 @@ Seccomp restricts **actions** (syscalls), but it does not provide **data isolati
 
 ## 13. Kubernetes (K8s) Production Deployment Pattern
 
-To run a containerized JVM using `jseccomp` securely inside a Kubernetes cluster, you must avoid running pods with privileged security contexts (e.g. `privileged: true` or running unconfined). 
+To run a containerized JVM using `mazewall` securely inside a Kubernetes cluster, you must avoid running pods with privileged security contexts (e.g. `privileged: true` or running unconfined). 
 
 Instead, configure Kubernetes to use the **Localhost custom seccomp profile** pattern.
 
@@ -328,28 +328,28 @@ Instead, configure Kubernetes to use the **Localhost custom seccomp profile** pa
 Kubelet looks for custom seccomp profiles in its local filesystem at:
 `/var/lib/kubelet/seccomp/`
 
-You must place a copy of `podman-seccomp.json` into a subdirectory on each host node (for example, as `/var/lib/kubelet/seccomp/profiles/jseccomp.json`).
+You must place a copy of `podman-seccomp.json` into a subdirectory on each host node (for example, as `/var/lib/kubelet/seccomp/profiles/mazewall.json`).
 
 *   **Automation tip:** Use a lightweight Kubernetes **DaemonSet** with a `hostPath` mount to distribute and keep this profile file synchronized across all nodes automatically. **The YAML below is illustrative only.** For production, use a GitOps-managed DaemonSet with image signing, or the [Security Profiles Operator](https://github.com/kubernetes-sigs/security-profiles-operator) which handles profile distribution with integrity verification. The `busybox` + raw `hostPath` pattern shown below has no integrity check and is not suitable for a hardened environment:
     ```yaml
     apiVersion: apps/v1
     kind: DaemonSet
     metadata:
-      name: jseccomp-profile-initializer
+      name: mazewall-profile-initializer
       namespace: kube-system
     spec:
       selector:
         matchLabels:
-          name: jseccomp-profile-initializer
+          name: mazewall-profile-initializer
       template:
         metadata:
           labels:
-            name: jseccomp-profile-initializer
+            name: mazewall-profile-initializer
         spec:
           containers:
           - name: initializer
             image: busybox:1.36
-            command: ["sh", "-c", "mkdir -p /var/lib/kubelet/seccomp/profiles && cp /config/jseccomp.json /var/lib/kubelet/seccomp/profiles/jseccomp.json && sleep 3600"]
+            command: ["sh", "-c", "mkdir -p /var/lib/kubelet/seccomp/profiles && cp /config/mazewall.json /var/lib/kubelet/seccomp/profiles/mazewall.json && sleep 3600"]
             volumeMounts:
             - name: kubelet-seccomp
               mountPath: /var/lib/kubelet
@@ -361,7 +361,7 @@ You must place a copy of `podman-seccomp.json` into a subdirectory on each host 
               path: /var/lib/kubelet
           - name: config
             configMap:
-              name: jseccomp-profile-configmap
+              name: mazewall-profile-configmap
     ```
 
 ### Step 2: Apply the Seccomp Profile in the Pod Manifest
@@ -399,9 +399,9 @@ spec:
         # 1. Instruct Kubelet to apply our custom profile from node's seccomp directory
         seccompProfile:
           type: Localhost
-          localhostProfile: profiles/jseccomp.json
+          localhostProfile: profiles/mazewall.json
       containers:
-      - name: jseccomp-service
+      - name: mazewall-service
         image: my-registry.internal/parser-service:1.2.0
         securityContext:
           # 2. Prevent privilege escalation (sets NO_NEW_PRIVS in host kernel)
@@ -422,7 +422,7 @@ This custom configuration is **100% compliant with the strict "Restricted" Pod S
 
 ## 14. Yama ptrace_scope & Out-of-Process Memory Profiling (Tier S)
 
-To implement safe, precise system call profiling without triggering JVM safepoint deadlocks, `jseccomp` implements the out-of-process BPF supervisor architecture utilizing the kernel's `SECCOMP_RET_USER_NOTIF` interface. This supervisor is spawned as a sibling daemon process and reads the memory of the sandboxed target JVM process via `process_vm_readv` to extract file paths and socket addresses.
+To implement safe, precise system call profiling without triggering JVM safepoint deadlocks, `mazewall` implements the out-of-process BPF supervisor architecture utilizing the kernel's `SECCOMP_RET_USER_NOTIF` interface. This supervisor is spawned as a sibling daemon process and reads the memory of the sandboxed target JVM process via `process_vm_readv` to extract file paths and socket addresses.
 
 However, modern Linux distributions and container environments harden inter-process access using the Yama Linux Security Module (LSM).
 
@@ -436,7 +436,7 @@ Because our profiling daemon is spawned as a **child** process of the main JVM (
 ### The Mitigation: PR_SET_PTRACER
 To resolve this permission boundary without requiring elevated privileges or broad CAP_SYS_PTRACE capabilities, the parent JVM process must explicitly declare the child daemon as an authorized tracer.
 
-Immediately upon spawning the daemon process, `jseccomp` invokes `prctl` with the `PR_SET_PTRACER` option:
+Immediately upon spawning the daemon process, `mazewall` invokes `prctl` with the `PR_SET_PTRACER` option:
 
 ```kotlin
 // Set the daemon process as our allowed ptrace tracer under Yama
@@ -449,5 +449,5 @@ This instructs the Yama LSM to allow the specified daemon process to read the pa
 ### Grandchild Process Boundaries
 Note that grandchild processes (e.g. processes spawned by `ProcessBuilder` within a sandboxed thread pool, like `echo` or helper scripts) do not inherit this ptrace tracer permission, and cannot easily invoke `prctl` to declare the daemon as a tracer. As a result, the daemon's `process_vm_readv` calls on grandchild processes will still return `EPERM` under `ptrace_scope = 1`.
 
-The `jseccomp` supervisor handles this constraint gracefully: if a `process_vm_readv` call returns `EPERM` on a grandchild process (like during `execve`), the supervisor intercepts the system call, logs the raw address registers, and continues executing it natively without crashing or blocking the worker.
+The `mazewall` supervisor handles this constraint gracefully: if a `process_vm_readv` call returns `EPERM` on a grandchild process (like during `execve`), the supervisor intercepts the system call, logs the raw address registers, and continues executing it natively without crashing or blocking the worker.
 

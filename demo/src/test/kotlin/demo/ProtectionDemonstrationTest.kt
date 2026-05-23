@@ -1,6 +1,6 @@
 package demo
 
-import io.contained.enforcer.ContainmentViolationException
+import io.mazewall.enforcer.ContainmentViolationException
 import org.junit.jupiter.api.Test
 import java.io.File
 import kotlin.test.assertFailsWith
@@ -12,7 +12,7 @@ class ProtectionDemonstrationTest {
     fun `demonstrates protection`() {
         val osName = System.getProperty("os.name")
         if (!osName.equals("Linux", ignoreCase = true)) return
-        if (!io.contained.Platform.isSupported()) return
+        if (!io.mazewall.Platform.isSupported()) return
 
         val marker = File("/tmp/pwned_safe")
         marker.delete()

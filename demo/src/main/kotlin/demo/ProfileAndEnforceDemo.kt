@@ -1,12 +1,12 @@
 package demo
 
-import io.contained.Policy
-import io.contained.Syscall
-import io.contained.Arch
-import io.contained.LinuxNative
-import io.contained.profiler.Profiler
-import io.contained.enforcer.ContainedExecutors
-import io.contained.enforcer.ContainmentViolationException
+import io.mazewall.Policy
+import io.mazewall.Syscall
+import io.mazewall.Arch
+import io.mazewall.LinuxNative
+import io.mazewall.profiler.Profiler
+import io.mazewall.enforcer.ContainedExecutors
+import io.mazewall.enforcer.ContainmentViolationException
 import java.io.File
 import java.lang.foreign.Arena
 import java.net.InetAddress
@@ -17,7 +17,7 @@ import kotlin.concurrent.thread
 
 fun runProfileAndEnforce() {
     println("\u001b[36;1m==========================================================")
-    println("          JSECCOMP: PROFILE & ENFORCE DEMO                ")
+    println("          MAZEWALL: PROFILE & ENFORCE DEMO                ")
     println("==========================================================\u001b[0m")
     println("Goal: Profile a high-performance workload doing both standard")
     println("      I/O and async io_uring operations, generate the policy,")
@@ -25,9 +25,9 @@ fun runProfileAndEnforce() {
     println()
 
     // 1. Setup paths and mock server
-    // (Jseccomp now automatically canonicalizes symlinks, but we use canonicalFile for demo hygiene)
+    // (Mazewall now automatically canonicalizes symlinks, but we use canonicalFile for demo hygiene)
     val tempDir = File(System.getProperty("java.io.tmpdir")).canonicalFile
-    val configFile = File(tempDir, "jseccomp_app_config.json").canonicalFile
+    val configFile = File(tempDir, "mazewall_app_config.json").canonicalFile
     configFile.writeText("""{"api_url": "localhost", "timeout_ms": 5000}""")
 
     // Create a local loopback server to safely profile sockets completely offline

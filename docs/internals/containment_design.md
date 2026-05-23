@@ -1,6 +1,6 @@
 # Technical Design: Containment Engine & Incremental Filter Stacking
 
-This document covers the implementation details of the enforcement tier in `jseccomp`:
+This document covers the implementation details of the enforcement tier in `mazewall`:
 how policies become live BPF filters, how filters stack incrementally, and how Landlock
 integrates with the seccomp pipeline. Read this before modifying `ContainedExecutors.kt`,
 `PureJavaBpfEngine.kt`, `BpfFilter.kt`, or `Landlock.kt`.
@@ -228,7 +228,7 @@ installOnProcess()  →  PureJavaBpfEngine.installOnProcess()
       **never falls back to thread-local installation**
     - Kernel 5.7+ changed TSYNC semantics: pre-5.7, any mismatch returns `EINVAL`;
       5.7+ returns `EINVAL` only for true incompatibilities. In all cases,
-      `jseccomp` treats any TSYNC failure as a hard error.
+      `mazewall` treats any TSYNC failure as a hard error.
     - updates PROCESS_BLOCKED, PROCESS_FILTER_DEPTH, PROCESS_ALLOWS_* atomics
 
 installOnCurrentThread()  →  PureJavaBpfEngine.install()
@@ -288,7 +288,7 @@ thread that may still lazy-load test infrastructure classes.
 - `applyRuleset(policy)` — enforcement path; used by `ContainedExecutors`.
 - `applyProfilingRuleset()` — applies a "deny everything" Landlock domain used by
   the profiler to force kernel audit events for `io_uring` operations. Activated only
-  via `JSECCOMP_PROFILER_AUDIT=true`. **Never call this in enforcement code paths.**
+  via `MAZEWALL_PROFILER_AUDIT=true`. **Never call this in enforcement code paths.**
 
 ---
 

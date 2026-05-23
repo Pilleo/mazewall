@@ -1,6 +1,6 @@
-# Guidelines for AI Coding Agents in jseccomp
+# Guidelines for AI Coding Agents in mazewall
 
-Welcome, AI Agent. This repository contains **jseccomp**, a kernel-enforced, thread-scoped and process-wide sandboxing library for JVM applications using Linux **Seccomp-BPF** and **Landlock LSM** via the JDK **Foreign Function & Memory (FFM) API**.
+Welcome, AI Agent. This repository contains **mazewall**, a kernel-enforced, thread-scoped and process-wide sandboxing library for JVM applications using Linux **Seccomp-BPF** and **Landlock LSM** via the JDK **Foreign Function & Memory (FFM) API**.
 
 As an AI agent pair-programming on this project, you are assisting in transitioning this project from a Proof of Concept (PoC) to a production-grade library. The minimum supported JDK is **22** (FFM API finalization); the codebase targets **Java 25 idioms** where applicable. Because this is a security-critical project that directly interfaces with the Linux kernel and manipulates JVM threads, you must adhere strictly to the following rules, constraints, and engineering philosophies.
 
@@ -28,7 +28,7 @@ As an AI agent pair-programming on this project, you are assisting in transition
 > **CRITICAL SECURITY INSTRUCTION:** AI agents historically tend to implement "fail-safe" or "silent bypass" fallback behavior to make code "just work." **This is strictly unacceptable in a security library.**
 
 *   **Never Implement Silent Bypasses:** Do not catch exceptions silently or downgrade a failed seccomp/Landlock installation to a warning-and-bypass unless that fallback is explicitly configured by the operator.
-*   **Fail Closed by Default:** The **default `FallbackBehavior` is `FAIL`** (see `Platform.configuredFallback()` — it returns `FallbackBehavior.FAIL` unless the operator explicitly overrides via `-Dio.contained.fallback=WARN_AND_BYPASS` or `IO_CONTAINED_FALLBACK=WARN_AND_BYPASS`). This is intentional and must not be changed.
+*   **Fail Closed by Default:** The **default `FallbackBehavior` is `FAIL`** (see `Platform.configuredFallback()` — it returns `FallbackBehavior.FAIL` unless the operator explicitly overrides via `-Dio.mazewall.fallback=WARN_AND_BYPASS` or `IO_MAZEWALL_FALLBACK=WARN_AND_BYPASS`). This is intentional and must not be changed.
 *   **No Unconsulted Fallbacks:** Do not write automatic recovery loops or mock environments (like simulating a syscall return value via register manipulation) without explicit review from the developer.
 
 ---
@@ -162,9 +162,9 @@ Always call `isContainmentViolation(t)` (the full cause-chain traversal), not `i
 *   **Running Tests:** Always run using the custom OCI profile:
     ```bash
     podman compose up -d
-    podman compose exec jseccomp ./gradlew test
+    podman compose exec mazewall ./gradlew test
     ```
-    The container is named `jseccomp` (see `compose.yml`). The profile (`podman-seccomp.json`) whitelists `seccomp(2)` for unprivileged filter stacking.
+    The container is named `mazewall` (see `compose.yml`). The profile (`podman-seccomp.json`) whitelists `seccomp(2)` for unprivileged filter stacking.
 
 *   **Test tier requirements:**
 

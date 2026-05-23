@@ -7,14 +7,14 @@ import java.io.File
 import kotlin.test.assertTrue
 import kotlin.test.assertFalse
 import kotlin.test.assertFailsWith
-import io.contained.enforcer.ContainmentViolationException
+import io.mazewall.enforcer.ContainmentViolationException
 
 class DemoAppTest {
 
     @Test
     @EnabledOnOs(OS.LINUX)
     fun `main with no arguments runs all demos and succeeds`() {
-        if (!io.contained.Platform.isSupported()) return
+        if (!io.mazewall.Platform.isSupported()) return
 
         val unsafeMarker = File("/tmp/pwned_unsafe")
         val safeMarker = File("/tmp/pwned_safe")

@@ -1,7 +1,7 @@
 
-# Technical Design Document: jseccomp Bill of Behavior (BoB) Profiler & Exception Handling
+# Technical Design Document: mazewall Bill of Behavior (BoB) Profiler & Exception Handling
 
-This document provides the definitive, production-grade technical design for the **Bill of Behavior (BoB) Profiler** and the **Containment Exception Handling Subsystem** inside `jseccomp`. It incorporates deep systems-level findings, physics-level kernel constraints, and JVM-specific runtime behaviors.
+This document provides the definitive, production-grade technical design for the **Bill of Behavior (BoB) Profiler** and the **Containment Exception Handling Subsystem** inside `mazewall`. It incorporates deep systems-level findings, physics-level kernel constraints, and JVM-specific runtime behaviors.
 
 ---
 
@@ -48,7 +48,7 @@ To bypass these constraints, we designed a **Tiered Profiling System** that prov
 
 ```
                      +---------------------------------------+
-                     |        jseccomp BoB Profiler          |
+                     |        mazewall BoB Profiler          |
                      +---------------------------------------+
                                          |
          +-------------------------------+-------------------------------+
@@ -138,7 +138,7 @@ Handling containment errors inside a managed, multithreaded platform like the Ho
 ### The JVM Error Translation Strategy
 Java's standard library does not expose raw OS `errno` values. For instance, when `openat` fails with `EPERM`, Java throws a generic `java.io.IOException` with a localized message. 
 
-To prevent locale-fragile string matching, `jseccomp` uses a **multi-layered exception translation strategy**:
+To prevent locale-fragile string matching, `mazewall` uses a **multi-layered exception translation strategy**:
 
 ```kotlin
 private fun isDirectContainmentViolation(t: Throwable): Boolean {
@@ -170,7 +170,7 @@ private fun isDirectContainmentViolation(t: Throwable): Boolean {
 ### Safepoint Safeguard and JVM Coordination Trap
 Some syscalls are strictly forbidden from being blocked because they handle HotSpot thread coordination. If blocked, the JVM will fail to run garbage collection or safely allocate structures, causing the process to abort immediately. 
 
-To protect the container environment from JVM lockups, the `jseccomp` policy builder will **enforce compile-time assertions** preventing developers from blocking these foundational operations:
+To protect the container environment from JVM lockups, the `mazewall` policy builder will **enforce compile-time assertions** preventing developers from blocking these foundational operations:
 
 ```kotlin
 // The Policy.Builder enforces that coordination primitives are ALWAYS allowed:

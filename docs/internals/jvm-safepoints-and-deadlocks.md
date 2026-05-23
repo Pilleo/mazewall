@@ -9,7 +9,7 @@ A JVM thread is never a completely isolated island. Periodically, the JVM pauses
 * `sched_yield` to relinquish CPU slices during contention.
 * `rt_sigreturn` to exit from signals triggered by safepoint interrupts.
 
-If a custom `jseccomp` policy aggressively blocks these utility system calls in a worker thread, the thread will fail to coordinate during the next JVM safepoint. The result is a **catastrophic, VM-wide deadlock or immediate JVM crash**.
+If a custom `mazewall` policy aggressively blocks these utility system calls in a worker thread, the thread will fail to coordinate during the next JVM safepoint. The result is a **catastrophic, VM-wide deadlock or immediate JVM crash**.
 
 ### Why Seccomp "Strict Mode" is Incompatible
 
@@ -22,7 +22,7 @@ Because HotSpot (and other modern runtimes like Go or Node.js) requires constant
 *   Allocate memory that triggers a page guard.
 *   Wait for a GC Safepoint to finish.
 
-In `jseccomp`, we exclusively use **Filter Mode** (`SECCOMP_SET_MODE_FILTER`), allowing us to whitelist the "JVM floor" while restricting application-specific dangerous operations.
+In `mazewall`, we exclusively use **Filter Mode** (`SECCOMP_SET_MODE_FILTER`), allowing us to whitelist the "JVM floor" while restricting application-specific dangerous operations.
 
 > [!CAUTION]
 > **Extensive Testing Mandatory.** When creating custom policies, you must never block core JVM synchronization and scheduling primitives. Your policies must be tested under heavy thread contention, high-throughput garbage collection, and active thread dumps in staging environments before any consideration of non-production deployment.

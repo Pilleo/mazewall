@@ -1,19 +1,19 @@
-# jseccomp: The Attacks We Actually Stop
+# mazewall: The Attacks We Actually Stop
 
-> **Series overview:** This is Part 3 of a 4-part series on behavioral security for cloud-native applications. **What this part adds:** concrete attack walkthroughs — real syscall sequences, policy definitions, and verified test outputs — showing exactly what `jseccomp` blocks and why.
+> **Series overview:** This is Part 3 of a 4-part series on behavioral security for cloud-native applications. **What this part adds:** concrete attack walkthroughs — real syscall sequences, policy definitions, and verified test outputs — showing exactly what `mazewall` blocks and why.
 
 
 Parts 1 and 2 built the conceptual and architectural case. Now we run the attacks.
 
-This article shows — with actual syscall sequences, policy definitions, and kernel output — exactly what `jseccomp` blocks and why. All examples are runnable from the repository.
+This article shows — with actual syscall sequences, policy definitions, and kernel output — exactly what `mazewall` blocks and why. All examples are runnable from the repository.
 
 ```bash
-git clone https://github.com/leanid/jseccomp.git
-cd jseccomp
+git clone https://github.com/leanid/mazewall.git
+cd mazewall
 # Linux x86_64 or aarch64, JDK 22+
 # Podman needed for nested seccomp (see Part 2 for the reason)
 podman compose up -d
-podman compose exec jseccomp ./gradlew test
+podman compose exec mazewall ./gradlew test
 ```
 
 ---
@@ -74,7 +74,7 @@ future.get()
 
 The kernel intercepts `execve()` in the worker thread and returns `EPERM`. The JVM surfaces this as `IOException("error=1, ...")`, which `ContainedExecutors` detects and wraps as `ContainmentViolationException`. The attacker's command never runs.
 
-> **Simplification note:** The demo models direct command injection for clarity — `VulnerableLogger` extracts a command from the payload and calls `ProcessBuilder` directly. The real Log4Shell chain (CVE-2021-44228) works differently: the logger contacts a remote LDAP server, receives a Java class reference, deserializes and instantiates it; that class may then call `Runtime.exec()` as its payload. `jseccomp` blocks the final `execve()` regardless of how the payload was delivered — the mechanism that matters is the same.
+> **Simplification note:** The demo models direct command injection for clarity — `VulnerableLogger` extracts a command from the payload and calls `ProcessBuilder` directly. The real Log4Shell chain (CVE-2021-44228) works differently: the logger contacts a remote LDAP server, receives a Java class reference, deserializes and instantiates it; that class may then call `Runtime.exec()` as its payload. `mazewall` blocks the final `execve()` regardless of how the payload was delivered — the mechanism that matters is the same.
 
 ---
 
@@ -86,7 +86,7 @@ The kernel intercepts `execve()` in the worker thread and returns `EPERM`. The J
 2. Write a full ELF binary into memory.
 3. Execute the in-memory binary.
 
-No file ever touches disk, defeating all disk-based security tooling. `jseccomp` blocks this entirely by denying the initial memory-file creation because a standard JVM worker thread has no legitimate use for it.
+No file ever touches disk, defeating all disk-based security tooling. `mazewall` blocks this entirely by denying the initial memory-file creation because a standard JVM worker thread has no legitimate use for it.
 
 <details>
 <summary><b>🔍 Deep Dive: The Syscall Sequence</b></summary>
@@ -129,7 +129,7 @@ The test calls the kernel directly via FFM, bypassing all Java wrappers — the 
 
 **Why this is hard to block naively:** The JVM's JIT compiler does exactly this — it allocates heap segments and marks them executable so it can compile native code. If a naive Seccomp filter blocks all executable memory allocations, the JVM will fail to run.
 
-**How `jseccomp` handles it:** As discussed in Part 2, `jseccomp` safely hooks the memory allocation requests and inspects their arguments bit-by-bit to ensure the JIT can work but shellcode cannot.
+**How `mazewall` handles it:** As discussed in Part 2, `mazewall` safely hooks the memory allocation requests and inspects their arguments bit-by-bit to ensure the JIT can work but shellcode cannot.
 
 <details>
 <summary><b>🔍 Deep Dive: Allocation and Syscall Hooking</b></summary>
@@ -207,7 +207,7 @@ fun `PURE_COMPUTE blocks mmap with PROT_EXEC`() {
 
 A sophisticated attacker who has already compromised a worker thread can set up an `io_uring` ring and submit process spawns that would be blocked by Seccomp if called directly. For filesystem reads, Landlock still provides a defense layer.
 
-**The `jseccomp` response:** Block `io_uring_setup` entirely in `NO_EXEC` and `PURE_COMPUTE` policies. A JVM worker thread processing JSON or images has no legitimate use for `io_uring`. The standard JVM uses `epoll` + NIO, not `io_uring`, for its internal I/O.
+**The `mazewall` response:** Block `io_uring_setup` entirely in `NO_EXEC` and `PURE_COMPUTE` policies. A JVM worker thread processing JSON or images has no legitimate use for `io_uring`. The standard JVM uses `epoll` + NIO, not `io_uring`, for its internal I/O.
 
 ```kotlin
 // From Policy.kt — NO_EXEC definition
@@ -230,19 +230,19 @@ A naive security approach might just block direct module-loading syscalls like `
 
 If the attacker calls `socket(AF_RDS, ...)` or invokes `mount` to attach an obscure filesystem, and the kernel does not currently have that driver loaded, the Linux kernel will **automatically trigger a dynamic modprobe helper** (`kmod`) to search for and load that module from host disk. This immediately exposes the kernel's vulnerable attack surface (e.g., legacy packet parsing bugs) to local exploitation, even if `init_module` itself was blocked.
 
-> **Kernel configuration caveat:** This auto-loading behaviour depends on `CONFIG_MODULES` being enabled and `/proc/sys/kernel/modprobe` pointing to a valid loader (the default on most production kernels). On hardened kernels (grsecurity, minimal builds, or those with `/proc/sys/kernel/modprobe` set to `/dev/null`), module auto-loading is disabled and this attack path is already closed at the OS level. Always verify whether this is the case before relying on `jseccomp` as the sole defence against this vector. 
+> **Kernel configuration caveat:** This auto-loading behaviour depends on `CONFIG_MODULES` being enabled and `/proc/sys/kernel/modprobe` pointing to a valid loader (the default on most production kernels). On hardened kernels (grsecurity, minimal builds, or those with `/proc/sys/kernel/modprobe` set to `/dev/null`), module auto-loading is disabled and this attack path is already closed at the OS level. Always verify whether this is the case before relying on `mazewall` as the sole defence against this vector. 
 
-**The `jseccomp` response:** Blocking both direct loading and indirect auto-loading.
+**The `mazewall` response:** Blocking both direct loading and indirect auto-loading.
 
-While `NO_EXEC` blocks the direct injection commands (`init_module`, `finit_module`), `jseccomp`'s **`PURE_COMPUTE`** policy goes much deeper: it blocks the entire `socket` and `mount` syscall families. By completely stripping the thread's ability to initialize sockets or attach mounts, `jseccomp` successfully plugs the dynamic auto-loading loophole at the thread boundary. A thread parsing JSON has **zero** legitimate reasons to create sockets or mount filesystems. Even if the underlying host kernel is highly vulnerable to legacy protocol exploits, the contained JVM thread is physically blocked from initiating the transitions that trigger module loading.
+While `NO_EXEC` blocks the direct injection commands (`init_module`, `finit_module`), `mazewall`'s **`PURE_COMPUTE`** policy goes much deeper: it blocks the entire `socket` and `mount` syscall families. By completely stripping the thread's ability to initialize sockets or attach mounts, `mazewall` successfully plugs the dynamic auto-loading loophole at the thread boundary. A thread parsing JSON has **zero** legitimate reasons to create sockets or mount filesystems. Even if the underlying host kernel is highly vulnerable to legacy protocol exploits, the contained JVM thread is physically blocked from initiating the transitions that trigger module loading.
 
 ### The Host-Layer Counterpart: Defense-in-Depth with ModuleJail
 
-This application-level sandboxing mirrors a significant trend in host-layer hardening, such as **ModuleJail** (developed by Jasper Nuyens). While `jseccomp` blocks module-loading syscalls *inside the JVM thread*, `ModuleJail` operates at the host OS layer to scan and blacklist dormant kernel modules. 
+This application-level sandboxing mirrors a significant trend in host-layer hardening, such as **ModuleJail** (developed by Jasper Nuyens). While `mazewall` blocks module-loading syscalls *inside the JVM thread*, `ModuleJail` operates at the host OS layer to scan and blacklist dormant kernel modules. 
 
 This creates a robust **Defense-in-Depth sandwich**:
 1. **Host Layer:** `ModuleJail` locks down the OS kernel, ensuring vulnerable legacy modules can never be loaded system-wide.
-2. **JVM Layer:** `jseccomp` blocks the specific syscall channels (`socket` families, `mount`, `init_module`) that an attacker would use to trigger dynamic kernel transitions in the first place.
+2. **JVM Layer:** `mazewall` blocks the specific syscall channels (`socket` families, `mount`, `init_module`) that an attacker would use to trigger dynamic kernel transitions in the first place.
 
 ---
 
@@ -274,7 +274,7 @@ executor.submit {
 }.get()
 ```
 
-Landlock uses `O_NOFOLLOW` when `jseccomp` opens path descriptors to build Landlock rules — this is a library implementation choice, not a Landlock kernel primitive. Because path-beneath rule descriptors are opened with `O_PATH | O_NOFOLLOW`, symlinks are rejected with `ELOOP`, preventing an attacker who controls a symlink target from redirecting a Landlock rule to an unintended path. Landlock's own kernel enforcement operates at the inode level after path resolution.
+Landlock uses `O_NOFOLLOW` when `mazewall` opens path descriptors to build Landlock rules — this is a library implementation choice, not a Landlock kernel primitive. Because path-beneath rule descriptors are opened with `O_PATH | O_NOFOLLOW`, symlinks are rejected with `ELOOP`, preventing an attacker who controls a symlink target from redirecting a Landlock rule to an unintended path. Landlock's own kernel enforcement operates at the inode level after path resolution.
 
 ---
 
@@ -306,15 +306,15 @@ The defense: always create a fresh thread pool for contained tasks, never reuse 
 
 ---
 
-## What jseccomp Does Not Stop
+## What mazewall Does Not Stop
 
 - **ROP/JOP gadget chains** — reusing existing mapped code. Seccomp cannot see CPU instruction flow; only syscalls. Complementary defences: ASLR, stack canaries, CFI (Intel CET, ARM BTI).
 - **In-process heap reads** — a contained thread still shares the JVM heap with all other threads and can read any object it can reach via references. This is the Shared-Memory ACE caveat from Part 2: it is why Tier 1 (process-wide `NO_EXEC`) is mandatory as a backstop against escalation.
 - **Pre-established network channels** — inherited open file descriptors. `NO_NETWORK` blocks *creation* of new sockets, not reads and writes on sockets already open.
 - **Orchestrator-level escapes** — if the JVM user has write access to `/etc/cron.d/` or the Podman socket, those escapes happen outside the syscall filter.
-- **Cluster-level visibility gaps** — `jseccomp` is not a replacement for cluster-wide tools like Kubescape or Falco. Those tools provide host-level and cross-container visibility that thread-scoped seccomp cannot offer. The correct model is defence-in-depth: cluster tools observe the container boundary; `jseccomp` enforces policy inside threads that the cluster tools cannot introspect.
+- **Cluster-level visibility gaps** — `mazewall` is not a replacement for cluster-wide tools like Kubescape or Falco. Those tools provide host-level and cross-container visibility that thread-scoped seccomp cannot offer. The correct model is defence-in-depth: cluster tools observe the container boundary; `mazewall` enforces policy inside threads that the cluster tools cannot introspect.
 
-`jseccomp` is one layer in a stack, not a total sandbox.
+`mazewall` is one layer in a stack, not a total sandbox.
 
 ---
 

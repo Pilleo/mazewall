@@ -22,4 +22,4 @@ plugins {
 include(":utils")
 include(":demo")
 
-rootProject.name = "jseccomp"
+rootProject.name = "mazewall"

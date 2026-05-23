@@ -9,7 +9,7 @@ class ProfileAndEnforceDemoTest {
     @Test
     @EnabledOnOs(OS.LINUX)
     fun `test profile and enforce demo runs successfully`() {
-        if (!io.contained.Platform.isSupported()) return
+        if (!io.mazewall.Platform.isSupported()) return
 
         // Verify that the entire end-to-end profile and enforce demo completes successfully
         runProfileAndEnforce()

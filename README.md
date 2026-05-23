@@ -1,4 +1,4 @@
-# jseccomp
+# mazewall
 
 **Kernel-enforced thread-scoped sandboxing for JVM applications. No agents. No SecurityManager. Just pure Linux Seccomp & Landlock.**
 
@@ -19,7 +19,7 @@ When Log4Shell hit, the attacker's code ran on the same thread as the vulnerable
 
 ## The Solution
 
-Modern application security layers are often too broad (process-wide containers) or highly brittle (application-level parsing checks). `jseccomp` provides surgical, unprivileged self-restriction at the OS thread boundary. By wrapping the executor that runs untrusted data-parsing tasks, the kernel enforces the security policy — no JVM bytecode or dynamic vulnerability can circumvent it.
+Modern application security layers are often too broad (process-wide containers) or highly brittle (application-level parsing checks). `mazewall` provides surgical, unprivileged self-restriction at the OS thread boundary. By wrapping the executor that runs untrusted data-parsing tasks, the kernel enforces the security policy — no JVM bytecode or dynamic vulnerability can circumvent it.
 
 Here is what that looks like in practice:
 
@@ -39,7 +39,7 @@ future.get() // Throws ExecutionException { cause: ContainmentViolationException
 
 ## How It Works
 
-`jseccomp` uses **Linux Seccomp-BPF** and **Landlock LSM** to install unprivileged security filters. The implementation is 100% pure Java, utilizing the **Foreign Function & Memory (FFM) API** (JDK 22+) to interface directly with the kernel without the need for native C dependencies.
+`mazewall` uses **Linux Seccomp-BPF** and **Landlock LSM** to install unprivileged security filters. The implementation is 100% pure Java, utilizing the **Foreign Function & Memory (FFM) API** (JDK 22+) to interface directly with the kernel without the need for native C dependencies.
 
 Prohibited syscalls trigger a `SECCOMP_RET_ERRNO` with `EPERM` (or Landlock file permissions return `EACCES`), causing standard Java I/O or JNI calls to fail. The executor wrapper catches these failures, matches them, and throws a `ContainmentViolationException`.
 
@@ -52,7 +52,7 @@ The canonical use case: wrap thread pools that process untrusted input (user upl
 
 ### 2. Behavioral Attestation for Regulated Data
 
-This is a less obvious but equally important use case. `jseccomp` can be used to **prove** — at the kernel level, not by software assertion — that sensitive data was handled with strict behavioral constraints.
+This is a less obvious but equally important use case. `mazewall` can be used to **prove** — at the kernel level, not by software assertion — that sensitive data was handled with strict behavioral constraints.
 
 Consider a thread pool that decrypts and processes PII, payment card data, or legally privileged documents. By wrapping it with `Policy.PURE_COMPUTE` and a Landlock path restriction:
 
@@ -103,7 +103,7 @@ To run the integration suite in a contained environment with nested seccomp supp
 ```bash
 # Start the container under the custom seccomp profile
 podman compose up -d
-podman compose exec jseccomp ./gradlew test
+podman compose exec mazewall ./gradlew test
 ```
 
 > [!IMPORTANT]
@@ -111,7 +111,7 @@ podman compose exec jseccomp ./gradlew test
 > 
 > Standard `security_opt: seccomp=...` triggers a bug in some orchestrators where the full JSON profile is passed as a string over the socket, causing a "file name too long" (`ENAMETOOLONG`) error. We bypass this using the Podman-native annotation `io.podman.annotations.seccomp` in `compose.yml`.
 
-> **Note on Container Security:** Rather than running completely unconfined (which is insecure), `jseccomp` includes a custom [podman-seccomp.json](podman-seccomp.json) profile that is automatically configured in [compose.yml](compose.yml). This profile whitelists `seccomp(2)` filter stacking, enabling the JVM inside the container to apply nested thread-level policies while keeping the container fully isolated from the host.
+> **Note on Container Security:** Rather than running completely unconfined (which is insecure), `mazewall` includes a custom [podman-seccomp.json](podman-seccomp.json) profile that is automatically configured in [compose.yml](compose.yml). This profile whitelists `seccomp(2)` filter stacking, enabling the JVM inside the container to apply nested thread-level policies while keeping the container fully isolated from the host.
 
 ### 2. Configure a Path-Restricted Thread Pool (Landlock)
 
@@ -161,7 +161,7 @@ When designing custom security policies, you should consult the authoritative Li
 
 ## Critical JVM Constraints
 
-* **Loom Virtual Thread Contamination:** Thread-scoped seccomp sandboxes the underlying OS thread. Since virtual threads share OS carrier threads via a ForkJoinPool, applying a filter inside a virtual thread will permanently "poison" that carrier thread. `jseccomp` explicitly detects virtual threads at runtime and throws `IllegalStateException` to prevent this bypass.
+* **Loom Virtual Thread Contamination:** Thread-scoped seccomp sandboxes the underlying OS thread. Since virtual threads share OS carrier threads via a ForkJoinPool, applying a filter inside a virtual thread will permanently "poison" that carrier thread. `mazewall` explicitly detects virtual threads at runtime and throws `IllegalStateException` to prevent this bypass.
 * **GC & Safepoint Deadlock Risk:** Custom policies must never block JVM coordination syscalls (`futex`, `sched_yield`, `rt_sigreturn`, `madvise`, `gettid`). Blocking synchronization primitives will lead to VM-wide deadlocks during the next GC cycle.
 * **Shared-Memory ACE Bypass:** Thread-scoped seccomp is not an absolute sandbox. If an attacker achieves native Arbitrary Code Execution (ACE) on a thread, they can manipulate the shared JVM heap/stack to corrupt unrestricted carrier or parent threads. Combine with process-wide `NO_EXEC` (Tier 1) for strong defense-in-depth.
 

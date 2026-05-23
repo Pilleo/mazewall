@@ -11,7 +11,7 @@ subprojects {
     }
 
     tasks.withType<Test>().configureEach {
-        systemProperty("io.contained.test", "true")
+        systemProperty("io.mazewall.test", "true")
         finalizedBy(tasks.withType<org.gradle.testing.jacoco.tasks.JacocoReport>())
     }
 
@@ -31,14 +31,14 @@ subprojects {
             rule {
                 element = "CLASS"
                 excludes = listOf(
-                    "io.contained.profiler.ProfilerDaemon*",
-                    "io.contained.seccomp.SeccompEngine*",
-                    "io.contained.profiler.IterativeProfiler*",
-                    "io.contained.Arch*",
-                    "io.contained.Platform*",
-                    "io.contained.profiler.Profiler*",
-                    "io.contained.landlock.Landlock*",
-                    "io.contained.seccomp.PureJavaBpfEngine*"
+                    "io.mazewall.profiler.ProfilerDaemon*",
+                    "io.mazewall.seccomp.SeccompEngine*",
+                    "io.mazewall.profiler.IterativeProfiler*",
+                    "io.mazewall.Arch*",
+                    "io.mazewall.Platform*",
+                    "io.mazewall.profiler.Profiler*",
+                    "io.mazewall.landlock.Landlock*",
+                    "io.mazewall.seccomp.PureJavaBpfEngine*"
                 )
                 limit {
                     counter = "INSTRUCTION"
@@ -49,9 +49,9 @@ subprojects {
             rule {
                 element = "CLASS"
                 includes = listOf(
-                    "io.contained.landlock.Landlock*",
-                    "io.contained.seccomp.PureJavaBpfEngine*",
-                    "io.contained.Platform*"
+                    "io.mazewall.landlock.Landlock*",
+                    "io.mazewall.seccomp.PureJavaBpfEngine*",
+                    "io.mazewall.Platform*"
                 )
                 limit {
                     counter = "INSTRUCTION"
@@ -61,7 +61,7 @@ subprojects {
             }
             rule {
                 element = "CLASS"
-                includes = listOf("io.contained.Arch*")
+                includes = listOf("io.mazewall.Arch*")
                 limit {
                     counter = "INSTRUCTION"
                     value = "COVEREDRATIO"

@@ -29,6 +29,6 @@ tasks.withType<Test> {
 tasks.register<JavaExec>("runScratch") {
     group = "application"
     classpath = sourceSets["test"].runtimeClasspath
-    mainClass.set("io.contained.Scratch")
+    mainClass.set("io.mazewall.Scratch")
     jvmArgs("--enable-native-access=ALL-UNNAMED")
 }

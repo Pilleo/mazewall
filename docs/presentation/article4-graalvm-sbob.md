@@ -166,7 +166,7 @@ The point is narrower: for the *PoC problem* of "can we generate a high-confiden
 
 ## What Comes Next
 
-While the underlying Linux kernel primitives (Seccomp and Landlock) are production-ready, the JVM-level integration in `jseccomp` is entirely experimental and untested. The entire codebase is a research proof-of-concept.
+While the underlying Linux kernel primitives (Seccomp and Landlock) are production-ready, the JVM-level integration in `mazewall` is entirely experimental and untested. The entire codebase is a research proof-of-concept.
 
 
 If you are working on:
