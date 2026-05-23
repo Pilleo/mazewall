@@ -178,7 +178,7 @@ class ProfilerIntegrationTest {
             })
             future.get(5, TimeUnit.SECONDS)
 
-            val bob = BobCompiler.compile(wrapped.recentLogs)
+            val bob = wrapped.compileBillOfBehavior()
             assertTrue(
                 bob.opens.contains("/etc/hostname"),
                 "Path resolution should work in wrapped executor. Observed opens: ${bob.opens}"
@@ -204,7 +204,7 @@ class ProfilerIntegrationTest {
             }
             tasks.forEach { it.get(5, TimeUnit.SECONDS) }
 
-            val bob = BobCompiler.compile(wrapped.recentLogs)
+            val bob = wrapped.compileBillOfBehavior()
             // The number of OPEN/OPENAT events in recentLogs for /etc/hostname should be low
             // due to deduplication, even if triggered from different threads.
             val openEvents = wrapped.recentLogs.filter { it.paths.contains("/etc/hostname") }

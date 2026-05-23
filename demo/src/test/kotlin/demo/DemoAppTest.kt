@@ -13,13 +13,15 @@ class DemoAppTest {
 
     @Test
     @EnabledOnOs(OS.LINUX)
-    fun `main with no arguments runs both demos and succeeds`() {
+    fun `main with no arguments runs all demos and succeeds`() {
+        if (!io.contained.Platform.isSupported()) return
+
         val unsafeMarker = File("/tmp/pwned_unsafe")
         val safeMarker = File("/tmp/pwned_safe")
         unsafeMarker.delete()
         safeMarker.delete()
 
-        // Running main() without arguments should trigger the "both" mode
+        // Running main() without arguments should trigger the "all" mode
         main(emptyArray())
 
         assertTrue(unsafeMarker.exists(), "Unsafe demo should have created the marker")

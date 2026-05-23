@@ -508,16 +508,23 @@ object Landlock {
      * @throws RuntimeException if `landlock_add_rule` fails for a reason other than a missing path.
      */
     private fun addRule(rulesetFd: Int, path: String, allowedAccess: Long, arena: Arena) {
+        val resolvedPath = try {
+            File(path).canonicalPath
+        } catch (e: Exception) {
+            path
+        }
         val openFlags = LinuxNative.O_PATH or LinuxNative.O_CLOEXEC or LinuxNative.O_NOFOLLOW
-        var pathSegment = arena.allocateFrom(path)
+        var pathSegment = arena.allocateFrom(resolvedPath)
         var fdResult = LinuxNative.open(pathSegment, openFlags)
 
+        var isFallbackToParent = false
         // Fix #3: If path doesn't exist (ENOENT=2), try the parent directory.
         if (fdResult.returnValue < 0 && fdResult.errno == 2) {
-            val parentPath = File(path).parent ?: "/"
-            logger.info("Path $path does not exist, falling back to parent directory: $parentPath")
+            val parentPath = File(resolvedPath).parent ?: "/"
+            logger.info("Path $resolvedPath does not exist, falling back to parent directory: $parentPath")
             pathSegment = arena.allocateFrom(parentPath)
             fdResult = LinuxNative.open(pathSegment, openFlags)
+            isFallbackToParent = true
         }
 
         // Fix #4: If symlink (ELOOP=40), log a clear warning.
@@ -533,8 +540,17 @@ object Landlock {
 
         val pathFd = fdResult.returnValue.toInt()
         try {
+            var finalAccess = allowedAccess
+            if (!isFallbackToParent && File(resolvedPath).isFile) {
+                // Strip directory-only flags to prevent EINVAL from the kernel when targeting regular files
+                val dirOnlyFlags = LANDLOCK_ACCESS_FS_READ_DIR or
+                                   LANDLOCK_ACCESS_FS_MAKE_DIR or
+                                   LANDLOCK_ACCESS_FS_REMOVE_DIR
+                finalAccess = finalAccess and dirOnlyFlags.inv()
+            }
+
             val pathAttr = arena.allocate(LinuxNative.LANDLOCK_PATH_BENEATH_ATTR_LAYOUT)
-            pathAttr.set(ValueLayout.JAVA_LONG, LinuxNative.LANDLOCK_PATH_BENEATH_ATTR_ACCESS_OFFSET, allowedAccess)
+            pathAttr.set(ValueLayout.JAVA_LONG, LinuxNative.LANDLOCK_PATH_BENEATH_ATTR_ACCESS_OFFSET, finalAccess)
             pathAttr.set(ValueLayout.JAVA_INT, LinuxNative.LANDLOCK_PATH_BENEATH_ATTR_FD_OFFSET, pathFd)
 
             val addResult = LinuxNative.syscall(

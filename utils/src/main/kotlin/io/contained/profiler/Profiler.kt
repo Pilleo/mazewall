@@ -535,6 +535,15 @@ object Profiler {
             ConcurrentHashMap<TraceEvent, MutableList<Array<StackTraceElement>>>()
         private val sharedPathCache = ConcurrentHashMap<String, Long>()
 
+        /**
+         * Compiles the captured logs and stack traces into a [BillOfBehavior].
+         */
+        fun compileBillOfBehavior(): BillOfBehavior {
+            return BobCompiler.compile(recentLogs).copy(
+                stackProfile = recentStackProfiles.toMap()
+            )
+        }
+
         override fun execute(command: Runnable) {
             delegate.execute {
                 ensureApplied()

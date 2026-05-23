@@ -254,7 +254,7 @@ class LandlockTest {
     // ── Issue #4: Symlink rejection ─────────────────────────────────────
 
     @Test
-    fun `testLandlockRejectsSymlinkPathWithONoFollow`() {
+    fun `testLandlockResolvesSymlinkPathAutomatically`() {
         if (!Landlock.isSupported()) return
 
         val realDir = createTempDirectory("landlock_real_target")
@@ -265,9 +265,8 @@ class LandlockTest {
         val symlink = symlinkDir.resolve("link_to_real")
         Files.createSymbolicLink(symlink, realDir)
 
-        // Allow the symlink path — with O_NOFOLLOW, the rule should be rejected
-        // (symlink cannot be opened with O_PATH | O_NOFOLLOW for landlock),
-        // and the real dir should remain blocked.
+        // Allow the symlink path — with auto-canonicalization inside jseccomp,
+        // this symlink path is automatically resolved to the target realDir.
         val policy = Policy.builder()
             .base(Policy.NO_EXEC)
             .allowJvmClasspath()
@@ -277,16 +276,12 @@ class LandlockTest {
         val executor = Executors.newSingleThreadExecutor()
         val safeExecutor = ContainedExecutors.wrap(executor, policy)
 
-        // Reading the real file should be blocked because the symlink rule was rejected
+        // Reading the real file should now succeed because the symlink was automatically resolved!
         val future = safeExecutor.submit(java.util.concurrent.Callable {
             Files.readString(realFile)
         })
 
-        val ex = assertFailsWith<ExecutionException> { future.get() }
-        assertTrue(
-            ex.cause is ContainmentViolationException || ex.cause is AccessDeniedException,
-            "Expected access denied, got ${ex.cause}"
-        )
+        assertEquals("real-content", future.get())
 
         executor.shutdown()
         realDir.toFile().deleteRecursively()

@@ -54,4 +54,49 @@ class BillOfBehaviorTest {
         assertEquals(setOf(Syscall.OPEN, Syscall.GETPID), merged.syscalls)
         assertEquals(setOf("/bin/ls", "/bin/sh"), merged.execs)
     }
+
+    @Test
+    fun `test toPolicy translates fields correctly`() {
+        val bob = BillOfBehavior(
+            opens = setOf("/read"),
+            fsWritePaths = setOf("/write"),
+            syscalls = setOf(Syscall.OPEN, Syscall.CONNECT)
+        )
+
+        // Deny-list mode base policy (blocks OPEN, so should unblock it)
+        val denyPolicy = io.contained.Policy.PURE_COMPUTE
+        val compiledDeny = bob.toPolicy(denyPolicy)
+        assertEquals(setOf("/read"), compiledDeny.allowedFsReadPaths)
+        assertEquals(setOf("/write"), compiledDeny.allowedFsWritePaths)
+
+        // Allow-list mode base policy
+        val allowBase = io.contained.Policy.builder().mode(io.contained.Policy.Mode.ALLOW_LIST).build()
+        val compiledAllow = bob.toPolicy(allowBase)
+        assertEquals(io.contained.Policy.Mode.ALLOW_LIST, compiledAllow.mode)
+        assertTrue(compiledAllow.syscalls.contains(Syscall.OPEN))
+        assertTrue(compiledAllow.syscalls.contains(Syscall.CONNECT))
+    }
+
+    @Test
+    fun `test toDsl generates correct snippets`() {
+        val bob = BillOfBehavior(
+            opens = setOf("/read"),
+            fsWritePaths = setOf("/write"),
+            syscalls = setOf(Syscall.OPEN)
+        )
+
+        // Deny-list base DSL
+        val dslDeny = bob.toDsl("Policy.PURE_COMPUTE", io.contained.Policy.PURE_COMPUTE)
+        assertTrue(dslDeny.contains("Policy.builder()"))
+        assertTrue(dslDeny.contains(".base(Policy.PURE_COMPUTE)"))
+        assertTrue(dslDeny.contains("Syscall.OPEN"))
+        assertTrue(dslDeny.contains(".allowFsRead(\"/read\")"))
+        assertTrue(dslDeny.contains(".allowFsWrite(\"/write\")"))
+
+        // Allow-list base DSL
+        val allowBase = io.contained.Policy.builder().mode(io.contained.Policy.Mode.ALLOW_LIST).build()
+        val dslAllow = bob.toDsl("Policy.builder().mode(Mode.ALLOW_LIST).build()", allowBase)
+        assertTrue(dslAllow.contains(".allow("))
+        assertTrue(dslAllow.contains("Syscall.OPEN"))
+    }
 }
