@@ -1,6 +1,6 @@
 Do You Really Know What Your App Is Doing at Runtime?
-
-> **Series overview:** This is Part 1 of a 4-part series on behavioral security for cloud-native applications.
+![maze_security_walls_new.png](maze_security_walls_new.png)
+> **Series overview:** This is Part 1 of a 5-part series on behavioral security for cloud-native applications.
  
 We have become very good at answering one specific supply-chain question:
  
@@ -143,10 +143,8 @@ These practices don't replace SBoB. They train engineering teams to think in the
 
 ---
 
-### Next Up: Exploring Kernel Boundaries
+### Next Up: Let Your Code Build Its Own Sandbox
  
-In Part 2 of this series, we move from theory to practice. We will use a tool designed to block syscalls at the thread level to explore the fundamental principles of kernel-level security. 
+In Part 2 of this series, we move from theory to practice. We will introduce **mazewall**, a newly developed experimental Proof-of-Concept library designed to translate SBoB concepts into active JVM thread sandboxing, and demonstrate the dynamic profiling workflow that allows the application to automatically trace and define its own required system permissions.
  
-Using the Java Virtual Machine (JVM) as our laboratory, we will see how to surgically neutralize threats like shellcode injection while maintaining application stability. This hands-on exploration will help you understand the core mechanics that modern security modules (like LSM) rely on to enforce behavioral integrity.
- 
-**[Read Part 2: Thread-Scoped Syscall Containment in the JVM](article2-mazewall.md)**
+**[Read Part 2: Let Your Code Build Its Own Sandbox: Introducing Mazewall](article2-profiler.md)**
