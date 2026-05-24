@@ -162,35 +162,9 @@ object ProfilerDaemon {
                 val notif = arena.allocate(LinuxNative.SECCOMP_NOTIF_LAYOUT)
                 val resp = arena.allocate(LinuxNative.SECCOMP_NOTIF_RESP_LAYOUT)
 
-                while (!isGlobalShutdown.get()) {
-                    notif.fill(0)
-                    val ioctlRes = LinuxNative.ioctl(listenerFd, LinuxNative.SECCOMP_IOCTL_NOTIF_RECV, notif)
-                    if (ioctlRes.returnValue < 0) break
-
-                    val id = notif.get(ValueLayout.JAVA_LONG, NOTIF_ID_OFF)
-                    val pid = notif.get(ValueLayout.JAVA_INT, NOTIF_PID_OFF)
-                    val nr = notif.get(ValueLayout.JAVA_INT, NOTIF_NR_OFF)
-                    val args = LongArray(6)
-                    for (i in 0..5) args[i] = notif.get(ValueLayout.JAVA_LONG, NOTIF_ARGS_OFF + i * 8L)
-
-                    val syscallName = syscallMap[nr] ?: "SYSCALL_$nr"
-                    val paths = getPathArgs(syscallName, args, pid)
-
-                    try {
-                        sendTraceEvent(socketFd, TraceEvent(pid, syscallName, args, paths))
-
-                        // Wait for ACK from parent JVM
-                        val ackBuf = arena.allocate(1)
-                        val readRes = LinuxNative.read(socketFd, ackBuf, 1)
-                        if (readRes.returnValue <= 0) break
-
-                        val command = ackBuf.get(ValueLayout.JAVA_BYTE, 0L)
-                        if (command == 0x53.toByte()) { // 'S' for Shutdown
-                            triggerGlobalShutdown()
-                        }
-                    } finally {
-                        sendContinueResponse(listenerFd, id, resp)
-                    }
+                var continueLoop = true
+                while (continueLoop && !isGlobalShutdown.get()) {
+                    continueLoop = processSingleNotification(listenerFd, socketFd, notif, resp, arena)
                 }
 
                 if (isGlobalShutdown.get()) {
@@ -213,6 +187,46 @@ object ProfilerDaemon {
             clientSockets.remove(socketFd)
             socketLocks.remove(socketFd)
         }
+    }
+
+    private fun processSingleNotification(
+        listenerFd: Int,
+        socketFd: Int,
+        notif: MemorySegment,
+        resp: MemorySegment,
+        arena: Arena,
+    ): Boolean {
+        notif.fill(0)
+        val ioctlRes = LinuxNative.ioctl(listenerFd, LinuxNative.SECCOMP_IOCTL_NOTIF_RECV, notif)
+        if (ioctlRes.returnValue < 0) return false
+
+        val id = notif.get(ValueLayout.JAVA_LONG, NOTIF_ID_OFF)
+        val pid = notif.get(ValueLayout.JAVA_INT, NOTIF_PID_OFF)
+        val nr = notif.get(ValueLayout.JAVA_INT, NOTIF_NR_OFF)
+        val args = LongArray(6)
+        for (i in 0..5) args[i] = notif.get(ValueLayout.JAVA_LONG, NOTIF_ARGS_OFF + i * 8L)
+
+        val syscallName = syscallMap[nr] ?: "SYSCALL_$nr"
+        val paths = getPathArgs(syscallName, args, pid)
+
+        var success = false
+        try {
+            sendTraceEvent(socketFd, TraceEvent(pid, syscallName, args, paths))
+
+            // Wait for ACK from parent JVM
+            val ackBuf = arena.allocate(1)
+            val readRes = LinuxNative.read(socketFd, ackBuf, 1)
+            if (readRes.returnValue > 0) {
+                val command = ackBuf.get(ValueLayout.JAVA_BYTE, 0L)
+                if (command == 0x53.toByte()) { // 'S' for Shutdown
+                    triggerGlobalShutdown()
+                }
+                success = true
+            }
+        } finally {
+            sendContinueResponse(listenerFd, id, resp)
+        }
+        return success
     }
 
     private fun sendTraceEvent(

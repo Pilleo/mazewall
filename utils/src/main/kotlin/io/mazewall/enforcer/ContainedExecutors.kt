@@ -32,6 +32,7 @@ object ContainedExecutors {
 
     private const val MAX_SECCOMP_FILTERS = 32
     private const val WARN_FILTERS_THRESHOLD = 10
+    private val ERRNO_VIOLATION_REGEX = Regex("""\berror[=:]\s*(1|13)\b""")
 
     private val PROCESS_BLOCKED = CopyOnWriteArraySet<Syscall>()
 
@@ -251,51 +252,7 @@ object ContainedExecutors {
     // Priority 1: JVM-encoded errno (most reliable — locale-independent)
     // Matches both "error=1" and "error: 1"
     private fun containsErrno(msg: String): Boolean {
-        var start = 0
-        while (true) {
-            val idx = msg.indexOf("error", start)
-            if (idx == -1) return false
-
-            // Check word boundary before "error"
-            if (idx > 0 && Character.isLetterOrDigit(msg[idx - 1])) {
-                start = idx + 1
-                continue
-            }
-
-            val afterErrorIdx = idx + 5
-            if (afterErrorIdx >= msg.length) return false
-
-            val sep = msg[afterErrorIdx]
-            if (sep != '=' && sep != ':') {
-                start = idx + 1
-                continue
-            }
-
-            var valIdx = afterErrorIdx + 1
-            // Skip optional whitespace after ':'
-            if (sep == ':') {
-                while (valIdx < msg.length && msg[valIdx].isWhitespace()) {
-                    valIdx++
-                }
-            }
-
-            if (valIdx >= msg.length) return false
-
-            val isErr1 = msg[valIdx] == '1'
-            val isErr13 = msg.regionMatches(valIdx, "13", 0, 2)
-
-            if (isErr1 || isErr13) {
-                val nextIdx = if (isErr13) valIdx + 2 else valIdx + 1
-                // Check word boundary after number
-                if (nextIdx < msg.length && Character.isLetterOrDigit(msg[nextIdx])) {
-                    start = idx + 1
-                    continue
-                }
-                return true
-            }
-
-            start = idx + 1
-        }
+        return ERRNO_VIOLATION_REGEX.containsMatchIn(msg)
     }
 
     // Priority 2: OS message fallback (locale-sensitive, narrowed to known safe patterns)
