@@ -11,7 +11,7 @@ import java.util.concurrent.TimeUnit
  */
 object VulnerableLogger {
     fun log(input: String): String {
-        if (input.startsWith("\${jndi:")) {
+        if (input.startsWith($$"${jndi:")) {
             // Simulates the CVE-2021-44228 gadget chain.
             // ProcessBuilder.start() calls execve() under the hood — the exact syscall
             // that seccomp's NO_EXEC policy blocks with EPERM.

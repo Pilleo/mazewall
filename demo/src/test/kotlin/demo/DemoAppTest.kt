@@ -43,7 +43,7 @@ class DemoAppTest {
     @EnabledOnOs(OS.LINUX)
     fun `SafeRunner blocks execution in JNDI`() {
         assertFailsWith<ContainmentViolationException> {
-            SafeRunner.run("\${jndi:ldap://test?cmd=ls}")
+            SafeRunner.run($$"${jndi:ldap://test?cmd=ls}")
         }
     }
 }

