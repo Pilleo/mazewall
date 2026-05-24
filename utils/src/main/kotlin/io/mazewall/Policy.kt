@@ -247,9 +247,7 @@ class Policy private constructor(
          * Note: Setting any FS paths enables Landlock enforcement for this policy.
          */
         fun allowFsRead(path: String): Builder {
-            require(path.isNotEmpty()) { "Path cannot be empty" }
-            require(path.startsWith("/")) { "Path must be absolute" }
-            require(!path.contains('\u0000')) { "Path cannot contain null bytes" }
+            validatePath(path)
             allowedFsReadPaths.add(path)
             return this
         }
@@ -283,9 +281,7 @@ class Policy private constructor(
          * Note: Setting any FS paths enables Landlock enforcement for this policy.
          */
         fun allowFsWrite(path: String): Builder {
-            require(path.isNotEmpty()) { "Path cannot be empty" }
-            require(path.startsWith("/")) { "Path must be absolute" }
-            require(!path.contains('\u0000')) { "Path cannot contain null bytes" }
+            validatePath(path)
             allowedFsWritePaths.add(path)
             return this
         }
@@ -316,6 +312,12 @@ class Policy private constructor(
         fun allowUnsafePrctl(): Builder {
             this.allowUnsafePrctl = true
             return this
+        }
+
+        private fun validatePath(path: String) {
+            require(path.isNotEmpty()) { "Path cannot be empty" }
+            require(path.startsWith("/")) { "Path must be absolute" }
+            require(!path.contains('\u0000')) { "Path cannot contain null bytes" }
         }
 
         fun build(): Policy = Policy(
