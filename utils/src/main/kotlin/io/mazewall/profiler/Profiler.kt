@@ -113,14 +113,16 @@ object Profiler {
         } finally {
             try {
                 Runtime.getRuntime().removeShutdownHook(shutdownHook)
-            } catch (e: Exception) {
+            } catch (e: IllegalStateException) {
+                logger.log(java.util.logging.Level.WARNING, "Failed to remove shutdown hook", e)
+            } catch (e: SecurityException) {
                 logger.log(java.util.logging.Level.WARNING, "Failed to remove shutdown hook", e)
             }
             triggerDaemonShutdown(socketPath)
             daemonProcess.destroyForcibly()
             try {
                 File(socketPath).delete()
-            } catch (e: Exception) {
+            } catch (e: SecurityException) {
                 logger.log(java.util.logging.Level.WARNING, "Failed to delete socket file at $socketPath", e)
             }
         }
@@ -146,9 +148,8 @@ object Profiler {
                     LinuxNative.close(fd)
                 }
             }
-        } catch (e: Exception) {
-            logger.log(java.util.logging.Level.WARNING, "Failed to trigger daemon shutdown", e)
-            // best effort
+        } catch (e: InterruptedException) {
+            Thread.currentThread().interrupt()
         }
     }
 
@@ -422,7 +423,7 @@ object Profiler {
                         LinuxNative.write(socketFd, ackBuf, 1)
                     }
                 }
-            } catch (e: Exception) {
+            } catch (e: java.io.IOException) {
                 logger.log(java.util.logging.Level.WARNING, "Trace listener error or socket closed", e)
             } finally {
                 arena.close()
@@ -510,7 +511,9 @@ object Profiler {
         override fun shutdown() {
             try {
                 Runtime.getRuntime().removeShutdownHook(shutdownHook)
-            } catch (e: Exception) {
+            } catch (e: IllegalStateException) {
+                logger.log(java.util.logging.Level.WARNING, "Failed to remove shutdown hook", e)
+            } catch (e: SecurityException) {
                 logger.log(java.util.logging.Level.WARNING, "Failed to remove shutdown hook", e)
             } finally {
                 delegate.shutdown()
@@ -532,7 +535,9 @@ object Profiler {
         override fun shutdownNow(): List<Runnable> {
             try {
                 Runtime.getRuntime().removeShutdownHook(shutdownHook)
-            } catch (e: Exception) {
+            } catch (e: IllegalStateException) {
+                logger.log(java.util.logging.Level.WARNING, "Failed to remove shutdown hook during shutdownNow", e)
+            } catch (e: SecurityException) {
                 logger.log(java.util.logging.Level.WARNING, "Failed to remove shutdown hook during shutdownNow", e)
             } finally {
                 val tasks = delegate.shutdownNow()

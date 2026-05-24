@@ -1,6 +1,10 @@
 package io.mazewall.seccomp
 
-import io.mazewall.*
+import io.mazewall.EnabledIfLinuxAndSupported
+import io.mazewall.IsolatedProcessTester
+import io.mazewall.Platform
+import io.mazewall.Policy
+import io.mazewall.Syscall
 import io.mazewall.enforcer.ContainedExecutors
 import org.junit.jupiter.api.Test
 import java.nio.channels.Selector

@@ -1,6 +1,10 @@
 package io.mazewall.profiler
 
-import io.mazewall.*
+import io.mazewall.Arch
+import io.mazewall.EnabledIfLinuxAndSupported
+import io.mazewall.LinuxNative
+import io.mazewall.Policy
+import io.mazewall.Syscall
 import org.junit.jupiter.api.Test
 import java.io.File
 import java.util.concurrent.Callable

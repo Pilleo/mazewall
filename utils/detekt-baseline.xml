@@ -16,10 +16,6 @@
     <ID>CyclomaticComplexMethod:Syscall.kt:Syscall$fun numberFor: Int</ID>
     <ID>EmptyFunctionBlock:PureJavaBpfEngineTest.kt:PureJavaBpfEngineTest.&lt;no name provided&gt;${}</ID>
     <ID>LongMethod:ContainedExecutors.kt:ContainedExecutors$private fun installInternal</ID>
-    <ID>LoopWithTooManyJumpStatements:ProfilerDaemon.kt:ProfilerDaemon$while</ID>
-    <ID>MagicNumber:ProfilerDaemon.kt:ProfilerDaemon$3</ID>
-    <ID>MagicNumber:ProfilerDaemon.kt:ProfilerDaemon$5</ID>
-    <ID>MagicNumber:ProfilerDaemon.kt:ProfilerDaemon$8L</ID>
     <ID>NestedBlockDepth:Policy.kt:Policy.Builder$fun allowJvmClasspath: Builder</ID>
     <ID>NestedBlockDepth:ProfilerDaemon.kt:ProfilerDaemon$private fun handleConnection</ID>
     <ID>PrintStackTrace:ProcessContainmentTest.kt:SeccompIsolatedTestApp$e</ID>
@@ -39,9 +35,7 @@
     <ID>TooGenericExceptionCaught:ContainedExecutors.kt:ContainedExecutors.ContainedExecutorWrapper$e: Error</ID>
     <ID>TooGenericExceptionCaught:ContainedExecutors.kt:ContainedExecutors.ContainedExecutorWrapper$e: Exception</ID>
     <ID>TooGenericExceptionCaught:IterativeProfiler.kt:IterativeProfiler$t: Throwable</ID>
-    <ID>TooGenericExceptionCaught:Profiler.kt:Profiler$e: Exception</ID>
     <ID>TooGenericExceptionCaught:Profiler.kt:Profiler$t: Throwable</ID>
-    <ID>TooGenericExceptionCaught:Profiler.kt:Profiler.ProfilerExecutorWrapper$e: Exception</ID>
     <ID>TooGenericExceptionCaught:ProfilerDaemon.kt:ProfilerDaemon$e: Exception</ID>
     <ID>TooManyFunctions:ContainedExecutors.kt:ContainedExecutors$ContainedExecutorWrapper : ExecutorService</ID>
     <ID>TooManyFunctions:LinuxNative.kt:LinuxNative</ID>
@@ -52,11 +46,5 @@
     <ID>VariableNaming:MmapProtectionTest.kt:MmapProtectionTest$val PROT_EXEC = 0x4</ID>
     <ID>VariableNaming:MmapProtectionTest.kt:MmapProtectionTest$val PROT_READ = 0x1</ID>
     <ID>VariableNaming:MmapProtectionTest.kt:MmapProtectionTest$val PROT_WRITE = 0x2</ID>
-    <ID>WildcardImport:BpfFilterTest.kt:import io.mazewall.*</ID>
-    <ID>WildcardImport:LinuxNative.kt:import java.lang.foreign.*</ID>
-    <ID>WildcardImport:MemfdCreateBypassTest.kt:import io.mazewall.*</ID>
-    <ID>WildcardImport:ProcessContainmentTest.kt:import io.mazewall.*</ID>
-    <ID>WildcardImport:ProfilerIntegrationTest.kt:import io.mazewall.*</ID>
-    <ID>WildcardImport:PureJavaBpfEngine.kt:import io.mazewall.*</ID>
   </CurrentIssues>
 </SmellBaseline>

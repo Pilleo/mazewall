@@ -45,6 +45,14 @@ object ProfilerDaemon {
     private const val RESP_ERR_OFF = 16L
     private const val RESP_FLAGS_OFF = 20L
 
+    private const val MAX_SYSCALL_ARGS = 6
+    private const val ARG_DIR_FD = 0
+    private const val ARG_PATH = 1
+    private const val ARG_OLD_DIR_FD = 0
+    private const val ARG_OLD_PATH = 1
+    private const val ARG_NEW_DIR_FD = 2
+    private const val ARG_NEW_PATH = 3
+
     @JvmStatic
     fun main(args: Array<String>) {
         if (args.isEmpty()) {
@@ -70,7 +78,7 @@ object ProfilerDaemon {
             try {
                 // Listen for parent JVM exit via stdin closure
                 System.`in`.read()
-            } catch (e: Exception) {
+            } catch (e: java.io.IOException) {
                 e.printStackTrace()
             }
             triggerGlobalShutdown()
@@ -108,27 +116,31 @@ object ProfilerDaemon {
             val addrLen = arena.allocate(ValueLayout.JAVA_INT)
             addrLen.set(ValueLayout.JAVA_INT, 0L, ADDR_UN_SIZE)
 
-            while (!isGlobalShutdown.get()) {
+            var shouldContinue = true
+            while (shouldContinue && !isGlobalShutdown.get()) {
                 val acceptRes = LinuxNative.accept(serverFd, addr, addrLen)
-                if (acceptRes.returnValue < 0) break
-                val clientFd = acceptRes.returnValue.toInt()
+                if (acceptRes.returnValue < 0) {
+                    shouldContinue = false
+                } else {
+                    val clientFd = acceptRes.returnValue.toInt()
 
-                // Check for a "Shutdown Command" connection (no FD sent, just 0x53)
-                if (isShutdownCommand(clientFd)) {
-                    LinuxNative.close(clientFd)
-                    triggerGlobalShutdown()
-                    break
-                }
-
-                Thread {
-                    try {
-                        handleConnection(clientFd)
-                    } catch (e: Exception) {
-                        e.printStackTrace()
-                    } finally {
+                    // Check for a "Shutdown Command" connection (no FD sent, just 0x53)
+                    if (isShutdownCommand(clientFd)) {
                         LinuxNative.close(clientFd)
+                        triggerGlobalShutdown()
+                        shouldContinue = false
+                    } else {
+                        Thread {
+                            try {
+                                handleConnection(clientFd)
+                            } catch (e: Exception) {
+                                e.printStackTrace()
+                            } finally {
+                                LinuxNative.close(clientFd)
+                            }
+                        }.start()
                     }
-                }.start()
+                }
             }
             LinuxNative.close(serverFd)
         }
@@ -203,8 +215,10 @@ object ProfilerDaemon {
         val id = notif.get(ValueLayout.JAVA_LONG, NOTIF_ID_OFF)
         val pid = notif.get(ValueLayout.JAVA_INT, NOTIF_PID_OFF)
         val nr = notif.get(ValueLayout.JAVA_INT, NOTIF_NR_OFF)
-        val args = LongArray(6)
-        for (i in 0..5) args[i] = notif.get(ValueLayout.JAVA_LONG, NOTIF_ARGS_OFF + i * 8L)
+        val args = LongArray(MAX_SYSCALL_ARGS)
+        for (i in 0 until MAX_SYSCALL_ARGS) {
+            args[i] = notif.get(ValueLayout.JAVA_LONG, NOTIF_ARGS_OFF + i * ValueLayout.JAVA_LONG.byteSize())
+        }
 
         val syscallName = syscallMap[nr] ?: "SYSCALL_$nr"
         val paths = getPathArgs(syscallName, args, pid)
@@ -350,11 +364,11 @@ object ProfilerDaemon {
             }
 
             "OPENAT", "EXECVEAT", "OPENAT2", "MKDIRAT", "UNLINKAT", "FCHMODAT", "FCHOWNAT", "UTIMENSAT", "FSTATAT", "READLINKAT" ->
-                tryRead(args[1], args[0])?.let { paths.add(it) }
+                tryRead(args[ARG_PATH], args[ARG_DIR_FD])?.let { paths.add(it) }
 
             "RENAMEAT", "RENAMEAT2", "LINKAT", "SYMLINKAT" -> {
-                tryRead(args[1], args[0])?.let { paths.add(it) }
-                tryRead(args[3], args[2])?.let { paths.add(it) }
+                tryRead(args[ARG_OLD_PATH], args[ARG_OLD_DIR_FD])?.let { paths.add(it) }
+                tryRead(args[ARG_NEW_PATH], args[ARG_NEW_DIR_FD])?.let { paths.add(it) }
             }
         }
         return paths
@@ -374,7 +388,7 @@ object ProfilerDaemon {
         val procPath = "/proc/$pid/$link"
         Arena.ofConfined().use { arena ->
             val pathSeg = arena.allocateFrom(procPath)
-            val buf = arena.allocate(PATH_MAX_VAL.toLong())
+            val buf = arena.allocate(PATH_MAX_VAL)
             val res = LinuxNative.readlink(pathSeg, buf, PATH_MAX_VAL)
             if (res.returnValue < 0) return null
             return buf.copyToString(res.returnValue.toInt())

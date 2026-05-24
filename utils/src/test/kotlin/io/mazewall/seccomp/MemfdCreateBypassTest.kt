@@ -1,6 +1,10 @@
 package io.mazewall.seccomp
 
-import io.mazewall.*
+import io.mazewall.Arch
+import io.mazewall.EnabledIfLinuxAndSupported
+import io.mazewall.LinuxNative
+import io.mazewall.Policy
+import io.mazewall.Syscall
 import io.mazewall.enforcer.ContainedExecutors
 import org.junit.jupiter.api.Test
 import java.util.concurrent.Executors
