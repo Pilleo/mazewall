@@ -235,7 +235,7 @@ object Landlock {
      *               be translated into Landlock rules.
      * @throws UnsupportedOperationException if Landlock is unsupported and the configured
      *         fallback is [io.mazewall.Platform.FallbackBehavior.FAIL].
-     * @throws RuntimeException if any Landlock syscall fails unexpectedly.
+     * @throws IllegalStateException if any Landlock syscall fails unexpectedly.
      */
     fun applyRuleset(policy: Policy) {
         val needsLandlock =
@@ -310,7 +310,7 @@ object Landlock {
         Arena.ofConfined().use { arena ->
             val rulesetFdResult = createRuleset(arena, accessMaskFs, abi)
             if (rulesetFdResult.returnValue < 0) {
-                throw RuntimeException("landlock_create_ruleset failed with errno ${rulesetFdResult.errno}")
+                throw IllegalStateException("landlock_create_ruleset failed with errno ${rulesetFdResult.errno}")
             }
             val rulesetFd = rulesetFdResult.returnValue.toInt()
 
@@ -336,7 +336,7 @@ object Landlock {
                 // Restrict self requires no_new_privs
                 val prctlResult = LinuxNative.prctl(LinuxNative.PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0)
                 if (prctlResult.returnValue < 0) {
-                    throw RuntimeException("prctl(PR_SET_NO_NEW_PRIVS) failed with errno ${prctlResult.errno}")
+                    throw IllegalStateException("prctl(PR_SET_NO_NEW_PRIVS) failed with errno ${prctlResult.errno}")
                 }
 
                 // Use TSYNC (Thread Sync) for process-wide enforcement if ABI >= 8 (Linux 7.0+)
@@ -351,7 +351,7 @@ object Landlock {
                         0,
                     )
                 if (restrictResult.returnValue < 0) {
-                    throw RuntimeException("landlock_restrict_self failed (flags=$flags) with errno ${restrictResult.errno}")
+                    throw IllegalStateException("landlock_restrict_self failed (flags=$flags) with errno ${restrictResult.errno}")
                 }
             } finally {
                 LinuxNative.close(rulesetFd)
@@ -443,7 +443,7 @@ object Landlock {
      * @param path       The filesystem path to allow access to (and its descendants).
      * @param allowedAccess Bitmask of `LANDLOCK_ACCESS_FS_*` flags to grant for this path.
      * @param arena      The [Arena] used for native memory allocations in this call.
-     * @throws RuntimeException if `landlock_add_rule` fails for a reason other than a missing path.
+     * @throws IllegalStateException if `landlock_add_rule` fails for a reason other than a missing path.
      */
     private fun addRule(
         rulesetFd: Int,
@@ -505,7 +505,7 @@ object Landlock {
                     )
                     return
                 }
-                throw RuntimeException("landlock_add_rule failed for $path with errno ${addResult.errno}")
+                throw IllegalStateException("landlock_add_rule failed for $path with errno ${addResult.errno}")
             }
         } finally {
             LinuxNative.close(pathFd)
