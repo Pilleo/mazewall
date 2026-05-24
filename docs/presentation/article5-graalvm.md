@@ -1,133 +1,196 @@
-# Generating an SBoB for Java: Production & AOT
+# Generating an SBoB for Java: Where We Are and What's Missing
 
-> **Series overview:** This is Part 5 of a 5-part series on behavioral security for cloud-native applications. **What this part adds:** scaling SBoB generation to production environments—explaining the "Merge Fallacy" of dynamic runtimes, and how GraalVM Native Image's Closed-World assumption allows us to mathematically prune capabilities Ahead-of-Time (AOT).
+> **Series overview:** This is Part 5 of a 5-part series on behavioral security for cloud-native applications. **What this part adds:** the harder problem of *generating* the behavioral contract — the tooling gaps, the Merge Fallacy, and why GraalVM's closed-world model is currently the clearest path to automating it.
 
----
 
-In Parts 2 and 4, we saw how **mazewall** dynamically profiles a worker thread to generate a security policy and enforces that policy at the Linux kernel level, successfully blocking advanced exploits like asynchronous `io_uring` evasion.
+Parts 1–4 established the *enforcement* side: what a Software Bill of Behavior (SBoB) is, how the kernel primitives enforce it, and what attacks they concretely stop.
 
-However, when we transition from a focused microservice demo to a large-scale enterprise application, dynamic profiling faces a classical architectural limitation: **the scale of dynamic paths.**
+Now the harder question: **how do you actually create the contract?**
 
-Modern JVM frameworks (like Spring Boot, Micronaut, and Quarkus) are massive, dynamic engines. They heavily rely on reflection, runtime bytecode generation, dynamic proxying, and deep dependency graphs.
-
-Today, we address how to scale SBoB generation to these massive systems, why dynamic analysis alone is insufficient, and how **GraalVM Native Image** and Ahead-of-Time (AOT) compilation provide a mathematically complete approach to behavioral sandboxing.
+This is where honesty is required. The generation tooling is immature or does not exist, the standards are forming, and the current best path is narrower than you'd like. Let's try to map it.
 
 ---
 
-## The Dynamic Scaling Problem: The "Merge Fallacy"
+## Static vs. Dynamic: The Honest Trade-off
 
-Dynamic profiling via test suites (as shown in Part 2) is highly effective for isolated, thread-scoped worker tasks. However, trying to generate a *process-wide* sandbox policy by merging dynamic profiling logs from multiple staging environments introduces a dangerous architectural anti-pattern: **The Merge Fallacy.**
+The first instinct is static analysis. For an isolated, well-defined library — a pure JSON parser, a cryptography primitive — static analysis works reasonably well. We can analyze bytecode, trace call graphs, and assert that `org.json:json` never calls `java.net.Socket`.
 
-Suppose you run your application in a staging environment for a week. You capture every system call and filesystem path, merge them, and deploy the resulting policy to production. 
+For a full-scale Java application, static analysis runs into a wall. Modern frameworks rely on:
+- **Reflection** for dependency injection and dynamic dispatch
+- **Dynamic proxies** for AOP (Spring transactions, interceptors)
+- **JNI** for native bridge libraries
+- **Configuration-driven dispatch** where the active beans depend on environment variables at runtime
 
-This approach has two fatal flaws:
+A static analyzer cannot definitively determine what a Spring Boot application will do at startup, because the behavior is constructed dynamically from classpath scanning and configuration files. The set of active endpoints, enabled features, and loaded providers isn't known until the context is initialized.
 
-1.  **The Under-Specification Trap (False Positives):** If your test suite or staging environment fails to trigger a rare code path—such as a database reconnect loop, a DNS rollover, or an annual PDF reporting generation task—that specific system call or directory will be missing from your compiled policy. When that rare event occurs in production, the kernel will block the call, crashing your application.
-2.  **The Over-Specification Trap (Least Privilege Erosion):** To prevent these crashes, security teams often aggressively merge profile logs from every developer, test run, and staging deployment. By the time you merge all dynamic execution logs, your whitelist has expanded so much that it covers almost the entire system call table. The sandbox loses its teeth, violating the principle of least privilege.
+**Dynamic analysis** — observing the application as it runs — avoids these problems but introduces its own: coverage. No test suite exercises every possible state. Kafka consumers, scheduled jobs, error-handling paths, and admin endpoints are routinely absent from integration test coverage.
 
-This is the Merge Fallacy: **combining discrete dynamic traces does not equal a mathematically complete or secure static policy.**
-
-To secure dynamic, complex runtimes without crashing rare operational paths, we must shift from dynamic discovery to **static, mathematical proof.**
-
----
-
-## Enter GraalVM: The Closed-World Assumption
-
-**GraalVM Native Image** compiles Java applications Ahead-of-Time (AOT) into standalone native executable binaries. 
-
-To compile a native binary, GraalVM relies on a strict architectural requirement: **The Closed-World Assumption.**
-
-```
-   Java Bytecode & Dependencies
-                |
-                v
-     [GraalVM Points-To Analysis] <--- Evaluates whole program
-                |
-                v
-    [Pruning: Unreachable Code Deleted]
-                |
-                v
-      Standalone Native Binary
-```
-
-Before compilation, GraalVM performs a global, static **points-to analysis**. It starts at the application's entry point (`main` method) and mathematically traces the call graph across all classes, methods, and third-party dependencies. If a method or class is not mathematically reachable via any active execution path, it is permanently pruned and deleted from the final binary.
-
-This closed-world compilation completely changes the game for behavioral sandboxing:
-
-1.  **Dead Code Elimination:** In a standard JVM, a 100KB microservice carries the entire 100MB JVM runtime (including management agents, compiler stubs, and unused NIO packages). If an attacker achieves ACE, they can invoke any JVM native method. In a GraalVM binary, all unreachable code—including unused native bridges—is gone.
-2.  **Deterministic Dependency Graph:** AOT compilation forces the resolving of all dynamic classloading, reflection, and proxy generation at build time. The final native binary contains a static, immutable instruction set.
+The conclusion is unavoidable: generating a meaningful SBoB requires combining static analysis, dynamic observation, and manual review. No single approach is sufficient.
 
 ---
 
-## Static SBoB: Compiling Rules from the Abstract Syntax Tree (AST)
+## The Three-Step Blueprint
 
-Because a GraalVM native binary has a deterministic, fully resolved call graph, we no longer need to run the application to *discover* what it does. We can analyze the compiled binary statically to **derive the exact security contract.**
+This how the most practical path seems today:
 
-At compile time, we can parse the binary's Abstract Syntax Tree (AST) to generate the SBoB:
+### Step 1: Generate Per-Dependency SBoBs
 
-1.  **Syscall Mapping:** We scan the fully resolved native binary for all occurrences of assembly instructions that invoke system calls (`syscall` on x86_64 or `svc` on aarch64).
-2.  **Call-Graph Tracing:** We map each system call back to the logical application method that invoked it.
-3.  **AST Policy Generation:** By analyzing the call graph, we statically prove that the application only invokes a specific subset of system calls (e.g. `read`, `write`, `epoll_wait`). We can automatically compile these system calls into a minimal Seccomp profile and embed it directly into the binary's metadata.
+At the library scope, behavioral analysis is tractable. A library has a finite, testable API surface that doesn't depend on the caller's configuration.
 
-This is a **Static SBoB**. It is mathematically complete (zero false positives for rare operational paths) and enforces absolute least privilege (no dead code or unused stubs can ever inject hidden syscalls).
+The approach: instrument each library through a comprehensive test harness, forcing execution down all branches, while tracing at the syscall level with tools like **Inspektor Gadget** (`trace_exec`, `trace_open` gadgets). The resulting syscall profile is the library's BoB baseline.
 
----
+To maximize branch coverage of libraries: use feedback-directed fuzzing (**JQF**, **Jazzer**), random test generators (**Randoop**), and evolutionary API fuzzing (**EvoMaster**). The goal is to exercise every code path through the library's public API under adversarial and edge-case inputs.
 
-## The Hybrid Model: Combining Static and Dynamic SBoB
+This generates a per-dependency BoB: *"This JSON parser calls `openat`, `read`, `mmap`, `brk`. It never calls `socket`, `connect`, `execve`, or `memfd_create`."*
 
-In production, the ideal cloud-native security model is a **hybrid architecture** that leverages both GraalVM's static pruning and **mazewall**'s thread-scoped dynamic containment:
+### Step 2: Dynamic Coverage for the Application
 
-```
-+--------------------------------------------------------+
-|              Host Kernel (Docker / K8s)                |
-|  Static SBoB applied globally to the GraalVM binary    |
-|  Restricts process-wide host access                    |
-+--------------------------------------------------------+
-                           |
-                           v
-+--------------------------------------------------------+
-|             GraalVM Native Process (Tier 1)            |
-|  Policy.NO_EXEC process-wide lockdown applied at init |
-+--------------------------------------------------------+
-                           |
-                           v
-+--------------------------------------------------------+
-|          mazewall Sandboxed Thread (Tier 2)            |
-|  Dynamic thread-scoped policy (e.g. PURE_COMPUTE)      |
-|  Surgically locks down untrusted task worker threads   |
-+--------------------------------------------------------+
-```
+Layer dynamic observation on top of the library baselines to capture framework-level behavior:
 
-1.  **Process-Wide Static Floor:** At the host level (Kubernetes/Podman), you run the compiled GraalVM binary using a highly restrictive static Seccomp profile derived during compilation. This blocks any system calls not present in the program's static call graph.
-2.  **Process-Wide Native Lockdown (Tier 1):** At application startup, the binary invokes `mazewall`'s process containment (`ContainedExecutors.installOnProcess()`) to permanently lock out shell executions (`execve`).
-3.  **Thread-Scoped Dynamic Isolation (Tier 2):** For specific threads handling untrusted user input, you wrap your executors with `mazewall` using the dynamic profiles generated during unit testing.
+- **Integration tests:** Known business flows under real framework initialization
+- **Chaos inputs:** Malformed and unexpected data to exercise error-handling paths
+- **Production shadow traffic:** Replay real-world requests in a controlled staging environment against a BoB-instrumented instance
+- **API fuzzing:** EvoMaster or similar tools that use evolutionary algorithms to generate complex inputs and maximize endpoint coverage
 
-By combining these layers, you achieve defense in depth. An attacker who compromises a worker thread is confined by Landlock and Seccomp at the thread level. Even if they somehow bypass the thread filter, they are blocked by the process-wide `NO_EXEC` lockdown, and finally backed stop by the host-level GraalVM static Seccomp profile.
+**Acknowledge the blind spots explicitly.** REST fuzzers don't trigger:
+- Kafka/RabbitMQ consumer paths
+- Scheduled jobs (`@Scheduled`, Quartz)
+- File watchers and inotify-driven processing
+- JMX and admin endpoints
+- Shutdown hooks
+
+These require dedicated, workload-specific observation campaigns separate from API coverage.
+
+### Step 3: Merge, Then Prune
+
+Combine the library baselines (Step 1) with the application observation profile (Step 2). This merge is where most real-world BoB implementations fail.
 
 ---
 
-## Summary of the 5-Part Journey
+## The Merge Fallacy
 
-We have reached the end of our behavioral security journey. Let's trace how the pieces connect:
+The most common mistake in BoB generation is the naive merge.
 
-*   **Part 1: The SBoB Concept** — We established the shift from blunt host-level boundaries to granular behavioral contracts (Software Bill of Behavior).
-*   **Part 2: Let Your Code Build Its Own Sandbox** — We introduced **mazewall** and demonstrated how developers can dynamically profile worker threads (`Profiler.profile`) to automatically generate security policies without guessing rules.
-*   **Part 3: Thread-Scoped JVM Mechanics** — We examined the advanced systems-level mechanics of JVM sandboxing, including the Java FFM native bridge, JIT memory protection, Loom carrier contamination prevention, and the golden rule of JVM safety (never block synchronization syscalls).
-*   **Part 4: The Attacks We Stop** — We put mazewall in the laboratory and verified its defense against real exploits, culminating in the co-enforcement of Seccomp and Landlock blocking asynchronous `io_uring` evasion.
-*   **Part 5: Production & AOT** — We explored how to scale this architecture to enterprise production, using GraalVM Native Image to mathematically prune capabilities Ahead-of-Time.
+If you concatenate the SBoBs of all dependencies, you produce a bloated super-permission set. Consider the AWS SDK. The SDK's BoB correctly declares that it *may* open outbound connections to S3, DynamoDB, SQS, Kinesis, and dozens of other services.
 
----
+If your application only uses DynamoDB — and the AWS SDK v2 declares access to S3, SQS, Kinesis, and dozens of other services, with well over 100 distinct endpoint configurations — but you naively merged the full SDK SBoB, you have just granted your application permission to connect to all of them. In practice, your DynamoDB-only service might observe three endpoint patterns in production. You have re-introduced exactly the broad, permissive permissions that SBoB was supposed to eliminate.
 
-## What You Can Do Today
+**A useful SBoB must represent the application's *actual* behavior, not the theoretical maximum behavior of its dependencies.** The merged profile must be aggressively pruned to what dynamic observation actually confirmed.
 
-Behavioral sandboxing is transitioning from an experimental PoC to standard production-grade architecture. You can start adopting this security philosophy today:
-
-1.  **Adopt a Contract Mindset:** Start auditing and documenting what system resources and network endpoints your microservices actually require at runtime.
-2.  **Experiment with Mazewall:** Check out the [mazewall repository](https://github.com/io-mazewall/mazewall), run the dynamic profiler against your JUnit tests, and inspect the generated Kotlin DSL.
-3.  **Build with GraalVM:** Compile your microservices into native binaries to automatically prune dead code and eliminate unused runtime capabilities.
-
-By moving your architecture toward unprivileged, uncompromised, and contract-aligned sandboxing, you ensure that even when the next high-severity Remote Code Execution zero-day hits, your application is structurally immune.
+This pruning is technically hard. It requires correlating library-level call sites with application-level execution paths, then computing which capability grants are reachable given the pruned call graph. This tooling does not exist as a production-ready product today.
 
 ---
 
-*Thank you for reading the series! Feedback, issues, and contributions are welcome in the [mazewall repository](https://github.com/io-mazewall/mazewall).*
+## The Limits: Lazy Init, Hot Reload, Dynamic Config
+
+Making BoB enforcement practical requires establishing a stable steady-state. Kubernetes readiness probes give a clean boundary: behavior during initialization is broad and complex; after the first successful health check, behavior should be narrow and predictable.
+
+But several common Java patterns break this assumption:
+
+**Lazy initialization:** Deferring startup of heavy components (connection pools, cache warmup) until the first tenant request — potentially hours after startup — means the "steady-state" BoB must still include the initialization-phase behaviors indefinitely. In a strict BoB model, lazy initialization is an anti-pattern.
+
+**Dynamic configuration and hot reload:** Feature flags, runtime config pushes, and hot deploys break the steady-state assumption. If behavior can change arbitrarily without a restart, creating a restrictive static behavioral contract is nearly impossible.
+
+These are real constraints that require architectural discipline. **For the PoC work ahead, the answer is GraalVM** — it sidesteps most of these problems by making the binary static. Standard JIT-compiled applications are the harder next step.
+
+---
+
+## GraalVM: The AOT Paradigm Shift
+
+If standard JIT-compiled JVM applications render static analysis practically useless, **GraalVM Native Image represents a fundamental paradigm shift that restores the feasibility of static analysis.**
+
+Standard Java security is completely reactive: it relies on dynamic observation to see what the application does, which is forever vulnerable to test coverage gaps. GraalVM changes the mathematical model by introducing the **Closed-World Assumption**.
+
+In practice, GraalVM *approximates* a closed world: at compile time, it performs a whole-program points-to analysis that must account for all dynamic features, which the developer explicitly registers via **Reachability Metadata** (`reflect-config.json`, `proxy-config.json`, `jni-config.json`). Unregistered reflection fails at runtime; registered dynamic features are tracked in the call graph. The closed-world assumption applies to *unregistered* code paths — those are provably absent from the binary.
+
+This approximation allows the static native image builder to construct a **provably complete call graph** over the explicitly registered surface of the application. Unreachable code paths are physically removed from the binary via Dead Code Elimination (DCE).
+
+### Dead Code Elimination as a Pruning Mechanism
+
+In a hypothetical future tooling pipeline, GraalVM’s closed-world compilation solves the "Merge Fallacy" mechanically rather than dynamically:
+
+1. **Statically Traced Call-Graphs:** Since the compiler constructs a complete, explicit call graph, static analysis tools can trace exactly which library call sites are reachable from the application entry point.
+2. **Deterministic Pruning:** If your application depends on a large library (like the AWS SDK) but only initializes a DynamoDB client, the compiler's AOT analysis statically proves that the Kinesis and S3 clients are unreachable. 
+3. **Physical Capability Dropping:** The S3 code paths—and their associated syscall behaviors—are permanently deleted from the final binary. The associated capabilities (e.g. TCP connect permissions to S3 buckets) are mechanically dropped from the SBoB without requiring dynamic observation.
+
+Instead of trying to deduce the application's actual behavior by running incomplete integration tests (which is reactive), GraalVM lets us **mathematically prove** the upper bound of the application's capabilities.
+
+### Leveraging Reachability Metadata
+
+Because the Java ecosystem has heavily standardized around GraalVM's reachability metadata (driven by the Spring Boot and Quarkus native compilation initiatives), an SBoB generation tool does not need to invent dynamic dispatch resolution from scratch. It can directly ingest the application's `reflect-config.json`, `proxy-config.json`, and `jni-config.json` to map the runtime boundaries of dynamic Java features.
+
+**The critical gap to keep front of mind:** DCE gives you a smaller, more auditable binary — but it does not tell you what syscalls that binary actually calls. Reachability metadata tells the compiler what code to *keep*; it does not describe what that code *does* at the kernel level. You still need syscall-level tracing (e.g., Inspektor Gadget, `strace`) to map the final leaf nodes of the call graph to system call numbers. GraalVM makes the static analysis target tractable; it does not replace the tracing step.
+
+### eBPF Profiling: Cleaner Than JIT
+
+Profiling a standard JVM with eBPF-based syscall tracers is extremely noisy. The JIT compiler periodically allocates executable memory segments and patches them during deoptimisation, generating `mmap(PROT_EXEC)` and `mprotect` noise that is difficult to attribute to application-level behaviour. Distinguishing JIT-internal syscalls from application-level ones requires filtering that is currently manual and error-prone.
+
+A GraalVM native binary eliminates this noise almost entirely. The binary behaves more like a standard C executable — startup syscalls are predictable, steady-state syscalls are stable, and there are no ongoing JIT recompilation events.
+
+<details>
+<summary><b>🔍 Deep Dive: eBPF Profiling & Debug Symbols</b></summary>
+
+**The dynamic tracing gap:** DWARF debug symbol support in GraalVM Native Image is still maturing. Specifically, **inlined functions flatten the call-stack context**. Because the AOT compiler aggressively inlines hot methods, an inlined function does not appear as a distinct frame in the symbol table. This makes it impossible for an eBPF tool using `uprobes` to map a system call stacktrace back to the original source library that initiated it. You can observe the syscall; attributing it to the exact library-level call site is incredibly hard.
+
+#### The Compiler Mitigation
+
+To build accurate profiling-based SBoBs, developers must instruct the GraalVM compiler to retain frame information. This is accomplished using specific compiler flags during the profiling build:
+
+* **`-H:PreserveFrameInformation`**: Instructs the native image builder to preserve stack trace frame details for all methods, including inlined ones.
+* **`-H:-InlineBeforeAnalysis`**: Prevents the optimizer from performing function inlining prior to the points-to call-graph analysis, ensuring that symbols remain distinct and map cleanly to the original libraries.
+
+These flags are intended for profiling builds, not production. They increase binary size and can incur minor performance overheads.
+
+> **Stability caveat:** GraalVM native-image compiler flags (`-H:*`) are not stable public API — they have been renamed or removed between versions. Before relying on these flags, verify their availability against your specific GraalVM version's output of `native-image --expert-options-all`. Do not hardcode them into production CI without a version pin.
+</details>
+
+### Control Flow Integrity
+
+GraalVM AOT compilation *positions* native Image binaries to be better candidates for hardware CFI features — **Intel CET (Shadow Stacks, IBT)** and **ARM BTI (Branch Target Identification)** — compared to JIT-compiled JVMs. The JIT compiler's requirement to frequently modify executable memory conflicts fundamentally with the kernel's ability to enforce control flow integrity at that memory; a static binary has no such constraint.
+
+However, as of mid-2025, **GraalVM Native Image does not have documented, first-class Intel CET or ARM BTI support**. Whether a native image binary receives CET/BTI protections depends entirely on the system linker's behaviour — `gcc` or `ld` may emit the required ELF notes (`PT_GNU_PROPERTY`) if the host toolchain supports it, but this is not a GraalVM-controlled, verified feature. Standard OS-level protections (ASLR, NX/DEP, stack canaries via compiler flags) are available and should be explicitly enabled via the linking toolchain. The CET/BTI story for native images is an open engineering area, not a solved one.
+
+---
+
+## The Counter-Argument and Its Limits
+
+The obvious objection: *"Most Java applications don't run on GraalVM Native Image."*
+
+True. GraalVM has real costs: longer build times, more complex debugging (no runtime reflection, more explicit configuration), ecosystem compatibility issues (libraries that don't yet provide reachability metadata), and cold-start trade-offs in some workloads.
+
+These are legitimate engineering objections, not security denialism. Many organizations have rational reasons to stay on JIT-compiled JVMs.
+
+The point is narrower: for the *PoC problem* of "can we generate a high-confidence, pruned SBoB automatically," GraalVM is currently the clearest path because it eliminates the hardest sources of noise. Standard JIT-compiled SBoB generation is the harder next problem — not a reason to abandon the idea, but a reason to sequence the work correctly.
+
+---
+
+## What Comes Next
+
+While the underlying Linux kernel primitives (Seccomp and Landlock) are production-ready, the JVM-level integration in `mazewall` is entirely experimental and untested. The entire codebase is a research proof-of-concept.
+
+
+If you are working on:
+- Syscall attribution tooling for GraalVM native binaries
+- Automated per-dependency SBoB generation using Inspektor Gadget + fuzzing pipelines
+...
+
+...the author is interested in collaborating on these engineering challenges.
+
+- **Instrument your CI pipeline with Inspektor Gadget** and start profiling your application's syscall footprint — regardless of whether you run GraalVM. Every application benefits from knowing its actual runtime footprint.
+- **Watch and contribute to the emerging Software Bill of Behavior (SBoB) specification:** Visit [billofbehavior.com](https://billofbehavior.com) and follow the open specification work at [github.com/k8sstormcenter/bob].
+
+---
+
+## Where This Series Leaves You
+
+Five articles in, the thesis is simple: behavioral security at the thread level is *possible today* in the JVM using standard Linux kernel primitives, requires no external infrastructure, and blocks real attack classes that container-level profiles miss. The limits are real — ACE bypass via shared heap, safepoint constraints, the Loom carrier problem — and have been stated precisely rather than glossed over.
+
+The generation side (producing the SBoB contract automatically) is harder and less mature. The Merge Fallacy is the central unsolved problem: pruning a dependency's theoretical capability set down to what the application actually uses. GraalVM's closed-world model is the most tractable current approach to this, because DCE does the pruning mechanically rather than requiring runtime observation to cover every code path.
+
+The next concrete engineering steps, in rough priority order:
+1. Syscall tracing integration for GraalVM native binaries with stable symbol attribution
+2. Per-library SBoB generation pipelines using Inspektor Gadget + fuzzing
+3. Tooling to merge and prune dependency SBoBs against observed production footprints
+4. An open, machine-readable SBoB schema that runtime enforcement engines can consume directly
+
+None of this is complete. All of it is tractable. If you read this far and disagree with something, the repository is the right place to continue the argument.
