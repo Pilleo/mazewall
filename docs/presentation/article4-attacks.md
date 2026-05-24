@@ -202,13 +202,13 @@ This illustrates the structural advantage of complementary co-enforcement. Secco
 
 ## Summary of Laboratory Results
 
-| Attack Vector | Primitives Used | Protected by | OS Error | Java Exception |
-|---|---|---|---|---|
-| **Shell Spawn** | `execve` | Seccomp (`Policy.NO_EXEC`) | `EPERM` | `IOException: Cannot run program` |
-| **Fileless Payload** | `memfd_create` / `execveat` | Seccomp (`Policy.NO_EXEC`) | `EPERM` | `ContainmentViolationException` |
-| **Shellcode Injection** | `mprotect(PROT_EXEC)` | Seccomp (cBPF inspect) | `EPERM` | `AccessDeniedException` |
-| **Path Traversal** | `openat("/etc/hosts")` | Landlock (Path filter) | `EACCES` | `ContainmentViolationException` |
-| **io_uring Evasion** | `io_uring` submission | Landlock (Credential copy) | `EACCES` | `ContainmentViolationException` |
+| Attack Vector           | Primitives Used             | Protected by               | OS Error | Java Exception                    |
+|-------------------------|-----------------------------|----------------------------|----------|-----------------------------------|
+| **Shell Spawn**         | `execve`                    | Seccomp (`Policy.NO_EXEC`) | `EPERM`  | `IOException: Cannot run program` |
+| **Fileless Payload**    | `memfd_create` / `execveat` | Seccomp (`Policy.NO_EXEC`) | `EPERM`  | `ContainmentViolationException`   |
+| **Shellcode Injection** | `mprotect(PROT_EXEC)`       | Seccomp (cBPF inspect)     | `EPERM`  | `AccessDeniedException`           |
+| **Path Traversal**      | `openat("/etc/hosts")`      | Landlock (Path filter)     | `EACCES` | `ContainmentViolationException`   |
+| **io_uring Evasion**    | `io_uring` submission       | Landlock (Credential copy) | `EACCES` | `ContainmentViolationException`   |
 
 ---
 

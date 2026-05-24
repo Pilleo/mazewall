@@ -39,31 +39,31 @@ The repository is organized as a multi-module Gradle project. The **`/utils`** m
 
 ### Enforcement Tier
 
-| File | Responsibility |
-|------|----------------|
-| `Policy.kt` | Composable security policies. Supports `ALLOW_LIST` (default-deny) and `DENY_LIST` (default-allow) modes. Builder pattern. |
-| `Syscall.kt` | `enum class Syscall` with `numberFor(arch)` dispatch. |
-| `Arch.kt` | Architecture maps: CPU AUDIT identifiers, seccomp syscall numbers, per-syscall numbers for x86_64 and aarch64. |
-| `BpfFilter.kt` | Compiles a `Policy` to a raw BPF instruction stream. Inverted linear scan for `ALLOW_LIST` mode to stay within 8-bit jump limit. Contains argument-inspection sequences for `mmap`/`mprotect`, `clone`, and `prctl`. |
-| `SeccompEngine.kt` | Interface: `install(policy)`, `installOnProcess(policy)`, `isSupported`. |
-| `PureJavaBpfEngine.kt` | `SeccompEngine` implementation. Sets `PR_SET_NO_NEW_PRIVS`, installs via `seccomp(2)` (falls back to `prctl(PR_SET_SECCOMP)` for old kernels), verifies with `PR_GET_SECCOMP`. If TSYNC fails, fails hard. See `containment_design.md §6`. |
-| `LinuxNative.kt` | FFM-based syscall bindings. All calls capture `errno` via `Linker.Option.captureCallState("errno")`. |
-| `Platform.kt` | OS/arch support check and `FallbackBehavior` resolution. Default: `FAIL`. |
-| `Landlock.kt` | Landlock LSM integration. Negotiates highest supported ABI version. Handles JVM classpath whitelisting. See `containment_design.md §5`. |
-| `ContainedExecutors.kt` | Primary public API. Wraps `ExecutorService`, provides `installOnCurrentThread()` / `installOnProcess()`. Manages incremental filter stacking with deduplication and depth enforcement. See `containment_design.md §4`. |
-| `ContainmentViolationException.kt` | Typed exception for EPERM/EACCES violations. Always wraps the original exception as its cause. |
+| File                               | Responsibility                                                                                                                                                                                                                             |
+|------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `Policy.kt`                        | Composable security policies. Supports `ALLOW_LIST` (default-deny) and `DENY_LIST` (default-allow) modes. Builder pattern.                                                                                                                 |
+| `Syscall.kt`                       | `enum class Syscall` with `numberFor(arch)` dispatch.                                                                                                                                                                                      |
+| `Arch.kt`                          | Architecture maps: CPU AUDIT identifiers, seccomp syscall numbers, per-syscall numbers for x86_64 and aarch64.                                                                                                                             |
+| `BpfFilter.kt`                     | Compiles a `Policy` to a raw BPF instruction stream. Inverted linear scan for `ALLOW_LIST` mode to stay within 8-bit jump limit. Contains argument-inspection sequences for `mmap`/`mprotect`, `clone`, and `prctl`.                       |
+| `SeccompEngine.kt`                 | Interface: `install(policy)`, `installOnProcess(policy)`, `isSupported`.                                                                                                                                                                   |
+| `PureJavaBpfEngine.kt`             | `SeccompEngine` implementation. Sets `PR_SET_NO_NEW_PRIVS`, installs via `seccomp(2)` (falls back to `prctl(PR_SET_SECCOMP)` for old kernels), verifies with `PR_GET_SECCOMP`. If TSYNC fails, fails hard. See `containment_design.md §6`. |
+| `LinuxNative.kt`                   | FFM-based syscall bindings. All calls capture `errno` via `Linker.Option.captureCallState("errno")`.                                                                                                                                       |
+| `Platform.kt`                      | OS/arch support check and `FallbackBehavior` resolution. Default: `FAIL`.                                                                                                                                                                  |
+| `Landlock.kt`                      | Landlock LSM integration. Negotiates highest supported ABI version. Handles JVM classpath whitelisting. See `containment_design.md §5`.                                                                                                    |
+| `ContainedExecutors.kt`            | Primary public API. Wraps `ExecutorService`, provides `installOnCurrentThread()` / `installOnProcess()`. Manages incremental filter stacking with deduplication and depth enforcement. See `containment_design.md §4`.                     |
+| `ContainmentViolationException.kt` | Typed exception for EPERM/EACCES violations. Always wraps the original exception as its cause.                                                                                                                                             |
 
 ### Profiling Tier
 
-| File | Responsibility |
-|------|----------------|
-| `Profiler.kt` | High-level USER_NOTIF profiler API. Spawns `ProfilerDaemon`, installs BPF with `SECCOMP_FILTER_FLAG_NEW_LISTENER`, passes fd via coordinator thread over SCM_RIGHTS. |
-| `ProfilerDaemon.kt` | Out-of-process daemon. Receives USER_NOTIF fd, loops on `SECCOMP_IOCTL_NOTIF_RECV`, resolves paths from `/proc/<pid>/fd/`, sends `TraceEvent` structs back, issues `FLAG_CONTINUE`. |
-| `BobCompiler.kt` | Compiles raw `TraceEvent` lists into a `BillOfBehavior`. |
-| `BillOfBehavior.kt` | Immutable record of kernel-level observations. SBoB-aligned. Produces `Policy` via `toPolicy()` or Kotlin DSL via `toDsl()`. |
-| `TraceEvent.kt` | Wire-level event record: `(pid, syscallName, args, paths)`. |
-| `ProfilingResult.kt` | `(returnValue: T, behavior: BillOfBehavior)`. |
-| `IterativeProfiler.kt` | Tier A profiler (no daemon, no USER_NOTIF). Progressive Landlock restriction with `AccessDeniedException` retry to discover FS paths. |
+| File                   | Responsibility                                                                                                                                                                      |
+|------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `Profiler.kt`          | High-level USER_NOTIF profiler API. Spawns `ProfilerDaemon`, installs BPF with `SECCOMP_FILTER_FLAG_NEW_LISTENER`, passes fd via coordinator thread over SCM_RIGHTS.                |
+| `ProfilerDaemon.kt`    | Out-of-process daemon. Receives USER_NOTIF fd, loops on `SECCOMP_IOCTL_NOTIF_RECV`, resolves paths from `/proc/<pid>/fd/`, sends `TraceEvent` structs back, issues `FLAG_CONTINUE`. |
+| `BobCompiler.kt`       | Compiles raw `TraceEvent` lists into a `BillOfBehavior`.                                                                                                                            |
+| `BillOfBehavior.kt`    | Immutable record of kernel-level observations. SBoB-aligned. Produces `Policy` via `toPolicy()` or Kotlin DSL via `toDsl()`.                                                        |
+| `TraceEvent.kt`        | Wire-level event record: `(pid, syscallName, args, paths)`.                                                                                                                         |
+| `ProfilingResult.kt`   | `(returnValue: T, behavior: BillOfBehavior)`.                                                                                                                                       |
+| `IterativeProfiler.kt` | Tier A profiler (no daemon, no USER_NOTIF). Progressive Landlock restriction with `AccessDeniedException` retry to discover FS paths.                                               |
 
 ### Additional Modules
 *   **`/demo`:** Log4Shell-style RCE showcase blocked by `Policy.NO_EXEC`.
@@ -168,18 +168,18 @@ Always call `isContainmentViolation(t)` (the full cause-chain traversal), not `i
 
 *   **Test tier requirements:**
 
-    | Test File | Requires Podman? | Requires Linux? | Kernel min |
-    |-----------|-----------------|-----------------|------------|
-    | `BpfFilterTest.kt` | No | No (pure unit) | — |
-    | `PolicyTest.kt` | No | No (pure unit) | — |
-    | `ContainedExecutorsTest.kt` | **Yes** | Yes | 4.8+ |
-    | `VirtualThreadGuardrailTest.kt` | **Yes** | Yes | 4.8+ |
-    | `StackingIntegrationTest.kt` | **Yes** | Yes | 4.8+ |
-    | `MmapProtectionTest.kt` | **Yes** | Yes | 4.8+ |
-    | `PrctlProtectionTest.kt` | **Yes** | Yes | 4.8+ |
-    | `ProfilerIntegrationTest.kt` | **Yes** | Yes | 5.0+ (USER_NOTIF) |
-    | `LandlockTest.kt` | No | Yes | 5.13+ |
-    | `IterativeProfilerTest.kt` | No | Yes | 5.13+ |
+    | Test File                       | Requires Podman? | Requires Linux? | Kernel min        |
+    |---------------------------------|------------------|-----------------|-------------------|
+    | `BpfFilterTest.kt`              | No               | No (pure unit)  | —                 |
+    | `PolicyTest.kt`                 | No               | No (pure unit)  | —                 |
+    | `ContainedExecutorsTest.kt`     | **Yes**          | Yes             | 4.8+              |
+    | `VirtualThreadGuardrailTest.kt` | **Yes**          | Yes             | 4.8+              |
+    | `StackingIntegrationTest.kt`    | **Yes**          | Yes             | 4.8+              |
+    | `MmapProtectionTest.kt`         | **Yes**          | Yes             | 4.8+              |
+    | `PrctlProtectionTest.kt`        | **Yes**          | Yes             | 4.8+              |
+    | `ProfilerIntegrationTest.kt`    | **Yes**          | Yes             | 5.0+ (USER_NOTIF) |
+    | `LandlockTest.kt`               | No               | Yes             | 5.13+             |
+    | `IterativeProfilerTest.kt`      | No               | Yes             | 5.13+             |
 
 *   **Platform Guards:** Use `@EnabledOnOs(OS.LINUX)` on all Linux-only integration tests.
 *   **Yama `ptrace_scope`:** `Profiler` calls `prctl(PR_SET_PTRACER, daemonPid)` to allow the daemon to read worker memory under Yama LSM. Do not remove this call.
@@ -191,8 +191,8 @@ Always call `isContainmentViolation(t)` (the full cause-chain traversal), not `i
 
 Before modifying components in the profiling or enforcement tiers, read the relevant design document first:
 
-| Document | Covers |
-|----------|--------|
-| `containment_design.md` | BPF linear scan rationale, argument-inspection BPF sequences, incremental filter stacking, Landlock ordering, `PureJavaBpfEngine` install sequence, FFM struct layouts, errno capture pattern |
-| `profiler_design.md` | USER_NOTIF architecture (Tier S/A/B), safepoint deadlock discovery, out-of-process daemon design, ACK protocol, `BillOfBehavior` SBoB alignment |
-| `SECURITY_CONSIDERATIONS.md` | Threat model, ACE escape caveat, `mmap`/`mprotect`/`clone` argument inspection rationale, `prctl` attack surface, `PR_SET_NO_NEW_PRIVS` implications, K8s deployment, Yama `ptrace_scope` |
+| Document                     | Covers                                                                                                                                                                                        |
+|------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `containment_design.md`      | BPF linear scan rationale, argument-inspection BPF sequences, incremental filter stacking, Landlock ordering, `PureJavaBpfEngine` install sequence, FFM struct layouts, errno capture pattern |
+| `profiler_design.md`         | USER_NOTIF architecture (Tier S/A/B), safepoint deadlock discovery, out-of-process daemon design, ACK protocol, `BillOfBehavior` SBoB alignment                                               |
+| `SECURITY_CONSIDERATIONS.md` | Threat model, ACE escape caveat, `mmap`/`mprotect`/`clone` argument inspection rationale, `prctl` attack surface, `PR_SET_NO_NEW_PRIVS` implications, K8s deployment, Yama `ptrace_scope`     |

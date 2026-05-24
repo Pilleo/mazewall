@@ -154,15 +154,15 @@ The following syscalls are **deliberately not present in any argument-inspection
 or block-list**. They are left completely unrestricted because blocking them causes
 catastrophic JVM instability:
 
-| Syscall | Reason left unrestricted |
-|---|---|
-| `futex` | JVM thread parking/unparking and monitor synchronization. Blocking causes deadlock at the next `synchronized` block or `Object.wait()`. |
-| `sched_yield` | Thread scheduler cooperation during spinlock contention. |
-| `rt_sigreturn` | Return from JVM signal handlers (HotSpot uses `SIGSEGV` for safepoint polling). Blocking causes instant JVM abort. |
-| `rt_sigaction` | HotSpot installs its own signal handlers at JVM init. Blocking prevents the JVM from starting. |
-| `madvise` | GC page lifecycle management (ZGC, G1). |
-| `gettid` | Thread identification used by GC and diagnostic paths. |
-| `close` | JVM and FFM close file descriptors constantly. Blocking causes fd leaks and runtime instability. |
+| Syscall        | Reason left unrestricted                                                                                                                |
+|----------------|-----------------------------------------------------------------------------------------------------------------------------------------|
+| `futex`        | JVM thread parking/unparking and monitor synchronization. Blocking causes deadlock at the next `synchronized` block or `Object.wait()`. |
+| `sched_yield`  | Thread scheduler cooperation during spinlock contention.                                                                                |
+| `rt_sigreturn` | Return from JVM signal handlers (HotSpot uses `SIGSEGV` for safepoint polling). Blocking causes instant JVM abort.                      |
+| `rt_sigaction` | HotSpot installs its own signal handlers at JVM init. Blocking prevents the JVM from starting.                                          |
+| `madvise`      | GC page lifecycle management (ZGC, G1).                                                                                                 |
+| `gettid`       | Thread identification used by GC and diagnostic paths.                                                                                  |
+| `close`        | JVM and FFM close file descriptors constantly. Blocking causes fd leaks and runtime instability.                                        |
 
 Do not add any of these to a policy's block-list. See `SECURITY_CONSIDERATIONS.md §9`
 for the full safepoint/GC deadlock analysis.
@@ -183,15 +183,15 @@ executor wrapping or the profiler) without wasting filter slots.
 
 `ContainedExecutors` maintains:
 
-| State | Type | Purpose |
-|---|---|---|
-| `THREAD_BLOCKED` | `ThreadLocal<Set<Syscall>>` | Syscalls already blocked on this OS thread |
-| `PROCESS_BLOCKED` | `CopyOnWriteArraySet<Syscall>` | Syscalls blocked process-wide via TSYNC |
-| `FILTER_DEPTH` | `ThreadLocal<Int>` | Count of thread-local filter installations |
-| `PROCESS_FILTER_DEPTH` | `AtomicInteger` | Count of process-wide filter installations |
-| `THREAD_ALLOWS_MMAP_EXEC` | `ThreadLocal<Boolean>` | Whether mmap PROT_EXEC inspection is still pending |
-| `PROCESS_ALLOWS_MMAP_EXEC` | `@Volatile Boolean` | Same, process-wide |
-| *(identical pattern for clone, prctl)* | | |
+| State                                  | Type                           | Purpose                                            |
+|----------------------------------------|--------------------------------|----------------------------------------------------|
+| `THREAD_BLOCKED`                       | `ThreadLocal<Set<Syscall>>`    | Syscalls already blocked on this OS thread         |
+| `PROCESS_BLOCKED`                      | `CopyOnWriteArraySet<Syscall>` | Syscalls blocked process-wide via TSYNC            |
+| `FILTER_DEPTH`                         | `ThreadLocal<Int>`             | Count of thread-local filter installations         |
+| `PROCESS_FILTER_DEPTH`                 | `AtomicInteger`                | Count of process-wide filter installations         |
+| `THREAD_ALLOWS_MMAP_EXEC`              | `ThreadLocal<Boolean>`         | Whether mmap PROT_EXEC inspection is still pending |
+| `PROCESS_ALLOWS_MMAP_EXEC`             | `@Volatile Boolean`            | Same, process-wide                                 |
+| *(identical pattern for clone, prctl)* |                                |                                                    |
 
 Before installing, `installInternal` computes:
 - `newBlocks = policy.syscalls - (THREAD_BLOCKED + PROCESS_BLOCKED)` → only truly new syscalls

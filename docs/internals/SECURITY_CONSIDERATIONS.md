@@ -310,11 +310,11 @@ Seccomp restricts **actions** (syscalls), but it does not provide **data isolati
 
 ## Summary: Security vs. Stability
 
-| Policy | Security Level | Stability Risk | Best Use Case |
-| :--- | :--- | :--- | :--- |
-| `NO_EXEC` | High | Low | Global process-wide lockdown (Elasticsearch model). |
-| `NO_NETWORK` | High | Medium | Data parsing, report generation. |
-| `PURE_COMPUTE`| Critical | High (HotSpot) / Medium (GraalVM) | Pure algorithmic tasks (image processing, crypto). |
+| Policy         | Security Level | Stability Risk                    | Best Use Case                                       |
+|:---------------|:---------------|:----------------------------------|:----------------------------------------------------|
+| `NO_EXEC`      | High           | Low                               | Global process-wide lockdown (Elasticsearch model). |
+| `NO_NETWORK`   | High           | Medium                            | Data parsing, report generation.                    |
+| `PURE_COMPUTE` | Critical       | High (HotSpot) / Medium (GraalVM) | Pure algorithmic tasks (image processing, crypto).  |
 
 ---
 

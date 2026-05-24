@@ -143,10 +143,10 @@ executor.submit {
 
 ## Built-In Policies
 
-| Policy | Blocked Syscalls / Primitives | Best Use Case |
-|---|---|---|
-| `Policy.NO_EXEC` | `execve`, `execveat`, `fork`, `vfork`, `memfd_create`, `io_uring_setup` | Process-wide startup lockdown baseline. |
-| `Policy.NO_NETWORK` | All execution blocks + `connect`, `socket`, `bind`, `accept` | Data parsers that require local filesystem access but no internet. |
+| Policy                | Blocked Syscalls / Primitives                                                                                                                                                                                                                  | Best Use Case                                                        |
+|-----------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|----------------------------------------------------------------------|
+| `Policy.NO_EXEC`      | `execve`, `execveat`, `fork`, `vfork`, `memfd_create`, `io_uring_setup`                                                                                                                                                                        | Process-wide startup lockdown baseline.                              |
+| `Policy.NO_NETWORK`   | All execution blocks + `connect`, `socket`, `bind`, `accept`                                                                                                                                                                                   | Data parsers that require local filesystem access but no internet.   |
 | `Policy.PURE_COMPUTE` | All network and execution blocks + `open`, `openat`, `ioctl`, `mount`, `io_uring_setup`; `mmap`/`mprotect` with `PROT_EXEC` and non-thread `clone` via BPF argument inspection; `prctl` restricted to safe options via BPF argument inspection | Algorithmic worker pools (image decoding, cryptographic operations). |
 
 ## System Call Reference
