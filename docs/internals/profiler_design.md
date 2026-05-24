@@ -107,15 +107,36 @@ For heavily locked-down environments where `root` is unavailable and Tier S is b
 
 ## 3. Profiling Identity vs. Performance
 
-When profiling an application that supports `io_uring`, the choice of profiling tier affects the resulting **Performance Profile** of the enforced application:
+When profiling an application that supports `io_uring`, the choice of profiling tier affects how the policy is generated and how the application performs in enforcement.
+
+### The Hybrid Profiling Shortcut (Recommended for io_uring)
+
+Because `mazewall`'s "Perfect Union" design uses **Landlock** to enforce the actual filesystem boundaries, Seccomp's only job is to authorize the *mechanism* of I/O, while Landlock authorizes the *destination*. 
+
+This enables a highly efficient developer workflow that avoids the need for root (Tier P) or slow iterative retries (Tier A):
+
+1.  **Disable `io_uring` during Profiling:** Run your test suite with `io_uring` temporarily disabled in the kernel (`sysctl -w kernel.io_uring_disabled=2`) or via framework configuration.
+2.  **Profile the Slow Path:** The application gracefully falls back to standard POSIX I/O (`openat`, `read`, `epoll`). The unprivileged Tier S `USER_NOTIF` profiler flawlessly intercepts these fallback calls and records every required absolute filesystem path.
+3.  **Abstract the Mechanism:** Take the generated DSL and manually append the `io_uring` system calls:
+    ```kotlin
+    .unblock(Syscall.IO_URING_SETUP, Syscall.IO_URING_ENTER)
+    ```
+4.  **Secure Enforcement in Production:** When deployed to a production environment where `io_uring` is enabled:
+    *   Seccomp allows the `io_uring_setup` syscall.
+    *   The application submits an async read to the ring.
+    *   The kernel's `io-wq` worker thread executes the read.
+    *   **Crucially, the `io-wq` worker inherits the Landlock ruleset of the thread that created it.**
+    *   If the async worker tries to read an unauthorized path (e.g., due to an exploit), Landlock intercepts and denies it at the VFS LSM hook layer.
+
+This hybrid approach leverages the ease of synchronous Tier S profiling while maintaining full asynchronous performance and perfect security in production.
 
 | Profiling Strategy | Resulting Policy | Enforcement Behavior |
 |--------------------|------------------|----------------------|
-| **Tier P (Root)** | Includes `io_uring` | Application runs on the **Fast Path**. |
-| **Tier A (Iterative)**| Includes `io_uring` | Application runs on the **Fast Path**. |
-| **Tier S (w/o io_uring)** | Standard I/O only | Application is **Functionally Identical** but runs on the **Slow Path** (Seccomp blocks `io_uring_setup`, forcing app fallback). |
+| **Hybrid (Tier S + Manual Add)**| Paths captured sync, async manually whitelisted | Application runs on the **Fast Path**. |
+| **Tier P (Root)** | Paths and async captured natively | Application runs on the **Fast Path**. |
+| **Tier A (Iterative)**| Paths and async learned via `EACCES` | Application runs on the **Fast Path**. |
+| **Tier S (w/o manual add)** | Standard I/O only | Application is **Functionally Identical** but runs on the **Slow Path** (Seccomp blocks `io_uring_setup`, forcing app fallback). |
 
-Disabling `io_uring` during the profiling phase is a valid way to generate a functional policy without root or complex setup, provided the developer accepts the performance trade-off in the final sandboxed environment.
 
 
 Handling containment errors inside a managed, multithreaded platform like the HotSpot JVM is highly delicate. If a thread attempts to make a blocked syscall, it receives `-EPERM`. We must translate this error deterministically without corrupting the JVM state.

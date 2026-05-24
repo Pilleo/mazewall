@@ -50,17 +50,24 @@ Attackers may use `execveat` to execute programs relative to a directory file de
 Modern Linux systems support `io_uring` for high-performance asynchronous I/O. Attackers increasingly abuse this subsystem to bypass seccomp filters. Because operations are submitted via a shared memory ring queue and executed by kernel worker threads (`io-wq`), a standard seccomp filter on the application thread is completely blind to the operations happening inside the ring.
 
 **The Profiling Strategy:**
-To build accurate policies for `io_uring` applications, `mazewall` requires a two-pronged profiling strategy:
+To build accurate policies for `io_uring` applications, `mazewall` requires one of the following profiling strategies:
 
-1.  **Tier P (Privileged):** Recommended for development. Uses root-privileged eBPF tracepoints to observe `io_uring` operations transparently without blocking them.
-2.  **Tier A (Iterative):** Unprivileged fallback. Uses Landlock to block unauthorized VFS access, catches the resulting Java exceptions, and iteratively retries the workload until all paths are discovered.
+1.  **Tier H (Hybrid Shortcut):** **Highly Recommended.** Developers temporarily disable `io_uring` during testing. The application falls back to standard I/O. The unprivileged Tier S profiler transparently captures all required paths. The developer then manually adds `.unblock(Syscall.IO_URING_SETUP)` to the generated policy for high-performance production enforcement.
+2.  **Tier P (Privileged):** Uses root-privileged eBPF tracepoints to observe `io_uring` operations transparently.
+3.  **Tier A (Iterative):** Unprivileged fallback. Uses Landlock to block unauthorized VFS access, catches the resulting Java exceptions, and iteratively retries the workload.
 
 **The Landlock Audit Constraint:**
 Early design iterations suggested using **Landlock Audit** (Type 1423) for transparent profiling. However, Landlock does not possess a "permissive" or "log-only" mode; it only emits an audit log when it **denies** an action. Applying a restrictive Landlock policy for profiling causes fatal `EACCES` crashes in the JVM, breaking the transparency guarantee. Landlock Audit is therefore strictly a **detection and enforcement** tool, not a transparent profiling sensor.
 
-**The Audit Privilege Barrier:**
-While Landlock itself is unprivileged to *install*, the kernel audit subsystem is a global resource. Reading these logs (e.g. from `/dev/kmsg`) requires `CAP_SYSLOG` or `CAP_AUDIT_READ`. 
-*   **Fail-Closed Mandate:** By default, the profiler will fail if it detects `io_uring` usage without a secure profiling sensor (Tier P or Tier A enabled), ensuring no asynchronous operations are silently missed unless explicitly configured via `MAZEWALL_PROFILER_FAIL_ON_AUDIT_ERROR=false`.
+**The "Perfect Union" Enforcement (Why Tier H Works):**
+When a thread is restricted by both Seccomp and Landlock in production:
+*   Seccomp whitelists `io_uring_setup`.
+*   Standard seccomp cannot inspect the async queue contents.
+*   **Crucially**, the kernel's async workers (`io-wq`) inherit the Landlock credentials of the submitting thread. Any unauthorized asynchronous operation is intercepted by Landlock at the VFS LSM hook layer and denied.
+*   Because Tier H successfully captured all legitimate paths (via standard I/O fallback), Landlock securely authorizes those paths regardless of the underlying I/O mechanism.
+
+**Fail-Closed Mandate:**
+By default, the profiler will now silently ignore `io_uring` syscalls during unprivileged runs, trusting that developers are utilizing the Tier H workflow (disabling `io_uring` during tests) or Tier A to generate the required filesystem rules.
 
 *   **Mitigation:** In production, `mazewall` explicitly blocks `io_uring_setup` in its strict policies. The standard JVM (currently) relies heavily on standard NIO/epoll and does not require `io_uring` for application-level worker threads.
 
