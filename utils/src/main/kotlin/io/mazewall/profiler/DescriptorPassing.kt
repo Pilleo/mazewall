@@ -9,6 +9,12 @@ import java.lang.foreign.ValueLayout
  * Shared utility for SCM_RIGHTS file descriptor passing via Unix Domain Sockets.
  */
 internal object DescriptorPassing {
+    private const val IOV_LEN_OFF = 8L
+    private const val MSG_IOV_OFF = 16L
+    private const val MSG_IOVLEN_OFF = 24L
+    private const val MSG_CONTROL_OFF = 32L
+    private const val MSG_CONTROLLEN_OFF = 40L
+
     /**
      * Sets up a [msghdr] structure for sending or receiving file descriptors.
      *
@@ -24,18 +30,18 @@ internal object DescriptorPassing {
     ): MemorySegment {
         val iov = arena.allocate(LinuxNative.IOVEC_LAYOUT)
         iov.set(ValueLayout.ADDRESS, 0L, dummyByte)
-        iov.set(ValueLayout.JAVA_LONG, 8L, 1L)
+        iov.set(ValueLayout.JAVA_LONG, IOV_LEN_OFF, 1L)
 
         val msg = arena.allocate(LinuxNative.MSGHDR_LAYOUT)
         msg.fill(0)
         // Offset 16: msg_iov (pointer)
-        msg.set(ValueLayout.ADDRESS, 16L, iov)
+        msg.set(ValueLayout.ADDRESS, MSG_IOV_OFF, iov)
         // Offset 24: msg_iovlen (size_t)
-        msg.set(ValueLayout.JAVA_LONG, 24L, 1L)
+        msg.set(ValueLayout.JAVA_LONG, MSG_IOVLEN_OFF, 1L)
         // Offset 32: msg_control (pointer)
-        msg.set(ValueLayout.ADDRESS, 32L, controlBuf)
+        msg.set(ValueLayout.ADDRESS, MSG_CONTROL_OFF, controlBuf)
         // Offset 40: msg_controllen (size_t)
-        msg.set(ValueLayout.JAVA_LONG, 40L, controlBuf.byteSize())
+        msg.set(ValueLayout.JAVA_LONG, MSG_CONTROLLEN_OFF, controlBuf.byteSize())
         return msg
     }
 }

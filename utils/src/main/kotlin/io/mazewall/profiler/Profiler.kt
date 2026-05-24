@@ -22,6 +22,16 @@ import java.util.logging.Logger
 object Profiler {
     private val logger = Logger.getLogger(Profiler::class.java.name)
 
+    private const val ADDR_UN_SIZE = 110
+    private const val CMSG_LEN_VAL = 20L
+    private const val CMSG_LEN_OFF = 0L
+    private const val CMSG_LEVEL_OFF = 8L
+    private const val CMSG_TYPE_OFF = 12L
+    private const val CMSG_DATA_OFF = 16L
+    private const val SOL_SOCKET_VAL = 1
+    private const val SCM_RIGHTS_VAL = 1
+    private const val DEDUPLICATION_WINDOW_MS = 500L
+
     /**
      * Profiles [block] on a dedicated OS platform thread under a seccomp
      * USER_NOTIF filter and returns both the block's return value and the
@@ -125,7 +135,7 @@ object Profiler {
                 try {
                     val addr = setupSockAddrUn(arena, socketPath)
 
-                    if (LinuxNative.connect(fd, addr, 110).returnValue == 0L) {
+                    if (LinuxNative.connect(fd, addr, ADDR_UN_SIZE).returnValue == 0L) {
                         val cmd = arena.allocate(1)
                         cmd.set(ValueLayout.JAVA_BYTE, 0L, 0x53.toByte()) // 'S' for Shutdown
                         LinuxNative.write(fd, cmd, 1)
@@ -168,7 +178,7 @@ object Profiler {
                     throw IllegalStateException("Failed to create socket: errno=${fdRes.errno}")
                 }
                 val fd = fdRes.returnValue.toInt()
-                val connRes = LinuxNative.connect(fd, addr, 110)
+                val connRes = LinuxNative.connect(fd, addr, ADDR_UN_SIZE)
                 if (connRes.returnValue == 0L) {
                     return fd
                 }
@@ -193,10 +203,10 @@ object Profiler {
 
             val controlBuf = arena.allocate(24)
             controlBuf.fill(0)
-            controlBuf.set(ValueLayout.JAVA_LONG, 0L, 20L) // cmsg_len
-            controlBuf.set(ValueLayout.JAVA_INT, 8L, 1) // cmsg_level (SOL_SOCKET = 1)
-            controlBuf.set(ValueLayout.JAVA_INT, 12L, 1) // cmsg_type (SCM_RIGHTS = 1)
-            controlBuf.set(ValueLayout.JAVA_INT, 16L, fdToSend)
+            controlBuf.set(ValueLayout.JAVA_LONG, CMSG_LEN_OFF, CMSG_LEN_VAL) // cmsg_len
+            controlBuf.set(ValueLayout.JAVA_INT, CMSG_LEVEL_OFF, SOL_SOCKET_VAL) // cmsg_level (SOL_SOCKET = 1)
+            controlBuf.set(ValueLayout.JAVA_INT, CMSG_TYPE_OFF, SCM_RIGHTS_VAL) // cmsg_type (SCM_RIGHTS = 1)
+            controlBuf.set(ValueLayout.JAVA_INT, CMSG_DATA_OFF, fdToSend)
 
             val msg = DescriptorPassing.setupScmRightsMsgHdr(arena, dummyByte, controlBuf)
 
@@ -378,7 +388,7 @@ object Profiler {
                         val cacheKey = "$syscallName:${paths.sorted().joinToString(",")}"
                         val now = System.currentTimeMillis()
                         val lastSeen = pathCache[cacheKey] ?: 0L
-                        if (now - lastSeen < 500) {
+                        if (now - lastSeen < DEDUPLICATION_WINDOW_MS) {
                             println("[PROFILER] Deduplicated duplicate event for $cacheKey")
                             // Write ACK to daemon so the daemon doesn't hang!
                             // ONLY if it's a Seccomp event (pid != 0).

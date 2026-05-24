@@ -69,6 +69,11 @@ object Landlock {
     /** Apply ruleset to all threads of the process. ABI v8+ (Linux 7.0). */
     private const val LANDLOCK_RESTRICT_SELF_TSYNC = (1L shl 3)
 
+    private const val ERRNO_EINVAL = 22
+    private const val ERRNO_ELOOP = 40
+    private const val ABI_V3 = 3
+    private const val ABI_V5 = 5
+
     // ── Filesystem access flags ─────────────────────────────────────────
     // Each flag corresponds to a bit in the kernel's `handled_access_fs` / `allowed_access`
     // bitmask. See `linux/landlock.h` for authoritative definitions.
@@ -141,8 +146,8 @@ object Landlock {
                 LANDLOCK_ACCESS_FS_MAKE_FIFO or LANDLOCK_ACCESS_FS_MAKE_BLOCK or
                 LANDLOCK_ACCESS_FS_MAKE_SYM
         if (abi >= 2) accessMaskFs = accessMaskFs or LANDLOCK_ACCESS_FS_REFER
-        if (abi >= 3) accessMaskFs = accessMaskFs or LANDLOCK_ACCESS_FS_TRUNCATE
-        if (abi >= 5) accessMaskFs = accessMaskFs or LANDLOCK_ACCESS_FS_IOCTL_DEV
+        if (abi >= ABI_V3) accessMaskFs = accessMaskFs or LANDLOCK_ACCESS_FS_TRUNCATE
+        if (abi >= ABI_V5) accessMaskFs = accessMaskFs or LANDLOCK_ACCESS_FS_IOCTL_DEV
 
         val classpathFlags = allFsRead or LANDLOCK_ACCESS_FS_EXECUTE
 
@@ -288,7 +293,7 @@ object Landlock {
             )
         }
 
-        if (abi >= 3) {
+        if (abi >= ABI_V3) {
             accessMaskFs = accessMaskFs or LANDLOCK_ACCESS_FS_TRUNCATE
         } else if (policy.isSyscallAllowed(Syscall.TRUNCATE) || policy.isSyscallAllowed(Syscall.FTRUNCATE)) {
             throw UnsupportedOperationException(
@@ -296,7 +301,7 @@ object Landlock {
             )
         }
 
-        if (abi >= 5) {
+        if (abi >= ABI_V5) {
             accessMaskFs = accessMaskFs or LANDLOCK_ACCESS_FS_IOCTL_DEV
         } else if (policy.isSyscallAllowed(Syscall.IOCTL)) {
             throw UnsupportedOperationException(
@@ -329,7 +334,7 @@ object Landlock {
                     val writeFlags =
                         LANDLOCK_ACCESS_FS_WRITE_FILE or LANDLOCK_ACCESS_FS_MAKE_REG or
                             LANDLOCK_ACCESS_FS_MAKE_DIR or LANDLOCK_ACCESS_FS_REMOVE_FILE or
-                            LANDLOCK_ACCESS_FS_REMOVE_DIR or (if (abi >= 3) LANDLOCK_ACCESS_FS_TRUNCATE else 0)
+                            LANDLOCK_ACCESS_FS_REMOVE_DIR or (if (abi >= ABI_V3) LANDLOCK_ACCESS_FS_TRUNCATE else 0)
                     addRule(rulesetFd, path, writeFlags, arena)
                 }
 
@@ -472,7 +477,7 @@ object Landlock {
         }
 
         // Fix #4: If symlink (ELOOP=40), log a clear warning.
-        if (fdResult.returnValue < 0 && fdResult.errno == 40) {
+        if (fdResult.returnValue < 0 && fdResult.errno == ERRNO_ELOOP) {
             logger.warning("Path $path is a symlink and was rejected (O_NOFOLLOW). Use the resolved real path instead.")
             return
         }
@@ -496,7 +501,7 @@ object Landlock {
 
             val addResult = addRuleToRuleset(arena, rulesetFd, pathFd, finalAccess)
             if (addResult.returnValue < 0) {
-                if (addResult.errno == 22) {
+                if (addResult.errno == ERRNO_EINVAL) {
                     // EINVAL: The FD likely points to a symlink inode (O_PATH | O_NOFOLLOW
                     // opens the symlink itself, not the target). Landlock rejects non-directory/
                     // non-regular-file inodes as path-beneath parents.

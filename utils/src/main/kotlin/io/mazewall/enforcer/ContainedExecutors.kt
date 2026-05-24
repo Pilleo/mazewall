@@ -30,6 +30,9 @@ import java.util.logging.Logger
 object ContainedExecutors {
     private val logger = Logger.getLogger(ContainedExecutors::class.java.name)
 
+    private const val MAX_SECCOMP_FILTERS = 32
+    private const val WARN_FILTERS_THRESHOLD = 10
+
     private val PROCESS_BLOCKED = CopyOnWriteArraySet<Syscall>()
 
     @Volatile
@@ -157,12 +160,12 @@ object ContainedExecutors {
                         needsPrctlProtection
 
             if (needsNewFilter) {
-                if (currentDepth >= 32) {
+                if (currentDepth >= MAX_SECCOMP_FILTERS) {
                     throw IllegalStateException(
-                        "Cannot install more than 32 seccomp filters on a single thread (including process-wide filters).",
+                        "Cannot install more than $MAX_SECCOMP_FILTERS seccomp filters on a single thread (including process-wide filters).",
                     )
                 }
-                if (currentDepth > 10) {
+                if (currentDepth > WARN_FILTERS_THRESHOLD) {
                     logger.warning("Thread ${Thread.currentThread().name} has $currentDepth seccomp filters.")
                 }
 

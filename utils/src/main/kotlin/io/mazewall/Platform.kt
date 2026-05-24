@@ -17,6 +17,8 @@ object Platform {
         SILENT_BYPASS, // run task uncontained, no warning
     }
 
+    private const val ERRNO_EINVAL = 22
+
     /**
      * Returns true if the current platform supports seccomp filters.
      */
@@ -34,7 +36,7 @@ object Platform {
         // A healthy kernel should return -1 and set errno to EINVAL (22).
         // Some container environments or broken kernels might silently return 0 or a different error.
         val bogusCheck = LinuxNative.prctl(LinuxNative.PR_SET_SECCOMP, -1L, 0L, 0, 0)
-        if (bogusCheck.returnValue == 0L || bogusCheck.errno != 22) { // 22 is EINVAL (Invalid argument)
+        if (bogusCheck.returnValue == 0L || bogusCheck.errno != ERRNO_EINVAL) { // 22 is EINVAL (Invalid argument)
             logger.warning(
                 "Seccomp sanity check failed. The kernel returned unexpected results (ret=${bogusCheck.returnValue}, errno=${bogusCheck.errno}). Seccomp may be stubbed or broken in this environment.",
             )

@@ -26,6 +26,25 @@ object ProfilerDaemon {
     private val activeListeners = CopyOnWriteArrayList<Int>()
     private val isGlobalShutdown = AtomicBoolean(false)
 
+    private const val ADDR_UN_SIZE = 110
+    private const val BACKLOG_SIZE = 128
+    private const val NOTIF_ID_OFF = 0L
+    private const val NOTIF_PID_OFF = 8L
+    private const val NOTIF_NR_OFF = 16L
+    private const val NOTIF_ARGS_OFF = 32L
+    private const val F_SETFL_VAL = 4
+    private const val O_NONBLOCK_VAL = 2048L
+    private const val CMSG_DATA_OFF = 16L
+    private const val IOV_LEN_OFF = 8L
+    private const val AT_FDCWD_VAL = -100L
+    private const val AT_FDCWD_UNSIGNED_VAL = 4294967196L
+    private const val AT_FDCWD_INT_VAL = -100
+    private const val PATH_MAX_VAL = 4096L
+    private const val RESP_ID_OFF = 0L
+    private const val RESP_VAL_OFF = 8L
+    private const val RESP_ERR_OFF = 16L
+    private const val RESP_FLAGS_OFF = 20L
+
     @JvmStatic
     fun main(args: Array<String>) {
         if (args.isEmpty()) {
@@ -83,11 +102,11 @@ object ProfilerDaemon {
             for (i in pathBytes.indices) pathSeg.set(ValueLayout.JAVA_BYTE, i.toLong(), pathBytes[i])
 
             File(socketPath).delete()
-            if (LinuxNative.bind(serverFd, addr, 110).returnValue < 0) throw IllegalStateException("Failed to bind")
-            if (LinuxNative.listen(serverFd, 128).returnValue < 0) throw IllegalStateException("Failed to listen")
+            if (LinuxNative.bind(serverFd, addr, ADDR_UN_SIZE).returnValue < 0) throw IllegalStateException("Failed to bind")
+            if (LinuxNative.listen(serverFd, BACKLOG_SIZE).returnValue < 0) throw IllegalStateException("Failed to listen")
 
             val addrLen = arena.allocate(ValueLayout.JAVA_INT)
-            addrLen.set(ValueLayout.JAVA_INT, 0L, 110)
+            addrLen.set(ValueLayout.JAVA_INT, 0L, ADDR_UN_SIZE)
 
             while (!isGlobalShutdown.get()) {
                 val acceptRes = LinuxNative.accept(serverFd, addr, addrLen)
@@ -148,11 +167,11 @@ object ProfilerDaemon {
                     val ioctlRes = LinuxNative.ioctl(listenerFd, LinuxNative.SECCOMP_IOCTL_NOTIF_RECV, notif)
                     if (ioctlRes.returnValue < 0) break
 
-                    val id = notif.get(ValueLayout.JAVA_LONG, 0L)
-                    val pid = notif.get(ValueLayout.JAVA_INT, 8L)
-                    val nr = notif.get(ValueLayout.JAVA_INT, 16L)
+                    val id = notif.get(ValueLayout.JAVA_LONG, NOTIF_ID_OFF)
+                    val pid = notif.get(ValueLayout.JAVA_INT, NOTIF_PID_OFF)
+                    val nr = notif.get(ValueLayout.JAVA_INT, NOTIF_NR_OFF)
                     val args = LongArray(6)
-                    for (i in 0..5) args[i] = notif.get(ValueLayout.JAVA_LONG, 32L + i * 8L)
+                    for (i in 0..5) args[i] = notif.get(ValueLayout.JAVA_LONG, NOTIF_ARGS_OFF + i * 8L)
 
                     val syscallName = syscallMap[nr] ?: "SYSCALL_$nr"
                     val paths = getPathArgs(syscallName, args, pid)
@@ -176,12 +195,12 @@ object ProfilerDaemon {
 
                 if (isGlobalShutdown.get()) {
                     // Drain notifications
-                    LinuxNative.fcntl(listenerFd, 4 /* F_SETFL */, 2048 /* O_NONBLOCK */)
+                    LinuxNative.fcntl(listenerFd, F_SETFL_VAL, O_NONBLOCK_VAL)
                     while (true) {
                         notif.fill(0)
                         val ioctlRes = LinuxNative.ioctl(listenerFd, LinuxNative.SECCOMP_IOCTL_NOTIF_RECV, notif)
                         if (ioctlRes.returnValue < 0) break
-                        val id = notif.get(ValueLayout.JAVA_LONG, 0L)
+                        val id = notif.get(ValueLayout.JAVA_LONG, NOTIF_ID_OFF)
                         sendContinueResponse(listenerFd, id, resp)
                     }
                 }
@@ -239,7 +258,7 @@ object ProfilerDaemon {
             controlBuf.fill(0)
             val msg = DescriptorPassing.setupScmRightsMsgHdr(arena, dummyByte, controlBuf)
             if (LinuxNative.recvmsg(socketFd, msg, 0).returnValue < 0) return null
-            return controlBuf.get(ValueLayout.JAVA_INT, 16L)
+            return controlBuf.get(ValueLayout.JAVA_INT, CMSG_DATA_OFF)
         }
     }
 
@@ -253,10 +272,10 @@ object ProfilerDaemon {
             localBuf.fill(0)
             val localIov = arena.allocate(LinuxNative.IOVEC_LAYOUT)
             localIov.set(ValueLayout.ADDRESS, 0L, localBuf)
-            localIov.set(ValueLayout.JAVA_LONG, 8L, maxLen.toLong())
+            localIov.set(ValueLayout.JAVA_LONG, IOV_LEN_OFF, maxLen.toLong())
             val remoteIov = arena.allocate(LinuxNative.IOVEC_LAYOUT)
             remoteIov.set(ValueLayout.ADDRESS, 0L, MemorySegment.ofAddress(remoteAddress))
-            remoteIov.set(ValueLayout.JAVA_LONG, 8L, maxLen.toLong())
+            remoteIov.set(ValueLayout.JAVA_LONG, IOV_LEN_OFF, maxLen.toLong())
             val res = LinuxNative.processVmReadv(pid, localIov, 1, remoteIov, 1, 0)
             if (res.returnValue < 0) {
                 if (res.errno == 1) { // EPERM
@@ -278,11 +297,11 @@ object ProfilerDaemon {
     ): List<String> {
         val paths = mutableListOf<String>()
 
-        fun isAtFdcwd(fd: Long): Boolean = fd == -100L || fd == 4294967196L || fd.toInt() == -100
+        fun isAtFdcwd(fd: Long): Boolean = fd == AT_FDCWD_VAL || fd == AT_FDCWD_UNSIGNED_VAL || fd.toInt() == AT_FDCWD_INT_VAL
 
         fun tryRead(
             addr: Long,
-            dirfd: Long = -100L,
+            dirfd: Long = AT_FDCWD_VAL,
         ): String? {
             if (addr == 0L) return null
             val path = readStringFromProcess(pid, addr) ?: return null
@@ -306,14 +325,14 @@ object ProfilerDaemon {
         }
         when (syscallName) {
             "OPEN", "EXECVE", "MKDIR", "RMDIR", "CHMOD", "CHOWN", "LCHOWN", "UNLINK", "READLINK", "CHROOT", "UTIME", "UTIMES" ->
-                tryRead(args[0], -100L)?.let { paths.add(it) }
+                tryRead(args[0], AT_FDCWD_VAL)?.let { paths.add(it) }
 
             "FCHMOD", "FCHOWN", "FSTAT" ->
                 resolveFdPath(pid, args[0].toInt())?.let { paths.add(it) }
 
             "SYMLINK", "LINK", "RENAME" -> {
-                tryRead(args[0], -100L)?.let { paths.add(it) }
-                tryRead(args[1], -100L)?.let { paths.add(it) }
+                tryRead(args[0], AT_FDCWD_VAL)?.let { paths.add(it) }
+                tryRead(args[1], AT_FDCWD_VAL)?.let { paths.add(it) }
             }
 
             "OPENAT", "EXECVEAT", "OPENAT2", "MKDIRAT", "UNLINKAT", "FCHMODAT", "FCHOWNAT", "UTIMENSAT", "FSTATAT", "READLINKAT" ->
@@ -341,8 +360,8 @@ object ProfilerDaemon {
         val procPath = "/proc/$pid/$link"
         Arena.ofConfined().use { arena ->
             val pathSeg = arena.allocateFrom(procPath)
-            val buf = arena.allocate(4096)
-            val res = LinuxNative.readlink(pathSeg, buf, 4096)
+            val buf = arena.allocate(PATH_MAX_VAL.toLong())
+            val res = LinuxNative.readlink(pathSeg, buf, PATH_MAX_VAL)
             if (res.returnValue < 0) return null
             return buf.copyToString(res.returnValue.toInt())
         }
@@ -354,10 +373,10 @@ object ProfilerDaemon {
         resp: MemorySegment,
     ) {
         resp.fill(0)
-        resp.set(ValueLayout.JAVA_LONG, 0L, id)
-        resp.set(ValueLayout.JAVA_LONG, 8L, 0L)
-        resp.set(ValueLayout.JAVA_INT, 16L, 0)
-        resp.set(ValueLayout.JAVA_INT, 20L, LinuxNative.SECCOMP_USER_NOTIF_FLAG_CONTINUE.toInt())
+        resp.set(ValueLayout.JAVA_LONG, RESP_ID_OFF, id)
+        resp.set(ValueLayout.JAVA_LONG, RESP_VAL_OFF, 0L)
+        resp.set(ValueLayout.JAVA_INT, RESP_ERR_OFF, 0)
+        resp.set(ValueLayout.JAVA_INT, RESP_FLAGS_OFF, LinuxNative.SECCOMP_USER_NOTIF_FLAG_CONTINUE.toInt())
         LinuxNative.ioctl(listenerFd, LinuxNative.SECCOMP_IOCTL_NOTIF_SEND, resp)
     }
 
