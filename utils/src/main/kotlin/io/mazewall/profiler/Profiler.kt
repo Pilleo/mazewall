@@ -239,6 +239,7 @@ object Profiler {
                     }
 
                     val socketFd = connectWithRetry(socketPath)
+                    var success = false
                     try {
                         val sent = sendDescriptor(socketFd, fd)
                         if (!sent) {
@@ -256,10 +257,11 @@ object Profiler {
 
                         // Start listener thread for this socket to receive TraceEvents
                         startTraceListener(socketFd, accumulatedLogs, stackTracesMap, pathCache, workerThreadProvider)
-                    } catch (e: Exception) {
-                        LinuxNative.close(socketFd)
-                        throw e
+                        success = true
                     } finally {
+                        if (!success) {
+                            LinuxNative.close(socketFd)
+                        }
                         LinuxNative.close(fd)
                     }
                 } catch (t: Throwable) {
