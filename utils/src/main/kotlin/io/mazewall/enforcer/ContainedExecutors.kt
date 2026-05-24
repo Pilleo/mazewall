@@ -414,5 +414,9 @@ object ContainedExecutors {
 
         override fun <T> invokeAny(tasks: Collection<Callable<T>>, timeout: Long, unit: TimeUnit): T =
             delegate.invokeAny(tasks.map { wrapCallable(it) }, timeout, unit)
+
+        override fun close() {
+            delegate.close()
+        }
     }
 }

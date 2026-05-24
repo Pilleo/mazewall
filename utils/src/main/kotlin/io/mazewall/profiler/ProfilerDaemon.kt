@@ -227,13 +227,9 @@ object ProfilerDaemon {
     private fun recvDescriptor(socketFd: Int): Int? {
         Arena.ofConfined().use { arena ->
             val dummyByte = arena.allocate(ValueLayout.JAVA_BYTE)
-            val iov = arena.allocate(LinuxNative.IOVEC_LAYOUT)
-            iov.set(ValueLayout.ADDRESS, 0L, dummyByte); iov.set(ValueLayout.JAVA_LONG, 8L, 1L)
-            val controlBuf = arena.allocate(24); controlBuf.fill(0)
-            val msg = arena.allocate(LinuxNative.MSGHDR_LAYOUT)
-            msg.fill(0)
-            msg.set(ValueLayout.ADDRESS, 16L, iov); msg.set(ValueLayout.JAVA_LONG, 24L, 1L)
-            msg.set(ValueLayout.ADDRESS, 32L, controlBuf); msg.set(ValueLayout.JAVA_LONG, 40L, 24L)
+            val controlBuf = arena.allocate(24)
+            controlBuf.fill(0)
+            val msg = DescriptorPassing.setupScmRightsMsgHdr(arena, dummyByte, controlBuf)
             if (LinuxNative.recvmsg(socketFd, msg, 0).returnValue < 0) return null
             return controlBuf.get(ValueLayout.JAVA_INT, 16L)
         }

@@ -178,10 +178,6 @@ object Profiler {
             val dummyByte = arena.allocate(ValueLayout.JAVA_BYTE)
             dummyByte.set(ValueLayout.JAVA_BYTE, 0, 0.toByte())
 
-            val iov = arena.allocate(LinuxNative.IOVEC_LAYOUT)
-            iov.set(ValueLayout.ADDRESS, 0L, dummyByte)
-            iov.set(ValueLayout.JAVA_LONG, 8L, 1L)
-
             val controlBuf = arena.allocate(24)
             controlBuf.fill(0)
             controlBuf.set(ValueLayout.JAVA_LONG, 0L, 20L) // cmsg_len
@@ -189,12 +185,7 @@ object Profiler {
             controlBuf.set(ValueLayout.JAVA_INT, 12L, 1)   // cmsg_type (SCM_RIGHTS = 1)
             controlBuf.set(ValueLayout.JAVA_INT, 16L, fdToSend)
 
-            val msg = arena.allocate(LinuxNative.MSGHDR_LAYOUT)
-            msg.fill(0)
-            msg.set(ValueLayout.ADDRESS, 16L, iov)
-            msg.set(ValueLayout.JAVA_LONG, 24L, 1L)
-            msg.set(ValueLayout.ADDRESS, 32L, controlBuf)
-            msg.set(ValueLayout.JAVA_LONG, 40L, 24L)
+            val msg = DescriptorPassing.setupScmRightsMsgHdr(arena, dummyByte, controlBuf)
 
             val res = LinuxNative.sendmsg(socketFd, msg, 0)
             return res.returnValue >= 0
@@ -452,6 +443,10 @@ object Profiler {
                 ensureApplied()
                 task.run()
             }
+
+        override fun close() {
+            delegate.close()
+        }
 
         private fun ensureApplied() {
             if (Thread.currentThread().isVirtual) {
