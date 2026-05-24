@@ -114,28 +114,16 @@ data class BillOfBehavior(
         sb.append("val policy = Policy.builder()\n")
         sb.append("    .base($basePolicyName)\n")
 
-        if (base.mode == Policy.Mode.DENY_LIST) {
-            val toUnblock = syscalls.filter { base.syscalls.contains(it) }.sortedBy { it.name }
-            if (toUnblock.isNotEmpty()) {
-                sb.append("    .unblock(\n")
-                toUnblock.forEachIndexed { i, s ->
-                    sb.append("        Syscall.${s.name}")
-                    if (i < toUnblock.size - 1) sb.append(",")
-                    sb.append("\n")
-                }
-                sb.append("    )\n")
-            }
+        val (methodName, list) = if (base.mode == Policy.Mode.DENY_LIST) {
+            ".unblock" to syscalls.filter { base.syscalls.contains(it) }.sortedBy { it.name }
         } else {
-            val toAllow = syscalls.sortedBy { it.name }
-            if (toAllow.isNotEmpty()) {
-                sb.append("    .allow(\n")
-                toAllow.forEachIndexed { i, s ->
-                    sb.append("        Syscall.${s.name}")
-                    if (i < toAllow.size - 1) sb.append(",")
-                    sb.append("\n")
-                }
-                sb.append("    )\n")
-            }
+            ".allow" to syscalls.sortedBy { it.name }
+        }
+
+        if (list.isNotEmpty()) {
+            sb.append("    $methodName(\n")
+            sb.append(list.joinToString(",\n") { "        Syscall.${it.name}" })
+            sb.append("\n    )\n")
         }
         for (path in opens.sorted()) sb.append("    .allowFsRead(\"$path\")\n")
         for (path in fsWritePaths.sorted()) sb.append("    .allowFsWrite(\"$path\")\n")
