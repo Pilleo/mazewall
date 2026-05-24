@@ -63,6 +63,7 @@ import java.util.logging.Logger
  * @see io.mazewall.Policy.Builder.allowJvmClasspath
  * @see io.mazewall.enforcer.ContainedExecutors.wrap
  */
+@Suppress("TooManyFunctions")
 object Landlock {
     private val logger = Logger.getLogger(Landlock::class.java.name)
 
@@ -265,49 +266,8 @@ object Landlock {
             return
         }
 
+        val accessMaskFs = getAccessMask(abi, policy)
         val allFsRead = LANDLOCK_ACCESS_FS_READ_FILE or LANDLOCK_ACCESS_FS_READ_DIR
-
-        // Fix #2: Handle ALL access categories the ABI supports.
-        // Any category NOT listed here is left globally unrestricted.
-        var accessMaskFs =
-            allFsRead or
-                LANDLOCK_ACCESS_FS_EXECUTE or
-                LANDLOCK_ACCESS_FS_WRITE_FILE or
-                LANDLOCK_ACCESS_FS_REMOVE_DIR or LANDLOCK_ACCESS_FS_REMOVE_FILE or
-                LANDLOCK_ACCESS_FS_MAKE_CHAR or LANDLOCK_ACCESS_FS_MAKE_DIR or
-                LANDLOCK_ACCESS_FS_MAKE_REG or LANDLOCK_ACCESS_FS_MAKE_SOCK or
-                LANDLOCK_ACCESS_FS_MAKE_FIFO or LANDLOCK_ACCESS_FS_MAKE_BLOCK or
-                LANDLOCK_ACCESS_FS_MAKE_SYM
-        if (abi >= 2) {
-            accessMaskFs = accessMaskFs or LANDLOCK_ACCESS_FS_REFER
-        } else if (policy.isSyscallAllowed(Syscall.RENAME) ||
-            policy.isSyscallAllowed(Syscall.RENAMEAT) ||
-            policy.isSyscallAllowed(
-                Syscall.RENAMEAT2,
-            ) ||
-            policy.isSyscallAllowed(Syscall.LINK) ||
-            policy.isSyscallAllowed(Syscall.LINKAT)
-        ) {
-            throw UnsupportedOperationException(
-                "Fatal Security Error: Policy allows rename/link syscalls, but this kernel (Landlock ABI $abi) is too old to restrict them (ABI 2 / Linux 5.19+ required). Update your kernel or block these syscalls.",
-            )
-        }
-
-        if (abi >= ABI_V3) {
-            accessMaskFs = accessMaskFs or LANDLOCK_ACCESS_FS_TRUNCATE
-        } else if (policy.isSyscallAllowed(Syscall.TRUNCATE) || policy.isSyscallAllowed(Syscall.FTRUNCATE)) {
-            throw UnsupportedOperationException(
-                "Fatal Security Error: Policy allows truncate syscalls, but this kernel (Landlock ABI $abi) is too old to restrict them (ABI 3 / Linux 6.2+ required). Update your kernel or block these syscalls.",
-            )
-        }
-
-        if (abi >= ABI_V5) {
-            accessMaskFs = accessMaskFs or LANDLOCK_ACCESS_FS_IOCTL_DEV
-        } else if (policy.isSyscallAllowed(Syscall.IOCTL)) {
-            throw UnsupportedOperationException(
-                "Fatal Security Error: Policy allows ioctl, but this kernel (Landlock ABI $abi) is too old to restrict dev ioctls (ABI 5 / Linux 6.10+ required). Update your kernel or block ioctl.",
-            )
-        }
 
         // All access flags for read + execute (needed for JVM classpath)
         val classpathFlags = allFsRead or LANDLOCK_ACCESS_FS_EXECUTE
@@ -324,40 +284,9 @@ object Landlock {
                 // Classloading is essential for JVM operation and must never be blocked.
                 addJvmClasspathRules(rulesetFd, classpathFlags, arena)
 
-                // Add user-specified read rules
-                for (path in policy.allowedFsReadPaths) {
-                    addRule(rulesetFd, path, allFsRead, arena)
-                }
+                applyUserRules(rulesetFd, policy, abi, arena, allFsRead)
 
-                // Add user-specified write rules
-                for (path in policy.allowedFsWritePaths) {
-                    val writeFlags =
-                        LANDLOCK_ACCESS_FS_WRITE_FILE or LANDLOCK_ACCESS_FS_MAKE_REG or
-                            LANDLOCK_ACCESS_FS_MAKE_DIR or LANDLOCK_ACCESS_FS_REMOVE_FILE or
-                            LANDLOCK_ACCESS_FS_REMOVE_DIR or (if (abi >= ABI_V3) LANDLOCK_ACCESS_FS_TRUNCATE else 0)
-                    addRule(rulesetFd, path, writeFlags, arena)
-                }
-
-                // Restrict self requires no_new_privs
-                val prctlResult = LinuxNative.prctl(LinuxNative.PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0)
-                if (prctlResult.returnValue < 0) {
-                    throw IllegalStateException("prctl(PR_SET_NO_NEW_PRIVS) failed with errno ${prctlResult.errno}")
-                }
-
-                // Use TSYNC (Thread Sync) for process-wide enforcement if ABI >= 8 (Linux 7.0+)
-                // DISABLED: TSYNC breaks sibling thread transparency in the test suite.
-                val flags = 0L // if (abi >= 8) LANDLOCK_RESTRICT_SELF_TSYNC else 0L
-                val restrictResult =
-                    LinuxNative.syscall(
-                        LinuxNative.LANDLOCK_RESTRICT_SELF_NR,
-                        rulesetFd.toLong(),
-                        flags,
-                        MemorySegment.NULL,
-                        0,
-                    )
-                if (restrictResult.returnValue < 0) {
-                    throw IllegalStateException("landlock_restrict_self failed (flags=$flags) with errno ${restrictResult.errno}")
-                }
+                enforceRuleset(rulesetFd)
             } finally {
                 LinuxNative.close(rulesetFd)
             }
@@ -516,6 +445,99 @@ object Landlock {
         } finally {
             LinuxNative.close(pathFd)
         }
+    }
+
+    private fun enforceRuleset(rulesetFd: Int) {
+        // Restrict self requires no_new_privs
+        val prctlResult = LinuxNative.prctl(LinuxNative.PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0)
+        if (prctlResult.returnValue < 0) {
+            throw IllegalStateException("prctl(PR_SET_NO_NEW_PRIVS) failed with errno ${prctlResult.errno}")
+        }
+
+        // Use TSYNC (Thread Sync) for process-wide enforcement if ABI >= 8 (Linux 7.0+)
+        // DISABLED: TSYNC breaks sibling thread transparency in the test suite.
+        val flags = 0L // if (abi >= 8) LANDLOCK_RESTRICT_SELF_TSYNC else 0L
+        val restrictResult =
+            LinuxNative.syscall(
+                LinuxNative.LANDLOCK_RESTRICT_SELF_NR,
+                rulesetFd.toLong(),
+                flags,
+                MemorySegment.NULL,
+                0,
+            )
+        if (restrictResult.returnValue < 0) {
+            throw IllegalStateException("landlock_restrict_self failed (flags=$flags) with errno ${restrictResult.errno}")
+        }
+    }
+
+    private fun applyUserRules(
+        rulesetFd: Int,
+        policy: Policy,
+        abi: Int,
+        arena: Arena,
+        allFsRead: Long,
+    ) {
+        // Add user-specified read rules
+        for (path in policy.allowedFsReadPaths) {
+            addRule(rulesetFd, path, allFsRead, arena)
+        }
+
+        // Add user-specified write rules
+        val writeFlags =
+            LANDLOCK_ACCESS_FS_WRITE_FILE or LANDLOCK_ACCESS_FS_MAKE_REG or
+                LANDLOCK_ACCESS_FS_MAKE_DIR or LANDLOCK_ACCESS_FS_REMOVE_FILE or
+                LANDLOCK_ACCESS_FS_REMOVE_DIR or (if (abi >= ABI_V3) LANDLOCK_ACCESS_FS_TRUNCATE else 0)
+
+        for (path in policy.allowedFsWritePaths) {
+            addRule(rulesetFd, path, writeFlags, arena)
+        }
+    }
+
+    @Suppress("ThrowsCount")
+    private fun getAccessMask(abi: Int, policy: Policy): Long {
+        val allFsRead = LANDLOCK_ACCESS_FS_READ_FILE or LANDLOCK_ACCESS_FS_READ_DIR
+
+        // Fix #2: Handle ALL access categories the ABI supports.
+        // Any category NOT listed here is left globally unrestricted.
+        var accessMaskFs =
+            allFsRead or
+                LANDLOCK_ACCESS_FS_EXECUTE or
+                LANDLOCK_ACCESS_FS_WRITE_FILE or
+                LANDLOCK_ACCESS_FS_REMOVE_DIR or LANDLOCK_ACCESS_FS_REMOVE_FILE or
+                LANDLOCK_ACCESS_FS_MAKE_CHAR or LANDLOCK_ACCESS_FS_MAKE_DIR or
+                LANDLOCK_ACCESS_FS_MAKE_REG or LANDLOCK_ACCESS_FS_MAKE_SOCK or
+                LANDLOCK_ACCESS_FS_MAKE_FIFO or LANDLOCK_ACCESS_FS_MAKE_BLOCK or
+                LANDLOCK_ACCESS_FS_MAKE_SYM
+        if (abi >= 2) {
+            accessMaskFs = accessMaskFs or LANDLOCK_ACCESS_FS_REFER
+        } else if (policy.isSyscallAllowed(Syscall.RENAME) ||
+            policy.isSyscallAllowed(Syscall.RENAMEAT) ||
+            policy.isSyscallAllowed(Syscall.RENAMEAT2) ||
+            policy.isSyscallAllowed(Syscall.LINK) ||
+            policy.isSyscallAllowed(Syscall.LINKAT)
+        ) {
+            throw UnsupportedOperationException(
+                "Fatal Security Error: Policy allows rename/link syscalls, but this kernel (Landlock ABI $abi) is too old to restrict them (ABI 2 / Linux 5.19+ required). Update your kernel or block these syscalls.",
+            )
+        }
+
+        if (abi >= ABI_V3) {
+            accessMaskFs = accessMaskFs or LANDLOCK_ACCESS_FS_TRUNCATE
+        } else if (policy.isSyscallAllowed(Syscall.TRUNCATE) || policy.isSyscallAllowed(Syscall.FTRUNCATE)) {
+            throw UnsupportedOperationException(
+                "Fatal Security Error: Policy allows truncate syscalls, but this kernel (Landlock ABI $abi) is too old to restrict them (ABI 3 / Linux 6.2+ required). Update your kernel or block these syscalls.",
+            )
+        }
+
+        if (abi >= ABI_V5) {
+            accessMaskFs = accessMaskFs or LANDLOCK_ACCESS_FS_IOCTL_DEV
+        } else if (policy.isSyscallAllowed(Syscall.IOCTL)) {
+            throw UnsupportedOperationException(
+                "Fatal Security Error: Policy allows ioctl, but this kernel (Landlock ABI $abi) is too old to restrict dev ioctls (ABI 5 / Linux 6.10+ required). Update your kernel or block ioctl.",
+            )
+        }
+
+        return accessMaskFs
     }
 
     private fun createRuleset(
