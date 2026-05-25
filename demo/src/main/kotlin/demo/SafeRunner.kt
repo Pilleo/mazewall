@@ -17,15 +17,13 @@ object SafeRunner {
                     VulnerableLogger.log(payload)
                 }
             future.get()
-        } catch (
-            @Suppress("SwallowedException") e: ExecutionException,
-        ) {
+        } catch (expected: ExecutionException) {
             // We intentionally unwrap the ExecutionException to expose the underlying
             // ContainmentViolationException to the caller for clearer demo output.
-            if (e.cause is ContainmentViolationException) {
-                throw e.cause as ContainmentViolationException
+            if (expected.cause is ContainmentViolationException) {
+                throw expected.cause as ContainmentViolationException
             }
-            throw e
+            throw expected
         } finally {
             safeExecutor.shutdown()
             executor.shutdown()

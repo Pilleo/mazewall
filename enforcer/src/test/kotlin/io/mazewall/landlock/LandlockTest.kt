@@ -404,4 +404,31 @@ class LandlockTest {
             }
         assertTrue(ex.message!!.contains("Policy allows ioctl, but this kernel"))
     }
+
+    @Test
+    fun `testLandlockGetAccessMaskLowAbi`() {
+        val policyRename = Policy.builder().unblock(Syscall.RENAME).build()
+        val exRename = assertFailsWith<UnsupportedOperationException> {
+            Landlock.getAccessMask(1, policyRename)
+        }
+        assertTrue(
+            exRename.message!!.contains("Policy allows rename/link syscalls, but this kernel"),
+        )
+
+        val policyTruncate = Policy.builder().unblock(Syscall.TRUNCATE).build()
+        val exTruncate = assertFailsWith<UnsupportedOperationException> {
+            Landlock.getAccessMask(2, policyTruncate)
+        }
+        assertTrue(
+            exTruncate.message!!.contains("Policy allows truncate syscalls, but this kernel"),
+        )
+
+        val policyIoctl = Policy.builder().unblock(Syscall.IOCTL).build()
+        val exIoctl = assertFailsWith<UnsupportedOperationException> {
+            Landlock.getAccessMask(4, policyIoctl)
+        }
+        assertTrue(
+            exIoctl.message!!.contains("Policy allows ioctl, but this kernel"),
+        )
+    }
 }

@@ -61,12 +61,11 @@ class IterativeProfilerTest {
     }
 
     @Test
-    @Suppress("TooGenericExceptionThrown")
     fun `test iterative profiling rethrows unrelated exceptions`() {
         val basePolicy = Policy.PURE_COMPUTE
-        org.junit.jupiter.api.assertThrows<RuntimeException> {
+        org.junit.jupiter.api.assertThrows<IllegalStateException> {
             IterativeProfiler.profile(basePolicy) {
-                throw RuntimeException("completely unrelated error")
+                throw IllegalStateException("completely unrelated error")
             }
         }
     }

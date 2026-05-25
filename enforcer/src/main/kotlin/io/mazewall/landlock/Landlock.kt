@@ -558,8 +558,7 @@ object Landlock {
      * Resolves the access mask for the given ABI and policy.
      * Enforces security errors for syscalls that cannot be restricted by the current ABI.
      */
-    @Suppress("ThrowsCount")
-    private fun getAccessMask(
+    internal fun getAccessMask(
         abi: Int,
         policy: Policy,
     ): Long {
@@ -576,6 +575,9 @@ object Landlock {
                     LANDLOCK_ACCESS_FS_MAKE_REG or LANDLOCK_ACCESS_FS_MAKE_SOCK or
                     LANDLOCK_ACCESS_FS_MAKE_FIFO or LANDLOCK_ACCESS_FS_MAKE_BLOCK or
                     LANDLOCK_ACCESS_FS_MAKE_SYM
+
+        val unsupportedErrors = mutableListOf<String>()
+
         if (abi >= 2) {
             accessMaskFs = accessMaskFs or LANDLOCK_ACCESS_FS_REFER
         } else if (policy.isSyscallAllowed(Syscall.RENAME) ||
@@ -584,24 +586,34 @@ object Landlock {
             policy.isSyscallAllowed(Syscall.LINK) ||
             policy.isSyscallAllowed(Syscall.LINKAT)
         ) {
-            throw UnsupportedOperationException(
-                "Fatal Security Error: Policy allows rename/link syscalls, but this kernel (Landlock ABI $abi) is too old to restrict them (ABI 2 / Linux 5.19+ required). Update your kernel or block these syscalls.",
+            unsupportedErrors.add(
+                "Policy allows rename/link syscalls, but this kernel (Landlock ABI $abi) is too old " +
+                        "to restrict them (ABI 2 / Linux 5.19+ required)",
             )
         }
 
         if (abi >= ABI_V3) {
             accessMaskFs = accessMaskFs or LANDLOCK_ACCESS_FS_TRUNCATE
         } else if (policy.isSyscallAllowed(Syscall.TRUNCATE) || policy.isSyscallAllowed(Syscall.FTRUNCATE)) {
-            throw UnsupportedOperationException(
-                "Fatal Security Error: Policy allows truncate syscalls, but this kernel (Landlock ABI $abi) is too old to restrict them (ABI 3 / Linux 6.2+ required). Update your kernel or block these syscalls.",
+            unsupportedErrors.add(
+                "Policy allows truncate syscalls, but this kernel (Landlock ABI $abi) is too old " +
+                        "to restrict them (ABI 3 / Linux 6.2+ required)",
             )
         }
 
         if (abi >= ABI_V5) {
             accessMaskFs = accessMaskFs or LANDLOCK_ACCESS_FS_IOCTL_DEV
         } else if (policy.isSyscallAllowed(Syscall.IOCTL)) {
+            unsupportedErrors.add(
+                "Policy allows ioctl, but this kernel (Landlock ABI $abi) is too old " +
+                        "to restrict dev ioctls (ABI 5 / Linux 6.10+ required)",
+            )
+        }
+
+        if (unsupportedErrors.isNotEmpty()) {
             throw UnsupportedOperationException(
-                "Fatal Security Error: Policy allows ioctl, but this kernel (Landlock ABI $abi) is too old to restrict dev ioctls (ABI 5 / Linux 6.10+ required). Update your kernel or block ioctl.",
+                "Fatal Security Error: ${unsupportedErrors.joinToString("; ")}. " +
+                        "Update your kernel or block these syscalls.",
             )
         }
 
