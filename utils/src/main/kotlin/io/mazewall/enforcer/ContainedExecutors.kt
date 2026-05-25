@@ -1,5 +1,6 @@
 package io.mazewall.enforcer
 
+import io.mazewall.Arch
 import io.mazewall.Platform
 import io.mazewall.Policy
 import io.mazewall.Syscall
@@ -7,6 +8,7 @@ import io.mazewall.landlock.Landlock
 import io.mazewall.seccomp.PureJavaBpfEngine
 import java.io.IOException
 import java.util.concurrent.*
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.logging.Logger
 
 /**
@@ -26,9 +28,10 @@ import java.util.logging.Logger
  * startup before containment is applied.
  */
 object ContainedExecutors {
+    private val warmedUp = AtomicBoolean(false)
+
     init {
-        // Preload detection logic to avoid NoClassDefFoundError on restricted threads
-        ContainmentViolationDetector.isContainmentViolation(Throwable(""))
+        performJitWarmup()
     }
 
     private val logger = Logger.getLogger(ContainedExecutors::class.java.name)
@@ -62,6 +65,8 @@ object ContainedExecutors {
         vararg policies: Policy,
     ) {
         checkVirtualThread()
+        performJitWarmup()
+
         val combinedPolicy = Policy.combine(*policies)
         applyLandlockIfNecessary(processWide, combinedPolicy)
 
@@ -70,6 +75,13 @@ object ContainedExecutors {
             return
         }
 
+        installSeccompFilter(processWide, combinedPolicy)
+    }
+
+    private fun installSeccompFilter(
+        processWide: Boolean,
+        combinedPolicy: Policy,
+    ) {
         synchronized(processLock) {
             val state = resolveCurrentState()
             val plan = FilterInstallationPlanner.calculateNewFilter(combinedPolicy, state)
@@ -87,6 +99,20 @@ object ContainedExecutors {
                 "Attempted to apply seccomp containment inside a virtual thread. " +
                         "Use a dedicated platform thread pool and install containment on its carrier threads instead.",
             )
+        }
+    }
+
+    private fun performJitWarmup() {
+        if (warmedUp.compareAndSet(false, true)) {
+            // Force JVM classloading and JIT compilation of core sandboxing components
+            // before containment is applied to prevent the "lazy initialization trap".
+            ContainmentViolationDetector.isContainmentViolation(Throwable(""))
+            Platform.isSupported()
+            try {
+                Arch.current()
+            } catch (e: Exception) {
+                // Ignore unsupported architecture; will be handled by platform check
+            }
         }
     }
 
