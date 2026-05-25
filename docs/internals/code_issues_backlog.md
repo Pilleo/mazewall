@@ -60,4 +60,8 @@
 
 ### 🔴 High: Implement Tier P (Privileged Profiler)
 **Context:** High-performance `io_uring` profiling currently requires either the slow `IterativeProfiler` or a performance-degrading fallback to standard I/O.
-**Needed:** A root-privileged profiler using eBPF tracepoints (`sys_enter_io_uring_setup`, etc.) or `strace` to achieve true transparent "Fast Path" profiling.
+**Needed:** A root-privileged profiler using either eBPF tracepoints (`sys_enter_io_uring_setup`, etc.) or `ptrace`/`strace` mechanisms to achieve transparent, fast-path profiling.
+**Container & Capabilities Constraints (Rootless Podman):**
+* *eBPF Tracepoints:* Because eBPF kprobes and tracepoints are global kernel-wide hooks, the host kernel requires global `CAP_BPF` and `CAP_PERFMON` in the initial (host) user namespace. In a rootless Podman setup (even with `--privileged`), the container only possesses these capabilities inside its mapped user namespace. Thus, loading eBPF tracepoint programs from a rootless container will fail with `EPERM` ("Operation not permitted"). eBPF-based profiling will require rootful Podman (host `sudo`).
+* *`ptrace` / `strace`:* Unlike eBPF, `ptrace(2)` is user-namespace aware. Inside rootless Podman, a sidecar profiler daemon mapped to the container's mapped `uid 0` has namespaced `CAP_SYS_PTRACE`. It can successfully attach to and trace the JVM worker process running in the same container.
+* *Architectural Recommendation:* Implement Tier P utilizing a `ptrace`-based daemon. This allows the profiler to run successfully in completely unprivileged, rootless developer environments by simply starting the container with namespaced tracing permissions (`--cap-add=SYS_PTRACE`), avoiding host-level `sudo` requirements while delivering safe, high-speed profiling.
