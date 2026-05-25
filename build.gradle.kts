@@ -75,14 +75,12 @@ subprojects {
                 element = "CLASS"
                 excludes =
                     listOf(
-                        "io.mazewall.profiler.ProfilerDaemon*",
                         "io.mazewall.seccomp.SeccompEngine*",
-                        "io.mazewall.profiler.IterativeProfiler*",
-                        "io.mazewall.Arch*",
                         "io.mazewall.Platform*",
-                        "io.mazewall.profiler.Profiler*",
-                        "io.mazewall.landlock.Landlock*",
                         "io.mazewall.seccomp.PureJavaBpfEngine*",
+                        "io.mazewall.profiler.Profiler*",
+                        "io.mazewall.Arch*",
+                        "io.mazewall.landlock.Landlock*",
                     )
                 limit {
                     counter = "INSTRUCTION"
@@ -90,27 +88,48 @@ subprojects {
                     minimum = "0.80".toBigDecimal()
                 }
             }
+            // Landlock must meet 78% instruction coverage (actual: 80.17%)
+            rule {
+                element = "CLASS"
+                includes = listOf("io.mazewall.landlock.Landlock*")
+                limit {
+                    counter = "INSTRUCTION"
+                    value = "COVEREDRATIO"
+                    minimum = "0.78".toBigDecimal()
+                }
+            }
+            // Platform and Arch must meet 75% instruction coverage (actual Platform: 79.53%, Arch: 79.63%)
             rule {
                 element = "CLASS"
                 includes =
                     listOf(
-                        "io.mazewall.landlock.Landlock*",
-                        "io.mazewall.seccomp.PureJavaBpfEngine*",
                         "io.mazewall.Platform*",
+                        "io.mazewall.Arch*",
                     )
                 limit {
                     counter = "INSTRUCTION"
                     value = "COVEREDRATIO"
-                    minimum = "0.60".toBigDecimal()
+                    minimum = "0.75".toBigDecimal()
                 }
             }
+            // PureJavaBpfEngine must meet 70% instruction coverage (actual: 73.13%)
             rule {
                 element = "CLASS"
-                includes = listOf("io.mazewall.Arch*")
+                includes = listOf("io.mazewall.seccomp.PureJavaBpfEngine*")
                 limit {
                     counter = "INSTRUCTION"
                     value = "COVEREDRATIO"
-                    minimum = "0.40".toBigDecimal()
+                    minimum = "0.70".toBigDecimal()
+                }
+            }
+            // Profiler must meet 60% instruction coverage (actual lowest inner class is 62.65%)
+            rule {
+                element = "CLASS"
+                includes = listOf("io.mazewall.profiler.Profiler*")
+                limit {
+                    counter = "INSTRUCTION"
+                    value = "COVEREDRATIO"
+                    minimum = "0.60".toBigDecimal()
                 }
             }
         }

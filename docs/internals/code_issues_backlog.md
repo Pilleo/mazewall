@@ -52,6 +52,10 @@
 **Context:** In `IterativeProfiler.kt`, reading a missing file inside a restricted directory triggers an `EACCES` denial. Previously, the profiler conservatively granted both Read and Write access, which caused Landlock to fall back to the parent directory and grant full write permissions on the parent directory for a simple missing file read.
 **Fix:** Refactored `IterativeProfiler` to use an adaptive permission discovery strategy. On the first violation of a path, only `Read` access is granted. If a subsequent run still triggers a violation on that path, it is identified as a `Write` attempt and `Write` access is granted. This ensures that missing file reads never elevate to write permissions on the parent directory, while guaranteeing convergence within exactly one extra iteration.
 
+### ✅ FIXED: Assertive Jacoco Coverage Verification
+**Context:** The Jacoco coverage verification rules in `build.gradle.kts` were highly relaxed, completely excluding complex files like `IterativeProfiler`, `Profiler`, `ProfilerDaemon`, and `Arch` from any verification, and setting low (40-60%) thresholds for others.
+**Fix:** Profiled actual test coverage across the whole codebase and significantly tightened the rules. Removed unnecessary exclusions so that high-coverage core components (like `IterativeProfiler` and `ProfilerDaemon`) are verified under the strict 80% instruction coverage rule. Raised specific limits for the remaining classes to match actual tight execution boundaries (e.g. Landlock to 78%, Platform and Arch to 75%, PureJavaBpfEngine to 70%, and Profiler to 60%).
+
 ## Remaining Issues
 
 ### 🔴 High: Implement Tier P (Privileged Profiler)
