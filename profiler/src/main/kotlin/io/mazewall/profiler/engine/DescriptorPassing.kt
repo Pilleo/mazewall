@@ -1,4 +1,4 @@
-package io.mazewall.profiler
+package io.mazewall.profiler.engine
 
 import io.mazewall.LinuxNative
 import java.lang.foreign.Arena

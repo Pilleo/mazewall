@@ -1,6 +1,8 @@
-package io.mazewall.profiler
+package io.mazewall.profiler.strace
 
 import io.mazewall.Syscall
+import io.mazewall.profiler.BillOfBehavior
+import io.mazewall.profiler.TraceableWorkload
 import java.io.File
 
 /**
@@ -30,7 +32,7 @@ object StraceProfiler {
             javaBin,
             "-cp",
             classpath,
-            "io.mazewall.profiler.StraceWorkloadRunner",
+            "io.mazewall.profiler.strace.StraceWorkloadRunner",
             workloadClass.name,
         )
 

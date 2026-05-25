@@ -1,9 +1,8 @@
-package io.mazewall.landlock
+package io.mazewall.profiler.iterative
 
 import io.mazewall.EnabledIfLinuxAndSupported
 import io.mazewall.Policy
 import io.mazewall.Syscall
-import io.mazewall.profiler.IterativeProfiler
 import org.junit.jupiter.api.Test
 import java.io.File
 import kotlin.test.assertTrue

@@ -2,6 +2,7 @@ package io.mazewall.profiler
 
 import io.mazewall.Policy
 import io.mazewall.Syscall
+import io.mazewall.profiler.engine.TraceEvent
 import java.io.InputStream
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files

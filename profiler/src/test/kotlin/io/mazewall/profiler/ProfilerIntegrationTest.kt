@@ -5,6 +5,7 @@ import io.mazewall.EnabledIfLinuxAndSupported
 import io.mazewall.LinuxNative
 import io.mazewall.Policy
 import io.mazewall.Syscall
+import io.mazewall.profiler.compiler.BobCompiler
 import org.junit.jupiter.api.Test
 import java.io.File
 import java.util.concurrent.Callable

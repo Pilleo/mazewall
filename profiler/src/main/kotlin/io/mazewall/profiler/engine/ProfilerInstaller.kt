@@ -1,9 +1,10 @@
-package io.mazewall.profiler
+package io.mazewall.profiler.engine
 
 import io.mazewall.Arch
 import io.mazewall.BpfFilter
 import io.mazewall.LinuxNative
 import io.mazewall.Policy
+import io.mazewall.profiler.Profiler
 import java.io.IOException
 import java.lang.foreign.Arena
 import java.lang.foreign.ValueLayout

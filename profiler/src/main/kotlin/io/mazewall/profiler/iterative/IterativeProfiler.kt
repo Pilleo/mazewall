@@ -1,4 +1,4 @@
-package io.mazewall.profiler
+package io.mazewall.profiler.iterative
 
 import io.mazewall.Policy
 import io.mazewall.enforcer.ContainedExecutors

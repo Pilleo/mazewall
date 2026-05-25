@@ -2,6 +2,10 @@ package io.mazewall.profiler
 
 import io.mazewall.LinuxNative
 import io.mazewall.Policy
+import io.mazewall.profiler.compiler.BobCompiler
+import io.mazewall.profiler.engine.DescriptorPassing
+import io.mazewall.profiler.engine.ProfilerInstaller
+import io.mazewall.profiler.engine.TraceEvent
 import java.io.BufferedInputStream
 import java.io.DataInputStream
 import java.io.IOException
@@ -503,7 +507,7 @@ object Profiler {
         }
         pbArgs.add("-cp")
         pbArgs.add(classpath)
-        pbArgs.add("io.mazewall.profiler.ProfilerDaemon")
+        pbArgs.add("io.mazewall.profiler.engine.ProfilerDaemon")
         pbArgs.add(socketPath)
 
         val pb = ProcessBuilder(pbArgs)

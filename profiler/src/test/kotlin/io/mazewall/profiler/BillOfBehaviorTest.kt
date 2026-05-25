@@ -1,6 +1,7 @@
 package io.mazewall.profiler
 
 import io.mazewall.Syscall
+import io.mazewall.profiler.engine.TraceEvent
 import org.junit.jupiter.api.Test
 import java.nio.file.Files
 import kotlin.test.assertEquals

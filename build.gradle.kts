@@ -136,7 +136,11 @@ subprojects {
                 // Profiler must meet 60% instruction coverage (actual lowest inner class is 62.65%)
                 rule {
                     element = "CLASS"
-                    includes = listOf("io.mazewall.profiler.Profiler*")
+                    includes =
+                        listOf(
+                            "io.mazewall.profiler.Profiler*",
+                            "io.mazewall.profiler.engine.Profiler*",
+                        )
                     limit {
                         counter = "INSTRUCTION"
                         value = "COVEREDRATIO"

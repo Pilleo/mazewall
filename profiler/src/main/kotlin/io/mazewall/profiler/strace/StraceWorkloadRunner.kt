@@ -1,4 +1,6 @@
-package io.mazewall.profiler
+package io.mazewall.profiler.strace
+
+import io.mazewall.profiler.TraceableWorkload
 
 /**
  * Subprocess entry point for the [StraceProfiler].

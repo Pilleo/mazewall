@@ -1,7 +1,8 @@
-package io.mazewall.profiler
+package io.mazewall.profiler.strace
 
 import io.mazewall.EnabledIfLinuxAndSupported
 import io.mazewall.Syscall
+import io.mazewall.profiler.TraceableWorkload
 import org.junit.jupiter.api.Test
 import java.io.File
 import java.net.ServerSocket

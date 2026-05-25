@@ -1,4 +1,4 @@
-package io.mazewall.profiler
+package io.mazewall.profiler.engine
 
 import org.junit.jupiter.api.Test
 import kotlin.test.assertEquals
