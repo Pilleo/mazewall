@@ -31,6 +31,10 @@
 
 ## Remaining Issues
 
+### 🔴 Critical: Profiler Connection Failure Deadlocks JVM Thread
+**Context:** In `ProfilerInstaller.kt`, `connectWithRetry` is called outside the `try { ... } finally { ... }` block that closes the listener file descriptor `fd`. If `connectWithRetry` throws an exception (e.g., due to connection timeout or retry failure), the listener FD is leaked and never closed. Since the seccomp profiling filter has already been successfully installed on the worker thread, any subsequent system call on the worker thread (such as `proceedLatch.await()`, which invokes `futex`) will block permanently waiting for a daemon response that will never come, resulting in a fatal JVM deadlock.
+**Needed:** Wrap the coordinator logic in a try-finally that guarantees the listener FD is closed if connection fails, or close the FD immediately when the coordinator thread encounters any uncaught exception before entering the main loop.
+
 ### 🔴 High: Landlock Path Fallback Over-Permission
 **Context:** In `IterativeProfiler.kt`, reading a missing file inside a restricted directory triggers an `EACCES` denial. The profiler conservatively grants both Read and Write access. When `Landlock.kt` processes this rule, it falls back to applying the rule to the parent directory, resulting in full write access to the parent.
 **Needed:** Re-evaluate the `IterativeProfiler` fallback strategy or explicitly handle missing files before passing them to Landlock.

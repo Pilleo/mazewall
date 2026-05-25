@@ -92,9 +92,10 @@ internal object ProfilerInstaller {
             throw err
         }
 
-        val socketFd = connectWithRetry(socketPath)
+        var socketFd = -1
         var success = false
         try {
+            socketFd = connectWithRetry(socketPath)
             val sent = Profiler.sendDescriptorInternal(socketFd, fd)
             if (!sent) {
                 throw IllegalStateException("Failed to send seccomp listener FD to daemon")
@@ -107,7 +108,9 @@ internal object ProfilerInstaller {
             success = true
         } finally {
             if (!success) {
-                LinuxNative.close(socketFd)
+                if (socketFd != -1) {
+                    LinuxNative.close(socketFd)
+                }
             }
             LinuxNative.close(fd)
         }

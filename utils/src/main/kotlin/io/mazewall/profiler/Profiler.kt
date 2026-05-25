@@ -492,15 +492,22 @@ object Profiler {
         // Spawn Daemon
         val javaBin = System.getProperty("java.home") + "/bin/java"
         val classpath = System.getProperty("java.class.path")
-        val pb =
-            ProcessBuilder(
-                javaBin,
-                "--enable-native-access=ALL-UNNAMED",
-                "-cp",
-                classpath,
-                "io.mazewall.profiler.ProfilerDaemon",
-                socketPath,
-            )
+
+        val jvmArgs = java.lang.management.ManagementFactory.getRuntimeMXBean().inputArguments
+        val jacocoAgent = jvmArgs.find { it.startsWith("-javaagent:") && it.contains("jacoco") }
+
+        val pbArgs = mutableListOf<String>()
+        pbArgs.add(javaBin)
+        pbArgs.add("--enable-native-access=ALL-UNNAMED")
+        if (jacocoAgent != null) {
+            pbArgs.add(jacocoAgent)
+        }
+        pbArgs.add("-cp")
+        pbArgs.add(classpath)
+        pbArgs.add("io.mazewall.profiler.ProfilerDaemon")
+        pbArgs.add(socketPath)
+
+        val pb = ProcessBuilder(pbArgs)
         val daemonProcess = pb.start()
         val daemonPid = daemonProcess.pid()
 
