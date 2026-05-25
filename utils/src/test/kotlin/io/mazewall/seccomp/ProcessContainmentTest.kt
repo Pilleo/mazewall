@@ -206,4 +206,12 @@ class ProcessContainmentTest {
     fun `thread-local installation respects filter depth`() {
         IsolatedProcessTester.runIsolatedTest("io.mazewall.seccomp.SeccompIsolatedTestApp", "thread-depth")
     }
+
+    @Test
+    fun `installOnProcess throws UnsupportedOperationException if policy has Landlock rules`() {
+        val policyWithFs = Policy.builder().allowFsRead("/etc").build()
+        org.junit.jupiter.api.assertThrows<UnsupportedOperationException> {
+            ContainedExecutors.installOnProcess(policyWithFs)
+        }
+    }
 }

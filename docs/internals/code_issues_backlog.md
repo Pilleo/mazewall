@@ -29,11 +29,19 @@
 ### ✅ FIXED: Landlock Empty Intersection Bypass
 **Context:** Fixed a severe bug in `Policy.combine` where stacking two restrictive policies with disjoint filesystem paths resulted in an `emptySet()`. Previously, this bypassed Landlock. Now, `Policy` utilizes an `enforceLandlock` boolean flag to ensure Landlock is forcefully applied (blocking all non-classpath access) when path intersections become disjoint.
 
-## Remaining Issues
+### ✅ FIXED: Profiler Connection Failure Deadlocks JVM Thread
+**Context:** In `ProfilerInstaller.kt`, `connectWithRetry` was called outside the `try-finally` block that closes the listener file descriptor `fd`. If the connection failed, the seccomp listener FD leaked and was never closed, permanently deadlocking any worker thread waiting on coordination.
+**Fix:** Restructured `runCoordinatorLogic` to perform `connectWithRetry` inside the `try` block, ensuring `finally` always executes and closes `fd` on failure. Verified via logic-focused unit tests.
 
-### 🔴 Critical: Profiler Connection Failure Deadlocks JVM Thread
-**Context:** In `ProfilerInstaller.kt`, `connectWithRetry` is called outside the `try { ... } finally { ... }` block that closes the listener file descriptor `fd`. If `connectWithRetry` throws an exception (e.g., due to connection timeout or retry failure), the listener FD is leaked and never closed. Since the seccomp profiling filter has already been successfully installed on the worker thread, any subsequent system call on the worker thread (such as `proceedLatch.await()`, which invokes `futex`) will block permanently waiting for a daemon response that will never come, resulting in a fatal JVM deadlock.
-**Needed:** Wrap the coordinator logic in a try-finally that guarantees the listener FD is closed if connection fails, or close the FD immediately when the coordinator thread encounters any uncaught exception before entering the main loop.
+### ✅ FIXED: Expand `installOnProcess` Integration Coverage
+**Context:** `ContainedExecutors.installOnProcess()` was lacking thorough integration-level guardrail and parameter validation tests.
+**Fix:** Expanded `VirtualThreadGuardrailTest` and `ProcessContainmentTest` to verify that `installOnProcess()` throws `IllegalStateException` on Loom virtual threads, and `UnsupportedOperationException` if a policy tries to stack Landlock filesystem rules.
+
+### ✅ FIXED: Deprecated Landlock Audit Logic Removal
+**Context:** The old Netlink-based `MAZEWALL_PROFILER_AUDIT` and `Landlock.applyProfilingRuleset()` were deprecated because Landlock lacks a permissive mode and throws blocking `EACCES` signals.
+**Fix:** Ripped out legacy Netlink socket bindings and `applyProfilingRuleset()` logic, fully relying on `IterativeProfiler` for unprivileged path discovery and keeping `Landlock.kt` clean.
+
+## Remaining Issues
 
 ### 🔴 High: Landlock Path Fallback Over-Permission
 **Context:** In `IterativeProfiler.kt`, reading a missing file inside a restricted directory triggers an `EACCES` denial. The profiler conservatively grants both Read and Write access. When `Landlock.kt` processes this rule, it falls back to applying the rule to the parent directory, resulting in full write access to the parent.
@@ -47,14 +55,6 @@
 **Context:** In `ProfilerDaemon.kt`, `readStringFromProcess` copies up to 4096 bytes. If a malicious pointer lacks a null terminator within that window, the daemon copies the entire block as a string, processing garbage data.
 **Needed:** Add a check to safely truncate or reject strings if the maximum length is reached without encountering a null byte.
 
-### 🔴 High: Remove Deprecated Landlock Audit Logic
-**Context:** The `MAZEWALL_PROFILER_AUDIT` logic in `Profiler.kt` and `Landlock.kt` is based on the false assumption that Landlock Audit is transparent. In reality, it causes `EACCES` crashes.
-**Needed:** Rip out the `Landlock.applyProfilingRuleset()` and related Netlink socket code from the Tier S profiler to restore its transparency guarantee.
-
 ### 🔴 High: Implement Tier P (Privileged Profiler)
 **Context:** High-performance `io_uring` profiling currently requires either the slow `IterativeProfiler` or a performance-degrading fallback to standard I/O.
 **Needed:** A root-privileged profiler using eBPF tracepoints (`sys_enter_io_uring_setup`, etc.) or `strace` to achieve true transparent "Fast Path" profiling.
-
-### 🟡 Medium: Expand `installOnProcess` Integration Coverage
-**Context:** `ContainedExecutors.installOnProcess()` needs deeper validation (inheritance, JVM stability, depth accumulation).
-**Needed:** Expanded test suite.

@@ -63,4 +63,23 @@ class VirtualThreadGuardrailTest {
             vExecutor.shutdown()
         }
     }
+
+    @Test
+    fun `installOnProcess throws IllegalStateException on virtual thread`() {
+        val executor = Executors.newVirtualThreadPerTaskExecutor()
+        try {
+            val future =
+                executor.submit {
+                    ContainedExecutors.installOnProcess(Policy.NO_EXEC)
+                }
+            val exception =
+                assertFailsWith<ExecutionException> {
+                    future.get()
+                }
+            assertTrue(exception.cause is IllegalStateException)
+            assertTrue(exception.cause!!.message!!.contains("virtual thread"))
+        } finally {
+            executor.shutdown()
+        }
+    }
 }
