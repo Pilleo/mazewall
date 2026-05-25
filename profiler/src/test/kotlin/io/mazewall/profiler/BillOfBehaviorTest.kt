@@ -2,6 +2,7 @@ package io.mazewall.profiler
 
 import io.mazewall.Syscall
 import org.junit.jupiter.api.Test
+import java.nio.file.Files
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
@@ -145,5 +146,82 @@ class BillOfBehaviorTest {
         assertFalse(dsl.contains(".allowFsRead(\"/tmp\")"))
         assertTrue(dsl.contains(".allowFsWrite(\"/var/log/app.log\")"))
         assertFalse(dsl.contains(".allowFsWrite(\"/var/log\")"))
+    }
+
+    @Test
+    fun `test JSON serialization and deserialization roundtrip`() {
+        val bob =
+            BillOfBehavior(
+                opens = setOf("/home/user/read1", "/home/user/read2"),
+                fsWritePaths = setOf("/home/user/write1"),
+                syscalls = setOf(Syscall.OPEN, Syscall.CONNECT),
+                execs = setOf("/bin/ls", "/bin/sh"),
+            )
+
+        val json = bob.toJson()
+        val parsed = BillOfBehavior.fromJson(json)
+
+        assertEquals(bob.opens, parsed.opens)
+        assertEquals(bob.fsWritePaths, parsed.fsWritePaths)
+        assertEquals(bob.syscalls, parsed.syscalls)
+        assertEquals(bob.execs, parsed.execs)
+    }
+
+    @Test
+    fun `test JSON serialization auto-prunes redundant paths`() {
+        val bob =
+            BillOfBehavior(
+                opens = setOf(
+                    "/home",
+                    "/home/leanid",
+                    "/home/leanid/.sdkman",
+                    "/tmp/config.json",
+                    "/tmp",
+                ),
+                fsWritePaths = setOf(
+                    "/var/log",
+                    "/var/log/app.log",
+                ),
+                syscalls = setOf(Syscall.OPEN),
+            )
+
+        val json = bob.toJson()
+        val parsed = BillOfBehavior.fromJson(json)
+
+        // Verifying that they are pruned losslessly!
+        assertEquals(setOf("/home/leanid/.sdkman", "/tmp/config.json"), parsed.opens)
+        assertEquals(setOf("/var/log/app.log"), parsed.fsWritePaths)
+        assertEquals(setOf(Syscall.OPEN), parsed.syscalls)
+    }
+
+    @Test
+    fun `test loading from file and stream`() {
+        val bob =
+            BillOfBehavior(
+                opens = setOf("/home/user/read"),
+                fsWritePaths = setOf("/home/user/write"),
+                syscalls = setOf(Syscall.OPEN),
+            )
+
+        val tempFile = Files.createTempFile("bob_test", ".json")
+        try {
+            Files.writeString(tempFile, bob.toJson())
+
+            // Test fromFile
+            val fromFileBob = BillOfBehavior.fromFile(tempFile)
+            assertEquals(bob.opens, fromFileBob.opens)
+            assertEquals(bob.fsWritePaths, fromFileBob.fsWritePaths)
+            assertEquals(bob.syscalls, fromFileBob.syscalls)
+
+            // Test fromStream
+            Files.newInputStream(tempFile).use { stream ->
+                val fromStreamBob = BillOfBehavior.fromStream(stream)
+                assertEquals(bob.opens, fromStreamBob.opens)
+                assertEquals(bob.fsWritePaths, fromStreamBob.fsWritePaths)
+                assertEquals(bob.syscalls, fromStreamBob.syscalls)
+            }
+        } finally {
+            Files.deleteIfExists(tempFile)
+        }
     }
 }

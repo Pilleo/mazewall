@@ -2,6 +2,9 @@ package io.mazewall.profiler
 
 import io.mazewall.Policy
 import io.mazewall.Syscall
+import java.io.InputStream
+import java.nio.charset.StandardCharsets
+import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.Paths
 
@@ -169,5 +172,112 @@ data class BillOfBehavior(
             execs = execs + other.execs,
             stackProfile = mergedStackProfile,
         )
+    }
+
+    /**
+     * Serializes this Bill of Behavior into a clean SBoB JSON string.
+     */
+    fun toJson(): String {
+        val sb = java.lang.StringBuilder()
+        sb.append("{\n")
+
+        sb.append("  \"opens\": [\n")
+        val prunedOpens = pruneSubpaths(opens).sorted()
+        sb.append(prunedOpens.joinToString(",\n") { "    \"${escapeJson(it)}\"" })
+        sb.append("\n  ],\n")
+
+        sb.append("  \"fsWritePaths\": [\n")
+        val prunedWrites = pruneSubpaths(fsWritePaths).sorted()
+        sb.append(prunedWrites.joinToString(",\n") { "    \"${escapeJson(it)}\"" })
+        sb.append("\n  ],\n")
+
+        sb.append("  \"syscalls\": [\n")
+        val sortedSyscalls = syscalls.sortedBy { it.name }
+        sb.append(sortedSyscalls.joinToString(",\n") { "    \"${it.name}\"" })
+        sb.append("\n  ],\n")
+
+        sb.append("  \"execs\": [\n")
+        val sortedExecs = execs.sorted()
+        sb.append(sortedExecs.joinToString(",\n") { "    \"${escapeJson(it)}\"" })
+        sb.append("\n  ]\n")
+
+        sb.append("}")
+        return sb.toString()
+    }
+
+    private fun escapeJson(str: String): String {
+        return str.replace("\\", "\\\\").replace("\"", "\\\"")
+    }
+
+    companion object {
+        /**
+         * Parses a Bill of Behavior from a Path pointing to an SBoB JSON file.
+         */
+        fun fromFile(path: Path): BillOfBehavior {
+            return fromJson(Files.readString(path))
+        }
+
+        /**
+         * Parses a Bill of Behavior from a JSON input stream.
+         */
+        fun fromStream(stream: InputStream): BillOfBehavior {
+            val content = stream.bufferedReader(StandardCharsets.UTF_8).use { it.readText() }
+            return fromJson(content)
+        }
+
+        /**
+         * Parses a Bill of Behavior from an SBoB JSON string.
+         */
+        fun fromJson(json: String): BillOfBehavior {
+            val opens = parseJsonStringArray(json, "opens")
+            val fsWritePaths = parseJsonStringArray(json, "fsWritePaths")
+            val syscallNames = parseJsonStringArray(json, "syscalls")
+            val execs = parseJsonStringArray(json, "execs")
+
+            val mappedSyscalls = syscallNames.mapNotNull { name ->
+                try {
+                    Syscall.valueOf(name.uppercase())
+                } catch (ignored: Exception) {
+                    null
+                }
+            }
+            val syscalls = mappedSyscalls.toSet()
+
+            return BillOfBehavior(
+                opens = opens,
+                fsWritePaths = fsWritePaths,
+                syscalls = syscalls,
+                execs = execs,
+            )
+        }
+
+        private fun parseJsonStringArray(
+            json: String,
+            key: String,
+        ): Set<String> {
+            val index = json.indexOf("\"$key\"")
+            val openBracket = if (index != -1) json.indexOf("[", index) else -1
+            val closeBracket = if (openBracket != -1) json.indexOf("]", openBracket) else -1
+
+            if (closeBracket != -1) {
+                val arrayContent = json.substring(openBracket + 1, closeBracket)
+                if (arrayContent.isNotBlank()) {
+                    return parseStringArrayContent(arrayContent)
+                }
+            }
+            return emptySet()
+        }
+
+        private fun parseStringArrayContent(arrayContent: String): Set<String> {
+            val result = mutableSetOf<String>()
+            val regex = "\"([^\"\\\\]|\\\\.)*\"".toRegex()
+            for (match in regex.findAll(arrayContent)) {
+                val value = match.value
+                val contentOnly = value.substring(1, value.length - 1)
+                val unescaped = contentOnly.replace("\\\"", "\"").replace("\\\\", "\\")
+                result.add(unescaped)
+            }
+            return result
+        }
     }
 }
