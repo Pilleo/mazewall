@@ -28,13 +28,13 @@ import io.mazewall.Policy.Companion.combine
  * ```
  */
 class Policy private constructor(
-    internal val syscalls: Set<Syscall>,
+    val syscalls: Set<Syscall>,
     val mode: Mode = Mode.DENY_LIST,
-    internal val allowMmapExec: Boolean = false,
-    internal val allowNonThreadClone: Boolean = false,
-    internal val allowUnsafePrctl: Boolean = false,
-    internal val allowedFsReadPaths: Set<String> = emptySet(),
-    internal val allowedFsWritePaths: Set<String> = emptySet(),
+    val allowMmapExec: Boolean = false,
+    val allowNonThreadClone: Boolean = false,
+    val allowUnsafePrctl: Boolean = false,
+    val allowedFsReadPaths: Set<String> = emptySet(),
+    val allowedFsWritePaths: Set<String> = emptySet(),
     internal val enforceLandlock: Boolean = false,
 ) {
     enum class Mode {

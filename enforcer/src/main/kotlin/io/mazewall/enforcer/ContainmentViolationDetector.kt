@@ -3,13 +3,10 @@ package io.mazewall.enforcer
 import java.io.IOException
 import java.nio.file.AccessDeniedException
 
-/**
- * Internal helper for detecting containment violations in exceptions.
- */
-internal object ContainmentViolationDetector {
+object ContainmentViolationDetector {
     private val ERRNO_VIOLATION_REGEX = Regex("""\berror[=:]\s*(1|13)\b""")
 
-    internal val DENIED_PHRASES = arrayOf(
+    val DENIED_PHRASES = arrayOf(
         "Operation not permitted",
         "Permission denied",
         "refusé",

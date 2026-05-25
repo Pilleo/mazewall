@@ -19,6 +19,7 @@ import kotlin.system.exitProcess
  * Communicates with the parent JVM via a Unix Domain Socket, sending binary [TraceEvent]
  * structures.
  */
+@Suppress("TooManyFunctions")
 object ProfilerDaemon {
     private val syscallMap = mutableMapOf<Int, String>()
     private val clientSockets = CopyOnWriteArrayList<Int>()
