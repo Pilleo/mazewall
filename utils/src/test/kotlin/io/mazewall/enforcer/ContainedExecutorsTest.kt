@@ -186,4 +186,95 @@ class ContainedExecutorsTest {
             }
         assertTrue(ex.message!!.contains("does not support Landlock filesystem rules"))
     }
+
+    @Test
+    @EnabledIfLinuxAndSupported
+    fun `test hierarchical Landlock stacking success`() {
+        val executor = Executors.newSingleThreadExecutor()
+        try {
+            val future = executor.submit(java.util.concurrent.Callable {
+                // 1. Install base policy allowing /tmp
+                val basePolicy = Policy.builder().allowFsRead("/tmp").build()
+                ContainedExecutors.installOnCurrentThread(basePolicy)
+                
+                // 2. Install nested policy allowing /tmp/foo (valid subset)
+                val nestedPolicy = Policy.builder().allowFsRead("/tmp/foo").build()
+                ContainedExecutors.installOnCurrentThread(nestedPolicy)
+                "success"
+            })
+            assertEquals("success", future.get())
+        } finally {
+            executor.shutdown()
+        }
+    }
+
+    @Test
+    @EnabledIfLinuxAndSupported
+    fun `test hierarchical Landlock stacking failure on expansion`() {
+        val executor = Executors.newSingleThreadExecutor()
+        try {
+            val future = executor.submit {
+                // 1. Install base policy allowing /tmp
+                val basePolicy = Policy.builder().allowFsRead("/tmp").build()
+                ContainedExecutors.installOnCurrentThread(basePolicy)
+                
+                // 2. Install nested policy allowing /etc (illegal expansion)
+                val nestedPolicy = Policy.builder().allowFsRead("/etc").build()
+                ContainedExecutors.installOnCurrentThread(nestedPolicy)
+            }
+            
+            val ex = assertFailsWith<ExecutionException> {
+                future.get()
+            }
+            assertTrue(ex.cause is IllegalStateException, "Expected IllegalStateException, got ${ex.cause}")
+            assertTrue(ex.cause!!.message!!.contains("Cannot expand Landlock filesystem permissions"))
+        } finally {
+            executor.shutdown()
+        }
+    }
+
+    @Test
+    @EnabledIfLinuxAndSupported
+    fun `test hierarchical Landlock stacking failure on component boundary mismatch`() {
+        val executor = Executors.newSingleThreadExecutor()
+        try {
+            val future = executor.submit {
+                // 1. Install base policy allowing /tmp
+                val basePolicy = Policy.builder().allowFsRead("/tmp").build()
+                ContainedExecutors.installOnCurrentThread(basePolicy)
+                
+                // 2. Install nested policy allowing /tmp-foo (incorrect component boundary)
+                val nestedPolicy = Policy.builder().allowFsRead("/tmp-foo").build()
+                ContainedExecutors.installOnCurrentThread(nestedPolicy)
+            }
+            
+            val ex = assertFailsWith<ExecutionException> {
+                future.get()
+            }
+            assertTrue(ex.cause is IllegalStateException)
+            assertTrue(ex.cause!!.message!!.contains("Cannot expand Landlock filesystem permissions"))
+        } finally {
+            executor.shutdown()
+        }
+    }
+
+    @Test
+    @EnabledIfLinuxAndSupported
+    fun `test hierarchical Landlock stacking identical paths`() {
+        val executor = Executors.newSingleThreadExecutor()
+        try {
+            val future = executor.submit(java.util.concurrent.Callable {
+                val basePolicy = Policy.builder().allowFsRead("/tmp").build()
+                ContainedExecutors.installOnCurrentThread(basePolicy)
+                
+                // Nesting the identical policy should succeed
+                ContainedExecutors.installOnCurrentThread(basePolicy)
+                "success"
+            })
+            assertEquals("success", future.get())
+        } finally {
+            executor.shutdown()
+        }
+    }
 }
+

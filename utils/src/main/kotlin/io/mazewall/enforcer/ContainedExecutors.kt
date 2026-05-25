@@ -137,14 +137,8 @@ object ContainedExecutors {
             val prevReads = appliedReads ?: emptySet()
             val prevWrites = appliedWrites ?: emptySet()
 
-            // TODO(Bug): Hierarchical Rule Stacking Bug
-            // This verification incorrectly uses exact string matching (`containsAll`).
-            // In Landlock, if a thread already allows `/tmp` (which implies access to all descendants),
-            // and a nested task requests `/tmp/foo`, this evaluates to false and throws an exception,
-            // incorrectly preventing valid, restrictive Landlock rule stacking.
-            // It should perform a `startsWith`-based subset check instead.
-            val hasNewReads = !prevReads.containsAll(policy.allowedFsReadPaths)
-            val hasNewWrites = !prevWrites.containsAll(policy.allowedFsWritePaths)
+            val hasNewReads = !isPathSubset(prevReads, policy.allowedFsReadPaths)
+            val hasNewWrites = !isPathSubset(prevWrites, policy.allowedFsWritePaths)
             if (hasNewReads || hasNewWrites) {
                 throw IllegalStateException("Cannot expand Landlock filesystem permissions on an already restricted thread.")
             }
@@ -154,6 +148,16 @@ object ContainedExecutors {
             Landlock.applyRuleset(policy)
             ContainerStateRegistry.THREAD_LANDLOCK_APPLIED_READS.set(policy.allowedFsReadPaths)
             ContainerStateRegistry.THREAD_LANDLOCK_APPLIED_WRITES.set(policy.allowedFsWritePaths)
+        }
+    }
+
+    private fun isPathSubset(parentPaths: Set<String>, childPaths: Set<String>): Boolean {
+        if (childPaths.isEmpty()) return true
+        if (parentPaths.isEmpty()) return false
+        val parents = parentPaths.map { java.nio.file.Paths.get(it).toAbsolutePath().normalize() }
+        return childPaths.all { childStr ->
+            val child = java.nio.file.Paths.get(childStr).toAbsolutePath().normalize()
+            parents.any { parent -> child.startsWith(parent) }
         }
     }
 

@@ -40,16 +40,15 @@
 ### ✅ FIXED: Deprecated Landlock Audit Logic Removal
 **Context:** The old Netlink-based `MAZEWALL_PROFILER_AUDIT` and `Landlock.applyProfilingRuleset()` were deprecated because Landlock lacks a permissive mode and throws blocking `EACCES` signals.
 **Fix:** Ripped out legacy Netlink socket bindings and `applyProfilingRuleset()` logic, fully relying on `IterativeProfiler` for unprivileged path discovery and keeping `Landlock.kt` clean.
+### ✅ FIXED: Hierarchical Rule Stacking Validation
+**Context:** In `ContainedExecutors.kt`, the check to prevent expanding existing Landlock permissions was using exact string matching (`containsAll`). This incorrectly threw an exception if a nested task requested a valid sub-path (e.g., `/tmp/foo` when `/tmp` was already allowed).
+**Fix:** Replaced exact string matching with a robust `java.nio.file.Path`-based subset path evaluation using component-level startsWith. Added extensive unit testing to cover identical stacking, sub-path nesting, component boundaries, and expansion detection.
 
 ## Remaining Issues
 
 ### 🔴 High: Landlock Path Fallback Over-Permission
 **Context:** In `IterativeProfiler.kt`, reading a missing file inside a restricted directory triggers an `EACCES` denial. The profiler conservatively grants both Read and Write access. When `Landlock.kt` processes this rule, it falls back to applying the rule to the parent directory, resulting in full write access to the parent.
 **Needed:** Re-evaluate the `IterativeProfiler` fallback strategy or explicitly handle missing files before passing them to Landlock.
-
-### 🟡 Medium: Hierarchical Rule Stacking Validation
-**Context:** In `ContainedExecutors.kt`, the check to prevent expanding existing Landlock permissions uses exact string matching (`containsAll`). This incorrectly throws an exception if a nested task requests a valid sub-path (e.g., `/tmp/foo` when `/tmp` is already allowed).
-**Needed:** Replace exact string matching with a `startsWith`-based subset path evaluation.
 
 ### 🟡 Medium: Profiler Daemon Missing Null-Terminator Bounding
 **Context:** In `ProfilerDaemon.kt`, `readStringFromProcess` copies up to 4096 bytes. If a malicious pointer lacks a null terminator within that window, the daemon copies the entire block as a string, processing garbage data.
