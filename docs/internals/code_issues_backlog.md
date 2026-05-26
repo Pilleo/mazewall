@@ -79,3 +79,7 @@
 **Context:** During the vulnerable-app demo, XStream triggered a `VerifyError: Could not link verifier` on protected threads. This was resolved by adding `allowMmapExec()` to the thread-scoped policy.
 **Needed:** Document that `allowMmapExec()` (allowing `PROT_EXEC` on `mmap`) is a prerequisite for some JVM native linking operations, even if the thread doesn't intend to execute its own shellcode.
 
+### 🔴 [Severity: High]: Process-wide `Policy.NO_EXEC` causes JVM crash even after warmup
+**Context:** Even after the application has fully started (e.g., after `ApplicationReadyEvent`), the JVM JIT compiler and native library loaders (like Tomcat native) continue to require `mmap` with `PROT_EXEC`. Applying the strict `NO_EXEC` preset process-wide results in a fatal JVM crash (`os::commit_memory failed; error='Operation not permitted' (errno=1)`) when the JVM attempts to optimize code or link dynamic libraries during request processing.
+**Needed:** Recommend or default to a "Balanced Baseline" for Tier 1 process-wide protection that allows `mmap(PROT_EXEC)` while still blocking `execve`, `fork`, and other process-creation primitives. Update documentation to warn against strict `NO_EXEC` for process-wide lockdown.
+

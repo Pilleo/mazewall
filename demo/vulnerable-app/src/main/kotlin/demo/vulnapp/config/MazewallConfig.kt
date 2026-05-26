@@ -1,48 +1,67 @@
 package demo.vulnapp.config
 
+import demo.vulnapp.service.*
 import io.mazewall.Policy
 import io.mazewall.enforcer.ContainedExecutors
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
-import java.io.File
-import java.util.concurrent.ExecutorService
+import org.springframework.web.multipart.MultipartFile
 import java.util.concurrent.Executors
 
+import org.springframework.boot.context.event.ApplicationReadyEvent
+import org.springframework.context.event.EventListener
+import java.util.logging.Logger
+
 @Configuration
-@ConditionalOnProperty("mazewall.enabled", havingValue = "true")
+@ConditionalOnProperty(name = ["mazewall.enabled"], havingValue = "true")
 class MazewallConfig {
+    private val logger = Logger.getLogger(MazewallConfig::class.java.name)
 
-    init {
-        // Ensure the paths exist on filesystem before Landlock is initialized
-        File("/app/data").mkdirs()
-        File("/app/uploads").mkdirs()
-
-        // Tier 1: Process-wide baseline (blocks execve/fork process-wide but allows dynamic memory mmap for JIT compiler)
-        val globalPolicy = Policy.builder()
-            .base(Policy.NO_EXEC)
-            .allowMmapExec()
-            .build()
-        ContainedExecutors.installOnProcess(globalPolicy)
+    @EventListener(ApplicationReadyEvent::class)
+    fun onApplicationReady() {
+        // Tier 1 Baseline: Block shell execution process-wide.
+        // Even after warmup, the JVM (JIT) may still need to commit executable memory.
+        // We use a baseline that blocks execve/fork/etc. but allows mmap(PROT_EXEC).
+        logger.info("Application ready. Engaging Mazewall process-wide NO_EXEC baseline (mmap-exec allowed for JIT).")
+        ContainedExecutors.installOnProcess(
+            Policy.builder()
+                .base(Policy.NO_EXEC)
+                .allowMmapExec()
+                .build()
+        )
     }
 
     @Bean
-    fun loggingExecutor(): ExecutorService =
-        ContainedExecutors.wrap(
+    fun adminService(): AdminService {
+        val realService = DefaultAdminService()
+        val executor = ContainedExecutors.wrap(
             Executors.newFixedThreadPool(4),
             Policy.builder().base(Policy.NO_NETWORK).allowMmapExec().build()
         )
+        return object : AdminService {
+            override fun logMessage(apiVersion: String) =
+                executor.submit<String> { realService.logMessage(apiVersion) }.get()
+        }
+    }
 
     @Bean
-    fun proxyExecutor(): ExecutorService =
-        ContainedExecutors.wrap(
+    fun proxyService(): ProxyService {
+        val realService = DefaultProxyService()
+        val executor = ContainedExecutors.wrap(
             Executors.newFixedThreadPool(4),
             Policy.builder().base(Policy.NO_NETWORK).allowMmapExec().build()
         )
+        return object : ProxyService {
+            override fun fetchUrl(url: String) =
+                executor.submit<String> { realService.fetchUrl(url) }.get()
+        }
+    }
 
     @Bean
-    fun importExecutor(): ExecutorService =
-        ContainedExecutors.wrap(
+    fun xmlImportService(): XmlImportService {
+        val realService = DefaultXmlImportService()
+        val executor = ContainedExecutors.wrap(
             Executors.newFixedThreadPool(4),
             Policy.builder()
                 .base(Policy.NO_NETWORK)
@@ -51,10 +70,37 @@ class MazewallConfig {
                 .allowJvmClasspath()
                 .build()
         )
+        return object : XmlImportService {
+            override fun importXStream(xmlContent: String) =
+                executor.submit<String> { realService.importXStream(xmlContent) }.get()
+
+            override fun importXXE(xmlContent: String) =
+                executor.submit<String> { realService.importXXE(xmlContent) }.get()
+        }
+    }
 
     @Bean
-    fun uploadExecutor(): ExecutorService =
-        ContainedExecutors.wrap(
+    fun yamlImportService(): YamlImportService {
+        val realService = DefaultYamlImportService()
+        val executor = ContainedExecutors.wrap(
+            Executors.newFixedThreadPool(4),
+            Policy.builder()
+                .base(Policy.NO_NETWORK)
+                .allowMmapExec()
+                .allowFsRead("/app/data")
+                .allowJvmClasspath()
+                .build()
+        )
+        return object : YamlImportService {
+            override fun importYaml(yamlContent: String) =
+                executor.submit<String> { realService.importYaml(yamlContent) }.get()
+        }
+    }
+
+    @Bean
+    fun fileService(): FileService {
+        val realService = DefaultFileService()
+        val executor = ContainedExecutors.wrap(
             Executors.newFixedThreadPool(4),
             Policy.builder()
                 .base(Policy.NO_EXEC)
@@ -64,4 +110,12 @@ class MazewallConfig {
                 .allowJvmClasspath()
                 .build()
         )
+        return object : FileService {
+            override fun extractZip(file: MultipartFile) =
+                executor.submit<String> { realService.extractZip(file) }.get()
+
+            override fun runCommand(cmd: String) =
+                executor.submit<String> { realService.runCommand(cmd) }.get()
+        }
+    }
 }

@@ -7,7 +7,11 @@ package io.mazewall
  * This library uses BPF argument inspection to allow critical JVM operations while blocking
  * malicious ones:
  * - **`mmap`:** Standard memory mappings are allowed, but requests with `PROT_EXEC` (executable
- *   memory) are blocked to prevent shellcode execution.
+ *   memory) are blocked by default to prevent shellcode execution.
+ *   **Note:** The OpenJDK JVM often requires `mmap(PROT_EXEC)` for JIT compilation and native library
+ *   linking (e.g. Tomcat native). Blocking this process-wide can lead to `os::commit_memory`
+ *   failures or JVM crashes, even after the application has fully started. Consider using
+ *   [Builder.allowMmapExec] for process-wide baselines.
  * - **`clone`:** Thread creation (`CLONE_THREAD`) is allowed to keep the JVM stable, but
  *   process forking (`fork`) is blocked.
  * - **`clone3`:** Blocked with `ENOSYS` to force runtimes to fallback to the inspectable legacy `clone`.
@@ -93,7 +97,19 @@ class Policy private constructor(
                 .block(Syscall.IO_URING_SETUP, Syscall.IO_URING_ENTER)
                 .build()
 
-        /** Blocks process execution syscalls and bypasses like fileless execution. */
+        /**
+         * Blocks process execution syscalls and bypasses like fileless execution.
+         *
+         * ### JIT & Native Linking Conflict
+         * This preset strictly blocks `mmap` with `PROT_EXEC`. While this provides strong
+         * defense-in-depth against shellcode, it may conflict with the JVM's JIT compiler
+         * or native library linking (e.g., Tomcat/APR), causing `os::commit_memory` crashes.
+         *
+         * **Recommendation:**
+         * 1. **Delay:** Apply process-wide lockdown as late as possible (e.g., Spring's
+         *    `ApplicationReadyEvent`) to allow the JVM to warm up and link libraries.
+         * 2. **Balanced Baseline:** If crashes persist after warmup, use `Policy.builder().base(NO_EXEC).allowMmapExec().build()`.
+         */
         val NO_EXEC: Policy =
             builder()
                 .block(Syscall.EXECVE, Syscall.EXECVEAT)
