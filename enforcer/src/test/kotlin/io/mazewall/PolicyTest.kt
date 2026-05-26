@@ -231,6 +231,29 @@ class PolicyTest {
     }
 
     @Test
+    fun `combine() path intersection edge cases`() {
+        // Test /home vs /home-bak (should not intersect)
+        val p1 = Policy.builder().allowFsRead("/home").build()
+        val p2 = Policy.builder().allowFsRead("/home-bak").build()
+        val combined = Policy.combine(p1, p2)
+        assertTrue(combined.allowedFsReadPaths.isEmpty(), "/home should not intersect with /home-bak")
+
+        // Test trailing slashes
+        val p3 = Policy.builder().allowFsRead("/data/").build()
+        val p4 = Policy.builder().allowFsRead("/data/db").build()
+        assertEquals(setOf("/data/db"), Policy.combine(p3, p4).allowedFsReadPaths)
+
+        val p5 = Policy.builder().allowFsRead("/data").build()
+        val p6 = Policy.builder().allowFsRead("/data/").build()
+        assertEquals(setOf("/data/"), Policy.combine(p5, p6).allowedFsReadPaths, "Should preserve trailing slash if deeper")
+        // Actually, if they are equal, either is fine. Current code adds p1 if p2 prefix of p1, or p2 if p1 prefix of p2.
+        // If p5=/data, p6=/data/, p5 prefix of p6 (true), p6 prefix of p5 (true).
+        // Let's see: isParent("/data", "/data/") -> "/data" == "/data/" (false), "/data" + "/" = "/data/". "/data/".startsWith("/data/") (true).
+        // isParent("/data/", "/data") -> "/data/" == "/data" (false), "/data/".endsWith("/") (true). "/data".startsWith("/data/") (false).
+        // So p5 is parent of p6. Adds p6.
+    }
+
+    @Test
     fun `combine() disjoint Landlock paths forces Landlock`() {
         val p1 = Policy.builder().allowFsRead("/a").build()
         val p2 = Policy.builder().allowFsRead("/b").build()

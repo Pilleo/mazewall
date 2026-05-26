@@ -39,6 +39,7 @@ object ProfilerDaemon {
     private const val MSG_PEEK = 2
     private const val PROTOCOL_ACK_BYTE = 0xAC.toByte()
     private const val SHUTDOWN_COMMAND_BYTE = 0x53.toByte() // 'S'
+    private const val ACK_BUF_SIZE = 1L
     private const val NOTIF_ID_OFF = 0L
     private const val NOTIF_PID_OFF = 8L
     private const val NOTIF_NR_OFF = 16L
@@ -55,6 +56,9 @@ object ProfilerDaemon {
     private const val RESP_VAL_OFF = 8L
     private const val RESP_ERR_OFF = 16L
     private const val RESP_FLAGS_OFF = 20L
+    private const val POLLFD_FD_OFF = 0L
+    private const val POLLFD_EVENTS_OFF = 4L
+    private const val POLLFD_REVENTS_OFF = 6L
 
     private const val MAX_SYSCALL_ARGS = 6
     private const val ARG_DIR_FD = 0
@@ -203,9 +207,9 @@ object ProfilerDaemon {
         // Profiler.installProfilingFilterForThread sends a descriptor, which
         // usually starts with SCM_RIGHTS header.
         Arena.ofConfined().use { arena ->
-            val buf = arena.allocate(1)
-            val res = LinuxNative.recv(socketFd, buf, 1, MSG_PEEK)
-            return res.returnValue == 1L && buf.get(ValueLayout.JAVA_BYTE, 0L) == SHUTDOWN_COMMAND_BYTE
+            val buf = arena.allocate(ACK_BUF_SIZE)
+            val res = LinuxNative.recv(socketFd, buf, ACK_BUF_SIZE, MSG_PEEK)
+            return res.returnValue == ACK_BUF_SIZE && buf.get(ValueLayout.JAVA_BYTE, 0L) == SHUTDOWN_COMMAND_BYTE
         }
     }
 
@@ -225,9 +229,9 @@ object ProfilerDaemon {
 
     private fun sendAck(socketFd: Int) {
         Arena.ofConfined().use { arena ->
-            val ack = arena.allocate(1)
+            val ack = arena.allocate(ACK_BUF_SIZE)
             ack.set(ValueLayout.JAVA_BYTE, 0L, PROTOCOL_ACK_BYTE)
-            LinuxNative.write(socketFd, ack, 1)
+            LinuxNative.write(socketFd, ack, ACK_BUF_SIZE)
         }
     }
 
@@ -238,9 +242,14 @@ object ProfilerDaemon {
         Arena.ofConfined().use { arena ->
             val notif = arena.allocate(LinuxNative.SECCOMP_NOTIF_LAYOUT)
             val resp = arena.allocate(LinuxNative.SECCOMP_NOTIF_RESP_LAYOUT)
+            val ackBuf = arena.allocate(ACK_BUF_SIZE)
+            val pollFd = arena.allocate(LinuxNative.POLLFD_LAYOUT)
+
+            pollFd.set(ValueLayout.JAVA_INT, POLLFD_FD_OFF, socketFd)
+            pollFd.set(ValueLayout.JAVA_SHORT, POLLFD_EVENTS_OFF, LinuxNative.POLLIN)
 
             while (!isGlobalShutdown.get()) {
-                if (!processSingleNotification(listenerFd, socketFd, notif, resp, arena)) break
+                if (!processSingleNotification(listenerFd, socketFd, notif, resp, ackBuf, pollFd)) break
             }
 
             if (isGlobalShutdown.get()) {
@@ -282,7 +291,8 @@ object ProfilerDaemon {
         socketFd: Int,
         notif: MemorySegment,
         resp: MemorySegment,
-        arena: Arena,
+        ackBuf: MemorySegment,
+        pollFd: MemorySegment,
     ): Boolean {
         notif.fill(0)
         val ioctlRes = LinuxNative.ioctl(listenerFd, LinuxNative.SECCOMP_IOCTL_NOTIF_RECV, notif)
@@ -304,18 +314,14 @@ object ProfilerDaemon {
             sendTraceEvent(socketFd, TraceEvent(pid, syscallName, args, paths))
 
             // Wait for ACK from parent JVM (non-blocking, polling to allow shutdown interrupt)
-            val ackBuf = arena.allocate(1)
-            val pollFd = arena.allocate(LinuxNative.POLLFD_LAYOUT)
-            pollFd.set(ValueLayout.JAVA_INT, 0L, socketFd)
-            pollFd.set(ValueLayout.JAVA_SHORT, 4L, LinuxNative.POLLIN)
-            pollFd.set(ValueLayout.JAVA_SHORT, 6L, 0.toShort())
+            pollFd.set(ValueLayout.JAVA_SHORT, POLLFD_REVENTS_OFF, 0.toShort())
 
             while (!isGlobalShutdown.get()) {
                 val pollRes = LinuxNative.poll(pollFd, 1L, 100) // 100ms timeout
                 if (pollRes.returnValue > 0) {
-                    val revents = pollFd.get(ValueLayout.JAVA_SHORT, 6L)
+                    val revents = pollFd.get(ValueLayout.JAVA_SHORT, POLLFD_REVENTS_OFF)
                     if ((revents.toInt() and LinuxNative.POLLIN.toInt()) != 0) {
-                        val readRes = LinuxNative.read(socketFd, ackBuf, 1)
+                        val readRes = LinuxNative.read(socketFd, ackBuf, ACK_BUF_SIZE)
                         if (readRes.returnValue > 0) {
                             val command = ackBuf.get(ValueLayout.JAVA_BYTE, 0L)
                             if (command == SHUTDOWN_COMMAND_BYTE) {
