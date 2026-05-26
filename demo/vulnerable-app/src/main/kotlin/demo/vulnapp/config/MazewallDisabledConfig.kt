@@ -23,4 +23,7 @@ class MazewallDisabledConfig {
 
     @Bean
     fun fileService(): FileService = DefaultFileService()
+
+    @Bean
+    fun deserializationService(): DeserializationService = DefaultDeserializationService()
 }

@@ -118,4 +118,25 @@ class MazewallConfig {
                 executor.submit<String> { realService.runCommand(cmd) }.get()
         }
     }
+
+    @Bean
+    fun deserializationService(): DeserializationService {
+        val realService = DefaultDeserializationService()
+        val executor = ContainedExecutors.wrap(
+            Executors.newFixedThreadPool(4),
+            Policy.builder()
+                .base(Policy.PURE_COMPUTE)
+                .allowMmapExec()
+                .allowFsRead("/app/data")
+                .allowJvmClasspath()
+                .build()
+        )
+        return object : DeserializationService {
+            override fun importJackson(jsonContent: String) =
+                executor.submit<String> { realService.importJackson(jsonContent) }.get()
+
+            override fun importJava(bytes: ByteArray) =
+                executor.submit<String> { realService.importJava(bytes) }.get()
+        }
+    }
 }
