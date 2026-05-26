@@ -3,7 +3,7 @@ plugins {
 }
 
 kotlin {
-    jvmToolchain(25)
+    jvmToolchain(22)
 }
 
 tasks.test {

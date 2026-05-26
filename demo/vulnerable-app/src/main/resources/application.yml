@@ -1,0 +1,11 @@
+spring:
+  application:
+    name: vulnerable-app
+  main:
+    banner-mode: "off"
+
+mazewall:
+  enabled: false
+
+server:
+  port: 8080

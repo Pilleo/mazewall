@@ -65,3 +65,17 @@
 
 *No remaining high-priority issues.*
 
+## Newly Discovered Issues (Integration Demo)
+
+### 🔴 [Severity: High]: `Policy.PURE_COMPUTE` blocks `OPENAT` syscalls
+**Context:** `PURE_COMPUTE` explicitly blocks `OPEN`, `OPENAT`, and `OPENAT2` via Seccomp. This creates a hard conflict when combined with Landlock (`allowFsRead`), because Seccomp blocks the syscall entirely before Landlock can regulate it.
+**Needed:** `PURE_COMPUTE` should probably not block `OPENAT` by default if it's intended to be used as a base for Landlock policies, OR we need a `Policy.NO_NETWORK_NO_EXEC` preset that allows FS syscalls for Landlock.
+
+### 🟡 [Severity: Medium]: `Policy.STRICT_SANDBOX` inherits `PURE_COMPUTE` flaws
+**Context:** `STRICT_SANDBOX` uses `PURE_COMPUTE` as a base and calls `allowJvmClasspath()`. Because `PURE_COMPUTE` blocks `OPENAT`, the "allowed" classpath is unreachable by the kernel, potentially causing `NoClassDefFoundError` or `VerifyError` during lazy classloading.
+**Needed:** Refactor `STRICT_SANDBOX` to use a base that allows FS syscalls, or explicitly unblock them.
+
+### 🟡 [Severity: Medium]: `java.lang.VerifyError` when bytecode verification happens on restricted threads
+**Context:** During the vulnerable-app demo, XStream triggered a `VerifyError: Could not link verifier` on protected threads. This was resolved by adding `allowMmapExec()` to the thread-scoped policy.
+**Needed:** Document that `allowMmapExec()` (allowing `PROT_EXEC` on `mmap`) is a prerequisite for some JVM native linking operations, even if the thread doesn't intend to execute its own shellcode.
+

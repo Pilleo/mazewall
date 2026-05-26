@@ -1,6 +1,5 @@
 package io.mazewall
 
-
 /**
  * Defines which syscalls to block. Create via [builder] or use the built-in presets.
  *

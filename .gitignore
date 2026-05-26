@@ -51,3 +51,32 @@ plan.md
 /killercoda/
 /node_modules/
 /.gradle_home/
+
+### Logs & Results ###
+*.log
+hs_err_pid*
+replay_pid*
+*_results.json
+/unprotected.json
+/protected.json
+/demo/vulnerable-app/results_report.md
+
+### Python ###
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+pip-log.txt
+pip-delete-this-directory.txt
+.venv
+.env
+.tox
+.coverage
+.cache
+nosetests.xml
+coverage.xml
+*,cover
+.hypothesis/

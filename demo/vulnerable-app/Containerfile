@@ -1,0 +1,15 @@
+FROM eclipse-temurin:25-jdk
+
+WORKDIR /app
+
+# Install dependencies (curl for health checks, strace for debugging)
+RUN apt-get update && apt-get install -y curl strace && rm -rf /var/lib/apt/lists/*
+
+# Copy the pre-built jar from the host
+COPY demo/vulnerable-app/build/libs/vulnerable-app.jar /app/vulnerable-app.jar
+
+# Expose ports
+EXPOSE 8080
+
+# Default command: run the jar
+CMD ["java", "-jar", "/app/vulnerable-app.jar"]

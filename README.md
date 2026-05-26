@@ -148,6 +148,20 @@ executor.submit {
 
 ---
 
+## Demos
+
+### 🛡️ [Real-World CVE Exploitation Demo](demo/vulnerable-app/README.md)
+A comprehensive Spring Boot 3.x integration showing how `mazewall` blocks:
+- **Log4Shell** (JNDI RCE)
+- **SnakeYAML & XStream** Deserialization
+- **Thymeleaf** SSTI
+- **XXE** & **Zip Slip**
+- **SSRF** exfiltration
+
+The demo includes an automated python exploit suite and generates a side-by-side protection report.
+
+---
+
 ## Built-In Policies
 
 | Policy                | Blocked Syscalls / Primitives                                                                                                                                                                                                                  | Best Use Case                                                        |
