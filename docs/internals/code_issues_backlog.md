@@ -69,19 +69,24 @@
 3. Implemented `MazewallTestProfileConfig` using Spring's `@TestConfiguration` to transparently wrap beans with the `Profiler` during integration tests.
 4. Moved `:profiler` to a `testImplementation` dependency in the demo app.
 
+### ✅ FIXED: Concurrent Profiler Daemons clobber `PR_SET_PTRACER`
+**Context:** Each call to `Profiler.profile` or `Profiler.wrap` spawned a new `ProfilerDaemon` and called `prctl(PR_SET_PTRACER, daemonPid)`. Because `PR_SET_PTRACER` is a process-wide setting, concurrent profiling sessions clobbered each other's ptrace authorization, causing previous daemons to fail with `EPERM`.
+**Fix:** Transitioned to a Singleton Daemon model where a single `ProfilerDaemon` is shared across all profiling sessions in the same JVM process. Verified via the new `ProfilerStressTest` concurrent test suite.
+
+### ✅ FIXED: `Policy.PURE_COMPUTE` blocks `OPENAT` syscalls
+**Context:** `PURE_COMPUTE` explicitly blocked `OPEN`, `OPENAT`, and `OPENAT2` via Seccomp. This created a hard conflict when combined with Landlock (`allowFsRead`), because Seccomp blocked the syscall entirely before Landlock could regulate it.
+**Fix:** Modified `Policy.Builder.build()` and `Policy.combine()` to automatically unblock open-related syscalls from Seccomp when Landlock filesystem rules are active (`enforceLandlock = true`). Since Landlock regulates paths for these syscalls anyway, this resolves the conflict securely.
+
+### ✅ FIXED: `Policy.STRICT_SANDBOX` inherits `PURE_COMPUTE` flaws
+**Context:** `STRICT_SANDBOX` used `PURE_COMPUTE` as a base and called `allowJvmClasspath()`. Because `PURE_COMPUTE` blocked `OPENAT`, the "allowed" classpath was unreachable by the kernel, causing lazy classloading failures.
+**Fix:** Resolved automatically via the fix for `PURE_COMPUTE` blocking open-related syscalls when Landlock is active (since `STRICT_SANDBOX` has `enforceLandlock = true`).
+
 ## Remaining Issues
 
 *No remaining high-priority issues.*
 
+
 ## Newly Discovered Issues (Integration Demo)
-
-### 🔴 [Severity: High]: `Policy.PURE_COMPUTE` blocks `OPENAT` syscalls
-**Context:** `PURE_COMPUTE` explicitly blocks `OPEN`, `OPENAT`, and `OPENAT2` via Seccomp. This creates a hard conflict when combined with Landlock (`allowFsRead`), because Seccomp blocks the syscall entirely before Landlock can regulate it.
-**Needed:** `PURE_COMPUTE` should probably not block `OPENAT` by default if it's intended to be used as a base for Landlock policies, OR we need a `Policy.NO_NETWORK_NO_EXEC` preset that allows FS syscalls for Landlock.
-
-### 🟡 [Severity: Medium]: `Policy.STRICT_SANDBOX` inherits `PURE_COMPUTE` flaws
-**Context:** `STRICT_SANDBOX` uses `PURE_COMPUTE` as a base and calls `allowJvmClasspath()`. Because `PURE_COMPUTE` blocks `OPENAT`, the "allowed" classpath is unreachable by the kernel, potentially causing `NoClassDefFoundError` or `VerifyError` during lazy classloading.
-**Needed:** Refactor `STRICT_SANDBOX` to use a base that allows FS syscalls, or explicitly unblock them.
 
 ### 🟡 [Severity: Medium]: `java.lang.VerifyError` when bytecode verification happens on restricted threads
 **Context:** During the vulnerable-app demo, XStream triggered a `VerifyError: Could not link verifier` on protected threads. This was resolved by adding `allowMmapExec()` to the thread-scoped policy.
@@ -91,9 +96,6 @@
 **Context:** Even after the application has fully started (e.g., after `ApplicationReadyEvent`), the JVM JIT compiler and native library loaders (like Tomcat native) continue to require `mmap` with `PROT_EXEC`. Applying the strict `NO_EXEC` preset process-wide results in a fatal JVM crash (`os::commit_memory failed; error='Operation not permitted' (errno=1)`) when the JVM attempts to optimize code or link dynamic libraries during request processing.
 **Needed:** Recommend or default to a "Balanced Baseline" for Tier 1 process-wide protection that allows `mmap(PROT_EXEC)` while still blocking `execve`, `fork`, and other process-creation primitives. Update documentation to warn against strict `NO_EXEC` for process-wide lockdown.
 
-### 🔴 [Severity: High]: Concurrent Profiler Daemons clobber `PR_SET_PTRACER`
-**Context:** Each call to `Profiler.profile` or `Profiler.wrap` currently spawns a new `ProfilerDaemon` and calls `prctl(PR_SET_PTRACER, daemonPid)`. Because `PR_SET_PTRACER` is a process-wide setting, concurrent profiling sessions clobber each other's ptrace authorization. Only the most recently spawned daemon remains authorized, causing previous daemons to fail with `EPERM` when attempting to read tracee memory via `process_vm_readv`.
-**Needed:** Transition to a Singleton Daemon model where a single `ProfilerDaemon` is shared across all profiling sessions in the same JVM process.
 
 ### 🔴 [Severity: Critical]: Unsafe heuristics in SBoB generation mask underlying system behavior
 **Context:** SBoB generation via strace inherently captures all JVM bootstrap and classpath resolution noise. A previous attempt to address this used hardcoded string matching (`/lib`, `/sys`, `java.home`) to silently filter these paths out of the final compiled policy.

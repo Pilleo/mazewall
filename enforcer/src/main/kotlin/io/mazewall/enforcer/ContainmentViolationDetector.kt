@@ -14,45 +14,37 @@ object ContainmentViolationDetector {
         "negado",
     )
 
-    fun isContainmentViolation(t: Throwable): Boolean =
-        isDirectContainmentViolation(t) ||
-            isViolationInCauseChain(t.cause, t) ||
-            isViolationInSuppressed(t.suppressedExceptions)
+    fun isContainmentViolation(t: Throwable): Boolean {
+        val visited = java.util.Collections.newSetFromMap(java.util.IdentityHashMap<Throwable, Boolean>())
+        return hasViolation(t, visited)
+    }
 
-    fun findViolationCause(t: Throwable): Throwable? =
-        if (isDirectContainmentViolation(t)) {
+    fun findViolationCause(t: Throwable): Throwable? {
+        val visited = java.util.Collections.newSetFromMap(java.util.IdentityHashMap<Throwable, Boolean>())
+        return findViolation(t, visited)
+    }
+
+    private fun hasViolation(
+        t: Throwable?,
+        visited: MutableSet<Throwable>,
+    ): Boolean {
+        if (t == null || !visited.add(t)) return false
+        return isDirectContainmentViolation(t) ||
+            hasViolation(t.cause, visited) ||
+            t.suppressedExceptions.any { hasViolation(it, visited) }
+    }
+
+    private fun findViolation(
+        t: Throwable?,
+        visited: MutableSet<Throwable>,
+    ): Throwable? {
+        if (t == null || !visited.add(t)) return null
+        return if (isDirectContainmentViolation(t)) {
             t
         } else {
-            findInCauseChain(t.cause, t) ?: findInSuppressed(t.suppressedExceptions)
+            findViolation(t.cause, visited) ?: t.suppressedExceptions.firstNotNullOfOrNull { findViolation(it, visited) }
         }
-
-    private fun isViolationInCauseChain(
-        cause: Throwable?,
-        original: Throwable,
-    ): Boolean {
-        var current = cause
-        while (current != null && current !== original) {
-            if (isDirectContainmentViolation(current)) return true
-            current = current.cause
-        }
-        return false
     }
-
-    private fun isViolationInSuppressed(suppressed: List<Throwable>): Boolean = suppressed.any { isDirectContainmentViolation(it) }
-
-    private fun findInCauseChain(
-        cause: Throwable?,
-        original: Throwable,
-    ): Throwable? {
-        var current = cause
-        while (current != null && current !== original) {
-            if (isDirectContainmentViolation(current)) return current
-            current = current.cause
-        }
-        return null
-    }
-
-    private fun findInSuppressed(suppressed: List<Throwable>): Throwable? = suppressed.find { isDirectContainmentViolation(it) }
 
     private fun isDirectContainmentViolation(t: Throwable): Boolean {
         val msg = t.message ?: return false

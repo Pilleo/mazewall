@@ -90,4 +90,55 @@ class ContainmentViolationDetectorTest {
         val found = ContainmentViolationDetector.findViolationCause(primary)
         assertTrue(found === suppressed, "Expected the suppressed SocketException, got $found")
     }
+
+    @Test
+    fun `findViolationCause finds violation in cause of suppressed exception`() {
+        val primary = RuntimeException("task failed")
+        val violation = IOException("Operation not permitted")
+        val suppressedWrapper = RuntimeException("suppressed wrapper", violation)
+        primary.addSuppressed(suppressedWrapper)
+        val found = ContainmentViolationDetector.findViolationCause(primary)
+        assertTrue(found === violation, "Expected the nested IOException, got $found")
+        assertTrue(ContainmentViolationDetector.isContainmentViolation(primary))
+    }
+
+    class CyclicCauseException(
+        val nextProvider: () -> Throwable?,
+    ) : RuntimeException("Cyclic Cause") {
+        override val cause: Throwable?
+            get() = nextProvider()
+    }
+
+    @Test
+    fun `isContainmentViolation handles circular references in cause chain`() {
+        var next: Throwable? = null
+        val t1 = CyclicCauseException { next }
+        val t2 = CyclicCauseException { t1 }
+        next = t2
+
+        assertFalse(ContainmentViolationDetector.isContainmentViolation(t1))
+
+        val violation = IOException("Operation not permitted")
+        val t3 = CyclicCauseException { violation }
+        next = t3
+        assertTrue(ContainmentViolationDetector.isContainmentViolation(t1))
+    }
+
+    @Test
+    fun `isContainmentViolation handles mixed cause and suppressed cycles gracefully`() {
+        var next: Throwable? = null
+        val t1 = CyclicCauseException { next }
+        val t2 = RuntimeException("t2")
+        next = t2
+
+        t2.addSuppressed(t1)
+
+        assertFalse(ContainmentViolationDetector.isContainmentViolation(t1))
+
+        val violation = IOException("Operation not permitted")
+        t2.addSuppressed(violation)
+        assertTrue(ContainmentViolationDetector.isContainmentViolation(t1))
+        val found = ContainmentViolationDetector.findViolationCause(t1)
+        assertTrue(found === violation)
+    }
 }

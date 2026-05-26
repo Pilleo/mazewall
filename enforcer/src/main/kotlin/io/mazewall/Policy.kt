@@ -198,8 +198,19 @@ class Policy private constructor(
 
             val enforceLandlock = policies.any { it.enforceLandlock }
 
+            val finalSyscalls =
+                if (enforceLandlock) {
+                    if (mode == Mode.DENY_LIST) {
+                        combinedSyscalls - setOf(Syscall.OPEN, Syscall.OPENAT, Syscall.OPENAT2)
+                    } else {
+                        combinedSyscalls + setOf(Syscall.OPEN, Syscall.OPENAT, Syscall.OPENAT2)
+                    }
+                } else {
+                    combinedSyscalls
+                }
+
             return Policy(
-                combinedSyscalls,
+                finalSyscalls,
                 mode = mode,
                 allowMmapExec = mmapExec,
                 allowNonThreadClone = cloneNonThread,
@@ -342,16 +353,28 @@ class Policy private constructor(
             require(!path.contains('\u0000')) { "Path cannot contain null bytes" }
         }
 
-        fun build(): Policy =
-            Policy(
-                syscalls.toSet(),
+        fun build(): Policy {
+            val enforceLandlock = allowedFsReadPaths.isNotEmpty() || allowedFsWritePaths.isNotEmpty()
+            val finalSyscalls =
+                if (enforceLandlock) {
+                    if (mode == Mode.DENY_LIST) {
+                        syscalls.toSet() - setOf(Syscall.OPEN, Syscall.OPENAT, Syscall.OPENAT2)
+                    } else {
+                        syscalls.toSet() + setOf(Syscall.OPEN, Syscall.OPENAT, Syscall.OPENAT2)
+                    }
+                } else {
+                    syscalls.toSet()
+                }
+            return Policy(
+                finalSyscalls,
                 mode,
                 allowMmapExec,
                 allowNonThreadClone,
                 allowUnsafePrctl,
                 allowedFsReadPaths.toSet(),
                 allowedFsWritePaths.toSet(),
-                enforceLandlock = allowedFsReadPaths.isNotEmpty() || allowedFsWritePaths.isNotEmpty(),
+                enforceLandlock = enforceLandlock,
             )
+        }
     }
 }

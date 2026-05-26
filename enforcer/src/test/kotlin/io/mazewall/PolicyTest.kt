@@ -172,7 +172,7 @@ class PolicyTest {
                 .allowUnsafePrctl()
                 .allowFsRead("/r")
                 .allowFsWrite("/w")
-                .block(Syscall.OPEN)
+                .block(Syscall.CONNECT)
                 .build()
 
         val p2 = Policy.builder().base(p1).build()
@@ -182,7 +182,7 @@ class PolicyTest {
         assertTrue(p2.allowUnsafePrctl)
         assertTrue(p2.allowedFsReadPaths.contains("/r"))
         assertTrue(p2.allowedFsWritePaths.contains("/w"))
-        assertTrue(p2.syscalls.contains(Syscall.OPEN))
+        assertTrue(p2.syscalls.contains(Syscall.CONNECT))
     }
 
     @Test
@@ -275,5 +275,45 @@ class PolicyTest {
                 .build()
         assertTrue(p2.isSyscallAllowed(Syscall.READ))
         assertFalse(p2.isSyscallAllowed(Syscall.WRITE))
+    }
+
+    @Test
+    fun `open syscalls are automatically unblocked when Landlock is active`() {
+        // Deny list mode
+        val policyDeny =
+            Policy
+                .builder()
+                .base(Policy.PURE_COMPUTE)
+                .allowFsRead("/tmp")
+                .build()
+
+        assertTrue(policyDeny.enforceLandlock)
+        assertTrue(policyDeny.isSyscallAllowed(Syscall.OPEN))
+        assertTrue(policyDeny.isSyscallAllowed(Syscall.OPENAT))
+        assertTrue(policyDeny.isSyscallAllowed(Syscall.OPENAT2))
+
+        // Allow list mode
+        val policyAllow =
+            Policy
+                .builder()
+                .mode(Policy.Mode.ALLOW_LIST)
+                .allowFsRead("/tmp")
+                .build()
+
+        assertTrue(policyAllow.enforceLandlock)
+        assertTrue(policyAllow.isSyscallAllowed(Syscall.OPEN))
+        assertTrue(policyAllow.isSyscallAllowed(Syscall.OPENAT))
+        assertTrue(policyAllow.isSyscallAllowed(Syscall.OPENAT2))
+    }
+
+    @Test
+    fun `open syscalls are automatically unblocked in combined policies when Landlock is active`() {
+        val p1 = Policy.builder().block(Syscall.OPEN, Syscall.OPENAT).build()
+        val p2 = Policy.builder().allowFsRead("/tmp").build()
+
+        val combined = Policy.combine(p1, p2)
+        assertTrue(combined.enforceLandlock)
+        assertTrue(combined.isSyscallAllowed(Syscall.OPEN))
+        assertTrue(combined.isSyscallAllowed(Syscall.OPENAT))
     }
 }
