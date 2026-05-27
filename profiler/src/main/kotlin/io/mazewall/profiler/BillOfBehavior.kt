@@ -196,6 +196,22 @@ data class BillOfBehavior(
     }
 
     /**
+     * Returns a new [BillOfBehavior] where paths matching the given [BaselinePathProfile]
+     * are excluded from [opens], [fsWritePaths], and [execs].
+     */
+    fun filterPaths(profile: BaselinePathProfile): BillOfBehavior {
+        return BillOfBehavior(
+            opens = opens.filterNot { profile.matches(it) }.toSet(),
+            fsWritePaths = fsWritePaths.filterNot { profile.matches(it) }.toSet(),
+            syscalls = syscalls,
+            execs = execs.filterNot { profile.matches(it) }.toSet(),
+            stackProfile = stackProfile.filterKeys { event ->
+                event.paths.none { profile.matches(it) }
+            },
+        )
+    }
+
+    /**
      * Serializes this Bill of Behavior into a clean SBoB JSON string.
      */
     fun toJson(): String {

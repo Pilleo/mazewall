@@ -100,4 +100,22 @@ class StraceProfilerTest {
             "Should NOT grant write permission for missing file read. Observed: ${bob.fsWritePaths}",
         )
     }
+
+    @Test
+    fun `test strace profiling explicit baseline path filtering`() {
+        val bob = StraceProfiler.profile(FileReadWorkload::class.java)
+
+        val baseline = io.mazewall.profiler.JvmBaselineProfiles
+            .jvmBootstrapNoise()
+        val hasNoise = bob.opens.any { baseline.matches(it) }
+        assertTrue(hasNoise, "Raw BillOfBehavior should capture JVM/system noise. Observed: ${bob.opens}")
+
+        // Now apply the filter
+        val filteredBob = bob.filterPaths(baseline)
+        val stillHasNoise = filteredBob.opens.any { baseline.matches(it) }
+        assertTrue(!stillHasNoise, "Filtered BillOfBehavior should NOT contain JVM/system noise. Observed: ${filteredBob.opens}")
+
+        // But it should still preserve the actual workload's read path (/etc/hostname)
+        assertTrue(filteredBob.opens.contains("/etc/hostname"), "Filtered BillOfBehavior should preserve actual read path. Observed: ${filteredBob.opens}")
+    }
 }

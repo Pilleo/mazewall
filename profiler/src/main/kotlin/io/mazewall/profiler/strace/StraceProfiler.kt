@@ -96,7 +96,7 @@ object StraceProfiler {
         if (isFsSyscall(syscallName)) {
             val args = cleaned.substringAfter("(", "")
             val path = extractQuotedPath(args)
-            if (path != null && !isJvmInternalPath(path)) {
+            if (path != null) {
                 if (isWriteSyscall(syscallName, args)) {
                     fsWritePaths.add(path)
                 } else {
@@ -165,27 +165,5 @@ object StraceProfiler {
     private fun extractQuotedPath(args: String): String? {
         val match = "\"(.*?)\"".toRegex().find(args)
         return match?.groupValues?.get(1)
-    }
-
-    private fun isJvmInternalPath(path: String): Boolean {
-        val isSysPath = path.startsWith("/lib") ||
-            path.startsWith("/usr/lib") ||
-            path.startsWith("/lib64") ||
-            path.startsWith("/proc") ||
-            path.startsWith("/sys") ||
-            path.startsWith("/dev") ||
-            path == "/etc/ld.so.cache" ||
-            path == "/etc/nsswitch.conf"
-
-        val javaHome = System.getProperty("java.home")
-        val isJavaHomePath = javaHome != null && path.startsWith(javaHome)
-
-        val classPath = System.getProperty("java.class.path")
-        val isClassPath = classPath != null &&
-            classPath.split(File.pathSeparator).any {
-            path.startsWith(File(it).absolutePath)
-        }
-
-        return isSysPath || isJavaHomePath || isClassPath
     }
 }
