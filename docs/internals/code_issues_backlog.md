@@ -267,5 +267,65 @@ If `state.currentlyAllowsMmapExec` is `false`, call `builder.allowMmapExec()` so
 **Cascading Risk Potential:** High stability and deployment failure. Process-wide seccomp fails to install out-of-the-box on local developer setups or standard servers unless pre-set via an OCI container runtime or launcher wrapper.
 **Needed:** Update the exception message in `PureJavaBpfEngine.kt` to clearly state that `TSYNC` failed due to missing `no_new_privs` on sibling threads, advising operators to run with OCI `allowPrivilegeEscalation: false` or pre-set `no_new_privs` using an external launcher.
 
+### 🔴 [Severity: CRITICAL]: Permanent thread pool contamination, classloader leaks, and state pollution via un-cleared `ThreadLocal` variables
+**Target:** `/enforcer/src/main/kotlin/io/mazewall/enforcer/ContainedExecutors.kt` and `ContainerStateRegistry.kt`
+**Failure Hypothesis:** Standard JVM thread pools (like `ForkJoinPool` or `ThreadPoolExecutor`) reuse worker threads. Since the sandbox tracks thread-scoped seccomp and Landlock states using `ThreadLocal` registers (e.g. `THREAD_BLOCKED`, `THREAD_LANDLOCK_APPLIED_READS`, `THREAD_LANDLOCK_APPLIED_WRITES`, `FILTER_DEPTH`) but *never* clears or removes them when a wrapped task finishes, the thread-scoped security state leaks permanently into subsequent uncontained or differently contained tasks on the same thread, causing unexpected `IllegalStateException` throws or memory leaks.
+**Context & Proof:** In `ContainedExecutors.kt`, `wrap` creates a `ContainedExecutorWrapper` which overrides `execute` and `submit` to wrap tasks. When the wrapped task runs, it calls `applyContainment()`, which checks the thread-local variables in `ContainerStateRegistry`. However, when the task *finishes*, the wrapper does not clean up the thread-local state!
+For example, if Task A with a strict Landlock read policy is run on Thread 1, `THREAD_LANDLOCK_APPLIED_READS` is set to the allowed paths. Later, Task B is run on the *same* thread, but with a *different* policy. `appliedReads` is retrieved as Task A's paths, causing `isPathSubset` to fail or falsely reject Task B's valid paths, throwing a permanent `IllegalStateException`.
+Furthermore, in standard dynamic enterprise environments (like servlet containers), keeping references to strings (the paths) in `ThreadLocal` variables of system/global threads prevents the application's classloader from being garbage collected on redeploy, resulting in severe process-wide heap memory exhaustion.
+**Cascading Risk Potential:** Critical. Deterministically causes thread pool contamination, unexpected runtime crashes on recycled threads, and permanent classloader memory leaks.
+**Needed:** In `ContainedExecutors.kt`, wrap task execution in a `try-finally` block. In the `finally` block, if this was the outermost sandbox application on the current thread (or if we are returning to the pool), restore or clear the thread-local states by calling `.remove()` on all thread-local registers in `ContainerStateRegistry`.
+
+### 🔴 [Severity: HIGH]: `IterativeProfiler` crashes deterministically on relative-path filesystem violations
+**Target:** `/profiler/src/main/kotlin/io/mazewall/profiler/iterative/IterativeProfiler.kt` (specifically `extractViolationPath`) and `/enforcer/src/main/kotlin/io/mazewall/Policy.kt` (specifically `validatePath`)
+**Failure Hypothesis:** When a profiled workload attempts to access a file using a relative path (e.g. `Paths.get("data.txt")`), a `java.nio.file.AccessDeniedException` is thrown containing the relative path. The `IterativeProfiler` extracts this relative path and attempts to add it to the policy via `allowFsRead(path)`. However, `Policy.Builder.validatePath` strictly mandates absolute paths, throwing `IllegalArgumentException: Path must be absolute`, which crashes the profiling loop instead of resolving or canonicalizing the path.
+**Context & Proof:** If a task performs `Files.readString(Paths.get("relative/file.txt"))`, Java throws `AccessDeniedException` where `t.file` is `"relative/file.txt"`. `extractViolationPath` returns `"relative/file.txt"`. `profile` calls `updatePolicyForViolation(currentPolicy, "relative/file.txt")`, which calls `builder.allowFsRead("relative/file.txt")`. Since `"relative/file.txt"` does not start with `"/"`, `validatePath` throws `IllegalArgumentException`. The retry loop in `IterativeProfiler` is immediately aborted, crashing the workload.
+**Cascading Risk Potential:** High usability and stability failure. Completely prevents progressive/iterative profiling of any applications that rely on relative file paths.
+**Needed:** In `IterativeProfiler.extractViolationPath`, if the extracted path is relative, resolve it to an absolute path relative to the JVM CWD (or a provided working directory) before returning it. Alternatively, canonicalize all paths in `updatePolicyForViolation` using `Paths.get(path).toAbsolutePath().normalize().toString()`.
+
+### 🔴 [Severity: HIGH]: `IterativeProfiler` infinite retry loop and failure on disjoint prefix file paths
+**Target:** `/profiler/src/main/kotlin/io/mazewall/profiler/iterative/IterativeProfiler.kt` (specifically `updatePolicyForViolation`)
+**Failure Hypothesis:** The `IterativeProfiler` checks if read is already allowed using a naive string `startsWith` check. If the workload accesses a path whose prefix matches an already allowed path but is a different, longer directory name (e.g., `/var/log-extra` when `/var/log` is allowed), the check falsely returns `true`. The profiler then attempts to add a *write* rule instead of a *read* rule, causing subsequent read attempts to continue failing and forcing the profiler into an infinite discovery retry loop that aborts after 20 retries.
+**Context & Proof:** If `currentPolicy` allowed read to `/var/log`, and a trapped read occurs on `/var/log-extra`, `isCurrentlyReadAllowed` evaluates to `true` (since `"/var/log-extra".startsWith("/var/log")` is true). So `updatePolicyForViolation` executes the `then` branch: `if (isCurrentlyReadAllowed) { builder.allowFsWrite(path) }`. Thus, it adds a write rule for `/var/log-extra` but NEVER adds a read rule! On the next retry, the thread tries to read `/var/log-extra` again, gets denied, and the same logic is executed. This continues until the retry count hits `maxRetries` (20), at which point the profiler crashes.
+**Cascading Risk Potential:** High stability and usability bug. Blocks iterative profiling for applications with sibling directories sharing identical prefixes.
+**Needed:** Use proper component-based `Path.startsWith` logic instead of raw string `startsWith`. Map the strings in `allowedFsReadPaths` to `Path` structures and normalize them, then compare using `java.nio.file.Path.startsWith`.
+
+### 🔴 [Severity: HIGH]: Profiler connection failure on signal interruption inside `recvDescriptor`
+**Target:** `/profiler/src/main/kotlin/io/mazewall/profiler/engine/ProfilerDaemon.kt` (specifically `recvDescriptor`)
+**Failure Hypothesis:** The out-of-process daemon receives the seccomp listener file descriptor from the JVM via `recvmsg` on a Unix domain socket. If a POSIX signal (such as standard JVM GC safepointing signals) is delivered to the daemon's connection thread while it is blocked inside `recvmsg`, the system call returns `-1` with `errno == EINTR`. `recvDescriptor` treats this as a fatal connection failure, closes the socket, and aborts the profiling session, leaving the worker thread permanently deadlocked.
+**Context & Proof:** If `LinuxNative.recvmsg` is interrupted by a signal, `returnValue` is `-1`. Since `-1 < 0`, `recvDescriptor` returns `null`. In `handleConnection`, the thread closes `socketFd` and returns, terminating the session. The tracee thread in the JVM remains frozen waiting for the daemon to ACK the listener FD, which never happens, resulting in a permanent JVM deadlock.
+**Cascading Risk Potential:** High stability and reliability failure. Causes arbitrary, random JVM deadlocks during startup/GC cycles when running the profiler.
+**Needed:** Wrap the `recvmsg` downcall in a loop in `recvDescriptor`. If `returnValue < 0` and `errno == 4` (EINTR), retry the `recvmsg` call. Only return `null` if the error is fatal (non-EINTR).
+
+### 🔴 [Severity: HIGH]: Metaspace & ClassLoader Memory Leak via Permanent ThreadLocal Storage of `Syscall` Enum in Recycled Thread Pools
+**Target:** `/enforcer/src/main/kotlin/io/mazewall/enforcer/ContainerStateRegistry.kt`
+**Failure Hypothesis:** When thread-scoped sandboxing is applied on recycled worker threads (like `ForkJoinPool` or `ThreadPoolExecutor`), the security state is registered in `ThreadLocal` variables defined in `ContainerStateRegistry`. Storing the application-defined `Syscall` enum in `THREAD_BLOCKED` (which is a `ThreadLocal<Set<Syscall>>`) creates a permanent reference chain to the application's `ClassLoader`. If the application is redeployed in a dynamic server/web container, this strong reference prevents the application's ClassLoader from being garbage-collected, leading to fatal metaspace/heap exhaustion.
+**Context & Proof:** In `ContainerStateRegistry.kt`:
+```kotlin
+val THREAD_BLOCKED = ThreadLocal.withInitial<Set<Syscall>> { emptySet() }
 ```
+Each `Syscall` is an entry in the `Syscall` enum class loaded by the application ClassLoader. When `updateThreadState` is called:
+```kotlin
+ContainerStateRegistry.THREAD_BLOCKED.set(ContainerStateRegistry.THREAD_BLOCKED.get() + newBlocks)
+```
+The thread's `ThreadLocalMap` permanently holds a strong reference to the `Set<Syscall>` value. Since the system threads are never terminated, the `Syscall` enum and its ClassLoader are leaked permanently after the application is undeployed.
+To make the state-tracking completely ClassLoader-safe and prevent any leaks, the `ThreadLocal` state must be stored using only JDK bootstrap-loaded classes or primitives.
+**Cascading Risk Potential:** High. Deterministically causes JVM ClassLoader leaks and memory exhaustion on redeployment in standard servlet or enterprise containers.
+**Needed:** Refactor `ContainerStateRegistry.THREAD_BLOCKED` to store `java.util.BitSet` (which uses only primitives) or `Long` bitmasks instead of `Set<Syscall>`. Map each `Syscall` to its ordinal number (`Syscall.ordinal`) to read/write the state safely without holding references to application-defined enum types.
+
+### 🔴 [Severity: CRITICAL]: JVM Deadlock and Starvation under Whitelist Policies due to omitted `MMAP` and `MPROTECT` whitelisting
+**Target:** `/enforcer/src/main/kotlin/io/mazewall/BpfFilter.kt` (specifically `jvmCriticalNrs`)
+**Failure Hypothesis:** When a developer compiles a strict whitelist seccomp policy (e.g. from an SBoB or custom whitelist preset where `defaultAction = ACT_ERRNO`), any system call not explicitly allowed is blocked. If the policy does not explicitly list `MMAP` and `MPROTECT` (e.g. because they were not triggered during a short profiling run), the compiled seccomp filter will block them. While `BpfFilter` performs argument inspection on `mmap`/`mprotect` when `allowMmapExec = false`, it only intercepts `PROT_EXEC` mappings. For non-executable mappings, it delegates to `addInspectionResult(nr)`, which returns the policy's action (e.g. `ACT_ERRNO` / `EPERM`). Consequently, any standard non-executable `mmap` or `mprotect` call made by the thread (such as JVM memory commits, thread stack allocations, or GC barrier protections) will fail with `EPERM`, causing immediate JVM thread crashes or deadlocks during subsequent garbage collection or memory allocations.
+**Context & Proof:** In `BpfFilter.kt`, the Special Syscall Argument Checks for `mmap` and `mprotect` do:
+```kotlin
+filters.add(SockFilter((BPF_JMP or BPF_JSET or BPF_K).toShort(), 0, 4, nr))
+filters.add(SockFilter((BPF_LD or BPF_W or BPF_ABS).toShort(), 0, 0, SECCOMP_ARGS2_OFFSET))
+filters.add(SockFilter((BPF_JMP or BPF_JSET or BPF_K).toShort(), 0, 1, 0x04)) // PROT_EXEC
+val denyNative = resolveNativeAction(SeccompAction.ACT_ERRNO, profilingMode)
+filters.add(SockFilter((BPF_RET or BPF_K).toShort(), 0, 0, denyNative))
+addInspectionResult(nr)
+```
+If `args[2] & 0x04` is zero (non-executable mapping), it jumps to `addInspectionResult(nr)`. In a whitelist policy where `defaultAction = ACT_ERRNO` and `Syscall.MMAP` is not in `syscallActions`, `addInspectionResult(nr)` will emit a `BPF_RET` of `denyNative` (i.e. `EPERM`). This blocks all non-executable `mmap`/`mprotect` calls, making the sandbox extremely unstable and causing catastrophic JVM crashes as soon as the thread triggers standard GC or stack management operations.
+**Cascading Risk Potential:** Critical. Causes deterministic, non-obvious production crashes and deadlocks during GC Safepoints or JVM memory commits under whitelist sandboxes.
+**Needed:** Add `Syscall.MMAP.numberFor(arch)` and `Syscall.MPROTECT.numberFor(arch)` to `jvmCriticalNrs` in `BpfFilter.kt` so they are always allowed for non-executable mappings (their executable mappings are already safely blocked by the argument inspection logic).
 
