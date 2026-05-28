@@ -4,16 +4,27 @@ This subproject demonstrates `mazewall`'s kernel-level security guarantees by ru
 
 ## Vulnerability Matrix
 
-| Attack Vector | Vulnerability | CVE / Link | Impact | Mazewall Protection |
+| Attack Vector | Vulnerability | CVE / Link | Impact | Mazewall Protection (Standard JVM) |
 |---------------|---------------|------------|--------|---------------------|
-| **Log4Shell** | Log4j 2.14.1 | [CVE-2021-44228](https://nvd.nist.gov/vuln/detail/CVE-2021-44228) | Remote Code Execution (RCE) | `Policy.NO_NETWORK` |
-| **SnakeYAML** | SnakeYAML 2.3 | [CVE-2022-1471](https://nvd.nist.gov/vuln/detail/CVE-2022-1471) | Deserialization RCE | `Policy.NO_EXEC` |
-| **XStream**   | XStream 1.4.17 | [CVE-2021-39144](https://nvd.nist.gov/vuln/detail/CVE-2021-39144) | Deserialization RCE | `Policy.NO_EXEC` |
-| **XXE**       | DocumentBuilder | [XXE Injection](https://owasp.org/www-community/vulnerabilities/XML_External_Entity_(XXE)_Processing) | File Exfiltration | Landlock Path Restriction |
-| **SSRF**      | RestTemplate | [SSRF](https://owasp.org/www-community/attacks/Server_Side_Request_Forgery) | Internal Network Scanning | `Policy.NO_NETWORK` |
-| **SSTI**      | Thymeleaf 3.x | [SSTI RCE](https://www.veracode.com/blog/secure-development/spring-view-manipulation-vulnerability) | Template Manipulation RCE | `Policy.NO_EXEC` |
-| **Zip Slip**  | ZipInputStream | [Zip Slip](https://snyk.io/research/zip-slip-vulnerability) | Arbitrary File Write | Landlock Path Restriction |
+| **Log4Shell** | Log4j 2.14.1 | [CVE-2021-44228](https://nvd.nist.gov/vuln/detail/CVE-2021-44228) | RCE (Data-plane) | `Policy.NO_NETWORK` (Trapped) |
+| **SnakeYAML** | SnakeYAML 2.3 | [CVE-2022-1471](https://nvd.nist.gov/vuln/detail/CVE-2022-1471) | Deserialization RCE | Tier 1 `NO_EXEC` (Shell blocked, exfiltration possible via Thread-Hopping) |
+| **XStream**   | XStream 1.4.17 | [CVE-2021-39144](https://nvd.nist.gov/vuln/detail/CVE-2021-39144) | Deserialization RCE | Tier 1 `NO_EXEC` (Shell blocked, exfiltration possible via Thread-Hopping) |
+| **XXE**       | DocumentBuilder | [XXE Injection](https://owasp.org/www-community/vulnerabilities/XML_External_Entity_(XXE)_Processing) | File Exfiltration | Landlock Path Restriction (Trapped) |
+| **SSRF**      | RestTemplate | [SSRF](https://owasp.org/www-community/attacks/Server_Side_Request_Forgery) | Internal Network Scanning | `Policy.NO_NETWORK` (Trapped) |
+| **SSTI**      | Thymeleaf 3.x | [SSTI RCE](https://www.veracode.com/blog/secure-development/spring-view-manipulation-vulnerability) | Template Manipulation RCE | Tier 1 `NO_EXEC` (Shell blocked, exfiltration possible via Thread-Hopping) |
+| **Zip Slip**  | ZipInputStream | [Zip Slip](https://snyk.io/research/zip-slip-vulnerability) | Arbitrary File Write | Landlock Path Restriction (Trapped) |
 | **SQLi**      | JdbcTemplate | [SQL Injection](https://owasp.org/www-community/attacks/SQL_Injection) | Database Compromise | *Out of Scope (Data-plane)* |
+
+### ⚠️ The "Thread-Hopping" Exfiltration Caveat
+Notice the distinction in the matrix above. For **Untrusted Data** attacks (SSRF, XXE, Log4Shell's initial JNDI lookup), Mazewall intercepts the synchronous system calls on the worker thread, providing absolute protection.
+
+However, for attacks that grant **Arbitrary Code Execution (Java logic)** such as SnakeYAML or Thymeleaf SSTI, the attacker can use standard Java concurrency APIs like `CompletableFuture.runAsync(...)` to execute their payload on the global `ForkJoinPool`. 
+
+Because those global threads were spawned at startup, they only inherited the process-wide **Tier 1 (`NO_EXEC`)** policy. 
+1. **The Attacker CANNOT spawn a shell** (Blocked by Tier 1).
+2. **The Attacker CAN exfiltrate data** by reading files or opening network sockets (Bypassing Tier 2).
+
+This demonstrates that on a standard JIT JVM, thread-scoped containment is a highly effective shield for trusted code, but it is not a complete cage for malicious code. For absolute isolation of untrusted logic, **GraalVM Isolates** or **Wasm** are required.
 
 ## Prerequisites
 

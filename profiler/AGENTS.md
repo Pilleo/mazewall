@@ -21,7 +21,6 @@ Operating these tools requires deep interaction with Linux kernel notification l
 
 ### 4. Strace Descendant Tracing Boundaries
 - The `StraceProfiler` spawns JVM workloads directly under `strace -f`.
-- When modifying path parsers, ensure the noisy background JVM classloader operations (reading `.class` files, reading standard system dependencies in `/lib64` or `/etc`) are systematically filtered out via `BobCompiler` regular expression exclusions. This keeps the resulting `BillOfBehavior` clean and secure.
 
 ---
 

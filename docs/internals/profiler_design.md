@@ -61,16 +61,31 @@ To bypass these constraints, we designed a **Tiered Profiling System** that prov
 +------------------+           +------------------+            +------------------+
 ```
 
-### Tier P: Privileged / Trace Profiler (Strace Subprocess Descendant Tracing)
-In local development environments and CI/CD runners where host-level root-privileged eBPF is blocked or unavailable, Tier P utilizes a high-fidelity **`strace` subprocess descendant tracing** architecture (`StraceProfiler`).
+### Tier P: Privileged / Trace Profiler (eBPF Tracepoints & Strace Limitations)
+
+In systems tracing, **Tier P** represents the privileged boundary. While eBPF provides the highest fidelity, local development environments, CI/CD runners, and rootless container workloads introduce major constraints.
+
+#### The physical `strace` and `ptrace` blind spot for `io_uring`
+Historically, `StraceProfiler` (running descendant tracing via `strace -f`) has been used to capture standard synchronous file system and network operations without elevated privileges. However, **`strace` is physically incapable of capturing asynchronous I/O paths submitted via `io_uring`.**
+* **The Mechanics of `strace`:** `strace` operates on top of the `ptrace(2)` system call, trapping the target thread at system call entry and exit boundaries.
+* **The `io_uring` Bypass:** When an application issues asynchronous I/O via `io_uring`, it writes Submission Queue Entries (SQEs) containing file path pointers and command opcodes directly to a lock-free ring buffer in a shared memory region. It then issues a single `io_uring_enter(2)` system call to notify the kernel of the new entries. The actual file or socket operations are executed asynchronously by kernel helper threads (`io-wq` worker threads) or via kernel poll queues.
+* **The Trapping Failure:** Because the `io-wq` kernel threads execute the physical filesystem operations in-kernel, they never trigger `ptrace` system call boundaries on the application's profiled thread. Therefore, `strace -e trace=file` or `strace` in general is completely blind to any filesystem paths or socket operations processed via `io_uring` async queues.
 
 #### The Unprivileged Container Yama Ptrace Scope Constraint
-Inside rootless, unprivileged containers (e.g., standard Podman/Docker developer environments), attempting to attach `strace` to a running JVM process using `strace -p <PID>` fails with `EPERM` ("Operation not permitted"). This occurs because:
+For standard synchronous I/O, inside rootless, unprivileged containers (e.g., standard Podman/Docker developer environments), attempting to attach `strace` to a running JVM process using `strace -p <PID>` fails with `EPERM` ("Operation not permitted"). This occurs because:
 1. The host kernel's default Yama Linux Security Module (LSM) configuration is set to `kernel.yama.ptrace_scope = 1`, which strictly restricts tracing to parent-child descendant relationships (a process can only trace its own descendants).
 2. The user namespace boundaries of rootless OCI runtimes prevent namespaced processes from easily calling `prctl(PR_SET_PTRACER, ...)` across JVM thread contexts without elevated capabilities.
 
-#### The Subprocess Descendant Architecture
-To achieve unprivileged, 100% container-compatible tracing, the profiler spawns a new child JVM process executed **directly under `strace -f`**. Under standard Linux kernel security boundaries, any process is fully permitted to trace its own spawned child descendants.
+#### The eBPF Container Privilege Ceiling (Why Rootless/Nested Containers Fail)
+To capture `io_uring` paths transparently, one must use eBPF programs attached to kernel tracepoints (such as `io_uring_submit_sqe` or LSM hooks like `bpf_lsm_file_open`). However, loading and executing eBPF programs is highly restricted:
+1. **Global Namespace Requirements:** The Linux kernel's BPF verifier strictly requires global `CAP_BPF` and `CAP_SYS_ADMIN` capabilities within the **initial (host) user namespace** to load eBPF tracing programs via `bpf(2)`.
+2. **Rootless Podman Privilege Bounds:** In a rootless Podman/Docker environment, the container runs inside a user namespace where the root user within the container (`uid=0`) is mapped to an unprivileged user on the host. Even when the container is executed with the `--privileged` flag, the process still lacks capabilities in the host's initial user namespace. The kernel verifier rejects the `bpf(2)` syscall with `EPERM`.
+3. **Podman-in-Podman (PiP) Ineffectiveness:** Running nested containers (PiP) does not bypass this boundary, as nested namespaces are still constrained by the ceiling of the parent rootless user namespace. eBPF loading remains permanently blocked.
+
+Consequently, true transparent `io_uring` profiling via eBPF (Tier P) requires a **rootful container or host-level root privileges**.
+
+#### The Subprocess Descendant Architecture for standard I/O
+To achieve unprivileged, 100% container-compatible tracing for standard (non-`io_uring`) synchronous I/O, the profiler spawns a new child JVM process executed **directly under `strace -f`**. Under standard Linux kernel security boundaries, any process is fully permitted to trace its own spawned child descendants.
 
 ```
 +-----------------------------+
@@ -166,7 +181,7 @@ This hybrid approach leverages the ease of synchronous Tier S profiling while ma
 | Profiling Strategy               | Resulting Policy                                | Enforcement Behavior                                                                                                             |
 |----------------------------------|-------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------|
 | **Hybrid (Tier S + Manual Add)** | Paths captured sync, async manually whitelisted | Application runs on the **Fast Path**.                                                                                           |
-| **Tier P (Root)**                | Paths and async captured natively               | Application runs on the **Fast Path**.                                                                                           |
+| **Tier P (Root eBPF)**           | Paths and async captured natively               | Application runs on the **Fast Path** (Note: Descendant `strace` is blind to `io_uring`).                                         |
 | **Tier A (Iterative)**           | Paths and async learned via `EACCES`            | Application runs on the **Fast Path**.                                                                                           |
 | **Tier S (w/o manual add)**      | Standard I/O only                               | Application is **Functionally Identical** but runs on the **Slow Path** (Seccomp blocks `io_uring_setup`, forcing app fallback). |
 

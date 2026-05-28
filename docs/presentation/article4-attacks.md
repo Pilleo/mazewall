@@ -86,11 +86,14 @@ Savvy attackers avoid writing binaries to disk to evade signature-based Endpoint
 2. They write the compiled ELF payload into the file descriptor.
 3. They invoke `execveat(2)` using the file descriptor (e.g. `/proc/self/fd/<fd>`) to execute the binary directly from RAM, leaving zero trace on the disk.
 
-### The Defense with Mazewall
-Under the `Policy.NO_EXEC` profile, `mazewall` blocks this attack at three separate checkpoints:
+### The Defense with Mazewall (And The ACE Caveat)
+If **Tier 1 (Process-Wide)** isolation is active, `mazewall` blocks this attack at three separate checkpoints:
 1. **`memfd_create` Blocking:** The `memfd_create` system call is blocked by default in Seccomp.
 2. **`execveat` Blocking:** Even if the attacker manages to obtain a memory-backed file descriptor through other means, the `execveat` system call is blocked.
 3. **Execution Denial:** The kernel immediately aborts the call with `EPERM`. The fileless binary remains passive data and can never transition into an active process.
+
+> [!WARNING]
+> **The Shared-Memory ACE Escape:** If you are *only* using Tier 2 (Thread-Scoped) containment, this defense is structurally bypassed. Fileless malware requires Arbitrary Code Execution (ACE) to invoke native system calls like `memfd_create`. Because all JVM threads share the same address space, an attacker with ACE on a sandboxed thread can simply pivot and corrupt the memory or stack of an *unrestricted* sibling thread, executing their payload there. **Thread-scoped containment alone does not stop ACE.**
 
 ---
 
@@ -107,14 +110,17 @@ They write shellcode bytes into an existing Java byte array, locate the array's 
 3. They pass `PROT_EXEC` (executable permissions) in the flags to make the memory region executable.
 4. The CPU registers are pivoted to point to the address of the shellcode. The shellcode executes with the full privileges of the JVM process.
 
-### The Defense with Mazewall
-As detailed in Part 3, mazewall uses Classic BPF (cBPF) argument-level inspection to secure memory without breaking the JIT compiler.
+### The Defense with Mazewall (Process-Wide Only)
+Assuming **Tier 1 (Process-Wide)** isolation is active, mazewall uses Classic BPF (cBPF) argument-level inspection to secure memory without breaking the JIT compiler.
 
-1. The sandboxed thread attempts to invoke `mprotect(address, size, PROT_READ | PROT_WRITE | PROT_EXEC)`.
+1. The thread attempts to invoke `mprotect(address, size, PROT_READ | PROT_WRITE | PROT_EXEC)`.
 2. Seccomp intercept matches the `mprotect` system call number.
 3. The filter inspects the third argument register (`args[2]`), loading the protection flag bits.
 4. It detects the `PROT_EXEC` bit (`0x4`).
-5. The filter rejects the call and returns `EPERM`. The memory region remains non-executable (W^X enforced). If the sandboxed thread subsequently attempts to jump to that memory region, the CPU raises `SIGSEGV` (Segmentation Fault), which the JVM surfaces as a fatal internal error on that thread.
+5. The filter rejects the call and returns `EPERM`. The memory region remains non-executable (W^X enforced). If the thread subsequently attempts to jump to that memory region, the CPU raises `SIGSEGV` (Segmentation Fault), which the JVM surfaces as a fatal internal error.
+
+> [!WARNING]
+> **The Shared-Memory ACE Escape (Again):** Just like Attack 2, writing and executing shellcode requires Arbitrary Code Execution (ACE). If only Tier 2 (Thread-Scoped) isolation is active, the attacker doesn't even need to call `mprotect` on the restricted thread. They will simply pivot their shellcode execution to an unconstrained sibling thread using shared memory.
 
 ```
        Worker Thread (Sandboxed)                  Linux Kernel
@@ -197,6 +203,9 @@ Mazewall neutralizes this bypass through the **complementary co-enforcement of S
 
 This illustrates the structural advantage of complementary co-enforcement. Seccomp handles the system call surface (allowing high-performance asynchronous setups), while Landlock acts as the VFS backstop, ensuring that asynchronous worker threads remain bound to the application thread's security contract regardless of how they are invoked.
 
+> [!CAUTION]
+> **Older Kernel Bypass:** This co-enforcement relies on Landlock being supported by the kernel (Landlock ABI >= 1). If Landlock is unsupported on the host system, it fails-open. Because `io_uring_setup` is whitelisted in Seccomp, an attacker on an older kernel can use `io_uring` to completely bypass the sandbox and perform arbitrary filesystem access.
+
 ---
 
 ## Attack 6: The Thread-Hopping Evasion (The Limits of the Cage)
@@ -239,7 +248,14 @@ CompletableFuture.runAsync(() -> {
 ### The Defense (Process-Wide Isolation)
 This bypass highlights the fundamental architectural truth of thread-scoped sandboxing: **Tier 2 (Thread-Scoped) containment is a shield against bad data, not a cage for malicious code.** 
 
-Without the deprecated Java Security Manager (JSM), in-process isolation of untrusted Java code is structurally broken. To stop this attack, you must apply **Tier 1 (Process-Wide) Isolation**. If the main `main()` method applies `Policy.NO_EXEC` process-wide at startup, the `ForkJoinPool` threads will inherit the filter when they are spawned. Even if the attacker hops threads, the destination thread will still block the shell execution.
+Without the deprecated Java Security Manager (JSM), in-process isolation of untrusted Java code is structurally broken. To stop this attack, you must apply **Tier 1 (Process-Wide) Isolation**.
+
+> [!IMPORTANT]
+> **You cannot apply process-wide isolation in `main()`!**
+> 
+> A common misconception is that calling a Seccomp TSYNC installation from Java's `main()` method will protect the whole process. **This deterministically fails on standard JVMs.** By the time `main()` executes, the JVM has *already* spawned GC threads, JIT threads, and VM helper threads. Because these background threads were spawned without the `no_new_privs` flag, the kernel will reject the process-wide Seccomp synchronization (`TSYNC`) with `EACCES`.
+> 
+> To achieve Tier 1 isolation, the Seccomp profile must be applied *before* the JVM process is started, typically via an **OCI container profile** (e.g., Docker or Podman's `--security-opt seccomp=profile.json`) or a native launcher wrapper.
 
 ---
 
@@ -248,10 +264,10 @@ Without the deprecated Java Security Manager (JSM), in-process isolation of untr
 | Attack Vector           | Primitives Used             | Protected by               | OS Error | Java Exception                    |
 |-------------------------|-----------------------------|----------------------------|----------|-----------------------------------|
 | **Shell Spawn**         | `execve`                    | Seccomp (`Policy.NO_EXEC`) | `EPERM`  | `IOException: Cannot run program` |
-| **Fileless Payload**    | `memfd_create` / `execveat` | Seccomp (`Policy.NO_EXEC`) | `EPERM`  | `ContainmentViolationException`   |
-| **Shellcode Injection** | `mprotect(PROT_EXEC)`       | Seccomp (cBPF inspect)     | `EPERM`  | `SIGSEGV` → JVM fatal error       |
+| **Fileless Payload**    | `memfd_create` / `execveat` | **Tier 1 (Process-Wide)**  | `EPERM`  | `ContainmentViolationException`   |
+| **Shellcode Injection** | `mprotect(PROT_EXEC)`       | **Tier 1 (Process-Wide)**  | `EPERM`  | `SIGSEGV` → JVM fatal error       |
 | **Path Traversal**      | `openat("/etc/hosts")`      | Landlock (Path filter)     | `EACCES` | `ContainmentViolationException`   |
-| **io_uring Evasion**    | `io_uring` submission       | Landlock (Credential copy) | `EACCES` | `ContainmentViolationException`   |
+| **io_uring Evasion**    | `io_uring` submission       | Landlock (Kernel ≥ 5.13)   | `EACCES` | `ContainmentViolationException`   |
 | **Thread-Hopping RCE**  | `CompletableFuture`         | **Tier 1 (Process-Wide)**  | `EPERM`  | N/A (Bypasses Tier 2)             |
 
 ---

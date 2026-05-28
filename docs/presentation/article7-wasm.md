@@ -48,9 +48,30 @@ In May 2026, the **Chicory** project (the pure-Java Wasm runtime) was moved into
 The performance barrier has been shattered by **Chicory Redline**. By leveraging the **Java 25+ Foreign Function & Memory (FFM) API**, Redline uses the Cranelift compiler (itself compiled to Wasm) to generate native machine code at runtime. 
 * **The Result:** You can now run a high-performance C++ or Rust parser (like `simdjson`) inside your JVM at **near-native speeds** while remaining inside a pure-Java, zero-dependency security boundary.
 
-## The Component Model: Jackson for Wasm?
+## The Killer Use Case: Sandboxing JSON (Fixing Jackson RCEs)
+
+The most persistent vulnerability in the Java ecosystem is Insecure Deserialization (e.g., Jackson Polymorphic RCEs, Fastjson). By combining Endive with Wasm, the industry has finally found a structural fix.
+
+Instead of parsing JSON with a highly-privileged Java library, modern high-security systems use the **Wasm Object Mapper pattern**:
+1. **The Guest (Rust):** A fast, memory-safe Rust parser (`serde_json`) is compiled to Wasm.
+2. **The Execution:** Java copies the untrusted JSON string into the Wasm module's 10MB linear memory.
+3. **The Parse:** The Wasm parser validates the JSON. If it encounters a "JSON Bomb" (DoS) or a buffer overflow, the Wasm module simply traps. The host JVM is perfectly safe.
+4. **The Safe Return:** The Wasm module returns a flat, safe binary representation of the data. Java reads this data and instantiates an immutable Java `Record`.
+
+Because the Wasm parser has **no access to the JVM classpath**, it is physically impossible for a malicious payload to trigger a Java gadget chain (like Log4Shell).
+
+## The Component Model: The Future of "readValue"
 
 The final frontier is the **Wasm Component Model (WIT)**. While the foundation is present in Endive today, the "Jackson experience"—automatically mapping Wasm data straight into Java POJOs—is the primary focus of the late 2026 roadmap. Currently, production workloads like **`jq4j`** (a sandboxed `jq` engine for the JVM) use stable **WASI Preview 1** and manual bindings or Protobuf to bridge the memory gap.
+
+## The Pure-Java Dream: TeaVM + Chicory
+
+While writing untrusted plugins in Rust is great for performance, what if you want to write your plugins in Java? By combining **TeaVM** (which compiles Java bytecode to WebAssembly) and **Chicory/Endive** (which runs Wasm inside the JVM), we can achieve a pure-Java development experience with Wasm-level isolation.
+
+With the right build plugins, you can write all your business logic in Java. The core application runs natively on the JVM, while specific untrusted modules are compiled by TeaVM into Wasm and executed by Chicory. 
+
+> [!NOTE]  
+> **The Performance Catch:** As of now, passing complex Java objects across the Wasm boundary requires heavy serialization. Only **primitive types** (ints, floats, and memory offsets) work at high speed. Until the Wasm Component Model fully matures, passing full object graphs back and forth will incur a performance penalty.
 
 ## The Synergies: Mazewall + Wasm
 
@@ -69,7 +90,7 @@ We call this the **"Double Sandbox"**—the guest is trapped in a Wasm cage, and
 
 | Workload Type | Recommended Sandbox | Why? |
 | :--- | :--- | :--- |
-| **Untrusted Native Libs (JNI/FFM)** | **Mazewall (Tier 2)** | Stops native buffer overflows from calling `execve`. |
+| **Untrusted Native Libs (JNI/FFM)** | **Mazewall (Tier 1)** | Stops native buffer overflows from calling `execve` (Tier 2 is bypassed via shared-memory pivot). |
 | **Untrusted Java Plugins** | **GraalVM Isolates** | Separates heaps while maintaining JVM language features. |
 | **Untrusted 3rd-party Scripts/Logic** | **WebAssembly (Wasm)** | Absolute "shared-nothing" isolation with no shared-memory pivot risk. |
 | **Highest Risk (Legacy Code)** | **Tier 1 (Process)** | The absolute backstop. Total OS-level separation. |

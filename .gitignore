@@ -84,3 +84,4 @@ nosetests.xml
 coverage.xml
 *,cover
 .hypothesis/
+demo/output/report.md

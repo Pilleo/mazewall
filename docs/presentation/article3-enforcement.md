@@ -65,9 +65,12 @@ The standard approach to container sandboxing is a global seccomp profile applie
 ```
 
 ### Tier 1: Process-Wide Lockdown
-At application startup, `mazewall` applies a global process-wide restriction (`Policy.NO_EXEC`) via `ContainedExecutors.installOnProcess()`. This permanently disables shell spawning and command execution (`execve`, `execveat`, `fork`, `vfork`, `memfd_create`) for every thread, present and future.
+At application startup, a global process-wide restriction (`Policy.NO_EXEC`) must be applied to permanently disable shell spawning and command execution (`execve`, `execveat`, `fork`, `vfork`, `memfd_create`) for every thread.
 
-*(Note: Process-wide `execve` blocking via Seccomp at startup is a production-proven pattern — Elasticsearch applies this in its bootstrap security checks to prevent the JVM process from ever spawning child processes.)* 
+> [!CAUTION]
+> **TSYNC fails on standard JVMs:** You cannot apply process-wide isolation by simply calling `ContainedExecutors.installOnProcess()` from Java. By the time your `main()` method executes, the JVM has already spawned background threads (GC, JIT) without the `no_new_privs` flag, causing the kernel to reject the Seccomp `TSYNC` synchronization with `EACCES`. 
+> 
+> To properly establish Tier 1 lockdown, the Seccomp profile must be applied *before* the JVM process is started via an **OCI container profile** (e.g., Docker or Podman) or a native launcher wrapper.
 
 ### Tier 2: Surgical Thread Containment
 For specific thread pools handling untrusted data (like JSON parsers or image processors), we apply stricter policies (like `Policy.PURE_COMPUTE` or custom Landlock paths). We wrap the target `ExecutorService` using `ContainedExecutors.wrap()`, which automatically binds the compiled policy to each worker thread before it executes its first task.

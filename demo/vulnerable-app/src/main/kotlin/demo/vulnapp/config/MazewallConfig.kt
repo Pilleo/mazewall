@@ -23,20 +23,6 @@ class MazewallConfig {
     private val logger = Logger.getLogger(MazewallConfig::class.java.name)
     private val executors = java.util.concurrent.CopyOnWriteArrayList<ExecutorService>()
 
-    @EventListener(ApplicationReadyEvent::class)
-    fun onApplicationReady() {
-        // Tier 1 Baseline: Block shell execution process-wide.
-        // Even after warmup, the JVM (JIT) may still need to commit executable memory.
-        // We use a baseline that blocks execve/fork/etc. but allows mmap(PROT_EXEC).
-        logger.info("Application ready. Engaging Mazewall process-wide NO_EXEC baseline (mmap-exec allowed for JIT).")
-        ContainedExecutors.installOnProcess(
-            Policy.builder()
-                .base(Policy.NO_EXEC)
-                .allowMmapExec()
-                .build()
-        )
-    }
-
     private fun wrapExecutor(delegate: ExecutorService, basePolicy: Policy): ExecutorService {
         executors.add(delegate)
         val sbobPath = System.getProperty("mazewall.sbob.path") ?: "/app/sbob.json"

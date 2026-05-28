@@ -54,6 +54,14 @@ While startup speed makes sub-process isolation (Tier 1) viable, GraalVM Native 
 
 **Summary:** In a GraalVM environment, Tier 2 (Thread-Scoped) limits are significantly harder to bypass because the attacker lacks the dynamic tools (JIT, Reflection, Classloading) required to pivot or escalate privileges.
 
+#### Tier 3: Isolates & WebAssembly (The Ultimate Sandbox)
+Even with GraalVM AOT compilation hardening the enforcement, all threads within a single JVM process still share the same heap. If an attacker discovers a vulnerability that allows for Arbitrary Code Execution (ACE) via native memory corruption, they can theoretically pivot into the main application's memory space.
+
+To achieve mathematically isolated, "Zero-Trust" execution of untrusted code without the overhead of multiple OS processes, the industry has shifted to two modern JVM architectures:
+
+1.  **GraalVM Isolates (Heap Security):** Spawning a GraalVM Isolate creates a completely independent Java heap and Garbage Collector within the same OS process. An attacker compromising an Isolate is physically trapped in that specific heap and cannot see or corrupt the main application's memory. When combined with Mazewall (Seccomp), this creates a high-density, multi-tenant sandbox.
+2.  **WebAssembly (Instruction-Level Security):** Embedding a Wasm runtime (like Endive/Chicory) provides a "shared-nothing, linear memory" architecture. The guest module lacks the CPU instructions to perform system calls (like opening a socket) and is physically restricted to a tiny byte array. The modern **Wasm Object Mapper** pattern leverages Wasm parsers (like `simdjson`) to safely parse untrusted data and uses Java 25 Panama FFM to map the results directly to Java Records, entirely eliminating the RCE risks of standard Java deserialization libraries (like Jackson).
+
 ---
 
 ## 2. The "Blast Radius" Architecture
@@ -82,7 +90,9 @@ Modern Linux systems support `io_uring` for high-performance asynchronous I/O. A
 To build accurate policies for `io_uring` applications, `mazewall` requires one of the following profiling strategies:
 
 1.  **Tier H (Hybrid Shortcut):** **Highly Recommended.** Developers temporarily disable `io_uring` during testing. The application falls back to standard I/O. The unprivileged Tier S profiler transparently captures all required paths. The developer then manually adds `.unblock(Syscall.IO_URING_SETUP)` to the generated policy for high-performance production enforcement.
-2.  **Tier P (Privileged):** Uses root-privileged eBPF tracepoints to observe `io_uring` operations transparently.
+2.  **Tier P (Privileged):** Uses root-privileged eBPF tracepoints (such as LSM hooks or `io_uring_submit_sqe` tracepoints) to observe `io_uring` operations transparently.
+    *   *The `strace` Blind Spot:* Descendant tracing via `strace` (ptrace) is physically blind to `io_uring` path and socket operations, as submissions bypass thread-scoped system call registers via shared-memory SQEs and are executed asynchronously in kernel-space by `io-wq` worker threads.
+    *   *Container Privilege Constraints:* Running eBPF (Tier P) requires global `CAP_BPF` and `CAP_SYS_ADMIN` capabilities in the host's **initial** user namespace. Therefore, unprivileged rootless containers (such as standard rootless Podman or Docker setups), even when run with `--privileged`, cannot load eBPF filters. Nested containers (Podman-in-Podman) are similarly blocked by the user namespace boundary of the rootless runtime on the host. eBPF profiling is only available on host-level root or rootful container deployments.
 3.  **Tier A (Iterative):** Unprivileged fallback. Uses Landlock to block unauthorized VFS access, catches the resulting Java exceptions, and iteratively retries the workload.
 
 **The Landlock Audit Constraint:**

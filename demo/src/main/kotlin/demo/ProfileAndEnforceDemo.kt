@@ -18,6 +18,13 @@ import java.util.concurrent.Executors
 import kotlin.concurrent.thread
 
 fun runProfileAndEnforce() {
+    // Warm up the ForkJoinPool before applying any containment.
+    // If the pool is lazily initialized inside a contained thread, its new workers
+    // would inadvertently inherit the sandbox via the clone syscall!
+    java.util.concurrent.CompletableFuture
+        .runAsync {}
+        .join()
+
     println("\u001b[36;1m==========================================================")
     println("          MAZEWALL: PROFILE & ENFORCE DEMO                ")
     println("==========================================================\u001b[0m")
@@ -167,8 +174,9 @@ fun runProfileAndEnforce() {
         // PHASE 4: Simulating Breach / Path Containment (Landlock)
         // ------------------------------------------------------------
         println("\n\u001b[33;1m[PHASE 4] Simulating Breach: Unauthorized Path Access...\u001b[0m")
-        println("An attacker has achieved Arbitrary Code Execution (ACE) and attempts to read")
-        println("a sensitive system configuration file '/etc/hosts' (not part of the profiled actions).")
+        println("SCENARIO: Untrusted Data / Synchronous Execution.")
+        println("An attacker has achieved Arbitrary Code Execution (ACE) inside the contained")
+        println("thread and attempts to read a sensitive file '/etc/hosts' synchronously.")
 
         val sensitiveFile = File("/etc/hosts").canonicalFile
         val attackerPathTask = {
@@ -196,8 +204,9 @@ fun runProfileAndEnforce() {
         // PHASE 5: Simulating Asynchronous Evasion via io_uring (Complementary Sandboxing)
         // ------------------------------------------------------------
         println("\n\u001b[33;1m[PHASE 5] Simulating Breach: Asynchronous Evasion via io_uring...\u001b[0m")
-        println("To bypass thread-scoped Seccomp filters, the attacker leverages the allowed")
-        println("io_uring queue to submit an asynchronous read of '/etc/hosts'.")
+        println("SCENARIO: Native Dependency Breach.")
+        println("To bypass thread-scoped Seccomp filters, a compromised native library leverages")
+        println("the allowed io_uring queue to submit an asynchronous read of '/etc/hosts'.")
         println("This is the ultimate test of the complementary Seccomp-Landlock sandboxing:")
         println("  1. Seccomp whitelists io_uring_setup for normal workload operations.")
         println("  2. Standard Seccomp cannot inspect async operations submitted inside the queue.")
@@ -245,6 +254,39 @@ fun runProfileAndEnforce() {
                 println("\u001b[31m[ERROR] Unexpected execution failure: ${e.message}\u001b[0m")
                 println(e.stackTraceToString())
             }
+        }
+
+        // ------------------------------------------------------------
+        // PHASE 6: The Thread-Hopping Bypass (Concurrency Evasion)
+        // ------------------------------------------------------------
+        println("\n\u001b[33;1m[PHASE 6] Simulating Breach: The Thread-Hopping Bypass...\u001b[0m")
+        println("SCENARIO: Untrusted Java Code / RCE Bypass.")
+        println("An attacker has achieved Java-level Remote Code Execution (e.g., via SpEL injection)")
+        println("and attempts to bypass the Tier 2 containment by hopping threads.")
+        println("WARNING: Thread-scoped Seccomp provides NO protection against untrusted Java code!")
+
+        val threadHoppingTask = {
+            println("  [Attacker] Inside contained thread. Submitting malicious task to global ForkJoinPool...")
+
+            // Standard Java concurrency APIs delegate execution to pre-existing OS threads
+            // (like ForkJoinPool.commonPool()) that lack the Seccomp/Landlock filters.
+            java.util.concurrent.CompletableFuture
+                .supplyAsync {
+                println("  [Attacker] Executing on uncontained thread: ${Thread.currentThread().name}")
+                println("  [Attacker] Reading sensitive file: ${sensitiveFile.canonicalPath}...")
+                sensitiveFile.readText()
+            }.get()
+        }
+
+        try {
+            val future = wrapper.submit(threadHoppingTask)
+            val stolenData = future.get()
+            println("\u001b[31;1m[BYPASS DETECTED] Attack succeeded! Data stolen via thread-hopping:\n$stolenData\u001b[0m")
+            println("\u001b[35m[LESSON] Tier 2 (Thread-Scoped) is a shield for trusted code, not a cage for malicious code.")
+            println("         To block this attack, you MUST use Tier 1 (Process-Wide) isolation.\u001b[0m")
+        } catch (e: ExecutionException) {
+            println("\u001b[32;1m[UNEXPECTED] Attack was blocked? This should not happen on standard JVMs without Tier 1 containment.\u001b[0m")
+            println(e.stackTraceToString())
         }
     } finally {
         containedExecutor?.shutdown()
