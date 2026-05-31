@@ -15,7 +15,26 @@ But the moment software is compromised, composition stops being the most importa
 And in many cases, the honest answer is uncomfortable: we don’t really know.
  
 An SBOM can tell you that a compression library is present. It cannot tell you that this same library has suddenly started interfering with authentication flows. It can tell you that a logging framework is installed. It cannot tell you that the logger is currently opening outbound network sockets. Composition transparency is valuable, but it is not behavioral transparency.
- 
+
+```mermaid
+graph LR
+    subgraph SBOM ["SBOM (Static Composition)"]
+        direction TB
+        box[Container Image]
+        box --> L1[log4j-core.jar]
+        box --> L2[jackson-databind.jar]
+        box --> L3[netty-all.jar]
+    end
+
+    subgraph SBoB ["SBoB (Dynamic Behavior)"]
+        direction TB
+        app[Running App]
+        app -- "Allow: TCP/443" --> API[External API]
+        app -- "Allow: Read" --> FS[/app/config]
+        app -- "Block: Exec" --> Shell[Bin/sh]
+    end
+```
+
 That gap is exactly where a new, emerging concept starts to matter: **SBoB—the Software Bill of Behavior.**
 
 ## From Boundaries to Contracts
@@ -23,6 +42,30 @@ That gap is exactly where a new, emerging concept starts to matter: **SBoB—the
 For the last decade, cloud-native security has relied on **boundaries**—wrapping apps in containers and namespaces, applying a global security profile at the outer shell. 
 
 But for developers, this boundary model has a fundamental blind spot: it treats the runtime like an **open field surrounded by a perimeter fence**. The internal "walls" (your code's modules and architecture) are structurally present, but provide zero physical enforcement. If an attacker achieves Arbitrary Code Execution (ACE) inside the application, they can wander freely within the fence, exfiltrate data, or execute payload code. 
+
+```mermaid
+graph TD
+    subgraph Traditional ["Boundary Model (Open Field)"]
+        F1[Perimeter Fence/Container]
+        A1[Attacker with ACE]
+        S1[Sensitive Data/Syscalls]
+        F1 -.-> A1
+        A1 -->|Unrestricted Movement| S1
+    end
+
+    subgraph Contract ["Contract Model (Runtime Maze)"]
+        F2[Perimeter Fence/Container]
+        subgraph Maze ["Enforced Corridors"]
+            A2[Attacker with ACE]
+            W1[Seccomp Wall]
+            W2[Landlock Wall]
+            S2[Sensitive Data]
+            A2 --X|Blocked| W1
+            A2 --X|Blocked| W2
+        end
+        F2 -.-> A2
+    end
+```
 
 The shift to **contracts** (SBoB) turns the OS from a passive boundary fence into an **active runtime maze**.
 
@@ -48,6 +91,29 @@ But it is important to distinguish between **observation** and **enforcement**. 
 
 While eBPF-based enforcement (like BPF-LSM) is extremely powerful, it requires high system privileges (`CAP_SYS_ADMIN` or `CAP_BPF`). In contrast, Seccomp and Landlock are designed to be **unprivileged**, allowing a standard application to "self-restrict" its own capabilities (once `PR_SET_NO_NEW_PRIVS` is set) without needing root access or cluster-level agents. This makes them the ideal "fast path" for developer-driven security.
 
+```mermaid
+graph TD
+    subgraph UserSpace ["User Space"]
+        App[Application]
+        Lib[Compromised Library]
+    end
+
+    subgraph Kernel ["Linux Kernel Space"]
+        eBPF{eBPF Observer}
+        S[Seccomp/Landlock Gates]
+        Syscall[System Call]
+    end
+
+    App --> Syscall
+    Lib --> Syscall
+    Syscall -.->|1. Notify| eBPF
+    eBPF -.->|Log/Alert| Dashboard[Security Dashboard]
+    
+    Syscall -->|2. Verify| S
+    S -->|Pass| Exec[Actual Execution]
+    S --X|Fail| Deny[EPERM / Kill Process]
+```
+
 ## This Isn't New—Server-Side Is Just Late
  
 If declaring upfront capabilities sounds like a radical shift, it isn't. In fact, this approach is already the standard in almost every other area of IT.
@@ -59,6 +125,26 @@ In this context, server-side Linux containers are the anomaly. SBoB is simply br
 ## The Primitives: How SBoB Is Enforced
 
 If SBoB is the declaration of intent, the Linux kernel provides three primary mechanisms to turn that intent into a hard boundary:
+
+```mermaid
+graph TD
+    A[Linux Security Primitives] --> S[Seccomp]
+    A --> L[Landlock]
+    A --> LSM[LSM / BPF-LSM]
+
+    S --> S1[Syscall Filtering]
+    S --> S2[Unprivileged]
+    
+    L --> L1[Path-Aware FS / TCP]
+    L --> L2[Unprivileged]
+    
+    LSM --> LSM1[Granular Kernel Hooks]
+    LSM --> LSM2[Privileged / Root Required]
+
+    style S fill:#f9f,stroke:#333,stroke-width:2px
+    style L fill:#9f9,stroke:#333,stroke-width:2px
+    style LSM fill:#ff9,stroke:#333,stroke-width:2px
+```
 
 ### 1. Seccomp (Secure Computing)
 Seccomp is the industry's "fast path" for blocking system calls. It is fast, unprivileged (via `NoNewPrivileges`), and extremely reliable. While Seccomp-BPF uses strictly constrained **Classic BPF (cBPF)** bytecode rather than the full eBPF instruction set, it remains the most widely deployed syscall filter in the world. However, it is "path-blind"—it sees the system call being made, but it cannot easily inspect the file paths or network addresses involved.
@@ -121,7 +207,28 @@ The most realistic way to implement Scopes is by aligning with the application's
 *   **Shutdown Scope:** Permissions required for graceful termination, such as flushing logs or closing connections.
  
 By using Kubernetes health checks as a trigger, the runtime engine can automatically "rotate" the active security contract. This provides a clear, automated enforcement boundary that matches how developers already think about their apps.
- 
+
+```mermaid
+graph LR
+    S[Startup Scope] -->|Health Check Success| R[Runtime Scope]
+    R -->|SIGTERM / Shutdown| D[Cleanup Scope]
+
+    subgraph "Allowed Permissions"
+        direction TB
+        S1[Broad: JIT, Config, Thread Spawning]
+        R1[Narrow: Database, Specific APIs]
+        D1[Minimal: Flush Logs, Close Connections]
+    end
+
+    S -.-> S1
+    R -.-> R1
+    D -.-> D1
+
+    style S fill:#f9f
+    style R fill:#9f9
+    style D fill:#ff9
+```
+
 ### 2. Granular Scopes (The Experimental Frontier)
 Beyond lifecycle phases, we can theoretically define scopes at a much deeper level. While these make for powerful Proofs of Concept (PoC), turning them into stable, production-ready technology faces significant architectural challenges:
  
