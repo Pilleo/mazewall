@@ -253,9 +253,12 @@ Without the deprecated Java Security Manager (JSM), in-process isolation of untr
 > [!IMPORTANT]
 > **You cannot apply process-wide isolation in `main()`!**
 > 
-> A common misconception is that calling a Seccomp TSYNC installation from Java's `main()` method will protect the whole process. **This deterministically fails on standard JVMs.** By the time `main()` executes, the JVM has *already* spawned GC threads, JIT threads, and VM helper threads. Because these background threads were spawned without the `no_new_privs` flag, the kernel will reject the process-wide Seccomp synchronization (`TSYNC`) with `EACCES`.
+> A common misconception is that calling a Seccomp TSYNC installation from Java's `main()` method will protect the whole process. **This deterministically fails on standard JVMs and LTS kernels.**
 > 
-> To achieve Tier 1 isolation, the Seccomp profile must be applied *before* the JVM process is started, typically via an **OCI container profile** (e.g., Docker or Podman's `--security-opt seccomp=profile.json`) or a native launcher wrapper.
+> 1. **Seccomp TSYNC:** By the time `main()` executes, the JVM has already spawned GC, JIT, and VM helper threads without the `no_new_privs` flag, causing the kernel to reject Seccomp `TSYNC` synchronization with `EACCES` (-13).
+> 2. **Landlock TSYNC:** Landlock process-wide synchronization (`LANDLOCK_RESTRICT_SELF_TSYNC`) is unavailable on kernels older than Linux 7.0 (ABI 8). Since Landlock remains thread-scoped on current LTS kernels (5.15, 6.1, 6.6), in-process calls cannot restrict background JVM threads, leaving an escape route.
+> 
+> To achieve secure process-wide lockdown (Seccomp and Landlock), the sandbox must be applied *before* the JVM starts, typically via an **OCI container profile** (using `allowPrivilegeEscalation: false` / `no-new-privs`) or a **native launcher wrapper** (such as **bubblewrap** or **nsjail**).
 
 ---
 

@@ -183,6 +183,7 @@ While highly secure for production baselines, it introduces significant technica
 *   **Sibling Thread Transparency:** The JVM is a massive, multi-threaded engine. Sibling threads (like Gradle workers, background GC threads, or JIT threads) may need to perform operations (like managing `build/tmp`) that the sandboxed worker thread is restricted from.
 *   **Test Suite Collisions:** Standard JVM test runners assume they have full control over the process memory space. Applying TSYNC inside a test will sandbox the entire runner process, leading to `AccessDeniedException` and `Permission Denied` crashes on completely unrelated sibling threads.
 *   **Architecture Decision:** For these reasons, `mazewall` keeps TSYNC **disabled by default**. It is reserved for Tier 1 (Process-Wide) startup lockdowns where the entire JVM life-cycle is intended to be constrained.
+*   **Process-Wide Filesystem Containment Fallback:** Since `LANDLOCK_RESTRICT_SELF_TSYNC` is unavailable on standard LTS kernels (< Linux 7.0), dynamic process-wide filesystem restrictions cannot be applied safely in-process at runtime. If process-wide filesystem sandboxing is required, operators must use an external launcher wrapper (such as **bubblewrap** or **nsjail**) to configure the Landlock ruleset on the process tree before invoking `execve` on the JVM.
 
 ---
 

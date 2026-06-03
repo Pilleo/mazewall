@@ -68,9 +68,11 @@ The standard approach to container sandboxing is a global seccomp profile applie
 At application startup, a global process-wide restriction (`Policy.NO_EXEC`) must be applied to permanently disable shell spawning and command execution (`execve`, `execveat`, `fork`, `vfork`, `memfd_create`) for every thread.
 
 > [!CAUTION]
-> **TSYNC fails on standard JVMs:** You cannot apply process-wide isolation by simply calling `ContainedExecutors.installOnProcess()` from Java. By the time your `main()` method executes, the JVM has already spawned background threads (GC, JIT) without the `no_new_privs` flag, causing the kernel to reject the Seccomp `TSYNC` synchronization with `EACCES`. 
+> **TSYNC fails on standard JVMs and LTS kernels:** 
+> 1. **Seccomp TSYNC:** You cannot apply process-wide seccomp isolation by simply calling `ContainedExecutors.installOnProcess()` from Java. By the time your `main()` method executes, the JVM has already spawned background threads (GC, JIT) without the `no_new_privs` flag, causing the kernel to reject the Seccomp `TSYNC` synchronization with `EACCES` (-13).
+> 2. **Landlock TSYNC:** Landlock process-wide synchronization (`LANDLOCK_RESTRICT_SELF_TSYNC`) is only available in Landlock ABI v8 (Linux 7.0+). On older LTS kernels (e.g., 5.15, 6.1, 6.6), Landlock rules remain strictly thread-scoped. An in-process call inside `main()` cannot restrict pre-existing sibling helper threads, leaving a critical security gap.
 > 
-> To properly establish Tier 1 lockdown, the Seccomp profile must be applied *before* the JVM process is started via an **OCI container profile** (e.g., Docker or Podman) or a native launcher wrapper.
+> To properly establish a secure process-wide lockdown (enforcing both Seccomp and Landlock before the JVM is multi-threaded), the sandbox boundaries must be applied *before* the JVM process starts. Operators can achieve this by configuring an **OCI container profile** (with `allowPrivilegeEscalation: false`) or using a **native launcher wrapper** (such as **bubblewrap** or **nsjail**) to sandbox the process tree prior to executing the JVM.
 
 ### Tier 2: Surgical Thread Containment
 For specific thread pools handling untrusted data (like JSON parsers or image processors), we apply stricter policies (like `Policy.PURE_COMPUTE` or custom Landlock paths). We wrap the target `ExecutorService` using `ContainedExecutors.wrap()`, which automatically binds the compiled policy to each worker thread before it executes its first task.
