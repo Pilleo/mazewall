@@ -69,13 +69,13 @@ object PureJavaBpfEngine : SeccompEngine {
             // Fall back to prctl for older kernels
             val errno1 = r3.errno
 
-            // Note: prctl SECCOMP_MODE_FILTER does not support TSYNC directly in the same way.
-            // If the user requested TSYNC and seccomp(2) failed, we must fail rather than
-            // silently falling back to thread-local behavior.
             if (useTsync) {
-                throw IllegalStateException(
-                    "Process-wide seccomp installation (TSYNC) failed: seccomp(2) failed with errno $errno1. Your kernel may be too old to support SECCOMP_FILTER_FLAG_TSYNC.",
-                )
+                val detail = if (errno1 == 13) {
+                    "failed with EACCES (Permission denied). This typically occurs because some pre-existing sibling threads (e.g. GC, JIT, or VM helper threads spawned during JVM startup) do not have the 'no_new_privs' flag enabled. To fix this, ensure the JVM process is started with privilege escalation disabled (e.g., OCI/Kubernetes 'allowPrivilegeEscalation: false', or running under a wrapper launcher that sets the flag before calling execve)."
+                } else {
+                    "failed with errno $errno1. Your kernel may be too old to support SECCOMP_FILTER_FLAG_TSYNC or the parameters are invalid."
+                }
+                throw IllegalStateException("Process-wide seccomp installation (TSYNC) failed: $detail")
             }
 
             val r4 =

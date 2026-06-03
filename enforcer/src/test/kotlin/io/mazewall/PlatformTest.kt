@@ -40,4 +40,27 @@ class PlatformTest {
             }
         }
     }
+
+    @Test
+    fun `test Platform diagnostics`() {
+        val diagnostics = Platform.diagnose()
+        assertTrue(diagnostics.osName.isNotEmpty())
+        assertTrue(diagnostics.osVersion.isNotEmpty())
+        assertTrue(diagnostics.osArch.isNotEmpty())
+
+        val osName = System.getProperty("os.name")
+        if (osName.equals("Linux", ignoreCase = true)) {
+            assertEquals(true, diagnostics.isLinux)
+        } else {
+            assertEquals(false, diagnostics.isLinux)
+        }
+
+        // Run toString() to cover Diagnostics formatting code paths
+        val output = diagnostics.toString()
+        assertTrue(output.contains("Mazewall Platform Diagnostics"))
+        assertTrue(output.contains("OS Name:"))
+        assertTrue(output.contains("Architecture:"))
+        assertTrue(output.contains("no_new_privs Enabled:"))
+        assertTrue(output.contains("Container Detected:"))
+    }
 }

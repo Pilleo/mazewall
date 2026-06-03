@@ -781,6 +781,7 @@ object LinuxNative {
     const val LANDLOCK_CREATE_RULESET_VERSION = (1L shl 0)
 
     const val PR_SET_NO_NEW_PRIVS = 38
+    const val PR_GET_NO_NEW_PRIVS = 39
     const val PR_SET_NAME = 15
     const val PR_GET_NAME = 16
     const val PR_SET_PTRACER = 0x59616d61

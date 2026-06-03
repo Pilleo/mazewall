@@ -71,4 +71,101 @@ object Platform {
         }
         return FallbackBehavior.FAIL
     }
+
+    /**
+     * Data class containing in-app diagnostics.
+     */
+    data class Diagnostics(
+        val osName: String,
+        val osVersion: String,
+        val osArch: String,
+        val isLinux: Boolean,
+        val isArchitectureSupported: Boolean,
+        val isNoNewPrivsEnabled: Boolean,
+        val seccompMode: Long,
+        val landlockAbiVersion: Int,
+        val isContainer: Boolean,
+    ) {
+        override fun toString(): String {
+            return """
+                === Mazewall Platform Diagnostics ===
+                OS Name: $osName ($osVersion)
+                Architecture: $osArch (Supported: $isArchitectureSupported)
+                Is Linux: $isLinux
+                no_new_privs Enabled: $isNoNewPrivsEnabled
+                Seccomp Mode: ${when (seccompMode) {
+                    0L -> "Disabled (0)"
+                    2L -> "Filter Mode (2)"
+                    else -> "Unknown/Error ($seccompMode)"
+                }}
+                Landlock ABI Version: ${if (landlockAbiVersion > 0) "$landlockAbiVersion" else "Unsupported ($landlockAbiVersion)"}
+                Container Detected: $isContainer
+                =====================================
+            """.trimIndent()
+        }
+    }
+
+    /**
+     * Run diagnostics to check system capabilities and privilege/sandboxing status.
+     */
+    fun diagnose(): Diagnostics {
+        val osName = System.getProperty("os.name") ?: "Unknown"
+        val osVersion = System.getProperty("os.version") ?: "Unknown"
+        val osArch = System.getProperty("os.arch") ?: "Unknown"
+        val isLinux = osName.equals("Linux", ignoreCase = true)
+
+        var isNoNewPrivsEnabled = false
+        var seccompMode = -1L
+        var landlockAbiVersion = 0
+
+        if (isLinux) {
+            try {
+                val nnpVal = LinuxNative.prctl(LinuxNative.PR_GET_NO_NEW_PRIVS, 0, 0, 0, 0)
+                if (nnpVal.returnValue >= 0) {
+                    isNoNewPrivsEnabled = nnpVal.returnValue == 1L
+                }
+            } catch (ignored: Exception) {
+            }
+
+            try {
+                val seccompVal = LinuxNative.prctl(LinuxNative.PR_GET_SECCOMP, 0, 0, 0, 0)
+                seccompMode = seccompVal.returnValue
+            } catch (ignored: Exception) {
+            }
+
+            try {
+                landlockAbiVersion = io.mazewall.landlock.Landlock
+                    .getAbiVersion()
+            } catch (ignored: Exception) {
+            }
+        }
+
+        return Diagnostics(
+            osName = osName,
+            osVersion = osVersion,
+            osArch = osArch,
+            isLinux = isLinux,
+            isArchitectureSupported = isArchitectureSupported(),
+            isNoNewPrivsEnabled = isNoNewPrivsEnabled,
+            seccompMode = seccompMode,
+            landlockAbiVersion = landlockAbiVersion,
+            isContainer = detectContainer(),
+        )
+    }
+
+    private fun detectContainer(): Boolean {
+        if (java.io.File("/.dockerenv").exists()) return true
+        if (java.io.File("/run/secrets/kubernetes.io").exists()) return true
+        try {
+            val cgroup = java.io.File("/proc/1/cgroup")
+            if (cgroup.exists()) {
+                val content = cgroup.readText()
+                if (content.contains("docker") || content.contains("podman") || content.contains("kubepods") || content.contains("containerd")) {
+                    return true
+                }
+            }
+        } catch (ignored: Exception) {
+        }
+        return false
+    }
 }
