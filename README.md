@@ -37,6 +37,23 @@ val future = safe.submit { vulnerableLogger.log(maliciousInput) }
 future.get() // Throws ExecutionException { cause: ContainmentViolationException }
 ```
 
+## Motivation: Developer-Centric Security & The "Friction Budget"
+
+`mazewall` was created to explore a critical gap in modern application security: the divide between **SecOps** and **Developers**.
+
+Security operations teams typically focus on the perimeter (containers, network rules, and firewalls). Security engineers look for insecure code patterns. But in the real world, the burden of application security falls on software developers—who are primarily incentivized and evaluated on *delivering features*, not safety.
+
+Security only succeeds when it becomes easy, automated, and integrated into the developer's normal loop. Tools like Dependabot and Renovate are successful because they reduce security friction to a single click. 
+
+As highlighted by Matthew Green and Matthew Smith in their seminal IEEE paper, [*"Developers are Not the Enemy!: The Need for Usable Security APIs"*](https://ieeexplore.ieee.org/document/7568412), security failures often stem from treating developers as adversaries or demanding high cognitive overhead, rather than providing developer-centric security APIs. Furthermore, Google's yearly [**DORA (DevOps Research and Assessment) Reports**](https://dora.dev/publications/) demonstrate that integrating automated security early in the software development lifecycle ("shifting left") actually correlates with *increased* software delivery velocity and performance.
+
+`mazewall` is an exploration of how we can build usable, automated security at the runtime layer:
+1. **Self-Restriction APIs:** Empowering developers to declare simple, programmatic boundaries (`ContainedExecutors`) directly within their code.
+2. **Automated Contracts (SBoBs):** Generating behavioral contracts automatically during test runs using the `USER_NOTIF` profiling daemon.
+3. **Guardrails over Chores:** Offloading the low-level, high-cognitive-load Linux Seccomp/Landlock assembly to a compiler-assisted build library.
+
+By bringing capability-based security into the JVM codebase, we aim to bridge the gap between SecOps requirements and developer reality.
+
 ## How It Works
 
 `mazewall` uses **Linux Seccomp-BPF** and **Landlock LSM** to install unprivileged security filters. The implementation is 100% pure Kotlin for the JVM, utilizing the **Foreign Function & Memory (FFM) API** (JDK 22+) to interface directly with the kernel without the need for native C dependencies.

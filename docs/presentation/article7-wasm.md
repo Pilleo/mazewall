@@ -86,6 +86,15 @@ graph TD
 
 The final frontier is the **Wasm Component Model (WIT)**. While the foundation is present in Endive today, the "Jackson experience"—automatically mapping Wasm data straight into Java POJOs—is the primary focus of the late 2026 roadmap. Currently, production workloads like **`jq4j`** (a sandboxed `jq` engine for the JVM) use stable **WASI Preview 1** and manual bindings or Protobuf to bridge the memory gap.
 
+## Bridging the Gap: Portals, Sidecars, and Codegen
+
+To make these sandboxed patterns practical, the developer experience must be seamless. This is a common challenge across languages when attempting to partition applications. 
+
+For instance, the Go research project **[glassbox-go](https://github.com/Pilleo/glassbox-go)** explores this by making WebAssembly easier to use through automated code generation, acting as a "portal" to a safe computing space for processing untrusted data. 
+
+A similar code-generation strategy could work for other isolation patterns as well. For example, instead of running an in-process sandbox, a build tool could generate client code to easily access a highly restricted *sidecar* process. To the developer, the API looks and feels like invoking a standard local class or library, but under the hood, the execution is serialized and safely offloaded to an isolated operating system process.
+
+
 ## The Pure-Java Dream: TeaVM + Chicory
 
 While writing untrusted plugins in Rust is great for performance, what if you want to write your plugins in Java? By combining **TeaVM** (which compiles Java bytecode to WebAssembly) and **Chicory/Endive** (which runs Wasm inside the JVM), we can achieve a pure-Java development experience with Wasm-level isolation.

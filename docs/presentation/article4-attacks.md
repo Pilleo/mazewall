@@ -301,6 +301,16 @@ These areas operate on already-sanitized data or internal state. Applying strict
 *   **Data Access Objects (DAOs):** Executing parameterized queries against the database (Requires network access; vulnerable to SQLi, but safe from system-level ACE if parameterized).
 *   **Framework Initialization:** Spring Boot context startup, Dependency Injection wiring.
 
+## Developer Ergonomics: Aligning Incentives & Shifting Left
+
+Why is sandboxing so rarely implemented at the application level, despite its clear security benefits? 
+
+It comes down to **Developer Ergonomics and Incentive Alignment**. Software developers are primarily evaluated on feature velocity, not safety. Asking a developer to manually construct complex Linux Seccomp filters or Landlock rule paths introduces immense cognitive load. In their seminal 2016 IEEE paper, [*"Developers are Not the Enemy!: The Need for Usable Security APIs"*](https://ieeexplore.ieee.org/document/7568412), researchers Matthew Green and Matthew Smith argue that security fails because we treat developers as adversaries rather than providing them with usable, developer-centric APIs. 
+
+If security tooling is too complex or introduces high cognitive friction, developers will bypass it to meet deadlines. This is why automated tools like Dependabot or Renovate succeed: they align with developer workflows rather than opposing them.
+
+To scale application containment, security must be built directly into the developer's normal tooling and feedback loops. Google’s yearly [**DORA (DevOps Research and Assessment) Reports**](https://dora.dev/publications/) consistently show that integrating automated security practices early in the software development lifecycle ("shifting left") actually correlates with *increased* delivery velocity and organizational performance, rather than slowing teams down.
+
 ## The Future: A Sandboxing Linter
 
 Relying on developers to remember to sandbox every new XML parser is a failing strategy. The ultimate goal of SBoB enforcement is a static analyzer (like an **ArchUnit test**, an **ErrorProne plugin**, or a custom CI linter) that enforces the Heat Map at compile time.
