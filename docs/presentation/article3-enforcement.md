@@ -270,7 +270,7 @@ In **Part 4**, we will run a series of concrete attacks—including shell inject
 [^seccomp]: Linux seccomp(2) manual page. https://man7.org/linux/man-pages/man2/seccomp.2.html
 [^landlock]: Landlock: unprivileged access control. https://landlock.io/
 [^jep444]: JEP 444: Virtual Threads. https://openjdk.org/jeps/444
-[^elasticsearch_seccomp]: Elasticsearch SystemCallFilter.java source. https://github.com/elastic/elasticsearch/blob/main/server/src/main/java/org/elasticsearch/bootstrap/SystemCallFilter.java
+[^elasticsearch_seccomp]: Elasticsearch SystemCallFilter.java source. https://github.com/elastic/elasticsearch/blob/master/server/src/main/java/org/elasticsearch/bootstrap/SystemCallFilter.java
 [^chromesandbox]: Chromium Sandbox Design. https://chromium.googlesource.com/chromium/src/+/main/docs/design/sandbox.md
 [^futex]: Linux futex(2) manual page. https://man7.org/linux/man-pages/man2/futex.2.html
 

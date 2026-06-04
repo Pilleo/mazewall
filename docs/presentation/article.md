@@ -290,7 +290,7 @@ The mindset shift, however, is already underway. Two things are worth tracking:
 ### Linux Security Basics & Learning Resources
 
 If you are new to Linux kernel and security concepts, here are some excellent introductory resources to help you build your foundations:
-*   **System Calls (Syscalls)**: Read Julia Evans' [What is a system call?](https://jvns.ca/blog/2016/10/04/whats-a-system-call/) for a friendly, visual introduction to how user programs request resources from the kernel.
+*   **System Calls (Syscalls)**: Read the Wikipedia article on [System Calls](https://en.wikipedia.org/wiki/System_call) for a detailed introduction to how user programs request resources from the kernel.
 *   **Linux Namespaces & Sandboxing**: Check out the [Linux namespaces(7) man page](https://man7.org/linux/man-pages/man7/namespaces.7.html) and [cgroups(7)](https://man7.org/linux/man-pages/man7/cgroups.7.html) to understand how traditional container boundaries are established.
 *   **eBPF (Extended Berkeley Packet Filter)**: Visit [ebpf.io's What is eBPF? guide](https://ebpf.io/what-is-ebpf/) for comprehensive documentation, tutorials, and ecosystem tools.
 *   **Unprivileged Sandboxing**: Read the LWN article on [Landlock LSM design](https://lwn.net/Articles/832362/) to understand how Linux enables unprivileged programs to safely isolate themselves.

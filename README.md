@@ -54,7 +54,7 @@ future.get() // Throws ExecutionException { cause: ContainmentViolationException
 
 ## Motivation: Developer-Centric Security & The "Friction Budget"
 
-`mazewall` was created to explore how to build usable, automated sandboxing directly into the JVM codebase. Security only succeeds when it integrates cleanly with developer workflows. As highlighted by Matthew Green and Matthew Smith in [*"Developers are Not the Enemy!: The Need for Usable Security APIs"*](https://ieeexplore.ieee.org/document/7568412) and supported by Google's yearly [**DORA Reports**](https://dora.dev/publications/), reducing developer friction and shifting security left is critical for both safety and velocity.
+`mazewall` was created to explore how to build usable, automated sandboxing directly into the JVM codebase. Security only succeeds when it integrates cleanly with developer workflows. As highlighted by Matthew Green and Matthew Smith in [*"Developers are Not the Enemy!: The Need for Usable Security APIs"*](https://ieeexplore.ieee.org/document/7676144) and supported by Google's yearly [**DORA Reports**](https://dora.dev/publications/), reducing developer friction and shifting security left is critical for both safety and velocity.
 
 For a complete analysis of the "Friction Budget" theory and behavioral contracts, see [Part 1: Do You Really Know What Your App Is Doing?](docs/presentation/article.md).
 
@@ -196,7 +196,7 @@ When designing custom security policies, you should consult the authoritative Li
 
 *   **Linux Man Pages:** Use `man 2 <syscall_name>` in your terminal (e.g., `man 2 prctl`, `man 2 seccomp`) to read the exact signature, argument descriptions, and potential error codes (`errno`).
 *   **Online Reference:** The [man7.org Section 2](https://man7.org/linux/man-pages/dir_section_2.html) portal provides the most up-to-date web-based version of the Linux manual pages.
-*   **Architecture Tables:** For architecture-specific syscall numbers (ID mapping), refer to [syscalls.me](https://syscalls.me/) or [filippo.io/linux-syscall-table/](https://filippo.io/linux-syscall-table/).
+*   **Architecture Tables:** For architecture-specific syscall numbers (ID mapping), refer to [filippo.io/linux-syscall-table/](https://filippo.io/linux-syscall-table/).
 
 ---
 

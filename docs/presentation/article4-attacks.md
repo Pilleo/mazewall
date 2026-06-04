@@ -324,7 +324,7 @@ These areas operate on already-sanitized data or internal state. Applying strict
 
 Why is sandboxing so rarely implemented at the application level, despite its clear security benefits? 
 
-It comes down to **Developer Ergonomics and Incentive Alignment**. Software developers are primarily evaluated on feature velocity, not safety. Asking a developer to manually construct complex Linux Seccomp filters or Landlock rule paths introduces immense cognitive load. In their seminal 2016 IEEE paper, [*"Developers are Not the Enemy!: The Need for Usable Security APIs"*](https://ieeexplore.ieee.org/document/7568412)[^green2016], researchers Matthew Green and Matthew Smith argue that security fails because we treat developers as adversaries rather than providing them with usable, developer-centric APIs. 
+It comes down to **Developer Ergonomics and Incentive Alignment**. Software developers are primarily evaluated on feature velocity, not safety. Asking a developer to manually construct complex Linux Seccomp filters or Landlock rule paths introduces immense cognitive load. In their seminal 2016 IEEE paper, [*"Developers are Not the Enemy!: The Need for Usable Security APIs"*](https://ieeexplore.ieee.org/document/7676144)[^green2016], researchers Matthew Green and Matthew Smith argue that security fails because we treat developers as adversaries rather than providing them with usable, developer-centric APIs. 
 
 If security tooling is too complex or introduces high cognitive friction, developers will bypass it to meet deadlines. This is why automated tools like Dependabot or Renovate succeed: they align with developer workflows rather than opposing them.
 
@@ -356,7 +356,7 @@ In **Part 5**, we will explore how to scale SBoB generation to production using 
 
 *Next Up: [Part 5: Generating an SBoB for Java: Where We Are and What's Missing](article5-graalvm.md)*
 
-[^green2016]: Matthew Green and Matthew Smith, ["Developers are Not the Enemy!: The Need for Usable Security APIs"](https://ieeexplore.ieee.org/document/7568412), IEEE Security & Privacy, 2016.
+[^green2016]: Matthew Green and Matthew Smith, ["Developers are Not the Enemy!: The Need for Usable Security APIs"](https://ieeexplore.ieee.org/document/7676144), IEEE Security & Privacy, 2016.
 [^memfd]: Sandfly Security: memfd_create fileless malware. https://sandflysecurity.com/blog/detecting-linux-memfd_create-fileless-malware-with-command-line-forensics/
 [^cve202144228]: CVE-2021-44228 (Log4Shell) NVD entry. https://nvd.nist.gov/vuln/detail/CVE-2021-44228
 [^dora]: DORA (DevOps Research and Assessment) Reports. https://dora.dev/publications/

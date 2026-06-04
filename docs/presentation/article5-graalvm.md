@@ -217,7 +217,7 @@ In Part 6 — the final part of this series — we address the two fatal structu
 
 **[Read Part 6: Beyond the Thread: GraalVM Isolates, WebAssembly, and Self-Defending Applications](article6-isolates.md)**
 
-[^graalvm_static]: GraalVM Native Image Static Analysis documentation. https://www.graalvm.org/latest/reference-manual/native-image/optimizations-and-performance/StaticAnalysis/
+[^graalvm_static]: GraalVM Native Image Static Analysis documentation. https://www.graalvm.org/latest/reference-manual/native-image/basics/
 [^graalvm_metadata]: GraalVM Reachability Metadata repository. https://github.com/oracle/graalvm-reachability-metadata
 [^jqf]: JQF: Coverage-Guided Property-Based Testing for Java. https://github.com/rohanpadhye/JQF
 [^evomaster]: EvoMaster: AI-driven REST API fuzz testing tool. https://github.com/EMResearch/EvoMaster
