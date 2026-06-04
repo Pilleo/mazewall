@@ -283,6 +283,38 @@ Without the deprecated Java Security Manager (JSM), in-process isolation of untr
 
 ---
 
+## Scaling Defense: The Application "Heat Map"
+
+Not all code is equally dangerous. To scale thread-scoped sandboxing across a large engineering organization, security teams must map the application's architecture into risk zones. Attackers consistently target the boundary layers where untrusted user input is transformed into executable state.
+
+### 🔥 RED ZONES (High Risk / Must Sandbox)
+These are the most vulnerable parts of an application. They should *always* be wrapped in a restricted thread pool (e.g., `Policy.PURE_COMPUTE`).
+*   **Deserializers:** Jackson, Gson, SnakeYAML, XStream. (Risk: RCE via gadget chains, memory exhaustion).
+*   **Document/Media Parsers:** XML (SAX/DOM), PDF generation, Image processing libraries. (Risk: XXE, SSRF, native memory corruption).
+*   **Template Engines:** Spring Expression Language (SpEL), Velocity, FreeMarker. (Risk: Server-Side Template Injection / SSTI).
+*   **Native Bridges (JNI/FFM):** Any Java code calling out to C/C++ libraries. (Risk: Buffer overflows, Arbitrary Code Execution).
+*   **Webhook Processors:** HTTP clients fetching user-provided URLs. (Risk: SSRF targeting internal cloud metadata endpoints).
+
+### 🧊 BLUE ZONES (Low Risk / Standard JVM execution)
+These areas operate on already-sanitized data or internal state. Applying strict sandboxing here is either unnecessary or breaks the application.
+*   **Core Business Logic:** Calculating shopping cart totals, generating internal reports, pure math operations.
+*   **Data Access Objects (DAOs):** Executing parameterized queries against the database (Requires network access; vulnerable to SQLi, but safe from system-level ACE if parameterized).
+*   **Framework Initialization:** Spring Boot context startup, Dependency Injection wiring.
+
+## The Future: A Sandboxing Linter
+
+Relying on developers to remember to sandbox every new XML parser is a failing strategy. The ultimate goal of SBoB enforcement is a static analyzer (like an **ArchUnit test**, an **ErrorProne plugin**, or a custom CI linter) that enforces the Heat Map at compile time.
+
+**How a Vulnerability Linter works:**
+1.  **Dependency Scanning:** The linter flags any class that imports packages from the "Red Zone" (e.g., `import com.fasterxml.jackson.*` or `import javax.xml.*`).
+2.  **Enforcement Rule:** It traces the call graph to ensure that the method invoking the Red Zone library is executed via `ContainedExecutors.wrap(...)` or is annotated with a required policy (e.g., `@Sandboxed(Policy.PURE_COMPUTE)`).
+3.  **CI/CD Failure:** If a developer introduces a new vulnerable dependency to process user uploads without sandboxing it, the build fails:
+    > *"🚨 Vulnerability Linter: `UserUploadParser.java` uses `javax.xml.*` but is not wrapped in a ContainedExecutor. Unprotected high-risk parsing detected."*
+
+This moves thread-scoped sandboxing from a manual chore to an automated, cryptographically verifiable DevSecOps pipeline.
+
+---
+
 These demonstrations show that the Linux kernel primitives (Seccomp and Landlock) enforce the behavioral contract against these attack classes when correctly applied. The defense is implemented in the kernel, not in application-level code that an attacker could bypass.
 
 But how does this work in large-scale production? How do we handle massive, dynamic JVM frameworks (like Spring or Micronaut) where reflection, dynamic proxy generation, and massive dependency graphs make runtime profiling complex?
