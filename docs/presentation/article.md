@@ -6,17 +6,19 @@
 
 > **Series overview:** This is Part 1 of our series on behavioral security for cloud-native applications. While the implementation examples use the JVM as a concrete laboratory, the kernel concepts apply equally to Go, Node.js, Python, and any server-side runtime hosted on Linux. To explore the codebase and architecture details, visit the main [mazewall README](../../README.md).
  
+In modern cloud-native development, we compile our code, build container images, and ship them to Kubernetes clusters with high frequency. To secure this pipeline, the industry has heavily focused on static scans—checking our code for vulnerable dependencies before it deploys. While this static security layer is vital, it only answers half the question. It tells us what is on our disk, but it remains blind to what actually happens when that code starts running.
+
 We have become very good at answering one specific supply-chain question:
  
 **What is inside this software?**
  
 That is what an [SBOM](https://www.cisa.gov/sbom) (Software Bill of Materials)[^sbom] gives us. It tells us what components, packages, and libraries are packed into an application or container image. That visibility is critical. If a zero-day vulnerability lands in a popular dependency, an SBOM helps us immediately identify our exposure.
  
-But the moment software is compromised, composition stops being the most important question. The real question becomes:
+But the moment software is compromised, composition stops being the most important question. The real question is how the software behaves at the operating system level:
  
-**What is this software doing right now?**
+**What is this software requesting from the OS kernel right now?**
  
-And in many cases, the honest answer is uncomfortable: we don’t really know.
+In other words: what system calls (syscalls) is it executing? Which files is it opening? Which external IP addresses is it attempting to connect to? In many cases, the honest answer is uncomfortable: we don’t really know.
  
 An SBOM can tell you that a compression library is present. It cannot tell you that this same library has suddenly started interfering with authentication flows. It can tell you that a logging framework is installed. It cannot tell you that the logger is currently opening outbound network sockets. Composition transparency is valuable, but it is not behavioral transparency.
 
@@ -45,6 +47,17 @@ graph TD
 ```
 
 That gap is exactly where a new, emerging concept starts to matter: **SBoB—the Software Bill of Behavior.**[^sbob]
+
+### The Linux Security Primitives: A Quick Comparison
+
+To enforce or observe this behavior, modern Linux kernels provide four primary security primitives. If you are new to Linux systems programming, here is a quick cheat sheet comparing their roles, capabilities, and privileges:
+
+| Primitive | Real-world Metaphor | Scope / Focus | Privilege Required | Developer Role |
+| :--- | :--- | :--- | :--- | :--- |
+| **eBPF** | The *Kernel Camera* | High-performance, event-driven system observation and telemetry hook. | 🔴 High (`CAP_SYS_ADMIN` or `CAP_BPF`) | Used to profile applications and generate SBoBs dynamically. |
+| **Seccomp** | The *Syscall Gatekeeper* | Filters system calls by number and registers. | 🟢 Unprivileged (requires `no_new_privs`) | Used in code (like `mazewall`) to self-restrict system permissions. |
+| **Landlock** | The *Folder Locker* | Path-aware file and TCP port access control. | 🟢 Unprivileged (requires `no_new_privs`) | Used by developers to sandbox specific paths and local directories. |
+| **BPF-LSM** | The *Deep Inspector* | Fine-grained, context-aware policy hooks inside the kernel. | 🔴 High (`CAP_SYS_ADMIN`) | Typically managed by cluster-level agents rather than individual apps. |
 
 ## From Boundaries to Contracts
 
@@ -170,7 +183,7 @@ By combining these primitives, we move from blunt "allow/deny" container rules t
  
 This is no longer a speculative academic exercise. The building blocks are already in production.
  
-In the open ecosystem, projects like **[Kubescape](https://kubescape.io)** are pushing strongly into runtime profiling for Kubernetes workloads. Using eBPF, Kubescape observes how workloads actually behave to build profiles around that behavior. This makes it a natural home for SBoB-related ideas and standards, such as the emerging **[Software Bill of Behavior specification](https://github.com/k8sstormcenter/bob)**.[^sbob]
+In the open ecosystem, projects like **[Kubescape](https://kubescape.io)** (an open-source Kubernetes security and compliance platform) are pushing strongly into runtime profiling for containerized workloads. Using eBPF, Kubescape observes how workloads actually behave in a cluster to build behavioral baselines and policies. This makes it a natural home for SBoB-related ideas and standards, such as the emerging **[Software Bill of Behavior specification](https://github.com/k8sstormcenter/bob)**.[^sbob]
  
 On the commercial side, companies like **Oligo Security** have proven that library-level and application-level runtime profiling is directly useful for security operations. By observing what libraries do inside running applications, their platform uses behavioral context to detect suspicious activity.
  
@@ -273,6 +286,14 @@ The mindset shift, however, is already underway. Two things are worth tracking:
 
 > [!TIP]
 > **Try this now:** Run `strace -f -c -p $(pgrep -d , java)` against a running JVM application on your system during a workload. Press **`Ctrl+C`** after a few seconds to stop the trace and print the summary table of unique system calls. You will likely be surprised by the size of the runtime footprint.
+
+### Linux Security Basics & Learning Resources
+
+If you are new to Linux kernel and security concepts, here are some excellent introductory resources to help you build your foundations:
+*   **System Calls (Syscalls)**: Read Julia Evans' [What is a system call?](https://jvns.ca/blog/2016/10/04/whats-a-system-call/) for a friendly, visual introduction to how user programs request resources from the kernel.
+*   **Linux Namespaces & Sandboxing**: Check out the [Linux namespaces(7) man page](https://man7.org/linux/man-pages/man7/namespaces.7.html) and [cgroups(7)](https://man7.org/linux/man-pages/man7/cgroups.7.html) to understand how traditional container boundaries are established.
+*   **eBPF (Extended Berkeley Packet Filter)**: Visit [ebpf.io's What is eBPF? guide](https://ebpf.io/what-is-ebpf/) for comprehensive documentation, tutorials, and ecosystem tools.
+*   **Unprivileged Sandboxing**: Read the LWN article on [Landlock LSM design](https://lwn.net/Articles/832362/) to understand how Linux enables unprivileged programs to safely isolate themselves.
 
 ---
 
