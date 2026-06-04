@@ -1,5 +1,8 @@
 # Beyond the Thread: GraalVM Isolates, WebAssembly, and Self-Defending Applications
 
+[![← Part 5](https://img.shields.io/badge/←_Part_5-SBoB_Generation-6366f1)](article5-graalvm.md)
+[![Series Home](https://img.shields.io/badge/Series-Home-1e293b)](../../README.md)
+
 > **Series overview:** This is Part 6 — the final part — of our series on behavioral security for cloud-native applications. **What this part adds:** We address the two fatal structural limits of thread-scoped sandboxing, then build upward — GraalVM Isolates for heap isolation, WebAssembly for instruction-level isolation, and automated codegen portals to make these patterns practical. All demonstrations use the mazewall PoC library.
 
 ---
@@ -35,6 +38,9 @@ The security industry solved the "shared memory" problem 15 years ago: **use sep
 GraalVM Native Image includes a feature called **Isolates** (`org.graalvm.nativeimage.Isolates`). An Isolate creates multiple, completely independent Java execution environments within a single OS process.
 
 ```mermaid
+---
+title: "Standard Process Heap vs. Independent Isolate Heaps"
+---
 graph TD
     subgraph Standard ["Standard JVM Process — Shared Heap"]
         direction LR
@@ -61,7 +67,7 @@ graph TD
 An Isolate gets a dedicated Java heap, a dedicated GC, and dedicated thread stacks. Even though two Isolates run inside the same Linux process, they cannot share Java objects. An attacker who compromises Isolate A physically cannot see or corrupt the Main Application's memory or Isolate B's memory.
 
 ### Sub-Millisecond Startup
-Because the binary is already loaded, spawning a new Isolate takes **less than 1 millisecond** — viable for per-request use.
+Because the binary is already loaded, spawning a new Isolate takes **sub-milliseconds to low-milliseconds** (microsecond-scale raw overhead in optimized setups) — making it highly viable for per-request use.
 
 ### Compressed Pointers (High Density)
 In Oracle GraalVM (free for production under the GFTC license), Isolates can use **Compressed References** (32-bit pointers on 64-bit architecture), dramatically shrinking memory footprint. You can run thousands of independent Isolates on a single server.
@@ -72,13 +78,13 @@ Combining GraalVM Isolates with kernel-level Seccomp/Landlock enforcement gives 
 
 1. **The Trusted Host:** The main application handles HTTP routing and database connections.
 2. **The Untrusted Task:** A request arrives to parse a potentially malicious XML document.
-3. **Spawn the Isolate:** The main app spawns a new GraalVM Isolate (< 1ms).
+3. **Spawn the Isolate:** The main app spawns a new GraalVM Isolate in sub-milliseconds.
 4. **Lock the Doors:** The very first line inside the Isolate calls `ContainedExecutors.installOnCurrentThread(Policy.PURE_COMPUTE)`.
 
-   > [!WARNING]
-   > **The Thread Poisoning Hazard:** Because Seccomp and Landlock filters are bound to the physical Linux OS thread and are strictly **irreversible**, applying a sandbox policy inside the Isolate permanently sandboxes the OS thread executing it. If the host invokes the Isolate synchronously on a primary worker thread (e.g., a Netty HTTP worker), that thread remains locked down even after the Isolate is destroyed. When returned to the pool, the poisoned thread will crash with `EPERM` on standard host operations.
-   >
-   > **Mitigation:** Execute the Isolate on a **dedicated throwaway thread** (spawned, runs the Isolate, then terminates) or within a dedicated sandboxed carrier pool.
+    > [!WARNING]
+    > **The Thread Poisoning Hazard:** Because Seccomp and Landlock filters are bound to the physical Linux OS thread and are strictly **irreversible**, applying a sandbox policy inside the Isolate permanently sandboxes the OS thread executing it. If the host invokes the Isolate synchronously on a primary worker thread (e.g., a Netty HTTP worker), that thread remains locked down even after the Isolate is destroyed. When returned to the pool, the poisoned thread will crash with `EPERM` on standard host operations.
+    >
+    > **Mitigation:** Execute the Isolate on a **dedicated throwaway thread** (spawned, runs the Isolate, then terminates) or within a dedicated sandboxed carrier pool.
 
 5. **Execute & Destroy:** The Isolate parses the XML safely, returns the plain-text result via a C-style memory copy, and is instantly destroyed.
 
@@ -107,13 +113,13 @@ WebAssembly is one serious candidate for an answer — not a direct replacement,
 
 WebAssembly was designed for the most hostile environment on earth: the web browser. Its creators abandoned the "object-sharing" model of the JVM and adopted a **shared-nothing, linear memory architecture**.
 
-**Linear Memory:** When you load a Wasm module into your JVM (using a runtime like **Endive** or **GraalWasm**), the runtime allocates a contiguous block of bytes — e.g., a 10MB `ByteBuffer`. Every pointer inside the Wasm code is a 32-bit offset into this array. A Wasm module physically *cannot* address memory outside its box. It cannot see your JVM heap, database connections, or environment variables. Even a buffer overflow inside the module can only corrupt the module's own 10MB.
+**Linear Memory:** When you load a Wasm module into your JVM (using a runtime like **Endive**[^bytecodealliance] or **GraalWasm**), the runtime allocates a contiguous block of bytes — e.g., a 10MB `ByteBuffer`. Every pointer inside the Wasm code is a 32-bit offset into this array. A Wasm module physically *cannot* address memory outside its box. It cannot see your JVM heap, database connections, or environment variables. Even a buffer overflow inside the module can only corrupt the module's own 10MB.
 
 **Instruction-Level Capability:** In a standard JVM, a thread has "permission" to open a socket. In Wasm, a module **does not even have the CPU instructions** to open a socket. Wasm code can only call functions explicitly "imported" from the host. If you don't pass in a `connect` function, the capability simply doesn't exist in the module's universe.
 
 ### 2026: The Ecosystem Matures
 
-**Endive (formerly Chicory):** In May 2026, the Chicory project was moved into the Bytecode Alliance and renamed **Endive** — now the industry-standard, vendor-neutral way to execute Wasm on the JVM.
+**Endive (formerly Chicory):** In May 2026, the Chicory project was moved into the Bytecode Alliance and renamed **Endive**[^bytecodealliance] — now the industry-standard, vendor-neutral way to execute Wasm on the JVM.
 
 **Chicory Redline & Panama FFM:** Chicory Redline further reduced the performance gap by using Panama FFM to call native Cranelift bindings, JIT-compiling Wasm modules to native machine code at runtime.
 
@@ -132,6 +138,9 @@ The most persistent vulnerability in the Java ecosystem is Insecure Deserializat
 Because the Wasm parser has **no access to the JVM classpath**, it is physically impossible to trigger a Java gadget chain (like Log4Shell).
 
 ```mermaid
+---
+title: "Unsafe Jackson Deserialization vs. Safe Wasm Object Mapper Pattern"
+---
 graph TD
     subgraph Jackson ["Unsafe Jackson Deserialization"]
         JSON1[Untrusted JSON Payload] -->|Deserializes class gadgets| Mapper1[Jackson ObjectMapper]
@@ -154,11 +163,11 @@ graph TD
 
 ### The Component Model: The Future of `readValue`
 
-The final frontier is the **Wasm Component Model (WIT)** — the industry's effort to make Wasm modules automatically map their output to host language types. While the foundation is present in Endive today, the "Jackson experience" (automatically mapping Wasm data directly into Java POJOs) is still a work in progress as of 2026. Production workloads use stable **WASI Preview 1** and manual bindings or Protobuf to bridge the memory gap.
+The final frontier is the **Wasm Component Model (WIT)** — the industry's effort to make Wasm modules automatically map their output to host language types. While the foundation is present in Endive today, the "Jackson experience" (automatically mapping Wasm data directly into Java POJOs) is still a work in progress as of 2026. Production workloads use stable **WASI Preview 1**[^wasi] and manual bindings or Protobuf to bridge the memory gap.
 
 ### The Pure-Java Dream: TeaVM + Endive
 
-What if you want to write plugin logic in Java, not Rust? By combining **TeaVM** (which compiles Java bytecode to Wasm) and **Endive** (which executes Wasm on the JVM), you can write all plugin code in Java while running it under Wasm-level isolation.
+What if you want to write plugin logic in Java, not Rust? By combining **TeaVM**[^teavm] (which compiles Java bytecode to Wasm) and **Endive**[^bytecodealliance] (which executes Wasm on the JVM), you can write all plugin code in Java while running it under Wasm-level isolation.
 
 > [!NOTE]
 > TeaVM's Wasm target has significant limitations: no threading, limited standard library support, and high serialization overhead. This pattern is experimental and better suited to simple, stateless logic than full-featured business code.
@@ -169,7 +178,7 @@ What if you want to write plugin logic in Java, not Rust? By combining **TeaVM**
 
 The central unsolved **ergonomics problem** of all these isolation patterns is developer friction. Writing the serialization glue code, managing the throwaway threads, and choosing the right isolation layer correctly is not something most developers will do by default.
 
-The Go research project **[glassbox-go](https://github.com/Pilleo/glassbox-go)** explores one direction: automated code generation that acts as a "portal" to a sandboxed execution space, making the isolation transparent to the calling code.
+The Go research project **[glassbox-go]**[^glassbox] explores one direction: automated code generation that acts as a "portal" to a sandboxed execution space, making the isolation transparent to the calling code.
 
 A similar strategy could work for sidecar isolation: a build plugin that generates type-safe client code for a highly restricted sidecar process, so that to the developer it looks like a normal library call — but under the hood the execution is serialized and offloaded to an isolated OS process.
 
@@ -202,6 +211,21 @@ Because the **Wasm runtime itself** is software. Runtimes like Endive can have i
 
 ---
 
+## The Developer Tooling Pipeline We Need
+
+To make secure sandboxing and behavioral containment practical for typical backend teams, the industry must transition from manual assembly configurations to a unified **Developer Tooling Pipeline**. The vision maps to a continuous lifecycle:
+
+```
+Write Code → Profile (Integration Tests) → Generate SBoB → Lint in CI/CD → Enforce at Runtime → Violations Monitor
+```
+
+1. **Integrated Profiling:** Syscall profiling shouldn't be a separate command-line chore. It must integrate into testing frameworks (e.g., as a JUnit extension) to record required system calls and file path footprints during local developer test runs.
+2. **Standardized Contracts:** SBoB definitions must be standardized in a machine-readable format (e.g. `.sbob.json` aligning with the emerging k8sstormcenter/bob spec) shipped alongside libraries directly by vendor authors.
+3. **CI/CD Static Linting:** Build plugins (like Maven or Gradle task linters) should compile call-graphs statically, verify that high-risk Red Zone libraries are wrapped in `ContainedExecutors`, and fail the build if the active policy does not cover runtime requirements.
+4. **Transparent Portals:** Sidecar portals and code generators must automate serialization, offloading tasks to isolated processes or Wasm interpreters automatically via simple method annotations (e.g., `@Isolated`).
+
+---
+
 ## Conclusion: The Maze is Complete
 
 Over these six articles, we moved from a "Perimeter Fence" model to a "Multi-Layered Maze."
@@ -218,4 +242,19 @@ The era of the "Open Field" JVM is over. The era of the **Hardened Runtime** has
 
 ---
 
+## Collaboration & Outreach
+
+If you are working on syscall attribution tooling for GraalVM native binaries, automated per-dependency SBoB generation using Inspektor Gadget and fuzzing pipelines, or build plugins to merge and prune dependency SBoBs, the author is interested in collaborating on these engineering challenges.
+
+* **Instrument your CI pipeline with Inspektor Gadget** and start profiling your application's syscall footprint — regardless of whether you run GraalVM. Every application benefits from knowing its actual runtime footprint.
+* **Watch and contribute to the emerging Software Bill of Behavior (SBoB) specification:** Visit [billofbehavior.com](https://billofbehavior.com) and follow the open specification work at [github.com/k8sstormcenter/bob](https://github.com/k8sstormcenter/bob).
+* **Start a discussion or send feedback:** The repository is the right place to continue the argument.
+
+---
+
 *This concludes our series on Behavioral Security for Cloud-Native Applications. To explore the code and primitives discussed, visit the [mazewall repository](https://github.com/Pilleo/jseccomp).*
+
+[^bytecodealliance]: Endive (formerly Chicory) in the Bytecode Alliance. https://bytecodealliance.org/
+[^wasi]: WASI Preview 1 Specification. https://github.com/WebAssembly/WASI/blob/main/legacy/preview1/docs.md
+[^teavm]: TeaVM Java-to-WebAssembly compiler. https://teavm.org/
+[^glassbox]: glassbox-go project page. https://github.com/Pilleo/glassbox-go

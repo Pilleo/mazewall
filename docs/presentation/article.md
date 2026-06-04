@@ -1,12 +1,16 @@
 # Do You Really Know What Your App Is Doing at Runtime?
 ![maze_security_walls_new.png](maze_security_walls_new.png)
+
+[![Series Home](https://img.shields.io/badge/Series-Home-1e293b)](../../README.md)
+[![Part 2 →](https://img.shields.io/badge/Part_2_→-Dynamic_Profiling-6366f1)](article2-profiler.md)
+
 > **Series overview:** This is Part 1 of our series on behavioral security for cloud-native applications. While the implementation examples use the JVM as a concrete laboratory, the kernel concepts apply equally to Go, Node.js, Python, and any server-side runtime hosted on Linux. To explore the codebase and architecture details, visit the main [mazewall README](../../README.md).
  
 We have become very good at answering one specific supply-chain question:
  
 **What is inside this software?**
  
-That is what an [SBOM](https://www.cisa.gov/sbom) (Software Bill of Materials) gives us. It tells us what components, packages, and libraries are packed into an application or container image. That visibility is critical. If a zero-day vulnerability lands in a popular dependency, an SBOM helps us immediately identify our exposure.
+That is what an [SBOM](https://www.cisa.gov/sbom) (Software Bill of Materials)[^sbom] gives us. It tells us what components, packages, and libraries are packed into an application or container image. That visibility is critical. If a zero-day vulnerability lands in a popular dependency, an SBOM helps us immediately identify our exposure.
  
 But the moment software is compromised, composition stops being the most important question. The real question becomes:
  
@@ -16,23 +20,31 @@ And in many cases, the honest answer is uncomfortable: we don’t really know.
  
 An SBOM can tell you that a compression library is present. It cannot tell you that this same library has suddenly started interfering with authentication flows. It can tell you that a logging framework is installed. It cannot tell you that the logger is currently opening outbound network sockets. Composition transparency is valuable, but it is not behavioral transparency.
 
-**1. The Composition View (SBOM)**
+### Visualizing the Twin Perspectives
+
+To understand the difference, we can compare the static composition view of the application with its dynamic behavioral view side-by-side:
+
 ```mermaid
+---
+title: "1. The Composition View (SBOM)"
+---
 graph TD
     A[Container Image] --> B[Dependencies]
     B --> C[log4j.jar]
     B --> D[netty.jar]
 ```
 
-**2. The Behavioral View (SBoB)**
 ```mermaid
+---
+title: "2. The Behavioral View (SBoB)"
+---
 graph TD
     A[Running Application] -->|Allowed Read| B[ /app/config ]
     A -->|Allowed Connect| C[ API Server ]
     A -.->|Blocked Exec| D[ /bin/sh ]
 ```
 
-That gap is exactly where a new, emerging concept starts to matter: **SBoB—the Software Bill of Behavior.**
+That gap is exactly where a new, emerging concept starts to matter: **SBoB—the Software Bill of Behavior.**[^sbob]
 
 ## From Boundaries to Contracts
 
@@ -41,6 +53,9 @@ For the last decade, cloud-native security has relied on **boundaries**—wrappi
 But for developers, this boundary model has a fundamental blind spot: it treats the runtime like an **open field surrounded by a perimeter fence**. The internal "walls" (your code's modules and architecture) are structurally present, but provide zero physical enforcement. If an attacker achieves [Arbitrary Code Execution (ACE)](https://en.wikipedia.org/wiki/Arbitrary_code_execution) inside the application, they can wander freely within the fence, exfiltrate data, or execute payload code. 
 
 ```mermaid
+---
+title: "Boundary Model (Open Field) vs. Contract Model (Runtime Safe-Maze)"
+---
 graph LR
     subgraph Field ["Boundary Model (Open Field)"]
         Attacker1((Attacker)) -->|Access Any System Resource| Sys1[Sensitive Files: /etc/passwd]
@@ -57,7 +72,7 @@ graph LR
 The shift to **contracts** (SBoB) turns the OS from a passive boundary fence into an **active runtime maze**.
 
 Every legitimate path through your code becomes a corridor; every system call, filesystem path, or socket access is a locked gate. Under this contract:
-1. **The Sandbox is a Maze:** An attacker who compromises a worker [thread](https://www.baeldung.com/cs/process-vs-thread) cannot wander to forbidden system calls or sensitive files—they are physically blocked by the nearest wall (e.g., [Seccomp](https://docs.docker.com/engine/security/seccomp/) or [Landlock](https://landlock.io/)).
+1. **The Sandbox is a Maze:** An attacker who compromises a worker [thread](https://www.baeldung.com/cs/process-vs-thread) cannot wander to forbidden system calls or sensitive files—they are physically blocked by the nearest wall (e.g., [Seccomp](https://docs.docker.com/engine/security/seccomp/)[^seccomp] or [Landlock](https://landlock.io/)[^landlock]).
 2. **The OS Enforces the Logic:** The kernel actively verifies that execution strictly matches the application's expected topology.
 
 We move from asking *"Is this container allowed to talk to the internet?"* to *"Is this specific library, at this specific millisecond, allowed to perform this specific system call?"*
@@ -68,7 +83,7 @@ We move from asking *"Is this container allowed to talk to the internet?"* to *"
  
 For a long time, precise runtime behavioral security was too expensive, too invasive, or too brittle to apply at scale. That changed with [eBPF](https://ebpf.io/what-is-ebpf/).
  
-If the SBoB is the clipboard, eBPF is the engine that makes the observation practical.
+If the SBoB is the blueprint contract, eBPF is the runtime camera that makes dynamic observation practical.
  
 At a high level, eBPF gives modern Linux systems a safe, highly performant way to observe and react to what is happening at runtime. Syscalls, process executions, network behaviors, and file accesses become instantly visible and actionable.
 
@@ -79,19 +94,22 @@ But it is important to distinguish between **observation** and **enforcement**. 
 While eBPF-based enforcement (like BPF-LSM) is extremely powerful, it requires high system privileges (`CAP_SYS_ADMIN` or `CAP_BPF`). In contrast, Seccomp and Landlock are designed to be **unprivileged**, allowing a standard application to "self-restrict" its own capabilities (once `PR_SET_NO_NEW_PRIVS` is set) without needing root access or cluster-level agents. This makes them the ideal "fast path" for developer-driven security.
 
 ```mermaid
+---
+title: "Syscall Evaluation & Telemetry Lifecycle"
+---
 sequenceDiagram
-    participant App as User Space Application
-    participant Entry as Kernel: Syscall Entry
-    participant Seccomp as Seccomp Filter
+    participant App as Application
+    participant Kernel as Syscall Entry
+    participant Seccomp as Seccomp
     participant Landlock as Landlock LSM
-    participant Exec as Syscall Execution
+    participant Exec as Execution
     participant eBPF as eBPF Hook
-    participant Agent as Security Agent (e.g., Kubescape)
+    participant Agent as Security Agent
 
-    Note over Entry, eBPF: Linux Kernel Boundary
+    Note over Kernel, eBPF: Linux Kernel Boundary
 
-    App->>Entry: 1. Issues Syscall
-    Entry->>Seccomp: 2. Evaluate
+    App->>Kernel: 1. Issues Syscall
+    Kernel->>Seccomp: 2. Evaluate
     alt Denied
         Seccomp--xApp: EPERM / Kill Thread
     else Allowed
@@ -101,7 +119,7 @@ sequenceDiagram
         else Allowed
             Landlock->>Exec: 4. Allowed
             Exec->>eBPF: 5. Trigger Hook
-            eBPF-->>Agent: 6. Non-blocking Telemetry (Perf Ring Buffer)
+            eBPF-->>Agent: 6. Telemetry (Ring Buffer)
             Exec-->>App: 7. Return Value
         end
     end
@@ -120,6 +138,9 @@ In this context, server-side Linux containers are the anomaly. SBoB is simply br
 If SBoB is the declaration of intent, the Linux kernel provides three primary mechanisms to turn that intent into a hard boundary:
 
 ```mermaid
+---
+title: "Linux Security Primitives: Self-Restriction vs. Privileged Hooking"
+---
 graph TD
     subgraph Unprivileged ["Unprivileged (Self-Restriction)"]
         Seccomp[Seccomp<br/>Scope: Syscall Numbers & Registers]
@@ -149,7 +170,7 @@ By combining these primitives, we move from blunt "allow/deny" container rules t
  
 This is no longer a speculative academic exercise. The building blocks are already in production.
  
-In the open ecosystem, projects like **[Kubescape](https://kubescape.io)** are pushing strongly into runtime profiling for Kubernetes workloads. Using eBPF, Kubescape observes how workloads actually behave to build profiles around that behavior. This makes it a natural home for SBoB-related ideas and standards, such as the emerging **[Software Bill of Behavior specification](https://github.com/k8sstormcenter/bob)**.
+In the open ecosystem, projects like **[Kubescape](https://kubescape.io)** are pushing strongly into runtime profiling for Kubernetes workloads. Using eBPF, Kubescape observes how workloads actually behave to build profiles around that behavior. This makes it a natural home for SBoB-related ideas and standards, such as the emerging **[Software Bill of Behavior specification](https://github.com/k8sstormcenter/bob)**.[^sbob]
  
 On the commercial side, companies like **Oligo Security** have proven that library-level and application-level runtime profiling is directly useful for security operations. By observing what libraries do inside running applications, their platform uses behavioral context to detect suspicious activity.
  
@@ -176,7 +197,7 @@ But SBoB also addresses the reality of modern syscall evasion.
  
 Traditional security often focuses on blocking `execve` (spawning a shell). But sophisticated attackers don't need a shell. They use **fileless malware**—malicious code that lives entirely in RAM, using Linux features like [`memfd_create`](https://sandflysecurity.com/blog/detecting-linux-memfd_create-fileless-malware-with-command-line-forensics/) to execute binaries that never touch the disk. Because there is no file, traditional disk-based scanning is blind.
  
-More advanced attackers use [**`io_uring`**](https://unixism.net/loti/), a high-performance asynchronous I/O API. By submitting operations via shared memory rings rather than direct syscalls, they can often "blind" traditional security monitors.
+More advanced attackers use [**`io_uring`**](https://unixism.net/loti/), a high-performance asynchronous I/O API. By submitting operations via shared memory rings rather than direct syscalls, they can often "blind" traditional security monitors. (We will explore how Landlock serves as the backstop to close this evasion vector in Part 4.)
  
 An SBoB allows us to express fine-grained intent that stops these techniques: *"This application is strictly forbidden from using `memfd_create`, `io_uring_setup`, or mapping executable memory"* (note that blocking executable memory mapping *process-wide* is only safe in Ahead-of-Time runtimes like GraalVM, as explained in Part 5 — on a standard JIT JVM, mazewall blocks it per sandboxed worker thread without crashing the JIT compiler, which runs on separate, unrestricted OS threads).
 
@@ -197,6 +218,9 @@ By using Kubernetes health checks as a trigger, the runtime engine can automatic
 > **The Monotonicity Constraint:** In-process, unprivileged self-sandboxing via Seccomp and Landlock is strictly **monotonic**—you can only stack filters to *restrict* capabilities, never restore them. Therefore, a transition from the `Runtime` scope to the `Shutdown` scope cannot regain dropped privileges (such as network socket creation or filesystem access). Any action required during Shutdown must remain allowed during the Runtime phase. Privileged host-level agents (like Kubescape utilizing eBPF + LSM) do not have this limitation, as they operate outside the sandboxed process.
 
 ```mermaid
+---
+title: "Monotonic Lifecycle Scope Transition"
+---
 stateDiagram-v2
     [*] --> Startup
     
@@ -240,12 +264,15 @@ To be direct: the tooling to do what this article describes systematically — g
 
 The mindset shift, however, is already underway. Two things are worth tracking:
 
-**The emerging standard.** The concept of a machine-readable behavioral contract for software is being formalized. The [Software Bill of Behavior specification](https://github.com/k8sstormcenter/bob) at k8sstormcenter is the most active public effort to define what such a contract looks like and how it should be produced and consumed. The related [VEX (Vulnerability Exploitability eXchange)](https://cyclonedx.org/capabilities/vex/) format — already supported by CycloneDX and SPDX toolchains — is the industry's first standardized acknowledgment that composition is a poor proxy for risk; only behavior at runtime matters.
+**The emerging standard.** The concept of a machine-readable behavioral contract for software is being formalized. The [Software Bill of Behavior specification](https://github.com/k8sstormcenter/bob)[^sbob] at k8sstormcenter is the most active public effort to define what such a contract looks like and how it should be produced and consumed. The related [VEX (Vulnerability Exploitability eXchange)](https://cyclonedx.org/capabilities/vex/) format — already supported by CycloneDX and SPDX toolchains — is the industry's first standardized acknowledgment that composition is a poor proxy for risk; only behavior at runtime matters.
 
 **The observation tooling.** [Kubescape](https://kubescape.io) is the most mature open-source implementation of runtime behavioral profiling at the Kubernetes level today. Running it in observation mode against a staging workload gives a concrete, ground-truth answer to the question this article opens with: *what is this software actually doing right now?* It is not the same as per-thread, developer-authored SBoB contracts — but it is real, it is in production use, and it generates artifacts that move toward the same goal.
 
 > [!NOTE]
 > Following the direction means thinking in behavioral terms: not just *what is inside this software*, but *what does it do, and what should it be allowed to do?* That shift in framing is the precondition for everything described in this series — regardless of which specific tools eventually implement it.
+
+> [!TIP]
+> **Try this now:** Run `strace -f -c -p $(pgrep -d , java)` against a running JVM application on your system during a workload. Press **`Ctrl+C`** after a few seconds to stop the trace and print the summary table of unique system calls. You will likely be surprised by the size of the runtime footprint.
 
 ---
 
@@ -254,3 +281,8 @@ The mindset shift, however, is already underway. Two things are worth tracking:
 In Part 2 of this series, we move from theory to practice. We will introduce **mazewall**, a newly developed experimental Proof-of-Concept library designed to translate SBoB concepts into active JVM thread sandboxing, and demonstrate the dynamic profiling workflow that allows the application to automatically trace and define its own required system permissions.
  
 **[Read Part 2: Let Your Code Build Its Own Sandbox: Introducing Mazewall](article2-profiler.md)**
+
+[^landlock]: Landlock: unprivileged access control. https://landlock.io/
+[^seccomp]: Linux seccomp(2) manual page. https://man7.org/linux/man-pages/man2/seccomp.2.html
+[^sbom]: CISA Software Bill of Materials (SBOM) resources. https://www.cisa.gov/sbom
+[^sbob]: Software Bill of Behavior specification. https://github.com/k8sstormcenter/bob

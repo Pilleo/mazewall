@@ -1,7 +1,15 @@
 # Generating an SBoB for Java: Where We Are and What's Missing
 
+[![← Part 4](https://img.shields.io/badge/←_Part_4-Exploit_Defense-6366f1)](article4-attacks.md)
+[![Series Home](https://img.shields.io/badge/Series-Home-1e293b)](../../README.md)
+[![Part 6 →](https://img.shields.io/badge/Part_6_→-Isolates_&_Wasm-6366f1)](article6-isolates.md)
+
 > **Series overview:** This is Part 5 of our series on behavioral security for cloud-native applications. **What this part adds:** the harder problem of *generating* the behavioral contract — the tooling gaps, the Merge Fallacy, and why GraalVM's closed-world model is currently the clearest path to automating it.
 
+**In this article:**
+[Static vs. Dynamic](#static-vs-dynamic-the-honest-trade-off) · [The Three-Step Blueprint](#the-three-step-blueprint) · [The Merge Fallacy](#the-merge-fallacy) · [Steady-State Limits](#the-limits-lazy-init-hot-reload-dynamic-config) · [GraalVM Closed-World AOT](#graalvm-the-aot-paradigm-shift) · [eBPF & Debug Symbols](#ebpf-profiling-cleaner-than-jit)
+
+---
 
 Parts 1–4 established the *enforcement* side: what a Software Bill of Behavior (SBoB) is, how the kernel primitives enforce it, and what attacks they concretely stop.
 
@@ -33,13 +41,23 @@ The conclusion is unavoidable: generating a meaningful SBoB requires combining s
 
 This is how the most practical path seems today:
 
+```mermaid
+---
+title: "The 3-Step SBoB Generation Blueprint"
+---
+flowchart TD
+    Step1[Step 1: Generate Per-Dependency SBoBs<br/>Fuzz & Trace libraries dynamically] --> Step2
+    Step2[Step 2: Dynamic Application Coverage<br/>Integration tests, Chaos inputs, Shadow traffic] --> Step3
+    Step3[Step 3: Merge and Prune Call Graph<br/>Prune theoretical max to actual reachable paths] --> Output([Minimal SBoB Contract])
+```
+
 ### Step 1: Generate Per-Dependency SBoBs
 
 At the library scope, behavioral analysis is tractable. A library has a finite, testable API surface that doesn't depend on the caller's configuration.
 
 The approach: instrument each library through a comprehensive test harness, forcing execution down all branches, while tracing at the syscall level with tools like **Inspektor Gadget** (`trace_exec`, `trace_open` gadgets). The resulting syscall profile is the library's BoB baseline.
 
-To maximize branch coverage of libraries: use feedback-directed fuzzing (**JQF**, **Jazzer**), random test generators (**Randoop**), and evolutionary API fuzzing (**EvoMaster**). The goal is to exercise every code path through the library's public API under adversarial and edge-case inputs.
+To maximize branch coverage of libraries: use feedback-directed fuzzing (**JQF**[^jqf], **Jazzer**), random test generators (**Randoop**), and evolutionary API fuzzing (**EvoMaster**[^evomaster]). The goal is to exercise every code path through the library's public API under adversarial and edge-case inputs.
 
 This generates a per-dependency BoB: *"This JSON parser calls `openat`, `read`, `mmap`, `brk`. It never calls `socket`, `connect`, `execve`, or `memfd_create`."*
 
@@ -50,7 +68,7 @@ Layer dynamic observation on top of the library baselines to capture framework-l
 - **Integration tests:** Known business flows under real framework initialization
 - **Chaos inputs:** Malformed and unexpected data to exercise error-handling paths
 - **Production shadow traffic:** Replay real-world requests in a controlled staging environment against a BoB-instrumented instance
-- **API fuzzing:** EvoMaster or similar tools that use evolutionary algorithms to generate complex inputs and maximize endpoint coverage
+- **API fuzzing:** EvoMaster[^evomaster] or similar tools that use evolutionary algorithms to generate complex inputs and maximize endpoint coverage
 
 **Acknowledge the blind spots explicitly.** REST fuzzers don't trigger:
 - Kafka/RabbitMQ consumer paths
@@ -101,7 +119,7 @@ If standard JIT-compiled JVM applications render static analysis practically use
 
 Standard Java security is completely reactive: it relies on dynamic observation to see what the application does, which is forever vulnerable to test coverage gaps. GraalVM changes the mathematical model by introducing the **Closed-World Assumption**.
 
-In practice, GraalVM *approximates* a closed world: at compile time, it performs a whole-program points-to analysis that must account for all dynamic features, which the developer explicitly registers via **Reachability Metadata** (`reflect-config.json`, `proxy-config.json`, `jni-config.json`). Unregistered reflection fails at runtime; registered dynamic features are tracked in the call graph. The closed-world assumption applies to *unregistered* code paths — those are provably absent from the binary.
+In practice, GraalVM *approximates* a closed world: at compile time, it performs a whole-program points-to analysis[^graalvm_static] that must account for all dynamic features, which the developer explicitly registers via **Reachability Metadata**[^graalvm_metadata] (`reflect-config.json`, `proxy-config.json`, `jni-config.json`). Unregistered reflection fails at runtime; registered dynamic features are tracked in the call graph. The closed-world assumption applies to *unregistered* code paths — those are provably absent from the binary.
 
 This approximation allows the static native image builder to construct a **provably complete call graph** over the explicitly registered surface of the application. Unreachable code paths are physically removed from the binary via Dead Code Elimination (DCE).
 
@@ -117,7 +135,7 @@ By eliminating reflection and dynamic class loading, GraalVM provides the only c
 
 ### Leveraging Reachability Metadata
 
-Because the Java ecosystem has heavily standardized around GraalVM's reachability metadata (driven by the Spring Boot and Quarkus native compilation initiatives), an SBoB generation tool does not need to invent dynamic dispatch resolution from scratch. It can directly ingest the application's `reflect-config.json`, `proxy-config.json`, and `jni-config.json` to map the runtime boundaries of dynamic Java features.
+Because the Java ecosystem has heavily standardized around GraalVM's reachability metadata[^graalvm_metadata] (driven by the Spring Boot and Quarkus native compilation initiatives), an SBoB generation tool does not need to invent dynamic dispatch resolution from scratch. It can directly ingest the application's `reflect-config.json`, `proxy-config.json`, and `jni-config.json` to map the runtime boundaries of dynamic Java features.
 
 **The critical gap to keep front of mind:** DCE gives you a smaller, more auditable binary — but it does not tell you what syscalls that binary actually calls. Reachability metadata tells the compiler what code to *keep*; it does not describe what that code *does* at the kernel level. You still need syscall-level tracing (e.g., Inspektor Gadget, `strace`) to map the final leaf nodes of the call graph to system call numbers. GraalVM makes the static analysis target tractable; it does not replace the tracing step.
 
@@ -139,7 +157,7 @@ To build accurate profiling-based SBoBs, developers must instruct the GraalVM co
 * **`-H:PreserveFrameInformation`**: Instructs the native image builder to preserve stack trace frame details for all methods, including inlined ones.
 * **`-H:-InlineBeforeAnalysis`**: Prevents the optimizer from performing function inlining prior to the points-to call-graph analysis, ensuring that symbols remain distinct and map cleanly to the original libraries.
 
-These flags are intended for profiling builds, not production. They increase binary size and can incur minor performance overheads.
+These options are available in modern GraalVM Native Image builds (targets matching JDK 22+).
 
 > **Stability caveat:** GraalVM native-image compiler flags (`-H:*`) are not stable public API — they have been renamed or removed between versions. Before relying on these flags, verify their availability against your specific GraalVM version's output of `native-image --expert-options-all`. Do not hardcode them into production CI without a version pin.
 </details>
@@ -158,7 +176,7 @@ This is a structural security flaw. If an attacker achieves Arbitrary Code Execu
 
 GraalVM AOT compilation *positions* native Image binaries to be better candidates for hardware CFI features — **Intel CET (Shadow Stacks, IBT)** and **ARM BTI (Branch Target Identification)** — compared to JIT-compiled JVMs. The JIT compiler's requirement to frequently modify executable memory conflicts fundamentally with the kernel's ability to enforce control flow integrity at that memory; a static binary has no such constraint.
 
-However, as of mid-2025, **GraalVM Native Image does not have documented, first-class Intel CET or ARM BTI support**. Whether a native image binary receives CET/BTI protections depends entirely on the system linker's behaviour — `gcc` or `ld` may emit the required ELF notes (`PT_GNU_PROPERTY`) if the host toolchain supports it, but this is not a GraalVM-controlled, verified feature. Standard OS-level protections (ASLR, NX/DEP, stack canaries via compiler flags) are available and should be explicitly enabled via the linking toolchain. The CET/BTI story for native images is an open engineering area, not a solved one.
+However, in current GraalVM releases, **GraalVM Native Image does not have documented, first-class Intel CET or ARM BTI support**. Whether a native image binary receives CET/BTI protections depends entirely on the system linker's behaviour — `gcc` or `ld` may emit the required ELF notes (`PT_GNU_PROPERTY`) if the host toolchain supports it, but this is not a GraalVM-controlled, verified feature. Standard OS-level protections (ASLR, NX/DEP, stack canaries via compiler flags) are available and should be explicitly enabled via the linking toolchain. The CET/BTI story for native images is an open engineering area, not a solved one.
 
 ---
 
@@ -171,23 +189,6 @@ True. GraalVM has real costs: longer build times, more complex debugging (no run
 These are legitimate engineering objections, not security denialism. Many organizations have rational reasons to stay on JIT-compiled JVMs.
 
 The point is narrower: for the *PoC problem* of "can we generate a high-confidence, pruned SBoB automatically," GraalVM is currently the clearest path because it eliminates the hardest sources of noise. Standard JIT-compiled SBoB generation is the harder next problem — not a reason to abandon the idea, but a reason to sequence the work correctly.
-
----
-
-## What Comes Next
-
-While the underlying Linux kernel primitives (Seccomp and Landlock) are production-ready, the JVM-level integration in `mazewall` is entirely experimental and untested. The entire codebase is a research proof-of-concept.
-
-
-If you are working on:
-- Syscall attribution tooling for GraalVM native binaries
-- Automated per-dependency SBoB generation using Inspektor Gadget + fuzzing pipelines
-...
-
-...the author is interested in collaborating on these engineering challenges.
-
-- **Instrument your CI pipeline with Inspektor Gadget** and start profiling your application's syscall footprint — regardless of whether you run GraalVM. Every application benefits from knowing its actual runtime footprint.
-- **Watch and contribute to the emerging Software Bill of Behavior (SBoB) specification:** Visit [billofbehavior.com](https://billofbehavior.com) and follow the open specification work at [github.com/k8sstormcenter/bob](https://github.com/k8sstormcenter/bob).
 
 ---
 
@@ -205,6 +206,9 @@ The next concrete engineering steps, in rough priority order:
 
 None of this is complete. All of it is tractable. If you read this far and disagree with something, the repository is the right place to continue the argument.
 
+> [!TIP]
+> **Try this now:** Run `native-image --expert-options-all` in your terminal to see the expert compiler options available for symbol preservation and optimization tuning in your local GraalVM installation.
+
 ---
 
 ### Next Up: The Final Layer
@@ -212,3 +216,9 @@ None of this is complete. All of it is tractable. If you read this far and disag
 In Part 6 — the final part of this series — we address the two fatal structural limits of thread-scoped sandboxing and build upward: GraalVM Isolates for heap isolation, WebAssembly for instruction-level isolation, and automated codegen portals to make these patterns practical for everyday backend developers.
 
 **[Read Part 6: Beyond the Thread: GraalVM Isolates, WebAssembly, and Self-Defending Applications](article6-isolates.md)**
+
+[^graalvm_static]: GraalVM Native Image Static Analysis documentation. https://www.graalvm.org/latest/reference-manual/native-image/optimizations-and-performance/StaticAnalysis/
+[^graalvm_metadata]: GraalVM Reachability Metadata repository. https://github.com/oracle/graalvm-reachability-metadata
+[^jqf]: JQF: Coverage-Guided Property-Based Testing for Java. https://github.com/rohanpadhye/JQF
+[^evomaster]: EvoMaster: AI-driven REST API fuzz testing tool. https://github.com/EMResearch/EvoMaster
+

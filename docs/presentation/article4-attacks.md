@@ -1,6 +1,13 @@
 # Mazewall: The Attacks We Actually Stop
 
+[![← Part 3](https://img.shields.io/badge/←_Part_3-JVM_Mechanics-6366f1)](article3-enforcement.md)
+[![Series Home](https://img.shields.io/badge/Series-Home-1e293b)](../../README.md)
+[![Part 5 →](https://img.shields.io/badge/Part_5_→-SBoB_Generation-6366f1)](article5-graalvm.md)
+
 > **Series overview:** This is Part 4 of our series on behavioral security for cloud-native applications. **What this part adds:** real exploit walkthroughs using the **mazewall** demo codebase — demonstrating how thread-scoped Seccomp and Landlock co-enforcement blocks command execution, fileless malware, JIT shellcode injection, and asynchronous `io_uring` evasion. All demonstrations use the mazewall PoC library.
+
+**In this article:**
+[Classic Shell Execution](#attack-1-classic-shell-execution-log4shell-style) · [Fileless Malware](#attack-2-fileless-malware-in-memory-execution) · [Shellcode and JIT](#attack-3-shellcode-and-memory-pivoting-jit-evacuation) · [Unauthorized Filesystem Access](#attack-4-unauthorized-filesystem-access-path-traversal) · [io_uring Evasion](#attack-5-asynchronous-evasion-via-io_uring) · [Thread-Hopping](#attack-6-the-thread-hopping-evasion-the-limits-of-the-cage) · [Heat Map & Developer Ergonomics](#scaling-defense-the-application-heat-map)
 
 ---
 
@@ -14,7 +21,7 @@ We will walk through the exact mechanics of these attacks, see how they execute 
 
 ## The Attack Lab Setup
 
-All demonstrations are drawn from the `demo` module of the mazewall repository. Our setup represents a standard microservice: a vulnerable logging utility that simulates a Log4Shell-style JNDI lookup vulnerability. 
+All demonstrations are drawn from the `demo` module of the mazewall repository. Our setup represents a standard microservice: a vulnerable logging utility that simulates a Log4Shell-style JNDI lookup vulnerability[^cve202144228]. 
 
 When an attacker sends a malicious payload, the application executes the input, which triggers a ProcessBuilder spawn.
 
@@ -46,7 +53,7 @@ Let's look at what happens at the systems level during each exploit scenario.
 ## Attack 1: Classic Shell Execution (Log4Shell Style)
 
 ### The Threat
-An attacker achieves Remote Code Execution (RCE) via a dependency vulnerability (like CVE-2021-44228). The exploitation payload commands the application to spawn a shell process (`/bin/sh`) or run a system utility (`touch`, `curl`, `wget`) to establish a foothold or download malicious assets.
+An attacker achieves Remote Code Execution (RCE) via a dependency vulnerability (like CVE-2021-44228[^cve202144228]). The exploitation payload commands the application to spawn a shell process (`/bin/sh`) or run a system utility (`touch`, `curl`, `wget`) to establish a foothold or download malicious assets.
 
 ### The Mechanics without Mazewall
 1. The vulnerable logger parses the malicious input and triggers Java's `ProcessBuilder.start()`.
@@ -79,10 +86,10 @@ When the sandboxed worker thread executes `VulnerableLogger.log()`, it does so u
 ## Attack 2: Fileless Malware (In-Memory execution)
 
 ### The Threat
-Savvy attackers avoid writing binaries to disk to evade signature-based Endpoint Detection and Response (EDR) agents. Instead, they use a technique called **fileless execution**: they create an anonymous file descriptor in virtual memory, write a malicious binary directly to it, and execute it straight from memory.
+Savvy attackers avoid writing binaries to disk to evade signature-based Endpoint Detection and Response (EDR) agents. Instead, they use a technique called **fileless execution**[^memfd]: they create an anonymous file descriptor in virtual memory, write a malicious binary directly to it, and execute it straight from memory.
 
 ### The Mechanics without Mazewall
-1. The attacker achieves ACE and invokes the Linux system call `memfd_create(2)` to allocate an anonymous memory-backed file descriptor.
+1. The attacker achieves ACE and invokes the Linux system call `memfd_create(2)`[^memfd] to allocate an anonymous memory-backed file descriptor.
 2. They write the compiled ELF payload into the file descriptor.
 3. They invoke `execveat(2)` using the file descriptor (e.g. `/proc/self/fd/<fd>`) to execute the binary directly from RAM, leaving zero trace on the disk.
 
@@ -125,9 +132,9 @@ Assuming **Tier 1 (Process-Wide)** isolation is active, mazewall uses Classic BP
 ```
        Worker Thread (Sandboxed)                  Linux Kernel
     [mprotect(..., PROT_EXEC)] -------> [cBPF Argument Check]
-                                                  |
-                                                  +---> PROT_EXEC detected!
-                                                  |     Returns EPERM (-1)
+                                                   |
+                                                   +---> PROT_EXEC detected!
+                                                   |     Returns EPERM (-1)
     [ContainmentViolationException] <-------------+
 ```
 
@@ -142,7 +149,7 @@ An attacker exploits a local file disclosure vulnerability (or directory travers
 In a standard JVM, Java's `File.readText()` translates directly to `open(2)` or `openat(2)`. The JVM has full read access to the entire underlying filesystem exposed to the container. The attacker reads any system configuration at will.
 
 ### The Defense with Mazewall
-Under the generated policy from our dynamic profiling run (Part 2), filesystem access is managed by **Landlock LSM**.
+Under the generated policy from our dynamic profiling run (Part 2), filesystem access is managed by **Landlock LSM**[^landlock].
 
 1. The attacker attempts to read `/etc/hosts`.
 2. The JVM translates this into the system call `openat(AT_FDCWD, "/etc/hosts", O_RDONLY)`.
@@ -157,22 +164,22 @@ Under the generated policy from our dynamic profiling run (Part 2), filesystem a
 
 ### The Threat
 
-High-performance workloads (such as Netty-based network loops) require modern Linux asynchronous engines like **`io_uring`**. 
+High-performance workloads (such as Netty-based network loops) require modern Linux asynchronous engines like **`io_uring`**[^iouring]. 
 
 To allow this workload, Seccomp must whitelist the initial `io_uring_setup(2)` and `io_uring_enter(2)` system calls. However, Seccomp is fundamentally **blind** to the contents of `io_uring` queues. 
 
 Because `io_uring` works by sharing a lockless ring buffer in memory between userspace and kernelspace, an attacker can submit filesystem reads (like `/etc/hosts`) or network writes by writing commands directly into the queue. The kernel processes these commands asynchronously using background worker threads (`io-wq`), bypassing thread-scoped Seccomp filters entirely!
 
 ```
-    [SANDBOXED THREAD] 
-      |
-      | writes command to
-      v
-    Shared Memory Ring Queue  === (Seccomp is blind to memory writes!) ===> [KERNEL WORKER]
-                                                                                |
-                                                                                v
-                                                                          Executes read of
-                                                                             /etc/hosts
+     [SANDBOXED THREAD] 
+       |
+       | writes command to
+       v
+     Shared Memory Ring Queue  === (Seccomp is blind to memory writes!) ===> [KERNEL WORKER]
+                                                                                 |
+                                                                                 v
+                                                                           Executes read of
+                                                                              /etc/hosts
 ```
 
 This is the classic asynchronous evasion vector.
@@ -192,7 +199,7 @@ Mazewall neutralizes this bypass through the **complementary co-enforcement of S
     [Writes io_uring read command]
                   |
                   v
-    Shared Memory Queue -----------------------> Inherits Landlock Ruleset
+     Shared Memory Queue -----------------------> Inherits Landlock Ruleset
                                                                |
                                                                v
                                                  Intercepts VFS read("/etc/hosts")
@@ -233,12 +240,8 @@ CompletableFuture.runAsync(() -> {
 3. The threads in this common pool were spawned by the OS *at JVM startup*—long before our worker thread applied the Seccomp filter.
 4. Because Seccomp filters are only inherited by *new* threads created via the `clone` syscall *after* the filter is applied, the `ForkJoinPool` threads are completely unconstrained.
  
-> **Why not just synchronize the filter using TSYNC?**  
-> Seccomp provides a synchronization flag (`SECCOMP_FILTER_FLAG_TSYNC`) to synchronize a filter across all existing sibling threads in the thread group. However, in Tier 2 (Thread-Scoped) containment, using `TSYNC` is intentionally avoided:
-> * **JVM Deadlock Risk:** Process-wide synchronization would immediately sandbox VM helper threads (GC, JIT, and VM coordinators). As discussed in Part 3, restricting these helper threads from synchronization and memory-paging system calls triggers immediate, JVM-wide deadlocks.
-> * **Privilege Monotonicity Constraint:** `TSYNC` requires the `no_new_privs` flag to be set on all existing threads, which fails on standard JVMs because background helper threads are spawned at VM initialization without this flag, returning `EACCES` (-13).
-> 
-> Thus, Tier 2 must remain strictly thread-local, which means thread-hopping remains a structural bypass if the attacker can execute arbitrary Java bytecode.
+> [!NOTE]
+> **TSYNC Limits & Cross-References:** As detailed in Part 3, Seccomp `TSYNC` synchronization requires setting the `no_new_privs` flag on all sibling threads prior to thread creation. In a running JVM, background helper threads already exist without this flag, causing TSYNC to fail with `EACCES` (-13). Furthermore, Landlock TSYNC is unavailable on kernels older than Linux 7.0 (ABI 8). Thus, Tier 2 must remain strictly thread-scoped, making thread-hopping a structural bypass if the attacker has arbitrary Java execution rights.
  
 5. The task instantly executes on the unconstrained thread. The shell spawns, and the sandbox is bypassed.
 
@@ -259,14 +262,7 @@ This bypass highlights the fundamental architectural truth of thread-scoped sand
 Without the deprecated Java Security Manager (JSM), in-process isolation of untrusted Java code is structurally broken. To stop this attack, you must apply **Tier 1 (Process-Wide) Isolation**.
 
 > [!IMPORTANT]
-> **You cannot apply process-wide isolation in `main()`!**
-> 
-> A common misconception is that calling a Seccomp TSYNC installation from Java's `main()` method will protect the whole process. **This deterministically fails on standard JVMs and LTS kernels.**
-> 
-> 1. **Seccomp TSYNC:** By the time `main()` executes, the JVM has already spawned GC, JIT, and VM helper threads without the `no_new_privs` flag, causing the kernel to reject Seccomp `TSYNC` synchronization with `EACCES` (-13).
-> 2. **Landlock TSYNC:** Landlock process-wide synchronization (`LANDLOCK_RESTRICT_SELF_TSYNC`) is unavailable on kernels older than Linux 7.0 (ABI 8). Since Landlock remains thread-scoped on current LTS kernels (5.15, 6.1, 6.6), in-process calls cannot restrict background JVM threads, leaving an escape route.
-> 
-> To achieve secure process-wide lockdown (Seccomp and Landlock), the sandbox must be applied *before* the JVM starts, typically via an **OCI container profile** (using `allowPrivilegeEscalation: false` / `no-new-privs`) or a **native launcher wrapper** (such as **bubblewrap** or **nsjail**).
+> **Process-Wide Isolation Setup:** As detailed in Part 3, you cannot apply secure process-wide isolation in `main()` because helper threads have already spawned. The sandbox must be applied *before* the JVM starts, typically via an **OCI container profile** (`no-new-privs`) or a **native launcher wrapper** like **bubblewrap** or **nsjail**.
 
 ---
 
@@ -287,6 +283,29 @@ Without the deprecated Java Security Manager (JSM), in-process isolation of untr
 
 Not all code is equally dangerous. To scale thread-scoped sandboxing across a large engineering organization, security teams must map the application's architecture into risk zones. Attackers consistently target the boundary layers where untrusted user input is transformed into executable state.
 
+```mermaid
+---
+title: "Application Heat Map: Sandboxing Risk Zones"
+---
+flowchart TD
+    subgraph RedZone ["🔥 RED ZONES (High Risk / Untrusted Data Boundary)"]
+        Deserializers["Deserializers<br/>(Jackson, Gson, SnakeYAML)"]
+        Parsers["Document/Media Parsers<br/>(XML, PDF, ImageIO)"]
+        Templates["Template Engines<br/>(SpEL, Velocity, FreeMarker)"]
+        Native["Native Bridges<br/>(JNI, Panama FFM)"]
+        Webhooks["Webhook Processors<br/>(HTTP clients calling user URLs)"]
+    end
+
+    subgraph BlueZone ["🧊 BLUE ZONES (Low Risk / Internal Execution)"]
+        Logic["Core Business Logic<br/>(Math, Order processing)"]
+        DAOs["Data Access Objects / DB Queries<br/>(Parameterized SQL)"]
+        Startup["Framework Initialization<br/>(Spring Boot context load)"]
+    end
+
+    Data([Untrusted Input]) --> RedZone
+    RedZone -->|Enforced via ContainedExecutor| BlueZone
+```
+
 ### 🔥 RED ZONES (High Risk / Must Sandbox)
 These are the most vulnerable parts of an application. They should *always* be wrapped in a restricted thread pool (e.g., `Policy.PURE_COMPUTE`).
 *   **Deserializers:** Jackson, Gson, SnakeYAML, XStream. (Risk: RCE via gadget chains, memory exhaustion).
@@ -305,21 +324,20 @@ These areas operate on already-sanitized data or internal state. Applying strict
 
 Why is sandboxing so rarely implemented at the application level, despite its clear security benefits? 
 
-It comes down to **Developer Ergonomics and Incentive Alignment**. Software developers are primarily evaluated on feature velocity, not safety. Asking a developer to manually construct complex Linux Seccomp filters or Landlock rule paths introduces immense cognitive load. In their seminal 2016 IEEE paper, [*"Developers are Not the Enemy!: The Need for Usable Security APIs"*](https://ieeexplore.ieee.org/document/7568412), researchers Matthew Green and Matthew Smith argue that security fails because we treat developers as adversaries rather than providing them with usable, developer-centric APIs. 
+It comes down to **Developer Ergonomics and Incentive Alignment**. Software developers are primarily evaluated on feature velocity, not safety. Asking a developer to manually construct complex Linux Seccomp filters or Landlock rule paths introduces immense cognitive load. In their seminal 2016 IEEE paper, [*"Developers are Not the Enemy!: The Need for Usable Security APIs"*](https://ieeexplore.ieee.org/document/7568412)[^green2016], researchers Matthew Green and Matthew Smith argue that security fails because we treat developers as adversaries rather than providing them with usable, developer-centric APIs. 
 
 If security tooling is too complex or introduces high cognitive friction, developers will bypass it to meet deadlines. This is why automated tools like Dependabot or Renovate succeed: they align with developer workflows rather than opposing them.
 
-To scale application containment, security must be built directly into the developer's normal tooling and feedback loops. Google’s yearly [**DORA (DevOps Research and Assessment) Reports**](https://dora.dev/publications/) consistently show that integrating automated security practices early in the software development lifecycle ("shifting left") actually correlates with *increased* delivery velocity and organizational performance, rather than slowing teams down.
+To scale application containment, security must be built directly into the developer's normal tooling and feedback loops. Google’s yearly [**DORA (DevOps Research and Assessment) Reports**](https://dora.dev/publications/)[^dora] consistently show that integrating automated security practices early in the software development lifecycle ("shifting left") actually correlates with *increased* delivery velocity and organizational performance, rather than slowing teams down.
 
 ## The Future: A Sandboxing Linter
 
-Relying on developers to remember to sandbox every new XML parser is a failing strategy. The ultimate goal of SBoB enforcement is a static analyzer (like an **ArchUnit test**, an **ErrorProne plugin**, or a custom CI linter) that enforces the Heat Map at compile time.
+Building on the usability principles highlighted in the usable security research[^green2016], the most robust way to enforce these boundaries without relying on developer memory is to automate the validation in the build toolchain. Here is how a future sandboxing linter concept would fit into the development workflow:
 
-**How a Sandboxing Linter Would Work (A Conceptual Design):**
 1.  **Dependency Scanning:** The linter would flag any class that imports packages from the "Red Zone" (e.g., `import com.fasterxml.jackson.*` or `import javax.xml.*`).
 2.  **Enforcement Rule:** It would trace the call graph to ensure that the method invoking the Red Zone library is executed via `ContainedExecutors.wrap(...)` or is annotated with a required policy (e.g., `@Sandboxed(Policy.PURE_COMPUTE)`).
 3.  **CI/CD Failure:** If a developer introduced a new vulnerable dependency to process user uploads without sandboxing it, the build would fail:
-    > *"🚨 Vulnerability Linter: `UserUploadParser.java` uses `javax.xml.*` but is not wrapped in a ContainedExecutor. Unprotected high-risk parsing detected."*
+     > *"🚨 Vulnerability Linter: `UserUploadParser.java` uses `javax.xml.*` but is not wrapped in a ContainedExecutor. Unprotected high-risk parsing detected."*
 
 This would move thread-scoped sandboxing from a manual chore to an automated, cryptographically verifiable DevSecOps pipeline.
 
@@ -331,6 +349,14 @@ But how does this work in large-scale production? How do we handle massive, dyna
 
 In **Part 5**, we will explore how to scale SBoB generation to production using Ahead-of-Time (AOT) compilation and GraalVM Native Image. And in **Part 6**, we will revisit Attack 6 — the Thread-Hopping bypass — and see how GraalVM Isolates close that gap permanently.
 
+> [!TIP]
+> **Try this now:** Run `strace -f -e trace=process ./gradlew test` to see how subprocesses are spawned and tracked across threads on your system during test executions.
+
 ---
 
 *Next Up: [Part 5: Generating an SBoB for Java: Where We Are and What's Missing](article5-graalvm.md)*
+
+[^green2016]: Matthew Green and Matthew Smith, ["Developers are Not the Enemy!: The Need for Usable Security APIs"](https://ieeexplore.ieee.org/document/7568412), IEEE Security & Privacy, 2016.
+[^memfd]: Sandfly Security: memfd_create fileless malware. https://sandflysecurity.com/blog/detecting-linux-memfd_create-fileless-malware-with-command-line-forensics/
+[^cve202144228]: CVE-2021-44228 (Log4Shell) NVD entry. https://nvd.nist.gov/vuln/detail/CVE-2021-44228
+[^dora]: DORA (DevOps Research and Assessment) Reports. https://dora.dev/publications/

@@ -1,6 +1,6 @@
 # mazewall
 
-**Kernel-enforced thread-scoped sandboxing for JVM applications. No agents. No SecurityManager. Just pure Linux Seccomp & Landlock.**
+**Kernel-enforced thread-scoped sandboxing for JVM applications. No native agents. No SecurityManager. Just pure Linux Seccomp & Landlock.**
 
 ---
 
@@ -12,7 +12,15 @@
 ## Technical Articles
 
 To read the core research and threat model analysis behind `mazewall`, start with our deep-dive article series:
-* [Do You Really Know What Your App Is Doing at Runtime?](docs/presentation/article.md) (Part 1 of the series)
+
+| Part | Title | Core Focus |
+| :--- | :--- | :--- |
+| **Part 1** | [Do You Really Know What Your App Is Doing at Runtime?](docs/presentation/article.md) | SBoB concepts, eBPF, Linux sandboxing primitives (`Seccomp`, `Landlock`, LSM). |
+| **Part 2** | [Let Your Code Build Its Own Sandbox](docs/presentation/article2-profiler.md) | Dynamic profiling, `USER_NOTIF` daemon, Iterative Landlock Path Discovery. |
+| **Part 3** | [Thread-Scoped JVM Containment: The Mechanics](docs/presentation/article3-enforcement.md) | FFM native bridge, errno races, GC safepoint deadlocks, Loom VT carrier issues. |
+| **Part 4** | [Mazewall: The Attacks We Actually Stop](docs/presentation/article4-attacks.md) | Exploitation defense (Log4Shell, fileless malware, JIT exec memory, `io_uring` evasion). |
+| **Part 5** | [Generating an SBoB for Java: What's Missing](docs/presentation/article5-graalvm.md) | The Merge Fallacy, dynamic classloading noise, GraalVM AOT Closed-World compilation. |
+| **Part 6** | [Beyond the Thread: Isolates, WebAssembly, and Tooling](docs/presentation/article6-isolates.md) | Thread-hopping bypass, GraalVM Isolates, WASI Component Model (Endive), sidecar portals. |
 
 ---
 
@@ -46,20 +54,9 @@ future.get() // Throws ExecutionException { cause: ContainmentViolationException
 
 ## Motivation: Developer-Centric Security & The "Friction Budget"
 
-`mazewall` was created to explore a critical gap in modern application security: the divide between **SecOps** and **Developers**.
+`mazewall` was created to explore how to build usable, automated sandboxing directly into the JVM codebase. Security only succeeds when it integrates cleanly with developer workflows. As highlighted by Matthew Green and Matthew Smith in [*"Developers are Not the Enemy!: The Need for Usable Security APIs"*](https://ieeexplore.ieee.org/document/7568412) and supported by Google's yearly [**DORA Reports**](https://dora.dev/publications/), reducing developer friction and shifting security left is critical for both safety and velocity.
 
-Security operations teams typically focus on the perimeter (containers, network rules, and firewalls). Security engineers look for insecure code patterns. But in the real world, the burden of application security falls on software developers—who are primarily incentivized and evaluated on *delivering features*, not safety.
-
-Security only succeeds when it becomes easy, automated, and integrated into the developer's normal loop. Tools like Dependabot and Renovate are successful because they reduce security friction to a single click. 
-
-As highlighted by Matthew Green and Matthew Smith in their seminal IEEE paper, [*"Developers are Not the Enemy!: The Need for Usable Security APIs"*](https://ieeexplore.ieee.org/document/7568412), security failures often stem from treating developers as adversaries or demanding high cognitive overhead, rather than providing developer-centric security APIs. Furthermore, Google's yearly [**DORA (DevOps Research and Assessment) Reports**](https://dora.dev/publications/) demonstrate that integrating automated security early in the software development lifecycle ("shifting left") actually correlates with *increased* software delivery velocity and performance.
-
-`mazewall` is an exploration of how we can build usable, automated security at the runtime layer:
-1. **Self-Restriction APIs:** Empowering developers to declare simple, programmatic boundaries (`ContainedExecutors`) directly within their code.
-2. **Automated Contracts (SBoBs):** Generating behavioral contracts automatically during test runs using the `USER_NOTIF` profiling daemon.
-3. **Guardrails over Chores:** Offloading the low-level, high-cognitive-load Linux Seccomp/Landlock assembly to a compiler-assisted build library.
-
-By bringing capability-based security into the JVM codebase, we aim to bridge the gap between SecOps requirements and developer reality.
+For a complete analysis of the "Friction Budget" theory and behavioral contracts, see [Part 1: Do You Really Know What Your App Is Doing?](docs/presentation/article.md).
 
 ## How It Works
 
@@ -118,16 +115,13 @@ This is relevant to:
 * **Path-Aware Filesystem Sandboxing:** Seamlessly integrates **Landlock** to restrict directories (e.g. allowing reads in `/data/incoming` while blocking `/etc` and the host filesystem).
 * **Automatic Classpath Authorization:** Auto-whitelists the JVM classpath and `java.home` to avoid lazy classloading crashes inside Landlock.
 
-### Roadmap: Native `SIGSYS` Trapping (SECCOMP_RET_TRAP)
-The current implementation relies on `SECCOMP_RET_ERRNO` and parsing localized JVM exception strings. The primary detection path (`error=1` / `error=13` JVM-encoded errno matching) is locale-independent and already well-optimized; the fundamental limit is that Java's `IOException` does not expose raw errno values. The planned path forward is a native `SIGSYS` trapping architecture:
-1. **`SECCOMP_RET_TRAP` Execution:** Instruct the kernel BPF filter to trigger a `SIGSYS` signal upon a violation.
-2. **Native Signal Handler Integration:** Register a native C signal handler using `sigaction` via FFM.
-3. **Instruction Pointer Advancement:** Intercept the signal, record registers and violation metadata, modify `rax` to `-EPERM`, and advance `rip`/`pc` past the 2-byte `syscall` instruction to resume Java execution. **Caveat:** this technique is only architecturally safe for syscalls that return a scalar error code. Syscalls where the caller dereferences a pointer argument based on the return value (e.g., `mmap` returning a memory address, `stat` writing into a buffer) will crash or corrupt the JVM if their return is faked. The `SECCOMP_RET_ERRNO` approach remains the stable production default for all such syscalls.
-4. **Deterministic Java Exception Mapping:** Map violations deterministically to Java exceptions without relying on brittle exception message parsing.
+### Roadmap: Native `SIGSYS` Trapping (`SECCOMP_RET_TRAP`)
+To avoid parsing JVM exception message strings (since Java `IOException` does not expose raw errno values), the roadmap includes implementing a native `SIGSYS` signal trap handler via the FFM API. This will register a native C signal handler to capture violation metadata, advance the instruction pointer past the blocked `syscall` instruction, and map violations deterministically to Java exceptions. Refer to [containment_design.md](docs/internals/containment_design.md) for detailed architecture and the scalar return value memory-safety caveats.
 
 ---
 
 ## Quick Start
+
 
 ### 1. Run the Tests Locally
 

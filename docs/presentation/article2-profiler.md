@@ -1,4 +1,8 @@
-# Dynamic Policy Profiling in Mazewall
+# Dynamic Policy Profiling in mazewall
+
+[![← Part 1](https://img.shields.io/badge/←_Part_1-SBoB_Concepts-6366f1)](article.md)
+[![Series Home](https://img.shields.io/badge/Series-Home-1e293b)](../../README.md)
+[![Part 3 →](https://img.shields.io/badge/Part_3_→-JVM_Mechanics-6366f1)](article3-enforcement.md)
 
 > **Series overview:** This is Part 2 of our series on behavioral security for cloud-native applications. **What this part adds:** a developer-focused walkthrough of **mazewall** — an experimental, research-grade Proof-of-Concept JVM sandboxing library. All code examples are for local exploration only; this is not a production-ready tool.
 
@@ -24,7 +28,7 @@ However, cluster-wide dynamic profiling has a few critical limitations for appli
 
 **mazewall** takes a different approach: **developer-scoped, thread-level profiling**. It uses two complementary mechanisms:
 
-- **USER_NOTIF-based syscall tracing:** An unprivileged out-of-process daemon intercepts every system call made by the profiled thread. This is transparent for synchronous syscalls but has a structural blind spot: `io_uring` operations are submitted via a shared-memory ring buffer, bypassing the syscall layer entirely, so they are invisible to `USER_NOTIF` tracing without root-level eBPF attachment.
+- **USER_NOTIF-based syscall tracing:** An unprivileged out-of-process daemon intercepts every system call made by the profiled thread. This is transparent for synchronous syscalls but has a structural blind spot: `io_uring`[^iouring] operations are submitted via a shared-memory ring buffer, bypassing the syscall layer entirely, so they are invisible to `USER_NOTIF` tracing without root-level eBPF attachment (which tools like Inspektor Gadget[^inspektor] do with elevated privilege).
 - **Iterative Landlock path discovery:** Filesystem path requirements are learned through controlled denial — the workload runs under a restricted policy, each denied path is whitelisted, and the workload retries until it converges.
 
 ### Tracing `io_uring`: The Workarounds
@@ -51,7 +55,7 @@ val workload = {
     val clientSocket = Socket("localhost", serverPort)
     val greeting = clientSocket.getInputStream().bufferedReader().readText()
     clientSocket.close()
-
+ 
     // 3. Initialize high-performance async io_uring
     val setupNr = Syscall.IO_URING_SETUP.numberFor(Arch.current()).toLong()
     val setupResult = LinuxNative.syscall(setupNr, 32L, 0L)
@@ -69,13 +73,13 @@ To profile this workload and generate its SBoB, we wrap it in mazewall's built-i
 
 ```kotlin
 import io.mazewall.profiler.Profiler
-
+ 
 fun main() {
     // Run the workload under the Profiler to audit exact syscalls & path accesses
     val profilingResult = Profiler.profile {
         workload()
     }
-
+ 
     // Inspect the return value
     println(profilingResult.value)
 }
@@ -118,11 +122,25 @@ This generated policy contains four elements:
 
 ## Dynamic Filesystem Learning: The Iterative Profiler
 
-Standard system call profiling (such as `USER_NOTIF` or `ptrace`) operates at the boundary of thread-issued system calls. However, as noted in the landscape discussion, **`io_uring` introduces a complete blind spot for unprivileged syscall monitors**: because filesystem commands are written directly into a shared-memory ring queue and executed asynchronously by kernel worker threads (`io-wq`), no direct file-open system calls (`openat`, etc.) are issued by the application thread. The `USER_NOTIF` supervisor daemon is completely blind to which paths are being accessed via `io_uring`.
+Standard system call profiling (such as `USER_NOTIF` or `ptrace`[^strace]) operates at the boundary of thread-issued system calls. However, as noted in the landscape discussion, **`io_uring` introduces a complete blind spot for unprivileged syscall monitors**: because filesystem commands are written directly into a shared-memory ring queue and executed asynchronously by kernel worker threads (`io-wq`), no direct file-open system calls (`openat`, etc.) are issued by the application thread. The `USER_NOTIF` supervisor daemon is completely blind to which paths are being accessed via `io_uring`.
 
 To solve this unprivileged path-blindness, `mazewall` implements the **Iterative Profiler** (`IterativeProfiler.profile`). 
 
 This "deny-and-retry" mechanism was created specifically to discover filesystem requirements for asynchronous `io_uring` workloads without requiring root privileges.
+
+```mermaid
+---
+title: "The Iterative Profiler: Deny-and-Retry Learning Loop"
+---
+flowchart TD
+    Start([Start Workload under Profile]) --> Run[Execute Workload with Restricted Policy]
+    Run --> Check{Access Denied?}
+    Check -- "Yes (Exception Caught)" --> Extract[Extract Denied File Path]
+    Extract --> Whitelist[Add Path to Temporary Policy]
+    Whitelist --> Retry[Restart Workload Execution]
+    Retry --> Run
+    Check -- "No (Success)" --> Converge([Convergence: Output Minimal SBoB Policy])
+```
 
 ### Overcoming the Landlock "Permissive" Limitation
 To understand why this requires a loop-based learning algorithm, we must look at a fundamental kernel constraint: **Landlock does not have a "permissive" or "log-only" mode.** Unlike AppArmor or SELinux, which can "complain" (log but allow), Landlock only logs when it actively **denies** access. This creates a "Catch-22" for profiling `io_uring` paths: to see what paths are accessed, you must block them via Landlock; but the moment you block them, the application crashes, preventing you from discovering any subsequent paths the workload needs.
@@ -134,12 +152,15 @@ To resolve this, the Iterative Profiler runs a loop-based learning algorithm:
 3. **Learn and Whitelist:** The Iterative Profiler catches the exception, extracts the denied path, whitelists it in the active ruleset, and immediately retries the execution.
 4. **Converge:** The loop runs progressively until the entire code block executes from start to finish without triggering a single filesystem violation.
 
+> [!NOTE]
+> **Landlock vs. Seccomp Layering:** Note that while the Seccomp filter must explicitly permit the standard file-opening system calls (`open`, `openat`, `openat2`), the path-level restriction itself is handled by Landlock, which blocks unauthorized path accesses at the Virtual File System (VFS) level and raises the filesystem exceptions intercepted by the profiler.
+
 ```kotlin
 // Base policy allows standard file/open syscalls, but denies all paths by default
 val basePolicy = Policy.builder()
     .unblock(Syscall.OPEN, Syscall.OPENAT, Syscall.OPENAT2)
     .build()
-
+ 
 val compiledPolicy = IterativeProfiler.profile(basePolicy) {
     // Runs the workload, dynamically learning and whitelisting every required file path
     targetWorkload()
@@ -165,7 +186,7 @@ Because the Profiler records the *exact* physical execution of the thread, the a
 *   **System Libraries & Host Configuration:** The local C standard library (e.g., standard `glibc` vs. Alpine's `musl`), JVM flags (like `-XX:+UseG1GC` vs. `-XX:+UseZGC`), and even local hostname configurations can alter which low-level system calls are invoked for basic memory allocation or network lookup operations.
 
 > [!WARNING]
-> **The golden rule of dynamic profiling:** Always profile in a container that replicates your **production environment alignment matrix** (identical CPU architecture, host kernel capabilities, base image OS libraries, and JVM flags). Profiling locally on a different architecture/JVM than your target environment is a recipe for production instability.
+> **Understanding Environment Drift:** It is highly recommended to profile within a container that mirrors your production configuration (matching CPU architecture, host kernel capabilities, base image OS libraries, and JVM flags). Profiling locally on a different architecture or JVM version than your target runtime can lead to missing rules and unexpected production instability.
 
 ---
 
@@ -194,6 +215,14 @@ Enforcing these restrictions raises several systems-level questions: How does a 
 
 In **Part 3**, we will look under the hood of mazewall to examine the mechanics of JVM thread containment.
 
+> [!TIP]
+> **Try this now:** Run the mazewall profiler demo on the vulnerable-app code under local integration tests to see how the generated policy changes between basic HTTP runs and database-heavy transactions.
+
 ---
 
 *Next Up: [Part 3: Thread-Scoped JVM Containment: The Mechanics](article3-enforcement.md)*
+
+[^strace]: strace(1) manual page. https://man7.org/linux/man-pages/man1/strace.1.html
+[^inspektor]: Inspektor Gadget: eBPF-based debugging and observability tool. https://www.inspektor-gadget.io/
+[^iouring]: io_uring LWN introduction by Jonathan Corbet. https://lwn.net/Articles/776703/
+

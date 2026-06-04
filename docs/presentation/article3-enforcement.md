@@ -1,62 +1,17 @@
 # Thread-Scoped JVM Containment: The Mechanics
 
+[![← Part 2](https://img.shields.io/badge/←_Part_2-Dynamic_Profiling-6366f1)](article2-profiler.md)
+[![Series Home](https://img.shields.io/badge/Series-Home-1e293b)](../../README.md)
+[![Part 4 →](https://img.shields.io/badge/Part_4_→-Exploit_Defense-6366f1)](article4-attacks.md)
+
 > **Series overview:** This is Part 3 of our series on behavioral security for cloud-native applications. **What this part adds:** the mechanics of thread-scoped sandboxing inside a live JVM using **mazewall** — how to restrict threads unprivileged, protect memory without breaking the JIT compiler, and navigate critical JVM safety constraints. All code examples use the mazewall PoC library and are for local exploration only.
+
+**In this article:**
+[Why Seccomp and Landlock?](#why-seccomp-and-landlock-and-not-bpf-lsm) · [gVisor, NsJail, Bubblewrap, and Mazewall](#comparing-sandboxing-paradigms-gvisor-nsjail-bubblewrap-and-mazewall) · [The FFM Bridge & Errno Race](#under-the-hood-the-ffm-native-bridge-and-the-errno-race) · [Process-Wide vs. Thread-Scoped](#process-wide-vs-thread-scoped-sandboxing) · [JIT memory safety](#protecting-memory-without-breaking-the-jit) · [Loom Virtual Threads carrier poisoning](#concurrency-pitfalls-loom-carrier-thread-contamination)
 
 ---
 
 In Part 2, we profiled a worker thread to generate a `Policy`. Now we look under the hood: how does mazewall actually install Seccomp and Landlock on an individual JVM OS thread, and what constraints does the JVM impose on that process?
-
----
-
-<details>
-<summary><b>🔍 System Architecture: The FFM Native Bridge and the Errno Race</b></summary>
-
-Before we look at the kernel, we must address how a Java library talks to it. Historically, calling Linux system calls from Java required **JNI (Java Native Interface)**.
-
-`mazewall` is built entirely on the modern **Java Foreign Function & Memory (FFM) API**, finalized in Java 22. FFM allows us to invoke native system calls (`prctl`, `seccomp`, `landlock_create_ruleset`) directly from Kotlin/Java with near-native performance and strict type safety, without writing a single line of C.
-
-However, calling native functions from a managed runtime introduces a subtle but critical engineering challenge: **the `errno` race condition.**
-
-In Linux, `errno` is a thread-local variable that stores the error code of the most recent system call. In a standard C program, reading `errno` immediately after a failed call is straightforward. In a JVM, however, the runtime is constantly performing its own native operations (GC write barriers, safepoint polls, JIT bookkeeping) on the same OS thread.
-
-If we make a system call and then attempt to read `errno` via a second FFM call, there is a high probability that the JVM's internal activity will clobber the `errno` value before we can retrieve it.
-
-#### The Unsafe Errno Race Condition (Without Capture)
-```mermaid
-sequenceDiagram
-    participant JavaCode as Java Code (via FFM)
-    participant JVM as JVM Background Tasks (GC/Safepoints)
-    participant OS as Linux Kernel / errno
-    
-    JavaCode->>OS: 1. Invokes syscall (e.g. landlock_create_ruleset)
-    OS-->>JavaCode: Returns -1 (Failure)
-    Note over OS: errno set to EACCES
-    
-    par JVM clobbers errno
-        JVM->>OS: 2. JVM internal activities on same thread (e.g., timing, memory allocation)
-        Note over OS: errno overwritten to 0 or another value!
-    and Java Code reads errno (Delayed JNI/FFM call)
-        JavaCode->>OS: 3. Java reads errno via separate call
-        OS-->>JavaCode: Returns corrupted errno (e.g., 0)
-    end
-    
-    Note over JavaCode: Result: Silent failure or incorrect security handling
-```
-
-`mazewall` handles this using the FFM `Linker.Option.captureCallState("errno")` feature. This tells the JVM to generate a specialized native "stub" that atomically captures the `errno` value into a protected memory segment the instant the system call returns, ensuring we see the kernel's true response rather than JVM-internal noise.
-
-#### The Safe Errno Capture Mechanism (With captureCallState)
-```mermaid
-sequenceDiagram
-    participant JavaCode as Java Code (via FFM)
-    participant OS as Linux Kernel / errno
-    
-    JavaCode->>OS: 1. Invokes syscall (with captureCallState)
-    Note over OS: errno set to EACCES
-    OS-->>JavaCode: 2. Atomically copies errno into JVM memory segment
-    Note over JavaCode: Java reads EACCES from the protected segment
-```
-</details>
 
 ---
 
@@ -70,8 +25,8 @@ BPF-LSM is unambiguously more powerful. While Seccomp sees raw pointer arguments
 
 Seccomp and Landlock are **self-restriction primitives**. Once the `NoNewPrivileges` flag is set on a process or thread, any unprivileged process can unilaterally strip its own capabilities. 
 
-*   **Seccomp** provides unprivileged system call filtering.
-*   **Landlock** provides unprivileged, path-aware filesystem access control (operating at the inode level to avoid TOCTOU pointer races) as well as TCP socket restrictions (governing port binding and connections starting in ABI v4).
+*   **Seccomp**[^seccomp] provides unprivileged system call filtering.
+*   **Landlock**[^landlock] provides unprivileged, path-aware filesystem access control (operating at the inode level to avoid TOCTOU pointer races) as well as TCP socket restrictions (governing port binding and connections starting in ABI v4).
 
 `mazewall` requires zero external infrastructure or host agents. That architectural choice has a cost (Seccomp cannot inspect deep pointer contents), but it enables a developer-driven security model with no external infrastructure dependency.
 
@@ -96,6 +51,62 @@ All three of these tools are **out-of-process, process-wrapping sandboxes**. The
 
 ---
 
+## Under the Hood: The FFM Native Bridge and the Errno Race
+
+Before we look at the kernel, we must address how a Java library talks to it. Historically, calling Linux system calls from Java required **JNI (Java Native Interface)**.
+
+`mazewall` is built entirely on the modern **Java Foreign Function & Memory (FFM) API**, finalized in Java 22. FFM allows us to invoke native system calls (`prctl`, `seccomp`, `landlock_create_ruleset`) directly from Kotlin/Java with near-native performance and strict type safety, without writing a single line of C.
+
+However, calling native functions from a managed runtime introduces a subtle but critical engineering challenge: **the `errno` race condition.**
+
+In Linux, `errno` is a thread-local variable that stores the error code of the most recent system call. In a standard C program, reading `errno` immediately after a failed call is straightforward. In a JVM, however, the runtime is constantly performing its own native operations (GC write barriers, safepoint polls, JIT bookkeeping) on the same OS thread.
+
+If we make a system call and then attempt to read `errno` via a second FFM call, there is a high probability that the JVM's internal activity will clobber the `errno` value before we can retrieve it.
+
+#### The Unsafe Errno Race Condition (Without Capture)
+```mermaid
+---
+title: "The Unsafe Errno Race Condition"
+---
+sequenceDiagram
+    participant JavaCode as Java Code (via FFM)
+    participant JVM as JVM Background Tasks (GC/Safepoints)
+    participant OS as Linux Kernel / errno
+    
+    JavaCode->>OS: 1. Invokes syscall (e.g. landlock_create_ruleset)
+    OS-->>JavaCode: Returns -1 (Failure)
+    Note over OS: errno set to EACCES
+    
+    par JVM clobbers errno
+        JVM->>OS: 2. JVM internal activities on same thread (e.g., timing, memory allocation)
+        Note over OS: errno overwritten to 0 or another value!
+    and Java Code reads errno (Delayed JNI/FFM call)
+        JavaCode->>OS: 3. Java reads errno via separate call
+        OS-->>JavaCode: Returns corrupted errno (e.g., 0)
+    end
+    
+    Note over JavaCode: Result: Silent failure or incorrect security handling
+```
+
+`mazewall` handles this using the FFM `Linker.Option.captureCallState("errno")` feature. This tells the JVM to generate a specialized native "stub" that atomically captures the `errno` value into a protected memory segment the instant the system call returns, ensuring we see the kernel's true response rather than JVM-internal noise.
+
+#### The Safe Errno Capture Mechanism (With captureCallState)
+```mermaid
+---
+title: "The Safe Errno Capture Mechanism"
+---
+sequenceDiagram
+    participant JavaCode as Java Code (via FFM)
+    participant OS as Linux Kernel / errno
+    
+    JavaCode->>OS: 1. Invokes syscall (with captureCallState)
+    Note over OS: errno set to EACCES
+    OS-->>JavaCode: 2. Atomically copies errno into JVM memory segment
+    Note over JavaCode: Java reads EACCES from the protected segment
+```
+
+---
+
 ## Process-Wide vs. Thread-Scoped Sandboxing
 
 The standard approach to container sandboxing is a global seccomp profile applied to the entire Linux process (such as the default Podman/Docker seccomp JSON). While this blocks highly dangerous operations like kernel module loading, it is a blunt instrument. Because a host-level Seccomp filter must permit the system calls required by the JVM's runtime infrastructure (such as file reads, network connections, and JIT compilation stubs), every thread within the JVM process shares the same broad system call permission surface. A low-privilege task thread has the exact same kernel-level permissions as the main administrative acceptor thread.
@@ -103,6 +114,9 @@ The standard approach to container sandboxing is a global seccomp profile applie
 `mazewall` implements a **two-tier** self-restriction architecture to provide more fine-grained security:
 
 ```mermaid
+---
+title: "Two-Tier Self-Restriction Stack"
+---
 graph TD
     JVM["Tier 1: JVM Process<br/>Policy.NO_EXEC applied at startup<br/>Blocks: execve, execveat, fork, vfork, memfd_create"]
     Pool["Tier 2: Worker Thread Pool<br/>Strict thread-scoped policies e.g. PURE_COMPUTE<br/>Enforced per worker thread during task execution"]
@@ -112,7 +126,7 @@ graph TD
 ### Tier 1: Process-Wide Lockdown
 At application startup, a global process-wide restriction (`Policy.NO_EXEC`) must be applied to permanently disable shell spawning and command execution (`execve`, `execveat`, `fork`, `vfork`, `memfd_create`) for every thread. 
 
-In the Java ecosystem, this is pioneered by **Elasticsearch** (often referred to as the "Elasticsearch Approach"). Elasticsearch installs a process-wide seccomp filter early in the bootstrap phase to block execution calls globally, ensuring that even if an RCE vulnerability (like Log4Shell) is triggered, the attacker cannot spawn an external shell.
+In the Java ecosystem, this is pioneered by **Elasticsearch**[^elasticsearch_seccomp] (often referred to as the "Elasticsearch Approach"). Elasticsearch installs a process-wide seccomp filter early in the bootstrap phase to block execution calls globally, ensuring that even if an RCE vulnerability (like Log4Shell) is triggered, the attacker cannot spawn an external shell.
 
 While Elasticsearch implements this *in-app* during initialization, operators can achieve a similar process-wide boundary using **language-agnostic wrapper designs**. Tools like **nsjail** or **bubblewrap** wrap the process execution from the outside, enforcing seccomp and namespace restrictions before the JVM even boots. The benefit of these wrappers is their absolute language-agnosticism; however, the trade-off is they operate completely outside the application domain, meaning they cannot dynamically scale or adjust permissions based on internal application lifecycle hooks or specific JVM threads.
 
@@ -122,6 +136,21 @@ While Elasticsearch implements this *in-app* during initialization, operators ca
 > 2. **Landlock TSYNC:** Landlock process-wide synchronization (`LANDLOCK_RESTRICT_SELF_TSYNC`) is only available in Landlock ABI v8 (Linux 7.0+). On older LTS kernels (e.g., 5.15, 6.1, 6.6), Landlock rules remain strictly thread-scoped. An in-process call inside `main()` cannot restrict pre-existing sibling helper threads, leaving a critical security gap.
 > 
 > To properly establish a secure process-wide lockdown (enforcing both Seccomp and Landlock before the JVM is multi-threaded), the sandbox boundaries must be applied *before* the JVM process starts. Operators can achieve this by configuring an **OCI container profile** (with `allowPrivilegeEscalation: false`, which forces `no_new_privs` at the process tree root prior to exec) or using a **native launcher wrapper** (such as **bubblewrap** or **nsjail**) to sandbox the process tree prior to executing the JVM.
+
+<details>
+<summary><b>🔍 System Configuration: Nested Seccomp in Container Runtimes</b></summary>
+
+To run `mazewall`'s nested, thread-scoped sandboxing inside containerized environments (like Podman or Docker), you must configure the container runtime's outer seccomp profile.
+
+By default, standard OCI container runtimes (like Docker and Podman) block the `seccomp(2)` system call and restrict the `option` argument of `prctl(2)` (specifically blocking options like `PR_SET_SECCOMP` and `PR_SET_MM`) to prevent containerized processes from altering their security boundaries. When the JVM inside a standard container attempts to apply a nested filter, the host kernel blocks the call, returning `EPERM`.
+
+To enable nested sandboxing without stripping your container's security entirely, you should run your container with a **custom seccomp profile** that whitelists the nested filter installation syscalls:
+
+1. **`seccomp`**: Allowed with zero restrictions.
+2. **`prctl`**: Allowed, specifically whitelisting `PR_SET_SECCOMP` (22) and `PR_SET_NO_NEW_PRIVS` (38) in the argument list.
+
+This configuration maintains a robust container-level security floor (blocking access to dangerous host-level calls like `keyctl` or kernel namespace mutations) while empowering the JVM inside the container to dynamically apply its own unprivileged thread-level sandboxes.
+</details>
 
 ### Tier 2: Surgical Thread Containment
 For specific thread pools handling untrusted data (like JSON parsers or image processors), we apply stricter policies (like `Policy.PURE_COMPUTE` or custom Landlock paths). We wrap the target `ExecutorService` using `ContainedExecutors.wrap()`, which automatically binds the compiled policy to each worker thread before it executes its first task.
@@ -154,6 +183,9 @@ Managed runtimes are not isolated islands. Periodically, the JVM pauses applicat
 To participate in these operations, application threads must run JVM runtime code, which frequently invokes system calls for thread synchronization, signaling, and resource management.
 
 ```mermaid
+---
+title: "JVM Safepoint Coordination Deadlock"
+---
 flowchart TD
     GC[JVM Safepoint / GC Cycle triggered]
     Worker["Worker Thread (Sandboxed)<br/>Invokes futex / sched_yield"]
@@ -168,7 +200,7 @@ flowchart TD
 Because of this, we must establish a **Golden Rule of JVM Safety**: **Never block core thread coordination and scheduling system calls.**
 
 If a custom `mazewall` policy aggressively blocks any of the following system calls, the worker thread will fail to coordinate with the JVM engine, causing the entire JVM to permanently freeze or crash:
-*   `futex` — required for thread synchronization and lock parking.
+*   `futex`[^futex] — required for thread synchronization and lock parking.
 *   `sched_yield` — required for relinquishing CPU slices during contention; blocking it causes severe performance degradation or livelock under lock contention.
 *   `rt_sigreturn` — required to return from JVM safepoint signal handlers.
 *   `rt_sigaction` / `sigaction` — required for JIT signal coordination.
@@ -182,7 +214,7 @@ This is why `mazewall`'s base policies (like `Policy.PURE_COMPUTE`) pre-whitelis
 
 ## Concurrency Pitfalls: Loom Carrier Thread Contamination
 
-Modern Java applications increasingly utilize **Virtual Threads** (Project Loom, Java 21+) for massive concurrency. However, Virtual Threads present a major architectural challenge for thread-scoped sandboxing.
+Modern Java applications increasingly utilize **Virtual Threads** (Project Loom, Java 21+)[^jep444] for massive concurrency. However, Virtual Threads present a major architectural challenge for thread-scoped sandboxing.
 
 Virtual Threads are multiplexed on top of a pool of physical OS **carrier threads** (typically a global `ForkJoinPool`). Seccomp and Landlock boundaries bind permanently to the underlying **Linux OS thread**.
 
@@ -220,20 +252,10 @@ However, because coroutines are still multiplexed, this requires engineering dis
 
 ---
 
-<details>
-<summary><b>🔍 System Configuration: Nested Seccomp in Container Runtimes</b></summary>
-
-To run `mazewall`'s nested, thread-scoped sandboxing inside containerized environments (like Podman or Docker), you must configure the container runtime's outer seccomp profile.
-
-By default, standard OCI container runtimes (like Docker and Podman) block the `seccomp(2)` system call and restrict the `option` argument of `prctl(2)` (specifically blocking options like `PR_SET_SECCOMP` and `PR_SET_MM`) to prevent containerized processes from altering their security boundaries. When the JVM inside a standard container attempts to apply a nested filter, the host kernel blocks the call, returning `EPERM`.
-
-To enable nested sandboxing without stripping your container's security entirely, you should run your container with a **custom seccomp profile** that whitelists the nested filter installation syscalls:
-
-1. **`seccomp`**: Allowed with zero restrictions.
-2. **`prctl`**: Allowed, specifically whitelisting `PR_SET_SECCOMP` (22) and `PR_SET_NO_NEW_PRIVS` (38) in the argument list.
-
-This configuration maintains a robust container-level security floor (blocking access to dangerous host-level calls like `keyctl` or kernel namespace mutations) while empowering the JVM inside the container to dynamically apply its own unprivileged thread-level sandboxes.
-</details>
+> [!TIP]
+> **Try this now:** Inspect Chrome's sandbox setup by visiting `chrome://sandbox` in your browser to see how client applications use Seccomp and user namespaces in production to isolate untrusted web renderers[^chromesandbox].
+>
+> **Or check Seccomp status directly:** Query the kernel's active Seccomp state for any running JVM process on your system: `grep Seccomp /proc/$(pgrep -n java)/status`. A value of `2` indicates that the process is actively sandboxed under a custom Seccomp-BPF filter (while `0` means disabled, and `1` means strict mode).
 
 ---
 
@@ -244,3 +266,11 @@ In **Part 4**, we will run a series of concrete attacks—including shell inject
 ---
 
 *Next Up: [Part 4: Mazewall: The Attacks We Actually Stop](article4-attacks.md)*
+
+[^seccomp]: Linux seccomp(2) manual page. https://man7.org/linux/man-pages/man2/seccomp.2.html
+[^landlock]: Landlock: unprivileged access control. https://landlock.io/
+[^jep444]: JEP 444: Virtual Threads. https://openjdk.org/jeps/444
+[^elasticsearch_seccomp]: Elasticsearch SystemCallFilter.java source. https://github.com/elastic/elasticsearch/blob/main/server/src/main/java/org/elasticsearch/bootstrap/SystemCallFilter.java
+[^chromesandbox]: Chromium Sandbox Design. https://chromium.googlesource.com/chromium/src/+/main/docs/design/sandbox.md
+[^futex]: Linux futex(2) manual page. https://man7.org/linux/man-pages/man2/futex.2.html
+
