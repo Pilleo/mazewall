@@ -118,7 +118,11 @@ The standard approach to container sandboxing is a global seccomp profile applie
 ```
 
 ### Tier 1: Process-Wide Lockdown
-At application startup, a global process-wide restriction (`Policy.NO_EXEC`) must be applied to permanently disable shell spawning and command execution (`execve`, `execveat`, `fork`, `vfork`, `memfd_create`) for every thread.
+At application startup, a global process-wide restriction (`Policy.NO_EXEC`) must be applied to permanently disable shell spawning and command execution (`execve`, `execveat`, `fork`, `vfork`, `memfd_create`) for every thread. 
+
+In the Java ecosystem, this is pioneered by **Elasticsearch** (often referred to as the "Elasticsearch Approach"). Elasticsearch installs a process-wide seccomp filter early in the bootstrap phase to block execution calls globally, ensuring that even if an RCE vulnerability (like Log4Shell) is triggered, the attacker cannot spawn an external shell.
+
+While Elasticsearch implements this *in-app* during initialization, operators can achieve a similar process-wide boundary using **language-agnostic wrapper designs**. Tools like **nsjail** or **bubblewrap** wrap the process execution from the outside, enforcing seccomp and namespace restrictions before the JVM even boots. The benefit of these wrappers is their absolute language-agnosticism; however, the trade-off is they operate completely outside the application domain, meaning they cannot dynamically scale or adjust permissions based on internal application lifecycle hooks or specific JVM threads.
 
 > [!CAUTION]
 > **TSYNC fails on standard JVMs and LTS kernels:** 
