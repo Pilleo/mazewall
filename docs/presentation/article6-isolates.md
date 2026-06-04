@@ -178,7 +178,7 @@ What if you want to write plugin logic in Java, not Rust? By combining **TeaVM**
 
 The central unsolved **ergonomics problem** of all these isolation patterns is developer friction. Writing the serialization glue code, managing the throwaway threads, and choosing the right isolation layer correctly is not something most developers will do by default.
 
-The Go research project **[glassbox-go]**[^glassbox] explores one direction: automated code generation that acts as a "portal" to a sandboxed execution space, making the isolation transparent to the calling code.
+The Go research project **[glassbox-go](https://github.com/Pilleo/glassbox-go)**[^glassbox] explores one direction: automated code generation that acts as a "portal" to a sandboxed execution space, making the isolation transparent to the calling code.
 
 A similar strategy could work for sidecar isolation: a build plugin that generates type-safe client code for a highly restricted sidecar process, so that to the developer it looks like a normal library call — but under the hood the execution is serialized and offloaded to an isolated OS process.
 
@@ -208,6 +208,17 @@ Because the **Wasm runtime itself** is software. Runtimes like Endive can have i
 | **Untrusted Java Plugins** | **GraalVM Isolates** | Separates heaps and thread models while maintaining full JVM language features. |
 | **Untrusted 3rd-party Scripts / Data** | **WebAssembly (Wasm)** | Absolute "shared-nothing" isolation. No shared-memory pivot risk. Physically no access to the host classpath. |
 | **Highest Risk (Legacy Code / Unknown)** | **Separate OS Process + Tier 1** | The absolute backstop. Total OS-level separation. |
+
+### Sandbox Trade-off Comparison
+
+To select the right architecture, we can compare these sandboxing methods across key runtime characteristics:
+
+| Sandbox Type | Performance | Memory Overhead | Classpath Access | W^X Security | Thread Isolation |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **Mazewall (Thread)** | High (Native) | Zero | ✅ Yes (Shared) | ⚠️ Thread-only | ❌ Vulnerable to Hopping |
+| **GraalVM Isolate** | High (Native) | Low (Compressed refs) | ❌ No (Isolated) | ✅ Strong (AOT) | ✅ Strong (Separate heaps) |
+| **WebAssembly** | Medium/Low | Medium (Linear heap) | ❌ No (None) | ✅ Strongest (Interpreter) | ✅ Absolute (No shared pool) |
+| **Separate Process / Sidecar** | Low (RPC latency) | High (New JVM overhead) | ❌ No (None) | ✅ Strongest (Process) | ✅ Absolute (Process barrier) |
 
 ---
 

@@ -143,7 +143,7 @@ title: "Linux Security Primitives: Self-Restriction vs. Privileged Hooking"
 ---
 graph TD
     subgraph Unprivileged ["Unprivileged (Self-Restriction)"]
-        Seccomp[Seccomp<br/>Scope: Syscall Numbers & Registers]
+        Seccomp[Seccomp<br/>Scope: Syscall Numbers & Registers (not io_uring queues)]
         Landlock[Landlock<br/>Scope: Filesystem Paths & TCP Ports]
     end
 

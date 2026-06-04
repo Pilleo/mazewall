@@ -34,9 +34,9 @@ However, cluster-wide dynamic profiling has a few critical limitations for appli
 ### Tracing `io_uring`: The Workarounds
 Because `io_uring` bypasses the standard syscall boundary for its submissions, unprivileged profiling is constrained. In practice, three approaches can be utilized to resolve this:
  
-1. **Tier H (Hybrid Shortcut - Recommended):** Temporarily disable `io_uring` during integration testing to force a fallback to standard synchronous or epoll-based I/O. The unprivileged `USER_NOTIF` and Landlock profiler will transparently capture all required file and network paths. You can then manually append `.unblock(Syscall.IO_URING_SETUP)` to the generated production policy to permit the high-performance asynchronous runtime.
-2. **Tier A (Iterative Path Discovery):** Leverage the Iterative Landlock path discovery loop described below. Because Landlock's LSM hooks operate at the Virtual File System (VFS) layer, the kernel's asynchronous workers (`io-wq`) are still intercepted by Landlock rules. When a path access is denied, the JVM catches the resulting exception, extracts the path, and adds it to the policy. While this discovers the required filesystem paths, it cannot independently discover the underlying blocked `io_uring` syscalls.
-3. **Tier P (Privileged eBPF Profiling):** Utilize root-level eBPF tracepoints (such as LSM hooks or `io_uring_submit_sqe` tracepoints) to trace path arguments directly. This requires `CAP_SYS_ADMIN` in the host's initial user namespace and is not currently implemented in the unprivileged `mazewall` user-space tool.
+1. **Strategy H (Hybrid Shortcut - Recommended):** Temporarily disable `io_uring` during integration testing to force a fallback to standard synchronous or epoll-based I/O. The unprivileged `USER_NOTIF` and Landlock profiler will transparently capture all required file and network paths. You can then manually append `.unblock(Syscall.IO_URING_SETUP)` to the generated production policy to permit the high-performance asynchronous runtime.
+2. **Strategy A (Iterative Path Discovery):** Leverage the Iterative Landlock path discovery loop described below. Because Landlock's LSM hooks operate at the Virtual File System (VFS) layer, the kernel's asynchronous workers (`io-wq`) are still intercepted by Landlock rules. When a path access is denied, the JVM catches the resulting exception, extracts the path, and adds it to the policy. While this discovers the required filesystem paths, it cannot independently discover the underlying blocked `io_uring` syscalls.
+3. **Strategy P (Privileged eBPF Profiling):** Utilize root-level eBPF tracepoints (such as LSM hooks or `io_uring_submit_sqe` tracepoints) to trace path arguments directly. This requires `CAP_SYS_ADMIN` in the host's initial user namespace and is not currently implemented in the unprivileged `mazewall` user-space tool.
 
 ---
 
@@ -170,7 +170,7 @@ val compiledPolicy = IterativeProfiler.profile(basePolicy) {
 Upon convergence, the iterative execution yields the minimal set of verified paths (`compiledPolicy.allowedFsReadPaths`) required for successful classloading and execution.
  
 > [!CAUTION]  
-> **The Idempotency Caveat:** Because the Iterative Profiler restarts the execution block from the beginning upon encountering a path violation, any side-effect-heavy tasks (such as database inserts, outbound message dispatches, or state mutations) will execute multiple times. When using Tier A profiling, developers must ensure that the target workload is either idempotent or that external systems-level side-effects are mocked out.
+> **The Idempotency Caveat:** Because the Iterative Profiler restarts the execution block from the beginning upon encountering a path violation, any side-effect-heavy tasks (such as database inserts, outbound message dispatches, or state mutations) will execute multiple times. When using Strategy A profiling, developers must ensure that the target workload is either idempotent or that external systems-level side-effects are mocked out.
 
 ---
 

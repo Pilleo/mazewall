@@ -302,8 +302,8 @@ flowchart TD
         Startup["Framework Initialization<br/>(Spring Boot context load)"]
     end
 
-    Data([Untrusted Input]) --> RedZone
-    RedZone -->|Enforced via ContainedExecutor| BlueZone
+    Data([Untrusted Input]) --> Deserializers
+    Webhooks -->|Enforced via ContainedExecutor| Logic
 ```
 
 ### 🔥 RED ZONES (High Risk / Must Sandbox)

@@ -365,3 +365,22 @@ val errno = capturedState.get(ValueLayout.JAVA_INT, errnoOffset)
 Do not call `Native.getLastError()` — this method does not exist in the standard
 JDK FFM API. Do not read errno after performing another FFM downcall, as the
 captured state segment reflects only the most recent call.
+
+---
+
+## 9. Logging & Metrics inside a Sandboxed Thread
+
+Applying strict sandboxing rules (like `Policy.PURE_COMPUTE` or restricted Landlock paths) to individual worker threads introduces a critical operational challenge: **logging and metrics execution**.
+
+### The Problem
+If a sandboxed task thread attempts to execute synchronous logging or metrics updates (e.g., standard file writes, TCP/UDP socket transmissions, or JMX updates):
+1. The kernel intercepts the filesystem write (`write`, `writev`) or network system call (`sendto`, `sendmsg`, `connect`).
+2. The system call is aborted, returning `EPERM` or `EACCES`.
+3. The sandboxing engine catches this and throws a `ContainmentViolationException`, crashing the task prematurely.
+
+### The Solution: Asynchronous Logging & Metrics
+To avoid crashing JVM tasks when logging under a sandboxed thread, you must ensure that all logging and telemetry output is decoupled from the task execution thread:
+
+* **In-Memory Decoupling**: The sandboxed task thread must write its log events and metrics data directly to an in-memory queue (e.g., a lock-free Log4j2 `Disruptor` ring buffer, a `ConcurrentLinkedQueue`, or a lock-free telemetry buffer).
+* **Out-of-Process / Helper Thread Offloading**: An unrestricted, uncontained background helper thread (which runs outside the thread-scoped sandbox) consumes the events from the queue and performs the actual systems-level I/O operations (writing to the disk or pushing metrics over network sockets).
+

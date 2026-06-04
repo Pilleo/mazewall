@@ -77,10 +77,10 @@ sequenceDiagram
     OS-->>JavaCode: Returns -1 (Failure)
     Note over OS: errno set to EACCES
     
-    par JVM clobbers errno
+    par [JVM clobbers errno]
         JVM->>OS: 2. JVM internal activities on same thread (e.g., timing, memory allocation)
         Note over OS: errno overwritten to 0 or another value!
-    and Java Code reads errno (Delayed JNI/FFM call)
+    and [Java Code reads errno (Delayed JNI/FFM call)]
         JavaCode->>OS: 3. Java reads errno via separate call
         OS-->>JavaCode: Returns corrupted errno (e.g., 0)
     end
