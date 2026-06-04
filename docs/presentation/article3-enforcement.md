@@ -1,6 +1,6 @@
 # Thread-Scoped JVM Containment: The Mechanics
 
-> **Series overview:** This is Part 3 of a 5-part series on behavioral security for cloud-native applications. **What this part adds:** the mechanics of thread-scoped sandboxing inside a live JVM using **mazewall** — how to restrict threads unprivileged, protect memory without breaking the JIT compiler, and navigate critical JVM safety constraints. All code examples use the mazewall PoC library and are for local exploration only.
+> **Series overview:** This is Part 3 of our series on behavioral security for cloud-native applications. **What this part adds:** the mechanics of thread-scoped sandboxing inside a live JVM using **mazewall** — how to restrict threads unprivileged, protect memory without breaking the JIT compiler, and navigate critical JVM safety constraints. All code examples use the mazewall PoC library and are for local exploration only.
 
 ---
 
@@ -88,10 +88,10 @@ At application startup, a global process-wide restriction (`Policy.NO_EXEC`) mus
 
 > [!CAUTION]
 > **TSYNC fails on standard JVMs and LTS kernels:** 
-> 1. **Seccomp TSYNC:** You cannot apply process-wide seccomp isolation by simply calling `ContainedExecutors.installOnProcess()` from Java. By the time your `main()` method executes, the JVM has already spawned background threads (GC, JIT) without the `no_new_privs` flag, causing the kernel to reject the Seccomp `TSYNC` synchronization with `EACCES` (-13).
+> 1. **Seccomp TSYNC:** You cannot apply process-wide seccomp isolation by simply calling `ContainedExecutors.installOnProcess()` from Java. The Linux kernel requires that the `no_new_privs` flag be set on *all* threads in the thread group before a seccomp filter can be synchronized process-wide. Because this flag must be set via `prctl` *prior* to thread creation, and because the JVM has already spawned background threads (GC, JIT, VM helpers) before your `main()` method begins execution, calling `TSYNC` in-process fails with `EACCES` (-13).
 > 2. **Landlock TSYNC:** Landlock process-wide synchronization (`LANDLOCK_RESTRICT_SELF_TSYNC`) is only available in Landlock ABI v8 (Linux 7.0+). On older LTS kernels (e.g., 5.15, 6.1, 6.6), Landlock rules remain strictly thread-scoped. An in-process call inside `main()` cannot restrict pre-existing sibling helper threads, leaving a critical security gap.
 > 
-> To properly establish a secure process-wide lockdown (enforcing both Seccomp and Landlock before the JVM is multi-threaded), the sandbox boundaries must be applied *before* the JVM process starts. Operators can achieve this by configuring an **OCI container profile** (with `allowPrivilegeEscalation: false`) or using a **native launcher wrapper** (such as **bubblewrap** or **nsjail**) to sandbox the process tree prior to executing the JVM.
+> To properly establish a secure process-wide lockdown (enforcing both Seccomp and Landlock before the JVM is multi-threaded), the sandbox boundaries must be applied *before* the JVM process starts. Operators can achieve this by configuring an **OCI container profile** (with `allowPrivilegeEscalation: false`, which forces `no_new_privs` at the process tree root prior to exec) or using a **native launcher wrapper** (such as **bubblewrap** or **nsjail**) to sandbox the process tree prior to executing the JVM.
 
 ### Tier 2: Surgical Thread Containment
 For specific thread pools handling untrusted data (like JSON parsers or image processors), we apply stricter policies (like `Policy.PURE_COMPUTE` or custom Landlock paths). We wrap the target `ExecutorService` using `ContainedExecutors.wrap()`, which automatically binds the compiled policy to each worker thread before it executes its first task.

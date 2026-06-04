@@ -1,6 +1,6 @@
 # The 1-Millisecond Sandbox: High-Density Security with GraalVM Isolates
-
-> **Series overview:** This is the 6th and final part of our series on behavioral security for cloud-native applications. **What this part adds:** We address the architectural limits of thread-scoped sandboxing and introduce the ultimate solution: combining GraalVM Isolates with kernel enforcement to build a zero-overhead, multi-tenant sandbox.
+ 
+> **Series overview:** This is Part 6 of our series on behavioral security for cloud-native applications. **What this part adds:** We address the architectural limits of thread-scoped sandboxing and introduce the ultimate solution: combining GraalVM Isolates with kernel enforcement to build a zero-overhead, multi-tenant sandbox.
 
 ---
 
@@ -61,6 +61,12 @@ The architecture looks like this:
 2. **The Untrusted Task:** A request arrives to parse a potentially malicious XML document.
 3. **Spawn the Isolate:** The main app spawns a new GraalVM Isolate (1ms).
 4. **Lock the Doors:** The very first line of code inside the Isolate calls `ContainedExecutors.installOnCurrentThread(Policy.PURE_COMPUTE)`.
+ 
+   > [!WARNING]  
+   > **The Thread Poisoning Hazard:** Because Seccomp and Landlock filters are bound to the physical Linux OS thread and are strictly **irreversible**, applying a sandbox policy inside the Isolate permanently sandboxes the OS thread executing it. If the host application invokes the Isolate synchronously on a primary worker pool thread (such as a Netty HTTP worker thread), that thread remains permanently locked down even after the Isolate is destroyed! When returned to the pool, the poisoned thread will crash with `EPERM` when trying to handle standard host operations (like database connections or routing).
+   >
+   > **Mitigation:** The host application must execute the Isolate on a **dedicated throwaway thread** (which is spawned, runs the Isolate, and then terminates, releasing the restricted OS thread resource) or within a dedicated sandboxed carrier pool.
+ 
 5. **Execute & Destroy:** The Isolate parses the XML safely, returns the plain-text result via a C-style memory copy, and is instantly destroyed, wiping its memory.
 
 ### Why is this impenetrable?

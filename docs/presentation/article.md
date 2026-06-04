@@ -1,6 +1,6 @@
 # Do You Really Know What Your App Is Doing at Runtime?
 ![maze_security_walls_new.png](maze_security_walls_new.png)
-> **Series overview:** This is Part 1 of a 5-part series on behavioral security for cloud-native applications.
+> **Series overview:** This is Part 1 of our series on behavioral security for cloud-native applications.
  
 We have become very good at answering one specific supply-chain question:
  
@@ -160,7 +160,7 @@ Traditional security often focuses on blocking `execve` (spawning a shell). But 
  
 More advanced attackers use [**`io_uring`**](https://unixism.net/loti/), a high-performance asynchronous I/O API. By submitting operations via shared memory rings rather than direct syscalls, they can often "blind" traditional security monitors.
  
-An SBoB allows us to express fine-grained intent that stops these techniques: *"This application is strictly forbidden from using `memfd_create`, `io_uring_setup`, or mapping executable memory."*
+An SBoB allows us to express fine-grained intent that stops these techniques: *"This application is strictly forbidden from using `memfd_create`, `io_uring_setup`, or mapping executable memory"* (note that blocking executable memory mapping is only possible in Ahead-of-Time runtimes like GraalVM, as explained in Part 5).
 
 ## The Concept of Scopes: When is a Behavior Expected?
  
@@ -174,6 +174,9 @@ The most realistic way to implement Scopes is by aligning with the application's
 *   **Shutdown Scope:** Permissions required for graceful termination, such as flushing logs or closing connections.
  
 By using Kubernetes health checks as a trigger, the runtime engine can automatically "rotate" the active security contract. This provides a clear, automated enforcement boundary that matches how developers already think about their apps.
+ 
+> [!NOTE]  
+> **The Monotonicity Constraint:** In-process, unprivileged self-sandboxing via Seccomp and Landlock is strictly **monotonic**—you can only stack filters to *restrict* capabilities, never restore them. Therefore, a transition from the `Runtime` scope to the `Shutdown` scope cannot regain dropped privileges (such as network socket creation or filesystem access). Any action required during Shutdown must remain allowed during the Runtime phase. Privileged host-level agents (like Kubescape utilizing eBPF + LSM) do not have this limitation, as they operate outside the sandboxed process.
 
 ```mermaid
 stateDiagram-v2

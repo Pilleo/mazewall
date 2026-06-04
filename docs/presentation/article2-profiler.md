@@ -1,6 +1,6 @@
 # Dynamic Policy Profiling in Mazewall
 
-> **Series overview:** This is Part 2 of a 5-part series on behavioral security for cloud-native applications. **What this part adds:** a developer-focused walkthrough of **mazewall** — an experimental, research-grade Proof-of-Concept JVM sandboxing library. All code examples are for local exploration only; this is not a production-ready tool.
+> **Series overview:** This is Part 2 of our series on behavioral security for cloud-native applications. **What this part adds:** a developer-focused walkthrough of **mazewall** — an experimental, research-grade Proof-of-Concept JVM sandboxing library. All code examples are for local exploration only; this is not a production-ready tool.
 
 ---
 
@@ -27,7 +27,12 @@ However, cluster-wide dynamic profiling has a few critical limitations for appli
 - **USER_NOTIF-based syscall tracing:** An unprivileged out-of-process daemon intercepts every system call made by the profiled thread. This is transparent for synchronous syscalls but has a structural blind spot: `io_uring` operations are submitted via a shared-memory ring buffer, bypassing the syscall layer entirely, so they are invisible to `USER_NOTIF` tracing without root-level eBPF attachment.
 - **Iterative Landlock path discovery:** Filesystem path requirements are learned through controlled denial — the workload runs under a restricted policy, each denied path is whitelisted, and the workload retries until it converges.
 
-Note on `io_uring` profiling: there is no clean unprivileged solution here. Privileged eBPF attachment can observe `io_uring` submissions, but this requires `CAP_SYS_ADMIN`. The iterative Landlock approach can verify that the *paths* accessed via `io_uring` are correctly whitelisted (because Landlock enforcement propagates to the kernel's async worker), but it cannot independently enumerate which `io_uring` syscalls are required. This is an open engineering challenge.
+### Tracing `io_uring`: The Workarounds
+Because `io_uring` bypasses the standard syscall boundary for its submissions, unprivileged profiling is constrained. In practice, three approaches can be utilized to resolve this:
+ 
+1. **Tier H (Hybrid Shortcut - Recommended):** Temporarily disable `io_uring` during integration testing to force a fallback to standard synchronous or epoll-based I/O. The unprivileged `USER_NOTIF` and Landlock profiler will transparently capture all required file and network paths. You can then manually append `.unblock(Syscall.IO_URING_SETUP)` to the generated production policy to permit the high-performance asynchronous runtime.
+2. **Tier A (Iterative Path Discovery):** Leverage the Iterative Landlock path discovery loop described below. Because Landlock's LSM hooks operate at the Virtual File System (VFS) layer, the kernel's asynchronous workers (`io-wq`) are still intercepted by Landlock rules. When a path access is denied, the JVM catches the resulting exception, extracts the path, and adds it to the policy. While this discovers the required filesystem paths, it cannot independently discover the underlying blocked `io_uring` syscalls.
+3. **Tier P (Privileged eBPF Profiling):** Utilize root-level eBPF tracepoints (such as LSM hooks or `io_uring_submit_sqe` tracepoints) to trace path arguments directly. This requires `CAP_SYS_ADMIN` in the host's initial user namespace and is not currently implemented in the unprivileged `mazewall` user-space tool.
 
 ---
 
@@ -137,6 +142,9 @@ val compiledPolicy = IterativeProfiler.profile(basePolicy) {
 ```
 
 Upon convergence, the iterative execution yields the minimal set of verified paths (`compiledPolicy.allowedFsReadPaths`) required for successful classloading and execution.
+ 
+> [!CAUTION]  
+> **The Idempotency Caveat:** Because the Iterative Profiler restarts the execution block from the beginning upon encountering a path violation, any side-effect-heavy tasks (such as database inserts, outbound message dispatches, or state mutations) will execute multiple times. When using Tier A profiling, developers must ensure that the target workload is either idempotent or that external systems-level side-effects are mocked out.
 
 ---
 

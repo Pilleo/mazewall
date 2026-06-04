@@ -1,6 +1,6 @@
 # The Instruction-Level Sandbox: Why WebAssembly is the Spiritual Successor to JSM
 
-> **Series overview:** This is Part 7 of a 7-part series on behavioral security for cloud-native applications. **What this part adds:** We look beyond the OS and the Heap to the instruction set itself. We explore how WebAssembly (Wasm) provides a "shared-nothing" sandbox that fulfills the original promise of the Java Security Manager without its fatal flaws, and how the 2026 emergence of **Endive** and **Chicory Redline** makes it production-ready.
+> **Series overview:** This is Part 7 of our series on behavioral security for cloud-native applications. **What this part adds:** We look beyond the OS and the Heap to the instruction set itself. We explore how WebAssembly (Wasm) provides a "shared-nothing" sandbox that fulfills the original promise of the Java Security Manager without its fatal flaws, and how the 2026 emergence of **Endive** and **Chicory Redline** makes it production-ready.
 
 ---
 
@@ -71,7 +71,7 @@ While writing untrusted plugins in Rust is great for performance, what if you wa
 With the right build plugins, you can write all your business logic in Java. The core application runs natively on the JVM, while specific untrusted modules are compiled by TeaVM into Wasm and executed by Chicory. 
 
 > [!NOTE]  
-> **The Performance Catch:** As of now, passing complex Java objects across the Wasm boundary requires heavy serialization. Only **primitive types** (ints, floats, and memory offsets) work at high speed. Until the Wasm Component Model fully matures, passing full object graphs back and forth will incur a performance penalty.
+> **The Performance Catch:** WebAssembly on the JVM currently carries a significant performance penalty compared to native JVM execution. For CPU-bound tasks, it runs substantially slower than native Java compilation. Beyond raw execution limits, passing complex Java objects across the Wasm boundary requires heavy serialization; only primitive types (ints, floats, and memory offsets) can be passed at high speed. Until the Wasm Component Model and high-performance native JIT runtimes fully mature, Wasm is primarily a choice for absolute security and untrusted plugin isolation, not peak performance.
 
 ## The Synergies: Mazewall + Wasm
 
@@ -81,9 +81,12 @@ Because the **Wasm Runtime** is still a piece of software. Runtimes like Wasmer 
 
 This is where the layers of this series come together:
 
-1. **Wasm (The Guest):** Provides a high-density, low-latency sandbox for the untrusted logic.
-2. **Mazewall (The Host):** Wraps the thread executing the Wasm runtime. If a bug is found in the Wasm runtime's JIT/Redline compiler, **Mazewall's Seccomp filter** is the final backstop that prevents that exploit from spawning a shell or exfiltrating data.
-
+1. **Wasm (The Guest):** Provides a high-density sandbox for the untrusted logic.
+2. **Mazewall (The Host):** Wraps the thread executing the Wasm runtime. If a bug is found in the Wasm runtime's parser, **Mazewall's Seccomp filter** is the final backstop that prevents that exploit from spawning a shell or accessing the host system.
+ 
+> [!CAUTION]  
+> **The JIT vs. W^X Conflict:** If you use Chicory Redline (which JIT-compiles Wasm at runtime using Panama FFM for performance), the executing thread *must* have permission to allocate executable memory (`allowMmapExec = true` in Mazewall). This introduces a minor JIT security gap on that thread. To enforce absolute W^X memory security (blocking `PROT_EXEC` entirely via `Policy.PURE_COMPUTE`), you must execute the Wasm engine in **interpreter mode** (which is slower but requires zero executable memory allocation).
+ 
 We call this the **"Double Sandbox"**—the guest is trapped in a Wasm cage, and the cage itself is bolted to the floor by the Linux kernel.
 
 ## Choosing Your Weapon: When to use what?

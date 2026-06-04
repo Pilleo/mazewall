@@ -1,6 +1,6 @@
 # Mazewall: The Attacks We Actually Stop
 
-> **Series overview:** This is Part 4 of a 5-part series on behavioral security for cloud-native applications. **What this part adds:** real exploit walkthroughs using the **mazewall** demo codebase — demonstrating how thread-scoped Seccomp and Landlock co-enforcement blocks command execution, fileless malware, JIT shellcode injection, and asynchronous `io_uring` evasion. All demonstrations use the mazewall PoC library.
+> **Series overview:** This is Part 4 of our series on behavioral security for cloud-native applications. **What this part adds:** real exploit walkthroughs using the **mazewall** demo codebase — demonstrating how thread-scoped Seccomp and Landlock co-enforcement blocks command execution, fileless malware, JIT shellcode injection, and asynchronous `io_uring` evasion. All demonstrations use the mazewall PoC library.
 
 ---
 
@@ -232,6 +232,14 @@ CompletableFuture.runAsync(() -> {
 2. The JVM delegates this task to the pre-existing global worker pool, `ForkJoinPool.commonPool()`.
 3. The threads in this common pool were spawned by the OS *at JVM startup*—long before our worker thread applied the Seccomp filter.
 4. Because Seccomp filters are only inherited by *new* threads created via the `clone` syscall *after* the filter is applied, the `ForkJoinPool` threads are completely unconstrained.
+ 
+> **Why not just synchronize the filter using TSYNC?**  
+> Seccomp provides a synchronization flag (`SECCOMP_FILTER_FLAG_TSYNC`) to synchronize a filter across all existing sibling threads in the thread group. However, in Tier 2 (Thread-Scoped) containment, using `TSYNC` is intentionally avoided:
+> * **JVM Deadlock Risk:** Process-wide synchronization would immediately sandbox VM helper threads (GC, JIT, and VM coordinators). As discussed in Part 3, restricting these helper threads from synchronization and memory-paging system calls triggers immediate, JVM-wide deadlocks.
+> * **Privilege Monotonicity Constraint:** `TSYNC` requires the `no_new_privs` flag to be set on all existing threads, which fails on standard JVMs because background helper threads are spawned at VM initialization without this flag, returning `EACCES` (-13).
+> 
+> Thus, Tier 2 must remain strictly thread-local, which means thread-hopping remains a structural bypass if the attacker can execute arbitrary Java bytecode.
+ 
 5. The task instantly executes on the unconstrained thread. The shell spawns, and the sandbox is bypassed.
 
 ```

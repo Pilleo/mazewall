@@ -1,6 +1,6 @@
 # Generating an SBoB for Java: Where We Are and What's Missing
 
-> **Series overview:** This is Part 5 of a 5-part series on behavioral security for cloud-native applications. **What this part adds:** the harder problem of *generating* the behavioral contract — the tooling gaps, the Merge Fallacy, and why GraalVM's closed-world model is currently the clearest path to automating it.
+> **Series overview:** This is Part 5 of our series on behavioral security for cloud-native applications. **What this part adds:** the harder problem of *generating* the behavioral contract — the tooling gaps, the Merge Fallacy, and why GraalVM's closed-world model is currently the clearest path to automating it.
 
 
 Parts 1–4 established the *enforcement* side: what a Software Bill of Behavior (SBoB) is, how the kernel primitives enforce it, and what attacks they concretely stop.
