@@ -146,13 +146,13 @@ These flags are intended for profiling builds, not production. They increase bin
 
 ### W^X: Why JIT is the Enemy of a Hardened Sandbox
 
-Beyond making behavioral profiling cleaner, GraalVM's lack of a JIT compiler fundamentally hardens the enforcement side of the sandbox.
+Beyond making behavioral profiling cleaner, moving from a dynamic runtime to an AOT (Ahead-of-Time) model fundamentally hardens the enforcement side of the sandbox. **As a general rule in security: a JIT-based runtime is inherently less safe than an AOT-compiled binary with limited or no runtime.**
 
-To function, a standard JVM **must** translate Java bytecode into machine code at runtime and write that code into memory for execution. This means the JVM requires the OS to grant it `mmap` or `mprotect` system calls with the `PROT_EXEC` (executable) flag.
+To function, a standard JVM (or any JIT runtime like Node.js V8 or PyPy) **must** translate bytecode into machine code at runtime and write that code into memory for execution. This means the runtime requires the OS to grant it `mmap` or `mprotect` system calls with the `PROT_EXEC` (executable) flag.
 
 This is a structural security flaw. If an attacker achieves Arbitrary Code Execution (ACE) via a buffer overflow in a native JNI library, they can use the exact same syscalls the JIT compiler uses to allocate executable memory, inject malicious C shellcode, and run it. **You cannot block `mprotect(PROT_EXEC)` in Seccomp on a JIT JVM**, because the JVM will crash the moment it tries to optimize a hot loop.
 
-**GraalVM Native Image eliminates this attack surface.** Because the binary is AOT-compiled, it never needs to generate new machine code at runtime. You can apply an ultra-strict Seccomp policy that permanently enforces **W^X (Write XOR Execute)** at the OS level by blocking `PROT_EXEC`. Even if an attacker compromises the process, the Linux kernel will physically prevent them from injecting and running new shellcode.
+**AOT compilation eliminates this attack surface.** Because a GraalVM Native Image is AOT-compiled, it never needs to generate new machine code at runtime. You can apply an ultra-strict Seccomp policy that permanently enforces **W^X (Write XOR Execute)** at the OS level by blocking `PROT_EXEC`. Even if an attacker compromises the process, the Linux kernel will physically prevent them from injecting and running new shellcode. The statically compiled nature of AOT makes the behavioral bounds tight and enforceable.
 
 ### Control Flow Integrity
 

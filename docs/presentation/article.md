@@ -79,22 +79,32 @@ But it is important to distinguish between **observation** and **enforcement**. 
 While eBPF-based enforcement (like BPF-LSM) is extremely powerful, it requires high system privileges (`CAP_SYS_ADMIN` or `CAP_BPF`). In contrast, Seccomp and Landlock are designed to be **unprivileged**, allowing a standard application to "self-restrict" its own capabilities (once `PR_SET_NO_NEW_PRIVS` is set) without needing root access or cluster-level agents. This makes them the ideal "fast path" for developer-driven security.
 
 ```mermaid
-graph TD
-    UserSpace[User Space: Application] -->|1. Issues Syscall| SyscallEntry[Kernel: Syscall Entry]
-    
-    subgraph Kernel ["Linux Kernel Boundary"]
-        SyscallEntry -->|2. Evaluate| Seccomp{Seccomp Filter}
-        Seccomp -->|Denied| EPERM[Return EPERM / Kill Thread]
-        Seccomp -->|3. Allowed| Landlock{Landlock LSM}
-        
-        Landlock -->|Denied| EACCES[Return EACCES]
-        Landlock -->|4. Allowed| Exec[Syscall Execution]
-        
-        Exec -->|5. Trigger Hook| eBPF[eBPF Tracepoint / kprobe]
+sequenceDiagram
+    participant App as User Space Application
+    participant Entry as Kernel: Syscall Entry
+    participant Seccomp as Seccomp Filter
+    participant Landlock as Landlock LSM
+    participant Exec as Syscall Execution
+    participant eBPF as eBPF Hook
+    participant Logs as Security Logs
+
+    Note over Entry, eBPF: Linux Kernel Boundary
+
+    App->>Entry: 1. Issues Syscall
+    Entry->>Seccomp: 2. Evaluate
+    alt Denied
+        Seccomp--xApp: EPERM / Kill Thread
+    else Allowed
+        Seccomp->>Landlock: 3. Allowed
+        alt Denied
+            Landlock--xApp: EACCES
+        else Allowed
+            Landlock->>Exec: 4. Allowed
+            Exec->>eBPF: 5. Trigger Hook
+            eBPF-->>Logs: 6. Async Event
+            Exec-->>App: 7. Return Value
+        end
     end
-    
-    eBPF -.->|6. Async Event| Logs[User Space: Security Logs / Alerts]
-    Exec -->|7. Return Value| UserSpace
 ```
 
 ## This Isn't New—Server-Side Is Just Late
