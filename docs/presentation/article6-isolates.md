@@ -220,6 +220,14 @@ To select the right architecture, we can compare these sandboxing methods across
 | **WebAssembly** | Medium/Low | Medium (Linear heap) | ❌ No (None) | ✅ Strongest (Interpreter) | ✅ Absolute (No shared pool) |
 | **Separate Process / Sidecar** | Low (RPC latency) | High (New JVM overhead) | ❌ No (None) | ✅ Strongest (Process) | ✅ Absolute (Process barrier) |
 
+### What You Can Do Today: A Pragmatic Roadmap
+
+While the systematic pipelines (dynamic SBoB generation, compiler integration) are still being built, backend developers can take concrete, pragmatic steps today to secure their applications:
+
+1. **Deploy eBPF Telemetry (Kubescape)**: Do not wait for sandboxing enforcement tools. Install **[Kubescape](https://kubescape.io)** (an open-source Kubernetes security and compliance platform) or other unprivileged eBPF-based tracing tools (like **[Inspektor Gadget](https://www.inspektor-gadget.io/)**) in your staging environments. Even in audit-only mode, these tools gather baseline syscall and network telemetry that you previously ignored. This data will be invaluable when you begin mapping your application's behavioral boundaries.
+2. **Prioritize AOT & Reflection-Free Dependencies**: When choosing serialization formats, frameworks, or utility libraries, prioritize reflection-free options (such as GraalVM-compatible components, Micronaut serialization, or DSL-JSON) and everything AOT(Hi GraalVM). Avoiding dynamic classloading and runtime reflection makes call graphs statically predictable, simplifying future sandboxing and hardening.
+3. **Utilize NsJail or Bubblewrap**: For legacy workloads, untrusted third-party binaries, or high-risk processes inside containers, do not wait for in-process sandboxing. Wrap execution in mature, production-ready process isolation boundaries like **[NsJail](https://github.com/google/nsjail)** or **[Bubblewrap](https://github.com/containers/bubblewrap)**. They provide robust kernel-level namespace and seccomp isolation from the outside today.
+
 ---
 
 ## The Developer Tooling Pipeline We Need
