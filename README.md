@@ -151,8 +151,7 @@ repositories {
 ```kotlin
 dependencies {
     // Core enforcement engine
-    // Replace 'USER.REPO' with your actual GitHub username and repository name
-    implementation("com.github.USER.REPO:enforcer:Tag")
+    implementation("com.github.Pilleo.jseccomp:enforcer:main-SNAPSHOT")
 }
 ```
 

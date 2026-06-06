@@ -39,8 +39,7 @@ repositories {
 }
 
 dependencies {
-    // Replace 'USER.REPO' with your actual GitHub username and repository name
-    implementation("com.github.USER.REPO:enforcer:Tag")
+    implementation("com.github.Pilleo.jseccomp:enforcer:main-SNAPSHOT")
 }
 ```
 
