@@ -6,6 +6,8 @@ plugins {
     id("com.github.spotbugs") version "6.5.5"
     id("org.owasp.dependencycheck") version "10.0.4"
     id("maven-publish")
+    id("base")
+    id("java")
 }
 
 group = "io.mazewall"
@@ -35,6 +37,7 @@ ktlint {
 }
 
 subprojects {
+    apply(plugin = "base")
     apply(plugin = "jacoco")
     apply(plugin = "dev.detekt")
     apply(plugin = "org.jlleitschuh.gradle.ktlint")
