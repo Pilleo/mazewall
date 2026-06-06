@@ -1,5 +1,5 @@
 # mazewall
-
+[![](https://jitpack.io/v/Pilleo/jseccomp.svg)](https://jitpack.io/#Pilleo/jseccomp)
 **Kernel-enforced thread-scoped sandboxing for JVM applications.**
 
 ---
