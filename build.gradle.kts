@@ -11,7 +11,15 @@ plugins {
 }
 
 group = "io.mazewall"
-version = "0.0.1-prealpha-SNAPSHOT"
+version = "0.1.0-SNAPSHOT"
+
+allprojects {
+    apply(plugin = "java")
+    apply(plugin = "maven-publish")
+
+    // Satisfy JitPack's broken 'listDeps' task by exposing 'configurations' as an extra property
+    extra["configurations"] = configurations
+}
 
 dependencyCheck {
     failBuildOnCVSS = 7.0f
@@ -42,7 +50,6 @@ subprojects {
     apply(plugin = "dev.detekt")
     apply(plugin = "org.jlleitschuh.gradle.ktlint")
     apply(plugin = "com.github.spotbugs")
-    apply(plugin = "maven-publish")
 
     // Ensure code is formatted before compilation to prevent build failures
     tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
