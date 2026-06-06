@@ -100,14 +100,14 @@ Consequently, it appends `'u'` to the builder and proceeds to parse the 4 hexade
 **Needed:** Add native `\uXXXX` escape sequence support inside `JsonTokenizer.parseString()`. When `esc == 'u'`, parse the next 4 hexadecimal characters as an integer and append its `Char` representation to the path string.
 
 ### 🔴 [Severity: MEDIUM]: Trace Listener misleads developers by capturing the Main Thread stack trace for unmapped child threads
-**Target:** `io.mazewall.profiler.Profiler`
+**Target:** `io.mazewall.profiler.internal.ProfilerTraceListener`
 **Failure Hypothesis:** A profiled workload spawns unmanaged child threads (via standard libraries or thread pools) that execute I/O or other trapped syscalls. When a child thread triggers a `USER_NOTIF`, the Trace Listener fails to resolve its TID to a Java `Thread` object in the JVM thread registry. As a fallback, the listener captures the stack trace of the main worker thread, permanently logging a completely unrelated stack trace for the child thread's event.
-**Context & Proof:** In `Profiler.kt`'s `startTraceListener`, the listener runs a loop reading events from the daemon socket:
+**Context & Proof:** In `ProfilerTraceListener.kt`'s `runListenerLoop`, the listener runs a loop reading events from the daemon socket:
 ```kotlin
-val threadToProfile = threadRegistry[pid] ?: workerThreadProvider()
+val threadToProfile = Profiler.threadRegistry[pid] ?: workerThreadProvider()
 val stackTrace = threadToProfile?.stackTrace?.map { it.toString() }
 ```
-`threadRegistry` only tracks threads that explicitly call the profiler registration hook. Child threads spawned dynamically by libraries are not registered.
+`Profiler.threadRegistry` only tracks threads that explicitly call the profiler registration hook. Child threads spawned dynamically by libraries are not registered.
 When the daemon notifies the listener that a child thread with TID `pid` made a syscall, `threadRegistry[pid]` returns `null`. The listener then invokes `workerThreadProvider()`, which returns the main thread's `Thread` object. As a result, the generated `TraceEvent` contains the stack trace of the **main thread** instead of the actual child thread. During SBoB analysis, developers are shown highly confusing stack traces of the main thread supposedly performing filesystem or network actions that it never initiated.
 **Cascading Risk Potential:** Medium diagnostic and maintainability defect. Misleads developers and increases debugging complexity by reporting false/uncorrect stack frames for sandboxed workload execution.
 **Needed:** Remove the fallback to `workerThreadProvider()` when capturing stack traces in the listener thread. If the TID is not found in `threadRegistry`, record `null` or a sentinel string (e.g., `["<untracked_descendant_thread_stack_trace>"]`) to maintain strict data integrity.
@@ -172,9 +172,9 @@ As a result, neither the symlink target nor the symlink creation path is resolve
 ```
 
 ### 🔴 [Severity: CRITICAL]: Trace Listener Socket Interruption Deadlock due to unhandled `EINTR`
-**Target:** `/profiler/src/main/kotlin/io/mazewall/profiler/Profiler.kt` (inside `startTraceListener`)
+**Target:** `/profiler/src/main/kotlin/io/mazewall/profiler/internal/ProfilerTraceListener.kt` (inside `start`)
 **Failure Hypothesis:** The JVM multi-threaded runtime relies heavily on POSIX signals (e.g., `SIGUSR2`, `SIGJVM1`, `SIGJVM2`) for GC safepoints and thread suspension. If one of these signals is delivered to the trace listener thread while it is blocked inside a native `LinuxNative.read()` call on the Unix domain socket, the call will fail with `EINTR` (-1). If the custom `InputStream` wrapper treats all non-positive return values as EOF and terminates, it will cause a permanent deadlock of sandboxed sibling threads.
-**Context & Proof:** In `Profiler.kt`, `startTraceListener` wraps the socket reading in a custom `InputStream`:
+**Context & Proof:** In `ProfilerTraceListener.kt`, `start` wraps the socket reading in a custom `InputStream`:
 ```kotlin
 override fun read(): Int {
     val res = LinuxNative.read(socketFd, readBuf, 1)
@@ -190,7 +190,7 @@ override fun read(): Int {
 If `LinuxNative.read()` is interrupted by a signal, `res.returnValue` is `-1` and `res.errno` is `4` (`EINTR`). The code does not check `errno` and instead immediately returns `-1` (EOF). When `DataInputStream.readFully()` is reading the packet (e.g., reading the PID or name length) and receives `-1`, it throws an `EOFException` and exits the listener thread's processing loop.
 Once the trace listener thread terminates, the socket is closed. When any sandboxed sibling thread subsequent to this event invokes a blocked system call, the seccomp filter intercepts the call and traps the thread by queuing a `USER_NOTIF`. The supervisor daemon receives the notification, writes the `TraceEvent` to the Unix domain socket, and blocks waiting for an ACK byte from the JVM. However, because the trace listener thread is dead and the JVM socket end is closed, the daemon's write fails or blocks indefinitely. Sibling threads are left permanently frozen in the kernel, leading to a complete JVM deadlock.
 **Cascading Risk Potential:** Critical. Deterministically causes JVM deadlocks during garbage collection or thread suspension events while running the profiler.
-**Needed:** Add an explicit loop inside the `read()` and `read(b, off, len)` overrides of the `InputStream` in `Profiler.kt` to check if `res.returnValue < 0 && res.errno == 4` (EINTR). If so, retry the `LinuxNative.read` call. Only return `-1` if the return value is non-positive and `errno` is not `EINTR` (indicating true EOF or socket failure).
+**Needed:** Add an explicit loop inside the `read()` and `read(b, off, len)` overrides of the `InputStream` in `ProfilerTraceListener.kt` to check if `res.returnValue < 0 && res.errno == 4` (EINTR). If so, retry the `LinuxNative.read` call. Only return `-1` if the return value is non-positive and `errno` is not `EINTR` (indicating true EOF or socket failure).
 
 ### 🔴 [Severity: HIGH]: Missing `sendmmsg` and `recvmmsg` system calls bypass `NO_NETWORK` and `PURE_COMPUTE_UNSAFE` restrictions
 **Target:** `io.mazewall.Syscall`, `io.mazewall.Policy.PURE_COMPUTE_UNSAFE`, `io.mazewall.Policy.NO_NETWORK`, and `/profiler/src/main/kotlin/io/mazewall/profiler/compiler/BobCompiler.kt`
