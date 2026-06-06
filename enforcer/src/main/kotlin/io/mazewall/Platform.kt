@@ -154,18 +154,22 @@ object Platform {
     }
 
     private fun detectContainer(): Boolean {
-        if (java.io.File("/.dockerenv").exists()) return true
-        if (java.io.File("/run/secrets/kubernetes.io").exists()) return true
-        try {
-            val cgroup = java.io.File("/proc/1/cgroup")
-            if (cgroup.exists()) {
-                val content = cgroup.readText()
-                if (content.contains("docker") || content.contains("podman") || content.contains("kubepods") || content.contains("containerd")) {
-                    return true
+        var isContainer = java.io.File("/.dockerenv").exists() ||
+            java.io.File("/run/secrets/kubernetes.io").exists()
+
+        if (!isContainer) {
+            try {
+                val cgroup = java.io.File("/proc/1/cgroup")
+                if (cgroup.exists()) {
+                    val content = cgroup.readText()
+                    isContainer = content.contains("docker") ||
+                        content.contains("podman") ||
+                        content.contains("kubepods") ||
+                        content.contains("containerd")
                 }
+            } catch (ignored: Exception) {
             }
-        } catch (ignored: Exception) {
         }
-        return false
+        return isContainer
     }
 }

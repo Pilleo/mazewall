@@ -7,19 +7,19 @@ plugins {
     id("org.owasp.dependencycheck") version "10.0.4"
     id("maven-publish")
     id("base")
+    id("java")
 }
 
 group = "io.mazewall"
 version = "0.1.0-SNAPSHOT"
 
 allprojects {
+    apply(plugin = "java")
     apply(plugin = "maven-publish")
+    apply(plugin = "org.jlleitschuh.gradle.ktlint")
 
-    // Safely attempt to preempt or override JitPack's broken 'listDeps' task
-    // Using 'matching' to avoid collision if JitPack already injected it.
-    tasks.matching { it.name == "listDeps" }.configureEach {
-        enabled = false
-    }
+    // Satisfy JitPack's broken 'listDeps' task by exposing 'configurations' as an extra property
+    extra["configurations"] = configurations
 
     // Aggressively skip tests on JitPack because the host kernel (4.4)
     // is too old for Seccomp/Landlock/FFM and will cause failures.
@@ -28,7 +28,18 @@ allprojects {
             enabled = false
         }
     }
+
+    // Ensure code is formatted before compilation to prevent build failures
+    tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
+        dependsOn("ktlintFormat")
+    }
+
+    // Also format Kotlin scripts (like build.gradle.kts)
+    tasks.matching { it.name == "kotlinSourcesJar" }.configureEach {
+        dependsOn("ktlintFormat")
+    }
 }
+
 dependencyCheck {
     failBuildOnCVSS = 7.0f
     format = "ALL"
@@ -56,13 +67,7 @@ subprojects {
     apply(plugin = "base")
     apply(plugin = "jacoco")
     apply(plugin = "dev.detekt")
-    apply(plugin = "org.jlleitschuh.gradle.ktlint")
     apply(plugin = "com.github.spotbugs")
-
-    // Ensure code is formatted before compilation to prevent build failures
-    tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
-        dependsOn("ktlintFormat")
-    }
 
     spotbugs {
         ignoreFailures.set(false)
