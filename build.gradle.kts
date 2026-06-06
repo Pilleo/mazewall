@@ -7,18 +7,20 @@ plugins {
     id("org.owasp.dependencycheck") version "10.0.4"
     id("maven-publish")
     id("base")
-    id("java")
 }
 
 group = "io.mazewall"
 version = "0.1.0-SNAPSHOT"
 
 allprojects {
-    apply(plugin = "java")
     apply(plugin = "maven-publish")
 
-    // Satisfy JitPack's broken 'listDeps' task by exposing 'configurations' as an extra property
-    extra["configurations"] = configurations
+    // Attempt to preempt JitPack's broken 'listDeps' task
+    tasks.register("listDeps") {
+        doLast {
+            println("JitPack listDeps shim for ${project.name}")
+        }
+    }
 }
 
 dependencyCheck {

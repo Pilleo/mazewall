@@ -1,6 +1,4 @@
 jdk:
-    - openjdk21
-before_install:
-    - java -version
+    - openjdk17
 install:
-    - ./gradlew publishToMavenLocal -x test
+    - ./gradlew publishToMavenLocal -x test -x listDeps
