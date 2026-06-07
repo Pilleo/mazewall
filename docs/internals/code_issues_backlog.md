@@ -165,26 +165,9 @@ As a result, neither the symlink target nor the symlink creation path is resolve
                 )
 ```
 
-### 🔴 [Severity: CRITICAL]: Trace Listener Socket Interruption Deadlock due to unhandled `EINTR`
+### 🟢 [RESOLVED]: Trace Listener Socket Interruption Deadlock due to unhandled `EINTR`
 **Target:** `/profiler/src/main/kotlin/io/mazewall/profiler/internal/ProfilerTraceListener.kt` (inside `start`)
-**Failure Hypothesis:** The JVM multi-threaded runtime relies heavily on POSIX signals (e.g., `SIGUSR2`, `SIGJVM1`, `SIGJVM2`) for GC safepoints and thread suspension. If one of these signals is delivered to the trace listener thread while it is blocked inside a native `LinuxNative.read()` call on the Unix domain socket, the call will fail with `EINTR` (-1). If the custom `InputStream` wrapper treats all non-positive return values as EOF and terminates, it will cause a permanent deadlock of sandboxed sibling threads.
-**Context & Proof:** In `ProfilerTraceListener.kt`, `start` wraps the socket reading in a custom `InputStream`:
-```kotlin
-override fun read(): Int {
-    val res = LinuxNative.read(socketFd, readBuf, 1)
-    val value =
-        if (res.returnValue <= 0) {
-            -1
-        } else {
-            readBuf.get(ValueLayout.JAVA_BYTE, 0L).toInt() and BYTE_MASK
-        }
-    return value
-}
-```
-If `LinuxNative.read()` is interrupted by a signal, `res.returnValue` is `-1` and `res.errno` is `4` (`EINTR`). The code does not check `errno` and instead immediately returns `-1` (EOF). When `DataInputStream.readFully()` is reading the packet (e.g., reading the PID or name length) and receives `-1`, it throws an `EOFException` and exits the listener thread's processing loop.
-Once the trace listener thread terminates, the socket is closed. When any sandboxed sibling thread subsequent to this event invokes a blocked system call, the seccomp filter intercepts the call and traps the thread by queuing a `USER_NOTIF`. The supervisor daemon receives the notification, writes the `TraceEvent` to the Unix domain socket, and blocks waiting for an ACK byte from the JVM. However, because the trace listener thread is dead and the JVM socket end is closed, the daemon's write fails or blocks indefinitely. Sibling threads are left permanently frozen in the kernel, leading to a complete JVM deadlock.
-**Cascading Risk Potential:** Critical. Deterministically causes JVM deadlocks during garbage collection or thread suspension events while running the profiler.
-**Needed:** Add an explicit loop inside the `read()` and `read(b, off, len)` overrides of the `InputStream` in `ProfilerTraceListener.kt` to check if `res.returnValue < 0 && res.errno == 4` (EINTR). If so, retry the `LinuxNative.read` call. Only return `-1` if the return value is non-positive and `errno` is not `EINTR` (indicating true EOF or socket failure).
+**Fix:** Extracted `NativeSocketInputStream` and added an explicit retry loop for `EINTR` (errno 4). Verified via targeted unit test with mocked native calls.
 
 ### 🔴 [Severity: HIGH]: Missing `sendmmsg` and `recvmmsg` system calls bypass `NO_NETWORK` and `PURE_COMPUTE_UNSAFE` restrictions
 **Target:** `io.mazewall.Syscall`, `io.mazewall.Policy.PURE_COMPUTE_UNSAFE`, `io.mazewall.Policy.NO_NETWORK`, and `/profiler/src/main/kotlin/io/mazewall/profiler/compiler/BobCompiler.kt`

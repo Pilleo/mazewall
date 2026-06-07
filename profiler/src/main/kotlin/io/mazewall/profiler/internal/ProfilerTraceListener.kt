@@ -7,7 +7,6 @@ import java.io.BufferedInputStream
 import java.io.DataInputStream
 import java.io.InputStream
 import java.lang.foreign.Arena
-import java.lang.foreign.MemorySegment
 import java.lang.foreign.ValueLayout
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.logging.Logger
@@ -30,40 +29,8 @@ internal class ProfilerTraceListener(
 
     fun start(): Thread {
         val arena = Arena.ofShared()
-        val readBuf = arena.allocate(1)
-        val multiBuf = arena.allocate(IO_BUFFER_SIZE.toLong())
 
-        val inputStream = object : InputStream() {
-            override fun read(): Int {
-                val res = LinuxNative.read(socketFd, readBuf, 1)
-                return if (res.returnValue <= 0) {
-                    -1
-                } else {
-                    readBuf.get(ValueLayout.JAVA_BYTE, 0L).toInt() and BYTE_MASK
-                }
-            }
-
-            override fun read(
-                b: ByteArray,
-                off: Int,
-                len: Int,
-            ): Int {
-                if (len == 0) return 0
-                val count = Math.min(len.toLong(), IO_BUFFER_SIZE.toLong())
-                val res = LinuxNative.read(socketFd, multiBuf, count)
-                return if (res.returnValue <= 0) {
-                    -1
-                } else {
-                    val actualLen = res.returnValue.toInt()
-                    MemorySegment.copy(multiBuf, ValueLayout.JAVA_BYTE, 0L, b, off, actualLen)
-                    actualLen
-                }
-            }
-
-            override fun close() {
-                LinuxNative.close(socketFd)
-            }
-        }
+        val inputStream = NativeSocketInputStream(socketFd, arena)
 
         return Thread {
             try {
