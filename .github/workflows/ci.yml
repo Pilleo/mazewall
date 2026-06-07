@@ -34,11 +34,16 @@ jobs:
             - name: Grant Execute Permission for Gradlew
               run: chmod +x gradlew
 
+            - name: Setup Podman Socket
+              run: |
+                  systemctl --user enable --now podman.socket
+                  echo "DOCKER_HOST=unix://$XDG_RUNTIME_DIR/podman/podman.sock" >> $GITHUB_ENV
+
             - name: Build test container
               run: cd ./infra/dev && podman compose build
 
             - name: Run tests in container
-              run: podman compose run --rm mazewall ./gradlew buld --info
+              run: podman compose run --rm mazewall ./gradlew check --info
               env:
                   IO_MAZEWALL_TEST: "true"
 
