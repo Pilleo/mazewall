@@ -13,13 +13,14 @@ import java.util.concurrent.atomic.AtomicReference
  * the highest priority action (e.g., ACT_KILL_PROCESS > ACT_ALLOW) takes precedence
  * according to BPF semantics.
  */
-// INVARIANT: ThreadLocals are INTENTIONALLY not cleared between tasks.
-// Seccomp filters are permanent for the OS thread lifetime.
-// Do NOT add cleanup in task wrappers; it would give a false sense of
-// isolation between tasks on the same thread. See code_issues_backlog.md
-// "Permanent thread pool contamination" for the known limitation and
-// the correct fix strategy (scope checks, not cleanup).
 internal object ContainerStateRegistry {
+    // INVARIANT: ThreadLocals are INTENTIONALLY not cleared between tasks.
+    // Seccomp filters are permanent for the OS thread lifetime.
+    // Do NOT add cleanup in task wrappers; it would give a false sense of
+    // isolation between tasks on the same thread. See code_issues_backlog.md
+    // "Permanent thread pool contamination" for the known limitation and
+    // the correct fix strategy (scope checks, not cleanup).
+
     val THREAD_SYSCALL_ACTIONS = ThreadLocal.withInitial<Map<Syscall, SeccompAction>> { emptyMap() }
     val THREAD_DEFAULT_ACTION = ThreadLocal.withInitial { SeccompAction.ACT_ALLOW }
     val THREAD_ALLOWS_MMAP_EXEC = ThreadLocal.withInitial { true }

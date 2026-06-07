@@ -134,7 +134,6 @@ object ContainedExecutors {
                 // trigger silent Landlock lockdown" for the known UX risk of this design.
                 policy.isSyscallAllowed(Syscall.IO_URING_SETUP)
 
-
         if (!needsLandlock) return
 
         if (processWide) {
