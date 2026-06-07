@@ -30,13 +30,12 @@ internal object ContainerStateRegistry {
     val THREAD_LANDLOCK_APPLIED_READS = ThreadLocal.withInitial<Set<String>?> { null }
     val THREAD_LANDLOCK_APPLIED_WRITES = ThreadLocal.withInitial<Set<String>?> { null }
 
-    val PROCESS_WIDE_ENFORCEMENT_ACTIVE = AtomicBoolean(false)
-    val PROCESS_WIDE_SYSCALL_ACTIONS = AtomicReference<Map<Syscall, SeccompAction>>(emptyMap())
-    val PROCESS_WIDE_DEFAULT_ACTION = AtomicReference(SeccompAction.ACT_ALLOW)
-    val PROCESS_WIDE_ALLOWS_MMAP_EXEC = AtomicBoolean(true)
-    val PROCESS_WIDE_ALLOWS_NON_THREAD_CLONE = AtomicBoolean(true)
-    val PROCESS_WIDE_ALLOWS_UNSAFE_PRCTL = AtomicBoolean(true)
+    val PROCESS_SYSCALL_ACTIONS: MutableMap<Syscall, SeccompAction> = java.util.concurrent.ConcurrentHashMap()
+    val PROCESS_DEFAULT_ACTION = AtomicReference(SeccompAction.ACT_ALLOW)
+    val PROCESS_ALLOWS_MMAP_EXEC = AtomicBoolean(true)
+    val PROCESS_ALLOWS_NON_THREAD_CLONE = AtomicBoolean(true)
+    val PROCESS_ALLOWS_UNSAFE_PRCTL = AtomicBoolean(true)
 
     // Global seccomp filter depth (number of stacked filters applied to the process)
-    val PROCESS_WIDE_FILTER_DEPTH = AtomicInteger(0)
+    val PROCESS_FILTER_DEPTH = AtomicInteger(0)
 }
