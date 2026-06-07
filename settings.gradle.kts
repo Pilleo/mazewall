@@ -7,9 +7,9 @@ dependencyResolutionManagement {
     repositories {
         mavenCentral()
         maven { url = uri("https://jitpack.io") }
-        maven {
-            url = uri("https://maven.pkg.github.com/Pilleo/mazewall")
-            System.getenv("GITHUB_ACTOR")?.let { actor ->
+        System.getenv("GITHUB_ACTOR")?.let { actor ->
+            maven {
+                url = uri("https://maven.pkg.github.com/Pilleo/mazewall")
                 credentials {
                     username = actor
                     password = System.getenv("GITHUB_TOKEN")

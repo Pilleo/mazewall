@@ -47,10 +47,10 @@ allprojects {
 
     publishing {
         repositories {
-            maven {
-                name = "GitHubPackages"
-                url = uri("https://maven.pkg.github.com/Pilleo/mazewall")
-                System.getenv("GITHUB_ACTOR")?.let { actor ->
+            System.getenv("GITHUB_ACTOR")?.let { actor ->
+                maven {
+                    name = "GitHubPackages"
+                    url = uri("https://maven.pkg.github.com/Pilleo/mazewall")
                     credentials {
                         username = actor
                         password = System.getenv("GITHUB_TOKEN")

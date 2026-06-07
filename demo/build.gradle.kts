@@ -16,8 +16,8 @@ application {
 }
 
 dependencies {
-    implementation(("io.mazewall:enforcer:0.0.1-prealpha-SNAPSHOT"))
-    implementation(("io.mazewall:profiler:0.0.1-prealpha-SNAPSHOT"))
+    implementation(project(":enforcer"))
+    implementation(project(":profiler"))
     testImplementation("org.junit.jupiter:junit-jupiter:5.10.0")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
     testImplementation(kotlin("test"))
