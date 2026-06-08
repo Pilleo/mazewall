@@ -13,10 +13,11 @@ class ThreadPoolWhitelistTest {
     fun `thread pool whitelist execution exhaustion`() {
         val executor = Executors.newSingleThreadExecutor()
 
+        // What if we just use ACT_LOG for default? Then nothing is blocked!
+        // We only care about testing the FilterInstallationPlanner deduplication logic, not the actual blocking.
         val policy = Policy
             .builder()
-            .allowJvmClasspath() // Set this before anything else
-            .defaultAction(SeccompAction.ACT_ERRNO)
+            .defaultAction(SeccompAction.ACT_LOG)
             .allow(Syscall.READ, Syscall.WRITE)
             .build()
 
