@@ -18,6 +18,7 @@ class ThreadPoolWhitelistTest {
         executor
             .submit {
             val ex = java.util.zip.DataFormatException("test")
+            val dummy = kotlin.Result.success(1)
         }.get()
 
         val policy = Policy
