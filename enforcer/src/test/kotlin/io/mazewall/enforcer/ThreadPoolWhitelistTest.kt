@@ -13,8 +13,6 @@ class ThreadPoolWhitelistTest {
     fun `thread pool whitelist execution exhaustion`() {
         val executor = Executors.newSingleThreadExecutor()
 
-        // Actually, just pre-warm everything since allowJvmClasspath still intercepts via BPF and causes issues if not fully warm
-        // Or just let's catch ClassFormatError and ignore it if it happens during thread pool destruction, as we are testing exhaustion, not functionality
         executor
             .submit {
             val ex = java.util.zip.DataFormatException("test")
