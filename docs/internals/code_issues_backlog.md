@@ -316,3 +316,28 @@ Consequently, if a workload relies on `io_uring` for file access, `StraceProfile
 **Target:** `io.mazewall.enforcer.ContainedExecutors.kt` (specifically `needsLandlock` calculation)
 **Context:** In `ContainedExecutors.kt`, `needsLandlock` is implicitly triggered if `io_uring_setup` is allowed, even if no filesystem paths are specified. This causes Landlock to be applied with an empty ruleset, permanently locking down the filesystem for the thread. This trigger is currently undocumented in the code, making it difficult for agents to diagnose the root cause of the "silent lockdown" symptom observed in `Landlock.kt`.
 **Needed:** Add a cross-reference comment to the `io_uring` trigger in `ContainedExecutors.kt`. Long-term, decouple the `io_uring` safety check from the automatic filesystem lockdown or provide a clear warning/opt-out mechanism.
+
+### 🔴 [Severity: CRITICAL]: `ContainedExecutors` Thread-Local State Persistence and Poisoning
+**Target:** `io.mazewall.enforcer.ContainedExecutors.kt` and `ContainerStateRegistry.kt`
+**Context:** `ContainedExecutorWrapper` calls `applyContainment()` (which sets `ThreadLocal` actions and flags) on every task execution, but it never clears these `ThreadLocals` in a `finally` block. Because worker threads are reused in a pool, any subsequent task scheduled on the same OS thread will inherit the `mazewall` state of the previous task, even if it's supposed to be uncontained or have a different policy.
+**Needed:** Implement a robust `try-finally` cleanup in `ContainedExecutorWrapper` that clears all registers in `ContainerStateRegistry` when a contained task completes.
+
+### 🔴 [Severity: HIGH]: `Landlock.applyRestrictiveBarrier()` Silent Fail-Open
+**Target:** `io.mazewall.landlock.Landlock.kt`
+**Context:** The method ignores the return values of `prctl(PR_SET_NO_NEW_PRIVS)` and the `landlock_restrict_self` syscall. If the kernel fails to apply the ruleset (e.g. invalid FD, EPERM), the method returns silently, and the `IterativeProfiler` continues running WITHOUT filesystem containment, leading to zero discovered paths.
+**Needed:** Add strict result verification and throw an exception on failure.
+
+### 🔴 [Severity: HIGH]: `ProfilerDaemon` `SYMLINKAT` Mapping Error
+**Target:** `io.mazewall.profiler.engine.ProfilerDaemon.kt` (specifically `getPathArgs`)
+**Context:** `SYMLINKAT` parameters are mapped as `(oldDirFd, oldPath, newDirFd, newPath)`, but the Linux kernel signature is `(target, newdirfd, linkpath)`. This causes the profiler to attempt to read memory from registers that do not contain string pointers, resulting in failed path resolution for symlink creation.
+**Needed:** Correct the argument mapping for `SYMLINKAT` to match the `(target, newdirfd, linkpath)` signature.
+
+### 🔴 [Severity: MEDIUM]: `SbobParser` Unicode Escape Parsing Failure
+**Target:** `io.mazewall.SbobParser.kt` (specifically `JsonTokenizer`)
+**Context:** The lightweight JSON tokenizer handles standard escapes like `\n` or `\t` but lacks support for `\uXXXX` Unicode escapes. This causes corruption or parsing failures when SBoB files contain non-ASCII characters in paths.
+**Needed:** Implement `\uXXXX` escape sequence parsing in `JsonTokenizer.parseString`.
+
+### 🔴 [Severity: MEDIUM]: `SbobParser` Syntactic Pruning Inaccuracy
+**Target:** `io.mazewall.SbobParser.kt` (specifically `pruneSubpaths`)
+**Context:** Pruning relies on syntactic `normalize()` and `startsWith()` checks. If a parent path is a symlink to a different filesystem branch, syntactic pruning is invalid and can lead to incorrect permission grants.
+**Needed:** Document this limitation or switch to a more robust pruning strategy that considers the physical inode structure.
