@@ -51,10 +51,26 @@ internal object FilterInstallationPlanner {
         }
 
         val newBlocksMap = mutableMapOf<Syscall, SeccompAction>()
+
+        // Check explicitly mapped actions in the new policy
         for ((sys, action) in policy.syscallActions) {
             val currentAction = state.currentSyscallActions[sys] ?: state.currentDefaultAction
             if (action.priority > currentAction.priority) {
                 newBlocksMap[sys] = action
+            }
+        }
+
+        // If the new policy operates as a whitelist (or has any restrictive default),
+        // we must check if there are syscalls currently allowed that the new policy restricts via its default action.
+        if (policy.defaultAction.priority > SeccompAction.ACT_ALLOW.priority && state.currentlyAllowedSyscalls != null) {
+            val toInstallAllowed = Syscall.entries.filter { policy.isSyscallAllowed(it) }.toSet()
+            for (sys in state.currentlyAllowedSyscalls) {
+                if (!toInstallAllowed.contains(sys)) {
+                    val currentAction = state.currentSyscallActions[sys] ?: state.currentDefaultAction
+                    if (policy.defaultAction.priority > currentAction.priority) {
+                        newBlocksMap[sys] = policy.defaultAction
+                    }
+                }
             }
         }
 
