@@ -1,3 +1,5 @@
+import org.gradle.api.publish.PublishingExtension
+
 plugins {
     kotlin("jvm") version "2.4.0" apply false
     id("jacoco")
@@ -6,7 +8,6 @@ plugins {
     id("com.github.spotbugs") version "6.5.5"
     id("org.owasp.dependencycheck") version "10.0.4"
     id("info.solidsoft.pitest") version "1.19.0" apply false
-    id("maven-publish")
     id("base")
 }
 
@@ -14,8 +15,10 @@ allprojects {
     group = "io.mazewall"
     version = "0.0.1-prealpha-SNAPSHOT"
 
-    apply(plugin = "java")
-    apply(plugin = "maven-publish")
+    repositories {
+        mavenCentral()
+    }
+
     apply(plugin = "org.jlleitschuh.gradle.ktlint")
 
     // JitPack Shim: Satisfy JitPack's broken 'listDeps' task by injecting
@@ -44,21 +47,6 @@ allprojects {
     tasks.matching { it.name == "kotlinSourcesJar" }.configureEach {
         dependsOn("ktlintFormat")
     }
-
-    publishing {
-        repositories {
-            System.getenv("GITHUB_ACTOR")?.let { actor ->
-                maven {
-                    name = "GitHubPackages"
-                    url = uri("https://maven.pkg.github.com/Pilleo/mazewall")
-                    credentials {
-                        username = actor
-                        password = System.getenv("GITHUB_TOKEN")
-                    }
-                }
-            }
-        }
-    }
 }
 
 dependencyCheck {
@@ -85,10 +73,27 @@ ktlint {
 }
 
 subprojects {
+    apply(plugin = "java")
+    apply(plugin = "maven-publish")
     apply(plugin = "base")
     apply(plugin = "jacoco")
     apply(plugin = "dev.detekt")
     apply(plugin = "com.github.spotbugs")
+
+    extensions.configure<PublishingExtension> {
+        repositories {
+            System.getenv("GITHUB_ACTOR")?.let { actor ->
+                maven {
+                    name = "GitHubPackages"
+                    url = uri("https://maven.pkg.github.com/Pilleo/mazewall")
+                    credentials {
+                        username = actor
+                        password = System.getenv("GITHUB_TOKEN")
+                    }
+                }
+            }
+        }
+    }
 
     spotbugs {
         ignoreFailures.set(false)
