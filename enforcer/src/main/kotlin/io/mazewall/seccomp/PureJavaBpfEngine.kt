@@ -36,7 +36,7 @@ object PureJavaBpfEngine : SeccompEngine {
         val filters = BpfFilter.build(arch, policy)
 
         Arena.ofConfined().use { arena ->
-            val prog = LinuxNative.newSockFProg(arena, filters)
+            val prog = LinuxNative.getMemory().newSockFProg(arena, filters)
             installFilter(arch, prog, useTsync)
         }
 
@@ -45,7 +45,7 @@ object PureJavaBpfEngine : SeccompEngine {
 
     private fun setNoNewPrivs() {
         // Step 1: Set no_new_privs (mandatory for non-root seccomp)
-        val r1 = LinuxNative.prctl(NativeConstants.PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0)
+        val r1 = LinuxNative.getProcess().prctl(NativeConstants.PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0)
         if (r1.returnValue != 0L) {
             throw IllegalStateException("prctl(PR_SET_NO_NEW_PRIVS) failed with errno ${r1.errno}")
         }
@@ -80,7 +80,7 @@ object PureJavaBpfEngine : SeccompEngine {
             }
 
             val r4 =
-                LinuxNative.prctl(
+                LinuxNative.getProcess().prctl(
                     NativeConstants.PR_SET_SECCOMP,
                     NativeConstants.SECCOMP_MODE_FILTER.toLong(),
                     prog,
@@ -105,7 +105,7 @@ object PureJavaBpfEngine : SeccompEngine {
         }
 
         // Verify filter is actually installed
-        val r5 = LinuxNative.prctl(NativeConstants.PR_GET_SECCOMP, 0, 0, 0, 0)
+        val r5 = LinuxNative.getProcess().prctl(NativeConstants.PR_GET_SECCOMP, 0, 0, 0, 0)
         if (r5.returnValue != 2L) {
             throw IllegalStateException(
                 "Seccomp filter verification failed: expected mode 2, got ${r5.returnValue}",

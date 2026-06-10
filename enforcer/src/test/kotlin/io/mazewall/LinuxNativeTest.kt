@@ -1,5 +1,4 @@
 package io.mazewall
-
 import io.mazewall.ffi.Layouts
 import io.mazewall.ffi.NativeConstants
 import org.junit.jupiter.api.Test

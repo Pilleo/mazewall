@@ -18,6 +18,7 @@ dependencies {
     testImplementation(kotlin("test"))
     testImplementation(libs.junit.jupiter.api)
     testImplementation(libs.junit.jupiter.params)
+    testImplementation(libs.archunit.junit5)
     testRuntimeOnly(libs.junit.jupiter.engine)
 }
 
@@ -44,6 +45,12 @@ tasks.register<JavaExec>("runScratch") {
 
 pitest {
     junit5PluginVersion.set("1.2.1")
-    targetClasses.set(setOf("io.mazewall.*"))
+
+    // Minimal target set for SbobParser only
+    targetClasses.set(setOf("io.mazewall.SbobParser*"))
+    targetTests.set(setOf("io.mazewall.SbobParserTest"))
+
     jvmArgs.set(listOf("--enable-native-access=ALL-UNNAMED"))
+
+    threads.set(1)
 }

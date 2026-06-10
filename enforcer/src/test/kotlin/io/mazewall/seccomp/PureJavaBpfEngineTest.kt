@@ -1,5 +1,4 @@
 package io.mazewall.seccomp
-
 import io.mazewall.EnabledIfLinuxAndSupported
 import io.mazewall.Policy
 import io.mazewall.core.Syscall

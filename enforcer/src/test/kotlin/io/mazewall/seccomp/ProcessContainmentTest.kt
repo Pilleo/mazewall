@@ -1,5 +1,4 @@
 package io.mazewall.seccomp
-
 import io.mazewall.EnabledIfLinuxAndSupported
 import io.mazewall.IsolatedProcessTester
 import io.mazewall.Platform

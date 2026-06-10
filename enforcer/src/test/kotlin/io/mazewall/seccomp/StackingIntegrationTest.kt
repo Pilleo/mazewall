@@ -1,22 +1,18 @@
 package io.mazewall.seccomp
 
 import io.mazewall.EnabledIfLinuxAndSupported
+import io.mazewall.IsolatedProcessTester
 import io.mazewall.Policy
 import io.mazewall.core.Syscall
 import io.mazewall.enforcer.ContainedExecutors
 import org.junit.jupiter.api.Test
-import kotlin.test.assertTrue
 
-class StackingIntegrationTest {
-    @Test
-    @EnabledIfLinuxAndSupported
-    fun `test filter stacking depth limit`() {
-        // Explicit list of syscalls that are safe to block for depth-testing:
-        // - No PRCTL (required for NO_NEW_PRIVS before each seccomp install)
-        // - No MMAP / MPROTECT (required by JVM JIT and GC)
-        // - No CLONE (required for JVM thread creation)
-        // - No CLONE3 (must remain blockable via ENOSYS for the clone fallback to work)
-        // Ordering is stable and independent of Syscall enum declaration order.
+/**
+ * Helper app for isolated execution of [StackingIntegrationTest] methods.
+ */
+object StackingIsolatedApp {
+    @JvmStatic
+    fun main(args: Array<String>) {
         val safeSyscalls =
             listOf(
                 Syscall.EXECVE,
@@ -52,40 +48,41 @@ class StackingIntegrationTest {
                 Syscall.GETEUID,
                 Syscall.GETGID,
                 Syscall.GETEGID,
+                Syscall.GETTID,
                 Syscall.GETCWD,
                 Syscall.UMASK,
             )
-        // Must have enough distinct entries to exceed the 32-filter limit
-        check(safeSyscalls.size > 32) { "Need >32 distinct syscalls to test the depth limit" }
 
-        var depthException: IllegalStateException? = null
-        val t =
-            Thread {
-                try {
-                    // Install one new syscall block per iteration. Each is distinct, so the
-                    // incremental filter logic always adds a new BPF program to the kernel chain.
-                    for (syscall in safeSyscalls.take(34)) {
-                        val policy =
-                            Policy
-                                .builder()
-                                .block(Syscall.IO_URING_SETUP, Syscall.IO_URING_ENTER) // Prevent Landlock from triggering
-                                .block(syscall)
-                                .build()
-                        ContainedExecutors.installOnCurrentThread(policy)
-                    }
-                } catch (e: IllegalStateException) {
-                    depthException = e
-                }
+        try {
+            for (syscall in safeSyscalls.take(34)) {
+                val policy =
+                    Policy
+                        .builder()
+                        .block(Syscall.IO_URING_SETUP, Syscall.IO_URING_ENTER)
+                        .block(syscall)
+                        .build()
+                ContainedExecutors.installOnCurrentThread(policy)
             }
-        t.start()
-        t.join()
+            System.err.println("Should have failed after 32 filters")
+            System.exit(1)
+        } catch (e: IllegalStateException) {
+            if (e.message!!.contains("Cannot install more than 32 seccomp filters")) {
+                System.exit(0)
+            } else {
+                System.err.println("Unexpected error message: ${e.message}")
+                System.exit(2)
+            }
+        } catch (e: Throwable) {
+            System.err.println("Unexpected error: ${e.message}")
+            System.exit(3)
+        }
+    }
+}
 
-        val exception = depthException
-        assertTrue(exception != null, "Expected IllegalStateException after 32 filters")
-        val message = exception.message
-        assertTrue(
-            message != null && message.contains("Cannot install more than 32 seccomp filters"),
-            "Unexpected exception message: $message",
-        )
+class StackingIntegrationTest {
+    @Test
+    @EnabledIfLinuxAndSupported
+    fun `test filter stacking depth limit`() {
+        IsolatedProcessTester.runIsolatedTest(StackingIsolatedApp::class.java.name, "depth-limit")
     }
 }

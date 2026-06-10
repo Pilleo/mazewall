@@ -153,7 +153,7 @@ object Landlock {
                 addJvmClasspathRules(rulesetFd, classpathFlags, arena)
                 enforceRuleset(rulesetFd)
             } finally {
-                LinuxNative.close(rulesetFd)
+                LinuxNative.getFileSystem().close(rulesetFd)
             }
         }
     }
@@ -203,7 +203,7 @@ object Landlock {
                 applyUserRules(rulesetFd, policy, abi, arena, allFsRead)
                 enforceRuleset(rulesetFd)
             } finally {
-                LinuxNative.close(rulesetFd)
+                LinuxNative.getFileSystem().close(rulesetFd)
             }
         }
     }
@@ -277,7 +277,7 @@ object Landlock {
         arena: Arena,
     ) {
         val pathSegment = arena.allocateFrom(path)
-        val fdResult = LinuxNative.open(pathSegment, NativeConstants.O_PATH or NativeConstants.O_CLOEXEC)
+        val fdResult = LinuxNative.getFileSystem().open(pathSegment, NativeConstants.O_PATH or NativeConstants.O_CLOEXEC)
         if (fdResult.returnValue < 0) {
             logger.warning("Could not open JVM classpath $path for landlock rule: errno ${fdResult.errno}")
             return
@@ -289,7 +289,7 @@ object Landlock {
                 logger.warning("landlock_add_rule failed for JVM classpath $path with errno ${addResult.errno}")
             }
         } finally {
-            LinuxNative.close(pathFd)
+            LinuxNative.getFileSystem().close(pathFd)
         }
     }
 
@@ -301,7 +301,7 @@ object Landlock {
     ) {
         val resolvedPath = resolveCanonicalPath(path)
         val openFlags = NativeConstants.O_PATH or NativeConstants.O_CLOEXEC or NativeConstants.O_NOFOLLOW
-        val initialResult = LinuxNative.open(arena.allocateFrom(resolvedPath), openFlags)
+        val initialResult = LinuxNative.getFileSystem().open(arena.allocateFrom(resolvedPath), openFlags)
 
         val (fdResult, isFallback) = handleInitialOpenFailure(initialResult, resolvedPath, openFlags, arena)
 
@@ -315,7 +315,7 @@ object Landlock {
             val finalAccess = calculateFinalAccess(allowedAccess, isFallback, resolvedPath)
             addRuleToRulesetAndVerify(arena, rulesetFd, pathFd, finalAccess, path)
         } finally {
-            LinuxNative.close(pathFd)
+            LinuxNative.getFileSystem().close(pathFd)
         }
     }
 
@@ -336,7 +336,7 @@ object Landlock {
         if (res.returnValue < 0 && res.errno == 2) { // ENOENT
             val parentPath = File(resolvedPath).parent ?: "/"
             logger.info("Path $resolvedPath does not exist, falling back to parent directory: $parentPath")
-            return LinuxNative.open(arena.allocateFrom(parentPath), flags) to true
+            return LinuxNative.getFileSystem().open(arena.allocateFrom(parentPath), flags) to true
         }
         return res to false
     }
@@ -382,7 +382,7 @@ object Landlock {
     }
 
     private fun enforceRuleset(rulesetFd: Int) {
-        val prctlResult = LinuxNative.prctl(NativeConstants.PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0)
+        val prctlResult = LinuxNative.getProcess().prctl(NativeConstants.PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0)
         if (prctlResult.returnValue < 0) {
             throw IllegalStateException("prctl(PR_SET_NO_NEW_PRIVS) failed with errno ${prctlResult.errno}")
         }

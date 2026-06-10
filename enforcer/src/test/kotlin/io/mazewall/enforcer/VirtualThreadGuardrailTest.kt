@@ -1,5 +1,4 @@
 package io.mazewall.enforcer
-
 import io.mazewall.EnabledIfLinuxAndSupported
 import io.mazewall.Policy
 import org.junit.jupiter.api.Test

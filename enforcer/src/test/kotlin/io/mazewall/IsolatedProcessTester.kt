@@ -1,7 +1,6 @@
 package io.mazewall
 
 import java.io.File
-import kotlin.test.assertEquals
 
 /**
  * Standardized utility for running integration tests in an isolated JVM process.
@@ -10,29 +9,37 @@ import kotlin.test.assertEquals
  */
 object IsolatedProcessTester {
     /**
-     * Spawns a new JVM process to run the specified [testClassName]'s [main] method with [mode].
+     * Spawns a new JVM process to run the specified [testClassName]'s [main] method with [args].
      * Asserts that the process exits with code 0.
      */
     fun runIsolatedTest(
         testClassName: String,
-        mode: String,
+        vararg args: String,
     ) {
         val javaHome = System.getProperty("java.home")
         val javaBin = javaHome + File.separator + "bin" + File.separator + "java"
         val classpath = System.getProperty("java.class.path")
 
-        val builder =
-            ProcessBuilder(
-                javaBin,
-                "-cp",
-                classpath,
-                "--enable-native-access=ALL-UNNAMED",
-                testClassName,
-                mode,
-            )
+        val command = mutableListOf(
+            javaBin,
+            "-cp",
+            classpath,
+            "--enable-native-access=ALL-UNNAMED",
+            testClassName,
+        )
+        command.addAll(args)
+
+        val builder = ProcessBuilder(command)
+        // Redirect error stream to stdout so we can capture everything if needed,
+        // or just inherit it to see it in the logs.
         builder.inheritIO()
+
         val process = builder.start()
         val exitCode = process.waitFor()
-        assertEquals(0, exitCode, "Isolated test process ($testClassName $mode) failed with exit code $exitCode")
+
+        if (exitCode != 0) {
+            val cmdString = command.joinToString(" ")
+            throw IllegalStateException("Isolated test process failed with exit code $exitCode.\nCommand: $cmdString")
+        }
     }
 }

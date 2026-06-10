@@ -12,23 +12,15 @@ interface NativeEngine :
     NativeNetworking,
     NativeProcess,
     NativeMemory {
-    fun prctl(
-        option: Int,
-        arg2: Any? = 0L,
-        arg3: Any? = 0L,
-        arg4: Any? = 0L,
-        arg5: Any? = 0L,
-    ): LinuxNative.SyscallResult
-
-    fun syscall(
-        nr: Long,
-        a1: Any? = 0L,
-        a2: Any? = 0L,
-        a3: Any? = 0L,
-        a4: Any? = 0L,
-        a5: Any? = 0L,
-        a6: Any? = 0L,
-    ): LinuxNative.SyscallResult
+        fun syscall(
+            nr: Long,
+            a1: Any? = 0L,
+            a2: Any? = 0L,
+            a3: Any? = 0L,
+            a4: Any? = 0L,
+            a5: Any? = 0L,
+            a6: Any? = 0L,
+        ): LinuxNative.SyscallResult
 
     fun syscall4(
         nr: Long,
@@ -61,13 +53,6 @@ interface NativeEngine :
         nfds: Long,
         timeout: Int,
     ): LinuxNative.SyscallResult
-
-    fun newSockFProg(
-        arena: Arena,
-        filters: Array<SockFilter>,
-    ): MemorySegment
-
-    fun close(fd: Int): LinuxNative.SyscallResult
 }
 
 interface NativeFileSystem {
@@ -81,6 +66,8 @@ interface NativeFileSystem {
         buf: MemorySegment,
         bufsiz: Long,
     ): LinuxNative.SyscallResult
+
+    fun close(fd: Int): LinuxNative.SyscallResult
 }
 
 interface NativeNetworking {
@@ -142,6 +129,14 @@ interface NativeNetworking {
 
 interface NativeProcess {
     fun gettid(): Int
+
+    fun prctl(
+        option: Int,
+        arg2: Any? = 0L,
+        arg3: Any? = 0L,
+        arg4: Any? = 0L,
+        arg5: Any? = 0L,
+    ): LinuxNative.SyscallResult
 }
 
 interface NativeMemory {
@@ -165,4 +160,9 @@ interface NativeMemory {
         buf: MemorySegment,
         count: Long,
     ): LinuxNative.SyscallResult
+
+    fun newSockFProg(
+        arena: Arena,
+        filters: Array<SockFilter>,
+    ): MemorySegment
 }

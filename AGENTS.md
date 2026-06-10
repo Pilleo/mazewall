@@ -143,8 +143,8 @@ When writing unit tests for components that interact with the kernel (like `BpfF
 ```kotlin
 // Example: Fault Injection in tests
 val mockFs = MockNativeFileSystem()
-mockFs.onOpen { EPERM } 
-LinuxNative.setEngine(mockFs) 
+mockFs.onOpen { EPERM }
+LinuxNative.setEngine(mockFs)
 ```
 Do not forget to call `LinuxNative.resetToDefault()` in your test cleanup or use a `@Before` / `@After` rule.
 
@@ -166,3 +166,7 @@ If a change touches both `:enforcer` and `:profiler`:
 1. Complete and verify `:enforcer` changes first.
 2. Run `:enforcer:check` before starting `:profiler` work.
 3. Update `Syscall.kt` and `Arch.kt` in `:enforcer` before referencing the new enum in profiler.
+
+## 8. Task verification protocol
+After any code changes, run `./gradlew build` to verify the final changes.
+You may run more granular checks in the process, but build must be alwasy green before you submit the results.
