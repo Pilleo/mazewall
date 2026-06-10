@@ -20,6 +20,7 @@ dependencies {
     testImplementation(kotlin("test"))
     testImplementation(libs.junit.jupiter.api)
     testImplementation(libs.junit.jupiter.params)
+    testImplementation(libs.archunit.junit5)
     testRuntimeOnly(libs.junit.jupiter.engine)
 }
 
