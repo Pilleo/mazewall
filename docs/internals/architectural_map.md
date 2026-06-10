@@ -29,7 +29,7 @@ sequenceDiagram
     D->>D: Resolve Paths via process_vm_readv
     D-->>L: Sends TraceEvent via UNIX Socket
     L->>L: Capture JVM Stack Trace (ThreadRegistry)
-    L-->>D: Sends ACK byte (Mandatory)
+    L-->>D: Sends ACK byte (Mandatory 0xAC)
     D->>K: Sends SECCOMP_USER_NOTIF_FLAG_CONTINUE
     K->>W: Resumes W
     W->>W: Syscall completes in user-space
@@ -57,14 +57,16 @@ Mazewall operates in Tiers. An agent must know which Tier a change affects.
 graph TD
     subgraph enforcer [":enforcer"]
         A[Policy.kt] --> B[BpfFilter.kt]
-        B --> C[LinuxNative.kt]
+        B --> C[NativeEngine.kt]
+        C -- traits --> LN[LinuxNative.kt]
         D[ContainedExecutors.kt] --> A
         D --> E[ContainerStateRegistry.kt]
         H[SbobParser.kt]
     end
 
     subgraph profiler [":profiler"]
-        F[Profiler.kt] --> G[ProfilerDaemon.kt]
+        F[Profiler.kt] --> G[ProfilerDaemonEngine.kt]
+        G -- delegates --> PS[ProfilerSessionHandler.kt]
         I[IterativeProfiler.kt] --> D
         J[Trace Listener]
     end

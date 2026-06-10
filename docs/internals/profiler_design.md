@@ -122,11 +122,14 @@ This ensures that only actual, dynamic application-level read/write paths and ne
 ### Tier S: Out-of-Process `USER_NOTIF` Supervisor (The Unprivileged Default)
 Placing the supervisor thread inside the *same* JVM leads to fatal safepoint deadlocks. Relying on `strace` leads to noisy, process-wide telemetry and brittle text scraping. Instead, we use `SECCOMP_RET_USER_NOTIF` backed by a lightweight sidecar process communicating via Unix Domain Sockets using a structured binary protocol to prevent log injection.
 
+**Reactive Reactor Loop (`ProfilerDaemonEngine`):**
+The supervisor daemon runs a reactor loop delegating connection lifecycle and event processing to `ProfilerSessionHandler`. This decoupling ensures that the core daemon engine remains resilient to individual session failures or malformed socket data.
+
 **Synchronous & Stateless `profile<T>` API:**
 The profiling session is run synchronously inside a dedicated OS platform thread via `Profiler.profile { block() }`. Spawning a dedicated thread ensures the seccomp filter is discarded once the thread exits, preventing filter leakage.
 
 **Timing-Safe JVM Stack Capture:**
-The Unix domain socket protocol includes a round-trip acknowledgment. The supervisor daemon blocks the worker thread in-kernel using seccomp, sends the `TraceEvent` to the parent JVM, and waits for an ACK byte. While the worker thread is blocked in-kernel, the trace listener in the parent JVM safely and stably captures the worker's Java stack trace via `Thread.stackTrace` on a best-effort basis, before sending the ACK. Once acknowledged, the daemon sends `FLAG_CONTINUE` to resume worker execution. This eliminates race conditions during stack profiling.
+The Unix domain socket protocol includes a round-trip acknowledgment using the `PROTOCOL_ACK_BYTE` (0xAC). The supervisor daemon blocks the worker thread in-kernel using seccomp, sends the `TraceEvent` to the parent JVM, and waits for this ACK byte. While the worker thread is blocked in-kernel, the trace listener in the parent JVM safely and stably captures the worker's Java stack trace via `Thread.stackTrace` on a best-effort basis, before sending the ACK. Once acknowledged, the daemon sends `FLAG_CONTINUE` to resume worker execution. This eliminates race conditions during stack profiling.
 
 **The `io_uring` Blind Spot & The Landlock Audit Catch-22:**
 Seccomp-BPF is blind to operations submitted via `io_uring` rings.

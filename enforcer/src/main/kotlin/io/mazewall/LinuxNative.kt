@@ -36,6 +36,11 @@ object LinuxNative : NativeEngine {
         engine = newEngine
     }
 
+    fun getFileSystem(): NativeFileSystem = engine
+    fun getNetworking(): NativeNetworking = engine
+    fun getProcess(): NativeProcess = engine
+    fun getMemory(): NativeMemory = engine
+
     override fun prctl(
         option: Int,
         arg2: Any?,

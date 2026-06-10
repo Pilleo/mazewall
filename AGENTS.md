@@ -129,7 +129,29 @@ Thread-scoped seccomp is **not** an absolute security boundary against an attack
 
 ---
 
-## 6. Key Design Documents
+## 7. Native Engine Traits & Fault Injection
+
+To maintain high testability, `mazewall` avoids direct static calls to native JNI/FFM methods. Instead, core components interact with the `NativeEngine` trait interfaces:
+- `NativeFileSystem`
+- `NativeNetworking`
+- `NativeProcess`
+- `NativeMemory`
+
+**Engineering Rule for Testing:**
+When writing unit tests for components that interact with the kernel (like `BpfFilter` or `Landlock`), always use the `setEngine` pattern to inject a `MockNativeEngine`. This allows you to simulate specific `errno` values, syscall failures, or kernel version responses without requiring root privileges or a specific Linux environment.
+
+```kotlin
+// Example: Fault Injection in tests
+val mockFs = MockNativeFileSystem()
+mockFs.onOpen { EPERM } 
+LinuxNative.setEngine(mockFs) 
+```
+Do not forget to call `LinuxNative.resetToDefault()` in your test cleanup or use a `@Before` / `@After` rule.
+
+---
+
+## 8. Key Design Documents
+
 
 Before modifying components, read the relevant design document:
 

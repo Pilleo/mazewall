@@ -51,12 +51,33 @@ Seccomp filters bind permanently to the OS thread (LWP). Installs from virtual t
 - **Sock Filter Field Layouts:** Use `ValueLayout.JAVA_INT` (4 bytes) for 32-bit `sock_filter` fields (`code`, `jt`, `jf`, `k`). Specifying a `JAVA_LONG` corrupts BPF filter streams silently.
 - **Mutex Flags:** `SECCOMP_FILTER_FLAG_NEW_LISTENER` (used by profiler) and `SECCOMP_FILTER_FLAG_TSYNC` (used by enforcer) are mutually exclusive. Never combine them.
 
-### 6. FFM API Patterns
-- **Minimum JDK:** 22 (FFM API finalization). Target Java 25 idioms where applicable, but the library must remain compilable/runnable on JDK 22+.
+### 6. FFM API Patterns & Safety
+- **Minimum JDK:** 22 (FFM API finalization). Target Java 25 idioms where applicable.
 - **Off-heap Memory:** Use `Arena.ofConfined()` with `.use { }` for safe, deterministic off-heap allocations (`MemorySegment`).
-- **Always Capture `errno`:** Native bindings must use `Linker.Option.captureCallState("errno")` and read it from the captured segment *immediately* after execution before another FFM call overwrites it. See `containment_design.md §8` for the exact pattern.
+- **Always Capture `errno`:** Native bindings must use `Linker.Option.captureCallState("errno")`.
+- **Timing Constraint:** Read `errno` from the captured segment *immediately* after the downcall execution. Any subsequent FFM operation (even an unrelated one) may overwrite the underlying thread-local capture state.
+- **Alignment Awareness:** When packing structs like `sock_fprog` or `msghdr`, ensure alignment matches the target architecture (8 bytes for pointers on 64-bit). Use `ValueLayout.ADDRESS` for pointers.
 
-### 7. Containment Exception Translation
+### 7. Native Engine Decoupling for Testability
+Core enforcement logic (like `BpfFilter.kt` and `Landlock.kt`) must not call `LinuxNative` static methods directly for I/O. Instead, they must use the `NativeEngine` traits accessed via `LinuxNative.getFileSystem()`, `LinuxNative.getNetworking()`, etc.
+
+**How to use in implementation:**
+```kotlin
+val fs = LinuxNative.getFileSystem()
+val res = fs.openat(dirFd, path, flags, mode)
+```
+
+**How to use in tests:**
+```kotlin
+@BeforeEach
+fun setup() {
+    val mockFs = MockNativeFileSystem()
+    LinuxNative.setEngine(mockFs)
+}
+```
+This pattern is mandatory for any code that needs to be verified via unit tests with fault injection.
+
+### 8. Containment Exception Translation
 The violation detector in `ContainedExecutors.isDirectContainmentViolation()` uses a two-priority strategy:
 1. **Priority 1 (locale-independent):** `\berror[=:]\s*(1|13)\b` — matches JVM-encoded errno 1 (`EPERM`) and 13 (`EACCES`).
 2. **Priority 2 (for `IOException`/`SocketException` only):** `(?i)\bOperation not permitted\b|\bPermission denied\b|\brefusé\b|\bverweigert\b|\bnegado\b` and `"Cannot run"`.

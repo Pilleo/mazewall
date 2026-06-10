@@ -83,12 +83,11 @@ protections.
 For `mmap`/`mprotect`, `prot` is the 3rd argument → `args[2]` → **byte offset 32**.
 
 ```
-BPF_JEQ(syscall_nr == mmap, match, skip_4)
+BPF_JEQ(syscall_nr == mmap, match, skip_3)
 BPF_LD offset=32                             # load args[2] (prot) lower 32 bits
 BPF_JSET 0x04, match, skip_1               # (BPF_JMP|0x40|BPF_K): if PROT_EXEC bit set, jt=0 (deny); else jf=1 (skip deny)
 BPF_RET(DENY)
-BPF_LD offset=0                              # restore NR for subsequent checks
-# identical 4-instruction sequence for mprotect (syscall_nr == mprotect)
+# identical 3-instruction sequence for mprotect (syscall_nr == mprotect)
 ```
 
 > **`JSET` semantics:** `jt=0, jf=1` — if `(ACC & 0x04) != 0` (PROT_EXEC IS set): jt=0, execute `RET_DENY` immediately; else: jf=1, skip over `RET_DENY`.
@@ -103,12 +102,11 @@ that shellcode injection does — they are whitelisted by this check automatical
 `CLONE_THREAD = 0x00010000`, `CLONE_VM = 0x00000100`, mask = `0x00010100`.
 
 ```
-BPF_JEQ(syscall_nr == clone, match, skip_5)
+BPF_JEQ(syscall_nr == clone, match, skip_4)
 BPF_LD offset=16                          # load args[0] (clone flags)
 BPF_ALU|BPF_AND|BPF_K (0x54) 0x00010100  # mask to CLONE_VM | CLONE_THREAD
 BPF_JEQ(0x00010100, skip_1, match)        # both bits set → JVM thread creation → skip deny
 BPF_RET(DENY)
-BPF_LD offset=0                           # restore NR
 ```
 
 > **`BPF_AND` note:** There is no standalone `BPF_AND` opcode. This is `BPF_ALU | BPF_AND | BPF_K` = opcode `0x54`. The operand `K` is the mask value.
@@ -126,7 +124,7 @@ fall back to the inspectable `clone`. This is not controlled by `allowNonThreadC
 ### 3d. `prctl` — whitelist safe options
 
 ```
-BPF_JEQ(syscall_nr == prctl, match, skip_9)
+BPF_JEQ(syscall_nr == prctl, match, skip_8)
 BPF_LD(args[0])                    # load option
 BPF_JEQ(PR_SET_NAME (15), allow, ...)
 BPF_JEQ(PR_GET_NAME (16), allow, ...)
@@ -135,7 +133,6 @@ BPF_JEQ(PR_SET_SECCOMP (22), allow, ...)
 BPF_JEQ(PR_SET_NO_NEW_PRIVS (38), allow, ...)
 BPF_JEQ(PR_GET_NO_NEW_PRIVS (39), allow, ...)
 BPF_RET(DENY)
-BPF_LD(syscall_nr)
 ```
 
 The JVM calls `prctl(PR_SET_NAME)` constantly for thread naming. Blocking `prctl`
@@ -257,13 +254,13 @@ syscalls fail before Landlock can activate.
 
 Do not change this order.
 
-### Per-thread application (THREAD_LANDLOCK_APPLIED)
+### Per-thread application (THREAD_LANDLOCK_APPLIED_*)
 
-`THREAD_LANDLOCK_APPLIED` is a `ThreadLocal<Boolean>` that ensures the Landlock
-ruleset is applied only once per OS thread. Applying it a second time on the same
-thread creates a second intersective Landlock domain that **narrows** permissions
-further. This can block JVM classpath reads and cause `NoClassDefFoundError` at
-unpredictable points during lazy classloading.
+`THREAD_LANDLOCK_APPLIED_READS` and `THREAD_LANDLOCK_APPLIED_WRITES` are `ThreadLocal<Set<String>?>`
+that ensure the Landlock ruleset is applied only when the requested paths are not already covered
+by an existing domain. Applying it a second time on the same thread creates a second
+intersective Landlock domain that **narrows** permissions further. This can block JVM
+classpath reads and cause `NoClassDefFoundError` at unpredictable points during lazy classloading.
 
 ### ABI version negotiation
 
@@ -291,10 +288,10 @@ Linux 7.0 (ABI 8) introduces `LANDLOCK_RESTRICT_SELF_TSYNC` which synchronizes t
 1. **Sibling Thread Transparency:** The JIT compiler and GC worker threads often require system path permissions that sandboxed application threads lack. Retroactive lockdown causes process deadlocks or aborts.
 2. **Test Suite Collisions:** TSYNC sandboxes the parent Gradle worker process during execution, crashing completely unrelated sibling tests with `AccessDeniedException`.
 
-### `applyProfilingRuleset()` vs. `applyRuleset(policy)`
+### `applyRestrictiveBarrier()` vs. `applyRuleset(policy)`
 
 - `applyRuleset(policy)` — enforcement path; used by `ContainedExecutors`.
-- `applyProfilingRuleset()` — applies a restrictive Landlock domain. This is used by the **Iterative Profiler (Tier A)** to trigger path denials that are then caught and resolved. In older design iterations, it was used with `MAZEWALL_PROFILER_AUDIT=true` to trigger kernel audit events, but this is now deprecated for transparent profiling as Landlock lacks a permissive mode.
+- `applyRestrictiveBarrier()` — applies a restrictive Landlock domain. This is used by the **Iterative Profiler (Tier A)** to trigger path denials that are then caught and resolved. In older design iterations, it was used with `MAZEWALL_PROFILER_AUDIT=true` to trigger kernel audit events, but this is now deprecated for transparent profiling as Landlock lacks a permissive mode.
 
 ---
 
