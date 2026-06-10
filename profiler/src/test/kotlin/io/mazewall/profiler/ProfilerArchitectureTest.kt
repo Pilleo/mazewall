@@ -75,6 +75,7 @@ class ProfilerArchitectureTest {
     }
 
     @ArchTest
+    @Suppress("UnusedParameter")
     fun `cross-module invariant - enforcer must not depend on profiler`(allClasses: com.tngtech.archunit.core.domain.JavaClasses) {
         // We actually check this in the Enforcer module's tests, but it's good to re-affirm.
         // Since we are analyzing `io.mazewall.profiler`, we can't easily check `io.mazewall.enforcer`.

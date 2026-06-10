@@ -86,6 +86,7 @@ subprojects {
 
     detekt {
         baseline = file("$rootDir/config/detekt/${project.name}-baseline.xml")
+        source.setFrom(files("src/main/kotlin"))
     }
 
     extensions.configure<PublishingExtension> {
