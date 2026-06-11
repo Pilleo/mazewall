@@ -164,4 +164,37 @@ class ContainmentDesignSpec :
             foundClone3 shouldBe true
         }
     }
+
+    "Sandbox Cleanliness (containment_design.md)" - {
+        "Pre-warmed JVM task runs successfully inside sandboxed executor without JIT crashes" {
+            val isSupported = try {
+                Arch.current()
+                true
+            } catch (e: java.lang.UnsupportedOperationException) {
+                false
+            }
+            if (isSupported) {
+                val executor = java.util.concurrent.Executors
+                    .newSingleThreadExecutor()
+                val safeExecutor = io.mazewall.enforcer.ContainedExecutors.wrap(
+                    executor,
+                    Policy.builder().build(),
+                )
+                try {
+                    val result = safeExecutor
+                        .submit(
+                        java.util.concurrent.Callable {
+                        val a = 1
+                        val b = 2
+                        a + b
+                    },
+                    ).get(5, java.util.concurrent.TimeUnit.SECONDS)
+
+                    result shouldBe 3
+                } finally {
+                    executor.shutdown()
+                }
+            }
+        }
+    }
 })

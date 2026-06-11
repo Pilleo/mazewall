@@ -51,4 +51,29 @@ class ArchitectureTest {
             ).because("traversal methods correctly handle cause chains which direct checks might skip")
             .check(allClasses)
     }
+
+    @ArchTest
+    fun sandboxedCodeMustNotUseLazyStringConcatenation(allClasses: com.tngtech.archunit.core.domain.JavaClasses) {
+        noClasses()
+            .that()
+            .resideInAPackage("io.mazewall.enforcer.internal..")
+            .should()
+            .dependOnClassesThat()
+            .haveFullyQualifiedName("java.lang.invoke.StringConcatFactory")
+            .because("String concatenation inside sandboxed threads triggers lazy classloading and JVM EPERM crashes.")
+            .check(allClasses)
+    }
+
+    @ArchTest
+    fun sandboxedCodeMustNotTriggerClassLoading(allClasses: com.tngtech.archunit.core.domain.JavaClasses) {
+        noClasses()
+            .that()
+            .resideInAPackage("io.mazewall.enforcer.internal..")
+            .should()
+            .dependOnClassesThat()
+            .belongToAnyOf(
+                ClassLoader::class.java,
+            ).because("Classloading inside seccomp-restricted threads triggers mmap/mprotect which fails with EPERM.")
+            .check(allClasses)
+    }
 }
