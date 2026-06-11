@@ -18,19 +18,46 @@ object IterativeProfiler {
         basePolicy: Policy = Policy.PURE_COMPUTE_UNSAFE,
         task: Runnable,
     ): Policy {
-        var currentPolicy = basePolicy
         val maxRetries = 20
+        var state: IterativeProfilerState = IterativeProfilerState.Running(basePolicy, 0)
 
-        for (i in 0 until maxRetries) {
-            val t = executeTask(currentPolicy, task) ?: return currentPolicy
-            val path = extractViolationPath(t)
-            if (path != null) {
-                currentPolicy = updatePolicyForViolation(currentPolicy, path)
-                continue
+        while (true) {
+            state = when (val currentState = state) {
+                is IterativeProfilerState.Running -> {
+                    if (currentState.iteration >= maxRetries) {
+                        IterativeProfilerState.Exceeded(currentState.policy)
+                    } else {
+                        val error = executeTask(currentState.policy, task)
+                        if (error == null) {
+                            IterativeProfilerState.Converged(currentState.policy)
+                        } else {
+                            IterativeProfilerState.Analyzing(currentState.policy, error, currentState.iteration)
+                        }
+                    }
+                }
+                is IterativeProfilerState.Analyzing -> {
+                    val path = extractViolationPath(currentState.error)
+                    if (path != null) {
+                        IterativeProfilerState.Updating(currentState.policy, path, currentState.iteration)
+                    } else {
+                        IterativeProfilerState.Failed(currentState.policy, currentState.error)
+                    }
+                }
+                is IterativeProfilerState.Updating -> {
+                    val nextPolicy = updatePolicyForViolation(currentState.policy, currentState.path)
+                    IterativeProfilerState.Running(nextPolicy, currentState.iteration + 1)
+                }
+                is IterativeProfilerState.Converged -> {
+                    return currentState.policy
+                }
+                is IterativeProfilerState.Exceeded -> {
+                    return currentState.policy
+                }
+                is IterativeProfilerState.Failed -> {
+                    throw currentState.error
+                }
             }
-            throw t
         }
-        return currentPolicy
     }
 
     private fun executeTask(
