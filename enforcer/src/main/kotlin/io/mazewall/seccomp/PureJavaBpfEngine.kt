@@ -15,6 +15,11 @@ import java.lang.foreign.Arena
  * Generates BPF filters manually and installs them using Downcalls.
  */
 object PureJavaBpfEngine : SeccompEngine {
+    private val threadState = ThreadLocal.withInitial<SeccompInstallationState> { SeccompInstallationState.Uninitialized }
+
+    internal val state: SeccompInstallationState
+        get() = threadState.get()
+
     override val isSupported: Boolean
         get() = Platform.isSupported()
 
@@ -26,21 +31,44 @@ object PureJavaBpfEngine : SeccompEngine {
         installInternal(policy, useTsync = true)
     }
 
+    @Suppress("TooGenericExceptionCaught")
     private fun installInternal(
         policy: Policy,
         useTsync: Boolean,
     ) {
-        setNoNewPrivs()
+        threadState.set(SeccompInstallationState.Uninitialized)
+        try {
+            setNoNewPrivs()
+            threadState.set(SeccompInstallationState.PrivilegesLocked)
 
-        val arch = Arch.current()
-        val filters = BpfFilter.build(arch, policy)
+            val arch = Arch.current()
+            val filters = BpfFilter.build(arch, policy)
 
-        Arena.ofConfined().use { arena ->
-            val prog = LinuxNative.getMemory().newSockFProg(arena, filters)
-            installFilter(arch, prog, useTsync)
+            Arena.ofConfined().use { arena ->
+                val prog = LinuxNative.getMemory().newSockFProg(arena, filters)
+                threadState.set(SeccompInstallationState.FilterBuilt(prog))
+                installFilter(arch, prog, useTsync)
+            }
+
+            verifyInstallation(policy)
+        } catch (e: Throwable) {
+            val stepName = when (val current = threadState.get()) {
+                is SeccompInstallationState.FilterBuilt -> "installFilter"
+                is SeccompInstallationState.SystemCallApplied, is SeccompInstallationState.FallbackPrctlApplied -> "verifyInstallation"
+                is SeccompInstallationState.PrivilegesLocked -> "buildFilter"
+                is SeccompInstallationState.Uninitialized -> "setNoNewPrivs"
+                else -> current.javaClass.simpleName
+            }
+            val errno = when {
+                e.message?.contains("errno") == true -> {
+                    val match = Regex("errno\\s*=?\\s*(-?\\d+)").find(e.message ?: "")
+                    match?.groupValues?.get(1)?.toIntOrNull() ?: -1
+                }
+                else -> -1
+            }
+            threadState.set(SeccompInstallationState.Failed(stepName, errno, e))
+            throw e
         }
-
-        verifyInstallation(policy)
     }
 
     private fun setNoNewPrivs() {
@@ -92,7 +120,11 @@ object PureJavaBpfEngine : SeccompEngine {
                 throw IllegalStateException(
                     "seccomp installation failed: seccomp(2) errno=$errno1, prctl errno=${r4.errno}",
                 )
+            } else {
+                threadState.set(SeccompInstallationState.FallbackPrctlApplied)
             }
+        } else {
+            threadState.set(SeccompInstallationState.SystemCallApplied)
         }
     }
 
@@ -101,6 +133,7 @@ object PureJavaBpfEngine : SeccompEngine {
         val canVerify = prctlAction == SeccompAction.ACT_ALLOW
 
         if (!canVerify) {
+            threadState.set(SeccompInstallationState.Verified)
             return // Cannot verify because prctl itself is restricted
         }
 
@@ -111,5 +144,6 @@ object PureJavaBpfEngine : SeccompEngine {
                 "Seccomp filter verification failed: expected mode 2, got ${r5.returnValue}",
             )
         }
+        threadState.set(SeccompInstallationState.Verified)
     }
 }

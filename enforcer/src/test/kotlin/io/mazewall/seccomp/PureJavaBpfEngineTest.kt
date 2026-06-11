@@ -95,4 +95,20 @@ class PureJavaBpfEngineTest {
             engine.installOnProcess(Policy.PURE_COMPUTE_UNSAFE)
         }
     }
+
+    @Test
+    @EnabledIfLinuxAndSupported
+    fun `test PureJavaBpfEngine exposes verified state on successful installation`() {
+        val executor = Executors.newSingleThreadExecutor()
+        try {
+            val state = executor
+                .submit<SeccompInstallationState> {
+                PureJavaBpfEngine.install(Policy.PURE_COMPUTE_UNSAFE)
+                PureJavaBpfEngine.state
+            }.get()
+            assertTrue(state is SeccompInstallationState.Verified, "Expected SeccompInstallationState.Verified, got $state")
+        } finally {
+            executor.shutdown()
+        }
+    }
 }

@@ -21,6 +21,9 @@ internal class ProfilerTraceListener(
 ) {
     private val logger = Logger.getLogger(ProfilerTraceListener::class.java.name)
 
+    var state: TraceListenerState = TraceListenerState.Disconnected
+        private set
+
     companion object {
         private const val DEDUPLICATION_WINDOW_MS = 500L
         private const val PROTOCOL_ACK_BYTE = 0xAC.toByte()
@@ -58,24 +61,34 @@ internal class ProfilerTraceListener(
         val dis = DataInputStream(BufferedInputStream(inputStream))
         try {
             while (true) {
+                state = TraceListenerState.AwaitingEvent
                 val event = readNextEvent(dis)
+                state = TraceListenerState.ProcessingEvent(event)
                 processEvent(event, ackBuf)
             }
         } catch (e: java.io.EOFException) {
             logger.log(java.util.logging.Level.FINE, "Trace listener socket closed (EOF)", e)
         } catch (e: java.io.IOException) {
             logger.log(java.util.logging.Level.WARNING, "Trace listener error", e)
+        } finally {
+            state = TraceListenerState.Disconnected
         }
     }
 
     private fun readNextEvent(dis: DataInputStream): TraceEvent {
         val pid = dis.readInt()
+        state = TraceListenerState.ReadingHeader(pid)
+
         val syscallNameLen = dis.readInt()
+        state = TraceListenerState.ReadingSyscall(pid, syscallNameLen)
+
         val syscallNameBytes = ByteArray(syscallNameLen)
         dis.readFully(syscallNameBytes)
         val syscallName = String(syscallNameBytes, Charsets.UTF_8)
 
         val argsCount = dis.readInt()
+        state = TraceListenerState.ReadingArguments(pid, syscallName, argsCount)
+
         val args = LongArray(argsCount)
         for (i in 0 until argsCount) {
             args[i] = dis.readLong()

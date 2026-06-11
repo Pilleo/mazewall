@@ -19,6 +19,20 @@ internal object JitWarmup {
 
         // Force JVM classloading and JIT compilation
         ContainmentViolationDetector.isContainmentViolation(Throwable(""))
+        // Prevent lazy initialization trap for SeccompInstallationState subclasses
+        io.mazewall.seccomp.SeccompInstallationState.Uninitialized
+            .toString()
+        io.mazewall.seccomp.SeccompInstallationState.PrivilegesLocked
+            .toString()
+        io.mazewall.seccomp.SeccompInstallationState.Verified
+            .toString()
+        io.mazewall.seccomp.SeccompInstallationState.SystemCallApplied
+            .toString()
+        io.mazewall.seccomp.SeccompInstallationState.FallbackPrctlApplied
+            .toString()
+        io.mazewall.seccomp.SeccompInstallationState.FilterBuilt::class.java
+        io.mazewall.seccomp.SeccompInstallationState.Failed::class.java
+
         try {
             Arch.current()
         } catch (ignored: Exception) {
