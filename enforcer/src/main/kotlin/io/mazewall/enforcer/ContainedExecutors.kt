@@ -6,7 +6,6 @@ import io.mazewall.PolicyScope
 import io.mazewall.core.SeccompAction
 import io.mazewall.core.Syscall
 import io.mazewall.enforcer.internal.ContainedExecutorWrapper
-import io.mazewall.enforcer.internal.JitWarmup
 import io.mazewall.landlock.Landlock
 import io.mazewall.seccomp.PureJavaBpfEngine
 import java.util.concurrent.ExecutorService
@@ -21,20 +20,19 @@ import java.util.logging.Logger
  * thread can still read the heap and any static variables it has access to. For resource
  * isolation (CPU, memory), use Linux cgroups.
  *
- * ### The "Lazy Initialization" Trap
- * The JVM performs many operations lazily (class loading, JIT, JNI loading). If a restricted
- * thread is the first to trigger a specific lazy initialization path (e.g. loading a provider
- * that needs to read a config file blocked by [io.mazewall.Policy.Companion.PURE_COMPUTE]), the operation will fail.
- * **Mitigation:** Ensure critical classes and native libraries are loaded during application
- * startup before containment is applied.
+ * ### Filesystem Containment and Class Loading
+ * [io.mazewall.Policy.Companion.PURE_COMPUTE] uses Landlock for filesystem enforcement and does
+ * NOT block `openat`/`open` at the seccomp level. The JVM can load classes lazily from the
+ * classpath without interference, as long as classpath paths are included via
+ * [io.mazewall.Policy.Builder.allowJvmClasspath].
+ *
+ * [io.mazewall.Policy.Companion.PURE_COMPUTE_UNSAFE] is deprecated. It blocks `openat`/`open`
+ * at the seccomp level, which prevents lazy class loading on the sandboxed thread. Only use it
+ * when ALL classes needed by the task are guaranteed to be loaded before containment is applied.
  */
 object ContainedExecutors {
     private val logger = Logger.getLogger(ContainedExecutors::class.java.name)
     private val processLock = Any()
-
-    init {
-        JitWarmup.perform()
-    }
 
     /**
      * Installs the given policies onto the current thread immediately.
@@ -81,8 +79,6 @@ object ContainedExecutors {
                         "Use a dedicated platform thread pool and install containment on its carrier threads instead.",
             )
         }
-        JitWarmup.perform()
-
         val combinedPolicy = Policy.combine(*policies)
         applyLandlockIfNecessary(processWide, combinedPolicy)
 

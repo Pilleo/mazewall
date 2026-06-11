@@ -360,3 +360,12 @@ Consequently, if a workload relies on `io_uring` for file access, `StraceProfile
 **Needed:** 
 1. **Short-Term Optimization:** Reduce the check interval (e.g., to `10ms` or `20ms`) and proportionally increase the retry limit (e.g., to `750` or `1500` retries) to maintain the 15-second total timeout buffer on slow environments while lowering connection latency to a few milliseconds.
 2. **Long-Term Solution:** Implement fully event-driven startup synchronization, such as having the daemon write a sentinel line (e.g., `"DAEMON_READY"`) to its standard output, which the parent JVM reads blockingly before attempting to connect, or using `inotify` to await the socket file creation.
+
+### ✅ [RESOLVED]: `JitWarmup` and `-Xint` removed from `ContainedExecutors`
+**Context:** `JitWarmup.perform()` attempted to pre-trigger class loading and JIT compilation before seccomp was applied to avoid lazy-class-loading `EPERM` crashes. This only applied to `PURE_COMPUTE_UNSAFE` (which blocks `openat`). `PURE_COMPUTE` (with Landlock) does not block `openat`, making warmup unnecessary for the recommended preset. `-Xint` was added to `IsolatedProcessTester` as a band-aid to prevent JIT-related failures in test subprocesses.
+**Fix:** `JitWarmup.kt` deleted. Both `JitWarmup.perform()` call sites removed from `ContainedExecutors`. `-Xint` removed from `IsolatedProcessTester`. `ContainedExecutors` KDoc updated to document the `PURE_COMPUTE` vs `PURE_COMPUTE_UNSAFE` class-loading contract.
+
+### 🟡 [DEFERRED — Medium]: JVM Invariant Syscall Floor is Incomplete
+**Context:** `BpfFilter.getJvmCriticalNrs()` contains 7 hardcoded syscalls established empirically on one JVM (Temurin G1GC x86-64). ZGC, Shenandoah, Loom, and GraalVM require additional syscalls (`userfaultfd`, `ioctl(UFFDIO_*)`, `rt_sigprocmask`, `memfd_create`, Loom epoll/eventfd calls). Profiling-based approaches are fundamentally incomplete (only capture exercised paths, miss GC-pressure-triggered and JIT-background paths). Source analysis is the correct approach but requires JVM internals expertise and cannot easily cover GraalVM separately.
+**Needed:** See `docs/internals/jvm_syscall_floor_research.md` for full option analysis. Recommended path: Option E (source analysis + stress harness validation). Short-term: manually add confirmed-missing entries (`rt_sigprocmask`, non-EXEC `mmap`/`mprotect`) to `getJvmCriticalNrs()`.
+

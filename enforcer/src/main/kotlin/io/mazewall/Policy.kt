@@ -122,7 +122,25 @@ class Policy<out S : PolicyScope> private constructor(
                 .block(Syscall.INIT_MODULE, Syscall.FINIT_MODULE)
                 .build()
 
-        /** Blocks outbound network syscalls only. */
+        /**
+         * Blocks outbound network syscalls only.
+         *
+         * ### JIT Compiler Warning
+         * `allowMmapExec` defaults to `false` on ALL policies, including this one. When this
+         * policy is installed **process-wide** via [io.mazewall.enforcer.ContainedExecutors.installOnProcess],
+         * the BPF filter emits the `mmap(PROT_EXEC)` argument-inspection sequence, which blocks
+         * the JVM's JIT compiler background threads from allocating code-cache pages.
+         * This causes a fatal JVM abort: `os::commit_memory failed; error='Operation not permitted'`.
+         *
+         * **If you do not also intend to block JIT compilation, use:**
+         * ```kotlin
+         * Policy.builder().base(Policy.NO_NETWORK).allowMmapExec().build()
+         * ```
+         *
+         * The built-in `NO_NETWORK` preset without `allowMmapExec()` is only safe for
+         * process-wide use if the JIT compiler is known to be disabled (e.g. `-Xint` in tests)
+         * or if the policy is applied before any JIT compilation has started.
+         */
         val NO_NETWORK: Policy<PolicyScope.ProcessWideSafe> =
             builder()
                 .defaultAction(SeccompAction.ACT_ALLOW)

@@ -100,7 +100,15 @@ object SeccompIsolatedTestApp {
         }
 
         // Process-wide NO_NETWORK (blocks bind, listen, accept, connect, etc.)
-        ContainedExecutors.installOnProcess(Policy.NO_NETWORK)
+        // allowMmapExec() is required: without it the BPF program emits the PROT_EXEC
+        // inspection which kills the JIT compiler's background threads after installation.
+        // This test validates NO_NETWORK isolation only — mmap(PROT_EXEC) is not under test.
+        val noNetworkAllowJit = Policy
+            .builder()
+            .base(Policy.NO_NETWORK)
+            .allowMmapExec()
+            .build()
+        ContainedExecutors.installOnProcess(noNetworkAllowJit)
 
         // NIO Selector uses epoll_create/epoll_ctl under the hood on Linux.
         // These should NOT be blocked by NO_NETWORK.

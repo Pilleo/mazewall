@@ -41,7 +41,25 @@ class AllowListTest {
         )
 
     private fun preWarm() {
-        // Force loading of classes and native symbols
+        // Force loading of classes and native symbols that PureJavaBpfEngine and
+        // ContainedExecutors will reference AFTER the ALLOW_LIST filter is installed.
+        // The ALLOW_LIST blocks openat (not in jvmFloor), so any class not yet loaded
+        // before installation will cause ClassNotFoundException.
+        // This is the legitimate use of pre-loading — targeted to THIS test's policy.
+        io.mazewall.seccomp.SeccompInstallationState.Uninitialized
+            .toString()
+        io.mazewall.seccomp.SeccompInstallationState.PrivilegesLocked
+            .toString()
+        io.mazewall.seccomp.SeccompInstallationState.Verified
+            .toString()
+        io.mazewall.seccomp.SeccompInstallationState.SystemCallApplied
+            .toString()
+        io.mazewall.seccomp.SeccompInstallationState.FallbackPrctlApplied
+            .toString()
+        io.mazewall.seccomp.SeccompInstallationState.FilterBuilt::class.java
+        io.mazewall.seccomp.SeccompInstallationState.Failed::class.java
+        Arch.current()
+        // Force native symbol linking for LinuxNative downcall stubs
         LinuxNative.socket(2, 1, 0)
         val mmap = Arch.current().mmap.toLong()
         if (mmap >= 0) {
