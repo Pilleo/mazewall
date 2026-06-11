@@ -54,10 +54,12 @@ object PureJavaBpfEngine : SeccompEngine {
         } catch (e: Throwable) {
             val stepName = when (val current = threadState.get()) {
                 is SeccompInstallationState.FilterBuilt -> "installFilter"
-                is SeccompInstallationState.SystemCallApplied, is SeccompInstallationState.FallbackPrctlApplied -> "verifyInstallation"
+                is SeccompInstallationState.SystemCallApplied -> "verifyInstallation"
+                is SeccompInstallationState.FallbackPrctlApplied -> "verifyInstallation"
                 is SeccompInstallationState.PrivilegesLocked -> "buildFilter"
                 is SeccompInstallationState.Uninitialized -> "setNoNewPrivs"
-                else -> current.javaClass.simpleName
+                is SeccompInstallationState.Verified -> "verified"
+                is SeccompInstallationState.Failed -> "failed"
             }
             val errno = when {
                 e.message?.contains("errno") == true -> {

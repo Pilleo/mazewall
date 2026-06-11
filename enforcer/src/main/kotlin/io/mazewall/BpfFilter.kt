@@ -204,7 +204,7 @@ object BpfFilter {
         return list
     }
 
-    private fun emitInspections(
+    internal fun emitInspections(
         builder: BpfProgram.Builder,
         inspections: List<io.mazewall.seccomp.SyscallInspection>,
         profilingMode: Boolean,

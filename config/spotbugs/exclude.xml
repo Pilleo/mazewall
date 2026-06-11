@@ -7,4 +7,11 @@
         <Method name="setEngine"/>
         <Bug pattern="ST_WRITE_TO_STATIC_FROM_INSTANCE_METHOD"/>
     </Match>
+    <Match>
+        <Class name="io.mazewall.Platform"/>
+        <Bug pattern="ST_WRITE_TO_STATIC_FROM_INSTANCE_METHOD"/>
+    </Match>
+    <Match>
+        <Class name="io.mazewall.PlatformDiagnosticsTest"/>
+    </Match>
 </FindBugsFilter>

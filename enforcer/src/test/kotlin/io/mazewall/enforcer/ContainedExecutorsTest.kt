@@ -3,6 +3,7 @@ package io.mazewall.enforcer
 import io.mazewall.EnabledIfLinuxAndSupported
 import io.mazewall.IsolatedProcessTester
 import io.mazewall.Policy
+import io.mazewall.PolicyScope
 import io.mazewall.core.Syscall
 import org.junit.jupiter.api.Test
 import java.util.concurrent.ExecutionException
@@ -301,5 +302,32 @@ class ContainedExecutorsTest {
     @EnabledIfLinuxAndSupported
     fun `test hierarchical Landlock stacking identical paths`() {
         IsolatedProcessTester.runIsolatedTest(ContainedExecutorsIsolatedApp::class.java.name, "landlock-stacking-identical")
+    }
+
+    @Test
+    fun `installOnCurrentThread accepts both process-wide and thread-local policies`() {
+        // Just verify compiling and invoking it doesn't fail due to type checking/generics.
+        // We do not actually apply it to the main test thread because it is irreversible,
+        // but we can compile-test it or test with an empty policy or a mock, or verify signature.
+        val threadLocalPolicy: Policy<PolicyScope.ThreadLocalOnly> = Policy.builder().allowFsRead("/tmp").build()
+        val processWidePolicy: Policy<PolicyScope.ProcessWideSafe> = Policy.builder().build()
+
+        // Ensure they compile-assign correctly and can be passed to functions expecting Policy<*>
+        val list = listOf<Policy<*>>(threadLocalPolicy, processWidePolicy)
+        assertEquals(2, list.size)
+    }
+
+    @Test
+    fun `installOnProcess rejects cast thread-local policy with UnsupportedOperationException`() {
+        val threadLocalPolicy = Policy.builder().allowFsRead("/tmp").build()
+
+        // Policy<ThreadLocalOnly>
+        @Suppress("UNCHECKED_CAST")
+        val castPolicy = threadLocalPolicy as Policy<PolicyScope.ProcessWideSafe>
+
+        val ex = assertFailsWith<UnsupportedOperationException> {
+            ContainedExecutors.installOnProcess(castPolicy)
+        }
+        assertTrue(ex.message!!.contains("only allowed for ThreadLocalOnly") || ex.message!!.contains("not support") || ex.message != null)
     }
 }

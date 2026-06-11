@@ -171,4 +171,71 @@ class BpfFilterTest {
         }
         assertTrue(foundInspection, "Filter should inspect prctl arguments")
     }
+
+    @Test
+    fun `testBpfMaskEquals zero and non-zero`() {
+        val inspections = listOf(
+            SyscallInspection(
+                syscallNumber = 100,
+                argIndex = 1,
+                check = ArgCheck.MaskEquals(0x04L, 0x00L),
+                ifMatched = SeccompAction.ACT_ALLOW,
+                ifNotMatched = SeccompAction.ACT_ERRNO,
+            ),
+            SyscallInspection(
+                syscallNumber = 101,
+                argIndex = 2,
+                check = ArgCheck.MaskEquals(0x04L, 0x04L),
+                ifMatched = SeccompAction.ACT_ALLOW,
+                ifNotMatched = SeccompAction.ACT_ERRNO,
+            ),
+        )
+        val builder = BpfProgram.builder()
+        val handled = mutableSetOf<Int>()
+        BpfFilter.emitInspections(builder, inspections, false, handled)
+        val instructions = builder.build().instructions
+        assertTrue(handled.contains(100))
+        assertTrue(handled.contains(101))
+
+        // Find JEQ 100
+        val has100 = instructions.any { it.code == 0x15.toShort() && it.k == 100 }
+        assertTrue(has100)
+        // Find JEQ 101
+        val has101 = instructions.any { it.code == 0x15.toShort() && it.k == 101 }
+        assertTrue(has101)
+    }
+
+    @Test
+    fun `testBpfEqualsAny options size variety`() {
+        val inspections = listOf(
+            SyscallInspection(
+                syscallNumber = 200,
+                argIndex = 0,
+                check = ArgCheck.EqualsAny(listOf(5L)),
+                ifMatched = SeccompAction.ACT_ALLOW,
+                ifNotMatched = SeccompAction.ACT_ERRNO,
+            ),
+            SyscallInspection(
+                syscallNumber = 201,
+                argIndex = 0,
+                check = ArgCheck.EqualsAny(listOf(10L, 20L)),
+                ifMatched = SeccompAction.ACT_ALLOW,
+                ifNotMatched = SeccompAction.ACT_ERRNO,
+            ),
+        )
+        val builder = BpfProgram.builder()
+        val handled = mutableSetOf<Int>()
+        BpfFilter.emitInspections(builder, inspections, false, handled)
+        val instructions = builder.build().instructions
+        assertTrue(handled.contains(200))
+        assertTrue(handled.contains(201))
+
+        // Ensure instruction jumps check correct expected values
+        val valuesChecked = instructions.filter { it.code == 0x15.toShort() }.map { it.k }
+        assertTrue(valuesChecked.contains(200))
+        assertTrue(valuesChecked.contains(201))
+        assertTrue(valuesChecked.contains(5))
+        assertTrue(valuesChecked.contains(10))
+        assertTrue(valuesChecked.contains(20))
+    }
 }

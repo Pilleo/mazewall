@@ -117,9 +117,11 @@ object Platform {
         }
     }
 
+    internal var yamaPath: String = "/proc/sys/kernel/yama/ptrace_scope"
+
     @Suppress("MagicNumber")
     private fun readYamaPtraceScope(): YamaPtraceScope {
-        val file = java.io.File("/proc/sys/kernel/yama/ptrace_scope")
+        val file = java.io.File(yamaPath)
         if (!file.exists()) return YamaPtraceScope.Unavailable
         return try {
             val content = file.readText().trim()
