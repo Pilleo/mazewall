@@ -17,7 +17,14 @@ class PureJavaBpfEngineTest {
             val result =
                 executor
                     .submit<Boolean> {
-                        PureJavaBpfEngine.install(Policy.NO_EXEC)
+                        // We allow mmap exec because on cold CI JVM, ProcessBuilder.start()
+                        // might trigger JIT compilation which requires executable memory.
+                        val policy = Policy
+                            .builder()
+                            .base(Policy.NO_EXEC)
+                            .allowMmapExec()
+                            .build()
+                        PureJavaBpfEngine.install(policy)
                         try {
                             ProcessBuilder("echo", "hello").start()
                             false
@@ -103,7 +110,14 @@ class PureJavaBpfEngineTest {
         try {
             val state = executor
                 .submit<SeccompInstallationState> {
-                PureJavaBpfEngine.install(Policy.PURE_COMPUTE_UNSAFE)
+                // We allow mmap exec because on cold CI JVM, any activity here
+                // might trigger JIT compilation which requires executable memory.
+                val policy = Policy
+                    .builder()
+                    .base(Policy.PURE_COMPUTE_UNSAFE)
+                    .allowMmapExec()
+                    .build()
+                PureJavaBpfEngine.install(policy)
                 PureJavaBpfEngine.state
             }.get()
             assertTrue(state is SeccompInstallationState.Verified, "Expected SeccompInstallationState.Verified, got $state")
