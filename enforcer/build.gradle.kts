@@ -11,10 +11,33 @@ tasks.test {
     useJUnitPlatform()
     jvmArgs("--enable-native-access=ALL-UNNAMED")
     systemProperty("kotest.framework.classpath.scanning.config.disable", "true")
-    // Force a fresh JVM for every test to ensure seccomp filters don't contaminate the environment
-    forkEvery = 1
+    exclude("**/seccomp/**")
+    exclude("**/landlock/**")
+    exclude("**/SecurityPolicyTest*")
+    exclude("**/ProcessContainmentInheritanceTest*")
+    exclude("**/ContainedExecutorsTest*")
+    exclude("**/VirtualThreadGuardrailTest*")
 }
 
+val integrationTest =
+    tasks.register<Test>("integrationTest") {
+        group = "verification"
+        description = "Runs integration tests that install seccomp or Landlock filters, forcing a fresh JVM for each test."
+        useJUnitPlatform()
+        jvmArgs("--enable-native-access=ALL-UNNAMED")
+        systemProperty("kotest.framework.classpath.scanning.config.disable", "true")
+        forkEvery = 1
+        include("**/seccomp/**")
+        include("**/landlock/**")
+        include("**/SecurityPolicyTest*")
+        include("**/ProcessContainmentInheritanceTest*")
+        include("**/ContainedExecutorsTest*")
+        include("**/VirtualThreadGuardrailTest*")
+    }
+
+tasks.check {
+    dependsOn(integrationTest)
+}
 dependencies {
     testImplementation(kotlin("test"))
     testImplementation(libs.junit.jupiter.api)

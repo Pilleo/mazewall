@@ -135,20 +135,22 @@ subprojects {
 
     tasks.withType<Test>().configureEach {
         systemProperty("io.mazewall.test", "true")
-        finalizedBy(tasks.withType<org.gradle.testing.jacoco.tasks.JacocoReport>())
     }
 
     tasks.withType<org.gradle.testing.jacoco.tasks.JacocoReport>().configureEach {
         dependsOn(tasks.withType<Test>())
+        mustRunAfter(tasks.withType<Test>())
+        executionData.setFrom(fileTree(project.layout.buildDirectory.dir("jacoco")).include("*.exec"))
         reports {
             xml.required.set(true)
             html.required.set(true)
         }
-
-        finalizedBy(tasks.withType<org.gradle.testing.jacoco.tasks.JacocoCoverageVerification>())
     }
 
     tasks.withType<org.gradle.testing.jacoco.tasks.JacocoCoverageVerification>().configureEach {
+        dependsOn(tasks.withType<org.gradle.testing.jacoco.tasks.JacocoReport>())
+        mustRunAfter(tasks.withType<org.gradle.testing.jacoco.tasks.JacocoReport>())
+        executionData.setFrom(fileTree(project.layout.buildDirectory.dir("jacoco")).include("*.exec"))
         violationRules {
             if (project.name == "enforcer") {
                 rule {
@@ -183,6 +185,8 @@ subprojects {
 
     plugins.withId("java") {
         tasks.named("check") {
+            dependsOn(tasks.withType<Test>())
+            dependsOn(tasks.withType<org.gradle.testing.jacoco.tasks.JacocoReport>())
             dependsOn(tasks.withType<org.gradle.testing.jacoco.tasks.JacocoCoverageVerification>())
         }
     }
