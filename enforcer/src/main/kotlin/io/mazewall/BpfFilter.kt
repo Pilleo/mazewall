@@ -128,7 +128,6 @@ object BpfFilter {
             Syscall.GETTID.numberFor(arch),
             Syscall.CLOSE.numberFor(arch),
                         Syscall.RT_SIGPROCMASK.numberFor(arch),
-
         ).filter { it >= 0 }.toSet()
 
     private fun emitArchCheck(

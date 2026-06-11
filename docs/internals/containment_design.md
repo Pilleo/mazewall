@@ -164,6 +164,72 @@ catastrophic JVM instability:
 Do not add any of these to a policy's block-list. See `SECURITY_CONSIDERATIONS.md §9`
 for the full safepoint/GC deadlock analysis.
 
+### 3f. `allowMmapExec = false` Is a Hidden Default for ALL Policies
+
+`allowMmapExec` defaults to `false` on every `Policy.Builder`, including **DENY_LIST**
+(default-ALLOW) policies like `NO_NETWORK` and `NO_EXEC`. Regardless of a policy's
+`defaultAction`, if `allowMmapExec` is `false`, the BPF program emits the `mmap(PROT_EXEC)`
+argument-inspection sequence that blocks `mmap` calls with the `PROT_EXEC` bit set.
+
+**Consequence for process-wide installation**: When `ContainedExecutors.installOnProcess()`
+is called with any policy where `allowMmapExec = false`, the BPF filter applies to **all
+threads**, including the JVM's JIT compiler background threads. The JIT compiler allocates
+code-cache pages via `mmap(PROT_EXEC)`. These calls are blocked, causing:
+
+```
+os::commit_memory(addr, size, 1) failed; error='Operation not permitted' (errno=1)
+# Native memory allocation (mmap) failed to map N bytes.
+# JVM crashes fatally.
+```
+
+**Correct pattern when blocking network but NOT JIT:**
+```kotlin
+// WRONG — kills the JIT compiler process-wide:
+ContainedExecutors.installOnProcess(Policy.NO_NETWORK)
+
+// CORRECT — restricts network, leaves JIT alone:
+ContainedExecutors.installOnProcess(
+    Policy.builder().base(Policy.NO_NETWORK).allowMmapExec().build()
+)
+```
+
+The preset `NO_EXEC` explicitly documents this. `NO_NETWORK` and any custom DENY_LIST
+policy must be treated with equal care.
+
+### 3g. ALLOW_LIST Policies and Lazy Class Loading
+
+When a policy uses `defaultAction = ACT_ERRNO` (allow-list mode), all syscalls not in the
+explicit allow set are blocked — including `openat` and `open`. The JVM loads classes
+lazily: a class is only loaded from its `.jar` via `openat` the first time it is referenced.
+
+**Consequence**: If `openat` is not in the allow-list, **any class not yet loaded at filter
+installation time cannot be loaded afterward**. This produces:
+
+```
+java.lang.NoClassDefFoundError: io/mazewall/seccomp/SeccompInstallationState$Failed
+```
+
+even though the class is on the classpath. The class loader makes an `openat` call,
+which is blocked, causing `ClassNotFoundException`, which is wrapped as `NoClassDefFoundError`.
+
+**Rule**: When writing code that will execute under an ALLOW_LIST policy that excludes
+`openat`, all classes that code will reference must be explicitly touched (loaded)
+**before** the filter is installed. This is distinct from `JitWarmup` (which was a
+misguided global warm-up): this is **targeted pre-loading of the specific class graph**
+that will execute under the restricted policy.
+
+```kotlin
+// Pre-load all internal state classes before installing the ALLOW_LIST filter.
+SeccompInstallationState.Failed::class.java       // touched → loaded now
+SeccompInstallationState.Verified::class.java     // touched → loaded now
+// ... install ALLOW_LIST filter ...
+// SeccompInstallationState.Failed can now be instantiated without openat.
+```
+
+This requirement does NOT apply to `PURE_COMPUTE` (which uses Landlock for filesystem
+enforcement and does not block `openat` in the BPF filter), or to any DENY_LIST policy
+(where `openat` is allowed by the default-ALLOW action).
+
 ---
 
 ## 4. Incremental Filter Stacking
