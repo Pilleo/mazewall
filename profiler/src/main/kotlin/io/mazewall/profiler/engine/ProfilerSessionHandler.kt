@@ -28,15 +28,27 @@ internal class ProfilerSessionHandler(
     private val syscallMap: Map<Int, String>,
     private val onShutdown: (String) -> Unit,
 ) {
+    var state: ProfilerState = ProfilerState.ActiveSession(socketFd, listenerFd)
+        private set
+
+    @Suppress("ReturnCount")
     fun handleActiveListener(
         pollFds: MemorySegment,
         ackBuf: MemorySegment,
         notif: MemorySegment,
         resp: MemorySegment,
     ): LoopAction {
+        val currentState = state
+        if (currentState is ProfilerState.Terminated) {
+            return LoopAction.Break
+        }
+
         val socketRevents = pollFds.get(ValueLayout.JAVA_SHORT, POLLFD_REVENT_DATA_OFF)
         if ((socketRevents.toInt() and NativeConstants.POLLIN.toInt()) != 0) {
-            if (handleShutdownRequest(ackBuf)) return LoopAction.Shutdown
+            if (handleShutdownRequest(ackBuf)) {
+                state = ProfilerState.Terminated
+                return LoopAction.Shutdown
+            }
         }
 
         val listenerRevents = pollFds.get(ValueLayout.JAVA_SHORT, POLLFD_REVENTS_OFF)
@@ -45,6 +57,7 @@ internal class ProfilerSessionHandler(
             val recvRes = transport.ioctl(listenerFd, SECCOMP_IOCTL_NOTIF_RECV, notif)
             if (recvRes.returnValue == 0L) {
                 if (!processNotification(notif, resp, ackBuf)) {
+                    state = ProfilerState.Terminated
                     return LoopAction.Break
                 }
             }
@@ -74,25 +87,38 @@ internal class ProfilerSessionHandler(
         resp: MemorySegment,
         ackBuf: MemorySegment,
     ): Boolean {
-        Arena.ofConfined().use { arena ->
+        val id = notif.get(ValueLayout.JAVA_LONG, NOTIF_ID_OFF)
+        val pid = notif.get(ValueLayout.JAVA_INT, NOTIF_PID_OFF)
+        val nr = notif.get(ValueLayout.JAVA_INT, NOTIF_NR_OFF)
+        val args = LongArray(MAX_SYSCALL_ARGS)
+        for (i in 0 until MAX_SYSCALL_ARGS) {
+            args[i] = notif.get(ValueLayout.JAVA_LONG, NOTIF_ARGS_OFF + i * ValueLayout.JAVA_LONG.byteSize())
+        }
+
+        val syscallName = syscallMap[nr] ?: "SYSCALL_$nr"
+        val paths = SyscallPathResolver(memoryReader, pid).getPathArgs(syscallName, args)
+        val event = TraceEvent(pid, syscallName, args, paths)
+
+        // Transition to Notified state
+        state = ProfilerState.Notified(socketFd, listenerFd, id, event)
+
+        return Arena.ofConfined().use { arena ->
             val pollFd = arena.allocate(Layouts.POLLFD)
             pollFd.set(ValueLayout.JAVA_INT, POLLFD_FD_OFF, socketFd)
             pollFd.set(ValueLayout.JAVA_SHORT, POLLFD_EVENTS_OFF, NativeConstants.POLLIN)
 
-            val id = notif.get(ValueLayout.JAVA_LONG, NOTIF_ID_OFF)
-            val pid = notif.get(ValueLayout.JAVA_INT, NOTIF_PID_OFF)
-            val nr = notif.get(ValueLayout.JAVA_INT, NOTIF_NR_OFF)
-            val args = LongArray(MAX_SYSCALL_ARGS)
-            for (i in 0 until MAX_SYSCALL_ARGS) {
-                args[i] = notif.get(ValueLayout.JAVA_LONG, NOTIF_ARGS_OFF + i * ValueLayout.JAVA_LONG.byteSize())
-            }
+            // Transition to WaitingForAck state
+            state = ProfilerState.WaitingForAck(socketFd, listenerFd, id)
 
-            val syscallName = syscallMap[nr] ?: "SYSCALL_$nr"
-            val paths = SyscallPathResolver(memoryReader, pid).getPathArgs(syscallName, args)
-
-            return try {
-                transport.sendTraceEvent(socketFd, TraceEvent(pid, syscallName, args, paths))
-                waitForParentAck(pollFd, ackBuf)
+            try {
+                transport.sendTraceEvent(socketFd, event)
+                val success = waitForParentAck(pollFd, ackBuf)
+                if (success) {
+                    state = ProfilerState.ActiveSession(socketFd, listenerFd)
+                } else {
+                    state = ProfilerState.Terminated
+                }
+                success
             } finally {
                 sendContinueResponse(id, resp)
             }
