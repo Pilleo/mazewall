@@ -28,8 +28,17 @@ jobs:
               uses: gradle/actions/setup-gradle@v4
               with:
                   gradle-version: wrapper
-                  # This enables the Gradle Build Cache, Configuration Cache, and dependency caching
-                  cache-read-only: ${{ github.ref != 'refs/heads/main' && github.ref != 'refs/heads/master' }}
+                  cache-disabled: true
+
+            - name: Cache Gradle packages
+              uses: actions/cache@v4
+              with:
+                  path: |
+                      ~/.gradle/caches
+                      ~/.gradle/wrapper
+                  key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+                  restore-keys: |
+                      ${{ runner.os }}-gradle-
 
             - name: Grant Execute Permission for Gradlew
               run: chmod +x gradlew
