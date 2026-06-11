@@ -96,6 +96,18 @@ subprojects {
         source.setFrom(files("src/main/kotlin"))
     }
 
+    tasks.configureEach {
+        if (name.startsWith("detekt")) {
+            try {
+                val method = this.javaClass.getMethod("getJdkHome")
+                val property = method.invoke(this) as org.gradle.api.file.DirectoryProperty
+                property.set(layout.projectDirectory.dir(providers.systemProperty("java.home")))
+            } catch (_: NoSuchMethodException) {
+                // Ignore tasks that do not have getJdkHome
+            }
+        }
+    }
+
     extensions.configure<PublishingExtension> {
         repositories {
             System.getenv("GITHUB_ACTOR")?.let { actor ->
