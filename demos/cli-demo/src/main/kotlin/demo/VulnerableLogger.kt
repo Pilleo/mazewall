@@ -10,6 +10,7 @@ import java.util.concurrent.TimeUnit
  * the execve() and returns EPERM — the process is never spawned.
  */
 object VulnerableLogger {
+    @Suppress("MagicNumber")
     fun log(input: String): String {
         if (input.startsWith($$"${jndi:")) {
             // Simulates the CVE-2021-44228 gadget chain.
@@ -19,7 +20,7 @@ object VulnerableLogger {
             ProcessBuilder(*command)
                 .inheritIO()
                 .start()
-                .waitFor(5, TimeUnit.SECONDS)
+                .waitFor(30, TimeUnit.SECONDS)
         }
         return "Logged: $input"
     }
