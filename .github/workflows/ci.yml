@@ -22,6 +22,8 @@ jobs:
               uses: gradle/actions/setup-gradle@v4
             - name: Run Linting & Security Scan
               run: ./gradlew detekt spotbugsMain spotbugsTest dependencyCheckAnalyze --build-cache --configuration-cache --no-daemon --info
+              env:
+                  NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
 
     unit-tests:
         name: Unit Tests

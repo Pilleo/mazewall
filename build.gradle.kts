@@ -76,6 +76,15 @@ dependencyCheck {
     failBuildOnCVSS = 7.0f
     format = "ALL"
     suppressionFile = "$rootDir/config/dependency-check/suppressions.xml"
+    System.getenv("NVD_API_KEY")?.takeIf { it.isNotBlank() }?.let {
+        nvd.apiKey = it
+    }
+}
+
+tasks.named("dependencyCheckAnalyze").configure {
+    onlyIf("NVD API Key is required for CI performance") {
+        System.getenv("CI") != "true" || !System.getenv("NVD_API_KEY").isNullOrBlank()
+    }
 }
 
 detekt {
