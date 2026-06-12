@@ -21,7 +21,8 @@ jobs:
             - name: Setup Gradle
               uses: gradle/actions/setup-gradle@v4
               with:
-                  cache-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY || 'default-mazewall-key' }}
+                  # Only provide the key if the secret is actually set
+                  cache-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
             - name: Run Linting
               run: ./gradlew detekt spotbugsMain spotbugsTest --build-cache --configuration-cache --no-daemon
 
@@ -62,7 +63,7 @@ jobs:
             - name: Setup Gradle
               uses: gradle/actions/setup-gradle@v4
               with:
-                  cache-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY || 'default-mazewall-key' }}
+                  cache-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
             - name: Setup Podman Socket
               run: |
                   systemctl --user enable --now podman.socket
@@ -88,7 +89,7 @@ jobs:
             - name: Setup Gradle
               uses: gradle/actions/setup-gradle@v4
               with:
-                  cache-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY || 'default-mazewall-key' }}
+                  cache-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
             - name: Setup Podman Socket
               run: |
                   systemctl --user enable --now podman.socket
@@ -113,6 +114,8 @@ jobs:
                   distribution: "temurin"
             - name: Setup Gradle
               uses: gradle/actions/setup-gradle@v4
+              with:
+                  cache-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
             - name: Run PITest (Host)
               run: ./gradlew :enforcer:pitest -Dpitest.threads=12 --build-cache --configuration-cache
 
@@ -131,7 +134,7 @@ jobs:
             - name: Setup Gradle
               uses: gradle/actions/setup-gradle@v4
               with:
-                  cache-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY || 'default-mazewall-key' }}
+                  cache-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
             - name: Setup Podman Socket
               run: |
                   systemctl --user enable --now podman.socket
@@ -160,6 +163,8 @@ jobs:
                   distribution: "temurin"
             - name: Setup Gradle
               uses: gradle/actions/setup-gradle@v4
+              with:
+                  cache-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
             - name: Publish to GitHub Packages
               run: ./gradlew publishAllPublicationsToGitHubPackagesRepository --info --no-parallel --no-configuration-cache
               env:
