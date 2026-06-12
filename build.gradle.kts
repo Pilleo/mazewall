@@ -70,6 +70,9 @@ dependencies {
 
 tasks.withType<Test>().configureEach {
     useJUnitPlatform()
+    if (project == rootProject) {
+        outputs.upToDateWhen { false }
+    }
 }
 
 dependencyCheck {
@@ -186,9 +189,15 @@ subprojects {
 
     tasks.withType<Test>().configureEach {
         systemProperty("io.mazewall.test", "true")
+        // Skip integration tests on host since they require container-level capabilities and seccomp filters.
+        if (name == "integrationTest" && System.getenv("MAZEWALL_IN_CONTAINER") != "true") {
+            enabled = false
+        }
     }
 
     tasks.withType<org.gradle.testing.jacoco.tasks.JacocoReport>().configureEach {
+        // Enforce ordering so we aggregate execution data from both host unit tests and container integration tests
+        mustRunAfter(rootProject.tasks.named("test"))
         dependsOn(tasks.withType<Test>())
         mustRunAfter(tasks.withType<Test>())
         executionData.setFrom(fileTree(project.layout.buildDirectory.dir("jacoco")).include("*.exec"))
@@ -199,6 +208,8 @@ subprojects {
     }
 
     tasks.withType<org.gradle.testing.jacoco.tasks.JacocoCoverageVerification>().configureEach {
+        // Enforce ordering so we aggregate execution data from both host unit tests and container integration tests
+        mustRunAfter(rootProject.tasks.named("test"))
         dependsOn(tasks.withType<org.gradle.testing.jacoco.tasks.JacocoReport>())
         mustRunAfter(tasks.withType<org.gradle.testing.jacoco.tasks.JacocoReport>())
         executionData.setFrom(fileTree(project.layout.buildDirectory.dir("jacoco")).include("*.exec"))

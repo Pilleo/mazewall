@@ -29,6 +29,7 @@ class ContainerizedTestRunner {
             .withFileSystemBind(System.getProperty("user.home") + "/.gradle", "/root/.gradle")
             .withEnv("GRADLE_USER_HOME", "/root/.gradle")
             .withEnv("IO_MAZEWALL_TEST", "true")
+            .withEnv("MAZEWALL_IN_CONTAINER", "true")
             .withEnv("GITHUB_ACTIONS", System.getenv("GITHUB_ACTIONS") ?: "false")
             .withWorkingDirectory("/workspace")
             .withCreateContainerCmdModifier { cmd ->
@@ -49,7 +50,7 @@ class ContainerizedTestRunner {
     fun `run core library tests in container`() {
         val tasksProp = System.getProperty(
             "mazewall.container.tasks",
-            ":enforcer:test :profiler:test :enforcer:integrationTest :profiler:integrationTest",
+            ":enforcer:integrationTest :profiler:integrationTest",
         )
         val tasks = tasksProp.split(" ").filter { it.isNotBlank() }.toTypedArray()
         runGradleTasks(*tasks)
