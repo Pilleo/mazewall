@@ -1,4 +1,5 @@
 package io.mazewall.seccomp
+import io.mazewall.BaseIntegrationTest
 import io.mazewall.EnabledIfLinuxAndSupported
 import io.mazewall.Policy
 import io.mazewall.core.Arch
@@ -23,7 +24,7 @@ import kotlin.test.assertTrue
  * `PROT_EXEC` (0x04) bit is set. This protects worker threads from creating executable memory
  * regions without interfering with JIT compilation running on unrestricted threads.
  */
-class MmapProtectionTest {
+class MmapProtectionTest : BaseIntegrationTest() {
     companion object {
         init {
             val linker = Linker.nativeLinker()

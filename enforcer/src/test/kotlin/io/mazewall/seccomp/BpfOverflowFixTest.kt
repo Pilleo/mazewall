@@ -1,5 +1,4 @@
 package io.mazewall.seccomp
-
 import io.mazewall.BpfFilter
 import io.mazewall.Policy
 import io.mazewall.core.Arch

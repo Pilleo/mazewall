@@ -1,5 +1,4 @@
 package io.mazewall.seccomp
-
 import io.kotest.matchers.ints.shouldBeLessThan
 import io.kotest.property.Exhaustive
 import io.kotest.property.checkAll

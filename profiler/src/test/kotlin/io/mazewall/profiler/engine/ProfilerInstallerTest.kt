@@ -1,15 +1,29 @@
 package io.mazewall.profiler.engine
 
-import io.mazewall.EnabledIfLinuxAndSupported
+import io.mazewall.LinuxNative
+import io.mazewall.MockNativeEngine
 import io.mazewall.Policy
+import org.junit.jupiter.api.AfterEach
+import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.test.assertTrue
 
-@EnabledIfLinuxAndSupported
 class ProfilerInstallerTest {
+    @BeforeEach
+    fun setUp() {
+        val mock = MockNativeEngine()
+        mock.syscallResult = LinuxNative.SyscallResult(100, 0)
+        LinuxNative.setEngine(mock)
+    }
+
+    @AfterEach
+    fun tearDown() {
+        LinuxNative.resetToDefault()
+    }
+
     @Test
     fun `test coordinator thread handles connection retry failure`() {
         val accumulatedLogs = CopyOnWriteArrayList<TraceEvent>()
@@ -32,8 +46,6 @@ class ProfilerInstallerTest {
                     },
                     startTraceListener = { _, _, _, _, _ -> },
                 )
-                // Trigger an intercepted syscall to force blocking in seccomp
-                java.io.FileInputStream("/etc/hostname").use {}
             } catch (t: Throwable) {
                 errorRef.set(t)
             }
@@ -88,6 +100,11 @@ class ProfilerInstallerTest {
 
     @Test
     fun `test coordinator thread handles send descriptor failure`() {
+        val mock = MockNativeEngine()
+        mock.syscallResult = LinuxNative.SyscallResult(100, 0)
+        mock.sendmsgResult = LinuxNative.SyscallResult(-1, 9) // EBADF
+        LinuxNative.setEngine(mock)
+
         val accumulatedLogs = CopyOnWriteArrayList<TraceEvent>()
         val pathCache = ConcurrentHashMap<String, Long>()
         val errorRef = AtomicReference<Throwable?>(null)
@@ -109,8 +126,6 @@ class ProfilerInstallerTest {
                     },
                     startTraceListener = { _, _, _, _, _ -> },
                 )
-                // Trigger an intercepted syscall to force blocking in seccomp
-                java.io.FileInputStream("/etc/hostname").use {}
             } catch (t: Throwable) {
                 errorRef.set(t)
             }

@@ -1,5 +1,5 @@
 package io.mazewall.landlock
-import io.mazewall.EnabledIfLinuxAndSupported
+import io.mazewall.BaseIntegrationTest
 import io.mazewall.Policy
 import io.mazewall.core.Syscall
 import org.junit.jupiter.api.Test
@@ -7,8 +7,7 @@ import java.io.File
 import kotlin.system.exitProcess
 import kotlin.test.assertEquals
 
-@EnabledIfLinuxAndSupported
-class LandlockTsyncIntegrationTest {
+class LandlockTsyncIntegrationTest : BaseIntegrationTest() {
     /**
      * Tiny main class for the out-of-process TSYNC test.
      */

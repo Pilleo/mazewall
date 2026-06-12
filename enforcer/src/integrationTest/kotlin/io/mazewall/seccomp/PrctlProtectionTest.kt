@@ -1,4 +1,5 @@
 package io.mazewall.seccomp
+import io.mazewall.BaseIntegrationTest
 import io.mazewall.EnabledIfLinuxAndSupported
 import io.mazewall.LinuxNative
 import io.mazewall.Policy
@@ -24,7 +25,7 @@ import kotlin.test.assertTrue
  * - 38 (PR_SET_NO_NEW_PRIVS)
  * - 39 (PR_GET_NO_NEW_PRIVS)
  */
-class PrctlProtectionTest {
+class PrctlProtectionTest : BaseIntegrationTest() {
     @Test
     @EnabledIfLinuxAndSupported
     fun `prctl PR_SET_NAME is allowed under default strict policy`() {

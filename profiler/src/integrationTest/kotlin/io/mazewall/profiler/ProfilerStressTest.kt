@@ -1,6 +1,5 @@
 package io.mazewall.profiler
-
-import io.mazewall.EnabledIfLinuxAndSupported
+import io.mazewall.BaseIntegrationTest
 import io.mazewall.Policy
 import org.junit.jupiter.api.Assertions.assertTimeoutPreemptively
 import org.junit.jupiter.api.Test
@@ -11,8 +10,7 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.test.assertTrue
 
-@EnabledIfLinuxAndSupported
-class ProfilerStressTest {
+class ProfilerStressTest : BaseIntegrationTest() {
     private val stressTimeout = Duration.ofSeconds(120)
 
     @Test

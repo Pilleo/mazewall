@@ -1,5 +1,5 @@
 package io.mazewall.seccomp
-import io.mazewall.EnabledIfLinuxAndSupported
+import io.mazewall.BaseIntegrationTest
 import io.mazewall.LinuxNative
 import io.mazewall.Policy
 import io.mazewall.core.Arch
@@ -9,8 +9,7 @@ import io.mazewall.enforcer.ContainedExecutors
 import org.junit.jupiter.api.Test
 import java.util.concurrent.Executors
 
-@EnabledIfLinuxAndSupported
-class AllowListTest {
+class AllowListTest : BaseIntegrationTest() {
     private fun jvmFloor(): Array<Syscall> =
         arrayOf(
             Syscall.WRITE,

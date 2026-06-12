@@ -1,4 +1,5 @@
 package io.mazewall.seccomp
+import io.mazewall.BaseIntegrationTest
 import io.mazewall.EnabledIfLinuxAndSupported
 import io.mazewall.IsolatedProcessTester
 import io.mazewall.Policy
@@ -10,7 +11,7 @@ import org.junit.jupiter.api.Test
 import java.io.IOException
 import java.nio.channels.Selector
 
-class ProcessContainmentTest {
+class ProcessContainmentTest : BaseIntegrationTest() {
     fun testProcessWide() {
         val safeGlobalPolicy =
             Policy

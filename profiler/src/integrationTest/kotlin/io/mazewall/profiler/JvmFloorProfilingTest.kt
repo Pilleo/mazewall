@@ -1,5 +1,5 @@
 package io.mazewall.profiler
-
+import io.mazewall.BaseIntegrationTest
 import io.mazewall.EnabledIfLinuxAndSupported
 import io.mazewall.enforcer.JvmFloorWorkload
 import io.mazewall.profiler.strace.StraceProfiler
@@ -9,7 +9,7 @@ import org.junit.jupiter.api.Test
  * Executes the JvmFloorWorkload under the StraceProfiler to generate
  * an exhaustive Bill of Behavior (BoB) for the current JVM environment.
  */
-class JvmFloorProfilingTest {
+class JvmFloorProfilingTest : BaseIntegrationTest() {
     /**
      * A wrapper workload that delegates to the enforcer's JvmFloorWorkload.
      * This is needed because StraceProfiler requires a [TraceableWorkload] class.

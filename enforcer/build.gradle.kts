@@ -8,7 +8,11 @@ kotlin {
 }
 
 sourceSets {
+    test {
+        java.srcDir(rootProject.file("src/sharedTest/kotlin"))
+    }
     create("integrationTest") {
+        java.srcDir(rootProject.file("src/sharedTest/kotlin"))
         compileClasspath += main.get().output + test.get().output
         runtimeClasspath += main.get().output + test.get().output
     }

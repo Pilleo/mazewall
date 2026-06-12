@@ -1,5 +1,4 @@
 package io.mazewall.profiler.strace
-
 import io.mazewall.profiler.TraceableWorkload
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Test

@@ -1,6 +1,5 @@
 package io.mazewall.profiler
-
-import io.mazewall.EnabledIfLinuxAndSupported
+import io.mazewall.BaseIntegrationTest
 import io.mazewall.LinuxNative
 import io.mazewall.Policy
 import io.mazewall.core.Arch
@@ -14,8 +13,7 @@ import java.util.concurrent.TimeUnit
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
-@EnabledIfLinuxAndSupported
-class ProfilerIntegrationTest {
+class ProfilerIntegrationTest : BaseIntegrationTest() {
     @Test
     fun `test profiler intercepts and logs file opens with path resolving and stack trace capture`() {
         val targetFile = File("/etc/hostname")

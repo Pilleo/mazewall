@@ -1,5 +1,4 @@
 package io.mazewall.landlock
-
 import io.mazewall.LinuxNative
 import io.mazewall.MockNativeEngine
 import io.mazewall.Policy

@@ -1,4 +1,5 @@
 package io.mazewall.seccomp
+import io.mazewall.BaseIntegrationTest
 import io.mazewall.EnabledIfLinuxAndSupported
 import io.mazewall.LinuxNative
 import io.mazewall.Policy
@@ -9,7 +10,7 @@ import java.util.concurrent.ExecutionException
 import java.util.concurrent.Executors
 import kotlin.test.fail
 
-class NetworkBypassReproductionTest {
+class NetworkBypassReproductionTest : BaseIntegrationTest() {
     @Test
     @EnabledIfLinuxAndSupported
     @Suppress("ThrowsCount")

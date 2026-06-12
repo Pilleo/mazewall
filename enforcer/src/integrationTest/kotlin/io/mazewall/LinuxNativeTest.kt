@@ -8,8 +8,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
-@EnabledIfLinuxAndSupported
-class LinuxNativeTest {
+class LinuxNativeTest : BaseIntegrationTest() {
     @Test
     fun testPrctlGetSeccomp() {
         val result = LinuxNative.prctl(NativeConstants.PR_GET_SECCOMP, 0, 0, 0, 0)

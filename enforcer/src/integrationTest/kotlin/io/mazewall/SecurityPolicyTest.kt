@@ -22,10 +22,10 @@ import kotlin.test.assertTrue
  * - [io.mazewall.seccomp.BpfHardeningTest]    — prctl, clone argument inspection sequences
  * - [io.mazewall.seccomp.ProcessContainmentTest] — process-wide and thread-inheritance tests
  */
-@EnabledIfLinuxAndSupported
-class SecurityPolicyTest {
+class SecurityPolicyTest : BaseIntegrationTest() {
     @Test
     fun `PURE_COMPUTE blocks filesystem modifications`() {
+        assumeLandlockAbiAtLeast(5)
         val executor = Executors.newSingleThreadExecutor()
         val safe = ContainedExecutors.wrap(executor, Policy.PURE_COMPUTE)
 

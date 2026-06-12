@@ -1,5 +1,5 @@
 package io.mazewall.enforcer
-import io.mazewall.EnabledIfLinuxAndSupported
+import io.mazewall.BaseIntegrationTest
 import io.mazewall.Policy
 import org.junit.jupiter.api.Test
 import java.util.concurrent.ExecutionException
@@ -7,8 +7,7 @@ import java.util.concurrent.Executors
 import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
-@EnabledIfLinuxAndSupported
-class VirtualThreadGuardrailTest {
+class VirtualThreadGuardrailTest : BaseIntegrationTest() {
     @Test
     fun `installOnCurrentThread throws IllegalStateException on virtual thread`() {
         val executor = Executors.newVirtualThreadPerTaskExecutor()

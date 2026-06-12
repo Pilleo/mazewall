@@ -1,13 +1,12 @@
 package io.mazewall.enforcer
-import io.mazewall.EnabledIfLinuxAndSupported
+import io.mazewall.BaseIntegrationTest
 import io.mazewall.Policy
 import io.mazewall.core.SeccompAction
 import io.mazewall.core.Syscall
 import org.junit.jupiter.api.Test
 import java.util.concurrent.Executors
 
-@EnabledIfLinuxAndSupported
-class ThreadPoolWhitelistTest {
+class ThreadPoolWhitelistTest : BaseIntegrationTest() {
     @Test
     fun `thread pool whitelist execution exhaustion`() {
         val executor = Executors.newSingleThreadExecutor()

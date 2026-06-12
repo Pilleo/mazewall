@@ -1,6 +1,5 @@
 package io.mazewall.profiler.strace
-
-import io.mazewall.EnabledIfLinuxAndSupported
+import io.mazewall.BaseIntegrationTest
 import io.mazewall.core.Syscall
 import io.mazewall.profiler.TraceableWorkload
 import org.junit.jupiter.api.Test
@@ -9,8 +8,7 @@ import java.net.ServerSocket
 import java.net.Socket
 import kotlin.test.assertTrue
 
-@EnabledIfLinuxAndSupported
-class StraceProfilerTest {
+class StraceProfilerTest : BaseIntegrationTest() {
     class FileReadWorkload : TraceableWorkload {
         override fun run() {
             File("/etc/hostname").readText()

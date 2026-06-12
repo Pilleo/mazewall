@@ -1,4 +1,5 @@
 package io.mazewall.seccomp
+import io.mazewall.BaseIntegrationTest
 import io.mazewall.EnabledIfLinuxAndSupported
 import io.mazewall.Policy
 import io.mazewall.core.Syscall
@@ -8,7 +9,7 @@ import java.util.concurrent.Executors
 import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
-class PureJavaBpfEngineTest {
+class PureJavaBpfEngineTest : BaseIntegrationTest() {
     @Test
     @EnabledIfLinuxAndSupported
     fun `test PureJavaBpfEngine blocks execve`() {

@@ -1,5 +1,4 @@
 package io.mazewall.seccomp
-
 import io.mazewall.Policy
 import org.junit.jupiter.api.Test
 import kotlin.test.assertEquals

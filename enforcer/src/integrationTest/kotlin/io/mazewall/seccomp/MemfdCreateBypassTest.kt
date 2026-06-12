@@ -1,4 +1,5 @@
 package io.mazewall.seccomp
+import io.mazewall.BaseIntegrationTest
 import io.mazewall.EnabledIfLinuxAndSupported
 import io.mazewall.LinuxNative
 import io.mazewall.Policy
@@ -10,7 +11,7 @@ import org.junit.jupiter.api.Test
 import java.util.concurrent.Executors
 import kotlin.test.assertTrue
 
-class MemfdCreateBypassTest {
+class MemfdCreateBypassTest : BaseIntegrationTest() {
     @Test
     @EnabledIfLinuxAndSupported
     fun `NO_EXEC blocks memfd_create as of recent security update`() {

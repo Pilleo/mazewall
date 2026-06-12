@@ -1,5 +1,5 @@
 package io.mazewall.landlock
-
+import io.mazewall.BaseIntegrationTest
 import io.mazewall.EnabledIfLinuxAndSupported
 import io.mazewall.IsolatedProcessTester
 import io.mazewall.LinuxNative
@@ -23,7 +23,7 @@ import kotlin.test.assertNotEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
-class LandlockTest {
+class LandlockTest : BaseIntegrationTest() {
     fun testReadAllowed(
         dir: String,
         file: String,

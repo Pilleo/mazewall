@@ -1,6 +1,6 @@
 package io.mazewall.enforcer
 
-import io.mazewall.EnabledIfLinuxAndSupported
+import io.mazewall.BaseIntegrationTest
 import io.mazewall.IsolatedProcessTester
 import io.mazewall.Policy
 import io.mazewall.PolicyScope
@@ -13,7 +13,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
-class ContainedExecutorsTest {
+class ContainedExecutorsTest : BaseIntegrationTest() {
     fun testContainmentWrapperBlocksExecve() {
         val executor = Executors.newSingleThreadExecutor()
         val safeExecutor = ContainedExecutors.wrap(executor, Policy.NO_EXEC)
@@ -163,7 +163,6 @@ class ContainedExecutorsTest {
     }
 
     @Test
-    @EnabledIfLinuxAndSupported
     fun `test containment wrapper blocks execve`() {
         IsolatedProcessTester.runIsolatedMethod(this::class.java.name, "testContainmentWrapperBlocksExecve")
     }
@@ -181,26 +180,23 @@ class ContainedExecutorsTest {
     }
 
     @Test
-    @EnabledIfLinuxAndSupported
     fun `test per-thread isolation (TSYNC bug fix)`() {
         IsolatedProcessTester.runIsolatedMethod(this::class.java.name, "testPerThreadIsolation")
     }
 
     @Test
-    @EnabledIfLinuxAndSupported
     fun `invokeAll applies containment to all tasks`() {
         IsolatedProcessTester.runIsolatedMethod(this::class.java.name, "testInvokeAllAppliesContainment")
     }
 
     @Test
-    @EnabledIfLinuxAndSupported
     fun `invokeAny applies containment`() {
         IsolatedProcessTester.runIsolatedMethod(this::class.java.name, "testInvokeAnyAppliesContainment")
     }
 
     @Test
-    @EnabledIfLinuxAndSupported
     fun `test wrap() executor invokeAll and invokeAny with timeouts`() {
+        assumeLandlockAbiAtLeast(5)
         val executor = Executors.newFixedThreadPool(2)
         val safeExecutor = ContainedExecutors.wrap(executor, Policy.PURE_COMPUTE)
 
@@ -250,25 +246,21 @@ class ContainedExecutorsTest {
     }
 
     @Test
-    @EnabledIfLinuxAndSupported
     fun `test hierarchical Landlock stacking success`() {
         IsolatedProcessTester.runIsolatedMethod(this::class.java.name, "testHierarchicalLandlockStackingSuccess")
     }
 
     @Test
-    @EnabledIfLinuxAndSupported
     fun `test hierarchical Landlock stacking failure on expansion`() {
         IsolatedProcessTester.runIsolatedMethod(this::class.java.name, "testHierarchicalLandlockStackingFailureOnExpansion")
     }
 
     @Test
-    @EnabledIfLinuxAndSupported
     fun `test hierarchical Landlock stacking failure on component boundary mismatch`() {
         IsolatedProcessTester.runIsolatedMethod(this::class.java.name, "testHierarchicalLandlockStackingFailureOnComponentBoundaryMismatch")
     }
 
     @Test
-    @EnabledIfLinuxAndSupported
     fun `test hierarchical Landlock stacking identical paths`() {
         IsolatedProcessTester.runIsolatedMethod(this::class.java.name, "testHierarchicalLandlockStackingIdenticalPaths")
     }

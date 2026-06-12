@@ -1,5 +1,5 @@
 package io.mazewall.seccomp
-import io.mazewall.EnabledIfLinuxAndSupported
+import io.mazewall.BaseIntegrationTest
 import io.mazewall.LinuxNative
 import io.mazewall.Policy
 import io.mazewall.core.Arch
@@ -9,8 +9,7 @@ import org.junit.jupiter.api.Test
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.test.assertEquals
 
-@EnabledIfLinuxAndSupported
-class BpfHardeningTest {
+class BpfHardeningTest : BaseIntegrationTest() {
     @Test
     fun `test that prctl can be blocked when inspection is explicitly disabled`() {
         val policy =
