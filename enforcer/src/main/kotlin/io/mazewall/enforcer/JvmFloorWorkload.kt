@@ -17,6 +17,14 @@ import java.util.concurrent.TimeUnit
  * 5. OS Thread Lifecycle: Native thread creation, joining, and signaling.
  */
 object JvmFloorWorkload {
+    private const val JIT_ITERATIONS = 50_000
+    private const val GC_ALLOCATION_COUNT = 500
+    private const val MB_SIZE = 1024 * 1024
+    private const val LOOM_TASK_COUNT = 100
+    private const val LOOM_SLEEP_MS = 1L
+    private const val OS_THREAD_ITERATIONS = 10
+    private const val OS_THREAD_SLEEP_MS = 1L
+
     /**
      * Executes the stress workload.
      */
@@ -27,7 +35,7 @@ object JvmFloorWorkload {
         // Force methods to reach the compilation threshold
         val startTime = System.nanoTime()
         var count = 0
-        repeat(50_000) {
+        repeat(JIT_ITERATIONS) {
             count += "jit-stress-iteration-$it".hashCode()
         }
         val jitDuration = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startTime)
@@ -37,10 +45,11 @@ object JvmFloorWorkload {
         // Large allocations followed by clear and explicit GC to trigger handshakes
         val gcStartTime = System.nanoTime()
         val garbage = mutableListOf<ByteArray>()
-        repeat(500) {
-            garbage.add(ByteArray(1024 * 1024)) // 1MB chunks
+        repeat(GC_ALLOCATION_COUNT) {
+            garbage.add(ByteArray(MB_SIZE)) // 1MB chunks
         }
         garbage.clear()
+        @Suppress("ExplicitGarbageCollectionCall")
         System.gc() // Trigger safepoints and signal-based handshakes
         val gcDuration = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - gcStartTime)
         println("[JVM FLOOR] GC stress completed in ${gcDuration}ms")
@@ -49,9 +58,9 @@ object JvmFloorWorkload {
         // Spawning virtual threads that yield to exercise the ForkJoinPool scheduler
         val loomStartTime = System.nanoTime()
         val executor = Executors.newVirtualThreadPerTaskExecutor()
-        val tasks = (1..100).map { id ->
+        val tasks = (1..LOOM_TASK_COUNT).map { id ->
             executor.submit {
-                Thread.sleep(1)
+                Thread.sleep(LOOM_SLEEP_MS)
                 Thread.yield() // Force carrier thread switch
                 id * id
             }
@@ -77,8 +86,8 @@ object JvmFloorWorkload {
         // 5. OS Thread Coordination
         // Standard OS thread lifecycle
         val thread = Thread {
-            repeat(10) {
-                Thread.sleep(1)
+            repeat(OS_THREAD_ITERATIONS) {
+                Thread.sleep(OS_THREAD_SLEEP_MS)
             }
         }
         thread.start()

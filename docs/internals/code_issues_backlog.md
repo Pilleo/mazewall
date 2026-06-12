@@ -7,7 +7,7 @@
 
 ### 🟢 [RESOLVED]: BPF Compiler Macro-Architecture Documentation Drift
 **Target:** `io.mazewall.BpfFilter.kt` and `docs/internals/containment_design.md`
-**Fix:** `docs/internals/containment_design.md` was updated to accurately reflect the early `BPF_RET` early-return optimization used in `BpfFilter.kt`.
+**Fix:** `docs/internals/containment_design.md` was updated to accurately reflect the early `BPF_RET` early-return optimization used in `BpfFilter.kt`. The BPF compiler now uses symbolic labels, eliminating the manual `BPF_LD offset=0` restoration logic entirely.
 
 ### 🔴 [Severity: HIGH]: STRICT_SANDBOX crashes on Linux kernels < 6.10 (Landlock ABI < 5) due to unblocked `ioctl`
 **Target:** `io/mazewall/landlock/Landlock.kt` and `io/mazewall/Policy.kt`
@@ -290,9 +290,34 @@ Consequently, if a workload relies on `io_uring` for file access, `StraceProfile
 **Needed:** Use FFM to interact with the `/sys/fs/cgroup` filesystem. When wrapping an untrusted workload, the library should dynamically create a transient cgroup v2 slice, move the worker thread's OS TID into that slice, and apply hard memory and CPU limits. This provides robust protection against resource-exhaustion DoS attacks from within sandboxed tasks.
 
 ### 🔵 [Severity: ENHANCEMENT]: Network Isolation via Namespaces (`CLONE_NEWNET`)
-**Context:** Seccomp effectively blocks *new* network connections (`socket`, `connect`), but it cannot prevent data exfiltration over a pre-existing, inherited network file descriptor if the policy permits `write` or `send` calls (which are often needed for file I/O). 
+**Context:** Seccomp effectively blocks *new* network connections (`socket`, `connect`), but it cannot prevent data exfiltration over a pre-existing, inherited network file descriptor if the policy permits `write` or `send` calls (which are often needed for file I/O).
 **Needed:** Propose an optional process-wide `CLONE_NEWNET` initialization to create a private network namespace. This physically removes the host's routing tables and network interfaces (leaving only loopback), ensuring that even if a process possesses an open socket FD, it has no route to the external network, providing a stronger architectural guarantee than syscall blocking alone.
 
+
+### 🔵 [Severity: ENHANCEMENT]: Leverage Value Classes for Primitive Safety (Internal)
+**Target:** `io.mazewall.LinuxNative.kt`, `io.mazewall.ffi.Layouts.kt`
+**Context:** We currently use raw `Int` for File Descriptors and `Errno`, and `Long` for masks and addresses. This is prone to "parameter swapping" bugs.
+**Needed:** Introduce `@JvmInline value class` for internal types like `FileDescriptor`, `Errno`, and `MemoryAddress`. Use these internally to enforce compile-time safety. To maintain Java compatibility, keep the public API surface (e.g., `ContainedExecutors`) using primitives, but use value classes for all internal FFM and logic layers.
+
+### 🔵 [Severity: ENHANCEMENT]: Introduce Context Parameters for Memory and Engine Scopes
+**Target:** Entire `:enforcer` module
+**Context:** Many methods pass `Arena` or `NativeEngine` as explicit parameters, leading to verbose method signatures and "parameter drilling."
+**Needed:** Refactor internal kernel-interface methods to use Kotlin 2.0+ `context(Arena)` or `context(NativeFileSystem)`. This ensures that operations like path allocation or syscall execution are only possible within an active, valid context, reducing boilerplate and improving clarity.
+
+### 🔵 [Severity: ENHANCEMENT]: Result-Oriented Functional Error Handling
+**Target:** `io.mazewall.NativeEngine.kt` and callers
+**Context:** We currently rely on manual `returnValue < 0` checks and `LinuxNative.errno()` calls. This is a common source of missed error handling.
+**Needed:** Wrap internal syscall returns in a monadic `Result<T>` or a custom `SyscallResult` type. This forces developers to explicitly handle the `Failure` branch before accessing the result, aligning with modern functional programming safety standards.
+
+### 🔵 [Severity: ENHANCEMENT]: Contract-Based Invariant Validation
+**Target:** `io.mazewall.Platform.kt`, `io.mazewall.enforcer.ContainerStateRegistry.kt`
+**Context:** We perform many runtime checks for thread types (e.g., ensuring not on a Virtual Thread) and platform support.
+**Needed:** Use `kotlin.contracts` to define formal invariants. For example, a `validateNotVirtual()` function should use a contract to prove to the compiler that the following code is safe from Loom-specific carrier poisoning, allowing for more aggressive smart-casting and reduced redundant checks.
+
+### 🔵 [Severity: ENHANCEMENT]: Delegated Properties for Thread-Local Sandbox State
+**Target:** `io.mazewall.enforcer.ContainerStateRegistry.kt`
+**Context:** Accessing thread-local state requires explicit `.get()` and `.set()` calls on `ThreadLocal` objects.
+**Needed:** Implement property delegates for `ThreadLocal` values. This would allow accessing the current thread's sandbox state as a standard property (`var currentPolicy by ThreadLocalDelegate(...)`), making the code more readable while safely encapsulating the underlying storage.
 
 ### 🟢 [RESOLVED]: `ContainedExecutors.kt` violates single-responsibility at the API surface
 **Target:** `io.mazewall.enforcer.ContainedExecutors`

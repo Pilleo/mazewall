@@ -105,8 +105,10 @@ object BpfFilter {
         if (arch.clone3 >= 0) {
             val enosysAction = NativeConstants.SECCOMP_RET_ERRNO or 38
             handledNrs.add(arch.clone3)
-            builder.jumpIfEqual(arch.clone3, 0, 1)
+            builder.jumpIfEqual(arch.clone3, jt = "clone3_match", jf = "clone3_skip")
+            builder.label("clone3_match")
             builder.ret(enosysAction)
+            builder.label("clone3_skip")
         }
 
         // 4. Block-based checks (Linear Scan)
@@ -135,9 +137,10 @@ object BpfFilter {
         arch: Arch,
     ) {
         builder.loadAbsolute(SECCOMP_DATA_ARCH_OFFSET)
-        // If arch matches, skip 1 instruction (the ret kill)
-        builder.jumpIfEqual(arch.audit, 1, 0)
+        builder.jumpIfEqual(arch.audit, jt = "arch_ok", jf = "arch_fail")
+        builder.label("arch_fail")
         builder.ret(NativeConstants.SECCOMP_RET_KILL_THREAD)
+        builder.label("arch_ok")
     }
 
     private fun getInspections(
@@ -211,49 +214,39 @@ object BpfFilter {
         profilingMode: Boolean,
         handledNrs: MutableSet<Int>,
     ) {
-        for (inspection in inspections) {
+        for ((idx, inspection) in inspections.withIndex()) {
             val nr = inspection.syscallNumber
             handledNrs.add(nr)
 
             val ifMatchedNative = resolveNativeAction(inspection.ifMatched, profilingMode)
             val ifNotMatchedNative = resolveNativeAction(inspection.ifNotMatched, profilingMode)
 
+            val labelPrefix = "inspect_${nr}_$idx"
+            builder.jumpIfEqual(nr, jt = "${labelPrefix}_match", jf = "${labelPrefix}_skip")
+            builder.label("${labelPrefix}_match")
+
+            builder.loadAbsolute(SECCOMP_DATA_ARGS_OFFSET + inspection.argIndex * 8)
+
             when (val check = inspection.check) {
                 is io.mazewall.seccomp.ArgCheck.EqualsAny -> {
-                    val n = check.allowedValues.size
-                    builder.jumpIfEqual(nr, 0, (n + 3).toShort())
-                    builder.loadAbsolute(SECCOMP_DATA_ARGS_OFFSET + inspection.argIndex * 8)
-                    check.allowedValues.forEachIndexed { index, value ->
-                        val skipOffset = n - index
-                        builder.jumpIfEqual(value.toInt(), skipOffset.toShort(), 0.toShort())
+                    check.allowedValues.forEachIndexed { valIdx, value ->
+                        builder.jumpIfEqual(value.toInt(), jt = "${labelPrefix}_allow", jf = null)
                     }
                     builder.ret(ifNotMatchedNative)
+                    builder.label("${labelPrefix}_allow")
                     builder.ret(ifMatchedNative)
                 }
                 is io.mazewall.seccomp.ArgCheck.MaskEquals -> {
-                    builder.jumpIfEqual(nr, 0, 5)
-                    builder.loadAbsolute(SECCOMP_DATA_ARGS_OFFSET + inspection.argIndex * 8)
                     builder.and(check.mask.toInt())
-                    builder.jumpIfEqual(check.expected.toInt(), 1, 0)
+                    builder.jumpIfEqual(check.expected.toInt(), jt = "${labelPrefix}_allow", jf = "${labelPrefix}_deny")
+                    builder.label("${labelPrefix}_deny")
                     builder.ret(ifNotMatchedNative)
+                    builder.label("${labelPrefix}_allow")
                     builder.ret(ifMatchedNative)
                 }
             }
+            builder.label("${labelPrefix}_skip")
         }
-    }
-
-    private fun emitInspectionResult(
-        builder: BpfProgram.Builder,
-        nr: Int,
-        syscallActions: Map<Int, SeccompAction>,
-        defaultAction: SeccompAction,
-        jvmCriticalNrs: Set<Int>,
-        profilingMode: Boolean,
-    ) {
-        val mappedAction = syscallActions[nr] ?: defaultAction
-        val effectiveAction = if (nr in jvmCriticalNrs) SeccompAction.ACT_ALLOW else mappedAction
-        val nativeAction = resolveNativeAction(effectiveAction, profilingMode)
-        builder.ret(nativeAction)
     }
 
     private fun emitLinearScan(
@@ -272,8 +265,11 @@ object BpfFilter {
                 val nativeAction = resolveNativeAction(effectiveAction, profilingMode)
 
                 if (nativeAction != defaultNativeAction) {
-                    builder.jumpIfEqual(nr, 0, 1)
+                    val label = "scan_$nr"
+                    builder.jumpIfEqual(nr, jt = "${label}_match", jf = "${label}_skip")
+                    builder.label("${label}_match")
                     builder.ret(nativeAction)
+                    builder.label("${label}_skip")
                 }
             }
         }
@@ -283,8 +279,12 @@ object BpfFilter {
             for (nr in jvmCriticalNrs.sorted()) {
                 if (nr in handledNrs) continue
                 handledNrs.add(nr)
-                builder.jumpIfEqual(nr, 0, 1)
+
+                val label = "critical_$nr"
+                builder.jumpIfEqual(nr, jt = "${label}_match", jf = "${label}_skip")
+                builder.label("${label}_match")
                 builder.ret(NativeConstants.SECCOMP_RET_ALLOW)
+                builder.label("${label}_skip")
             }
         }
     }
