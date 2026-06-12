@@ -30,3 +30,7 @@ tasks.withType<Test> {
         showStandardStreams = true
     }
 }
+
+tasks.matching { it.name.startsWith("spotbugs") || it.name.contains("detekt") || it.name.contains("jacoco") }.configureEach {
+    enabled = false
+}

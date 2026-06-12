@@ -45,21 +45,30 @@ class ContainerizedTestRunner {
     }
 
     @Test
-    fun `run enforcer and profiler tests in container`() {
-        // We use execInContainer to trigger the gradle test run inside the provisioned environment.
-        val result = mazewall.execInContainer(
-            "./gradlew",
-            ":enforcer:test",
-            ":enforcer:integrationTest",
-            ":profiler:test",
-            ":profiler:integrationTest",
-            "--info",
-            "--no-daemon",
+    fun `run core library tests in container`() {
+        val tasksProp = System.getProperty(
+            "mazewall.container.tasks",
+            ":enforcer:test :profiler:test :enforcer:integrationTest :profiler:integrationTest",
         )
+        val tasks = tasksProp.split(" ").filter { it.isNotBlank() }.toTypedArray()
+        runGradleTasks(*tasks)
+    }
 
-        println("STDOUT:\n${result.stdout}")
-        println("STDERR:\n${result.stderr}")
+    private fun runGradleTasks(vararg tasks: String) {
+        if (tasks.isEmpty()) return
 
-        assertEquals(0, result.exitCode, "Tests failed in container with exit code ${result.exitCode}")
+        val command = mutableListOf("./gradlew")
+        command.addAll(tasks)
+        command.addAll(listOf("--info", "--no-daemon"))
+
+        println("Executing tasks: ${tasks.joinToString(", ")}")
+        val result = mazewall.execInContainer(*command.toTypedArray())
+
+        if (result.exitCode != 0) {
+            println("STDOUT:\n${result.stdout}")
+            println("STDERR:\n${result.stderr}")
+        }
+
+        assertEquals(0, result.exitCode, "Gradle tasks failed in container with exit code ${result.exitCode}: ${tasks.joinToString(", ")}")
     }
 }
