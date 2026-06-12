@@ -5,10 +5,9 @@
 **Context:** The Landlock documentation states that rules explicitly use `O_NOFOLLOW` to reject symlinks and prevent attackers from redirecting path rules. However, `addRule` calls `resolveCanonicalPath(path)` (which delegates to `File(path).canonicalPath`) *before* opening the file descriptor. `File.canonicalPath` automatically resolves all symlinks to their real targets. Therefore, `O_NOFOLLOW` operates on the already-resolved real path and will never trigger `ELOOP` for developer-provided symlinks, silently bypassing the rejection mechanism and applying the rule to the symlink's target.
 **Needed:** Replace `File.canonicalPath` with a pure syntactic normalization function that collapses `.` and `..` without resolving symlinks (e.g., `Paths.get(path).normalize().toString()`). This ensures `O_NOFOLLOW` correctly evaluates the original symlink boundaries.
 
-### 🔴 [Severity: LOW]: BPF Compiler Macro-Architecture Documentation Drift
+### 🟢 [RESOLVED]: BPF Compiler Macro-Architecture Documentation Drift
 **Target:** `io.mazewall.BpfFilter.kt` and `docs/internals/containment_design.md`
-**Context:** `containment_design.md` documents that the BPF argument-inspection sequences for `mmap`, `clone`, and `prctl` fall through to the remaining linear scan by emitting `BPF_LD offset=0 # restore NR for subsequent checks`. The actual implementation in `BpfFilter.kt` uses `addInspectionResult(nr)`, which emits an immediate `BPF_RET` (ALLOW or DENY) and exits the BPF program early if the check passes.
-**Needed:** Update `docs/internals/containment_design.md` to accurately reflect the early-return optimization used in `BpfFilter.kt`. Remove the `BPF_LD offset=0` instruction from the documentation snippet and explain the early `BPF_RET`.
+**Fix:** `docs/internals/containment_design.md` was updated to accurately reflect the early `BPF_RET` early-return optimization used in `BpfFilter.kt`.
 
 ### 🔴 [Severity: HIGH]: STRICT_SANDBOX crashes on Linux kernels < 6.10 (Landlock ABI < 5) due to unblocked `ioctl`
 **Target:** `io/mazewall/landlock/Landlock.kt` and `io/mazewall/Policy.kt`
@@ -203,14 +202,9 @@ As a result, both the existing filter and the new stacked filter contain identic
 **Needed:** In `FilterInstallationPlanner.calculateNewFilter`, when constructing `toInstall` in the `else` branch of `policy.defaultAction == ACT_ALLOW`:
 If `state.currentlyAllowsMmapExec` is `false`, call `builder.allowMmapExec()` so that the new filter skips compilation of the redundant inspection block. Apply the same optimization for `allowNonThreadClone` and `allowUnsafePrctl`.
 
-### 🔴 [Severity: NITPICK]: Design Documentation Drift in Landlock thread-local variable and restrictive method names
+### 🟢 [RESOLVED]: Design Documentation Drift in Landlock thread-local variable and restrictive method names
 **Target:** `/docs/internals/containment_design.md`
-**Failure Hypothesis:** The design documentation has drifted from the actual source code implementation regarding thread-local tracking variables and velocity/restricting method names, which causes confusion for developers.
-**Context & Proof:** In `containment_design.md §5`:
-1. The documentation states that `THREAD_LANDLOCK_APPLIED` is a `ThreadLocal<Boolean>` that ensures rulesets are applied once. In the codebase (`ContainerStateRegistry.kt`), this was refactored to `THREAD_LANDLOCK_APPLIED_READS` and `THREAD_LANDLOCK_APPLIED_WRITES` (which are `ThreadLocal<Set<String>?>`) to support dynamic subset validation during stacked nesting.
-2. The documentation refers to the method `applyProfilingRuleset()` used by the Iterative Profiler. In `Landlock.kt`, this method is actually named `applyRestrictiveBarrier()`.
-**Cascading Risk Potential:** Nitpick / maintainability defect. Misleads developers and increases onboarding friction.
-**Needed:** Update `containment_design.md` to accurately reference `THREAD_LANDLOCK_APPLIED_READS`/`THREAD_LANDLOCK_APPLIED_WRITES` and `applyRestrictiveBarrier()`.
+**Fix:** `docs/internals/containment_design.md` was updated to accurately reference `THREAD_LANDLOCK_APPLIED_READS`/`THREAD_LANDLOCK_APPLIED_WRITES` and `applyRestrictiveBarrier()`.
 
 ### 🔴 [Severity: HIGH]: Public `PureJavaBpfEngine.install` bypasses Loom Carrier Poisoning safeguards and JIT warmups
 **Target:** `io.mazewall.seccomp.PureJavaBpfEngine` & `io.mazewall.enforcer.ContainedExecutors`
@@ -258,12 +252,9 @@ If `state.currentlyAllowsMmapExec` is `false`, call `builder.allowMmapExec()` so
 **Cascading Risk Potential:** High stability and usability bug. Blocks iterative profiling for applications with sibling directories sharing identical prefixes.
 **Needed:** Use proper component-based `Path.startsWith` logic instead of raw string `startsWith`. Map the strings in `allowedFsReadPaths` to `Path` structures and normalize them, then compare using `java.nio.file.Path.startsWith`.
 
-### 🔴 [Severity: HIGH]: Profiler connection failure on signal interruption inside `recvDescriptor`
+### 🟢 [RESOLVED]: Profiler connection failure on signal interruption inside `recvDescriptor`
 **Target:** `/profiler/src/main/kotlin/io/mazewall/profiler/engine/ProfilerDaemon.kt` (specifically `recvDescriptor`)
-**Failure Hypothesis:** The out-of-process daemon receives the seccomp listener file descriptor from the JVM via `recvmsg` on a Unix domain socket. If a POSIX signal (such as standard JVM GC safepointing signals) is delivered to the daemon's connection thread while it is blocked inside `recvmsg`, the system call returns `-1` with `errno == EINTR`. `recvDescriptor` treats this as a fatal connection failure, closes the socket, and aborts the profiling session, leaving the worker thread permanently deadlocked.
-**Context & Proof:** If `LinuxNative.recvmsg` is interrupted by a signal, `returnValue` is `-1`. Since `-1 < 0`, `recvDescriptor` returns `null`. In `handleConnection`, the thread closes `socketFd` and returns, terminating the session. The tracee thread in the JVM remains frozen waiting for the daemon to ACK the listener FD, which never happens, resulting in a permanent JVM deadlock.
-**Cascading Risk Potential:** High stability and reliability failure. Causes arbitrary, random JVM deadlocks during startup/GC cycles when running the profiler.
-**Needed:** Wrap the `recvmsg` downcall in a loop in `recvDescriptor`. If `returnValue < 0` and `errno == 4` (EINTR), retry the `recvmsg` call. Only return `null` if the error is fatal (non-EINTR).
+**Fix:** `recvDescriptor` in `ProfilerTransport.kt` was updated to wrap the `recvmsg` call in a loop that continues on `EINTR` (`errno == 4`).
 
 ### 🟢 [RESOLVED]: Seccomp Filter Bypass via `pkey_mprotect`
 **Target:** `io.mazewall.BpfFilter`, `io.mazewall.core.Syscall`, `io.mazewall.seccomp.MmapProtectionTest`
@@ -303,10 +294,9 @@ Consequently, if a workload relies on `io_uring` for file access, `StraceProfile
 **Needed:** Propose an optional process-wide `CLONE_NEWNET` initialization to create a private network namespace. This physically removes the host's routing tables and network interfaces (leaving only loopback), ensuring that even if a process possesses an open socket FD, it has no route to the external network, providing a stronger architectural guarantee than syscall blocking alone.
 
 
-### 🔴 [Severity: MEDIUM]: `ContainedExecutors.kt` violates single-responsibility at the API surface
+### 🟢 [RESOLVED]: `ContainedExecutors.kt` violates single-responsibility at the API surface
 **Target:** `io.mazewall.enforcer.ContainedExecutors`
-**Context:** The `ContainedExecutors` object conflates the public API, internal plumbing, inner class wrappers, and JIT warmup logic in a single 377-line file. It currently uses `@Suppress("TooManyFunctions")`. The `ContainedExecutorWrapper` inner class conflates lifecycle concerns by triggering the full installation chain on every task execution.
-**Needed:** Refactor `ContainedExecutors` to separate the public API from the internal installation plumbing. Extract `ContainedExecutorWrapper` into its own file and optimize the task-wrapping logic to avoid redundant Landlock checks.
+**Fix:** `ContainedExecutors` was refactored, and the inner class `ContainedExecutorWrapper` was extracted into its own file (`enforcer/internal/ContainedExecutorWrapper.kt`).
 
 ### 🔴 [Severity: HIGH]: Blacklist policies trigger silent Landlock filesystem lockdown due to `io_uring` check
 **Target:** `io.mazewall.enforcer.ContainedExecutors.kt` (specifically `needsLandlock` calculation)
@@ -344,15 +334,13 @@ Consequently, if a workload relies on `io_uring` for file access, `StraceProfile
 **Context:** Pruning relies on syntactic `normalize()` and `startsWith()` checks. If a parent path is a symlink to a different filesystem branch, syntactic pruning is invalid and can lead to incorrect permission grants.
 **Needed:** Document this limitation or switch to a more robust pruning strategy that considers the physical inode structure.
 
-### 🔴 [Severity: HIGH]: Profiler daemon reactor loop spins at 100% CPU on delayed ACK bytes
+### 🟢 [RESOLVED]: Profiler daemon reactor loop spins at 100% CPU on delayed ACK bytes
 **Target:** `io.mazewall.profiler.engine.ProfilerSessionHandler.kt` (specifically `handleShutdownRequest`)
-**Context:** When the parent JVM sends a trace event acknowledgement byte (`PROTOCOL_ACK_BYTE`) on the socket, it is normally consumed by `waitForParentAck` inside the notification processing flow. However, if the ACK byte arrives late (after `waitForParentAck` times out or returns), or if any other non-shutdown byte is received on `socketFd` while the daemon is idling in its main `poll` loop, the reactor loop will detect readability on `socketFd`. It calls `handleShutdownRequest`, which peeks at the socket and returns `false` (since the byte is not `SHUTDOWN_COMMAND_BYTE`), leaving the byte unconsumed. In the next iteration, `poll` immediately returns readability again, causing the connection thread to spin at 100% CPU and hang the test suite.
-**Needed:** Modify `handleShutdownRequest` to consume the byte from the socket rather than peeking, so delayed ACK bytes or other spurious data are properly discarded instead of causing the reactor loop to spin indefinitely.
+**Fix:** `handleShutdownRequest` in `ProfilerSessionHandler.kt` was modified to use `transport.recv(..., 0)` to properly consume bytes instead of peeking.
 
-### 🔴 [Severity: HIGH]: Profiler daemon `waitForParentAck` enters infinite polling loop on timeout
+### 🟢 [RESOLVED]: Profiler daemon `waitForParentAck` enters infinite polling loop on timeout
 **Target:** `io.mazewall.profiler.engine.ProfilerSessionHandler.kt` (specifically `waitForParentAck`)
-**Context:** If `poll` times out waiting for the parent's acknowledgement byte (e.g. during rapid JVM shutdown or under high load), it returns `0`. The loop checks if `pollRes.returnValue <= 0`, but because `0 < 0` is false, it skips the return and hits `continue`, immediately re-polling. This creates an infinite polling loop that blocks the handler thread forever, causing stress tests to hang and preventing clean session teardown.
-**Needed:** Correct the check to immediately return `false` if `pollRes.returnValue == 0L`, indicating a timeout.
+**Fix:** `waitForParentAck` in `ProfilerSessionHandler.kt` was corrected to return `false` if `pollRes.returnValue == 0L`, indicating a timeout.
 
 ### 🟢 [RESOLVED]: Profiler Daemon Socket Connection Polling Loop Smell
 **Target:** `io.mazewall.profiler.internal.ProfilerSocket.kt` (specifically `connectWithRetry`)
