@@ -22,8 +22,8 @@ internal object ProfilerSocket {
 
     fun connectWithRetry(
         socketPath: String,
-        maxRetries: Int = 300,
-        delayMs: Long = 100L,
+        maxRetries: Int = 500,
+        delayMs: Long = 10L,
     ): Int {
         Arena.ofConfined().use { arena ->
             val addr = setupSockAddrUn(arena, socketPath)

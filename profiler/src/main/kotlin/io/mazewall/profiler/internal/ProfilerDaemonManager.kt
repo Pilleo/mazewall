@@ -94,21 +94,7 @@ internal object ProfilerDaemonManager {
         val daemonProcess = pb.start()
         val daemonPid = daemonProcess.pid()
 
-        // Give it a tiny bit of time to check for immediate crashes (e.g. ClassNotFoundException)
-        @Suppress("MagicNumber")
-        Thread.sleep(1000)
-        if (!daemonProcess.isAlive) {
-            val exitCode = daemonProcess.exitValue()
-            val errorOutput = daemonProcess.errorStream.bufferedReader().readText()
-            val output = daemonProcess.inputStream.bufferedReader().readText()
-            throw IllegalStateException(
-                "ProfilerDaemon failed to start (exitCode=$exitCode).\n" +
-                    "STDOUT: $output\n" +
-                    "STDERR: $errorOutput",
-            )
-        }
-
-        LinuxNative.prctl(NativeConstants.PR_SET_PTRACER, daemonPid, 0, 0, 0)
+        val readyLatch = java.util.concurrent.CountDownLatch(1)
 
         Thread {
             daemonProcess.errorStream.bufferedReader().useLines { lines ->
@@ -125,14 +111,35 @@ internal object ProfilerDaemonManager {
         Thread {
             daemonProcess.inputStream.bufferedReader().useLines { lines ->
                 lines.forEach { line ->
-                    System.err.println("[DAEMON OUT] $line")
-                    System.err.flush()
+                    if (line == io.mazewall.profiler.engine.DAEMON_READY_SENTINEL) {
+                        readyLatch.countDown()
+                    } else {
+                        System.err.println("[DAEMON OUT] $line")
+                        System.err.flush()
+                    }
                 }
             }
         }.apply {
             isDaemon = true
             name = "profiler-daemon-stdout"
         }.start()
+
+        // Wait for sentinel with 30s timeout (generous for slow CI)
+        @Suppress("MagicNumber")
+        val ready = readyLatch.await(30, java.util.concurrent.TimeUnit.SECONDS)
+
+        if (!ready) {
+            val alive = daemonProcess.isAlive
+            val exitCode = if (!alive) daemonProcess.exitValue() else -1
+            if (alive) daemonProcess.destroyForcibly()
+
+            throw IllegalStateException(
+                "ProfilerDaemon failed to signal readiness within 30s (exitCode=$exitCode). " +
+                    "Check [DAEMON ERR] logs above.",
+            )
+        }
+
+        LinuxNative.prctl(NativeConstants.PR_SET_PTRACER, daemonPid, 0, 0, 0)
 
         val shutdownHook = Thread {
             daemonProcess.destroyForcibly()

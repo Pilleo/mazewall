@@ -43,6 +43,11 @@ internal class ProfilerDaemonEngine(
         val serverFd = transport.createServer(socketPath)
         state = ProfilerDaemonState.Listening(serverFd, socketPath)
         System.err.println("[DAEMON] Listening on $socketPath (fd=$serverFd)")
+
+        // Signal readiness to parent process via stdout sentinel
+        println(DAEMON_READY_SENTINEL)
+        System.out.flush()
+
         try {
             Arena.ofConfined().use { arena ->
                 state = ProfilerDaemonState.Active(serverFd)
