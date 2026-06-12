@@ -30,8 +30,6 @@ jobs:
                   gradle-version: wrapper
                   # Enable caching for both build results and configuration
                   cache-read-only: false
-                  # Use configuration cache if possible
-                  arguments: --configuration-cache
 
             - name: Grant Execute Permission for Gradlew
               run: chmod +x gradlew
