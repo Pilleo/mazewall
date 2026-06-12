@@ -31,6 +31,7 @@ class LandlockTest : BaseIntegrationTest() {
         val policy = Policy
             .builder()
             .base(Policy.NO_EXEC)
+            .allowMmapExec()
             .allowJvmClasspath()
             .allowFsRead(dir)
             .build()
@@ -45,6 +46,7 @@ class LandlockTest : BaseIntegrationTest() {
         val policy = Policy
             .builder()
             .base(Policy.NO_EXEC)
+            .allowMmapExec()
             .allowJvmClasspath()
             .allowFsRead(dir)
             .build()
@@ -68,6 +70,7 @@ class LandlockTest : BaseIntegrationTest() {
         val policy = Policy
             .builder()
             .base(Policy.NO_EXEC)
+            .allowMmapExec()
             .allowJvmClasspath()
             .allowFsWrite(dir)
             .build()
@@ -85,6 +88,7 @@ class LandlockTest : BaseIntegrationTest() {
         val policy = Policy
             .builder()
             .base(Policy.NO_EXEC)
+            .allowMmapExec()
             .allowJvmClasspath()
             .allowFsRead(dir)
             .build()
@@ -105,6 +109,7 @@ class LandlockTest : BaseIntegrationTest() {
         val policy = Policy
             .builder()
             .base(Policy.NO_EXEC)
+            .allowMmapExec()
             .allowJvmClasspath()
             .build()
         val executor = Executors.newSingleThreadExecutor()
@@ -128,6 +133,7 @@ class LandlockTest : BaseIntegrationTest() {
         val policy = Policy
             .builder()
             .base(Policy.NO_EXEC)
+            .allowMmapExec()
             .allowJvmClasspath()
             .allowFsRead(dir)
             .build()
@@ -164,6 +170,7 @@ class LandlockTest : BaseIntegrationTest() {
         val policy = Policy
             .builder()
             .base(Policy.NO_EXEC)
+            .allowMmapExec()
             .allowJvmClasspath()
             .allowFsWrite(file)
             .build()
@@ -181,6 +188,7 @@ class LandlockTest : BaseIntegrationTest() {
         val policy = Policy
             .builder()
             .base(Policy.NO_EXEC)
+            .allowMmapExec()
             .allowJvmClasspath()
             .allowFsRead(symlink)
             .build()
@@ -198,6 +206,7 @@ class LandlockTest : BaseIntegrationTest() {
         val policy = Policy
             .builder()
             .base(Policy.NO_EXEC)
+            .allowMmapExec()
             .allowFsRead(dir)
             .build()
         val executor = Executors.newSingleThreadExecutor()
@@ -211,6 +220,7 @@ class LandlockTest : BaseIntegrationTest() {
         val policy = Policy
             .builder()
             .base(Policy.NO_EXEC)
+            .allowMmapExec()
             .allowJvmClasspath()
             .allowFsRead(realFile)
             .build()
@@ -225,6 +235,7 @@ class LandlockTest : BaseIntegrationTest() {
         val policy = Policy
             .builder()
             .base(Policy.NO_EXEC)
+            .allowMmapExec()
             .allowJvmClasspath()
             .allowFsRead(allowed)
             .build()
@@ -246,6 +257,7 @@ class LandlockTest : BaseIntegrationTest() {
         val policy = Policy
             .builder()
             .base(Policy.NO_EXEC)
+            .allowMmapExec()
             .allowJvmClasspath()
             .allowFsRead(linkA)
             .build()
