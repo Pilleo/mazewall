@@ -177,6 +177,22 @@ log, build floor from it.
 - Together they provide the strongest possible evidence of correctness without
   requiring kernel-level tracing tools or privileged capabilities.
 
+### Implementation: `JvmFloorWorkload`
+
+The project now includes `io.mazewall.enforcer.JvmFloorWorkload`, a synthetic stress test designed to
+trigger the JVM subsystems that historically cause seccomp/Landlock issues:
+
+1. **JIT Compiler**: Compute-intensive hash loops to trigger C2 compilation and executable memory mappings.
+2. **GC Handshakes**: Large object allocations and manual `System.gc()` to force cross-thread coordination.
+3. **Loom/Concurrency**: Virtual thread yielding and carrier thread NUMA scheduling.
+4. **NIO/Networking**: Native selector initialization and socket stack loading.
+5. **OS Thread Coordination**: Thread creation, sleeps, and joining.
+
+You can run this workload via Gradle to profile it on any new platform:
+```bash
+./gradlew :enforcer:runJvmFloor
+```
+
 ### Open Implementation Questions
 
 1. **Who writes the stress harness?** This requires JVM internals expertise to trigger

@@ -82,6 +82,14 @@ tasks.register<JavaExec>("runScratch") {
     jvmArgs("--enable-native-access=ALL-UNNAMED")
 }
 
+tasks.register<JavaExec>("runJvmFloor") {
+    group = "verification"
+    description = "Runs the synthetic JVM floor workload to exercise JIT, GC, Loom, and NIO subsystems."
+    classpath = sourceSets["main"].runtimeClasspath
+    mainClass.set("io.mazewall.enforcer.JvmFloorWorkload")
+    jvmArgs("--enable-native-access=ALL-UNNAMED")
+}
+
 pitest {
     junit5PluginVersion.set("1.2.1")
 
