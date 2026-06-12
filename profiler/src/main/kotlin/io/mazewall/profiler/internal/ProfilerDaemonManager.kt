@@ -91,37 +91,29 @@ internal object ProfilerDaemonManager {
         logger.info("Spawning ProfilerDaemon: ${pbArgs.joinToString(" ")}")
 
         val pb = ProcessBuilder(pbArgs)
+        pb.redirectErrorStream(true)
         val daemonProcess = pb.start()
         val daemonPid = daemonProcess.pid()
 
         val readyLatch = java.util.concurrent.CountDownLatch(1)
 
         Thread {
-            daemonProcess.errorStream.bufferedReader().useLines { lines ->
-                lines.forEach { line ->
-                    System.err.println("[DAEMON ERR] $line")
+            try {
+                val reader = daemonProcess.inputStream.bufferedReader()
+                while (true) {
+                    val line = reader.readLine() ?: break
+                    if (line.contains(io.mazewall.profiler.engine.DAEMON_READY_SENTINEL)) {
+                        readyLatch.countDown()
+                    }
+                    System.err.println("[DAEMON] $line")
                     System.err.flush()
                 }
+            } catch (e: IOException) {
+                logger.log(java.util.logging.Level.FINE, "Daemon output reader stopped", e)
             }
         }.apply {
             isDaemon = true
-            name = "profiler-daemon-stderr"
-        }.start()
-
-        Thread {
-            daemonProcess.inputStream.bufferedReader().useLines { lines ->
-                lines.forEach { line ->
-                    if (line == io.mazewall.profiler.engine.DAEMON_READY_SENTINEL) {
-                        readyLatch.countDown()
-                    } else {
-                        System.err.println("[DAEMON OUT] $line")
-                        System.err.flush()
-                    }
-                }
-            }
-        }.apply {
-            isDaemon = true
-            name = "profiler-daemon-stdout"
+            name = "profiler-daemon-output"
         }.start()
 
         // Wait for sentinel with 30s timeout (generous for slow CI)
@@ -135,11 +127,14 @@ internal object ProfilerDaemonManager {
 
             throw IllegalStateException(
                 "ProfilerDaemon failed to signal readiness within 30s (exitCode=$exitCode). " +
-                    "Check [DAEMON ERR] logs above.",
+                    "Check [DAEMON] logs above.",
             )
         }
 
-        LinuxNative.prctl(NativeConstants.PR_SET_PTRACER, daemonPid, 0, 0, 0)
+        val prctlRes = LinuxNative.prctl(NativeConstants.PR_SET_PTRACER, daemonPid, 0, 0, 0)
+        if (prctlRes.returnValue < 0) {
+            logger.warning("prctl(PR_SET_PTRACER) failed with errno ${prctlRes.errno}. The daemon may not be able to read process memory if Yama ptrace_scope is restrictive.")
+        }
 
         val shutdownHook = Thread {
             daemonProcess.destroyForcibly()

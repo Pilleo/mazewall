@@ -6,7 +6,6 @@ import io.mazewall.Policy
 import io.mazewall.core.Syscall
 import io.mazewall.enforcer.ContainedExecutors
 import org.junit.jupiter.api.Test
-import kotlin.test.assertTrue
 
 class StackingIntegrationTest {
     fun testDepthLimit() {
@@ -50,26 +49,37 @@ class StackingIntegrationTest {
                 Syscall.UMASK,
             )
 
-        for (syscall in safeSyscalls.take(34)) {
-            val policy =
-                Policy
-                    .builder()
-                    .block(Syscall.IO_URING_SETUP, Syscall.IO_URING_ENTER)
-                    .block(syscall)
-                    .build()
-            ContainedExecutors.installOnCurrentThread(policy)
+        try {
+            // We try to install 34 filters. Kernel limit is 32.
+            for (syscall in safeSyscalls.take(34)) {
+                val policy =
+                    Policy
+                        .builder()
+                        .block(Syscall.IO_URING_SETUP, Syscall.IO_URING_ENTER)
+                        .block(syscall)
+                        .build()
+                ContainedExecutors.installOnCurrentThread(policy)
+            }
+            // If we reach here, the kernel didn't enforce the limit (or we miscounted)
+            System.err.println("[TEST ERROR] Successfully installed 34 filters, but limit is 32.")
+            System.exit(1)
+        } catch (e: Throwable) {
+            val msg = e.message ?: ""
+            if (msg.contains("32 seccomp filters")) {
+                // Success - we hit the limit as expected.
+                System.out.println("[TEST OK] Hit filter limit as expected: $msg")
+                return
+            }
+            System.err.println("[TEST ERROR] Caught unexpected exception during depth limit test: ${e.javaClass.name}: $msg")
+            e.printStackTrace(System.err)
+            System.exit(2)
         }
     }
 
     @Test
     @EnabledIfLinuxAndSupported
     fun `test filter stacking depth limit`() {
-        // We expect the isolated runner to FAIL because it exceeds the 32-filter limit.
-        // IsolatedProcessTester.runIsolatedTest/runIsolatedMethod throws IllegalStateException
-        // if the child process exit code is non-zero.
-        val ex = org.junit.jupiter.api.assertThrows<IllegalStateException> {
-            IsolatedProcessTester.runIsolatedMethod(this::class.java.name, "testDepthLimit")
-        }
-        assertTrue(ex.message!!.contains("Isolated test process failed with exit code 2"), "Expected exit code 2 due to IllegalStateException in child process, but got: ${ex.message}")
+        // Now the isolated method handles the exception itself and exits with 0 on success.
+        IsolatedProcessTester.runIsolatedMethod(this::class.java.name, "testDepthLimit")
     }
 }

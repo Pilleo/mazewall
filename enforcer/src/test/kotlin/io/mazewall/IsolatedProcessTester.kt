@@ -105,8 +105,9 @@ object IsolatedTestRunner {
             }
             System.exit(0)
         } catch (e: Exception) {
-            System.err.println("IsolatedTestRunner failed to execute $className.$methodName: ${e.message}")
-            e.printStackTrace(System.err)
+            val cause = if (e is java.lang.reflect.InvocationTargetException) e.cause ?: e else e
+            System.err.println("IsolatedTestRunner failed to execute $className.$methodName: ${cause.message}")
+            cause.printStackTrace(System.err)
             System.exit(2)
         }
     }

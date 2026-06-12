@@ -58,7 +58,6 @@ object SbobParser {
                     }
                 }.toSet()
 
-        @Suppress("UNCHECKED_CAST")
         val builder = Policy.builder().base(base as Policy<PolicyScope>)
 
         if (base.defaultAction == SeccompAction.ACT_ALLOW) {
@@ -94,6 +93,7 @@ object SbobParser {
         return result.map { it.toString() }.toSet()
     }
 
+    @Suppress("CyclomaticComplexMethod")
     private fun extractStringArrays(json: String): Map<String, Set<String>> {
         val result = mutableMapOf<String, Set<String>>()
         val tokenizer = JsonTokenizer(json)
@@ -121,6 +121,10 @@ object SbobParser {
                 tokenizer.skipWhitespace()
                 if (tokenizer.pos < json.length && json[tokenizer.pos] == ',') {
                     tokenizer.pos++
+                } else if (tokenizer.pos < json.length && json[tokenizer.pos] != '}') {
+                    // Prevent infinite loop on malformed JSON:
+                    // if we are not at a delimiter and no progress was made, consume one char.
+                    tokenizer.pos++
                 }
             }
         }
@@ -138,6 +142,7 @@ object SbobParser {
 
         fun parseString(): String? {
             if (pos >= json.length || json[pos] != '"') return null
+            val startPos = pos
             pos++
             val sb = StringBuilder()
             while (pos < json.length) {
@@ -153,6 +158,9 @@ object SbobParser {
                 }
                 pos++
             }
+            // If we reached the end without finding a closing quote,
+            // ensure we don't restart from the same position next time.
+            if (pos == startPos) pos++
             return null
         }
 

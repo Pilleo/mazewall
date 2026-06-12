@@ -28,18 +28,10 @@ jobs:
               uses: gradle/actions/setup-gradle@v4
               with:
                   gradle-version: wrapper
-                  cache-disabled: true
-
-            - name: Cache Gradle packages
-              uses: actions/cache@v4
-              with:
-                  path: |
-                      ~/.gradle/caches
-                      ~/.gradle/wrapper
-                      .gradle
-                  key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
-                  restore-keys: |
-                      ${{ runner.os }}-gradle-
+                  # Enable caching for both build results and configuration
+                  cache-read-only: false
+                  # Use configuration cache if possible
+                  arguments: --configuration-cache
 
             - name: Grant Execute Permission for Gradlew
               run: chmod +x gradlew
@@ -67,12 +59,36 @@ jobs:
                   podman compose build
                   podman save -o /tmp/mazewall-dev.tar mazewall-dev:latest
 
-            - name: Run tests in container
-              run: |
-                  podman compose -f infra/dev/compose.yml up -d
-                  podman compose -f infra/dev/compose.yml exec -T mazewall ./gradlew check --info
+            - name: Start Environment
+              run: podman compose -f infra/dev/compose.yml up -d
+
+            - name: Build & Compile
+              run: podman compose -f infra/dev/compose.yml exec -T mazewall ./gradlew classes --build-cache --configuration-cache
+              env:
+                  GRADLE_USER_HOME: /home/runner/.gradle
+
+            - name: Run Unit Tests
+              run: podman compose -f infra/dev/compose.yml exec -T mazewall ./gradlew test --build-cache --configuration-cache
               env:
                   IO_MAZEWALL_TEST: "true"
+                  GRADLE_USER_HOME: /home/runner/.gradle
+
+            - name: Run Integration Tests
+              run: podman compose -f infra/dev/compose.yml exec -T mazewall ./gradlew integrationTest --build-cache --configuration-cache
+              env:
+                  IO_MAZEWALL_TEST: "true"
+                  GRADLE_USER_HOME: /home/runner/.gradle
+
+            - name: Run Linting
+              if: success() || failure()
+              run: podman compose -f infra/dev/compose.yml exec -T mazewall ./gradlew detekt spotbugsMain spotbugsTest --build-cache --configuration-cache
+              env:
+                  GRADLE_USER_HOME: /home/runner/.gradle
+
+            - name: Run Coverage Verification
+              if: success() || failure()
+              run: podman compose -f infra/dev/compose.yml exec -T mazewall ./gradlew jacocoTestReport jacocoTestCoverageVerification --build-cache --configuration-cache
+              env:
                   GRADLE_USER_HOME: /home/runner/.gradle
 
             - name: Publish to GitHub Packages
@@ -103,5 +119,13 @@ jobs:
               uses: actions/upload-artifact@v4
               with:
                   name: junit-reports
-                  path: "**/build/reports/tests/test"
+                  path: "**/build/reports/tests/**"
+                  retention-days: 5
+
+            - name: Upload Coverage Report
+              if: always()
+              uses: actions/upload-artifact@v4
+              with:
+                  name: coverage-reports
+                  path: "**/build/reports/jacoco/**"
                   retention-days: 5
