@@ -83,6 +83,8 @@ dependencyCheck {
     analyzers {
         ossIndexEnabled = false
     }
+    // Skip checking demo projects since they are deliberately vulnerable
+    skipProjects = listOf(":demos:cli-demo", ":demos:vulnerable-web-app")
 }
 
 tasks.named("dependencyCheckAnalyze").configure {
