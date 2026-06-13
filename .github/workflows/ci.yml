@@ -35,9 +35,11 @@ jobs:
                   echo "DOCKER_HOST=unix://$XDG_RUNTIME_DIR/podman/podman.sock" >> $GITHUB_ENV
                   echo "MAZEWALL_CONTAINER_ENGINE=podman" >> $GITHUB_ENV
             - name: Run Build, Lint & Unit Tests
-              run: ./gradlew build --no-parallel
+              run: ./gradlew build -x jacocoTestCoverageVerification --no-parallel
             - name: Run Containerized Integration Tests
               run: ./scripts/run_containerized_tests.sh :enforcer:integrationTest :profiler:integrationTest
+            - name: Verify Test Coverage
+              run: ./gradlew jacocoTestCoverageVerification --no-parallel
             - name: Run PITest (Host Unit Tests Only)
               run: ./gradlew :enforcer:pitest -Dpitest.threads=2 --no-parallel
             - name: Run Vulnerability Exploitation Demo
