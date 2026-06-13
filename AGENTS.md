@@ -117,17 +117,18 @@ Thread-scoped seccomp is **not** an absolute security boundary against an attack
     *   **For Bug Fixes:** You MUST empirically reproduce the reported issue by writing a failing test case before applying any code changes.
     *   **For New Features:** Define the expected behavior with tests before implementing the logic.
 *   **Testing is Mandatory:** Any bugfix, behavioral change, or new parameter **must** be accompanied by an automated test.
-*   **Running Tests:** Always run using the nested-seccomp OCI profile via Testcontainers. Standard Gradle tasks will automatically provision the required environment:
-    - `./gradlew test` — Runs all tests, including containerized core tests and the web app demo.
-    - `./gradlew :enforcer:check` — Runs enforcer-specific checks.
+*   **Running Tests:** Always run using the nested-seccomp OCI profile via the provided Podman orchestration scripts. This ensures the correct kernel capabilities and seccomp filters are applied:
+    - `./gradlew test` — Runs host-side unit tests only (fast, no kernel interaction).
+    - `./scripts/run_tests.sh` — Runs the full integration test suite inside a container.
+    - `./scripts/run_vulnerable_app_demo.sh` — Executes the end-to-end CVE exploitation demo.
     - `./scripts/check_coverage.sh` — Verifies Jacoco thresholds.
     - `./scripts/lint.sh` — Runs static analysis (Detekt, SpotBugs, ktlint).
     ```bash
-    ./gradlew test
+    ./scripts/run_tests.sh
     ```
-*   **Module Check Tasks:** Verify your changes specifically pass module checks before pushing:
-    *   `:enforcer:check` (Landlock $\ge 65\%$, LinuxNative $\ge 78\%$, core classes $\ge 80\%$ Jacoco instruction coverage)
-    *   `:profiler:check` (Profiler $\ge 60\%$ Jacoco instruction coverage)
+*   **Module Check Tasks:** Verify your changes specifically pass module checks:
+    *   `:enforcer:check` (Landlock >= 65%, LinuxNative >= 78%, core classes >= 80% Jacoco instruction coverage)
+    *   `:profiler:check` (Profiler >= 60% Jacoco instruction coverage)
 
 ---
 
