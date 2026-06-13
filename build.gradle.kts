@@ -71,7 +71,27 @@ dependencies {
 tasks.withType<Test>().configureEach {
     useJUnitPlatform()
     if (project == rootProject) {
-        outputs.upToDateWhen { false }
+        // We run tests inside a Testcontainers container which spawns an inner Gradle build.
+        // To allow caching the root test task, we must explicitly declare all inputs that
+        // would cause the inner build to change its outcome, and all outputs that the inner
+        // build produces.
+
+        // Inputs: Sources of the subprojects being tested
+        inputs.files(fileTree("enforcer/src")).withPropertyName("enforcerSrc").withPathSensitivity(PathSensitivity.RELATIVE)
+        inputs.files(fileTree("profiler/src")).withPropertyName("profilerSrc").withPathSensitivity(PathSensitivity.RELATIVE)
+        inputs.files(fileTree("infra")).withPropertyName("infraFiles").withPathSensitivity(PathSensitivity.RELATIVE)
+
+        // Inputs: Build configuration and scripts
+        inputs.file("build.gradle.kts").withPropertyName("rootBuildKts").withPathSensitivity(PathSensitivity.NONE)
+        inputs.file("settings.gradle.kts").withPropertyName("settingsKts").withPathSensitivity(PathSensitivity.NONE)
+        inputs.file("gradle.properties").withPropertyName("gradleProps").withPathSensitivity(PathSensitivity.NONE)
+        inputs.file("gradle/libs.versions.toml").withPropertyName("libsVersions").withPathSensitivity(PathSensitivity.NONE)
+
+        // Outputs: Captured from the nested Gradle build to be restored from cache
+        outputs.file("enforcer/build/jacoco/integrationTest.exec").withPropertyName("enforcerJacocoExec").optional()
+        outputs.file("profiler/build/jacoco/integrationTest.exec").withPropertyName("profilerJacocoExec").optional()
+        outputs.dir("enforcer/build/test-results/integrationTest").withPropertyName("enforcerTestResults").optional()
+        outputs.dir("profiler/build/test-results/integrationTest").withPropertyName("profilerTestResults").optional()
     }
 }
 
