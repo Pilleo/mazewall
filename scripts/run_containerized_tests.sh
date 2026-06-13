@@ -29,4 +29,4 @@ podman run --rm \
     -e GITHUB_ACTIONS="${GITHUB_ACTIONS:-false}" \
     -w /workspace \
     mazewall-test-runner \
-    ./gradlew "$@" --no-daemon --stacktrace
+    ./gradlew "$@" --no-daemon --build-cache --stacktrace
