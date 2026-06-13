@@ -97,6 +97,7 @@ Background reading on the kernel mechanics and threat model:
 | **4** | [The Attacks We Actually Stop](docs/presentation/article4-attacks.md) | Log4Shell, fileless malware, io_uring bypass |
 | **5** | [Generating an SBoB for Java: What's Missing](docs/presentation/article5-graalvm.md) | Dynamic classloading, GraalVM AOT |
 | **6** | [Beyond the Thread: Isolates, WebAssembly, Tooling](docs/presentation/article6-isolates.md) | GraalVM Isolates, WASI, sidecar portals |
+| **7** | [Supervisor Proxy & Stacktrace Scoping](docs/internals/supervisor_proxy_design.md) | `USER_NOTIF`, FD Injection, `openat2` TOCTTOU |
 
 ---
 

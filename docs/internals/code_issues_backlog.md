@@ -281,9 +281,14 @@ Consequently, if a workload relies on `io_uring` for file access, `StraceProfile
 **Context:** Landlock is excellent for thread-scoped restrictions, but it operates on the host's view of the filesystem. If an exploit finds a bypass in Landlock or uses a filesystem action Landlock doesn't handle yet, the host files are physically present in the mount namespace. 
 **Needed:** Inspired by `bubblewrap`, implement a process-wide Tier 1 initialization option that uses `unshare(CLONE_NEWUSER | CLONE_NEWNS)` at JVM startup (before background threads spawn) to `pivot_root` into a `tmpfs` bind-mount jail. This provides an absolute physical backstop to Landlock by ensuring only necessary host directories are physically present in the sandbox's mount namespace.
 
-### 🔵 [Severity: ENHANCEMENT]: Supervisor Proxy Pattern (FD Injection)
-**Context:** Thread-scoped network or file containment currently relies on native syscalls (`open`, `socket`) that are vulnerable to SSRF, TOCTTOU symlink attacks, and file descriptor exhaustion. Even with Landlock, an attacker achieving ACE can still attempt to exploit race conditions or path resolution nuances.
-**Needed:** Inspired by `nsjail` LISTEN mode, expand the `USER_NOTIF` Daemon into an Authorization Proxy. Sandboxed threads would be denied `open` and `socket` syscalls entirely. Instead, they would send a high-level request to the trusted Daemon (e.g., "Open database connection for user X"). The Daemon validates the request outside the sandbox, opens the resource safely, and injects the raw File Descriptor back into the sandbox via `SECCOMP_USER_NOTIF_FLAG_CONTINUE`. This shifts the security boundary from complex kernel syscalls to a high-level, auditable IPC protocol.
+### 🔵 [Severity: ENHANCEMENT]: Supervisor Proxy Pattern (FD Injection) & Stacktrace Scoping
+**Target:** `docs/internals/supervisor_proxy_design.md`
+**Context:** Thread-scoped network or file containment currently relies on static kernel rules (BPF/Landlock). These cannot provide context-aware authorization (e.g., "only allow this specific Java method to open a database connection") and are vulnerable to path traversal or TOCTTOU attacks if the sandbox needs to access dynamic files.
+**Needed:** Implement a `USER_NOTIF` daemon that acts as an Authorization Proxy. The BPF filter handles fast-path I/O but punts rare, sensitive operations (like `execve` or connection pooling) to the proxy.
+1.  **Stacktrace Scoping:** The proxy maps the trapped thread's OS TID to a JVM `Thread` and inspects `getStackTrace()` to authorize the call. This is protected from spoofing by `mazewall`'s Tier 1 `NO_EXEC` memory baseline.
+2.  **FD Injection:** For file access, the proxy executes the open and injects the FD via `SECCOMP_IOCTL_NOTIF_ADDFD`.
+3.  **Confused Deputy Mitigation:** The proxy must NEVER use string manipulation for path resolution. It must strictly use `openat2` with the `RESOLVE_BENEATH` flag to ensure the kernel physically blocks TOCTTOU symlink escapes.
+For full architectural details, see `supervisor_proxy_design.md`.
 
 ### 🔵 [Severity: ENHANCEMENT]: Resource Containment via Cgroups v2
 **Context:** `mazewall` currently focuses on capability and access containment (Syscalls and Filesystem) but lacks hard native resource limits (Memory, CPU) per thread or sandbox. This leaves the JVM vulnerable to native memory leaks (via FFM) or thread-spawning denial-of-service (fork-bomb) attacks within a contained thread pool.
