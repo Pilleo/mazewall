@@ -4,6 +4,7 @@ import io.mazewall.LinuxNative
 import io.mazewall.Platform
 import io.mazewall.Policy
 import io.mazewall.Uncompiled
+import io.mazewall.core.SandboxedPath
 import io.mazewall.core.Syscall
 import io.mazewall.ffi.Layouts
 import io.mazewall.ffi.NativeConstants
@@ -154,13 +155,14 @@ object Landlock {
      * Queries the kernel for the highest Landlock ABI version it supports.
      */
     fun getAbiVersion(): Int {
-        val abiResult =
+        val abiResult = LinuxNative.withTransaction {
             LinuxNative.syscall(
                 NativeConstants.LANDLOCK_CREATE_RULESET_NR,
                 0L,
                 0L,
                 NativeConstants.LANDLOCK_CREATE_RULESET_VERSION,
             )
+        }
         return when (abiResult) {
             is LinuxNative.SyscallResult.Success -> abiResult.value.toInt()
             is LinuxNative.SyscallResult.Error -> 0
@@ -243,7 +245,9 @@ object Landlock {
         allowedAccess: Long,
     ) {
         val pathSegment = arena.allocateFrom(path)
-        val fdResult = LinuxNative.getFileSystem().open(pathSegment, NativeConstants.O_PATH or NativeConstants.O_CLOEXEC)
+        val fdResult = LinuxNative.withTransaction {
+            LinuxNative.getFileSystem().open(pathSegment, NativeConstants.O_PATH or NativeConstants.O_CLOEXEC)
+        }
         val pathFd =
             when (fdResult) {
                 is LinuxNative.SyscallResult.Success -> fdResult.asFd()
@@ -266,12 +270,14 @@ object Landlock {
     context(arena: Arena)
     private fun addRule(
         rulesetFd: LinuxNative.FileDescriptor,
-        path: String,
+        path: SandboxedPath,
         allowedAccess: Long,
     ) {
-        val resolvedPath = resolveCanonicalPath(path)
+        val resolvedPath = path.value
         val openFlags = NativeConstants.O_PATH or NativeConstants.O_CLOEXEC or NativeConstants.O_NOFOLLOW
-        val initialResult = LinuxNative.getFileSystem().open(arena.allocateFrom(resolvedPath), openFlags)
+        val initialResult = LinuxNative.withTransaction {
+            LinuxNative.getFileSystem().open(arena.allocateFrom(resolvedPath), openFlags)
+        }
 
         val (fdResult, isFallback) = handleInitialOpenFailure(initialResult, resolvedPath, openFlags)
 
@@ -279,26 +285,18 @@ object Landlock {
             when (fdResult) {
                 is LinuxNative.SyscallResult.Success -> fdResult.asFd()
                 is LinuxNative.SyscallResult.Error -> {
-                    logOpenFailure(path, fdResult.errno)
+                    logOpenFailure(resolvedPath, fdResult.errno)
                     return
                 }
             }
 
         try {
             val finalAccess = calculateFinalAccess(allowedAccess, isFallback, resolvedPath)
-            addRuleToRulesetAndVerify(rulesetFd, pathFd, finalAccess, path)
+            addRuleToRulesetAndVerify(rulesetFd, pathFd, finalAccess, resolvedPath)
         } finally {
             LinuxNative.getFileSystem().close(pathFd)
         }
     }
-
-    private fun resolveCanonicalPath(path: String): String =
-        try {
-            File(path).canonicalPath
-        } catch (e: java.io.IOException) {
-            logger.log(java.util.logging.Level.FINE, "Failed to canonicalize path $path: ${e.message}", e)
-            path
-        }
 
     context(arena: Arena)
     private fun handleInitialOpenFailure(
@@ -309,7 +307,10 @@ object Landlock {
         if (res is LinuxNative.SyscallResult.Error && res.errno == 2) { // ENOENT
             val parentPath = File(resolvedPath).parent ?: "/"
             logger.info("Path $resolvedPath does not exist, falling back to parent directory: $parentPath")
-            return LinuxNative.getFileSystem().open(arena.allocateFrom(parentPath), flags) to true
+            val openResult = LinuxNative.withTransaction {
+                LinuxNative.getFileSystem().open(arena.allocateFrom(parentPath), flags)
+            }
+            return openResult to true
         }
         return res to false
     }
@@ -355,10 +356,12 @@ object Landlock {
     }
 
     internal fun enforceRuleset(rulesetFd: LinuxNative.FileDescriptor) {
-        val prctlResult = LinuxNative.getProcess().prctl(NativeConstants.PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0)
+        val (prctlResult, restrictResult) = LinuxNative.withTransaction {
+            val p = LinuxNative.getProcess().prctl(NativeConstants.PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0)
+            val r = LinuxNative.syscall(NativeConstants.LANDLOCK_RESTRICT_SELF_NR, rulesetFd.value.toLong(), 0, MemorySegment.NULL, 0)
+            p to r
+        }
         prctlResult.getOrThrow("prctl(PR_SET_NO_NEW_PRIVS)")
-
-        val restrictResult = LinuxNative.syscall(NativeConstants.LANDLOCK_RESTRICT_SELF_NR, rulesetFd.value.toLong(), 0, MemorySegment.NULL, 0)
         restrictResult.getOrThrow("landlock_restrict_self")
     }
 
@@ -417,7 +420,9 @@ object Landlock {
         rulesetAttr.set(ValueLayout.JAVA_LONG, Layouts.LANDLOCK_RULESET_ATTR_FS_OFFSET, accessMaskFs)
         rulesetAttr.set(ValueLayout.JAVA_LONG, Layouts.LANDLOCK_RULESET_ATTR_NET_OFFSET, 0L)
         val size = if (abi >= 4) Layouts.LANDLOCK_RULESET_ATTR.byteSize() else 8L
-        return LinuxNative.syscall(NativeConstants.LANDLOCK_CREATE_RULESET_NR, rulesetAttr, size, MemorySegment.NULL)
+        return LinuxNative.withTransaction {
+            LinuxNative.syscall(NativeConstants.LANDLOCK_CREATE_RULESET_NR, rulesetAttr, size, MemorySegment.NULL)
+        }
     }
 
     context(arena: Arena)
@@ -429,7 +434,9 @@ object Landlock {
         val pathAttr = arena.allocate(Layouts.LANDLOCK_PATH_BENEATH_ATTR)
         pathAttr.set(ValueLayout.JAVA_LONG, Layouts.LANDLOCK_PATH_BENEATH_ATTR_ACCESS_OFFSET, accessMask)
         pathAttr.set(ValueLayout.JAVA_INT, Layouts.LANDLOCK_PATH_BENEATH_ATTR_FD_OFFSET, pathFd.value)
-        return LinuxNative.syscall(NativeConstants.LANDLOCK_ADD_RULE_NR, rulesetFd.value.toLong(), NativeConstants.LANDLOCK_RULE_PATH_BENEATH.toLong(), pathAttr, 0)
+        return LinuxNative.withTransaction {
+            LinuxNative.syscall(NativeConstants.LANDLOCK_ADD_RULE_NR, rulesetFd.value.toLong(), NativeConstants.LANDLOCK_RULE_PATH_BENEATH.toLong(), pathAttr, 0)
+        }
     }
 }
 

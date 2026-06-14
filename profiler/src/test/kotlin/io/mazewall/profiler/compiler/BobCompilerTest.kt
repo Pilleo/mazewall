@@ -49,9 +49,9 @@ class BobCompilerTest {
         assertTrue(policy.isSyscallAllowed(Syscall.OPENAT), "OPENAT should be unrestricted")
 
         // Verify fs paths
-        assertTrue(policy.allowedFsReadPaths.contains("/etc/hostname"), "Should contain read path")
-        assertTrue(policy.allowedFsWritePaths.contains("/tmp/write-test.txt"), "Should contain write path")
-        assertTrue(policy.allowedFsWritePaths.contains("/tmp/new-dir"), "Should contain write path")
+        assertTrue(policy.allowedFsReadPaths.any { it.value == "/etc/hostname" }, "Should contain read path")
+        assertTrue(policy.allowedFsWritePaths.any { it.value == "/tmp/write-test.txt" }, "Should contain write path")
+        assertTrue(policy.allowedFsWritePaths.any { it.value == "/tmp/new-dir" }, "Should contain write path")
 
         // Compile to DSL
         val dsl = bob.toDsl("Policy.PURE_COMPUTE_UNSAFE", Policy.PURE_COMPUTE_UNSAFE)

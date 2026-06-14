@@ -13,7 +13,9 @@ import kotlin.test.assertTrue
 class LinuxNativeTest : BaseIntegrationTest() {
     @Test
     fun testPrctlGetSeccomp() {
-        val result = LinuxNative.prctl(NativeConstants.PR_GET_SECCOMP, 0, 0, 0, 0)
+        val result = LinuxNative.withTransaction {
+            LinuxNative.prctl(NativeConstants.PR_GET_SECCOMP, 0, 0, 0, 0)
+        }
         // Usually returns 0 or 2, unless error
         assertTrue(result is LinuxNative.SyscallResult.Success && result.value >= 0)
     }
@@ -22,7 +24,9 @@ class LinuxNativeTest : BaseIntegrationTest() {
     fun testToLongError() {
         assertFailsWith<IllegalArgumentException> {
             // String is not a supported type for toLong()
-            LinuxNative.prctl(NativeConstants.PR_SET_NAME, "string-not-allowed")
+            LinuxNative.withTransaction {
+                LinuxNative.prctl(NativeConstants.PR_SET_NAME, "string-not-allowed")
+            }
         }
     }
 
@@ -50,11 +54,15 @@ class LinuxNativeTest : BaseIntegrationTest() {
                     .createTempFile("native-test", ".txt")
             val path = arena.allocateFrom(tempFile.toString())
 
-            val openResult = LinuxNative.open(path, 0) // O_RDONLY
+            val openResult = LinuxNative.withTransaction {
+                LinuxNative.open(path, 0) // O_RDONLY
+            }
             val fd = openResult.getFdOrThrow("open")
 
             val buffer = arena.allocate(1024)
-            val readResult = LinuxNative.read(fd, buffer, 1024)
+            val readResult = LinuxNative.withTransaction {
+                LinuxNative.read(fd, buffer, 1024)
+            }
             assertTrue(readResult is LinuxNative.SyscallResult.Success)
 
             val closeResult = LinuxNative.close(fd)
@@ -83,17 +91,23 @@ class LinuxNativeTest : BaseIntegrationTest() {
     @Test
     fun testSocketSyscalls() {
         // test socket()
-        val socketResult = LinuxNative.socket(2, 1, 0) // AF_INET, SOCK_STREAM
+        val socketResult = LinuxNative.withTransaction {
+            LinuxNative.socket(2, 1, 0) // AF_INET, SOCK_STREAM
+        }
         if (socketResult is LinuxNative.SyscallResult.Success) {
             val fd = socketResult.asFd()
 
             // test bind (to a random port)
             Arena.ofConfined().use { arena ->
                 val addr = arena.allocate(16) // struct sockaddr_in
-                LinuxNative.bind(fd, addr, 16)
+                LinuxNative.withTransaction {
+                    LinuxNative.bind(fd, addr, 16)
+                }
             }
 
-            LinuxNative.listen(fd, 5)
+            LinuxNative.withTransaction {
+                LinuxNative.listen(fd, 5)
+            }
             LinuxNative.close(fd)
         }
     }
@@ -102,7 +116,9 @@ class LinuxNativeTest : BaseIntegrationTest() {
     fun testSocketpair() {
         Arena.ofConfined().use { arena ->
             val fds = arena.allocate(ValueLayout.JAVA_INT, 2)
-            val result = LinuxNative.socketpair(1, 1, 0, fds) // AF_UNIX, SOCK_STREAM
+            val result = LinuxNative.withTransaction {
+                LinuxNative.socketpair(1, 1, 0, fds) // AF_UNIX, SOCK_STREAM
+            }
             if (result is LinuxNative.SyscallResult.Success) {
                 LinuxNative.close(LinuxNative.FileDescriptor(fds.get(ValueLayout.JAVA_INT, 0)))
                 LinuxNative.close(LinuxNative.FileDescriptor(fds.get(ValueLayout.JAVA_INT, 4)))
@@ -127,14 +143,16 @@ class LinuxNativeTest : BaseIntegrationTest() {
             localIovec.set(ValueLayout.JAVA_LONG, 8, 10)
 
             val result =
-                LinuxNative.processVmReadv(
-                    ProcessHandle.current().pid().toInt(),
-                    localIovec,
-                    1,
-                    remoteIovec,
-                    1,
-                    0, // flags
-                )
+                LinuxNative.withTransaction {
+                    LinuxNative.processVmReadv(
+                        ProcessHandle.current().pid().toInt(),
+                        localIovec,
+                        1,
+                        remoteIovec,
+                        1,
+                        0, // flags
+                    )
+                }
         }
     }
 
@@ -145,10 +163,14 @@ class LinuxNativeTest : BaseIntegrationTest() {
                 java.nio.file.Files
                     .createTempFile("fcntl-test", ".txt")
             val path = arena.allocateFrom(tempFile.toString())
-            val openResult = LinuxNative.open(path, 0)
+            val openResult = LinuxNative.withTransaction {
+                LinuxNative.open(path, 0)
+            }
             val fd = openResult.getFdOrThrow("open")
 
-            val flags = LinuxNative.fcntl(fd, 3, 0) // F_GETFL
+            val flags = LinuxNative.withTransaction {
+                LinuxNative.fcntl(fd, 3, 0) // F_GETFL
+            }
             assertTrue(flags is LinuxNative.SyscallResult.Success)
 
             LinuxNative.close(fd)
@@ -161,7 +183,9 @@ class LinuxNativeTest : BaseIntegrationTest() {
         Arena.ofConfined().use { arena ->
             val path = arena.allocateFrom("/proc/self/exe")
             val buffer = arena.allocate(1024)
-            val result = LinuxNative.readlink(path, buffer, 1024)
+            val result = LinuxNative.withTransaction {
+                LinuxNative.readlink(path, buffer, 1024)
+            }
             assertTrue(result is LinuxNative.SyscallResult.Success)
         }
     }
@@ -174,7 +198,9 @@ class LinuxNativeTest : BaseIntegrationTest() {
             pollFd.set(ValueLayout.JAVA_SHORT, 4L, NativeConstants.POLLIN.toShort())
             pollFd.set(ValueLayout.JAVA_SHORT, 6L, 0.toShort())
 
-            val result = LinuxNative.poll(pollFd, 1L, 0) // 0 timeout
+            val result = LinuxNative.withTransaction {
+                LinuxNative.poll(pollFd, 1L, 0) // 0 timeout
+            }
             assertTrue(result is LinuxNative.SyscallResult.Success)
         }
     }

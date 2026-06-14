@@ -90,15 +90,15 @@ object IterativeProfiler {
     ): Policy<*, Uncompiled> {
         @Suppress("UNCHECKED_CAST")
         val builder = Policy.threadLocalBuilder().base(currentPolicy as Policy<PolicyScope.ThreadLocalOnly, *>)
-        val isCurrentlyReadAllowed = currentPolicy.allowedFsReadPaths.any { path.startsWith(it) }
+        val isCurrentlyReadAllowed = currentPolicy.allowedFsReadPaths.any { path.startsWith(it.value) }
 
         if (isCurrentlyReadAllowed) {
             // If read is already allowed but we still got denied, it's a write attempt.
-            builder.allowFsWrite(path)
+            builder.allowFsWrite(io.mazewall.core.SandboxedPath.of(path, allowNonExistent = true))
         } else {
             // First attempt: grant read access only.
             // If it was a write attempt, the next run will hit the `isCurrentlyReadAllowed` branch and add write.
-            builder.allowFsRead(path)
+            builder.allowFsRead(io.mazewall.core.SandboxedPath.of(path, allowNonExistent = true))
         }
         return builder.build()
     }

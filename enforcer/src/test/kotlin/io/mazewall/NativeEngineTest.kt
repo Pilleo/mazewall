@@ -18,7 +18,7 @@ class NativeEngineTest {
 
         LinuxNative.setEngine(mock)
 
-        val result = LinuxNative.prctl(0)
+        val result = LinuxNative.withTransaction { LinuxNative.prctl(0) }
         assertEquals(42L, result.getOrThrow("test"))
     }
 
@@ -29,7 +29,7 @@ class NativeEngineTest {
 
         LinuxNative.setEngine(mock)
 
-        val result = LinuxNative.syscall(1L)
+        val result = LinuxNative.withTransaction { LinuxNative.syscall(1L) }
         assertEquals(13, (result as LinuxNative.SyscallResult.Error).errno)
     }
 }

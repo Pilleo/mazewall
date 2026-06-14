@@ -1,5 +1,6 @@
 package io.mazewall.enforcer
 
+import io.mazewall.core.SandboxedPath
 import io.mazewall.core.SeccompAction
 import io.mazewall.core.Syscall
 import java.util.concurrent.atomic.AtomicBoolean
@@ -28,8 +29,8 @@ internal object ContainerStateRegistry {
     var threadAllowsUnsafePrctl by threadLocal { true }
     var threadAllowedSyscalls by threadLocal<Set<Syscall>?> { null }
     var filterDepth by threadLocal { 0 }
-    var threadLandlockAppliedReads by threadLocal<Set<String>?> { null }
-    var threadLandlockAppliedWrites by threadLocal<Set<String>?> { null }
+    var threadLandlockAppliedReads by threadLocal<Set<SandboxedPath>?> { null }
+    var threadLandlockAppliedWrites by threadLocal<Set<SandboxedPath>?> { null }
 
     val PROCESS_SYSCALL_ACTIONS: MutableMap<Syscall, SeccompAction> = java.util.concurrent.ConcurrentHashMap()
     val PROCESS_DEFAULT_ACTION = AtomicReference(SeccompAction.ACT_ALLOW)

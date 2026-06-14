@@ -261,7 +261,9 @@ class MmapProtectionTest : BaseIntegrationTest() {
                         val arch = io.mazewall.core.Arch
                             .current()
                         val nr = arch.pkeyMprotect
-                        val res = io.mazewall.LinuxNative.syscall(nr.toLong(), addr.address(), 4096L, (PROT_READ or PROT_EXEC).toLong(), 0L)
+                        val res = io.mazewall.LinuxNative.withTransaction {
+                            io.mazewall.LinuxNative.syscall(nr.toLong(), addr.address(), 4096L, (PROT_READ or PROT_EXEC).toLong(), 0L)
+                        }
 
                         when (res) {
                             is io.mazewall.LinuxNative.SyscallResult.Error -> {

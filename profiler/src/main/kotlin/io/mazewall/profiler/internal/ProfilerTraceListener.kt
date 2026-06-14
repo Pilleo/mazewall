@@ -152,7 +152,7 @@ internal class ProfilerTraceListener(
         ackBuf: MemorySegment,
     ) {
         if (pid != 0) {
-            LinuxNative.write(socketFd, ackBuf, 1)
+            LinuxNative.withTransaction { LinuxNative.write(socketFd, ackBuf, 1) }
         }
     }
 }

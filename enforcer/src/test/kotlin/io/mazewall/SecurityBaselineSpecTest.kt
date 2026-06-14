@@ -34,7 +34,8 @@ class SecurityBaselineSpecTest {
             policy.enforceLandlock shouldBe true
             val javaHome = System.getProperty("java.home")
             if (!javaHome.isNullOrEmpty()) {
-                policy.allowedFsReadPaths.shouldContain(javaHome)
+                val normalizedHome = java.nio.file.Paths.get(javaHome).toAbsolutePath().normalize().toString()
+                policy.allowedFsReadPaths.map { it.value }.shouldContain(normalizedHome)
             }
         }
     }

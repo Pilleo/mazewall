@@ -33,14 +33,18 @@ object Platform {
             isSeccompSanityCheckPassing() &&
             isArchitectureSupported()
 
-    private fun hasKernelSeccompSupport(): Boolean = LinuxNative.prctl(NativeConstants.PR_GET_SECCOMP, 0, 0, 0, 0) is LinuxNative.SyscallResult.Success
+    private fun hasKernelSeccompSupport(): Boolean = LinuxNative.withTransaction {
+        LinuxNative.prctl(NativeConstants.PR_GET_SECCOMP, 0, 0, 0, 0)
+    } is LinuxNative.SyscallResult.Success
 
     private fun isSeccompSanityCheckPassing(): Boolean {
         // Bogus Sanity Check: Ensure the kernel actively enforces seccomp.
         // We call prctl(PR_SET_SECCOMP) with an invalid mode (-1).
         // A healthy kernel should return -1 and set errno to EINVAL (22).
         // Some container environments or broken kernels might silently return 0 or a different error.
-        val bogusCheck = LinuxNative.prctl(NativeConstants.PR_SET_SECCOMP, -1L, 0L, 0, 0)
+        val bogusCheck = LinuxNative.withTransaction {
+            LinuxNative.prctl(NativeConstants.PR_SET_SECCOMP, -1L, 0L, 0, 0)
+        }
         val passed = bogusCheck is LinuxNative.SyscallResult.Error && bogusCheck.errno == ERRNO_EINVAL
         if (!passed) {
             val (ret, errno) =
@@ -166,7 +170,9 @@ object Platform {
 
         if (isLinux) {
             try {
-                val nnpVal = LinuxNative.prctl(NativeConstants.PR_GET_NO_NEW_PRIVS, 0, 0, 0, 0)
+                val nnpVal = LinuxNative.withTransaction {
+                    LinuxNative.prctl(NativeConstants.PR_GET_NO_NEW_PRIVS, 0, 0, 0, 0)
+                }
                 if (nnpVal is LinuxNative.SyscallResult.Success) {
                     isNoNewPrivsEnabled = nnpVal.value == 1L
                 }
@@ -174,7 +180,9 @@ object Platform {
             }
 
             try {
-                val seccompVal = LinuxNative.prctl(NativeConstants.PR_GET_SECCOMP, 0, 0, 0, 0)
+                val seccompVal = LinuxNative.withTransaction {
+                    LinuxNative.prctl(NativeConstants.PR_GET_SECCOMP, 0, 0, 0, 0)
+                }
                 seccompMode = when (seccompVal) {
                     is LinuxNative.SyscallResult.Error -> SeccompMode.Error(seccompVal.errno)
                     is LinuxNative.SyscallResult.Success -> {

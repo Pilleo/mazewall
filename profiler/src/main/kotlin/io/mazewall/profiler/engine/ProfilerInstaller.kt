@@ -162,7 +162,9 @@ internal class ProfilerInstallerSession(
         // Wait for ACK byte from daemon
         val ackBuf = arena.allocate(1)
         while (true) {
-            val res = LinuxNative.getMemory().read(socketFd, ackBuf, 1)
+            val res = LinuxNative.withTransaction {
+                LinuxNative.getMemory().read(socketFd, ackBuf, 1)
+            }
             when (res) {
                 is LinuxNative.SyscallResult.Success -> {
                     if (res.value == 1L && ackBuf.get(ValueLayout.JAVA_BYTE, 0) == 0xAC.toByte()) {
@@ -181,7 +183,9 @@ internal class ProfilerInstallerSession(
     }
 
     private fun ensureNoNewPrivs() {
-        val r = LinuxNative.getProcess().prctl(NativeConstants.PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0)
+        val r = LinuxNative.withTransaction {
+            LinuxNative.getProcess().prctl(NativeConstants.PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0)
+        }
         r.getOrThrow("prctl(PR_SET_NO_NEW_PRIVS)")
     }
 
@@ -191,13 +195,14 @@ internal class ProfilerInstallerSession(
     ): LinuxNative.FileDescriptor {
         val arch = Arch.current()
         val prog = LinuxNative.getMemory().newSockFProg(filters)
-        val r =
+        val r = LinuxNative.withTransaction {
             LinuxNative.syscall(
                 arch.seccompSyscallNumber.toLong(),
                 NativeConstants.SECCOMP_SET_MODE_FILTER.toLong(),
                 NativeConstants.SECCOMP_FILTER_FLAG_NEW_LISTENER,
                 prog,
             )
+        }
 
         return r.getFdOrThrow("seccomp(SECCOMP_FILTER_FLAG_NEW_LISTENER)")
     }

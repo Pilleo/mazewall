@@ -3,6 +3,7 @@ package io.mazewall.enforcer
 import io.mazewall.BaseIntegrationTest
 import io.mazewall.IsolatedProcessTester
 import io.mazewall.Policy
+import io.mazewall.compile
 import io.mazewall.PolicyScope
 import io.mazewall.core.Syscall
 import org.junit.jupiter.api.Test

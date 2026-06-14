@@ -79,7 +79,9 @@ class LinuxNativeCoverageTest {
         mock.syscallResult = LinuxNative.SyscallResult.Success(444)
         LinuxNative.setEngine(mock)
 
-        val res = LinuxNative.syscall4(1, 2, 3, 4, 5)
+        val res = LinuxNative.withTransaction {
+            LinuxNative.syscall4(1, 2, 3, 4, 5)
+        }
         assertEquals(444L, res.getOrThrow("test"))
     }
 
@@ -87,12 +89,16 @@ class LinuxNativeCoverageTest {
     fun `test toLong branches`() {
         // We use LinuxNative methods to test the actual implementation of toLong() in RealNativeEngine
         // null branch
-        LinuxNative.syscall(-1, null, null, null, null, null, null)
+        LinuxNative.withTransaction {
+            LinuxNative.syscall(-1, null, null, null, null, null, null)
+        }
 
         // MemorySegment branch
         Arena.ofConfined().use { arena ->
             val seg = arena.allocate(8)
-            LinuxNative.syscall(-1, seg, 1, 2, 3, 4, 5)
+            LinuxNative.withTransaction {
+                LinuxNative.syscall(-1, seg, 1, 2, 3, 4, 5)
+            }
         }
     }
 
@@ -100,7 +106,9 @@ class LinuxNativeCoverageTest {
     fun `test toLong failure path`() {
         assertFailsWith<IllegalArgumentException> {
             // Use a type that is not Number or MemorySegment
-            LinuxNative.syscall(-1, Any())
+            LinuxNative.withTransaction {
+                LinuxNative.syscall(-1, Any())
+            }
         }
     }
 
@@ -138,20 +146,32 @@ class LinuxNativeCoverageTest {
             val fd = LinuxNative.FileDescriptor(1)
 
             mock.acceptResult = LinuxNative.SyscallResult.Success(10)
-            assertEquals(10L, LinuxNative.accept(fd, seg, seg).getOrThrow("test"))
+            assertEquals(10L, LinuxNative.withTransaction {
+                LinuxNative.accept(fd, seg, seg)
+            }.getOrThrow("test"))
 
             mock.sendmsgResult = LinuxNative.SyscallResult.Success(20)
-            assertEquals(20L, LinuxNative.sendmsg(fd, seg, 0).getOrThrow("test"))
+            assertEquals(20L, LinuxNative.withTransaction {
+                LinuxNative.sendmsg(fd, seg, 0)
+            }.getOrThrow("test"))
 
             mock.recvmsgResult = LinuxNative.SyscallResult.Success(30)
-            assertEquals(30L, LinuxNative.recvmsg(fd, seg, 0).getOrThrow("test"))
+            assertEquals(30L, LinuxNative.withTransaction {
+                LinuxNative.recvmsg(fd, seg, 0)
+            }.getOrThrow("test"))
 
             mock.ioctlResult = LinuxNative.SyscallResult.Success(40)
-            assertEquals(40L, LinuxNative.ioctl(fd, 2L, seg).getOrThrow("test"))
-            assertEquals(40L, LinuxNative.ioctl(fd, 2L, 3L).getOrThrow("test"))
+            assertEquals(40L, LinuxNative.withTransaction {
+                LinuxNative.ioctl(fd, 2L, seg)
+            }.getOrThrow("test"))
+            assertEquals(40L, LinuxNative.withTransaction {
+                LinuxNative.ioctl(fd, 2L, 3L)
+            }.getOrThrow("test"))
 
             mock.recvResult = LinuxNative.SyscallResult.Success(50)
-            assertEquals(50L, LinuxNative.recv(fd, seg, 8L, 0).getOrThrow("test"))
+            assertEquals(50L, LinuxNative.withTransaction {
+                LinuxNative.recv(fd, seg, 8L, 0)
+            }.getOrThrow("test"))
 
             assertEquals(1234, LinuxNative.gettid())
         }

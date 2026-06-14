@@ -4,6 +4,8 @@ import io.mazewall.Platform
 import io.mazewall.Policy
 import io.mazewall.PolicyScope
 import io.mazewall.Uncompiled
+import io.mazewall.compile
+import io.mazewall.core.SandboxedPath
 import io.mazewall.core.SeccompAction
 import io.mazewall.core.Syscall
 import io.mazewall.enforcer.internal.ContainedExecutorWrapper
@@ -89,7 +91,7 @@ object ContainedExecutors {
 
     private fun installSeccompFilter(
         processWide: Boolean,
-        combinedPolicy: Policy<*, *>,
+        combinedPolicy: Policy<*, Uncompiled>,
     ) {
         synchronized(processLock) {
             val state = resolveCurrentState()
@@ -140,24 +142,16 @@ object ContainedExecutors {
                 policy.isSyscallAllowed(Syscall.IO_URING_SETUP)
 
     private fun isPathSubset(
-        parentPaths: Set<String>,
-        childPaths: Set<String>,
+        parentPaths: Set<SandboxedPath>,
+        childPaths: Set<SandboxedPath>,
     ): Boolean {
         if (childPaths.isEmpty()) return true
-        val parents = parentPaths.map {
-            java.nio.file.Paths
-            .get(it)
-            .toAbsolutePath()
-            .normalize()
-        }
+        val parents = parentPaths.map { java.nio.file.Paths.get(it.value) }
         return parents.isNotEmpty() &&
-            childPaths.all { childStr ->
-                val child = java.nio.file.Paths
-                    .get(childStr)
-                    .toAbsolutePath()
-                    .normalize()
-                parents.any { parent -> child.startsWith(parent) }
-            }
+                childPaths.all { childPath ->
+                    val child = java.nio.file.Paths.get(childPath.value)
+                    parents.any { parent -> child.startsWith(parent) }
+                }
     }
 
     private fun handleUnsupportedPlatform() {
@@ -215,7 +209,7 @@ object ContainedExecutors {
 
     private fun applyBpfFilter(
         processWide: Boolean,
-        toInstall: Policy<*, *>,
+        toInstall: Policy<*, Uncompiled>,
         newBlocks: Map<Syscall, SeccompAction>,
         newDefaultAction: SeccompAction,
     ) {
@@ -234,7 +228,7 @@ object ContainedExecutors {
     private fun updateProcessState(
         newBlocks: Map<Syscall, SeccompAction>,
         newDefaultAction: SeccompAction,
-        toInstall: Policy<*, *>,
+        toInstall: Policy<*, Uncompiled>,
     ) {
         val currentActions = ContainerStateRegistry.PROCESS_SYSCALL_ACTIONS
         for ((sys, action) in newBlocks) {
@@ -265,7 +259,7 @@ object ContainedExecutors {
     private fun updateThreadState(
         newBlocks: Map<Syscall, SeccompAction>,
         newDefaultAction: SeccompAction,
-        toInstall: Policy<*, *>,
+        toInstall: Policy<*, Uncompiled>,
     ) {
         val currentActions = ContainerStateRegistry.threadSyscallActions
         val mergedActions = currentActions.toMutableMap()

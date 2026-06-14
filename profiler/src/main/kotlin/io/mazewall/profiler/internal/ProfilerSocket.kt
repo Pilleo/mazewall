@@ -30,14 +30,24 @@ internal object ProfilerSocket {
 
             var lastErrno = 0
             for (retry in 0 until maxRetries) {
-                val fdRes = LinuxNative.socket(AF_UNIX, SOCK_STREAM, 0)
-                val fd = fdRes.getFdOrThrow("socket(AF_UNIX)")
-                val connRes = LinuxNative.connect(fd, addr, ADDR_UN_SIZE)
-                if (connRes is LinuxNative.SyscallResult.Success) {
-                    return fd.value
+                val (fdRes, connRes) = LinuxNative.withTransaction {
+                    val r1 = LinuxNative.socket(AF_UNIX, SOCK_STREAM, 0)
+                    if (r1 is LinuxNative.SyscallResult.Error) return@withTransaction r1 to r1
+                    val fd = r1.getFdOrThrow("socket(AF_UNIX)")
+                    val r2 = LinuxNative.connect(fd, addr, ADDR_UN_SIZE)
+                    r1 to r2
                 }
-                lastErrno = (connRes as LinuxNative.SyscallResult.Error).errno
-                LinuxNative.close(fd)
+
+                if (fdRes is LinuxNative.SyscallResult.Success && connRes is LinuxNative.SyscallResult.Success) {
+                    return fdRes.asInt()
+                }
+
+                if (fdRes is LinuxNative.SyscallResult.Success) {
+                    lastErrno = (connRes as LinuxNative.SyscallResult.Error).errno
+                    LinuxNative.close(fdRes.asFd())
+                } else {
+                    lastErrno = (fdRes as LinuxNative.SyscallResult.Error).errno
+                }
 
                 Thread.sleep(delayMs)
             }
@@ -66,7 +76,7 @@ internal object ProfilerSocket {
                 DescriptorPassing.setupScmRightsMsgHdr(dummyByte, controlBuf)
             }
 
-            val res = LinuxNative.sendmsg(LinuxNative.FileDescriptor(socketFd), msg, 0)
+            val res = LinuxNative.withTransaction { LinuxNative.sendmsg(LinuxNative.FileDescriptor(socketFd), msg, 0) }
             return res is LinuxNative.SyscallResult.Success
         }
     }

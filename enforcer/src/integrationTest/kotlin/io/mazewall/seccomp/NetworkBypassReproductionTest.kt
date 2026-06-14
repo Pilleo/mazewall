@@ -31,7 +31,9 @@ class NetworkBypassReproductionTest : BaseIntegrationTest() {
 
                     // Attempt sendmmsg (even with invalid args, seccomp EPERM should trigger first before kernel EINVAL/EBADF)
                     // If it bypasses seccomp, the kernel will return EBADF (9) or EFAULT (14) because fd=0 is not a socket or args are null
-                    val sendRes = LinuxNative.syscall(sendmmsgNr, 0, 0, 0, 0)
+                    val sendRes = LinuxNative.withTransaction {
+                        LinuxNative.syscall(sendmmsgNr, 0, 0, 0, 0)
+                    }
 
                     if (sendRes is LinuxNative.SyscallResult.Error) {
                         if (sendRes.errno != 1) { // 1 is EPERM (seccomp block)
@@ -42,7 +44,9 @@ class NetworkBypassReproductionTest : BaseIntegrationTest() {
                     }
 
                     // Attempt recvmmsg
-                    val recvRes = LinuxNative.syscall(recvmmsgNr, 0, 0, 0, 0, 0)
+                    val recvRes = LinuxNative.withTransaction {
+                        LinuxNative.syscall(recvmmsgNr, 0, 0, 0, 0, 0)
+                    }
                     if (recvRes is LinuxNative.SyscallResult.Error) {
                         if (recvRes.errno != 1) { // 1 is EPERM (seccomp block)
                             throw IllegalStateException("SECURITY BYPASS: recvmmsg reached the kernel! Errno was ${recvRes.errno} instead of EPERM(1)")

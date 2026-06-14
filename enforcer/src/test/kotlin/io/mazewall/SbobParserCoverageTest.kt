@@ -23,7 +23,7 @@ class SbobParserCoverageTest {
             }
         """.trimIndent()
         val policy = SbobParser.parseJsonToPolicy(json)
-        assertTrue(policy.allowedFsReadPaths.contains("/valid/path"))
+        assertTrue(policy.allowedFsReadPaths.any { it.value == "/valid/path" })
         assertEquals(1, policy.allowedFsReadPaths.size)
     }
 
@@ -41,7 +41,7 @@ class SbobParserCoverageTest {
             }
         """.trimIndent()
         val policy = SbobParser.parseJsonToPolicy(json)
-        assertTrue(policy.allowedFsReadPaths.contains("/tmp"))
+        assertTrue(policy.allowedFsReadPaths.any { it.value == "/tmp" })
     }
 
     @Test
@@ -65,7 +65,7 @@ class SbobParserCoverageTest {
         val json = """{"opens": ["/etc"]}"""
         val stream = ByteArrayInputStream(json.toByteArray())
         val policy = SbobParser.parseToPolicy(stream)
-        assertTrue(policy.allowedFsReadPaths.contains("/etc"))
+        assertTrue(policy.allowedFsReadPaths.any { it.value == "/etc" })
     }
 
     @Test
@@ -93,9 +93,9 @@ class SbobParserCoverageTest {
         // /etc/passwd should be pruned by /etc
         // /var/log/syslog should be pruned by /var/log
         // /tmp/../tmp/foo should be normalized to /tmp/foo
-        assertTrue(policy.allowedFsReadPaths.contains("/etc"))
-        assertTrue(policy.allowedFsReadPaths.contains("/var/log"))
-        assertTrue(policy.allowedFsReadPaths.contains("/tmp/foo"))
-        assertFalse(policy.allowedFsReadPaths.contains("/etc/passwd"))
+        assertTrue(policy.allowedFsReadPaths.any { it.value == "/etc" })
+        assertTrue(policy.allowedFsReadPaths.any { it.value == "/var/log" })
+        assertTrue(policy.allowedFsReadPaths.any { it.value == "/tmp/foo" })
+        assertFalse(policy.allowedFsReadPaths.any { it.value == "/etc/passwd" })
     }
 }

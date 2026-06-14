@@ -27,7 +27,9 @@ class PrctlBypassReproductionTest : BaseIntegrationTest() {
                         // PR_SET_PDEATHSIG is 1. Signal 15 is SIGTERM.
                         // 15 is also the value of PR_SET_NAME (whitelisted).
                         // If the filter is broken, it might allow this!
-                        LinuxNative.prctl(1, 15, 0, 0, 0)
+                        LinuxNative.withTransaction {
+                            LinuxNative.prctl(1, 15, 0, 0, 0)
+                        }
                     },
                 ).get()
 
@@ -72,7 +74,9 @@ class PrctlBypassReproductionTest : BaseIntegrationTest() {
                     Callable {
                         // PR_CAP_AMBIENT is 47. Op 2 is PR_CAP_AMBIENT_RAISE.
                         // If we pass 15 as the 3rd or 4th arg, does it bypass?
-                        LinuxNative.prctl(47, 2, 15, 0, 0)
+                        LinuxNative.withTransaction {
+                            LinuxNative.prctl(47, 2, 15, 0, 0)
+                        }
                     },
                 ).get()
 

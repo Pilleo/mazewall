@@ -2,6 +2,7 @@ package io.mazewall.seccomp
 import io.mazewall.BaseIntegrationTest
 import io.mazewall.EnabledIfLinuxAndSupported
 import io.mazewall.Policy
+import io.mazewall.compile
 import io.mazewall.Compiled
 import io.mazewall.core.Arch
 import io.mazewall.core.Syscall

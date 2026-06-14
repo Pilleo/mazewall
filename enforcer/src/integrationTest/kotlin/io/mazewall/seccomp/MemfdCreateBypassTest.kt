@@ -27,12 +27,14 @@ class MemfdCreateBypassTest : BaseIntegrationTest() {
                     val res =
                         java.lang.foreign.Arena.ofConfined().use { arena ->
                             val name = arena.allocateFrom("test_memfd")
-                            LinuxNative.syscall(
-                                arch.memfdCreate.toLong(),
-                                name.address(),
-                                0,
-                                java.lang.foreign.MemorySegment.NULL,
-                            )
+                            LinuxNative.withTransaction {
+                                LinuxNative.syscall(
+                                    arch.memfdCreate.toLong(),
+                                    name.address(),
+                                    0,
+                                    java.lang.foreign.MemorySegment.NULL,
+                                )
+                            }
                         }
                     assertTrue(res is LinuxNative.SyscallResult.Error && res.errno == NativeConstants.EPERM, "Expected EPERM, got $res")
                 }.get()
@@ -60,12 +62,14 @@ class MemfdCreateBypassTest : BaseIntegrationTest() {
                     val res =
                         java.lang.foreign.Arena.ofConfined().use { arena ->
                             val name = arena.allocateFrom("test_memfd_blocked")
-                            LinuxNative.syscall(
-                                arch.memfdCreate.toLong(),
-                                name.address(),
-                                0,
-                                java.lang.foreign.MemorySegment.NULL,
-                            )
+                            LinuxNative.withTransaction {
+                                LinuxNative.syscall(
+                                    arch.memfdCreate.toLong(),
+                                    name.address(),
+                                    0,
+                                    java.lang.foreign.MemorySegment.NULL,
+                                )
+                            }
                         }
                     assertTrue(res is LinuxNative.SyscallResult.Error && res.errno == NativeConstants.EPERM, "Expected EPERM, got $res")
                 }.get()

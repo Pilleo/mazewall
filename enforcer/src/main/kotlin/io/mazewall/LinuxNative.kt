@@ -13,7 +13,14 @@ import java.lang.foreign.ValueLayout
 import java.lang.invoke.MethodHandle
 import java.lang.invoke.MethodHandles
 
-object LinuxNative : NativeEngine {
+/**
+ * Entry point for all native Linux interactions.
+ *
+ * This object manages the active [NativeEngine] and provides a capability-based
+ * API for sensitive operations via [withTransaction].
+ */
+@Suppress("TooManyFunctions")
+public object LinuxNative : NativeEngine {
     @Volatile
     private var engine: NativeEngine = RealNativeEngine
 
@@ -33,6 +40,15 @@ object LinuxNative : NativeEngine {
         engine = RealNativeEngine
     }
 
+    /**
+     * Executes the given [block] within a [NativeTransaction] context.
+     * Raw system calls and sensitive native operations are only available within this scope.
+     */
+    public inline fun <T> withTransaction(block: context(NativeTransaction) () -> T): T {
+        val transaction = object : NativeTransaction {}
+        return block(transaction)
+    }
+
     fun getFileSystem(): NativeFileSystem = engine
 
     fun getNetworking(): NativeNetworking = engine
@@ -41,6 +57,7 @@ object LinuxNative : NativeEngine {
 
     fun getMemory(): NativeMemory = engine
 
+    context(_: NativeTransaction)
     override fun prctl(
         option: Int,
         arg2: Any?,
@@ -49,6 +66,7 @@ object LinuxNative : NativeEngine {
         arg5: Any?,
     ) = engine.prctl(option, arg2, arg3, arg4, arg5)
 
+    context(_: NativeTransaction)
     override fun syscall(
         nr: Long,
         a1: Any?,
@@ -59,6 +77,7 @@ object LinuxNative : NativeEngine {
         a6: Any?,
     ) = engine.syscall(nr, a1, a2, a3, a4, a5, a6)
 
+    context(_: NativeTransaction)
     override fun syscall4(
         nr: Long,
         a1: Any?,
@@ -67,6 +86,7 @@ object LinuxNative : NativeEngine {
         a4: Any?,
     ) = engine.syscall4(nr, a1, a2, a3, a4)
 
+    context(_: NativeTransaction)
     override fun open(
         path: MemorySegment,
         flags: Int,
@@ -74,6 +94,7 @@ object LinuxNative : NativeEngine {
 
     override fun close(fd: FileDescriptor) = engine.close(fd)
 
+    context(_: NativeTransaction)
     override fun socketpair(
         domain: Int,
         type: Int,
@@ -81,59 +102,69 @@ object LinuxNative : NativeEngine {
         sv: MemorySegment,
     ) = engine.socketpair(domain, type, protocol, sv)
 
+    context(_: NativeTransaction)
     override fun socket(
         domain: Int,
         type: Int,
         protocol: Int,
     ) = engine.socket(domain, type, protocol)
 
+    context(_: NativeTransaction)
     override fun bind(
         sockfd: FileDescriptor,
         addr: MemorySegment,
         addrlen: Int,
     ) = engine.bind(sockfd, addr, addrlen)
 
+    context(_: NativeTransaction)
     override fun listen(
         sockfd: FileDescriptor,
         backlog: Int,
     ) = engine.listen(sockfd, backlog)
 
+    context(_: NativeTransaction)
     override fun accept(
         sockfd: FileDescriptor,
         addr: MemorySegment,
         addrlen: MemorySegment,
     ) = engine.accept(sockfd, addr, addrlen)
 
+    context(_: NativeTransaction)
     override fun connect(
         sockfd: FileDescriptor,
         addr: MemorySegment,
         addrlen: Int,
     ) = engine.connect(sockfd, addr, addrlen)
 
+    context(_: NativeTransaction)
     override fun sendmsg(
         sockfd: FileDescriptor,
         msg: MemorySegment,
         flags: Int,
     ) = engine.sendmsg(sockfd, msg, flags)
 
+    context(_: NativeTransaction)
     override fun recvmsg(
         sockfd: FileDescriptor,
         msg: MemorySegment,
         flags: Int,
     ) = engine.recvmsg(sockfd, msg, flags)
 
+    context(_: NativeTransaction)
     override fun ioctl(
         fd: FileDescriptor,
         request: Long,
         arg: MemorySegment,
     ) = engine.ioctl(fd, request, arg)
 
+    context(_: NativeTransaction)
     override fun ioctl(
         fd: FileDescriptor,
         request: Long,
         arg: Long,
     ) = engine.ioctl(fd, request, arg)
 
+    context(_: NativeTransaction)
     override fun processVmReadv(
         pid: Int,
         localIov: MemorySegment,
@@ -143,24 +174,28 @@ object LinuxNative : NativeEngine {
         flags: Long,
     ) = engine.processVmReadv(pid, localIov, liovcnt, remoteIov, riovcnt, flags)
 
+    context(_: NativeTransaction)
     override fun readlink(
         path: MemorySegment,
         buf: MemorySegment,
         bufsiz: Long,
     ) = engine.readlink(path, buf, bufsiz)
 
+    context(_: NativeTransaction)
     override fun read(
         fd: FileDescriptor,
         buf: MemorySegment,
         count: Long,
     ) = engine.read(fd, buf, count)
 
+    context(_: NativeTransaction)
     override fun write(
         fd: FileDescriptor,
         buf: MemorySegment,
         count: Long,
     ) = engine.write(fd, buf, count)
 
+    context(_: NativeTransaction)
     override fun recv(
         sockfd: FileDescriptor,
         buf: MemorySegment,
@@ -168,6 +203,7 @@ object LinuxNative : NativeEngine {
         flags: Int,
     ) = engine.recv(sockfd, buf, len, flags)
 
+    context(_: NativeTransaction)
     override fun fcntl(
         fd: FileDescriptor,
         cmd: Int,
@@ -176,6 +212,7 @@ object LinuxNative : NativeEngine {
 
     override fun gettid() = engine.gettid()
 
+    context(_: NativeTransaction)
     override fun poll(
         fds: MemorySegment,
         nfds: Long,
@@ -527,6 +564,7 @@ internal object RealNativeEngine : NativeEngine {
         if (ret < 0) LinuxNative.SyscallResult.Error(errno, ret)
         else LinuxNative.SyscallResult.Success(ret)
 
+    context(_: NativeTransaction)
     override fun prctl(
         option: Int,
         arg2: Any?,
@@ -550,6 +588,7 @@ internal object RealNativeEngine : NativeEngine {
         }
     }
 
+    context(_: NativeTransaction)
     override fun syscall(
         nr: Long,
         a1: Any?,
@@ -577,6 +616,7 @@ internal object RealNativeEngine : NativeEngine {
         }
     }
 
+    context(_: NativeTransaction)
     override fun syscall4(
         nr: Long,
         a1: Any?,
@@ -585,6 +625,7 @@ internal object RealNativeEngine : NativeEngine {
         a4: Any?,
     ): LinuxNative.SyscallResult = syscall(nr, a1, a2, a3, a4)
 
+    context(_: NativeTransaction)
     override fun open(
         path: MemorySegment,
         flags: Int,
@@ -606,6 +647,7 @@ internal object RealNativeEngine : NativeEngine {
         }
     }
 
+    context(_: NativeTransaction)
     override fun socketpair(
         domain: Int,
         type: Int,
@@ -620,6 +662,7 @@ internal object RealNativeEngine : NativeEngine {
         }
     }
 
+    context(_: NativeTransaction)
     override fun socket(
         domain: Int,
         type: Int,
@@ -633,6 +676,7 @@ internal object RealNativeEngine : NativeEngine {
         }
     }
 
+    context(_: NativeTransaction)
     override fun bind(
         sockfd: LinuxNative.FileDescriptor,
         addr: MemorySegment,
@@ -646,6 +690,7 @@ internal object RealNativeEngine : NativeEngine {
         }
     }
 
+    context(_: NativeTransaction)
     override fun listen(
         sockfd: LinuxNative.FileDescriptor,
         backlog: Int,
@@ -658,6 +703,7 @@ internal object RealNativeEngine : NativeEngine {
         }
     }
 
+    context(_: NativeTransaction)
     override fun accept(
         sockfd: LinuxNative.FileDescriptor,
         addr: MemorySegment,
@@ -671,6 +717,7 @@ internal object RealNativeEngine : NativeEngine {
         }
     }
 
+    context(_: NativeTransaction)
     override fun connect(
         sockfd: LinuxNative.FileDescriptor,
         addr: MemorySegment,
@@ -684,6 +731,7 @@ internal object RealNativeEngine : NativeEngine {
         }
     }
 
+    context(_: NativeTransaction)
     override fun sendmsg(
         sockfd: LinuxNative.FileDescriptor,
         msg: MemorySegment,
@@ -697,6 +745,7 @@ internal object RealNativeEngine : NativeEngine {
         }
     }
 
+    context(_: NativeTransaction)
     override fun recvmsg(
         sockfd: LinuxNative.FileDescriptor,
         msg: MemorySegment,
@@ -710,6 +759,7 @@ internal object RealNativeEngine : NativeEngine {
         }
     }
 
+    context(_: NativeTransaction)
     override fun ioctl(
         fd: LinuxNative.FileDescriptor,
         request: Long,
@@ -723,6 +773,7 @@ internal object RealNativeEngine : NativeEngine {
         }
     }
 
+    context(_: NativeTransaction)
     override fun ioctl(
         fd: LinuxNative.FileDescriptor,
         request: Long,
@@ -736,6 +787,7 @@ internal object RealNativeEngine : NativeEngine {
         }
     }
 
+    context(_: NativeTransaction)
     override fun processVmReadv(
         pid: Int,
         localIov: MemorySegment,
@@ -761,6 +813,7 @@ internal object RealNativeEngine : NativeEngine {
         }
     }
 
+    context(_: NativeTransaction)
     override fun readlink(
         path: MemorySegment,
         buf: MemorySegment,
@@ -774,6 +827,7 @@ internal object RealNativeEngine : NativeEngine {
         }
     }
 
+    context(_: NativeTransaction)
     override fun read(
         fd: LinuxNative.FileDescriptor,
         buf: MemorySegment,
@@ -787,6 +841,7 @@ internal object RealNativeEngine : NativeEngine {
         }
     }
 
+    context(_: NativeTransaction)
     override fun write(
         fd: LinuxNative.FileDescriptor,
         buf: MemorySegment,
@@ -800,6 +855,7 @@ internal object RealNativeEngine : NativeEngine {
         }
     }
 
+    context(_: NativeTransaction)
     override fun recv(
         sockfd: LinuxNative.FileDescriptor,
         buf: MemorySegment,
@@ -814,6 +870,7 @@ internal object RealNativeEngine : NativeEngine {
         }
     }
 
+    context(_: NativeTransaction)
     override fun fcntl(
         fd: LinuxNative.FileDescriptor,
         cmd: Int,
@@ -834,6 +891,7 @@ internal object RealNativeEngine : NativeEngine {
         }
     }
 
+    context(_: NativeTransaction)
     override fun poll(
         fds: MemorySegment,
         nfds: Long,

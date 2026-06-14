@@ -25,7 +25,7 @@ class IterativeProfilerTest {
                 target.readText()
             }
 
-        assertTrue(compiledPolicy.allowedFsReadPaths.contains("/etc/hostname"))
+        assertTrue(compiledPolicy.allowedFsReadPaths.any { it.value == "/etc/hostname" })
     }
 
     @Test
@@ -51,7 +51,7 @@ class IterativeProfilerTest {
             }
 
         assertTrue(
-            compiledPolicy.allowedFsWritePaths.contains(target.absolutePath),
+            compiledPolicy.allowedFsWritePaths.any { it.value == target.absolutePath },
             "Should allow write access to path: ${target.absolutePath}",
         )
 
@@ -81,8 +81,8 @@ class IterativeProfilerTest {
             }
             // Second attempt succeeds
         }
-        assertTrue(compiledPolicy.allowedFsReadPaths.contains(targetPath))
-        assertTrue(!compiledPolicy.allowedFsWritePaths.contains(targetPath), "Should not grant write permission by default")
+        assertTrue(compiledPolicy.allowedFsReadPaths.any { it.value == targetPath })
+        assertTrue(!compiledPolicy.allowedFsWritePaths.any { it.value == targetPath }, "Should not grant write permission by default")
     }
 
     @Test
@@ -110,8 +110,8 @@ class IterativeProfilerTest {
             println("COMPILED POLICY READS: ${compiledPolicy.allowedFsReadPaths}")
             println("COMPILED POLICY WRITES: ${compiledPolicy.allowedFsWritePaths}")
             // We should have read permission, but absolutely NO write permission!
-            assertTrue(compiledPolicy.allowedFsReadPaths.contains(existingFile.absolutePath))
-            assertTrue(!compiledPolicy.allowedFsWritePaths.contains(existingFile.absolutePath), "Should not grant write permission for existing file read")
+            assertTrue(compiledPolicy.allowedFsReadPaths.any { it.value == existingFile.absolutePath })
+            assertTrue(!compiledPolicy.allowedFsWritePaths.any { it.value == existingFile.absolutePath }, "Should not grant write permission for existing file read")
         } finally {
             parentDir.deleteRecursively()
         }
@@ -123,7 +123,7 @@ class IterativeProfilerTest {
         val compiledPolicy = IterativeProfiler.profile(basePolicy) {
             throw java.io.IOException("/etc/forever_denied (Permission denied)")
         }
-        assertTrue(compiledPolicy.allowedFsReadPaths.contains("/etc/forever_denied"))
+        assertTrue(compiledPolicy.allowedFsReadPaths.any { it.value == "/etc/forever_denied" })
     }
 
     @Test

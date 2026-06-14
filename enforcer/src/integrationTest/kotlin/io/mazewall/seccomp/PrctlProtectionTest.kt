@@ -38,7 +38,9 @@ class PrctlProtectionTest : BaseIntegrationTest() {
                 .submit {
                     Arena.ofConfined().use { arena ->
                         val nameSeg = arena.allocateFrom("test-thread-name")
-                        val res = LinuxNative.prctl(15, nameSeg.address(), 0, 0, 0).getOrThrow("prctl(PR_SET_NAME)")
+                        val res = LinuxNative.withTransaction {
+                            LinuxNative.prctl(15, nameSeg.address(), 0, 0, 0)
+                        }.getOrThrow("prctl(PR_SET_NAME)")
                         assertEquals(0, res)
                     }
                 }.get()
@@ -58,7 +60,9 @@ class PrctlProtectionTest : BaseIntegrationTest() {
                 .submit {
                     Arena.ofConfined().use { arena ->
                         val nameBuffer = arena.allocate(16)
-                        val res = LinuxNative.prctl(16, nameBuffer.address(), 0, 0, 0).getOrThrow("prctl(PR_GET_NAME)")
+                        val res = LinuxNative.withTransaction {
+                            LinuxNative.prctl(16, nameBuffer.address(), 0, 0, 0)
+                        }.getOrThrow("prctl(PR_GET_NAME)")
                         assertEquals(0, res)
 
                         val name = nameBuffer.getString(0)
@@ -81,7 +85,9 @@ class PrctlProtectionTest : BaseIntegrationTest() {
                 safeExecutor
                     .submit {
                         // Option 25 is PR_SET_MM (hazardous process memory manipulation), which is blocked
-                        LinuxNative.prctl(25, 0, 0, 0, 0).getOrThrow("prctl(PR_SET_MM)")
+                        LinuxNative.withTransaction {
+                            LinuxNative.prctl(25, 0, 0, 0, 0)
+                        }.getOrThrow("prctl(PR_SET_MM)")
                     }.get()
             }.let { e ->
                 assertTrue(
@@ -106,7 +112,9 @@ class PrctlProtectionTest : BaseIntegrationTest() {
                     // Option 25 is PR_SET_MM. Without BPF blocking, it will not be blocked by seccomp
                     // (though the kernel might return EINVAL/EPERM based on standard kernel capabilities,
                     // it won't be blocked by seccomp BPF with EPERM, so it won't trigger ContainmentViolationException).
-                    val res = LinuxNative.prctl(25, 0, 0, 0, 0)
+                    val res = LinuxNative.withTransaction {
+                        LinuxNative.prctl(25, 0, 0, 0, 0)
+                    }
                     // If seccomp BPF had blocked it, res would be Error(errno=1).
                     // When seccomp does not block it, it usually returns Error(errno=22) (EINVAL) because the arguments are invalid.
                     assertTrue(

@@ -5,6 +5,7 @@ import io.mazewall.EnabledIfLinuxAndSupported
 import io.mazewall.IsolatedProcessTester
 import io.mazewall.LinuxNative
 import io.mazewall.MockNativeEngine
+import io.mazewall.NativeTransaction
 import io.mazewall.Policy
 import io.mazewall.RealNativeEngine
 import io.mazewall.core.Syscall
@@ -489,6 +490,7 @@ class LandlockTest : BaseIntegrationTest() {
     @Test
     fun `testLandlockSessionStateTransitions`() {
         val mockEngine = object : MockNativeEngine() {
+            context(_: NativeTransaction)
             override fun syscall(
                 nr: Long,
                 a1: Any?,
@@ -523,6 +525,7 @@ class LandlockTest : BaseIntegrationTest() {
     @Test
     fun `testLandlockSessionFailedState`() {
         val mockEngine = object : MockNativeEngine() {
+            context(_: NativeTransaction)
             override fun syscall(
                 nr: Long,
                 a1: Any?,

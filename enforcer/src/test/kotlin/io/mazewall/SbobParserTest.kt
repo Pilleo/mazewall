@@ -33,9 +33,9 @@ class SbobParserTest {
         assertTrue(policy.isSyscallAllowed(Syscall.CONNECT))
 
         // Verify paths are added
-        assertTrue(policy.allowedFsReadPaths.contains("/etc/hostname"))
-        assertTrue(policy.allowedFsReadPaths.contains("/tmp/foo/bar"))
-        assertTrue(policy.allowedFsWritePaths.contains("/tmp/write.txt"))
+        assertTrue(policy.allowedFsReadPaths.any { it.value == "/etc/hostname" })
+        assertTrue(policy.allowedFsReadPaths.any { it.value == "/tmp/foo/bar" })
+        assertTrue(policy.allowedFsWritePaths.any { it.value == "/tmp/write.txt" })
     }
 
     @Test
@@ -55,7 +55,7 @@ class SbobParserTest {
         Files.writeString(file, json)
 
         val policy = SbobParser.parseToPolicy(file, Policy.PURE_COMPUTE_UNSAFE)
-        assertTrue(policy.allowedFsReadPaths.contains("/etc/hosts"))
+        assertTrue(policy.allowedFsReadPaths.any { it.value == "/etc/hosts" })
         assertTrue(policy.isSyscallAllowed(Syscall.OPENAT))
     }
 
@@ -64,7 +64,7 @@ class SbobParserTest {
         val json = "{\"opens\": [\"/etc/hosts\"], \"syscalls\": [\"OPEN\"]}"
         val stream = ByteArrayInputStream(json.toByteArray())
         val policy = SbobParser.parseToPolicy(stream, Policy.PURE_COMPUTE_UNSAFE)
-        assertTrue(policy.allowedFsReadPaths.contains("/etc/hosts"))
+        assertTrue(policy.allowedFsReadPaths.any { it.value == "/etc/hosts" })
         assertTrue(policy.isSyscallAllowed(Syscall.OPEN))
     }
 
@@ -89,8 +89,8 @@ class SbobParserTest {
     fun `test escaped json strings`() {
         val json = "{\"opens\": [\"/tmp/space\\\\path\", \"/tmp/quote\\\"path\"]}"
         val policy = SbobParser.parseJsonToPolicy(json)
-        assertTrue(policy.allowedFsReadPaths.contains("/tmp/space\\path"))
-        assertTrue(policy.allowedFsReadPaths.contains("/tmp/quote\"path"))
+        assertTrue(policy.allowedFsReadPaths.any { it.value == "/tmp/space\\path" })
+        assertTrue(policy.allowedFsReadPaths.any { it.value == "/tmp/quote\"path" })
     }
 
     @Test
@@ -108,7 +108,8 @@ class SbobParserTest {
         val policy = SbobParser.parseJsonToPolicy(json)
 
         // Should prune /tmp/foo because /tmp covers it, and /var/log/app.log because /var/log covers it
-        assertEquals(setOf("/tmp", "/var/log"), policy.allowedFsReadPaths)
+        val readPaths = policy.allowedFsReadPaths.map { it.value }.toSet()
+        assertEquals(setOf("/tmp", "/var/log"), readPaths)
     }
 
     @Test
@@ -145,9 +146,9 @@ class SbobParserTest {
         """.trimIndent()
 
         val policy = SbobParser.parseJsonToPolicy(json)
-        assertTrue(policy.allowedFsReadPaths.contains("/tmp/app_data_[1]/cache"))
-        assertTrue(policy.allowedFsWritePaths.contains("/tmp/\"escaped\""))
-        assertTrue(policy.allowedFsWritePaths.contains("/tmp/\\slash"))
-        assertTrue(policy.allowedFsWritePaths.contains("/tmp/\n\r\t\b\u000C/foo"))
+        assertTrue(policy.allowedFsReadPaths.any { it.value == "/tmp/app_data_[1]/cache" })
+        assertTrue(policy.allowedFsWritePaths.any { it.value == "/tmp/\"escaped\"" })
+        assertTrue(policy.allowedFsWritePaths.any { it.value == "/tmp/\\slash" })
+        assertTrue(policy.allowedFsWritePaths.any { it.value == "/tmp/\n\r\t\b\u000C/foo" })
     }
 }

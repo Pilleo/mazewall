@@ -9,8 +9,6 @@ import java.lang.foreign.ValueLayout
 internal class NativeSocketInputStream(
     private val socketFd: LinuxNative.FileDescriptor,
     private val arena: Arena,
-    private val nativeRead: (LinuxNative.FileDescriptor, MemorySegment, Long) -> LinuxNative.SyscallResult = LinuxNative::read,
-    private val nativeClose: (LinuxNative.FileDescriptor) -> LinuxNative.SyscallResult = LinuxNative::close,
 ) : InputStream() {
     private val readBuf = arena.allocate(1)
     private val multiBuf = arena.allocate(BUFFER_SIZE.toLong())
@@ -23,7 +21,7 @@ internal class NativeSocketInputStream(
 
     override fun read(): Int {
         while (true) {
-            val res = nativeRead(socketFd, readBuf, 1)
+            val res = LinuxNative.withTransaction { LinuxNative.read(socketFd, readBuf, 1) }
             when (res) {
                 is LinuxNative.SyscallResult.Success -> {
                     if (res.value <= 0) return -1
@@ -54,7 +52,7 @@ internal class NativeSocketInputStream(
     ): Int {
         val count = Math.min(len.toLong(), BUFFER_SIZE.toLong())
         while (true) {
-            val res = nativeRead(socketFd, multiBuf, count)
+            val res = LinuxNative.withTransaction { LinuxNative.read(socketFd, multiBuf, count) }
             when (res) {
                 is LinuxNative.SyscallResult.Success -> {
                     if (res.value <= 0) return -1
@@ -72,6 +70,6 @@ internal class NativeSocketInputStream(
     }
 
     override fun close() {
-        nativeClose(socketFd)
+        LinuxNative.close(socketFd)
     }
 }

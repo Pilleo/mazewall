@@ -78,7 +78,9 @@ object PureJavaBpfEngine : SeccompEngine {
 
     private fun setNoNewPrivs() {
         // Step 1: Set no_new_privs (mandatory for non-root seccomp)
-        val r1 = LinuxNative.getProcess().prctl(NativeConstants.PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0)
+        val r1 = LinuxNative.withTransaction {
+            LinuxNative.getProcess().prctl(NativeConstants.PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0)
+        }
         r1.getOrThrow("prctl(PR_SET_NO_NEW_PRIVS)")
     }
 
@@ -89,13 +91,14 @@ object PureJavaBpfEngine : SeccompEngine {
     ) {
         // Try modern seccomp(2) syscall first
         val flags = if (useTsync) NativeConstants.SECCOMP_FILTER_FLAG_TSYNC.toLong() else 0L
-        val r3 =
+        val r3 = LinuxNative.withTransaction {
             LinuxNative.syscall(
                 arch.seccompSyscallNumber.toLong(),
                 NativeConstants.SECCOMP_SET_MODE_FILTER.toLong(),
                 flags,
                 prog,
             )
+        }
 
         if (r3 is LinuxNative.SyscallResult.Error) {
             // Fall back to prctl for older kernels
@@ -110,7 +113,7 @@ object PureJavaBpfEngine : SeccompEngine {
                 throw IllegalStateException("Process-wide seccomp installation (TSYNC) failed: $detail")
             }
 
-            val r4 =
+            val r4 = LinuxNative.withTransaction {
                 LinuxNative.getProcess().prctl(
                     NativeConstants.PR_SET_SECCOMP,
                     NativeConstants.SECCOMP_MODE_FILTER.toLong(),
@@ -118,6 +121,7 @@ object PureJavaBpfEngine : SeccompEngine {
                     0,
                     0,
                 )
+            }
 
             if (r4 is LinuxNative.SyscallResult.Error) {
                 throw IllegalStateException(
@@ -141,7 +145,9 @@ object PureJavaBpfEngine : SeccompEngine {
         }
 
         // Verify filter is actually installed
-        val r5 = LinuxNative.getProcess().prctl(NativeConstants.PR_GET_SECCOMP, 0, 0, 0, 0)
+        val r5 = LinuxNative.withTransaction {
+            LinuxNative.getProcess().prctl(NativeConstants.PR_GET_SECCOMP, 0, 0, 0, 0)
+        }
         val mode = r5.getOrThrow("prctl(PR_GET_SECCOMP)")
         if (mode != 2L) {
             throw IllegalStateException(

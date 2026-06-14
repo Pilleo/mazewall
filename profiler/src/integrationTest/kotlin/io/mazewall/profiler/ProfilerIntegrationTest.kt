@@ -98,12 +98,12 @@ class ProfilerIntegrationTest : BaseIntegrationTest() {
 
         // The compiled policy should allow reading from /etc/hostname
         assertTrue(
-            compiledPolicy.allowedFsReadPaths.contains("/etc/hostname"),
+            compiledPolicy.allowedFsReadPaths.contains(io.mazewall.core.SandboxedPath.of("/etc/hostname")),
             "Should contain read-path for /etc/hostname",
         )
 
         // Verify DSL has the correct builder and allowFsRead
-        assertTrue(dsl.contains("Policy.builder()"))
+        assertTrue(dsl.contains("Policy.threadLocalBuilder()"))
         assertTrue(dsl.contains("allowFsRead(\"/etc/hostname\")"))
     }
 
@@ -160,12 +160,16 @@ class ProfilerIntegrationTest : BaseIntegrationTest() {
                     Callable {
                         java.lang.foreign.Arena.ofConfined().use { arena ->
                             val pathSeg = arena.allocateFrom(absolutePath)
-                            val openRes = LinuxNative.open(pathSeg, 0)
+                            val openRes = LinuxNative.withTransaction {
+                                LinuxNative.open(pathSeg, 0)
+                            }
                             if (openRes is LinuxNative.SyscallResult.Success) {
                                 val fd = openRes.asFd()
                                 val fchmodNr = Syscall.FCHMOD.numberFor(Arch.current()).toLong()
                                 if (fchmodNr >= 0) {
-                                    LinuxNative.syscall(fchmodNr, fd, 0x1FF) // 0777
+                                    LinuxNative.withTransaction {
+                                        LinuxNative.syscall(fchmodNr, fd, 0x1FF) // 0777
+                                    }
                                 }
                                 LinuxNative.close(fd)
                             }

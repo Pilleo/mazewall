@@ -60,10 +60,14 @@ class AllowListTest : BaseIntegrationTest() {
         io.mazewall.seccomp.SeccompInstallationState.Failed::class.java
         Arch.current()
         // Force native symbol linking for LinuxNative downcall stubs
-        LinuxNative.socket(2, 1, 0)
+        LinuxNative.withTransaction {
+            LinuxNative.socket(2, 1, 0)
+        }
         val mmap = Arch.current().mmap.toLong()
         if (mmap >= 0) {
-            LinuxNative.syscall(mmap, 0, 4096, 0, 0x22, -1, 0)
+            LinuxNative.withTransaction {
+                LinuxNative.syscall(mmap, 0, 4096, 0, 0x22, -1, 0)
+            }
         }
     }
 
@@ -85,7 +89,9 @@ class AllowListTest : BaseIntegrationTest() {
                     ContainedExecutors.installOnCurrentThread(policy)
 
                     // socket() is NOT allowed, should fail with EPERM
-                    val result = LinuxNative.socket(2, 1, 0)
+                    val result = LinuxNative.withTransaction {
+                        LinuxNative.socket(2, 1, 0)
+                    }
                     if (result !is LinuxNative.SyscallResult.Error || result.errno != 1) {
                         throw IllegalStateException("Expected EPERM (1), got $result")
                     }
@@ -115,7 +121,9 @@ class AllowListTest : BaseIntegrationTest() {
                     // mmap with PROT_EXEC should fail even though MMAP is allowed
                     val mmap = Arch.current().mmap.toLong()
                     if (mmap >= 0) {
-                        val result = LinuxNative.syscall(mmap, 0, 4096, 0x04 /* PROT_EXEC */, 0x22, -1, 0)
+                        val result = LinuxNative.withTransaction {
+                            LinuxNative.syscall(mmap, 0, 4096, 0x04 /* PROT_EXEC */, 0x22, -1, 0)
+                        }
                         if (result !is LinuxNative.SyscallResult.Error || result.errno != 1) {
                             throw IllegalStateException("Expected EPERM (1) for mmap(PROT_EXEC), got $result")
                         }

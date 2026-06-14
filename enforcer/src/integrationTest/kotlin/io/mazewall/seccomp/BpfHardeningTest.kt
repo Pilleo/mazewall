@@ -29,7 +29,9 @@ class BpfHardeningTest : BaseIntegrationTest() {
                 try {
                     ContainedExecutors.installOnCurrentThread(policy)
                     // PR_SET_NAME = 15
-                    val res = LinuxNative.prctl(15, 0, 0, 0, 0)
+                    val res = LinuxNative.withTransaction {
+                        LinuxNative.prctl(15, 0, 0, 0, 0)
+                    }
                     result.set(res)
                 } catch (t: Throwable) {
                     error.set(t)
@@ -64,7 +66,9 @@ class BpfHardeningTest : BaseIntegrationTest() {
                     // so we use the generic syscall(2) downcall.
                     val arch = io.mazewall.core.Arch
                         .current()
-                    val res = LinuxNative.syscall(arch.mmap.toLong(), 0, 4096, 1, 2, -1, 0)
+                    val res = LinuxNative.withTransaction {
+                        LinuxNative.syscall(arch.mmap.toLong(), 0, 4096, 1, 2, -1, 0)
+                    }
                     result.set(res)
                 } catch (t: Throwable) {
                     error.set(t)

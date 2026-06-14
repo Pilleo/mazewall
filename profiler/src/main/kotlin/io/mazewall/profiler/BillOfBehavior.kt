@@ -123,8 +123,8 @@ data class BillOfBehavior(
         }
         val pOpens = pruneSubpaths(opens)
         val pWrites = pruneSubpaths(fsWritePaths)
-        for (path in pOpens) builder.allowFsRead(path)
-        for (path in pWrites) builder.allowFsWrite(path)
+        for (path in pOpens) builder.allowFsRead(io.mazewall.core.SandboxedPath.of(path, allowNonExistent = true))
+        for (path in pWrites) builder.allowFsWrite(io.mazewall.core.SandboxedPath.of(path, allowNonExistent = true))
         return builder.build()
     }
 
@@ -166,18 +166,18 @@ data class BillOfBehavior(
     private fun pruneSubpaths(paths: Set<String>): Set<String> {
         if (paths.size <= 1) return paths
 
-        val parsedPaths = paths.map { Paths.get(it).toAbsolutePath().normalize() }.distinct()
-        val result = mutableListOf<Path>()
+        val sorted = paths.sorted()
+        val result = mutableListOf<String>()
 
-        for (path in parsedPaths) {
-            val hasChild = parsedPaths.any { other ->
+        for (path in sorted) {
+            val hasChild = sorted.any { other ->
                 other != path && other.startsWith(path)
             }
             if (!hasChild) {
                 result.add(path)
             }
         }
-        return result.map { it.toString().replace('\\', '/') }.toSet()
+        return result.toSet()
     }
 
     /**

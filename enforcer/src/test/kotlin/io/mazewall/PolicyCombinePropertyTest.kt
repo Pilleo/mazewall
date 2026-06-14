@@ -62,11 +62,13 @@ class PolicyCombinePropertyTest {
     }
 
     private fun isParentOrEqual(
-        parent: String,
-        child: String,
+        parent: io.mazewall.core.SandboxedPath,
+        child: io.mazewall.core.SandboxedPath,
     ): Boolean {
-        if (parent == child) return true
-        val parentWithSlash = if (parent.endsWith("/")) parent else "$parent/"
-        return child.startsWith(parentWithSlash)
+        val p = parent.value
+        val c = child.value
+        if (p == c) return true
+        val parentWithSlash = if (p.endsWith("/")) p else "$p/"
+        return c.startsWith(parentWithSlash)
     }
 }

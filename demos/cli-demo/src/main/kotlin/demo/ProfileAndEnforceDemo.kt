@@ -79,7 +79,7 @@ fun runProfileAndEnforce() {
             val setupNr = Syscall.IO_URING_SETUP.numberFor(Arch.current()).toLong()
 
             // io_uring_setup(entries = 32, params = NULL)
-            val setupResult = LinuxNative.syscall(setupNr, 32L, 0L)
+            val setupResult = LinuxNative.withTransaction { LinuxNative.syscall(setupNr, 32L, 0L) }
             val ioUringStatus: String
 
             when (setupResult) {
@@ -230,10 +230,12 @@ fun runProfileAndEnforce() {
             Arena.ofConfined().use { arena ->
                 val fs = LinuxNative.getFileSystem()
                 val openResult =
-                    fs.open(
-                        arena.allocateFrom(sensitiveFile.canonicalPath),
-                        0, // O_RDONLY
-                    )
+                    LinuxNative.withTransaction {
+                        fs.open(
+                            arena.allocateFrom(sensitiveFile.canonicalPath),
+                            0, // O_RDONLY
+                        )
+                    }
 
                 // EPERM = Seccomp blocked the syscall entirely
                 // EACCES = Landlock denied the path access at the VFS layer

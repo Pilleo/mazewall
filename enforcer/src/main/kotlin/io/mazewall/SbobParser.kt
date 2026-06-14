@@ -1,5 +1,6 @@
 package io.mazewall
 
+import io.mazewall.core.SandboxedPath
 import io.mazewall.core.SeccompAction
 import io.mazewall.core.Syscall
 import java.io.InputStream
@@ -73,8 +74,8 @@ object SbobParser {
         val prunedReads = pruneSubpaths(opens)
         val prunedWrites = pruneSubpaths(fsWritePaths)
 
-        for (path in prunedReads) builder.allowFsRead(path)
-        for (path in prunedWrites) builder.allowFsWrite(path)
+        for (path in prunedReads) builder.allowFsRead(SandboxedPath.of(path, allowNonExistent = true))
+        for (path in prunedWrites) builder.allowFsWrite(SandboxedPath.of(path, allowNonExistent = true))
 
         return builder.build()
     }
