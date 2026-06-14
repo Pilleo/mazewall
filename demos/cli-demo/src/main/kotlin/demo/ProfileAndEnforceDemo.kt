@@ -150,10 +150,11 @@ fun runProfileAndEnforce() {
         // Compile the observed profile into a Landlock & Seccomp enforced Policy.
         // We explicitly unblock io_uring_setup to showcase how developers customize/stack policies
         // and to verify the complementary sandboxing even when container seccomp profiles block it.
+        val baseForEnforcement = bob.toPolicy(Policy.PURE_COMPUTE_UNSAFE)
         val compiledPolicy =
             Policy
-                .builder()
-                .base(bob.toPolicy(Policy.PURE_COMPUTE_UNSAFE))
+                .threadLocalBuilder()
+                .base(baseForEnforcement)
                 .unblock(Syscall.IO_URING_SETUP)
                 .build()
 

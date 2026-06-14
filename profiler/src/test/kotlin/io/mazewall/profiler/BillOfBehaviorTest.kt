@@ -103,7 +103,7 @@ class BillOfBehaviorTest {
 
         // Deny-list base DSL
         val dslDeny = bob.toDsl("Policy.PURE_COMPUTE_UNSAFE", io.mazewall.Policy.PURE_COMPUTE_UNSAFE)
-        assertTrue(dslDeny.contains("Policy.builder()"))
+        assertTrue(dslDeny.contains("Policy.threadLocalBuilder()"))
         assertTrue(dslDeny.contains(".base(Policy.PURE_COMPUTE_UNSAFE)"))
         assertTrue(dslDeny.contains("Syscall.OPEN"))
         assertTrue(dslDeny.contains(".allowFsRead(\"/read\")"))

@@ -2,6 +2,7 @@ package demo.vulnapp.config
 
 import demo.vulnapp.service.*
 import io.mazewall.Policy
+import io.mazewall.Uncompiled
 import io.mazewall.profiler.Profiler
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
 import org.springframework.boot.test.context.TestConfiguration
@@ -26,7 +27,7 @@ class MazewallTestProfileConfig(
     private fun wrapForProfiling(): Profiler.ProfilerExecutorWrapper =
         Profiler.wrap(
             Executors.newFixedThreadPool(4),
-            Policy.builder().base(Policy.PURE_COMPUTE).allowMmapExec().build()
+            Policy.threadLocalBuilder().base(Policy.PURE_COMPUTE).allowMmapExec().build()
         ).also { profileManager.register(it) }
 
     @Bean

@@ -59,7 +59,7 @@ class BobCompilerTest {
 
         val expectedDsl =
             """
-val policy = Policy.builder()
+val policy = Policy.threadLocalBuilder()
     .base(Policy.PURE_COMPUTE_UNSAFE)
     .unblock(
         Syscall.CONNECT,

@@ -174,7 +174,7 @@ class PolicyTest {
     fun `builder base() merges all flags`() {
         val p1 =
             Policy
-                .builder()
+                .threadLocalBuilder()
                 .allowMmapExec()
                 .allowNonThreadClone()
                 .allowUnsafePrctl()
@@ -183,7 +183,8 @@ class PolicyTest {
                 .block(Syscall.CONNECT)
                 .build()
 
-        val p2 = Policy.builder().base(p1).build()
+        val p2 = Policy.threadLocalBuilder().base(p1).build()
+
 
         assertTrue(p2.allowMmapExec)
         assertTrue(p2.allowNonThreadClone)

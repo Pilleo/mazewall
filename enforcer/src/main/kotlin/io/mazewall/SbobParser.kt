@@ -21,7 +21,7 @@ object SbobParser {
     fun parseToPolicy(
         path: Path,
         base: Policy<*, Uncompiled> = Policy.PURE_COMPUTE_UNSAFE,
-    ): Policy<*, Uncompiled> {
+    ): Policy<PolicyScope.ThreadLocalOnly, Uncompiled> {
         return parseJsonToPolicy(Files.readString(path), base)
     }
 
@@ -31,7 +31,7 @@ object SbobParser {
     fun parseToPolicy(
         stream: InputStream,
         base: Policy<*, Uncompiled> = Policy.PURE_COMPUTE_UNSAFE,
-    ): Policy<*, Uncompiled> {
+    ): Policy<PolicyScope.ThreadLocalOnly, Uncompiled> {
         val content = stream.bufferedReader(StandardCharsets.UTF_8).use { it.readText() }
         return parseJsonToPolicy(content, base)
     }
@@ -42,7 +42,7 @@ object SbobParser {
     fun parseJsonToPolicy(
         json: String,
         base: Policy<*, Uncompiled> = Policy.PURE_COMPUTE_UNSAFE,
-    ): Policy<*, Uncompiled> {
+    ): Policy<PolicyScope.ThreadLocalOnly, Uncompiled> {
         val arrays = extractStringArrays(json)
         val opens = arrays["opens"] ?: emptySet()
         val fsWritePaths = arrays["fsWritePaths"] ?: emptySet()
@@ -58,7 +58,9 @@ object SbobParser {
                     }
                 }.toSet()
 
-        val builder = Policy.builder().base(base)
+        // SBoB parsing may result in Landlock rules, so we transition to ThreadLocalOnly
+        @Suppress("UNCHECKED_CAST")
+        val builder = Policy.threadLocalBuilder().base(base as Policy<PolicyScope.ThreadLocalOnly, *>)
 
         if (base.defaultAction == SeccompAction.ACT_ALLOW) {
             val toUnblock =
@@ -68,10 +70,10 @@ object SbobParser {
             builder.allow(*mappedSyscalls.toTypedArray())
         }
 
-        val prunedOpens = pruneSubpaths(opens)
+        val prunedReads = pruneSubpaths(opens)
         val prunedWrites = pruneSubpaths(fsWritePaths)
 
-        for (path in prunedOpens) builder.allowFsRead(path)
+        for (path in prunedReads) builder.allowFsRead(path)
         for (path in prunedWrites) builder.allowFsWrite(path)
 
         return builder.build()

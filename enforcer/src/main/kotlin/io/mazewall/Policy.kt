@@ -7,13 +7,16 @@ import io.mazewall.seccomp.BpfInstruction
 
 /**
  * Marker interfaces for policy scopes.
+ *
+ * Hierarchy: [ProcessWideSafe] ⊂ [ThreadLocalOnly].
+ * Anything safe for the whole process is safe for a single thread, but not vice versa.
  */
-sealed interface PolicyScope {
-    /** Safe for process-wide or thread-scoped containment. */
-    interface ProcessWideSafe : PolicyScope
+public sealed interface PolicyScope {
+    /** Enforces thread-local restrictions (e.g. Landlock FS rules). */
+    public interface ThreadLocalOnly : PolicyScope
 
-    /** Enforces Landlock filesystem restrictions; restricted to thread-local containment. */
-    interface ThreadLocalOnly : PolicyScope
+    /** Safe for process-wide or thread-scoped containment. */
+    public interface ProcessWideSafe : ThreadLocalOnly
 }
 
 /**
@@ -222,7 +225,12 @@ class Policy<out S : PolicyScope, out State : PolicyState> private constructor(
                 .allowJvmClasspath()
                 .build()
 
+        @JvmStatic
         fun builder(): Builder<PolicyScope.ProcessWideSafe> = Builder()
+
+        /** Creates a builder specifically for thread-local policies (e.g. including FS rules). */
+        @JvmStatic
+        fun threadLocalBuilder(): Builder<PolicyScope.ThreadLocalOnly> = Builder()
 
         private fun intersectPaths(
             set1: Set<String>,
@@ -407,8 +415,11 @@ class Policy<out S : PolicyScope, out State : PolicyState> private constructor(
 
         /**
          * Inherits all settings (actions, allowed paths, etc.) from the given [policy].
+         *
+         * The result type is governed by [S]. If [S] is [ProcessWideSafe], only process-safe
+         * policies can be passed.
          */
-        fun <T : PolicyScope> base(policy: Policy<T, *>): Builder<T> {
+        fun base(policy: Policy<S, *>): Builder<S> {
             this.defaultAction = policy.defaultAction
             this.syscallActions.putAll(policy.syscallActions)
             if (policy.allowMmapExec) allowMmapExec = true
@@ -416,13 +427,13 @@ class Policy<out S : PolicyScope, out State : PolicyState> private constructor(
             if (policy.allowUnsafePrctl) allowUnsafePrctl = true
             allowedFsReadPaths.addAll(policy.allowedFsReadPaths)
             allowedFsWritePaths.addAll(policy.allowedFsWritePaths)
-            @Suppress("UNCHECKED_CAST")
-            return this as Builder<T>
+            return this
         }
 
         /**
          * Allows reading from the specified file or directory path (and its children).
-         * Note: Setting any FS paths enables Landlock enforcement for this policy.
+         * Note: Setting any FS paths enables Landlock enforcement for this policy,
+         * restricting it to thread-local usage.
          */
         fun allowFsRead(path: String): Builder<PolicyScope.ThreadLocalOnly> {
             validatePath(path)
@@ -466,7 +477,8 @@ class Policy<out S : PolicyScope, out State : PolicyState> private constructor(
 
         /**
          * Allows writing to the specified file or directory path (and its children).
-         * Note: Setting any FS paths enables Landlock enforcement for this policy.
+         * Note: Setting any FS paths enables Landlock enforcement for this policy,
+         * restricting it to thread-local usage.
          */
         fun allowFsWrite(path: String): Builder<PolicyScope.ThreadLocalOnly> {
             validatePath(path)

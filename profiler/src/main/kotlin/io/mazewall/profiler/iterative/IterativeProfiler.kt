@@ -1,6 +1,7 @@
 package io.mazewall.profiler.iterative
 
 import io.mazewall.Policy
+import io.mazewall.PolicyScope
 import io.mazewall.Uncompiled
 import io.mazewall.enforcer.ContainedExecutors
 import io.mazewall.enforcer.ContainmentViolationDetector
@@ -87,7 +88,8 @@ object IterativeProfiler {
         currentPolicy: Policy<*, Uncompiled>,
         path: String,
     ): Policy<*, Uncompiled> {
-        val builder = Policy.builder().base(currentPolicy)
+        @Suppress("UNCHECKED_CAST")
+        val builder = Policy.threadLocalBuilder().base(currentPolicy as Policy<PolicyScope.ThreadLocalOnly, *>)
         val isCurrentlyReadAllowed = currentPolicy.allowedFsReadPaths.any { path.startsWith(it) }
 
         if (isCurrentlyReadAllowed) {

@@ -2,6 +2,8 @@ package io.mazewall.profiler
 
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import io.mazewall.Policy
+import io.mazewall.PolicyScope
+import io.mazewall.Uncompiled
 import io.mazewall.core.SeccompAction
 import io.mazewall.core.Syscall
 import io.mazewall.profiler.engine.TraceEvent
@@ -110,18 +112,19 @@ data class BillOfBehavior(
      * All [opens] paths are granted read access; all [fsWritePaths] paths
      * are granted write access.
      */
-    fun toPolicy(base: Policy<*, *> = Policy.PURE_COMPUTE_UNSAFE): Policy<*, *> {
-        val builder = Policy.builder().base(base)
+    fun toPolicy(base: Policy<*, Uncompiled> = Policy.PURE_COMPUTE_UNSAFE): Policy<PolicyScope.ThreadLocalOnly, Uncompiled> {
+        @Suppress("UNCHECKED_CAST")
+        val builder = Policy.threadLocalBuilder().base(base as Policy<PolicyScope.ThreadLocalOnly, *>)
         if (base.defaultAction == io.mazewall.core.SeccompAction.ACT_ALLOW) {
             val toUnblock = syscalls.filter { !base.isSyscallAllowed(it) }
             builder.unblock(*toUnblock.toTypedArray())
         } else {
             builder.allow(*syscalls.toTypedArray())
         }
-        val prunedOpens = pruneSubpaths(opens)
-        val prunedWrites = pruneSubpaths(fsWritePaths)
-        for (path in prunedOpens) builder.allowFsRead(path)
-        for (path in prunedWrites) builder.allowFsWrite(path)
+        val pOpens = pruneSubpaths(opens)
+        val pWrites = pruneSubpaths(fsWritePaths)
+        for (path in pOpens) builder.allowFsRead(path)
+        for (path in pWrites) builder.allowFsWrite(path)
         return builder.build()
     }
 
@@ -131,10 +134,15 @@ data class BillOfBehavior(
      */
     fun toDsl(
         basePolicyName: String = "Policy.PURE_COMPUTE_UNSAFE",
-        base: Policy<*, *> = Policy.PURE_COMPUTE_UNSAFE,
+        base: Policy<*, Uncompiled> = Policy.PURE_COMPUTE_UNSAFE,
     ): String {
         val sb = StringBuilder()
-        sb.append("val policy = Policy.builder()\n")
+        val pOpens = pruneSubpaths(opens)
+        val pWrites = pruneSubpaths(fsWritePaths)
+        val isThreadLocal = pOpens.isNotEmpty() || pWrites.isNotEmpty()
+
+        val builderCall = if (isThreadLocal) "Policy.threadLocalBuilder()" else "Policy.builder()"
+        sb.append("val policy = $builderCall\n")
         sb.append("    .base($basePolicyName)\n")
 
         val (methodName, list) =
@@ -149,10 +157,8 @@ data class BillOfBehavior(
             sb.append(list.joinToString(",\n") { "        Syscall.${it.name}" })
             sb.append("\n    )\n")
         }
-        val prunedOpens = pruneSubpaths(opens)
-        val prunedWrites = pruneSubpaths(fsWritePaths)
-        for (path in prunedOpens.sorted()) sb.append("    .allowFsRead(\"$path\")\n")
-        for (path in prunedWrites.sorted()) sb.append("    .allowFsWrite(\"$path\")\n")
+        for (path in pOpens.sorted()) sb.append("    .allowFsRead(\"$path\")\n")
+        for (path in pWrites.sorted()) sb.append("    .allowFsWrite(\"$path\")\n")
         sb.append("    .build()")
         return sb.toString()
     }
