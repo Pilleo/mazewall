@@ -2,6 +2,7 @@ package io.mazewall.profiler
 
 import io.mazewall.LinuxNative
 import io.mazewall.Policy
+import io.mazewall.Uncompiled
 import io.mazewall.profiler.compiler.BobCompiler
 import io.mazewall.profiler.engine.ProfilerInstaller
 import io.mazewall.profiler.engine.TraceEvent
@@ -129,7 +130,7 @@ object Profiler {
 
     fun wrap(
         delegate: ExecutorService,
-        vararg policies: Policy<*, *>,
+        vararg policies: Policy<*, Uncompiled>,
     ): ProfilerExecutorWrapper {
         val policy = Policy.combine(*policies)
         val context = getOrSpawnSharedDaemon()
@@ -138,21 +139,20 @@ object Profiler {
 
     private fun installProfilingFilterForThread(
         socketPath: String,
-        policy: Policy<*, *>,
+        policy: Policy<*, Uncompiled>,
         accumulatedLogs: MutableList<TraceEvent>,
         stackTracesMap: MutableMap<TraceEvent, MutableList<Array<StackTraceElement>>>?,
         pathCache: MutableMap<String, Long>,
         workerThreadProvider: () -> Thread?,
     ) {
         ProfilerInstaller.installProfilingFilterForThread(
-            socketPath,
-            policy,
-            accumulatedLogs,
-            stackTracesMap,
-            pathCache,
-            workerThreadProvider,
-            { path -> ProfilerSocket.connectWithRetry(path) },
-            { fd, logs, traces, cache, provider ->
+            socketPath = socketPath,
+            policy = policy,
+            accumulatedLogs = accumulatedLogs,
+            stackTracesMap = stackTracesMap,
+            pathCache = pathCache,
+            workerThreadProvider = workerThreadProvider,
+            startTraceListener = { fd, logs, traces, cache, provider ->
                 ProfilerTraceListener(LinuxNative.FileDescriptor(fd), logs, traces, cache, provider).start()
             },
         )
@@ -165,7 +165,7 @@ object Profiler {
 
     class ProfilerExecutorWrapper(
         private val delegate: ExecutorService,
-        private val policy: Policy<*, *>,
+        private val policy: Policy<*, Uncompiled>,
         private val context: DaemonContext,
     ) : ExecutorService by delegate {
         private val threadApplied = ThreadLocal.withInitial { false }

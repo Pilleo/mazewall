@@ -121,7 +121,9 @@ object RealProfilerTransport : ProfilerTransport {
             val controlBuf = arena.allocate(24)
             controlBuf.fill(0)
 
-            val msg = DescriptorPassing.setupScmRightsMsgHdr(arena, dummyByte, controlBuf)
+            val msg = with(arena) {
+                DescriptorPassing.setupScmRightsMsgHdr(dummyByte, controlBuf)
+            }
 
             while (true) {
                 val res = LinuxNative.recvmsg(socketFd, msg, 0)

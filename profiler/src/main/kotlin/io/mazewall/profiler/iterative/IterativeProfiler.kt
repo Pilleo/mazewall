@@ -1,6 +1,7 @@
 package io.mazewall.profiler.iterative
 
 import io.mazewall.Policy
+import io.mazewall.Uncompiled
 import io.mazewall.enforcer.ContainedExecutors
 import io.mazewall.enforcer.ContainmentViolationDetector
 import io.mazewall.landlock.Landlock
@@ -15,9 +16,9 @@ import java.nio.file.AccessDeniedException
  */
 object IterativeProfiler {
     fun profile(
-        basePolicy: Policy<*, *> = Policy.PURE_COMPUTE_UNSAFE,
+        basePolicy: Policy<*, Uncompiled> = Policy.PURE_COMPUTE_UNSAFE,
         task: Runnable,
-    ): Policy<*, *> {
+    ): Policy<*, Uncompiled> {
         val maxRetries = 20
         var state: IterativeProfilerState = IterativeProfilerState.Running(basePolicy, 0)
 
@@ -61,7 +62,7 @@ object IterativeProfiler {
     }
 
     private fun executeTask(
-        currentPolicy: Policy<*, *>,
+        currentPolicy: Policy<*, Uncompiled>,
         task: Runnable,
     ): Throwable? {
         var error: Throwable? = null
@@ -83,9 +84,9 @@ object IterativeProfiler {
     }
 
     private fun updatePolicyForViolation(
-        currentPolicy: Policy<*, *>,
+        currentPolicy: Policy<*, Uncompiled>,
         path: String,
-    ): Policy<*, *> {
+    ): Policy<*, Uncompiled> {
         val builder = Policy.builder().base(currentPolicy)
         val isCurrentlyReadAllowed = currentPolicy.allowedFsReadPaths.any { path.startsWith(it) }
 

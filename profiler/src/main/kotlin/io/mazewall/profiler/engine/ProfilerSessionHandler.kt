@@ -218,6 +218,8 @@ internal class ProfilerSessionHandler(
     }
 
     companion object {
+        private const val EINTR = 4
+        private const val POLL_ACK_TIMEOUT_MS = 5000
         private val logger = java.util.logging.Logger.getLogger(ProfilerSessionHandler::class.java.name)
     }
 }

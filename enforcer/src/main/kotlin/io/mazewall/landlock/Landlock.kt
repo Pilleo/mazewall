@@ -3,6 +3,7 @@ package io.mazewall.landlock
 import io.mazewall.LinuxNative
 import io.mazewall.Platform
 import io.mazewall.Policy
+import io.mazewall.Uncompiled
 import io.mazewall.core.Syscall
 import io.mazewall.ffi.Layouts
 import io.mazewall.ffi.NativeConstants
@@ -169,7 +170,7 @@ object Landlock {
     /**
      * Builds and applies a Landlock ruleset to the calling thread based on the given [policy].
      */
-    fun applyRuleset(policy: Policy<*, *>) {
+    fun applyRuleset(policy: Policy<*, Uncompiled>) {
         if (!shouldApplyLandlock(policy)) return
 
         val session = LandlockSession(policy)
@@ -211,16 +212,16 @@ object Landlock {
         mask: Long,
         abi: Int,
     ): LinuxNative.FileDescriptor {
-        val res = createRuleset(arena, mask, abi)
+        val res = with(arena) { createRuleset(mask, abi) }
         return res.getFdOrThrow("landlock_create_ruleset")
     }
 
+    context(arena: Arena)
     internal fun addJvmClasspathRules(
         rulesetFd: LinuxNative.FileDescriptor,
         accessFlags: Long,
-        arena: Arena,
     ) {
-        System.getProperty("java.home")?.let { addRuleFollowSymlinks(rulesetFd, it, accessFlags, arena) }
+        System.getProperty("java.home")?.let { addRuleFollowSymlinks(rulesetFd, it, accessFlags) }
 
         val classPath = System.getProperty("java.class.path") ?: return
         val seen = mutableSetOf<String>()
@@ -229,17 +230,17 @@ object Landlock {
             if (file.exists()) {
                 val dir = if (file.isDirectory) file.absolutePath else file.parent
                 if (seen.add(dir)) {
-                    addRuleFollowSymlinks(rulesetFd, dir, accessFlags, arena)
+                    addRuleFollowSymlinks(rulesetFd, dir, accessFlags)
                 }
             }
         }
     }
 
+    context(arena: Arena)
     private fun addRuleFollowSymlinks(
         rulesetFd: LinuxNative.FileDescriptor,
         path: String,
         allowedAccess: Long,
-        arena: Arena,
     ) {
         val pathSegment = arena.allocateFrom(path)
         val fdResult = LinuxNative.getFileSystem().open(pathSegment, NativeConstants.O_PATH or NativeConstants.O_CLOEXEC)
@@ -253,7 +254,7 @@ object Landlock {
             }
 
         try {
-            val addResult = addRuleToRuleset(arena, rulesetFd, pathFd, allowedAccess)
+            val addResult = addRuleToRuleset(rulesetFd, pathFd, allowedAccess)
             if (addResult is LinuxNative.SyscallResult.Error) {
                 logger.warning("landlock_add_rule failed for JVM classpath $path with errno ${addResult.errno}")
             }
@@ -262,17 +263,17 @@ object Landlock {
         }
     }
 
+    context(arena: Arena)
     private fun addRule(
         rulesetFd: LinuxNative.FileDescriptor,
         path: String,
         allowedAccess: Long,
-        arena: Arena,
     ) {
         val resolvedPath = resolveCanonicalPath(path)
         val openFlags = NativeConstants.O_PATH or NativeConstants.O_CLOEXEC or NativeConstants.O_NOFOLLOW
         val initialResult = LinuxNative.getFileSystem().open(arena.allocateFrom(resolvedPath), openFlags)
 
-        val (fdResult, isFallback) = handleInitialOpenFailure(initialResult, resolvedPath, openFlags, arena)
+        val (fdResult, isFallback) = handleInitialOpenFailure(initialResult, resolvedPath, openFlags)
 
         val pathFd =
             when (fdResult) {
@@ -285,7 +286,7 @@ object Landlock {
 
         try {
             val finalAccess = calculateFinalAccess(allowedAccess, isFallback, resolvedPath)
-            addRuleToRulesetAndVerify(arena, rulesetFd, pathFd, finalAccess, path)
+            addRuleToRulesetAndVerify(rulesetFd, pathFd, finalAccess, path)
         } finally {
             LinuxNative.getFileSystem().close(pathFd)
         }
@@ -299,11 +300,11 @@ object Landlock {
             path
         }
 
+    context(arena: Arena)
     private fun handleInitialOpenFailure(
         res: LinuxNative.SyscallResult,
         resolvedPath: String,
         flags: Int,
-        arena: Arena,
     ): Pair<LinuxNative.SyscallResult, Boolean> {
         if (res is LinuxNative.SyscallResult.Error && res.errno == 2) { // ENOENT
             val parentPath = File(resolvedPath).parent ?: "/"
@@ -336,14 +337,14 @@ object Landlock {
         return allowedAccess
     }
 
+    context(arena: Arena)
     private fun addRuleToRulesetAndVerify(
-        arena: Arena,
         rulesetFd: LinuxNative.FileDescriptor,
         pathFd: LinuxNative.FileDescriptor,
         access: Long,
         path: String,
     ) {
-        val res = addRuleToRuleset(arena, rulesetFd, pathFd, access)
+        val res = addRuleToRuleset(rulesetFd, pathFd, access)
         if (res is LinuxNative.SyscallResult.Error) {
             if (res.errno == ERRNO_EINVAL) {
                 logger.warning("landlock_add_rule rejected $path (EINVAL) — path may be a symlink or unsupported inode type.")
@@ -361,18 +362,18 @@ object Landlock {
         restrictResult.getOrThrow("landlock_restrict_self")
     }
 
+    context(arena: Arena)
     internal fun applyUserRules(
         rulesetFd: LinuxNative.FileDescriptor,
         policy: Policy<*, *>,
         abi: Int,
-        arena: Arena,
         allFsRead: Long,
     ) {
-        policy.allowedFsReadPaths.forEach { addRule(rulesetFd, it, allFsRead, arena) }
+        policy.allowedFsReadPaths.forEach { addRule(rulesetFd, it, allFsRead) }
         val writeFlags = LANDLOCK_ACCESS_FS_WRITE_FILE or LANDLOCK_ACCESS_FS_MAKE_REG or
-            LANDLOCK_ACCESS_FS_MAKE_DIR or LANDLOCK_ACCESS_FS_REMOVE_FILE or
-            LANDLOCK_ACCESS_FS_REMOVE_DIR or (if (abi >= ABI_V3) LANDLOCK_ACCESS_FS_TRUNCATE else 0)
-        policy.allowedFsWritePaths.forEach { addRule(rulesetFd, it, writeFlags, arena) }
+                LANDLOCK_ACCESS_FS_MAKE_DIR or LANDLOCK_ACCESS_FS_REMOVE_FILE or
+                LANDLOCK_ACCESS_FS_REMOVE_DIR or (if (abi >= ABI_V3) LANDLOCK_ACCESS_FS_TRUNCATE else 0)
+        policy.allowedFsWritePaths.forEach { addRule(rulesetFd, it, writeFlags) }
     }
 
     internal fun getAccessMask(
@@ -407,8 +408,8 @@ object Landlock {
         }
     }
 
+    context(arena: Arena)
     internal fun createRuleset(
-        arena: Arena,
         accessMaskFs: Long,
         abi: Int,
     ): LinuxNative.SyscallResult {
@@ -419,8 +420,8 @@ object Landlock {
         return LinuxNative.syscall(NativeConstants.LANDLOCK_CREATE_RULESET_NR, rulesetAttr, size, MemorySegment.NULL)
     }
 
+    context(arena: Arena)
     private fun addRuleToRuleset(
-        arena: Arena,
         rulesetFd: LinuxNative.FileDescriptor,
         pathFd: LinuxNative.FileDescriptor,
         accessMask: Long,
@@ -433,7 +434,7 @@ object Landlock {
 }
 
 internal class LandlockSession(
-    private val policy: Policy<*, *>? = null,
+    private val policy: Policy<*, Uncompiled>? = null,
 ) {
     var state: LandlockState = LandlockState.Uninitialized
         private set
@@ -460,7 +461,7 @@ internal class LandlockSession(
 
         state = LandlockState.CreatingRuleset(abi)
         Arena.ofConfined().use { arena ->
-            val rulesetFdResult = Landlock.createRuleset(arena, accessMaskFs, abi)
+            val rulesetFdResult = with(arena) { Landlock.createRuleset(accessMaskFs, abi) }
             val rulesetFd =
                 when (rulesetFdResult) {
                     is LinuxNative.SyscallResult.Success -> rulesetFdResult.asFd()
@@ -473,9 +474,11 @@ internal class LandlockSession(
 
             state = LandlockState.ConfiguringRuleset(rulesetFd, abi)
             try {
-                Landlock.addJvmClasspathRules(rulesetFd, classpathFlags, arena)
-                if (policy != null) {
-                    Landlock.applyUserRules(rulesetFd, policy, abi, arena, allFsRead)
+                with(arena) {
+                    Landlock.addJvmClasspathRules(rulesetFd, classpathFlags)
+                    if (policy != null) {
+                        Landlock.applyUserRules(rulesetFd, policy, abi, allFsRead)
+                    }
                 }
                 state = LandlockState.Enforcing(rulesetFd)
                 Landlock.enforceRuleset(rulesetFd)

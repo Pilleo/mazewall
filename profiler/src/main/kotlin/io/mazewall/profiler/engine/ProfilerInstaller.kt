@@ -3,10 +3,12 @@ package io.mazewall.profiler.engine
 import io.mazewall.BpfFilter
 import io.mazewall.LinuxNative
 import io.mazewall.Policy
+import io.mazewall.Uncompiled
 import io.mazewall.core.Arch
 import io.mazewall.ffi.NativeConstants
 import io.mazewall.seccomp.BpfInstruction
 import io.mazewall.profiler.Profiler
+import io.mazewall.profiler.internal.ProfilerSocket
 import java.io.IOException
 import java.lang.foreign.Arena
 import java.lang.foreign.ValueLayout
@@ -17,14 +19,16 @@ import java.util.concurrent.atomic.AtomicInteger
  * Internal helper for installing seccomp profiling filters.
  */
 internal object ProfilerInstaller {
+    private const val EINTR = 4
+
     fun installProfilingFilterForThread(
         socketPath: String,
-        policy: Policy<*, *>,
+        policy: Policy<*, Uncompiled>,
         accumulatedLogs: MutableList<TraceEvent>,
         stackTracesMap: MutableMap<TraceEvent, MutableList<Array<StackTraceElement>>>?,
         pathCache: MutableMap<String, Long>,
         workerThreadProvider: () -> Thread?,
-        connectWithRetry: (String) -> Int,
+        connectWithRetry: (String) -> Int = { path -> ProfilerSocket.connectWithRetry(path) },
         startTraceListener: (Int, MutableList<TraceEvent>, MutableMap<TraceEvent, MutableList<Array<StackTraceElement>>>?, MutableMap<String, Long>, () -> Thread?) -> Unit,
     ) {
         val session = ProfilerInstallerSession(
@@ -43,7 +47,7 @@ internal object ProfilerInstaller {
 
 internal class ProfilerInstallerSession(
     private val socketPath: String,
-    private val policy: Policy<*, *>,
+    private val policy: Policy<*, Uncompiled>,
     private val accumulatedLogs: MutableList<TraceEvent>,
     private val stackTracesMap: MutableMap<TraceEvent, MutableList<Array<StackTraceElement>>>?,
     private val pathCache: MutableMap<String, Long>,
@@ -79,7 +83,11 @@ internal class ProfilerInstallerSession(
         try {
             ensureNoNewPrivs()
             val filters = BpfFilter.build(Arch.current(), policy, profilingMode = true)
-            listenerFd = installProfilingBpf(filters)
+            Arena.ofConfined().use { arena ->
+                with(arena) {
+                    listenerFd = installProfilingBpf(filters)
+                }
+            }
         } catch (e: IOException) {
             state = ProfilerInstallerState.Failed(e)
             proceedLatch.countDown()
@@ -122,7 +130,11 @@ internal class ProfilerInstallerSession(
             }
 
             state = ProfilerInstallerState.VerifyingAck(fd, socketFd)
-            verifyDaemonAck(socketFd)
+            Arena.ofConfined().use { arena ->
+                with(arena) {
+                    verifyDaemonAck(socketFd)
+                }
+            }
 
             // Start listener thread for this socket to receive TraceEvents
             startTraceListener(socketFd.value, accumulatedLogs, stackTracesMap, pathCache, workerThreadProvider)
@@ -145,27 +157,26 @@ internal class ProfilerInstallerSession(
         }
     }
 
+    context(arena: Arena)
     private fun verifyDaemonAck(socketFd: LinuxNative.FileDescriptor) {
         // Wait for ACK byte from daemon
-        Arena.ofConfined().use { arena ->
-            val ackBuf = arena.allocate(1)
-            while (true) {
-                val res = LinuxNative.getMemory().read(socketFd, ackBuf, 1)
-                when (res) {
-                    is LinuxNative.SyscallResult.Success -> {
-                        if (res.value == 1L && ackBuf.get(ValueLayout.JAVA_BYTE, 0) == 0xAC.toByte()) {
-                            return
-                        }
-                    }
-
-                    is LinuxNative.SyscallResult.Error -> {
-                        if (res.errno == EINTR) {
-                            continue
-                        }
+        val ackBuf = arena.allocate(1)
+        while (true) {
+            val res = LinuxNative.getMemory().read(socketFd, ackBuf, 1)
+            when (res) {
+                is LinuxNative.SyscallResult.Success -> {
+                    if (res.value == 1L && ackBuf.get(ValueLayout.JAVA_BYTE, 0) == 0xAC.toByte()) {
+                        return
                     }
                 }
-                throw IllegalStateException("Daemon failed to ACK listener receipt")
+
+                is LinuxNative.SyscallResult.Error -> {
+                    if (res.errno == EINTR) {
+                        continue
+                    }
+                }
             }
+            throw IllegalStateException("Daemon failed to ACK listener receipt")
         }
     }
 
@@ -174,21 +185,20 @@ internal class ProfilerInstallerSession(
         r.getOrThrow("prctl(PR_SET_NO_NEW_PRIVS)")
     }
 
+    context(arena: Arena)
     private fun installProfilingBpf(
         filters: List<BpfInstruction>,
     ): LinuxNative.FileDescriptor {
         val arch = Arch.current()
-        Arena.ofConfined().use { arena ->
-            val prog = with(arena) { LinuxNative.getMemory().newSockFProg(filters) }
-            val r =
-                LinuxNative.syscall(
-                    arch.seccompSyscallNumber.toLong(),
-                    NativeConstants.SECCOMP_SET_MODE_FILTER.toLong(),
-                    NativeConstants.SECCOMP_FILTER_FLAG_NEW_LISTENER,
-                    prog,
-                )
+        val prog = LinuxNative.getMemory().newSockFProg(filters)
+        val r =
+            LinuxNative.syscall(
+                arch.seccompSyscallNumber.toLong(),
+                NativeConstants.SECCOMP_SET_MODE_FILTER.toLong(),
+                NativeConstants.SECCOMP_FILTER_FLAG_NEW_LISTENER,
+                prog,
+            )
 
-            return r.getFdOrThrow("seccomp(SECCOMP_FILTER_FLAG_NEW_LISTENER)")
-        }
+        return r.getFdOrThrow("seccomp(SECCOMP_FILTER_FLAG_NEW_LISTENER)")
     }
 }

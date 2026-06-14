@@ -14,7 +14,7 @@ class DescriptorPassingTest {
             dummyByte.set(ValueLayout.JAVA_BYTE, 0, 42.toByte())
             val controlBuf = arena.allocate(128)
 
-            val msgHdr = DescriptorPassing.setupScmRightsMsgHdr(arena, dummyByte, controlBuf)
+            val msgHdr = with(arena) { DescriptorPassing.setupScmRightsMsgHdr(dummyByte, controlBuf) }
 
             // msg_name and msg_namelen should be zero
             assertEquals(0L, msgHdr.get(ValueLayout.ADDRESS, 0L).address(), "msg_name should be null")

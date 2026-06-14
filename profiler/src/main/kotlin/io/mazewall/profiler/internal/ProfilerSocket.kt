@@ -62,7 +62,9 @@ internal object ProfilerSocket {
             controlBuf.set(ValueLayout.JAVA_INT, CMSG_TYPE_OFF, SCM_RIGHTS_VAL) // cmsg_type (SCM_RIGHTS = 1)
             controlBuf.set(ValueLayout.JAVA_INT, CMSG_DATA_OFF, fdToSend)
 
-            val msg = DescriptorPassing.setupScmRightsMsgHdr(arena, dummyByte, controlBuf)
+            val msg = with(arena) {
+                DescriptorPassing.setupScmRightsMsgHdr(dummyByte, controlBuf)
+            }
 
             val res = LinuxNative.sendmsg(LinuxNative.FileDescriptor(socketFd), msg, 0)
             return res is LinuxNative.SyscallResult.Success

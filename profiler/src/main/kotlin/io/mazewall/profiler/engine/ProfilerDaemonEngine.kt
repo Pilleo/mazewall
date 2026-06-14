@@ -188,7 +188,7 @@ internal class ProfilerDaemonEngine(
         )
         try {
             Arena.ofConfined().use { arena ->
-                val pollFds = setupSessionPoll(arena, socketFd, listenerFd)
+                val pollFds = with(arena) { setupSessionPoll(socketFd, listenerFd) }
                 val notif = arena.allocate(Layouts.SECCOMP_NOTIF)
                 val resp = arena.allocate(Layouts.SECCOMP_NOTIF_RESP)
                 val ackBuf = arena.allocate(ACK_BUF_SIZE)
@@ -217,8 +217,8 @@ internal class ProfilerDaemonEngine(
         }
     }
 
+    context(arena: Arena)
     private fun setupSessionPoll(
-        arena: Arena,
         socketFd: LinuxNative.FileDescriptor,
         listenerFd: LinuxNative.FileDescriptor,
     ): MemorySegment {

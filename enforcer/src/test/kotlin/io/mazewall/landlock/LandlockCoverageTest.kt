@@ -55,7 +55,9 @@ class LandlockCoverageTest {
         LinuxNative.setEngine(mock)
 
         Arena.ofConfined().use { arena ->
-            Landlock.addJvmClasspathRules(LinuxNative.FileDescriptor(42), 0L, arena)
+            with(arena) {
+                Landlock.addJvmClasspathRules(LinuxNative.FileDescriptor(42), 0L)
+            }
         }
     }
 
@@ -81,7 +83,9 @@ class LandlockCoverageTest {
         LinuxNative.setEngine(mock)
 
         Arena.ofConfined().use { arena ->
-            Landlock.addJvmClasspathRules(LinuxNative.FileDescriptor(42), 0L, arena)
+            with(arena) {
+                Landlock.addJvmClasspathRules(LinuxNative.FileDescriptor(42), 0L)
+            }
         }
     }
 

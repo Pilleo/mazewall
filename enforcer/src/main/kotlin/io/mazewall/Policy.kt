@@ -280,17 +280,17 @@ class Policy<out S : PolicyScope, out State : PolicyState> private constructor(
          */
         @JvmStatic
         @JvmName("combineProcessWide")
-        fun combine(vararg policies: Policy<PolicyScope.ProcessWideSafe, *>): Policy<PolicyScope.ProcessWideSafe, Uncompiled> {
+        fun combine(vararg policies: Policy<PolicyScope.ProcessWideSafe, Uncompiled>): Policy<PolicyScope.ProcessWideSafe, Uncompiled> {
             @Suppress("UNCHECKED_CAST")
             return combineInternal(*policies) as Policy<PolicyScope.ProcessWideSafe, Uncompiled>
         }
 
         @JvmStatic
-        fun combine(vararg policies: Policy<*, *>): Policy<*, Uncompiled> {
+        fun combine(vararg policies: Policy<*, Uncompiled>): Policy<*, Uncompiled> {
             return combineInternal(*policies)
         }
 
-        private fun combineInternal(vararg policies: Policy<*, *>): Policy<*, Uncompiled> {
+        private fun combineInternal(vararg policies: Policy<*, Uncompiled>): Policy<*, Uncompiled> {
             require(policies.isNotEmpty()) { "At least one policy is required" }
 
             val combinedDefaultAction = policies.maxByOrNull { it.defaultAction.priority }!!.defaultAction

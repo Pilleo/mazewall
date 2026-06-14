@@ -3,6 +3,7 @@ package io.mazewall.enforcer
 import io.mazewall.Platform
 import io.mazewall.Policy
 import io.mazewall.PolicyScope
+import io.mazewall.Uncompiled
 import io.mazewall.core.SeccompAction
 import io.mazewall.core.Syscall
 import io.mazewall.enforcer.internal.ContainedExecutorWrapper
@@ -44,7 +45,7 @@ object ContainedExecutors {
      * To prevent this "carrier contamination", this method throws [IllegalStateException]
      * if called from a virtual thread.
      */
-    fun installOnCurrentThread(vararg policies: Policy<*, *>) {
+    fun installOnCurrentThread(vararg policies: Policy<*, Uncompiled>) {
         installInternal(false, *policies)
     }
 
@@ -53,7 +54,7 @@ object ContainedExecutors {
      * This acts as a global security lockdown and cannot be undone. All future threads
      * created by this process will inherit these restrictions.
      */
-    fun installOnProcess(vararg policies: Policy<PolicyScope.ProcessWideSafe, *>) {
+    fun installOnProcess(vararg policies: Policy<PolicyScope.ProcessWideSafe, Uncompiled>) {
         installInternal(true, *policies)
     }
 
@@ -63,7 +64,7 @@ object ContainedExecutors {
      */
     fun wrap(
         delegate: ExecutorService,
-        vararg policies: Policy<*, *>,
+        vararg policies: Policy<*, Uncompiled>,
     ): ExecutorService {
         val combinedPolicy = Policy.combine(*policies)
         return ContainedExecutorWrapper(delegate, combinedPolicy)
@@ -71,7 +72,7 @@ object ContainedExecutors {
 
     private fun installInternal(
         processWide: Boolean,
-        vararg policies: Policy<*, *>,
+        vararg policies: Policy<*, Uncompiled>,
     ) {
         validateLinuxAndNotVirtual()
 
@@ -103,7 +104,7 @@ object ContainedExecutors {
 
     private fun applyLandlockIfNecessary(
         processWide: Boolean,
-        policy: Policy<*, *>,
+        policy: Policy<*, Uncompiled>,
     ) {
         if (!needsLandlock(policy)) return
 

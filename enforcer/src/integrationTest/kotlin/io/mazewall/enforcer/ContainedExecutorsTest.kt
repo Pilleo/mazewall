@@ -276,10 +276,10 @@ class ContainedExecutorsTest : BaseIntegrationTest() {
 
     @Test
     fun `installOnProcess rejects cast thread-local policy with UnsupportedOperationException`() {
-        val threadLocalPolicy = Policy.builder().allowFsRead("/tmp").build().compile(io.mazewall.core.Arch.current())
+        val threadLocalPolicy = Policy.builder().allowFsRead("/tmp").build()
 
         @Suppress("UNCHECKED_CAST")
-        val castPolicy = threadLocalPolicy as Policy<PolicyScope.ProcessWideSafe, io.mazewall.Compiled>
+        val castPolicy = threadLocalPolicy as Policy<PolicyScope.ProcessWideSafe, io.mazewall.Uncompiled>
 
         val ex = assertFailsWith<UnsupportedOperationException> {
             ContainedExecutors.installOnProcess(castPolicy)

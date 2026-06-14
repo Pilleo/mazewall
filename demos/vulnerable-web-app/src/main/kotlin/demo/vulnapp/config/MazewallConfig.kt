@@ -3,6 +3,7 @@ package demo.vulnapp.config
 import demo.vulnapp.service.*
 import io.mazewall.Policy
 import io.mazewall.SbobParser
+import io.mazewall.Uncompiled
 import io.mazewall.enforcer.ContainedExecutors
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
 import org.springframework.context.annotation.Bean
@@ -23,7 +24,7 @@ class MazewallConfig {
     private val logger = Logger.getLogger(MazewallConfig::class.java.name)
     private val executors = java.util.concurrent.CopyOnWriteArrayList<ExecutorService>()
 
-    private fun wrapExecutor(delegate: ExecutorService, basePolicy: Policy<*, *>): ExecutorService {
+    private fun wrapExecutor(delegate: ExecutorService, basePolicy: Policy<*, Uncompiled>): ExecutorService {
         executors.add(delegate)
         val sbobPath = System.getProperty("mazewall.sbob.path") ?: "/app/sbob.json"
         val bobFile = Paths.get(sbobPath)
