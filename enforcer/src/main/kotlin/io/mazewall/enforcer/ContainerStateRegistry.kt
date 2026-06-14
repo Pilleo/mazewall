@@ -21,15 +21,15 @@ internal object ContainerStateRegistry {
     // "Permanent thread pool contamination" for the known limitation and
     // the correct fix strategy (scope checks, not cleanup).
 
-    val THREAD_SYSCALL_ACTIONS = ThreadLocal.withInitial<Map<Syscall, SeccompAction>> { emptyMap() }
-    val THREAD_DEFAULT_ACTION = ThreadLocal.withInitial { SeccompAction.ACT_ALLOW }
-    val THREAD_ALLOWS_MMAP_EXEC = ThreadLocal.withInitial { true }
-    val THREAD_ALLOWS_NON_THREAD_CLONE = ThreadLocal.withInitial { true }
-    val THREAD_ALLOWS_UNSAFE_PRCTL = ThreadLocal.withInitial { true }
-    val THREAD_ALLOWED_SYSCALLS = ThreadLocal.withInitial<Set<Syscall>?> { null }
-    val FILTER_DEPTH = ThreadLocal.withInitial { 0 }
-    val THREAD_LANDLOCK_APPLIED_READS = ThreadLocal.withInitial<Set<String>?> { null }
-    val THREAD_LANDLOCK_APPLIED_WRITES = ThreadLocal.withInitial<Set<String>?> { null }
+    var threadSyscallActions by threadLocal<Map<Syscall, SeccompAction>> { emptyMap() }
+    var threadDefaultAction by threadLocal { SeccompAction.ACT_ALLOW }
+    var threadAllowsMmapExec by threadLocal { true }
+    var threadAllowsNonThreadClone by threadLocal { true }
+    var threadAllowsUnsafePrctl by threadLocal { true }
+    var threadAllowedSyscalls by threadLocal<Set<Syscall>?> { null }
+    var filterDepth by threadLocal { 0 }
+    var threadLandlockAppliedReads by threadLocal<Set<String>?> { null }
+    var threadLandlockAppliedWrites by threadLocal<Set<String>?> { null }
 
     val PROCESS_SYSCALL_ACTIONS: MutableMap<Syscall, SeccompAction> = java.util.concurrent.ConcurrentHashMap()
     val PROCESS_DEFAULT_ACTION = AtomicReference(SeccompAction.ACT_ALLOW)

@@ -21,11 +21,14 @@ object Platform {
 
     private const val ERRNO_EINVAL = 22
 
+    /** True if the current operating system is Linux. */
+    val isLinux: Boolean = System.getProperty("os.name").equals("Linux", ignoreCase = true)
+
     /**
      * Returns true if the current platform supports seccomp filters.
      */
     fun isSupported(): Boolean =
-        System.getProperty("os.name").equals("Linux", ignoreCase = true) &&
+        isLinux &&
             hasKernelSeccompSupport() &&
             isSeccompSanityCheckPassing() &&
             isArchitectureSupported()

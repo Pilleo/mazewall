@@ -73,12 +73,8 @@ object ContainedExecutors {
         processWide: Boolean,
         vararg policies: Policy<*, *>,
     ) {
-        if (Thread.currentThread().isVirtual) {
-            throw IllegalStateException(
-                "Attempted to apply seccomp containment inside a virtual thread. " +
-                        "Use a dedicated platform thread pool and install containment on its carrier threads instead.",
-            )
-        }
+        validateLinuxAndNotVirtual()
+
         val combinedPolicy = Policy.combine(*policies)
         applyLandlockIfNecessary(processWide, combinedPolicy)
 
@@ -118,8 +114,8 @@ object ContainedExecutors {
             )
         }
 
-        val appliedReads = ContainerStateRegistry.THREAD_LANDLOCK_APPLIED_READS.get()
-        val appliedWrites = ContainerStateRegistry.THREAD_LANDLOCK_APPLIED_WRITES.get()
+        val appliedReads = ContainerStateRegistry.threadLandlockAppliedReads
+        val appliedWrites = ContainerStateRegistry.threadLandlockAppliedWrites
 
         if (appliedReads != null && appliedWrites != null) {
             // Assert that we are not trying to expand Landlock filesystem permissions on nested containment
@@ -132,8 +128,8 @@ object ContainedExecutors {
 
         if (appliedReads != policy.allowedFsReadPaths || appliedWrites != policy.allowedFsWritePaths) {
             Landlock.applyRuleset(policy)
-            ContainerStateRegistry.THREAD_LANDLOCK_APPLIED_READS.set(policy.allowedFsReadPaths)
-            ContainerStateRegistry.THREAD_LANDLOCK_APPLIED_WRITES.set(policy.allowedFsWritePaths)
+            ContainerStateRegistry.threadLandlockAppliedReads = policy.allowedFsReadPaths
+            ContainerStateRegistry.threadLandlockAppliedWrites = policy.allowedFsWritePaths
         }
     }
 
@@ -177,7 +173,7 @@ object ContainedExecutors {
     }
 
     private fun resolveCurrentState(): FilterInstallationPlanner.ContainerState {
-        val threadActions = ContainerStateRegistry.THREAD_SYSCALL_ACTIONS.get()
+        val threadActions = ContainerStateRegistry.threadSyscallActions
         val processActions = ContainerStateRegistry.PROCESS_SYSCALL_ACTIONS
 
         val mergedActions = mutableMapOf<Syscall, SeccompAction>()
@@ -191,11 +187,11 @@ object ContainedExecutors {
             }
         }
 
-        val threadDefault = ContainerStateRegistry.THREAD_DEFAULT_ACTION.get()
+        val threadDefault = ContainerStateRegistry.threadDefaultAction
         val processDefault = ContainerStateRegistry.PROCESS_DEFAULT_ACTION.get()
         val mergedDefault = if (threadDefault.priority > processDefault.priority) threadDefault else processDefault
 
-        val threadAllowed = ContainerStateRegistry.THREAD_ALLOWED_SYSCALLS.get()
+        val threadAllowed = ContainerStateRegistry.threadAllowedSyscalls
         val processAllowed = ContainerStateRegistry.PROCESS_ALLOWED_SYSCALLS.get()
         val mergedAllowed = if (threadAllowed == null) {
             processAllowed
@@ -208,10 +204,10 @@ object ContainedExecutors {
         return FilterInstallationPlanner.ContainerState(
             currentSyscallActions = mergedActions,
             currentDefaultAction = mergedDefault,
-            currentlyAllowsMmapExec = ContainerStateRegistry.THREAD_ALLOWS_MMAP_EXEC.get() && ContainerStateRegistry.PROCESS_ALLOWS_MMAP_EXEC.get(),
-            currentlyAllowsNonThreadClone = ContainerStateRegistry.THREAD_ALLOWS_NON_THREAD_CLONE.get() && ContainerStateRegistry.PROCESS_ALLOWS_NON_THREAD_CLONE.get(),
-            currentlyAllowsUnsafePrctl = ContainerStateRegistry.THREAD_ALLOWS_UNSAFE_PRCTL.get() && ContainerStateRegistry.PROCESS_ALLOWS_UNSAFE_PRCTL.get(),
-            currentDepth = ContainerStateRegistry.FILTER_DEPTH.get() + ContainerStateRegistry.PROCESS_FILTER_DEPTH.get(),
+            currentlyAllowsMmapExec = ContainerStateRegistry.threadAllowsMmapExec && ContainerStateRegistry.PROCESS_ALLOWS_MMAP_EXEC.get(),
+            currentlyAllowsNonThreadClone = ContainerStateRegistry.threadAllowsNonThreadClone && ContainerStateRegistry.PROCESS_ALLOWS_NON_THREAD_CLONE.get(),
+            currentlyAllowsUnsafePrctl = ContainerStateRegistry.threadAllowsUnsafePrctl && ContainerStateRegistry.PROCESS_ALLOWS_UNSAFE_PRCTL.get(),
+            currentDepth = ContainerStateRegistry.filterDepth + ContainerStateRegistry.PROCESS_FILTER_DEPTH.get(),
             currentlyAllowedSyscalls = mergedAllowed,
         )
     }
@@ -270,27 +266,27 @@ object ContainedExecutors {
         newDefaultAction: SeccompAction,
         toInstall: Policy<*, *>,
     ) {
-        val currentActions = ContainerStateRegistry.THREAD_SYSCALL_ACTIONS.get()
+        val currentActions = ContainerStateRegistry.threadSyscallActions
         val mergedActions = currentActions.toMutableMap()
         for ((sys, action) in newBlocks) {
             mergedActions[sys] = action
         }
-        ContainerStateRegistry.THREAD_SYSCALL_ACTIONS.set(mergedActions)
+        ContainerStateRegistry.threadSyscallActions = mergedActions
 
-        val currentDefault = ContainerStateRegistry.THREAD_DEFAULT_ACTION.get()
+        val currentDefault = ContainerStateRegistry.threadDefaultAction
         if (newDefaultAction.priority > currentDefault.priority) {
-            ContainerStateRegistry.THREAD_DEFAULT_ACTION.set(newDefaultAction)
+            ContainerStateRegistry.threadDefaultAction = newDefaultAction
         }
 
-        if (!toInstall.allowMmapExec) ContainerStateRegistry.THREAD_ALLOWS_MMAP_EXEC.set(false)
-        if (!toInstall.allowNonThreadClone) ContainerStateRegistry.THREAD_ALLOWS_NON_THREAD_CLONE.set(false)
-        if (!toInstall.allowUnsafePrctl) ContainerStateRegistry.THREAD_ALLOWS_UNSAFE_PRCTL.set(false)
-        ContainerStateRegistry.FILTER_DEPTH.set(ContainerStateRegistry.FILTER_DEPTH.get() + 1)
+        if (!toInstall.allowMmapExec) ContainerStateRegistry.threadAllowsMmapExec = false
+        if (!toInstall.allowNonThreadClone) ContainerStateRegistry.threadAllowsNonThreadClone = false
+        if (!toInstall.allowUnsafePrctl) ContainerStateRegistry.threadAllowsUnsafePrctl = false
+        ContainerStateRegistry.filterDepth = ContainerStateRegistry.filterDepth + 1
 
         if (toInstall.defaultAction != SeccompAction.ACT_ALLOW) {
             val toInstallAllowed = Syscall.entries.filter { toInstall.isSyscallAllowed(it) }.toSet()
-            val currentAllowed = ContainerStateRegistry.THREAD_ALLOWED_SYSCALLS.get()
-            ContainerStateRegistry.THREAD_ALLOWED_SYSCALLS.set(currentAllowed?.intersect(toInstallAllowed) ?: toInstallAllowed)
+            val currentAllowed = ContainerStateRegistry.threadAllowedSyscalls
+            ContainerStateRegistry.threadAllowedSyscalls = currentAllowed?.intersect(toInstallAllowed) ?: toInstallAllowed
         }
     }
 }
