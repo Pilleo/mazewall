@@ -97,9 +97,28 @@ pitest {
 }
 
 classDiagrams {
+    defaults {
+        style {
+            hidePackages()
+            theme("spacelab")
+            hide("empty members")
+        }
+        exclude(methods().withNameLike("component*") as io.gitlab.plunts.gradle.plantuml.plugin.matcher.MethodMatcher)
+        exclude(methods().withName("copy") as io.gitlab.plunts.gradle.plantuml.plugin.matcher.MethodMatcher)
+        exclude(methods().withName("getEntries") as io.gitlab.plunts.gradle.plantuml.plugin.matcher.MethodMatcher)
+        exclude(methods().withName("profile") as io.gitlab.plunts.gradle.plantuml.plugin.matcher.MethodMatcher)
+        exclude(methods().withName("wrap") as io.gitlab.plunts.gradle.plantuml.plugin.matcher.MethodMatcher)
+        exclude(methods().withName("toPolicy") as io.gitlab.plunts.gradle.plantuml.plugin.matcher.MethodMatcher)
+        exclude(methods().withName("toDsl") as io.gitlab.plunts.gradle.plantuml.plugin.matcher.MethodMatcher)
+        exclude(classes().withNameLike("*\\$*"))
+        // Exclude constant/data-heavy/mapper noise
+        exclude(classes().withName("io.mazewall.profiler.engine.ProfilerConstantsKt"))
+    }
+
     diagram {
         name("Profiler Class Diagram")
         include(packages().withName("io.mazewall.profiler"))
         writeTo(file("$rootDir/docs/diagrams/profiler_class_diagram.puml"))
+        insertInto(file("$rootDir/docs/internals/profiler_architecture.md"))
     }
 }

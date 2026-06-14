@@ -94,6 +94,10 @@ graph TD
     D2 --> enforcer
 ```
 
+For detailed class diagrams and relationship maps of the individual modules:
+- See the [Enforcer Architecture Document](enforcer_architecture.md) for the `:enforcer` module.
+- See the [Profiler Architecture Document](profiler_architecture.md) for the `:profiler` module.
+
 ## 5. Critical Memory Layouts (FFM)
 
 If you modify these, you must update both the Kotlin side and the C-side (if applicable).

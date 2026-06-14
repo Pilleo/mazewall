@@ -18,6 +18,8 @@ This subproject implements unprivileged sandboxing using Linux **Seccomp-BPF** a
 
 ## Technical Architecture
 
+For a detailed class hierarchy and structural relationship map, see the [Enforcer Module Architecture documentation](../docs/internals/enforcer_architecture.md).
+
 - **FFM Native Bindings:** Uses the JDK Foreign Function & Memory API to map native Linux system calls directly from Kotlin, eliminating the need for JNI or dynamic C library dependencies.
 - **BPF Program Compilation:** Generates deterministic BPF instruction arrays. The compiler uses an inverted linear scan to handle complex syscall policies within the 8-bit seccomp relative jump limitation.
 - **Thread-Scoped Enforcement:** Applies filters to individual OS threads via `prctl(PR_SET_SECCOMP, SECCOMP_MODE_FILTER, ...)`. Filters are inherited by child threads created after installation.

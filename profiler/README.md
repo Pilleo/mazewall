@@ -109,13 +109,14 @@ behavior.networkEndpoints // Set<String>  — every socket destination
 behavior.toPolicy()      // → Policy (ready to pass to ContainedExecutors.wrap)
 behavior.toDsl()         // → String (Kotlin DSL to paste into your codebase)
 behavior.toJson()        // → String (machine-readable SBoB JSON)
+behavior.toStackTracesJson() // → String (JSON mapping stack traces to events)
 ```
 
 ---
 
 ## Technical Architecture
 
-*(Internal details for contributors — skip if you just want to use the profiler.)*
+For a detailed class hierarchy and structural relationship map, see the [Profiler Module Architecture documentation](../docs/internals/profiler_architecture.md).
 
 - **`Profiler` / `ProfilerDaemon`**: Implements the out-of-process `USER_NOTIF` engine. The daemon receives the seccomp listener FD via UNIX socket `SCM_RIGHTS` passing, intercepts trapped syscalls, resolves paths via `process_vm_readv`, and sends an ACK back to release the worker thread.
 - **`ProfilerTraceListener`**: Bridge between the daemon and the JVM — receives `TraceEvent`s and correlates them with JVM stack traces via `ThreadRegistry`.

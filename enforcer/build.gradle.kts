@@ -137,9 +137,31 @@ pitest {
 }
 
 classDiagrams {
+    defaults {
+        style {
+            hidePackages()
+            theme("spacelab")
+            hide("empty members")
+        }
+        exclude(methods().withNameLike("component*") as io.gitlab.plunts.gradle.plantuml.plugin.matcher.MethodMatcher)
+        exclude(methods().withName("copy") as io.gitlab.plunts.gradle.plantuml.plugin.matcher.MethodMatcher)
+        exclude(methods().withName("getEntries") as io.gitlab.plunts.gradle.plantuml.plugin.matcher.MethodMatcher)
+        exclude(methods().withName("buildFromActions\$io_mazewall_enforcer") as io.gitlab.plunts.gradle.plantuml.plugin.matcher.MethodMatcher)
+        exclude(methods().withName("combineProcessWide") as io.gitlab.plunts.gradle.plantuml.plugin.matcher.MethodMatcher)
+        exclude(methods().withName("combine") as io.gitlab.plunts.gradle.plantuml.plugin.matcher.MethodMatcher)
+        exclude(classes().withNameLike("*\\$*"))
+        // Exclude constant/data-heavy/mapper noise
+        exclude(classes().withName("io.mazewall.core.Arch"))
+        exclude(classes().withName("io.mazewall.core.Syscall"))
+        exclude(classes().withNameLike("io.mazewall.core.*Mapper"))
+        exclude(classes().withName("io.mazewall.ffi.NativeConstants"))
+        exclude(classes().withName("io.mazewall.ffi.Layouts"))
+    }
+
     diagram {
         name("Enforcer Class Diagram")
         include(packages().withName("io.mazewall"))
         writeTo(file("$rootDir/docs/diagrams/enforcer_class_diagram.puml"))
+        insertInto(file("$rootDir/docs/internals/enforcer_architecture.md"))
     }
 }

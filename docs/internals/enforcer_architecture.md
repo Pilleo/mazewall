@@ -1,3 +1,12 @@
+# Enforcer Module Architecture
+
+This document maps the architectural design and class hierarchy of the `:enforcer` module.
+
+## Core Class Diagram
+
+The following diagram illustrates the relationships between the sandbox engine, policy models, native FFM bindings, and the Landlock/Seccomp implementation layers.
+
+```plantuml
 @startuml Enforcer Class Diagram
 !pragma useIntermediatePackages false
 !theme spacelab
@@ -333,3 +342,4 @@ io.mazewall.seccomp.PureJavaBpfEngine --> io.mazewall.seccomp.PureJavaBpfEngine
 io.mazewall.seccomp.SyscallInspection --> io.mazewall.seccomp.ArgCheck
 io.mazewall.seccomp.SyscallInspection --> io.mazewall.core.SeccompAction
 @enduml
+```

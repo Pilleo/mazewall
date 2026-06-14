@@ -1,3 +1,12 @@
+# Profiler Module Architecture
+
+This document maps the architectural design and class hierarchy of the `:profiler` module.
+
+## Core Class Diagram
+
+The following diagram illustrates the relationships between the profiler daemon, the memory reader, trace listener, the IPC transport layer, and the SBoB compiler.
+
+```plantuml
 @startuml Profiler Class Diagram
 !pragma useIntermediatePackages false
 !theme spacelab
@@ -224,3 +233,4 @@ io.mazewall.profiler.iterative.IterativeProfiler --> io.mazewall.profiler.iterat
 io.mazewall.profiler.strace.StraceProfiler --> io.mazewall.profiler.strace.StraceProfiler
 io.mazewall.profiler.strace.StraceWorkloadRunner --> io.mazewall.profiler.strace.StraceWorkloadRunner
 @enduml
+```
