@@ -8,7 +8,7 @@ class SeccompEngineTest {
     @Test
     fun `default installOnProcess throws UnsupportedOperationException`() {
         val dummyEngine = object : SeccompEngine {
-            override fun install(policy: Policy<*>) {
+            override fun install(policy: io.mazewall.CompiledPolicy<*>) {
                 // No-op
             }
 
@@ -17,9 +17,12 @@ class SeccompEngineTest {
         }
 
         val emptyPolicy = Policy.builder().build()
+        val arch = io.mazewall.core.Arch
+            .current()
+        val compiledPolicy = emptyPolicy.compile(arch)
 
         val exception = assertFailsWith<UnsupportedOperationException> {
-            dummyEngine.installOnProcess(emptyPolicy)
+            dummyEngine.installOnProcess(compiledPolicy)
         }
 
         assertEquals("Global process containment is not supported by this engine.", exception.message)

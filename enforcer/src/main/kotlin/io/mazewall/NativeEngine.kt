@@ -161,8 +161,8 @@ interface NativeMemory {
         count: Long,
     ): LinuxNative.SyscallResult
 
+    context(arena: Arena)
     fun newSockFProg(
-        arena: Arena,
         filters: Array<SockFilter>,
     ): MemorySegment
 }

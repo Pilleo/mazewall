@@ -167,8 +167,8 @@ open class MockNativeEngine : NativeEngine {
         timeout: Int,
     ) = pollResult
 
+    context(arena: Arena)
     override fun newSockFProg(
-        arena: Arena,
         filters: Array<SockFilter>,
     ): MemorySegment {
         return arena.allocate(Layouts.SOCK_FPROG)

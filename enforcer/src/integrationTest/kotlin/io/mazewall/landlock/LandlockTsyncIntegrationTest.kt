@@ -54,7 +54,7 @@ class LandlockTsyncIntegrationTest : BaseIntegrationTest() {
                 "--enable-native-access=ALL-UNNAMED",
                 "-cp",
                 classpath,
-                $$"io.mazewall.landlock.LandlockTsyncIntegrationTest$TsyncChild",
+                "io.mazewall.landlock.LandlockTsyncIntegrationTest\$TsyncChild",
             )
 
         val process = pb.start()

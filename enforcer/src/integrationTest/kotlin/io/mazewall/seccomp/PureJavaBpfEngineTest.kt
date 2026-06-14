@@ -2,6 +2,7 @@ package io.mazewall.seccomp
 import io.mazewall.BaseIntegrationTest
 import io.mazewall.EnabledIfLinuxAndSupported
 import io.mazewall.Policy
+import io.mazewall.core.Arch
 import io.mazewall.core.Syscall
 import io.mazewall.enforcer.ContainmentViolationDetector
 import org.junit.jupiter.api.Test
@@ -25,7 +26,7 @@ class PureJavaBpfEngineTest : BaseIntegrationTest() {
                             .base(Policy.NO_EXEC)
                             .allowMmapExec()
                             .build()
-                        PureJavaBpfEngine.install(policy)
+                        PureJavaBpfEngine.install(policy.compile(Arch.current()))
                         try {
                             ProcessBuilder("echo", "hello").start()
                             false
@@ -81,7 +82,7 @@ class PureJavaBpfEngineTest : BaseIntegrationTest() {
         try {
             executor
                 .submit {
-                    PureJavaBpfEngine.install(policy)
+                    PureJavaBpfEngine.install(policy.compile(Arch.current()))
                 }.get()
         } finally {
             executor.shutdown()
@@ -94,13 +95,13 @@ class PureJavaBpfEngineTest : BaseIntegrationTest() {
             object : SeccompEngine {
                 override val isSupported: Boolean = true
 
-                override fun install(policy: Policy<*>) {
+                override fun install(policy: io.mazewall.CompiledPolicy<*>) {
                     // No-op for test stub
                 }
             }
         // Should throw UnsupportedOperationException as per default impl
         assertFailsWith<UnsupportedOperationException> {
-            engine.installOnProcess(Policy.PURE_COMPUTE_UNSAFE)
+            engine.installOnProcess(Policy.PURE_COMPUTE_UNSAFE.compile(Arch.current()))
         }
     }
 
@@ -118,7 +119,7 @@ class PureJavaBpfEngineTest : BaseIntegrationTest() {
                     .base(Policy.PURE_COMPUTE_UNSAFE)
                     .allowMmapExec()
                     .build()
-                PureJavaBpfEngine.install(policy)
+                PureJavaBpfEngine.install(policy.compile(Arch.current()))
                 PureJavaBpfEngine.state
             }.get()
             assertTrue(state is SeccompInstallationState.Verified, "Expected SeccompInstallationState.Verified, got $state")

@@ -174,7 +174,7 @@ internal class ProfilerInstallerSession(
     ) {
         val arch = Arch.current()
         Arena.ofConfined().use { arena ->
-            val prog = LinuxNative.newSockFProg(arena, filters)
+            val prog = with(arena) { LinuxNative.newSockFProg(filters) }
             val r =
                 LinuxNative.syscall(
                     arch.seccompSyscallNumber.toLong(),

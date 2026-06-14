@@ -90,7 +90,7 @@ class LinuxNativeCoverageTest {
                 SockFilter(0x01, 2, 3, 0x12345678),
                 SockFilter(0x05, 0, 0, 0x00000001),
             )
-            val prog = LinuxNative.newSockFProg(arena, filters)
+            val prog = with(arena) { LinuxNative.newSockFProg(filters) }
             assertNotNull(prog)
 
             assertEquals(2, prog.get(ValueLayout.JAVA_SHORT, Layouts.SOCK_FPROG_LEN_OFFSET).toInt())

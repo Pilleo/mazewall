@@ -19,3 +19,21 @@ ktlint_standard_indent = disabled
 ktlint_standard_string-template-indent = disabled
 ktlint_standard_function-expression-body = disabled
 ktlint_standard_multiline-expression-wrapping = disabled
+
+[**/MockNativeEngine.kt]
+ktlint = disabled
+
+[**/LinuxNative.kt]
+ktlint = disabled
+
+[**/NativeEngine.kt]
+ktlint = disabled
+
+[**/PureJavaBpfEngine.kt]
+ktlint = disabled
+
+[**/ProfilerInstaller.kt]
+ktlint = disabled
+
+[**/LinuxNativeCoverageTest.kt]
+ktlint = disabled

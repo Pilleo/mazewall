@@ -193,10 +193,10 @@ object LinuxNative : NativeEngine {
         timeout: Int,
     ) = engine.poll(fds, nfds, timeout)
 
+    context(arena: Arena)
     override fun newSockFProg(
-        arena: Arena,
         filters: Array<SockFilter>,
-    ) = engine.newSockFProg(arena, filters)
+    ) = with(arena) { engine.newSockFProg(filters) }
 
     data class SyscallResult(
         val returnValue: Long,
@@ -786,8 +786,8 @@ internal object RealNativeEngine : NativeEngine {
         }
     }
 
+    context(arena: Arena)
     override fun newSockFProg(
-        arena: Arena,
         filters: Array<SockFilter>,
     ): MemorySegment {
         val filterArraySeg = arena.allocate(MemoryLayout.sequenceLayout(filters.size.toLong(), Layouts.SOCK_FILTER))

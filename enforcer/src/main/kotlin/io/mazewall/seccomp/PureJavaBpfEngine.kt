@@ -1,6 +1,5 @@
 package io.mazewall.seccomp
 
-import io.mazewall.BpfFilter
 import io.mazewall.LinuxNative
 import io.mazewall.Platform
 import io.mazewall.Policy
@@ -23,17 +22,17 @@ object PureJavaBpfEngine : SeccompEngine {
     override val isSupported: Boolean
         get() = Platform.isSupported()
 
-    override fun install(policy: Policy<*>) {
+    override fun install(policy: io.mazewall.CompiledPolicy<*>) {
         installInternal(policy, useTsync = false)
     }
 
-    override fun installOnProcess(policy: Policy<*>) {
+    override fun installOnProcess(policy: io.mazewall.CompiledPolicy<*>) {
         installInternal(policy, useTsync = true)
     }
 
     @Suppress("TooGenericExceptionCaught")
     private fun installInternal(
-        policy: Policy<*>,
+        policy: io.mazewall.CompiledPolicy<*>,
         useTsync: Boolean,
     ) {
         threadState.set(SeccompInstallationState.Uninitialized)
@@ -42,15 +41,17 @@ object PureJavaBpfEngine : SeccompEngine {
             threadState.set(SeccompInstallationState.PrivilegesLocked)
 
             val arch = Arch.current()
-            val filters = BpfFilter.build(arch, policy)
+            val filters = policy.compiledFilters
 
             Arena.ofConfined().use { arena ->
-                val prog = LinuxNative.getMemory().newSockFProg(arena, filters)
+                val prog = with(arena) {
+                    LinuxNative.getMemory().newSockFProg(filters)
+                }
                 threadState.set(SeccompInstallationState.FilterBuilt(prog))
                 installFilter(arch, prog, useTsync)
             }
 
-            verifyInstallation(policy)
+            verifyInstallation(policy.policy)
         } catch (e: Throwable) {
             val stepName = when (val current = threadState.get()) {
                 is SeccompInstallationState.FilterBuilt -> "installFilter"

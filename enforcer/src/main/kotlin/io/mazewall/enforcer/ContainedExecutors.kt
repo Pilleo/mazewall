@@ -222,11 +222,14 @@ object ContainedExecutors {
         newBlocks: Map<Syscall, SeccompAction>,
         newDefaultAction: SeccompAction,
     ) {
+        val arch = io.mazewall.core.Arch
+            .current()
+        val compiledPolicy = toInstall.compile(arch)
         if (processWide) {
-            PureJavaBpfEngine.installOnProcess(toInstall)
+            PureJavaBpfEngine.installOnProcess(compiledPolicy)
             updateProcessState(newBlocks, newDefaultAction, toInstall)
         } else {
-            PureJavaBpfEngine.install(toInstall)
+            PureJavaBpfEngine.install(compiledPolicy)
             updateThreadState(newBlocks, newDefaultAction, toInstall)
         }
     }

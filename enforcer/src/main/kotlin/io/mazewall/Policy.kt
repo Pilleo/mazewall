@@ -15,6 +15,14 @@ sealed interface PolicyScope {
 }
 
 /**
+ * A compiled seccomp policy containing the BPF filter instructions ready for installation.
+ */
+class CompiledPolicy<out S : PolicyScope> internal constructor(
+    val policy: Policy<S>,
+    val compiledFilters: Array<SockFilter>,
+)
+
+/**
  * Defines which syscalls to block. Create via [builder] or use the built-in presets.
  *
  * ### Built-in Preset Decision Guide
@@ -60,6 +68,14 @@ class Policy<out S : PolicyScope> private constructor(
     val allowedFsWritePaths: Set<String> = emptySet(),
     internal val enforceLandlock: Boolean = false,
 ) {
+    /**
+     * Compiles this policy for the given [arch] and transitions it to the Compiled state.
+     */
+    fun compile(arch: Arch): CompiledPolicy<S> {
+        val filters = BpfFilter.build(arch, this)
+        return CompiledPolicy(this, filters)
+    }
+
     /** Returns true if the given [syscall] is unconditionally allowed by this policy. */
     fun isSyscallAllowed(syscall: Syscall): Boolean {
         val action = syscallActions[syscall] ?: defaultAction
@@ -487,7 +503,7 @@ class Policy<out S : PolicyScope> private constructor(
                 finalSyscalls[Syscall.OPENAT2] = SeccompAction.ACT_ALLOW
             }
 
-            return Policy(
+            return Policy<S>(
                 defaultAction = defaultAction,
                 syscallActions = finalSyscalls.toMap(),
                 allowMmapExec = allowMmapExec,
