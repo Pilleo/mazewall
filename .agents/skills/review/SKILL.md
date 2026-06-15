@@ -45,11 +45,8 @@ To prevent hyperfocus on low-level mechanics at the expense of developer usage a
    - If a doc says "X is restricted", manually trace the `Policy` builder to ensure X is *actually* restricted under all conditions. Flag any drift between intent and implementation.
 
 7. **Code Maintainability & Engineering Standards (The "Craftsmanship" View):**
-   - **Compile-Time Safety:** Maximize the Kotlin type system (e.g., sealed classes, strict null-safety, explicit generics) to prevent bugs from reaching runtime. Avoid bypassing the type system with unsafe casts or reflection.
-   - **Debuggability:** Ensure the system's state is easily inspectable during failures. Error messages and logs must be context-rich, trace-friendly, and avoid swallowing underlying exceptions.
-   - **Future-Proofness:** Evaluate architectural adaptability. Can the codebase easily accommodate upcoming JVM evolutions (like Project Valhalla) or new Linux kernel subsystems?
-   - **Readability:** Guarantee that the code is idiomatic Kotlin, self-documenting, and free of overly "clever" obscurity. Complex logic must be clearly explained via comments.
-   - **Logical Modularity:** Enforce strict separation of concerns. Ensure components are loosely coupled, prioritize composition over inheritance, and rely on established trait interfaces (e.g., `NativeEngine`).
+   - Audit the code to verify it strictly adheres to the [mazewall Code Quality & Craftsmanship Standards](file:///home/leanid/Documents/code/java/jseccomp/.agents/CODE_QUALITY.md). Evaluate components against the standards for SOLID, type verification, immutability, FP, AOT friendliness, modularity, debuggability, readability, and future-proofness.
+
 
 ## 🔄 The Continuous Execution Loop
 

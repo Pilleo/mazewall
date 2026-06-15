@@ -29,6 +29,9 @@ The `ProfilerDaemonEngine` uses a non-blocking reactor loop that delegates sessi
 ### 4. Strace Descendant Tracing Boundaries
 - The `StraceProfiler` spawns JVM workloads directly under `strace -f`.
 
+### 5. Code Maintainability & Engineering Standards
+All profiler components must adhere strictly to the centralized [mazewall Code Quality & Craftsmanship Standards](file:///home/leanid/Documents/code/java/jseccomp/.agents/CODE_QUALITY.md) for rules on SOLID, type verification, immutability, FP, AOT friendliness, logical modularity, and debuggability.
+
 ---
 
 ## 🔄 Verification & Testing

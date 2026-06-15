@@ -85,6 +85,9 @@ The violation detector in `ContainedExecutors.isDirectContainmentViolation()` us
 4. **Prohibited:** broad fragments like `"denied"` without class restrictions (avoid false positives on standard business logic exceptions).
 - **Traversing:** Always call `isContainmentViolation(t)` (performs cause-chain traversal) rather than calling `isDirectContainmentViolation(t)` directly.
 
+### 9. Code Maintainability & Engineering Standards
+All enforcer components must adhere strictly to the centralized [mazewall Code Quality & Craftsmanship Standards](file:///home/leanid/Documents/code/java/jseccomp/.agents/CODE_QUALITY.md) for rules on SOLID, type verification, immutability, FP, AOT friendliness, logical modularity, and debuggability.
+
 ---
 
 ## 🔄 Verification & Testing

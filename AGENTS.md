@@ -66,6 +66,9 @@ When presenting a fix or creating a PR, use the following format:
     *   **Core code, KDocs, & design docs:** Highly rigorous. Exact syscall numbers, FFM memory layouts, kernel invariants.
 *   **Mandatory Documentation of Findings:** Any new architectural finding, kernel behavior discovery, or security nuance *must* be documented immediately in the appropriate Markdown file. Do not leave critical insights in conversation histories.
 
+### Code Maintainability & Craftsmanship Invariants
+All code must adhere strictly to the centralized [mazewall Code Quality & Craftsmanship Standards](file:///home/leanid/Documents/code/java/jseccomp/.agents/CODE_QUALITY.md). Read and follow it for rules regarding SOLID design, type verification, immutability/FP, AOT friendliness, logical modularity, and debuggability.
+
 ---
 
 ## 2. Strict Protection Against Unsafe Fallback / Bypass Scenarios
