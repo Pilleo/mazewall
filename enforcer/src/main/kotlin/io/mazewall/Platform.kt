@@ -45,12 +45,12 @@ object Platform {
         val bogusCheck = LinuxNative.withTransaction {
             LinuxNative.prctl(NativeConstants.PR_SET_SECCOMP, -1L, 0L, 0, 0)
         }
-        val passed = bogusCheck is LinuxNative.SyscallResult.Error && bogusCheck.errno.value == ERRNO_EINVAL
+        val passed = bogusCheck is LinuxNative.SyscallResult.Error && bogusCheck.errno == ERRNO_EINVAL
         if (!passed) {
             val (ret, errno) =
                 when (bogusCheck) {
                     is LinuxNative.SyscallResult.Success -> bogusCheck.value to 0
-                    is LinuxNative.SyscallResult.Error -> bogusCheck.rawValue to bogusCheck.errno.value
+                    is LinuxNative.SyscallResult.Error -> bogusCheck.rawValue to bogusCheck.errno
                 }
             logger.warning(
                 "Seccomp sanity check failed. The kernel returned unexpected results (ret=$ret, errno=$errno). Seccomp may be stubbed or broken in this environment.",
@@ -184,7 +184,7 @@ object Platform {
                     LinuxNative.prctl(NativeConstants.PR_GET_SECCOMP, 0, 0, 0, 0)
                 }
                 seccompMode = when (seccompVal) {
-                    is LinuxNative.SyscallResult.Error -> SeccompMode.Error(seccompVal.errno.value)
+                    is LinuxNative.SyscallResult.Error -> SeccompMode.Error(seccompVal.errno)
                     is LinuxNative.SyscallResult.Success -> {
                         when (seccompVal.value) {
                             0L -> SeccompMode.Disabled

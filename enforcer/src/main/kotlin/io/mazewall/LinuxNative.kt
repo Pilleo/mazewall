@@ -255,10 +255,10 @@ public object LinuxNative : NativeEngine {
         }
 
         /** The call failed with a specific Linux [errno]. */
-        public data class Error(val errno: io.mazewall.core.Errno, val rawValue: Long) : SyscallResult {
+        public data class Error(val errno: Int, val rawValue: Long) : SyscallResult {
             /** Throws an [IllegalStateException] with the given [context]. */
             public fun throwErrno(context: String): Nothing {
-                throw IllegalStateException("$context failed with errno=${errno.value} (raw return=$rawValue)")
+                throw IllegalStateException("$context failed with errno=$errno (raw return=$rawValue)")
             }
         }
 
@@ -561,7 +561,7 @@ internal object RealNativeEngine : NativeEngine {
         }
 
     private fun result(ret: Long, errno: Int): LinuxNative.SyscallResult =
-        if (ret < 0) LinuxNative.SyscallResult.Error(io.mazewall.core.Errno(errno), ret)
+        if (ret < 0) LinuxNative.SyscallResult.Error(errno, ret)
         else LinuxNative.SyscallResult.Success(ret)
 
     context(_: NativeTransaction)

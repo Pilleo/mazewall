@@ -111,8 +111,8 @@ enum class Syscall {
     NANOSLEEP,
     ;
 
-    /** Returns the syscall number for the given [arch], or an invalid number if not available. */
-    fun numberFor(arch: Arch): SyscallNumber = SyscallNumber(SyscallMapper.numberFor(this, arch))
+    /** Returns the syscall number for the given [arch], or -1 if not available. */
+    fun numberFor(arch: Arch): Int = SyscallMapper.numberFor(this, arch)
 }
 
 /**

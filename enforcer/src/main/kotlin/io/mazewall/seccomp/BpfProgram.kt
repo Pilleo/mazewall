@@ -85,7 +85,7 @@ public class BpfProgram(
          * Expects a specific [syscall] for the given [arch].
          */
         public fun expect(syscall: io.mazewall.core.Syscall, arch: io.mazewall.core.Arch, block: Builder.() -> Unit): Builder {
-            val nr = syscall.numberFor(arch).nr
+            val nr = syscall.numberFor(arch)
             if (nr >= 0) expect(nr, block)
             return this
         }
@@ -94,7 +94,7 @@ public class BpfProgram(
          * Java-compatible version of [expect] using [io.mazewall.core.Syscall].
          */
         public fun expect(syscall: io.mazewall.core.Syscall, arch: io.mazewall.core.Arch, block: java.util.function.Consumer<Builder>): Builder {
-            val nr = syscall.numberFor(arch).nr
+            val nr = syscall.numberFor(arch)
             if (nr >= 0) expect(nr, block)
             return this
         }

@@ -123,14 +123,14 @@ object BpfFilter {
 
     private fun getJvmCriticalNrs(arch: Arch): Set<Int> =
         setOf(
-            Syscall.FUTEX.numberFor(arch).nr,
-            Syscall.SCHED_YIELD.numberFor(arch).nr,
-            Syscall.RT_SIGRETURN.numberFor(arch).nr,
-            Syscall.RT_SIGACTION.numberFor(arch).nr,
-            Syscall.MADVISE.numberFor(arch).nr,
-            Syscall.GETTID.numberFor(arch).nr,
-            Syscall.CLOSE.numberFor(arch).nr,
-            Syscall.RT_SIGPROCMASK.numberFor(arch).nr,
+            Syscall.FUTEX.numberFor(arch),
+            Syscall.SCHED_YIELD.numberFor(arch),
+            Syscall.RT_SIGRETURN.numberFor(arch),
+            Syscall.RT_SIGACTION.numberFor(arch),
+            Syscall.MADVISE.numberFor(arch),
+            Syscall.GETTID.numberFor(arch),
+            Syscall.CLOSE.numberFor(arch),
+            Syscall.RT_SIGPROCMASK.numberFor(arch),
         ).filter { it >= 0 }.toSet()
 
     private fun emitArchCheck(

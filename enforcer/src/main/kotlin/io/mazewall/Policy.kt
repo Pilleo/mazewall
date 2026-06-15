@@ -67,7 +67,7 @@ public class Policy<out S : PolicyScope, out State : PolicyState> private constr
     public fun syscallActionNumbers(arch: Arch): Map<Int, SeccompAction> {
         val result = java.util.TreeMap<Int, SeccompAction>()
         for ((syscall, action) in syscallActions) {
-            val nr = syscall.numberFor(arch).nr
+            val nr = syscall.numberFor(arch)
             if (nr >= 0) {
                 val current = result[nr]
                 if (current == null || action.priority > current.priority) {
