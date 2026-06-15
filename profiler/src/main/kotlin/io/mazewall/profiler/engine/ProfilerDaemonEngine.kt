@@ -5,6 +5,7 @@ import io.mazewall.core.Arch
 import io.mazewall.core.Syscall
 import io.mazewall.ffi.Layouts
 import io.mazewall.ffi.NativeConstants
+import io.mazewall.recover
 import java.lang.foreign.Arena
 import java.lang.foreign.MemoryLayout
 import java.lang.foreign.MemorySegment
@@ -97,16 +98,11 @@ internal class ProfilerDaemonEngine(
 
         while (!isGlobalShutdown()) {
             val pollRes = transport.poll(pollFd, 1L, POLL_TIMEOUT_MS)
-            when (pollRes) {
-                is LinuxNative.SyscallResult.Success -> {
-                    if (pollRes.value <= 0) continue
-                }
-
-                is LinuxNative.SyscallResult.Error -> {
-                    if (pollRes.errno != EINTR) break // Not EINTR
-                    continue
-                }
+            val count = pollRes.recover { errno, _ ->
+                if (errno != NativeConstants.EINTR) return // Break from loop
+                0L
             }
+            if (count <= 0) continue
             handleNewConnection(serverFd)
         }
     }
@@ -135,16 +131,11 @@ internal class ProfilerDaemonEngine(
 
                 while (!isGlobalShutdown()) {
                     val pollRes = transport.poll(pollFd, 1L, POLL_TIMEOUT_MS)
-                    when (pollRes) {
-                        is LinuxNative.SyscallResult.Success -> {
-                            if (pollRes.value <= 0) continue
-                        }
-
-                        is LinuxNative.SyscallResult.Error -> {
-                            if (pollRes.errno != EINTR) break // Not EINTR
-                            continue
-                        }
+                    val count = pollRes.recover { errno, _ ->
+                        if (errno != NativeConstants.EINTR) return@use // Break from loop
+                        0L
                     }
+                    if (count <= 0) continue
                     if (!receiveAndHandleListener(socketFd)) break
                 }
             }
@@ -196,16 +187,11 @@ internal class ProfilerDaemonEngine(
 
                 while (!isGlobalShutdown()) {
                     val pollRes = transport.poll(pollFds, 2L, POLL_TIMEOUT_MS)
-                    when (pollRes) {
-                        is LinuxNative.SyscallResult.Success -> {
-                            if (pollRes.value <= 0) continue
-                        }
-
-                        is LinuxNative.SyscallResult.Error -> {
-                            if (pollRes.errno != EINTR) break // Not EINTR
-                            continue
-                        }
+                    val count = pollRes.recover { errno, _ ->
+                        if (errno != NativeConstants.EINTR) return@use // Break from loop
+                        0L
                     }
+                    if (count <= 0) continue
 
                     val action = sessionHandler.handleActiveListener(pollFds, ackBuf, notif, resp, socketPollFd)
                     if (action !is LoopAction.Continue) break

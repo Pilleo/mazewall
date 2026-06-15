@@ -1,7 +1,11 @@
 package io.mazewall.profiler.engine
 
 import io.mazewall.LinuxNative
+import io.mazewall.core.Pid
 import io.mazewall.ffi.Layouts
+import io.mazewall.map
+import io.mazewall.onFailure
+import io.mazewall.onSuccess
 import java.lang.foreign.Arena
 import java.lang.foreign.MemorySegment
 import java.lang.foreign.ValueLayout
@@ -12,13 +16,13 @@ import java.nio.charset.StandardCharsets
  */
 interface ProfilerMemoryReader {
     fun readStringFromProcess(
-        pid: Int,
+        pid: Pid,
         remoteAddr: Long,
         maxLen: Int = 4096,
     ): String?
 
     fun resolveLink(
-        pid: Int,
+        pid: Pid,
         link: String,
     ): String?
 }
@@ -31,7 +35,7 @@ object RealMemoryReader : ProfilerMemoryReader {
     private const val IOV_LEN_OFF = 8L
 
     override fun readStringFromProcess(
-        pid: Int,
+        pid: Pid,
         remoteAddress: Long,
         maxLen: Int,
     ): String? {
@@ -48,21 +52,17 @@ object RealMemoryReader : ProfilerMemoryReader {
                 LinuxNative.memory.processVmReadv(pid, localIov, 1, remoteIov, 1, 0)
             }
             var result: String? = null
-            when (res) {
-                is LinuxNative.SyscallResult.Success -> {
-                    val bytesRead = res.value.toInt()
-                    var len = 0
-                    while (len < bytesRead && localBuf.get(ValueLayout.JAVA_BYTE, len.toLong()) != 0.toByte()) len++
+            res.onSuccess { value ->
+                val bytesRead = value.toInt()
+                var len = 0
+                while (len < bytesRead && localBuf.get(ValueLayout.JAVA_BYTE, len.toLong()) != 0.toByte()) len++
 
-                    if (len < bytesRead) {
-                        result = localBuf.copyToString(len)
-                    }
+                if (len < bytesRead) {
+                    result = localBuf.copyToString(len)
                 }
-
-                is LinuxNative.SyscallResult.Error -> {
-                    if (res.errno == 1) { // EPERM
-                        System.err.println("[DAEMON] WARN: Permission denied reading memory from PID $pid. (Yama ptrace_scope?)")
-                    }
+            }.onFailure { errno, _ ->
+                if (errno == 1) { // EPERM
+                    System.err.println("[DAEMON] WARN: Permission denied reading memory from PID ${pid.value}. (Yama ptrace_scope?)")
                 }
             }
             return result
@@ -70,20 +70,17 @@ object RealMemoryReader : ProfilerMemoryReader {
     }
 
     override fun resolveLink(
-        pid: Int,
+        pid: Pid,
         link: String,
     ): String? {
-        val procPath = "/proc/$pid/$link"
+        val procPath = "/proc/${pid.value}/$link"
         Arena.ofConfined().use { arena ->
             val pathSeg = arena.allocateFrom(procPath)
             val buf = arena.allocate(PATH_MAX_VAL)
             val res = LinuxNative.withTransaction {
                 LinuxNative.fileSystem.readlink(pathSeg, buf, PATH_MAX_VAL)
             }
-            return when (res) {
-                is LinuxNative.SyscallResult.Success -> buf.copyToString(res.value.toInt())
-                is LinuxNative.SyscallResult.Error -> null
-            }
+            return res.onSuccess { }.map { buf.copyToString(it.toInt()) }.getOrNull()
         }
     }
 

@@ -10,10 +10,9 @@
 2. Refactor `NativeTransaction` to `NativeTransaction<Mode>`.
 3. Update `NativeEngine` methods to demand specific modes via context receivers, e.g., `context(_: NativeTransaction<out ReadOnly>)` for `processVmReadv` and `context(_: NativeTransaction<ReadWrite>)` for `prctl`. This ensures at compile-time that restricted scopes cannot perform mutating operations.
 
-### 🟡 [Severity: MEDIUM]: Monadic Combinators for `SyscallResult`
-**Target:** `io.mazewall.LinuxNative.SyscallResult`
-**Context:** Currently, native system calls return `SyscallResult` which requires manual `when` branching or `.getOrThrow()` calls. This leads to imperative boilerplate and potential unhandled errors if a developer forgets to check the `Error` branch during complex multi-syscall transactions.
-**Needed:** Add standard functional combinators like `map`, `flatMap`, `recover`, `onSuccess`, `onFailure`, and `fold` to `SyscallResult`. This would allow developers to safely and fluently chain native calls (e.g., `open(path).flatMap { fd -> read(fd) }.onSuccess { close(it) }`) without relying on exceptions or redundant branching.
+### ✅ [RESOLVED]: Monadic Combinators for `SyscallResult`
+**Context:** Currently, native system calls return `SyscallResult` which requires manual `when` branching or `.getOrThrow()` calls. This leads to imperative boilerplate and potential unhandled errors.
+**Fix:** Refactored `SyscallResult` to `SyscallResult<out T>` and added standard functional combinators like `map`, `flatMap`, `recover`, `onSuccess`, and `onFailure`.
 
 ### 🔵 [Severity: ENHANCEMENT]: Sealed Class State Machines for Kernel Lifecycles
 **Target:** `io.mazewall.landlock.LandlockSession` and `io.mazewall.seccomp.SeccompInstallationState`
@@ -39,13 +38,9 @@ This ensures jump targets are validated at compile time and guarantees no dangli
 2. Perform updates using Compare-And-Swap (CAS) with immutable map merges.
 This ensures the enforcement engine always evaluates a perfectly consistent snapshot, improving the atomicity of process-wide containment updates.
 
-### 🔵 [Severity: ENHANCEMENT]: Value Class Completeness (Primitive Obsession)
-**Target:** `io.mazewall.core` and FFM boundary types.
-**Context:** While value classes were introduced for `FileDescriptor` and `Errno`, many other native concepts (like `MemoryAddress`, `Pid`, and `Uid`) are still passed as raw `Long` or `Int` primitives. This remains prone to "parameter swapping" bugs where a PID is passed to a function expecting a File Descriptor.
-**Needed:** Complete the integration of value classes across all FFM and internal logic layers:
-1. `@JvmInline value class MemoryAddress(val address: Long)`
-2. `@JvmInline value class Pid(val value: Int)`
-3. Ensure these types are used strictly across all trait interfaces to maintain type-safe boundaries at the FFM downcall layer.
+### ✅ [RESOLVED]: Value Class Completeness (Primitive Obsession)
+**Context:** While value classes were introduced for `FileDescriptor` and `Errno`, many other native concepts (like `MemoryAddress`, `Pid`, and `Uid`) were still passed as raw `Long` or `Int` primitives.
+**Fix:** Introduced `Pid`, `Uid`, and `MemoryAddress` value classes and integrated them into the `NativeEngine` interfaces and `RealNativeHelper`.
 
 ### ✅ [DONE] [Severity: MEDIUM]: Lack of Compile-Time Enforced Memory and Lifetime Safety for FFM Native Bindings
 **Target:** `io.mazewall.enforcer` (core FFM bindings and MemorySegment management)

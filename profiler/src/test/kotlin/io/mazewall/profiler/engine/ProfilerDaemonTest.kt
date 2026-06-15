@@ -16,8 +16,8 @@ class ProfilerDaemonTest {
     private class MockTransport : ProfilerTransport {
         val sentEvents = mutableListOf<TraceEvent>()
         val pollCount = AtomicInteger(0)
-        var nextPollResult: LinuxNative.SyscallResult = LinuxNative.SyscallResult.Success(1L)
-        var nextReadResult: LinuxNative.SyscallResult = LinuxNative.SyscallResult.Success(1L)
+        var nextPollResult: LinuxNative.SyscallResult<Long> = LinuxNative.SyscallResult.Success(1L)
+        var nextReadResult: LinuxNative.SyscallResult<Long> = LinuxNative.SyscallResult.Success(1L)
         var ackByte: Byte = 0xAC.toByte()
         val ioctlCalls = mutableListOf<Long>()
 
@@ -34,7 +34,7 @@ class ProfilerDaemonTest {
             fds: MemorySegment,
             nfds: Long,
             timeout: Int,
-        ): LinuxNative.SyscallResult {
+        ): LinuxNative.SyscallResult<Long> {
             pollCount.incrementAndGet()
             // In the wait-for-ack loop, we need to set the revents
             if (nfds == 1L) {
@@ -47,7 +47,7 @@ class ProfilerDaemonTest {
             fd: LinuxNative.FileDescriptor,
             buf: MemorySegment,
             count: Long,
-        ): LinuxNative.SyscallResult {
+        ): LinuxNative.SyscallResult<Long> {
             if (count == 1L) {
                 buf.set(ValueLayout.JAVA_BYTE, 0L, ackByte)
             }
@@ -58,20 +58,20 @@ class ProfilerDaemonTest {
             fd: LinuxNative.FileDescriptor,
             buf: MemorySegment,
             count: Long,
-        ): LinuxNative.SyscallResult = LinuxNative.SyscallResult.Success(count)
+        ): LinuxNative.SyscallResult<Long> = LinuxNative.SyscallResult.Success(count)
 
         override fun recv(
             sockfd: LinuxNative.FileDescriptor,
             buf: MemorySegment,
             len: Long,
             flags: Int,
-        ): LinuxNative.SyscallResult = LinuxNative.SyscallResult.Success(len)
+        ): LinuxNative.SyscallResult<Long> = LinuxNative.SyscallResult.Success(len)
 
         override fun ioctl(
             fd: LinuxNative.FileDescriptor,
             request: Long,
             arg: MemorySegment,
-        ): LinuxNative.SyscallResult {
+        ): LinuxNative.SyscallResult<Long> {
             ioctlCalls.add(request)
             if (request == 0xc0502100L) { // RECV
                 arg.set(ValueLayout.JAVA_LONG, 0L, 123L) // id
@@ -91,13 +91,13 @@ class ProfilerDaemonTest {
 
     private class MockReader : ProfilerMemoryReader {
         override fun readStringFromProcess(
-            pid: Int,
+            pid: io.mazewall.core.Pid,
             remoteAddr: Long,
             maxLen: Int,
         ): String? = "/tmp/test.txt"
 
         override fun resolveLink(
-            pid: Int,
+            pid: io.mazewall.core.Pid,
             link: String,
         ): String? = "/proc/1/cwd"
     }
@@ -108,7 +108,13 @@ class ProfilerDaemonTest {
         val reader = MockReader()
         val syscallMap = mapOf(2 to "OPEN")
         var shutdownCalled = false
-        val handler = ProfilerSessionHandler(LinuxNative.FileDescriptor(10), LinuxNative.FileDescriptor(20), transport, reader, syscallMap) {
+        val handler = ProfilerSessionHandler(
+            LinuxNative.FileDescriptor(10),
+            LinuxNative.FileDescriptor(20),
+            transport,
+            reader,
+            syscallMap,
+        ) {
             shutdownCalled = true
         }
 
@@ -143,7 +149,13 @@ class ProfilerDaemonTest {
         val reader = MockReader()
         val syscallMap = mapOf(2 to "OPEN")
         var shutdownCalled = false
-        val handler = ProfilerSessionHandler(LinuxNative.FileDescriptor(10), LinuxNative.FileDescriptor(20), transport, reader, syscallMap) {
+        val handler = ProfilerSessionHandler(
+            LinuxNative.FileDescriptor(10),
+            LinuxNative.FileDescriptor(20),
+            transport,
+            reader,
+            syscallMap,
+        ) {
             shutdownCalled = true
         }
 

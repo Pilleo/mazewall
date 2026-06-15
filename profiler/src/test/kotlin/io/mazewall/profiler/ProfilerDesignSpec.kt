@@ -60,21 +60,21 @@ class ProfilerDesignSpec :
             var resolveLinkResult: String? = "/proc/1/cwd"
 
             override fun readStringFromProcess(
-                pid: Int,
+                pid: io.mazewall.core.Pid,
                 remoteAddr: Long,
                 maxLen: Int,
             ): String? = readStringResult
 
             override fun resolveLink(
-                pid: Int,
+                pid: io.mazewall.core.Pid,
                 link: String,
             ): String? = resolveLinkResult
         }
 
         class MockTransport : ProfilerTransport {
             val sentEvents = mutableListOf<TraceEvent>()
-            var nextPollResult: LinuxNative.SyscallResult = LinuxNative.SyscallResult.Success(1)
-            var nextReadResult: LinuxNative.SyscallResult = LinuxNative.SyscallResult.Success(1)
+            var nextPollResult: LinuxNative.SyscallResult<Long> = LinuxNative.SyscallResult.Success(1L)
+            var nextReadResult: LinuxNative.SyscallResult<Long> = LinuxNative.SyscallResult.Success(1L)
             var ackByte: Byte = 0xAC.toByte()
             val ioctlCalls = mutableListOf<Long>()
             var createdServerPath: String? = null
@@ -99,7 +99,7 @@ class ProfilerDesignSpec :
                 fds: MemorySegment,
                 nfds: Long,
                 timeout: Int,
-            ): LinuxNative.SyscallResult {
+            ): LinuxNative.SyscallResult<Long> {
                 if (nfds == 1L) {
                     fds.set(ValueLayout.JAVA_SHORT, POLLFD_REVENTS_OFF, NativeConstants.POLLIN)
                 }
@@ -110,7 +110,7 @@ class ProfilerDesignSpec :
                 fd: LinuxNative.FileDescriptor,
                 buf: MemorySegment,
                 count: Long,
-            ): LinuxNative.SyscallResult {
+            ): LinuxNative.SyscallResult<Long> {
                 if (count == 1L) {
                     buf.set(ValueLayout.JAVA_BYTE, 0L, ackByte)
                 }
@@ -121,20 +121,22 @@ class ProfilerDesignSpec :
                 fd: LinuxNative.FileDescriptor,
                 buf: MemorySegment,
                 count: Long,
-            ): LinuxNative.SyscallResult = LinuxNative.SyscallResult.Success(count)
+            ): LinuxNative.SyscallResult<Long> = LinuxNative.SyscallResult.Success(
+count)
 
             override fun recv(
                 sockfd: LinuxNative.FileDescriptor,
                 buf: MemorySegment,
                 len: Long,
                 flags: Int,
-            ): LinuxNative.SyscallResult = LinuxNative.SyscallResult.Success(len)
+            ): LinuxNative.SyscallResult<Long> = LinuxNative.SyscallResult.Success(
+len)
 
             override fun ioctl(
                 fd: LinuxNative.FileDescriptor,
                 request: Long,
                 arg: MemorySegment,
-            ): LinuxNative.SyscallResult {
+            ): LinuxNative.SyscallResult<Long> {
                 ioctlCalls.add(request)
                 if (request == 0xc0502100L) { // RECV
                     arg.set(ValueLayout.JAVA_LONG, 0L, nextNotifId) // id
@@ -144,7 +146,7 @@ class ProfilerDesignSpec :
                         arg.set(ValueLayout.JAVA_LONG, 32L + i * 8, nextNotifArgs[i])
                     }
                 }
-                return LinuxNative.SyscallResult.Success(0)
+                return LinuxNative.SyscallResult.Success(0L)
             }
 
             override fun createServer(socketPath: String): LinuxNative.FileDescriptor {

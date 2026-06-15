@@ -2,11 +2,16 @@ package demo
 
 import io.mazewall.LinuxNative
 import io.mazewall.Policy
+import io.mazewall.asFd
 import io.mazewall.core.Arch
 import io.mazewall.core.Syscall
 import io.mazewall.enforcer.ContainedExecutors
 import io.mazewall.enforcer.ContainmentViolationException
+import io.mazewall.map
+import io.mazewall.onFailure
+import io.mazewall.onSuccess
 import io.mazewall.profiler.Profiler
+import io.mazewall.recover
 import java.io.File
 import java.io.IOException
 import java.lang.foreign.Arena
@@ -82,19 +87,18 @@ fun runProfileAndEnforce() {
             val setupResult = LinuxNative.withTransaction { LinuxNative.syscall(setupNr, 32L, 0L) }
             val ioUringStatus: String
 
-            when (setupResult) {
-                is LinuxNative.SyscallResult.Success -> {
-                    val ringFd = setupResult.asFd()
-                    ioUringStatus = "io_uring ring initialized successfully (ringFd=${ringFd.value})"
+            ioUringStatus = setupResult.map { value ->
+                val ringFd = LinuxNative.FileDescriptor(value.toInt())
+                try {
+                    "io_uring ring initialized successfully (ringFd=${ringFd.value})"
+                } finally {
                     LinuxNative.fileSystem.close(ringFd)
                 }
-
-                is LinuxNative.SyscallResult.Error -> {
-                    // Real-world high-performance frameworks gracefully fallback to epoll/NIO
-                    // if io_uring_setup is blocked by container runtimes or unsupported by the kernel.
-                    // By gracefully falling back instead of crashing, we ensure the app survives in strict environments!
-                    ioUringStatus = "io_uring_setup returned errno ${setupResult.errno} (gracefully falling back to standard I/O)"
-                }
+            }.recover { errno, _ ->
+                // Real-world high-performance frameworks gracefully fallback to epoll/NIO
+                // if io_uring_setup is blocked by container runtimes or unsupported by the kernel.
+                // By gracefully falling back instead of crashing, we ensure the app survives in strict environments!
+                "io_uring_setup returned errno $errno (gracefully falling back to standard I/O)"
             }
 
             "Workload completed.\n" +
@@ -239,13 +243,13 @@ fun runProfileAndEnforce() {
 
                 // EPERM = Seccomp blocked the syscall entirely
                 // EACCES = Landlock denied the path access at the VFS layer
-                if (openResult is LinuxNative.SyscallResult.Error && (openResult.errno == 1 || openResult.errno == 13)) {
-                    println("  [Kernel io-wq Worker] Landlock LSM hook intercepted '/etc/hosts' access inside kernel workqueue!")
-                    throw java.io.IOException("Permission denied (io_uring async worker blocked by Landlock)")
-                }
-
-                if (openResult is LinuxNative.SyscallResult.Success) {
-                    LinuxNative.fileSystem.close(openResult.asFd())
+                openResult.onFailure { errno, _ ->
+                    if (errno == 1 || errno == 13) {
+                        println("  [Kernel io-wq Worker] Landlock LSM hook intercepted '/etc/hosts' access inside kernel workqueue!")
+                        throw java.io.IOException("Permission denied (io_uring async worker blocked by Landlock)")
+                    }
+                }.onSuccess { value ->
+                    LinuxNative.fileSystem.close(LinuxNative.FileDescriptor(value.toInt()))
                 }
             }
             "Evasion succeeded (Is Landlock supported on this kernel?)"

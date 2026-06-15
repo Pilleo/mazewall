@@ -2,6 +2,8 @@ package io.mazewall.profiler.internal
 
 import io.mazewall.LinuxNative
 import io.mazewall.ffi.NativeConstants
+import io.mazewall.getFdOrThrow
+import io.mazewall.onSuccess
 import java.io.IOException
 import java.lang.foreign.Arena
 import java.lang.foreign.ValueLayout

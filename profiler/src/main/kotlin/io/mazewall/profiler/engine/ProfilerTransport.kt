@@ -2,6 +2,9 @@ package io.mazewall.profiler.engine
 
 import io.mazewall.LinuxNative
 import io.mazewall.ffi.Layouts
+import io.mazewall.getFdOrThrow
+import io.mazewall.onFailure
+import io.mazewall.onSuccess
 import java.lang.foreign.Arena
 import java.lang.foreign.MemorySegment
 import java.lang.foreign.ValueLayout
@@ -22,32 +25,32 @@ interface ProfilerTransport {
         fds: MemorySegment,
         nfds: Long,
         timeout: Int,
-    ): LinuxNative.SyscallResult
+    ): LinuxNative.SyscallResult<Long>
 
     fun read(
         fd: LinuxNative.FileDescriptor,
         buf: MemorySegment,
         count: Long,
-    ): LinuxNative.SyscallResult
+    ): LinuxNative.SyscallResult<Long>
 
     fun write(
         fd: LinuxNative.FileDescriptor,
         buf: MemorySegment,
         count: Long,
-    ): LinuxNative.SyscallResult
+    ): LinuxNative.SyscallResult<Long>
 
     fun recv(
         sockfd: LinuxNative.FileDescriptor,
         buf: MemorySegment,
         len: Long,
         flags: Int,
-    ): LinuxNative.SyscallResult
+    ): LinuxNative.SyscallResult<Long>
 
     fun ioctl(
         fd: LinuxNative.FileDescriptor,
         request: Long,
         arg: MemorySegment,
-    ): LinuxNative.SyscallResult
+    ): LinuxNative.SyscallResult<Long>
 
     fun createServer(socketPath: String): LinuxNative.FileDescriptor
 
@@ -116,7 +119,7 @@ object RealProfilerTransport : ProfilerTransport {
     }
 
     override fun recvDescriptor(socketFd: LinuxNative.FileDescriptor): LinuxNative.FileDescriptor? {
-        Arena.ofConfined().use { arena ->
+        return Arena.ofConfined().use { arena ->
             val dummyByte = arena.allocate(ValueLayout.JAVA_BYTE)
             val controlBuf = arena.allocate(24)
             controlBuf.fill(0)
@@ -127,25 +130,21 @@ object RealProfilerTransport : ProfilerTransport {
 
             while (true) {
                 val res = LinuxNative.withTransaction { LinuxNative.networking.recvmsg(socketFd, msg, 0) }
-                when (res) {
-                    is LinuxNative.SyscallResult.Success -> {
-                        if (res.value == 0L) return null // EOF
+                res.onSuccess { value ->
+                    if (value == 0L) return@use null // EOF
 
-                        val cmsgLen = controlBuf.get(ValueLayout.JAVA_LONG, CMSG_LEN_OFF)
-                        val cmsgLevel = controlBuf.get(ValueLayout.JAVA_INT, CMSG_LEVEL_OFF)
-                        val cmsgType = controlBuf.get(ValueLayout.JAVA_INT, CMSG_TYPE_OFF)
-                        if (cmsgLen >= CMSG_LEN_VAL && cmsgLevel == SOL_SOCKET_VAL && cmsgType == SCM_RIGHTS_VAL) {
-                            return LinuxNative.FileDescriptor(controlBuf.get(ValueLayout.JAVA_INT, CMSG_DATA_OFF))
-                        }
-                        return null
+                    val cmsgLen = controlBuf.get(ValueLayout.JAVA_LONG, CMSG_LEN_OFF)
+                    val cmsgLevel = controlBuf.get(ValueLayout.JAVA_INT, CMSG_LEVEL_OFF)
+                    val cmsgType = controlBuf.get(ValueLayout.JAVA_INT, CMSG_TYPE_OFF)
+                    if (cmsgLen >= CMSG_LEN_VAL && cmsgLevel == SOL_SOCKET_VAL && cmsgType == SCM_RIGHTS_VAL) {
+                        return@use LinuxNative.FileDescriptor(controlBuf.get(ValueLayout.JAVA_INT, CMSG_DATA_OFF))
                     }
-
-                    is LinuxNative.SyscallResult.Error -> {
-                        if (res.errno == 4) continue // EINTR
-                        return null
-                    }
+                }.onFailure { errno, _ ->
+                    if (errno == 4) return@onFailure // EINTR, continue loop
+                    return@use null
                 }
             }
+            null
         }
     }
 
@@ -153,36 +152,37 @@ object RealProfilerTransport : ProfilerTransport {
         fds: MemorySegment,
         nfds: Long,
         timeout: Int,
-    ): LinuxNative.SyscallResult = LinuxNative.withTransaction { LinuxNative.poll(fds, nfds, timeout) }
+    ): LinuxNative.SyscallResult<Long> = LinuxNative.withTransaction { LinuxNative.poll(fds, nfds, timeout) }
 
     override fun read(
         fd: LinuxNative.FileDescriptor,
         buf: MemorySegment,
         count: Long,
-    ): LinuxNative.SyscallResult = LinuxNative.withTransaction { LinuxNative.memory.read(fd, buf, count) }
+    ): LinuxNative.SyscallResult<Long> = LinuxNative.withTransaction { LinuxNative.memory.read(fd, buf, count) }
 
     override fun write(
         fd: LinuxNative.FileDescriptor,
         buf: MemorySegment,
         count: Long,
-    ): LinuxNative.SyscallResult = LinuxNative.withTransaction { LinuxNative.memory.write(fd, buf, count) }
+    ): LinuxNative.SyscallResult<Long> = LinuxNative.withTransaction { LinuxNative.memory.write(fd, buf, count) }
 
     override fun recv(
         sockfd: LinuxNative.FileDescriptor,
         buf: MemorySegment,
         len: Long,
         flags: Int,
-    ): LinuxNative.SyscallResult = LinuxNative.withTransaction { LinuxNative.networking.recv(sockfd, buf, len, flags) }
+    ): LinuxNative.SyscallResult<Long> = LinuxNative.withTransaction { LinuxNative.networking.recv(sockfd, buf, len, flags) }
 
     override fun ioctl(
         fd: LinuxNative.FileDescriptor,
         request: Long,
         arg: MemorySegment,
-    ): LinuxNative.SyscallResult = LinuxNative.withTransaction { LinuxNative.ioctl(fd, request, arg) }
+    ): LinuxNative.SyscallResult<Long> = LinuxNative.withTransaction { LinuxNative.ioctl(fd, request, arg) }
 
     override fun createServer(socketPath: String): LinuxNative.FileDescriptor {
-        val res = LinuxNative.withTransaction { LinuxNative.networking.socket(AF_UNIX, SOCK_STREAM, 0) }
-        val fd = res.getFdOrThrow("socket(AF_UNIX)")
+        val fd = LinuxNative.withTransaction {
+            LinuxNative.networking.socket(AF_UNIX, SOCK_STREAM, 0)
+        }.getFdOrThrow("socket(AF_UNIX)")
 
         Arena.ofConfined().use { arena ->
             val addr = arena.allocate(Layouts.SOCKADDR_UN)
@@ -192,18 +192,19 @@ object RealProfilerTransport : ProfilerTransport {
             val pathSeg = addr.asSlice(2, SOCKADDR_UN_PATH_SIZE.toLong())
             MemorySegment.copy(pathBytes, 0, pathSeg, ValueLayout.JAVA_BYTE, 0L, pathBytes.size)
 
-            val bindRes = LinuxNative.withTransaction { LinuxNative.networking.bind(fd, addr, ADDR_UN_SIZE) }
-            if (bindRes is LinuxNative.SyscallResult.Error) {
+            LinuxNative.withTransaction {
+                LinuxNative.networking.bind(fd, addr, ADDR_UN_SIZE)
+            }.onFailure { _, _ ->
                 LinuxNative.fileSystem.close(fd)
-                bindRes.throwErrno("bind(AF_UNIX)")
-            }
+            }.getOrThrow("bind(AF_UNIX)")
         }
 
-        val listenRes = LinuxNative.withTransaction { LinuxNative.networking.listen(fd, BACKLOG_SIZE) }
-        if (listenRes is LinuxNative.SyscallResult.Error) {
+        LinuxNative.withTransaction {
+            LinuxNative.networking.listen(fd, BACKLOG_SIZE)
+        }.onFailure { _, _ ->
             LinuxNative.fileSystem.close(fd)
-            listenRes.throwErrno("listen")
-        }
+        }.getOrThrow("listen")
+
         return fd
     }
 

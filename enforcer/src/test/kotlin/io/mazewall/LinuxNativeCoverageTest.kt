@@ -17,15 +17,15 @@ class LinuxNativeCoverageTest {
 
     @Test
     fun `test data class methods for SyscallResult`() {
-        val res1 = LinuxNative.SyscallResult.Success(100)
-        val res2 = LinuxNative.SyscallResult.Success(100)
-        val res3 = LinuxNative.SyscallResult.Error(1, 200)
+        val res1: LinuxNative.SyscallResult<Long> = LinuxNative.SyscallResult.Success(100L)
+        val res2: LinuxNative.SyscallResult<Long> = LinuxNative.SyscallResult.Success(100L)
+        val res3: LinuxNative.SyscallResult<Long> = LinuxNative.SyscallResult.Error(1, 200L)
 
         assertEquals(res1, res2)
-        assertNotEquals<LinuxNative.SyscallResult>(res1, res3)
+        assertNotEquals<LinuxNative.SyscallResult<*>>(res1, res3)
         assertEquals(res1.hashCode(), res2.hashCode())
         assertNotNull(res1.toString())
-        assertEquals(100L, res1.value)
+        assertEquals(100L, (res1 as LinuxNative.SyscallResult.Success).value)
         assertEquals(1, (res3 as LinuxNative.SyscallResult.Error).errno)
         assertEquals(200L, res3.rawValue)
     }
@@ -172,6 +172,6 @@ class LinuxNativeCoverageTest {
             LinuxNative.networking.recv(fd, seg, 8L, 0)
         }.getOrThrow("test"))
 
-        assertEquals(1234, LinuxNative.process.gettid())
+        assertEquals(1234, LinuxNative.process.gettid().value)
     }
 }

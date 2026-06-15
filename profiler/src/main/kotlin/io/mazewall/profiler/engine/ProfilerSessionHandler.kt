@@ -1,7 +1,11 @@
 package io.mazewall.profiler.engine
 
 import io.mazewall.LinuxNative
+import io.mazewall.core.Pid
 import io.mazewall.ffi.NativeConstants
+import io.mazewall.map
+import io.mazewall.onSuccess
+import io.mazewall.recover
 import java.lang.foreign.MemorySegment
 import java.lang.foreign.ValueLayout
 
@@ -57,12 +61,12 @@ internal class ProfilerSessionHandler(
         if ((listenerRevents.toInt() and NativeConstants.POLLIN.toInt()) != 0) {
             notif.fill(0)
             val recvRes = transport.ioctl(listenerFd, SECCOMP_IOCTL_NOTIF_RECV, notif)
-            if (recvRes is LinuxNative.SyscallResult.Success) {
+            recvRes.onSuccess {
                 if (!processNotification(notif, resp, ackBuf, socketPollFd)) {
                     state = ProfilerState.Terminated
-                    return LoopAction.Break
                 }
             }
+            if (state is ProfilerState.Terminated) return LoopAction.Break
         }
         return LoopAction.Continue
     }
@@ -70,23 +74,19 @@ internal class ProfilerSessionHandler(
     @Suppress("ReturnCount")
     private fun handleShutdownRequest(ackBuf: MemorySegment): Boolean {
         val res = transport.recv(socketFd, ackBuf, 1L, 0)
-        return when (res) {
-            is LinuxNative.SyscallResult.Success -> {
-                if (res.value > 0) {
-                    val command = ackBuf.get(ValueLayout.JAVA_BYTE, 0L)
-                    if (command == SHUTDOWN_COMMAND_BYTE) {
-                        onShutdown("Parent Command")
-                        true
-                    } else {
-                        false
-                    }
+        return res.map { value ->
+            if (value > 0) {
+                val command = ackBuf.get(ValueLayout.JAVA_BYTE, 0L)
+                if (command == SHUTDOWN_COMMAND_BYTE) {
+                    onShutdown("Parent Command")
+                    true
                 } else {
-                    true // parent socket closed
+                    false
                 }
+            } else {
+                true // parent socket closed
             }
-
-            is LinuxNative.SyscallResult.Error -> false
-        }
+        }.recover { _, _ -> false }
     }
 
     internal fun processNotification(
@@ -96,9 +96,10 @@ internal class ProfilerSessionHandler(
         socketPollFd: MemorySegment,
     ): Boolean {
         val id = notif.get(ValueLayout.JAVA_LONG, NOTIF_ID_OFF)
-        val pid = notif.get(ValueLayout.JAVA_INT, NOTIF_PID_OFF)
+        val pidVal = notif.get(ValueLayout.JAVA_INT, NOTIF_PID_OFF)
+        val pid = Pid(pidVal)
         val nr = notif.get(ValueLayout.JAVA_INT, NOTIF_NR_OFF)
-        ledger.record(SessionEvent.Notified(System.nanoTime(), pid.toLong(), nr.toLong()))
+        ledger.record(SessionEvent.Notified(System.nanoTime(), pidVal.toLong(), nr.toLong()))
 
         val args = LongArray(MAX_SYSCALL_ARGS)
         for (i in 0 until MAX_SYSCALL_ARGS) {
@@ -107,7 +108,7 @@ internal class ProfilerSessionHandler(
 
         val syscallName = syscallMap[nr] ?: "SYSCALL_$nr"
         val paths = SyscallPathResolver(memoryReader, pid, ledger).getPathArgs(syscallName, args)
-        val event = TraceEvent(pid, syscallName, args, paths)
+        val event = TraceEvent(pidVal, syscallName, args, paths)
 
         // Transition to Notified state
         state = ProfilerState.Notified(socketFd, listenerFd, id, event)
@@ -121,10 +122,10 @@ internal class ProfilerSessionHandler(
         @Suppress("TooGenericExceptionCaught")
         return try {
             transport.sendTraceEvent(socketFd, event)
-            ledger.record(SessionEvent.EventSent(System.nanoTime(), pid.toLong()))
+            ledger.record(SessionEvent.EventSent(System.nanoTime(), pidVal.toLong()))
             val success = waitForParentAck(socketPollFd, ackBuf)
             if (success) {
-                ledger.record(SessionEvent.AckReceived(System.nanoTime(), pid.toLong()))
+                ledger.record(SessionEvent.AckReceived(System.nanoTime(), pidVal.toLong()))
                 state = ProfilerState.ActiveSession(socketFd, listenerFd)
             } else {
                 logger.warning {
@@ -141,7 +142,7 @@ internal class ProfilerSessionHandler(
             }
             throw e
         } finally {
-            sendContinueResponse(id, resp, pid.toLong())
+            sendContinueResponse(id, resp, pidVal.toLong())
         }
     }
 
@@ -154,16 +155,13 @@ internal class ProfilerSessionHandler(
 
         while (true) {
             val pollRes = transport.poll(pollFd, 1L, POLL_ACK_TIMEOUT_MS)
-            when (pollRes) {
-                is LinuxNative.SyscallResult.Success -> {
-                    if (pollRes.value == 0L) return false
-                }
-
-                is LinuxNative.SyscallResult.Error -> {
-                    if (pollRes.errno == EINTR) continue
-                    return false
-                }
+            val count = pollRes.recover { errno, _ ->
+                if (errno == NativeConstants.EINTR) return@recover -1L
+                return false
             }
+            if (count == -1L) continue
+            if (count == 0L) return false
+            
             val revents = pollFd.get(ValueLayout.JAVA_SHORT, POLLFD_REVENTS_OFF)
             if ((revents.toInt() and NativeConstants.POLLIN.toInt()) != 0) {
                 if (readAndProcessAck(ackBuf)) return true
@@ -176,28 +174,24 @@ internal class ProfilerSessionHandler(
     private fun readAndProcessAck(ackBuf: MemorySegment): Boolean {
         while (true) {
             val readRes = transport.read(socketFd, ackBuf, ACK_BUF_SIZE)
-            when (readRes) {
-                is LinuxNative.SyscallResult.Success -> {
-                    if (readRes.value <= 0) {
-                        if (readRes.value == 0L) return false
-                        continue
-                    }
-                    for (i in 0 until readRes.value.toInt()) {
-                        val byte = ackBuf.get(ValueLayout.JAVA_BYTE, i.toLong())
-                        if (byte == PROTOCOL_ACK_BYTE) return true
-                        if (byte == SHUTDOWN_COMMAND_BYTE) {
-                            onShutdown("Parent Command during notification")
-                            return false
-                        }
-                    }
-                    break
-                }
-
-                is LinuxNative.SyscallResult.Error -> {
-                    if (readRes.errno == EINTR) continue
+            val value = readRes.recover { errno, v ->
+                if (errno == NativeConstants.EINTR) return@recover -1L
+                return false
+            }
+            if (value == -1L) continue
+            if (value <= 0) {
+                if (value == 0L) return false
+                continue
+            }
+            for (i in 0 until value.toInt()) {
+                val byte = ackBuf.get(ValueLayout.JAVA_BYTE, i.toLong())
+                if (byte == PROTOCOL_ACK_BYTE) return true
+                if (byte == SHUTDOWN_COMMAND_BYTE) {
+                    onShutdown("Parent Command during notification")
                     return false
                 }
             }
+            break
         }
         return false
     }
@@ -218,7 +212,6 @@ internal class ProfilerSessionHandler(
     }
 
     companion object {
-        private const val EINTR = 4
         private const val POLL_ACK_TIMEOUT_MS = 5000
         private val logger = java.util.logging.Logger.getLogger(ProfilerSessionHandler::class.java.name)
     }
@@ -226,7 +219,7 @@ internal class ProfilerSessionHandler(
 
 private class SyscallPathResolver(
     private val memoryReader: ProfilerMemoryReader,
-    private val pid: Int,
+    private val pid: Pid,
     private val ledger: SessionEventLedger,
 ) {
     fun getPathArgs(
@@ -267,7 +260,7 @@ private class SyscallPathResolver(
     ): String? {
         if (addr == 0L) return null
         val path = memoryReader.readStringFromProcess(pid, addr)
-        ledger.record(SessionEvent.VmReadvResolved(System.nanoTime(), pid.toLong(), path != null))
+        ledger.record(SessionEvent.VmReadvResolved(System.nanoTime(), pid.value.toLong(), path != null))
         if (path == null) return null
         return if (path.startsWith("/")) path else resolveRelativePath(path, dirfd)
     }

@@ -1,7 +1,12 @@
 package io.mazewall.profiler.internal
 
 import io.mazewall.LinuxNative
+import io.mazewall.asFd
+import io.mazewall.asInt
 import io.mazewall.ffi.Layouts
+import io.mazewall.getFdOrThrow
+import io.mazewall.onFailure
+import io.mazewall.onSuccess
 import io.mazewall.profiler.engine.DescriptorPassing
 import java.lang.foreign.Arena
 import java.lang.foreign.MemorySegment

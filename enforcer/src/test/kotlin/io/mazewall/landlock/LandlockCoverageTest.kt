@@ -37,7 +37,7 @@ class LandlockCoverageTest {
             a4: Any?,
             a5: Any?,
             a6: Any?,
-        ): LinuxNative.SyscallResult {
+        ): LinuxNative.SyscallResult<Long> {
             if (nr == io.mazewall.ffi.NativeConstants.LANDLOCK_CREATE_RULESET_NR &&
                 a3 == io.mazewall.ffi.NativeConstants.LANDLOCK_CREATE_RULESET_VERSION
             ) {
@@ -85,7 +85,7 @@ class LandlockCoverageTest {
                 a4: Any?,
                 a5: Any?,
                 a6: Any?,
-            ): LinuxNative.SyscallResult {
+            ): LinuxNative.SyscallResult<Long> {
                 if (nr == io.mazewall.ffi.NativeConstants.LANDLOCK_ADD_RULE_NR) {
                     return LinuxNative.SyscallResult.Error(1, -1) // EPERM
                 }
@@ -112,7 +112,7 @@ class LandlockCoverageTest {
                 a4: Any?,
                 a5: Any?,
                 a6: Any?,
-            ): LinuxNative.SyscallResult {
+            ): LinuxNative.SyscallResult<Long> {
                 if (nr == io.mazewall.ffi.NativeConstants.LANDLOCK_RESTRICT_SELF_NR) {
                     return LinuxNative.SyscallResult.Error(1, -1) // EPERM
                 }
@@ -143,7 +143,7 @@ class LandlockCoverageTest {
                 override fun open(
                     path: java.lang.foreign.MemorySegment,
                     flags: Int,
-                ): LinuxNative.SyscallResult {
+                ): LinuxNative.SyscallResult<Long> {
                     val current = calls.incrementAndGet()
                     return if (current == 1) {
                         LinuxNative.SyscallResult.Error(2, -1)

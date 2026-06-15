@@ -3,6 +3,7 @@ package io.mazewall.profiler
 import io.mazewall.BaseIntegrationTest
 import io.mazewall.LinuxNative
 import io.mazewall.Policy
+import io.mazewall.asFd
 import io.mazewall.core.Arch
 import io.mazewall.core.Syscall
 import io.mazewall.profiler.compiler.BobCompiler

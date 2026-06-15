@@ -3,6 +3,7 @@ package io.mazewall.profiler
 import io.mazewall.LinuxNative
 import io.mazewall.Policy
 import io.mazewall.Uncompiled
+import io.mazewall.core.Pid
 import io.mazewall.profiler.compiler.BobCompiler
 import io.mazewall.profiler.engine.ProfilerInstaller
 import io.mazewall.profiler.engine.TraceEvent
@@ -23,7 +24,7 @@ import java.util.logging.Logger
  */
 object Profiler {
     private val logger = Logger.getLogger(Profiler::class.java.name)
-    val threadRegistry = ConcurrentHashMap<Int, Thread>()
+    val threadRegistry = ConcurrentHashMap<io.mazewall.core.Pid, Thread>()
 
     /**
      * Profiles [block] on a dedicated OS platform thread under a seccomp

@@ -141,7 +141,7 @@ class LinuxNativeTest : BaseIntegrationTest() {
         val result =
             LinuxNative.withTransaction {
                 LinuxNative.memory.processVmReadv(
-                    ProcessHandle.current().pid().toInt(),
+                    io.mazewall.core.Pid(ProcessHandle.current().pid().toInt()),
                     localIovec,
                     1,
                     remoteIovec,

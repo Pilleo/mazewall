@@ -103,7 +103,7 @@ internal class ProfilerTraceListener(
             paths.add(String(pathBytes, Charsets.UTF_8))
         }
 
-        val threadToProfile = Profiler.threadRegistry[pid] ?: workerThreadProvider()
+        val threadToProfile = Profiler.threadRegistry[io.mazewall.core.Pid(pid)] ?: workerThreadProvider()
         val stackTrace = threadToProfile?.stackTrace?.map { it.toString() }
         return TraceEvent(pid, syscallName, args, paths, stackTrace)
     }
@@ -137,7 +137,7 @@ internal class ProfilerTraceListener(
 
     private fun accumulateStackTrace(event: TraceEvent) {
         if (stackTracesMap == null) return
-        val threadToProfile = Profiler.threadRegistry[event.pid] ?: workerThreadProvider()
+        val threadToProfile = Profiler.threadRegistry[io.mazewall.core.Pid(event.pid)] ?: workerThreadProvider()
         if (threadToProfile != null) {
             val frames = threadToProfile.stackTrace
             stackTracesMap

@@ -499,7 +499,7 @@ class LandlockTest : BaseIntegrationTest() {
                 a4: Any?,
                 a5: Any?,
                 a6: Any?,
-            ): LinuxNative.SyscallResult {
+            ): LinuxNative.SyscallResult<Long> {
                 return if (nr == io.mazewall.ffi.NativeConstants.LANDLOCK_CREATE_RULESET_NR &&
                     a3 == io.mazewall.ffi.NativeConstants.LANDLOCK_CREATE_RULESET_VERSION
                 ) {
@@ -534,7 +534,7 @@ class LandlockTest : BaseIntegrationTest() {
                 a4: Any?,
                 a5: Any?,
                 a6: Any?,
-            ): LinuxNative.SyscallResult {
+            ): LinuxNative.SyscallResult<Long> {
                 return if (nr == io.mazewall.ffi.NativeConstants.LANDLOCK_CREATE_RULESET_NR &&
                     a3 == io.mazewall.ffi.NativeConstants.LANDLOCK_CREATE_RULESET_VERSION
                 ) {

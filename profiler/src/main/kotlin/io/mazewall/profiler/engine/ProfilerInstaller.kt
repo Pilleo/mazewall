@@ -5,6 +5,8 @@ import io.mazewall.LinuxNative
 import io.mazewall.Policy
 import io.mazewall.Uncompiled
 import io.mazewall.core.Arch
+import io.mazewall.getFdOrThrow
+import io.mazewall.onSuccess
 import io.mazewall.ffi.NativeConstants
 import io.mazewall.seccomp.BpfInstruction
 import io.mazewall.profiler.Profiler
