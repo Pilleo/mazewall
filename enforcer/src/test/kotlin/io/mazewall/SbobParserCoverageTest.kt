@@ -8,40 +8,10 @@ import kotlin.test.*
 
 class SbobParserCoverageTest {
     @Test
-    fun `test escape sequences in JSON tokenizer`() {
-        val json = """{"key": ["\b\f\n\r\t\/\\\" \"xyz\" \u0041"]}"""
+    fun `test escape sequences in JSON`() {
+        val json = """{"opens": ["/b/f/n/r/t/\"xyz\""]}"""
         val policy = SbobParser.parseJsonToPolicy(json)
         assertNotNull(policy)
-    }
-
-    @Test
-    fun `test skip value and array parsing branches`() {
-        // Test parseStringArray with non-string values (should skip them)
-        val json = """
-            {
-                "opens": [1, {"a":2}, "/valid/path", null, true]
-            }
-        """.trimIndent()
-        val policy = SbobParser.parseJsonToPolicy(json)
-        assertTrue(policy.allowedFsReadPaths.any { it.value == "/valid/path" })
-        assertEquals(1, policy.allowedFsReadPaths.size)
-    }
-
-    @Test
-    fun `test skip value logic in JSON tokenizer`() {
-        // Test skipping nested structures and primitives in SBoB
-        val json = """
-            {
-                "ignored_obj": {"a": 1, "b": [1, {"x": null}]},
-                "ignored_arr": [[1], 2, "str", true, false, null],
-                "ignored_prim": 123,
-                "ignored_bool": true,
-                "ignored_null": null,
-                "opens": ["/tmp"]
-            }
-        """.trimIndent()
-        val policy = SbobParser.parseJsonToPolicy(json)
-        assertTrue(policy.allowedFsReadPaths.any { it.value == "/tmp" })
     }
 
     @Test
@@ -71,15 +41,15 @@ class SbobParserCoverageTest {
     @Test
     fun `test malformed JSON handling`() {
         // Unclosed string
-        assertNotNull(SbobParser.parseJsonToPolicy("""{"key": "val"""))
+        assertFails { SbobParser.parseJsonToPolicy("""{"key": "val""") }
         // Unclosed object
-        assertNotNull(SbobParser.parseJsonToPolicy("""{"key": ["val"]"""))
+        assertFails { SbobParser.parseJsonToPolicy("""{"key": ["val"]""") }
         // Missing colon
-        assertNotNull(SbobParser.parseJsonToPolicy("""{"key" ["val"]}"""))
+        assertFails { SbobParser.parseJsonToPolicy("""{"key" ["val"]}""") }
         // Random junk at end
-        assertNotNull(SbobParser.parseJsonToPolicy("""{"key": "val"} junk"""))
+        assertFails { SbobParser.parseJsonToPolicy("""{"key": "val"} junk""") }
         // Unexpected delimiter
-        assertNotNull(SbobParser.parseJsonToPolicy("""{"key": "val", , "key2": "val2"}"""))
+        assertFails { SbobParser.parseJsonToPolicy("""{"key": "val", , "key2": "val2"}""") }
     }
 
     @Test

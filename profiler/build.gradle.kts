@@ -2,6 +2,7 @@ plugins {
     kotlin("jvm")
     id("info.solidsoft.pitest")
     alias(libs.plugins.plantuml)
+    alias(libs.plugins.kotlinPluginSerialization)
 }
 
 kotlin {
@@ -60,7 +61,7 @@ tasks.test {
 
 dependencies {
     implementation(project(":enforcer"))
-    implementation(libs.jackson.kotlin)
+    implementation(libs.kotlinxSerialization)
 
     testImplementation(kotlin("test"))
     testImplementation(libs.junit.jupiter.api)

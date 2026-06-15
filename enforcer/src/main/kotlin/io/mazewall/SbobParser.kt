@@ -37,6 +37,8 @@ object SbobParser {
         return parseJsonToPolicy(content, base)
     }
 
+    private val jsonDecoder = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
+
     /**
      * Parses an SBoB JSON string and generates a [Policy].
      */
@@ -44,10 +46,10 @@ object SbobParser {
         json: String,
         base: Policy<*, Uncompiled> = Policy.PURE_COMPUTE_UNSAFE,
     ): Policy<PolicyScope.ThreadLocalOnly, Uncompiled> {
-        val arrays = extractStringArrays(json)
-        val opens = arrays["opens"] ?: emptySet()
-        val fsWritePaths = arrays["fsWritePaths"] ?: emptySet()
-        val syscallNames = arrays["syscalls"] ?: emptySet()
+        val dto = jsonDecoder.decodeFromString<BillOfBehaviorDto>(json)
+        val opens = dto.opens
+        val fsWritePaths = dto.fsWritePaths
+        val syscallNames = dto.syscalls
 
         val mappedSyscalls =
             syscallNames
@@ -95,160 +97,5 @@ object SbobParser {
         }
         return result.map { it.toString() }.toSet()
     }
-
-    @Suppress("CyclomaticComplexMethod")
-    private fun extractStringArrays(json: String): Map<String, Set<String>> {
-        val result = mutableMapOf<String, Set<String>>()
-        val tokenizer = JsonTokenizer(json)
-        tokenizer.skipWhitespace()
-
-        if (tokenizer.pos < json.length && json[tokenizer.pos] == '{') {
-            tokenizer.pos++
-            while (tokenizer.pos < json.length) {
-                tokenizer.skipWhitespace()
-                if (tokenizer.pos < json.length && json[tokenizer.pos] == '}') {
-                    tokenizer.pos++
-                    break
-                }
-                val key = tokenizer.parseString()
-                tokenizer.skipWhitespace()
-                if (tokenizer.pos < json.length && json[tokenizer.pos] == ':') {
-                    tokenizer.pos++
-                    tokenizer.skipWhitespace()
-                    if (key != null && tokenizer.pos < json.length && json[tokenizer.pos] == '[') {
-                        result[key] = tokenizer.parseStringArray()
-                    } else {
-                        tokenizer.skipValue()
-                    }
-                }
-                tokenizer.skipWhitespace()
-                if (tokenizer.pos < json.length && json[tokenizer.pos] == ',') {
-                    tokenizer.pos++
-                } else if (tokenizer.pos < json.length && json[tokenizer.pos] != '}') {
-                    // Prevent infinite loop on malformed JSON:
-                    // if we are not at a delimiter and no progress was made, consume one char.
-                    tokenizer.pos++
-                }
-            }
-        }
-        return result
-    }
-
-    private class JsonTokenizer(
-        val json: String,
-    ) {
-        var pos = 0
-
-        fun skipWhitespace() {
-            while (pos < json.length && json[pos].isWhitespace()) pos++
-        }
-
-        fun parseString(): String? {
-            if (pos >= json.length || json[pos] != '"') return null
-            val startPos = pos
-            pos++
-            val sb = StringBuilder()
-            while (pos < json.length) {
-                val c = json[pos]
-                if (c == '"') {
-                    pos++
-                    return sb.toString()
-                }
-                if (c == '\\') {
-                    handleEscapeSequence(sb)
-                } else {
-                    sb.append(c)
-                }
-                pos++
-            }
-            // If we reached the end without finding a closing quote,
-            // ensure we don't restart from the same position next time.
-            if (pos == startPos) pos++
-            return null
-        }
-
-        private fun handleEscapeSequence(sb: StringBuilder) {
-            pos++
-            if (pos < json.length) {
-                val esc = json[pos]
-                when (esc) {
-                    '"', '\\', '/' -> sb.append(esc)
-                    'b' -> sb.append('\b')
-                    'f' -> sb.append('\u000C')
-                    'n' -> sb.append('\n')
-                    'r' -> sb.append('\r')
-                    't' -> sb.append('\t')
-                    else -> sb.append(esc)
-                }
-            }
-        }
-
-        fun skipValue() {
-            skipWhitespace()
-            if (pos >= json.length) return
-            when (json[pos]) {
-                '"' -> parseString()
-                '[' -> skipArray()
-                '{' -> skipObject()
-                else -> skipPrimitive()
-            }
-        }
-
-        private fun skipArray() {
-            pos++
-            while (pos < json.length) {
-                skipWhitespace()
-                if (pos < json.length && json[pos] == ']') {
-                    pos++
-                    break
-                }
-                skipValue()
-                skipWhitespace()
-                if (pos < json.length && json[pos] == ',') pos++
-            }
-        }
-
-        private fun skipObject() {
-            pos++
-            while (pos < json.length) {
-                skipWhitespace()
-                if (pos < json.length && json[pos] == '}') {
-                    pos++
-                    break
-                }
-                parseString() // skip key
-                skipWhitespace()
-                if (pos < json.length && json[pos] == ':') pos++
-                skipValue()
-                skipWhitespace()
-                if (pos < json.length && json[pos] == ',') pos++
-            }
-        }
-
-        private fun skipPrimitive() {
-            while (pos < json.length && !json[pos].isWhitespace() && json[pos] != ',' && json[pos] != '}' && json[pos] != ']') pos++
-        }
-
-        fun parseStringArray(): Set<String> {
-            val set = mutableSetOf<String>()
-            if (pos >= json.length || json[pos] != '[') return set
-            pos++
-            while (pos < json.length) {
-                skipWhitespace()
-                if (pos < json.length && json[pos] == ']') {
-                    pos++
-                    break
-                }
-                if (pos < json.length && json[pos] == '"') {
-                    val str = parseString()
-                    if (str != null) set.add(str)
-                } else {
-                    skipValue()
-                }
-                skipWhitespace()
-                if (pos < json.length && json[pos] == ',') pos++
-            }
-            return set
-        }
-    }
 }
+

@@ -1,9 +1,10 @@
 package io.mazewall.profiler
 
-import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import io.mazewall.Policy
 import io.mazewall.PolicyScope
 import io.mazewall.Uncompiled
+import io.mazewall.BillOfBehaviorDto
+import io.mazewall.StackProfileEntryDto
 import io.mazewall.core.SeccompAction
 import io.mazewall.core.Syscall
 import io.mazewall.profiler.engine.TraceEvent
@@ -12,23 +13,12 @@ import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.Paths
+import kotlinx.serialization.json.Json
 
-private val mapper = jacksonObjectMapper()
-
-private class BillOfBehaviorDto(
-    val opens: Set<String> = emptySet(),
-    val fsWritePaths: Set<String> = emptySet(),
-    val syscalls: Set<String> = emptySet(),
-    val execs: Set<String> = emptySet(),
-    val stackProfile: List<StackProfileEntryDto> = emptyList(),
-)
-
-private class StackProfileEntryDto(
-    val syscall: String,
-    val paths: List<String> = emptyList(),
-    val args: List<Long> = emptyList(),
-    val stackTrace: List<String> = emptyList(),
-)
+private val jsonSerializer = Json {
+    prettyPrint = true
+    ignoreUnknownKeys = true
+}
 
 /**
  * An immutable record of what kernel-level operations were observed during a
@@ -247,7 +237,7 @@ data class BillOfBehavior(
             stackProfile = stackProfileDtos,
         )
 
-        return mapper.writerWithDefaultPrettyPrinter().writeValueAsString(dto)
+        return jsonSerializer.encodeToString(BillOfBehaviorDto.serializer(), dto)
     }
 
     /**
@@ -265,7 +255,7 @@ data class BillOfBehavior(
                 )
             }
         }
-        return mapper.writerWithDefaultPrettyPrinter().writeValueAsString(stackProfileDtos)
+        return jsonSerializer.encodeToString(kotlinx.serialization.builtins.ListSerializer(StackProfileEntryDto.serializer()), stackProfileDtos)
     }
 
     companion object {
@@ -288,7 +278,7 @@ data class BillOfBehavior(
          * Parses a Bill of Behavior from an SBoB JSON string.
          */
         fun fromJson(json: String): BillOfBehavior {
-            val dto = mapper.readValue(json, BillOfBehaviorDto::class.java)
+            val dto = jsonSerializer.decodeFromString(BillOfBehaviorDto.serializer(), json)
 
             val mappedSyscalls = dto.syscalls
                 .mapNotNull { name ->
