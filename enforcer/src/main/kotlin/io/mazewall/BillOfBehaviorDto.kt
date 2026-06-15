@@ -16,6 +16,17 @@ public class StackProfileEntryDto(
     val syscall: String,
     val paths: List<String> = emptyList(),
     val args: List<Long> = emptyList(),
-    val stackTrace: List<String> = emptyList(),
+    val stackTrace: List<StackFrameDto> = emptyList(),
+)
+
+@Serializable
+public data class StackFrameDto(
+    val classLoader: String? = null,
+    val module: String? = null,
+    val moduleVersion: String? = null,
+    val className: String,
+    val methodName: String,
+    val fileName: String? = null,
+    val lineNumber: Int = -1,
 )
 

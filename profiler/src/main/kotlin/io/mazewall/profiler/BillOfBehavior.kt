@@ -5,6 +5,7 @@ import io.mazewall.PolicyScope
 import io.mazewall.Uncompiled
 import io.mazewall.BillOfBehaviorDto
 import io.mazewall.StackProfileEntryDto
+import io.mazewall.StackFrameDto
 import io.mazewall.core.SeccompAction
 import io.mazewall.core.Syscall
 import io.mazewall.profiler.engine.TraceEvent
@@ -224,7 +225,17 @@ data class BillOfBehavior(
                     syscall = event.syscallName,
                     paths = event.paths,
                     args = event.args.toList(),
-                    stackTrace = frames.map { it.toString() },
+                    stackTrace = frames.map { frame ->
+                        StackFrameDto(
+                            classLoader = frame.classLoaderName,
+                            module = frame.moduleName,
+                            moduleVersion = frame.moduleVersion,
+                            className = frame.className,
+                            methodName = frame.methodName,
+                            fileName = frame.fileName,
+                            lineNumber = frame.lineNumber,
+                        )
+                    },
                 )
             }
         }
@@ -251,7 +262,17 @@ data class BillOfBehavior(
                     syscall = event.syscallName,
                     paths = event.paths,
                     args = event.args.toList(),
-                    stackTrace = frames.map { it.toString() },
+                    stackTrace = frames.map { frame ->
+                        StackFrameDto(
+                            classLoader = frame.classLoaderName,
+                            module = frame.moduleName,
+                            moduleVersion = frame.moduleVersion,
+                            className = frame.className,
+                            methodName = frame.methodName,
+                            fileName = frame.fileName,
+                            lineNumber = frame.lineNumber,
+                        )
+                    },
                 )
             }
         }
@@ -297,7 +318,17 @@ data class BillOfBehavior(
                     args = entry.args.map { it }.toLongArray(),
                     paths = entry.paths,
                 )
-                val frames = entry.stackTrace.map { parseStackTraceElement(it) }.toTypedArray()
+                val frames = entry.stackTrace.map { frameDto ->
+                    StackTraceElement(
+                        frameDto.classLoader,
+                        frameDto.module,
+                        frameDto.moduleVersion,
+                        frameDto.className,
+                        frameDto.methodName,
+                        frameDto.fileName,
+                        frameDto.lineNumber,
+                    )
+                }.toTypedArray()
                 stackProfile.getOrPut(event) { mutableListOf() }.add(frames)
             }
 
@@ -307,96 +338,6 @@ data class BillOfBehavior(
                 syscalls = mappedSyscalls,
                 execs = dto.execs,
                 stackProfile = stackProfile,
-            )
-        }
-
-        /**
-         * Parses a string produced by [StackTraceElement.toString].
-         *
-         * Format (all optional segments in brackets):
-         * ```
-         * [classLoaderName/][moduleName[@version]/]className.methodName(fileName[:lineNumber])
-         * ```
-         *
-         * Examples:
-         * - `io.mazewall.Profiler.profile(Profiler.kt:152)`
-         * - `java.base/java.lang.Thread.run(Thread.java:1583)`
-         * - `app/io.mazewall@1.0/io.mazewall.Profiler.profile(Profiler.kt:152)`
-         * - `Native Method` / `Unknown Source` inside parens
-         *
-         * A regex is not used: the optional classloader, module, and version segments create
-         * ambiguous group boundaries (e.g., `foo/bar` could be classloader+class or module+class)
-         * that are more clearly disambiguated by the sequential string decomposition below.
-         */
-        @Suppress("ComplexMethod", "CyclomaticComplexMethod", "MagicNumber", "ReturnCount") // justified by format above
-        private fun parseStackTraceElement(str: String): StackTraceElement {
-            val openParen = str.indexOf('(')
-            val closeParen = str.lastIndexOf(')')
-            if (openParen == -1 || closeParen == -1 || closeParen < openParen) {
-                return StackTraceElement("Unknown", "unknown", null, -1)
-            }
-
-            val beforeParen = str.substring(0, openParen)
-            val insideParen = str.substring(openParen + 1, closeParen)
-
-            val lastDot = beforeParen.lastIndexOf('.')
-            if (lastDot == -1) {
-                return StackTraceElement("Unknown", beforeParen, null, -1)
-            }
-            val methodName = beforeParen.substring(lastDot + 1)
-            val remaining = beforeParen.substring(0, lastDot)
-
-            val slashes = remaining.split('/')
-            val className = slashes.last()
-
-            val (classLoaderName, moduleName, moduleVersion) = when {
-                slashes.size > 2 -> {
-                    val cl = slashes[0]
-                    val mod = slashes[1]
-                    val atIdx = mod.indexOf('@')
-                    if (atIdx != -1) {
-                        Triple(cl, mod.substring(0, atIdx), mod.substring(atIdx + 1))
-                    } else {
-                        Triple(cl, mod, null)
-                    }
-                }
-                slashes.size == 2 -> {
-                    val first = slashes[0]
-                    val atIdx = first.indexOf('@')
-                    if (atIdx != -1) {
-                        Triple(null, first.substring(0, atIdx), first.substring(atIdx + 1))
-                    } else {
-                        if (first.startsWith("java.") || first.startsWith("jdk.")) {
-                            Triple(null, first, null)
-                        } else {
-                            Triple(first, null, null)
-                        }
-                    }
-                }
-                else -> Triple(null, null, null)
-            }
-
-            val (fileName, lineNumber) = when (insideParen) {
-                "Native Method" -> null to -2
-                "Unknown Source" -> null to -1
-                else -> {
-                    val colon = insideParen.lastIndexOf(':')
-                    if (colon != -1) {
-                        insideParen.substring(0, colon) to insideParen.substring(colon + 1).toIntOrNull()
-                    } else {
-                        insideParen to -1
-                    }
-                }
-            }
-
-            return StackTraceElement(
-                classLoaderName,
-                moduleName,
-                moduleVersion,
-                className,
-                methodName,
-                fileName,
-                lineNumber ?: -1,
             )
         }
     }
