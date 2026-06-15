@@ -39,19 +39,19 @@ object PureJavaBpfEngine : SeccompEngine {
     ) {
         threadState.set(SeccompInstallationState.Uninitialized)
         try {
-            setNoNewPrivs()
-            threadState.set(SeccompInstallationState.PrivilegesLocked)
+            val uninitialized = SeccompInstallationState.Uninitialized
+            val locked = uninitialized.lockPrivileges()
+            threadState.set(locked)
 
             val arch = Arch.current()
-            val filters = policy.compiledFilters
-
             nativeScope {
-                val prog = LinuxNative.memory.newSockFProg(filters)
-                threadState.set(SeccompInstallationState.FilterBuilt(prog))
-                installFilter(arch, prog, useTsync)
+                val built = locked.buildFilter(this, policy)
+                threadState.set(built)
+                val applied = built.applyFilter(arch, useTsync)
+                threadState.set(applied)
+                val verified = applied.verify(policy)
+                threadState.set(verified)
             }
-
-            verifyInstallation(policy)
         } catch (e: Throwable) {
             val stepName = when (val current = threadState.get()) {
                 is SeccompInstallationState.FilterBuilt -> "installFilter"
@@ -75,7 +75,7 @@ object PureJavaBpfEngine : SeccompEngine {
         }
     }
 
-    private fun setNoNewPrivs() {
+    internal fun setNoNewPrivs() {
         // Step 1: Set no_new_privs (mandatory for non-root seccomp)
         val r1 = LinuxNative.withTransaction {
             LinuxNative.process.prctl(NativeConstants.PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0)
@@ -83,11 +83,11 @@ object PureJavaBpfEngine : SeccompEngine {
         r1.getOrThrow("prctl(PR_SET_NO_NEW_PRIVS)")
     }
 
-    private fun installFilter(
+    internal fun installFilter(
         arch: Arch,
         prog: java.lang.foreign.MemorySegment,
         useTsync: Boolean,
-    ) {
+    ): SeccompInstallationState.FilterApplied {
         // Try modern seccomp(2) syscall first
         val flags = if (useTsync) NativeConstants.SECCOMP_FILTER_FLAG_TSYNC.toLong() else 0L
         val r3 = LinuxNative.withTransaction {
@@ -127,19 +127,18 @@ object PureJavaBpfEngine : SeccompEngine {
                     "seccomp installation failed: seccomp(2) errno=$errno1, prctl errno=${r4.errno}",
                 )
             } else {
-                threadState.set(SeccompInstallationState.FallbackPrctlApplied)
+                return SeccompInstallationState.FallbackPrctlApplied
             }
         } else {
-            threadState.set(SeccompInstallationState.SystemCallApplied)
+            return SeccompInstallationState.SystemCallApplied
         }
     }
 
-    private fun verifyInstallation(policy: Policy<*, *>) {
+    internal fun verifyInstallation(policy: Policy<*, *>) {
         val prctlAction = policy.syscallActions[Syscall.PRCTL] ?: policy.defaultAction
         val canVerify = prctlAction == SeccompAction.ACT_ALLOW
 
         if (!canVerify) {
-            threadState.set(SeccompInstallationState.Verified)
             return // Cannot verify because prctl itself is restricted
         }
 
@@ -153,6 +152,6 @@ object PureJavaBpfEngine : SeccompEngine {
                 "Seccomp filter verification failed: expected mode 2, got $mode",
             )
         }
-        threadState.set(SeccompInstallationState.Verified)
     }
 }
+

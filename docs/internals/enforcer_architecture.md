@@ -32,32 +32,18 @@ class "LinuxNative" as io.mazewall.LinuxNative {
   +NativeNetworking getNetworking()
   +NativeProcess getProcess()
   +NativeMemory getMemory()
-  +SyscallResult prctl(NativeTransaction, int, Object, Object, Object, Object)
   +SyscallResult syscall(NativeTransaction, long, Object, Object, Object, Object, Object, Object)
   +SyscallResult syscall4(NativeTransaction, long, Object, Object, Object, Object)
-  +SyscallResult open(NativeTransaction, MemorySegment, int)
-  +SyscallResult close-LsA-840(int)
-  +SyscallResult socketpair(NativeTransaction, int, int, int, MemorySegment)
-  +SyscallResult socket(NativeTransaction, int, int, int)
-  +SyscallResult bind-r9EpL9Y(NativeTransaction, int, MemorySegment, int)
-  +SyscallResult listen-cRJsZIA(NativeTransaction, int, int)
-  +SyscallResult accept-r9EpL9Y(NativeTransaction, int, MemorySegment, MemorySegment)
-  +SyscallResult connect-r9EpL9Y(NativeTransaction, int, MemorySegment, int)
-  +SyscallResult sendmsg-r9EpL9Y(NativeTransaction, int, MemorySegment, int)
-  +SyscallResult recvmsg-r9EpL9Y(NativeTransaction, int, MemorySegment, int)
   +SyscallResult ioctl-r9EpL9Y(NativeTransaction, int, long, MemorySegment)
   +SyscallResult ioctl-r9EpL9Y(NativeTransaction, int, long, long)
-  +SyscallResult processVmReadv(NativeTransaction, int, MemorySegment, long, MemorySegment, long, long)
-  +SyscallResult readlink(NativeTransaction, MemorySegment, MemorySegment, long)
-  +SyscallResult read-r9EpL9Y(NativeTransaction, int, MemorySegment, long)
-  +SyscallResult write-r9EpL9Y(NativeTransaction, int, MemorySegment, long)
-  +SyscallResult recv-cNv3Vh8(NativeTransaction, int, MemorySegment, long, int)
   +SyscallResult fcntl-r9EpL9Y(NativeTransaction, int, int, long)
-  +int gettid()
   +SyscallResult poll(NativeTransaction, MemorySegment, long, int)
-  +MemorySegment newSockFProg(Arena, List<? extends BpfInstruction>)
 }
 interface "NativeEngine" as io.mazewall.NativeEngine {
+  + {abstract}NativeFileSystem getFileSystem()
+  + {abstract}NativeNetworking getNetworking()
+  + {abstract}NativeProcess getProcess()
+  + {abstract}NativeMemory getMemory()
   + {abstract}SyscallResult syscall(NativeTransaction, long, Object, Object, Object, Object, Object, Object)
   + {abstract}SyscallResult syscall4(NativeTransaction, long, Object, Object, Object, Object)
   + {abstract}SyscallResult ioctl-r9EpL9Y(NativeTransaction, int, long, MemorySegment)
@@ -138,11 +124,42 @@ interface "PolicyState" as io.mazewall.PolicyState {
 class "RealNativeEngine" as io.mazewall.RealNativeEngine {
   + {static}RealNativeEngine INSTANCE
   __
-  +SyscallResult prctl(NativeTransaction, int, Object, Object, Object, Object)
+  +NativeFileSystem getFileSystem()
+  +NativeNetworking getNetworking()
+  +NativeProcess getProcess()
+  +NativeMemory getMemory()
   +SyscallResult syscall(NativeTransaction, long, Object, Object, Object, Object, Object, Object)
   +SyscallResult syscall4(NativeTransaction, long, Object, Object, Object, Object)
+  +SyscallResult ioctl-r9EpL9Y(NativeTransaction, int, long, MemorySegment)
+  +SyscallResult ioctl-r9EpL9Y(NativeTransaction, int, long, long)
+  +SyscallResult fcntl-r9EpL9Y(NativeTransaction, int, int, long)
+  +SyscallResult poll(NativeTransaction, MemorySegment, long, int)
+}
+class "RealNativeFileSystem" as io.mazewall.RealNativeFileSystem {
+  + {static}RealNativeFileSystem INSTANCE
+  __
   +SyscallResult open(NativeTransaction, MemorySegment, int)
   +SyscallResult close-LsA-840(int)
+  +SyscallResult readlink(NativeTransaction, MemorySegment, MemorySegment, long)
+}
+class "RealNativeHelper" as io.mazewall.RealNativeHelper {
+  + {static}RealNativeHelper INSTANCE
+  __
+  +long toLong(Object)
+  +SyscallResult result(long, int)
+  +MethodHandle downcall(String, FunctionDescriptor, Option[])
+}
+class "RealNativeMemory" as io.mazewall.RealNativeMemory {
+  + {static}RealNativeMemory INSTANCE
+  __
+  +SyscallResult processVmReadv(NativeTransaction, int, MemorySegment, long, MemorySegment, long, long)
+  +SyscallResult read-r9EpL9Y(NativeTransaction, int, MemorySegment, long)
+  +SyscallResult write-r9EpL9Y(NativeTransaction, int, MemorySegment, long)
+  +MemorySegment newSockFProg(Arena, List<? extends BpfInstruction>)
+}
+class "RealNativeNetworking" as io.mazewall.RealNativeNetworking {
+  + {static}RealNativeNetworking INSTANCE
+  __
   +SyscallResult socketpair(NativeTransaction, int, int, int, MemorySegment)
   +SyscallResult socket(NativeTransaction, int, int, int)
   +SyscallResult bind-r9EpL9Y(NativeTransaction, int, MemorySegment, int)
@@ -151,17 +168,13 @@ class "RealNativeEngine" as io.mazewall.RealNativeEngine {
   +SyscallResult connect-r9EpL9Y(NativeTransaction, int, MemorySegment, int)
   +SyscallResult sendmsg-r9EpL9Y(NativeTransaction, int, MemorySegment, int)
   +SyscallResult recvmsg-r9EpL9Y(NativeTransaction, int, MemorySegment, int)
-  +SyscallResult ioctl-r9EpL9Y(NativeTransaction, int, long, MemorySegment)
-  +SyscallResult ioctl-r9EpL9Y(NativeTransaction, int, long, long)
-  +SyscallResult processVmReadv(NativeTransaction, int, MemorySegment, long, MemorySegment, long, long)
-  +SyscallResult readlink(NativeTransaction, MemorySegment, MemorySegment, long)
-  +SyscallResult read-r9EpL9Y(NativeTransaction, int, MemorySegment, long)
-  +SyscallResult write-r9EpL9Y(NativeTransaction, int, MemorySegment, long)
   +SyscallResult recv-cNv3Vh8(NativeTransaction, int, MemorySegment, long, int)
-  +SyscallResult fcntl-r9EpL9Y(NativeTransaction, int, int, long)
+}
+class "RealNativeProcess" as io.mazewall.RealNativeProcess {
+  + {static}RealNativeProcess INSTANCE
+  __
   +int gettid()
-  +SyscallResult poll(NativeTransaction, MemorySegment, long, int)
-  +MemorySegment newSockFProg(Arena, List<? extends BpfInstruction>)
+  +SyscallResult prctl(NativeTransaction, int, Object, Object, Object, Object)
 }
 class "SbobParser" as io.mazewall.SbobParser {
   + {static}SbobParser INSTANCE
@@ -228,35 +241,6 @@ class "ContainedExecutors" as io.mazewall.enforcer.ContainedExecutors {
   +void installOnProcess(Policy<? extends ProcessWideSafe, ? extends Uncompiled>[])
   +ExecutorService wrap(ExecutorService, Policy<?, ? extends Uncompiled>[])
 }
-class "ContainerStateRegistry" as io.mazewall.enforcer.ContainerStateRegistry {
-  + {static}ContainerStateRegistry INSTANCE
-  __
-  +Map<Syscall, SeccompAction> getThreadSyscallActions()
-  +void setThreadSyscallActions(Map<Syscall, ? extends SeccompAction>)
-  +SeccompAction getThreadDefaultAction()
-  +void setThreadDefaultAction(SeccompAction)
-  +boolean getThreadAllowsMmapExec()
-  +void setThreadAllowsMmapExec(boolean)
-  +boolean getThreadAllowsNonThreadClone()
-  +void setThreadAllowsNonThreadClone(boolean)
-  +boolean getThreadAllowsUnsafePrctl()
-  +void setThreadAllowsUnsafePrctl(boolean)
-  +Set<Syscall> getThreadAllowedSyscalls()
-  +void setThreadAllowedSyscalls(Set<? extends Syscall>)
-  +int getFilterDepth()
-  +void setFilterDepth(int)
-  +Set<SandboxedPath> getThreadLandlockAppliedReads()
-  +void setThreadLandlockAppliedReads(Set<SandboxedPath>)
-  +Set<SandboxedPath> getThreadLandlockAppliedWrites()
-  +void setThreadLandlockAppliedWrites(Set<SandboxedPath>)
-  +Map<Syscall, SeccompAction> getPROCESS_SYSCALL_ACTIONS()
-  +AtomicReference<SeccompAction> getPROCESS_DEFAULT_ACTION()
-  +AtomicBoolean getPROCESS_ALLOWS_MMAP_EXEC()
-  +AtomicBoolean getPROCESS_ALLOWS_NON_THREAD_CLONE()
-  +AtomicBoolean getPROCESS_ALLOWS_UNSAFE_PRCTL()
-  +AtomicReference<Set<Syscall>> getPROCESS_ALLOWED_SYSCALLS()
-  +AtomicInteger getPROCESS_FILTER_DEPTH()
-}
 class "ContainmentViolationDetector" as io.mazewall.enforcer.ContainmentViolationDetector {
   + {static}ContainmentViolationDetector INSTANCE
   __
@@ -278,12 +262,46 @@ class "JvmFloorWorkload" as io.mazewall.enforcer.JvmFloorWorkload {
   +void run()
   + {static}void main(String[])
 }
+class "ProcessStateRegistry" as io.mazewall.enforcer.ProcessStateRegistry {
+  + {static}ProcessStateRegistry INSTANCE
+  __
+  +Map<Syscall, SeccompAction> getSYSCALL_ACTIONS()
+  +AtomicReference<SeccompAction> getDEFAULT_ACTION()
+  +AtomicBoolean getALLOWS_MMAP_EXEC()
+  +AtomicBoolean getALLOWS_NON_THREAD_CLONE()
+  +AtomicBoolean getALLOWS_UNSAFE_PRCTL()
+  +AtomicReference<Set<Syscall>> getALLOWED_SYSCALLS()
+  +AtomicInteger getFILTER_DEPTH()
+}
 class "ThreadLocalDelegate" as io.mazewall.enforcer.ThreadLocalDelegate<T> {
   +T getValue(Object, KProperty<?>)
   +void setValue(Object, KProperty<?>, T)
 }
 class "ThreadLocalDelegateKt" as io.mazewall.enforcer.ThreadLocalDelegateKt {
   + {static}ThreadLocalDelegate<T> threadLocal(Function0<? extends T>)
+}
+class "ThreadStateRegistry" as io.mazewall.enforcer.ThreadStateRegistry {
+  + {static}ThreadStateRegistry INSTANCE
+  __
+  +Map<Syscall, SeccompAction> getSyscallActions()
+  +void setSyscallActions(Map<Syscall, ? extends SeccompAction>)
+  +SeccompAction getDefaultAction()
+  +void setDefaultAction(SeccompAction)
+  +boolean getAllowsMmapExec()
+  +void setAllowsMmapExec(boolean)
+  +boolean getAllowsNonThreadClone()
+  +void setAllowsNonThreadClone(boolean)
+  +boolean getAllowsUnsafePrctl()
+  +void setAllowsUnsafePrctl(boolean)
+  +Set<Syscall> getAllowedSyscalls()
+  +void setAllowedSyscalls(Set<? extends Syscall>)
+  +int getFilterDepth()
+  +void setFilterDepth(int)
+  +Set<SandboxedPath> getLandlockAppliedReads()
+  +void setLandlockAppliedReads(Set<SandboxedPath>)
+  +Set<SandboxedPath> getLandlockAppliedWrites()
+  +void setLandlockAppliedWrites(Set<SandboxedPath>)
+  +void sanitize()
 }
 class "ValidationKt" as io.mazewall.enforcer.ValidationKt {
   + {static}void validateLinuxAndNotVirtual()
@@ -308,6 +326,115 @@ class "LayoutValidator" as io.mazewall.ffi.LayoutValidator {
   + {static}LayoutValidator INSTANCE
   __
   +void validate()
+}
+class "ConfinedSegment" as io.mazewall.ffi.memory.ConfinedSegment {
+  +MemorySegment getSegment()
+  + {static}String toString-impl(MemorySegment)
+  + {static}int hashCode-impl(MemorySegment)
+  + {static}boolean equals-impl(MemorySegment, Object)
+  + {static}MemorySegment constructor-impl(MemorySegment)
+  + {static}boolean equals-impl0(MemorySegment, MemorySegment)
+}
+class "ErrnoSegment" as io.mazewall.ffi.memory.ErrnoSegment {
+  + {static}Companion Companion
+  __
+  +MemorySegment getSegment()
+  + {static}int getErrno-impl(MemorySegment)
+  + {static}String toString-impl(MemorySegment)
+  + {static}int hashCode-impl(MemorySegment)
+  + {static}boolean equals-impl(MemorySegment, Object)
+  + {static}MemorySegment constructor-impl(MemorySegment)
+  + {static}boolean equals-impl0(MemorySegment, MemorySegment)
+}
+class "LandlockPathBeneathAttrSegment" as io.mazewall.ffi.memory.LandlockPathBeneathAttrSegment {
+  + {static}Companion Companion
+  __
+  +MemorySegment getSegment()
+  + {static}long getAllowedAccess-impl(MemorySegment)
+  + {static}void setAllowedAccess-impl(MemorySegment, long)
+  + {static}int getParentFd-impl(MemorySegment)
+  + {static}void setParentFd-impl(MemorySegment, int)
+  + {static}String toString-impl(MemorySegment)
+  + {static}int hashCode-impl(MemorySegment)
+  + {static}boolean equals-impl(MemorySegment, Object)
+  + {static}MemorySegment constructor-impl(MemorySegment)
+  + {static}boolean equals-impl0(MemorySegment, MemorySegment)
+}
+class "LandlockRulesetAttrSegment" as io.mazewall.ffi.memory.LandlockRulesetAttrSegment {
+  + {static}Companion Companion
+  __
+  +MemorySegment getSegment()
+  + {static}long getHandledAccessFs-impl(MemorySegment)
+  + {static}void setHandledAccessFs-impl(MemorySegment, long)
+  + {static}long getHandledAccessNet-impl(MemorySegment)
+  + {static}void setHandledAccessNet-impl(MemorySegment, long)
+  + {static}String toString-impl(MemorySegment)
+  + {static}int hashCode-impl(MemorySegment)
+  + {static}boolean equals-impl(MemorySegment, Object)
+  + {static}MemorySegment constructor-impl(MemorySegment)
+  + {static}boolean equals-impl0(MemorySegment, MemorySegment)
+}
+interface "ManagedSegment" as io.mazewall.ffi.memory.ManagedSegment {
+  + {abstract}MemorySegment getSegment()
+}
+class "NativeScopeKt" as io.mazewall.ffi.memory.NativeScopeKt {
+  + {static}T nativeScope(Function1<? super Arena, ? extends T>)
+}
+class "PollFdSegment" as io.mazewall.ffi.memory.PollFdSegment {
+  + {static}Companion Companion
+  __
+  +MemorySegment getSegment()
+  + {static}int getFd-impl(MemorySegment)
+  + {static}void setFd-impl(MemorySegment, int)
+  + {static}short getEvents-impl(MemorySegment)
+  + {static}void setEvents-impl(MemorySegment, short)
+  + {static}short getRevents-impl(MemorySegment)
+  + {static}void setRevents-impl(MemorySegment, short)
+  + {static}String toString-impl(MemorySegment)
+  + {static}int hashCode-impl(MemorySegment)
+  + {static}boolean equals-impl(MemorySegment, Object)
+  + {static}MemorySegment constructor-impl(MemorySegment)
+  + {static}boolean equals-impl0(MemorySegment, MemorySegment)
+}
+class "SharedSegment" as io.mazewall.ffi.memory.SharedSegment {
+  +MemorySegment getSegment()
+  + {static}String toString-impl(MemorySegment)
+  + {static}int hashCode-impl(MemorySegment)
+  + {static}boolean equals-impl(MemorySegment, Object)
+  + {static}MemorySegment constructor-impl(MemorySegment)
+  + {static}boolean equals-impl0(MemorySegment, MemorySegment)
+}
+class "SockFilterSegment" as io.mazewall.ffi.memory.SockFilterSegment {
+  + {static}Companion Companion
+  __
+  +MemorySegment getSegment()
+  + {static}short getCode-impl(MemorySegment)
+  + {static}void setCode-impl(MemorySegment, short)
+  + {static}byte getJt-impl(MemorySegment)
+  + {static}void setJt-impl(MemorySegment, byte)
+  + {static}byte getJf-impl(MemorySegment)
+  + {static}void setJf-impl(MemorySegment, byte)
+  + {static}int getK-impl(MemorySegment)
+  + {static}void setK-impl(MemorySegment, int)
+  + {static}String toString-impl(MemorySegment)
+  + {static}int hashCode-impl(MemorySegment)
+  + {static}boolean equals-impl(MemorySegment, Object)
+  + {static}MemorySegment constructor-impl(MemorySegment)
+  + {static}boolean equals-impl0(MemorySegment, MemorySegment)
+}
+class "SockFprogSegment" as io.mazewall.ffi.memory.SockFprogSegment {
+  + {static}Companion Companion
+  __
+  +MemorySegment getSegment()
+  + {static}short getLen-impl(MemorySegment)
+  + {static}void setLen-impl(MemorySegment, short)
+  + {static}MemorySegment getFilter-impl(MemorySegment)
+  + {static}void setFilter-impl(MemorySegment, MemorySegment)
+  + {static}String toString-impl(MemorySegment)
+  + {static}int hashCode-impl(MemorySegment)
+  + {static}boolean equals-impl(MemorySegment, Object)
+  + {static}MemorySegment constructor-impl(MemorySegment)
+  + {static}boolean equals-impl0(MemorySegment, MemorySegment)
 }
 class "Landlock" as io.mazewall.landlock.Landlock {
   + {static}Landlock INSTANCE
@@ -389,37 +516,41 @@ class "SyscallInspection" as io.mazewall.seccomp.SyscallInspection {
 }
 io.mazewall.BpfFilter --> io.mazewall.BpfFilter
 io.mazewall.LinuxNative .u.|> io.mazewall.NativeEngine
-io.mazewall.LinuxNative .u.|> io.mazewall.NativeFileSystem
-io.mazewall.LinuxNative .u.|> io.mazewall.NativeNetworking
-io.mazewall.LinuxNative .u.|> io.mazewall.NativeProcess
-io.mazewall.LinuxNative .u.|> io.mazewall.NativeMemory
 io.mazewall.LinuxNative --> io.mazewall.NativeEngine
 io.mazewall.LinuxNative --> io.mazewall.LinuxNative
-io.mazewall.NativeEngine .u.|> io.mazewall.NativeFileSystem
-io.mazewall.NativeEngine .u.|> io.mazewall.NativeNetworking
-io.mazewall.NativeEngine .u.|> io.mazewall.NativeProcess
-io.mazewall.NativeEngine .u.|> io.mazewall.NativeMemory
 io.mazewall.Platform --> io.mazewall.Platform
 io.mazewall.Policy --> io.mazewall.core.SandboxedPath
 io.mazewall.Policy <--> io.mazewall.Policy
 io.mazewall.Policy --> io.mazewall.seccomp.BpfInstruction
 io.mazewall.Policy --> io.mazewall.core.SeccompAction
 io.mazewall.RealNativeEngine .u.|> io.mazewall.NativeEngine
-io.mazewall.RealNativeEngine .u.|> io.mazewall.NativeFileSystem
-io.mazewall.RealNativeEngine .u.|> io.mazewall.NativeNetworking
-io.mazewall.RealNativeEngine .u.|> io.mazewall.NativeProcess
-io.mazewall.RealNativeEngine .u.|> io.mazewall.NativeMemory
+io.mazewall.RealNativeEngine --> io.mazewall.NativeProcess
+io.mazewall.RealNativeEngine --> io.mazewall.NativeNetworking
+io.mazewall.RealNativeEngine --> io.mazewall.NativeMemory
 io.mazewall.RealNativeEngine --> io.mazewall.RealNativeEngine
+io.mazewall.RealNativeEngine --> io.mazewall.NativeFileSystem
+io.mazewall.RealNativeFileSystem .u.|> io.mazewall.NativeFileSystem
+io.mazewall.RealNativeFileSystem --> io.mazewall.RealNativeFileSystem
+io.mazewall.RealNativeHelper --> io.mazewall.RealNativeHelper
+io.mazewall.RealNativeMemory .u.|> io.mazewall.NativeMemory
+io.mazewall.RealNativeMemory --> io.mazewall.RealNativeMemory
+io.mazewall.RealNativeNetworking .u.|> io.mazewall.NativeNetworking
+io.mazewall.RealNativeNetworking --> io.mazewall.RealNativeNetworking
+io.mazewall.RealNativeProcess .u.|> io.mazewall.NativeProcess
+io.mazewall.RealNativeProcess --> io.mazewall.RealNativeProcess
 io.mazewall.SbobParser --> io.mazewall.SbobParser
 io.mazewall.enforcer.ContainedExecutors --> io.mazewall.enforcer.ContainedExecutors
-io.mazewall.enforcer.ContainerStateRegistry --> io.mazewall.enforcer.ContainerStateRegistry
-io.mazewall.enforcer.ContainerStateRegistry --> io.mazewall.core.SeccompAction
-io.mazewall.enforcer.ContainerStateRegistry --> io.mazewall.enforcer.ThreadLocalDelegate
 io.mazewall.enforcer.ContainmentViolationDetector --> io.mazewall.enforcer.ContainmentViolationDetector
 io.mazewall.enforcer.FilterInstallationPlanner --> io.mazewall.enforcer.FilterInstallationPlanner
 io.mazewall.enforcer.JvmFloorWorkload --> io.mazewall.enforcer.JvmFloorWorkload
+io.mazewall.enforcer.ProcessStateRegistry --> io.mazewall.enforcer.ProcessStateRegistry
+io.mazewall.enforcer.ProcessStateRegistry --> io.mazewall.core.SeccompAction
+io.mazewall.enforcer.ThreadStateRegistry --> io.mazewall.enforcer.ThreadLocalDelegate
+io.mazewall.enforcer.ThreadStateRegistry --> io.mazewall.enforcer.ThreadStateRegistry
 io.mazewall.enforcer.internal.ContainedExecutorWrapper --> io.mazewall.Policy
 io.mazewall.ffi.LayoutValidator --> io.mazewall.ffi.LayoutValidator
+io.mazewall.ffi.memory.ConfinedSegment .u.|> io.mazewall.ffi.memory.ManagedSegment
+io.mazewall.ffi.memory.SharedSegment .u.|> io.mazewall.ffi.memory.ManagedSegment
 io.mazewall.landlock.Landlock --> io.mazewall.landlock.Landlock
 io.mazewall.landlock.LandlockSession --> io.mazewall.landlock.LandlockState
 io.mazewall.landlock.LandlockSession --> io.mazewall.Policy

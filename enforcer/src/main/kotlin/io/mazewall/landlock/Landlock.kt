@@ -466,8 +466,6 @@ internal class LandlockSession(
         } else {
             Landlock.getFullAccessMask(abi)
         }
-        val allFsRead = Landlock.LANDLOCK_ACCESS_FS_READ_FILE or Landlock.LANDLOCK_ACCESS_FS_READ_DIR
-        val classpathFlags = allFsRead or Landlock.LANDLOCK_ACCESS_FS_EXECUTE
 
         state = LandlockState.CreatingRuleset(abi)
         nativeScope {
@@ -482,14 +480,12 @@ internal class LandlockSession(
                     }
                 }
 
+            val created = LandlockLifecycle.RulesetCreated(rulesetFd, abi, policy)
             state = LandlockState.ConfiguringRuleset(rulesetFd, abi)
             try {
-                Landlock.addJvmClasspathRules(rulesetFd, classpathFlags)
-                if (policy != null) {
-                    Landlock.applyUserRules(rulesetFd, policy, abi, allFsRead)
-                }
+                val added = created.addRules(this)
                 state = LandlockState.Enforcing(rulesetFd)
-                Landlock.enforceRuleset(rulesetFd)
+                added.restrictSelf()
                 state = LandlockState.Applied
             } catch (e: Exception) {
                 state = LandlockState.Failed(e)
@@ -500,3 +496,4 @@ internal class LandlockSession(
         }
     }
 }
+
