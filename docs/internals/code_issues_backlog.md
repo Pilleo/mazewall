@@ -496,4 +496,46 @@ This is critical for generating a production-grade JVM Syscall Floor that accoun
 **Target:** `NativeTransaction` capability tokens.
 **Context:** The `NativeTransaction` currently acts as a blanket capability token, allowing any transaction to perform any native operation (read-only or read-write).
 **Needed:** Implement `NativeTransaction<Mode>` using Phantom Types and marker interfaces (`ReadOnly`, `ReadWrite`). This allows restricting sensitive operations (like `syscall` or `prctl`) to `NativeTransaction<ReadWrite>` while allowing lighter operations (like `processVmReadv`) in `NativeTransaction<ReadOnly>` scopes, checked at compile time.
+
+### 🟡 [Severity: MEDIUM]: Lack of Compile-Time Enforced Memory and Lifetime Safety for FFM Native Bindings
+**Target:** `io.mazewall.enforcer` (core FFM bindings and MemorySegment management)
+**Context:** Currently, FFM native memory allocations (`MemorySegment`) and lifecycle management (`Arena`) are managed through raw, imperative calls. While standard unit tests and JIT warmups verify these boundaries at runtime, developers can easily introduce memory safety bugs (such as Use-After-Close temporal violations, offset alignment spatial errors, or thread-confinement violations) that bypass compiler checks. Kotlin's modern type system and compiler features could be leveraged to enforce these invariants statically.
+**Needed:** Define and adopt the following compile-time safety patterns across the codebase:
+1. **Temporal Safety via Scoped Lambdas:** Hide raw `Arena` creation behind scoped inline utility functions (e.g., `nativeScope { ... }`) that receive `Arena` as a Context Parameter or receiver, ensuring segments cannot escape their bounded lifetimes.
+2. **Spatial/ABI Safety via Kotlin Value Classes (or Java Records):** Wrap raw `MemorySegment` structs in Kotlin `@JvmInline value class` wrappers that encapsulate layout offsets. This guarantees that offset math is hidden from developers and type-checked by the compiler with zero runtime allocation overhead.
+3. **Confinement Safety via Sealed State Hierarchies:** Model segment ownership transitions (e.g., thread-confined vs. shared states) using sealed interfaces to enforce safe multi-threaded segment handling via compile-time exhaustive checks.
+4. **Static ArchUnit Checks:** Enforce lint-level restrictions on raw `MemorySegment` access (e.g., prohibiting raw `.get()` or `.set()` calls outside of dedicated `bindings` or wrapper classes).
+
+**Memory Management (MM) Blind Spots & Mitigations:**
+Even with compile-time enforcements, the lack of a native borrow checker introduces four critical blind spots:
+*   **The Escape Bypass (Temporal Leak):** Scoped lambdas (`nativeScope`) do not prevent `MemorySegment` references from being returned and escaping the closed arena scope.
+    - *Mitigation:* Restrict `nativeScope` functions to return only primitive values, arrays, or deep-copied Java heap structures. Enforce this via ArchUnit checks that block returning raw segments or wrappers from scopes.
+*   **Dangling Native Pointers (Un-tracked Lifetime Dependencies):** Storing a pointer (memory address) to a struct allocated in a short-lived arena inside a struct allocated in a longer-lived arena results in a dangling pointer when the child arena is closed.
+    - *Mitigation:* Establish strict coding standards requiring hierarchically nested structs to be allocated within the *same* `Arena` instance.
+*   **GC-Managed Auto Arenas (`Arena.ofAuto()`):** GC-managed segments can be cleaned up while their raw memory addresses are still referenced by native code or kernel structures.
+    - *Mitigation:* Never use `Arena.ofAuto()` for segments whose addresses are passed to the Linux kernel (like BPF filters or UNIX sockets). Use confined, explicitly closed arenas bound to thread lifecycles.
+*   **Reinterpret Bounds Bypasses:** Developers can extract raw segments from type-safe wrappers and invoke `MemorySegment.reinterpret(Long.MAX_VALUE)` to reset bounds.
+    - *Mitigation:* Block `reinterpret()` calls at the linter/ArchUnit level except within audited native bootstrap bindings.
+
+### 🔴 [Severity: HIGH]: Interface Segregation Violation and Fat Class Smell in `LinuxNative` / `RealNativeEngine`
+**Target:** `io.mazewall.LinuxNative`, `io.mazewall.NativeEngine`, `io.mazewall.RealNativeEngine`
+**Context:** `LinuxNative` and `RealNativeEngine` implement *all* segment-specific native engine interfaces (`NativeEngine`, `NativeFileSystem`, `NativeNetworking`, `NativeProcess`, `NativeMemory`) directly, turning them into monolithic, fat classes. Furthermore, `NativeEngine` is defined as: `interface NativeEngine : NativeFileSystem, NativeNetworking, NativeProcess, NativeMemory`. This forces any mock engine or alternative implementation (e.g. for unit testing or fault injection) to implement the entire union of all 25+ native call methods, even if a test only needs to mock a single filesystem read or a socket bind.
+**Needed:** Decouple `LinuxNative` from the massive inheritance hierarchy. Instead of inheriting all traits, `LinuxNative` should delegate to individual, modular sub-engines (e.g. `engine.fileSystem`, `engine.networking`) that implement only their specific interface. `MockNativeEngine` can then be composed of specific mock sub-engines.
+
+### 🟡 [Severity: MEDIUM]: Tight Coupling and Dependency Inversion Violation in `ProfilerSessionHandler`
+**Target:** `io.mazewall.profiler.engine.ProfilerSessionHandler`
+**Context:** The `ProfilerSessionHandler` in the `:profiler` module is tightly coupled to concrete implementations: `ProfilerSessionHandler --> RealMemoryReader` and `ProfilerSessionHandler --> RealProfilerTransport`. Instead of referencing the abstract trait interfaces (`ProfilerMemoryReader` and `ProfilerTransport`), it directly depends on or instantiates the `Real*` classes.
+**Needed:** Refactor `ProfilerSessionHandler` to accept `ProfilerMemoryReader` and `ProfilerTransport` as constructor parameters (context dependencies), allowing mock transports and mock memory readers to be injected during testing.
+
+### 🟡 [Severity: MEDIUM]: Temporal State Mutation Leak in `ContainerStateRegistry` via Thread-Local Delegates
+**Target:** `io.mazewall.enforcer.ContainerStateRegistry`
+**Context:** `ContainerStateRegistry` exposes multiple properties backed by a custom `ThreadLocalDelegate`: `ContainerStateRegistry --> ThreadLocalDelegate`. However, these fields lack atomic/synchronized guards against structural mutation if a reference escapes the thread context. Furthermore, the registry mixes process-wide state variables (tracked via `AtomicReference`/`AtomicBoolean`) with thread-local variables under a single interface.
+**Needed:** Split `ContainerStateRegistry` into two distinct, strongly-typed components: `ProcessStateRegistry` and `ThreadStateRegistry`. Enforce explicit lifecycle bounds and sanitization routines on the `ThreadStateRegistry` when task execution terminates.
+
+### 🔵 [Severity: ENHANCEMENT]: Shared Value Class Instantiation Overhead in `Policy` / `BpfFilter` Boundaries
+**Target:** `io.mazewall.Policy`, `io.mazewall.BpfFilter`
+**Context:** Value classes like `Errno`, `SyscallNumber`, and `FileDescriptor` are instantiated frequently at the boundary of `BpfFilter.build` and `LinuxNative` syscall invocations. While Kotlin value classes compile to primitives under the hood, passing them as generic type arguments (e.g. `Map<Syscall, SeccompAction>`) forces JVM boxing.
+**Needed:** Optimize hot paths to use primitive arrays or custom flat structures (e.g. a flat primitive array representation of mapped syscalls to action codes) to avoid JVM boxing overhead.
+
 EOF
+
