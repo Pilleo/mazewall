@@ -27,15 +27,6 @@ Even with compile-time enforcements, the lack of a native borrow checker introdu
 **Context:** `LinuxNative` and `RealNativeEngine` implement *all* segment-specific native engine interfaces (`NativeEngine`, `NativeFileSystem`, `NativeNetworking`, `NativeProcess`, `NativeMemory`) directly, turning them into monolithic, fat classes. Furthermore, `NativeEngine` is defined as: `interface NativeEngine : NativeFileSystem, NativeNetworking, NativeProcess, NativeMemory`. This forces any mock engine or alternative implementation (e.g. for unit testing or fault injection) to implement the entire union of all 25+ native call methods, even if a test only needs to mock a single filesystem read or a socket bind.
 **Needed:** Decouple `LinuxNative` from the massive inheritance hierarchy. Instead of inheriting all traits, `LinuxNative` should delegate to individual, modular sub-engines (e.g. `engine.fileSystem`, `engine.networking`) that implement only their specific interface. `MockNativeEngine` can then be composed of specific mock sub-engines.
 
-### 🟡 [Severity: MEDIUM]: Tight Coupling and Dependency Inversion Violation in `ProfilerSessionHandler`
-**Target:** `io.mazewall.profiler.engine.ProfilerSessionHandler`
-**Context:** The `ProfilerSessionHandler` in the `:profiler` module is tightly coupled to concrete implementations: `ProfilerSessionHandler --> RealMemoryReader` and `ProfilerSessionHandler --> RealProfilerTransport`. Instead of referencing the abstract trait interfaces (`ProfilerMemoryReader` and `ProfilerTransport`), it directly depends on or instantiates the `Real*` classes.
-**Needed:** Refactor `ProfilerSessionHandler` to accept `ProfilerMemoryReader` and `ProfilerTransport` as constructor parameters (context dependencies), allowing mock transports and mock memory readers to be injected during testing.
-
-### 🟡 [Severity: MEDIUM]: Temporal State Mutation Leak in `ContainerStateRegistry` via Thread-Local Delegates
-**Target:** `io.mazewall.enforcer.ContainerStateRegistry`
-**Context:** `ContainerStateRegistry` exposes multiple properties backed by a custom `ThreadLocalDelegate`: `ContainerStateRegistry --> ThreadLocalDelegate`. However, these fields lack atomic/synchronized guards against structural mutation if a reference escapes the thread context. Furthermore, the registry mixes process-wide state variables (tracked via `AtomicReference`/`AtomicBoolean`) with thread-local variables under a single interface.
-**Needed:** Split `ContainerStateRegistry` into two distinct, strongly-typed components: `ProcessStateRegistry` and `ThreadStateRegistry`. Enforce explicit lifecycle bounds and sanitization routines on the `ThreadStateRegistry` when task execution terminates.
 
 ## Critical Sandbox Escape & Security Constraints
 
@@ -416,6 +407,18 @@ For full architectural details, see `supervisor_proxy_design.md`.
 EOF
 
 ## Resolved & WONTFIX Historical Backlog
+
+### 🟢 [RESOLVED]: Temporal State Mutation Leak in `ContainerStateRegistry` via Thread-Local Delegates
+**Target:** `io.mazewall.enforcer.ContainerStateRegistry`
+**Context:** `ContainerStateRegistry` exposed multiple properties backed by a custom `ThreadLocalDelegate` alongside process-wide state variables under a single interface.
+**Needed:** Split `ContainerStateRegistry` into two distinct, strongly-typed components: `ProcessStateRegistry` and `ThreadStateRegistry`. Enforce explicit lifecycle bounds and sanitization routines on the `ThreadStateRegistry` when task execution terminates.
+**Resolved:** The registry was split into `ProcessStateRegistry` and `ThreadStateRegistry`. Additionally, `ThreadStateRegistry` now includes an explicit `sanitize()` method that purposefully throws an `UnsupportedOperationException`, documenting why clearing ThreadLocals violates immutable OS sandbox semantics and thus explicitly enforcing the lifecycle bound as "OS thread lifetime".
+
+### 🟢 [RESOLVED]: Tight Coupling and Dependency Inversion Violation in `ProfilerSessionHandler`
+**Target:** `io.mazewall.profiler.engine.ProfilerSessionHandler`
+**Context:** The `ProfilerSessionHandler` in the `:profiler` module was tightly coupled to concrete implementations.
+**Needed:** Refactor `ProfilerSessionHandler` to accept `ProfilerMemoryReader` and `ProfilerTransport` as constructor parameters (context dependencies), allowing mock transports and mock memory readers to be injected during testing.
+**Resolved:** The class now accepts the abstract interfaces `ProfilerTransport` and `ProfilerMemoryReader` as constructor parameters, fully decoupling it and enabling tests (like `ProfilerDaemonTest`) to inject mock implementations.
 
 ### 🟢 [RESOLVED]: BPF Compiler Macro-Architecture Documentation Drift
 **Target:** `io.mazewall.BpfFilter.kt` and `docs/internals/containment_design.md`

@@ -70,7 +70,7 @@ graph TD
         LN --> NC[NativeConstants.kt]
         LN --> L[Layouts.kt]
         D[ContainedExecutors.kt] --> P
-        D --> E[ContainerStateRegistry.kt]
+        D --> E[StateRegistries.kt]
         H[SbobParser.kt]
     end
 
@@ -112,5 +112,5 @@ If you modify these, you must update both the Kotlin side and the C-side (if app
 |---------|----------------|--------------------|
 | **JVM Hangs on Startup** | Blocked critical syscall (futex, clone). | Check `BpfFilter.jvmCriticalNrs`. |
 | **Profiler returns null paths** | Yama `ptrace_scope` or symlink mismatch. | Check `ProfilerDaemon.resolveCanonicalPath`. |
-| **"IllegalStateException: Already restricted"** | Redundant Landlock application on pooled thread. | Check `ContainerStateRegistry` usage in `wrap()`. |
+| **"IllegalStateException: Already restricted"** | Redundant Landlock application on pooled thread. | Check `StateRegistries` usage in `wrap()`. |
 | **E2BIG on Landlock install** | Exceeded Landlock domain nesting limit (max 16). | Investigate stacked policy logic in `FilterInstallationPlanner`. |
