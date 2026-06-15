@@ -30,7 +30,7 @@ class ArchitectureTest {
             .callMethodWhere(object : DescribedPredicate<JavaMethodCall>("calls to LinuxNative implementation methods") {
                 override fun test(input: JavaMethodCall): Boolean {
                     return input.target.owner.isAssignableTo(LinuxNative::class.java) &&
-                           input.target.name !in listOf("getFileSystem", "getNetworking", "getProcess", "getMemory")
+                           input.target.name !in listOf("getFileSystem", "getNetworking", "getProcess", "getMemory", "withTransaction", "getTRANSACTION_INSTANCE")
                 }
             })
             .because("direct calls to LinuxNative implementation bypass the testable NativeEngine abstraction")

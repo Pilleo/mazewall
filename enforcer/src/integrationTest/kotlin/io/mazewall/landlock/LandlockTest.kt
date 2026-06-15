@@ -174,7 +174,7 @@ class LandlockTest : BaseIntegrationTest() {
             .base(Policy.NO_EXEC)
             .allowMmapExec()
             .allowJvmClasspath()
-            .allowFsWrite(file)
+            .allowFsWrite(io.mazewall.core.SandboxedPath.of(file, true))
             .build()
         val executor = Executors.newSingleThreadExecutor()
         val safeExecutor = ContainedExecutors.wrap(executor, policy)

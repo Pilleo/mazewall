@@ -93,8 +93,8 @@ class ContainedExecutorsTest : BaseIntegrationTest() {
         try {
             val future = executor.submit(
                 java.util.concurrent.Callable {
-                ContainedExecutors.installOnCurrentThread(Policy.builder().allowFsRead("/tmp").build())
-                ContainedExecutors.installOnCurrentThread(Policy.builder().allowFsRead("/tmp/foo").build())
+                ContainedExecutors.installOnCurrentThread(Policy.builder().allowFsRead(io.mazewall.core.SandboxedPath.of("/tmp", true)).build())
+                ContainedExecutors.installOnCurrentThread(Policy.builder().allowFsRead(io.mazewall.core.SandboxedPath.of("/tmp/foo", true)).build())
                 "success"
             },
             )
@@ -129,8 +129,8 @@ class ContainedExecutorsTest : BaseIntegrationTest() {
         val executor = Executors.newSingleThreadExecutor()
         try {
             val future = executor.submit {
-                ContainedExecutors.installOnCurrentThread(Policy.builder().allowFsRead("/tmp").build())
-                ContainedExecutors.installOnCurrentThread(Policy.builder().allowFsRead("/tmp-foo").build())
+                ContainedExecutors.installOnCurrentThread(Policy.builder().allowFsRead(io.mazewall.core.SandboxedPath.of("/tmp", true)).build())
+                ContainedExecutors.installOnCurrentThread(Policy.builder().allowFsRead(io.mazewall.core.SandboxedPath.of("/tmp-foo", true)).build())
             }
             try {
                 future.get()
