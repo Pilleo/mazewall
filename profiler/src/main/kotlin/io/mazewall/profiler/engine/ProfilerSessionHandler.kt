@@ -268,7 +268,7 @@ private class SyscallPathResolver(
     private fun resolveRelativePath(
         path: String,
         dirfd: Long,
-    ): String? {
+    ): String {
         val dirPath = if (isAtFdcwd(dirfd)) {
             resolveCwd()
         } else if (dirfd >= 0) {
@@ -276,10 +276,11 @@ private class SyscallPathResolver(
         } else {
             null
         }
-        return if (dirPath != null) {
-            if (dirPath.endsWith("/")) "$dirPath$path" else "$dirPath/$path"
-        } else {
-            path
+        
+        if (dirPath == null) {
+            throw IllegalStateException("Failed to resolve absolute path for relative path '$path' (dirfd=$dirfd)")
         }
+        
+        return if (dirPath.endsWith("/")) "$dirPath$path" else "$dirPath/$path"
     }
 }
