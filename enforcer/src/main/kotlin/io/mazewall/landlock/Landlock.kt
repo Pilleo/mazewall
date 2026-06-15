@@ -199,9 +199,7 @@ object Landlock {
     private fun shouldApplyLandlock(policy: Policy<*, *>) =
         policy.enforceLandlock ||
             policy.allowedFsReadPaths.isNotEmpty() ||
-            policy.allowedFsWritePaths.isNotEmpty() ||
-            policy.isSyscallAllowed(Syscall.IO_URING_SETUP) ||
-            policy.isSyscallAllowed(Syscall.IO_URING_ENTER)
+            policy.allowedFsWritePaths.isNotEmpty()
 
     internal fun handleUnsupportedLandlock() {
         val fallback = Platform.configuredFallback()

@@ -70,19 +70,13 @@ Even with compile-time enforcements, the lack of a native borrow checker introdu
 
 ## Critical Sandbox Escape & Security Constraints
 
-### 🔴 [Severity: HIGH]: Landlock Symlink Rejection Bypass via Canonicalization
-**Target:** `io.mazewall.landlock.Landlock.kt` (specifically `resolveCanonicalPath`)
-**Context:** The Landlock documentation states that rules explicitly use `O_NOFOLLOW` to reject symlinks and prevent attackers from redirecting path rules. However, `addRule` calls `resolveCanonicalPath(path)` (which delegates to `File(path).canonicalPath`) *before* opening the file descriptor. `File.canonicalPath` automatically resolves all symlinks to their real targets. Therefore, `O_NOFOLLOW` operates on the already-resolved real path and will never trigger `ELOOP` for developer-provided symlinks, silently bypassing the rejection mechanism and applying the rule to the symlink's target.
-**Needed:** Replace `File.canonicalPath` with a pure syntactic normalization function that collapses `.` and `..` without resolving symlinks (e.g., `Paths.get(path).normalize().toString()`). This ensures `O_NOFOLLOW` correctly evaluates the original symlink boundaries.
+### ✅ [RESOLVED]: Landlock Symlink Rejection Bypass via Canonicalization
+**Context:** The Landlock documentation states that rules explicitly use `O_NOFOLLOW` to reject symlinks and prevent attackers from redirecting path rules. However, `addRule` called `SandboxedPath.of` which used `toRealPath()`, silently bypassing this protection.
+**Fix:** Switched to syntactic normalization (`Paths.get(path).toAbsolutePath().normalize()`) in `SandboxedPath.of`. This defers symlink resolution to the kernel, which then correctly rejects links via `O_NOFOLLOW`.
 
-### 🔴 [Severity: HIGH]: Blacklist policies trigger silent, catastrophic Landlock filesystem lockdown due to `io_uring` check
-**Target:** `io.mazewall.landlock.Landlock.kt` (specifically `shouldApplyLandlock`) and `io.mazewall.enforcer.ContainedExecutors.kt`
-**Failure Hypothesis:** A developer creates a custom blacklist policy to block a single syscall (e.g., `Policy.builder().block(Syscall.EXECVE).build()`). Because `io_uring_setup` is not explicitly blocked, it defaults to ALLOW. The `Landlock.shouldApplyLandlock` method detects that `io_uring_setup` is allowed and automatically applies Landlock to prevent async bypasses. However, because the user provided no explicit allowed filesystem paths, Landlock is applied with an empty ruleset (plus the JVM classpath), permanently denying all other filesystem access (reads, writes, stat, etc.) to the thread.
-**Context & Proof:** In `Landlock.kt`, `shouldApplyLandlock` returns true if `policy.isSyscallAllowed(Syscall.IO_URING_SETUP)`. Any policy built with `defaultAction = ACT_ALLOW` that does not explicitly block `IO_URING_SETUP` will trigger this. `Landlock.applyRuleset` will then create a ruleset handling all FS actions, apply the classpath rules, apply zero user rules, and enforce it via `landlock_restrict_self`. This silently destroys the thread's ability to interact with the filesystem, causing unexpected `EACCES` errors that developers will struggle to debug since they didn't request filesystem containment.
-**Vulnerability Chain Potential:** High severity usability and stability defect. It breaks the principle of least astonishment and causes widespread application crashes for simple blacklist policies. Additionally, if Landlock is unsupported (`abi < 1`), it fails-open, allowing `io_uring` to bypass the seccomp filter anyway.
-**Needed:** 
-1. Remove the automatic Landlock application based on `IO_URING_SETUP` from `shouldApplyLandlock`.
-2. Instead, if `io_uring` is allowed but the policy enforces Landlock (i.e., Landlock is explicitly requested), that's fine (the kernel handles the restriction). If Landlock is NOT explicitly requested, `io_uring` should either be allowed (accepting the risk if it's a permissive blacklist) OR explicitly warn the user. The safest approach is to ensure presets like `NO_EXEC` and `PURE_COMPUTE_UNSAFE` explicitly block `io_uring` (which they already do), but not forcefully apply Landlock to custom blacklists.
+### ✅ [RESOLVED]: Blacklist policies trigger silent Landlock filesystem lockdown due to `io_uring` check
+**Context:** Landlock was automatically triggered if `io_uring` syscalls were allowed. If no FS rules were provided, this resulted in a total FS lockdown.
+**Fix:** Removed the `io_uring` check from `Landlock.shouldApplyLandlock`.
 
 ### 🔴 [Severity: CRITICAL]: Standard Java Concurrency (`Virtual Threads`, `CompletableFuture`) trivially bypasses Thread-Scoped (Tier 2) containment without ACE
 **Target:** `io.mazewall.enforcer.ContainedExecutors` and `docs/internals/SECURITY_CONSIDERATIONS.md`

@@ -183,7 +183,7 @@ class LandlockTest : BaseIntegrationTest() {
         executor.shutdown()
     }
 
-    fun testResolveSymlink(
+    fun testSymlinkRejection(
         realFile: String,
         symlink: String,
     ) {
@@ -196,9 +196,18 @@ class LandlockTest : BaseIntegrationTest() {
             .build()
         val executor = Executors.newSingleThreadExecutor()
         val safeExecutor = ContainedExecutors.wrap(executor, policy)
-        val res = safeExecutor.submit(java.util.concurrent.Callable { Files.readString(Path.of(realFile)) }).get()
-        if (res != "real-content") throw IllegalStateException("Wrong content: $res")
-        executor.shutdown()
+        
+        // The policy allows 'symlink', but Landlock rejects symlinks in rulesets (O_NOFOLLOW).
+        // Therefore, access to the real file should be denied.
+        try {
+            safeExecutor.submit(java.util.concurrent.Callable { Files.readString(Path.of(realFile)) }).get()
+            throw IllegalStateException("Access should have been denied because the symlink rule was rejected")
+        } catch (e: ExecutionException) {
+            val cause = e.cause
+            if (cause !is AccessDeniedException && cause !is ContainmentViolationException) throw e
+        } finally {
+            executor.shutdown()
+        }
     }
 
     fun testAutoClasspath(
@@ -377,7 +386,7 @@ class LandlockTest : BaseIntegrationTest() {
 
     @Test
     @EnabledIfLinuxAndSupported
-    fun `testLandlockResolvesSymlinkPathAutomatically`() {
+    fun `testLandlockRejectsSymlinksInPolicy`() {
         if (!Landlock.isSupported()) return
         val realDir = createTempDirectory("landlock_real_target")
         val realFile = realDir.resolve("secret.txt")
@@ -386,7 +395,7 @@ class LandlockTest : BaseIntegrationTest() {
         val symlink = symlinkDir.resolve("link_to_real")
         Files.createSymbolicLink(symlink, realDir)
         try {
-            IsolatedProcessTester.runIsolatedMethod(this::class.java.name, "testResolveSymlink", realFile.toString(), symlink.toString())
+            IsolatedProcessTester.runIsolatedMethod(this::class.java.name, "testSymlinkRejection", realFile.toString(), symlink.toString())
         } finally {
             realDir.toFile().deleteRecursively()
             symlinkDir.toFile().deleteRecursively()

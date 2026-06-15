@@ -1,15 +1,18 @@
 package io.mazewall.core
 
 import java.nio.file.LinkOption
+import java.nio.file.NoSuchFileException
 import java.nio.file.Path
 import java.nio.file.Paths
 
 /**
- * A type-safe, validated, and canonicalized path for use in sandboxing rules.
+ * A type-safe, validated, and normalized path for use in sandboxing rules.
  *
- * This value class ensures that all paths added to a security policy have been
- * resolved to their real location on disk without following symlinks (to prevent
- * bypasses).
+ * This value class ensures that all paths added to a security policy are
+ * absolute and normalized. Note that this class does NOT resolve symlinks;
+ * symlink resolution is intentionally deferred to the kernel (via Landlock's
+ * O_NOFOLLOW) to prevent silent bypasses where a user provides a symlink
+ * that resolves to a restricted target.
  */
 @JvmInline
 public value class SandboxedPath private constructor(public val value: String) {
@@ -24,16 +27,10 @@ public value class SandboxedPath private constructor(public val value: String) {
         @JvmStatic
         public fun of(path: String, allowNonExistent: Boolean = false): SandboxedPath {
             val p = Paths.get(path).toAbsolutePath().normalize()
-            return try {
-                val resolved = p.toRealPath().toString()
-                SandboxedPath(resolved)
-            } catch (e: java.io.IOException) {
-                if (allowNonExistent || java.nio.file.Files.exists(p, LinkOption.NOFOLLOW_LINKS)) {
-                    SandboxedPath(p.toString())
-                } else {
-                    throw e
-                }
+            if (!allowNonExistent && !java.nio.file.Files.exists(p, LinkOption.NOFOLLOW_LINKS)) {
+                throw java.nio.file.NoSuchFileException(p.toString())
             }
+            return SandboxedPath(p.toString())
         }
 
         /**
