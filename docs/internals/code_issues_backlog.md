@@ -40,6 +40,64 @@
 2. Update the `NativeEngine` interface to use `NativeArg` instead of `Any?`.
 3. This eliminates the "else" branch in `toLong` and ensures that all syscall parameters are validated at compile-time.
 
+### 🔵 [Severity: ENHANCEMENT]: Polymorphic `TraceEvent` Hierarchy (Sealed Classes)
+**Target:** `io.mazewall.profiler.engine.TraceEvent`
+**Context:** `TraceEvent` is currently a flat data class with a `syscallName: String` and a raw `LongArray` of arguments. The `SyscallPathResolver` and `BobCompiler` use large `when(syscallName)` blocks to manually index into the `LongArray`. This is brittle and has already led to argument-mapping bugs (e.g., the `SYMLINKAT` error).
+**Needed:** Refactor `TraceEvent` into a sealed class hierarchy.
+1. Create a sealed interface `TraceEvent` with common properties (`pid`, `timestamp`).
+2. Implement specialized variants like `OpenEvent(path, flags)`, `ExecEvent(path, args)`, `ConnectEvent(address, port)`, etc.
+3. Update the `ProfilerSessionHandler` to emit these specialized events.
+4. This ensures that analysis logic (compiler, path resolver) uses type-safe properties instead of raw array indices and allows for exhaustive `when` checks.
+
+### 🔵 [Severity: ENHANCEMENT]: Formal Monoidal Composition for `BillOfBehavior`
+**Target:** `io.mazewall.profiler.BillOfBehavior`
+**Context:** `BillOfBehavior` has a manual `plus` operator, but it isn't formally modeled as a Monoid. Merging complex behavior profiles (e.g., merging a JVM floor with an application-specific trace) is a core operation for generating policies.
+**Needed:** Formally implement the Monoid pattern for `BillOfBehavior`.
+1. Define an `identity` (Empty SBoB).
+2. Ensure the `plus` operation is associative and correctly merges sets and maps (including deep merging of stack profiles).
+3. This allows using standard functional aggregators like `list.reduce(BillOfBehavior::plus)` or `list.fold(BillOfBehavior.empty, ...)` with algebraic certainty.
+
+### 🔵 [Severity: ENHANCEMENT]: Type-Safe "Must-Check" Enforcement for `SyscallResult`
+**Target:** `io.mazewall.SyscallResult`
+**Context:** While `SyscallResult` is a sealed class (Success/Error), nothing in the type system prevents a developer from invoking a native method and completely ignoring the returned `SyscallResult`. In security-critical native code, an unhandled error (like a failed `seccomp` installation) is catastrophic.
+**Needed:** Use generics and phantom types to enforce that a result is "consumed."
+1. Redefine as `SyscallResult<out T, out Handled : Boolean>`.
+2. Native methods return `SyscallResult<T, False>`.
+3. Methods like `onSuccess`, `onFailure`, `recover`, or `getOrThrow` return `SyscallResult<T, True>` or the raw value.
+4. While Kotlin doesn't have native "must-use" attributes like Rust's `#[must_use]`, this type-state allows for ArchUnit or Lint checks that ensure no `SyscallResult<_, False>` remains in the final expression of a block.
+
+### 🔵 [Severity: ENHANCEMENT]: Refactor Profiler Daemon to use Coroutines (Structured Concurrency)
+**Target:** `io.mazewall.profiler.engine.ProfilerDaemonEngine` and `ProfilerSessionHandler`
+**Context:** The current profiler daemon uses a "thread-per-connection" model and manual thread management for handling tracee sessions. This is heavyweight and makes graceful shutdown/cancellation complex.
+**Needed:** Transition the daemon to a coroutine-based architecture.
+1. Use `supervisorScope` and `launch` for managing connection handlers and session loops.
+2. Replace synchronous `transport.poll` loops with non-blocking equivalents (e.g., using a coroutine-friendly wrapper around `epoll` or `io_uring`).
+3. This improves the daemon's scalability and makes its lifecycle management more robust and idiomatic.
+
+### 🔵 [Severity: ENHANCEMENT]: Asynchronous Trace Event Streaming via `Channel` / `Flow`
+**Target:** `io.mazewall.profiler.Profiler` and `ProfilerTraceListener`
+**Context:** Captured trace events and stack traces are currently collected using `CopyOnWriteArrayList` and `ConcurrentHashMap`. The listener thread synchronously updates these collections, which can introduce latency in the "ACK loop" and increase the risk of deadlocks if the collections block.
+**Needed:** Use Kotlin `Channel` or `Flow` to stream events.
+1. The `ProfilerTraceListener` should send `TraceEvent` objects into a `Channel`.
+2. The `BobCompiler` (or a background collector) can consume these events asynchronously.
+3. This reduces the time spent by the listener thread in the critical section of the seccomp notify loop, improving profiling performance and decoupling event capture from analysis.
+
+### 🔵 [Severity: ENHANCEMENT]: Investigate "Loom-Safe" Profiling for Virtual Threads
+**Target:** `io.mazewall.profiler.Profiler`
+**Context:** Currently, `Profiler.profile` explicitly forbids execution on virtual threads to prevent "Carrier Poisoning" (trapping the underlying OS thread and affecting unrelated virtual threads).
+**Needed:** Explore mechanisms to allow profiling virtual threads without global side effects.
+1. Evaluate using `ReentrantLock` or `synchronized` blocks inside the workload to "pin" the virtual thread to its carrier during sensitive sections.
+2. Alternatively, investigate if a process-wide `USER_NOTIF` handler can distinguish between virtual threads based on their `TID` and only trap those explicitly opted into profiling.
+
+### 🔵 [Severity: ENHANCEMENT]: Leverage Kotlin Contracts for Static Analysis
+**Target:** `io.mazewall.enforcer` and `io.mazewall.LinuxNative`
+**Context:** The compiler is often unaware of the side effects of validation functions or the invocation guarantees of scoped lambdas. This leads to redundant checks and prevents initializing `val` properties within blocks like `withTransaction`.
+**Needed:** Implement Kotlin Contracts across core utilities.
+1. **Validation Contracts**: Update `validateLinuxAndNotVirtual()` to use `returns() implies ...`.
+2. **Result Contracts**: Update `SyscallResult.isSuccess()` to use `returns(true) implies (this is Success)`.
+3. **Scope Contracts**: Update `withTransaction`, `nativeScope`, and `SyscallResult` combinators (`onSuccess`, `map`) with `callsInPlace` (`EXACTLY_ONCE` or `AT_MOST_ONCE`).
+4. This improves DX by enabling smart-casting and local `val` initialization in native scopes.
+
 ## Foundational Architecture & Test-Harness Enablers
 
 ### 🔵 [Severity: ENHANCEMENT]: Phantom Types for Context-Aware Capability Tokens
