@@ -8,6 +8,7 @@ import io.mazewall.core.Arch
 import io.mazewall.core.SeccompAction
 import io.mazewall.core.Syscall
 import io.mazewall.ffi.NativeConstants
+import io.mazewall.ffi.memory.nativeScope
 import java.lang.foreign.Arena
 
 /**
@@ -44,10 +45,8 @@ object PureJavaBpfEngine : SeccompEngine {
             val arch = Arch.current()
             val filters = policy.compiledFilters
 
-            Arena.ofConfined().use { arena ->
-                val prog = with(arena) {
-                    LinuxNative.getMemory().newSockFProg(filters)
-                }
+            nativeScope {
+                val prog = LinuxNative.getMemory().newSockFProg(filters)
                 threadState.set(SeccompInstallationState.FilterBuilt(prog))
                 installFilter(arch, prog, useTsync)
             }

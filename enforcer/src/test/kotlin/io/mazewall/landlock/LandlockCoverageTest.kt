@@ -5,6 +5,7 @@ import io.mazewall.MockNativeEngine
 import io.mazewall.NativeTransaction
 import io.mazewall.Policy
 import io.mazewall.core.SandboxedPath
+import io.mazewall.ffi.memory.*
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
@@ -58,10 +59,8 @@ class LandlockCoverageTest {
         mock.openResult = LinuxNative.SyscallResult.Error(13, -1) // EACCES
         LinuxNative.setEngine(mock)
 
-        Arena.ofConfined().use { arena ->
-            with(arena) {
-                Landlock.addJvmClasspathRules(LinuxNative.FileDescriptor(42), 0L)
-            }
+        nativeScope {
+            Landlock.addJvmClasspathRules(LinuxNative.FileDescriptor(42), 0L)
         }
     }
 
@@ -87,10 +86,8 @@ class LandlockCoverageTest {
         }
         LinuxNative.setEngine(mock)
 
-        Arena.ofConfined().use { arena ->
-            with(arena) {
-                Landlock.addJvmClasspathRules(LinuxNative.FileDescriptor(42), 0L)
-            }
+        nativeScope {
+            Landlock.addJvmClasspathRules(LinuxNative.FileDescriptor(42), 0L)
         }
     }
 

@@ -8,6 +8,9 @@ import io.mazewall.core.SandboxedPath
 import io.mazewall.core.Syscall
 import io.mazewall.ffi.Layouts
 import io.mazewall.ffi.NativeConstants
+import io.mazewall.ffi.memory.LandlockPathBeneathAttrSegment
+import io.mazewall.ffi.memory.LandlockRulesetAttrSegment
+import io.mazewall.ffi.memory.nativeScope
 import java.io.File
 import java.lang.foreign.Arena
 import java.lang.foreign.MemorySegment
@@ -374,8 +377,8 @@ object Landlock {
     ) {
         policy.allowedFsReadPaths.forEach { addRule(rulesetFd, it, allFsRead) }
         val writeFlags = LANDLOCK_ACCESS_FS_WRITE_FILE or LANDLOCK_ACCESS_FS_MAKE_REG or
-                LANDLOCK_ACCESS_FS_MAKE_DIR or LANDLOCK_ACCESS_FS_REMOVE_FILE or
-                LANDLOCK_ACCESS_FS_REMOVE_DIR or (if (abi >= ABI_V3) LANDLOCK_ACCESS_FS_TRUNCATE else 0)
+            LANDLOCK_ACCESS_FS_MAKE_DIR or LANDLOCK_ACCESS_FS_REMOVE_FILE or
+            LANDLOCK_ACCESS_FS_REMOVE_DIR or (if (abi >= ABI_V3) LANDLOCK_ACCESS_FS_TRUNCATE else 0)
         policy.allowedFsWritePaths.forEach { addRule(rulesetFd, it, writeFlags) }
     }
 
@@ -416,12 +419,12 @@ object Landlock {
         accessMaskFs: Long,
         abi: Int,
     ): LinuxNative.SyscallResult {
-        val rulesetAttr = arena.allocate(Layouts.LANDLOCK_RULESET_ATTR)
-        rulesetAttr.set(ValueLayout.JAVA_LONG, Layouts.LANDLOCK_RULESET_ATTR_FS_OFFSET, accessMaskFs)
-        rulesetAttr.set(ValueLayout.JAVA_LONG, Layouts.LANDLOCK_RULESET_ATTR_NET_OFFSET, 0L)
-        val size = if (abi >= 4) Layouts.LANDLOCK_RULESET_ATTR.byteSize() else 8L
+        val rulesetAttr = LandlockRulesetAttrSegment.allocate()
+        rulesetAttr.setHandledAccessFs(accessMaskFs)
+        rulesetAttr.setHandledAccessNet(0L)
+        val size = if (abi >= 4) Layouts.LANDLOCK_RULESET_ATTR.byteSize() else Layouts.LANDLOCK_RULESET_ATTR_V1_SIZE
         return LinuxNative.withTransaction {
-            LinuxNative.syscall(NativeConstants.LANDLOCK_CREATE_RULESET_NR, rulesetAttr, size, MemorySegment.NULL)
+            LinuxNative.syscall(NativeConstants.LANDLOCK_CREATE_RULESET_NR, rulesetAttr.segment, size, MemorySegment.NULL)
         }
     }
 
@@ -431,11 +434,11 @@ object Landlock {
         pathFd: LinuxNative.FileDescriptor,
         accessMask: Long,
     ): LinuxNative.SyscallResult {
-        val pathAttr = arena.allocate(Layouts.LANDLOCK_PATH_BENEATH_ATTR)
-        pathAttr.set(ValueLayout.JAVA_LONG, Layouts.LANDLOCK_PATH_BENEATH_ATTR_ACCESS_OFFSET, accessMask)
-        pathAttr.set(ValueLayout.JAVA_INT, Layouts.LANDLOCK_PATH_BENEATH_ATTR_FD_OFFSET, pathFd.value)
+        val pathAttr = LandlockPathBeneathAttrSegment.allocate()
+        pathAttr.setAllowedAccess(accessMask)
+        pathAttr.setParentFd(pathFd.value)
         return LinuxNative.withTransaction {
-            LinuxNative.syscall(NativeConstants.LANDLOCK_ADD_RULE_NR, rulesetFd.value.toLong(), NativeConstants.LANDLOCK_RULE_PATH_BENEATH.toLong(), pathAttr, 0)
+            LinuxNative.syscall(NativeConstants.LANDLOCK_ADD_RULE_NR, rulesetFd.value.toLong(), NativeConstants.LANDLOCK_RULE_PATH_BENEATH.toLong(), pathAttr.segment, 0)
         }
     }
 }
@@ -467,8 +470,8 @@ internal class LandlockSession(
         val classpathFlags = allFsRead or Landlock.LANDLOCK_ACCESS_FS_EXECUTE
 
         state = LandlockState.CreatingRuleset(abi)
-        Arena.ofConfined().use { arena ->
-            val rulesetFdResult = with(arena) { Landlock.createRuleset(accessMaskFs, abi) }
+        nativeScope {
+            val rulesetFdResult = Landlock.createRuleset(accessMaskFs, abi)
             val rulesetFd =
                 when (rulesetFdResult) {
                     is LinuxNative.SyscallResult.Success -> rulesetFdResult.asFd()
@@ -481,11 +484,9 @@ internal class LandlockSession(
 
             state = LandlockState.ConfiguringRuleset(rulesetFd, abi)
             try {
-                with(arena) {
-                    Landlock.addJvmClasspathRules(rulesetFd, classpathFlags)
-                    if (policy != null) {
-                        Landlock.applyUserRules(rulesetFd, policy, abi, allFsRead)
-                    }
+                Landlock.addJvmClasspathRules(rulesetFd, classpathFlags)
+                if (policy != null) {
+                    Landlock.applyUserRules(rulesetFd, policy, abi, allFsRead)
                 }
                 state = LandlockState.Enforcing(rulesetFd)
                 Landlock.enforceRuleset(rulesetFd)

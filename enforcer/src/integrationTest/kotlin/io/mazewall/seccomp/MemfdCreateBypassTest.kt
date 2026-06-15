@@ -8,6 +8,7 @@ import io.mazewall.core.Arch
 import io.mazewall.core.Syscall
 import io.mazewall.enforcer.ContainedExecutors
 import io.mazewall.ffi.NativeConstants
+import io.mazewall.ffi.memory.nativeScope
 import org.junit.jupiter.api.Test
 import java.util.concurrent.Executors
 import kotlin.test.assertTrue
@@ -25,8 +26,8 @@ class MemfdCreateBypassTest : BaseIntegrationTest() {
                     val arch = Arch.current()
                     // memfd_create IS blocked by NO_EXEC
                     val res =
-                        java.lang.foreign.Arena.ofConfined().use { arena ->
-                            val name = arena.allocateFrom("test_memfd")
+                        nativeScope {
+                            val name = allocateFrom("test_memfd")
                             LinuxNative.withTransaction {
                                 LinuxNative.syscall(
                                     arch.memfdCreate.toLong(),
@@ -60,8 +61,8 @@ class MemfdCreateBypassTest : BaseIntegrationTest() {
 
                     val arch = Arch.current()
                     val res =
-                        java.lang.foreign.Arena.ofConfined().use { arena ->
-                            val name = arena.allocateFrom("test_memfd_blocked")
+                        nativeScope {
+                            val name = allocateFrom("test_memfd_blocked")
                             LinuxNative.withTransaction {
                                 LinuxNative.syscall(
                                     arch.memfdCreate.toLong(),

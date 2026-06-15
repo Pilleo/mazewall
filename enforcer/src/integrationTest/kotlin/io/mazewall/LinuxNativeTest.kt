@@ -2,6 +2,7 @@ package io.mazewall
 
 import io.mazewall.ffi.Layouts
 import io.mazewall.ffi.NativeConstants
+import io.mazewall.ffi.memory.*
 import io.mazewall.seccomp.BpfInstruction
 import org.junit.jupiter.api.Test
 import java.lang.foreign.Arena
@@ -46,30 +47,28 @@ class LinuxNativeTest : BaseIntegrationTest() {
     }
 
     @Test
-    fun testBasicSyscalls() {
-        Arena.ofConfined().use { arena ->
-            // test open/close/read/write on a temp file
-            val tempFile =
-                java.nio.file.Files
-                    .createTempFile("native-test", ".txt")
-            val path = arena.allocateFrom(tempFile.toString())
+    fun testBasicSyscalls() = nativeScope {
+        // test open/close/read/write on a temp file
+        val tempFile =
+            java.nio.file.Files
+                .createTempFile("native-test", ".txt")
+        val path = allocateFrom(tempFile.toString())
 
-            val openResult = LinuxNative.withTransaction {
-                LinuxNative.open(path, 0) // O_RDONLY
-            }
-            val fd = openResult.getFdOrThrow("open")
-
-            val buffer = arena.allocate(1024)
-            val readResult = LinuxNative.withTransaction {
-                LinuxNative.read(fd, buffer, 1024)
-            }
-            assertTrue(readResult is LinuxNative.SyscallResult.Success)
-
-            val closeResult = LinuxNative.close(fd)
-            assertTrue(closeResult is LinuxNative.SyscallResult.Success)
-
-            tempFile.toFile().delete()
+        val openResult = LinuxNative.withTransaction {
+            LinuxNative.open(path, 0) // O_RDONLY
         }
+        val fd = openResult.getFdOrThrow("open")
+
+        val buffer = allocate(1024)
+        val readResult = LinuxNative.withTransaction {
+            LinuxNative.read(fd, buffer, 1024)
+        }
+        assertTrue(readResult is LinuxNative.SyscallResult.Success)
+
+        val closeResult = LinuxNative.close(fd)
+        assertTrue(closeResult is LinuxNative.SyscallResult.Success)
+
+        tempFile.toFile().delete()
     }
 
     @Test
@@ -98,8 +97,8 @@ class LinuxNativeTest : BaseIntegrationTest() {
             val fd = socketResult.asFd()
 
             // test bind (to a random port)
-            Arena.ofConfined().use { arena ->
-                val addr = arena.allocate(16) // struct sockaddr_in
+            nativeScope {
+                val addr = allocate(16) // struct sockaddr_in
                 LinuxNative.withTransaction {
                     LinuxNative.bind(fd, addr, 16)
                 }
@@ -113,95 +112,87 @@ class LinuxNativeTest : BaseIntegrationTest() {
     }
 
     @Test
-    fun testSocketpair() {
-        Arena.ofConfined().use { arena ->
-            val fds = arena.allocate(ValueLayout.JAVA_INT, 2)
-            val result = LinuxNative.withTransaction {
-                LinuxNative.socketpair(1, 1, 0, fds) // AF_UNIX, SOCK_STREAM
-            }
-            if (result is LinuxNative.SyscallResult.Success) {
-                LinuxNative.close(LinuxNative.FileDescriptor(fds.get(ValueLayout.JAVA_INT, 0)))
-                LinuxNative.close(LinuxNative.FileDescriptor(fds.get(ValueLayout.JAVA_INT, 4)))
-            }
+    fun testSocketpair() = nativeScope {
+        val fds = allocate(ValueLayout.JAVA_INT, 2)
+        val result = LinuxNative.withTransaction {
+            LinuxNative.socketpair(1, 1, 0, fds) // AF_UNIX, SOCK_STREAM
+        }
+        if (result is LinuxNative.SyscallResult.Success) {
+            LinuxNative.close(LinuxNative.FileDescriptor(fds.get(ValueLayout.JAVA_INT, 0)))
+            LinuxNative.close(LinuxNative.FileDescriptor(fds.get(ValueLayout.JAVA_INT, 4)))
         }
     }
 
     @Test
-    fun testProcessVmReadv() {
-        Arena.ofConfined().use { arena ->
-            // Try reading from our own memory
-            val localBuf = arena.allocate(10)
-            localBuf.set(ValueLayout.JAVA_BYTE, 0, 123)
+    fun testProcessVmReadv() = nativeScope {
+        // Try reading from our own memory
+        val localBuf = allocate(10)
+        localBuf.set(ValueLayout.JAVA_BYTE, 0, 123)
 
-            val remoteIovec = arena.allocate(Layouts.IOVEC)
-            remoteIovec.set(ValueLayout.ADDRESS, 0, localBuf)
-            remoteIovec.set(ValueLayout.JAVA_LONG, 8, 10)
+        val remoteIovec = allocate(Layouts.IOVEC)
+        remoteIovec.set(ValueLayout.ADDRESS, 0, localBuf)
+        remoteIovec.set(ValueLayout.JAVA_LONG, 8, 10)
 
-            val localIovec = arena.allocate(Layouts.IOVEC)
-            val destBuf = arena.allocate(10)
-            localIovec.set(ValueLayout.ADDRESS, 0, destBuf)
-            localIovec.set(ValueLayout.JAVA_LONG, 8, 10)
+        val localIovec = allocate(Layouts.IOVEC)
+        val destBuf = allocate(10)
+        localIovec.set(ValueLayout.ADDRESS, 0, destBuf)
+        localIovec.set(ValueLayout.JAVA_LONG, 8, 10)
 
-            val result =
-                LinuxNative.withTransaction {
-                    LinuxNative.processVmReadv(
-                        ProcessHandle.current().pid().toInt(),
-                        localIovec,
-                        1,
-                        remoteIovec,
-                        1,
-                        0, // flags
-                    )
-                }
+        val result =
+            LinuxNative.withTransaction {
+                LinuxNative.processVmReadv(
+                    ProcessHandle.current().pid().toInt(),
+                    localIovec,
+                    1,
+                    remoteIovec,
+                    1,
+                    0, // flags
+                )
+            }
+    }
+}
+
+@Test
+fun testFcntl() {
+    Arena.ofConfined().use { arena ->
+        val tempFile =
+            java.nio.file.Files
+                .createTempFile("fcntl-test", ".txt")
+        val path = arena.allocateFrom(tempFile.toString())
+        val openResult = LinuxNative.withTransaction {
+            LinuxNative.open(path, 0)
         }
+        val fd = openResult.getFdOrThrow("open")
+
+        val flags = LinuxNative.withTransaction {
+            LinuxNative.fcntl(fd, 3, 0) // F_GETFL
+        }
+        assertTrue(flags is LinuxNative.SyscallResult.Success)
+
+        LinuxNative.close(fd)
+        tempFile.toFile().delete()
     }
 
     @Test
-    fun testFcntl() {
-        Arena.ofConfined().use { arena ->
-            val tempFile =
-                java.nio.file.Files
-                    .createTempFile("fcntl-test", ".txt")
-            val path = arena.allocateFrom(tempFile.toString())
-            val openResult = LinuxNative.withTransaction {
-                LinuxNative.open(path, 0)
-            }
-            val fd = openResult.getFdOrThrow("open")
-
-            val flags = LinuxNative.withTransaction {
-                LinuxNative.fcntl(fd, 3, 0) // F_GETFL
-            }
-            assertTrue(flags is LinuxNative.SyscallResult.Success)
-
-            LinuxNative.close(fd)
-            tempFile.toFile().delete()
+    fun testReadlink() = nativeScope {
+        val path = allocateFrom("/proc/self/exe")
+        val buffer = allocate(1024)
+        val result = LinuxNative.withTransaction {
+            LinuxNative.readlink(path, buffer, 1024)
         }
+        assertTrue(result is LinuxNative.SyscallResult.Success)
     }
 
     @Test
-    fun testReadlink() {
-        Arena.ofConfined().use { arena ->
-            val path = arena.allocateFrom("/proc/self/exe")
-            val buffer = arena.allocate(1024)
-            val result = LinuxNative.withTransaction {
-                LinuxNative.readlink(path, buffer, 1024)
-            }
-            assertTrue(result is LinuxNative.SyscallResult.Success)
-        }
-    }
+    fun testPoll() = nativeScope {
+        val pollFd = PollFdSegment.allocate()
+        pollFd.setFd(-1) // Invalid FD
+        pollFd.setEvents(NativeConstants.POLLIN.toShort())
+        pollFd.setRevents(0.toShort())
 
-    @Test
-    fun testPoll() {
-        Arena.ofConfined().use { arena ->
-            val pollFd = arena.allocate(Layouts.POLLFD)
-            pollFd.set(ValueLayout.JAVA_INT, 0L, -1) // Invalid FD
-            pollFd.set(ValueLayout.JAVA_SHORT, 4L, NativeConstants.POLLIN.toShort())
-            pollFd.set(ValueLayout.JAVA_SHORT, 6L, 0.toShort())
-
-            val result = LinuxNative.withTransaction {
-                LinuxNative.poll(pollFd, 1L, 0) // 0 timeout
-            }
-            assertTrue(result is LinuxNative.SyscallResult.Success)
+        val result = LinuxNative.withTransaction {
+            LinuxNative.poll(pollFd.segment, 1L, 0) // 0 timeout
         }
+        assertTrue(result is LinuxNative.SyscallResult.Success)
     }
 }

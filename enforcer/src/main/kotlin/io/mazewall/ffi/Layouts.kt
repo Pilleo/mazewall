@@ -30,6 +30,10 @@ object Layouts {
         ValueLayout.JAVA_INT.withName("k"),
     )
     val SOCK_FILTER_SIZE: Long = SOCK_FILTER.byteSize()
+    val SOCK_FILTER_CODE_OFFSET: Long = SOCK_FILTER.byteOffset(MemoryLayout.PathElement.groupElement("code"))
+    val SOCK_FILTER_JT_OFFSET: Long = SOCK_FILTER.byteOffset(MemoryLayout.PathElement.groupElement("jt"))
+    val SOCK_FILTER_JF_OFFSET: Long = SOCK_FILTER.byteOffset(MemoryLayout.PathElement.groupElement("jf"))
+    val SOCK_FILTER_K_OFFSET: Long = SOCK_FILTER.byteOffset(MemoryLayout.PathElement.groupElement("k"))
 
     /**
      * Corresponds to `struct sock_fprog` in `<linux/filter.h>`.
@@ -124,6 +128,9 @@ object Layouts {
         ValueLayout.JAVA_SHORT.withName("events"),
         ValueLayout.JAVA_SHORT.withName("revents"),
     )
+    val POLLFD_FD_OFFSET: Long = POLLFD.byteOffset(MemoryLayout.PathElement.groupElement("fd"))
+    val POLLFD_EVENTS_OFFSET: Long = POLLFD.byteOffset(MemoryLayout.PathElement.groupElement("events"))
+    val POLLFD_REVENTS_OFFSET: Long = POLLFD.byteOffset(MemoryLayout.PathElement.groupElement("revents"))
 
     /**
      * Corresponds to `struct landlock_ruleset_attr` in `<linux/landlock.h>`.
@@ -132,6 +139,7 @@ object Layouts {
         ValueLayout.JAVA_LONG.withName("handled_access_fs"),
         ValueLayout.JAVA_LONG.withName("handled_access_net"),
     )
+    const val LANDLOCK_RULESET_ATTR_V1_SIZE: Long = 8L
     val LANDLOCK_RULESET_ATTR_FS_OFFSET: Long =
         LANDLOCK_RULESET_ATTR.byteOffset(MemoryLayout.PathElement.groupElement("handled_access_fs"))
     val LANDLOCK_RULESET_ATTR_NET_OFFSET: Long =

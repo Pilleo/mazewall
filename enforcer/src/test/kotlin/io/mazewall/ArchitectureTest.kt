@@ -30,7 +30,7 @@ class ArchitectureTest {
             .callMethodWhere(object : DescribedPredicate<JavaMethodCall>("calls to LinuxNative implementation methods") {
                 override fun test(input: JavaMethodCall): Boolean {
                     return input.target.owner.isAssignableTo(LinuxNative::class.java) &&
-                           input.target.name !in listOf("getFileSystem", "getNetworking", "getProcess", "getMemory", "withTransaction", "getTRANSACTION_INSTANCE")
+                        input.target.name !in listOf("getFileSystem", "getNetworking", "getProcess", "getMemory", "withTransaction", "getTRANSACTION_INSTANCE")
                 }
             })
             .because("direct calls to LinuxNative implementation bypass the testable NativeEngine abstraction")
@@ -46,8 +46,8 @@ class ArchitectureTest {
             .onlyBeCalled()
             .byMethodsThat(
                 DescribedPredicate.describe("matching name") {
-                it != null && (it.name.matches(Regex("isContainmentViolation|hasViolation|findViolation")))
-            },
+                    it != null && (it.name.matches(Regex("isContainmentViolation|hasViolation|findViolation")))
+                },
             ).because("traversal methods correctly handle cause chains which direct checks might skip")
             .check(allClasses)
     }
@@ -74,6 +74,70 @@ class ArchitectureTest {
             .belongToAnyOf(
                 ClassLoader::class.java,
             ).because("Classloading inside seccomp-restricted threads triggers mmap/mprotect which fails with EPERM.")
+            .check(allClasses)
+    }
+
+    @ArchTest
+    fun rawMemorySegmentAccessMustBeEncapsulated(allClasses: com.tngtech.archunit.core.domain.JavaClasses) {
+        noClasses()
+            .that()
+            .resideInAPackage("io.mazewall..")
+            .and().resideOutsideOfPackages("io.mazewall.ffi..", "io.mazewall.ffi.memory..")
+            .should()
+            .callMethodWhere(object : DescribedPredicate<JavaMethodCall>("calls to MemorySegment.get or set") {
+                override fun test(input: JavaMethodCall): Boolean {
+                    return input.target.owner.isAssignableTo("java.lang.foreign.MemorySegment") &&
+                        (input.target.name == "get" || input.target.name == "set")
+                }
+            })
+            .because("raw memory access via get/set bypasses compile-time safety. Use io.mazewall.ffi.memory wrappers instead.")
+            .check(allClasses)
+    }
+
+    @ArchTest
+    fun memorySegmentReinterpretIsBanned(allClasses: com.tngtech.archunit.core.domain.JavaClasses) {
+        noClasses()
+            .that()
+            .resideInAPackage("io.mazewall..")
+            .and().resideOutsideOfPackages("io.mazewall.ffi.memory..")
+            .should()
+            .callMethodWhere(object : DescribedPredicate<JavaMethodCall>("calls to MemorySegment.reinterpret") {
+                override fun test(input: JavaMethodCall): Boolean {
+                    return input.target.owner.isAssignableTo("java.lang.foreign.MemorySegment") &&
+                        input.target.name == "reinterpret"
+                }
+            })
+            .because("reinterpreting memory segments bypasses safety bounds. Encapsulate within io.mazewall.ffi.memory instead.")
+            .check(allClasses)
+    }
+
+    @ArchTest
+    fun nativeScopeMustNotReturnMemorySegment(allClasses: com.tngtech.archunit.core.domain.JavaClasses) {
+        methods()
+            .that()
+            .haveName("nativeScope")
+            .should()
+            .haveRawReturnType(DescribedPredicate.describe("not a MemorySegment or ManagedSegment") {
+                it != null && !it.isAssignableTo("java.lang.foreign.MemorySegment") &&
+                    !it.isAssignableTo("io.mazewall.ffi.memory.ManagedSegment")
+            })
+            .because("nativeScope must not leak segments beyond their arena lifetime.")
+            .check(allClasses)
+    }
+
+    @ArchTest
+    fun arenaOfAutoIsBanned(allClasses: com.tngtech.archunit.core.domain.JavaClasses) {
+        noClasses()
+            .that()
+            .resideInAPackage("io.mazewall..")
+            .should()
+            .callMethodWhere(object : DescribedPredicate<JavaMethodCall>("calls to Arena.ofAuto") {
+                override fun test(input: JavaMethodCall): Boolean {
+                    return input.target.owner.isAssignableTo("java.lang.foreign.Arena") &&
+                        input.target.name == "ofAuto"
+                }
+            })
+            .because("GC-managed auto arenas can be cleaned up while kernel structures still reference them. Use nativeScope instead.")
             .check(allClasses)
     }
 }

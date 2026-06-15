@@ -2,7 +2,7 @@
 
 ## Foundational Architecture & Test-Harness Enablers
 
-### 🟡 [Severity: MEDIUM]: Lack of Compile-Time Enforced Memory and Lifetime Safety for FFM Native Bindings
+### ✅ [DONE] [Severity: MEDIUM]: Lack of Compile-Time Enforced Memory and Lifetime Safety for FFM Native Bindings
 **Target:** `io.mazewall.enforcer` (core FFM bindings and MemorySegment management)
 **Context:** Currently, FFM native memory allocations (`MemorySegment`) and lifecycle management (`Arena`) are managed through raw, imperative calls. While standard unit tests and JIT warmups verify these boundaries at runtime, developers can easily introduce memory safety bugs (such as Use-After-Close temporal violations, offset alignment spatial errors, or thread-confinement violations) that bypass compiler checks. Kotlin's modern type system and compiler features could be leveraged to enforce these invariants statically.
 **Needed:** Define and adopt the following compile-time safety patterns across the codebase:
@@ -386,7 +386,12 @@ For full architectural details, see `supervisor_proxy_design.md`.
 ### 🔵 [Severity: ENHANCEMENT]: Value Class Completeness (Type Safety)
 **Target:** `io.mazewall.core.valueClasses` and native interactions.
 **Context:** While value classes were introduced, they were inconsistently used, leading to "primitive obsession" where `Int` was used for `Errno` or `SyscallNumber`.
-**Needed:** Maintain strict use of `Errno`, `SyscallNumber`, and `MemoryAddress` across all native API boundaries to prevent transposition bugs at compile time.
+**Reference Commit:** Commit `51fc21bfb19ab4396fb4d672bcc9b680d3981bd0` (tagged as "unfinished refactoring") provides a valuable starting point for this task. It contains:
+1. Mapping `Syscall.numberFor()` to return the type-safe `SyscallNumber` wrapper.
+2. Mapping `LinuxNative.SyscallResult.Error` to hold a type-safe `Errno` wrapper instead of a raw `Int`.
+3. Defining the `@JvmInline value class MemoryAddress(val address: Long)` wrapper.
+**Needed:** Finish integrating these value classes cleanly across all engine/native call sites and ensure compile-time type boundaries are strictly maintained.
+
 
 ### 🟡 [Severity: MEDIUM]: Monadic Combinators for `SyscallResult`
 **Target:** `io.mazewall.LinuxNative.SyscallResult`

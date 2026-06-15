@@ -1,6 +1,7 @@
 package io.mazewall
 
 import io.mazewall.ffi.Layouts
+import io.mazewall.ffi.memory.*
 import io.mazewall.seccomp.BpfInstruction
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
@@ -94,8 +95,8 @@ class LinuxNativeCoverageTest {
         }
 
         // MemorySegment branch
-        Arena.ofConfined().use { arena ->
-            val seg = arena.allocate(8)
+        nativeScope {
+            val seg = allocate(8)
             LinuxNative.withTransaction {
                 LinuxNative.syscall(-1, seg, 1, 2, 3, 4, 5)
             }
@@ -114,66 +115,63 @@ class LinuxNativeCoverageTest {
 
     @Test
     @EnabledIfLinuxAndSupported
-    fun `test newSockFProg manual packing`() {
-        Arena.ofConfined().use { arena ->
-            val filters = listOf(
-                BpfInstruction.Jmp(0x01, 2, 3, 0x12345678),
-                BpfInstruction.Ld(0x05, 0x00000001),
-            )
-            val prog = with(arena) { LinuxNative.newSockFProg(filters) }
-            assertNotNull(prog)
+    fun `test newSockFProg manual packing`() = nativeScope {
+        val filters = listOf(
+            BpfInstruction.Jmp(0x01, 2, 3, 0x12345678),
+            BpfInstruction.Ld(0x05, 0x00000001),
+        )
+        val progSeg = LinuxNative.newSockFProg(filters)
+        val prog = SockFprogSegment(progSeg)
+        assertNotNull(prog.segment)
 
-            assertEquals(2, prog.get(ValueLayout.JAVA_SHORT, Layouts.SOCK_FPROG_LEN_OFFSET).toInt())
-            val filterArrayRaw = prog.get(ValueLayout.ADDRESS, Layouts.SOCK_FPROG_FILTER_OFFSET)
-            val filterArray = filterArrayRaw.reinterpret(Layouts.SOCK_FILTER_SIZE * 2)
+        assertEquals(2, prog.getLen().toInt())
+        val filterArray = prog.getFilter()
+        val f1 = SockFilterSegment(filterArray.asSlice(0, Layouts.SOCK_FILTER_SIZE))
 
-            // Verify first filter
-            assertEquals(0x01.toShort(), filterArray.get(ValueLayout.JAVA_SHORT, 0))
-            assertEquals(2, filterArray.get(ValueLayout.JAVA_BYTE, 2).toInt())
-            assertEquals(3, filterArray.get(ValueLayout.JAVA_BYTE, 3).toInt())
-            assertEquals(0x12345678, filterArray.get(ValueLayout.JAVA_INT, 4))
-        }
+        // Verify first filter
+        assertEquals(0x01.toShort(), f1.getCode())
+        assertEquals(2, f1.getJt().toInt())
+        assertEquals(3, f1.getJf().toInt())
+        assertEquals(0x12345678, f1.getK())
     }
 
 
     @Test
-    fun `test missing syscall wrappers in LinuxNative`() {
+    fun `test missing syscall wrappers in LinuxNative`() = nativeScope {
         val mock = MockNativeEngine()
         LinuxNative.setEngine(mock)
 
-        Arena.ofConfined().use { arena ->
-            val seg = arena.allocate(8)
-            val fd = LinuxNative.FileDescriptor(1)
+        val seg = allocate(8)
+        val fd = LinuxNative.FileDescriptor(1)
 
-            mock.acceptResult = LinuxNative.SyscallResult.Success(10)
-            assertEquals(10L, LinuxNative.withTransaction {
-                LinuxNative.accept(fd, seg, seg)
-            }.getOrThrow("test"))
+        mock.acceptResult = LinuxNative.SyscallResult.Success(10)
+        assertEquals(10L, LinuxNative.withTransaction {
+            LinuxNative.accept(fd, seg, seg)
+        }.getOrThrow("test"))
 
-            mock.sendmsgResult = LinuxNative.SyscallResult.Success(20)
-            assertEquals(20L, LinuxNative.withTransaction {
-                LinuxNative.sendmsg(fd, seg, 0)
-            }.getOrThrow("test"))
+        mock.sendmsgResult = LinuxNative.SyscallResult.Success(20)
+        assertEquals(20L, LinuxNative.withTransaction {
+            LinuxNative.sendmsg(fd, seg, 0)
+        }.getOrThrow("test"))
 
-            mock.recvmsgResult = LinuxNative.SyscallResult.Success(30)
-            assertEquals(30L, LinuxNative.withTransaction {
-                LinuxNative.recvmsg(fd, seg, 0)
-            }.getOrThrow("test"))
+        mock.recvmsgResult = LinuxNative.SyscallResult.Success(30)
+        assertEquals(30L, LinuxNative.withTransaction {
+            LinuxNative.recvmsg(fd, seg, 0)
+        }.getOrThrow("test"))
 
-            mock.ioctlResult = LinuxNative.SyscallResult.Success(40)
-            assertEquals(40L, LinuxNative.withTransaction {
-                LinuxNative.ioctl(fd, 2L, seg)
-            }.getOrThrow("test"))
-            assertEquals(40L, LinuxNative.withTransaction {
-                LinuxNative.ioctl(fd, 2L, 3L)
-            }.getOrThrow("test"))
+        mock.ioctlResult = LinuxNative.SyscallResult.Success(40)
+        assertEquals(40L, LinuxNative.withTransaction {
+            LinuxNative.ioctl(fd, 2L, seg)
+        }.getOrThrow("test"))
+        assertEquals(40L, LinuxNative.withTransaction {
+            LinuxNative.ioctl(fd, 2L, 3L)
+        }.getOrThrow("test"))
 
-            mock.recvResult = LinuxNative.SyscallResult.Success(50)
-            assertEquals(50L, LinuxNative.withTransaction {
-                LinuxNative.recv(fd, seg, 8L, 0)
-            }.getOrThrow("test"))
+        mock.recvResult = LinuxNative.SyscallResult.Success(50)
+        assertEquals(50L, LinuxNative.withTransaction {
+            LinuxNative.recv(fd, seg, 8L, 0)
+        }.getOrThrow("test"))
 
-            assertEquals(1234, LinuxNative.gettid())
-        }
+        assertEquals(1234, LinuxNative.gettid())
     }
 }

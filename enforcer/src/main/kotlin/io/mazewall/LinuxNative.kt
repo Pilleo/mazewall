@@ -2,6 +2,10 @@ package io.mazewall
 
 import io.mazewall.ffi.LayoutValidator
 import io.mazewall.ffi.Layouts
+import io.mazewall.ffi.memory.ErrnoSegment
+import io.mazewall.ffi.memory.SockFilterSegment
+import io.mazewall.ffi.memory.SockFprogSegment
+import io.mazewall.ffi.memory.nativeScope
 import io.mazewall.seccomp.BpfInstruction
 import java.lang.foreign.Arena
 import java.lang.foreign.FunctionDescriptor
@@ -574,21 +578,18 @@ internal object RealNativeEngine : NativeEngine {
         arg3: Any?,
         arg4: Any?,
         arg5: Any?,
-    ): LinuxNative.SyscallResult {
-        Arena.ofConfined().use { arena ->
-            val capturedState = arena.allocate(Layouts.ERRNO)
-            val ret =
-                PRCTL.invokeExact(
-                    capturedState,
-                    option,
-                    arg2.toLong(),
-                    arg3.toLong(),
-                    arg4.toLong(),
-                    arg5.toLong(),
-                ) as Int
-            val errno = capturedState.get(ValueLayout.JAVA_INT, Layouts.ERRNO_OFFSET)
-            return result(ret.toLong(), errno)
-        }
+    ): LinuxNative.SyscallResult = nativeScope {
+        val capturedState = ErrnoSegment.allocate()
+        val ret =
+            PRCTL.invokeExact(
+                capturedState.segment,
+                option,
+                arg2.toLong(),
+                arg3.toLong(),
+                arg4.toLong(),
+                arg5.toLong(),
+            ) as Int
+        result(ret.toLong(), capturedState.getErrno())
     }
 
     context(_: NativeTransaction)
@@ -600,23 +601,20 @@ internal object RealNativeEngine : NativeEngine {
         a4: Any?,
         a5: Any?,
         a6: Any?,
-    ): LinuxNative.SyscallResult {
-        Arena.ofConfined().use { arena ->
-            val capturedState = arena.allocate(Layouts.ERRNO)
-            val ret =
-                SYSCALL.invokeExact(
-                    capturedState,
-                    nr,
-                    a1.toLong(),
-                    a2.toLong(),
-                    a3.toLong(),
-                    a4.toLong(),
-                    a5.toLong(),
-                    a6.toLong(),
-                ) as Long
-            val errno = capturedState.get(ValueLayout.JAVA_INT, Layouts.ERRNO_OFFSET)
-            return result(ret, errno)
-        }
+    ): LinuxNative.SyscallResult = nativeScope {
+        val capturedState = ErrnoSegment.allocate()
+        val ret =
+            SYSCALL.invokeExact(
+                capturedState.segment,
+                nr,
+                a1.toLong(),
+                a2.toLong(),
+                a3.toLong(),
+                a4.toLong(),
+                a5.toLong(),
+                a6.toLong(),
+            ) as Long
+        result(ret, capturedState.getErrno())
     }
 
     context(_: NativeTransaction)
@@ -632,22 +630,16 @@ internal object RealNativeEngine : NativeEngine {
     override fun open(
         path: MemorySegment,
         flags: Int,
-    ): LinuxNative.SyscallResult {
-        Arena.ofConfined().use { arena ->
-            val capturedState = arena.allocate(Layouts.ERRNO)
-            val ret = OPEN.invokeExact(capturedState, path, flags) as Int
-            val errno = capturedState.get(ValueLayout.JAVA_INT, Layouts.ERRNO_OFFSET)
-            return result(ret.toLong(), errno)
-        }
+    ): LinuxNative.SyscallResult = nativeScope {
+        val capturedState = ErrnoSegment.allocate()
+        val ret = OPEN.invokeExact(capturedState.segment, path, flags) as Int
+        result(ret.toLong(), capturedState.getErrno())
     }
 
-    override fun close(fd: LinuxNative.FileDescriptor): LinuxNative.SyscallResult {
-        Arena.ofConfined().use { arena ->
-            val capturedState = arena.allocate(Layouts.ERRNO)
-            val ret = CLOSE.invokeExact(capturedState, fd.value) as Int
-            val errno = capturedState.get(ValueLayout.JAVA_INT, Layouts.ERRNO_OFFSET)
-            return result(ret.toLong(), errno)
-        }
+    override fun close(fd: LinuxNative.FileDescriptor): LinuxNative.SyscallResult = nativeScope {
+        val capturedState = ErrnoSegment.allocate()
+        val ret = CLOSE.invokeExact(capturedState.segment, fd.value) as Int
+        result(ret.toLong(), capturedState.getErrno())
     }
 
     context(_: NativeTransaction)
@@ -656,13 +648,10 @@ internal object RealNativeEngine : NativeEngine {
         type: Int,
         protocol: Int,
         sv: MemorySegment,
-    ): LinuxNative.SyscallResult {
-        Arena.ofConfined().use { arena ->
-            val capturedState = arena.allocate(Layouts.ERRNO)
-            val ret = SOCKETPAIR.invokeExact(capturedState, domain, type, protocol, sv) as Int
-            val errno = capturedState.get(ValueLayout.JAVA_INT, Layouts.ERRNO_OFFSET)
-            return result(ret.toLong(), errno)
-        }
+    ): LinuxNative.SyscallResult = nativeScope {
+        val capturedState = ErrnoSegment.allocate()
+        val ret = SOCKETPAIR.invokeExact(capturedState.segment, domain, type, protocol, sv) as Int
+        result(ret.toLong(), capturedState.getErrno())
     }
 
     context(_: NativeTransaction)
@@ -670,13 +659,10 @@ internal object RealNativeEngine : NativeEngine {
         domain: Int,
         type: Int,
         protocol: Int,
-    ): LinuxNative.SyscallResult {
-        Arena.ofConfined().use { arena ->
-            val capturedState = arena.allocate(Layouts.ERRNO)
-            val ret = SOCKET.invokeExact(capturedState, domain, type, protocol) as Int
-            val errno = capturedState.get(ValueLayout.JAVA_INT, Layouts.ERRNO_OFFSET)
-            return result(ret.toLong(), errno)
-        }
+    ): LinuxNative.SyscallResult = nativeScope {
+        val capturedState = ErrnoSegment.allocate()
+        val ret = SOCKET.invokeExact(capturedState.segment, domain, type, protocol) as Int
+        result(ret.toLong(), capturedState.getErrno())
     }
 
     context(_: NativeTransaction)
@@ -684,26 +670,20 @@ internal object RealNativeEngine : NativeEngine {
         sockfd: LinuxNative.FileDescriptor,
         addr: MemorySegment,
         addrlen: Int,
-    ): LinuxNative.SyscallResult {
-        Arena.ofConfined().use { arena ->
-            val capturedState = arena.allocate(Layouts.ERRNO)
-            val ret = BIND.invokeExact(capturedState, sockfd.value, addr, addrlen) as Int
-            val errno = capturedState.get(ValueLayout.JAVA_INT, Layouts.ERRNO_OFFSET)
-            return result(ret.toLong(), errno)
-        }
+    ): LinuxNative.SyscallResult = nativeScope {
+        val capturedState = ErrnoSegment.allocate()
+        val ret = BIND.invokeExact(capturedState.segment, sockfd.value, addr, addrlen) as Int
+        result(ret.toLong(), capturedState.getErrno())
     }
 
     context(_: NativeTransaction)
     override fun listen(
         sockfd: LinuxNative.FileDescriptor,
         backlog: Int,
-    ): LinuxNative.SyscallResult {
-        Arena.ofConfined().use { arena ->
-            val capturedState = arena.allocate(Layouts.ERRNO)
-            val ret = LISTEN.invokeExact(capturedState, sockfd.value, backlog) as Int
-            val errno = capturedState.get(ValueLayout.JAVA_INT, Layouts.ERRNO_OFFSET)
-            return result(ret.toLong(), errno)
-        }
+    ): LinuxNative.SyscallResult = nativeScope {
+        val capturedState = ErrnoSegment.allocate()
+        val ret = LISTEN.invokeExact(capturedState.segment, sockfd.value, backlog) as Int
+        result(ret.toLong(), capturedState.getErrno())
     }
 
     context(_: NativeTransaction)
@@ -711,13 +691,10 @@ internal object RealNativeEngine : NativeEngine {
         sockfd: LinuxNative.FileDescriptor,
         addr: MemorySegment,
         addrlen: MemorySegment,
-    ): LinuxNative.SyscallResult {
-        Arena.ofConfined().use { arena ->
-            val capturedState = arena.allocate(Layouts.ERRNO)
-            val ret = ACCEPT.invokeExact(capturedState, sockfd.value, addr, addrlen) as Int
-            val errno = capturedState.get(ValueLayout.JAVA_INT, Layouts.ERRNO_OFFSET)
-            return result(ret.toLong(), errno)
-        }
+    ): LinuxNative.SyscallResult = nativeScope {
+        val capturedState = ErrnoSegment.allocate()
+        val ret = ACCEPT.invokeExact(capturedState.segment, sockfd.value, addr, addrlen) as Int
+        result(ret.toLong(), capturedState.getErrno())
     }
 
     context(_: NativeTransaction)
@@ -725,13 +702,10 @@ internal object RealNativeEngine : NativeEngine {
         sockfd: LinuxNative.FileDescriptor,
         addr: MemorySegment,
         addrlen: Int,
-    ): LinuxNative.SyscallResult {
-        Arena.ofConfined().use { arena ->
-            val capturedState = arena.allocate(Layouts.ERRNO)
-            val ret = CONNECT.invokeExact(capturedState, sockfd.value, addr, addrlen) as Int
-            val errno = capturedState.get(ValueLayout.JAVA_INT, Layouts.ERRNO_OFFSET)
-            return result(ret.toLong(), errno)
-        }
+    ): LinuxNative.SyscallResult = nativeScope {
+        val capturedState = ErrnoSegment.allocate()
+        val ret = CONNECT.invokeExact(capturedState.segment, sockfd.value, addr, addrlen) as Int
+        result(ret.toLong(), capturedState.getErrno())
     }
 
     context(_: NativeTransaction)
@@ -739,13 +713,10 @@ internal object RealNativeEngine : NativeEngine {
         sockfd: LinuxNative.FileDescriptor,
         msg: MemorySegment,
         flags: Int,
-    ): LinuxNative.SyscallResult {
-        Arena.ofConfined().use { arena ->
-            val capturedState = arena.allocate(Layouts.ERRNO)
-            val ret = SENDMSG.invokeExact(capturedState, sockfd.value, msg, flags) as Long
-            val errno = capturedState.get(ValueLayout.JAVA_INT, Layouts.ERRNO_OFFSET)
-            return result(ret, errno)
-        }
+    ): LinuxNative.SyscallResult = nativeScope {
+        val capturedState = ErrnoSegment.allocate()
+        val ret = SENDMSG.invokeExact(capturedState.segment, sockfd.value, msg, flags) as Long
+        result(ret, capturedState.getErrno())
     }
 
     context(_: NativeTransaction)
@@ -753,13 +724,10 @@ internal object RealNativeEngine : NativeEngine {
         sockfd: LinuxNative.FileDescriptor,
         msg: MemorySegment,
         flags: Int,
-    ): LinuxNative.SyscallResult {
-        Arena.ofConfined().use { arena ->
-            val capturedState = arena.allocate(Layouts.ERRNO)
-            val ret = RECVMSG.invokeExact(capturedState, sockfd.value, msg, flags) as Long
-            val errno = capturedState.get(ValueLayout.JAVA_INT, Layouts.ERRNO_OFFSET)
-            return result(ret, errno)
-        }
+    ): LinuxNative.SyscallResult = nativeScope {
+        val capturedState = ErrnoSegment.allocate()
+        val ret = RECVMSG.invokeExact(capturedState.segment, sockfd.value, msg, flags) as Long
+        result(ret, capturedState.getErrno())
     }
 
     context(_: NativeTransaction)
@@ -767,13 +735,10 @@ internal object RealNativeEngine : NativeEngine {
         fd: LinuxNative.FileDescriptor,
         request: Long,
         arg: MemorySegment,
-    ): LinuxNative.SyscallResult {
-        Arena.ofConfined().use { arena ->
-            val capturedState = arena.allocate(Layouts.ERRNO)
-            val ret = IOCTL_ADDR.invokeExact(capturedState, fd.value, request, arg) as Int
-            val errno = capturedState.get(ValueLayout.JAVA_INT, Layouts.ERRNO_OFFSET)
-            return result(ret.toLong(), errno)
-        }
+    ): LinuxNative.SyscallResult = nativeScope {
+        val capturedState = ErrnoSegment.allocate()
+        val ret = IOCTL_ADDR.invokeExact(capturedState.segment, fd.value, request, arg) as Int
+        result(ret.toLong(), capturedState.getErrno())
     }
 
     context(_: NativeTransaction)
@@ -781,13 +746,10 @@ internal object RealNativeEngine : NativeEngine {
         fd: LinuxNative.FileDescriptor,
         request: Long,
         arg: Long,
-    ): LinuxNative.SyscallResult {
-        Arena.ofConfined().use { arena ->
-            val capturedState = arena.allocate(Layouts.ERRNO)
-            val ret = IOCTL_LONG.invokeExact(capturedState, fd.value, request, arg) as Int
-            val errno = capturedState.get(ValueLayout.JAVA_INT, Layouts.ERRNO_OFFSET)
-            return result(ret.toLong(), errno)
-        }
+    ): LinuxNative.SyscallResult = nativeScope {
+        val capturedState = ErrnoSegment.allocate()
+        val ret = IOCTL_LONG.invokeExact(capturedState.segment, fd.value, request, arg) as Int
+        result(ret.toLong(), capturedState.getErrno())
     }
 
     context(_: NativeTransaction)
@@ -798,22 +760,19 @@ internal object RealNativeEngine : NativeEngine {
         remoteIov: MemorySegment,
         riovcnt: Long,
         flags: Long,
-    ): LinuxNative.SyscallResult {
-        Arena.ofConfined().use { arena ->
-            val capturedState = arena.allocate(Layouts.ERRNO)
-            val ret =
-                PROCESS_VM_READV.invokeExact(
-                    capturedState,
-                    pid,
-                    localIov,
-                    liovcnt,
-                    remoteIov,
-                    riovcnt,
-                    flags,
-                ) as Long
-            val errno = capturedState.get(ValueLayout.JAVA_INT, Layouts.ERRNO_OFFSET)
-            return result(ret, errno)
-        }
+    ): LinuxNative.SyscallResult = nativeScope {
+        val capturedState = ErrnoSegment.allocate()
+        val ret =
+            PROCESS_VM_READV.invokeExact(
+                capturedState.segment,
+                pid,
+                localIov,
+                liovcnt,
+                remoteIov,
+                riovcnt,
+                flags,
+            ) as Long
+        result(ret, capturedState.getErrno())
     }
 
     context(_: NativeTransaction)
@@ -821,13 +780,10 @@ internal object RealNativeEngine : NativeEngine {
         path: MemorySegment,
         buf: MemorySegment,
         bufsiz: Long,
-    ): LinuxNative.SyscallResult {
-        Arena.ofConfined().use { arena ->
-            val capturedState = arena.allocate(Layouts.ERRNO)
-            val ret = READLINK.invokeExact(capturedState, path, buf, bufsiz) as Long
-            val errno = capturedState.get(ValueLayout.JAVA_INT, Layouts.ERRNO_OFFSET)
-            return result(ret, errno)
-        }
+    ): LinuxNative.SyscallResult = nativeScope {
+        val capturedState = ErrnoSegment.allocate()
+        val ret = READLINK.invokeExact(capturedState.segment, path, buf, bufsiz) as Long
+        result(ret, capturedState.getErrno())
     }
 
     context(_: NativeTransaction)
@@ -835,13 +791,10 @@ internal object RealNativeEngine : NativeEngine {
         fd: LinuxNative.FileDescriptor,
         buf: MemorySegment,
         count: Long,
-    ): LinuxNative.SyscallResult {
-        Arena.ofConfined().use { arena ->
-            val capturedState = arena.allocate(Layouts.ERRNO)
-            val ret = READ.invokeExact(capturedState, fd.value, buf, count) as Long
-            val errno = capturedState.get(ValueLayout.JAVA_INT, Layouts.ERRNO_OFFSET)
-            return result(ret, errno)
-        }
+    ): LinuxNative.SyscallResult = nativeScope {
+        val capturedState = ErrnoSegment.allocate()
+        val ret = READ.invokeExact(capturedState.segment, fd.value, buf, count) as Long
+        result(ret, capturedState.getErrno())
     }
 
     context(_: NativeTransaction)
@@ -849,13 +802,10 @@ internal object RealNativeEngine : NativeEngine {
         fd: LinuxNative.FileDescriptor,
         buf: MemorySegment,
         count: Long,
-    ): LinuxNative.SyscallResult {
-        Arena.ofConfined().use { arena ->
-            val capturedState = arena.allocate(Layouts.ERRNO)
-            val ret = WRITE.invokeExact(capturedState, fd.value, buf, count) as Long
-            val errno = capturedState.get(ValueLayout.JAVA_INT, Layouts.ERRNO_OFFSET)
-            return result(ret, errno)
-        }
+    ): LinuxNative.SyscallResult = nativeScope {
+        val capturedState = ErrnoSegment.allocate()
+        val ret = WRITE.invokeExact(capturedState.segment, fd.value, buf, count) as Long
+        result(ret, capturedState.getErrno())
     }
 
     context(_: NativeTransaction)
@@ -864,13 +814,10 @@ internal object RealNativeEngine : NativeEngine {
         buf: MemorySegment,
         len: Long,
         flags: Int,
-    ): LinuxNative.SyscallResult {
-        Arena.ofConfined().use { arena ->
-            val capturedState = arena.allocate(Layouts.ERRNO)
-            val ret = RECV.invokeExact(capturedState, sockfd.value, buf, len, flags) as Long
-            val errno = capturedState.get(ValueLayout.JAVA_INT, Layouts.ERRNO_OFFSET)
-            return result(ret, errno)
-        }
+    ): LinuxNative.SyscallResult = nativeScope {
+        val capturedState = ErrnoSegment.allocate()
+        val ret = RECV.invokeExact(capturedState.segment, sockfd.value, buf, len, flags) as Long
+        result(ret, capturedState.getErrno())
     }
 
     context(_: NativeTransaction)
@@ -878,20 +825,15 @@ internal object RealNativeEngine : NativeEngine {
         fd: LinuxNative.FileDescriptor,
         cmd: Int,
         arg: Long,
-    ): LinuxNative.SyscallResult {
-        Arena.ofConfined().use { arena ->
-            val capturedState = arena.allocate(Layouts.ERRNO)
-            val ret = FCNTL.invokeExact(capturedState, fd.value, cmd, arg) as Int
-            val errno = capturedState.get(ValueLayout.JAVA_INT, Layouts.ERRNO_OFFSET)
-            return result(ret.toLong(), errno)
-        }
+    ): LinuxNative.SyscallResult = nativeScope {
+        val capturedState = ErrnoSegment.allocate()
+        val ret = FCNTL.invokeExact(capturedState.segment, fd.value, cmd, arg) as Int
+        result(ret.toLong(), capturedState.getErrno())
     }
 
-    override fun gettid(): Int {
-        Arena.ofConfined().use { arena ->
-            val capturedState = arena.allocate(Layouts.ERRNO)
-            return GETTID.invokeExact(capturedState) as Int
-        }
+    override fun gettid(): Int = nativeScope {
+        val capturedState = ErrnoSegment.allocate()
+        GETTID.invokeExact(capturedState.segment) as Int
     }
 
     context(_: NativeTransaction)
@@ -899,32 +841,29 @@ internal object RealNativeEngine : NativeEngine {
         fds: MemorySegment,
         nfds: Long,
         timeout: Int,
-    ): LinuxNative.SyscallResult {
-        Arena.ofConfined().use { arena ->
-            val capturedState = arena.allocate(Layouts.ERRNO)
-            val ret = POLL.invokeExact(capturedState, fds, nfds, timeout) as Int
-            val errno = capturedState.get(ValueLayout.JAVA_INT, Layouts.ERRNO_OFFSET)
-            return result(ret.toLong(), errno)
-        }
+    ): LinuxNative.SyscallResult = nativeScope {
+        val capturedState = ErrnoSegment.allocate()
+        val ret = POLL.invokeExact(capturedState.segment, fds, nfds, timeout) as Int
+        result(ret.toLong(), capturedState.getErrno())
     }
 
     context(arena: Arena)
     override fun newSockFProg(
         filters: List<BpfInstruction>,
     ): MemorySegment {
-        val filterArraySeg = arena.allocate(MemoryLayout.sequenceLayout(filters.size.toLong(), Layouts.SOCK_FILTER))
+        val filterArraySeg = SockFilterSegment.allocateArray(filters.size)
         for (i in filters.indices) {
             val f = filters[i]
-            val offset = i * Layouts.SOCK_FILTER_SIZE
-            filterArraySeg.set(ValueLayout.JAVA_SHORT, offset, f.code)
-            filterArraySeg.set(ValueLayout.JAVA_BYTE, offset + 2, f.jt.toByte())
-            filterArraySeg.set(ValueLayout.JAVA_BYTE, offset + 3, f.jf.toByte())
-            filterArraySeg.set(ValueLayout.JAVA_INT, offset + 4, f.k)
+            val segment = SockFilterSegment(filterArraySeg.asSlice(i * Layouts.SOCK_FILTER_SIZE, Layouts.SOCK_FILTER_SIZE))
+            segment.setCode(f.code)
+            segment.setJt(f.jt.toByte())
+            segment.setJf(f.jf.toByte())
+            segment.setK(f.k)
         }
-        val prog = arena.allocate(Layouts.SOCK_FPROG)
-        prog.set(ValueLayout.JAVA_SHORT, Layouts.SOCK_FPROG_LEN_OFFSET, filters.size.toShort())
-        prog.set(ValueLayout.ADDRESS, Layouts.SOCK_FPROG_FILTER_OFFSET, filterArraySeg)
-        return prog
+        val prog = SockFprogSegment.allocate()
+        prog.setLen(filters.size.toShort())
+        prog.setFilter(filterArraySeg)
+        return prog.segment
     }
 
     private fun downcall(
