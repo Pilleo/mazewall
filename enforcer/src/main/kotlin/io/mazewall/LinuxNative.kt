@@ -40,13 +40,16 @@ public object LinuxNative : NativeEngine {
         engine = RealNativeEngine
     }
 
+    @JvmSynthetic
+    @PublishedApi
+    internal val TRANSACTION_INSTANCE: NativeTransaction = object : NativeTransaction {}
+
     /**
      * Executes the given [block] within a [NativeTransaction] context.
      * Raw system calls and sensitive native operations are only available within this scope.
      */
     public inline fun <T> withTransaction(block: context(NativeTransaction) () -> T): T {
-        val transaction = object : NativeTransaction {}
-        return block(transaction)
+        return block(TRANSACTION_INSTANCE)
     }
 
     fun getFileSystem(): NativeFileSystem = engine

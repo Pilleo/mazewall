@@ -139,7 +139,7 @@ object ContainedExecutors {
     private fun needsLandlock(policy: Policy<*, *>) =
         policy.allowedFsReadPaths.isNotEmpty() ||
                 policy.allowedFsWritePaths.isNotEmpty() ||
-                policy.isSyscallAllowed(Syscall.IO_URING_SETUP)
+                (policy.isSyscallAllowed(Syscall.IO_URING_SETUP) && (!policy.isSyscallAllowed(Syscall.OPEN) || !policy.isSyscallAllowed(Syscall.OPENAT)))
 
     private fun isPathSubset(
         parentPaths: Set<SandboxedPath>,

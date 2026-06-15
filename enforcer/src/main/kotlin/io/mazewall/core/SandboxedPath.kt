@@ -24,12 +24,16 @@ public value class SandboxedPath private constructor(public val value: String) {
         @JvmStatic
         public fun of(path: String, allowNonExistent: Boolean = false): SandboxedPath {
             val p = Paths.get(path).toAbsolutePath().normalize()
-            val resolved = if (allowNonExistent) {
-                p.toString()
-            } else {
-                p.toRealPath(LinkOption.NOFOLLOW_LINKS).toString()
+            return try {
+                val resolved = p.toRealPath().toString()
+                SandboxedPath(resolved)
+            } catch (e: java.io.IOException) {
+                if (allowNonExistent) {
+                    SandboxedPath(p.toString())
+                } else {
+                    throw e
+                }
             }
-            return SandboxedPath(resolved)
         }
 
         /**

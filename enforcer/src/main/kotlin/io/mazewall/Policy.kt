@@ -284,7 +284,7 @@ public class Policy<out S : PolicyScope, out State : PolicyState> private constr
         }
 
         public fun allowFsRead(path: String): Builder<PolicyScope.ThreadLocalOnly> =
-            allowFsRead(SandboxedPath.of(path))
+            allowFsRead(SandboxedPath.of(path, allowNonExistent = true))
 
         public fun allowFsRead(path: SandboxedPath): Builder<PolicyScope.ThreadLocalOnly> {
             allowedFsReadPaths.add(path)
@@ -323,7 +323,7 @@ public class Policy<out S : PolicyScope, out State : PolicyState> private constr
         }
 
         public fun allowFsWrite(path: String): Builder<PolicyScope.ThreadLocalOnly> =
-            allowFsWrite(SandboxedPath.of(path))
+            allowFsWrite(SandboxedPath.of(path, allowNonExistent = true))
 
         public fun allowFsWrite(path: SandboxedPath): Builder<PolicyScope.ThreadLocalOnly> {
             allowedFsWritePaths.add(path)

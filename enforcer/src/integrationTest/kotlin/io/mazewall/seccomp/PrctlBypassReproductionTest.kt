@@ -21,31 +21,19 @@ class PrctlBypassReproductionTest : BaseIntegrationTest() {
         val safeExecutor = ContainedExecutors.wrap(executor, Policy.builder().build())
 
         try {
-            val res = safeExecutor
+            safeExecutor
                 .submit(
                     Callable {
-                        // PR_SET_PDEATHSIG is 1. Signal 15 is SIGTERM.
-                        // 15 is also the value of PR_SET_NAME (whitelisted).
-                        // If the filter is broken, it might allow this!
-                        LinuxNative.withTransaction {
+                        val r = LinuxNative.withTransaction {
                             LinuxNative.prctl(1, 15, 0, 0, 0)
                         }
+                        if (r is LinuxNative.SyscallResult.Error && r.errno != 1) {
+                            throw IllegalStateException("SECURITY BYPASS: prctl(PR_SET_PDEATHSIG) reached kernel (errno ${r.errno} instead of EPERM)")
+                        }
+                        r.getOrThrow("prctl(PR_SET_PDEATHSIG)")
                     },
                 ).get()
-
-            when (res) {
-                is LinuxNative.SyscallResult.Success -> {
-                    // VULNERABILITY CONFIRMED: prctl(1, 15) was allowed!
-                    throw IllegalStateException("SECURITY BYPASS: prctl(PR_SET_PDEATHSIG, SIGTERM) was allowed")
-                }
-
-                is LinuxNative.SyscallResult.Error -> {
-                    if (res.errno != 1) {
-                        throw IllegalStateException("SECURITY BYPASS: prctl(PR_SET_PDEATHSIG) reached kernel (errno ${res.errno} instead of EPERM)")
-                    }
-                    res.throwErrno("prctl(PR_SET_PDEATHSIG)")
-                }
-            }
+            throw IllegalStateException("SECURITY BYPASS: prctl(PR_SET_PDEATHSIG, SIGTERM) was allowed")
         } catch (e: ExecutionException) {
             val cause = e.cause
             if (cause is ContainmentViolationException) {
@@ -69,32 +57,24 @@ class PrctlBypassReproductionTest : BaseIntegrationTest() {
         val safeExecutor = ContainedExecutors.wrap(executor, Policy.builder().build())
 
         try {
-            val res = safeExecutor
+            safeExecutor
                 .submit(
                     Callable {
-                        // PR_CAP_AMBIENT is 47. Op 2 is PR_CAP_AMBIENT_RAISE.
-                        // If we pass 15 as the 3rd or 4th arg, does it bypass?
-                        LinuxNative.withTransaction {
+                        val r = LinuxNative.withTransaction {
                             LinuxNative.prctl(47, 2, 15, 0, 0)
                         }
+                        if (r is LinuxNative.SyscallResult.Error) {
+                            if (r.errno == 22) {
+                                throw IllegalStateException("SECURITY BYPASS: prctl(PR_CAP_AMBIENT) reached kernel (EINVAL instead of EPERM)")
+                            }
+                            if (r.errno != 1) {
+                                throw IllegalStateException("SECURITY BYPASS: prctl(PR_CAP_AMBIENT) reached kernel (errno ${r.errno} instead of EPERM)")
+                            }
+                        }
+                        r.getOrThrow("prctl(PR_CAP_AMBIENT)")
                     },
                 ).get()
-
-            when (res) {
-                is LinuxNative.SyscallResult.Success -> {
-                    throw IllegalStateException("CRITICAL SECURITY BYPASS: prctl(PR_CAP_AMBIENT) succeeded")
-                }
-
-                is LinuxNative.SyscallResult.Error -> {
-                    if (res.errno == 22) { // EINVAL
-                        throw IllegalStateException("SECURITY BYPASS: prctl(PR_CAP_AMBIENT) reached kernel (EINVAL instead of EPERM)")
-                    }
-                    if (res.errno != 1) {
-                        throw IllegalStateException("SECURITY BYPASS: prctl(PR_CAP_AMBIENT) reached kernel (errno ${res.errno} instead of EPERM)")
-                    }
-                    res.throwErrno("prctl(PR_CAP_AMBIENT)")
-                }
-            }
+            throw IllegalStateException("CRITICAL SECURITY BYPASS: prctl(PR_CAP_AMBIENT) succeeded")
         } catch (e: ExecutionException) {
             val cause = e.cause
             if (cause is ContainmentViolationException) {

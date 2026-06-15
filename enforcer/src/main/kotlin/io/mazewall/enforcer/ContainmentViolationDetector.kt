@@ -4,7 +4,7 @@ import java.io.IOException
 import java.nio.file.AccessDeniedException
 
 object ContainmentViolationDetector {
-    private val ERRNO_VIOLATION_REGEX = Regex("""\berror[=:]\s*(1|13)\b""")
+    private val ERRNO_VIOLATION_REGEX = Regex("""\b(error|errno)[=:]\s*(1|13)\b""")
 
     val DENIED_PHRASES = arrayOf(
         "Operation not permitted",
