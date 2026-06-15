@@ -285,7 +285,7 @@ object Landlock {
             when (fdResult) {
                 is LinuxNative.SyscallResult.Success -> fdResult.asFd()
                 is LinuxNative.SyscallResult.Error -> {
-                    logOpenFailure(resolvedPath, fdResult.errno)
+                    logOpenFailure(resolvedPath, fdResult.errno.value)
                     return
                 }
             }
@@ -304,7 +304,7 @@ object Landlock {
         resolvedPath: String,
         flags: Int,
     ): Pair<LinuxNative.SyscallResult, Boolean> {
-        if (res is LinuxNative.SyscallResult.Error && res.errno == 2) { // ENOENT
+        if (res is LinuxNative.SyscallResult.Error && res.errno.value == 2) { // ENOENT
             val parentPath = File(resolvedPath).parent ?: "/"
             logger.info("Path $resolvedPath does not exist, falling back to parent directory: $parentPath")
             val openResult = LinuxNative.withTransaction {
@@ -347,10 +347,10 @@ object Landlock {
     ) {
         val res = addRuleToRuleset(rulesetFd, pathFd, access)
         if (res is LinuxNative.SyscallResult.Error) {
-            if (res.errno == ERRNO_EINVAL) {
+            if (res.errno.value == ERRNO_EINVAL) {
                 logger.warning("landlock_add_rule rejected $path (EINVAL) — path may be a symlink or unsupported inode type.")
             } else {
-                throw IllegalStateException("landlock_add_rule failed for $path with errno ${res.errno}")
+                throw IllegalStateException("landlock_add_rule failed for $path with errno ${res.errno.value}")
             }
         }
     }
@@ -473,7 +473,7 @@ internal class LandlockSession(
                 when (rulesetFdResult) {
                     is LinuxNative.SyscallResult.Success -> rulesetFdResult.asFd()
                     is LinuxNative.SyscallResult.Error -> {
-                        val err = IllegalStateException("landlock_create_ruleset failed with errno ${rulesetFdResult.errno}")
+                        val err = IllegalStateException("landlock_create_ruleset failed with errno ${rulesetFdResult.errno.value}")
                         state = LandlockState.Failed(err)
                         throw err
                     }

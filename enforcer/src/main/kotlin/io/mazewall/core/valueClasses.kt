@@ -29,3 +29,13 @@ value class Errno(
 ) {
     override fun toString(): String = "errno($value)"
 }
+
+/**
+ * Type-safe wrapper for memory addresses.
+ */
+@JvmInline
+value class MemoryAddress(
+    val address: Long,
+) {
+    override fun toString(): String = "0x${address.toString(16)}"
+}
