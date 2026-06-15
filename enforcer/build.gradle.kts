@@ -165,3 +165,26 @@ classDiagrams {
         insertInto(file("$rootDir/docs/internals/enforcer_architecture.md"))
     }
 }
+
+tasks.named("generateClassDiagrams") {
+    doLast {
+        val pumlFile = file("$rootDir/docs/diagrams/enforcer_class_diagram.puml")
+        if (pumlFile.exists()) {
+            var content = pumlFile.readText()
+            // Strip Kotlin value-class mangling hash suffix (e.g. -r9EpL9Y, -LsA-840, etc.)
+            content = content.replace(Regex("([a-zA-Z0-9_]+)-[a-zA-Z0-9_-]{7,15}(?=\\b|\\(|$)"), "$1")
+            // Strip any leftover internal module access flags (e.g. $io_mazewall_enforcer)
+            content = content.replace(Regex("\\\$[a-zA-Z0-9_]+"), "")
+            pumlFile.writeText(content)
+        }
+        val mdFile = file("$rootDir/docs/internals/enforcer_architecture.md")
+        if (mdFile.exists()) {
+            var content = mdFile.readText()
+            content = content.replace(Regex("([a-zA-Z0-9_]+)-[a-zA-Z0-9_-]{7,15}(?=\\b|\\(|$)"), "$1")
+            content = content.replace(Regex("\\\$[a-zA-Z0-9_]+"), "")
+            mdFile.writeText(content)
+        }
+    }
+}
+
+

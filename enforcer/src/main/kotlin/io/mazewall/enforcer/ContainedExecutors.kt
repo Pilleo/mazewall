@@ -169,7 +169,7 @@ object ContainedExecutors {
 
     private fun resolveCurrentState(): FilterInstallationPlanner.ContainerState {
         val threadActions = ThreadStateRegistry.syscallActions
-        val processActions = ProcessStateRegistry.SYSCALL_ACTIONS
+        val processActions = ProcessStateRegistry.SYSCALL_ACTIONS.get()
 
         val mergedActions = mutableMapOf<Syscall, SeccompAction>()
         for ((sys, action) in threadActions) {
@@ -230,9 +230,15 @@ object ContainedExecutors {
         newDefaultAction: SeccompAction,
         toInstall: Policy<*, Uncompiled>,
     ) {
-        val currentActions = ProcessStateRegistry.SYSCALL_ACTIONS
-        for ((sys, action) in newBlocks) {
-            currentActions[sys] = action
+        while (true) {
+            val current = ProcessStateRegistry.SYSCALL_ACTIONS.get()
+            val next = current.toMutableMap()
+            for ((sys, action) in newBlocks) {
+                next[sys] = action
+            }
+            if (ProcessStateRegistry.SYSCALL_ACTIONS.compareAndSet(current, next)) {
+                break
+            }
         }
         val currentDefault = ProcessStateRegistry.DEFAULT_ACTION.get()
         if (newDefaultAction.priority > currentDefault.priority) {
