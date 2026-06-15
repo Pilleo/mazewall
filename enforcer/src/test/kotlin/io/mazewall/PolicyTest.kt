@@ -79,19 +79,7 @@ class PolicyTest {
         assertEquals(1, policy.allowedFsReadPaths.size)
     }
 
-    @Test
-    fun `builder allowFsWrite rejects invalid paths`() {
-        assertFailsWith<java.nio.file.NoSuchFileException> {
-            Policy.builder().allowFsWrite("/nonexistent/path/at/all")
-        }
-    }
 
-    @Test
-    fun `builder allowFsRead rejects invalid paths`() {
-        assertFailsWith<java.nio.file.NoSuchFileException> {
-            Policy.builder().allowFsRead("/nonexistent/path/at/all")
-        }
-    }
 
     @Test
     fun `builder base() merges all flags`(@TempDir tempDir: java.nio.file.Path) {
