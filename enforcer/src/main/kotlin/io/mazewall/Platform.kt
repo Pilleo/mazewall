@@ -34,7 +34,7 @@ object Platform {
             isArchitectureSupported()
 
     private fun hasKernelSeccompSupport(): Boolean = LinuxNative.withTransaction {
-        LinuxNative.prctl(NativeConstants.PR_GET_SECCOMP, 0, 0, 0, 0)
+        LinuxNative.process.prctl(NativeConstants.PR_GET_SECCOMP, 0, 0, 0, 0)
     } is LinuxNative.SyscallResult.Success
 
     private fun isSeccompSanityCheckPassing(): Boolean {
@@ -43,7 +43,7 @@ object Platform {
         // A healthy kernel should return -1 and set errno to EINVAL (22).
         // Some container environments or broken kernels might silently return 0 or a different error.
         val bogusCheck = LinuxNative.withTransaction {
-            LinuxNative.prctl(NativeConstants.PR_SET_SECCOMP, -1L, 0L, 0, 0)
+            LinuxNative.process.prctl(NativeConstants.PR_SET_SECCOMP, -1L, 0L, 0, 0)
         }
         val passed = bogusCheck is LinuxNative.SyscallResult.Error && bogusCheck.errno == ERRNO_EINVAL
         if (!passed) {
@@ -171,7 +171,7 @@ object Platform {
         if (isLinux) {
             try {
                 val nnpVal = LinuxNative.withTransaction {
-                    LinuxNative.prctl(NativeConstants.PR_GET_NO_NEW_PRIVS, 0, 0, 0, 0)
+                    LinuxNative.process.prctl(NativeConstants.PR_GET_NO_NEW_PRIVS, 0, 0, 0, 0)
                 }
                 if (nnpVal is LinuxNative.SyscallResult.Success) {
                     isNoNewPrivsEnabled = nnpVal.value == 1L
@@ -181,7 +181,7 @@ object Platform {
 
             try {
                 val seccompVal = LinuxNative.withTransaction {
-                    LinuxNative.prctl(NativeConstants.PR_GET_SECCOMP, 0, 0, 0, 0)
+                    LinuxNative.process.prctl(NativeConstants.PR_GET_SECCOMP, 0, 0, 0, 0)
                 }
                 seccompMode = when (seccompVal) {
                     is LinuxNative.SyscallResult.Error -> SeccompMode.Error(seccompVal.errno)

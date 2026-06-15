@@ -86,7 +86,7 @@ fun runProfileAndEnforce() {
                 is LinuxNative.SyscallResult.Success -> {
                     val ringFd = setupResult.asFd()
                     ioUringStatus = "io_uring ring initialized successfully (ringFd=${ringFd.value})"
-                    LinuxNative.close(ringFd)
+                    LinuxNative.fileSystem.close(ringFd)
                 }
 
                 is LinuxNative.SyscallResult.Error -> {
@@ -228,7 +228,7 @@ fun runProfileAndEnforce() {
             // whitelisted scope, the VFS layer rejects the open regardless of whether it came from a
             // synchronous syscall or an io_uring submission queue entry.
             Arena.ofConfined().use { arena ->
-                val fs = LinuxNative.getFileSystem()
+                val fs = LinuxNative.fileSystem
                 val openResult =
                     LinuxNative.withTransaction {
                         fs.open(
@@ -245,7 +245,7 @@ fun runProfileAndEnforce() {
                 }
 
                 if (openResult is LinuxNative.SyscallResult.Success) {
-                    LinuxNative.close(openResult.asFd())
+                    LinuxNative.fileSystem.close(openResult.asFd())
                 }
             }
             "Evasion succeeded (Is Landlock supported on this kernel?)"

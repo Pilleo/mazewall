@@ -110,7 +110,7 @@ object RealProfilerTransport : ProfilerTransport {
                 offset += p.size
             }
 
-            val res = LinuxNative.withTransaction { LinuxNative.write(socketFd, buf, totalSize.toLong()) }
+            val res = LinuxNative.withTransaction { LinuxNative.memory.write(socketFd, buf, totalSize.toLong()) }
             res.getOrThrow("sendTraceEvent")
         }
     }
@@ -126,7 +126,7 @@ object RealProfilerTransport : ProfilerTransport {
             }
 
             while (true) {
-                val res = LinuxNative.withTransaction { LinuxNative.recvmsg(socketFd, msg, 0) }
+                val res = LinuxNative.withTransaction { LinuxNative.networking.recvmsg(socketFd, msg, 0) }
                 when (res) {
                     is LinuxNative.SyscallResult.Success -> {
                         if (res.value == 0L) return null // EOF
@@ -159,20 +159,20 @@ object RealProfilerTransport : ProfilerTransport {
         fd: LinuxNative.FileDescriptor,
         buf: MemorySegment,
         count: Long,
-    ): LinuxNative.SyscallResult = LinuxNative.withTransaction { LinuxNative.read(fd, buf, count) }
+    ): LinuxNative.SyscallResult = LinuxNative.withTransaction { LinuxNative.memory.read(fd, buf, count) }
 
     override fun write(
         fd: LinuxNative.FileDescriptor,
         buf: MemorySegment,
         count: Long,
-    ): LinuxNative.SyscallResult = LinuxNative.withTransaction { LinuxNative.write(fd, buf, count) }
+    ): LinuxNative.SyscallResult = LinuxNative.withTransaction { LinuxNative.memory.write(fd, buf, count) }
 
     override fun recv(
         sockfd: LinuxNative.FileDescriptor,
         buf: MemorySegment,
         len: Long,
         flags: Int,
-    ): LinuxNative.SyscallResult = LinuxNative.withTransaction { LinuxNative.recv(sockfd, buf, len, flags) }
+    ): LinuxNative.SyscallResult = LinuxNative.withTransaction { LinuxNative.networking.recv(sockfd, buf, len, flags) }
 
     override fun ioctl(
         fd: LinuxNative.FileDescriptor,
@@ -181,7 +181,7 @@ object RealProfilerTransport : ProfilerTransport {
     ): LinuxNative.SyscallResult = LinuxNative.withTransaction { LinuxNative.ioctl(fd, request, arg) }
 
     override fun createServer(socketPath: String): LinuxNative.FileDescriptor {
-        val res = LinuxNative.withTransaction { LinuxNative.socket(AF_UNIX, SOCK_STREAM, 0) }
+        val res = LinuxNative.withTransaction { LinuxNative.networking.socket(AF_UNIX, SOCK_STREAM, 0) }
         val fd = res.getFdOrThrow("socket(AF_UNIX)")
 
         Arena.ofConfined().use { arena ->
@@ -192,27 +192,27 @@ object RealProfilerTransport : ProfilerTransport {
             val pathSeg = addr.asSlice(2, SOCKADDR_UN_PATH_SIZE.toLong())
             MemorySegment.copy(pathBytes, 0, pathSeg, ValueLayout.JAVA_BYTE, 0L, pathBytes.size)
 
-            val bindRes = LinuxNative.withTransaction { LinuxNative.bind(fd, addr, ADDR_UN_SIZE) }
+            val bindRes = LinuxNative.withTransaction { LinuxNative.networking.bind(fd, addr, ADDR_UN_SIZE) }
             if (bindRes is LinuxNative.SyscallResult.Error) {
-                LinuxNative.close(fd)
+                LinuxNative.fileSystem.close(fd)
                 bindRes.throwErrno("bind(AF_UNIX)")
             }
         }
 
-        val listenRes = LinuxNative.withTransaction { LinuxNative.listen(fd, BACKLOG_SIZE) }
+        val listenRes = LinuxNative.withTransaction { LinuxNative.networking.listen(fd, BACKLOG_SIZE) }
         if (listenRes is LinuxNative.SyscallResult.Error) {
-            LinuxNative.close(fd)
+            LinuxNative.fileSystem.close(fd)
             listenRes.throwErrno("listen")
         }
         return fd
     }
 
     override fun accept(serverFd: LinuxNative.FileDescriptor): LinuxNative.FileDescriptor {
-        val res = LinuxNative.withTransaction { LinuxNative.accept(serverFd, MemorySegment.NULL, MemorySegment.NULL) }
+        val res = LinuxNative.withTransaction { LinuxNative.networking.accept(serverFd, MemorySegment.NULL, MemorySegment.NULL) }
         return res.getFdOrThrow("accept")
     }
 
     override fun close(fd: LinuxNative.FileDescriptor) {
-        LinuxNative.close(fd)
+        LinuxNative.fileSystem.close(fd)
     }
 }

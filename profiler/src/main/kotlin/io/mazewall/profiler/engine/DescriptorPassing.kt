@@ -18,7 +18,7 @@ internal object DescriptorPassing {
     /**
      * Sets up a [msghdr] structure for sending or receiving file descriptors.
      *
-     * @param dummyByte A 1-byte buffer used as the mandatory data payload for [io.mazewall.LinuxNative.sendmsg]/[io.mazewall.LinuxNative.recvmsg].
+     * @param dummyByte A 1-byte buffer used as the mandatory data payload for [io.mazewall.LinuxNative.networking.sendmsg]/[io.mazewall.LinuxNative.networking.recvmsg].
      * @param controlBuf The buffer for [cmsghdr] that contains (or will contain) the file descriptors.
      * @return The initialized [msghdr] MemorySegment.
      */

@@ -17,11 +17,11 @@ public interface NativeTransaction
  *
  * All sensitive methods require a [NativeTransaction] capability in context.
  */
-public interface NativeEngine :
-    NativeFileSystem,
-    NativeNetworking,
-    NativeProcess,
-    NativeMemory {
+public interface NativeEngine {
+    public val fileSystem: NativeFileSystem
+    public val networking: NativeNetworking
+    public val process: NativeProcess
+    public val memory: NativeMemory
 
     context(_: NativeTransaction)
     fun syscall(

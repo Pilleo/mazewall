@@ -150,10 +150,10 @@ internal class ProfilerInstallerSession(
         } finally {
             if (!success) {
                 if (socketFd.isValid) {
-                    LinuxNative.getFileSystem().close(socketFd)
+                    LinuxNative.fileSystem.close(socketFd)
                 }
             }
-            LinuxNative.getFileSystem().close(fd)
+            LinuxNative.fileSystem.close(fd)
         }
     }
 
@@ -163,7 +163,7 @@ internal class ProfilerInstallerSession(
         val ackBuf = arena.allocate(1)
         while (true) {
             val res = LinuxNative.withTransaction {
-                LinuxNative.getMemory().read(socketFd, ackBuf, 1)
+                LinuxNative.memory.read(socketFd, ackBuf, 1)
             }
             when (res) {
                 is LinuxNative.SyscallResult.Success -> {
@@ -184,7 +184,7 @@ internal class ProfilerInstallerSession(
 
     private fun ensureNoNewPrivs() {
         val r = LinuxNative.withTransaction {
-            LinuxNative.getProcess().prctl(NativeConstants.PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0)
+            LinuxNative.process.prctl(NativeConstants.PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0)
         }
         r.getOrThrow("prctl(PR_SET_NO_NEW_PRIVS)")
     }
@@ -194,7 +194,7 @@ internal class ProfilerInstallerSession(
         filters: List<BpfInstruction>,
     ): LinuxNative.FileDescriptor {
         val arch = Arch.current()
-        val prog = LinuxNative.getMemory().newSockFProg(filters)
+        val prog = LinuxNative.memory.newSockFProg(filters)
         val r = LinuxNative.withTransaction {
             LinuxNative.syscall(
                 arch.seccompSyscallNumber.toLong(),

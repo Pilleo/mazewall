@@ -249,7 +249,7 @@ object Landlock {
     ) {
         val pathSegment = arena.allocateFrom(path)
         val fdResult = LinuxNative.withTransaction {
-            LinuxNative.getFileSystem().open(pathSegment, NativeConstants.O_PATH or NativeConstants.O_CLOEXEC)
+            LinuxNative.fileSystem.open(pathSegment, NativeConstants.O_PATH or NativeConstants.O_CLOEXEC)
         }
         val pathFd =
             when (fdResult) {
@@ -266,7 +266,7 @@ object Landlock {
                 logger.warning("landlock_add_rule failed for JVM classpath $path with errno ${addResult.errno}")
             }
         } finally {
-            LinuxNative.getFileSystem().close(pathFd)
+            LinuxNative.fileSystem.close(pathFd)
         }
     }
 
@@ -279,7 +279,7 @@ object Landlock {
         val resolvedPath = path.value
         val openFlags = NativeConstants.O_PATH or NativeConstants.O_CLOEXEC or NativeConstants.O_NOFOLLOW
         val initialResult = LinuxNative.withTransaction {
-            LinuxNative.getFileSystem().open(arena.allocateFrom(resolvedPath), openFlags)
+            LinuxNative.fileSystem.open(arena.allocateFrom(resolvedPath), openFlags)
         }
 
         val (fdResult, isFallback) = handleInitialOpenFailure(initialResult, resolvedPath, openFlags)
@@ -297,7 +297,7 @@ object Landlock {
             val finalAccess = calculateFinalAccess(allowedAccess, isFallback, resolvedPath)
             addRuleToRulesetAndVerify(rulesetFd, pathFd, finalAccess, resolvedPath)
         } finally {
-            LinuxNative.getFileSystem().close(pathFd)
+            LinuxNative.fileSystem.close(pathFd)
         }
     }
 
@@ -311,7 +311,7 @@ object Landlock {
             val parentPath = File(resolvedPath).parent ?: "/"
             logger.info("Path $resolvedPath does not exist, falling back to parent directory: $parentPath")
             val openResult = LinuxNative.withTransaction {
-                LinuxNative.getFileSystem().open(arena.allocateFrom(parentPath), flags)
+                LinuxNative.fileSystem.open(arena.allocateFrom(parentPath), flags)
             }
             return openResult to true
         }
@@ -360,7 +360,7 @@ object Landlock {
 
     internal fun enforceRuleset(rulesetFd: LinuxNative.FileDescriptor) {
         val (prctlResult, restrictResult) = LinuxNative.withTransaction {
-            val p = LinuxNative.getProcess().prctl(NativeConstants.PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0)
+            val p = LinuxNative.process.prctl(NativeConstants.PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0)
             val r = LinuxNative.syscall(NativeConstants.LANDLOCK_RESTRICT_SELF_NR, rulesetFd.value.toLong(), 0, MemorySegment.NULL, 0)
             p to r
         }
@@ -495,7 +495,7 @@ internal class LandlockSession(
                 state = LandlockState.Failed(e)
                 throw e
             } finally {
-                LinuxNative.getFileSystem().close(rulesetFd)
+                LinuxNative.fileSystem.close(rulesetFd)
             }
         }
     }

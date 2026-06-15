@@ -45,7 +45,7 @@ object RealMemoryReader : ProfilerMemoryReader {
             remoteIov.set(ValueLayout.ADDRESS, 0L, MemorySegment.ofAddress(remoteAddress))
             remoteIov.set(ValueLayout.JAVA_LONG, IOV_LEN_OFF, maxLen.toLong())
             val res = LinuxNative.withTransaction {
-                LinuxNative.getMemory().processVmReadv(pid, localIov, 1, remoteIov, 1, 0)
+                LinuxNative.memory.processVmReadv(pid, localIov, 1, remoteIov, 1, 0)
             }
             var result: String? = null
             when (res) {
@@ -78,7 +78,7 @@ object RealMemoryReader : ProfilerMemoryReader {
             val pathSeg = arena.allocateFrom(procPath)
             val buf = arena.allocate(PATH_MAX_VAL)
             val res = LinuxNative.withTransaction {
-                LinuxNative.getFileSystem().readlink(pathSeg, buf, PATH_MAX_VAL)
+                LinuxNative.fileSystem.readlink(pathSeg, buf, PATH_MAX_VAL)
             }
             return when (res) {
                 is LinuxNative.SyscallResult.Success -> buf.copyToString(res.value.toInt())

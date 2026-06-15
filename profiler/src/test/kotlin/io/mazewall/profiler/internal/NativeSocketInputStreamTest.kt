@@ -2,6 +2,7 @@ package io.mazewall.profiler.internal
 
 import io.mazewall.LinuxNative
 import io.mazewall.MockNativeEngine
+import io.mazewall.MockNativeMemory
 import io.mazewall.NativeTransaction
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
@@ -16,20 +17,22 @@ class NativeSocketInputStreamTest {
     @Timeout(value = 5, unit = TimeUnit.SECONDS)
     fun `read should retry on EINTR`() {
         var attempts = 0
-        val mock = object : MockNativeEngine() {
-            context(_: NativeTransaction)
-            override fun read(fd: LinuxNative.FileDescriptor, buf: MemorySegment, count: Long): LinuxNative.SyscallResult {
-                attempts++
-                return if (attempts <= 2) {
-                    // Simulate EINTR (errno 4) for the first two attempts
-                    LinuxNative.SyscallResult.Error(4, -1)
-                } else {
-                    // Return a successful byte (0x42) on the third attempt
-                    buf.set(ValueLayout.JAVA_BYTE, 0L, 0x42.toByte())
-                    LinuxNative.SyscallResult.Success(1)
+        val mock = MockNativeEngine(
+            memory = object : MockNativeMemory() {
+                context(_: NativeTransaction)
+                override fun read(fd: LinuxNative.FileDescriptor, buf: MemorySegment, count: Long): LinuxNative.SyscallResult {
+                    attempts++
+                    return if (attempts <= 2) {
+                        // Simulate EINTR (errno 4) for the first two attempts
+                        LinuxNative.SyscallResult.Error(4, -1)
+                    } else {
+                        // Return a successful byte (0x42) on the third attempt
+                        buf.set(ValueLayout.JAVA_BYTE, 0L, 0x42.toByte())
+                        LinuxNative.SyscallResult.Success(1)
+                    }
                 }
             }
-        }
+        )
 
         LinuxNative.setEngine(mock)
         try {
@@ -48,20 +51,22 @@ class NativeSocketInputStreamTest {
     @Timeout(value = 5, unit = TimeUnit.SECONDS)
     fun `bulk read should retry on EINTR`() {
         var attempts = 0
-        val mock = object : MockNativeEngine() {
-            context(_: NativeTransaction)
-            override fun read(fd: LinuxNative.FileDescriptor, buf: MemorySegment, count: Long): LinuxNative.SyscallResult {
-                attempts++
-                return if (attempts <= 2) {
-                    // Simulate EINTR (errno 4) for the first two attempts
-                    LinuxNative.SyscallResult.Error(4, -1)
-                } else {
-                    // Return a successful byte (0x42) on the third attempt
-                    buf.set(ValueLayout.JAVA_BYTE, 0L, 0x42.toByte())
-                    LinuxNative.SyscallResult.Success(1)
+        val mock = MockNativeEngine(
+            memory = object : MockNativeMemory() {
+                context(_: NativeTransaction)
+                override fun read(fd: LinuxNative.FileDescriptor, buf: MemorySegment, count: Long): LinuxNative.SyscallResult {
+                    attempts++
+                    return if (attempts <= 2) {
+                        // Simulate EINTR (errno 4) for the first two attempts
+                        LinuxNative.SyscallResult.Error(4, -1)
+                    } else {
+                        // Return a successful byte (0x42) on the third attempt
+                        buf.set(ValueLayout.JAVA_BYTE, 0L, 0x42.toByte())
+                        LinuxNative.SyscallResult.Success(1)
+                    }
                 }
             }
-        }
+        )
 
         LinuxNative.setEngine(mock)
         try {

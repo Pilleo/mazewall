@@ -68,10 +68,10 @@ class LinuxNativeCoverageTest {
 
     @Test
     fun `test LinuxNative engine delegation getters`() {
-        assertNotNull(LinuxNative.getFileSystem())
-        assertNotNull(LinuxNative.getNetworking())
-        assertNotNull(LinuxNative.getProcess())
-        assertNotNull(LinuxNative.getMemory())
+        assertNotNull(LinuxNative.fileSystem)
+        assertNotNull(LinuxNative.networking)
+        assertNotNull(LinuxNative.process)
+        assertNotNull(LinuxNative.memory)
     }
 
     @Test
@@ -120,7 +120,7 @@ class LinuxNativeCoverageTest {
             BpfInstruction.Jmp(0x01, 2, 3, 0x12345678),
             BpfInstruction.Ld(0x05, 0x00000001),
         )
-        val progSeg = LinuxNative.newSockFProg(filters)
+        val progSeg = LinuxNative.memory.newSockFProg(filters)
         val prog = SockFprogSegment(progSeg)
         assertNotNull(prog.segment)
 
@@ -144,19 +144,19 @@ class LinuxNativeCoverageTest {
         val seg = allocate(8)
         val fd = LinuxNative.FileDescriptor(1)
 
-        mock.acceptResult = LinuxNative.SyscallResult.Success(10)
+        mock.networking.acceptResult = LinuxNative.SyscallResult.Success(10)
         assertEquals(10L, LinuxNative.withTransaction {
-            LinuxNative.accept(fd, seg, seg)
+            LinuxNative.networking.accept(fd, seg, seg)
         }.getOrThrow("test"))
 
-        mock.sendmsgResult = LinuxNative.SyscallResult.Success(20)
+        mock.networking.sendmsgResult = LinuxNative.SyscallResult.Success(20)
         assertEquals(20L, LinuxNative.withTransaction {
-            LinuxNative.sendmsg(fd, seg, 0)
+            LinuxNative.networking.sendmsg(fd, seg, 0)
         }.getOrThrow("test"))
 
-        mock.recvmsgResult = LinuxNative.SyscallResult.Success(30)
+        mock.networking.recvmsgResult = LinuxNative.SyscallResult.Success(30)
         assertEquals(30L, LinuxNative.withTransaction {
-            LinuxNative.recvmsg(fd, seg, 0)
+            LinuxNative.networking.recvmsg(fd, seg, 0)
         }.getOrThrow("test"))
 
         mock.ioctlResult = LinuxNative.SyscallResult.Success(40)
@@ -167,11 +167,11 @@ class LinuxNativeCoverageTest {
             LinuxNative.ioctl(fd, 2L, 3L)
         }.getOrThrow("test"))
 
-        mock.recvResult = LinuxNative.SyscallResult.Success(50)
+        mock.networking.recvResult = LinuxNative.SyscallResult.Success(50)
         assertEquals(50L, LinuxNative.withTransaction {
-            LinuxNative.recv(fd, seg, 8L, 0)
+            LinuxNative.networking.recv(fd, seg, 8L, 0)
         }.getOrThrow("test"))
 
-        assertEquals(1234, LinuxNative.gettid())
+        assertEquals(1234, LinuxNative.process.gettid())
     }
 }

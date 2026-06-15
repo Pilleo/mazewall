@@ -56,22 +56,10 @@ public object LinuxNative : NativeEngine {
         return block(TRANSACTION_INSTANCE)
     }
 
-    fun getFileSystem(): NativeFileSystem = engine
-
-    fun getNetworking(): NativeNetworking = engine
-
-    fun getProcess(): NativeProcess = engine
-
-    fun getMemory(): NativeMemory = engine
-
-    context(_: NativeTransaction)
-    override fun prctl(
-        option: Int,
-        arg2: Any?,
-        arg3: Any?,
-        arg4: Any?,
-        arg5: Any?,
-    ) = engine.prctl(option, arg2, arg3, arg4, arg5)
+    override val fileSystem: NativeFileSystem get() = engine.fileSystem
+    override val networking: NativeNetworking get() = engine.networking
+    override val process: NativeProcess get() = engine.process
+    override val memory: NativeMemory get() = engine.memory
 
     context(_: NativeTransaction)
     override fun syscall(
@@ -94,70 +82,6 @@ public object LinuxNative : NativeEngine {
     ) = engine.syscall4(nr, a1, a2, a3, a4)
 
     context(_: NativeTransaction)
-    override fun open(
-        path: MemorySegment,
-        flags: Int,
-    ) = engine.open(path, flags)
-
-    override fun close(fd: FileDescriptor) = engine.close(fd)
-
-    context(_: NativeTransaction)
-    override fun socketpair(
-        domain: Int,
-        type: Int,
-        protocol: Int,
-        sv: MemorySegment,
-    ) = engine.socketpair(domain, type, protocol, sv)
-
-    context(_: NativeTransaction)
-    override fun socket(
-        domain: Int,
-        type: Int,
-        protocol: Int,
-    ) = engine.socket(domain, type, protocol)
-
-    context(_: NativeTransaction)
-    override fun bind(
-        sockfd: FileDescriptor,
-        addr: MemorySegment,
-        addrlen: Int,
-    ) = engine.bind(sockfd, addr, addrlen)
-
-    context(_: NativeTransaction)
-    override fun listen(
-        sockfd: FileDescriptor,
-        backlog: Int,
-    ) = engine.listen(sockfd, backlog)
-
-    context(_: NativeTransaction)
-    override fun accept(
-        sockfd: FileDescriptor,
-        addr: MemorySegment,
-        addrlen: MemorySegment,
-    ) = engine.accept(sockfd, addr, addrlen)
-
-    context(_: NativeTransaction)
-    override fun connect(
-        sockfd: FileDescriptor,
-        addr: MemorySegment,
-        addrlen: Int,
-    ) = engine.connect(sockfd, addr, addrlen)
-
-    context(_: NativeTransaction)
-    override fun sendmsg(
-        sockfd: FileDescriptor,
-        msg: MemorySegment,
-        flags: Int,
-    ) = engine.sendmsg(sockfd, msg, flags)
-
-    context(_: NativeTransaction)
-    override fun recvmsg(
-        sockfd: FileDescriptor,
-        msg: MemorySegment,
-        flags: Int,
-    ) = engine.recvmsg(sockfd, msg, flags)
-
-    context(_: NativeTransaction)
     override fun ioctl(
         fd: FileDescriptor,
         request: Long,
@@ -172,52 +96,11 @@ public object LinuxNative : NativeEngine {
     ) = engine.ioctl(fd, request, arg)
 
     context(_: NativeTransaction)
-    override fun processVmReadv(
-        pid: Int,
-        localIov: MemorySegment,
-        liovcnt: Long,
-        remoteIov: MemorySegment,
-        riovcnt: Long,
-        flags: Long,
-    ) = engine.processVmReadv(pid, localIov, liovcnt, remoteIov, riovcnt, flags)
-
-    context(_: NativeTransaction)
-    override fun readlink(
-        path: MemorySegment,
-        buf: MemorySegment,
-        bufsiz: Long,
-    ) = engine.readlink(path, buf, bufsiz)
-
-    context(_: NativeTransaction)
-    override fun read(
-        fd: FileDescriptor,
-        buf: MemorySegment,
-        count: Long,
-    ) = engine.read(fd, buf, count)
-
-    context(_: NativeTransaction)
-    override fun write(
-        fd: FileDescriptor,
-        buf: MemorySegment,
-        count: Long,
-    ) = engine.write(fd, buf, count)
-
-    context(_: NativeTransaction)
-    override fun recv(
-        sockfd: FileDescriptor,
-        buf: MemorySegment,
-        len: Long,
-        flags: Int,
-    ) = engine.recv(sockfd, buf, len, flags)
-
-    context(_: NativeTransaction)
     override fun fcntl(
         fd: FileDescriptor,
         cmd: Int,
         arg: Long,
     ) = engine.fcntl(fd, cmd, arg)
-
-    override fun gettid() = engine.gettid()
 
     context(_: NativeTransaction)
     override fun poll(
@@ -225,11 +108,6 @@ public object LinuxNative : NativeEngine {
         nfds: Long,
         timeout: Int,
     ) = engine.poll(fds, nfds, timeout)
-
-    context(arena: Arena)
-    override fun newSockFProg(
-        filters: List<BpfInstruction>,
-    ) = with(arena) { engine.newSockFProg(filters) }
 
     /**
      * A type-safe wrapper for a Linux file descriptor.
@@ -300,296 +178,73 @@ public object LinuxNative : NativeEngine {
  * Real implementation of NativeEngine using FFM to call Linux system calls.
  */
 internal object RealNativeEngine : NativeEngine {
-    private val linker: Linker = Linker.nativeLinker()
-    private val stdlib: SymbolLookup = linker.defaultLookup()
+    override val fileSystem: NativeFileSystem = RealNativeFileSystem
+    override val networking: NativeNetworking = RealNativeNetworking
+    override val process: NativeProcess = RealNativeProcess
+    override val memory: NativeMemory = RealNativeMemory
 
-    private val PRCTL: MethodHandle
-    private val SYSCALL: MethodHandle
-    private val OPEN: MethodHandle
-    private val CLOSE: MethodHandle
-    private val SOCKETPAIR: MethodHandle
-    private val SOCKET: MethodHandle
-    private val BIND: MethodHandle
-    private val LISTEN: MethodHandle
-    private val ACCEPT: MethodHandle
-    private val CONNECT: MethodHandle
-    private val SENDMSG: MethodHandle
-    private val RECVMSG: MethodHandle
-    private val IOCTL_ADDR: MethodHandle
-    private val IOCTL_LONG: MethodHandle
-    private val PROCESS_VM_READV: MethodHandle
-    private val READLINK: MethodHandle
-    private val READ: MethodHandle
-    private val WRITE: MethodHandle
-    private val RECV: MethodHandle
-    private val FCNTL: MethodHandle
-    private val GETTID: MethodHandle
-    private val POLL: MethodHandle
+    private val SYSCALL: MethodHandle =
+        RealNativeHelper.downcall(
+            "syscall",
+            FunctionDescriptor.of(
+                ValueLayout.JAVA_LONG,
+                ValueLayout.JAVA_LONG,
+                ValueLayout.JAVA_LONG,
+                ValueLayout.JAVA_LONG,
+                ValueLayout.JAVA_LONG,
+                ValueLayout.JAVA_LONG,
+                ValueLayout.JAVA_LONG,
+                ValueLayout.JAVA_LONG,
+            ),
+            Linker.Option.captureCallState("errno"),
+        )
+    private val IOCTL_ADDR: MethodHandle =
+        RealNativeHelper.downcall(
+            "ioctl",
+            FunctionDescriptor.of(
+                ValueLayout.JAVA_INT,
+                ValueLayout.JAVA_INT,
+                ValueLayout.JAVA_LONG,
+                ValueLayout.ADDRESS,
+            ),
+            Linker.Option.captureCallState("errno"),
+        )
+    private val IOCTL_LONG: MethodHandle =
+        RealNativeHelper.downcall(
+            "ioctl",
+            FunctionDescriptor.of(
+                ValueLayout.JAVA_INT,
+                ValueLayout.JAVA_INT,
+                ValueLayout.JAVA_LONG,
+                ValueLayout.JAVA_LONG,
+            ),
+            Linker.Option.captureCallState("errno"),
+        )
+    private val FCNTL: MethodHandle =
+        RealNativeHelper.downcall(
+            "fcntl",
+            FunctionDescriptor.of(
+                ValueLayout.JAVA_INT,
+                ValueLayout.JAVA_INT,
+                ValueLayout.JAVA_INT,
+                ValueLayout.JAVA_LONG,
+            ),
+            Linker.Option.captureCallState("errno"),
+        )
+    private val POLL: MethodHandle =
+        RealNativeHelper.downcall(
+            "poll",
+            FunctionDescriptor.of(
+                ValueLayout.JAVA_INT,
+                ValueLayout.ADDRESS,
+                ValueLayout.JAVA_LONG,
+                ValueLayout.JAVA_INT,
+            ),
+            Linker.Option.captureCallState("errno"),
+        )
 
     init {
-        PRCTL =
-            downcall(
-                "prctl",
-                FunctionDescriptor.of(
-                    ValueLayout.JAVA_INT,
-                    ValueLayout.JAVA_INT,
-                    ValueLayout.JAVA_LONG,
-                    ValueLayout.JAVA_LONG,
-                    ValueLayout.JAVA_LONG,
-                    ValueLayout.JAVA_LONG,
-                ),
-                Linker.Option.captureCallState("errno"),
-            )
-        SYSCALL =
-            downcall(
-                "syscall",
-                FunctionDescriptor.of(
-                    ValueLayout.JAVA_LONG,
-                    ValueLayout.JAVA_LONG,
-                    ValueLayout.JAVA_LONG,
-                    ValueLayout.JAVA_LONG,
-                    ValueLayout.JAVA_LONG,
-                    ValueLayout.JAVA_LONG,
-                    ValueLayout.JAVA_LONG,
-                    ValueLayout.JAVA_LONG,
-                ),
-                Linker.Option.captureCallState("errno"),
-            )
-        OPEN =
-            downcall(
-                "open",
-                FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.ADDRESS, ValueLayout.JAVA_INT),
-                Linker.Option.captureCallState("errno"),
-            )
-        CLOSE =
-            downcall(
-                "close",
-                FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.JAVA_INT),
-                Linker.Option.captureCallState("errno"),
-            )
-        SOCKETPAIR =
-            downcall(
-                "socketpair",
-                FunctionDescriptor.of(
-                    ValueLayout.JAVA_INT,
-                    ValueLayout.JAVA_INT,
-                    ValueLayout.JAVA_INT,
-                    ValueLayout.JAVA_INT,
-                    ValueLayout.ADDRESS,
-                ),
-                Linker.Option.captureCallState("errno"),
-            )
-        SOCKET =
-            downcall(
-                "socket",
-                FunctionDescriptor.of(
-                    ValueLayout.JAVA_INT,
-                    ValueLayout.JAVA_INT,
-                    ValueLayout.JAVA_INT,
-                    ValueLayout.JAVA_INT,
-                ),
-                Linker.Option.captureCallState("errno"),
-            )
-        BIND =
-            downcall(
-                "bind",
-                FunctionDescriptor.of(
-                    ValueLayout.JAVA_INT,
-                    ValueLayout.JAVA_INT,
-                    ValueLayout.ADDRESS,
-                    ValueLayout.JAVA_INT,
-                ),
-                Linker.Option.captureCallState("errno"),
-            )
-        LISTEN =
-            downcall(
-                "listen",
-                FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.JAVA_INT, ValueLayout.JAVA_INT),
-                Linker.Option.captureCallState("errno"),
-            )
-        ACCEPT =
-            downcall(
-                "accept",
-                FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.JAVA_INT, ValueLayout.ADDRESS, ValueLayout.ADDRESS),
-                Linker.Option.captureCallState("errno"),
-            )
-        CONNECT =
-            downcall(
-                "connect",
-                FunctionDescriptor.of(
-                    ValueLayout.JAVA_INT,
-                    ValueLayout.JAVA_INT,
-                    ValueLayout.ADDRESS,
-                    ValueLayout.JAVA_INT,
-                ),
-                Linker.Option.captureCallState("errno"),
-            )
-        SENDMSG =
-            downcall(
-                "sendmsg",
-                FunctionDescriptor.of(
-                    ValueLayout.JAVA_LONG,
-                    ValueLayout.JAVA_INT,
-                    ValueLayout.ADDRESS,
-                    ValueLayout.JAVA_INT,
-                ),
-                Linker.Option.captureCallState("errno"),
-            )
-        RECVMSG =
-            downcall(
-                "recvmsg",
-                FunctionDescriptor.of(
-                    ValueLayout.JAVA_LONG,
-                    ValueLayout.JAVA_INT,
-                    ValueLayout.ADDRESS,
-                    ValueLayout.JAVA_INT,
-                ),
-                Linker.Option.captureCallState("errno"),
-            )
-        IOCTL_ADDR =
-            downcall(
-                "ioctl",
-                FunctionDescriptor.of(
-                    ValueLayout.JAVA_INT,
-                    ValueLayout.JAVA_INT,
-                    ValueLayout.JAVA_LONG,
-                    ValueLayout.ADDRESS,
-                ),
-                Linker.Option.captureCallState("errno"),
-            )
-        IOCTL_LONG =
-            downcall(
-                "ioctl",
-                FunctionDescriptor.of(
-                    ValueLayout.JAVA_INT,
-                    ValueLayout.JAVA_INT,
-                    ValueLayout.JAVA_LONG,
-                    ValueLayout.JAVA_LONG,
-                ),
-                Linker.Option.captureCallState("errno"),
-            )
-        PROCESS_VM_READV =
-            downcall(
-                "process_vm_readv",
-                FunctionDescriptor.of(
-                    ValueLayout.JAVA_LONG,
-                    ValueLayout.JAVA_INT,
-                    ValueLayout.ADDRESS,
-                    ValueLayout.JAVA_LONG,
-                    ValueLayout.ADDRESS,
-                    ValueLayout.JAVA_LONG,
-                    ValueLayout.JAVA_LONG,
-                ),
-                Linker.Option.captureCallState("errno"),
-            )
-        READLINK =
-            downcall(
-                "readlink",
-                FunctionDescriptor.of(
-                    ValueLayout.JAVA_LONG,
-                    ValueLayout.ADDRESS,
-                    ValueLayout.ADDRESS,
-                    ValueLayout.JAVA_LONG,
-                ),
-                Linker.Option.captureCallState("errno"),
-            )
-        READ =
-            downcall(
-                "read",
-                FunctionDescriptor.of(
-                    ValueLayout.JAVA_LONG,
-                    ValueLayout.JAVA_INT,
-                    ValueLayout.ADDRESS,
-                    ValueLayout.JAVA_LONG,
-                ),
-                Linker.Option.captureCallState("errno"),
-            )
-        WRITE =
-            downcall(
-                "write",
-                FunctionDescriptor.of(
-                    ValueLayout.JAVA_LONG,
-                    ValueLayout.JAVA_INT,
-                    ValueLayout.ADDRESS,
-                    ValueLayout.JAVA_LONG,
-                ),
-                Linker.Option.captureCallState("errno"),
-            )
-        RECV =
-            downcall(
-                "recv",
-                FunctionDescriptor.of(
-                    ValueLayout.JAVA_LONG,
-                    ValueLayout.JAVA_INT,
-                    ValueLayout.ADDRESS,
-                    ValueLayout.JAVA_LONG,
-                    ValueLayout.JAVA_INT,
-                ),
-                Linker.Option.captureCallState("errno"),
-            )
-        FCNTL =
-            downcall(
-                "fcntl",
-                FunctionDescriptor.of(
-                    ValueLayout.JAVA_INT,
-                    ValueLayout.JAVA_INT,
-                    ValueLayout.JAVA_INT,
-                    ValueLayout.JAVA_LONG,
-                ),
-                Linker.Option.captureCallState("errno"),
-            )
-        GETTID =
-            downcall(
-                "gettid",
-                FunctionDescriptor.of(ValueLayout.JAVA_INT),
-                Linker.Option.captureCallState("errno"),
-            )
-        POLL =
-            downcall(
-                "poll",
-                FunctionDescriptor.of(
-                    ValueLayout.JAVA_INT,
-                    ValueLayout.ADDRESS,
-                    ValueLayout.JAVA_LONG,
-                    ValueLayout.JAVA_INT,
-                ),
-                Linker.Option.captureCallState("errno"),
-            )
         LayoutValidator.validate()
-    }
-
-    private fun Any?.toLong(): Long =
-        when (this) {
-            is Number -> this.toLong()
-            is MemorySegment -> this.address()
-            is LinuxNative.FileDescriptor -> this.value.toLong()
-            null -> 0L
-            else -> throw IllegalArgumentException("Unsupported native call argument type: ${this.javaClass.name}")
-        }
-
-    private fun result(ret: Long, errno: Int): LinuxNative.SyscallResult =
-        if (ret < 0) LinuxNative.SyscallResult.Error(errno, ret)
-        else LinuxNative.SyscallResult.Success(ret)
-
-    context(_: NativeTransaction)
-    override fun prctl(
-        option: Int,
-        arg2: Any?,
-        arg3: Any?,
-        arg4: Any?,
-        arg5: Any?,
-    ): LinuxNative.SyscallResult = nativeScope {
-        val capturedState = ErrnoSegment.allocate()
-        val ret =
-            PRCTL.invokeExact(
-                capturedState.segment,
-                option,
-                arg2.toLong(),
-                arg3.toLong(),
-                arg4.toLong(),
-                arg5.toLong(),
-            ) as Int
-        result(ret.toLong(), capturedState.getErrno())
     }
 
     context(_: NativeTransaction)
@@ -607,14 +262,14 @@ internal object RealNativeEngine : NativeEngine {
             SYSCALL.invokeExact(
                 capturedState.segment,
                 nr,
-                a1.toLong(),
-                a2.toLong(),
-                a3.toLong(),
-                a4.toLong(),
-                a5.toLong(),
-                a6.toLong(),
+                RealNativeHelper.toLong(a1),
+                RealNativeHelper.toLong(a2),
+                RealNativeHelper.toLong(a3),
+                RealNativeHelper.toLong(a4),
+                RealNativeHelper.toLong(a5),
+                RealNativeHelper.toLong(a6),
             ) as Long
-        result(ret, capturedState.getErrno())
+        RealNativeHelper.result(ret, capturedState.getErrno())
     }
 
     context(_: NativeTransaction)
@@ -627,110 +282,6 @@ internal object RealNativeEngine : NativeEngine {
     ): LinuxNative.SyscallResult = syscall(nr, a1, a2, a3, a4)
 
     context(_: NativeTransaction)
-    override fun open(
-        path: MemorySegment,
-        flags: Int,
-    ): LinuxNative.SyscallResult = nativeScope {
-        val capturedState = ErrnoSegment.allocate()
-        val ret = OPEN.invokeExact(capturedState.segment, path, flags) as Int
-        result(ret.toLong(), capturedState.getErrno())
-    }
-
-    override fun close(fd: LinuxNative.FileDescriptor): LinuxNative.SyscallResult = nativeScope {
-        val capturedState = ErrnoSegment.allocate()
-        val ret = CLOSE.invokeExact(capturedState.segment, fd.value) as Int
-        result(ret.toLong(), capturedState.getErrno())
-    }
-
-    context(_: NativeTransaction)
-    override fun socketpair(
-        domain: Int,
-        type: Int,
-        protocol: Int,
-        sv: MemorySegment,
-    ): LinuxNative.SyscallResult = nativeScope {
-        val capturedState = ErrnoSegment.allocate()
-        val ret = SOCKETPAIR.invokeExact(capturedState.segment, domain, type, protocol, sv) as Int
-        result(ret.toLong(), capturedState.getErrno())
-    }
-
-    context(_: NativeTransaction)
-    override fun socket(
-        domain: Int,
-        type: Int,
-        protocol: Int,
-    ): LinuxNative.SyscallResult = nativeScope {
-        val capturedState = ErrnoSegment.allocate()
-        val ret = SOCKET.invokeExact(capturedState.segment, domain, type, protocol) as Int
-        result(ret.toLong(), capturedState.getErrno())
-    }
-
-    context(_: NativeTransaction)
-    override fun bind(
-        sockfd: LinuxNative.FileDescriptor,
-        addr: MemorySegment,
-        addrlen: Int,
-    ): LinuxNative.SyscallResult = nativeScope {
-        val capturedState = ErrnoSegment.allocate()
-        val ret = BIND.invokeExact(capturedState.segment, sockfd.value, addr, addrlen) as Int
-        result(ret.toLong(), capturedState.getErrno())
-    }
-
-    context(_: NativeTransaction)
-    override fun listen(
-        sockfd: LinuxNative.FileDescriptor,
-        backlog: Int,
-    ): LinuxNative.SyscallResult = nativeScope {
-        val capturedState = ErrnoSegment.allocate()
-        val ret = LISTEN.invokeExact(capturedState.segment, sockfd.value, backlog) as Int
-        result(ret.toLong(), capturedState.getErrno())
-    }
-
-    context(_: NativeTransaction)
-    override fun accept(
-        sockfd: LinuxNative.FileDescriptor,
-        addr: MemorySegment,
-        addrlen: MemorySegment,
-    ): LinuxNative.SyscallResult = nativeScope {
-        val capturedState = ErrnoSegment.allocate()
-        val ret = ACCEPT.invokeExact(capturedState.segment, sockfd.value, addr, addrlen) as Int
-        result(ret.toLong(), capturedState.getErrno())
-    }
-
-    context(_: NativeTransaction)
-    override fun connect(
-        sockfd: LinuxNative.FileDescriptor,
-        addr: MemorySegment,
-        addrlen: Int,
-    ): LinuxNative.SyscallResult = nativeScope {
-        val capturedState = ErrnoSegment.allocate()
-        val ret = CONNECT.invokeExact(capturedState.segment, sockfd.value, addr, addrlen) as Int
-        result(ret.toLong(), capturedState.getErrno())
-    }
-
-    context(_: NativeTransaction)
-    override fun sendmsg(
-        sockfd: LinuxNative.FileDescriptor,
-        msg: MemorySegment,
-        flags: Int,
-    ): LinuxNative.SyscallResult = nativeScope {
-        val capturedState = ErrnoSegment.allocate()
-        val ret = SENDMSG.invokeExact(capturedState.segment, sockfd.value, msg, flags) as Long
-        result(ret, capturedState.getErrno())
-    }
-
-    context(_: NativeTransaction)
-    override fun recvmsg(
-        sockfd: LinuxNative.FileDescriptor,
-        msg: MemorySegment,
-        flags: Int,
-    ): LinuxNative.SyscallResult = nativeScope {
-        val capturedState = ErrnoSegment.allocate()
-        val ret = RECVMSG.invokeExact(capturedState.segment, sockfd.value, msg, flags) as Long
-        result(ret, capturedState.getErrno())
-    }
-
-    context(_: NativeTransaction)
     override fun ioctl(
         fd: LinuxNative.FileDescriptor,
         request: Long,
@@ -738,7 +289,7 @@ internal object RealNativeEngine : NativeEngine {
     ): LinuxNative.SyscallResult = nativeScope {
         val capturedState = ErrnoSegment.allocate()
         val ret = IOCTL_ADDR.invokeExact(capturedState.segment, fd.value, request, arg) as Int
-        result(ret.toLong(), capturedState.getErrno())
+        RealNativeHelper.result(ret.toLong(), capturedState.getErrno())
     }
 
     context(_: NativeTransaction)
@@ -749,8 +300,364 @@ internal object RealNativeEngine : NativeEngine {
     ): LinuxNative.SyscallResult = nativeScope {
         val capturedState = ErrnoSegment.allocate()
         val ret = IOCTL_LONG.invokeExact(capturedState.segment, fd.value, request, arg) as Int
-        result(ret.toLong(), capturedState.getErrno())
+        RealNativeHelper.result(ret.toLong(), capturedState.getErrno())
     }
+
+    context(_: NativeTransaction)
+    override fun fcntl(
+        fd: LinuxNative.FileDescriptor,
+        cmd: Int,
+        arg: Long,
+    ): LinuxNative.SyscallResult = nativeScope {
+        val capturedState = ErrnoSegment.allocate()
+        val ret = FCNTL.invokeExact(capturedState.segment, fd.value, cmd, arg) as Int
+        RealNativeHelper.result(ret.toLong(), capturedState.getErrno())
+    }
+
+    context(_: NativeTransaction)
+    override fun poll(
+        fds: MemorySegment,
+        nfds: Long,
+        timeout: Int,
+    ): LinuxNative.SyscallResult = nativeScope {
+        val capturedState = ErrnoSegment.allocate()
+        val ret = POLL.invokeExact(capturedState.segment, fds, nfds, timeout) as Int
+        RealNativeHelper.result(ret.toLong(), capturedState.getErrno())
+    }
+}
+
+internal object RealNativeFileSystem : NativeFileSystem {
+    private val OPEN: MethodHandle =
+        RealNativeHelper.downcall(
+            "open",
+            FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.ADDRESS, ValueLayout.JAVA_INT),
+            Linker.Option.captureCallState("errno"),
+        )
+    private val CLOSE: MethodHandle =
+        RealNativeHelper.downcall(
+            "close",
+            FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.JAVA_INT),
+            Linker.Option.captureCallState("errno"),
+        )
+    private val READLINK: MethodHandle =
+        RealNativeHelper.downcall(
+            "readlink",
+            FunctionDescriptor.of(
+                ValueLayout.JAVA_LONG,
+                ValueLayout.ADDRESS,
+                ValueLayout.ADDRESS,
+                ValueLayout.JAVA_LONG,
+            ),
+            Linker.Option.captureCallState("errno"),
+        )
+
+    context(_: NativeTransaction)
+    override fun open(
+        path: MemorySegment,
+        flags: Int,
+    ): LinuxNative.SyscallResult = nativeScope {
+        val capturedState = ErrnoSegment.allocate()
+        val ret = OPEN.invokeExact(capturedState.segment, path, flags) as Int
+        RealNativeHelper.result(ret.toLong(), capturedState.getErrno())
+    }
+
+    override fun close(fd: LinuxNative.FileDescriptor): LinuxNative.SyscallResult = nativeScope {
+        val capturedState = ErrnoSegment.allocate()
+        val ret = CLOSE.invokeExact(capturedState.segment, fd.value) as Int
+        RealNativeHelper.result(ret.toLong(), capturedState.getErrno())
+    }
+
+    context(_: NativeTransaction)
+    override fun readlink(
+        path: MemorySegment,
+        buf: MemorySegment,
+        bufsiz: Long,
+    ): LinuxNative.SyscallResult = nativeScope {
+        val capturedState = ErrnoSegment.allocate()
+        val ret = READLINK.invokeExact(capturedState.segment, path, buf, bufsiz) as Long
+        RealNativeHelper.result(ret, capturedState.getErrno())
+    }
+}
+
+internal object RealNativeNetworking : NativeNetworking {
+    private val SOCKETPAIR: MethodHandle =
+        RealNativeHelper.downcall(
+            "socketpair",
+            FunctionDescriptor.of(
+                ValueLayout.JAVA_INT,
+                ValueLayout.JAVA_INT,
+                ValueLayout.JAVA_INT,
+                ValueLayout.JAVA_INT,
+                ValueLayout.ADDRESS,
+            ),
+            Linker.Option.captureCallState("errno"),
+        )
+    private val SOCKET: MethodHandle =
+        RealNativeHelper.downcall(
+            "socket",
+            FunctionDescriptor.of(
+                ValueLayout.JAVA_INT,
+                ValueLayout.JAVA_INT,
+                ValueLayout.JAVA_INT,
+                ValueLayout.JAVA_INT,
+            ),
+            Linker.Option.captureCallState("errno"),
+        )
+    private val BIND: MethodHandle =
+        RealNativeHelper.downcall(
+            "bind",
+            FunctionDescriptor.of(
+                ValueLayout.JAVA_INT,
+                ValueLayout.JAVA_INT,
+                ValueLayout.ADDRESS,
+                ValueLayout.JAVA_INT,
+            ),
+            Linker.Option.captureCallState("errno"),
+        )
+    private val LISTEN: MethodHandle =
+        RealNativeHelper.downcall(
+            "listen",
+            FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.JAVA_INT, ValueLayout.JAVA_INT),
+            Linker.Option.captureCallState("errno"),
+        )
+    private val ACCEPT: MethodHandle =
+        RealNativeHelper.downcall(
+            "accept",
+            FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.JAVA_INT, ValueLayout.ADDRESS, ValueLayout.ADDRESS),
+            Linker.Option.captureCallState("errno"),
+        )
+    private val CONNECT: MethodHandle =
+        RealNativeHelper.downcall(
+            "connect",
+            FunctionDescriptor.of(
+                ValueLayout.JAVA_INT,
+                ValueLayout.JAVA_INT,
+                ValueLayout.ADDRESS,
+                ValueLayout.JAVA_INT,
+            ),
+            Linker.Option.captureCallState("errno"),
+        )
+    private val SENDMSG: MethodHandle =
+        RealNativeHelper.downcall(
+            "sendmsg",
+            FunctionDescriptor.of(
+                ValueLayout.JAVA_LONG,
+                ValueLayout.JAVA_INT,
+                ValueLayout.ADDRESS,
+                ValueLayout.JAVA_INT,
+            ),
+            Linker.Option.captureCallState("errno"),
+        )
+    private val RECVMSG: MethodHandle =
+        RealNativeHelper.downcall(
+            "recvmsg",
+            FunctionDescriptor.of(
+                ValueLayout.JAVA_LONG,
+                ValueLayout.JAVA_INT,
+                ValueLayout.ADDRESS,
+                ValueLayout.JAVA_INT,
+            ),
+            Linker.Option.captureCallState("errno"),
+        )
+    private val RECV: MethodHandle =
+        RealNativeHelper.downcall(
+            "recv",
+            FunctionDescriptor.of(
+                ValueLayout.JAVA_LONG,
+                ValueLayout.JAVA_INT,
+                ValueLayout.ADDRESS,
+                ValueLayout.JAVA_LONG,
+                ValueLayout.JAVA_INT,
+            ),
+            Linker.Option.captureCallState("errno"),
+        )
+
+    context(_: NativeTransaction)
+    override fun socketpair(
+        domain: Int,
+        type: Int,
+        protocol: Int,
+        sv: MemorySegment,
+    ): LinuxNative.SyscallResult = nativeScope {
+        val capturedState = ErrnoSegment.allocate()
+        val ret = SOCKETPAIR.invokeExact(capturedState.segment, domain, type, protocol, sv) as Int
+        RealNativeHelper.result(ret.toLong(), capturedState.getErrno())
+    }
+
+    context(_: NativeTransaction)
+    override fun socket(
+        domain: Int,
+        type: Int,
+        protocol: Int,
+    ): LinuxNative.SyscallResult = nativeScope {
+        val capturedState = ErrnoSegment.allocate()
+        val ret = SOCKET.invokeExact(capturedState.segment, domain, type, protocol) as Int
+        RealNativeHelper.result(ret.toLong(), capturedState.getErrno())
+    }
+
+    context(_: NativeTransaction)
+    override fun bind(
+        sockfd: LinuxNative.FileDescriptor,
+        addr: MemorySegment,
+        addrlen: Int,
+    ): LinuxNative.SyscallResult = nativeScope {
+        val capturedState = ErrnoSegment.allocate()
+        val ret = BIND.invokeExact(capturedState.segment, sockfd.value, addr, addrlen) as Int
+        RealNativeHelper.result(ret.toLong(), capturedState.getErrno())
+    }
+
+    context(_: NativeTransaction)
+    override fun listen(
+        sockfd: LinuxNative.FileDescriptor,
+        backlog: Int,
+    ): LinuxNative.SyscallResult = nativeScope {
+        val capturedState = ErrnoSegment.allocate()
+        val ret = LISTEN.invokeExact(capturedState.segment, sockfd.value, backlog) as Int
+        RealNativeHelper.result(ret.toLong(), capturedState.getErrno())
+    }
+
+    context(_: NativeTransaction)
+    override fun accept(
+        sockfd: LinuxNative.FileDescriptor,
+        addr: MemorySegment,
+        addrlen: MemorySegment,
+    ): LinuxNative.SyscallResult = nativeScope {
+        val capturedState = ErrnoSegment.allocate()
+        val ret = ACCEPT.invokeExact(capturedState.segment, sockfd.value, addr, addrlen) as Int
+        RealNativeHelper.result(ret.toLong(), capturedState.getErrno())
+    }
+
+    context(_: NativeTransaction)
+    override fun connect(
+        sockfd: LinuxNative.FileDescriptor,
+        addr: MemorySegment,
+        addrlen: Int,
+    ): LinuxNative.SyscallResult = nativeScope {
+        val capturedState = ErrnoSegment.allocate()
+        val ret = CONNECT.invokeExact(capturedState.segment, sockfd.value, addr, addrlen) as Int
+        RealNativeHelper.result(ret.toLong(), capturedState.getErrno())
+    }
+
+    context(_: NativeTransaction)
+    override fun sendmsg(
+        sockfd: LinuxNative.FileDescriptor,
+        msg: MemorySegment,
+        flags: Int,
+    ): LinuxNative.SyscallResult = nativeScope {
+        val capturedState = ErrnoSegment.allocate()
+        val ret = SENDMSG.invokeExact(capturedState.segment, sockfd.value, msg, flags) as Long
+        RealNativeHelper.result(ret, capturedState.getErrno())
+    }
+
+    context(_: NativeTransaction)
+    override fun recvmsg(
+        sockfd: LinuxNative.FileDescriptor,
+        msg: MemorySegment,
+        flags: Int,
+    ): LinuxNative.SyscallResult = nativeScope {
+        val capturedState = ErrnoSegment.allocate()
+        val ret = RECVMSG.invokeExact(capturedState.segment, sockfd.value, msg, flags) as Long
+        RealNativeHelper.result(ret, capturedState.getErrno())
+    }
+
+    context(_: NativeTransaction)
+    override fun recv(
+        sockfd: LinuxNative.FileDescriptor,
+        buf: MemorySegment,
+        len: Long,
+        flags: Int,
+    ): LinuxNative.SyscallResult = nativeScope {
+        val capturedState = ErrnoSegment.allocate()
+        val ret = RECV.invokeExact(capturedState.segment, sockfd.value, buf, len, flags) as Long
+        RealNativeHelper.result(ret, capturedState.getErrno())
+    }
+}
+
+internal object RealNativeProcess : NativeProcess {
+    private val PRCTL: MethodHandle =
+        RealNativeHelper.downcall(
+            "prctl",
+            FunctionDescriptor.of(
+                ValueLayout.JAVA_INT,
+                ValueLayout.JAVA_INT,
+                ValueLayout.JAVA_LONG,
+                ValueLayout.JAVA_LONG,
+                ValueLayout.JAVA_LONG,
+                ValueLayout.JAVA_LONG,
+            ),
+            Linker.Option.captureCallState("errno"),
+        )
+    private val GETTID: MethodHandle =
+        RealNativeHelper.downcall(
+            "gettid",
+            FunctionDescriptor.of(ValueLayout.JAVA_INT),
+            Linker.Option.captureCallState("errno"),
+        )
+
+    override fun gettid(): Int = nativeScope {
+        val capturedState = ErrnoSegment.allocate()
+        GETTID.invokeExact(capturedState.segment) as Int
+    }
+
+    context(_: NativeTransaction)
+    override fun prctl(
+        option: Int,
+        arg2: Any?,
+        arg3: Any?,
+        arg4: Any?,
+        arg5: Any?,
+    ): LinuxNative.SyscallResult = nativeScope {
+        val capturedState = ErrnoSegment.allocate()
+        val ret =
+            PRCTL.invokeExact(
+                capturedState.segment,
+                option,
+                RealNativeHelper.toLong(arg2),
+                RealNativeHelper.toLong(arg3),
+                RealNativeHelper.toLong(arg4),
+                RealNativeHelper.toLong(arg5),
+            ) as Int
+        RealNativeHelper.result(ret.toLong(), capturedState.getErrno())
+    }
+}
+
+internal object RealNativeMemory : NativeMemory {
+    private val PROCESS_VM_READV: MethodHandle =
+        RealNativeHelper.downcall(
+            "process_vm_readv",
+            FunctionDescriptor.of(
+                ValueLayout.JAVA_LONG,
+                ValueLayout.JAVA_INT,
+                ValueLayout.ADDRESS,
+                ValueLayout.JAVA_LONG,
+                ValueLayout.ADDRESS,
+                ValueLayout.JAVA_LONG,
+                ValueLayout.JAVA_LONG,
+            ),
+            Linker.Option.captureCallState("errno"),
+        )
+    private val READ: MethodHandle =
+        RealNativeHelper.downcall(
+            "read",
+            FunctionDescriptor.of(
+                ValueLayout.JAVA_LONG,
+                ValueLayout.JAVA_INT,
+                ValueLayout.ADDRESS,
+                ValueLayout.JAVA_LONG,
+            ),
+            Linker.Option.captureCallState("errno"),
+        )
+    private val WRITE: MethodHandle =
+        RealNativeHelper.downcall(
+            "write",
+            FunctionDescriptor.of(
+                ValueLayout.JAVA_LONG,
+                ValueLayout.JAVA_INT,
+                ValueLayout.ADDRESS,
+                ValueLayout.JAVA_LONG,
+            ),
+            Linker.Option.captureCallState("errno"),
+        )
 
     context(_: NativeTransaction)
     override fun processVmReadv(
@@ -772,18 +679,7 @@ internal object RealNativeEngine : NativeEngine {
                 riovcnt,
                 flags,
             ) as Long
-        result(ret, capturedState.getErrno())
-    }
-
-    context(_: NativeTransaction)
-    override fun readlink(
-        path: MemorySegment,
-        buf: MemorySegment,
-        bufsiz: Long,
-    ): LinuxNative.SyscallResult = nativeScope {
-        val capturedState = ErrnoSegment.allocate()
-        val ret = READLINK.invokeExact(capturedState.segment, path, buf, bufsiz) as Long
-        result(ret, capturedState.getErrno())
+        RealNativeHelper.result(ret, capturedState.getErrno())
     }
 
     context(_: NativeTransaction)
@@ -794,7 +690,7 @@ internal object RealNativeEngine : NativeEngine {
     ): LinuxNative.SyscallResult = nativeScope {
         val capturedState = ErrnoSegment.allocate()
         val ret = READ.invokeExact(capturedState.segment, fd.value, buf, count) as Long
-        result(ret, capturedState.getErrno())
+        RealNativeHelper.result(ret, capturedState.getErrno())
     }
 
     context(_: NativeTransaction)
@@ -805,46 +701,7 @@ internal object RealNativeEngine : NativeEngine {
     ): LinuxNative.SyscallResult = nativeScope {
         val capturedState = ErrnoSegment.allocate()
         val ret = WRITE.invokeExact(capturedState.segment, fd.value, buf, count) as Long
-        result(ret, capturedState.getErrno())
-    }
-
-    context(_: NativeTransaction)
-    override fun recv(
-        sockfd: LinuxNative.FileDescriptor,
-        buf: MemorySegment,
-        len: Long,
-        flags: Int,
-    ): LinuxNative.SyscallResult = nativeScope {
-        val capturedState = ErrnoSegment.allocate()
-        val ret = RECV.invokeExact(capturedState.segment, sockfd.value, buf, len, flags) as Long
-        result(ret, capturedState.getErrno())
-    }
-
-    context(_: NativeTransaction)
-    override fun fcntl(
-        fd: LinuxNative.FileDescriptor,
-        cmd: Int,
-        arg: Long,
-    ): LinuxNative.SyscallResult = nativeScope {
-        val capturedState = ErrnoSegment.allocate()
-        val ret = FCNTL.invokeExact(capturedState.segment, fd.value, cmd, arg) as Int
-        result(ret.toLong(), capturedState.getErrno())
-    }
-
-    override fun gettid(): Int = nativeScope {
-        val capturedState = ErrnoSegment.allocate()
-        GETTID.invokeExact(capturedState.segment) as Int
-    }
-
-    context(_: NativeTransaction)
-    override fun poll(
-        fds: MemorySegment,
-        nfds: Long,
-        timeout: Int,
-    ): LinuxNative.SyscallResult = nativeScope {
-        val capturedState = ErrnoSegment.allocate()
-        val ret = POLL.invokeExact(capturedState.segment, fds, nfds, timeout) as Int
-        result(ret.toLong(), capturedState.getErrno())
+        RealNativeHelper.result(ret, capturedState.getErrno())
     }
 
     context(arena: Arena)
@@ -865,8 +722,26 @@ internal object RealNativeEngine : NativeEngine {
         prog.setFilter(filterArraySeg)
         return prog.segment
     }
+}
 
-    private fun downcall(
+internal object RealNativeHelper {
+    private val linker: Linker = Linker.nativeLinker()
+    private val stdlib: SymbolLookup = linker.defaultLookup()
+
+    fun toLong(value: Any?): Long =
+        when (value) {
+            is Number -> value.toLong()
+            is MemorySegment -> value.address()
+            is LinuxNative.FileDescriptor -> value.value.toLong()
+            null -> 0L
+            else -> throw IllegalArgumentException("Unsupported native call argument type: ${value.javaClass.name}")
+        }
+
+    fun result(ret: Long, errno: Int): LinuxNative.SyscallResult =
+        if (ret < 0) LinuxNative.SyscallResult.Error(errno, ret)
+        else LinuxNative.SyscallResult.Success(ret)
+
+    fun downcall(
         name: String,
         fd: FunctionDescriptor,
         vararg options: Linker.Option,

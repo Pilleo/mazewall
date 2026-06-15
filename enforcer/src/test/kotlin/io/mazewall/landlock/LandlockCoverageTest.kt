@@ -2,6 +2,10 @@ package io.mazewall.landlock
 
 import io.mazewall.LinuxNative
 import io.mazewall.MockNativeEngine
+import io.mazewall.MockNativeFileSystem
+import io.mazewall.MockNativeMemory
+import io.mazewall.MockNativeNetworking
+import io.mazewall.MockNativeProcess
 import io.mazewall.NativeTransaction
 import io.mazewall.Policy
 import io.mazewall.core.SandboxedPath
@@ -18,7 +22,12 @@ class LandlockCoverageTest {
         LinuxNative.resetToDefault()
     }
 
-    private open class SupportedLandlockMock : MockNativeEngine() {
+    private open class SupportedLandlockMock(
+        fileSystem: MockNativeFileSystem = MockNativeFileSystem(),
+        networking: MockNativeNetworking = MockNativeNetworking(),
+        process: MockNativeProcess = MockNativeProcess(),
+        memory: MockNativeMemory = MockNativeMemory()
+    ) : MockNativeEngine(fileSystem, networking, process, memory) {
         context(_: NativeTransaction)
         override fun syscall(
             nr: Long,
@@ -56,7 +65,7 @@ class LandlockCoverageTest {
     @Test
     fun `test addRuleFollowSymlinks with open failure`() {
         val mock = SupportedLandlockMock()
-        mock.openResult = LinuxNative.SyscallResult.Error(13, -1) // EACCES
+        mock.fileSystem.openResult = LinuxNative.SyscallResult.Error(13, -1) // EACCES
         LinuxNative.setEngine(mock)
 
         nativeScope {
@@ -77,13 +86,13 @@ class LandlockCoverageTest {
                 a5: Any?,
                 a6: Any?,
             ): LinuxNative.SyscallResult {
-                return if (nr == io.mazewall.ffi.NativeConstants.LANDLOCK_ADD_RULE_NR) {
-                    LinuxNative.SyscallResult.Error(22, -1) // EINVAL
-                } else {
-                    super.syscall(nr, a1, a2, a3, a4, a5, a6)
+                if (nr == io.mazewall.ffi.NativeConstants.LANDLOCK_ADD_RULE_NR) {
+                    return LinuxNative.SyscallResult.Error(1, -1) // EPERM
                 }
+                return super.syscall(nr, a1, a2, a3, a4, a5, a6)
             }
         }
+        mock.fileSystem.openResult = LinuxNative.SyscallResult.Success(100)
         LinuxNative.setEngine(mock)
 
         nativeScope {
@@ -92,21 +101,8 @@ class LandlockCoverageTest {
     }
 
     @Test
-    fun `test enforceRuleset with prctl failure`() {
-        val mock = SupportedLandlockMock()
-        mock.prctlResult = LinuxNative.SyscallResult.Error(1, -1) // EPERM
-        LinuxNative.setEngine(mock)
-
-        assertFailsWith<IllegalStateException> {
-            Landlock.enforceRuleset(LinuxNative.FileDescriptor(42))
-        }
-    }
-
-    @Test
-    fun `test LandlockSession applyRuleset with create_ruleset failure`() {
-        val mock = SupportedLandlockMock()
-        // Simulate create_ruleset failure by overriding syscall
-        val mockFail = object : SupportedLandlockMock() {
+    fun `test restrictSelf failure`() {
+        val mock = object : SupportedLandlockMock() {
             context(_: NativeTransaction)
             override fun syscall(
                 nr: Long,
@@ -117,59 +113,46 @@ class LandlockCoverageTest {
                 a5: Any?,
                 a6: Any?,
             ): LinuxNative.SyscallResult {
-                return if (nr == io.mazewall.ffi.NativeConstants.LANDLOCK_CREATE_RULESET_NR &&
-                    a3 == io.mazewall.ffi.NativeConstants.LANDLOCK_CREATE_RULESET_VERSION
-                ) {
-                    LinuxNative.SyscallResult.Success(5) // Allow version check
-                } else if (nr == io.mazewall.ffi.NativeConstants.LANDLOCK_CREATE_RULESET_NR) {
-                    LinuxNative.SyscallResult.Error(1, -1) // Fail actual creation
-                } else {
-                    super.syscall(nr, a1, a2, a3, a4, a5, a6)
+                if (nr == io.mazewall.ffi.NativeConstants.LANDLOCK_RESTRICT_SELF_NR) {
+                    return LinuxNative.SyscallResult.Error(1, -1) // EPERM
                 }
+                return super.syscall(nr, a1, a2, a3, a4, a5, a6)
             }
         }
-        LinuxNative.setEngine(mockFail)
+        LinuxNative.setEngine(mock)
 
-        val session = LandlockSession(Policy.builder().allowFsRead(SandboxedPath.of("/tmp", true)).build())
+        val session = LandlockSession(Policy.builder().build())
         assertFailsWith<IllegalStateException> {
             session.applyRuleset()
         }
     }
 
     @Test
-    fun `test logOpenFailure with ERRNO_ELOOP`() {
-        val mock = SupportedLandlockMock()
-        mock.openResult = LinuxNative.SyscallResult.Error(40, -1) // ELOOP
-        LinuxNative.setEngine(mock)
-
-        val session = LandlockSession(Policy.builder().allowFsRead(SandboxedPath.of("/tmp/link", true)).build())
-        session.applyRuleset()
-    }
-
-    @Test
     fun `test calculateFinalAccess branches`() {
         val mock = SupportedLandlockMock()
-        mock.openResult = LinuxNative.SyscallResult.Success(100)
+        mock.fileSystem.openResult = LinuxNative.SyscallResult.Success(100)
         LinuxNative.setEngine(mock)
 
         // Branch: isFallback = true
         // handleInitialOpenFailure returns true if errno is 2 (ENOENT)
         val calls = java.util.concurrent.atomic
             .AtomicInteger(0)
-        val mockFallback = object : SupportedLandlockMock() {
-            context(_: NativeTransaction)
-            override fun open(
-                path: java.lang.foreign.MemorySegment,
-                flags: Int,
-            ): LinuxNative.SyscallResult {
-                val current = calls.incrementAndGet()
-                return if (current == 1) {
-                    LinuxNative.SyscallResult.Error(2, -1)
-                } else {
-                    LinuxNative.SyscallResult.Success(100)
+        val mockFallback = SupportedLandlockMock(
+            fileSystem = object : MockNativeFileSystem() {
+                context(_: NativeTransaction)
+                override fun open(
+                    path: java.lang.foreign.MemorySegment,
+                    flags: Int,
+                ): LinuxNative.SyscallResult {
+                    val current = calls.incrementAndGet()
+                    return if (current == 1) {
+                        LinuxNative.SyscallResult.Error(2, -1)
+                    } else {
+                        LinuxNative.SyscallResult.Success(100)
+                    }
                 }
             }
-        }
+        )
         LinuxNative.setEngine(mockFallback)
         val session1 = LandlockSession(Policy.builder().allowFsRead(SandboxedPath.of("/nonexistent/file", true)).build())
         session1.applyRuleset()

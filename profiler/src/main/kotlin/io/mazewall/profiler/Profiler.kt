@@ -74,7 +74,7 @@ object Profiler {
             // Dedicated OS platform thread for block
             val thread =
                 Thread {
-                    val spid = LinuxNative.gettid()
+                    val spid = LinuxNative.process.gettid()
                     threadRegistry[spid] = Thread.currentThread()
                     // SUPPRESSION JUSTIFICATION: We are executing an arbitrary, untrusted user block.
                     // We MUST catch Throwable to ensure we capture any Error or Exception thrown
@@ -184,7 +184,7 @@ object Profiler {
 
         override fun execute(command: Runnable) {
             delegate.execute {
-                val spid = LinuxNative.gettid()
+                val spid = LinuxNative.process.gettid()
                 threadRegistry[spid] = Thread.currentThread()
                 try {
                     ensureApplied()
@@ -198,7 +198,7 @@ object Profiler {
         override fun <T> submit(task: Callable<T>): Future<T> =
             delegate.submit(
                 Callable {
-                    val spid = LinuxNative.gettid()
+                    val spid = LinuxNative.process.gettid()
                     threadRegistry[spid] = Thread.currentThread()
                     try {
                         ensureApplied()
@@ -214,7 +214,7 @@ object Profiler {
             result: T,
         ): Future<T> =
             delegate.submit({
-                val spid = LinuxNative.gettid()
+                val spid = LinuxNative.process.gettid()
                 threadRegistry[spid] = Thread.currentThread()
                 try {
                     ensureApplied()
@@ -226,7 +226,7 @@ object Profiler {
 
         override fun submit(task: Runnable): Future<*> =
             delegate.submit {
-                val spid = LinuxNative.gettid()
+                val spid = LinuxNative.process.gettid()
                 threadRegistry[spid] = Thread.currentThread()
                 try {
                     ensureApplied()

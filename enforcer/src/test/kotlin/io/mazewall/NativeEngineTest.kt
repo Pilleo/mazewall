@@ -14,11 +14,11 @@ class NativeEngineTest {
     @Test
     fun `LinuxNative delegates to injected engine`() {
         val mock = MockNativeEngine()
-        mock.prctlResult = LinuxNative.SyscallResult.Success(42)
+        mock.process.prctlResult = LinuxNative.SyscallResult.Success(42)
 
         LinuxNative.setEngine(mock)
 
-        val result = LinuxNative.withTransaction { LinuxNative.prctl(0) }
+        val result = LinuxNative.withTransaction { LinuxNative.process.prctl(0) }
         assertEquals(42L, result.getOrThrow("test"))
     }
 

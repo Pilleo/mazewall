@@ -8,33 +8,16 @@ import java.lang.foreign.MemorySegment
 /**
  * A mock implementation of [NativeEngine] for testing fault injection.
  */
-public open class MockNativeEngine : NativeEngine {
-    public var prctlResult: LinuxNative.SyscallResult = LinuxNative.SyscallResult.Success(0)
+public open class MockNativeEngine(
+    override val fileSystem: MockNativeFileSystem = MockNativeFileSystem(),
+    override val networking: MockNativeNetworking = MockNativeNetworking(),
+    override val process: MockNativeProcess = MockNativeProcess(),
+    override val memory: MockNativeMemory = MockNativeMemory(),
+) : NativeEngine {
     public var syscallResult: LinuxNative.SyscallResult = LinuxNative.SyscallResult.Success(0)
-    public var closeResult: LinuxNative.SyscallResult = LinuxNative.SyscallResult.Success(0)
-    public var openResult: LinuxNative.SyscallResult = LinuxNative.SyscallResult.Success(0)
-    public var bindResult: LinuxNative.SyscallResult = LinuxNative.SyscallResult.Success(0)
-    public var listenResult: LinuxNative.SyscallResult = LinuxNative.SyscallResult.Success(0)
-    public var acceptResult: LinuxNative.SyscallResult = LinuxNative.SyscallResult.Success(0)
-    public var connectResult: LinuxNative.SyscallResult = LinuxNative.SyscallResult.Success(0)
-    public var sendmsgResult: LinuxNative.SyscallResult = LinuxNative.SyscallResult.Success(0)
-    public var recvmsgResult: LinuxNative.SyscallResult = LinuxNative.SyscallResult.Success(0)
     public var ioctlResult: LinuxNative.SyscallResult = LinuxNative.SyscallResult.Success(0)
-    public var readResult: LinuxNative.SyscallResult = LinuxNative.SyscallResult.Success(0)
-    public var writeResult: LinuxNative.SyscallResult = LinuxNative.SyscallResult.Success(0)
-    public var recvResult: LinuxNative.SyscallResult = LinuxNative.SyscallResult.Success(0)
     public var fcntlResult: LinuxNative.SyscallResult = LinuxNative.SyscallResult.Success(0)
     public var pollResult: LinuxNative.SyscallResult = LinuxNative.SyscallResult.Success(0)
-    public var readlinkResult: LinuxNative.SyscallResult = LinuxNative.SyscallResult.Success(0)
-
-    context(_: NativeTransaction)
-    override fun prctl(
-        option: Int,
-        arg2: Any?,
-        arg3: Any?,
-        arg4: Any?,
-        arg5: Any?,
-    ) = prctlResult
 
     context(_: NativeTransaction)
     override fun syscall(
@@ -57,12 +40,65 @@ public open class MockNativeEngine : NativeEngine {
     ) = syscallResult
 
     context(_: NativeTransaction)
+    override fun ioctl(
+        fd: LinuxNative.FileDescriptor,
+        request: Long,
+        arg: MemorySegment,
+    ) = ioctlResult
+
+    context(_: NativeTransaction)
+    override fun ioctl(
+        fd: LinuxNative.FileDescriptor,
+        request: Long,
+        arg: Long,
+    ) = ioctlResult
+
+    context(_: NativeTransaction)
+    override fun fcntl(
+        fd: LinuxNative.FileDescriptor,
+        cmd: Int,
+        arg: Long,
+    ) = fcntlResult
+
+    context(_: NativeTransaction)
+    override fun poll(
+        fds: MemorySegment,
+        nfds: Long,
+        timeout: Int,
+    ) = pollResult
+}
+
+public open class MockNativeFileSystem : NativeFileSystem {
+    public var openResult: LinuxNative.SyscallResult = LinuxNative.SyscallResult.Success(0)
+    public var readlinkResult: LinuxNative.SyscallResult = LinuxNative.SyscallResult.Success(0)
+    public var closeResult: LinuxNative.SyscallResult = LinuxNative.SyscallResult.Success(0)
+
+    context(_: NativeTransaction)
     override fun open(
         path: MemorySegment,
         flags: Int,
     ) = openResult
 
+    context(_: NativeTransaction)
+    override fun readlink(
+        path: MemorySegment,
+        buf: MemorySegment,
+        bufsiz: Long,
+    ) = readlinkResult
+
     override fun close(fd: LinuxNative.FileDescriptor) = closeResult
+}
+
+public open class MockNativeNetworking : NativeNetworking {
+    public var socketpairResult: LinuxNative.SyscallResult = LinuxNative.SyscallResult.Success(0)
+    public var socketResult: LinuxNative.SyscallResult = LinuxNative.SyscallResult.Success(0)
+    public var bindResult: LinuxNative.SyscallResult = LinuxNative.SyscallResult.Success(0)
+    public var listenResult: LinuxNative.SyscallResult = LinuxNative.SyscallResult.Success(0)
+    public var acceptResult: LinuxNative.SyscallResult = LinuxNative.SyscallResult.Success(0)
+    public var connectResult: LinuxNative.SyscallResult = LinuxNative.SyscallResult.Success(0)
+    public var sendmsgResult: LinuxNative.SyscallResult = LinuxNative.SyscallResult.Success(0)
+    public var recvmsgResult: LinuxNative.SyscallResult = LinuxNative.SyscallResult.Success(0)
+    public var recvResult: LinuxNative.SyscallResult = LinuxNative.SyscallResult.Success(0)
 
     context(_: NativeTransaction)
     override fun socketpair(
@@ -70,14 +106,14 @@ public open class MockNativeEngine : NativeEngine {
         type: Int,
         protocol: Int,
         sv: MemorySegment,
-    ) = LinuxNative.SyscallResult.Success(0)
+    ) = socketpairResult
 
     context(_: NativeTransaction)
     override fun socket(
         domain: Int,
         type: Int,
         protocol: Int,
-    ) = LinuxNative.SyscallResult.Success(0)
+    ) = socketResult
 
     context(_: NativeTransaction)
     override fun bind(
@@ -121,18 +157,34 @@ public open class MockNativeEngine : NativeEngine {
     ) = recvmsgResult
 
     context(_: NativeTransaction)
-    override fun ioctl(
-        fd: LinuxNative.FileDescriptor,
-        request: Long,
-        arg: MemorySegment,
-    ) = ioctlResult
+    override fun recv(
+        sockfd: LinuxNative.FileDescriptor,
+        buf: MemorySegment,
+        len: Long,
+        flags: Int,
+    ) = recvResult
+}
+
+public open class MockNativeProcess : NativeProcess {
+    public var tid: Int = 1234
+    public var prctlResult: LinuxNative.SyscallResult = LinuxNative.SyscallResult.Success(0)
+
+    override fun gettid() = tid
 
     context(_: NativeTransaction)
-    override fun ioctl(
-        fd: LinuxNative.FileDescriptor,
-        request: Long,
-        arg: Long,
-    ) = ioctlResult
+    override fun prctl(
+        option: Int,
+        arg2: Any?,
+        arg3: Any?,
+        arg4: Any?,
+        arg5: Any?,
+    ) = prctlResult
+}
+
+public open class MockNativeMemory : NativeMemory {
+    public var processVmReadvResult: LinuxNative.SyscallResult = LinuxNative.SyscallResult.Success(0)
+    public var readResult: LinuxNative.SyscallResult = LinuxNative.SyscallResult.Success(0)
+    public var writeResult: LinuxNative.SyscallResult = LinuxNative.SyscallResult.Success(0)
 
     context(_: NativeTransaction)
     override fun processVmReadv(
@@ -142,14 +194,7 @@ public open class MockNativeEngine : NativeEngine {
         remoteIov: MemorySegment,
         riovcnt: Long,
         flags: Long,
-    ) = LinuxNative.SyscallResult.Success(0)
-
-    context(_: NativeTransaction)
-    override fun readlink(
-        path: MemorySegment,
-        buf: MemorySegment,
-        bufsiz: Long,
-    ) = readlinkResult
+    ) = processVmReadvResult
 
     context(_: NativeTransaction)
     override fun read(
@@ -164,30 +209,6 @@ public open class MockNativeEngine : NativeEngine {
         buf: MemorySegment,
         count: Long,
     ) = writeResult
-
-    context(_: NativeTransaction)
-    override fun recv(
-        sockfd: LinuxNative.FileDescriptor,
-        buf: MemorySegment,
-        len: Long,
-        flags: Int,
-    ) = recvResult
-
-    context(_: NativeTransaction)
-    override fun fcntl(
-        fd: LinuxNative.FileDescriptor,
-        cmd: Int,
-        arg: Long,
-    ) = fcntlResult
-
-    override fun gettid() = 1234
-
-    context(_: NativeTransaction)
-    override fun poll(
-        fds: MemorySegment,
-        nfds: Long,
-        timeout: Int,
-    ) = pollResult
 
     context(arena: Arena)
     override fun newSockFProg(

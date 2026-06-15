@@ -25,7 +25,7 @@ class PrctlBypassReproductionTest : BaseIntegrationTest() {
                 .submit(
                     Callable {
                         val r = LinuxNative.withTransaction {
-                            LinuxNative.prctl(1, 15, 0, 0, 0)
+                            LinuxNative.process.prctl(1, 15, 0, 0, 0)
                         }
                         if (r is LinuxNative.SyscallResult.Error && r.errno != 1) {
                             throw IllegalStateException("SECURITY BYPASS: prctl(PR_SET_PDEATHSIG) reached kernel (errno ${r.errno} instead of EPERM)")
@@ -61,7 +61,7 @@ class PrctlBypassReproductionTest : BaseIntegrationTest() {
                 .submit(
                     Callable {
                         val r = LinuxNative.withTransaction {
-                            LinuxNative.prctl(47, 2, 15, 0, 0)
+                            LinuxNative.process.prctl(47, 2, 15, 0, 0)
                         }
                         if (r is LinuxNative.SyscallResult.Error) {
                             if (r.errno == 22) {

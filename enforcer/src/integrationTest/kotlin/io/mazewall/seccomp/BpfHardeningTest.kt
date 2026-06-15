@@ -30,7 +30,7 @@ class BpfHardeningTest : BaseIntegrationTest() {
                     ContainedExecutors.installOnCurrentThread(policy)
                     // PR_SET_NAME = 15
                     val res = LinuxNative.withTransaction {
-                        LinuxNative.prctl(15, 0, 0, 0, 0)
+                        LinuxNative.process.prctl(15, 0, 0, 0, 0)
                     }
                     result.set(res)
                 } catch (t: Throwable) {

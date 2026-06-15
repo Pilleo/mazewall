@@ -188,7 +188,7 @@ class ProtectionDemonstrationTest {
                 .submit {
                     Arena.ofConfined().use { arena ->
                         val openResult = LinuxNative.withTransaction {
-                            LinuxNative.open(
+                            LinuxNative.fileSystem.open(
                                 arena.allocateFrom("/etc/hosts"),
                                 0, // O_RDONLY
                             )

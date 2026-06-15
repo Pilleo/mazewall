@@ -61,7 +61,7 @@ class AllowListTest : BaseIntegrationTest() {
         Arch.current()
         // Force native symbol linking for LinuxNative downcall stubs
         LinuxNative.withTransaction {
-            LinuxNative.socket(2, 1, 0)
+            LinuxNative.networking.socket(2, 1, 0)
         }
         val mmap = Arch.current().mmap.toLong()
         if (mmap >= 0) {
@@ -90,7 +90,7 @@ class AllowListTest : BaseIntegrationTest() {
 
                     // socket() is NOT allowed, should fail with EPERM
                     val result = LinuxNative.withTransaction {
-                        LinuxNative.socket(2, 1, 0)
+                        LinuxNative.networking.socket(2, 1, 0)
                     }
                     if (result !is LinuxNative.SyscallResult.Error || result.errno != 1) {
                         throw IllegalStateException("Expected EPERM (1), got $result")

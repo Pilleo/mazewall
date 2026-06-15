@@ -46,7 +46,7 @@ object PureJavaBpfEngine : SeccompEngine {
             val filters = policy.compiledFilters
 
             nativeScope {
-                val prog = LinuxNative.getMemory().newSockFProg(filters)
+                val prog = LinuxNative.memory.newSockFProg(filters)
                 threadState.set(SeccompInstallationState.FilterBuilt(prog))
                 installFilter(arch, prog, useTsync)
             }
@@ -78,7 +78,7 @@ object PureJavaBpfEngine : SeccompEngine {
     private fun setNoNewPrivs() {
         // Step 1: Set no_new_privs (mandatory for non-root seccomp)
         val r1 = LinuxNative.withTransaction {
-            LinuxNative.getProcess().prctl(NativeConstants.PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0)
+            LinuxNative.process.prctl(NativeConstants.PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0)
         }
         r1.getOrThrow("prctl(PR_SET_NO_NEW_PRIVS)")
     }
@@ -113,7 +113,7 @@ object PureJavaBpfEngine : SeccompEngine {
             }
 
             val r4 = LinuxNative.withTransaction {
-                LinuxNative.getProcess().prctl(
+                LinuxNative.process.prctl(
                     NativeConstants.PR_SET_SECCOMP,
                     NativeConstants.SECCOMP_MODE_FILTER.toLong(),
                     prog,
@@ -145,7 +145,7 @@ object PureJavaBpfEngine : SeccompEngine {
 
         // Verify filter is actually installed
         val r5 = LinuxNative.withTransaction {
-            LinuxNative.getProcess().prctl(NativeConstants.PR_GET_SECCOMP, 0, 0, 0, 0)
+            LinuxNative.process.prctl(NativeConstants.PR_GET_SECCOMP, 0, 0, 0, 0)
         }
         val mode = r5.getOrThrow("prctl(PR_GET_SECCOMP)")
         if (mode != 2L) {

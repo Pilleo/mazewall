@@ -40,7 +40,7 @@ class PrctlProtectionTest : BaseIntegrationTest() {
                     nativeScope {
                         val nameSeg = allocateFrom("test-thread-name")
                         val res = LinuxNative.withTransaction {
-                            LinuxNative.prctl(15, nameSeg.address(), 0, 0, 0)
+                            LinuxNative.process.prctl(15, nameSeg.address(), 0, 0, 0)
                         }.getOrThrow("prctl(PR_SET_NAME)")
                         assertEquals(0, res)
                     }
@@ -62,7 +62,7 @@ class PrctlProtectionTest : BaseIntegrationTest() {
                     nativeScope {
                         val nameBuffer = allocate(16)
                         val res = LinuxNative.withTransaction {
-                            LinuxNative.prctl(16, nameBuffer.address(), 0, 0, 0)
+                            LinuxNative.process.prctl(16, nameBuffer.address(), 0, 0, 0)
                         }.getOrThrow("prctl(PR_GET_NAME)")
                         assertEquals(0, res)
 
@@ -87,7 +87,7 @@ class PrctlProtectionTest : BaseIntegrationTest() {
                     .submit {
                         // Option 25 is PR_SET_MM (hazardous process memory manipulation), which is blocked
                         LinuxNative.withTransaction {
-                            LinuxNative.prctl(25, 0, 0, 0, 0)
+                            LinuxNative.process.prctl(25, 0, 0, 0, 0)
                         }.getOrThrow("prctl(PR_SET_MM)")
                     }.get()
             }.let { e ->
@@ -114,7 +114,7 @@ class PrctlProtectionTest : BaseIntegrationTest() {
                     // (though the kernel might return EINVAL/EPERM based on standard kernel capabilities,
                     // it won't be blocked by seccomp BPF with EPERM, so it won't trigger ContainmentViolationException).
                     val res = LinuxNative.withTransaction {
-                        LinuxNative.prctl(25, 0, 0, 0, 0)
+                        LinuxNative.process.prctl(25, 0, 0, 0, 0)
                     }
                     // If seccomp BPF had blocked it, res would be Error(errno=1).
                     // When seccomp does not block it, it usually returns Error(errno=22) (EINVAL) because the arguments are invalid.
