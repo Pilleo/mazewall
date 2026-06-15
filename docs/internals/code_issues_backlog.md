@@ -54,14 +54,6 @@
 **Context:** Currently, native system calls return `SyscallResult` which requires manual `when` branching or `.getOrThrow()` calls. This leads to imperative boilerplate and potential unhandled errors.
 **Fix:** Refactored `SyscallResult` to `SyscallResult<out T>` and added standard functional combinators like `map`, `flatMap`, `recover`, `onSuccess`, and `onFailure`.
 
-### 🔵 [Severity: ENHANCEMENT]: Sealed Class State Machines for Kernel Lifecycles
-**Target:** `io.mazewall.landlock.LandlockSession` and `io.mazewall.seccomp.SeccompInstallationState`
-**Context:** Kernel operations (especially Landlock) have extremely rigid lifecycle orders (Create Ruleset -> Add Rules -> Restrict Self). The current API uses a single object and relies on runtime checks or developer discipline to ensure out-of-order execution doesn't occur.
-**Needed:** Transition these lifecycles to **Sealed Class State Machines** where the return type of one operation is the *required receiver* of the next. 
-1. Instead of a monolithic `applyRuleset()` method, the API should return a chain of types: `RulesetCreated` -> `RulesAdded` -> `Restricted`.
-2. The `enforce()` or `restrictSelf()` method should only be available on the `RulesAdded` type.
-This mathematically eliminates out-of-order kernel interactions at compile time.
-
 ### 🔵 [Severity: ENHANCEMENT]: Type-State Enforced BPF DSL
 **Target:** `io.mazewall.seccomp.BpfProgram.Builder`
 **Context:** The current BPF DSL uses `String` identifiers for jump labels (e.g., `jmp("LABEL_ALLOW")`). This is prone to typos that cause runtime `IllegalStateException` during filter compilation and makes it difficult to verify that all branches are correctly resolved.
@@ -69,14 +61,6 @@ This mathematically eliminates out-of-order kernel interactions at compile time.
 1. `val allowLabel = createLabel()`
 2. `jmpIfTrue(allowLabel)`
 This ensures jump targets are validated at compile time and guarantees no dangling branches exist in the BPF program before it reaches the kernel.
-
-### 🔵 [Severity: ENHANCEMENT]: Immutability and Consistency in `ProcessStateRegistry`
-**Target:** `io.mazewall.enforcer.ProcessStateRegistry`
-**Context:** `ProcessStateRegistry` currently uses a `ConcurrentHashMap` for `SYSCALL_ACTIONS`. While thread-safe, it allows for partial updates during stacked policy merging, meaning the enforcement engine could theoretically evaluate an inconsistent "half-merged" snapshot of process rules.
-**Needed:** Shift from concurrent mutable data structures to **AtomicReferences of Immutable Data**.
-1. Replace `ConcurrentHashMap` with an `AtomicReference<Map<Syscall, SeccompAction>>`.
-2. Perform updates using Compare-And-Swap (CAS) with immutable map merges.
-This ensures the enforcement engine always evaluates a perfectly consistent snapshot, improving the atomicity of process-wide containment updates.
 
 ### ✅ [RESOLVED]: Value Class Completeness (Primitive Obsession)
 **Context:** While value classes were introduced for `FileDescriptor` and `Errno`, many other native concepts (like `MemoryAddress`, `Pid`, and `Uid`) were still passed as raw `Long` or `Int` primitives.
@@ -158,17 +142,6 @@ The profiler must explicitly FAIL (or throw an exception back to the JVM) if it 
 **Needed:** 
 1. `SbobParser` should warn or throw an error when attempting to parse a relative path, or it should accept an explicit `baseCwd` parameter to resolve relative paths deterministically rather than relying on the environmental JVM CWD at load time.
 2. The Profiler should ensure all paths are fully resolved to absolute canonical paths *before* writing them to the SBoB, failing the profiler session if a `dirfd` cannot be resolved to an absolute path.
-
-### 🔴 [Severity: HIGH]: `SbobParser` fails to parse standard JSON Unicode escape sequences (`\uXXXX`)
-**Target:** `io.mazewall.SbobParser`
-**Failure Hypothesis:** A developer/operator profiles a workload containing non-ASCII file paths (e.g. `/opt/café` or `/usr/share/datos_personales_🔒`). The Profiler records these paths and writes them to an SBoB JSON. Because standard JSON serializers escape non-ASCII and high-unicode symbols using standard `\uXXXX` sequences (e.g. `\u00e9` for `é`), the SBoB file will contain these escapes. When `SbobParser` reads this JSON, its custom `JsonTokenizer` will fail to parse the `\uXXXX` sequence and instead treat it as a literal string `uXXXX`, leading to silently corrupted paths and catastrophic application runtime failures under Landlock.
-**Context & Proof:** In `SbobParser.kt`, `JsonTokenizer.parseString()` handles basic backslash escapes (`\"`, `\\`, `\/`, `\b`, `\f`, `\n`, `\r`, `\t`) inside its `when (esc)` block. If it encounters a Unicode escape sequence starting with `\u`, the parser matches `'u'` inside `when (esc)` and falls back to the `else` block:
-```kotlin
-else -> sb.append(esc)
-```
-Consequently, it appends `'u'` to the builder and proceeds to parse the 4 hexadecimal characters as regular string characters (e.g., `\u00e9` yields `u00e9` in the parsed string). The returned path becomes `/opt/cafu00e9` instead of `/opt/café`. When this policy is passed to Landlock, the ruleset allows `/opt/cafu00e9` but blocks `/opt/café`, causing the JVM to throw a `ContainmentViolationException` in production for a completely valid, profiled path.
-**Cascading Risk Potential:** High usability and stability failure. Silently misconfigures Landlock rulesets, causing production systems to crash with unexpected access-denied errors that are highly dynamic and hard to debug.
-**Needed:** Add native `\uXXXX` escape sequence support inside `JsonTokenizer.parseString()`. When `esc == 'u'`, parse the next 4 hexadecimal characters as an integer and append its `Char` representation to the path string.
 
 ### 🔴 [Severity: MEDIUM]: Trace Listener misleads developers by capturing the Main Thread stack trace for unmapped child threads
 **Target:** `io.mazewall.profiler.internal.ProfilerTraceListener`
@@ -268,11 +241,6 @@ If a framework catches `AccessDeniedException` and wraps it (e.g. in `RuntimeExc
 **Target:** `io.mazewall.profiler.engine.ProfilerDaemon.kt` (specifically `getPathArgs`)
 **Context:** `SYMLINKAT` parameters are mapped as `(oldDirFd, oldPath, newDirFd, newPath)`, but the Linux kernel signature is `(target, newdirfd, linkpath)`. This causes the profiler to attempt to read memory from registers that do not contain string pointers, resulting in failed path resolution for symlink creation.
 **Needed:** Correct the argument mapping for `SYMLINKAT` to match the `(target, newdirfd, linkpath)` signature.
-
-### 🔴 [Severity: MEDIUM]: `SbobParser` Unicode Escape Parsing Failure
-**Target:** `io.mazewall.SbobParser.kt` (specifically `JsonTokenizer`)
-**Context:** The lightweight JSON tokenizer handles standard escapes like `\n` or `\t` but lacks support for `\uXXXX` Unicode escapes. This causes corruption or parsing failures when SBoB files contain non-ASCII characters in paths.
-**Needed:** Implement `\uXXXX` escape sequence parsing in `JsonTokenizer.parseString`.
 
 ### 🔴 [Severity: MEDIUM]: `SbobParser` Syntactic Pruning Inaccuracy
 **Target:** `io.mazewall.SbobParser.kt` (specifically `pruneSubpaths`)
@@ -602,4 +570,17 @@ If an attacker achieves native arbitrary code execution (ACE) or has access to a
 **Context:** All 12 test methods in `LandlockTest` that run in isolated subprocesses (via `IsolatedProcessTester.runIsolatedMethod()`) used `.base(Policy.NO_EXEC)` without `.allowMmapExec()`. The `Policy.NO_EXEC` preset has `allowMmapExec = false` by default, which emits `mmap(PROT_EXEC)` argument-inspection in the BPF filter. Inside the Testcontainer's nested seccomp environment (which already restricts `mmap(PROT_EXEC)` at the host level), the isolated subprocess JVM crashes immediately at startup when the JIT compiler tries to allocate code cache pages. Manifests as: `os::commit_memory(..., 65536, 1) failed; error='Operation not permitted' (errno=1)`. These tests are validating Landlock filesystem restrictions — not mmap(PROT_EXEC) behavior — so allowing JIT is correct.
 **Fix:** Added `.allowMmapExec()` to all 12 policy builders in `LandlockTest.kt`.
 
+### 🟢 [RESOLVED]: Sealed Class State Machines for Kernel Lifecycles
+**Target:** `io.mazewall.landlock.LandlockSession` and `io.mazewall.seccomp.SeccompInstallationState`
+**Fix:** Transitioned both Seccomp and Landlock installation lifecycles to compile-time safe, compiler-enforced Type-State transition chains using sealed classes and interfaces.
+
+### 🟢 [RESOLVED]: Immutability and Consistency in `ProcessStateRegistry`
+**Target:** `io.mazewall.enforcer.ProcessStateRegistry`
+**Fix:** Replaced the concurrent mutable `ConcurrentHashMap` with an `AtomicReference<Map<Syscall, SeccompAction>>` containing an immutable Map, and updated updates to run in Compare-And-Swap (CAS) merge loops.
+
+### 🟢 [RESOLVED]: `SbobParser` fails to parse JSON Unicode escape sequences (`\uXXXX`)
+**Target:** `io.mazewall.SbobParser`
+**Fix:** Completely removed the handwritten, custom `JsonTokenizer` state machine and switched to `kotlinx.serialization` for parsing SBoB JSON files, which handles Unicode escapes natively and correctly out of the box.
+
 EOF
+
