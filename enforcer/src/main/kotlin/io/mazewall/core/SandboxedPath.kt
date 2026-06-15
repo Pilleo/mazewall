@@ -28,7 +28,7 @@ public value class SandboxedPath private constructor(public val value: String) {
                 val resolved = p.toRealPath().toString()
                 SandboxedPath(resolved)
             } catch (e: java.io.IOException) {
-                if (allowNonExistent) {
+                if (allowNonExistent || java.nio.file.Files.exists(p, LinkOption.NOFOLLOW_LINKS)) {
                     SandboxedPath(p.toString())
                 } else {
                     throw e
