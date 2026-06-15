@@ -11,4 +11,7 @@ To ensure mazewall is production-grade, secure, and maintainable, all code chang
 7. **Future-Proofness & Valhalla Readiness:** Design code to be adaptable to upcoming JVM updates (such as Project Valhalla value types) and new Linux subsystems.
 8. **Readability & Idiomatic Kotlin:** Code must be idiomatic, self-documenting, and explain complex low-level OS/FFM mechanics via comments.
 9. **State Machines with Sealed Hierarchies:** Prefer modeling complex workflows, lifecycles, and component states as formal state machines using Kotlin `sealed class` or `sealed interface` hierarchies. This guarantees type-safety and exhaustive compiler verification during state transitions.
+10. **FFM & Native Memory Safety:** Off-heap allocations must use deterministic scopes like `Arena.ofConfined().use { }` to prevent memory leaks. Captured native `errno` states must be read immediately after downcalls, and struct layouts must align precisely with host CPU architectures to avoid JVM crashes.
+11. **Fail-Closed Security Default:** Security violations, enforcement failures, or environment mismatches must result in critical exceptions or process termination. Never degrade enforcement to a silent warning-and-bypass.
+
 
