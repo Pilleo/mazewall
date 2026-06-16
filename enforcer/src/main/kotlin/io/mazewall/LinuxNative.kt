@@ -70,7 +70,7 @@ public object LinuxNative : NativeEngine {
         a4: io.mazewall.core.NativeArg,
         a5: io.mazewall.core.NativeArg,
         a6: io.mazewall.core.NativeArg,
-    ): SyscallResult<Long> = engine.syscall(nr, a1, a2, a3, a4, a5, a6)
+    ): SyscallResult<Long, SyscallHandledState.Unhandled> = engine.syscall(nr, a1, a2, a3, a4, a5, a6)
 
     context(_: NativeTransaction)
     override fun syscall4(
@@ -79,35 +79,35 @@ public object LinuxNative : NativeEngine {
         a2: io.mazewall.core.NativeArg,
         a3: io.mazewall.core.NativeArg,
         a4: io.mazewall.core.NativeArg,
-    ): SyscallResult<Long> = engine.syscall4(nr, a1, a2, a3, a4)
+    ): SyscallResult<Long, SyscallHandledState.Unhandled> = engine.syscall4(nr, a1, a2, a3, a4)
 
     context(_: NativeTransaction)
     override fun ioctl(
         fd: FileDescriptor,
         request: Long,
         arg: MemorySegment,
-    ): SyscallResult<Long> = engine.ioctl(fd, request, arg)
+    ): SyscallResult<Long, SyscallHandledState.Unhandled> = engine.ioctl(fd, request, arg)
 
     context(_: NativeTransaction)
     override fun ioctl(
         fd: FileDescriptor,
         request: Long,
         arg: Long,
-    ): SyscallResult<Long> = engine.ioctl(fd, request, arg)
+    ): SyscallResult<Long, SyscallHandledState.Unhandled> = engine.ioctl(fd, request, arg)
 
     context(_: NativeTransaction)
     override fun fcntl(
         fd: FileDescriptor,
         cmd: Int,
         arg: Long,
-    ): SyscallResult<Long> = engine.fcntl(fd, cmd, arg)
+    ): SyscallResult<Long, SyscallHandledState.Unhandled> = engine.fcntl(fd, cmd, arg)
 
     context(_: NativeTransaction)
     override fun poll(
         fds: MemorySegment,
         nfds: Long,
         timeout: Int,
-    ): SyscallResult<Long> = engine.poll(fds, nfds, timeout)
+    ): SyscallResult<Long, SyscallHandledState.Unhandled> = engine.poll(fds, nfds, timeout)
 
     /**
      * A type-safe wrapper for a Linux file descriptor.
@@ -131,12 +131,17 @@ public object LinuxNative : NativeEngine {
      *
      * @param T The type of the value returned on success.
      */
-    public sealed interface SyscallResult<out T> {
+    public sealed interface SyscallHandledState {
+        public interface Handled : SyscallHandledState
+        public interface Unhandled : SyscallHandledState
+    }
+
+    public sealed interface SyscallResult<out T, out Handled : SyscallHandledState> {
         /** The call succeeded. */
-        public data class Success<out T>(val value: T) : SyscallResult<T>
+        public data class Success<out T, out Handled : SyscallHandledState>(val value: T) : SyscallResult<T, Handled>
 
         /** The call failed with a specific Linux [errno]. */
-        public data class Error(val errno: Int, val rawValue: Long) : SyscallResult<Nothing> {
+        public data class Error<out Handled : SyscallHandledState>(val errno: Int, val rawValue: Long) : SyscallResult<Nothing, Handled> {
             /** Throws an [IllegalStateException] with the given [context]. */
             public fun throwErrno(context: String): Nothing {
                 throw IllegalStateException("$context failed with errno=$errno (raw return=$rawValue)")
@@ -166,7 +171,7 @@ public object LinuxNative : NativeEngine {
 /**
  * Transforms the success value using [transform].
  */
-public inline fun <T, R> LinuxNative.SyscallResult<T>.map(transform: (T) -> R): LinuxNative.SyscallResult<R> =
+public inline fun <T, R, H : LinuxNative.SyscallHandledState> LinuxNative.SyscallResult<T, H>.map(transform: (T) -> R): LinuxNative.SyscallResult<R, H> =
     when (this) {
         is LinuxNative.SyscallResult.Success -> LinuxNative.SyscallResult.Success(transform(value))
         is LinuxNative.SyscallResult.Error -> this
@@ -175,9 +180,9 @@ public inline fun <T, R> LinuxNative.SyscallResult<T>.map(transform: (T) -> R): 
 /**
  * Transforms the success value using [transform] which returns another [LinuxNative.SyscallResult].
  */
-public inline fun <T, R> LinuxNative.SyscallResult<T>.flatMap(
-    transform: (T) -> LinuxNative.SyscallResult<R>
-): LinuxNative.SyscallResult<R> =
+public inline fun <T, R, H : LinuxNative.SyscallHandledState> LinuxNative.SyscallResult<T, H>.flatMap(
+    transform: (T) -> LinuxNative.SyscallResult<R, H>
+): LinuxNative.SyscallResult<R, H> =
     when (this) {
         is LinuxNative.SyscallResult.Success -> transform(value)
         is LinuxNative.SyscallResult.Error -> this
@@ -186,25 +191,27 @@ public inline fun <T, R> LinuxNative.SyscallResult<T>.flatMap(
 /**
  * Executes [action] if the call succeeded.
  */
-public inline fun <T> LinuxNative.SyscallResult<T>.onSuccess(action: (T) -> Unit): LinuxNative.SyscallResult<T> {
+@Suppress("UNCHECKED_CAST")
+public inline fun <T> LinuxNative.SyscallResult<T, *>.onSuccess(action: (T) -> Unit): LinuxNative.SyscallResult<T, LinuxNative.SyscallHandledState.Handled> {
     if (this is LinuxNative.SyscallResult.Success) action(value)
-    return this
+    return this as LinuxNative.SyscallResult<T, LinuxNative.SyscallHandledState.Handled>
 }
 
 /**
  * Executes [action] if the call failed.
  */
-public inline fun <T> LinuxNative.SyscallResult<T>.onFailure(
+@Suppress("UNCHECKED_CAST")
+public inline fun <T> LinuxNative.SyscallResult<T, *>.onFailure(
     action: (errno: Int, rawValue: Long) -> Unit
-): LinuxNative.SyscallResult<T> {
+): LinuxNative.SyscallResult<T, LinuxNative.SyscallHandledState.Handled> {
     if (this is LinuxNative.SyscallResult.Error) action(errno, rawValue)
-    return this
+    return this as LinuxNative.SyscallResult<T, LinuxNative.SyscallHandledState.Handled>
 }
 
 /**
  * Recovers from an error by applying [transform].
  */
-public inline fun <T> LinuxNative.SyscallResult<T>.recover(
+public inline fun <T> LinuxNative.SyscallResult<T, *>.recover(
     transform: (errno: Int, rawValue: Long) -> @UnsafeVariance T
 ): T =
     when (this) {
@@ -216,18 +223,18 @@ public inline fun <T> LinuxNative.SyscallResult<T>.recover(
  * Extension properties for [LinuxNative.SyscallResult] of [Long] to provide
  * convenience conversions for common native result types.
  */
-public fun LinuxNative.SyscallResult.Success<Long>.asInt(): Int = value.toInt()
+public fun LinuxNative.SyscallResult.Success<Long, *>.asInt(): Int = value.toInt()
 
 /**
  * Returns the success value as a [LinuxNative.FileDescriptor].
  */
-public fun LinuxNative.SyscallResult.Success<Long>.asFd(): LinuxNative.FileDescriptor =
+public fun LinuxNative.SyscallResult.Success<Long, *>.asFd(): LinuxNative.FileDescriptor =
     LinuxNative.FileDescriptor(value.toInt())
 
 /**
  * Convenience extension for [LinuxNative.SyscallResult] of [Long].
  */
-public fun LinuxNative.SyscallResult<Long>.asInt(): Int =
+public fun LinuxNative.SyscallResult<Long, *>.asInt(): Int =
     when (this) {
         is LinuxNative.SyscallResult.Success -> value.toInt()
         is LinuxNative.SyscallResult.Error -> throwErrno("asInt")
@@ -236,7 +243,7 @@ public fun LinuxNative.SyscallResult<Long>.asInt(): Int =
 /**
  * Returns the success value as a [LinuxNative.FileDescriptor] or throws.
  */
-public fun LinuxNative.SyscallResult<Long>.getFdOrThrow(context: String): LinuxNative.FileDescriptor =
+public fun LinuxNative.SyscallResult<Long, *>.getFdOrThrow(context: String): LinuxNative.FileDescriptor =
     when (this) {
         is LinuxNative.SyscallResult.Success -> LinuxNative.FileDescriptor(value.toInt())
         is LinuxNative.SyscallResult.Error -> throwErrno(context)
@@ -324,7 +331,7 @@ internal object RealNativeEngine : NativeEngine {
         a4: io.mazewall.core.NativeArg,
         a5: io.mazewall.core.NativeArg,
         a6: io.mazewall.core.NativeArg,
-    ): LinuxNative.SyscallResult<Long> =
+    ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
  nativeScope {
         val capturedState = ErrnoSegment.allocate()
         val ret =
@@ -348,7 +355,7 @@ internal object RealNativeEngine : NativeEngine {
         a2: io.mazewall.core.NativeArg,
         a3: io.mazewall.core.NativeArg,
         a4: io.mazewall.core.NativeArg,
-    ): LinuxNative.SyscallResult<Long> =
+    ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
  syscall(nr, a1, a2, a3, a4)
 
     context(_: NativeTransaction)
@@ -356,7 +363,7 @@ internal object RealNativeEngine : NativeEngine {
         fd: LinuxNative.FileDescriptor,
         request: Long,
         arg: MemorySegment,
-    ): LinuxNative.SyscallResult<Long> =
+    ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
  nativeScope {
         val capturedState = ErrnoSegment.allocate()
         val ret = IOCTL_ADDR.invokeExact(capturedState.segment, fd.value, request, arg) as Int
@@ -368,7 +375,7 @@ internal object RealNativeEngine : NativeEngine {
         fd: LinuxNative.FileDescriptor,
         request: Long,
         arg: Long,
-    ): LinuxNative.SyscallResult<Long> =
+    ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
  nativeScope {
         val capturedState = ErrnoSegment.allocate()
         val ret = IOCTL_LONG.invokeExact(capturedState.segment, fd.value, request, arg) as Int
@@ -380,7 +387,7 @@ internal object RealNativeEngine : NativeEngine {
         fd: LinuxNative.FileDescriptor,
         cmd: Int,
         arg: Long,
-    ): LinuxNative.SyscallResult<Long> =
+    ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
  nativeScope {
         val capturedState = ErrnoSegment.allocate()
         val ret = FCNTL.invokeExact(capturedState.segment, fd.value, cmd, arg) as Int
@@ -392,7 +399,7 @@ internal object RealNativeEngine : NativeEngine {
         fds: MemorySegment,
         nfds: Long,
         timeout: Int,
-    ): LinuxNative.SyscallResult<Long> =
+    ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
  nativeScope {
         val capturedState = ErrnoSegment.allocate()
         val ret = POLL.invokeExact(capturedState.segment, fds, nfds, timeout) as Int
@@ -429,14 +436,14 @@ internal object RealNativeFileSystem : NativeFileSystem {
     override fun open(
         path: MemorySegment,
         flags: Int,
-    ): LinuxNative.SyscallResult<Long> =
+    ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
  nativeScope {
         val capturedState = ErrnoSegment.allocate()
         val ret = OPEN.invokeExact(capturedState.segment, path, flags) as Int
         RealNativeHelper.result(ret.toLong(), capturedState.getErrno())
     }
 
-    override fun close(fd: LinuxNative.FileDescriptor): LinuxNative.SyscallResult<Long> = nativeScope {
+    override fun close(fd: LinuxNative.FileDescriptor): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = nativeScope {
         val capturedState = ErrnoSegment.allocate()
         val ret = CLOSE.invokeExact(capturedState.segment, fd.value) as Int
         RealNativeHelper.result(ret.toLong(), capturedState.getErrno())
@@ -447,7 +454,7 @@ internal object RealNativeFileSystem : NativeFileSystem {
         path: MemorySegment,
         buf: MemorySegment,
         bufsiz: Long,
-    ): LinuxNative.SyscallResult<Long> =
+    ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
  nativeScope {
         val capturedState = ErrnoSegment.allocate()
         val ret = READLINK.invokeExact(capturedState.segment, path, buf, bufsiz) as Long
@@ -554,7 +561,7 @@ internal object RealNativeNetworking : NativeNetworking {
         type: Int,
         protocol: Int,
         sv: MemorySegment,
-    ): LinuxNative.SyscallResult<Long> =
+    ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
  nativeScope {
         val capturedState = ErrnoSegment.allocate()
         val ret = SOCKETPAIR.invokeExact(capturedState.segment, domain, type, protocol, sv) as Int
@@ -566,7 +573,7 @@ internal object RealNativeNetworking : NativeNetworking {
         domain: Int,
         type: Int,
         protocol: Int,
-    ): LinuxNative.SyscallResult<Long> =
+    ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
  nativeScope {
         val capturedState = ErrnoSegment.allocate()
         val ret = SOCKET.invokeExact(capturedState.segment, domain, type, protocol) as Int
@@ -578,7 +585,7 @@ internal object RealNativeNetworking : NativeNetworking {
         sockfd: LinuxNative.FileDescriptor,
         addr: MemorySegment,
         addrlen: Int,
-    ): LinuxNative.SyscallResult<Long> =
+    ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
  nativeScope {
         val capturedState = ErrnoSegment.allocate()
         val ret = BIND.invokeExact(capturedState.segment, sockfd.value, addr, addrlen) as Int
@@ -589,7 +596,7 @@ internal object RealNativeNetworking : NativeNetworking {
     override fun listen(
         sockfd: LinuxNative.FileDescriptor,
         backlog: Int,
-    ): LinuxNative.SyscallResult<Long> =
+    ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
  nativeScope {
         val capturedState = ErrnoSegment.allocate()
         val ret = LISTEN.invokeExact(capturedState.segment, sockfd.value, backlog) as Int
@@ -601,7 +608,7 @@ internal object RealNativeNetworking : NativeNetworking {
         sockfd: LinuxNative.FileDescriptor,
         addr: MemorySegment,
         addrlen: MemorySegment,
-    ): LinuxNative.SyscallResult<Long> =
+    ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
  nativeScope {
         val capturedState = ErrnoSegment.allocate()
         val ret = ACCEPT.invokeExact(capturedState.segment, sockfd.value, addr, addrlen) as Int
@@ -613,7 +620,7 @@ internal object RealNativeNetworking : NativeNetworking {
         sockfd: LinuxNative.FileDescriptor,
         addr: MemorySegment,
         addrlen: Int,
-    ): LinuxNative.SyscallResult<Long> =
+    ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
  nativeScope {
         val capturedState = ErrnoSegment.allocate()
         val ret = CONNECT.invokeExact(capturedState.segment, sockfd.value, addr, addrlen) as Int
@@ -625,7 +632,7 @@ internal object RealNativeNetworking : NativeNetworking {
         sockfd: LinuxNative.FileDescriptor,
         msg: MemorySegment,
         flags: Int,
-    ): LinuxNative.SyscallResult<Long> =
+    ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
  nativeScope {
         val capturedState = ErrnoSegment.allocate()
         val ret = SENDMSG.invokeExact(capturedState.segment, sockfd.value, msg, flags) as Long
@@ -637,7 +644,7 @@ internal object RealNativeNetworking : NativeNetworking {
         sockfd: LinuxNative.FileDescriptor,
         msg: MemorySegment,
         flags: Int,
-    ): LinuxNative.SyscallResult<Long> =
+    ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
  nativeScope {
         val capturedState = ErrnoSegment.allocate()
         val ret = RECVMSG.invokeExact(capturedState.segment, sockfd.value, msg, flags) as Long
@@ -650,7 +657,7 @@ internal object RealNativeNetworking : NativeNetworking {
         buf: MemorySegment,
         len: Long,
         flags: Int,
-    ): LinuxNative.SyscallResult<Long> =
+    ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
  nativeScope {
         val capturedState = ErrnoSegment.allocate()
         val ret = RECV.invokeExact(capturedState.segment, sockfd.value, buf, len, flags) as Long
@@ -691,7 +698,7 @@ internal object RealNativeProcess : NativeProcess {
         arg3: io.mazewall.core.NativeArg,
         arg4: io.mazewall.core.NativeArg,
         arg5: io.mazewall.core.NativeArg,
-    ): LinuxNative.SyscallResult<Long> =
+    ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
  nativeScope {
         val capturedState = ErrnoSegment.allocate()
         val ret =
@@ -753,7 +760,7 @@ internal object RealNativeMemory : NativeMemory {
         remoteIov: MemorySegment,
         riovcnt: Long,
         flags: Long,
-    ): LinuxNative.SyscallResult<Long> =
+    ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
  nativeScope {
         val capturedState = ErrnoSegment.allocate()
         val ret =
@@ -774,7 +781,7 @@ internal object RealNativeMemory : NativeMemory {
         fd: LinuxNative.FileDescriptor,
         buf: MemorySegment,
         count: Long,
-    ): LinuxNative.SyscallResult<Long> =
+    ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
  nativeScope {
         val capturedState = ErrnoSegment.allocate()
         val ret = READ.invokeExact(capturedState.segment, fd.value, buf, count) as Long
@@ -786,7 +793,7 @@ internal object RealNativeMemory : NativeMemory {
         fd: LinuxNative.FileDescriptor,
         buf: MemorySegment,
         count: Long,
-    ): LinuxNative.SyscallResult<Long> =
+    ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
  nativeScope {
         val capturedState = ErrnoSegment.allocate()
         val ret = WRITE.invokeExact(capturedState.segment, fd.value, buf, count) as Long
@@ -818,7 +825,7 @@ internal object RealNativeHelper {
     private val stdlib: SymbolLookup = linker.defaultLookup()
 
 
-    fun result(ret: Long, errno: Int): LinuxNative.SyscallResult<Long> =
+    fun result(ret: Long, errno: Int): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
         if (ret < 0) LinuxNative.SyscallResult.Error(errno, ret)
         else LinuxNative.SyscallResult.Success(ret)
 

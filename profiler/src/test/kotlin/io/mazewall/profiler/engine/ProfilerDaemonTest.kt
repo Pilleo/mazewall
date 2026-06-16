@@ -16,8 +16,8 @@ class ProfilerDaemonTest {
     private class MockTransport : ProfilerTransport {
         val sentEvents = mutableListOf<TraceEvent>()
         val pollCount = AtomicInteger(0)
-        var nextPollResult: LinuxNative.SyscallResult<Long> = LinuxNative.SyscallResult.Success(1L)
-        var nextReadResult: LinuxNative.SyscallResult<Long> = LinuxNative.SyscallResult.Success(1L)
+        var nextPollResult: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(1L)
+        var nextReadResult: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(1L)
         var ackByte: Byte = 0xAC.toByte()
         val ioctlCalls = mutableListOf<Long>()
 
@@ -34,7 +34,7 @@ class ProfilerDaemonTest {
             fds: MemorySegment,
             nfds: Long,
             timeout: Int,
-        ): LinuxNative.SyscallResult<Long> {
+        ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
             pollCount.incrementAndGet()
             // In the wait-for-ack loop, we need to set the revents
             if (nfds == 1L) {
@@ -47,7 +47,7 @@ class ProfilerDaemonTest {
             fd: LinuxNative.FileDescriptor,
             buf: MemorySegment,
             count: Long,
-        ): LinuxNative.SyscallResult<Long> {
+        ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
             if (count == 1L) {
                 buf.set(ValueLayout.JAVA_BYTE, 0L, ackByte)
             }
@@ -58,20 +58,20 @@ class ProfilerDaemonTest {
             fd: LinuxNative.FileDescriptor,
             buf: MemorySegment,
             count: Long,
-        ): LinuxNative.SyscallResult<Long> = LinuxNative.SyscallResult.Success(count)
+        ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(count)
 
         override fun recv(
             sockfd: LinuxNative.FileDescriptor,
             buf: MemorySegment,
             len: Long,
             flags: Int,
-        ): LinuxNative.SyscallResult<Long> = LinuxNative.SyscallResult.Success(len)
+        ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(len)
 
         override fun ioctl(
             fd: LinuxNative.FileDescriptor,
             request: Long,
             arg: MemorySegment,
-        ): LinuxNative.SyscallResult<Long> {
+        ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
             ioctlCalls.add(request)
             if (request == 0xc0502100L) { // RECV
                 arg.set(ValueLayout.JAVA_LONG, 0L, 123L) // id
@@ -79,7 +79,7 @@ class ProfilerDaemonTest {
                 arg.set(ValueLayout.JAVA_INT, 16L, 2) // nr (open)
                 arg.set(ValueLayout.JAVA_LONG, 32L, 0x1000L) // args[0] = non-zero pointer
             }
-            return LinuxNative.SyscallResult.Success(0L)
+            return LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(0L)
         }
 
         override fun createServer(socketPath: String): LinuxNative.FileDescriptor = LinuxNative.FileDescriptor(99)
@@ -144,7 +144,7 @@ class ProfilerDaemonTest {
     fun `test SessionEventLedger records and dumps events on ACK timeout`() {
         val transport = MockTransport()
         // Simulate a timeout by poll returning 0L
-        transport.nextPollResult = LinuxNative.SyscallResult.Success(0L)
+        transport.nextPollResult = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(0L)
 
         val reader = MockReader()
         val syscallMap = mapOf(2 to "OPEN")
