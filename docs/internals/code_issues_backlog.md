@@ -168,7 +168,32 @@
 **Context:** The `IterativeProfiler` uses a feedback loop (Run -> Catch -> Resolve -> Add Rule -> Retry). If resolution fails or retries occur without new rules, it can enter infinite loops.
 **Needed:** Use a state machine to track discovery progress: `Discovery<Pending> -> Discovery<Resolved(Path)> -> Discovery<RuleVerified> -> Discovery<Retrying>`. The `retry()` function will only accept `Discovery<RuleVerified>`, proving at compile-time that each iteration contributes a verified rule toward the final policy, preventing infinite-loop regressions.
 
+### 🔴 [Severity: MEDIUM]: `BpfFilter.kt` violates OCP (Open/Closed Principle)
+**Target:** `io.mazewall.BpfFilter`
+**Context:** The `getInspections()` method uses hardcoded `if`-statements for specific syscalls (`mmap`, `clone`, `prctl`). Adding a new security capability (e.g., `pkey_mprotect`) requires modifying this core class.
+**Needed:** Introduce a `SyscallInspector` interface. The `Policy` should provide a registry of these inspectors, and `BpfFilter` should iterate over them polymorphically to generate bytecode.
+
+### 🔴 [Severity: MEDIUM]: `ProfilerSessionHandler.kt` violates SRP (Single Responsibility Principle)
+**Target:** `io.mazewall.profiler.engine.ProfilerSessionHandler`
+**Context:** The class manages raw memory parsing, cross-process path resolution, trace event construction, and low-level IPC protocol byte-parsing (`0xAC` handshake).
+**Needed:** Delegate low-level IPC protocol parsing to `ProfilerTransport` or a new `ProfilerProtocolParser`. Extract event construction into the `SyscallEvent<State>` pipeline.
+
+### 🔴 [Severity: LOW]: Architectural DIP (Dependency Inversion) Violations in Native Scopes
+**Target:** Entire project
+**Context:** Many classes directly instantiate `Arena.ofConfined()` or rely on the `LinuxNative` object, making isolated unit testing without a Linux kernel difficult.
+**Needed:** Refactor components to accept `NativeEngine` or `NativeScope` as constructor dependencies, improving mockability and environment independence.
+
 ## Foundational Architecture & Test-Harness Enablers
+
+### 🔵 [Severity: ENHANCEMENT]: Compile-Time Enforced Tier 1 Process Baseline (`ProcessContainmentToken`)
+**Target:** `io.mazewall.enforcer.ContainedExecutors`
+**Context:** `mazewall`'s Threat Model explicitly states that Tier 1 (process-wide `NO_EXEC` baseline) is an absolute architectural backstop against Arbitrary Code Execution (ACE) thread-hopping escapes. If a developer creates a Tier 2 (thread-scoped) sandbox without installing Tier 1, the system is highly vulnerable.
+**Needed:** Make `ContainedExecutors.installOnProcess()` return a `ProcessContainmentToken<Tier1>` singleton. Modify `ContainedExecutors.wrap()` (which creates Tier 2 thread pools) to require this token as an argument. This forces developers to mathematically prove to the compiler that the Tier 1 process-wide baseline has been successfully installed before they can spawn a Tier 2 thread-scoped sandbox.
+
+### 🔵 [Severity: ENHANCEMENT]: `TraceEvent` Resolution Pipeline (`SyscallEvent<State>`)
+**Target:** `io.mazewall.profiler.engine.SyscallPathResolver` and `io.mazewall.profiler.BobCompiler`
+**Context:** In the Profiler, intercepted system calls produce raw register values (e.g., `arg[0] = 0x7ffd1234`). These pointers must be resolved into String paths by reading tracee memory. Currently, these operations are loosely coupled, forcing the `BobCompiler` to defensively check if path resolution failed or was skipped.
+**Needed:** Implement a Type-State pipeline: `SyscallEvent<Raw> -> SyscallEvent<Resolved>`. The Daemon produces `Raw` events. The `SyscallPathResolver` transitions them to `Resolved` after successfully reading memory. The `BobCompiler` should be refactored to only accept `SyscallEvent<Resolved>`, eradicating `null` path checks and guaranteeing that raw kernel memory pointers are never accidentally serialized into the Bill of Behavior DSL.
 
 ### 🔵 [Severity: ENHANCEMENT]: Phantom Types for Context-Aware Capability Tokens
 **Target:** `io.mazewall.NativeTransaction` and `io.mazewall.LinuxNative`

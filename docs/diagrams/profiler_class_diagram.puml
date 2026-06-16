@@ -22,13 +22,6 @@ class "BillOfBehavior" as io.mazewall.profiler.BillOfBehavior {
   +String toJson()
   +String toStackTracesJson()
 }
-class "BillOfBehaviorDto" as io.mazewall.profiler.BillOfBehaviorDto {
-  +Set<String> getOpens()
-  +Set<String> getFsWritePaths()
-  +Set<String> getSyscalls()
-  +Set<String> getExecs()
-  +List<StackProfileEntryDto> getStackProfile()
-}
 class "BillOfBehaviorKt" as io.mazewall.profiler.BillOfBehaviorKt {
 }
 class "JvmBaselineProfiles" as io.mazewall.profiler.JvmBaselineProfiles {
@@ -39,32 +32,33 @@ class "JvmBaselineProfiles" as io.mazewall.profiler.JvmBaselineProfiles {
 class "Profiler" as io.mazewall.profiler.Profiler {
   + {static}Profiler INSTANCE
   __
-  +ConcurrentHashMap<Integer, Thread> getThreadRegistry()
+  +ConcurrentHashMap<Pid, Thread> getThreadRegistry()
   +boolean sendDescriptorInternal$io_mazewall_profiler(int, int)
 }
 class "ProfilingResult" as io.mazewall.profiler.ProfilingResult<T> {
   +T getValue()
   +BillOfBehavior getBehavior()
 }
-class "StackProfileEntryDto" as io.mazewall.profiler.StackProfileEntryDto {
-  +String getSyscall()
-  +List<String> getPaths()
-  +List<Long> getArgs()
-  +List<String> getStackTrace()
-}
 interface "TraceableWorkload" as io.mazewall.profiler.TraceableWorkload {
 }
 class "BobCompiler" as io.mazewall.profiler.compiler.BobCompiler {
   + {static}BobCompiler INSTANCE
   __
-  +BillOfBehavior compile(List<TraceEvent>)
+  +BillOfBehavior compile(List<? extends TraceEvent>)
 }
 class "DescriptorPassing" as io.mazewall.profiler.engine.DescriptorPassing {
   + {static}DescriptorPassing INSTANCE
   __
   +MemorySegment setupScmRightsMsgHdr(Arena, MemorySegment, MemorySegment)
 }
+abstract class "HandshakeSession" as io.mazewall.profiler.engine.HandshakeSession {
+  + {abstract}long getNotifId()
+  + {abstract}FileDescriptor getListenerFd()
+}
 abstract class "LoopAction" as io.mazewall.profiler.engine.LoopAction {
+}
+abstract class "ProfilerConnection" as io.mazewall.profiler.engine.ProfilerConnection {
+  + {abstract}FileDescriptor getSocketFd()
 }
 class "ProfilerDaemon" as io.mazewall.profiler.engine.ProfilerDaemon {
   + {static}ProfilerDaemon INSTANCE
@@ -92,8 +86,8 @@ class "ProfilerInstallerSession" as io.mazewall.profiler.engine.ProfilerInstalle
 interface "ProfilerInstallerState" as io.mazewall.profiler.engine.ProfilerInstallerState {
 }
 interface "ProfilerMemoryReader" as io.mazewall.profiler.engine.ProfilerMemoryReader {
-  + {abstract}String readStringFromProcess(int, long, int)
-  + {abstract}String resolveLink(int, String)
+  + {abstract}String readStringFromProcess-9xGxYpM(int, long, int)
+  + {abstract}String resolveLink-av3ZdJY(int, String)
 }
 class "ProfilerSessionHandler" as io.mazewall.profiler.engine.ProfilerSessionHandler {
   + {static}Companion Companion
@@ -106,36 +100,40 @@ class "ProfilerSessionHandler" as io.mazewall.profiler.engine.ProfilerSessionHan
 interface "ProfilerState" as io.mazewall.profiler.engine.ProfilerState {
 }
 interface "ProfilerTransport" as io.mazewall.profiler.engine.ProfilerTransport {
-  + {abstract}void sendTraceEvent-vKx2IOo(int, TraceEvent)
-  + {abstract}FileDescriptor recvDescriptor-j347BTE(int)
+  + {abstract}void sendTraceEvent(FileDescriptor, TraceEvent)
+  + {abstract}void sendSeccompContinue(Success, MemorySegment)
+  + {abstract}void sendSeccompError(Failed, MemorySegment, int)
+  + {abstract}FileDescriptor recvDescriptor(FileDescriptor)
   + {abstract}SyscallResult poll(MemorySegment, long, int)
-  + {abstract}SyscallResult read-Kqro5DY(int, MemorySegment, long)
-  + {abstract}SyscallResult write-Kqro5DY(int, MemorySegment, long)
-  + {abstract}SyscallResult recv-NB7cCZM(int, MemorySegment, long, int)
-  + {abstract}SyscallResult ioctl-Kqro5DY(int, long, MemorySegment)
-  + {abstract}int createServer-DWjxMRM(String)
-  + {abstract}int accept-NiggFcA(int)
-  + {abstract}void close-LsA-840(int)
+  + {abstract}SyscallResult read(FileDescriptor, MemorySegment, long)
+  + {abstract}SyscallResult write(FileDescriptor, MemorySegment, long)
+  + {abstract}SyscallResult recv(FileDescriptor, MemorySegment, long, int)
+  + {abstract}SyscallResult ioctl(FileDescriptor, long, MemorySegment)
+  + {abstract}FileDescriptor createServer(String)
+  + {abstract}FileDescriptor accept(FileDescriptor)
+  + {abstract}void close(FileDescriptor)
 }
 class "RealMemoryReader" as io.mazewall.profiler.engine.RealMemoryReader {
   + {static}RealMemoryReader INSTANCE
   __
-  +String readStringFromProcess(int, long, int)
-  +String resolveLink(int, String)
+  +String readStringFromProcess-9xGxYpM(int, long, int)
+  +String resolveLink-av3ZdJY(int, String)
 }
 class "RealProfilerTransport" as io.mazewall.profiler.engine.RealProfilerTransport {
   + {static}RealProfilerTransport INSTANCE
   __
-  +void sendTraceEvent-vKx2IOo(int, TraceEvent)
-  +FileDescriptor recvDescriptor-j347BTE(int)
+  +void sendTraceEvent(FileDescriptor, TraceEvent)
+  +void sendSeccompContinue(Success, MemorySegment)
+  +void sendSeccompError(Failed, MemorySegment, int)
+  +FileDescriptor recvDescriptor(FileDescriptor)
   +SyscallResult poll(MemorySegment, long, int)
-  +SyscallResult read-Kqro5DY(int, MemorySegment, long)
-  +SyscallResult write-Kqro5DY(int, MemorySegment, long)
-  +SyscallResult recv-NB7cCZM(int, MemorySegment, long, int)
-  +SyscallResult ioctl-Kqro5DY(int, long, MemorySegment)
-  +int createServer-DWjxMRM(String)
-  +int accept-NiggFcA(int)
-  +void close-LsA-840(int)
+  +SyscallResult read(FileDescriptor, MemorySegment, long)
+  +SyscallResult write(FileDescriptor, MemorySegment, long)
+  +SyscallResult recv(FileDescriptor, MemorySegment, long, int)
+  +SyscallResult ioctl(FileDescriptor, long, MemorySegment)
+  +FileDescriptor createServer(String)
+  +FileDescriptor accept(FileDescriptor)
+  +void close(FileDescriptor)
 }
 interface "SessionEvent" as io.mazewall.profiler.engine.SessionEvent {
   + {abstract}long getTimestampNanos()
@@ -150,12 +148,14 @@ class "SessionEventLedger" as io.mazewall.profiler.engine.SessionEventLedger {
 class "SyscallPathResolver" as io.mazewall.profiler.engine.SyscallPathResolver {
   +List<String> getPathArgs(String, long[])
 }
-class "TraceEvent" as io.mazewall.profiler.engine.TraceEvent {
-  +int getPid()
-  +String getSyscallName()
-  +long[] getArgs()
+abstract class "TraceEvent" as io.mazewall.profiler.engine.TraceEvent {
+  + {static}Companion Companion
+  __
+  + {abstract}int getPid()
+  + {abstract}String getSyscallName()
+  + {abstract}long[] getArgs()
+  + {abstract}List<String> getStackTrace()
   +List<String> getPaths()
-  +List<String> getStackTrace()
 }
 class "DaemonContext" as io.mazewall.profiler.internal.DaemonContext {
   +String getSocketPath()
@@ -209,7 +209,6 @@ class "StraceWorkloadRunner" as io.mazewall.profiler.strace.StraceWorkloadRunner
   + {static}void main(String[])
 }
 io.mazewall.profiler.BillOfBehavior --> io.mazewall.profiler.engine.TraceEvent
-io.mazewall.profiler.BillOfBehaviorDto --> io.mazewall.profiler.StackProfileEntryDto
 io.mazewall.profiler.JvmBaselineProfiles --> io.mazewall.profiler.JvmBaselineProfiles
 io.mazewall.profiler.Profiler --> io.mazewall.profiler.Profiler
 io.mazewall.profiler.ProfilingResult --> io.mazewall.profiler.BillOfBehavior
