@@ -2,6 +2,45 @@
 
 ## Recent Findings (Project Review June 2026)
 
+### 🔵 [Severity: ENHANCEMENT]: Compile-Time Feature Proof Tokens and Scope-Safe Policy Builders (Type-State Pattern)
+**Context:** Currently, `ContainedExecutors.kt` throws a runtime `UnsupportedOperationException` if process-wide containment is applied with Landlock rules because Landlock has historically been considered thread-scoped only. However, process-wide Landlock is supported on some newer kernels/setups. Blocking it unconditionally at compile-time or throwing runtime failures limits support on modern systems.
+**Needed:** Implement compile-time feature proof tokens and type-state parameterized builders.
+1. Define a `ProcessWideLandlockToken` that can only be obtained at runtime by checking support (`Landlock.isSupportedProcessWide()`).
+2. Parameterize `PolicyBuilder` with a `Scope` type-state, requiring the token to configure Landlock filesystem rules on a process-wide policy.
+3. Implement a `LandlockFallback` enum (`FailClosed`, `WarnAndBypass`) for process-wide policy installations when runtime kernel support is absent.
+4. This ensures that Landlock's conditional process-wide availability is verified at runtime before configuration, preventing illegal rulesets while preserving compilation safety.
+
+### 🔵 [Severity: ENHANCEMENT]: Strong Type-Safety for `prctl` (Sealed Command Hierarchies)
+**Context:** The JVM `prctl` wrapper currently accepts raw `Int` or `Long` for commands and arguments. Since `prctl` accepts vastly different option structures and argument counts/types depending on the first parameter (the `option` command, e.g. `PR_SET_SECCOMP` vs `PR_SET_NAME`), this is extremely error-prone and can easily lead to memory corruption or invalid register states.
+**Needed:**
+1. Define a sealed class hierarchy representing valid `PrctlCommand`s (e.g. `SetNoNewPrivs`, `SetName(name: String)`, `SetSeccomp(mode: Int)`).
+2. Use type-safe serialization inside the downcall wrapper to unpack the sealed command parameters into correct native arguments.
+3. Update `NativeProcess` to accept the typed `PrctlCommand` instead of raw long/integer arguments, eliminating the risk of misaligned arguments at compile time.
+
+### 🔵 [Severity: ENHANCEMENT]: Verified-by-Construction BPF Bytecode (BpfProgram<Status>)
+**Context:** BPF filters are constructed via string builders or manual instruction lists and passed directly to the kernel. A typo or structural error in a jump target or instruction boundary results in a runtime error or, worse, a kernel validation failure that triggers a fallback/bypass.
+**Needed:**
+1. Introduce a phantom type `BpfProgram<Status>` where `Status` is `Unverified` or `Verified`.
+2. Provide a builder DSL that generates instructions into `BpfProgram<Unverified>`.
+3. Require passing `BpfProgram<Unverified>` through an in-memory/in-app BPF static verifier or a local compilation dry-run to produce `BpfProgram<Verified>`.
+4. Enforce that `PureJavaBpfEngine.install` only accepts `BpfProgram<Verified>`, guaranteeing that only mathematically verified filters can ever be loaded into the kernel.
+
+### 🔵 [Severity: ENHANCEMENT]: Context-Scoped Resource Ownership (File Descriptors)
+**Context:** Linux file descriptors (`FileDescriptor`) are managed as raw integers. If a file descriptor is closed twice (double close), or used after close (use-after-free), or leaked, it can lead to severe security bugs or incorrect resource assignment when another thread opens a new file.
+**Needed:**
+1. Refactor `FileDescriptor` to be a context-scoped resource wrapper using `AutoCloseable` or `Arena` scope.
+2. Require native transactions to check the validity of a `FileDescriptor` token before performing system calls on it.
+3. Implement a compile-time ownership tracking mechanism where resource lifetimes are bounded by FFM `Arena` scopes, preventing use-after-free at compile time.
+
+### 🔵 [Severity: ENHANCEMENT]: Algebraic Policy Composition (Semigroup/Monoid)
+**Context:** Policies are composed using the `+` operator or manual combination logic, but this does not adhere to a formal algebraic model. This makes complex nesting of policies or verification of identity laws difficult to test and model.
+**Needed:**
+1. Formally implement the `Monoid` interface for `Policy<S, State>`.
+2. Define the identity element (`empty` policy) and ensure that combination is associative.
+3. Leverage this monoidal composition to cleanly verify, merge, and diff sandbox configurations.
+
+
+
 ### 🔴 [Severity: HIGH]: BPF Filter Engine uses 32-bit `Int` for 64-bit Syscall Argument Comparisons
 **Context:** The current `BpfFilter` implementation (and `BpfProgram.Builder`) treats system call arguments as 32-bit values by casting `Long` values to `Int` (e.g., in `emitInspections` and `ArgCheck`). On 64-bit architectures, system call arguments are 8 bytes. Seccomp-BPF registers are 32-bit, but the `seccomp_data` struct provides arguments as `__u64`. Comparisons against pointers, large offsets, or high-bit flags (like `O_PATH` or `O_CLOEXEC` on some architectures, or memory addresses) will be truncated, leading to silent security bypasses or incorrect denials.
 **Needed:** Update the BPF compiler to handle 64-bit comparisons.
