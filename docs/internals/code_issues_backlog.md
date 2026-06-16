@@ -152,8 +152,22 @@
 
 ### 🔵 [Severity: ENHANCEMENT]: Phantom Types for Thread Pool Containment Constraints (`SandboxedExecutor`)
 **Target:** `io.mazewall.enforcer.ContainedExecutors`
-**Context:** Standard `ExecutorService` usage trivially bypasses Tier 2 (thread-scoped) sandboxes via delegation to global thread pools (like `ForkJoinPool`).
-**Needed:** Introduce `interface SandboxedExecutor<out P : Policy> : Executor`. Require sensitive classes to explicitly depend on this typed executor (e.g., `SandboxedExecutor<Policy.NO_NETWORK>`). This forces the compiler to verify that dangerous, untrusted logic only runs on thread pools that have the required security baseline applied, defeating the thread-hopping bypass.
+**Context:** Standard `ExecutorService` usage trivially bypasses Tier 2 (thread-scoped) sandboxes if a developer accidentally delegates tasks to global thread pools (e.g., via `CompletableFuture.supplyAsync`).
+**Needed:** Introduce `interface SandboxedExecutor<out P : Policy> : Executor`. Require sensitive classes to explicitly depend on this typed executor (e.g., `SandboxedExecutor<Policy.NO_NETWORK>`). This API guardrail forces the compiler to verify that components run on thread pools with the required security baseline, preventing *accidental* architectural leaks of data-oriented workloads. Note: Due to JVM Type Erasure, this does NOT prevent a malicious actor with ACE from reflecting or escaping the sandbox at runtime (which is caught instead by the Tier 1 Process-Wide baseline).
+
+### 🔵 [Severity: ENHANCEMENT]: Type-State Enforced BPF Construction Lifecycle (`BpfBuilder<State>`)
+**Target:** `io.mazewall.seccomp.BpfProgram.Builder`
+**Context:** Seccomp-BPF programs must follow a strict structural sequence (`Arch Check -> Load NR -> Inspections -> Scan -> Default RET`) to be valid and safe. Currently, the `Builder` allows instructions to be emitted in any order, which could lead to malformed filters (e.g., comparing NR before loading it).
+**Needed:** Implement a Type-State pattern: `BpfBuilder<Uninitialized> -> BpfBuilder<ArchVerified> -> BpfBuilder<NrLoaded> -> BpfBuilder<Finalized>`. The compiler will enforce that architecture checks and syscall number loads occur in the mandatory sequence before any filtering logic is permitted, ensuring BPF bytecode is structurally correct by construction.
+
+### ✅ [RESOLVED] [Severity: ENHANCEMENT]: Type-Safe Profiler Connection Handshake State Machine (`ProfilerConnection<State>`)
+**Context:** The Profiler Daemon connection follows a non-trivial handshake: `Accept -> Receive FD (SCM_RIGHTS) -> Send PROTOCOL_ACK_BYTE`. Performing operations out of order (e.g., polling a null listener FD) causes reactor crashes.
+**Fix:** Implemented `ProfilerConnection` sealed class hierarchy (`Accepted`, `FdAttached`, `Active`). The `ProfilerDaemonEngine` now uses this state machine to drive the handshake, ensuring that the listener FD is received and the ACK byte is sent in the mandatory order before the session reactor starts.
+
+### 🔵 [Severity: ENHANCEMENT]: Proof-of-Progress State Machine for Landlock Discovery (`DiscoveryTask<Status>`)
+**Target:** `io.mazewall.profiler.IterativeProfiler`
+**Context:** The `IterativeProfiler` uses a feedback loop (Run -> Catch -> Resolve -> Add Rule -> Retry). If resolution fails or retries occur without new rules, it can enter infinite loops.
+**Needed:** Use a state machine to track discovery progress: `Discovery<Pending> -> Discovery<Resolved(Path)> -> Discovery<RuleVerified> -> Discovery<Retrying>`. The `retry()` function will only accept `Discovery<RuleVerified>`, proving at compile-time that each iteration contributes a verified rule toward the final policy, preventing infinite-loop regressions.
 
 ## Foundational Architecture & Test-Harness Enablers
 

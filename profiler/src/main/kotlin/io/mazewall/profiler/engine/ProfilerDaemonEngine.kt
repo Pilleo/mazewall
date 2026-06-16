@@ -121,8 +121,9 @@ internal class ProfilerDaemonEngine(
         }
     }
 
-    @Suppress("NestedBlockDepth", "LoopWithTooManyJumpStatements")
+    @Suppress("NestedBlockDepth", "LoopWithTooManyJumpStatements", "CyclomaticComplexMethod")
     private fun handleConnection(socketFd: LinuxNative.FileDescriptor) {
+        var connection: ProfilerConnection = ProfilerConnection.Accepted(socketFd)
         try {
             Arena.ofConfined().use { arena ->
                 val pollFd = arena.allocate(Layouts.POLLFD)
@@ -130,38 +131,59 @@ internal class ProfilerDaemonEngine(
                 pollFd.set(ValueLayout.JAVA_SHORT, POLLFD_EVENTS_OFF, NativeConstants.POLLIN.toShort())
 
                 while (!isGlobalShutdown()) {
-                    val pollRes = transport.poll(pollFd, 1L, POLL_TIMEOUT_MS)
-                    val count = pollRes.recover { errno, _ ->
-                        if (errno != NativeConstants.EINTR) return@use // Break from loop
-                        0L
+                    // Only poll if we are waiting for a NEW listener FD (Accepted state)
+                    if (connection is ProfilerConnection.Accepted) {
+                        val pollRes = transport.poll(pollFd, 1L, POLL_TIMEOUT_MS)
+                        val count = pollRes.recover { errno, _ ->
+                            if (errno != NativeConstants.EINTR) return@use // Break from loop
+                            0L
+                        }
+                        if (count <= 0) continue
                     }
-                    if (count <= 0) continue
-                    if (!receiveAndHandleListener(socketFd)) break
+
+                    when (val current = connection) {
+                        is ProfilerConnection.Accepted -> {
+                            val listenerFd = transport.recvDescriptor(socketFd)
+                            if (listenerFd != null) {
+                                System.err.println("[DAEMON] Received listener FD: ${listenerFd.value}")
+                                activeListeners.add(listenerFd)
+                                connection = current.attachFd(listenerFd)
+                                // Immediately loop to send ACK (don't poll)
+                            } else {
+                                return@use
+                            }
+                        }
+
+                        is ProfilerConnection.FdAttached -> {
+                            // Send ACK byte to notify receipt of listener FD
+                            System.err.println("[DAEMON] Sending handshake ACK to socket ${socketFd.value}")
+                            val ackBuf = arena.allocate(ACK_BUF_SIZE)
+                            ackBuf.set(ValueLayout.JAVA_BYTE, 0L, PROTOCOL_ACK_BYTE)
+                            transport.write(socketFd, ackBuf, ACK_BUF_SIZE)
+                            connection = current.handshakeComplete()
+                            // Immediately loop to start session reactor (don't poll)
+                        }
+
+                        is ProfilerConnection.Active -> {
+                            System.err.println("[DAEMON] Starting session reactor for listener ${current.listenerFd.value}")
+                            handleSession(current.socketFd, current.listenerFd)
+                            // After session finishes, reset to Accepted to wait for another session on this socket
+                            connection = ProfilerConnection.Accepted(current.socketFd)
+                            System.err.println("[DAEMON] Session reactor finished. Resetting to Accepted.")
+                        }
+                    }
                 }
             }
         } finally {
             clientSockets.remove(socketFd)
             transport.close(socketFd)
+            // Note: handleSession handles closing listenerFd in its finally block if it reached Active state.
+            // If it failed before Active, we should ideally close listenerFd here if it was received.
+            if (connection is ProfilerConnection.FdAttached) {
+                activeListeners.remove(connection.listenerFd)
+                transport.close(connection.listenerFd)
+            }
         }
-    }
-
-    private fun receiveAndHandleListener(socketFd: LinuxNative.FileDescriptor): Boolean {
-        val listenerFd = transport.recvDescriptor(socketFd) ?: return false
-        activeListeners.add(listenerFd)
-
-        // Send ACK byte to notify receipt of listener FD
-        Arena.ofConfined().use { arena ->
-            val ackBuf = arena.allocate(ACK_BUF_SIZE)
-            ackBuf.set(ValueLayout.JAVA_BYTE, 0L, PROTOCOL_ACK_BYTE)
-            transport.write(socketFd, ackBuf, ACK_BUF_SIZE)
-        }
-
-        Thread { handleSession(socketFd, listenerFd) }
-            .apply {
-                name = "listener-handler-${listenerFd.value}"
-                start()
-            }.join() // Process one session per connection sequentially for simplicity
-        return true
     }
 
     @Suppress("NestedBlockDepth", "LoopWithTooManyJumpStatements")
