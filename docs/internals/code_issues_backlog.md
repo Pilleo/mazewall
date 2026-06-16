@@ -126,6 +126,35 @@
 3. **Scope Contracts**: Update `withTransaction`, `nativeScope`, and `SyscallResult` combinators (`onSuccess`, `map`) with `callsInPlace` (`EXACTLY_ONCE` or `AT_MOST_ONCE`).
 4. This improves DX by enabling smart-casting and local `val` initialization in native scopes.
 
+### ✅ [RESOLVED] [Severity: ENHANCEMENT]: Type-State Machine for Profiler ACK Handshake (`Session<State>`)
+**Context:** Missing the `0xAC` JVM handshake or failing to send a `CONTINUE` response causes permanent tracee deadlocks in `ProfilerSessionHandler`.
+**Fix:** Implemented `HandshakeSession` sealed class hierarchy. `ProfilerTransport` now strictly requires `HandshakeSession.Success` to send `CONTINUE` and `HandshakeSession.Failed` to send error responses, ensuring the tracee is always released without deadlocks.
+
+### 🔵 [Severity: ENHANCEMENT]: ArchUnit: Strict Isolation of FFM (`java.lang.foreign`) Boundaries
+**Target:** Entire project structure
+**Context:** FFM calls must go through `NativeEngine` to allow mockability and fault injection, but nothing stops a developer from importing `java.lang.foreign.*` directly in a policy builder or integration test.
+**Needed:** Implement an ArchUnit rule asserting that `java.lang.foreign.**` classes are exclusively accessed within the `io.mazewall.ffi` package and `RealNativeEngine`.
+
+### 🔵 [Severity: ENHANCEMENT]: Strongly-Typed Generics for `ioctl` Commands (`IoctlCommand<Req, Res>`)
+**Target:** `io.mazewall.NativeEngine` and `io.mazewall.ffi`
+**Context:** The backlog notes that `ioctl` fallback crashes happen because arguments are highly polymorphic and easy to misalign when reading memory.
+**Needed:** Define `class IoctlCommand<Req : StructLayout, Res : StructLayout>(val code: Long)`. `NativeEngine.ioctl` would use these generics, ensuring the request/response payload structs strictly match the `ioctl` command code at compile time.
+
+### 🔵 [Severity: ENHANCEMENT]: Type-State Machine for Landlock Ruleset Mutability
+**Target:** `io.mazewall.landlock.Landlock`
+**Context:** Landlock follows a strict `Create -> Add Rules -> Restrict Self` lifecycle. Adding a rule after restriction fails silently or errors out.
+**Needed:** Use Phantom Types: `Ruleset<Building>` and `Ruleset<Sealed>`. The `addRule()` function requires `Building`, and `restrictSelf()` transitions it to `Sealed`, making post-enforcement mutations a compile-time error.
+
+### 🔵 [Severity: ENHANCEMENT]: ArchUnit: Enforce `Errno` Capture Locality Wrapper
+**Target:** `io.mazewall.ffi` and `io.mazewall.NativeEngine`
+**Context:** `AGENTS.md` explicitly warns that `errno` must be read *immediately* after an FFM downcall, or it will be overwritten by the JVM.
+**Needed:** Use ArchUnit to ban direct calls to FFM `MethodHandle.invokeExact()` anywhere outside a dedicated `SyscallInvoker` utility, ensuring that the downcall and the subsequent `errno` capture are always atomically bound together.
+
+### 🔵 [Severity: ENHANCEMENT]: Phantom Types for Thread Pool Containment Constraints (`SandboxedExecutor`)
+**Target:** `io.mazewall.enforcer.ContainedExecutors`
+**Context:** Standard `ExecutorService` usage trivially bypasses Tier 2 (thread-scoped) sandboxes via delegation to global thread pools (like `ForkJoinPool`).
+**Needed:** Introduce `interface SandboxedExecutor<out P : Policy> : Executor`. Require sensitive classes to explicitly depend on this typed executor (e.g., `SandboxedExecutor<Policy.NO_NETWORK>`). This forces the compiler to verify that dangerous, untrusted logic only runs on thread pools that have the required security baseline applied, defeating the thread-hopping bypass.
+
 ## Foundational Architecture & Test-Harness Enablers
 
 ### 🔵 [Severity: ENHANCEMENT]: Phantom Types for Context-Aware Capability Tokens

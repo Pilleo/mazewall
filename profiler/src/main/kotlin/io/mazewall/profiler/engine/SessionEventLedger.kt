@@ -44,6 +44,14 @@ sealed interface SessionEvent {
     ) : SessionEvent {
         override fun toString() = "[$timestampNanos] Thread $threadId: CONTINUE_REPLIED valToReply=$valToReply"
     }
+
+    class ErrorReplied(
+        override val timestampNanos: Long,
+        override val threadId: Long,
+        val errno: Int,
+    ) : SessionEvent {
+        override fun toString() = "[$timestampNanos] Thread $threadId: ERROR_REPLIED errno=$errno"
+    }
 }
 
 @Suppress("MagicNumber")

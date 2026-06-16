@@ -20,12 +20,33 @@ class ProfilerDaemonTest {
         var nextReadResult: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(1L)
         var ackByte: Byte = 0xAC.toByte()
         val ioctlCalls = mutableListOf<Long>()
+        var continueSent = false
+        var errorSent = false
+        var lastErrorNr = 0
 
         override fun sendTraceEvent(
             socketFd: LinuxNative.FileDescriptor,
             event: TraceEvent,
         ) {
             sentEvents.add(event)
+        }
+
+        override fun sendSeccompContinue(
+            session: HandshakeSession.Success,
+            resp: MemorySegment,
+        ) {
+            continueSent = true
+            ioctlCalls.add(SECCOMP_IOCTL_NOTIF_SEND)
+        }
+
+        override fun sendSeccompError(
+            session: HandshakeSession.Failed,
+            resp: MemorySegment,
+            errorNr: Int,
+        ) {
+            errorSent = true
+            lastErrorNr = errorNr
+            ioctlCalls.add(SECCOMP_IOCTL_NOTIF_SEND)
         }
 
         override fun recvDescriptor(socketFd: LinuxNative.FileDescriptor): LinuxNative.FileDescriptor? = LinuxNative.FileDescriptor(5)
@@ -135,13 +156,54 @@ class ProfilerDaemonTest {
             assertEquals(1, transport.sentEvents.size)
             assertEquals("OPEN", transport.sentEvents[0].syscallName)
             assertEquals(456, transport.sentEvents[0].pid)
-            // Verify that continue response was sent via ioctl
+            // Verify that continue response was sent via type-safe method
+            assertTrue(transport.continueSent, "Should have called sendSeccompContinue")
             assertTrue(transport.ioctlCalls.contains(SECCOMP_IOCTL_NOTIF_SEND), "Should have sent SECCOMP_IOCTL_NOTIF_SEND")
         }
     }
 
     @Test
-    fun `test SessionEventLedger records and dumps events on ACK timeout`() {
+    fun `test session handler sends error response on ACK timeout`() {
+        val transport = MockTransport()
+        // Simulate a timeout by poll returning 0L
+        transport.nextPollResult = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(0L)
+
+        val reader = MockReader()
+        val syscallMap = mapOf(2 to "OPEN")
+        val handler = ProfilerSessionHandler(
+            LinuxNative.FileDescriptor(10),
+            LinuxNative.FileDescriptor(20),
+            transport,
+            reader,
+            syscallMap,
+        ) { }
+
+        Arena.ofConfined().use { arena ->
+            val notif = arena.allocate(Layouts.SECCOMP_NOTIF)
+            notif.set(ValueLayout.JAVA_LONG, NOTIF_ID_OFF, 123L) // ID
+            notif.set(ValueLayout.JAVA_INT, NOTIF_PID_OFF, 456) // PID
+            notif.set(ValueLayout.JAVA_INT, NOTIF_NR_OFF, 2) // NR (open)
+            notif.set(ValueLayout.JAVA_LONG, NOTIF_ARGS_OFF, 0x1000L) // args[0] = non-zero pointer
+
+            val resp = arena.allocate(Layouts.SECCOMP_NOTIF_RESP)
+            val ackBuf = arena.allocate(1L)
+            val socketPollFd = arena.allocate(Layouts.POLLFD)
+
+            val pollFds = setupMockPoll(arena)
+            handler.handleActiveListener(pollFds, ackBuf, notif, resp, socketPollFd)
+
+            // Since ACK timed out, the state becomes Terminated
+            assertTrue(handler.state is ProfilerState.Terminated, "Handler state should be Terminated on ACK timeout")
+
+            // Verify that error response was sent instead of continue
+            assertTrue(transport.errorSent, "Should have called sendSeccompError on timeout")
+            assertEquals(104, transport.lastErrorNr, "Should have sent ECONNRESET (104)")
+            assertTrue(transport.ioctlCalls.contains(SECCOMP_IOCTL_NOTIF_SEND), "Should have sent SECCOMP_IOCTL_NOTIF_SEND")
+        }
+    }
+
+    @Test
+    fun `test SessionEventLedger records events on ACK timeout`() {
         val transport = MockTransport()
         // Simulate a timeout by poll returning 0L
         transport.nextPollResult = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(0L)
@@ -183,7 +245,7 @@ class ProfilerDaemonTest {
             assertTrue(events.any { it is SessionEvent.Notified }, "Ledger should contain Notified event")
             assertTrue(events.any { it is SessionEvent.VmReadvResolved }, "Ledger should contain VmReadvResolved event")
             assertTrue(events.any { it is SessionEvent.EventSent }, "Ledger should contain EventSent event")
-            assertTrue(events.any { it is SessionEvent.ContinueReplied }, "Ledger should contain ContinueReplied event")
+            assertTrue(events.any { it is SessionEvent.ErrorReplied }, "Ledger should contain ErrorReplied event")
         }
     }
 

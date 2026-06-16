@@ -7,6 +7,7 @@ import io.mazewall.ffi.Layouts
 import io.mazewall.ffi.NativeConstants
 import io.mazewall.profiler.engine.ACK_BUF_SIZE
 import io.mazewall.profiler.engine.ADDR_UN_SIZE
+import io.mazewall.profiler.engine.HandshakeSession
 import io.mazewall.profiler.engine.LoopAction
 import io.mazewall.profiler.engine.POLLFD_REVENTS_OFF
 import io.mazewall.profiler.engine.PROTOCOL_ACK_BYTE
@@ -93,6 +94,21 @@ class ProfilerDesignSpec :
                 sentEvents.add(event)
             }
 
+            override fun sendSeccompContinue(
+                session: HandshakeSession.Success,
+                resp: MemorySegment,
+            ) {
+                ioctlCalls.add(0xc0182101L) // SECCOMP_IOCTL_NOTIF_SEND
+            }
+
+            override fun sendSeccompError(
+                session: HandshakeSession.Failed,
+                resp: MemorySegment,
+                errorNr: Int,
+            ) {
+                ioctlCalls.add(0xc0182101L) // SECCOMP_IOCTL_NOTIF_SEND
+            }
+
             override fun recvDescriptor(socketFd: LinuxNative.FileDescriptor): LinuxNative.FileDescriptor? = LinuxNative.FileDescriptor(5)
 
             override fun poll(
@@ -122,7 +138,8 @@ class ProfilerDesignSpec :
                 buf: MemorySegment,
                 count: Long,
             ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(
-count)
+                count
+            )
 
             override fun recv(
                 sockfd: LinuxNative.FileDescriptor,
@@ -130,7 +147,8 @@ count)
                 len: Long,
                 flags: Int,
             ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(
-len)
+                len
+            )
 
             override fun ioctl(
                 fd: LinuxNative.FileDescriptor,

@@ -2,6 +2,7 @@ package io.mazewall.profiler.engine
 
 import io.mazewall.LinuxNative
 import io.mazewall.ffi.Layouts
+import io.mazewall.ffi.NativeConstants
 import io.mazewall.getFdOrThrow
 import io.mazewall.onFailure
 import io.mazewall.onSuccess
@@ -17,6 +18,25 @@ interface ProfilerTransport {
     fun sendTraceEvent(
         socketFd: LinuxNative.FileDescriptor,
         event: TraceEvent,
+    )
+
+    /**
+     * Sends a SECCOMP_USER_NOTIF_FLAG_CONTINUE response to the kernel for a successful handshake.
+     * Enforced at compile-time to only work with sessions in the Success state.
+     */
+    fun sendSeccompContinue(
+        session: HandshakeSession.Success,
+        resp: MemorySegment,
+    )
+
+    /**
+     * Sends an error response (or generic failure) to the kernel for a failed handshake.
+     * Enforced at compile-time to only work with sessions in the Failed state.
+     */
+    fun sendSeccompError(
+        session: HandshakeSession.Failed,
+        resp: MemorySegment,
+        errorNr: Int,
     )
 
     fun recvDescriptor(socketFd: LinuxNative.FileDescriptor): LinuxNative.FileDescriptor?
@@ -116,6 +136,32 @@ object RealProfilerTransport : ProfilerTransport {
             val res = LinuxNative.withTransaction { LinuxNative.memory.write(socketFd, buf, totalSize.toLong()) }
             res.getOrThrow("sendTraceEvent")
         }
+    }
+
+    override fun sendSeccompContinue(
+        session: HandshakeSession.Success,
+        resp: MemorySegment,
+    ) {
+        resp.fill(0)
+        resp.set(ValueLayout.JAVA_LONG, RESP_ID_OFF, session.notifId)
+        resp.set(ValueLayout.JAVA_LONG, RESP_VAL_OFF, 0L)
+        resp.set(ValueLayout.JAVA_INT, RESP_ERR_OFF, 0)
+        resp.set(ValueLayout.JAVA_INT, RESP_FLAGS_OFF, NativeConstants.SECCOMP_USER_NOTIF_FLAG_CONTINUE.toInt())
+        ioctl(session.listenerFd, SECCOMP_IOCTL_NOTIF_SEND, resp)
+    }
+
+    override fun sendSeccompError(
+        session: HandshakeSession.Failed,
+        resp: MemorySegment,
+        errorNr: Int,
+    ) {
+        resp.fill(0)
+        resp.set(ValueLayout.JAVA_LONG, RESP_ID_OFF, session.notifId)
+        resp.set(ValueLayout.JAVA_LONG, RESP_VAL_OFF, -1L)
+        // Error numbers are negative in the 'error' field of seccomp_notif_resp
+        resp.set(ValueLayout.JAVA_INT, RESP_ERR_OFF, -errorNr)
+        resp.set(ValueLayout.JAVA_INT, RESP_FLAGS_OFF, 0)
+        ioctl(session.listenerFd, SECCOMP_IOCTL_NOTIF_SEND, resp)
     }
 
     override fun recvDescriptor(socketFd: LinuxNative.FileDescriptor): LinuxNative.FileDescriptor? {

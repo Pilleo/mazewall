@@ -110,6 +110,9 @@ internal class ProfilerSessionHandler(
         val paths = SyscallPathResolver(memoryReader, pid, ledger).getPathArgs(syscallName, args)
         val event = TraceEvent(pidVal, syscallName, args, paths)
 
+        // Initialize handshake session
+        val handshake = HandshakeSession.Active(id, listenerFd)
+
         // Transition to Notified state
         state = ProfilerState.Notified(socketFd, listenerFd, id, event)
 
@@ -120,96 +123,104 @@ internal class ProfilerSessionHandler(
         state = ProfilerState.WaitingForAck(socketFd, listenerFd, id)
 
         @Suppress("TooGenericExceptionCaught")
-        return try {
+        try {
             transport.sendTraceEvent(socketFd, event)
             ledger.record(SessionEvent.EventSent(System.nanoTime(), pidVal.toLong()))
-            val success = waitForParentAck(socketPollFd, ackBuf)
-            if (success) {
-                ledger.record(SessionEvent.AckReceived(System.nanoTime(), pidVal.toLong()))
-                state = ProfilerState.ActiveSession(socketFd, listenerFd)
-            } else {
-                logger.warning {
-                    "ACK wait failed (timeout or error). Dumping SessionEventLedger:\n" +
-                        ledger.dump().joinToString("\n")
+
+            val result = waitForParentAck(socketPollFd, ackBuf, handshake)
+            return when (result) {
+                is HandshakeSession.Success -> {
+                    ledger.record(SessionEvent.AckReceived(System.nanoTime(), pidVal.toLong()))
+                    state = ProfilerState.ActiveSession(socketFd, listenerFd)
+                    transport.sendSeccompContinue(result, resp)
+                    ledger.record(SessionEvent.ContinueReplied(System.nanoTime(), pidVal.toLong(), 0L))
+                    true
                 }
-                state = ProfilerState.Terminated
+
+                is HandshakeSession.Failed -> {
+                    logger.warning {
+                        "ACK wait failed (timeout or error). Dumping SessionEventLedger:\n" +
+                            ledger.dump().joinToString("\n")
+                    }
+                    state = ProfilerState.Terminated
+                    // Use ECONNRESET to indicate that the profiling session was interrupted/failed
+                    transport.sendSeccompError(result, resp, 104) // 104 = ECONNRESET
+                    ledger.record(SessionEvent.ErrorReplied(System.nanoTime(), pidVal.toLong(), 104))
+                    false
+                }
+
+                else -> {
+                    state = ProfilerState.Terminated
+                    false
+                }
             }
-            success
         } catch (e: Throwable) {
             logger.severe {
                 "Exception in processNotification: ${e.message}. Dumping SessionEventLedger:\n" +
                     ledger.dump().joinToString("\n")
             }
+            // If we hit an exception, the handshake effectively failed.
+            // We must reply to avoid deadlocking the tracee.
+            transport.sendSeccompError(handshake.failed(), resp, 104)
+            ledger.record(SessionEvent.ErrorReplied(System.nanoTime(), pidVal.toLong(), 104))
             throw e
-        } finally {
-            sendContinueResponse(id, resp, pidVal.toLong())
         }
+
     }
 
     @Suppress("ReturnCount", "NestedBlockDepth", "CyclomaticComplexMethod")
     private fun waitForParentAck(
         pollFd: MemorySegment,
         ackBuf: MemorySegment,
-    ): Boolean {
+        session: HandshakeSession.Active,
+    ): HandshakeSession {
         pollFd.set(ValueLayout.JAVA_SHORT, POLLFD_REVENTS_OFF, 0.toShort())
 
         while (true) {
             val pollRes = transport.poll(pollFd, 1L, POLL_ACK_TIMEOUT_MS)
             val count = pollRes.recover { errno, _ ->
                 if (errno == NativeConstants.EINTR) return@recover -1L
-                return false
+                return@recover -2L // Error
             }
             if (count == -1L) continue
-            if (count == 0L) return false
-            
+            if (count == -2L || count == 0L) return session.failed()
+
             val revents = pollFd.get(ValueLayout.JAVA_SHORT, POLLFD_REVENTS_OFF)
             if ((revents.toInt() and NativeConstants.POLLIN.toInt()) != 0) {
-                if (readAndProcessAck(ackBuf)) return true
+                return readAndProcessAck(ackBuf, session)
             }
-            return false
+            return session.failed()
         }
     }
 
     @Suppress("ReturnCount", "LoopWithTooManyJumpStatements")
-    private fun readAndProcessAck(ackBuf: MemorySegment): Boolean {
+    private fun readAndProcessAck(
+        ackBuf: MemorySegment,
+        session: HandshakeSession.Active,
+    ): HandshakeSession {
         while (true) {
             val readRes = transport.read(socketFd, ackBuf, ACK_BUF_SIZE)
             val value = readRes.recover { errno, v ->
                 if (errno == NativeConstants.EINTR) return@recover -1L
-                return false
+                return@recover -2L // Error
             }
             if (value == -1L) continue
             if (value <= 0) {
-                if (value == 0L) return false
-                continue
+                return session.failed()
             }
             for (i in 0 until value.toInt()) {
                 val byte = ackBuf.get(ValueLayout.JAVA_BYTE, i.toLong())
-                if (byte == PROTOCOL_ACK_BYTE) return true
+                if (byte == PROTOCOL_ACK_BYTE) return session.acknowledged()
                 if (byte == SHUTDOWN_COMMAND_BYTE) {
                     onShutdown("Parent Command during notification")
-                    return false
+                    return session.failed()
                 }
             }
             break
         }
-        return false
+        return session.failed()
     }
 
-
-    private fun sendContinueResponse(
-        id: Long,
-        resp: MemorySegment,
-        pid: Long,
-    ) {
-        resp.fill(0)
-        resp.set(ValueLayout.JAVA_LONG, RESP_ID_OFF, id)
-        resp.set(ValueLayout.JAVA_LONG, RESP_VAL_OFF, 0L)
-        resp.set(ValueLayout.JAVA_INT, RESP_ERR_OFF, 0)
-        resp.set(ValueLayout.JAVA_INT, RESP_FLAGS_OFF, NativeConstants.SECCOMP_USER_NOTIF_FLAG_CONTINUE.toInt())
-        transport.ioctl(listenerFd, SECCOMP_IOCTL_NOTIF_SEND, resp)
-        ledger.record(SessionEvent.ContinueReplied(System.nanoTime(), pid, 0L))
-    }
 
     companion object {
         private const val POLL_ACK_TIMEOUT_MS = 5000
@@ -276,11 +287,11 @@ private class SyscallPathResolver(
         } else {
             null
         }
-        
+
         if (dirPath == null) {
             throw IllegalStateException("Failed to resolve absolute path for relative path '$path' (dirfd=$dirfd)")
         }
-        
+
         return if (dirPath.endsWith("/")) "$dirPath$path" else "$dirPath/$path"
     }
 }
