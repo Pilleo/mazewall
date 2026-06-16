@@ -4,6 +4,7 @@ import io.mazewall.BaseIntegrationTest
 import io.mazewall.EnabledIfLinuxAndSupported
 import io.mazewall.LinuxNative
 import io.mazewall.Policy
+import io.mazewall.core.NativeArg
 import io.mazewall.enforcer.ContainedExecutors
 import io.mazewall.enforcer.ContainmentViolationException
 import org.junit.jupiter.api.Test
@@ -25,7 +26,13 @@ class PrctlBypassReproductionTest : BaseIntegrationTest() {
                 .submit(
                     Callable {
                         val r = LinuxNative.withTransaction {
-                            LinuxNative.process.prctl(1, 15, 0, 0, 0)
+                            LinuxNative.process.prctl(
+                                1,
+                                NativeArg.IntArg(15),
+                                NativeArg.NullArg,
+                                NativeArg.NullArg,
+                                NativeArg.NullArg,
+                            )
                         }
                         if (r is LinuxNative.SyscallResult.Error && r.errno != 1) {
                             throw IllegalStateException("SECURITY BYPASS: prctl(PR_SET_PDEATHSIG) reached kernel (errno ${r.errno} instead of EPERM)")
@@ -61,7 +68,13 @@ class PrctlBypassReproductionTest : BaseIntegrationTest() {
                 .submit(
                     Callable {
                         val r = LinuxNative.withTransaction {
-                            LinuxNative.process.prctl(47, 2, 15, 0, 0)
+                            LinuxNative.process.prctl(
+                                47,
+                                NativeArg.IntArg(2),
+                                NativeArg.IntArg(15),
+                                NativeArg.NullArg,
+                                NativeArg.NullArg,
+                            )
                         }
                         if (r is LinuxNative.SyscallResult.Error) {
                             if (r.errno == 22) {

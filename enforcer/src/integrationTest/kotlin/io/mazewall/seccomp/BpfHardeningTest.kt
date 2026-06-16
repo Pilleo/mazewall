@@ -4,6 +4,7 @@ import io.mazewall.BaseIntegrationTest
 import io.mazewall.LinuxNative
 import io.mazewall.Policy
 import io.mazewall.core.Arch
+import io.mazewall.core.NativeArg
 import io.mazewall.core.Syscall
 import io.mazewall.enforcer.ContainedExecutors
 import org.junit.jupiter.api.Test
@@ -30,7 +31,13 @@ class BpfHardeningTest : BaseIntegrationTest() {
                     ContainedExecutors.installOnCurrentThread(policy)
                     // PR_SET_NAME = 15
                     val res = LinuxNative.withTransaction {
-                        LinuxNative.process.prctl(15, 0, 0, 0, 0)
+                        LinuxNative.process.prctl(
+                            15,
+                            NativeArg.NullArg,
+                            NativeArg.NullArg,
+                            NativeArg.NullArg,
+                            NativeArg.NullArg,
+                        )
                     }
                     result.set(res)
                 } catch (t: Throwable) {
@@ -67,7 +74,15 @@ class BpfHardeningTest : BaseIntegrationTest() {
                     val arch = io.mazewall.core.Arch
                         .current()
                     val res = LinuxNative.withTransaction {
-                        LinuxNative.syscall(arch.mmap.toLong(), 0, 4096, 1, 2, -1, 0)
+                        LinuxNative.syscall(
+                            arch.mmap.toLong(),
+                            NativeArg.NullArg,
+                            NativeArg.IntArg(4096),
+                            NativeArg.IntArg(1),
+                            NativeArg.IntArg(2),
+                            NativeArg.IntArg(-1),
+                            NativeArg.NullArg,
+                        )
                     }
                     result.set(res)
                 } catch (t: Throwable) {

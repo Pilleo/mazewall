@@ -5,6 +5,7 @@ import io.mazewall.Policy
 import io.mazewall.asFd
 import io.mazewall.core.Arch
 import io.mazewall.core.Syscall
+import io.mazewall.core.NativeArg
 import io.mazewall.enforcer.ContainedExecutors
 import io.mazewall.enforcer.ContainmentViolationException
 import io.mazewall.map
@@ -84,7 +85,9 @@ fun runProfileAndEnforce() {
             val setupNr = Syscall.IO_URING_SETUP.numberFor(Arch.current()).toLong()
 
             // io_uring_setup(entries = 32, params = NULL)
-            val setupResult = LinuxNative.withTransaction { LinuxNative.syscall(setupNr, 32L, 0L) }
+            val setupResult = LinuxNative.withTransaction {
+                LinuxNative.syscall(setupNr, NativeArg.LongArg(32L), NativeArg.NullArg)
+            }
             val ioUringStatus: String
 
             ioUringStatus = setupResult.map { value ->

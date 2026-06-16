@@ -5,6 +5,7 @@ import io.mazewall.EnabledIfLinuxAndSupported
 import io.mazewall.LinuxNative
 import io.mazewall.Policy
 import io.mazewall.core.Arch
+import io.mazewall.core.NativeArg
 import io.mazewall.core.Syscall
 import io.mazewall.enforcer.ContainedExecutors
 import io.mazewall.ffi.NativeConstants
@@ -31,9 +32,9 @@ class MemfdCreateBypassTest : BaseIntegrationTest() {
                             LinuxNative.withTransaction {
                                 LinuxNative.syscall(
                                     arch.memfdCreate.toLong(),
-                                    name.address(),
-                                    0,
-                                    java.lang.foreign.MemorySegment.NULL,
+                                    NativeArg.MemoryArg(name),
+                                    NativeArg.NullArg,
+                                    NativeArg.NullArg,
                                 )
                             }
                         }
@@ -66,9 +67,9 @@ class MemfdCreateBypassTest : BaseIntegrationTest() {
                             LinuxNative.withTransaction {
                                 LinuxNative.syscall(
                                     arch.memfdCreate.toLong(),
-                                    name.address(),
-                                    0,
-                                    java.lang.foreign.MemorySegment.NULL,
+                                    NativeArg.MemoryArg(name),
+                                    NativeArg.NullArg,
+                                    NativeArg.NullArg,
                                 )
                             }
                         }

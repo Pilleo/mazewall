@@ -1,6 +1,7 @@
 package io.mazewall.profiler.internal
 
 import io.mazewall.LinuxNative
+import io.mazewall.core.NativeArg
 import io.mazewall.ffi.NativeConstants
 import io.mazewall.getFdOrThrow
 import io.mazewall.onSuccess
@@ -32,7 +33,13 @@ internal object ProfilerDaemonManager {
             val existing = sharedDaemonContext
             if (existing != null && existing.daemonProcess.isAlive) {
                 LinuxNative.withTransaction {
-                    LinuxNative.process.prctl(NativeConstants.PR_SET_PTRACER, existing.daemonProcess.pid(), 0, 0, 0)
+                    LinuxNative.process.prctl(
+                        NativeConstants.PR_SET_PTRACER,
+                        NativeArg.LongArg(existing.daemonProcess.pid()),
+                        NativeArg.NullArg,
+                        NativeArg.NullArg,
+                        NativeArg.NullArg,
+                    )
                 }
                 return existing
             }
@@ -136,7 +143,13 @@ internal object ProfilerDaemonManager {
         }
 
         val prctlRes = LinuxNative.withTransaction {
-            LinuxNative.process.prctl(NativeConstants.PR_SET_PTRACER, daemonPid, 0, 0, 0)
+            LinuxNative.process.prctl(
+                NativeConstants.PR_SET_PTRACER,
+                NativeArg.LongArg(daemonPid),
+                NativeArg.NullArg,
+                NativeArg.NullArg,
+                NativeArg.NullArg,
+            )
         }
         if (prctlRes is LinuxNative.SyscallResult.Error) {
             logger.warning("prctl(PR_SET_PTRACER) failed with errno ${prctlRes.errno}. The daemon may not be able to read process memory if Yama ptrace_scope is restrictive.")

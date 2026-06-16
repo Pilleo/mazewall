@@ -4,6 +4,7 @@ import io.mazewall.BaseIntegrationTest
 import io.mazewall.EnabledIfLinuxAndSupported
 import io.mazewall.LinuxNative
 import io.mazewall.Policy
+import io.mazewall.core.NativeArg
 import io.mazewall.enforcer.ContainedExecutors
 import io.mazewall.enforcer.ContainmentViolationException
 import org.junit.jupiter.api.Test
@@ -32,7 +33,13 @@ class NetworkBypassReproductionTest : BaseIntegrationTest() {
                     // Attempt sendmmsg (even with invalid args, seccomp EPERM should trigger first before kernel EINVAL/EBADF)
                     // If it bypasses seccomp, the kernel will return EBADF (9) or EFAULT (14) because fd=0 is not a socket or args are null
                     val sendRes = LinuxNative.withTransaction {
-                        LinuxNative.syscall(sendmmsgNr, 0, 0, 0, 0)
+                        LinuxNative.syscall(
+                            sendmmsgNr,
+                            NativeArg.NullArg,
+                            NativeArg.NullArg,
+                            NativeArg.NullArg,
+                            NativeArg.NullArg,
+                        )
                     }
 
                     if (sendRes is LinuxNative.SyscallResult.Error) {
@@ -45,7 +52,14 @@ class NetworkBypassReproductionTest : BaseIntegrationTest() {
 
                     // Attempt recvmmsg
                     val recvRes = LinuxNative.withTransaction {
-                        LinuxNative.syscall(recvmmsgNr, 0, 0, 0, 0, 0)
+                        LinuxNative.syscall(
+                            recvmmsgNr,
+                            NativeArg.NullArg,
+                            NativeArg.NullArg,
+                            NativeArg.NullArg,
+                            NativeArg.NullArg,
+                            NativeArg.NullArg,
+                        )
                     }
                     if (recvRes is LinuxNative.SyscallResult.Error) {
                         if (recvRes.errno != 1) { // 1 is EPERM (seccomp block)
