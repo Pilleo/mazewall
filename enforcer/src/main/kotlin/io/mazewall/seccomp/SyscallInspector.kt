@@ -2,6 +2,7 @@ package io.mazewall.seccomp
 
 import io.mazewall.core.Arch
 import io.mazewall.core.SeccompAction
+import io.mazewall.ffi.NativeConstants
 
 /**
  * Context provided to [SyscallInspector]s to determine how to build their rules.
@@ -28,7 +29,43 @@ internal data class InspectionContext(
  * A plugin that generates Seccomp-BPF argument inspections for specific syscalls.
  */
 internal interface SyscallInspector {
-    fun getInspections(arch: Arch, context: InspectionContext): List<SyscallInspection>
+    /**
+     * Returns a list of standard, argument-based inspections to be emitted.
+     */
+    fun getInspections(arch: Arch, context: InspectionContext): List<SyscallInspection> = emptyList()
+
+    /**
+     * Emits special, non-standard BPF logic directly into the builder.
+     * Used for syscalls that don't fit the standard ArgCheck model (e.g. clone3).
+     */
+    fun emitSpecial(
+        builder: BpfBuilder.NrLoaded,
+        arch: Arch,
+        context: InspectionContext,
+        handledNrs: MutableSet<Int>
+    ) {
+    }
+}
+
+/**
+ * Ensures clone3 always returns ENOSYS, as it is complex to inspect and usually not
+ * needed by JVMs if standard clone is available.
+ */
+internal class Clone3Inspector : SyscallInspector {
+    override fun emitSpecial(
+        builder: BpfBuilder.NrLoaded,
+        arch: Arch,
+        context: InspectionContext,
+        handledNrs: MutableSet<Int>
+    ) {
+        if (arch.clone3 >= 0) {
+            val enosysAction = NativeConstants.SECCOMP_RET_ERRNO or NativeConstants.ENOSYS
+            handledNrs.add(arch.clone3)
+            builder.expect(arch.clone3) {
+                ret(enosysAction)
+            }
+        }
+    }
 }
 
 /**

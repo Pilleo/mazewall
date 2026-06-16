@@ -39,6 +39,7 @@ object BpfFilter {
             arch,
             policy.syscallActionNumbers(arch),
             policy.defaultAction,
+            policy.getSyscallInspectors(),
             policy.allowMmapExec,
             policy.allowNonThreadClone,
             policy.allowUnsafePrctl,
@@ -72,6 +73,7 @@ object BpfFilter {
         arch: Arch,
         syscallActions: Map<Int, SeccompAction>,
         defaultAction: SeccompAction,
+        inspectors: List<io.mazewall.seccomp.SyscallInspector>,
         allowMmapExec: Boolean = false,
         allowNonThreadClone: Boolean = false,
         allowUnsafePrctl: Boolean = false,
@@ -97,21 +99,14 @@ object BpfFilter {
             allowNonThreadClone,
             allowUnsafePrctl
         )
-        val inspectors = listOf(
-            io.mazewall.seccomp.MmapExecInspector(),
-            io.mazewall.seccomp.ThreadCloneInspector(),
-            io.mazewall.seccomp.UnsafePrctlInspector()
-        )
+
+        // Collect and emit all argument-based inspections
         val inspections = inspectors.flatMap { it.getInspections(arch, context) }
         emitInspections(builder, inspections, profilingMode, handledNrs)
 
-        // clone3 -> Always ENOSYS (does not need argument inspection)
-        if (arch.clone3 >= 0) {
-            val enosysAction = NativeConstants.SECCOMP_RET_ERRNO or 38
-            handledNrs.add(arch.clone3)
-            builder.expect(arch.clone3) {
-                ret(enosysAction)
-            }
+        // Emit any special non-arg-based logic (e.g. clone3)
+        for (inspector in inspectors) {
+            inspector.emitSpecial(builder, arch, context, handledNrs)
         }
 
         // 3. Block-based checks (Linear Scan)

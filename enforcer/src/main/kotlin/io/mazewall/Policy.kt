@@ -78,6 +78,18 @@ public class Policy<out S : PolicyScope, out State : PolicyState> private constr
         return result
     }
 
+    /**
+     * Returns the list of active syscall inspectors for this policy.
+     */
+    internal fun getSyscallInspectors(): List<io.mazewall.seccomp.SyscallInspector> {
+        return listOf(
+            io.mazewall.seccomp.MmapExecInspector(),
+            io.mazewall.seccomp.ThreadCloneInspector(),
+            io.mazewall.seccomp.UnsafePrctlInspector(),
+            io.mazewall.seccomp.Clone3Inspector(),
+        )
+    }
+
     public companion object {
         private val logger = java.util.logging.Logger
             .getLogger(Policy::class.java.name)

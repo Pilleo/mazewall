@@ -47,6 +47,7 @@ object NativeConstants {
     // Errors
     const val EPERM = 1
     const val EINTR = 4
+    const val ENOSYS = 38
 
     // File options
     const val O_PATH = 0x01000000
