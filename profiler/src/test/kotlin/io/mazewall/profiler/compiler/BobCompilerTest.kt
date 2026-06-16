@@ -3,7 +3,8 @@ package io.mazewall.profiler.compiler
 import io.mazewall.Policy
 import io.mazewall.core.Arch
 import io.mazewall.core.Syscall
-import io.mazewall.profiler.engine.TraceEvent
+import io.mazewall.profiler.engine.SyscallEvent
+import io.mazewall.profiler.engine.SyscallEventState
 import org.junit.jupiter.api.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -19,20 +20,20 @@ class BobCompilerTest {
     fun `test compiling various events to policy and DSL`() {
         val events =
             listOf(
-                TraceEvent(12345, "CONNECT", longArrayOf(3, 139626353982016, 16, 0, 0, 0), emptyList()),
-                TraceEvent(
+                SyscallEvent<SyscallEventState.Resolved>(12345, "CONNECT", longArrayOf(3, 139626353982016, 16, 0, 0, 0), emptyList()),
+                SyscallEvent<SyscallEventState.Resolved>(
                     12345,
                     "OPENAT",
                     longArrayOf(0, 139626353983000, 0, 0, 0, 0),
                     listOf("/etc/hostname"),
                 ), // O_RDONLY
-                TraceEvent(
+                SyscallEvent<SyscallEventState.Resolved>(
                     12345,
                     "OPEN",
                     longArrayOf(139626353983000, O_WRONLY, 0, 0, 0, 0),
                     listOf("/tmp/write-test.txt"),
                 ), // O_WRONLY
-                TraceEvent(12345, "MKDIR", longArrayOf(139626353983000, 0, 0, 0, 0, 0), listOf("/tmp/new-dir")),
+                SyscallEvent<SyscallEventState.Resolved>(12345, "MKDIR", longArrayOf(139626353983000, 0, 0, 0, 0, 0), listOf("/tmp/new-dir")),
             )
 
         // Compile to Bill of Behavior
@@ -106,7 +107,7 @@ val policy = Policy.builder()
         // and should not have any effect.
         val events =
             listOf(
-                TraceEvent(12345, "GETPID", longArrayOf(0, 0, 0, 0, 0, 0), emptyList()),
+                SyscallEvent<SyscallEventState.Resolved>(12345, "GETPID", longArrayOf(0, 0, 0, 0, 0, 0), emptyList()),
             )
 
         val bob = BobCompiler.compile(events)
@@ -127,25 +128,25 @@ val policy = Policy.builder()
     fun `test OPENAT2 and AT variants categorization`() {
         val events =
             listOf(
-                TraceEvent(
+                SyscallEvent<SyscallEventState.Resolved>(
                     12345,
                     "OPENAT2",
                     longArrayOf(0, 0, 0x12345678, 0, 0, 0), // args[2] is a pointer
                     listOf("/tmp/openat2-test.txt"),
                 ),
-                TraceEvent(
+                SyscallEvent<SyscallEventState.Resolved>(
                     12345,
                     "UNLINKAT",
                     longArrayOf(0, 0, 0, 0, 0, 0),
                     listOf("/tmp/deleted-file.txt"),
                 ),
-                TraceEvent(
+                SyscallEvent<SyscallEventState.Resolved>(
                     12345,
                     "MKDIRAT",
                     longArrayOf(0, 0, 0, 0, 0, 0),
                     listOf("/tmp/new-subdir"),
                 ),
-                TraceEvent(
+                SyscallEvent<SyscallEventState.Resolved>(
                     12345,
                     "RENAMEAT2",
                     longArrayOf(0, 0, 0, 0, 0, 0),
@@ -175,9 +176,9 @@ val policy = Policy.builder()
     @Test
     fun `test unknown and invalid syscall names`() {
         val events = listOf(
-            TraceEvent(pid = 1, syscallName = "UNKNOWN_SYSCALL_123", args = longArrayOf(), paths = listOf("/path/unknown")),
-            TraceEvent(pid = 1, syscallName = "", args = longArrayOf(), paths = listOf("/path/empty")),
-            TraceEvent(pid = 1, syscallName = "NOT_A_SYSCALL", args = longArrayOf(), paths = listOf("/path/invalid")),
+            SyscallEvent<SyscallEventState.Resolved>(pid = 1, syscallName = "UNKNOWN_SYSCALL_123", args = longArrayOf(), paths = listOf("/path/unknown")),
+            SyscallEvent<SyscallEventState.Resolved>(pid = 1, syscallName = "", args = longArrayOf(), paths = listOf("/path/empty")),
+            SyscallEvent<SyscallEventState.Resolved>(pid = 1, syscallName = "NOT_A_SYSCALL", args = longArrayOf(), paths = listOf("/path/invalid")),
         )
         val bob = BobCompiler.compile(events)
 
@@ -191,8 +192,8 @@ val policy = Policy.builder()
     @Test
     fun `test execve and execveat`() {
         val events = listOf(
-            TraceEvent(pid = 1, syscallName = "EXECVE", args = longArrayOf(), paths = listOf("/bin/sh")),
-            TraceEvent(pid = 1, syscallName = "EXECVEAT", args = longArrayOf(), paths = listOf("/bin/bash")),
+            SyscallEvent<SyscallEventState.Resolved>(pid = 1, syscallName = "EXECVE", args = longArrayOf(), paths = listOf("/bin/sh")),
+            SyscallEvent<SyscallEventState.Resolved>(pid = 1, syscallName = "EXECVEAT", args = longArrayOf(), paths = listOf("/bin/bash")),
         )
         val bob = BobCompiler.compile(events)
 
@@ -225,7 +226,7 @@ val policy = Policy.builder()
         )
 
         val events = mutations.map {
-            TraceEvent(pid = 1, syscallName = it, args = longArrayOf(), paths = listOf("/path/$it"))
+            SyscallEvent<SyscallEventState.Resolved>(pid = 1, syscallName = it, args = longArrayOf(), paths = listOf("/path/$it"))
         }
 
         val bob = BobCompiler.compile(events)
@@ -239,8 +240,8 @@ val policy = Policy.builder()
         // Syscalls that are known should be in syscalls
         val expectedSyscalls = mutations
             .mapNotNull {
-            runCatching { Syscall.valueOf(it) }.getOrNull()
-        }.toSet()
+                runCatching { Syscall.valueOf(it) }.getOrNull()
+            }.toSet()
         assertEquals(expectedSyscalls, bob.syscalls)
     }
 
@@ -254,18 +255,18 @@ val policy = Policy.builder()
 
         val events = listOf(
             // Missing flags arg (size <= 1), treated as read-only (0)
-            TraceEvent(pid = 1, syscallName = "OPEN", args = longArrayOf(), paths = listOf("/path/missing")),
-            TraceEvent(pid = 1, syscallName = "OPEN", args = longArrayOf(10), paths = listOf("/path/missing2")),
+            SyscallEvent<SyscallEventState.Resolved>(pid = 1, syscallName = "OPEN", args = longArrayOf(), paths = listOf("/path/missing")),
+            SyscallEvent<SyscallEventState.Resolved>(pid = 1, syscallName = "OPEN", args = longArrayOf(10), paths = listOf("/path/missing2")),
             // Read-only
-            TraceEvent(pid = 1, syscallName = "OPEN", args = longArrayOf(10, oRdonly), paths = listOf("/path/readonly")),
+            SyscallEvent<SyscallEventState.Resolved>(pid = 1, syscallName = "OPEN", args = longArrayOf(10, oRdonly), paths = listOf("/path/readonly")),
             // Write-only
-            TraceEvent(pid = 1, syscallName = "OPEN", args = longArrayOf(10, oWronly), paths = listOf("/path/writeonly")),
+            SyscallEvent<SyscallEventState.Resolved>(pid = 1, syscallName = "OPEN", args = longArrayOf(10, oWronly), paths = listOf("/path/writeonly")),
             // Read-write
-            TraceEvent(pid = 1, syscallName = "OPEN", args = longArrayOf(10, oRdwr), paths = listOf("/path/readwrite")),
+            SyscallEvent<SyscallEventState.Resolved>(pid = 1, syscallName = "OPEN", args = longArrayOf(10, oRdwr), paths = listOf("/path/readwrite")),
             // Create
-            TraceEvent(pid = 1, syscallName = "OPEN", args = longArrayOf(10, oCreat), paths = listOf("/path/create")),
+            SyscallEvent<SyscallEventState.Resolved>(pid = 1, syscallName = "OPEN", args = longArrayOf(10, oCreat), paths = listOf("/path/create")),
             // Truncate
-            TraceEvent(pid = 1, syscallName = "OPEN", args = longArrayOf(10, oTrunc), paths = listOf("/path/truncate")),
+            SyscallEvent<SyscallEventState.Resolved>(pid = 1, syscallName = "OPEN", args = longArrayOf(10, oTrunc), paths = listOf("/path/truncate")),
         )
 
         val bob = BobCompiler.compile(events)
@@ -290,19 +291,19 @@ val policy = Policy.builder()
 
         val events = listOf(
             // Missing flags arg (size <= 2), treated as read-only (0)
-            TraceEvent(pid = 1, syscallName = "OPENAT", args = longArrayOf(), paths = listOf("/path/missing")),
-            TraceEvent(pid = 1, syscallName = "OPENAT", args = longArrayOf(10), paths = listOf("/path/missing2")),
-            TraceEvent(pid = 1, syscallName = "OPENAT", args = longArrayOf(10, 20), paths = listOf("/path/missing3")),
+            SyscallEvent<SyscallEventState.Resolved>(pid = 1, syscallName = "OPENAT", args = longArrayOf(), paths = listOf("/path/missing")),
+            SyscallEvent<SyscallEventState.Resolved>(pid = 1, syscallName = "OPENAT", args = longArrayOf(10), paths = listOf("/path/missing2")),
+            SyscallEvent<SyscallEventState.Resolved>(pid = 1, syscallName = "OPENAT", args = longArrayOf(10, 20), paths = listOf("/path/missing3")),
             // Read-only
-            TraceEvent(pid = 1, syscallName = "OPENAT", args = longArrayOf(10, 20, oRdonly), paths = listOf("/path/readonly")),
+            SyscallEvent<SyscallEventState.Resolved>(pid = 1, syscallName = "OPENAT", args = longArrayOf(10, 20, oRdonly), paths = listOf("/path/readonly")),
             // Write-only
-            TraceEvent(pid = 1, syscallName = "OPENAT", args = longArrayOf(10, 20, oWronly), paths = listOf("/path/writeonly")),
+            SyscallEvent<SyscallEventState.Resolved>(pid = 1, syscallName = "OPENAT", args = longArrayOf(10, 20, oWronly), paths = listOf("/path/writeonly")),
             // Read-write
-            TraceEvent(pid = 1, syscallName = "OPENAT", args = longArrayOf(10, 20, oRdwr), paths = listOf("/path/readwrite")),
+            SyscallEvent<SyscallEventState.Resolved>(pid = 1, syscallName = "OPENAT", args = longArrayOf(10, 20, oRdwr), paths = listOf("/path/readwrite")),
             // Create
-            TraceEvent(pid = 1, syscallName = "OPENAT", args = longArrayOf(10, 20, oCreat), paths = listOf("/path/create")),
+            SyscallEvent<SyscallEventState.Resolved>(pid = 1, syscallName = "OPENAT", args = longArrayOf(10, 20, oCreat), paths = listOf("/path/create")),
             // Truncate
-            TraceEvent(pid = 1, syscallName = "OPENAT", args = longArrayOf(10, 20, oTrunc), paths = listOf("/path/truncate")),
+            SyscallEvent<SyscallEventState.Resolved>(pid = 1, syscallName = "OPENAT", args = longArrayOf(10, 20, oTrunc), paths = listOf("/path/truncate")),
         )
 
         val bob = BobCompiler.compile(events)
@@ -321,8 +322,8 @@ val policy = Policy.builder()
     fun `test overlapping paths`() {
         // A path is opened for reading, then opened for writing
         val events = listOf(
-            TraceEvent(pid = 1, syscallName = "OPEN", args = longArrayOf(10, 0L), paths = listOf("/shared/path")), // Read-only
-            TraceEvent(pid = 1, syscallName = "OPEN", args = longArrayOf(10, 1L), paths = listOf("/shared/path")), // Write-only
+            SyscallEvent<SyscallEventState.Resolved>(pid = 1, syscallName = "OPEN", args = longArrayOf(10, 0L), paths = listOf("/shared/path")), // Read-only
+            SyscallEvent<SyscallEventState.Resolved>(pid = 1, syscallName = "OPEN", args = longArrayOf(10, 1L), paths = listOf("/shared/path")), // Write-only
         )
 
         val bob = BobCompiler.compile(events)
@@ -335,7 +336,7 @@ val policy = Policy.builder()
     @Test
     fun `test unknown syscall with arguments behaves as default`() {
         val events = listOf(
-            TraceEvent(pid = 1, syscallName = "UNKNOWN", args = longArrayOf(10, 1L, 64L), paths = listOf("/path/unknown")),
+            SyscallEvent<SyscallEventState.Resolved>(pid = 1, syscallName = "UNKNOWN", args = longArrayOf(10, 1L, 64L), paths = listOf("/path/unknown")),
         )
 
         val bob = BobCompiler.compile(events)

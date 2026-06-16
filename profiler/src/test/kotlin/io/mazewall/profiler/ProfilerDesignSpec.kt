@@ -16,7 +16,8 @@ import io.mazewall.profiler.engine.ProfilerSessionHandler
 import io.mazewall.profiler.engine.ProfilerTransport
 import io.mazewall.profiler.engine.SHUTDOWN_COMMAND_BYTE
 import io.mazewall.profiler.engine.SOCKADDR_UN_PATH_SIZE
-import io.mazewall.profiler.engine.TraceEvent
+import io.mazewall.profiler.engine.SyscallEvent
+import io.mazewall.profiler.engine.SyscallEventState
 import java.lang.foreign.Arena
 import java.lang.foreign.MemoryLayout
 import java.lang.foreign.MemorySegment
@@ -73,7 +74,7 @@ class ProfilerDesignSpec :
         }
 
         class MockTransport : ProfilerTransport {
-            val sentEvents = mutableListOf<TraceEvent>()
+            val sentEvents = mutableListOf<SyscallEvent<SyscallEventState.Resolved>>()
             var nextPollResult: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(1L)
             var nextReadResult: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(1L)
             var ackByte: Byte = 0xAC.toByte()
@@ -89,7 +90,7 @@ class ProfilerDesignSpec :
 
             override fun sendTraceEvent(
                 socketFd: LinuxNative.FileDescriptor,
-                event: TraceEvent,
+                event: SyscallEvent<SyscallEventState.Resolved>,
             ) {
                 sentEvents.add(event)
             }

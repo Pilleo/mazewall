@@ -6,7 +6,8 @@ import io.mazewall.Uncompiled
 import io.mazewall.core.Pid
 import io.mazewall.profiler.compiler.BobCompiler
 import io.mazewall.profiler.engine.ProfilerInstaller
-import io.mazewall.profiler.engine.TraceEvent
+import io.mazewall.profiler.engine.SyscallEvent
+import io.mazewall.profiler.engine.SyscallEventState
 import io.mazewall.profiler.internal.DaemonContext
 import io.mazewall.profiler.internal.ProfilerDaemonManager
 import io.mazewall.profiler.internal.ProfilerSocket
@@ -61,9 +62,9 @@ object Profiler {
 
         val context = getOrSpawnSharedDaemon()
 
-        val localLogs = CopyOnWriteArrayList<TraceEvent>()
+        val localLogs = CopyOnWriteArrayList<SyscallEvent<SyscallEventState.Resolved>>()
         val localStackProfile =
-            ConcurrentHashMap<TraceEvent, MutableList<Array<StackTraceElement>>>()
+            ConcurrentHashMap<SyscallEvent<SyscallEventState.Resolved>, MutableList<Array<StackTraceElement>>>()
         val localPathCache = ConcurrentHashMap<String, Long>()
 
         var workerThread: Thread? = null
@@ -141,8 +142,8 @@ object Profiler {
     private fun installProfilingFilterForThread(
         socketPath: String,
         policy: Policy<*, Uncompiled>,
-        accumulatedLogs: MutableList<TraceEvent>,
-        stackTracesMap: MutableMap<TraceEvent, MutableList<Array<StackTraceElement>>>?,
+        accumulatedLogs: MutableList<SyscallEvent<SyscallEventState.Resolved>>,
+        stackTracesMap: MutableMap<SyscallEvent<SyscallEventState.Resolved>, MutableList<Array<StackTraceElement>>>?,
         pathCache: MutableMap<String, Long>,
         workerThreadProvider: () -> Thread?,
     ) {
@@ -170,9 +171,9 @@ object Profiler {
         private val context: DaemonContext,
     ) : ExecutorService by delegate {
         private val threadApplied = ThreadLocal.withInitial { false }
-        val recentLogs = CopyOnWriteArrayList<TraceEvent>()
+        val recentLogs = CopyOnWriteArrayList<SyscallEvent<SyscallEventState.Resolved>>()
         val recentStackProfiles =
-            ConcurrentHashMap<TraceEvent, MutableList<Array<StackTraceElement>>>()
+            ConcurrentHashMap<SyscallEvent<SyscallEventState.Resolved>, MutableList<Array<StackTraceElement>>>()
         private val sharedPathCache = ConcurrentHashMap<String, Long>()
 
         /**

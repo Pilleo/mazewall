@@ -17,7 +17,7 @@ import java.nio.charset.StandardCharsets
 interface ProfilerTransport {
     fun sendTraceEvent(
         socketFd: LinuxNative.FileDescriptor,
-        event: TraceEvent,
+        event: SyscallEvent<SyscallEventState.Resolved>,
     )
 
     /**
@@ -97,11 +97,11 @@ object RealProfilerTransport : ProfilerTransport {
 
     override fun sendTraceEvent(
         socketFd: LinuxNative.FileDescriptor,
-        event: TraceEvent,
+        event: SyscallEvent<SyscallEventState.Resolved>,
     ) {
         Arena.ofConfined().use { arena ->
             val syscallNameBytes = event.syscallName.toByteArray(StandardCharsets.UTF_8)
-            val pathBytesList = if (event is TraceEvent.File) event.filePaths.map { it.toByteArray(StandardCharsets.UTF_8) } else emptyList()
+            val pathBytesList = event.paths.map { it.toByteArray(StandardCharsets.UTF_8) }
 
             var totalSize = 4 + 4 + syscallNameBytes.size + 4 + (event.args.size * 8) + 4
             for (p in pathBytesList) {

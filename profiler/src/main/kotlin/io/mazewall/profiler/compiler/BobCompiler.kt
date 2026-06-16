@@ -2,7 +2,8 @@ package io.mazewall.profiler.compiler
 
 import io.mazewall.core.Syscall
 import io.mazewall.profiler.BillOfBehavior
-import io.mazewall.profiler.engine.TraceEvent
+import io.mazewall.profiler.engine.SyscallEvent
+import io.mazewall.profiler.engine.SyscallEventState
 import java.util.*
 
 /**
@@ -18,7 +19,7 @@ object BobCompiler {
     /**
      * Parses the given profiler trace events and returns a [BillOfBehavior].
      */
-    fun compile(events: List<TraceEvent>): BillOfBehavior {
+    fun compile(events: List<SyscallEvent<SyscallEventState.Resolved>>): BillOfBehavior {
         val opens = mutableSetOf<String>()
         val fsWritePaths = mutableSetOf<String>()
         val syscalls = mutableSetOf<Syscall>()
@@ -39,13 +40,11 @@ object BobCompiler {
             val isWrite = isFileSystemMutation(event.syscallName) || isOpenWrite(event.syscallName, event.args)
             val isExec = event.syscallName == "EXECVE" || event.syscallName == "EXECVEAT"
 
-            if (event is TraceEvent.File) {
-                for (path in event.filePaths) {
-                    when {
-                        isExec -> execs.add(path)
-                        isWrite -> fsWritePaths.add(path)
-                        else -> opens.add(path)
-                    }
+            for (path in event.paths) {
+                when {
+                    isExec -> execs.add(path)
+                    isWrite -> fsWritePaths.add(path)
+                    else -> opens.add(path)
                 }
             }
         }

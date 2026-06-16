@@ -28,7 +28,7 @@ internal sealed interface ProfilerState {
         val socketFd: LinuxNative.FileDescriptor,
         val listenerFd: LinuxNative.FileDescriptor,
         val notifId: Long,
-        val event: TraceEvent,
+        val event: SyscallEvent<SyscallEventState.Resolved>,
     ) : ProfilerState
 
     /** Event sent, waiting for PROTOCOL_ACK_BYTE or SHUTDOWN from parent. */

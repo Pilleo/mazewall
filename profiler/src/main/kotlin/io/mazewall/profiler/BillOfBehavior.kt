@@ -8,7 +8,8 @@ import io.mazewall.StackProfileEntryDto
 import io.mazewall.StackFrameDto
 import io.mazewall.core.SeccompAction
 import io.mazewall.core.Syscall
-import io.mazewall.profiler.engine.TraceEvent
+import io.mazewall.profiler.engine.SyscallEvent
+import io.mazewall.profiler.engine.SyscallEventState
 import java.io.InputStream
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
@@ -86,10 +87,10 @@ data class BillOfBehavior(
      * May be empty if profiling was done via IterativeProfiler (Tier A),
      * which does not use USER_NOTIF.
      *
-     * Keyed by [TraceEvent] identity; multiple events for the same syscall name
+     * Keyed by [SyscallEvent] identity; multiple events for the same syscall name
      * may produce different stack entries if triggered from different call sites.
      */
-    val stackProfile: Map<TraceEvent, List<Array<StackTraceElement>>> = emptyMap(),
+    val stackProfile: Map<SyscallEvent<SyscallEventState.Resolved>, List<Array<StackTraceElement>>> = emptyMap(),
 ) {
     /**
      * Compiles this bill of behavior into a [io.mazewall.Policy] starting from [base].
@@ -204,7 +205,7 @@ data class BillOfBehavior(
             syscalls = syscalls,
             execs = execs.filterNot { profile.matches(it) }.toSet(),
             stackProfile = stackProfile.filterKeys { event ->
-                if (event is TraceEvent.File) event.filePaths.none { profile.matches(it) } else true
+                event.paths.none { profile.matches(it) }
             },
         )
     }
@@ -303,16 +304,16 @@ data class BillOfBehavior(
 
             val mappedSyscalls = dto.syscalls
                 .mapNotNull { name ->
-                try {
-                    Syscall.valueOf(name.uppercase())
-                } catch (ignored: Exception) {
-                    null
-                }
-            }.toSet()
+                    try {
+                        Syscall.valueOf(name.uppercase())
+                    } catch (ignored: Exception) {
+                        null
+                    }
+                }.toSet()
 
-            val stackProfile = mutableMapOf<TraceEvent, MutableList<Array<StackTraceElement>>>()
+            val stackProfile = mutableMapOf<SyscallEvent<SyscallEventState.Resolved>, MutableList<Array<StackTraceElement>>>()
             for (entry in dto.stackProfile) {
-                val event = TraceEvent(
+                val event = SyscallEvent<SyscallEventState.Resolved>(
                     pid = 0,
                     syscallName = entry.syscall,
                     args = entry.args.map { it }.toLongArray(),

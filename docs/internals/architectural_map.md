@@ -114,3 +114,27 @@ If you modify these, you must update both the Kotlin side and the C-side (if app
 | **Profiler returns null paths** | Yama `ptrace_scope` or symlink mismatch. | Check `ProfilerDaemon.resolveCanonicalPath`. |
 | **"IllegalStateException: Already restricted"** | Redundant Landlock application on pooled thread. | Check `StateRegistries` usage in `wrap()`. |
 | **E2BIG on Landlock install** | Exceeded Landlock domain nesting limit (max 16). | Investigate stacked policy logic in `FilterInstallationPlanner`. |
+
+## 7. Core Architectural Paradigms & Patterns
+
+To maintain security and stability at the kernel-JVM boundary, `mazewall` adheres to a **Functional-Core, Imperative-Shell** architecture using the following patterns:
+
+### A. Type-State Machine Pattern (Safety-by-Construction)
+Interfacing with kernel APIs and IPC protocols is sequentially fragile. We use Type-States to make invalid operation sequences *unrepresentable* in the type system.
+- **Application:** `BpfBuilder<State>` (enforces Arch Check -> Load NR -> Filtering) and `HandshakeSession<State>` (prevents deadlocks by enforcing the 0xAC protocol).
+
+### B. Functional Programming at the Native Boundary
+Native calls return `errno` and raw values that are easily lost or misinterpreted.
+- **Application:** We use **Monadic Result types** (`SyscallResult<T>`) instead of exceptions for native FFM downcalls. This forces callers to explicitly handle `recover` or `map` logic, preserving the critical `errno` context.
+
+### C. Pragmatic OOP & Strategy Pattern (Platform Abstraction)
+The Linux kernel cannot be mocked. We use OOP traits to decouple high-level security logic from low-level FFM implementations.
+- **Application:** `NativeEngine` and its sub-traits (`NativeFileSystem`, etc.) allow injecting `MockNativeEngine` for host-side unit testing without a Linux environment.
+
+### D. Domain-Driven Design (DDD) & Value Objects
+To avoid "Primitive Obsession" in a codebase full of pointers and integers, we use DDD principles to define a "Ubiquitous Language" for security.
+- **Application:** `value class` for `FileDescriptor`, `Pid`, and `SyscallNumber` ensures that type-safety persists even when dealing with raw kernel identifiers.
+
+### E. Architectural Fitness Functions (ArchUnit)
+Security is a structural property. We use ArchUnit to ensure that memory-unsafe operations are strictly localized.
+- **Application:** Banning direct `java.lang.foreign` or `Unsafe` access outside of the `io.mazewall.ffi` package to prevent structural bypasses of our memory-safety model.

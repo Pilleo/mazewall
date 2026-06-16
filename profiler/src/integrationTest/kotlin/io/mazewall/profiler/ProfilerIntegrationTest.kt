@@ -7,6 +7,8 @@ import io.mazewall.asFd
 import io.mazewall.core.Arch
 import io.mazewall.core.Syscall
 import io.mazewall.profiler.compiler.BobCompiler
+import io.mazewall.profiler.engine.SyscallEvent
+import io.mazewall.profiler.engine.SyscallEventState
 import org.junit.jupiter.api.Test
 import java.io.File
 import java.util.concurrent.Callable
@@ -39,7 +41,7 @@ class ProfilerIntegrationTest : BaseIntegrationTest() {
         )
         assertTrue(bob.opens.contains("/etc/hostname"), "Should contain opened path /etc/hostname")
 
-        // Assert that the stackProfile contains the trace event and its stack trace has our test class name!
+        // Assert that the stackProfile contains the syscall event and its stack trace has our test class name!
         assertTrue(bob.stackProfile.isNotEmpty(), "Stack profile should not be empty")
         val hasOurClass =
             bob.stackProfile.values.any { traces ->

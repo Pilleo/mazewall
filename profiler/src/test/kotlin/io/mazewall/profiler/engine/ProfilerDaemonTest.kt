@@ -3,6 +3,9 @@ package io.mazewall.profiler.engine
 import io.mazewall.LinuxNative
 import io.mazewall.ffi.Layouts
 import io.mazewall.ffi.NativeConstants
+import io.mazewall.profiler.engine.SyscallEvent
+import io.mazewall.profiler.engine.SyscallEventState
+import io.mazewall.profiler.engine.TraceEvent
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
@@ -14,7 +17,7 @@ import java.util.concurrent.atomic.AtomicInteger
 
 class ProfilerDaemonTest {
     private class MockTransport : ProfilerTransport {
-        val sentEvents = mutableListOf<TraceEvent>()
+        val sentEvents = mutableListOf<SyscallEvent<SyscallEventState.Resolved>>()
         val pollCount = AtomicInteger(0)
         var nextPollResult: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(1L)
         var nextReadResult: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(1L)
@@ -26,7 +29,7 @@ class ProfilerDaemonTest {
 
         override fun sendTraceEvent(
             socketFd: LinuxNative.FileDescriptor,
-            event: TraceEvent,
+            event: SyscallEvent<SyscallEventState.Resolved>,
         ) {
             sentEvents.add(event)
         }

@@ -95,9 +95,9 @@ internal class ProfilerSessionHandler(
         ackBuf: MemorySegment,
         socketPollFd: MemorySegment,
     ): Boolean {
+        // 1. RECEIVE: Parse raw registers into a SyscallEvent<Raw>
         val id = notif.get(ValueLayout.JAVA_LONG, NOTIF_ID_OFF)
         val pidVal = notif.get(ValueLayout.JAVA_INT, NOTIF_PID_OFF)
-        val pid = Pid(pidVal)
         val nr = notif.get(ValueLayout.JAVA_INT, NOTIF_NR_OFF)
         ledger.record(SessionEvent.Notified(System.nanoTime(), pidVal.toLong(), nr.toLong()))
 
@@ -106,28 +106,34 @@ internal class ProfilerSessionHandler(
             args[i] = notif.get(ValueLayout.JAVA_LONG, NOTIF_ARGS_OFF + i * ValueLayout.JAVA_LONG.byteSize())
         }
 
-        val syscallName = syscallMap[nr] ?: "SYSCALL_$nr"
-        val paths = SyscallPathResolver(memoryReader, pid, ledger).getPathArgs(syscallName, args)
-        val event = TraceEvent(pidVal, syscallName, args, paths)
+        val rawEvent = SyscallEvent<SyscallEventState.Raw>(
+            pid = pidVal,
+            syscallName = syscallMap[nr] ?: "SYSCALL_$nr",
+            args = args
+        )
 
-        // Initialize handshake session
+        // 2. RESOLVE: Transform Raw event into Resolved event (path resolution)
+        val resolver = SyscallPathResolver(memoryReader, ledger)
+        val resolvedEvent = resolver.resolve(rawEvent)
+
+        // 3. NOTIFY: Prepare handshake and notify JVM listener
         val handshake = HandshakeSession.Active(id, listenerFd)
-
-        // Transition to Notified state
-        state = ProfilerState.Notified(socketFd, listenerFd, id, event)
+        state = ProfilerState.Notified(socketFd, listenerFd, id, resolvedEvent)
 
         socketPollFd.set(ValueLayout.JAVA_INT, POLLFD_FD_OFF, socketFd.value)
         socketPollFd.set(ValueLayout.JAVA_SHORT, POLLFD_EVENTS_OFF, NativeConstants.POLLIN.toShort())
 
-        // Transition to WaitingForAck state
         state = ProfilerState.WaitingForAck(socketFd, listenerFd, id)
 
         @Suppress("TooGenericExceptionCaught")
         try {
-            transport.sendTraceEvent(socketFd, event)
+            transport.sendTraceEvent(socketFd, resolvedEvent)
             ledger.record(SessionEvent.EventSent(System.nanoTime(), pidVal.toLong()))
 
-            val result = waitForParentAck(socketPollFd, ackBuf, handshake)
+            // 4. HANDSHAKE: Delegate IPC protocol to the state machine
+            val result = handshake.performHandshake(socketFd, transport, socketPollFd, ackBuf, onShutdown)
+
+            // 5. REPLY: Finalize based on handshake outcome
             return when (result) {
                 is HandshakeSession.Success -> {
                     ledger.record(SessionEvent.AckReceived(System.nanoTime(), pidVal.toLong()))
@@ -143,7 +149,6 @@ internal class ProfilerSessionHandler(
                             ledger.dump().joinToString("\n")
                     }
                     state = ProfilerState.Terminated
-                    // Use ECONNRESET to indicate that the profiling session was interrupted/failed
                     transport.sendSeccompError(result, resp, ECONNRESET)
                     ledger.record(SessionEvent.ErrorReplied(System.nanoTime(), pidVal.toLong(), ECONNRESET))
                     false
@@ -159,65 +164,10 @@ internal class ProfilerSessionHandler(
                 "Exception in processNotification: ${e.message}. Dumping SessionEventLedger:\n" +
                     ledger.dump().joinToString("\n")
             }
-            // If we hit an exception, the handshake effectively failed.
-            // We must reply to avoid deadlocking the tracee.
             transport.sendSeccompError(handshake.failed(), resp, ECONNRESET)
             ledger.record(SessionEvent.ErrorReplied(System.nanoTime(), pidVal.toLong(), ECONNRESET))
             throw e
         }
-    }
-
-    @Suppress("ReturnCount", "NestedBlockDepth", "CyclomaticComplexMethod")
-    private fun waitForParentAck(
-        pollFd: MemorySegment,
-        ackBuf: MemorySegment,
-        session: HandshakeSession.Active,
-    ): HandshakeSession {
-        pollFd.set(ValueLayout.JAVA_SHORT, POLLFD_REVENTS_OFF, 0.toShort())
-
-        while (true) {
-            val pollRes = transport.poll(pollFd, 1L, POLL_ACK_TIMEOUT_MS)
-            val count = pollRes.recover { errno, _ ->
-                if (errno == NativeConstants.EINTR) return@recover RETRY_SIGNAL
-                return@recover INTERNAL_ERROR_SIGNAL
-            }
-            if (count == RETRY_SIGNAL) continue
-            if (count == INTERNAL_ERROR_SIGNAL || count == 0L) return session.failed()
-
-            val revents = pollFd.get(ValueLayout.JAVA_SHORT, POLLFD_REVENTS_OFF)
-            if ((revents.toInt() and NativeConstants.POLLIN.toInt()) != 0) {
-                return readAndProcessAck(ackBuf, session)
-            }
-            return session.failed()
-        }
-    }
-
-    @Suppress("ReturnCount", "LoopWithTooManyJumpStatements")
-    private fun readAndProcessAck(
-        ackBuf: MemorySegment,
-        session: HandshakeSession.Active,
-    ): HandshakeSession {
-        while (true) {
-            val readRes = transport.read(socketFd, ackBuf, ACK_BUF_SIZE)
-            val value = readRes.recover { errno, _ ->
-                if (errno == NativeConstants.EINTR) return@recover RETRY_SIGNAL
-                return@recover INTERNAL_ERROR_SIGNAL
-            }
-            if (value == RETRY_SIGNAL) continue
-            if (value <= 0) {
-                return session.failed()
-            }
-            for (i in 0 until value.toInt()) {
-                val byte = ackBuf.get(ValueLayout.JAVA_BYTE, i.toLong())
-                if (byte == PROTOCOL_ACK_BYTE) return session.acknowledged()
-                if (byte == SHUTDOWN_COMMAND_BYTE) {
-                    onShutdown("Parent Command during notification")
-                    return session.failed()
-                }
-            }
-            break
-        }
-        return session.failed()
     }
 
     companion object {

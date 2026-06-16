@@ -2,6 +2,8 @@ package io.mazewall.profiler.internal
 
 import io.mazewall.LinuxNative
 import io.mazewall.profiler.Profiler
+import io.mazewall.profiler.engine.SyscallEvent
+import io.mazewall.profiler.engine.SyscallEventState
 import io.mazewall.profiler.engine.TraceEvent
 import java.io.BufferedInputStream
 import java.io.DataInputStream
@@ -14,8 +16,8 @@ import java.util.logging.Logger
 
 internal class ProfilerTraceListener(
     private val socketFd: LinuxNative.FileDescriptor,
-    private val accumulatedLogs: MutableList<TraceEvent>,
-    private val stackTracesMap: MutableMap<TraceEvent, MutableList<Array<StackTraceElement>>>?,
+    private val accumulatedLogs: MutableList<SyscallEvent<SyscallEventState.Resolved>>,
+    private val stackTracesMap: MutableMap<SyscallEvent<SyscallEventState.Resolved>, MutableList<Array<StackTraceElement>>>?,
     private val pathCache: MutableMap<String, Long>,
     private val workerThreadProvider: () -> Thread?,
 ) {
@@ -62,8 +64,9 @@ internal class ProfilerTraceListener(
         try {
             while (true) {
                 state = TraceListenerState.AwaitingEvent
-                val event = readNextEvent(dis)
-                state = TraceListenerState.ProcessingEvent(event)
+                val legacyEvent = readNextEvent(dis)
+                val event = SyscallEvent.fromTraceEvent(legacyEvent)
+                state = TraceListenerState.ProcessingEvent(legacyEvent)
                 processEvent(event, ackBuf)
             }
         } catch (e: java.io.EOFException) {
@@ -109,10 +112,10 @@ internal class ProfilerTraceListener(
     }
 
     private fun processEvent(
-        event: TraceEvent,
+        event: SyscallEvent<SyscallEventState.Resolved>,
         ackBuf: MemorySegment,
     ) {
-        if (event is TraceEvent.File && event.filePaths.isNotEmpty() && isDuplicate(event)) {
+        if (event.paths.isNotEmpty() && isDuplicate(event)) {
             sendAckIfNecessary(event.pid, ackBuf)
             return
         }
@@ -122,9 +125,8 @@ internal class ProfilerTraceListener(
         sendAckIfNecessary(event.pid, ackBuf)
     }
 
-    private fun isDuplicate(event: TraceEvent): Boolean {
-        val paths = if (event is TraceEvent.File) event.filePaths else emptyList()
-        val cacheKey = "${event.syscallName}:${paths.sorted().joinToString(",")}"
+    private fun isDuplicate(event: SyscallEvent<SyscallEventState.Resolved>): Boolean {
+        val cacheKey = "${event.syscallName}:${event.paths.sorted().joinToString(",")}"
         val now = System.currentTimeMillis()
         val lastSeen = pathCache[cacheKey] ?: 0L
         return if (now - lastSeen < DEDUPLICATION_WINDOW_MS) {
@@ -136,7 +138,7 @@ internal class ProfilerTraceListener(
         }
     }
 
-    private fun accumulateStackTrace(event: TraceEvent) {
+    private fun accumulateStackTrace(event: SyscallEvent<SyscallEventState.Resolved>) {
         if (stackTracesMap == null) return
         val threadToProfile = Profiler.threadRegistry[io.mazewall.core.Pid(event.pid)] ?: workerThreadProvider()
         if (threadToProfile != null) {

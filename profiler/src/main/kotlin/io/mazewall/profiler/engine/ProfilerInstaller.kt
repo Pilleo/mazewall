@@ -27,12 +27,18 @@ internal object ProfilerInstaller {
     fun installProfilingFilterForThread(
         socketPath: String,
         policy: Policy<*, Uncompiled>,
-        accumulatedLogs: MutableList<TraceEvent>,
-        stackTracesMap: MutableMap<TraceEvent, MutableList<Array<StackTraceElement>>>?,
+        accumulatedLogs: MutableList<SyscallEvent<SyscallEventState.Resolved>>,
+        stackTracesMap: MutableMap<SyscallEvent<SyscallEventState.Resolved>, MutableList<Array<StackTraceElement>>>?,
         pathCache: MutableMap<String, Long>,
         workerThreadProvider: () -> Thread?,
         connectWithRetry: (String) -> Int = { path -> ProfilerSocket.connectWithRetry(path) },
-        startTraceListener: (Int, MutableList<TraceEvent>, MutableMap<TraceEvent, MutableList<Array<StackTraceElement>>>?, MutableMap<String, Long>, () -> Thread?) -> Unit,
+        startTraceListener: (
+            Int,
+            MutableList<SyscallEvent<SyscallEventState.Resolved>>,
+            MutableMap<SyscallEvent<SyscallEventState.Resolved>, MutableList<Array<StackTraceElement>>>?,
+            MutableMap<String, Long>,
+            () -> Thread?
+        ) -> Unit,
     ) {
         val session = ProfilerInstallerSession(
             socketPath = socketPath,
@@ -51,12 +57,18 @@ internal object ProfilerInstaller {
 internal class ProfilerInstallerSession(
     private val socketPath: String,
     private val policy: Policy<*, Uncompiled>,
-    private val accumulatedLogs: MutableList<TraceEvent>,
-    private val stackTracesMap: MutableMap<TraceEvent, MutableList<Array<StackTraceElement>>>?,
+    private val accumulatedLogs: MutableList<SyscallEvent<SyscallEventState.Resolved>>,
+    private val stackTracesMap: MutableMap<SyscallEvent<SyscallEventState.Resolved>, MutableList<Array<StackTraceElement>>>?,
     private val pathCache: MutableMap<String, Long>,
     private val workerThreadProvider: () -> Thread?,
     private val connectWithRetry: (String) -> Int,
-    private val startTraceListener: (Int, MutableList<TraceEvent>, MutableMap<TraceEvent, MutableList<Array<StackTraceElement>>>?, MutableMap<String, Long>, () -> Thread?) -> Unit,
+    private val startTraceListener: (
+        Int,
+        MutableList<SyscallEvent<SyscallEventState.Resolved>>,
+        MutableMap<SyscallEvent<SyscallEventState.Resolved>, MutableList<Array<StackTraceElement>>>?,
+        MutableMap<String, Long>,
+        () -> Thread?
+    ) -> Unit,
 ) {
     private val installLatch = CountDownLatch(1)
     private val proceedLatch = CountDownLatch(1)
