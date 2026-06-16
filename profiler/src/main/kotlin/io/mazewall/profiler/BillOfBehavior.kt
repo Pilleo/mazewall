@@ -204,7 +204,7 @@ data class BillOfBehavior(
             syscalls = syscalls,
             execs = execs.filterNot { profile.matches(it) }.toSet(),
             stackProfile = stackProfile.filterKeys { event ->
-                event.paths.none { profile.matches(it) }
+                if (event is TraceEvent.File) event.filePaths.none { profile.matches(it) } else true
             },
         )
     }
