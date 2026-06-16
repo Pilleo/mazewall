@@ -128,6 +128,7 @@ class "Policy" as io.mazewall.Policy<S extends PolicyScope, State extends Policy
   +List<BpfInstruction> getCompiledFilters()
   +boolean isSyscallAllowed(Syscall)
   +Map<Integer, SeccompAction> syscallActionNumbers(Arch)
+  +List<SyscallInspector> getSyscallInspectors()
   + {static}Builder builder()
   + {static}Builder threadLocalBuilder()
 }
@@ -562,6 +563,10 @@ class "BpfProgram" as io.mazewall.seccomp.BpfProgram {
   + {static}Uninitialized builder()
   + {static}BpfProgram dsl(Arch, Consumer<NrLoaded>)
 }
+class "Clone3Inspector" as io.mazewall.seccomp.Clone3Inspector {
+  +void emitSpecial(NrLoaded, Arch, InspectionContext, Set<Integer>)
+  +List<SyscallInspection> getInspections(Arch, InspectionContext)
+}
 class "InspectionContext" as io.mazewall.seccomp.InspectionContext {
   +Map<Integer, SeccompAction> getSyscallActions()
   +SeccompAction getDefaultAction()
@@ -573,6 +578,7 @@ class "InspectionContext" as io.mazewall.seccomp.InspectionContext {
 }
 class "MmapExecInspector" as io.mazewall.seccomp.MmapExecInspector {
   +List<SyscallInspection> getInspections(Arch, InspectionContext)
+  +void emitSpecial(NrLoaded, Arch, InspectionContext, Set<Integer>)
 }
 class "PureJavaBpfEngine" as io.mazewall.seccomp.PureJavaBpfEngine {
   + {static}PureJavaBpfEngine INSTANCE
@@ -600,13 +606,16 @@ class "SyscallInspection" as io.mazewall.seccomp.SyscallInspection {
   +SeccompAction getIfNotMatched()
 }
 interface "SyscallInspector" as io.mazewall.seccomp.SyscallInspector {
-  + {abstract}List<SyscallInspection> getInspections(Arch, InspectionContext)
+  +List<SyscallInspection> getInspections(Arch, InspectionContext)
+  +void emitSpecial(NrLoaded, Arch, InspectionContext, Set<Integer>)
 }
 class "ThreadCloneInspector" as io.mazewall.seccomp.ThreadCloneInspector {
   +List<SyscallInspection> getInspections(Arch, InspectionContext)
+  +void emitSpecial(NrLoaded, Arch, InspectionContext, Set<Integer>)
 }
 class "UnsafePrctlInspector" as io.mazewall.seccomp.UnsafePrctlInspector {
   +List<SyscallInspection> getInspections(Arch, InspectionContext)
+  +void emitSpecial(NrLoaded, Arch, InspectionContext, Set<Integer>)
 }
 io.mazewall.BillOfBehaviorDto --> io.mazewall.StackProfileEntryDto
 io.mazewall.BpfFilter --> io.mazewall.BpfFilter
@@ -652,6 +661,7 @@ io.mazewall.landlock.LandlockSession --> io.mazewall.landlock.LandlockState
 io.mazewall.landlock.LandlockSession --> io.mazewall.Policy
 io.mazewall.seccomp.BpfBuilder --> io.mazewall.seccomp.BpfMacro
 io.mazewall.seccomp.BpfProgram --> io.mazewall.seccomp.BpfInstruction
+io.mazewall.seccomp.Clone3Inspector .u.|> io.mazewall.seccomp.SyscallInspector
 io.mazewall.seccomp.InspectionContext --> io.mazewall.core.SeccompAction
 io.mazewall.seccomp.MmapExecInspector .u.|> io.mazewall.seccomp.SyscallInspector
 io.mazewall.seccomp.PureJavaBpfEngine .u.|> io.mazewall.seccomp.SeccompEngine
