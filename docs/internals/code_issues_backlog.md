@@ -33,13 +33,6 @@
 1. Add a utility to map common `Int` errnos to their symbolic names (e.g., `1 -> "EPERM"`, `13 -> "EACCES"`).
 2. Update `SyscallResult.Error.toString()` and `throwErrno()` to include this symbolic name for better developer feedback.
 
-### 🔵 [Severity: ENHANCEMENT]: Sealed Interface `NativeArg` for Syscall Parameter Safety
-**Context:** The `NativeEngine` and `LinuxNative.syscall` methods currently use `Any?` for system call arguments, which are then converted to `Long` via a runtime `when` expression in `RealNativeHelper.toLong`. This is a type-safety hole that allows passing unsupported types, leading to runtime `IllegalArgumentException`.
-**Needed:** Introduce a sealed interface `NativeArg` to represent all valid native arguments.
-1. Define `NativeArg` with variants like `LongArg`, `MemoryArg`, `FdArg`, `PidArg`, etc.
-2. Update the `NativeEngine` interface to use `NativeArg` instead of `Any?`.
-3. This eliminates the "else" branch in `toLong` and ensures that all syscall parameters are validated at compile-time.
-
 ### 🔵 [Severity: ENHANCEMENT]: Polymorphic `TraceEvent` Hierarchy (Sealed Classes)
 **Target:** `io.mazewall.profiler.engine.TraceEvent`
 **Context:** `TraceEvent` is currently a flat data class with a `syscallName: String` and a raw `LongArray` of arguments. The `SyscallPathResolver` and `BobCompiler` use large `when(syscallName)` blocks to manually index into the `LongArray`. This is brittle and has already led to argument-mapping bugs (e.g., the `SYMLINKAT` error).
@@ -108,9 +101,6 @@
 2. Refactor `NativeTransaction` to `NativeTransaction<Mode>`.
 3. Update `NativeEngine` methods to demand specific modes via context receivers, e.g., `context(_: NativeTransaction<out ReadOnly>)` for `processVmReadv` and `context(_: NativeTransaction<ReadWrite>)` for `prctl`. This ensures at compile-time that restricted scopes cannot perform mutating operations.
 
-### ✅ [RESOLVED]: Monadic Combinators for `SyscallResult`
-**Context:** Currently, native system calls return `SyscallResult` which requires manual `when` branching or `.getOrThrow()` calls. This leads to imperative boilerplate and potential unhandled errors.
-**Fix:** Refactored `SyscallResult` to `SyscallResult<out T>` and added standard functional combinators like `map`, `flatMap`, `recover`, `onSuccess`, and `onFailure`.
 
 ### 🔵 [Severity: ENHANCEMENT]: Type-State Enforced BPF DSL
 **Target:** `io.mazewall.seccomp.BpfProgram.Builder`
@@ -120,45 +110,12 @@
 2. `jmpIfTrue(allowLabel)`
 This ensures jump targets are validated at compile time and guarantees no dangling branches exist in the BPF program before it reaches the kernel.
 
-### ✅ [RESOLVED]: Value Class Completeness (Primitive Obsession)
-**Context:** While value classes were introduced for `FileDescriptor` and `Errno`, many other native concepts (like `MemoryAddress`, `Pid`, and `Uid`) were still passed as raw `Long` or `Int` primitives.
-**Fix:** Introduced `Pid`, `Uid`, and `MemoryAddress` value classes and integrated them into the `NativeEngine` interfaces and `RealNativeHelper`.
 
-### ✅ [DONE] [Severity: MEDIUM]: Lack of Compile-Time Enforced Memory and Lifetime Safety for FFM Native Bindings
-**Target:** `io.mazewall.enforcer` (core FFM bindings and MemorySegment management)
-**Context:** Currently, FFM native memory allocations (`MemorySegment`) and lifecycle management (`Arena`) are managed through raw, imperative calls. While standard unit tests and JIT warmups verify these boundaries at runtime, developers can easily introduce memory safety bugs (such as Use-After-Close temporal violations, offset alignment spatial errors, or thread-confinement violations) that bypass compiler checks. Kotlin's modern type system and compiler features could be leveraged to enforce these invariants statically.
-**Needed:** Define and adopt the following compile-time safety patterns across the codebase:
-1. **Temporal Safety via Scoped Lambdas:** Hide raw `Arena` creation behind scoped inline utility functions (e.g., `nativeScope { ... }`) that receive `Arena` as a Context Parameter or receiver, ensuring segments cannot escape their bounded lifetimes.
-2. **Spatial/ABI Safety via Kotlin Value Classes (or Java Records):** Wrap raw `MemorySegment` structs in Kotlin `@JvmInline value class` wrappers that encapsulate layout offsets. This guarantees that offset math is hidden from developers and type-checked by the compiler with zero runtime allocation overhead.
-3. **Confinement Safety via Sealed State Hierarchies:** Model segment ownership transitions (e.g., thread-confined vs. shared states) using sealed interfaces to enforce safe multi-threaded segment handling via compile-time exhaustive checks.
-4. **Static ArchUnit Checks:** Enforce lint-level restrictions on raw `MemorySegment` access (e.g., prohibiting raw `.get()` or `.set()` calls outside of dedicated `bindings` or wrapper classes).
 
-**Memory Management (MM) Blind Spots & Mitigations:**
-Even with compile-time enforcements, the lack of a native borrow checker introduces four critical blind spots:
-*   **The Escape Bypass (Temporal Leak):** Scoped lambdas (`nativeScope`) do not prevent `MemorySegment` references from being returned and escaping the closed arena scope.
-    - *Mitigation:* Restrict `nativeScope` functions to return only primitive values, arrays, or deep-copied Java heap structures. Enforce this via ArchUnit checks that block returning raw segments or wrappers from scopes.
-*   **Dangling Native Pointers (Un-tracked Lifetime Dependencies):** Storing a pointer (memory address) to a struct allocated in a short-lived arena inside a struct allocated in a longer-lived arena results in a dangling pointer when the child arena is closed.
-    - *Mitigation:* Establish strict coding standards requiring hierarchically nested structs to be allocated within the *same* `Arena` instance.
-*   **GC-Managed Auto Arenas (`Arena.ofAuto()`):** GC-managed segments can be cleaned up while their raw memory addresses are still referenced by native code or kernel structures.
-    - *Mitigation:* Never use `Arena.ofAuto()` for segments whose addresses are passed to the Linux kernel (like BPF filters or UNIX sockets). Use confined, explicitly closed arenas bound to thread lifecycles.
-*   **Reinterpret Bounds Bypasses:** Developers can extract raw segments from type-safe wrappers and invoke `MemorySegment.reinterpret(Long.MAX_VALUE)` to reset bounds.
-    - *Mitigation:* Block `reinterpret()` calls at the linter/ArchUnit level except within audited native bootstrap bindings.
-
-### ✅ [DONE] [Severity: HIGH]: Interface Segregation Violation and Fat Class Smell in `LinuxNative` / `RealNativeEngine`
-**Target:** `io.mazewall.LinuxNative`, `io.mazewall.NativeEngine`, `io.mazewall.RealNativeEngine`
-**Context:** `LinuxNative` and `RealNativeEngine` implemented *all* segment-specific native engine interfaces directly, turning them into monolithic, fat classes.
-**Needed:** Decouple `LinuxNative` from the massive inheritance hierarchy. Instead of inheriting all traits, `LinuxNative` should delegate to individual, modular sub-engines (e.g. `engine.fileSystem`, `engine.networking`) that implement only their specific interface. `MockNativeEngine` can then be composed of specific mock sub-engines.
-**Resolved:** Redefined `NativeEngine` as a container of `fileSystem`, `networking`, `process`, and `memory` sub-engines. `RealNativeEngine` now delegates to specialized internal objects, and `LinuxNative` entry point was refactored to use property-based access, removing monolithic top-level delegates.
 
 ## Critical Sandbox Escape & Security Constraints
 
-### ✅ [RESOLVED]: Landlock Symlink Rejection Bypass via Canonicalization
-**Context:** The Landlock documentation states that rules explicitly use `O_NOFOLLOW` to reject symlinks and prevent attackers from redirecting path rules. However, `addRule` called `SandboxedPath.of` which used `toRealPath()`, silently bypassing this protection.
-**Fix:** Switched to syntactic normalization (`Paths.get(path).toAbsolutePath().normalize()`) in `SandboxedPath.of`. This defers symlink resolution to the kernel, which then correctly rejects links via `O_NOFOLLOW`.
 
-### ✅ [RESOLVED]: Blacklist policies trigger silent Landlock filesystem lockdown due to `io_uring` check
-**Context:** Landlock was automatically triggered if `io_uring` syscalls were allowed. If no FS rules were provided, this resulted in a total FS lockdown.
-**Fix:** Removed the `io_uring` check from `Landlock.shouldApplyLandlock`.
 
 ### 🔴 [Severity: CRITICAL]: Standard Java Concurrency (`Virtual Threads`, `CompletableFuture`) trivially bypasses Thread-Scoped (Tier 2) containment without ACE
 **Target:** `io.mazewall.enforcer.ContainedExecutors` and `docs/internals/SECURITY_CONSIDERATIONS.md`
@@ -783,6 +740,52 @@ If an attacker achieves native arbitrary code execution (ACE) or has access to a
 ### 🟢 [RESOLVED]: `SbobParser` fails to parse JSON Unicode escape sequences (`\uXXXX`)
 **Target:** `io.mazewall.SbobParser`
 **Fix:** Completely removed the handwritten, custom `JsonTokenizer` state machine and switched to `kotlinx.serialization` for parsing SBoB JSON files, which handles Unicode escapes natively and correctly out of the box.
+
+### 🟢 [RESOLVED]: Sealed Interface `NativeArg` for Syscall Parameter Safety
+**Context:** The `NativeEngine` and `LinuxNative.syscall` methods used `Any?` for system call arguments, which were then converted to `Long` via a runtime `when` expression in `RealNativeHelper.toLong`. This was a type-safety hole that allowed passing unsupported types, leading to runtime `IllegalArgumentException`.
+**Fix:** Introduced the `NativeArg` sealed interface and its concrete subclasses (`LongArg`, `IntArg`, `MemoryArg`, `FdArg`, `PidArg`, etc.). Refactored `NativeEngine`, `LinuxNative`, and call sites to use `NativeArg`, ensuring compile-time safety and eliminating dynamic runtime casts.
+
+### ✅ [RESOLVED]: Monadic Combinators for `SyscallResult`
+**Context:** Currently, native system calls return `SyscallResult` which requires manual `when` branching or `.getOrThrow()` calls. This leads to imperative boilerplate and potential unhandled errors.
+**Fix:** Refactored `SyscallResult` to `SyscallResult<out T>` and added standard functional combinators like `map`, `flatMap`, `recover`, `onSuccess`, and `onFailure`.
+
+### ✅ [RESOLVED]: Value Class Completeness (Primitive Obsession)
+**Context:** While value classes were introduced for `FileDescriptor` and `Errno`, many other native concepts (like `MemoryAddress`, `Pid`, and `Uid`) were still passed as raw `Long` or `Int` primitives.
+**Fix:** Introduced `Pid`, `Uid`, and `MemoryAddress` value classes and integrated them into the `NativeEngine` interfaces and `RealNativeHelper`.
+
+### ✅ [DONE] [Severity: MEDIUM]: Lack of Compile-Time Enforced Memory and Lifetime Safety for FFM Native Bindings
+**Target:** `io.mazewall.enforcer` (core FFM bindings and MemorySegment management)
+**Context:** Currently, FFM native memory allocations (`MemorySegment`) and lifecycle management (`Arena`) are managed through raw, imperative calls. While standard unit tests and JIT warmups verify these boundaries at runtime, developers can easily introduce memory safety bugs (such as Use-After-Close temporal violations, offset alignment spatial errors, or thread-confinement violations) that bypass compiler checks. Kotlin's modern type system and compiler features could be leveraged to enforce these invariants statically.
+**Needed:** Define and adopt the following compile-time safety patterns across the codebase:
+1. **Temporal Safety via Scoped Lambdas:** Hide raw `Arena` creation behind scoped inline utility functions (e.g., `nativeScope { ... }`) that receive `Arena` as a Context Parameter or receiver, ensuring segments cannot escape their bounded lifetimes.
+2. **Spatial/ABI Safety via Kotlin Value Classes (or Java Records):** Wrap raw `MemorySegment` structs in Kotlin `@JvmInline value class` wrappers that encapsulate layout offsets. This guarantees that offset math is hidden from developers and type-checked by the compiler with zero runtime allocation overhead.
+3. **Confinement Safety via Sealed State Hierarchies:** Model segment ownership transitions (e.g., thread-confined vs. shared states) using sealed interfaces to enforce safe multi-threaded segment handling via compile-time exhaustive checks.
+4. **Static ArchUnit Checks:** Enforce lint-level restrictions on raw `MemorySegment` access (e.g., prohibiting raw `.get()` or `.set()` calls outside of dedicated `bindings` or wrapper classes).
+
+**Memory Management (MM) Blind Spots & Mitigations:**
+Even with compile-time enforcements, the lack of a native borrow checker introduces four critical blind spots:
+*   **The Escape Bypass (Temporal Leak):** Scoped lambdas (`nativeScope`) do not prevent `MemorySegment` references from being returned and escaping the closed arena scope.
+    - *Mitigation:* Restrict `nativeScope` functions to return only primitive values, arrays, or deep-copied Java heap structures. Enforce this via ArchUnit checks that block returning raw segments or wrappers from scopes.
+*   **Dangling Native Pointers (Un-tracked Lifetime Dependencies):** Storing a pointer (memory address) to a struct allocated in a short-lived arena inside a struct allocated in a longer-lived arena results in a dangling pointer when the child arena is closed.
+    - *Mitigation:* Establish strict coding standards requiring hierarchically nested structs to be allocated within the *same* `Arena` instance.
+*   **GC-Managed Auto Arenas (`Arena.ofAuto()`):** GC-managed segments can be cleaned up while their raw memory addresses are still referenced by native code or kernel structures.
+    - *Mitigation:* Never use `Arena.ofAuto()` for segments whose addresses are passed to the Linux kernel (like BPF filters or UNIX sockets). Use confined, explicitly closed arenas bound to thread lifecycles.
+*   **Reinterpret Bounds Bypasses:** Developers can extract raw segments from type-safe wrappers and invoke `MemorySegment.reinterpret(Long.MAX_VALUE)` to reset bounds.
+    - *Mitigation:* Block `reinterpret()` calls at the linter/ArchUnit level except within audited native bootstrap bindings.
+
+### ✅ [DONE] [Severity: HIGH]: Interface Segregation Violation and Fat Class Smell in `LinuxNative` / `RealNativeEngine`
+**Target:** `io.mazewall.LinuxNative`, `io.mazewall.NativeEngine`, `io.mazewall.RealNativeEngine`
+**Context:** `LinuxNative` and `RealNativeEngine` implemented *all* segment-specific native engine interfaces directly, turning them into monolithic, fat classes.
+**Needed:** Decouple `LinuxNative` from the massive inheritance hierarchy. Instead of inheriting all traits, `LinuxNative` should delegate to individual, modular sub-engines (e.g. `engine.fileSystem`, `engine.networking`) that implement only their specific interface. `MockNativeEngine` can then be composed of specific mock sub-engines.
+**Resolved:** Redefined `NativeEngine` as a container of `fileSystem`, `networking`, `process`, and `memory` sub-engines. `RealNativeEngine` now delegates to specialized internal objects, and `LinuxNative` entry point was refactored to use property-based access, removing monolithic top-level delegates.
+
+### ✅ [RESOLVED]: Landlock Symlink Rejection Bypass via Canonicalization
+**Context:** The Landlock documentation states that rules explicitly use `O_NOFOLLOW` to reject symlinks and prevent attackers from redirecting path rules. However, `addRule` called `SandboxedPath.of` which used `toRealPath()`, silently bypassing this protection.
+**Fix:** Switched to syntactic normalization (`Paths.get(path).toAbsolutePath().normalize()`) in `SandboxedPath.of`. This defers symlink resolution to the kernel, which then correctly rejects links via `O_NOFOLLOW`.
+
+### ✅ [RESOLVED]: Blacklist policies trigger silent Landlock filesystem lockdown due to `io_uring` check
+**Context:** Landlock was automatically triggered if `io_uring` syscalls were allowed. If no FS rules were provided, this resulted in a total FS lockdown.
+**Fix:** Removed the `io_uring` check from `Landlock.shouldApplyLandlock`.
 
 EOF
 
