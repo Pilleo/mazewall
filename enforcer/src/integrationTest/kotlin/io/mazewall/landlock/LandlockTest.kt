@@ -8,6 +8,8 @@ import io.mazewall.MockNativeEngine
 import io.mazewall.NativeTransaction
 import io.mazewall.Policy
 import io.mazewall.RealNativeEngine
+import io.mazewall.core.FileDescriptor
+import io.mazewall.core.FileDescriptorRole
 import io.mazewall.core.Syscall
 import io.mazewall.enforcer.ContainedExecutors
 import io.mazewall.enforcer.ContainmentViolationException
@@ -196,7 +198,7 @@ class LandlockTest : BaseIntegrationTest() {
             .build()
         val executor = Executors.newSingleThreadExecutor()
         val safeExecutor = ContainedExecutors.wrap(executor, policy)
-        
+
         // The policy allows 'symlink', but Landlock rejects symlinks in rulesets (O_NOFOLLOW).
         // Therefore, access to the real file should be denied.
         try {
@@ -567,16 +569,16 @@ class LandlockTest : BaseIntegrationTest() {
 
     @Test
     fun `testLandlockStateDataClassCoverage`() {
-        val s1 = LandlockState.ConfiguringRuleset(LinuxNative.FileDescriptor(10), 5)
-        val s2 = LandlockState.ConfiguringRuleset(LinuxNative.FileDescriptor(10), 5)
-        val s3 = LandlockState.ConfiguringRuleset(LinuxNative.FileDescriptor(11), 5)
+        val s1 = LandlockState.ConfiguringRuleset(FileDescriptor.unsafe(10), 5)
+        val s2 = LandlockState.ConfiguringRuleset(FileDescriptor.unsafe(10), 5)
+        val s3 = LandlockState.ConfiguringRuleset(FileDescriptor.unsafe(11), 5)
         assertEquals(s1, s2)
         assertNotEquals<LandlockState>(s1, s3)
         assertEquals(s1.hashCode(), s2.hashCode())
         assertNotNull(s1.toString())
         assertEquals(10, s1.rulesetFd.value)
         assertEquals(5, s1.abi)
-        val copied = s1.copy(rulesetFd = LinuxNative.FileDescriptor(12))
+        val copied = s1.copy(rulesetFd = FileDescriptor.unsafe(12))
         assertEquals(12, copied.rulesetFd.value)
 
         val q1 = LandlockState.QueryingAbi(3)
@@ -595,13 +597,13 @@ class LandlockTest : BaseIntegrationTest() {
         val cCopied = c1.copy(abi = 4)
         assertEquals(4, cCopied.abi)
 
-        val e1 = LandlockState.Enforcing(LinuxNative.FileDescriptor(10))
-        val e2 = LandlockState.Enforcing(LinuxNative.FileDescriptor(10))
+        val e1 = LandlockState.Enforcing(FileDescriptor.unsafe(10))
+        val e2 = LandlockState.Enforcing(FileDescriptor.unsafe(10))
         assertEquals(e1, e2)
         assertNotEquals<LandlockState>(e1, LandlockState.Applied)
         assertEquals(e1.hashCode(), e2.hashCode())
         assertNotNull(e1.toString())
-        val eCopied = e1.copy(rulesetFd = LinuxNative.FileDescriptor(11))
+        val eCopied = e1.copy(rulesetFd = FileDescriptor.unsafe(11))
         assertEquals(11, eCopied.rulesetFd.value)
 
         val err = RuntimeException("test")

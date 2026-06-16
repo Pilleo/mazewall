@@ -1,6 +1,8 @@
 package io.mazewall.profiler.engine
 
 import io.mazewall.LinuxNative
+import io.mazewall.core.FileDescriptor
+import io.mazewall.core.FileDescriptorRole
 import io.mazewall.ffi.Layouts
 import io.mazewall.ffi.NativeConstants
 import io.mazewall.getFdOrThrow
@@ -16,7 +18,7 @@ import java.nio.charset.StandardCharsets
  */
 interface TraceEventPublisher {
     fun sendTraceEvent(
-        socketFd: LinuxNative.FileDescriptor,
+        socketFd: FileDescriptor<*>,
         event: SyscallEvent<SyscallEventState.Resolved>,
     )
 }
@@ -56,26 +58,26 @@ interface NativeIoOperations {
     ): LinuxNative.SyscallResult<Long, *>
 
     fun read(
-        fd: LinuxNative.FileDescriptor,
+        fd: FileDescriptor<*>,
         buf: MemorySegment,
         count: Long,
     ): LinuxNative.SyscallResult<Long, *>
 
     fun write(
-        fd: LinuxNative.FileDescriptor,
+        fd: FileDescriptor<*>,
         buf: MemorySegment,
         count: Long,
     ): LinuxNative.SyscallResult<Long, *>
 
     fun recv(
-        sockfd: LinuxNative.FileDescriptor,
+        sockfd: FileDescriptor<*>,
         buf: MemorySegment,
         len: Long,
         flags: Int,
     ): LinuxNative.SyscallResult<Long, *>
 
     fun ioctl(
-        fd: LinuxNative.FileDescriptor,
+        fd: FileDescriptor<*>,
         request: Long,
         arg: MemorySegment,
     ): LinuxNative.SyscallResult<Long, *>
@@ -85,13 +87,13 @@ interface NativeIoOperations {
  * Interface for socket creation and connection handling.
  */
 interface SocketLifecycleManager {
-    fun createServer(socketPath: String): LinuxNative.FileDescriptor
+    fun createServer(socketPath: String): FileDescriptor<FileDescriptorRole.UnixSocket>
 
-    fun accept(serverFd: LinuxNative.FileDescriptor): LinuxNative.FileDescriptor
+    fun accept(serverFd: FileDescriptor<FileDescriptorRole.UnixSocket>): FileDescriptor<FileDescriptorRole.UnixSocket>
 
-    fun close(fd: LinuxNative.FileDescriptor)
+    fun close(fd: FileDescriptor<*>)
 
-    fun recvDescriptor(socketFd: LinuxNative.FileDescriptor): LinuxNative.FileDescriptor?
+    fun recvDescriptor(socketFd: FileDescriptor<FileDescriptorRole.UnixSocket>): FileDescriptor<FileDescriptorRole.SeccompNotif>?
 }
 
 /**
@@ -120,7 +122,7 @@ object RealProfilerTransport : ProfilerTransport {
     private val JAVA_LONG_BE_UNALIGNED = ValueLayout.JAVA_LONG.withOrder(java.nio.ByteOrder.BIG_ENDIAN).withByteAlignment(1)
 
     override fun sendTraceEvent(
-        socketFd: LinuxNative.FileDescriptor,
+        socketFd: FileDescriptor<*>,
         event: SyscallEvent<SyscallEventState.Resolved>,
     ) {
         Arena.ofConfined().use { arena ->
@@ -188,7 +190,7 @@ object RealProfilerTransport : ProfilerTransport {
         ioctl(session.listenerFd, SECCOMP_IOCTL_NOTIF_SEND, resp)
     }
 
-    override fun recvDescriptor(socketFd: LinuxNative.FileDescriptor): LinuxNative.FileDescriptor? {
+    override fun recvDescriptor(socketFd: FileDescriptor<FileDescriptorRole.UnixSocket>): FileDescriptor<FileDescriptorRole.SeccompNotif>? {
         return Arena.ofConfined().use { arena ->
             val dummyByte = arena.allocate(ValueLayout.JAVA_BYTE)
             val controlBuf = arena.allocate(24)
@@ -207,7 +209,7 @@ object RealProfilerTransport : ProfilerTransport {
                     val cmsgLevel = controlBuf.get(ValueLayout.JAVA_INT, CMSG_LEVEL_OFF)
                     val cmsgType = controlBuf.get(ValueLayout.JAVA_INT, CMSG_TYPE_OFF)
                     if (cmsgLen >= CMSG_LEN_VAL && cmsgLevel == SOL_SOCKET_VAL && cmsgType == SCM_RIGHTS_VAL) {
-                        return@use LinuxNative.FileDescriptor(controlBuf.get(ValueLayout.JAVA_INT, CMSG_DATA_OFF))
+                        return@use FileDescriptor.unsafe<FileDescriptorRole.SeccompNotif>(controlBuf.get(ValueLayout.JAVA_INT, CMSG_DATA_OFF))
                     }
                 }.onFailure { errno, _ ->
                     if (errno == 4) return@onFailure // EINTR, continue loop
@@ -225,34 +227,34 @@ object RealProfilerTransport : ProfilerTransport {
     ): LinuxNative.SyscallResult<Long, *> = LinuxNative.withTransaction { LinuxNative.poll(fds, nfds, timeout) }
 
     override fun read(
-        fd: LinuxNative.FileDescriptor,
+        fd: FileDescriptor<*>,
         buf: MemorySegment,
         count: Long,
     ): LinuxNative.SyscallResult<Long, *> = LinuxNative.withTransaction { LinuxNative.memory.read(fd, buf, count) }
 
     override fun write(
-        fd: LinuxNative.FileDescriptor,
+        fd: FileDescriptor<*>,
         buf: MemorySegment,
         count: Long,
     ): LinuxNative.SyscallResult<Long, *> = LinuxNative.withTransaction { LinuxNative.memory.write(fd, buf, count) }
 
     override fun recv(
-        sockfd: LinuxNative.FileDescriptor,
+        sockfd: FileDescriptor<*>,
         buf: MemorySegment,
         len: Long,
         flags: Int,
     ): LinuxNative.SyscallResult<Long, *> = LinuxNative.withTransaction { LinuxNative.networking.recv(sockfd, buf, len, flags) }
 
     override fun ioctl(
-        fd: LinuxNative.FileDescriptor,
+        fd: FileDescriptor<*>,
         request: Long,
         arg: MemorySegment,
     ): LinuxNative.SyscallResult<Long, *> = LinuxNative.withTransaction { LinuxNative.ioctl(fd, request, arg) }
 
-    override fun createServer(socketPath: String): LinuxNative.FileDescriptor {
+    override fun createServer(socketPath: String): FileDescriptor<FileDescriptorRole.UnixSocket> {
         val fd = LinuxNative.withTransaction {
             LinuxNative.networking.socket(AF_UNIX, SOCK_STREAM, 0)
-        }.getFdOrThrow("socket(AF_UNIX)")
+        }.getFdOrThrow("socket(AF_UNIX)").let { FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(it.value) }
 
         Arena.ofConfined().use { arena ->
             val addr = arena.allocate(Layouts.SOCKADDR_UN)
@@ -278,12 +280,12 @@ object RealProfilerTransport : ProfilerTransport {
         return fd
     }
 
-    override fun accept(serverFd: LinuxNative.FileDescriptor): LinuxNative.FileDescriptor {
+    override fun accept(serverFd: FileDescriptor<FileDescriptorRole.UnixSocket>): FileDescriptor<FileDescriptorRole.UnixSocket> {
         val res = LinuxNative.withTransaction { LinuxNative.networking.accept(serverFd, MemorySegment.NULL, MemorySegment.NULL) }
-        return res.getFdOrThrow("accept")
+        return res.getFdOrThrow("accept").let { FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(it.value) }
     }
 
-    override fun close(fd: LinuxNative.FileDescriptor) {
+    override fun close(fd: FileDescriptor<*>) {
         LinuxNative.fileSystem.close(fd)
     }
 }

@@ -1,6 +1,8 @@
 package io.mazewall.profiler.engine
 
 import io.mazewall.LinuxNative
+import io.mazewall.core.FileDescriptor
+import io.mazewall.core.FileDescriptorRole
 
 /**
  * States representing the lifecycle of the Profiler Daemon server.
@@ -11,13 +13,13 @@ internal sealed interface ProfilerDaemonState {
 
     /** The daemon server is creating and binding the socket. */
     data class Listening(
-        val serverFd: LinuxNative.FileDescriptor,
+        val serverFd: FileDescriptor<FileDescriptorRole.UnixSocket>,
         val socketPath: String,
     ) : ProfilerDaemonState
 
     /** The daemon server is actively listening and processing client connections. */
     data class Active(
-        val serverFd: LinuxNative.FileDescriptor,
+        val serverFd: FileDescriptor<FileDescriptorRole.UnixSocket>,
     ) : ProfilerDaemonState
 
     /** Global shutdown has been triggered. */

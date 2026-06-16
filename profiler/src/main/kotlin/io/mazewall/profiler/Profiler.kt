@@ -3,6 +3,8 @@ package io.mazewall.profiler
 import io.mazewall.LinuxNative
 import io.mazewall.Policy
 import io.mazewall.Uncompiled
+import io.mazewall.core.FileDescriptor
+import io.mazewall.core.FileDescriptorRole
 import io.mazewall.core.Pid
 import io.mazewall.profiler.compiler.BobCompiler
 import io.mazewall.profiler.engine.ProfilerInstaller
@@ -155,7 +157,7 @@ object Profiler {
             pathCache = pathCache,
             workerThreadProvider = workerThreadProvider,
             startTraceListener = { fd, logs, traces, cache, provider ->
-                ProfilerTraceListener(LinuxNative.FileDescriptor(fd), logs, traces, cache, provider).start()
+                ProfilerTraceListener(FileDescriptor.unsafe<FileDescriptorRole.Generic>(fd), logs, traces, cache, provider).start()
             },
         )
     }

@@ -1,6 +1,8 @@
 package io.mazewall.profiler.engine
 
 import io.mazewall.LinuxNative
+import io.mazewall.core.FileDescriptor
+import io.mazewall.core.FileDescriptorRole
 import io.mazewall.ffi.Layouts
 import io.mazewall.ffi.NativeConstants
 import io.mazewall.profiler.engine.SyscallEvent
@@ -28,7 +30,7 @@ class ProfilerDaemonTest {
         var lastErrorNr = 0
 
         override fun sendTraceEvent(
-            socketFd: LinuxNative.FileDescriptor,
+            socketFd: FileDescriptor<*>,
             event: SyscallEvent<SyscallEventState.Resolved>,
         ) {
             sentEvents.add(event)
@@ -52,7 +54,7 @@ class ProfilerDaemonTest {
             ioctlCalls.add(SECCOMP_IOCTL_NOTIF_SEND)
         }
 
-        override fun recvDescriptor(socketFd: LinuxNative.FileDescriptor): LinuxNative.FileDescriptor? = LinuxNative.FileDescriptor(5)
+        override fun recvDescriptor(socketFd: FileDescriptor<FileDescriptorRole.UnixSocket>): FileDescriptor<FileDescriptorRole.SeccompNotif>? = FileDescriptor.unsafe(5)
 
         override fun poll(
             fds: MemorySegment,
@@ -68,7 +70,7 @@ class ProfilerDaemonTest {
         }
 
         override fun read(
-            fd: LinuxNative.FileDescriptor,
+            fd: FileDescriptor<*>,
             buf: MemorySegment,
             count: Long,
         ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
@@ -79,20 +81,20 @@ class ProfilerDaemonTest {
         }
 
         override fun write(
-            fd: LinuxNative.FileDescriptor,
+            fd: FileDescriptor<*>,
             buf: MemorySegment,
             count: Long,
         ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(count)
 
         override fun recv(
-            sockfd: LinuxNative.FileDescriptor,
+            sockfd: FileDescriptor<*>,
             buf: MemorySegment,
             len: Long,
             flags: Int,
         ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(len)
 
         override fun ioctl(
-            fd: LinuxNative.FileDescriptor,
+            fd: FileDescriptor<*>,
             request: Long,
             arg: MemorySegment,
         ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
@@ -106,11 +108,11 @@ class ProfilerDaemonTest {
             return LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(0L)
         }
 
-        override fun createServer(socketPath: String): LinuxNative.FileDescriptor = LinuxNative.FileDescriptor(99)
+        override fun createServer(socketPath: String): FileDescriptor<FileDescriptorRole.UnixSocket> = FileDescriptor.unsafe(99)
 
-        override fun accept(serverFd: LinuxNative.FileDescriptor): LinuxNative.FileDescriptor = LinuxNative.FileDescriptor(100)
+        override fun accept(serverFd: FileDescriptor<FileDescriptorRole.UnixSocket>): FileDescriptor<FileDescriptorRole.UnixSocket> = FileDescriptor.unsafe(100)
 
-        override fun close(fd: LinuxNative.FileDescriptor) {}
+        override fun close(fd: FileDescriptor<*>) {}
     }
 
     private class MockReader : ProfilerMemoryReader {
@@ -133,8 +135,8 @@ class ProfilerDaemonTest {
         val syscallMap = mapOf(2 to "OPEN")
         var shutdownCalled = false
         val handler = ProfilerSessionHandler(
-            LinuxNative.FileDescriptor(10),
-            LinuxNative.FileDescriptor(20),
+            FileDescriptor.unsafe(10),
+            FileDescriptor.unsafe(20),
             transport,
             transport,
             transport,
@@ -176,8 +178,8 @@ class ProfilerDaemonTest {
         val reader = MockReader()
         val syscallMap = mapOf(2 to "OPEN")
         val handler = ProfilerSessionHandler(
-            LinuxNative.FileDescriptor(10),
-            LinuxNative.FileDescriptor(20),
+            FileDescriptor.unsafe(10),
+            FileDescriptor.unsafe(20),
             transport,
             transport,
             transport,
@@ -219,8 +221,8 @@ class ProfilerDaemonTest {
         val syscallMap = mapOf(2 to "OPEN")
         var shutdownCalled = false
         val handler = ProfilerSessionHandler(
-            LinuxNative.FileDescriptor(10),
-            LinuxNative.FileDescriptor(20),
+            FileDescriptor.unsafe(10),
+            FileDescriptor.unsafe(20),
             transport,
             transport,
             transport,

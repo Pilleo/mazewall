@@ -5,6 +5,8 @@ import io.mazewall.LinuxNative
 import io.mazewall.Policy
 import io.mazewall.Uncompiled
 import io.mazewall.core.Arch
+import io.mazewall.core.FileDescriptor
+import io.mazewall.core.FileDescriptorRole
 import io.mazewall.core.NativeArg
 import io.mazewall.getFdOrThrow
 import io.mazewall.onSuccess
@@ -72,7 +74,7 @@ internal class ProfilerInstallerSession(
 ) {
     private val installLatch = CountDownLatch(1)
     private val proceedLatch = CountDownLatch(1)
-    private var listenerFd: LinuxNative.FileDescriptor = LinuxNative.FileDescriptor.INVALID
+    private var listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif> = FileDescriptor.INVALID
 
     @Volatile
     var state: ProfilerInstallerState = ProfilerInstallerState.Uninitialized
@@ -134,10 +136,10 @@ internal class ProfilerInstallerSession(
         }
 
         state = ProfilerInstallerState.Connecting(fd)
-        var socketFd: LinuxNative.FileDescriptor = LinuxNative.FileDescriptor.INVALID
+        var socketFd: FileDescriptor<FileDescriptorRole.UnixSocket> = FileDescriptor.INVALID
         var success = false
         try {
-            socketFd = LinuxNative.FileDescriptor(connectWithRetry(socketPath))
+            socketFd = FileDescriptor.unsafe(connectWithRetry(socketPath))
             state = ProfilerInstallerState.SendingDescriptor(fd, socketFd)
             val sent = Profiler.sendDescriptorInternal(socketFd.value, fd.value)
             if (!sent) {
@@ -173,7 +175,7 @@ internal class ProfilerInstallerSession(
     }
 
     context(arena: Arena)
-    private fun verifyDaemonAck(socketFd: LinuxNative.FileDescriptor) {
+    private fun verifyDaemonAck(socketFd: FileDescriptor<FileDescriptorRole.UnixSocket>) {
         // Wait for ACK byte from daemon
         val ackBuf = arena.allocate(1)
         while (true) {
@@ -213,7 +215,7 @@ internal class ProfilerInstallerSession(
     context(arena: Arena)
     private fun installProfilingBpf(
         filters: List<BpfInstruction>,
-    ): LinuxNative.FileDescriptor {
+    ): FileDescriptor<FileDescriptorRole.SeccompNotif> {
         val arch = Arch.current()
         val prog = LinuxNative.memory.newSockFProg(filters)
         val r = LinuxNative.withTransaction {
@@ -225,6 +227,6 @@ internal class ProfilerInstallerSession(
             )
         }
 
-        return r.getFdOrThrow("seccomp(SECCOMP_FILTER_FLAG_NEW_LISTENER)")
+        return r.getFdOrThrow("seccomp(SECCOMP_FILTER_FLAG_NEW_LISTENER)").let { FileDescriptor.unsafe(it.value) }
     }
 }

@@ -1,6 +1,8 @@
 package io.mazewall.profiler.engine
 
 import io.mazewall.LinuxNative
+import io.mazewall.core.FileDescriptor
+import io.mazewall.core.FileDescriptorRole
 import io.mazewall.ffi.NativeConstants
 import io.mazewall.recover
 import java.lang.foreign.MemorySegment
@@ -11,12 +13,12 @@ import java.lang.foreign.ValueLayout
  */
 sealed class HandshakeSession {
     abstract val notifId: Long
-    abstract val listenerFd: LinuxNative.FileDescriptor
+    abstract val listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif>
 
     /** Handshake initiated, event sent to JVM, waiting for 0xAC ACK. */
     class Active(
         override val notifId: Long,
-        override val listenerFd: LinuxNative.FileDescriptor,
+        override val listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif>,
     ) : HandshakeSession() {
         fun acknowledged() = Success(notifId, listenerFd)
         fun failed() = Failed(notifId, listenerFd)
@@ -27,7 +29,7 @@ sealed class HandshakeSession {
          */
         @Suppress("ReturnCount", "NestedBlockDepth", "CyclomaticComplexMethod")
         fun performHandshake(
-            socketFd: LinuxNative.FileDescriptor,
+            socketFd: FileDescriptor<FileDescriptorRole.UnixSocket>,
             ioOps: NativeIoOperations,
             pollFd: MemorySegment,
             ackBuf: MemorySegment,
@@ -54,7 +56,7 @@ sealed class HandshakeSession {
 
         @Suppress("ReturnCount", "LoopWithTooManyJumpStatements")
         private fun readAndProcessAck(
-            socketFd: LinuxNative.FileDescriptor,
+            socketFd: FileDescriptor<FileDescriptorRole.UnixSocket>,
             ioOps: NativeIoOperations,
             ackBuf: MemorySegment,
             onShutdown: (String) -> Unit
@@ -91,12 +93,12 @@ sealed class HandshakeSession {
     /** Handshake successful, ready to send SECCOMP_USER_NOTIF_FLAG_CONTINUE. */
     class Success(
         override val notifId: Long,
-        override val listenerFd: LinuxNative.FileDescriptor,
+        override val listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif>,
     ) : HandshakeSession()
 
     /** Handshake failed (timeout, error, or shutdown), must send an error or kill thread. */
     class Failed(
         override val notifId: Long,
-        override val listenerFd: LinuxNative.FileDescriptor,
+        override val listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif>,
     ) : HandshakeSession()
 }

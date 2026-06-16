@@ -1,13 +1,14 @@
 package io.mazewall.profiler.internal
 
 import io.mazewall.LinuxNative
+import io.mazewall.core.FileDescriptor
 import java.io.InputStream
 import java.lang.foreign.Arena
 import java.lang.foreign.MemorySegment
 import java.lang.foreign.ValueLayout
 
 internal class NativeSocketInputStream(
-    private val socketFd: LinuxNative.FileDescriptor,
+    private val socketFd: FileDescriptor<*>,
     private val arena: Arena,
 ) : InputStream() {
     private val readBuf = arena.allocate(1)

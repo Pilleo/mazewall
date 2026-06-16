@@ -4,6 +4,8 @@ import io.mazewall.LinuxNative
 import io.mazewall.MockNativeEngine
 import io.mazewall.MockNativeMemory
 import io.mazewall.NativeTransaction
+import io.mazewall.core.FileDescriptor
+import io.mazewall.core.FileDescriptorRole
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.Timeout
@@ -20,7 +22,7 @@ class NativeSocketInputStreamTest {
         val mock = MockNativeEngine(
             memory = object : MockNativeMemory() {
                 context(_: NativeTransaction)
-                override fun read(fd: LinuxNative.FileDescriptor, buf: MemorySegment, count: Long): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                override fun read(fd: FileDescriptor<*>, buf: MemorySegment, count: Long): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
                     attempts++
                     return if (attempts <= 2) {
                         // Simulate EINTR (errno 4) for the first two attempts
@@ -37,7 +39,7 @@ class NativeSocketInputStreamTest {
         LinuxNative.setEngine(mock)
         try {
             Arena.ofConfined().use { arena ->
-                val stream = NativeSocketInputStream(LinuxNative.FileDescriptor(1), arena)
+                val stream = NativeSocketInputStream(FileDescriptor.unsafe<FileDescriptorRole.Generic>(1), arena)
                 val result = stream.read()
                 assertEquals(0x42, result)
                 assertEquals(3, attempts)
@@ -54,7 +56,7 @@ class NativeSocketInputStreamTest {
         val mock = MockNativeEngine(
             memory = object : MockNativeMemory() {
                 context(_: NativeTransaction)
-                override fun read(fd: LinuxNative.FileDescriptor, buf: MemorySegment, count: Long): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                override fun read(fd: FileDescriptor<*>, buf: MemorySegment, count: Long): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
                     attempts++
                     return if (attempts <= 2) {
                         // Simulate EINTR (errno 4) for the first two attempts
@@ -71,7 +73,7 @@ class NativeSocketInputStreamTest {
         LinuxNative.setEngine(mock)
         try {
             Arena.ofConfined().use { arena ->
-                val stream = NativeSocketInputStream(LinuxNative.FileDescriptor(1), arena)
+                val stream = NativeSocketInputStream(FileDescriptor.unsafe<FileDescriptorRole.Generic>(1), arena)
                 val buffer = ByteArray(1)
                 val result = stream.read(buffer)
                 assertEquals(1, result)

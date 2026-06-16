@@ -1,5 +1,6 @@
 package io.mazewall
 
+import io.mazewall.core.FileDescriptor
 import io.mazewall.ffi.Layouts
 import io.mazewall.seccomp.BpfInstruction
 import java.lang.foreign.Arena
@@ -41,21 +42,21 @@ public open class MockNativeEngine(
 
     context(_: NativeTransaction)
     override fun ioctl(
-        fd: LinuxNative.FileDescriptor,
+        fd: FileDescriptor<*>,
         request: Long,
         arg: MemorySegment,
     ) = ioctlResult
 
     context(_: NativeTransaction)
     override fun ioctl(
-        fd: LinuxNative.FileDescriptor,
+        fd: FileDescriptor<*>,
         request: Long,
         arg: Long,
     ) = ioctlResult
 
     context(_: NativeTransaction)
     override fun fcntl(
-        fd: LinuxNative.FileDescriptor,
+        fd: FileDescriptor<*>,
         cmd: Int,
         arg: Long,
     ) = fcntlResult
@@ -86,7 +87,7 @@ public open class MockNativeFileSystem : NativeFileSystem {
         bufsiz: Long,
     ) = readlinkResult
 
-    override fun close(fd: LinuxNative.FileDescriptor) = closeResult
+    override fun close(fd: FileDescriptor<*>) = closeResult
 }
 
 public open class MockNativeNetworking : NativeNetworking {
@@ -117,48 +118,48 @@ public open class MockNativeNetworking : NativeNetworking {
 
     context(_: NativeTransaction)
     override fun bind(
-        sockfd: LinuxNative.FileDescriptor,
+        sockfd: FileDescriptor<*>,
         addr: MemorySegment,
         addrlen: Int,
     ) = bindResult
 
     context(_: NativeTransaction)
     override fun listen(
-        sockfd: LinuxNative.FileDescriptor,
+        sockfd: FileDescriptor<*>,
         backlog: Int,
     ) = listenResult
 
     context(_: NativeTransaction)
     override fun accept(
-        sockfd: LinuxNative.FileDescriptor,
+        sockfd: FileDescriptor<*>,
         addr: MemorySegment,
         addrlen: MemorySegment,
     ) = acceptResult
 
     context(_: NativeTransaction)
     override fun connect(
-        sockfd: LinuxNative.FileDescriptor,
+        sockfd: FileDescriptor<*>,
         addr: MemorySegment,
         addrlen: Int,
     ) = connectResult
 
     context(_: NativeTransaction)
     override fun sendmsg(
-        sockfd: LinuxNative.FileDescriptor,
+        sockfd: FileDescriptor<*>,
         msg: MemorySegment,
         flags: Int,
     ) = sendmsgResult
 
     context(_: NativeTransaction)
     override fun recvmsg(
-        sockfd: LinuxNative.FileDescriptor,
+        sockfd: FileDescriptor<*>,
         msg: MemorySegment,
         flags: Int,
     ) = recvmsgResult
 
     context(_: NativeTransaction)
     override fun recv(
-        sockfd: LinuxNative.FileDescriptor,
+        sockfd: FileDescriptor<*>,
         buf: MemorySegment,
         len: Long,
         flags: Int,
@@ -198,14 +199,14 @@ public open class MockNativeMemory : NativeMemory {
 
     context(_: NativeTransaction)
     override fun read(
-        fd: LinuxNative.FileDescriptor,
+        fd: FileDescriptor<*>,
         buf: MemorySegment,
         count: Long,
     ) = readResult
 
     context(_: NativeTransaction)
     override fun write(
-        fd: LinuxNative.FileDescriptor,
+        fd: FileDescriptor<*>,
         buf: MemorySegment,
         count: Long,
     ) = writeResult

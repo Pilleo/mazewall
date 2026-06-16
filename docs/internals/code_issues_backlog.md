@@ -2,6 +2,22 @@
 
 ## Recent Findings (Project Review June 2026)
 
+### ✅ [RESOLVED] [Severity: ENHANCEMENT]: Phantom Types for File Descriptor Roles (Compile-Time FD Safety)
+**Context:** Currently, `io.mazewall.LinuxNative.FileDescriptor` is a universal value class wrapper around an `Int`. This provides lifetime safety via `AutoCloseable` but lacks type safety. A developer could accidentally pass a socket FD or an `O_PATH` file descriptor to a Landlock Ruleset function, causing runtime `EBADF` or silent logical failures.
+**Needed:** Refactor `FileDescriptor` to accept a Phantom Type parameter: `class FileDescriptor<Role>(val fd: Int)`. Define sealed interface roles like `Ruleset`, `OPath`, `SeccompNotif`, and `UnixSocket`. This eliminates FD transposition bugs at compile time.
+
+### 🔴 [Severity: MEDIUM]: `SbobParser` Violates Single Responsibility Principle (SRP)
+**Context:** `SbobParser` acts as a God Class. It manages `kotlinx.serialization` JSON decoding, canonicalizes paths against a CWD, maps string names to `Syscall` enums, prunes subpaths, and constructs the `Policy` instance.
+**Needed:** Split the class into cohesive, decoupled components: `BobDeserializer` (JSON to DTO), `PathNormalizer` (canonicalization and pruning), and `PolicyTransformer` (DTO to Policy builder).
+
+### 🔴 [Severity: LOW]: `ContainmentViolationDetector` Violates Open/Closed Principle (OCP)
+**Context:** `ContainmentViolationDetector` hardcodes `Regex` instances and `DENIED_PHRASES` strings to translate standard JVM `IOException` messages into containment failures. Extending this detection for custom environments or translated OS locales requires modifying the core object directly.
+**Needed:** Implement a `ViolationMatcher` strategy interface. Core logic should iterate over injected matchers, allowing consumers to register custom patterns without altering the detector itself.
+
+### 🔵 [Severity: ENHANCEMENT]: ArchUnit: Ban Universal Exception Suppression in Enforcer
+**Context:** `Landlock.kt` and `Platform.kt` use `catch (Exception e)` or `catch (ignored: Exception)` blocks. While sometimes used safely for diagnostics, catching generic exceptions in a security boundary module can silently swallow critical JVM `VirtualMachineError` instances or obscure containment violations, violating the "Fail Closed" invariant.
+**Needed:** Introduce an ArchUnit rule in the `:enforcer` module that strictly prohibits `catch (Exception)`, `catch (RuntimeException)`, or `catch (Throwable)`. Enforce catching specific expected native faults (e.g., `AccessDeniedException`, `IOException`).
+
 ### 🔵 [Severity: ENHANCEMENT]: Compile-Time Feature Proof Tokens and Scope-Safe Policy Builders (Type-State Pattern)
 **Context:** Currently, `ContainedExecutors.kt` throws a runtime `UnsupportedOperationException` if process-wide containment is applied with Landlock rules because Landlock has historically been considered thread-scoped only. However, process-wide Landlock is supported on some newer kernels/setups. Blocking it unconditionally at compile-time or throwing runtime failures limits support on modern systems.
 **Needed:** Implement compile-time feature proof tokens and type-state parameterized builders.

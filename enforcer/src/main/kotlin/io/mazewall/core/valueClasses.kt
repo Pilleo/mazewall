@@ -1,34 +1,6 @@
 package io.mazewall.core
 
 /**
- * Type-safe wrapper for file descriptors to prevent transposition bugs.
- */
-public class FileDescriptor(
-    public val fd: Int,
-    public val arena: java.lang.foreign.Arena? = null
-) : AutoCloseable {
-    private var closed = false
-
-    public val isValid: Boolean get() = !closed && fd >= 0 && (arena == null || arena.scope().isAlive)
-    public val isInvalid: Boolean get() = !isValid
-
-    override fun close() {
-        if (closed || fd < 0) return
-        closed = true
-    }
-
-    override fun toString(): String = if (isValid) "fd($fd)" else "fd($fd, closed/invalid)"
-
-    override fun equals(other: Any?): Boolean {
-        if (this === other) return true
-        if (other !is FileDescriptor) return false
-        return fd == other.fd
-    }
-
-    override fun hashCode(): Int = fd
-}
-
-/**
  * Type-safe wrapper for system call numbers.
  */
 @JvmInline
@@ -70,6 +42,7 @@ public value class Uid(val value: Int) {
 @JvmInline
 public value class MemoryAddress(val value: Long) {
     public fun toLong(): Long = value
+
     @Suppress("MagicNumber")
     override fun toString(): String = "0x${value.toString(16)}"
 }

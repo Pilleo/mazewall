@@ -9,7 +9,7 @@ class FileDescriptorReproductionTest {
 
     @Test
     fun `file descriptor is a simple value class without scope validation`() {
-        val fd = io.mazewall.LinuxNative.FileDescriptor(10)
+        val fd = FileDescriptor.unsafe<FileDescriptorRole.Generic>(10)
         assertEquals(10, fd.value)
         val isAutoCloseable = fd as? AutoCloseable
         assertNotNull(isAutoCloseable, "FileDescriptor should be AutoCloseable now")

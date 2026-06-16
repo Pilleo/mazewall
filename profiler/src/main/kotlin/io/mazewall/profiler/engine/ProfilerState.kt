@@ -1,6 +1,8 @@
 package io.mazewall.profiler.engine
 
 import io.mazewall.LinuxNative
+import io.mazewall.core.FileDescriptor
+import io.mazewall.core.FileDescriptorRole
 
 /**
  * States representing the lifecycle of a profiler connection/session.
@@ -8,33 +10,33 @@ import io.mazewall.LinuxNative
 internal sealed interface ProfilerState {
     /** Connection accepted, waiting to receive the seccomp listener file descriptor. */
     data class Connected(
-        val socketFd: LinuxNative.FileDescriptor,
+        val socketFd: FileDescriptor<FileDescriptorRole.UnixSocket>,
     ) : ProfilerState
 
     /** FD received, sending PROTOCOL_ACK_BYTE to parent. */
     data class HandshakeAck(
-        val socketFd: LinuxNative.FileDescriptor,
-        val listenerFd: LinuxNative.FileDescriptor,
+        val socketFd: FileDescriptor<FileDescriptorRole.UnixSocket>,
+        val listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif>,
     ) : ProfilerState
 
     /** Actively polling for seccomp notifications or shutdown command. */
     data class ActiveSession(
-        val socketFd: LinuxNative.FileDescriptor,
-        val listenerFd: LinuxNative.FileDescriptor,
+        val socketFd: FileDescriptor<FileDescriptorRole.UnixSocket>,
+        val listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif>,
     ) : ProfilerState
 
     /** Seccomp notification received, sending trace event. */
     data class Notified(
-        val socketFd: LinuxNative.FileDescriptor,
-        val listenerFd: LinuxNative.FileDescriptor,
+        val socketFd: FileDescriptor<FileDescriptorRole.UnixSocket>,
+        val listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif>,
         val notifId: Long,
         val event: SyscallEvent<SyscallEventState.Resolved>,
     ) : ProfilerState
 
     /** Event sent, waiting for PROTOCOL_ACK_BYTE or SHUTDOWN from parent. */
     data class WaitingForAck(
-        val socketFd: LinuxNative.FileDescriptor,
-        val listenerFd: LinuxNative.FileDescriptor,
+        val socketFd: FileDescriptor<FileDescriptorRole.UnixSocket>,
+        val listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif>,
         val notifId: Long,
     ) : ProfilerState
 

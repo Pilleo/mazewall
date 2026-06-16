@@ -3,6 +3,8 @@ package io.mazewall.profiler.internal
 import io.mazewall.LinuxNative
 import io.mazewall.asFd
 import io.mazewall.asInt
+import io.mazewall.core.FileDescriptor
+import io.mazewall.core.FileDescriptorRole
 import io.mazewall.ffi.Layouts
 import io.mazewall.getFdOrThrow
 import io.mazewall.onFailure
@@ -81,7 +83,7 @@ internal object ProfilerSocket {
                 DescriptorPassing.setupScmRightsMsgHdr(dummyByte, controlBuf)
             }
 
-            val res = LinuxNative.withTransaction { LinuxNative.networking.sendmsg(LinuxNative.FileDescriptor(socketFd), msg, 0) }
+            val res = LinuxNative.withTransaction { LinuxNative.networking.sendmsg(FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(socketFd), msg, 0) }
             return res is LinuxNative.SyscallResult.Success
         }
     }

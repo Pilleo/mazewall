@@ -1,5 +1,6 @@
 package io.mazewall
 
+import io.mazewall.core.FileDescriptor
 import io.mazewall.seccomp.BpfInstruction
 import java.lang.foreign.Arena
 import java.lang.foreign.MemorySegment
@@ -45,21 +46,21 @@ public interface NativeEngine {
 
     context(_: NativeTransaction)
     fun ioctl(
-        fd: LinuxNative.FileDescriptor,
+        fd: FileDescriptor<*>,
         request: Long,
         arg: MemorySegment,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled>
 
     context(_: NativeTransaction)
     fun ioctl(
-        fd: LinuxNative.FileDescriptor,
+        fd: FileDescriptor<*>,
         request: Long,
         arg: Long,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled>
 
     context(_: NativeTransaction)
     fun fcntl(
-        fd: LinuxNative.FileDescriptor,
+        fd: FileDescriptor<*>,
         cmd: Int,
         arg: Long,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled>
@@ -86,7 +87,7 @@ public interface NativeFileSystem {
         bufsiz: Long,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled>
 
-    fun close(fd: LinuxNative.FileDescriptor): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled>
+    fun close(fd: FileDescriptor<*>): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled>
 }
 
 public interface NativeNetworking {
@@ -107,48 +108,48 @@ public interface NativeNetworking {
 
     context(_: NativeTransaction)
     fun bind(
-        sockfd: LinuxNative.FileDescriptor,
+        sockfd: FileDescriptor<*>,
         addr: MemorySegment,
         addrlen: Int,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled>
 
     context(_: NativeTransaction)
     fun listen(
-        sockfd: LinuxNative.FileDescriptor,
+        sockfd: FileDescriptor<*>,
         backlog: Int,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled>
 
     context(_: NativeTransaction)
     fun accept(
-        sockfd: LinuxNative.FileDescriptor,
+        sockfd: FileDescriptor<*>,
         addr: MemorySegment,
         addrlen: MemorySegment,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled>
 
     context(_: NativeTransaction)
     fun connect(
-        sockfd: LinuxNative.FileDescriptor,
+        sockfd: FileDescriptor<*>,
         addr: MemorySegment,
         addrlen: Int,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled>
 
     context(_: NativeTransaction)
     fun sendmsg(
-        sockfd: LinuxNative.FileDescriptor,
+        sockfd: FileDescriptor<*>,
         msg: MemorySegment,
         flags: Int,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled>
 
     context(_: NativeTransaction)
     fun recvmsg(
-        sockfd: LinuxNative.FileDescriptor,
+        sockfd: FileDescriptor<*>,
         msg: MemorySegment,
         flags: Int,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled>
 
     context(_: NativeTransaction)
     fun recv(
-        sockfd: LinuxNative.FileDescriptor,
+        sockfd: FileDescriptor<*>,
         buf: MemorySegment,
         len: Long,
         flags: Int,
@@ -181,14 +182,14 @@ public interface NativeMemory {
 
     context(_: NativeTransaction)
     fun read(
-        fd: LinuxNative.FileDescriptor,
+        fd: FileDescriptor<*>,
         buf: MemorySegment,
         count: Long,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled>
 
     context(_: NativeTransaction)
     fun write(
-        fd: LinuxNative.FileDescriptor,
+        fd: FileDescriptor<*>,
         buf: MemorySegment,
         count: Long,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled>

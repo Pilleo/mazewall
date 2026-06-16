@@ -3,6 +3,8 @@ package io.mazewall.landlock
 import io.mazewall.LinuxNative
 import io.mazewall.Policy
 import io.mazewall.Uncompiled
+import io.mazewall.core.FileDescriptor
+import io.mazewall.core.FileDescriptorRole
 import java.lang.foreign.Arena
 
 /**
@@ -24,13 +26,13 @@ internal sealed interface LandlockState {
 
     /** Ruleset FD created, adding classpath and user-defined path rules. */
     data class ConfiguringRuleset(
-        val rulesetFd: LinuxNative.FileDescriptor,
+        val rulesetFd: FileDescriptor<FileDescriptorRole.Ruleset>,
         val abi: Int,
     ) : LandlockState
 
     /** Enabling no_new_privs and restricting the thread. */
     data class Enforcing(
-        val rulesetFd: LinuxNative.FileDescriptor,
+        val rulesetFd: FileDescriptor<FileDescriptorRole.Ruleset>,
     ) : LandlockState
 
     /** Ruleset applied successfully to the thread. */
@@ -48,7 +50,7 @@ internal sealed interface LandlockState {
 internal sealed interface LandlockLifecycle {
     /** Ruleset FD created, ready to add classpath and user rules. */
     class RulesetCreated(
-        val rulesetFd: LinuxNative.FileDescriptor,
+        val rulesetFd: FileDescriptor<FileDescriptorRole.Ruleset>,
         val abi: Int,
         val policy: Policy<*, Uncompiled>?,
     ) : LandlockLifecycle {
@@ -67,7 +69,7 @@ internal sealed interface LandlockLifecycle {
 
     /** Rules added, ready to restrict the thread. */
     class RulesAdded(
-        val rulesetFd: LinuxNative.FileDescriptor,
+        val rulesetFd: FileDescriptor<FileDescriptorRole.Ruleset>,
     ) : LandlockLifecycle {
         fun restrictSelf(): Restricted {
             Landlock.enforceRuleset(rulesetFd)
@@ -78,4 +80,3 @@ internal sealed interface LandlockLifecycle {
     /** Ruleset successfully enforced and thread restricted. */
     data object Restricted : LandlockLifecycle
 }
-

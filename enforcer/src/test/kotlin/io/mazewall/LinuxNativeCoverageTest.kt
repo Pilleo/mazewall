@@ -1,5 +1,7 @@
 package io.mazewall
 
+import io.mazewall.core.FileDescriptor
+import io.mazewall.core.FileDescriptorRole
 import io.mazewall.ffi.Layouts
 import io.mazewall.ffi.memory.*
 import io.mazewall.seccomp.BpfInstruction
@@ -22,7 +24,7 @@ class LinuxNativeCoverageTest {
         val res3: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Error<LinuxNative.SyscallHandledState.Unhandled>(1, 200L)
 
         assertEquals(res1, res2)
-        assertNotEquals<LinuxNative.SyscallResult<*,*>>(res1, res3)
+        assertNotEquals<LinuxNative.SyscallResult<*, *>>(res1, res3)
         assertEquals(res1.hashCode(), res2.hashCode())
         assertNotNull(res1.toString())
         assertEquals(100L, (res1 as LinuxNative.SyscallResult.Success).value)
@@ -32,12 +34,12 @@ class LinuxNativeCoverageTest {
 
     @Test
     fun `test FileDescriptor methods`() {
-        val fd1 = LinuxNative.FileDescriptor(10)
-        val fd2 = LinuxNative.FileDescriptor(10)
-        val fd3 = LinuxNative.FileDescriptor(-1)
+        val fd1 = FileDescriptor.unsafe<FileDescriptorRole.Generic>(10)
+        val fd2 = FileDescriptor.unsafe<FileDescriptorRole.Generic>(10)
+        val fd3 = FileDescriptor.unsafe<FileDescriptorRole.Generic>(-1)
 
         assertEquals(fd1, fd2)
-        assertNotEquals(fd1, fd3)
+        assertNotEquals<FileDescriptor<*>>(fd1, fd3)
         assertTrue(fd1.isValid)
         assertTrue(fd3.isInvalid)
         assertEquals("fd(10)", fd1.toString())
@@ -91,14 +93,30 @@ class LinuxNativeCoverageTest {
         // We use LinuxNative methods to test the actual implementation of toLong() in RealNativeEngine
         // null branch
         LinuxNative.withTransaction {
-            LinuxNative.syscall(-1, io.mazewall.core.NativeArg.NullArg, io.mazewall.core.NativeArg.NullArg, io.mazewall.core.NativeArg.NullArg, io.mazewall.core.NativeArg.NullArg, io.mazewall.core.NativeArg.NullArg, io.mazewall.core.NativeArg.NullArg)
+            LinuxNative.syscall(
+                -1,
+                io.mazewall.core.NativeArg.NullArg,
+                io.mazewall.core.NativeArg.NullArg,
+                io.mazewall.core.NativeArg.NullArg,
+                io.mazewall.core.NativeArg.NullArg,
+                io.mazewall.core.NativeArg.NullArg,
+                io.mazewall.core.NativeArg.NullArg
+            )
         }
 
         // MemorySegment branch
         nativeScope {
             val seg = allocate(8)
             LinuxNative.withTransaction {
-                LinuxNative.syscall(-1, io.mazewall.core.NativeArg.MemoryArg(seg), io.mazewall.core.NativeArg.IntArg(1), io.mazewall.core.NativeArg.IntArg(2), io.mazewall.core.NativeArg.IntArg(3), io.mazewall.core.NativeArg.IntArg(4), io.mazewall.core.NativeArg.IntArg(5))
+                LinuxNative.syscall(
+                    -1,
+                    io.mazewall.core.NativeArg.MemoryArg(seg),
+                    io.mazewall.core.NativeArg.IntArg(1),
+                    io.mazewall.core.NativeArg.IntArg(2),
+                    io.mazewall.core.NativeArg.IntArg(3),
+                    io.mazewall.core.NativeArg.IntArg(4),
+                    io.mazewall.core.NativeArg.IntArg(5)
+                )
             }
         }
     }
@@ -133,7 +151,7 @@ class LinuxNativeCoverageTest {
         LinuxNative.setEngine(mock)
 
         val seg = allocate(8)
-        val fd = LinuxNative.FileDescriptor(1)
+        val fd = FileDescriptor.unsafe<FileDescriptorRole.Generic>(1)
 
         mock.networking.acceptResult = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(10)
         assertEquals(10L, LinuxNative.withTransaction {

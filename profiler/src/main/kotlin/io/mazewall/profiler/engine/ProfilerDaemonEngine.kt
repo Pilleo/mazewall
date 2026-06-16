@@ -2,6 +2,8 @@ package io.mazewall.profiler.engine
 
 import io.mazewall.LinuxNative
 import io.mazewall.core.Arch
+import io.mazewall.core.FileDescriptor
+import io.mazewall.core.FileDescriptorRole
 import io.mazewall.core.Syscall
 import io.mazewall.ffi.Layouts
 import io.mazewall.ffi.NativeConstants
@@ -29,8 +31,8 @@ internal class ProfilerDaemonEngine(
     private val socketManager: SocketLifecycleManager = transport
 
     private val syscallMap = mutableMapOf<Int, String>()
-    private val clientSockets = CopyOnWriteArrayList<LinuxNative.FileDescriptor>()
-    private val activeListeners = CopyOnWriteArrayList<LinuxNative.FileDescriptor>()
+    private val clientSockets = CopyOnWriteArrayList<FileDescriptor<FileDescriptorRole.UnixSocket>>()
+    private val activeListeners = CopyOnWriteArrayList<FileDescriptor<FileDescriptorRole.SeccompNotif>>()
     private val stateRef = java.util.concurrent.atomic
         .AtomicReference<ProfilerDaemonState>(ProfilerDaemonState.Uninitialized)
 
@@ -94,12 +96,12 @@ internal class ProfilerDaemonEngine(
 
     @Suppress("LoopWithTooManyJumpStatements")
     private fun acceptConnections(
-        serverFd: LinuxNative.FileDescriptor,
+        serverFd: FileDescriptor<FileDescriptorRole.UnixSocket>,
         arena: Arena,
     ) {
         val pollFd = arena.allocate(Layouts.POLLFD)
         pollFd.set(ValueLayout.JAVA_INT, POLLFD_FD_OFF, serverFd.value)
-        pollFd.set(ValueLayout.JAVA_SHORT, POLLFD_EVENTS_OFF, NativeConstants.POLLIN.toShort())
+        pollFd.set(ValueLayout.JAVA_SHORT, POLLFD_EVENTS_OFF, NativeConstants.POLLIN)
 
         while (!isGlobalShutdown()) {
             val pollRes = ioOps.poll(pollFd, 1L, POLL_TIMEOUT_MS)
@@ -113,7 +115,7 @@ internal class ProfilerDaemonEngine(
     }
 
     @Suppress("TooGenericExceptionCaught", "SwallowedException")
-    private fun handleNewConnection(serverFd: LinuxNative.FileDescriptor) {
+    private fun handleNewConnection(serverFd: FileDescriptor<FileDescriptorRole.UnixSocket>) {
         try {
             val clientFd = socketManager.accept(serverFd)
             clientSockets.add(clientFd)
@@ -127,13 +129,13 @@ internal class ProfilerDaemonEngine(
     }
 
     @Suppress("NestedBlockDepth", "LoopWithTooManyJumpStatements", "CyclomaticComplexMethod")
-    private fun handleConnection(socketFd: LinuxNative.FileDescriptor) {
+    private fun handleConnection(socketFd: FileDescriptor<FileDescriptorRole.UnixSocket>) {
         var connection: ProfilerConnection = ProfilerConnection.Accepted(socketFd)
         try {
             Arena.ofConfined().use { arena ->
                 val pollFd = arena.allocate(Layouts.POLLFD)
                 pollFd.set(ValueLayout.JAVA_INT, POLLFD_FD_OFF, socketFd.value)
-                pollFd.set(ValueLayout.JAVA_SHORT, POLLFD_EVENTS_OFF, NativeConstants.POLLIN.toShort())
+                pollFd.set(ValueLayout.JAVA_SHORT, POLLFD_EVENTS_OFF, NativeConstants.POLLIN)
 
                 while (!isGlobalShutdown()) {
                     // Only poll if we are waiting for a NEW listener FD (Accepted state)
@@ -191,8 +193,8 @@ internal class ProfilerDaemonEngine(
 
     @Suppress("NestedBlockDepth", "LoopWithTooManyJumpStatements")
     private fun handleSession(
-        socketFd: LinuxNative.FileDescriptor,
-        listenerFd: LinuxNative.FileDescriptor,
+        socketFd: FileDescriptor<FileDescriptorRole.UnixSocket>,
+        listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif>,
     ) {
         val sessionHandler = ProfilerSessionHandler(
             socketFd,
@@ -232,16 +234,16 @@ internal class ProfilerDaemonEngine(
 
     context(arena: Arena)
     private fun setupSessionPoll(
-        socketFd: LinuxNative.FileDescriptor,
-        listenerFd: LinuxNative.FileDescriptor,
+        socketFd: FileDescriptor<FileDescriptorRole.UnixSocket>,
+        listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif>,
     ): MemorySegment {
         val pollFds = arena.allocate(MemoryLayout.sequenceLayout(2, Layouts.POLLFD))
         // [0]: Seccomp listener FD
         pollFds.set(ValueLayout.JAVA_INT, 0L, listenerFd.value)
-        pollFds.set(ValueLayout.JAVA_SHORT, POLLFD_EVENTS_OFF, NativeConstants.POLLIN.toShort())
+        pollFds.set(ValueLayout.JAVA_SHORT, POLLFD_EVENTS_OFF, NativeConstants.POLLIN)
         // [1]: UNIX socket FD (for parent shutdown/ACK)
         pollFds.set(ValueLayout.JAVA_INT, POLLFD_STRUCT_SIZE, socketFd.value)
-        pollFds.set(ValueLayout.JAVA_SHORT, POLLFD_STRUCT_SIZE + POLLFD_EVENTS_OFF, NativeConstants.POLLIN.toShort())
+        pollFds.set(ValueLayout.JAVA_SHORT, POLLFD_STRUCT_SIZE + POLLFD_EVENTS_OFF, NativeConstants.POLLIN)
         return pollFds
     }
 }

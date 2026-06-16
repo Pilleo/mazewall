@@ -3,6 +3,8 @@ package io.mazewall.profiler
 import io.kotest.core.spec.style.FreeSpec
 import io.kotest.matchers.shouldBe
 import io.mazewall.LinuxNative
+import io.mazewall.core.FileDescriptor
+import io.mazewall.core.FileDescriptorRole
 import io.mazewall.ffi.Layouts
 import io.mazewall.ffi.NativeConstants
 import io.mazewall.profiler.engine.ACK_BUF_SIZE
@@ -80,8 +82,8 @@ class ProfilerDesignSpec :
             var ackByte: Byte = 0xAC.toByte()
             val ioctlCalls = mutableListOf<Long>()
             var createdServerPath: String? = null
-            var acceptedServerFd: LinuxNative.FileDescriptor? = null
-            var closedFds = mutableListOf<LinuxNative.FileDescriptor>()
+            var acceptedServerFd: FileDescriptor<FileDescriptorRole.UnixSocket>? = null
+            var closedFds = mutableListOf<FileDescriptor<*>>()
 
             var nextNotifId = 123L
             var nextNotifPid = 456
@@ -89,7 +91,7 @@ class ProfilerDesignSpec :
             val nextNotifArgs = LongArray(6)
 
             override fun sendTraceEvent(
-                socketFd: LinuxNative.FileDescriptor,
+                socketFd: FileDescriptor<*>,
                 event: SyscallEvent<SyscallEventState.Resolved>,
             ) {
                 sentEvents.add(event)
@@ -110,7 +112,7 @@ class ProfilerDesignSpec :
                 ioctlCalls.add(0xc0182101L) // SECCOMP_IOCTL_NOTIF_SEND
             }
 
-            override fun recvDescriptor(socketFd: LinuxNative.FileDescriptor): LinuxNative.FileDescriptor? = LinuxNative.FileDescriptor(5)
+            override fun recvDescriptor(socketFd: FileDescriptor<FileDescriptorRole.UnixSocket>): FileDescriptor<FileDescriptorRole.SeccompNotif>? = FileDescriptor.unsafe(5)
 
             override fun poll(
                 fds: MemorySegment,
@@ -124,7 +126,7 @@ class ProfilerDesignSpec :
             }
 
             override fun read(
-                fd: LinuxNative.FileDescriptor,
+                fd: FileDescriptor<*>,
                 buf: MemorySegment,
                 count: Long,
             ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
@@ -135,7 +137,7 @@ class ProfilerDesignSpec :
             }
 
             override fun write(
-                fd: LinuxNative.FileDescriptor,
+                fd: FileDescriptor<*>,
                 buf: MemorySegment,
                 count: Long,
             ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(
@@ -143,7 +145,7 @@ class ProfilerDesignSpec :
             )
 
             override fun recv(
-                sockfd: LinuxNative.FileDescriptor,
+                sockfd: FileDescriptor<*>,
                 buf: MemorySegment,
                 len: Long,
                 flags: Int,
@@ -152,7 +154,7 @@ class ProfilerDesignSpec :
             )
 
             override fun ioctl(
-                fd: LinuxNative.FileDescriptor,
+                fd: FileDescriptor<*>,
                 request: Long,
                 arg: MemorySegment,
             ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
@@ -168,17 +170,17 @@ class ProfilerDesignSpec :
                 return LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(0L)
             }
 
-            override fun createServer(socketPath: String): LinuxNative.FileDescriptor {
+            override fun createServer(socketPath: String): FileDescriptor<FileDescriptorRole.UnixSocket> {
                 createdServerPath = socketPath
-                return LinuxNative.FileDescriptor(99)
+                return FileDescriptor.unsafe(99)
             }
 
-            override fun accept(serverFd: LinuxNative.FileDescriptor): LinuxNative.FileDescriptor {
+            override fun accept(serverFd: FileDescriptor<FileDescriptorRole.UnixSocket>): FileDescriptor<FileDescriptorRole.UnixSocket> {
                 acceptedServerFd = serverFd
-                return LinuxNative.FileDescriptor(100)
+                return FileDescriptor.unsafe(100)
             }
 
-            override fun close(fd: LinuxNative.FileDescriptor) {
+            override fun close(fd: FileDescriptor<*>) {
                 closedFds.add(fd)
             }
         }
@@ -194,8 +196,8 @@ class ProfilerDesignSpec :
 
                 val syscallMap = mapOf(2 to "OPEN")
                 val handler = ProfilerSessionHandler(
-                    LinuxNative.FileDescriptor(10),
-                    LinuxNative.FileDescriptor(20),
+                    FileDescriptor.unsafe(10),
+                    FileDescriptor.unsafe(20),
                     transport,
                     transport,
                     transport,
@@ -235,8 +237,8 @@ class ProfilerDesignSpec :
 
                 val syscallMap = mapOf(257 to "OPENAT")
                 val handler = ProfilerSessionHandler(
-                    LinuxNative.FileDescriptor(10),
-                    LinuxNative.FileDescriptor(20),
+                    FileDescriptor.unsafe(10),
+                    FileDescriptor.unsafe(20),
                     transport,
                     transport,
                     transport,

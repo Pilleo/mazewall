@@ -1,5 +1,7 @@
 package io.mazewall
 
+import io.mazewall.core.FileDescriptor
+import io.mazewall.core.FileDescriptorRole
 import io.mazewall.ffi.LayoutValidator
 import io.mazewall.ffi.Layouts
 import io.mazewall.ffi.memory.ErrnoSegment
@@ -83,21 +85,21 @@ public object LinuxNative : NativeEngine {
 
     context(_: NativeTransaction)
     override fun ioctl(
-        fd: FileDescriptor,
+        fd: FileDescriptor<*>,
         request: Long,
         arg: MemorySegment,
     ): SyscallResult<Long, SyscallHandledState.Unhandled> = engine.ioctl(fd, request, arg)
 
     context(_: NativeTransaction)
     override fun ioctl(
-        fd: FileDescriptor,
+        fd: FileDescriptor<*>,
         request: Long,
         arg: Long,
     ): SyscallResult<Long, SyscallHandledState.Unhandled> = engine.ioctl(fd, request, arg)
 
     context(_: NativeTransaction)
     override fun fcntl(
-        fd: FileDescriptor,
+        fd: FileDescriptor<*>,
         cmd: Int,
         arg: Long,
     ): SyscallResult<Long, SyscallHandledState.Unhandled> = engine.fcntl(fd, cmd, arg)
@@ -110,37 +112,11 @@ public object LinuxNative : NativeEngine {
     ): SyscallResult<Long, SyscallHandledState.Unhandled> = engine.poll(fds, nfds, timeout)
 
     /**
-     * A type-safe wrapper for a Linux file descriptor.
+     * Marker interface for system call handling states.
      */
-    public class FileDescriptor(
-        public val value: Int,
-        public val arena: java.lang.foreign.Arena? = null
-    ) : AutoCloseable {
-        private var closed = false
-
-        public val isValid: Boolean get() = !closed && value >= 0 && (arena == null || arena.scope().isAlive)
-        public val isInvalid: Boolean get() = !isValid
-
-        override fun close() {
-            if (closed || value < 0) return
-            closed = true
-            fileSystem.close(this)
-        }
-
-        public companion object {
-            /** Represents an invalid or uninitialized file descriptor. */
-            public val INVALID: FileDescriptor = FileDescriptor(-1)
-        }
-
-        override fun toString(): String = if (isValid) "fd($value)" else "fd($value, closed/invalid)"
-
-        override fun equals(other: Any?): Boolean {
-            if (this === other) return true
-            if (other !is FileDescriptor) return false
-            return value == other.value
-        }
-
-        override fun hashCode(): Int = value
+    public sealed interface SyscallHandledState {
+        public interface Handled : SyscallHandledState
+        public interface Unhandled : SyscallHandledState
     }
 
     /**
@@ -148,11 +124,6 @@ public object LinuxNative : NativeEngine {
      *
      * @param T The type of the value returned on success.
      */
-    public sealed interface SyscallHandledState {
-        public interface Handled : SyscallHandledState
-        public interface Unhandled : SyscallHandledState
-    }
-
     public sealed interface SyscallResult<out T, out Handled : SyscallHandledState> {
         /** The call succeeded. */
         public data class Success<out T, out Handled : SyscallHandledState>(val value: T) : SyscallResult<T, Handled>
@@ -240,13 +211,13 @@ public inline fun <T> LinuxNative.SyscallResult<T, *>.recover(
  * Extension properties for [LinuxNative.SyscallResult] of [Long] to provide
  * convenience conversions for common native result types.
  */
-public fun LinuxNative.SyscallResult.Success<Long, *>.asInt(): Int = value.toInt()
+public fun LinuxNative.SyscallResult.Success<Long, *>.asLong(): Long = value
 
 /**
- * Returns the success value as a [LinuxNative.FileDescriptor].
+ * Returns the success value as a [FileDescriptor] of [FileDescriptorRole.Generic].
  */
-public fun LinuxNative.SyscallResult.Success<Long, *>.asFd(): LinuxNative.FileDescriptor =
-    LinuxNative.FileDescriptor(value.toInt())
+public fun LinuxNative.SyscallResult.Success<Long, *>.asFd(): FileDescriptor<FileDescriptorRole.Generic> =
+    FileDescriptor.unsafe(value.toInt())
 
 /**
  * Convenience extension for [LinuxNative.SyscallResult] of [Long].
@@ -258,11 +229,11 @@ public fun LinuxNative.SyscallResult<Long, *>.asInt(): Int =
     }
 
 /**
- * Returns the success value as a [LinuxNative.FileDescriptor] or throws.
+ * Returns the success value as a [FileDescriptor] of [FileDescriptorRole.Generic] or throws.
  */
-public fun LinuxNative.SyscallResult<Long, *>.getFdOrThrow(context: String): LinuxNative.FileDescriptor =
+public fun LinuxNative.SyscallResult<Long, *>.getFdOrThrow(context: String): FileDescriptor<FileDescriptorRole.Generic> =
     when (this) {
-        is LinuxNative.SyscallResult.Success -> LinuxNative.FileDescriptor(value.toInt())
+        is LinuxNative.SyscallResult.Success -> FileDescriptor.unsafe(value.toInt())
         is LinuxNative.SyscallResult.Error -> throwErrno(context)
     }
 
@@ -349,21 +320,21 @@ internal object RealNativeEngine : NativeEngine {
         a5: io.mazewall.core.NativeArg,
         a6: io.mazewall.core.NativeArg,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
- nativeScope {
-        val capturedState = ErrnoSegment.allocate()
-        val ret =
-            SYSCALL.invokeExact(
-                capturedState.segment,
-                nr,
-                a1.asLong,
-                a2.asLong,
-                a3.asLong,
-                a4.asLong,
-                a5.asLong,
-                a6.asLong,
-            ) as Long
-        RealNativeHelper.result(ret, capturedState.getErrno())
-    }
+        nativeScope {
+            val capturedState = ErrnoSegment.allocate()
+            val ret =
+                SYSCALL.invokeExact(
+                    capturedState.segment,
+                    nr,
+                    a1.asLong,
+                    a2.asLong,
+                    a3.asLong,
+                    a4.asLong,
+                    a5.asLong,
+                    a6.asLong,
+                ) as Long
+            RealNativeHelper.result(ret, capturedState.getErrno())
+        }
 
     context(_: NativeTransaction)
     override fun syscall4(
@@ -373,46 +344,46 @@ internal object RealNativeEngine : NativeEngine {
         a3: io.mazewall.core.NativeArg,
         a4: io.mazewall.core.NativeArg,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
- syscall(nr, a1, a2, a3, a4)
+        syscall(nr, a1, a2, a3, a4, io.mazewall.core.NativeArg.LongArg(0L), io.mazewall.core.NativeArg.LongArg(0L))
 
     context(_: NativeTransaction)
     override fun ioctl(
-        fd: LinuxNative.FileDescriptor,
+        fd: FileDescriptor<*>,
         request: Long,
         arg: MemorySegment,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
- nativeScope {
-        require(fd.isValid) { "FileDescriptor is invalid or closed" }
-        val capturedState = ErrnoSegment.allocate()
-        val ret = IOCTL_ADDR.invokeExact(capturedState.segment, fd.value, request, arg) as Int
-        RealNativeHelper.result(ret.toLong(), capturedState.getErrno())
-    }
+        nativeScope {
+            require(fd.isValid) { "FileDescriptor is invalid or closed" }
+            val capturedState = ErrnoSegment.allocate()
+            val ret = IOCTL_ADDR.invokeExact(capturedState.segment, fd.value, request, arg) as Int
+            RealNativeHelper.result(ret.toLong(), capturedState.getErrno())
+        }
 
     context(_: NativeTransaction)
     override fun ioctl(
-        fd: LinuxNative.FileDescriptor,
+        fd: FileDescriptor<*>,
         request: Long,
         arg: Long,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
- nativeScope {
-        require(fd.isValid) { "FileDescriptor is invalid or closed" }
-        val capturedState = ErrnoSegment.allocate()
-        val ret = IOCTL_LONG.invokeExact(capturedState.segment, fd.value, request, arg) as Int
-        RealNativeHelper.result(ret.toLong(), capturedState.getErrno())
-    }
+        nativeScope {
+            require(fd.isValid) { "FileDescriptor is invalid or closed" }
+            val capturedState = ErrnoSegment.allocate()
+            val ret = IOCTL_LONG.invokeExact(capturedState.segment, fd.value, request, arg) as Int
+            RealNativeHelper.result(ret.toLong(), capturedState.getErrno())
+        }
 
     context(_: NativeTransaction)
     override fun fcntl(
-        fd: LinuxNative.FileDescriptor,
+        fd: FileDescriptor<*>,
         cmd: Int,
         arg: Long,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
- nativeScope {
-        require(fd.isValid) { "FileDescriptor is invalid or closed" }
-        val capturedState = ErrnoSegment.allocate()
-        val ret = FCNTL.invokeExact(capturedState.segment, fd.value, cmd, arg) as Int
-        RealNativeHelper.result(ret.toLong(), capturedState.getErrno())
-    }
+        nativeScope {
+            require(fd.isValid) { "FileDescriptor is invalid or closed" }
+            val capturedState = ErrnoSegment.allocate()
+            val ret = FCNTL.invokeExact(capturedState.segment, fd.value, cmd, arg) as Int
+            RealNativeHelper.result(ret.toLong(), capturedState.getErrno())
+        }
 
     context(_: NativeTransaction)
     override fun poll(
@@ -420,11 +391,11 @@ internal object RealNativeEngine : NativeEngine {
         nfds: Long,
         timeout: Int,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
- nativeScope {
-        val capturedState = ErrnoSegment.allocate()
-        val ret = POLL.invokeExact(capturedState.segment, fds, nfds, timeout) as Int
-        RealNativeHelper.result(ret.toLong(), capturedState.getErrno())
-    }
+        nativeScope {
+            val capturedState = ErrnoSegment.allocate()
+            val ret = POLL.invokeExact(capturedState.segment, fds, nfds, timeout) as Int
+            RealNativeHelper.result(ret.toLong(), capturedState.getErrno())
+        }
 }
 
 internal object RealNativeFileSystem : NativeFileSystem {
@@ -457,13 +428,13 @@ internal object RealNativeFileSystem : NativeFileSystem {
         path: MemorySegment,
         flags: Int,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
- nativeScope {
-        val capturedState = ErrnoSegment.allocate()
-        val ret = OPEN.invokeExact(capturedState.segment, path, flags) as Int
-        RealNativeHelper.result(ret.toLong(), capturedState.getErrno())
-    }
+        nativeScope {
+            val capturedState = ErrnoSegment.allocate()
+            val ret = OPEN.invokeExact(capturedState.segment, path, flags) as Int
+            RealNativeHelper.result(ret.toLong(), capturedState.getErrno())
+        }
 
-    override fun close(fd: LinuxNative.FileDescriptor): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = nativeScope {
+    override fun close(fd: FileDescriptor<*>): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = nativeScope {
         val capturedState = ErrnoSegment.allocate()
         val ret = CLOSE.invokeExact(capturedState.segment, fd.value) as Int
         RealNativeHelper.result(ret.toLong(), capturedState.getErrno())
@@ -475,11 +446,11 @@ internal object RealNativeFileSystem : NativeFileSystem {
         buf: MemorySegment,
         bufsiz: Long,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
- nativeScope {
-        val capturedState = ErrnoSegment.allocate()
-        val ret = READLINK.invokeExact(capturedState.segment, path, buf, bufsiz) as Long
-        RealNativeHelper.result(ret, capturedState.getErrno())
-    }
+        nativeScope {
+            val capturedState = ErrnoSegment.allocate()
+            val ret = READLINK.invokeExact(capturedState.segment, path, buf, bufsiz) as Long
+            RealNativeHelper.result(ret, capturedState.getErrno())
+        }
 }
 
 internal object RealNativeNetworking : NativeNetworking {
@@ -582,11 +553,11 @@ internal object RealNativeNetworking : NativeNetworking {
         protocol: Int,
         sv: MemorySegment,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
- nativeScope {
-        val capturedState = ErrnoSegment.allocate()
-        val ret = SOCKETPAIR.invokeExact(capturedState.segment, domain, type, protocol, sv) as Int
-        RealNativeHelper.result(ret.toLong(), capturedState.getErrno())
-    }
+        nativeScope {
+            val capturedState = ErrnoSegment.allocate()
+            val ret = SOCKETPAIR.invokeExact(capturedState.segment, domain, type, protocol, sv) as Int
+            RealNativeHelper.result(ret.toLong(), capturedState.getErrno())
+        }
 
     context(_: NativeTransaction)
     override fun socket(
@@ -594,102 +565,102 @@ internal object RealNativeNetworking : NativeNetworking {
         type: Int,
         protocol: Int,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
- nativeScope {
-        val capturedState = ErrnoSegment.allocate()
-        val ret = SOCKET.invokeExact(capturedState.segment, domain, type, protocol) as Int
-        RealNativeHelper.result(ret.toLong(), capturedState.getErrno())
-    }
+        nativeScope {
+            val capturedState = ErrnoSegment.allocate()
+            val ret = SOCKET.invokeExact(capturedState.segment, domain, type, protocol) as Int
+            RealNativeHelper.result(ret.toLong(), capturedState.getErrno())
+        }
 
     context(_: NativeTransaction)
     override fun bind(
-        sockfd: LinuxNative.FileDescriptor,
+        sockfd: FileDescriptor<*>,
         addr: MemorySegment,
         addrlen: Int,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
- nativeScope {
-        require(sockfd.isValid) { "FileDescriptor is invalid or closed" }
-        val capturedState = ErrnoSegment.allocate()
-        val ret = BIND.invokeExact(capturedState.segment, sockfd.value, addr, addrlen) as Int
-        RealNativeHelper.result(ret.toLong(), capturedState.getErrno())
-    }
+        nativeScope {
+            require(sockfd.isValid) { "FileDescriptor is invalid or closed" }
+            val capturedState = ErrnoSegment.allocate()
+            val ret = BIND.invokeExact(capturedState.segment, sockfd.value, addr, addrlen) as Int
+            RealNativeHelper.result(ret.toLong(), capturedState.getErrno())
+        }
 
     context(_: NativeTransaction)
     override fun listen(
-        sockfd: LinuxNative.FileDescriptor,
+        sockfd: FileDescriptor<*>,
         backlog: Int,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
- nativeScope {
-        require(sockfd.isValid) { "FileDescriptor is invalid or closed" }
-        val capturedState = ErrnoSegment.allocate()
-        val ret = LISTEN.invokeExact(capturedState.segment, sockfd.value, backlog) as Int
-        RealNativeHelper.result(ret.toLong(), capturedState.getErrno())
-    }
+        nativeScope {
+            require(sockfd.isValid) { "FileDescriptor is invalid or closed" }
+            val capturedState = ErrnoSegment.allocate()
+            val ret = LISTEN.invokeExact(capturedState.segment, sockfd.value, backlog) as Int
+            RealNativeHelper.result(ret.toLong(), capturedState.getErrno())
+        }
 
     context(_: NativeTransaction)
     override fun accept(
-        sockfd: LinuxNative.FileDescriptor,
+        sockfd: FileDescriptor<*>,
         addr: MemorySegment,
         addrlen: MemorySegment,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
- nativeScope {
-        require(sockfd.isValid) { "FileDescriptor is invalid or closed" }
-        val capturedState = ErrnoSegment.allocate()
-        val ret = ACCEPT.invokeExact(capturedState.segment, sockfd.value, addr, addrlen) as Int
-        RealNativeHelper.result(ret.toLong(), capturedState.getErrno())
-    }
+        nativeScope {
+            require(sockfd.isValid) { "FileDescriptor is invalid or closed" }
+            val capturedState = ErrnoSegment.allocate()
+            val ret = ACCEPT.invokeExact(capturedState.segment, sockfd.value, addr, addrlen) as Int
+            RealNativeHelper.result(ret.toLong(), capturedState.getErrno())
+        }
 
     context(_: NativeTransaction)
     override fun connect(
-        sockfd: LinuxNative.FileDescriptor,
+        sockfd: FileDescriptor<*>,
         addr: MemorySegment,
         addrlen: Int,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
- nativeScope {
-        require(sockfd.isValid) { "FileDescriptor is invalid or closed" }
-        val capturedState = ErrnoSegment.allocate()
-        val ret = CONNECT.invokeExact(capturedState.segment, sockfd.value, addr, addrlen) as Int
-        RealNativeHelper.result(ret.toLong(), capturedState.getErrno())
-    }
+        nativeScope {
+            require(sockfd.isValid) { "FileDescriptor is invalid or closed" }
+            val capturedState = ErrnoSegment.allocate()
+            val ret = CONNECT.invokeExact(capturedState.segment, sockfd.value, addr, addrlen) as Int
+            RealNativeHelper.result(ret.toLong(), capturedState.getErrno())
+        }
 
     context(_: NativeTransaction)
     override fun sendmsg(
-        sockfd: LinuxNative.FileDescriptor,
+        sockfd: FileDescriptor<*>,
         msg: MemorySegment,
         flags: Int,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
- nativeScope {
-        require(sockfd.isValid) { "FileDescriptor is invalid or closed" }
-        val capturedState = ErrnoSegment.allocate()
-        val ret = SENDMSG.invokeExact(capturedState.segment, sockfd.value, msg, flags) as Long
-        RealNativeHelper.result(ret, capturedState.getErrno())
-    }
+        nativeScope {
+            require(sockfd.isValid) { "FileDescriptor is invalid or closed" }
+            val capturedState = ErrnoSegment.allocate()
+            val ret = SENDMSG.invokeExact(capturedState.segment, sockfd.value, msg, flags) as Long
+            RealNativeHelper.result(ret, capturedState.getErrno())
+        }
 
     context(_: NativeTransaction)
     override fun recvmsg(
-        sockfd: LinuxNative.FileDescriptor,
+        sockfd: FileDescriptor<*>,
         msg: MemorySegment,
         flags: Int,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
- nativeScope {
-        require(sockfd.isValid) { "FileDescriptor is invalid or closed" }
-        val capturedState = ErrnoSegment.allocate()
-        val ret = RECVMSG.invokeExact(capturedState.segment, sockfd.value, msg, flags) as Long
-        RealNativeHelper.result(ret, capturedState.getErrno())
-    }
+        nativeScope {
+            require(sockfd.isValid) { "FileDescriptor is invalid or closed" }
+            val capturedState = ErrnoSegment.allocate()
+            val ret = RECVMSG.invokeExact(capturedState.segment, sockfd.value, msg, flags) as Long
+            RealNativeHelper.result(ret, capturedState.getErrno())
+        }
 
     context(_: NativeTransaction)
     override fun recv(
-        sockfd: LinuxNative.FileDescriptor,
+        sockfd: FileDescriptor<*>,
         buf: MemorySegment,
         len: Long,
         flags: Int,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
- nativeScope {
-        require(sockfd.isValid) { "FileDescriptor is invalid or closed" }
-        val capturedState = ErrnoSegment.allocate()
-        val ret = RECV.invokeExact(capturedState.segment, sockfd.value, buf, len, flags) as Long
-        RealNativeHelper.result(ret, capturedState.getErrno())
-    }
+        nativeScope {
+            require(sockfd.isValid) { "FileDescriptor is invalid or closed" }
+            val capturedState = ErrnoSegment.allocate()
+            val ret = RECV.invokeExact(capturedState.segment, sockfd.value, buf, len, flags) as Long
+            RealNativeHelper.result(ret, capturedState.getErrno())
+        }
 }
 
 internal object RealNativeProcess : NativeProcess {
@@ -726,19 +697,19 @@ internal object RealNativeProcess : NativeProcess {
         arg4: io.mazewall.core.NativeArg,
         arg5: io.mazewall.core.NativeArg,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
- nativeScope {
-        val capturedState = ErrnoSegment.allocate()
-        val ret =
-            PRCTL.invokeExact(
-                capturedState.segment,
-                option,
-                arg2.asLong,
-                arg3.asLong,
-                arg4.asLong,
-                arg5.asLong,
-            ) as Int
-        RealNativeHelper.result(ret.toLong(), capturedState.getErrno())
-    }
+        nativeScope {
+            val capturedState = ErrnoSegment.allocate()
+            val ret =
+                PRCTL.invokeExact(
+                    capturedState.segment,
+                    option,
+                    arg2.asLong,
+                    arg3.asLong,
+                    arg4.asLong,
+                    arg5.asLong,
+                ) as Int
+            RealNativeHelper.result(ret.toLong(), capturedState.getErrno())
+        }
 }
 
 internal object RealNativeMemory : NativeMemory {
@@ -788,46 +759,46 @@ internal object RealNativeMemory : NativeMemory {
         riovcnt: Long,
         flags: Long,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
- nativeScope {
-        val capturedState = ErrnoSegment.allocate()
-        val ret =
-            PROCESS_VM_READV.invokeExact(
-                capturedState.segment,
-                pid.value,
-                localIov,
-                liovcnt,
-                remoteIov,
-                riovcnt,
-                flags,
-            ) as Long
-        RealNativeHelper.result(ret, capturedState.getErrno())
-    }
+        nativeScope {
+            val capturedState = ErrnoSegment.allocate()
+            val ret =
+                PROCESS_VM_READV.invokeExact(
+                    capturedState.segment,
+                    pid.value,
+                    localIov,
+                    liovcnt,
+                    remoteIov,
+                    riovcnt,
+                    flags,
+                ) as Long
+            RealNativeHelper.result(ret, capturedState.getErrno())
+        }
 
     context(_: NativeTransaction)
     override fun read(
-        fd: LinuxNative.FileDescriptor,
+        fd: FileDescriptor<*>,
         buf: MemorySegment,
         count: Long,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
- nativeScope {
-        require(fd.isValid) { "FileDescriptor is invalid or closed" }
-        val capturedState = ErrnoSegment.allocate()
-        val ret = READ.invokeExact(capturedState.segment, fd.value, buf, count) as Long
-        RealNativeHelper.result(ret, capturedState.getErrno())
-    }
+        nativeScope {
+            require(fd.isValid) { "FileDescriptor is invalid or closed" }
+            val capturedState = ErrnoSegment.allocate()
+            val ret = READ.invokeExact(capturedState.segment, fd.value, buf, count) as Long
+            RealNativeHelper.result(ret, capturedState.getErrno())
+        }
 
     context(_: NativeTransaction)
     override fun write(
-        fd: LinuxNative.FileDescriptor,
+        fd: FileDescriptor<*>,
         buf: MemorySegment,
         count: Long,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
- nativeScope {
-        require(fd.isValid) { "FileDescriptor is invalid or closed" }
-        val capturedState = ErrnoSegment.allocate()
-        val ret = WRITE.invokeExact(capturedState.segment, fd.value, buf, count) as Long
-        RealNativeHelper.result(ret, capturedState.getErrno())
-    }
+        nativeScope {
+            require(fd.isValid) { "FileDescriptor is invalid or closed" }
+            val capturedState = ErrnoSegment.allocate()
+            val ret = WRITE.invokeExact(capturedState.segment, fd.value, buf, count) as Long
+            RealNativeHelper.result(ret, capturedState.getErrno())
+        }
 
     context(arena: Arena)
     override fun newSockFProg(

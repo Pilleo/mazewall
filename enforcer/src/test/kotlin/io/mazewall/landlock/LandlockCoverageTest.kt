@@ -8,6 +8,7 @@ import io.mazewall.MockNativeNetworking
 import io.mazewall.MockNativeProcess
 import io.mazewall.NativeTransaction
 import io.mazewall.Policy
+import io.mazewall.core.FileDescriptor
 import io.mazewall.core.SandboxedPath
 import io.mazewall.ffi.memory.*
 import org.junit.jupiter.api.AfterEach
@@ -69,7 +70,7 @@ class LandlockCoverageTest {
         LinuxNative.setEngine(mock)
 
         nativeScope {
-            Landlock.addJvmClasspathRules(LinuxNative.FileDescriptor(42), 0L)
+            Landlock.addJvmClasspathRules(FileDescriptor.unsafe(42), 0L)
         }
     }
 
@@ -96,7 +97,7 @@ class LandlockCoverageTest {
         LinuxNative.setEngine(mock)
 
         nativeScope {
-            Landlock.addJvmClasspathRules(LinuxNative.FileDescriptor(42), 0L)
+            Landlock.addJvmClasspathRules(FileDescriptor.unsafe(42), 0L)
         }
     }
 

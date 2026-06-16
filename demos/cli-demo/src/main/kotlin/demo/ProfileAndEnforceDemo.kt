@@ -4,6 +4,8 @@ import io.mazewall.LinuxNative
 import io.mazewall.Policy
 import io.mazewall.asFd
 import io.mazewall.core.Arch
+import io.mazewall.core.FileDescriptor
+import io.mazewall.core.FileDescriptorRole
 import io.mazewall.core.Syscall
 import io.mazewall.core.NativeArg
 import io.mazewall.enforcer.ContainedExecutors
@@ -91,7 +93,7 @@ fun runProfileAndEnforce() {
             val ioUringStatus: String
 
             ioUringStatus = setupResult.map { value ->
-                val ringFd = LinuxNative.FileDescriptor(value.toInt())
+                val ringFd = FileDescriptor.unsafe<FileDescriptorRole.Generic>(value.toInt())
                 try {
                     "io_uring ring initialized successfully (ringFd=${ringFd.value})"
                 } finally {
@@ -252,7 +254,7 @@ fun runProfileAndEnforce() {
                         throw java.io.IOException("Permission denied (io_uring async worker blocked by Landlock)")
                     }
                 }.onSuccess { value ->
-                    LinuxNative.fileSystem.close(LinuxNative.FileDescriptor(value.toInt()))
+                    LinuxNative.fileSystem.close(FileDescriptor.unsafe<FileDescriptorRole.Generic>(value.toInt()))
                 }
             }
             "Evasion succeeded (Is Landlock supported on this kernel?)"
