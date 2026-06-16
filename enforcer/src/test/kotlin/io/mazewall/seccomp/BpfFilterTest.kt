@@ -1,4 +1,5 @@
 package io.mazewall.seccomp
+
 import io.mazewall.BpfFilter
 import io.mazewall.Policy
 import io.mazewall.core.Arch
@@ -164,7 +165,7 @@ class BpfFilterTest {
                 // Should load args[0] HI (offset 16 + 4 = 20)
                 val ldArgs = filter[i + 1]
                 if (ldArgs.code == 0x20.toShort() && ldArgs.k == 20) {
-                     foundInspection = true
+                    foundInspection = true
                 }
             }
         }
@@ -190,6 +191,8 @@ class BpfFilterTest {
             ),
         )
         val builder = BpfProgram.builder()
+            .checkArch(arch)
+            .loadSyscallNr()
         val handled = mutableSetOf<Int>()
         BpfFilter.emitInspections(builder, inspections, false, handled)
         val instructions = builder.build().instructions
@@ -223,6 +226,8 @@ class BpfFilterTest {
             ),
         )
         val builder = BpfProgram.builder()
+            .checkArch(arch)
+            .loadSyscallNr()
         val handled = mutableSetOf<Int>()
         BpfFilter.emitInspections(builder, inspections, false, handled)
         val instructions = builder.build().instructions
@@ -252,6 +257,8 @@ class BpfFilterTest {
             ),
         )
         val builder = BpfProgram.builder()
+            .checkArch(arch)
+            .loadSyscallNr()
         val handled = mutableSetOf<Int>()
         BpfFilter.emitInspections(builder, inspections, false, handled)
         val instructions = builder.build().instructions
@@ -281,6 +288,8 @@ class BpfFilterTest {
             ),
         )
         val builder = BpfProgram.builder()
+            .checkArch(arch)
+            .loadSyscallNr()
         val handled = mutableSetOf<Int>()
         BpfFilter.emitInspections(builder, inspections, false, handled)
         val instructions = builder.build().instructions

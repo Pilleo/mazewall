@@ -1,6 +1,12 @@
 package io.mazewall.seccomp
 
 import io.mazewall.BpfFilter
+import io.mazewall.core.Arch
+import io.mazewall.core.SeccompAction
+import io.mazewall.core.Syscall
+import io.mazewall.ffi.NativeConstants
+import java.util.UUID
+import java.util.function.Consumer
 
 /**
  * A compiled seccomp policy containing the BPF filter instructions ready for installation.
@@ -12,134 +18,160 @@ public class BpfProgram(
         private const val MAX_BPF_JUMP_OFFSET = 255
 
         @JvmStatic
-        public fun builder(): Builder = Builder()
+        public fun builder(): BpfBuilder.Uninitialized = BpfBuilder.Uninitialized()
 
         /**
          * Declarative entry point for building BPF programs.
          */
         @JvmStatic
-        public fun dsl(block: java.util.function.Consumer<Builder>): BpfProgram {
-            val builder = Builder()
-            block.accept(builder)
-            return builder.build()
+        public fun dsl(arch: Arch, block: Consumer<BpfBuilder.NrLoaded>): BpfProgram {
+            val nrLoaded = BpfBuilder.Uninitialized()
+                .checkArch(arch)
+                .loadSyscallNr()
+            block.accept(nrLoaded)
+            return nrLoaded.build()
         }
 
         /**
          * Kotlin-friendly declarative entry point for building BPF programs.
          */
-        public inline fun dsl(block: Builder.() -> Unit): BpfProgram =
-            Builder().apply(block).build()
+        public inline fun dsl(arch: Arch, block: BpfBuilder.NrLoaded.() -> Unit): BpfProgram =
+            BpfBuilder.Uninitialized()
+                .checkArch(arch)
+                .loadSyscallNr()
+                .apply(block)
+                .build()
+    }
+}
+
+/**
+ * Type-safe state machine for building BPF programs.
+ * Enforces the initialization sequence: Arch Check -> Load NR -> Filtering.
+ */
+public sealed class BpfBuilder protected constructor(internal val ops: MutableList<BpfMacro>) {
+
+    /**
+     * Initial state: Only allows architecture verification.
+     */
+    public class Uninitialized : BpfBuilder(mutableListOf()) {
+        /**
+         * Emits code to verify the current architecture and transitions to [ArchVerified].
+         */
+        public fun checkArch(arch: Arch): ArchVerified {
+            ops.add(BpfMacro.LoadAbsolute(BpfFilter.SECCOMP_DATA_ARCH_OFFSET))
+            val archOkLabel = "arch_ok_${UUID.randomUUID().toString().replace("-", "")}"
+            ops.add(BpfMacro.JumpIfEqual(arch.audit, jt = archOkLabel))
+            ops.add(BpfMacro.Ret(NativeConstants.SECCOMP_RET_KILL_THREAD))
+            ops.add(BpfMacro.Label(archOkLabel))
+            return ArchVerified(ops)
+        }
     }
 
     /**
-     * DSL for building BPF programs using symbolic labels and high-level helpers.
+     * Architecture verified: Only allows loading the syscall number.
      */
-    public class Builder {
-        private val ops = mutableListOf<BpfMacro>()
+    public class ArchVerified internal constructor(ops: MutableList<BpfMacro>) : BpfBuilder(ops) {
+        /**
+         * Emits code to load the syscall number and transitions to [NrLoaded].
+         */
+        public fun loadSyscallNr(): NrLoaded {
+            ops.add(BpfMacro.LoadAbsolute(BpfFilter.SECCOMP_DATA_NR_OFFSET))
+            return NrLoaded(ops)
+        }
+    }
 
-        /** Loads the current syscall number into the accumulator. */
-        public fun loadSyscallNr(): Builder = loadAbsolute(BpfFilter.SECCOMP_DATA_NR_OFFSET)
-
-        /** Loads the CPU architecture into the accumulator. */
-        public fun loadArch(): Builder = loadAbsolute(BpfFilter.SECCOMP_DATA_ARCH_OFFSET)
+    /**
+     * Syscall number loaded: Allows full filtering logic and final building.
+     */
+    public class NrLoaded internal constructor(ops: MutableList<BpfMacro>) : BpfBuilder(ops) {
 
         /** Returns ACT_ALLOW immediately. */
-        public fun allow(): Builder = ret(io.mazewall.core.SeccompAction.ACT_ALLOW.nativeCode)
+        public fun allow(): NrLoaded {
+            return ret(SeccompAction.ACT_ALLOW.nativeCode)
+        }
 
         /** Returns ACT_ERRNO with the given [errno]. */
-        public fun deny(errno: Int): Builder =
-            ret(io.mazewall.core.SeccompAction.ACT_ERRNO.nativeCode or (errno and ERRNO_MASK))
+        public fun deny(errno: Int): NrLoaded {
+            return ret(SeccompAction.ACT_ERRNO.nativeCode or (errno and ERRNO_MASK))
+        }
 
         /** Returns SECCOMP_RET_KILL_THREAD. */
-        public fun killThread(): Builder =
-            ret(io.mazewall.ffi.NativeConstants.SECCOMP_RET_KILL_THREAD)
+        public fun killThread(): NrLoaded {
+            return ret(NativeConstants.SECCOMP_RET_KILL_THREAD)
+        }
 
         /** Returns SECCOMP_RET_USER_NOTIF (for profiling or complex rules). */
-        public fun notifyUser(): Builder =
-            ret(io.mazewall.ffi.NativeConstants.SECCOMP_RET_USER_NOTIF)
+        public fun notifyUser(): NrLoaded {
+            return ret(NativeConstants.SECCOMP_RET_USER_NOTIF)
+        }
 
         /**
          * Expects a specific syscall number and executes the [block] if matched.
          * Skips the block if the syscall number does not match.
          */
-        public fun expect(nr: Int, block: Builder.() -> Unit): Builder {
-            val skipLabel = "skip_${java.util.UUID.randomUUID().toString().replace("-", "")}"
+        public fun expect(nr: Int, block: NrLoaded.() -> Unit): NrLoaded {
+            val skipLabel = "skip_${UUID.randomUUID().toString().replace("-", "")}"
             jumpIfEqual(nr, jf = skipLabel)
             this.block()
             label(skipLabel)
             return this
         }
 
-        /**
-         * Java-compatible version of [expect].
-         */
-        public fun expect(nr: Int, block: java.util.function.Consumer<Builder>): Builder {
-            val skipLabel = "skip_${java.util.UUID.randomUUID().toString().replace("-", "")}"
+        /** Java-compatible version of [expect]. */
+        public fun expect(nr: Int, block: Consumer<NrLoaded>): NrLoaded {
+            val skipLabel = "skip_${UUID.randomUUID().toString().replace("-", "")}"
             jumpIfEqual(nr, jf = skipLabel)
             block.accept(this)
             label(skipLabel)
             return this
         }
 
-        /**
-         * Expects a specific [syscall] for the given [arch].
-         */
-        public fun expect(syscall: io.mazewall.core.Syscall, arch: io.mazewall.core.Arch, block: Builder.() -> Unit): Builder {
+        /** Expects a specific [syscall] for the given [arch]. */
+        public fun expect(syscall: Syscall, arch: Arch, block: NrLoaded.() -> Unit): NrLoaded {
             val nr = syscall.numberFor(arch)
             if (nr >= 0) expect(nr, block)
             return this
         }
 
-        /**
-         * Java-compatible version of [expect] using [io.mazewall.core.Syscall].
-         */
-        public fun expect(syscall: io.mazewall.core.Syscall, arch: io.mazewall.core.Arch, block: java.util.function.Consumer<Builder>): Builder {
+        /** Java-compatible version of [expect] using [Syscall]. */
+        public fun expect(syscall: Syscall, arch: Arch, block: Consumer<NrLoaded>): NrLoaded {
             val nr = syscall.numberFor(arch)
             if (nr >= 0) expect(nr, block)
             return this
         }
 
-        public fun loadAbsolute(offset: Int): Builder {
+        public fun loadAbsolute(offset: Int): NrLoaded {
             ops.add(BpfMacro.LoadAbsolute(offset))
             return this
         }
 
-        public fun jumpIfEqual(
-            k: Int,
-            jt: String? = null,
-            jf: String? = null,
-        ): Builder {
+        public fun jumpIfEqual(k: Int, jt: String? = null, jf: String? = null): NrLoaded {
             ops.add(BpfMacro.JumpIfEqual(k, jt, jf))
             return this
         }
 
-        public fun jumpIfSet(
-            k: Int,
-            jt: String? = null,
-            jf: String? = null,
-        ): Builder {
+        public fun jumpIfSet(k: Int, jt: String? = null, jf: String? = null): NrLoaded {
             ops.add(BpfMacro.JumpIfSet(k, jt, jf))
             return this
         }
 
-        public fun and(k: Int): Builder {
+        public fun and(k: Int): NrLoaded {
             ops.add(BpfMacro.And(k))
             return this
         }
 
-        public fun ret(action: Int): Builder {
+        public fun ret(action: Int): NrLoaded {
             ops.add(BpfMacro.Ret(action))
             return this
         }
 
-        public fun label(name: String): Builder {
+        public fun label(name: String): NrLoaded {
             ops.add(BpfMacro.Label(name))
             return this
         }
 
         /**
          * Compiles the high-level instructions into raw seccomp-bpf opcodes.
-         * Resolves all symbolic labels into forward-only relative offsets.
          */
         public fun build(): BpfProgram {
             val labelPositions = mutableMapOf<String, Int>()
@@ -198,6 +230,7 @@ public class BpfProgram(
         }
 
         private companion object {
+            private const val MAX_BPF_JUMP_OFFSET = 255
             private const val ERRNO_MASK = 0xFFFF
             private const val BPF_LD_ABS: Short = 0x20
             private const val BPF_ALU_AND: Short = 0x54
@@ -211,10 +244,10 @@ public class BpfProgram(
 /**
  * Intermediate symbolic representation of BPF instructions before label resolution.
  */
-private sealed interface BpfMacro {
+internal sealed interface BpfMacro {
     data class LoadAbsolute(val offset: Int) : BpfMacro
-    data class JumpIfEqual(val k: Int, val jt: String?, val jf: String?) : BpfMacro
-    data class JumpIfSet(val k: Int, val jt: String?, val jf: String?) : BpfMacro
+    data class JumpIfEqual(val k: Int, val jt: String? = null, val jf: String? = null) : BpfMacro
+    data class JumpIfSet(val k: Int, val jt: String? = null, val jf: String? = null) : BpfMacro
     data class And(val k: Int) : BpfMacro
     data class Ret(val action: Int) : BpfMacro
     data class Label(val name: String) : BpfMacro

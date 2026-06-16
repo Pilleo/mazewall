@@ -155,10 +155,9 @@
 **Context:** Standard `ExecutorService` usage trivially bypasses Tier 2 (thread-scoped) sandboxes if a developer accidentally delegates tasks to global thread pools (e.g., via `CompletableFuture.supplyAsync`).
 **Needed:** Introduce `interface SandboxedExecutor<out P : Policy> : Executor`. Require sensitive classes to explicitly depend on this typed executor (e.g., `SandboxedExecutor<Policy.NO_NETWORK>`). This API guardrail forces the compiler to verify that components run on thread pools with the required security baseline, preventing *accidental* architectural leaks of data-oriented workloads. Note: Due to JVM Type Erasure, this does NOT prevent a malicious actor with ACE from reflecting or escaping the sandbox at runtime (which is caught instead by the Tier 1 Process-Wide baseline).
 
-### 🔵 [Severity: ENHANCEMENT]: Type-State Enforced BPF Construction Lifecycle (`BpfBuilder<State>`)
-**Target:** `io.mazewall.seccomp.BpfProgram.Builder`
+### ✅ [RESOLVED] [Severity: ENHANCEMENT]: Type-State Enforced BPF Construction Lifecycle (`BpfBuilder<State>`)
 **Context:** Seccomp-BPF programs must follow a strict structural sequence (`Arch Check -> Load NR -> Inspections -> Scan -> Default RET`) to be valid and safe. Currently, the `Builder` allows instructions to be emitted in any order, which could lead to malformed filters (e.g., comparing NR before loading it).
-**Needed:** Implement a Type-State pattern: `BpfBuilder<Uninitialized> -> BpfBuilder<ArchVerified> -> BpfBuilder<NrLoaded> -> BpfBuilder<Finalized>`. The compiler will enforce that architecture checks and syscall number loads occur in the mandatory sequence before any filtering logic is permitted, ensuring BPF bytecode is structurally correct by construction.
+**Fix:** Implemented `BpfBuilder` sealed class hierarchy (`Uninitialized`, `ArchVerified`, `NrLoaded`). The compiler now enforces that architecture checks and syscall number loads occur in the mandatory sequence before any filtering logic is permitted, ensuring BPF bytecode is structurally correct by construction.
 
 ### ✅ [RESOLVED] [Severity: ENHANCEMENT]: Type-Safe Profiler Connection Handshake State Machine (`ProfilerConnection<State>`)
 **Context:** The Profiler Daemon connection follows a non-trivial handshake: `Accept -> Receive FD (SCM_RIGHTS) -> Send PROTOCOL_ACK_BYTE`. Performing operations out of order (e.g., polling a null listener FD) causes reactor crashes.

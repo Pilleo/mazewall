@@ -77,19 +77,17 @@ object BpfFilter {
         allowUnsafePrctl: Boolean = false,
         profilingMode: Boolean = false,
     ): List<BpfInstruction> {
-        val builder = BpfProgram.builder()
         val defaultNativeAction = resolveNativeAction(defaultAction, profilingMode)
 
         // Syscalls absolutely required for safepoints, GC, and thread stability.
         val jvmCriticalNrs = getJvmCriticalNrs(arch)
 
-        // 1. Check Architecture
-        emitArchCheck(builder, arch)
+        // 1. Initialize Builder and enforce sequence: Arch Check -> Load NR
+        val builder = BpfProgram.builder()
+            .checkArch(arch)
+            .loadSyscallNr()
 
-        // 2. Load Syscall Number
-        builder.loadSyscallNr()
-
-        // 3. Special Syscall Argument Checks
+        // 2. Special Syscall Argument Checks
         val handledNrs = mutableSetOf<Int>()
 
         val inspections = getInspections(
@@ -112,10 +110,10 @@ object BpfFilter {
             }
         }
 
-        // 4. Block-based checks (Linear Scan)
+        // 3. Block-based checks (Linear Scan)
         emitLinearScan(builder, syscallActions, jvmCriticalNrs, profilingMode, defaultNativeAction, handledNrs)
 
-        // 5. Default Action
+        // 4. Default Action
         builder.ret(defaultNativeAction)
 
         return builder.build().instructions
@@ -132,17 +130,6 @@ object BpfFilter {
             Syscall.CLOSE.numberFor(arch),
             Syscall.RT_SIGPROCMASK.numberFor(arch),
         ).filter { it >= 0 }.toSet()
-
-    private fun emitArchCheck(
-        builder: BpfProgram.Builder,
-        arch: Arch,
-    ) {
-        builder.loadArch()
-        builder.jumpIfEqual(arch.audit, jt = "arch_ok", jf = "arch_fail")
-        builder.label("arch_fail")
-        builder.killThread()
-        builder.label("arch_ok")
-    }
 
     private fun getInspections(
         arch: Arch,
@@ -210,7 +197,7 @@ object BpfFilter {
     }
 
     internal fun emitInspections(
-        builder: BpfProgram.Builder,
+        builder: io.mazewall.seccomp.BpfBuilder.NrLoaded,
         inspections: List<io.mazewall.seccomp.SyscallInspection>,
         profilingMode: Boolean,
         handledNrs: MutableSet<Int>,
@@ -272,7 +259,7 @@ object BpfFilter {
     }
 
     private fun emitLinearScan(
-        builder: BpfProgram.Builder,
+        builder: io.mazewall.seccomp.BpfBuilder.NrLoaded,
         syscallActions: Map<Int, SeccompAction>,
         jvmCriticalNrs: Set<Int>,
         profilingMode: Boolean,
