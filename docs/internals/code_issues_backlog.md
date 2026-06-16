@@ -41,12 +41,6 @@
 
 
 
-### 🔴 [Severity: HIGH]: BPF Filter Engine uses 32-bit `Int` for 64-bit Syscall Argument Comparisons
-**Context:** The current `BpfFilter` implementation (and `BpfProgram.Builder`) treats system call arguments as 32-bit values by casting `Long` values to `Int` (e.g., in `emitInspections` and `ArgCheck`). On 64-bit architectures, system call arguments are 8 bytes. Seccomp-BPF registers are 32-bit, but the `seccomp_data` struct provides arguments as `__u64`. Comparisons against pointers, large offsets, or high-bit flags (like `O_PATH` or `O_CLOEXEC` on some architectures, or memory addresses) will be truncated, leading to silent security bypasses or incorrect denials.
-**Needed:** Update the BPF compiler to handle 64-bit comparisons.
-1. `BpfProgram.Builder` should accept `Long` for arguments.
-2. The compiler must emit two loads (high/low 32-bit words) and a sequence of jump instructions to perform the 64-bit equality or mask check.
-
 ### 🔴 [Severity: MEDIUM]: Manual FFM Layout Maintenance and ABI Drift Risk
 **Context:** `Layouts.kt` contains hand-coded `MemoryLayout` definitions for critical kernel structures (e.g., `sock_fprog`, `seccomp_data`, `landlock_ruleset_attr`). While `LayoutValidator` performs runtime alignment checks, it does not guarantee that the offsets match the actual target architecture's ABI if they differ (e.g., padding rules between x86_64 and AArch64).
 **Needed:** Implement a robust validation or generation strategy.
@@ -72,14 +66,15 @@
 1. Add a utility to map common `Int` errnos to their symbolic names (e.g., `1 -> "EPERM"`, `13 -> "EACCES"`).
 2. Update `SyscallResult.Error.toString()` and `throwErrno()` to include this symbolic name for better developer feedback.
 
-### 🔵 [Severity: ENHANCEMENT]: Polymorphic `TraceEvent` Hierarchy (Sealed Classes)
+### 🔵 [Severity: ENHANCEMENT]: Polymorphic `TraceEvent` Hierarchy (Semantic Property Access)
 **Target:** `io.mazewall.profiler.engine.TraceEvent`
-**Context:** `TraceEvent` is currently a flat data class with a `syscallName: String` and a raw `LongArray` of arguments. The `SyscallPathResolver` and `BobCompiler` use large `when(syscallName)` blocks to manually index into the `LongArray`. This is brittle and has already led to argument-mapping bugs (e.g., the `SYMLINKAT` error).
-**Needed:** Refactor `TraceEvent` into a sealed class hierarchy.
-1. Create a sealed interface `TraceEvent` with common properties (`pid`, `timestamp`).
-2. Implement specialized variants like `OpenEvent(path, flags)`, `ExecEvent(path, args)`, `ConnectEvent(address, port)`, etc.
-3. Update the `ProfilerSessionHandler` to emit these specialized events.
-4. This ensures that analysis logic (compiler, path resolver) uses type-safe properties instead of raw array indices and allows for exhaustive `when` checks.
+**Context:** `TraceEvent` is currently a sealed class but only distinguishes between `Generic` and `File`. Crucially, both variants still expose a raw `args: LongArray` as the primary way to access syscall parameters. This forces downstream consumers (like `BobCompiler` and `SyscallPathResolver`) to use **positional/index-based access** (e.g., `event.args[2]` for `mmap` protection flags). 
+**Problem:** This "primitive obsession" at the event layer is brittle and error-prone. A single register mismatch in the mapping logic (as seen with `SYMLINKAT`) causes silent analysis failures. Furthermore, it prevents the compiler from ensuring that all parameters for a specific syscall are present and correctly typed before they reach the analysis engine.
+**Status:** **PARTIALLY IMPLEMENTED.** (The sealed class structure exists, but the semantic property extraction does not).
+**Needed:** Transition to a fully specialized sealed hierarchy where syscall-specific parameters are exposed as **named, typed properties**.
+1. **Specialized Variants:** Implement types like `SocketEvent(val domain: Int, val type: Int)`, `MmapEvent(val addr: Long, val len: Long, val prot: Int)`, and `ExecEvent(val path: String, val args: List<String>)`.
+2. **Type-Safe Analysis:** Refactor `BobCompiler` to use exhaustive `when` expressions on these types. Instead of checking `if (event.syscallName == "MMAP") { use(event.args[2]) }`, it should use `is MmapEvent -> use(event.prot)`.
+3. **Internal Decoupling:** The register-to-property mapping should be encapsulated within the `TraceEvent` factory or a specialized `EventMapper`, keeping the rest of the profiler engine completely unaware of raw register indices.
 
 ### 🔵 [Severity: ENHANCEMENT]: Formal Monoidal Composition for `BillOfBehavior`
 **Target:** `io.mazewall.profiler.BillOfBehavior`
@@ -816,6 +811,19 @@ Even with compile-time enforcements, the lack of a native borrow checker introdu
 **Target:** `io.mazewall.LinuxNative`, `io.mazewall.NativeEngine`, `io.mazewall.RealNativeEngine`
 **Context:** `LinuxNative` and `RealNativeEngine` implemented *all* segment-specific native engine interfaces directly, turning them into monolithic, fat classes.
 **Needed:** Decouple `LinuxNative` from the massive inheritance hierarchy. Instead of inheriting all traits, `LinuxNative` should delegate to individual, modular sub-engines (e.g. `engine.fileSystem`, `engine.networking`) that implement only their specific interface. `MockNativeEngine` can then be composed of specific mock sub-engines.
+**Resolved:** Redefined `NativeEngine` as a container of `fileSystem`, `networking`, `process`, and `memory` sub-engines. `RealNativeEngine` now delegates to specialized internal objects, and `LinuxNative` entry point was refactored to use property-based access, removing monolithic top-level delegates.
+
+### ✅ [RESOLVED]: Landlock Symlink Rejection Bypass via Canonicalization
+**Context:** The Landlock documentation states that rules explicitly use `O_NOFOLLOW` to reject symlinks and prevent attackers from redirecting path rules. However, `addRule` called `SandboxedPath.of` which used `toRealPath()`, silently bypassing this protection.
+**Fix:** Switched to syntactic normalization (`Paths.get(path).toAbsolutePath().normalize()`) in `SandboxedPath.of`. This defers symlink resolution to the kernel, which then correctly rejects links via `O_NOFOLLOW`.
+
+### ✅ [RESOLVED]: Blacklist policies trigger silent Landlock filesystem lockdown due to `io_uring` check
+**Context:** Landlock was automatically triggered if `io_uring` syscalls were allowed. If no FS rules were provided, this resulted in a total FS lockdown.
+**Fix:** Removed the `io_uring` check from `Landlock.shouldApplyLandlock`.
+
+EOF
+
+ystem`, `engine.networking`) that implement only their specific interface. `MockNativeEngine` can then be composed of specific mock sub-engines.
 **Resolved:** Redefined `NativeEngine` as a container of `fileSystem`, `networking`, `process`, and `memory` sub-engines. `RealNativeEngine` now delegates to specialized internal objects, and `LinuxNative` entry point was refactored to use property-based access, removing monolithic top-level delegates.
 
 ### ✅ [RESOLVED]: Landlock Symlink Rejection Bypass via Canonicalization
