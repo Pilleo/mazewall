@@ -25,12 +25,13 @@
 3. Require passing `BpfProgram<Unverified>` through an in-memory/in-app BPF static verifier or a local compilation dry-run to produce `BpfProgram<Verified>`.
 4. Enforce that `PureJavaBpfEngine.install` only accepts `BpfProgram<Verified>`, guaranteeing that only mathematically verified filters can ever be loaded into the kernel.
 
-### 🔵 [Severity: ENHANCEMENT]: Context-Scoped Resource Ownership (File Descriptors)
+### 🟢 [RESOLVED]: Context-Scoped Resource Ownership (File Descriptors)
 **Context:** Linux file descriptors (`FileDescriptor`) are managed as raw integers. If a file descriptor is closed twice (double close), or used after close (use-after-free), or leaked, it can lead to severe security bugs or incorrect resource assignment when another thread opens a new file.
 **Needed:**
 1. Refactor `FileDescriptor` to be a context-scoped resource wrapper using `AutoCloseable` or `Arena` scope.
 2. Require native transactions to check the validity of a `FileDescriptor` token before performing system calls on it.
 3. Implement a compile-time ownership tracking mechanism where resource lifetimes are bounded by FFM `Arena` scopes, preventing use-after-free at compile time.
+**Fix:** Refactored `FileDescriptor` in both `LinuxNative` and `io.mazewall.core` into regular classes implementing `AutoCloseable` with validation checks mapping to `Arena` lifetimes, and injected `require(fd.isValid)` runtime checks across all `NativeEngine` calls utilizing file descriptors.
 
 ### 🔵 [Severity: ENHANCEMENT]: Algebraic Policy Composition (Semigroup/Monoid)
 **Context:** Policies are composed using the `+` operator or manual combination logic, but this does not adhere to a formal algebraic model. This makes complex nesting of policies or verification of identity laws difficult to test and model.
