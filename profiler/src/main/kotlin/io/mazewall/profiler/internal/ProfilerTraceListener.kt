@@ -13,16 +13,26 @@ import java.lang.foreign.Arena
 import java.lang.foreign.MemorySegment
 import java.lang.foreign.ValueLayout
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.logging.Logger
 
+/**
+ * Background listener that reads [SyscallEvent]s from a tracee socket and resolves them.
+ *
+ * Implements [AutoCloseable] to ensure that the worker thread is deterministically joined
+ * and resources (Arena, Socket) are released upon shutdown.
+ */
+@Suppress("SwallowedException")
 internal class ProfilerTraceListener(
     private val socketFd: FileDescriptor<*>,
     private val accumulatedLogs: MutableList<SyscallEvent<SyscallEventState.Resolved>>,
     private val stackTracesMap: MutableMap<SyscallEvent<SyscallEventState.Resolved>, MutableList<Array<StackTraceElement>>>?,
     private val pathCache: MutableMap<String, Long>,
     private val workerThreadProvider: () -> Thread?,
-) {
+) : AutoCloseable {
     private val logger = Logger.getLogger(ProfilerTraceListener::class.java.name)
+    private val closed = AtomicBoolean(false)
+    private var workerThread: Thread? = null
 
     var state: TraceListenerState = TraceListenerState.Disconnected
         private set
@@ -30,16 +40,19 @@ internal class ProfilerTraceListener(
     companion object {
         private const val DEDUPLICATION_WINDOW_MS = 500L
         private const val PROTOCOL_ACK_BYTE = 0xAC.toByte()
-        private const val IO_BUFFER_SIZE = 8192
-        private const val BYTE_MASK = 0xFF
+        private const val JOIN_TIMEOUT_MS = 1000L
     }
 
-    fun start(): Thread {
-        val arena = Arena.ofShared()
+    /**
+     * Starts the background listener thread.
+     */
+    fun start() {
+        if (closed.get()) throw IllegalStateException("Listener is already closed")
 
+        val arena = Arena.ofShared()
         val inputStream = NativeSocketInputStream(socketFd, arena)
 
-        return Thread {
+        val thread = Thread {
             try {
                 runListenerLoop(inputStream, arena)
             } finally {
@@ -49,9 +62,36 @@ internal class ProfilerTraceListener(
         }.apply {
             isDaemon = true
             name = "trace-listener-${socketFd.value}"
-        }.also {
-            it.start()
         }
+
+        workerThread = thread
+        thread.start()
+    }
+
+    /**
+     * Shuts down the listener, closes the socket, and waits for the worker thread to finish.
+     */
+    override fun close() {
+        if (!closed.compareAndSet(false, true)) return
+
+        logger.fine("Closing ProfilerTraceListener for fd=${socketFd.value}")
+
+        // Closing the socket will cause the NativeSocketInputStream.read() to unblock/fail
+        // allowing the worker loop to terminate gracefully.
+        socketFd.close()
+
+        workerThread?.let {
+            try {
+                it.join(JOIN_TIMEOUT_MS)
+                if (it.isAlive) {
+                    logger.warning("Trace listener thread for fd=${socketFd.value} did not terminate within $JOIN_TIMEOUT_MS ms")
+                    it.interrupt()
+                }
+            } catch (e: InterruptedException) {
+                Thread.currentThread().interrupt()
+            }
+        }
+        workerThread = null
     }
 
     private fun runListenerLoop(
@@ -63,15 +103,24 @@ internal class ProfilerTraceListener(
 
         val dis = DataInputStream(BufferedInputStream(inputStream))
         try {
-            while (true) {
+            while (!closed.get()) {
                 state = TraceListenerState.AwaitingEvent
-                val legacyEvent = readNextEvent(dis)
+                val legacyEvent = try {
+                    readNextEvent(dis)
+                } catch (e: java.io.EOFException) {
+                    break // Graceful shutdown or socket closed
+                } catch (e: java.io.IOException) {
+                    if (closed.get()) {
+                        logger.log(java.util.logging.Level.FINE, "Trace listener loop interrupted by close", e)
+                        break
+                    }
+                    throw e
+                }
+
                 val event = SyscallEvent.fromTraceEvent(legacyEvent)
                 state = TraceListenerState.ProcessingEvent(legacyEvent)
                 processEvent(event, ackBuf)
             }
-        } catch (e: java.io.EOFException) {
-            logger.log(java.util.logging.Level.FINE, "Trace listener socket closed (EOF)", e)
         } catch (e: java.io.IOException) {
             logger.log(java.util.logging.Level.WARNING, "Trace listener error", e)
         } finally {

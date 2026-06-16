@@ -28,6 +28,7 @@ import java.util.logging.Logger
 object Profiler {
     private val logger = Logger.getLogger(Profiler::class.java.name)
     val threadRegistry = ConcurrentHashMap<io.mazewall.core.Pid, Thread>()
+    private val listeners = CopyOnWriteArrayList<ProfilerTraceListener>()
 
     /**
      * Profiles [block] on a dedicated OS platform thread under a seccomp
@@ -157,7 +158,15 @@ object Profiler {
             pathCache = pathCache,
             workerThreadProvider = workerThreadProvider,
             startTraceListener = { fd, logs, traces, cache, provider ->
-                ProfilerTraceListener(FileDescriptor.unsafe<FileDescriptorRole.Generic>(fd), logs, traces, cache, provider).start()
+                val listener = ProfilerTraceListener(
+                    FileDescriptor.unsafe<FileDescriptorRole.Generic>(fd),
+                    logs,
+                    traces,
+                    cache,
+                    provider
+                )
+                listeners.add(listener)
+                listener.start()
             },
         )
     }
@@ -166,6 +175,26 @@ object Profiler {
         socketFd: Int,
         fdToSend: Int,
     ): Boolean = ProfilerSocket.sendDescriptor(socketFd, fdToSend)
+
+    /**
+     * Shuts down the profiler daemon and releases all background listeners.
+     */
+    @JvmStatic
+    public fun stop() {
+        ProfilerDaemonManager.stop()
+        listeners.forEach {
+            // SUPPRESSION JUSTIFICATION: We are performing a best-effort cleanup of background components.
+            // Any exception during a single component's close() must be logged but not allowed to
+            // stop the rest of the teardown process.
+            @Suppress("TooGenericExceptionCaught")
+            try {
+                it.close()
+            } catch (e: Exception) {
+                logger.warning("Failed to close trace listener: ${e.message}")
+            }
+        }
+        listeners.clear()
+    }
 
     class ProfilerExecutorWrapper(
         private val delegate: ExecutorService,
@@ -270,8 +299,4 @@ object Profiler {
             return delegate.shutdownNow()
         }
     }
-
-    /**
-     * Internal context for the profiler daemon.
-     */
 }

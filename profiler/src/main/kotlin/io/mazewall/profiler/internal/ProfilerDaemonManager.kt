@@ -49,6 +49,15 @@ internal object ProfilerDaemonManager {
         }
     }
 
+    fun stop() {
+        synchronized(daemonLock) {
+            sharedDaemonContext?.let {
+                cleanupDaemon(it)
+                sharedDaemonContext = null
+            }
+        }
+    }
+
     fun cleanupDaemon(context: DaemonContext) {
         try {
             Runtime.getRuntime().removeShutdownHook(context.shutdownHook)

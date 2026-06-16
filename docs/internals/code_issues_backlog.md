@@ -163,6 +163,31 @@
 **Context:** The registry manually tracks `landlockAppliedReads` and `landlockAppliedWrites`, partially duplicating the information already contained within the `Policy` object (DRY violation).
 **Needed:** Consolidate state tracking to use the `Policy` object as the single source of truth for applied Landlock restrictions.
 
+### 🔵 [Severity: ENHANCEMENT]: Compile-Time BPF Termination Safety (Type-State RET Enforcement)
+**Context:** Currently, `BpfBuilder.NrLoaded.build()` can be called on a program that does not end with a `RET` instruction. While the kernel verifier will reject such programs at runtime, it results in a "Fail Closed" crash rather than a compile-time error.
+**Needed:** Split `NrLoaded` into `Active` and `Terminated` states. The `ret()` method should transition the builder to the `Terminated` state, and only `Terminated` should expose the `build()` method.
+
+### 🔴 [Severity: MEDIUM]: ProfilerTraceListener Lacks Deterministic Lifecycle (AutoCloseable)
+**Context:** `ProfilerTraceListener` starts a background thread and reads from a socket. Currently, there is no standard way to signal shutdown or join the thread, leading to potential leaks or "half-dead" listeners during profiler restarts.
+**Needed:** Implement `AutoCloseable` for `ProfilerTraceListener`. Ensure it joins the worker thread and releases its socket reference upon closing.
+
+### 🟡 [Severity: LOW]: High-Frequency Arena Allocation Overhead (MM Optimization)
+**Context:** The current `nativeScope` utility and profiler reactor loop create a new `Arena.ofConfined()` for every single operation (syscall resolution, polling, etc.). This puts unnecessary pressure on the JVM native allocator and GC.
+**Needed:** Investigate "Scoped Arenas" using Kotlin context parameters or a `ThreadLocal` arena for high-frequency reactor loops. Reuse the same arena for all operations within a single task or notification lifecycle.
+
+### 🔵 [Severity: ENHANCEMENT]: Memory Segment Pooling for Profiler USER_NOTIF
+**Context:** The `seccomp_notif` and `seccomp_notif_resp` structures are used for every trapped system call. Continually allocating and zeroing these segments in the `reactorLoop` is inefficient.
+**Needed:** Implement a simple `SegmentPool` for fixed-size FFM structures. Pre-allocate a small cache of aligned segments and reuse them across different notifications.
+
+### 🔴 [Severity: LOW]: Dependency Inversion Violation in Platform Diagnostics
+**Context:** `Platform.kt` directly invokes static FFM calls and reads `/proc` files to determine container environments. This makes unit testing the "Fallback" and "Diagnostic" logic difficult without a real Linux kernel.
+**Needed:** Introduce a `PlatformProvider` interface. Move the low-level discovery logic into a `LinuxPlatformProvider` and allow injecting a `MockPlatformProvider` for tests.
+
+### 🔵 [Severity: ENHANCEMENT]: Atomic Container State Transitions (Unified State Container)
+**Target:** `io.mazewall.enforcer.ContainedExecutors`
+**Context:** Currently, `ContainedExecutors` updates thread and process state across multiple independent `Registry` variables (`SYSCALL_ACTIONS`, `DEFAULT_ACTION`, `FILTER_DEPTH`, etc.). This lack of atomicity could lead to inconsistent intermediate states during concurrent installations.
+**Needed:** Define a `ContainerState` immutable data class that holds all these properties. Use a single `AtomicReference<ContainerState>` in `ProcessStateRegistry` and a single `ThreadLocal<ContainerState>` in `ThreadStateRegistry` to ensure all transitions are atomic and consistent.
+
 ## Foundational Architecture & Test-Harness Enablers
 
 ### 🔵 [Severity: ENHANCEMENT]: Compile-Time Enforced Tier 1 Process Baseline (`ProcessContainmentToken`)
