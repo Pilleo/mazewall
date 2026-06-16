@@ -172,7 +172,7 @@ class ContainmentDesignSpec :
                 } catch (e: java.lang.UnsupportedOperationException) {
                     false
                 }
-                if (isSupported) {
+                if (isSupported && io.mazewall.Platform.isSupported()) {
                     val executor = java.util.concurrent.Executors
                         .newSingleThreadExecutor()
                     val safeExecutor = io.mazewall.enforcer.ContainedExecutors.wrap(

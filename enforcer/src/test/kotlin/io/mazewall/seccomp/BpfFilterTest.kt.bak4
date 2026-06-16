@@ -237,6 +237,7 @@ class BpfFilterTest {
         assertTrue(valuesChecked.contains(10))
         assertTrue(valuesChecked.contains(20))
     }
+}
 
     @Test
     fun `testBpfMaskEquals handles 64-bit values accurately across HI and LO words`() {
