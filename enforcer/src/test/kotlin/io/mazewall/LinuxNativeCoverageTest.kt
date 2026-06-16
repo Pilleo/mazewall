@@ -81,7 +81,7 @@ class LinuxNativeCoverageTest {
         LinuxNative.setEngine(mock)
 
         val res = LinuxNative.withTransaction {
-            LinuxNative.syscall4(1, 2, 3, 4, 5)
+            LinuxNative.syscall4(1, io.mazewall.core.NativeArg.IntArg(2), io.mazewall.core.NativeArg.IntArg(3), io.mazewall.core.NativeArg.IntArg(4), io.mazewall.core.NativeArg.IntArg(5))
         }
         assertEquals(444L, res.getOrThrow("test"))
     }
@@ -91,27 +91,18 @@ class LinuxNativeCoverageTest {
         // We use LinuxNative methods to test the actual implementation of toLong() in RealNativeEngine
         // null branch
         LinuxNative.withTransaction {
-            LinuxNative.syscall(-1, null, null, null, null, null, null)
+            LinuxNative.syscall(-1, io.mazewall.core.NativeArg.NullArg, io.mazewall.core.NativeArg.NullArg, io.mazewall.core.NativeArg.NullArg, io.mazewall.core.NativeArg.NullArg, io.mazewall.core.NativeArg.NullArg, io.mazewall.core.NativeArg.NullArg)
         }
 
         // MemorySegment branch
         nativeScope {
             val seg = allocate(8)
             LinuxNative.withTransaction {
-                LinuxNative.syscall(-1, seg, 1, 2, 3, 4, 5)
+                LinuxNative.syscall(-1, io.mazewall.core.NativeArg.MemoryArg(seg), io.mazewall.core.NativeArg.IntArg(1), io.mazewall.core.NativeArg.IntArg(2), io.mazewall.core.NativeArg.IntArg(3), io.mazewall.core.NativeArg.IntArg(4), io.mazewall.core.NativeArg.IntArg(5))
             }
         }
     }
 
-    @Test
-    fun `test toLong failure path`() {
-        assertFailsWith<IllegalArgumentException> {
-            // Use a type that is not Number or MemorySegment
-            LinuxNative.withTransaction {
-                LinuxNative.syscall(-1, Any())
-            }
-        }
-    }
 
     @Test
     @EnabledIfLinuxAndSupported

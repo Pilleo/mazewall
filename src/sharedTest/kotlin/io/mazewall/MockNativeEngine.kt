@@ -22,21 +22,21 @@ public open class MockNativeEngine(
     context(_: NativeTransaction)
     override fun syscall(
         nr: Long,
-        a1: Any?,
-        a2: Any?,
-        a3: Any?,
-        a4: Any?,
-        a5: Any?,
-        a6: Any?,
+        a1: io.mazewall.core.NativeArg,
+        a2: io.mazewall.core.NativeArg,
+        a3: io.mazewall.core.NativeArg,
+        a4: io.mazewall.core.NativeArg,
+        a5: io.mazewall.core.NativeArg,
+        a6: io.mazewall.core.NativeArg,
     ) = syscallResult
 
     context(_: NativeTransaction)
     override fun syscall4(
         nr: Long,
-        a1: Any?,
-        a2: Any?,
-        a3: Any?,
-        a4: Any?,
+        a1: io.mazewall.core.NativeArg,
+        a2: io.mazewall.core.NativeArg,
+        a3: io.mazewall.core.NativeArg,
+        a4: io.mazewall.core.NativeArg,
     ) = syscallResult
 
     context(_: NativeTransaction)
@@ -174,10 +174,10 @@ public open class MockNativeProcess : NativeProcess {
     context(_: NativeTransaction)
     override fun prctl(
         option: Int,
-        arg2: Any?,
-        arg3: Any?,
-        arg4: Any?,
-        arg5: Any?,
+        arg2: io.mazewall.core.NativeArg,
+        arg3: io.mazewall.core.NativeArg,
+        arg4: io.mazewall.core.NativeArg,
+        arg5: io.mazewall.core.NativeArg,
     ) = prctlResult
 }
 

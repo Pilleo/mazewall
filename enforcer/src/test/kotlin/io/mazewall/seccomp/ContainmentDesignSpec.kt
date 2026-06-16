@@ -166,12 +166,7 @@ class ContainmentDesignSpec :
 
         "Sandbox Cleanliness (containment_design.md)" - {
             "Pre-warmed JVM task runs successfully inside sandboxed executor without JIT crashes" {
-                val isSupported = try {
-                    Arch.current()
-                    true
-                } catch (e: java.lang.UnsupportedOperationException) {
-                    false
-                }
+                val isSupported = io.mazewall.Platform.isSupported()
                 if (isSupported) {
                     val executor = java.util.concurrent.Executors
                         .newSingleThreadExecutor()

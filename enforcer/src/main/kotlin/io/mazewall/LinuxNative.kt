@@ -64,21 +64,21 @@ public object LinuxNative : NativeEngine {
     context(_: NativeTransaction)
     override fun syscall(
         nr: Long,
-        a1: Any?,
-        a2: Any?,
-        a3: Any?,
-        a4: Any?,
-        a5: Any?,
-        a6: Any?,
+        a1: io.mazewall.core.NativeArg,
+        a2: io.mazewall.core.NativeArg,
+        a3: io.mazewall.core.NativeArg,
+        a4: io.mazewall.core.NativeArg,
+        a5: io.mazewall.core.NativeArg,
+        a6: io.mazewall.core.NativeArg,
     ): SyscallResult<Long> = engine.syscall(nr, a1, a2, a3, a4, a5, a6)
 
     context(_: NativeTransaction)
     override fun syscall4(
         nr: Long,
-        a1: Any?,
-        a2: Any?,
-        a3: Any?,
-        a4: Any?,
+        a1: io.mazewall.core.NativeArg,
+        a2: io.mazewall.core.NativeArg,
+        a3: io.mazewall.core.NativeArg,
+        a4: io.mazewall.core.NativeArg,
     ): SyscallResult<Long> = engine.syscall4(nr, a1, a2, a3, a4)
 
     context(_: NativeTransaction)
@@ -318,12 +318,12 @@ internal object RealNativeEngine : NativeEngine {
     context(_: NativeTransaction)
     override fun syscall(
         nr: Long,
-        a1: Any?,
-        a2: Any?,
-        a3: Any?,
-        a4: Any?,
-        a5: Any?,
-        a6: Any?,
+        a1: io.mazewall.core.NativeArg,
+        a2: io.mazewall.core.NativeArg,
+        a3: io.mazewall.core.NativeArg,
+        a4: io.mazewall.core.NativeArg,
+        a5: io.mazewall.core.NativeArg,
+        a6: io.mazewall.core.NativeArg,
     ): LinuxNative.SyscallResult<Long> =
  nativeScope {
         val capturedState = ErrnoSegment.allocate()
@@ -331,12 +331,12 @@ internal object RealNativeEngine : NativeEngine {
             SYSCALL.invokeExact(
                 capturedState.segment,
                 nr,
-                RealNativeHelper.toLong(a1),
-                RealNativeHelper.toLong(a2),
-                RealNativeHelper.toLong(a3),
-                RealNativeHelper.toLong(a4),
-                RealNativeHelper.toLong(a5),
-                RealNativeHelper.toLong(a6),
+                a1.asLong,
+                a2.asLong,
+                a3.asLong,
+                a4.asLong,
+                a5.asLong,
+                a6.asLong,
             ) as Long
         RealNativeHelper.result(ret, capturedState.getErrno())
     }
@@ -344,10 +344,10 @@ internal object RealNativeEngine : NativeEngine {
     context(_: NativeTransaction)
     override fun syscall4(
         nr: Long,
-        a1: Any?,
-        a2: Any?,
-        a3: Any?,
-        a4: Any?,
+        a1: io.mazewall.core.NativeArg,
+        a2: io.mazewall.core.NativeArg,
+        a3: io.mazewall.core.NativeArg,
+        a4: io.mazewall.core.NativeArg,
     ): LinuxNative.SyscallResult<Long> =
  syscall(nr, a1, a2, a3, a4)
 
@@ -687,10 +687,10 @@ internal object RealNativeProcess : NativeProcess {
     context(_: NativeTransaction)
     override fun prctl(
         option: Int,
-        arg2: Any?,
-        arg3: Any?,
-        arg4: Any?,
-        arg5: Any?,
+        arg2: io.mazewall.core.NativeArg,
+        arg3: io.mazewall.core.NativeArg,
+        arg4: io.mazewall.core.NativeArg,
+        arg5: io.mazewall.core.NativeArg,
     ): LinuxNative.SyscallResult<Long> =
  nativeScope {
         val capturedState = ErrnoSegment.allocate()
@@ -698,10 +698,10 @@ internal object RealNativeProcess : NativeProcess {
             PRCTL.invokeExact(
                 capturedState.segment,
                 option,
-                RealNativeHelper.toLong(arg2),
-                RealNativeHelper.toLong(arg3),
-                RealNativeHelper.toLong(arg4),
-                RealNativeHelper.toLong(arg5),
+                arg2.asLong,
+                arg3.asLong,
+                arg4.asLong,
+                arg5.asLong,
             ) as Int
         RealNativeHelper.result(ret.toLong(), capturedState.getErrno())
     }
@@ -817,17 +817,6 @@ internal object RealNativeHelper {
     private val linker: Linker = Linker.nativeLinker()
     private val stdlib: SymbolLookup = linker.defaultLookup()
 
-    fun toLong(value: Any?): Long =
-        when (value) {
-            is Number -> value.toLong()
-            is MemorySegment -> value.address()
-            is LinuxNative.FileDescriptor -> value.value.toLong()
-            is io.mazewall.core.Pid -> value.value.toLong()
-            is io.mazewall.core.Uid -> value.value.toLong()
-            is io.mazewall.core.MemoryAddress -> value.value
-            null -> 0L
-            else -> throw IllegalArgumentException("Unsupported native call argument type: ${value.javaClass.name}")
-        }
 
     fun result(ret: Long, errno: Int): LinuxNative.SyscallResult<Long> =
         if (ret < 0) LinuxNative.SyscallResult.Error(errno, ret)
