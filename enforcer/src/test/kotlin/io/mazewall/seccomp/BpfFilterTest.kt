@@ -109,13 +109,13 @@ class BpfFilterTest {
         for (i in filter.indices) {
             val f = filter[i]
             if (f.code == 0x15.toShort() && f.k == mmapNr) {
-                // Should load args[2] (offset 32)
+                // Should load args[2] HI (offset 32 + 4)
                 val ldArgs = filter[i + 1]
-                if (ldArgs.code == 0x20.toShort() && ldArgs.k == 32) {
-                    // Should bitwise AND with 0x04 (PROT_EXEC)
+                if (ldArgs.code == 0x20.toShort() && ldArgs.k == 36) {
+                    // Should bitwise AND with 0x04 (PROT_EXEC) -> hi mask is 0
                     val andIns = filter[i + 2]
-                    if (andIns.code == 0x54.toShort() && andIns.k == 0x04) {
-                        // Should check JEQ 0 (expected)
+                    if (andIns.code == 0x54.toShort() && andIns.k == 0) {
+                        // Should check JEQ 0 (expected hi)
                         val jeqIns = filter[i + 3]
                         if (jeqIns.code == 0x15.toShort() && jeqIns.k == 0) {
                             foundInspection = true
@@ -137,12 +137,12 @@ class BpfFilterTest {
         for (i in filter.indices) {
             val f = filter[i]
             if (f.code == 0x15.toShort() && f.k == cloneNr) {
-                // Should load args[0] (offset 16)
+                // Should load args[0] HI (offset 16 + 4)
                 val ldArgs = filter[i + 1]
-                if (ldArgs.code == 0x20.toShort() && ldArgs.k == 16) {
-                    // Should mask CLONE_VM | CLONE_THREAD (0x00010100)
+                if (ldArgs.code == 0x20.toShort() && ldArgs.k == 20) {
+                    // Should mask CLONE_VM | CLONE_THREAD (0x00010100) -> hi mask = 0
                     val mask = filter[i + 2]
-                    if (mask.code == 0x54.toShort() && mask.k == 0x00010100) {
+                    if (mask.code == 0x54.toShort() && mask.k == 0) {
                         foundInspection = true
                     }
                 }
@@ -161,9 +161,9 @@ class BpfFilterTest {
         for (i in filter.indices) {
             val f = filter[i]
             if (f.code == 0x15.toShort() && f.k == prctlNr) {
-                // Should load args[0] (offset 16)
+                // Should load args[0] HI (offset 16 + 4 = 20)
                 val ldArgs = filter[i + 1]
-                if (ldArgs.code == 0x20.toShort() && ldArgs.k == 16) {
+                if (ldArgs.code == 0x20.toShort() && ldArgs.k == 20) {
                      foundInspection = true
                 }
             }
@@ -236,5 +236,66 @@ class BpfFilterTest {
         assertTrue(valuesChecked.contains(5))
         assertTrue(valuesChecked.contains(10))
         assertTrue(valuesChecked.contains(20))
+    }
+
+    @Test
+    fun `testBpfMaskEquals handles 64-bit values accurately across HI and LO words`() {
+        // e.g. clone() checking CLONE_NEWNET (0x40000000L) and something in HI like 0x0000000100000000L
+        val maskVal = 0x0000000140000000L
+        val inspections = listOf(
+            SyscallInspection(
+                syscallNumber = 300,
+                argIndex = 0,
+                check = ArgCheck.MaskEquals(maskVal, maskVal),
+                ifMatched = SeccompAction.ACT_ALLOW,
+                ifNotMatched = SeccompAction.ACT_ERRNO,
+            ),
+        )
+        val builder = BpfProgram.builder()
+        val handled = mutableSetOf<Int>()
+        BpfFilter.emitInspections(builder, inspections, false, handled)
+        val instructions = builder.build().instructions
+
+        // Check if we find the correct operations on hi and lo bounds:
+        val maskHi = (maskVal ushr 32).toInt() // 1
+        val maskLo = maskVal.toInt() // 0x40000000
+
+        val hasHiMask = instructions.any { it.code == 0x54.toShort() && it.k == maskHi }
+        val hasLoMask = instructions.any { it.code == 0x54.toShort() && it.k == maskLo }
+
+        assertTrue(hasHiMask, "Filter should contain the bitwise AND instruction for the HI half")
+        assertTrue(hasLoMask, "Filter should contain the bitwise AND instruction for the LO half")
+    }
+
+    @Test
+    fun `testBpfEqualsAny handles 64-bit values accurately across HI and LO words`() {
+        val largeVal1 = 0x1122334455667788L
+        val largeVal2 = -0x778899aabbccddefL
+        val inspections = listOf(
+            SyscallInspection(
+                syscallNumber = 400,
+                argIndex = 0,
+                check = ArgCheck.EqualsAny(listOf(largeVal1, largeVal2)),
+                ifMatched = SeccompAction.ACT_ALLOW,
+                ifNotMatched = SeccompAction.ACT_ERRNO,
+            ),
+        )
+        val builder = BpfProgram.builder()
+        val handled = mutableSetOf<Int>()
+        BpfFilter.emitInspections(builder, inspections, false, handled)
+        val instructions = builder.build().instructions
+
+        val hi1 = (largeVal1 ushr 32).toInt()
+        val lo1 = largeVal1.toInt()
+        val hi2 = ((largeVal2 ushr 32)).toInt()
+        val lo2 = largeVal2.toInt()
+
+        // Ensure instruction jumps check correct expected values
+        val valuesChecked = instructions.filter { it.code == 0x15.toShort() }.map { it.k }
+        assertTrue(valuesChecked.contains(400), "Syscall check should be present")
+        assertTrue(valuesChecked.contains(hi1), "HI 1 check should be present")
+        assertTrue(valuesChecked.contains(lo1), "LO 1 check should be present")
+        assertTrue(valuesChecked.contains(hi2), "HI 2 check should be present")
+        assertTrue(valuesChecked.contains(lo2), "LO 2 check should be present")
     }
 }

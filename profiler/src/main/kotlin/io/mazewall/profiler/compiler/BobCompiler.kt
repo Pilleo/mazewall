@@ -39,11 +39,13 @@ object BobCompiler {
             val isWrite = isFileSystemMutation(event.syscallName) || isOpenWrite(event.syscallName, event.args)
             val isExec = event.syscallName == "EXECVE" || event.syscallName == "EXECVEAT"
 
-            for (path in event.paths) {
-                when {
-                    isExec -> execs.add(path)
-                    isWrite -> fsWritePaths.add(path)
-                    else -> opens.add(path)
+            if (event is TraceEvent.File) {
+                for (path in event.filePaths) {
+                    when {
+                        isExec -> execs.add(path)
+                        isWrite -> fsWritePaths.add(path)
+                        else -> opens.add(path)
+                    }
                 }
             }
         }
