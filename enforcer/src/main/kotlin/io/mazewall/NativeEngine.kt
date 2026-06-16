@@ -32,7 +32,7 @@ public interface NativeEngine {
         a4: io.mazewall.core.NativeArg = io.mazewall.core.NativeArg.LongArg(0L),
         a5: io.mazewall.core.NativeArg = io.mazewall.core.NativeArg.LongArg(0L),
         a6: io.mazewall.core.NativeArg = io.mazewall.core.NativeArg.LongArg(0L),
-    ): LinuxNative.SyscallResult<Long>
+    ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled>
 
     context(_: NativeTransaction)
     fun syscall4(
@@ -41,35 +41,35 @@ public interface NativeEngine {
         a2: io.mazewall.core.NativeArg,
         a3: io.mazewall.core.NativeArg,
         a4: io.mazewall.core.NativeArg,
-    ): LinuxNative.SyscallResult<Long>
+    ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled>
 
     context(_: NativeTransaction)
     fun ioctl(
         fd: LinuxNative.FileDescriptor,
         request: Long,
         arg: MemorySegment,
-    ): LinuxNative.SyscallResult<Long>
+    ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled>
 
     context(_: NativeTransaction)
     fun ioctl(
         fd: LinuxNative.FileDescriptor,
         request: Long,
         arg: Long,
-    ): LinuxNative.SyscallResult<Long>
+    ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled>
 
     context(_: NativeTransaction)
     fun fcntl(
         fd: LinuxNative.FileDescriptor,
         cmd: Int,
         arg: Long,
-    ): LinuxNative.SyscallResult<Long>
+    ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled>
 
     context(_: NativeTransaction)
     fun poll(
         fds: MemorySegment,
         nfds: Long,
         timeout: Int,
-    ): LinuxNative.SyscallResult<Long>
+    ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled>
 }
 
 public interface NativeFileSystem {
@@ -77,16 +77,16 @@ public interface NativeFileSystem {
     fun open(
         path: MemorySegment,
         flags: Int,
-    ): LinuxNative.SyscallResult<Long>
+    ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled>
 
     context(_: NativeTransaction)
     fun readlink(
         path: MemorySegment,
         buf: MemorySegment,
         bufsiz: Long,
-    ): LinuxNative.SyscallResult<Long>
+    ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled>
 
-    fun close(fd: LinuxNative.FileDescriptor): LinuxNative.SyscallResult<Long>
+    fun close(fd: LinuxNative.FileDescriptor): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled>
 }
 
 public interface NativeNetworking {
@@ -96,55 +96,55 @@ public interface NativeNetworking {
         type: Int,
         protocol: Int,
         sv: MemorySegment,
-    ): LinuxNative.SyscallResult<Long>
+    ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled>
 
     context(_: NativeTransaction)
     fun socket(
         domain: Int,
         type: Int,
         protocol: Int,
-    ): LinuxNative.SyscallResult<Long>
+    ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled>
 
     context(_: NativeTransaction)
     fun bind(
         sockfd: LinuxNative.FileDescriptor,
         addr: MemorySegment,
         addrlen: Int,
-    ): LinuxNative.SyscallResult<Long>
+    ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled>
 
     context(_: NativeTransaction)
     fun listen(
         sockfd: LinuxNative.FileDescriptor,
         backlog: Int,
-    ): LinuxNative.SyscallResult<Long>
+    ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled>
 
     context(_: NativeTransaction)
     fun accept(
         sockfd: LinuxNative.FileDescriptor,
         addr: MemorySegment,
         addrlen: MemorySegment,
-    ): LinuxNative.SyscallResult<Long>
+    ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled>
 
     context(_: NativeTransaction)
     fun connect(
         sockfd: LinuxNative.FileDescriptor,
         addr: MemorySegment,
         addrlen: Int,
-    ): LinuxNative.SyscallResult<Long>
+    ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled>
 
     context(_: NativeTransaction)
     fun sendmsg(
         sockfd: LinuxNative.FileDescriptor,
         msg: MemorySegment,
         flags: Int,
-    ): LinuxNative.SyscallResult<Long>
+    ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled>
 
     context(_: NativeTransaction)
     fun recvmsg(
         sockfd: LinuxNative.FileDescriptor,
         msg: MemorySegment,
         flags: Int,
-    ): LinuxNative.SyscallResult<Long>
+    ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled>
 
     context(_: NativeTransaction)
     fun recv(
@@ -152,7 +152,7 @@ public interface NativeNetworking {
         buf: MemorySegment,
         len: Long,
         flags: Int,
-    ): LinuxNative.SyscallResult<Long>
+    ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled>
 }
 
 public interface NativeProcess {
@@ -165,7 +165,7 @@ public interface NativeProcess {
         arg3: io.mazewall.core.NativeArg = io.mazewall.core.NativeArg.LongArg(0L),
         arg4: io.mazewall.core.NativeArg = io.mazewall.core.NativeArg.LongArg(0L),
         arg5: io.mazewall.core.NativeArg = io.mazewall.core.NativeArg.LongArg(0L),
-    ): LinuxNative.SyscallResult<Long>
+    ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled>
 }
 
 public interface NativeMemory {
@@ -177,21 +177,21 @@ public interface NativeMemory {
         remoteIov: MemorySegment,
         riovcnt: Long,
         flags: Long,
-    ): LinuxNative.SyscallResult<Long>
+    ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled>
 
     context(_: NativeTransaction)
     fun read(
         fd: LinuxNative.FileDescriptor,
         buf: MemorySegment,
         count: Long,
-    ): LinuxNative.SyscallResult<Long>
+    ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled>
 
     context(_: NativeTransaction)
     fun write(
         fd: LinuxNative.FileDescriptor,
         buf: MemorySegment,
         count: Long,
-    ): LinuxNative.SyscallResult<Long>
+    ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled>
 
     context(arena: Arena)
     fun newSockFProg(

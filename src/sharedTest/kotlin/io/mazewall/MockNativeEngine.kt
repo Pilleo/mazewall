@@ -14,10 +14,10 @@ public open class MockNativeEngine(
     override val process: MockNativeProcess = MockNativeProcess(),
     override val memory: MockNativeMemory = MockNativeMemory(),
 ) : NativeEngine {
-    public var syscallResult: LinuxNative.SyscallResult<Long> = LinuxNative.SyscallResult.Success(0L)
-    public var ioctlResult: LinuxNative.SyscallResult<Long> = LinuxNative.SyscallResult.Success(0L)
-    public var fcntlResult: LinuxNative.SyscallResult<Long> = LinuxNative.SyscallResult.Success(0L)
-    public var pollResult: LinuxNative.SyscallResult<Long> = LinuxNative.SyscallResult.Success(0L)
+    public var syscallResult: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(0L)
+    public var ioctlResult: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(0L)
+    public var fcntlResult: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(0L)
+    public var pollResult: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(0L)
 
     context(_: NativeTransaction)
     override fun syscall(
@@ -69,9 +69,9 @@ public open class MockNativeEngine(
 }
 
 public open class MockNativeFileSystem : NativeFileSystem {
-    public var openResult: LinuxNative.SyscallResult<Long> = LinuxNative.SyscallResult.Success(0L)
-    public var readlinkResult: LinuxNative.SyscallResult<Long> = LinuxNative.SyscallResult.Success(0L)
-    public var closeResult: LinuxNative.SyscallResult<Long> = LinuxNative.SyscallResult.Success(0L)
+    public var openResult: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(0L)
+    public var readlinkResult: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(0L)
+    public var closeResult: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(0L)
 
     context(_: NativeTransaction)
     override fun open(
@@ -90,15 +90,15 @@ public open class MockNativeFileSystem : NativeFileSystem {
 }
 
 public open class MockNativeNetworking : NativeNetworking {
-    public var socketpairResult: LinuxNative.SyscallResult<Long> = LinuxNative.SyscallResult.Success(0L)
-    public var socketResult: LinuxNative.SyscallResult<Long> = LinuxNative.SyscallResult.Success(0L)
-    public var bindResult: LinuxNative.SyscallResult<Long> = LinuxNative.SyscallResult.Success(0L)
-    public var listenResult: LinuxNative.SyscallResult<Long> = LinuxNative.SyscallResult.Success(0L)
-    public var acceptResult: LinuxNative.SyscallResult<Long> = LinuxNative.SyscallResult.Success(0L)
-    public var connectResult: LinuxNative.SyscallResult<Long> = LinuxNative.SyscallResult.Success(0L)
-    public var sendmsgResult: LinuxNative.SyscallResult<Long> = LinuxNative.SyscallResult.Success(0L)
-    public var recvmsgResult: LinuxNative.SyscallResult<Long> = LinuxNative.SyscallResult.Success(0L)
-    public var recvResult: LinuxNative.SyscallResult<Long> = LinuxNative.SyscallResult.Success(0L)
+    public var socketpairResult: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(0L)
+    public var socketResult: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(0L)
+    public var bindResult: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(0L)
+    public var listenResult: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(0L)
+    public var acceptResult: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(0L)
+    public var connectResult: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(0L)
+    public var sendmsgResult: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(0L)
+    public var recvmsgResult: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(0L)
+    public var recvResult: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(0L)
 
     context(_: NativeTransaction)
     override fun socketpair(
@@ -167,7 +167,7 @@ public open class MockNativeNetworking : NativeNetworking {
 
 public open class MockNativeProcess : NativeProcess {
     public var tid: io.mazewall.core.Pid = io.mazewall.core.Pid(1234)
-    public var prctlResult: LinuxNative.SyscallResult<Long> = LinuxNative.SyscallResult.Success(0L)
+    public var prctlResult: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(0L)
 
     override fun gettid() = tid
 
@@ -182,9 +182,9 @@ public open class MockNativeProcess : NativeProcess {
 }
 
 public open class MockNativeMemory : NativeMemory {
-    public var processVmReadvResult: LinuxNative.SyscallResult<Long> = LinuxNative.SyscallResult.Success(0L)
-    public var readResult: LinuxNative.SyscallResult<Long> = LinuxNative.SyscallResult.Success(0L)
-    public var writeResult: LinuxNative.SyscallResult<Long> = LinuxNative.SyscallResult.Success(0L)
+    public var processVmReadvResult: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(0L)
+    public var readResult: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(0L)
+    public var writeResult: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(0L)
 
     context(_: NativeTransaction)
     override fun processVmReadv(

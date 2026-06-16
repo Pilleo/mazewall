@@ -73,8 +73,8 @@ class ProfilerDesignSpec :
 
         class MockTransport : ProfilerTransport {
             val sentEvents = mutableListOf<TraceEvent>()
-            var nextPollResult: LinuxNative.SyscallResult<Long> = LinuxNative.SyscallResult.Success(1L)
-            var nextReadResult: LinuxNative.SyscallResult<Long> = LinuxNative.SyscallResult.Success(1L)
+            var nextPollResult: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(1L)
+            var nextReadResult: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(1L)
             var ackByte: Byte = 0xAC.toByte()
             val ioctlCalls = mutableListOf<Long>()
             var createdServerPath: String? = null
@@ -99,7 +99,7 @@ class ProfilerDesignSpec :
                 fds: MemorySegment,
                 nfds: Long,
                 timeout: Int,
-            ): LinuxNative.SyscallResult<Long> {
+            ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
                 if (nfds == 1L) {
                     fds.set(ValueLayout.JAVA_SHORT, POLLFD_REVENTS_OFF, NativeConstants.POLLIN)
                 }
@@ -110,7 +110,7 @@ class ProfilerDesignSpec :
                 fd: LinuxNative.FileDescriptor,
                 buf: MemorySegment,
                 count: Long,
-            ): LinuxNative.SyscallResult<Long> {
+            ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
                 if (count == 1L) {
                     buf.set(ValueLayout.JAVA_BYTE, 0L, ackByte)
                 }
@@ -121,7 +121,7 @@ class ProfilerDesignSpec :
                 fd: LinuxNative.FileDescriptor,
                 buf: MemorySegment,
                 count: Long,
-            ): LinuxNative.SyscallResult<Long> = LinuxNative.SyscallResult.Success(
+            ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(
 count)
 
             override fun recv(
@@ -129,14 +129,14 @@ count)
                 buf: MemorySegment,
                 len: Long,
                 flags: Int,
-            ): LinuxNative.SyscallResult<Long> = LinuxNative.SyscallResult.Success(
+            ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(
 len)
 
             override fun ioctl(
                 fd: LinuxNative.FileDescriptor,
                 request: Long,
                 arg: MemorySegment,
-            ): LinuxNative.SyscallResult<Long> {
+            ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
                 ioctlCalls.add(request)
                 if (request == 0xc0502100L) { // RECV
                     arg.set(ValueLayout.JAVA_LONG, 0L, nextNotifId) // id
@@ -146,7 +146,7 @@ len)
                         arg.set(ValueLayout.JAVA_LONG, 32L + i * 8, nextNotifArgs[i])
                     }
                 }
-                return LinuxNative.SyscallResult.Success(0L)
+                return LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(0L)
             }
 
             override fun createServer(socketPath: String): LinuxNative.FileDescriptor {

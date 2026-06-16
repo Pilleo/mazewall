@@ -14,7 +14,7 @@ class NativeEngineTest {
     @Test
     fun `LinuxNative delegates to injected engine`() {
         val mock = MockNativeEngine()
-        mock.process.prctlResult = LinuxNative.SyscallResult.Success(42)
+        mock.process.prctlResult = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(42)
 
         LinuxNative.setEngine(mock)
 
@@ -25,7 +25,7 @@ class NativeEngineTest {
     @Test
     fun `fault injection works for errno`() {
         val mock = MockNativeEngine()
-        mock.syscallResult = LinuxNative.SyscallResult.Error(13, -1) // EACCES
+        mock.syscallResult = LinuxNative.SyscallResult.Error<LinuxNative.SyscallHandledState.Unhandled>(13, -1) // EACCES
 
         LinuxNative.setEngine(mock)
 

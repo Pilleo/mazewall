@@ -25,32 +25,32 @@ interface ProfilerTransport {
         fds: MemorySegment,
         nfds: Long,
         timeout: Int,
-    ): LinuxNative.SyscallResult<Long>
+    ): LinuxNative.SyscallResult<Long, *>
 
     fun read(
         fd: LinuxNative.FileDescriptor,
         buf: MemorySegment,
         count: Long,
-    ): LinuxNative.SyscallResult<Long>
+    ): LinuxNative.SyscallResult<Long, *>
 
     fun write(
         fd: LinuxNative.FileDescriptor,
         buf: MemorySegment,
         count: Long,
-    ): LinuxNative.SyscallResult<Long>
+    ): LinuxNative.SyscallResult<Long, *>
 
     fun recv(
         sockfd: LinuxNative.FileDescriptor,
         buf: MemorySegment,
         len: Long,
         flags: Int,
-    ): LinuxNative.SyscallResult<Long>
+    ): LinuxNative.SyscallResult<Long, *>
 
     fun ioctl(
         fd: LinuxNative.FileDescriptor,
         request: Long,
         arg: MemorySegment,
-    ): LinuxNative.SyscallResult<Long>
+    ): LinuxNative.SyscallResult<Long, *>
 
     fun createServer(socketPath: String): LinuxNative.FileDescriptor
 
@@ -152,32 +152,32 @@ object RealProfilerTransport : ProfilerTransport {
         fds: MemorySegment,
         nfds: Long,
         timeout: Int,
-    ): LinuxNative.SyscallResult<Long> = LinuxNative.withTransaction { LinuxNative.poll(fds, nfds, timeout) }
+    ): LinuxNative.SyscallResult<Long, *> = LinuxNative.withTransaction { LinuxNative.poll(fds, nfds, timeout) }
 
     override fun read(
         fd: LinuxNative.FileDescriptor,
         buf: MemorySegment,
         count: Long,
-    ): LinuxNative.SyscallResult<Long> = LinuxNative.withTransaction { LinuxNative.memory.read(fd, buf, count) }
+    ): LinuxNative.SyscallResult<Long, *> = LinuxNative.withTransaction { LinuxNative.memory.read(fd, buf, count) }
 
     override fun write(
         fd: LinuxNative.FileDescriptor,
         buf: MemorySegment,
         count: Long,
-    ): LinuxNative.SyscallResult<Long> = LinuxNative.withTransaction { LinuxNative.memory.write(fd, buf, count) }
+    ): LinuxNative.SyscallResult<Long, *> = LinuxNative.withTransaction { LinuxNative.memory.write(fd, buf, count) }
 
     override fun recv(
         sockfd: LinuxNative.FileDescriptor,
         buf: MemorySegment,
         len: Long,
         flags: Int,
-    ): LinuxNative.SyscallResult<Long> = LinuxNative.withTransaction { LinuxNative.networking.recv(sockfd, buf, len, flags) }
+    ): LinuxNative.SyscallResult<Long, *> = LinuxNative.withTransaction { LinuxNative.networking.recv(sockfd, buf, len, flags) }
 
     override fun ioctl(
         fd: LinuxNative.FileDescriptor,
         request: Long,
         arg: MemorySegment,
-    ): LinuxNative.SyscallResult<Long> = LinuxNative.withTransaction { LinuxNative.ioctl(fd, request, arg) }
+    ): LinuxNative.SyscallResult<Long, *> = LinuxNative.withTransaction { LinuxNative.ioctl(fd, request, arg) }
 
     override fun createServer(socketPath: String): LinuxNative.FileDescriptor {
         val fd = LinuxNative.withTransaction {

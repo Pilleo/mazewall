@@ -20,15 +20,15 @@ class NativeSocketInputStreamTest {
         val mock = MockNativeEngine(
             memory = object : MockNativeMemory() {
                 context(_: NativeTransaction)
-                override fun read(fd: LinuxNative.FileDescriptor, buf: MemorySegment, count: Long): LinuxNative.SyscallResult<Long> {
+                override fun read(fd: LinuxNative.FileDescriptor, buf: MemorySegment, count: Long): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
                     attempts++
                     return if (attempts <= 2) {
                         // Simulate EINTR (errno 4) for the first two attempts
-                        LinuxNative.SyscallResult.Error(4, -1L)
+                        LinuxNative.SyscallResult.Error<LinuxNative.SyscallHandledState.Unhandled>(4, -1L)
                     } else {
                         // Return a successful byte (0x42) on the third attempt
                         buf.set(ValueLayout.JAVA_BYTE, 0L, 0x42.toByte())
-                        LinuxNative.SyscallResult.Success(1L)
+                        LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(1L)
                     }
                 }
             }
@@ -54,15 +54,15 @@ class NativeSocketInputStreamTest {
         val mock = MockNativeEngine(
             memory = object : MockNativeMemory() {
                 context(_: NativeTransaction)
-                override fun read(fd: LinuxNative.FileDescriptor, buf: MemorySegment, count: Long): LinuxNative.SyscallResult<Long> {
+                override fun read(fd: LinuxNative.FileDescriptor, buf: MemorySegment, count: Long): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
                     attempts++
                     return if (attempts <= 2) {
                         // Simulate EINTR (errno 4) for the first two attempts
-                        LinuxNative.SyscallResult.Error(4, -1L)
+                        LinuxNative.SyscallResult.Error<LinuxNative.SyscallHandledState.Unhandled>(4, -1L)
                     } else {
                         // Return a successful byte (0x42) on the third attempt
                         buf.set(ValueLayout.JAVA_BYTE, 0L, 0x42.toByte())
-                        LinuxNative.SyscallResult.Success(1L)
+                        LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(1L)
                     }
                 }
             }

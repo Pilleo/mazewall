@@ -508,15 +508,15 @@ class LandlockTest : BaseIntegrationTest() {
                 a4: io.mazewall.core.NativeArg,
                 a5: io.mazewall.core.NativeArg,
                 a6: io.mazewall.core.NativeArg,
-            ): LinuxNative.SyscallResult<Long> {
+            ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
                 return if (nr == io.mazewall.ffi.NativeConstants.LANDLOCK_CREATE_RULESET_NR &&
                     a3.asLong == io.mazewall.ffi.NativeConstants.LANDLOCK_CREATE_RULESET_VERSION.toLong()
                 ) {
-                    LinuxNative.SyscallResult.Success(5) // ABI version 5
+                    LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(5) // ABI version 5
                 } else if (nr == io.mazewall.ffi.NativeConstants.LANDLOCK_CREATE_RULESET_NR) {
-                    LinuxNative.SyscallResult.Success(42) // Fake ruleset FD
+                    LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(42) // Fake ruleset FD
                 } else {
-                    LinuxNative.SyscallResult.Success(0) // Success for other syscalls
+                    LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(0) // Success for other syscalls
                 }
             }
         }
@@ -543,13 +543,13 @@ class LandlockTest : BaseIntegrationTest() {
                 a4: io.mazewall.core.NativeArg,
                 a5: io.mazewall.core.NativeArg,
                 a6: io.mazewall.core.NativeArg,
-            ): LinuxNative.SyscallResult<Long> {
+            ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
                 return if (nr == io.mazewall.ffi.NativeConstants.LANDLOCK_CREATE_RULESET_NR &&
                     a3.asLong == io.mazewall.ffi.NativeConstants.LANDLOCK_CREATE_RULESET_VERSION.toLong()
                 ) {
-                    LinuxNative.SyscallResult.Success(5) // ABI version 5
+                    LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(5) // ABI version 5
                 } else {
-                    LinuxNative.SyscallResult.Error(22, -1) // EINVAL for ruleset creation
+                    LinuxNative.SyscallResult.Error<LinuxNative.SyscallHandledState.Unhandled>(22, -1) // EINVAL for ruleset creation
                 }
             }
         }
