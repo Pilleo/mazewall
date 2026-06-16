@@ -81,7 +81,7 @@ object RealProfilerTransport : ProfilerTransport {
     ) {
         Arena.ofConfined().use { arena ->
             val syscallNameBytes = event.syscallName.toByteArray(StandardCharsets.UTF_8)
-            val pathBytesList = event.paths.map { it.toByteArray(StandardCharsets.UTF_8) }
+            val pathBytesList = if (event is TraceEvent.File) event.filePaths.map { it.toByteArray(StandardCharsets.UTF_8) } else emptyList()
 
             var totalSize = 4 + 4 + syscallNameBytes.size + 4 + (event.args.size * 8) + 4
             for (p in pathBytesList) {
