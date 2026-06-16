@@ -26,21 +26,21 @@ public interface NativeEngine {
     context(_: NativeTransaction)
     fun syscall(
         nr: Long,
-        a1: Any? = 0L,
-        a2: Any? = 0L,
-        a3: Any? = 0L,
-        a4: Any? = 0L,
-        a5: Any? = 0L,
-        a6: Any? = 0L,
+        a1: io.mazewall.core.NativeArg = io.mazewall.core.NativeArg.LongArg(0L),
+        a2: io.mazewall.core.NativeArg = io.mazewall.core.NativeArg.LongArg(0L),
+        a3: io.mazewall.core.NativeArg = io.mazewall.core.NativeArg.LongArg(0L),
+        a4: io.mazewall.core.NativeArg = io.mazewall.core.NativeArg.LongArg(0L),
+        a5: io.mazewall.core.NativeArg = io.mazewall.core.NativeArg.LongArg(0L),
+        a6: io.mazewall.core.NativeArg = io.mazewall.core.NativeArg.LongArg(0L),
     ): LinuxNative.SyscallResult<Long>
 
     context(_: NativeTransaction)
     fun syscall4(
         nr: Long,
-        a1: Any?,
-        a2: Any?,
-        a3: Any?,
-        a4: Any?,
+        a1: io.mazewall.core.NativeArg,
+        a2: io.mazewall.core.NativeArg,
+        a3: io.mazewall.core.NativeArg,
+        a4: io.mazewall.core.NativeArg,
     ): LinuxNative.SyscallResult<Long>
 
     context(_: NativeTransaction)
@@ -161,10 +161,10 @@ public interface NativeProcess {
     context(_: NativeTransaction)
     fun prctl(
         option: Int,
-        arg2: Any? = 0L,
-        arg3: Any? = 0L,
-        arg4: Any? = 0L,
-        arg5: Any? = 0L,
+        arg2: io.mazewall.core.NativeArg = io.mazewall.core.NativeArg.LongArg(0L),
+        arg3: io.mazewall.core.NativeArg = io.mazewall.core.NativeArg.LongArg(0L),
+        arg4: io.mazewall.core.NativeArg = io.mazewall.core.NativeArg.LongArg(0L),
+        arg5: io.mazewall.core.NativeArg = io.mazewall.core.NativeArg.LongArg(0L),
     ): LinuxNative.SyscallResult<Long>
 }
 

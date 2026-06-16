@@ -4,6 +4,7 @@ import io.mazewall.BaseIntegrationTest
 import io.mazewall.LinuxNative
 import io.mazewall.Policy
 import io.mazewall.core.Arch
+import io.mazewall.core.NativeArg
 import io.mazewall.core.SeccompAction
 import io.mazewall.core.Syscall
 import io.mazewall.enforcer.ContainedExecutors
@@ -66,7 +67,15 @@ class AllowListTest : BaseIntegrationTest() {
         val mmap = Arch.current().mmap.toLong()
         if (mmap >= 0) {
             LinuxNative.withTransaction {
-                LinuxNative.syscall(mmap, 0, 4096, 0, 0x22, -1, 0)
+                LinuxNative.syscall(
+                    mmap,
+                    NativeArg.NullArg,
+                    NativeArg.IntArg(4096),
+                    NativeArg.NullArg,
+                    NativeArg.IntArg(0x22),
+                    NativeArg.IntArg(-1),
+                    NativeArg.NullArg,
+                )
             }
         }
     }
@@ -122,7 +131,15 @@ class AllowListTest : BaseIntegrationTest() {
                     val mmap = Arch.current().mmap.toLong()
                     if (mmap >= 0) {
                         val result = LinuxNative.withTransaction {
-                            LinuxNative.syscall(mmap, 0, 4096, 0x04 /* PROT_EXEC */, 0x22, -1, 0)
+                            LinuxNative.syscall(
+                                mmap,
+                                NativeArg.NullArg,
+                                NativeArg.IntArg(4096),
+                                NativeArg.IntArg(0x04 /* PROT_EXEC */),
+                                NativeArg.IntArg(0x22),
+                                NativeArg.IntArg(-1),
+                                NativeArg.NullArg,
+                            )
                         }
                         if (result !is LinuxNative.SyscallResult.Error || result.errno != 1) {
                             throw IllegalStateException("Expected EPERM (1) for mmap(PROT_EXEC), got $result")

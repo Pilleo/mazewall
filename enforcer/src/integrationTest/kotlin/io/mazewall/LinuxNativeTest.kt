@@ -4,6 +4,7 @@ import io.mazewall.ffi.Layouts
 import io.mazewall.ffi.NativeConstants
 import io.mazewall.ffi.memory.*
 import io.mazewall.seccomp.BpfInstruction
+import io.mazewall.core.NativeArg
 import org.junit.jupiter.api.Test
 import java.lang.foreign.Arena
 import java.lang.foreign.ValueLayout
@@ -15,20 +16,16 @@ class LinuxNativeTest : BaseIntegrationTest() {
     @Test
     fun testPrctlGetSeccomp() {
         val result = LinuxNative.withTransaction {
-            LinuxNative.process.prctl(NativeConstants.PR_GET_SECCOMP, 0, 0, 0, 0)
+            LinuxNative.process.prctl(
+                NativeConstants.PR_GET_SECCOMP,
+                NativeArg.NullArg,
+                NativeArg.NullArg,
+                NativeArg.NullArg,
+                NativeArg.NullArg,
+            )
         }
         // Usually returns 0 or 2, unless error
         assertTrue(result is LinuxNative.SyscallResult.Success && result.value >= 0)
-    }
-
-    @Test
-    fun testToLongError() {
-        assertFailsWith<IllegalArgumentException> {
-            // String is not a supported type for toLong()
-            LinuxNative.withTransaction {
-                LinuxNative.process.prctl(NativeConstants.PR_SET_NAME, "string-not-allowed")
-            }
-        }
     }
 
     @Test

@@ -502,15 +502,15 @@ class LandlockTest : BaseIntegrationTest() {
             context(_: NativeTransaction)
             override fun syscall(
                 nr: Long,
-                a1: Any?,
-                a2: Any?,
-                a3: Any?,
-                a4: Any?,
-                a5: Any?,
-                a6: Any?,
+                a1: io.mazewall.core.NativeArg,
+                a2: io.mazewall.core.NativeArg,
+                a3: io.mazewall.core.NativeArg,
+                a4: io.mazewall.core.NativeArg,
+                a5: io.mazewall.core.NativeArg,
+                a6: io.mazewall.core.NativeArg,
             ): LinuxNative.SyscallResult<Long> {
                 return if (nr == io.mazewall.ffi.NativeConstants.LANDLOCK_CREATE_RULESET_NR &&
-                    a3 == io.mazewall.ffi.NativeConstants.LANDLOCK_CREATE_RULESET_VERSION
+                    a3.asLong == io.mazewall.ffi.NativeConstants.LANDLOCK_CREATE_RULESET_VERSION.toLong()
                 ) {
                     LinuxNative.SyscallResult.Success(5) // ABI version 5
                 } else if (nr == io.mazewall.ffi.NativeConstants.LANDLOCK_CREATE_RULESET_NR) {
@@ -537,15 +537,15 @@ class LandlockTest : BaseIntegrationTest() {
             context(_: NativeTransaction)
             override fun syscall(
                 nr: Long,
-                a1: Any?,
-                a2: Any?,
-                a3: Any?,
-                a4: Any?,
-                a5: Any?,
-                a6: Any?,
+                a1: io.mazewall.core.NativeArg,
+                a2: io.mazewall.core.NativeArg,
+                a3: io.mazewall.core.NativeArg,
+                a4: io.mazewall.core.NativeArg,
+                a5: io.mazewall.core.NativeArg,
+                a6: io.mazewall.core.NativeArg,
             ): LinuxNative.SyscallResult<Long> {
                 return if (nr == io.mazewall.ffi.NativeConstants.LANDLOCK_CREATE_RULESET_NR &&
-                    a3 == io.mazewall.ffi.NativeConstants.LANDLOCK_CREATE_RULESET_VERSION
+                    a3.asLong == io.mazewall.ffi.NativeConstants.LANDLOCK_CREATE_RULESET_VERSION.toLong()
                 ) {
                     LinuxNative.SyscallResult.Success(5) // ABI version 5
                 } else {

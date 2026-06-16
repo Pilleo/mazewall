@@ -5,6 +5,7 @@ import io.mazewall.LinuxNative
 import io.mazewall.Policy
 import io.mazewall.Uncompiled
 import io.mazewall.core.Arch
+import io.mazewall.core.NativeArg
 import io.mazewall.getFdOrThrow
 import io.mazewall.onSuccess
 import io.mazewall.ffi.NativeConstants
@@ -186,7 +187,13 @@ internal class ProfilerInstallerSession(
 
     private fun ensureNoNewPrivs() {
         val r = LinuxNative.withTransaction {
-            LinuxNative.process.prctl(NativeConstants.PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0)
+            LinuxNative.process.prctl(
+                NativeConstants.PR_SET_NO_NEW_PRIVS,
+                NativeArg.IntArg(1),
+                NativeArg.NullArg,
+                NativeArg.NullArg,
+                NativeArg.NullArg,
+            )
         }
         r.getOrThrow("prctl(PR_SET_NO_NEW_PRIVS)")
     }
@@ -200,9 +207,9 @@ internal class ProfilerInstallerSession(
         val r = LinuxNative.withTransaction {
             LinuxNative.syscall(
                 arch.seccompSyscallNumber.toLong(),
-                NativeConstants.SECCOMP_SET_MODE_FILTER.toLong(),
-                NativeConstants.SECCOMP_FILTER_FLAG_NEW_LISTENER,
-                prog,
+                NativeArg.LongArg(NativeConstants.SECCOMP_SET_MODE_FILTER.toLong()),
+                NativeArg.LongArg(NativeConstants.SECCOMP_FILTER_FLAG_NEW_LISTENER),
+                NativeArg.MemoryArg(prog),
             )
         }
 

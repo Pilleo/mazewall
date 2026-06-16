@@ -31,15 +31,15 @@ class LandlockCoverageTest {
         context(_: NativeTransaction)
         override fun syscall(
             nr: Long,
-            a1: Any?,
-            a2: Any?,
-            a3: Any?,
-            a4: Any?,
-            a5: Any?,
-            a6: Any?,
+            a1: io.mazewall.core.NativeArg,
+            a2: io.mazewall.core.NativeArg,
+            a3: io.mazewall.core.NativeArg,
+            a4: io.mazewall.core.NativeArg,
+            a5: io.mazewall.core.NativeArg,
+            a6: io.mazewall.core.NativeArg,
         ): LinuxNative.SyscallResult<Long> {
             if (nr == io.mazewall.ffi.NativeConstants.LANDLOCK_CREATE_RULESET_NR &&
-                a3 == io.mazewall.ffi.NativeConstants.LANDLOCK_CREATE_RULESET_VERSION
+                a3 is io.mazewall.core.NativeArg.LongArg && a3.value == io.mazewall.ffi.NativeConstants.LANDLOCK_CREATE_RULESET_VERSION.toLong()
             ) {
                 return LinuxNative.SyscallResult.Success(5)
             }
@@ -79,12 +79,12 @@ class LandlockCoverageTest {
             context(_: NativeTransaction)
             override fun syscall(
                 nr: Long,
-                a1: Any?,
-                a2: Any?,
-                a3: Any?,
-                a4: Any?,
-                a5: Any?,
-                a6: Any?,
+                a1: io.mazewall.core.NativeArg,
+                a2: io.mazewall.core.NativeArg,
+                a3: io.mazewall.core.NativeArg,
+                a4: io.mazewall.core.NativeArg,
+                a5: io.mazewall.core.NativeArg,
+                a6: io.mazewall.core.NativeArg,
             ): LinuxNative.SyscallResult<Long> {
                 if (nr == io.mazewall.ffi.NativeConstants.LANDLOCK_ADD_RULE_NR) {
                     return LinuxNative.SyscallResult.Error(1, -1) // EPERM
@@ -106,12 +106,12 @@ class LandlockCoverageTest {
             context(_: NativeTransaction)
             override fun syscall(
                 nr: Long,
-                a1: Any?,
-                a2: Any?,
-                a3: Any?,
-                a4: Any?,
-                a5: Any?,
-                a6: Any?,
+                a1: io.mazewall.core.NativeArg,
+                a2: io.mazewall.core.NativeArg,
+                a3: io.mazewall.core.NativeArg,
+                a4: io.mazewall.core.NativeArg,
+                a5: io.mazewall.core.NativeArg,
+                a6: io.mazewall.core.NativeArg,
             ): LinuxNative.SyscallResult<Long> {
                 if (nr == io.mazewall.ffi.NativeConstants.LANDLOCK_RESTRICT_SELF_NR) {
                     return LinuxNative.SyscallResult.Error(1, -1) // EPERM

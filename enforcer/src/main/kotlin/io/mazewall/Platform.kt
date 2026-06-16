@@ -34,7 +34,13 @@ object Platform {
             isArchitectureSupported()
 
     private fun hasKernelSeccompSupport(): Boolean = LinuxNative.withTransaction {
-        LinuxNative.process.prctl(NativeConstants.PR_GET_SECCOMP, 0, 0, 0, 0)
+        LinuxNative.process.prctl(
+            NativeConstants.PR_GET_SECCOMP,
+            io.mazewall.core.NativeArg.LongArg(0L),
+            io.mazewall.core.NativeArg.LongArg(0L),
+            io.mazewall.core.NativeArg.LongArg(0L),
+            io.mazewall.core.NativeArg.LongArg(0L),
+        )
     } is LinuxNative.SyscallResult.Success
 
     private fun isSeccompSanityCheckPassing(): Boolean {
@@ -43,7 +49,13 @@ object Platform {
         // A healthy kernel should return -1 and set errno to EINVAL (22).
         // Some container environments or broken kernels might silently return 0 or a different error.
         val bogusCheck = LinuxNative.withTransaction {
-            LinuxNative.process.prctl(NativeConstants.PR_SET_SECCOMP, -1L, 0L, 0, 0)
+            LinuxNative.process.prctl(
+            NativeConstants.PR_SET_SECCOMP,
+            io.mazewall.core.NativeArg.LongArg(-1L),
+            io.mazewall.core.NativeArg.LongArg(0L),
+            io.mazewall.core.NativeArg.LongArg(0L),
+            io.mazewall.core.NativeArg.LongArg(0L),
+        )
         }
         val passed = bogusCheck is LinuxNative.SyscallResult.Error && bogusCheck.errno == ERRNO_EINVAL
         if (!passed) {
@@ -171,7 +183,13 @@ object Platform {
         if (isLinux) {
             try {
                 val nnpVal = LinuxNative.withTransaction {
-                    LinuxNative.process.prctl(NativeConstants.PR_GET_NO_NEW_PRIVS, 0, 0, 0, 0)
+                    LinuxNative.process.prctl(
+                    NativeConstants.PR_GET_NO_NEW_PRIVS,
+                    io.mazewall.core.NativeArg.LongArg(0L),
+                    io.mazewall.core.NativeArg.LongArg(0L),
+                    io.mazewall.core.NativeArg.LongArg(0L),
+                    io.mazewall.core.NativeArg.LongArg(0L),
+                )
                 }
                 if (nnpVal is LinuxNative.SyscallResult.Success) {
                     isNoNewPrivsEnabled = nnpVal.value == 1L
@@ -181,7 +199,13 @@ object Platform {
 
             try {
                 val seccompVal = LinuxNative.withTransaction {
-                    LinuxNative.process.prctl(NativeConstants.PR_GET_SECCOMP, 0, 0, 0, 0)
+                    LinuxNative.process.prctl(
+            NativeConstants.PR_GET_SECCOMP,
+            io.mazewall.core.NativeArg.LongArg(0L),
+            io.mazewall.core.NativeArg.LongArg(0L),
+            io.mazewall.core.NativeArg.LongArg(0L),
+            io.mazewall.core.NativeArg.LongArg(0L),
+        )
                 }
                 seccompMode = when (seccompVal) {
                     is LinuxNative.SyscallResult.Error -> SeccompMode.Error(seccompVal.errno)
