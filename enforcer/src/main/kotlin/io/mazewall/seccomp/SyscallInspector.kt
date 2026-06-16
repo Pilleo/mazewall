@@ -1,0 +1,108 @@
+package io.mazewall.seccomp
+
+import io.mazewall.core.Arch
+import io.mazewall.core.SeccompAction
+
+/**
+ * Context provided to [SyscallInspector]s to determine how to build their rules.
+ */
+internal data class InspectionContext(
+    val syscallActions: Map<Int, SeccompAction>,
+    val defaultAction: SeccompAction,
+    val jvmCriticalNrs: Set<Int>,
+    val allowMmapExec: Boolean,
+    val allowNonThreadClone: Boolean,
+    val allowUnsafePrctl: Boolean,
+) {
+    /**
+     * Resolves the effective action for a given syscall number, taking into account
+     * critical JVM requirements (which override policy) and default fallbacks.
+     */
+    fun resolveEffectiveAction(nr: Int): SeccompAction {
+        if (nr in jvmCriticalNrs) return SeccompAction.ACT_ALLOW
+        return syscallActions[nr] ?: defaultAction
+    }
+}
+
+/**
+ * A plugin that generates Seccomp-BPF argument inspections for specific syscalls.
+ */
+internal interface SyscallInspector {
+    fun getInspections(arch: Arch, context: InspectionContext): List<SyscallInspection>
+}
+
+/**
+ * Inspects memory mapping syscalls (mmap, mprotect, pkey_mprotect) to block PROT_EXEC
+ * when execution is not explicitly allowed.
+ */
+internal class MmapExecInspector : SyscallInspector {
+    override fun getInspections(arch: Arch, context: InspectionContext): List<SyscallInspection> {
+        if (context.allowMmapExec) return emptyList()
+
+        return listOf(arch.mmap, arch.mprotect, arch.pkeyMprotect)
+            .filter { it >= 0 }
+            .map { nr ->
+                SyscallInspection(
+                    syscallNumber = nr,
+                    argIndex = 2, // PROT flag is usually the 3rd argument
+                    check = ArgCheck.MaskEquals(PROT_EXEC, 0x00L),
+                    ifMatched = context.resolveEffectiveAction(nr),
+                    ifNotMatched = SeccompAction.ACT_ERRNO,
+                )
+            }
+    }
+
+    private companion object {
+        private const val PROT_EXEC = 0x04L
+    }
+}
+
+/**
+ * Inspects clone to ensure it is only used for creating threads (CLONE_THREAD)
+ * and not full processes, when non-thread cloning is not allowed.
+ */
+internal class ThreadCloneInspector : SyscallInspector {
+    override fun getInspections(arch: Arch, context: InspectionContext): List<SyscallInspection> {
+        if (context.allowNonThreadClone || arch.clone < 0) return emptyList()
+
+        val nr = arch.clone
+        return listOf(
+            SyscallInspection(
+                syscallNumber = nr,
+                argIndex = 0, // clone flags are the 1st argument
+                check = ArgCheck.MaskEquals(CLONE_VM_THREAD_MASK, CLONE_VM_THREAD_MASK),
+                ifMatched = context.resolveEffectiveAction(nr),
+                ifNotMatched = SeccompAction.ACT_ERRNO,
+            )
+        )
+    }
+
+    private companion object {
+        private const val CLONE_VM_THREAD_MASK = 0x00010100L
+    }
+}
+
+/**
+ * Inspects prctl to block dangerous sub-commands (like PR_SET_MM or PR_SET_PTRACER)
+ * when unsafe prctl operations are not explicitly allowed.
+ */
+internal class UnsafePrctlInspector : SyscallInspector {
+    override fun getInspections(arch: Arch, context: InspectionContext): List<SyscallInspection> {
+        if (context.allowUnsafePrctl || arch.prctl < 0) return emptyList()
+
+        val nr = arch.prctl
+        return listOf(
+            SyscallInspection(
+                syscallNumber = nr,
+                argIndex = 0, // prctl option is the 1st argument
+                check = ArgCheck.EqualsAny(SAFE_PRCTL_OPTIONS),
+                ifMatched = context.resolveEffectiveAction(nr),
+                ifNotMatched = SeccompAction.ACT_ERRNO,
+            )
+        )
+    }
+
+    private companion object {
+        private val SAFE_PRCTL_OPTIONS = listOf(15L, 16L, 21L, 22L, 38L, 39L)
+    }
+}

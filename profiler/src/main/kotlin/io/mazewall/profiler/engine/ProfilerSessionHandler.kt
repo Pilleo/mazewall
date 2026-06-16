@@ -144,8 +144,8 @@ internal class ProfilerSessionHandler(
                     }
                     state = ProfilerState.Terminated
                     // Use ECONNRESET to indicate that the profiling session was interrupted/failed
-                    transport.sendSeccompError(result, resp, 104) // 104 = ECONNRESET
-                    ledger.record(SessionEvent.ErrorReplied(System.nanoTime(), pidVal.toLong(), 104))
+                    transport.sendSeccompError(result, resp, ECONNRESET)
+                    ledger.record(SessionEvent.ErrorReplied(System.nanoTime(), pidVal.toLong(), ECONNRESET))
                     false
                 }
 
@@ -161,11 +161,10 @@ internal class ProfilerSessionHandler(
             }
             // If we hit an exception, the handshake effectively failed.
             // We must reply to avoid deadlocking the tracee.
-            transport.sendSeccompError(handshake.failed(), resp, 104)
-            ledger.record(SessionEvent.ErrorReplied(System.nanoTime(), pidVal.toLong(), 104))
+            transport.sendSeccompError(handshake.failed(), resp, ECONNRESET)
+            ledger.record(SessionEvent.ErrorReplied(System.nanoTime(), pidVal.toLong(), ECONNRESET))
             throw e
         }
-
     }
 
     @Suppress("ReturnCount", "NestedBlockDepth", "CyclomaticComplexMethod")
@@ -179,11 +178,11 @@ internal class ProfilerSessionHandler(
         while (true) {
             val pollRes = transport.poll(pollFd, 1L, POLL_ACK_TIMEOUT_MS)
             val count = pollRes.recover { errno, _ ->
-                if (errno == NativeConstants.EINTR) return@recover -1L
-                return@recover -2L // Error
+                if (errno == NativeConstants.EINTR) return@recover RETRY_SIGNAL
+                return@recover INTERNAL_ERROR_SIGNAL
             }
-            if (count == -1L) continue
-            if (count == -2L || count == 0L) return session.failed()
+            if (count == RETRY_SIGNAL) continue
+            if (count == INTERNAL_ERROR_SIGNAL || count == 0L) return session.failed()
 
             val revents = pollFd.get(ValueLayout.JAVA_SHORT, POLLFD_REVENTS_OFF)
             if ((revents.toInt() and NativeConstants.POLLIN.toInt()) != 0) {
@@ -200,11 +199,11 @@ internal class ProfilerSessionHandler(
     ): HandshakeSession {
         while (true) {
             val readRes = transport.read(socketFd, ackBuf, ACK_BUF_SIZE)
-            val value = readRes.recover { errno, v ->
-                if (errno == NativeConstants.EINTR) return@recover -1L
-                return@recover -2L // Error
+            val value = readRes.recover { errno, _ ->
+                if (errno == NativeConstants.EINTR) return@recover RETRY_SIGNAL
+                return@recover INTERNAL_ERROR_SIGNAL
             }
-            if (value == -1L) continue
+            if (value == RETRY_SIGNAL) continue
             if (value <= 0) {
                 return session.failed()
             }
@@ -221,12 +220,15 @@ internal class ProfilerSessionHandler(
         return session.failed()
     }
 
-
     companion object {
         private const val POLL_ACK_TIMEOUT_MS = 5000
+        private const val ECONNRESET = 104
+        private const val RETRY_SIGNAL = -1L
+        private const val INTERNAL_ERROR_SIGNAL = -2L
         private val logger = java.util.logging.Logger.getLogger(ProfilerSessionHandler::class.java.name)
     }
 }
+
 
 private class SyscallPathResolver(
     private val memoryReader: ProfilerMemoryReader,

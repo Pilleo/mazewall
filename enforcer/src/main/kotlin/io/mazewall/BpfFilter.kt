@@ -87,18 +87,22 @@ object BpfFilter {
             .checkArch(arch)
             .loadSyscallNr()
 
-        // 2. Special Syscall Argument Checks
+        // 2. Specialized Syscall Argument Inspections (Plugin-based)
         val handledNrs = mutableSetOf<Int>()
-
-        val inspections = getInspections(
-            arch,
+        val context = io.mazewall.seccomp.InspectionContext(
             syscallActions,
             defaultAction,
             jvmCriticalNrs,
             allowMmapExec,
             allowNonThreadClone,
-            allowUnsafePrctl,
+            allowUnsafePrctl
         )
+        val inspectors = listOf(
+            io.mazewall.seccomp.MmapExecInspector(),
+            io.mazewall.seccomp.ThreadCloneInspector(),
+            io.mazewall.seccomp.UnsafePrctlInspector()
+        )
+        val inspections = inspectors.flatMap { it.getInspections(arch, context) }
         emitInspections(builder, inspections, profilingMode, handledNrs)
 
         // clone3 -> Always ENOSYS (does not need argument inspection)
@@ -130,71 +134,6 @@ object BpfFilter {
             Syscall.CLOSE.numberFor(arch),
             Syscall.RT_SIGPROCMASK.numberFor(arch),
         ).filter { it >= 0 }.toSet()
-
-    private fun getInspections(
-        arch: Arch,
-        syscallActions: Map<Int, SeccompAction>,
-        defaultAction: SeccompAction,
-        jvmCriticalNrs: Set<Int>,
-        allowMmapExec: Boolean,
-        allowNonThreadClone: Boolean,
-        allowUnsafePrctl: Boolean,
-    ): List<io.mazewall.seccomp.SyscallInspection> {
-        val list = mutableListOf<io.mazewall.seccomp.SyscallInspection>()
-
-        if (!allowMmapExec) {
-            listOf(arch.mmap, arch.mprotect, arch.pkeyMprotect).forEach { nr ->
-                if (nr >= 0) {
-                    val mappedAction = syscallActions[nr] ?: defaultAction
-                    val effectiveAction = if (nr in jvmCriticalNrs) SeccompAction.ACT_ALLOW else mappedAction
-                    list.add(
-                        io.mazewall.seccomp.SyscallInspection(
-                            syscallNumber = nr,
-                            argIndex = 2,
-                            check = io.mazewall.seccomp.ArgCheck
-                                .MaskEquals(0x04L, 0x00L),
-                            ifMatched = effectiveAction,
-                            ifNotMatched = SeccompAction.ACT_ERRNO,
-                        ),
-                    )
-                }
-            }
-        }
-
-        if (!allowNonThreadClone && arch.clone >= 0) {
-            val nr = arch.clone
-            val mappedAction = syscallActions[nr] ?: defaultAction
-            val effectiveAction = if (nr in jvmCriticalNrs) SeccompAction.ACT_ALLOW else mappedAction
-            list.add(
-                io.mazewall.seccomp.SyscallInspection(
-                    syscallNumber = nr,
-                    argIndex = 0,
-                    check = io.mazewall.seccomp.ArgCheck
-                        .MaskEquals(0x00010100L, 0x00010100L),
-                    ifMatched = effectiveAction,
-                    ifNotMatched = SeccompAction.ACT_ERRNO,
-                ),
-            )
-        }
-
-        if (!allowUnsafePrctl && arch.prctl >= 0) {
-            val nr = arch.prctl
-            val mappedAction = syscallActions[nr] ?: defaultAction
-            val effectiveAction = if (nr in jvmCriticalNrs) SeccompAction.ACT_ALLOW else mappedAction
-            list.add(
-                io.mazewall.seccomp.SyscallInspection(
-                    syscallNumber = nr,
-                    argIndex = 0,
-                    check = io.mazewall.seccomp.ArgCheck
-                        .EqualsAny(listOf(15L, 16L, 21L, 22L, 38L, 39L)),
-                    ifMatched = effectiveAction,
-                    ifNotMatched = SeccompAction.ACT_ERRNO,
-                ),
-            )
-        }
-
-        return list
-    }
 
     internal fun emitInspections(
         builder: io.mazewall.seccomp.BpfBuilder.NrLoaded,
