@@ -41,7 +41,7 @@ class LinuxNativeCoverageTest {
         assertTrue(fd1.isValid)
         assertTrue(fd3.isInvalid)
         assertEquals("fd(10)", fd1.toString())
-        assertEquals("fd(INVALID)", fd3.toString())
+        assertEquals("fd(-1, closed/invalid)", fd3.toString())
     }
 
     @Test

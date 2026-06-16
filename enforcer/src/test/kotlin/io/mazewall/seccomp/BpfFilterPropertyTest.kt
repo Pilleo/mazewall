@@ -1,5 +1,6 @@
 package io.mazewall.seccomp
-import io.kotest.matchers.ints.shouldBeLessThan
+import kotlin.test.assertTrue
+import io.kotest.matchers.shouldBe
 import io.kotest.property.Exhaustive
 import io.kotest.property.checkAll
 import io.kotest.property.exhaustive.collection
@@ -25,7 +26,7 @@ class BpfFilterPropertyTest {
                 val filter = BpfFilter.build(Arch.AMD64, policy)
 
                 // Linux limits BPF programs to 4096 instructions
-                filter.size shouldBeLessThan 4096
+                assertTrue(filter.size < 4096, "Filter size ${filter.size} should be less than 4096")
             }
         }
     }
