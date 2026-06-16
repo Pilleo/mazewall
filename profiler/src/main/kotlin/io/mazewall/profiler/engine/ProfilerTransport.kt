@@ -12,14 +12,19 @@ import java.lang.foreign.ValueLayout
 import java.nio.charset.StandardCharsets
 
 /**
- * Interface for communicating with the parent JVM and receiving file descriptors.
+ * High-level interface for publishing domain events to the parent JVM.
  */
-interface ProfilerTransport {
+interface TraceEventPublisher {
     fun sendTraceEvent(
         socketFd: LinuxNative.FileDescriptor,
         event: SyscallEvent<SyscallEventState.Resolved>,
     )
+}
 
+/**
+ * High-level interface for sending seccomp responses back to the kernel.
+ */
+interface SeccompResponder {
     /**
      * Sends a SECCOMP_USER_NOTIF_FLAG_CONTINUE response to the kernel for a successful handshake.
      * Enforced at compile-time to only work with sessions in the Success state.
@@ -38,9 +43,12 @@ interface ProfilerTransport {
         resp: MemorySegment,
         errorNr: Int,
     )
+}
 
-    fun recvDescriptor(socketFd: LinuxNative.FileDescriptor): LinuxNative.FileDescriptor?
-
+/**
+ * Low-level interface for raw POSIX-like polling and I/O.
+ */
+interface NativeIoOperations {
     fun poll(
         fds: MemorySegment,
         nfds: Long,
@@ -71,13 +79,29 @@ interface ProfilerTransport {
         request: Long,
         arg: MemorySegment,
     ): LinuxNative.SyscallResult<Long, *>
+}
 
+/**
+ * Interface for socket creation and connection handling.
+ */
+interface SocketLifecycleManager {
     fun createServer(socketPath: String): LinuxNative.FileDescriptor
 
     fun accept(serverFd: LinuxNative.FileDescriptor): LinuxNative.FileDescriptor
 
     fun close(fd: LinuxNative.FileDescriptor)
+
+    fun recvDescriptor(socketFd: LinuxNative.FileDescriptor): LinuxNative.FileDescriptor?
 }
+
+/**
+ * Legacy composite interface for communicating with the parent JVM and receiving file descriptors.
+ */
+interface ProfilerTransport :
+    TraceEventPublisher,
+    SeccompResponder,
+    NativeIoOperations,
+    SocketLifecycleManager
 
 /**
  * Real implementation of [ProfilerTransport] using standard Linux syscalls.

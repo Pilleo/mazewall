@@ -183,6 +183,15 @@
 **Context:** Many classes directly instantiate `Arena.ofConfined()` or rely on the `LinuxNative` object, making isolated unit testing without a Linux kernel difficult.
 **Needed:** Refactor components to accept `NativeEngine` or `NativeScope` as constructor dependencies, improving mockability and environment independence.
 
+### ✅ [RESOLVED] [Severity: DX-FRICTION]: Interface Segregation Violation (ISP) in `ProfilerTransport`
+**Context:** `ProfilerTransport` was a "Fat Interface," mixing high-level trace event sending with low-level kernel responses and socket infrastructure management.
+**Fix:** Segregated `ProfilerTransport` into role-specific interfaces: `TraceEventPublisher`, `SeccompResponder`, `SocketLifecycleManager`, and `NativeIoOperations`. Components now strictly depend only on the roles they require.
+
+### 🔴 [Severity: LOW]: Redundant State in `ThreadStateRegistry` vs `Policy`
+**Target:** `io.mazewall.enforcer.ThreadStateRegistry`
+**Context:** The registry manually tracks `landlockAppliedReads` and `landlockAppliedWrites`, partially duplicating the information already contained within the `Policy` object (DRY violation).
+**Needed:** Consolidate state tracking to use the `Policy` object as the single source of truth for applied Landlock restrictions.
+
 ## Foundational Architecture & Test-Harness Enablers
 
 ### 🔵 [Severity: ENHANCEMENT]: Compile-Time Enforced Tier 1 Process Baseline (`ProcessContainmentToken`)

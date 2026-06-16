@@ -193,7 +193,15 @@ class ProfilerDesignSpec :
                 reader.readStringResult = "/tmp/test.txt"
 
                 val syscallMap = mapOf(2 to "OPEN")
-                val handler = ProfilerSessionHandler(LinuxNative.FileDescriptor(10), LinuxNative.FileDescriptor(20), transport, reader, syscallMap) {}
+                val handler = ProfilerSessionHandler(
+                    LinuxNative.FileDescriptor(10),
+                    LinuxNative.FileDescriptor(20),
+                    transport,
+                    transport,
+                    transport,
+                    reader,
+                    syscallMap
+                ) {}
 
                 Arena.ofConfined().use { arena ->
                     val notif = arena.allocate(Layouts.SECCOMP_NOTIF)
@@ -226,7 +234,15 @@ class ProfilerDesignSpec :
                 reader.resolveLinkResult = "/home/user"
 
                 val syscallMap = mapOf(257 to "OPENAT")
-                val handler = ProfilerSessionHandler(LinuxNative.FileDescriptor(10), LinuxNative.FileDescriptor(20), transport, reader, syscallMap) {}
+                val handler = ProfilerSessionHandler(
+                    LinuxNative.FileDescriptor(10),
+                    LinuxNative.FileDescriptor(20),
+                    transport,
+                    transport,
+                    transport,
+                    reader,
+                    syscallMap
+                ) {}
 
                 Arena.ofConfined().use { arena ->
                     val notif = arena.allocate(Layouts.SECCOMP_NOTIF)

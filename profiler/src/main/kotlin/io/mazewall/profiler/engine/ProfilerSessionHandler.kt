@@ -26,7 +26,9 @@ internal sealed class LoopAction {
 internal class ProfilerSessionHandler(
     private val socketFd: LinuxNative.FileDescriptor,
     private val listenerFd: LinuxNative.FileDescriptor,
-    private val transport: ProfilerTransport,
+    private val publisher: TraceEventPublisher,
+    private val responder: SeccompResponder,
+    private val ioOps: NativeIoOperations,
     private val memoryReader: ProfilerMemoryReader,
     private val syscallMap: Map<Int, String>,
     private val onShutdown: (String) -> Unit,
@@ -60,7 +62,7 @@ internal class ProfilerSessionHandler(
         val listenerRevents = pollFds.get(ValueLayout.JAVA_SHORT, POLLFD_REVENTS_OFF)
         if ((listenerRevents.toInt() and NativeConstants.POLLIN.toInt()) != 0) {
             notif.fill(0)
-            val recvRes = transport.ioctl(listenerFd, SECCOMP_IOCTL_NOTIF_RECV, notif)
+            val recvRes = ioOps.ioctl(listenerFd, SECCOMP_IOCTL_NOTIF_RECV, notif)
             recvRes.onSuccess {
                 if (!processNotification(notif, resp, ackBuf, socketPollFd)) {
                     state = ProfilerState.Terminated
@@ -73,7 +75,7 @@ internal class ProfilerSessionHandler(
 
     @Suppress("ReturnCount")
     private fun handleShutdownRequest(ackBuf: MemorySegment): Boolean {
-        val res = transport.recv(socketFd, ackBuf, 1L, 0)
+        val res = ioOps.recv(socketFd, ackBuf, 1L, 0)
         return res.map { value ->
             if (value > 0) {
                 val command = ackBuf.get(ValueLayout.JAVA_BYTE, 0L)
@@ -127,18 +129,18 @@ internal class ProfilerSessionHandler(
 
         @Suppress("TooGenericExceptionCaught")
         try {
-            transport.sendTraceEvent(socketFd, resolvedEvent)
+            publisher.sendTraceEvent(socketFd, resolvedEvent)
             ledger.record(SessionEvent.EventSent(System.nanoTime(), pidVal.toLong()))
 
             // 4. HANDSHAKE: Delegate IPC protocol to the state machine
-            val result = handshake.performHandshake(socketFd, transport, socketPollFd, ackBuf, onShutdown)
+            val result = handshake.performHandshake(socketFd, ioOps, socketPollFd, ackBuf, onShutdown)
 
             // 5. REPLY: Finalize based on handshake outcome
             return when (result) {
                 is HandshakeSession.Success -> {
                     ledger.record(SessionEvent.AckReceived(System.nanoTime(), pidVal.toLong()))
                     state = ProfilerState.ActiveSession(socketFd, listenerFd)
-                    transport.sendSeccompContinue(result, resp)
+                    responder.sendSeccompContinue(result, resp)
                     ledger.record(SessionEvent.ContinueReplied(System.nanoTime(), pidVal.toLong(), 0L))
                     true
                 }
@@ -149,7 +151,7 @@ internal class ProfilerSessionHandler(
                             ledger.dump().joinToString("\n")
                     }
                     state = ProfilerState.Terminated
-                    transport.sendSeccompError(result, resp, ECONNRESET)
+                    responder.sendSeccompError(result, resp, ECONNRESET)
                     ledger.record(SessionEvent.ErrorReplied(System.nanoTime(), pidVal.toLong(), ECONNRESET))
                     false
                 }
@@ -164,7 +166,7 @@ internal class ProfilerSessionHandler(
                 "Exception in processNotification: ${e.message}. Dumping SessionEventLedger:\n" +
                     ledger.dump().joinToString("\n")
             }
-            transport.sendSeccompError(handshake.failed(), resp, ECONNRESET)
+            responder.sendSeccompError(handshake.failed(), resp, ECONNRESET)
             ledger.record(SessionEvent.ErrorReplied(System.nanoTime(), pidVal.toLong(), ECONNRESET))
             throw e
         }

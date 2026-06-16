@@ -15,7 +15,7 @@ import java.util.concurrent.CopyOnWriteArrayList
 /**
  * Standalone Profiler Daemon Engine.
  *
- * Communicates with the parent JVM via a [ProfilerTransport], sending binary [TraceEvent]
+ * Communicates with the parent JVM via a [ProfilerTransport], sending binary [SyscallEvent]
  * structures and resolving memory using [ProfilerMemoryReader].
  */
 internal class ProfilerDaemonEngine(
@@ -23,6 +23,11 @@ internal class ProfilerDaemonEngine(
     private val transport: ProfilerTransport = RealProfilerTransport,
     private val memoryReader: ProfilerMemoryReader = RealMemoryReader,
 ) {
+    private val publisher: TraceEventPublisher = transport
+    private val responder: SeccompResponder = transport
+    private val ioOps: NativeIoOperations = transport
+    private val socketManager: SocketLifecycleManager = transport
+
     private val syscallMap = mutableMapOf<Int, String>()
     private val clientSockets = CopyOnWriteArrayList<LinuxNative.FileDescriptor>()
     private val activeListeners = CopyOnWriteArrayList<LinuxNative.FileDescriptor>()
@@ -52,7 +57,7 @@ internal class ProfilerDaemonEngine(
     }
 
     fun run() {
-        val serverFd = transport.createServer(socketPath)
+        val serverFd = socketManager.createServer(socketPath)
         state = ProfilerDaemonState.Listening(serverFd, socketPath)
         System.err.println("[DAEMON] Listening on $socketPath (fd=$serverFd)")
 
@@ -67,7 +72,7 @@ internal class ProfilerDaemonEngine(
             }
         } finally {
             state = ProfilerDaemonState.Terminated
-            transport.close(serverFd)
+            socketManager.close(serverFd)
         }
     }
 
@@ -97,7 +102,7 @@ internal class ProfilerDaemonEngine(
         pollFd.set(ValueLayout.JAVA_SHORT, POLLFD_EVENTS_OFF, NativeConstants.POLLIN.toShort())
 
         while (!isGlobalShutdown()) {
-            val pollRes = transport.poll(pollFd, 1L, POLL_TIMEOUT_MS)
+            val pollRes = ioOps.poll(pollFd, 1L, POLL_TIMEOUT_MS)
             val count = pollRes.recover { errno, _ ->
                 if (errno != NativeConstants.EINTR) return // Break from loop
                 0L
@@ -110,7 +115,7 @@ internal class ProfilerDaemonEngine(
     @Suppress("TooGenericExceptionCaught", "SwallowedException")
     private fun handleNewConnection(serverFd: LinuxNative.FileDescriptor) {
         try {
-            val clientFd = transport.accept(serverFd)
+            val clientFd = socketManager.accept(serverFd)
             clientSockets.add(clientFd)
             Thread { handleConnection(clientFd) }.apply {
                 name = "conn-handler-${clientFd.value}"
@@ -133,7 +138,7 @@ internal class ProfilerDaemonEngine(
                 while (!isGlobalShutdown()) {
                     // Only poll if we are waiting for a NEW listener FD (Accepted state)
                     if (connection is ProfilerConnection.Accepted) {
-                        val pollRes = transport.poll(pollFd, 1L, POLL_TIMEOUT_MS)
+                        val pollRes = ioOps.poll(pollFd, 1L, POLL_TIMEOUT_MS)
                         val count = pollRes.recover { errno, _ ->
                             if (errno != NativeConstants.EINTR) return@use // Break from loop
                             0L
@@ -143,7 +148,7 @@ internal class ProfilerDaemonEngine(
 
                     when (val current = connection) {
                         is ProfilerConnection.Accepted -> {
-                            val listenerFd = transport.recvDescriptor(socketFd)
+                            val listenerFd = socketManager.recvDescriptor(socketFd)
                             if (listenerFd != null) {
                                 System.err.println("[DAEMON] Received listener FD: ${listenerFd.value}")
                                 activeListeners.add(listenerFd)
@@ -159,7 +164,7 @@ internal class ProfilerDaemonEngine(
                             System.err.println("[DAEMON] Sending handshake ACK to socket ${socketFd.value}")
                             val ackBuf = arena.allocate(ACK_BUF_SIZE)
                             ackBuf.set(ValueLayout.JAVA_BYTE, 0L, PROTOCOL_ACK_BYTE)
-                            transport.write(socketFd, ackBuf, ACK_BUF_SIZE)
+                            ioOps.write(socketFd, ackBuf, ACK_BUF_SIZE)
                             connection = current.handshakeComplete()
                             // Immediately loop to start session reactor (don't poll)
                         }
@@ -176,12 +181,10 @@ internal class ProfilerDaemonEngine(
             }
         } finally {
             clientSockets.remove(socketFd)
-            transport.close(socketFd)
-            // Note: handleSession handles closing listenerFd in its finally block if it reached Active state.
-            // If it failed before Active, we should ideally close listenerFd here if it was received.
+            socketManager.close(socketFd)
             if (connection is ProfilerConnection.FdAttached) {
                 activeListeners.remove(connection.listenerFd)
-                transport.close(connection.listenerFd)
+                socketManager.close(connection.listenerFd)
             }
         }
     }
@@ -194,7 +197,9 @@ internal class ProfilerDaemonEngine(
         val sessionHandler = ProfilerSessionHandler(
             socketFd,
             listenerFd,
-            transport,
+            publisher,
+            responder,
+            ioOps,
             memoryReader,
             syscallMap,
             this::triggerGlobalShutdown,
@@ -208,7 +213,7 @@ internal class ProfilerDaemonEngine(
                 val socketPollFd = arena.allocate(Layouts.POLLFD)
 
                 while (!isGlobalShutdown()) {
-                    val pollRes = transport.poll(pollFds, 2L, POLL_TIMEOUT_MS)
+                    val pollRes = ioOps.poll(pollFds, 2L, POLL_TIMEOUT_MS)
                     val count = pollRes.recover { errno, _ ->
                         if (errno != NativeConstants.EINTR) return@use // Break from loop
                         0L
@@ -221,7 +226,7 @@ internal class ProfilerDaemonEngine(
             }
         } finally {
             activeListeners.remove(listenerFd)
-            transport.close(listenerFd)
+            socketManager.close(listenerFd)
         }
     }
 

@@ -28,7 +28,7 @@ sealed class HandshakeSession {
         @Suppress("ReturnCount", "NestedBlockDepth", "CyclomaticComplexMethod")
         fun performHandshake(
             socketFd: LinuxNative.FileDescriptor,
-            transport: ProfilerTransport,
+            ioOps: NativeIoOperations,
             pollFd: MemorySegment,
             ackBuf: MemorySegment,
             onShutdown: (String) -> Unit
@@ -36,7 +36,7 @@ sealed class HandshakeSession {
             pollFd.set(ValueLayout.JAVA_SHORT, POLLFD_REVENTS_OFF, 0.toShort())
 
             while (true) {
-                val pollRes = transport.poll(pollFd, 1L, POLL_ACK_TIMEOUT_MS)
+                val pollRes = ioOps.poll(pollFd, 1L, POLL_ACK_TIMEOUT_MS)
                 val count = pollRes.recover { errno, _ ->
                     if (errno == NativeConstants.EINTR) return@recover RETRY_SIGNAL
                     return@recover INTERNAL_ERROR_SIGNAL
@@ -46,7 +46,7 @@ sealed class HandshakeSession {
 
                 val revents = pollFd.get(ValueLayout.JAVA_SHORT, POLLFD_REVENTS_OFF)
                 if ((revents.toInt() and NativeConstants.POLLIN.toInt()) != 0) {
-                    return readAndProcessAck(socketFd, transport, ackBuf, onShutdown)
+                    return readAndProcessAck(socketFd, ioOps, ackBuf, onShutdown)
                 }
                 return failed()
             }
@@ -55,12 +55,12 @@ sealed class HandshakeSession {
         @Suppress("ReturnCount", "LoopWithTooManyJumpStatements")
         private fun readAndProcessAck(
             socketFd: LinuxNative.FileDescriptor,
-            transport: ProfilerTransport,
+            ioOps: NativeIoOperations,
             ackBuf: MemorySegment,
             onShutdown: (String) -> Unit
         ): HandshakeSession {
             while (true) {
-                val readRes = transport.read(socketFd, ackBuf, ACK_BUF_SIZE)
+                val readRes = ioOps.read(socketFd, ackBuf, ACK_BUF_SIZE)
                 val value = readRes.recover { errno, _ ->
                     if (errno == NativeConstants.EINTR) return@recover RETRY_SIGNAL
                     return@recover INTERNAL_ERROR_SIGNAL

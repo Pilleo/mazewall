@@ -562,6 +562,18 @@ class "BpfProgram" as io.mazewall.seccomp.BpfProgram {
   + {static}Uninitialized builder()
   + {static}BpfProgram dsl(Arch, Consumer<NrLoaded>)
 }
+class "InspectionContext" as io.mazewall.seccomp.InspectionContext {
+  +Map<Integer, SeccompAction> getSyscallActions()
+  +SeccompAction getDefaultAction()
+  +Set<Integer> getJvmCriticalNrs()
+  +boolean getAllowMmapExec()
+  +boolean getAllowNonThreadClone()
+  +boolean getAllowUnsafePrctl()
+  +SeccompAction resolveEffectiveAction(int)
+}
+class "MmapExecInspector" as io.mazewall.seccomp.MmapExecInspector {
+  +List<SyscallInspection> getInspections(Arch, InspectionContext)
+}
 class "PureJavaBpfEngine" as io.mazewall.seccomp.PureJavaBpfEngine {
   + {static}PureJavaBpfEngine INSTANCE
   __
@@ -586,6 +598,15 @@ class "SyscallInspection" as io.mazewall.seccomp.SyscallInspection {
   +ArgCheck getCheck()
   +SeccompAction getIfMatched()
   +SeccompAction getIfNotMatched()
+}
+interface "SyscallInspector" as io.mazewall.seccomp.SyscallInspector {
+  + {abstract}List<SyscallInspection> getInspections(Arch, InspectionContext)
+}
+class "ThreadCloneInspector" as io.mazewall.seccomp.ThreadCloneInspector {
+  +List<SyscallInspection> getInspections(Arch, InspectionContext)
+}
+class "UnsafePrctlInspector" as io.mazewall.seccomp.UnsafePrctlInspector {
+  +List<SyscallInspection> getInspections(Arch, InspectionContext)
 }
 io.mazewall.BillOfBehaviorDto --> io.mazewall.StackProfileEntryDto
 io.mazewall.BpfFilter --> io.mazewall.BpfFilter
@@ -631,10 +652,14 @@ io.mazewall.landlock.LandlockSession --> io.mazewall.landlock.LandlockState
 io.mazewall.landlock.LandlockSession --> io.mazewall.Policy
 io.mazewall.seccomp.BpfBuilder --> io.mazewall.seccomp.BpfMacro
 io.mazewall.seccomp.BpfProgram --> io.mazewall.seccomp.BpfInstruction
+io.mazewall.seccomp.InspectionContext --> io.mazewall.core.SeccompAction
+io.mazewall.seccomp.MmapExecInspector .u.|> io.mazewall.seccomp.SyscallInspector
 io.mazewall.seccomp.PureJavaBpfEngine .u.|> io.mazewall.seccomp.SeccompEngine
 io.mazewall.seccomp.PureJavaBpfEngine --> io.mazewall.seccomp.SeccompInstallationState
 io.mazewall.seccomp.PureJavaBpfEngine --> io.mazewall.seccomp.PureJavaBpfEngine
 io.mazewall.seccomp.SyscallInspection --> io.mazewall.seccomp.ArgCheck
 io.mazewall.seccomp.SyscallInspection --> io.mazewall.core.SeccompAction
+io.mazewall.seccomp.ThreadCloneInspector .u.|> io.mazewall.seccomp.SyscallInspector
+io.mazewall.seccomp.UnsafePrctlInspector .u.|> io.mazewall.seccomp.SyscallInspector
 @enduml
 ```

@@ -136,6 +136,8 @@ class ProfilerDaemonTest {
             LinuxNative.FileDescriptor(10),
             LinuxNative.FileDescriptor(20),
             transport,
+            transport,
+            transport,
             reader,
             syscallMap,
         ) {
@@ -177,6 +179,8 @@ class ProfilerDaemonTest {
             LinuxNative.FileDescriptor(10),
             LinuxNative.FileDescriptor(20),
             transport,
+            transport,
+            transport,
             reader,
             syscallMap,
         ) { }
@@ -217,6 +221,8 @@ class ProfilerDaemonTest {
         val handler = ProfilerSessionHandler(
             LinuxNative.FileDescriptor(10),
             LinuxNative.FileDescriptor(20),
+            transport,
+            transport,
             transport,
             reader,
             syscallMap,
