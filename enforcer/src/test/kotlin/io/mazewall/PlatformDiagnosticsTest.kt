@@ -15,18 +15,18 @@ class PlatformDiagnosticsTest {
 
     @BeforeEach
     fun setUp() {
-        originalYamaPath = Platform.yamaPath
+        originalYamaPath = RealPlatformProvider.yamaPath
     }
 
     @AfterEach
     fun tearDown() {
-        Platform.yamaPath = originalYamaPath
+        RealPlatformProvider.yamaPath = originalYamaPath
     }
 
     @Test
     fun `test yama scope parsing values`() {
         val yamaFile = File(tempDir, "ptrace_scope")
-        Platform.yamaPath = yamaFile.absolutePath
+        RealPlatformProvider.yamaPath = yamaFile.absolutePath
 
         // Classic (0)
         yamaFile.writeText("0\n")
@@ -61,7 +61,7 @@ class PlatformDiagnosticsTest {
 
     @Test
     fun `test yama scope unavailable when file missing`() {
-        Platform.yamaPath = File(tempDir, "does-not-exist").absolutePath
+        RealPlatformProvider.yamaPath = File(tempDir, "does-not-exist").absolutePath
         val diag = Platform.diagnose()
         assertEquals(YamaPtraceScope.Unavailable, diag.yamaPtraceScope)
     }

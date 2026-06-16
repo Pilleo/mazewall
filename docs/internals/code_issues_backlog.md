@@ -18,6 +18,44 @@
 **Context:** `Landlock.kt` and `Platform.kt` use `catch (Exception e)` or `catch (ignored: Exception)` blocks. While sometimes used safely for diagnostics, catching generic exceptions in a security boundary module can silently swallow critical JVM `VirtualMachineError` instances or obscure containment violations, violating the "Fail Closed" invariant.
 **Needed:** Introduce an ArchUnit rule in the `:enforcer` module that strictly prohibits `catch (Exception)`, `catch (RuntimeException)`, or `catch (Throwable)`. Enforce catching specific expected native faults (e.g., `AccessDeniedException`, `IOException`).
 
+### 🔴 [Severity: CRITICAL]: Linux Version and Feature Drift (Missing Feature Detection Matrix)
+**Target:** `io.mazewall.LinuxNative`, `Platform.kt`
+**Context:** Currently, `mazewall` assumes a relatively static set of kernel capabilities. However, Linux kernel features for Seccomp (e.g., `SECCOMP_FILTER_FLAG_TSYNC`, `USER_NOTIF`) and Landlock (ABI versions 1-8) drift significantly between kernel versions (e.g., Landlock ABI v4 added network support; v8 added `LANDLOCK_RESTRICT_SELF_TSYNC`). The current codebase lacks a unified, resilient mechanism to detect, fall back, or safely degrade when executing on older or non-standard kernels.
+**Needed:** Implement a robust `KernelFeatureMatrix` subsystem. This system must query kernel capabilities at initialization (via ABI queries or `prctl` probing) and construct an immutable context object. The `Policy` engine and `NativeEngine` must use this context to either safely downgrade enforcement (if explicitly allowed by `FallbackBehavior`) or fail deterministically at startup with a clear compatibility error.
+
+### 🔴 [Severity: HIGH]: The Landlock "Bootstrapping Dilemma" (Process-Wide Pre-Init Enforcement)
+**Target:** `io.mazewall.landlock.Landlock`, `ContainedExecutors`
+**Context:** Landlock is inherently thread-scoped until ABI v8 (`LANDLOCK_RESTRICT_SELF_TSYNC`). When a Java application calls `ContainedExecutors.installOnProcess()` from `main()`, the JVM has already spawned critical infrastructure threads (GC, JIT) which remain unrestricted.
+**Needed:** Formalize the "Best-Effort Pure-Java" strategy.
+1. **Document Accepted Risk:** Explicitly document that in-JVM enforcement protects against Java RCE and Logic bugs, but is vulnerable to native ACE (Arbitrary Code Execution) thread-hopping on kernels < 7.0.
+2. **Future-Proofing:** Implement automatic `TSYNC` adoption when the `KernelFeatureMatrix` detects Landlock ABI v8+, upgrading the sandbox to full ACE protection seamlessly.
+3. **Opt-In Absolute Security:** Document external native wrappers (like `firejail`) for workloads requiring absolute ACE protection on older kernels.
+
+### 🔵 [Severity: ENHANCEMENT]: Compile-Time BPF Termination Safety (Type-State RET Enforcement)
+**Context:** Currently, `BpfBuilder.NrLoaded.build()` can be called on a program that does not end with a `RET` instruction. While the kernel verifier will reject such programs at runtime, it results in a "Fail Closed" crash rather than a compile-time error.
+**Needed:** Split `NrLoaded` into `Active` and `Terminated` states. The `ret()` method should transition the builder to the `Terminated` state, and only `Terminated` should expose the `build()` method.
+
+### 🔵 [Severity: ENHANCEMENT]: Atomic Container State Transitions (Unified State Container)
+**Target:** `io.mazewall.enforcer.ContainedExecutors`
+**Context:** Currently, `ContainedExecutors` updates thread and process state across multiple independent `Registry` variables (`SYSCALL_ACTIONS`, `DEFAULT_ACTION`, etc.). This lack of atomicity could lead to inconsistent intermediate states during concurrent installations.
+**Needed:** Define a `ContainerState` immutable data class that holds all these properties. Use a single `AtomicReference<ContainerState>` in `ProcessStateRegistry` and a single `ThreadLocal<ContainerState>` in `ThreadStateRegistry` to ensure all transitions are atomic and consistent.
+
+### ✅ [RESOLVED] [Severity: MEDIUM]: ProfilerTraceListener Lacks Deterministic Lifecycle (AutoCloseable)
+**Context:** `ProfilerTraceListener` starts a background thread and reads from a socket. Previously, there was no standard way to signal shutdown or join the thread, leading to potential leaks or "half-dead" listeners during profiler restarts.
+**Needed:** Implement `AutoCloseable` for `ProfilerTraceListener`. Ensure it joins the worker thread and releases its socket reference upon closing.
+
+### 🟡 [Severity: LOW]: High-Frequency Arena Allocation Overhead (MM Optimization)
+**Context:** The current `nativeScope` utility and profiler reactor loop create a new `Arena.ofConfined()` for every single operation (syscall resolution, polling, etc.). This puts unnecessary pressure on the JVM native allocator and GC.
+**Needed:** Investigate "Scoped Arenas" using Kotlin context parameters or a `ThreadLocal` arena for high-frequency reactor loops. Reuse the same arena for all operations within a single task or notification lifecycle.
+
+### 🔵 [Severity: ENHANCEMENT]: Memory Segment Pooling for Profiler USER_NOTIF
+**Context:** The `seccomp_notif` and `seccomp_notif_resp` structures are used for every trapped system call. Continually allocating and zeroing these segments in the `reactorLoop` is inefficient.
+**Needed:** Implement a simple `SegmentPool` for fixed-size FFM structures. Pre-allocate a small cache of aligned segments and reuse them across different notifications.
+
+### ✅ [RESOLVED] [Severity: LOW]: Dependency Inversion Violation in Platform Diagnostics
+**Context:** `Platform.kt` directly invoked static FFM calls and read `/proc` files to determine container environments. This made unit testing the "Fallback" and "Diagnostic" logic difficult without a real Linux kernel.
+**Needed:** Introduce a `PlatformProvider` interface. Move the low-level discovery logic into a `LinuxPlatformProvider` and allow injecting a `MockPlatformProvider` for tests.
+
 ### 🔵 [Severity: ENHANCEMENT]: Compile-Time Feature Proof Tokens and Scope-Safe Policy Builders (Type-State Pattern)
 **Context:** Currently, `ContainedExecutors.kt` throws a runtime `UnsupportedOperationException` if process-wide containment is applied with Landlock rules because Landlock has historically been considered thread-scoped only. However, process-wide Landlock is supported on some newer kernels/setups. Blocking it unconditionally at compile-time or throwing runtime failures limits support on modern systems.
 **Needed:** Implement compile-time feature proof tokens and type-state parameterized builders.
@@ -178,10 +216,6 @@
 ### 🔵 [Severity: ENHANCEMENT]: Memory Segment Pooling for Profiler USER_NOTIF
 **Context:** The `seccomp_notif` and `seccomp_notif_resp` structures are used for every trapped system call. Continually allocating and zeroing these segments in the `reactorLoop` is inefficient.
 **Needed:** Implement a simple `SegmentPool` for fixed-size FFM structures. Pre-allocate a small cache of aligned segments and reuse them across different notifications.
-
-### 🔴 [Severity: LOW]: Dependency Inversion Violation in Platform Diagnostics
-**Context:** `Platform.kt` directly invokes static FFM calls and reads `/proc` files to determine container environments. This makes unit testing the "Fallback" and "Diagnostic" logic difficult without a real Linux kernel.
-**Needed:** Introduce a `PlatformProvider` interface. Move the low-level discovery logic into a `LinuxPlatformProvider` and allow injecting a `MockPlatformProvider` for tests.
 
 ### 🔵 [Severity: ENHANCEMENT]: Atomic Container State Transitions (Unified State Container)
 **Target:** `io.mazewall.enforcer.ContainedExecutors`

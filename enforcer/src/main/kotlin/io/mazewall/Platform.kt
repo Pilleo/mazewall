@@ -7,13 +7,32 @@ import java.util.logging.Logger
 /**
  * Platform checks and fallback configuration.
  */
-object Platform {
+public object Platform {
     private val logger = Logger.getLogger(Platform::class.java.name)
+
+    @Volatile
+    private var provider: PlatformProvider = RealPlatformProvider
+
+    /**
+     * Swaps the active platform provider. Used for testing and fault injection.
+     */
+    @Suppress("spotbugs:ST_WRITE_TO_STATIC_FROM_INSTANCE_METHOD")
+    public fun setProvider(newProvider: PlatformProvider) {
+        provider = newProvider
+    }
+
+    /**
+     * Restores the default RealPlatformProvider.
+     */
+    @Suppress("spotbugs:ST_WRITE_TO_STATIC_FROM_INSTANCE_METHOD")
+    public fun resetToDefault() {
+        provider = RealPlatformProvider
+    }
 
     /**
      * Enum defining how the library behaves when run on an unsupported platform (e.g. macOS or Windows).
      */
-    enum class FallbackBehavior {
+    public enum class FallbackBehavior {
         FAIL, // throw UnsupportedOperationException
         WARN_AND_BYPASS, // log warning, run task uncontained
         SILENT_BYPASS, // run task uncontained, no warning
@@ -22,41 +41,23 @@ object Platform {
     private const val ERRNO_EINVAL = 22
 
     /** True if the current operating system is Linux. */
-    val isLinux: Boolean = System.getProperty("os.name").equals("Linux", ignoreCase = true)
+    public val isLinux: Boolean get() = provider.getOsName().equals("Linux", ignoreCase = true)
 
     /**
      * Returns true if the current platform supports seccomp filters.
      */
-    fun isSupported(): Boolean =
+    public fun isSupported(): Boolean =
         isLinux &&
-            hasKernelSeccompSupport() &&
+            provider.hasKernelSeccompSupport() &&
             isSeccompSanityCheckPassing() &&
             isArchitectureSupported()
-
-    private fun hasKernelSeccompSupport(): Boolean = LinuxNative.withTransaction {
-        LinuxNative.process.prctl(
-            NativeConstants.PR_GET_SECCOMP,
-            io.mazewall.core.NativeArg.LongArg(0L),
-            io.mazewall.core.NativeArg.LongArg(0L),
-            io.mazewall.core.NativeArg.LongArg(0L),
-            io.mazewall.core.NativeArg.LongArg(0L),
-        )
-    } is LinuxNative.SyscallResult.Success
 
     private fun isSeccompSanityCheckPassing(): Boolean {
         // Bogus Sanity Check: Ensure the kernel actively enforces seccomp.
         // We call prctl(PR_SET_SECCOMP) with an invalid mode (-1).
         // A healthy kernel should return -1 and set errno to EINVAL (22).
         // Some container environments or broken kernels might silently return 0 or a different error.
-        val bogusCheck = LinuxNative.withTransaction {
-            LinuxNative.process.prctl(
-            NativeConstants.PR_SET_SECCOMP,
-            io.mazewall.core.NativeArg.LongArg(-1L),
-            io.mazewall.core.NativeArg.LongArg(0L),
-            io.mazewall.core.NativeArg.LongArg(0L),
-            io.mazewall.core.NativeArg.LongArg(0L),
-        )
-        }
+        val bogusCheck = provider.checkSeccompSanity()
         val passed = bogusCheck is LinuxNative.SyscallResult.Error && bogusCheck.errno == ERRNO_EINVAL
         if (!passed) {
             val (ret, errno) =
@@ -83,7 +84,7 @@ object Platform {
     /**
      * Resolves the configured fallback behavior based on system properties or environment variables.
      */
-    fun configuredFallback(): FallbackBehavior {
+    public fun configuredFallback(): FallbackBehavior {
         val prop =
             System.getProperty("io.mazewall.fallback")
                 ?: System.getenv("IO_MAZEWALL_FALLBACK")
@@ -101,7 +102,7 @@ object Platform {
     /**
      * Data class containing in-app diagnostics.
      */
-    data class Diagnostics(
+    public data class Diagnostics(
         val osName: String,
         val osVersion: String,
         val osArch: String,
@@ -145,122 +146,21 @@ object Platform {
         }
     }
 
-    internal var yamaPath: String = "/proc/sys/kernel/yama/ptrace_scope"
-
-    @Suppress("MagicNumber")
-    private fun readYamaPtraceScope(): YamaPtraceScope {
-        val file = java.io.File(yamaPath)
-        if (!file.exists()) return YamaPtraceScope.Unavailable
-        return try {
-            val content = file.readText().trim()
-            val intVal = content.toIntOrNull() ?: return YamaPtraceScope.Unavailable
-            when (intVal) {
-                0 -> YamaPtraceScope.Classic
-                1 -> YamaPtraceScope.Restricted
-                2 -> YamaPtraceScope.AdminOnly
-                3 -> YamaPtraceScope.Disabled
-                else -> YamaPtraceScope.Unknown(intVal)
-            }
-        } catch (ignored: Exception) {
-            YamaPtraceScope.Unavailable
-        }
-    }
-
     /**
      * Run diagnostics to check system capabilities and privilege/sandboxing status.
      */
-    fun diagnose(): Diagnostics {
-        val osName = System.getProperty("os.name") ?: "Unknown"
-        val osVersion = System.getProperty("os.version") ?: "Unknown"
-        val osArch = System.getProperty("os.arch") ?: "Unknown"
-        val isLinux = osName.equals("Linux", ignoreCase = true)
-
-        var isNoNewPrivsEnabled = false
-        var seccompMode: SeccompMode = SeccompMode.Disabled
-        var yamaPtraceScope: YamaPtraceScope = YamaPtraceScope.Unavailable
-        var landlockAbiVersion = 0
-
-        if (isLinux) {
-            try {
-                val nnpVal = LinuxNative.withTransaction {
-                    LinuxNative.process.prctl(
-                    NativeConstants.PR_GET_NO_NEW_PRIVS,
-                    io.mazewall.core.NativeArg.LongArg(0L),
-                    io.mazewall.core.NativeArg.LongArg(0L),
-                    io.mazewall.core.NativeArg.LongArg(0L),
-                    io.mazewall.core.NativeArg.LongArg(0L),
-                )
-                }
-                if (nnpVal is LinuxNative.SyscallResult.Success) {
-                    isNoNewPrivsEnabled = nnpVal.value == 1L
-                }
-            } catch (ignored: Exception) {
-            }
-
-            try {
-                val seccompVal = LinuxNative.withTransaction {
-                    LinuxNative.process.prctl(
-            NativeConstants.PR_GET_SECCOMP,
-            io.mazewall.core.NativeArg.LongArg(0L),
-            io.mazewall.core.NativeArg.LongArg(0L),
-            io.mazewall.core.NativeArg.LongArg(0L),
-            io.mazewall.core.NativeArg.LongArg(0L),
-        )
-                }
-                seccompMode = when (seccompVal) {
-                    is LinuxNative.SyscallResult.Error -> SeccompMode.Error(seccompVal.errno)
-                    is LinuxNative.SyscallResult.Success -> {
-                        when (seccompVal.value) {
-                            0L -> SeccompMode.Disabled
-                            1L -> SeccompMode.Strict
-                            2L -> SeccompMode.Filter
-                            else -> SeccompMode.Error(-1)
-                        }
-                    }
-                }
-            } catch (ignored: Exception) {
-            }
-
-            yamaPtraceScope = readYamaPtraceScope()
-
-            try {
-                landlockAbiVersion = io.mazewall.landlock.Landlock
-                    .getAbiVersion()
-            } catch (ignored: Exception) {
-            }
-        }
-
+    public fun diagnose(): Diagnostics {
         return Diagnostics(
-            osName = osName,
-            osVersion = osVersion,
-            osArch = osArch,
+            osName = provider.getOsName(),
+            osVersion = provider.getOsVersion(),
+            osArch = provider.getOsArch(),
             isLinux = isLinux,
             isArchitectureSupported = isArchitectureSupported(),
-            isNoNewPrivsEnabled = isNoNewPrivsEnabled,
-            seccompMode = seccompMode,
-            yamaPtraceScope = yamaPtraceScope,
-            landlockAbiVersion = landlockAbiVersion,
-            isContainer = detectContainer(),
+            isNoNewPrivsEnabled = provider.isNoNewPrivsEnabled(),
+            seccompMode = provider.getSeccompMode(),
+            yamaPtraceScope = provider.getYamaPtraceScope(),
+            landlockAbiVersion = provider.getLandlockAbiVersion(),
+            isContainer = provider.isContainer(),
         )
-    }
-
-    private fun detectContainer(): Boolean {
-        var isContainer = java.io.File("/.dockerenv").exists() ||
-            java.io.File("/run/secrets/kubernetes.io").exists()
-
-        if (!isContainer) {
-            try {
-                val cgroup = java.io.File("/proc/1/cgroup")
-                if (cgroup.exists()) {
-                    val content = cgroup.readText()
-                    isContainer = content.contains("docker") ||
-                        content.contains("podman") ||
-                        content.contains("kubepods") ||
-                        content.contains("containerd")
-                }
-            } catch (ignored: Exception) {
-            }
-        }
-        return isContainer
     }
 }
