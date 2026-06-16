@@ -22,7 +22,7 @@ class BpfHardeningTest : BaseIntegrationTest() {
                 .block(Syscall.PRCTL) // Explicitly block it
                 .build()
 
-        val result = AtomicReference<LinuxNative.SyscallResult<Long>>()
+        val result = AtomicReference<LinuxNative.SyscallResult<Long, *>>()
         val error = AtomicReference<Throwable>()
 
         val thread =
@@ -62,7 +62,7 @@ class BpfHardeningTest : BaseIntegrationTest() {
                 .block(Syscall.MMAP) // Explicitly block it
                 .build()
 
-        val result = AtomicReference<LinuxNative.SyscallResult<Long>>()
+        val result = AtomicReference<LinuxNative.SyscallResult<Long, *>>()
         val error = AtomicReference<Throwable>()
 
         val thread =

@@ -85,7 +85,7 @@
 2. Ensure the `plus` operation is associative and correctly merges sets and maps (including deep merging of stack profiles).
 3. This allows using standard functional aggregators like `list.reduce(BillOfBehavior::plus)` or `list.fold(BillOfBehavior.empty, ...)` with algebraic certainty.
 
-### 🔵 [Severity: ENHANCEMENT]: Type-Safe "Must-Check" Enforcement for `SyscallResult`
+### ✅ [RESOLVED] [Severity: ENHANCEMENT]: Type-Safe "Must-Check" Enforcement for `SyscallResult`
 **Target:** `io.mazewall.SyscallResult`
 **Context:** While `SyscallResult` is a sealed class (Success/Error), nothing in the type system prevents a developer from invoking a native method and completely ignoring the returned `SyscallResult`. In security-critical native code, an unhandled error (like a failed `seccomp` installation) is catastrophic.
 **Needed:** Use generics and phantom types to enforce that a result is "consumed."

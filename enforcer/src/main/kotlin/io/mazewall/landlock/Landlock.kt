@@ -293,11 +293,11 @@ object Landlock {
 
     context(arena: Arena)
     private fun handleInitialOpenFailure(
-        res: LinuxNative.SyscallResult<Long>,
+        res: LinuxNative.SyscallResult<Long, *>,
         resolvedPath: String,
         flags: Int,
-    ): Pair<LinuxNative.SyscallResult<Long>, Boolean> {
-        if (res is LinuxNative.SyscallResult.Error && res.errno == 2) { // ENOENT
+    ): Pair<LinuxNative.SyscallResult<Long, *>, Boolean> {
+        if (res is LinuxNative.SyscallResult.Error<*> && res.errno == 2) { // ENOENT
             val parentPath = File(resolvedPath).parent ?: "/"
             logger.info("Path $resolvedPath does not exist, falling back to parent directory: $parentPath")
             val openResult = LinuxNative.withTransaction {
@@ -339,7 +339,7 @@ object Landlock {
         path: String,
     ) {
         val res = addRuleToRuleset(rulesetFd, pathFd, access)
-        if (res is LinuxNative.SyscallResult.Error) {
+        if (res is LinuxNative.SyscallResult.Error<*>) {
             if (res.errno == ERRNO_EINVAL) {
                 logger.warning("landlock_add_rule rejected $path (EINVAL) — path may be a symlink or unsupported inode type.")
             } else {
@@ -408,7 +408,7 @@ object Landlock {
     internal fun createRuleset(
         accessMaskFs: Long,
         abi: Int,
-    ): LinuxNative.SyscallResult<Long> {
+    ): LinuxNative.SyscallResult<Long, *> {
         val rulesetAttr = LandlockRulesetAttrSegment.allocate()
         rulesetAttr.setHandledAccessFs(accessMaskFs)
         rulesetAttr.setHandledAccessNet(0L)
@@ -423,7 +423,7 @@ object Landlock {
         rulesetFd: LinuxNative.FileDescriptor,
         pathFd: LinuxNative.FileDescriptor,
         accessMask: Long,
-    ): LinuxNative.SyscallResult<Long> {
+    ): LinuxNative.SyscallResult<Long, *> {
         val pathAttr = LandlockPathBeneathAttrSegment.allocate()
         pathAttr.setAllowedAccess(accessMask)
         pathAttr.setParentFd(pathFd.value)

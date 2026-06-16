@@ -37,11 +37,11 @@ class LandlockCoverageTest {
             a4: io.mazewall.core.NativeArg,
             a5: io.mazewall.core.NativeArg,
             a6: io.mazewall.core.NativeArg,
-        ): LinuxNative.SyscallResult<Long> {
+        ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
             if (nr == io.mazewall.ffi.NativeConstants.LANDLOCK_CREATE_RULESET_NR &&
                 a3 is io.mazewall.core.NativeArg.LongArg && a3.value == io.mazewall.ffi.NativeConstants.LANDLOCK_CREATE_RULESET_VERSION.toLong()
             ) {
-                return LinuxNative.SyscallResult.Success(5)
+                return LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(5)
             }
             return super.syscall(nr, a1, a2, a3, a4, a5, a6)
         }
@@ -65,7 +65,7 @@ class LandlockCoverageTest {
     @Test
     fun `test addRuleFollowSymlinks with open failure`() {
         val mock = SupportedLandlockMock()
-        mock.fileSystem.openResult = LinuxNative.SyscallResult.Error(13, -1) // EACCES
+        mock.fileSystem.openResult = LinuxNative.SyscallResult.Error<LinuxNative.SyscallHandledState.Unhandled>(13, -1) // EACCES
         LinuxNative.setEngine(mock)
 
         nativeScope {
@@ -85,14 +85,14 @@ class LandlockCoverageTest {
                 a4: io.mazewall.core.NativeArg,
                 a5: io.mazewall.core.NativeArg,
                 a6: io.mazewall.core.NativeArg,
-            ): LinuxNative.SyscallResult<Long> {
+            ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
                 if (nr == io.mazewall.ffi.NativeConstants.LANDLOCK_ADD_RULE_NR) {
-                    return LinuxNative.SyscallResult.Error(1, -1) // EPERM
+                    return LinuxNative.SyscallResult.Error<LinuxNative.SyscallHandledState.Unhandled>(1, -1) // EPERM
                 }
                 return super.syscall(nr, a1, a2, a3, a4, a5, a6)
             }
         }
-        mock.fileSystem.openResult = LinuxNative.SyscallResult.Success(100)
+        mock.fileSystem.openResult = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(100)
         LinuxNative.setEngine(mock)
 
         nativeScope {
@@ -112,9 +112,9 @@ class LandlockCoverageTest {
                 a4: io.mazewall.core.NativeArg,
                 a5: io.mazewall.core.NativeArg,
                 a6: io.mazewall.core.NativeArg,
-            ): LinuxNative.SyscallResult<Long> {
+            ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
                 if (nr == io.mazewall.ffi.NativeConstants.LANDLOCK_RESTRICT_SELF_NR) {
-                    return LinuxNative.SyscallResult.Error(1, -1) // EPERM
+                    return LinuxNative.SyscallResult.Error<LinuxNative.SyscallHandledState.Unhandled>(1, -1) // EPERM
                 }
                 return super.syscall(nr, a1, a2, a3, a4, a5, a6)
             }
@@ -130,7 +130,7 @@ class LandlockCoverageTest {
     @Test
     fun `test calculateFinalAccess branches`() {
         val mock = SupportedLandlockMock()
-        mock.fileSystem.openResult = LinuxNative.SyscallResult.Success(100)
+        mock.fileSystem.openResult = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(100)
         LinuxNative.setEngine(mock)
 
         // Branch: isFallback = true
@@ -143,12 +143,12 @@ class LandlockCoverageTest {
                 override fun open(
                     path: java.lang.foreign.MemorySegment,
                     flags: Int,
-                ): LinuxNative.SyscallResult<Long> {
+                ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
                     val current = calls.incrementAndGet()
                     return if (current == 1) {
-                        LinuxNative.SyscallResult.Error(2, -1)
+                        LinuxNative.SyscallResult.Error<LinuxNative.SyscallHandledState.Unhandled>(2, -1)
                     } else {
-                        LinuxNative.SyscallResult.Success(100)
+                        LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(100)
                     }
                 }
             }
