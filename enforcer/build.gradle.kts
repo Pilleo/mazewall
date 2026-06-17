@@ -164,29 +164,38 @@ classDiagrams {
         name("Enforcer Class Diagram")
         include(packages().withName("io.mazewall"))
         writeTo(file("$rootDir/docs/diagrams/enforcer_class_diagram.puml"))
+        renderTo(file("$rootDir/docs/diagrams/enforcer_class_diagram.svg"))
         insertInto(file("$rootDir/docs/internals/enforcer_architecture.md"))
     }
 }
 
 tasks.named("generateClassDiagrams") {
+    val pumlFile = file("$rootDir/docs/diagrams/enforcer_class_diagram.puml")
+    val svgFile = file("$rootDir/docs/diagrams/enforcer_class_diagram.svg")
+    val mdFile = file("$rootDir/docs/internals/enforcer_architecture.md")
+
     doLast {
-        val pumlFile = file("$rootDir/docs/diagrams/enforcer_class_diagram.puml")
-        if (pumlFile.exists()) {
-            var content = pumlFile.readText()
-            // Strip Kotlin value-class mangling hash suffix (e.g. -r9EpL9Y, -LsA-840, etc.)
-            content = content.replace(Regex("([a-zA-Z0-9_]+)-[a-zA-Z0-9_-]{7,15}(?=\\b|\\(|$)"), "$1")
-            // Strip any leftover internal module access flags (e.g. $io_mazewall_enforcer)
-            content = content.replace(Regex("\\\$[a-zA-Z0-9_]+"), "")
-            pumlFile.writeText(content)
+        fun cleanup(file: File) {
+            if (file.exists()) {
+                var content = file.readText()
+                // Strip Kotlin value-class mangling hash suffix (e.g. -r9EpL9Y, -LsA-840, etc.)
+                content = content.replace(Regex("([a-zA-Z0-9_]+)-[a-zA-Z0-9_-]{7,15}(?=\\b|\\(|$)"), "$1")
+                // Strip any leftover internal module access flags (e.g. $io_mazewall_enforcer)
+                content = content.replace(Regex("\\\$[a-zA-Z0-9_]+"), "")
+                file.writeText(content)
+            }
         }
-        val mdFile = file("$rootDir/docs/internals/enforcer_architecture.md")
+
+        cleanup(pumlFile)
+        cleanup(svgFile)
+        cleanup(mdFile)
+
         if (mdFile.exists()) {
             var content = mdFile.readText()
-            content = content.replace(Regex("([a-zA-Z0-9_]+)-[a-zA-Z0-9_-]{7,15}(?=\\b|\\(|$)"), "$1")
-            content = content.replace(Regex("\\\$[a-zA-Z0-9_]+"), "")
+            // Replace PlantUML code blocks with SVG image links for GitHub compatibility
+            val svgRelativePath = "../diagrams/enforcer_class_diagram.svg"
+            content = content.replace(Regex("```plantuml[\\s\\S]*?```"), "![Enforcer Class Diagram]($svgRelativePath)")
             mdFile.writeText(content)
         }
     }
 }
-
-

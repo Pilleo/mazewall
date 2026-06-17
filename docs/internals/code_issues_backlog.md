@@ -224,6 +224,36 @@
 **Context:** Currently, `ContainedExecutors` updates thread and process state across multiple independent `Registry` variables (`SYSCALL_ACTIONS`, `DEFAULT_ACTION`, `FILTER_DEPTH`, etc.). This lack of atomicity could lead to inconsistent intermediate states during concurrent installations.
 **Needed:** Define a `ContainerState` immutable data class that holds all these properties. Use a single `AtomicReference<ContainerState>` in `ProcessStateRegistry` and a single `ThreadLocal<ContainerState>` in `ThreadStateRegistry` to ensure all transitions are atomic and consistent.
 
+### 🔴 [Severity: MEDIUM]: `Policy` Violates Single Responsibility Principle (God Object)
+**Target:** `io.mazewall.Policy`
+**Context:** `Policy` acts as a rule definition model, a DSL builder, an architecture-specific mapper, and a container for compiled BPF artifacts. This high coupling makes the class difficult to extend without affecting unrelated subsystems.
+**Needed:** Split `Policy` into `PolicyDefinition` (data model), `PolicyBuilder` (construction logic), and `CompiledSandbox` (artifact container).
+
+### 🔴 [Severity: MEDIUM]: Residual Interface Segregation Violation (ISP) in `NativeEngine`
+**Target:** `io.mazewall.NativeEngine`
+**Context:** While sub-engines (FileSystem, Networking) were extracted, the main `NativeEngine` interface still exposes low-level, unconstrained `syscall`, `ioctl`, and `poll` methods. Any component requiring the engine for simple file operations is unnecessarily exposed to raw syscall capabilities.
+**Needed:** Segregate raw syscall operations into a separate `RawSyscallOperations` interface, ensuring higher-level components only depend on restricted, domain-specific traits.
+
+### 🔵 [Severity: ENHANCEMENT]: `SeccompAction` Violates Open/Closed Principle (OCP)
+**Target:** `io.mazewall.core.SeccompAction`
+**Context:** Currently an `enum`, `SeccompAction` cannot support dynamic parameters (e.g., custom errno values for `ACT_ERRNO` or trace IDs for `ACT_TRACE`) without breaking changes or global modifications.
+**Needed:** Refactor `SeccompAction` to a `sealed interface`. Use `data object`s for static actions and `data class`es for parameterized actions, enabling extensibility while maintaining exhaustive compiler checks.
+
+### 🔵 [Severity: ENHANCEMENT]: Type-State for `FileDescriptor` Lifecycles (Compile-Time Use-After-Close Safety)
+**Target:** `io.mazewall.core.FileDescriptor`
+**Context:** Current FD safety relies on runtime validity checks. Use-after-close errors result in runtime crashes rather than being caught by the compiler.
+**Needed:** Introduce a second Phantom Type parameter `Lifecycle` (e.g., `FileDescriptor<Role, Open>`). Methods like `close()` should consume an `Open` FD and return a `Closed` one, making any subsequent usage of the `Closed` token a compile-time error.
+
+### 🔴 [Severity: HIGH]: Generic Type Safety for `MemorySegment` Payloads
+**Target:** `io.mazewall.NativeEngine` and `io.mazewall.profiler.engine`
+**Context:** Native interfaces blindly accept untyped `MemorySegment` objects. This allows a developer to pass a segment initialized with the wrong layout (e.g., passing a `sockaddr` to a `poll` call), leading to memory corruption or kernel rejections.
+**Needed:** Wrap segments in a generic `ManagedSegment<T : StructLayout>`. Refactor native methods to demand specific layouts, shifting struct-syscall alignment verification to compile time.
+
+### 🔴 [Severity: MEDIUM]: ArchUnit: Ban `java.lang.Thread` for Context Preservation
+**Target:** Entire project
+**Context:** Direct usage of `java.lang.Thread` or standard `Executors` ignores `mazewall`'s thread-local containment states and structured concurrency requirements, leading to "context leaks" where sandboxed tasks execute unconstrained.
+**Needed:** Implement an ArchUnit rule banning raw thread instantiation and unmanaged executor usage. Force all asynchronous execution through managed `Coroutines` or `ContextAwareExecutor` implementations.
+
 ## Foundational Architecture & Test-Harness Enablers
 
 ### 🔵 [Severity: ENHANCEMENT]: Compile-Time Enforced Tier 1 Process Baseline (`ProcessContainmentToken`)

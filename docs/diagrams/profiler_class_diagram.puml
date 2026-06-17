@@ -33,7 +33,7 @@ class "Profiler" as io.mazewall.profiler.Profiler {
   + {static}Profiler INSTANCE
   __
   +ConcurrentHashMap<Pid, Thread> getThreadRegistry()
-  +boolean sendDescriptorInternal$io_mazewall_profiler(int, int)
+  +boolean sendDescriptorInternal(int, int)
   + {static}void stop()
 }
 class "ProfilingResult" as io.mazewall.profiler.ProfilingResult<T> {
@@ -94,8 +94,8 @@ class "ProfilerInstallerSession" as io.mazewall.profiler.engine.ProfilerInstalle
 interface "ProfilerInstallerState" as io.mazewall.profiler.engine.ProfilerInstallerState {
 }
 interface "ProfilerMemoryReader" as io.mazewall.profiler.engine.ProfilerMemoryReader {
-  + {abstract}String readStringFromProcess-9xGxYpM(int, long, int)
-  + {abstract}String resolveLink-av3ZdJY(int, String)
+  + {abstract}String readStringFromProcess(int, long, int)
+  + {abstract}String resolveLink(int, String)
 }
 class "ProfilerSessionHandler" as io.mazewall.profiler.engine.ProfilerSessionHandler {
   + {static}Companion Companion
@@ -103,7 +103,7 @@ class "ProfilerSessionHandler" as io.mazewall.profiler.engine.ProfilerSessionHan
   +SessionEventLedger getLedger()
   +ProfilerState getState()
   +LoopAction handleActiveListener(MemorySegment, MemorySegment, MemorySegment, MemorySegment, MemorySegment)
-  +boolean processNotification$io_mazewall_profiler(MemorySegment, MemorySegment, MemorySegment, MemorySegment)
+  +boolean processNotification(MemorySegment, MemorySegment, MemorySegment, MemorySegment)
 }
 interface "ProfilerState" as io.mazewall.profiler.engine.ProfilerState {
 }
@@ -112,8 +112,8 @@ interface "ProfilerTransport" as io.mazewall.profiler.engine.ProfilerTransport {
 class "RealMemoryReader" as io.mazewall.profiler.engine.RealMemoryReader {
   + {static}RealMemoryReader INSTANCE
   __
-  +String readStringFromProcess-9xGxYpM(int, long, int)
-  +String resolveLink-av3ZdJY(int, String)
+  +String readStringFromProcess(int, long, int)
+  +String resolveLink(int, String)
 }
 class "RealProfilerTransport" as io.mazewall.profiler.engine.RealProfilerTransport {
   + {static}RealProfilerTransport INSTANCE

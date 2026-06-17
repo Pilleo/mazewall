@@ -100,12 +100,14 @@ tasks.named<org.springframework.boot.gradle.tasks.run.BootRun>("bootRun") {
     systemProperty("spring.classformat.ignore", "true")
     systemProperty("org.springframework.boot.logging.LoggingSystem", "none")
     dependsOn(extractJacocoAgent)
+    val jacocoExecFile = layout.buildDirectory.file("jacoco/bootRun.exec")
+    val jacocoAgentFile = layout.buildDirectory.file("jacoco/jacocoagent.jar")
     // Attach jacocoagent.jar as a -javaagent so runtime coverage is written to
     // build/jacoco/bootRun.exec. We must use doFirst because jvmArgs() wired
     // to a Provider<List<String>> is not supported by BootRun's JavaForkOptions.
     doFirst("attachJacocoAgent") {
-        val execFile = layout.buildDirectory.file("jacoco/bootRun.exec").get().asFile
-        val agentFile = layout.buildDirectory.file("jacoco/jacocoagent.jar").get().asFile
+        val execFile = jacocoExecFile.get().asFile
+        val agentFile = jacocoAgentFile.get().asFile
         execFile.parentFile.mkdirs()
         jvmArgs(
             "-javaagent:${agentFile.absolutePath}" +
