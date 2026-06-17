@@ -17,16 +17,16 @@ class FilterInstallationPlannerTest {
             .allow(Syscall.READ, Syscall.WRITE)
             .build()
 
-        val state = FilterInstallationPlanner.ContainerState(
-            currentSyscallActions = mapOf(
+        val state = ContainerState(
+            syscallActions = mapOf(
                 Syscall.READ to SeccompAction.ACT_ALLOW,
                 Syscall.WRITE to SeccompAction.ACT_ALLOW,
             ),
-            currentDefaultAction = SeccompAction.ACT_KILL_PROCESS,
-            currentlyAllowsMmapExec = false,
-            currentlyAllowsNonThreadClone = false,
-            currentlyAllowsUnsafePrctl = false,
-            currentDepth = 1,
+            defaultAction = SeccompAction.ACT_KILL_PROCESS,
+            allowsMmapExec = false,
+            allowsNonThreadClone = false,
+            allowsUnsafePrctl = false,
+            filterDepth = 1,
         )
 
         val plan = FilterInstallationPlanner.calculateNewFilter(policy, state)
@@ -42,15 +42,15 @@ class FilterInstallationPlannerTest {
             .addAction(SeccompAction.ACT_KILL_PROCESS, Syscall.EXECVE)
             .build()
 
-        val state = FilterInstallationPlanner.ContainerState(
-            currentSyscallActions = mapOf(
+        val state = ContainerState(
+            syscallActions = mapOf(
                 Syscall.EXECVE to SeccompAction.ACT_LOG,
             ),
-            currentDefaultAction = SeccompAction.ACT_ALLOW,
-            currentlyAllowsMmapExec = true,
-            currentlyAllowsNonThreadClone = true,
-            currentlyAllowsUnsafePrctl = true,
-            currentDepth = 1,
+            defaultAction = SeccompAction.ACT_ALLOW,
+            allowsMmapExec = true,
+            allowsNonThreadClone = true,
+            allowsUnsafePrctl = true,
+            filterDepth = 1,
         )
 
         val plan = FilterInstallationPlanner.calculateNewFilter(policy, state)

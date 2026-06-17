@@ -98,7 +98,7 @@ object ContainedExecutors {
             val plan = FilterInstallationPlanner.calculateNewFilter(combinedPolicy, state)
 
             if (plan.needsNewFilter) {
-                FilterInstallationPlanner.verifyFilterDepth(state.currentDepth)
+                FilterInstallationPlanner.verifyFilterDepth(state.filterDepth)
                 applyBpfFilter(processWide, plan.toInstall, plan.newBlocks, plan.newDefaultAction)
             }
         }
@@ -110,8 +110,9 @@ object ContainedExecutors {
     ) {
         if (!needsLandlock(policy)) return
 
-        val appliedReads = ThreadStateRegistry.landlockAppliedReads
-        val appliedWrites = ThreadStateRegistry.landlockAppliedWrites
+        val state = if (processWide) ProcessStateRegistry.state else ThreadStateRegistry.state
+        val appliedReads = state.landlockAppliedReads
+        val appliedWrites = state.landlockAppliedWrites
 
         if (appliedReads != null && appliedWrites != null) {
             // Assert that we are not trying to expand Landlock filesystem permissions on nested containment
@@ -124,8 +125,11 @@ object ContainedExecutors {
 
         if (appliedReads != policy.allowedFsReadPaths || appliedWrites != policy.allowedFsWritePaths) {
             Landlock.applyRuleset(policy, processWide)
-            ThreadStateRegistry.landlockAppliedReads = policy.allowedFsReadPaths
-            ThreadStateRegistry.landlockAppliedWrites = policy.allowedFsWritePaths
+            if (processWide) {
+                ProcessStateRegistry.update { it.withLandlockPaths(policy.allowedFsReadPaths, policy.allowedFsWritePaths) }
+            } else {
+                ThreadStateRegistry.state = ThreadStateRegistry.state.withLandlockPaths(policy.allowedFsReadPaths, policy.allowedFsWritePaths)
+            }
         }
     }
 
@@ -160,43 +164,38 @@ object ContainedExecutors {
         }
     }
 
-    private fun resolveCurrentState(): FilterInstallationPlanner.ContainerState {
-        val threadActions = ThreadStateRegistry.syscallActions
-        val processActions = ProcessStateRegistry.SYSCALL_ACTIONS.get()
+    private fun resolveCurrentState(): ContainerState {
+        val ts = ThreadStateRegistry.state
+        val ps = ProcessStateRegistry.state
 
-        val mergedActions = mutableMapOf<Syscall, SeccompAction>()
-        for ((sys, action) in threadActions) {
-            mergedActions[sys] = action
-        }
-        for ((sys, action) in processActions) {
+        val mergedActions = ts.syscallActions.toMutableMap()
+        for ((sys, action) in ps.syscallActions) {
             val current = mergedActions[sys]
             if (current == null || action.priority > current.priority) {
                 mergedActions[sys] = action
             }
         }
 
-        val threadDefault = ThreadStateRegistry.defaultAction
-        val processDefault = ProcessStateRegistry.DEFAULT_ACTION.get()
-        val mergedDefault = if (threadDefault.priority > processDefault.priority) threadDefault else processDefault
+        val mergedDefault = if (ts.defaultAction.priority > ps.defaultAction.priority) ts.defaultAction else ps.defaultAction
 
-        val threadAllowed = ThreadStateRegistry.allowedSyscalls
-        val processAllowed = ProcessStateRegistry.ALLOWED_SYSCALLS.get()
-        val mergedAllowed = if (threadAllowed == null) {
-            processAllowed
-        } else if (processAllowed == null) {
-            threadAllowed
+        val mergedAllowed = if (ts.allowedSyscalls == null) {
+            ps.allowedSyscalls
+        } else if (ps.allowedSyscalls == null) {
+            ts.allowedSyscalls
         } else {
-            threadAllowed.intersect(processAllowed)
+            ts.allowedSyscalls.intersect(ps.allowedSyscalls)
         }
 
-        return FilterInstallationPlanner.ContainerState(
-            currentSyscallActions = mergedActions,
-            currentDefaultAction = mergedDefault,
-            currentlyAllowsMmapExec = ThreadStateRegistry.allowsMmapExec && ProcessStateRegistry.ALLOWS_MMAP_EXEC.get(),
-            currentlyAllowsNonThreadClone = ThreadStateRegistry.allowsNonThreadClone && ProcessStateRegistry.ALLOWS_NON_THREAD_CLONE.get(),
-            currentlyAllowsUnsafePrctl = ThreadStateRegistry.allowsUnsafePrctl && ProcessStateRegistry.ALLOWS_UNSAFE_PRCTL.get(),
-            currentDepth = ThreadStateRegistry.filterDepth + ProcessStateRegistry.FILTER_DEPTH.get(),
-            currentlyAllowedSyscalls = mergedAllowed,
+        return ContainerState(
+            filterDepth = ts.filterDepth + ps.filterDepth,
+            syscallActions = mergedActions,
+            defaultAction = mergedDefault,
+            allowedSyscalls = mergedAllowed,
+            allowsMmapExec = ts.allowsMmapExec && ps.allowsMmapExec,
+            allowsNonThreadClone = ts.allowsNonThreadClone && ps.allowsNonThreadClone,
+            allowsUnsafePrctl = ts.allowsUnsafePrctl && ps.allowsUnsafePrctl,
+            landlockAppliedReads = ts.landlockAppliedReads,
+            landlockAppliedWrites = ts.landlockAppliedWrites
         )
     }
 
@@ -223,35 +222,8 @@ object ContainedExecutors {
         newDefaultAction: SeccompAction,
         toInstall: Policy<*, Uncompiled>,
     ) {
-        while (true) {
-            val current = ProcessStateRegistry.SYSCALL_ACTIONS.get()
-            val next = current.toMutableMap()
-            for ((sys, action) in newBlocks) {
-                next[sys] = action
-            }
-            if (ProcessStateRegistry.SYSCALL_ACTIONS.compareAndSet(current, next)) {
-                break
-            }
-        }
-        val currentDefault = ProcessStateRegistry.DEFAULT_ACTION.get()
-        if (newDefaultAction.priority > currentDefault.priority) {
-            ProcessStateRegistry.DEFAULT_ACTION.set(newDefaultAction)
-        }
-
-        if (!toInstall.allowMmapExec) ProcessStateRegistry.ALLOWS_MMAP_EXEC.set(false)
-        if (!toInstall.allowNonThreadClone) ProcessStateRegistry.ALLOWS_NON_THREAD_CLONE.set(false)
-        if (!toInstall.allowUnsafePrctl) ProcessStateRegistry.ALLOWS_UNSAFE_PRCTL.set(false)
-        ProcessStateRegistry.FILTER_DEPTH.incrementAndGet()
-
-        if (toInstall.defaultAction != SeccompAction.ACT_ALLOW) {
-            val toInstallAllowed = Syscall.entries.filter { toInstall.isSyscallAllowed(it) }.toSet()
-            while (true) {
-                val current = ProcessStateRegistry.ALLOWED_SYSCALLS.get()
-                val next = current?.intersect(toInstallAllowed) ?: toInstallAllowed
-                if (ProcessStateRegistry.ALLOWED_SYSCALLS.compareAndSet(current, next)) {
-                    break
-                }
-            }
+        ProcessStateRegistry.update { current ->
+            current.withNewSeccompPolicy(toInstall, newBlocks, newDefaultAction)
         }
     }
 
@@ -260,27 +232,6 @@ object ContainedExecutors {
         newDefaultAction: SeccompAction,
         toInstall: Policy<*, Uncompiled>,
     ) {
-        val currentActions = ThreadStateRegistry.syscallActions
-        val mergedActions = currentActions.toMutableMap()
-        for ((sys, action) in newBlocks) {
-            mergedActions[sys] = action
-        }
-        ThreadStateRegistry.syscallActions = mergedActions
-
-        val currentDefault = ThreadStateRegistry.defaultAction
-        if (newDefaultAction.priority > currentDefault.priority) {
-            ThreadStateRegistry.defaultAction = newDefaultAction
-        }
-
-        if (!toInstall.allowMmapExec) ThreadStateRegistry.allowsMmapExec = false
-        if (!toInstall.allowNonThreadClone) ThreadStateRegistry.allowsNonThreadClone = false
-        if (!toInstall.allowUnsafePrctl) ThreadStateRegistry.allowsUnsafePrctl = false
-        ThreadStateRegistry.filterDepth = ThreadStateRegistry.filterDepth + 1
-
-        if (toInstall.defaultAction != SeccompAction.ACT_ALLOW) {
-            val toInstallAllowed = Syscall.entries.filter { toInstall.isSyscallAllowed(it) }.toSet()
-            val currentAllowed = ThreadStateRegistry.allowedSyscalls
-            ThreadStateRegistry.allowedSyscalls = currentAllowed?.intersect(toInstallAllowed) ?: toInstallAllowed
-        }
+        ThreadStateRegistry.state = ThreadStateRegistry.state.withNewSeccompPolicy(toInstall, newBlocks, newDefaultAction)
     }
 }

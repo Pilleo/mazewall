@@ -217,7 +217,7 @@
 **Context:** The `seccomp_notif` and `seccomp_notif_resp` structures are used for every trapped system call. Continually allocating and zeroing these segments in the `reactorLoop` is inefficient.
 **Needed:** Implement a simple `SegmentPool` for fixed-size FFM structures. Pre-allocate a small cache of aligned segments and reuse them across different notifications.
 
-### 🔵 [Severity: ENHANCEMENT]: Atomic Container State Transitions (Unified State Container)
+### ✅ [RESOLVED] [Severity: ENHANCEMENT]: Atomic Container State Transitions (Unified State Container)
 **Target:** `io.mazewall.enforcer.ContainedExecutors`
 **Context:** Currently, `ContainedExecutors` updates thread and process state across multiple independent `Registry` variables (`SYSCALL_ACTIONS`, `DEFAULT_ACTION`, `FILTER_DEPTH`, etc.). This lack of atomicity could lead to inconsistent intermediate states during concurrent installations.
 **Needed:** Define a `ContainerState` immutable data class that holds all these properties. Use a single `AtomicReference<ContainerState>` in `ProcessStateRegistry` and a single `ThreadLocal<ContainerState>` in `ThreadStateRegistry` to ensure all transitions are atomic and consistent.

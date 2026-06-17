@@ -13,16 +13,6 @@ internal object FilterInstallationPlanner {
     private const val MAX_SECCOMP_FILTERS = 32
     private const val WARN_FILTERS_THRESHOLD = 10
 
-    data class ContainerState(
-        val currentSyscallActions: Map<Syscall, SeccompAction>,
-        val currentDefaultAction: SeccompAction,
-        val currentlyAllowsMmapExec: Boolean,
-        val currentlyAllowsNonThreadClone: Boolean,
-        val currentlyAllowsUnsafePrctl: Boolean,
-        val currentDepth: Int,
-        val currentlyAllowedSyscalls: Set<Syscall>? = null,
-    )
-
     data class FilterPlan(
         val needsNewFilter: Boolean,
         val toInstall: Policy<*, io.mazewall.Uncompiled>,
@@ -44,17 +34,17 @@ internal object FilterInstallationPlanner {
         policy: Policy<*, io.mazewall.Uncompiled>,
         state: ContainerState,
     ): FilterPlan {
-        val effectiveNewDefaultAction = if (policy.defaultAction.priority > state.currentDefaultAction.priority) {
+        val effectiveNewDefaultAction = if (policy.defaultAction.priority > state.defaultAction.priority) {
             policy.defaultAction
         } else {
-            state.currentDefaultAction
+            state.defaultAction
         }
 
         val newBlocksMap = mutableMapOf<Syscall, SeccompAction>()
 
         // Check explicitly mapped actions in the new policy
         for ((sys, action) in policy.syscallActions) {
-            val currentAction = state.currentSyscallActions[sys] ?: state.currentDefaultAction
+            val currentAction = state.syscallActions[sys] ?: state.defaultAction
             if (action.priority > currentAction.priority) {
                 newBlocksMap[sys] = action
             }
@@ -62,11 +52,11 @@ internal object FilterInstallationPlanner {
 
         // If the new policy operates as a whitelist (or has any restrictive default),
         // we must check if there are syscalls currently allowed that the new policy restricts via its default action.
-        if (policy.defaultAction.priority > SeccompAction.ACT_ALLOW.priority && state.currentlyAllowedSyscalls != null) {
+        if (policy.defaultAction.priority > SeccompAction.ACT_ALLOW.priority && state.allowedSyscalls != null) {
             val toInstallAllowed = Syscall.entries.filter { policy.isSyscallAllowed(it) }.toSet()
-            for (sys in state.currentlyAllowedSyscalls) {
+            for (sys in state.allowedSyscalls) {
                 if (!toInstallAllowed.contains(sys)) {
-                    val currentAction = state.currentSyscallActions[sys] ?: state.currentDefaultAction
+                    val currentAction = state.syscallActions[sys] ?: state.defaultAction
                     if (policy.defaultAction.priority > currentAction.priority) {
                         newBlocksMap[sys] = policy.defaultAction
                     }
@@ -74,15 +64,15 @@ internal object FilterInstallationPlanner {
             }
         }
 
-        val needsMmapProtection = !policy.allowMmapExec && state.currentlyAllowsMmapExec
-        val needsCloneProtection = !policy.allowNonThreadClone && state.currentlyAllowsNonThreadClone
-        val needsPrctlProtection = !policy.allowUnsafePrctl && state.currentlyAllowsUnsafePrctl
+        val needsMmapProtection = !policy.allowMmapExec && state.allowsMmapExec
+        val needsCloneProtection = !policy.allowNonThreadClone && state.allowsNonThreadClone
+        val needsPrctlProtection = !policy.allowUnsafePrctl && state.allowsUnsafePrctl
 
-        val needsDefaultActionEscalation = policy.defaultAction.priority > state.currentDefaultAction.priority
+        val needsDefaultActionEscalation = policy.defaultAction.priority > state.defaultAction.priority
 
         val needsWhitelistEscalation = if (needsDefaultActionEscalation && policy.defaultAction != SeccompAction.ACT_ALLOW) {
             val toInstallAllowed = Syscall.entries.filter { policy.isSyscallAllowed(it) }.toSet()
-            val currentlyAllowed = state.currentlyAllowedSyscalls
+            val currentlyAllowed = state.allowedSyscalls
 
             if (currentlyAllowed != null) {
                 !toInstallAllowed.containsAll(currentlyAllowed)
@@ -106,9 +96,9 @@ internal object FilterInstallationPlanner {
             for ((sys, action) in newBlocksMap) {
                 builder.addAction(action, sys)
             }
-            if (policy.allowMmapExec || !state.currentlyAllowsMmapExec) builder.allowMmapExec()
-            if (policy.allowNonThreadClone || !state.currentlyAllowsNonThreadClone) builder.allowNonThreadClone()
-            if (policy.allowUnsafePrctl || !state.currentlyAllowsUnsafePrctl) builder.allowUnsafePrctl()
+            if (policy.allowMmapExec || !state.allowsMmapExec) builder.allowMmapExec()
+            if (policy.allowNonThreadClone || !state.allowsNonThreadClone) builder.allowNonThreadClone()
+            if (policy.allowUnsafePrctl || !state.allowsUnsafePrctl) builder.allowUnsafePrctl()
             builder.build()
         }
 

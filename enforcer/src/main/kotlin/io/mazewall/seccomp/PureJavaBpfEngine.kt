@@ -8,6 +8,7 @@ import io.mazewall.UnsupportedKernelFeatureException
 import io.mazewall.core.Arch
 import io.mazewall.core.SeccompAction
 import io.mazewall.core.Syscall
+import io.mazewall.enforcer.ThreadStateRegistry
 import io.mazewall.ffi.NativeConstants
 import io.mazewall.ffi.memory.nativeScope
 import java.lang.foreign.Arena
@@ -17,10 +18,9 @@ import java.lang.foreign.Arena
  * Generates BPF filters manually and installs them using Downcalls.
  */
 object PureJavaBpfEngine : SeccompEngine {
-    private val threadState = ThreadLocal.withInitial<SeccompInstallationState> { SeccompInstallationState.Uninitialized }
 
     internal val state: SeccompInstallationState
-        get() = threadState.get()
+        get() = ThreadStateRegistry.state.engineState
 
     override val isSupported: Boolean
         get() = Platform.isSupported()
@@ -41,23 +41,23 @@ object PureJavaBpfEngine : SeccompEngine {
         policy: Policy<*, Compiled>,
         useTsync: Boolean,
     ) {
-        threadState.set(SeccompInstallationState.Uninitialized)
+        updateState(SeccompInstallationState.Uninitialized)
         try {
             val uninitialized = SeccompInstallationState.Uninitialized
             val locked = uninitialized.lockPrivileges()
-            threadState.set(locked)
+            updateState(locked)
 
             val arch = Arch.current()
             nativeScope {
                 val built = locked.buildFilter(this, policy)
-                threadState.set(built)
+                updateState(built)
                 val applied = built.applyFilter(arch, useTsync)
-                threadState.set(applied)
+                updateState(applied)
                 val verified = applied.verify(policy)
-                threadState.set(verified)
+                updateState(verified)
             }
         } catch (e: Throwable) {
-            val stepName = when (val current = threadState.get()) {
+            val stepName = when (state) {
                 is SeccompInstallationState.FilterBuilt -> "installFilter"
                 is SeccompInstallationState.SystemCallApplied -> "verifyInstallation"
                 is SeccompInstallationState.FallbackPrctlApplied -> "verifyInstallation"
@@ -74,9 +74,13 @@ object PureJavaBpfEngine : SeccompEngine {
 
                 else -> -1
             }
-            threadState.set(SeccompInstallationState.Failed(stepName, errno, e))
+            updateState(SeccompInstallationState.Failed(stepName, errno, e))
             throw e
         }
+    }
+
+    private fun updateState(next: SeccompInstallationState) {
+        ThreadStateRegistry.state = ThreadStateRegistry.state.withEngineState(next)
     }
 
     internal fun setNoNewPrivs() {
