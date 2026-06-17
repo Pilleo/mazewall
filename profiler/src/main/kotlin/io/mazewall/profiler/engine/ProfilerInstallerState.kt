@@ -1,6 +1,7 @@
 package io.mazewall.profiler.engine
 
 import io.mazewall.LinuxNative
+import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
 
@@ -16,25 +17,25 @@ internal sealed interface ProfilerInstallerState {
 
     /** BPF installed; coordinator is connecting to socket path. */
     data class Connecting(
-        val listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif>,
+        val listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open>,
     ) : ProfilerInstallerState
 
     /** Connected; coordinator is sending the listener FD to the daemon. */
     data class SendingDescriptor(
-        val listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif>,
-        val socketFd: FileDescriptor<FileDescriptorRole.UnixSocket>,
+        val listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open>,
+        val socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>,
     ) : ProfilerInstallerState
 
     /** Descriptor sent; coordinator is waiting for verification ACK. */
     data class VerifyingAck(
-        val listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif>,
-        val socketFd: FileDescriptor<FileDescriptorRole.UnixSocket>,
+        val listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open>,
+        val socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>,
     ) : ProfilerInstallerState
 
     /** Handshake verified; trace listener started. */
     data class Active(
-        val listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif>,
-        val socketFd: FileDescriptor<FileDescriptorRole.UnixSocket>,
+        val listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open>,
+        val socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>,
     ) : ProfilerInstallerState
 
     /** Installation or handshake failed; cleaning up descriptors and propagating error. */

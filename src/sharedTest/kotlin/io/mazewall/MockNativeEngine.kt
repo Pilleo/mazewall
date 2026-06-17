@@ -1,5 +1,6 @@
 package io.mazewall
 
+import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.ffi.Layouts
 import io.mazewall.seccomp.BpfInstruction
@@ -42,21 +43,21 @@ public open class MockNativeEngine(
 
     context(_: NativeTransaction)
     override fun ioctl(
-        fd: FileDescriptor<*>,
+        fd: FileDescriptor<*, FdState.Open>,
         request: Long,
         arg: MemorySegment,
     ) = ioctlResult
 
     context(_: NativeTransaction)
     override fun ioctl(
-        fd: FileDescriptor<*>,
+        fd: FileDescriptor<*, FdState.Open>,
         request: Long,
         arg: Long,
     ) = ioctlResult
 
     context(_: NativeTransaction)
     override fun fcntl(
-        fd: FileDescriptor<*>,
+        fd: FileDescriptor<*, FdState.Open>,
         cmd: Int,
         arg: Long,
     ) = fcntlResult
@@ -87,7 +88,7 @@ public open class MockNativeFileSystem : NativeFileSystem {
         bufsiz: Long,
     ) = readlinkResult
 
-    override fun close(fd: FileDescriptor<*>) = closeResult
+    override fun close(fd: FileDescriptor<*, FdState.Open>) = closeResult
 }
 
 public open class MockNativeNetworking : NativeNetworking {
@@ -118,48 +119,48 @@ public open class MockNativeNetworking : NativeNetworking {
 
     context(_: NativeTransaction)
     override fun bind(
-        sockfd: FileDescriptor<*>,
+        sockfd: FileDescriptor<*, FdState.Open>,
         addr: MemorySegment,
         addrlen: Int,
     ) = bindResult
 
     context(_: NativeTransaction)
     override fun listen(
-        sockfd: FileDescriptor<*>,
+        sockfd: FileDescriptor<*, FdState.Open>,
         backlog: Int,
     ) = listenResult
 
     context(_: NativeTransaction)
     override fun accept(
-        sockfd: FileDescriptor<*>,
+        sockfd: FileDescriptor<*, FdState.Open>,
         addr: MemorySegment,
         addrlen: MemorySegment,
     ) = acceptResult
 
     context(_: NativeTransaction)
     override fun connect(
-        sockfd: FileDescriptor<*>,
+        sockfd: FileDescriptor<*, FdState.Open>,
         addr: MemorySegment,
         addrlen: Int,
     ) = connectResult
 
     context(_: NativeTransaction)
     override fun sendmsg(
-        sockfd: FileDescriptor<*>,
+        sockfd: FileDescriptor<*, FdState.Open>,
         msg: MemorySegment,
         flags: Int,
     ) = sendmsgResult
 
     context(_: NativeTransaction)
     override fun recvmsg(
-        sockfd: FileDescriptor<*>,
+        sockfd: FileDescriptor<*, FdState.Open>,
         msg: MemorySegment,
         flags: Int,
     ) = recvmsgResult
 
     context(_: NativeTransaction)
     override fun recv(
-        sockfd: FileDescriptor<*>,
+        sockfd: FileDescriptor<*, FdState.Open>,
         buf: MemorySegment,
         len: Long,
         flags: Int,
@@ -199,14 +200,14 @@ public open class MockNativeMemory : NativeMemory {
 
     context(_: NativeTransaction)
     override fun read(
-        fd: FileDescriptor<*>,
+        fd: FileDescriptor<*, FdState.Open>,
         buf: MemorySegment,
         count: Long,
     ) = readResult
 
     context(_: NativeTransaction)
     override fun write(
-        fd: FileDescriptor<*>,
+        fd: FileDescriptor<*, FdState.Open>,
         buf: MemorySegment,
         count: Long,
     ) = writeResult

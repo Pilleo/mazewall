@@ -159,7 +159,7 @@ object Profiler {
             workerThreadProvider = workerThreadProvider,
             startTraceListener = { fd, logs, traces, cache, provider ->
                 val listener = ProfilerTraceListener(
-                    FileDescriptor.unsafe<FileDescriptorRole.Generic>(fd),
+                    FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(fd),
                     logs,
                     traces,
                     cache,

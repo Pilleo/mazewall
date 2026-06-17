@@ -7,6 +7,7 @@ import io.mazewall.Uncompiled
 import io.mazewall.UnsupportedKernelFeatureException
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
+import io.mazewall.core.FdState
 import io.mazewall.core.SandboxedPath
 import io.mazewall.core.Syscall
 import io.mazewall.ffi.Layouts
@@ -219,16 +220,16 @@ object Landlock {
         arena: Arena,
         mask: Long,
         abi: Int,
-    ): FileDescriptor<FileDescriptorRole.Ruleset> {
+    ): FileDescriptor<FileDescriptorRole.Ruleset, FdState.Open> {
         return with(arena) { createRuleset(mask, abi) }.getFdOrThrow("landlock_create_ruleset").let { FileDescriptor.unsafe<FileDescriptorRole.Ruleset>(it.value) }
     }
 
     context(arena: Arena)
     internal fun addJvmClasspathRules(
-        rulesetFd: FileDescriptor<FileDescriptorRole.Ruleset>,
+        ruleset: LandlockRuleset<RulesetState.Building>,
         accessFlags: Long,
     ) {
-        System.getProperty("java.home")?.let { addRuleFollowSymlinks(rulesetFd, it, accessFlags) }
+        System.getProperty("java.home")?.let { addRuleFollowSymlinks(ruleset, it, accessFlags) }
 
         val classPath = System.getProperty("java.class.path") ?: return
         val seen = mutableSetOf<String>()
@@ -237,7 +238,7 @@ object Landlock {
             if (file.exists()) {
                 val dir = if (file.isDirectory) file.absolutePath else file.parent
                 if (seen.add(dir)) {
-                    addRuleFollowSymlinks(rulesetFd, dir, accessFlags)
+                    addRuleFollowSymlinks(ruleset, dir, accessFlags)
                 }
             }
         }
@@ -245,7 +246,7 @@ object Landlock {
 
     context(arena: Arena)
     private fun addRuleFollowSymlinks(
-        rulesetFd: FileDescriptor<FileDescriptorRole.Ruleset>,
+        ruleset: LandlockRuleset<RulesetState.Building>,
         path: String,
         allowedAccess: Long,
     ) {
@@ -257,7 +258,7 @@ object Landlock {
         fdResult.onSuccess { value ->
             val pathFd = FileDescriptor.unsafe<FileDescriptorRole.OPath>(value.toInt())
             try {
-                val addResult = addRuleToRuleset(rulesetFd, pathFd, allowedAccess)
+                val addResult = addRuleToRuleset(ruleset, pathFd, allowedAccess)
                 addResult.onFailure { errno, _ ->
                     logger.warning("landlock_add_rule failed for JVM classpath $path with errno $errno")
                 }
@@ -271,7 +272,7 @@ object Landlock {
 
     context(arena: Arena)
     private fun addRule(
-        rulesetFd: FileDescriptor<FileDescriptorRole.Ruleset>,
+        ruleset: LandlockRuleset<RulesetState.Building>,
         path: SandboxedPath,
         allowedAccess: Long,
     ) {
@@ -287,7 +288,7 @@ object Landlock {
             val pathFd = FileDescriptor.unsafe<FileDescriptorRole.OPath>(value.toInt())
             try {
                 val finalAccess = calculateFinalAccess(allowedAccess, isFallback, resolvedPath)
-                addRuleToRulesetAndVerify(rulesetFd, pathFd, finalAccess, resolvedPath)
+                addRuleToRulesetAndVerify(ruleset, pathFd, finalAccess, resolvedPath)
             } finally {
                 LinuxNative.fileSystem.close(pathFd)
             }
@@ -338,12 +339,12 @@ object Landlock {
 
     context(arena: Arena)
     private fun addRuleToRulesetAndVerify(
-        rulesetFd: FileDescriptor<FileDescriptorRole.Ruleset>,
-        pathFd: FileDescriptor<FileDescriptorRole.OPath>,
+        ruleset: LandlockRuleset<RulesetState.Building>,
+        pathFd: FileDescriptor<FileDescriptorRole.OPath, FdState.Open>,
         access: Long,
         path: String,
     ) {
-        val res = addRuleToRuleset(rulesetFd, pathFd, access)
+        val res = addRuleToRuleset(ruleset, pathFd, access)
         if (res is LinuxNative.SyscallResult.Error<*>) {
             if (res.errno == ERRNO_EINVAL) {
                 logger.warning("landlock_add_rule rejected $path (EINVAL) — path may be a symlink or unsupported inode type.")
@@ -353,7 +354,10 @@ object Landlock {
         }
     }
 
-    internal fun enforceRuleset(rulesetFd: FileDescriptor<FileDescriptorRole.Ruleset>, processWide: Boolean = false) {
+    internal fun enforceRuleset(
+        ruleset: LandlockRuleset<RulesetState.Building>,
+        processWide: Boolean = false
+    ): LandlockRuleset<RulesetState.Sealed> {
         val (prctlResult, restrictResult) = LinuxNative.withTransaction {
             val p = LinuxNative.process.prctl(
                 NativeConstants.PR_SET_NO_NEW_PRIVS,
@@ -366,7 +370,7 @@ object Landlock {
             val flags = if (processWide) LANDLOCK_RESTRICT_SELF_TSYNC else 0L
             val r = LinuxNative.syscall(
                 NativeConstants.LANDLOCK_RESTRICT_SELF_NR,
-                io.mazewall.core.NativeArg.FdArg(rulesetFd),
+                io.mazewall.core.NativeArg.FdArg(ruleset.fd),
                 io.mazewall.core.NativeArg.LongArg(flags),
                 io.mazewall.core.NativeArg.MemoryArg(MemorySegment.NULL),
                 io.mazewall.core.NativeArg.IntArg(0)
@@ -375,20 +379,21 @@ object Landlock {
         }
         prctlResult.getOrThrow("prctl(PR_SET_NO_NEW_PRIVS)")
         restrictResult.getOrThrow("landlock_restrict_self")
+        return LandlockRuleset(ruleset.fd)
     }
 
     context(arena: Arena)
     internal fun applyUserRules(
-        rulesetFd: FileDescriptor<FileDescriptorRole.Ruleset>,
+        ruleset: LandlockRuleset<RulesetState.Building>,
         policy: Policy<*, *>,
         abi: Int,
         allFsRead: Long,
     ) {
-        policy.allowedFsReadPaths.forEach { addRule(rulesetFd, it, allFsRead) }
+        policy.allowedFsReadPaths.forEach { addRule(ruleset, it, allFsRead) }
         val writeFlags = LANDLOCK_ACCESS_FS_WRITE_FILE or LANDLOCK_ACCESS_FS_MAKE_REG or
             LANDLOCK_ACCESS_FS_MAKE_DIR or LANDLOCK_ACCESS_FS_REMOVE_FILE or
             LANDLOCK_ACCESS_FS_REMOVE_DIR or (if (abi >= ABI_V3) LANDLOCK_ACCESS_FS_TRUNCATE else 0)
-        policy.allowedFsWritePaths.forEach { addRule(rulesetFd, it, writeFlags) }
+        policy.allowedFsWritePaths.forEach { addRule(ruleset, it, writeFlags) }
     }
 
     internal fun getAccessMask(
@@ -444,8 +449,8 @@ object Landlock {
 
     context(arena: Arena)
     private fun addRuleToRuleset(
-        rulesetFd: FileDescriptor<FileDescriptorRole.Ruleset>,
-        pathFd: FileDescriptor<FileDescriptorRole.OPath>,
+        ruleset: LandlockRuleset<RulesetState.Building>,
+        pathFd: FileDescriptor<FileDescriptorRole.OPath, FdState.Open>,
         accessMask: Long,
     ): LinuxNative.SyscallResult<Long, *> {
         val pathAttr = LandlockPathBeneathAttrSegment.allocate()
@@ -454,7 +459,7 @@ object Landlock {
         return LinuxNative.withTransaction {
             LinuxNative.syscall(
                 NativeConstants.LANDLOCK_ADD_RULE_NR,
-                io.mazewall.core.NativeArg.FdArg(rulesetFd),
+                io.mazewall.core.NativeArg.FdArg(ruleset.fd),
                 io.mazewall.core.NativeArg.LongArg(NativeConstants.LANDLOCK_RULE_PATH_BENEATH.toLong()),
                 io.mazewall.core.NativeArg.MemoryArg(pathAttr.segment),
                 io.mazewall.core.NativeArg.IntArg(0)
@@ -506,7 +511,8 @@ internal class LandlockSession(
                 throw err
             }.let { FileDescriptor.unsafe<FileDescriptorRole.Ruleset>(it.toInt()) }
 
-            val created = LandlockLifecycle.RulesetCreated(rulesetFd, abi, policy)
+            val ruleset = LandlockRuleset<RulesetState.Building>(rulesetFd)
+            val created = LandlockLifecycle.RulesetCreated(ruleset, abi, policy)
             state = LandlockState.ConfiguringRuleset(rulesetFd, abi)
             try {
                 val added = created.addRules(this)

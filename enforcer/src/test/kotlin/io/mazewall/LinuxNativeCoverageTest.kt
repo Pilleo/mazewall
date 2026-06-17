@@ -39,7 +39,7 @@ class LinuxNativeCoverageTest {
         val fd3 = FileDescriptor.unsafe<FileDescriptorRole.Generic>(-1)
 
         assertEquals(fd1, fd2)
-        assertNotEquals<FileDescriptor<*>>(fd1, fd3)
+        assertNotEquals(fd1, fd3)
         assertTrue(fd1.isValid)
         assertTrue(fd3.isInvalid)
         assertEquals("fd(10)", fd1.toString())

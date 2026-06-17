@@ -1,6 +1,7 @@
 package io.mazewall.profiler.engine
 
 import io.mazewall.LinuxNative
+import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
 
@@ -13,13 +14,13 @@ internal sealed interface ProfilerDaemonState {
 
     /** The daemon server is creating and binding the socket. */
     data class Listening(
-        val serverFd: FileDescriptor<FileDescriptorRole.UnixSocket>,
+        val serverFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>,
         val socketPath: String,
     ) : ProfilerDaemonState
 
     /** The daemon server is actively listening and processing client connections. */
     data class Active(
-        val serverFd: FileDescriptor<FileDescriptorRole.UnixSocket>,
+        val serverFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>,
     ) : ProfilerDaemonState
 
     /** Global shutdown has been triggered. */

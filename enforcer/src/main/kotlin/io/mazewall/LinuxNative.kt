@@ -1,6 +1,7 @@
 package io.mazewall
 
 import io.mazewall.core.FileDescriptor
+import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptorRole
 import io.mazewall.ffi.LayoutValidator
 import io.mazewall.ffi.Layouts
@@ -100,21 +101,21 @@ public object LinuxNative : NativeEngine {
 
     context(_: NativeTransaction)
     override fun ioctl(
-        fd: FileDescriptor<*>,
+        fd: FileDescriptor<*, FdState.Open>,
         request: Long,
         arg: MemorySegment,
     ): SyscallResult<Long, SyscallHandledState.Unhandled> = engine.ioctl(fd, request, arg)
 
     context(_: NativeTransaction)
     override fun ioctl(
-        fd: FileDescriptor<*>,
+        fd: FileDescriptor<*, FdState.Open>,
         request: Long,
         arg: Long,
     ): SyscallResult<Long, SyscallHandledState.Unhandled> = engine.ioctl(fd, request, arg)
 
     context(_: NativeTransaction)
     override fun fcntl(
-        fd: FileDescriptor<*>,
+        fd: FileDescriptor<*, FdState.Open>,
         cmd: Int,
         arg: Long,
     ): SyscallResult<Long, SyscallHandledState.Unhandled> = engine.fcntl(fd, cmd, arg)
@@ -231,7 +232,7 @@ public fun LinuxNative.SyscallResult.Success<Long, *>.asLong(): Long = value
 /**
  * Returns the success value as a [FileDescriptor] of [FileDescriptorRole.Generic].
  */
-public fun LinuxNative.SyscallResult.Success<Long, *>.asFd(): FileDescriptor<FileDescriptorRole.Generic> =
+public fun LinuxNative.SyscallResult.Success<Long, *>.asFd(): FileDescriptor<FileDescriptorRole.Generic, FdState.Open> =
     FileDescriptor.unsafe(value.toInt())
 
 /**
@@ -246,7 +247,7 @@ public fun LinuxNative.SyscallResult<Long, *>.asInt(): Int =
 /**
  * Returns the success value as a [FileDescriptor] of [FileDescriptorRole.Generic] or throws.
  */
-public fun LinuxNative.SyscallResult<Long, *>.getFdOrThrow(context: String): FileDescriptor<FileDescriptorRole.Generic> =
+public fun LinuxNative.SyscallResult<Long, *>.getFdOrThrow(context: String): FileDescriptor<FileDescriptorRole.Generic, FdState.Open> =
     when (this) {
         is LinuxNative.SyscallResult.Success -> FileDescriptor.unsafe(value.toInt())
         is LinuxNative.SyscallResult.Error -> throwErrno(context)
@@ -363,7 +364,7 @@ internal object RealNativeEngine : NativeEngine {
 
     context(_: NativeTransaction)
     override fun ioctl(
-        fd: FileDescriptor<*>,
+        fd: FileDescriptor<*, FdState.Open>,
         request: Long,
         arg: MemorySegment,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
@@ -376,7 +377,7 @@ internal object RealNativeEngine : NativeEngine {
 
     context(_: NativeTransaction)
     override fun ioctl(
-        fd: FileDescriptor<*>,
+        fd: FileDescriptor<*, FdState.Open>,
         request: Long,
         arg: Long,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
@@ -389,7 +390,7 @@ internal object RealNativeEngine : NativeEngine {
 
     context(_: NativeTransaction)
     override fun fcntl(
-        fd: FileDescriptor<*>,
+        fd: FileDescriptor<*, FdState.Open>,
         cmd: Int,
         arg: Long,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
@@ -449,7 +450,7 @@ internal object RealNativeFileSystem : NativeFileSystem {
             RealNativeHelper.result(ret.toLong(), capturedState.getErrno())
         }
 
-    override fun close(fd: FileDescriptor<*>): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = nativeScope {
+    override fun close(fd: FileDescriptor<*, FdState.Open>): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = nativeScope {
         val capturedState = ErrnoSegment.allocate()
         val ret = CLOSE.invokeExact(capturedState.segment, fd.value) as Int
         RealNativeHelper.result(ret.toLong(), capturedState.getErrno())
@@ -588,7 +589,7 @@ internal object RealNativeNetworking : NativeNetworking {
 
     context(_: NativeTransaction)
     override fun bind(
-        sockfd: FileDescriptor<*>,
+        sockfd: FileDescriptor<*, FdState.Open>,
         addr: MemorySegment,
         addrlen: Int,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
@@ -601,7 +602,7 @@ internal object RealNativeNetworking : NativeNetworking {
 
     context(_: NativeTransaction)
     override fun listen(
-        sockfd: FileDescriptor<*>,
+        sockfd: FileDescriptor<*, FdState.Open>,
         backlog: Int,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
         nativeScope {
@@ -613,7 +614,7 @@ internal object RealNativeNetworking : NativeNetworking {
 
     context(_: NativeTransaction)
     override fun accept(
-        sockfd: FileDescriptor<*>,
+        sockfd: FileDescriptor<*, FdState.Open>,
         addr: MemorySegment,
         addrlen: MemorySegment,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
@@ -626,7 +627,7 @@ internal object RealNativeNetworking : NativeNetworking {
 
     context(_: NativeTransaction)
     override fun connect(
-        sockfd: FileDescriptor<*>,
+        sockfd: FileDescriptor<*, FdState.Open>,
         addr: MemorySegment,
         addrlen: Int,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
@@ -639,7 +640,7 @@ internal object RealNativeNetworking : NativeNetworking {
 
     context(_: NativeTransaction)
     override fun sendmsg(
-        sockfd: FileDescriptor<*>,
+        sockfd: FileDescriptor<*, FdState.Open>,
         msg: MemorySegment,
         flags: Int,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
@@ -652,7 +653,7 @@ internal object RealNativeNetworking : NativeNetworking {
 
     context(_: NativeTransaction)
     override fun recvmsg(
-        sockfd: FileDescriptor<*>,
+        sockfd: FileDescriptor<*, FdState.Open>,
         msg: MemorySegment,
         flags: Int,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
@@ -665,7 +666,7 @@ internal object RealNativeNetworking : NativeNetworking {
 
     context(_: NativeTransaction)
     override fun recv(
-        sockfd: FileDescriptor<*>,
+        sockfd: FileDescriptor<*, FdState.Open>,
         buf: MemorySegment,
         len: Long,
         flags: Int,
@@ -791,7 +792,7 @@ internal object RealNativeMemory : NativeMemory {
 
     context(_: NativeTransaction)
     override fun read(
-        fd: FileDescriptor<*>,
+        fd: FileDescriptor<*, FdState.Open>,
         buf: MemorySegment,
         count: Long,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
@@ -804,7 +805,7 @@ internal object RealNativeMemory : NativeMemory {
 
     context(_: NativeTransaction)
     override fun write(
-        fd: FileDescriptor<*>,
+        fd: FileDescriptor<*, FdState.Open>,
         buf: MemorySegment,
         count: Long,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =

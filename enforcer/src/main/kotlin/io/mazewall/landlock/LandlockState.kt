@@ -5,6 +5,7 @@ import io.mazewall.Policy
 import io.mazewall.Uncompiled
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
+import io.mazewall.core.FdState
 import java.lang.foreign.Arena
 
 /**
@@ -26,13 +27,13 @@ internal sealed interface LandlockState {
 
     /** Ruleset FD created, adding classpath and user-defined path rules. */
     data class ConfiguringRuleset(
-        val rulesetFd: FileDescriptor<FileDescriptorRole.Ruleset>,
+        val rulesetFd: FileDescriptor<FileDescriptorRole.Ruleset, FdState.Open>,
         val abi: Int,
     ) : LandlockState
 
     /** Enabling no_new_privs and restricting the thread. */
     data class Enforcing(
-        val rulesetFd: FileDescriptor<FileDescriptorRole.Ruleset>,
+        val rulesetFd: FileDescriptor<FileDescriptorRole.Ruleset, FdState.Open>,
     ) : LandlockState
 
     /** Ruleset applied successfully to the thread. */
@@ -45,12 +46,28 @@ internal sealed interface LandlockState {
 }
 
 /**
+ * Marker interfaces representing compile-time mutability states of a Landlock ruleset.
+ */
+public sealed interface RulesetState {
+    public interface Building : RulesetState
+    public interface Sealed : RulesetState
+}
+
+/**
+ * A type-safe wrapper for a Landlock ruleset file descriptor, parameterized
+ * by its mutability state [S] to prevent post-enforcement rule modifications.
+ */
+public class LandlockRuleset<out S : RulesetState> internal constructor(
+    public val fd: FileDescriptor<FileDescriptorRole.Ruleset, FdState.Open>
+)
+
+/**
  * Compiler-enforced type-state lifecycle for Landlock sandboxing.
  */
 internal sealed interface LandlockLifecycle {
     /** Ruleset FD created, ready to add classpath and user rules. */
     class RulesetCreated(
-        val rulesetFd: FileDescriptor<FileDescriptorRole.Ruleset>,
+        val ruleset: LandlockRuleset<RulesetState.Building>,
         val abi: Int,
         val policy: Policy<*, Uncompiled>?,
     ) : LandlockLifecycle {
@@ -58,21 +75,21 @@ internal sealed interface LandlockLifecycle {
             val allFsRead = Landlock.LANDLOCK_ACCESS_FS_READ_FILE or Landlock.LANDLOCK_ACCESS_FS_READ_DIR
             val classpathFlags = allFsRead or Landlock.LANDLOCK_ACCESS_FS_EXECUTE
             with(arena) {
-                Landlock.addJvmClasspathRules(rulesetFd, classpathFlags)
+                Landlock.addJvmClasspathRules(ruleset, classpathFlags)
                 if (policy != null) {
-                    Landlock.applyUserRules(rulesetFd, policy, abi, allFsRead)
+                    Landlock.applyUserRules(ruleset, policy, abi, allFsRead)
                 }
             }
-            return RulesAdded(rulesetFd)
+            return RulesAdded(ruleset)
         }
     }
 
     /** Rules added, ready to restrict the thread. */
     class RulesAdded(
-        val rulesetFd: FileDescriptor<FileDescriptorRole.Ruleset>,
+        val ruleset: LandlockRuleset<RulesetState.Building>,
     ) : LandlockLifecycle {
         fun restrictSelf(processWide: Boolean = false): Restricted {
-            Landlock.enforceRuleset(rulesetFd, processWide)
+            Landlock.enforceRuleset(ruleset, processWide)
             return Restricted
         }
     }

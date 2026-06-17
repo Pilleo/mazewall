@@ -7,6 +7,7 @@ import io.mazewall.Policy
 import io.mazewall.Uncompiled
 import io.mazewall.UnsupportedKernelFeatureException
 import io.mazewall.core.Arch
+import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
 import io.mazewall.core.NativeArg
@@ -76,7 +77,7 @@ internal class ProfilerInstallerSession(
 ) {
     private val installLatch = CountDownLatch(1)
     private val proceedLatch = CountDownLatch(1)
-    private var listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif> = FileDescriptor.INVALID
+    private var listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open>? = null
 
     @Volatile
     var state: ProfilerInstallerState = ProfilerInstallerState.Uninitialized
@@ -131,7 +132,7 @@ internal class ProfilerInstallerSession(
     private fun runCoordinatorLogic() {
         installLatch.await()
         val fd = listenerFd
-        if (fd.isInvalid) {
+        if (fd == null) {
             val finalState = state
             val err = if (finalState is ProfilerInstallerState.Failed) {
                 finalState.error
@@ -142,10 +143,10 @@ internal class ProfilerInstallerSession(
         }
 
         state = ProfilerInstallerState.Connecting(fd)
-        var socketFd: FileDescriptor<FileDescriptorRole.UnixSocket> = FileDescriptor.INVALID
+        var socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>? = null
         var success = false
         try {
-            socketFd = FileDescriptor.unsafe(connectWithRetry(socketPath))
+            socketFd = FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(connectWithRetry(socketPath))
             state = ProfilerInstallerState.SendingDescriptor(fd, socketFd)
             val sent = Profiler.sendDescriptorInternal(socketFd.value, fd.value)
             if (!sent) {
@@ -172,7 +173,7 @@ internal class ProfilerInstallerSession(
             proceedLatch.countDown()
         } finally {
             if (!success) {
-                if (socketFd.isValid) {
+                if (socketFd != null && socketFd.isValid) {
                     LinuxNative.fileSystem.close(socketFd)
                 }
             }
@@ -181,7 +182,7 @@ internal class ProfilerInstallerSession(
     }
 
     context(arena: Arena)
-    private fun verifyDaemonAck(socketFd: FileDescriptor<FileDescriptorRole.UnixSocket>) {
+    private fun verifyDaemonAck(socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>) {
         // Wait for ACK byte from daemon
         val ackBuf = arena.allocate(1)
         while (true) {
@@ -221,7 +222,7 @@ internal class ProfilerInstallerSession(
     context(arena: Arena)
     private fun installProfilingBpf(
         filters: List<BpfInstruction>,
-    ): FileDescriptor<FileDescriptorRole.SeccompNotif> {
+    ): FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open> {
         val arch = Arch.current()
         val prog = LinuxNative.memory.newSockFProg(filters)
         val r = LinuxNative.withTransaction {
@@ -233,6 +234,6 @@ internal class ProfilerInstallerSession(
             )
         }
 
-        return r.getFdOrThrow("seccomp(SECCOMP_FILTER_FLAG_NEW_LISTENER)").let { FileDescriptor.unsafe(it.value) }
+        return r.getFdOrThrow("seccomp(SECCOMP_FILTER_FLAG_NEW_LISTENER)").let { FileDescriptor.unsafe<FileDescriptorRole.SeccompNotif>(it.value) }
     }
 }

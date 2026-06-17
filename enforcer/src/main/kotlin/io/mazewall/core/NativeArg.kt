@@ -29,7 +29,7 @@ public sealed interface NativeArg {
     }
 
     @JvmInline
-    public value class FdArg(public val fd: FileDescriptor<*>) : NativeArg {
+    public value class FdArg(public val fd: FileDescriptor<*, *>) : NativeArg {
         override val asLong: Long get() = fd.value.toLong()
     }
 

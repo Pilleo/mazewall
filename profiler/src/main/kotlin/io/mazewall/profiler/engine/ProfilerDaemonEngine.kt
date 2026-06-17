@@ -2,6 +2,7 @@ package io.mazewall.profiler.engine
 
 import io.mazewall.LinuxNative
 import io.mazewall.core.Arch
+import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
 import io.mazewall.core.Syscall
@@ -31,8 +32,8 @@ internal class ProfilerDaemonEngine(
     private val socketManager: SocketLifecycleManager = transport
 
     private val syscallMap = mutableMapOf<Int, String>()
-    private val clientSockets = CopyOnWriteArrayList<FileDescriptor<FileDescriptorRole.UnixSocket>>()
-    private val activeListeners = CopyOnWriteArrayList<FileDescriptor<FileDescriptorRole.SeccompNotif>>()
+    private val clientSockets = CopyOnWriteArrayList<FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>>()
+    private val activeListeners = CopyOnWriteArrayList<FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open>>()
     private val stateRef = java.util.concurrent.atomic
         .AtomicReference<ProfilerDaemonState>(ProfilerDaemonState.Uninitialized)
 
@@ -96,7 +97,7 @@ internal class ProfilerDaemonEngine(
 
     @Suppress("LoopWithTooManyJumpStatements")
     private fun acceptConnections(
-        serverFd: FileDescriptor<FileDescriptorRole.UnixSocket>,
+        serverFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>,
         arena: Arena,
     ) {
         val pollFd = arena.allocate(Layouts.POLLFD)
@@ -115,7 +116,7 @@ internal class ProfilerDaemonEngine(
     }
 
     @Suppress("TooGenericExceptionCaught", "SwallowedException")
-    private fun handleNewConnection(serverFd: FileDescriptor<FileDescriptorRole.UnixSocket>) {
+    private fun handleNewConnection(serverFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>) {
         try {
             val clientFd = socketManager.accept(serverFd)
             clientSockets.add(clientFd)
@@ -129,7 +130,7 @@ internal class ProfilerDaemonEngine(
     }
 
     @Suppress("NestedBlockDepth", "LoopWithTooManyJumpStatements", "CyclomaticComplexMethod")
-    private fun handleConnection(socketFd: FileDescriptor<FileDescriptorRole.UnixSocket>) {
+    private fun handleConnection(socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>) {
         var connection: ProfilerConnection = ProfilerConnection.Accepted(socketFd)
         try {
             Arena.ofConfined().use { arena ->
@@ -193,8 +194,8 @@ internal class ProfilerDaemonEngine(
 
     @Suppress("NestedBlockDepth", "LoopWithTooManyJumpStatements")
     private fun handleSession(
-        socketFd: FileDescriptor<FileDescriptorRole.UnixSocket>,
-        listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif>,
+        socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>,
+        listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open>,
     ) {
         val sessionHandler = ProfilerSessionHandler(
             socketFd,
@@ -234,8 +235,8 @@ internal class ProfilerDaemonEngine(
 
     context(arena: Arena)
     private fun setupSessionPoll(
-        socketFd: FileDescriptor<FileDescriptorRole.UnixSocket>,
-        listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif>,
+        socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>,
+        listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open>,
     ): MemorySegment {
         val pollFds = arena.allocate(MemoryLayout.sequenceLayout(2, Layouts.POLLFD))
         // [0]: Seccomp listener FD

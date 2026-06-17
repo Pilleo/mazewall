@@ -10,7 +10,9 @@ import io.mazewall.MockPlatformProvider
 import io.mazewall.NativeTransaction
 import io.mazewall.Platform
 import io.mazewall.Policy
+import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
+import io.mazewall.core.FileDescriptorRole
 import io.mazewall.core.SandboxedPath
 import io.mazewall.ffi.memory.*
 import org.junit.jupiter.api.AfterEach
@@ -72,7 +74,9 @@ class LandlockCoverageTest {
         LinuxNative.setEngine(mock)
 
         nativeScope {
-            Landlock.addJvmClasspathRules(FileDescriptor.unsafe(42), 0L)
+            with(this) {
+                Landlock.addJvmClasspathRules(LandlockRuleset<RulesetState.Building>(FileDescriptor.unsafe<FileDescriptorRole.Ruleset>(42)), 0L)
+            }
         }
     }
 
@@ -99,7 +103,9 @@ class LandlockCoverageTest {
         LinuxNative.setEngine(mock)
 
         nativeScope {
-            Landlock.addJvmClasspathRules(FileDescriptor.unsafe(42), 0L)
+            with(this) {
+                Landlock.addJvmClasspathRules(LandlockRuleset<RulesetState.Building>(FileDescriptor.unsafe<FileDescriptorRole.Ruleset>(42)), 0L)
+            }
         }
     }
 
@@ -170,13 +176,13 @@ class LandlockCoverageTest {
         LinuxNative.setEngine(mock)
 
         // Default
-        LandlockLifecycle.RulesAdded(FileDescriptor.unsafe(10)).restrictSelf()
+        LandlockLifecycle.RulesAdded(LandlockRuleset<RulesetState.Building>(FileDescriptor.unsafe<FileDescriptorRole.Ruleset>(10))).restrictSelf()
 
         // Thread-scoped
-        LandlockLifecycle.RulesAdded(FileDescriptor.unsafe(10)).restrictSelf(false)
+        LandlockLifecycle.RulesAdded(LandlockRuleset<RulesetState.Building>(FileDescriptor.unsafe<FileDescriptorRole.Ruleset>(10))).restrictSelf(false)
 
         // Process-wide
-        LandlockLifecycle.RulesAdded(FileDescriptor.unsafe(10)).restrictSelf(true)
+        LandlockLifecycle.RulesAdded(LandlockRuleset<RulesetState.Building>(FileDescriptor.unsafe<FileDescriptorRole.Ruleset>(10))).restrictSelf(true)
     }
 
     @Test

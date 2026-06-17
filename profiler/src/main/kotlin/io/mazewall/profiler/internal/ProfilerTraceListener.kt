@@ -1,7 +1,9 @@
 package io.mazewall.profiler.internal
 
 import io.mazewall.LinuxNative
+import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
+import io.mazewall.core.FileDescriptorRole
 import io.mazewall.profiler.Profiler
 import io.mazewall.profiler.engine.SyscallEvent
 import io.mazewall.profiler.engine.SyscallEventState
@@ -24,7 +26,7 @@ import java.util.logging.Logger
  */
 @Suppress("SwallowedException")
 internal class ProfilerTraceListener(
-    private val socketFd: FileDescriptor<*>,
+    private val socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>,
     private val accumulatedLogs: MutableList<SyscallEvent<SyscallEventState.Resolved>>,
     private val stackTracesMap: MutableMap<SyscallEvent<SyscallEventState.Resolved>, MutableList<Array<StackTraceElement>>>?,
     private val pathCache: MutableMap<String, Long>,

@@ -1,6 +1,7 @@
 package io.mazewall.profiler.engine
 
 import io.mazewall.LinuxNative
+import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
 import io.mazewall.core.Pid
@@ -26,8 +27,8 @@ internal sealed class LoopAction {
  * Internal logic for handling active seccomp listeners and shutdown requests.
  */
 internal class ProfilerSessionHandler(
-    private val socketFd: FileDescriptor<FileDescriptorRole.UnixSocket>,
-    private val listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif>,
+    private val socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>,
+    private val listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open>,
     private val publisher: TraceEventPublisher,
     private val responder: SeccompResponder,
     private val ioOps: NativeIoOperations,

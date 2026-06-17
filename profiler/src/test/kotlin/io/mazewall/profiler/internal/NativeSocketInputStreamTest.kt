@@ -4,6 +4,7 @@ import io.mazewall.LinuxNative
 import io.mazewall.MockNativeEngine
 import io.mazewall.MockNativeMemory
 import io.mazewall.NativeTransaction
+import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -22,7 +23,7 @@ class NativeSocketInputStreamTest {
         val mock = MockNativeEngine(
             memory = object : MockNativeMemory() {
                 context(_: NativeTransaction)
-                override fun read(fd: FileDescriptor<*>, buf: MemorySegment, count: Long): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                override fun read(fd: FileDescriptor<*, FdState.Open>, buf: MemorySegment, count: Long): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
                     attempts++
                     return if (attempts <= 2) {
                         // Simulate EINTR (errno 4) for the first two attempts
@@ -56,7 +57,7 @@ class NativeSocketInputStreamTest {
         val mock = MockNativeEngine(
             memory = object : MockNativeMemory() {
                 context(_: NativeTransaction)
-                override fun read(fd: FileDescriptor<*>, buf: MemorySegment, count: Long): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                override fun read(fd: FileDescriptor<*, FdState.Open>, buf: MemorySegment, count: Long): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
                     attempts++
                     return if (attempts <= 2) {
                         // Simulate EINTR (errno 4) for the first two attempts
