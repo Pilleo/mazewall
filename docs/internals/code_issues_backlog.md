@@ -2,6 +2,18 @@
 
 ## Recent Findings (Project Review June 2026)
 
+### 🔵 [Severity: ENHANCEMENT]: Decoupling FFM Transaction Lifecycle from `NativeEngine`
+**Context:** `LinuxNative` (implementing `NativeEngine`) directly orchestrates transaction scopes via `withTransaction(block: (NativeTransaction) -> T)`. The FFM `Arena` context and transaction lifecycle management are directly coupled with the system call execution engine. This prevents mocking transaction behaviors, customizing allocation strategies (such as thread-local pre-allocated buffers) for specific environments, or separating memory ownership from call dispatch.
+**Needed:** Extract a dedicated `TransactionManager` interface. `NativeEngine` should only consume `NativeTransaction` tokens, delegating all transaction lifecycle and FFM context creation tasks to the `TransactionManager`.
+
+### 🔵 [Severity: ENHANCEMENT]: Pipeline Pattern for Seccomp Argument Inspections
+**Context:** The compilation logic in `BpfFilter` is tightly coupled to concrete argument inspection implementations (`Clone3Inspector`, `MmapExecInspector`, `ThreadCloneInspector`, `UnsafePrctlInspector`). Adding a new seccomp argument check requires modifying `BpfFilter` directly, violating the Open/Closed Principle (OCP).
+**Needed:** Restructure the inspection generation into a pipeline pattern (`SyscallInspectionPipeline`) where inspectors are registered and applied dynamically, allowing `BpfFilter` to remain completely generic.
+
+### 🔵 [Severity: ENHANCEMENT]: Type-Safe State Machine for Seccomp Engine Lifecycle
+**Context:** `PureJavaBpfEngine` implements `SeccompEngine` and mutates a global `SeccompInstallationState` at runtime. Since seccomp is a one-way state transition, relying on runtime verification checks or mutable flags is prone to race conditions or silent failures, especially in multi-threaded application test suites.
+**Needed:** Transition `SeccompEngine` to a type-state machine parameterized by phantom states representing the engine's initialization level (`Unprivileged` -> `Configured` -> `Loaded`).
+
 ### ✅ [RESOLVED] [Severity: ENHANCEMENT]: Phantom Types for File Descriptor Roles (Compile-Time FD Safety)
 **Context:** Currently, `io.mazewall.LinuxNative.FileDescriptor` is a universal value class wrapper around an `Int`. This provides lifetime safety via `AutoCloseable` but lacks type safety. A developer could accidentally pass a socket FD or an `O_PATH` file descriptor to a Landlock Ruleset function, causing runtime `EBADF` or silent logical failures.
 **Needed:** Refactor `FileDescriptor` to accept a Phantom Type parameter: `class FileDescriptor<Role>(val fd: Int)`. Define sealed interface roles like `Ruleset`, `OPath`, `SeccompNotif`, and `UnixSocket`. This eliminates FD transposition bugs at compile time.
