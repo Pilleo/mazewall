@@ -59,7 +59,10 @@ tasks.test {
     systemProperty("kotest.framework.classpath.scanning.config.disable", "true")
 }
 
+val plantumlConfig by configurations.creating
+
 dependencies {
+    plantumlConfig(libs.plantuml.core)
     implementation(project(":enforcer"))
     implementation(libs.kotlinxSerialization)
 
@@ -72,6 +75,7 @@ dependencies {
     testRuntimeOnly(libs.junit.jupiter.engine)
     testRuntimeOnly(libs.slf4j.nop)
 }
+
 
 publishing {
     publications {
@@ -98,6 +102,8 @@ pitest {
 }
 
 classDiagrams {
+    plantumlServer = null
+    renderClasspath(plantumlConfig)
     defaults {
         style {
             hidePackages()
@@ -121,14 +127,12 @@ classDiagrams {
         include(packages().withName("io.mazewall.profiler"))
         writeTo(file("$rootDir/docs/diagrams/profiler_class_diagram.puml"))
         renderTo(file("$rootDir/docs/diagrams/profiler_class_diagram.svg"))
-        insertInto(file("$rootDir/docs/internals/profiler_architecture.md"))
     }
 }
 
 tasks.named("generateClassDiagrams") {
     val pumlFile = file("$rootDir/docs/diagrams/profiler_class_diagram.puml")
     val svgFile = file("$rootDir/docs/diagrams/profiler_class_diagram.svg")
-    val mdFile = file("$rootDir/docs/internals/profiler_architecture.md")
 
     doLast {
         fun cleanup(file: File) {
@@ -138,20 +142,13 @@ tasks.named("generateClassDiagrams") {
                 content = content.replace(Regex("([a-zA-Z0-9_]+)-[a-zA-Z0-9_-]{7,15}(?=\\b|\\(|$)"), "$1")
                 // Strip any leftover internal module access flags (e.g. $io_mazewall_enforcer)
                 content = content.replace(Regex("\\\$[a-zA-Z0-9_]+"), "")
+                // Fix PlantUML SVG XML parsing error (duplicate data attribute in <g class="entity">)
+                content = content.replace(Regex(" data=\"([^\"]*)\" id=\"([^\"]*)\" data=\"([^\"]*)\""), " data-name=\"$1\" id=\"$2\" data-line=\"$3\"")
                 file.writeText(content)
             }
         }
 
         cleanup(pumlFile)
         cleanup(svgFile)
-        cleanup(mdFile)
-
-        if (mdFile.exists()) {
-            var content = mdFile.readText()
-            // Replace PlantUML code blocks with SVG image links for GitHub compatibility
-            val svgRelativePath = "../diagrams/profiler_class_diagram.svg"
-            content = content.replace(Regex("```plantuml[\\s\\S]*?```"), "![Profiler Class Diagram]($svgRelativePath)")
-            mdFile.writeText(content)
-        }
     }
 }

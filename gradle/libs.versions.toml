@@ -33,6 +33,7 @@ kotest-assertions = { module = "io.kotest:kotest-assertions-core", version.ref =
 kotest-property = { module = "io.kotest:kotest-property", version.ref = "kotest" }
 kotest-runner = { module = "io.kotest:kotest-runner-junit5", version.ref = "kotest" }
 slf4j-nop = { module = "org.slf4j:slf4j-nop", version = "2.0.13" }
+plantuml-core = { module = "net.sourceforge.plantuml:plantuml", version = "1.2023.13" }
 
 
 [bundles]
