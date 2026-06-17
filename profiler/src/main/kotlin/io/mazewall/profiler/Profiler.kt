@@ -6,6 +6,7 @@ import io.mazewall.Uncompiled
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
 import io.mazewall.core.Pid
+import io.mazewall.core.Tid
 import io.mazewall.profiler.compiler.BobCompiler
 import io.mazewall.profiler.engine.ProfilerInstaller
 import io.mazewall.profiler.engine.SyscallEvent
@@ -27,7 +28,7 @@ import java.util.logging.Logger
  */
 object Profiler {
     private val logger = Logger.getLogger(Profiler::class.java.name)
-    val threadRegistry = ConcurrentHashMap<io.mazewall.core.Pid, Thread>()
+    val threadRegistry = ConcurrentHashMap<Tid, Thread>()
     private val listeners = CopyOnWriteArrayList<ProfilerTraceListener>()
 
     /**
@@ -79,8 +80,8 @@ object Profiler {
             // Dedicated OS platform thread for block
             val thread =
                 Thread {
-                    val spid = LinuxNative.process.gettid()
-                    threadRegistry[spid] = Thread.currentThread()
+                    val stid = LinuxNative.process.gettid()
+                    threadRegistry[stid] = Thread.currentThread()
                     // SUPPRESSION JUSTIFICATION: We are executing an arbitrary, untrusted user block.
                     // We MUST catch Throwable to ensure we capture any Error or Exception thrown
                     // by the user's workload so we can bubble it up to the calling thread safely.
@@ -99,7 +100,7 @@ object Profiler {
                     } catch (e: Throwable) {
                         blockError.set(e)
                     } finally {
-                        threadRegistry.remove(spid)
+                        threadRegistry.remove(stid)
                     }
                 }
 
@@ -217,13 +218,13 @@ object Profiler {
 
         override fun execute(command: Runnable) {
             delegate.execute {
-                val spid = LinuxNative.process.gettid()
-                threadRegistry[spid] = Thread.currentThread()
+                val stid = LinuxNative.process.gettid()
+                threadRegistry[stid] = Thread.currentThread()
                 try {
                     ensureApplied()
                     command.run()
                 } finally {
-                    threadRegistry.remove(spid)
+                    threadRegistry.remove(stid)
                 }
             }
         }
@@ -231,13 +232,13 @@ object Profiler {
         override fun <T> submit(task: Callable<T>): Future<T> =
             delegate.submit(
                 Callable {
-                    val spid = LinuxNative.process.gettid()
-                    threadRegistry[spid] = Thread.currentThread()
+                    val stid = LinuxNative.process.gettid()
+                    threadRegistry[stid] = Thread.currentThread()
                     try {
                         ensureApplied()
                         task.call()
                     } finally {
-                        threadRegistry.remove(spid)
+                        threadRegistry.remove(stid)
                     }
                 },
             )
@@ -247,25 +248,25 @@ object Profiler {
             result: T,
         ): Future<T> =
             delegate.submit({
-                val spid = LinuxNative.process.gettid()
-                threadRegistry[spid] = Thread.currentThread()
+                val stid = LinuxNative.process.gettid()
+                threadRegistry[stid] = Thread.currentThread()
                 try {
                     ensureApplied()
                     task.run()
                 } finally {
-                    threadRegistry.remove(spid)
+                    threadRegistry.remove(stid)
                 }
             }, result)
 
         override fun submit(task: Runnable): Future<*> =
             delegate.submit {
-                val spid = LinuxNative.process.gettid()
-                threadRegistry[spid] = Thread.currentThread()
+                val stid = LinuxNative.process.gettid()
+                threadRegistry[stid] = Thread.currentThread()
                 try {
                     ensureApplied()
                     task.run()
                 } finally {
-                    threadRegistry.remove(spid)
+                    threadRegistry.remove(stid)
                 }
             }
 

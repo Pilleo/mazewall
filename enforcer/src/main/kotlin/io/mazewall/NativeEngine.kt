@@ -164,7 +164,7 @@ public interface NativeNetworking {
 }
 
 public interface NativeProcess {
-    fun gettid(): io.mazewall.core.Pid
+    fun gettid(): io.mazewall.core.Tid
 
     context(_: NativeTransaction)
     fun prctl(command: io.mazewall.core.PrctlCommand): SyscallResult<Long, SyscallHandledState.Unhandled>

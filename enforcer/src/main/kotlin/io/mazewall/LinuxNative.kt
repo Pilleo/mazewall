@@ -742,9 +742,9 @@ internal object RealNativeProcess : NativeProcess {
             Linker.Option.captureCallState("errno"),
         )
 
-    override fun gettid(): io.mazewall.core.Pid = nativeScope {
+    override fun gettid(): io.mazewall.core.Tid = nativeScope {
         val capturedState = ErrnoSegment.allocate()
-        io.mazewall.core.Pid(GETTID.invokeExact(capturedState.segment) as Int)
+        io.mazewall.core.Tid(GETTID.invokeExact(capturedState.segment) as Int)
     }
 
     context(_: NativeTransaction)

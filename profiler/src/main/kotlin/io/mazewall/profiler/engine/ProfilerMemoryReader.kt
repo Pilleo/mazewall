@@ -2,6 +2,7 @@ package io.mazewall.profiler.engine
 
 import io.mazewall.LinuxNative
 import io.mazewall.core.Pid
+import io.mazewall.core.Tid
 import io.mazewall.ffi.Layouts
 import io.mazewall.map
 import io.mazewall.onFailure
@@ -12,17 +13,17 @@ import java.lang.foreign.ValueLayout
 import java.nio.charset.StandardCharsets
 
 /**
- * Interface for reading memory and resolving paths from a tracee process.
+ * Interface for reading memory and resolving paths from a tracee process or thread.
  */
 interface ProfilerMemoryReader {
     fun readStringFromProcess(
-        pid: Pid,
+        tid: Tid,
         remoteAddr: Long,
         maxLen: Int = 4096,
     ): String?
 
     fun resolveLink(
-        pid: Pid,
+        tid: Tid,
         link: String,
     ): String?
 }
@@ -35,7 +36,7 @@ object RealMemoryReader : ProfilerMemoryReader {
     private const val IOV_LEN_OFF = 8L
 
     override fun readStringFromProcess(
-        pid: Pid,
+        tid: Tid,
         remoteAddress: Long,
         maxLen: Int,
     ): String? {
@@ -49,7 +50,7 @@ object RealMemoryReader : ProfilerMemoryReader {
             remoteIov.set(ValueLayout.ADDRESS, 0L, MemorySegment.ofAddress(remoteAddress))
             remoteIov.set(ValueLayout.JAVA_LONG, IOV_LEN_OFF, maxLen.toLong())
             val res = LinuxNative.withTransaction {
-                LinuxNative.memory.processVmReadv(pid, localIov, 1, remoteIov, 1, 0)
+                LinuxNative.memory.processVmReadv(Pid(tid.value), localIov, 1, remoteIov, 1, 0)
             }
             var result: String? = null
             res.onSuccess { value ->
@@ -62,7 +63,7 @@ object RealMemoryReader : ProfilerMemoryReader {
                 }
             }.onFailure { errno, _ ->
                 if (errno == 1) { // EPERM
-                    System.err.println("[DAEMON] WARN: Permission denied reading memory from PID ${pid.value}. (Yama ptrace_scope?)")
+                    System.err.println("[DAEMON] WARN: Permission denied reading memory from TID ${tid.value}. (Yama ptrace_scope?)")
                 }
             }
             return result
@@ -70,10 +71,10 @@ object RealMemoryReader : ProfilerMemoryReader {
     }
 
     override fun resolveLink(
-        pid: Pid,
+        tid: Tid,
         link: String,
     ): String? {
-        val procPath = "/proc/${pid.value}/$link"
+        val procPath = "/proc/${tid.value}/$link"
         Arena.ofConfined().use { arena ->
             val pathSeg = arena.allocateFrom(procPath)
             val buf = arena.allocate(PATH_MAX_VAL)

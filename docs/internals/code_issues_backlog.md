@@ -155,12 +155,13 @@
 **Context & Proof:** `SyscallEvent` uses `val args: LongArray`. Since arrays in JVM are mutable, any reference holder can execute `event.args[0] = value`.
 **Needed:** Refactor `SyscallEvent` to use an immutable list or perform defensive copies to ensure the captured state remains constant.
 
-### 🟡 [Severity: LOW]: Conceptual Type Error: Conflation of `Pid` and `Tid`
+### ✅ [RESOLVED] [Severity: LOW]: Conceptual Type Error: Conflation of `Pid` and `Tid`
 **Dimension:** Intention Safety / Architecture
 **Target Area:** Cross-Module
 **Failure Hypothesis:** Using the same type (`Pid`) for both Process IDs (TGID) and Thread IDs (LWP) leads to semantic confusion and risks transposition bugs in multi-threaded logic.
 **Context & Proof:** The codebase uses `io.mazewall.core.Pid` for process-wide operations (like Landlock) and thread-local profiling (USER_NOTIF). Linux treates these as distinct identifiers (`getpid` vs `gettid`).
 **Needed:** Introduce a distinct `value class Tid(val value: Int)` and use it exclusively for thread-level tracking and profiling.
+**Fixed:** Introduced `Tid` value class in `:enforcer:core`. Updated `NativeProcess`, `NativeMemory`, `SyscallEvent`, and the entire `:profiler` pipeline to use `Tid` for thread-specific identifiers, maintaining `Pid` only for true process-level IDs.
 
 2. Alternatively, investigate if a process-wide `USER_NOTIF` handler can distinguish between virtual threads based on their `TID` and only trap those explicitly opted into profiling.
 

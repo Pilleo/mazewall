@@ -6,6 +6,7 @@ import io.mazewall.LinuxNative
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
+import io.mazewall.core.Tid
 import io.mazewall.ffi.Layouts
 import io.mazewall.ffi.NativeConstants
 import io.mazewall.profiler.engine.ACK_BUF_SIZE
@@ -65,13 +66,13 @@ class ProfilerDesignSpec :
             var resolveLinkResult: String? = "/proc/1/cwd"
 
             override fun readStringFromProcess(
-                pid: io.mazewall.core.Pid,
+                tid: Tid,
                 remoteAddr: Long,
                 maxLen: Int,
             ): String? = readStringResult
 
             override fun resolveLink(
-                pid: io.mazewall.core.Pid,
+                tid: Tid,
                 link: String,
             ): String? = resolveLinkResult
         }
@@ -221,7 +222,7 @@ class ProfilerDesignSpec :
                     action shouldBe LoopAction.Continue
                     transport.sentEvents.size shouldBe 1
                     transport.sentEvents[0].syscallName shouldBe "OPEN"
-                    transport.sentEvents[0].pid shouldBe io.mazewall.core.Pid(456)
+                    transport.sentEvents[0].tid shouldBe Tid(456)
                     transport.sentEvents[0].paths shouldBe listOf("/tmp/test.txt")
                     transport.ioctlCalls.contains(0xc0182101L) shouldBe true // SECCOMP_IOCTL_NOTIF_SEND
                 }

@@ -2,6 +2,7 @@ package io.mazewall.profiler.engine
 
 import io.mazewall.LinuxNative
 import io.mazewall.core.Pid
+import io.mazewall.core.Tid
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
@@ -119,13 +120,13 @@ class ProfilerDaemonTest {
 
     private class MockReader : ProfilerMemoryReader {
         override fun readStringFromProcess(
-            pid: io.mazewall.core.Pid,
+            tid: Tid,
             remoteAddr: Long,
             maxLen: Int,
         ): String? = "/tmp/test.txt"
 
         override fun resolveLink(
-            pid: io.mazewall.core.Pid,
+            tid: Tid,
             link: String,
         ): String? = "/proc/1/cwd"
     }
@@ -164,7 +165,7 @@ class ProfilerDaemonTest {
             assertTrue(action is LoopAction.Continue)
             assertEquals(1, transport.sentEvents.size)
             assertEquals("OPEN", transport.sentEvents[0].syscallName)
-            assertEquals(Pid(456), transport.sentEvents[0].pid)
+            assertEquals(Tid(456), transport.sentEvents[0].tid)
             // Verify that continue response was sent via type-safe method
             assertTrue(transport.continueSent, "Should have called sendSeccompContinue")
             assertTrue(transport.ioctlCalls.contains(SECCOMP_IOCTL_NOTIF_SEND), "Should have sent SECCOMP_IOCTL_NOTIF_SEND")

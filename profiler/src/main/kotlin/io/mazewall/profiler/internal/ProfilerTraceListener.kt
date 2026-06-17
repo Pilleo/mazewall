@@ -4,6 +4,8 @@ import io.mazewall.LinuxNative
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
+import io.mazewall.core.Pid
+import io.mazewall.core.Tid
 import io.mazewall.profiler.Profiler
 import io.mazewall.profiler.engine.SyscallEvent
 import io.mazewall.profiler.engine.SyscallEventState
@@ -131,18 +133,18 @@ internal class ProfilerTraceListener(
     }
 
     private fun readNextEvent(dis: DataInputStream): TraceEvent {
-        val pid = dis.readInt()
-        state = TraceListenerState.ReadingHeader(pid)
+        val pidOrTid = dis.readInt()
+        state = TraceListenerState.ReadingHeader(pidOrTid)
 
         val syscallNameLen = dis.readInt()
-        state = TraceListenerState.ReadingSyscall(pid, syscallNameLen)
+        state = TraceListenerState.ReadingSyscall(pidOrTid, syscallNameLen)
 
         val syscallNameBytes = ByteArray(syscallNameLen)
         dis.readFully(syscallNameBytes)
         val syscallName = String(syscallNameBytes, Charsets.UTF_8)
 
         val argsCount = dis.readInt()
-        state = TraceListenerState.ReadingArguments(pid, syscallName, argsCount)
+        state = TraceListenerState.ReadingArguments(pidOrTid, syscallName, argsCount)
 
         val args = LongArray(argsCount)
         for (i in 0 until argsCount) {
@@ -158,9 +160,9 @@ internal class ProfilerTraceListener(
             paths.add(String(pathBytes, Charsets.UTF_8))
         }
 
-        val threadToProfile = Profiler.threadRegistry[io.mazewall.core.Pid(pid)] ?: workerThreadProvider()
+        val threadToProfile = Profiler.threadRegistry[Tid(pidOrTid)] ?: workerThreadProvider()
         val stackTrace = threadToProfile?.stackTrace?.map { it.toString() }
-        return TraceEvent(pid = pid, syscallName = syscallName, args = args, paths = paths, stackTrace = stackTrace)
+        return TraceEvent(pid = pidOrTid, syscallName = syscallName, args = args, paths = paths, stackTrace = stackTrace)
     }
 
     private fun processEvent(
@@ -168,13 +170,13 @@ internal class ProfilerTraceListener(
         ackBuf: MemorySegment,
     ) {
         if (event.paths.isNotEmpty() && isDuplicate(event)) {
-            sendAckIfNecessary(event.pid, ackBuf)
+            sendAckIfNecessary(event.tid, ackBuf)
             return
         }
 
         accumulateStackTrace(event)
         accumulatedLogs.add(event)
-        sendAckIfNecessary(event.pid, ackBuf)
+        sendAckIfNecessary(event.tid, ackBuf)
     }
 
     private fun isDuplicate(event: SyscallEvent<SyscallEventState.Resolved>): Boolean {
@@ -192,7 +194,7 @@ internal class ProfilerTraceListener(
 
     private fun accumulateStackTrace(event: SyscallEvent<SyscallEventState.Resolved>) {
         if (stackTracesMap == null) return
-        val threadToProfile = Profiler.threadRegistry[event.pid] ?: workerThreadProvider()
+        val threadToProfile = Profiler.threadRegistry[event.tid] ?: workerThreadProvider()
         if (threadToProfile != null) {
             val frames = threadToProfile.stackTrace
             stackTracesMap
@@ -203,10 +205,10 @@ internal class ProfilerTraceListener(
     }
 
     private fun sendAckIfNecessary(
-        pid: io.mazewall.core.Pid,
+        tid: Tid,
         ackBuf: MemorySegment,
     ) {
-        if (pid.value != 0) {
+        if (tid.value != 0) {
             LinuxNative.withTransaction { LinuxNative.memory.write(socketFd, ackBuf, 1) }
         }
     }

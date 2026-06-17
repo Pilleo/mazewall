@@ -168,7 +168,7 @@ public open class MockNativeNetworking : NativeNetworking {
 }
 
 public open class MockNativeProcess : NativeProcess {
-    public var tid: io.mazewall.core.Pid = io.mazewall.core.Pid(1234)
+    public var tid: io.mazewall.core.Tid = io.mazewall.core.Tid(1234)
     public var prctlResult: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(0L)
     public var lastPrctlCommand: io.mazewall.core.PrctlCommand? = null
 

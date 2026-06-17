@@ -4,7 +4,7 @@ import io.mazewall.LinuxNative
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
-import io.mazewall.core.Pid
+import io.mazewall.core.Tid
 import io.mazewall.ffi.NativeConstants
 import io.mazewall.map
 import io.mazewall.onSuccess
@@ -114,7 +114,7 @@ internal class ProfilerSessionHandler(
         }
 
         val rawEvent = SyscallEvent<SyscallEventState.Raw>(
-            pid = Pid(pidVal),
+            tid = Tid(pidVal),
             syscallName = syscallMap[nr] ?: "SYSCALL_$nr",
             args = args
         )

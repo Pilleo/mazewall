@@ -137,7 +137,7 @@ object RealProfilerTransport : ProfilerTransport {
 
             val buf = arena.allocate(totalSize.toLong())
             var offset = 0L
-            buf.set(JAVA_INT_BE_UNALIGNED, offset, event.pid.value)
+            buf.set(JAVA_INT_BE_UNALIGNED, offset, event.tid.value)
             offset += 4
             buf.set(JAVA_INT_BE_UNALIGNED, offset, syscallNameBytes.size)
             offset += 4

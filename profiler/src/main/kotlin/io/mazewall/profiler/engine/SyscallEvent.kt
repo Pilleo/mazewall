@@ -1,6 +1,7 @@
 package io.mazewall.profiler.engine
 
 import io.mazewall.core.Pid
+import io.mazewall.core.Tid
 
 /**
  * States for the syscall event resolution pipeline.
@@ -9,15 +10,25 @@ public sealed interface SyscallEventState {
     /** Raw registers captured from the kernel. */
     public interface Raw : SyscallEventState
 
-    /** Path arguments resolved from tracee memory. */
+    /** Arguments resolved into human-readable strings (e.g. paths). */
     public interface Resolved : SyscallEventState
 }
 
 /**
  * A type-safe event representing a trapped system call in various stages of resolution.
+ *
+ * This class ensures that diagnostic events carry strongly-typed identifiers ([Tid])
+ * and maintain immutability for the captured system call arguments and paths.
+ *
+ * @param S The resolution state of the event (e.g., [SyscallEventState.Raw], [SyscallEventState.Resolved]).
+ * @property tid The Thread ID (LWP) of the process that triggered the system call.
+ * @property syscallName The mnemonic name of the system call (e.g., "OPENAT").
+ * @property args The raw register arguments captured from the kernel.
+ * @property paths The list of resolved filesystem paths extracted from the tracee's memory.
+ * @property stackTrace The captured JVM stack trace of the triggering thread, if available.
  */
 public data class SyscallEvent<out S : SyscallEventState>(
-    val pid: Pid,
+    val tid: Tid,
     val syscallName: String,
     val args: LongArray,
     val paths: List<String> = emptyList(),
@@ -26,7 +37,7 @@ public data class SyscallEvent<out S : SyscallEventState>(
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
         if (other !is SyscallEvent<*>) return false
-        if (pid != other.pid) return false
+        if (tid != other.tid) return false
         if (syscallName != other.syscallName) return false
         if (!args.contentEquals(other.args)) return false
         if (paths != other.paths) return false
@@ -35,7 +46,7 @@ public data class SyscallEvent<out S : SyscallEventState>(
     }
 
     override fun hashCode(): Int {
-        var result = pid.hashCode()
+        var result = tid.hashCode()
         result = 31 * result + syscallName.hashCode()
         result = 31 * result + args.contentHashCode()
         result = 31 * result + paths.hashCode()
@@ -44,19 +55,19 @@ public data class SyscallEvent<out S : SyscallEventState>(
     }
 
     /**
-     * Converts this resolved event to the legacy TraceEvent format for wire-compatibility.
+     * Converts this resolved event to the legacy [TraceEvent] format for wire-compatibility.
      */
     fun toTraceEvent(): TraceEvent {
-        return TraceEvent(pid.value, syscallName, args, paths, stackTrace)
+        return TraceEvent(tid.value, syscallName, args, paths, stackTrace)
     }
 
     public companion object {
         /**
-         * Wraps a legacy TraceEvent into a type-safe Resolved SyscallEvent.
+         * Wraps a legacy [TraceEvent] into a type-safe [SyscallEventState.Resolved] [SyscallEvent].
          */
         fun fromTraceEvent(event: TraceEvent): SyscallEvent<SyscallEventState.Resolved> {
             return SyscallEvent(
-                pid = Pid(event.pid),
+                tid = Tid(event.pid),
                 syscallName = event.syscallName,
                 args = event.args,
                 paths = event.paths,
@@ -67,7 +78,7 @@ public data class SyscallEvent<out S : SyscallEventState>(
 }
 
 /**
- * Transitions a raw event to a resolved state by attaching the resolved paths.
+ * Extension function to safely transition a raw syscall event to a resolved state by attaching the resolved paths.
  */
 internal fun SyscallEvent<SyscallEventState.Raw>.resolved(paths: List<String>): SyscallEvent<SyscallEventState.Resolved> =
-    SyscallEvent(pid, syscallName, args, paths, stackTrace)
+    SyscallEvent(tid, syscallName, args, paths, stackTrace)
