@@ -140,7 +140,44 @@ class ArchitectureTest {
             .because("GC-managed auto arenas can be cleaned up while kernel structures still reference them. Use nativeScope instead.")
             .check(allClasses)
     }
-}
+
+    @ArchTest
+    fun noGenericExceptionCatchingInEnforcer(allClasses: com.tngtech.archunit.core.domain.JavaClasses) {
+        methods()
+            .that()
+            .areDeclaredInClassesThat()
+            .resideInAPackage("io.mazewall..")
+            .and()
+            .areDeclaredInClassesThat()
+            .haveSimpleNameNotStartingWith("LayoutValidator")
+            .and()
+            .areDeclaredInClassesThat()
+            .haveSimpleNameNotStartingWith("LayoutValidationScope")
+            .and()
+            .areDeclaredInClassesThat()
+            .haveSimpleNameNotStartingWith("PureJavaBpfEngine")
+            .and()
+            .areDeclaredInClassesThat()
+            .haveSimpleNameNotStartingWith("LandlockSession")
+            .should(object : com.tngtech.archunit.lang.ArchCondition<com.tngtech.archunit.core.domain.JavaMethod>("not catch generic exceptions") {
+                override fun check(item: com.tngtech.archunit.core.domain.JavaMethod, events: com.tngtech.archunit.lang.ConditionEvents) {
+                    item.tryCatchBlocks.forEach { tryCatchBlock ->
+                        tryCatchBlock.caughtThrowables.forEach { caughtException ->
+                            val name = caughtException.name
+                            if (name == Exception::class.java.name ||
+                                name == Throwable::class.java.name ||
+                                name == RuntimeException::class.java.name
+                            ) {
+                                val message = "Method ${item.fullName} catches generic exception $name at ${tryCatchBlock.sourceCodeLocation}"
+                                events.add(com.tngtech.archunit.lang.SimpleConditionEvent.violated(item, message))
+                            }
+                        }
+                    }
+                }
+            })
+            .because("Catching generic exceptions in a security boundary module can silently swallow critical JVM errors or obscure containment violations. Catch specific expected native faults instead.")
+            .check(allClasses)
+    }
 
     @ArchTest
     fun unhandledSyscallResultsMustNotBeReturnedByDomainLogic(allClasses: com.tngtech.archunit.core.domain.JavaClasses) {
@@ -172,8 +209,11 @@ class ArchitectureTest {
             .resideInAnyPackage("io.mazewall.seccomp..", "io.mazewall.landlock..")
             .and()
             .arePublic()
+            .and()
+            .haveNameNotMatching(".*\\$.*") // Ignore Kotlin internal mangled names
             .should()
             .notHaveRawReturnType(LinuxNative.SyscallResult::class.java)
             .because("Domain logic must not leak raw SyscallResult objects to callers. They must be handled internally.")
             .check(allClasses)
     }
+}

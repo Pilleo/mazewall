@@ -3,6 +3,7 @@ package io.mazewall
 import io.mazewall.ffi.NativeConstants
 import java.io.File
 
+@Suppress("SwallowedException")
 internal object RealPlatformProvider : PlatformProvider {
     private const val PR_GET_SECCOMP = 21
     private const val PR_SET_SECCOMP = 22
@@ -46,7 +47,7 @@ internal object RealPlatformProvider : PlatformProvider {
                 }
             }
         }
-    } catch (ignored: Exception) {
+    } catch (e: IllegalStateException) {
         SeccompMode.Error(-1)
     }
 
@@ -76,7 +77,7 @@ internal object RealPlatformProvider : PlatformProvider {
         } else {
             false
         }
-    } catch (ignored: Exception) {
+    } catch (e: IllegalStateException) {
         false
     }
 
@@ -94,14 +95,18 @@ internal object RealPlatformProvider : PlatformProvider {
                 3 -> YamaPtraceScope.Disabled
                 else -> YamaPtraceScope.Unknown(intVal)
             }
-        } catch (ignored: Exception) {
+        } catch (e: java.io.IOException) {
+            YamaPtraceScope.Unavailable
+        } catch (e: SecurityException) {
             YamaPtraceScope.Unavailable
         }
     }
 
     override fun getLandlockAbiVersion(): Int = try {
         io.mazewall.landlock.Landlock.getAbiVersion()
-    } catch (ignored: Exception) {
+    } catch (e: UnsupportedOperationException) {
+        0
+    } catch (e: IllegalStateException) {
         0
     }
 
@@ -143,7 +148,10 @@ internal object RealPlatformProvider : PlatformProvider {
                         content.contains("kubepods") ||
                         content.contains("containerd")
                 }
-            } catch (ignored: Exception) {
+            } catch (e: java.io.IOException) {
+                // Ignore
+            } catch (e: SecurityException) {
+                // Ignore
             }
         }
         return isContainer

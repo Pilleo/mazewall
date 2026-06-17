@@ -94,7 +94,7 @@ object JvmFloorWorkload {
                 java.net.Socket().use { socket ->
                     socket.connect(java.net.InetSocketAddress("127.0.0.1", 1), 1)
                 }
-            } catch (ignored: Exception) {
+            } catch (ignored: java.io.IOException) {
                 // Connection failure is expected and fine, we just want the syscalls
             }
         }
