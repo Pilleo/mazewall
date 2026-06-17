@@ -36,15 +36,43 @@ object BobCompiler {
                 syscalls.add(syscall)
             }
 
-            // Categorize paths
-            val isWrite = isFileSystemMutation(event.syscallName) || isOpenWrite(event.syscallName, event.args)
-            val isExec = event.syscallName == "EXECVE" || event.syscallName == "EXECVEAT"
+            // Categorize paths using polymorphic hierarchy
+            val semanticEvent = event.toTraceEvent()
 
-            for (path in event.paths) {
-                when {
-                    isExec -> execs.add(path)
-                    isWrite -> fsWritePaths.add(path)
-                    else -> opens.add(path)
+            when (semanticEvent) {
+                is io.mazewall.profiler.engine.TraceEvent.Open -> {
+                    if (isOpenWrite(semanticEvent)) {
+                        fsWritePaths.add(semanticEvent.path)
+                    } else {
+                        opens.add(semanticEvent.path)
+                    }
+                }
+
+                is io.mazewall.profiler.engine.TraceEvent.Exec -> {
+                    execs.add(semanticEvent.path)
+                }
+
+                is io.mazewall.profiler.engine.TraceEvent.FsMutation -> {
+                    fsWritePaths.addAll(semanticEvent.paths)
+                }
+
+                is io.mazewall.profiler.engine.TraceEvent.Mmap -> {
+                    // MMAP events could optionally be used to detect executable memory requests
+                    // but for BoB generation we currently focus on path-based security.
+                }
+
+                is io.mazewall.profiler.engine.TraceEvent.Socket -> {
+                    // Socket domain/type could be used for network BoB generation in the future.
+                }
+
+                is io.mazewall.profiler.engine.TraceEvent.Generic -> {
+                    // Conservative fallback: treat any paths in a generic event as reads
+                    // unless we know it's a mutation
+                    if (isFileSystemMutation(semanticEvent.syscallName)) {
+                        fsWritePaths.addAll(semanticEvent.paths)
+                    } else {
+                        opens.addAll(semanticEvent.paths)
+                    }
                 }
             }
         }
@@ -79,18 +107,15 @@ object BobCompiler {
                 "FCHOWNAT",
             )
 
-    private fun isOpenWrite(
-        syscallName: String,
-        args: LongArray,
-    ): Boolean {
-        if (syscallName == "OPENAT2") return true // Pointer to struct open_how, conservatively treat as write
+    private fun isOpenWrite(semanticEvent: io.mazewall.profiler.engine.TraceEvent): Boolean {
+        if (semanticEvent is io.mazewall.profiler.engine.TraceEvent.Open) {
+            if (semanticEvent.syscallName == "OPENAT2") return true // Pointer to struct open_how, conservatively treat as write
+            return isOpenWrite(semanticEvent.flags)
+        }
+        return false
+    }
 
-        val flags =
-            when (syscallName) {
-                "OPEN" -> if (args.size > 1) args[1] else 0L
-                "OPENAT" -> if (args.size > 2) args[2] else 0L
-                else -> 0L
-            }
+    private fun isOpenWrite(flags: Long): Boolean {
         val accessMode = flags and 3L
         val isWriteMode = accessMode == O_WRONLY || accessMode == O_RDWR
         val hasCreateOrTrunc = (flags and O_CREAT) != 0L || (flags and O_TRUNC) != 0L

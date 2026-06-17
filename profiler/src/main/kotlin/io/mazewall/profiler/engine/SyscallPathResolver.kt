@@ -15,23 +15,31 @@ internal class SyscallPathResolver(
      */
     fun resolve(event: SyscallEvent<SyscallEventState.Raw>): SyscallEvent<SyscallEventState.Resolved> {
         val pid = Pid(event.pid)
+        val args = event.args
+
         val paths = when (event.syscallName) {
             "OPEN", "EXECVE", "MKDIR", "RMDIR", "CHMOD", "CHOWN", "LCHOWN", "UNLINK", "READLINK", "CHROOT", "UTIME", "UTIMES" ->
-                listOfNotNull(tryRead(pid, event.args[0]))
+                listOfNotNull(tryRead(pid, args[0]))
 
             "FCHMOD", "FCHOWN", "FSTAT" ->
-                listOfNotNull(resolveFdPath(pid, event.args[0].toInt()))
+                listOfNotNull(resolveFdPath(pid, args[0].toInt()))
 
             "SYMLINK", "LINK", "RENAME" ->
-                listOfNotNull(tryRead(pid, event.args[0]), tryRead(pid, event.args[1]))
+                listOfNotNull(tryRead(pid, args[0]), tryRead(pid, args[1]))
 
             "OPENAT", "EXECVEAT", "OPENAT2", "MKDIRAT", "UNLINKAT", "FCHMODAT", "FCHOWNAT", "UTIMENSAT", "FSTATAT", "READLINKAT" ->
-                listOfNotNull(tryRead(pid, event.args[ARG_PATH], event.args[ARG_DIR_FD]))
+                listOfNotNull(tryRead(pid, args[1], args[0])) // dirfd=0, path=1
 
-            "RENAMEAT", "RENAMEAT2", "LINKAT", "SYMLINKAT" ->
+            "RENAMEAT", "RENAMEAT2", "LINKAT" ->
                 listOfNotNull(
-                    tryRead(pid, event.args[ARG_OLD_PATH], event.args[ARG_OLD_DIR_FD]),
-                    tryRead(pid, event.args[ARG_NEW_PATH], event.args[ARG_NEW_DIR_FD]),
+                    tryRead(pid, args[1], args[0]), // olddirfd=0, oldpath=1
+                    tryRead(pid, args[3], args[2]), // newdirfd=2, newpath=3
+                )
+
+            "SYMLINKAT" ->
+                listOfNotNull(
+                    tryRead(pid, args[0]), // target (oldpath) is relative to CWD
+                    tryRead(pid, args[2], args[1]), // linkpath (newpath) is relative to newdirfd
                 )
 
             else -> emptyList()
