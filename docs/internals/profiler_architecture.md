@@ -43,6 +43,7 @@ class "Profiler" as io.mazewall.profiler.Profiler {
   __
   +ConcurrentHashMap<Pid, Thread> getThreadRegistry()
   +boolean sendDescriptorInternal$io_mazewall_profiler(int, int)
+  + {static}void stop()
 }
 class "ProfilingResult" as io.mazewall.profiler.ProfilingResult<T> {
   +T getValue()
@@ -62,19 +63,19 @@ class "DescriptorPassing" as io.mazewall.profiler.engine.DescriptorPassing {
 }
 abstract class "HandshakeSession" as io.mazewall.profiler.engine.HandshakeSession {
   + {abstract}long getNotifId()
-  + {abstract}FileDescriptor getListenerFd()
+  + {abstract}FileDescriptor<SeccompNotif> getListenerFd()
 }
 abstract class "LoopAction" as io.mazewall.profiler.engine.LoopAction {
 }
 interface "NativeIoOperations" as io.mazewall.profiler.engine.NativeIoOperations {
   + {abstract}SyscallResult poll(MemorySegment, long, int)
-  + {abstract}SyscallResult read(FileDescriptor, MemorySegment, long)
-  + {abstract}SyscallResult write(FileDescriptor, MemorySegment, long)
-  + {abstract}SyscallResult recv(FileDescriptor, MemorySegment, long, int)
-  + {abstract}SyscallResult ioctl(FileDescriptor, long, MemorySegment)
+  + {abstract}SyscallResult read(FileDescriptor<?>, MemorySegment, long)
+  + {abstract}SyscallResult write(FileDescriptor<?>, MemorySegment, long)
+  + {abstract}SyscallResult recv(FileDescriptor<?>, MemorySegment, long, int)
+  + {abstract}SyscallResult ioctl(FileDescriptor<?>, long, MemorySegment)
 }
 abstract class "ProfilerConnection" as io.mazewall.profiler.engine.ProfilerConnection {
-  + {abstract}FileDescriptor getSocketFd()
+  + {abstract}FileDescriptor<UnixSocket> getSocketFd()
 }
 class "ProfilerDaemon" as io.mazewall.profiler.engine.ProfilerDaemon {
   + {static}ProfilerDaemon INSTANCE
@@ -126,18 +127,18 @@ class "RealMemoryReader" as io.mazewall.profiler.engine.RealMemoryReader {
 class "RealProfilerTransport" as io.mazewall.profiler.engine.RealProfilerTransport {
   + {static}RealProfilerTransport INSTANCE
   __
-  +void sendTraceEvent(FileDescriptor, SyscallEvent<? extends Resolved>)
+  +void sendTraceEvent(FileDescriptor<?>, SyscallEvent<? extends Resolved>)
   +void sendSeccompContinue(Success, MemorySegment)
   +void sendSeccompError(Failed, MemorySegment, int)
-  +FileDescriptor recvDescriptor(FileDescriptor)
+  +FileDescriptor<SeccompNotif> recvDescriptor(FileDescriptor<UnixSocket>)
   +SyscallResult poll(MemorySegment, long, int)
-  +SyscallResult read(FileDescriptor, MemorySegment, long)
-  +SyscallResult write(FileDescriptor, MemorySegment, long)
-  +SyscallResult recv(FileDescriptor, MemorySegment, long, int)
-  +SyscallResult ioctl(FileDescriptor, long, MemorySegment)
-  +FileDescriptor createServer(String)
-  +FileDescriptor accept(FileDescriptor)
-  +void close(FileDescriptor)
+  +SyscallResult read(FileDescriptor<?>, MemorySegment, long)
+  +SyscallResult write(FileDescriptor<?>, MemorySegment, long)
+  +SyscallResult recv(FileDescriptor<?>, MemorySegment, long, int)
+  +SyscallResult ioctl(FileDescriptor<?>, long, MemorySegment)
+  +FileDescriptor<UnixSocket> createServer(String)
+  +FileDescriptor<UnixSocket> accept(FileDescriptor<UnixSocket>)
+  +void close(FileDescriptor<?>)
 }
 interface "SeccompResponder" as io.mazewall.profiler.engine.SeccompResponder {
   + {abstract}void sendSeccompContinue(Success, MemorySegment)
@@ -154,10 +155,10 @@ class "SessionEventLedger" as io.mazewall.profiler.engine.SessionEventLedger {
   +List<SessionEvent> dump()
 }
 interface "SocketLifecycleManager" as io.mazewall.profiler.engine.SocketLifecycleManager {
-  + {abstract}FileDescriptor createServer(String)
-  + {abstract}FileDescriptor accept(FileDescriptor)
-  + {abstract}void close(FileDescriptor)
-  + {abstract}FileDescriptor recvDescriptor(FileDescriptor)
+  + {abstract}FileDescriptor<UnixSocket> createServer(String)
+  + {abstract}FileDescriptor<UnixSocket> accept(FileDescriptor<UnixSocket>)
+  + {abstract}void close(FileDescriptor<?>)
+  + {abstract}FileDescriptor<SeccompNotif> recvDescriptor(FileDescriptor<UnixSocket>)
 }
 class "SyscallEvent" as io.mazewall.profiler.engine.SyscallEvent<S extends SyscallEventState> {
   + {static}Companion Companion
@@ -187,7 +188,7 @@ abstract class "TraceEvent" as io.mazewall.profiler.engine.TraceEvent {
   +List<String> getPaths()
 }
 interface "TraceEventPublisher" as io.mazewall.profiler.engine.TraceEventPublisher {
-  + {abstract}void sendTraceEvent(FileDescriptor, SyscallEvent<? extends Resolved>)
+  + {abstract}void sendTraceEvent(FileDescriptor<?>, SyscallEvent<? extends Resolved>)
 }
 class "DaemonContext" as io.mazewall.profiler.internal.DaemonContext {
   +String getSocketPath()
@@ -206,6 +207,7 @@ class "ProfilerDaemonManager" as io.mazewall.profiler.internal.ProfilerDaemonMan
   + {static}ProfilerDaemonManager INSTANCE
   __
   +DaemonContext getOrSpawnSharedDaemon()
+  +void stop()
   +void cleanupDaemon(DaemonContext)
 }
 class "ProfilerSocket" as io.mazewall.profiler.internal.ProfilerSocket {
@@ -223,7 +225,8 @@ class "ProfilerTraceListener" as io.mazewall.profiler.internal.ProfilerTraceList
   + {static}Companion Companion
   __
   +TraceListenerState getState()
-  +Thread start()
+  +void start()
+  +void close()
 }
 interface "TraceListenerState" as io.mazewall.profiler.internal.TraceListenerState {
 }
@@ -242,6 +245,7 @@ class "StraceWorkloadRunner" as io.mazewall.profiler.strace.StraceWorkloadRunner
 }
 io.mazewall.profiler.BillOfBehavior --> io.mazewall.profiler.engine.SyscallEvent
 io.mazewall.profiler.JvmBaselineProfiles --> io.mazewall.profiler.JvmBaselineProfiles
+io.mazewall.profiler.Profiler --> io.mazewall.profiler.internal.ProfilerTraceListener
 io.mazewall.profiler.Profiler --> io.mazewall.profiler.Profiler
 io.mazewall.profiler.ProfilingResult --> io.mazewall.profiler.BillOfBehavior
 io.mazewall.profiler.compiler.BobCompiler --> io.mazewall.profiler.compiler.BobCompiler
