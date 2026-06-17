@@ -1,6 +1,7 @@
 package io.mazewall.profiler
 
 import io.mazewall.Policy
+import io.mazewall.core.Pid
 import io.mazewall.PolicyScope
 import io.mazewall.Uncompiled
 import io.mazewall.BillOfBehaviorDto
@@ -314,7 +315,7 @@ data class BillOfBehavior(
             val stackProfile = mutableMapOf<SyscallEvent<SyscallEventState.Resolved>, MutableList<Array<StackTraceElement>>>()
             for (entry in dto.stackProfile) {
                 val event = SyscallEvent<SyscallEventState.Resolved>(
-                    pid = 0,
+                    pid = Pid(0),
                     syscallName = entry.syscall,
                     args = entry.args.map { it }.toLongArray(),
                     paths = entry.paths,

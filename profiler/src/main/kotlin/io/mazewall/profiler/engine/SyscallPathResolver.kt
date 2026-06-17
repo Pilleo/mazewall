@@ -14,7 +14,7 @@ internal class SyscallPathResolver(
      * Resolves path arguments for a raw syscall event.
      */
     fun resolve(event: SyscallEvent<SyscallEventState.Raw>): SyscallEvent<SyscallEventState.Resolved> {
-        val pid = Pid(event.pid)
+        val pid = event.pid
         val args = event.args
 
         val paths = when (event.syscallName) {

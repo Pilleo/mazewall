@@ -192,7 +192,7 @@ internal class ProfilerTraceListener(
 
     private fun accumulateStackTrace(event: SyscallEvent<SyscallEventState.Resolved>) {
         if (stackTracesMap == null) return
-        val threadToProfile = Profiler.threadRegistry[io.mazewall.core.Pid(event.pid)] ?: workerThreadProvider()
+        val threadToProfile = Profiler.threadRegistry[event.pid] ?: workerThreadProvider()
         if (threadToProfile != null) {
             val frames = threadToProfile.stackTrace
             stackTracesMap
@@ -203,10 +203,10 @@ internal class ProfilerTraceListener(
     }
 
     private fun sendAckIfNecessary(
-        pid: Int,
+        pid: io.mazewall.core.Pid,
         ackBuf: MemorySegment,
     ) {
-        if (pid != 0) {
+        if (pid.value != 0) {
             LinuxNative.withTransaction { LinuxNative.memory.write(socketFd, ackBuf, 1) }
         }
     }

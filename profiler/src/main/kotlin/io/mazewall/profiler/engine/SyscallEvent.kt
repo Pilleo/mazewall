@@ -17,8 +17,7 @@ public sealed interface SyscallEventState {
  * A type-safe event representing a trapped system call in various stages of resolution.
  */
 public data class SyscallEvent<out S : SyscallEventState>(
-
-    val pid: Int,
+    val pid: Pid,
     val syscallName: String,
     val args: LongArray,
     val paths: List<String> = emptyList(),
@@ -36,7 +35,7 @@ public data class SyscallEvent<out S : SyscallEventState>(
     }
 
     override fun hashCode(): Int {
-        var result = pid
+        var result = pid.hashCode()
         result = 31 * result + syscallName.hashCode()
         result = 31 * result + args.contentHashCode()
         result = 31 * result + paths.hashCode()
@@ -48,7 +47,7 @@ public data class SyscallEvent<out S : SyscallEventState>(
      * Converts this resolved event to the legacy TraceEvent format for wire-compatibility.
      */
     fun toTraceEvent(): TraceEvent {
-        return TraceEvent(pid, syscallName, args, paths, stackTrace)
+        return TraceEvent(pid.value, syscallName, args, paths, stackTrace)
     }
 
     public companion object {
@@ -57,7 +56,7 @@ public data class SyscallEvent<out S : SyscallEventState>(
          */
         fun fromTraceEvent(event: TraceEvent): SyscallEvent<SyscallEventState.Resolved> {
             return SyscallEvent(
-                pid = event.pid,
+                pid = Pid(event.pid),
                 syscallName = event.syscallName,
                 args = event.args,
                 paths = event.paths,

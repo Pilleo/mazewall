@@ -113,7 +113,8 @@ class ProfilerDesignSpec :
                 ioctlCalls.add(0xc0182101L) // SECCOMP_IOCTL_NOTIF_SEND
             }
 
-            override fun recvDescriptor(socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>): FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open>? = FileDescriptor.unsafe(5)
+            override fun recvDescriptor(socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>): FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open>? =
+                FileDescriptor.unsafe(5)
 
             override fun poll(
                 fds: MemorySegment,
@@ -220,7 +221,7 @@ class ProfilerDesignSpec :
                     action shouldBe LoopAction.Continue
                     transport.sentEvents.size shouldBe 1
                     transport.sentEvents[0].syscallName shouldBe "OPEN"
-                    transport.sentEvents[0].pid shouldBe 456
+                    transport.sentEvents[0].pid shouldBe io.mazewall.core.Pid(456)
                     transport.sentEvents[0].paths shouldBe listOf("/tmp/test.txt")
                     transport.ioctlCalls.contains(0xc0182101L) shouldBe true // SECCOMP_IOCTL_NOTIF_SEND
                 }

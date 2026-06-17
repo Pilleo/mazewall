@@ -1,6 +1,7 @@
 package io.mazewall.profiler.engine
 
 import io.mazewall.LinuxNative
+import io.mazewall.core.Pid
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
@@ -163,7 +164,7 @@ class ProfilerDaemonTest {
             assertTrue(action is LoopAction.Continue)
             assertEquals(1, transport.sentEvents.size)
             assertEquals("OPEN", transport.sentEvents[0].syscallName)
-            assertEquals(456, transport.sentEvents[0].pid)
+            assertEquals(Pid(456), transport.sentEvents[0].pid)
             // Verify that continue response was sent via type-safe method
             assertTrue(transport.continueSent, "Should have called sendSeccompContinue")
             assertTrue(transport.ioctlCalls.contains(SECCOMP_IOCTL_NOTIF_SEND), "Should have sent SECCOMP_IOCTL_NOTIF_SEND")

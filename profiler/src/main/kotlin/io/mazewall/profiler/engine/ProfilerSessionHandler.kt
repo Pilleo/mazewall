@@ -57,7 +57,7 @@ internal class ProfilerSessionHandler(
         val socketRevents = pollFds.get(ValueLayout.JAVA_SHORT, POLLFD_REVENT_DATA_OFF)
         if ((socketRevents.toInt() and NativeConstants.POLLIN.toInt()) != 0) {
             if (handleShutdownRequest(ackBuf)) {
-                state = ProfilerState.Terminated
+                state = ProfilerState.Terminated(socketFd, listenerFd)
                 return LoopAction.Shutdown
             }
         }
@@ -68,7 +68,7 @@ internal class ProfilerSessionHandler(
             val recvRes = ioOps.ioctl(listenerFd, SECCOMP_IOCTL_NOTIF_RECV, notif)
             recvRes.onSuccess {
                 if (!processNotification(notif, resp, ackBuf, socketPollFd)) {
-                    state = ProfilerState.Terminated
+                    state = ProfilerState.Terminated(socketFd, listenerFd)
                 }
             }
             if (state is ProfilerState.Terminated) return LoopAction.Break
@@ -100,6 +100,8 @@ internal class ProfilerSessionHandler(
         ackBuf: MemorySegment,
         socketPollFd: MemorySegment,
     ): Boolean {
+        val currentState = state as? ProfilerState.ActiveSession ?: return false
+
         // 1. RECEIVE: Parse raw registers into a SyscallEvent<Raw>
         val id = notif.get(ValueLayout.JAVA_LONG, NOTIF_ID_OFF)
         val pidVal = notif.get(ValueLayout.JAVA_INT, NOTIF_PID_OFF)
@@ -112,7 +114,7 @@ internal class ProfilerSessionHandler(
         }
 
         val rawEvent = SyscallEvent<SyscallEventState.Raw>(
-            pid = pidVal,
+            pid = Pid(pidVal),
             syscallName = syscallMap[nr] ?: "SYSCALL_$nr",
             args = args
         )
@@ -123,12 +125,14 @@ internal class ProfilerSessionHandler(
 
         // 3. NOTIFY: Prepare handshake and notify JVM listener
         val handshake = HandshakeSession.Active(id, listenerFd)
-        state = ProfilerState.Notified(socketFd, listenerFd, id, resolvedEvent)
+        val notifiedState = currentState.notified(id, resolvedEvent)
+        state = notifiedState
 
         socketPollFd.set(ValueLayout.JAVA_INT, POLLFD_FD_OFF, socketFd.value)
         socketPollFd.set(ValueLayout.JAVA_SHORT, POLLFD_EVENTS_OFF, NativeConstants.POLLIN)
 
-        state = ProfilerState.WaitingForAck(socketFd, listenerFd, id)
+        val waitingState = notifiedState.waitingForAck()
+        state = waitingState
 
         @Suppress("TooGenericExceptionCaught")
         try {
@@ -142,7 +146,7 @@ internal class ProfilerSessionHandler(
             return when (result) {
                 is HandshakeSession.Success -> {
                     ledger.record(SessionEvent.AckReceived(System.nanoTime(), pidVal.toLong()))
-                    state = ProfilerState.ActiveSession(socketFd, listenerFd)
+                    state = waitingState.acknowledged()
                     responder.sendSeccompContinue(result, resp)
                     ledger.record(SessionEvent.ContinueReplied(System.nanoTime(), pidVal.toLong(), 0L))
                     true
@@ -153,14 +157,14 @@ internal class ProfilerSessionHandler(
                         "ACK wait failed (timeout or error). Dumping SessionEventLedger:\n" +
                             ledger.dump().joinToString("\n")
                     }
-                    state = ProfilerState.Terminated
+                    state = waitingState.terminate()
                     responder.sendSeccompError(result, resp, ECONNRESET)
                     ledger.record(SessionEvent.ErrorReplied(System.nanoTime(), pidVal.toLong(), ECONNRESET))
                     false
                 }
 
                 else -> {
-                    state = ProfilerState.Terminated
+                    state = ProfilerState.Terminated(socketFd, listenerFd)
                     false
                 }
             }

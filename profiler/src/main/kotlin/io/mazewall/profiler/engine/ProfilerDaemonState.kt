@@ -1,6 +1,5 @@
 package io.mazewall.profiler.engine
 
-import io.mazewall.LinuxNative
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
@@ -10,13 +9,18 @@ import io.mazewall.core.FileDescriptorRole
  */
 internal sealed interface ProfilerDaemonState {
     /** The daemon server has not been started. */
-    data object Uninitialized : ProfilerDaemonState
+    data object Uninitialized : ProfilerDaemonState {
+        fun listening(serverFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>, socketPath: String) =
+            Listening(serverFd, socketPath)
+    }
 
     /** The daemon server is creating and binding the socket. */
     data class Listening(
         val serverFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>,
         val socketPath: String,
-    ) : ProfilerDaemonState
+    ) : ProfilerDaemonState {
+        fun active() = Active(serverFd)
+    }
 
     /** The daemon server is actively listening and processing client connections. */
     data class Active(

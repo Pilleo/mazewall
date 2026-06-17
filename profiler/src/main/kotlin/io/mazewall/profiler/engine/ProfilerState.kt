@@ -1,46 +1,73 @@
 package io.mazewall.profiler.engine
 
-import io.mazewall.LinuxNative
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
+import java.lang.foreign.MemorySegment
 
 /**
  * States representing the lifecycle of a profiler connection/session.
+ *
+ * Each state defines the valid operations (events) that can occur in that state,
+ * ensuring type-safe transitions.
  */
 internal sealed interface ProfilerState {
-    /** Connection accepted, waiting to receive the seccomp listener file descriptor. */
+    val socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>?
+    val listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open>?
+
+    /** Initial state: Connection accepted, waiting to receive the seccomp listener FD. */
     data class Connected(
-        val socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>,
-    ) : ProfilerState
+        override val socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>,
+    ) : ProfilerState {
+        override val listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open>? = null
+
+        fun attachFd(fd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open>) =
+            HandshakeAck(socketFd, fd)
+    }
 
     /** FD received, sending PROTOCOL_ACK_BYTE to parent. */
     data class HandshakeAck(
-        val socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>,
-        val listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open>,
-    ) : ProfilerState
+        override val socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>,
+        override val listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open>,
+    ) : ProfilerState {
+        fun handshakeComplete() = ActiveSession(socketFd, listenerFd)
+    }
 
     /** Actively polling for seccomp notifications or shutdown command. */
     data class ActiveSession(
-        val socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>,
-        val listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open>,
-    ) : ProfilerState
+        override val socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>,
+        override val listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open>,
+    ) : ProfilerState {
+        fun notified(id: Long, event: SyscallEvent<SyscallEventState.Resolved>) =
+            Notified(socketFd, listenerFd, id, event)
+
+        fun terminate() = Terminated(socketFd, listenerFd)
+    }
 
     /** Seccomp notification received, sending trace event. */
     data class Notified(
-        val socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>,
-        val listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open>,
+        override val socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>,
+        override val listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open>,
         val notifId: Long,
         val event: SyscallEvent<SyscallEventState.Resolved>,
-    ) : ProfilerState
+    ) : ProfilerState {
+        fun waitingForAck() = WaitingForAck(socketFd, listenerFd, notifId)
+        fun terminate() = Terminated(socketFd, listenerFd)
+    }
 
     /** Event sent, waiting for PROTOCOL_ACK_BYTE or SHUTDOWN from parent. */
     data class WaitingForAck(
-        val socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>,
-        val listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open>,
+        override val socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>,
+        override val listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open>,
         val notifId: Long,
-    ) : ProfilerState
+    ) : ProfilerState {
+        fun acknowledged() = ActiveSession(socketFd, listenerFd)
+        fun terminate() = Terminated(socketFd, listenerFd)
+    }
 
     /** Closed state. */
-    data object Terminated : ProfilerState
+    data class Terminated(
+        override val socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>? = null,
+        override val listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open>? = null,
+    ) : ProfilerState
 }

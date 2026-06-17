@@ -159,6 +159,28 @@
 2. The `BobCompiler` (or a background collector) can consume these events asynchronously.
 3. This reduces the time spent by the listener thread in the critical section of the seccomp notify loop, improving profiling performance and decoupling event capture from analysis.
 
+### 🔴 [Severity: MEDIUM]: Procedural State Mutation over Type-Safe State Machines
+**Dimension:** Architecture / State Management
+**Target Area:** `:profiler` (`ProfilerDaemonEngine.kt`, `ProfilerSessionHandler.kt`, `ProfilerInstaller.kt`)
+**Failure Hypothesis:** Mutable `var state` properties updated inside procedural loops (`while`, `when`) can lead to invalid transitions or missed synchronizations if an intermediate failure occurs. 
+**Context & Proof:** `ProfilerSessionHandler` maintains `var state: ProfilerState`. The transitions are handled chronologically in `processNotification()` rather than being enforced by the state instances themselves. `ProfilerDaemonEngine` uses a raw `AtomicReference` for `ProfilerDaemonState` and a `var connection: ProfilerConnection`.
+**Recommendation:** Refactor to use true Type-Safe State Machines using Kotlin's sealed classes. The state interfaces themselves should define valid transition methods. This makes invalid transitions compile-time unrepresentable. The orchestration loops should become stateless reducers (e.g., `state = state.handleEvent(event)`).
+
+### 🔴 [Severity: LOW]: Primitive Obsession in Profiler Diagnostic Events
+**Dimension:** Intention Safety / FFM ABI
+**Target Area:** `:profiler` (`SyscallEvent.kt`)
+**Failure Hypothesis:** Passing raw integers for OS identifiers risks transposition bugs (e.g., passing a Process ID where a File Descriptor was expected).
+**Context & Proof:** The `:enforcer` module makes excellent use of Kotlin `value class` (`Pid`, `Uid`, `SyscallNumber`). However, `:profiler` regresses to primitives. For example, `SyscallEvent` uses `val pid: Int` instead of `val pid: io.mazewall.core.Pid`. 
+**Recommendation:** Expand the strict `value class` usage from `:enforcer` to all DTOs and event structures in the `:profiler` module to ensure OS identifiers are never mixed up.
+
+### 🔴 [Severity: MEDIUM]: Phantom Type Invalidation via Internal Mutability
+**Dimension:** Compile-Time Correctness 
+**Target Area:** `:enforcer` (`io.mazewall.core.FileDescriptor`)
+**Failure Hypothesis:** A developer could hold a reference to `FileDescriptor<..., FdState.Open>`, call `.close()`, and the type system would still claim it is `FdState.Open`, leading to runtime `EBADF` crashes.
+**Context & Proof:** `FileDescriptor` uses brilliant phantom types (`R : FileDescriptorRole, S : FdState`), but internally relies on a mutable `private var closed = false`. 
+**Recommendation:** `FileDescriptor` should be strictly immutable. The `close()` function should invalidate the underlying FFM memory segment and return a new `FileDescriptor<R, FdState.Closed>` instance (or simply be consumed by the native engine).
+
+
 ### 🔵 [Severity: ENHANCEMENT]: Investigate "Loom-Safe" Profiling for Virtual Threads
 **Target:** `io.mazewall.profiler.Profiler`
 **Context:** Currently, `Profiler.profile` explicitly forbids execution on virtual threads to prevent "Carrier Poisoning" (trapping the underlying OS thread and affecting unrelated virtual threads).
@@ -265,6 +287,15 @@
 **Target:** Entire project
 **Context:** Direct usage of `java.lang.Thread` or standard `Executors` ignores `mazewall`'s thread-local containment states and structured concurrency requirements, leading to "context leaks" where sandboxed tasks execute unconstrained.
 **Needed:** Implement an ArchUnit rule banning raw thread instantiation and unmanaged executor usage. Force all asynchronous execution through managed `Coroutines` or `ContextAwareExecutor` implementations.
+
+### 🔵 [Severity: ENHANCEMENT]: Leverage Kotlin Contracts for Static Analysis
+**Target:** `io.mazewall.enforcer` and `io.mazewall.LinuxNative`
+**Context:** The compiler is often unaware of the side effects of validation functions or the invocation guarantees of scoped lambdas. This leads to redundant checks and prevents initializing `val` properties within blocks like `withTransaction`.
+**Needed:** Implement Kotlin Contracts across core utilities:
+1. **Validation Contracts**: Update `validateLinuxAndNotVirtual()` to use `returns() implies ...`.
+2. **Result Contracts**: Update `SyscallResult.isSuccess()` to use `returns(true) implies (this is Success)`.
+3. **Scope Contracts**: Update `BpfProgram.dsl`, `BpfBuilder.expect`, `withTransaction`, and `nativeScope` with `callsInPlace` (`EXACTLY_ONCE` or `AT_MOST_ONCE`) to allow local `val` initialization and improve initialization safety.
+4. This improves DX by enabling smart-casting and local `val` initialization in native and BPF DSL scopes.
 
 ## Foundational Architecture & Test-Harness Enablers
 
