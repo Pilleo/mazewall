@@ -10,21 +10,11 @@ import java.nio.file.Path
 
 /**
  * A lightweight parser for Software Bill of Behavior (SBoB) JSON files.
- * This class is designed to be used in production environments to load
- * profiling results without requiring the heavy `mazewall:profiler` module.
- *
- * It delegates core responsibilities to specialized internal components:
- * - [BobDeserializer] for JSON decoding.
- * - [PathNormalizer] for path canonicalization and subpath pruning.
- * - [PolicyTransformer] for generating the final [Policy].
  */
 object SbobParser {
     /**
      * Parses a Bill of Behavior from a Path pointing to an SBoB JSON file
      * and applies it to a base policy.
-     *
-     * @param baseCwd Optional base directory to resolve any relative paths against.
-     * If null, relative paths in the SBoB will trigger an IllegalArgumentException.
      */
     fun parseToPolicy(
         path: Path,
@@ -36,9 +26,6 @@ object SbobParser {
 
     /**
      * Parses a Bill of Behavior from a JSON input stream and applies it to a base policy.
-     *
-     * @param baseCwd Optional base directory to resolve any relative paths against.
-     * If null, relative paths in the SBoB will trigger an IllegalArgumentException.
      */
     fun parseToPolicy(
         stream: InputStream,
@@ -51,9 +38,6 @@ object SbobParser {
 
     /**
      * Parses an SBoB JSON string and generates a [Policy].
-     *
-     * @param baseCwd Optional base directory to resolve any relative paths against.
-     * If null, relative paths in the SBoB will trigger an IllegalArgumentException.
      */
     fun parseJsonToPolicy(
         json: String,
@@ -67,7 +51,8 @@ object SbobParser {
         val prunedReads = PathNormalizer.normalizeAndPrune(dto.opens, baseCwd)
         val prunedWrites = PathNormalizer.normalizeAndPrune(dto.fsWritePaths, baseCwd)
 
-        // 3. TRANSFORM: Convert DTO data into a Policy
-        return PolicyTransformer.transform(dto, prunedReads, prunedWrites, base)
+        // 3. TRANSFORM: Convert DTO data into a PolicyDefinition
+        val def = PolicyTransformer.transform(dto, prunedReads, prunedWrites, base.definition)
+        return Policy(def)
     }
 }

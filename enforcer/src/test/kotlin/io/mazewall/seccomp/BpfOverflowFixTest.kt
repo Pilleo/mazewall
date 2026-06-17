@@ -28,7 +28,7 @@ class BpfOverflowFixTest {
     @Test
     fun `PURE_COMPUTE_UNSAFE policy builds successfully on current arch`() {
         val arch = Arch.current()
-        val filters = BpfFilter.build(arch, Policy.PURE_COMPUTE_UNSAFE)
+        val filters = BpfFilter.build(arch, Policy.PURE_COMPUTE_UNSAFE.definition)
         assertTrue(filters.isNotEmpty())
         println("PURE_COMPUTE_UNSAFE filter size: ${filters.size} instructions")
     }

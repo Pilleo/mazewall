@@ -29,7 +29,7 @@ class FilterInstallationPlannerTest {
             filterDepth = 1,
         )
 
-        val plan = FilterInstallationPlanner.calculateNewFilter(policy, state)
+        val plan = FilterInstallationPlanner.calculateNewFilter(policy.definition, state)
 
         assertFalse(plan.needsNewFilter, "Should skip installing identical whitelist filter")
     }
@@ -53,7 +53,7 @@ class FilterInstallationPlannerTest {
             filterDepth = 1,
         )
 
-        val plan = FilterInstallationPlanner.calculateNewFilter(policy, state)
+        val plan = FilterInstallationPlanner.calculateNewFilter(policy.definition, state)
 
         assertTrue(plan.needsNewFilter, "Should install filter to escalate action severity")
         assertTrue(plan.newBlocks.containsKey(Syscall.EXECVE))

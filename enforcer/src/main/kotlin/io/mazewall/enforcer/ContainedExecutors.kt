@@ -2,7 +2,9 @@ package io.mazewall.enforcer
 
 import io.mazewall.Platform
 import io.mazewall.Policy
+import io.mazewall.PolicyDefinition
 import io.mazewall.PolicyScope
+import io.mazewall.PolicyPresets
 import io.mazewall.Uncompiled
 import io.mazewall.compile
 import io.mazewall.core.SandboxedPath
@@ -16,22 +18,6 @@ import java.util.logging.Logger
 
 /**
  * Public API for wrapping an existing [java.util.concurrent.ExecutorService] to enforce seccomp containment.
- *
- * ### Security & Scope
- * Seccomp is a "blast radius" mitigator for I/O and execution. It is **not** a replacement
- * for internal Java security boundaries (like module exports) or data isolation. A contained
- * thread can still read the heap and any static variables it has access to. For resource
- * isolation (CPU, memory), use Linux cgroups.
- *
- * ### Filesystem Containment and Class Loading
- * [io.mazewall.Policy.Companion.PURE_COMPUTE] uses Landlock for filesystem enforcement and does
- * NOT block `openat`/`open` at the seccomp level. The JVM can load classes lazily from the
- * classpath without interference, as long as classpath paths are included via
- * [io.mazewall.Policy.Builder.allowJvmClasspath].
- *
- * [io.mazewall.Policy.Companion.PURE_COMPUTE_UNSAFE] is deprecated. It blocks `openat`/`open`
- * at the seccomp level, which prevents lazy class loading on the sandboxed thread. Only use it
- * when ALL classes needed by the task are guaranteed to be loaded before containment is applied.
  */
 object ContainedExecutors {
     private val logger = Logger.getLogger(ContainedExecutors::class.java.name)
@@ -39,25 +25,22 @@ object ContainedExecutors {
 
     /**
      * Installs the given policies onto the current thread immediately.
-     *
-     * ### Virtual Thread Warning
-     * Seccomp filters are per-thread. Virtual threads multiplex onto a small pool of OS
-     * "carrier" threads. Installing a filter from within a virtual thread would sandbox
-     * the carrier, inadvertently affecting all other virtual threads scheduled on it.
-     * To prevent this "carrier contamination", this method throws [IllegalStateException]
-     * if called from a virtual thread.
      */
     fun installOnCurrentThread(vararg policies: Policy<*, Uncompiled>) {
-        installInternal(false, *policies)
+        val combined = PolicyDefinition.combine(*policies.map { it.definition }.toTypedArray())
+        installOnCurrentThread(combined)
+    }
+
+    internal fun installOnCurrentThread(policy: PolicyDefinition<*>) {
+        installInternal(false, policy)
     }
 
     /**
      * Installs the given policies onto the entire process (all threads) immediately.
-     * This acts as a global security lockdown and cannot be undone. All future threads
-     * created by this process will inherit these restrictions.
      */
     fun installOnProcess(vararg policies: Policy<PolicyScope.ProcessWideSafe, Uncompiled>) {
-        installInternal(true, *policies)
+        val combined = PolicyDefinition.combine(*policies.map { it.definition }.toTypedArray())
+        installInternal(true, combined)
     }
 
     /**
@@ -68,30 +51,29 @@ object ContainedExecutors {
         delegate: ExecutorService,
         vararg policies: Policy<*, Uncompiled>,
     ): ExecutorService {
-        val combinedPolicy = Policy.combine(*policies)
+        val combinedPolicy = PolicyDefinition.combine(*policies.map { it.definition }.toTypedArray())
         return ContainedExecutorWrapper(delegate, combinedPolicy)
     }
 
     private fun installInternal(
         processWide: Boolean,
-        vararg policies: Policy<*, Uncompiled>,
+        policy: PolicyDefinition<*>,
     ) {
         validateLinuxAndNotVirtual()
 
-        val combinedPolicy = Policy.combine(*policies)
-        applyLandlockIfNecessary(processWide, combinedPolicy)
+        applyLandlockIfNecessary(processWide, policy)
 
         if (!Platform.isSupported()) {
             handleUnsupportedPlatform()
             return
         }
 
-        installSeccompFilter(processWide, combinedPolicy)
+        installSeccompFilter(processWide, policy)
     }
 
     private fun installSeccompFilter(
         processWide: Boolean,
-        combinedPolicy: Policy<*, Uncompiled>,
+        combinedPolicy: PolicyDefinition<*>,
     ) {
         synchronized(processLock) {
             val state = resolveCurrentState()
@@ -106,7 +88,7 @@ object ContainedExecutors {
 
     private fun applyLandlockIfNecessary(
         processWide: Boolean,
-        policy: Policy<*, Uncompiled>,
+        policy: PolicyDefinition<*>,
     ) {
         if (!needsLandlock(policy)) return
 
@@ -133,7 +115,7 @@ object ContainedExecutors {
         }
     }
 
-    private fun needsLandlock(policy: Policy<*, *>) =
+    private fun needsLandlock(policy: PolicyDefinition<*>) =
         policy.allowedFsReadPaths.isNotEmpty() ||
             policy.allowedFsWritePaths.isNotEmpty() ||
             (policy.isSyscallAllowed(Syscall.IO_URING_SETUP) && (!policy.isSyscallAllowed(Syscall.OPEN) || !policy.isSyscallAllowed(Syscall.OPENAT)))
@@ -201,18 +183,17 @@ object ContainedExecutors {
 
     private fun applyBpfFilter(
         processWide: Boolean,
-        toInstall: Policy<*, Uncompiled>,
+        toInstall: PolicyDefinition<*>,
         newBlocks: Map<Syscall, SeccompAction>,
         newDefaultAction: SeccompAction,
     ) {
-        val arch = io.mazewall.core.Arch
-            .current()
-        val compiledPolicy = toInstall.compile(arch)
+        val arch = io.mazewall.core.Arch.current()
+        val compiledSandbox = toInstall.compile(arch)
         if (processWide) {
-            PureJavaBpfEngine.installOnProcess(compiledPolicy)
+            PureJavaBpfEngine.installOnProcess(compiledSandbox)
             updateProcessState(newBlocks, newDefaultAction, toInstall)
         } else {
-            PureJavaBpfEngine.install(compiledPolicy)
+            PureJavaBpfEngine.install(compiledSandbox)
             updateThreadState(newBlocks, newDefaultAction, toInstall)
         }
     }
@@ -220,7 +201,7 @@ object ContainedExecutors {
     private fun updateProcessState(
         newBlocks: Map<Syscall, SeccompAction>,
         newDefaultAction: SeccompAction,
-        toInstall: Policy<*, Uncompiled>,
+        toInstall: PolicyDefinition<*>,
     ) {
         ProcessStateRegistry.update { current ->
             current.withNewSeccompPolicy(toInstall, newBlocks, newDefaultAction)
@@ -230,7 +211,7 @@ object ContainedExecutors {
     private fun updateThreadState(
         newBlocks: Map<Syscall, SeccompAction>,
         newDefaultAction: SeccompAction,
-        toInstall: Policy<*, Uncompiled>,
+        toInstall: PolicyDefinition<*>,
     ) {
         ThreadStateRegistry.state = ThreadStateRegistry.state.withNewSeccompPolicy(toInstall, newBlocks, newDefaultAction)
     }

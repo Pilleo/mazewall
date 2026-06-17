@@ -32,19 +32,30 @@ object BpfFilter {
 
     fun build(
         arch: Arch,
-        policy: Policy<*, *>,
+        policy: PolicyDefinition<*>,
         profilingMode: Boolean = false,
     ): List<BpfInstruction> =
         buildFromActions(
             arch,
             policy.syscallActionNumbers(arch),
             policy.defaultAction,
-            policy.getSyscallInspectionPipeline(),
+            getSyscallInspectionPipeline(),
             policy.allowMmapExec,
             policy.allowNonThreadClone,
             policy.allowUnsafePrctl,
             profilingMode,
         )
+
+    internal fun getSyscallInspectionPipeline(): io.mazewall.seccomp.SyscallInspectionPipeline {
+        return io.mazewall.seccomp.DefaultSyscallInspectionPipeline(
+            listOf(
+                io.mazewall.seccomp.MmapExecInspector(),
+                io.mazewall.seccomp.ThreadCloneInspector(),
+                io.mazewall.seccomp.UnsafePrctlInspector(),
+                io.mazewall.seccomp.Clone3Inspector(),
+            )
+        )
+    }
 
     private fun resolveNativeAction(
         action: SeccompAction,

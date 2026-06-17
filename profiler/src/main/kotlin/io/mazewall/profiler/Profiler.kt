@@ -2,6 +2,8 @@ package io.mazewall.profiler
 
 import io.mazewall.LinuxNative
 import io.mazewall.Policy
+import io.mazewall.PolicyDefinition
+import io.mazewall.PolicyPresets
 import io.mazewall.Uncompiled
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
@@ -89,7 +91,7 @@ object Profiler {
                     try {
                         installProfilingFilterForThread(
                             context.socketPath,
-                            Policy.PURE_COMPUTE_UNSAFE,
+                            PolicyPresets.PURE_COMPUTE_UNSAFE,
                             localLogs,
                             localStackProfile,
                             localPathCache,
@@ -138,14 +140,14 @@ object Profiler {
         delegate: ExecutorService,
         vararg policies: Policy<*, Uncompiled>,
     ): ProfilerExecutorWrapper {
-        val policy = Policy.combine(*policies)
+        val policy = PolicyDefinition.combine(*policies.map { it.definition }.toTypedArray())
         val context = getOrSpawnSharedDaemon()
         return ProfilerExecutorWrapper(delegate, policy, context)
     }
 
     private fun installProfilingFilterForThread(
         socketPath: String,
-        policy: Policy<*, Uncompiled>,
+        policy: PolicyDefinition<*>,
         accumulatedLogs: MutableList<SyscallEvent<SyscallEventState.Resolved>>,
         stackTracesMap: MutableMap<SyscallEvent<SyscallEventState.Resolved>, MutableList<Array<StackTraceElement>>>?,
         pathCache: MutableMap<String, Long>,
@@ -199,7 +201,7 @@ object Profiler {
 
     class ProfilerExecutorWrapper(
         private val delegate: ExecutorService,
-        private val policy: Policy<*, Uncompiled>,
+        private val policy: PolicyDefinition<*>,
         private val context: DaemonContext,
     ) : ExecutorService by delegate {
         private val threadApplied = ThreadLocal.withInitial { false }

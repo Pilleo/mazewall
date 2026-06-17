@@ -1,6 +1,8 @@
 package io.mazewall.enforcer
 
-import io.mazewall.Policy
+import io.mazewall.PolicyDefinition
+import io.mazewall.PolicyBuilder
+import io.mazewall.PolicyScope
 import io.mazewall.core.SeccompAction
 import io.mazewall.core.Syscall
 import java.util.logging.Logger
@@ -15,13 +17,13 @@ internal object FilterInstallationPlanner {
 
     data class FilterPlan(
         val needsNewFilter: Boolean,
-        val toInstall: Policy<*, io.mazewall.Uncompiled>,
+        val toInstall: PolicyDefinition<*>,
         val newBlocks: Map<Syscall, SeccompAction>,
         val newDefaultAction: SeccompAction,
     )
 
     /**
-     * Calculates the minimal new [Policy] (if any) needed to enforce the requested [policy]
+     * Calculates the minimal new [PolicyDefinition] (if any) needed to enforce the requested [policy]
      * given the current [state].
      *
      * It compares the incoming policy's default action and specific syscall actions against
@@ -31,7 +33,7 @@ internal object FilterInstallationPlanner {
      */
     @Suppress("CyclomaticComplexMethod")
     fun calculateNewFilter(
-        policy: Policy<*, io.mazewall.Uncompiled>,
+        policy: PolicyDefinition<*>,
         state: ContainerState,
     ): FilterPlan {
         val effectiveNewDefaultAction = if (policy.defaultAction.priority > state.defaultAction.priority) {
@@ -92,7 +94,7 @@ internal object FilterInstallationPlanner {
         val toInstall = if (needsWhitelistEscalation) {
             policy
         } else {
-            val builder = Policy.builder()
+            val builder = PolicyBuilder<PolicyScope.ThreadLocalOnly>()
             for ((sys, action) in newBlocksMap) {
                 builder.addAction(action, sys)
             }

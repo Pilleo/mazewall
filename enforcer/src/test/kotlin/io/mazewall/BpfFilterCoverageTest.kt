@@ -13,7 +13,7 @@ class BpfFilterCoverageTest {
         // Test with profilingMode = true
         val profilingFilters = BpfFilter.build(
             arch = arch,
-            policy = Policy.PURE_COMPUTE_UNSAFE,
+            policy = Policy.PURE_COMPUTE_UNSAFE.definition,
             profilingMode = true,
         )
         assertNotNull(profilingFilters)
@@ -21,7 +21,7 @@ class BpfFilterCoverageTest {
         // Test with profilingMode = false
         val enforcementFilters = BpfFilter.build(
             arch = arch,
-            policy = Policy.PURE_COMPUTE_UNSAFE,
+            policy = Policy.PURE_COMPUTE_UNSAFE.definition,
             profilingMode = false,
         )
         assertNotNull(enforcementFilters)
@@ -31,7 +31,7 @@ class BpfFilterCoverageTest {
             .builder()
             .allowNonThreadClone()
             .build()
-        val cloneFilters = BpfFilter.build(arch, clonePolicy)
+        val cloneFilters = BpfFilter.build(arch, clonePolicy.definition)
         assertNotNull(cloneFilters)
 
         // Test with allowUnsafePrctl = true
@@ -39,7 +39,7 @@ class BpfFilterCoverageTest {
             .builder()
             .allowUnsafePrctl()
             .build()
-        val prctlFilters = BpfFilter.build(arch, prctlPolicy)
+        val prctlFilters = BpfFilter.build(arch, prctlPolicy.definition)
         assertNotNull(prctlFilters)
 
         // Test with custom default action
@@ -47,14 +47,14 @@ class BpfFilterCoverageTest {
             .builder()
             .defaultAction(SeccompAction.ACT_ERRNO)
             .build()
-        val errnoFilters = BpfFilter.build(arch, errnoPolicy)
+        val errnoFilters = BpfFilter.build(arch, errnoPolicy.definition)
         assertNotNull(errnoFilters)
     }
 
     @Test
     fun `test BpfFilter build for different architectures`() {
         // Test ARM64 (AARCH64)
-        assertNotNull(BpfFilter.build(Arch.AARCH64, Policy.PURE_COMPUTE_UNSAFE))
+        assertNotNull(BpfFilter.build(Arch.AARCH64, Policy.PURE_COMPUTE_UNSAFE.definition))
     }
 
     @Test
@@ -66,7 +66,7 @@ class BpfFilterCoverageTest {
             // enforce mmap check
             .build()
 
-        val filters = BpfFilter.build(arch, policy)
+        val filters = BpfFilter.build(arch, policy.definition)
         assertNotNull(filters)
     }
 
@@ -83,7 +83,7 @@ class BpfFilterCoverageTest {
             SeccompAction.ACT_ALLOW,
         ).forEach { action ->
             val policy = Policy.builder().defaultAction(action).build()
-            assertNotNull(BpfFilter.build(arch, policy))
+            assertNotNull(BpfFilter.build(arch, policy.definition))
         }
     }
 }

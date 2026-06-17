@@ -130,7 +130,7 @@ class LandlockCoverageTest {
         }
         LinuxNative.setEngine(mock)
 
-        val session = LandlockSession(Policy.builder().build())
+        val session = LandlockSession(Policy.builder().build().definition)
         assertFailsWith<IllegalStateException> {
             session.applyRuleset()
         }
@@ -145,7 +145,7 @@ class LandlockCoverageTest {
         val mockEngine = SupportedLandlockMock()
         LinuxNative.setEngine(mockEngine)
 
-        val session = LandlockSession(Policy.builder().build(), processWide = true)
+        val session = LandlockSession(Policy.builder().build().definition, processWide = true)
         session.applyRuleset()
     }
 
@@ -162,7 +162,7 @@ class LandlockCoverageTest {
         System.setProperty("io.mazewall.fallback", "WARN_AND_BYPASS")
         try {
             // Should log warning and continue with thread-scoped
-            val session = LandlockSession(Policy.builder().build(), processWide = true)
+            val session = LandlockSession(Policy.builder().build().definition, processWide = true)
             session.applyRuleset()
         } finally {
             if (old != null) System.setProperty("io.mazewall.fallback", old)
@@ -212,13 +212,13 @@ class LandlockCoverageTest {
             }
         )
         LinuxNative.setEngine(mockFallback)
-        val session1 = LandlockSession(Policy.builder().allowFsRead(SandboxedPath.of("/nonexistent/file", true)).build())
+        val session1 = LandlockSession(Policy.builder().allowFsRead(SandboxedPath.of("/nonexistent/file", true)).build().definition)
         session1.applyRuleset()
 
         LinuxNative.setEngine(mock)
         val tempFile = java.io.File.createTempFile("landlock-test", "txt")
         try {
-            val session2 = LandlockSession(Policy.builder().allowFsRead(tempFile.absolutePath).build())
+            val session2 = LandlockSession(Policy.builder().allowFsRead(tempFile.absolutePath).build().definition)
             session2.applyRuleset()
         } finally {
             tempFile.delete()

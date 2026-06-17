@@ -2,8 +2,8 @@ package io.mazewall.seccomp
 
 import io.mazewall.LinuxNative
 import io.mazewall.Platform
-import io.mazewall.Policy
-import io.mazewall.Compiled
+import io.mazewall.PolicyDefinition
+import io.mazewall.CompiledSandbox
 import io.mazewall.UnsupportedKernelFeatureException
 import io.mazewall.core.Arch
 import io.mazewall.core.SeccompAction
@@ -12,7 +12,6 @@ import io.mazewall.core.PrctlCommand
 import io.mazewall.enforcer.ThreadStateRegistry
 import io.mazewall.ffi.NativeConstants
 import io.mazewall.ffi.memory.nativeScope
-import java.lang.foreign.Arena
 
 /**
  * Pure Java implementation of the seccomp engine.
@@ -30,13 +29,13 @@ object PureJavaBpfEngine : SeccompEngine<EngineState> {
     override val isSupported: Boolean
         get() = Platform.isSupported()
 
-    override fun install(policy: Policy<*, Compiled>): SeccompEngine<EngineState.Loaded> {
+    override fun install(policy: CompiledSandbox<*>): SeccompEngine<EngineState.Loaded> {
         installInternal(policy, useTsync = false)
         @Suppress("UNCHECKED_CAST")
         return this as SeccompEngine<EngineState.Loaded>
     }
 
-    override fun installOnProcess(policy: Policy<*, Compiled>): SeccompEngine<EngineState.Loaded> {
+    override fun installOnProcess(policy: CompiledSandbox<*>): SeccompEngine<EngineState.Loaded> {
         if (!Platform.featureMatrix.seccompTsyncSupported) {
             throw UnsupportedKernelFeatureException("Process-wide Seccomp synchronization (TSYNC) requires Linux 3.17+.")
         }
@@ -47,7 +46,7 @@ object PureJavaBpfEngine : SeccompEngine<EngineState> {
 
     @Suppress("TooGenericExceptionCaught")
     private fun installInternal(
-        policy: Policy<*, Compiled>,
+        policy: CompiledSandbox<*>,
         useTsync: Boolean,
     ) {
         updateState(SeccompInstallationState.Uninitialized)
@@ -62,7 +61,7 @@ object PureJavaBpfEngine : SeccompEngine<EngineState> {
                 updateState(built)
                 val applied = built.applyFilter(arch, useTsync)
                 updateState(applied)
-                val verified = applied.verify(policy)
+                val verified = applied.verify(policy.definition)
                 updateState(verified)
             }
         } catch (e: Throwable) {
@@ -150,8 +149,8 @@ object PureJavaBpfEngine : SeccompEngine<EngineState> {
         }
     }
 
-    internal fun verifyInstallation(policy: Policy<*, *>) {
-        val prctlAction = policy.syscallActions[Syscall.PRCTL] ?: policy.defaultAction
+    internal fun verifyInstallation(definition: PolicyDefinition<*>) {
+        val prctlAction = definition.syscallActions[Syscall.PRCTL] ?: definition.defaultAction
         val canVerify = prctlAction == SeccompAction.ACT_ALLOW
 
         if (!canVerify) {

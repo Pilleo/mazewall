@@ -17,7 +17,7 @@ class BpfFilterLabelTest {
                 .block(Syscall.EXECVE, Syscall.OPEN, Syscall.SOCKET)
                 .build()
 
-        val filter = BpfFilter.build(arch, policy)
+        val filter = BpfFilter.build(arch, policy.definition)
         assertTrue(filter.size >= 10, "Expected at least 10 instructions, got ${filter.size}")
     }
 
@@ -25,7 +25,7 @@ class BpfFilterLabelTest {
     fun `all jump targets land on valid instructions`() {
         val arch = Arch.AMD64
         val policy = Policy.PURE_COMPUTE_UNSAFE
-        val filter = BpfFilter.build(arch, policy)
+        val filter = BpfFilter.build(arch, policy.definition)
 
         for (i in filter.indices) {
             val insn = filter[i]

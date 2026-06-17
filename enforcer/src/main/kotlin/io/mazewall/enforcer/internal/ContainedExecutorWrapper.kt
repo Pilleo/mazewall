@@ -1,7 +1,6 @@
 package io.mazewall.enforcer.internal
 
-import io.mazewall.Policy
-import io.mazewall.Uncompiled
+import io.mazewall.PolicyDefinition
 import io.mazewall.enforcer.ContainedExecutors
 import io.mazewall.enforcer.ContainmentViolationDetector
 import io.mazewall.enforcer.ContainmentViolationException
@@ -15,7 +14,7 @@ import java.util.concurrent.TimeUnit
  */
 internal class ContainedExecutorWrapper(
     private val delegate: ExecutorService,
-    private val policy: Policy<*, Uncompiled>,
+    private val policy: PolicyDefinition<*>,
 ) : ExecutorService by delegate {
     private fun <T> wrapCallable(task: Callable<T>): Callable<T> =
         Callable {

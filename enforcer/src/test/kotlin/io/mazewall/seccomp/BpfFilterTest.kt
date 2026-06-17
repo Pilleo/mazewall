@@ -15,7 +15,7 @@ class BpfFilterTest {
 
     @Test
     fun `filter contains arch check`() {
-        val filter = BpfFilter.build(arch, Policy.builder().build())
+        val filter = BpfFilter.build(arch, Policy.builder().build().definition)
 
         // Find LD W ABS 4 (Load architecture audit ID)
         val hasArchLoad = filter.any { it.code == 0x20.toShort() && it.k == 4 }
@@ -28,7 +28,7 @@ class BpfFilterTest {
 
     @Test
     fun `filter contains syscall nr load`() {
-        val filter = BpfFilter.build(arch, Policy.builder().build())
+        val filter = BpfFilter.build(arch, Policy.builder().build().definition)
         // Load syscall NR (LD W ABS 0)
         val hasSyscallLoad = filter.any { it.code == 0x20.toShort() && it.k == 0 }
         assertTrue(hasSyscallLoad, "Filter should contain instruction to load syscall number")
@@ -36,7 +36,7 @@ class BpfFilterTest {
 
     @Test
     fun `empty policy allows all syscalls`() {
-        val filter = BpfFilter.build(arch, Policy.builder().build())
+        val filter = BpfFilter.build(arch, Policy.builder().build().definition)
         // The last instruction should be RET ALLOW
         val last = filter.last()
         assertEquals(0x06.toShort(), last.code, "Last instruction should be RET")
@@ -46,7 +46,7 @@ class BpfFilterTest {
     @Test
     fun `ALLOW_LIST mode has RET DENY as default`() {
         val policy = Policy.builder().defaultAction(io.mazewall.core.SeccompAction.ACT_ERRNO).build()
-        val filter = BpfFilter.build(arch, policy)
+        val filter = BpfFilter.build(arch, policy.definition)
         val last = filter.last()
         assertEquals(0x06.toShort(), last.code)
         assertEquals(NativeConstants.SECCOMP_RET_ERRNO or NativeConstants.EPERM, last.k)
@@ -60,7 +60,7 @@ class BpfFilterTest {
                 .defaultAction(io.mazewall.core.SeccompAction.ACT_ERRNO)
                 .allow(Syscall.READ)
                 .build()
-        val filter = BpfFilter.build(arch, policy)
+        val filter = BpfFilter.build(arch, policy.definition)
 
         // Find JEQ read -> RET ALLOW
         val readNr = Syscall.READ.numberFor(arch)
@@ -82,7 +82,7 @@ class BpfFilterTest {
     @Test
     fun `clone3 always returns ENOSYS even in ALLOW_LIST`() {
         val policy = Policy.builder().defaultAction(io.mazewall.core.SeccompAction.ACT_ERRNO).build()
-        val filter = BpfFilter.build(arch, policy)
+        val filter = BpfFilter.build(arch, policy.definition)
 
         val clone3Nr = arch.clone3
         var found = false
@@ -102,7 +102,7 @@ class BpfFilterTest {
     @Test
     fun `testBpfMmapArgumentInspection`() {
         val policy = Policy.builder().unblock(Syscall.MMAP).build() // NO_EXEC by default blocks mmap exec
-        val filter = BpfFilter.build(arch, policy)
+        val filter = BpfFilter.build(arch, policy.definition)
 
         // Find JEQ mmap -> check PROT_EXEC
         val mmapNr = Syscall.MMAP.numberFor(arch)
@@ -131,7 +131,7 @@ class BpfFilterTest {
     @Test
     fun `testBpfCloneArgumentInspection`() {
         val policy = Policy.builder().build() // NO_EXEC by default protects clone
-        val filter = BpfFilter.build(arch, policy)
+        val filter = BpfFilter.build(arch, policy.definition)
 
         val cloneNr = Syscall.CLONE.numberFor(arch)
         var foundInspection = false
@@ -155,7 +155,7 @@ class BpfFilterTest {
     @Test
     fun `testBpfPrctlArgumentInspection`() {
         val policy = Policy.builder().build() // NO_EXEC protects prctl
-        val filter = BpfFilter.build(arch, policy)
+        val filter = BpfFilter.build(arch, policy.definition)
 
         val prctlNr = Syscall.PRCTL.numberFor(arch)
         var foundInspection = false

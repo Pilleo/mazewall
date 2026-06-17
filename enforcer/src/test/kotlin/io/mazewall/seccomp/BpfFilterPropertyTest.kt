@@ -23,7 +23,7 @@ class BpfFilterPropertyTest {
                         randomSyscalls.forEach { block(it) }
                     }.build()
 
-                val filter = BpfFilter.build(Arch.AMD64, policy)
+                val filter = BpfFilter.build(Arch.AMD64, policy.definition)
 
                 // Linux limits BPF programs to 4096 instructions
                 assertTrue(filter.size < 4096, "Filter size ${filter.size} should be less than 4096")

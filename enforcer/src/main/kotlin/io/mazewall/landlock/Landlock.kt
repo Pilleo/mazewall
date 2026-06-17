@@ -2,8 +2,8 @@ package io.mazewall.landlock
 
 import io.mazewall.LinuxNative
 import io.mazewall.Platform
-import io.mazewall.Policy
-import io.mazewall.Uncompiled
+import io.mazewall.PolicyDefinition
+import io.mazewall.PolicyPresets
 import io.mazewall.UnsupportedKernelFeatureException
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
@@ -182,7 +182,7 @@ object Landlock {
      *
      * @param processWide If true, attempts to synchronize the ruleset across all threads (Linux 7.0+).
      */
-    fun applyRuleset(policy: Policy<*, Uncompiled>, processWide: Boolean = false) {
+    fun applyRuleset(policy: PolicyDefinition<*>, processWide: Boolean = false) {
         if (!shouldApplyLandlock(policy)) return
 
         val session = LandlockSession(policy, processWide)
@@ -203,7 +203,7 @@ object Landlock {
         return mask
     }
 
-    private fun shouldApplyLandlock(policy: Policy<*, *>) =
+    private fun shouldApplyLandlock(policy: PolicyDefinition<*>) =
         policy.enforceLandlock ||
             policy.allowedFsReadPaths.isNotEmpty() ||
             policy.allowedFsWritePaths.isNotEmpty()
@@ -380,7 +380,7 @@ object Landlock {
     context(arena: Arena)
     internal fun applyUserRules(
         ruleset: LandlockRuleset<RulesetState.Building>,
-        policy: Policy<*, *>,
+        policy: PolicyDefinition<*>,
         abi: Int,
         allFsRead: Long,
     ) {
@@ -393,7 +393,7 @@ object Landlock {
 
     internal fun getAccessMask(
         abi: Int,
-        policy: Policy<*, *>,
+        policy: PolicyDefinition<*>,
     ): Long {
         var accessMaskFs = getFullAccessMask(1) // Base mask
         if (abi >= 2) accessMaskFs = accessMaskFs or LANDLOCK_ACCESS_FS_REFER
@@ -406,7 +406,7 @@ object Landlock {
 
     private fun validateAbiSupport(
         abi: Int,
-        policy: Policy<*, *>,
+        policy: PolicyDefinition<*>,
     ) {
         val unsupportedErrors = mutableListOf<String>()
         if (abi < 2 && (policy.isSyscallAllowed(Syscall.RENAME) || policy.isSyscallAllowed(Syscall.LINK))) {
@@ -464,7 +464,7 @@ object Landlock {
 }
 
 internal class LandlockSession(
-    private val policy: Policy<*, Uncompiled>? = null,
+    private val policy: PolicyDefinition<*>? = null,
     private val processWide: Boolean = false,
 ) {
     var state: LandlockState = LandlockState.Uninitialized

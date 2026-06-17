@@ -3,7 +3,7 @@ import io.mazewall.BaseIntegrationTest
 import io.mazewall.EnabledIfLinuxAndSupported
 import io.mazewall.Policy
 import io.mazewall.compile
-import io.mazewall.Compiled
+import io.mazewall.CompiledSandbox
 import io.mazewall.core.Arch
 import io.mazewall.core.Syscall
 import io.mazewall.enforcer.ContainmentViolationDetector
@@ -28,7 +28,7 @@ class PureJavaBpfEngineTest : BaseIntegrationTest() {
                             .base(Policy.NO_EXEC)
                             .allowMmapExec()
                             .build()
-                        PureJavaBpfEngine.install(policy.compile(Arch.current()))
+                        PureJavaBpfEngine.install(policy.definition.compile(Arch.current()))
                         try {
                             ProcessBuilder("echo", "hello").start()
                             false
@@ -84,7 +84,7 @@ class PureJavaBpfEngineTest : BaseIntegrationTest() {
         try {
             executor
                 .submit {
-                    PureJavaBpfEngine.install(policy.compile(Arch.current()))
+                    PureJavaBpfEngine.install(policy.definition.compile(Arch.current()))
                 }.get()
         } finally {
             executor.shutdown()
@@ -98,13 +98,14 @@ class PureJavaBpfEngineTest : BaseIntegrationTest() {
                 override val state: EngineState = object : EngineState.Unprivileged {}
                 override val isSupported: Boolean = true
 
-                override fun install(policy: Policy<*, Compiled>): SeccompEngine<EngineState.Loaded> {
+                override fun install(policy: CompiledSandbox<*>): SeccompEngine<EngineState.Loaded> {
+                    @Suppress("UNCHECKED_CAST")
                     return this as SeccompEngine<EngineState.Loaded>
                 }
             }
         // Should throw UnsupportedOperationException as per default impl
         assertFailsWith<UnsupportedOperationException> {
-            engine.installOnProcess(Policy.PURE_COMPUTE_UNSAFE.compile(Arch.current()))
+            engine.installOnProcess(Policy.PURE_COMPUTE_UNSAFE.definition.compile(Arch.current()))
         }
     }
 
@@ -122,7 +123,7 @@ class PureJavaBpfEngineTest : BaseIntegrationTest() {
                     .base(Policy.PURE_COMPUTE_UNSAFE)
                     .allowMmapExec()
                     .build()
-                PureJavaBpfEngine.install(policy.compile(Arch.current()))
+                PureJavaBpfEngine.install(policy.definition.compile(Arch.current()))
                 PureJavaBpfEngine.state
             }.get()
             assertTrue(state is EngineState.Loaded, "Expected EngineState.Loaded, got $state")

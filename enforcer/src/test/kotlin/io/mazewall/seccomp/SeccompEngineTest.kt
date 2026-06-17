@@ -1,7 +1,7 @@
 package io.mazewall.seccomp
 import io.mazewall.Policy
+import io.mazewall.CompiledSandbox
 import io.mazewall.compile
-import io.mazewall.Compiled
 import org.junit.jupiter.api.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -13,7 +13,8 @@ class SeccompEngineTest {
             override val state: EngineState
                 get() = object : EngineState.Unprivileged {}
 
-            override fun install(policy: Policy<*, Compiled>): SeccompEngine<EngineState.Loaded> {
+            override fun install(policy: CompiledSandbox<*>): SeccompEngine<EngineState.Loaded> {
+                @Suppress("UNCHECKED_CAST")
                 return this as SeccompEngine<EngineState.Loaded>
             }
 
@@ -22,12 +23,11 @@ class SeccompEngineTest {
         }
 
         val emptyPolicy = Policy.builder().build()
-        val arch = io.mazewall.core.Arch
-            .current()
-        val compiledPolicy = emptyPolicy.compile(arch)
+        val arch = io.mazewall.core.Arch.current()
+        val compiledSandbox = emptyPolicy.definition.compile(arch)
 
         val exception = assertFailsWith<UnsupportedOperationException> {
-            dummyEngine.installOnProcess(compiledPolicy)
+            dummyEngine.installOnProcess(compiledSandbox)
         }
 
         assertEquals("Global process containment is not supported by this engine.", exception.message)

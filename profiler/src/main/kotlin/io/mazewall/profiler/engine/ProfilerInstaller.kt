@@ -3,8 +3,7 @@ package io.mazewall.profiler.engine
 import io.mazewall.BpfFilter
 import io.mazewall.LinuxNative
 import io.mazewall.Platform
-import io.mazewall.Policy
-import io.mazewall.Uncompiled
+import io.mazewall.PolicyDefinition
 import io.mazewall.UnsupportedKernelFeatureException
 import io.mazewall.core.Arch
 import io.mazewall.core.FdState
@@ -31,7 +30,7 @@ internal object ProfilerInstaller {
 
     fun installProfilingFilterForThread(
         socketPath: String,
-        policy: Policy<*, Uncompiled>,
+        policy: PolicyDefinition<*>,
         accumulatedLogs: MutableList<SyscallEvent<SyscallEventState.Resolved>>,
         stackTracesMap: MutableMap<SyscallEvent<SyscallEventState.Resolved>, MutableList<Array<StackTraceElement>>>?,
         pathCache: MutableMap<String, Long>,
@@ -61,7 +60,7 @@ internal object ProfilerInstaller {
 
 internal class ProfilerInstallerSession(
     private val socketPath: String,
-    private val policy: Policy<*, Uncompiled>,
+    private val policy: PolicyDefinition<*>,
     private val accumulatedLogs: MutableList<SyscallEvent<SyscallEventState.Resolved>>,
     private val stackTracesMap: MutableMap<SyscallEvent<SyscallEventState.Resolved>, MutableList<Array<StackTraceElement>>>?,
     private val pathCache: MutableMap<String, Long>,

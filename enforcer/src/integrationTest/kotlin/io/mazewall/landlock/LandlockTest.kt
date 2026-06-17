@@ -424,7 +424,7 @@ class LandlockTest : BaseIntegrationTest() {
         val abi = Landlock.getAbiVersion()
         if (abi >= 2) return
         val policy = Policy.builder().unblock(Syscall.RENAME).build()
-        val ex = assertFailsWith<UnsupportedOperationException> { Landlock.applyRuleset(policy) }
+        val ex = assertFailsWith<UnsupportedOperationException> { Landlock.applyRuleset(policy.definition) }
         assertTrue(ex.message!!.contains("Policy allows rename/link syscalls, but this kernel"))
     }
 
@@ -434,7 +434,7 @@ class LandlockTest : BaseIntegrationTest() {
         val abi = Landlock.getAbiVersion()
         if (abi >= 3) return
         val policy = Policy.builder().unblock(Syscall.TRUNCATE).build()
-        val ex = assertFailsWith<UnsupportedOperationException> { Landlock.applyRuleset(policy) }
+        val ex = assertFailsWith<UnsupportedOperationException> { Landlock.applyRuleset(policy.definition) }
         assertTrue(ex.message!!.contains("Policy allows truncate syscalls, but this kernel"))
     }
 
@@ -444,7 +444,7 @@ class LandlockTest : BaseIntegrationTest() {
         val abi = Landlock.getAbiVersion()
         if (abi >= 5) return
         val policy = Policy.builder().unblock(Syscall.IOCTL).build()
-        val ex = assertFailsWith<UnsupportedOperationException> { Landlock.applyRuleset(policy) }
+        val ex = assertFailsWith<UnsupportedOperationException> { Landlock.applyRuleset(policy.definition) }
         assertTrue(ex.message!!.contains("Policy allows ioctl, but this kernel"))
     }
 
@@ -524,7 +524,7 @@ class LandlockTest : BaseIntegrationTest() {
         }
         LinuxNative.setEngine(mockEngine)
         try {
-            val session = LandlockSession(Policy.PURE_COMPUTE_UNSAFE)
+            val session = LandlockSession(Policy.PURE_COMPUTE_UNSAFE.definition)
             assertTrue(session.state is LandlockState.Uninitialized)
             session.applyRuleset()
             assertTrue(session.state is LandlockState.Applied)
@@ -557,7 +557,7 @@ class LandlockTest : BaseIntegrationTest() {
         }
         LinuxNative.setEngine(mockEngine)
         try {
-            val session = LandlockSession(Policy.PURE_COMPUTE_UNSAFE)
+            val session = LandlockSession(Policy.PURE_COMPUTE_UNSAFE.definition)
             assertFailsWith<IllegalStateException> {
                 session.applyRuleset()
             }

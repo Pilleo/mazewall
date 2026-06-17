@@ -10,14 +10,6 @@
 **Context:** The compilation logic in `BpfFilter` is tightly coupled to concrete argument inspection implementations (`Clone3Inspector`, `MmapExecInspector`, `ThreadCloneInspector`, `UnsafePrctlInspector`). Adding a new seccomp argument check requires modifying `BpfFilter` directly, violating the Open/Closed Principle (OCP).
 **Needed:** Restructure the inspection generation into a pipeline pattern (`SyscallInspectionPipeline`) where inspectors are registered and applied dynamically, allowing `BpfFilter` to remain completely generic.
 
-### 🔵 [Severity: ENHANCEMENT]: Type-Safe State Machine for Seccomp Engine Lifecycle
-**Context:** `PureJavaBpfEngine` implements `SeccompEngine` and mutates a global `SeccompInstallationState` at runtime. Since seccomp is a one-way state transition, relying on runtime verification checks or mutable flags is prone to race conditions or silent failures, especially in multi-threaded application test suites.
-**Needed:** Transition `SeccompEngine` to a type-state machine parameterized by phantom states representing the engine's initialization level (`Unprivileged` -> `Configured` -> `Loaded`).
-
-### ✅ [RESOLVED] [Severity: ENHANCEMENT]: Phantom Types for File Descriptor Roles (Compile-Time FD Safety)
-**Context:** Currently, `io.mazewall.LinuxNative.FileDescriptor` is a universal value class wrapper around an `Int`. This provides lifetime safety via `AutoCloseable` but lacks type safety. A developer could accidentally pass a socket FD or an `O_PATH` file descriptor to a Landlock Ruleset function, causing runtime `EBADF` or silent logical failures.
-**Needed:** Refactor `FileDescriptor` to accept a Phantom Type parameter: `class FileDescriptor<Role>(val fd: Int)`. Define sealed interface roles like `Ruleset`, `OPath`, `SeccompNotif`, and `UnixSocket`. This eliminates FD transposition bugs at compile time.
-
 ### 🔴 [Severity: LOW]: `ContainmentViolationDetector` Violates Open/Closed Principle (OCP)
 **Context:** `ContainmentViolationDetector` hardcodes `Regex` instances and `DENIED_PHRASES` strings to translate standard JVM `IOException` messages into containment failures. Extending this detection for custom environments or translated OS locales requires modifying the core object directly.
 **Needed:** Implement a `ViolationMatcher` strategy interface. Core logic should iterate over injected matchers, allowing consumers to register custom patterns without altering the detector itself.
@@ -155,16 +147,6 @@
 **Context & Proof:** `SyscallEvent` uses `val args: LongArray`. Since arrays in JVM are mutable, any reference holder can execute `event.args[0] = value`.
 **Needed:** Refactor `SyscallEvent` to use an immutable list or perform defensive copies to ensure the captured state remains constant.
 
-### ✅ [RESOLVED] [Severity: LOW]: Conceptual Type Error: Conflation of `Pid` and `Tid`
-**Dimension:** Intention Safety / Architecture
-**Target Area:** Cross-Module
-**Failure Hypothesis:** Using the same type (`Pid`) for both Process IDs (TGID) and Thread IDs (LWP) leads to semantic confusion and risks transposition bugs in multi-threaded logic.
-**Context & Proof:** The codebase uses `io.mazewall.core.Pid` for process-wide operations (like Landlock) and thread-local profiling (USER_NOTIF). Linux treates these as distinct identifiers (`getpid` vs `gettid`).
-**Needed:** Introduce a distinct `value class Tid(val value: Int)` and use it exclusively for thread-level tracking and profiling.
-**Fixed:** Introduced `Tid` value class in `:enforcer:core`. Updated `NativeProcess`, `NativeMemory`, `SyscallEvent`, and the entire `:profiler` pipeline to use `Tid` for thread-specific identifiers, maintaining `Pid` only for true process-level IDs.
-
-2. Alternatively, investigate if a process-wide `USER_NOTIF` handler can distinguish between virtual threads based on their `TID` and only trap those explicitly opted into profiling.
-
 ### 🔵 [Severity: ENHANCEMENT]: Leverage Kotlin Contracts for Static Analysis
 **Target:** `io.mazewall.enforcer` and `io.mazewall.LinuxNative`
 **Context:** The compiler is often unaware of the side effects of validation functions or the invocation guarantees of scoped lambdas. This leads to redundant checks and prevents initializing `val` properties within blocks like `withTransaction`.
@@ -229,11 +211,6 @@
 ### 🔵 [Severity: ENHANCEMENT]: Memory Segment Pooling for Profiler USER_NOTIF
 **Context:** The `seccomp_notif` and `seccomp_notif_resp` structures are used for every trapped system call. Continually allocating and zeroing these segments in the `reactorLoop` is inefficient.
 **Needed:** Implement a simple `SegmentPool` for fixed-size FFM structures. Pre-allocate a small cache of aligned segments and reuse them across different notifications.
-
-### 🔴 [Severity: MEDIUM]: `Policy` Violates Single Responsibility Principle (God Object)
-**Target:** `io.mazewall.Policy`
-**Context:** `Policy` acts as a rule definition model, a DSL builder, an architecture-specific mapper, and a container for compiled BPF artifacts. This high coupling makes the class difficult to extend without affecting unrelated subsystems.
-**Needed:** Split `Policy` into `PolicyDefinition` (data model), `PolicyBuilder` (construction logic), and `CompiledSandbox` (artifact container).
 
 ### 🔴 [Severity: MEDIUM]: Residual Interface Segregation Violation (ISP) in `NativeEngine`
 **Target:** `io.mazewall.NativeEngine`
@@ -818,27 +795,6 @@ For full architectural details, see `supervisor_proxy_design.md`.
 **Context:** When `defaultAction = ACT_ERRNO` (ALLOW_LIST), `openat` is blocked unless explicitly in the allow set. Classes referenced by `PureJavaBpfEngine` immediately after filter installation (specifically `SeccompInstallationState$Failed`) are loaded lazily via `openat`. After the filter blocks `openat`, these classes can no longer be loaded → `NoClassDefFoundError`. The old `JitWarmup` attempted to solve this globally but was fragile and non-deterministic. The correct fix is targeted: explicitly touch the exact class graph that will be used post-installation, in the specific test/component that uses the restrictive ALLOW_LIST policy.
 **Fix:** Extended `AllowListTest.preWarm()` to touch all `SeccompInstallationState` subclasses before the filter is installed. Added `§3g` to `containment_design.md` documenting the rule and its scope.
 
-### ✅ [DONE] [Severity: MEDIUM]: Lack of Compile-Time Enforced Memory and Lifetime Safety for FFM Native Bindings
-**Target:** `io.mazewall.enforcer` (core FFM bindings and MemorySegment management)
-**Context:** Currently, FFM native memory allocations (`MemorySegment`) and lifecycle management (`Arena`) are managed through raw, imperative calls. While standard unit tests and JIT warmups verify these boundaries at runtime, developers can easily introduce memory safety bugs (such as Use-After-Close temporal violations, offset alignment spatial errors, or thread-confinement violations) that bypass compiler checks. Kotlin's modern type system and compiler features could be leveraged to enforce these invariants statically.
-**Needed:** Define and adopt the following compile-time safety patterns across the codebase:
-1. **Temporal Safety via Scoped Lambdas:** Hide raw `Arena` creation behind scoped inline utility functions (e.g., `nativeScope { ... }`) that receive `Arena` as a Context Parameter or receiver, ensuring segments cannot escape their bounded lifetimes.
-2. **Spatial/ABI Safety via Kotlin Value Classes (or Java Records):** Wrap raw `MemorySegment` structs in Kotlin `@JvmInline value class` wrappers that encapsulate layout offsets. This guarantees that offset math is hidden from developers and type-checked by the compiler with zero runtime allocation overhead.
-3. **Confinement Safety via Sealed State Hierarchies:** Model segment ownership transitions (e.g., thread-confined vs. shared states) using sealed interfaces to enforce safe multi-threaded segment handling via compile-time exhaustive checks.
-4. **Static ArchUnit Checks:** Enforce lint-level restrictions on raw `MemorySegment` access (e.g., prohibiting raw `.get()` or `.set()` calls outside of dedicated `bindings` or wrapper classes).
-
-**Memory Management (MM) Blind Spots & Mitigations:**
-Even with compile-time enforcements, the lack of a native borrow checker introduces four critical blind spots:
-*   **The Escape Bypass (Temporal Leak):** Scoped lambdas (`nativeScope`) do not prevent `MemorySegment` references from being returned and escaping the closed arena scope.
-    - *Mitigation:* Restrict `nativeScope` functions to return only primitive values, arrays, or deep-copied Java heap structures. Enforce this via ArchUnit checks that block returning raw segments or wrappers from scopes.
-*   **Dangling Native Pointers (Un-tracked Lifetime Dependencies):** Storing a pointer (memory address) to a struct allocated in a short-lived arena inside a struct allocated in a longer-lived arena results in a dangling pointer when the child arena is closed.
-    - *Mitigation:* Establish strict coding standards requiring hierarchically nested structs to be allocated within the *same* `Arena` instance.
-*   **GC-Managed Auto Arenas (`Arena.ofAuto()`):** GC-managed segments can be cleaned up while their raw memory addresses are still referenced by native code or kernel structures.
-    - *Mitigation:* Never use `Arena.ofAuto()` for segments whose addresses are passed to the Linux kernel (like BPF filters or UNIX sockets). Use confined, explicitly closed arenas bound to thread lifecycles.
-*   **Reinterpret Bounds Bypasses:** Developers can extract raw segments from type-safe wrappers and invoke `MemorySegment.reinterpret(Long.MAX_VALUE)` to reset bounds.
-    - *Mitigation:* Block `reinterpret()` calls at the linter/ArchUnit level except within audited native bootstrap bindings.
-
 ### ✅ [RESOLVED]: Landlock Symlink Rejection Bypass via Canonicalization
 **Context:** The Landlock documentation states that rules explicitly use `O_NOFOLLOW` to reject symlinks and prevent attackers from redirecting path rules. However, `addRule` called `SandboxedPath.of` which used `toRealPath()`, silently bypassing this protection.
 **Fix:** Switched to syntactic normalization (`Paths.get(path).toAbsolutePath().normalize()`) in `SandboxedPath.of`. This defers symlink resolution to the kernel, which then correctly rejects links via `O_NOFOLLOW`.
-

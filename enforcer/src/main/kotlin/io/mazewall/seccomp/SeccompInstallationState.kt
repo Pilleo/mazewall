@@ -1,8 +1,8 @@
 package io.mazewall.seccomp
 
 import io.mazewall.LinuxNative
-import io.mazewall.Policy
-import io.mazewall.Compiled
+import io.mazewall.PolicyDefinition
+import io.mazewall.CompiledSandbox
 import io.mazewall.core.Arch
 import java.lang.foreign.Arena
 import java.lang.foreign.MemorySegment
@@ -21,8 +21,8 @@ internal sealed interface SeccompInstallationState {
 
     /** The thread or process has set `no_new_privs`. */
     data object PrivilegesLocked : SeccompInstallationState {
-        fun buildFilter(arena: Arena, policy: Policy<*, Compiled>): FilterBuilt {
-            val filters = policy.compiledFilters
+        fun buildFilter(arena: Arena, sandbox: CompiledSandbox<*>): FilterBuilt {
+            val filters = sandbox.compiledFilters
             val prog = with(arena) { LinuxNative.memory.newSockFProg(filters) }
             return FilterBuilt(prog)
         }
@@ -39,8 +39,8 @@ internal sealed interface SeccompInstallationState {
 
     /** Common interface for applied filter states. */
     sealed interface FilterApplied : SeccompInstallationState {
-        fun verify(policy: Policy<*, *>): Verified {
-            PureJavaBpfEngine.verifyInstallation(policy)
+        fun verify(definition: PolicyDefinition<*>): Verified {
+            PureJavaBpfEngine.verifyInstallation(definition)
             return Verified
         }
     }
@@ -61,4 +61,3 @@ internal sealed interface SeccompInstallationState {
         val error: Throwable,
     ) : SeccompInstallationState
 }
-

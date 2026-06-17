@@ -1,8 +1,7 @@
 package io.mazewall.landlock
 
 import io.mazewall.LinuxNative
-import io.mazewall.Policy
-import io.mazewall.Uncompiled
+import io.mazewall.PolicyDefinition
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
 import io.mazewall.core.FdState
@@ -69,7 +68,7 @@ internal sealed interface LandlockLifecycle {
     class RulesetCreated(
         val ruleset: LandlockRuleset<RulesetState.Building>,
         val abi: Int,
-        val policy: Policy<*, Uncompiled>?,
+        val policy: PolicyDefinition<*>?,
     ) : LandlockLifecycle {
         fun addRules(arena: Arena): RulesAdded {
             val allFsRead = Landlock.LANDLOCK_ACCESS_FS_READ_FILE or Landlock.LANDLOCK_ACCESS_FS_READ_DIR

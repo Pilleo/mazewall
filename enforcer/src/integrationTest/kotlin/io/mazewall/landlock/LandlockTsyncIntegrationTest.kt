@@ -20,7 +20,7 @@ class LandlockTsyncIntegrationTest : BaseIntegrationTest() {
                     .block(Syscall.OPEN, Syscall.OPENAT, Syscall.IO_URING_SETUP, Syscall.IO_URING_ENTER)
                     .build()
 
-            Landlock.applyRuleset(policy)
+            Landlock.applyRuleset(policy.definition)
 
             // This sibling thread should also be sandboxed
             val thread =

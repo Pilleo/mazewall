@@ -1,7 +1,6 @@
 package io.mazewall.enforcer
 
-import io.mazewall.Policy
-import io.mazewall.Uncompiled
+import io.mazewall.PolicyDefinition
 import io.mazewall.core.SandboxedPath
 import io.mazewall.core.SeccompAction
 import io.mazewall.core.Syscall
@@ -23,7 +22,7 @@ internal data class ContainerState(
     val allowsUnsafePrctl: Boolean = true
 ) {
     fun withNewSeccompPolicy(
-        toInstall: Policy<*, Uncompiled>,
+        toInstall: PolicyDefinition<*>,
         newBlocks: Map<Syscall, SeccompAction>,
         newDefaultAction: SeccompAction
     ): ContainerState {
