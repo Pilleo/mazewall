@@ -94,6 +94,16 @@ public interface NativeFileSystem {
         bufsiz: Long,
     ): SyscallResult<Long, SyscallHandledState.Unhandled>
 
+    context(_: NativeTransaction)
+    fun mmap(
+        addr: Long,
+        length: Long,
+        prot: Int,
+        flags: Int,
+        fd: Int,
+        offset: Long,
+    ): SyscallResult<Long, SyscallHandledState.Unhandled>
+
     fun close(fd: FileDescriptor<*, FdState.Open>): SyscallResult<Long, SyscallHandledState.Unhandled>
 }
 

@@ -5,9 +5,11 @@ import io.mazewall.LinuxNative
 import io.mazewall.Policy
 import io.mazewall.core.Arch
 import io.mazewall.core.NativeArg
+import io.mazewall.core.PrctlCommand
 import io.mazewall.core.Syscall
 import io.mazewall.enforcer.ContainedExecutors
 import org.junit.jupiter.api.Test
+import java.lang.foreign.MemorySegment
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -32,7 +34,7 @@ class BpfHardeningTest : BaseIntegrationTest() {
                     // PR_SET_NAME = 15
                     val res = LinuxNative.withTransaction {
                         LinuxNative.process.prctl(
-                            io.mazewall.core.PrctlCommand.Raw(15)
+                            PrctlCommand.SetName(NativeArg.MemoryArg(MemorySegment.NULL))
                         )
                     }
                     result.set(res)
@@ -50,11 +52,11 @@ class BpfHardeningTest : BaseIntegrationTest() {
     }
 
     @Test
-    fun `test that mmap can be blocked when mmap exec inspection is disabled`() {
+    fun `test that mmap with PROT_EXEC can be blocked when inspection is explicitly disabled`() {
         val policy =
             Policy
                 .builder()
-                .allowMmapExec() // Disable mmap inspection (previously would cause MMAP to be skipped in block list)
+                .allowMmapExec() // Disable argument inspection
                 .block(Syscall.MMAP) // Explicitly block it
                 .build()
 
@@ -65,21 +67,10 @@ class BpfHardeningTest : BaseIntegrationTest() {
             Thread {
                 try {
                     ContainedExecutors.installOnCurrentThread(policy)
-                    // We don't call mmap directly via FFM here because it's hard to set up the arguments safely,
-                    // so we use the generic syscall(2) downcall.
-                    val arch = io.mazewall.core.Arch
-                        .current()
-                    val res = LinuxNative.withTransaction {
-                        LinuxNative.syscall(
-                            arch.mmap.toLong(),
-                            NativeArg.NullArg,
-                            NativeArg.IntArg(4096),
-                            NativeArg.IntArg(1),
-                            NativeArg.IntArg(2),
-                            NativeArg.IntArg(-1),
-                            NativeArg.NullArg,
-                        )
-                    }
+                    val res =
+                        LinuxNative.withTransaction {
+                            LinuxNative.fileSystem.mmap(0, 4096, 7, 0x22, -1, 0)
+                        }
                     result.set(res)
                 } catch (t: Throwable) {
                     error.set(t)

@@ -480,6 +480,20 @@ internal object RealNativeFileSystem : NativeFileSystem {
             ),
             Linker.Option.captureCallState("errno"),
         )
+    private val MMAP: MethodHandle =
+        RealNativeHelper.downcall(
+            "mmap",
+            FunctionDescriptor.of(
+                ValueLayout.ADDRESS,
+                ValueLayout.ADDRESS,
+                ValueLayout.JAVA_LONG,
+                ValueLayout.JAVA_INT,
+                ValueLayout.JAVA_INT,
+                ValueLayout.JAVA_INT,
+                ValueLayout.JAVA_LONG,
+            ),
+            Linker.Option.captureCallState("errno"),
+        )
 
     context(_: NativeTransaction)
     override fun open(
@@ -490,6 +504,30 @@ internal object RealNativeFileSystem : NativeFileSystem {
             val capturedState = ErrnoSegment.allocate()
             val ret = OPEN.invokeExact(capturedState.segment, path, flags) as Int
             RealNativeHelper.result(ret.toLong(), capturedState.getErrno())
+        }
+
+    context(_: NativeTransaction)
+    override fun mmap(
+        addr: Long,
+        length: Long,
+        prot: Int,
+        flags: Int,
+        fd: Int,
+        offset: Long,
+    ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
+        nativeScope {
+            val capturedState = ErrnoSegment.allocate()
+            val ret =
+                MMAP.invokeExact(
+                    capturedState.segment,
+                    MemorySegment.ofAddress(addr),
+                    length,
+                    prot,
+                    flags,
+                    fd,
+                    offset,
+                ) as MemorySegment
+            RealNativeHelper.result(ret.address(), capturedState.getErrno())
         }
 
     override fun close(fd: FileDescriptor<*, FdState.Open>): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = nativeScope {

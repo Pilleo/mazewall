@@ -74,6 +74,7 @@ public open class MockNativeFileSystem : NativeFileSystem {
     public var openResult: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(0L)
     public var readlinkResult: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(0L)
     public var closeResult: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(0L)
+    public var mmapResult: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(0L)
 
     context(_: NativeTransaction)
     override fun open(
@@ -87,6 +88,16 @@ public open class MockNativeFileSystem : NativeFileSystem {
         buf: MemorySegment,
         bufsiz: Long,
     ) = readlinkResult
+
+    context(_: NativeTransaction)
+    override fun mmap(
+        addr: Long,
+        length: Long,
+        prot: Int,
+        flags: Int,
+        fd: Int,
+        offset: Long,
+    ) = mmapResult
 
     override fun close(fd: FileDescriptor<*, FdState.Open>) = closeResult
 }

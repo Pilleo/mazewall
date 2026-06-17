@@ -89,17 +89,4 @@ public sealed class PrctlCommand(public val option: Int) {
         override val arg4: NativeArg get() = NativeArg.LongArg(0L)
         override val arg5: NativeArg get() = NativeArg.LongArg(0L)
     }
-
-    /**
-     * An escape hatch for dynamic or unmapped testing/diagnostic options.
-     * @deprecated Use specialized [PrctlCommand] variants instead.
-     */
-    @Deprecated("Use specialized PrctlCommand variants instead.")
-    public data class Raw(
-        val rawOption: Int,
-        override val arg2: NativeArg = NativeArg.LongArg(0L),
-        override val arg3: NativeArg = NativeArg.LongArg(0L),
-        override val arg4: NativeArg = NativeArg.LongArg(0L),
-        override val arg5: NativeArg = NativeArg.LongArg(0L)
-    ) : PrctlCommand(rawOption)
 }
