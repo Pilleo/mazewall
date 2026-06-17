@@ -17,23 +17,31 @@ import java.lang.foreign.Arena
  * Pure Java implementation of the seccomp engine.
  * Generates BPF filters manually and installs them using Downcalls.
  */
-object PureJavaBpfEngine : SeccompEngine {
+object PureJavaBpfEngine : SeccompEngine<EngineState> {
 
-    internal val state: SeccompInstallationState
-        get() = ThreadStateRegistry.state.engineState
+    override val state: EngineState
+        get() = when (ThreadStateRegistry.state.engineState) {
+            is SeccompInstallationState.Uninitialized -> object : EngineState.Unprivileged {}
+            is SeccompInstallationState.Verified -> object : EngineState.Loaded {}
+            else -> object : EngineState.Configured {}
+        }
 
     override val isSupported: Boolean
         get() = Platform.isSupported()
 
-    override fun install(policy: Policy<*, Compiled>) {
+    override fun install(policy: Policy<*, Compiled>): SeccompEngine<EngineState.Loaded> {
         installInternal(policy, useTsync = false)
+        @Suppress("UNCHECKED_CAST")
+        return this as SeccompEngine<EngineState.Loaded>
     }
 
-    override fun installOnProcess(policy: Policy<*, Compiled>) {
+    override fun installOnProcess(policy: Policy<*, Compiled>): SeccompEngine<EngineState.Loaded> {
         if (!Platform.featureMatrix.seccompTsyncSupported) {
             throw UnsupportedKernelFeatureException("Process-wide Seccomp synchronization (TSYNC) requires Linux 3.17+.")
         }
         installInternal(policy, useTsync = true)
+        @Suppress("UNCHECKED_CAST")
+        return this as SeccompEngine<EngineState.Loaded>
     }
 
     @Suppress("TooGenericExceptionCaught")
@@ -57,7 +65,7 @@ object PureJavaBpfEngine : SeccompEngine {
                 updateState(verified)
             }
         } catch (e: Throwable) {
-            val stepName = when (state) {
+            val stepName = when (ThreadStateRegistry.state.engineState) {
                 is SeccompInstallationState.FilterBuilt -> "installFilter"
                 is SeccompInstallationState.SystemCallApplied -> "verifyInstallation"
                 is SeccompInstallationState.FallbackPrctlApplied -> "verifyInstallation"

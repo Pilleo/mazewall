@@ -2,6 +2,8 @@ package io.mazewall
 
 import io.mazewall.core.Arch
 import io.mazewall.ffi.NativeConstants
+import io.mazewall.LinuxNative.SyscallResult
+import io.mazewall.LinuxNative.SyscallHandledState
 import java.util.logging.Logger
 
 /**
@@ -83,12 +85,12 @@ public object Platform {
         // A healthy kernel should return -1 and set errno to EINVAL (22).
         // Some container environments or broken kernels might silently return 0 or a different error.
         val bogusCheck = provider.checkSeccompSanity()
-        val passed = bogusCheck is LinuxNative.SyscallResult.Error && bogusCheck.errno == ERRNO_EINVAL
+        val passed = bogusCheck is SyscallResult.Error && bogusCheck.errno == ERRNO_EINVAL
         if (!passed) {
             val (ret, errno) =
                 when (bogusCheck) {
-                    is LinuxNative.SyscallResult.Success -> bogusCheck.value to 0
-                    is LinuxNative.SyscallResult.Error -> bogusCheck.rawValue to bogusCheck.errno
+                    is SyscallResult.Success -> bogusCheck.value to 0
+                    is SyscallResult.Error -> bogusCheck.rawValue to bogusCheck.errno
                 }
             logger.warning(
                 "Seccomp sanity check failed. The kernel returned unexpected results (ret=$ret, errno=$errno). Seccomp may be stubbed or broken in this environment.",

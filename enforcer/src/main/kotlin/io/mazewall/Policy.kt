@@ -79,14 +79,16 @@ public class Policy<out S : PolicyScope, out State : PolicyState> private constr
     }
 
     /**
-     * Returns the list of active syscall inspectors for this policy.
+     * Returns the active syscall inspection pipeline for this policy.
      */
-    internal fun getSyscallInspectors(): List<io.mazewall.seccomp.SyscallInspector> {
-        return listOf(
-            io.mazewall.seccomp.MmapExecInspector(),
-            io.mazewall.seccomp.ThreadCloneInspector(),
-            io.mazewall.seccomp.UnsafePrctlInspector(),
-            io.mazewall.seccomp.Clone3Inspector(),
+    internal fun getSyscallInspectionPipeline(): io.mazewall.seccomp.SyscallInspectionPipeline {
+        return io.mazewall.seccomp.DefaultSyscallInspectionPipeline(
+            listOf(
+                io.mazewall.seccomp.MmapExecInspector(),
+                io.mazewall.seccomp.ThreadCloneInspector(),
+                io.mazewall.seccomp.UnsafePrctlInspector(),
+                io.mazewall.seccomp.Clone3Inspector(),
+            )
         )
     }
 

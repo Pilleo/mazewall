@@ -94,11 +94,12 @@ class PureJavaBpfEngineTest : BaseIntegrationTest() {
     @Test
     fun `test SeccompEngine default implementation`() {
         val engine =
-            object : SeccompEngine {
+            object : SeccompEngine<EngineState> {
+                override val state: EngineState = object : EngineState.Unprivileged {}
                 override val isSupported: Boolean = true
 
-                override fun install(policy: Policy<*, Compiled>) {
-                    // No-op for test stub
+                override fun install(policy: Policy<*, Compiled>): SeccompEngine<EngineState.Loaded> {
+                    return this as SeccompEngine<EngineState.Loaded>
                 }
             }
         // Should throw UnsupportedOperationException as per default impl
@@ -113,7 +114,7 @@ class PureJavaBpfEngineTest : BaseIntegrationTest() {
         val executor = Executors.newSingleThreadExecutor()
         try {
             val state = executor
-                .submit<SeccompInstallationState> {
+                .submit<EngineState> {
                 // We allow mmap exec because on cold CI JVM, any activity here
                 // might trigger JIT compilation which requires executable memory.
                 val policy = Policy
@@ -124,7 +125,7 @@ class PureJavaBpfEngineTest : BaseIntegrationTest() {
                 PureJavaBpfEngine.install(policy.compile(Arch.current()))
                 PureJavaBpfEngine.state
             }.get()
-            assertTrue(state is SeccompInstallationState.Verified, "Expected SeccompInstallationState.Verified, got $state")
+            assertTrue(state is EngineState.Loaded, "Expected EngineState.Loaded, got $state")
         } finally {
             executor.shutdown()
         }

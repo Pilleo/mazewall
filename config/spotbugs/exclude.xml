@@ -7,6 +7,8 @@
         <Or>
             <Method name="setEngine" />
             <Method name="resetToDefault" />
+            <Method name="setTransactionManager" />
+            <Method name="resetTransactionManager" />
         </Or>
         <Bug pattern="ST_WRITE_TO_STATIC_FROM_INSTANCE_METHOD" />
     </Match>

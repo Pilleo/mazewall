@@ -1,5 +1,8 @@
 package io.mazewall
 
+import io.mazewall.LinuxNative.SyscallResult
+import io.mazewall.LinuxNative.SyscallHandledState
+
 /**
  * Interface for retrieving platform-specific diagnostics and capabilities.
  * Abstracting this allows for deterministic unit testing of fallback and diagnostic logic.
@@ -24,7 +27,7 @@ public interface PlatformProvider {
      * Performs a bogus Seccomp call to verify that the kernel actively enforces filters.
      * Should return EINVAL (22) if healthy.
      */
-    fun checkSeccompSanity(): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled>
+    fun checkSeccompSanity(): SyscallResult<Long, SyscallHandledState.Unhandled>
 
     /** Returns true if the PR_SET_NO_NEW_PRIVS bit is set for the current process. */
     fun isNoNewPrivsEnabled(): Boolean

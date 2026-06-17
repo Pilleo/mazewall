@@ -9,9 +9,12 @@ import kotlin.test.assertFailsWith
 class SeccompEngineTest {
     @Test
     fun `default installOnProcess throws UnsupportedOperationException`() {
-        val dummyEngine = object : SeccompEngine {
-            override fun install(policy: Policy<*, Compiled>) {
-                // No-op
+        val dummyEngine = object : SeccompEngine<EngineState> {
+            override val state: EngineState
+                get() = object : EngineState.Unprivileged {}
+
+            override fun install(policy: Policy<*, Compiled>): SeccompEngine<EngineState.Loaded> {
+                return this as SeccompEngine<EngineState.Loaded>
             }
 
             override val isSupported: Boolean

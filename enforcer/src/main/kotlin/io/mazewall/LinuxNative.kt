@@ -46,16 +46,31 @@ public object LinuxNative : NativeEngine {
         engine = RealNativeEngine
     }
 
-    @JvmSynthetic
-    @PublishedApi
-    internal val TRANSACTION_INSTANCE: NativeTransaction = object : NativeTransaction {}
+    @Volatile
+    private var transactionManager: TransactionManager = RealTransactionManager
+
+    /**
+     * Swaps the active transaction manager. Used for testing.
+     */
+    @Suppress("spotbugs:ST_WRITE_TO_STATIC_FROM_INSTANCE_METHOD")
+    fun setTransactionManager(newManager: TransactionManager) {
+        transactionManager = newManager
+    }
+
+    /**
+     * Restores the default RealTransactionManager.
+     */
+    @Suppress("spotbugs:ST_WRITE_TO_STATIC_FROM_INSTANCE_METHOD")
+    fun resetTransactionManager() {
+        transactionManager = RealTransactionManager
+    }
 
     /**
      * Executes the given [block] within a [NativeTransaction] context.
      * Raw system calls and sensitive native operations are only available within this scope.
      */
-    public inline fun <T> withTransaction(block: context(NativeTransaction) () -> T): T {
-        return block(TRANSACTION_INSTANCE)
+    public fun <T> withTransaction(block: NativeTransaction.() -> T): T {
+        return transactionManager.withTransaction(block)
     }
 
     override val fileSystem: NativeFileSystem get() = engine.fileSystem
@@ -862,4 +877,17 @@ internal object RealNativeHelper {
             is ValueLayout.OfDouble -> Double::class.java
             else -> MemorySegment::class.java
         }
+}
+
+/**
+ * Default implementation of TransactionManager using a static singleton transaction context.
+ */
+public object RealTransactionManager : TransactionManager {
+    @JvmSynthetic
+    @PublishedApi
+    internal val TRANSACTION_INSTANCE: NativeTransaction = object : NativeTransaction {}
+
+    override fun <T> withTransaction(block: NativeTransaction.() -> T): T {
+        return TRANSACTION_INSTANCE.block()
+    }
 }

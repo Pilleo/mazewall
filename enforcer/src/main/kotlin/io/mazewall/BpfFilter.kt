@@ -39,7 +39,7 @@ object BpfFilter {
             arch,
             policy.syscallActionNumbers(arch),
             policy.defaultAction,
-            policy.getSyscallInspectors(),
+            policy.getSyscallInspectionPipeline(),
             policy.allowMmapExec,
             policy.allowNonThreadClone,
             policy.allowUnsafePrctl,
@@ -73,7 +73,7 @@ object BpfFilter {
         arch: Arch,
         syscallActions: Map<Int, SeccompAction>,
         defaultAction: SeccompAction,
-        inspectors: List<io.mazewall.seccomp.SyscallInspector>,
+        pipeline: io.mazewall.seccomp.SyscallInspectionPipeline,
         allowMmapExec: Boolean = false,
         allowNonThreadClone: Boolean = false,
         allowUnsafePrctl: Boolean = false,
@@ -101,13 +101,11 @@ object BpfFilter {
         )
 
         // Collect and emit all argument-based inspections
-        val inspections = inspectors.flatMap { it.getInspections(arch, context) }
+        val inspections = pipeline.getInspections(arch, context)
         emitInspections(builder, inspections, profilingMode, handledNrs)
 
         // Emit any special non-arg-based logic (e.g. clone3)
-        for (inspector in inspectors) {
-            inspector.emitSpecial(builder, arch, context, handledNrs)
-        }
+        pipeline.emitSpecial(builder, arch, context, handledNrs)
 
         // 3. Block-based checks (Linear Scan)
         emitLinearScan(builder, syscallActions, jvmCriticalNrs, profilingMode, defaultNativeAction, handledNrs)
