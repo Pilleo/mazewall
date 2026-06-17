@@ -209,11 +209,7 @@ internal class ProfilerInstallerSession(
     private fun ensureNoNewPrivs() {
         val r = LinuxNative.withTransaction {
             LinuxNative.process.prctl(
-                NativeConstants.PR_SET_NO_NEW_PRIVS,
-                NativeArg.IntArg(1),
-                NativeArg.NullArg,
-                NativeArg.NullArg,
-                NativeArg.NullArg,
+                io.mazewall.core.PrctlCommand.SetNoNewPrivs(true)
             )
         }
         r.getOrThrow("prctl(PR_SET_NO_NEW_PRIVS)")

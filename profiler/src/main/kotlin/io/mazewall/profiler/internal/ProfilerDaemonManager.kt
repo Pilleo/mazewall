@@ -34,11 +34,7 @@ internal object ProfilerDaemonManager {
             if (existing != null && existing.daemonProcess.isAlive) {
                 LinuxNative.withTransaction {
                     LinuxNative.process.prctl(
-                        NativeConstants.PR_SET_PTRACER,
-                        NativeArg.LongArg(existing.daemonProcess.pid()),
-                        NativeArg.NullArg,
-                        NativeArg.NullArg,
-                        NativeArg.NullArg,
+                        io.mazewall.core.PrctlCommand.SetPtracer(existing.daemonProcess.pid())
                     )
                 }
                 return existing
@@ -153,11 +149,7 @@ internal object ProfilerDaemonManager {
 
         val prctlRes = LinuxNative.withTransaction {
             LinuxNative.process.prctl(
-                NativeConstants.PR_SET_PTRACER,
-                NativeArg.LongArg(daemonPid),
-                NativeArg.NullArg,
-                NativeArg.NullArg,
-                NativeArg.NullArg,
+                io.mazewall.core.PrctlCommand.SetPtracer(daemonPid)
             )
         }
         if (prctlRes is LinuxNative.SyscallResult.Error) {

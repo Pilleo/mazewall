@@ -19,11 +19,7 @@ class LinuxNativeTest : BaseIntegrationTest() {
     fun testPrctlGetSeccomp() {
         val result = LinuxNative.withTransaction {
             LinuxNative.process.prctl(
-                NativeConstants.PR_GET_SECCOMP,
-                NativeArg.NullArg,
-                NativeArg.NullArg,
-                NativeArg.NullArg,
-                NativeArg.NullArg,
+                io.mazewall.core.PrctlCommand.GetSeccomp
             )
         }
         // Usually returns 0 or 2, unless error

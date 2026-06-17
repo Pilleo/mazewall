@@ -167,13 +167,7 @@ public interface NativeProcess {
     fun gettid(): io.mazewall.core.Pid
 
     context(_: NativeTransaction)
-    fun prctl(
-        option: Int,
-        arg2: io.mazewall.core.NativeArg = io.mazewall.core.NativeArg.LongArg(0L),
-        arg3: io.mazewall.core.NativeArg = io.mazewall.core.NativeArg.LongArg(0L),
-        arg4: io.mazewall.core.NativeArg = io.mazewall.core.NativeArg.LongArg(0L),
-        arg5: io.mazewall.core.NativeArg = io.mazewall.core.NativeArg.LongArg(0L),
-    ): SyscallResult<Long, SyscallHandledState.Unhandled>
+    fun prctl(command: io.mazewall.core.PrctlCommand): SyscallResult<Long, SyscallHandledState.Unhandled>
 }
 
 public interface NativeMemory {

@@ -18,7 +18,7 @@ class NativeEngineTest {
 
         LinuxNative.setEngine(mock)
 
-        val result = LinuxNative.withTransaction { LinuxNative.process.prctl(0) }
+        val result = LinuxNative.withTransaction { LinuxNative.process.prctl(io.mazewall.core.PrctlCommand.Raw(0)) }
         assertEquals(42L, result.getOrThrow("test"))
     }
 

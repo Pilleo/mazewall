@@ -1,14 +1,11 @@
 package io.mazewall
 
+import io.mazewall.core.PrctlCommand
 import io.mazewall.ffi.NativeConstants
 import java.io.File
 
 @Suppress("SwallowedException")
 internal object RealPlatformProvider : PlatformProvider {
-    private const val PR_GET_SECCOMP = 21
-    private const val PR_SET_SECCOMP = 22
-    private const val PR_GET_NO_NEW_PRIVS = 39
-
     @JvmField
     internal var yamaPath: String = "/proc/sys/kernel/yama/ptrace_scope"
 
@@ -17,24 +14,12 @@ internal object RealPlatformProvider : PlatformProvider {
     override fun getOsArch(): String = System.getProperty("os.arch") ?: "Unknown"
 
     override fun hasKernelSeccompSupport(): Boolean = LinuxNative.withTransaction {
-        LinuxNative.process.prctl(
-            PR_GET_SECCOMP,
-            io.mazewall.core.NativeArg.LongArg(0L),
-            io.mazewall.core.NativeArg.LongArg(0L),
-            io.mazewall.core.NativeArg.LongArg(0L),
-            io.mazewall.core.NativeArg.LongArg(0L),
-        )
+        LinuxNative.process.prctl(PrctlCommand.GetSeccomp)
     } is LinuxNative.SyscallResult.Success
 
     override fun getSeccompMode(): SeccompMode = try {
         val seccompVal = LinuxNative.withTransaction {
-            LinuxNative.process.prctl(
-                PR_GET_SECCOMP,
-                io.mazewall.core.NativeArg.LongArg(0L),
-                io.mazewall.core.NativeArg.LongArg(0L),
-                io.mazewall.core.NativeArg.LongArg(0L),
-                io.mazewall.core.NativeArg.LongArg(0L),
-            )
+            LinuxNative.process.prctl(PrctlCommand.GetSeccomp)
         }
         when (seccompVal) {
             is LinuxNative.SyscallResult.Error -> SeccompMode.Error(seccompVal.errno)
@@ -53,24 +38,12 @@ internal object RealPlatformProvider : PlatformProvider {
 
     override fun checkSeccompSanity(): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
         LinuxNative.withTransaction {
-            LinuxNative.process.prctl(
-                PR_SET_SECCOMP,
-                io.mazewall.core.NativeArg.LongArg(-1L),
-                io.mazewall.core.NativeArg.LongArg(0L),
-                io.mazewall.core.NativeArg.LongArg(0L),
-                io.mazewall.core.NativeArg.LongArg(0L),
-            )
+            LinuxNative.process.prctl(PrctlCommand.SetSeccomp(-1L))
         }
 
     override fun isNoNewPrivsEnabled(): Boolean = try {
         val nnpVal = LinuxNative.withTransaction {
-            LinuxNative.process.prctl(
-                PR_GET_NO_NEW_PRIVS,
-                io.mazewall.core.NativeArg.LongArg(0L),
-                io.mazewall.core.NativeArg.LongArg(0L),
-                io.mazewall.core.NativeArg.LongArg(0L),
-                io.mazewall.core.NativeArg.LongArg(0L),
-            )
+            LinuxNative.process.prctl(PrctlCommand.GetNoNewPrivs)
         }
         if (nnpVal is LinuxNative.SyscallResult.Success) {
             nnpVal.value == 1L

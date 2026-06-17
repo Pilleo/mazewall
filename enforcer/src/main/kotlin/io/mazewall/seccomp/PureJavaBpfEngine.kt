@@ -8,6 +8,7 @@ import io.mazewall.UnsupportedKernelFeatureException
 import io.mazewall.core.Arch
 import io.mazewall.core.SeccompAction
 import io.mazewall.core.Syscall
+import io.mazewall.core.PrctlCommand
 import io.mazewall.enforcer.ThreadStateRegistry
 import io.mazewall.ffi.NativeConstants
 import io.mazewall.ffi.memory.nativeScope
@@ -94,13 +95,7 @@ object PureJavaBpfEngine : SeccompEngine<EngineState> {
     internal fun setNoNewPrivs() {
         // Step 1: Set no_new_privs (mandatory for non-root seccomp)
         val r1 = LinuxNative.withTransaction {
-            LinuxNative.process.prctl(
-                NativeConstants.PR_SET_NO_NEW_PRIVS,
-                io.mazewall.core.NativeArg.LongArg(1L),
-                io.mazewall.core.NativeArg.LongArg(0L),
-                io.mazewall.core.NativeArg.LongArg(0L),
-                io.mazewall.core.NativeArg.LongArg(0L),
-            )
+            LinuxNative.process.prctl(PrctlCommand.SetNoNewPrivs(true))
         }
         r1.getOrThrow("prctl(PR_SET_NO_NEW_PRIVS)")
     }
@@ -136,11 +131,10 @@ object PureJavaBpfEngine : SeccompEngine<EngineState> {
 
             val r4 = LinuxNative.withTransaction {
                 LinuxNative.process.prctl(
-                    NativeConstants.PR_SET_SECCOMP,
-                    io.mazewall.core.NativeArg.LongArg(NativeConstants.SECCOMP_MODE_FILTER.toLong()),
-                    io.mazewall.core.NativeArg.MemoryArg(prog),
-                    io.mazewall.core.NativeArg.IntArg(0),
-                    io.mazewall.core.NativeArg.IntArg(0),
+                    PrctlCommand.SetSeccomp(
+                        NativeConstants.SECCOMP_MODE_FILTER.toLong(),
+                        io.mazewall.core.NativeArg.MemoryArg(prog)
+                    )
                 )
             }
 
@@ -166,13 +160,7 @@ object PureJavaBpfEngine : SeccompEngine<EngineState> {
 
         // Verify filter is actually installed
         val r5 = LinuxNative.withTransaction {
-            LinuxNative.process.prctl(
-                NativeConstants.PR_GET_SECCOMP,
-                io.mazewall.core.NativeArg.LongArg(0L),
-                io.mazewall.core.NativeArg.LongArg(0L),
-                io.mazewall.core.NativeArg.LongArg(0L),
-                io.mazewall.core.NativeArg.LongArg(0L),
-            )
+            LinuxNative.process.prctl(PrctlCommand.GetSeccomp)
         }
         val mode = r5.getOrThrow("prctl(PR_GET_SECCOMP)")
         if (mode != 2L) {

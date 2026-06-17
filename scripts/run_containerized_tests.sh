@@ -27,6 +27,8 @@ podman run --rm \
     -e IO_MAZEWALL_TEST=true \
     -e MAZEWALL_IN_CONTAINER=true \
     -e GITHUB_ACTIONS="${GITHUB_ACTIONS:-false}" \
+    -e LANG=C.UTF-8 \
+    -e LC_ALL=C.UTF-8 \
     -w /workspace \
     mazewall-test-runner \
     ./gradlew "$@" --no-daemon --build-cache --stacktrace

@@ -7,6 +7,7 @@ import io.mazewall.Uncompiled
 import io.mazewall.UnsupportedKernelFeatureException
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
+import io.mazewall.core.PrctlCommand
 import io.mazewall.core.FdState
 import io.mazewall.core.SandboxedPath
 import io.mazewall.core.Syscall
@@ -359,13 +360,7 @@ object Landlock {
         processWide: Boolean = false
     ): LandlockRuleset<RulesetState.Sealed> {
         val (prctlResult, restrictResult) = LinuxNative.withTransaction {
-            val p = LinuxNative.process.prctl(
-                NativeConstants.PR_SET_NO_NEW_PRIVS,
-                io.mazewall.core.NativeArg.LongArg(1L),
-                io.mazewall.core.NativeArg.LongArg(0L),
-                io.mazewall.core.NativeArg.LongArg(0L),
-                io.mazewall.core.NativeArg.LongArg(0L)
-            )
+            val p = LinuxNative.process.prctl(PrctlCommand.SetNoNewPrivs(true))
 
             val flags = if (processWide) LANDLOCK_RESTRICT_SELF_TSYNC else 0L
             val r = LinuxNative.syscall(

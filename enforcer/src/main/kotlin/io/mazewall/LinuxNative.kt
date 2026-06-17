@@ -706,23 +706,17 @@ internal object RealNativeProcess : NativeProcess {
     }
 
     context(_: NativeTransaction)
-    override fun prctl(
-        option: Int,
-        arg2: io.mazewall.core.NativeArg,
-        arg3: io.mazewall.core.NativeArg,
-        arg4: io.mazewall.core.NativeArg,
-        arg5: io.mazewall.core.NativeArg,
-    ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
+    override fun prctl(command: io.mazewall.core.PrctlCommand): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
         nativeScope {
             val capturedState = ErrnoSegment.allocate()
             val ret =
                 PRCTL.invokeExact(
                     capturedState.segment,
-                    option,
-                    arg2.asLong,
-                    arg3.asLong,
-                    arg4.asLong,
-                    arg5.asLong,
+                    command.option,
+                    command.arg2.asLong,
+                    command.arg3.asLong,
+                    command.arg4.asLong,
+                    command.arg5.asLong,
                 ) as Int
             RealNativeHelper.result(ret.toLong(), capturedState.getErrno())
         }

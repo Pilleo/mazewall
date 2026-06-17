@@ -42,11 +42,7 @@ class PrctlProtectionTest : BaseIntegrationTest() {
                         val nameSeg = allocateFrom("test-thread-name")
                         val res = LinuxNative.withTransaction {
                             LinuxNative.process.prctl(
-                                15,
-                                NativeArg.MemoryArg(nameSeg),
-                                NativeArg.NullArg,
-                                NativeArg.NullArg,
-                                NativeArg.NullArg,
+                                io.mazewall.core.PrctlCommand.Raw(15, NativeArg.MemoryArg(nameSeg))
                             )
                         }.getOrThrow("prctl(PR_SET_NAME)")
                         assertEquals(0, res)
@@ -70,11 +66,7 @@ class PrctlProtectionTest : BaseIntegrationTest() {
                         val nameBuffer = allocate(16)
                         val res = LinuxNative.withTransaction {
                             LinuxNative.process.prctl(
-                                16,
-                                NativeArg.MemoryArg(nameBuffer),
-                                NativeArg.NullArg,
-                                NativeArg.NullArg,
-                                NativeArg.NullArg,
+                                io.mazewall.core.PrctlCommand.Raw(16, NativeArg.MemoryArg(nameBuffer))
                             )
                         }.getOrThrow("prctl(PR_GET_NAME)")
                         assertEquals(0, res)
@@ -101,11 +93,7 @@ class PrctlProtectionTest : BaseIntegrationTest() {
                         // Option 25 is PR_SET_MM (hazardous process memory manipulation), which is blocked
                         LinuxNative.withTransaction {
                             LinuxNative.process.prctl(
-                                25,
-                                NativeArg.NullArg,
-                                NativeArg.NullArg,
-                                NativeArg.NullArg,
-                                NativeArg.NullArg,
+                                io.mazewall.core.PrctlCommand.Raw(25)
                             )
                         }.getOrThrow("prctl(PR_SET_MM)")
                     }.get()
@@ -134,11 +122,7 @@ class PrctlProtectionTest : BaseIntegrationTest() {
                     // it won't be blocked by seccomp BPF with EPERM, so it won't trigger ContainmentViolationException).
                     val res = LinuxNative.withTransaction {
                         LinuxNative.process.prctl(
-                            25,
-                            NativeArg.NullArg,
-                            NativeArg.NullArg,
-                            NativeArg.NullArg,
-                            NativeArg.NullArg,
+                            io.mazewall.core.PrctlCommand.Raw(25)
                         )
                     }
                     // If seccomp BPF had blocked it, res would be Error(errno=1).

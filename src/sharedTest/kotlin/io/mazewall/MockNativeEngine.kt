@@ -170,17 +170,17 @@ public open class MockNativeNetworking : NativeNetworking {
 public open class MockNativeProcess : NativeProcess {
     public var tid: io.mazewall.core.Pid = io.mazewall.core.Pid(1234)
     public var prctlResult: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(0L)
+    public var lastPrctlCommand: io.mazewall.core.PrctlCommand? = null
 
     override fun gettid() = tid
 
     context(_: NativeTransaction)
     override fun prctl(
-        option: Int,
-        arg2: io.mazewall.core.NativeArg,
-        arg3: io.mazewall.core.NativeArg,
-        arg4: io.mazewall.core.NativeArg,
-        arg5: io.mazewall.core.NativeArg,
-    ) = prctlResult
+        command: io.mazewall.core.PrctlCommand,
+    ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+        lastPrctlCommand = command
+        return prctlResult
+    }
 }
 
 public open class MockNativeMemory : NativeMemory {
