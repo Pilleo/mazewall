@@ -52,13 +52,6 @@
 3. Implement a `LandlockFallback` enum (`FailClosed`, `WarnAndBypass`) for process-wide policy installations when runtime kernel support is absent.
 4. This ensures that Landlock's conditional process-wide availability is verified at runtime before configuration, preventing illegal rulesets while preserving compilation safety.
 
-### 🔵 [Severity: ENHANCEMENT]: Strong Type-Safety for `prctl` (Sealed Command Hierarchies)
-**Context:** The JVM `prctl` wrapper currently accepts raw `Int` or `Long` for commands and arguments. Since `prctl` accepts vastly different option structures and argument counts/types depending on the first parameter (the `option` command, e.g. `PR_SET_SECCOMP` vs `PR_SET_NAME`), this is extremely error-prone and can easily lead to memory corruption or invalid register states.
-**Needed:**
-1. Define a sealed class hierarchy representing valid `PrctlCommand`s (e.g. `SetNoNewPrivs`, `SetName(name: String)`, `SetSeccomp(mode: Int)`).
-2. Use type-safe serialization inside the downcall wrapper to unpack the sealed command parameters into correct native arguments.
-3. Update `NativeProcess` to accept the typed `PrctlCommand` instead of raw long/integer arguments, eliminating the risk of misaligned arguments at compile time.
-
 ### 🔵 [Severity: ENHANCEMENT]: Verified-by-Construction BPF Bytecode (BpfProgram<Status>)
 **Context:** BPF filters are constructed via string builders or manual instruction lists and passed directly to the kernel. A typo or structural error in a jump target or instruction boundary results in a runtime error or, worse, a kernel validation failure that triggers a fallback/bypass.
 **Needed:**

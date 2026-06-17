@@ -90,6 +90,7 @@ internal class ProfilerInstallerSession(
         val listenerFdPromise = java.util.concurrent.CompletableFuture<Int>()
         val setupError = java.util.concurrent.atomic.AtomicReference<Throwable?>()
         val setupHelper = Thread {
+            @Suppress("TooGenericExceptionCaught")
             try {
                 val listenerFdValue = listenerFdPromise.get()
                 val sent = ProfilerSocket.sendDescriptor(fd, listenerFdValue)

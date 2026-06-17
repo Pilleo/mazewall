@@ -5,6 +5,7 @@ import io.mazewall.EnabledIfLinuxAndSupported
 import io.mazewall.LinuxNative
 import io.mazewall.Policy
 import io.mazewall.core.NativeArg
+import io.mazewall.core.PrctlCommand
 import io.mazewall.enforcer.ContainedExecutors
 import io.mazewall.enforcer.ContainmentViolationException
 import org.junit.jupiter.api.Test
@@ -27,7 +28,7 @@ class PrctlBypassReproductionTest : BaseIntegrationTest() {
                     Callable {
                         val r = LinuxNative.withTransaction {
                             LinuxNative.process.prctl(
-                                io.mazewall.core.PrctlCommand.Raw(1, NativeArg.IntArg(15))
+                                PrctlCommand.SetPdeathsig(15L)
                             )
                         }
                         if (r is LinuxNative.SyscallResult.Error && r.errno != 1) {
@@ -65,7 +66,7 @@ class PrctlBypassReproductionTest : BaseIntegrationTest() {
                     Callable {
                         val r = LinuxNative.withTransaction {
                             LinuxNative.process.prctl(
-                                io.mazewall.core.PrctlCommand.Raw(47, NativeArg.IntArg(2), NativeArg.IntArg(15))
+                                PrctlCommand.CapAmbient(2L, 15L)
                             )
                         }
                         if (r is LinuxNative.SyscallResult.Error) {

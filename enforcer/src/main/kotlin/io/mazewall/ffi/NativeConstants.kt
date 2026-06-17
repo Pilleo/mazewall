@@ -15,13 +15,19 @@ object NativeConstants {
     const val LANDLOCK_CREATE_RULESET_VERSION = (1L shl 0)
 
     // prctl options
-    const val PR_SET_NO_NEW_PRIVS = 38
-    const val PR_GET_NO_NEW_PRIVS = 39
+    const val PR_SET_PDEATHSIG = 1
     const val PR_SET_NAME = 15
     const val PR_GET_NAME = 16
-    const val PR_SET_PTRACER = 0x59616d61
-    const val PR_SET_SECCOMP = 22
+    const val PR_SET_MM = 25
     const val PR_GET_SECCOMP = 21
+    const val PR_SET_SECCOMP = 22
+    const val PR_SET_NO_NEW_PRIVS = 38
+    const val PR_GET_NO_NEW_PRIVS = 39
+    const val PR_CAP_AMBIENT = 47
+    const val PR_SET_PTRACER = 0x59616d61
+
+    // prctl sub-options
+    const val PR_CAP_AMBIENT_RAISE = 2
 
     // Seccomp
     const val SECCOMP_SET_MODE_FILTER = 1
