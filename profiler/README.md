@@ -71,7 +71,7 @@ Three profiling strategies are available depending on your environment and what 
 The default. An out-of-process daemon intercepts every syscall on the profiled thread via the kernel's `SECCOMP_USER_NOTIF` interface. It captures both the syscall number and the resolved filesystem path (via `/proc/<pid>/fd/`), then releases the thread and lets it continue.
 
 **Limitations:**
-- `io_uring` operations bypass syscall interception (see Tier A / Tier H workaround in [article2-profiler.md](../docs/presentation/article2-profiler.md))
+- `io_uring` operations bypass syscall interception (see [IO_URING_PROFILING.md](IO_URING_PROFILING.md) for solutions)
 - Requires `ptrace_scope ≤ 1` or a container with `SYS_PTRACE` if cross-process path resolution is needed
 
 ### Tier A — Iterative Landlock Profiler

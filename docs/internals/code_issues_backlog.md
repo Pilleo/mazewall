@@ -99,16 +99,6 @@
 1. Add a utility to map common `Int` errnos to their symbolic names (e.g., `1 -> "EPERM"`, `13 -> "EACCES"`).
 2. Update `SyscallResult.Error.toString()` and `throwErrno()` to include this symbolic name for better developer feedback.
 
-### 🔵 [Severity: ENHANCEMENT]: Polymorphic `TraceEvent` Hierarchy (Semantic Property Access)
-**Target:** `io.mazewall.profiler.engine.TraceEvent`
-**Context:** `TraceEvent` is currently a sealed class but only distinguishes between `Generic` and `File`. Crucially, both variants still expose a raw `args: LongArray` as the primary way to access syscall parameters. This forces downstream consumers (like `BobCompiler` and `SyscallPathResolver`) to use **positional/index-based access** (e.g., `event.args[2]` for `mmap` protection flags). 
-**Problem:** This "primitive obsession" at the event layer is brittle and error-prone. A single register mismatch in the mapping logic (as seen with `SYMLINKAT`) causes silent analysis failures. Furthermore, it prevents the compiler from ensuring that all parameters for a specific syscall are present and correctly typed before they reach the analysis engine.
-**Status:** **PARTIALLY IMPLEMENTED.** (The sealed class structure exists, but the semantic property extraction does not).
-**Needed:** Transition to a fully specialized sealed hierarchy where syscall-specific parameters are exposed as **named, typed properties**.
-1. **Specialized Variants:** Implement types like `SocketEvent(val domain: Int, val type: Int)`, `MmapEvent(val addr: Long, val len: Long, val prot: Int)`, and `ExecEvent(val path: String, val args: List<String>)`.
-2. **Type-Safe Analysis:** Refactor `BobCompiler` to use exhaustive `when` expressions on these types. Instead of checking `if (event.syscallName == "MMAP") { use(event.args[2]) }`, it should use `is MmapEvent -> use(event.prot)`.
-3. **Internal Decoupling:** The register-to-property mapping should be encapsulated within the `TraceEvent` factory or a specialized `EventMapper`, keeping the rest of the profiler engine completely unaware of raw register indices.
-
 ### 🔵 [Severity: ENHANCEMENT]: Formal Monoidal Composition for `BillOfBehavior`
 **Target:** `io.mazewall.profiler.BillOfBehavior`
 **Context:** `BillOfBehavior` has a manual `plus` operator, but it isn't formally modeled as a Monoid. Merging complex behavior profiles (e.g., merging a JVM floor with an application-specific trace) is a core operation for generating policies.
@@ -473,7 +463,7 @@ However, `PURE_COMPUTE_UNSAFE` does **not** block `Syscall.IOCTL` (likely becaus
 val needsMmapProtection = !policy.allowMmapExec && state.currentlyAllowsMmapExec
 ```
 If a previous filter already blocked `mmap` exec, `state.currentlyAllowsMmapExec` is `false`, so `needsMmapProtection` is `false`. Thus, the protection itself does not trigger `needsNewFilter = true`.
-However, if `needsNewFilter` is triggered by a *different* new syscall block, we compile the new policy filter `toInstall`. Because `policy.allowMmapExec` is `false` (the new policy also blocks it), the constructed `toInstall` has `allowMmapExec = false`. When `BpfFilter.build(arch, toInstall)` compiles the filter, it unconditionally adds the complete `mmap`/`mprotect` argument-inspection BPF instruction block.
+奪However, if `needsNewFilter` is triggered by a *different* new syscall block, we compile the new policy filter `toInstall`. Because `policy.allowMmapExec` is `false` (the new policy also blocks it), the constructed `toInstall` has `allowMmapExec = false`. When `BpfFilter.build(arch, toInstall)` compiles the filter, it unconditionally adds the complete `mmap`/`mprotect` argument-inspection BPF instruction block.
 As a result, both the existing filter and the new stacked filter contain identical redundant BPF instruction sets. Each subsequent stacked filter adds yet another copy, bloating the kernel's BPF filter list, increasing runtime overhead on every `mmap`/`mprotect`/`clone`/`prctl` call, and wasting the 32-filter depth limit budget.
 **Cascading Risk Potential:** Medium performance and kernel instruction memory footprint degradation on highly nested or stacked sandbox setups.
 **Needed:** In `FilterInstallationPlanner.calculateNewFilter`, when constructing `toInstall` in the `else` branch of `policy.defaultAction == ACT_ALLOW`:

@@ -4,11 +4,8 @@ import io.mazewall.LinuxNative
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
-import io.mazewall.core.Pid
 import io.mazewall.core.Tid
 import io.mazewall.profiler.Profiler
-import io.mazewall.profiler.engine.SyscallEvent
-import io.mazewall.profiler.engine.SyscallEventState
 import io.mazewall.profiler.engine.TraceEvent
 import java.io.BufferedInputStream
 import java.io.DataInputStream
@@ -21,7 +18,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.logging.Logger
 
 /**
- * Background listener that reads [SyscallEvent]s from a tracee socket and resolves them.
+ * Background listener that reads trace events from a daemon socket and resolves them.
  *
  * Implements [AutoCloseable] to ensure that the worker thread is deterministically joined
  * and resources (Arena, Socket) are released upon shutdown.
@@ -29,8 +26,8 @@ import java.util.logging.Logger
 @Suppress("SwallowedException")
 internal class ProfilerTraceListener(
     private val socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>,
-    private val accumulatedLogs: MutableList<SyscallEvent<SyscallEventState.Resolved>>,
-    private val stackTracesMap: MutableMap<SyscallEvent<SyscallEventState.Resolved>, MutableList<Array<StackTraceElement>>>?,
+    private val accumulatedLogs: MutableList<TraceEvent>,
+    private val stackTracesMap: MutableMap<TraceEvent, MutableList<Array<StackTraceElement>>>?,
     private val pathCache: MutableMap<String, Long>,
     private val workerThreadProvider: () -> Thread?,
 ) : AutoCloseable {
@@ -80,8 +77,6 @@ internal class ProfilerTraceListener(
 
         logger.fine("Closing ProfilerTraceListener for fd=${socketFd.value}")
 
-        // Closing the socket will cause the NativeSocketInputStream.read() to unblock/fail
-        // allowing the worker loop to terminate gracefully.
         socketFd.close()
 
         workerThread?.let {
@@ -107,9 +102,16 @@ internal class ProfilerTraceListener(
 
         val dis = DataInputStream(BufferedInputStream(inputStream))
         try {
+            // Read handshake ACK from the daemon
+            state = TraceListenerState.Disconnected // Reusing state for handshake wait
+            val handshakeAck = dis.readByte()
+            if (handshakeAck != PROTOCOL_ACK_BYTE) {
+                logger.warning("Invalid handshake ACK from daemon: $handshakeAck")
+            }
+
             while (!closed.get()) {
                 state = TraceListenerState.AwaitingEvent
-                val legacyEvent = try {
+                val event = try {
                     readNextEvent(dis)
                 } catch (e: java.io.EOFException) {
                     break // Graceful shutdown or socket closed
@@ -121,8 +123,7 @@ internal class ProfilerTraceListener(
                     throw e
                 }
 
-                val event = SyscallEvent.fromTraceEvent(legacyEvent)
-                state = TraceListenerState.ProcessingEvent(legacyEvent)
+                state = TraceListenerState.ProcessingEvent(event)
                 processEvent(event, ackBuf)
             }
         } catch (e: java.io.IOException) {
@@ -133,18 +134,18 @@ internal class ProfilerTraceListener(
     }
 
     private fun readNextEvent(dis: DataInputStream): TraceEvent {
-        val pidOrTid = dis.readInt()
-        state = TraceListenerState.ReadingHeader(pidOrTid)
+        val tidValue = dis.readInt()
+        state = TraceListenerState.ReadingHeader(tidValue)
 
         val syscallNameLen = dis.readInt()
-        state = TraceListenerState.ReadingSyscall(pidOrTid, syscallNameLen)
+        state = TraceListenerState.ReadingSyscall(tidValue, syscallNameLen)
 
         val syscallNameBytes = ByteArray(syscallNameLen)
         dis.readFully(syscallNameBytes)
         val syscallName = String(syscallNameBytes, Charsets.UTF_8)
 
         val argsCount = dis.readInt()
-        state = TraceListenerState.ReadingArguments(pidOrTid, syscallName, argsCount)
+        state = TraceListenerState.ReadingArguments(tidValue, syscallName, argsCount)
 
         val args = LongArray(argsCount)
         for (i in 0 until argsCount) {
@@ -160,13 +161,13 @@ internal class ProfilerTraceListener(
             paths.add(String(pathBytes, Charsets.UTF_8))
         }
 
-        val threadToProfile = Profiler.threadRegistry[Tid(pidOrTid)] ?: workerThreadProvider()
+        val threadToProfile = Profiler.threadRegistry[Tid(tidValue)] ?: workerThreadProvider()
         val stackTrace = threadToProfile?.stackTrace?.map { it.toString() }
-        return TraceEvent(pid = pidOrTid, syscallName = syscallName, args = args, paths = paths, stackTrace = stackTrace)
+        return TraceEvent(tidValue = tidValue, syscallName = syscallName, args = args, paths = paths, stackTrace = stackTrace)
     }
 
     private fun processEvent(
-        event: SyscallEvent<SyscallEventState.Resolved>,
+        event: TraceEvent,
         ackBuf: MemorySegment,
     ) {
         if (event.paths.isNotEmpty() && isDuplicate(event)) {
@@ -179,7 +180,7 @@ internal class ProfilerTraceListener(
         sendAckIfNecessary(event.tid, ackBuf)
     }
 
-    private fun isDuplicate(event: SyscallEvent<SyscallEventState.Resolved>): Boolean {
+    private fun isDuplicate(event: TraceEvent): Boolean {
         val cacheKey = "${event.syscallName}:${event.paths.sorted().joinToString(",")}"
         val now = System.currentTimeMillis()
         val lastSeen = pathCache[cacheKey] ?: 0L
@@ -192,7 +193,7 @@ internal class ProfilerTraceListener(
         }
     }
 
-    private fun accumulateStackTrace(event: SyscallEvent<SyscallEventState.Resolved>) {
+    private fun accumulateStackTrace(event: TraceEvent) {
         if (stackTracesMap == null) return
         val threadToProfile = Profiler.threadRegistry[event.tid] ?: workerThreadProvider()
         if (threadToProfile != null) {

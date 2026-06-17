@@ -1,6 +1,5 @@
 package io.mazewall.profiler.engine
 
-import io.mazewall.core.Pid
 import io.mazewall.core.Tid
 
 /**
@@ -31,7 +30,7 @@ public data class SyscallEvent<out S : SyscallEventState>(
     val tid: Tid,
     val syscallName: String,
     val args: LongArray,
-    val paths: List<String> = emptyList(),
+    val paths: List<String> = emptySet<String>().toList(),
     val stackTrace: List<String>? = null,
 ) {
     override fun equals(other: Any?): Boolean {
@@ -52,28 +51,6 @@ public data class SyscallEvent<out S : SyscallEventState>(
         result = 31 * result + paths.hashCode()
         result = 31 * result + (stackTrace?.hashCode() ?: 0)
         return result
-    }
-
-    /**
-     * Converts this resolved event to the legacy [TraceEvent] format for wire-compatibility.
-     */
-    fun toTraceEvent(): TraceEvent {
-        return TraceEvent(tid.value, syscallName, args, paths, stackTrace)
-    }
-
-    public companion object {
-        /**
-         * Wraps a legacy [TraceEvent] into a type-safe [SyscallEventState.Resolved] [SyscallEvent].
-         */
-        fun fromTraceEvent(event: TraceEvent): SyscallEvent<SyscallEventState.Resolved> {
-            return SyscallEvent(
-                tid = Tid(event.pid),
-                syscallName = event.syscallName,
-                args = event.args,
-                paths = event.paths,
-                stackTrace = event.stackTrace
-            )
-        }
     }
 }
 

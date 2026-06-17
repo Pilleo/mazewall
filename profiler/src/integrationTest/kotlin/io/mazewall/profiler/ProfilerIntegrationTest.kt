@@ -7,8 +7,7 @@ import io.mazewall.asFd
 import io.mazewall.core.Arch
 import io.mazewall.core.Syscall
 import io.mazewall.profiler.compiler.BobCompiler
-import io.mazewall.profiler.engine.SyscallEvent
-import io.mazewall.profiler.engine.SyscallEventState
+import io.mazewall.profiler.engine.TraceEvent
 import org.junit.jupiter.api.Test
 import java.io.File
 import java.util.concurrent.Callable

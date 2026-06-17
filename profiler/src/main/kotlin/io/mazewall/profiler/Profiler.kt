@@ -7,149 +7,101 @@ import io.mazewall.PolicyPresets
 import io.mazewall.Uncompiled
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
-import io.mazewall.core.Pid
 import io.mazewall.core.Tid
 import io.mazewall.profiler.compiler.BobCompiler
+import io.mazewall.profiler.engine.TraceEvent
 import io.mazewall.profiler.engine.ProfilerInstaller
-import io.mazewall.profiler.engine.SyscallEvent
-import io.mazewall.profiler.engine.SyscallEventState
-import io.mazewall.profiler.internal.DaemonContext
 import io.mazewall.profiler.internal.ProfilerDaemonManager
-import io.mazewall.profiler.internal.ProfilerSocket
 import io.mazewall.profiler.internal.ProfilerTraceListener
-import java.util.concurrent.*
+import java.util.concurrent.Callable
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Future
 import java.util.concurrent.atomic.AtomicReference
 import java.util.logging.Logger
 
-// SUPPRESSION JUSTIFICATION: This class is the central coordinator for the unprivileged system call profiler.
-// Keeping the socket setup, trace compilation, daemon life cycle, and thread registering functions together
-// maintains the architectural cohesion of the diagnostic engine.
-
 /**
- * High-performance Out-of-Process USER_NOTIF Profiler API.
+ * High-level API for system call profiling and Bill of Behavior (SBoB) generation.
+ *
+ * Tier S Profiler: Uses seccomp USER_NOTIF to trap system calls and notify a background daemon,
+ * which resolves arguments (like paths) using `process_vm_readv` before allowing the syscall to continue.
  */
 object Profiler {
     private val logger = Logger.getLogger(Profiler::class.java.name)
-    val threadRegistry = ConcurrentHashMap<Tid, Thread>()
     private val listeners = CopyOnWriteArrayList<ProfilerTraceListener>()
+    internal val threadRegistry = ConcurrentHashMap<Tid, Thread>()
 
     /**
-     * Profiles [block] on a dedicated OS platform thread under a seccomp
-     * USER_NOTIF filter and returns both the block's return value and the
-     * complete [BillOfBehavior].
-     *
-     * The lambda runs synchronously — the caller blocks until it completes.
-     *
-     * ## Thread isolation
-     * A fresh OS thread is created for each call. Syscalls from any threads
-     * spawned *inside* the lambda are not captured — seccomp USER_NOTIF is
-     * per-thread, and profiling child threads requires explicit opt-in not
-     * yet provided by this API.
-     *
-     * ## Stack traces
-     * Per-syscall JVM stack traces are captured on a best-effort basis.
-     * When the kernel pauses the worker for USER_NOTIF, its Java stack is
-     * frozen. The trace listener captures it via [Thread.stackTrace] before
-     * the daemon sends FLAG_CONTINUE. Frames are Java-only. There is a brief
-     * window between the daemon sending the TraceEvent and the JVM listener
-     * reading it; in practice the worker is still in-kernel during this
-     * window, but this is not a formal JMM guarantee. Treat traces as
-     * diagnostic, not as hard security evidence.
-     *
-     * @throws IllegalStateException if the profiling infrastructure cannot
-     *         be initialised (e.g. PR_SET_NO_NEW_PRIVS failed).
-     * @throws IllegalStateException if called from a Loom virtual thread
-     *         (would poison the ForkJoinPool carrier — see AGENTS.md Rule B).
+     * Profiles the given [block] and returns a [BillOfBehavior].
      */
-    fun <T> profile(block: () -> T): ProfilingResult<T> {
-        if (Thread.currentThread().isVirtual) {
-            throw IllegalStateException("Seccomp profiling is not supported on Loom virtual threads.")
-        }
-
-        val context = getOrSpawnSharedDaemon()
-
-        val localLogs = CopyOnWriteArrayList<SyscallEvent<SyscallEventState.Resolved>>()
-        val localStackProfile =
-            ConcurrentHashMap<SyscallEvent<SyscallEventState.Resolved>, MutableList<Array<StackTraceElement>>>()
+    fun <T> profile(
+        block: () -> T,
+    ): ProfilingResult<T> {
+        val context = ProfilerDaemonManager.getOrSpawnSharedDaemon()
+        val localLogs = CopyOnWriteArrayList<TraceEvent>()
+        val localStackProfile = ConcurrentHashMap<TraceEvent, MutableList<Array<StackTraceElement>>>()
         val localPathCache = ConcurrentHashMap<String, Long>()
 
-        var workerThread: Thread? = null
+        val blockResult = AtomicReference<T>()
+        val errorRef = AtomicReference<Throwable>()
 
-        try {
-            val blockResult = AtomicReference<Any?>(null)
-            val blockError = AtomicReference<Throwable?>(null)
+        val workerThread = Thread {
+            val tid = LinuxNative.process.gettid()
+            threadRegistry[tid] = Thread.currentThread()
+            try {
+                // We must use a separate thread because seccomp USER_NOTIF stops the calling thread.
+                // The resolver daemon needs to be notified by the kernel, which then notifies
+                // our JVM listener thread to record the event.
+                @Suppress("TooGenericExceptionCaught")
+                try {
+                    installProfilingFilterForThread(
+                        context.socketPath,
+                        PolicyPresets.PURE_COMPUTE_UNSAFE,
+                        localLogs,
+                        localStackProfile,
+                        localPathCache,
+                    ) { Thread.currentThread() }
 
-            // Dedicated OS platform thread for block
-            val thread =
-                Thread {
-                    val stid = LinuxNative.process.gettid()
-                    threadRegistry[stid] = Thread.currentThread()
-                    // SUPPRESSION JUSTIFICATION: We are executing an arbitrary, untrusted user block.
-                    // We MUST catch Throwable to ensure we capture any Error or Exception thrown
-                    // by the user's workload so we can bubble it up to the calling thread safely.
-                    @Suppress("TooGenericExceptionCaught")
-                    try {
-                        installProfilingFilterForThread(
-                            context.socketPath,
-                            PolicyPresets.PURE_COMPUTE_UNSAFE,
-                            localLogs,
-                            localStackProfile,
-                            localPathCache,
-                        ) { workerThread }
-
-                        val res = block()
-                        blockResult.set(res)
-                    } catch (e: Throwable) {
-                        blockError.set(e)
-                    } finally {
-                        threadRegistry.remove(stid)
-                    }
+                    val res = block()
+                    blockResult.set(res)
+                } catch (e: Throwable) {
+                    errorRef.set(e)
                 }
-
-            workerThread = thread
-            thread.start()
-            thread.join()
-
-            val err = blockError.get()
-            if (err != null) throw err
-
-            val behavior =
-                BobCompiler.compile(localLogs).copy(
-                    stackProfile = localStackProfile.toMap(),
-                )
-
-            // SUPPRESSION JUSTIFICATION: blockResult holds the result of the generic `block: () -> T` closure.
-            // Because it is stored in an AtomicReference<Any?> to pass across the worker thread boundary,
-            // type erasure requires an unchecked cast when retrieving it. This cast is statically safe.
-            val finalResult = blockResult.get()
-            if (finalResult == null) {
-                logger.warning("Profiler.profile: blockResult is null! localLogs size: ${localLogs.size}")
+            } finally {
+                threadRegistry.remove(tid)
             }
-            @Suppress("UNCHECKED_CAST")
-            return ProfilingResult(finalResult as T, behavior)
-        } finally {
-            // No cleanup here — the shared daemon stays alive until JVM shutdown
+        }.apply {
+            name = "mazewall-profiler-worker"
+            start()
         }
+
+        workerThread.join()
+
+        errorRef.get()?.let { throw it }
+
+        val bob = BobCompiler.compile(localLogs)
+        return ProfilingResult(blockResult.get() as T, bob, localStackProfile)
     }
 
-    private fun getOrSpawnSharedDaemon(): DaemonContext {
-        return ProfilerDaemonManager.getOrSpawnSharedDaemon()
-    }
-
+    /**
+     * Wraps an [ExecutorService] to automatically profile all submitted tasks.
+     * Use [ProfilerExecutorWrapper.recentLogs] to retrieve the captured behaviors.
+     */
     fun wrap(
         delegate: ExecutorService,
         vararg policies: Policy<*, Uncompiled>,
     ): ProfilerExecutorWrapper {
         val policy = PolicyDefinition.combine(*policies.map { it.definition }.toTypedArray())
-        val context = getOrSpawnSharedDaemon()
+        val context = ProfilerDaemonManager.getOrSpawnSharedDaemon()
         return ProfilerExecutorWrapper(delegate, policy, context)
     }
 
     private fun installProfilingFilterForThread(
         socketPath: String,
         policy: PolicyDefinition<*>,
-        accumulatedLogs: MutableList<SyscallEvent<SyscallEventState.Resolved>>,
-        stackTracesMap: MutableMap<SyscallEvent<SyscallEventState.Resolved>, MutableList<Array<StackTraceElement>>>?,
+        accumulatedLogs: MutableList<TraceEvent>,
+        stackTracesMap: MutableMap<TraceEvent, MutableList<Array<StackTraceElement>>>?,
         pathCache: MutableMap<String, Long>,
         workerThreadProvider: () -> Thread?,
     ) {
@@ -174,122 +126,63 @@ object Profiler {
         )
     }
 
-    internal fun sendDescriptorInternal(
-        socketFd: Int,
-        fdToSend: Int,
-    ): Boolean = ProfilerSocket.sendDescriptor(socketFd, fdToSend)
-
     /**
-     * Shuts down the profiler daemon and releases all background listeners.
+     * Shuts down the shared profiler daemon and all active trace listeners.
      */
-    @JvmStatic
-    public fun stop() {
-        ProfilerDaemonManager.stop()
-        listeners.forEach {
-            // SUPPRESSION JUSTIFICATION: We are performing a best-effort cleanup of background components.
-            // Any exception during a single component's close() must be logged but not allowed to
-            // stop the rest of the teardown process.
-            @Suppress("TooGenericExceptionCaught")
-            try {
-                it.close()
-            } catch (e: Exception) {
-                logger.warning("Failed to close trace listener: ${e.message}")
-            }
+    fun shutdown() {
+        synchronized(this) {
+            listeners.forEach { it.close() }
+            listeners.clear()
+            ProfilerDaemonManager.stop()
         }
-        listeners.clear()
     }
 
     class ProfilerExecutorWrapper(
         private val delegate: ExecutorService,
         private val policy: PolicyDefinition<*>,
-        private val context: DaemonContext,
+        private val context: io.mazewall.profiler.internal.DaemonContext,
     ) : ExecutorService by delegate {
         private val threadApplied = ThreadLocal.withInitial { false }
-        val recentLogs = CopyOnWriteArrayList<SyscallEvent<SyscallEventState.Resolved>>()
+        val recentLogs = CopyOnWriteArrayList<TraceEvent>()
         val recentStackProfiles =
-            ConcurrentHashMap<SyscallEvent<SyscallEventState.Resolved>, MutableList<Array<StackTraceElement>>>()
-        private val sharedPathCache = ConcurrentHashMap<String, Long>()
+            ConcurrentHashMap<TraceEvent, MutableList<Array<StackTraceElement>>>()
+        private val pathCache = ConcurrentHashMap<String, Long>()
 
-        /**
-         * Compiles the captured logs and stack traces into a [BillOfBehavior].
-         */
-        fun compileBillOfBehavior(): BillOfBehavior =
-            BobCompiler.compile(recentLogs).copy(
-                stackProfile = recentStackProfiles.toMap(),
-            )
+        override fun <T : Any?> submit(task: Callable<T>): Future<T> {
+            return delegate.submit(Callable {
+                applyProfilingIfNecessary()
+                task.call()
+            })
+        }
+
+        override fun submit(task: Runnable): Future<*> {
+            return delegate.submit(Runnable {
+                applyProfilingIfNecessary()
+                task.run()
+            })
+        }
 
         override fun execute(command: Runnable) {
             delegate.execute {
-                val stid = LinuxNative.process.gettid()
-                threadRegistry[stid] = Thread.currentThread()
-                try {
-                    ensureApplied()
-                    command.run()
-                } finally {
-                    threadRegistry.remove(stid)
-                }
+                applyProfilingIfNecessary()
+                command.run()
             }
         }
 
-        override fun <T> submit(task: Callable<T>): Future<T> =
-            delegate.submit(
-                Callable {
-                    val stid = LinuxNative.process.gettid()
-                    threadRegistry[stid] = Thread.currentThread()
-                    try {
-                        ensureApplied()
-                        task.call()
-                    } finally {
-                        threadRegistry.remove(stid)
-                    }
-                },
-            )
+        /** Compiles a [BillOfBehavior] from the events captured so far. */
+        fun compileBillOfBehavior(): BillOfBehavior = BobCompiler.compile(recentLogs)
 
-        override fun <T> submit(
-            task: Runnable,
-            result: T,
-        ): Future<T> =
-            delegate.submit({
-                val stid = LinuxNative.process.gettid()
-                threadRegistry[stid] = Thread.currentThread()
-                try {
-                    ensureApplied()
-                    task.run()
-                } finally {
-                    threadRegistry.remove(stid)
-                }
-            }, result)
-
-        override fun submit(task: Runnable): Future<*> =
-            delegate.submit {
-                val stid = LinuxNative.process.gettid()
-                threadRegistry[stid] = Thread.currentThread()
-                try {
-                    ensureApplied()
-                    task.run()
-                } finally {
-                    threadRegistry.remove(stid)
-                }
-            }
-
-        override fun close() {
-            delegate.close()
-        }
-
-        private fun ensureApplied() {
-            if (Thread.currentThread().isVirtual) {
-                throw IllegalStateException("Seccomp profiling is not supported on Loom virtual threads.")
-            }
+        private fun applyProfilingIfNecessary() {
             if (!threadApplied.get()) {
                 val currentThread = Thread.currentThread()
+                threadRegistry[LinuxNative.process.gettid()] = currentThread
                 installProfilingFilterForThread(
                     context.socketPath,
                     policy,
                     recentLogs,
                     recentStackProfiles,
-                    sharedPathCache,
+                    pathCache,
                 ) { currentThread }
-
                 threadApplied.set(true)
             }
         }

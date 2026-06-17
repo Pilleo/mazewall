@@ -1,22 +1,18 @@
 package io.mazewall.profiler
 
 import io.mazewall.Policy
-import io.mazewall.core.Pid
 import io.mazewall.core.Tid
 import io.mazewall.PolicyScope
 import io.mazewall.Uncompiled
 import io.mazewall.BillOfBehaviorDto
 import io.mazewall.StackProfileEntryDto
 import io.mazewall.StackFrameDto
-import io.mazewall.core.SeccompAction
 import io.mazewall.core.Syscall
-import io.mazewall.profiler.engine.SyscallEvent
-import io.mazewall.profiler.engine.SyscallEventState
+import io.mazewall.profiler.engine.TraceEvent
 import java.io.InputStream
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
-import java.nio.file.Paths
 import kotlinx.serialization.json.Json
 
 private val jsonSerializer = Json {
@@ -28,83 +24,20 @@ private val jsonSerializer = Json {
  * An immutable record of what kernel-level operations were observed during a
  * profiling run. This is the raw output of the [Profiler] — completely decoupled
  * from any [io.mazewall.Policy].
- *
- * Field naming follows the [Software Bill of Behavior (SBoB) spec draft v0.0.1](https://billofbehavior.com/bob/docs/drafts/spec-v0.0.1/):
- * - [opens]   → SBoB §4.6 `opens`
- * - [execs]   → SBoB §4.5 `execs`
- * - [syscalls] → non-standard extension; all intercepted syscall names
- *
- * ## Absent vs Explicit-Empty
- * Per SBoB §5.4, absent (null) means "unconstrained / not observed" and
- * explicit empty (emptySet()) means "observed zero activity". This class
- * always returns empty sets (never null), because a completed profiling run
- * with zero observations is a valid, meaningful result: the operation touched
- * nothing in that category.
- *
- * ## Stack profiles
- * [stackProfile] captures per-syscall JVM stack traces on a best-effort basis.
- * The worker thread is frozen in the kernel during USER_NOTIF; its Java stack
- * is stable at that moment. Frames are Java-only — no kernel frames are available.
- * This is a precursor to the SBoB stack-profile extension (spec-stackprofile-v0.0.1,
- * not yet published). The encoding will align to OTel Profiles when that extension
- * stabilises.
- *
- * ## Composability
- * Use [plus] to merge two bills from separate profiling runs into a single policy.
  */
 data class BillOfBehavior(
-    /**
-     * Filesystem paths opened for read (open/openat/openat2 with O_RDONLY, stat,
-     * readlink, etc.). Maps to SBoB §4.6 `opens` with `flags` indicating read access.
-     */
     val opens: Set<String> = emptySet(),
-    /**
-     * Filesystem paths opened for write, created, or mutated (O_WRONLY, O_RDWR,
-     * O_CREAT, O_TRUNC, mkdir, rmdir, rename, chmod, chown, etc.).
-     * Maps to SBoB §4.6 `opens` with write-mode flags.
-     *
-     * ## Design decision: conservative write-path discovery
-     * When [io.mazewall.profiler.iterative.IterativeProfiler] catches an AccessDeniedException from Landlock, the
-     * exception does not reliably carry the access mode that was denied. Rather than
-     * guessing, the profiler conservatively adds the denied path to BOTH [opens] and
-     * [fsWritePaths]. This guarantees convergence at the cost of slightly over-permissive
-     * Landlock rules — correct for a profiling tool whose goal is discovery, not enforcement.
-     */
     val fsWritePaths: Set<String> = emptySet(),
-    /**
-     * All syscall names intercepted during the run. A superset of what any
-     * specific base [io.mazewall.Policy] would block — the caller decides which subset matters
-     * via [toPolicy].
-     */
     val syscalls: Set<Syscall> = emptySet(),
-    /**
-     * Child processes spawned (execve/execveat paths). Maps to SBoB §4.5 `execs`.
-     */
     val execs: Set<String> = emptySet(),
     /**
-     * Per-syscall JVM stack traces captured at the moment the kernel paused the
-     * worker thread for USER_NOTIF. The worker thread is blocked in-kernel and its
-     * Java stack is frozen at that point — traces are accurate for Java frames.
-     *
-     * May be empty if profiling was done via IterativeProfiler (Tier A),
-     * which does not use USER_NOTIF.
-     *
-     * Keyed by [SyscallEvent] identity; multiple events for the same syscall name
+     * Keyed by [TraceEvent] identity; multiple events for the same syscall name
      * may produce different stack entries if triggered from different call sites.
      */
-    val stackProfile: Map<SyscallEvent<SyscallEventState.Resolved>, List<Array<StackTraceElement>>> = emptyMap(),
+    val stackProfile: Map<TraceEvent, List<Array<StackTraceElement>>> = emptyMap(),
 ) {
     /**
      * Compiles this bill of behavior into a [io.mazewall.Policy] starting from [base].
-     *
-     * Only syscalls that are **actually blocked** by [base] are unblocked —
-     * syscalls observed but absent from the base block-list are ignored.
-     * This is the correct filter: if a syscall was observed but the base
-     * policy never blocked it, calling unblock() on it would be a no-op
-     * at best and a footgun if the base policy changes later.
-     *
-     * All [opens] paths are granted read access; all [fsWritePaths] paths
-     * are granted write access.
      */
     fun toPolicy(base: Policy<*, Uncompiled> = Policy.PURE_COMPUTE_UNSAFE): Policy<PolicyScope.ThreadLocalOnly, Uncompiled> {
         @Suppress("UNCHECKED_CAST")
@@ -124,7 +57,6 @@ data class BillOfBehavior(
 
     /**
      * Emits a copy-pasteable Kotlin DSL snippet that reproduces the compiled policy.
-     * [basePolicyName] is used as the string label in the emitted code.
      */
     fun toDsl(
         basePolicyName: String = "Policy.PURE_COMPUTE_UNSAFE",
@@ -176,8 +108,6 @@ data class BillOfBehavior(
 
     /**
      * Merges two bills of behavior (union of all observations).
-     * Useful for compiling a single policy across multiple profiling runs
-     * covering different code paths of the same application.
      */
     operator fun plus(other: BillOfBehavior): BillOfBehavior {
         val mergedStackProfile = stackProfile.toMutableMap()
@@ -227,7 +157,7 @@ data class BillOfBehavior(
                 StackProfileEntryDto(
                     syscall = event.syscallName,
                     paths = event.paths,
-                    args = event.args.toList(),
+                    args = if (event is TraceEvent.Generic) event.args else emptyList(),
                     stackTrace = frames.map { frame ->
                         StackFrameDto(
                             classLoader = frame.classLoaderName,
@@ -264,7 +194,7 @@ data class BillOfBehavior(
                 StackProfileEntryDto(
                     syscall = event.syscallName,
                     paths = event.paths,
-                    args = event.args.toList(),
+                    args = if (event is TraceEvent.Generic) event.args else emptyList(),
                     stackTrace = frames.map { frame ->
                         StackFrameDto(
                             classLoader = frame.classLoaderName,
@@ -283,24 +213,15 @@ data class BillOfBehavior(
     }
 
     companion object {
-        /**
-         * Parses a Bill of Behavior from a Path pointing to an SBoB JSON file.
-         */
         fun fromFile(path: Path): BillOfBehavior {
             return fromJson(Files.readString(path))
         }
 
-        /**
-         * Parses a Bill of Behavior from a JSON input stream.
-         */
         fun fromStream(stream: InputStream): BillOfBehavior {
             val content = stream.bufferedReader(StandardCharsets.UTF_8).use { it.readText() }
             return fromJson(content)
         }
 
-        /**
-         * Parses a Bill of Behavior from an SBoB JSON string.
-         */
         fun fromJson(json: String): BillOfBehavior {
             val dto = jsonSerializer.decodeFromString(BillOfBehaviorDto.serializer(), json)
 
@@ -313,22 +234,22 @@ data class BillOfBehavior(
                     }
                 }.toSet()
 
-            val stackProfile = mutableMapOf<SyscallEvent<SyscallEventState.Resolved>, MutableList<Array<StackTraceElement>>>()
+            val stackProfile = mutableMapOf<TraceEvent, MutableList<Array<StackTraceElement>>>()
             for (entry in dto.stackProfile) {
-                val event = SyscallEvent<SyscallEventState.Resolved>(
-                    tid = Tid(0),
+                val event = TraceEvent(
+                    tidValue = 0,
                     syscallName = entry.syscall,
-                    args = entry.args.map { it }.toLongArray(),
+                    args = entry.args.toLongArray(),
                     paths = entry.paths,
                 )
                 val frames = entry.stackTrace.map { frameDto ->
                     StackTraceElement(
-                        frameDto.classLoader,
-                        frameDto.module,
-                        frameDto.moduleVersion,
+                        frameDto.classLoader ?: "<unknown>",
+                        frameDto.module ?: "<unknown>",
+                        frameDto.moduleVersion ?: "<unknown>",
                         frameDto.className,
                         frameDto.methodName,
-                        frameDto.fileName,
+                        frameDto.fileName ?: "<unknown>",
                         frameDto.lineNumber,
                     )
                 }.toTypedArray()

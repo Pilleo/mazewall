@@ -1,5 +1,7 @@
 package io.mazewall.profiler.engine
 
+import io.mazewall.core.Tid
+
 /**
  * A semantic, polymorphic representation of a trapped system call.
  *
@@ -7,9 +9,8 @@ package io.mazewall.profiler.engine
  * for syscall parameters, eliminating brittle index-based access in the analysis engine.
  */
 public sealed class TraceEvent {
-    public abstract val pid: Int
+    public abstract val tid: Tid
     public abstract val syscallName: String
-    public abstract val args: LongArray
     public abstract val stackTrace: List<String>?
 
     /**
@@ -22,18 +23,18 @@ public sealed class TraceEvent {
      * A generic event for syscalls that don't have a specialized type yet.
      */
     public data class Generic(
-        override val pid: Int,
+        override val tid: Tid,
         override val syscallName: String,
-        override val args: LongArray,
+        val args: List<Long>,
         override val paths: List<String> = emptyList(),
         override val stackTrace: List<String>? = null,
     ) : TraceEvent() {
         override fun equals(other: Any?): Boolean {
             if (this === other) return true
             if (other !is Generic) return false
-            // INVARIANT: PID is ignored for behavioral equality (required for deduplication)
+            // INVARIANT: TID is ignored for behavioral equality (required for deduplication)
             if (syscallName != other.syscallName) return false
-            if (!args.contentEquals(other.args)) return false
+            if (args != other.args) return false
             if (paths != other.paths) return false
             if (stackTrace != other.stackTrace) return false
             return true
@@ -41,7 +42,7 @@ public sealed class TraceEvent {
 
         override fun hashCode(): Int {
             var result = syscallName.hashCode()
-            result = 31 * result + args.contentHashCode()
+            result = 31 * result + args.hashCode()
             result = 31 * result + paths.hashCode()
             result = 31 * result + (stackTrace?.hashCode() ?: 0)
             return result
@@ -52,9 +53,8 @@ public sealed class TraceEvent {
      * Specialized event for file opening operations (OPEN, OPENAT, OPENAT2).
      */
     public data class Open(
-        override val pid: Int,
+        override val tid: Tid,
         override val syscallName: String,
-        override val args: LongArray,
         val path: String,
         val flags: Long,
         val mode: Int,
@@ -65,9 +65,7 @@ public sealed class TraceEvent {
         override fun equals(other: Any?): Boolean {
             if (this === other) return true
             if (other !is Open) return false
-            // INVARIANT: PID is ignored for behavioral equality
             if (syscallName != other.syscallName) return false
-            if (!args.contentEquals(other.args)) return false
             if (path != other.path) return false
             if (flags != other.flags) return false
             if (mode != other.mode) return false
@@ -77,7 +75,6 @@ public sealed class TraceEvent {
 
         override fun hashCode(): Int {
             var result = syscallName.hashCode()
-            result = 31 * result + args.contentHashCode()
             result = 31 * result + path.hashCode()
             result = 31 * result + flags.hashCode()
             result = 31 * result + mode
@@ -90,9 +87,8 @@ public sealed class TraceEvent {
      * Specialized event for process execution (EXECVE, EXECVEAT).
      */
     public data class Exec(
-        override val pid: Int,
+        override val tid: Tid,
         override val syscallName: String,
-        override val args: LongArray,
         val path: String,
         override val stackTrace: List<String>? = null,
     ) : TraceEvent() {
@@ -101,9 +97,7 @@ public sealed class TraceEvent {
         override fun equals(other: Any?): Boolean {
             if (this === other) return true
             if (other !is Exec) return false
-            // INVARIANT: PID is ignored for behavioral equality
             if (syscallName != other.syscallName) return false
-            if (!args.contentEquals(other.args)) return false
             if (path != other.path) return false
             if (stackTrace != other.stackTrace) return false
             return true
@@ -111,7 +105,6 @@ public sealed class TraceEvent {
 
         override fun hashCode(): Int {
             var result = syscallName.hashCode()
-            result = 31 * result + args.contentHashCode()
             result = 31 * result + path.hashCode()
             result = 31 * result + (stackTrace?.hashCode() ?: 0)
             return result
@@ -122,8 +115,7 @@ public sealed class TraceEvent {
      * Specialized event for memory mapping (MMAP).
      */
     public data class Mmap(
-        override val pid: Int,
-        override val args: LongArray,
+        override val tid: Tid,
         val addr: Long,
         val len: Long,
         val prot: Int,
@@ -140,8 +132,6 @@ public sealed class TraceEvent {
         override fun equals(other: Any?): Boolean {
             if (this === other) return true
             if (other !is Mmap) return false
-            // INVARIANT: PID is ignored for behavioral equality
-            if (!args.contentEquals(other.args)) return false
             if (addr != other.addr) return false
             if (len != other.len) return false
             if (prot != other.prot) return false
@@ -153,8 +143,7 @@ public sealed class TraceEvent {
         }
 
         override fun hashCode(): Int {
-            var result = args.contentHashCode()
-            result = 31 * result + addr.hashCode()
+            var result = addr.hashCode()
             result = 31 * result + len.hashCode()
             result = 31 * result + prot
             result = 31 * result + flags
@@ -169,8 +158,7 @@ public sealed class TraceEvent {
      * Specialized event for network socket operations.
      */
     public data class Socket(
-        override val pid: Int,
-        override val args: LongArray,
+        override val tid: Tid,
         val domain: Int,
         val type: Int,
         val protocol: Int,
@@ -184,8 +172,6 @@ public sealed class TraceEvent {
         override fun equals(other: Any?): Boolean {
             if (this === other) return true
             if (other !is Socket) return false
-            // INVARIANT: PID is ignored for behavioral equality
-            if (!args.contentEquals(other.args)) return false
             if (domain != other.domain) return false
             if (type != other.type) return false
             if (protocol != other.protocol) return false
@@ -194,8 +180,7 @@ public sealed class TraceEvent {
         }
 
         override fun hashCode(): Int {
-            var result = args.contentHashCode()
-            result = 31 * result + domain
+            var result = domain
             result = 31 * result + type
             result = 31 * result + protocol
             result = 31 * result + (stackTrace?.hashCode() ?: 0)
@@ -207,18 +192,15 @@ public sealed class TraceEvent {
      * Specialized event for filesystem mutation (MKDIR, RMDIR, UNLINK, etc.).
      */
     public data class FsMutation(
-        override val pid: Int,
+        override val tid: Tid,
         override val syscallName: String,
-        override val args: LongArray,
         override val paths: List<String>,
         override val stackTrace: List<String>? = null,
     ) : TraceEvent() {
         override fun equals(other: Any?): Boolean {
             if (this === other) return true
             if (other !is FsMutation) return false
-            // INVARIANT: PID is ignored for behavioral equality
             if (syscallName != other.syscallName) return false
-            if (!args.contentEquals(other.args)) return false
             if (paths != other.paths) return false
             if (stackTrace != other.stackTrace) return false
             return true
@@ -226,7 +208,6 @@ public sealed class TraceEvent {
 
         override fun hashCode(): Int {
             var result = syscallName.hashCode()
-            result = 31 * result + args.contentHashCode()
             result = 31 * result + paths.hashCode()
             result = 31 * result + (stackTrace?.hashCode() ?: 0)
             return result
@@ -234,11 +215,6 @@ public sealed class TraceEvent {
     }
 
     public companion object {
-        private const val MAX_BPF_JUMP_OFFSET = 255
-        private const val PROT_EXEC = 0x04
-        private const val AF_INET = 2
-        private const val AF_INET6 = 10
-
         private const val INDEX_ADDR = 0
         private const val INDEX_LEN = 1
         private const val INDEX_PROT = 2
@@ -261,25 +237,26 @@ public sealed class TraceEvent {
          * Maps raw data into the polymorphic hierarchy.
          */
         public operator fun invoke(
-            pid: Int,
+            tidValue: Int,
             syscallName: String,
             args: LongArray,
             paths: List<String> = emptyList(),
             stackTrace: List<String>? = null,
         ): TraceEvent {
+            val tid = Tid(tidValue)
             return when (syscallName) {
-                "OPEN", "OPENAT", "OPENAT2" -> createOpenEvent(pid, syscallName, args, paths, stackTrace)
-                "EXECVE", "EXECVEAT" -> createExecEvent(pid, syscallName, args, paths, stackTrace)
-                "MMAP" -> createMmapEvent(pid, args, stackTrace)
-                "SOCKET" -> createSocketEvent(pid, args, stackTrace)
+                "OPEN", "OPENAT", "OPENAT2" -> createOpenEvent(tid, syscallName, args, paths, stackTrace)
+                "EXECVE", "EXECVEAT" -> createExecEvent(tid, syscallName, args, paths, stackTrace)
+                "MMAP" -> createMmapEvent(tid, args, stackTrace)
+                "SOCKET" -> createSocketEvent(tid, args, stackTrace)
                 "MKDIR", "MKDIRAT", "RMDIR", "UNLINK", "UNLINKAT", "RENAME", "RENAMEAT", "RENAMEAT2", "LINK", "LINKAT", "SYMLINK", "SYMLINKAT", "CHMOD", "FCHMODAT", "CHOWN", "LCHOWN", "FCHOWNAT" ->
-                    createFsMutationEvent(pid, syscallName, args, paths, stackTrace)
+                    createFsMutationEvent(tid, syscallName, paths, stackTrace)
 
-                else -> Generic(pid, syscallName, args, paths, stackTrace)
+                else -> Generic(tid, syscallName, args.toList(), paths, stackTrace)
             }
         }
 
-        private fun createOpenEvent(pid: Int, syscallName: String, args: LongArray, paths: List<String>, stackTrace: List<String>?): TraceEvent {
+        private fun createOpenEvent(tid: Tid, syscallName: String, args: LongArray, paths: List<String>, stackTrace: List<String>?): TraceEvent {
             return if (paths.isNotEmpty()) {
                 val flags = when (syscallName) {
                     "OPEN" -> if (args.size > INDEX_OPEN_FLAGS) args[INDEX_OPEN_FLAGS] else 0L
@@ -287,36 +264,36 @@ public sealed class TraceEvent {
                     "OPENAT2" -> 0L // flags are inside a struct pointer in args[2]
                     else -> 0L
                 }
-                Open(pid, syscallName, args, paths[0], flags, 0, stackTrace)
+                Open(tid, syscallName, paths[0], flags, 0, stackTrace)
             } else {
-                Generic(pid, syscallName, args, paths, stackTrace)
+                Generic(tid, syscallName, args.toList(), paths, stackTrace)
             }
         }
 
-        private fun createExecEvent(pid: Int, syscallName: String, args: LongArray, paths: List<String>, stackTrace: List<String>?): TraceEvent {
-            return if (paths.isNotEmpty()) Exec(pid, syscallName, args, paths[0], stackTrace)
-            else Generic(pid, syscallName, args, paths, stackTrace)
+        private fun createExecEvent(tid: Tid, syscallName: String, args: LongArray, paths: List<String>, stackTrace: List<String>?): TraceEvent {
+            return if (paths.isNotEmpty()) Exec(tid, syscallName, paths[0], stackTrace)
+            else Generic(tid, syscallName, args.toList(), paths, stackTrace)
         }
 
-        private fun createMmapEvent(pid: Int, args: LongArray, stackTrace: List<String>?): TraceEvent {
+        private fun createMmapEvent(tid: Tid, args: LongArray, stackTrace: List<String>?): TraceEvent {
             return if (args.size >= MIN_MMAP_ARGS) {
-                Mmap(pid, args, args[INDEX_ADDR], args[INDEX_LEN], args[INDEX_PROT].toInt(), args[INDEX_FLAGS].toInt(), args[INDEX_FD].toInt(), args[INDEX_OFFSET], stackTrace)
+                Mmap(tid, args[INDEX_ADDR], args[INDEX_LEN], args[INDEX_PROT].toInt(), args[INDEX_FLAGS].toInt(), args[INDEX_FD].toInt(), args[INDEX_OFFSET], stackTrace)
             } else {
-                Generic(pid, "MMAP", args, emptyList(), stackTrace)
+                Generic(tid, "MMAP", args.toList(), emptyList(), stackTrace)
             }
         }
 
-        private fun createSocketEvent(pid: Int, args: LongArray, stackTrace: List<String>?): TraceEvent {
+        private fun createSocketEvent(tid: Tid, args: LongArray, stackTrace: List<String>?): TraceEvent {
             return if (args.size >= MIN_SOCKET_ARGS) {
-                Socket(pid, args, args[INDEX_DOMAIN].toInt(), args[INDEX_TYPE].toInt(), args[INDEX_PROTOCOL].toInt(), stackTrace)
+                Socket(tid, args[INDEX_DOMAIN].toInt(), args[INDEX_TYPE].toInt(), args[INDEX_PROTOCOL].toInt(), stackTrace)
             } else {
-                Generic(pid, "SOCKET", args, emptyList(), stackTrace)
+                Generic(tid, "SOCKET", args.toList(), emptyList(), stackTrace)
             }
         }
 
-        private fun createFsMutationEvent(pid: Int, syscallName: String, args: LongArray, paths: List<String>, stackTrace: List<String>?): TraceEvent {
-            return if (paths.isNotEmpty()) FsMutation(pid, syscallName, args, paths, stackTrace)
-            else Generic(pid, syscallName, args, paths, stackTrace)
+        private fun createFsMutationEvent(tid: Tid, syscallName: String, paths: List<String>, stackTrace: List<String>?): TraceEvent {
+            return if (paths.isNotEmpty()) FsMutation(tid, syscallName, paths, stackTrace)
+            else Generic(tid, syscallName, emptyList(), paths, stackTrace)
         }
     }
 }

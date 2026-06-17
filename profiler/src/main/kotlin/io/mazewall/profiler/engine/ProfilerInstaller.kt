@@ -10,36 +10,30 @@ import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
 import io.mazewall.core.NativeArg
-import io.mazewall.getFdOrThrow
-import io.mazewall.onSuccess
 import io.mazewall.ffi.NativeConstants
-import io.mazewall.seccomp.BpfInstruction
-import io.mazewall.profiler.Profiler
+import io.mazewall.ffi.memory.nativeScope
+import io.mazewall.getFdOrThrow
 import io.mazewall.profiler.internal.ProfilerSocket
-import java.io.IOException
-import java.lang.foreign.Arena
-import java.lang.foreign.ValueLayout
-import java.util.concurrent.CountDownLatch
-import java.util.concurrent.atomic.AtomicInteger
 
 /**
- * Internal helper for installing seccomp profiling filters.
+ * Internal orchestrator for installing profiling filters and initializing the listener.
  */
 internal object ProfilerInstaller {
-    private const val EINTR = 4
-
+    /**
+     * Installs a seccomp profiling filter (SECCOMP_RET_USER_NOTIF) for the current thread.
+     */
     fun installProfilingFilterForThread(
         socketPath: String,
         policy: PolicyDefinition<*>,
-        accumulatedLogs: MutableList<SyscallEvent<SyscallEventState.Resolved>>,
-        stackTracesMap: MutableMap<SyscallEvent<SyscallEventState.Resolved>, MutableList<Array<StackTraceElement>>>?,
+        accumulatedLogs: MutableList<TraceEvent>,
+        stackTracesMap: MutableMap<TraceEvent, MutableList<Array<StackTraceElement>>>?,
         pathCache: MutableMap<String, Long>,
         workerThreadProvider: () -> Thread?,
         connectWithRetry: (String) -> Int = { path -> ProfilerSocket.connectWithRetry(path) },
         startTraceListener: (
             Int,
-            MutableList<SyscallEvent<SyscallEventState.Resolved>>,
-            MutableMap<SyscallEvent<SyscallEventState.Resolved>, MutableList<Array<StackTraceElement>>>?,
+            MutableList<TraceEvent>,
+            MutableMap<TraceEvent, MutableList<Array<StackTraceElement>>>?,
             MutableMap<String, Long>,
             () -> Thread?
         ) -> Unit,
@@ -61,170 +55,81 @@ internal object ProfilerInstaller {
 internal class ProfilerInstallerSession(
     private val socketPath: String,
     private val policy: PolicyDefinition<*>,
-    private val accumulatedLogs: MutableList<SyscallEvent<SyscallEventState.Resolved>>,
-    private val stackTracesMap: MutableMap<SyscallEvent<SyscallEventState.Resolved>, MutableList<Array<StackTraceElement>>>?,
+    private val accumulatedLogs: MutableList<TraceEvent>,
+    private val stackTracesMap: MutableMap<TraceEvent, MutableList<Array<StackTraceElement>>>?,
     private val pathCache: MutableMap<String, Long>,
     private val workerThreadProvider: () -> Thread?,
     private val connectWithRetry: (String) -> Int,
     private val startTraceListener: (
         Int,
-        MutableList<SyscallEvent<SyscallEventState.Resolved>>,
-        MutableMap<SyscallEvent<SyscallEventState.Resolved>, MutableList<Array<StackTraceElement>>>?,
+        MutableList<TraceEvent>,
+        MutableMap<TraceEvent, MutableList<Array<StackTraceElement>>>?,
         MutableMap<String, Long>,
         () -> Thread?
     ) -> Unit,
 ) {
-    private val installLatch = CountDownLatch(1)
-    private val proceedLatch = CountDownLatch(1)
-    private var listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open>? = null
-
-    @Volatile
-    var state: ProfilerInstallerState = ProfilerInstallerState.Uninitialized
-        private set
-
     fun install() {
         if (!Platform.featureMatrix.seccompUserNotifSupported) {
-            throw UnsupportedKernelFeatureException("Seccomp profiling (USER_NOTIF) requires Linux 5.0+ (and a modern OCI seccomp profile if containerized).")
+            throw UnsupportedKernelFeatureException("Seccomp User Notifications are required for profiling.")
         }
 
-        state = ProfilerInstallerState.InstallingBpf
+        // Mandatory for non-privileged seccomp
+        LinuxNative.withTransaction {
+            LinuxNative.process.prctl(io.mazewall.core.PrctlCommand.SetNoNewPrivs(true))
+        }.getOrThrow("prctl(PR_SET_NO_NEW_PRIVS)")
 
-        val coordinatorThread =
-            Thread {
-                runCoordinatorLogic()
-            }.apply {
-                isDaemon = true
-                name = "profiler-coordinator"
-                uncaughtExceptionHandler = Thread.UncaughtExceptionHandler { _, e ->
-                    this@ProfilerInstallerSession.state = ProfilerInstallerState.Failed(e)
-                    proceedLatch.countDown()
-                }
-            }
-
-        coordinatorThread.start()
-
-        try {
-            ensureNoNewPrivs()
-            val filters = BpfFilter.build(Arch.current(), policy, profilingMode = true)
-            Arena.ofConfined().use { arena ->
-                with(arena) {
-                    listenerFd = installProfilingBpf(filters)
-                }
-            }
-        } catch (e: IOException) {
-            state = ProfilerInstallerState.Failed(e)
-            proceedLatch.countDown()
-        } catch (e: IllegalStateException) {
-            state = ProfilerInstallerState.Failed(e)
-            proceedLatch.countDown()
-        } finally {
-            installLatch.countDown()
-        }
-
-        proceedLatch.await()
-        val finalState = state
-        if (finalState is ProfilerInstallerState.Failed) {
-            throw finalState.error
-        }
-    }
-
-    private fun runCoordinatorLogic() {
-        installLatch.await()
-        val fd = listenerFd
-        if (fd == null) {
-            val finalState = state
-            val err = if (finalState is ProfilerInstallerState.Failed) {
-                finalState.error
-            } else {
-                IllegalStateException("Failed to install seccomp filter")
-            }
-            throw err
-        }
-
-        state = ProfilerInstallerState.Connecting(fd)
-        var socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>? = null
-        var success = false
-        try {
-            socketFd = FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(connectWithRetry(socketPath))
-            state = ProfilerInstallerState.SendingDescriptor(fd, socketFd)
-            val sent = Profiler.sendDescriptorInternal(socketFd.value, fd.value)
-            if (!sent) {
-                throw IllegalStateException("Failed to send seccomp listener FD to daemon")
-            }
-
-            state = ProfilerInstallerState.VerifyingAck(fd, socketFd)
-            Arena.ofConfined().use { arena ->
-                with(arena) {
-                    verifyDaemonAck(socketFd)
-                }
-            }
-
-            // Start listener thread for this socket to receive TraceEvents
-            startTraceListener(socketFd.value, accumulatedLogs, stackTracesMap, pathCache, workerThreadProvider)
-            state = ProfilerInstallerState.Active(fd, socketFd)
-            success = true
-            proceedLatch.countDown()
-        } catch (e: IOException) {
-            state = ProfilerInstallerState.Failed(e)
-            proceedLatch.countDown()
-        } catch (e: IllegalStateException) {
-            state = ProfilerInstallerState.Failed(e)
-            proceedLatch.countDown()
-        } finally {
-            if (!success) {
-                if (socketFd != null && socketFd.isValid) {
-                    LinuxNative.fileSystem.close(socketFd)
-                }
-            }
-            LinuxNative.fileSystem.close(fd)
-        }
-    }
-
-    context(arena: Arena)
-    private fun verifyDaemonAck(socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>) {
-        // Wait for ACK byte from daemon
-        val ackBuf = arena.allocate(1)
-        while (true) {
-            val res = LinuxNative.withTransaction {
-                LinuxNative.memory.read(socketFd, ackBuf, 1)
-            }
-            when (res) {
-                is LinuxNative.SyscallResult.Success -> {
-                    if (res.value == 1L && ackBuf.get(ValueLayout.JAVA_BYTE, 0) == 0xAC.toByte()) {
-                        return
-                    }
-                }
-
-                is LinuxNative.SyscallResult.Error -> {
-                    if (res.errno == EINTR) {
-                        continue
-                    }
-                }
-            }
-            throw IllegalStateException("Daemon failed to ACK listener receipt")
-        }
-    }
-
-    private fun ensureNoNewPrivs() {
-        val r = LinuxNative.withTransaction {
-            LinuxNative.process.prctl(
-                io.mazewall.core.PrctlCommand.SetNoNewPrivs(true)
-            )
-        }
-        r.getOrThrow("prctl(PR_SET_NO_NEW_PRIVS)")
-    }
-
-    context(arena: Arena)
-    private fun installProfilingBpf(
-        filters: List<BpfInstruction>,
-    ): FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open> {
+        val fd = connectWithRetry(socketPath)
         val arch = Arch.current()
-        val prog = LinuxNative.memory.newSockFProg(filters)
+
+        val filter = BpfFilter.build(arch, policy, profilingMode = true)
+
+        // We must spawn all infrastructure threads BEFORE installing the seccomp filter on the current thread.
+        // Seccomp filters are thread-scoped and inherited by children. If we spawn these threads AFTER
+        // sandboxing the current thread, they will also be sandboxed and trapped, leading to a deadlock
+        // when they try to communicate with the daemon (which is blocked waiting for setup to finish).
+        val listenerFdPromise = java.util.concurrent.CompletableFuture<Int>()
+        val setupError = java.util.concurrent.atomic.AtomicReference<Throwable?>()
+        val setupHelper = Thread {
+            try {
+                val listenerFdValue = listenerFdPromise.get()
+                val sent = ProfilerSocket.sendDescriptor(fd, listenerFdValue)
+                if (!sent) {
+                    setupError.set(IllegalStateException("Failed to send seccomp listener FD to daemon"))
+                }
+            } catch (e: Exception) {
+                setupError.set(e)
+            }
+        }.apply {
+            isDaemon = true
+            name = "profiler-setup-helper"
+            start()
+        }
+
+        // Start background thread to listen for events from the daemon (uncontained)
+        startTraceListener(fd, accumulatedLogs, stackTracesMap, pathCache, workerThreadProvider)
+
+        nativeScope {
+            val prog = LinuxNative.memory.newSockFProg(filter)
+            val listenerFd = installListener(arch, prog)
+
+            // Release the helper to send the descriptor
+            listenerFdPromise.complete(listenerFd.value)
+
+            // Wait for setup to finish to ensure daemon is ready before workload starts
+            setupHelper.join()
+            setupError.get()?.let { throw it }
+        }
+    }
+
+    private fun installListener(
+        arch: Arch,
+        prog: java.lang.foreign.MemorySegment,
+    ): FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open> {
         val r = LinuxNative.withTransaction {
             LinuxNative.syscall(
                 arch.seccompSyscallNumber.toLong(),
                 NativeArg.LongArg(NativeConstants.SECCOMP_SET_MODE_FILTER.toLong()),
-                NativeArg.LongArg(NativeConstants.SECCOMP_FILTER_FLAG_NEW_LISTENER),
+                NativeArg.LongArg(NativeConstants.SECCOMP_FILTER_FLAG_NEW_LISTENER.toLong()),
                 NativeArg.MemoryArg(prog),
             )
         }

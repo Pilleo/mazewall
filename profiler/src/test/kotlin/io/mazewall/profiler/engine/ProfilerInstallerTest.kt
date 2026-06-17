@@ -5,8 +5,6 @@ import io.mazewall.MockNativeEngine
 import io.mazewall.MockPlatformProvider
 import io.mazewall.Platform
 import io.mazewall.Policy
-import io.mazewall.profiler.engine.SyscallEvent
-import io.mazewall.profiler.engine.SyscallEventState
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -35,7 +33,7 @@ class ProfilerInstallerTest {
 
     @Test
     fun `test coordinator thread handles connection retry failure`() {
-        val accumulatedLogs = CopyOnWriteArrayList<SyscallEvent<SyscallEventState.Resolved>>()
+        val accumulatedLogs = CopyOnWriteArrayList<TraceEvent>()
         val pathCache = ConcurrentHashMap<String, Long>()
         val errorRef = AtomicReference<Throwable?>(null)
 
@@ -69,7 +67,7 @@ class ProfilerInstallerTest {
 
     @Test
     fun `test main thread waits for coordinator thread to finish`() {
-        val accumulatedLogs = CopyOnWriteArrayList<SyscallEvent<SyscallEventState.Resolved>>()
+        val accumulatedLogs = CopyOnWriteArrayList<TraceEvent>()
         val pathCache = ConcurrentHashMap<String, Long>()
         val errorRef = AtomicReference<Throwable?>(null)
         val startTime = System.currentTimeMillis()
@@ -114,7 +112,7 @@ class ProfilerInstallerTest {
         mock.networking.sendmsgResult = LinuxNative.SyscallResult.Error(9, -1) // EBADF
         LinuxNative.setEngine(mock)
 
-        val accumulatedLogs = CopyOnWriteArrayList<SyscallEvent<SyscallEventState.Resolved>>()
+        val accumulatedLogs = CopyOnWriteArrayList<TraceEvent>()
         val pathCache = ConcurrentHashMap<String, Long>()
         val errorRef = AtomicReference<Throwable?>(null)
 

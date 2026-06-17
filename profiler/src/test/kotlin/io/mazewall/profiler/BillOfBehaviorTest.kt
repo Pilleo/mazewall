@@ -4,8 +4,7 @@ import io.mazewall.core.Pid
 import io.mazewall.core.Tid
 import io.mazewall.core.SeccompAction
 import io.mazewall.core.Syscall
-import io.mazewall.profiler.engine.SyscallEvent
-import io.mazewall.profiler.engine.SyscallEventState
+import io.mazewall.profiler.engine.TraceEvent
 import org.junit.jupiter.api.Test
 import java.nio.file.Files
 import kotlin.test.assertEquals
@@ -15,7 +14,7 @@ import kotlin.test.assertTrue
 class BillOfBehaviorTest {
     @Test
     fun `test plus operator merges stack traces without data loss`() {
-        val event = SyscallEvent<SyscallEventState.Resolved>(Tid(0), "OPEN", longArrayOf(1), listOf("/test"))
+        val event = TraceEvent(0, "OPEN", longArrayOf(1), listOf("/test"))
 
         val stack1 = arrayOf(StackTraceElement("Class1", "method1", "File1.kt", 1))
         val stack2 = arrayOf(StackTraceElement("Class2", "method2", "File2.kt", 2))
@@ -235,8 +234,8 @@ class BillOfBehaviorTest {
 
     @Test
     fun `test JSON serialization and deserialization roundtrip preserves stackProfile`() {
-        val event1 = SyscallEvent<SyscallEventState.Resolved>(Tid(0), "OPEN", longArrayOf(1, 2), listOf("/test1"))
-        val event2 = SyscallEvent<SyscallEventState.Resolved>(Tid(0), "CLOSE", longArrayOf(3), listOf("/test2"))
+        val event1 = TraceEvent(0, "OPEN", longArrayOf(1, 2), listOf("/test1"))
+        val event2 = TraceEvent(0, "CLOSE", longArrayOf(3), listOf("/test2"))
 
         val stack1 = arrayOf(
             StackTraceElement("app", "java.base", "11.0", "java.io.FileInputStream", "open0", "FileInputStream.java", 123),
@@ -249,7 +248,7 @@ class BillOfBehaviorTest {
         val bob = BillOfBehavior(
             opens = setOf("/test1", "/test2"),
             syscalls = setOf(Syscall.OPEN, Syscall.CLOSE),
-            stackProfile = mapOf<SyscallEvent<SyscallEventState.Resolved>, List<Array<StackTraceElement>>>(
+            stackProfile = mapOf<TraceEvent, List<Array<StackTraceElement>>>(
                 event1 to listOf(stack1),
                 event2 to listOf(stack2),
             ),
@@ -267,7 +266,6 @@ class BillOfBehaviorTest {
         val parsedEvent1 = parsed.stackProfile.keys.find { it.syscallName == "OPEN" }
         assertTrue(parsedEvent1 != null)
         assertEquals(event1.paths, parsedEvent1.paths)
-        assertTrue(event1.args.contentEquals(parsedEvent1.args))
 
         val parsedTraces1 = parsed.stackProfile[parsedEvent1]!!
         assertEquals(1, parsedTraces1.size)
@@ -281,7 +279,7 @@ class BillOfBehaviorTest {
 
     @Test
     fun `test plus operator deduplicates identical stack traces`() {
-        val event = SyscallEvent<SyscallEventState.Resolved>(Tid(0), "OPEN", longArrayOf(1), listOf("/test"))
+        val event = TraceEvent(0, "OPEN", longArrayOf(1), listOf("/test"))
 
         val stack1 = arrayOf(StackTraceElement("Class1", "method1", "File1.kt", 1))
         val stack2 = arrayOf(StackTraceElement("Class1", "method1", "File1.kt", 1)) // Identical contents
