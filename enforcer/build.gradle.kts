@@ -169,14 +169,12 @@ classDiagrams {
     diagram {
         name("Enforcer Class Diagram")
         include(packages().withName("io.mazewall"))
-        writeTo(file("$rootDir/docs/diagrams/enforcer_class_diagram.puml"))
-        renderTo(file("$rootDir/docs/diagrams/enforcer_class_diagram.svg"))
+        insertInto(file("$rootDir/docs/internals/enforcer_architecture.md"))
     }
 }
 
 tasks.named("generateClassDiagrams") {
-    val pumlFile = file("$rootDir/docs/diagrams/enforcer_class_diagram.puml")
-    val svgFile = file("$rootDir/docs/diagrams/enforcer_class_diagram.svg")
+    val mdFile = file("$rootDir/docs/internals/enforcer_architecture.md")
 
     doLast {
         fun cleanup(file: File) {
@@ -186,13 +184,11 @@ tasks.named("generateClassDiagrams") {
                 content = content.replace(Regex("([a-zA-Z0-9_]+)-[a-zA-Z0-9_-]{7,15}(?=\\b|\\(|$)"), "$1")
                 // Strip any leftover internal module access flags (e.g. $io_mazewall_enforcer)
                 content = content.replace(Regex("\\\$[a-zA-Z0-9_]+"), "")
-                // Fix PlantUML SVG XML parsing error (duplicate data attribute in <g class="entity">)
-                content = content.replace(Regex(" data=\"([^\"]*)\" id=\"([^\"]*)\" data=\"([^\"]*)\""), " data-name=\"$1\" id=\"$2\" data-line=\"$3\"")
                 file.writeText(content)
             }
         }
 
-        cleanup(pumlFile)
-        cleanup(svgFile)
+        cleanup(mdFile)
     }
 }
+
