@@ -2,6 +2,10 @@ package io.mazewall.ffi.memory
 
 import java.lang.foreign.Arena
 
+import kotlin.contracts.ExperimentalContracts
+import kotlin.contracts.InvocationKind
+import kotlin.contracts.contract
+
 /**
  * Scoped context for native memory management.
  *
@@ -9,5 +13,10 @@ import java.lang.foreign.Arena
  * using [Arena.ofConfined]. The [block] receives the arena as a receiver,
  * preventing segments from being easily leaked outside the scope.
  */
-public inline fun <T> nativeScope(crossinline block: Arena.() -> T): T =
-    Arena.ofConfined().use { it.block() }
+@OptIn(ExperimentalContracts::class)
+public inline fun <T> nativeScope(crossinline block: Arena.() -> T): T {
+    contract {
+        callsInPlace(block, InvocationKind.EXACTLY_ONCE)
+    }
+    return Arena.ofConfined().use { it.block() }
+}

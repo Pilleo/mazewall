@@ -32,4 +32,36 @@ class NativeEngineTest {
         val result = LinuxNative.withTransaction { LinuxNative.syscall(1L) }
         assertEquals(13, (result as LinuxNative.SyscallResult.Error).errno)
     }
+
+    @Test
+    fun `contracts allow local val initialization inside nativeScope`() {
+        val initializedInScope: String
+        io.mazewall.ffi.memory.nativeScope {
+            initializedInScope = "hello"
+        }
+        assertEquals("hello", initializedInScope)
+    }
+
+    @Test
+    fun `SyscallResult isSuccess and isFailure smart casts correctly`() {
+        val successResult: LinuxNative.SyscallResult<String, LinuxNative.SyscallHandledState.Unhandled> =
+            LinuxNative.SyscallResult.Success("test-value")
+
+        if (successResult.isSuccess()) {
+            // Smart cast allows accessing .value directly on successResult
+            assertEquals("test-value", successResult.value)
+        } else {
+            org.junit.jupiter.api.Assertions.fail("Expected success")
+        }
+
+        val failureResult: LinuxNative.SyscallResult<String, LinuxNative.SyscallHandledState.Unhandled> =
+            LinuxNative.SyscallResult.Error(5, -1L)
+
+        if (failureResult.isFailure()) {
+            // Smart cast allows accessing .errno directly on failureResult
+            assertEquals(5, failureResult.errno)
+        } else {
+            org.junit.jupiter.api.Assertions.fail("Expected failure")
+        }
+    }
 }

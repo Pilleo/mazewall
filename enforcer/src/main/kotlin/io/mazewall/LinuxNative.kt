@@ -10,6 +10,9 @@ import io.mazewall.ffi.memory.SockFilterSegment
 import io.mazewall.ffi.memory.SockFprogSegment
 import io.mazewall.ffi.memory.nativeScope
 import io.mazewall.seccomp.BpfInstruction
+import kotlin.contracts.ExperimentalContracts
+import kotlin.contracts.InvocationKind
+import kotlin.contracts.contract
 import java.lang.foreign.Arena
 import java.lang.foreign.FunctionDescriptor
 import java.lang.foreign.Linker
@@ -172,31 +175,61 @@ public object LinuxNative : NativeEngine {
     }
 }
 
+@OptIn(ExperimentalContracts::class)
+public fun <T, H : LinuxNative.SyscallHandledState> LinuxNative.SyscallResult<T, H>.isSuccess(): Boolean {
+    contract {
+        returns(true) implies (this@isSuccess is LinuxNative.SyscallResult.Success<T, H>)
+    }
+    return this is LinuxNative.SyscallResult.Success
+}
+
+@OptIn(ExperimentalContracts::class)
+public fun <T, H : LinuxNative.SyscallHandledState> LinuxNative.SyscallResult<T, H>.isFailure(): Boolean {
+    contract {
+        returns(true) implies (this@isFailure is LinuxNative.SyscallResult.Error<H>)
+    }
+    return this is LinuxNative.SyscallResult.Error
+}
+
 /**
  * Transforms the success value using [transform].
  */
-public inline fun <T, R, H : LinuxNative.SyscallHandledState> LinuxNative.SyscallResult<T, H>.map(transform: (T) -> R): LinuxNative.SyscallResult<R, H> =
-    when (this) {
+@OptIn(ExperimentalContracts::class)
+public inline fun <T, R, H : LinuxNative.SyscallHandledState> LinuxNative.SyscallResult<T, H>.map(transform: (T) -> R): LinuxNative.SyscallResult<R, H> {
+    contract {
+        callsInPlace(transform, InvocationKind.AT_MOST_ONCE)
+    }
+    return when (this) {
         is LinuxNative.SyscallResult.Success -> LinuxNative.SyscallResult.Success(transform(value))
         is LinuxNative.SyscallResult.Error -> this
     }
+}
 
 /**
  * Transforms the success value using [transform] which returns another [LinuxNative.SyscallResult].
  */
+@OptIn(ExperimentalContracts::class)
 public inline fun <T, R, H : LinuxNative.SyscallHandledState> LinuxNative.SyscallResult<T, H>.flatMap(
     transform: (T) -> LinuxNative.SyscallResult<R, H>
-): LinuxNative.SyscallResult<R, H> =
-    when (this) {
+): LinuxNative.SyscallResult<R, H> {
+    contract {
+        callsInPlace(transform, InvocationKind.AT_MOST_ONCE)
+    }
+    return when (this) {
         is LinuxNative.SyscallResult.Success -> transform(value)
         is LinuxNative.SyscallResult.Error -> this
     }
+}
 
 /**
  * Executes [action] if the call succeeded.
  */
 @Suppress("UNCHECKED_CAST")
+@OptIn(ExperimentalContracts::class)
 public inline fun <T> LinuxNative.SyscallResult<T, *>.onSuccess(action: (T) -> Unit): LinuxNative.SyscallResult<T, LinuxNative.SyscallHandledState.Handled> {
+    contract {
+        callsInPlace(action, InvocationKind.AT_MOST_ONCE)
+    }
     if (this is LinuxNative.SyscallResult.Success) action(value)
     return this as LinuxNative.SyscallResult<T, LinuxNative.SyscallHandledState.Handled>
 }
@@ -205,9 +238,13 @@ public inline fun <T> LinuxNative.SyscallResult<T, *>.onSuccess(action: (T) -> U
  * Executes [action] if the call failed.
  */
 @Suppress("UNCHECKED_CAST")
+@OptIn(ExperimentalContracts::class)
 public inline fun <T> LinuxNative.SyscallResult<T, *>.onFailure(
     action: (errno: Int, rawValue: Long) -> Unit
 ): LinuxNative.SyscallResult<T, LinuxNative.SyscallHandledState.Handled> {
+    contract {
+        callsInPlace(action, InvocationKind.AT_MOST_ONCE)
+    }
     if (this is LinuxNative.SyscallResult.Error) action(errno, rawValue)
     return this as LinuxNative.SyscallResult<T, LinuxNative.SyscallHandledState.Handled>
 }
@@ -215,13 +252,18 @@ public inline fun <T> LinuxNative.SyscallResult<T, *>.onFailure(
 /**
  * Recovers from an error by applying [transform].
  */
+@OptIn(ExperimentalContracts::class)
 public inline fun <T> LinuxNative.SyscallResult<T, *>.recover(
     transform: (errno: Int, rawValue: Long) -> @UnsafeVariance T
-): T =
-    when (this) {
+): T {
+    contract {
+        callsInPlace(transform, InvocationKind.AT_MOST_ONCE)
+    }
+    return when (this) {
         is LinuxNative.SyscallResult.Success -> value
         is LinuxNative.SyscallResult.Error -> transform(errno, rawValue)
     }
+}
 
 /**
  * Extension properties for [LinuxNative.SyscallResult] of [Long] to provide
