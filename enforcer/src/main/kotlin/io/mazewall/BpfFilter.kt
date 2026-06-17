@@ -112,10 +112,8 @@ object BpfFilter {
         // 3. Block-based checks (Linear Scan)
         emitLinearScan(builder, syscallActions, jvmCriticalNrs, profilingMode, defaultNativeAction, handledNrs)
 
-        // 4. Default Action
-        builder.ret(defaultNativeAction)
-
-        return builder.build().instructions
+        // 4. Default Action & Build
+        return builder.ret(defaultNativeAction).build().instructions
     }
 
     private fun getJvmCriticalNrs(arch: Arch): Set<Int> =

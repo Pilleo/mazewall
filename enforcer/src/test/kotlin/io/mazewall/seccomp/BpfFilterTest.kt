@@ -195,7 +195,7 @@ class BpfFilterTest {
             .loadSyscallNr()
         val handled = mutableSetOf<Int>()
         BpfFilter.emitInspections(builder, inspections, false, handled)
-        val instructions = builder.build().instructions
+        val instructions = builder.allow().build().instructions
         assertTrue(handled.contains(100))
         assertTrue(handled.contains(101))
 
@@ -230,7 +230,7 @@ class BpfFilterTest {
             .loadSyscallNr()
         val handled = mutableSetOf<Int>()
         BpfFilter.emitInspections(builder, inspections, false, handled)
-        val instructions = builder.build().instructions
+        val instructions = builder.allow().build().instructions
         assertTrue(handled.contains(200))
         assertTrue(handled.contains(201))
 
@@ -261,7 +261,7 @@ class BpfFilterTest {
             .loadSyscallNr()
         val handled = mutableSetOf<Int>()
         BpfFilter.emitInspections(builder, inspections, false, handled)
-        val instructions = builder.build().instructions
+        val instructions = builder.allow().build().instructions
 
         // Check if we find the correct operations on hi and lo bounds:
         val maskHi = (maskVal ushr 32).toInt() // 1
@@ -292,7 +292,7 @@ class BpfFilterTest {
             .loadSyscallNr()
         val handled = mutableSetOf<Int>()
         BpfFilter.emitInspections(builder, inspections, false, handled)
-        val instructions = builder.build().instructions
+        val instructions = builder.allow().build().instructions
 
         val hi1 = (largeVal1 ushr 32).toInt()
         val lo1 = largeVal1.toInt()

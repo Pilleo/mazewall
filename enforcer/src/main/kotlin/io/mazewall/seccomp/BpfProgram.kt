@@ -7,6 +7,7 @@ import io.mazewall.core.Syscall
 import io.mazewall.ffi.NativeConstants
 import java.util.UUID
 import java.util.function.Consumer
+import java.util.function.Function
 
 /**
  * A compiled seccomp policy containing the BPF filter instructions ready for installation.
@@ -22,31 +23,33 @@ public class BpfProgram(
 
         /**
          * Declarative entry point for building BPF programs.
+         * Enforces that the program ends with a termination instruction.
          */
         @JvmStatic
-        public fun dsl(arch: Arch, block: Consumer<BpfBuilder.NrLoaded>): BpfProgram {
+        public fun dsl(arch: Arch, block: Function<BpfBuilder.NrLoaded, BpfBuilder.Terminated>): BpfProgram {
             val nrLoaded = BpfBuilder.Uninitialized()
                 .checkArch(arch)
                 .loadSyscallNr()
-            block.accept(nrLoaded)
-            return nrLoaded.build()
+            val terminated = block.apply(nrLoaded)
+            return terminated.build()
         }
 
         /**
          * Kotlin-friendly declarative entry point for building BPF programs.
+         * Enforces that the program ends with a termination instruction.
          */
-        public inline fun dsl(arch: Arch, block: BpfBuilder.NrLoaded.() -> Unit): BpfProgram =
+        public inline fun dsl(arch: Arch, block: BpfBuilder.NrLoaded.() -> BpfBuilder.Terminated): BpfProgram =
             BpfBuilder.Uninitialized()
                 .checkArch(arch)
                 .loadSyscallNr()
-                .apply(block)
+                .let(block)
                 .build()
     }
 }
 
 /**
  * Type-safe state machine for building BPF programs.
- * Enforces the initialization sequence: Arch Check -> Load NR -> Filtering.
+ * Enforces the initialization sequence: Arch Check -> Load NR -> Filtering -> Termination.
  */
 public sealed class BpfBuilder protected constructor(internal val ops: MutableList<BpfMacro>) {
 
@@ -86,28 +89,31 @@ public sealed class BpfBuilder protected constructor(internal val ops: MutableLi
     public class NrLoaded internal constructor(ops: MutableList<BpfMacro>) : BpfBuilder(ops) {
 
         /** Returns ACT_ALLOW immediately. */
-        public fun allow(): NrLoaded {
+        public fun allow(): Terminated {
             return ret(SeccompAction.ACT_ALLOW.nativeCode)
         }
 
         /** Returns ACT_ERRNO with the given [errno]. */
-        public fun deny(errno: Int): NrLoaded {
+        public fun deny(errno: Int): Terminated {
             return ret(SeccompAction.ACT_ERRNO.nativeCode or (errno and ERRNO_MASK))
         }
 
         /** Returns SECCOMP_RET_KILL_THREAD. */
-        public fun killThread(): NrLoaded {
+        public fun killThread(): Terminated {
             return ret(NativeConstants.SECCOMP_RET_KILL_THREAD)
         }
 
         /** Returns SECCOMP_RET_USER_NOTIF (for profiling or complex rules). */
-        public fun notifyUser(): NrLoaded {
+        public fun notifyUser(): Terminated {
             return ret(NativeConstants.SECCOMP_RET_USER_NOTIF)
         }
 
         /**
          * Expects a specific syscall number and executes the [block] if matched.
          * Skips the block if the syscall number does not match.
+         *
+         * Note: The block itself may terminate, but the main sequence continues
+         * after the block's end.
          */
         public fun expect(nr: Int, block: NrLoaded.() -> Unit): NrLoaded {
             val skipLabel = "skip_${UUID.randomUUID().toString().replace("-", "")}"
@@ -160,9 +166,13 @@ public sealed class BpfBuilder protected constructor(internal val ops: MutableLi
             return this
         }
 
-        public fun ret(action: Int): NrLoaded {
+        /**
+         * Ends the instruction sequence with a RET instruction.
+         * Transitions the builder to the [Terminated] state.
+         */
+        public fun ret(action: Int): Terminated {
             ops.add(BpfMacro.Ret(action))
-            return this
+            return Terminated(ops)
         }
 
         public fun label(name: String): NrLoaded {
@@ -170,6 +180,15 @@ public sealed class BpfBuilder protected constructor(internal val ops: MutableLi
             return this
         }
 
+        private companion object {
+            private const val ERRNO_MASK = 0xFFFF
+        }
+    }
+
+    /**
+     * Terminated state: The BPF program ends with a RET instruction and is ready to be built.
+     */
+    public class Terminated internal constructor(ops: MutableList<BpfMacro>) : BpfBuilder(ops) {
         /**
          * Compiles the high-level instructions into raw seccomp-bpf opcodes.
          */
@@ -231,7 +250,6 @@ public sealed class BpfBuilder protected constructor(internal val ops: MutableLi
 
         private companion object {
             private const val MAX_BPF_JUMP_OFFSET = 255
-            private const val ERRNO_MASK = 0xFFFF
             private const val BPF_LD_ABS: Short = 0x20
             private const val BPF_ALU_AND: Short = 0x54
             private const val BPF_RET: Short = 0x06
