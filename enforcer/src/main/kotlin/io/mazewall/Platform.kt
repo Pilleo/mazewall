@@ -13,12 +13,34 @@ public object Platform {
     @Volatile
     private var provider: PlatformProvider = RealPlatformProvider
 
+    @Volatile
+    private var cachedMatrix: KernelFeatureMatrix? = null
+
+    /**
+     * Immutable matrix of supported Linux kernel features.
+     */
+    public val featureMatrix: KernelFeatureMatrix
+        get() {
+            val current = cachedMatrix
+            if (current != null) return current
+            synchronized(this) {
+                val secondCheck = cachedMatrix
+                if (secondCheck != null) return secondCheck
+                val resolved = KernelFeatureMatrix.resolve(provider)
+                cachedMatrix = resolved
+                return resolved
+            }
+        }
+
     /**
      * Swaps the active platform provider. Used for testing and fault injection.
      */
     @Suppress("spotbugs:ST_WRITE_TO_STATIC_FROM_INSTANCE_METHOD")
     public fun setProvider(newProvider: PlatformProvider) {
-        provider = newProvider
+        synchronized(this) {
+            provider = newProvider
+            cachedMatrix = null
+        }
     }
 
     /**
@@ -26,7 +48,10 @@ public object Platform {
      */
     @Suppress("spotbugs:ST_WRITE_TO_STATIC_FROM_INSTANCE_METHOD")
     public fun resetToDefault() {
-        provider = RealPlatformProvider
+        synchronized(this) {
+            provider = RealPlatformProvider
+            cachedMatrix = null
+        }
     }
 
     /**
@@ -111,7 +136,7 @@ public object Platform {
         val isNoNewPrivsEnabled: Boolean,
         val seccompMode: SeccompMode,
         val yamaPtraceScope: YamaPtraceScope,
-        val landlockAbiVersion: Int,
+        val features: KernelFeatureMatrix,
         val isContainer: Boolean,
     ) {
         override fun toString(): String {
@@ -139,7 +164,9 @@ public object Platform {
                     is YamaPtraceScope.Unavailable -> "Unavailable"
                 }
             }
-                Landlock ABI Version: ${if (landlockAbiVersion > 0) "$landlockAbiVersion" else "Unsupported ($landlockAbiVersion)"}
+                Kernel Features:
+                  - Seccomp: ${features.seccompSupported} (TSYNC: ${features.seccompTsyncSupported}, Notif: ${features.seccompUserNotifSupported})
+                  - Landlock: ${if (features.landlockSupported) "ABI v${features.landlockAbiVersion}" else "Unsupported"} (TSYNC: ${features.landlockTsyncSupported})
                 Container Detected: $isContainer
                 =====================================
             """.trimIndent()
@@ -159,7 +186,7 @@ public object Platform {
             isNoNewPrivsEnabled = provider.isNoNewPrivsEnabled(),
             seccompMode = provider.getSeccompMode(),
             yamaPtraceScope = provider.getYamaPtraceScope(),
-            landlockAbiVersion = provider.getLandlockAbiVersion(),
+            features = featureMatrix,
             isContainer = provider.isContainer(),
         )
     }

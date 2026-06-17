@@ -2,8 +2,10 @@ package io.mazewall.profiler.engine
 
 import io.mazewall.BpfFilter
 import io.mazewall.LinuxNative
+import io.mazewall.Platform
 import io.mazewall.Policy
 import io.mazewall.Uncompiled
+import io.mazewall.UnsupportedKernelFeatureException
 import io.mazewall.core.Arch
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
@@ -81,6 +83,10 @@ internal class ProfilerInstallerSession(
         private set
 
     fun install() {
+        if (!Platform.featureMatrix.seccompUserNotifSupported) {
+            throw UnsupportedKernelFeatureException("Seccomp profiling (USER_NOTIF) requires Linux 5.0+ (and a modern OCI seccomp profile if containerized).")
+        }
+
         state = ProfilerInstallerState.InstallingBpf
 
         val coordinatorThread =

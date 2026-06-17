@@ -4,6 +4,7 @@ import io.mazewall.LinuxNative
 import io.mazewall.Platform
 import io.mazewall.Policy
 import io.mazewall.Uncompiled
+import io.mazewall.UnsupportedKernelFeatureException
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
 import io.mazewall.core.SandboxedPath
@@ -176,11 +177,13 @@ object Landlock {
 
     /**
      * Builds and applies a Landlock ruleset to the calling thread based on the given [policy].
+     *
+     * @param processWide If true, attempts to synchronize the ruleset across all threads (Linux 7.0+).
      */
-    fun applyRuleset(policy: Policy<*, Uncompiled>) {
+    fun applyRuleset(policy: Policy<*, Uncompiled>, processWide: Boolean = false) {
         if (!shouldApplyLandlock(policy)) return
 
-        val session = LandlockSession(policy)
+        val session = LandlockSession(policy, processWide)
         session.applyRuleset()
     }
 
@@ -350,7 +353,7 @@ object Landlock {
         }
     }
 
-    internal fun enforceRuleset(rulesetFd: FileDescriptor<FileDescriptorRole.Ruleset>) {
+    internal fun enforceRuleset(rulesetFd: FileDescriptor<FileDescriptorRole.Ruleset>, processWide: Boolean = false) {
         val (prctlResult, restrictResult) = LinuxNative.withTransaction {
             val p = LinuxNative.process.prctl(
                 NativeConstants.PR_SET_NO_NEW_PRIVS,
@@ -359,10 +362,12 @@ object Landlock {
                 io.mazewall.core.NativeArg.LongArg(0L),
                 io.mazewall.core.NativeArg.LongArg(0L)
             )
+
+            val flags = if (processWide) LANDLOCK_RESTRICT_SELF_TSYNC else 0L
             val r = LinuxNative.syscall(
                 NativeConstants.LANDLOCK_RESTRICT_SELF_NR,
                 io.mazewall.core.NativeArg.FdArg(rulesetFd),
-                io.mazewall.core.NativeArg.IntArg(0),
+                io.mazewall.core.NativeArg.LongArg(flags),
                 io.mazewall.core.NativeArg.MemoryArg(MemorySegment.NULL),
                 io.mazewall.core.NativeArg.IntArg(0)
             )
@@ -460,14 +465,24 @@ object Landlock {
 
 internal class LandlockSession(
     private val policy: Policy<*, Uncompiled>? = null,
+    private val processWide: Boolean = false,
 ) {
     var state: LandlockState = LandlockState.Uninitialized
         private set
 
     @Suppress("TooGenericExceptionCaught")
     fun applyRuleset() {
-        val abi = Landlock.getAbiVersion()
+        val features = Platform.featureMatrix
+        val abi = features.landlockAbiVersion
         state = LandlockState.QueryingAbi(abi)
+
+        if (processWide && !features.landlockTsyncSupported) {
+            handleProcessWideUnsupported()
+            // If we are warning and bypassing, we only continue if there are no rules.
+            // But if there are rules, we continue and apply them to the current thread only.
+            // Documentation states this is the accepted risk.
+        }
+
         if (abi < 1) {
             if (policy != null) {
                 Landlock.handleUnsupportedLandlock()
@@ -496,7 +511,7 @@ internal class LandlockSession(
             try {
                 val added = created.addRules(this)
                 state = LandlockState.Enforcing(rulesetFd)
-                added.restrictSelf()
+                added.restrictSelf(processWide)
                 state = LandlockState.Applied
             } catch (e: Exception) {
                 state = LandlockState.Failed(e)
@@ -504,6 +519,16 @@ internal class LandlockSession(
             } finally {
                 LinuxNative.fileSystem.close(rulesetFd)
             }
+        }
+    }
+
+    private fun handleProcessWideUnsupported() {
+        val fallback = Platform.configuredFallback()
+        val msg = "Process-wide Landlock (TSYNC) requires Linux 7.0+ (ABI v8). This kernel supports ABI v${Platform.featureMatrix.landlockAbiVersion}."
+        if (fallback == Platform.FallbackBehavior.FAIL) {
+            throw UnsupportedKernelFeatureException(msg)
+        } else if (fallback == Platform.FallbackBehavior.WARN_AND_BYPASS) {
+            java.util.logging.Logger.getLogger(Landlock::class.java.name).warning("$msg Rules will only be applied to the current thread and its descendants.")
         }
     }
 }

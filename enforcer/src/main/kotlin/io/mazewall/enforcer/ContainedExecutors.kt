@@ -110,13 +110,6 @@ object ContainedExecutors {
     ) {
         if (!needsLandlock(policy)) return
 
-        if (processWide) {
-            throw UnsupportedOperationException(
-                "Process-wide containment (installOnProcess) does not support Landlock filesystem rules. " +
-                        "Use thread-scoped containment (installOnCurrentThread) for filesystem restrictions.",
-            )
-        }
-
         val appliedReads = ThreadStateRegistry.landlockAppliedReads
         val appliedWrites = ThreadStateRegistry.landlockAppliedWrites
 
@@ -130,7 +123,7 @@ object ContainedExecutors {
         }
 
         if (appliedReads != policy.allowedFsReadPaths || appliedWrites != policy.allowedFsWritePaths) {
-            Landlock.applyRuleset(policy)
+            Landlock.applyRuleset(policy, processWide)
             ThreadStateRegistry.landlockAppliedReads = policy.allowedFsReadPaths
             ThreadStateRegistry.landlockAppliedWrites = policy.allowedFsWritePaths
         }
@@ -138,8 +131,8 @@ object ContainedExecutors {
 
     private fun needsLandlock(policy: Policy<*, *>) =
         policy.allowedFsReadPaths.isNotEmpty() ||
-                policy.allowedFsWritePaths.isNotEmpty() ||
-                (policy.isSyscallAllowed(Syscall.IO_URING_SETUP) && (!policy.isSyscallAllowed(Syscall.OPEN) || !policy.isSyscallAllowed(Syscall.OPENAT)))
+            policy.allowedFsWritePaths.isNotEmpty() ||
+            (policy.isSyscallAllowed(Syscall.IO_URING_SETUP) && (!policy.isSyscallAllowed(Syscall.OPEN) || !policy.isSyscallAllowed(Syscall.OPENAT)))
 
     private fun isPathSubset(
         parentPaths: Set<SandboxedPath>,
@@ -148,10 +141,10 @@ object ContainedExecutors {
         if (childPaths.isEmpty()) return true
         val parents = parentPaths.map { java.nio.file.Paths.get(it.value) }
         return parents.isNotEmpty() &&
-                childPaths.all { childPath ->
-                    val child = java.nio.file.Paths.get(childPath.value)
-                    parents.any { parent -> child.startsWith(parent) }
-                }
+            childPaths.all { childPath ->
+                val child = java.nio.file.Paths.get(childPath.value)
+                parents.any { parent -> child.startsWith(parent) }
+            }
     }
 
     private fun handleUnsupportedPlatform() {

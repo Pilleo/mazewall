@@ -6,7 +6,9 @@ import io.mazewall.MockNativeFileSystem
 import io.mazewall.MockNativeMemory
 import io.mazewall.MockNativeNetworking
 import io.mazewall.MockNativeProcess
+import io.mazewall.MockPlatformProvider
 import io.mazewall.NativeTransaction
+import io.mazewall.Platform
 import io.mazewall.Policy
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.SandboxedPath
@@ -40,7 +42,7 @@ class LandlockCoverageTest {
             a6: io.mazewall.core.NativeArg,
         ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
             if (nr == io.mazewall.ffi.NativeConstants.LANDLOCK_CREATE_RULESET_NR &&
-                a3 is io.mazewall.core.NativeArg.LongArg && a3.value == io.mazewall.ffi.NativeConstants.LANDLOCK_CREATE_RULESET_VERSION.toLong()
+                a3 is io.mazewall.core.NativeArg.LongArg && a3.value == io.mazewall.ffi.NativeConstants.LANDLOCK_CREATE_RULESET_VERSION
             ) {
                 return LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(5)
             }
@@ -126,6 +128,55 @@ class LandlockCoverageTest {
         assertFailsWith<IllegalStateException> {
             session.applyRuleset()
         }
+    }
+
+    @Test
+    fun `test LandlockSession process-wide supported`() {
+        val mockPlatform = MockPlatformProvider()
+        mockPlatform.mockLandlockAbiVersion = 8
+        Platform.setProvider(mockPlatform)
+
+        val mockEngine = SupportedLandlockMock()
+        LinuxNative.setEngine(mockEngine)
+
+        val session = LandlockSession(Policy.builder().build(), processWide = true)
+        session.applyRuleset()
+    }
+
+    @Test
+    fun `test LandlockSession process-wide unsupported`() {
+        val mockPlatform = MockPlatformProvider()
+        mockPlatform.mockLandlockAbiVersion = 5
+        Platform.setProvider(mockPlatform)
+
+        val mockEngine = SupportedLandlockMock()
+        LinuxNative.setEngine(mockEngine)
+
+        val old = System.getProperty("io.mazewall.fallback")
+        System.setProperty("io.mazewall.fallback", "WARN_AND_BYPASS")
+        try {
+            // Should log warning and continue with thread-scoped
+            val session = LandlockSession(Policy.builder().build(), processWide = true)
+            session.applyRuleset()
+        } finally {
+            if (old != null) System.setProperty("io.mazewall.fallback", old)
+            else System.clearProperty("io.mazewall.fallback")
+        }
+    }
+
+    @Test
+    fun `test restrictSelf coverage`() {
+        val mock = SupportedLandlockMock()
+        LinuxNative.setEngine(mock)
+
+        // Default
+        LandlockLifecycle.RulesAdded(FileDescriptor.unsafe(10)).restrictSelf()
+
+        // Thread-scoped
+        LandlockLifecycle.RulesAdded(FileDescriptor.unsafe(10)).restrictSelf(false)
+
+        // Process-wide
+        LandlockLifecycle.RulesAdded(FileDescriptor.unsafe(10)).restrictSelf(true)
     }
 
     @Test

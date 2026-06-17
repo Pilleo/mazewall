@@ -4,9 +4,11 @@ import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
+import org.junit.jupiter.api.parallel.Isolated
 import java.io.File
 import kotlin.test.assertEquals
 
+@Isolated
 class PlatformDiagnosticsTest {
     @TempDir
     lateinit var tempDir: File
@@ -21,6 +23,7 @@ class PlatformDiagnosticsTest {
     @AfterEach
     fun tearDown() {
         RealPlatformProvider.yamaPath = originalYamaPath
+        Platform.resetToDefault()
     }
 
     @Test
@@ -30,39 +33,32 @@ class PlatformDiagnosticsTest {
 
         // Classic (0)
         yamaFile.writeText("0\n")
-        var diag = Platform.diagnose()
-        assertEquals(YamaPtraceScope.Classic, diag.yamaPtraceScope)
+        assertEquals(YamaPtraceScope.Classic, RealPlatformProvider.getYamaPtraceScope())
 
         // Restricted (1)
         yamaFile.writeText("1")
-        diag = Platform.diagnose()
-        assertEquals(YamaPtraceScope.Restricted, diag.yamaPtraceScope)
+        assertEquals(YamaPtraceScope.Restricted, RealPlatformProvider.getYamaPtraceScope())
 
         // AdminOnly (2)
         yamaFile.writeText("  2  ")
-        diag = Platform.diagnose()
-        assertEquals(YamaPtraceScope.AdminOnly, diag.yamaPtraceScope)
+        assertEquals(YamaPtraceScope.AdminOnly, RealPlatformProvider.getYamaPtraceScope())
 
         // Disabled (3)
         yamaFile.writeText("3")
-        diag = Platform.diagnose()
-        assertEquals(YamaPtraceScope.Disabled, diag.yamaPtraceScope)
+        assertEquals(YamaPtraceScope.Disabled, RealPlatformProvider.getYamaPtraceScope())
 
         // Unknown (99)
         yamaFile.writeText("99")
-        diag = Platform.diagnose()
-        assertEquals(YamaPtraceScope.Unknown(99), diag.yamaPtraceScope)
+        assertEquals(YamaPtraceScope.Unknown(99), RealPlatformProvider.getYamaPtraceScope())
 
         // Invalid content
         yamaFile.writeText("not-a-number")
-        diag = Platform.diagnose()
-        assertEquals(YamaPtraceScope.Unavailable, diag.yamaPtraceScope)
+        assertEquals(YamaPtraceScope.Unavailable, RealPlatformProvider.getYamaPtraceScope())
     }
 
     @Test
     fun `test yama scope unavailable when file missing`() {
         RealPlatformProvider.yamaPath = File(tempDir, "does-not-exist").absolutePath
-        val diag = Platform.diagnose()
-        assertEquals(YamaPtraceScope.Unavailable, diag.yamaPtraceScope)
+        assertEquals(YamaPtraceScope.Unavailable, RealPlatformProvider.getYamaPtraceScope())
     }
 }

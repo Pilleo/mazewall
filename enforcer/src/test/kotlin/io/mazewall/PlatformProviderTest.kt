@@ -50,7 +50,7 @@ class PlatformProviderTest {
         assertEquals(true, d.isNoNewPrivsEnabled)
         assertEquals(SeccompMode.Filter, d.seccompMode)
         assertEquals(YamaPtraceScope.AdminOnly, d.yamaPtraceScope)
-        assertEquals(4, d.landlockAbiVersion)
+        assertEquals(4, d.features.landlockAbiVersion)
         assertEquals(true, d.isContainer)
         assertFalse(d.isLinux)
     }
@@ -75,5 +75,24 @@ class PlatformProviderTest {
 
         Platform.setProvider(mock)
         assertFalse(Platform.isSupported())
+    }
+
+    @Test
+    fun `featureMatrix resolves correctly from provider`() {
+        val mock = MockPlatformProvider()
+        mock.mockKernelSeccompSupport = true
+        mock.mockSeccompTsyncSupported = true
+        mock.mockSeccompUserNotifSupported = false
+        mock.mockLandlockAbiVersion = 5
+
+        Platform.setProvider(mock)
+        val matrix = KernelFeatureMatrix.resolve(mock)
+
+        assertTrue(matrix.seccompSupported)
+        assertTrue(matrix.seccompTsyncSupported)
+        assertFalse(matrix.seccompUserNotifSupported)
+        assertEquals(5, matrix.landlockAbiVersion)
+        assertTrue(matrix.landlockSupported)
+        assertFalse(matrix.landlockTsyncSupported) // Needs ABI 8
     }
 }

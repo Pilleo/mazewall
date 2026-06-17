@@ -14,6 +14,8 @@ public open class MockPlatformProvider : PlatformProvider {
     public var mockNoNewPrivsEnabled: Boolean = false
     public var mockYamaPtraceScope: YamaPtraceScope = YamaPtraceScope.Classic
     public var mockLandlockAbiVersion: Int = 5
+    public var mockSeccompTsyncSupported: Boolean = true
+    public var mockSeccompUserNotifSupported: Boolean = true
     public var mockContainer: Boolean = false
 
     override fun getOsName(): String = mockOsName
@@ -25,5 +27,7 @@ public open class MockPlatformProvider : PlatformProvider {
     override fun isNoNewPrivsEnabled(): Boolean = mockNoNewPrivsEnabled
     override fun getYamaPtraceScope(): YamaPtraceScope = mockYamaPtraceScope
     override fun getLandlockAbiVersion(): Int = mockLandlockAbiVersion
+    override fun probeSeccompTsync(): Boolean = mockSeccompTsyncSupported
+    override fun probeSeccompUserNotif(): Boolean = mockSeccompUserNotifSupported
     override fun isContainer(): Boolean = mockContainer
 }

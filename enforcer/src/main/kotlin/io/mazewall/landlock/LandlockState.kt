@@ -71,8 +71,8 @@ internal sealed interface LandlockLifecycle {
     class RulesAdded(
         val rulesetFd: FileDescriptor<FileDescriptorRole.Ruleset>,
     ) : LandlockLifecycle {
-        fun restrictSelf(): Restricted {
-            Landlock.enforceRuleset(rulesetFd)
+        fun restrictSelf(processWide: Boolean = false): Restricted {
+            Landlock.enforceRuleset(rulesetFd, processWide)
             return Restricted
         }
     }

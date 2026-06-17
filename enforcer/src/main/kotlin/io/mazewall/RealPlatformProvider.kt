@@ -105,6 +105,30 @@ internal object RealPlatformProvider : PlatformProvider {
         0
     }
 
+    override fun probeSeccompTsync(): Boolean = probeSeccompFlag(NativeConstants.SECCOMP_FILTER_FLAG_TSYNC.toLong())
+
+    override fun probeSeccompUserNotif(): Boolean = probeSeccompFlag(NativeConstants.SECCOMP_FILTER_FLAG_NEW_LISTENER)
+
+    /**
+     * Probes for a seccomp flag by performing a dry-run call with a NULL pointer.
+     * If the kernel recognizes the flag, it returns EFAULT (Bad Address) because it
+     * tries to read the filter program. If it doesn't recognize the flag, it returns EINVAL.
+     */
+    private fun probeSeccompFlag(flag: Long): Boolean {
+        val arch = io.mazewall.core.Arch.current()
+        val res = LinuxNative.withTransaction {
+            LinuxNative.syscall(
+                arch.seccompSyscallNumber.toLong(),
+                io.mazewall.core.NativeArg.LongArg(NativeConstants.SECCOMP_SET_MODE_FILTER.toLong()),
+                io.mazewall.core.NativeArg.LongArg(flag),
+                io.mazewall.core.NativeArg.NullArg, // Trigger EFAULT on valid flags
+            )
+        }
+        // EFAULT (14) means the kernel recognized the flag and tried to read the NULL program.
+        @Suppress("MagicNumber")
+        return res is LinuxNative.SyscallResult.Error && res.errno == 14
+    }
+
     override fun isContainer(): Boolean {
         var isContainer = File("/.dockerenv").exists() ||
             File("/run/secrets/kubernetes.io").exists()

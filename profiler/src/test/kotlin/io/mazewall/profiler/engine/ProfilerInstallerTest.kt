@@ -2,6 +2,8 @@ package io.mazewall.profiler.engine
 
 import io.mazewall.LinuxNative
 import io.mazewall.MockNativeEngine
+import io.mazewall.MockPlatformProvider
+import io.mazewall.Platform
 import io.mazewall.Policy
 import io.mazewall.profiler.engine.SyscallEvent
 import io.mazewall.profiler.engine.SyscallEventState
@@ -16,14 +18,19 @@ import kotlin.test.assertTrue
 class ProfilerInstallerTest {
     @BeforeEach
     fun setUp() {
-        val mock = MockNativeEngine()
-        mock.syscallResult = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(100)
-        LinuxNative.setEngine(mock)
+        val mockEngine = MockNativeEngine()
+        mockEngine.syscallResult = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(100)
+        LinuxNative.setEngine(mockEngine)
+
+        val mockPlatform = MockPlatformProvider()
+        mockPlatform.mockSeccompUserNotifSupported = true
+        Platform.setProvider(mockPlatform)
     }
 
     @AfterEach
     fun tearDown() {
         LinuxNative.resetToDefault()
+        Platform.resetToDefault()
     }
 
     @Test

@@ -35,6 +35,18 @@ public interface PlatformProvider {
     /** Returns the supported Landlock ABI version, or 0 if unsupported. */
     fun getLandlockAbiVersion(): Int
 
+    /**
+     * Probes for Seccomp TSYNC support (process-wide synchronization).
+     * Should return true if the kernel recognizes SECCOMP_FILTER_FLAG_TSYNC.
+     */
+    fun probeSeccompTsync(): Boolean
+
+    /**
+     * Probes for Seccomp USER_NOTIF support (Tier S profiling).
+     * Should return true if the kernel recognizes SECCOMP_FILTER_FLAG_NEW_LISTENER.
+     */
+    fun probeSeccompUserNotif(): Boolean
+
     /** Returns true if the process appears to be running inside a container (Docker/K8s/Podman). */
     fun isContainer(): Boolean
 }

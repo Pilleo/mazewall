@@ -4,6 +4,7 @@ import io.mazewall.LinuxNative
 import io.mazewall.Platform
 import io.mazewall.Policy
 import io.mazewall.Compiled
+import io.mazewall.UnsupportedKernelFeatureException
 import io.mazewall.core.Arch
 import io.mazewall.core.SeccompAction
 import io.mazewall.core.Syscall
@@ -29,6 +30,9 @@ object PureJavaBpfEngine : SeccompEngine {
     }
 
     override fun installOnProcess(policy: Policy<*, Compiled>) {
+        if (!Platform.featureMatrix.seccompTsyncSupported) {
+            throw UnsupportedKernelFeatureException("Process-wide Seccomp synchronization (TSYNC) requires Linux 3.17+.")
+        }
         installInternal(policy, useTsync = true)
     }
 
@@ -79,12 +83,12 @@ object PureJavaBpfEngine : SeccompEngine {
         // Step 1: Set no_new_privs (mandatory for non-root seccomp)
         val r1 = LinuxNative.withTransaction {
             LinuxNative.process.prctl(
-            NativeConstants.PR_SET_NO_NEW_PRIVS,
-            io.mazewall.core.NativeArg.LongArg(1L),
-            io.mazewall.core.NativeArg.LongArg(0L),
-            io.mazewall.core.NativeArg.LongArg(0L),
-            io.mazewall.core.NativeArg.LongArg(0L),
-        )
+                NativeConstants.PR_SET_NO_NEW_PRIVS,
+                io.mazewall.core.NativeArg.LongArg(1L),
+                io.mazewall.core.NativeArg.LongArg(0L),
+                io.mazewall.core.NativeArg.LongArg(0L),
+                io.mazewall.core.NativeArg.LongArg(0L),
+            )
         }
         r1.getOrThrow("prctl(PR_SET_NO_NEW_PRIVS)")
     }
@@ -151,12 +155,12 @@ object PureJavaBpfEngine : SeccompEngine {
         // Verify filter is actually installed
         val r5 = LinuxNative.withTransaction {
             LinuxNative.process.prctl(
-            NativeConstants.PR_GET_SECCOMP,
-            io.mazewall.core.NativeArg.LongArg(0L),
-            io.mazewall.core.NativeArg.LongArg(0L),
-            io.mazewall.core.NativeArg.LongArg(0L),
-            io.mazewall.core.NativeArg.LongArg(0L),
-        )
+                NativeConstants.PR_GET_SECCOMP,
+                io.mazewall.core.NativeArg.LongArg(0L),
+                io.mazewall.core.NativeArg.LongArg(0L),
+                io.mazewall.core.NativeArg.LongArg(0L),
+                io.mazewall.core.NativeArg.LongArg(0L),
+            )
         }
         val mode = r5.getOrThrow("prctl(PR_GET_SECCOMP)")
         if (mode != 2L) {
@@ -166,4 +170,3 @@ object PureJavaBpfEngine : SeccompEngine {
         }
     }
 }
-
