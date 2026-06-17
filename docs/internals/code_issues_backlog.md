@@ -18,11 +18,6 @@
 **Context:** Currently, `io.mazewall.LinuxNative.FileDescriptor` is a universal value class wrapper around an `Int`. This provides lifetime safety via `AutoCloseable` but lacks type safety. A developer could accidentally pass a socket FD or an `O_PATH` file descriptor to a Landlock Ruleset function, causing runtime `EBADF` or silent logical failures.
 **Needed:** Refactor `FileDescriptor` to accept a Phantom Type parameter: `class FileDescriptor<Role>(val fd: Int)`. Define sealed interface roles like `Ruleset`, `OPath`, `SeccompNotif`, and `UnixSocket`. This eliminates FD transposition bugs at compile time.
 
-### ✅ [RESOLVED] [Severity: MEDIUM]: `SbobParser` Violates Single Responsibility Principle (SRP)
-**Context:** `SbobParser` acts as a God Class. It manages `kotlinx.serialization` JSON decoding, canonicalizes paths against a CWD, maps string names to `Syscall` enums, prunes subpaths, and constructs the `Policy` instance.
-**Needed:** Split the class into cohesive, decoupled components: `BobDeserializer` (JSON to DTO), `PathNormalizer` (canonicalization and pruning), and `PolicyTransformer` (DTO to Policy builder).
-**Fixed:** Refactored into `io.mazewall.sbob` package components.
-
 ### 🔴 [Severity: LOW]: `ContainmentViolationDetector` Violates Open/Closed Principle (OCP)
 **Context:** `ContainmentViolationDetector` hardcodes `Regex` instances and `DENIED_PHRASES` strings to translate standard JVM `IOException` messages into containment failures. Extending this detection for custom environments or translated OS locales requires modifying the core object directly.
 **Needed:** Implement a `ViolationMatcher` strategy interface. Core logic should iterate over injected matchers, allowing consumers to register custom patterns without altering the detector itself.
@@ -44,19 +39,10 @@
 2. **Future-Proofing:** Implement automatic `TSYNC` adoption when the `KernelFeatureMatrix` detects Landlock ABI v8+, upgrading the sandbox to full ACE protection seamlessly.
 3. **Opt-In Absolute Security:** Document external native wrappers (like `firejail`) for workloads requiring absolute ACE protection on older kernels.
 
-### ✅ [RESOLVED] [Severity: ENHANCEMENT]: Compile-Time BPF Termination Safety (Type-State RET Enforcement)
-**Context:** Currently, `BpfBuilder.NrLoaded.build()` can be called on a program that does not end with a `RET` instruction. While the kernel verifier will reject such programs at runtime, it results in a "Fail Closed" crash rather than a compile-time error.
-**Needed:** Split `NrLoaded` into `Active` and `Terminated` states. The `ret()` method should transition the builder to the `Terminated` state, and only `Terminated` should expose the `build()` method.
-**Fixed:** Implemented a `Terminated` state in `BpfBuilder`. Methods like `allow()`, `deny()`, and `ret()` now transition to this state, and `build()` is restricted to it.
-
 ### 🔵 [Severity: ENHANCEMENT]: Atomic Container State Transitions (Unified State Container)
 **Target:** `io.mazewall.enforcer.ContainedExecutors`
 **Context:** Currently, `ContainedExecutors` updates thread and process state across multiple independent `Registry` variables (`SYSCALL_ACTIONS`, `DEFAULT_ACTION`, etc.). This lack of atomicity could lead to inconsistent intermediate states during concurrent installations.
 **Needed:** Define a `ContainerState` immutable data class that holds all these properties. Use a single `AtomicReference<ContainerState>` in `ProcessStateRegistry` and a single `ThreadLocal<ContainerState>` in `ThreadStateRegistry` to ensure all transitions are atomic and consistent.
-
-### ✅ [RESOLVED] [Severity: MEDIUM]: ProfilerTraceListener Lacks Deterministic Lifecycle (AutoCloseable)
-**Context:** `ProfilerTraceListener` starts a background thread and reads from a socket. Previously, there was no standard way to signal shutdown or join the thread, leading to potential leaks or "half-dead" listeners during profiler restarts.
-**Needed:** Implement `AutoCloseable` for `ProfilerTraceListener`. Ensure it joins the worker thread and releases its socket reference upon closing.
 
 ### 🟡 [Severity: LOW]: High-Frequency Arena Allocation Overhead (MM Optimization)
 **Context:** The current `nativeScope` utility and profiler reactor loop create a new `Arena.ofConfined()` for every single operation (syscall resolution, polling, etc.). This puts unnecessary pressure on the JVM native allocator and GC.
@@ -65,10 +51,6 @@
 ### 🔵 [Severity: ENHANCEMENT]: Memory Segment Pooling for Profiler USER_NOTIF
 **Context:** The `seccomp_notif` and `seccomp_notif_resp` structures are used for every trapped system call. Continually allocating and zeroing these segments in the `reactorLoop` is inefficient.
 **Needed:** Implement a simple `SegmentPool` for fixed-size FFM structures. Pre-allocate a small cache of aligned segments and reuse them across different notifications.
-
-### ✅ [RESOLVED] [Severity: LOW]: Dependency Inversion Violation in Platform Diagnostics
-**Context:** `Platform.kt` directly invoked static FFM calls and read `/proc` files to determine container environments. This made unit testing the "Fallback" and "Diagnostic" logic difficult without a real Linux kernel.
-**Needed:** Introduce a `PlatformProvider` interface. Move the low-level discovery logic into a `LinuxPlatformProvider` and allow injecting a `MockPlatformProvider` for tests.
 
 ### 🔵 [Severity: ENHANCEMENT]: Compile-Time Feature Proof Tokens and Scope-Safe Policy Builders (Type-State Pattern)
 **Context:** Currently, `ContainedExecutors.kt` throws a runtime `UnsupportedOperationException` if process-wide containment is applied with Landlock rules because Landlock has historically been considered thread-scoped only. However, process-wide Landlock is supported on some newer kernels/setups. Blocking it unconditionally at compile-time or throwing runtime failures limits support on modern systems.
@@ -159,36 +141,27 @@
 2. The `BobCompiler` (or a background collector) can consume these events asynchronously.
 3. This reduces the time spent by the listener thread in the critical section of the seccomp notify loop, improving profiling performance and decoupling event capture from analysis.
 
-### ✅ [RESOLVED] [Severity: MEDIUM]: Procedural State Mutation over Type-Safe State Machines
-**Dimension:** Architecture / State Management
-**Target Area:** `:profiler` (`ProfilerDaemonEngine.kt`, `ProfilerSessionHandler.kt`, `ProfilerInstaller.kt`)
-**Failure Hypothesis:** Mutable `var state` properties updated inside procedural loops (`while`, `when`) can lead to invalid transitions or missed synchronizations if an intermediate failure occurs. 
-**Context & Proof:** `ProfilerSessionHandler` maintains `var state: ProfilerState`. The transitions are handled chronologically in `processNotification()` rather than being enforced by the state instances themselves. `ProfilerDaemonEngine` uses a raw `AtomicReference` for `ProfilerDaemonState` and a `var connection: ProfilerConnection`.
-**Recommendation:** Refactor to use true Type-Safe State Machines using Kotlin's sealed classes. The state interfaces themselves should define valid transition methods. This makes invalid transitions compile-time unrepresentable. The orchestration loops should become stateless reducers (e.g., `state = state.handleEvent(event)`).
-**Fixed:** Implemented sealed interfaces with explicit transition methods for `ProfilerState`, `ProfilerDaemonState`, and `ProfilerConnection`. Removed mutable `var state` and logic bugs.
+### 🔴 [Severity: MEDIUM]: Memory Registry Leak in `Profiler.threadRegistry`
+**Dimension:** Performance / Resource Lifecycle
+**Target Area:** `io.mazewall.profiler.Profiler`
+**Failure Hypothesis:** The `threadRegistry` map stores references to every profiled thread, but never removes them.
+**Context & Proof:** `Profiler.profile` registers the current thread via `threadRegistry[spid] = Thread.currentThread()`. There is no corresponding `remove` call in the `finally` block or completion callback.
+**Needed:** Add a `finally` block to `Profiler.profile` to remove the TID from the registry once the workload is finished.
 
-### ✅ [RESOLVED] [Severity: LOW]: Primitive Obsession in Profiler Diagnostic Events
-**Dimension:** Intention Safety / FFM ABI
-**Target Area:** `:profiler` (`SyscallEvent.kt`)
-**Failure Hypothesis:** Passing raw integers for OS identifiers risks transposition bugs (e.g., passing a Process ID where a File Descriptor was expected).
-**Context & Proof:** The `:enforcer` module makes excellent use of Kotlin `value class` (`Pid`, `Uid`, `SyscallNumber`). However, `:profiler` regresses to primitives. For example, `SyscallEvent` uses `val pid: Int` instead of `val pid: io.mazewall.core.Pid`. 
-**Recommendation:** Expand the strict `value class` usage from `:enforcer` to all DTOs and event structures in the `:profiler` module to ensure OS identifiers are never mixed up.
-**Fixed:** Replaced `Int` with `Pid` across the `:profiler` events, compiler, and tests.
+### 🔴 [Severity: MEDIUM]: Thread-Safety Violation: Mutable `LongArray` in `SyscallEvent`
+**Dimension:** Intention Safety / Concurrency
+**Target Area:** `io.mazewall.profiler.engine.SyscallEvent`
+**Failure Hypothesis:** Syscall arguments are stored in a mutable array, allowing downstream consumers to accidentally or maliciously corrupt the event data.
+**Context & Proof:** `SyscallEvent` uses `val args: LongArray`. Since arrays in JVM are mutable, any reference holder can execute `event.args[0] = value`.
+**Needed:** Refactor `SyscallEvent` to use an immutable list or perform defensive copies to ensure the captured state remains constant.
 
-### ✅ [RESOLVED] [Severity: MEDIUM]: Phantom Type Invalidation via Internal Mutability
-**Dimension:** Compile-Time Correctness 
-**Target Area:** `:enforcer` (`io.mazewall.core.FileDescriptor`)
-**Failure Hypothesis:** A developer could hold a reference to `FileDescriptor<..., FdState.Open>`, call `.close()`, and the type system would still claim it is `FdState.Open`, leading to runtime `EBADF` crashes.
-**Context & Proof:** `FileDescriptor` uses brilliant phantom types (`R : FileDescriptorRole, S : FdState`), but internally relies on a mutable `private var closed = false`. 
-**Recommendation:** `FileDescriptor` should be strictly immutable. The `close()` function should invalidate the underlying FFM memory segment and return a new `FileDescriptor<R, FdState.Closed>` instance (or simply be consumed by the native engine).
-**Fixed:** Removed internal `closed` state. `FileDescriptor` is now strictly immutable. Transitions are handled by `closeFd()` which returns a new instance with the `Closed` phantom type.
+### 🟡 [Severity: LOW]: Conceptual Type Error: Conflation of `Pid` and `Tid`
+**Dimension:** Intention Safety / Architecture
+**Target Area:** Cross-Module
+**Failure Hypothesis:** Using the same type (`Pid`) for both Process IDs (TGID) and Thread IDs (LWP) leads to semantic confusion and risks transposition bugs in multi-threaded logic.
+**Context & Proof:** The codebase uses `io.mazewall.core.Pid` for process-wide operations (like Landlock) and thread-local profiling (USER_NOTIF). Linux treates these as distinct identifiers (`getpid` vs `gettid`).
+**Needed:** Introduce a distinct `value class Tid(val value: Int)` and use it exclusively for thread-level tracking and profiling.
 
-
-### 🔵 [Severity: ENHANCEMENT]: Investigate "Loom-Safe" Profiling for Virtual Threads
-**Target:** `io.mazewall.profiler.Profiler`
-**Context:** Currently, `Profiler.profile` explicitly forbids execution on virtual threads to prevent "Carrier Poisoning" (trapping the underlying OS thread and affecting unrelated virtual threads).
-**Needed:** Explore mechanisms to allow profiling virtual threads without global side effects.
-1. Evaluate using `ReentrantLock` or `synchronized` blocks inside the workload to "pin" the virtual thread to its carrier during sensitive sections.
 2. Alternatively, investigate if a process-wide `USER_NOTIF` handler can distinguish between virtual threads based on their `TID` and only trap those explicitly opted into profiling.
 
 ### 🔵 [Severity: ENHANCEMENT]: Leverage Kotlin Contracts for Static Analysis
@@ -255,11 +228,6 @@
 ### 🔵 [Severity: ENHANCEMENT]: Memory Segment Pooling for Profiler USER_NOTIF
 **Context:** The `seccomp_notif` and `seccomp_notif_resp` structures are used for every trapped system call. Continually allocating and zeroing these segments in the `reactorLoop` is inefficient.
 **Needed:** Implement a simple `SegmentPool` for fixed-size FFM structures. Pre-allocate a small cache of aligned segments and reuse them across different notifications.
-
-### ✅ [RESOLVED] [Severity: ENHANCEMENT]: Atomic Container State Transitions (Unified State Container)
-**Target:** `io.mazewall.enforcer.ContainedExecutors`
-**Context:** Currently, `ContainedExecutors` updates thread and process state across multiple independent `Registry` variables (`SYSCALL_ACTIONS`, `DEFAULT_ACTION`, `FILTER_DEPTH`, etc.). This lack of atomicity could lead to inconsistent intermediate states during concurrent installations.
-**Needed:** Define a `ContainerState` immutable data class that holds all these properties. Use a single `AtomicReference<ContainerState>` in `ProcessStateRegistry` and a single `ThreadLocal<ContainerState>` in `ThreadStateRegistry` to ensure all transitions are atomic and consistent.
 
 ### 🔴 [Severity: MEDIUM]: `Policy` Violates Single Responsibility Principle (God Object)
 **Target:** `io.mazewall.Policy`
@@ -812,78 +780,11 @@ For full architectural details, see `supervisor_proxy_design.md`.
 
 ## Resolved & WONTFIX Historical Backlog
 
-### 🟢 [RESOLVED]: Context-Scoped Resource Ownership (File Descriptors)
-**Context:** Linux file descriptors (`FileDescriptor`) are managed as raw integers. If a file descriptor is closed twice (double close), or used after close (use-after-free), or leaked, it can lead to severe security bugs or incorrect resource assignment when another thread opens a new file.
-**Needed:**
-1. Refactor `FileDescriptor` to be a context-scoped resource wrapper using `AutoCloseable` or `Arena` scope.
-2. Require native transactions to check the validity of a `FileDescriptor` token before performing system calls on it.
-3. Implement a compile-time ownership tracking mechanism where resource lifetimes are bounded by FFM `Arena` scopes, preventing use-after-free at compile time.
-**Fix:** Refactored `FileDescriptor` in both `LinuxNative` and `io.mazewall.core` into regular classes implementing `AutoCloseable` with validation checks mapping to `Arena` lifetimes, and injected `require(fd.isValid)` runtime checks across all `NativeEngine` calls utilizing file descriptors.
-
-### ✅ [RESOLVED] [Severity: ENHANCEMENT]: Type-Safe "Must-Check" Enforcement for `SyscallResult`
-**Target:** `io.mazewall.SyscallResult`
-**Context:** While `SyscallResult` is a sealed class (Success/Error), nothing in the type system prevents a developer from invoking a native method and completely ignoring the returned `SyscallResult`. In security-critical native code, an unhandled error (like a failed `seccomp` installation) is catastrophic.
-**Needed:** Use generics and phantom types to enforce that a result is "consumed."
-1. Redefine as `SyscallResult<out T, out Handled : Boolean>`.
-2. Native methods return `SyscallResult<T, False>`.
-3. Methods like `onSuccess`, `onFailure`, `recover`, or `getOrThrow` return `SyscallResult<T, True>` or the raw value.
-4. While Kotlin doesn't have native "must-use" attributes like Rust's `#[must_use]`, this type-state allows for ArchUnit or Lint checks that ensure no `SyscallResult<_, False>` remains in the final expression of a block.
-
-### ✅ [RESOLVED] [Severity: ENHANCEMENT]: Type-State Machine for Profiler ACK Handshake (`Session<State>`)
-**Context:** Missing the `0xAC` JVM handshake or failing to send a `CONTINUE` response causes permanent tracee deadlocks in `ProfilerSessionHandler`.
-**Fix:** Implemented `HandshakeSession` sealed class hierarchy. `ProfilerTransport` now strictly requires `HandshakeSession.Success` to send `CONTINUE` and `HandshakeSession.Failed` to send error responses, ensuring the tracee is always released without deadlocks.
-
-### ✅ [RESOLVED] [Severity: ENHANCEMENT]: Type-State Enforced BPF Construction Lifecycle (`BpfBuilder<State>`)
-**Context:** Seccomp-BPF programs must follow a strict structural sequence (`Arch Check -> Load NR -> Inspections -> Scan -> Default RET`) to be valid and safe. Currently, the `Builder` allows instructions to be emitted in any order, which could lead to malformed filters (e.g., comparing NR before loading it).
-**Fix:** Implemented `BpfBuilder` sealed class hierarchy (`Uninitialized`, `ArchVerified`, `NrLoaded`). The compiler now enforces that architecture checks and syscall number loads occur in the mandatory sequence before any filtering logic is permitted, ensuring BPF bytecode is structurally correct by construction.
-
-### ✅ [RESOLVED] [Severity: ENHANCEMENT]: Type-Safe Profiler Connection Handshake State Machine (`ProfilerConnection<State>`)
-**Context:** The Profiler Daemon connection follows a non-trivial handshake: `Accept -> Receive FD (SCM_RIGHTS) -> Send PROTOCOL_ACK_BYTE`. Performing operations out of order (e.g., polling a null listener FD) causes reactor crashes.
-**Fix:** Implemented `ProfilerConnection` sealed class hierarchy (`Accepted`, `FdAttached`, `Active`). The `ProfilerDaemonEngine` now uses this state machine to drive the handshake, ensuring that the listener FD is received and the ACK byte is sent in the mandatory order before the session reactor starts.
-
-### ✅ [RESOLVED] [Severity: MEDIUM]: `BpfFilter.kt` violates OCP (Open/Closed Principle)
-**Target:** `io.mazewall.BpfFilter`
-**Context:** The `getInspections()` method uses hardcoded `if`-statements for specific syscalls (`mmap`, `clone`, `prctl`). Adding a new security capability (e.g., `pkey_mprotect`) requires modifying this core class.
-**Fix:** Extracted hardcoded inspections into polymorphic `SyscallInspector` plugins. Registry moved to `Policy` class.
-
-### ✅ [RESOLVED] [Severity: MEDIUM]: `ProfilerSessionHandler.kt` violates SRP (Single Responsibility Principle)
-**Target:** `io.mazewall.profiler.engine.ProfilerSessionHandler`
-**Context:** The class manages raw memory parsing, cross-process path resolution, trace event construction, and low-level IPC protocol byte-parsing (`0xAC` handshake).
-**Fix:** Refactored into a pure orchestrator. Extracted path resolution to `SyscallPathResolver` and IPC handshake logic to `HandshakeSession`.
-
-### ✅ [RESOLVED] [Severity: DX-FRICTION]: Interface Segregation Violation (ISP) in `ProfilerTransport`
-**Context:** `ProfilerTransport` was a "Fat Interface," mixing high-level trace event sending with low-level kernel responses and socket infrastructure management.
-**Fix:** Segregated `ProfilerTransport` into role-specific interfaces: `TraceEventPublisher`, `SeccompResponder`, `SocketLifecycleManager`, and `NativeIoOperations`. Components now strictly depend only on the roles they require.
-
-### ✅ [RESOLVED] [Severity: ENHANCEMENT]: `TraceEvent` Resolution Pipeline (`SyscallEvent<State>`)
-**Target:** `io.mazewall.profiler.engine.SyscallPathResolver` and `io.mazewall.profiler.BobCompiler`
-**Context:** In the Profiler, intercepted system calls produce raw register values (e.g., `arg[0] = 0x7ffd1234`). These pointers must be resolved into String paths by reading tracee memory. Currently, these operations are loosely coupled, forcing the `BobCompiler` to defensively check if path resolution failed or was skipped.
-**Fix:** Implemented a type-state pipeline using `SyscallEvent<Raw>` and `SyscallEvent<Resolved>`, ensuring compile-time safety for path data.
-
 ### 🟢 [RESOLVED]: Temporal State Mutation Leak in `ContainerStateRegistry` via Thread-Local Delegates
 **Target:** `io.mazewall.enforcer.ContainerStateRegistry`
 **Context:** `ContainerStateRegistry` exposed multiple properties backed by a custom `ThreadLocalDelegate` alongside process-wide state variables under a single interface.
 **Needed:** Split `ContainerStateRegistry` into two distinct, strongly-typed components: `ProcessStateRegistry` and `ThreadStateRegistry`. Enforce explicit lifecycle bounds and sanitization routines on the `ThreadStateRegistry` when task execution terminates.
 **Resolved:** The registry was split into `ProcessStateRegistry` and `ThreadStateRegistry`. Additionally, `ThreadStateRegistry` now includes an explicit `sanitize()` method that purposefully throws an `UnsupportedOperationException`, documenting why clearing ThreadLocals violates immutable OS sandbox semantics and thus explicitly enforcing the lifecycle bound as "OS thread lifetime".
-
-### 🟢 [RESOLVED]: Tight Coupling and Dependency Inversion Violation in `ProfilerSessionHandler`
-**Target:** `io.mazewall.profiler.engine.ProfilerSessionHandler`
-**Context:** The `ProfilerSessionHandler` in the `:profiler` module was tightly coupled to concrete implementations.
-**Needed:** Refactor `ProfilerSessionHandler` to accept `ProfilerMemoryReader` and `ProfilerTransport` as constructor parameters (context dependencies), allowing mock transports and mock memory readers to be injected during testing.
-**Resolved:** The class now accepts the abstract interfaces `ProfilerTransport` and `ProfilerMemoryReader` as constructor parameters, fully decoupling it and enabling tests (like `ProfilerDaemonTest`) to inject mock implementations.
-
-### 🟢 [RESOLVED]: BPF Compiler Macro-Architecture Documentation Drift
-**Target:** `io.mazewall.BpfFilter.kt` and `docs/internals/containment_design.md`
-**Fix:** `docs/internals/containment_design.md` was updated to accurately reflect the early `BPF_RET` early-return optimization used in `BpfFilter.kt`. The BPF compiler now uses symbolic labels, eliminating the manual `BPF_LD offset=0` restoration logic entirely.
-
-### 🟢 [RESOLVED]: Landlock.applyRestrictiveBarrier() silent fail-open
-**Target:** /enforcer/src/main/kotlin/io/mazewall/landlock/Landlock.kt
-**Context:** In applyRestrictiveBarrier(), the calls to LinuxNative.prctl(PR_SET_NO_NEW_PRIVS) and LinuxNative.syscall(LANDLOCK_RESTRICT_SELF_NR) return a SyscallResult. The method ignores the returnValue (and errno) of these calls. If the restrictive barrier fails to apply (e.g., due to Landlock configuration limits or permission errors), the profiler will proceed with no restrictions, bypassing the intended restrictive barrier entirely.
-**Needed:** Add checks for returnValue < 0 for both prctl and syscall, throwing an IllegalStateException on failure to adhere to the fail-closed doctrine, matching the logic in enforceRuleset().
-
-### 🟢 [RESOLVED]: Missing `creat` and `mknod` syscalls bypass `PURE_COMPUTE_UNSAFE` filesystem restrictions
-**Target:** `io.mazewall.core.Syscall`, `io.mazewall.core.Arch`, `io.mazewall.Policy.PURE_COMPUTE_UNSAFE`
-**Fix:** Added `CREAT`, `MKNOD`, and `MKNODAT` to `Syscall` enum and mapped them in `Arch.kt` for amd64 and aarch64. Added these syscalls to the blocklists in `Policy.PURE_COMPUTE_UNSAFE` and `Policy.NO_EXEC`.
 
 ### 🟢 [RESOLVED]: Nested Seccomp Stacking Security Containment Bypass on already-blocked Syscalls
 **Target:** `io.mazewall.enforcer.FilterInstallationPlanner`
@@ -892,43 +793,11 @@ For full architectural details, see `supervisor_proxy_design.md`.
 **Cascading Risk Potential:** High security containment bypass. A stacked policy that is intended to restrict thread capabilities further is ignored, causing RCE/compromised code to execute under weaker sandbox rules than designed.
 **Fix:** Modified `currentlyBlocked` to track `Map<Syscall, SeccompAction>` rather than `Set<Syscall>`. In `calculateNewFilter`, `newBlocks` now includes any syscall in the new policy that maps to a *higher priority (more restrictive) action* than the currently installed action for that syscall.
 
-### 🟢 [RESOLVED]: Redundant BPF Argument Inspection Blocks in Stacked Filters
-**Target:** `io.mazewall.enforcer.FilterInstallationPlanner`
-**Context:** When a stacked policy does not require a full whitelist escalation, a new `Policy` is built dynamically (`toInstall`). However, if `mmap(PROT_EXEC)` is already blocked by a previous filter, the planner still generates and installs the BPF argument inspection instructions again if the new policy also blocks it.
-**Fix:** Updated `FilterInstallationPlanner.calculateNewFilter` to explicitly set `builder.allowMmapExec()`, `builder.allowNonThreadClone()`, and `builder.allowUnsafePrctl()` if the `state` indicates they are already protected. This prevents redundant multi-instruction blocks from wasting the 32-filter limit.
-
-### 🟢 [RESOLVED]: Excessive Landlock Directory Capability Leak via Parent Fallback on Non-Existent Path Rules
-**Target:** `io.mazewall.landlock.Landlock.kt` (specifically `addRule`)
-**Failure Hypothesis:** When a user specifies a file-specific filesystem access rule for a file path that does not yet exist, Landlock's fallback handler opens the parent directory but fails to strip directory-specific actions (`READ_DIR`, `MAKE_DIR`, `REMOVE_DIR`) from the access mask, violating the principle of least privilege.
-**Context & Proof:** If a user calls `allowFsWrite("/var/lib/app/settings.json")` (non-existent file) under a custom policy, `addRule` falls back to the parent directory `/var/lib/app` with `isFallback = true`. The `calculateFinalAccess` method only strips `dirOnlyFlags` when `!isFallback && File(resolvedPath).isFile`. Because `isFallback` is `true`, the `dirOnlyFlags` (`READ_DIR | MAKE_DIR | REMOVE_DIR`) are NOT stripped from `writeFlags`. The resulting ruleset grants the thread complete authority to list files (`READ_DIR`), create directories (`MAKE_DIR`), and delete directories (`REMOVE_DIR`) inside the parent `/var/lib/app`, exposing other sensitive files or directories to manipulation or deletion.
-**Cascading Risk Potential:** High boundary bypass and integrity risk. An attacker can write to, create, or delete arbitrary files/folders under the parent directory, breaching the intended scope of a single-file rule.
-**Fix:** Adjusted `calculateFinalAccess` to strip `dirOnlyFlags` whenever `isFallback` is `true` or if the resolved path is an existing file. This ensures that parent directory fallbacks never leak directory manipulation capabilities.
-
-### 🟢 [RESOLVED]: Trace Listener Socket Interruption Deadlock due to unhandled `EINTR`
-**Target:** `/profiler/src/main/kotlin/io/mazewall/profiler/internal/ProfilerTraceListener.kt` (inside `start`)
-**Fix:** Extracted `NativeSocketInputStream` and added an explicit retry loop for `EINTR` (errno 4). Verified via targeted unit test with mocked native calls.
-
-### 🟢 [RESOLVED]: Missing `sendmmsg` and `recvmmsg` system calls bypass `NO_NETWORK` and `PURE_COMPUTE_UNSAFE` restrictions
-**Target:** `io.mazewall.core.Syscall`, `io.mazewall.Policy.PURE_COMPUTE_UNSAFE`, `io.mazewall.Policy.NO_NETWORK`, and `/profiler/src/main/kotlin/io/mazewall/profiler/compiler/BobCompiler.kt`
-**Failure Hypothesis:** A blacklist-based seccomp policy that aims to prevent all outbound networking fails to block alternative or modern socket-sending system calls. An attacker with arbitrary code execution can bypass `NO_NETWORK` or `PURE_COMPUTE_UNSAFE` by invoking these unblocked network system calls.
-**Context & Proof:** `Policy.NO_NETWORK` and `Policy.PURE_COMPUTE_UNSAFE` block standard socket operations like `CONNECT`, `SENDTO`, `SENDMSG`, and `SOCKET`. However, they fail to account for `sendmmsg` (system call 307 on x86_64, 269 on aarch64) and `recvmmsg` (system call 299 on x86_64, 268 on aarch64). Because blacklist-based policies default to allowing any system call not explicitly blocked (`defaultAction = ACT_ALLOW`), `sendmmsg` and `recvmmsg` remain unconditionally allowed.
-If an attacker achieves native arbitrary code execution (ACE) or has access to a pre-existing socket file descriptor, they can directly invoke `syscall(307, fd, msgvec, vlen, flags)` to transmit network packets, completely bypassing the socket blocklists. Additionally, these system calls are omitted from `Syscall.kt` and thus are also ignored by the `BobCompiler` during trace compilation, creating a complete blind spot in both enforcement and profiling.
-**Cascading Risk Potential:** High security sandbox evasion. Enables arbitrary outbound network transmission on contained threads despite active network blocklists.
-**Fix:** Added `SENDMMSG` and `RECVMMSG` to `Syscall.kt` and mapped them in `Arch.kt` for x86_64 and aarch64. Added these variants to the block lists in `Policy.PURE_COMPUTE_UNSAFE` and `Policy.NO_NETWORK`.
-
-### 🟢 [RESOLVED]: Design Documentation Drift in Landlock thread-local variable and restrictive method names
-**Target:** `/docs/internals/containment_design.md`
-**Fix:** `docs/internals/containment_design.md` was updated to accurately reference `THREAD_LANDLOCK_APPLIED_READS`/`THREAD_LANDLOCK_APPLIED_WRITES` and `applyRestrictiveBarrier()`.
-
 ### 🟢 [RESOLVED]: `installOnProcess` process-wide seccomp synchronization (TSYNC) fails deterministically on standard JVMs
 **Target:** `io.mazewall.seccomp.PureJavaBpfEngine`
 **Failure Hypothesis:** Process-wide seccomp installation via `TSYNC` requires `no_new_privs` to be enabled on all threads in the thread group. In standard JVMs, background threads are spawned before `no_new_privs` is set, causing TSYNC to fail with `EACCES` under non-root configurations. The current exception error message is also highly misleading.
 **Context & Proof:** The Linux kernel requires `no_new_privs` to be set on all sibling threads in the thread group for `SECCOMP_FILTER_FLAG_TSYNC` to succeed. When the JVM starts, GC threads, JIT threads, and VM helper threads are spawned at startup. In `PureJavaBpfEngine.installInternal`, the main thread calls `setNoNewPrivs()`, which only sets the flag on the *calling* thread. Pre-existing background threads do not get it. When `TSYNC` is attempted, the kernel returns `EACCES` (-13). The method catches this failure and throws an exception claiming "Your kernel may be too old to support SECCOMP_FILTER_FLAG_TSYNC", which is factually incorrect and misleads operators.
 **Resolved:** Clarified the exception message to clearly state that `TSYNC` failed due to missing `no_new_privs` on sibling threads, advising operators to run with OCI/Kubernetes `allowPrivilegeEscalation: false` or pre-set `no_new_privs` using an external launcher. Additionally, added a platform diagnostics API (`Platform.diagnose()`) to verify the `no_new_privs` state in-app.
-
-### 🟢 [RESOLVED]: Profiler connection failure on signal interruption inside `recvDescriptor`
-**Target:** `/profiler/src/main/kotlin/io/mazewall/profiler/engine/ProfilerDaemon.kt` (specifically `recvDescriptor`)
-**Fix:** `recvDescriptor` in `ProfilerTransport.kt` was updated to wrap the `recvmsg` call in a loop that continues on `EINTR` (`errno == 4`).
 
 ### 🟢 [RESOLVED]: Seccomp Filter Bypass via `pkey_mprotect`
 **Target:** `io.mazewall.BpfFilter`, `io.mazewall.core.Syscall`, `io.mazewall.seccomp.MmapProtectionTest`
@@ -937,36 +806,6 @@ If an attacker achieves native arbitrary code execution (ACE) or has access to a
 **Vulnerability Chain Potential:** Very high. If an attacker achieves arbitrary code execution (or memory corruption) they can just use `pkey_mprotect` instead of `mprotect` to bypass JIT / dynamic shellcode protections in the sandbox.
 **Fix:** Added `PKEY_MPROTECT` to `Syscall`, mapped its number per architecture, and in `BpfFilter.buildFromActions` added it to the same argument inspection block that currently restricts `PROT_EXEC` in `mprotect` and `mmap`. Added tests to `MmapProtectionTest.kt` to guarantee blocking.
 **Failure Hypothesis:** A thread pool processing multiple tasks with a whitelist policy (where `defaultAction != ACT_ALLOW`) will unconditionally attach a new, redundant Seccomp BPF filter on every task execution, eventually crashing the thread when the filter limit is reached.
-
-### ✅ [DONE] [Severity: ENHANCEMENT]: Leverage Value Classes for Primitive Safety (Internal)
-**Target:** `io.mazewall.LinuxNative.kt`, `io.mazewall.ffi.Layouts.kt`
-**Context:** We currently use raw `Int` for File Descriptors and `Errno`, and `Long` for masks and addresses. This is prone to "parameter swapping" bugs.
-**Needed:** Introduce `@JvmInline value class` for internal types like `FileDescriptor`, `Errno`, and `MemoryAddress`. Use these internally to enforce compile-time safety. To maintain Java compatibility, keep the public API surface (e.g., `ContainedExecutors`) using primitives, but use value classes for all internal FFM and logic layers.
-
-### ✅ [DONE] [Severity: ENHANCEMENT]: Result-Oriented Functional Error Handling
-**Target:** `io.mazewall.NativeEngine.kt` and callers
-**Context:** We currently rely on manual `returnValue < 0` checks and `LinuxNative.errno()` calls. This is a common source of missed error handling.
-**Needed:** Wrap internal syscall returns in a monadic `Result<T>` or a custom `SyscallResult` type. This forces developers to explicitly handle the `Failure` branch before accessing the result, aligning with modern functional programming safety standards.
-
-### 🟢 [RESOLVED]: `ContainedExecutors.kt` violates single-responsibility at the API surface
-**Target:** `io.mazewall.enforcer.ContainedExecutors`
-**Fix:** `ContainedExecutors` was refactored, and the inner class `ContainedExecutorWrapper` was extracted into its own file (`enforcer/internal/ContainedExecutorWrapper.kt`).
-
-### 🟢 [RESOLVED]: Profiler daemon reactor loop spins at 100% CPU on delayed ACK bytes
-**Target:** `io.mazewall.profiler.engine.ProfilerSessionHandler.kt` (specifically `handleShutdownRequest`)
-**Fix:** `handleShutdownRequest` in `ProfilerSessionHandler.kt` was modified to use `transport.recv(..., 0)` to properly consume bytes instead of peeking.
-
-### 🟢 [RESOLVED]: Profiler daemon `waitForParentAck` enters infinite polling loop on timeout
-**Target:** `io.mazewall.profiler.engine.ProfilerSessionHandler.kt` (specifically `waitForParentAck`)
-**Fix:** `waitForParentAck` in `ProfilerSessionHandler.kt` was corrected to return `false` if `pollRes.returnValue == 0L`, indicating a timeout.
-
-### 🟢 [RESOLVED]: Profiler Daemon Socket Connection Polling Loop Smell
-**Target:** `io.mazewall.profiler.internal.ProfilerSocket.kt` (specifically `connectWithRetry`)
-**Fix:** Implemented zero-latency event-driven startup synchronization. The `ProfilerDaemon` now prints a `MAZEWALL_DAEMON_READY` sentinel to stdout when listening. The `ProfilerDaemonManager` uses a `CountDownLatch` and a dedicated stdout reader thread to wait for this sentinel before attempting a connection. This eliminates the artificial 1-second startup delay and reduces connection polling latency to 10ms.
-
-### ✅ [RESOLVED]: `JitWarmup` and `-Xint` removed from `ContainedExecutors`
-**Context:** `JitWarmup.perform()` attempted to pre-trigger class loading and JIT compilation before seccomp was applied to avoid lazy-class-loading `EPERM` crashes. This only applied to `PURE_COMPUTE_UNSAFE` (which blocks `openat`). `PURE_COMPUTE` (with Landlock) does not block `openat`, making warmup unnecessary for the recommended preset. `-Xint` was added to `IsolatedProcessTester` as a band-aid to prevent JIT-related failures in test subprocesses.
-**Fix:** `JitWarmup.kt` deleted. Both `JitWarmup.perform()` call sites removed from `ContainedExecutors`. `-Xint` removed from `IsolatedProcessTester`. `ContainedExecutors` KDoc updated to document the `PURE_COMPUTE` vs `PURE_COMPUTE_UNSAFE` class-loading contract.
 
 ### ✅ [RESOLVED]: `allowMmapExec=false` silently kills JIT on process-wide DENY_LIST policies
 **Target:** `Policy.NO_NETWORK` KDoc, `containment_design.md §3f`
@@ -977,35 +816,6 @@ If an attacker achieves native arbitrary code execution (ACE) or has access to a
 **Target:** `AllowListTest.preWarm()`, `containment_design.md §3g`
 **Context:** When `defaultAction = ACT_ERRNO` (ALLOW_LIST), `openat` is blocked unless explicitly in the allow set. Classes referenced by `PureJavaBpfEngine` immediately after filter installation (specifically `SeccompInstallationState$Failed`) are loaded lazily via `openat`. After the filter blocks `openat`, these classes can no longer be loaded → `NoClassDefFoundError`. The old `JitWarmup` attempted to solve this globally but was fragile and non-deterministic. The correct fix is targeted: explicitly touch the exact class graph that will be used post-installation, in the specific test/component that uses the restrictive ALLOW_LIST policy.
 **Fix:** Extended `AllowListTest.preWarm()` to touch all `SeccompInstallationState` subclasses before the filter is installed. Added `§3g` to `containment_design.md` documenting the rule and its scope.
-
-### ✅ [RESOLVED]: `LandlockTest` isolated subprocesses crash on JIT startup inside nested seccomp container
-**Target:** `LandlockTest.kt` (integrationTest), 12 policy builders
-**Context:** All 12 test methods in `LandlockTest` that run in isolated subprocesses (via `IsolatedProcessTester.runIsolatedMethod()`) used `.base(Policy.NO_EXEC)` without `.allowMmapExec()`. The `Policy.NO_EXEC` preset has `allowMmapExec = false` by default, which emits `mmap(PROT_EXEC)` argument-inspection in the BPF filter. Inside the Testcontainer's nested seccomp environment (which already restricts `mmap(PROT_EXEC)` at the host level), the isolated subprocess JVM crashes immediately at startup when the JIT compiler tries to allocate code cache pages. Manifests as: `os::commit_memory(..., 65536, 1) failed; error='Operation not permitted' (errno=1)`. These tests are validating Landlock filesystem restrictions — not mmap(PROT_EXEC) behavior — so allowing JIT is correct.
-**Fix:** Added `.allowMmapExec()` to all 12 policy builders in `LandlockTest.kt`.
-
-### 🟢 [RESOLVED]: Sealed Class State Machines for Kernel Lifecycles
-**Target:** `io.mazewall.landlock.LandlockSession` and `io.mazewall.seccomp.SeccompInstallationState`
-**Fix:** Transitioned both Seccomp and Landlock installation lifecycles to compile-time safe, compiler-enforced Type-State transition chains using sealed classes and interfaces.
-
-### 🟢 [RESOLVED]: Immutability and Consistency in `ProcessStateRegistry`
-**Target:** `io.mazewall.enforcer.ProcessStateRegistry`
-**Fix:** Replaced the concurrent mutable `ConcurrentHashMap` with an `AtomicReference<Map<Syscall, SeccompAction>>` containing an immutable Map, and updated updates to run in Compare-And-Swap (CAS) merge loops.
-
-### 🟢 [RESOLVED]: `SbobParser` fails to parse JSON Unicode escape sequences (`\uXXXX`)
-**Target:** `io.mazewall.SbobParser`
-**Fix:** Completely removed the handwritten, custom `JsonTokenizer` state machine and switched to `kotlinx.serialization` for parsing SBoB JSON files, which handles Unicode escapes natively and correctly out of the box.
-
-### 🟢 [RESOLVED]: Sealed Interface `NativeArg` for Syscall Parameter Safety
-**Context:** The `NativeEngine` and `LinuxNative.syscall` methods used `Any?` for system call arguments, which were then converted to `Long` via a runtime `when` expression in `RealNativeHelper.toLong`. This was a type-safety hole that allowed passing unsupported types, leading to runtime `IllegalArgumentException`.
-**Fix:** Introduced the `NativeArg` sealed interface and its concrete subclasses (`LongArg`, `IntArg`, `MemoryArg`, `FdArg`, `PidArg`, etc.). Refactored `NativeEngine`, `LinuxNative`, and call sites to use `NativeArg`, ensuring compile-time safety and eliminating dynamic runtime casts.
-
-### ✅ [RESOLVED]: Monadic Combinators for `SyscallResult`
-**Context:** Currently, native system calls return `SyscallResult` which requires manual `when` branching or `.getOrThrow()` calls. This leads to imperative boilerplate and potential unhandled errors.
-**Fix:** Refactored `SyscallResult` to `SyscallResult<out T>` and added standard functional combinators like `map`, `flatMap`, `recover`, `onSuccess`, and `onFailure`.
-
-### ✅ [RESOLVED]: Value Class Completeness (Primitive Obsession)
-**Context:** While value classes were introduced for `FileDescriptor` and `Errno`, many other native concepts (like `MemoryAddress`, `Pid`, and `Uid`) were still passed as raw `Long` or `Int` primitives.
-**Fix:** Introduced `Pid`, `Uid`, and `MemoryAddress` value classes and integrated them into the `NativeEngine` interfaces and `RealNativeHelper`.
 
 ### ✅ [DONE] [Severity: MEDIUM]: Lack of Compile-Time Enforced Memory and Lifetime Safety for FFM Native Bindings
 **Target:** `io.mazewall.enforcer` (core FFM bindings and MemorySegment management)
@@ -1027,16 +837,7 @@ Even with compile-time enforcements, the lack of a native borrow checker introdu
 *   **Reinterpret Bounds Bypasses:** Developers can extract raw segments from type-safe wrappers and invoke `MemorySegment.reinterpret(Long.MAX_VALUE)` to reset bounds.
     - *Mitigation:* Block `reinterpret()` calls at the linter/ArchUnit level except within audited native bootstrap bindings.
 
-### ✅ [DONE] [Severity: HIGH]: Interface Segregation Violation and Fat Class Smell in `LinuxNative` / `RealNativeEngine`
-**Target:** `io.mazewall.LinuxNative`, `io.mazewall.NativeEngine`, `io.mazewall.RealNativeEngine`
-**Context:** `LinuxNative` and `RealNativeEngine` implemented *all* segment-specific native engine interfaces directly, turning them into monolithic, fat classes.
-**Needed:** Decouple `LinuxNative` from the massive inheritance hierarchy. Instead of inheriting all traits, `LinuxNative` should delegate to individual, modular sub-engines (e.g. `engine.fileSystem`, `engine.networking`) that implement only their specific interface. `MockNativeEngine` can then be composed of specific mock sub-engines.
-**Resolved:** Redefined `NativeEngine` as a container of `fileSystem`, `networking`, `process`, and `memory` sub-engines. `RealNativeEngine` now delegates to specialized internal objects, and `LinuxNative` entry point was refactored to use property-based access, removing monolithic top-level delegates.
-
 ### ✅ [RESOLVED]: Landlock Symlink Rejection Bypass via Canonicalization
 **Context:** The Landlock documentation states that rules explicitly use `O_NOFOLLOW` to reject symlinks and prevent attackers from redirecting path rules. However, `addRule` called `SandboxedPath.of` which used `toRealPath()`, silently bypassing this protection.
 **Fix:** Switched to syntactic normalization (`Paths.get(path).toAbsolutePath().normalize()`) in `SandboxedPath.of`. This defers symlink resolution to the kernel, which then correctly rejects links via `O_NOFOLLOW`.
 
-### ✅ [RESOLVED]: Blacklist policies trigger silent Landlock filesystem lockdown due to `io_uring` check
-**Context:** Landlock was automatically triggered if `io_uring` syscalls were allowed. If no FS rules were provided, this resulted in a total FS lockdown.
-**Fix:** Removed the `io_uring` check from `Landlock.shouldApplyLandlock`.
