@@ -6,9 +6,10 @@
 **Context:** Currently, `io.mazewall.LinuxNative.FileDescriptor` is a universal value class wrapper around an `Int`. This provides lifetime safety via `AutoCloseable` but lacks type safety. A developer could accidentally pass a socket FD or an `O_PATH` file descriptor to a Landlock Ruleset function, causing runtime `EBADF` or silent logical failures.
 **Needed:** Refactor `FileDescriptor` to accept a Phantom Type parameter: `class FileDescriptor<Role>(val fd: Int)`. Define sealed interface roles like `Ruleset`, `OPath`, `SeccompNotif`, and `UnixSocket`. This eliminates FD transposition bugs at compile time.
 
-### 🔴 [Severity: MEDIUM]: `SbobParser` Violates Single Responsibility Principle (SRP)
+### ✅ [RESOLVED] [Severity: MEDIUM]: `SbobParser` Violates Single Responsibility Principle (SRP)
 **Context:** `SbobParser` acts as a God Class. It manages `kotlinx.serialization` JSON decoding, canonicalizes paths against a CWD, maps string names to `Syscall` enums, prunes subpaths, and constructs the `Policy` instance.
 **Needed:** Split the class into cohesive, decoupled components: `BobDeserializer` (JSON to DTO), `PathNormalizer` (canonicalization and pruning), and `PolicyTransformer` (DTO to Policy builder).
+**Fixed:** Refactored into `io.mazewall.sbob` package components.
 
 ### 🔴 [Severity: LOW]: `ContainmentViolationDetector` Violates Open/Closed Principle (OCP)
 **Context:** `ContainmentViolationDetector` hardcodes `Regex` instances and `DENIED_PHRASES` strings to translate standard JVM `IOException` messages into containment failures. Extending this detection for custom environments or translated OS locales requires modifying the core object directly.
@@ -31,9 +32,10 @@
 2. **Future-Proofing:** Implement automatic `TSYNC` adoption when the `KernelFeatureMatrix` detects Landlock ABI v8+, upgrading the sandbox to full ACE protection seamlessly.
 3. **Opt-In Absolute Security:** Document external native wrappers (like `firejail`) for workloads requiring absolute ACE protection on older kernels.
 
-### 🔵 [Severity: ENHANCEMENT]: Compile-Time BPF Termination Safety (Type-State RET Enforcement)
+### ✅ [RESOLVED] [Severity: ENHANCEMENT]: Compile-Time BPF Termination Safety (Type-State RET Enforcement)
 **Context:** Currently, `BpfBuilder.NrLoaded.build()` can be called on a program that does not end with a `RET` instruction. While the kernel verifier will reject such programs at runtime, it results in a "Fail Closed" crash rather than a compile-time error.
 **Needed:** Split `NrLoaded` into `Active` and `Terminated` states. The `ret()` method should transition the builder to the `Terminated` state, and only `Terminated` should expose the `build()` method.
+**Fixed:** Implemented a `Terminated` state in `BpfBuilder`. Methods like `allow()`, `deny()`, and `ret()` now transition to this state, and `build()` is restricted to it.
 
 ### 🔵 [Severity: ENHANCEMENT]: Atomic Container State Transitions (Unified State Container)
 **Target:** `io.mazewall.enforcer.ContainedExecutors`

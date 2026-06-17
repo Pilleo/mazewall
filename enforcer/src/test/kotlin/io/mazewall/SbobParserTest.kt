@@ -113,6 +113,24 @@ class SbobParserTest {
     }
 
     @Test
+    fun `test path pruning does not over-match siblings`() {
+        // BACKLOG FIX VERIFICATION: /etc/hosts should NOT match /etc/hostname as a parent
+        val json =
+            """
+            {
+              "opens": ["/etc/hosts", "/etc/hostname"],
+              "fsWritePaths": [],
+              "syscalls": [],
+              "execs": []
+            }
+            """.trimIndent()
+
+        val policy = SbobParser.parseJsonToPolicy(json)
+        val readPaths = policy.allowedFsReadPaths.map { it.value }.toSet()
+        assertEquals(setOf("/etc/hosts", "/etc/hostname"), readPaths)
+    }
+
+    @Test
     fun `test parsing empty sbob`() {
         val json = "{}"
         val policy = SbobParser.parseJsonToPolicy(json)
