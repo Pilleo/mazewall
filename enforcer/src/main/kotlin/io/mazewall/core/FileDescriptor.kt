@@ -29,8 +29,9 @@ public sealed interface FileDescriptorRole {
  * (e.g., a Landlock ruleset vs a directory opened with O_PATH), preventing transposition
  * bugs where an incorrect FD type is passed to a system call.
  *
- * It also provides deterministic resource management via [AutoCloseable], automatically
- * invoking the kernel's `close` system call through the active [LinuxNative] engine.
+ * It is strictly immutable. Lifecycle transitions (Open -> Closed) are managed by
+ * the [LinuxNative.fileSystem] engine, which consumes an [Open] descriptor and
+ * returns a [Closed] one.
  *
  * @param R The role of this file descriptor.
  * @param S The state of this file descriptor.
@@ -41,30 +42,41 @@ public class FileDescriptor<out R : FileDescriptorRole, out S : FdState>(
     public val value: Int,
     public val arena: Arena? = null
 ) : AutoCloseable {
-    private var closed = false
 
     /** Returns true if the file descriptor is open and valid. */
-    public val isValid: Boolean get() = !closed && value >= 0 && (arena == null || arena.scope().isAlive)
+    public val isValid: Boolean get() = value >= 0 && (arena == null || arena.scope().isAlive)
 
     /** Returns true if the file descriptor is closed or invalid. */
     public val isInvalid: Boolean get() = !isValid
 
+    /**
+     * Closes the descriptor via [LinuxNative.fileSystem].
+     *
+     * Note: This method satisfies [AutoCloseable] for convenience in try-with-resources,
+     * but since [FileDescriptor] is immutable, the instance itself remains of type [Open].
+     * To obtain a [Closed] type, use [closeFd].
+     */
     override fun close() {
-        if (closed || value < 0) return
-        closed = true
-        // Delegate actual kernel close to the native engine
+        if (value < 0) return
+        if (this.isClosedType()) return
+
         @Suppress("UNCHECKED_CAST")
         LinuxNative.fileSystem.close(this as FileDescriptor<*, FdState.Open>)
         arena?.close()
     }
 
     /**
-     * Closes the descriptor and returns it cast to a Closed state at compile-time.
+     * Closes the descriptor and returns it cast to a [Closed] state at compile-time.
      */
     @Suppress("UNCHECKED_CAST")
     public fun closeFd(): FileDescriptor<R, FdState.Closed> {
         close()
-        return this as FileDescriptor<R, FdState.Closed>
+        return FileDescriptor<R, FdState.Closed>(value, arena)
+    }
+
+    private fun isClosedType(): Boolean {
+        // We can't easily check S at runtime due to erasure, but we can check if it's INVALID
+        return value < 0
     }
 
     override fun toString(): String = if (isValid) "fd($value)" else "fd($value, closed/invalid)"

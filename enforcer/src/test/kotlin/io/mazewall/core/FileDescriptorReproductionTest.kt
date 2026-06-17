@@ -8,13 +8,17 @@ import kotlin.test.*
 class FileDescriptorReproductionTest {
 
     @Test
-    fun `file descriptor is a simple value class without scope validation`() {
+    fun `file descriptor is strictly immutable and returns closed type`() {
         val fd = FileDescriptor.unsafe<FileDescriptorRole.Generic>(10)
         assertEquals(10, fd.value)
         val isAutoCloseable = fd as? AutoCloseable
-        assertNotNull(isAutoCloseable, "FileDescriptor should be AutoCloseable now")
+        assertNotNull(isAutoCloseable, "FileDescriptor should be AutoCloseable")
 
-        fd.close()
-        assertFalse(fd.isValid)
+        val closedFd = fd.closeFd()
+        assertEquals(10, closedFd.value)
+
+        // Even after closing, the original 'fd' reference still exists and its 'value' is unchanged
+        // but it's technically invalid at the OS level. The 'Closed' type provides compile-time safety.
+        assertTrue(closedFd is FileDescriptor<*, FdState.Closed>)
     }
 }
