@@ -2,44 +2,6 @@
 
 ## Recent Findings (Project Review June 2026)
 
-### ✅ [RESOLVED]: Decoupling FFM Transaction Lifecycle from `NativeEngine`
-**Status:** RESOLVED (June 2026)
-**Context:** `LinuxNative` (implementing `NativeEngine`) directly orchestrated transaction scopes via `withTransaction(block: (NativeTransaction) -> T)`. The FFM `Arena` context and transaction lifecycle management are directly coupled with the system call execution engine. This prevents mocking transaction behaviors, customizing allocation strategies (such as thread-local pre-allocated buffers) for specific environments, or separating memory ownership from call dispatch.
-**Fix:** Extracted a dedicated `TransactionManager` interface. `LinuxNative` now delegates transaction boundaries to an injectable `TRANSACTION_INSTANCE`.
-
-### ✅ [RESOLVED]: Pipeline Pattern for Seccomp Argument Inspections
-**Status:** RESOLVED (June 2026)
-**Context:** The compilation logic in `BpfFilter` is tightly coupled to concrete argument inspection implementations (`Clone3Inspector`, `MmapExecInspector`, `ThreadCloneInspector`, `UnsafePrctlInspector`). Adding a new seccomp argument check requires modifying `BpfFilter` directly, violating the Open/Closed Principle (OCP).
-**Fix:** Restructured the inspection generation into a pipeline pattern (`SyscallInspectionPipeline`) where inspectors are registered and applied dynamically.
-
-### ✅ [RESOLVED]: `ContainmentViolationDetector` Violates Open/Closed Principle (OCP) & Lacks Word Boundaries
-**Status:** RESOLVED (June 2026)
-**Context:** `ContainmentViolationDetector` hardcoded `Regex` instances and `DENIED_PHRASES` strings to translate standard JVM `IOException` messages into containment failures. Extending this detection for custom environments or translated OS locales required modifying the core object directly. Additionally, it lacked `\b` word boundaries in phrase matching, leading to potential false positives.
-**Fix:** Refactored to use a `ViolationMatcher` strategy interface with a dynamic registry. Updated phrase matching to use compiled Regex with `\b` word boundaries.
-
-### ✅ [RESOLVED]: ArchUnit: Ban Universal Exception Suppression in Enforcer
-**Status:** RESOLVED (June 2026)
-**Context:** `Landlock.kt` and `Platform.kt` use `catch (Exception e)` or `catch (ignored: Exception)` blocks. While sometimes used safely for diagnostics, catching generic exceptions in a security boundary module can silently swallow critical JVM `VirtualMachineError` instances or obscure containment violations, violating the "Fail Closed" invariant.
-**Fix:** Introduced an ArchUnit rule `noGenericExceptionCatchingInEnforcer` in the `:enforcer` module that strictly prohibits generic catch blocks.
-
-### ✅ [RESOLVED]: Linux Version and Feature Drift (Missing Feature Detection Matrix)
-**Status:** RESOLVED (June 2026)
-**Target:** `io.mazewall.LinuxNative`, `Platform.kt`
-**Context:** Currently, `mazewall` assumes a relatively static set of kernel capabilities. However, Linux kernel features for Seccomp (e.g., `SECCOMP_FILTER_FLAG_TSYNC`, `USER_NOTIF`) and Landlock (ABI versions 1-8) drift significantly between kernel versions (e.g., Landlock ABI v4 added network support; v8 added `LANDLOCK_RESTRICT_SELF_TSYNC`). The current codebase lacks a unified, resilient mechanism to detect, fall back, or safely degrade when executing on older or non-standard kernels.
-**Fix:** Implemented a robust `KernelFeatureMatrix` subsystem. `Platform.featureMatrix` now provides a cached, probed view of kernel capabilities at initialization.
-
-### ✅ [RESOLVED]: The Landlock "Bootstrapping Dilemma" (Process-Wide Pre-Init Enforcement)
-**Status:** RESOLVED (June 2026)
-**Target:** `io.mazewall.landlock.Landlock`, `ContainedExecutors`
-**Context:** Landlock is inherently thread-scoped until ABI v8 (`LANDLOCK_RESTRICT_SELF_TSYNC`). When a Java application calls `ContainedExecutors.installOnProcess()` from `main()`, the JVM has already spawned critical infrastructure threads (GC, JIT) which remain unrestricted.
-**Fix:** Implemented automatic `TSYNC` adoption in `Landlock.kt` and `ContainedExecutors.kt` when the `KernelFeatureMatrix` detects Landlock ABI v8+.
-
-### ✅ [RESOLVED]: Atomic Container State Transitions (Unified State Container)
-**Status:** RESOLVED (June 2026)
-**Target:** `io.mazewall.enforcer.ContainedExecutors`
-**Context:** Currently, `ContainedExecutors` updates thread and process state across multiple independent `Registry` variables (`SYSCALL_ACTIONS`, `DEFAULT_ACTION`, etc.). This lack of atomicity could lead to inconsistent intermediate states during concurrent installations.
-**Fix:** Defined a `ContainerState` immutable data class. Transitioned to using `ThreadStateRegistry` which manages atomic-like state updates for the thread.
-
 ### 🟡 [Severity: LOW]: High-Frequency Arena Allocation Overhead (MM Optimization)
 **Context:** The current `nativeScope` utility and profiler reactor loop create a new `Arena.ofConfined()` for every single operation (syscall resolution, polling, etc.). This puts unnecessary pressure on the JVM native allocator and GC.
 **Needed:** Investigate "Scoped Arenas" using Kotlin context parameters or a `ThreadLocal` arena for high-frequency reactor loops. Reuse the same arena for all operations within a single task or notification lifecycle.
@@ -769,3 +731,32 @@ For full architectural details, see `supervisor_proxy_design.md`.
 ### ✅ [RESOLVED]: Landlock Symlink Rejection Bypass via Canonicalization
 **Context:** The Landlock documentation states that rules explicitly use `O_NOFOLLOW` to reject symlinks and prevent attackers from redirecting path rules. However, `addRule` called `SandboxedPath.of` which used `toRealPath()`, silently bypassing this protection.
 **Fix:** Switched to syntactic normalization (`Paths.get(path).toAbsolutePath().normalize()`) in `SandboxedPath.of`. This defers symlink resolution to the kernel, which then correctly rejects links via `O_NOFOLLOW`.
+
+
+### 🔴 [Severity: MEDIUM]: Missing `BpfProgram<Status>` and `BpfLabel` Type-Safety
+*   **Dimension:** Compile-time Safety & Type Integrity
+*   **Target Area:** `enforcer/src/main/kotlin/io/mazewall/seccomp/BpfProgram.kt`
+*   **Observation:** While the `BpfBuilder` uses a sealed state machine, the resulting `BpfProgram` lacks a `Status` phantom type (Verified/Unverified). Furthermore, `BpfBuilder` still uses `String` for labels, which are prone to typos and lack compile-time existence guarantees.
+*   **Needed:** Transition `BpfProgram` to `BpfProgram<Status>` and introduce `BpfLabel` value class tokens for the DSL.
+
+### 🔴 [Severity: HIGH]: `IterativeProfiler` Logic Errors (Confirmed)
+*   **Dimension:** State Machine Integrity & Failure Propagation
+*   **Target Area:** `profiler/src/main/kotlin/io/mazewall/profiler/iterative/IterativeProfiler.kt`
+*   **Confirmed Proof:**
+    1.  **Relative Paths:** `resolveAbsolutePath` explicitly returns `null` if the path does not start with `/`, causing a transition to `Failed`.
+    2.  **Path Truncation:** `resolveAbsolutePath` backward scan stops at the first whitespace, truncating paths with spaces.
+    3.  **Infinite Loop:** `updatePolicyForViolation` uses `path.startsWith(it.value)` which fails for disjoint prefix matches, leading to repeated denials of the same path.
+    4.  **Context Loss:** Spawning a new `Thread` for each iteration loses `ThreadLocal` and MDC context, making diagnostics difficult.
+*   **Needed:** Refactor `IterativeProfiler` to use a proof-of-progress state machine and proper path normalization.
+
+### 🔴 [Severity: MEDIUM]: Loom Carrier Poisoning Bypass in `PureJavaBpfEngine`
+*   **Dimension:** OS Invariants & Native Safety
+*   **Target Area:** `enforcer/src/main/kotlin/io/mazewall/seccomp/PureJavaBpfEngine.kt`
+*   **Observation:** The mandatory assertion `check(!Thread.currentThread().isVirtual)` is present in `ContainedExecutors` but absent in the public `PureJavaBpfEngine.install` methods. An advanced user could bypass the high-level API and poison carrier threads by calling the engine directly from a virtual thread.
+*   **Needed:** Move the virtual thread check into `SeccompInstallationState.Uninitialized.lockPrivileges()` to ensure it is always enforced.
+
+### 🟡 [Severity: LOW]: Landlock Excessive Capability Leak on `ENOENT`
+*   **Dimension:** OS Invariants & Native Safety
+*   **Target Area:** `enforcer/src/main/kotlin/io/mazewall/landlock/Landlock.kt`
+*   **Observation:** When a path does not exist, `addRule` falls back to the parent directory. This grants access to the *entire* directory when the user only intended to allow a specific (future) file.
+*   **Needed:** Implement `O_CREAT` awareness or document this broad fallback as a known limitation.
