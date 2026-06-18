@@ -37,7 +37,7 @@ object RealMemoryReader : ProfilerMemoryReader {
 
     override fun readStringFromProcess(
         tid: Tid,
-        remoteAddress: Long,
+        remoteAddr: Long,
         maxLen: Int,
     ): String? {
         Arena.ofConfined().use { arena ->
@@ -47,7 +47,7 @@ object RealMemoryReader : ProfilerMemoryReader {
             localIov.set(ValueLayout.ADDRESS, 0L, localBuf)
             localIov.set(ValueLayout.JAVA_LONG, IOV_LEN_OFF, maxLen.toLong())
             val remoteIov = arena.allocate(Layouts.IOVEC)
-            remoteIov.set(ValueLayout.ADDRESS, 0L, MemorySegment.ofAddress(remoteAddress))
+            remoteIov.set(ValueLayout.ADDRESS, 0L, MemorySegment.ofAddress(remoteAddr))
             remoteIov.set(ValueLayout.JAVA_LONG, IOV_LEN_OFF, maxLen.toLong())
             val res = LinuxNative.withTransaction {
                 LinuxNative.memory.processVmReadv(Pid(tid.value), localIov, 1, remoteIov, 1, 0)
@@ -55,10 +55,9 @@ object RealMemoryReader : ProfilerMemoryReader {
             var result: String? = null
             res.onSuccess { value ->
                 val bytesRead = value.toInt()
-                var len = 0
-                while (len < bytesRead && localBuf.get(ValueLayout.JAVA_BYTE, len.toLong()) != 0.toByte()) len++
-
-                if (len < bytesRead) {
+                if (bytesRead > 0) {
+                    var len = 0
+                    while (len < bytesRead && localBuf.get(ValueLayout.JAVA_BYTE, len.toLong()) != 0.toByte()) len++
                     result = localBuf.copyToString(len)
                 }
             }.onFailure { errno, _ ->

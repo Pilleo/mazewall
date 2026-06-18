@@ -330,12 +330,11 @@ As a result, neither the symlink target nor the symlink creation path is resolve
 2. Modified `Landlock.handleInitialOpenFailure` to return `res to false` immediately without falling back to the parent directory if the path ends with `" (deleted)"`.
 3. Verified via unit and integration tests.
 
-### 🔴 [Severity: HIGH]: `ProfilerDaemon` memory-reading fails to resolve paths on page boundaries or large strings
-**Target:** `io.mazewall.profiler.engine.ProfilerDaemon` (specifically `readStringFromProcess`)
-**Failure Hypothesis:** If `process_vm_readv` reads a path string that does not contain a null terminator in the returned buffer (due to page boundaries or large lengths), the profiler returns `null`, breaking rule compilation.
-**Context & Proof:** In `ProfilerDaemon.kt`'s `readStringFromProcess()`, a loop searches `localBuf` for `0.toByte()`. If `process_vm_readv` performs a partial read (e.g. at the end of a mapped page boundary) or if the path is longer than `maxLen` (4096 bytes) and no null terminator is present, the index loop reaches `bytesRead`. The condition `len < bytesRead` then evaluates to `false`, causing the method to return `null`. The profiler thus fails to capture the path, producing empty rulesets that crash in production.
-**Cascading Risk Potential:** High usability and stability failure. Breaks path resolution on complex memory allocations, leading to broken policies and production crashes.
-**Needed:** If `len == bytesRead`, copy and return the best-effort string `localBuf.copyToString(bytesRead)` rather than returning `null`. Alternatively, increase the buffer size and perform a secondary read if a null terminator is not found.
+### ✅ [RESOLVED]: `ProfilerDaemon` memory-reading fails to resolve paths on page boundaries or large strings
+**Status:** RESOLVED (June 2026)
+**Target:** `io.mazewall.profiler.engine.ProfilerMemoryReader` (specifically `readStringFromProcess`)
+**Context & Proof:** If `process_vm_readv` reads a path string that does not contain a null terminator in the returned buffer (due to page boundaries or large lengths), the profiler returned `null`, breaking rule compilation.
+**Fix:** Modified `readStringFromProcess` to return a best-effort decoded string of length `bytesRead` when a null terminator is not found, instead of returning `null`. Verified via unit tests.
 
 ### 🔴 [Severity: HIGH]: `IterativeProfiler` crashes deterministically on relative-path filesystem violations
 **Target:** `/profiler/src/main/kotlin/io/mazewall/profiler/iterative/IterativeProfiler.kt` (specifically `extractViolationPath`) and `/enforcer/src/main/kotlin/io/mazewall/Policy.kt` (specifically `validatePath`)
