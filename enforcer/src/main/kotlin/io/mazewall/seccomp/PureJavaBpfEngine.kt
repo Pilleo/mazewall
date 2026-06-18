@@ -17,7 +17,7 @@ import io.mazewall.ffi.memory.nativeScope
  * Pure Java implementation of the seccomp engine.
  * Generates BPF filters manually and installs them using Downcalls.
  */
-object PureJavaBpfEngine : SeccompEngine<EngineState> {
+internal object PureJavaBpfEngine : SeccompEngine<EngineState> {
 
     override val state: EngineState
         get() = when (ThreadStateRegistry.state.engineState) {
@@ -49,6 +49,9 @@ object PureJavaBpfEngine : SeccompEngine<EngineState> {
         policy: CompiledSandbox<*>,
         useTsync: Boolean,
     ) {
+        if (Thread.currentThread().isVirtual) {
+            throw IllegalStateException("Cannot install seccomp filter on a virtual thread.")
+        }
         updateState(SeccompInstallationState.Uninitialized)
         try {
             val uninitialized = SeccompInstallationState.Uninitialized

@@ -414,12 +414,11 @@ As a result, neither the symlink target nor the symlink creation path is resolve
 **Context:** Seccomp BPF filters are additive. If a previous filter already restricts `mmap(PROT_EXEC)`, non-thread `clone`, or unsafe `prctl` calls, there is no need to compile and install duplicate argument inspection blocks for these syscalls in a new stacked filter.
 **Fix:** Optimized `FilterInstallationPlanner.calculateNewFilter` to skip redundant inspection blocks if already enforced in the current thread state.
 
-### 🔴 [Severity: HIGH]: Public `PureJavaBpfEngine.install` bypasses Loom Carrier Poisoning safeguards and JIT warmups
+### ✅ [RESOLVED]: Public `PureJavaBpfEngine.install` bypasses Loom Carrier Poisoning safeguards and JIT warmups
+**Status:** RESOLVED (June 2026)
 **Target:** `io.mazewall.seccomp.PureJavaBpfEngine` & `io.mazewall.enforcer.ContainedExecutors`
-**Failure Hypothesis:** A client application or direct invocation of the public `PureJavaBpfEngine.install()` or `PureJavaBpfEngine.installOnProcess()` bypasses the critical virtual thread safety guards, JIT warmups, and thread-local state tracking implemented in `ContainedExecutors`.
-**Context & Proof:** In `PureJavaBpfEngine.kt`, the `install` and `installOnProcess` methods are public and implement `SeccompEngine`. Unlike `ContainedExecutors.installOnCurrentThread`, `PureJavaBpfEngine` contains no `checkVirtualThread()` assertion. If a developer or library calls `PureJavaBpfEngine.install()` from within a Loom Virtual Thread, it will successfully execute `prctl(PR_SET_NO_NEW_PRIVS)` and `seccomp(...)` on the underlying OS carrier thread. This causes carrier thread poisoning, permanently restricting all other virtual threads scheduled on it. Furthermore, it completely bypasses the `ContainerStateRegistry` thread-local state updates and `performJitWarmup()`, leading to JIT compiler deadlocks/traps and state inconsistencies during stacked filter installation.
-**Cascading Risk Potential:** High security containment and stability bypass. Bypasses core safety guards, poisoning carrier threads and corrupting subsequent stacked sandboxes.
-**Needed:** Declare `PureJavaBpfEngine` and `SeccompEngine` as `internal` to prevent direct external access. Additionally, add a virtual thread check `if (Thread.currentThread().isVirtual) { ... }` inside `PureJavaBpfEngine.installInternal` as a defense-in-depth safety measure.
+**Context:** The `PureJavaBpfEngine` and `SeccompEngine` were public and lacked check checks for virtual threads, allowing users to call them directly, potentially poisoning carrier threads.
+**Fix:** Declared `SeccompEngine` and `PureJavaBpfEngine` as `internal` to prevent direct external access. Added a virtual thread check `if (Thread.currentThread().isVirtual)` inside `PureJavaBpfEngine.installInternal` as a defense-in-depth safety measure.
 
 ### 🔴 [Severity: CRITICAL]: StraceProfiler completely fails to trace `io_uring` file operations natively
 **Target:** `io.mazewall.profiler.strace.StraceProfiler`, `docs/internals/profiler_design.md`
