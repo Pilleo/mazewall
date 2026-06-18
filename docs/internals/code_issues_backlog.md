@@ -89,19 +89,17 @@
 2. The `BobCompiler` (or a background collector) can consume these events asynchronously.
 3. This reduces the time spent by the listener thread in the critical section of the seccomp notify loop, improving profiling performance and decoupling event capture from analysis.
 
-### 🔴 [Severity: MEDIUM]: Memory Registry Leak in `Profiler.threadRegistry`
-**Dimension:** Performance / Resource Lifecycle
+### ✅ [RESOLVED]: Memory Registry Leak in `Profiler.threadRegistry`
+**Status:** RESOLVED (June 2026)
 **Target Area:** `io.mazewall.profiler.Profiler`
-**Failure Hypothesis:** The `threadRegistry` map stores references to every profiled thread, but never removes them.
 **Context & Proof:** `Profiler.profile` registers the current thread via `threadRegistry[spid] = Thread.currentThread()`. There is no corresponding `remove` call in the `finally` block or completion callback.
-**Needed:** Add a `finally` block to `Profiler.profile` to remove the TID from the registry once the workload is finished.
+**Fix:** Added a `finally` block to `Profiler.profile` to remove the TID from the registry once the workload is finished.
 
-### 🔴 [Severity: MEDIUM]: Thread-Safety Violation: Mutable `LongArray` in `SyscallEvent`
-**Dimension:** Intention Safety / Concurrency
+### ✅ [RESOLVED]: Thread-Safety Violation: Mutable `LongArray` in `SyscallEvent`
+**Status:** RESOLVED (June 2026)
 **Target Area:** `io.mazewall.profiler.engine.SyscallEvent`
-**Failure Hypothesis:** Syscall arguments are stored in a mutable array, allowing downstream consumers to accidentally or maliciously corrupt the event data.
-**Context & Proof:** `SyscallEvent` uses `val args: LongArray`. Since arrays in JVM are mutable, any reference holder can execute `event.args[0] = value`.
-**Needed:** Refactor `SyscallEvent` to use an immutable list or perform defensive copies to ensure the captured state remains constant.
+**Context & Proof:** `SyscallEvent` used `val args: LongArray`. Since arrays in JVM are mutable, any reference holder can execute `event.args[0] = value`.
+**Fix:** Refactored `SyscallEvent` to use an immutable `List<Long>` for `args`, ensuring the captured state remains constant.
 
 ### ✅ [RESOLVED]: Leverage Kotlin Contracts for Static Analysis
 **Status:** RESOLVED (June 2026)

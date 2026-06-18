@@ -116,7 +116,7 @@ internal class ProfilerSessionHandler(
         val rawEvent = SyscallEvent<SyscallEventState.Raw>(
             tid = Tid(pidVal),
             syscallName = syscallMap[nr] ?: "SYSCALL_$nr",
-            args = args
+            args = args.toList()
         )
 
         // 2. RESOLVE: Transform Raw event into Resolved event (path resolution)

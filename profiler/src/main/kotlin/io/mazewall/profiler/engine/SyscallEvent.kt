@@ -29,7 +29,7 @@ public sealed interface SyscallEventState {
 public data class SyscallEvent<out S : SyscallEventState>(
     val tid: Tid,
     val syscallName: String,
-    val args: LongArray,
+    val args: List<Long>,
     val paths: List<String> = emptySet<String>().toList(),
     val stackTrace: List<String>? = null,
 ) {
@@ -38,7 +38,7 @@ public data class SyscallEvent<out S : SyscallEventState>(
         if (other !is SyscallEvent<*>) return false
         if (tid != other.tid) return false
         if (syscallName != other.syscallName) return false
-        if (!args.contentEquals(other.args)) return false
+        if (args != other.args) return false
         if (paths != other.paths) return false
         if (stackTrace != other.stackTrace) return false
         return true
@@ -47,7 +47,7 @@ public data class SyscallEvent<out S : SyscallEventState>(
     override fun hashCode(): Int {
         var result = tid.hashCode()
         result = 31 * result + syscallName.hashCode()
-        result = 31 * result + args.contentHashCode()
+        result = 31 * result + args.hashCode()
         result = 31 * result + paths.hashCode()
         result = 31 * result + (stackTrace?.hashCode() ?: 0)
         return result
