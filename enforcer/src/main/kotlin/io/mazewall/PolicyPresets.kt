@@ -48,6 +48,7 @@ public object PolicyPresets {
     public val PURE_COMPUTE: PolicyDefinition<PolicyScope.ThreadLocalOnly> =
         PolicyBuilder<PolicyScope.ThreadLocalOnly>()
             .base(PURE_COMPUTE_UNSAFE)
+            .block(Syscall.IOCTL)
             .allowJvmClasspath()
             .build()
 }

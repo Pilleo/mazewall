@@ -391,12 +391,14 @@ As a result, neither the symlink target nor the symlink creation path is resolve
     *   **Strategy B (Validation Oracle):** Use `jextract` purely as a test-time oracle. CI generates bindings dynamically and reflects on them to verify that the manual `Layouts.kt` is mathematically correct against the ground-truth C headers. (Minimal JAR size, prevents human error during release, but requires manual layout updates).
 **Needed:** Decide between Strategy A (full automation) and Strategy B (automated verification of manual layouts) to eliminate ABI drift risk without sacrificing multi-arch compatibility.
 
-### 🔴 [Severity: HIGH]: STRICT_SANDBOX crashes on Linux kernels < 6.10 (Landlock ABI < 5) due to unblocked `ioctl`
-**Target:** `io/mazewall/landlock/Landlock.kt` and `io/mazewall/Policy.kt`
-**Context:** The `Policy.PURE_COMPUTE` preset uses `PURE_COMPUTE_UNSAFE` as its base and calls `allowJvmClasspath()`. Calling `allowJvmClasspath()` populates `allowedFsReadPaths`, which implicitly sets `enforceLandlock = true`.
-When `Landlock.applyRuleset()` is invoked, it checks `getAccessMask()`. If the system's Landlock ABI is < 5 (Linux < 6.10), Landlock cannot restrict `ioctl` operations. The code correctly verifies that if Landlock cannot restrict `ioctl`, the seccomp policy *must* block it: `else if (policy.isSyscallAllowed(Syscall.IOCTL)) { unsupportedErrors.add(...) }`.
-However, `PURE_COMPUTE_UNSAFE` does **not** block `Syscall.IOCTL` (likely because standard out `isatty` requires it). Therefore, running `PURE_COMPUTE` on any kernel older than Linux 6.10 (e.g., Ubuntu 24.04 uses 6.8) results in a fatal `UnsupportedOperationException` on startup.
-**Needed:** Either `PURE_COMPUTE_UNSAFE` / `PURE_COMPUTE` must explicitly block `ioctl` (and accept that `isatty` fails, perhaps redirecting it), OR the Landlock ABI < 5 check for `ioctl` should only be a warning if the policy is an out-of-the-box preset. Alternatively, `PURE_COMPUTE` should be adjusted to block `ioctl` explicitly.
+### ✅ [RESOLVED]: STRICT_SANDBOX crashes on Linux kernels < 6.10 (Landlock ABI < 5) due to unblocked `ioctl`
+**Status:** RESOLVED (June 2026)
+**Target:** `io.mazewall.landlock.Landlock` (specifically `validateAbiSupport`) and `io.mazewall.PolicyPresets` (specifically `PURE_COMPUTE`)
+**Context & Proof:** The `Policy.PURE_COMPUTE` preset previously did not block `Syscall.IOCTL`. Running `PURE_COMPUTE` on a system with Landlock ABI < 5 (Linux < 6.10) caused `validateAbiSupport` to throw a fatal `UnsupportedOperationException` unconditionally.
+**Fix:** 
+1. Updated `validateAbiSupport` to query and respect `Platform.configuredFallback()` before throwing an `UnsupportedOperationException`.
+2. Explicitly blocked `Syscall.IOCTL` in the `PURE_COMPUTE` preset definition to ensure clean initialization and robust containment on older Linux kernels by default.
+3. Verified via unit and build verification tests.
 
 ### 🔴 [Severity: MEDIUM]: Excessive container privileges and deprecated Audit architecture in compose.yml files
 **Target:** /infra/dev/compose.yml and /demos/vulnerable-web-app/compose.yml

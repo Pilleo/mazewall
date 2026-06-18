@@ -419,16 +419,22 @@ object Landlock {
     ) {
         val unsupportedErrors = mutableListOf<String>()
         if (abi < 2 && (policy.isSyscallAllowed(Syscall.RENAME) || policy.isSyscallAllowed(Syscall.LINK))) {
-            unsupportedErrors.add("Policy allows rename/link syscalls, but this kernel is too old")
+            unsupportedErrors.add("Policy allows rename/link syscalls, but this kernel is too old (ABI v$abi)")
         }
         if (abi < ABI_V3 && (policy.isSyscallAllowed(Syscall.TRUNCATE) || policy.isSyscallAllowed(Syscall.FTRUNCATE))) {
-            unsupportedErrors.add("Policy allows truncate syscalls, but this kernel is too old")
+            unsupportedErrors.add("Policy allows truncate syscalls, but this kernel is too old (ABI v$abi)")
         }
         if (abi < ABI_V5 && policy.isSyscallAllowed(Syscall.IOCTL)) {
-            unsupportedErrors.add("Policy allows ioctl, but this kernel is too old")
+            unsupportedErrors.add("Policy allows ioctl, but this kernel is too old (ABI v$abi)")
         }
         if (unsupportedErrors.isNotEmpty()) {
-            throw UnsupportedOperationException("Fatal Security Error: ${unsupportedErrors.joinToString("; ")}")
+            val msg = "Fatal Security Error: ${unsupportedErrors.joinToString("; ")}"
+            val fallback = Platform.configuredFallback()
+            if (fallback == Platform.FallbackBehavior.FAIL) {
+                throw UnsupportedOperationException(msg)
+            } else {
+                logger.warning(msg)
+            }
         }
     }
 
