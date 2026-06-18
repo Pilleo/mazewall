@@ -10,17 +10,66 @@
 
 ---
 
+## Who Should Care
+
+If your JVM service handles **untrusted input** — XML, YAML, PDF, SQL, user-uploaded files, third-party SDKs — then every one of those code paths runs with the same OS permissions as your authentication layer, your secret store, and your outbound HTTP client.
+
+A successful exploit in your YAML importer is a successful exploit of your entire process.
+
+mazewall lets you wrap those risky code paths in **kernel-enforced behavioral contracts** so that even a fully successful exploit can't reach the network, spawn a shell, or write outside its declared scope.
+
+---
+
 ## The Problem
 
-When Log4Shell hit, the attacker's code ran on the *exact same thread* as the vulnerable logger — a thread that already had `execve` permission because the rest of the JVM needed it.
+### Before mazewall: flat permissions everywhere
 
-The same is true for every thread in your JVM today: your XML parser, your YAML importer, your PDF generator, and your authentication service all share the same OS permissions. A compromise in any of them is a compromise of all of them.
+Every thread in your JVM today has identical OS-level permissions:
 
-Container-level profiles (Docker's `--security-opt seccomp`) can't fix this — they apply one policy to the entire process. **The granularity you need is at the thread pool level.**
+```
+HTTP Thread Pool      → can exec, can connect, can write anywhere
+YAML Parser Pool      → can exec, can connect, can write anywhere  ← same
+PDF Generator Pool    → can exec, can connect, can write anywhere  ← same
+XML Importer Pool     → can exec, can connect, can write anywhere  ← same
+```
+
+A compromise in any one of these is a compromise of all of them. Log4Shell is the canonical example: the attacker's payload ran inside the logger thread, which had `execve` permission because the rest of the JVM needed it.
+
+### Why Docker doesn't solve this
+
+Docker's seccomp profile is a **city wall** — it applies one policy to the entire container process. That policy is determined by what the *most permissive legitimate thread* needs. Your HTTP handler needs network access, so every thread gets network access. Your startup routine needs process creation, so every thread gets process creation.
+
+Docker can't tailor permissions to your internal business logic. It can't know that your PDF generator should never call home, or that your YAML importer should never spawn a child process. That gap is your attack surface.
+
+```
+Docker container (one policy for all):
+┌──────────────────────────────────────────────────────┐
+│  HTTP Handler    │ needs: execve ✓  network ✓  fs ✓  │
+│  YAML Importer   │ needs: execve ✗  network ✗  fs ~  │  ← gets full access anyway
+│  PDF Generator   │ needs: execve ✗  network ✗  fs ~  │  ← gets full access anyway
+│  XML Importer    │ needs: execve ✗  network ✗  fs ~  │  ← gets full access anyway
+└──────────────────────────────────────────────────────┘
+  If the YAML importer is compromised → full process access
+```
+
+---
 
 ## The Solution
 
-mazewall wraps any standard `ExecutorService` and installs a **kernel-enforced syscall filter** for those threads only. The filter is applied via Linux `prctl`/`seccomp` — the same mechanism Docker uses, applied from inside the JVM, without root privileges or native C dependencies. Once installed, no JVM vulnerability can remove it.
+### After mazewall: kernel-enforced per-thread contracts
+
+mazewall wraps any standard `ExecutorService` and installs a **kernel-enforced syscall filter** for those threads only, tailored to exactly what that code path actually needs:
+
+```
+HTTP Thread Pool      → default permissions (unchanged)
+YAML Parser Pool      → no exec, no network, read /data/in only    [kernel-enforced]
+PDF Generator Pool    → no exec, no network, no filesystem writes   [kernel-enforced]
+XML Importer Pool     → no exec, no network, read /app/schemas only [kernel-enforced]
+```
+
+If the YAML importer is compromised, it hits a kernel wall. There is no shell to spawn. There is no socket to call home on. The blast radius is limited to exactly what you declared.
+
+The filter is applied via Linux `prctl`/`seccomp` — the same mechanism Docker uses, applied from inside the JVM, **without root privileges or native C dependencies**. Once installed, no JVM vulnerability can remove it.
 
 ```kotlin
 val safe = ContainedExecutors.wrap(
@@ -37,6 +86,32 @@ That's the whole API for most use cases.
 
 ---
 
+## You Don't Write the Policy Yourself
+
+The biggest concern people raise: *"How do I know which syscalls my code actually needs?"*
+
+You don't need to know. The `:profiler` module observes your workload during a test run and **generates the exact policy for you**:
+
+```kotlin
+val result = Profiler.profile {
+    myXmlParser.parse(untrustedInput)   // run it under observation
+}
+
+println(result.behavior.toDsl())
+// Output:
+// Policy.builder()
+//     .base(Policy.NO_NETWORK)
+//     .allowFsRead("/app/schemas")
+//     .allowJvmClasspath()
+//     .build()
+```
+
+Paste the output, wrap your executor — done. No manual BPF assembly, no trial-and-error deadlocks.
+
+This observe → generate → enforce workflow is the foundation of [SBoB (Software Bill of Behavior)](docs/presentation/article.md) — a behavioral contract that travels alongside your application, analogous to an SBOM for composition but capturing *what your code is allowed to do at runtime*, not just what it contains.
+
+---
+
 ## How the Layers Fit Together
 
 mazewall operates in two tiers. Think of it as the difference between the building's outer wall and the locks on the rooms inside:
@@ -44,7 +119,7 @@ mazewall operates in two tiers. Think of it as the difference between the buildi
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
 │  Host / Container                                                   │
-│  ┌──── Docker / Podman (Tier 0) ─────────────────────────────────┐ │
+│  ┌──── Docker / Podman (city wall) ──────────────────────────────┐ │
 │  │  One Seccomp profile for the entire container process          │ │
 │  │                                                                │ │
 │  │  ┌─────────── JVM Process ────────────────────────────────┐   │ │
@@ -76,43 +151,6 @@ mazewall operates in two tiers. Think of it as the difference between the buildi
 
 ---
 
-## Profiling: Let Your Code Define Its Own Policy
-
-You don't have to guess which syscalls your workload needs. The `:profiler` module observes a workload during a test run and generates the exact `Policy` DSL you need:
-
-```kotlin
-val result = Profiler.profile {
-    myXmlParser.parse(untrustedInput)   // run it under observation
-}
-
-println(result.behavior.toDsl())
-// Output:
-// Policy.builder()
-//     .base(Policy.NO_NETWORK)
-//     .allowFsRead("/app/schemas")
-//     .allowJvmClasspath()
-//     .build()
-```
-
-Paste the output, wrap your executor — done. No manual BPF assembly, no trial-and-error deadlocks.
-
-This profiling workflow (observe → generate → enforce) is the foundation of [SBoB (Software Bill of Behavior)](docs/presentation/article.md) — a behavioral contract that travels alongside your application, analogous to an SBOM for composition.
-
----
-
-## Where to Go Next
-
-| I want to… | Go to |
-|---|---|
-| Install and write my first policy | [GETTING_STARTED.md](GETTING_STARTED.md) |
-| Auto-generate a policy from my workload | [profiler/README.md](profiler/README.md) |
-| See it block real CVEs (Log4Shell, SSRF, XXE) | [Demo README](demos/vulnerable-web-app/README.md) |
-| Understand the threat model and what it can't stop | [SECURITY_CONSIDERATIONS.md](docs/internals/SECURITY_CONSIDERATIONS.md) |
-| Read the deep-dive article series | [Article series](#article-series) |
-| Contribute or modify the codebase | [CONTRIBUTING.md](CONTRIBUTING.md) |
-
----
-
 ## How It Works (in plain terms)
 
 mazewall uses two Linux kernel features that have been in Docker since 2014:
@@ -132,14 +170,27 @@ Elasticsearch pioneered a process-wide variant of this pattern in the JVM since 
 
 ## Built-In Policies
 
-| Policy | Blocks | Typical use |
-|---|---|---|
-| `Policy.NO_EXEC` | `execve`, `fork`, `memfd_create`, `io_uring_*`, `ptrace` | Process-wide startup lockdown |
-| `Policy.NO_NETWORK` | `connect`, `socket`, `sendmsg`, `io_uring_*` | Parsers that need disk but no network |
-| `Policy.PURE_COMPUTE_UNSAFE` | All of the above + filesystem writes + `mmap(PROT_EXEC)` | Crypto/image workers |
-| `Policy.PURE_COMPUTE` | `PURE_COMPUTE_UNSAFE` + auto-whitelists JVM classpath | Same, without lazy-classload crashes |
+| Policy | Blocks | Plain English | Typical use |
+|---|---|---|---|
+| `Policy.NO_EXEC` | `execve`, `fork`, `memfd_create`, `io_uring_*`, `ptrace` | No shell spawning, no child processes, no fileless malware vectors | Process-wide startup lockdown — install this first |
+| `Policy.NO_NETWORK` | `connect`, `socket`, `sendmsg`, `io_uring_*` | Cannot call the network under any circumstances | XML/YAML/CSV parsers, file format processors |
+| `Policy.PURE_COMPUTE` | Exec + network + filesystem writes + `mmap(PROT_EXEC)`, with JVM classpath auto-whitelisted | Reads code, touches nothing else | Image processing, crypto, ML inference |
+| `Policy.PURE_COMPUTE_UNSAFE` | Same as above, without the JVM classpath whitelist | Strictest possible — may crash on lazy classloading | Pre-warmed, fully initialized workers only |
 
 Policies are composable via a builder — see [GETTING_STARTED.md](GETTING_STARTED.md#building-a-custom-policy).
+
+---
+
+## Where to Go Next
+
+| I want to… | Go to |
+|---|---|
+| Install and write my first policy | [GETTING_STARTED.md](GETTING_STARTED.md) |
+| Auto-generate a policy from my workload | [profiler/README.md](profiler/README.md) |
+| See it block real CVEs (Log4Shell, SSRF, XXE) | [Demo README](demos/vulnerable-web-app/README.md) |
+| Understand the threat model and what it can't stop | [SECURITY_CONSIDERATIONS.md](docs/internals/SECURITY_CONSIDERATIONS.md) |
+| Read the deep-dive article series | [Article series](#article-series) |
+| Contribute or modify the codebase | [CONTRIBUTING.md](CONTRIBUTING.md) |
 
 ---
 
