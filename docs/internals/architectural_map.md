@@ -62,16 +62,17 @@ graph TD
             A[Arch.kt]
             SA[SeccompAction.kt]
         end
-        P[Policy.kt] --> B[BpfFilter.kt]
-        B --> S
-        B --> A
-        B --> C[NativeEngine.kt]
+        PD[PolicyDefinition.kt] --> CS[CompiledSandbox.kt]
+        CS --> S
+        CS --> A
+        CS --> C[NativeEngine.kt]
         C -- traits --> LN[LinuxNative.kt]
         LN --> NC[NativeConstants.kt]
         LN --> L[Layouts.kt]
-        D[ContainedExecutors.kt] --> P
+        D[ContainedExecutors.kt] --> PD
         D --> E[StateRegistries.kt]
         H[SbobParser.kt]
+        SD[SandboxDispatcher.kt] --> PD
     end
 
     subgraph profiler [":profiler"]
