@@ -758,3 +758,51 @@ For full architectural details, see `supervisor_proxy_design.md`.
 *   **Target Area:** `enforcer/src/main/kotlin/io/mazewall/landlock/Landlock.kt`
 *   **Observation:** When a path does not exist, `addRule` falls back to the parent directory. This grants access to the *entire* directory when the user only intended to allow a specific (future) file.
 *   **Needed:** Implement `O_CREAT` awareness or document this broad fallback as a known limitation.
+
+### 🔴 [Severity: MEDIUM]: Cascading Failure in `verifyInstallation` when stacking over a restrictive `prctl` filter
+*   **Dimension:** Cascading Failure / OS Invariants
+*   **Target Area:** `enforcer/src/main/kotlin/io/mazewall/seccomp/PureJavaBpfEngine.kt`
+*   **Failure Hypothesis:** When a thread has an existing Seccomp filter that restricts `prctl` (e.g. `ACT_ERRNO`), installing a *subsequent* permissive policy that explicitly allows `prctl` will cause a deterministic crash during the installation verification phase.
+*   **Context & Proof:** `verifyInstallation(definition: PolicyDefinition<*>)` checks if `prctl` is allowed by examining only the *incoming* `definition` (`definition.syscallActions[Syscall.PRCTL] ?: definition.defaultAction`). If allowed, it executes `LinuxNative.process.prctl(PrctlCommand.GetSeccomp)`. However, seccomp filters stack in the Linux kernel; the *most restrictive* action across all installed filters is applied. The incoming policy might allow `prctl`, but the *already installed* policy will intercept and block it, causing `r5.getOrThrow` to throw an exception and fail the installation of the second filter entirely.
+*   **Cascading Risk Potential:** Medium. Prevents the installation of otherwise valid subsequent policies (stacking) if the initial policy was restrictive of `prctl`. This is a state tracking desynchronization between the thread's cumulative OS state and the stateless validation in `verifyInstallation`.
+*   **Recommendation:** `verifyInstallation` should check the combined `ContainerState` from `ThreadStateRegistry` rather than just the incoming `PolicyDefinition`, ensuring it correctly respects the cumulative restrictions on `prctl` before attempting the native syscall.
+
+### 🔴 [Severity: LOW]: Suboptimal BPF `RET` instruction placement in `emitLinearScan`
+*   **Dimension:** Performance / Macro-Architecture
+*   **Target Area:** `enforcer/src/main/kotlin/io/mazewall/BpfFilter.kt`
+*   **Failure Hypothesis:** The BPF linear scan compiler does not deduplicate identical return values. If many syscalls map to the same restrictive action, the resulting bytecode size will bloat unnecessarily, potentially hitting the Linux 4096 instruction limit.
+*   **Context & Proof:** In `BpfFilter.emitLinearScan`, the code loops over all `syscallActions` and executes `builder.expect(nr) { ret(nativeAction) }`. This injects a jump instruction and a discrete `RET` instruction for every single mapped syscall. If 50 syscalls are mapped to `ACT_ERRNO`, it emits 50 separate `RET` instructions instead of jumping to a single shared `RET` block for `ACT_ERRNO`. This wastes BPF instruction slots and creates suboptimal CPU instruction cache usage inside the kernel.
+*   **Cascading Risk Potential:** Low, but impacts bytecode efficiency. In scenarios with massive `DENY_LIST` policies, this bloat could push the BPF program size closer to the strict `BPF_MAXINSNS` limit (4096), causing `seccomp(2)` to inexplicably fail with `EINVAL` during installation.
+*   **Recommendation:** Group the `syscallActions` by `nativeAction`. Iterate through the groups, emit jump chains for the syscall numbers, and place a single `RET <action>` instruction at the end of each chain using shared labels.
+
+### 🔴 [Severity: HIGH]: `SeccompInstallationState` Partial Failure Leaves Thread Unprivileged but Uncontained
+*   **Dimension:** Cascading Failure Analysis (The Systems View)
+*   **Target Area:** `enforcer/src/main/kotlin/io/mazewall/seccomp/PureJavaBpfEngine.kt` and `SeccompInstallationState.kt`
+*   **Failure Hypothesis:** If an exception (like OutOfMemoryError, or a virtual machine error) occurs after `setNoNewPrivs` but before the BPF filter is successfully applied, the OS thread will have `no_new_privs` permanently set, but no containment filter will be active.
+*   **Context & Proof:** In `PureJavaBpfEngine.installInternal`, `val locked = uninitialized.lockPrivileges()` sets `PR_SET_NO_NEW_PRIVS`. Then, `nativeScope { val built = locked.buildFilter(this, policy) }` attempts to allocate native memory for the BPF instructions. If this native allocation fails (e.g., due to memory pressure or FFM limits), an exception is thrown. The method catches the exception and updates the state to `Failed`. However, `PR_SET_NO_NEW_PRIVS` cannot be unset. The thread is now returned to the pool (if running via `ContainedExecutors.wrap`), silently dropping privileges for all future tasks on this carrier thread without actually applying the requested security policy.
+*   **Cascading Risk Potential:** High. Thread pool contamination. Future tasks executing on this thread will fail unexpectedly if they legitimately require privilege escalation (e.g., `execve` with setuid), leading to non-deterministic failures across the application.
+*   **Recommendation:** Pre-allocate the `MemorySegment` and build the `SockFProg` struct *before* calling `setNoNewPrivs()`. This ensures that all memory and layout calculations succeed before making the irreversible kernel state change.
+
+### 🔴 [Severity: MEDIUM]: Native Memory Leak in `ContainedExecutors.wrap` under High Concurrency
+*   **Dimension:** Micro-Implementation & FFM ABI Rigor
+*   **Target Area:** `enforcer/src/main/kotlin/io/mazewall/seccomp/PureJavaBpfEngine.kt`
+*   **Failure Hypothesis:** The BPF program memory allocated via `nativeScope` might leak or be prematurely freed if the `seccomp` syscall is interrupted or delayed by a GC pause.
+*   **Context & Proof:** `PureJavaBpfEngine.installInternal` uses `nativeScope { val built = locked.buildFilter(this, policy); built.applyFilter(arch, useTsync) }`. The `nativeScope` (typically `Arena.ofConfined()`) guarantees memory is freed when the block exits. If `seccomp` is called, the kernel copies the BPF instructions into kernel space. However, if `ContainedExecutors.wrap` submits thousands of tasks concurrently, and each task triggers a nested compilation/installation that throws an exception inside the `nativeScope`, the JVM might struggle to clean up the confined arenas promptly if the exceptions are caught and swallowed by the executor.
+*   **Cascading Risk Potential:** Medium. In a highly dynamic environment, this could lead to native memory exhaustion.
+*   **Recommendation:** Verify the `nativeScope` implementation correctly bounds the arena lifetime even when exceptions are thrown (e.g., ensure it uses `try-finally` internally), and consider caching the compiled `MemorySegment` for identical policies.
+
+### 🔴 [Severity: HIGH]: `SeccompInstallationState` Partial Failure Leaves Thread Unprivileged but Uncontained
+*   **Dimension:** Cascading Failure Analysis (The Systems View)
+*   **Target Area:** `enforcer/src/main/kotlin/io/mazewall/seccomp/PureJavaBpfEngine.kt` and `SeccompInstallationState.kt`
+*   **Failure Hypothesis:** If an exception (like OutOfMemoryError, or a virtual machine error) occurs after `setNoNewPrivs` but before the BPF filter is successfully applied, the OS thread will have `no_new_privs` permanently set, but no containment filter will be active.
+*   **Context & Proof:** In `PureJavaBpfEngine.installInternal`, `val locked = uninitialized.lockPrivileges()` sets `PR_SET_NO_NEW_PRIVS`. Then, `nativeScope { val built = locked.buildFilter(this, policy) }` attempts to allocate native memory for the BPF instructions. If this native allocation fails (e.g., due to memory pressure or FFM limits), an exception is thrown. The method catches the exception and updates the state to `Failed`. However, `PR_SET_NO_NEW_PRIVS` cannot be unset. The thread is now returned to the pool (if running via `ContainedExecutors.wrap`), silently dropping privileges for all future tasks on this carrier thread without actually applying the requested security policy.
+*   **Cascading Risk Potential:** High. Thread pool contamination. Future tasks executing on this thread will fail unexpectedly if they legitimately require privilege escalation (e.g., `execve` with setuid), leading to non-deterministic failures across the application.
+*   **Recommendation:** Pre-allocate the `MemorySegment` and build the `SockFProg` struct *before* calling `setNoNewPrivs()`. This ensures that all memory and layout calculations succeed before making the irreversible kernel state change.
+
+### 🔴 [Severity: MEDIUM]: Native Memory Leak in `ContainedExecutors.wrap` under High Concurrency
+*   **Dimension:** Micro-Implementation & FFM ABI Rigor
+*   **Target Area:** `enforcer/src/main/kotlin/io/mazewall/seccomp/PureJavaBpfEngine.kt`
+*   **Failure Hypothesis:** The BPF program memory allocated via `nativeScope` might leak or be prematurely freed if the `seccomp` syscall is interrupted or delayed by a GC pause.
+*   **Context & Proof:** `PureJavaBpfEngine.installInternal` uses `nativeScope { val built = locked.buildFilter(this, policy); built.applyFilter(arch, useTsync) }`. The `nativeScope` (typically `Arena.ofConfined()`) guarantees memory is freed when the block exits. If `seccomp` is called, the kernel copies the BPF instructions into kernel space. However, if `ContainedExecutors.wrap` submits thousands of tasks concurrently, and each task triggers a nested compilation/installation that throws an exception inside the `nativeScope`, the JVM might struggle to clean up the confined arenas promptly if the exceptions are caught and swallowed by the executor.
+*   **Cascading Risk Potential:** Medium. In a highly dynamic environment, this could lead to native memory exhaustion.
+*   **Recommendation:** Verify the `nativeScope` implementation correctly bounds the arena lifetime even when exceptions are thrown (e.g., ensure it uses `try-finally` internally), and consider caching the compiled `MemorySegment` for identical policies.
