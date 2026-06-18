@@ -135,4 +135,31 @@ class IterativeProfilerTest {
             }
         }
     }
+
+    @Test
+    fun `test iterative profiling converges on relative paths`() {
+        val target = File("build/tmp/iterative-relative-test.txt")
+        target.parentFile.mkdirs()
+        target.writeText("content")
+
+        val basePolicy =
+            Policy
+                .builder()
+                .unblock(Syscall.OPEN, Syscall.OPENAT, Syscall.OPENAT2)
+                .build()
+
+        val compiledPolicy =
+            IterativeProfiler.profile(basePolicy) {
+                // Use a relative path to read the file
+                val relativePath = java.nio.file.Paths.get("build/tmp/iterative-relative-test.txt")
+                java.nio.file.Files.readString(relativePath)
+            }
+
+        assertTrue(
+            compiledPolicy.allowedFsReadPaths.any { it.value == target.absolutePath },
+            "Should allow read access to absolute path of target: ${target.absolutePath}"
+        )
+
+        target.delete()
+    }
 }

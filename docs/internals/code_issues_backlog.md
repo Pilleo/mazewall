@@ -336,12 +336,14 @@ As a result, neither the symlink target nor the symlink creation path is resolve
 **Context & Proof:** If `process_vm_readv` reads a path string that does not contain a null terminator in the returned buffer (due to page boundaries or large lengths), the profiler returned `null`, breaking rule compilation.
 **Fix:** Modified `readStringFromProcess` to return a best-effort decoded string of length `bytesRead` when a null terminator is not found, instead of returning `null`. Verified via unit tests.
 
-### 🔴 [Severity: HIGH]: `IterativeProfiler` crashes deterministically on relative-path filesystem violations
-**Target:** `/profiler/src/main/kotlin/io/mazewall/profiler/iterative/IterativeProfiler.kt` (specifically `extractViolationPath`) and `/enforcer/src/main/kotlin/io/mazewall/Policy.kt` (specifically `validatePath`)
-**Failure Hypothesis:** When a profiled workload attempts to access a file using a relative path (e.g. `Paths.get("data.txt")`), a `java.nio.file.AccessDeniedException` is thrown containing the relative path. The `IterativeProfiler` extracts this relative path and attempts to add it to the policy via `allowFsRead(path)`. However, `Policy.Builder.validatePath` strictly mandates absolute paths, throwing `IllegalArgumentException: Path must be absolute`, which crashes the profiling loop instead of resolving or canonicalizing the path.
-**Context & Proof:** If a task performs `Files.readString(Paths.get("relative/file.txt"))`, Java throws `AccessDeniedException` where `t.file` is `"relative/file.txt"`. `extractViolationPath` returns `"relative/file.txt"`. `profile` calls `updatePolicyForViolation(currentPolicy, "relative/file.txt")`, which calls `builder.allowFsRead("relative/file.txt")`. Since `"relative/file.txt"` does not start with `"/"`, `validatePath` throws `IllegalArgumentException`. The retry loop in `IterativeProfiler` is immediately aborted, crashing the workload.
-**Cascading Risk Potential:** High usability and stability failure. Completely prevents progressive/iterative profiling of any applications that rely on relative file paths.
-**Needed:** In `IterativeProfiler.extractViolationPath`, if the extracted path is relative, resolve it to an absolute path relative to the JVM CWD (or a provided working directory) before returning it. Alternatively, canonicalize all paths in `updatePolicyForViolation` using `Paths.get(path).toAbsolutePath().normalize().toString()`.
+### ✅ [RESOLVED]: `IterativeProfiler` crashes deterministically on relative-path filesystem violations
+**Status:** RESOLVED (June 2026)
+**Target:** `io.mazewall.profiler.iterative.IterativeProfiler` (specifically `extractViolationPath` and `resolveAbsolutePath`)
+**Context & Proof:** When a profiled workload accessed a file using a relative path, the extracted path was passed raw to the builder, violating the absolute path requirement and crashing the profiling loop. Furthermore, `resolveAbsolutePath` explicitly returned `null` for relative paths in exception messages, ignoring them completely.
+**Fix:** 
+1. Updated `extractViolationPath` to always resolve and normalize paths to absolute form (`java.nio.file.Paths.get(it).toAbsolutePath().normalize().toString()`).
+2. Modified `resolveAbsolutePath` to allow returning relative paths so they can be processed and canonicalized properly.
+3. Verified via unit and build verification tests.
 
 ### 🔴 [Severity: HIGH]: `IterativeProfiler` infinite retry loop and failure on disjoint prefix file paths
 **Target:** `/profiler/src/main/kotlin/io/mazewall/profiler/iterative/IterativeProfiler.kt` (specifically `updatePolicyForViolation`)

@@ -118,7 +118,13 @@ object IterativeProfiler {
                 }
             }
         }
-        return path
+        return path?.let {
+            try {
+                java.nio.file.Paths.get(it).toAbsolutePath().normalize().toString()
+            } catch (@Suppress("SwallowedException") e: java.nio.file.InvalidPathException) {
+                null
+            }
+        }
     }
 
     private fun findDeniedPhraseIndex(msg: String): Int =
@@ -142,7 +148,6 @@ object IterativeProfiler {
     ): String? {
         var start = pathEnd
         while (start > 0 && !msg[start - 1].isWhitespace() && msg[start - 1] != ':') start--
-        val path = msg.substring(start, pathEnd + 1)
-        return if (path.startsWith("/")) path else null
+        return msg.substring(start, pathEnd + 1)
     }
 }
