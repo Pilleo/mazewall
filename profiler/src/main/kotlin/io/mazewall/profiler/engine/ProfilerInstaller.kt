@@ -29,6 +29,7 @@ internal object ProfilerInstaller {
         stackTracesMap: MutableMap<TraceEvent, MutableList<Array<StackTraceElement>>>?,
         pathCache: MutableMap<String, Long>,
         workerThreadProvider: () -> Thread?,
+        processWide: Boolean = false,
         connectWithRetry: (String) -> Int = { path -> ProfilerSocket.connectWithRetry(path) },
         startTraceListener: (
             Int,
@@ -47,6 +48,7 @@ internal object ProfilerInstaller {
             workerThreadProvider = workerThreadProvider,
             connectWithRetry = connectWithRetry,
             startTraceListener = startTraceListener,
+            processWide = processWide,
         )
         session.install()
     }
@@ -67,7 +69,9 @@ internal class ProfilerInstallerSession(
         MutableMap<String, Long>,
         () -> Thread?
     ) -> Unit,
+    private val processWide: Boolean = false,
 ) {
+    @Suppress("ThrowsCount", "MagicNumber")
     fun install() {
         if (!Platform.featureMatrix.seccompUserNotifSupported) {
             throw UnsupportedKernelFeatureException("Seccomp User Notifications are required for profiling.")
@@ -112,6 +116,33 @@ internal class ProfilerInstallerSession(
         nativeScope {
             val prog = LinuxNative.memory.newSockFProg(filter)
             val listenerFd = installListener(arch, prog)
+
+            // Step 2: Synchronize filter tree process-wide if processWide is true
+            if (processWide) {
+                val dummyBpf = io.mazewall.seccomp.BpfProgram.dsl(arch) { allow() }.instructions
+                val dummyProg = LinuxNative.memory.newSockFProg(dummyBpf)
+                val tsyncRes = LinuxNative.withTransaction {
+                    LinuxNative.syscall(
+                        arch.seccompSyscallNumber.toLong(),
+                        NativeArg.LongArg(NativeConstants.SECCOMP_SET_MODE_FILTER.toLong()),
+                        NativeArg.LongArg(NativeConstants.SECCOMP_FILTER_FLAG_TSYNC.toLong()),
+                        NativeArg.MemoryArg(dummyProg),
+                    )
+                }
+                if (tsyncRes is LinuxNative.SyscallResult.Error) {
+                    val errno = tsyncRes.errno
+                    if (errno == 13) {
+                        throw IllegalStateException(
+                            "Process-wide profiling failed with EACCES (Permission denied). " +
+                            "This typically occurs because sibling threads (such as GC or JIT compiler threads) " +
+                            "do not have the 'no_new_privs' flag set. Process-wide profiling requires running " +
+                            "inside a container (where privilege escalation is disabled at the container boundary)."
+                        )
+                    } else {
+                        throw IllegalStateException("Process-wide profiling TSYNC failed with errno $errno")
+                    }
+                }
+            }
 
             // Release the helper to send the descriptor
             listenerFdPromise.complete(listenerFd.value)

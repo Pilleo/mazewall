@@ -35,7 +35,9 @@ object Profiler {
     /**
      * Profiles the given [block] and returns a [BillOfBehavior].
      */
+    @JvmOverloads
     fun <T> profile(
+        processWide: Boolean = false,
         block: () -> T,
     ): ProfilingResult<T> {
         val context = ProfilerDaemonManager.getOrSpawnSharedDaemon()
@@ -61,7 +63,9 @@ object Profiler {
                         localLogs,
                         localStackProfile,
                         localPathCache,
-                    ) { Thread.currentThread() }
+                        processWide,
+                        { Thread.currentThread() }
+                    )
 
                     val res = block()
                     blockResult.set(res)
@@ -103,6 +107,7 @@ object Profiler {
         accumulatedLogs: MutableList<TraceEvent>,
         stackTracesMap: MutableMap<TraceEvent, MutableList<Array<StackTraceElement>>>?,
         pathCache: MutableMap<String, Long>,
+        processWide: Boolean,
         workerThreadProvider: () -> Thread?,
     ) {
         ProfilerInstaller.installProfilingFilterForThread(
@@ -112,6 +117,7 @@ object Profiler {
             stackTracesMap = stackTracesMap,
             pathCache = pathCache,
             workerThreadProvider = workerThreadProvider,
+            processWide = processWide,
             startTraceListener = { fd, logs, traces, cache, provider ->
                 val listener = ProfilerTraceListener(
                     FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(fd),
@@ -182,7 +188,9 @@ object Profiler {
                     recentLogs,
                     recentStackProfiles,
                     pathCache,
-                ) { currentThread }
+                    false,
+                    { currentThread }
+                )
                 threadApplied.set(true)
             }
         }

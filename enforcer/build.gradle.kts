@@ -64,6 +64,7 @@ val plantumlConfig by configurations.creating
 
 dependencies {
     plantumlConfig(libs.plantuml.core)
+    compileOnly(libs.kotlinxCoroutines)
     implementation(libs.kotlinxSerialization)
     testImplementation(kotlin("test"))
     testImplementation(libs.junit.jupiter.api)

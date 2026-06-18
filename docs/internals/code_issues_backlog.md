@@ -233,7 +233,7 @@ This ensures jump targets are validated at compile time and guarantees no dangli
 **Needed:** 
 1. Document this fundamental architectural bypass clearly in `SECURITY_CONSIDERATIONS.md` alongside the ACE pivot. Emphasize that Tier 2 containment only restricts synchronous execution on the current thread.
 
-### 🔴 [Severity: HIGH]: Tier S Profiler is blind to background threads (No TSYNC/Inheritance)
+### ✅ [RESOLVED] [Severity: HIGH]: Tier S Profiler is blind to background threads (No TSYNC/Inheritance)
 **Target:** `io.mazewall.profiler.Profiler.kt`, `io.mazewall.profiler.engine.ProfilerInstaller.kt`
 **Context:** Seccomp filters and `USER_NOTIF` file descriptors are per-thread by default. The current Tier S `Profiler.profile { ... }` only installs the filter on the calling thread. Background JVM threads (GC, JIT, ForkJoinPool) completely bypass the profiler, leading to an incomplete "JVM Floor" baseline.
 **Needed:** Implement process-wide tracing support in Tier S. Two potential paths:
