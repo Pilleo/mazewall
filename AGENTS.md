@@ -15,7 +15,7 @@ As an AI agent pair-programming on this project, you are assisting in transition
 
 **🚫 Never Do:**
 *   Never catch `EPERM` or `EACCES` exceptions without rethrowing or crashing (No silent bypasses).
-*   Never block JVM coordination syscalls (`futex`, `clone` with `CLONE_THREAD`, `rt_sigreturn`).
+*   Never block JVM coordination syscalls (refer to the detailed list in [enforcer/AGENTS.md](file:///home/leanid/Documents/code/java/jseccomp/enforcer/AGENTS.md#1-never-block-jvm-coordination-system-calls)).
 *   Never combine `SECCOMP_FILTER_FLAG_TSYNC` and `SECCOMP_FILTER_FLAG_NEW_LISTENER`.
 *   Never use `JAVA_LONG` for 32-bit `sock_filter` fields.
 
@@ -80,6 +80,8 @@ All code must adhere strictly to the centralized [mazewall Code Quality & Crafts
 *   **Fail Closed by Default:** The **default `FallbackBehavior` is `FAIL`** (see `Platform.configuredFallback()` — it returns `FallbackBehavior.FAIL` unless the operator explicitly overrides via `-Dio.mazewall.fallback=WARN_AND_BYPASS` or `IO_MAZEWALL_FALLBACK=WARN_AND_BYPASS`). This is intentional and must not be changed.
 *   **No Unconsulted Fallbacks:** Do not write automatic recovery loops or mock environments (like simulating a syscall return value via register manipulation) without explicit operator consent, even if the immediate effect appears safe.
 
+---
+
 ## 3. Directory Structure & Technical Delegations
 
 `mazewall` is split into two specialized subprojects. Detailed engineering safety rules, FFM design conventions, and architectural bounds are documented in the respective **child `AGENTS.md` files**:
@@ -88,16 +90,16 @@ All code must adhere strictly to the centralized [mazewall Code Quality & Crafts
 Responsible for production-grade sandboxing using Linux Seccomp-BPF and Landlock LSM through the JDK Foreign Function & Memory (FFM) API.
 *   **Key Source Files:** `Policy.kt`, `BpfFilter.kt`, `PureJavaBpfEngine.kt`, `Landlock.kt`, `ContainedExecutors.kt`, `LinuxNative.kt`, `Platform.kt`.
 *   **Engineering Rules:**
-    > [!IMPORTANT]
+    > [IMPORTANT]
     > Before making any changes inside `/enforcer`, you **must** read and adhere to the strict guidelines in **[enforcer/AGENTS.md](file:///home/leanid/Documents/code/java/jseccomp/enforcer/AGENTS.md)**.
     >
-    > It covers JVM coordination system calls (never block `futex`, `clone` with `CLONE_THREAD`, etc.), preventing Loom Virtual Thread carrier poisoning, and FFM `errno` capture safety.
+    > It covers preventing Loom Virtual Thread carrier poisoning, native FFM layout alignments, and raw syscall constraint designs.
 
 ### B. The `:profiler` Module (Developer Diagnostic Suite)
 Responsible for unprivileged system call profiling and Landlock path discovery using BPF `USER_NOTIF` sockets, progressive testing, and descendant `strace` parsing.
 *   **Key Source Files:** `Profiler.kt`, `ProfilerDaemon.kt`, `IterativeProfiler.kt`, `StraceProfiler.kt`, `BobCompiler.kt`, `BillOfBehavior.kt`.
 *   **Engineering Rules:**
-    > [!IMPORTANT]
+    > [IMPORTANT]
     > Before making any changes inside `/profiler`, you **must** read and adhere to the strict guidelines in **[profiler/AGENTS.md](file:///home/leanid/Documents/code/java/jseccomp/profiler/AGENTS.md)**.
     >
     > It covers the critical out-of-process `USER_NOTIF` ACK loop deadlock prevention, Yama `ptrace_scope` configurations, and `strace` log parsing.
@@ -110,7 +112,6 @@ Thread-scoped seccomp is **not** an absolute security boundary against an attack
 
 *   **Mandatory Baseline:** Tier 1 (process-wide `NO_EXEC` baseline, via `ContainedExecutors.installOnProcess`) is an absolute architectural backstop, not an optional recommendation. Stacking thread-scoped Tier 2 containment on top mitigates the blast radius of data-oriented attacks (SSRF, XXE, SQLi), but must never be presented alone as a complete security boundary. Refer to [SECURITY_CONSIDERATIONS.md](file:///home/leanid/Documents/code/java/jseccomp/docs/internals/SECURITY_CONSIDERATIONS.md) for the complete threat matrix.
 *   **Namespaces & cgroups Roadmap (Tier 1 Expansion):** Process-wide Mount/Network/PID namespaces and cgroups v2 limits are planned on the roadmap to reinforce the Tier 1 baseline at process initialization, ensuring escapes from memory corruption remain contained inside the process boundaries. Thread-local namespaces are explicitly rejected due to JVM coordination conflicts.
-
 
 ---
 
@@ -135,44 +136,29 @@ Thread-scoped seccomp is **not** an absolute security boundary against an attack
 
 ---
 
-## 7. Native Engine Traits & Fault Injection
+## 6. Native Engine Traits & Fault Injection
 
-To maintain high testability, `mazewall` avoids direct static calls to native JNI/FFM methods. Instead, core components interact with the `NativeEngine` trait interfaces:
-- `NativeFileSystem`
-- `NativeNetworking`
-- `NativeProcess`
-- `NativeMemory`
-
-**Engineering Rule for Testing:**
-When writing unit tests for components that interact with the kernel (like `BpfFilter` or `Landlock`), always use the `setEngine` pattern to inject a `MockNativeEngine`. This allows you to simulate specific `errno` values, syscall failures, or kernel version responses without requiring root privileges or a specific Linux environment.
-
-```kotlin
-// Example: Fault Injection in tests
-val mockFs = MockNativeFileSystem()
-mockFs.onOpen { EPERM }
-LinuxNative.setEngine(mockFs)
-```
-Do not forget to call `LinuxNative.resetToDefault()` in your test cleanup or use a `@Before` / `@After` rule.
+To maintain high testability, `mazewall` avoids direct static calls to native JNI/FFM methods. Instead, core components interact with the `NativeEngine` trait interfaces.
+For detailed implementation examples and test usage of the `MockNativeEngine` pattern, refer to the documentation in [enforcer/AGENTS.md](file:///home/leanid/Documents/code/java/jseccomp/enforcer/AGENTS.md#7-native-engine-decoupling-for-testability).
 
 ---
 
-## 8. Key Design Documents
-
+## 7. Key Design Documents
 
 Before modifying components, read the relevant design document:
 
-| Document                                                                                                                 | Covers                                                                   |
-|--------------------------------------------------------------------------------------------------------------------------|--------------------------------------------------------------------------|
-| [containment_design.md](file:///home/leanid/Documents/code/java/jseccomp/docs/internals/containment_design.md)           | BPF scan loops, argument inspections, Landlock ordering, FFM layouts.    |
-| [profiler_design.md](file:///home/leanid/Documents/code/java/jseccomp/docs/internals/profiler_design.md)                 | USER_NOTIF architecture, socket SCM_RIGHTS, ACK loop protocol.           |
+| Document | Covers |
+|---|---|
+| [containment_design.md](file:///home/leanid/Documents/code/java/jseccomp/docs/internals/containment_design.md) | BPF scan loops, argument inspections, Landlock ordering, FFM layouts. |
+| [profiler_design.md](file:///home/leanid/Documents/code/java/jseccomp/docs/internals/profiler_design.md) | USER_NOTIF architecture, socket SCM_RIGHTS, ACK loop protocol. |
 | [SECURITY_CONSIDERATIONS.md](file:///home/leanid/Documents/code/java/jseccomp/docs/internals/SECURITY_CONSIDERATIONS.md) | Full threat model, ACE escape caveats, K8s custom profiles, Yama scopes. |
 
-## 7. Cross-Module Change Protocol
+## 8. Cross-Module Change Protocol
 If a change touches both `:enforcer` and `:profiler`:
 1. Complete and verify `:enforcer` changes first.
 2. Run `:enforcer:check` before starting `:profiler` work.
 3. Update `Syscall.kt` and `Arch.kt` in `:enforcer` before referencing the new enum in profiler.
 
-## 8. Task verification protocol
+## 9. Task verification protocol
 After any code changes, run `./gradlew build` to verify the final changes.
-You may run more granular checks in the process, but build must be alwasy green before you submit the results.
+You may run more granular checks in the process, but build must be always green before you submit the results.

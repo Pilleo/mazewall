@@ -44,7 +44,7 @@ Seccomp filters bind permanently to the OS thread (LWP). Installs from virtual t
 - The `applyContainment()` method in `ContainedExecutors.ContainedExecutorWrapper` enforces this correct order. **Do not change this sequence.**
 
 ### 4. Fail Closed by Default
-- **Rule:** Do not write "fail-safe" or "silent bypass" fallback behavior. If a seccomp filter or Landlock rule cannot be installed, and `FallbackBehavior` resolves to `FAIL` (the default), you must throw a hard exception or crash the process. Silent bypasses are strictly forbidden.
+Ensure compliance with the global fallback policies defined in [Root AGENTS.md](file:///home/leanid/Documents/code/java/jseccomp/AGENTS.md#2-strict-protection-against-unsafe-fallback--bypass-scenarios).
 
 ### 5. BPF Compiler & Argument Safety
 - **Multi-Instruction Argument Inspection:** When modifying `BpfFilter.kt`, preserve the multi-instruction argument-inspection sequences for `mmap`/`mprotect`, `clone`, and `prctl`. Do not replace them with simple `BPF_JEQ` checks against the syscall numbers; doing so deletes crucial protection context.
@@ -85,27 +85,12 @@ The violation detector in `ContainedExecutors.isDirectContainmentViolation()` us
 4. **Prohibited:** broad fragments like `"denied"` without class restrictions (avoid false positives on standard business logic exceptions).
 - **Traversing:** Always call `isContainmentViolation(t)` (performs cause-chain traversal) rather than calling `isDirectContainmentViolation(t)` directly.
 
-### 9. Code Maintainability & Engineering Standards
-All enforcer components must adhere strictly to the centralized [mazewall Code Quality & Craftsmanship Standards](file:///home/leanid/Documents/code/java/jseccomp/.agents/CODE_QUALITY.md) for rules on SOLID, type verification, immutability, FP, AOT friendliness, logical modularity, and debuggability.
-
 ---
 
 ## 🔄 Verification & Testing
-
-Every modification inside `:enforcer` must be verified using the unprivileged OCI container:
-```bash
-podman compose exec mazewall ./gradlew :enforcer:check
-```
-
-- **Lints & Style:** Spotbugs and Detekt analyses must pass completely.
-- **Coverage Rules:**
-  - `Landlock*` instruction coverage must remain $\ge 65\%$.
-  - `LinuxNative*` instruction coverage must remain $\ge 78\%$.
-  - Core enforcement classes must remain $\ge 80\%$.
-- **Test annotations:** Use `@EnabledIfLinuxAndSupported` to guard platform-specific tests.
+For test script commands and Podman orchestration parameters, refer to the parent registry in [Root AGENTS.md](file:///home/leanid/Documents/code/java/jseccomp/AGENTS.md#5-testing-and-verification-guidelines).
 
 ---
 
 ## 📓 Code Issues & Discoveries Journal
 If you discover a kernel-level behavior, FFM nuance, or bug during development, you MUST log it immediately in `docs/internals/code_issues_backlog.md`.
-

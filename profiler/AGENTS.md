@@ -23,24 +23,16 @@ The `ProfilerDaemonEngine` uses a non-blocking reactor loop that delegates sessi
 - Under default container configurations, process memory reads (`/proc/<pid>/mem`) or attaches are blocked by Yama LSM (`ptrace_scope = 1`).
 - To allow the out-of-process `ProfilerDaemon` to inspect JVM tracee memory segments unprivileged, the tracee JVM must explicitly authorize the daemon PID via `prctl(PR_SET_PTRACER, daemonPid)`. Ensure this call is preserved during tracing startup.
 
-### 3. Descriptor Passing via UNIX Domain Sockets
+### 4. Descriptor Passing via UNIX Domain Sockets
 - Transferring the seccomp listener file descriptor to the daemon requires standard UNIX domain sockets and `SCM_RIGHTS` ancillary control messages. Ensure the FFM memory structure representing the `msghdr` and `cmsghdr` payload blocks remains byte-aligned.
 
-### 4. Strace Descendant Tracing Boundaries
+### 5. Strace Descendant Tracing Boundaries
 - The `StraceProfiler` spawns JVM workloads directly under `strace -f`.
-
-### 5. Code Maintainability & Engineering Standards
-All profiler components must adhere strictly to the centralized [mazewall Code Quality & Craftsmanship Standards](file:///home/leanid/Documents/code/java/jseccomp/.agents/CODE_QUALITY.md) for rules on SOLID, type verification, immutability, FP, AOT friendliness, logical modularity, and debuggability.
 
 ---
 
 ## 🔄 Verification & Testing
-
-Every modification inside `:profiler` must be verified using the unprivileged OCI container:
-```bash
-podman compose exec mazewall ./gradlew :profiler:check
-```
-
+For test script commands and Podman orchestration parameters, refer to the parent registry in [Root AGENTS.md](file:///home/leanid/Documents/code/java/jseccomp/AGENTS.md#5-testing-and-verification-guidelines).
 - **Lints & Style:** Spotbugs and Detekt analyses must pass completely. If detekt complains about function counts or sizes in complex daemon handling states, use specific annotations like `@Suppress("TooManyFunctions")`.
 - **Coverage Rules:**
   - `Profiler*` instruction coverage must remain $\ge 60\%$.
