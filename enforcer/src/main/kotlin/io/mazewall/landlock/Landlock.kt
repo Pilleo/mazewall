@@ -311,6 +311,9 @@ object Landlock {
         flags: Int,
     ): Pair<LinuxNative.SyscallResult<Long, *>, Boolean> {
         if (res is LinuxNative.SyscallResult.Error<*> && res.errno == 2) { // ENOENT
+            if (resolvedPath.endsWith(" (deleted)")) {
+                return res to false
+            }
             val parentPath = File(resolvedPath).parent ?: "/"
             logger.info("Path $resolvedPath does not exist, falling back to parent directory: $parentPath")
             val openResult = LinuxNative.withTransaction {

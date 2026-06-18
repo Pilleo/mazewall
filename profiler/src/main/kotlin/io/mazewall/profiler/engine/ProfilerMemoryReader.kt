@@ -81,7 +81,7 @@ object RealMemoryReader : ProfilerMemoryReader {
             val res = LinuxNative.withTransaction {
                 LinuxNative.fileSystem.readlink(pathSeg, buf, PATH_MAX_VAL)
             }
-            return res.onSuccess { }.map { buf.copyToString(it.toInt()) }.getOrNull()
+            return res.onSuccess { }.map { buf.copyToString(it.toInt()).removeSuffix(" (deleted)") }.getOrNull()
         }
     }
 

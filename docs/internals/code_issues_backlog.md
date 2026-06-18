@@ -321,12 +321,14 @@ As a result, neither the symlink target nor the symlink creation path is resolve
 **Context:** Progressive profiling relied on catching permission failures, but failed if a library wrapped the underlying `AccessDeniedException` in a custom exception, as the profiler only inspected the top-level exception.
 **Fix:** Updated `IterativeProfiler.extractViolationPath` to use the refactored `ContainmentViolationDetector.findViolationCause(t)`, which correctly traverses the exception cause chain to find the actual containment violation.
 
-### 🔴 [Severity: HIGH]: Excessive Landlock directory capability leak on unlinked/deleted files ending in ` (deleted)`
-**Target:** `io.mazewall.profiler.engine.ProfilerDaemon` (specifically `resolveFdPath`) and `io.mazewall.landlock.Landlock.kt` (specifically `addRule`)
-**Failure Hypothesis:** When a profiled application accesses a temporary file and deletes it while keeping its file descriptor open, Linux procfs `/proc/<pid>/fd/<fd>` symlinks resolve with ` (deleted)` appended to the path. The profiler logs this path, and when applied in production, Landlock's fallback mechanism opens the parent directory, exposing the entire directory to the sandbox.
-**Context & Proof:** If an application opens a file (e.g. `/var/log/app/tmp_file`) and unlinks it immediately, `ProfilerDaemon.resolveFdPath` calls `readlink` on `/proc/$pid/fd/$fd`, which returns `/var/log/app/tmp_file (deleted)`. The profiler records this exact string in the SBoB JSON. In production, `Landlock.addRule()` tries to open `/var/log/app/tmp_file (deleted)`. Since that path does not exist, `handleInitialOpenFailure` catches the `ENOENT` error and falls back to the parent directory by calling `File("/var/log/app/tmp_file (deleted)").parent ?: "/"`, which resolves to `/var/log/app`. Landlock then opens `/var/log/app` and adds a rule allowing full access. This leaks access to all sibling files and folders inside that directory.
-**Cascading Risk Potential:** High security privilege leak. An attacker can access, corrupt, or delete other sensitive logs and files in the parent directory, breaching the single-file isolation model.
-**Needed:** In `ProfilerDaemon.kt`, strip any trailing `" (deleted)"` suffix from resolved paths before returning them. Additionally, in `Landlock.kt`'s `handleInitialOpenFailure`, ignore fallback attempts for paths ending with `" (deleted)"` or validate if the path string represents a deleted file marker before reverting to the parent.
+### ✅ [RESOLVED]: Excessive Landlock directory capability leak on unlinked/deleted files ending in ` (deleted)`
+**Status:** RESOLVED (June 2026)
+**Target:** `io.mazewall.profiler.engine.ProfilerMemoryReader` (specifically `resolveLink`) and `io.mazewall.landlock.Landlock.kt` (specifically `handleInitialOpenFailure`)
+**Context & Proof:** If an application opens a file (e.g. `/var/log/app/tmp_file`) and unlinks it immediately, reading the `/proc/$pid/fd/$fd` symlink returns `/var/log/app/tmp_file (deleted)`. Landlock's fallback mechanism previously opened the parent directory, exposing the entire directory to the sandbox.
+**Fix:** 
+1. Stripped any trailing `" (deleted)"` suffix from resolved symlink paths in `ProfilerMemoryReader.resolveLink`.
+2. Modified `Landlock.handleInitialOpenFailure` to return `res to false` immediately without falling back to the parent directory if the path ends with `" (deleted)"`.
+3. Verified via unit and integration tests.
 
 ### 🔴 [Severity: HIGH]: `ProfilerDaemon` memory-reading fails to resolve paths on page boundaries or large strings
 **Target:** `io.mazewall.profiler.engine.ProfilerDaemon` (specifically `readStringFromProcess`)

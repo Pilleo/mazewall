@@ -224,4 +224,32 @@ class LandlockCoverageTest {
             tempFile.delete()
         }
     }
+
+    @Test
+    fun `test handleInitialOpenFailure with deleted file`() {
+        val deletedPathAttempts = java.util.concurrent.atomic.AtomicInteger(0)
+        val mockFallback = SupportedLandlockMock(
+            fileSystem = object : MockNativeFileSystem() {
+                context(_: NativeTransaction)
+                override fun open(
+                    path: java.lang.foreign.MemorySegment,
+                    flags: Int,
+                ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                    val pathStr = path.getString(0)
+                    if (pathStr.contains(" (deleted)")) {
+                        deletedPathAttempts.incrementAndGet()
+                        return LinuxNative.SyscallResult.Error<LinuxNative.SyscallHandledState.Unhandled>(2, -1) // ENOENT
+                    }
+                    return LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(100)
+                }
+            }
+        )
+        LinuxNative.setEngine(mockFallback)
+
+        // If path ends with " (deleted)", it should NOT call open a second time (meaning no fallback occurs)
+        val session = LandlockSession(Policy.builder().allowFsRead(SandboxedPath.of("/nonexistent/file (deleted)", true)).build().definition)
+        session.applyRuleset()
+
+        assertEquals(1, deletedPathAttempts.get(), "Should only attempt to open the deleted file path once, with no fallback to parent directory")
+    }
 }
