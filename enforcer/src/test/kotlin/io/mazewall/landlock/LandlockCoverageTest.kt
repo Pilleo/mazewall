@@ -131,6 +131,7 @@ class LandlockCoverageTest {
         LinuxNative.setEngine(mock)
 
         val session = LandlockSession(Policy.builder().build().definition)
+        org.junit.jupiter.api.Assumptions.assumeTrue(io.mazewall.Platform.isSupported())
         assertFailsWith<IllegalStateException> {
             session.applyRuleset()
         }
@@ -247,6 +248,7 @@ class LandlockCoverageTest {
         LinuxNative.setEngine(mockFallback)
 
         // If path ends with " (deleted)", it should NOT call open a second time (meaning no fallback occurs)
+        org.junit.jupiter.api.Assumptions.assumeTrue(io.mazewall.Platform.isSupported())
         val session = LandlockSession(Policy.builder().allowFsRead(SandboxedPath.of("/nonexistent/file (deleted)", true)).build().definition)
         session.applyRuleset()
 
