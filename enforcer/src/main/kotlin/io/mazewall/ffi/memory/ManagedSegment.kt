@@ -4,6 +4,10 @@ import java.lang.foreign.MemorySegment
 
 /**
  * Models ownership and confinement of a [MemorySegment].
+ *
+ * ARCHITECTURAL INVARIANT: ManagedSegment ensures that FFM interactions are type-safe
+ * and scope-aware. It prevents passing segments with incorrect layouts or invalid
+ * lifecycles to native system calls, mitigating memory corruption risks at the JVM boundary.
  */
 public sealed interface ManagedSegment {
     public val segment: MemorySegment

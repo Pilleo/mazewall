@@ -20,8 +20,10 @@ import java.util.logging.Logger
 /**
  * Background listener that reads trace events from a daemon socket and resolves them.
  *
- * Implements [AutoCloseable] to ensure that the worker thread is deterministically joined
- * and resources (Arena, Socket) are released upon shutdown.
+ * ARCHITECTURAL INVARIANT: This listener implements [AutoCloseable] to ensure a
+ * deterministic lifecycle. Closing the listener ensures that the worker thread is joined
+ * and the underlying Unix domain socket is explicitly released, preventing "half-dead"
+ * listeners or socket leaks during consecutive profiling runs.
  */
 @Suppress("SwallowedException")
 internal class ProfilerTraceListener(

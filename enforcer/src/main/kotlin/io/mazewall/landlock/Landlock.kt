@@ -83,6 +83,12 @@ import java.util.logging.Logger
  * @see io.mazewall.enforcer.ContainedExecutors.wrap
  */
 object Landlock {
+    /**
+     * ARCHITECTURAL INVARIANT: Landlock ruleset mutability is enforced via the Type-State
+     * pattern (using RulesetState.Building and RulesetState.Sealed). This ensures that
+     * rules can only be added before the ruleset is restricted, preventing runtime errors
+     * or silent ignore-failures when attempting post-enforcement mutations.
+     */
     private val logger = Logger.getLogger(Landlock::class.java.name)
 
     /** Apply ruleset to all threads of the process. ABI v8+ (Linux 7.0). */

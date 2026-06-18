@@ -144,7 +144,17 @@ Seccomp-BPF is blind to operations submitted via `io_uring` rings.
 *   **Deadlock Immunity:** Because the supervisor runs in a completely separate OS process, its JVM safepoints are physically isolated from the main JVM. It cannot cause a safepoint deadlock.
 *   **Zero-Crash Execution (`FLAG_CONTINUE`):** When a worker thread blocks on a syscall, the external supervisor reads the notification struct. If the syscall takes pointer arguments (like `openat` file paths), the supervisor inspects the worker's memory via `process_vm_readv()` and resolves absolute paths by inspecting `/proc/[pid]/fd/`. After logging the operation to a binary stream back to the JVM, the supervisor replies to the kernel with `SECCOMP_USER_NOTIF_FLAG_CONTINUE` (Linux 5.5+). This guarantees the kernel executes the syscall natively without requiring dangerous user-space emulation.
 
-### Tier A: Native Iterative Deny-and-Retry Loop (The Unprivileged Fallback)
+### Profiler Lifecycle & Memory Safety Invariants
+
+To ensure a stable and leak-free profiling experience, the `:profiler` module adheres to several architectural invariants:
+
+*   **Deterministic Listener Lifecycle:** `ProfilerTraceListener` implements `AutoCloseable`. This ensures that when a profiling session ends (via `Profiler.shutdown()`), the listener thread is joined, and the underlying Unix domain socket is explicitly closed, preventing "half-dead" listeners or socket leaks during consecutive profiling runs.
+*   **Type-Safe FFM Payloads (`ManagedSegment`):** All interaction with the supervisor daemon over Unix sockets uses `ManagedSegment`. This wrapper ensures that the `MemorySegment` being sent or received matches the expected struct layout (e.g., `seccomp_notif`) and is within a valid FFM scope, preventing memory corruption or invalid socket writes.
+*   **Registry Cleanup & Thread Poisoning:** `Profiler.profile` uses a `finally` block to remove the current thread's TID from the `threadRegistry`. This is critical for preventing memory leaks. However, because the JVM reuses threads in a pool, any `ProfilerExecutorWrapper` must be used with caution; while the registry is cleaned, the OS-level seccomp filter on the carrier thread is permanent (see §1: Loom Virtual Thread Carrier Poisoning).
+
+---
+
+## 3. Tier A: Native Iterative Deny-and-Retry Loop (The Unprivileged Fallback)
 For heavily locked-down environments where `root` is unavailable and Tier S is blocked by strict OCI container profiles, the `IterativeProfiler` provides a fully in-process, zero-privilege alternative:
 
 1.  **Baseline Run:** Execute the target code under a restrictive baseline policy (e.g. `Policy.PURE_COMPUTE_UNSAFE`).

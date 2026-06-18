@@ -36,6 +36,14 @@ ContainedExecutors.installInternal(processWide, vararg policies)
     │  - updates thread-local or process-wide tracking state
 ```
 
+### 1a. Architecture: Decoupled Transaction & Feature Detection
+
+The enforcement engine follows a strict **Dependency Inversion** pattern to ensure testability and version-resiliency:
+
+*   **TransactionManager:** The FFM `Arena` lifecycle and `NativeTransaction` boundaries are decoupled from `LinuxNative`. This allows `mazewall` to be tested using a `MockNativeEngine` without requiring a real Linux kernel, and enables future optimizations like thread-local arena pooling.
+*   **KernelFeatureMatrix:** Instead of static version checks, `mazewall` uses a cached, probe-based `KernelFeatureMatrix` (via `Platform.featureMatrix`). This matrix detects capabilities like Seccomp TSYNC, Landlock ABI versions, and USER_NOTIF support at initialization, allowing the engine to fail-closed or safely degrade based on `FallbackBehavior`.
+*   **SyscallInspectionPipeline:** Argument-inspection generation (for `mmap`, `clone`, etc.) is implemented as a pipeline (`SyscallInspectionPipeline`). This enforces the **Open/Closed Principle**, allowing new inspections (e.g., for `openat2`) to be added without modifying the core `BpfFilter` compiler.
+
 ---
 
 ## 2. Why a Linear BPF Scan (Not a BST)
@@ -244,24 +252,14 @@ executor wrapping or the profiler) without wasting filter slots.
 
 ### How deduplication works
 
-`ContainedExecutors` maintains:
-
-| State                                  | Type                           | Purpose                                            |
-|----------------------------------------|--------------------------------|----------------------------------------------------|
-| `THREAD_SYSCALL_ACTIONS`               | `ThreadLocal<Map<Syscall, SeccompAction>>` | Syscall actions already enforced on this OS thread |
-| `PROCESS_SYSCALL_ACTIONS`              | `ConcurrentHashMap<Syscall, SeccompAction>` | Syscall actions enforced process-wide via TSYNC    |
-| `FILTER_DEPTH`                         | `ThreadLocal<Int>`             | Count of thread-local filter installations         |
-| `PROCESS_FILTER_DEPTH`                 | `AtomicInteger`                | Count of process-wide filter installations         |
-| `THREAD_ALLOWS_MMAP_EXEC`              | `ThreadLocal<Boolean>`         | Whether mmap PROT_EXEC inspection is still pending |
-| `PROCESS_ALLOWS_MMAP_EXEC`             | `AtomicBoolean`                | Same, process-wide                                 |
-| *(identical pattern for clone, prctl)* |                                |                                                    |
+`ContainedExecutors` maintains an immutable **`ContainerState`** data class, updated atomically via `ThreadStateRegistry` (ThreadLocal) and `ProcessStateRegistry` (AtomicReference). This ensures a consistent view of the sandbox state across concurrent installations.
 
 Before installing, `installInternal` computes:
-- `newBlocks = policy.syscallActions - (THREAD_SYSCALL_ACTIONS merged with PROCESS_SYSCALL_ACTIONS)` based on action priority.
-- `needsMmapProtection`, `needsCloneProtection`, `needsPrctlProtection` → argument-inspection gates
+- `newBlocks`: Syscalls in the new policy that map to a *higher priority (more restrictive) action* than the currently installed action.
+- `needsMmapProtection`, `needsCloneProtection`, `needsPrctlProtection`: Gates for argument-inspection blocks.
 
-If `newBlocks` is empty, no new default action priority escalation is required, and no gates need updating, **no filter is installed** — the
-depth counter is preserved.
+**Optimization (Optimized Stacking):** Seccomp BPF filters are additive. If a previous filter already restricts `mmap(PROT_EXEC)`, non-thread `clone`, or unsafe `prctl` calls, `FilterInstallationPlanner` skips compiling duplicate argument-inspection blocks for these syscalls in the new stacked filter, preserving kernel instruction memory and the 32-filter depth budget.
+
 
 ### The `synchronized(processLock)` requirement
 

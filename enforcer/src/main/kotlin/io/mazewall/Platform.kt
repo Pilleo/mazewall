@@ -8,6 +8,11 @@ import java.util.logging.Logger
 
 /**
  * Platform checks and fallback configuration.
+ *
+ * ARCHITECTURAL INVARIANT: Kernel capability detection is handled via a cached,
+ * probe-based [KernelFeatureMatrix]. This ensures that `mazewall` remains resilient
+ * to kernel version drift (e.g., Landlock ABI additions) by dynamically querying
+ * capabilities at initialization rather than relying on static OS version strings.
  */
 public object Platform {
     private val logger = Logger.getLogger(Platform::class.java.name)

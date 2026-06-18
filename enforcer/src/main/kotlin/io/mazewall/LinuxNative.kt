@@ -26,8 +26,10 @@ import java.lang.invoke.MethodHandles
 /**
  * Entry point for all native Linux interactions.
  *
- * This object manages the active [NativeEngine] and provides a capability-based
- * API for sensitive operations via [withTransaction].
+ * ARCHITECTURAL INVARIANT: The FFM Transaction lifecycle (Arena management) is
+ * decoupled from the native engine via an internal TransactionManager. This separation
+ * ensures that [LinuxNative] remains mockable and that memory allocation strategies
+ * can be swapped (e.g., for arena pooling) without modifying call dispatch logic.
  */
 @Suppress("TooManyFunctions")
 public object LinuxNative : NativeEngine {

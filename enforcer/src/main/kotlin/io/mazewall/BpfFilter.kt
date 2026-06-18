@@ -13,6 +13,11 @@ import java.util.logging.Logger
 /**
  * Builds seccomp-bpf programs using a robust strictly-forward linear scan approach.
  * This avoids all jump offset overflow and backward-jump issues.
+ *
+ * ARCHITECTURAL INVARIANT: System call argument inspections are handled via a
+ * [io.mazewall.seccomp.SyscallInspectionPipeline]. This enforces the Open/Closed Principle,
+ * allowing new inspections (e.g., for `openat2`) to be added to the BPF build loop
+ * without modifying the core [BpfFilter] logic.
  */
 object BpfFilter {
     private val logger = Logger.getLogger(BpfFilter::class.java.name)

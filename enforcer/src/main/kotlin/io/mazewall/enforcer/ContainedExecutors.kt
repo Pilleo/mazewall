@@ -18,6 +18,11 @@ import java.util.logging.Logger
 
 /**
  * Public API for wrapping an existing [java.util.concurrent.ExecutorService] to enforce seccomp containment.
+ *
+ * ARCHITECTURAL INVARIANT: Container state is maintained via immutable [ContainerState] objects,
+ * which are updated atomically via [ThreadStateRegistry] and [ProcessStateRegistry]. This ensures
+ * that the library has a consistent and race-free view of the active sandbox configuration
+ * during concurrent or nested filter installations.
  */
 object ContainedExecutors {
     private val logger = Logger.getLogger(ContainedExecutors::class.java.name)

@@ -9,6 +9,12 @@ import java.util.logging.Logger
 
 /**
  * Internal helper for planning and verifying seccomp filter installations.
+ *
+ * ARCHITECTURAL INVARIANT: Seccomp BPF filters are additive and intersective.
+ * To preserve kernel instruction memory and the 32-filter depth budget, this planner
+ * implements Optimized Stacking. It skips compiling duplicate argument-inspection
+ * blocks (for mmap, clone, prctl) if those protections are already enforced in
+ * the current thread or process state.
  */
 internal object FilterInstallationPlanner {
     private val logger = Logger.getLogger(FilterInstallationPlanner::class.java.name)
