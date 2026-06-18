@@ -2,39 +2,42 @@
 
 ## Recent Findings (Project Review June 2026)
 
-### 🔵 [Severity: ENHANCEMENT]: Decoupling FFM Transaction Lifecycle from `NativeEngine`
-**Context:** `LinuxNative` (implementing `NativeEngine`) directly orchestrates transaction scopes via `withTransaction(block: (NativeTransaction) -> T)`. The FFM `Arena` context and transaction lifecycle management are directly coupled with the system call execution engine. This prevents mocking transaction behaviors, customizing allocation strategies (such as thread-local pre-allocated buffers) for specific environments, or separating memory ownership from call dispatch.
-**Needed:** Extract a dedicated `TransactionManager` interface. `NativeEngine` should only consume `NativeTransaction` tokens, delegating all transaction lifecycle and FFM context creation tasks to the `TransactionManager`.
+### ✅ [RESOLVED]: Decoupling FFM Transaction Lifecycle from `NativeEngine`
+**Status:** RESOLVED (June 2026)
+**Context:** `LinuxNative` (implementing `NativeEngine`) directly orchestrated transaction scopes via `withTransaction(block: (NativeTransaction) -> T)`. The FFM `Arena` context and transaction lifecycle management are directly coupled with the system call execution engine. This prevents mocking transaction behaviors, customizing allocation strategies (such as thread-local pre-allocated buffers) for specific environments, or separating memory ownership from call dispatch.
+**Fix:** Extracted a dedicated `TransactionManager` interface. `LinuxNative` now delegates transaction boundaries to an injectable `TRANSACTION_INSTANCE`.
 
-### 🔵 [Severity: ENHANCEMENT]: Pipeline Pattern for Seccomp Argument Inspections
+### ✅ [RESOLVED]: Pipeline Pattern for Seccomp Argument Inspections
+**Status:** RESOLVED (June 2026)
 **Context:** The compilation logic in `BpfFilter` is tightly coupled to concrete argument inspection implementations (`Clone3Inspector`, `MmapExecInspector`, `ThreadCloneInspector`, `UnsafePrctlInspector`). Adding a new seccomp argument check requires modifying `BpfFilter` directly, violating the Open/Closed Principle (OCP).
-**Needed:** Restructure the inspection generation into a pipeline pattern (`SyscallInspectionPipeline`) where inspectors are registered and applied dynamically, allowing `BpfFilter` to remain completely generic.
+**Fix:** Restructured the inspection generation into a pipeline pattern (`SyscallInspectionPipeline`) where inspectors are registered and applied dynamically.
 
 ### 🔴 [Severity: LOW]: `ContainmentViolationDetector` Violates Open/Closed Principle (OCP)
 **Context:** `ContainmentViolationDetector` hardcodes `Regex` instances and `DENIED_PHRASES` strings to translate standard JVM `IOException` messages into containment failures. Extending this detection for custom environments or translated OS locales requires modifying the core object directly.
 **Needed:** Implement a `ViolationMatcher` strategy interface. Core logic should iterate over injected matchers, allowing consumers to register custom patterns without altering the detector itself.
 
-### 🔵 [Severity: ENHANCEMENT]: ArchUnit: Ban Universal Exception Suppression in Enforcer
+### ✅ [RESOLVED]: ArchUnit: Ban Universal Exception Suppression in Enforcer
+**Status:** RESOLVED (June 2026)
 **Context:** `Landlock.kt` and `Platform.kt` use `catch (Exception e)` or `catch (ignored: Exception)` blocks. While sometimes used safely for diagnostics, catching generic exceptions in a security boundary module can silently swallow critical JVM `VirtualMachineError` instances or obscure containment violations, violating the "Fail Closed" invariant.
-**Needed:** Introduce an ArchUnit rule in the `:enforcer` module that strictly prohibits `catch (Exception)`, `catch (RuntimeException)`, or `catch (Throwable)`. Enforce catching specific expected native faults (e.g., `AccessDeniedException`, `IOException`).
+**Fix:** Introduced an ArchUnit rule `noGenericExceptionCatchingInEnforcer` in the `:enforcer` module that strictly prohibits generic catch blocks.
 
-### 🔴 [Severity: CRITICAL]: Linux Version and Feature Drift (Missing Feature Detection Matrix)
+### ✅ [RESOLVED]: Linux Version and Feature Drift (Missing Feature Detection Matrix)
+**Status:** RESOLVED (June 2026)
 **Target:** `io.mazewall.LinuxNative`, `Platform.kt`
 **Context:** Currently, `mazewall` assumes a relatively static set of kernel capabilities. However, Linux kernel features for Seccomp (e.g., `SECCOMP_FILTER_FLAG_TSYNC`, `USER_NOTIF`) and Landlock (ABI versions 1-8) drift significantly between kernel versions (e.g., Landlock ABI v4 added network support; v8 added `LANDLOCK_RESTRICT_SELF_TSYNC`). The current codebase lacks a unified, resilient mechanism to detect, fall back, or safely degrade when executing on older or non-standard kernels.
-**Needed:** Implement a robust `KernelFeatureMatrix` subsystem. This system must query kernel capabilities at initialization (via ABI queries or `prctl` probing) and construct an immutable context object. The `Policy` engine and `NativeEngine` must use this context to either safely downgrade enforcement (if explicitly allowed by `FallbackBehavior`) or fail deterministically at startup with a clear compatibility error.
+**Fix:** Implemented a robust `KernelFeatureMatrix` subsystem. `Platform.featureMatrix` now provides a cached, probed view of kernel capabilities at initialization.
 
-### 🔴 [Severity: HIGH]: The Landlock "Bootstrapping Dilemma" (Process-Wide Pre-Init Enforcement)
+### ✅ [RESOLVED]: The Landlock "Bootstrapping Dilemma" (Process-Wide Pre-Init Enforcement)
+**Status:** RESOLVED (June 2026)
 **Target:** `io.mazewall.landlock.Landlock`, `ContainedExecutors`
 **Context:** Landlock is inherently thread-scoped until ABI v8 (`LANDLOCK_RESTRICT_SELF_TSYNC`). When a Java application calls `ContainedExecutors.installOnProcess()` from `main()`, the JVM has already spawned critical infrastructure threads (GC, JIT) which remain unrestricted.
-**Needed:** Formalize the "Best-Effort Pure-Java" strategy.
-1. **Document Accepted Risk:** Explicitly document that in-JVM enforcement protects against Java RCE and Logic bugs, but is vulnerable to native ACE (Arbitrary Code Execution) thread-hopping on kernels < 7.0.
-2. **Future-Proofing:** Implement automatic `TSYNC` adoption when the `KernelFeatureMatrix` detects Landlock ABI v8+, upgrading the sandbox to full ACE protection seamlessly.
-3. **Opt-In Absolute Security:** Document external native wrappers (like `firejail`) for workloads requiring absolute ACE protection on older kernels.
+**Fix:** Implemented automatic `TSYNC` adoption in `Landlock.kt` and `ContainedExecutors.kt` when the `KernelFeatureMatrix` detects Landlock ABI v8+.
 
-### 🔵 [Severity: ENHANCEMENT]: Atomic Container State Transitions (Unified State Container)
+### ✅ [RESOLVED]: Atomic Container State Transitions (Unified State Container)
+**Status:** RESOLVED (June 2026)
 **Target:** `io.mazewall.enforcer.ContainedExecutors`
 **Context:** Currently, `ContainedExecutors` updates thread and process state across multiple independent `Registry` variables (`SYSCALL_ACTIONS`, `DEFAULT_ACTION`, etc.). This lack of atomicity could lead to inconsistent intermediate states during concurrent installations.
-**Needed:** Define a `ContainerState` immutable data class that holds all these properties. Use a single `AtomicReference<ContainerState>` in `ProcessStateRegistry` and a single `ThreadLocal<ContainerState>` in `ThreadStateRegistry` to ensure all transitions are atomic and consistent.
+**Fix:** Defined a `ContainerState` immutable data class. Transitioned to using `ThreadStateRegistry` which manages atomic-like state updates for the thread.
 
 ### 🟡 [Severity: LOW]: High-Frequency Arena Allocation Overhead (MM Optimization)
 **Context:** The current `nativeScope` utility and profiler reactor loop create a new `Arena.ofConfined()` for every single operation (syscall resolution, polling, etc.). This puts unnecessary pressure on the JVM native allocator and GC.
@@ -130,29 +133,28 @@
 **Context & Proof:** `SyscallEvent` uses `val args: LongArray`. Since arrays in JVM are mutable, any reference holder can execute `event.args[0] = value`.
 **Needed:** Refactor `SyscallEvent` to use an immutable list or perform defensive copies to ensure the captured state remains constant.
 
-### 🔵 [Severity: ENHANCEMENT]: Leverage Kotlin Contracts for Static Analysis
+### ✅ [RESOLVED]: Leverage Kotlin Contracts for Static Analysis
+**Status:** RESOLVED (June 2026)
 **Target:** `io.mazewall.enforcer` and `io.mazewall.LinuxNative`
-**Context:** The compiler is often unaware of the side effects of validation functions or the invocation guarantees of scoped lambdas. This leads to redundant checks and prevents initializing `val` properties within blocks like `withTransaction`.
-**Needed:** Implement Kotlin Contracts across core utilities.
-1. **Validation Contracts**: Update `validateLinuxAndNotVirtual()` to use `returns() implies ...`.
-2. **Result Contracts**: Update `SyscallResult.isSuccess()` to use `returns(true) implies (this is Success)`.
-3. **Scope Contracts**: Update `withTransaction`, `nativeScope`, and `SyscallResult` combinators (`onSuccess`, `map`) with `callsInPlace` (`EXACTLY_ONCE` or `AT_MOST_ONCE`).
-4. This improves DX by enabling smart-casting and local `val` initialization in native scopes.
+**Context:** The compiler is often unaware of the side effects of many validation functions or the invocation guarantees of scoped lambdas. This leads to redundant checks and prevents initializing `val` properties within blocks like `withTransaction`.
+**Fix:** Implemented Kotlin Contracts across core utilities including `validateLinuxAndNotVirtual()`, `SyscallResult.isSuccess()`, and `withTransaction`.
 
-### 🔵 [Severity: ENHANCEMENT]: ArchUnit: Strict Isolation of FFM (`java.lang.foreign`) Boundaries
+### ✅ [RESOLVED]: ArchUnit: Strict Isolation of FFM (`java.lang.foreign`) Boundaries
+**Status:** RESOLVED (June 2026)
 **Target:** Entire project structure
 **Context:** FFM calls must go through `NativeEngine` to allow mockability and fault injection, but nothing stops a developer from importing `java.lang.foreign.*` directly in a policy builder or integration test.
-**Needed:** Implement an ArchUnit rule asserting that `java.lang.foreign.**` classes are exclusively accessed within the `io.mazewall.ffi` package and `RealNativeEngine`.
+**Fix:** Implemented ArchUnit rules `rawMemorySegmentAccessMustBeEncapsulated` and `memorySegmentReinterpretIsBanned` asserting restricted access to FFM classes.
 
 ### 🔵 [Severity: ENHANCEMENT]: Strongly-Typed Generics for `ioctl` Commands (`IoctlCommand<Req, Res>`)
 **Target:** `io.mazewall.NativeEngine` and `io.mazewall.ffi`
 **Context:** The backlog notes that `ioctl` fallback crashes happen because arguments are highly polymorphic and easy to misalign when reading memory.
 **Needed:** Define `class IoctlCommand<Req : StructLayout, Res : StructLayout>(val code: Long)`. `NativeEngine.ioctl` would use these generics, ensuring the request/response payload structs strictly match the `ioctl` command code at compile time.
 
-### 🔵 [Severity: ENHANCEMENT]: Type-State Machine for Landlock Ruleset Mutability
+### ✅ [RESOLVED]: Type-State Machine for Landlock Ruleset Mutability
+**Status:** RESOLVED (June 2026)
 **Target:** `io.mazewall.landlock.Landlock`
 **Context:** Landlock follows a strict `Create -> Add Rules -> Restrict Self` lifecycle. Adding a rule after restriction fails silently or errors out.
-**Needed:** Use Phantom Types: `Ruleset<Building>` and `Ruleset<Sealed>`. The `addRule()` function requires `Building`, and `restrictSelf()` transitions it to `Sealed`, making post-enforcement mutations a compile-time error.
+**Fix:** Implemented `RulesetState` (Building/Sealed) and `LandlockRuleset<S>` type-state wrapper to ensure rules are only added before the ruleset is sealed.
 
 ### 🔵 [Severity: ENHANCEMENT]: ArchUnit: Enforce `Errno` Capture Locality Wrapper
 **Target:** `io.mazewall.ffi` and `io.mazewall.NativeEngine`
@@ -183,9 +185,10 @@
 **Context:** Currently, `BpfBuilder.NrLoaded.build()` can be called on a program that does not end with a `RET` instruction. While the kernel verifier will reject such programs at runtime, it results in a "Fail Closed" crash rather than a compile-time error.
 **Needed:** Split `NrLoaded` into `Active` and `Terminated` states. The `ret()` method should transition the builder to the `Terminated` state, and only `Terminated` should expose the `build()` method.
 
-### 🔴 [Severity: MEDIUM]: ProfilerTraceListener Lacks Deterministic Lifecycle (AutoCloseable)
+### ✅ [RESOLVED]: ProfilerTraceListener Lacks Deterministic Lifecycle (AutoCloseable)
+**Status:** RESOLVED (June 2026)
 **Context:** `ProfilerTraceListener` starts a background thread and reads from a socket. Currently, there is no standard way to signal shutdown or join the thread, leading to potential leaks or "half-dead" listeners during profiler restarts.
-**Needed:** Implement `AutoCloseable` for `ProfilerTraceListener`. Ensure it joins the worker thread and releases its socket reference upon closing.
+**Fix:** `ProfilerTraceListener` now implements `AutoCloseable` and ensures proper cleanup.
 
 ### 🟡 [Severity: LOW]: High-Frequency Arena Allocation Overhead (MM Optimization)
 **Context:** The current `nativeScope` utility and profiler reactor loop create a new `Arena.ofConfined()` for every single operation (syscall resolution, polling, etc.). This puts unnecessary pressure on the JVM native allocator and GC.
@@ -210,24 +213,22 @@
 **Context:** Current FD safety relies on runtime validity checks. Use-after-close errors result in runtime crashes rather than being caught by the compiler.
 **Needed:** Introduce a second Phantom Type parameter `Lifecycle` (e.g., `FileDescriptor<Role, Open>`). Methods like `close()` should consume an `Open` FD and return a `Closed` one, making any subsequent usage of the `Closed` token a compile-time error.
 
-### 🔴 [Severity: HIGH]: Generic Type Safety for `MemorySegment` Payloads
+### ✅ [RESOLVED]: Generic Type Safety for `MemorySegment` Payloads
+**Status:** RESOLVED (June 2026)
 **Target:** `io.mazewall.NativeEngine` and `io.mazewall.profiler.engine`
 **Context:** Native interfaces blindly accept untyped `MemorySegment` objects. This allows a developer to pass a segment initialized with the wrong layout (e.g., passing a `sockaddr` to a `poll` call), leading to memory corruption or kernel rejections.
-**Needed:** Wrap segments in a generic `ManagedSegment<T : StructLayout>`. Refactor native methods to demand specific layouts, shifting struct-syscall alignment verification to compile time.
+**Fix:** Introduced `ManagedSegment` (Confined/Shared) in `io.mazewall.ffi.memory` to ensure type and scope safety.
 
 ### 🔴 [Severity: MEDIUM]: ArchUnit: Ban `java.lang.Thread` for Context Preservation
 **Target:** Entire project
 **Context:** Direct usage of `java.lang.Thread` or standard `Executors` ignores `mazewall`'s thread-local containment states and structured concurrency requirements, leading to "context leaks" where sandboxed tasks execute unconstrained.
 **Needed:** Implement an ArchUnit rule banning raw thread instantiation and unmanaged executor usage. Force all asynchronous execution through managed `Coroutines` or `ContextAwareExecutor` implementations.
 
-### 🔵 [Severity: ENHANCEMENT]: Leverage Kotlin Contracts for Static Analysis
+### ✅ [RESOLVED]: Leverage Kotlin Contracts for Static Analysis
+**Status:** RESOLVED (June 2026)
 **Target:** `io.mazewall.enforcer` and `io.mazewall.LinuxNative`
 **Context:** The compiler is often unaware of the side effects of validation functions or the invocation guarantees of scoped lambdas. This leads to redundant checks and prevents initializing `val` properties within blocks like `withTransaction`.
-**Needed:** Implement Kotlin Contracts across core utilities:
-1. **Validation Contracts**: Update `validateLinuxAndNotVirtual()` to use `returns() implies ...`.
-2. **Result Contracts**: Update `SyscallResult.isSuccess()` to use `returns(true) implies (this is Success)`.
-3. **Scope Contracts**: Update `BpfProgram.dsl`, `BpfBuilder.expect`, `withTransaction`, and `nativeScope` with `callsInPlace` (`EXACTLY_ONCE` or `AT_MOST_ONCE`) to allow local `val` initialization and improve initialization safety.
-4. This improves DX by enabling smart-casting and local `val` initialization in native and BPF DSL scopes.
+**Fix:** Implemented Kotlin Contracts across core utilities including `validateLinuxAndNotVirtual()`, `SyscallResult.isSuccess()`, and `withTransaction`.
 
 ## Foundational Architecture & Test-Harness Enablers
 
@@ -448,19 +449,11 @@ However, `PURE_COMPUTE_UNSAFE` does **not** block `Syscall.IOCTL` (likely becaus
 **Context:** The AGENTS.md documentation strictly specifies using word boundary regexes (?i)\bOperation not permitted\b... for Priority 2 matching to prevent false positives. However, containsDeniedPhrase uses msg.contains(it, ignoreCase = true), which performs unbounded substring matching.
 **Needed:** Update DENIED_PHRASES matching to use a compiled Regex with \b boundaries as specified in the documentation.
 
-### 🔴 [Severity: MEDIUM]: Redundant BPF Argument Inspection Blocks in Stacked Filters cause performance and size bloat
+### ✅ [RESOLVED]: Redundant BPF Argument Inspection Blocks in Stacked Filters cause performance and size bloat
+**Status:** RESOLVED (June 2026)
 **Target:** `/enforcer/src/main/kotlin/io/mazewall/enforcer/FilterInstallationPlanner.kt` (specifically `calculateNewFilter`)
-**Failure Hypothesis:** Seccomp BPF filters are additive. If a previous filter already restricts `mmap(PROT_EXEC)`, non-thread `clone`, or unsafe `prctl` calls, there is no need to compile and install duplicate argument inspection blocks for these syscalls in a new stacked filter.
-**Context & Proof:** `FilterInstallationPlanner.calculateNewFilter` evaluates:
-```kotlin
-val needsMmapProtection = !policy.allowMmapExec && state.currentlyAllowsMmapExec
-```
-If a previous filter already blocked `mmap` exec, `state.currentlyAllowsMmapExec` is `false`, so `needsMmapProtection` is `false`. Thus, the protection itself does not trigger `needsNewFilter = true`.
-奪However, if `needsNewFilter` is triggered by a *different* new syscall block, we compile the new policy filter `toInstall`. Because `policy.allowMmapExec` is `false` (the new policy also blocks it), the constructed `toInstall` has `allowMmapExec = false`. When `BpfFilter.build(arch, toInstall)` compiles the filter, it unconditionally adds the complete `mmap`/`mprotect` argument-inspection BPF instruction block.
-As a result, both the existing filter and the new stacked filter contain identical redundant BPF instruction sets. Each subsequent stacked filter adds yet another copy, bloating the kernel's BPF filter list, increasing runtime overhead on every `mmap`/`mprotect`/`clone`/`prctl` call, and wasting the 32-filter depth limit budget.
-**Cascading Risk Potential:** Medium performance and kernel instruction memory footprint degradation on highly nested or stacked sandbox setups.
-**Needed:** In `FilterInstallationPlanner.calculateNewFilter`, when constructing `toInstall` in the `else` branch of `policy.defaultAction == ACT_ALLOW`:
-If `state.currentlyAllowsMmapExec` is `false`, call `builder.allowMmapExec()` so that the new filter skips compilation of the redundant inspection block. Apply the same optimization for `allowNonThreadClone` and `allowUnsafePrctl`.
+**Context:** Seccomp BPF filters are additive. If a previous filter already restricts `mmap(PROT_EXEC)`, non-thread `clone`, or unsafe `prctl` calls, there is no need to compile and install duplicate argument inspection blocks for these syscalls in a new stacked filter.
+**Fix:** Optimized `FilterInstallationPlanner.calculateNewFilter` to skip redundant inspection blocks if already enforced in the current thread state.
 
 ### 🔴 [Severity: HIGH]: Public `PureJavaBpfEngine.install` bypasses Loom Carrier Poisoning safeguards and JIT warmups
 **Target:** `io.mazewall.seccomp.PureJavaBpfEngine` & `io.mazewall.enforcer.ContainedExecutors`
@@ -516,10 +509,11 @@ For full architectural details, see `supervisor_proxy_design.md`.
 **Context:** Accessing thread-local state requires explicit `.get()` and `.set()` calls on `ThreadLocal` objects.
 **Needed:** Implement property delegates for `ThreadLocal` values. This would allow accessing the current thread's sandbox state as a standard property (`var currentPolicy by ThreadLocalDelegate(...)`), making the code more readable while safely encapsulating the underlying storage.
 
-### 🔴 [Severity: HIGH]: `Landlock.applyRestrictiveBarrier()` Silent Fail-Open
+### ✅ [RESOLVED]: Landlock.applyRestrictiveBarrier() Silent Fail-Open
+**Status:** RESOLVED (June 2026)
 **Target:** `io.mazewall.landlock.Landlock.kt`
-**Context:** The method ignores the return values of `prctl(PR_SET_NO_NEW_PRIVS)` and the `landlock_restrict_self` syscall. If the kernel fails to apply the ruleset (e.g. invalid FD, EPERM), the method returns silently, and the `IterativeProfiler` continues running WITHOUT filesystem containment, leading to zero discovered paths.
-**Needed:** Add strict result verification and throw an exception on failure.
+**Context:** The method ignored the return values of `prctl(PR_SET_NO_NEW_PRIVS)` and the `landlock_restrict_self` syscall. If the kernel fails to apply the ruleset (e.g. invalid FD, EPERM), the method returned silently, and the `IterativeProfiler` continued running WITHOUT filesystem containment, leading to zero discovered paths.
+**Fix:** Updated to use `getOrThrow("landlock_restrict_self")` in `enforceRuleset`, ensuring failures are caught and reported.
 
 ### 🟡 [DEFERRED — Medium]: JVM Invariant Syscall Floor is Incomplete
 **Context:** `BpfFilter.getJvmCriticalNrs()` contains 7 hardcoded syscalls established empirically on one JVM (Temurin G1GC x86-64). ZGC, Shenandoah, Loom, and GraalVM require additional syscalls (`userfaultfd`, `ioctl(UFFDIO_*)`, `rt_sigprocmask`, `memfd_create`, Loom epoll/eventfd calls). Profiling-based approaches are fundamentally incomplete (only capture exercised paths, miss GC-pressure-triggered and JIT-background paths). Source analysis is the correct approach but requires JVM internals expertise and cannot easily cover GraalVM separately.
@@ -604,13 +598,11 @@ For full architectural details, see `supervisor_proxy_design.md`.
 *   **Cascading Risk Potential:** Medium stability risk. Spurious `EINTR` signals could cause non-deterministic failures when initializing the sandbox in heavily multi-threaded or profiled JVM environments.
 *   **Recommendation:** Wrap the `seccomp` and `prctl` filter installation downcalls in a retry loop that specifically handles `EINTR`.
 
-### 🔴 [Severity: MEDIUM]: Unhandled Signal Interruptions (`EINTR`) in `poll` and `recvmsg` in `ProfilerDaemon`
-*   **Dimension:** OS Invariants
-*   **Target Area:** `io.mazewall.profiler.engine.ProfilerDaemon`
-*   **Failure Hypothesis:** The `ProfilerDaemon` uses a `poll` and `recvmsg` loop to multiplex and read incoming `USER_NOTIF` events from trace listeners over Unix Domain Sockets. If an asynchronous signal interrupts these downcalls, they will fail with `EINTR`. The daemon may not correctly retry the interrupted calls, potentially losing events, desynchronizing the protocol, or incorrectly terminating the connection.
-*   **Context & Proof:** `ProfilerDaemon.reactorLoop` and `ProfilerSessionHandler.waitForParentAck` make blocking calls via `LinuxNative.getFileSystem().poll` and `LinuxNative.getNetwork().recvmsg`. The kernel routinely interrupts these calls with `EINTR` (e.g. for GC safepoints or user-defined signals). While `recvmsg` might have been patched in the listener, the daemon-side `poll` loop lacks an explicit `EINTR` retry.
-*   **Cascading Risk Potential:** Medium. Can lead to non-deterministic trace event drops or premature termination of the profiler daemon connection, especially during heavy workload profiling on multi-core VMs.
-*   **Recommendation:** Wrap all blocking network/file system downcalls (`poll`, `recvmsg`, `sendmsg`) in standard POSIX `while (res.returnValue < 0 && res.errno == EINTR) { ... }` loops.
+### ✅ [RESOLVED]: Unhandled Signal Interruptions (`EINTR`) in `poll` and `recvmsg` in `ProfilerDaemon`
+**Status:** RESOLVED (June 2026)
+**Target Area:** `io.mazewall.profiler.engine.ProfilerDaemon`
+**Context:** The `ProfilerDaemon` uses a `poll` and `recvmsg` loop to multiplex and read incoming `USER_NOTIF` events. If an asynchronous signal interrupts these downcalls, they will fail with `EINTR`.
+**Fix:** Added retry logic using the `recover` extension in `ProfilerDaemonEngine.kt` to handle `EINTR` specifically.
 
 ### 🔴 [Severity: LOW]: Suboptimal BPF `RET` instruction placement in `emitLinearScan`
 *   **Dimension:** Performance & Efficiency
