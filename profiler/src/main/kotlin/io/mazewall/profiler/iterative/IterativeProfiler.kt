@@ -104,10 +104,11 @@ object IterativeProfiler {
     }
 
     private fun extractViolationPath(t: Throwable): String? {
+        val violation = io.mazewall.enforcer.ContainmentViolationDetector.findViolationCause(t) ?: return null
         val path = when {
-            t is AccessDeniedException -> t.file
+            violation is AccessDeniedException -> violation.file
             else -> {
-                val msg = t.message
+                val msg = violation.message
                 if (msg == null) {
                     null
                 } else {

@@ -2,8 +2,18 @@ package io.mazewall.enforcer
 
 import java.io.IOException
 import java.nio.file.AccessDeniedException
+import java.util.concurrent.CopyOnWriteArrayList
+
+/**
+ * Strategy interface for identifying containment violations from exceptions.
+ */
+fun interface ViolationMatcher {
+    fun matches(t: Throwable): Boolean
+}
 
 object ContainmentViolationDetector {
+    private val MATCHERS = CopyOnWriteArrayList<ViolationMatcher>()
+
     private val ERRNO_VIOLATION_REGEX = Regex("""\b(error|errno)[=:]\s*(1|13)\b""")
 
     val DENIED_PHRASES = arrayOf(
@@ -13,6 +23,49 @@ object ContainmentViolationDetector {
         "verweigert",
         "negado",
     )
+
+    // Using \b word boundaries as per security requirements to avoid false positives on substrings
+    private val DENIED_PHRASES_REGEX = Regex(
+        """\b(${DENIED_PHRASES.joinToString("|")})\b""",
+        RegexOption.IGNORE_CASE
+    )
+
+    init {
+        // Register default matchers
+        registerMatcher { t -> t is AccessDeniedException }
+        registerMatcher { t ->
+            val msg = t.message ?: return@registerMatcher false
+            ERRNO_VIOLATION_REGEX.containsMatchIn(msg)
+        }
+        registerMatcher { t ->
+            val msg = t.message ?: return@registerMatcher false
+            t is IOException && (DENIED_PHRASES_REGEX.containsMatchIn(msg) || msg.contains("Cannot run"))
+        }
+    }
+
+    /**
+     * Registers a custom violation matcher.
+     */
+    fun registerMatcher(matcher: ViolationMatcher) {
+        MATCHERS.add(matcher)
+    }
+
+    /**
+     * Resets matchers to default ones. Useful for testing.
+     */
+    fun resetToDefaults() {
+        MATCHERS.clear()
+        // Re-add defaults
+        registerMatcher { t -> t is AccessDeniedException }
+        registerMatcher { t ->
+            val msg = t.message ?: return@registerMatcher false
+            ERRNO_VIOLATION_REGEX.containsMatchIn(msg)
+        }
+        registerMatcher { t ->
+            val msg = t.message ?: return@registerMatcher false
+            t is IOException && (DENIED_PHRASES_REGEX.containsMatchIn(msg) || msg.contains("Cannot run"))
+        }
+    }
 
     fun isContainmentViolation(t: Throwable): Boolean {
         val visited = java.util.Collections.newSetFromMap(java.util.IdentityHashMap<Throwable, Boolean>())
@@ -47,15 +100,6 @@ object ContainmentViolationDetector {
     }
 
     private fun isDirectContainmentViolation(t: Throwable): Boolean {
-        val msg = t.message ?: return false
-        val isViolation = when {
-            t is AccessDeniedException -> true
-            ERRNO_VIOLATION_REGEX.containsMatchIn(msg) -> true
-            t is IOException && (containsDeniedPhrase(msg) || msg.contains("Cannot run")) -> true
-            else -> false
-        }
-        return isViolation
+        return MATCHERS.any { it.matches(t) }
     }
-
-    private fun containsDeniedPhrase(msg: String): Boolean = DENIED_PHRASES.any { msg.contains(it, ignoreCase = true) }
 }
