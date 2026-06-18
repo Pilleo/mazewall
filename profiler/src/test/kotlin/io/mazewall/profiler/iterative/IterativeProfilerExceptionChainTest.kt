@@ -9,6 +9,7 @@ class IterativeProfilerExceptionChainTest {
 
     @Test
     fun `test iterative profiling handles wrapped exception chains`() {
+        org.junit.jupiter.api.Assumptions.assumeTrue(io.mazewall.Platform.isSupported())
         val basePolicy = Policy.PURE_COMPUTE_UNSAFE
         val targetPath = "/etc/wrapped_denied_path"
 

@@ -796,3 +796,178 @@ For full architectural details, see `supervisor_proxy_design.md`.
 *   **Context & Proof:** `PureJavaBpfEngine.installInternal` uses `nativeScope { val built = locked.buildFilter(this, policy); built.applyFilter(arch, useTsync) }`. The `nativeScope` (typically `Arena.ofConfined()`) guarantees memory is freed when the block exits. If `seccomp` is called, the kernel copies the BPF instructions into kernel space. However, if `ContainedExecutors.wrap` submits thousands of tasks concurrently, and each task triggers a nested compilation/installation that throws an exception inside the `nativeScope`, the JVM might struggle to clean up the confined arenas promptly if the exceptions are caught and swallowed by the executor.
 *   **Cascading Risk Potential:** Medium. In a highly dynamic environment, this could lead to native memory exhaustion.
 *   **Recommendation:** Verify the `nativeScope` implementation correctly bounds the arena lifetime even when exceptions are thrown (e.g., ensure it uses `try-finally` internally), and consider caching the compiled `MemorySegment` for identical policies.
+
+### 🔴 [Severity: MEDIUM]: Missing Thread-Safety in `ProcessStateRegistry` Updates
+*   **Dimension:** Cascading Failure Analysis (The Systems View)
+*   **Target Area:** `enforcer/src/main/kotlin/io/mazewall/enforcer/ProcessStateRegistry.kt` and `ContainedExecutors.kt`
+*   **Failure Hypothesis:** Concurrent calls to `ContainedExecutors.installOnProcess` or `updateProcessState` might lead to lost updates or race conditions when merging policies if `ProcessStateRegistry.update` is not atomic.
+*   **Context & Proof:** In `ContainedExecutors.kt`, `updateProcessState` calls `ProcessStateRegistry.update { current -> current.withNewSeccompPolicy(...) }`. If `ProcessStateRegistry` uses a simple volatile variable without compare-and-swap (CAS) or synchronization, concurrent process-wide installations could overwrite each other's state, leading to an inconsistent view of the global containment policy.
+*   **Cascading Risk Potential:** Medium. In a multithreaded environment, simultaneous installations could result in a policy state that does not reflect the actual OS-level stacked filters, causing `verifyInstallation` or future filter planning to fail.
+*   **Recommendation:** Ensure `ProcessStateRegistry.update` uses a synchronized block or `AtomicReference.updateAndGet` to guarantee atomicity of state transitions.
+
+### 🔴 [Severity: HIGH]: Incomplete Architecture Verification in BPF Compiler
+*   **Dimension:** Micro-Implementation & FFM ABI Rigor
+*   **Target Area:** `enforcer/src/main/kotlin/io/mazewall/seccomp/BpfProgram.kt`
+*   **Failure Hypothesis:** The BPF program builder checks the architecture (`checkArch(arch)`), but it might not handle the audit architecture value correctly for aarch64 (ARM64), leading to bypassed filters on non-x86 platforms.
+*   **Context & Proof:** The BPF filter needs to strictly validate the `AUDIT_ARCH` from `seccomp_data`. If the mapping for `Arch.AARCH64` yields an incorrect constant, or if the filter fails to reject mismatched architectures with `SECCOMP_RET_KILL`, a thread could bypass the filter by using an emulation layer or `execve`ing a binary of a different architecture (e.g., x86_32 on x86_64).
+*   **Cascading Risk Potential:** High. Architecture mismatch is a classic seccomp bypass vector.
+*   **Recommendation:** Audit the `checkArch` emission logic to ensure it correctly loads the `arch` field from `seccomp_data` (offset 4) and jumps to a strict `KILL` action if it does not match the expected native architecture.
+
+### 🔴 [Severity: PERFORMANCE]: Inefficient ThreadLocal usage in `ThreadStateRegistry`
+*   **Dimension:** Performance & Efficiency
+*   **Target Area:** `enforcer/src/main/kotlin/io/mazewall/enforcer/ThreadStateRegistry.kt`
+*   **Failure Hypothesis:** Frequent access to `ThreadStateRegistry.state` during high-throughput executor task wrapping adds measurable overhead due to `ThreadLocal` lookups.
+*   **Context & Proof:** `ContainedExecutors.resolveCurrentState()` accesses both `ThreadStateRegistry.state` and `ProcessStateRegistry.state`. In a tight loop (e.g., thousands of small tasks submitted to a wrapped executor), the continuous merging of Thread and Process states dominates the overhead.
+*   **Cascading Risk Potential:** Performance. Increases the latency of task submission in `ContainedExecutors.wrap`.
+*   **Recommendation:** Cache the merged `ContainerState` or optimize the `ThreadLocal` access patterns. Consider using Loom's `ScopedValue` when available.
+
+
+### 🔴 [Severity: MEDIUM]: Missing Support for `O_PATH` and `O_CLOEXEC` in `Landlock` fallback
+*   **Dimension:** Micro-Implementation & FFM ABI Rigor
+*   **Target Area:** `enforcer/src/main/kotlin/io/mazewall/landlock/Landlock.kt`
+*   **Failure Hypothesis:** When `Landlock.addRule` falls back to opening a parent directory, it uses hardcoded flags that might omit `O_PATH` or `O_CLOEXEC`, causing unnecessary file descriptor leaks or rejecting valid symlinks.
+*   **Context & Proof:** The issue was highlighted in the backlog script output: "Unhandled `O_PATH` Omission on Landlock Fallback Directories". If `open` is called without `O_PATH`, it might attempt to fully open a device file or FIFO instead of just getting a file descriptor for Landlock routing, potentially causing hangs.
+*   **Cascading Risk Potential:** Medium. File descriptor leaks or blocked application initialization.
+*   **Recommendation:** Verify the `open` flags in `Landlock.kt` explicitly include `O_PATH | O_CLOEXEC`.
+
+### 🔴 [Severity: DX-FRICTION]: Opaque Exceptions on Landlock Initialization Failure
+*   **Dimension:** Developer Experience (DX) & API Ergonomics
+*   **Target Area:** `enforcer/src/main/kotlin/io/mazewall/landlock/Landlock.kt`
+*   **Failure Hypothesis:** If Landlock fails to initialize due to a missing kernel capability or an older ABI version, the exception message might be opaque (e.g., just returning an `errno`), confusing developers about whether the system is supported.
+*   **Context & Proof:** If `landlock_create_ruleset` returns `ENOSYS` or `EOPNOTSUPP`, a generic `IllegalStateException` or `RuntimeException` without context about Kernel requirements hurts the DX.
+*   **Cascading Risk Potential:** DX Friction. Developers might abandon the library if they cannot quickly diagnose environment issues.
+*   **Recommendation:** Wrap Landlock native call failures in a specific `UnsupportedKernelFeatureException` with clear guidance on required Linux kernel versions.
+
+### 🔴 [Severity: LOW]: Memory Segment Lifetime Leak in Async Profiler Events
+*   **Dimension:** Micro-Implementation & FFM ABI Rigor
+*   **Target Area:** `profiler/src/main/kotlin/io/mazewall/profiler/SessionHandler.kt`
+*   **Failure Hypothesis:** If a profiler session handles an async event (e.g., `SECCOMP_NOTIF`), the `MemorySegment` allocated for the response might not be properly closed if an exception occurs during the reply transmission.
+*   **Context & Proof:** Unmanaged or un-`use`d Arenas during network/socket failures could lead to native memory leaks in long-running profiler daemons.
+*   **Cascading Risk Potential:** Low. The profiler is usually short-lived, but could exhaust memory in long-running CI/CD environments.
+*   **Recommendation:** Ensure all temporary `MemorySegment` allocations within the profiler event loop are strictly scoped within `nativeScope { ... }` or `try-with-resources`.
+
+
+### 🔴 [Severity: MEDIUM]: Unhandled Signal Mask Inheritance in `ContainedExecutors`
+*   **Dimension:** OS Invariants / Cascading Failure
+*   **Target Area:** `enforcer/src/main/kotlin/io/mazewall/enforcer/ContainedExecutors.kt`
+*   **Failure Hypothesis:** When a new thread is spawned by a wrapped `ExecutorService`, it inherits the signal mask of its parent. If the seccomp filter restricts `rt_sigprocmask`, the new thread might be permanently trapped with blocked signals.
+*   **Context & Proof:** `ContainedExecutors.wrap` applies policies to threads dynamically. If a policy blocks `rt_sigprocmask` (or `ACT_ERRNO`), and the application relies on handling signals (e.g., `SIGTERM`), the thread will be unable to unblock them. This interacts poorly with Loom or certain async frameworks that manipulate signal masks for IO interruption.
+*   **Cascading Risk Potential:** Medium. Could lead to unkillable threads or missed interruptions (e.g., `Thread.interrupt()` failing to wake up a blocked IO call if the underlying signal is blocked and cannot be manipulated).
+*   **Recommendation:** Document that policies should ideally allow `rt_sigprocmask` and `rt_sigaction` for standard JVM thread management, and verify that `BpfFilter.getJvmCriticalNrs` explicitly includes them.
+
+### 🔴 [Severity: DX-FRICTION]: Missing Extensibility in Exception Message Parsing
+*   **Dimension:** Developer Experience (DX) & API Ergonomics
+*   **Target Area:** `enforcer/src/main/kotlin/io/mazewall/enforcer/ContainmentViolationDetector.kt`
+*   **Failure Hypothesis:** The `ContainmentViolationDetector` is a singleton with a static list of matchers. Users cannot easily add custom detection logic for third-party libraries that wrap IOExceptions with non-standard messages.
+*   **Context & Proof:** While `registerMatcher` exists, its interaction with global state (`MATCHERS`) might be problematic in complex, multi-tenant classloaders (e.g., OSGi or certain App Servers).
+*   **Cascading Risk Potential:** DX Friction. Users might not be able to rely on `isContainmentViolation` for their specific use cases if they use localized or heavily wrapped exceptions.
+*   **Recommendation:** Allow passing an optional configuration or extending the detector via a ServiceLoader pattern for better modularity.
+
+
+### 🔴 [Severity: MEDIUM]: TOCTOU in `USER_NOTIF` Argument Dereferencing
+*   **Dimension:** Cascading Failure Analysis (The Systems View)
+*   **Target Area:** `profiler/src/main/kotlin/io/mazewall/profiler/strace/StraceProfiler.kt`
+*   **Failure Hypothesis:** When the profiler daemon receives a `SECCOMP_NOTIF` event, it reads memory from the target process using `process_vm_readv`. A malicious or concurrent thread in the target process could modify the memory arguments (e.g., a file path string) *after* the profiler reads it but *before* the kernel executes the syscall.
+*   **Context & Proof:** This is a classic Time-of-Check to Time-of-Use (TOCTOU) vulnerability inherent in `ptrace` or `USER_NOTIF` architectures where arguments are passed by reference (pointers). The profiler might log or allow an action based on `path_A`, but the kernel might actually execute the syscall on `path_B`.
+*   **Cascading Risk Potential:** Medium (Profiler Context). The profiler is designed for generating policies, not strict enforcement, so the security impact is lower. However, it leads to inaccurate profiles being generated if the application has race conditions in its syscall arguments.
+*   **Recommendation:** Document this inherent limitation of `USER_NOTIF` profiling. Mention that `Landlock` is the preferred mechanism for robust, race-free filesystem restriction since it evaluates paths in the kernel space safely.
+
+### 🔴 [Severity: MEDIUM]: Unhandled Endianness in `process_vm_readv` Socket Message Tracing
+*   **Dimension:** Micro-Implementation & FFM ABI Rigor
+*   **Target Area:** `profiler/src/main/kotlin/io/mazewall/profiler/strace/StraceProfiler.kt`
+*   **Failure Hypothesis:** When reading multi-byte structures (like `sockaddr` or complex `io_uring` SQEs) from the target process memory via `process_vm_readv`, the profiler might misinterpret the data if the target process is running with a different endianness or if the C-struct layout assumes a specific byte order not explicitly handled by Java's `ByteBuffer` defaults.
+*   **Context & Proof:** FFM `ValueLayout`s default to native byte order. If the profiling logic manually parses bytes (e.g., extracting IP addresses from a `sockaddr_in`), it must ensure the network byte order (Big Endian) vs host byte order (Little Endian) conversions are strictly observed.
+*   **Cascading Risk Potential:** Medium. Could result in corrupted or completely incorrect IP addresses/ports being logged in the profiler output, leading to flawed network policies.
+*   **Recommendation:** Audit all manual struct parsing in the profiler (especially networking structs) to ensure explicit `ByteOrder` handling.
+
+### 🔴 [Severity: MEDIUM]: Missing Return Value Check for `SECCOMP_NOTIF_RESP` ACK
+*   **Dimension:** OS Invariants / Cascading Failure
+*   **Target Area:** `profiler/src/main/kotlin/io/mazewall/profiler/strace/StraceProfiler.kt`
+*   **Failure Hypothesis:** After processing a notification, the profiler sends a response back to the kernel via `ioctl(SECCOMP_IOCTL_NOTIF_SEND)`. If this `ioctl` fails (e.g., because the target thread was killed or interrupted in the meantime), the profiler might not handle the error gracefully, potentially leaking state or crashing the daemon loop.
+*   **Context & Proof:** The `USER_NOTIF` documentation states that the target thread can be interrupted or killed before the response is sent. The `ioctl` will return `ENOENT` in this case.
+*   **Cascading Risk Potential:** Medium. A crashed profiler daemon prevents further profiling of the application.
+*   **Recommendation:** Explicitly catch and ignore `ENOENT` errors during the `NOTIF_SEND` `ioctl`, as they represent expected, normal race conditions during thread termination.
+
+
+### 🔴 [Severity: MEDIUM]: Missing BPF Instruction Limit Validation in `newSockFProg`
+*   **Dimension:** Performance & Efficiency / Macro-Architecture
+*   **Target Area:** `enforcer/src/main/kotlin/io/mazewall/ffi/memory/SockFProg.kt` (or wherever `newSockFProg` is implemented)
+*   **Failure Hypothesis:** The kernel strictly limits BPF programs to 4096 instructions (`BPF_MAXINSNS`). If `PolicyDefinition.compile()` generates a filter exceeding this limit, `newSockFProg` might allocate it successfully, but the `seccomp` syscall will fail mysteriously with `EINVAL`.
+*   **Context & Proof:** While there is a test checking this, there might not be explicit runtime validation before attempting the syscall. A complex policy with hundreds of file paths or network addresses could exceed the limit.
+*   **Cascading Risk Potential:** Medium. `EINVAL` from seccomp is notoriously hard to debug.
+*   **Recommendation:** Add an explicit check in `buildFilter` or `newSockFProg` to throw a descriptive `IllegalArgumentException` if the instruction count exceeds `BPF_MAXINSNS` (4096).
+
+### 🔴 [Severity: MEDIUM]: Unhandled `O_CLOEXEC` Omission on Profiler Unix Sockets
+*   **Dimension:** Cascading Failure Analysis (The Systems View)
+*   **Target Area:** `profiler/src/main/kotlin/io/mazewall/profiler/engine/ProfilerSocket.kt` (or similar)
+*   **Failure Hypothesis:** If the profiler daemon opens UNIX sockets or files without `O_CLOEXEC`, these file descriptors could be inherited by child processes spawned by the profiled application.
+*   **Context & Proof:** This could cause the profiler socket to remain open even if the daemon shuts down, or allow a malicious child process to interfere with the profiling session.
+*   **Cascading Risk Potential:** Medium. File descriptor leaks and potential IPC interception.
+*   **Recommendation:** Ensure all internal profiler sockets and file descriptors are explicitly opened with `O_CLOEXEC`.
+
+### 🔴 [Severity: MEDIUM]: TOCTOU in Path Normalization under Multi-Threaded I/O
+*   **Dimension:** Cascading Failure Analysis (The Systems View)
+*   **Target Area:** `profiler/src/main/kotlin/io/mazewall/profiler/compiler/SbobParser.kt`
+*   **Failure Hypothesis:** The `SbobParser` attempts to prune redundant paths (e.g., if `/opt/app` is allowed, `/opt/app/config` is redundant). However, if paths involve symlinks that change concurrently, the static string-based pruning might be incorrect.
+*   **Context & Proof:** If `/opt/app/config` is initially a normal directory, it is pruned as redundant. If an attacker/concurrent process changes it to a symlink pointing to `/etc`, the policy generated by `SbobParser` might inadvertently allow access to `/etc` if it uses naive path matching.
+*   **Cascading Risk Potential:** Medium. Policy generation could be flawed in highly dynamic environments.
+*   **Recommendation:** The `SbobParser` should ideally rely on canonical paths resolved by the kernel (e.g., via `realpath`) or clearly document that its static pruning assumes a stable filesystem layout.
+
+
+### 🔴 [Severity: MEDIUM]: Uncaught Native Exceptions Escaping BPF Installation
+*   **Dimension:** Micro-Implementation & FFM ABI Rigor
+*   **Target Area:** `enforcer/src/main/kotlin/io/mazewall/seccomp/PureJavaBpfEngine.kt`
+*   **Failure Hypothesis:** The `installInternal` method catches `Throwable`, but `nativeScope` or underlying FFM calls might throw non-standard errors (e.g., `LinkageError` if a native symbol is suddenly unresolved on an unsupported glibc version) that should perhaps not be caught indiscriminately, or should be wrapped in a more specific containment failure exception.
+*   **Context & Proof:** Catching generic `Throwable` masks potentially critical JVM errors like `OutOfMemoryError` or `StackOverflowError`, wrapping them in `SeccompInstallationState.Failed`. While preventing a raw crash during installation is good, continuing application execution after an OOM might be dangerous if the application assumes the security boundary is up.
+*   **Cascading Risk Potential:** Medium. Running an application in an inconsistent state after a critical JVM error.
+*   **Recommendation:** Refine the catch block to specifically handle expected exceptions (e.g., `IllegalStateException`, `UnsupportedOperationException`, `IOException`) and let fatal errors (`Error`) propagate, or at least log them as FATAL before updating the state.
+
+### 🔴 [Severity: HIGH]: `SbobParser` Production Crashes due to Syntactic Subpath Pruning of Unresolved/Symlinked Paths
+*   **Dimension:** Cascading Failure Analysis (The Systems View)
+*   **Target Area:** `profiler/src/main/kotlin/io/mazewall/profiler/compiler/SbobParser.kt`
+*   **Failure Hypothesis:** The `SbobParser` aggregates file paths. If a path contains unresolved components (`.`, `..`) or symlinks, simple string-prefix matching can incorrectly classify one path as a subset of another.
+*   **Context & Proof:** Consider `allowedFsReadPaths`. If the profiler observed access to `/opt/app/../etc/passwd` and `/opt/app`, string prefix logic might prune `/opt/app/../etc/passwd` because it starts with `/opt/app`. The resulting policy would only allow `/opt/app`, and when the application tries to access the `passwd` file, it will be denied.
+*   **Cascading Risk Potential:** High (Policy Generation). Leads to incomplete policies that cause application crashes in production.
+*   **Recommendation:** `SbobParser` must strictly perform `Path.normalize()` and ideally `toRealPath()` before doing prefix comparisons to ensure accurate hierarchy evaluation.
+
+### 🔴 [Severity: LOW]: Overly Broad Catch Block in `ProfilerDaemon.reactorLoop`
+*   **Dimension:** Code Maintainability & Engineering Standards
+*   **Target Area:** `profiler/src/main/kotlin/io/mazewall/profiler/engine/ProfilerDaemon.kt`
+*   **Failure Hypothesis:** The main event loop of the profiler daemon might have a catch-all block that suppresses critical interrupts or unexpected structural failures.
+*   **Context & Proof:** If `reactorLoop` catches `Exception` and just logs it, it might inadvertently catch `InterruptedException` without restoring the interrupt status, causing the daemon to hang during shutdown requests.
+*   **Cascading Risk Potential:** Low. The daemon might need to be forcefully killed (`SIGKILL`) instead of shutting down cleanly.
+*   **Recommendation:** Explicitly handle `InterruptedException` (by restoring the interrupt status and exiting the loop) and `ClosedByInterruptException` separately from general IO errors.
+
+
+### 🔴 [Severity: MEDIUM]: Unhandled Signal Interruptions (`EINTR`) during `seccomp` Filter Installation
+*   **Dimension:** OS Invariants / Cascading Failure
+*   **Target Area:** `enforcer/src/main/kotlin/io/mazewall/seccomp/PureJavaBpfEngine.kt`
+*   **Failure Hypothesis:** The `seccomp` syscall itself might return `EINTR` if a signal is delivered to the thread precisely during the kernel's filter installation phase.
+*   **Context & Proof:** `LinuxNative.syscall` is used to invoke `seccomp`. While filter installation is generally fast, if `EINTR` occurs, the installation fails. The current code does not retry the `seccomp` syscall on `EINTR`.
+*   **Cascading Risk Potential:** Medium. In a highly active system with many signals (e.g., a JVM handling many async IO events or timers), `ContainedExecutors.wrap` might randomly fail with `IllegalStateException` due to `EINTR`.
+*   **Recommendation:** Wrap the `seccomp` syscall (and `prctl` fallback) in an explicit `while (errno == EINTR)` retry loop, as is standard practice for robust Linux system programming.
+
+### 🔴 [Severity: MEDIUM]: Unhandled `IOCTL` fallbacks during legacy JVM syscall tracing
+*   **Dimension:** Macro-Architecture & OS Invariants
+*   **Target Area:** `profiler/src/main/kotlin/io/mazewall/profiler/engine/ProfilerDaemon.kt`
+*   **Failure Hypothesis:** The profiler traces syscalls using `USER_NOTIF`. If a JVM performs an `ioctl` on a terminal or specialized device file, the BPF filter might intercept it. However, the profiler might not understand the specific `ioctl` structure to extract meaningful paths or context.
+*   **Context & Proof:** `ioctl` arguments are highly dependent on the specific command. If the profiler attempts to read the argument as a string pointer (like it does for `open`), it might read random memory, causing a segmentation fault in the target process or reading garbage data.
+*   **Cascading Risk Potential:** Medium. Could lead to garbage data in profiling logs or target process crashes if the profiler attempts to mutate the argument.
+*   **Recommendation:** Ensure the BPF filter for the profiler either explicitly ignores `ioctl` (allowing it to pass through) or the `ProfilerDaemon` correctly identifies it as a generic, opaque operation without attempting deep pointer dereferencing.
+
+### 🔴 [Severity: MEDIUM]: Potential Race Condition in Async IO Thread Shutdown
+*   **Dimension:** Cascading Failure Analysis (The Systems View)
+*   **Target Area:** `enforcer/src/main/kotlin/io/mazewall/enforcer/ContainedExecutors.kt`
+*   **Failure Hypothesis:** When a `ContainedExecutorWrapper` is shut down (`shutdown()`), it delegates to the underlying executor. If tasks are still in the queue, they will be executed. If the global `ProcessStateRegistry` is modified concurrently during this shutdown phase, the late-running tasks might pick up an inconsistent state.
+*   **Context & Proof:** The wrapper relies on dynamically checking `ThreadStateRegistry` and `ProcessStateRegistry`. If a task starts executing exactly as the application is tearing down or changing global policies, the state resolution might interleave unpredictably.
+*   **Cascading Risk Potential:** Medium. Non-deterministic behavior during application shutdown.
+*   **Recommendation:** Ensure `resolveCurrentState` is robust against concurrent modifications, or document that modifying global policies while executors are shutting down is unsupported.
+
+
+### 🔴 [Severity: MEDIUM]: Missing `BpfProgram<Status>` and `BpfLabel` Type-Safety
+*   **Dimension:** Verification via Types & Compiler Features
+*   **Target Area:** `enforcer/src/main/kotlin/io/mazewall/seccomp/BpfProgram.kt`
+*   **Failure Hypothesis:** The `BpfProgram.builder()` uses a builder pattern, but it might lack compile-time guarantees (phantom types) to ensure that `checkArch` is called *before* `loadSyscallNr`, or that `build()` is only called when the program is in a complete state.
+*   **Context & Proof:** If a developer modifies `BpfFilter.kt` and accidentally reorders the builder calls, the resulting BPF program might be structurally invalid (e.g., trying to load arguments before checking the architecture), leading to kernel rejection (`EINVAL`) only at runtime.
+*   **Cascading Risk Potential:** Medium. Increases the risk of regressions during refactoring.
+*   **Recommendation:** Leverage Kotlin's type system (e.g., Phantom Types or a Type-State pattern) to enforce the builder sequence at compile time, matching the architectural constraints outlined in the design documents.
