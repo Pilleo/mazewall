@@ -163,7 +163,7 @@ internal class ProfilerTraceListener(
             paths.add(String(pathBytes, Charsets.UTF_8))
         }
 
-        val threadToProfile = Profiler.threadRegistry[Tid(tidValue)] ?: workerThreadProvider()
+        val threadToProfile = Profiler.threadRegistry[Tid(tidValue)]
         val stackTrace = threadToProfile?.stackTrace?.map { it.toString() }
         return TraceEvent(tidValue = tidValue, syscallName = syscallName, args = args, paths = paths, stackTrace = stackTrace)
     }
@@ -197,7 +197,7 @@ internal class ProfilerTraceListener(
 
     private fun accumulateStackTrace(event: TraceEvent) {
         if (stackTracesMap == null) return
-        val threadToProfile = Profiler.threadRegistry[event.tid] ?: workerThreadProvider()
+        val threadToProfile = Profiler.threadRegistry[event.tid]
         if (threadToProfile != null) {
             val frames = threadToProfile.stackTrace
             stackTracesMap

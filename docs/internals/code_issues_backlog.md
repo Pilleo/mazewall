@@ -242,7 +242,14 @@ This is critical for generating a production-grade JVM Syscall Floor that accoun
 ### 🔴 [Severity: HIGH]: Blacklist policies trigger silent Landlock filesystem lockdown due to `io_uring` check
 **Target:** `io.mazewall.enforcer.ContainedExecutors.kt` (specifically `needsLandlock` calculation)
 **Context:** In `ContainedExecutors.kt`, `needsLandlock` is implicitly triggered if `io_uring_setup` is allowed, even if no filesystem paths are specified. This causes Landlock to be applied with an empty ruleset, permanently locking down the filesystem for the thread. This trigger is currently undocumented in the code, making it difficult for agents to diagnose the root cause of the "silent lockdown" symptom observed in `Landlock.kt`.
-**Needed:** Add a cross-reference comment to the `io_uring` trigger in `ContainedExecutors.kt`. Long-term, decouple the `io_uring` safety check from the automatic filesystem lockdown or provide a clear warning/opt-out mechanism.
+- *Threat Model Nuance:* Seccomp BPF filters are unable to inspect shared memory Submission Queue Entries (SQEs) inside `io_uring` queues at syscall entry time. Thus, an attacker can bypass path-based seccomp blocks (e.g. `openat`) by submitting operations asynchronously via `io_uring`. Since kernel workers (`io-wq`) inherit the thread's Landlock credentials, applying Landlock prevents this bypass.
+- *Root Cause:* If a blacklist policy allows `io_uring_setup` but blocks direct `open`/`openat`, `needsLandlock` evaluates to `true`. If the user did not define any allowed filesystem paths, Landlock is applied with empty read/write lists, effectively locking the thread out of all file operations.
+**Needed:** Add a cross-reference comment to the `io_uring` trigger in `ContainedExecutors.kt`.
+- *Fix Strategy:*
+  1. Add a `disableLandlockForIoUring` boolean option in `PolicyBuilder` / `PolicyDefinition` (defaulting to `false` to remain secure-by-default).
+  2. In `needsLandlock`, check `!policy.disableLandlockForIoUring` before applying the implicit `io_uring` trigger.
+  3. In `applyLandlockIfNecessary`, log a logger warning if Landlock is implicitly triggered due to `io_uring` while no paths are defined, advising the developer to use the builder opt-out if they require full filesystem access.
+
 
 ## Profiler, SBoB Parser & Exception Mapping Diagnostics
 
@@ -277,43 +284,22 @@ When the daemon notifies the listener that a child thread with TID `pid` made a 
 **Cascading Risk Potential:** Medium diagnostic and maintainability defect. Misleads developers and increases debugging complexity by reporting false/uncorrect stack frames for sandboxed workload execution.
 **Needed:** Remove the fallback to `workerThreadProvider()` when capturing stack traces in the listener thread. If the TID is not found in `threadRegistry`, record `null` or a sentinel string (e.g., `["<untracked_descendant_thread_stack_trace>"]`) to maintain strict data integrity.
 
-### 🔴 [Severity: HIGH]: `ProfilerDaemon` fails to resolve `SYMLINKAT` path parameters due to invalid argument grouping
-**Target:** `io.mazewall.profiler.engine.ProfilerDaemon` (specifically `getPathArgs`)
-**Failure Hypothesis:** The `ProfilerDaemon` maps `SYMLINKAT` into the same argument-parsing branch as `RENAMEAT`, `RENAMEAT2`, and `LINKAT`. However, `SYMLINKAT` uses a completely different argument layout than those double-descriptor syscalls. This mismatch causes the profiler to read invalid memory addresses, failing path resolution completely and leading to production Landlock crashes.
-**Context & Proof:** In `ProfilerDaemon.kt`, `SYMLINKAT` is matched in the following branch of `getPathArgs()`:
-```kotlin
-            "RENAMEAT", "RENAMEAT2", "LINKAT", "SYMLINKAT" ->
-                listOfNotNull(
-                    tryRead(pid, args[ARG_OLD_PATH], args[ARG_OLD_DIR_FD]),
-                    tryRead(pid, args[ARG_NEW_PATH], args[ARG_NEW_DIR_FD]),
-                )
-```
-Where:
-- `ARG_OLD_DIR_FD` = 0, `ARG_OLD_PATH` = 1
-- `ARG_NEW_DIR_FD` = 2, `ARG_NEW_PATH` = 3
-
-But the Linux signature for `symlinkat` is:
-`int symlinkat(const char *target, int newdirfd, const char *linkpath);`
-Which translates in seccomp notification args to:
-- `args[0]` = `target` (string pointer)
-- `args[1]` = `newdirfd` (integer FD)
-- `args[2]` = `linkpath` (string pointer)
-- `args[3]` = (unused / undefined register garbage)
-
-Consequently, `ProfilerDaemon` executes:
-1. `tryRead(pid, args[1], args[0])` -> Treats `newdirfd` (e.g. `3`) as a string pointer. `process_vm_readv` tries to read memory at address `3`, failing with `EFAULT`.
-2. `tryRead(pid, args[3], args[2])` -> Treats register garbage (from `args[3]`) as a string pointer, failing with `EFAULT` or `EPERM`.
-
-As a result, neither the symlink target nor the symlink creation path is resolved. SBoB output misses the rule, causing Landlock to deny `symlinkat` in production and crash the application.
-**Cascading Risk Potential:** High usability, stability, and sandbox coverage defect. Completely prevents applications from creating symbolic links via `symlinkat` in production sandboxes.
-**Needed:** Move `"SYMLINKAT"` out of the `RENAMEAT` branch. Create a dedicated branch in `getPathArgs()` for `"SYMLINKAT"`:
-```kotlin
-            "SYMLINKAT" ->
-                listOfNotNull(
-                    tryRead(pid, args[0]), // Target raw string (treated as absolute or relative to linkpath)
-                    tryRead(pid, args[2], args[1]) // Resolves linkpath (args[2]) relative to newdirfd (args[1])
-                )
-```
+### ✅ [RESOLVED]: `SyscallPathResolver` correctly resolves `SYMLINKAT` path parameters
+**Status:** RESOLVED (June 2026)
+**Target:** `io.mazewall.profiler.engine.SyscallPathResolver` (migrated from `ProfilerDaemon.getPathArgs`)
+**Original Bug:** `SYMLINKAT` was grouped with `RENAMEAT`/`LINKAT` in a four-argument (olddirfd, oldpath, newdirfd, newpath) branch. The Linux `symlinkat(target, newdirfd, linkpath)` signature puts `newdirfd` at `args[1]` — not a string pointer — so reading it as a char* caused `EFAULT` failures, meaning zero paths were ever resolved for `symlinkat` calls.
+**Fix:**
+1. `SyscallPathResolver` now has a dedicated `"SYMLINKAT"` branch:
+   ```kotlin
+   "SYMLINKAT" ->
+       listOfNotNull(
+           tryRead(tid, args[0]),          // target — raw string pointer (no dirfd)
+           tryRead(tid, args[2], args[1]), // linkpath relative to newdirfd
+       )
+   ```
+2. `args[1]` is correctly treated as the `newdirfd` integer, not a string pointer.
+3. `args[3]` (unused register) is never accessed.
+**Verification:** `SyscallPathResolverTest` (June 2026) includes a regression-guard test that asserts only `args[0]` and `args[2]` are ever passed to `readStringFromProcess`, with `args[1]` used solely as the dirfd. Additional tests cover absolute linkpath, AT_FDCWD, and contrast against the correct RENAMEAT/LINKAT four-argument layout.
 
 ### ✅ [RESOLVED]: `IterativeProfiler` fails to resolve wrapped exception chains
 **Status:** RESOLVED (June 2026)
@@ -352,10 +338,10 @@ As a result, neither the symlink target nor the symlink creation path is resolve
 **Cascading Risk Potential:** High stability and usability bug. Blocks iterative profiling for applications with sibling directories sharing identical prefixes.
 **Needed:** Use proper component-based `Path.startsWith` logic instead of raw string `startsWith`. Map the strings in `allowedFsReadPaths` to `Path` structures and normalize them, then compare using `java.nio.file.Path.startsWith`.
 
-### 🔴 [Severity: HIGH]: `ProfilerDaemon` `SYMLINKAT` Mapping Error
-**Target:** `io.mazewall.profiler.engine.ProfilerDaemon.kt` (specifically `getPathArgs`)
-**Context:** `SYMLINKAT` parameters are mapped as `(oldDirFd, oldPath, newDirFd, newPath)`, but the Linux kernel signature is `(target, newdirfd, linkpath)`. This causes the profiler to attempt to read memory from registers that do not contain string pointers, resulting in failed path resolution for symlink creation.
-**Needed:** Correct the argument mapping for `SYMLINKAT` to match the `(target, newdirfd, linkpath)` signature.
+### ✅ [RESOLVED]: `ProfilerDaemon` `SYMLINKAT` Mapping Error
+**Status:** RESOLVED (June 2026) — see entry above for full details.
+**Target:** `io.mazewall.profiler.engine.SyscallPathResolver` (logic migrated from `ProfilerDaemon.getPathArgs`)
+**Fix:** `SYMLINKAT` has its own dedicated branch in `SyscallPathResolver` with the correct `(target, newdirfd, linkpath)` argument layout. Regression-guarded by `SyscallPathResolverTest`.
 
 ### 🔴 [Severity: MEDIUM]: `SbobParser` Syntactic Pruning Inaccuracy
 **Target:** `io.mazewall.SbobParser.kt` (specifically `pruneSubpaths`)
