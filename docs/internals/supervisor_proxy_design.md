@@ -22,7 +22,9 @@ To maintain the high performance required of a JVM sandboxing library, we do not
 1.  Untrusted thread executes a sensitive syscall (e.g., `execve`).
 2.  Kernel BPF filter catches it, pauses the thread, and alerts the Supervisor daemon.
 3.  Supervisor validates the request (see Authorization below).
-4.  If approved, Supervisor instructs the kernel to resume the syscall (`SECCOMP_USER_NOTIF_FLAG_CONTINUE`), or it executes the operation itself and injects the resulting FD.
+4.  If approved, the Supervisor takes action based on the syscall type:
+    *   **Value-only arguments:** Instructs the kernel to resume the syscall (`SECCOMP_USER_NOTIF_FLAG_CONTINUE`).
+    *   **Pointer arguments:** MUST execute the operation itself and inject the resulting FD/return value to prevent TOCTTOU attacks (never use `FLAG_CONTINUE` here).
 5.  If denied, Supervisor instructs the kernel to spoof an `EPERM` or `EACCES` failure.
 
 ---
@@ -51,3 +53,29 @@ When injecting File Descriptors, the Supervisor must never trust string paths pr
 *   **`openat2` with `RESOLVE_BENEATH`:** The Supervisor must exclusively use the Linux 5.6+ `openat2` syscall with the `RESOLVE_BENEATH` flag. The Supervisor opens a safe "Root FD" (e.g., `/tmp/safe_zone/`). When processing a request, it calls `openat2(root_fd, requested_path, RESOLVE_BENEATH)`. 
 *   **Kernel Enforcement:** If the `requested_path` contains `../` or absolute symlinks that attempt to escape the `root_fd` directory, the kernel guarantees an instant `EXDEV` failure. This provides race-free, kernel-enforced path confinement, ensuring the Supervisor cannot be tricked into opening host files like `/etc/shadow`.
 *   **Double-Sandboxing:** As an additional defense-in-depth measure, the dedicated Supervisor thread itself should be subjected to a strict Landlock policy, restricting its own host filesystem access to the bare minimum required for proxy operations.
+
+---
+
+## 5. Limitations & Known Attack Vectors
+
+While the Supervisor Proxy is powerful, it introduces several complex edge cases that must be mitigated:
+
+### A. The `USER_NOTIF` Pointer Argument TOCTTOU
+Using `SECCOMP_USER_NOTIF_FLAG_CONTINUE` is unsafe for any system call that uses memory pointers for its arguments (like `connect`, `openat`, `execve`). A malicious thread could mutate the pointer data in memory *after* the Supervisor validates it, but *before* the kernel resumes the syscall.
+*   **Mitigation:** For any syscall with pointer arguments, the Supervisor MUST copy the data, validate it, execute the syscall itself, and inject the resulting FD. `FLAG_CONTINUE` is strictly reserved for syscalls where all arguments are passed by value in registers.
+
+### B. Virtual Thread (Loom) Carrier Pinning & Exhaustion (DoS)
+When a thread triggers a `SECCOMP_RET_USER_NOTIF` trap, the kernel physically blocks the OS thread. Because this happens outside standard Java I/O APIs, the JVM does not know to unmount a Virtual Thread. The underlying OS Carrier Thread is pinned.
+*   **Mitigation:** If an attacker spawns 10,000 virtual threads that all trap to the Supervisor, they will instantly exhaust the ForkJoinPool carrier threads, deadlocking the JVM. The Supervisor must implement strict rate-limiting and fast-fail mechanisms for `USER_NOTIF` traps.
+
+### C. Supervisor Resource Starvation (DoS)
+A malicious thread can execute a tight `while(true)` loop calling an arbitrary blocked syscall. This floods the Supervisor's `USER_NOTIF` queue, maxing out the Supervisor's CPU and denying service to legitimate threads.
+*   **Mitigation:** Implement a backpressure mechanism or rate limit per TID. If a thread exceeds the trap threshold, the Supervisor should immediately inject an `EPERM` without performing expensive stack walks or validations.
+
+### D. Stack Walking Safepoint Latency
+Relying on `Thread.getStackTrace()` to authorize requests is an expensive operation that may induce JVM-wide safepoints, adding severe and unpredictable latency spikes to network/file I/O.
+*   **Mitigation:** Utilize the Java 9+ `StackWalker` API instead of `Thread.getStackTrace()`. `StackWalker` allows lazy evaluation and avoids allocating large arrays of `StackTraceElement` objects when only the top frames need inspection.
+
+### E. FD Leakage on Injection
+When the Supervisor injects a File Descriptor into the untrusted thread, the untrusted thread might crash or be interrupted *before* the Java wrapper (`java.io.FileDescriptor`) is created and registered with the Garbage Collector / Cleaner.
+*   **Mitigation:** The OS FD will leak, eventually hitting the process `ulimit -n`. The architecture must include an FD tracking heartbeat or rely strictly on process-wide exit limits to manage orphaned injected FDs.
