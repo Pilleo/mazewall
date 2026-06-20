@@ -15,6 +15,8 @@ import io.mazewall.onFailure
 import io.mazewall.onSuccess
 import io.mazewall.profiler.Profiler
 import io.mazewall.recover
+import io.mazewall.enforcer.supervisor.StacktraceScopingPolicy
+import io.mazewall.core.Tid
 import java.io.File
 import java.io.IOException
 import java.lang.foreign.Arena
@@ -73,7 +75,7 @@ fun runProfileAndEnforce() {
 
         // This is the realistic workload we want to profile & run securely.
         // It does synchronous File/Socket I/O AND initializes a high-performance io_uring queue.
-        val workload = {
+        fun legitWorkload(): String {
             // [1. Synchronous File I/O] Read configuration from disk
             val config = configFile.readText()
 
@@ -106,10 +108,14 @@ fun runProfileAndEnforce() {
                 "io_uring_setup returned errno $errno (gracefully falling back to standard I/O)"
             }
 
-            "Workload completed.\n" +
+            return "Workload completed.\n" +
                 "  => Config read: ${config.trim()}\n" +
                 "  => Network greeting: ${serverGreeting.trim()}\n" +
                 "  => Async Engine: $ioUringStatus"
+        }
+
+        val workload = {
+            legitWorkload()
         }
 
         // ------------------------------------------------------------
@@ -159,18 +165,39 @@ fun runProfileAndEnforce() {
         // Compile the observed profile into a Landlock & Seccomp enforced Policy.
         // We explicitly unblock io_uring_setup to showcase how developers customize/stack policies
         // and to verify the complementary sandboxing even when container seccomp profiles block it.
+        // In addition, we stack the new JVM-level Supervisor Proxy to audit and authorize OPEN/OPENAT
+        // syscalls based on the calling thread's active stack trace context!
         val baseForEnforcement = bob.toPolicy(Policy.PURE_COMPUTE_UNSAFE)
         val compiledPolicy =
             Policy
                 .threadLocalBuilder()
                 .base(baseForEnforcement)
                 .unblock(Syscall.IO_URING_SETUP)
+                .supervise(Syscall.OPENAT)
+                .supervise(Syscall.OPEN)
                 .build()
 
-        println("Creating standard Thread Pool and wrapping it with ContainedExecutors...")
+        val scopingPolicy = object : StacktraceScopingPolicy {
+            override fun authorize(
+                tid: Tid,
+                syscall: Syscall,
+                args: List<Any>,
+                stack: List<StackTraceElement>
+            ): Boolean {
+                val hasLegitWorkload = stack.any { it.methodName.contains("legitWorkload") }
+                if (!hasLegitWorkload) {
+                    println("  [SUPERVISOR INTERCEPT] Denying syscall $syscall for TID $tid. Call stack does NOT originate from legitWorkload()!")
+                } else {
+                    println("  [SUPERVISOR INTERCEPT] Allowing syscall $syscall for TID $tid. Stack context verified.")
+                }
+                return hasLegitWorkload
+            }
+        }
+
+        println("Creating standard Thread Pool and wrapping it with ContainedExecutors (with StacktraceScopingPolicy)...")
         val rawExecutor = Executors.newSingleThreadExecutor()
         baseExecutor = rawExecutor
-        val wrapper = ContainedExecutors.wrap(rawExecutor, compiledPolicy)
+        val wrapper = ContainedExecutors.wrap(rawExecutor, compiledPolicy, scopingPolicy)
         containedExecutor = wrapper
 
         try {
@@ -308,6 +335,37 @@ fun runProfileAndEnforce() {
             println("\u001b[32;1m[UNEXPECTED] Attack was blocked? This should not happen on standard JVMs without Tier 1 containment.\u001b[0m")
             println(e.stackTraceToString())
         }
+
+        // ------------------------------------------------------------
+        // PHASE 7: JVM-Level Stack Trace Supervision (Supervisor Proxy)
+        // ------------------------------------------------------------
+        println("\n\u001b[33;1m[PHASE 7] Simulating Breach: Dynamic JVM Stacktrace Verification...\u001b[0m")
+        println("SCENARIO: Subverting Trusted Files.")
+        println("The config file 'mazewall_app_config.json' is whitelisted by Landlock.")
+        println("However, the Supervisor Proxy enforces that any open/openat syscall must")
+        println("originate from within our trusted 'legitWorkload()' stack frame.")
+        println("An attacker attempts to read this whitelisted config file from outside that context:")
+
+        val attackerConfigTask = {
+            println("  [Attacker] Attempting to read whitelisted config file outside trusted stack context...")
+            configFile.readText()
+        }
+
+        try {
+            val future = wrapper.submit(attackerConfigTask)
+            val configContent = future.get()
+            println("\u001b[31;1m[ALERT] VULNERABILITY! Read whitelisted config from untrusted stack context: $configContent\u001b[0m")
+        } catch (e: ExecutionException) {
+            val cause = e.cause ?: e
+            if (cause is ContainmentViolationException) {
+                println("\u001b[32;1m[BOUNCER SUCCESS] Supervisor Proxy blocked the file read attempt at the JVM boundary!\u001b[0m")
+                println("  Java Exception caught: \u001b[31m${cause.javaClass.name}: ${cause.message}\u001b[0m")
+                println("  Original Cause: \u001b[33m${cause.cause?.javaClass?.name}: ${cause.cause?.message}\u001b[0m")
+            } else {
+                println("\u001b[31m[ERROR] Unexpected execution failure: ${e.message}\u001b[0m")
+                println(e.stackTraceToString())
+            }
+        }
     } finally {
         containedExecutor?.shutdown()
         baseExecutor?.shutdown()
@@ -324,6 +382,7 @@ fun runProfileAndEnforce() {
     println("  Phase 4: Sync path traversal breach        🛡  BLOCKED by Landlock VFS")
     println("  Phase 5: io_uring async evasion attempt    🛡  BLOCKED by Landlock VFS (io-wq inherits ruleset)")
     println("  Phase 6: Thread-hopping bypass             ⚠  BYPASSED (intentional — Tier 2 limitation)")
+    println("  Phase 7: Supervisor Stacktrace Breach      🛡  BLOCKED by Supervisor Proxy")
     println("\u001b[35m")
     println("  [LESSON] Phase 6 is intentionally bypassed. Thread-scoped Tier 2 containment")
     println("           is a shield for trusted code paths, not a cage for arbitrary Java logic.")
