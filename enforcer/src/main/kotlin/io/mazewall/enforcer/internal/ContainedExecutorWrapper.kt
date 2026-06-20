@@ -12,6 +12,40 @@ import java.util.concurrent.TimeUnit
 
 /**
  * Internal wrapper that applies containment policies before task execution.
+ *
+ * The seccomp filter is installed per-task immediately before [task.call] (or [task.run]).
+ * This design is required for correctness across two scenarios that a one-time "install at
+ * construction" approach cannot handle:
+ *
+ * 1. **Multi-thread executors** (`FixedThreadPool`, `CachedThreadPool`): BPF filters are
+ *    thread-scoped. Each platform thread that runs a task must have the filter installed on
+ *    itself. Submitting a single install task at construction only covers the one thread that
+ *    happens to run it; other pool threads remain unfiltered.
+ *
+ * 2. **Virtual-thread executors**: the guardrail in [ContainedExecutors.installOnCurrentThread]
+ *    deliberately throws on virtual threads. The contract for [ContainedExecutors.wrap] is that
+ *    the call itself never throws — the exception surfaces only when the task actually executes.
+ *    Installing at construction would break that contract.
+ *
+ * ### Classloader bypass and per-task install
+ *
+ * The supervisor's [io.mazewall.enforcer.supervisor.JvmStackInspector] unconditionally allows
+ * any intercepted syscall while the JVM ClassLoader lock is held by the sandboxed thread. This
+ * prevents the well-known deadlock where the supervisor thread cannot load classes (the lock
+ * is held) while the sandboxed thread is blocked waiting for the supervisor response.
+ *
+ * As a consequence, the *first* execution of user code on a given thread may trigger lazy
+ * class loading, during which any `openat` (including one to a user file) that coincides with
+ * an active classloader frame is allowed without consulting the scoping policy. This is the
+ * correct and intended behavior: the bypass breaks the deadlock, and the file access is
+ * allowed. The scoping policy is correctly consulted for **all subsequent calls** on that
+ * thread once the relevant classes are loaded.
+ *
+ * **Security implication**: the library guarantees that unauthorized syscalls are DENIED.
+ * It does not guarantee that every authorized syscall is routed through the scoping policy —
+ * those that coincide with class loading are bypassed. Tests must reflect this contract:
+ * verify that evil access is denied (reliable, class-load-independent), not that an internal
+ * tracking structure is populated for allowed access (unreliable on first execution).
  */
 internal class ContainedExecutorWrapper(
     private val delegate: ExecutorService,

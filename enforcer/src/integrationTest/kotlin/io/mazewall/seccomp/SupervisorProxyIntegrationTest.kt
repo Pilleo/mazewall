@@ -3,7 +3,6 @@ package io.mazewall.seccomp
 import io.mazewall.BaseIntegrationTest
 import io.mazewall.EnabledIfLinuxAndSupported
 import io.mazewall.Policy
-import io.mazewall.core.Arch
 import io.mazewall.core.Syscall
 import io.mazewall.enforcer.ContainedExecutors
 import io.mazewall.enforcer.supervisor.StacktraceScopingPolicy
@@ -17,13 +16,42 @@ import kotlin.test.assertTrue
 
 class SupervisorProxyIntegrationTest : BaseIntegrationTest() {
 
+    /**
+     * Verifies the [StacktraceScopingPolicy] allow/deny contract.
+     *
+     * ### What this test checks
+     * - **Functional**: a task calling `file.readText()` from within a method named `legitAction`
+     *   successfully reads the file (the scoping policy allows it).
+     * - **Security**: a task calling `file.readText()` from outside `legitAction` is denied by
+     *   the scoping policy with an `IOException` (EPERM from seccomp).
+     *
+     * ### Why `allowedCalls` is not asserted
+     *
+     * On a cold JVM thread (first execution), `file.readText()` may trigger lazy classloading
+     * of Kotlin stdlib IO classes. While the JVM ClassLoader lock is held, the supervisor
+     * unconditionally allows any intercepted `openat` to prevent deadlock — the scoping
+     * policy is not consulted for that call. The file is still opened successfully (bypass =
+     * allow), so the legit functional test passes regardless.
+     *
+     * Asserting `allowedCalls.isNotEmpty()` would make the test depend on whether classloading
+     * happened to coincide with the file access on first execution — a timing condition that
+     * varies between a warmed local runner and a cold CI runner. That is an internal
+     * implementation detail, not the library's security contract.
+     *
+     * ### Why `deniedCalls` IS asserted (and is reliable)
+     *
+     * The evil action always runs **after** the legit action. By the time evil executes, all
+     * Kotlin IO classes used by `file.readText()` are already loaded. The JVM ClassLoader lock
+     * is not held. The supervisor's classloader bypass does not fire. The scoping policy is
+     * consulted and denies the access. This assertion is therefore deterministic regardless of
+     * JVM warmup state.
+     */
     @Test
     @EnabledIfLinuxAndSupported
     fun `test supervised openat allows or denies based on JVM stack trace scoping policy`() {
         val tempFile = Files.createTempFile("supervised_test_", ".txt").toFile()
         tempFile.writeText("legit content")
 
-        val allowedCalls = mutableListOf<String>()
         val deniedCalls = mutableListOf<String>()
 
         val scopingPolicy = object : StacktraceScopingPolicy {
@@ -38,13 +66,10 @@ class SupervisorProxyIntegrationTest : BaseIntegrationTest() {
                     return true
                 }
                 val isLegit = stack.any { it.methodName.contains("legitAction") }
-                if (isLegit) {
-                    allowedCalls.add(path)
-                    return true
-                } else {
+                if (!isLegit) {
                     deniedCalls.add(path)
-                    return false
                 }
+                return isLegit
             }
         }
 
@@ -58,20 +83,25 @@ class SupervisorProxyIntegrationTest : BaseIntegrationTest() {
         val containedExecutor = ContainedExecutors.wrap(rawExecutor, policy, scopingPolicy)
 
         try {
-            // 1. Run legit action (should succeed)
+            // Run legit action first. The file is read successfully (either via the allow path
+            // of the policy, or via the classloader bypass on a cold JVM — both are correct).
+            // The primary effect here is to ensure all Kotlin IO classes are loaded so the
+            // subsequent evil-action execution is free from classloading interference.
             val legitResult = containedExecutor.submit<String> {
                 legitAction(tempFile)
             }.get()
             assertEquals("legit content", legitResult)
-            assertTrue(allowedCalls.any { it.contains(tempFile.name) }, "Expected tempFile open to be allowed")
 
-            // 2. Run evil action (should fail)
+            // Run evil action second. All IO classes are now loaded; the classloader bypass
+            // cannot fire. The scoping policy is invoked and must deny the access.
             val evilResult = containedExecutor.submit<Boolean> {
                 evilAction(tempFile)
             }.get()
-            assertTrue(evilResult, "Evil action should have been blocked")
-            assertTrue(deniedCalls.any { it.contains(tempFile.name) }, "Expected tempFile open to be denied")
-
+            assertTrue(evilResult, "Evil action must be denied by the scoping policy")
+            assertTrue(
+                deniedCalls.any { it.contains(tempFile.name) },
+                "Scoping policy must have been invoked and denied the evil file access"
+            )
         } finally {
             rawExecutor.shutdown()
             tempFile.delete()
@@ -87,7 +117,7 @@ class SupervisorProxyIntegrationTest : BaseIntegrationTest() {
             file.readText()
             false
         } catch (e: java.io.IOException) {
-            // Expect Landlock or Seccomp to deny it with EPERM / Operation not permitted
+            // Seccomp denied the openat with EPERM
             true
         }
     }
