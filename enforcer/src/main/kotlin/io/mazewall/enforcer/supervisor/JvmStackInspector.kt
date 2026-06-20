@@ -26,6 +26,17 @@ package io.mazewall.enforcer.supervisor
  * > Violating this constraint reintroduces the exact deadlock this class is designed to prevent,
  * > because Kotlin collection helpers may themselves require classloading on first use.
  *
+ * ### Pre-charge Requirement (OpenJDK Lazy Classloader)
+ *
+ * This class itself must be loaded **before** the seccomp filter is installed on the sandboxed
+ * thread. On OpenJDK's strictly lazy classloader (e.g. Ubuntu 24.04), first-reference classloading
+ * of `JvmStackInspector` inside the reactor would attempt to acquire the ClassLoader lock — the
+ * exact scenario this class is designed to detect and short-circuit.
+ *
+ * `installSupervisedFilterForThread` calls `JvmStackInspector.isClassloaderActive(emptyArray())`
+ * while the current thread is still unfiltered to satisfy this invariant. This is consistent with
+ * the `BpfProgram` pre-charge already established in [io.mazewall.ffi.networking.SupervisorSeccompNotifInstaller].
+ *
  * ### Why `jdk.internal.reflect.*` is intentionally excluded
  *
  * There are two distinct scenarios where reflection appears on the stack:

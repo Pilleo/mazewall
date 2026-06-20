@@ -60,6 +60,22 @@ public object SupervisorInstaller {
         val tid = LinuxNative.process.gettid()
         registerThread(tid)
 
+        // Pre-charge reactor class dependencies before the seccomp filter is installed.
+        //
+        // On OpenJDK's strict lazy classloader (e.g. Ubuntu 24.04), any class first
+        // referenced inside the validation reactor that has not yet been loaded will require
+        // the JVM ClassLoader lock at the exact moment the sandboxed thread holds it.
+        // This produces the same circular deadlock that JvmStackInspector is designed to break.
+        //
+        // The fix mirrors the BpfProgram pre-charge already established in
+        // SupervisorSeccompNotifInstaller: force the critical class loads here, while the
+        // current thread is still unfiltered (the seccomp install happens inside
+        // SupervisorSeccompNotifInstaller.install below).
+        //
+        // INVARIANT: JvmStackInspector must be loaded before ANY seccomp notification
+        // can arrive, because the reactor calls it unconditionally on every notification.
+        JvmStackInspector.isClassloaderActive(emptyArray())
+
         try {
             SupervisorSeccompNotifInstaller.install(
                 socketPath = context.socketPath,
@@ -178,7 +194,11 @@ internal class JVMValidationListener(
     }
 
     private fun readRequestArgs(dis: DataInputStream, argCount: Int): List<Any> {
-        val argsList = mutableListOf<Any>()
+        // Use java.util.ArrayList directly — kotlin.collections.CollectionsKt (which backs
+        // mutableListOf) may not be loaded on OpenJDK's strict lazy classloader at the time
+        // the first notification arrives, and loading it while the tracee holds the ClassLoader
+        // lock causes the same deadlock we use JvmStackInspector to prevent.
+        val argsList = java.util.ArrayList<Any>(argCount)
         for (i in 0 until argCount) {
             val type = dis.readByte()
             when (type.toInt()) {
