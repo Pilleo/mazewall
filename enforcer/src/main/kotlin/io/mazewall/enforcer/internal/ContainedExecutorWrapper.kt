@@ -14,18 +14,11 @@ import java.util.concurrent.TimeUnit
  * Internal wrapper that applies containment policies before task execution.
  *
  * The seccomp filter is installed per-task immediately before [task.call] (or [task.run]).
- * This design is required for correctness across two scenarios that a one-time "install at
- * construction" approach cannot handle:
- *
- * 1. **Multi-thread executors** (`FixedThreadPool`, `CachedThreadPool`): BPF filters are
- *    thread-scoped. Each platform thread that runs a task must have the filter installed on
- *    itself. Submitting a single install task at construction only covers the one thread that
- *    happens to run it; other pool threads remain unfiltered.
- *
- * 2. **Virtual-thread executors**: the guardrail in [ContainedExecutors.installOnCurrentThread]
- *    deliberately throws on virtual threads. The contract for [ContainedExecutors.wrap] is that
- *    the call itself never throws — the exception surfaces only when the task actually executes.
- *    Installing at construction would break that contract.
+ * This design is required for correctness because BPF filters are thread-scoped. In a
+ * multi-thread executor (e.g. [java.util.concurrent.ThreadPoolExecutor]), each platform thread
+ * that runs a task must have the filter installed on itself. Submitting a single install
+ * task at construction only covers the one thread that happens to run it; other pool
+ * threads remain unfiltered.
  *
  * ### Classloader bypass and per-task install
  *

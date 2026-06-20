@@ -74,7 +74,7 @@ public object SupervisorInstaller {
         //
         // INVARIANT: JvmStackInspector must be loaded before ANY seccomp notification
         // can arrive, because the reactor calls it unconditionally on every notification.
-        JvmStackInspector.isClassloaderActive(emptyArray())
+        JvmStackInspector.precharge()
 
         try {
             SupervisorSeccompNotifInstaller.install(
@@ -157,16 +157,15 @@ internal class JVMValidationListener(
                 // operation it holds the JVM ClassLoader monitor. Immediately allow the syscall
                 // so the tracee can finish class loading and release the lock.
                 val targetThread = SupervisorInstaller.threadRegistry[Tid(pidVal)]
-                val rawStack: Array<StackTraceElement> = targetThread?.stackTrace ?: emptyArray()
+                val validationState = JvmStackInspector.inspect(nr, argsList, targetThread)
 
-                val isAllowed = if (JvmStackInspector.isClassloaderActive(rawStack)) {
-                    true
-                } else {
-                    // Only convert to List and invoke policy logic once we know the ClassLoader
-                    // lock is NOT held. These operations are safe to call at this point.
-                    val stackTrace = rawStack.toList()
-                    val syscall = Syscall.entries.find { it.numberFor(Arch.current()) == nr } ?: Syscall.OPEN
-                    scopingPolicy.authorize(Tid(pidVal), syscall, argsList, stackTrace)
+                val isAllowed = when (validationState) {
+                    is ScopingValidationState.ClassloaderActive -> true
+                    is ScopingValidationState.SafeToValidate -> {
+                        val stackTrace = validationState.rawStack.toList()
+                        val syscall = Syscall.entries.find { it.numberFor(Arch.current()) == validationState.nr } ?: Syscall.OPEN
+                        scopingPolicy.authorize(Tid(pidVal), syscall, validationState.argsList, stackTrace)
+                    }
                 }
 
                 // Decision encoding: 0 = Deny, 1 = Allow Continue, 2 = Allow & Inject FD

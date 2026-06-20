@@ -5,8 +5,10 @@ import com.tngtech.archunit.core.domain.JavaMethodCall
 import com.tngtech.archunit.core.importer.ImportOption
 import com.tngtech.archunit.junit.AnalyzeClasses
 import com.tngtech.archunit.junit.ArchTest
+import com.tngtech.archunit.lang.syntax.ArchRuleDefinition.classes
 import com.tngtech.archunit.lang.syntax.ArchRuleDefinition.methods
 import com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses
+import io.mazewall.enforcer.supervisor.StacktraceScopingPolicy
 
 @AnalyzeClasses(packages = ["io.mazewall"], importOptions = [ImportOption.DoNotIncludeTests::class])
 class ArchitectureTest {
@@ -235,4 +237,111 @@ class ArchitectureTest {
             .because("Big Endian write helpers must be encapsulated within NetworkOrderBuffer to enforce compile-time ordering.")
             .check(allClasses)
     }
+
+    @ArchTest
+    fun virtualThreadsAreBannedInProductionCode(allClasses: com.tngtech.archunit.core.domain.JavaClasses) {
+        noClasses()
+            .that()
+            .resideInAPackage("io.mazewall..")
+            .and()
+            .haveSimpleNameNotStartingWith("JvmFloorWorkload")
+            .should()
+            .callMethodWhere(object : DescribedPredicate<JavaMethodCall>("calls to virtual thread creation APIs") {
+                override fun test(input: JavaMethodCall): Boolean {
+                    val owner = input.target.owner
+                    val name = input.target.name
+                    return (owner.isAssignableTo(java.util.concurrent.Executors::class.java) && name == "newVirtualThreadPerTaskExecutor") ||
+                        (owner.isAssignableTo(java.lang.Thread::class.java) && (name == "ofVirtual" || name == "startVirtualThread"))
+                }
+            })
+            .because("Virtual thread executors are not permitted in production runtime paths of mazewall")
+            .check(allClasses)
+    }
+
+    @ArchTest
+    fun jvmStackInspectorMustHavePrimitiveDependenciesOnly(allClasses: com.tngtech.archunit.core.domain.JavaClasses) {
+        classes()
+            .that()
+            .haveFullyQualifiedName("io.mazewall.enforcer.supervisor.JvmStackInspector")
+            .should()
+            .onlyDependOnClassesThat(
+                object : DescribedPredicate<com.tngtech.archunit.core.domain.JavaClass>("only allow primitive/JDK types, Intrinsics, Metadata and ScopingValidationState") {
+                    override fun test(input: com.tngtech.archunit.core.domain.JavaClass): Boolean {
+                        val name = input.name
+                        return name == "io.mazewall.enforcer.supervisor.JvmStackInspector" ||
+                            name == "io.mazewall.enforcer.supervisor.ScopingValidationState" ||
+                            name == "io.mazewall.enforcer.supervisor.ScopingValidationState\$SafeToValidate" ||
+                            name == "io.mazewall.enforcer.supervisor.ScopingValidationState\$ClassloaderActive" ||
+                            name == "io.mazewall.enforcer.supervisor.ScopingValidationState\$SafeToValidate\$Companion" ||
+                            name == "java.lang.Object" ||
+                            name == "java.lang.String" ||
+                            name == "java.lang.StackTraceElement" ||
+                            name == "java.lang.Thread" ||
+                            name == "java.util.List" ||
+                            name == "java.util.Collection" ||
+                            name == "java.util.ArrayList" ||
+                            name == "java.lang.Exception" ||
+                            name == "org.jetbrains.annotations.NotNull" ||
+                            name == "org.jetbrains.annotations.Nullable" ||
+                            name == "kotlin.jvm.internal.Intrinsics" ||
+                            name == "kotlin.jvm.internal.DefaultConstructorMarker" ||
+                            name == "kotlin.Metadata" ||
+                            name.startsWith("[")
+                    }
+                }
+            )
+            .because("Any other dependencies in JvmStackInspector could trigger classloading during validation and deadlock the JVM.")
+            .check(allClasses)
+    }
+
+    @ArchTest
+    fun scopingValidationStateMustHavePrimitiveDependenciesOnly(allClasses: com.tngtech.archunit.core.domain.JavaClasses) {
+        classes()
+            .that(object : DescribedPredicate<com.tngtech.archunit.core.domain.JavaClass>("are ScopingValidationState types") {
+                override fun test(input: com.tngtech.archunit.core.domain.JavaClass): Boolean {
+                    return input.name.contains("ScopingValidationState")
+                }
+            })
+            .should()
+            .onlyDependOnClassesThat(
+                object : DescribedPredicate<com.tngtech.archunit.core.domain.JavaClass>("only allow primitive/JDK types, Intrinsics, List and Metadata") {
+                    override fun test(input: com.tngtech.archunit.core.domain.JavaClass): Boolean {
+                        val name = input.name
+                        return name.startsWith("io.mazewall.enforcer.supervisor.ScopingValidationState") ||
+                            name == "java.lang.Object" ||
+                            name == "java.lang.String" ||
+                            name == "java.lang.StackTraceElement" ||
+                            name == "java.util.List" ||
+                            name == "java.lang.Exception" ||
+                            name == "org.jetbrains.annotations.NotNull" ||
+                            name == "org.jetbrains.annotations.Nullable" ||
+                            name == "kotlin.jvm.internal.Intrinsics" ||
+                            name == "kotlin.jvm.internal.DefaultConstructorMarker" ||
+                            name == "kotlin.Metadata" ||
+                            name.startsWith("[")
+                    }
+                }
+            )
+            .because("Any other dependencies in ScopingValidationState could trigger classloading during validation and deadlock the JVM.")
+            .check(allClasses)
+    }
+
+    @ArchTest
+    fun scopingPolicyAuthorizeMustOnlyBeCalledByJVMValidationListener(allClasses: com.tngtech.archunit.core.domain.JavaClasses) {
+        noClasses()
+            .that()
+            .resideInAPackage("io.mazewall..")
+            .and()
+            .haveSimpleNameNotStartingWith("JVMValidationListener")
+            .should()
+            .callMethodWhere(object : DescribedPredicate<JavaMethodCall>("calls to StacktraceScopingPolicy.authorize") {
+                override fun test(input: JavaMethodCall): Boolean {
+                    return input.target.owner.isAssignableTo(StacktraceScopingPolicy::class.java) &&
+                        input.target.name == "authorize"
+                }
+            })
+            .because("Only JVMValidationListener is allowed to invoke authorize to ensure it is guarded by the ClassLoader deadlock bypass.")
+            .check(allClasses)
+    }
 }
+
