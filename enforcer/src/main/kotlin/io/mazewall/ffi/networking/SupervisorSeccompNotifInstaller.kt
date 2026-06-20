@@ -12,15 +12,19 @@ import io.mazewall.ffi.NativeConstants
 import io.mazewall.ffi.memory.nativeScope
 import io.mazewall.getFdOrThrow
 import java.lang.foreign.MemorySegment
-import java.util.concurrent.CompletableFuture
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 
 /**
  * Unified orchestrator for installing seccomp notification filters and establishing
  * socket handshakes with the supervisor/profiler daemon.
+ *
+ * This implementation replicates the coordinator pattern from the original profiler
+ * to prevent deadlocks when supervising critical JVM operations (like open/openat).
  */
 public object SupervisorSeccompNotifInstaller {
-    @Suppress("LongParameterList", "ThrowsCount", "MagicNumber", "TooGenericExceptionCaught")
+    @Suppress("LongParameterList", "ThrowsCount", "MagicNumber", "TooGenericExceptionCaught", "CyclomaticComplexMethod", "LongMethod")
     public fun install(
         socketPath: String,
         filterInstructions: List<io.mazewall.seccomp.BpfInstruction>,
@@ -49,39 +53,56 @@ public object SupervisorSeccompNotifInstaller {
             null
         }
 
-        val socketFd = connectWithRetry(socketPath)
-
-        // ARCHITECTURAL INVARIANT: Spawning validation/listener threads and performing all related
-        // classloading MUST occur BEFORE the seccomp filter is installed on the current thread.
-        // If we sandbox the thread first, any subsequent JVM classloader operations (which trigger 'openat')
-        // will get trapped by seccomp, blocking the installer thread and causing a circular deadlock
-        // since the daemon blocks waiting for an ACK from the listener thread that hasn't started yet.
-        onSocketConnected(socketFd)
-
-        // Helper thread to send seccomp listener FD to daemon
-        val listenerFdPromise = CompletableFuture<Int>()
+        // Coordination structures
+        val installLatch = CountDownLatch(1)
+        val proceedLatch = CountDownLatch(1)
+        val listenerFdVal = AtomicInteger(-1)
         val setupError = AtomicReference<Throwable?>()
-        val setupHelper = Thread {
+
+        // Coordinator thread spawned BEFORE the seccomp filter is active.
+        // This ensures the helper is completely uncontained.
+        val coordinator = Thread {
             try {
-                val listenerFdValue = listenerFdPromise.get()
-                val sent = sendDescriptor(socketFd, listenerFdValue)
-                if (!sent) {
-                    setupError.set(IllegalStateException("Failed to send seccomp listener FD to daemon"))
+                // Wait for the tracee thread to complete the seccomp installation
+                installLatch.await()
+                val fd = listenerFdVal.get()
+                if (fd < 0) {
+                    val err = setupError.get() ?: IllegalStateException("Failed to install seccomp filter")
+                    throw err
                 }
-            } catch (e: InterruptedException) {
-                setupError.set(e)
-            } catch (e: java.util.concurrent.ExecutionException) {
-                setupError.set(e)
+
+                // Connect to socket and send the descriptor (runs uncontained)
+                val socketFd = connectWithRetry(socketPath)
+                try {
+                    val sent = sendDescriptor(socketFd, fd)
+                    if (!sent) {
+                        throw IllegalStateException("Failed to send seccomp listener FD to daemon")
+                    }
+
+                    // Start validation/event listener thread (which will run uncontained)
+                    onSocketConnected(socketFd)
+                } catch (t: Throwable) {
+                    LinuxNative.fileSystem.close(FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(socketFd))
+                    throw t
+                }
+
+                // Handshake is fully configured, wake up tracee thread
+                proceedLatch.countDown()
+            } catch (t: Throwable) {
+                setupError.set(t)
+                proceedLatch.countDown()
             }
         }.apply {
             isDaemon = true
-            name = "seccomp-setup-helper"
+            name = "seccomp-install-coordinator"
             start()
         }
 
         try {
             nativeScope {
                 val prog = LinuxNative.memory.newSockFProg(filterInstructions)
+                
+                // Install seccomp user notifier filter (applied to the current tracee thread)
                 val r = LinuxNative.withTransaction {
                     LinuxNative.syscall(
                         arch.seccompSyscallNumber.toLong(),
@@ -90,8 +111,16 @@ public object SupervisorSeccompNotifInstaller {
                         NativeArg.MemoryArg(prog),
                     )
                 }
-                val listenerFd = r.getFdOrThrow("seccomp(SECCOMP_FILTER_FLAG_NEW_LISTENER)")
-                    .let { FileDescriptor.unsafe<FileDescriptorRole.SeccompNotif>(it.value) }
+
+                val rawFd = when (r) {
+                    is LinuxNative.SyscallResult.Success -> r.value.toInt()
+                    is LinuxNative.SyscallResult.Error -> {
+                        setupError.set(IllegalStateException("seccomp syscall failed with errno ${r.errno}"))
+                        installLatch.countDown()
+                        proceedLatch.countDown()
+                        return@nativeScope
+                    }
+                }
 
                 // Step 2: Synchronize filter tree process-wide if processWide is true
                 if (processWide && dummyBpf != null) {
@@ -119,14 +148,18 @@ public object SupervisorSeccompNotifInstaller {
                     }
                 }
 
-                listenerFdPromise.complete(listenerFd.value)
-
-                setupHelper.join()
-                setupError.get()?.let { throw it }
+                listenerFdVal.set(rawFd)
+                installLatch.countDown() // Release the coordinator to connect & send descriptor
             }
+
+            // Block tracee thread until the coordinator completes descriptor passing and listener startup
+            proceedLatch.await()
+            setupError.get()?.let { throw it }
         } catch (t: Throwable) {
-            // Clean up socketFd if handshake fails
-            LinuxNative.fileSystem.close(FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(socketFd))
+            val fd = listenerFdVal.get()
+            if (fd >= 0) {
+                LinuxNative.fileSystem.close(FileDescriptor.unsafe<FileDescriptorRole.SeccompNotif>(fd))
+            }
             throw t
         }
     }

@@ -35,7 +35,7 @@ public object SupervisorInstaller {
     private val logger = Logger.getLogger(SupervisorInstaller::class.java.name)
     internal val threadRegistry = ConcurrentHashMap<Tid, Thread>()
 
-    @Suppress("LongParameterList")
+    @Suppress("LongParameterList", "TooGenericExceptionCaught")
     public fun installSupervisedFilterForThread(
         policy: PolicyDefinition<*>,
         scopingPolicy: StacktraceScopingPolicy
@@ -64,8 +64,9 @@ public object SupervisorInstaller {
                 )
                 listener.start()
             }
-        } finally {
+        } catch (t: Throwable) {
             threadRegistry.remove(tid)
+            throw t
         }
     }
 }

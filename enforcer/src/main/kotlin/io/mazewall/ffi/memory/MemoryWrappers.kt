@@ -341,10 +341,38 @@ public fun MemorySegment.writeShort(offset: Long, value: Short) { this.set(Value
 public fun MemorySegment.readInt(offset: Long): Int = this.get(ValueLayout.JAVA_INT, offset)
 public fun MemorySegment.writeInt(offset: Long, value: Int) { this.set(ValueLayout.JAVA_INT, offset, value) }
 
+public fun MemorySegment.readIntUnaligned(offset: Long): Int = this.get(ValueLayout.JAVA_INT_UNALIGNED, offset)
+public fun MemorySegment.writeIntUnaligned(offset: Long, value: Int) { this.set(ValueLayout.JAVA_INT_UNALIGNED, offset, value) }
+
 public fun MemorySegment.readLong(offset: Long): Long = this.get(ValueLayout.JAVA_LONG, offset)
 public fun MemorySegment.writeLong(offset: Long, value: Long) { this.set(ValueLayout.JAVA_LONG, offset, value) }
 
+public fun MemorySegment.readLongUnaligned(offset: Long): Long = this.get(ValueLayout.JAVA_LONG_UNALIGNED, offset)
+public fun MemorySegment.writeLongUnaligned(offset: Long, value: Long) { this.set(ValueLayout.JAVA_LONG_UNALIGNED, offset, value) }
+
 public fun MemorySegment.readAddress(offset: Long): MemorySegment = this.get(ValueLayout.ADDRESS, offset)
 public fun MemorySegment.writeAddress(offset: Long, value: MemorySegment) { this.set(ValueLayout.ADDRESS, offset, value) }
+
+private val JAVA_INT_BE = ValueLayout.JAVA_INT.withOrder(java.nio.ByteOrder.BIG_ENDIAN)
+private val JAVA_INT_BE_UNALIGNED = ValueLayout.JAVA_INT.withOrder(java.nio.ByteOrder.BIG_ENDIAN).withByteAlignment(1)
+private val JAVA_LONG_BE = ValueLayout.JAVA_LONG.withOrder(java.nio.ByteOrder.BIG_ENDIAN)
+private val JAVA_LONG_BE_UNALIGNED = ValueLayout.JAVA_LONG.withOrder(java.nio.ByteOrder.BIG_ENDIAN).withByteAlignment(1)
+
+public fun MemorySegment.writeIntBigEndian(offset: Long, value: Int) {
+    this.set(JAVA_INT_BE, offset, value)
+}
+
+public fun MemorySegment.writeIntBigEndianUnaligned(offset: Long, value: Int) {
+    this.set(JAVA_INT_BE_UNALIGNED, offset, value)
+}
+
+public fun MemorySegment.writeLongBigEndian(offset: Long, value: Long) {
+    this.set(JAVA_LONG_BE, offset, value)
+}
+
+public fun MemorySegment.writeLongBigEndianUnaligned(offset: Long, value: Long) {
+    this.set(JAVA_LONG_BE_UNALIGNED, offset, value)
+}
+
 
 

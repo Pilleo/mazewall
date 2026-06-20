@@ -34,6 +34,9 @@ class SupervisorProxyIntegrationTest : BaseIntegrationTest() {
                 stack: List<StackTraceElement>
             ): Boolean {
                 val path = args.firstOrNull() as? String ?: ""
+                if (!path.contains("supervised_test_")) {
+                    return true
+                }
                 val isLegit = stack.any { it.methodName.contains("legitAction") }
                 if (isLegit) {
                     allowedCalls.add(path)
