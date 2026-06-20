@@ -60,22 +60,6 @@ public object SupervisorInstaller {
         val tid = LinuxNative.process.gettid()
         registerThread(tid)
 
-        // Pre-charge reactor class dependencies before the seccomp filter is installed.
-        //
-        // On OpenJDK's strict lazy classloader (e.g. Ubuntu 24.04), any class first
-        // referenced inside the validation reactor that has not yet been loaded will require
-        // the JVM ClassLoader lock at the exact moment the sandboxed thread holds it.
-        // This produces the same circular deadlock that JvmStackInspector is designed to break.
-        //
-        // The fix mirrors the BpfProgram pre-charge already established in
-        // SupervisorSeccompNotifInstaller: force the critical class loads here, while the
-        // current thread is still unfiltered (the seccomp install happens inside
-        // SupervisorSeccompNotifInstaller.install below).
-        //
-        // INVARIANT: JvmStackInspector must be loaded before ANY seccomp notification
-        // can arrive, because the reactor calls it unconditionally on every notification.
-        JvmStackInspector.precharge()
-
         try {
             SupervisorSeccompNotifInstaller.install(
                 socketPath = context.socketPath,
@@ -124,7 +108,7 @@ internal class JVMValidationListener(
         }
     }
 
-    @Suppress("CyclomaticComplexMethod")
+    @Suppress("CyclomaticComplexMethod", "NestedBlockDepth")
     private fun runValidationReactor(inputStream: SupervisorSocketInputStream, arena: Arena) {
         try {
             val dis = DataInputStream(BufferedInputStream(inputStream))
@@ -144,29 +128,67 @@ internal class JVMValidationListener(
                 val nr = dis.readInt()
                 val argCount = dis.readInt()
 
-                val argsList = readRequestArgs(dis, argCount)
+                // Read request arguments as raw data structures to avoid classloading.
+                // We use primitive arrays here:
+                val argTypes = ByteArray(argCount)
+                val argValues = arrayOfNulls<Any>(argCount)
+                for (i in 0 until argCount) {
+                    val type = dis.readByte()
+                    argTypes[i] = type
+                    when (type.toInt()) {
+                        0 -> { // Long
+                            argValues[i] = dis.readLong()
+                        }
+                        1, 2 -> { // String raw bytes or SockAddr bytes
+                            val len = dis.readInt()
+                            val bytes = ByteArray(len)
+                            dis.readFully(bytes)
+                            argValues[i] = bytes
+                        }
+                    }
+                }
 
                 // Perform Stacktrace Scoping validation.
                 //
                 // ORDERING IS CRITICAL: obtain the raw stack array and run the classloader check
-                // BEFORE any Kotlin stdlib call (toList, find, lambdas). Those helpers may not yet
-                // be loaded by the JVM; attempting to load them while the tracee holds the
-                // ClassLoader lock causes a permanent deadlock.
+                // BEFORE any classloading (no string decoding, no custom classes, no Kotlin lists/lambdas).
                 //
                 // Fast-path: if the tracee thread is currently executing inside a classloader
                 // operation it holds the JVM ClassLoader monitor. Immediately allow the syscall
                 // so the tracee can finish class loading and release the lock.
                 val targetThread = SupervisorInstaller.threadRegistry[Tid(pidVal)]
-                val validationState = JvmStackInspector.inspect(nr, argsList, targetThread)
+                val stackTrace = targetThread?.stackTrace ?: emptyArray()
+                val isLoaderActive = JvmStackInspector.isClassloaderActive(stackTrace)
 
-                val isAllowed = when (validationState) {
-                    is ScopingValidationState.ClassloaderActive -> true
-                    is ScopingValidationState.SafeToValidate -> {
-                        val stackTrace = validationState.rawStack.toList()
-                        val syscall = Syscall.entries.find { it.numberFor(Arch.current()) == validationState.nr } ?: Syscall.OPEN
-                        scopingPolicy.authorize(Tid(pidVal), syscall, validationState.argsList, stackTrace)
+                if (isLoaderActive) {
+                    val decision: Byte = if (nr == SYS_OPEN || nr == SYS_CONNECT || nr == SYS_OPENAT || nr == SYS_OPENAT2) {
+                        2.toByte()
+                    } else {
+                        1.toByte()
+                    }
+                    sendResponse(id, decision, 0)
+                    continue
+                }
+
+                // If classloader is NOT active, it is 100% safe to perform classloading, decode strings,
+                // allocate collections, and run the policy.
+                val argsList = java.util.ArrayList<Any>(argCount)
+                for (i in 0 until argCount) {
+                    val type = argTypes[i]
+                    val value = argValues[i] ?: continue
+                    when (type.toInt()) {
+                        0 -> argsList.add(value as Long)
+                        1 -> {
+                            val bytes = value as ByteArray
+                            argsList.add(String(bytes, StandardCharsets.UTF_8))
+                        }
+                        2 -> argsList.add(value as ByteArray)
                     }
                 }
+
+                val stackTraceList = stackTrace.toList()
+                val syscall = Syscall.entries.find { it.numberFor(Arch.current()) == nr } ?: Syscall.OPEN
+                val isAllowed = scopingPolicy.authorize(Tid(pidVal), syscall, argsList, stackTraceList)
 
                 // Decision encoding: 0 = Deny, 1 = Allow Continue, 2 = Allow & Inject FD
                 val decision: Byte = if (isAllowed) {
@@ -190,35 +212,6 @@ internal class JVMValidationListener(
             arena.close()
             inputStream.close()
         }
-    }
-
-    private fun readRequestArgs(dis: DataInputStream, argCount: Int): List<Any> {
-        // Use java.util.ArrayList directly — kotlin.collections.CollectionsKt (which backs
-        // mutableListOf) may not be loaded on OpenJDK's strict lazy classloader at the time
-        // the first notification arrives, and loading it while the tracee holds the ClassLoader
-        // lock causes the same deadlock we use JvmStackInspector to prevent.
-        val argsList = java.util.ArrayList<Any>(argCount)
-        for (i in 0 until argCount) {
-            val type = dis.readByte()
-            when (type.toInt()) {
-                0 -> { // Long
-                    argsList.add(dis.readLong())
-                }
-                1 -> { // String
-                    val len = dis.readInt()
-                    val bytes = ByteArray(len)
-                    dis.readFully(bytes)
-                    argsList.add(String(bytes, StandardCharsets.UTF_8))
-                }
-                2 -> { // SockAddr bytes
-                    val len = dis.readInt()
-                    val bytes = ByteArray(len)
-                    dis.readFully(bytes)
-                    argsList.add(bytes)
-                }
-            }
-        }
-        return argsList
     }
 
     private fun sendResponse(id: Long, decision: Byte, errorNr: Int) {
