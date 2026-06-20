@@ -159,6 +159,9 @@ class ArchitectureTest {
             .and()
             .areDeclaredInClassesThat()
             .haveSimpleNameNotStartingWith("LandlockSession")
+            .and()
+            .areDeclaredInClassesThat()
+            .haveSimpleNameNotStartingWith("Supervisor")
             .should(object : com.tngtech.archunit.lang.ArchCondition<com.tngtech.archunit.core.domain.JavaMethod>("not catch generic exceptions") {
                 override fun check(item: com.tngtech.archunit.core.domain.JavaMethod, events: com.tngtech.archunit.lang.ConditionEvents) {
                     item.tryCatchBlocks.forEach { tryCatchBlock ->

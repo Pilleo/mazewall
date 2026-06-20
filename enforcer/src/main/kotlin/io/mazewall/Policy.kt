@@ -144,6 +144,10 @@ public class Policy<out S : PolicyScope, out State : PolicyState> internal const
 
         public fun block(vararg syscalls: Syscall): Builder<S> = addAction(SeccompAction.ACT_ERRNO, *syscalls)
         public fun allow(vararg syscalls: Syscall): Builder<S> = addAction(SeccompAction.ACT_ALLOW, *syscalls)
+        public fun supervise(vararg syscalls: Syscall): Builder<S> {
+            internalBuilder.supervise(*syscalls)
+            return this
+        }
 
         public fun unblock(vararg syscalls: Syscall): Builder<S> {
             internalBuilder.unblock(*syscalls)

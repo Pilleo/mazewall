@@ -13,6 +13,7 @@ import io.mazewall.core.Syscall
 import io.mazewall.enforcer.internal.ContainedExecutorWrapper
 import io.mazewall.landlock.Landlock
 import io.mazewall.seccomp.PureJavaBpfEngine
+import io.mazewall.enforcer.supervisor.StacktraceScopingPolicy
 import java.util.concurrent.ExecutorService
 import java.util.logging.Logger
 
@@ -36,8 +37,16 @@ object ContainedExecutors {
         installOnCurrentThread(combined)
     }
 
+    fun installOnCurrentThread(policy: Policy<*, Uncompiled>, scopingPolicy: StacktraceScopingPolicy) {
+        installOnCurrentThread(policy.definition, scopingPolicy)
+    }
+
     internal fun installOnCurrentThread(policy: PolicyDefinition<*>) {
-        installInternal(false, policy)
+        installOnCurrentThread(policy, io.mazewall.enforcer.supervisor.DefaultStacktraceScopingPolicy)
+    }
+
+    internal fun installOnCurrentThread(policy: PolicyDefinition<*>, scopingPolicy: StacktraceScopingPolicy) {
+        installInternal(false, policy, scopingPolicy)
     }
 
     /**
@@ -60,9 +69,18 @@ object ContainedExecutors {
         return ContainedExecutorWrapper(delegate, combinedPolicy)
     }
 
+    fun wrap(
+        delegate: ExecutorService,
+        policy: Policy<*, Uncompiled>,
+        scopingPolicy: StacktraceScopingPolicy,
+    ): ExecutorService {
+        return ContainedExecutorWrapper(delegate, policy.definition, scopingPolicy)
+    }
+
     private fun installInternal(
         processWide: Boolean,
         policy: PolicyDefinition<*>,
+        scopingPolicy: StacktraceScopingPolicy = io.mazewall.enforcer.supervisor.DefaultStacktraceScopingPolicy
     ) {
         validateLinuxAndNotVirtual()
 
@@ -73,12 +91,13 @@ object ContainedExecutors {
             return
         }
 
-        installSeccompFilter(processWide, policy)
+        installSeccompFilter(processWide, policy, scopingPolicy)
     }
 
     private fun installSeccompFilter(
         processWide: Boolean,
         combinedPolicy: PolicyDefinition<*>,
+        scopingPolicy: StacktraceScopingPolicy
     ) {
         synchronized(processLock) {
             val state = resolveCurrentState()
@@ -86,7 +105,7 @@ object ContainedExecutors {
 
             if (plan.needsNewFilter) {
                 FilterInstallationPlanner.verifyFilterDepth(state.filterDepth)
-                applyBpfFilter(processWide, plan.toInstall, plan.newBlocks, plan.newDefaultAction)
+                applyBpfFilter(processWide, plan.toInstall, plan.newBlocks, plan.newDefaultAction, scopingPolicy)
             }
         }
     }
@@ -191,15 +210,24 @@ object ContainedExecutors {
         toInstall: PolicyDefinition<*>,
         newBlocks: Map<Syscall, SeccompAction>,
         newDefaultAction: SeccompAction,
+        scopingPolicy: StacktraceScopingPolicy
     ) {
         val arch = io.mazewall.core.Arch.current()
-        val compiledSandbox = toInstall.compile(arch)
-        if (processWide) {
-            PureJavaBpfEngine.installOnProcess(compiledSandbox)
-            updateProcessState(newBlocks, newDefaultAction, toInstall)
-        } else {
-            PureJavaBpfEngine.install(compiledSandbox)
+        if (toInstall.hasSupervisedSyscalls) {
+            if (processWide) {
+                throw UnsupportedOperationException("Process-wide supervised filters are not supported. Use thread-scoped supervision instead.")
+            }
+            io.mazewall.enforcer.supervisor.SupervisorInstaller.installSupervisedFilterForThread(toInstall, scopingPolicy)
             updateThreadState(newBlocks, newDefaultAction, toInstall)
+        } else {
+            val compiledSandbox = toInstall.compile(arch)
+            if (processWide) {
+                PureJavaBpfEngine.installOnProcess(compiledSandbox)
+                updateProcessState(newBlocks, newDefaultAction, toInstall)
+            } else {
+                PureJavaBpfEngine.install(compiledSandbox)
+                updateThreadState(newBlocks, newDefaultAction, toInstall)
+            }
         }
     }
 

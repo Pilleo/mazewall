@@ -8,12 +8,15 @@ import io.mazewall.CompiledSandbox
 internal sealed interface EngineState {
     /** The engine is initialized but no filters or privileges have been restricted yet. */
     interface Unprivileged : EngineState
+    object UnprivilegedImpl : Unprivileged
 
     /** The configuration (policy compile) has been registered. */
     interface Configured : EngineState
+    object ConfiguredImpl : Configured
 
     /** BPF filters have been successfully loaded into the kernel for this thread/process. */
     interface Loaded : EngineState
+    object LoadedImpl : Loaded
 }
 
 /**

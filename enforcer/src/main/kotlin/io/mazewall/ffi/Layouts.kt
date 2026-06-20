@@ -81,6 +81,18 @@ object Layouts {
     )
 
     /**
+     * Corresponds to `struct seccomp_notif_addfd` in `<linux/seccomp.h>`.
+     * Used to inject a file descriptor into a restricted process.
+     */
+    val SECCOMP_NOTIF_ADDFD: StructLayout = MemoryLayout.structLayout(
+        ValueLayout.JAVA_LONG.withName("id"),
+        ValueLayout.JAVA_INT.withName("flags"),
+        ValueLayout.JAVA_INT.withName("srcfd"),
+        ValueLayout.JAVA_INT.withName("newfd"),
+        ValueLayout.JAVA_INT.withName("newfd_flags"),
+    )
+
+    /**
      * Corresponds to `struct iovec` in `<sys/uio.h>`.
      */
     val IOVEC: StructLayout = MemoryLayout.structLayout(
@@ -156,4 +168,41 @@ object Layouts {
         LANDLOCK_PATH_BENEATH_ATTR.byteOffset(MemoryLayout.PathElement.groupElement("allowed_access"))
     val LANDLOCK_PATH_BENEATH_ATTR_FD_OFFSET: Long =
         LANDLOCK_PATH_BENEATH_ATTR.byteOffset(MemoryLayout.PathElement.groupElement("parent_fd"))
+
+    // Offsets for struct seccomp_notif_addfd
+    val SECCOMP_NOTIF_ADDFD_ID_OFFSET: Long = SECCOMP_NOTIF_ADDFD.byteOffset(MemoryLayout.PathElement.groupElement("id"))
+    val SECCOMP_NOTIF_ADDFD_FLAGS_OFFSET: Long = SECCOMP_NOTIF_ADDFD.byteOffset(MemoryLayout.PathElement.groupElement("flags"))
+    val SECCOMP_NOTIF_ADDFD_SRCFD_OFFSET: Long = SECCOMP_NOTIF_ADDFD.byteOffset(MemoryLayout.PathElement.groupElement("srcfd"))
+    val SECCOMP_NOTIF_ADDFD_NEWFD_OFFSET: Long = SECCOMP_NOTIF_ADDFD.byteOffset(MemoryLayout.PathElement.groupElement("newfd"))
+    val SECCOMP_NOTIF_ADDFD_NEWFD_FLAGS_OFFSET: Long = SECCOMP_NOTIF_ADDFD.byteOffset(MemoryLayout.PathElement.groupElement("newfd_flags"))
+
+    // Offsets for struct iovec
+    val IOVEC_BASE_OFFSET: Long = IOVEC.byteOffset(MemoryLayout.PathElement.groupElement("iov_base"))
+    val IOVEC_LEN_OFFSET: Long = IOVEC.byteOffset(MemoryLayout.PathElement.groupElement("iov_len"))
+
+    // Offsets for struct msghdr
+    val MSGHDR_NAME_OFFSET: Long = MSGHDR.byteOffset(MemoryLayout.PathElement.groupElement("msg_name"))
+    val MSGHDR_NAMELEN_OFFSET: Long = MSGHDR.byteOffset(MemoryLayout.PathElement.groupElement("msg_namelen"))
+    val MSGHDR_IOV_OFFSET: Long = MSGHDR.byteOffset(MemoryLayout.PathElement.groupElement("msg_iov"))
+    val MSGHDR_IOVLEN_OFFSET: Long = MSGHDR.byteOffset(MemoryLayout.PathElement.groupElement("msg_iovlen"))
+    val MSGHDR_CONTROL_OFFSET: Long = MSGHDR.byteOffset(MemoryLayout.PathElement.groupElement("msg_control"))
+    val MSGHDR_CONTROLLEN_OFFSET: Long = MSGHDR.byteOffset(MemoryLayout.PathElement.groupElement("msg_controllen"))
+    val MSGHDR_FLAGS_OFFSET: Long = MSGHDR.byteOffset(MemoryLayout.PathElement.groupElement("msg_flags"))
+
+    // Offsets for struct cmsghdr
+    val CMSGHDR_LEN_OFFSET: Long = CMSGHDR.byteOffset(MemoryLayout.PathElement.groupElement("cmsg_len"))
+    val CMSGHDR_LEVEL_OFFSET: Long = CMSGHDR.byteOffset(MemoryLayout.PathElement.groupElement("cmsg_level"))
+    val CMSGHDR_TYPE_OFFSET: Long = CMSGHDR.byteOffset(MemoryLayout.PathElement.groupElement("cmsg_type"))
+
+    // Offsets for struct sockaddr_un
+    val SOCKADDR_UN_FAMILY_OFFSET: Long = SOCKADDR_UN.byteOffset(MemoryLayout.PathElement.groupElement("sun_family"))
+    val SOCKADDR_UN_PATH_OFFSET: Long = SOCKADDR_UN.byteOffset(MemoryLayout.PathElement.groupElement("sun_path"))
+    const val SOCKADDR_UN_PATH_SIZE: Long = 108L
+
+    const val CMSGHDR_DATA_OFFSET: Long = 16L
+
+    const val SUPERVISOR_RESPONSE_ID_OFFSET: Long = 0L
+    const val SUPERVISOR_RESPONSE_DECISION_OFFSET: Long = 8L
+    const val SUPERVISOR_RESPONSE_ERROR_OFFSET: Long = 12L
+    const val SUPERVISOR_RESPONSE_SIZE: Long = 16L
 }

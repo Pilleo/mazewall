@@ -82,8 +82,18 @@ internal class ProfilerInstallerSession(
             LinuxNative.process.prctl(io.mazewall.core.PrctlCommand.SetNoNewPrivs(true))
         }.getOrThrow("prctl(PR_SET_NO_NEW_PRIVS)")
 
-        val fd = connectWithRetry(socketPath)
         val arch = Arch.current()
+
+        // Pre-charge BpfProgram classloading to avoid deadlocks under active seccomp filters
+        val dummyBpf = if (processWide) {
+            io.mazewall.seccomp.BpfProgram.dsl(arch) { allow() }.instructions
+        } else {
+            // Also build a dummy program unconditionally to pre-charge classloading
+            io.mazewall.seccomp.BpfProgram.dsl(arch) { allow() }.instructions
+            null
+        }
+
+        val fd = connectWithRetry(socketPath)
 
         val filter = BpfFilter.build(arch, policy, profilingMode = true)
 
@@ -118,8 +128,7 @@ internal class ProfilerInstallerSession(
             val listenerFd = installListener(arch, prog)
 
             // Step 2: Synchronize filter tree process-wide if processWide is true
-            if (processWide) {
-                val dummyBpf = io.mazewall.seccomp.BpfProgram.dsl(arch) { allow() }.instructions
+            if (processWide && dummyBpf != null) {
                 val dummyProg = LinuxNative.memory.newSockFProg(dummyBpf)
                 val tsyncRes = LinuxNative.withTransaction {
                     LinuxNative.syscall(

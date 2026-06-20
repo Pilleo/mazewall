@@ -2,6 +2,11 @@
 
 ## Recent Findings (Project Review June 2026)
 
+### 🔴 [Severity: MEDIUM]: Kotlin Inlining Causes ArchUnit noGenericExceptionCatching Violation
+**Context:** Kotlin inline functions like `Arena.ofConfined().use { ... }` or `nativeScope` expand at compilation time to copy their internal `try ... catch (e: Throwable)` or `finally` blocks directly into caller methods. As a result, caller methods in un-excluded packages like `io.mazewall.enforcer.supervisor` are falsely reported by ArchUnit as catching generic `Throwable` or `Exception` (e.g. `connectWithRetry` or `handleInjectFd`), violating the strict `noGenericExceptionCatchingInEnforcer` rule.
+**Needed:** Add supervisor classes (e.g. `SupervisorSessionHandler`, `SupervisorInstaller`) to the ArchUnit exclusions list in `ArchitectureTest.kt` for this rule, as they do not catch generic exceptions directly but rely on standard FFM scoped block helpers.
+
+
 ### 🟡 [Severity: LOW]: High-Frequency Arena Allocation Overhead (MM Optimization)
 **Context:** The current `nativeScope` utility and profiler reactor loop create a new `Arena.ofConfined()` for every single operation (syscall resolution, polling, etc.). This puts unnecessary pressure on the JVM native allocator and GC.
 **Needed:** Investigate "Scoped Arenas" using Kotlin context parameters or a `ThreadLocal` arena for high-frequency reactor loops. Reuse the same arena for all operations within a single task or notification lifecycle.

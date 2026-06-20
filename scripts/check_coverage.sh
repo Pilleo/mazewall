@@ -6,8 +6,8 @@ cd "$(dirname "$0")/.." || exit
 
 # Run Jacoco report generation first if it doesn't exist or to ensure it's fresh
 # Note: This runs inside podman to ensure tests have run in the correct environment
-echo "📊 Generating Jacoco reports in container..."
-podman compose -f infra/dev/compose.yml exec mazewall ./gradlew jacocoTestReport
+echo "📊 Generating Jacoco reports..."
+podman compose -f infra/dev/compose.yml exec mazewall ./gradlew jacocoTestReport || ./gradlew jacocoTestReport
 
 echo ""
 echo "🧐 Verifying coverage thresholds..."

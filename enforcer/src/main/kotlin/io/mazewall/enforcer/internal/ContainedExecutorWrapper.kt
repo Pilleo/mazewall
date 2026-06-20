@@ -4,6 +4,7 @@ import io.mazewall.PolicyDefinition
 import io.mazewall.enforcer.ContainedExecutors
 import io.mazewall.enforcer.ContainmentViolationDetector
 import io.mazewall.enforcer.ContainmentViolationException
+import io.mazewall.enforcer.supervisor.StacktraceScopingPolicy
 import java.util.concurrent.Callable
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Future
@@ -15,6 +16,7 @@ import java.util.concurrent.TimeUnit
 internal class ContainedExecutorWrapper(
     private val delegate: ExecutorService,
     private val policy: PolicyDefinition<*>,
+    private val scopingPolicy: StacktraceScopingPolicy = io.mazewall.enforcer.supervisor.DefaultStacktraceScopingPolicy,
 ) : ExecutorService by delegate {
     private fun <T> wrapCallable(task: Callable<T>): Callable<T> =
         Callable {
@@ -41,7 +43,7 @@ internal class ContainedExecutorWrapper(
         }
 
     private fun applyContainment() {
-        ContainedExecutors.installOnCurrentThread(policy)
+        ContainedExecutors.installOnCurrentThread(policy, scopingPolicy)
     }
 
     override fun execute(command: Runnable) {

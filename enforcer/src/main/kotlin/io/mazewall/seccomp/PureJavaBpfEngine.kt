@@ -21,9 +21,9 @@ internal object PureJavaBpfEngine : SeccompEngine<EngineState> {
 
     override val state: EngineState
         get() = when (ThreadStateRegistry.state.engineState) {
-            is SeccompInstallationState.Uninitialized -> object : EngineState.Unprivileged {}
-            is SeccompInstallationState.Verified -> object : EngineState.Loaded {}
-            else -> object : EngineState.Configured {}
+            is SeccompInstallationState.Uninitialized -> EngineState.UnprivilegedImpl
+            is SeccompInstallationState.Verified -> EngineState.LoadedImpl
+            else -> EngineState.ConfiguredImpl
         }
 
     override val isSupported: Boolean
@@ -52,6 +52,11 @@ internal object PureJavaBpfEngine : SeccompEngine<EngineState> {
         if (Thread.currentThread().isVirtual) {
             throw IllegalStateException("Cannot install seccomp filter on a virtual thread.")
         }
+        // Pre-charge classloading of engine states to prevent deadlocks/failures under active filters
+        EngineState.UnprivilegedImpl.toString()
+        EngineState.LoadedImpl.toString()
+        EngineState.ConfiguredImpl.toString()
+
         updateState(SeccompInstallationState.Uninitialized)
         try {
             val uninitialized = SeccompInstallationState.Uninitialized

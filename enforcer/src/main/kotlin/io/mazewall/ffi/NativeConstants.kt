@@ -40,6 +40,11 @@ object NativeConstants {
     const val SECCOMP_IOCTL_NOTIF_RECV = 0xc0502100L
     const val SECCOMP_IOCTL_NOTIF_SEND = 0xc0182101L
     const val SECCOMP_IOCTL_NOTIF_ID_VALID = 0x40082102L
+    const val SECCOMP_IOCTL_NOTIF_ADDFD = 0x40182103L
+
+    // Seccomp ADDFD Flags
+    const val SECCOMP_ADDFD_FLAG_SETFD = 1L shl 0
+    const val SECCOMP_ADDFD_FLAG_SEND = 1L shl 1
 
     // Seccomp Return Actions
     const val SECCOMP_RET_KILL_PROCESS = 0x80000000.toInt()

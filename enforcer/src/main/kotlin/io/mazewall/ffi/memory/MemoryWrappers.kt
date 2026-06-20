@@ -147,3 +147,204 @@ public value class ErrnoSegment(public val segment: MemorySegment) {
         public fun allocate(): ErrnoSegment = ErrnoSegment(arena.allocate(Layouts.ERRNO))
     }
 }
+
+/**
+ * Type-safe wrapper for `struct seccomp_notif_addfd`.
+ */
+@JvmInline
+public value class SeccompNotifAddFdSegment(public val segment: MemorySegment) {
+    public fun getId(): Long = segment.get(ValueLayout.JAVA_LONG, Layouts.SECCOMP_NOTIF_ADDFD_ID_OFFSET)
+    public fun setId(value: Long): Unit {
+        segment.set(ValueLayout.JAVA_LONG, Layouts.SECCOMP_NOTIF_ADDFD_ID_OFFSET, value)
+    }
+
+    public fun getFlags(): Int = segment.get(ValueLayout.JAVA_INT, Layouts.SECCOMP_NOTIF_ADDFD_FLAGS_OFFSET)
+    public fun setFlags(value: Int): Unit {
+        segment.set(ValueLayout.JAVA_INT, Layouts.SECCOMP_NOTIF_ADDFD_FLAGS_OFFSET, value)
+    }
+
+    public fun getSrcfd(): Int = segment.get(ValueLayout.JAVA_INT, Layouts.SECCOMP_NOTIF_ADDFD_SRCFD_OFFSET)
+    public fun setSrcfd(value: Int): Unit {
+        segment.set(ValueLayout.JAVA_INT, Layouts.SECCOMP_NOTIF_ADDFD_SRCFD_OFFSET, value)
+    }
+
+    public fun getNewfd(): Int = segment.get(ValueLayout.JAVA_INT, Layouts.SECCOMP_NOTIF_ADDFD_NEWFD_OFFSET)
+    public fun setNewfd(value: Int): Unit {
+        segment.set(ValueLayout.JAVA_INT, Layouts.SECCOMP_NOTIF_ADDFD_NEWFD_OFFSET, value)
+    }
+
+    public fun getNewfdFlags(): Int = segment.get(ValueLayout.JAVA_INT, Layouts.SECCOMP_NOTIF_ADDFD_NEWFD_FLAGS_OFFSET)
+    public fun setNewfdFlags(value: Int): Unit {
+        segment.set(ValueLayout.JAVA_INT, Layouts.SECCOMP_NOTIF_ADDFD_NEWFD_FLAGS_OFFSET, value)
+    }
+
+    public companion object {
+        context(arena: Arena)
+        public fun allocate(): SeccompNotifAddFdSegment =
+            SeccompNotifAddFdSegment(arena.allocate(Layouts.SECCOMP_NOTIF_ADDFD))
+    }
+}
+
+/**
+ * Type-safe wrapper for `struct iovec`.
+ */
+@JvmInline
+public value class IovecSegment(public val segment: MemorySegment) {
+    public fun getIovBase(): MemorySegment = segment.get(ValueLayout.ADDRESS, Layouts.IOVEC_BASE_OFFSET)
+    public fun setIovBase(value: MemorySegment): Unit {
+        segment.set(ValueLayout.ADDRESS, Layouts.IOVEC_BASE_OFFSET, value)
+    }
+
+    public fun getIovLen(): Long = segment.get(ValueLayout.JAVA_LONG, Layouts.IOVEC_LEN_OFFSET)
+    public fun setIovLen(value: Long): Unit {
+        segment.set(ValueLayout.JAVA_LONG, Layouts.IOVEC_LEN_OFFSET, value)
+    }
+
+    public companion object {
+        context(arena: Arena)
+        public fun allocate(): IovecSegment =
+            IovecSegment(arena.allocate(Layouts.IOVEC))
+    }
+}
+
+/**
+ * Type-safe wrapper for `struct msghdr`.
+ */
+@JvmInline
+public value class MsghdrSegment(public val segment: MemorySegment) {
+    public fun getMsgName(): MemorySegment = segment.get(ValueLayout.ADDRESS, Layouts.MSGHDR_NAME_OFFSET)
+    public fun setMsgName(value: MemorySegment): Unit {
+        segment.set(ValueLayout.ADDRESS, Layouts.MSGHDR_NAME_OFFSET, value)
+    }
+
+    public fun getMsgNamelen(): Int = segment.get(ValueLayout.JAVA_INT, Layouts.MSGHDR_NAMELEN_OFFSET)
+    public fun setMsgNamelen(value: Int): Unit {
+        segment.set(ValueLayout.JAVA_INT, Layouts.MSGHDR_NAMELEN_OFFSET, value)
+    }
+
+    public fun getMsgIov(): MemorySegment = segment.get(ValueLayout.ADDRESS, Layouts.MSGHDR_IOV_OFFSET)
+    public fun setMsgIov(value: MemorySegment): Unit {
+        segment.set(ValueLayout.ADDRESS, Layouts.MSGHDR_IOV_OFFSET, value)
+    }
+
+    public fun getMsgIovlen(): Long = segment.get(ValueLayout.JAVA_LONG, Layouts.MSGHDR_IOVLEN_OFFSET)
+    public fun setMsgIovlen(value: Long): Unit {
+        segment.set(ValueLayout.JAVA_LONG, Layouts.MSGHDR_IOVLEN_OFFSET, value)
+    }
+
+    public fun getMsgControl(): MemorySegment = segment.get(ValueLayout.ADDRESS, Layouts.MSGHDR_CONTROL_OFFSET)
+    public fun setMsgControl(value: MemorySegment): Unit {
+        segment.set(ValueLayout.ADDRESS, Layouts.MSGHDR_CONTROL_OFFSET, value)
+    }
+
+    public fun getMsgControllen(): Long = segment.get(ValueLayout.JAVA_LONG, Layouts.MSGHDR_CONTROLLEN_OFFSET)
+    public fun setMsgControllen(value: Long): Unit {
+        segment.set(ValueLayout.JAVA_LONG, Layouts.MSGHDR_CONTROLLEN_OFFSET, value)
+    }
+
+    public fun getMsgFlags(): Int = segment.get(ValueLayout.JAVA_INT, Layouts.MSGHDR_FLAGS_OFFSET)
+    public fun setMsgFlags(value: Int): Unit {
+        segment.set(ValueLayout.JAVA_INT, Layouts.MSGHDR_FLAGS_OFFSET, value)
+    }
+
+    public companion object {
+        context(arena: Arena)
+        public fun allocate(): MsghdrSegment =
+            MsghdrSegment(arena.allocate(Layouts.MSGHDR))
+    }
+}
+
+/**
+ * Type-safe wrapper for `struct cmsghdr`.
+ */
+@JvmInline
+public value class CmsghdrSegment(public val segment: MemorySegment) {
+    public fun getCmsgLen(): Long = segment.get(ValueLayout.JAVA_LONG, Layouts.CMSGHDR_LEN_OFFSET)
+    public fun setCmsgLen(value: Long): Unit {
+        segment.set(ValueLayout.JAVA_LONG, Layouts.CMSGHDR_LEN_OFFSET, value)
+    }
+
+    public fun getCmsgLevel(): Int = segment.get(ValueLayout.JAVA_INT, Layouts.CMSGHDR_LEVEL_OFFSET)
+    public fun setCmsgLevel(value: Int): Unit {
+        segment.set(ValueLayout.JAVA_INT, Layouts.CMSGHDR_LEVEL_OFFSET, value)
+    }
+
+    public fun getCmsgType(): Int = segment.get(ValueLayout.JAVA_INT, Layouts.CMSGHDR_TYPE_OFFSET)
+    public fun setCmsgType(value: Int): Unit {
+        segment.set(ValueLayout.JAVA_INT, Layouts.CMSGHDR_TYPE_OFFSET, value)
+    }
+
+    public fun getDataFd(): Int = segment.get(ValueLayout.JAVA_INT, Layouts.CMSGHDR_DATA_OFFSET)
+    public fun setDataFd(value: Int): Unit {
+        segment.set(ValueLayout.JAVA_INT, Layouts.CMSGHDR_DATA_OFFSET, value)
+    }
+
+    public companion object {
+        context(arena: Arena)
+        public fun allocate(): CmsghdrSegment =
+            CmsghdrSegment(arena.allocate(Layouts.CMSGHDR))
+    }
+}
+
+/**
+ * Type-safe wrapper for `struct sockaddr_un`.
+ */
+@JvmInline
+public value class SockaddrUnSegment(public val segment: MemorySegment) {
+    public fun getSunFamily(): Short = segment.get(ValueLayout.JAVA_SHORT, Layouts.SOCKADDR_UN_FAMILY_OFFSET)
+    public fun setSunFamily(value: Short): Unit {
+        segment.set(ValueLayout.JAVA_SHORT, Layouts.SOCKADDR_UN_FAMILY_OFFSET, value)
+    }
+
+    public fun getSunPath(): MemorySegment = segment.asSlice(Layouts.SOCKADDR_UN_PATH_OFFSET, Layouts.SOCKADDR_UN_PATH_SIZE)
+
+    public companion object {
+        context(arena: Arena)
+        public fun allocate(): SockaddrUnSegment =
+            SockaddrUnSegment(arena.allocate(Layouts.SOCKADDR_UN))
+    }
+}
+
+/**
+ * Type-safe wrapper for supervisor response packet (13 bytes).
+ */
+@JvmInline
+public value class SupervisorResponseSegment(public val segment: MemorySegment) {
+    public fun getId(): Long = segment.get(ValueLayout.JAVA_LONG, Layouts.SUPERVISOR_RESPONSE_ID_OFFSET)
+    public fun setId(value: Long): Unit {
+        segment.set(ValueLayout.JAVA_LONG, Layouts.SUPERVISOR_RESPONSE_ID_OFFSET, value)
+    }
+
+    public fun getDecision(): Byte = segment.get(ValueLayout.JAVA_BYTE, Layouts.SUPERVISOR_RESPONSE_DECISION_OFFSET)
+    public fun setDecision(value: Byte): Unit {
+        segment.set(ValueLayout.JAVA_BYTE, Layouts.SUPERVISOR_RESPONSE_DECISION_OFFSET, value)
+    }
+
+    public fun getErrorNr(): Int = segment.get(ValueLayout.JAVA_INT, Layouts.SUPERVISOR_RESPONSE_ERROR_OFFSET)
+    public fun setErrorNr(value: Int): Unit {
+        segment.set(ValueLayout.JAVA_INT, Layouts.SUPERVISOR_RESPONSE_ERROR_OFFSET, value)
+    }
+
+    public companion object {
+        context(arena: Arena)
+        public fun allocate(): SupervisorResponseSegment =
+            SupervisorResponseSegment(arena.allocate(Layouts.SUPERVISOR_RESPONSE_SIZE))
+    }
+}
+
+public fun MemorySegment.readByte(offset: Long): Byte = this.get(ValueLayout.JAVA_BYTE, offset)
+public fun MemorySegment.writeByte(offset: Long, value: Byte) { this.set(ValueLayout.JAVA_BYTE, offset, value) }
+
+public fun MemorySegment.readShort(offset: Long): Short = this.get(ValueLayout.JAVA_SHORT, offset)
+public fun MemorySegment.writeShort(offset: Long, value: Short) { this.set(ValueLayout.JAVA_SHORT, offset, value) }
+
+public fun MemorySegment.readInt(offset: Long): Int = this.get(ValueLayout.JAVA_INT, offset)
+public fun MemorySegment.writeInt(offset: Long, value: Int) { this.set(ValueLayout.JAVA_INT, offset, value) }
+
+public fun MemorySegment.readLong(offset: Long): Long = this.get(ValueLayout.JAVA_LONG, offset)
+public fun MemorySegment.writeLong(offset: Long, value: Long) { this.set(ValueLayout.JAVA_LONG, offset, value) }
+
+public fun MemorySegment.readAddress(offset: Long): MemorySegment = this.get(ValueLayout.ADDRESS, offset)
+public fun MemorySegment.writeAddress(offset: Long, value: MemorySegment) { this.set(ValueLayout.ADDRESS, offset, value) }
+
+

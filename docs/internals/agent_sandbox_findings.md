@@ -19,8 +19,8 @@ AI agents act as "deputies" on behalf of users. When an agent is compromised, at
 
 | Layer | Threat Vector | Mitigated By | Status |
 | :--- | :--- | :--- | :--- |
-| **OS-Level** | Attacker uses path traversal (`../../etc/shadow`) or malicious symlinks to access host files. | `openat2` syscall with `RESOLVE_BENEATH` flag at the supervisor proxy layer. | **Fully Solved** |
-| **Execution-Level** | Attacker achieves native execution and spoofs JVM stack traces to bypass tool restrictions. | Tier 1 global `NO_EXEC` / `W^X` memory protection paired with Stacktrace Scoping. | **Fully Solved** |
+| **OS-Level** | Attacker uses path traversal (`../../etc/shadow`) or malicious symlinks to access host files. | `openat2` syscall with `RESOLVE_BENEATH` flag at the supervisor proxy layer. | **Designed (Not Yet Implemented)** |
+| **Execution-Level** | Attacker achieves native execution and spoofs JVM stack traces to bypass tool restrictions. | Tier 1 global `NO_EXEC` / `W^X` memory protection paired with Stacktrace Scoping. | **Designed (Not Yet Implemented)** |
 | **Logical/Semantic** | Attacker prompts the agent to perform malicious actions *within* the tool's allowed scope (e.g. dropping a DB table). | Out of scope for kernel-level sandboxing. Must be solved using **Agent Compartmentalization**. | **Not Solved at Syscall Level** |
 
 ### Implementing Agent Compartmentalization
@@ -33,9 +33,10 @@ To mitigate Logical Confused Deputy vulnerabilities, multi-agent systems must av
 
 ## 3. Threat Model: The Shared-Memory ACE Escape Caveat
 
-Thread-scoped seccomp (Tier 2) is **not** an absolute security boundary against an attacker with Arbitrary Code Execution (ACE) on the JVM thread.
+Thread-scoped seccomp (Tier 2) is **not** an absolute security boundary against an attacker with Arbitrary Code Execution (ACE) or even arbitrary Java logic execution on the JVM thread.
 
 *   **The Shared-Memory Vulnerability:** Because all JVM threads share the same heap and virtual address space, an exploit utilizing native memory corruption (e.g., via FFM `Unsafe` pointers or native helper libraries) can corrupt memory on unrestricted sibling threads or GC helper threads to execute arbitrary code.
+*   **The Java Concurrency Bypass:** An attacker capable of executing arbitrary Java logic (even without achieving native memory corruption) can easily bypass thread-scoped filters by spawning tasks on uncontained threads (e.g., via `CompletableFuture.runAsync()`). Refer to [§1 of SECURITY_CONSIDERATIONS.md](file:///home/leanid/Documents/code/java/jseccomp/docs/internals/SECURITY_CONSIDERATIONS.md#1-thread-level-vs-process-level-isolation) for the detailed concurrency pivot analysis.
 *   **The Mandated Backstop (Tier 1):** Process-wide `NO_EXEC` and `mprotect` restrictions must be applied at startup (`ContainedExecutors.installOnProcess`). This eliminates the execution of injected native code, blocking the prerequisite step for stack-spoofing memory corruption.
 *   **Roadmap (Tier 1 Expansion):** Process-wide namespaces (Mount, PID, Network) and cgroups v2 limits are required to bound the JVM at initialization. Thread-local namespaces are rejected due to JVM internal coordination conflicts.
 
@@ -74,6 +75,8 @@ public String searchWeb(String url) { ... }
 public String queryDb(String sql) { ... }
 ```
 If this Agent is deployed inside a Docker container, that container **must** be granted network access to both the public web and the internal database. If the Agent suffers a prompt injection and uses the `searchWeb` tool to execute an SSRF attack against the internal DB, **Docker will allow it**. Docker only sees the JVM process making a network call, which is authorized.
+
+*Note on Network Policies:* While container orchestrators (like Kubernetes) can enforce Network Policies to restrict pod egress, these policies apply to the **entire container process**. They cannot distinguish between network requests originating from the `searchWeb` tool versus the `queryDb` tool since both requests originate from the same JVM process and container network interface.
 
 ### Why `mazewall` is Different
 `mazewall` operates at the **Thread** boundary, enabling Agent Compartmentalization *inside* the JVM:

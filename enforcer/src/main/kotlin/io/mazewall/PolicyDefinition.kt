@@ -24,6 +24,7 @@ public data class PolicyDefinition<out S : PolicyScope>(
     public val allowedFsWritePaths: Set<SandboxedPath> = emptySet(),
     internal val enforceLandlock: Boolean = false,
 ) {
+    public val hasSupervisedSyscalls: Boolean get() = syscallActions.values.any { it == SeccompAction.ACT_NOTIFY }
     /** Returns true if the given [syscall] is unconditionally allowed by this policy. */
     public fun isSyscallAllowed(syscall: Syscall): Boolean {
         val action = syscallActions[syscall] ?: defaultAction
