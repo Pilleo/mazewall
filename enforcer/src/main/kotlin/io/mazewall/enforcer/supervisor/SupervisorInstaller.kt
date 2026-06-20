@@ -108,6 +108,7 @@ internal class JVMValidationListener(
         }
     }
 
+    @Suppress("CyclomaticComplexMethod")
     private fun runValidationReactor(inputStream: SupervisorSocketInputStream, arena: Arena) {
         try {
             val dis = DataInputStream(BufferedInputStream(inputStream))
@@ -129,12 +130,28 @@ internal class JVMValidationListener(
 
                 val argsList = readRequestArgs(dis, argCount)
 
-                // Perform Stacktrace Scoping validation
+                // Perform Stacktrace Scoping validation.
+                //
+                // ORDERING IS CRITICAL: obtain the raw stack array and run the classloader check
+                // BEFORE any Kotlin stdlib call (toList, find, lambdas). Those helpers may not yet
+                // be loaded by the JVM; attempting to load them while the tracee holds the
+                // ClassLoader lock causes a permanent deadlock.
+                //
+                // Fast-path: if the tracee thread is currently executing inside a classloader
+                // operation it holds the JVM ClassLoader monitor. Immediately allow the syscall
+                // so the tracee can finish class loading and release the lock.
                 val targetThread = SupervisorInstaller.threadRegistry[Tid(pidVal)]
-                val stackTrace = targetThread?.stackTrace?.toList() ?: emptyList()
+                val rawStack: Array<StackTraceElement> = targetThread?.stackTrace ?: emptyArray()
 
-                val syscall = Syscall.entries.find { it.numberFor(Arch.current()) == nr } ?: Syscall.OPEN
-                val isAllowed = scopingPolicy.authorize(Tid(pidVal), syscall, argsList, stackTrace)
+                val isAllowed = if (JvmStackInspector.isClassloaderActive(rawStack)) {
+                    true
+                } else {
+                    // Only convert to List and invoke policy logic once we know the ClassLoader
+                    // lock is NOT held. These operations are safe to call at this point.
+                    val stackTrace = rawStack.toList()
+                    val syscall = Syscall.entries.find { it.numberFor(Arch.current()) == nr } ?: Syscall.OPEN
+                    scopingPolicy.authorize(Tid(pidVal), syscall, argsList, stackTrace)
+                }
 
                 // Decision encoding: 0 = Deny, 1 = Allow Continue, 2 = Allow & Inject FD
                 val decision: Byte = if (isAllowed) {
