@@ -148,72 +148,71 @@ internal class SupervisorDaemonEngine(
     }
 
     private fun handleConnection(socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>) {
+        var connection: io.mazewall.ffi.networking.SeccompConnection = io.mazewall.ffi.networking.SeccompConnection.Accepted(socketFd)
         try {
             Arena.ofConfined().use { arena ->
                 val pollFd = PollFdSegment(arena.allocate(Layouts.POLLFD))
                 pollFd.setFd(socketFd.value)
                 pollFd.setEvents(NativeConstants.POLLIN)
-                connectionLoop(socketFd, pollFd, arena)
+
+                while (!isGlobalShutdown()) {
+                    val next = processConnectionStep(arena, connection, socketFd, pollFd) ?: break
+                    connection = next
+                }
             }
         } finally {
             clientSockets.remove(socketFd)
             closeFd(socketFd)
+            if (connection is io.mazewall.ffi.networking.SeccompConnection.FdAttached) {
+                val lFd = connection.listenerFd
+                activeListeners.remove(lFd)
+                closeFd(lFd)
+            }
         }
     }
 
-    private fun connectionLoop(
+    private fun processConnectionStep(
+        arena: Arena,
+        connection: io.mazewall.ffi.networking.SeccompConnection,
         socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>,
-        pollFd: PollFdSegment,
-        arena: Arena
-    ) {
-        var isFdAttached = false
-        var listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open>? = null
-        try {
-            while (!isGlobalShutdown()) {
-                if (!isFdAttached) {
-                    val received = pollAndReceiveDescriptor(socketFd, pollFd, arena)
-                    if (received != null) {
-                        listenerFd = received
-                        isFdAttached = true
-                    } else {
-                        break
-                    }
+        pollFd: PollFdSegment
+    ): io.mazewall.ffi.networking.SeccompConnection? {
+        if (connection is io.mazewall.ffi.networking.SeccompConnection.Accepted) {
+            val pollRes = LinuxNative.withTransaction { LinuxNative.poll(pollFd.segment, 1L, POLL_TIMEOUT_MS) }
+            val count = pollRes.recover { errno, _ ->
+                if (errno == NativeConstants.EINTR) 0L else -1L
+            }
+            if (count < 0) return null
+            if (count == 0L) return connection
+        }
+
+        return when (val current = connection) {
+            is io.mazewall.ffi.networking.SeccompConnection.Accepted -> {
+                val listenerFd = io.mazewall.ffi.networking.SupervisorSocketUtils.recvDescriptor(socketFd)
+                if (listenerFd != null) {
+                    System.err.println("[SUPERVISOR] Received listener FD: ${listenerFd.value}")
+                    activeListeners.add(listenerFd)
+                    current.attachFd(listenerFd)
                 } else {
-                    val lFd = listenerFd ?: break
-                    System.err.println("[SUPERVISOR] Starting session reactor for listener ${lFd.value}")
-                    handleSession(socketFd, lFd)
-                    isFdAttached = false
-                    listenerFd = null
+                    null
                 }
             }
-        } finally {
-            listenerFd?.let {
-                activeListeners.remove(it)
-                closeFd(it)
+
+            is io.mazewall.ffi.networking.SeccompConnection.FdAttached -> {
+                System.err.println("[SUPERVISOR] Sending handshake ACK to socket ${socketFd.value}")
+                val ackBuf = arena.allocate(ACK_BUF_SIZE)
+                ackBuf.writeByte(0L, PROTOCOL_ACK_BYTE)
+                LinuxNative.withTransaction { LinuxNative.memory.write(socketFd, ackBuf, ACK_BUF_SIZE) }
+                current.handshakeComplete()
+            }
+
+            is io.mazewall.ffi.networking.SeccompConnection.Active -> {
+                System.err.println("[SUPERVISOR] Starting session reactor for listener ${current.listenerFd.value}")
+                handleSession(current.socketFd, current.listenerFd)
+                System.err.println("[SUPERVISOR] Session reactor finished. Resetting to Accepted.")
+                io.mazewall.ffi.networking.SeccompConnection.Accepted(current.socketFd)
             }
         }
-    }
-
-    private fun pollAndReceiveDescriptor(
-        socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>,
-        pollFd: PollFdSegment,
-        arena: Arena
-    ): FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open>? {
-        val pollRes = LinuxNative.withTransaction { LinuxNative.poll(pollFd.segment, 1L, POLL_TIMEOUT_MS) }
-        val count = pollRes.recover { errno, _ ->
-            if (errno == NativeConstants.EINTR) 0L else -1L
-        }
-        if (count < 0) return null
-
-        val received = recvDescriptor(socketFd) ?: return null
-        System.err.println("[SUPERVISOR] Received listener FD: ${received.value}")
-        activeListeners.add(received)
-
-        // Send ACK byte to notify receipt of listener FD
-        val ackBuf = arena.allocate(ACK_BUF_SIZE)
-        ackBuf.writeByte(0L, PROTOCOL_ACK_BYTE)
-        LinuxNative.withTransaction { LinuxNative.memory.write(socketFd, ackBuf, ACK_BUF_SIZE) }
-        return received
     }
 
     private fun handleSession(
@@ -255,70 +254,30 @@ internal class SupervisorDaemonEngine(
 
     private fun createServer(socketPath: String): FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open> {
         val fd = LinuxNative.withTransaction {
-            LinuxNative.networking.socket(1, 1, 0) // AF_UNIX = 1, SOCK_STREAM = 1
+            LinuxNative.networking.socket(
+                io.mazewall.ffi.networking.SupervisorSocketUtils.AF_UNIX,
+                io.mazewall.ffi.networking.SupervisorSocketUtils.SOCK_STREAM,
+                0
+            )
         }.getFdOrThrow("socket(AF_UNIX)").let { FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(it.value) }
 
         Arena.ofConfined().use { arena ->
-            val sockaddrUn = SockaddrUnSegment(arena.allocate(Layouts.SOCKADDR_UN))
-            sockaddrUn.setSunFamily(1.toShort()) // AF_UNIX = 1
-            val pathBytes = socketPath.toByteArray(StandardCharsets.UTF_8)
-            val pathSeg = sockaddrUn.getSunPath()
-            MemorySegment.copy(pathBytes, 0, pathSeg, ValueLayout.JAVA_BYTE, 0L, pathBytes.size)
+            val sockaddrUn = io.mazewall.ffi.networking.SupervisorSocketUtils.setupSockAddrUn(arena, socketPath)
 
             LinuxNative.withTransaction {
-                LinuxNative.networking.bind(fd, sockaddrUn.segment, SOCKADDR_UN_SIZE)
+                LinuxNative.networking.bind(fd, sockaddrUn.segment, io.mazewall.ffi.networking.SupervisorSocketUtils.SOCKADDR_UN_SIZE)
             }.onFailure { _, _ ->
                 LinuxNative.fileSystem.close(fd)
             }.getOrThrow("bind(AF_UNIX)")
         }
 
         LinuxNative.withTransaction {
-            LinuxNative.networking.listen(fd, BACKLOG_SIZE)
+            LinuxNative.networking.listen(fd, io.mazewall.ffi.networking.SupervisorSocketUtils.BACKLOG_SIZE)
         }.onFailure { _, _ ->
             LinuxNative.fileSystem.close(fd)
         }.getOrThrow("listen")
 
         return fd
-    }
-
-    private fun recvDescriptor(socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>): FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open>? {
-        return Arena.ofConfined().use { arena ->
-            val dummyByte = arena.allocate(ValueLayout.JAVA_BYTE)
-            val controlBuf = arena.allocate(MSG_CONTROL_BUF_SIZE)
-            controlBuf.fill(0)
-
-            val iov = IovecSegment(arena.allocate(Layouts.IOVEC))
-            iov.setIovBase(dummyByte)
-            iov.setIovLen(1L)
-
-            val msg = MsghdrSegment(arena.allocate(Layouts.MSGHDR))
-            msg.setMsgIov(iov.segment)
-            msg.setMsgIovlen(1L)
-            msg.setMsgControl(controlBuf)
-            msg.setMsgControllen(MSG_CONTROL_BUF_SIZE)
-
-            val cmsg = CmsghdrSegment(controlBuf)
-
-            while (true) {
-                val res = LinuxNative.withTransaction { LinuxNative.networking.recvmsg(socketFd, msg.segment, 0) }
-                if (res is LinuxNative.SyscallResult.Success) {
-                    val value = res.value
-                    if (value == 0L) return@use null
-
-                    val cmsgLen = cmsg.getCmsgLen()
-                    val cmsgLevel = cmsg.getCmsgLevel()
-                    val cmsgType = cmsg.getCmsgType()
-                    if (cmsgLen >= CMSG_RIGHTS_LEN && cmsgLevel == SOL_SOCKET && cmsgType == SCM_RIGHTS) {
-                        return@use FileDescriptor.unsafe<FileDescriptorRole.SeccompNotif>(cmsg.getDataFd())
-                    }
-                } else {
-                    val errno = (res as LinuxNative.SyscallResult.Error).errno
-                    if (errno == EINTR) continue
-                    return@use null
-                }
-            }
-            null
-        }
     }
 
     private fun closeFd(fd: FileDescriptor<*, FdState.Open>) {

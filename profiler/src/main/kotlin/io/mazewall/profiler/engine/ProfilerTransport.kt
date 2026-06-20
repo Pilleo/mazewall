@@ -192,33 +192,7 @@ object RealProfilerTransport : ProfilerTransport {
     }
 
     override fun recvDescriptor(socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>): FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open>? {
-        return Arena.ofConfined().use { arena ->
-            val dummyByte = arena.allocate(ValueLayout.JAVA_BYTE)
-            val controlBuf = arena.allocate(24)
-            controlBuf.fill(0)
-
-            val msg = with(arena) {
-                DescriptorPassing.setupScmRightsMsgHdr(dummyByte, controlBuf)
-            }
-
-            while (true) {
-                val res = LinuxNative.withTransaction { LinuxNative.networking.recvmsg(socketFd, msg, 0) }
-                res.onSuccess { value ->
-                    if (value == 0L) return@use null // EOF
-
-                    val cmsgLen = controlBuf.get(ValueLayout.JAVA_LONG, CMSG_LEN_OFF)
-                    val cmsgLevel = controlBuf.get(ValueLayout.JAVA_INT, CMSG_LEVEL_OFF)
-                    val cmsgType = controlBuf.get(ValueLayout.JAVA_INT, CMSG_TYPE_OFF)
-                    if (cmsgLen >= CMSG_LEN_VAL && cmsgLevel == SOL_SOCKET_VAL && cmsgType == SCM_RIGHTS_VAL) {
-                        return@use FileDescriptor.unsafe<FileDescriptorRole.SeccompNotif>(controlBuf.get(ValueLayout.JAVA_INT, CMSG_DATA_OFF))
-                    }
-                }.onFailure { errno, _ ->
-                    if (errno == 4) return@onFailure // EINTR, continue loop
-                    return@use null
-                }
-            }
-            null
-        }
+        return io.mazewall.ffi.networking.SupervisorSocketUtils.recvDescriptor(socketFd)
     }
 
     override fun poll(
@@ -254,26 +228,25 @@ object RealProfilerTransport : ProfilerTransport {
 
     override fun createServer(socketPath: String): FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open> {
         val fd = LinuxNative.withTransaction {
-            LinuxNative.networking.socket(AF_UNIX, SOCK_STREAM, 0)
+            LinuxNative.networking.socket(
+                io.mazewall.ffi.networking.SupervisorSocketUtils.AF_UNIX,
+                io.mazewall.ffi.networking.SupervisorSocketUtils.SOCK_STREAM,
+                0
+            )
         }.getFdOrThrow("socket(AF_UNIX)").let { FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(it.value) }
 
         Arena.ofConfined().use { arena ->
-            val addr = arena.allocate(Layouts.SOCKADDR_UN)
-            addr.fill(0)
-            addr.set(ValueLayout.JAVA_SHORT, 0L, AF_UNIX.toShort())
-            val pathBytes = socketPath.toByteArray(StandardCharsets.UTF_8)
-            val pathSeg = addr.asSlice(2, SOCKADDR_UN_PATH_SIZE.toLong())
-            MemorySegment.copy(pathBytes, 0, pathSeg, ValueLayout.JAVA_BYTE, 0L, pathBytes.size)
+            val sockaddrUn = io.mazewall.ffi.networking.SupervisorSocketUtils.setupSockAddrUn(arena, socketPath)
 
             LinuxNative.withTransaction {
-                LinuxNative.networking.bind(fd, addr, ADDR_UN_SIZE)
+                LinuxNative.networking.bind(fd, sockaddrUn.segment, io.mazewall.ffi.networking.SupervisorSocketUtils.SOCKADDR_UN_SIZE)
             }.onFailure { _, _ ->
                 LinuxNative.fileSystem.close(fd)
             }.getOrThrow("bind(AF_UNIX)")
         }
 
         LinuxNative.withTransaction {
-            LinuxNative.networking.listen(fd, BACKLOG_SIZE)
+            LinuxNative.networking.listen(fd, io.mazewall.ffi.networking.SupervisorSocketUtils.BACKLOG_SIZE)
         }.onFailure { _, _ ->
             LinuxNative.fileSystem.close(fd)
         }.getOrThrow("listen")

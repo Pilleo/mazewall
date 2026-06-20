@@ -132,7 +132,7 @@ internal class ProfilerDaemonEngine(
 
     @Suppress("NestedBlockDepth", "LoopWithTooManyJumpStatements", "CyclomaticComplexMethod")
     private fun handleConnection(socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>) {
-        var connection: ProfilerConnection = ProfilerConnection.Accepted(socketFd)
+        var connection: io.mazewall.ffi.networking.SeccompConnection = io.mazewall.ffi.networking.SeccompConnection.Accepted(socketFd)
         try {
             Arena.ofConfined().use { arena ->
                 val pollFd = arena.allocate(Layouts.POLLFD)
@@ -141,7 +141,7 @@ internal class ProfilerDaemonEngine(
 
                 while (!isGlobalShutdown()) {
                     // Only poll if we are waiting for a NEW listener FD (Accepted state)
-                    if (connection is ProfilerConnection.Accepted) {
+                    if (connection is io.mazewall.ffi.networking.SeccompConnection.Accepted) {
                         val pollRes = ioOps.poll(pollFd, 1L, POLL_TIMEOUT_MS)
                         val count = pollRes.recover { errno, _ ->
                             if (errno != NativeConstants.EINTR) return@use // Break from loop
@@ -151,7 +151,7 @@ internal class ProfilerDaemonEngine(
                     }
 
                     when (val current = connection) {
-                        is ProfilerConnection.Accepted -> {
+                        is io.mazewall.ffi.networking.SeccompConnection.Accepted -> {
                             val listenerFd = socketManager.recvDescriptor(socketFd)
                             if (listenerFd != null) {
                                 System.err.println("[DAEMON] Received listener FD: ${listenerFd.value}")
@@ -163,7 +163,7 @@ internal class ProfilerDaemonEngine(
                             }
                         }
 
-                        is ProfilerConnection.FdAttached -> {
+                        is io.mazewall.ffi.networking.SeccompConnection.FdAttached -> {
                             // Send ACK byte to notify receipt of listener FD
                             System.err.println("[DAEMON] Sending handshake ACK to socket ${socketFd.value}")
                             val ackBuf = arena.allocate(ACK_BUF_SIZE)
@@ -173,11 +173,11 @@ internal class ProfilerDaemonEngine(
                             // Immediately loop to start session reactor (don't poll)
                         }
 
-                        is ProfilerConnection.Active -> {
+                        is io.mazewall.ffi.networking.SeccompConnection.Active -> {
                             System.err.println("[DAEMON] Starting session reactor for listener ${current.listenerFd.value}")
                             handleSession(current.socketFd, current.listenerFd)
                             // After session finishes, reset to Accepted to wait for another session on this socket
-                            connection = ProfilerConnection.Accepted(current.socketFd)
+                            connection = io.mazewall.ffi.networking.SeccompConnection.Accepted(current.socketFd)
                             System.err.println("[DAEMON] Session reactor finished. Resetting to Accepted.")
                         }
                     }
@@ -186,9 +186,10 @@ internal class ProfilerDaemonEngine(
         } finally {
             clientSockets.remove(socketFd)
             socketManager.close(socketFd)
-            if (connection is ProfilerConnection.FdAttached) {
-                activeListeners.remove(connection.listenerFd)
-                socketManager.close(connection.listenerFd)
+            if (connection is io.mazewall.ffi.networking.SeccompConnection.FdAttached) {
+                val lFd = (connection as io.mazewall.ffi.networking.SeccompConnection.FdAttached).listenerFd
+                activeListeners.remove(lFd)
+                socketManager.close(lFd)
             }
         }
     }

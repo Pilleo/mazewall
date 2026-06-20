@@ -1,103 +1,29 @@
 package io.mazewall.profiler.internal
 
-import io.mazewall.LinuxNative
-import io.mazewall.asFd
-import io.mazewall.asInt
-import io.mazewall.core.FileDescriptor
-import io.mazewall.core.FileDescriptorRole
-import io.mazewall.ffi.Layouts
-import io.mazewall.getFdOrThrow
-import io.mazewall.onFailure
-import io.mazewall.onSuccess
-import io.mazewall.profiler.engine.DescriptorPassing
+import io.mazewall.ffi.networking.SupervisorSocketUtils
 import java.lang.foreign.Arena
 import java.lang.foreign.MemorySegment
-import java.lang.foreign.ValueLayout
 
 internal object ProfilerSocket {
-    const val AF_UNIX = 1
-    const val SOCK_STREAM = 1
-    const val ADDR_UN_SIZE = 110
-    const val SOCKADDR_UN_PATH_SIZE = 108
-    private const val CMSG_LEN_VAL = 20L
-    private const val CMSG_LEN_OFF = 0L
-    private const val CMSG_LEVEL_OFF = 8L
-    private const val CMSG_TYPE_OFF = 12L
-    private const val CMSG_DATA_OFF = 16L
-    private const val SOL_SOCKET_VAL = 1
-    private const val SCM_RIGHTS_VAL = 1
-
     fun connectWithRetry(
         socketPath: String,
         maxRetries: Int = 500,
         delayMs: Long = 10L,
     ): Int {
-        Arena.ofConfined().use { arena ->
-            val addr = setupSockAddrUn(arena, socketPath)
-
-            var lastErrno = 0
-            for (retry in 0 until maxRetries) {
-                val (fdRes, connRes) = LinuxNative.withTransaction {
-                    val r1 = LinuxNative.networking.socket(AF_UNIX, SOCK_STREAM, 0)
-                    if (r1 is LinuxNative.SyscallResult.Error) return@withTransaction r1 to r1
-                    val fd = r1.getFdOrThrow("socket(AF_UNIX)")
-                    val r2 = LinuxNative.networking.connect(fd, addr, ADDR_UN_SIZE)
-                    r1 to r2
-                }
-
-                if (fdRes is LinuxNative.SyscallResult.Success && connRes is LinuxNative.SyscallResult.Success) {
-                    return fdRes.asInt()
-                }
-
-                if (fdRes is LinuxNative.SyscallResult.Success) {
-                    lastErrno = (connRes as LinuxNative.SyscallResult.Error).errno
-                    LinuxNative.fileSystem.close(fdRes.asFd())
-                } else {
-                    lastErrno = (fdRes as LinuxNative.SyscallResult.Error).errno
-                }
-
-                Thread.sleep(delayMs)
-            }
-            throw IllegalStateException(
-                "Failed to connect to daemon socket at $socketPath after $maxRetries retries. Last errno=$lastErrno",
-            )
-        }
+        return SupervisorSocketUtils.connectWithRetry(socketPath, maxRetries, delayMs)
     }
 
     fun sendDescriptor(
         socketFd: Int,
         fdToSend: Int,
     ): Boolean {
-        Arena.ofConfined().use { arena ->
-            val dummyByte = arena.allocate(ValueLayout.JAVA_BYTE)
-            dummyByte.set(ValueLayout.JAVA_BYTE, 0, 0.toByte())
-
-            val controlBuf = arena.allocate(24)
-            controlBuf.fill(0)
-            controlBuf.set(ValueLayout.JAVA_LONG, CMSG_LEN_OFF, CMSG_LEN_VAL) // cmsg_len
-            controlBuf.set(ValueLayout.JAVA_INT, CMSG_LEVEL_OFF, SOL_SOCKET_VAL) // cmsg_level (SOL_SOCKET = 1)
-            controlBuf.set(ValueLayout.JAVA_INT, CMSG_TYPE_OFF, SCM_RIGHTS_VAL) // cmsg_type (SCM_RIGHTS = 1)
-            controlBuf.set(ValueLayout.JAVA_INT, CMSG_DATA_OFF, fdToSend)
-
-            val msg = with(arena) {
-                DescriptorPassing.setupScmRightsMsgHdr(dummyByte, controlBuf)
-            }
-
-            val res = LinuxNative.withTransaction { LinuxNative.networking.sendmsg(FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(socketFd), msg, 0) }
-            return res is LinuxNative.SyscallResult.Success
-        }
+        return SupervisorSocketUtils.sendDescriptor(socketFd, fdToSend)
     }
 
     fun setupSockAddrUn(
         arena: Arena,
         socketPath: String,
     ): MemorySegment {
-        val addr = arena.allocate(Layouts.SOCKADDR_UN)
-        addr.fill(0)
-        addr.set(ValueLayout.JAVA_SHORT, 0L, AF_UNIX.toShort())
-        val pathBytes = socketPath.toByteArray(Charsets.UTF_8)
-        val pathSeg = addr.asSlice(2, SOCKADDR_UN_PATH_SIZE.toLong())
-        MemorySegment.copy(pathBytes, 0, pathSeg, ValueLayout.JAVA_BYTE, 0L, pathBytes.size)
-        return addr
+        return SupervisorSocketUtils.setupSockAddrUn(arena, socketPath).segment
     }
 }

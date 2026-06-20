@@ -167,18 +167,22 @@ internal object SupervisorDaemonManager {
         try {
             Arena.ofConfined().use { arena ->
                 val fdRes = LinuxNative.withTransaction {
-                    LinuxNative.networking.socket(1, 1, 0) // AF_UNIX = 1, SOCK_STREAM = 1
+                    LinuxNative.networking.socket(
+                        io.mazewall.ffi.networking.SupervisorSocketUtils.AF_UNIX,
+                        io.mazewall.ffi.networking.SupervisorSocketUtils.SOCK_STREAM,
+                        0
+                    )
                 }
                 val fd = fdRes.getFdOrThrow("socket(AF_UNIX)")
                 try {
-                    val sockaddrUn = io.mazewall.ffi.memory.SockaddrUnSegment(arena.allocate(Layouts.SOCKADDR_UN))
-                    sockaddrUn.setSunFamily(1.toShort()) // AF_UNIX = 1
-                    val pathBytes = socketPath.toByteArray(StandardCharsets.UTF_8)
-                    val pathSeg = sockaddrUn.getSunPath()
-                    MemorySegment.copy(pathBytes, 0, pathSeg, ValueLayout.JAVA_BYTE, 0L, pathBytes.size)
+                    val sockaddrUn = io.mazewall.ffi.networking.SupervisorSocketUtils.setupSockAddrUn(arena, socketPath)
 
                     val connRes = LinuxNative.withTransaction {
-                        LinuxNative.networking.connect(fd, sockaddrUn.segment, SOCKADDR_UN_SIZE)
+                        LinuxNative.networking.connect(
+                            fd,
+                            sockaddrUn.segment,
+                            io.mazewall.ffi.networking.SupervisorSocketUtils.SOCKADDR_UN_SIZE
+                        )
                     }
                     if (connRes is LinuxNative.SyscallResult.Success) {
                         val cmd = arena.allocateFrom(ValueLayout.JAVA_BYTE, SHUTDOWN_COMMAND_BYTE)

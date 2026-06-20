@@ -168,14 +168,24 @@ internal object ProfilerDaemonManager {
         try {
             Arena.ofConfined().use { arena ->
                 val (fdRes, addr) = LinuxNative.withTransaction {
-                    val r1 = LinuxNative.networking.socket(ProfilerSocket.AF_UNIX, ProfilerSocket.SOCK_STREAM, 0)
+                    val r1 = LinuxNative.networking.socket(
+                        io.mazewall.ffi.networking.SupervisorSocketUtils.AF_UNIX,
+                        io.mazewall.ffi.networking.SupervisorSocketUtils.SOCK_STREAM,
+                        0
+                    )
                     if (r1 is LinuxNative.SyscallResult.Error) return@withTransaction r1 to null
-                    r1 to ProfilerSocket.setupSockAddrUn(arena, socketPath)
+                    r1 to io.mazewall.ffi.networking.SupervisorSocketUtils.setupSockAddrUn(arena, socketPath).segment
                 }
                 if (fdRes is LinuxNative.SyscallResult.Error) return
                 val fd = fdRes.getFdOrThrow("socket(AF_UNIX)")
                 try {
-                    val connRes = LinuxNative.withTransaction { LinuxNative.networking.connect(fd, addr!!, ProfilerSocket.ADDR_UN_SIZE) }
+                    val connRes = LinuxNative.withTransaction {
+                        LinuxNative.networking.connect(
+                            fd,
+                            addr!!,
+                            io.mazewall.ffi.networking.SupervisorSocketUtils.SOCKADDR_UN_SIZE
+                        )
+                    }
                     if (connRes is LinuxNative.SyscallResult.Success) {
                         val cmd = arena.allocate(1)
                         cmd.set(ValueLayout.JAVA_BYTE, 0L, SHUTDOWN_COMMAND_BYTE)

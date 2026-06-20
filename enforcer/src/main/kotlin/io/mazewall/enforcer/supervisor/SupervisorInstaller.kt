@@ -115,69 +115,11 @@ public object SupervisorInstaller {
     }
 
     private fun connectWithRetry(socketPath: String, maxRetries: Int = 500, delayMs: Long = 10L): Int {
-        Arena.ofConfined().use { arena ->
-            val sockaddrUn = io.mazewall.ffi.memory.SockaddrUnSegment(arena.allocate(Layouts.SOCKADDR_UN))
-            sockaddrUn.setSunFamily(1.toShort()) // AF_UNIX = 1
-            val pathBytes = socketPath.toByteArray(StandardCharsets.UTF_8)
-            val pathSeg = sockaddrUn.getSunPath()
-            MemorySegment.copy(pathBytes, 0, pathSeg, ValueLayout.JAVA_BYTE, 0L, pathBytes.size)
-
-            var lastErrno = 0
-            for (retry in 0 until maxRetries) {
-                val fdRes = LinuxNative.withTransaction {
-                    LinuxNative.networking.socket(1, 1, 0) // AF_UNIX = 1, SOCK_STREAM = 1
-                }
-                if (fdRes is LinuxNative.SyscallResult.Error) {
-                    lastErrno = fdRes.errno
-                    Thread.sleep(delayMs)
-                    continue
-                }
-                val fdVal = fdRes.getOrThrow("socket").toInt()
-                val fd = FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(fdVal)
-                val connRes = LinuxNative.withTransaction {
-                    LinuxNative.networking.connect(fd, sockaddrUn.segment, 110)
-                }
-                if (connRes is LinuxNative.SyscallResult.Success) {
-                    return fdVal
-                }
-                lastErrno = (connRes as LinuxNative.SyscallResult.Error).errno
-                LinuxNative.fileSystem.close(fd)
-
-                Thread.sleep(delayMs)
-            }
-            throw IllegalStateException(
-                "Failed to connect to supervisor daemon socket at $socketPath after $maxRetries retries. Last errno=$lastErrno",
-            )
-        }
+        return io.mazewall.ffi.networking.SupervisorSocketUtils.connectWithRetry(socketPath, maxRetries, delayMs)
     }
 
     private fun sendDescriptor(socketFd: Int, fdToSend: Int): Boolean {
-        Arena.ofConfined().use { arena ->
-            val dummyByte = arena.allocate(ValueLayout.JAVA_BYTE)
-
-            val controlBuf = arena.allocate(MSG_CONTROL_BUF_SIZE)
-            controlBuf.fill(0)
-            val cmsg = io.mazewall.ffi.memory.CmsghdrSegment(controlBuf)
-            cmsg.setCmsgLen(CMSG_RIGHTS_LEN)
-            cmsg.setCmsgLevel(SOL_SOCKET)
-            cmsg.setCmsgType(SCM_RIGHTS)
-            cmsg.setDataFd(fdToSend)
-
-            val iov = io.mazewall.ffi.memory.IovecSegment(arena.allocate(Layouts.IOVEC))
-            iov.setIovBase(dummyByte)
-            iov.setIovLen(1L)
-
-            val msg = io.mazewall.ffi.memory.MsghdrSegment(arena.allocate(Layouts.MSGHDR))
-            msg.setMsgIov(iov.segment)
-            msg.setMsgIovlen(1L)
-            msg.setMsgControl(controlBuf)
-            msg.setMsgControllen(MSG_CONTROL_BUF_SIZE)
-
-            val res = LinuxNative.withTransaction {
-                LinuxNative.networking.sendmsg(FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(socketFd), msg.segment, 0)
-            }
-            return res is LinuxNative.SyscallResult.Success
-        }
+        return io.mazewall.ffi.networking.SupervisorSocketUtils.sendDescriptor(socketFd, fdToSend)
     }
 }
 
