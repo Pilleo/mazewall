@@ -57,7 +57,7 @@ public object SupervisorInstaller {
                 socketPath = context.socketPath,
                 filterInstructions = filter,
                 processWide = false
-            ) { socketFd, _ ->
+            ) { socketFd ->
                 val listener = JVMValidationListener(
                     FileDescriptor.unsafe(socketFd),
                     scopingPolicy

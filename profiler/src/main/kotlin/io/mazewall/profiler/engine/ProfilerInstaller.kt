@@ -82,7 +82,7 @@ internal class ProfilerInstallerSession(
             processWide = processWide,
             connectWithRetry = connectWithRetry,
             sendDescriptor = { sockFd, fd -> ProfilerSocket.sendDescriptor(sockFd, fd) }
-        ) { socketFd, _ ->
+        ) { socketFd ->
             // Start background thread to listen for events from the daemon (uncontained)
             startTraceListener(socketFd, accumulatedLogs, stackTracesMap, pathCache, workerThreadProvider)
         }

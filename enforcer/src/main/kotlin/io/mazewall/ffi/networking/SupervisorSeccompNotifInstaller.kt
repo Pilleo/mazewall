@@ -27,7 +27,7 @@ public object SupervisorSeccompNotifInstaller {
         processWide: Boolean = false,
         connectWithRetry: (String) -> Int = { path -> SupervisorSocketUtils.connectWithRetry(path) },
         sendDescriptor: (Int, Int) -> Boolean = { sockFd, fd -> SupervisorSocketUtils.sendDescriptor(sockFd, fd) },
-        onHandshakeSuccess: (socketFd: Int, listenerFd: Int) -> Unit
+        onSocketConnected: (socketFd: Int) -> Unit
     ) {
         if (!Platform.featureMatrix.seccompUserNotifSupported) {
             throw UnsupportedKernelFeatureException("Seccomp User Notifications are required.")
@@ -50,6 +50,13 @@ public object SupervisorSeccompNotifInstaller {
         }
 
         val socketFd = connectWithRetry(socketPath)
+
+        // ARCHITECTURAL INVARIANT: Spawning validation/listener threads and performing all related
+        // classloading MUST occur BEFORE the seccomp filter is installed on the current thread.
+        // If we sandbox the thread first, any subsequent JVM classloader operations (which trigger 'openat')
+        // will get trapped by seccomp, blocking the installer thread and causing a circular deadlock
+        // since the daemon blocks waiting for an ACK from the listener thread that hasn't started yet.
+        onSocketConnected(socketFd)
 
         // Helper thread to send seccomp listener FD to daemon
         val listenerFdPromise = CompletableFuture<Int>()
@@ -116,8 +123,6 @@ public object SupervisorSeccompNotifInstaller {
 
                 setupHelper.join()
                 setupError.get()?.let { throw it }
-
-                onHandshakeSuccess(socketFd, listenerFd.value)
             }
         } catch (t: Throwable) {
             // Clean up socketFd if handshake fails
