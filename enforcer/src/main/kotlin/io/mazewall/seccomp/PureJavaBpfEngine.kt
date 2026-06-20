@@ -56,6 +56,13 @@ internal object PureJavaBpfEngine : SeccompEngine<EngineState> {
         EngineState.UnprivilegedImpl.toString()
         EngineState.LoadedImpl.toString()
         EngineState.ConfiguredImpl.toString()
+        SeccompInstallationState.Uninitialized.toString()
+        SeccompInstallationState.PrivilegesLocked.toString()
+        SeccompInstallationState.SystemCallApplied.toString()
+        SeccompInstallationState.FallbackPrctlApplied.toString()
+        SeccompInstallationState.Verified.toString()
+        SeccompInstallationState.FilterBuilt::class.java.name.toString()
+        SeccompInstallationState.Failed::class.java.name.toString()
 
         updateState(SeccompInstallationState.Uninitialized)
         try {

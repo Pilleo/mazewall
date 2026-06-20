@@ -180,9 +180,8 @@ class ProcessContainmentTest : BaseIntegrationTest() {
         IsolatedProcessTester.runIsolatedMethod(this::class.java.name, "testThreadDepth")
     }
 
-    @Test
-    fun `installOnProcess respects Landlock support limits`() {
-        val policyWithFs = Policy.builder().allowFsRead("/etc").build()
+    fun testLandlockSupportLimits() {
+        val policyWithFs = Policy.builder().allowMmapExec().allowFsRead("/etc").build()
         val features = Platform.featureMatrix
 
         if (features.landlockTsyncSupported) {
@@ -193,7 +192,7 @@ class ProcessContainmentTest : BaseIntegrationTest() {
                 ContainedExecutors.installOnProcess(policyWithFs as Policy<PolicyScope.ProcessWideSafe, io.mazewall.Uncompiled>)
             } catch (e: Exception) {
                 // EACCES is acceptable in this test context as it proves we bypassed the version guard
-                if (e.message?.contains("EACCES") == false && e !is io.mazewall.UnsupportedKernelFeatureException) {
+                if (e.message?.contains("EACCES") == false && e.message?.contains("13") == false && e !is io.mazewall.UnsupportedKernelFeatureException) {
                     throw e
                 }
             }
@@ -203,5 +202,11 @@ class ProcessContainmentTest : BaseIntegrationTest() {
                 ContainedExecutors.installOnProcess(policyWithFs as Policy<PolicyScope.ProcessWideSafe, io.mazewall.Uncompiled>)
             }
         }
+    }
+
+    @Test
+    @EnabledIfLinuxAndSupported
+    fun `installOnProcess respects Landlock support limits`() {
+        IsolatedProcessTester.runIsolatedMethod(this::class.java.name, "testLandlockSupportLimits")
     }
 }

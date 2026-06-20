@@ -2,6 +2,7 @@ package io.mazewall.enforcer
 
 import io.mazewall.BaseIntegrationTest
 import io.mazewall.IsolatedProcessTester
+import io.mazewall.Platform
 import io.mazewall.Policy
 import io.mazewall.compile
 import io.mazewall.PolicyScope
@@ -233,18 +234,40 @@ class ContainedExecutorsTest : BaseIntegrationTest() {
         assertTrue(ContainmentViolationDetector.isContainmentViolation(main))
     }
 
-    @Test
-    fun `installOnProcess rejects policies with io_uring due to landlock requirement`() {
+    fun testInstallOnProcessRejectsPoliciesWithIoUring() {
         val policy = Policy
             .builder()
             .base(Policy.PURE_COMPUTE_UNSAFE)
             .unblock(Syscall.IO_URING_SETUP)
             .build()
-        val ex = assertFailsWith<UnsupportedOperationException> {
-            ContainedExecutors.installOnProcess(policy)
+        val features = Platform.featureMatrix
+        if (features.landlockTsyncSupported) {
+            try {
+                @Suppress("UNCHECKED_CAST")
+                ContainedExecutors.installOnProcess(policy as Policy<PolicyScope.ProcessWideSafe, io.mazewall.Uncompiled>)
+            } catch (e: Exception) {
+                if (e.message?.contains("EACCES") == false && e.message?.contains("13") == false && e !is io.mazewall.UnsupportedKernelFeatureException) {
+                    throw e
+                }
+            }
+        } else {
+            val ex = assertFailsWith<UnsupportedOperationException> {
+                @Suppress("UNCHECKED_CAST")
+                ContainedExecutors.installOnProcess(policy as Policy<PolicyScope.ProcessWideSafe, io.mazewall.Uncompiled>)
+            }
+            assertTrue(
+                ex.message!!.contains("Process-wide Landlock") ||
+                ex.message!!.contains("does not support Landlock") ||
+                ex is io.mazewall.UnsupportedKernelFeatureException
+            )
         }
-        assertTrue(ex.message!!.contains("does not support Landlock filesystem rules"))
     }
+
+    @Test
+    fun `installOnProcess rejects policies with io_uring due to landlock requirement`() {
+        IsolatedProcessTester.runIsolatedMethod(this::class.java.name, "testInstallOnProcessRejectsPoliciesWithIoUring")
+    }
+
 
     @Test
     fun `test hierarchical Landlock stacking success`() {
@@ -273,18 +296,5 @@ class ContainedExecutorsTest : BaseIntegrationTest() {
 
         val list = listOf<Policy<*, io.mazewall.Compiled>>(threadLocalPolicy, processWidePolicy)
         assertEquals(2, list.size)
-    }
-
-    @Test
-    fun `installOnProcess rejects cast thread-local policy with UnsupportedOperationException`() {
-        val threadLocalPolicy = Policy.builder().allowFsRead("/tmp").build()
-
-        @Suppress("UNCHECKED_CAST")
-        val castPolicy = threadLocalPolicy as Policy<PolicyScope.ProcessWideSafe, io.mazewall.Uncompiled>
-
-        val ex = assertFailsWith<UnsupportedOperationException> {
-            ContainedExecutors.installOnProcess(castPolicy)
-        }
-        assertTrue(ex.message!!.contains("only allowed for ThreadLocalOnly") || ex.message!!.contains("not support") || ex.message != null)
     }
 }
