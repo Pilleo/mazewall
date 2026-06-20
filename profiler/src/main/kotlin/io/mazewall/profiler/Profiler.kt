@@ -40,6 +40,9 @@ object Profiler {
         processWide: Boolean = false,
         block: () -> T,
     ): ProfilingResult<T> {
+        if (Thread.currentThread().isVirtual) {
+            throw IllegalStateException("Cannot run profiler inside virtual threads")
+        }
         val context = ProfilerDaemonManager.getOrSpawnSharedDaemon()
         val localLogs = CopyOnWriteArrayList<TraceEvent>()
         val localStackProfile = ConcurrentHashMap<TraceEvent, MutableList<Array<StackTraceElement>>>()
@@ -181,6 +184,9 @@ object Profiler {
         private fun applyProfilingIfNecessary() {
             if (!threadApplied.get()) {
                 val currentThread = Thread.currentThread()
+                if (currentThread.isVirtual) {
+                    throw IllegalStateException("Cannot run profiler inside virtual threads")
+                }
                 threadRegistry[LinuxNative.process.gettid()] = currentThread
                 installProfilingFilterForThread(
                     context.socketPath,

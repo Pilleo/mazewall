@@ -20,10 +20,7 @@ import io.mazewall.ffi.memory.writeInt
 import io.mazewall.ffi.memory.writeIntUnaligned
 import io.mazewall.ffi.memory.writeLong
 import io.mazewall.ffi.memory.writeLongUnaligned
-import io.mazewall.ffi.memory.writeIntBigEndian
-import io.mazewall.ffi.memory.writeIntBigEndianUnaligned
-import io.mazewall.ffi.memory.writeLongBigEndian
-import io.mazewall.ffi.memory.writeLongBigEndianUnaligned
+import io.mazewall.ffi.networking.NetworkOrderBuffer
 import io.mazewall.onSuccess
 import io.mazewall.recover
 import java.lang.foreign.Arena
@@ -174,28 +171,29 @@ internal class SupervisorSessionHandler(
             )
 
             val buf = arena.allocate(totalSize.toLong())
+            val netBuf = NetworkOrderBuffer(buf)
             var offset = 0L
 
-            buf.writeLongBigEndian(offset, id); offset += BYTES_PER_LONG
-            buf.writeIntBigEndian(offset, pidVal); offset += SIZE_INT
-            buf.writeIntBigEndian(offset, nr); offset += SIZE_INT
+            netBuf.writeLong(offset, id); offset += BYTES_PER_LONG
+            netBuf.writeInt(offset, pidVal); offset += SIZE_INT
+            netBuf.writeInt(offset, nr); offset += SIZE_INT
 
             if (pathStr != null) {
-                buf.writeIntBigEndian(offset, ONE_ARG); offset += SIZE_INT
-                buf.writeByte(offset, ARG_TYPE_STRING); offset += SIZE_BYTE
+                netBuf.writeInt(offset, ONE_ARG); offset += SIZE_INT
+                netBuf.writeByte(offset, ARG_TYPE_STRING); offset += SIZE_BYTE
                 val bytes = pathStr.toByteArray(StandardCharsets.UTF_8)
-                buf.writeIntBigEndianUnaligned(offset, bytes.size); offset += SIZE_INT
+                netBuf.writeIntUnaligned(offset, bytes.size); offset += SIZE_INT
                 MemorySegment.copy(bytes, 0, buf, ValueLayout.JAVA_BYTE, offset, bytes.size)
             } else if (sockaddrBytes != null) {
-                buf.writeIntBigEndian(offset, ONE_ARG); offset += SIZE_INT
-                buf.writeByte(offset, ARG_TYPE_SOCKADDR); offset += SIZE_BYTE
-                buf.writeIntBigEndianUnaligned(offset, sockaddrBytes.size); offset += SIZE_INT
+                netBuf.writeInt(offset, ONE_ARG); offset += SIZE_INT
+                netBuf.writeByte(offset, ARG_TYPE_SOCKADDR); offset += SIZE_BYTE
+                netBuf.writeIntUnaligned(offset, sockaddrBytes.size); offset += SIZE_INT
                 MemorySegment.copy(sockaddrBytes, 0, buf, ValueLayout.JAVA_BYTE, offset, sockaddrBytes.size)
             } else {
-                buf.writeIntBigEndian(offset, MAX_ARGS); offset += SIZE_INT
+                netBuf.writeInt(offset, MAX_ARGS); offset += SIZE_INT
                 for (arg in args) {
-                    buf.writeByte(offset, ARG_TYPE_LONG); offset += SIZE_BYTE
-                    buf.writeLongBigEndianUnaligned(offset, arg); offset += BYTES_PER_LONG
+                    netBuf.writeByte(offset, ARG_TYPE_LONG); offset += SIZE_BYTE
+                    netBuf.writeLongUnaligned(offset, arg); offset += BYTES_PER_LONG
                 }
             }
 

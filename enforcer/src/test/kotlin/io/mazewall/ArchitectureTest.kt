@@ -219,4 +219,20 @@ class ArchitectureTest {
             .because("Domain logic must not leak raw SyscallResult objects to callers. They must be handled internally.")
             .check(allClasses)
     }
+
+    @ArchTest
+    fun bigEndianMemoryWritesMustOnlyBeCalledByNetworkOrderBuffer(allClasses: com.tngtech.archunit.core.domain.JavaClasses) {
+        noClasses()
+            .that()
+            .resideOutsideOfPackages("io.mazewall.ffi.networking..")
+            .should()
+            .callMethodWhere(object : DescribedPredicate<JavaMethodCall>("calls to Big Endian write helpers") {
+                override fun test(input: JavaMethodCall): Boolean {
+                    return input.target.owner.name.startsWith("io.mazewall.ffi.memory.MemoryWrappersKt") &&
+                        input.target.name.contains("BigEndian")
+                }
+            })
+            .because("Big Endian write helpers must be encapsulated within NetworkOrderBuffer to enforce compile-time ordering.")
+            .check(allClasses)
+    }
 }

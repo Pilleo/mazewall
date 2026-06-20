@@ -35,11 +35,19 @@ public object SupervisorInstaller {
     private val logger = Logger.getLogger(SupervisorInstaller::class.java.name)
     internal val threadRegistry = ConcurrentHashMap<Tid, Thread>()
 
+    public fun registerThread(tid: Tid) {
+        threadRegistry[tid] = Thread.currentThread()
+    }
+
+    public fun unregisterThread(tid: Tid) {
+        threadRegistry.remove(tid)
+    }
+
     @Suppress("LongParameterList", "TooGenericExceptionCaught")
     public fun installSupervisedFilterForThread(
         policy: PolicyDefinition<*>,
         scopingPolicy: StacktraceScopingPolicy
-    ) {
+    ): SupervisorSession {
         val context = SupervisorDaemonManager.getOrSpawnSharedDaemon()
         val arch = Arch.current()
 
@@ -50,7 +58,7 @@ public object SupervisorInstaller {
 
         val filter = BpfFilter.build(arch, policy)
         val tid = LinuxNative.process.gettid()
-        threadRegistry[tid] = Thread.currentThread()
+        registerThread(tid)
 
         try {
             SupervisorSeccompNotifInstaller.install(
@@ -64,8 +72,9 @@ public object SupervisorInstaller {
                 )
                 listener.start()
             }
+            return SupervisorSession(tid)
         } catch (t: Throwable) {
-            threadRegistry.remove(tid)
+            unregisterThread(tid)
             throw t
         }
     }

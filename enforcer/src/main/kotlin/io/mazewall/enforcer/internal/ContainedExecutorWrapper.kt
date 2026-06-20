@@ -20,31 +20,29 @@ internal class ContainedExecutorWrapper(
 ) : ExecutorService by delegate {
     private fun <T> wrapCallable(task: Callable<T>): Callable<T> =
         Callable {
-            applyContainment()
-            val result = runCatching { task.call() }
-            result.getOrElse { e ->
-                if (e is Exception && ContainmentViolationDetector.isContainmentViolation(e)) {
-                    throw ContainmentViolationException("Task violated containment policy", e)
+            ContainedExecutors.installOnCurrentThread(policy, scopingPolicy).use {
+                val result = runCatching { task.call() }
+                result.getOrElse { e ->
+                    if (e is Exception && ContainmentViolationDetector.isContainmentViolation(e)) {
+                        throw ContainmentViolationException("Task violated containment policy", e)
+                    }
+                    throw e
                 }
-                throw e
             }
         }
 
     private fun wrapRunnable(task: Runnable): Runnable =
         Runnable {
-            applyContainment()
-            val result = runCatching { task.run() }
-            result.onFailure { e ->
-                if (e is Exception && ContainmentViolationDetector.isContainmentViolation(e)) {
-                    throw ContainmentViolationException("Task violated containment policy", e)
+            ContainedExecutors.installOnCurrentThread(policy, scopingPolicy).use {
+                val result = runCatching { task.run() }
+                result.onFailure { e ->
+                    if (e is Exception && ContainmentViolationDetector.isContainmentViolation(e)) {
+                        throw ContainmentViolationException("Task violated containment policy", e)
+                    }
+                    throw e
                 }
-                throw e
             }
         }
-
-    private fun applyContainment() {
-        ContainedExecutors.installOnCurrentThread(policy, scopingPolicy)
-    }
 
     override fun execute(command: Runnable) {
         delegate.execute(wrapRunnable(command))

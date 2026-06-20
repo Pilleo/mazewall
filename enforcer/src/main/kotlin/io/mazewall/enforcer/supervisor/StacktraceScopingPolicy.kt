@@ -10,6 +10,11 @@ public interface StacktraceScopingPolicy {
     /**
      * Authorizes or denies a system call.
      *
+     * > [!WARNING]
+     * > Scoping policies must be careful not to block system and classpath file reads (e.g. `open`/`openat` for `.class` or `.jar` files).
+     * > Blocking classloader reads during active execution will cause [ClassNotFoundException] or [NoClassDefFoundError] and deadlock the JVM.
+     * > It is recommended to always authorize reads that do not target sensitive application assets or test files.
+     *
      * @param tid The Thread ID of the blocked thread.
      * @param syscall The system call being invoked.
      * @param args The resolved/raw system call arguments.
