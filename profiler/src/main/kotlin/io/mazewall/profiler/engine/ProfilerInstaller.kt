@@ -14,6 +14,7 @@ import io.mazewall.ffi.NativeConstants
 import io.mazewall.ffi.memory.nativeScope
 import io.mazewall.getFdOrThrow
 import io.mazewall.profiler.internal.ProfilerSocket
+import io.mazewall.ffi.networking.SupervisorSeccompNotifInstaller
 
 /**
  * Internal orchestrator for installing profiling filters and initializing the listener.
@@ -71,110 +72,19 @@ internal class ProfilerInstallerSession(
     ) -> Unit,
     private val processWide: Boolean = false,
 ) {
-    @Suppress("ThrowsCount", "MagicNumber")
     fun install() {
-        if (!Platform.featureMatrix.seccompUserNotifSupported) {
-            throw UnsupportedKernelFeatureException("Seccomp User Notifications are required for profiling.")
-        }
-
-        // Mandatory for non-privileged seccomp
-        LinuxNative.withTransaction {
-            LinuxNative.process.prctl(io.mazewall.core.PrctlCommand.SetNoNewPrivs(true))
-        }.getOrThrow("prctl(PR_SET_NO_NEW_PRIVS)")
-
         val arch = Arch.current()
-
-        // Pre-charge BpfProgram classloading to avoid deadlocks under active seccomp filters
-        val dummyBpf = if (processWide) {
-            io.mazewall.seccomp.BpfProgram.dsl(arch) { allow() }.instructions
-        } else {
-            // Also build a dummy program unconditionally to pre-charge classloading
-            io.mazewall.seccomp.BpfProgram.dsl(arch) { allow() }.instructions
-            null
-        }
-
-        val fd = connectWithRetry(socketPath)
-
         val filter = BpfFilter.build(arch, policy, profilingMode = true)
 
-        // We must spawn all infrastructure threads BEFORE installing the seccomp filter on the current thread.
-        // Seccomp filters are thread-scoped and inherited by children. If we spawn these threads AFTER
-        // sandboxing the current thread, they will also be sandboxed and trapped, leading to a deadlock
-        // when they try to communicate with the daemon (which is blocked waiting for setup to finish).
-        val listenerFdPromise = java.util.concurrent.CompletableFuture<Int>()
-        val setupError = java.util.concurrent.atomic.AtomicReference<Throwable?>()
-        val setupHelper = Thread {
-            @Suppress("TooGenericExceptionCaught")
-            try {
-                val listenerFdValue = listenerFdPromise.get()
-                val sent = ProfilerSocket.sendDescriptor(fd, listenerFdValue)
-                if (!sent) {
-                    setupError.set(IllegalStateException("Failed to send seccomp listener FD to daemon"))
-                }
-            } catch (e: Exception) {
-                setupError.set(e)
-            }
-        }.apply {
-            isDaemon = true
-            name = "profiler-setup-helper"
-            start()
+        SupervisorSeccompNotifInstaller.install(
+            socketPath = socketPath,
+            filterInstructions = filter,
+            processWide = processWide,
+            connectWithRetry = connectWithRetry,
+            sendDescriptor = { sockFd, fd -> ProfilerSocket.sendDescriptor(sockFd, fd) }
+        ) { socketFd, _ ->
+            // Start background thread to listen for events from the daemon (uncontained)
+            startTraceListener(socketFd, accumulatedLogs, stackTracesMap, pathCache, workerThreadProvider)
         }
-
-        // Start background thread to listen for events from the daemon (uncontained)
-        startTraceListener(fd, accumulatedLogs, stackTracesMap, pathCache, workerThreadProvider)
-
-        nativeScope {
-            val prog = LinuxNative.memory.newSockFProg(filter)
-            val listenerFd = installListener(arch, prog)
-
-            // Step 2: Synchronize filter tree process-wide if processWide is true
-            if (processWide && dummyBpf != null) {
-                val dummyProg = LinuxNative.memory.newSockFProg(dummyBpf)
-                val tsyncRes = LinuxNative.withTransaction {
-                    LinuxNative.syscall(
-                        arch.seccompSyscallNumber.toLong(),
-                        NativeArg.LongArg(NativeConstants.SECCOMP_SET_MODE_FILTER.toLong()),
-                        NativeArg.LongArg(NativeConstants.SECCOMP_FILTER_FLAG_TSYNC.toLong()),
-                        NativeArg.MemoryArg(dummyProg),
-                    )
-                }
-                if (tsyncRes is LinuxNative.SyscallResult.Error) {
-                    val errno = tsyncRes.errno
-                    if (errno == 13) {
-                        throw IllegalStateException(
-                            "Process-wide profiling failed with EACCES (Permission denied). " +
-                            "This typically occurs because sibling threads (such as GC or JIT compiler threads) " +
-                            "do not have the 'no_new_privs' flag set. Process-wide profiling requires running " +
-                            "inside a container (where privilege escalation is disabled at the container boundary)."
-                        )
-                    } else {
-                        throw IllegalStateException("Process-wide profiling TSYNC failed with errno $errno")
-                    }
-                }
-            }
-
-            // Release the helper to send the descriptor
-            listenerFdPromise.complete(listenerFd.value)
-
-            // Wait for setup to finish to ensure daemon is ready before workload starts
-            setupHelper.join()
-            setupError.get()?.let { throw it }
-        }
-    }
-
-    private fun installListener(
-        arch: Arch,
-        prog: java.lang.foreign.MemorySegment,
-    ): FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open> {
-        val r = LinuxNative.withTransaction {
-            LinuxNative.syscall(
-                arch.seccompSyscallNumber.toLong(),
-                NativeArg.LongArg(NativeConstants.SECCOMP_SET_MODE_FILTER.toLong()),
-                NativeArg.LongArg(NativeConstants.SECCOMP_FILTER_FLAG_NEW_LISTENER.toLong()),
-                NativeArg.MemoryArg(prog),
-            )
-        }
-
-        return r.getFdOrThrow("seccomp(SECCOMP_FILTER_FLAG_NEW_LISTENER)").let { FileDescriptor.unsafe<FileDescriptorRole.SeccompNotif>(it.value) }
     }
 }

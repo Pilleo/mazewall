@@ -17,6 +17,7 @@ import io.mazewall.ffi.NativeConstants
 import io.mazewall.ffi.memory.nativeScope
 import io.mazewall.getFdOrThrow
 import io.mazewall.onFailure
+import io.mazewall.ffi.networking.SupervisorSeccompNotifInstaller
 import java.io.BufferedInputStream
 import java.io.DataInputStream
 import java.io.InputStream
@@ -34,18 +35,12 @@ public object SupervisorInstaller {
     private val logger = Logger.getLogger(SupervisorInstaller::class.java.name)
     internal val threadRegistry = ConcurrentHashMap<Tid, Thread>()
 
-    private const val CMSG_RIGHTS_LEN = 20L
-    private const val MSG_CONTROL_BUF_SIZE = 24L
-    private const val SOL_SOCKET = 1
-    private const val SCM_RIGHTS = 1
-
     @Suppress("LongParameterList")
     public fun installSupervisedFilterForThread(
         policy: PolicyDefinition<*>,
         scopingPolicy: StacktraceScopingPolicy
     ) {
         val context = SupervisorDaemonManager.getOrSpawnSharedDaemon()
-        val socketFd = connectWithRetry(context.socketPath)
         val arch = Arch.current()
 
         // Assert not a virtual thread per Loom carrier poisoning rules
@@ -53,73 +48,25 @@ public object SupervisorInstaller {
             throw IllegalStateException("Cannot install seccomp filter directly on a virtual thread.")
         }
 
-        // Mandatory for non-privileged seccomp
-        LinuxNative.withTransaction {
-            LinuxNative.process.prctl(io.mazewall.core.PrctlCommand.SetNoNewPrivs(true))
-        }.getOrThrow("prctl(PR_SET_NO_NEW_PRIVS)")
-
         val filter = BpfFilter.build(arch, policy)
-
-        // Helper thread to send seccomp listener FD to daemon
-        val listenerFdPromise = CompletableFuture<Int>()
-        val setupError = AtomicReference<Throwable?>()
-        val setupHelper = Thread {
-            try {
-                val listenerFdValue = listenerFdPromise.get()
-                val sent = sendDescriptor(socketFd, listenerFdValue)
-                if (!sent) {
-                    setupError.set(IllegalStateException("Failed to send seccomp listener FD to daemon"))
-                }
-            } catch (e: InterruptedException) {
-                setupError.set(e)
-            } catch (e: java.util.concurrent.ExecutionException) {
-                setupError.set(e)
-            }
-        }.apply {
-            isDaemon = true
-            name = "supervisor-setup-helper"
-            start()
-        }
-
-        // Start background JVM listener thread to handle validation requests
-        val listener = JVMValidationListener(
-            FileDescriptor.unsafe(socketFd),
-            scopingPolicy
-        )
-        listener.start()
-
         val tid = LinuxNative.process.gettid()
         threadRegistry[tid] = Thread.currentThread()
 
         try {
-            nativeScope {
-                val prog = LinuxNative.memory.newSockFProg(filter)
-                val r = LinuxNative.withTransaction {
-                    LinuxNative.syscall(
-                        arch.seccompSyscallNumber.toLong(),
-                        NativeArg.LongArg(NativeConstants.SECCOMP_SET_MODE_FILTER.toLong()),
-                        NativeArg.LongArg(NativeConstants.SECCOMP_FILTER_FLAG_NEW_LISTENER.toLong()),
-                        NativeArg.MemoryArg(prog),
-                    )
-                }
-                val listenerFd = r.getFdOrThrow("seccomp(SECCOMP_FILTER_FLAG_NEW_LISTENER)").let { FileDescriptor.unsafe<FileDescriptorRole.SeccompNotif>(it.value) }
-
-                listenerFdPromise.complete(listenerFd.value)
-
-                setupHelper.join()
-                setupError.get()?.let { throw it }
+            SupervisorSeccompNotifInstaller.install(
+                socketPath = context.socketPath,
+                filterInstructions = filter,
+                processWide = false
+            ) { socketFd, _ ->
+                val listener = JVMValidationListener(
+                    FileDescriptor.unsafe(socketFd),
+                    scopingPolicy
+                )
+                listener.start()
             }
         } finally {
             threadRegistry.remove(tid)
         }
-    }
-
-    private fun connectWithRetry(socketPath: String, maxRetries: Int = 500, delayMs: Long = 10L): Int {
-        return io.mazewall.ffi.networking.SupervisorSocketUtils.connectWithRetry(socketPath, maxRetries, delayMs)
-    }
-
-    private fun sendDescriptor(socketFd: Int, fdToSend: Int): Boolean {
-        return io.mazewall.ffi.networking.SupervisorSocketUtils.sendDescriptor(socketFd, fdToSend)
     }
 }
 
