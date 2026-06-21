@@ -1,6 +1,39 @@
 package io.mazewall.enforcer.supervisor
 
+public sealed interface ScopingValidationState {
+    public data object ClassloaderActive : ScopingValidationState
+
+    public class SafeToValidate private constructor(
+        public val rawStack: Array<StackTraceElement>,
+        public val nr: Int,
+        public val argsList: List<Any>
+    ) : ScopingValidationState {
+        internal companion object {
+            fun create(rawStack: Array<StackTraceElement>, nr: Int, argsList: List<Any>) =
+                SafeToValidate(rawStack, nr, argsList)
+        }
+    }
+}
+
 public object JvmStackInspector {
+
+    /**
+     * Inspects the target thread's stack trace for classloader activity and returns the appropriate type-state.
+     *
+     * This method must be called before invoking the scoping policy.
+     */
+    public fun inspect(
+        nr: Int,
+        argsList: List<Any>,
+        targetThread: Thread?
+    ): ScopingValidationState {
+        val rawStack = targetThread?.stackTrace ?: emptyArray()
+        return if (isClassloaderActive(rawStack)) {
+            ScopingValidationState.ClassloaderActive
+        } else {
+            ScopingValidationState.SafeToValidate.create(rawStack, nr, argsList)
+        }
+    }
 
     private fun startsWith(str: String, prefix: String): Boolean {
         if (str.length < prefix.length) return false
@@ -33,6 +66,19 @@ public object JvmStackInspector {
             }
         }
         return false
+    }
+
+    /**
+     * Forces the JVM to load this class and all its associated state classes and methods
+     * so they are available without triggering class loading during seccomp validation.
+     */
+    public fun precharge() {
+        val stack = emptyArray<StackTraceElement>()
+        isClassloaderActive(stack)
+        val s1 = ScopingValidationState.ClassloaderActive
+        val emptyList = java.util.ArrayList<Any>(0)
+        val s2 = ScopingValidationState.SafeToValidate.create(stack, -1, emptyList)
+        inspect(-1, emptyList, null)
     }
 }
 

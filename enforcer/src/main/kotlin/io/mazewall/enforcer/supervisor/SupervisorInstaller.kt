@@ -59,6 +59,7 @@ public object SupervisorInstaller {
         val filter = BpfFilter.build(arch, policy)
         val tid = LinuxNative.process.gettid()
         registerThread(tid)
+        JvmStackInspector.precharge()
 
         try {
             SupervisorSeccompNotifInstaller.install(
@@ -118,6 +119,8 @@ internal class JVMValidationListener(
                 logger.warning("Invalid handshake ACK: $ack")
             }
 
+            val responseSegment = with(arena) { io.mazewall.ffi.memory.SupervisorResponseSegment.allocate() }
+
             while (!closed.get()) {
                 val id = try {
                     dis.readLong()
@@ -128,67 +131,19 @@ internal class JVMValidationListener(
                 val nr = dis.readInt()
                 val argCount = dis.readInt()
 
-                // Read request arguments as raw data structures to avoid classloading.
-                // We use primitive arrays here:
-                val argTypes = ByteArray(argCount)
-                val argValues = arrayOfNulls<Any>(argCount)
-                for (i in 0 until argCount) {
-                    val type = dis.readByte()
-                    argTypes[i] = type
-                    when (type.toInt()) {
-                        0 -> { // Long
-                            argValues[i] = dis.readLong()
-                        }
-                        1, 2 -> { // String raw bytes or SockAddr bytes
-                            val len = dis.readInt()
-                            val bytes = ByteArray(len)
-                            dis.readFully(bytes)
-                            argValues[i] = bytes
-                        }
-                    }
-                }
+                val argsList = readRequestArgs(dis, argCount)
 
-                // Perform Stacktrace Scoping validation.
-                //
-                // ORDERING IS CRITICAL: obtain the raw stack array and run the classloader check
-                // BEFORE any classloading (no string decoding, no custom classes, no Kotlin lists/lambdas).
-                //
-                // Fast-path: if the tracee thread is currently executing inside a classloader
-                // operation it holds the JVM ClassLoader monitor. Immediately allow the syscall
-                // so the tracee can finish class loading and release the lock.
                 val targetThread = SupervisorInstaller.threadRegistry[Tid(pidVal)]
-                val stackTrace = targetThread?.stackTrace ?: emptyArray()
-                val isLoaderActive = JvmStackInspector.isClassloaderActive(stackTrace)
+                val validationState = JvmStackInspector.inspect(nr, argsList, targetThread)
 
-                if (isLoaderActive) {
-                    val decision: Byte = if (nr == SYS_OPEN || nr == SYS_CONNECT || nr == SYS_OPENAT || nr == SYS_OPENAT2) {
-                        2.toByte()
-                    } else {
-                        1.toByte()
-                    }
-                    sendResponse(id, decision, 0)
-                    continue
-                }
-
-                // If classloader is NOT active, it is 100% safe to perform classloading, decode strings,
-                // allocate collections, and run the policy.
-                val argsList = java.util.ArrayList<Any>(argCount)
-                for (i in 0 until argCount) {
-                    val type = argTypes[i]
-                    val value = argValues[i] ?: continue
-                    when (type.toInt()) {
-                        0 -> argsList.add(value as Long)
-                        1 -> {
-                            val bytes = value as ByteArray
-                            argsList.add(String(bytes, StandardCharsets.UTF_8))
-                        }
-                        2 -> argsList.add(value as ByteArray)
+                val isAllowed = when (validationState) {
+                    is ScopingValidationState.ClassloaderActive -> true
+                    is ScopingValidationState.SafeToValidate -> {
+                        val stackTrace = validationState.rawStack.toList()
+                        val syscall = Syscall.entries.find { it.numberFor(Arch.current()) == validationState.nr } ?: Syscall.OPEN
+                        scopingPolicy.authorize(Tid(pidVal), syscall, validationState.argsList, stackTrace)
                     }
                 }
-
-                val stackTraceList = stackTrace.toList()
-                val syscall = Syscall.entries.find { it.numberFor(Arch.current()) == nr } ?: Syscall.OPEN
-                val isAllowed = scopingPolicy.authorize(Tid(pidVal), syscall, argsList, stackTraceList)
 
                 // Decision encoding: 0 = Deny, 1 = Allow Continue, 2 = Allow & Inject FD
                 val decision: Byte = if (isAllowed) {
@@ -202,7 +157,7 @@ internal class JVMValidationListener(
                 }
 
                 val errorNr = if (decision.toInt() == 0) NativeConstants.EPERM else 0
-                sendResponse(id, decision, errorNr)
+                sendResponse(id, decision, errorNr, responseSegment)
             }
         } catch (ignored: java.io.IOException) {
             // Done
@@ -214,15 +169,37 @@ internal class JVMValidationListener(
         }
     }
 
-    private fun sendResponse(id: Long, decision: Byte, errorNr: Int) {
-        Arena.ofConfined().use { responseArena ->
-            val resp = with(responseArena) { io.mazewall.ffi.memory.SupervisorResponseSegment.allocate() }
-            resp.setId(id)
-            resp.setDecision(decision)
-            resp.setErrorNr(errorNr)
-            LinuxNative.withTransaction {
-                LinuxNative.memory.write(socketFd, resp.segment, Layouts.SUPERVISOR_RESPONSE_SIZE)
+    private fun readRequestArgs(dis: DataInputStream, argCount: Int): List<Any> {
+        val argsList = java.util.ArrayList<Any>(argCount)
+        for (i in 0 until argCount) {
+            val type = dis.readByte()
+            when (type.toInt()) {
+                0 -> { // Long
+                    argsList.add(dis.readLong())
+                }
+                1 -> { // String
+                    val len = dis.readInt()
+                    val bytes = ByteArray(len)
+                    dis.readFully(bytes)
+                    argsList.add(String(bytes, StandardCharsets.UTF_8))
+                }
+                2 -> { // SockAddr bytes
+                    val len = dis.readInt()
+                    val bytes = ByteArray(len)
+                    dis.readFully(bytes)
+                    argsList.add(bytes)
+                }
             }
+        }
+        return argsList
+    }
+
+    private fun sendResponse(id: Long, decision: Byte, errorNr: Int, resp: io.mazewall.ffi.memory.SupervisorResponseSegment) {
+        resp.setId(id)
+        resp.setDecision(decision)
+        resp.setErrorNr(errorNr)
+        LinuxNative.withTransaction {
+            LinuxNative.memory.write(socketFd, resp.segment, Layouts.SUPERVISOR_RESPONSE_SIZE)
         }
     }
 }

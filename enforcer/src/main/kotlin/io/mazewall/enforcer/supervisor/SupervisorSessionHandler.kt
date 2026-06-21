@@ -41,7 +41,7 @@ internal class SupervisorSessionHandler(
     private val logger = Logger.getLogger(SupervisorSessionHandler::class.java.name)
 
     companion object {
-        private const val POLL_TIMEOUT_MS = 5000
+        private const val POLL_TIMEOUT_MS = 30000
         private const val AT_FDCWD = -100
 
         // Seccomp notifications offsets

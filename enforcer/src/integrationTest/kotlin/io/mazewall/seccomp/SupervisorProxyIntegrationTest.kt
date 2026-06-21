@@ -65,37 +65,37 @@ class SupervisorProxyIntegrationTest : BaseIntegrationTest() {
                 if (!path.contains("supervised_test_")) {
                     return true
                 }
-                val isLegit = stack.any { it.methodName.contains("legitAction") }
+                val isLegit = stack.any { it.className.contains("LegitContext") }
                 if (!isLegit) {
                     deniedCalls.add(path)
                 }
                 return isLegit
             }
         }
-
+ 
         val policy = Policy.builder()
             .base(Policy.PURE_COMPUTE_UNSAFE)
             .supervise(Syscall.OPENAT)
             .supervise(Syscall.OPEN)
             .build()
-
+ 
         val rawExecutor = Executors.newSingleThreadExecutor()
         val containedExecutor = ContainedExecutors.wrap(rawExecutor, policy, scopingPolicy)
-
+ 
         try {
             // Run legit action first. The file is read successfully (either via the allow path
             // of the policy, or via the classloader bypass on a cold JVM — both are correct).
             // The primary effect here is to ensure all Kotlin IO classes are loaded so the
             // subsequent evil-action execution is free from classloading interference.
             val legitResult = containedExecutor.submit<String> {
-                legitAction(tempFile)
+                LegitContext(tempFile).run()
             }.get()
             assertEquals("legit content", legitResult)
-
+ 
             // Run evil action second. All IO classes are now loaded; the classloader bypass
             // cannot fire. The scoping policy is invoked and must deny the access.
             val evilResult = containedExecutor.submit<Boolean> {
-                evilAction(tempFile)
+                EvilContext(tempFile).run()
             }.get()
             assertTrue(evilResult, "Evil action must be denied by the scoping policy")
             assertTrue(
@@ -107,18 +107,22 @@ class SupervisorProxyIntegrationTest : BaseIntegrationTest() {
             tempFile.delete()
         }
     }
-
-    private fun legitAction(file: File): String {
-        return file.readText()
+ 
+    private class LegitContext(private val file: File) {
+        fun run(): String {
+            return file.readText()
+        }
     }
-
-    private fun evilAction(file: File): Boolean {
-        return try {
-            file.readText()
-            false
-        } catch (e: java.io.IOException) {
-            // Seccomp denied the openat with EPERM
-            true
+ 
+    private class EvilContext(private val file: File) {
+        fun run(): Boolean {
+            return try {
+                file.readText()
+                false
+            } catch (e: java.io.IOException) {
+                // Seccomp denied the openat with EPERM
+                true
+            }
         }
     }
 }
