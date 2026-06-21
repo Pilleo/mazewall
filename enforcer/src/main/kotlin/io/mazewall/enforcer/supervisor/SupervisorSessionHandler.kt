@@ -81,6 +81,33 @@ internal class SupervisorSessionHandler(
 
         private const val SLOW_VALIDATION_THRESHOLD_MS = 2000L
 
+        /**
+         * Resolves the set of paths that the supervisor daemon will inject directly
+         * without forwarding to the JVM validation listener.
+         *
+         * ### The ClassLoader/Safepoint Deadlock Problem in Stacktrace Analysis
+         *
+         * The [io.mazewall.enforcer.supervisor.StacktraceScopingPolicy] relies on obtaining the Java stack trace
+         * of the target thread using `Thread.getStackTrace()`. This forces a JVM safepoint.
+         * If the target thread triggers a seccomp-supervised syscall (e.g., `openat`) while holding internal JVM
+         * locks (such as the ClassLoader lock during class resolution or a global lock during JaCoCo instrumentation),
+         * forwarding that syscall to the `JVMValidationListener` thread creates a severe risk of a **ClassLoader Deadlock**.
+         *
+         * **The Deadlock Scenario:**
+         * 1. The target thread begins loading a class or instrumenting it (e.g., JaCoCo dumping data, or reading `kotlin-stdlib`).
+         * 2. It holds the ClassLoader lock and triggers an `openat` syscall.
+         * 3. The `openat` is intercepted and sent to the `JVMValidationListener` thread.
+         * 4. The listener invokes the user's `StacktraceScopingPolicy`, which may trigger dynamic class loading
+         *    (e.g., loading a Kotlin lambda class like `stack.any { ... }`).
+         * 5. The listener attempts to acquire the ClassLoader lock and blocks forever because the target thread
+         *    is blocked waiting for the seccomp response.
+         *
+         * **The Solution:**
+         * To prevent this, the daemon implements a fast-path bypass for all internal JVM file accesses.
+         * We unconditionally inject file descriptors for `java.home`, `java.class.path`, `javaagent` jars,
+         * and build/coverage directories. Because these syscalls bypass the JVM listener entirely,
+         * no dynamic class loading is triggered during vulnerable tracee states.
+         */
         @Suppress("SwallowedException", "TooGenericExceptionCaught")
         private val safeBypassPaths = mutableListOf<java.nio.file.Path>().apply {
             try {
@@ -113,6 +140,12 @@ internal class SupervisorSessionHandler(
                         }
                     }
                 }
+
+                // Add CI-specific build directories and test-framework caches to prevent deadlock
+                try {
+                    add(java.nio.file.Paths.get("build").toAbsolutePath().normalize())
+                    add(java.nio.file.Paths.get(".gradle").toAbsolutePath().normalize())
+                } catch (ignored: Exception) {}
             } catch (e: Exception) {
                 // Fail-safe
             }
