@@ -122,6 +122,19 @@ internal class SupervisorSessionHandler(
         val tid = Tid(pidVal)
         val extracted = extractNotificationArgs(nr, tid, args)
 
+        if ((nr == SYS_OPEN || nr == SYS_OPENAT || nr == SYS_OPENAT2) && extracted.pathStr != null) {
+            val pathStr = extracted.pathStr
+            try {
+                val path = java.nio.file.Paths.get(pathStr).toAbsolutePath().normalize()
+                val javaHome = java.nio.file.Paths.get(System.getProperty("java.home")).toAbsolutePath().normalize()
+                if (path.startsWith(javaHome)) {
+                    return handleInjectFd(id, nr, args, pathStr, null, resp)
+                }
+            } catch (ignored: Exception) {
+                // Fall back to slow-path validation
+            }
+        }
+
         val success = sendRequestToJvm(id, pidVal, nr, args, extracted.pathStr, extracted.sockaddrBytes)
         if (!success) return false
 

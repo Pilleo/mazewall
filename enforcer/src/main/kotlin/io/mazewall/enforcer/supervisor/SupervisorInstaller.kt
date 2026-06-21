@@ -60,8 +60,6 @@ public object SupervisorInstaller {
         val filter = BpfFilter.build(arch, policy)
         val tid = LinuxNative.process.gettid()
         registerThread(tid)
-        JvmStackInspector.precharge()
-
         try {
             SupervisorSeccompNotifInstaller.install(
                 socketPath = context.socketPath,
@@ -142,7 +140,6 @@ internal class JVMValidationListener(
                 val validationState = JvmStackInspector.inspect(nr, argsList, targetThread)
 
                 val isAllowed = when (validationState) {
-                    is ScopingValidationState.ClassloaderActive -> true
                     is ScopingValidationState.SafeToValidate -> {
                         val stackTrace = validationState.rawStack.toList()
                         val syscall = Syscall.entries.find { it.numberFor(Arch.current()) == validationState.nr } ?: Syscall.OPEN

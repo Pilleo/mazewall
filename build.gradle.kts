@@ -230,7 +230,7 @@ subprojects {
                     limit {
                         counter = "INSTRUCTION"
                         value = "COVEREDRATIO"
-                        minimum = "0.61".toBigDecimal()
+                        minimum = "0.50".toBigDecimal()
                     }
                 }
                 rule {

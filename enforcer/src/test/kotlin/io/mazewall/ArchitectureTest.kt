@@ -272,7 +272,6 @@ class ArchitectureTest {
                         return name == "io.mazewall.enforcer.supervisor.JvmStackInspector" ||
                             name == "io.mazewall.enforcer.supervisor.ScopingValidationState" ||
                             name == "io.mazewall.enforcer.supervisor.ScopingValidationState\$SafeToValidate" ||
-                            name == "io.mazewall.enforcer.supervisor.ScopingValidationState\$ClassloaderActive" ||
                             name == "io.mazewall.enforcer.supervisor.ScopingValidationState\$SafeToValidate\$Companion" ||
                             name == "java.lang.Object" ||
                             name == "java.lang.String" ||

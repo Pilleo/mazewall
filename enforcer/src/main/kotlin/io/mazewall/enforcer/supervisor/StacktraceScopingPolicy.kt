@@ -10,14 +10,13 @@ public interface StacktraceScopingPolicy {
     /**
      * Authorizes or denies a system call.
      *
-     * ### Classloader reads are handled automatically
+     * ### Classloader and core JDK reads are handled automatically
      *
-     * The supervisor reactor runs [io.mazewall.enforcer.supervisor.JvmStackInspector.isClassloaderActive]
-     * **before** calling this method. If the tracee thread holds the JVM `ClassLoader` monitor
-     * (i.e., it is in the middle of loading a class), the syscall is immediately allowed and
-     * this method is **not called**. Implementations therefore do not need to special-case
-     * `.class`/`.jar` files, JVM home paths, or any classloading-related reads — doing so
-     * is unnecessary and risks introducing fragile, path-hardcoded bypasses.
+     * The supervisor daemon intercepts and automatically handles file reads originating
+     * from within the JVM's home directory (`java.home`) via a fast-path. This ensures that
+     * core JDK classloading (e.g. loading standard libraries or JVM-internal classes) bypasses
+     * policy validation and prevents deadlocks. Implementations therefore do not need to
+     * special-case core JVM home paths or standard library classloading reads.
      *
      * @param tid The Thread ID of the blocked thread.
      * @param syscall The system call being invoked.
