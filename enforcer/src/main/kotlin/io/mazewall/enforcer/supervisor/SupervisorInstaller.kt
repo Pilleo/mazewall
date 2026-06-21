@@ -27,6 +27,7 @@ import java.lang.foreign.ValueLayout
 import java.nio.charset.StandardCharsets
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 import java.util.logging.Logger
@@ -66,12 +67,12 @@ public object SupervisorInstaller {
                 socketPath = context.socketPath,
                 filterInstructions = filter,
                 processWide = false
-            ) { socketFd ->
+            ) { socketFd, readyLatch ->
                 val listener = JVMValidationListener(
                     FileDescriptor.unsafe(socketFd),
                     scopingPolicy
                 )
-                listener.start()
+                listener.start(readyLatch)
             }
             return SupervisorSession(tid)
         } catch (t: Throwable) {
@@ -96,12 +97,12 @@ internal class JVMValidationListener(
         private const val SYS_OPENAT2 = 437
     }
 
-    fun start() {
+    fun start(readyLatch: CountDownLatch) {
         val arena = Arena.ofShared()
         val inputStream = SupervisorSocketInputStream(socketFd, arena)
 
         Thread {
-            runValidationReactor(inputStream, arena)
+            runValidationReactor(inputStream, arena, readyLatch)
         }.apply {
             isDaemon = true
             name = "supervisor-validation-listener-${socketFd.value}"
@@ -110,13 +111,17 @@ internal class JVMValidationListener(
     }
 
     @Suppress("CyclomaticComplexMethod", "NestedBlockDepth")
-    private fun runValidationReactor(inputStream: SupervisorSocketInputStream, arena: Arena) {
+    private fun runValidationReactor(inputStream: SupervisorSocketInputStream, arena: Arena, readyLatch: CountDownLatch) {
         try {
             val dis = DataInputStream(BufferedInputStream(inputStream))
-            // Read handshake ACK
-            val ack = dis.readByte()
-            if (ack != PROTOCOL_ACK_BYTE) {
-                logger.warning("Invalid handshake ACK: $ack")
+            try {
+                // Read handshake ACK
+                val ack = dis.readByte()
+                if (ack != PROTOCOL_ACK_BYTE) {
+                    logger.warning("Invalid handshake ACK: $ack")
+                }
+            } finally {
+                readyLatch.countDown()
             }
 
             val responseSegment = with(arena) { io.mazewall.ffi.memory.SupervisorResponseSegment.allocate() }

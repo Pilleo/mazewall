@@ -31,7 +31,7 @@ public object SupervisorSeccompNotifInstaller {
         processWide: Boolean = false,
         connectWithRetry: (String) -> Int = { path -> SupervisorSocketUtils.connectWithRetry(path) },
         sendDescriptor: (Int, Int) -> Boolean = { sockFd, fd -> SupervisorSocketUtils.sendDescriptor(sockFd, fd) },
-        onSocketConnected: (socketFd: Int) -> Unit
+        onSocketConnected: (socketFd: Int, readyLatch: CountDownLatch) -> Unit
     ) {
         if (!Platform.featureMatrix.seccompUserNotifSupported) {
             throw UnsupportedKernelFeatureException("Seccomp User Notifications are required.")
@@ -79,8 +79,13 @@ public object SupervisorSeccompNotifInstaller {
                         throw IllegalStateException("Failed to send seccomp listener FD to daemon")
                     }
 
+                    val readyLatch = CountDownLatch(1)
+
                     // Start validation/event listener thread (which will run uncontained)
-                    onSocketConnected(socketFd)
+                    onSocketConnected(socketFd, readyLatch)
+
+                    // Wait until the listener is fully initialized and ready
+                    readyLatch.await()
                 } catch (t: Throwable) {
                     LinuxNative.fileSystem.close(FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(socketFd))
                     throw t

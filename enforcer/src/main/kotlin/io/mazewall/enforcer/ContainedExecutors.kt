@@ -84,6 +84,10 @@ object ContainedExecutors {
     ) : AutoCloseable {
         validateLinuxAndNotVirtual()
 
+        if (policy.hasSupervisedSyscalls) {
+            io.mazewall.enforcer.supervisor.SupervisorDaemonManager.getOrSpawnSharedDaemon()
+        }
+
         applyLandlockIfNecessary(processWide, policy)
 
         if (!Platform.isSupported()) {

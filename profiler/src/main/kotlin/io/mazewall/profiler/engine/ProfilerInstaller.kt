@@ -15,6 +15,7 @@ import io.mazewall.ffi.memory.nativeScope
 import io.mazewall.getFdOrThrow
 import io.mazewall.profiler.internal.ProfilerSocket
 import io.mazewall.ffi.networking.SupervisorSeccompNotifInstaller
+import java.util.concurrent.CountDownLatch
 
 /**
  * Internal orchestrator for installing profiling filters and initializing the listener.
@@ -37,7 +38,8 @@ internal object ProfilerInstaller {
             MutableList<TraceEvent>,
             MutableMap<TraceEvent, MutableList<Array<StackTraceElement>>>?,
             MutableMap<String, Long>,
-            () -> Thread?
+            () -> Thread?,
+            CountDownLatch
         ) -> Unit,
     ) {
         val session = ProfilerInstallerSession(
@@ -68,7 +70,8 @@ internal class ProfilerInstallerSession(
         MutableList<TraceEvent>,
         MutableMap<TraceEvent, MutableList<Array<StackTraceElement>>>?,
         MutableMap<String, Long>,
-        () -> Thread?
+        () -> Thread?,
+        CountDownLatch
     ) -> Unit,
     private val processWide: Boolean = false,
 ) {
@@ -82,9 +85,9 @@ internal class ProfilerInstallerSession(
             processWide = processWide,
             connectWithRetry = connectWithRetry,
             sendDescriptor = { sockFd, fd -> ProfilerSocket.sendDescriptor(sockFd, fd) }
-        ) { socketFd ->
+        ) { socketFd, readyLatch ->
             // Start background thread to listen for events from the daemon (uncontained)
-            startTraceListener(socketFd, accumulatedLogs, stackTracesMap, pathCache, workerThreadProvider)
+            startTraceListener(socketFd, accumulatedLogs, stackTracesMap, pathCache, workerThreadProvider, readyLatch)
         }
     }
 }

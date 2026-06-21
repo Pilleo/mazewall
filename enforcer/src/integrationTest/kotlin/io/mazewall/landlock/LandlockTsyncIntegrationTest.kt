@@ -20,21 +20,31 @@ class LandlockTsyncIntegrationTest : BaseIntegrationTest() {
                     .block(Syscall.OPEN, Syscall.OPENAT, Syscall.IO_URING_SETUP, Syscall.IO_URING_ENTER)
                     .build()
 
-            Landlock.applyRuleset(policy.definition)
+            val latch = java.util.concurrent.CountDownLatch(1)
+            val doneLatch = java.util.concurrent.CountDownLatch(1)
+            var exitCode = 0
 
-            // This sibling thread should also be sandboxed
+            // Spawn the sibling thread BEFORE Landlock is applied
             val thread =
                 Thread {
+                    latch.countDown()
+                    doneLatch.await()
                     try {
                         File("/etc/hostname").readText()
-                        exitProcess(0) // Should have succeeded (if TSYNC is disabled)
+                        exitCode = 0 // Succeeded (TSYNC not retroactively applied)
                     } catch (e: Exception) {
                         System.err.println("Sandboxed successfully: ${e.message}")
-                        exitProcess(42) // Correctly sandboxed (if TSYNC is enabled)
+                        exitCode = 42 // Restricted (TSYNC applied)
                     }
                 }
             thread.start()
+            latch.await()
+
+            Landlock.applyRuleset(policy.definition)
+
+            doneLatch.countDown()
             thread.join()
+            exitProcess(exitCode)
         }
     }
 

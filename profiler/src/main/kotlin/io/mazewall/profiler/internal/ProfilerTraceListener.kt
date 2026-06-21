@@ -14,6 +14,7 @@ import java.lang.foreign.Arena
 import java.lang.foreign.MemorySegment
 import java.lang.foreign.ValueLayout
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.logging.Logger
 
@@ -49,7 +50,7 @@ internal class ProfilerTraceListener(
     /**
      * Starts the background listener thread.
      */
-    fun start() {
+    fun start(readyLatch: CountDownLatch) {
         if (closed.get()) throw IllegalStateException("Listener is already closed")
 
         val arena = Arena.ofShared()
@@ -57,7 +58,7 @@ internal class ProfilerTraceListener(
 
         val thread = Thread {
             try {
-                runListenerLoop(inputStream, arena)
+                runListenerLoop(inputStream, arena, readyLatch)
             } finally {
                 arena.close()
                 inputStream.close()
@@ -98,17 +99,22 @@ internal class ProfilerTraceListener(
     private fun runListenerLoop(
         inputStream: InputStream,
         arena: Arena,
+        readyLatch: CountDownLatch,
     ) {
         val ackBuf = arena.allocate(1)
         ackBuf.set(ValueLayout.JAVA_BYTE, 0L, PROTOCOL_ACK_BYTE)
 
         val dis = DataInputStream(BufferedInputStream(inputStream))
         try {
-            // Read handshake ACK from the daemon
-            state = TraceListenerState.Disconnected // Reusing state for handshake wait
-            val handshakeAck = dis.readByte()
-            if (handshakeAck != PROTOCOL_ACK_BYTE) {
-                logger.warning("Invalid handshake ACK from daemon: $handshakeAck")
+            try {
+                // Read handshake ACK from the daemon
+                state = TraceListenerState.Disconnected // Reusing state for handshake wait
+                val handshakeAck = dis.readByte()
+                if (handshakeAck != PROTOCOL_ACK_BYTE) {
+                    logger.warning("Invalid handshake ACK from daemon: $handshakeAck")
+                }
+            } finally {
+                readyLatch.countDown()
             }
 
             while (!closed.get()) {

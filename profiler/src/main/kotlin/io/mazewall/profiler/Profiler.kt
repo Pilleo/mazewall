@@ -16,6 +16,7 @@ import io.mazewall.profiler.internal.ProfilerTraceListener
 import java.util.concurrent.Callable
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Future
 import java.util.concurrent.atomic.AtomicReference
@@ -121,7 +122,7 @@ object Profiler {
             pathCache = pathCache,
             workerThreadProvider = workerThreadProvider,
             processWide = processWide,
-            startTraceListener = { fd, logs, traces, cache, provider ->
+            startTraceListener = { fd, logs, traces, cache, provider, readyLatch ->
                 val listener = ProfilerTraceListener(
                     FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(fd),
                     logs,
@@ -130,7 +131,7 @@ object Profiler {
                     provider
                 )
                 listeners.add(listener)
-                listener.start()
+                listener.start(readyLatch)
             },
         )
     }

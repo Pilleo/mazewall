@@ -189,8 +189,6 @@ object Landlock {
      * @param processWide If true, attempts to synchronize the ruleset across all threads (Linux 7.0+).
      */
     fun applyRuleset(policy: PolicyDefinition<*>, processWide: Boolean = false) {
-        if (!shouldApplyLandlock(policy)) return
-
         val session = LandlockSession(policy, processWide)
         session.applyRuleset()
     }
@@ -208,11 +206,6 @@ object Landlock {
         if (abi >= ABI_V5) mask = mask or LANDLOCK_ACCESS_FS_IOCTL_DEV
         return mask
     }
-
-    private fun shouldApplyLandlock(policy: PolicyDefinition<*>) =
-        policy.enforceLandlock ||
-            policy.allowedFsReadPaths.isNotEmpty() ||
-            policy.allowedFsWritePaths.isNotEmpty()
 
     internal fun handleUnsupportedLandlock() {
         val fallback = Platform.configuredFallback()

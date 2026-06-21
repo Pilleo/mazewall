@@ -51,7 +51,7 @@ class ProfilerInstallerTest {
                     connectWithRetry = { _ ->
                         throw IllegalStateException("Simulated connection retry failure")
                     },
-                    startTraceListener = { _, _, _, _, _ -> },
+                    startTraceListener = { _, _, _, _, _, latch -> latch.countDown() },
                 )
             } catch (t: Throwable) {
                 errorRef.set(t)
@@ -87,7 +87,7 @@ class ProfilerInstallerTest {
                         Thread.sleep(500)
                         throw IllegalStateException("Delayed error")
                     },
-                    startTraceListener = { _, _, _, _, _ -> },
+                    startTraceListener = { _, _, _, _, _, latch -> latch.countDown() },
                 )
             } catch (t: Throwable) {
                 errorRef.set(t)
@@ -131,7 +131,7 @@ class ProfilerInstallerTest {
                         // Return a dummy FD that will fail sendDescriptor
                         999
                     },
-                    startTraceListener = { _, _, _, _, _ -> },
+                    startTraceListener = { _, _, _, _, _, latch -> latch.countDown() },
                 )
             } catch (t: Throwable) {
                 errorRef.set(t)
