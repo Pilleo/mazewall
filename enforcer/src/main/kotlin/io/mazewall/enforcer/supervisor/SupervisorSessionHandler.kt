@@ -78,6 +78,45 @@ internal class SupervisorSessionHandler(
         private const val SIZE_INT = 4
         private const val SIZE_BYTE = 1
         private const val ONE_ARG = 1
+
+        private const val SLOW_VALIDATION_THRESHOLD_MS = 2000L
+
+        @Suppress("SwallowedException", "TooGenericExceptionCaught")
+        private val safeBypassPaths = mutableListOf<java.nio.file.Path>().apply {
+            try {
+                val javaHome = java.nio.file.Paths.get(System.getProperty("java.home")).toAbsolutePath().normalize()
+                add(javaHome)
+
+                val cp = System.getProperty("java.class.path")
+                if (cp != null) {
+                    val cpEntries = cp.split(java.io.File.pathSeparator)
+                    for (entry in cpEntries) {
+                        if (entry.isNotEmpty()) {
+                            try {
+                                val cpPath = java.nio.file.Paths.get(entry).toAbsolutePath().normalize()
+                                add(cpPath)
+                            } catch (ignored: Exception) {}
+                        }
+                    }
+                }
+
+                // Add javaagent jars to prevent deadlocks during agent instrumentation
+                val jvmArgs = java.lang.management.ManagementFactory.getRuntimeMXBean().inputArguments
+                for (arg in jvmArgs) {
+                    if (arg.startsWith("-javaagent:")) {
+                        val agentPath = arg.substringAfter("-javaagent:").substringBefore("=")
+                        if (agentPath.isNotEmpty()) {
+                            try {
+                                val p = java.nio.file.Paths.get(agentPath).toAbsolutePath().normalize()
+                                add(p)
+                            } catch (ignored: Exception) {}
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                // Fail-safe
+            }
+        }
     }
 
     fun handleActiveListener(
@@ -122,16 +161,29 @@ internal class SupervisorSessionHandler(
         val tid = Tid(pidVal)
         val extracted = extractNotificationArgs(nr, tid, args)
 
+        // --- DAEMON-SIDE FAST-PATH BYPASS ---
+        // HAZARD: When the sandboxed thread triggers lazy classloading (e.g., loading IOException
+        // or a Kotlin helper) during a blocked file syscall, it holds the JVM's internal ClassLoader lock.
+        // If we dispatch this request back to the JVM validation listener thread, the listener's policy
+        // evaluation could also trigger classloading, blocking the listener on the tracee's ClassLoader lock.
+        // This causes a permanent circular deadlock.
+        //
+        // SOLUTION: The uncontained daemon intercepts file read operations targeting the JVM's home directory,
+        // application classpath, or Java agents. Paths are resolved to absolute form and normalized.
+        // Since these paths contain trusted platform/application classes and libraries that are already loaded
+        // or destined to be loaded, it is safe to bypass policy evaluation and directly inject the file descriptor.
         if ((nr == SYS_OPEN || nr == SYS_OPENAT || nr == SYS_OPENAT2) && extracted.pathStr != null) {
             val pathStr = extracted.pathStr
             try {
                 val path = java.nio.file.Paths.get(pathStr).toAbsolutePath().normalize()
-                val javaHome = java.nio.file.Paths.get(System.getProperty("java.home")).toAbsolutePath().normalize()
-                if (path.startsWith(javaHome)) {
+                val matched = safeBypassPaths.any { bypassPath ->
+                    path.startsWith(bypassPath) || path == bypassPath
+                }
+                if (matched) {
                     return handleInjectFd(id, nr, args, pathStr, null, resp)
                 }
             } catch (ignored: Exception) {
-                // Fall back to slow-path validation
+                // Fall back to slow-path JVM validation if path normalization fails
             }
         }
 
@@ -229,11 +281,17 @@ internal class SupervisorSessionHandler(
             pollFd.setFd(socketFd.value)
             pollFd.setEvents(NativeConstants.POLLIN)
 
+            val startMs = System.currentTimeMillis()
             val pollRes = LinuxNative.withTransaction { LinuxNative.poll(pollFd.segment, 1L, POLL_TIMEOUT_MS) }
+            val durationMs = System.currentTimeMillis() - startMs
+            if (durationMs > SLOW_VALIDATION_THRESHOLD_MS) {
+                logger.warning("[SUPERVISOR-DIAGNOSTIC] JVM policy validation took ${durationMs}ms (syscall nr=$nr, path=$pathStr, id=$id). Possible deadlock or slow stack trace resolution.")
+            }
             val count = pollRes.recover { errno, _ ->
                 if (errno == NativeConstants.EINTR) 1L else 0L
             }
             if (count <= 0) {
+                logger.severe("[SUPERVISOR-DIAGNOSTIC] JVM validation timed out or failed after ${durationMs}ms (syscall nr=$nr, path=$pathStr, id=$id). Returning EPERM.")
                 sendSeccompError(id, NativeConstants.EPERM, resp)
                 return@use false
             }

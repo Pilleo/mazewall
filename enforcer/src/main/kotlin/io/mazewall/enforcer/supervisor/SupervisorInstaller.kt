@@ -93,6 +93,10 @@ internal class JVMValidationListener(
         private const val SYS_CONNECT = 42
         private const val SYS_OPENAT = 257
         private const val SYS_OPENAT2 = 437
+
+        private const val SLOW_INSPECT_THRESHOLD_MS = 500L
+        private const val SLOW_AUTH_THRESHOLD_MS = 500L
+        private const val SLOW_TOTAL_THRESHOLD_MS = 1000L
     }
 
     fun start(readyLatch: CountDownLatch) {
@@ -136,15 +140,32 @@ internal class JVMValidationListener(
 
                 val argsList = readRequestArgs(dis, argCount)
 
+                val startMs = System.currentTimeMillis()
                 val targetThread = SupervisorInstaller.threadRegistry[Tid(pidVal)]
                 val validationState = JvmStackInspector.inspect(nr, argsList, targetThread)
+
+                val inspectMs = System.currentTimeMillis() - startMs
+                if (inspectMs > SLOW_INSPECT_THRESHOLD_MS) {
+                    logger.warning("[SUPERVISOR-DIAGNOSTIC] JvmStackInspector.inspect took ${inspectMs}ms for syscall nr=$nr, args=$argsList")
+                }
 
                 val isAllowed = when (validationState) {
                     is ScopingValidationState.SafeToValidate -> {
                         val stackTrace = validationState.rawStack.toList()
                         val syscall = Syscall.entries.find { it.numberFor(Arch.current()) == validationState.nr } ?: Syscall.OPEN
-                        scopingPolicy.authorize(Tid(pidVal), syscall, validationState.argsList, stackTrace)
+                        val authStartMs = System.currentTimeMillis()
+                        val res = scopingPolicy.authorize(Tid(pidVal), syscall, validationState.argsList, stackTrace)
+                        val authMs = System.currentTimeMillis() - authStartMs
+                        if (authMs > SLOW_AUTH_THRESHOLD_MS) {
+                            logger.warning("[SUPERVISOR-DIAGNOSTIC] scopingPolicy.authorize took ${authMs}ms for syscall $syscall")
+                        }
+                        res
                     }
+                }
+
+                val totalMs = System.currentTimeMillis() - startMs
+                if (totalMs > SLOW_TOTAL_THRESHOLD_MS) {
+                    logger.warning("[SUPERVISOR-DIAGNOSTIC] JVM Validation total processing took ${totalMs}ms for syscall nr=$nr")
                 }
 
                 // Decision encoding: 0 = Deny, 1 = Allow Continue, 2 = Allow & Inject FD

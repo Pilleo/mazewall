@@ -28,8 +28,8 @@ class SupervisorProxyIntegrationTest : BaseIntegrationTest() {
      * ### Why `allowedCalls` is not asserted
      *
      * On a cold JVM thread (first execution), `file.readText()` may trigger lazy classloading
-     * of Kotlin stdlib IO classes. While the JVM ClassLoader lock is held, the supervisor
-     * unconditionally allows any intercepted `openat` to prevent deadlock — the scoping
+     * of Kotlin stdlib IO classes. Any read originating from the JDK home path is automatically
+     * allowed via the daemon-side fast-path bypass to prevent deadlock — the scoping
      * policy is not consulted for that call. The file is still opened successfully (bypass =
      * allow), so the legit functional test passes regardless.
      *
@@ -41,10 +41,9 @@ class SupervisorProxyIntegrationTest : BaseIntegrationTest() {
      * ### Why `deniedCalls` IS asserted (and is reliable)
      *
      * The evil action always runs **after** the legit action. By the time evil executes, all
-     * Kotlin IO classes used by `file.readText()` are already loaded. The JVM ClassLoader lock
-     * is not held. The supervisor's classloader bypass does not fire. The scoping policy is
-     * consulted and denies the access. This assertion is therefore deterministic regardless of
-     * JVM warmup state.
+     * Kotlin IO classes used by `file.readText()` are already loaded. The daemon fast-path does
+     * not fire for the non-JDK user temp file, so the scoping policy is consulted and denies the access.
+     * This assertion is therefore deterministic regardless of JVM warmup state.
      */
     @Test
     @EnabledIfLinuxAndSupported
@@ -108,6 +107,53 @@ class SupervisorProxyIntegrationTest : BaseIntegrationTest() {
         }
     }
  
+    @Test
+    @EnabledIfLinuxAndSupported
+    fun `test daemon fast-path allows reads inside java home even from evil context`() {
+        val releaseFile = File(System.getProperty("java.home"), "release")
+        if (!releaseFile.exists()) {
+            return
+        }
+
+        val scopingPolicy = object : StacktraceScopingPolicy {
+            override fun authorize(
+                tid: Tid,
+                syscall: Syscall,
+                args: List<Any>,
+                stack: List<StackTraceElement>
+            ): Boolean {
+                // Deny all user-policy evaluations to prove the daemon bypass is working
+                return false
+            }
+        }
+
+        val policy = Policy.builder()
+            .base(Policy.PURE_COMPUTE_UNSAFE)
+            .supervise(Syscall.OPENAT)
+            .supervise(Syscall.OPEN)
+            .build()
+
+        val rawExecutor = Executors.newSingleThreadExecutor()
+        val containedExecutor = ContainedExecutors.wrap(rawExecutor, policy, scopingPolicy)
+
+        try {
+            // Read a core JDK file. Despite scopingPolicy returning false for everything,
+            // the daemon fast-path should intercept the read and allow it immediately.
+            val result = containedExecutor.submit<Boolean> {
+                try {
+                    releaseFile.readText()
+                    true
+                } catch (e: Exception) {
+                    false
+                }
+            }.get()
+
+            assertTrue(result, "Reading JDK home files must succeed via daemon fast-path bypass")
+        } finally {
+            rawExecutor.shutdown()
+        }
+    }
+
     private class LegitContext(private val file: File) {
         fun run(): String {
             return file.readText()
