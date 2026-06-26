@@ -45,7 +45,7 @@ object BpfFilter {
             policy.syscallActionNumbers(arch),
             policy.defaultAction,
             getSyscallInspectionPipeline(),
-            policy.allowMmapExec,
+            policy.allowMmapExec || profilingMode,
             policy.allowNonThreadClone,
             policy.allowUnsafePrctl,
             profilingMode,

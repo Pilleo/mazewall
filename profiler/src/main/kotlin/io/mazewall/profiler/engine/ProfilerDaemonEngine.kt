@@ -187,27 +187,26 @@ internal class ProfilerDaemonEngine(
             clientSockets.remove(socketFd)
             socketManager.close(socketFd)
             if (connection is io.mazewall.ffi.networking.SeccompConnection.FdAttached) {
-                val lFd = (connection as io.mazewall.ffi.networking.SeccompConnection.FdAttached).listenerFd
+                val lFd = connection.listenerFd
                 activeListeners.remove(lFd)
                 socketManager.close(lFd)
             }
         }
     }
 
-    @Suppress("NestedBlockDepth", "LoopWithTooManyJumpStatements")
     private fun handleSession(
         socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>,
         listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open>,
     ) {
         val sessionHandler = ProfilerSessionHandler(
-            socketFd,
-            listenerFd,
-            publisher,
-            responder,
-            ioOps,
-            memoryReader,
-            syscallMap,
-            this::triggerGlobalShutdown,
+            socketFd = socketFd,
+            listenerFd = listenerFd,
+            publisher = publisher,
+            responder = responder,
+            ioOps = ioOps,
+            memoryReader = memoryReader,
+            syscallMap = syscallMap,
+            onShutdown = this::triggerGlobalShutdown,
         )
         try {
             Arena.ofConfined().use { arena ->
@@ -215,7 +214,6 @@ internal class ProfilerDaemonEngine(
                 val notif = arena.allocate(Layouts.SECCOMP_NOTIF)
                 val resp = arena.allocate(Layouts.SECCOMP_NOTIF_RESP)
                 val ackBuf = arena.allocate(ACK_BUF_SIZE)
-                val socketPollFd = arena.allocate(Layouts.POLLFD)
 
                 while (!isGlobalShutdown()) {
                     val pollRes = ioOps.poll(pollFds, 2L, POLL_TIMEOUT_MS)
@@ -225,7 +223,7 @@ internal class ProfilerDaemonEngine(
                     }
                     if (count <= 0) continue
 
-                    val action = sessionHandler.handleActiveListener(pollFds, ackBuf, notif, resp, socketPollFd)
+                    val action = sessionHandler.handleActiveListener(pollFds, ackBuf, notif, resp)
                     if (action !is LoopAction.Continue) break
                 }
             }

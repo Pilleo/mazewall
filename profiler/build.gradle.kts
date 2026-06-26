@@ -44,6 +44,7 @@ val integrationTest =
         useJUnitPlatform()
         jvmArgs("--enable-native-access=ALL-UNNAMED")
         systemProperty("kotest.framework.classpath.scanning.config.disable", "true")
+        forkEvery = 1
         testLogging {
             showStandardStreams = true
         }

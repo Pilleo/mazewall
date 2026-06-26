@@ -319,3 +319,133 @@ Landlock Audit logging (`LANDLOCK_ACCESS` records) is a kernel-specific telemetr
 *   **The Impact:** On kernels older than 6.13 (including standard LTS versions like 5.15), applying a restrictive Landlock "Audit" policy will silently block operations with `EACCES` without emitting any audit logs, causing the profiler to miss dependencies and the application to crash.
 *   **The Mitigation:** Transparent profiling of `io_uring` via Landlock Audit is physically impossible due to the lack of a permissive mode. `mazewall` requires either **Tier P (Privileged eBPF)** for transparent capture or **Tier A (Iterative Profiler)** to handle the non-transparent `EACCES` denials via retries.
 
+---
+
+## 6. Architectural Analysis: Why `USER_NOTIF` Is the Wrong Primitive for Tier S Profiling
+
+> **Status (June 2026):** This section documents a confirmed architectural defect discovered during integration test debugging. The current codebase has this defect. The correct design is documented here for the next refactor cycle. Tracked in `code_issues_backlog.md` under `🔴 [CRITICAL]: Tier S Profiler Uses the Wrong Kernel Primitive`.
+
+### 6.1 The Category Error
+
+`SECCOMP_RET_USER_NOTIF` was designed for the **supervisor** use case: the tracee thread is *suspended in kernel mode* until the supervisor process sends `SECCOMP_USER_NOTIF_FLAG_CONTINUE` or an error response. That blocking invariant is *correct and necessary* when you need to intercept, inspect, modify, or veto a syscall before the kernel executes it (the `:enforcer` Tier 2 use case).
+
+**Profiling does not need to block the tracee.** The profiler's only requirement is to *observe* which syscalls were made and with what arguments, then let execution proceed unconditionally. Using `USER_NOTIF` for observation forces every single intercepted syscall to pay the full cost of a mandatory synchronous IPC round-trip:
+
+```
+tracee suspended in kernel
+  → daemon wakes from poll
+  → daemon reads seccomp_notif via ioctl(SECCOMP_IOCTL_NOTIF_RECV)
+  → daemon calls process_vm_readv to resolve path argument
+  → daemon writes resolved event to JVM socket
+  → JVM trace-listener reads event
+  → JVM trace-listener writes ACK byte (0xAC) back to daemon
+  → daemon's performHandshake() receives ACK
+  → daemon sends SECCOMP_USER_NOTIF_FLAG_CONTINUE via ioctl(SECCOMP_IOCTL_NOTIF_SEND)
+  → tracee unblocked, syscall executes in kernel
+```
+
+The tracee thread cannot execute during the entire duration of that chain.
+
+### 6.2 The Six Symptoms of the Mismatch
+
+Every workaround that was added to make the profiler work is a direct symptom of the wrong primitive:
+
+| # | Workaround | Why It Exists | What It Reveals |
+|---|---|---|---|
+| 1 | `safeBypassPaths` — JVM home, classpath, `/proc`, `/sys`, build dirs, gradle cache | JVM's own `openat` calls during class loading deadlock if forwarded through the full handshake | The round-trip blocks the tracee; JVM-internal I/O cannot safely wait for IPC |
+| 2 | `bypassedTids` — trace-listener excluded by its own TID | Trace-listener's socket `read()` syscall would create a circular wait if intercepted | The IPC mechanism conflicts with the blocking mechanism it is trying to implement |
+| 3 | ACK-before-stacktrace ordering in `processEvent` | `Thread.getStackTrace()` requires JVM safepoint; safepoint requires the blocked thread to be free; free only after ACK | Safepoint coordination is incompatible with threads suspended in kernel mode |
+| 4 | TSYNC timing window in `SupervisorSeccompNotifInstaller` | TSYNC must run after trace-listener is alive but before worker thread enters profiled block | A race in this window causes a permanent hang with no timeout |
+| 5 | `HandshakeSession` state machine + 60-second poll timeout | Exists solely to implement the synchronous ACK round-trip | Any failure path deadlocks the profiled thread for up to 60 seconds |
+| 6 | `handleShutdownRequest()` consuming ACK bytes (latent race) | Session reactor loop reads 1 byte on `POLLIN`; ACK byte arriving between notifications is silently consumed, `performHandshake` then times out | Bidirectional use of a single socket for shutdown signals and per-event ACKs creates an ordering race |
+
+None of these workarounds would exist in a fire-and-forget design.
+
+### 6.3 Protocol Comparison: Current vs. Correct
+
+```
+CURRENT (broken) — Synchronous Blocking Round-Trip
+═══════════════════════════════════════════════════
+
+JVM Worker Thread           Daemon Process              JVM Trace-Listener
+       │                         │                              │
+       │ openat("/etc/hostname") │                              │
+       ├── USER_NOTIF ─────────► │                              │
+       │ [SUSPENDED IN KERNEL]   │ process_vm_readv             │
+       │                         │ write(socket, event) ───────►│
+       │                         │ poll(socket, POLLIN)         │ readNextEvent()
+       │                         │ [WAITING FOR ACK]            │ processEvent()
+       │                         │                       ◄──────│ write(socket, 0xAC)
+       │                         │ send CONTINUE                │
+       │◄──────────────────────  │                              │
+       │ [UNBLOCKED]             │                              │
+
+
+CORRECT — Fire-and-Forget Unidirectional Stream
+════════════════════════════════════════════════
+
+JVM Worker Thread           Daemon Process              JVM Trace-Listener
+       │                         │                              │
+       │ openat("/etc/hostname") │                              │
+       ├── USER_NOTIF ─────────► │                              │
+       │ [SUSPENDED IN KERNEL]   │ process_vm_readv             │
+       │                         │ send CONTINUE ─────────────► │ (kernel unblocks tracee)
+       │◄──────────────────────  │                              │
+       │ [UNBLOCKED IMMEDIATELY] │ write(socket, event) ───────►│
+       │                         │                              │ readNextEvent()
+       │                         │                              │ processEvent()
+       │                         │                              │ Thread.getStackTrace() ✓
+```
+
+The tracee is unblocked as soon as `process_vm_readv` completes. The trace-listener processes events asynchronously. There is no synchronization between the trace-listener and the daemon.
+
+### 6.4 Path Argument Resolution Is Preserved
+
+The only reason `USER_NOTIF` was chosen over simpler primitives (like `SECCOMP_RET_LOG`) is that it enables `process_vm_readv` to read path arguments from the tracee's address space **while the tracee is still suspended** — before the path pointer may be overwritten by the returning syscall.
+
+In the fire-and-forget design this invariant is fully preserved: `process_vm_readv` is still called **before** `CONTINUE` is sent. The daemon reads the path, sends `CONTINUE`, and then delivers the already-resolved event to the JVM listener. The path resolution window is not affected. No information is lost.
+
+### 6.5 Components Eliminated by This Refactor
+
+The following become **dead code** and are deleted:
+
+| File / Symbol | Fate |
+|---|---|
+| `HandshakeSession.kt` | Entire file deleted |
+| `HandshakeSession.Active.performHandshake()` | Deleted |
+| `POLL_ACK_TIMEOUT_MS` (both in `ProfilerConstants.kt` and `ProfilerSessionHandler.kt`) | Deleted |
+| `sendAckIfNecessary()` in `ProfilerTraceListener` | Method deleted |
+| `bypassedTids` parameter chain (`readHandshakeConfig`, `ProfilerSessionHandler`, `ProfilerTraceListener`) | Deleted |
+| `safeBypassPaths` in `ProfilerSessionHandler` | Removed as a deadlock-prevention mechanism; may be kept as an optional high-volume noise filter |
+| `handleShutdownRequest()`'s `recv()` byte-read in `ProfilerSessionHandler.handleActiveListener` | Replaced with pure socket EOF detection |
+| ACK-ordering comments and constraints in `ProfilerTraceListener.processEvent` and `readNextEvent` | Deleted (ordering constraint no longer exists) |
+
+### 6.6 Components Retained Without Change
+
+| Component | Status |
+|---|---|
+| BPF filter construction — `BpfFilter.kt` | Unchanged |
+| `SECCOMP_FILTER_FLAG_NEW_LISTENER` installation | Unchanged |
+| `SECCOMP_FILTER_FLAG_TSYNC` for process-wide tracing | Unchanged |
+| `process_vm_readv` via `ProfilerMemoryReader` | Unchanged |
+| `SyscallPathResolver` | Unchanged |
+| `ProfilerDaemonEngine` connection/accept loop | Unchanged structure |
+| Unix domain socket as delivery channel | Repurposed: bidirectional protocol → unidirectional event stream |
+| `ProfilerTraceListener.readNextEvent()` | Unchanged binary framing |
+| `BobCompiler`, `BillOfBehavior` | Unchanged |
+| `SHUTDOWN_COMMAND_BYTE (0x53)` protocol | Retained as the *sole* thing the JVM ever writes to the daemon |
+
+### 6.7 Shutdown Without Bidirectional ACK
+
+The `SHUTDOWN_COMMAND_BYTE (0x53)` protocol is simplified. It becomes the **only** byte the JVM trace-listener ever writes to the daemon on the event socket (currently it writes one `0xAC` ACK per event plus one `0x53` at shutdown). Daemon shutdown detection:
+
+1. **Socket EOF** — `read()` returns 0 → the trace-listener closed its end of the socket → daemon sends `CONTINUE` to all pending notifications and exits cleanly.
+2. **Explicit `0x53`** — trace-listener sends the explicit shutdown command → same daemon response as EOF.
+
+### 6.8 Stack Trace Capture After Fire-and-Forget
+
+With the current design, `Thread.getStackTrace()` must be called *after* the ACK is sent, because the target thread is suspended in the kernel and cannot reach a JVM safepoint until it returns from the syscall.
+
+With fire-and-forget, the target thread is unblocked immediately (the daemon sends `CONTINUE` before writing to the JVM socket). By the time the trace-listener receives the event and calls `Thread.getStackTrace()`, the thread is already running in user space. The stack trace is still diagnostically accurate: the thread is still inside the call chain that triggered the syscall (e.g., `File.readText()` → JDK NIO → `openat`).
+
+The ordering constraint documented in `ProfilerTraceListener.processEvent` and `readNextEvent` is fully removed.

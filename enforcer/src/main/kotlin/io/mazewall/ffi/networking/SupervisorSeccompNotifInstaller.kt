@@ -127,8 +127,20 @@ public object SupervisorSeccompNotifInstaller {
                     }
                 }
 
-                // Step 2: Synchronize filter tree process-wide if processWide is true
-                if (processWide && dummyBpf != null) {
+                listenerFdVal.set(rawFd)
+                installLatch.countDown() // Release the coordinator to connect & send descriptor
+            }
+
+            // Block tracee thread until the coordinator completes descriptor passing and listener startup
+            proceedLatch.await()
+            setupError.get()?.let { throw it }
+
+            // Step 2: Synchronize filter tree process-wide if processWide is true
+            // We run this AFTER the coordinator has connected, handshaked, and started the listener.
+            // This prevents the coordinator and listener threads from being subject to the seccomp
+            // filter during their startup and handshake, avoiding fatal circular deadlocks.
+            if (processWide && dummyBpf != null) {
+                nativeScope {
                     val dummyProg = LinuxNative.memory.newSockFProg(dummyBpf)
                     val tsyncRes = LinuxNative.withTransaction {
                         LinuxNative.syscall(
@@ -152,14 +164,7 @@ public object SupervisorSeccompNotifInstaller {
                         }
                     }
                 }
-
-                listenerFdVal.set(rawFd)
-                installLatch.countDown() // Release the coordinator to connect & send descriptor
             }
-
-            // Block tracee thread until the coordinator completes descriptor passing and listener startup
-            proceedLatch.await()
-            setupError.get()?.let { throw it }
         } catch (t: Throwable) {
             val fd = listenerFdVal.get()
             if (fd >= 0) {

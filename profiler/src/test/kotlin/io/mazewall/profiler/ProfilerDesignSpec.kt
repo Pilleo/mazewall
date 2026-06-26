@@ -217,7 +217,7 @@ class ProfilerDesignSpec :
                     val pollFds = arena.allocate(MemoryLayout.sequenceLayout(2, Layouts.POLLFD))
                     pollFds.set(ValueLayout.JAVA_SHORT, POLLFD_REVENTS_OFF, NativeConstants.POLLIN)
 
-                    val action = handler.handleActiveListener(pollFds, ackBuf, notif, resp, socketPollFd)
+                    val action = handler.handleActiveListener(pollFds, ackBuf, notif, resp)
 
                     action shouldBe LoopAction.Continue
                     transport.sentEvents.size shouldBe 1
@@ -257,7 +257,7 @@ class ProfilerDesignSpec :
                     val pollFds = arena.allocate(MemoryLayout.sequenceLayout(2, Layouts.POLLFD))
                     pollFds.set(ValueLayout.JAVA_SHORT, POLLFD_REVENTS_OFF, NativeConstants.POLLIN)
 
-                    handler.handleActiveListener(pollFds, ackBuf, notif, resp, socketPollFd)
+                    handler.handleActiveListener(pollFds, ackBuf, notif, resp)
                     transport.sentEvents.size shouldBe 1
                     transport.sentEvents[0].paths shouldBe listOf("/home/user/relative.txt")
                 }

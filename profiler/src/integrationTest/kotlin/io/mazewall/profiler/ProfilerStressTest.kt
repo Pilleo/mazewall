@@ -11,6 +11,15 @@ import java.util.concurrent.atomic.AtomicInteger
 import kotlin.test.assertTrue
 
 class ProfilerStressTest : BaseIntegrationTest() {
+
+    companion object {
+        @org.junit.jupiter.api.AfterAll
+        @JvmStatic
+        fun tearDownAll() {
+            Profiler.shutdown()
+        }
+    }
+
     private val stressTimeout = Duration.ofSeconds(120)
 
     @Test
@@ -19,7 +28,7 @@ class ProfilerStressTest : BaseIntegrationTest() {
             val threadCount = 64
             val iterationsPerThread = 10
             val pool = Executors.newFixedThreadPool(threadCount)
-            val wrapped = Profiler.wrap(pool, Policy.PURE_COMPUTE_UNSAFE)
+            val wrapped = Profiler.wrap(pool, false, Policy.PURE_COMPUTE_UNSAFE)
 
             val successCount = AtomicInteger(0)
             val totalExpected = threadCount * iterationsPerThread
@@ -53,7 +62,7 @@ class ProfilerStressTest : BaseIntegrationTest() {
 
             repeat(lifecycleIterations) {
                 val pool = Executors.newFixedThreadPool(4)
-                val wrapped = Profiler.wrap(pool, Policy.PURE_COMPUTE_UNSAFE)
+                val wrapped = Profiler.wrap(pool, false, Policy.PURE_COMPUTE_UNSAFE)
 
                 try {
                     val futures =
@@ -81,7 +90,7 @@ class ProfilerStressTest : BaseIntegrationTest() {
                 pool.submit(
                     java.util.concurrent.Callable<String> {
                         val result =
-                            Profiler.profile {
+                            Profiler.profile(captureStackTraces = false) {
                                 // Mixed syscalls
                                 File("/etc/hostname").readText()
                                 File("/proc/self/comm").readText()

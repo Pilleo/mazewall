@@ -12,6 +12,7 @@ import io.mazewall.profiler.engine.SyscallEvent
 import io.mazewall.profiler.engine.SyscallEventState
 import io.mazewall.profiler.engine.TraceEvent
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import java.lang.foreign.Arena
@@ -160,7 +161,7 @@ class ProfilerDaemonTest {
             val socketPollFd = arena.allocate(Layouts.POLLFD)
 
             val pollFds = setupMockPoll(arena)
-            val action = handler.handleActiveListener(pollFds, ackBuf, notif, resp, socketPollFd)
+            val action = handler.handleActiveListener(pollFds, ackBuf, notif, resp)
 
             assertTrue(action is LoopAction.Continue)
             assertEquals(1, transport.sentEvents.size)
@@ -173,9 +174,10 @@ class ProfilerDaemonTest {
     }
 
     @Test
-    fun `test session handler sends error response on ACK timeout`() {
+    fun `test fire-and-forget - handler sends CONTINUE before delivering event`() {
+        // In fire-and-forget mode the daemon sends CONTINUE immediately after path resolution,
+        // even when the mock transport's poll would have 'timed out' in the old ACK design.
         val transport = MockTransport()
-        // Simulate a timeout by poll returning 0L
         transport.nextPollResult = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(0L)
 
         val reader = MockReader()
@@ -199,25 +201,27 @@ class ProfilerDaemonTest {
 
             val resp = arena.allocate(Layouts.SECCOMP_NOTIF_RESP)
             val ackBuf = arena.allocate(1L)
-            val socketPollFd = arena.allocate(Layouts.POLLFD)
 
             val pollFds = setupMockPoll(arena)
-            handler.handleActiveListener(pollFds, ackBuf, notif, resp, socketPollFd)
+            val action = handler.handleActiveListener(pollFds, ackBuf, notif, resp)
 
-            // Since ACK timed out, the state becomes Terminated
-            assertTrue(handler.state is ProfilerState.Terminated, "Handler state should be Terminated on ACK timeout")
+            // Fire-and-forget: CONTINUE is always sent immediately — no timeout, no error
+            assertTrue(action is LoopAction.Continue, "Handler should continue (not terminate) in fire-and-forget mode")
+            assertTrue(transport.continueSent, "Should have called sendSeccompContinue in fire-and-forget mode")
+            assertFalse(transport.errorSent, "Should NOT have sent error in fire-and-forget mode")
 
-            // Verify that error response was sent instead of continue
-            assertTrue(transport.errorSent, "Should have called sendSeccompError on timeout")
-            assertEquals(104, transport.lastErrorNr, "Should have sent ECONNRESET (104)")
-            assertTrue(transport.ioctlCalls.contains(SECCOMP_IOCTL_NOTIF_SEND), "Should have sent SECCOMP_IOCTL_NOTIF_SEND")
+            // State should not be Terminated — the session remains active
+            assertFalse(handler.state is ProfilerState.Terminated, "State should not be Terminated in fire-and-forget mode")
+
+            // Event was delivered to the JVM listener after CONTINUE was sent
+            assertEquals(1, transport.sentEvents.size, "Event should have been sent to JVM listener")
+            assertEquals("OPEN", transport.sentEvents[0].syscallName)
         }
     }
 
     @Test
-    fun `test SessionEventLedger records events on ACK timeout`() {
+    fun `test SessionEventLedger records CONTINUE and EventSent in fire-and-forget mode`() {
         val transport = MockTransport()
-        // Simulate a timeout by poll returning 0L
         transport.nextPollResult = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(0L)
 
         val reader = MockReader()
@@ -244,22 +248,22 @@ class ProfilerDaemonTest {
 
             val resp = arena.allocate(Layouts.SECCOMP_NOTIF_RESP)
             val ackBuf = arena.allocate(1L)
-            val socketPollFd = arena.allocate(Layouts.POLLFD)
 
             val pollFds = setupMockPoll(arena)
-            val action = handler.handleActiveListener(pollFds, ackBuf, notif, resp, socketPollFd)
+            handler.handleActiveListener(pollFds, ackBuf, notif, resp)
 
-            // Since ACK timed out, the handler action is still continue (or break/shutdown depending on implementation),
-            // but the state becomes Terminated because waitForParentAck returned false.
-            assertTrue(handler.state is ProfilerState.Terminated, "Handler state should be Terminated on ACK timeout")
+            // In fire-and-forget mode: CONTINUE is sent, event is delivered, no error.
+            // The state is NOT Terminated.
+            assertFalse(handler.state is ProfilerState.Terminated, "Ledger state should not be Terminated in fire-and-forget")
 
-            // Check that ledger recorded events
+            // Check that ledger recorded key events
             val events = handler.ledger.dump()
             assertTrue(events.isNotEmpty(), "Ledger should have recorded events")
             assertTrue(events.any { it is SessionEvent.Notified }, "Ledger should contain Notified event")
             assertTrue(events.any { it is SessionEvent.VmReadvResolved }, "Ledger should contain VmReadvResolved event")
             assertTrue(events.any { it is SessionEvent.EventSent }, "Ledger should contain EventSent event")
-            assertTrue(events.any { it is SessionEvent.ErrorReplied }, "Ledger should contain ErrorReplied event")
+            assertTrue(events.any { it is SessionEvent.ContinueReplied }, "Ledger should contain ContinueReplied event (sent before event)")
+            assertFalse(events.any { it is SessionEvent.ErrorReplied }, "Ledger should NOT contain ErrorReplied in fire-and-forget mode")
         }
     }
 

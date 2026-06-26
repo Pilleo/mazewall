@@ -63,8 +63,8 @@ internal object ProfilerDaemonManager {
         } catch (e: SecurityException) {
             logger.log(java.util.logging.Level.WARNING, "Failed to remove shutdown hook", e)
         }
-        triggerDaemonShutdown(context.socketPath)
         context.daemonProcess.destroyForcibly()
+        context.daemonProcess.waitFor()
         try {
             Files.deleteIfExists(context.socketDir.resolve("profiler.sock"))
             Files.deleteIfExists(context.socketDir)

@@ -39,11 +39,44 @@ object Profiler {
     @JvmOverloads
     fun <T> profile(
         processWide: Boolean = false,
+        captureStackTraces: Boolean = true,
         block: () -> T,
     ): ProfilingResult<T> {
         if (Thread.currentThread().isVirtual) {
             throw IllegalStateException("Cannot run profiler inside virtual threads")
         }
+
+        // Pre-warm classloading to prevent circular classloader deadlocks
+        // when seccomp filters intercept file system reads during dynamic class loading.
+        @Suppress("TooGenericExceptionCaught")
+        try {
+            val dummyFile = java.io.File.createTempFile("mazewall_warmup", ".tmp")
+            dummyFile.writeText("warmup")
+            dummyFile.readText()
+            dummyFile.delete()
+
+            // Pre-load all classes and code paths utilized inside ProfilerTraceListener
+            val dummyEvent = io.mazewall.profiler.engine.TraceEvent(
+                tidValue = 0,
+                syscallName = "openat",
+                args = longArrayOf(),
+                paths = listOf("warmup"),
+                stackTrace = null
+            )
+            dummyEvent.tid
+            dummyEvent.syscallName
+
+            // Warm up stack trace retrieval, mapping, and stringification
+            Thread.currentThread().stackTrace.map { it.toString() }
+
+            // Warm up list, map, and sorting operations
+            val list = java.util.concurrent.CopyOnWriteArrayList<Array<StackTraceElement>>()
+            list.add(emptyArray())
+            val pathCache = java.util.concurrent.ConcurrentHashMap<String, Long>()
+            pathCache["key"] = System.currentTimeMillis()
+            listOf("warmup").sorted().joinToString(",")
+        } catch (ignored: Exception) {}
+
         val context = ProfilerDaemonManager.getOrSpawnSharedDaemon()
         val localLogs = CopyOnWriteArrayList<TraceEvent>()
         val localStackProfile = ConcurrentHashMap<TraceEvent, MutableList<Array<StackTraceElement>>>()
@@ -51,6 +84,9 @@ object Profiler {
 
         val blockResult = AtomicReference<T>()
         val errorRef = AtomicReference<Throwable>()
+
+        // Capture the trace listener created for this session so it can be drained before compile.
+        val sessionListener = AtomicReference<ProfilerTraceListener>()
 
         val workerThread = Thread {
             val tid = LinuxNative.process.gettid()
@@ -65,10 +101,11 @@ object Profiler {
                         context.socketPath,
                         PolicyPresets.PURE_COMPUTE_UNSAFE,
                         localLogs,
-                        localStackProfile,
+                        if (captureStackTraces) localStackProfile else null,
                         localPathCache,
                         processWide,
-                        { Thread.currentThread() }
+                        { Thread.currentThread() },
+                        onListenerCreated = { sessionListener.set(it) },
                     )
 
                     val res = block()
@@ -88,6 +125,20 @@ object Profiler {
 
         errorRef.get()?.let { throw it }
 
+        // CRITICAL: Drain the trace listener before compiling the Bill of Behavior.
+        //
+        // The daemon delivers events asynchronously after releasing the tracee (fire-and-forget).
+        // After workerThread.join() returns, there may still be events in-flight: the daemon wrote
+        // them to the socket but the listener thread has not yet called accumulatedLogs.add().
+        //
+        // close() sends SHUTDOWN_COMMAND_BYTE to signal the daemon to stop, then waits for the
+        // listener thread to drain all remaining socket data until it sees EOF. Only then does
+        // BobCompiler.compile() read localLogs, which is now stable and complete.
+        sessionListener.get()?.let { listener ->
+            listeners.remove(listener)
+            listener.close()
+        }
+
         val bob = BobCompiler.compile(localLogs)
         return ProfilingResult(blockResult.get() as T, bob, localStackProfile)
     }
@@ -99,10 +150,19 @@ object Profiler {
     fun wrap(
         delegate: ExecutorService,
         vararg policies: Policy<*, Uncompiled>,
+    ): ProfilerExecutorWrapper = wrap(delegate, true, *policies)
+
+    /**
+     * Wraps an [ExecutorService] to automatically profile all submitted tasks, with optional stacktrace capture.
+     */
+    fun wrap(
+        delegate: ExecutorService,
+        captureStackTraces: Boolean,
+        vararg policies: Policy<*, Uncompiled>,
     ): ProfilerExecutorWrapper {
         val policy = PolicyDefinition.combine(*policies.map { it.definition }.toTypedArray())
         val context = ProfilerDaemonManager.getOrSpawnSharedDaemon()
-        return ProfilerExecutorWrapper(delegate, policy, context)
+        return ProfilerExecutorWrapper(delegate, policy, context, captureStackTraces)
     }
 
     private fun installProfilingFilterForThread(
@@ -151,6 +211,7 @@ object Profiler {
         private val delegate: ExecutorService,
         private val policy: PolicyDefinition<*>,
         private val context: io.mazewall.profiler.internal.DaemonContext,
+        private val captureStackTraces: Boolean = true,
     ) : ExecutorService by delegate {
         private val threadApplied = ThreadLocal.withInitial { false }
         val recentLogs = CopyOnWriteArrayList<TraceEvent>()
@@ -193,7 +254,7 @@ object Profiler {
                     context.socketPath,
                     policy,
                     recentLogs,
-                    recentStackProfiles,
+                    if (captureStackTraces) recentStackProfiles else null,
                     pathCache,
                     false,
                     { currentThread }

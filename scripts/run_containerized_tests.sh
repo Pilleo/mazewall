@@ -21,6 +21,7 @@ podman run --rm \
     --cap-add AUDIT_READ \
     --cap-add AUDIT_CONTROL \
     --cap-add SYS_ADMIN \
+    --cap-add SYS_PTRACE \
     -v "${PROJECT_ROOT}:/workspace" \
     -v "${HOME}/.gradle:/root/.gradle" \
     -e GRADLE_USER_HOME=/root/.gradle \
@@ -31,4 +32,4 @@ podman run --rm \
     -e LC_ALL=C.UTF-8 \
     -w /workspace \
     mazewall-test-runner \
-    ./gradlew "$@" --no-daemon --build-cache --stacktrace
+    ./gradlew "$@" --no-daemon --stacktrace

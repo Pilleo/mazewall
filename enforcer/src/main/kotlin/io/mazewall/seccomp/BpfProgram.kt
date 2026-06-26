@@ -51,7 +51,14 @@ public class BpfProgram(
  * Type-safe state machine for building BPF programs.
  * Enforces the initialization sequence: Arch Check -> Load NR -> Filtering -> Termination.
  */
-public sealed class BpfBuilder protected constructor(internal val ops: MutableList<BpfMacro>) {
+public sealed class BpfBuilder protected constructor(
+    internal val ops: MutableList<BpfMacro>,
+    internal val labelCounter: java.util.concurrent.atomic.AtomicInteger = java.util.concurrent.atomic.AtomicInteger(0)
+) {
+
+    internal fun nextLabel(prefix: String): String {
+        return "${prefix}_${labelCounter.incrementAndGet()}"
+    }
 
     /**
      * Initial state: Only allows architecture verification.
@@ -62,31 +69,37 @@ public sealed class BpfBuilder protected constructor(internal val ops: MutableLi
          */
         public fun checkArch(arch: Arch): ArchVerified {
             ops.add(BpfMacro.LoadAbsolute(BpfFilter.SECCOMP_DATA_ARCH_OFFSET))
-            val archOkLabel = "arch_ok_${UUID.randomUUID().toString().replace("-", "")}"
+            val archOkLabel = nextLabel("arch_ok")
             ops.add(BpfMacro.JumpIfEqual(arch.audit, jt = archOkLabel))
             ops.add(BpfMacro.Ret(NativeConstants.SECCOMP_RET_KILL_THREAD))
             ops.add(BpfMacro.Label(archOkLabel))
-            return ArchVerified(ops)
+            return ArchVerified(ops, labelCounter)
         }
     }
 
     /**
      * Architecture verified: Only allows loading the syscall number.
      */
-    public class ArchVerified internal constructor(ops: MutableList<BpfMacro>) : BpfBuilder(ops) {
+    public class ArchVerified internal constructor(
+        ops: MutableList<BpfMacro>,
+        labelCounter: java.util.concurrent.atomic.AtomicInteger
+    ) : BpfBuilder(ops, labelCounter) {
         /**
          * Emits code to load the syscall number and transitions to [NrLoaded].
          */
         public fun loadSyscallNr(): NrLoaded {
             ops.add(BpfMacro.LoadAbsolute(BpfFilter.SECCOMP_DATA_NR_OFFSET))
-            return NrLoaded(ops)
+            return NrLoaded(ops, labelCounter)
         }
     }
 
     /**
      * Syscall number loaded: Allows full filtering logic and final building.
      */
-    public class NrLoaded internal constructor(ops: MutableList<BpfMacro>) : BpfBuilder(ops) {
+    public class NrLoaded internal constructor(
+        ops: MutableList<BpfMacro>,
+        labelCounter: java.util.concurrent.atomic.AtomicInteger
+    ) : BpfBuilder(ops, labelCounter) {
 
         /** Returns ACT_ALLOW immediately. */
         public fun allow(): Terminated {
@@ -116,7 +129,7 @@ public sealed class BpfBuilder protected constructor(internal val ops: MutableLi
          * after the block's end.
          */
         public fun expect(nr: Int, block: NrLoaded.() -> Unit): NrLoaded {
-            val skipLabel = "skip_${UUID.randomUUID().toString().replace("-", "")}"
+            val skipLabel = nextLabel("skip")
             jumpIfEqual(nr, jf = skipLabel)
             this.block()
             label(skipLabel)
@@ -125,7 +138,7 @@ public sealed class BpfBuilder protected constructor(internal val ops: MutableLi
 
         /** Java-compatible version of [expect]. */
         public fun expect(nr: Int, block: Consumer<NrLoaded>): NrLoaded {
-            val skipLabel = "skip_${UUID.randomUUID().toString().replace("-", "")}"
+            val skipLabel = nextLabel("skip")
             jumpIfEqual(nr, jf = skipLabel)
             block.accept(this)
             label(skipLabel)
