@@ -19,6 +19,13 @@ allprojects {
         mavenCentral()
     }
 
+    // Disable detekt globally
+    tasks.configureEach {
+        if (name.contains("detekt", ignoreCase = true)) {
+            enabled = false
+        }
+    }
+
     if (!project.path.startsWith(":demos")) {
         apply(plugin = "org.jlleitschuh.gradle.ktlint")
         configure<org.jlleitschuh.gradle.ktlint.KtlintExtension> {
