@@ -97,7 +97,7 @@ graph TD
 
 For detailed class diagrams and relationship maps of the individual modules:
 - See the [Enforcer Architecture Document](enforcer_architecture.md) for the `:enforcer` module.
-- See the [Profiler Architecture Document](profiler_architecture.md) for the `:profiler` module.
+- See the [Profiler Design Document](profiler_design.md) for the `:profiler` module.
 
 ## 5. Critical Memory Layouts (FFM)
 

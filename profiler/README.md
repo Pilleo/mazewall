@@ -116,7 +116,7 @@ behavior.toStackTracesJson() // → String (JSON mapping stack traces to events)
 
 ## Technical Architecture
 
-For a detailed class hierarchy and structural relationship map, see the [Profiler Module Architecture documentation](../docs/internals/profiler_architecture.md).
+For a detailed class hierarchy and structural relationship map, see the [Profiler Technical Design documentation](../docs/internals/profiler_design.md).
 
 - **`Profiler` / `ProfilerDaemon`**: Implements the out-of-process `USER_NOTIF` engine. The daemon receives the seccomp listener FD via UNIX socket `SCM_RIGHTS` passing, intercepts trapped syscalls, resolves paths via `process_vm_readv`, and sends an ACK back to release the worker thread.
 - **`ProfilerTraceListener`**: Bridge between the daemon and the JVM — receives `TraceEvent`s and correlates them with JVM stack traces via `ThreadRegistry`.
