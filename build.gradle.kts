@@ -271,3 +271,29 @@ subprojects {
         }
     }
 }
+
+tasks.register<JavaExec>("runTriage") {
+    group = "verification"
+    description = "Gathers system telemetry and diagnostics on failure."
+    classpath = subprojects.first { it.name == "profiler" }
+        .tasks.getByName<SourceSetOutput>("mainSourceSetOutput").classesDirs +
+        subprojects.first { it.name == "profiler" }
+            .configurations.getByName("runtimeClasspath")
+    mainClass.set("io.mazewall.profiler.triage.DiagnosticTriageRunner")
+    
+    // Only run this diagnostic triage task if the test execution actually failed.
+    onlyIf {
+        val testTasksFailed = subprojects.flatMap { it.tasks.withType<Test>() }
+            .any { it.state.failure != null }
+        testTasksFailed
+    }
+}
+
+// Wire the triage runner to finalize test execution across all subprojects
+subprojects {
+    tasks.withType<Test>().configureEach {
+        finalizedBy(rootProject.tasks.named("runTriage"))
+    }
+}
+
+

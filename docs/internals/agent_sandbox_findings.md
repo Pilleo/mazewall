@@ -85,3 +85,40 @@ If this Agent is deployed inside a Docker container, that container **must** be 
 *   **The DB Tool Thread:** When `queryDb` is invoked, it runs on a thread with a filter that *only* allows connections to the database IP.
 
 **The Strategic Pitch:** Docker secures the application from the host. `mazewall` secures the agent's tools from each other. Because BPF thread filters take microseconds to apply and require zero serialization overhead to pass data (unlike IPC between containers), `mazewall` provides zero-trust isolation between natively executed tools without the latency of containerization.
+
+---
+
+## 6. Case Study: Comparative Analysis with NVIDIA OpenShell
+
+We conducted a deep architectural review of **NVIDIA OpenShell** (GitHub and architecture logs) to compare its host/agent containment patterns with `mazewall`'s JVM-native model.
+
+### Architectural Breakdown
+
+| Layer | NVIDIA OpenShell (Out-of-Process) | mazewall (In-Process JVM Library) |
+| :--- | :--- | :--- |
+| **Sandbox Scope** | **Container Boundary:** Spawns a lightweight Kubernetes cluster (`K3s`) inside a Docker container for each agent. | **Process/Thread Boundary:** Manages Seccomp-BPF and Landlock rulesets directly inside the JVM address space. |
+| **Egress Protection** | **L7 Proxy + TLS MITM:** Intercepts TCP sockets, maps them to PIDs via `/proc/net/tcp`, verifies parent processes, and filters L7 requests (resolving path/method). | **L4 Syscall Blocking:** Restricts `connect` or `socket` syscalls completely at the kernel layer, rejecting connections instantly without proxy overhead. |
+| **Credential Safety** | **Upstream Secret Injection:** Sandboxed process only sees placeholder environment variables; proxy swaps placeholders upstream. | **In-Memory Thread Restriction:** Blocks restricted threads from reading security properties or environment maps. |
+| **Syscall Hooking** | Uses Rust's `seccompiler` library to compile filters injected in child forks before executing agent binaries. | Manages raw Linux syscalls using Java's Foreign Function & Memory (FFM) API and loads them dynamically. |
+
+---
+
+### Core Lessons & Actionable Enhancements for `mazewall`
+
+1. **Socket Address Family Argument Filtering (L4 Egress Evasion Prevention)**
+   * *OpenShell Pattern:* OpenShell inspects the first argument (Address Family) of `socket()` to block raw packet capturing (`AF_PACKET`), Bluetooth, and VM sockets. It denies `AF_INET`/`AF_INET6` under network-blocking mode, but always permits local Unix Domain Sockets (`AF_UNIX`).
+   * *Lesson for mazewall:* Blocking `socket` or `connect` completely breaks local IPC (e.g. databases, local daemon sockets). We should implement a `SocketAddressFamilyInspector` under the `SyscallInspectionPipeline` to inspect the address family, allowing `AF_UNIX` (local) while restricting `AF_INET`/`AF_INET6` (remote).
+
+2. **JVM-Aware Filesystem Baseline Templates**
+   * *OpenShell Pattern:* OpenShell starts with a blank Landlock ruleset and whitelists host directories recursively (e.g., read-only for `/usr`, `/lib`, `/etc`, and read-write for `/sandbox`, `/tmp`).
+   * *Lesson for mazewall:* JVM-native tools require specific access to runtime libraries (e.g., `java.home`, classpath directories, SSL cert folders like `/etc/ssl/certs`). We should provide built-in templates inside `PolicyBuilder` to automatically pre-seed these JVM-critical paths as read-only, allowing developers to lock down filesystems with minimal manual path declaration.
+
+3. **Telemetry & Profiler Code Stripping**
+   * *OpenShell Pattern:* Telemetry can be completely stripped out at compile time using Rust Cargo features (`--no-default-features`).
+   * *Lesson for mazewall:* To minimize security surface area and runtime overhead, all observer/profiler code (`:profiler` module, tracing sockets, log publishers) must be optionally strippable during build compilation (e.g. through Gradle build-time configuration or conditional code-gen) so production environments carry zero tracing baggage.
+
+4. **Credential Isolation via Sibling Thread Delegation**
+   * *OpenShell Pattern:* Replaces sensitive variables with placeholder strings and relies on an external proxy to inject secrets upstream, keeping secrets out of the agent process memory.
+   * *Lesson for mazewall:* Because the JVM heap is shared, we cannot isolate secret strings on the heap from threads containing ACE exploits. However, we can use thread-scoped `mazewall` policies to block unauthorized threads from querying environment variables, forcing them to delegate secret resolution to secure sibling threads or credential containers.
+
+---

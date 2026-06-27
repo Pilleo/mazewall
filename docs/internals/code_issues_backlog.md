@@ -2,6 +2,10 @@
 
 ## Recent Findings (Project Review June 2026)
 
+### 🔵 [Severity: ENHANCEMENT]: Socket Address Family Filtering for Network Isolation Evasion Prevention
+**Context:** Currently, `mazewall` blocks networking by disabling `socket` or `connect` completely. This breaks local IPC utilizing Unix Domain Sockets (`AF_UNIX`/`AF_LOCAL`) which are common for DB/daemon integration. NVIDIA OpenShell inspects the first argument (Address Family) of `socket()` to allow `AF_UNIX` while denying `AF_INET`/`AF_INET6`, `AF_PACKET`, etc.
+**Needed:** Implement a `SocketAddressFamilyInspector` under `SyscallInspectionPipeline` to filter `socket` syscall arguments, preserving local IPC while preventing internet or raw packet capture.
+
 ### 🔴 [Severity: CRITICAL]: Tier S Profiler Uses the Wrong Kernel Primitive — `USER_NOTIF` is a Supervisor Mechanism, Not an Observer Mechanism
 **Status:** OPEN — Requires architectural refactor of `ProfilerSessionHandler`, `HandshakeSession`, and `ProfilerTraceListener`
 **Target Area:** `io.mazewall.profiler.engine.ProfilerSessionHandler`, `io.mazewall.profiler.engine.HandshakeSession`, `io.mazewall.profiler.internal.ProfilerTraceListener`, `io.mazewall.profiler.engine.ProfilerDaemonEngine`
