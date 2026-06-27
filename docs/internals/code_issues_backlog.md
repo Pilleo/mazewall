@@ -1126,3 +1126,39 @@ For full architectural details, see `supervisor_proxy_design.md`.
 *   **Failure Hypothesis:** FFM (`java.lang.foreign`) MemorySegments and Arenas are bleeding outside the `io.mazewall.ffi` boundary.
 *   **Context & Proof:** `JVMValidationListener.start` and `runValidationReactor` in `SupervisorInstaller.kt` directly use `Arena.ofShared()` and manipulate memory allocation logic for the `SupervisorResponseSegment`. According to `docs/internals/architectural_map.md#7-core-architectural-paradigms--patterns`, all raw memory/FFM manipulation must be isolated to `io.mazewall.ffi`.
 *   **Recommendation:** Move the raw `Arena` and `SupervisorResponseSegment` lifecycle management into a dedicated class inside the `io.mazewall.ffi` package, exposing a safe, higher-level interface to the `enforcer.supervisor` package.
+
+### 🔴 [Severity: LOW]: Suboptimal Gradle Build Configuration for CI/CD
+*   **Target Area:** `.github/workflows/ci.yml` and `build.gradle.kts`
+*   **Hypothesis:** The GitHub Actions workflow explicitly disables parallel execution and configuration caching for most Gradle tasks, overriding optimal defaults in `gradle.properties`.
+*   **Context & Proof:** In `.github/workflows/ci.yml`, steps like `run: ./gradlew build -x jacocoTestCoverageVerification --no-parallel` and publishing steps use `--no-parallel` and `--no-configuration-cache`. This drastically increases CI execution time compared to a parallelized, configuration-cached build.
+*   **Recommendation:** Remove `--no-parallel` globally in CI. Selectively re-enable configuration caching (e.g., removing `--no-configuration-cache`) where possible. Investigate if `dependencyCheckAnalyze` and the publishing tasks can be updated to support the configuration cache.
+
+### 🔴 [Severity: LOW]: CI Podman Container Caching Missing
+*   **Target Area:** `scripts/run_containerized_tests.sh` and `.github/workflows/ci.yml`
+*   **Hypothesis:** The `mazewall-test-runner` Podman image is built synchronously on every CI pipeline run without leveraging external layer caching (e.g., `--cache-from`), causing unnecessary delays.
+*   **Context & Proof:** In `scripts/run_containerized_tests.sh`, the command `podman build -t mazewall-test-runner -f infra/dev/Containerfile .` executes without any cache-related flags. In GitHub Actions, since the runner environment is ephemeral, this forces a full re-download of packages and JDK distributions defined in `Containerfile` on every single PR and push.
+*   **Recommendation:** Implement Podman/Buildah layer caching in GitHub Actions. Alternatively, use GitHub Container Registry (GHCR) to push/pull a baseline test runner image or use actions like `docker/setup-buildx-action` (if switching back to Docker) to cache intermediate layers effectively.
+
+### 🔴 [Severity: LOW]: Redundant JaCoCo Test Coverage Verification in CI
+*   **Target Area:** `.github/workflows/ci.yml` and `build.gradle.kts`
+*   **Hypothesis:** The CI workflow executes the Jacoco verification phase separately, breaking standard task dependency chains and adding unnecessary overhead.
+*   **Context & Proof:** The CI runs `./gradlew build -x jacocoTestCoverageVerification` and then, two steps later, `./gradlew jacocoTestCoverageVerification`. Because integration tests are run in between, it attempts to aggregate execution data. However, Gradle's task graph (`build.gradle.kts` defines `check` depending on `jacocoTestCoverageVerification`) is already designed to handle this sequentially. Manually orchestrating this with `-x` is brittle and inefficient.
+*   **Recommendation:** Refactor the CI workflow to execute a single `./gradlew check` that natively encapsulates unit testing, integration testing (perhaps via a composite task or proper test source set separation rather than a shell script wrapper), and jacoco verification in a single, parallelizable Gradle invocation.
+
+### 🔴 [Severity: LOW]: Inefficient DependencyCheck Configuration in CI
+*   **Target Area:** `.github/workflows/ci.yml` and `build.gradle.kts`
+*   **Hypothesis:** The OWASP Dependency-Check plugin is executed without configuration caching, significantly increasing configuration phase time.
+*   **Context & Proof:** In `.github/workflows/ci.yml`, the command runs `./gradlew dependencyCheckAnalyze --info --no-configuration-cache`. Modern versions of the dependency-check plugin support Gradle's configuration cache. Disabling it forces Gradle to re-evaluate the entire project build script every time this step runs.
+*   **Recommendation:** Upgrade the `dependencyCheck` plugin (if necessary) to a version fully compatible with Gradle's Configuration Cache and remove the `--no-configuration-cache` flag from the CI pipeline. Ensure the task inputs/outputs are correctly defined so the task is cacheable.
+
+### 🔴 [Severity: MEDIUM]: Gradle Configuration Avoidance Breakage via JitPack Shim
+*   **Target Area:** `build.gradle.kts`
+*   **Hypothesis:** The use of `tasks.whenTaskAdded` disables Gradle's Task Configuration Avoidance, forcing eager configuration of all tasks during the configuration phase, severely degrading IDE sync and build start times.
+*   **Context & Proof:** In `build.gradle.kts`, lines 52-57 contain:
+    ```kotlin
+    tasks.whenTaskAdded {
+        if (name == "listDeps") { ... }
+    }
+    ```
+    According to Gradle documentation, `whenTaskAdded` executes immediately for every task created, effectively breaking lazy task configuration. This means every task in the project is realized and configured, even if only a single, unrelated task is being executed.
+*   **Recommendation:** Replace `tasks.whenTaskAdded { if (name == "listDeps") { ... } }` with the lazy API equivalent: `tasks.matching { it.name == "listDeps" }.configureEach { ... }`. This preserves Task Configuration Avoidance while still applying the necessary shim for JitPack.
