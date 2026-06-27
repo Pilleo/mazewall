@@ -97,6 +97,7 @@ internal object SupervisorDaemonManager {
         val pbArgs = mutableListOf<String>()
         pbArgs.add(javaBin)
         pbArgs.add("--enable-native-access=ALL-UNNAMED")
+        pbArgs.add("-Xmx64m")
         if (jacocoAgent != null) {
             pbArgs.add(jacocoAgent)
         }
