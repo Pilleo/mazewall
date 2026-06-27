@@ -44,7 +44,10 @@ Evaluate the project across these core operational areas:
 
 This is a **continuous, hypothesis-driven execution loop**. You are authorized to run indefinitely. Do not summarize prematurely.
 
-1. **Phase 1: Research & Hypothesis:** Check `docs/internals/code_issues_backlog.md` for existing open issues, then formulate a specific security or architectural failure hypothesis.
+1. **Phase 1: Research & Hypothesis:** 
+   - Check `docs/internals/code_issues_backlog.md` for existing open issues.
+   - Look into the generated PlantUML diagrams under `docs/diagrams/` (e.g., [enforcer_class_diagram.puml](file:///home/leanid/Documents/code/java/jseccomp/docs/diagrams/enforcer_class_diagram.puml) and [profiler_class_diagram.puml](file:///home/leanid/Documents/code/java/jseccomp/docs/diagrams/profiler_class_diagram.puml)) to align on the class architectures and relationships.
+   - Formulate a specific security or architectural failure hypothesis.
 2. **Phase 2: Source Code Audit:** Audit the target files, checking both core logic and their associated tests.
 3. **Phase 3: Backlog Entry:** If you find a weakness, document it in `docs/internals/code_issues_backlog.md` using the standard format:
 

@@ -154,3 +154,7 @@ tasks.named("generateClassDiagrams") {
     }
 }
 
+tasks.named("build") {
+    dependsOn("generateClassDiagrams")
+}
+
