@@ -47,6 +47,7 @@ internal class ProfilerSessionHandler(
         ackBuf: MemorySegment,
         notif: MemorySegment,
         resp: MemorySegment,
+        socketPollFd: MemorySegment,
     ): LoopAction {
         val currentState = state
         if (currentState is ProfilerState.Terminated) {
@@ -73,7 +74,7 @@ internal class ProfilerSessionHandler(
             notif.fill(0)
             val recvRes = ioOps.ioctl(listenerFd, SECCOMP_IOCTL_NOTIF_RECV, notif)
             recvRes.onSuccess {
-                if (!processNotification(notif, resp)) {
+                if (!processNotification(notif, resp, ackBuf, socketPollFd)) {
                     state = ProfilerState.Terminated(socketFd, listenerFd)
                 }
             }
@@ -100,10 +101,12 @@ internal class ProfilerSessionHandler(
         }.recover { _, _ -> false }
     }
 
-    @Suppress("TooGenericExceptionCaught", "ReturnCount")
+    @Suppress("TooGenericExceptionCaught", "ReturnCount", "CyclomaticComplexMethod")
     internal fun processNotification(
         notif: MemorySegment,
         resp: MemorySegment,
+        ackBuf: MemorySegment,
+        socketPollFd: MemorySegment,
     ): Boolean {
         val currentState = state as? ProfilerState.ActiveSession ?: return false
 
@@ -114,11 +117,6 @@ internal class ProfilerSessionHandler(
         System.err.println("[DAEMON-DEBUG] Received notification: id=$id, pid=$pidVal, nr=$nr")
         val handshake = HandshakeSession.Active(id, listenerFd)
 
-        // Track whether SECCOMP_USER_NOTIF_FLAG_CONTINUE was sent for this notification.
-        // The kernel allows exactly one response per notification ID. If CONTINUE was already
-        // sent, we must NOT call sendSeccompError in the catch block — the kernel would reject
-        // it with ENOENT (stale ID), causing an exception in the exception handler itself and
-        // crashing the daemon thread entirely.
         var continueSent = false
 
         try {
@@ -130,8 +128,6 @@ internal class ProfilerSessionHandler(
             }
 
             // RESOLVE: Transform raw event into a resolved event (read path from tracee memory).
-            // process_vm_readv is called here while the tracee is still suspended, guaranteeing
-            // that the path argument is still valid in the tracee's address space.
             val resolver = SyscallPathResolver(memoryReader, ledger)
             val resolvedEvent = resolver.resolve(event = SyscallEvent<SyscallEventState.Raw>(
                 tid = Tid(pidVal),
@@ -139,30 +135,8 @@ internal class ProfilerSessionHandler(
                 args = args.toList()
             ))
 
-            // FIRE-AND-FORGET: Release the tracee thread immediately after path resolution.
-            //
-            // The tracee is unblocked here — before any IPC to the JVM listener. This eliminates
-            // the synchronous ACK round-trip that was the source of all profiler deadlocks:
-            //
-            //   OLD (broken): tracee blocked → daemon writes event → JVM reads event →
-            //                 JVM sends ACK → daemon receives ACK → daemon sends CONTINUE
-            //   NEW (correct): tracee blocked → daemon resolves path → daemon sends CONTINUE →
-            //                  tracee unblocked → daemon delivers event to JVM asynchronously
-            //
-            // path resolution via process_vm_readv is still safe because CONTINUE is sent AFTER
-            // the read, not before.
-            System.err.println("[DAEMON-DEBUG] Releasing tracee tid=$pidVal (fire-and-forget CONTINUE)")
-            val notifiedState = currentState.notified(id, resolvedEvent)
-            val waitingState = notifiedState.waitingForAck()
-            state = waitingState
-            responder.sendSeccompContinue(handshake.acknowledged(), resp)
-            continueSent = true
-            ledger.record(SessionEvent.ContinueReplied(System.nanoTime(), pidVal.toLong(), 0L))
-            state = waitingState.acknowledged()
-
             // Optimisation: skip event delivery for JVM-internal paths that generate noise
-            // (JDK home, classpath, /proc, /sys). The tracee is already running; this is
-            // purely an IPC volume reduction, not a deadlock-prevention measure.
+            // (JDK home, classpath, /proc, /sys).
             if ((nr == SYS_OPEN || nr == SYS_OPENAT || nr == SYS_OPENAT2) && resolvedEvent.paths.isNotEmpty()) {
                 val pathStr = resolvedEvent.paths.first()
                 try {
@@ -171,30 +145,58 @@ internal class ProfilerSessionHandler(
                         path.startsWith(bypassPath) || path == bypassPath
                     }
                     System.err.println("[DAEMON-DEBUG] Noise-filter check: path=$pathStr, skip=$matched")
-                    if (matched) return true
+                    if (matched) {
+                        responder.sendSeccompContinue(handshake.acknowledged(), resp)
+                        return true
+                    }
                 } catch (ignored: Exception) {}
             }
 
-            // DELIVER: Write event to JVM listener socket (non-blocking from tracee perspective).
+            val notifiedState = currentState.notified(id, resolvedEvent)
+            val waitingState = notifiedState.waitingForAck()
+            state = waitingState
+
+            socketPollFd.set(ValueLayout.JAVA_INT, POLLFD_FD_OFF, socketFd.value)
+            socketPollFd.set(ValueLayout.JAVA_SHORT, POLLFD_EVENTS_OFF, NativeConstants.POLLIN)
+
+            // DELIVER: Write event to JVM listener socket.
             System.err.println("[DAEMON-DEBUG] Sending event to JVM listener: tid=$pidVal, syscall=${resolvedEvent.syscallName}, paths=${resolvedEvent.paths}")
             publisher.sendTraceEvent(socketFd, resolvedEvent)
             System.err.println("[DAEMON-DEBUG] Event sent to JVM listener.")
             ledger.record(SessionEvent.EventSent(System.nanoTime(), pidVal.toLong()))
 
-            return true
+            // HANDSHAKE: Wait for JVM listener to ACK event before letting tracee continue.
+            val result = handshake.performHandshake(socketFd, ioOps, socketPollFd, ackBuf, onShutdown)
+            return when (result) {
+                is HandshakeSession.Success -> {
+                    ledger.record(SessionEvent.AckReceived(System.nanoTime(), pidVal.toLong()))
+                    state = waitingState.acknowledged()
+                    responder.sendSeccompContinue(result, resp)
+                    continueSent = true
+                    ledger.record(SessionEvent.ContinueReplied(System.nanoTime(), pidVal.toLong(), 0L))
+                    true
+                }
+                is HandshakeSession.Failed -> {
+                    System.err.println("[DAEMON-WARN] Handshake failed or shutdown triggered")
+                    state = waitingState.terminate()
+                    responder.sendSeccompError(result, resp, ECONNRESET)
+                    ledger.record(SessionEvent.ErrorReplied(System.nanoTime(), pidVal.toLong(), ECONNRESET))
+                    false
+                }
+                else -> {
+                    state = ProfilerState.Terminated(socketFd, listenerFd)
+                    false
+                }
+            }
         } catch (e: Throwable) {
             logger.severe {
                 "Exception in processNotification: ${e.message}. Dumping SessionEventLedger:\n" +
                     ledger.dump().joinToString("\n")
             }
             if (continueSent) {
-                // CONTINUE was already sent — the tracee is running. We cannot respond again.
-                // Log the delivery failure but keep the session alive: return true so the caller
-                // does not terminate the session over a JVM-side delivery error.
                 state = ProfilerState.ActiveSession(socketFd, listenerFd)
                 return true
             }
-            // CONTINUE was not yet sent — error out and release the tracee.
             responder.sendSeccompError(handshake.failed(), resp, ECONNRESET)
             ledger.record(SessionEvent.ErrorReplied(System.nanoTime(), pidVal.toLong(), ECONNRESET))
             return false
@@ -253,12 +255,6 @@ internal class ProfilerSessionHandler(
                 try {
                     add(java.nio.file.Paths.get("/proc").toAbsolutePath().normalize())
                     add(java.nio.file.Paths.get("/sys").toAbsolutePath().normalize())
-                } catch (ignored: Exception) {}
-
-                // Add the project root directory to bypass all project classes and build artifacts
-                try {
-                    val userDir = java.nio.file.Paths.get(System.getProperty("user.dir")).toAbsolutePath().normalize()
-                    add(userDir)
                 } catch (ignored: Exception) {}
             } catch (e: Exception) {
                 // Fail-safe

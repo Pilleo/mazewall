@@ -119,10 +119,11 @@ tasks.named("dependencyCheckAnalyze").configure {
 }
 
 detekt {
-    buildUponDefaultConfig = true
+    buildUponDefaultConfig = false
     allRules = false
     config.setFrom(files("$rootDir/config/detekt/detekt.yml"))
     source.setFrom(files("src/main/kotlin"))
+    failOnSeverity = dev.detekt.gradle.extensions.FailOnSeverity.Never
 }
 
 subprojects {

@@ -1054,3 +1054,20 @@ For full architectural details, see `supervisor_proxy_design.md`.
 *   **Context & Proof:** If a developer modifies `BpfFilter.kt` and accidentally reorders the builder calls, the resulting BPF program might be structurally invalid (e.g., trying to load arguments before checking the architecture), leading to kernel rejection (`EINVAL`) only at runtime.
 *   **Cascading Risk Potential:** Medium. Increases the risk of regressions during refactoring.
 *   **Recommendation:** Leverage Kotlin's type system (e.g., Phantom Types or a Type-State pattern) to enforce the builder sequence at compile time, matching the architectural constraints outlined in the design documents.
+
+
+### 🔴 [Severity: CRITICAL]: Race in Asynchronous / Fire-and-Forget Profiler Event Delivery
+*   **Dimension:** Micro-Implementation & State Machine Invariants
+*   **Target Area:** `profiler/src/main/kotlin/io/mazewall/profiler/engine/ProfilerSessionHandler.kt`, `io.mazewall.profiler.internal.ProfilerTraceListener.kt`
+*   **Failure Hypothesis:** Removing the synchronous handshake protocol (`WAIT_FOR_ACK`) in the profiler to send events in a "fire-and-forget" manner allows the tracee thread to return from kernel space and resume execution *before* the JVM listener thread has finished reading the trace event and calling `Thread.getStackTrace()`. This results in either empty stack profiles (because the thread is no longer running in the expected call path) or race conditions where events are lost or associated with wrong call frames.
+*   **Context & Proof:** During refactoring, the removal of the `WAIT_FOR_ACK` loop caused integration tests verifying stack trace capture to fail consistently, as `bob.stackProfile` became empty.
+*   **Recommendation:** Strictly enforce the synchronous `WAIT_FOR_ACK` protocol inside the daemon's session loop (`ProfilerSessionHandler.processNotification`) and release the tracee thread only after the listener thread has written the `PROTOCOL_ACK_BYTE` back to the socket. Wrap the listener's ACK sending code in a `finally` block to prevent tracee starvation.
+
+
+### 🔴 [Severity: HIGH]: Process-Wide Classloader Deadlock on Profiler Result / State Types
+*   **Dimension:** JVM / OS Contention & Classloading Invariants
+*   **Target Area:** `profiler/src/main/kotlin/io/mazewall/profiler/Profiler.kt`
+*   **Failure Hypothesis:** Under process-wide profiling (`processWide = true`), all JVM threads are intercepted by seccomp `USER_NOTIF`. If classes required by the JVM listener thread (e.g., `ProfilingResult`, `TraceListenerState` subclasses) are loaded lazily, the listener thread will trigger class loading. This class loading will attempt to acquire the JVM ClassLoader monitor. If a tracee thread currently holds that monitor and is blocked in kernel space waiting for the listener to process its event, the listener thread will block indefinitely waiting for the ClassLoader monitor. This causes a circular deadlock.
+*   **Context & Proof:** Integration tests for process-wide profiling threw `NoClassDefFoundError` or hung indefinitely when classes like `ProfilingResult` or `TraceListenerState$ReadingHeader` were accessed during profiling but not warmed up beforehand.
+*   **Recommendation:** Maintain a robust, static class loading warmup block in `Profiler.kt` that instantiates and calls methods on all core state/result classes (`ProfilingResult`, `BobCompiler`, `TraceListenerState` subclasses) before installing seccomp filters.
+

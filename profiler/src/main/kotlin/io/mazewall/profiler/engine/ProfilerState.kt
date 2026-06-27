@@ -83,6 +83,12 @@ internal sealed interface ProfilerState {
         fun terminate() = Terminated(socketFd, listenerFd)
     }
 
+    /** Pass-through mode: ignoring all events and just sending CONTINUE blindly. */
+    data class PassThrough(
+        override val socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>?,
+        override val listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open>?,
+    ) : ProfilerState
+
     /** Closed state. No further operations are allowed. */
     data class Terminated(
         override val socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>? = null,

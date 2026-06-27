@@ -46,7 +46,9 @@ internal class ProfilerTraceListener(
         // On receipt the daemon session loop terminates gracefully (LoopAction.Shutdown), which
         // allows the JVM listener to drain the remaining events before seeing EOF.
         private const val SHUTDOWN_COMMAND_BYTE = 0x53.toByte()
+        private const val PASS_THROUGH_COMMAND_BYTE = 0x54.toByte()
         private const val JOIN_TIMEOUT_MS = 5000L
+        private const val INTERRUPT_JOIN_TIMEOUT_MS = 500L
     }
 
     /**
@@ -101,7 +103,7 @@ internal class ProfilerTraceListener(
                 if (it.isAlive) {
                     logger.warning("Trace listener thread for fd=${socketFd.value} did not terminate within $JOIN_TIMEOUT_MS ms")
                     it.interrupt()
-                    it.join(500)
+                    it.join(INTERRUPT_JOIN_TIMEOUT_MS)
                 }
             } catch (e: InterruptedException) {
                 Thread.currentThread().interrupt()
@@ -114,13 +116,46 @@ internal class ProfilerTraceListener(
     }
 
     private fun sendShutdownCommand() {
+        sendCommand(SHUTDOWN_COMMAND_BYTE)
+    }
+
+    /**
+     * Instructs the daemon to enter Pass-Through mode. The daemon will stop sending
+     * events to this socket and simply loop executing `SECCOMP_USER_NOTIF_FLAG_CONTINUE`
+     * for all notifications until the tracee process fully exits.
+     * The daemon will close its end of the socket, which sends EOF to our listener thread.
+     */
+    fun passThrough() {
+        if (!closed.compareAndSet(false, true)) return
+
+        logger.fine("Entering Pass-Through mode for ProfilerTraceListener fd=${socketFd.value}")
+
+        sendCommand(PASS_THROUGH_COMMAND_BYTE)
+
+        workerThread?.let {
+            try {
+                it.join(JOIN_TIMEOUT_MS)
+                if (it.isAlive) {
+                    logger.warning("Trace listener thread for fd=${socketFd.value} did not terminate within $JOIN_TIMEOUT_MS ms during passThrough")
+                    it.interrupt()
+                }
+            } catch (e: InterruptedException) {
+                Thread.currentThread().interrupt()
+            }
+        }
+        
+        socketFd.close()
+        workerThread = null
+    }
+
+    private fun sendCommand(commandByte: Byte) {
         // Best-effort: if the socket is already closed or the daemon is dead, ignore errors.
         // Use a confined native arena — MemorySegment.ofArray() creates a heap segment that
         // cannot be passed to native write() syscalls via the FFM API.
         try {
             Arena.ofConfined().use { arena ->
                 val buf = arena.allocate(1)
-                buf.set(java.lang.foreign.ValueLayout.JAVA_BYTE, 0L, SHUTDOWN_COMMAND_BYTE)
+                buf.set(java.lang.foreign.ValueLayout.JAVA_BYTE, 0L, commandByte)
                 LinuxNative.withTransaction { LinuxNative.memory.write(socketFd, buf, 1) }
             }
         } catch (ignored: Exception) {}
@@ -211,18 +246,22 @@ internal class ProfilerTraceListener(
     }
 
     private fun processEvent(event: TraceEvent) {
-         System.err.println("[TRACE-LISTENER-DEBUG] processEvent: tid=${event.tid.value}, syscall=${event.syscallName}")
-         if (event.paths.isNotEmpty() && isDuplicate(event)) {
-             System.err.println("[TRACE-LISTENER-DEBUG] duplicate event, skipping")
-             return
+         try {
+             System.err.println("[TRACE-LISTENER-DEBUG] processEvent: tid=${event.tid.value}, syscall=${event.syscallName}")
+             if (event.paths.isNotEmpty() && isDuplicate(event)) {
+                 System.err.println("[TRACE-LISTENER-DEBUG] duplicate event, skipping")
+                 return
+             }
+
+             accumulatedLogs.add(event)
+             accumulateStackTrace(event)
+         } finally {
+             sendAck()
          }
+    }
 
-         accumulatedLogs.add(event)
-
-         // The daemon uses fire-and-forget delivery: the tracee thread is already unblocked
-         // before this event arrives on the socket. There is no ACK to send and no ordering
-         // constraint between event recording and stack trace capture.
-         accumulateStackTrace(event)
+    private fun sendAck() {
+        sendCommand(PROTOCOL_ACK_BYTE)
     }
 
     private fun isDuplicate(event: TraceEvent): Boolean {

@@ -79,6 +79,12 @@ public object SupervisorSeccompNotifInstaller {
                         throw IllegalStateException("Failed to send seccomp listener FD to daemon")
                     }
 
+                    // The daemon now has a copy of the listener FD via SCM_RIGHTS.
+                    // We must close our local copy. If we don't, the kernel will not abort
+                    // pending notifications when the daemon exits (since our FD would remain open),
+                    // causing tracee threads to deadlock forever in __seccomp_filter.
+                    LinuxNative.fileSystem.close(FileDescriptor.unsafe<FileDescriptorRole.SeccompNotif>(fd))
+
                     val readyLatch = CountDownLatch(1)
 
                     // Start validation/event listener thread (which will run uncontained)

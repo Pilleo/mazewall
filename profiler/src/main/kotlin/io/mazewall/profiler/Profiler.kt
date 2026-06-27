@@ -69,6 +69,22 @@ object Profiler {
             // Warm up stack trace retrieval, mapping, and stringification
             Thread.currentThread().stackTrace.map { it.toString() }
 
+            // Warm up BobCompiler and related classes
+            val dummyBob = io.mazewall.profiler.compiler.BobCompiler.compile(java.util.concurrent.CopyOnWriteArrayList(listOf(dummyEvent)))
+
+            // Warm up ProfilingResult
+            val dummyResult = ProfilingResult(Unit, dummyBob, java.util.concurrent.ConcurrentHashMap())
+            dummyResult.toString()
+
+            // Warm up TraceListenerState subclasses
+            val s1 = io.mazewall.profiler.internal.TraceListenerState.AwaitingEvent
+            val s2 = io.mazewall.profiler.internal.TraceListenerState.ReadingHeader(0)
+            val s3 = io.mazewall.profiler.internal.TraceListenerState.ReadingSyscall(0, 0)
+            val s4 = io.mazewall.profiler.internal.TraceListenerState.ReadingArguments(0, "", 0)
+            val s5 = io.mazewall.profiler.internal.TraceListenerState.ProcessingEvent(dummyEvent)
+            val s6 = io.mazewall.profiler.internal.TraceListenerState.Disconnected
+            s1.toString(); s2.toString(); s3.toString(); s4.toString(); s5.toString(); s6.toString()
+
             // Warm up list, map, and sorting operations
             val list = java.util.concurrent.CopyOnWriteArrayList<Array<StackTraceElement>>()
             list.add(emptyArray())
@@ -88,9 +104,10 @@ object Profiler {
         // Capture the trace listener created for this session so it can be drained before compile.
         val sessionListener = AtomicReference<ProfilerTraceListener>()
 
+        var tid: io.mazewall.core.Tid? = null
         val workerThread = Thread {
-            val tid = LinuxNative.process.gettid()
-            threadRegistry[tid] = Thread.currentThread()
+            tid = LinuxNative.process.gettid()
+            threadRegistry[tid!!] = Thread.currentThread()
             try {
                 // We must use a separate thread because seccomp USER_NOTIF stops the calling thread.
                 // The resolver daemon needs to be notified by the kernel, which then notifies
@@ -114,7 +131,7 @@ object Profiler {
                     errorRef.set(e)
                 }
             } finally {
-                threadRegistry.remove(tid)
+                // Do not remove tid here. Wait until listener drains events.
             }
         }.apply {
             name = "mazewall-profiler-worker"
@@ -136,10 +153,14 @@ object Profiler {
         // BobCompiler.compile() read localLogs, which is now stable and complete.
         sessionListener.get()?.let { listener ->
             listeners.remove(listener)
-            listener.close()
+            listener.passThrough()
+        }
+        
+        if (tid != null) {
+            threadRegistry.remove(tid!!)
         }
 
-        val bob = BobCompiler.compile(localLogs)
+        val bob = BobCompiler.compile(localLogs).copy(stackProfile = localStackProfile)
         return ProfilingResult(blockResult.get() as T, bob, localStackProfile)
     }
 
@@ -173,6 +194,7 @@ object Profiler {
         pathCache: MutableMap<String, Long>,
         processWide: Boolean,
         workerThreadProvider: () -> Thread?,
+        onListenerCreated: ((ProfilerTraceListener) -> Unit)? = null,
     ) {
         ProfilerInstaller.installProfilingFilterForThread(
             socketPath = socketPath,
@@ -191,6 +213,7 @@ object Profiler {
                     provider
                 )
                 listeners.add(listener)
+                onListenerCreated?.invoke(listener)
                 listener.start(readyLatch)
             },
         )
@@ -201,9 +224,11 @@ object Profiler {
      */
     fun shutdown() {
         synchronized(this) {
-            listeners.forEach { it.close() }
+            listeners.forEach { it.passThrough() }
             listeners.clear()
-            ProfilerDaemonManager.stop()
+            // Do not call ProfilerDaemonManager.stop() here. 
+            // We want the daemon to stay alive in PassThrough mode to service background threads 
+            // until the parent JVM exits (which triggers the daemon's stdin EOF monitor).
         }
     }
 
