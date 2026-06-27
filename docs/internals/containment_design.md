@@ -458,4 +458,25 @@ To reinforce process-wide (Tier 1) security boundaries without breaking JVM thre
    - **Why:** Mitigate Denial of Service (DoS) attacks (e.g., CPU exhaustion, memory ballooning) initiated by sandboxed tasks.
    - **Implementation:** Bind the JVM process or specific system cgroup slices to strict resource boundaries at initialization.
 
+---
+
+## 11. Experimental: Stacktrace-Enforced Scoping (L4 Call-Path Binding)
+
+In addition to static syscall filtering, `mazewall` supports dynamic **Stacktrace-Enforced Scoping** (using `StacktraceScopingPolicy` and `JvmStackInspector`). This binds a system call's permission check to the calling JVM execution stack trace in real time.
+
+### The Safepoint Deadlock Problem
+* Thread creation (`Thread.start()`) and process spawning (`ProcessBuilder.start()`) both rely on `clone` (or `clone3`) syscalls under the hood.
+* When a syscall is supervised under `USER_NOTIF`, the kernel suspends the tracee thread.
+* The supervisor must obtain the JVM stacktrace of the suspended thread using `Thread.getStackTrace()`. This forces a JVM safepoint.
+* However, because the tracee thread is suspended in `Thread.start()` holding internal classloader and thread monitors, it cannot reach the safepoint.
+* This results in a permanent circular deadlock.
+
+### The Solution (Parent-Thread vfork Supervision)
+1. **Allow `CLONE` / `CLONE3` entirely:** To ensure the JVM can start threads without deadlocking or triggering supervisor inspections, do not supervise `CLONE`.
+2. **Configure `vfork` process spawning:** Set `-Djdk.lang.Process.launchMechanism=vfork` (or `fork`) on the JVM process. This forces process spawning to use `vfork`/`fork` instead of `clone`.
+3. **Supervise `VFORK` and `FORK`:** When a tool spawns a process, `vfork` is executed on the calling JVM thread. The supervisor intercepts this syscall on the parent thread before the child process detaches, enabling safe context inspection via `Thread.getStackTrace()`.
+4. **Child Process Attributing:** Since the child process has a different PID and does not run JVM code, its subsequent `execve` has an empty stacktrace. Attributing and validating the execution context is therefore handled at the parent's `vfork`/`fork` boundary.
+
+---
+
 

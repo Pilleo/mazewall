@@ -141,6 +141,23 @@ Through the agent sandboxing implementation, we discovered two key system-level 
 ### The Solution:
 * Allow `CLONE` and `CLONE3` entirely to ensure thread creation and standard JVM scheduling function without triggering supervisor inspections.
 * Set `-Djdk.lang.Process.launchMechanism=vfork` to force the JVM to spawn processes using `vfork` or `fork` rather than `clone`.
-* Supervise `VFORK` and `FORK` instead of `EXECVE`. Since `vfork` is executed on the calling JVM thread before the child process is fully detached, we can capture the calling JVM stacktrace perfectly and authorize or block the process spawn directly on the parent thread.
+* Supervise `VFORK` and `FORK` instead of `EXECVE`. Since `vfork` is executed on the calling JVM thread before the child process is fully detached, we can capture the calling JVM stacktrace perfectly and authorize or block the process spawn directly on the parent thread. 
+
+For example, when `vfork` is intercepted on the parent thread, the supervisor receives the following JVM stacktrace:
+```
+[MAZEWALL] [DEBUG] process spawn (syscall=VFORK) stack:
+  at java.lang.ProcessImpl.forkAndExec(ProcessImpl.java:-2)
+  at java.lang.ProcessImpl.<init>(ProcessImpl.java:300)
+  at java.lang.ProcessImpl.start(ProcessImpl.java:231)
+  at java.lang.ProcessBuilder.start(ProcessBuilder.java:1078)
+  at java.lang.ProcessBuilder.start(ProcessBuilder.java:1046)
+  at io.mazewall.demo.agent.AgentTools.executeDataAnalysis$lambda$0(Tools.kt:153)
+  at io.mazewall.enforcer.internal.ContainedExecutorWrapper.wrapCallable$lambda$0(ContainedExecutorWrapper.kt:51)
+  at java.util.concurrent.FutureTask.run(FutureTask.java:328)
+  at java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1090)
+  at java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:614)
+  at java.lang.Thread.run(Thread.java:1474)
+```
+The scoping policy can then safely inspect this trace, matching `AgentTools.executeDataAnalysis` to allow the execution, or denying it if it originates from an untrusted context (e.g. from `fetchWebpage`).
 
 ---

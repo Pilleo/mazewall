@@ -166,6 +166,12 @@ Implementation uses the JDK **Foreign Function & Memory API** (JDK 22+) to make 
 
 Elasticsearch pioneered a process-wide variant of this pattern in the JVM since 2015 (originally configured via `bootstrap.system_call_filter`, now a mandatory, non-configurable startup check). mazewall brings that approach to per-thread granularity, composable with standard Java executor infrastructure.
 
+### Experimental: Stacktrace-Enforced Scoping (L4 Call-Path Binding)
+In addition to static system call blocking, `mazewall` supports **Stacktrace-Enforced Scoping** (via the `StacktraceScopingPolicy` API). When a thread executes a supervised system call (such as a network `connect` or process spawning `vfork`), the kernel suspends the thread and delegates validation to the JVM. The supervisor retrieves the JVM stack trace of the blocked thread, allowing the call only if it originates from a pre-approved call path.
+
+> [!WARNING]
+> **Highly Experimental:** Stacktrace inspection requires triggering JVM safepoints. Supervising system calls that are executed while holding internal JVM monitors (e.g. `CLONE` during thread creation) causes circular JVM safepoint deadlocks. This feature is highly experimental and subject to change or removal in future versions.
+
 ---
 
 ## Built-In Policies

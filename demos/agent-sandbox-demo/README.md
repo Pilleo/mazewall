@@ -62,3 +62,16 @@ This PoC runs a LangChain4j agent with three tools, demonstrating three common s
     ./gradlew :demos:agent-sandbox-demo:run --args="--scenario rce_malicious --mazewall"
     ```
     *(Result: The command execution is blocked because the stack trace did not originate from `executeDataAnalysis`).*
+
+---
+
+## ⚠️ Highly Experimental: Stacktrace-Enforced Execution
+
+The stacktrace scoping mechanism utilized in this demo is **highly experimental** and subject to significant API changes or complete removal in future versions.
+
+### How It Works:
+1. **The Safepoint Deadlock Challenge:** Spawning OS processes or Java threads triggers the Linux `clone` (or `clone3`) syscall. Supervising `CLONE` directly causes a deadlock: the thread is blocked in `Thread.start()` holding internal classloader/thread monitors, and checking the stacktrace requires triggering a JVM safepoint (which waits for the blocked thread to yield).
+2. **The JVM launchMechanism Workaround:** To bypass this, we configure the JVM to launch processes using `vfork` or `fork` instead of `clone` (`-Djdk.lang.Process.launchMechanism=vfork`). We then allow thread-creation `CLONE` calls un-supervised.
+3. **Parent Thread Context Capture:** When `vfork`/`fork` is called, the parent JVM thread is suspended before the child process is fully detached. The supervisor intercepts this call on the parent thread, queries `Thread.getStackTrace()`, and determines if the call originated from the authorized tool (`executeDataAnalysis`).
+4. **Execution Restriction:** Since the child process detaches afterward, the actual `execve` occurs inside the child. Because child PIDs have no JVM stacktrace, we enforce validation on the parent thread's `vfork`/`fork` rather than on `execve` directly.
+

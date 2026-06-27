@@ -213,6 +213,16 @@ Blocking `futex` or `rt_sigreturn` will cause the JVM to permanently freeze or c
 
 This is why `mazewall`'s base policies (like `Policy.PURE_COMPUTE_UNSAFE`) pre-whitelist these system calls. When writing custom policies, these system calls must remain unblocked.
 
+### The Safepoint Deadlock Hazard in Stacktrace Scoping
+
+A critical extension of this deadlock model occurs during **Stacktrace-Enforced Scoping**. When a system call (like `connect` or `clone`) is supervised under `USER_NOTIF`, the kernel suspends the executing thread. To validate the calling context, the supervisor daemon must query the JVM for the thread's stack trace (`Thread.getStackTrace()`), which triggers a JVM safepoint.
+
+If the thread is suspended while holding internal JVM monitors—such as during thread creation (`Thread.start()` invoking `CLONE`), class loading, or native library initialization—it cannot reach the safepoint. The JVM will wait indefinitely for the thread to reach the safepoint, while the thread is suspended in the kernel waiting for the supervisor, resulting in a **permanent circular deadlock**.
+
+To mitigate this:
+1. **Never supervise `CLONE` / `CLONE3`**: Standard Java thread creation must be allowed un-supervised to prevent deadlocks.
+2. **Attribute via `vfork` / `fork`**: To supervise process spawning safely, force the JVM to use `vfork` (`-Djdk.lang.Process.launchMechanism=vfork`) and supervise `VFORK`/`FORK` rather than `CLONE` or `EXECVE`. Since `vfork` suspends the parent JVM thread before detaching, we can capture the calling JVM stacktrace safely on the parent thread.
+
 ---
 
 ## Concurrency Pitfalls: Loom Carrier Thread Contamination
