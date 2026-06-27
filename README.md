@@ -3,7 +3,7 @@
 [![CI](https://github.com/Pilleo/mazewall/actions/workflows/ci.yml/badge.svg)](https://github.com/Pilleo/mazewall/actions/workflows/ci.yml)
 [![JitPack](https://jitpack.io/v/Pilleo/mazewall.svg)](https://jitpack.io/#Pilleo/mazewall)
 
-**Per-thread syscall sandboxing for JVM applications — no native code, no root, no restarts.**
+**Per-thread,process kernel-enforced  syscall sandboxing for JVM applications. Container-like sandoboxing for your methods **
 
 > [!NOTE]
 > **Pre-Alpha.** Core enforcement and profiling work end-to-end. API is unstable and known issues are actively tracked. If you're evaluating this for your stack or want to contribute, [open a discussion](https://github.com/Pilleo/mazewall/discussions).

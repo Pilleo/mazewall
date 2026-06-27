@@ -130,7 +130,7 @@ internal class ProfilerDaemonEngine(
         }
     }
 
-    @Suppress("NestedBlockDepth", "LoopWithTooManyJumpStatements", "CyclomaticComplexMethod")
+    @Suppress("NestedBlockDepth", "LoopWithTooManyJumpStatements", "CyclomaticComplexMethod", "TooGenericExceptionCaught")
     private fun handleConnection(socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>) {
         var connection: io.mazewall.ffi.networking.SeccompConnection = io.mazewall.ffi.networking.SeccompConnection.Accepted(socketFd)
         try {
@@ -164,7 +164,6 @@ internal class ProfilerDaemonEngine(
                         }
 
                         is io.mazewall.ffi.networking.SeccompConnection.FdAttached -> {
-                            // Send ACK byte to notify receipt of listener FD
                             System.err.println("[DAEMON] Sending handshake ACK to socket ${socketFd.value}")
                             val ackBuf = arena.allocate(ACK_BUF_SIZE)
                             ackBuf.set(ValueLayout.JAVA_BYTE, 0L, PROTOCOL_ACK_BYTE)
@@ -176,38 +175,41 @@ internal class ProfilerDaemonEngine(
                         is io.mazewall.ffi.networking.SeccompConnection.Active -> {
                             System.err.println("[DAEMON] Starting session reactor for listener ${current.listenerFd.value}")
                             handleSession(current.socketFd, current.listenerFd)
-                            // After session finishes, reset to Accepted to wait for another session on this socket
-                            connection = io.mazewall.ffi.networking.SeccompConnection.Accepted(current.socketFd)
-                            System.err.println("[DAEMON] Session reactor finished. Resetting to Accepted.")
+                            // After session finishes (e.g. shutdown command received), terminate
+                            // the connection entirely. The trace listener expects EOF on the
+                            // socket to know all events are drained.
+                            System.err.println("[DAEMON] Session reactor finished. Closing connection.")
+                            return@use
                         }
                     }
                 }
             }
+        } catch (e: Exception) {
+            System.err.println("[DAEMON-WARN] Connection handler terminated with exception: ${e.message}")
         } finally {
             clientSockets.remove(socketFd)
             socketManager.close(socketFd)
             if (connection is io.mazewall.ffi.networking.SeccompConnection.FdAttached) {
-                val lFd = (connection as io.mazewall.ffi.networking.SeccompConnection.FdAttached).listenerFd
+                val lFd = connection.listenerFd
                 activeListeners.remove(lFd)
                 socketManager.close(lFd)
             }
         }
     }
 
-    @Suppress("NestedBlockDepth", "LoopWithTooManyJumpStatements")
     private fun handleSession(
         socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>,
         listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open>,
     ) {
         val sessionHandler = ProfilerSessionHandler(
-            socketFd,
-            listenerFd,
-            publisher,
-            responder,
-            ioOps,
-            memoryReader,
-            syscallMap,
-            this::triggerGlobalShutdown,
+            socketFd = socketFd,
+            listenerFd = listenerFd,
+            publisher = publisher,
+            responder = responder,
+            ioOps = ioOps,
+            memoryReader = memoryReader,
+            syscallMap = syscallMap,
+            onShutdown = this::triggerGlobalShutdown,
         )
         try {
             Arena.ofConfined().use { arena ->

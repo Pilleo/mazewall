@@ -174,7 +174,7 @@ object RealProfilerTransport : ProfilerTransport {
         resp.set(ValueLayout.JAVA_LONG, RESP_VAL_OFF, 0L)
         resp.set(ValueLayout.JAVA_INT, RESP_ERR_OFF, 0)
         resp.set(ValueLayout.JAVA_INT, RESP_FLAGS_OFF, NativeConstants.SECCOMP_USER_NOTIF_FLAG_CONTINUE.toInt())
-        ioctl(session.listenerFd, SECCOMP_IOCTL_NOTIF_SEND, resp)
+        ioctl(session.listenerFd, SECCOMP_IOCTL_NOTIF_SEND, resp).getOrThrow("sendSeccompContinue")
     }
 
     override fun sendSeccompError(
@@ -188,7 +188,7 @@ object RealProfilerTransport : ProfilerTransport {
         // Error numbers are negative in the 'error' field of seccomp_notif_resp
         resp.set(ValueLayout.JAVA_INT, RESP_ERR_OFF, -errorNr)
         resp.set(ValueLayout.JAVA_INT, RESP_FLAGS_OFF, 0)
-        ioctl(session.listenerFd, SECCOMP_IOCTL_NOTIF_SEND, resp)
+        ioctl(session.listenerFd, SECCOMP_IOCTL_NOTIF_SEND, resp).getOrThrow("sendSeccompContinue")
     }
 
     override fun recvDescriptor(socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>): FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open>? {

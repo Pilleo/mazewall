@@ -47,11 +47,6 @@ class "BobCompiler" as io.mazewall.profiler.compiler.BobCompiler {
   __
   +BillOfBehavior compile(List<? extends TraceEvent>)
 }
-class "DescriptorPassing" as io.mazewall.profiler.engine.DescriptorPassing {
-  + {static}DescriptorPassing INSTANCE
-  __
-  +MemorySegment setupScmRightsMsgHdr(Arena, MemorySegment, MemorySegment)
-}
 abstract class "HandshakeSession" as io.mazewall.profiler.engine.HandshakeSession {
   + {abstract}long getNotifId()
   + {abstract}FileDescriptor<SeccompNotif, Open> getListenerFd()
@@ -64,9 +59,6 @@ interface "NativeIoOperations" as io.mazewall.profiler.engine.NativeIoOperations
   + {abstract}SyscallResult write(FileDescriptor<?, ? extends Open>, MemorySegment, long)
   + {abstract}SyscallResult recv(FileDescriptor<?, ? extends Open>, MemorySegment, long, int)
   + {abstract}SyscallResult ioctl(FileDescriptor<?, ? extends Open>, long, MemorySegment)
-}
-abstract class "ProfilerConnection" as io.mazewall.profiler.engine.ProfilerConnection {
-  + {abstract}FileDescriptor<UnixSocket, Open> getSocketFd()
 }
 class "ProfilerDaemon" as io.mazewall.profiler.engine.ProfilerDaemon {
   + {static}ProfilerDaemon INSTANCE
@@ -85,7 +77,7 @@ interface "ProfilerDaemonState" as io.mazewall.profiler.engine.ProfilerDaemonSta
 class "ProfilerInstaller" as io.mazewall.profiler.engine.ProfilerInstaller {
   + {static}ProfilerInstaller INSTANCE
   __
-  +void installProfilingFilterForThread(String, PolicyDefinition<?>, List<TraceEvent>, Map<TraceEvent, List<StackTraceElement[]>>, Map<String, Long>, Function0<? extends Thread>, boolean, Function1<? super String, Integer>, Function5<? super Integer, ? super List<TraceEvent>, ? super Map<TraceEvent, List<StackTraceElement[]>>, ? super Map<String, Long>, ? super Function0<? extends Thread>, Unit>)
+  +void installProfilingFilterForThread(String, PolicyDefinition<?>, List<TraceEvent>, Map<TraceEvent, List<StackTraceElement[]>>, Map<String, Long>, Function0<? extends Thread>, boolean, Function1<? super String, Integer>, Function6<? super Integer, ? super List<TraceEvent>, ? super Map<TraceEvent, List<StackTraceElement[]>>, ? super Map<String, Long>, ? super Function0<? extends Thread>, ? super CountDownLatch, Unit>)
 }
 class "ProfilerInstallerSession" as io.mazewall.profiler.engine.ProfilerInstallerSession {
   +void install()
@@ -201,10 +193,6 @@ class "ProfilerDaemonManager" as io.mazewall.profiler.internal.ProfilerDaemonMan
 }
 class "ProfilerSocket" as io.mazewall.profiler.internal.ProfilerSocket {
   + {static}ProfilerSocket INSTANCE
-  + {static}int AF_UNIX
-  + {static}int SOCK_STREAM
-  + {static}int ADDR_UN_SIZE
-  + {static}int SOCKADDR_UN_PATH_SIZE
   __
   +int connectWithRetry(String, int, long)
   +boolean sendDescriptor(int, int)
@@ -214,8 +202,9 @@ class "ProfilerTraceListener" as io.mazewall.profiler.internal.ProfilerTraceList
   + {static}Companion Companion
   __
   +TraceListenerState getState()
-  +void start()
+  +void start(CountDownLatch)
   +void close()
+  +void passThrough()
 }
 interface "TraceListenerState" as io.mazewall.profiler.internal.TraceListenerState {
 }
@@ -239,7 +228,6 @@ io.mazewall.profiler.Profiler --> io.mazewall.profiler.Profiler
 io.mazewall.profiler.ProfilingResult --> io.mazewall.profiler.BillOfBehavior
 io.mazewall.profiler.ProfilingResult --> io.mazewall.profiler.engine.TraceEvent
 io.mazewall.profiler.compiler.BobCompiler --> io.mazewall.profiler.compiler.BobCompiler
-io.mazewall.profiler.engine.DescriptorPassing --> io.mazewall.profiler.engine.DescriptorPassing
 io.mazewall.profiler.engine.ProfilerDaemon --> io.mazewall.profiler.engine.ProfilerDaemon
 io.mazewall.profiler.engine.ProfilerDaemonEngine --> io.mazewall.profiler.engine.ProfilerTransport
 io.mazewall.profiler.engine.ProfilerDaemonEngine --> io.mazewall.profiler.engine.SeccompResponder

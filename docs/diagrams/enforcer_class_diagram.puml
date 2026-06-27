@@ -163,6 +163,7 @@ class "PolicyBuilder" as io.mazewall.PolicyBuilder<S extends PolicyScope> {
   +PolicyBuilder<S> addAction(SeccompAction, Syscall[])
   +PolicyBuilder<S> block(Syscall[])
   +PolicyBuilder<S> allow(Syscall[])
+  +PolicyBuilder<S> supervise(Syscall[])
   +PolicyBuilder<S> unblock(Syscall[])
   +PolicyBuilder<S> base(PolicyDefinition<? extends S>)
   +PolicyBuilder<ThreadLocalOnly> allowFsRead(String)
@@ -186,6 +187,7 @@ class "PolicyDefinition" as io.mazewall.PolicyDefinition<S extends PolicyScope> 
   +Set<SandboxedPath> getAllowedFsReadPaths()
   +Set<SandboxedPath> getAllowedFsWritePaths()
   +boolean getEnforceLandlock()
+  +boolean getHasSupervisedSyscalls()
   +boolean isSyscallAllowed(Syscall)
   +Map<Integer, SeccompAction> syscallActionNumbers(Arch)
 }
@@ -421,9 +423,12 @@ class "ContainedExecutors" as io.mazewall.enforcer.ContainedExecutors {
   + {static}ContainedExecutors INSTANCE
   __
   +void installOnCurrentThread(Policy<?, ? extends Uncompiled>[])
-  +void installOnCurrentThread(PolicyDefinition<?>)
+  +void installOnCurrentThread(Policy<?, ? extends Uncompiled>, StacktraceScopingPolicy)
+  +AutoCloseable installOnCurrentThread(PolicyDefinition<?>)
+  +AutoCloseable installOnCurrentThread(PolicyDefinition<?>, StacktraceScopingPolicy)
   +void installOnProcess(Policy<? extends ProcessWideSafe, ? extends Uncompiled>[])
   +ExecutorService wrap(ExecutorService, Policy<?, ? extends Uncompiled>[])
+  +ExecutorService wrap(ExecutorService, Policy<?, ? extends Uncompiled>, StacktraceScopingPolicy)
 }
 class "ContainerState" as io.mazewall.enforcer.ContainerState {
   +int getFilterDepth()
@@ -518,10 +523,104 @@ class "ContainedExecutorWrapper" as io.mazewall.enforcer.internal.ContainedExecu
   +boolean isTerminated()
   +boolean awaitTermination(long, TimeUnit)
 }
+class "DefaultStacktraceScopingPolicy" as io.mazewall.enforcer.supervisor.DefaultStacktraceScopingPolicy {
+  + {static}DefaultStacktraceScopingPolicy INSTANCE
+  __
+  +boolean authorize(int, Syscall, List<? extends Object>, List<StackTraceElement>)
+}
+class "JVMValidationListener" as io.mazewall.enforcer.supervisor.JVMValidationListener {
+  + {static}Companion Companion
+  __
+  +void start(CountDownLatch)
+}
+class "JvmStackInspector" as io.mazewall.enforcer.supervisor.JvmStackInspector {
+  + {static}JvmStackInspector INSTANCE
+  __
+  +ScopingValidationState inspect(int, List<? extends Object>, Thread)
+}
+abstract class "LoopAction" as io.mazewall.enforcer.supervisor.LoopAction {
+}
+interface "ScopingValidationState" as io.mazewall.enforcer.supervisor.ScopingValidationState {
+}
+interface "StacktraceScopingPolicy" as io.mazewall.enforcer.supervisor.StacktraceScopingPolicy {
+  + {abstract}boolean authorize(int, Syscall, List<? extends Object>, List<StackTraceElement>)
+}
+class "SupervisorContext" as io.mazewall.enforcer.supervisor.SupervisorContext {
+  +String getSocketPath()
+  +Path getSocketDir()
+  +Process getDaemonProcess()
+  +Thread getShutdownHook()
+}
+class "SupervisorDaemon" as io.mazewall.enforcer.supervisor.SupervisorDaemon {
+  + {static}SupervisorDaemon INSTANCE
+  + {static}String DAEMON_READY_SENTINEL
+  __
+  + {static}void main(String[])
+}
+class "SupervisorDaemonEngine" as io.mazewall.enforcer.supervisor.SupervisorDaemonEngine {
+  + {static}Companion Companion
+  __
+  +SupervisorDaemonState getState()
+  +void run()
+  +void triggerGlobalShutdown(String)
+}
+class "SupervisorDaemonManager" as io.mazewall.enforcer.supervisor.SupervisorDaemonManager {
+  + {static}SupervisorDaemonManager INSTANCE
+  __
+  +SupervisorContext getOrSpawnSharedDaemon()
+  +void stop()
+}
+interface "SupervisorDaemonState" as io.mazewall.enforcer.supervisor.SupervisorDaemonState {
+}
+class "SupervisorInstaller" as io.mazewall.enforcer.supervisor.SupervisorInstaller {
+  + {static}SupervisorInstaller INSTANCE
+  __
+  +ConcurrentHashMap<Tid, Thread> getThreadRegistry()
+  +void registerThread(int)
+  +void unregisterThread(int)
+  +SupervisorSession installSupervisedFilterForThread(PolicyDefinition<?>, StacktraceScopingPolicy)
+}
+class "SupervisorSession" as io.mazewall.enforcer.supervisor.SupervisorSession {
+  +void close()
+}
+class "SupervisorSessionHandler" as io.mazewall.enforcer.supervisor.SupervisorSessionHandler {
+  + {static}Companion Companion
+  __
+  +LoopAction handleActiveListener(MemorySegment, MemorySegment, MemorySegment)
+}
+class "SupervisorSocketInputStream" as io.mazewall.enforcer.supervisor.SupervisorSocketInputStream {
+  + {static}Companion Companion
+  __
+  +int read()
+  +int read(byte[], int, int)
+  +void close()
+}
+class "SyscallArguments" as io.mazewall.enforcer.supervisor.SyscallArguments {
+  +String getPathStr()
+  +byte[] getSockaddrBytes()
+}
 class "LayoutValidator" as io.mazewall.ffi.LayoutValidator {
   + {static}LayoutValidator INSTANCE
   __
   +void validate()
+}
+class "CmsghdrSegment" as io.mazewall.ffi.memory.CmsghdrSegment {
+  + {static}Companion Companion
+  __
+  +MemorySegment getSegment()
+  + {static}long getCmsgLen-impl(MemorySegment)
+  + {static}void setCmsgLen-impl(MemorySegment, long)
+  + {static}int getCmsgLevel-impl(MemorySegment)
+  + {static}void setCmsgLevel-impl(MemorySegment, int)
+  + {static}int getCmsgType-impl(MemorySegment)
+  + {static}void setCmsgType-impl(MemorySegment, int)
+  + {static}int getDataFd-impl(MemorySegment)
+  + {static}void setDataFd-impl(MemorySegment, int)
+  + {static}String toString-impl(MemorySegment)
+  + {static}int hashCode-impl(MemorySegment)
+  + {static}boolean equals-impl(MemorySegment, Object)
+  + {static}MemorySegment constructor-impl(MemorySegment)
+  + {static}boolean equals-impl0(MemorySegment, MemorySegment)
 }
 class "ConfinedSegment" as io.mazewall.ffi.memory.ConfinedSegment {
   +MemorySegment getSegment()
@@ -536,6 +635,20 @@ class "ErrnoSegment" as io.mazewall.ffi.memory.ErrnoSegment {
   __
   +MemorySegment getSegment()
   + {static}int getErrno-impl(MemorySegment)
+  + {static}String toString-impl(MemorySegment)
+  + {static}int hashCode-impl(MemorySegment)
+  + {static}boolean equals-impl(MemorySegment, Object)
+  + {static}MemorySegment constructor-impl(MemorySegment)
+  + {static}boolean equals-impl0(MemorySegment, MemorySegment)
+}
+class "IovecSegment" as io.mazewall.ffi.memory.IovecSegment {
+  + {static}Companion Companion
+  __
+  +MemorySegment getSegment()
+  + {static}MemorySegment getIovBase-impl(MemorySegment)
+  + {static}void setIovBase-impl(MemorySegment, MemorySegment)
+  + {static}long getIovLen-impl(MemorySegment)
+  + {static}void setIovLen-impl(MemorySegment, long)
   + {static}String toString-impl(MemorySegment)
   + {static}int hashCode-impl(MemorySegment)
   + {static}boolean equals-impl(MemorySegment, Object)
@@ -573,6 +686,50 @@ class "LandlockRulesetAttrSegment" as io.mazewall.ffi.memory.LandlockRulesetAttr
 interface "ManagedSegment" as io.mazewall.ffi.memory.ManagedSegment {
   + {abstract}MemorySegment getSegment()
 }
+class "MemoryWrappersKt" as io.mazewall.ffi.memory.MemoryWrappersKt {
+  + {static}byte readByte(MemorySegment, long)
+  + {static}void writeByte(MemorySegment, long, byte)
+  + {static}short readShort(MemorySegment, long)
+  + {static}void writeShort(MemorySegment, long, short)
+  + {static}int readInt(MemorySegment, long)
+  + {static}void writeInt(MemorySegment, long, int)
+  + {static}int readIntUnaligned(MemorySegment, long)
+  + {static}void writeIntUnaligned(MemorySegment, long, int)
+  + {static}long readLong(MemorySegment, long)
+  + {static}void writeLong(MemorySegment, long, long)
+  + {static}long readLongUnaligned(MemorySegment, long)
+  + {static}void writeLongUnaligned(MemorySegment, long, long)
+  + {static}MemorySegment readAddress(MemorySegment, long)
+  + {static}void writeAddress(MemorySegment, long, MemorySegment)
+  + {static}void writeIntBigEndian(MemorySegment, long, int)
+  + {static}void writeIntBigEndianUnaligned(MemorySegment, long, int)
+  + {static}void writeLongBigEndian(MemorySegment, long, long)
+  + {static}void writeLongBigEndianUnaligned(MemorySegment, long, long)
+}
+class "MsghdrSegment" as io.mazewall.ffi.memory.MsghdrSegment {
+  + {static}Companion Companion
+  __
+  +MemorySegment getSegment()
+  + {static}MemorySegment getMsgName-impl(MemorySegment)
+  + {static}void setMsgName-impl(MemorySegment, MemorySegment)
+  + {static}int getMsgNamelen-impl(MemorySegment)
+  + {static}void setMsgNamelen-impl(MemorySegment, int)
+  + {static}MemorySegment getMsgIov-impl(MemorySegment)
+  + {static}void setMsgIov-impl(MemorySegment, MemorySegment)
+  + {static}long getMsgIovlen-impl(MemorySegment)
+  + {static}void setMsgIovlen-impl(MemorySegment, long)
+  + {static}MemorySegment getMsgControl-impl(MemorySegment)
+  + {static}void setMsgControl-impl(MemorySegment, MemorySegment)
+  + {static}long getMsgControllen-impl(MemorySegment)
+  + {static}void setMsgControllen-impl(MemorySegment, long)
+  + {static}int getMsgFlags-impl(MemorySegment)
+  + {static}void setMsgFlags-impl(MemorySegment, int)
+  + {static}String toString-impl(MemorySegment)
+  + {static}int hashCode-impl(MemorySegment)
+  + {static}boolean equals-impl(MemorySegment, Object)
+  + {static}MemorySegment constructor-impl(MemorySegment)
+  + {static}boolean equals-impl0(MemorySegment, MemorySegment)
+}
 class "NativeScopeKt" as io.mazewall.ffi.memory.NativeScopeKt {
   + {static}T nativeScope(Function1<? super Arena, ? extends T>)
 }
@@ -586,6 +743,26 @@ class "PollFdSegment" as io.mazewall.ffi.memory.PollFdSegment {
   + {static}void setEvents-impl(MemorySegment, short)
   + {static}short getRevents-impl(MemorySegment)
   + {static}void setRevents-impl(MemorySegment, short)
+  + {static}String toString-impl(MemorySegment)
+  + {static}int hashCode-impl(MemorySegment)
+  + {static}boolean equals-impl(MemorySegment, Object)
+  + {static}MemorySegment constructor-impl(MemorySegment)
+  + {static}boolean equals-impl0(MemorySegment, MemorySegment)
+}
+class "SeccompNotifAddFdSegment" as io.mazewall.ffi.memory.SeccompNotifAddFdSegment {
+  + {static}Companion Companion
+  __
+  +MemorySegment getSegment()
+  + {static}long getId-impl(MemorySegment)
+  + {static}void setId-impl(MemorySegment, long)
+  + {static}int getFlags-impl(MemorySegment)
+  + {static}void setFlags-impl(MemorySegment, int)
+  + {static}int getSrcfd-impl(MemorySegment)
+  + {static}void setSrcfd-impl(MemorySegment, int)
+  + {static}int getNewfd-impl(MemorySegment)
+  + {static}void setNewfd-impl(MemorySegment, int)
+  + {static}int getNewfdFlags-impl(MemorySegment)
+  + {static}void setNewfdFlags-impl(MemorySegment, int)
   + {static}String toString-impl(MemorySegment)
   + {static}int hashCode-impl(MemorySegment)
   + {static}boolean equals-impl(MemorySegment, Object)
@@ -631,6 +808,78 @@ class "SockFprogSegment" as io.mazewall.ffi.memory.SockFprogSegment {
   + {static}boolean equals-impl(MemorySegment, Object)
   + {static}MemorySegment constructor-impl(MemorySegment)
   + {static}boolean equals-impl0(MemorySegment, MemorySegment)
+}
+class "SockaddrUnSegment" as io.mazewall.ffi.memory.SockaddrUnSegment {
+  + {static}Companion Companion
+  __
+  +MemorySegment getSegment()
+  + {static}short getSunFamily-impl(MemorySegment)
+  + {static}void setSunFamily-impl(MemorySegment, short)
+  + {static}MemorySegment getSunPath-impl(MemorySegment)
+  + {static}String toString-impl(MemorySegment)
+  + {static}int hashCode-impl(MemorySegment)
+  + {static}boolean equals-impl(MemorySegment, Object)
+  + {static}MemorySegment constructor-impl(MemorySegment)
+  + {static}boolean equals-impl0(MemorySegment, MemorySegment)
+}
+class "SupervisorProcessMemoryReader" as io.mazewall.ffi.memory.SupervisorProcessMemoryReader {
+  + {static}SupervisorProcessMemoryReader INSTANCE
+  __
+  +String readString(int, long, int, boolean)
+  +byte[] readBytes(int, long, int, boolean)
+}
+class "SupervisorResponseSegment" as io.mazewall.ffi.memory.SupervisorResponseSegment {
+  + {static}Companion Companion
+  __
+  +MemorySegment getSegment()
+  + {static}long getId-impl(MemorySegment)
+  + {static}void setId-impl(MemorySegment, long)
+  + {static}byte getDecision-impl(MemorySegment)
+  + {static}void setDecision-impl(MemorySegment, byte)
+  + {static}int getErrorNr-impl(MemorySegment)
+  + {static}void setErrorNr-impl(MemorySegment, int)
+  + {static}String toString-impl(MemorySegment)
+  + {static}int hashCode-impl(MemorySegment)
+  + {static}boolean equals-impl(MemorySegment, Object)
+  + {static}MemorySegment constructor-impl(MemorySegment)
+  + {static}boolean equals-impl0(MemorySegment, MemorySegment)
+}
+class "NetworkOrderBuffer" as io.mazewall.ffi.networking.NetworkOrderBuffer {
+  +MemorySegment getSegment()
+  + {static}void writeInt-impl(MemorySegment, long, int)
+  + {static}void writeIntUnaligned-impl(MemorySegment, long, int)
+  + {static}void writeLong-impl(MemorySegment, long, long)
+  + {static}void writeLongUnaligned-impl(MemorySegment, long, long)
+  + {static}void writeByte-impl(MemorySegment, long, byte)
+  + {static}String toString-impl(MemorySegment)
+  + {static}int hashCode-impl(MemorySegment)
+  + {static}boolean equals-impl(MemorySegment, Object)
+  + {static}MemorySegment constructor-impl(MemorySegment)
+  + {static}boolean equals-impl0(MemorySegment, MemorySegment)
+}
+abstract class "SeccompConnection" as io.mazewall.ffi.networking.SeccompConnection {
+  + {abstract}FileDescriptor<UnixSocket, Open> getSocketFd()
+}
+class "SupervisorSeccompNotifInstaller" as io.mazewall.ffi.networking.SupervisorSeccompNotifInstaller {
+  + {static}SupervisorSeccompNotifInstaller INSTANCE
+  __
+  +void install(String, List<? extends BpfInstruction>, boolean, Function1<? super String, Integer>, Function2<? super Integer, ? super Integer, Boolean>, Function2<? super Integer, ? super CountDownLatch, Unit>)
+}
+class "SupervisorSocketUtils" as io.mazewall.ffi.networking.SupervisorSocketUtils {
+  + {static}SupervisorSocketUtils INSTANCE
+  + {static}int AF_UNIX
+  + {static}int SOCK_STREAM
+  + {static}int BACKLOG_SIZE
+  + {static}int SOCKADDR_UN_SIZE
+  + {static}long CMSG_RIGHTS_LEN
+  + {static}long MSG_CONTROL_BUF_SIZE
+  + {static}int SOL_SOCKET
+  + {static}int SCM_RIGHTS
+  __
+  +MemorySegment setupSockAddrUn(Arena, String)
+  +int connectWithRetry(String, int, long)
+  +boolean sendDescriptor(int, int)
+  +FileDescriptor<SeccompNotif, Open> recvDescriptor(FileDescriptor<UnixSocket, ? extends Open>)
 }
 class "Landlock" as io.mazewall.landlock.Landlock {
   + {static}Landlock INSTANCE
@@ -695,6 +944,8 @@ interface "ArgCheck" as io.mazewall.seccomp.ArgCheck {
 }
 abstract class "BpfBuilder" as io.mazewall.seccomp.BpfBuilder {
   +List<BpfMacro> getOps()
+  +AtomicInteger getLabelCounter()
+  +String nextLabel(String)
 }
 abstract class "BpfInstruction" as io.mazewall.seccomp.BpfInstruction {
   + {static}Companion Companion
@@ -836,10 +1087,28 @@ io.mazewall.enforcer.SandboxDispatcher --> io.mazewall.enforcer.SandboxDispatche
 io.mazewall.enforcer.SandboxDispatcher --> io.mazewall.PolicyDefinition
 io.mazewall.enforcer.ThreadStateRegistry --> io.mazewall.enforcer.ThreadLocalDelegate
 io.mazewall.enforcer.ThreadStateRegistry --> io.mazewall.enforcer.ThreadStateRegistry
+io.mazewall.enforcer.internal.ContainedExecutorWrapper --> io.mazewall.enforcer.supervisor.StacktraceScopingPolicy
 io.mazewall.enforcer.internal.ContainedExecutorWrapper --> io.mazewall.PolicyDefinition
+io.mazewall.enforcer.supervisor.DefaultStacktraceScopingPolicy .u.|> io.mazewall.enforcer.supervisor.StacktraceScopingPolicy
+io.mazewall.enforcer.supervisor.DefaultStacktraceScopingPolicy --> io.mazewall.enforcer.supervisor.DefaultStacktraceScopingPolicy
+io.mazewall.enforcer.supervisor.JVMValidationListener --> io.mazewall.core.FileDescriptor
+io.mazewall.enforcer.supervisor.JVMValidationListener --> io.mazewall.enforcer.supervisor.StacktraceScopingPolicy
+io.mazewall.enforcer.supervisor.JvmStackInspector --> io.mazewall.enforcer.supervisor.JvmStackInspector
+io.mazewall.enforcer.supervisor.SupervisorDaemon --> io.mazewall.enforcer.supervisor.SupervisorDaemon
+io.mazewall.enforcer.supervisor.SupervisorDaemonEngine --> io.mazewall.core.FileDescriptor
+io.mazewall.enforcer.supervisor.SupervisorDaemonEngine --> io.mazewall.enforcer.supervisor.SupervisorDaemonState
+io.mazewall.enforcer.supervisor.SupervisorDaemonManager --> io.mazewall.enforcer.supervisor.SupervisorContext
+io.mazewall.enforcer.supervisor.SupervisorDaemonManager --> io.mazewall.enforcer.supervisor.SupervisorDaemonManager
+io.mazewall.enforcer.supervisor.SupervisorInstaller --> io.mazewall.enforcer.supervisor.SupervisorInstaller
+io.mazewall.enforcer.supervisor.SupervisorInstaller --> io.mazewall.core.Tid
+io.mazewall.enforcer.supervisor.SupervisorSessionHandler --> io.mazewall.core.FileDescriptor
+io.mazewall.enforcer.supervisor.SupervisorSocketInputStream --> io.mazewall.core.FileDescriptor
 io.mazewall.ffi.LayoutValidator --> io.mazewall.ffi.LayoutValidator
 io.mazewall.ffi.memory.ConfinedSegment .u.|> io.mazewall.ffi.memory.ManagedSegment
 io.mazewall.ffi.memory.SharedSegment .u.|> io.mazewall.ffi.memory.ManagedSegment
+io.mazewall.ffi.memory.SupervisorProcessMemoryReader --> io.mazewall.ffi.memory.SupervisorProcessMemoryReader
+io.mazewall.ffi.networking.SupervisorSeccompNotifInstaller --> io.mazewall.ffi.networking.SupervisorSeccompNotifInstaller
+io.mazewall.ffi.networking.SupervisorSocketUtils --> io.mazewall.ffi.networking.SupervisorSocketUtils
 io.mazewall.landlock.Landlock --> io.mazewall.landlock.Landlock
 io.mazewall.landlock.LandlockRuleset --> io.mazewall.core.FileDescriptor
 io.mazewall.landlock.LandlockSession --> io.mazewall.landlock.LandlockState

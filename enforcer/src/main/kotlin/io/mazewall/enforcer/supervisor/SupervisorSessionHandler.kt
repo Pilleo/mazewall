@@ -146,6 +146,18 @@ internal class SupervisorSessionHandler(
                     add(java.nio.file.Paths.get("build").toAbsolutePath().normalize())
                     add(java.nio.file.Paths.get(".gradle").toAbsolutePath().normalize())
                 } catch (ignored: Exception) {}
+
+                // Add /proc and /sys virtual filesystems to prevent GC/JIT thread deadlocks
+                try {
+                    add(java.nio.file.Paths.get("/proc").toAbsolutePath().normalize())
+                    add(java.nio.file.Paths.get("/sys").toAbsolutePath().normalize())
+                } catch (ignored: Exception) {}
+
+                // Add the project root directory to bypass all project classes and build artifacts
+                try {
+                    val userDir = java.nio.file.Paths.get(System.getProperty("user.dir")).toAbsolutePath().normalize()
+                    add(userDir)
+                } catch (ignored: Exception) {}
             } catch (e: Exception) {
                 // Fail-safe
             }
@@ -158,9 +170,10 @@ internal class SupervisorSessionHandler(
         resp: MemorySegment
     ): LoopAction {
         val pfd2 = PollFdSegment(pollFds.asSlice(Layouts.POLLFD.byteSize(), Layouts.POLLFD.byteSize()))
-        val socketRevents = pfd2.getRevents()
-        if ((socketRevents.toInt() and NativeConstants.POLLIN.toInt()) != 0) {
-            // JVM socket closed or sent shutdown
+        val socketRevents = pfd2.getRevents().toInt()
+        val errorOrHup = NativeConstants.POLLERR.toInt() or NativeConstants.POLLHUP.toInt() or NativeConstants.POLLNVAL.toInt()
+        if ((socketRevents and (NativeConstants.POLLIN.toInt() or errorOrHup)) != 0) {
+            // JVM socket closed, errored, or sent shutdown
             return LoopAction.Shutdown
         }
 
@@ -181,6 +194,7 @@ internal class SupervisorSessionHandler(
         return LoopAction.Continue
     }
 
+    @Suppress("TooGenericExceptionCaught")
     private fun processNotification(notif: MemorySegment, resp: MemorySegment): Boolean {
         val id = notif.readLong(NOTIF_ID_OFF)
         val pidVal = notif.readInt(NOTIF_PID_OFF)
@@ -193,6 +207,7 @@ internal class SupervisorSessionHandler(
 
         val tid = Tid(pidVal)
         val extracted = extractNotificationArgs(nr, tid, args)
+        logger.info { "[SUPERVISOR-DEBUG] Received syscall notification: id=$id, pid=$pidVal, nr=$nr, path=${extracted.pathStr}" }
 
         // --- DAEMON-SIDE FAST-PATH BYPASS ---
         // HAZARD: When the sandboxed thread triggers lazy classloading (e.g., loading IOException
@@ -212,18 +227,27 @@ internal class SupervisorSessionHandler(
                 val matched = safeBypassPaths.any { bypassPath ->
                     path.startsWith(bypassPath) || path == bypassPath
                 }
+                logger.info { "[SUPERVISOR-DEBUG] Fast-path check for path=$path: matched=$matched" }
                 if (matched) {
-                    return handleInjectFd(id, nr, args, pathStr, null, resp)
+                    val injectRes = handleInjectFd(id, nr, args, pathStr, null, resp)
+                    logger.info { "[SUPERVISOR-DEBUG] Fast-path handleInjectFd result=$injectRes" }
+                    return injectRes
                 }
-            } catch (ignored: Exception) {
-                // Fall back to slow-path JVM validation if path normalization fails
+            } catch (e: Exception) {
+                logger.warning { "[SUPERVISOR-DEBUG] Fast-path check failed with error: ${e.message}" }
             }
         }
 
+        logger.info { "[SUPERVISOR-DEBUG] Forwarding request to JVM validation listener" }
         val success = sendRequestToJvm(id, pidVal, nr, args, extracted.pathStr, extracted.sockaddrBytes)
-        if (!success) return false
+        if (!success) {
+            logger.severe { "[SUPERVISOR-DEBUG] Failed to send request to JVM" }
+            return false
+        }
 
-        return readAndHandleJvmResponse(id, nr, args, extracted.pathStr, extracted.sockaddrBytes, resp)
+        val res = readAndHandleJvmResponse(id, nr, args, extracted.pathStr, extracted.sockaddrBytes, resp)
+        logger.info { "[SUPERVISOR-DEBUG] JVM validation handler response result=$res" }
+        return res
     }
 
     private fun extractNotificationArgs(nr: Int, tid: Tid, args: LongArray): SyscallArguments {
@@ -384,20 +408,25 @@ internal class SupervisorSessionHandler(
                     if (pathStr == null) {
                         -NativeConstants.EPERM
                     } else {
-                        openFileInSupervisor(nr, args, pathStr)
+                        val res = openFileInSupervisor(nr, args, pathStr)
+                        logger.info { "[SUPERVISOR-DEBUG] openFileInSupervisor path=$pathStr res=$res" }
+                        res
                     }
                 }
                 SYS_CONNECT -> {
                     if (sockaddrBytes == null) {
                         -NativeConstants.EPERM
                     } else {
-                        connectSocketInSupervisor(sockaddrBytes)
+                        val res = connectSocketInSupervisor(sockaddrBytes)
+                        logger.info { "[SUPERVISOR-DEBUG] connectSocketInSupervisor res=$res" }
+                        res
                     }
                 }
                 else -> -NativeConstants.EPERM
             }
 
             if (localFdValue < 0) {
+                logger.warning { "[SUPERVISOR-DEBUG] localFdValue is negative error: $localFdValue. Sending seccomp error." }
                 sendSeccompError(id, -localFdValue, resp)
                 return false
             }
@@ -411,11 +440,13 @@ internal class SupervisorSessionHandler(
 
                 LinuxNative.withTransaction {
                     val res = LinuxNative.ioctl(listenerFd, NativeConstants.SECCOMP_IOCTL_NOTIF_ADDFD, addfd.segment)
+                    logger.info { "[SUPERVISOR-DEBUG] ioctl SECCOMP_IOCTL_NOTIF_ADDFD res=$res" }
                     res is LinuxNative.SyscallResult.Success
                 }
             }
 
             if (!success) {
+                logger.severe { "[SUPERVISOR-DEBUG] ioctl SECCOMP_IOCTL_NOTIF_ADDFD failed. Sending EPERM." }
                 sendSeccompError(id, NativeConstants.EPERM, resp)
                 return false
             }

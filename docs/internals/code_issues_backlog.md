@@ -2,6 +2,73 @@
 
 ## Recent Findings (Project Review June 2026)
 
+### 🔴 [Severity: CRITICAL]: Tier S Profiler Uses the Wrong Kernel Primitive — `USER_NOTIF` is a Supervisor Mechanism, Not an Observer Mechanism
+**Status:** OPEN — Requires architectural refactor of `ProfilerSessionHandler`, `HandshakeSession`, and `ProfilerTraceListener`
+**Target Area:** `io.mazewall.profiler.engine.ProfilerSessionHandler`, `io.mazewall.profiler.engine.HandshakeSession`, `io.mazewall.profiler.internal.ProfilerTraceListener`, `io.mazewall.profiler.engine.ProfilerDaemonEngine`
+
+**Root Cause — The Category Error:**
+`SECCOMP_RET_USER_NOTIF` is the Linux kernel primitive for *supervisor* use cases: a tracee thread is **suspended in kernel mode** until the supervisor explicitly sends `SECCOMP_USER_NOTIF_FLAG_CONTINUE` or an error code. That blocking invariant is correct when you need to inspect, redirect, or veto a syscall before it executes.
+
+Profiling does not need to block the tracee. Profiling needs to **observe** what a thread does and let it proceed. Using `USER_NOTIF` for observation forces the system to pay the full cost of a mandatory synchronous IPC round-trip (tracee suspended → daemon reads → daemon writes event → JVM listener reads event → JVM listener sends ACK → daemon sends `CONTINUE`) for every single intercepted syscall. The tracee thread cannot execute during that entire chain. This is a bolt-cutter used to slice butter.
+
+**Symptoms That Expose the Architectural Mismatch:**
+Every workaround added to make the profiler "work" is a symptom of the wrong primitive:
+
+1. **`safeBypassPaths`** (`ProfilerSessionHandler.kt` lines 241–293): A growing list of JVM home, classpath, `/proc`, `/sys`, gradle cache, build dir — all hard-coded exceptions so the daemon does not forward events to the JVM listener. Required because the JVM itself triggers dozens of `openat` calls during normal operation; forwarding them all would deadlock on class-loading locks.
+2. **`bypassedTids`**: The trace-listener thread's own TID must be excluded from `USER_NOTIF` handling. If the trace-listener's syscalls hit the handshake protocol, it creates a circular wait (trace-listener waiting to send ACK, but itself suspended by its own filter).
+3. **ACK-before-stacktrace ordering** (`processEvent`): The ACK byte must be sent *before* `Thread.getStackTrace()` because capturing the stack trace requires a JVM safepoint, which requires the blocked thread to have returned from the kernel, which requires the ACK. The ordering is forced by the protocol, not by logic.
+4. **TSYNC timing gymnastics** (`SupervisorSeccompNotifInstaller`): TSYNC must be applied after the trace-listener thread is fully running (so it isn't trapped by its own filter during startup) but before the worker thread calls the profiled block. A race in this window leads to permanent hangs.
+5. **`HandshakeSession` state machine + 60-second poll timeout**: A complex, error-prone state machine exists solely to implement the synchronous ACK round-trip. The timeout is 60 seconds, meaning any failure deadlocks the profiled thread for a full minute.
+6. **`handleShutdownRequest` consumes the ACK byte**: The session reactor loop at `ProfilerSessionHandler.handleActiveListener` calls `handleShutdownRequest()` (which reads 1 byte from the socket) whenever the socket shows `POLLIN`. If the ACK byte from the trace-listener arrives while the daemon is between notifications, it is consumed by `handleShutdownRequest` and never seen by `performHandshake`. This is a latent race condition.
+
+**The Correct Design — Fire-and-Forget Event Delivery:**
+For profiling, the daemon should:
+1. Receive the `USER_NOTIF` notification from the kernel.
+2. Read path arguments via `process_vm_readv` (this is already done correctly).
+3. Send `SECCOMP_USER_NOTIF_FLAG_CONTINUE` **immediately** — before any IPC to the JVM listener.
+4. Deliver the resolved event to the JVM listener **asynchronously** over the socket — no ACK required, no response needed.
+
+The socket between the daemon and the JVM listener becomes a **unidirectional event stream**: daemon writes, JVM listener reads. The listener never writes back.
+
+**What Is Eliminated by This Refactor:**
+- `HandshakeSession` and `performHandshake()` — removed entirely.
+- `POLL_ACK_TIMEOUT_MS` and the ACK poll loop — removed entirely.
+- `sendAckIfNecessary()` in `ProfilerTraceListener` — removed entirely.
+- `bypassedTids` list — removed entirely (trace-listener never needs to be excluded).
+- `safeBypassPaths` bypass list — drastically simplified or removed (the daemon continues all syscalls without waiting, so bypasses are not needed for deadlock prevention).
+- `handleShutdownRequest` byte-consumption race — removed (listener never sends data back on the event socket).
+- The ACK-before-stacktrace ordering constraint — removed (stack trace can be captured any time after the event is received, since the tracee is already running).
+- TSYNC timing window — significantly relaxed (trace-listener no longer needs special startup sequencing).
+
+**What Stays Identical:**
+- Seccomp `USER_NOTIF` filter installation and TSYNC — unchanged.
+- `process_vm_readv` for path resolution — unchanged.
+- BPF filter construction (`BpfFilter.kt`) — unchanged.
+- The `ProfilerDaemonEngine` connection/session accept loop — unchanged structure.
+- The socket as a delivery channel — repurposed from bidirectional protocol to unidirectional stream.
+
+**Shutdown Signal:**
+Without the bidirectional ACK, how does the JVM signal the daemon to shut down? The daemon detects shutdown by observing the socket being closed (EOF on `read()`) or by receiving a dedicated out-of-band signal byte on a separate control channel. The existing `SHUTDOWN_COMMAND_BYTE (0x53)` approach can be retained on the same socket — it just becomes the *only* thing the JVM listener ever sends to the daemon (a single byte on close), instead of an ACK per event.
+
+**Implementation Order (when work starts):**
+1. Remove `HandshakeSession.performHandshake()` and the ACK poll loop from `ProfilerSessionHandler.processNotification`.
+2. Change `processNotification` to: resolve path → send `CONTINUE` immediately → write event to socket (fire-and-forget).
+3. Remove `sendAckIfNecessary()` from `ProfilerTraceListener`.
+4. Remove `bypassedTids` from `readHandshakeConfig()` and `ProfilerSessionHandler`.
+5. Remove or drastically simplify `safeBypassPaths` (keep only as an optimization to skip writing low-value JVM-internal events, not for deadlock prevention).
+6. Remove `handleShutdownRequest`'s byte-read from the session reactor loop; replace with socket EOF detection only.
+7. Update tests.
+
+**Reference:** Analysis performed June 2026 after persistent `performHandshake` timeout failures in `ProcessWideProfilerIntegrationTest`. See `profiler_design.md` §6 for the detailed architectural breakdown and comparison table.
+
+
+
+### ✅ [RESOLVED]: JVM Safepoint / seccomp USER_NOTIF Circular Deadlock in `ProfilerTraceListener`
+**Status:** RESOLVED (June 2026)
+**Target Area:** `io.mazewall.profiler.internal.ProfilerTraceListener.readNextEvent` and `processEvent`
+**Context & Root Cause:** When `ProfilerTraceListener` received a seccomp `USER_NOTIF` event for a profiled thread (e.g., an `openat` call from a worker), the thread was suspended in kernel space awaiting the `SECCOMP_USER_NOTIF_FLAG_CONTINUE` response from the daemon. The daemon delivers that response only after receiving an ACK byte from the trace-listener. However, the trace-listener was calling `Thread.getStackTrace()` on the profiled thread *before* sending the ACK — inside `readNextEvent()`. `Thread.getStackTrace()` requires the JVM to stop the target thread at a safepoint. A thread blocked in the kernel (blocked on a syscall, not yet returned to user space) cannot reach a safepoint until it returns from the kernel. It cannot return from the kernel until the seccomp response arrives. The response cannot arrive until the ACK is sent. The ACK cannot be sent because the trace-listener is waiting for the safepoint. **Circular deadlock, no timeout, permanent hang.**
+**Fix:** Removed the inline `Thread.getStackTrace()` call from `readNextEvent()` entirely. Reordered `processEvent()` to call `sendAckIfNecessary()` first (releasing the kernel-blocked thread), then `accumulateStackTrace()` (which calls `Thread.getStackTrace()` after the thread is free to reach a safepoint). The captured stack trace remains diagnostically accurate: after returning from the syscall, the thread is still executing within the same high-level call chain (e.g., `File.readText()` → the profiled lambda), so the stack frames reflect the code that triggered the syscall.
+
 ### 🔴 [Severity: HIGH]: In-Process Stacktrace Analysis ClassLoader Deadlock in Supervisor
 **Context:** During real-time (in-process) seccomp supervision using `USER_NOTIF`, when the sandboxed JVM thread is blocked on a syscall (e.g. `openat`) during lazy classloading, it holds the JVM's internal `ClassLoader` monitor. If the supervisor validation thread attempts to resolve the stack trace (which may trigger classloading of Kotlin stdlib or policy classes) or executes user-provided scoping policy, it blocks on the same `ClassLoader` monitor. This creates a permanent circular deadlock. This differs from the Profiler, which parses `strace` logs out-of-process and is completely free from tracee-side JVM locks.
 **Needed:** A daemon-side fast-path bypass is required to intercept all file reads referencing the JVM's home directory (`java.home`), the application's classpath (`java.class.path`), and JVM startup agents (e.g., Jacoco). The daemon must resolve these to canonical absolute paths and inject the file descriptor immediately without delegating to the JVM validation thread, bypassing the scoping policy for standard classes.
@@ -987,3 +1054,20 @@ For full architectural details, see `supervisor_proxy_design.md`.
 *   **Context & Proof:** If a developer modifies `BpfFilter.kt` and accidentally reorders the builder calls, the resulting BPF program might be structurally invalid (e.g., trying to load arguments before checking the architecture), leading to kernel rejection (`EINVAL`) only at runtime.
 *   **Cascading Risk Potential:** Medium. Increases the risk of regressions during refactoring.
 *   **Recommendation:** Leverage Kotlin's type system (e.g., Phantom Types or a Type-State pattern) to enforce the builder sequence at compile time, matching the architectural constraints outlined in the design documents.
+
+
+### 🔴 [Severity: CRITICAL]: Race in Asynchronous / Fire-and-Forget Profiler Event Delivery
+*   **Dimension:** Micro-Implementation & State Machine Invariants
+*   **Target Area:** `profiler/src/main/kotlin/io/mazewall/profiler/engine/ProfilerSessionHandler.kt`, `io.mazewall.profiler.internal.ProfilerTraceListener.kt`
+*   **Failure Hypothesis:** Removing the synchronous handshake protocol (`WAIT_FOR_ACK`) in the profiler to send events in a "fire-and-forget" manner allows the tracee thread to return from kernel space and resume execution *before* the JVM listener thread has finished reading the trace event and calling `Thread.getStackTrace()`. This results in either empty stack profiles (because the thread is no longer running in the expected call path) or race conditions where events are lost or associated with wrong call frames.
+*   **Context & Proof:** During refactoring, the removal of the `WAIT_FOR_ACK` loop caused integration tests verifying stack trace capture to fail consistently, as `bob.stackProfile` became empty.
+*   **Recommendation:** Strictly enforce the synchronous `WAIT_FOR_ACK` protocol inside the daemon's session loop (`ProfilerSessionHandler.processNotification`) and release the tracee thread only after the listener thread has written the `PROTOCOL_ACK_BYTE` back to the socket. Wrap the listener's ACK sending code in a `finally` block to prevent tracee starvation.
+
+
+### 🔴 [Severity: HIGH]: Process-Wide Classloader Deadlock on Profiler Result / State Types
+*   **Dimension:** JVM / OS Contention & Classloading Invariants
+*   **Target Area:** `profiler/src/main/kotlin/io/mazewall/profiler/Profiler.kt`
+*   **Failure Hypothesis:** Under process-wide profiling (`processWide = true`), all JVM threads are intercepted by seccomp `USER_NOTIF`. If classes required by the JVM listener thread (e.g., `ProfilingResult`, `TraceListenerState` subclasses) are loaded lazily, the listener thread will trigger class loading. This class loading will attempt to acquire the JVM ClassLoader monitor. If a tracee thread currently holds that monitor and is blocked in kernel space waiting for the listener to process its event, the listener thread will block indefinitely waiting for the ClassLoader monitor. This causes a circular deadlock.
+*   **Context & Proof:** Integration tests for process-wide profiling threw `NoClassDefFoundError` or hung indefinitely when classes like `ProfilingResult` or `TraceListenerState$ReadingHeader` were accessed during profiling but not warmed up beforehand.
+*   **Recommendation:** Maintain a robust, static class loading warmup block in `Profiler.kt` that instantiates and calls methods on all core state/result classes (`ProfilingResult`, `BobCompiler`, `TraceListenerState` subclasses) before installing seccomp filters.
+

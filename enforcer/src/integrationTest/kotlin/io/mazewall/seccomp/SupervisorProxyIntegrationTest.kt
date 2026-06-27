@@ -16,6 +16,15 @@ import kotlin.test.assertTrue
 
 class SupervisorProxyIntegrationTest : BaseIntegrationTest() {
 
+    companion object {
+        @org.junit.jupiter.api.AfterAll
+        @JvmStatic
+        fun tearDownAll() {
+            io.mazewall.enforcer.supervisor.SupervisorDaemonManager.stop()
+        }
+    }
+
+
     /**
      * Verifies the [StacktraceScopingPolicy] allow/deny contract.
      *

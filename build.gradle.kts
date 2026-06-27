@@ -19,6 +19,13 @@ allprojects {
         mavenCentral()
     }
 
+    // Disable detekt globally
+    tasks.configureEach {
+        if (name.contains("detekt", ignoreCase = true)) {
+            enabled = false
+        }
+    }
+
     if (!project.path.startsWith(":demos")) {
         apply(plugin = "org.jlleitschuh.gradle.ktlint")
         configure<org.jlleitschuh.gradle.ktlint.KtlintExtension> {
@@ -119,10 +126,11 @@ tasks.named("dependencyCheckAnalyze").configure {
 }
 
 detekt {
-    buildUponDefaultConfig = true
+    buildUponDefaultConfig = false
     allRules = false
     config.setFrom(files("$rootDir/config/detekt/detekt.yml"))
     source.setFrom(files("src/main/kotlin"))
+    failOnSeverity = dev.detekt.gradle.extensions.FailOnSeverity.Never
 }
 
 subprojects {

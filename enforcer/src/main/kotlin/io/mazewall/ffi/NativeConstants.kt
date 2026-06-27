@@ -6,6 +6,9 @@ package io.mazewall.ffi
 object NativeConstants {
     // Poll events
     const val POLLIN: Short = 1
+    const val POLLERR: Short = 8
+    const val POLLHUP: Short = 16
+    const val POLLNVAL: Short = 32
 
     // Landlock
     const val LANDLOCK_CREATE_RULESET_NR = 444L

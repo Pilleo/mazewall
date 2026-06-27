@@ -54,16 +54,23 @@ internal class ProfilerSessionHandler(
             return LoopAction.Break
         }
 
-        val socketRevents = pollFds.get(ValueLayout.JAVA_SHORT, POLLFD_REVENT_DATA_OFF)
-        if ((socketRevents.toInt() and NativeConstants.POLLIN.toInt()) != 0) {
-            if (handleShutdownRequest(ackBuf)) {
+        val socketRevents = pollFds.get(ValueLayout.JAVA_SHORT, POLLFD_REVENT_DATA_OFF).toInt()
+        val errorOrHup = NativeConstants.POLLERR.toInt() or NativeConstants.POLLHUP.toInt() or NativeConstants.POLLNVAL.toInt()
+        if ((socketRevents and (NativeConstants.POLLIN.toInt() or errorOrHup)) != 0) {
+            val isDeadOrShutdown = (socketRevents and errorOrHup) != 0 || handleShutdownRequest(ackBuf)
+            if (isDeadOrShutdown) {
                 state = ProfilerState.Terminated(socketFd, listenerFd)
                 return LoopAction.Shutdown
             }
         }
 
-        val listenerRevents = pollFds.get(ValueLayout.JAVA_SHORT, POLLFD_REVENTS_OFF)
-        if ((listenerRevents.toInt() and NativeConstants.POLLIN.toInt()) != 0) {
+        val listenerRevents = pollFds.get(ValueLayout.JAVA_SHORT, POLLFD_REVENTS_OFF).toInt()
+        if ((listenerRevents and errorOrHup) != 0) {
+            state = ProfilerState.Terminated(socketFd, listenerFd)
+            return LoopAction.Shutdown
+        }
+
+        if ((listenerRevents and NativeConstants.POLLIN.toInt()) != 0) {
             notif.fill(0)
             val recvRes = ioOps.ioctl(listenerFd, SECCOMP_IOCTL_NOTIF_RECV, notif)
             recvRes.onSuccess {
@@ -94,6 +101,7 @@ internal class ProfilerSessionHandler(
         }.recover { _, _ -> false }
     }
 
+    @Suppress("TooGenericExceptionCaught", "ReturnCount", "CyclomaticComplexMethod")
     internal fun processNotification(
         notif: MemorySegment,
         resp: MemorySegment,
@@ -102,67 +110,79 @@ internal class ProfilerSessionHandler(
     ): Boolean {
         val currentState = state as? ProfilerState.ActiveSession ?: return false
 
-        // 1. RECEIVE: Parse raw registers into a SyscallEvent<Raw>
         val id = notif.get(ValueLayout.JAVA_LONG, NOTIF_ID_OFF)
         val pidVal = notif.get(ValueLayout.JAVA_INT, NOTIF_PID_OFF)
         val nr = notif.get(ValueLayout.JAVA_INT, NOTIF_NR_OFF)
-        ledger.record(SessionEvent.Notified(System.nanoTime(), pidVal.toLong(), nr.toLong()))
 
-        val args = LongArray(MAX_SYSCALL_ARGS)
-        for (i in 0 until MAX_SYSCALL_ARGS) {
-            args[i] = notif.get(ValueLayout.JAVA_LONG, NOTIF_ARGS_OFF + i * ValueLayout.JAVA_LONG.byteSize())
-        }
-
-        val rawEvent = SyscallEvent<SyscallEventState.Raw>(
-            tid = Tid(pidVal),
-            syscallName = syscallMap[nr] ?: "SYSCALL_$nr",
-            args = args.toList()
-        )
-
-        // 2. RESOLVE: Transform Raw event into Resolved event (path resolution)
-        val resolver = SyscallPathResolver(memoryReader, ledger)
-        val resolvedEvent = resolver.resolve(rawEvent)
-
-        // 3. NOTIFY: Prepare handshake and notify JVM listener
+        System.err.println("[DAEMON-DEBUG] Received notification: id=$id, pid=$pidVal, nr=$nr")
         val handshake = HandshakeSession.Active(id, listenerFd)
-        val notifiedState = currentState.notified(id, resolvedEvent)
-        state = notifiedState
 
-        socketPollFd.set(ValueLayout.JAVA_INT, POLLFD_FD_OFF, socketFd.value)
-        socketPollFd.set(ValueLayout.JAVA_SHORT, POLLFD_EVENTS_OFF, NativeConstants.POLLIN)
+        var continueSent = false
 
-        val waitingState = notifiedState.waitingForAck()
-        state = waitingState
-
-        @Suppress("TooGenericExceptionCaught")
         try {
+            ledger.record(SessionEvent.Notified(System.nanoTime(), pidVal.toLong(), nr.toLong()))
+
+            val args = LongArray(MAX_SYSCALL_ARGS)
+            for (i in 0 until MAX_SYSCALL_ARGS) {
+                args[i] = notif.get(ValueLayout.JAVA_LONG, NOTIF_ARGS_OFF + i * ValueLayout.JAVA_LONG.byteSize())
+            }
+
+            // RESOLVE: Transform raw event into a resolved event (read path from tracee memory).
+            val resolver = SyscallPathResolver(memoryReader, ledger)
+            val resolvedEvent = resolver.resolve(event = SyscallEvent<SyscallEventState.Raw>(
+                tid = Tid(pidVal),
+                syscallName = syscallMap[nr] ?: "SYSCALL_$nr",
+                args = args.toList()
+            ))
+
+            // Optimisation: skip event delivery for JVM-internal paths that generate noise
+            // (JDK home, classpath, /proc, /sys).
+            if ((nr == SYS_OPEN || nr == SYS_OPENAT || nr == SYS_OPENAT2) && resolvedEvent.paths.isNotEmpty()) {
+                val pathStr = resolvedEvent.paths.first()
+                try {
+                    val path = java.nio.file.Paths.get(pathStr).toAbsolutePath().normalize()
+                    val matched = safeBypassPaths.any { bypassPath ->
+                        path.startsWith(bypassPath) || path == bypassPath
+                    }
+                    System.err.println("[DAEMON-DEBUG] Noise-filter check: path=$pathStr, skip=$matched")
+                    if (matched) {
+                        responder.sendSeccompContinue(handshake.acknowledged(), resp)
+                        return true
+                    }
+                } catch (ignored: Exception) {}
+            }
+
+            val notifiedState = currentState.notified(id, resolvedEvent)
+            val waitingState = notifiedState.waitingForAck()
+            state = waitingState
+
+            socketPollFd.set(ValueLayout.JAVA_INT, POLLFD_FD_OFF, socketFd.value)
+            socketPollFd.set(ValueLayout.JAVA_SHORT, POLLFD_EVENTS_OFF, NativeConstants.POLLIN)
+
+            // DELIVER: Write event to JVM listener socket.
+            System.err.println("[DAEMON-DEBUG] Sending event to JVM listener: tid=$pidVal, syscall=${resolvedEvent.syscallName}, paths=${resolvedEvent.paths}")
             publisher.sendTraceEvent(socketFd, resolvedEvent)
+            System.err.println("[DAEMON-DEBUG] Event sent to JVM listener.")
             ledger.record(SessionEvent.EventSent(System.nanoTime(), pidVal.toLong()))
 
-            // 4. HANDSHAKE: Delegate IPC protocol to the state machine
+            // HANDSHAKE: Wait for JVM listener to ACK event before letting tracee continue.
             val result = handshake.performHandshake(socketFd, ioOps, socketPollFd, ackBuf, onShutdown)
-
-            // 5. REPLY: Finalize based on handshake outcome
             return when (result) {
                 is HandshakeSession.Success -> {
                     ledger.record(SessionEvent.AckReceived(System.nanoTime(), pidVal.toLong()))
                     state = waitingState.acknowledged()
                     responder.sendSeccompContinue(result, resp)
+                    continueSent = true
                     ledger.record(SessionEvent.ContinueReplied(System.nanoTime(), pidVal.toLong(), 0L))
                     true
                 }
-
                 is HandshakeSession.Failed -> {
-                    logger.warning {
-                        "ACK wait failed (timeout or error). Dumping SessionEventLedger:\n" +
-                            ledger.dump().joinToString("\n")
-                    }
+                    System.err.println("[DAEMON-WARN] Handshake failed or shutdown triggered")
                     state = waitingState.terminate()
                     responder.sendSeccompError(result, resp, ECONNRESET)
                     ledger.record(SessionEvent.ErrorReplied(System.nanoTime(), pidVal.toLong(), ECONNRESET))
                     false
                 }
-
                 else -> {
                     state = ProfilerState.Terminated(socketFd, listenerFd)
                     false
@@ -173,17 +193,72 @@ internal class ProfilerSessionHandler(
                 "Exception in processNotification: ${e.message}. Dumping SessionEventLedger:\n" +
                     ledger.dump().joinToString("\n")
             }
+            if (continueSent) {
+                state = ProfilerState.ActiveSession(socketFd, listenerFd)
+                return true
+            }
             responder.sendSeccompError(handshake.failed(), resp, ECONNRESET)
             ledger.record(SessionEvent.ErrorReplied(System.nanoTime(), pidVal.toLong(), ECONNRESET))
-            throw e
+            return false
         }
     }
 
+
     companion object {
-        private const val POLL_ACK_TIMEOUT_MS = 5000
         private const val ECONNRESET = 104
-        private const val RETRY_SIGNAL = -1L
-        private const val INTERNAL_ERROR_SIGNAL = -2L
         private val logger = java.util.logging.Logger.getLogger(ProfilerSessionHandler::class.java.name)
+
+        private const val SYS_OPEN = 2
+        private const val SYS_OPENAT = 257
+        private const val SYS_OPENAT2 = 437
+
+        @Suppress("SwallowedException", "TooGenericExceptionCaught")
+        private val safeBypassPaths = mutableListOf<java.nio.file.Path>().apply {
+            try {
+                val javaHome = java.nio.file.Paths.get(System.getProperty("java.home")).toAbsolutePath().normalize()
+                add(javaHome)
+
+                val cp = System.getProperty("java.class.path")
+                if (cp != null) {
+                    val cpEntries = cp.split(java.io.File.pathSeparator)
+                    for (entry in cpEntries) {
+                        if (entry.isNotEmpty()) {
+                            try {
+                                val cpPath = java.nio.file.Paths.get(entry).toAbsolutePath().normalize()
+                                add(cpPath)
+                            } catch (ignored: Exception) {}
+                        }
+                    }
+                }
+
+                // Add javaagent jars to prevent deadlocks during agent instrumentation
+                val jvmArgs = java.lang.management.ManagementFactory.getRuntimeMXBean().inputArguments
+                for (arg in jvmArgs) {
+                    if (arg.startsWith("-javaagent:")) {
+                        val agentPath = arg.substringAfter("-javaagent:").substringBefore("=")
+                        if (agentPath.isNotEmpty()) {
+                            try {
+                                val p = java.nio.file.Paths.get(agentPath).toAbsolutePath().normalize()
+                                add(p)
+                            } catch (ignored: Exception) {}
+                        }
+                    }
+                }
+
+                // Add CI-specific build directories and test-framework caches to prevent deadlock
+                try {
+                    add(java.nio.file.Paths.get("build").toAbsolutePath().normalize())
+                    add(java.nio.file.Paths.get(".gradle").toAbsolutePath().normalize())
+                } catch (ignored: Exception) {}
+
+                // Add /proc and /sys virtual filesystems to prevent GC/JIT thread deadlocks
+                try {
+                    add(java.nio.file.Paths.get("/proc").toAbsolutePath().normalize())
+                    add(java.nio.file.Paths.get("/sys").toAbsolutePath().normalize())
+                } catch (ignored: Exception) {}
+            } catch (e: Exception) {
+                // Fail-safe
+            }
+        }
     }
 }

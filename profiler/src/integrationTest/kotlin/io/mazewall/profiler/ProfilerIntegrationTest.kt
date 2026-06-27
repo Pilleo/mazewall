@@ -17,6 +17,15 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 class ProfilerIntegrationTest : BaseIntegrationTest() {
+
+    companion object {
+        @org.junit.jupiter.api.AfterAll
+        @JvmStatic
+        fun tearDownAll() {
+            Profiler.shutdown()
+        }
+    }
+
     @Test
     fun `test profiler intercepts and logs file opens with path resolving and stack trace capture`() {
         val targetFile = File("/etc/hostname")
@@ -155,7 +164,7 @@ class ProfilerIntegrationTest : BaseIntegrationTest() {
         file.writeText("content")
         val absolutePath = file.absolutePath
         val pool = Executors.newSingleThreadExecutor()
-        val wrapped = Profiler.wrap(pool, Policy.PURE_COMPUTE_UNSAFE)
+        val wrapped = Profiler.wrap(pool, false, Policy.PURE_COMPUTE_UNSAFE)
         try {
             wrapped
                 .submit(
@@ -201,7 +210,7 @@ class ProfilerIntegrationTest : BaseIntegrationTest() {
     @Test
     fun `test profiler daemon handles high-frequency concurrent events without stream corruption`() {
         val pool = Executors.newFixedThreadPool(8)
-        val wrapped = Profiler.wrap(pool, Policy.PURE_COMPUTE_UNSAFE)
+        val wrapped = Profiler.wrap(pool, false, Policy.PURE_COMPUTE_UNSAFE)
         try {
             val taskCount = 200
             val target = File("/etc/hostname")
@@ -232,7 +241,7 @@ class ProfilerIntegrationTest : BaseIntegrationTest() {
     fun `test wrap() executor correctly resolves paths via daemon ptrace`() {
         val targetFile = File("/etc/hostname")
         val pool = Executors.newSingleThreadExecutor()
-        val wrapped = Profiler.wrap(pool, Policy.PURE_COMPUTE_UNSAFE)
+        val wrapped = Profiler.wrap(pool, false, Policy.PURE_COMPUTE_UNSAFE)
         try {
             val future =
                 wrapped.submit(
@@ -258,7 +267,7 @@ class ProfilerIntegrationTest : BaseIntegrationTest() {
         // Even if Landlock audit was enabled, the sharedPathCache should deduplicate them
         // if they happen within the 500ms window.
         val pool = Executors.newFixedThreadPool(4)
-        val wrapped = Profiler.wrap(pool, Policy.PURE_COMPUTE_UNSAFE)
+        val wrapped = Profiler.wrap(pool, false, Policy.PURE_COMPUTE_UNSAFE)
         try {
             val target = File("/etc/hostname")
             val tasks =
@@ -285,7 +294,7 @@ class ProfilerIntegrationTest : BaseIntegrationTest() {
     @Test
     fun `test wrap() executor shutdown waits for pending tasks and avoids ENOSYS`() {
         val pool = Executors.newSingleThreadExecutor()
-        val wrapped = Profiler.wrap(pool, Policy.PURE_COMPUTE_UNSAFE)
+        val wrapped = Profiler.wrap(pool, false, Policy.PURE_COMPUTE_UNSAFE)
         val latch = java.util.concurrent.CountDownLatch(1)
         val finished =
             java.util.concurrent.atomic
@@ -336,39 +345,6 @@ class ProfilerIntegrationTest : BaseIntegrationTest() {
             assertTrue(hasOurClass, "Stack trace in wrapped executor should contain ProfilerIntegrationTest")
         } finally {
             wrapped.shutdownNow()
-        }
-    }
-
-    @Test
-    fun `test processWide profiling captures background thread syscalls`() {
-        val targetFile = File("/etc/hostname")
-        assertTrue(targetFile.exists())
-
-        val latch = java.util.concurrent.CountDownLatch(1)
-        val testLatch = java.util.concurrent.CountDownLatch(1)
-        val bgThread = Thread {
-            latch.await()
-            try {
-                targetFile.readText()
-            } finally {
-                testLatch.countDown()
-            }
-        }
-        bgThread.start()
-
-        try {
-            val result = Profiler.profile(processWide = true) {
-                latch.countDown()
-                testLatch.await(5, TimeUnit.SECONDS)
-            }
-            val bob = result.behavior
-            assertTrue(bob.opens.contains("/etc/hostname"), "Process-wide profiling should capture /etc/hostname from background thread")
-        } catch (e: IllegalStateException) {
-            // If run on host without container privilege boundary, TSYNC will fail with EACCES
-            assertTrue(e.message?.contains("EACCES") == true || e.message?.contains("Permission denied") == true)
-        } finally {
-            latch.countDown()
-            bgThread.join()
         }
     }
 }

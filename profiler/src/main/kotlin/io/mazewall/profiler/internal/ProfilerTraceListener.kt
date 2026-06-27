@@ -11,8 +11,6 @@ import java.io.BufferedInputStream
 import java.io.DataInputStream
 import java.io.InputStream
 import java.lang.foreign.Arena
-import java.lang.foreign.MemorySegment
-import java.lang.foreign.ValueLayout
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.atomic.AtomicBoolean
@@ -44,7 +42,13 @@ internal class ProfilerTraceListener(
     companion object {
         private const val DEDUPLICATION_WINDOW_MS = 500L
         private const val PROTOCOL_ACK_BYTE = 0xAC.toByte()
-        private const val JOIN_TIMEOUT_MS = 1000L
+        // Signals the daemon to finish writing any in-flight events and close its socket end.
+        // On receipt the daemon session loop terminates gracefully (LoopAction.Shutdown), which
+        // allows the JVM listener to drain the remaining events before seeing EOF.
+        private const val SHUTDOWN_COMMAND_BYTE = 0x53.toByte()
+        private const val PASS_THROUGH_COMMAND_BYTE = 0x54.toByte()
+        private const val JOIN_TIMEOUT_MS = 5000L
+        private const val INTERRUPT_JOIN_TIMEOUT_MS = 500L
     }
 
     /**
@@ -58,7 +62,7 @@ internal class ProfilerTraceListener(
 
         val thread = Thread {
             try {
-                runListenerLoop(inputStream, arena, readyLatch)
+                runListenerLoop(inputStream, readyLatch)
             } finally {
                 arena.close()
                 inputStream.close()
@@ -73,55 +77,117 @@ internal class ProfilerTraceListener(
     }
 
     /**
-     * Shuts down the listener, closes the socket, and waits for the worker thread to finish.
+     * Shuts down the listener using the graceful drain protocol:
+     * 1. Sends SHUTDOWN_COMMAND_BYTE to the daemon so it finishes writing any in-flight events.
+     * 2. Waits for the listener thread to drain all remaining events until it sees EOF from the daemon.
+     * 3. Only then closes the underlying socket FD.
+     *
+     * This prevents the race condition where the JVM closes the socket FD while the daemon is
+     * still writing the last event (sendTraceEvent → write → EPIPE → event lost).
      */
     override fun close() {
         if (!closed.compareAndSet(false, true)) return
 
         logger.fine("Closing ProfilerTraceListener for fd=${socketFd.value}")
 
-        socketFd.close()
+        // Step 1: Signal the daemon to finish up. The daemon receives this byte in
+        // handleShutdownRequest(), terminates its session loop, and then closes its
+        // side of the socket. This triggers EOF on our read side.
+        sendShutdownCommand()
 
+        // Step 2: Wait for the listener thread to drain remaining events and see EOF.
+        // The thread exits via EOFException once the daemon closes its socket end.
         workerThread?.let {
             try {
                 it.join(JOIN_TIMEOUT_MS)
                 if (it.isAlive) {
                     logger.warning("Trace listener thread for fd=${socketFd.value} did not terminate within $JOIN_TIMEOUT_MS ms")
                     it.interrupt()
+                    it.join(INTERRUPT_JOIN_TIMEOUT_MS)
                 }
             } catch (e: InterruptedException) {
                 Thread.currentThread().interrupt()
             }
         }
+
+        // Step 3: Close the socket FD only after draining.
+        socketFd.close()
         workerThread = null
     }
 
+    private fun sendShutdownCommand() {
+        sendCommand(SHUTDOWN_COMMAND_BYTE)
+    }
+
+    /**
+     * Instructs the daemon to enter Pass-Through mode. The daemon will stop sending
+     * events to this socket and simply loop executing `SECCOMP_USER_NOTIF_FLAG_CONTINUE`
+     * for all notifications until the tracee process fully exits.
+     * The daemon will close its end of the socket, which sends EOF to our listener thread.
+     */
+    fun passThrough() {
+        if (!closed.compareAndSet(false, true)) return
+
+        logger.fine("Entering Pass-Through mode for ProfilerTraceListener fd=${socketFd.value}")
+
+        sendCommand(PASS_THROUGH_COMMAND_BYTE)
+
+        workerThread?.let {
+            try {
+                it.join(JOIN_TIMEOUT_MS)
+                if (it.isAlive) {
+                    logger.warning("Trace listener thread for fd=${socketFd.value} did not terminate within $JOIN_TIMEOUT_MS ms during passThrough")
+                    it.interrupt()
+                }
+            } catch (e: InterruptedException) {
+                Thread.currentThread().interrupt()
+            }
+        }
+        
+        socketFd.close()
+        workerThread = null
+    }
+
+    private fun sendCommand(commandByte: Byte) {
+        // Best-effort: if the socket is already closed or the daemon is dead, ignore errors.
+        // Use a confined native arena — MemorySegment.ofArray() creates a heap segment that
+        // cannot be passed to native write() syscalls via the FFM API.
+        try {
+            Arena.ofConfined().use { arena ->
+                val buf = arena.allocate(1)
+                buf.set(java.lang.foreign.ValueLayout.JAVA_BYTE, 0L, commandByte)
+                LinuxNative.withTransaction { LinuxNative.memory.write(socketFd, buf, 1) }
+            }
+        } catch (ignored: Exception) {}
+    }
+
+    @Suppress("MagicNumber")
     private fun runListenerLoop(
         inputStream: InputStream,
-        arena: Arena,
         readyLatch: CountDownLatch,
     ) {
-        val ackBuf = arena.allocate(1)
-        ackBuf.set(ValueLayout.JAVA_BYTE, 0L, PROTOCOL_ACK_BYTE)
-
         val dis = DataInputStream(BufferedInputStream(inputStream))
         try {
             try {
-                // Read handshake ACK from the daemon
-                state = TraceListenerState.Disconnected // Reusing state for handshake wait
+                // Read handshake ACK from the daemon confirming the listener FD was received.
+                state = TraceListenerState.Disconnected
                 val handshakeAck = dis.readByte()
                 if (handshakeAck != PROTOCOL_ACK_BYTE) {
                     logger.warning("Invalid handshake ACK from daemon: $handshakeAck")
                 }
+                // No config bytes are sent. The daemon uses fire-and-forget delivery;
+                // no bypassedTids or captureStackTraces negotiation is required.
             } finally {
                 readyLatch.countDown()
             }
 
+            System.err.println("[TRACE-LISTENER-DEBUG] Loop started, ready to read events")
             while (!closed.get()) {
                 state = TraceListenerState.AwaitingEvent
                 val event = try {
                     readNextEvent(dis)
                 } catch (e: java.io.EOFException) {
+                    System.err.println("[TRACE-LISTENER-DEBUG] EOFException, closing loop")
                     break // Graceful shutdown or socket closed
                 } catch (e: java.io.IOException) {
                     if (closed.get()) {
@@ -132,7 +198,7 @@ internal class ProfilerTraceListener(
                 }
 
                 state = TraceListenerState.ProcessingEvent(event)
-                processEvent(event, ackBuf)
+                processEvent(event)
             }
         } catch (e: java.io.IOException) {
             logger.log(java.util.logging.Level.WARNING, "Trace listener error", e)
@@ -142,6 +208,7 @@ internal class ProfilerTraceListener(
     }
 
     private fun readNextEvent(dis: DataInputStream): TraceEvent {
+        System.err.println("[TRACE-LISTENER-DEBUG] Awaiting/reading next event...")
         val tidValue = dis.readInt()
         state = TraceListenerState.ReadingHeader(tidValue)
 
@@ -169,23 +236,32 @@ internal class ProfilerTraceListener(
             paths.add(String(pathBytes, Charsets.UTF_8))
         }
 
-        val threadToProfile = Profiler.threadRegistry[Tid(tidValue)]
-        val stackTrace = threadToProfile?.stackTrace?.map { it.toString() }
-        return TraceEvent(tidValue = tidValue, syscallName = syscallName, args = args, paths = paths, stackTrace = stackTrace)
+        System.err.println("[TRACE-LISTENER-DEBUG] Read event header: tid=$tidValue, syscall=$syscallName, paths=$paths")
+        // NOTE: In the fire-and-forget design the daemon sends SECCOMP_USER_NOTIF_FLAG_CONTINUE
+        // to the kernel *before* writing this event to the socket. By the time this event arrives
+        // here, the tracee thread has already returned from its blocked syscall and is running
+        // freely. There is no safepoint deadlock risk — stack traces may be captured at any point
+        // in processEvent() without circular dependencies.
+        return TraceEvent(tidValue = tidValue, syscallName = syscallName, args = args, paths = paths, stackTrace = null)
     }
 
-    private fun processEvent(
-        event: TraceEvent,
-        ackBuf: MemorySegment,
-    ) {
-        if (event.paths.isNotEmpty() && isDuplicate(event)) {
-            sendAckIfNecessary(event.tid, ackBuf)
-            return
-        }
+    private fun processEvent(event: TraceEvent) {
+         try {
+             System.err.println("[TRACE-LISTENER-DEBUG] processEvent: tid=${event.tid.value}, syscall=${event.syscallName}")
+             if (event.paths.isNotEmpty() && isDuplicate(event)) {
+                 System.err.println("[TRACE-LISTENER-DEBUG] duplicate event, skipping")
+                 return
+             }
 
-        accumulateStackTrace(event)
-        accumulatedLogs.add(event)
-        sendAckIfNecessary(event.tid, ackBuf)
+             accumulatedLogs.add(event)
+             accumulateStackTrace(event)
+         } finally {
+             sendAck()
+         }
+    }
+
+    private fun sendAck() {
+        sendCommand(PROTOCOL_ACK_BYTE)
     }
 
     private fun isDuplicate(event: TraceEvent): Boolean {
@@ -202,7 +278,7 @@ internal class ProfilerTraceListener(
     }
 
     private fun accumulateStackTrace(event: TraceEvent) {
-        if (stackTracesMap == null) return
+        if (stackTracesMap == null || event.tid.value == 0) return
         val threadToProfile = Profiler.threadRegistry[event.tid]
         if (threadToProfile != null) {
             val frames = threadToProfile.stackTrace
@@ -210,15 +286,6 @@ internal class ProfilerTraceListener(
                 .computeIfAbsent(event) {
                     CopyOnWriteArrayList<Array<StackTraceElement>>()
                 }.add(frames)
-        }
-    }
-
-    private fun sendAckIfNecessary(
-        tid: Tid,
-        ackBuf: MemorySegment,
-    ) {
-        if (tid.value != 0) {
-            LinuxNative.withTransaction { LinuxNative.memory.write(socketFd, ackBuf, 1) }
         }
     }
 }
