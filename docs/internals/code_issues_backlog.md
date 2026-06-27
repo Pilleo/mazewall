@@ -1071,3 +1071,58 @@ For full architectural details, see `supervisor_proxy_design.md`.
 *   **Context & Proof:** Integration tests for process-wide profiling threw `NoClassDefFoundError` or hung indefinitely when classes like `ProfilingResult` or `TraceListenerState$ReadingHeader` were accessed during profiling but not warmed up beforehand.
 *   **Recommendation:** Maintain a robust, static class loading warmup block in `Profiler.kt` that instantiates and calls methods on all core state/result classes (`ProfilingResult`, `BobCompiler`, `TraceListenerState` subclasses) before installing seccomp filters.
 
+
+### 🔴 [Severity: CRITICAL]: Confused Deputy / Time-of-Check to Time-of-Use (TOCTOU) via Path Modification
+*   **Dimension:** Vulnerability Chaining & Concurrency (The Sandbox View)
+*   **Target Area:** `enforcer/src/main/kotlin/io/mazewall/enforcer/supervisor/SupervisorSessionHandler.kt`
+*   **Failure Hypothesis:** The supervisor daemon reads a string argument (path) from the target process memory using `SupervisorProcessMemoryReader`, validates it with the JVM, and if allowed, directly delegates the `open()` call or `connect()` call from the supervisor itself using that path, handing back the resulting FD via seccomp inject FD.
+*   **Context & Proof:** The `handleInjectFd` method opens the file `pathStr` (which was read *previously* by `processNotification` or `readAndHandleJvmResponse`) using `openFileInSupervisor` and injects the resulting file descriptor into the tracee. However, `pathStr` was read from the tracee's memory address space asynchronously. Between the time the memory was read and validated by the JVM, and the time the `SupervisorDaemon` executes `openFileInSupervisor()`, another thread in the tracee could mutate the memory string to point to a restricted file (e.g., from `/tmp/allowed` to `/etc/shadow`). The supervisor will then blindly open `/etc/shadow` and inject the FD back to the tracee.
+*   **Recommendation:** Do not use string paths for FD injection when there is an untrusted shared memory boundary. Instead of delegating the `open()` to the supervisor, the supervisor should reply with `SECCOMP_USER_NOTIF_FLAG_CONTINUE` if authorized, letting the kernel perform the syscall safely in the tracee's context using the *current* state of the memory.
+
+
+### 🔴 [Severity: CRITICAL]: TOCTOU / Pointer Re-targeting via `sockaddrBytes` Mutation during Connect Validation
+*   **Dimension:** Vulnerability Chaining & Concurrency (The Sandbox View)
+*   **Target Area:** `enforcer/src/main/kotlin/io/mazewall/enforcer/supervisor/SupervisorSessionHandler.kt`
+*   **Failure Hypothesis:** Similar to the path-based TOCTOU, the supervisor reads `sockaddrBytes` from the target process, validates it in the JVM, and then uses `connectSocketInSupervisor` to perform the `connect()` syscall from the supervisor process.
+*   **Context & Proof:** `connectSocketInSupervisor` uses the `sockaddrBytes` array that was read from the tracee's memory earlier. An attacker in the tracee could swap the memory contents of the `sockaddr` struct (e.g., changing the IP from a harmless destination to an internal, protected service on loopback) between the time the supervisor reads it and the time the supervisor performs the `connect`. The supervisor, acting as a confused deputy, connects to the malicious destination and returns the connected socket FD to the tracee.
+*   **Recommendation:** Stop injecting FDs for `connect()` and `open()` based on user-space copies. If the scoping policy authorizes the action, simply use `SECCOMP_USER_NOTIF_FLAG_CONTINUE` so the kernel safely evaluates the syscall in the tracee using the final memory state.
+
+
+### 🔴 [Severity: MEDIUM]: Unhandled Signal Interruptions (`EINTR`) during Supervisor IPC socket communication
+*   **Dimension:** Micro-Implementation & State Machine Invariants
+*   **Target Area:** `enforcer/src/main/kotlin/io/mazewall/enforcer/supervisor/SupervisorSessionHandler.kt`
+*   **Failure Hypothesis:** The JVM validation loop reads from and writes to the supervisor socket. System calls over the socket can be interrupted by signals (`EINTR`).
+*   **Context & Proof:** In `SupervisorSessionHandler.kt`, `LinuxNative.poll`, `LinuxNative.memory.write`, etc. are used. The `readAndHandleJvmResponse` and `sendSeccompError`/`sendSeccompContinue` functions do not properly loop on `EINTR` when calling `write` or `ioctl`. If a signal is received during the `ioctl(SECCOMP_IOCTL_NOTIF_SEND)` call, it may fail with `EINTR`, leaving the tracee suspended forever as the notification is never correctly answered.
+*   **Recommendation:** Wrap the `ioctl` calls for `SECCOMP_IOCTL_NOTIF_SEND` and `SECCOMP_IOCTL_NOTIF_ADDFD` in an explicit retry loop that checks `if (errno == EINTR) continue`.
+
+
+### 🔴 [Severity: MEDIUM]: Unhandled Signal Interruptions (`EINTR`) during Supervisor Initialization
+*   **Dimension:** Micro-Implementation & State Machine Invariants
+*   **Target Area:** `enforcer/src/main/kotlin/io/mazewall/ffi/networking/SupervisorSeccompNotifInstaller.kt`
+*   **Failure Hypothesis:** Sending the socket file descriptors over `SCM_RIGHTS` can be interrupted by signals.
+*   **Context & Proof:** `SupervisorSocketUtils.sendDescriptor` relies on `sendmsg`, which can fail with `EINTR`. If `EINTR` occurs while `SupervisorSeccompNotifInstaller` is trying to pass the seccomp listener FD to the supervisor daemon, the daemon will not receive the FD, but the JVM might proceed or throw an error, leading to an inconsistent state or unmonitored tracee.
+*   **Recommendation:** Wrap `sendmsg` inside `SupervisorSocketUtils.sendDescriptor` in a `while (errno == EINTR)` retry loop.
+
+
+### 🔴 [Severity: MEDIUM]: Asynchronous Supervisor socket reads timeout failure handling
+*   **Dimension:** Verification via Types & Compiler Features
+*   **Target Area:** `enforcer/src/main/kotlin/io/mazewall/enforcer/supervisor/SupervisorSessionHandler.kt`
+*   **Failure Hypothesis:** The `readAndHandleJvmResponse` waits up to 1 second (`POLL_TIMEOUT_MS`) for the JVM to validate the stack trace.
+*   **Context & Proof:** If the JVM `JvmStackInspector.inspect` or `scopingPolicy.authorize` takes more than `POLL_TIMEOUT_MS` (e.g., due to garbage collection pauses or complex policy evaluation), `poll` times out. The `SupervisorSessionHandler` logs a severe error and sends an `EPERM` error via `sendSeccompError` to the tracee. Later, when the JVM finally finishes and sends the response, the supervisor receives an unexpected response or ignores it, breaking the synchronization protocol.
+*   **Recommendation:** Remove the arbitrary timeout for the JVM validation step. The daemon should wait indefinitely (or loop on poll) for the JVM to respond. If the JVM hangs, the tracee should hang as well. Introducing timeouts at the IPC boundary leads to desynchronization and potential subsequent failure in tracking future system calls.
+
+
+### 🔴 [Severity: CRITICAL]: Classloader Deadlock in JVM Validation Listener
+*   **Dimension:** JVM / OS Contention & Classloading Invariants
+*   **Target Area:** `enforcer/src/main/kotlin/io/mazewall/enforcer/supervisor/SupervisorInstaller.kt`
+*   **Failure Hypothesis:** The JVM validation listener runs on a dedicated daemon thread and evaluates `StacktraceScopingPolicy`. During evaluation, it might trigger the classloader.
+*   **Context & Proof:** If `scopingPolicy.authorize` executes and lazily loads classes (e.g., custom policy classes, string utilities), it acquires the JVM ClassLoader lock. If the tracee thread that triggered the syscall was holding the ClassLoader lock (because the syscall was an `open()` inside a classloading sequence that wasn't caught by the JDK fast-path), the validation listener will block waiting for the ClassLoader lock, while the tracee thread is blocked in kernel space waiting for the seccomp response. This results in a permanent process-wide deadlock.
+*   **Recommendation:** Force eager classloading of all classes required by `JVMValidationListener`, `JvmStackInspector`, and `StacktraceScopingPolicy` before installing the seccomp filter on the thread, similar to the profiler warmup. Also, ensure the custom scoping policies are strictly verified not to perform arbitrary classloading.
+
+
+### 🔴 [Severity: LOW]: Incomplete FFM Architecture Isolation
+*   **Dimension:** Architectural Patterns Compliance (The Integrity View)
+*   **Target Area:** `enforcer/src/main/kotlin/io/mazewall/enforcer/supervisor/SupervisorInstaller.kt`
+*   **Failure Hypothesis:** FFM (`java.lang.foreign`) MemorySegments and Arenas are bleeding outside the `io.mazewall.ffi` boundary.
+*   **Context & Proof:** `JVMValidationListener.start` and `runValidationReactor` in `SupervisorInstaller.kt` directly use `Arena.ofShared()` and manipulate memory allocation logic for the `SupervisorResponseSegment`. According to `docs/internals/architectural_map.md#7-core-architectural-paradigms--patterns`, all raw memory/FFM manipulation must be isolated to `io.mazewall.ffi`.
+*   **Recommendation:** Move the raw `Arena` and `SupervisorResponseSegment` lifecycle management into a dedicated class inside the `io.mazewall.ffi` package, exposing a safe, higher-level interface to the `enforcer.supervisor` package.
