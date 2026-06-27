@@ -122,3 +122,25 @@ We conducted a deep architectural review of **NVIDIA OpenShell** (GitHub and arc
    * *Lesson for mazewall:* Because the JVM heap is shared, we cannot isolate secret strings on the heap from threads containing ACE exploits. However, we can use thread-scoped `mazewall` policies to block unauthorized threads from querying environment variables, forcing them to delegate secret resolution to secure sibling threads or credential containers.
 
 ---
+
+## 7. Process Spawning & Stacktrace Enforcement Nuances
+
+Through the agent sandboxing implementation, we discovered two key system-level behaviors when enforcing stacktrace-based rules on process spawning:
+
+1. **Lost JVM Stacktrace on Child Process `execve`:**
+   * When the JVM spawns a process, the child process runs in a separate PID.
+   * When `execve` is supervised, the seccomp notification comes from the child process PID.
+   * Since this new PID is not registered in the JVM's `threadRegistry`, calls to `Thread.getStackTrace()` yield an empty array.
+   * Direct stacktrace validation on `EXECVE`/`EXECVEAT` is therefore not possible.
+   
+2. **ClassLoader/Safepoint Deadlocks on thread-creation `clone`:**
+   * JVM thread creation and process spawning both invoke `clone` (or `clone3`) under the hood.
+   * If `CLONE` is supervised, the supervisor must capture the stacktrace via `Thread.getStackTrace()`, which triggers a JVM safepoint.
+   * Since the thread is blocked inside `Thread.start()` holding internal classloader and thread creation locks, waiting for a safepoint creates a permanent circular deadlock.
+
+### The Solution:
+* Allow `CLONE` and `CLONE3` entirely to ensure thread creation and standard JVM scheduling function without triggering supervisor inspections.
+* Set `-Djdk.lang.Process.launchMechanism=vfork` to force the JVM to spawn processes using `vfork` or `fork` rather than `clone`.
+* Supervise `VFORK` and `FORK` instead of `EXECVE`. Since `vfork` is executed on the calling JVM thread before the child process is fully detached, we can capture the calling JVM stacktrace perfectly and authorize or block the process spawn directly on the parent thread.
+
+---

@@ -221,6 +221,11 @@ class "StraceWorkloadRunner" as io.mazewall.profiler.strace.StraceWorkloadRunner
   __
   + {static}void main(String[])
 }
+class "DiagnosticTriageRunner" as io.mazewall.profiler.triage.DiagnosticTriageRunner {
+  + {static}DiagnosticTriageRunner INSTANCE
+  __
+  + {static}void main(String[])
+}
 io.mazewall.profiler.BillOfBehavior --> io.mazewall.profiler.engine.TraceEvent
 io.mazewall.profiler.JvmBaselineProfiles --> io.mazewall.profiler.JvmBaselineProfiles
 io.mazewall.profiler.Profiler --> io.mazewall.profiler.internal.ProfilerTraceListener
@@ -267,4 +272,5 @@ io.mazewall.profiler.internal.ProfilerTraceListener --> io.mazewall.profiler.int
 io.mazewall.profiler.iterative.IterativeProfiler --> io.mazewall.profiler.iterative.IterativeProfiler
 io.mazewall.profiler.strace.StraceProfiler --> io.mazewall.profiler.strace.StraceProfiler
 io.mazewall.profiler.strace.StraceWorkloadRunner --> io.mazewall.profiler.strace.StraceWorkloadRunner
+io.mazewall.profiler.triage.DiagnosticTriageRunner --> io.mazewall.profiler.triage.DiagnosticTriageRunner
 @enduml

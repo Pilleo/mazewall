@@ -2,6 +2,15 @@
 
 ## Recent Findings (Project Review June 2026)
 
+### 🔴 [Severity: HIGH]: Stacktrace-Enforced Process Spawning Safepoint Deadlock and Trace Propagation Gotchas
+**Context:** During the implementation of the AI Agent sandboxing PoC, we discovered that:
+1. **Empty Stack Trace on `execve` inside child processes:** When a child process is spawned via `clone` or `vfork`, it executes `execve` under its own PID. The seccomp notify event is triggered on that child PID. Because the child PID is not a registered JVM thread, calling `Thread.getStackTrace()` on it returns an empty array. This makes it impossible to enforce stacktrace scoping policies on `EXECVE`/`EXECVEAT` directly.
+2. **ClassLoader/Safepoint Deadlocks when supervising `CLONE`:** Spawning a JVM thread or a child process calls `CLONE` (or `CLONE3`). When a thread calls `Thread.start()` or spawns a process, it triggers `CLONE`. If `CLONE` is supervised, stacktrace inspection forces a JVM safepoint while the JVM holds internal thread-creation locks, leading to a permanent deadlock.
+**Needed:** To enforce stacktrace-based scoping for process execution safely:
+1. Allow `CLONE` and `CLONE3` entirely to prevent safepoint deadlocks during thread creation.
+2. Force the JVM to use `vfork` or `fork` for process spawning (`-Djdk.lang.Process.launchMechanism=vfork`).
+3. Supervise `VFORK` and `FORK` to capture the calling stacktrace on the parent thread before the child process is created.
+
 ### 🔵 [Severity: ENHANCEMENT]: Socket Address Family Filtering for Network Isolation Evasion Prevention
 **Context:** Currently, `mazewall` blocks networking by disabling `socket` or `connect` completely. This breaks local IPC utilizing Unix Domain Sockets (`AF_UNIX`/`AF_LOCAL`) which are common for DB/daemon integration. NVIDIA OpenShell inspects the first argument (Address Family) of `socket()` to allow `AF_UNIX` while denying `AF_INET`/`AF_INET6`, `AF_PACKET`, etc.
 **Needed:** Implement a `SocketAddressFamilyInspector` under `SyscallInspectionPipeline` to filter `socket` syscall arguments, preserving local IPC while preventing internet or raw packet capture.
