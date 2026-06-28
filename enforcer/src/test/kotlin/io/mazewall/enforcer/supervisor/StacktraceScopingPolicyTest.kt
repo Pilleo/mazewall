@@ -2,6 +2,7 @@ package io.mazewall.enforcer.supervisor
 
 import io.mazewall.core.Syscall
 import io.mazewall.core.Tid
+import io.mazewall.enforcer.supervisor.ScopingHandler
 import org.junit.jupiter.api.Test
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
@@ -11,26 +12,17 @@ class StacktraceScopingPolicyTest {
     @Test
     fun `default scoping policy always returns true`() {
         val policy = DefaultStacktraceScopingPolicy
-        val result = policy.authorize(
-            Tid(1234),
-            Syscall.OPENAT,
-            listOf("/etc/hosts"),
-            emptyList()
-        )
-        assertTrue(result)
+        assertTrue(policy.handlers.isEmpty())
     }
 
     @Test
     fun `custom scoping policy authorizes based on stack trace package`() {
         val policy = object : StacktraceScopingPolicy {
-            override fun authorize(
-                tid: Tid,
-                syscall: Syscall,
-                args: List<Any>,
-                stack: List<StackTraceElement>
-            ): Boolean {
-                return stack.any { it.className.startsWith("io.mazewall.legit") }
-            }
+            override val handlers = mapOf<Syscall, ScopingHandler>(
+                Syscall.OPENAT to { tid, args, stack -> 
+                    stack.any { it.className.startsWith("io.mazewall.legit") }
+                }
+            )
         }
 
         val legitStack = listOf(
@@ -42,7 +34,7 @@ class StacktraceScopingPolicyTest {
             StackTraceElement("java.lang.Thread", "run", "Thread.java", 120)
         )
 
-        assertTrue(policy.authorize(Tid(1234), Syscall.OPENAT, listOf("/etc/hosts"), legitStack))
-        assertFalse(policy.authorize(Tid(1234), Syscall.OPENAT, listOf("/etc/hosts"), maliciousStack))
+        assertTrue(policy.handlers[Syscall.OPENAT]?.invoke(Tid(1234), listOf("/etc/hosts"), legitStack) ?: true)
+        assertFalse(policy.handlers[Syscall.OPENAT]?.invoke(Tid(1234), listOf("/etc/hosts"), maliciousStack) ?: true)
     }
 }

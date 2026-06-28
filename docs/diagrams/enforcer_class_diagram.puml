@@ -163,7 +163,6 @@ class "PolicyBuilder" as io.mazewall.PolicyBuilder<S extends PolicyScope> {
   +PolicyBuilder<S> addAction(SeccompAction, Syscall[])
   +PolicyBuilder<S> block(Syscall[])
   +PolicyBuilder<S> allow(Syscall[])
-  +PolicyBuilder<S> supervise(Syscall[])
   +PolicyBuilder<S> unblock(Syscall[])
   +PolicyBuilder<S> base(PolicyDefinition<? extends S>)
   +PolicyBuilder<ThreadLocalOnly> allowFsRead(String)
@@ -526,7 +525,7 @@ class "ContainedExecutorWrapper" as io.mazewall.enforcer.internal.ContainedExecu
 class "DefaultStacktraceScopingPolicy" as io.mazewall.enforcer.supervisor.DefaultStacktraceScopingPolicy {
   + {static}DefaultStacktraceScopingPolicy INSTANCE
   __
-  +boolean authorize(int, Syscall, List<? extends Object>, List<StackTraceElement>)
+  +Map<Syscall, Function3<Tid, List<? extends Object>, List<StackTraceElement>, Boolean>> getHandlers()
 }
 class "JVMValidationListener" as io.mazewall.enforcer.supervisor.JVMValidationListener {
   + {static}Companion Companion
@@ -543,7 +542,9 @@ abstract class "LoopAction" as io.mazewall.enforcer.supervisor.LoopAction {
 interface "ScopingValidationState" as io.mazewall.enforcer.supervisor.ScopingValidationState {
 }
 interface "StacktraceScopingPolicy" as io.mazewall.enforcer.supervisor.StacktraceScopingPolicy {
-  + {abstract}boolean authorize(int, Syscall, List<? extends Object>, List<StackTraceElement>)
+  + {abstract}Map<Syscall, Function3<Tid, List<? extends Object>, List<StackTraceElement>, Boolean>> getHandlers()
+}
+class "StacktraceScopingPolicyKt" as io.mazewall.enforcer.supervisor.StacktraceScopingPolicyKt {
 }
 class "SupervisorContext" as io.mazewall.enforcer.supervisor.SupervisorContext {
   +String getSocketPath()
@@ -1091,6 +1092,7 @@ io.mazewall.enforcer.internal.ContainedExecutorWrapper --> io.mazewall.enforcer.
 io.mazewall.enforcer.internal.ContainedExecutorWrapper --> io.mazewall.PolicyDefinition
 io.mazewall.enforcer.supervisor.DefaultStacktraceScopingPolicy .u.|> io.mazewall.enforcer.supervisor.StacktraceScopingPolicy
 io.mazewall.enforcer.supervisor.DefaultStacktraceScopingPolicy --> io.mazewall.enforcer.supervisor.DefaultStacktraceScopingPolicy
+io.mazewall.enforcer.supervisor.DefaultStacktraceScopingPolicy --> io.mazewall.core.Tid
 io.mazewall.enforcer.supervisor.JVMValidationListener --> io.mazewall.core.FileDescriptor
 io.mazewall.enforcer.supervisor.JVMValidationListener --> io.mazewall.enforcer.supervisor.StacktraceScopingPolicy
 io.mazewall.enforcer.supervisor.JvmStackInspector --> io.mazewall.enforcer.supervisor.JvmStackInspector

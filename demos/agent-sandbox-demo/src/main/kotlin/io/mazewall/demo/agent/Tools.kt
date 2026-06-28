@@ -5,6 +5,7 @@ import io.mazewall.Policy
 import io.mazewall.core.Syscall
 import io.mazewall.enforcer.ContainedExecutors
 import io.mazewall.enforcer.supervisor.StacktraceScopingPolicy
+import io.mazewall.enforcer.supervisor.ScopingHandler
 import io.mazewall.core.Tid
 import java.io.File
 import java.net.URI
@@ -27,30 +28,30 @@ class AgentTools(
     // 1. Web Agent Compartment: Allows network connections, but blocks private IPs (SSRF) and blocks process spawning
     private val networkPolicy = Policy.builder()
         .allowMmapExec()
-        .block(Syscall.VFORK, Syscall.FORK, Syscall.EXECVE, Syscall.EXECVEAT)
-        .supervise(Syscall.CONNECT)
+        .allow(Syscall.CLONE, Syscall.CLONE3, Syscall.EXECVE, Syscall.EXECVEAT)
         .build()
 
-    private val networkScopingPolicy = object : StacktraceScopingPolicy {
-        override fun authorize(
-            tid: Tid,
-            syscall: Syscall,
-            args: List<Any>,
-            stack: List<StackTraceElement>
-        ): Boolean {
-            if (syscall == Syscall.CONNECT) {
-                val sockaddrBytes = args.firstOrNull { it is ByteArray } as? ByteArray ?: return true
-                if (isPrivateIp(sockaddrBytes)) {
-                    println("[MAZEWALL] [BLOCKED] Outbound connection to private network blocked by kernel!")
-                    return false
+    private val webScopingPolicy = object : StacktraceScopingPolicy {
+        override val handlers = mapOf<Syscall, ScopingHandler>(
+            Syscall.CONNECT to { tid, args, stack ->
+                val ip = args.firstOrNull() as? String ?: ""
+                val isPrivate = ip.startsWith("10.") || ip.startsWith("192.168.") || ip.startsWith("127.") || ip.startsWith("172.16.")
+                
+                if (isPrivate) {
+                    println("[MAZEWALL] [BLOCKED] Network connection to private IP $ip intercepted and dropped!")
+                    false
+                } else {
+                    println("[MAZEWALL] [ALLOWED] Network connection to public IP $ip authorized.")
+                    true
                 }
-            }
-            return true
-        }
+            },
+            Syscall.VFORK to { tid, args, stack -> authorizeExec(stack) },
+            Syscall.FORK to { tid, args, stack -> authorizeExec(stack) }
+        )
     }
 
     private val webExecutor: ExecutorService = if (useMazewall) {
-        ContainedExecutors.wrap(webRawExecutor, networkPolicy, networkScopingPolicy)
+        ContainedExecutors.wrap(webRawExecutor, networkPolicy, webScopingPolicy)
     } else {
         webRawExecutor
     }
@@ -73,27 +74,23 @@ class AgentTools(
     private val execPolicy = Policy.builder()
         .allowMmapExec()
         .allow(Syscall.CLONE, Syscall.CLONE3, Syscall.EXECVE, Syscall.EXECVEAT)
-        .supervise(Syscall.VFORK, Syscall.FORK)
         .build()
 
     private val execScopingPolicy = object : StacktraceScopingPolicy {
-        override fun authorize(
-            tid: Tid,
-            syscall: Syscall,
-            args: List<Any>,
-            stack: List<StackTraceElement>
-        ): Boolean {
-            if (syscall == Syscall.VFORK || syscall == Syscall.FORK) {
-                val isLegit = stack.any { it.className.contains("AgentTools") && it.methodName.contains("executeDataAnalysis") }
-                if (!isLegit) {
-                    println("[MAZEWALL] [BLOCKED] Process spawn blocked! Execution stack did not originate from executeDataAnalysis!")
-                } else {
-                    println("[MAZEWALL] [ALLOWED] Process spawn authorized for executeDataAnalysis.")
-                }
-                return isLegit
-            }
-            return true
+        override val handlers = mapOf<Syscall, ScopingHandler>(
+            Syscall.VFORK to { tid, args, stack -> authorizeExec(stack) },
+            Syscall.FORK to { tid, args, stack -> authorizeExec(stack) }
+        )
+    }
+
+    private fun authorizeExec(stack: List<StackTraceElement>): Boolean {
+        val isLegit = stack.any { it.className.contains("AgentTools") && it.methodName.contains("executeDataAnalysis") }
+        if (!isLegit) {
+            println("[MAZEWALL] [BLOCKED] Process spawn blocked! Execution stack did not originate from executeDataAnalysis!")
+        } else {
+            println("[MAZEWALL] [ALLOWED] Process spawn authorized for executeDataAnalysis.")
         }
+        return isLegit
     }
 
     private val analysisExecutor: ExecutorService = if (useMazewall) {

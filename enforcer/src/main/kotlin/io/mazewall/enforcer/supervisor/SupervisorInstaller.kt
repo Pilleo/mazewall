@@ -154,7 +154,8 @@ internal class JVMValidationListener(
                         val stackTrace = validationState.rawStack.toList()
                         val syscall = Syscall.entries.find { it.numberFor(Arch.current()) == validationState.nr } ?: Syscall.OPEN
                         val authStartMs = System.currentTimeMillis()
-                        val res = scopingPolicy.authorize(Tid(pidVal), syscall, validationState.argsList, stackTrace)
+                        val handler = scopingPolicy.handlers[syscall]
+                        val res = handler?.invoke(Tid(pidVal), validationState.argsList, stackTrace) ?: true
                         val authMs = System.currentTimeMillis() - authStartMs
                         if (authMs > SLOW_AUTH_THRESHOLD_MS) {
                             logger.warning("[SUPERVISOR-DIAGNOSTIC] scopingPolicy.authorize took ${authMs}ms for syscall $syscall")

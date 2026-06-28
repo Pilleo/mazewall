@@ -31,7 +31,6 @@ public class PolicyBuilder<S : PolicyScope> internal constructor(
 
     public fun block(vararg syscalls: Syscall): PolicyBuilder<S> = addAction(SeccompAction.ACT_ERRNO, *syscalls)
     public fun allow(vararg syscalls: Syscall): PolicyBuilder<S> = addAction(SeccompAction.ACT_ALLOW, *syscalls)
-    public fun supervise(vararg syscalls: Syscall): PolicyBuilder<S> = addAction(SeccompAction.ACT_NOTIFY, *syscalls)
 
     public fun unblock(vararg syscalls: Syscall): PolicyBuilder<S> {
         for (sys in syscalls) syscallActions.remove(sys)

@@ -16,6 +16,7 @@ import io.mazewall.onSuccess
 import io.mazewall.profiler.Profiler
 import io.mazewall.recover
 import io.mazewall.enforcer.supervisor.StacktraceScopingPolicy
+import io.mazewall.enforcer.supervisor.ScopingHandler
 import io.mazewall.core.Tid
 import java.io.File
 import java.io.IOException
@@ -173,22 +174,20 @@ fun runProfileAndEnforce() {
                 .threadLocalBuilder()
                 .base(baseForEnforcement)
                 .unblock(Syscall.IO_URING_SETUP)
-                .supervise(Syscall.OPENAT)
-                .supervise(Syscall.OPEN)
                 .build()
 
         val scopingPolicy = object : StacktraceScopingPolicy {
-            override fun authorize(
-                tid: Tid,
-                syscall: Syscall,
-                args: List<Any>,
-                stack: List<StackTraceElement>
-            ): Boolean {
+            override val handlers = mapOf<Syscall, ScopingHandler>(
+                Syscall.OPENAT to { tid, args, stack -> authorize(tid, args, stack) },
+                Syscall.OPEN to { tid, args, stack -> authorize(tid, args, stack) }
+            )
+            
+            private fun authorize(tid: Tid, args: List<Any>, stack: List<StackTraceElement>): Boolean {
                 val hasLegitWorkload = stack.any { it.methodName.contains("legitWorkload") }
                 if (!hasLegitWorkload) {
-                    println("  [SUPERVISOR INTERCEPT] Denying syscall $syscall for TID $tid. Call stack does NOT originate from legitWorkload()!")
+                    println("  [SUPERVISOR INTERCEPT] Denying syscall for TID $tid. Call stack does NOT originate from legitWorkload()!")
                 } else {
-                    println("  [SUPERVISOR INTERCEPT] Allowing syscall $syscall for TID $tid. Stack context verified.")
+                    println("  [SUPERVISOR INTERCEPT] Allowing syscall for TID $tid. Stack context verified.")
                 }
                 return hasLegitWorkload
             }

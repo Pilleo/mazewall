@@ -82,20 +82,29 @@ object ContainedExecutors {
         policy: PolicyDefinition<*>,
         scopingPolicy: StacktraceScopingPolicy = io.mazewall.enforcer.supervisor.DefaultStacktraceScopingPolicy
     ) : AutoCloseable {
+        val augmentedPolicy = if (scopingPolicy.handlers.isNotEmpty()) {
+            PolicyDefinition.combine(
+                policy,
+                PolicyDefinition(syscallActions = scopingPolicy.handlers.keys.associateWith { SeccompAction.ACT_NOTIFY })
+            )
+        } else {
+            policy
+        }
+
         validateLinuxAndNotVirtual()
 
-        if (policy.hasSupervisedSyscalls) {
+        if (augmentedPolicy.hasSupervisedSyscalls) {
             io.mazewall.enforcer.supervisor.SupervisorDaemonManager.getOrSpawnSharedDaemon()
         }
 
-        applyLandlockIfNecessary(processWide, policy)
+        applyLandlockIfNecessary(processWide, augmentedPolicy)
 
         if (!Platform.isSupported()) {
             handleUnsupportedPlatform()
             return AutoCloseable {}
         }
 
-        return installSeccompFilter(processWide, policy, scopingPolicy)
+        return installSeccompFilter(processWide, augmentedPolicy, scopingPolicy)
     }
 
     private fun installSeccompFilter(

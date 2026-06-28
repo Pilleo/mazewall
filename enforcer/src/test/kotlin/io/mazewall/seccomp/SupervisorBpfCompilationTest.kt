@@ -15,8 +15,8 @@ class SupervisorBpfCompilationTest {
     @Test
     fun `policy builder with supervise produces notify action in bpf filter`() {
         val policy = Policy.builder()
-            .supervise(Syscall.OPENAT)
-            .supervise(Syscall.CONNECT)
+            .addAction(io.mazewall.core.SeccompAction.ACT_NOTIFY, Syscall.OPENAT)
+            .addAction(io.mazewall.core.SeccompAction.ACT_NOTIFY, Syscall.CONNECT)
             .build()
 
         assertTrue(policy.definition.hasSupervisedSyscalls)

@@ -6,6 +6,7 @@ import io.mazewall.Policy
 import io.mazewall.core.Syscall
 import io.mazewall.enforcer.ContainedExecutors
 import io.mazewall.enforcer.supervisor.StacktraceScopingPolicy
+import io.mazewall.enforcer.supervisor.ScopingHandler
 import io.mazewall.core.Tid
 import org.junit.jupiter.api.Test
 import java.io.File
@@ -63,12 +64,12 @@ class SupervisorProxyIntegrationTest : BaseIntegrationTest() {
         val deniedCalls = mutableListOf<String>()
 
         val scopingPolicy = object : StacktraceScopingPolicy {
-            override fun authorize(
-                tid: Tid,
-                syscall: Syscall,
-                args: List<Any>,
-                stack: List<StackTraceElement>
-            ): Boolean {
+            override val handlers = mapOf<Syscall, ScopingHandler>(
+                Syscall.OPENAT to { tid, args, stack -> authorize(args, stack) },
+                Syscall.OPEN to { tid, args, stack -> authorize(args, stack) }
+            )
+            
+            private fun authorize(args: List<Any>, stack: List<StackTraceElement>): Boolean {
                 val path = args.firstOrNull() as? String ?: ""
                 if (!path.contains("supervised_test_")) {
                     return true
@@ -83,8 +84,6 @@ class SupervisorProxyIntegrationTest : BaseIntegrationTest() {
  
         val policy = Policy.builder()
             .base(Policy.PURE_COMPUTE_UNSAFE)
-            .supervise(Syscall.OPENAT)
-            .supervise(Syscall.OPEN)
             .build()
  
         val rawExecutor = Executors.newSingleThreadExecutor()
@@ -125,21 +124,14 @@ class SupervisorProxyIntegrationTest : BaseIntegrationTest() {
         }
 
         val scopingPolicy = object : StacktraceScopingPolicy {
-            override fun authorize(
-                tid: Tid,
-                syscall: Syscall,
-                args: List<Any>,
-                stack: List<StackTraceElement>
-            ): Boolean {
-                // Deny all user-policy evaluations to prove the daemon bypass is working
-                return false
-            }
+            override val handlers = mapOf<Syscall, ScopingHandler>(
+                Syscall.OPENAT to { tid, args, stack -> false },
+                Syscall.OPEN to { tid, args, stack -> false }
+            )
         }
 
         val policy = Policy.builder()
             .base(Policy.PURE_COMPUTE_UNSAFE)
-            .supervise(Syscall.OPENAT)
-            .supervise(Syscall.OPEN)
             .build()
 
         val rawExecutor = Executors.newSingleThreadExecutor()

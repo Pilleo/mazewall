@@ -49,6 +49,7 @@ fun main(args: Array<String>) {
         // ensuring that even if an attacker achieves Arbitrary Code Execution (ACE) on any thread, 
         // they cannot escape the container namespace boundary via mount, ptrace, unshare, etc.
         val processBaseline = Policy.builder()
+            .allowMmapExec()
             .block(Syscall.PTRACE, Syscall.MOUNT, Syscall.UNSHARE, Syscall.CHROOT)
             .build()
         ContainedExecutors.installOnProcess(processBaseline)
