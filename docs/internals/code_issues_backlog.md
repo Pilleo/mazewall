@@ -1167,11 +1167,11 @@ For full architectural details, see `supervisor_proxy_design.md`.
 *   **Context & Proof:** The CI runs `./gradlew build -x jacocoTestCoverageVerification` and then, two steps later, `./gradlew jacocoTestCoverageVerification`. Because integration tests are run in between, it attempts to aggregate execution data. However, Gradle's task graph (`build.gradle.kts` defines `check` depending on `jacocoTestCoverageVerification`) is already designed to handle this sequentially. Manually orchestrating this with `-x` is brittle and inefficient.
 *   **Recommendation:** Refactor the CI workflow to execute a single `./gradlew check` that natively encapsulates unit testing, integration testing (perhaps via a composite task or proper test source set separation rather than a shell script wrapper), and jacoco verification in a single, parallelizable Gradle invocation.
 
-### 🔴 [Severity: LOW]: Inefficient DependencyCheck Configuration in CI
-*   **Target Area:** `.github/workflows/ci.yml` and `build.gradle.kts`
-*   **Hypothesis:** The OWASP Dependency-Check plugin is executed without configuration caching, significantly increasing configuration phase time.
-*   **Context & Proof:** In `.github/workflows/ci.yml`, the command runs `./gradlew dependencyCheckAnalyze --info --no-configuration-cache`. Modern versions of the dependency-check plugin support Gradle's configuration cache. Disabling it forces Gradle to re-evaluate the entire project build script every time this step runs.
-*   **Recommendation:** Upgrade the `dependencyCheck` plugin (if necessary) to a version fully compatible with Gradle's Configuration Cache and remove the `--no-configuration-cache` flag from the CI pipeline. Ensure the task inputs/outputs are correctly defined so the task is cacheable.
+### ✅ [RESOLVED]: Inefficient DependencyCheck Configuration in CI
+*   **Status:** RESOLVED (June 2026)
+*   **Target Area:** `.github/workflows/ci.yml`
+*   **Context & Proof:** The OWASP Dependency-Check plugin is executed without configuration caching, significantly increasing configuration phase time.
+*   **Fix:** Removed the `--no-configuration-cache` flag from the `dependencyCheckAnalyze` step in `ci.yml` now that version `10.0.4` fully supports the configuration cache.
 
 ### ✅ [RESOLVED]: Gradle Configuration Avoidance Breakage via JitPack Shim
 *   **Status:** RESOLVED (June 2026)
@@ -1186,12 +1186,12 @@ For full architectural details, see `supervisor_proxy_design.md`.
 *   **Context & Proof:** In `SupervisorProcessMemoryReader.kt`, `LinuxNative.memory.processVmReadv` is called without any retry logic. If it returns an error and `errno == EINTR`, the function returns `null`. This `null` cascades back to `SupervisorSessionHandler.kt`, where the `handleInjectFd` method (and others) will interpret the `null` path or `null` sockaddr as invalid arguments and wrongly deny the system call with `EPERM`.
 *   **Recommendation:** Wrap the `processVmReadv` call inside a `while (errno == EINTR)` retry loop to ensure that transient signal interruptions do not cause legitimate syscalls to be denied.
 
-### 🔴 [Severity: HIGH]: `poll` EINTR Logic Bug Causes Process Deadlock via Blocking `read`
+### ✅ [RESOLVED]: `poll` EINTR Logic Bug Causes Process Deadlock via Blocking `read`
+*   **Status:** RESOLVED (June 2026)
 *   **Dimension:** Vulnerability Chaining & Concurrency (The Sandbox View)
 *   **Target Area:** `enforcer/src/main/kotlin/io/mazewall/enforcer/supervisor/SupervisorSessionHandler.kt`
-*   **Failure Hypothesis:** If `poll` is interrupted by a signal, it returns a false positive for data readiness, leading to a blocking `read` that will never return if the JVM hasn't sent the data, permanently hanging the supervisor thread and the tracee.
-*   **Context & Proof:** In `readAndHandleJvmResponse`, `poll` is executed to wait for the JVM's validation response. The error recovery logic is: `pollRes.recover { errno, _ -> if (errno == NativeConstants.EINTR) 1L else 0L }`. Since `poll` returning `1L` means `count > 0`, the code incorrectly assumes data is ready and immediately proceeds to `LinuxNative.memory.read(socketFd, ...)`. Because the socket is blocking, if the JVM is actually slow or stalled (and hasn't sent any data yet), the `read` will block indefinitely. This completely bypasses the intended `POLL_TIMEOUT_MS` fail-safe and permanently deadlocks both the `SupervisorDaemon` thread and the JVM tracee waiting for the seccomp response.
-*   **Recommendation:** Fix the `recover` block to correctly identify `EINTR` and loop the `poll` call with a reduced timeout instead of incorrectly returning `1L`. Alternatively, make the socket non-blocking and handle `EAGAIN` gracefully.
+*   **Context & Proof:** If `poll` is interrupted by a signal, it returns a false positive for data readiness, leading to a blocking `read` that will never return if the JVM hasn't sent the data, permanently hanging the supervisor thread and the tracee.
+*   **Fix:** Wrapped the `poll` call in a loop inside `readAndHandleJvmResponse` that correctly handles `EINTR`, updates the remaining timeout dynamically, and retries the poll instead of returning `1L` to trigger a premature blocking read.
 
 ### 🔴 [Severity: MEDIUM]: Bitwise Sign-Extension Bug in `sockaddr` Domain Parsing
 *   **Dimension:** FFM ABI & Memory Safety (The Low-Level View)
@@ -1207,12 +1207,12 @@ For full architectural details, see `supervisor_proxy_design.md`.
 *   **Context & Proof:** In `SupervisorSocketUtils.setupSockAddrUn`, the length of the string is not bounds-checked before copying into the 108-byte `sun_path` struct layout using `MemorySegment.copy(pathBytes, 0, pathSeg, ValueLayout.JAVA_BYTE, 0L, pathBytes.size)`. If the OS temporary directory path (`System.getProperty("java.io.tmpdir")`) is heavily nested, `Files.createTempDirectory` in `SupervisorDaemonManager` could produce a `socketPath` exceeding 108 bytes. This will cause `MemorySegment.copy` to crash the initialization of the supervisor.
 *   **Recommendation:** Add an explicit bounds check `require(pathBytes.size < 108) { "Socket path too long" }` in `setupSockAddrUn` and consider using the abstract namespace (`\0` prefix) or `openat`-relative binding if paths get too long.
 
-### 🔴 [Severity: CRITICAL]: Untrusted Allocation Size Causes `OutOfMemoryError` and Daemon Crash via `connect()`
+### ✅ [RESOLVED]: Untrusted Allocation Size Causes `OutOfMemoryError` and Daemon Crash via `connect()`
+*   **Status:** RESOLVED (June 2026)
 *   **Dimension:** Vulnerability Chaining & Concurrency (The Sandbox View)
 *   **Target Area:** `enforcer/src/main/kotlin/io/mazewall/ffi/memory/SupervisorProcessMemoryReader.kt` and `SupervisorSessionHandler.kt`
-*   **Failure Hypothesis:** A tracee can intentionally crash the supervisor daemon by passing an extremely large `addrlen` argument to the `connect` syscall, triggering a fatal `OutOfMemoryError` that is not caught by standard exception handlers.
-*   **Context & Proof:** In `SupervisorSessionHandler.extractNotificationArgs`, for the `SYS_CONNECT` syscall, `len` is extracted directly from the tracee's untrusted argument: `val len = args[2].toInt()`. This `len` is passed to `SupervisorProcessMemoryReader.readBytesFromProcess`, which immediately executes `arena.allocate(len.toLong())`. If a malicious tracee supplies an artificially large value (e.g., 1GB), the native allocation will fail and throw an `OutOfMemoryError` because the `SupervisorDaemon` is launched with `-Xmx64m`. `processNotification` only catches `Exception`, so the `OutOfMemoryError` (which is a `VirtualMachineError` / `Throwable`) propagates, crashing the daemon thread and leaving the tracee permanently suspended in kernel space.
-*   **Recommendation:** Implement strict bounds checking for `addrlen` in `extractNotificationArgs` (e.g., limit to a reasonable maximum like `1024` bytes for `sockaddr`). Alternatively, ensure that memory reads are chunked or that `Throwable` is caught to safely return `EPERM` without crashing the daemon.
+*   **Context & Proof:** A tracee can intentionally crash the supervisor daemon by passing an extremely large `addrlen` argument to the `connect` syscall, triggering a fatal `OutOfMemoryError` that is not caught by standard exception handlers.
+*   **Fix:** Wrapped the body of `processNotification` in `SupervisorSessionHandler` in a global `try-catch` catching `Throwable`. Any fatal error or OOM now fails-closed safely, logging the error and returning `EPERM` without crashing the daemon thread.
 ### 🔴 [Severity: HIGH]: Incomplete EINTR Handling in process_vm_readv and Other Syscalls
 *   **Target Area:** `enforcer/src/main/kotlin/io/mazewall/ffi/memory/SupervisorProcessMemoryReader.kt` and other syscalls
 *   **Hypothesis:** Various system calls, notably `process_vm_readv` in `SupervisorProcessMemoryReader`, do not wrap their execution in a retry loop to handle `EINTR` (interruption by a signal).
