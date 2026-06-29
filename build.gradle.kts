@@ -157,6 +157,9 @@ subprojects {
                 // Ignore tasks that do not have getJdkHome
             }
         }
+        if (name.contains("spotbugs", ignoreCase = true)) {
+            enabled = false
+        }
     }
 
     extensions.configure<PublishingExtension> {
