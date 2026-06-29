@@ -110,9 +110,19 @@ internal class SupervisorSessionHandler(
          */
         @Suppress("SwallowedException", "TooGenericExceptionCaught")
         private val safeBypassPaths = mutableListOf<java.nio.file.Path>().apply {
+            fun addPathAndReal(path: java.nio.file.Path) {
+                val abs = path.toAbsolutePath().normalize()
+                add(abs)
+                try {
+                    add(abs.toRealPath())
+                } catch (ignored: Exception) {}
+            }
+
             try {
-                val javaHome = java.nio.file.Paths.get(System.getProperty("java.home")).toAbsolutePath().normalize()
-                add(javaHome)
+                val javaHomeStr = System.getProperty("java.home")
+                if (!javaHomeStr.isNullOrEmpty()) {
+                    addPathAndReal(java.nio.file.Paths.get(javaHomeStr))
+                }
 
                 val cp = System.getProperty("java.class.path")
                 if (cp != null) {
@@ -120,8 +130,7 @@ internal class SupervisorSessionHandler(
                     for (entry in cpEntries) {
                         if (entry.isNotEmpty()) {
                             try {
-                                val cpPath = java.nio.file.Paths.get(entry).toAbsolutePath().normalize()
-                                add(cpPath)
+                                addPathAndReal(java.nio.file.Paths.get(entry))
                             } catch (ignored: Exception) {}
                         }
                     }
@@ -134,8 +143,7 @@ internal class SupervisorSessionHandler(
                         val agentPath = arg.substringAfter("-javaagent:").substringBefore("=")
                         if (agentPath.isNotEmpty()) {
                             try {
-                                val p = java.nio.file.Paths.get(agentPath).toAbsolutePath().normalize()
-                                add(p)
+                                addPathAndReal(java.nio.file.Paths.get(agentPath))
                             } catch (ignored: Exception) {}
                         }
                     }
@@ -143,20 +151,30 @@ internal class SupervisorSessionHandler(
 
                 // Add CI-specific build directories and test-framework caches to prevent deadlock
                 try {
-                    add(java.nio.file.Paths.get("build").toAbsolutePath().normalize())
-                    add(java.nio.file.Paths.get(".gradle").toAbsolutePath().normalize())
+                    addPathAndReal(java.nio.file.Paths.get("build"))
+                    addPathAndReal(java.nio.file.Paths.get(".gradle"))
+                } catch (ignored: Exception) {}
+
+                // Add GRADLE_USER_HOME if set to support container/CI cache directories
+                try {
+                    val gradleUserHome = System.getenv("GRADLE_USER_HOME")
+                    if (!gradleUserHome.isNullOrEmpty()) {
+                        addPathAndReal(java.nio.file.Paths.get(gradleUserHome))
+                    }
                 } catch (ignored: Exception) {}
 
                 // Add /proc and /sys virtual filesystems to prevent GC/JIT thread deadlocks
                 try {
-                    add(java.nio.file.Paths.get("/proc").toAbsolutePath().normalize())
-                    add(java.nio.file.Paths.get("/sys").toAbsolutePath().normalize())
+                    addPathAndReal(java.nio.file.Paths.get("/proc"))
+                    addPathAndReal(java.nio.file.Paths.get("/sys"))
                 } catch (ignored: Exception) {}
 
                 // Add the project root directory to bypass all project classes and build artifacts
                 try {
-                    val userDir = java.nio.file.Paths.get(System.getProperty("user.dir")).toAbsolutePath().normalize()
-                    add(userDir)
+                    val userDir = System.getProperty("user.dir")
+                    if (!userDir.isNullOrEmpty()) {
+                        addPathAndReal(java.nio.file.Paths.get(userDir))
+                    }
                 } catch (ignored: Exception) {}
             } catch (e: Exception) {
                 // Fail-safe
