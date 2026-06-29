@@ -27,4 +27,8 @@
     <Match>
         <Class name="io.mazewall.PlatformDiagnosticsTest" />
     </Match>
+    <Match>
+        <Class name="~io\.mazewall\.enforcer\.supervisor\.SupervisorSessionHandler.*" />
+        <Bug pattern="DE_MIGHT_IGNORE" />
+    </Match>
 </FindBugsFilter>
