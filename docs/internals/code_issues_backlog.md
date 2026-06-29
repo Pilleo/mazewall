@@ -1247,3 +1247,34 @@ If a policy "allows" an `openat` via `decision == 1`, the kernel will execute th
 *   **Hypothesis:** `docs/internals/architectural_map.md` strictly dictates that "all raw memory/FFM/Unsafe manipulations isolated to `io.mazewall.ffi`".
 *   **Context & Proof:** `grep -rn "java.lang.foreign" enforcer/src/main/kotlin/io/mazewall/ | grep -v "/ffi/"` reveals extensive usage of `java.lang.foreign.MemorySegment`, `Arena`, and `ValueLayout` in high-level classes like `Landlock.kt`, `SupervisorSessionHandler.kt`, and `LinuxNative.kt`. This completely violates the ArchUnit architectural constraint.
 *   **Recommendation:** Move all direct FFM memory allocations (`Arena.ofConfined().use { ... }`) and native struct manipulations into dedicated wrapper classes inside `io.mazewall.ffi`. The outer layers (`enforcer`, `landlock`, etc.) should only interact with safe Kotlin types (ByteArrays, Strings, domain objects).
+
+### 🔴 [Severity: MEDIUM]: Unhandled EINTR in `SupervisorSocketUtils.sendDescriptor`
+*   **Target Area:** `enforcer/src/main/kotlin/io/mazewall/ffi/networking/SupervisorSocketUtils.kt`
+*   **Hypothesis:** `sendmsg` can be interrupted by a signal, returning `EINTR`. If not handled, descriptor passing will spuriously fail.
+*   **Context & Proof:** In `SupervisorSocketUtils.sendDescriptor`, `LinuxNative.networking.sendmsg` is called. The result is just checked for `Success`. If `EINTR` occurs, it silently returns `false`. This can cause a handshake failure between the profiler and the tracee.
+*   **Recommendation:** Wrap `sendmsg` in a retry loop that checks for `errno == io.mazewall.ffi.NativeConstants.EINTR`, similar to `recvmsg`.
+
+### 🔴 [Severity: MEDIUM]: Unhandled `SyscallResult` return types leaking into domain logic
+*   **Target Area:** `enforcer/src/main/kotlin/io/mazewall/seccomp/` and `io/mazewall/landlock/`
+*   **Hypothesis:** `ArchitectureTest.kt` enforces that domain logic must not return `SyscallResult`, but `SyscallResult` type might still be leaking via internal methods or properties.
+*   **Context & Proof:** `domainLogicMustHandleSyscallResults` only checks public methods. But internal/private domain logic shouldn't leak raw FFM `SyscallResult` either.
+*   **Recommendation:** Expand `ArchitectureTest.domainLogicMustHandleSyscallResults` to check all methods in the domain packages, not just public ones.
+
+### 🔴 [Severity: LOW]: Inconsistent Architecture Test for `java.lang.foreign`
+*   **Dimension:** Architectural Patterns Compliance (The Integrity View)
+*   **Target Area:** `enforcer/src/test/kotlin/io/mazewall/ArchitectureTest.kt`
+*   **Hypothesis:** The ArchUnit tests ban `java.lang.foreign.MemorySegment.reinterpret`, `Arena.ofAuto`, and `MemorySegment.get`, but they do not generally ban the import and usage of `java.lang.foreign` outside of `io.mazewall.ffi`.
+*   **Context & Proof:** `grep -rn "java.lang.foreign" enforcer/src/main/kotlin/io/mazewall/ | grep -v "/ffi/"` returns many hits. The `ArchitectureTest.kt` lacks a strict package boundary check for the `java.lang.foreign` package.
+*   **Recommendation:** Add an ArchUnit test: `noClasses().that().resideOutsideOfPackage("io.mazewall.ffi..").should().dependOnClassesThat().resideInAPackage("java.lang.foreign..")` to enforce the constraint defined in `architectural_map.md`.
+
+### 🔴 [Severity: MEDIUM]: Unhandled `SyscallResult` during Shutdown
+*   **Target Area:** `enforcer/src/main/kotlin/io/mazewall/enforcer/supervisor/SupervisorDaemonManager.kt`
+*   **Hypothesis:** `SupervisorDaemonManager.triggerDaemonShutdown` ignores `connect` and `write` failures.
+*   **Context & Proof:** In `triggerDaemonShutdown`, `LinuxNative.networking.connect` is executed, and if successful, `write` is called. However, it blindly ignores potential `EINTR` or `ECONNREFUSED` (which could mean the daemon is already shutting down or socket is busy).
+*   **Recommendation:** Check for specific errors in `triggerDaemonShutdown` and gracefully handle retryable network errors during daemon shutdown.
+
+### 🔴 [Severity: CRITICAL]: Profiler Trace Listener State Mutability Bug
+*   **Target Area:** `profiler/src/main/kotlin/io/mazewall/profiler/internal/ProfilerTraceListener.kt`
+*   **Hypothesis:** The `ProfilerTraceListener` thread might leak resources or deadlock if an unhandled exception crashes the listener loop before `closed.set(true)` or `socketFd` is released.
+*   **Context & Proof:** `ProfilerTraceListener` handles concurrent socket reads and trace resolution. The `workerThread` loops infinitely. If an unexpected `RuntimeException` (like an FFM alignment error) escapes the loop, the socket might not be closed properly, and the worker thread terminates while the profiler engine thinks the listener is still active.
+*   **Recommendation:** Wrap the entire worker loop in a `try-catch` block, log the fatal error, and unconditionally close the socket in a `finally` block to ensure deterministic cleanup.
