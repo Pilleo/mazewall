@@ -50,6 +50,8 @@ internal class ContainedExecutorWrapper(
             ContainedExecutors.installOnCurrentThread(policy, scopingPolicy).use {
                 val result = runCatching { task.call() }
                 result.getOrElse { e ->
+                    System.err.println("Task execution failed with exception:")
+                    e.printStackTrace()
                     if (e is Exception && ContainmentViolationDetector.isContainmentViolation(e)) {
                         throw ContainmentViolationException("Task violated containment policy", e)
                     }

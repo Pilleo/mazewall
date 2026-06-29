@@ -112,6 +112,12 @@ class SupervisorProxyIntegrationTest : BaseIntegrationTest() {
         } finally {
             rawExecutor.shutdown()
             tempFile.delete()
+            System.err.println("--- VALIDATION LOGS ---")
+            while (true) {
+                val log = io.mazewall.enforcer.supervisor.ValidationLog.logs.poll() ?: break
+                System.err.print(log)
+            }
+            System.err.println("-----------------------")
         }
     }
  
@@ -145,6 +151,8 @@ class SupervisorProxyIntegrationTest : BaseIntegrationTest() {
                     releaseFile.readText()
                     true
                 } catch (e: Exception) {
+                    System.err.println("Fast-path read failed:")
+                    e.printStackTrace()
                     false
                 }
             }.get()
@@ -152,6 +160,12 @@ class SupervisorProxyIntegrationTest : BaseIntegrationTest() {
             assertTrue(result, "Reading JDK home files must succeed via daemon fast-path bypass")
         } finally {
             rawExecutor.shutdown()
+            System.err.println("--- VALIDATION LOGS ---")
+            while (true) {
+                val log = io.mazewall.enforcer.supervisor.ValidationLog.logs.poll() ?: break
+                System.err.print(log)
+            }
+            System.err.println("-----------------------")
         }
     }
 

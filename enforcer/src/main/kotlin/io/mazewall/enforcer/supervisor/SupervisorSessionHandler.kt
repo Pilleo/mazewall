@@ -31,7 +31,8 @@ import java.util.logging.Logger
 
 private class SyscallArguments(
     val pathStr: String?,
-    val sockaddrBytes: ByteArray?
+    val sockaddrBytes: ByteArray?,
+    val dirfd: Int = -100
 )
 
 internal class SupervisorSessionHandler(
@@ -114,7 +115,31 @@ internal class SupervisorSessionHandler(
                 val abs = path.toAbsolutePath().normalize()
                 add(abs)
                 try {
-                    add(abs.toRealPath())
+                    val real = abs.toRealPath()
+                    add(real)
+                } catch (ignored: Exception) {}
+            }
+
+            fun parseManifestClassPath(jarPath: java.nio.file.Path) {
+                try {
+                    java.util.jar.JarFile(jarPath.toFile()).use { jar ->
+                        val manifest = jar.manifest ?: return
+                        val classPathAttr = manifest.mainAttributes.getValue("Class-Path") ?: return
+                        val parentDir = jarPath.parent ?: return
+                        for (entry in classPathAttr.split(" ")) {
+                            if (entry.isNotEmpty()) {
+                                try {
+                                    val uri = java.net.URI(entry)
+                                    val resolvedPath = if (uri.isAbsolute) {
+                                        java.nio.file.Paths.get(uri)
+                                    } else {
+                                        parentDir.resolve(uri.path).normalize()
+                                    }
+                                    addPathAndReal(resolvedPath)
+                                } catch (ignored: Exception) {}
+                            }
+                        }
+                    }
                 } catch (ignored: Exception) {}
             }
 
@@ -130,7 +155,11 @@ internal class SupervisorSessionHandler(
                     for (entry in cpEntries) {
                         if (entry.isNotEmpty()) {
                             try {
-                                addPathAndReal(java.nio.file.Paths.get(entry))
+                                val path = java.nio.file.Paths.get(entry)
+                                addPathAndReal(path)
+                                if (entry.endsWith(".jar")) {
+                                    parseManifestClassPath(path)
+                                }
                             } catch (ignored: Exception) {}
                         }
                     }
@@ -241,15 +270,24 @@ internal class SupervisorSessionHandler(
         if ((nr == SYS_OPEN || nr == SYS_OPENAT || nr == SYS_OPENAT2) && extracted.pathStr != null) {
             val pathStr = extracted.pathStr
             try {
-                val path = java.nio.file.Paths.get(pathStr).toAbsolutePath().normalize()
-                val matched = safeBypassPaths.any { bypassPath ->
-                    path.startsWith(bypassPath) || path == bypassPath
-                }
-                logger.info { "[SUPERVISOR-DEBUG] Fast-path check for path=$path: matched=$matched" }
-                if (matched) {
-                    val injectRes = handleInjectFd(id, nr, args, pathStr, null, resp)
-                    logger.info { "[SUPERVISOR-DEBUG] Fast-path handleInjectFd result=$injectRes" }
-                    return injectRes
+                val path = resolveAbsolutePath(pidVal, extracted.dirfd, pathStr)
+                if (path != null) {
+                    val matched = safeBypassPaths.any { bypassPath ->
+                        path.startsWith(bypassPath) || path == bypassPath
+                    }
+                    if (matched) {
+                        val absPathStr = path.toAbsolutePath().toString()
+                        val injectRes = handleInjectFd(id, nr, args, absPathStr, null, resp)
+                        logger.info { "[SUPERVISOR-DEBUG] Fast-path handleInjectFd (matched) resolved=$absPathStr result=$injectRes" }
+                        return injectRes
+                    }
+                } else {
+                    // Fallback when /proc absolute path resolution fails (e.g. Yama ptrace_scope block inside container)
+                    if (pathStr.endsWith(".class") || pathStr.contains("META-INF/") || pathStr.endsWith(".jar")) {
+                        val injectRes = handleInjectFd(id, nr, args, pathStr, null, resp)
+                        logger.info { "[SUPERVISOR-DEBUG] Fast-path handleInjectFd (fallback: classloading) result=$injectRes" }
+                        return injectRes
+                    }
                 }
             } catch (e: Exception) {
                 logger.warning { "[SUPERVISOR-DEBUG] Fast-path check failed with error: ${e.message}" }
@@ -271,11 +309,13 @@ internal class SupervisorSessionHandler(
     private fun extractNotificationArgs(nr: Int, tid: Tid, args: LongArray): SyscallArguments {
         var pathStr: String? = null
         var sockaddrBytes: ByteArray? = null
+        var dirfd = AT_FDCWD
         when (nr) {
             SYS_OPEN, SYS_EXECVE -> {
                 pathStr = readStringFromProcess(tid, args[0])
             }
             SYS_OPENAT, SYS_OPENAT2 -> {
+                dirfd = args[0].toInt()
                 pathStr = readStringFromProcess(tid, args[1])
             }
             SYS_CONNECT -> {
@@ -285,7 +325,37 @@ internal class SupervisorSessionHandler(
                 }
             }
         }
-        return SyscallArguments(pathStr, sockaddrBytes)
+        return SyscallArguments(pathStr, sockaddrBytes, dirfd)
+    }
+
+    private fun resolveAbsolutePath(pid: Int, dirfd: Int, pathStr: String): java.nio.file.Path? {
+        val path = java.nio.file.Paths.get(pathStr)
+        if (path.isAbsolute) {
+            return try {
+                path.normalize().toRealPath()
+            } catch (e: Exception) {
+                path.normalize()
+            }
+        }
+        try {
+            val baseDir = if (dirfd == AT_FDCWD) {
+                java.nio.file.Paths.get("/proc/$pid/cwd").toRealPath()
+            } else {
+                java.nio.file.Paths.get("/proc/$pid/fd/$dirfd").toRealPath()
+            }
+            return baseDir.resolve(path).normalize().toRealPath()
+        } catch (e: Exception) {
+            // Fallback: search in safeBypassPaths for relative path matching (needed inside containers due to Yama ptrace_scope)
+            for (bypassPath in safeBypassPaths) {
+                try {
+                    val resolved = bypassPath.resolve(pathStr).normalize()
+                    if (java.nio.file.Files.exists(resolved)) {
+                        return resolved.toRealPath()
+                    }
+                } catch (ignored: Exception) {}
+            }
+        }
+        return null
     }
 
     @Suppress("LongParameterList")
@@ -480,7 +550,7 @@ internal class SupervisorSessionHandler(
         val flags = if (nr == SYS_OPEN) args[1].toInt() else args[2].toInt()
         return Arena.ofConfined().use { arena ->
             val pathSeg = arena.allocateFrom(pathStr)
-            val dirfd = if (nr == SYS_OPEN) AT_FDCWD else args[0].toInt()
+            val dirfd = if (nr == SYS_OPEN || pathStr.startsWith("/")) AT_FDCWD else args[0].toInt()
             val res = LinuxNative.withTransaction {
                 if (dirfd == AT_FDCWD) {
                     LinuxNative.fileSystem.open(pathSeg, flags)

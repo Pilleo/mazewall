@@ -599,6 +599,12 @@ class "SupervisorSocketInputStream" as io.mazewall.enforcer.supervisor.Superviso
 class "SyscallArguments" as io.mazewall.enforcer.supervisor.SyscallArguments {
   +String getPathStr()
   +byte[] getSockaddrBytes()
+  +int getDirfd()
+}
+class "ValidationLog" as io.mazewall.enforcer.supervisor.ValidationLog {
+  + {static}ValidationLog INSTANCE
+  __
+  +ConcurrentLinkedQueue<String> getLogs()
 }
 class "LayoutValidator" as io.mazewall.ffi.LayoutValidator {
   + {static}LayoutValidator INSTANCE
@@ -1105,6 +1111,7 @@ io.mazewall.enforcer.supervisor.SupervisorInstaller --> io.mazewall.enforcer.sup
 io.mazewall.enforcer.supervisor.SupervisorInstaller --> io.mazewall.core.Tid
 io.mazewall.enforcer.supervisor.SupervisorSessionHandler --> io.mazewall.core.FileDescriptor
 io.mazewall.enforcer.supervisor.SupervisorSocketInputStream --> io.mazewall.core.FileDescriptor
+io.mazewall.enforcer.supervisor.ValidationLog --> io.mazewall.enforcer.supervisor.ValidationLog
 io.mazewall.ffi.LayoutValidator --> io.mazewall.ffi.LayoutValidator
 io.mazewall.ffi.memory.ConfinedSegment .u.|> io.mazewall.ffi.memory.ManagedSegment
 io.mazewall.ffi.memory.SharedSegment .u.|> io.mazewall.ffi.memory.ManagedSegment

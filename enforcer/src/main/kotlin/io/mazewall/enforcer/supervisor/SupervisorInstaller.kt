@@ -152,6 +152,14 @@ internal class JVMValidationListener(
                 val isAllowed = when (validationState) {
                     is ScopingValidationState.SafeToValidate -> {
                         val stackTrace = validationState.rawStack.toList()
+                        val sb = StringBuilder()
+                        sb.append("Validation stack for nr=${validationState.nr}, targetThread=$targetThread:\n")
+                        if (stackTrace.isEmpty()) {
+                            sb.append("  (empty stack trace)\n")
+                        } else {
+                            stackTrace.forEach { sb.append("  $it\n") }
+                        }
+                        ValidationLog.logs.add(sb.toString())
                         val syscall = Syscall.entries.find { it.numberFor(Arch.current()) == validationState.nr } ?: Syscall.OPEN
                         val authStartMs = System.currentTimeMillis()
                         val handler = scopingPolicy.handlers[syscall]
@@ -226,4 +234,8 @@ internal class JVMValidationListener(
             LinuxNative.memory.write(socketFd, resp.segment, Layouts.SUPERVISOR_RESPONSE_SIZE)
         }
     }
+}
+
+public object ValidationLog {
+    public val logs: java.util.concurrent.ConcurrentLinkedQueue<String> = java.util.concurrent.ConcurrentLinkedQueue<String>()
 }

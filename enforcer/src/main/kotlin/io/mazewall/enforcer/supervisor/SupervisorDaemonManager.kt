@@ -113,16 +113,27 @@ internal object SupervisorDaemonManager {
         val daemonProcess = pb.start()
         val daemonPid = daemonProcess.pid()
 
+        LinuxNative.withTransaction {
+            LinuxNative.process.prctl(
+                io.mazewall.core.PrctlCommand.SetPtracer(daemonPid)
+            )
+        }
+
         val readyLatch = java.util.concurrent.CountDownLatch(1)
 
         Thread {
             try {
+                val logFile = java.io.File("/workspace/daemon.log")
+                logFile.writeText("") // Clear previous log
                 val reader = daemonProcess.inputStream.bufferedReader()
                 while (true) {
                     val line = reader.readLine() ?: break
                     if (line.contains(SupervisorDaemon.DAEMON_READY_SENTINEL)) {
                         readyLatch.countDown()
                     }
+                    try {
+                        logFile.appendText("[SUPERVISOR-DAEMON] $line\n")
+                    } catch (ignored: Exception) {}
                     System.err.println("[SUPERVISOR-DAEMON] $line")
                     System.err.flush()
                 }
