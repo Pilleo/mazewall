@@ -1175,3 +1175,38 @@ For full architectural details, see `supervisor_proxy_design.md`.
     ```
     According to Gradle documentation, `whenTaskAdded` executes immediately for every task created, effectively breaking lazy task configuration. This means every task in the project is realized and configured, even if only a single, unrelated task is being executed.
 *   **Recommendation:** Replace `tasks.whenTaskAdded { if (name == "listDeps") { ... } }` with the lazy API equivalent: `tasks.matching { it.name == "listDeps" }.configureEach { ... }`. This preserves Task Configuration Avoidance while still applying the necessary shim for JitPack.
+
+### 🔴 [Severity: MEDIUM]: Unhandled Signal Interruptions (`EINTR`) during Supervisor `process_vm_readv` Socket Message Tracing
+*   **Dimension:** Vulnerability Chaining & Concurrency (The Sandbox View)
+*   **Target Area:** `enforcer/src/main/kotlin/io/mazewall/ffi/memory/SupervisorProcessMemoryReader.kt`
+*   **Failure Hypothesis:** The `process_vm_readv` syscall can be interrupted by a signal, failing with `EINTR`. If this happens, the method incorrectly returns `null` instead of retrying.
+*   **Context & Proof:** In `SupervisorProcessMemoryReader.kt`, `LinuxNative.memory.processVmReadv` is called without any retry logic. If it returns an error and `errno == EINTR`, the function returns `null`. This `null` cascades back to `SupervisorSessionHandler.kt`, where the `handleInjectFd` method (and others) will interpret the `null` path or `null` sockaddr as invalid arguments and wrongly deny the system call with `EPERM`.
+*   **Recommendation:** Wrap the `processVmReadv` call inside a `while (errno == EINTR)` retry loop to ensure that transient signal interruptions do not cause legitimate syscalls to be denied.
+
+### 🔴 [Severity: HIGH]: `poll` EINTR Logic Bug Causes Process Deadlock via Blocking `read`
+*   **Dimension:** Vulnerability Chaining & Concurrency (The Sandbox View)
+*   **Target Area:** `enforcer/src/main/kotlin/io/mazewall/enforcer/supervisor/SupervisorSessionHandler.kt`
+*   **Failure Hypothesis:** If `poll` is interrupted by a signal, it returns a false positive for data readiness, leading to a blocking `read` that will never return if the JVM hasn't sent the data, permanently hanging the supervisor thread and the tracee.
+*   **Context & Proof:** In `readAndHandleJvmResponse`, `poll` is executed to wait for the JVM's validation response. The error recovery logic is: `pollRes.recover { errno, _ -> if (errno == NativeConstants.EINTR) 1L else 0L }`. Since `poll` returning `1L` means `count > 0`, the code incorrectly assumes data is ready and immediately proceeds to `LinuxNative.memory.read(socketFd, ...)`. Because the socket is blocking, if the JVM is actually slow or stalled (and hasn't sent any data yet), the `read` will block indefinitely. This completely bypasses the intended `POLL_TIMEOUT_MS` fail-safe and permanently deadlocks both the `SupervisorDaemon` thread and the JVM tracee waiting for the seccomp response.
+*   **Recommendation:** Fix the `recover` block to correctly identify `EINTR` and loop the `poll` call with a reduced timeout instead of incorrectly returning `1L`. Alternatively, make the socket non-blocking and handle `EAGAIN` gracefully.
+
+### 🔴 [Severity: MEDIUM]: Bitwise Sign-Extension Bug in `sockaddr` Domain Parsing
+*   **Dimension:** FFM ABI & Memory Safety (The Low-Level View)
+*   **Target Area:** `enforcer/src/main/kotlin/io/mazewall/enforcer/supervisor/SupervisorSessionHandler.kt`
+*   **Failure Hypothesis:** When parsing the address family (domain) from `sockaddrBytes`, the code incorrectly performs bitwise operations on signed bytes, resulting in invalid domain integers for families >= 128.
+*   **Context & Proof:** In `connectSocketInSupervisor`, the domain is extracted using: `sockaddrBytes[0].toInt() or (sockaddrBytes[1].toInt() shl 8)`. In Kotlin, `Byte.toInt()` performs sign extension. If the first byte is `0x80` or higher, it will be sign-extended to a negative integer (e.g., `0xFFFFFF80`). This corrupted integer is then passed to `LinuxNative.networking.socket(domain, 1, 0)`, which will fail with `EINVAL` (Invalid argument) because the kernel does not recognize negative domains, preventing connections to legitimate address families that map to values >= 128 (e.g., custom local AF values or specific vendor AF implementations).
+*   **Recommendation:** Use bitwise AND to mask out the sign extension: `(sockaddrBytes[0].toInt() and 0xFF) or ((sockaddrBytes[1].toInt() and 0xFF) shl 8)`.
+
+### 🔴 [Severity: LOW]: Potential Buffer Overflow / OutOfBoundsException on Long UNIX Socket Paths
+*   **Dimension:** FFM ABI & Memory Safety (The Low-Level View)
+*   **Target Area:** `enforcer/src/main/kotlin/io/mazewall/ffi/networking/SupervisorSocketUtils.kt`
+*   **Failure Hypothesis:** If `socketPath` exceeds 108 bytes, `setupSockAddrUn` will throw an `IndexOutOfBoundsException` or cause memory corruption when copying path bytes into the `sockaddr_un` FFM struct.
+*   **Context & Proof:** In `SupervisorSocketUtils.setupSockAddrUn`, the length of the string is not bounds-checked before copying into the 108-byte `sun_path` struct layout using `MemorySegment.copy(pathBytes, 0, pathSeg, ValueLayout.JAVA_BYTE, 0L, pathBytes.size)`. If the OS temporary directory path (`System.getProperty("java.io.tmpdir")`) is heavily nested, `Files.createTempDirectory` in `SupervisorDaemonManager` could produce a `socketPath` exceeding 108 bytes. This will cause `MemorySegment.copy` to crash the initialization of the supervisor.
+*   **Recommendation:** Add an explicit bounds check `require(pathBytes.size < 108) { "Socket path too long" }` in `setupSockAddrUn` and consider using the abstract namespace (`\0` prefix) or `openat`-relative binding if paths get too long.
+
+### 🔴 [Severity: CRITICAL]: Untrusted Allocation Size Causes `OutOfMemoryError` and Daemon Crash via `connect()`
+*   **Dimension:** Vulnerability Chaining & Concurrency (The Sandbox View)
+*   **Target Area:** `enforcer/src/main/kotlin/io/mazewall/ffi/memory/SupervisorProcessMemoryReader.kt` and `SupervisorSessionHandler.kt`
+*   **Failure Hypothesis:** A tracee can intentionally crash the supervisor daemon by passing an extremely large `addrlen` argument to the `connect` syscall, triggering a fatal `OutOfMemoryError` that is not caught by standard exception handlers.
+*   **Context & Proof:** In `SupervisorSessionHandler.extractNotificationArgs`, for the `SYS_CONNECT` syscall, `len` is extracted directly from the tracee's untrusted argument: `val len = args[2].toInt()`. This `len` is passed to `SupervisorProcessMemoryReader.readBytesFromProcess`, which immediately executes `arena.allocate(len.toLong())`. If a malicious tracee supplies an artificially large value (e.g., 1GB), the native allocation will fail and throw an `OutOfMemoryError` because the `SupervisorDaemon` is launched with `-Xmx64m`. `processNotification` only catches `Exception`, so the `OutOfMemoryError` (which is a `VirtualMachineError` / `Throwable`) propagates, crashing the daemon thread and leaving the tracee permanently suspended in kernel space.
+*   **Recommendation:** Implement strict bounds checking for `addrlen` in `extractNotificationArgs` (e.g., limit to a reasonable maximum like `1024` bytes for `sockaddr`). Alternatively, ensure that memory reads are chunked or that `Throwable` is caught to safely return `EPERM` without crashing the daemon.
