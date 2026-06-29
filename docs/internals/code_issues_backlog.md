@@ -1164,14 +1164,8 @@ For full architectural details, see `supervisor_proxy_design.md`.
 *   **Context & Proof:** In `.github/workflows/ci.yml`, the command runs `./gradlew dependencyCheckAnalyze --info --no-configuration-cache`. Modern versions of the dependency-check plugin support Gradle's configuration cache. Disabling it forces Gradle to re-evaluate the entire project build script every time this step runs.
 *   **Recommendation:** Upgrade the `dependencyCheck` plugin (if necessary) to a version fully compatible with Gradle's Configuration Cache and remove the `--no-configuration-cache` flag from the CI pipeline. Ensure the task inputs/outputs are correctly defined so the task is cacheable.
 
-### 🔴 [Severity: MEDIUM]: Gradle Configuration Avoidance Breakage via JitPack Shim
+### ✅ [RESOLVED]: Gradle Configuration Avoidance Breakage via JitPack Shim
+*   **Status:** RESOLVED (June 2026)
 *   **Target Area:** `build.gradle.kts`
-*   **Hypothesis:** The use of `tasks.whenTaskAdded` disables Gradle's Task Configuration Avoidance, forcing eager configuration of all tasks during the configuration phase, severely degrading IDE sync and build start times.
-*   **Context & Proof:** In `build.gradle.kts`, lines 52-57 contain:
-    ```kotlin
-    tasks.whenTaskAdded {
-        if (name == "listDeps") { ... }
-    }
-    ```
-    According to Gradle documentation, `whenTaskAdded` executes immediately for every task created, effectively breaking lazy task configuration. This means every task in the project is realized and configured, even if only a single, unrelated task is being executed.
-*   **Recommendation:** Replace `tasks.whenTaskAdded { if (name == "listDeps") { ... } }` with the lazy API equivalent: `tasks.matching { it.name == "listDeps" }.configureEach { ... }`. This preserves Task Configuration Avoidance while still applying the necessary shim for JitPack.
+*   **Context & Proof:** The use of `tasks.whenTaskAdded` disabled Gradle's Task Configuration Avoidance, forcing eager configuration of all tasks during the configuration phase, severely degrading IDE sync and build start times.
+*   **Fix:** Replaced `tasks.whenTaskAdded` with the lazy API equivalent: `tasks.matching { it.name == "listDeps" }.configureEach { ... }`. This preserves Task Configuration Avoidance while still injecting the configurations property for JitPack's `listDeps` task.

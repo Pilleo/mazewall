@@ -50,11 +50,9 @@ allprojects {
 
     // JitPack Shim: Satisfy JitPack's broken 'listDeps' task by injecting
     // the missing 'configurations' property into the task instance.
-    tasks.whenTaskAdded {
-        if (name == "listDeps") {
-            // Using extensions/extra to satisfy Groovy property resolution
-            (this as? ExtensionAware)?.extra?.set("configurations", project.configurations)
-        }
+    tasks.matching { it.name == "listDeps" }.configureEach {
+        // Using extensions/extra to satisfy Groovy property resolution
+        (this as? ExtensionAware)?.extra?.set("configurations", project.configurations)
     }
 
     // Aggressively skip tests on JitPack because the host kernel (4.4)
