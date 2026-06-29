@@ -31,9 +31,12 @@ internal object SupervisorDaemonManager {
     private const val SOCKADDR_UN_SIZE = 110
     private const val LATCH_TIMEOUT_SECONDS = 30L
 
+    val daemonLogLines = java.util.concurrent.ConcurrentLinkedQueue<String>()
+
     fun getOrSpawnSharedDaemon(): SupervisorContext {
         synchronized(daemonLock) {
             val existing = sharedDaemonContext
+            System.err.println("DEBUG: getOrSpawnSharedDaemon - existing = ${existing?.socketPath} (alive=${existing?.daemonProcess?.isAlive})")
             if (existing != null && existing.daemonProcess.isAlive) {
                 LinuxNative.withTransaction {
                     LinuxNative.process.prctl(
@@ -80,6 +83,7 @@ internal object SupervisorDaemonManager {
     }
 
     private fun spawnDaemon(): SupervisorContext {
+        System.err.println("DEBUG: spawnDaemon called!")
         val daemonClassName = SupervisorDaemon::class.java.name
 
         val perms = PosixFilePermissions.fromString("rwx------")
@@ -123,17 +127,26 @@ internal object SupervisorDaemonManager {
 
         Thread {
             try {
-                val logFile = java.io.File("/workspace/daemon.log")
-                logFile.writeText("") // Clear previous log
+                val logFile = java.io.File("/tmp/supervisor_daemon.log")
+                try {
+                    logFile.writeText("") // Clear previous log
+                } catch (e: Exception) {
+                    System.err.println("DEBUG: logFile.writeText failed: ${e.message}")
+                    e.printStackTrace()
+                }
                 val reader = daemonProcess.inputStream.bufferedReader()
                 while (true) {
                     val line = reader.readLine() ?: break
                     if (line.contains(SupervisorDaemon.DAEMON_READY_SENTINEL)) {
                         readyLatch.countDown()
                     }
+                    daemonLogLines.add(line)
                     try {
-                        logFile.appendText("[SUPERVISOR-DAEMON] $line\n")
-                    } catch (ignored: Exception) {}
+                        logFile.appendText("$line\n")
+                    } catch (e: Exception) {
+                        System.err.println("DEBUG: logFile.appendText failed: ${e.message}")
+                        e.printStackTrace()
+                    }
                     System.err.println("[SUPERVISOR-DAEMON] $line")
                     System.err.flush()
                 }

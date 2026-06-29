@@ -568,6 +568,7 @@ class "SupervisorDaemonEngine" as io.mazewall.enforcer.supervisor.SupervisorDaem
 class "SupervisorDaemonManager" as io.mazewall.enforcer.supervisor.SupervisorDaemonManager {
   + {static}SupervisorDaemonManager INSTANCE
   __
+  +ConcurrentLinkedQueue<String> getDaemonLogLines()
   +SupervisorContext getOrSpawnSharedDaemon()
   +void stop()
 }

@@ -29,6 +29,12 @@ object ContainedExecutors {
     private val logger = Logger.getLogger(ContainedExecutors::class.java.name)
     private val processLock = Any()
 
+    init {
+        // Pre-load exception-related classes to avoid NoClassDefFoundError when classloading under active seccomp
+        Class.forName(ContainmentViolationDetector::class.java.name)
+        Class.forName(ContainmentViolationException::class.java.name)
+    }
+
     /**
      * Installs the given policies onto the current thread immediately.
      */
@@ -83,10 +89,11 @@ object ContainedExecutors {
         scopingPolicy: StacktraceScopingPolicy = io.mazewall.enforcer.supervisor.DefaultStacktraceScopingPolicy
     ) : AutoCloseable {
         val augmentedPolicy = if (scopingPolicy.handlers.isNotEmpty()) {
-            PolicyDefinition.combine(
-                policy,
-                PolicyDefinition(syscallActions = scopingPolicy.handlers.keys.associateWith { SeccompAction.ACT_NOTIFY })
-            )
+            val overriddenActions = policy.syscallActions.toMutableMap()
+            for (sys in scopingPolicy.handlers.keys) {
+                overriddenActions[sys] = SeccompAction.ACT_NOTIFY
+            }
+            policy.copy(syscallActions = overriddenActions)
         } else {
             policy
         }

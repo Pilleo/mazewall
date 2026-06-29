@@ -11,6 +11,14 @@ public object SupervisorDaemon {
 
     @JvmStatic
     public fun main(args: Array<String>) {
+        try {
+            val rootLogger = java.util.logging.Logger.getLogger("")
+            rootLogger.level = java.util.logging.Level.ALL
+            for (handler in rootLogger.handlers) {
+                handler.level = java.util.logging.Level.ALL
+            }
+        } catch (ignored: Exception) {}
+
         if (args.isEmpty()) {
             System.err.println("Usage: SupervisorDaemon <socket_path>")
             exitProcess(1)

@@ -118,6 +118,19 @@ class SupervisorProxyIntegrationTest : BaseIntegrationTest() {
                 System.err.print(log)
             }
             System.err.println("-----------------------")
+            System.err.println("--- DAEMON LOGS ---")
+            System.err.println("DEBUG: SupervisorDaemonManager classLoader: ${io.mazewall.enforcer.supervisor.SupervisorDaemonManager::class.java.classLoader}")
+            try {
+                val logFile = java.io.File("/tmp/supervisor_daemon.log")
+                if (logFile.exists()) {
+                    System.err.println(logFile.readText())
+                } else {
+                    System.err.println("Daemon log file does not exist")
+                }
+            } catch (e: Exception) {
+                System.err.println("Failed to read daemon log file: ${e.message}")
+            }
+            System.err.println("-------------------")
         }
     }
  
@@ -166,6 +179,19 @@ class SupervisorProxyIntegrationTest : BaseIntegrationTest() {
                 System.err.print(log)
             }
             System.err.println("-----------------------")
+            System.err.println("--- DAEMON LOGS ---")
+            System.err.println("DEBUG: SupervisorDaemonManager classLoader: ${io.mazewall.enforcer.supervisor.SupervisorDaemonManager::class.java.classLoader}")
+            try {
+                val logFile = java.io.File("/tmp/supervisor_daemon.log")
+                if (logFile.exists()) {
+                    System.err.println(logFile.readText())
+                } else {
+                    System.err.println("Daemon log file does not exist")
+                }
+            } catch (e: Exception) {
+                System.err.println("Failed to read daemon log file: ${e.message}")
+            }
+            System.err.println("-------------------")
         }
     }
 
