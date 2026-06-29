@@ -304,7 +304,7 @@ Without the bidirectional ACK, how does the JVM signal the daemon to shut down? 
 ### 🔵 [Severity: ENHANCEMENT]: Phantom Types for Context-Aware Capability Tokens
 **Target:** `io.mazewall.NativeTransaction` and `io.mazewall.LinuxNative`
 **Context:** Currently, `NativeTransaction` acts as a blanket capability token, allowing any transaction to perform any native operation (read-only or read-write). This means an auditing or profiling phase can accidentally invoke a mutating system call (like `prctl` or `socket`) when it only intended to read memory.
-**Needed:** Implement context-sensitive capability tokens using **Phantom Types**. 
+**Needed:** Implement context-sensitive capability tokens using **Phantom Types**.
 1. Define marker interfaces `ReadOnly` and `ReadWrite`.
 2. Refactor `NativeTransaction` to `NativeTransaction<Mode>`.
 3. Update `NativeEngine` methods to demand specific modes via context receivers, e.g., `context(_: NativeTransaction<out ReadOnly>)` for `processVmReadv` and `context(_: NativeTransaction<ReadWrite>)` for `prctl`. This ensures at compile-time that restricted scopes cannot perform mutating operations.
@@ -324,7 +324,7 @@ This ensures jump targets are validated at compile time and guarantees no dangli
 **Failure Hypothesis:** A developer wraps an `ExecutorService` using `ContainedExecutors.wrap(delegate, Policy.NO_NETWORK)` to safely process an untrusted document. The untrusted parsing logic calls standard Java APIs like `CompletableFuture.runAsync { ... }` or `Thread.startVirtualThread { ... }`. Because these APIs delegate execution to the JVM's pre-existing `ForkJoinPool.commonPool()` (whose OS carrier threads were spawned at JVM startup and lack the seccomp filter), the delegated task executes entirely unconstrained.
 **Context & Proof:** Seccomp and Landlock filters are strictly inherited via the Linux `clone` syscall. While `mazewall` correctly notes that Arbitrary Code Execution (ACE) can poison sibling threads, it fails to account for the fact that standard, safe Java APIs bypass thread-scoped containment by design. An attacker does not need memory corruption (ACE) or native access; they only need to submit a closure to a standard thread pool. Any network request or file access within that closure will succeed, instantly neutralizing the Tier 2 containment.
 **Vulnerability Chain Potential:** Critical. Completely invalidates the security boundary of Tier 2 `wrap()` for any workload that isn't strictly synchronous and single-threaded. Malicious libraries can easily initiate SSRF or read files by simply hopping threads.
-**Needed:** 
+**Needed:**
 1. Document this fundamental architectural bypass clearly in `SECURITY_CONSIDERATIONS.md` alongside the ACE pivot. Emphasize that Tier 2 containment only restricts synchronous execution on the current thread.
 
 ### ✅ [RESOLVED] [Severity: HIGH]: Tier S Profiler is blind to background threads (No TSYNC/Inheritance)
@@ -355,15 +355,15 @@ This is critical for generating a production-grade JVM Syscall Floor that accoun
 **Failure Hypothesis:** A system administrator configures Linux with Yama `kernel.yama.ptrace_scope = 2` (admin-only attach). When the `mazewall` Profiler daemon attempts to read path arguments using `process_vm_readv` on the JVM threads, the kernel denies the read with `EPERM` (1).
 **Context & Proof:** The daemon catches this `EPERM`, logs a warning to `System.err`, and gracefully returns `null` for the read string. The event is then passed to `getPathArgs()`, which receives `null` and yields an empty list of paths (`emptyList()`). The `TraceEvent` is sent to the JVM without any path context. When `BobCompiler` consumes these events, it generates an empty set for `opens` and `fsWritePaths`.
 **Vulnerability Chain Potential:** High usability / stability failure. Because the profiler fails gracefully instead of crashing, it produces a "valid" `BillOfBehavior` JSON containing `[]` for paths. When this SBoB is deployed to production via `SbobParser.parseToPolicy`, it generates a `Policy` that permits zero paths. The JVM wrapper then applies Landlock with an empty ruleset, instantly revoking all filesystem access and causing a catastrophic production crash across the application.
-**Needed:** 
+**Needed:**
 The profiler must explicitly FAIL (or throw an exception back to the JVM) if it encounters `EPERM` during path resolution. At the very least, it should inject a specific sentinel path like `"<YAMA_ERROR_UNKNOWN_PATH>"` so `BobCompiler` knows the trace was corrupted and can refuse to compile an empty SBoB, preventing invalid policies from being shipped.
 
 ### 🔴 [Severity: MEDIUM]: `SbobParser` lacks Context-Aware Working Directory resolution for Relative Paths
 **Target:** `io.mazewall.SbobParser`
 **Failure Hypothesis:** The `Profiler` runs in a staging environment where the JVM's Current Working Directory (CWD) is `/var/lib/staging`. An application accesses a file using a relative path, e.g., `config/settings.json`. The Profiler `tryRead` fails to resolve `dirfd` and falls back to logging the relative path `config/settings.json` into the `BillOfBehavior`. In production, the JVM's CWD is `/opt/app`. When `SbobParser` reads the SBoB, it calls `Paths.get("config/settings.json").toAbsolutePath().normalize()`, which resolves to `/opt/app/config/settings.json`.
-**Context & Proof:** Landlock requires absolute paths. `SbobParser`'s `pruneSubpaths` method silently converts relative paths using the production JVM's CWD at the time of parsing. If the application actually intends to access a global relative path, or the profiler's CWD differs from the production CWD, the generated policy will allow the wrong absolute path. 
+**Context & Proof:** Landlock requires absolute paths. `SbobParser`'s `pruneSubpaths` method silently converts relative paths using the production JVM's CWD at the time of parsing. If the application actually intends to access a global relative path, or the profiler's CWD differs from the production CWD, the generated policy will allow the wrong absolute path.
 **Vulnerability Chain Potential:** Medium usability and sandbox evasion failure. If a relative path is unintentionally permitted, and the production CWD is `/`, the policy might inadvertently allow access to `/config/settings.json`. This breaks deterministic policy portability across environments.
-**Needed:** 
+**Needed:**
 1. `SbobParser` should warn or throw an error when attempting to parse a relative path, or it should accept an explicit `baseCwd` parameter to resolve relative paths deterministically rather than relying on the environmental JVM CWD at load time.
 2. The Profiler should ensure all paths are fully resolved to absolute canonical paths *before* writing them to the SBoB, failing the profiler session if a `dirfd` cannot be resolved to an absolute path.
 
@@ -407,7 +407,7 @@ When the daemon notifies the listener that a child thread with TID `pid` made a 
 **Status:** RESOLVED (June 2026)
 **Target:** `io.mazewall.profiler.engine.ProfilerMemoryReader` (specifically `resolveLink`) and `io.mazewall.landlock.Landlock.kt` (specifically `handleInitialOpenFailure`)
 **Context & Proof:** If an application opens a file (e.g. `/var/log/app/tmp_file`) and unlinks it immediately, reading the `/proc/$pid/fd/$fd` symlink returns `/var/log/app/tmp_file (deleted)`. Landlock's fallback mechanism previously opened the parent directory, exposing the entire directory to the sandbox.
-**Fix:** 
+**Fix:**
 1. Stripped any trailing `" (deleted)"` suffix from resolved symlink paths in `ProfilerMemoryReader.resolveLink`.
 2. Modified `Landlock.handleInitialOpenFailure` to return `res to false` immediately without falling back to the parent directory if the path ends with `" (deleted)"`.
 3. Verified via unit and integration tests.
@@ -422,7 +422,7 @@ When the daemon notifies the listener that a child thread with TID `pid` made a 
 **Status:** RESOLVED (June 2026)
 **Target:** `io.mazewall.profiler.iterative.IterativeProfiler` (specifically `extractViolationPath` and `resolveAbsolutePath`)
 **Context & Proof:** When a profiled workload accessed a file using a relative path, the extracted path was passed raw to the builder, violating the absolute path requirement and crashing the profiling loop. Furthermore, `resolveAbsolutePath` explicitly returned `null` for relative paths in exception messages, ignoring them completely.
-**Fix:** 
+**Fix:**
 1. Updated `extractViolationPath` to always resolve and normalize paths to absolute form (`java.nio.file.Paths.get(it).toAbsolutePath().normalize().toString()`).
 2. Modified `resolveAbsolutePath` to allow returning relative paths so they can be processed and canonicalized properly.
 3. Verified via unit and build verification tests.
@@ -477,7 +477,7 @@ When the daemon notifies the listener that a child thread with TID `pid` made a 
 **Status:** RESOLVED (June 2026)
 **Target:** `io.mazewall.landlock.Landlock` (specifically `validateAbiSupport`) and `io.mazewall.PolicyPresets` (specifically `PURE_COMPUTE`)
 **Context & Proof:** The `Policy.PURE_COMPUTE` preset previously did not block `Syscall.IOCTL`. Running `PURE_COMPUTE` on a system with Landlock ABI < 5 (Linux < 6.10) caused `validateAbiSupport` to throw a fatal `UnsupportedOperationException` unconditionally.
-**Fix:** 
+**Fix:**
 1. Updated `validateAbiSupport` to query and respect `Platform.configuredFallback()` before throwing an `UnsupportedOperationException`.
 2. Explicitly blocked `Syscall.IOCTL` in the `PURE_COMPUTE` preset definition to ensure clean initialization and robust containment on older Linux kernels by default.
 3. Verified via unit and build verification tests.
@@ -1169,3 +1169,72 @@ For full architectural details, see `supervisor_proxy_design.md`.
 *   **Target Area:** `build.gradle.kts`
 *   **Context & Proof:** The use of `tasks.whenTaskAdded` disabled Gradle's Task Configuration Avoidance, forcing eager configuration of all tasks during the configuration phase, severely degrading IDE sync and build start times.
 *   **Fix:** Replaced `tasks.whenTaskAdded` with the lazy API equivalent: `tasks.matching { it.name == "listDeps" }.configureEach { ... }`. This preserves Task Configuration Avoidance while still injecting the configurations property for JitPack's `listDeps` task.
+
+### 🔴 [Severity: MEDIUM]: Unhandled Signal Interruptions (`EINTR`) during Supervisor `process_vm_readv` Socket Message Tracing
+*   **Dimension:** Vulnerability Chaining & Concurrency (The Sandbox View)
+*   **Target Area:** `enforcer/src/main/kotlin/io/mazewall/ffi/memory/SupervisorProcessMemoryReader.kt`
+*   **Failure Hypothesis:** The `process_vm_readv` syscall can be interrupted by a signal, failing with `EINTR`. If this happens, the method incorrectly returns `null` instead of retrying.
+*   **Context & Proof:** In `SupervisorProcessMemoryReader.kt`, `LinuxNative.memory.processVmReadv` is called without any retry logic. If it returns an error and `errno == EINTR`, the function returns `null`. This `null` cascades back to `SupervisorSessionHandler.kt`, where the `handleInjectFd` method (and others) will interpret the `null` path or `null` sockaddr as invalid arguments and wrongly deny the system call with `EPERM`.
+*   **Recommendation:** Wrap the `processVmReadv` call inside a `while (errno == EINTR)` retry loop to ensure that transient signal interruptions do not cause legitimate syscalls to be denied.
+
+### 🔴 [Severity: HIGH]: `poll` EINTR Logic Bug Causes Process Deadlock via Blocking `read`
+*   **Dimension:** Vulnerability Chaining & Concurrency (The Sandbox View)
+*   **Target Area:** `enforcer/src/main/kotlin/io/mazewall/enforcer/supervisor/SupervisorSessionHandler.kt`
+*   **Failure Hypothesis:** If `poll` is interrupted by a signal, it returns a false positive for data readiness, leading to a blocking `read` that will never return if the JVM hasn't sent the data, permanently hanging the supervisor thread and the tracee.
+*   **Context & Proof:** In `readAndHandleJvmResponse`, `poll` is executed to wait for the JVM's validation response. The error recovery logic is: `pollRes.recover { errno, _ -> if (errno == NativeConstants.EINTR) 1L else 0L }`. Since `poll` returning `1L` means `count > 0`, the code incorrectly assumes data is ready and immediately proceeds to `LinuxNative.memory.read(socketFd, ...)`. Because the socket is blocking, if the JVM is actually slow or stalled (and hasn't sent any data yet), the `read` will block indefinitely. This completely bypasses the intended `POLL_TIMEOUT_MS` fail-safe and permanently deadlocks both the `SupervisorDaemon` thread and the JVM tracee waiting for the seccomp response.
+*   **Recommendation:** Fix the `recover` block to correctly identify `EINTR` and loop the `poll` call with a reduced timeout instead of incorrectly returning `1L`. Alternatively, make the socket non-blocking and handle `EAGAIN` gracefully.
+
+### 🔴 [Severity: MEDIUM]: Bitwise Sign-Extension Bug in `sockaddr` Domain Parsing
+*   **Dimension:** FFM ABI & Memory Safety (The Low-Level View)
+*   **Target Area:** `enforcer/src/main/kotlin/io/mazewall/enforcer/supervisor/SupervisorSessionHandler.kt`
+*   **Failure Hypothesis:** When parsing the address family (domain) from `sockaddrBytes`, the code incorrectly performs bitwise operations on signed bytes, resulting in invalid domain integers for families >= 128.
+*   **Context & Proof:** In `connectSocketInSupervisor`, the domain is extracted using: `sockaddrBytes[0].toInt() or (sockaddrBytes[1].toInt() shl 8)`. In Kotlin, `Byte.toInt()` performs sign extension. If the first byte is `0x80` or higher, it will be sign-extended to a negative integer (e.g., `0xFFFFFF80`). This corrupted integer is then passed to `LinuxNative.networking.socket(domain, 1, 0)`, which will fail with `EINVAL` (Invalid argument) because the kernel does not recognize negative domains, preventing connections to legitimate address families that map to values >= 128 (e.g., custom local AF values or specific vendor AF implementations).
+*   **Recommendation:** Use bitwise AND to mask out the sign extension: `(sockaddrBytes[0].toInt() and 0xFF) or ((sockaddrBytes[1].toInt() and 0xFF) shl 8)`.
+
+### 🔴 [Severity: LOW]: Potential Buffer Overflow / OutOfBoundsException on Long UNIX Socket Paths
+*   **Dimension:** FFM ABI & Memory Safety (The Low-Level View)
+*   **Target Area:** `enforcer/src/main/kotlin/io/mazewall/ffi/networking/SupervisorSocketUtils.kt`
+*   **Failure Hypothesis:** If `socketPath` exceeds 108 bytes, `setupSockAddrUn` will throw an `IndexOutOfBoundsException` or cause memory corruption when copying path bytes into the `sockaddr_un` FFM struct.
+*   **Context & Proof:** In `SupervisorSocketUtils.setupSockAddrUn`, the length of the string is not bounds-checked before copying into the 108-byte `sun_path` struct layout using `MemorySegment.copy(pathBytes, 0, pathSeg, ValueLayout.JAVA_BYTE, 0L, pathBytes.size)`. If the OS temporary directory path (`System.getProperty("java.io.tmpdir")`) is heavily nested, `Files.createTempDirectory` in `SupervisorDaemonManager` could produce a `socketPath` exceeding 108 bytes. This will cause `MemorySegment.copy` to crash the initialization of the supervisor.
+*   **Recommendation:** Add an explicit bounds check `require(pathBytes.size < 108) { "Socket path too long" }` in `setupSockAddrUn` and consider using the abstract namespace (`\0` prefix) or `openat`-relative binding if paths get too long.
+
+### 🔴 [Severity: CRITICAL]: Untrusted Allocation Size Causes `OutOfMemoryError` and Daemon Crash via `connect()`
+*   **Dimension:** Vulnerability Chaining & Concurrency (The Sandbox View)
+*   **Target Area:** `enforcer/src/main/kotlin/io/mazewall/ffi/memory/SupervisorProcessMemoryReader.kt` and `SupervisorSessionHandler.kt`
+*   **Failure Hypothesis:** A tracee can intentionally crash the supervisor daemon by passing an extremely large `addrlen` argument to the `connect` syscall, triggering a fatal `OutOfMemoryError` that is not caught by standard exception handlers.
+*   **Context & Proof:** In `SupervisorSessionHandler.extractNotificationArgs`, for the `SYS_CONNECT` syscall, `len` is extracted directly from the tracee's untrusted argument: `val len = args[2].toInt()`. This `len` is passed to `SupervisorProcessMemoryReader.readBytesFromProcess`, which immediately executes `arena.allocate(len.toLong())`. If a malicious tracee supplies an artificially large value (e.g., 1GB), the native allocation will fail and throw an `OutOfMemoryError` because the `SupervisorDaemon` is launched with `-Xmx64m`. `processNotification` only catches `Exception`, so the `OutOfMemoryError` (which is a `VirtualMachineError` / `Throwable`) propagates, crashing the daemon thread and leaving the tracee permanently suspended in kernel space.
+*   **Recommendation:** Implement strict bounds checking for `addrlen` in `extractNotificationArgs` (e.g., limit to a reasonable maximum like `1024` bytes for `sockaddr`). Alternatively, ensure that memory reads are chunked or that `Throwable` is caught to safely return `EPERM` without crashing the daemon.
+### 🔴 [Severity: HIGH]: Incomplete EINTR Handling in process_vm_readv and Other Syscalls
+*   **Target Area:** `enforcer/src/main/kotlin/io/mazewall/ffi/memory/SupervisorProcessMemoryReader.kt` and other syscalls
+*   **Hypothesis:** Various system calls, notably `process_vm_readv` in `SupervisorProcessMemoryReader`, do not wrap their execution in a retry loop to handle `EINTR` (interruption by a signal).
+*   **Context & Proof:** The `process_vm_readv` call in `SupervisorProcessMemoryReader.readBytes` and `SupervisorProcessMemoryReader.readString` does not check if the `errno` is `EINTR`. If a signal is received during the call, it will return an error, which the current implementation treats as a failure and returns `null`. This can lead to unexpected failures in reading from the tracee's memory, potentially causing legitimate syscalls to be denied or causing errors downstream. The same issue exists in `poll` as mentioned in the backlog, and potentially others.
+*   **Recommendation:** Wrap `process_vm_readv` and other interruptible syscalls in a `while (res is LinuxNative.SyscallResult.Error && res.errno == NativeConstants.EINTR)` loop. Review all blocking or interruptible syscalls for proper `EINTR` handling.
+### 🔴 [Severity: LOW]: Memory Alignment verification for `Layouts.kt` FFM Structures
+*   **Target Area:** `enforcer/src/main/kotlin/io/mazewall/ffi/Layouts.kt`
+*   **Hypothesis:** `Layouts.kt` manually specifies C struct memory layouts using `java.lang.foreign.MemoryLayout`. Does it perfectly match the Linux C ABI on x86_64?
+*   **Context & Proof:** We wrote a C program and a Java program to verify `sizeof` and `offsetof` for `msghdr`, `cmsghdr`, `seccomp_data`, `seccomp_notif`, `seccomp_notif_resp`, and `seccomp_notif_addfd`. The sizes and offsets in Java exactly matched the sizes and offsets in C. No issues found in standard FFM layout alignment for x86_64.
+*   **Recommendation:** Continue to verify cross-compilation/aarch64 alignments if applicable, but x86_64 layouts are verified correct.
+### 🔴 [Severity: LOW]: Memory Segment Scopes and Lifetimes
+*   **Target Area:** `enforcer/src/main/kotlin/io/mazewall/enforcer/supervisor/SupervisorSessionHandler.kt`
+*   **Hypothesis:** `Arena.ofConfined().use { ... }` scopes are heavily utilized. Are there any `MemorySegment` objects escaping their confinement scope?
+*   **Context & Proof:** We examined `readAndHandleJvmResponse`, `sendRequestToJvm`, `handleInjectFd`, `openFileInSupervisor` and `connectSocketInSupervisor`. In all instances, the variables derived from `arena.allocate` do not escape the `use { ... }` closure, and primitive values (Int/Boolean) or system calls are properly extracted. No memory leaks or double frees via FFM were observed in these functions.
+*   **Recommendation:** FFM scoping here looks solid.
+### 🔴 [Severity: HIGH]: TOCTOU Vulnerability in Supervisor Syscall Emulation via `process_vm_readv`
+*   **Dimension:** Vulnerability Chaining & Concurrency (The Sandbox View)
+*   **Target Area:** `enforcer/src/main/kotlin/io/mazewall/enforcer/supervisor/SupervisorSessionHandler.kt`
+*   **Failure Hypothesis:** A Time-of-Check to Time-of-Use (TOCTOU) vulnerability exists when the supervisor handles `USER_NOTIF` events because it reads memory from the tracee's address space (`process_vm_readv`), validates it, and then uses that previously-read value to emulate the syscall on behalf of the tracee.
+*   **Context & Proof:** In `SupervisorSessionHandler.kt`, `extractNotificationArgs` calls `readStringFromProcess` which uses `process_vm_readv` to read a file path from the tracee's memory space. This `pathStr` string is then validated against policies (e.g., the daemon-side fast-path bypass `safeBypassPaths` or via `sendRequestToJvm`). Finally, if allowed, `handleInjectFd` calls `openFileInSupervisor` using the *extracted* `pathStr` (which is a safe, copy-by-value String on the daemon side), bypassing the kernel's normal open mechanisms and directly providing an FD to the tracee via `SECCOMP_IOCTL_NOTIF_ADDFD`. Wait, this specific implementation mitigates the traditional TOCTOU! Because the daemon opens the exact string it validated, it does *not* tell the kernel to "continue" and let the kernel re-read the pointer. The daemon itself opens the file and injects the FD.
+However, a TOCTOU *does* exist if `SECCOMP_USER_NOTIF_FLAG_CONTINUE` is ever used for paths containing pointers. If the daemon reads a path, validates it, and then sends `CONTINUE`, a sibling thread could have rewritten the string in memory between the `readStringFromProcess` and the `CONTINUE` ioctl. Checking `readAndHandleJvmResponse`, it appears that for `decision == 1` (Allow Continue), it uses `sendSeccompContinue` which indeed sends `SECCOMP_USER_NOTIF_FLAG_CONTINUE`.
+If a policy "allows" an `openat` via `decision == 1`, the kernel will execute the syscall, re-dereferencing the pointer in the tracee's memory space. A malicious sibling thread could overwrite the path string after the supervisor validated it but before the kernel actually executes `openat`.
+*   **Recommendation:** For any system call that depends on pointer dereferencing (like `open`, `openat`, `execve`), the supervisor MUST NOT use `SECCOMP_USER_NOTIF_FLAG_CONTINUE` to allow the call if it made a security decision based on the memory contents. It MUST emulate the system call (e.g., via `SECCOMP_IOCTL_NOTIF_ADDFD` or modifying the tracee's registers if supported) using the *exact copied memory* it validated. Currently, `decision == 1` is dangerous for pointer-based syscalls.
+### 🔴 [Severity: LOW]: Silent Fallback by default behavior evaluation
+*   **Target Area:** `enforcer/src/main/kotlin/io/mazewall/Platform.kt` and usages of `Platform.configuredFallback()`
+*   **Hypothesis:** If Landlock or Seccomp is missing, does the system securely fail, or does it bypass containment silently by default?
+*   **Context & Proof:** `Platform.configuredFallback()` checks `io.mazewall.fallback` properties and defaults to `Platform.FallbackBehavior.FAIL` if not set. `ContainedExecutors.kt` and `Landlock.kt` correctly call this method and throw an `UnsupportedOperationException` if `FAIL` is the configured behavior.
+*   **Recommendation:** The fallback behavior is secure by default (fail-closed) and correctly implemented.
+### 🔴 [Severity: MEDIUM]: Architectural Violation - FFM Leaking Outside `io.mazewall.ffi`
+*   **Dimension:** Architectural Patterns Compliance (The Integrity View)
+*   **Target Area:** Multiple modules, e.g. `LinuxNative.kt`, `Landlock.kt`, `SupervisorSessionHandler.kt`, `SupervisorDaemonManager.kt`, `SeccompInstallationState.kt`, etc.
+*   **Hypothesis:** `docs/internals/architectural_map.md` strictly dictates that "all raw memory/FFM/Unsafe manipulations isolated to `io.mazewall.ffi`".
+*   **Context & Proof:** `grep -rn "java.lang.foreign" enforcer/src/main/kotlin/io/mazewall/ | grep -v "/ffi/"` reveals extensive usage of `java.lang.foreign.MemorySegment`, `Arena`, and `ValueLayout` in high-level classes like `Landlock.kt`, `SupervisorSessionHandler.kt`, and `LinuxNative.kt`. This completely violates the ArchUnit architectural constraint.
+*   **Recommendation:** Move all direct FFM memory allocations (`Arena.ofConfined().use { ... }`) and native struct manipulations into dedicated wrapper classes inside `io.mazewall.ffi`. The outer layers (`enforcer`, `landlock`, etc.) should only interact with safe Kotlin types (ByteArrays, Strings, domain objects).
