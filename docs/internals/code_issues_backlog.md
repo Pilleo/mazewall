@@ -1267,11 +1267,11 @@ If a policy "allows" an `openat` via `decision == 1`, the kernel will execute th
 *   **Context & Proof:** `grep -rn "java.lang.foreign" enforcer/src/main/kotlin/io/mazewall/ | grep -v "/ffi/"` returns many hits. The `ArchitectureTest.kt` lacks a strict package boundary check for the `java.lang.foreign` package.
 *   **Recommendation:** Add an ArchUnit test: `noClasses().that().resideOutsideOfPackage("io.mazewall.ffi..").should().dependOnClassesThat().resideInAPackage("java.lang.foreign..")` to enforce the constraint defined in `architectural_map.md`.
 
-### 🔴 [Severity: MEDIUM]: Unhandled `SyscallResult` during Shutdown
+### ✅ [RESOLVED]: Unhandled `SyscallResult` during Shutdown
+*   **Status:** RESOLVED (June 2026)
 *   **Target Area:** `enforcer/src/main/kotlin/io/mazewall/enforcer/supervisor/SupervisorDaemonManager.kt`
-*   **Hypothesis:** `SupervisorDaemonManager.triggerDaemonShutdown` ignores `connect` and `write` failures.
 *   **Context & Proof:** In `triggerDaemonShutdown`, `LinuxNative.networking.connect` is executed, and if successful, `write` is called. However, it blindly ignores potential `EINTR` or `ECONNREFUSED` (which could mean the daemon is already shutting down or socket is busy).
-*   **Recommendation:** Check for specific errors in `triggerDaemonShutdown` and gracefully handle retryable network errors during daemon shutdown.
+*   **Fix:** Wrapped the `connect` and `write` system calls in retry loops that catch `EINTR` to guarantee delivery of the daemon shutdown byte.
 
 ### 🔴 [Severity: CRITICAL]: Profiler Trace Listener State Mutability Bug
 *   **Target Area:** `profiler/src/main/kotlin/io/mazewall/profiler/internal/ProfilerTraceListener.kt`

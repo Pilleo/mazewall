@@ -202,16 +202,30 @@ internal object SupervisorDaemonManager {
                 try {
                     val sockaddrUn = io.mazewall.ffi.networking.SupervisorSocketUtils.setupSockAddrUn(arena, socketPath)
 
-                    val connRes = LinuxNative.withTransaction {
-                        LinuxNative.networking.connect(
-                            fd,
-                            sockaddrUn.segment,
-                            io.mazewall.ffi.networking.SupervisorSocketUtils.SOCKADDR_UN_SIZE
-                        )
+                    var connRes: LinuxNative.SyscallResult<Long, *>
+                    while (true) {
+                        connRes = LinuxNative.withTransaction {
+                            LinuxNative.networking.connect(
+                                fd,
+                                sockaddrUn.segment,
+                                io.mazewall.ffi.networking.SupervisorSocketUtils.SOCKADDR_UN_SIZE
+                            )
+                        }
+                        if (connRes is LinuxNative.SyscallResult.Error && connRes.errno == io.mazewall.ffi.NativeConstants.EINTR) {
+                            continue
+                        }
+                        break
                     }
                     if (connRes is LinuxNative.SyscallResult.Success) {
                         val cmd = arena.allocateFrom(ValueLayout.JAVA_BYTE, SHUTDOWN_COMMAND_BYTE)
-                        LinuxNative.withTransaction { LinuxNative.memory.write(fd, cmd, 1) }
+                        var writeRes: LinuxNative.SyscallResult<Long, *>
+                        while (true) {
+                            writeRes = LinuxNative.withTransaction { LinuxNative.memory.write(fd, cmd, 1) }
+                            if (writeRes is LinuxNative.SyscallResult.Error && writeRes.errno == io.mazewall.ffi.NativeConstants.EINTR) {
+                                continue
+                            }
+                            break
+                        }
                         Thread.sleep(SHUTDOWN_WAIT_MS)
                     }
                 } finally {
