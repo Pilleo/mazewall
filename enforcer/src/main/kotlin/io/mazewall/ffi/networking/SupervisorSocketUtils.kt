@@ -134,10 +134,18 @@ public object SupervisorSocketUtils {
             msg.setMsgControl(controlBuf)
             msg.setMsgControllen(MSG_CONTROL_BUF_SIZE)
 
-            val res = LinuxNative.withTransaction {
-                LinuxNative.networking.sendmsg(FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(socketFd), msg.segment, 0)
+            while (true) {
+                val res = LinuxNative.withTransaction {
+                    LinuxNative.networking.sendmsg(FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(socketFd), msg.segment, 0)
+                }
+                if (res is LinuxNative.SyscallResult.Success) {
+                    return true
+                } else {
+                    val errno = (res as LinuxNative.SyscallResult.Error).errno
+                    if (errno == io.mazewall.ffi.NativeConstants.EINTR) continue
+                    return false
+                }
             }
-            return res is LinuxNative.SyscallResult.Success
         }
     }
 

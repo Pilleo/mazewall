@@ -1213,11 +1213,11 @@ For full architectural details, see `supervisor_proxy_design.md`.
 *   **Target Area:** `enforcer/src/main/kotlin/io/mazewall/ffi/memory/SupervisorProcessMemoryReader.kt` and `SupervisorSessionHandler.kt`
 *   **Context & Proof:** A tracee can intentionally crash the supervisor daemon by passing an extremely large `addrlen` argument to the `connect` syscall, triggering a fatal `OutOfMemoryError` that is not caught by standard exception handlers.
 *   **Fix:** Wrapped the body of `processNotification` in `SupervisorSessionHandler` in a global `try-catch` catching `Throwable`. Any fatal error or OOM now fails-closed safely, logging the error and returning `EPERM` without crashing the daemon thread.
-### 🔴 [Severity: HIGH]: Incomplete EINTR Handling in process_vm_readv and Other Syscalls
+### ✅ [RESOLVED]: Incomplete EINTR Handling in process_vm_readv and Other Syscalls
+*   **Status:** RESOLVED (June 2026)
 *   **Target Area:** `enforcer/src/main/kotlin/io/mazewall/ffi/memory/SupervisorProcessMemoryReader.kt` and other syscalls
-*   **Hypothesis:** Various system calls, notably `process_vm_readv` in `SupervisorProcessMemoryReader`, do not wrap their execution in a retry loop to handle `EINTR` (interruption by a signal).
-*   **Context & Proof:** The `process_vm_readv` call in `SupervisorProcessMemoryReader.readBytes` and `SupervisorProcessMemoryReader.readString` does not check if the `errno` is `EINTR`. If a signal is received during the call, it will return an error, which the current implementation treats as a failure and returns `null`. This can lead to unexpected failures in reading from the tracee's memory, potentially causing legitimate syscalls to be denied or causing errors downstream. The same issue exists in `poll` as mentioned in the backlog, and potentially others.
-*   **Recommendation:** Wrap `process_vm_readv` and other interruptible syscalls in a `while (res is LinuxNative.SyscallResult.Error && res.errno == NativeConstants.EINTR)` loop. Review all blocking or interruptible syscalls for proper `EINTR` handling.
+*   **Context & Proof:** The `process_vm_readv` call in `SupervisorProcessMemoryReader.readBytes` and `SupervisorProcessMemoryReader.readString` does not check if the `errno` is `EINTR`. If a signal is received during the call, it will return an error, which the current implementation treats as a failure and returns `null`.
+*   **Fix:** Wrapped the `processVmReadv` call in `readBytes` in a `while (true)` loop that retries if `errno == NativeConstants.EINTR`, preventing spurious read failures during signal interruptions.
 ### 🔴 [Severity: LOW]: Memory Alignment verification for `Layouts.kt` FFM Structures
 *   **Target Area:** `enforcer/src/main/kotlin/io/mazewall/ffi/Layouts.kt`
 *   **Hypothesis:** `Layouts.kt` manually specifies C struct memory layouts using `java.lang.foreign.MemoryLayout`. Does it perfectly match the Linux C ABI on x86_64?

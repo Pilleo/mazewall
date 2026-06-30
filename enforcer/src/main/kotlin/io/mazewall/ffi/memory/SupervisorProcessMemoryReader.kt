@@ -43,8 +43,15 @@ public object SupervisorProcessMemoryReader {
             remoteIov.setIovBase(MemorySegment.ofAddress(remoteAddr))
             remoteIov.setIovLen(len.toLong())
 
-            val res = LinuxNative.withTransaction {
-                LinuxNative.memory.processVmReadv(Pid(tid.value), localIov.segment, 1, remoteIov.segment, 1, 0)
+            var res: LinuxNative.SyscallResult<Long, *>
+            while (true) {
+                res = LinuxNative.withTransaction {
+                    LinuxNative.memory.processVmReadv(Pid(tid.value), localIov.segment, 1, remoteIov.segment, 1, 0)
+                }
+                if (res is LinuxNative.SyscallResult.Error && res.errno == io.mazewall.ffi.NativeConstants.EINTR) {
+                    continue
+                }
+                break
             }
             if (res is LinuxNative.SyscallResult.Success && res.value > 0) {
                 val bytesRead = res.value.toInt()
