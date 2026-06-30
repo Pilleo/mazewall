@@ -918,7 +918,7 @@ class "Landlock" as io.mazewall.landlock.Landlock {
   +LandlockRuleset<Sealed> enforceRuleset(LandlockRuleset<? extends Building>, boolean)
   +void applyUserRules(Arena, LandlockRuleset<? extends Building>, PolicyDefinition<?>, int, long)
   +long getAccessMask(int, PolicyDefinition<?>)
-  +SyscallResult createRuleset(Arena, long, int)
+  +FileDescriptor<Ruleset, Open> createRuleset(Arena, long, int)
 }
 interface "LandlockLifecycle" as io.mazewall.landlock.LandlockLifecycle {
 }

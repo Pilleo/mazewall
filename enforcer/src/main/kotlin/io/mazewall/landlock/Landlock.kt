@@ -91,6 +91,16 @@ object Landlock {
      */
     private val logger = Logger.getLogger(Landlock::class.java.name)
 
+    private sealed interface AddRuleResult {
+        object Success : AddRuleResult
+        data class Error(val errno: Int) : AddRuleResult
+    }
+
+    private sealed interface OpenResult {
+        data class Success(val fd: Int, val isFallback: Boolean) : OpenResult
+        data class Error(val errno: Int) : OpenResult
+    }
+
     /** Apply ruleset to all threads of the process. ABI v8+ (Linux 7.0). */
     private const val LANDLOCK_RESTRICT_SELF_TSYNC = (1L shl 3)
 
@@ -221,7 +231,7 @@ object Landlock {
         mask: Long,
         abi: Int,
     ): FileDescriptor<FileDescriptorRole.Ruleset, FdState.Open> {
-        return with(arena) { createRuleset(mask, abi) }.getFdOrThrow("landlock_create_ruleset").let { FileDescriptor.unsafe<FileDescriptorRole.Ruleset>(it.value) }
+        return with(arena) { createRuleset(mask, abi) }
     }
 
     context(arena: Arena)
@@ -258,9 +268,11 @@ object Landlock {
         fdResult.onSuccess { value ->
             val pathFd = FileDescriptor.unsafe<FileDescriptorRole.OPath>(value.toInt())
             try {
-                val addResult = addRuleToRuleset(ruleset, pathFd, allowedAccess)
-                addResult.onFailure { errno, _ ->
-                    logger.warning("landlock_add_rule failed for JVM classpath $path with errno $errno")
+                when (val addRes = addRuleToRuleset(ruleset, pathFd, allowedAccess)) {
+                    is AddRuleResult.Success -> {}
+                    is AddRuleResult.Error -> {
+                        logger.warning("landlock_add_rule failed for JVM classpath $path with errno ${addRes.errno}")
+                    }
                 }
             } finally {
                 LinuxNative.fileSystem.close(pathFd)
@@ -282,18 +294,21 @@ object Landlock {
             LinuxNative.fileSystem.open(arena.allocateFrom(resolvedPath), openFlags)
         }
 
-        val (fdResult, isFallback) = handleInitialOpenFailure(initialResult, resolvedPath, openFlags)
-
-        fdResult.onSuccess { value ->
-            val pathFd = FileDescriptor.unsafe<FileDescriptorRole.OPath>(value.toInt())
-            try {
-                val finalAccess = calculateFinalAccess(allowedAccess, isFallback, resolvedPath)
-                addRuleToRulesetAndVerify(ruleset, pathFd, finalAccess, resolvedPath)
-            } finally {
-                LinuxNative.fileSystem.close(pathFd)
+        val openRes = handleInitialOpenFailure(initialResult, resolvedPath, openFlags)
+        val (fdResult, isFallback) = when (openRes) {
+            is OpenResult.Success -> openRes.fd to openRes.isFallback
+            is OpenResult.Error -> {
+                logOpenFailure(resolvedPath, openRes.errno)
+                return
             }
-        }.onFailure { errno, _ ->
-            logOpenFailure(resolvedPath, errno)
+        }
+
+        val pathFd = FileDescriptor.unsafe<FileDescriptorRole.OPath>(fdResult)
+        try {
+            val finalAccess = calculateFinalAccess(allowedAccess, isFallback, resolvedPath)
+            addRuleToRulesetAndVerify(ruleset, pathFd, finalAccess, resolvedPath)
+        } finally {
+            LinuxNative.fileSystem.close(pathFd)
         }
     }
 
@@ -302,19 +317,25 @@ object Landlock {
         res: LinuxNative.SyscallResult<Long, *>,
         resolvedPath: String,
         flags: Int,
-    ): Pair<LinuxNative.SyscallResult<Long, *>, Boolean> {
-        if (res is LinuxNative.SyscallResult.Error<*> && res.errno == 2) { // ENOENT
+    ): OpenResult {
+        if (res is LinuxNative.SyscallResult.Error && res.errno == 2) { // ENOENT
             if (resolvedPath.endsWith(" (deleted)")) {
-                return res to false
+                return OpenResult.Error(res.errno)
             }
             val parentPath = File(resolvedPath).parent ?: "/"
             logger.info("Path $resolvedPath does not exist, falling back to parent directory: $parentPath")
             val openResult = LinuxNative.withTransaction {
                 LinuxNative.fileSystem.open(arena.allocateFrom(parentPath), flags)
             }
-            return openResult to true
+            return when (openResult) {
+                is LinuxNative.SyscallResult.Success -> OpenResult.Success(openResult.value.toInt(), true)
+                is LinuxNative.SyscallResult.Error -> OpenResult.Error(openResult.errno)
+            }
         }
-        return res to false
+        return when (res) {
+            is LinuxNative.SyscallResult.Success -> OpenResult.Success(res.value.toInt(), false)
+            is LinuxNative.SyscallResult.Error -> OpenResult.Error(res.errno)
+        }
     }
 
     private fun logOpenFailure(
@@ -347,12 +368,14 @@ object Landlock {
         access: Long,
         path: String,
     ) {
-        val res = addRuleToRuleset(ruleset, pathFd, access)
-        if (res is LinuxNative.SyscallResult.Error<*>) {
-            if (res.errno == ERRNO_EINVAL) {
-                logger.warning("landlock_add_rule rejected $path (EINVAL) — path may be a symlink or unsupported inode type.")
-            } else {
-                throw IllegalStateException("landlock_add_rule failed for $path with errno ${res.errno}")
+        when (val res = addRuleToRuleset(ruleset, pathFd, access)) {
+            is AddRuleResult.Success -> {}
+            is AddRuleResult.Error -> {
+                if (res.errno == ERRNO_EINVAL) {
+                    logger.warning("landlock_add_rule rejected $path (EINVAL) — path may be a symlink or unsupported inode type.")
+                } else {
+                    throw IllegalStateException("landlock_add_rule failed for $path with errno ${res.errno}")
+                }
             }
         }
     }
@@ -435,12 +458,12 @@ object Landlock {
     internal fun createRuleset(
         accessMaskFs: Long,
         abi: Int,
-    ): LinuxNative.SyscallResult<Long, *> {
+    ): FileDescriptor<FileDescriptorRole.Ruleset, FdState.Open> {
         val rulesetAttr = LandlockRulesetAttrSegment.allocate()
         rulesetAttr.setHandledAccessFs(accessMaskFs)
         rulesetAttr.setHandledAccessNet(0L)
         val size = if (abi >= 4) Layouts.LANDLOCK_RULESET_ATTR.byteSize() else Layouts.LANDLOCK_RULESET_ATTR_V1_SIZE
-        return LinuxNative.withTransaction {
+        val res = LinuxNative.withTransaction {
             LinuxNative.syscall(
                 NativeConstants.LANDLOCK_CREATE_RULESET_NR,
                 io.mazewall.core.NativeArg.MemoryArg(rulesetAttr.segment),
@@ -448,6 +471,7 @@ object Landlock {
                 io.mazewall.core.NativeArg.MemoryArg(MemorySegment.NULL)
             )
         }
+        return res.getFdOrThrow("landlock_create_ruleset").let { FileDescriptor.unsafe(it.value) }
     }
 
     context(arena: Arena)
@@ -455,11 +479,11 @@ object Landlock {
         ruleset: LandlockRuleset<RulesetState.Building>,
         pathFd: FileDescriptor<FileDescriptorRole.OPath, FdState.Open>,
         accessMask: Long,
-    ): LinuxNative.SyscallResult<Long, *> {
+    ): AddRuleResult {
         val pathAttr = LandlockPathBeneathAttrSegment.allocate()
         pathAttr.setAllowedAccess(accessMask)
         pathAttr.setParentFd(pathFd.value)
-        return LinuxNative.withTransaction {
+        val res = LinuxNative.withTransaction {
             LinuxNative.syscall(
                 NativeConstants.LANDLOCK_ADD_RULE_NR,
                 io.mazewall.core.NativeArg.FdArg(ruleset.fd),
@@ -467,6 +491,10 @@ object Landlock {
                 io.mazewall.core.NativeArg.MemoryArg(pathAttr.segment),
                 io.mazewall.core.NativeArg.IntArg(0)
             )
+        }
+        return when (res) {
+            is LinuxNative.SyscallResult.Success -> AddRuleResult.Success
+            is LinuxNative.SyscallResult.Error -> AddRuleResult.Error(res.errno)
         }
     }
 }
@@ -507,12 +535,12 @@ internal class LandlockSession(
 
         state = LandlockState.CreatingRuleset(abi)
         nativeScope {
-            val rulesetFdResult = Landlock.createRuleset(accessMaskFs, abi)
-            val rulesetFd = rulesetFdResult.recover { errno, _ ->
-                val err = IllegalStateException("landlock_create_ruleset failed with errno $errno")
-                state = LandlockState.Failed(err)
-                throw err
-            }.let { FileDescriptor.unsafe<FileDescriptorRole.Ruleset>(it.toInt()) }
+            val rulesetFd = try {
+                Landlock.createRuleset(accessMaskFs, abi)
+            } catch (e: Exception) {
+                state = LandlockState.Failed(e)
+                throw e
+            }
 
             val ruleset = LandlockRuleset<RulesetState.Building>(rulesetFd)
             val created = LandlockLifecycle.RulesetCreated(ruleset, abi, policy)

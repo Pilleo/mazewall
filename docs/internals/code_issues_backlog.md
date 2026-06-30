@@ -1179,12 +1179,12 @@ For full architectural details, see `supervisor_proxy_design.md`.
 *   **Context & Proof:** The use of `tasks.whenTaskAdded` disabled Gradle's Task Configuration Avoidance, forcing eager configuration of all tasks during the configuration phase, severely degrading IDE sync and build start times.
 *   **Fix:** Replaced `tasks.whenTaskAdded` with the lazy API equivalent: `tasks.matching { it.name == "listDeps" }.configureEach { ... }`. This preserves Task Configuration Avoidance while still injecting the configurations property for JitPack's `listDeps` task.
 
-### 🔴 [Severity: MEDIUM]: Unhandled Signal Interruptions (`EINTR`) during Supervisor `process_vm_readv` Socket Message Tracing
+### ✅ [RESOLVED]: Unhandled Signal Interruptions (`EINTR`) during Supervisor `process_vm_readv` Socket Message Tracing
+*   **Status:** RESOLVED (June 2026)
 *   **Dimension:** Vulnerability Chaining & Concurrency (The Sandbox View)
 *   **Target Area:** `enforcer/src/main/kotlin/io/mazewall/ffi/memory/SupervisorProcessMemoryReader.kt`
-*   **Failure Hypothesis:** The `process_vm_readv` syscall can be interrupted by a signal, failing with `EINTR`. If this happens, the method incorrectly returns `null` instead of retrying.
-*   **Context & Proof:** In `SupervisorProcessMemoryReader.kt`, `LinuxNative.memory.processVmReadv` is called without any retry logic. If it returns an error and `errno == EINTR`, the function returns `null`. This `null` cascades back to `SupervisorSessionHandler.kt`, where the `handleInjectFd` method (and others) will interpret the `null` path or `null` sockaddr as invalid arguments and wrongly deny the system call with `EPERM`.
-*   **Recommendation:** Wrap the `processVmReadv` call inside a `while (errno == EINTR)` retry loop to ensure that transient signal interruptions do not cause legitimate syscalls to be denied.
+*   **Context & Proof:** The `process_vm_readv` syscall can be interrupted by a signal, failing with `EINTR`. If this happens, the method incorrectly returns `null` instead of retrying.
+*   **Fix:** Wrapped the `processVmReadv` call inside `SupervisorProcessMemoryReader.readBytes` in a retry loop on `EINTR` to guarantee memory reads are not interrupted.
 
 ### ✅ [RESOLVED]: `poll` EINTR Logic Bug Causes Process Deadlock via Blocking `read`
 *   **Status:** RESOLVED (June 2026)
@@ -1248,17 +1248,17 @@ If a policy "allows" an `openat` via `decision == 1`, the kernel will execute th
 *   **Context & Proof:** `grep -rn "java.lang.foreign" enforcer/src/main/kotlin/io/mazewall/ | grep -v "/ffi/"` reveals extensive usage of `java.lang.foreign.MemorySegment`, `Arena`, and `ValueLayout` in high-level classes like `Landlock.kt`, `SupervisorSessionHandler.kt`, and `LinuxNative.kt`. This completely violates the ArchUnit architectural constraint.
 *   **Recommendation:** Move all direct FFM memory allocations (`Arena.ofConfined().use { ... }`) and native struct manipulations into dedicated wrapper classes inside `io.mazewall.ffi`. The outer layers (`enforcer`, `landlock`, etc.) should only interact with safe Kotlin types (ByteArrays, Strings, domain objects).
 
-### 🔴 [Severity: MEDIUM]: Unhandled EINTR in `SupervisorSocketUtils.sendDescriptor`
+### ✅ [RESOLVED]: Unhandled EINTR in `SupervisorSocketUtils.sendDescriptor`
+*   **Status:** RESOLVED (June 2026)
 *   **Target Area:** `enforcer/src/main/kotlin/io/mazewall/ffi/networking/SupervisorSocketUtils.kt`
-*   **Hypothesis:** `sendmsg` can be interrupted by a signal, returning `EINTR`. If not handled, descriptor passing will spuriously fail.
-*   **Context & Proof:** In `SupervisorSocketUtils.sendDescriptor`, `LinuxNative.networking.sendmsg` is called. The result is just checked for `Success`. If `EINTR` occurs, it silently returns `false`. This can cause a handshake failure between the profiler and the tracee.
-*   **Recommendation:** Wrap `sendmsg` in a retry loop that checks for `errno == io.mazewall.ffi.NativeConstants.EINTR`, similar to `recvmsg`.
+*   **Context & Proof:** `sendmsg` can be interrupted by a signal, returning `EINTR`. If not handled, descriptor passing will spuriously fail.
+*   **Fix:** Wrapped the `sendmsg` call inside `SupervisorSocketUtils.sendDescriptor` in a retry loop on `EINTR` to guarantee file descriptors are passed correctly.
 
-### 🔴 [Severity: MEDIUM]: Unhandled `SyscallResult` return types leaking into domain logic
+### ✅ [RESOLVED]: Unhandled `SyscallResult` return types leaking into domain logic
+*   **Status:** RESOLVED (June 2026)
 *   **Target Area:** `enforcer/src/main/kotlin/io/mazewall/seccomp/` and `io/mazewall/landlock/`
-*   **Hypothesis:** `ArchitectureTest.kt` enforces that domain logic must not return `SyscallResult`, but `SyscallResult` type might still be leaking via internal methods or properties.
-*   **Context & Proof:** `domainLogicMustHandleSyscallResults` only checks public methods. But internal/private domain logic shouldn't leak raw FFM `SyscallResult` either.
-*   **Recommendation:** Expand `ArchitectureTest.domainLogicMustHandleSyscallResults` to check all methods in the domain packages, not just public ones.
+*   **Context & Proof:** `domainLogicMustHandleSyscallResults` only checked public methods, allowing internal/private domain logic to leak raw FFM `SyscallResult` objects.
+*   **Fix:** Refactored internal methods in `Landlock.kt` to encapsulate all `SyscallResult` usages inside clean domain structures (`AddRuleResult`, `OpenResult`) or exceptions. Expanded the check in `ArchitectureTest.kt` to audit all methods in these packages.
 
 ### 🔴 [Severity: LOW]: Inconsistent Architecture Test for `java.lang.foreign`
 *   **Dimension:** Architectural Patterns Compliance (The Integrity View)

@@ -213,8 +213,6 @@ class ArchitectureTest {
             .areDeclaredInClassesThat()
             .resideInAnyPackage("io.mazewall.seccomp..", "io.mazewall.landlock..")
             .and()
-            .arePublic()
-            .and()
             .haveNameNotMatching(".*\\$.*") // Ignore Kotlin internal mangled names
             .should()
             .notHaveRawReturnType(LinuxNative.SyscallResult::class.java)
