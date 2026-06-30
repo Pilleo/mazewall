@@ -13,6 +13,7 @@ jobs:
         permissions:
             contents: read
             packages: write
+            pull-requests: write
         steps:
             - name: Checkout Code
               uses: actions/checkout@v4
@@ -36,23 +37,52 @@ jobs:
                   systemctl --user enable --now podman.socket
                   echo "DOCKER_HOST=unix://$XDG_RUNTIME_DIR/podman/podman.sock" >> $GITHUB_ENV
                   echo "MAZEWALL_CONTAINER_ENGINE=podman" >> $GITHUB_ENV
-            - name: Run Build, Lint & Unit Tests
-              run: ./gradlew build -x jacocoTestCoverageVerification
-            - name: Run Containerized Integration Tests
-              run: ./scripts/run_containerized_tests.sh :enforcer:integrationTest :profiler:integrationTest
-            - name: Verify Test Coverage
-              run: ./gradlew jacocoTestCoverageVerification
-            - name: Run PITest (Host Unit Tests Only)
-              run: ./gradlew :enforcer:pitest -Dpitest.threads=2
-            - name: Run Vulnerability Exploitation Demo
-              run: ./scripts/run_vulnerable_app_demo.sh
-            - name: Run Security Check
-              run: ./gradlew dependencyCheckAnalyze --info
-              env:
-                  NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
-            - name: Publish to GitHub Packages
-              if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
-              run: ./gradlew publishAllPublicationsToGitHubPackagesRepository --info
-              env:
-                  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-                  GITHUB_ACTOR: ${{ github.actor }}
+             - name: Run Build, Lint & Unit Tests
+               run: |
+                   set -o pipefail
+                   ./gradlew build -x jacocoTestCoverageVerification 2>&1 | tee build.log
+             - name: Run Containerized Integration Tests
+               run: |
+                   set -o pipefail
+                   ./scripts/run_containerized_tests.sh :enforcer:integrationTest :profiler:integrationTest 2>&1 | tee integration.log
+             - name: Verify Test Coverage
+               run: ./gradlew jacocoTestCoverageVerification
+             - name: Run PITest (Host Unit Tests Only)
+               run: ./gradlew :enforcer:pitest -Dpitest.threads=2
+             - name: Run Vulnerability Exploitation Demo
+               run: ./scripts/run_vulnerable_app_demo.sh
+             - name: Run Security Check
+               run: ./gradlew dependencyCheckAnalyze --info
+               env:
+                   NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
+             - name: Publish to GitHub Packages
+               if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+               run: ./gradlew publishAllPublicationsToGitHubPackagesRepository --info
+               env:
+                   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+                   GITHUB_ACTOR: ${{ github.actor }}
+             - name: Post Failure Comment on PR
+               if: failure() && github.event_name == 'pull_request'
+               run: |
+                   echo "### ❌ CI Build Failed" > pr_comment.md
+                   echo "The CI/CD pipeline encountered an error during execution. Here are the failure logs:" >> pr_comment.md
+                   
+                   if [ -f build.log ]; then
+                       echo "" >> pr_comment.md
+                       echo "#### Build Log (Tail):" >> pr_comment.md
+                       echo "\`\`\`text" >> pr_comment.md
+                       tail -n 45 build.log >> pr_comment.md
+                       echo "\`\`\`" >> pr_comment.md
+                   fi
+                   
+                   if [ -f integration.log ]; then
+                       echo "" >> pr_comment.md
+                       echo "#### Integration Test Log (Tail):" >> pr_comment.md
+                       echo "\`\`\`text" >> pr_comment.md
+                       tail -n 45 integration.log >> pr_comment.md
+                       echo "\`\`\`" >> pr_comment.md
+                   fi
+                   
+                   gh pr comment ${{ github.event.pull_request.number }} --body-file pr_comment.md
+               env:
+                   GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
