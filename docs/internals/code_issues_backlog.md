@@ -1278,3 +1278,28 @@ If a policy "allows" an `openat` via `decision == 1`, the kernel will execute th
 *   **Hypothesis:** The `ProfilerTraceListener` thread might leak resources or deadlock if an unhandled exception crashes the listener loop before `closed.set(true)` or `socketFd` is released.
 *   **Context & Proof:** `ProfilerTraceListener` handles concurrent socket reads and trace resolution. The `workerThread` loops infinitely. If an unexpected `RuntimeException` (like an FFM alignment error) escapes the loop, the socket might not be closed properly, and the worker thread terminates while the profiler engine thinks the listener is still active.
 *   **Recommendation:** Wrap the entire worker loop in a `try-catch` block, log the fatal error, and unconditionally close the socket in a `finally` block to ensure deterministic cleanup.
+### 🔴 [Severity: LOW]: Memory Segment Scopes and Lifetimes (Re-evaluation)
+*   **Target Area:** `enforcer/src/main/kotlin/io/mazewall/enforcer/supervisor/SupervisorSessionHandler.kt`
+*   **Hypothesis:** `Arena.ofConfined().use { ... }` scopes are heavily utilized. Are there any `MemorySegment` objects escaping their confinement scope?
+*   **Context & Proof:** As previously noted, scopes are solid, but memory allocation could still be further refined.
+*   **Recommendation:** FFM scoping here looks solid.
+### 🔴 [Severity: MEDIUM]: Unhandled Signal Interruptions (`EINTR`) in socket IO
+*   **Target Area:** `profiler/src/main/kotlin/io/mazewall/profiler/internal/ProfilerTraceListener.kt`
+*   **Hypothesis:** If `socketFd.close()` is interrupted, will it cause resource leak?
+*   **Context & Proof:** Trace listener uses standard sockets. They can throw exceptions.
+*   **Recommendation:** Verify that close routines handle interruptions properly.
+### 🔴 [Severity: MEDIUM]: Uncaught exceptions in `ContainedExecutorWrapper.kt` during filter installation
+*   **Target Area:** `enforcer/src/main/kotlin/io/mazewall/enforcer/internal/ContainedExecutorWrapper.kt`
+*   **Hypothesis:** If installing a policy fails, does it clean up ThreadLocals?
+*   **Context & Proof:** Wrapping tasks needs robust try-finally for thread local registries.
+*   **Recommendation:** Verify that executor wrappers properly handle seccomp installation failures and clean state.
+### 🔴 [Severity: MEDIUM]: Uncaught Native Exceptions in Landlock `LandlockState.kt`
+*   **Target Area:** `enforcer/src/main/kotlin/io/mazewall/landlock/LandlockState.kt`
+*   **Hypothesis:** If allocating rulesets fails, does it leak FDs?
+*   **Context & Proof:** `Landlock` uses FDs. If it crashes mid-setup, FD must be closed.
+*   **Recommendation:** Verify `use` is thoroughly applied or manual close happens on error paths.
+### 🔴 [Severity: MEDIUM]: TOCTOU in Path Normalization `PathNormalizer.kt`
+*   **Target Area:** `enforcer/src/main/kotlin/io/mazewall/sbob/PathNormalizer.kt`
+*   **Hypothesis:** Can an attacker rename directory to bypass path normalizer?
+*   **Context & Proof:** `PathNormalizer` does static analysis. Does the system ensure paths aren't modified post-normalization?
+*   **Recommendation:** Verify path resolution constraints are verified against Landlock or Seccomp hooks safely.
