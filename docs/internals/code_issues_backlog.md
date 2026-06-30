@@ -1273,11 +1273,11 @@ If a policy "allows" an `openat` via `decision == 1`, the kernel will execute th
 *   **Context & Proof:** In `triggerDaemonShutdown`, `LinuxNative.networking.connect` is executed, and if successful, `write` is called. However, it blindly ignores potential `EINTR` or `ECONNREFUSED` (which could mean the daemon is already shutting down or socket is busy).
 *   **Fix:** Wrapped the `connect` and `write` system calls in retry loops that catch `EINTR` to guarantee delivery of the daemon shutdown byte.
 
-### 🔴 [Severity: CRITICAL]: Profiler Trace Listener State Mutability Bug
+### ✅ [RESOLVED]: Profiler Trace Listener State Mutability Bug
+*   **Status:** RESOLVED (June 2026)
 *   **Target Area:** `profiler/src/main/kotlin/io/mazewall/profiler/internal/ProfilerTraceListener.kt`
-*   **Hypothesis:** The `ProfilerTraceListener` thread might leak resources or deadlock if an unhandled exception crashes the listener loop before `closed.set(true)` or `socketFd` is released.
-*   **Context & Proof:** `ProfilerTraceListener` handles concurrent socket reads and trace resolution. The `workerThread` loops infinitely. If an unexpected `RuntimeException` (like an FFM alignment error) escapes the loop, the socket might not be closed properly, and the worker thread terminates while the profiler engine thinks the listener is still active.
-*   **Recommendation:** Wrap the entire worker loop in a `try-catch` block, log the fatal error, and unconditionally close the socket in a `finally` block to ensure deterministic cleanup.
+*   **Context & Proof:** The `ProfilerTraceListener` thread might leak resources or deadlock if an unhandled exception crashes the listener loop before `closed.set(true)` or `socketFd` is released.
+*   **Fix:** Wrapped the listener thread's run execution in a `try-catch` catching `Throwable`. On fatal crash, it logs the error, marks the listener as closed, and closes the socket FD to ensure deterministic resource cleanup.
 ### 🔴 [Severity: LOW]: Memory Segment Scopes and Lifetimes (Re-evaluation)
 *   **Target Area:** `enforcer/src/main/kotlin/io/mazewall/enforcer/supervisor/SupervisorSessionHandler.kt`
 *   **Hypothesis:** `Arena.ofConfined().use { ... }` scopes are heavily utilized. Are there any `MemorySegment` objects escaping their confinement scope?

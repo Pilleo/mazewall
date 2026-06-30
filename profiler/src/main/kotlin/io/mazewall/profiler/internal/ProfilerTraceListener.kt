@@ -63,6 +63,13 @@ internal class ProfilerTraceListener(
         val thread = Thread {
             try {
                 runListenerLoop(inputStream, readyLatch)
+            } catch (t: Throwable) {
+                logger.log(java.util.logging.Level.SEVERE, "ProfilerTraceListener worker thread crashed with fatal error", t)
+                if (closed.compareAndSet(false, true)) {
+                    try {
+                        socketFd.close()
+                    } catch (ignored: Exception) {}
+                }
             } finally {
                 arena.close()
                 inputStream.close()
