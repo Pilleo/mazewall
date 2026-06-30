@@ -347,7 +347,7 @@ Landlock Audit logging (`LANDLOCK_ACCESS` records) is a kernel-specific telemetr
 
 ## 6. Architectural Analysis: Why `USER_NOTIF` Is the Wrong Primitive for Tier S Profiling
 
-> **Status (June 2026):** This section documents a confirmed architectural defect discovered during integration test debugging. The current codebase has this defect. The correct design is documented here for the next refactor cycle. Tracked in `code_issues_backlog.md` under `🔴 [CRITICAL]: Tier S Profiler Uses the Wrong Kernel Primitive`.
+> **Status:** INTENTIONAL DESIGN INVARIANT. While an asynchronous fire-and-forget design was analyzed to improve performance, we confirmed that JVM stack trace capturing requires the target thread to be suspended (blocked) in kernel space. If the tracee thread is resumed immediately, it moves past the system call frame or terminates before the JVM listener thread can dump its stack trace, resulting in empty or inaccurate traces. Therefore, the synchronous ACK handshake protocol is preserved as a permanent design invariant.
 
 ### 6.1 The Category Error
 
@@ -466,10 +466,12 @@ The `SHUTDOWN_COMMAND_BYTE (0x53)` protocol is simplified. It becomes the **only
 1. **Socket EOF** — `read()` returns 0 → the trace-listener closed its end of the socket → daemon sends `CONTINUE` to all pending notifications and exits cleanly.
 2. **Explicit `0x53`** — trace-listener sends the explicit shutdown command → same daemon response as EOF.
 
-### 6.8 Stack Trace Capture After Fire-and-Forget
+### 6.8 Stack Trace Capture and the JVM Safepoint Constraint
 
-With the current design, `Thread.getStackTrace()` must be called *after* the ACK is sent, because the target thread is suspended in the kernel and cannot reach a JVM safepoint until it returns from the syscall.
+To capture a JVM stack trace of the profiled thread at the exact moment of the syscall (e.g., to indicate which user method triggered the filesystem operation), the target thread must remain suspended.
 
-With fire-and-forget, the target thread is unblocked immediately (the daemon sends `CONTINUE` before writing to the JVM socket). By the time the trace-listener receives the event and calls `Thread.getStackTrace()`, the thread is already running in user space. The stack trace is still diagnostically accurate: the thread is still inside the call chain that triggered the syscall (e.g., `File.readText()` → JDK NIO → `openat`).
+Because the JVM's `Thread.getStackTrace()` requires the target thread to be in a state where it can reach a safepoint, and a thread suspended in the kernel via `USER_NOTIF` is in a safe native blocking state, we can safely dump its stack trace. However, if the thread is resumed immediately (as in the proposed fire-and-forget model):
+1. The tracee thread will run to completion and potentially exit/join before the out-of-process JVM listener even receives the socket event (due to asynchronous I/O and scheduling latencies).
+2. Even if the thread is kept alive, it will have already returned from the syscall method and progressed further, meaning the captured stack trace will not contain the active system call frame.
 
-The ordering constraint documented in `ProfilerTraceListener.processEvent` and `readNextEvent` is fully removed.
+Therefore, the synchronous ACK protocol is structurally mandatory for accurate JVM stack trace profiling. The daemon must suspend the thread, notify the JVM listener, wait for the JVM listener to dump the stack trace and send the ACK byte, and only then resume the tracee.

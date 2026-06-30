@@ -115,6 +115,7 @@ internal class ProfilerSessionHandler(
         val nr = notif.get(ValueLayout.JAVA_INT, NOTIF_NR_OFF)
 
         System.err.println("[DAEMON-DEBUG] Received notification: id=$id, pid=$pidVal, nr=$nr")
+        val handshake = HandshakeSession.Active(id, listenerFd)
 
         var continueSent = false
 
@@ -145,16 +146,18 @@ internal class ProfilerSessionHandler(
                     }
                     System.err.println("[DAEMON-DEBUG] Noise-filter check: path=$pathStr, skip=$matched")
                     if (matched) {
-                        responder.sendSeccompContinue(id, listenerFd, resp)
+                        responder.sendSeccompContinue(handshake.acknowledged(), resp)
                         return true
                     }
                 } catch (ignored: Exception) {}
             }
 
-            // Resume tracee immediately (Fire-and-Forget)
-            responder.sendSeccompContinue(id, listenerFd, resp)
-            continueSent = true
-            ledger.record(SessionEvent.ContinueReplied(System.nanoTime(), pidVal.toLong(), 0L))
+            val notifiedState = currentState.notified(id, resolvedEvent)
+            val waitingState = notifiedState.waitingForAck()
+            state = waitingState
+
+            socketPollFd.set(ValueLayout.JAVA_INT, POLLFD_FD_OFF, socketFd.value)
+            socketPollFd.set(ValueLayout.JAVA_SHORT, POLLFD_EVENTS_OFF, NativeConstants.POLLIN)
 
             // DELIVER: Write event to JVM listener socket.
             System.err.println("[DAEMON-DEBUG] Sending event to JVM listener: tid=$pidVal, syscall=${resolvedEvent.syscallName}, paths=${resolvedEvent.paths}")
@@ -162,16 +165,42 @@ internal class ProfilerSessionHandler(
             System.err.println("[DAEMON-DEBUG] Event sent to JVM listener.")
             ledger.record(SessionEvent.EventSent(System.nanoTime(), pidVal.toLong()))
 
-            return true
+            // HANDSHAKE: Wait for the JVM listener to ACK the event before letting the tracee continue.
+            // This blocking synchronization is physically required: if the daemon sends CONTINUE immediately
+            // (asynchronous fire-and-forget), the tracee thread resumes and moves past the system call frame
+            // before the JVM listener thread can capture its stack trace, resulting in empty or incorrect traces.
+            val result = handshake.performHandshake(socketFd, ioOps, socketPollFd, ackBuf, onShutdown)
+            return when (result) {
+                is HandshakeSession.Success -> {
+                    ledger.record(SessionEvent.AckReceived(System.nanoTime(), pidVal.toLong()))
+                    state = waitingState.acknowledged()
+                    responder.sendSeccompContinue(result, resp)
+                    continueSent = true
+                    ledger.record(SessionEvent.ContinueReplied(System.nanoTime(), pidVal.toLong(), 0L))
+                    true
+                }
+                is HandshakeSession.Failed -> {
+                    System.err.println("[DAEMON-WARN] Handshake failed or shutdown triggered")
+                    state = waitingState.terminate()
+                    responder.sendSeccompError(result, resp, ECONNRESET)
+                    ledger.record(SessionEvent.ErrorReplied(System.nanoTime(), pidVal.toLong(), ECONNRESET))
+                    false
+                }
+                else -> {
+                    state = ProfilerState.Terminated(socketFd, listenerFd)
+                    false
+                }
+            }
         } catch (e: Throwable) {
             logger.severe {
                 "Exception in processNotification: ${e.message}. Dumping SessionEventLedger:\n" +
                     ledger.dump().joinToString("\n")
             }
             if (continueSent) {
+                state = ProfilerState.ActiveSession(socketFd, listenerFd)
                 return true
             }
-            responder.sendSeccompError(id, listenerFd, resp, ECONNRESET)
+            responder.sendSeccompError(handshake.failed(), resp, ECONNRESET)
             ledger.record(SessionEvent.ErrorReplied(System.nanoTime(), pidVal.toLong(), ECONNRESET))
             return false
         }

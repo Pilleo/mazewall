@@ -24,11 +24,6 @@
 **Context:** Currently, `mazewall` blocks networking by disabling `socket` or `connect` completely. This breaks local IPC utilizing Unix Domain Sockets (`AF_UNIX`/`AF_LOCAL`) which are common for DB/daemon integration. NVIDIA OpenShell inspects the first argument (Address Family) of `socket()` to allow `AF_UNIX` while denying `AF_INET`/`AF_INET6`, `AF_PACKET`, etc.
 **Needed:** Implement a `SocketAddressFamilyInspector` under `SyscallInspectionPipeline` to filter `socket` syscall arguments, preserving local IPC while preventing internet or raw packet capture.
 
-### ✅ [RESOLVED]: Tier S Profiler Uses the Wrong Kernel Primitive — `USER_NOTIF` is a Supervisor Mechanism, Not an Observer Mechanism
-*   **Status:** RESOLVED (June 2026)
-*   **Target Area:** `io.mazewall.profiler.engine.ProfilerSessionHandler`, `io.mazewall.profiler.engine.HandshakeSession`, `io.mazewall.profiler.internal.ProfilerTraceListener`, `io.mazewall.profiler.engine.ProfilerDaemonEngine`
-*   **Context:** `SECCOMP_RET_USER_NOTIF` is a supervisor primitive. Profiling only needs observation without blocking the tracee thread synchronously.
-*   **Fix:** Refactored the connection to use asynchronous fire-and-forget delivery. Removed `HandshakeSession`, stripped down the individual per-event ACK round-trip, simplified connection states, and made the profiler daemon send seccomp `CONTINUE` immediately after resolving path parameters, unblocking tracees instantly.
 
 
 

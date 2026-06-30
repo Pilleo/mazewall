@@ -11,6 +11,7 @@ import io.mazewall.ffi.Layouts
 import io.mazewall.ffi.NativeConstants
 import io.mazewall.profiler.engine.ACK_BUF_SIZE
 import io.mazewall.profiler.engine.ADDR_UN_SIZE
+import io.mazewall.profiler.engine.HandshakeSession
 import io.mazewall.profiler.engine.LoopAction
 import io.mazewall.profiler.engine.POLLFD_REVENTS_OFF
 import io.mazewall.profiler.engine.PROTOCOL_ACK_BYTE
@@ -99,16 +100,14 @@ class ProfilerDesignSpec :
             }
 
             override fun sendSeccompContinue(
-                notifId: Long,
-                listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open>,
+                session: HandshakeSession.Success,
                 resp: MemorySegment,
             ) {
                 ioctlCalls.add(0xc0182101L) // SECCOMP_IOCTL_NOTIF_SEND
             }
 
             override fun sendSeccompError(
-                notifId: Long,
-                listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open>,
+                session: HandshakeSession.Failed,
                 resp: MemorySegment,
                 errorNr: Int,
             ) {

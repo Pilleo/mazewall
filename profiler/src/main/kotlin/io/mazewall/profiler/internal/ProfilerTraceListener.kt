@@ -244,24 +244,32 @@ internal class ProfilerTraceListener(
         }
 
         System.err.println("[TRACE-LISTENER-DEBUG] Read event header: tid=$tidValue, syscall=$syscallName, paths=$paths")
-        // NOTE: In the fire-and-forget design the daemon sends SECCOMP_USER_NOTIF_FLAG_CONTINUE
-        // to the kernel *before* writing this event to the socket. By the time this event arrives
-        // here, the tracee thread has already returned from its blocked syscall and is running
-        // freely. There is no safepoint deadlock risk — stack traces may be captured at any point
-        // in processEvent() without circular dependencies.
+        // NOTE: This protocol is strictly synchronous. The daemon suspends the tracee thread
+        // in kernel space using seccomp and awaits an ACK from this listener thread. While the
+        // tracee thread is suspended in the kernel, we can safely and reliably capture its JVM
+        // stack trace (via accumulateStackTrace) without the thread moving past the active syscall frame.
+        // Once the stack trace is captured, we send the ACK to unblock the tracee.
         return TraceEvent(tidValue = tidValue, syscallName = syscallName, args = args, paths = paths, stackTrace = null)
     }
 
-     private fun processEvent(event: TraceEvent) {
-         System.err.println("[TRACE-LISTENER-DEBUG] processEvent: tid=${event.tid.value}, syscall=${event.syscallName}")
-         if (event.paths.isNotEmpty() && isDuplicate(event)) {
-             System.err.println("[TRACE-LISTENER-DEBUG] duplicate event, skipping")
-             return
-         }
+    private fun processEvent(event: TraceEvent) {
+         try {
+             System.err.println("[TRACE-LISTENER-DEBUG] processEvent: tid=${event.tid.value}, syscall=${event.syscallName}")
+             if (event.paths.isNotEmpty() && isDuplicate(event)) {
+                 System.err.println("[TRACE-LISTENER-DEBUG] duplicate event, skipping")
+                 return
+             }
 
-         accumulatedLogs.add(event)
-         accumulateStackTrace(event)
-     }
+             accumulatedLogs.add(event)
+             accumulateStackTrace(event)
+         } finally {
+             sendAck()
+         }
+    }
+
+    private fun sendAck() {
+        sendCommand(PROTOCOL_ACK_BYTE)
+    }
 
     private fun isDuplicate(event: TraceEvent): Boolean {
         val cacheKey = "${event.syscallName}:${event.paths.sorted().joinToString(",")}"

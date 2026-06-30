@@ -29,20 +29,20 @@ interface TraceEventPublisher {
  */
 interface SeccompResponder {
     /**
-     * Sends a SECCOMP_USER_NOTIF_FLAG_CONTINUE response to the kernel.
+     * Sends a SECCOMP_USER_NOTIF_FLAG_CONTINUE response to the kernel for a successful handshake.
+     * Enforced at compile-time to only work with sessions in the Success state.
      */
     fun sendSeccompContinue(
-        notifId: Long,
-        listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open>,
+        session: HandshakeSession.Success,
         resp: MemorySegment,
     )
 
     /**
-     * Sends an error response (or generic failure) to the kernel.
+     * Sends an error response (or generic failure) to the kernel for a failed handshake.
+     * Enforced at compile-time to only work with sessions in the Failed state.
      */
     fun sendSeccompError(
-        notifId: Long,
-        listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open>,
+        session: HandshakeSession.Failed,
         resp: MemorySegment,
         errorNr: Int,
     )
@@ -166,31 +166,29 @@ object RealProfilerTransport : ProfilerTransport {
     }
 
     override fun sendSeccompContinue(
-        notifId: Long,
-        listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open>,
+        session: HandshakeSession.Success,
         resp: MemorySegment,
     ) {
         resp.fill(0)
-        resp.set(ValueLayout.JAVA_LONG, RESP_ID_OFF, notifId)
+        resp.set(ValueLayout.JAVA_LONG, RESP_ID_OFF, session.notifId)
         resp.set(ValueLayout.JAVA_LONG, RESP_VAL_OFF, 0L)
         resp.set(ValueLayout.JAVA_INT, RESP_ERR_OFF, 0)
         resp.set(ValueLayout.JAVA_INT, RESP_FLAGS_OFF, NativeConstants.SECCOMP_USER_NOTIF_FLAG_CONTINUE.toInt())
-        ioctl(listenerFd, SECCOMP_IOCTL_NOTIF_SEND, resp).getOrThrow("sendSeccompContinue")
+        ioctl(session.listenerFd, SECCOMP_IOCTL_NOTIF_SEND, resp).getOrThrow("sendSeccompContinue")
     }
 
     override fun sendSeccompError(
-        notifId: Long,
-        listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open>,
+        session: HandshakeSession.Failed,
         resp: MemorySegment,
         errorNr: Int,
     ) {
         resp.fill(0)
-        resp.set(ValueLayout.JAVA_LONG, RESP_ID_OFF, notifId)
+        resp.set(ValueLayout.JAVA_LONG, RESP_ID_OFF, session.notifId)
         resp.set(ValueLayout.JAVA_LONG, RESP_VAL_OFF, -1L)
         // Error numbers are negative in the 'error' field of seccomp_notif_resp
         resp.set(ValueLayout.JAVA_INT, RESP_ERR_OFF, -errorNr)
         resp.set(ValueLayout.JAVA_INT, RESP_FLAGS_OFF, 0)
-        ioctl(listenerFd, SECCOMP_IOCTL_NOTIF_SEND, resp).getOrThrow("sendSeccompContinue")
+        ioctl(session.listenerFd, SECCOMP_IOCTL_NOTIF_SEND, resp).getOrThrow("sendSeccompContinue")
     }
 
     override fun recvDescriptor(socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>): FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open>? {
