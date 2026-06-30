@@ -48,38 +48,7 @@ internal sealed interface ProfilerState {
         override val socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>,
         override val listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open>,
     ) : ProfilerState {
-        /** Transitions to [Notified] when a syscall is trapped by the kernel. */
-        fun notified(id: Long, event: SyscallEvent<SyscallEventState.Resolved>) =
-            Notified(socketFd, listenerFd, id, event)
-
         /** Gracefully terminates the session. */
-        fun terminate() = Terminated(socketFd, listenerFd)
-    }
-
-    /** Seccomp notification received, sending trace event. */
-    data class Notified(
-        override val socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>,
-        override val listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open>,
-        val notifId: Long,
-        val event: SyscallEvent<SyscallEventState.Resolved>,
-    ) : ProfilerState {
-        /** Transitions to [WaitingForAck] after the trace event is published to the JVM. */
-        fun waitingForAck() = WaitingForAck(socketFd, listenerFd, notifId)
-
-        /** Terminates on protocol error. */
-        fun terminate() = Terminated(socketFd, listenerFd)
-    }
-
-    /** Event sent, waiting for PROTOCOL_ACK_BYTE or SHUTDOWN from parent. */
-    data class WaitingForAck(
-        override val socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>,
-        override val listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open>,
-        val notifId: Long,
-    ) : ProfilerState {
-        /** Transitions back to [ActiveSession] after the JVM acknowledges receipt. */
-        fun acknowledged() = ActiveSession(socketFd, listenerFd)
-
-        /** Terminates on timeout or desynchronization. */
         fun terminate() = Terminated(socketFd, listenerFd)
     }
 

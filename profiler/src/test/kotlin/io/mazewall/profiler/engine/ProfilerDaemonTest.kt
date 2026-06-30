@@ -41,7 +41,8 @@ class ProfilerDaemonTest {
         }
 
         override fun sendSeccompContinue(
-            session: HandshakeSession.Success,
+            notifId: Long,
+            listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open>,
             resp: MemorySegment,
         ) {
             continueSent = true
@@ -49,7 +50,8 @@ class ProfilerDaemonTest {
         }
 
         override fun sendSeccompError(
-            session: HandshakeSession.Failed,
+            notifId: Long,
+            listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open>,
             resp: MemorySegment,
             errorNr: Int,
         ) {
@@ -172,56 +174,9 @@ class ProfilerDaemonTest {
             assertTrue(transport.ioctlCalls.contains(SECCOMP_IOCTL_NOTIF_SEND), "Should have sent SECCOMP_IOCTL_NOTIF_SEND")
         }
     }
- 
     @Test
-    fun `test handshake - handler sends error on ACK timeout`() {
-        // In handshake mode, if the listener fails to ACK within the timeout (or poll returns 0),
-        // the daemon sends a seccomp error to unblock the tracee.
+    fun `test SessionEventLedger records CONTINUE and EventSent in fire-and-forget mode`() {
         val transport = MockTransport()
-        transport.nextPollResult = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(0L)
- 
-        val reader = MockReader()
-        val syscallMap = mapOf(2 to "OPEN")
-        val handler = ProfilerSessionHandler(
-            FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(10),
-            FileDescriptor.unsafe<FileDescriptorRole.SeccompNotif>(20),
-            transport,
-            transport,
-            transport,
-            reader,
-            syscallMap,
-        ) { }
- 
-        Arena.ofConfined().use { arena ->
-            val notif = arena.allocate(Layouts.SECCOMP_NOTIF)
-            notif.set(ValueLayout.JAVA_LONG, NOTIF_ID_OFF, 123L) // ID
-            notif.set(ValueLayout.JAVA_INT, NOTIF_PID_OFF, 456) // PID
-            notif.set(ValueLayout.JAVA_INT, NOTIF_NR_OFF, 2) // NR (open)
-            notif.set(ValueLayout.JAVA_LONG, NOTIF_ARGS_OFF, 0x1000L) // args[0] = non-zero pointer
- 
-            val resp = arena.allocate(Layouts.SECCOMP_NOTIF_RESP)
-            val ackBuf = arena.allocate(1L)
-            val socketPollFd = arena.allocate(Layouts.POLLFD)
- 
-            val pollFds = setupMockPoll(arena)
-            val action = handler.handleActiveListener(pollFds, ackBuf, notif, resp, socketPollFd)
- 
-            // Handshake failure should cause processNotification to return false, breaking the loop
-            assertTrue(action is LoopAction.Break)
-            assertFalse(transport.continueSent, "Should NOT have sent CONTINUE on handshake failure")
-            assertTrue(transport.errorSent, "Should have sent seccomp error on handshake failure")
-            assertTrue(handler.state is ProfilerState.Terminated, "State should be Terminated")
-        }
-    }
- 
-    @Test
-    fun `test SessionEventLedger records CONTINUE and EventSent in handshake mode`() {
-        val transport = MockTransport()
-        // Mock successful poll and read returning ACK
-        transport.nextPollResult = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(1L)
-        transport.nextReadResult = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(1L)
-        transport.ackByte = PROTOCOL_ACK_BYTE
- 
         val reader = MockReader()
         val syscallMap = mapOf(2 to "OPEN")
         var shutdownCalled = false
@@ -236,33 +191,31 @@ class ProfilerDaemonTest {
         ) {
             shutdownCalled = true
         }
- 
+
         Arena.ofConfined().use { arena ->
             val notif = arena.allocate(Layouts.SECCOMP_NOTIF)
             notif.set(ValueLayout.JAVA_LONG, NOTIF_ID_OFF, 123L) // ID
             notif.set(ValueLayout.JAVA_INT, NOTIF_PID_OFF, 456) // PID
             notif.set(ValueLayout.JAVA_INT, NOTIF_NR_OFF, 2) // NR (open)
             notif.set(ValueLayout.JAVA_LONG, NOTIF_ARGS_OFF, 0x1000L) // args[0] = non-zero pointer
- 
+
             val resp = arena.allocate(Layouts.SECCOMP_NOTIF_RESP)
             val ackBuf = arena.allocate(1L)
             val socketPollFd = arena.allocate(Layouts.POLLFD)
- 
+
             val pollFds = setupMockPoll(arena)
             handler.handleActiveListener(pollFds, ackBuf, notif, resp, socketPollFd)
- 
-            // In handshake mode: with successful ACK, CONTINUE is sent.
+
             assertFalse(handler.state is ProfilerState.Terminated, "State should not be Terminated")
- 
+
             // Check that ledger recorded key events
             val events = handler.ledger.dump()
             assertTrue(events.isNotEmpty(), "Ledger should have recorded events")
             assertTrue(events.any { it is SessionEvent.Notified }, "Ledger should contain Notified event")
             assertTrue(events.any { it is SessionEvent.VmReadvResolved }, "Ledger should contain VmReadvResolved event")
             assertTrue(events.any { it is SessionEvent.EventSent }, "Ledger should contain EventSent event")
-            assertTrue(events.any { it is SessionEvent.AckReceived }, "Ledger should contain AckReceived event")
             assertTrue(events.any { it is SessionEvent.ContinueReplied }, "Ledger should contain ContinueReplied event")
-            assertFalse(events.any { it is SessionEvent.ErrorReplied }, "Ledger should NOT contain ErrorReplied in fire-and-forget mode")
+            assertFalse(events.any { it is SessionEvent.ErrorReplied }, "Ledger should NOT contain ErrorReplied")
         }
     }
 

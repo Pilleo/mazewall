@@ -252,24 +252,16 @@ internal class ProfilerTraceListener(
         return TraceEvent(tidValue = tidValue, syscallName = syscallName, args = args, paths = paths, stackTrace = null)
     }
 
-    private fun processEvent(event: TraceEvent) {
-         try {
-             System.err.println("[TRACE-LISTENER-DEBUG] processEvent: tid=${event.tid.value}, syscall=${event.syscallName}")
-             if (event.paths.isNotEmpty() && isDuplicate(event)) {
-                 System.err.println("[TRACE-LISTENER-DEBUG] duplicate event, skipping")
-                 return
-             }
-
-             accumulatedLogs.add(event)
-             accumulateStackTrace(event)
-         } finally {
-             sendAck()
+     private fun processEvent(event: TraceEvent) {
+         System.err.println("[TRACE-LISTENER-DEBUG] processEvent: tid=${event.tid.value}, syscall=${event.syscallName}")
+         if (event.paths.isNotEmpty() && isDuplicate(event)) {
+             System.err.println("[TRACE-LISTENER-DEBUG] duplicate event, skipping")
+             return
          }
-    }
 
-    private fun sendAck() {
-        sendCommand(PROTOCOL_ACK_BYTE)
-    }
+         accumulatedLogs.add(event)
+         accumulateStackTrace(event)
+     }
 
     private fun isDuplicate(event: TraceEvent): Boolean {
         val cacheKey = "${event.syscallName}:${event.paths.sorted().joinToString(",")}"

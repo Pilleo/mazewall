@@ -47,10 +47,6 @@ class "BobCompiler" as io.mazewall.profiler.compiler.BobCompiler {
   __
   +BillOfBehavior compile(List<? extends TraceEvent>)
 }
-abstract class "HandshakeSession" as io.mazewall.profiler.engine.HandshakeSession {
-  + {abstract}long getNotifId()
-  + {abstract}FileDescriptor<SeccompNotif, Open> getListenerFd()
-}
 abstract class "LoopAction" as io.mazewall.profiler.engine.LoopAction {
 }
 interface "NativeIoOperations" as io.mazewall.profiler.engine.NativeIoOperations {
@@ -112,8 +108,8 @@ class "RealProfilerTransport" as io.mazewall.profiler.engine.RealProfilerTranspo
   + {static}RealProfilerTransport INSTANCE
   __
   +void sendTraceEvent(FileDescriptor<?, ? extends Open>, SyscallEvent<? extends Resolved>)
-  +void sendSeccompContinue(Success, MemorySegment)
-  +void sendSeccompError(Failed, MemorySegment, int)
+  +void sendSeccompContinue(long, FileDescriptor<SeccompNotif, ? extends Open>, MemorySegment)
+  +void sendSeccompError(long, FileDescriptor<SeccompNotif, ? extends Open>, MemorySegment, int)
   +FileDescriptor<SeccompNotif, Open> recvDescriptor(FileDescriptor<UnixSocket, ? extends Open>)
   +SyscallResult poll(MemorySegment, long, int)
   +SyscallResult read(FileDescriptor<?, ? extends Open>, MemorySegment, long)
@@ -125,8 +121,8 @@ class "RealProfilerTransport" as io.mazewall.profiler.engine.RealProfilerTranspo
   +void close(FileDescriptor<?, ? extends Open>)
 }
 interface "SeccompResponder" as io.mazewall.profiler.engine.SeccompResponder {
-  + {abstract}void sendSeccompContinue(Success, MemorySegment)
-  + {abstract}void sendSeccompError(Failed, MemorySegment, int)
+  + {abstract}void sendSeccompContinue(long, FileDescriptor<SeccompNotif, ? extends Open>, MemorySegment)
+  + {abstract}void sendSeccompError(long, FileDescriptor<SeccompNotif, ? extends Open>, MemorySegment, int)
 }
 interface "SessionEvent" as io.mazewall.profiler.engine.SessionEvent {
   + {abstract}long getTimestampNanos()
