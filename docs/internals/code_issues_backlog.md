@@ -1303,3 +1303,33 @@ If a policy "allows" an `openat` via `decision == 1`, the kernel will execute th
 *   **Hypothesis:** Can an attacker rename directory to bypass path normalizer?
 *   **Context & Proof:** `PathNormalizer` does static analysis. Does the system ensure paths aren't modified post-normalization?
 *   **Recommendation:** Verify path resolution constraints are verified against Landlock or Seccomp hooks safely.
+
+### 🔴 [Severity: HIGH]: Missing ArchUnit test for FFM architecture boundary violations
+*   **Target Area:** `enforcer/src/test/kotlin/io/mazewall/ArchitectureTest.kt`
+*   **Hypothesis:** `docs/internals/architectural_map.md` states "ArchUnit Isolation: all raw memory/FFM/Unsafe manipulations isolated to `io.mazewall.ffi`."
+*   **Context & Proof:** As noted in "Architectural Violation - FFM Leaking Outside `io.mazewall.ffi`", there is extensive usage of `java.lang.foreign` outside of the FFM boundary packages. Currently, `ArchitectureTest.kt` does not have an overarching rule checking `noClasses().that().resideOutsideOfPackage("io.mazewall.ffi..").should().dependOnClassesThat().resideInAPackage("java.lang.foreign..")`. Such a test should be added, but it would currently fail.
+*   **Recommendation:** Implement the ArchUnit test and incrementally refactor `Landlock.kt`, `SupervisorSessionHandler.kt`, `LinuxNative.kt`, etc., so they rely entirely on `io.mazewall.ffi` safe types.
+
+### 🔴 [Severity: MEDIUM]: Unreliable Test Teardown for Mocked Native Engines
+*   **Target Area:** `enforcer/src/test/kotlin/io/mazewall/landlock/LandlockCoverageTest.kt` and `enforcer/src/test/kotlin/io/mazewall/LinuxNativeCoverageTest.kt`
+*   **Hypothesis:** `LinuxNative.setEngine(mock)` is used extensively to inject mock kernel behaviors. However, `LinuxNative.resetToDefault()` or an equivalent teardown is missing in many of these tests.
+*   **Context & Proof:** `grep -rn "LinuxNative.setEngine" enforcer/src/test/kotlin/io/mazewall/` shows 15 usages, but `LinuxNative.resetToDefault` has only 2 occurrences (and `LinuxNative.setEngine(RealNativeEngine)` appears once in `NativeEngineTest.kt`). In `LandlockCoverageTest.kt` and `LinuxNativeCoverageTest.kt`, there is no `@AfterEach` method or `finally` block ensuring the engine is reset. If one of these tests fails or throws an exception midway, the static `LinuxNative` singleton will remain mocked for all subsequent tests running in the same JVM, causing spurious test failures across the suite.
+*   **Recommendation:** Add an `@AfterEach` block in all test classes that use `LinuxNative.setEngine` to unconditionally call `LinuxNative.resetToDefault()`, ensuring global state is properly isolated between tests.
+
+### 🔴 [Severity: MEDIUM]: Uncaught Native Exceptions Escaping Landlock Installation
+*   **Target Area:** `enforcer/src/main/kotlin/io/mazewall/landlock/LandlockState.kt`
+*   **Hypothesis:** `LandlockSession.applyRuleset` handles FFM resources but may not correctly propagate or contain exceptions during intermediate installation phases.
+*   **Context & Proof:** In `LandlockSession.applyRuleset`, `nativeScope` and `try-catch` are used. However, if `Landlock.createRuleset` throws an unexpected runtime exception (e.g., an FFM `IllegalStateException` due to memory alignment issues on a weird kernel, rather than a managed `SyscallResult.Error`), the exception bypasses the standard `state = LandlockState.Failed(err)` setting because it's outside the inner `try` block that wraps `added.restrictSelf(processWide)`.
+*   **Recommendation:** Wrap the entire logic from `state = LandlockState.CreatingRuleset(abi)` onwards inside a comprehensive `try-catch` block that correctly transitions the state to `LandlockState.Failed(e)` for any `Throwable`, ensuring the failure state is strictly recorded before throwing.
+
+### 🔴 [Severity: MEDIUM]: Uncaught exceptions in `ContainedExecutorWrapper.kt` during filter installation
+*   **Target Area:** `enforcer/src/main/kotlin/io/mazewall/enforcer/internal/ContainedExecutorWrapper.kt`
+*   **Hypothesis:** If `ContainedExecutors.installOnCurrentThread(policy, scopingPolicy)` fails midway (e.g., Landlock throws an exception before Seccomp is installed, or the supervisor connection fails), the `ThreadStateRegistry` might be left in a partially updated or corrupted state because `installOnCurrentThread` updates `ThreadStateRegistry.state` incrementally as it installs filters, but doesn't roll back on failure.
+*   **Context & Proof:** `ContainedExecutors.installInternal` calls `applyLandlockIfNecessary` which updates `ThreadStateRegistry.state`. If the subsequent `installSeccompFilter` fails, the thread state registry will reflect Landlock applied, but the seccomp filter might not be, or worse, the `SupervisorSession` might not be created properly. While `ContainedExecutorWrapper` uses `.use {}` to close the `AutoCloseable` return value of `installOnCurrentThread`, it doesn't clean up the `ThreadStateRegistry.state` if the *installation itself* throws an exception.
+*   **Recommendation:** `ContainedExecutors.installInternal` should probably take a snapshot of the current state, and use a `try-catch` to restore the original `ThreadStateRegistry.state` (and potentially Landlock/Seccomp state, though those are harder to revert) if the installation throws an error, or the Wrapper should handle it.
+
+### 🔴 [Severity: MEDIUM]: TOCTOU in Path Normalization `PathNormalizer.kt`
+*   **Target Area:** `enforcer/src/main/kotlin/io/mazewall/sbob/PathNormalizer.kt`
+*   **Hypothesis:** `PathNormalizer.normalizeAndPrune` uses `Path.normalize()` which is purely syntactic and does not resolve symlinks dynamically at the kernel level.
+*   **Context & Proof:** The method states "resolves all paths... and prunes redundant subpaths". However, it only uses `normalize()` (which removes `..` and `.`), not `toRealPath()` or `toAbsolutePath()`. If a path `/opt/app/../etc/passwd` is specified, `normalize()` resolves it to `/etc/passwd`. But if `/opt/app` was a symlink to `/var/app` and `/var` was allowed, the string-based parsing is ignorant of the actual kernel VFS topology. This can create vulnerabilities where an attacker constructs paths that look harmless syntactically but point to sensitive locations via symlinks. The `Landlock.applyUserRules` then registers these string paths into the kernel.
+*   **Recommendation:** `PathNormalizer` should strictly document that it performs static analysis, and if real security guarantees are needed, it should invoke `Path.toRealPath()` to resolve symlinks before pruning, or rely entirely on kernel-level Landlock rules (which handle symlink resolution dynamically, though Landlock `openat` flags do not follow symlinks by default unless `O_NOFOLLOW` is omitted).
