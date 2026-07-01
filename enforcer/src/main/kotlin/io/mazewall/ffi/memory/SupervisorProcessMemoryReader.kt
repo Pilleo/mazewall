@@ -59,8 +59,11 @@ public object SupervisorProcessMemoryReader {
                 MemorySegment.copy(localBuf, ValueLayout.JAVA_BYTE, 0L, dest, 0, bytesRead)
                 dest
             } else {
-                if (res is LinuxNative.SyscallResult.Error && res.errno == 1 && warnOnEperm) { // EPERM = 1
-                    System.err.println("[DAEMON] WARN: Permission denied reading memory from TID ${tid.value}. (Yama ptrace_scope?)")
+                if (res is LinuxNative.SyscallResult.Error && res.errno == 1) { // EPERM = 1
+                    if (warnOnEperm) {
+                        System.err.println("[DAEMON] WARN: Permission denied reading memory from TID ${tid.value}. (Yama ptrace_scope?)")
+                    }
+                    return "<YAMA_ERROR_UNKNOWN_PATH>".toByteArray(StandardCharsets.UTF_8)
                 }
                 null
             }

@@ -97,6 +97,21 @@ val policy = Policy.builder()
     }
 
     @Test
+    fun `test compiler throws exception when Yama error sentinel is present`() {
+        val events = listOf(
+            TraceEvent(
+                12345,
+                "OPEN",
+                longArrayOf(139626353983000, 0, 0, 0, 0, 0),
+                listOf("<YAMA_ERROR_UNKNOWN_PATH>")
+            )
+        )
+        org.junit.jupiter.api.assertThrows<IllegalStateException> {
+            BobCompiler.compile(events)
+        }
+    }
+
+    @Test
     fun `test C-1 bug fix - syscall observed but not restricted by base policy is absent from compiled policy`() {
         // GETPID is generally not restricted by Policy.PURE_COMPUTE_UNSAFE.
         // If we observe GETPID, compiling against PURE_COMPUTE should NOT list it in the unrestricted list of the DSL

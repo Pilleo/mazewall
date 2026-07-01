@@ -25,6 +25,9 @@ object BobCompiler {
         val execs = mutableSetOf<String>()
 
         for (event in events) {
+            if (event.paths.contains("<YAMA_ERROR_UNKNOWN_PATH>")) {
+                throw IllegalStateException("Profiler path resolution failed due to permission restriction (Yama ptrace_scope). Please invoke prctl(PR_SET_PTRACER, daemonPid) or configure Yama settings.")
+            }
             // Map the syscall name to Syscall enum
             val syscall =
                 runCatching {
