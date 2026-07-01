@@ -32,7 +32,7 @@ class "JvmBaselineProfiles" as io.mazewall.profiler.JvmBaselineProfiles {
 class "Profiler" as io.mazewall.profiler.Profiler {
   + {static}Profiler INSTANCE
   __
-  +ConcurrentHashMap<Tid, Thread> getThreadRegistry()
+  +ConcurrentHashMap<Tid, Thread> getThreadRegistry$io_mazewall_profiler()
   +void shutdown()
 }
 class "ProfilingResult" as io.mazewall.profiler.ProfilingResult<T> {
@@ -85,8 +85,8 @@ class "ProfilerInstallerSession" as io.mazewall.profiler.engine.ProfilerInstalle
 interface "ProfilerInstallerState" as io.mazewall.profiler.engine.ProfilerInstallerState {
 }
 interface "ProfilerMemoryReader" as io.mazewall.profiler.engine.ProfilerMemoryReader {
-  + {abstract}String readStringFromProcess(int, long, int)
-  + {abstract}String resolveLink(int, String)
+  + {abstract}String readStringFromProcess-UQ8bvmw(int, long, int)
+  + {abstract}String resolveLink-wmNNZyg(int, String)
 }
 class "ProfilerSessionHandler" as io.mazewall.profiler.engine.ProfilerSessionHandler {
   + {static}Companion Companion
@@ -94,7 +94,7 @@ class "ProfilerSessionHandler" as io.mazewall.profiler.engine.ProfilerSessionHan
   +SessionEventLedger getLedger()
   +ProfilerState getState()
   +LoopAction handleActiveListener(MemorySegment, MemorySegment, MemorySegment, MemorySegment, MemorySegment)
-  +boolean processNotification(MemorySegment, MemorySegment, MemorySegment, MemorySegment)
+  +boolean processNotification$io_mazewall_profiler(MemorySegment, MemorySegment, MemorySegment, MemorySegment)
 }
 interface "ProfilerState" as io.mazewall.profiler.engine.ProfilerState {
   + {abstract}FileDescriptor<UnixSocket, Open> getSocketFd()
@@ -105,8 +105,8 @@ interface "ProfilerTransport" as io.mazewall.profiler.engine.ProfilerTransport {
 class "RealMemoryReader" as io.mazewall.profiler.engine.RealMemoryReader {
   + {static}RealMemoryReader INSTANCE
   __
-  +String readStringFromProcess(int, long, int)
-  +String resolveLink(int, String)
+  +String readStringFromProcess-UQ8bvmw(int, long, int)
+  +String resolveLink-wmNNZyg(int, String)
 }
 class "RealProfilerTransport" as io.mazewall.profiler.engine.RealProfilerTransport {
   + {static}RealProfilerTransport INSTANCE
@@ -145,12 +145,12 @@ interface "SocketLifecycleManager" as io.mazewall.profiler.engine.SocketLifecycl
   + {abstract}FileDescriptor<SeccompNotif, Open> recvDescriptor(FileDescriptor<UnixSocket, ? extends Open>)
 }
 class "SyscallEvent" as io.mazewall.profiler.engine.SyscallEvent<S extends SyscallEventState> {
-  +int getTid()
+  +int getTid-HbGDZeU()
   +String getSyscallName()
   +List<Long> getArgs()
   +List<String> getPaths()
   +List<String> getStackTrace()
-  +SyscallEvent<S> copy(int, String, List<Long>, List<String>, List<String>)
+  +SyscallEvent<S> copy-34OFzuQ(int, String, List<Long>, List<String>, List<String>)
 }
 class "SyscallEventKt" as io.mazewall.profiler.engine.SyscallEventKt {
   + {static}SyscallEvent<Resolved> resolved(SyscallEvent<? extends Raw>, List<String>)
@@ -163,7 +163,7 @@ class "SyscallPathResolver" as io.mazewall.profiler.engine.SyscallPathResolver {
 abstract class "TraceEvent" as io.mazewall.profiler.engine.TraceEvent {
   + {static}Companion Companion
   __
-  + {abstract}int getTid()
+  + {abstract}int getTid-HbGDZeU()
   + {abstract}String getSyscallName()
   + {abstract}List<String> getStackTrace()
   +List<String> getPaths()

@@ -1095,11 +1095,12 @@ For full architectural details, see `supervisor_proxy_design.md`.
 *   **Context & Proof:** `JVMValidationListener.start` and `runValidationReactor` in `SupervisorInstaller.kt` directly use `Arena.ofShared()` and manipulate memory allocation logic for the `SupervisorResponseSegment`. According to `docs/internals/architectural_map.md#7-core-architectural-paradigms--patterns`, all raw memory/FFM manipulation must be isolated to `io.mazewall.ffi`.
 *   **Recommendation:** Move the raw `Arena` and `SupervisorResponseSegment` lifecycle management into a dedicated class inside the `io.mazewall.ffi` package, exposing a safe, higher-level interface to the `enforcer.supervisor` package.
 
-### 🔴 [Severity: LOW]: Suboptimal Gradle Build Configuration for CI/CD
+### ✅ [RESOLVED]: Suboptimal Gradle Build Configuration for CI/CD
+**Status:** RESOLVED (July 2026)
 *   **Target Area:** `.github/workflows/ci.yml` and `build.gradle.kts`
-*   **Hypothesis:** The GitHub Actions workflow explicitly disables parallel execution and configuration caching for most Gradle tasks, overriding optimal defaults in `gradle.properties`.
-*   **Context & Proof:** In `.github/workflows/ci.yml`, steps like `run: ./gradlew build -x jacocoTestCoverageVerification --no-parallel` and publishing steps use `--no-parallel` and `--no-configuration-cache`. This drastically increases CI execution time compared to a parallelized, configuration-cached build.
-*   **Recommendation:** Remove `--no-parallel` globally in CI. Selectively re-enable configuration caching (e.g., removing `--no-configuration-cache`) where possible. Investigate if `dependencyCheckAnalyze` and the publishing tasks can be updated to support the configuration cache.
+*   **Context & Proof:** The GitHub Actions workflow previously disabled parallel execution and configuration caching for Gradle tasks via `--no-parallel` and `--no-configuration-cache`.
+*   **Fix:** Merged the steps into a single containerized step running `./gradlew build` inside the container, leveraging parallel execution and configuration cache natively using standard configuration from `gradle.properties`.
+
 
 ### 🔴 [Severity: LOW]: CI Podman Container Caching Missing
 *   **Target Area:** `scripts/run_containerized_tests.sh` and `.github/workflows/ci.yml`
@@ -1107,11 +1108,12 @@ For full architectural details, see `supervisor_proxy_design.md`.
 *   **Context & Proof:** In `scripts/run_containerized_tests.sh`, the command `podman build -t mazewall-test-runner -f infra/dev/Containerfile .` executes without any cache-related flags. In GitHub Actions, since the runner environment is ephemeral, this forces a full re-download of packages and JDK distributions defined in `Containerfile` on every single PR and push.
 *   **Recommendation:** Implement Podman/Buildah layer caching in GitHub Actions. Alternatively, use GitHub Container Registry (GHCR) to push/pull a baseline test runner image or use actions like `docker/setup-buildx-action` (if switching back to Docker) to cache intermediate layers effectively.
 
-### 🔴 [Severity: LOW]: Redundant JaCoCo Test Coverage Verification in CI
-*   **Target Area:** `.github/workflows/ci.yml` and `build.gradle.kts`
-*   **Hypothesis:** The CI workflow executes the Jacoco verification phase separately, breaking standard task dependency chains and adding unnecessary overhead.
-*   **Context & Proof:** The CI runs `./gradlew build -x jacocoTestCoverageVerification` and then, two steps later, `./gradlew jacocoTestCoverageVerification`. Because integration tests are run in between, it attempts to aggregate execution data. However, Gradle's task graph (`build.gradle.kts` defines `check` depending on `jacocoTestCoverageVerification`) is already designed to handle this sequentially. Manually orchestrating this with `-x` is brittle and inefficient.
-*   **Recommendation:** Refactor the CI workflow to execute a single `./gradlew check` that natively encapsulates unit testing, integration testing (perhaps via a composite task or proper test source set separation rather than a shell script wrapper), and jacoco verification in a single, parallelizable Gradle invocation.
+### ✅ [RESOLVED]: Redundant JaCoCo Test Coverage Verification in CI
+**Status:** RESOLVED (July 2026)
+*   **Target Area:** `.github/workflows/ci.yml`
+*   **Context & Proof:** The CI workflow previously executed the Jacoco verification phase separately, using `-x` to skip it and executing it later.
+*   **Fix:** By running the entire build inside the container, both unit and integration tests run in the same Gradle invocation, allowing JaCoCo to automatically aggregate execution data and verify thresholds as part of the standard `check` phase.
+
 
 ### ✅ [RESOLVED]: Inefficient DependencyCheck Configuration in CI
 *   **Status:** RESOLVED (June 2026)

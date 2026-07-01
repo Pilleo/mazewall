@@ -205,10 +205,6 @@ subprojects {
 
     tasks.withType<Test>().configureEach {
         systemProperty("io.mazewall.test", "true")
-        // Skip integration tests on host since they require container-level capabilities and seccomp filters.
-        if (name == "integrationTest" && System.getenv("MAZEWALL_IN_CONTAINER") != "true") {
-            enabled = false
-        }
     }
 
     tasks.withType<org.gradle.testing.jacoco.tasks.JacocoReport>().configureEach {

@@ -155,6 +155,8 @@ tasks.named("generateClassDiagrams") {
 }
 
 tasks.named("build") {
-    dependsOn("generateClassDiagrams")
+    if (System.getenv("CI") != "true" && System.getenv("MAZEWALL_IN_CONTAINER") != "true") {
+        dependsOn("generateClassDiagrams")
+    }
 }
 
