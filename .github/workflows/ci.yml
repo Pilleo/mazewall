@@ -37,10 +37,25 @@ jobs:
                   systemctl --user enable --now podman.socket
                   echo "DOCKER_HOST=unix://$XDG_RUNTIME_DIR/podman/podman.sock" >> $GITHUB_ENV
                   echo "MAZEWALL_CONTAINER_ENGINE=podman" >> $GITHUB_ENV
+            - name: Cache Podman Image
+              id: cache-podman
+              uses: actions/cache@v4
+              with:
+                  path: ~/.cache/podman-image
+                  key: podman-image-${{ hashFiles('infra/dev/Containerfile') }}
+            - name: Load Cached Podman Image
+              if: steps.cache-podman.outputs.cache-hit == 'true'
+              run: |
+                  podman load -i ~/.cache/podman-image/mazewall-test-runner.tar
             - name: Run Containerized Build, Lint, Tests & Coverage Verification
               run: |
                   set -o pipefail
                   ./scripts/run_containerized_tests.sh build 2>&1 | tee build.log
+            - name: Save Podman Image to Cache
+              if: steps.cache-podman.outputs.cache-hit != 'true'
+              run: |
+                  mkdir -p ~/.cache/podman-image
+                  podman save -o ~/.cache/podman-image/mazewall-test-runner.tar mazewall-test-runner:latest
             - name: Run PITest (Host Unit Tests Only)
               run: ./gradlew :enforcer:pitest -Dpitest.threads=2
             - name: Run Vulnerability Exploitation Demo
