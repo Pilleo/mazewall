@@ -41,14 +41,14 @@ jobs:
               id: cache-podman
               uses: actions/cache@v4
               with:
-                  path: ~/.cache/podman-image
+                  path: ${{ github.workspace }}/.cache/podman-image
                   key: podman-image-${{ hashFiles('infra/dev/Containerfile') }}-${{ github.sha }}
                   restore-keys: |
                       podman-image-${{ hashFiles('infra/dev/Containerfile') }}-
             - name: Load Cached Podman Image
               run: |
-                  if [ -f ~/.cache/podman-image/mazewall-test-runner.tar ]; then
-                      podman load -i ~/.cache/podman-image/mazewall-test-runner.tar
+                  if [ -f ${{ github.workspace }}/.cache/podman-image/mazewall-test-runner.tar ]; then
+                      podman load -i ${{ github.workspace }}/.cache/podman-image/mazewall-test-runner.tar
                       podman images
                   fi
             - name: Run Containerized Build, Lint, Tests & Coverage Verification
@@ -57,9 +57,9 @@ jobs:
                   ./scripts/run_containerized_tests.sh build 2>&1 | tee build.log
             - name: Save Podman Image to Cache
               run: |
-                  if [ ! -f ~/.cache/podman-image/mazewall-test-runner.tar ]; then
-                      mkdir -p ~/.cache/podman-image
-                      podman save -o ~/.cache/podman-image/mazewall-test-runner.tar mazewall-test-runner:latest
+                  if [ ! -f ${{ github.workspace }}/.cache/podman-image/mazewall-test-runner.tar ]; then
+                      mkdir -p ${{ github.workspace }}/.cache/podman-image
+                      podman save -o ${{ github.workspace }}/.cache/podman-image/mazewall-test-runner.tar mazewall-test-runner:latest
                   fi
             - name: Run PITest (Host Unit Tests Only)
               run: ./gradlew :enforcer:pitest -Dpitest.threads=2
