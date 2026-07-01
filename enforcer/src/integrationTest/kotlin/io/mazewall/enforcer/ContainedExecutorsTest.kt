@@ -234,11 +234,10 @@ class ContainedExecutorsTest : BaseIntegrationTest() {
         assertTrue(ContainmentViolationDetector.isContainmentViolation(main))
     }
 
-    fun testInstallOnProcessRejectsPoliciesWithIoUring() {
+    fun testInstallOnProcessRejectsPoliciesWithLandlockRequirement() {
         val policy = Policy
             .builder()
-            .base(Policy.PURE_COMPUTE_UNSAFE)
-            .unblock(Syscall.IO_URING_SETUP)
+            .allowFsRead("/tmp")
             .build()
         val features = Platform.featureMatrix
         if (features.landlockTsyncSupported) {
@@ -264,8 +263,8 @@ class ContainedExecutorsTest : BaseIntegrationTest() {
     }
 
     @Test
-    fun `installOnProcess rejects policies with io_uring due to landlock requirement`() {
-        IsolatedProcessTester.runIsolatedMethod(this::class.java.name, "testInstallOnProcessRejectsPoliciesWithIoUring")
+    fun `installOnProcess rejects policies with Landlock requirement on unsupported kernels`() {
+        IsolatedProcessTester.runIsolatedMethod(this::class.java.name, "testInstallOnProcessRejectsPoliciesWithLandlockRequirement")
     }
 
 

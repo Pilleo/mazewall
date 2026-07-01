@@ -19,8 +19,8 @@ class "BpfFilter" as io.mazewall.BpfFilter {
   + {static}int SECCOMP_DATA_ARCH_OFFSET
   __
   +List<BpfInstruction> build(Arch, PolicyDefinition<?>, boolean)
-  +SyscallInspectionPipeline getSyscallInspectionPipeline$io_mazewall_enforcer()
-  +void emitInspections$io_mazewall_enforcer(NrLoaded, List<SyscallInspection>, boolean, Set<Integer>)
+  +SyscallInspectionPipeline getSyscallInspectionPipeline()
+  +void emitInspections(NrLoaded, List<SyscallInspection>, boolean, Set<Integer>)
 }
 class "CompiledSandbox" as io.mazewall.CompiledSandbox<S extends PolicyScope> {
   +PolicyDefinition<S> getDefinition()
@@ -87,7 +87,7 @@ interface "NativeFileSystem" as io.mazewall.NativeFileSystem {
   + {abstract}SyscallResult close(FileDescriptor<?, ? extends Open>)
 }
 interface "NativeMemory" as io.mazewall.NativeMemory {
-  + {abstract}SyscallResult processVmReadv-dExwGbI(NativeTransaction, int, MemorySegment, long, MemorySegment, long, long)
+  + {abstract}SyscallResult processVmReadv(NativeTransaction, int, MemorySegment, long, MemorySegment, long, long)
   + {abstract}SyscallResult read(NativeTransaction, FileDescriptor<?, ? extends Open>, MemorySegment, long)
   + {abstract}SyscallResult write(NativeTransaction, FileDescriptor<?, ? extends Open>, MemorySegment, long)
   + {abstract}MemorySegment newSockFProg(Arena, List<? extends BpfInstruction>)
@@ -104,7 +104,7 @@ interface "NativeNetworking" as io.mazewall.NativeNetworking {
   + {abstract}SyscallResult recv(NativeTransaction, FileDescriptor<?, ? extends Open>, MemorySegment, long, int)
 }
 interface "NativeProcess" as io.mazewall.NativeProcess {
-  + {abstract}int gettid-HbGDZeU()
+  + {abstract}int gettid()
   + {abstract}SyscallResult prctl(NativeTransaction, PrctlCommand)
 }
 interface "NativeTransaction" as io.mazewall.NativeTransaction {
@@ -117,7 +117,7 @@ class "Platform" as io.mazewall.Platform {
   +void resetToDefault()
   +boolean isLinux()
   +boolean isSupported()
-  +boolean isArchitectureSupported$io_mazewall_enforcer()
+  +boolean isArchitectureSupported()
   +FallbackBehavior configuredFallback()
   +Diagnostics diagnose()
 }
@@ -150,11 +150,11 @@ class "Policy" as io.mazewall.Policy<S extends PolicyScope, State extends Policy
   +boolean getAllowUnsafePrctl()
   +Set<SandboxedPath> getAllowedFsReadPaths()
   +Set<SandboxedPath> getAllowedFsWritePaths()
-  +boolean getEnforceLandlock$io_mazewall_enforcer()
+  +boolean getEnforceLandlock()
   +List<BpfInstruction> getCompiledFilters()
   +boolean isSyscallAllowed(Syscall)
   +Map<Integer, SeccompAction> syscallActionNumbers(Arch)
-  +SyscallInspectionPipeline getSyscallInspectionPipeline$io_mazewall_enforcer()
+  +SyscallInspectionPipeline getSyscallInspectionPipeline()
   + {static}Builder builder()
   + {static}Builder threadLocalBuilder()
 }
@@ -166,10 +166,10 @@ class "PolicyBuilder" as io.mazewall.PolicyBuilder<S extends PolicyScope> {
   +PolicyBuilder<S> unblock(Syscall[])
   +PolicyBuilder<S> base(PolicyDefinition<? extends S>)
   +PolicyBuilder<ThreadLocalOnly> allowFsRead(String)
-  +PolicyBuilder<ThreadLocalOnly> allowFsRead-3PFA_EI(String)
+  +PolicyBuilder<ThreadLocalOnly> allowFsRead(String)
   +PolicyBuilder<ThreadLocalOnly> allowJvmClasspath()
   +PolicyBuilder<ThreadLocalOnly> allowFsWrite(String)
-  +PolicyBuilder<ThreadLocalOnly> allowFsWrite-3PFA_EI(String)
+  +PolicyBuilder<ThreadLocalOnly> allowFsWrite(String)
   +PolicyBuilder<S> allowMmapExec()
   +PolicyBuilder<S> allowNonThreadClone()
   +PolicyBuilder<S> allowUnsafePrctl()
@@ -185,7 +185,7 @@ class "PolicyDefinition" as io.mazewall.PolicyDefinition<S extends PolicyScope> 
   +boolean getAllowUnsafePrctl()
   +Set<SandboxedPath> getAllowedFsReadPaths()
   +Set<SandboxedPath> getAllowedFsWritePaths()
-  +boolean getEnforceLandlock$io_mazewall_enforcer()
+  +boolean getEnforceLandlock()
   +boolean getHasSupervisedSyscalls()
   +boolean isSyscallAllowed(Syscall)
   +Map<Integer, SeccompAction> syscallActionNumbers(Arch)
@@ -240,7 +240,7 @@ class "RealNativeHelper" as io.mazewall.RealNativeHelper {
 class "RealNativeMemory" as io.mazewall.RealNativeMemory {
   + {static}RealNativeMemory INSTANCE
   __
-  +SyscallResult processVmReadv-dExwGbI(NativeTransaction, int, MemorySegment, long, MemorySegment, long, long)
+  +SyscallResult processVmReadv(NativeTransaction, int, MemorySegment, long, MemorySegment, long, long)
   +SyscallResult read(NativeTransaction, FileDescriptor<?, ? extends Open>, MemorySegment, long)
   +SyscallResult write(NativeTransaction, FileDescriptor<?, ? extends Open>, MemorySegment, long)
   +MemorySegment newSockFProg(Arena, List<? extends BpfInstruction>)
@@ -261,7 +261,7 @@ class "RealNativeNetworking" as io.mazewall.RealNativeNetworking {
 class "RealNativeProcess" as io.mazewall.RealNativeProcess {
   + {static}RealNativeProcess INSTANCE
   __
-  +int gettid-HbGDZeU()
+  +int gettid()
   +SyscallResult prctl(NativeTransaction, PrctlCommand)
 }
 class "RealPlatformProvider" as io.mazewall.RealPlatformProvider {
@@ -379,7 +379,7 @@ class "SandboxedPath" as io.mazewall.core.SandboxedPath {
   + {static}int hashCode-impl(String)
   + {static}boolean equals-impl(String, Object)
   + {static}boolean equals-impl0(String, String)
-  + {static}String of-NptRyN4(String, boolean)
+  + {static}String of(String, boolean)
 }
 enum "SeccompAction" as io.mazewall.core.SeccompAction {
   ACT_KILL_PROCESS
@@ -423,8 +423,8 @@ class "ContainedExecutors" as io.mazewall.enforcer.ContainedExecutors {
   __
   +void installOnCurrentThread(Policy<?, ? extends Uncompiled>[])
   +void installOnCurrentThread(Policy<?, ? extends Uncompiled>, StacktraceScopingPolicy)
-  +AutoCloseable installOnCurrentThread$io_mazewall_enforcer(PolicyDefinition<?>)
-  +AutoCloseable installOnCurrentThread$io_mazewall_enforcer(PolicyDefinition<?>, StacktraceScopingPolicy)
+  +AutoCloseable installOnCurrentThread(PolicyDefinition<?>)
+  +AutoCloseable installOnCurrentThread(PolicyDefinition<?>, StacktraceScopingPolicy)
   +void installOnProcess(Policy<? extends ProcessWideSafe, ? extends Uncompiled>[])
   +ExecutorService wrap(ExecutorService, Policy<?, ? extends Uncompiled>[])
   +ExecutorService wrap(ExecutorService, Policy<?, ? extends Uncompiled>, StacktraceScopingPolicy)
@@ -577,9 +577,9 @@ interface "SupervisorDaemonState" as io.mazewall.enforcer.supervisor.SupervisorD
 class "SupervisorInstaller" as io.mazewall.enforcer.supervisor.SupervisorInstaller {
   + {static}SupervisorInstaller INSTANCE
   __
-  +ConcurrentHashMap<Tid, Thread> getThreadRegistry$io_mazewall_enforcer()
-  +void registerThread-4e3CYpk(int)
-  +void unregisterThread-4e3CYpk(int)
+  +ConcurrentHashMap<Tid, Thread> getThreadRegistry()
+  +void registerThread(int)
+  +void unregisterThread(int)
   +SupervisorSession installSupervisedFilterForThread(PolicyDefinition<?>, StacktraceScopingPolicy)
 }
 class "SupervisorSession" as io.mazewall.enforcer.supervisor.SupervisorSession {
@@ -833,8 +833,8 @@ class "SockaddrUnSegment" as io.mazewall.ffi.memory.SockaddrUnSegment {
 class "SupervisorProcessMemoryReader" as io.mazewall.ffi.memory.SupervisorProcessMemoryReader {
   + {static}SupervisorProcessMemoryReader INSTANCE
   __
-  +String readString-9VTcEsA(int, long, int, boolean)
-  +byte[] readBytes-9VTcEsA(int, long, int, boolean)
+  +String readString(int, long, int, boolean)
+  +byte[] readBytes(int, long, int, boolean)
 }
 class "SupervisorResponseSegment" as io.mazewall.ffi.memory.SupervisorResponseSegment {
   + {static}Companion Companion
@@ -884,7 +884,7 @@ class "SupervisorSocketUtils" as io.mazewall.ffi.networking.SupervisorSocketUtil
   + {static}int SOL_SOCKET
   + {static}int SCM_RIGHTS
   __
-  +MemorySegment setupSockAddrUn-PLQgl-A(Arena, String)
+  +MemorySegment setupSockAddrUn(Arena, String)
   +int connectWithRetry(String, int, long)
   +boolean sendDescriptor(int, int)
   +FileDescriptor<SeccompNotif, Open> recvDescriptor(FileDescriptor<UnixSocket, ? extends Open>)
@@ -912,13 +912,13 @@ class "Landlock" as io.mazewall.landlock.Landlock {
   +boolean isSupported()
   +int getAbiVersion()
   +void applyRuleset(PolicyDefinition<?>, boolean)
-  +long getFullAccessMask$io_mazewall_enforcer(int)
-  +void handleUnsupportedLandlock$io_mazewall_enforcer()
-  +void addJvmClasspathRules$io_mazewall_enforcer(Arena, LandlockRuleset<? extends Building>, long)
-  +LandlockRuleset<Sealed> enforceRuleset$io_mazewall_enforcer(LandlockRuleset<? extends Building>, boolean)
-  +void applyUserRules$io_mazewall_enforcer(Arena, LandlockRuleset<? extends Building>, PolicyDefinition<?>, int, long)
-  +long getAccessMask$io_mazewall_enforcer(int, PolicyDefinition<?>)
-  +FileDescriptor<Ruleset, Open> createRuleset$io_mazewall_enforcer(Arena, long, int)
+  +long getFullAccessMask(int)
+  +void handleUnsupportedLandlock()
+  +void addJvmClasspathRules(Arena, LandlockRuleset<? extends Building>, long)
+  +LandlockRuleset<Sealed> enforceRuleset(LandlockRuleset<? extends Building>, boolean)
+  +void applyUserRules(Arena, LandlockRuleset<? extends Building>, PolicyDefinition<?>, int, long)
+  +long getAccessMask(int, PolicyDefinition<?>)
+  +FileDescriptor<Ruleset, Open> createRuleset(Arena, long, int)
 }
 interface "LandlockLifecycle" as io.mazewall.landlock.LandlockLifecycle {
 }
@@ -951,9 +951,9 @@ class "PolicyTransformer" as io.mazewall.sbob.PolicyTransformer {
 interface "ArgCheck" as io.mazewall.seccomp.ArgCheck {
 }
 abstract class "BpfBuilder" as io.mazewall.seccomp.BpfBuilder {
-  +List<BpfMacro> getOps$io_mazewall_enforcer()
-  +AtomicInteger getLabelCounter$io_mazewall_enforcer()
-  +String nextLabel$io_mazewall_enforcer(String)
+  +List<BpfMacro> getOps()
+  +AtomicInteger getLabelCounter()
+  +String nextLabel(String)
 }
 abstract class "BpfInstruction" as io.mazewall.seccomp.BpfInstruction {
   + {static}Companion Companion
@@ -1003,9 +1003,9 @@ class "PureJavaBpfEngine" as io.mazewall.seccomp.PureJavaBpfEngine {
   +boolean isSupported()
   +SeccompEngine<Loaded> install(CompiledSandbox<?>)
   +SeccompEngine<Loaded> installOnProcess(CompiledSandbox<?>)
-  +void setNoNewPrivs$io_mazewall_enforcer()
-  +FilterApplied installFilter$io_mazewall_enforcer(Arch, MemorySegment, boolean)
-  +void verifyInstallation$io_mazewall_enforcer(PolicyDefinition<?>)
+  +void setNoNewPrivs()
+  +FilterApplied installFilter(Arch, MemorySegment, boolean)
+  +void verifyInstallation(PolicyDefinition<?>)
 }
 interface "SeccompEngine" as io.mazewall.seccomp.SeccompEngine<S extends EngineState> {
   + {abstract}S getState()
