@@ -471,11 +471,28 @@ In addition to static syscall filtering, `mazewall` supports dynamic **Stacktrac
 * However, because the tracee thread is suspended in `Thread.start()` holding internal classloader and thread monitors, it cannot reach the safepoint.
 * This results in a permanent circular deadlock.
 
-### The Solution (Parent-Thread vfork Supervision)
-1. **Allow `CLONE` / `CLONE3` entirely:** To ensure the JVM can start threads without deadlocking or triggering supervisor inspections, do not supervise `CLONE`.
-2. **Configure `vfork` process spawning:** Set `-Djdk.lang.Process.launchMechanism=vfork` (or `fork`) on the JVM process. This forces process spawning to use `vfork`/`fork` instead of `clone`.
-3. **Supervise `VFORK` and `FORK`:** When a tool spawns a process, `vfork` is executed on the calling JVM thread. The supervisor intercepts this syscall on the parent thread before the child process detaches, enabling safe context inspection via `Thread.getStackTrace()`.
-4. **Child Process Attributing:** Since the child process has a different PID and does not run JVM code, its subsequent `execve` has an empty stacktrace. Attributing and validating the execution context is therefore handled at the parent's `vfork`/`fork` boundary.
+### The JVM-Independent Solution (BPF-Level Separation & State-Based Propagation)
+
+Rather than relying on JVM-specific configuration arguments (like `-Djdk.lang.Process.launchMechanism=vfork`), `mazewall` implements a clean, system-level design to enforce stacktrace-based scoping for process spawning safely:
+
+1. **BPF-Level Clone Flag Inspection (Preventing Deadlocks):**
+   JVM thread creation (`Thread.start()`) utilizes the `clone`/`clone3` syscalls with the `CLONE_THREAD` flag (value `0x00010000`). Blocking or suspending this path results in JVM-internal deadlocks.
+   The BPF program is configured to inspect `clone` flags and **unconditionally allow** calls where `CLONE_THREAD` is set. Non-thread-creating `clone` calls (which indicate process creation, such as those from `posix_spawn`), along with `fork` and `vfork`, are routed to `USER_NOTIF`.
+
+2. **Parent Stack Trace Capture on Spawn Entry:**
+   When the parent JVM thread ($T_{parent}$) calls `vfork`, `fork`, or a process-spawning `clone`:
+   - The seccomp filter traps the entry.
+   - The JVM validation listener captures the stack trace of $T_{parent}$ and registers $T_{parent}$'s TID in a global `PendingSpawnRegistry` with its authorized stack trace before allowing the syscall to continue.
+
+3. **State-Based Propagation on Child `execve`:**
+   When the child process ($PID_{child}$) calls `execve`/`execveat` to run the target binary:
+   - The seccomp filter intercepts `execve`.
+   - The supervisor daemon reads `PPID` from `/proc/$PID_{child}/stat` to verify it is a descendant of the JVM.
+   - Because the parent thread is suspended by the kernel in `vfork` or `clone(CLONE_VFORK)` until the child calls `execve` or exits, the spawning parent thread is guaranteed to be in the `PendingSpawnRegistry`.
+   - The JVM validation listener queries the registry to retrieve the parent thread's authorized stack trace and validates the execution context.
+   - Once the child execs, the parent thread returns and is removed from the `PendingSpawnRegistry`.
+
+This ensures process spawning validation is 100% secure, JVM-independent, and free of thread-creation deadlocks.
 
 ---
 

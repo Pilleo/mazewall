@@ -199,4 +199,48 @@ class PolicyTest {
         val combinedTP: Policy<PolicyScope.ThreadLocalOnly, Uncompiled> = p3 + p1
         assertTrue(combinedTP.enforceLandlock)
     }
+
+    @Test
+    fun `io_uring_setup is blocked if open or openat is restricted and Landlock is not active`() {
+        val p = Policy.builder()
+            .block(Syscall.OPEN)
+            .allow(Syscall.IO_URING_SETUP)
+            .build()
+
+        assertFalse(p.isSyscallAllowed(Syscall.OPEN))
+        assertFalse(p.isSyscallAllowed(Syscall.IO_URING_SETUP), "io_uring_setup should be blocked to prevent bypass when Landlock is not active")
+    }
+
+    @Test
+    fun `io_uring_setup remains allowed if open and openat are allowed`() {
+        val p = Policy.builder()
+            .allow(Syscall.OPEN)
+            .allow(Syscall.OPENAT)
+            .allow(Syscall.IO_URING_SETUP)
+            .build()
+
+        assertTrue(p.isSyscallAllowed(Syscall.OPEN))
+        assertTrue(p.isSyscallAllowed(Syscall.IO_URING_SETUP), "io_uring_setup should remain allowed when open and openat are allowed")
+    }
+
+    @Test
+    fun `io_uring_setup remains allowed if Landlock is active`() {
+        val p = Policy.builder()
+            .block(Syscall.OPEN)
+            .allow(Syscall.IO_URING_SETUP)
+            .allowFsRead("/some/path")
+            .build()
+
+        assertTrue(p.enforceLandlock)
+        assertTrue(p.isSyscallAllowed(Syscall.IO_URING_SETUP), "io_uring_setup should remain allowed when Landlock is active to enforce path limits")
+    }
+
+    @Test
+    fun `io_uring_setup blocking is resolved correctly during policy combination`() {
+        val p1 = Policy.builder().block(Syscall.OPEN).allow(Syscall.IO_URING_SETUP).build()
+        val p2 = Policy.builder().allow(Syscall.OPEN).allow(Syscall.IO_URING_SETUP).build()
+
+        val combined = Policy.combine(p1, p2)
+        assertFalse(combined.isSyscallAllowed(Syscall.IO_URING_SETUP), "combined policy should block io_uring_setup because open is restricted overall and Landlock is not active")
+    }
 }

@@ -81,6 +81,18 @@ public data class PolicyDefinition<out S : PolicyScope>(
                 combinedSyscalls[Syscall.OPEN] = SeccompAction.ACT_ALLOW
                 combinedSyscalls[Syscall.OPENAT] = SeccompAction.ACT_ALLOW
                 combinedSyscalls[Syscall.OPENAT2] = SeccompAction.ACT_ALLOW
+            } else {
+                val openAction = combinedSyscalls[Syscall.OPEN] ?: combinedDefaultAction
+                val openatAction = combinedSyscalls[Syscall.OPENAT] ?: combinedDefaultAction
+                val ioUringAction = combinedSyscalls[Syscall.IO_URING_SETUP] ?: combinedDefaultAction
+
+                val openBlocked = openAction != SeccompAction.ACT_ALLOW
+                val openatBlocked = openatAction != SeccompAction.ACT_ALLOW
+                val ioUringAllowed = ioUringAction == SeccompAction.ACT_ALLOW
+
+                if ((openBlocked || openatBlocked) && ioUringAllowed) {
+                    combinedSyscalls[Syscall.IO_URING_SETUP] = SeccompAction.ACT_ERRNO
+                }
             }
 
             @Suppress("UNCHECKED_CAST")

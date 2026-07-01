@@ -118,6 +118,18 @@ public class PolicyBuilder<S : PolicyScope> internal constructor(
             finalSyscalls[Syscall.OPEN] = SeccompAction.ACT_ALLOW
             finalSyscalls[Syscall.OPENAT] = SeccompAction.ACT_ALLOW
             finalSyscalls[Syscall.OPENAT2] = SeccompAction.ACT_ALLOW
+        } else {
+            val openAction = finalSyscalls[Syscall.OPEN] ?: defaultAction
+            val openatAction = finalSyscalls[Syscall.OPENAT] ?: defaultAction
+            val ioUringAction = finalSyscalls[Syscall.IO_URING_SETUP] ?: defaultAction
+
+            val openBlocked = openAction != SeccompAction.ACT_ALLOW
+            val openatBlocked = openatAction != SeccompAction.ACT_ALLOW
+            val ioUringAllowed = ioUringAction == SeccompAction.ACT_ALLOW
+
+            if ((openBlocked || openatBlocked) && ioUringAllowed) {
+                finalSyscalls[Syscall.IO_URING_SETUP] = SeccompAction.ACT_ERRNO
+            }
         }
         return PolicyDefinition<S>(
             defaultAction = defaultAction,
