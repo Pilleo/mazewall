@@ -47,11 +47,10 @@ class ProfilerInstallerTest {
                     accumulatedLogs = accumulatedLogs,
                     stackTracesMap = null,
                     pathCache = pathCache,
-                    workerThreadProvider = { currentThread },
                     connectWithRetry = { _ ->
                         throw IllegalStateException("Simulated connection retry failure")
                     },
-                    startTraceListener = { _, _, _, _, _, latch -> latch.countDown() },
+                    startTraceListener = { _, _, _, _, latch -> latch.countDown() },
                 )
             } catch (t: Throwable) {
                 errorRef.set(t)
@@ -82,12 +81,11 @@ class ProfilerInstallerTest {
                     accumulatedLogs = accumulatedLogs,
                     stackTracesMap = null,
                     pathCache = pathCache,
-                    workerThreadProvider = { currentThread },
                     connectWithRetry = { _ ->
                         Thread.sleep(500)
                         throw IllegalStateException("Delayed error")
                     },
-                    startTraceListener = { _, _, _, _, _, latch -> latch.countDown() },
+                    startTraceListener = { _, _, _, _, latch -> latch.countDown() },
                 )
             } catch (t: Throwable) {
                 errorRef.set(t)
@@ -126,12 +124,11 @@ class ProfilerInstallerTest {
                     accumulatedLogs = accumulatedLogs,
                     stackTracesMap = null,
                     pathCache = pathCache,
-                    workerThreadProvider = { currentThread },
                     connectWithRetry = { _ ->
                         // Return a dummy FD that will fail sendDescriptor
                         999
                     },
-                    startTraceListener = { _, _, _, _, _, latch -> latch.countDown() },
+                    startTraceListener = { _, _, _, _, latch -> latch.countDown() },
                 )
             } catch (t: Throwable) {
                 errorRef.set(t)

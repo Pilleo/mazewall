@@ -299,28 +299,25 @@ This ensures jump targets are validated at compile time and guarantees no dangli
 2. **`SECCOMP_FILTER_FLAG_NEW_LISTENER` + Clone Tracking:** Ensure new child threads automatically inherit the seccomp filter and notify the same supervisor daemon.
 This is critical for generating a production-grade JVM Syscall Floor that accounts for background management tasks.
 
-### 🔴 [Severity: HIGH]: Blacklist policies trigger silent Landlock filesystem lockdown due to `io_uring` check
+### ✅ [RESOLVED]: Blacklist policies trigger silent Landlock filesystem lockdown due to `io_uring` check
+**Status:** RESOLVED (July 2026)
 **Target:** `io.mazewall.enforcer.ContainedExecutors.kt` (specifically `needsLandlock` calculation)
-**Context:** In `ContainedExecutors.kt`, `needsLandlock` is implicitly triggered if `io_uring_setup` is allowed, even if no filesystem paths are specified. This causes Landlock to be applied with an empty ruleset, permanently locking down the filesystem for the thread. This trigger is currently undocumented in the code, making it difficult for agents to diagnose the root cause of the "silent lockdown" symptom observed in `Landlock.kt`.
+**Context:** In `ContainedExecutors.kt`, `needsLandlock` was implicitly triggered if `io_uring_setup` was allowed, even if no filesystem paths were specified. This caused Landlock to be applied with an empty ruleset, permanently locking down the filesystem for the thread.
 - *Threat Model Nuance:* Seccomp BPF filters are unable to inspect shared memory Submission Queue Entries (SQEs) inside `io_uring` queues at syscall entry time. Thus, an attacker can bypass path-based seccomp blocks (e.g. `openat`) by submitting operations asynchronously via `io_uring`. Since kernel workers (`io-wq`) inherit the thread's Landlock credentials, applying Landlock prevents this bypass.
-- *Root Cause:* If a blacklist policy allows `io_uring_setup` but blocks direct `open`/`openat`, `needsLandlock` evaluates to `true`. If the user did not define any allowed filesystem paths, Landlock is applied with empty read/write lists, effectively locking the thread out of all file operations.
-**Needed:** Add a cross-reference comment to the `io_uring` trigger in `ContainedExecutors.kt`.
-- *Fix Strategy:*
-  1. Add a `disableLandlockForIoUring` boolean option in `PolicyBuilder` / `PolicyDefinition` (defaulting to `false` to remain secure-by-default).
-  2. In `needsLandlock`, check `!policy.disableLandlockForIoUring` before applying the implicit `io_uring` trigger.
-  3. In `applyLandlockIfNecessary`, log a logger warning if Landlock is implicitly triggered due to `io_uring` while no paths are defined, advising the developer to use the builder opt-out if they require full filesystem access.
+- *Root Cause:* If a blacklist policy allows `io_uring_setup` but blocks direct `open`/`openat`, `needsLandlock` evaluated to `true`. If the user did not define any allowed filesystem paths, Landlock was applied with empty read/write lists, effectively locking the thread out of all file operations.
+**Fix:**
+1. Landlock is now only enforced if actual allowed filesystem paths are defined.
+2. If Landlock is not enforced (no allowed paths), and the policy restricts `open` or `openat` but allows `io_uring_setup`, `io_uring_setup` is automatically blocked (mapped to `ACT_ERRNO`) to prevent the bypass vector.
+
 
 
 ## Profiler, SBoB Parser & Exception Mapping Diagnostics
 
-### 🔴 [Severity: HIGH]: Silent failure of Profiler path resolution under Yama `ptrace_scope` > 1 leads to catastrophic Landlock enforcement failures
+### ✅ [RESOLVED]: Silent failure of Profiler path resolution under Yama `ptrace_scope` > 1 leads to catastrophic Landlock enforcement failures
+**Status:** RESOLVED (July 2026)
 **Target:** `io.mazewall.profiler.engine.ProfilerDaemon`
-
-**Failure Hypothesis:** A system administrator configures Linux with Yama `kernel.yama.ptrace_scope = 2` (admin-only attach). When the `mazewall` Profiler daemon attempts to read path arguments using `process_vm_readv` on the JVM threads, the kernel denies the read with `EPERM` (1).
-**Context & Proof:** The daemon catches this `EPERM`, logs a warning to `System.err`, and gracefully returns `null` for the read string. The event is then passed to `getPathArgs()`, which receives `null` and yields an empty list of paths (`emptyList()`). The `TraceEvent` is sent to the JVM without any path context. When `BobCompiler` consumes these events, it generates an empty set for `opens` and `fsWritePaths`.
-**Vulnerability Chain Potential:** High usability / stability failure. Because the profiler fails gracefully instead of crashing, it produces a "valid" `BillOfBehavior` JSON containing `[]` for paths. When this SBoB is deployed to production via `SbobParser.parseToPolicy`, it generates a `Policy` that permits zero paths. The JVM wrapper then applies Landlock with an empty ruleset, instantly revoking all filesystem access and causing a catastrophic production crash across the application.
-**Needed:**
-The profiler must explicitly FAIL (or throw an exception back to the JVM) if it encounters `EPERM` during path resolution. At the very least, it should inject a specific sentinel path like `"<YAMA_ERROR_UNKNOWN_PATH>"` so `BobCompiler` knows the trace was corrupted and can refuse to compile an empty SBoB, preventing invalid policies from being shipped.
+**Context:** A system administrator configures Linux with Yama `kernel.yama.ptrace_scope = 2` (admin-only attach). When the `mazewall` Profiler daemon attempts to read path arguments using `process_vm_readv` on the JVM threads, the kernel denies the read with `EPERM` (1). The daemon caught this `EPERM` and gracefully returned `null` for the read string, which yielded an empty list of paths and compiled into an empty SBoB that caused a complete filesystem lockdown.
+**Fix:** The profiler now returns a `"<YAMA_ERROR_UNKNOWN_PATH>"` sentinel when `process_vm_readv` fails with `EPERM`, and `BobCompiler` throws an `IllegalStateException` to prevent compiling a corrupted empty profile, warning the developer to configure ptrace tracing appropriately.
 
 ### 🔴 [Severity: MEDIUM]: `SbobParser` lacks Context-Aware Working Directory resolution for Relative Paths
 **Target:** `io.mazewall.SbobParser`
@@ -331,18 +328,12 @@ The profiler must explicitly FAIL (or throw an exception back to the JVM) if it 
 1. `SbobParser` should warn or throw an error when attempting to parse a relative path, or it should accept an explicit `baseCwd` parameter to resolve relative paths deterministically rather than relying on the environmental JVM CWD at load time.
 2. The Profiler should ensure all paths are fully resolved to absolute canonical paths *before* writing them to the SBoB, failing the profiler session if a `dirfd` cannot be resolved to an absolute path.
 
-### 🔴 [Severity: MEDIUM]: Trace Listener misleads developers by capturing the Main Thread stack trace for unmapped child threads
+### ✅ [RESOLVED]: Trace Listener misleads developers by capturing the Main Thread stack trace for unmapped child threads
+**Status:** RESOLVED (July 2026)
 **Target:** `io.mazewall.profiler.internal.ProfilerTraceListener`
-**Failure Hypothesis:** A profiled workload spawns unmanaged child threads (via standard libraries or thread pools) that execute I/O or other trapped syscalls. When a child thread triggers a `USER_NOTIF`, the Trace Listener fails to resolve its TID to a Java `Thread` object in the JVM thread registry. As a fallback, the listener captures the stack trace of the main worker thread, permanently logging a completely unrelated stack trace for the child thread's event.
-**Context & Proof:** In `ProfilerTraceListener.kt`'s `runListenerLoop`, the listener runs a loop reading events from the daemon socket:
-```kotlin
-val threadToProfile = Profiler.threadRegistry[pid] ?: workerThreadProvider()
-val stackTrace = threadToProfile?.stackTrace?.map { it.toString() }
-```
-`Profiler.threadRegistry` only tracks threads that explicitly call the profiler registration hook. Child threads spawned dynamically by libraries are not registered.
-When the daemon notifies the listener that a child thread with TID `pid` made a syscall, `threadRegistry[pid]` returns `null`. The listener then invokes `workerThreadProvider()`, which returns the main thread's `Thread` object. As a result, the generated `TraceEvent` contains the stack trace of the **main thread** instead of the actual child thread. During SBoB analysis, developers are shown highly confusing stack traces of the main thread supposedly performing filesystem or network actions that it never initiated.
-**Cascading Risk Potential:** Medium diagnostic and maintainability defect. Misleads developers and increases debugging complexity by reporting false/uncorrect stack frames for sandboxed workload execution.
-**Needed:** Remove the fallback to `workerThreadProvider()` when capturing stack traces in the listener thread. If the TID is not found in `threadRegistry`, record `null` or a sentinel string (e.g., `["<untracked_descendant_thread_stack_trace>"]`) to maintain strict data integrity.
+**Context:** A profiled workload spawns unmanaged child threads that execute trapped syscalls. When a child thread triggers a `USER_NOTIF`, the Trace Listener fails to resolve its TID to a Java `Thread` object. Previously it fell back to capturing the main worker thread's stack trace, creating highly confusing reports.
+**Fix:** Removed the fallback. If a thread cannot be resolved in the `threadRegistry`, the listener records a sentinel stack trace element `"<untracked_descendant_thread>"` to maintain strict data integrity.
+
 
 ### ✅ [RESOLVED]: `SyscallPathResolver` correctly resolves `SYMLINKAT` path parameters
 **Status:** RESOLVED (June 2026)

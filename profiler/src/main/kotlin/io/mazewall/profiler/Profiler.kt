@@ -121,7 +121,6 @@ object Profiler {
                         if (captureStackTraces) localStackProfile else null,
                         localPathCache,
                         processWide,
-                        { Thread.currentThread() },
                         onListenerCreated = { sessionListener.set(it) },
                     )
 
@@ -193,7 +192,6 @@ object Profiler {
         stackTracesMap: MutableMap<TraceEvent, MutableList<Array<StackTraceElement>>>?,
         pathCache: MutableMap<String, Long>,
         processWide: Boolean,
-        workerThreadProvider: () -> Thread?,
         onListenerCreated: ((ProfilerTraceListener) -> Unit)? = null,
     ) {
         ProfilerInstaller.installProfilingFilterForThread(
@@ -202,15 +200,13 @@ object Profiler {
             accumulatedLogs = accumulatedLogs,
             stackTracesMap = stackTracesMap,
             pathCache = pathCache,
-            workerThreadProvider = workerThreadProvider,
             processWide = processWide,
-            startTraceListener = { fd, logs, traces, cache, provider, readyLatch ->
+            startTraceListener = { fd, logs, traces, cache, readyLatch ->
                 val listener = ProfilerTraceListener(
                     FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(fd),
                     logs,
                     traces,
-                    cache,
-                    provider
+                    cache
                 )
                 listeners.add(listener)
                 onListenerCreated?.invoke(listener)

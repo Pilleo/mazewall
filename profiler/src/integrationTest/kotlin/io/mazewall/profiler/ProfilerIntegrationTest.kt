@@ -347,4 +347,29 @@ class ProfilerIntegrationTest : BaseIntegrationTest() {
             wrapped.shutdownNow()
         }
     }
+
+    @Test
+    fun `test profiler captures untracked background thread syscalls with sentinel stack trace`() {
+        val targetFile = File("/etc/hostname")
+        assertTrue(targetFile.exists())
+
+        val result = Profiler.profile(processWide = true, captureStackTraces = true) {
+            val thread = Thread {
+                targetFile.readText()
+            }
+            thread.start()
+            thread.join()
+        }
+
+        val bob = result.behavior
+        assertTrue(bob.opens.contains("/etc/hostname"))
+        assertTrue(bob.stackProfile.isNotEmpty())
+
+        val hasSentinel = bob.stackProfile.values.any { traces ->
+            traces.any { frames ->
+                frames.any { frame -> frame.className.contains("<untracked_descendant_thread>") }
+            }
+        }
+        assertTrue(hasSentinel, "Should contain untracked descendant thread sentinel in stack profile")
+    }
 }

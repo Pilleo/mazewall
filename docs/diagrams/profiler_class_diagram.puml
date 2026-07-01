@@ -77,7 +77,7 @@ interface "ProfilerDaemonState" as io.mazewall.profiler.engine.ProfilerDaemonSta
 class "ProfilerInstaller" as io.mazewall.profiler.engine.ProfilerInstaller {
   + {static}ProfilerInstaller INSTANCE
   __
-  +void installProfilingFilterForThread(String, PolicyDefinition<?>, List<TraceEvent>, Map<TraceEvent, List<StackTraceElement[]>>, Map<String, Long>, Function0<? extends Thread>, boolean, Function1<? super String, Integer>, Function6<? super Integer, ? super List<TraceEvent>, ? super Map<TraceEvent, List<StackTraceElement[]>>, ? super Map<String, Long>, ? super Function0<? extends Thread>, ? super CountDownLatch, Unit>)
+  +void installProfilingFilterForThread(String, PolicyDefinition<?>, List<TraceEvent>, Map<TraceEvent, List<StackTraceElement[]>>, Map<String, Long>, boolean, Function1<? super String, Integer>, Function5<? super Integer, ? super List<TraceEvent>, ? super Map<TraceEvent, List<StackTraceElement[]>>, ? super Map<String, Long>, ? super CountDownLatch, Unit>)
 }
 class "ProfilerInstallerSession" as io.mazewall.profiler.engine.ProfilerInstallerSession {
   +void install()

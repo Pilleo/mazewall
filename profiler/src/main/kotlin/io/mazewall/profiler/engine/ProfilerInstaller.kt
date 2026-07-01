@@ -30,7 +30,6 @@ internal object ProfilerInstaller {
         accumulatedLogs: MutableList<TraceEvent>,
         stackTracesMap: MutableMap<TraceEvent, MutableList<Array<StackTraceElement>>>?,
         pathCache: MutableMap<String, Long>,
-        workerThreadProvider: () -> Thread?,
         processWide: Boolean = false,
         connectWithRetry: (String) -> Int = { path -> ProfilerSocket.connectWithRetry(path) },
         startTraceListener: (
@@ -38,7 +37,6 @@ internal object ProfilerInstaller {
             MutableList<TraceEvent>,
             MutableMap<TraceEvent, MutableList<Array<StackTraceElement>>>?,
             MutableMap<String, Long>,
-            () -> Thread?,
             CountDownLatch
         ) -> Unit,
     ) {
@@ -48,7 +46,6 @@ internal object ProfilerInstaller {
             accumulatedLogs = accumulatedLogs,
             stackTracesMap = stackTracesMap,
             pathCache = pathCache,
-            workerThreadProvider = workerThreadProvider,
             connectWithRetry = connectWithRetry,
             startTraceListener = startTraceListener,
             processWide = processWide,
@@ -63,14 +60,12 @@ internal class ProfilerInstallerSession(
     private val accumulatedLogs: MutableList<TraceEvent>,
     private val stackTracesMap: MutableMap<TraceEvent, MutableList<Array<StackTraceElement>>>?,
     private val pathCache: MutableMap<String, Long>,
-    private val workerThreadProvider: () -> Thread?,
     private val connectWithRetry: (String) -> Int,
     private val startTraceListener: (
         Int,
         MutableList<TraceEvent>,
         MutableMap<TraceEvent, MutableList<Array<StackTraceElement>>>?,
         MutableMap<String, Long>,
-        () -> Thread?,
         CountDownLatch
     ) -> Unit,
     private val processWide: Boolean = false,
@@ -87,7 +82,7 @@ internal class ProfilerInstallerSession(
             sendDescriptor = { sockFd, fd -> ProfilerSocket.sendDescriptor(sockFd, fd) }
         ) { socketFd, readyLatch ->
             // Start background thread to listen for events from the daemon (uncontained)
-            startTraceListener(socketFd, accumulatedLogs, stackTracesMap, pathCache, workerThreadProvider, readyLatch)
+            startTraceListener(socketFd, accumulatedLogs, stackTracesMap, pathCache, readyLatch)
         }
     }
 }
