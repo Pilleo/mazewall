@@ -49,7 +49,6 @@ jobs:
               run: |
                   if [ -f ${{ github.workspace }}/.cache/podman-image/mazewall-test-runner.tar ]; then
                       podman load -i ${{ github.workspace }}/.cache/podman-image/mazewall-test-runner.tar
-                      podman images
                   fi
             - name: Run Containerized Build, Lint, Tests & Coverage Verification
               run: |
