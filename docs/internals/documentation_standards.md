@@ -62,3 +62,19 @@ To maintain a clear relationship graph of how JVM code coordinates with native s
         click ContainmentDesign "containment_design.md"
     ```
 *   This enables developers and agents to traverse component boundaries visually, instantly clicking through to the underlying code files or design constraints.
+
+---
+
+## 5. File Structure Inspection Tool
+
+To avoid reading hundreds of lines of code just to understand the API surface or method layout of a source file, the repository provides a lightweight outline/structure tool.
+
+### Usage:
+Run the Kotlin script passing the path to any Kotlin file:
+```bash
+kotlin scripts/file_structure.main.kts enforcer/src/main/kotlin/io/mazewall/enforcer/ContainedExecutors.kt
+```
+
+This returns a clean, hierarchical tree outlining the classes, objects, interfaces, member functions (with parameters), and properties of the file, allowing both human developers and agents to immediately grasp the component's signature.
+
+
