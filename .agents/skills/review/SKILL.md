@@ -4,7 +4,7 @@
 **Objective:** Perform a logical security and structural audit of the `mazewall` repository to identify architecture gaps, security vulnerabilities, memory-safety risks (FFM), and test coverage weaknesses.
 
 > [!IMPORTANT]
-> **CRITICAL OPERATIONAL CONSTRAINT:** Your mission is exclusively to **investigate and document issues**. Do **NOT** attempt to write or apply fixes to the source code. Your sole output is detailed, high-fidelity documentation of issues, gaps, and improvements in the audit backlog (`docs/internals/code_issues_backlog.md`).
+> **CRITICAL OPERATIONAL CONSTRAINT:** Your mission is exclusively to **investigate and document issues**. Do **NOT** attempt to write or apply fixes to the source code. Your sole output is detailed, high-fidelity documentation of issues, gaps, and improvements by creating a new markdown issue file in the backlog directory `docs/internals/backlog/` and registering it in [backlog/README.md](file:///home/leanid/Documents/code/java/jseccomp/docs/internals/backlog/README.md).
 >
 > **NO EXECUTION REQUIRED:** You are **NOT** required to execute tests or build the project. This is a logic and architectural audit based on source code inspection.
 
@@ -45,21 +45,25 @@ Evaluate the project across these core operational areas:
 This is a **continuous, hypothesis-driven execution loop**. You are authorized to run indefinitely. Do not summarize prematurely.
 
 1. **Phase 1: Research & Hypothesis:** 
-   - Check `docs/internals/code_issues_backlog.md` for existing open issues.
+   - Check [backlog/README.md](file:///home/leanid/Documents/code/java/jseccomp/docs/internals/backlog/README.md) for existing open issues.
    - Look into the generated PlantUML diagrams under `docs/diagrams/` (e.g., [enforcer_class_diagram.puml](file:///home/leanid/Documents/code/java/jseccomp/docs/diagrams/enforcer_class_diagram.puml) and [profiler_class_diagram.puml](file:///home/leanid/Documents/code/java/jseccomp/docs/diagrams/profiler_class_diagram.puml)) to align on the class architectures and relationships.
    - Formulate a specific security or architectural failure hypothesis.
 2. **Phase 2: Source Code Audit:** Audit the target files, checking both core logic and their associated tests.
-3. **Phase 3: Backlog Entry:** If you find a weakness, document it in `docs/internals/code_issues_backlog.md` using the standard format:
+3. **Phase 3: Backlog Entry:** If you find a vulnerability, bug, or gap, create a new markdown file in the backlog directory (e.g. `docs/internals/backlog/issue-XXX-some-bug.md`) using the following format:
 
 ```markdown
-### 🔴 [Severity: CRITICAL/HIGH/MEDIUM/LOW/DOS]: [Concise Title]
-*   **Target Area:** [File path or Architectural Concept]
-*   **Hypothesis:** [What specific vulnerability or failure vector were you investigating?]
-*   **Context & Proof:** [Direct code reference and explanation of the failure execution flow.]
-*   **Recommendation:** [Actionable steps to resolve the issue.]
+---
+title: "Title of Issue"
+severity: "HIGH/MEDIUM/LOW/CRITICAL/ENHANCEMENT"
+status: "open"
+---
+
+# 🔴 [Severity: Severity]: Title of Issue
+**Context:** [What you found and why it exists]
+**Needed:** [How to fix or prevent it]
 ```
 
-*Note: Never overwrite or delete existing backlog issues; always append or mark resolved.*
+Register your new issue in the **Open Issues** table inside `docs/internals/backlog/README.md`.
 
 ---
 

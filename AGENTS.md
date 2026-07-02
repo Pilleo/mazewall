@@ -182,8 +182,7 @@ The `.agents/skills/` directory contains reusable, step-by-step workflows for co
 |---|---|
 | `add_syscall` | Adding a new syscall constant to `Policy`, `BpfFilter`, or the profiler |
 | `ffm_safety` | Making any FFM/off-heap memory changes (layouts, arenas, downcalls) |
-| `fix_backlog_item` | Fixing a known issue registered in `docs/internals/backlog/` |
-| `fix_safety` | Guidance on fixing bugs/tests cleanly without warmups, swallows, or hacks |
+| `fix_backlog_item` | Fixing bugs/backlog items cleanly without warmups, swallows, or hacks |
 | `loop_driven_development` | Iterative red-green-refactor TDD cycle for new features |
 | `report_security_issue` | Discovering a new vulnerability, bypass risk, or kernel behavior gap |
 | `review` | Code review of a patch, PR, or proposed design |
