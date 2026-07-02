@@ -11,22 +11,25 @@ While the examples are JVM-specific, the underlying concepts (Seccomp-BPF, Landl
 
 ## Read the Article Series
 
-1. **[Part 1: Do You Really Know What Your App Is Doing at Runtime?](presentation/article.html)**  
+1. **[Part 0: Your Threads Are All Equally Trusted — Should They Be?](presentation/article0-developer-primer.html)**  
+   Process-wide vs thread-scoped sandbox basics, ExecutorService wrapping, and architectural trade-offs.
+
+2. **[Part 1: Do You Really Know What Your App Is Doing at Runtime?](presentation/article.html)**  
    The threat model, SBoB concept, and why container-level profiles aren't enough.
 
-2. **[Part 2: Let Your Code Build Its Own Sandbox](presentation/article2-profiler.html)**  
+3. **[Part 2: Let Your Code Build Its Own Sandbox](presentation/article2-profiler.html)**  
    Dynamic profiling: how to observe a workload and auto-generate its minimal policy.
 
-3. **[Part 3: Thread-Scoped Containment Mechanics](presentation/article3-enforcement.html)**  
+4. **[Part 3: Thread-Scoped Containment Mechanics](presentation/article3-enforcement.html)**  
    FFM native bindings, errno safety races, Loom virtual thread carrier poisoning, GC safepoint whitelists.
 
-4. **[Part 4: Exploit Scenarios & Kernel Blocking](presentation/article4-attacks.html)**  
+5. **[Part 4: Exploit Scenarios & Kernel Blocking](presentation/article4-attacks.html)**  
    Log4Shell, fileless malware, JIT executable memory, and `io_uring` evasions — tested against mazewall.
 
-5. **[Part 5: Ahead-of-Time SBoB with GraalVM](presentation/article5-graalvm.html)**  
+6. **[Part 5: Ahead-of-Time SBoB with GraalVM](presentation/article5-graalvm.html)**  
    How AOT compilation changes the security picture and removes JIT runtime noise.
 
-6. **[Part 6: Beyond the Thread — Isolates, WebAssembly, and Tooling](presentation/article6-isolates.html)**  
+7. **[Part 6: Beyond the Thread — Isolates, WebAssembly, and Tooling](presentation/article6-isolates.html)**  
    Heap-level isolation via GraalVM Isolates, instruction-level isolation via WebAssembly, and the developer tooling roadmap.
 
 ---

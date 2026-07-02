@@ -225,6 +225,7 @@ Background reading on the kernel mechanics and threat model:
 
 | Part | Title | Focus |
 |---|---|---|
+| **0** | [Your Threads Are All Equally Trusted — Should They Be?](docs/presentation/article0-developer-primer.md) | Process-wide vs thread-scoped sandbox basics |
 | **1** | [Do You Really Know What Your App Is Doing at Runtime?](docs/presentation/article.md) | Seccomp, Landlock, SBoB concepts |
 | **2** | [Let Your Code Build Its Own Sandbox](docs/presentation/article2-profiler.md) | Dynamic profiling, USER_NOTIF daemon |
 | **3** | [Thread-Scoped JVM Containment: The Mechanics](docs/presentation/article3-enforcement.md) | FFM bridge, GC safepoints, Loom VT |
