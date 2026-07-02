@@ -93,4 +93,4 @@ For test script commands and Podman orchestration parameters, refer to the paren
 ---
 
 ## 📓 Code Issues & Discoveries Journal
-If you discover a kernel-level behavior, FFM nuance, or bug during development, you MUST log it immediately in `docs/internals/code_issues_backlog.md`.
+If you discover a kernel-level behavior, FFM nuance, or bug during development, you MUST log it immediately by creating a new markdown file in [docs/internals/backlog/](../docs/internals/backlog/) and registering it in the [backlog README.md](../docs/internals/backlog/README.md).

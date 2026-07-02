@@ -23,11 +23,17 @@ As an AI agent pair-programming on this project, you are assisting in transition
 
 ## 📓 Code Issues & Discoveries Journal
 
-Whenever you discover a bug, architectural gap, kernel-level nuance, or security vulnerability, you MUST log it in `docs/internals/code_issues_backlog.md`. Do not leave critical insights buried in chat history.
+Whenever you discover a bug, architectural gap, kernel-level nuance, or security vulnerability, you MUST log it by creating a new markdown file in the [backlog directory](docs/internals/backlog/) (e.g. `issue-182-some-bug.md`) and registering it in [docs/internals/backlog/README.md](docs/internals/backlog/README.md). Do not leave critical insights buried in chat history.
 
-**Format for new findings:**
+**Format for new issue files (include YAML frontmatter):**
 ```markdown
-### 🔴 [Severity (High/Medium/Low/Critical)]: [Title]
+---
+title: "Title of Issue"
+severity: "HIGH/MEDIUM/LOW/CRITICAL/ENHANCEMENT"
+status: "open"
+---
+
+# 🔴 [Severity: HIGH]: Title of Issue
 **Context:** [What you found and why it exists]
 **Needed:** [How to fix or prevent it]
 ```

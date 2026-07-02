@@ -3,7 +3,7 @@
 **Status: DEFERRED** — Problem scoped and documented. Implementation blocked pending
 a verifiable solution to GraalVM coverage and source analysis completeness.
 
-**Related backlog entry**: `code_issues_backlog.md` (Medium: JVM Invariant Floor)
+**Related backlog entry**: [issue-075-jvm-invariant-syscall-floor-is-incomplete.md](backlog/issue-075-jvm-invariant-syscall-floor-is-incomplete.md) (Medium: JVM Invariant Floor)
 
 ---
 

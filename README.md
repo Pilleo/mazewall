@@ -211,9 +211,7 @@ Policies are composable via a builder — see [GETTING_STARTED.md](GETTING_START
 
 ---
 
-## Current State
-
-The library is actively developed. Core sandboxing (`NO_EXEC`, `NO_NETWORK`, `PURE_COMPUTE`) and the profiler workflow are functional and tested via automated CI. Known issues and open bugs are tracked in [`docs/internals/code_issues_backlog.md`](docs/internals/code_issues_backlog.md).
+The library is actively developed. Core sandboxing (`NO_EXEC`, `NO_NETWORK`, `PURE_COMPUTE`) and the profiler workflow are functional and tested via automated CI. Known issues and open bugs are tracked in the [`docs/internals/backlog/`](docs/internals/backlog/README.md) directory.
 
 API and behavior **will change**. If you're evaluating this for production use, follow the repo and check the backlog.
 

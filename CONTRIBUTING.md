@@ -32,7 +32,7 @@ mazewall has two production modules: **`:enforcer`** (zero-dependency production
 
 1. **Security first:** Never implement silent fallback or bypass behavior. The default is fail-closed. See [AGENTS.md §2](AGENTS.md).
 2. **TDD:** Reproduce bugs with a failing test before fixing. New features get tests before implementation.
-3. **Log issues:** Any kernel behavior discovery, JVM quirk, or security nuance you find goes in [`docs/internals/code_issues_backlog.md`](docs/internals/code_issues_backlog.md).
+3. **Log issues:** Any kernel behavior discovery, JVM quirk, or security nuance you find goes in the [`docs/internals/backlog/`](docs/internals/backlog/README.md) directory.
 4. **Discuss major changes:** Open a GitHub issue before starting large architectural or API changes.
 5. **Code style:** Kotlin idiomatic style, Detekt clean, ktlint clean (`./scripts/lint.sh`).
 

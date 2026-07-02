@@ -10,9 +10,9 @@ internal object ThreadStateRegistry {
     // INVARIANT: ThreadLocals are INTENTIONALLY not cleared between tasks.
     // Seccomp filters are permanent for the OS thread lifetime.
     // Do NOT add cleanup in task wrappers; it would give a false sense of
-    // isolation between tasks on the same thread. See code_issues_backlog.md
-    // "Permanent thread pool contamination" for the known limitation and
-    // the correct fix strategy (scope checks, not cleanup).
+    // isolation between tasks on the same thread. See docs/internals/backlog/
+    // issue-102-permanent-thread-pool-contamination-classloader-leaks-and-st.md
+    // for the known limitation and correct fix strategy (scope checks, not cleanup).
 
     private var stateInternal by threadLocal { ContainerState() }
 

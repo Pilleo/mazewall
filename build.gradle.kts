@@ -293,4 +293,15 @@ subprojects {
     }
 }
 
+val generateKnowledgeMap by tasks.creating(Exec::class) {
+    group = "documentation"
+    description = "Generates and updates the Mermaid-based architectural knowledge graph"
+    commandLine("python3", "$rootDir/scripts/generate_knowledge_map.py")
+}
+
+tasks.named("check") {
+    dependsOn(generateKnowledgeMap)
+}
+
+
 

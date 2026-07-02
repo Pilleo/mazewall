@@ -1,3 +1,10 @@
+---
+title: "Technical Design: Containment Engine & Incremental Filter Stacking"
+scope: "enforcer"
+target_files: ["enforcer/src/main/kotlin/io/mazewall/enforcer/ContainedExecutors.kt", "enforcer/src/main/kotlin/io/mazewall/seccomp/PureJavaBpfEngine.kt", "enforcer/src/main/kotlin/io/mazewall/enforcer/BpfFilter.kt", "enforcer/src/main/kotlin/io/mazewall/landlock/Landlock.kt"]
+keywords: ["seccomp", "bpf", "landlock", "filter stacking"]
+---
+
 # Technical Design: Containment Engine & Incremental Filter Stacking
 
 This document covers the implementation details of the enforcement tier in `mazewall`:

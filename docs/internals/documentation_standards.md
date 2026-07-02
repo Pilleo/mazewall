@@ -1,0 +1,64 @@
+# Repository Documentation Standards (Human & Agent Co-Optimized)
+
+To keep this codebase manageable for both human software engineers and AI coding agents (such as LLMs), the documentation follows a strict **modular, JIT-retrieved, and structured** layout model. 
+
+---
+
+## 1. Modularization over Monoliths
+
+A massive documentation file is hard for humans to scan and extremely expensive for AI agents to load. A 200KB markdown file consumes upwards of 50,000 context tokens, causing **"lost in the middle"** context degradation where agents ignore critical details.
+
+### Standard:
+*   Keep files under **10KB (approx. 200 lines)**.
+*   **The Backlog Standard:** All issues, bugs, and design changes are logged as individual, numbered Markdown files inside [docs/internals/backlog/](backlog/).
+*   **The Index Rule:** Every directory of modular documents must contain a `README.md` that acts as a summary index table linking to individual files.
+
+---
+
+## 2. YAML Frontmatter (Metadata Schema) for Design Docs
+
+To allow AI agents to map target files to design rules in microseconds without parsing full pages of prose, all design and roadmap documents should contain a YAML frontmatter header.
+
+### Frontmatter Schema:
+```yaml
+---
+title: "Title of the Document"
+scope: "enforcer | profiler | ffi | cicd"
+critical_syscalls: ["sys_a", "sys_b"]
+target_files: ["path/to/affected/File.kt"]
+keywords: ["key1", "key2"]
+---
+```
+
+### Agent Integration:
+Before modifying a system component, an agent can perform a high-speed grep search (e.g. `grep_search` looking for `target_files` or `scope: "enforcer"`) to discover which files contain the relevant design constraints, loading them only when needed.
+
+---
+
+## 3. Just-In-Time (JIT) Context Loading (`.agents/`)
+
+The workspace `.agents/` directory is the entry point for AI agent rules. Placing raw design details or backlog logs inside the global `.agents/AGENTS.md` leads to prompt bloat and dilutes compiler guidelines.
+
+### Standard:
+*   The `.agents/AGENTS.md` and child agents files (e.g., `enforcer/AGENTS.md`) must only contain **behavioral invariants, compile targets, and critical boundaries**.
+*   All design layouts, FFM mappings, and research notes must be kept out of the rule files and referenced via **absolute file links** (which agents resolve to physical paths) or relative paths:
+    > "When editing memory mapping code or JIT safety checks, you MUST read the layout design guidelines in [containment_design.md](containment_design.md)."
+*   This forces the agent to follow a JIT retrieval strategy: it scans the rule index first, and then selectively calls `view_file` on the target design document only if the active task touches that area.
+
+---
+
+## 4. Architecture-as-Code (Interactive Knowledge Graph)
+
+To maintain a clear relationship graph of how JVM code coordinates with native systems, the repository maintains an interactive component map at [architectural_map.md](architectural_map.md).
+
+### Standard:
+*   Use standard Mermaid flowcharts to model cross-module dependency structures and trace notification sequence flows.
+*   Make all chart nodes interactive by appending clickable Markdown or HTML file links:
+    ```mermaid
+    graph TD
+        Enforcer[":enforcer Module"] -->|Security Policy| PolicyClass[Policy.kt]
+        Enforcer -->|Design Document| ContainmentDesign[containment_design.md]
+        
+        click ContainmentDesign "containment_design.md"
+    ```
+*   This enables developers and agents to traverse component boundaries visually, instantly clicking through to the underlying code files or design constraints.
