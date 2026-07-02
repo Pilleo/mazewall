@@ -2,16 +2,19 @@ import os
 import re
 import glob
 
-rootDir = "/home/leanid/Documents/code/java/jseccomp"
+rootDir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 docsDir = os.path.join(rootDir, "docs", "internals")
+mapsDir = os.path.join(docsDir, "maps")
 backlogDir = os.path.join(docsDir, "backlog")
 target_map_file = os.path.join(docsDir, "architectural_map.md")
+
+# Ensure maps/ directory exists
+os.makedirs(mapsDir, exist_ok=True)
 
 def parse_yaml_frontmatter(file_path):
     with open(file_path, "r", encoding="utf-8") as f:
         content = f.read()
     
-    # Match YAML block at top of the file
     match = re.match(r"^---\s*\n(.*?)\n---\s*\n", content, re.DOTALL)
     if not match:
         return None
@@ -19,77 +22,73 @@ def parse_yaml_frontmatter(file_path):
     yaml_text = match.group(1)
     metadata = {}
     
-    # Simple key-value parser for simple YAML metadata
     for line in yaml_text.split("\n"):
         if ":" in line:
             key, val = line.split(":", 1)
             key = key.strip()
             val = val.strip().strip('"').strip("'")
             if val.startswith("[") and val.endswith("]"):
-                # Parse list of strings
                 items = [item.strip().strip('"').strip("'") for item in val[1:-1].split(",")]
                 metadata[key] = [i for i in items if i]
             else:
                 metadata[key] = val
     return metadata
 
-def generate_mermaid():
-    # Scan all design docs in internals directory
-    design_docs = glob.glob(os.path.join(docsDir, "*.md"))
-    # Scan all open backlog issues
-    backlog_issues = glob.glob(os.path.join(backlogDir, "issue-*.md"))
-    
+
+def generate_mermaid_for_scope(scope_name, design_docs, backlog_issues):
+    """Generate a Mermaid diagram for a specific scope."""
     nodes = []
     edges = []
     clicks = []
-    
-    # 1. Process Design Docs
+
     for doc in design_docs:
         filename = os.path.basename(doc)
-        if filename == "architectural_map.md" or filename == "README.md":
+        if filename in ("architectural_map.md", "README.md", "documentation_standards.md"):
             continue
-            
+
         meta = parse_yaml_frontmatter(doc)
         if not meta or "title" not in meta:
             continue
-            
+
+        doc_scope = meta.get("scope", "").strip('"').strip("'")
+        if scope_name != "all" and doc_scope != scope_name:
+            continue
+
         doc_id = filename.replace(".md", "").replace("-", "_")
         nodes.append(f'    {doc_id}["📄 Design: {meta["title"]}"]')
-        clicks.append(f'    click {doc_id} "{filename}"')
-        
-        # Link files/classes mapped to this design doc
+        # Link relative from maps/ subdir
+        clicks.append(f'    click {doc_id} "../{filename}"')
+
         if "target_files" in meta:
             targets = meta["target_files"]
             if isinstance(targets, str):
                 targets = [targets]
             for target in targets:
-                # Get a clean class/file name
                 clean_target = os.path.basename(target)
                 target_id = clean_target.replace(".", "_").replace("-", "_")
                 nodes.append(f'    {target_id}["💻 Source: {clean_target}"]')
                 edges.append(f'    {target_id} -->|Governed by| {doc_id}')
-                
-    # 2. Process Open Backlog Issues
+
     for issue in backlog_issues:
         filename = os.path.basename(issue)
         meta = parse_yaml_frontmatter(issue)
         if not meta or "title" not in meta:
             continue
-            
-        # Only map open issues
         if meta.get("status") != "open":
             continue
-            
+
+        issue_scope = meta.get("scope", "").strip('"').strip("'")
+        if scope_name != "all" and issue_scope and issue_scope != scope_name:
+            continue
+
         issue_id = filename.replace(".md", "").replace("-", "_")
         severity = meta.get("severity", "MEDIUM")
-        nodes.append(f'    {issue_id}["🔴 Issue: {meta["title"]} (Severity: {severity})"]')
-        clicks.append(f'    click {issue_id} "backlog/{filename}"')
-        
-        # Look for Target file definition in the issue content
+        nodes.append(f'    {issue_id}["🔴 Issue: {meta["title"]} ({severity})"]')
+        clicks.append(f'    click {issue_id} "../backlog/{filename}"')
+
         with open(issue, "r", encoding="utf-8") as f:
             issue_content = f.read()
-        
-        # Find Target Area metadata in content if not in YAML
+
         target_match = re.search(r'\*\*Target( Area)?:\*\*\s*`(.*?)`', issue_content)
         if target_match:
             target_path = target_match.group(2)
@@ -98,10 +97,11 @@ def generate_mermaid():
             nodes.append(f'    {target_id}["💻 Source: {clean_target}"]')
             edges.append(f'    {issue_id} -->|Affects| {target_id}')
 
-    # Deduplicate nodes
     nodes = list(set(nodes))
-    
-    # Construct Mermaid Code
+
+    if not nodes:
+        return None
+
     mermaid = ["```mermaid", "graph TD"]
     mermaid.extend(nodes)
     mermaid.extend(edges)
@@ -109,32 +109,96 @@ def generate_mermaid():
     mermaid.append("```")
     return "\n".join(mermaid)
 
-def main():
+
+def write_sub_map(scope_name, title, design_docs, backlog_issues, description):
+    """Write a scoped sub-map file to docs/internals/maps/."""
+    mermaid = generate_mermaid_for_scope(scope_name, design_docs, backlog_issues)
+    if not mermaid:
+        return False
+
+    out_path = os.path.join(mapsDir, f"{scope_name}_map.md")
+    content = f"""# {title}
+
+{description}
+
+> Auto-generated by `scripts/generate_knowledge_map.py`. Do not edit manually.
+> Root map: [architectural_map.md](../architectural_map.md)
+
+<!-- KNOWLEDGE_MAP_START -->
+
+{mermaid}
+
+<!-- KNOWLEDGE_MAP_END -->
+"""
+    with open(out_path, "w", encoding="utf-8") as f:
+        f.write(content)
+    print(f"  Wrote {out_path}")
+    return True
+
+
+def update_root_index(enforcer_ok, profiler_ok):
+    """Rewrite the dynamic section in architectural_map.md to be a lightweight index."""
     if not os.path.exists(target_map_file):
         print(f"Error: {target_map_file} not found.")
         return
-        
+
     with open(target_map_file, "r", encoding="utf-8") as f:
         content = f.read()
-        
-    # Check for placeholder markers in architectural_map.md
-    # If they don't exist, we will append the knowledge graph section at the bottom
+
     start_marker = "<!-- KNOWLEDGE_MAP_START -->"
     end_marker = "<!-- KNOWLEDGE_MAP_END -->"
-    
-    mermaid_diagram = generate_mermaid()
-    
+
+    links = []
+    if enforcer_ok:
+        links.append("- [enforcer_map.md](maps/enforcer_map.md) — BPF filter, containment, FFM bindings")
+    if profiler_ok:
+        links.append("- [profiler_map.md](maps/profiler_map.md) — USER_NOTIF daemon, trace events, iterative profiler")
+
+    index_section = "\n".join([
+        "### Sub-Maps (auto-generated per module):",
+        "",
+        *links,
+        "",
+        "> Each sub-map links design documents to source files and open backlog issues for that scope.",
+    ])
+
     if start_marker in content and end_marker in content:
         pattern = re.escape(start_marker) + r".*?" + re.escape(end_marker)
-        replacement = f"{start_marker}\n\n{mermaid_diagram}\n\n{end_marker}"
+        replacement = f"{start_marker}\n\n{index_section}\n\n{end_marker}"
         new_content = re.sub(pattern, replacement, content, flags=re.DOTALL)
     else:
-        new_content = content + f"\n\n## 8. Dynamic Knowledge Map\n\n{start_marker}\n\n{mermaid_diagram}\n\n{end_marker}\n"
-        
+        new_content = content + f"\n\n## Dynamic Knowledge Map Index\n\n{start_marker}\n\n{index_section}\n\n{end_marker}\n"
+
     with open(target_map_file, "w", encoding="utf-8") as f:
         f.write(new_content)
-        
-    print("Successfully generated and injected the Knowledge Map diagram.")
+    print(f"  Updated root index in {target_map_file}")
+
+
+def main():
+    design_docs = glob.glob(os.path.join(docsDir, "*.md"))
+    backlog_issues = glob.glob(os.path.join(backlogDir, "issue-*.md"))
+
+    print("Generating scoped knowledge sub-maps...")
+
+    enforcer_ok = write_sub_map(
+        scope_name="enforcer",
+        title="Enforcer Module Knowledge Map",
+        design_docs=design_docs,
+        backlog_issues=backlog_issues,
+        description="Maps design documents, source files, and open issues for the `:enforcer` module (Seccomp-BPF, Landlock, FFM bindings).",
+    )
+
+    profiler_ok = write_sub_map(
+        scope_name="profiler",
+        title="Profiler Module Knowledge Map",
+        design_docs=design_docs,
+        backlog_issues=backlog_issues,
+        description="Maps design documents, source files, and open issues for the `:profiler` module (USER_NOTIF, strace, iterative Landlock).",
+    )
+
+    update_root_index(enforcer_ok, profiler_ok)
+    print("Done.")
+
 
 if __name__ == "__main__":
     main()

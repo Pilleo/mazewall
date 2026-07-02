@@ -70,11 +70,51 @@ To maintain a clear relationship graph of how JVM code coordinates with native s
 To avoid reading hundreds of lines of code just to understand the API surface or method layout of a source file, the repository provides a lightweight outline/structure tool.
 
 ### Usage:
-Run the Kotlin script passing the path to any Kotlin file:
+Run the Kotlin script passing the path to any file:
 ```bash
+# Kotlin files: outlines classes, objects, functions, properties
 kotlin scripts/file_structure.main.kts enforcer/src/main/kotlin/io/mazewall/enforcer/ContainedExecutors.kt
+
+# Markdown: outlines heading hierarchy
+kotlin scripts/file_structure.main.kts docs/internals/containment_design.md
+
+# YAML/YML: outlines top-level and second-level keys
+kotlin scripts/file_structure.main.kts .github/workflows/ci.yml
+
+# XML: outlines top-level element tags
+kotlin scripts/file_structure.main.kts config/seccomp-profile.xml
+
+# JSON: outlines top-level keys
+kotlin scripts/file_structure.main.kts sbob.json
 ```
 
-This returns a clean, hierarchical tree outlining the classes, objects, interfaces, member functions (with parameters), and properties of the file, allowing both human developers and agents to immediately grasp the component's signature.
+This returns a clean, hierarchical tree allowing both human developers and agents to immediately grasp the file's structure without reading its full contents.
 
+---
+
+## 6. Code-to-Docs Back-Reference Convention (`@ref`)
+
+To create bidirectional navigation between source code and design documents, critical code sites should include structured `@ref` comments. This allows agents and developers to jump directly from a function to the authoritative design document — without having to search.
+
+### Standard Format:
+```kotlin
+// @ref: docs/internals/containment_design.md — Description of what the link covers
+// @issue: docs/internals/backlog/issue-042-tsync-race.md — Known issue affecting this code
+```
+
+### Rules:
+*   Use `// @ref:` for links to design documents, security considerations, or research notes.
+*   Use `// @issue:` for links to open backlog issues that affect this code site.
+*   All paths must be **relative to the project root**.
+*   Place `@ref` comments on the line **immediately before** the declaration (class, function, companion object) they describe.
+*   Do not duplicate all design content in code — the comment is a **pointer**, not a summary.
+
+### Example:
+```kotlin
+// @ref: docs/internals/containment_design.md — BPF linear scan and 8-bit jump limit
+// @ref: docs/internals/jvm_syscall_floor_research.md — JVM floor syscall requirements
+internal fun installFilter(arch: Arch, prog: MemorySegment, useTsync: Boolean) {
+    ...
+}
+```
 

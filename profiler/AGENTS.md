@@ -32,7 +32,7 @@ The `ProfilerDaemonEngine` uses a non-blocking reactor loop that delegates sessi
 ---
 
 ## 🔄 Verification & Testing
-For test script commands and Podman orchestration parameters, refer to the parent registry in [Root AGENTS.md](file:///home/leanid/Documents/code/java/jseccomp/AGENTS.md#5-testing-and-verification-guidelines).
+For test script commands and Podman orchestration parameters, refer to the parent registry in [Root AGENTS.md](../AGENTS.md#5-testing-and-verification-guidelines).
 - **Lints & Style:** Spotbugs and Detekt analyses must pass completely. If detekt complains about function counts or sizes in complex daemon handling states, use specific annotations like `@Suppress("TooManyFunctions")`.
 - **Coverage Rules:**
   - `Profiler*` instruction coverage must remain $\ge 60\%$.

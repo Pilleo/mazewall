@@ -52,26 +52,35 @@ class BpfHardeningTest : BaseIntegrationTest() {
     }
 
     @Test
-    fun `test that mmap with PROT_EXEC can be blocked when inspection is explicitly disabled`() {
+    fun `test that mmap with PROT_EXEC is blocked by default and standard mmap is preserved`() {
         val policy =
             Policy
                 .builder()
-                .allowMmapExec() // Disable argument inspection
-                .block(Syscall.MMAP) // Explicitly block it
+                .block(Syscall.MMAP) // Even if we block MMAP, critical bypass allows it for non-exec
                 .build()
 
-        val result = AtomicReference<LinuxNative.SyscallResult<Long, *>>()
+        val execResult = AtomicReference<LinuxNative.SyscallResult<Long, *>>()
+        val readWriteResult = AtomicReference<LinuxNative.SyscallResult<Long, *>>()
         val error = AtomicReference<Throwable>()
 
         val thread =
             Thread {
                 try {
                     ContainedExecutors.installOnCurrentThread(policy)
-                    val res =
+                    
+                    // 1. Calling mmap with PROT_EXEC (7) should be blocked (EPERM)
+                    execResult.set(
                         LinuxNative.withTransaction {
                             LinuxNative.fileSystem.mmap(0, 4096, 7, 0x22, -1, 0)
                         }
-                    result.set(res)
+                    )
+                    
+                    // 2. Calling mmap with PROT_READ | PROT_WRITE (3) should succeed because MMAP is critical
+                    readWriteResult.set(
+                        LinuxNative.withTransaction {
+                            LinuxNative.fileSystem.mmap(0, 4096, 3, 0x22, -1, 0)
+                        }
+                    )
                 } catch (t: Throwable) {
                     error.set(t)
                 }
@@ -81,7 +90,10 @@ class BpfHardeningTest : BaseIntegrationTest() {
 
         if (error.get() != null) throw error.get()
 
-        val res = result.get()
-        assertTrue(res is LinuxNative.SyscallResult.Error && res.errno == 1, "MMAP should have been blocked with EPERM, got $res")
+        val execRes = execResult.get()
+        assertTrue(execRes is LinuxNative.SyscallResult.Error && execRes.errno == 1, "MMAP with PROT_EXEC should have been blocked with EPERM, got $execRes")
+
+        val rwRes = readWriteResult.get()
+        assertTrue(rwRes is LinuxNative.SyscallResult.Success, "Standard MMAP (non-exec) should succeed as it is JVM-critical, got $rwRes")
     }
 }

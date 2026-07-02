@@ -15,7 +15,7 @@ As an AI agent pair-programming on this project, you are assisting in transition
 
 **🚫 Never Do:**
 *   Never catch `EPERM` or `EACCES` exceptions without rethrowing or crashing (No silent bypasses).
-*   Never block JVM coordination syscalls (refer to the detailed list in [enforcer/AGENTS.md](file:///home/leanid/Documents/code/java/jseccomp/enforcer/AGENTS.md#1-never-block-jvm-coordination-system-calls)).
+*   Never block JVM coordination syscalls (refer to the detailed list in [enforcer/AGENTS.md](enforcer/AGENTS.md#1-never-block-jvm-coordination-system-calls)).
 *   Never combine `SECCOMP_FILTER_FLAG_TSYNC` and `SECCOMP_FILTER_FLAG_NEW_LISTENER`.
 *   Never use `JAVA_LONG` for 32-bit `sock_filter` fields.
 
@@ -76,7 +76,7 @@ When presenting a fix or creating a PR, use the following format:
 *   **Mandatory Documentation of Findings:** Any new architectural finding, kernel behavior discovery, or security nuance *must* be documented immediately in the appropriate Markdown file. Do not leave critical insights in conversation histories.
 
 ### Code Maintainability & Craftsmanship Invariants
-All code must adhere strictly to the centralized [mazewall Code Quality & Craftsmanship Standards](file:///home/leanid/Documents/code/java/jseccomp/.agents/CODE_QUALITY.md). Read and follow it for rules regarding SOLID design, type verification, immutability/FP, AOT friendliness, logical modularity, and debuggability.
+All code must adhere strictly to the centralized [mazewall Code Quality & Craftsmanship Standards](.agents/CODE_QUALITY.md). Read and follow it for rules regarding SOLID design, type verification, immutability/FP, AOT friendliness, logical modularity, and debuggability.
 
 ---
 
@@ -100,7 +100,7 @@ Responsible for production-grade sandboxing using Linux Seccomp-BPF and Landlock
 *   **Key Source Files:** `Policy.kt`, `BpfFilter.kt`, `PureJavaBpfEngine.kt`, `Landlock.kt`, `ContainedExecutors.kt`, `LinuxNative.kt`, `Platform.kt`.
 *   **Engineering Rules:**
     > [IMPORTANT]
-    > Before making any changes inside `/enforcer`, you **must** read and adhere to the strict guidelines in **[enforcer/AGENTS.md](file:///home/leanid/Documents/code/java/jseccomp/enforcer/AGENTS.md)**.
+    > Before making any changes inside `/enforcer`, you **must** read and adhere to the strict guidelines in **[enforcer/AGENTS.md](enforcer/AGENTS.md)**.
     >
     > It covers preventing Loom Virtual Thread carrier poisoning, native FFM layout alignments, and raw syscall constraint designs.
 
@@ -109,7 +109,7 @@ Responsible for unprivileged system call profiling and Landlock path discovery u
 *   **Key Source Files:** `Profiler.kt`, `ProfilerDaemon.kt`, `IterativeProfiler.kt`, `StraceProfiler.kt`, `BobCompiler.kt`, `BillOfBehavior.kt`.
 *   **Engineering Rules:**
     > [IMPORTANT]
-    > Before making any changes inside `/profiler`, you **must** read and adhere to the strict guidelines in **[profiler/AGENTS.md](file:///home/leanid/Documents/code/java/jseccomp/profiler/AGENTS.md)**.
+    > Before making any changes inside `/profiler`, you **must** read and adhere to the strict guidelines in **[profiler/AGENTS.md](profiler/AGENTS.md)**.
     >
     > It covers the critical out-of-process `USER_NOTIF` ACK loop deadlock prevention, Yama `ptrace_scope` configurations, and `strace` log parsing.
 
@@ -119,7 +119,7 @@ Responsible for unprivileged system call profiling and Landlock path discovery u
 
 Thread-scoped seccomp is **not** an absolute security boundary against an attacker with Arbitrary Code Execution (ACE) on the sandboxed thread. Because all JVM threads share the same address space and heap, a native memory corruption exploit (e.g., via buffer overflow or FFM `Unsafe` pointer manipulation) on a contained thread can corrupt memory on unrestricted sibling or helper threads to achieve escape.
 
-*   **Mandatory Baseline:** Tier 1 (process-wide `NO_EXEC` baseline, via `ContainedExecutors.installOnProcess`) is an absolute architectural backstop, not an optional recommendation. Stacking thread-scoped Tier 2 containment on top mitigates the blast radius of data-oriented attacks (SSRF, XXE, SQLi), but must never be presented alone as a complete security boundary. Refer to [SECURITY_CONSIDERATIONS.md](file:///home/leanid/Documents/code/java/jseccomp/docs/internals/SECURITY_CONSIDERATIONS.md) for the complete threat matrix.
+*   **Mandatory Baseline:** Tier 1 (process-wide `NO_EXEC` baseline, via `ContainedExecutors.installOnProcess`) is an absolute architectural backstop, not an optional recommendation. Stacking thread-scoped Tier 2 containment on top mitigates the blast radius of data-oriented attacks (SSRF, XXE, SQLi), but must never be presented alone as a complete security boundary. Refer to [SECURITY_CONSIDERATIONS.md](docs/internals/SECURITY_CONSIDERATIONS.md) for the complete threat matrix.
 *   **Namespaces & cgroups Roadmap (Tier 1 Expansion):** Process-wide Mount/Network/PID namespaces and cgroups v2 limits are planned on the roadmap to reinforce the Tier 1 baseline at process initialization, ensuring escapes from memory corruption remain contained inside the process boundaries. Thread-local namespaces are explicitly rejected due to JVM coordination conflicts.
 
 ---
@@ -148,7 +148,7 @@ Thread-scoped seccomp is **not** an absolute security boundary against an attack
 ## 6. Native Engine Traits & Fault Injection
 
 To maintain high testability, `mazewall` avoids direct static calls to native JNI/FFM methods. Instead, core components interact with the `NativeEngine` trait interfaces.
-For detailed implementation examples and test usage of the `MockNativeEngine` pattern, refer to the documentation in [enforcer/AGENTS.md](file:///home/leanid/Documents/code/java/jseccomp/enforcer/AGENTS.md#7-native-engine-decoupling-for-testability).
+For detailed implementation examples and test usage of the `MockNativeEngine` pattern, refer to the documentation in [enforcer/AGENTS.md](enforcer/AGENTS.md#7-native-engine-decoupling-for-testability).
 
 ---
 
@@ -158,9 +158,9 @@ Before modifying components, read the relevant design document:
 
 | Document | Covers |
 |---|---|
-| [containment_design.md](file:///home/leanid/Documents/code/java/jseccomp/docs/internals/containment_design.md) | BPF scan loops, argument inspections, Landlock ordering, FFM layouts. |
-| [profiler_design.md](file:///home/leanid/Documents/code/java/jseccomp/docs/internals/profiler_design.md) | USER_NOTIF architecture, socket SCM_RIGHTS, ACK loop protocol. |
-| [SECURITY_CONSIDERATIONS.md](file:///home/leanid/Documents/code/java/jseccomp/docs/internals/SECURITY_CONSIDERATIONS.md) | Full threat model, ACE escape caveats, K8s custom profiles, Yama scopes. |
+| [containment_design.md](docs/internals/containment_design.md) | BPF scan loops, argument inspections, Landlock ordering, FFM layouts. |
+| [profiler_design.md](docs/internals/profiler_design.md) | USER_NOTIF architecture, socket SCM_RIGHTS, ACK loop protocol. |
+| [SECURITY_CONSIDERATIONS.md](docs/internals/SECURITY_CONSIDERATIONS.md) | Full threat model, ACE escape caveats, K8s custom profiles, Yama scopes. |
 
 ## 8. Cross-Module Change Protocol
 If a change touches both `:enforcer` and `:profiler`:
@@ -171,3 +171,23 @@ If a change touches both `:enforcer` and `:profiler`:
 ## 9. Task verification protocol
 After any code changes, run `./gradlew build` to verify the final changes.
 You may run more granular checks in the process, but build must be always green before you submit the results.
+
+---
+
+## 10. Available Agent Skills
+
+The `.agents/skills/` directory contains reusable, step-by-step workflows for common tasks. Use these skills proactively when they match the task at hand — they encode hard-won lessons specific to this codebase.
+
+| Skill directory | Use when... |
+|---|---|
+| `add_syscall` | Adding a new syscall constant to `Policy`, `BpfFilter`, or the profiler |
+| `ffm_safety` | Making any FFM/off-heap memory changes (layouts, arenas, downcalls) |
+| `fix_backlog_item` | Fixing a known issue registered in `docs/internals/backlog/` |
+| `fix_safety` | Guidance on fixing bugs/tests cleanly without warmups, swallows, or hacks |
+| `loop_driven_development` | Iterative red-green-refactor TDD cycle for new features |
+| `report_security_issue` | Discovering a new vulnerability, bypass risk, or kernel behavior gap |
+| `review` | Code review of a patch, PR, or proposed design |
+| `spec_driven_development` | Building a feature from a written spec document |
+| `update_docs` | Keeping design docs in sync after code changes |
+| `file_structure` | Inspecting any file's outline/structure before reading its full content |
+

@@ -128,6 +128,45 @@ For the critical ACK loop architecture and deadlock prevention rules, see [archi
 
 ---
 
+## Source Tree
+
+> Use `kotlin scripts/file_structure.main.kts <file>` to inspect any file's API surface before reading its full content.
+
+```
+profiler/src/main/kotlin/io/mazewall/profiler/
+│
+├── Profiler.kt                # ⭐ Primary public entry point: Profiler.profile { }
+├── BillOfBehavior.kt          # Structured behavioral contract output (syscalls, paths, network)
+├── BillOfBehaviorDto.kt       # JSON-serializable DTO for SBoB output
+├── TraceableWorkload.kt       # Functional interface for profiled workloads
+├── ProfilingResult.kt         # Result value wrapping BillOfBehavior + metadata
+│
+├── engine/
+│   ├── ProfilerDaemon.kt         # Daemon entry point (separate JVM process)
+│   ├── ProfilerDaemonEngine.kt   # Core USER_NOTIF ACK loop logic
+│   ├── ProfilerSessionHandler.kt # Handles a single profiling session's lifecycle
+│   ├── ProfilerTransport.kt      # UNIX socket + SCM_RIGHTS FD passing
+│   ├── ProfilerInstaller.kt      # Installs the NOTIFY filter on the target thread
+│   ├── HandshakeSession.kt       # Startup handshake protocol between JVM and daemon
+│   ├── SyscallPathResolver.kt    # Resolves path args via process_vm_readv
+│   ├── TraceEvent.kt             # Sealed hierarchy of syscall trace events
+│   └── SyscallEvent.kt           # Raw syscall intercept data
+│
+├── compiler/
+│   └── BobCompiler.kt         # Compiles raw TraceEvents into a BillOfBehavior
+│
+├── iterative/
+│   └── IterativeProfiler.kt   # Landlock deny-and-retry learning loop (Tier A)
+│
+├── strace/
+│   └── StraceProfiler.kt      # strace-based profiler (Tier P)
+│
+└── triage/
+    └── (internal diagnostic tooling)
+```
+
+
+
 ## Testing
 
 ```bash

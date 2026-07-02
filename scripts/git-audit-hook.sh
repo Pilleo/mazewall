@@ -34,5 +34,12 @@ if [ -n "$CORE_FILES" ]; then
   echo "Please ensure these changes are fully validated through './scripts/run_tests.sh'."
 fi
 
-echo "==> Security audit passed successfully."
+# 3. Run host unit tests to verify no structural/logic breakages
+echo "==> Running host unit tests..."
+if ! ./gradlew :enforcer:test --no-configuration-cache; then
+  echo "ERROR: Host unit tests failed. Commit aborted."
+  exit 1
+fi
+
+echo "==> Security audit and unit tests passed successfully."
 exit 0

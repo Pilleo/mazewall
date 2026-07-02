@@ -28,6 +28,50 @@ For a detailed class hierarchy and structural relationship map, see the [Enforce
 
 ---
 
+## Source Tree
+
+> Use `kotlin scripts/file_structure.main.kts <file>` to inspect any file's API surface before reading its full content.
+
+```
+enforcer/src/main/kotlin/io/mazewall/
+│
+├── Policy.kt                  # Public API: DSL for declaring syscall allow/deny rules
+├── PolicyBuilder.kt           # Fluent builder for Policy objects
+├── PolicyDefinition.kt        # Sealed type for compiled vs uncompiled policies
+├── PolicyPresets.kt           # Built-in presets: NO_EXEC, NO_NETWORK, PURE_COMPUTE
+├── BpfFilter.kt               # BPF bytecode compiler: Policy → sock_filter[]
+├── LinuxNative.kt             # All FFM downcalls to Linux kernel (prctl, seccomp, landlock)
+├── NativeEngine.kt            # Trait interface enabling MockNativeEngine for tests
+├── Platform.kt                # Platform detection, fallback behavior, feature matrix
+├── CompiledSandbox.kt         # Value type wrapping a compiled filter + definition
+├── DiagnosticsState.kt        # Diagnostic state for debugging installation failures
+├── KernelFeatureMatrix.kt     # Runtime probe of available kernel features
+│
+├── core/
+│   ├── Syscall.kt             # Enum of all supported syscalls (x86_64 + aarch64 numbers)
+│   ├── Arch.kt                # Architecture detection and syscall number mapping
+│   ├── SeccompAction.kt       # BPF actions: ALLOW, KILL, ERRNO, TRACE, NOTIFY
+│   └── PrctlCommand.kt        # prctl command constants
+│
+├── enforcer/
+│   ├── ContainedExecutors.kt  # ⭐ Primary public entry point (installOnProcess / installOnCurrentThread)
+│   ├── ThreadStateRegistry.kt # ThreadLocal state tracking seccomp/Landlock install status
+│   ├── SandboxDispatcher.kt   # Dispatches work into contained thread contexts
+│   ├── FilterInstallationPlanner.kt  # Decides which filters/Landlock rules to install
+│   └── ContainmentViolationDetector.kt # Detects and reports policy violations
+│
+├── seccomp/
+│   └── PureJavaBpfEngine.kt   # Low-level Seccomp engine: builds/installs BPF programs
+│
+├── landlock/
+│   └── Landlock.kt            # Landlock ruleset creation and path restriction logic
+│
+└── ffi/
+    ├── memory/                # FFM memory utilities (nativeScope, struct layouts)
+    └── NativeConstants.kt     # Raw kernel constants (SECCOMP_SET_MODE_FILTER, etc.)
+```
+
+
 ## Installation
 
 Add `mazewall-enforcer` to your project via **JitPack** or **GitHub Packages**.

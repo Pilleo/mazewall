@@ -44,7 +44,7 @@ Seccomp filters bind permanently to the OS thread (LWP). Installs from virtual t
 - The `applyContainment()` method in `ContainedExecutors.ContainedExecutorWrapper` enforces this correct order. **Do not change this sequence.**
 
 ### 4. Fail Closed by Default
-Ensure compliance with the global fallback policies defined in [Root AGENTS.md](file:///home/leanid/Documents/code/java/jseccomp/AGENTS.md#2-strict-protection-against-unsafe-fallback--bypass-scenarios).
+Ensure compliance with the global fallback policies defined in [Root AGENTS.md](../AGENTS.md#2-strict-protection-against-unsafe-fallback--bypass-scenarios).
 
 ### 5. BPF Compiler & Argument Safety
 - **Multi-Instruction Argument Inspection:** When modifying `BpfFilter.kt`, preserve the multi-instruction argument-inspection sequences for `mmap`/`mprotect`, `clone`, and `prctl`. Do not replace them with simple `BPF_JEQ` checks against the syscall numbers; doing so deletes crucial protection context.
@@ -88,7 +88,7 @@ The violation detector in `ContainedExecutors.isDirectContainmentViolation()` us
 ---
 
 ## 🔄 Verification & Testing
-For test script commands and Podman orchestration parameters, refer to the parent registry in [Root AGENTS.md](file:///home/leanid/Documents/code/java/jseccomp/AGENTS.md#5-testing-and-verification-guidelines).
+For test script commands and Podman orchestration parameters, refer to the parent registry in [Root AGENTS.md](../AGENTS.md#5-testing-and-verification-guidelines).
 
 ---
 

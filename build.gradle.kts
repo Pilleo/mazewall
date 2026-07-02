@@ -293,14 +293,28 @@ subprojects {
     }
 }
 
-val generateKnowledgeMap by tasks.creating(Exec::class) {
+val generateKnowledgeMap by tasks.registering(Exec::class) {
     group = "documentation"
     description = "Generates and updates the Mermaid-based architectural knowledge graph"
     commandLine("python3", "$rootDir/scripts/generate_knowledge_map.py")
 }
 
+val installGitHooks by tasks.registering(Copy::class) {
+    group = "git"
+    description = "Installs the pre-commit audit and verification hook"
+    from("$rootDir/scripts/git-audit-hook.sh") {
+        rename { "pre-commit" }
+    }
+    into(file("$rootDir/.git/hooks"))
+    val targetFile = file("$rootDir/.git/hooks/pre-commit")
+    doLast {
+        targetFile.setExecutable(true)
+    }
+}
+
 tasks.named("check") {
     dependsOn(generateKnowledgeMap)
+    dependsOn(installGitHooks)
 }
 
 
