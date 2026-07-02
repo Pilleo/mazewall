@@ -143,6 +143,11 @@ This directory contains modularized backlog items for architectural and security
 | 179 | Uncaught Native Exceptions Escaping Landlock Installation | **HIGH** | [issue-179-uncaught-native-exceptions-escaping-landlock-installation.md](issue-179-uncaught-native-exceptions-escaping-landlock-installation.md) |
 | 180 | Uncaught exceptions in `ContainedExecutorWrapper.kt` during filter installation | **HIGH** | [issue-180-uncaught-exceptions-in-containedexecutorwrapperkt-during-fil.md](issue-180-uncaught-exceptions-in-containedexecutorwrapperkt-during-fil.md) |
 | 181 | TOCTOU in Path Normalization `PathNormalizer.kt` | **HIGH** | [issue-181-toctou-in-path-normalization-pathnormalizerkt.md](issue-181-toctou-in-path-normalization-pathnormalizerkt.md) |
+| 182 | Bitwise Sign-Extension Bug in `sockaddr` Domain Parsing | **HIGH** | [issue-182-bitwise-sign-extension-bug-in-sockaddr-domain-parsing.md](issue-182-bitwise-sign-extension-bug-in-sockaddr-domain-parsing.md) |
+| 183 | Potential Buffer Overflow / OutOfBoundsException on Long UNIX Socket Paths | **LOW** | [issue-183-potential-buffer-overflow-outofboundsexception-on-long-unix-.md](issue-183-potential-buffer-overflow-outofboundsexception-on-long-unix-.md) |
+| 184 | Unhandled `SYS_ACCEPT` in SupervisorSessionHandler | **HIGH** | [issue-184-unhandled-sys-accept-in-supervisorsessionhandler.md](issue-184-unhandled-sys-accept-in-supervisorsessionhandler.md) |
+| 185 | Missing domain logic handling of SyscallResult in SupervisorDaemonEngine | **MEDIUM** | [issue-185-missing-domain-logic-handling-of-syscallresult-in-supervisordaemonengine.md](issue-185-missing-domain-logic-handling-of-syscallresult-in-supervisordaemonengine.md) |
+| 186 | MemorySegment Lifetime/Scope Violation in SupervisorSessionHandler | **HIGH** | [issue-186-memorysegment-lifetime-scope-violation-in-supervisordaemon.md](issue-186-memorysegment-lifetime-scope-violation-in-supervisordaemon.md) |
 
 ## Resolved Issues (Archive)
 
