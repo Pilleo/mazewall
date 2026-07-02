@@ -26,7 +26,7 @@ echo -e "${GREEN}[INFO] Using container engine:${RESET} $COMPOSE_CMD"
 
 # 2. Build the application bootJar
 echo -e "${CYAN}[STEP 1/5] Building the Vulnerable Spring Boot Application...${RESET}"
-./gradlew :demos:vulnerable-web-app:bootJar
+./gradlew :demos:vulnerable-web-app:bootJar --build-cache --configuration-cache
 
 # Create output directory on host to persist all results, SBoB files, and stack traces
 mkdir -p demos/output
