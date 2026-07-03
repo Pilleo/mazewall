@@ -125,7 +125,6 @@ This directory contains modularized backlog items for architectural and security
 | 149 | Classloader Deadlock in JVM Validation Listener | **CRITICAL** | [issue-149-classloader-deadlock-in-jvm-validation-listener.md](issue-149-classloader-deadlock-in-jvm-validation-listener.md) |
 | 150 | Incomplete FFM Architecture Isolation | **HIGH** | [issue-150-incomplete-ffm-architecture-isolation.md](issue-150-incomplete-ffm-architecture-isolation.md) |
 | 152 | CI Podman Container Caching Missing | **HIGH** | [issue-152-ci-podman-container-caching-missing.md](issue-152-ci-podman-container-caching-missing.md) |
-| 158 | Bitwise Sign-Extension Bug in `sockaddr` Domain Parsing | **HIGH** | [issue-158-bitwise-sign-extension-bug-in-sockaddr-domain-parsing.md](issue-158-bitwise-sign-extension-bug-in-sockaddr-domain-parsing.md) |
 | 159 | Potential Buffer Overflow / OutOfBoundsException on Long UNIX Socket Paths | **HIGH** | [issue-159-potential-buffer-overflow-outofboundsexception-on-long-unix-.md](issue-159-potential-buffer-overflow-outofboundsexception-on-long-unix-.md) |
 | 162 | Memory Alignment verification for `Layouts.kt` FFM Structures | **HIGH** | [issue-162-memory-alignment-verification-for-layoutskt-ffm-structures.md](issue-162-memory-alignment-verification-for-layoutskt-ffm-structures.md) |
 | 163 | Memory Segment Scopes and Lifetimes | **HIGH** | [issue-163-memory-segment-scopes-and-lifetimes.md](issue-163-memory-segment-scopes-and-lifetimes.md) |
@@ -143,7 +142,6 @@ This directory contains modularized backlog items for architectural and security
 | 179 | Uncaught Native Exceptions Escaping Landlock Installation | **HIGH** | [issue-179-uncaught-native-exceptions-escaping-landlock-installation.md](issue-179-uncaught-native-exceptions-escaping-landlock-installation.md) |
 | 180 | Uncaught exceptions in `ContainedExecutorWrapper.kt` during filter installation | **HIGH** | [issue-180-uncaught-exceptions-in-containedexecutorwrapperkt-during-fil.md](issue-180-uncaught-exceptions-in-containedexecutorwrapperkt-during-fil.md) |
 | 181 | TOCTOU in Path Normalization `PathNormalizer.kt` | **HIGH** | [issue-181-toctou-in-path-normalization-pathnormalizerkt.md](issue-181-toctou-in-path-normalization-pathnormalizerkt.md) |
-| 182 | Bitwise Sign-Extension Bug in `sockaddr` Domain Parsing | **HIGH** | [issue-182-bitwise-sign-extension-bug-in-sockaddr-domain-parsing.md](issue-182-bitwise-sign-extension-bug-in-sockaddr-domain-parsing.md) |
 | 183 | Potential Buffer Overflow / OutOfBoundsException on Long UNIX Socket Paths | **LOW** | [issue-183-potential-buffer-overflow-outofboundsexception-on-long-unix-.md](issue-183-potential-buffer-overflow-outofboundsexception-on-long-unix-.md) |
 | 184 | Unhandled `SYS_ACCEPT` in SupervisorSessionHandler | **HIGH** | [issue-184-unhandled-sys-accept-in-supervisorsessionhandler.md](issue-184-unhandled-sys-accept-in-supervisorsessionhandler.md) |
 | 185 | Missing domain logic handling of SyscallResult in SupervisorDaemonEngine | **MEDIUM** | [issue-185-missing-domain-logic-handling-of-syscallresult-in-supervisordaemonengine.md](issue-185-missing-domain-logic-handling-of-syscallresult-in-supervisordaemonengine.md) |
@@ -197,3 +195,5 @@ This directory contains modularized backlog items for architectural and security
 | 168 | Unhandled `SyscallResult` return types leaking into domain logic | [resolved/issue-168-unhandled-syscallresult-return-types-leaking-into-domain-log.md](resolved/issue-168-unhandled-syscallresult-return-types-leaking-into-domain-log.md) |
 | 170 | Unhandled `SyscallResult` during Shutdown | [resolved/issue-170-unhandled-syscallresult-during-shutdown.md](resolved/issue-170-unhandled-syscallresult-during-shutdown.md) |
 | 171 | Profiler Trace Listener State Mutability Bug | [resolved/issue-171-profiler-trace-listener-state-mutability-bug.md](resolved/issue-171-profiler-trace-listener-state-mutability-bug.md) |
+| 158 | Bitwise Sign-Extension Bug in `sockaddr` Domain Parsing | [resolved/issue-158-bitwise-sign-extension-bug-in-sockaddr-domain-parsing.md](resolved/issue-158-bitwise-sign-extension-bug-in-sockaddr-domain-parsing.md) |
+| 182 | Bitwise Sign-Extension Bug in `sockaddr` Domain Parsing | [resolved/issue-182-bitwise-sign-extension-bug-in-sockaddr-domain-parsing.md](resolved/issue-182-bitwise-sign-extension-bug-in-sockaddr-domain-parsing.md) |

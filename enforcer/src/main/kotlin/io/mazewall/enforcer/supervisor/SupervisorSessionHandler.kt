@@ -607,7 +607,7 @@ internal class SupervisorSessionHandler(
 
     private fun connectSocketInSupervisor(sockaddrBytes: ByteArray): Int {
         val domain = if (sockaddrBytes.size >= 2) {
-            sockaddrBytes[0].toInt() or (sockaddrBytes[1].toInt() shl 8)
+            (sockaddrBytes[0].toInt() and 0xFF) or ((sockaddrBytes[1].toInt() and 0xFF) shl 8)
         } else {
             2 // AF_INET = 2
         }
