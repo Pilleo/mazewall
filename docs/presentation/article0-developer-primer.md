@@ -1,6 +1,8 @@
 # Your Threads Are All Equally Trusted — Should They Be?
 
 > **What this is:** A developer-first introduction to mazewall—how to enforce OS-level sandboxing constraints directly on your JVM thread pools.
+>
+> After reading this, you will understand what thread-level OS sandboxing is, why your service likely lacks it today, and what it looks like to add it.
 
 ---
 
@@ -74,7 +76,7 @@ No external firewall rules. No container reconfiguration. The policy is declared
 
 ---
 
-## Two levels of enforcement: Two minutes to adopt
+## Two levels of enforcement
 
 mazewall works in two tiers that stack together.
 
@@ -129,7 +131,9 @@ val documentPool = ContainedExecutors.wrap(
 
 The `ExecutorService` interface is unchanged—`submit()`, `invokeAll()`, and `Future` work exactly as before. If you over-restrict and block something a thread legitimately needs, you will see an `IOException` or `SecurityException` during testing.
 
-*Tip: The mazewall profiler module can automatically discover required system calls and paths during testing, helping you build accurate policies.*
+*Tip: You don't need to guess system calls—mazewall includes an automated profiler that discovers the required syscalls and filesystem paths during your test suite runs. Details in Part 2.*
+
+*Note: Virtual thread and Kotlin coroutine support, as well as carrier thread pinning behaviour, are covered in [Part 3](article3-enforcement.md) and the [README](../../README.md).*
 
 ---
 
@@ -146,29 +150,18 @@ In most real-world post-exploitation scenarios (such as Log4Shell, XXE, SSRF), t
 
 ---
 
-## What this is not
-
-mazewall is one layer in a security stack, not a replacement for:
-
-- **Container security** (Docker/Podman Seccomp profiles, cgroups, network policies) — the outer wall. Still necessary.
-- **[Kubescape](https://kubescape.io)** — cluster-wide eBPF observation and behavioral profile generation across all workloads.
-- **[Tetragon](https://tetragon.io)** — kernel-level enforcement and real-time process observability using eBPF, operated at the Kubernetes node level.
-- **Authentication, input validation, secrets management** — unrelated concerns.
-
-Kubescape and Tetragon see the JVM as a single black box. Docker applies one profile to every thread uniformly. mazewall lets you express different rules for different parts of the same JVM process, enforced by the same kernel mechanisms—Seccomp-BPF (syscall-level filtering) and Landlock LSM (filesystem access control)—from inside the application, with no external agent required.
+> [!NOTE]
+> **What mazewall is not:** It is one layer in a security stack, not a replacement for container security (Docker/Podman Seccomp profiles, cgroups, network policies), cluster-wide eBPF observability tools, or standard concerns like authentication and input validation. Those outer layers are still necessary. The difference is that cluster-wide tools see the JVM as a single black box and Docker applies one profile to every thread uniformly. mazewall lets you express different rules for different parts of the same JVM process—enforced by the same kernel mechanisms (Seccomp-BPF and Landlock LSM)—from inside the application, with no external agent required.
 
 ---
 
 ## Try it in your project
 
-Add the dependency to your build:
+**Requirements:** Linux kernel ≥ 5.13, JDK 22+, no root or special capabilities required.
 
-```kotlin
-// build.gradle.kts — check https://github.com/Pilleo/mazewall/releases for the latest version
-implementation("io.mazewall:mazewall-enforcer:0.0.1-prealpha-SNAPSHOT")
-```
+Add the dependency to your build (see [GETTING_STARTED.md](../../GETTING_STARTED.md) for GitHub Packages configuration details).
 
-And initialize a process-wide baseline in your application launcher:
+Then initialize a process-wide baseline in your application launcher:
 
 ```kotlin
 fun main() {
@@ -181,8 +174,5 @@ fun main() {
 
 ## Where to go next
 
-- **[Part 1: Do You Really Know What Your App Is Doing at Runtime?](article.md)** — The full case for behavioral security: why composition transparency (what's in the binary) is not the same as behavioral transparency (what the binary is doing right now).
-- **Part 2: Thread-Scoped vs. Process-Wide Containment** — A deep dive into Seccomp-BPF and Landlock LSM mechanics within a shared-memory environment.
-- **Part 3: Sandboxing JVM Thread Pools in Practice** — Configuring executors, managing JIT coordination threads, and using the developer diagnostic suite.
-- **Part 4: Real-world Vulnerability Walkthroughs** — Exploiting and stopping Log4Shell, SSRF, and Prompt Injection step-by-step.
-- **Part 5: Production-grade Deployment and Monitoring** — Performance overhead, fallback behaviors, and handling kernel version discrepancies.
+**[Part 1: Do You Really Know What Your App Is Doing at Runtime? →](article.md)**
+The case for behavioral security: why knowing what a library *is* is not the same as knowing what it *does* at runtime.
