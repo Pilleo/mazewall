@@ -84,7 +84,8 @@ def generate_mermaid_for_scope(scope_name, design_docs, backlog_issues):
         issue_id = filename.replace(".md", "").replace("-", "_")
         severity = meta.get("severity", "MEDIUM")
         nodes.append(f'    {issue_id}["🔴 Issue: {meta["title"]} ({severity})"]')
-        clicks.append(f'    click {issue_id} "../backlog/{filename}"')
+        rel_path = os.path.relpath(issue, backlogDir)
+        clicks.append(f'    click {issue_id} "../backlog/{rel_path}"')
 
         with open(issue, "r", encoding="utf-8") as f:
             issue_content = f.read()
@@ -178,7 +179,7 @@ def update_root_index(enforcer_ok, profiler_ok):
 
 def main():
     design_docs = sorted(glob.glob(os.path.join(docsDir, "*.md")))
-    backlog_issues = sorted(glob.glob(os.path.join(backlogDir, "issue-*.md")))
+    backlog_issues = sorted(glob.glob(os.path.join(backlogDir, "**/issue-*.md"), recursive=True))
 
     print("Generating scoped knowledge sub-maps...")
 
