@@ -4,7 +4,7 @@
 **Objective:** Perform a logical security and structural audit of the `mazewall` repository to identify architecture gaps, security vulnerabilities, memory-safety risks (FFM), and test coverage weaknesses.
 
 > [!IMPORTANT]
-> **CRITICAL OPERATIONAL CONSTRAINT:** Your mission is exclusively to **investigate and document issues**. Do **NOT** attempt to write or apply fixes to the source code. Your sole output is detailed, high-fidelity documentation of issues, gaps, and improvements by creating a new markdown issue file in the backlog directory `docs/internals/backlog/` and registering it in [backlog/README.md](file:///home/leanid/Documents/code/java/jseccomp/docs/internals/backlog/README.md).
+> **CRITICAL OPERATIONAL CONSTRAINT:** Your mission is exclusively to **investigate and document issues**. Do **NOT** attempt to write or apply fixes to the source code. Your sole output is detailed, high-fidelity documentation of issues, gaps, and improvements by creating a new markdown issue file in the categorized backlog directories under `docs/internals/backlog/` (e.g. `security`, `performance`, `testing`, `code_health`) and registering it in [backlog/README.md](file:///home/leanid/Documents/code/java/jseccomp/docs/internals/backlog/README.md).
 >
 > **NO EXECUTION REQUIRED:** You are **NOT** required to execute tests or build the project. This is a logic and architectural audit based on source code inspection.
 
@@ -52,7 +52,7 @@ This is a **continuous, hypothesis-driven execution loop**. You are authorized t
 2. **Phase 2: Source Code & Structural Audit:** 
    - Use `./scripts/sg.sh` to run structural queries against your hypothesis (e.g. search for swallowed exceptions: `try { $$$ } catch ($E: Exception) { }`).
    - Audit target files, checking both core logic and their associated tests.
-3. **Phase 3: Backlog Entry:** If you find a vulnerability, bug, or gap, create a new markdown file in the backlog directory (e.g. `docs/internals/backlog/issue-XXX-some-bug.md`) using the following format:
+ 3. **Phase 3: Backlog Entry:** If you find a vulnerability, bug, or gap, create a new markdown file in the appropriate backlog subdirectory (e.g. `docs/internals/backlog/security/issue-XXX-some-bug.md`, or under `performance/`, `testing/`, `code_health/`) using the following format:
 
 ```markdown
 ---
@@ -66,7 +66,7 @@ status: "open"
 **Needed:** [How to fix or prevent it]
 ```
 
-Register your new issue in the **Open Issues** table inside `docs/internals/backlog/README.md`.
+Register your new issue in the **Open Issues** table inside `docs/internals/backlog/README.md` (ensuring the link references the category folder).
 
 ---
 

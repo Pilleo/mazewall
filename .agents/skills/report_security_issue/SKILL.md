@@ -12,12 +12,16 @@ Determine the severity based on the following impact criteria:
 - **LOW:** Documentation drift, minor performance degradation, nitpicks.
 
 ### 2. Documentation Phase (Debuggability & Precision)
-Add a new entry to **`docs/internals/code_issues_backlog.md`** using the following structured template:
+Create a new issue file under the appropriate category subdirectory in **`docs/internals/backlog/{category}/issue-XXX-name.md`** (e.g., `security/`) and register it in the **Open Issues** table of [backlog/README.md](file:///home/leanid/Documents/code/java/jseccomp/docs/internals/backlog/README.md) using the following structured template:
 
 ```markdown
-### 🔴 [Severity]: [Descriptive Title]
-**Target:** [File paths and symbols involved]
-**Dimension:** [Vulnerability Chaining / FFM ABI / Kernel Invariants / Performance / Misconfiguration / Documentation]
+---
+title: "Title of Issue"
+severity: "HIGH/MEDIUM/LOW/CRITICAL/ENHANCEMENT"
+status: "open"
+---
+
+# 🔴 [Severity: Severity]: Title of Issue
 **Context:** [Detailed description of the vulnerability, including why it exists and why current checks fail.]
 **Failure Hypothesis:** [The precise memory state, kernel state, or JVM state that causes the failure.]
 **Needed:** [Concrete technical recommendation for the fix, ensuring it improves debuggability and trace-friendliness.]

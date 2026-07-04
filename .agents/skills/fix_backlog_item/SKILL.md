@@ -7,7 +7,7 @@ description: >
 
 # Skill: Fix Backlog Item & Safety Protocol
 
-This skill provides a structured, TDD-focused protocol and safety checklist for resolving issues registered in the decentralized backlog directory (`docs/internals/backlog/`).
+This skill provides a structured, TDD-focused protocol and safety checklist for resolving issues registered in the decentralized backlog directory (`docs/internals/backlog/{category}/`).
 
 ---
 
@@ -26,7 +26,7 @@ When fixing bugs or resolving failing tests, you must avoid introducing fragile 
 ## 🛡️ Resolution Protocol
 
 ### 1. Research & Analysis
-*   **Locate the Backlog Entry:** Find the target file in `docs/internals/backlog/` (e.g. `issue-XXX-name.md`).
+*   **Locate the Backlog Entry:** Find the target file in `docs/internals/backlog/` (e.g. `docs/internals/backlog/security/issue-XXX-name.md`, or under `performance/`, `testing/`, `code_health/`).
 *   **Locate Code Targets:** Identify the target files and symbols. Use `grep_search` to find all relevant call sites.
 *   **Verify State:** Confirm if the issue is still present in the current codebase.
 
@@ -42,6 +42,7 @@ When fixing bugs or resolving failing tests, you must avoid introducing fragile 
 *   **Regression Check:** Run the full project check (`./gradlew check`) to verify clean compilation, static analysis, and that no tests are broken.
 
 ### 4. Finalization & Logging
-*   **Update Backlog File:** Set `status: "resolved"` in the issue file's YAML frontmatter (e.g. `docs/internals/backlog/issue-XXX-name.md`).
-*   **Update README:** Move the entry from "Open Issues" to the "Resolved Issues (Archive)" section in [backlog/README.md](file:///home/leanid/Documents/code/java/jseccomp/docs/internals/backlog/README.md).
+*   **Update Backlog File:** Set `status: "resolved"` in the issue file's YAML frontmatter (e.g. `docs/internals/backlog/security/issue-XXX-name.md`).
+*   **Update README:** Move the entry from "Open Issues" to the "Resolved Issues (Archive)" section in [backlog/README.md](file:///home/leanid/Documents/code/java/jseccomp/docs/internals/backlog/README.md) (updating the link path to point to `resolved/issue-XXX-name.md`).
+*   **Move File to Resolved:** Move the resolved issue file from its category folder to `docs/internals/backlog/resolved/`.
 *   **Clean Up:** Remove any temporary reproduction tests unless they provide long-term regression value.

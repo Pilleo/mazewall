@@ -19,5 +19,5 @@ This skill provides a protocol for keeping design and internal documentation in 
 - **Readability:** Ensure that updated documentation remains accessible and free of jargon that hasn't been defined.
 
 ### 4. Backlog Audit
-- **Check Backlog:** Scan `docs/internals/code_issues_backlog.md` for "Documentation Drift" entries.
-- **Resolve:** If your change resolves an existing drift entry, mark it as `[RESOLVED]`.
+- **Check Backlog:** Scan `docs/internals/backlog/` category directories (specifically `code_health` or `testing`) and [backlog/README.md](file:///home/leanid/Documents/code/java/jseccomp/docs/internals/backlog/README.md) for "Documentation Drift" entries.
+- **Resolve:** If your change resolves an existing drift entry, set `status: "resolved"` in its YAML frontmatter, move the issue file to `docs/internals/backlog/resolved/`, and update its registration status in [backlog/README.md](file:///home/leanid/Documents/code/java/jseccomp/docs/internals/backlog/README.md).
