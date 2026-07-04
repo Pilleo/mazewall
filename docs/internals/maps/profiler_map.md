@@ -204,6 +204,8 @@ graph TD
     issue_183_potential_buffer_overflow_outofboundsexception_on_long_unix_["🔴 Issue: Potential Buffer Overflow / OutOfBoundsException on Long UNIX Socket Paths (LOW)"]
     issue_185_missing_domain_logic_handling_of_syscallresult_in_supervisordaemonengine["🔴 Issue: Missing domain logic handling of SyscallResult in SupervisorDaemonEngine (MEDIUM)"]
     issue_186_memorysegment_lifetime_scope_violation_in_supervisordaemon["🔴 Issue: MemorySegment Lifetime/Scope Violation in SupervisorSessionHandler (HIGH)"]
+    issue_190_unhandled_eintr_in_accept_in_supervisordaemonengine["🔴 Issue: Unhandled EINTR in accept in SupervisorDaemonEngine (MEDIUM)"]
+    issue_191_jvm_validation_timeout_causes_denial_of_service_on_valid_syscalls["🔴 Issue: JVM Validation Timeout Causes Denial of Service on Valid Syscalls (MEDIUM)"]
     run_containerized_tests_sh["💻 Source: run_containerized_tests.sh"]
     supervisor_proxy_design_md["💻 Source: supervisor_proxy_design.md"]
     issue_018_formal_monoidal_composition_for_billofbehavior -->|Affects| io_mazewall_profiler_BillOfBehavior
@@ -452,6 +454,8 @@ graph TD
     click issue_183_potential_buffer_overflow_outofboundsexception_on_long_unix_ "../backlog/performance/issue-183-potential-buffer-overflow-outofboundsexception-on-long-unix-.md"
     click issue_185_missing_domain_logic_handling_of_syscallresult_in_supervisordaemonengine "../backlog/security/issue-185-missing-domain-logic-handling-of-syscallresult-in-supervisordaemonengine.md"
     click issue_186_memorysegment_lifetime_scope_violation_in_supervisordaemon "../backlog/testing/issue-186-memorysegment-lifetime-scope-violation-in-supervisordaemon.md"
+    click issue_190_unhandled_eintr_in_accept_in_supervisordaemonengine "../backlog/security/issue-190-unhandled-eintr-in-accept-in-supervisordaemonengine.md"
+    click issue_191_jvm_validation_timeout_causes_denial_of_service_on_valid_syscalls "../backlog/security/issue-191-jvm-validation-timeout-causes-denial-of-service-on-valid-syscalls.md"
 ```
 
 <!-- KNOWLEDGE_MAP_END -->
