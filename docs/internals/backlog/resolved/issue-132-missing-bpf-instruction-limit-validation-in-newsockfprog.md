@@ -1,7 +1,7 @@
 ---
 title: "Missing BPF Instruction Limit Validation in `newSockFProg`"
 severity: "HIGH"
-status: "open"
+status: "resolved"
 ---
 
 # 🔴 [Severity: MEDIUM]: Missing BPF Instruction Limit Validation in `newSockFProg`

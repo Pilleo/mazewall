@@ -30,9 +30,6 @@ graph TD
     ProfilerTraceListener_kt["💻 Source: ProfilerTraceListener.kt"]
     Profiler_kt["💻 Source: Profiler.kt"]
     PureJavaBpfEngine_kt["💻 Source: PureJavaBpfEngine.kt"]
-    SbobParser_kt["💻 Source: SbobParser.kt"]
-    SessionHandler_kt["💻 Source: SessionHandler.kt"]
-    SockFProg_kt["💻 Source: SockFProg.kt"]
     StraceProfiler_kt["💻 Source: StraceProfiler.kt"]
     SupervisorInstaller_kt["💻 Source: SupervisorInstaller.kt"]
     SupervisorSeccompNotifInstaller_kt["💻 Source: SupervisorSeccompNotifInstaller.kt"]
@@ -43,14 +40,12 @@ graph TD
     io_mazewall_BpfFilter["💻 Source: io.mazewall.BpfFilter"]
     io_mazewall_NativeEngine["💻 Source: io.mazewall.NativeEngine"]
     io_mazewall_NativeTransaction["💻 Source: io.mazewall.NativeTransaction"]
-    io_mazewall_Platform_kt["💻 Source: io.mazewall.Platform.kt"]
     io_mazewall_SbobParser["💻 Source: io.mazewall.SbobParser"]
     io_mazewall_SbobParser_kt["💻 Source: io.mazewall.SbobParser.kt"]
     io_mazewall_core_FileDescriptor["💻 Source: io.mazewall.core.FileDescriptor"]
     io_mazewall_core_SeccompAction["💻 Source: io.mazewall.core.SeccompAction"]
     io_mazewall_enforcer_ContainedExecutors["💻 Source: io.mazewall.enforcer.ContainedExecutors"]
     io_mazewall_enforcer_ContainedExecutors_kt["💻 Source: io.mazewall.enforcer.ContainedExecutors.kt"]
-    io_mazewall_enforcer_ContainerStateRegistry_kt["💻 Source: io.mazewall.enforcer.ContainerStateRegistry.kt"]
     io_mazewall_enforcer_ThreadStateRegistry["💻 Source: io.mazewall.enforcer.ThreadStateRegistry"]
     io_mazewall_ffi["💻 Source: io.mazewall.ffi"]
     io_mazewall_ffi_Layouts["💻 Source: io.mazewall.ffi.Layouts"]
@@ -61,8 +56,6 @@ graph TD
     io_mazewall_profiler_engine_ProfilerDaemonEngine["💻 Source: io.mazewall.profiler.engine.ProfilerDaemonEngine"]
     io_mazewall_profiler_engine_ProfilerDaemon["💻 Source: io.mazewall.profiler.engine.ProfilerDaemon"]
     io_mazewall_profiler_engine_ProfilerSessionHandler["💻 Source: io.mazewall.profiler.engine.ProfilerSessionHandler"]
-    io_mazewall_profiler_internal_ProfilerSocket["💻 Source: io.mazewall.profiler.internal.ProfilerSocket"]
-    io_mazewall_profiler_iterative_IterativeProfiler["💻 Source: io.mazewall.profiler.iterative.IterativeProfiler"]
     io_mazewall_profiler_strace_StraceProfiler["💻 Source: io.mazewall.profiler.strace.StraceProfiler"]
     io_mazewall_seccomp_BpfProgram_BDL["💻 Source: io.mazewall.seccomp.BpfProgram.BDL"]
     io_mazewall_seccomp_PureJavaBpfEngine["💻 Source: io.mazewall.seccomp.PureJavaBpfEngine"]
@@ -76,9 +69,7 @@ graph TD
     issue_010_compile_time_feature_proof_tokens_and_scope_safe_policy_buil["🔴 Issue: Compile-Time Feature Proof Tokens and Scope-Safe Policy Builders (Type-State Pattern) (ENHANCEMENT)"]
     issue_011_verified_by_construction_bpf_bytecode_bpfprogramstatus["🔴 Issue: Verified-by-Construction BPF Bytecode (BpfProgram<Status>) (ENHANCEMENT)"]
     issue_012_algebraic_policy_composition_semigroupmonoid["🔴 Issue: Algebraic Policy Composition (Semigroup/Monoid) (ENHANCEMENT)"]
-    issue_013_manual_ffm_layout_maintenance_and_abi_drift_risk["🔴 Issue: Manual FFM Layout Maintenance and ABI Drift Risk (HIGH)"]
     issue_014_bpf_disassemblerdumper_for_policy_verification["🔴 Issue: BPF Disassembler/Dumper for Policy Verification (ENHANCEMENT)"]
-    issue_015_algebraic_policy_composition_semigroupmonoid["🔴 Issue: Algebraic Policy Composition (Semigroup/Monoid) (ENHANCEMENT)"]
     issue_016_strongly_typed_syscall_flags_and_native_argument_definitions["🔴 Issue: Strongly Typed Syscall Flags and Native Argument Definitions (ENHANCEMENT)"]
     issue_017_symbolic_errno_mapping_in_syscallresult["🔴 Issue: Symbolic Errno Mapping in `SyscallResult` (ENHANCEMENT)"]
     issue_018_formal_monoidal_composition_for_billofbehavior["🔴 Issue: Formal Monoidal Composition for `BillOfBehavior` (ENHANCEMENT)"]
@@ -91,8 +82,6 @@ graph TD
     issue_030_architectural_dip_dependency_inversion_violations_in_native_["🔴 Issue: Architectural DIP (Dependency Inversion) Violations in Native Scopes (HIGH)"]
     issue_031_redundant_state_in_threadstateregistry_vs_policy["🔴 Issue: Redundant State in `ThreadStateRegistry` vs `Policy` (HIGH)"]
     issue_032_compile_time_bpf_termination_safety_type_state_ret_enforceme["🔴 Issue: Compile-Time BPF Termination Safety (Type-State RET Enforcement) (ENHANCEMENT)"]
-    issue_034_high_frequency_arena_allocation_overhead_mm_optimization["🔴 Issue: High-Frequency Arena Allocation Overhead (MM Optimization) (MEDIUM)"]
-    issue_035_memory_segment_pooling_for_profiler_usernotif["🔴 Issue: Memory Segment Pooling for Profiler USER_NOTIF (ENHANCEMENT)"]
     issue_036_residual_interface_segregation_violation_isp_in_nativeengine["🔴 Issue: Residual Interface Segregation Violation (ISP) in `NativeEngine` (HIGH)"]
     issue_037_seccompaction_violates_openclosed_principle_ocp["🔴 Issue: `SeccompAction` Violates Open/Closed Principle (OCP) (ENHANCEMENT)"]
     issue_038_type_state_for_filedescriptor_lifecycles_compile_time_use_af["🔴 Issue: Type-State for `FileDescriptor` Lifecycles (Compile-Time Use-After-Close Safety) (ENHANCEMENT)"]
@@ -114,8 +103,6 @@ graph TD
     issue_069_resource_containment_via_cgroups_v2["🔴 Issue: Resource Containment via Cgroups v2 (ENHANCEMENT)"]
     issue_070_network_isolation_via_namespaces_clonenewnet["🔴 Issue: Network Isolation via Namespaces (`CLONE_NEWNET`) (ENHANCEMENT)"]
     issue_071_introduce_context_parameters_for_memory_and_engine_scopes["🔴 Issue: Introduce Context Parameters for Memory and Engine Scopes (ENHANCEMENT)"]
-    issue_072_contract_based_invariant_validation["🔴 Issue: Contract-Based Invariant Validation (ENHANCEMENT)"]
-    issue_073_delegated_properties_for_thread_local_sandbox_state["🔴 Issue: Delegated Properties for Thread-Local Sandbox State (ENHANCEMENT)"]
     issue_075_jvm_invariant_syscall_floor_is_incomplete["🔴 Issue: 🟡 [DEFERRED — Medium]: JVM Invariant Syscall Floor is Incomplete (MEDIUM)"]
     issue_076_containmentdesignspec_test_fails_on_systems_without_landlock["🔴 Issue: `ContainmentDesignSpec` test fails on systems without Landlock support (HIGH)"]
     issue_077_landlock_getaccessmask_missing_abi_4_support_net_capabilitie["🔴 Issue: `Landlock` getAccessMask missing ABI 4 Support (Net Capabilities) (HIGH)"]
@@ -124,54 +111,34 @@ graph TD
     issue_080_inefficient_regex_compilation_in_containmentviolationdetecto["🔴 Issue: Inefficient Regex Compilation in `ContainmentViolationDetector` (HIGH)"]
     issue_081_root_test_task_requires_host_dockerpodman_not_runnable_insid["🔴 Issue: 📝 [NOTE]: Root `:test` task requires host Docker/Podman, not runnable inside dev container (MEDIUM)"]
     issue_082_ktlint_parser_fails_on_kotlin_2x_named_context_parameters_sy["🔴 Issue: KtLint parser fails on Kotlin 2.x named context parameters syntax (MEDIUM)"]
-    issue_083_unhandled_ioctl_fallbacks_during_legacy_jvm_syscall_tracing["🔴 Issue: Unhandled `IOCTL` fallbacks during legacy JVM syscall tracing (HIGH)"]
-    issue_084_potential_race_condition_in_async_io_thread_shutdown["🔴 Issue: Potential Race Condition in Async IO Thread Shutdown (HIGH)"]
-    issue_085_uncaught_native_exceptions_escaping_bpf_installation["🔴 Issue: Uncaught Native Exceptions Escaping BPF Installation (HIGH)"]
     issue_086_unhandled_signal_interruptions_eintr_during_seccomp_filter_i["🔴 Issue: Unhandled Signal Interruptions (`EINTR`) during `seccomp` Filter Installation (HIGH)"]
-    issue_088_suboptimal_bpf_ret_instruction_placement_in_emitlinearscan["🔴 Issue: Suboptimal BPF `RET` instruction placement in `emitLinearScan` (HIGH)"]
-    issue_089_missing_extensibility_in_exception_message_parsing["🔴 Issue: 🔴 [Severity: DX-FRICTION]: Missing Extensibility in Exception Message Parsing (HIGH)"]
-    issue_090_unhandled_ocloexec_omission_on_profiler_unix_sockets["🔴 Issue: Unhandled `O_CLOEXEC` Omission on Profiler Unix Sockets (HIGH)"]
     issue_091_unhandled_opath_omission_on_landlock_fallback_directories["🔴 Issue: Unhandled `O_PATH` Omission on Landlock Fallback Directories (HIGH)"]
     issue_092_memory_segment_lifetime_leak_in_async_profiler_events["🔴 Issue: Memory Segment Lifetime Leak in Async Profiler Events (HIGH)"]
     issue_093_toctou_vulnerability_in_prctl_argument_inspection["🔴 Issue: TOCTOU Vulnerability in `prctl` Argument Inspection (HIGH)"]
     issue_094_overly_broad_catch_block_in_profilerdaemonreactorloop["🔴 Issue: Overly Broad Catch Block in `ProfilerDaemon.reactorLoop` (HIGH)"]
     issue_095_unhandled_endianness_in_processvmreadv_socket_message_tracin["🔴 Issue: Unhandled Endianness in `process_vm_readv` Socket Message Tracing (HIGH)"]
-    issue_096_missing_bpf_instruction_limit_validation_in_newsockfprog["🔴 Issue: Missing BPF Instruction Limit Validation in `newSockFProg` (HIGH)"]
     issue_097_toctou_in_path_normalization_under_multi_threaded_io["🔴 Issue: TOCTOU in Path Normalization under Multi-Threaded I/O (HIGH)"]
-    issue_098_unhandled_signal_mask_inheritance_in_containedexecutors["🔴 Issue: Unhandled Signal Mask Inheritance in `ContainedExecutors` (HIGH)"]
-    issue_099_toctou_in_usernotif_argument_dereferencing["🔴 Issue: TOCTOU in `USER_NOTIF` Argument Dereferencing (HIGH)"]
-    issue_100_missing_return_value_check_for_seccompnotifresp_ack["🔴 Issue: Missing Return Value Check for `SECCOMP_NOTIF_RESP` ACK (HIGH)"]
     issue_101_sbobparser_production_crashes_due_to_syntactic_subpath_pruni["🔴 Issue: SbobParser Production Crashes due to Syntactic Subpath Pruning of Unresolved/Symlinked Paths (HIGH)"]
     issue_102_permanent_thread_pool_contamination_classloader_leaks_and_st["🔴 Issue: 🟢 [WONTFIX]: Permanent thread pool contamination, classloader leaks, and state pollution via un-cleared `ThreadLocal` variables (MEDIUM)"]
     issue_103_containedexecutors_thread_local_state_persistence_and_poison["🔴 Issue: 🟢 [WONTFIX]: `ContainedExecutors` Thread-Local State Persistence and Poisoning (MEDIUM)"]
-    issue_111_missing_bpfprogramstatus_and_bpflabel_type_safety["🔴 Issue: Missing `BpfProgram<Status>` and `BpfLabel` Type-Safety (HIGH)"]
     issue_112_iterativeprofiler_logic_errors_confirmed["🔴 Issue: `IterativeProfiler` Logic Errors (Confirmed) (HIGH)"]
     issue_113_loom_carrier_poisoning_bypass_in_purejavabpfengine["🔴 Issue: Loom Carrier Poisoning Bypass in `PureJavaBpfEngine` (HIGH)"]
     issue_114_landlock_excessive_capability_leak_on_enoent["🔴 Issue: Landlock Excessive Capability Leak on `ENOENT` (MEDIUM)"]
     issue_115_cascading_failure_in_verifyinstallation_when_stacking_over_a["🔴 Issue: Cascading Failure in `verifyInstallation` when stacking over a restrictive `prctl` filter (HIGH)"]
     issue_116_suboptimal_bpf_ret_instruction_placement_in_emitlinearscan["🔴 Issue: Suboptimal BPF `RET` instruction placement in `emitLinearScan` (HIGH)"]
-    issue_117_seccompinstallationstate_partial_failure_leaves_thread_unpri["🔴 Issue: `SeccompInstallationState` Partial Failure Leaves Thread Unprivileged but Uncontained (HIGH)"]
     issue_118_native_memory_leak_in_containedexecutorswrap_under_high_conc["🔴 Issue: Native Memory Leak in `ContainedExecutors.wrap` under High Concurrency (HIGH)"]
     issue_119_seccompinstallationstate_partial_failure_leaves_thread_unpri["🔴 Issue: `SeccompInstallationState` Partial Failure Leaves Thread Unprivileged but Uncontained (HIGH)"]
-    issue_120_native_memory_leak_in_containedexecutorswrap_under_high_conc["🔴 Issue: Native Memory Leak in `ContainedExecutors.wrap` under High Concurrency (HIGH)"]
     issue_121_missing_thread_safety_in_processstateregistry_updates["🔴 Issue: Missing Thread-Safety in `ProcessStateRegistry` Updates (HIGH)"]
     issue_122_incomplete_architecture_verification_in_bpf_compiler["🔴 Issue: Incomplete Architecture Verification in BPF Compiler (HIGH)"]
     issue_123_inefficient_threadlocal_usage_in_threadstateregistry["🔴 Issue: Inefficient ThreadLocal usage in `ThreadStateRegistry` (HIGH)"]
     issue_124_missing_support_for_opath_and_ocloexec_in_landlock_fallback["🔴 Issue: Missing Support for `O_PATH` and `O_CLOEXEC` in `Landlock` fallback (HIGH)"]
     issue_125_opaque_exceptions_on_landlock_initialization_failure["🔴 Issue: 🔴 [Severity: DX-FRICTION]: Opaque Exceptions on Landlock Initialization Failure (HIGH)"]
-    issue_126_memory_segment_lifetime_leak_in_async_profiler_events["🔴 Issue: Memory Segment Lifetime Leak in Async Profiler Events (HIGH)"]
     issue_127_unhandled_signal_mask_inheritance_in_containedexecutors["🔴 Issue: Unhandled Signal Mask Inheritance in `ContainedExecutors` (HIGH)"]
     issue_128_missing_extensibility_in_exception_message_parsing["🔴 Issue: 🔴 [Severity: DX-FRICTION]: Missing Extensibility in Exception Message Parsing (HIGH)"]
     issue_129_toctou_in_usernotif_argument_dereferencing["🔴 Issue: TOCTOU in `USER_NOTIF` Argument Dereferencing (HIGH)"]
-    issue_130_unhandled_endianness_in_processvmreadv_socket_message_tracin["🔴 Issue: Unhandled Endianness in `process_vm_readv` Socket Message Tracing (HIGH)"]
     issue_131_missing_return_value_check_for_seccompnotifresp_ack["🔴 Issue: Missing Return Value Check for `SECCOMP_NOTIF_RESP` ACK (HIGH)"]
-    issue_132_missing_bpf_instruction_limit_validation_in_newsockfprog["🔴 Issue: Missing BPF Instruction Limit Validation in `newSockFProg` (HIGH)"]
     issue_133_unhandled_ocloexec_omission_on_profiler_unix_sockets["🔴 Issue: Unhandled `O_CLOEXEC` Omission on Profiler Unix Sockets (HIGH)"]
-    issue_134_toctou_in_path_normalization_under_multi_threaded_io["🔴 Issue: TOCTOU in Path Normalization under Multi-Threaded I/O (HIGH)"]
     issue_135_uncaught_native_exceptions_escaping_bpf_installation["🔴 Issue: Uncaught Native Exceptions Escaping BPF Installation (HIGH)"]
-    issue_136_sbobparser_production_crashes_due_to_syntactic_subpath_pruni["🔴 Issue: `SbobParser` Production Crashes due to Syntactic Subpath Pruning of Unresolved/Symlinked Paths (HIGH)"]
-    issue_137_overly_broad_catch_block_in_profilerdaemonreactorloop["🔴 Issue: Overly Broad Catch Block in `ProfilerDaemon.reactorLoop` (HIGH)"]
-    issue_138_unhandled_signal_interruptions_eintr_during_seccomp_filter_i["🔴 Issue: Unhandled Signal Interruptions (`EINTR`) during `seccomp` Filter Installation (HIGH)"]
     issue_139_unhandled_ioctl_fallbacks_during_legacy_jvm_syscall_tracing["🔴 Issue: Unhandled `IOCTL` fallbacks during legacy JVM syscall tracing (HIGH)"]
     issue_140_potential_race_condition_in_async_io_thread_shutdown["🔴 Issue: Potential Race Condition in Async IO Thread Shutdown (HIGH)"]
     issue_141_missing_bpfprogramstatus_and_bpflabel_type_safety["🔴 Issue: Missing `BpfProgram<Status>` and `BpfLabel` Type-Safety (HIGH)"]
@@ -179,7 +146,6 @@ graph TD
     issue_143_process_wide_classloader_deadlock_on_profiler_result_state_t["🔴 Issue: Process-Wide Classloader Deadlock on Profiler Result / State Types (HIGH)"]
     issue_144_confused_deputy_time_of_check_to_time_of_use_toctou_via_path["🔴 Issue: Confused Deputy / Time-of-Check to Time-of-Use (TOCTOU) via Path Modification (CRITICAL)"]
     issue_145_toctou_pointer_re_targeting_via_sockaddrbytes_mutation_durin["🔴 Issue: TOCTOU / Pointer Re-targeting via `sockaddrBytes` Mutation during Connect Validation (CRITICAL)"]
-    issue_146_unhandled_signal_interruptions_eintr_during_supervisor_ipc_s["🔴 Issue: Unhandled Signal Interruptions (`EINTR`) during Supervisor IPC socket communication (HIGH)"]
     issue_147_unhandled_signal_interruptions_eintr_during_supervisor_initi["🔴 Issue: Unhandled Signal Interruptions (`EINTR`) during Supervisor Initialization (HIGH)"]
     issue_148_asynchronous_supervisor_socket_reads_timeout_failure_handlin["🔴 Issue: Asynchronous Supervisor socket reads timeout failure handling (HIGH)"]
     issue_149_classloader_deadlock_in_jvm_validation_listener["🔴 Issue: Classloader Deadlock in JVM Validation Listener (CRITICAL)"]
@@ -192,17 +158,12 @@ graph TD
     issue_165_silent_fallback_by_default_behavior_evaluation["🔴 Issue: Silent Fallback by default behavior evaluation (HIGH)"]
     issue_166_architectural_violation_ffm_leaking_outside_iomazewallffi["🔴 Issue: Architectural Violation - FFM Leaking Outside `io.mazewall.ffi` (HIGH)"]
     issue_169_inconsistent_architecture_test_for_javalangforeign["🔴 Issue: Inconsistent Architecture Test for `java.lang.foreign` (HIGH)"]
-    issue_172_memory_segment_scopes_and_lifetimes_re_evaluation["🔴 Issue: Memory Segment Scopes and Lifetimes (Re-evaluation) (HIGH)"]
     issue_173_unhandled_signal_interruptions_eintr_in_socket_io["🔴 Issue: Unhandled Signal Interruptions (`EINTR`) in socket IO (HIGH)"]
-    issue_174_uncaught_exceptions_in_containedexecutorwrapperkt_during_fil["🔴 Issue: Uncaught exceptions in `ContainedExecutorWrapper.kt` during filter installation (HIGH)"]
     issue_175_uncaught_native_exceptions_in_landlock_landlockstatekt["🔴 Issue: Uncaught Native Exceptions in Landlock `LandlockState.kt` (HIGH)"]
-    issue_176_toctou_in_path_normalization_pathnormalizerkt["🔴 Issue: TOCTOU in Path Normalization `PathNormalizer.kt` (HIGH)"]
     issue_177_missing_archunit_test_for_ffm_architecture_boundary_violatio["🔴 Issue: Missing ArchUnit test for FFM architecture boundary violations (HIGH)"]
     issue_178_unreliable_test_teardown_for_mocked_native_engines["🔴 Issue: Unreliable Test Teardown for Mocked Native Engines (HIGH)"]
-    issue_179_uncaught_native_exceptions_escaping_landlock_installation["🔴 Issue: Uncaught Native Exceptions Escaping Landlock Installation (HIGH)"]
     issue_180_uncaught_exceptions_in_containedexecutorwrapperkt_during_fil["🔴 Issue: Uncaught exceptions in `ContainedExecutorWrapper.kt` during filter installation (HIGH)"]
     issue_181_toctou_in_path_normalization_pathnormalizerkt["🔴 Issue: TOCTOU in Path Normalization `PathNormalizer.kt` (HIGH)"]
-    issue_183_potential_buffer_overflow_outofboundsexception_on_long_unix_["🔴 Issue: Potential Buffer Overflow / OutOfBoundsException on Long UNIX Socket Paths (LOW)"]
     issue_185_missing_domain_logic_handling_of_syscallresult_in_supervisordaemonengine["🔴 Issue: Missing domain logic handling of SyscallResult in SupervisorDaemonEngine (MEDIUM)"]
     issue_186_memorysegment_lifetime_scope_violation_in_supervisordaemon["🔴 Issue: MemorySegment Lifetime/Scope Violation in SupervisorSessionHandler (HIGH)"]
     issue_187_archunit_bypass_swallowed_syscallresult_in_supervisorsessionhandler["🔴 Issue: ArchUnit Bypass: Swallowed SyscallResult in SupervisorSessionHandler (HIGH)"]
@@ -239,61 +200,39 @@ graph TD
     issue_061_manual_ffm_layout_maintenance_and_drift_risk -->|Affects| io_mazewall_ffi_Layouts
     issue_066_straceprofiler_completely_fails_to_trace_iouring_file_operat -->|Affects| io_mazewall_profiler_strace_StraceProfiler
     issue_068_supervisor_proxy_pattern_fd_injection_stacktrace_scoping -->|Affects| supervisor_proxy_design_md
-    issue_072_contract_based_invariant_validation -->|Affects| io_mazewall_Platform_kt
-    issue_073_delegated_properties_for_thread_local_sandbox_state -->|Affects| io_mazewall_enforcer_ContainerStateRegistry_kt
     issue_076_containmentdesignspec_test_fails_on_systems_without_landlock -->|Affects| ContainmentDesignSpec_kt
     issue_077_landlock_getaccessmask_missing_abi_4_support_net_capabilitie -->|Affects| Landlock_kt
     issue_078_purejavabpfengine_thread_state_synchronization -->|Affects| PureJavaBpfEngine_kt
     issue_079_unhandled_tsync_edge_cases_during_jit_classloading -->|Affects| PureJavaBpfEngine_kt
     issue_080_inefficient_regex_compilation_in_containmentviolationdetecto -->|Affects| ContainmentViolationDetector_kt
-    issue_083_unhandled_ioctl_fallbacks_during_legacy_jvm_syscall_tracing -->|Affects| io_mazewall_profiler_engine_ProfilerDaemon
-    issue_084_potential_race_condition_in_async_io_thread_shutdown -->|Affects| io_mazewall_enforcer_ContainedExecutors
-    issue_085_uncaught_native_exceptions_escaping_bpf_installation -->|Affects| io_mazewall_seccomp_PureJavaBpfEngine
     issue_086_unhandled_signal_interruptions_eintr_during_seccomp_filter_i -->|Affects| io_mazewall_seccomp_PureJavaBpfEngine
-    issue_088_suboptimal_bpf_ret_instruction_placement_in_emitlinearscan -->|Affects| io_mazewall_BpfFilter
-    issue_089_missing_extensibility_in_exception_message_parsing -->|Affects| io_mazewall_profiler_iterative_IterativeProfiler
-    issue_090_unhandled_ocloexec_omission_on_profiler_unix_sockets -->|Affects| io_mazewall_profiler_internal_ProfilerSocket
     issue_091_unhandled_opath_omission_on_landlock_fallback_directories -->|Affects| io_mazewall_landlock_Landlock
     issue_092_memory_segment_lifetime_leak_in_async_profiler_events -->|Affects| io_mazewall_profiler_engine_ProfilerSessionHandler
     issue_093_toctou_vulnerability_in_prctl_argument_inspection -->|Affects| io_mazewall_BpfFilter
     issue_094_overly_broad_catch_block_in_profilerdaemonreactorloop -->|Affects| io_mazewall_profiler_engine_ProfilerDaemon
     issue_095_unhandled_endianness_in_processvmreadv_socket_message_tracin -->|Affects| io_mazewall_profiler_engine_ProfilerDaemon
-    issue_096_missing_bpf_instruction_limit_validation_in_newsockfprog -->|Affects| io_mazewall_seccomp_PureJavaBpfEngine
     issue_097_toctou_in_path_normalization_under_multi_threaded_io -->|Affects| io_mazewall_SbobParser
-    issue_098_unhandled_signal_mask_inheritance_in_containedexecutors -->|Affects| io_mazewall_enforcer_ContainedExecutors
-    issue_099_toctou_in_usernotif_argument_dereferencing -->|Affects| io_mazewall_profiler_engine_ProfilerDaemon
-    issue_100_missing_return_value_check_for_seccompnotifresp_ack -->|Affects| io_mazewall_profiler_engine_ProfilerSessionHandler
     issue_101_sbobparser_production_crashes_due_to_syntactic_subpath_pruni -->|Affects| io_mazewall_SbobParser
     issue_102_permanent_thread_pool_contamination_classloader_leaks_and_st -->|Affects| ContainedExecutors_kt
     issue_103_containedexecutors_thread_local_state_persistence_and_poison -->|Affects| io_mazewall_enforcer_ContainedExecutors_kt
-    issue_111_missing_bpfprogramstatus_and_bpflabel_type_safety -->|Affects| BpfProgram_kt
     issue_112_iterativeprofiler_logic_errors_confirmed -->|Affects| IterativeProfiler_kt
     issue_113_loom_carrier_poisoning_bypass_in_purejavabpfengine -->|Affects| PureJavaBpfEngine_kt
     issue_114_landlock_excessive_capability_leak_on_enoent -->|Affects| Landlock_kt
     issue_115_cascading_failure_in_verifyinstallation_when_stacking_over_a -->|Affects| PureJavaBpfEngine_kt
     issue_116_suboptimal_bpf_ret_instruction_placement_in_emitlinearscan -->|Affects| BpfFilter_kt
-    issue_117_seccompinstallationstate_partial_failure_leaves_thread_unpri -->|Affects| PureJavaBpfEngine_kt
     issue_118_native_memory_leak_in_containedexecutorswrap_under_high_conc -->|Affects| PureJavaBpfEngine_kt
     issue_119_seccompinstallationstate_partial_failure_leaves_thread_unpri -->|Affects| PureJavaBpfEngine_kt
-    issue_120_native_memory_leak_in_containedexecutorswrap_under_high_conc -->|Affects| PureJavaBpfEngine_kt
     issue_121_missing_thread_safety_in_processstateregistry_updates -->|Affects| ProcessStateRegistry_kt
     issue_122_incomplete_architecture_verification_in_bpf_compiler -->|Affects| BpfProgram_kt
     issue_123_inefficient_threadlocal_usage_in_threadstateregistry -->|Affects| ThreadStateRegistry_kt
     issue_124_missing_support_for_opath_and_ocloexec_in_landlock_fallback -->|Affects| Landlock_kt
     issue_125_opaque_exceptions_on_landlock_initialization_failure -->|Affects| Landlock_kt
-    issue_126_memory_segment_lifetime_leak_in_async_profiler_events -->|Affects| SessionHandler_kt
     issue_127_unhandled_signal_mask_inheritance_in_containedexecutors -->|Affects| ContainedExecutors_kt
     issue_128_missing_extensibility_in_exception_message_parsing -->|Affects| ContainmentViolationDetector_kt
     issue_129_toctou_in_usernotif_argument_dereferencing -->|Affects| StraceProfiler_kt
-    issue_130_unhandled_endianness_in_processvmreadv_socket_message_tracin -->|Affects| StraceProfiler_kt
     issue_131_missing_return_value_check_for_seccompnotifresp_ack -->|Affects| StraceProfiler_kt
-    issue_132_missing_bpf_instruction_limit_validation_in_newsockfprog -->|Affects| SockFProg_kt
     issue_133_unhandled_ocloexec_omission_on_profiler_unix_sockets -->|Affects| ProfilerSocket_kt
-    issue_134_toctou_in_path_normalization_under_multi_threaded_io -->|Affects| SbobParser_kt
     issue_135_uncaught_native_exceptions_escaping_bpf_installation -->|Affects| PureJavaBpfEngine_kt
-    issue_136_sbobparser_production_crashes_due_to_syntactic_subpath_pruni -->|Affects| SbobParser_kt
-    issue_137_overly_broad_catch_block_in_profilerdaemonreactorloop -->|Affects| ProfilerDaemon_kt
-    issue_138_unhandled_signal_interruptions_eintr_during_seccomp_filter_i -->|Affects| PureJavaBpfEngine_kt
     issue_139_unhandled_ioctl_fallbacks_during_legacy_jvm_syscall_tracing -->|Affects| ProfilerDaemon_kt
     issue_140_potential_race_condition_in_async_io_thread_shutdown -->|Affects| ContainedExecutors_kt
     issue_141_missing_bpfprogramstatus_and_bpflabel_type_safety -->|Affects| BpfProgram_kt
@@ -301,7 +240,6 @@ graph TD
     issue_143_process_wide_classloader_deadlock_on_profiler_result_state_t -->|Affects| Profiler_kt
     issue_144_confused_deputy_time_of_check_to_time_of_use_toctou_via_path -->|Affects| SupervisorSessionHandler_kt
     issue_145_toctou_pointer_re_targeting_via_sockaddrbytes_mutation_durin -->|Affects| SupervisorSessionHandler_kt
-    issue_146_unhandled_signal_interruptions_eintr_during_supervisor_ipc_s -->|Affects| SupervisorSessionHandler_kt
     issue_147_unhandled_signal_interruptions_eintr_during_supervisor_initi -->|Affects| SupervisorSeccompNotifInstaller_kt
     issue_148_asynchronous_supervisor_socket_reads_timeout_failure_handlin -->|Affects| SupervisorSessionHandler_kt
     issue_149_classloader_deadlock_in_jvm_validation_listener -->|Affects| SupervisorInstaller_kt
@@ -313,14 +251,10 @@ graph TD
     issue_164_toctou_vulnerability_in_supervisor_syscall_emulation_via_pro -->|Affects| SupervisorSessionHandler_kt
     issue_165_silent_fallback_by_default_behavior_evaluation -->|Affects| Platform_kt
     issue_169_inconsistent_architecture_test_for_javalangforeign -->|Affects| ArchitectureTest_kt
-    issue_172_memory_segment_scopes_and_lifetimes_re_evaluation -->|Affects| SupervisorSessionHandler_kt
     issue_173_unhandled_signal_interruptions_eintr_in_socket_io -->|Affects| ProfilerTraceListener_kt
-    issue_174_uncaught_exceptions_in_containedexecutorwrapperkt_during_fil -->|Affects| ContainedExecutorWrapper_kt
     issue_175_uncaught_native_exceptions_in_landlock_landlockstatekt -->|Affects| LandlockState_kt
-    issue_176_toctou_in_path_normalization_pathnormalizerkt -->|Affects| PathNormalizer_kt
     issue_177_missing_archunit_test_for_ffm_architecture_boundary_violatio -->|Affects| ArchitectureTest_kt
     issue_178_unreliable_test_teardown_for_mocked_native_engines -->|Affects| LandlockCoverageTest_kt
-    issue_179_uncaught_native_exceptions_escaping_landlock_installation -->|Affects| LandlockState_kt
     issue_180_uncaught_exceptions_in_containedexecutorwrapperkt_during_fil -->|Affects| ContainedExecutorWrapper_kt
     issue_181_toctou_in_path_normalization_pathnormalizerkt -->|Affects| PathNormalizer_kt
     click containment_design "../containment_design.md"
@@ -334,9 +268,7 @@ graph TD
     click issue_010_compile_time_feature_proof_tokens_and_scope_safe_policy_buil "../backlog/security/issue-010-compile-time-feature-proof-tokens-and-scope-safe-policy-buil.md"
     click issue_011_verified_by_construction_bpf_bytecode_bpfprogramstatus "../backlog/security/issue-011-verified-by-construction-bpf-bytecode-bpfprogramstatus.md"
     click issue_012_algebraic_policy_composition_semigroupmonoid "../backlog/testing/issue-012-algebraic-policy-composition-semigroupmonoid.md"
-    click issue_013_manual_ffm_layout_maintenance_and_abi_drift_risk "../backlog/testing/issue-013-manual-ffm-layout-maintenance-and-abi-drift-risk.md"
     click issue_014_bpf_disassemblerdumper_for_policy_verification "../backlog/security/issue-014-bpf-disassemblerdumper-for-policy-verification.md"
-    click issue_015_algebraic_policy_composition_semigroupmonoid "../backlog/testing/issue-015-algebraic-policy-composition-semigroupmonoid.md"
     click issue_016_strongly_typed_syscall_flags_and_native_argument_definitions "../backlog/performance/issue-016-strongly-typed-syscall-flags-and-native-argument-definitions.md"
     click issue_017_symbolic_errno_mapping_in_syscallresult "../backlog/performance/issue-017-symbolic-errno-mapping-in-syscallresult.md"
     click issue_018_formal_monoidal_composition_for_billofbehavior "../backlog/testing/issue-018-formal-monoidal-composition-for-billofbehavior.md"
@@ -349,8 +281,6 @@ graph TD
     click issue_030_architectural_dip_dependency_inversion_violations_in_native_ "../backlog/testing/issue-030-architectural-dip-dependency-inversion-violations-in-native-.md"
     click issue_031_redundant_state_in_threadstateregistry_vs_policy "../backlog/security/issue-031-redundant-state-in-threadstateregistry-vs-policy.md"
     click issue_032_compile_time_bpf_termination_safety_type_state_ret_enforceme "../backlog/code_health/issue-032-compile-time-bpf-termination-safety-type-state-ret-enforceme.md"
-    click issue_034_high_frequency_arena_allocation_overhead_mm_optimization "../backlog/performance/issue-034-high-frequency-arena-allocation-overhead-mm-optimization.md"
-    click issue_035_memory_segment_pooling_for_profiler_usernotif "../backlog/security/issue-035-memory-segment-pooling-for-profiler-usernotif.md"
     click issue_036_residual_interface_segregation_violation_isp_in_nativeengine "../backlog/testing/issue-036-residual-interface-segregation-violation-isp-in-nativeengine.md"
     click issue_037_seccompaction_violates_openclosed_principle_ocp "../backlog/security/issue-037-seccompaction-violates-openclosed-principle-ocp.md"
     click issue_038_type_state_for_filedescriptor_lifecycles_compile_time_use_af "../backlog/code_health/issue-038-type-state-for-filedescriptor-lifecycles-compile-time-use-af.md"
@@ -372,8 +302,6 @@ graph TD
     click issue_069_resource_containment_via_cgroups_v2 "../backlog/security/issue-069-resource-containment-via-cgroups-v2.md"
     click issue_070_network_isolation_via_namespaces_clonenewnet "../backlog/security/issue-070-network-isolation-via-namespaces-clonenewnet.md"
     click issue_071_introduce_context_parameters_for_memory_and_engine_scopes "../backlog/testing/issue-071-introduce-context-parameters-for-memory-and-engine-scopes.md"
-    click issue_072_contract_based_invariant_validation "../backlog/testing/issue-072-contract-based-invariant-validation.md"
-    click issue_073_delegated_properties_for_thread_local_sandbox_state "../backlog/performance/issue-073-delegated-properties-for-thread-local-sandbox-state.md"
     click issue_075_jvm_invariant_syscall_floor_is_incomplete "../backlog/performance/issue-075-jvm-invariant-syscall-floor-is-incomplete.md"
     click issue_076_containmentdesignspec_test_fails_on_systems_without_landlock "../backlog/testing/issue-076-containmentdesignspec-test-fails-on-systems-without-landlock.md"
     click issue_077_landlock_getaccessmask_missing_abi_4_support_net_capabilitie "../backlog/security/issue-077-landlock-getaccessmask-missing-abi-4-support-net-capabilitie.md"
@@ -382,54 +310,34 @@ graph TD
     click issue_080_inefficient_regex_compilation_in_containmentviolationdetecto "../backlog/performance/issue-080-inefficient-regex-compilation-in-containmentviolationdetecto.md"
     click issue_081_root_test_task_requires_host_dockerpodman_not_runnable_insid "../backlog/testing/issue-081-root-test-task-requires-host-dockerpodman-not-runnable-insid.md"
     click issue_082_ktlint_parser_fails_on_kotlin_2x_named_context_parameters_sy "../backlog/testing/issue-082-ktlint-parser-fails-on-kotlin-2x-named-context-parameters-sy.md"
-    click issue_083_unhandled_ioctl_fallbacks_during_legacy_jvm_syscall_tracing "../backlog/testing/issue-083-unhandled-ioctl-fallbacks-during-legacy-jvm-syscall-tracing.md"
-    click issue_084_potential_race_condition_in_async_io_thread_shutdown "../backlog/performance/issue-084-potential-race-condition-in-async-io-thread-shutdown.md"
-    click issue_085_uncaught_native_exceptions_escaping_bpf_installation "../backlog/security/issue-085-uncaught-native-exceptions-escaping-bpf-installation.md"
     click issue_086_unhandled_signal_interruptions_eintr_during_seccomp_filter_i "../backlog/security/issue-086-unhandled-signal-interruptions-eintr-during-seccomp-filter-i.md"
-    click issue_088_suboptimal_bpf_ret_instruction_placement_in_emitlinearscan "../backlog/performance/issue-088-suboptimal-bpf-ret-instruction-placement-in-emitlinearscan.md"
-    click issue_089_missing_extensibility_in_exception_message_parsing "../backlog/performance/issue-089-missing-extensibility-in-exception-message-parsing.md"
-    click issue_090_unhandled_ocloexec_omission_on_profiler_unix_sockets "../backlog/performance/issue-090-unhandled-ocloexec-omission-on-profiler-unix-sockets.md"
     click issue_091_unhandled_opath_omission_on_landlock_fallback_directories "../backlog/security/issue-091-unhandled-opath-omission-on-landlock-fallback-directories.md"
     click issue_092_memory_segment_lifetime_leak_in_async_profiler_events "../backlog/performance/issue-092-memory-segment-lifetime-leak-in-async-profiler-events.md"
     click issue_093_toctou_vulnerability_in_prctl_argument_inspection "../backlog/security/issue-093-toctou-vulnerability-in-prctl-argument-inspection.md"
     click issue_094_overly_broad_catch_block_in_profilerdaemonreactorloop "../backlog/performance/issue-094-overly-broad-catch-block-in-profilerdaemonreactorloop.md"
     click issue_095_unhandled_endianness_in_processvmreadv_socket_message_tracin "../backlog/testing/issue-095-unhandled-endianness-in-processvmreadv-socket-message-tracin.md"
-    click issue_096_missing_bpf_instruction_limit_validation_in_newsockfprog "../backlog/testing/issue-096-missing-bpf-instruction-limit-validation-in-newsockfprog.md"
     click issue_097_toctou_in_path_normalization_under_multi_threaded_io "../backlog/security/issue-097-toctou-in-path-normalization-under-multi-threaded-io.md"
-    click issue_098_unhandled_signal_mask_inheritance_in_containedexecutors "../backlog/security/issue-098-unhandled-signal-mask-inheritance-in-containedexecutors.md"
-    click issue_099_toctou_in_usernotif_argument_dereferencing "../backlog/security/issue-099-toctou-in-usernotif-argument-dereferencing.md"
-    click issue_100_missing_return_value_check_for_seccompnotifresp_ack "../backlog/security/issue-100-missing-return-value-check-for-seccompnotifresp-ack.md"
     click issue_101_sbobparser_production_crashes_due_to_syntactic_subpath_pruni "../backlog/testing/issue-101-sbobparser-production-crashes-due-to-syntactic-subpath-pruni.md"
     click issue_102_permanent_thread_pool_contamination_classloader_leaks_and_st "../backlog/performance/issue-102-permanent-thread-pool-contamination-classloader-leaks-and-st.md"
     click issue_103_containedexecutors_thread_local_state_persistence_and_poison "../backlog/performance/issue-103-containedexecutors-thread-local-state-persistence-and-poison.md"
-    click issue_111_missing_bpfprogramstatus_and_bpflabel_type_safety "../backlog/security/issue-111-missing-bpfprogramstatus-and-bpflabel-type-safety.md"
     click issue_112_iterativeprofiler_logic_errors_confirmed "../backlog/performance/issue-112-iterativeprofiler-logic-errors-confirmed.md"
     click issue_113_loom_carrier_poisoning_bypass_in_purejavabpfengine "../backlog/security/issue-113-loom-carrier-poisoning-bypass-in-purejavabpfengine.md"
     click issue_114_landlock_excessive_capability_leak_on_enoent "../backlog/security/issue-114-landlock-excessive-capability-leak-on-enoent.md"
     click issue_115_cascading_failure_in_verifyinstallation_when_stacking_over_a "../backlog/security/issue-115-cascading-failure-in-verifyinstallation-when-stacking-over-a.md"
     click issue_116_suboptimal_bpf_ret_instruction_placement_in_emitlinearscan "../backlog/performance/issue-116-suboptimal-bpf-ret-instruction-placement-in-emitlinearscan.md"
-    click issue_117_seccompinstallationstate_partial_failure_leaves_thread_unpri "../backlog/security/issue-117-seccompinstallationstate-partial-failure-leaves-thread-unpri.md"
     click issue_118_native_memory_leak_in_containedexecutorswrap_under_high_conc "../backlog/performance/issue-118-native-memory-leak-in-containedexecutorswrap-under-high-conc.md"
     click issue_119_seccompinstallationstate_partial_failure_leaves_thread_unpri "../backlog/security/issue-119-seccompinstallationstate-partial-failure-leaves-thread-unpri.md"
-    click issue_120_native_memory_leak_in_containedexecutorswrap_under_high_conc "../backlog/performance/issue-120-native-memory-leak-in-containedexecutorswrap-under-high-conc.md"
     click issue_121_missing_thread_safety_in_processstateregistry_updates "../backlog/testing/issue-121-missing-thread-safety-in-processstateregistry-updates.md"
     click issue_122_incomplete_architecture_verification_in_bpf_compiler "../backlog/security/issue-122-incomplete-architecture-verification-in-bpf-compiler.md"
     click issue_123_inefficient_threadlocal_usage_in_threadstateregistry "../backlog/performance/issue-123-inefficient-threadlocal-usage-in-threadstateregistry.md"
     click issue_124_missing_support_for_opath_and_ocloexec_in_landlock_fallback "../backlog/security/issue-124-missing-support-for-opath-and-ocloexec-in-landlock-fallback.md"
     click issue_125_opaque_exceptions_on_landlock_initialization_failure "../backlog/security/issue-125-opaque-exceptions-on-landlock-initialization-failure.md"
-    click issue_126_memory_segment_lifetime_leak_in_async_profiler_events "../backlog/performance/issue-126-memory-segment-lifetime-leak-in-async-profiler-events.md"
     click issue_127_unhandled_signal_mask_inheritance_in_containedexecutors "../backlog/testing/issue-127-unhandled-signal-mask-inheritance-in-containedexecutors.md"
     click issue_128_missing_extensibility_in_exception_message_parsing "../backlog/testing/issue-128-missing-extensibility-in-exception-message-parsing.md"
     click issue_129_toctou_in_usernotif_argument_dereferencing "../backlog/security/issue-129-toctou-in-usernotif-argument-dereferencing.md"
-    click issue_130_unhandled_endianness_in_processvmreadv_socket_message_tracin "../backlog/testing/issue-130-unhandled-endianness-in-processvmreadv-socket-message-tracin.md"
     click issue_131_missing_return_value_check_for_seccompnotifresp_ack "../backlog/security/issue-131-missing-return-value-check-for-seccompnotifresp-ack.md"
-    click issue_132_missing_bpf_instruction_limit_validation_in_newsockfprog "../backlog/testing/issue-132-missing-bpf-instruction-limit-validation-in-newsockfprog.md"
     click issue_133_unhandled_ocloexec_omission_on_profiler_unix_sockets "../backlog/performance/issue-133-unhandled-ocloexec-omission-on-profiler-unix-sockets.md"
-    click issue_134_toctou_in_path_normalization_under_multi_threaded_io "../backlog/security/issue-134-toctou-in-path-normalization-under-multi-threaded-io.md"
     click issue_135_uncaught_native_exceptions_escaping_bpf_installation "../backlog/testing/issue-135-uncaught-native-exceptions-escaping-bpf-installation.md"
-    click issue_136_sbobparser_production_crashes_due_to_syntactic_subpath_pruni "../backlog/performance/issue-136-sbobparser-production-crashes-due-to-syntactic-subpath-pruni.md"
-    click issue_137_overly_broad_catch_block_in_profilerdaemonreactorloop "../backlog/performance/issue-137-overly-broad-catch-block-in-profilerdaemonreactorloop.md"
-    click issue_138_unhandled_signal_interruptions_eintr_during_seccomp_filter_i "../backlog/security/issue-138-unhandled-signal-interruptions-eintr-during-seccomp-filter-i.md"
     click issue_139_unhandled_ioctl_fallbacks_during_legacy_jvm_syscall_tracing "../backlog/testing/issue-139-unhandled-ioctl-fallbacks-during-legacy-jvm-syscall-tracing.md"
     click issue_140_potential_race_condition_in_async_io_thread_shutdown "../backlog/testing/issue-140-potential-race-condition-in-async-io-thread-shutdown.md"
     click issue_141_missing_bpfprogramstatus_and_bpflabel_type_safety "../backlog/security/issue-141-missing-bpfprogramstatus-and-bpflabel-type-safety.md"
@@ -437,7 +345,6 @@ graph TD
     click issue_143_process_wide_classloader_deadlock_on_profiler_result_state_t "../backlog/security/issue-143-process-wide-classloader-deadlock-on-profiler-result-state-t.md"
     click issue_144_confused_deputy_time_of_check_to_time_of_use_toctou_via_path "../backlog/security/issue-144-confused-deputy-time-of-check-to-time-of-use-toctou-via-path.md"
     click issue_145_toctou_pointer_re_targeting_via_sockaddrbytes_mutation_durin "../backlog/security/issue-145-toctou-pointer-re-targeting-via-sockaddrbytes-mutation-durin.md"
-    click issue_146_unhandled_signal_interruptions_eintr_during_supervisor_ipc_s "../backlog/security/issue-146-unhandled-signal-interruptions-eintr-during-supervisor-ipc-s.md"
     click issue_147_unhandled_signal_interruptions_eintr_during_supervisor_initi "../backlog/security/issue-147-unhandled-signal-interruptions-eintr-during-supervisor-initi.md"
     click issue_148_asynchronous_supervisor_socket_reads_timeout_failure_handlin "../backlog/testing/issue-148-asynchronous-supervisor-socket-reads-timeout-failure-handlin.md"
     click issue_149_classloader_deadlock_in_jvm_validation_listener "../backlog/security/issue-149-classloader-deadlock-in-jvm-validation-listener.md"
@@ -450,17 +357,12 @@ graph TD
     click issue_165_silent_fallback_by_default_behavior_evaluation "../backlog/security/issue-165-silent-fallback-by-default-behavior-evaluation.md"
     click issue_166_architectural_violation_ffm_leaking_outside_iomazewallffi "../backlog/security/issue-166-architectural-violation-ffm-leaking-outside-iomazewallffi.md"
     click issue_169_inconsistent_architecture_test_for_javalangforeign "../backlog/testing/issue-169-inconsistent-architecture-test-for-javalangforeign.md"
-    click issue_172_memory_segment_scopes_and_lifetimes_re_evaluation "../backlog/performance/issue-172-memory-segment-scopes-and-lifetimes-re-evaluation.md"
     click issue_173_unhandled_signal_interruptions_eintr_in_socket_io "../backlog/performance/issue-173-unhandled-signal-interruptions-eintr-in-socket-io.md"
-    click issue_174_uncaught_exceptions_in_containedexecutorwrapperkt_during_fil "../backlog/performance/issue-174-uncaught-exceptions-in-containedexecutorwrapperkt-during-fil.md"
     click issue_175_uncaught_native_exceptions_in_landlock_landlockstatekt "../backlog/security/issue-175-uncaught-native-exceptions-in-landlock-landlockstatekt.md"
-    click issue_176_toctou_in_path_normalization_pathnormalizerkt "../backlog/security/issue-176-toctou-in-path-normalization-pathnormalizerkt.md"
     click issue_177_missing_archunit_test_for_ffm_architecture_boundary_violatio "../backlog/testing/issue-177-missing-archunit-test-for-ffm-architecture-boundary-violatio.md"
     click issue_178_unreliable_test_teardown_for_mocked_native_engines "../backlog/testing/issue-178-unreliable-test-teardown-for-mocked-native-engines.md"
-    click issue_179_uncaught_native_exceptions_escaping_landlock_installation "../backlog/security/issue-179-uncaught-native-exceptions-escaping-landlock-installation.md"
     click issue_180_uncaught_exceptions_in_containedexecutorwrapperkt_during_fil "../backlog/security/issue-180-uncaught-exceptions-in-containedexecutorwrapperkt-during-fil.md"
     click issue_181_toctou_in_path_normalization_pathnormalizerkt "../backlog/security/issue-181-toctou-in-path-normalization-pathnormalizerkt.md"
-    click issue_183_potential_buffer_overflow_outofboundsexception_on_long_unix_ "../backlog/performance/issue-183-potential-buffer-overflow-outofboundsexception-on-long-unix-.md"
     click issue_185_missing_domain_logic_handling_of_syscallresult_in_supervisordaemonengine "../backlog/security/issue-185-missing-domain-logic-handling-of-syscallresult-in-supervisordaemonengine.md"
     click issue_186_memorysegment_lifetime_scope_violation_in_supervisordaemon "../backlog/testing/issue-186-memorysegment-lifetime-scope-violation-in-supervisordaemon.md"
     click issue_187_archunit_bypass_swallowed_syscallresult_in_supervisorsessionhandler "../backlog/testing/issue-187-archunit-bypass-swallowed-syscallresult-in-supervisorsessionhandler.md"
