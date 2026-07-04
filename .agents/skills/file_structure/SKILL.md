@@ -19,13 +19,23 @@ This dramatically reduces token usage and prevents "lost in the middle" context 
 > **This MUST be your first step when approaching any source file, config file, or design document.**
 > Only call `view_file` after the outline tells you which section or function you actually need.
 
-## Command
+## Command & Tools
 
-```bash
-kotlin scripts/file_structure.main.kts <path_to_file>
-```
+1. **For JVM Code symbols (Kotlin/Java classes, methods)**:
+   Prefer using **Codanna** to inspect structures and relationships:
+   ```bash
+   codanna mcp find_symbol <SymbolName>
+   # or to get full structure and methods:
+   codanna retrieve describe <SymbolName>
+   ```
 
-## Supported File Types
+2. **For file outlines (non-code or specific files)**:
+   Use the local kotlin helper script:
+   ```bash
+   kotlin scripts/file_structure.main.kts <path_to_file>
+   ```
+
+## Supported File Types (Local Script)
 
 | Extension | What is outlined |
 |---|---|
@@ -39,23 +49,26 @@ kotlin scripts/file_structure.main.kts <path_to_file>
 ## Examples
 
 ```bash
-# Before reading a Kotlin class — see its public API
-kotlin scripts/file_structure.main.kts enforcer/src/main/kotlin/io/mazewall/BpfFilter.kt
+# Get outline/methods of BpfFilter class:
+codanna retrieve describe BpfFilter
 
-# Before reading a design doc — see which sections it has
+# Trace what buildFromActions calls:
+codanna mcp get_calls buildFromActions
+
+# Find who calls getJvmCriticalNrs:
+codanna mcp find_callers getJvmCriticalNrs
+
+# Before reading a design doc — see which sections it has:
 kotlin scripts/file_structure.main.kts docs/internals/containment_design.md
 
-# Before reading a CI workflow — see what jobs are defined
+# Before reading a CI workflow — see what jobs are defined:
 kotlin scripts/file_structure.main.kts .github/workflows/ci.yml
-
-# Before reading a config — see what keys are present
-kotlin scripts/file_structure.main.kts sbob.json
 ```
 
 ## Workflow Integration
 
 1. **Receive a task** involving an unknown file or codebase component.
-2. **Run the outline command** to understand the structure.
+2. **Retrieve the structure** using `codanna retrieve describe` (for code symbols) or `kotlin scripts/file_structure.main.kts` (for documents/configs).
 3. **Identify the relevant section** (e.g., a specific function or heading).
 4. **Call `view_file`** with `StartLine`/`EndLine` targeting only that section.
 5. Only read the **entire file** if the outline shows it is short (< 80 lines) or the whole content is relevant.

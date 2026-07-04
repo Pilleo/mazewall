@@ -172,15 +172,23 @@ If a change touches both `:enforcer` and `:profiler`:
 After any code changes, run `./gradlew build` to verify the final changes.
 You may run more granular checks in the process, but build must be always green before you submit the results.
 
+## 10. Codebase Intelligence & Search Tools
+
+To optimize context token consumption and perform precise codebase navigation:
+
+*   **Codanna (Symbol Lookup & Call Graphs):** Use the helper wrapper `./scripts/code_atlas.sh`, or raw `codanna retrieve` / `codanna mcp` directly. It is completely CLI-only/one-shot; no background daemon server needs to be running. Refer to [.agents/skills/file_structure/SKILL.md](file:///.agents/skills/file_structure/SKILL.md) for detail usage.
+*   **ast-grep (Structural Code Search):** Use the repository wrapper `./scripts/sg.sh` for syntax-aware pattern searches and refactoring. Refer to [.agents/skills/ast_grep/SKILL.md](file:///.agents/skills/ast_grep/SKILL.md) for detail usage.
+
 ---
 
-## 10. Available Agent Skills
+## 11. Available Agent Skills
 
 The `.agents/skills/` directory contains reusable, step-by-step workflows for common tasks. Use these skills proactively when they match the task at hand — they encode hard-won lessons specific to this codebase.
 
 | Skill directory | Use when... |
 |---|---|
 | `add_syscall` | Adding a new syscall constant to `Policy`, `BpfFilter`, or the profiler |
+| `ast_grep` | Performing structural, syntax-aware search and replace on source code |
 | `ffm_safety` | Making any FFM/off-heap memory changes (layouts, arenas, downcalls) |
 | `fix_backlog_item` | Fixing bugs/backlog items cleanly without warmups, swallows, or hacks |
 | `loop_driven_development` | Iterative red-green-refactor TDD cycle for new features |

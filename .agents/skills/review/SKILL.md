@@ -46,9 +46,12 @@ This is a **continuous, hypothesis-driven execution loop**. You are authorized t
 
 1. **Phase 1: Research & Hypothesis:** 
    - Check [backlog/README.md](file:///home/leanid/Documents/code/java/jseccomp/docs/internals/backlog/README.md) for existing open issues.
-   - Look into the generated PlantUML diagrams under `docs/diagrams/` (e.g., [enforcer_class_diagram.puml](file:///home/leanid/Documents/code/java/jseccomp/docs/diagrams/enforcer_class_diagram.puml) and [profiler_class_diagram.puml](file:///home/leanid/Documents/code/java/jseccomp/docs/diagrams/profiler_class_diagram.puml)) to align on the class architectures and relationships.
+   - Use `./scripts/code_atlas.sh describe <Symbol>` or `./scripts/code_atlas.sh callers <Symbol>` to trace symbol relationships and codebase hierarchies.
+   - Use the generated PlantUML diagrams under `docs/diagrams/` to align on the class architectures.
    - Formulate a specific security or architectural failure hypothesis.
-2. **Phase 2: Source Code Audit:** Audit the target files, checking both core logic and their associated tests.
+2. **Phase 2: Source Code & Structural Audit:** 
+   - Use `./scripts/sg.sh` to run structural queries against your hypothesis (e.g. search for swallowed exceptions: `try { $$$ } catch ($E: Exception) { }`).
+   - Audit target files, checking both core logic and their associated tests.
 3. **Phase 3: Backlog Entry:** If you find a vulnerability, bug, or gap, create a new markdown file in the backlog directory (e.g. `docs/internals/backlog/issue-XXX-some-bug.md`) using the following format:
 
 ```markdown
