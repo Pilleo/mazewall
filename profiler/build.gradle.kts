@@ -42,7 +42,7 @@ val integrationTest =
         testClassesDirs = sourceSets["integrationTest"].output.classesDirs
         classpath = sourceSets["integrationTest"].runtimeClasspath
         useJUnitPlatform()
-        jvmArgs("--enable-native-access=ALL-UNNAMED", "-Xmx256m", "-Xms128m")
+        jvmArgs("--enable-native-access=ALL-UNNAMED", "-Xmx256m", "-Xms128m", "-Dfile.encoding=UTF-8", "-Dsun.jnu.encoding=UTF-8")
         systemProperty("kotest.framework.classpath.scanning.config.disable", "true")
         forkEvery = 1
         testLogging {
@@ -56,7 +56,7 @@ tasks.check {
 
 tasks.test {
     useJUnitPlatform()
-    jvmArgs("--enable-native-access=ALL-UNNAMED", "-Xmx256m", "-Xms128m")
+    jvmArgs("--enable-native-access=ALL-UNNAMED", "-Xmx256m", "-Xms128m", "-Dfile.encoding=UTF-8", "-Dsun.jnu.encoding=UTF-8")
     systemProperty("kotest.framework.classpath.scanning.config.disable", "true")
 }
 
