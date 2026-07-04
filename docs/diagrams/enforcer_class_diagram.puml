@@ -20,6 +20,7 @@ class "BpfFilter" as io.mazewall.BpfFilter {
   __
   +List<BpfInstruction> build(Arch, PolicyDefinition<?>, boolean)
   +SyscallInspectionPipeline getSyscallInspectionPipeline()
+  +List<BpfInstruction> buildFromActions(Arch, Map<Integer, ? extends SeccompAction>, SeccompAction, SyscallInspectionPipeline, boolean, boolean, boolean, boolean)
   +void emitInspections(NrLoaded, List<SyscallInspection>, boolean, Set<Integer>)
 }
 class "CompiledSandbox" as io.mazewall.CompiledSandbox<S extends PolicyScope> {
