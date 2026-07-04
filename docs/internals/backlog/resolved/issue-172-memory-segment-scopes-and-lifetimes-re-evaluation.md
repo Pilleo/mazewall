@@ -1,7 +1,7 @@
 ---
 title: "Memory Segment Scopes and Lifetimes (Re-evaluation)"
 severity: "HIGH"
-status: "open"
+status: "resolved"
 ---
 
 # 🔴 [Severity: LOW]: Memory Segment Scopes and Lifetimes (Re-evaluation)

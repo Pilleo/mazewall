@@ -1,7 +1,7 @@
 ---
 title: "`SbobParser` Syntactic Pruning Inaccuracy"
 severity: "HIGH"
-status: "open"
+status: "resolved"
 ---
 
 # 🔴 [Severity: MEDIUM]: `SbobParser` Syntactic Pruning Inaccuracy

@@ -1,7 +1,7 @@
 ---
 title: "Delegated Properties for Thread-Local Sandbox State"
 severity: "ENHANCEMENT"
-status: "open"
+status: "resolved"
 ---
 
 # 🔵 [Severity: ENHANCEMENT]: Delegated Properties for Thread-Local Sandbox State

@@ -1,7 +1,7 @@
 ---
 title: "🟢 [WONTFIX]: `ContainedExecutors` Thread-Local State Persistence and Poisoning"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 ---
 
 # 🟢 [WONTFIX]: `ContainedExecutors` Thread-Local State Persistence and Poisoning
