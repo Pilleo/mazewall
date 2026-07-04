@@ -97,7 +97,9 @@ def generate_mermaid_for_scope(scope_name, design_docs, backlog_issues):
             nodes.append(f'    {target_id}["💻 Source: {clean_target}"]')
             edges.append(f'    {issue_id} -->|Affects| {target_id}')
 
-    nodes = list(set(nodes))
+    nodes = sorted(list(set(nodes)))
+    edges.sort()
+    clicks.sort()
 
     if not nodes:
         return None
@@ -175,8 +177,8 @@ def update_root_index(enforcer_ok, profiler_ok):
 
 
 def main():
-    design_docs = glob.glob(os.path.join(docsDir, "*.md"))
-    backlog_issues = glob.glob(os.path.join(backlogDir, "issue-*.md"))
+    design_docs = sorted(glob.glob(os.path.join(docsDir, "*.md")))
+    backlog_issues = sorted(glob.glob(os.path.join(backlogDir, "issue-*.md")))
 
     print("Generating scoped knowledge sub-maps...")
 
