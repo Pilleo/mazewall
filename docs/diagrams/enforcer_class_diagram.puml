@@ -88,6 +88,7 @@ interface "NativeFileSystem" as io.mazewall.NativeFileSystem {
 }
 interface "NativeMemory" as io.mazewall.NativeMemory {
   + {abstract}SyscallResult processVmReadv(NativeTransaction, int, MemorySegment, long, MemorySegment, long, long)
+  + {abstract}SyscallResult processVmWritev(NativeTransaction, int, MemorySegment, long, MemorySegment, long, long)
   + {abstract}SyscallResult read(NativeTransaction, FileDescriptor<?, ? extends Open>, MemorySegment, long)
   + {abstract}SyscallResult write(NativeTransaction, FileDescriptor<?, ? extends Open>, MemorySegment, long)
   + {abstract}MemorySegment newSockFProg(Arena, List<? extends BpfInstruction>)
@@ -241,6 +242,7 @@ class "RealNativeMemory" as io.mazewall.RealNativeMemory {
   + {static}RealNativeMemory INSTANCE
   __
   +SyscallResult processVmReadv(NativeTransaction, int, MemorySegment, long, MemorySegment, long, long)
+  +SyscallResult processVmWritev(NativeTransaction, int, MemorySegment, long, MemorySegment, long, long)
   +SyscallResult read(NativeTransaction, FileDescriptor<?, ? extends Open>, MemorySegment, long)
   +SyscallResult write(NativeTransaction, FileDescriptor<?, ? extends Open>, MemorySegment, long)
   +MemorySegment newSockFProg(Arena, List<? extends BpfInstruction>)
@@ -590,6 +592,8 @@ class "SupervisorSessionHandler" as io.mazewall.enforcer.supervisor.SupervisorSe
   __
   +LoopAction handleActiveListener(MemorySegment, MemorySegment, MemorySegment)
 }
+class "SupervisorSessionHandlerKt" as io.mazewall.enforcer.supervisor.SupervisorSessionHandlerKt {
+}
 class "SupervisorSocketInputStream" as io.mazewall.enforcer.supervisor.SupervisorSocketInputStream {
   + {static}Companion Companion
   __
@@ -835,6 +839,11 @@ class "SupervisorProcessMemoryReader" as io.mazewall.ffi.memory.SupervisorProces
   __
   +String readString(int, long, int, boolean)
   +byte[] readBytes(int, long, int, boolean)
+}
+class "SupervisorProcessMemoryWriter" as io.mazewall.ffi.memory.SupervisorProcessMemoryWriter {
+  + {static}SupervisorProcessMemoryWriter INSTANCE
+  __
+  +boolean writeBytes(int, long, byte[])
 }
 class "SupervisorResponseSegment" as io.mazewall.ffi.memory.SupervisorResponseSegment {
   + {static}Companion Companion
@@ -1117,6 +1126,7 @@ io.mazewall.ffi.LayoutValidator --> io.mazewall.ffi.LayoutValidator
 io.mazewall.ffi.memory.ConfinedSegment .u.|> io.mazewall.ffi.memory.ManagedSegment
 io.mazewall.ffi.memory.SharedSegment .u.|> io.mazewall.ffi.memory.ManagedSegment
 io.mazewall.ffi.memory.SupervisorProcessMemoryReader --> io.mazewall.ffi.memory.SupervisorProcessMemoryReader
+io.mazewall.ffi.memory.SupervisorProcessMemoryWriter --> io.mazewall.ffi.memory.SupervisorProcessMemoryWriter
 io.mazewall.ffi.networking.SupervisorSeccompNotifInstaller --> io.mazewall.ffi.networking.SupervisorSeccompNotifInstaller
 io.mazewall.ffi.networking.SupervisorSocketUtils --> io.mazewall.ffi.networking.SupervisorSocketUtils
 io.mazewall.landlock.Landlock --> io.mazewall.landlock.Landlock

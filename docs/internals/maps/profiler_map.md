@@ -202,7 +202,6 @@ graph TD
     issue_180_uncaught_exceptions_in_containedexecutorwrapperkt_during_fil["🔴 Issue: Uncaught exceptions in `ContainedExecutorWrapper.kt` during filter installation (HIGH)"]
     issue_181_toctou_in_path_normalization_pathnormalizerkt["🔴 Issue: TOCTOU in Path Normalization `PathNormalizer.kt` (HIGH)"]
     issue_183_potential_buffer_overflow_outofboundsexception_on_long_unix_["🔴 Issue: Potential Buffer Overflow / OutOfBoundsException on Long UNIX Socket Paths (LOW)"]
-    issue_184_unhandled_sys_accept_in_supervisorsessionhandler["🔴 Issue: Unhandled `SYS_ACCEPT` in SupervisorSessionHandler (HIGH)"]
     issue_185_missing_domain_logic_handling_of_syscallresult_in_supervisordaemonengine["🔴 Issue: Missing domain logic handling of SyscallResult in SupervisorDaemonEngine (MEDIUM)"]
     issue_186_memorysegment_lifetime_scope_violation_in_supervisordaemon["🔴 Issue: MemorySegment Lifetime/Scope Violation in SupervisorSessionHandler (HIGH)"]
     run_containerized_tests_sh["💻 Source: run_containerized_tests.sh"]
@@ -451,7 +450,6 @@ graph TD
     click issue_180_uncaught_exceptions_in_containedexecutorwrapperkt_during_fil "../backlog/security/issue-180-uncaught-exceptions-in-containedexecutorwrapperkt-during-fil.md"
     click issue_181_toctou_in_path_normalization_pathnormalizerkt "../backlog/security/issue-181-toctou-in-path-normalization-pathnormalizerkt.md"
     click issue_183_potential_buffer_overflow_outofboundsexception_on_long_unix_ "../backlog/performance/issue-183-potential-buffer-overflow-outofboundsexception-on-long-unix-.md"
-    click issue_184_unhandled_sys_accept_in_supervisorsessionhandler "../backlog/code_health/issue-184-unhandled-sys-accept-in-supervisorsessionhandler.md"
     click issue_185_missing_domain_logic_handling_of_syscallresult_in_supervisordaemonengine "../backlog/security/issue-185-missing-domain-logic-handling-of-syscallresult-in-supervisordaemonengine.md"
     click issue_186_memorysegment_lifetime_scope_violation_in_supervisordaemon "../backlog/testing/issue-186-memorysegment-lifetime-scope-violation-in-supervisordaemon.md"
 ```

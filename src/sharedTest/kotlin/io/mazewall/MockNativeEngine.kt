@@ -196,6 +196,7 @@ public open class MockNativeProcess : NativeProcess {
 
 public open class MockNativeMemory : NativeMemory {
     public var processVmReadvResult: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(0L)
+    public var processVmWritevResult: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(0L)
     public var readResult: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(0L)
     public var writeResult: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(0L)
 
@@ -208,6 +209,16 @@ public open class MockNativeMemory : NativeMemory {
         riovcnt: Long,
         flags: Long,
     ) = processVmReadvResult
+
+    context(_: NativeTransaction)
+    override fun processVmWritev(
+        pid: io.mazewall.core.Pid,
+        localIov: MemorySegment,
+        liovcnt: Long,
+        remoteIov: MemorySegment,
+        riovcnt: Long,
+        flags: Long,
+    ) = processVmWritevResult
 
     context(_: NativeTransaction)
     override fun read(

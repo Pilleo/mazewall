@@ -91,7 +91,9 @@ internal class JVMValidationListener(
         private const val PROTOCOL_ACK_BYTE = 0xAC.toByte()
         private const val SYS_OPEN = 2
         private const val SYS_CONNECT = 42
+        private const val SYS_ACCEPT = 43
         private const val SYS_OPENAT = 257
+        private const val SYS_ACCEPT4 = 288
         private const val SYS_OPENAT2 = 437
 
         private const val SLOW_INSPECT_THRESHOLD_MS = 500L
@@ -114,11 +116,14 @@ internal class JVMValidationListener(
 
     @Suppress("CyclomaticComplexMethod", "NestedBlockDepth")
     private fun runValidationReactor(inputStream: SupervisorSocketInputStream, arena: Arena, readyLatch: CountDownLatch) {
+        System.err.println("[JVM-VALIDATION] validation reactor thread started")
         try {
             val dis = DataInputStream(BufferedInputStream(inputStream))
             try {
                 // Read handshake ACK
+                System.err.println("[JVM-VALIDATION] reading handshake ACK...")
                 val ack = dis.readByte()
+                System.err.println("[JVM-VALIDATION] handshake ACK received: $ack")
                 if (ack != PROTOCOL_ACK_BYTE) {
                     logger.warning("Invalid handshake ACK: $ack")
                 }
@@ -139,6 +144,7 @@ internal class JVMValidationListener(
                 val argCount = dis.readInt()
 
                 val argsList = readRequestArgs(dis, argCount)
+                System.err.println("[JVM-VALIDATION] Received request: id=$id, pid=$pidVal, nr=$nr, args=$argsList")
 
                 val startMs = System.currentTimeMillis()
                 val targetThread = SupervisorInstaller.threadRegistry[Tid(pidVal)]
@@ -179,7 +185,7 @@ internal class JVMValidationListener(
 
                 // Decision encoding: 0 = Deny, 1 = Allow Continue, 2 = Allow & Inject FD
                 val decision: Byte = if (isAllowed) {
-                    if (nr == SYS_OPEN || nr == SYS_CONNECT || nr == SYS_OPENAT || nr == SYS_OPENAT2) {
+                    if (nr == SYS_OPEN || nr == SYS_CONNECT || nr == SYS_OPENAT || nr == SYS_OPENAT2 || nr == SYS_ACCEPT || nr == SYS_ACCEPT4) {
                         2.toByte()
                     } else {
                         1.toByte()

@@ -54,9 +54,9 @@ When presenting a fix or creating a PR, use the following format:
 ## 🔄 Iterative Development & Testing
 
 *   **Step-by-Step Execution:** Do not attempt massive refactors in a single pass. Make changes iteratively and surgically.
-*   **Source File Inspection (API Outline):** Before reading the full contents of any source file, you MUST inspect its API surface first using the native Kotlin script:
-    `kotlin scripts/file_structure.main.kts <path_to_kotlin_file>`
-    This lists all class, function, and property declarations with correct indentation and parameters (including multi-line signatures), saving context tokens.
+*   **Source File Inspection (API Outline):** Before reading the full contents of any source file, you MUST inspect its API surface or symbols first to save context tokens. You may use:
+    - **Codanna** (`codanna retrieve describe <SymbolName>` or MCP tools) for semantic JVM code symbols, class declarations, and cross-references.
+    - The native Kotlin script (`kotlin scripts/file_structure.main.kts <path_to_file>`) for outlining a specific file structure on disk (such as Markdown documents, YAML configs, or files containing multiple classes).
 *   **Constant Verification:** Test after **each** logical step using the Testcontainers suite (`./gradlew test`). The codebase must remain buildable and tests must pass at every intermediate stage.
 
 ---

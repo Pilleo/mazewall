@@ -819,6 +819,20 @@ internal object RealNativeMemory : NativeMemory {
             ),
             Linker.Option.captureCallState("errno"),
         )
+    private val PROCESS_VM_WRITEV: MethodHandle =
+        RealNativeHelper.downcall(
+            "process_vm_writev",
+            FunctionDescriptor.of(
+                ValueLayout.JAVA_LONG,
+                ValueLayout.JAVA_INT,
+                ValueLayout.ADDRESS,
+                ValueLayout.JAVA_LONG,
+                ValueLayout.ADDRESS,
+                ValueLayout.JAVA_LONG,
+                ValueLayout.JAVA_LONG,
+            ),
+            Linker.Option.captureCallState("errno"),
+        )
     private val READ: MethodHandle =
         RealNativeHelper.downcall(
             "read",
@@ -855,6 +869,30 @@ internal object RealNativeMemory : NativeMemory {
             val capturedState = ErrnoSegment.allocate()
             val ret =
                 PROCESS_VM_READV.invokeExact(
+                    capturedState.segment,
+                    pid.value,
+                    localIov,
+                    liovcnt,
+                    remoteIov,
+                    riovcnt,
+                    flags,
+                ) as Long
+            RealNativeHelper.result(ret, capturedState.getErrno())
+        }
+
+    context(_: NativeTransaction)
+    override fun processVmWritev(
+        pid: io.mazewall.core.Pid,
+        localIov: MemorySegment,
+        liovcnt: Long,
+        remoteIov: MemorySegment,
+        riovcnt: Long,
+        flags: Long,
+    ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
+        nativeScope {
+            val capturedState = ErrnoSegment.allocate()
+            val ret =
+                PROCESS_VM_WRITEV.invokeExact(
                     capturedState.segment,
                     pid.value,
                     localIov,

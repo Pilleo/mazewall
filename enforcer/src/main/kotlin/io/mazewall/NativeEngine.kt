@@ -192,6 +192,16 @@ public interface NativeMemory {
     ): SyscallResult<Long, SyscallHandledState.Unhandled>
 
     context(_: NativeTransaction)
+    fun processVmWritev(
+        pid: io.mazewall.core.Pid,
+        localIov: MemorySegment,
+        liovcnt: Long,
+        remoteIov: MemorySegment,
+        riovcnt: Long,
+        flags: Long,
+    ): SyscallResult<Long, SyscallHandledState.Unhandled>
+
+    context(_: NativeTransaction)
     fun read(
         fd: FileDescriptor<*, FdState.Open>,
         buf: MemorySegment,

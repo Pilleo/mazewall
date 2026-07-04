@@ -143,7 +143,6 @@ This directory contains modularized backlog items for architectural and security
 | 180 | Uncaught exceptions in `ContainedExecutorWrapper.kt` during filter installation | **HIGH** | [issue-180-uncaught-exceptions-in-containedexecutorwrapperkt-during-fil.md](security/issue-180-uncaught-exceptions-in-containedexecutorwrapperkt-during-fil.md) |
 | 181 | TOCTOU in Path Normalization `PathNormalizer.kt` | **HIGH** | [issue-181-toctou-in-path-normalization-pathnormalizerkt.md](security/issue-181-toctou-in-path-normalization-pathnormalizerkt.md) |
 | 183 | Potential Buffer Overflow / OutOfBoundsException on Long UNIX Socket Paths | **LOW** | [issue-183-potential-buffer-overflow-outofboundsexception-on-long-unix-.md](performance/issue-183-potential-buffer-overflow-outofboundsexception-on-long-unix-.md) |
-| 184 | Unhandled `SYS_ACCEPT` in SupervisorSessionHandler | **HIGH** | [issue-184-unhandled-sys-accept-in-supervisorsessionhandler.md](code_health/issue-184-unhandled-sys-accept-in-supervisorsessionhandler.md) |
 | 185 | Missing domain logic handling of SyscallResult in SupervisorDaemonEngine | **MEDIUM** | [issue-185-missing-domain-logic-handling-of-syscallresult-in-supervisordaemonengine.md](security/issue-185-missing-domain-logic-handling-of-syscallresult-in-supervisordaemonengine.md) |
 | 186 | MemorySegment Lifetime/Scope Violation in SupervisorSessionHandler | **HIGH** | [issue-186-memorysegment-lifetime-scope-violation-in-supervisordaemon.md](testing/issue-186-memorysegment-lifetime-scope-violation-in-supervisordaemon.md) |
 
@@ -197,3 +196,4 @@ This directory contains modularized backlog items for architectural and security
 | 171 | Profiler Trace Listener State Mutability Bug | [resolved/issue-171-profiler-trace-listener-state-mutability-bug.md](resolved/issue-171-profiler-trace-listener-state-mutability-bug.md) |
 | 158 | Bitwise Sign-Extension Bug in `sockaddr` Domain Parsing | [resolved/issue-158-bitwise-sign-extension-bug-in-sockaddr-domain-parsing.md](resolved/issue-158-bitwise-sign-extension-bug-in-sockaddr-domain-parsing.md) |
 | 182 | Bitwise Sign-Extension Bug in `sockaddr` Domain Parsing | [resolved/issue-182-bitwise-sign-extension-bug-in-sockaddr-domain-parsing.md](resolved/issue-182-bitwise-sign-extension-bug-in-sockaddr-domain-parsing.md) |
+| 184 | Unhandled `SYS_ACCEPT` in SupervisorSessionHandler | [resolved/issue-184-unhandled-sys-accept-in-supervisorsessionhandler.md](resolved/issue-184-unhandled-sys-accept-in-supervisorsessionhandler.md) |
