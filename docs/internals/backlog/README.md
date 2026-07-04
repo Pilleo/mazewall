@@ -5,6 +5,7 @@ This directory contains modularized backlog items for architectural and security
 ## Open Issues
 
 | # | Title | Severity | Link |
+
 |---|---|---|---|
 | 1 | Yama `ptrace_scope` Blocks Daemon's `process_vm_readv` (Missing `PR_SET_PTRACER`) | **HIGH** | [issue-001-yama-ptracescope-blocks-daemons-processvmreadv-missing-prset.md](issue-001-yama-ptracescope-blocks-daemons-processvmreadv-missing-prset.md) |
 | 2 | Stacktrace-Enforced Process Spawning Safepoint Deadlock and Trace Propagation Gotchas | **HIGH** | [issue-002-stacktrace-enforced-process-spawning-safepoint-deadlock-and-.md](issue-002-stacktrace-enforced-process-spawning-safepoint-deadlock-and-.md) |
@@ -146,6 +147,11 @@ This directory contains modularized backlog items for architectural and security
 | 184 | Unhandled `SYS_ACCEPT` in SupervisorSessionHandler | **HIGH** | [issue-184-unhandled-sys-accept-in-supervisorsessionhandler.md](issue-184-unhandled-sys-accept-in-supervisorsessionhandler.md) |
 | 185 | Missing domain logic handling of SyscallResult in SupervisorDaemonEngine | **MEDIUM** | [issue-185-missing-domain-logic-handling-of-syscallresult-in-supervisordaemonengine.md](issue-185-missing-domain-logic-handling-of-syscallresult-in-supervisordaemonengine.md) |
 | 186 | MemorySegment Lifetime/Scope Violation in SupervisorSessionHandler | **HIGH** | [issue-186-memorysegment-lifetime-scope-violation-in-supervisordaemon.md](issue-186-memorysegment-lifetime-scope-violation-in-supervisordaemon.md) |
+| 187 | ArchUnit Bypass: Swallowed SyscallResult in SupervisorSessionHandler | **HIGH** | [issue-187-archunit-bypass-swallowed-syscallresult-in-supervisorsessionhandler.md](issue-187-archunit-bypass-swallowed-syscallresult-in-supervisorsessionhandler.md) |
+| 188 | Unbounded Thread Creation in SupervisorDaemonEngine (DoS) | **HIGH** | [issue-188-unbounded-thread-creation-in-supervisordaemonengine-dos.md](issue-188-unbounded-thread-creation-in-supervisordaemonengine-dos.md) |
+| 189 | TOCTOU Vulnerability in resolveAbsolutePath via Files.exists | **HIGH** | [issue-189-toctou-vulnerability-in-resolveabsolutepath-via-files-exists.md](issue-189-toctou-vulnerability-in-resolveabsolutepath-via-files-exists.md) |
+| 190 | Unhandled EINTR in accept in SupervisorDaemonEngine | **MEDIUM** | [issue-190-unhandled-eintr-in-accept-in-supervisordaemonengine.md](issue-190-unhandled-eintr-in-accept-in-supervisordaemonengine.md) |
+| 191 | JVM Validation Timeout Causes Denial of Service on Valid Syscalls | **MEDIUM** | [issue-191-jvm-validation-timeout-causes-denial-of-service-on-valid-syscalls.md](issue-191-jvm-validation-timeout-causes-denial-of-service-on-valid-syscalls.md) |
 
 ## Resolved Issues (Archive)
 
