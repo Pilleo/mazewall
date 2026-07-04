@@ -296,12 +296,11 @@ subprojects {
 val generateKnowledgeMap by tasks.registering(Exec::class) {
     group = "documentation"
     description = "Generates and updates the Mermaid-based architectural knowledge graph"
+    commandLine("python3", "$rootDir/scripts/generate_knowledge_map.py")
 
-    if (System.getenv("CI") != "true") {
-            commandLine("python3", "$rootDir/scripts/generate_knowledge_map.py")
-
+    onlyIf {
+        System.getenv("CI") != "true"
     }
-
 }
 
 val installGitHooks by tasks.registering(Copy::class) {
