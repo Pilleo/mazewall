@@ -1,12 +1,436 @@
-// KDoc/Documentation update only. No logic changes.
-/**
- * Main daemon loop for the autonomous orchestrator.
- * Handles polling GitHub, invoking Jules, and triggering PR reviews.
- */
 package io.mazewall.orchestrator
 
 import java.io.File
 import java.util.concurrent.TimeUnit
+
+enum class OrchestratorState {
+    SELECT_TASK,
+    AWAIT_START_APPROVAL,
+    AWAIT_JULES_START,
+    AWAIT_PR_CREATION,
+    MONITOR_PR,
+    RESOLVE_TASK
+}
+
+class OrchestratorContext {
+    var state: OrchestratorState = OrchestratorState.SELECT_TASK
+    var currentIssueId: String? = null
+    var currentIssueTitle: String? = null
+    var currentIssueFile: String? = null
+    var githubIssueNumber: String? = null
+    var julesSessionId: String? = null
+    var prNumber: String? = null
+    val skippedIds: MutableSet<String> = mutableSetOf()
+
+    // Monitoring state/cache variables
+    var lastHeadSha: String? = null
+    var lastReviewedSha: String? = null
+    var lastBuildStatus: String? = null
+    var lastCheckedSha: String? = null
+    var lastWaitingLogTime: Long = 0L
+
+    fun load(props: java.util.Properties) {
+        state = props.getProperty("state")?.let { OrchestratorState.valueOf(it) } ?: OrchestratorState.SELECT_TASK
+        currentIssueId = props.getProperty("currentIssueId").takeIf { !it.isNullOrEmpty() }
+        currentIssueTitle = props.getProperty("currentIssueTitle").takeIf { !it.isNullOrEmpty() }
+        currentIssueFile = props.getProperty("currentIssueFile").takeIf { !it.isNullOrEmpty() }
+        githubIssueNumber = props.getProperty("githubIssueNumber").takeIf { !it.isNullOrEmpty() }
+        julesSessionId = props.getProperty("julesSessionId").takeIf { !it.isNullOrEmpty() }
+        prNumber = props.getProperty("prNumber").takeIf { !it.isNullOrEmpty() }
+        
+        skippedIds.clear()
+        props.getProperty("skippedIds")?.let { ids ->
+            if (ids.isNotEmpty()) {
+                skippedIds.addAll(ids.split(","))
+            }
+        }
+
+        lastHeadSha = props.getProperty("lastHeadSha").takeIf { !it.isNullOrEmpty() }
+        lastReviewedSha = props.getProperty("lastReviewedSha").takeIf { !it.isNullOrEmpty() }
+        lastBuildStatus = props.getProperty("lastBuildStatus").takeIf { !it.isNullOrEmpty() }
+        lastCheckedSha = props.getProperty("lastCheckedSha").takeIf { !it.isNullOrEmpty() }
+        lastWaitingLogTime = props.getProperty("lastWaitingLogTime")?.toLongOrNull() ?: 0L
+    }
+
+    fun save(props: java.util.Properties) {
+        props.setProperty("state", state.name)
+        props.setProperty("currentIssueId", currentIssueId ?: "")
+        props.setProperty("currentIssueTitle", currentIssueTitle ?: "")
+        props.setProperty("currentIssueFile", currentIssueFile ?: "")
+        props.setProperty("githubIssueNumber", githubIssueNumber ?: "")
+        props.setProperty("julesSessionId", julesSessionId ?: "")
+        props.setProperty("prNumber", prNumber ?: "")
+        props.setProperty("skippedIds", skippedIds.joinToString(","))
+        
+        props.setProperty("lastHeadSha", lastHeadSha ?: "")
+        props.setProperty("lastReviewedSha", lastReviewedSha ?: "")
+        props.setProperty("lastBuildStatus", lastBuildStatus ?: "")
+        props.setProperty("lastCheckedSha", lastCheckedSha ?: "")
+        props.setProperty("lastWaitingLogTime", lastWaitingLogTime.toString())
+    }
+}
+
+class OrchestratorDaemonRunner(
+    private val bot: TelegramBot?,
+    private val backlogDir: File,
+    private val resolvedDir: File,
+    private val stateFile: File
+) {
+    private val context = OrchestratorContext()
+
+    fun loadState() {
+        if (stateFile.exists()) {
+            val props = java.util.Properties()
+            stateFile.inputStream().use { props.load(it) }
+            context.load(props)
+            println("♻️ State machine context loaded from ${stateFile.name} (State: ${context.state})")
+        }
+    }
+
+    fun saveState() {
+        val props = java.util.Properties()
+        context.save(props)
+        stateFile.outputStream().use { props.store(it, "Orchestrator state") }
+    }
+
+    fun run() {
+        loadState()
+        while (true) {
+            try {
+                when (context.state) {
+                    OrchestratorState.SELECT_TASK -> handleSelectTask()
+                    OrchestratorState.AWAIT_START_APPROVAL -> handleAwaitStartApproval()
+                    OrchestratorState.AWAIT_JULES_START -> handleAwaitJulesStart()
+                    OrchestratorState.AWAIT_PR_CREATION -> handleAwaitPrCreation()
+                    OrchestratorState.MONITOR_PR -> handleMonitorPr()
+                    OrchestratorState.RESOLVE_TASK -> handleResolveTask()
+                }
+                saveState()
+            } catch (e: Exception) {
+                System.err.println("⚠️ Error in state ${context.state}: ${e.message}")
+                e.printStackTrace()
+                try {
+                    bot?.sendMessage("⚠️ *Daemon Error in State ${context.state}:* `${e.message}`. Retrying in 2 minutes...")
+                } catch (_: Exception) {}
+                TimeUnit.MINUTES.sleep(2)
+            }
+        }
+    }
+
+    private fun handleSelectTask() {
+        val allIssues = BacklogParser.parseAllIssues(backlogDir)
+        println("📚 Backlog Status: ${allIssues.count { it.status == "open" }} open issues remaining.")
+        val activeIssues = allIssues.filter { it.id !in context.skippedIds }
+        val nextIssue = DependencyGraph.selectNextIssue(activeIssues)
+
+        if (nextIssue == null) {
+            println("💤 No unblocked open issues found. Checking again in 2 minutes...")
+            TimeUnit.MINUTES.sleep(2)
+            return
+        }
+
+        println("\n🎯 Next prioritized task: ${nextIssue.id} - ${nextIssue.title} (Priority: ${nextIssue.priority})")
+        context.currentIssueId = nextIssue.id
+        context.currentIssueTitle = nextIssue.title
+        context.currentIssueFile = nextIssue.file.path
+        context.githubIssueNumber = nextIssue.githubIssue?.toString()
+        context.julesSessionId = null
+        context.prNumber = null
+        context.state = OrchestratorState.AWAIT_START_APPROVAL
+    }
+
+    private fun handleAwaitStartApproval() {
+        val issueId = context.currentIssueId ?: throw IllegalStateException("currentIssueId is null")
+        val issueTitle = context.currentIssueTitle ?: throw IllegalStateException("currentIssueTitle is null")
+        val githubIssueNumber = context.githubIssueNumber
+
+        val approved = if (githubIssueNumber != null) {
+            println("🔄 Resuming already-in-progress task $issueId (linked to GitHub issue #$githubIssueNumber)...")
+            true
+        } else {
+            ringTerminalBell(3)
+            if (bot != null) {
+                val telegramText = """
+                    🤖 *Request to start task $issueId*
+                    *Title:* $issueTitle
+                    
+                    Please approve or skip in the inline keyboard below.
+                """.trimIndent()
+                bot.sendMessageWithApprovalMarkup(issueId, telegramText)
+                bot.waitForApproval(issueId)
+            } else {
+                print("\u001B[1;31m🔔 [APPROVAL REQUIRED] Start task $issueId - $issueTitle? (y/n): \u001B[0m")
+                System.out.flush()
+                val input = readlnOrNull()?.trim()?.lowercase()
+                input == "y" || input == "yes"
+            }
+        }
+
+        if (!approved) {
+            println("⏭️ Task $issueId skipped by user. Postponing.")
+            context.skippedIds.add(issueId)
+            bot?.sendMessage("⏭️ Task `$issueId` skipped. Will pick another.")
+            context.state = OrchestratorState.SELECT_TASK
+            return
+        }
+
+        bot?.sendMessage("🚀 Starting task `$issueId`...")
+
+        // Retrieve or create GitHub issue
+        var newGithubIssueNumber = context.githubIssueNumber
+        if (newGithubIssueNumber == null) {
+            val existingIssueNumber = GitHubCli.findExistingIssueNumber(issueId)
+            if (existingIssueNumber != null) {
+                println("♻️ Recovered existing GitHub issue #$existingIssueNumber for $issueId (was missing from backlog file).")
+                newGithubIssueNumber = existingIssueNumber
+            } else {
+                println("Creating GitHub issue for $issueId...")
+                val issueTitleForGit = "[$issueId] $issueTitle"
+                newGithubIssueNumber = GitHubCli.createIssue(issueTitleForGit, File(context.currentIssueFile!!), "jules")
+                println("Created GitHub issue #$newGithubIssueNumber")
+            }
+            // Write it to issue file
+            val nextIssue = BacklogParser.parseAllIssues(backlogDir).firstOrNull { it.id == issueId }
+            if (nextIssue != null) {
+                BacklogParser.writeGithubIssue(nextIssue, newGithubIssueNumber.toInt())
+            }
+            context.githubIssueNumber = newGithubIssueNumber
+        }
+
+        context.state = OrchestratorState.AWAIT_JULES_START
+    }
+
+    private fun handleAwaitJulesStart() {
+        val issueId = context.currentIssueId ?: throw IllegalStateException("currentIssueId is null")
+        var activeSession = JulesCli.getActiveSession(issueId)
+        var attempts = 0
+        while (activeSession == null && attempts < 12) {
+            println("Waiting for Jules session to be automatically triggered via GitHub issue label (attempt ${attempts + 1}/12)...")
+            TimeUnit.SECONDS.sleep(15)
+            activeSession = JulesCli.getActiveSession(issueId)
+            attempts++
+        }
+
+        if (activeSession != null) {
+            println("Linked Jules session: ID=${activeSession.id}, Status=${activeSession.status}")
+            context.julesSessionId = activeSession.id
+            context.state = OrchestratorState.AWAIT_PR_CREATION
+        } else {
+            println("⚠️ Jules session did not trigger. Retrying in 1 minute...")
+            TimeUnit.MINUTES.sleep(1)
+        }
+    }
+
+    private fun handleAwaitPrCreation() {
+        val issueId = context.currentIssueId ?: throw IllegalStateException("currentIssueId is null")
+        val githubIssueNumber = context.githubIssueNumber ?: throw IllegalStateException("githubIssueNumber is null")
+        val sessionId = context.julesSessionId
+
+        if (GitHubCli.isIssueClosed(githubIssueNumber)) {
+            println("\n\u001B[1;33m⚠️ GitHub issue #$githubIssueNumber was closed. Canceling task $issueId.\u001B[0m")
+            bot?.sendMessage("⚠️ GitHub issue #$githubIssueNumber was closed. Task `$issueId` canceled.")
+            val nextIssue = BacklogParser.parseAllIssues(backlogDir).firstOrNull { it.id == issueId }
+            if (nextIssue != null) {
+                BacklogParser.removeGithubIssue(nextIssue)
+            }
+            context.skippedIds.add(issueId)
+            clearActiveTask()
+            context.state = OrchestratorState.SELECT_TASK
+            return
+        }
+
+        val session = JulesCli.getActiveSession(issueId)
+        if (session != null && session.status != context.lastBuildStatus) {
+            println("Jules session status changed: ${session.status}")
+            context.lastBuildStatus = session.status
+
+            val sessionUrl = "https://jules.google.com/session/${session.id}"
+            if (session.status.contains("Awaiting", ignoreCase = true) || session.status.contains("Feedback", ignoreCase = true)) {
+                val alertMsg = "⚠️ *Jules needs feedback on task $issueId!* Status: `${session.status}`. Please check and respond here: $sessionUrl"
+                bot?.sendMessage(alertMsg)
+                println("\n\u001B[1;31m🔔 [FEEDBACK REQUIRED] Jules is blocked waiting for feedback on task $issueId. Status: ${session.status}\u001B[0m")
+                println("👉 Respond here: $sessionUrl")
+                ringTerminalBell(5)
+            } else if (session.status.equals("Completed", ignoreCase = true)) {
+                val alertMsg = "🟢 *Jules task $issueId is Completed!* Ready to publish PR: $sessionUrl"
+                bot?.sendMessage(alertMsg)
+                println("\n\u001B[1;32m🟢 [COMPLETED] Jules task $issueId is Completed! Please review and publish the PR in the UI.\u001B[0m")
+                println("👉 Publish PR here: $sessionUrl")
+                ringTerminalBell(5)
+            }
+        }
+
+        val prNumber = GitHubCli.findLinkedPR(githubIssueNumber, issueId, sessionId)
+        if (prNumber != null) {
+            println("Jules opened PR #$prNumber")
+            context.prNumber = prNumber
+            context.lastBuildStatus = null
+            context.state = OrchestratorState.MONITOR_PR
+        } else {
+            println("Waiting for Jules to open a PR for issue #$githubIssueNumber...")
+            TimeUnit.SECONDS.sleep(30)
+        }
+    }
+
+    private fun handleMonitorPr() {
+        val prNumber = context.prNumber ?: throw IllegalStateException("prNumber is null")
+        val githubIssueNumber = context.githubIssueNumber ?: throw IllegalStateException("githubIssueNumber is null")
+        val issueId = context.currentIssueId ?: throw IllegalStateException("currentIssueId is null")
+
+        if (GitHubCli.isPrMerged(prNumber)) {
+            println("PR #$prNumber merged!")
+            bot?.sendMessage("🎉 PR #$prNumber merged! resolving issue locally...")
+            context.state = OrchestratorState.RESOLVE_TASK
+            return
+        }
+
+        val currentSha = GitHubCli.getPrHeadSha(prNumber)
+        if (currentSha != context.lastHeadSha) {
+            println("🔄 New commits detected on PR #$prNumber (Head SHA: $currentSha). Checking build status...")
+            context.lastHeadSha = currentSha
+        }
+
+        val status = GitHubCli.checkBuildStatus(prNumber)
+        if (status != context.lastBuildStatus || currentSha != context.lastCheckedSha) {
+            println("PR #$prNumber build check: $status")
+            context.lastBuildStatus = status
+            context.lastCheckedSha = currentSha
+        }
+
+        when (status) {
+            "SUCCESS" -> {
+                if (currentSha != context.lastReviewedSha) {
+                    val comments = GitHubCli.getPrComments(prNumber)
+                    val shaPrefix = currentSha.take(7)
+
+                    val alreadyReviewedByAgy = comments.any {
+                        it.body.contains("Approved by Antigravity") ||
+                        it.body.contains("Rejected by Antigravity")
+                    }
+
+                    if (alreadyReviewedByAgy) {
+                        println("✨ PR #$prNumber already has an Antigravity review. Skipping.")
+                        context.lastReviewedSha = currentSha
+                    } else {
+                        val requestComment = comments.firstOrNull {
+                            (it.body.contains("@jules") || it.body.contains("@google-labs-jules")) &&
+                            it.body.contains(shaPrefix)
+                        }
+
+                        if (requestComment == null) {
+                            println("🤖 Requesting Jules review for PR #$prNumber (SHA: $currentSha)...")
+                            bot?.sendMessage("🤖 *PR #$prNumber Build Passed.* Asking @google-labs-jules to review SHA `${shaPrefix}`...")
+
+                            val prompt = """
+                                @google-labs-jules @jules Please perform a critical code review on this Pull Request (SHA: $currentSha) as a senior JVM security expert and staff engineer for the `mazewall` project.
+
+                                Provide a detailed response covering:
+
+                                1. **Overview**: Describe what this PR is doing and its main objectives.
+                                2. **Rationale**: Why was the solution implemented in this specific way?
+                                3. **Comparison & Alternatives**: Why is this solution better than other designs? What alternatives were considered (or should be considered) and what are their trade-offs?
+                                4. **Critical & Security Analysis**:
+                                   - Evaluate correctness and potential failure modes.
+                                   - Check for JVM sandboxing bypasses, Landlock or Seccomp filter flaws.
+                                   - Verify FFM (Foreign Function & Memory) alignment, lifecycle, and memory leak risks.
+                                   - Analyze concurrency, JVM thread coordination, and Loom virtual thread carrier thread safety (preventing carrier poisoning).
+                                5. **Conclusion**: Provide your final recommendation (e.g. Approved or needs changes).
+
+                                Please be concise, extremely precise, and thorough. Use formatting for readability.
+                            """.trimIndent()
+
+                            executeCmd("gh", "pr", "comment", prNumber, "--body", prompt)
+                        } else {
+                            val requestTime = java.time.Instant.parse(requestComment.createdAt)
+                            val julesReply = comments.firstOrNull { comment ->
+                                val author = comment.author?.login ?: ""
+                                (author.contains("jules", ignoreCase = true)) &&
+                                java.time.Instant.parse(comment.createdAt).isAfter(requestTime)
+                            }
+
+                            if (julesReply != null) {
+                                println("🟢 Jules review received for SHA $currentSha.")
+                                val prUrl = executeCmd("gh", "pr", "view", prNumber, "--json", "url").substringAfter("\"url\":\"").substringBefore("\"")
+                                bot?.sendMessage("🟢 *Jules reviewed PR #$prNumber!* Ready for final manual review and merge: $prUrl")
+                                context.lastReviewedSha = currentSha
+                                ringTerminalBell(3)
+                            } else {
+                                println("⌛ Waiting for Jules (@google-labs-jules) to complete review on PR #$prNumber (SHA: $shaPrefix)...")
+                            }
+                        }
+                    }
+                }
+
+                val now = System.currentTimeMillis()
+                if (now - context.lastWaitingLogTime > 60_000) {
+                    val prUrl = executeCmd("gh", "pr", "view", prNumber, "--json", "url").substringAfter("\"url\":\"").substringBefore("\"")
+                    println("⌛ Waiting for manual merge of PR #$prNumber at: $prUrl")
+                    context.lastWaitingLogTime = now
+                }
+                TimeUnit.SECONDS.sleep(30)
+            }
+            "FAILURE" -> {
+                println("❌ Build failed on PR #$prNumber. Fetching logs...")
+                val failedLogs = GitHubCli.getFailedBuildLogs(prNumber)
+                val feedback = """
+                    ❌ **CI Build Failed.**
+                    Jules, please review the failing logs and fix the implementation:
+                    
+                    ```
+                    $failedLogs
+                    ```
+                """.trimIndent()
+                
+                executeCmd("gh", "pr", "comment", prNumber, "--body", feedback)
+                bot?.sendMessage("❌ Build failed on PR #$prNumber. Feedback sent to Jules.")
+                TimeUnit.MINUTES.sleep(5)
+            }
+            "CONFLICT" -> {
+                val now = System.currentTimeMillis()
+                if (now - context.lastWaitingLogTime > 60_000) {
+                    val prUrl = executeCmd("gh", "pr", "view", prNumber, "--json", "url").substringAfter("\"url\":\"").substringBefore("\"")
+                    bot?.sendMessage("⚠️ *PR #$prNumber has conflicts!* Please resolve them: $prUrl")
+                    println("\u001B[1;31m🔔 [CONFLICT] PR #$prNumber has conflicts! Please resolve conflicts: $prUrl\u001B[0m")
+                    ringTerminalBell(3)
+                    context.lastWaitingLogTime = now
+                }
+                TimeUnit.SECONDS.sleep(30)
+            }
+            else -> {
+                TimeUnit.SECONDS.sleep(30)
+            }
+        }
+    }
+
+    private fun handleResolveTask() {
+        val issueId = context.currentIssueId ?: throw IllegalStateException("currentIssueId is null")
+        val nextIssue = BacklogParser.parseAllIssues(backlogDir).firstOrNull { it.id == issueId } ?: throw IllegalStateException("nextIssue not found in backlog")
+
+        BacklogParser.markIssueAsResolved(nextIssue, resolvedDir)
+
+        println("Regenerating architectural maps...")
+        executeCmd("./gradlew", "generateKnowledgeMap")
+        bot?.sendMessage("✅ Resolved issue `$issueId`. Picking next task...")
+
+        clearActiveTask()
+        stateFile.delete()
+        context.state = OrchestratorState.SELECT_TASK
+    }
+
+    private fun clearActiveTask() {
+        context.currentIssueId = null
+        context.currentIssueTitle = null
+        context.currentIssueFile = null
+        context.githubIssueNumber = null
+        context.julesSessionId = null
+        context.prNumber = null
+        context.lastHeadSha = null
+        context.lastReviewedSha = null
+        context.lastBuildStatus = null
+        context.lastCheckedSha = null
+        context.lastWaitingLogTime = 0L
+    }
+}
 
 fun main() {
     println("🤖 Starting Autonomous Backlog Orchestrator Daemon...")
@@ -23,303 +447,15 @@ fun main() {
         println("⚠️ TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID not set. Running in local terminal-only mode.")
         null
     }
-    
+
     val backlogDir = File(backlogPath)
     val resolvedDir = File(backlogDir, "resolved")
-    val skippedIds = mutableSetOf<String>()
+    val stateFile = File(".orchestrator_state.properties")
 
     bot?.sendMessage("🤖 *Orchestrator Daemon Online* in repo `$julesRepo`.")
 
-    while (true) {
-        try {
-            val allIssues = BacklogParser.parseAllIssues(backlogDir)
-            println("📚 Backlog Status: ${allIssues.count { it.status == "open" }} open issues remaining.")
-            val activeIssues = allIssues.filter { it.id !in skippedIds }
-            val nextIssue = DependencyGraph.selectNextIssue(activeIssues)
-
-            if (nextIssue == null) {
-                println("💤 No unblocked open issues found. Checking again in 2 minutes...")
-                TimeUnit.MINUTES.sleep(2)
-                continue
-            }
-
-            println("\n🎯 Next prioritized task: ${nextIssue.id} - ${nextIssue.title} (Priority: ${nextIssue.priority})")
-
-            val approved = if (nextIssue.githubIssue != null) {
-                println("🔄 Resuming already-in-progress task ${nextIssue.id} (linked to GitHub issue #${nextIssue.githubIssue})...")
-                true
-            } else {
-                // Ring terminal bell to alert developer locally
-                ringTerminalBell(3)
-
-                if (bot != null) {
-                    val telegramText = """
-                        🤖 *Request to start task ${nextIssue.id}*
-                        *Title:* ${nextIssue.title}
-                        *Priority:* ${nextIssue.priority} (0-10)
-                        
-                        Please approve or skip in the inline keyboard below.
-                    """.trimIndent()
-                    bot.sendMessageWithApprovalMarkup(nextIssue.id, telegramText)
-                    bot.waitForApproval(nextIssue.id)
-                } else {
-                    print("\u001B[1;31m🔔 [APPROVAL REQUIRED] Start task ${nextIssue.id} - ${nextIssue.title}? (y/n): \u001B[0m")
-                    System.out.flush()
-                    val input = readlnOrNull()?.trim()?.lowercase()
-                    input == "y" || input == "yes"
-                }
-            }
-
-            if (!approved) {
-                println("⏭️ Task ${nextIssue.id} skipped by user. Postponing.")
-                skippedIds.add(nextIssue.id)
-                bot?.sendMessage("⏭️ Task `${nextIssue.id}` skipped. Will pick another.")
-                continue
-            }
-
-            bot?.sendMessage("🚀 Starting task `${nextIssue.id}`...")
-            
-            // 1. Create or retrieve GitHub Issue
-            var githubIssueNumber = nextIssue.githubIssue?.toString()
-            val issueTitle = "[${nextIssue.id}] ${nextIssue.title}"
-            if (githubIssueNumber == null) {
-                // Recovery: check if an issue was already created in a previous session (e.g. script was killed mid-run)
-                val existingIssueNumber = GitHubCli.findExistingIssueNumber(nextIssue.id)
-                if (existingIssueNumber != null) {
-                    println("♻️ Recovered existing GitHub issue #$existingIssueNumber for ${nextIssue.id} (was missing from backlog file).")
-                    githubIssueNumber = existingIssueNumber
-                    BacklogParser.writeGithubIssue(nextIssue, existingIssueNumber.toInt())
-                } else {
-                    println("Creating GitHub issue for ${nextIssue.id}...")
-                    githubIssueNumber = GitHubCli.createIssue(issueTitle, nextIssue.file, "jules")
-                    BacklogParser.writeGithubIssue(nextIssue, githubIssueNumber.toInt())
-                    println("Created GitHub issue #$githubIssueNumber")
-                }
-            } else {
-                println("Using existing GitHub issue #$githubIssueNumber")
-            }
-
-            val finalIssueNumber = githubIssueNumber
-
-            // 2. Poll for the automatically triggered Jules Session via GitHub label
-            var activeSession = JulesCli.getActiveSession(nextIssue.id)
-            var attempts = 0
-            while (activeSession == null && attempts < 12) {
-                println("Waiting for Jules session to be automatically triggered via GitHub issue label (attempt ${attempts + 1}/12)...")
-                TimeUnit.SECONDS.sleep(15)
-                activeSession = JulesCli.getActiveSession(nextIssue.id)
-                attempts++
-            }
-            
-            if (activeSession != null) {
-                println("Linked Jules session: ID=${activeSession.id}, Status=${activeSession.status}")
-            }
-
-            // 3. Monitor PR & Build status
-            var prNumber = GitHubCli.findLinkedPR(finalIssueNumber, nextIssue.id, activeSession?.id)
-            var lastStatus: String? = null
-            var taskCanceled = false
-            while (prNumber == null) {
-                if (GitHubCli.isIssueClosed(finalIssueNumber)) {
-                    println("\n\u001B[1;33m⚠️ GitHub issue #$finalIssueNumber was closed. Canceling task ${nextIssue.id}.\u001B[0m")
-                    bot?.sendMessage("⚠️ GitHub issue #$finalIssueNumber was closed. Task `${nextIssue.id}` canceled.")
-                    BacklogParser.removeGithubIssue(nextIssue)
-                    skippedIds.add(nextIssue.id)
-                    taskCanceled = true
-                    break
-                }
-
-                val session = JulesCli.getActiveSession(nextIssue.id)
-                if (session != null && session.status != lastStatus) {
-                    println("Jules session status changed: ${session.status}")
-                    lastStatus = session.status
-
-                    val sessionUrl = "https://jules.google.com/session/${session.id}"
-                    if (session.status.contains("Awaiting", ignoreCase = true) || session.status.contains("Feedback", ignoreCase = true)) {
-                        // Alert developer!
-                        val alertMsg = "⚠️ *Jules needs feedback on task ${nextIssue.id}!* Status: `${session.status}`. Please check and respond here: $sessionUrl"
-                        bot?.sendMessage(alertMsg)
-                        println("\n\u001B[1;31m🔔 [FEEDBACK REQUIRED] Jules is blocked waiting for feedback on task ${nextIssue.id}. Status: ${session.status}\u001B[0m")
-                        println("👉 Respond here: $sessionUrl")
-                        ringTerminalBell(5)
-                    } else if (session.status.equals("Completed", ignoreCase = true)) {
-                        val alertMsg = "🟢 *Jules task ${nextIssue.id} is Completed!* Ready to publish PR: $sessionUrl"
-                        bot?.sendMessage(alertMsg)
-                        println("\n\u001B[1;32m🟢 [COMPLETED] Jules task ${nextIssue.id} is Completed! Please review and publish the PR in the UI.\u001B[0m")
-                        println("👉 Publish PR here: $sessionUrl")
-                        ringTerminalBell(5)
-                    }
-                }
-
-                println("Waiting for Jules to open a PR for issue #$finalIssueNumber...")
-                TimeUnit.SECONDS.sleep(30)
-                prNumber = GitHubCli.findLinkedPR(finalIssueNumber, nextIssue.id, activeSession?.id)
-            }
-
-            if (taskCanceled) {
-                continue
-            }
-            
-            val finalPrNumber = prNumber!!
-            println("Jules opened PR #$finalPrNumber")
-
-            // 4. Poll CI Checks, run Antigravity reviews, and wait for manual merge
-            var lastHeadSha: String? = null
-            var lastReviewedSha: String? = null
-            var lastBuildStatus: String? = null
-            var lastCheckedSha: String? = null
-            var lastWaitingLogTime: Long = 0
-            val conversationId = getEnvOrNull("CONVERSATION_ID")
-
-            while (!GitHubCli.isPrMerged(finalPrNumber)) {
-                // Get current head SHA of the PR to detect new commits
-                val currentSha = GitHubCli.getPrHeadSha(finalPrNumber)
-                if (currentSha != lastHeadSha) {
-                    println("🔄 New commits detected on PR #$finalPrNumber (Head SHA: $currentSha). Checking build status...")
-                    lastHeadSha = currentSha
-                }
-
-                val status = GitHubCli.checkBuildStatus(finalPrNumber)
-                if (status != lastBuildStatus || currentSha != lastCheckedSha) {
-                    println("PR #$finalPrNumber build check: $status")
-                    lastBuildStatus = status
-                    lastCheckedSha = currentSha
-                }
-
-                when (status) {
-                    "SUCCESS" -> {
-                        if (currentSha != lastReviewedSha) {
-                            val comments = GitHubCli.getPrComments(finalPrNumber)
-                            val shaPrefix = currentSha.take(7)
-
-                            // Check if already reviewed in a previous run/session by agy/antigravity or Jules
-                            val alreadyReviewedByAgy = comments.any {
-                                it.body.contains("Approved by Antigravity") ||
-                                it.body.contains("Rejected by Antigravity")
-                            }
-
-                            if (alreadyReviewedByAgy) {
-                                println("✨ PR #$finalPrNumber already has an Antigravity review. Skipping.")
-                                lastReviewedSha = currentSha
-                            } else {
-                                // Find the request comment if it exists
-                                val requestComment = comments.firstOrNull {
-                                    (it.body.contains("@jules") || it.body.contains("@google-labs-jules")) &&
-                                    it.body.contains(shaPrefix)
-                                }
-
-                                if (requestComment == null) {
-                                    // 1. Request Jules review
-                                    println("🤖 Requesting Jules review for PR #$finalPrNumber (SHA: $currentSha)...")
-                                    bot?.sendMessage("🤖 *PR #$finalPrNumber Build Passed.* Asking @google-labs-jules to review SHA `${shaPrefix}`...")
-
-                                    val prompt = """
-                                        @google-labs-jules @jules Please perform a critical code review on this Pull Request (SHA: $currentSha) as a senior JVM security expert and staff engineer for the `mazewall` project.
-
-                                        Provide a detailed response covering:
-
-                                        1. **Overview**: Describe what this PR is doing and its main objectives.
-                                        2. **Rationale**: Why was the solution implemented in this specific way?
-                                        3. **Comparison & Alternatives**: Why is this solution better than other designs? What alternatives were considered (or should be considered) and what are their trade-offs?
-                                        4. **Critical & Security Analysis**:
-                                           - Evaluate correctness and potential failure modes.
-                                           - Check for JVM sandboxing bypasses, Landlock or Seccomp filter flaws.
-                                           - Verify FFM (Foreign Function & Memory) alignment, lifecycle, and memory leak risks.
-                                           - Analyze concurrency, JVM thread coordination, and Loom virtual thread carrier thread safety (preventing carrier poisoning).
-                                        5. **Conclusion**: Provide your final recommendation (e.g. Approved or needs changes).
-
-                                        Please be concise, extremely precise, and thorough. Use formatting for readability.
-                                    """.trimIndent()
-
-                                    executeCmd("gh", "pr", "comment", finalPrNumber, "--body", prompt)
-                                } else {
-                                    // 2. Check if Jules has replied after the request comment
-                                    val requestTime = java.time.Instant.parse(requestComment.createdAt)
-                                    val julesReply = comments.firstOrNull { comment ->
-                                        val author = comment.author?.login ?: ""
-                                        (author.contains("jules", ignoreCase = true)) &&
-                                        java.time.Instant.parse(comment.createdAt).isAfter(requestTime)
-                                    }
-
-                                    if (julesReply != null) {
-                                        println("🟢 Jules review received for SHA $currentSha.")
-                                        val prUrl = executeCmd("gh", "pr", "view", finalPrNumber, "--json", "url").substringAfter("\"url\":\"").substringBefore("\"")
-                                        bot?.sendMessage("🟢 *Jules reviewed PR #$finalPrNumber!* Ready for final manual review and merge: $prUrl")
-                                        lastReviewedSha = currentSha
-                                        ringTerminalBell(3)
-                                    } else {
-                                        println("⌛ Waiting for Jules (@google-labs-jules) to complete review on PR #$finalPrNumber (SHA: $shaPrefix)...")
-                                    }
-                                }
-                            }
-                        }
-
-                        // Sleep and wait for manual developer merge
-                        val now = System.currentTimeMillis()
-                        if (now - lastWaitingLogTime > 60_000) {
-                            val prUrl = executeCmd("gh", "pr", "view", finalPrNumber, "--json", "url").substringAfter("\"url\":\"").substringBefore("\"")
-                            println("⌛ Waiting for manual merge of PR #$finalPrNumber at: $prUrl")
-                            lastWaitingLogTime = now
-                        }
-                        TimeUnit.SECONDS.sleep(30)
-                    }
-                    "FAILURE" -> {
-                        println("❌ Build failed on PR #$finalPrNumber. Fetching logs...")
-                        val failedLogs = GitHubCli.getFailedBuildLogs(finalPrNumber)
-                        val feedback = """
-                            ❌ **CI Build Failed.**
-                            Jules, please review the failing logs and fix the implementation:
-                            
-                            ```
-                            $failedLogs
-                            ```
-                        """.trimIndent()
-                        
-                        // Comment on PR using gh cli
-                        executeCmd("gh", "pr", "comment", finalPrNumber, "--body", feedback)
-                        bot?.sendMessage("❌ Build failed on PR #$finalPrNumber. Feedback sent to Jules.")
-                        
-                        // Sleep 5 minutes to let Jules rebuild/re-commit
-                        TimeUnit.MINUTES.sleep(5)
-                    }
-                    "CONFLICT" -> {
-                        val now = System.currentTimeMillis()
-                        if (now - lastWaitingLogTime > 60_000) {
-                            val prUrl = executeCmd("gh", "pr", "view", finalPrNumber, "--json", "url").substringAfter("\"url\":\"").substringBefore("\"")
-                            bot?.sendMessage("⚠️ *PR #$finalPrNumber has conflicts!* Please resolve them: $prUrl")
-                            println("\u001B[1;31m🔔 [CONFLICT] PR #$finalPrNumber has conflicts! Please resolve conflicts: $prUrl\u001B[0m")
-                            ringTerminalBell(3)
-                            lastWaitingLogTime = now
-                        }
-                        TimeUnit.SECONDS.sleep(30)
-                    }
-                    else -> {
-                        // Pending / in progress, wait 30 seconds
-                        TimeUnit.SECONDS.sleep(30)
-                    }
-                }
-            }
-
-            println("PR #$finalPrNumber merged!")
-            bot?.sendMessage("🎉 PR #$finalPrNumber merged! resolving issue locally...")
-
-            // 7. Transition issue local status
-            BacklogParser.markIssueAsResolved(nextIssue, resolvedDir)
-
-            // 8. Regenerate Knowledge Map
-            println("Regenerating architectural maps...")
-            executeCmd("./gradlew", "generateKnowledgeMap")
-            bot?.sendMessage("✅ Resolved issue `${nextIssue.id}`. Picking next task...")
-
-        } catch (e: Exception) {
-            System.err.println("⚠️ Error in loop cycle: ${e.message}")
-            e.printStackTrace()
-            try {
-                bot?.sendMessage("⚠️ *Daemon Error:* `${e.message}`. Retrying in 2 minutes...")
-            } catch (_: Exception) {}
-            TimeUnit.MINUTES.sleep(2)
-        }
-    }
+    val runner = OrchestratorDaemonRunner(bot, backlogDir, resolvedDir, stateFile)
+    runner.run()
 }
 
 private fun loadDotEnv() {

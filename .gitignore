@@ -96,3 +96,6 @@ docs/presentation/mazewall_pitch_cee_2026.pdf
 /.codanna/index/
 /.fastembed_cache/
 .fastembed_cache
+
+### Orchestrator State ###
+.orchestrator_state.properties
