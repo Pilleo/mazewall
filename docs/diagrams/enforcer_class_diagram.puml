@@ -541,6 +541,13 @@ class "JvmStackInspector" as io.mazewall.enforcer.supervisor.JvmStackInspector {
 }
 abstract class "LoopAction" as io.mazewall.enforcer.supervisor.LoopAction {
 }
+class "PendingSpawnRegistry" as io.mazewall.enforcer.supervisor.PendingSpawnRegistry {
+  + {static}PendingSpawnRegistry INSTANCE
+  __
+  +void register(int, List<StackTraceElement>)
+  +List<StackTraceElement> get(int)
+  +void remove(int)
+}
 interface "ScopingValidationState" as io.mazewall.enforcer.supervisor.ScopingValidationState {
 }
 interface "StacktraceScopingPolicy" as io.mazewall.enforcer.supervisor.StacktraceScopingPolicy {
@@ -1112,6 +1119,8 @@ io.mazewall.enforcer.supervisor.DefaultStacktraceScopingPolicy --> io.mazewall.c
 io.mazewall.enforcer.supervisor.JVMValidationListener --> io.mazewall.core.FileDescriptor
 io.mazewall.enforcer.supervisor.JVMValidationListener --> io.mazewall.enforcer.supervisor.StacktraceScopingPolicy
 io.mazewall.enforcer.supervisor.JvmStackInspector --> io.mazewall.enforcer.supervisor.JvmStackInspector
+io.mazewall.enforcer.supervisor.PendingSpawnRegistry --> io.mazewall.enforcer.supervisor.PendingSpawnRegistry
+io.mazewall.enforcer.supervisor.PendingSpawnRegistry --> io.mazewall.core.Tid
 io.mazewall.enforcer.supervisor.SupervisorDaemon --> io.mazewall.enforcer.supervisor.SupervisorDaemon
 io.mazewall.enforcer.supervisor.SupervisorDaemonEngine --> io.mazewall.core.FileDescriptor
 io.mazewall.enforcer.supervisor.SupervisorDaemonEngine --> io.mazewall.enforcer.supervisor.SupervisorDaemonState

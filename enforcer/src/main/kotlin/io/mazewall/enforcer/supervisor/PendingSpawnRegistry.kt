@@ -11,25 +11,34 @@ import java.util.concurrent.ConcurrentHashMap
  * process when it subsequently calls execve.
  */
 internal object PendingSpawnRegistry {
-    private val registry = ConcurrentHashMap<Tid, List<StackTraceElement>>()
+    private val registry = ConcurrentHashMap<Tid, PendingSpawn>()
+
+    private class PendingSpawn(val stackTrace: List<StackTraceElement>, val timestamp: Long)
 
     /**
      * Registers the authorized stack trace for a parent thread currently spawning a process.
      */
     fun register(parentTid: Tid, stackTrace: List<StackTraceElement>) {
-        registry[parentTid] = stackTrace
+        val now = System.currentTimeMillis()
+        registry[parentTid] = PendingSpawn(stackTrace, now)
+        // Clean up expired entries (older than 10 seconds to be very safe)
+        registry.entries.removeIf { now - it.value.timestamp > 10000 }
     }
 
     /**
      * Retrieves the authorized stack trace for a given parent TID.
      */
     fun get(parentTid: Tid): List<StackTraceElement>? {
-        return registry[parentTid]
+        val entry = registry[parentTid] ?: return null
+        if (System.currentTimeMillis() - entry.timestamp > 10000) {
+            registry.remove(parentTid)
+            return null
+        }
+        return entry.stackTrace
     }
 
     /**
      * Removes the authorized stack trace for a given parent TID.
-     * This should be called after the child successfully execs or the parent returns.
      */
     fun remove(parentTid: Tid) {
         registry.remove(parentTid)
