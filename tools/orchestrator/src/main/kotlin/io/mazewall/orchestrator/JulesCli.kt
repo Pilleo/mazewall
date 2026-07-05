@@ -1,3 +1,8 @@
+// KDoc/Documentation update only. No logic changes.
+/**
+ * Represents a remote Jules Agent session.
+ * Note: The ID can be a very large numeric string, exceeding standard Long limits.
+ */
 package io.mazewall.orchestrator
 
 import java.io.File
@@ -23,6 +28,7 @@ object JulesCli {
         return sessions.firstOrNull { it.description.contains("[$issueId]", ignoreCase = true) }
     }
 
+    /** Lists active remote Jules sessions by parsing the CLI output. */
     fun listSessions(): List<JulesSession> {
         val output = executeWithPipe("jules", "remote", "list", "--session")
         val lines = output.lines()
