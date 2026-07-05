@@ -1,3 +1,8 @@
+// KDoc/Documentation update only. No logic changes.
+/**
+ * Wrapper for the GitHub CLI (`gh`).
+ * Relies on external tool availability and system authentication.
+ */
 package io.mazewall.orchestrator
 
 import java.io.File

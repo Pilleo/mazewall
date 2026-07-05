@@ -1,3 +1,8 @@
+// KDoc/Documentation update only. No logic changes.
+/**
+ * Main daemon loop for the autonomous orchestrator.
+ * Handles polling GitHub, invoking Jules, and triggering PR reviews.
+ */
 package io.mazewall.orchestrator
 
 import java.io.File
