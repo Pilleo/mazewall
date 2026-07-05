@@ -97,6 +97,27 @@ object BpfFilter {
         allowUnsafePrctl: Boolean = false,
         profilingMode: Boolean = false,
     ): List<BpfInstruction> {
+        val effectiveSyscallActions = syscallActions.toMutableMap()
+
+        // --- STACKTRACE PROPAGATION FOR PROCESS SPAWNING ---
+        // To enforce stacktrace scoping on execve/execveat, we must first capture the
+        // parent thread's stack trace during the spawn entry (fork/vfork/clone).
+        // If execve is supervised, we automatically upgrade spawn syscalls to ACT_NOTIFY.
+        val execveNr = arch.execve
+        val execveatNr = arch.execveat
+        val isExecSupervised = effectiveSyscallActions[execveNr] == SeccompAction.ACT_NOTIFY ||
+            effectiveSyscallActions[execveatNr] == SeccompAction.ACT_NOTIFY
+
+        if (isExecSupervised) {
+            val spawnSyscalls = listOf(arch.fork, arch.vfork, arch.clone).filter { it >= 0 }
+            for (nr in spawnSyscalls) {
+                // Only upgrade if not already explicitly set to something else by the user
+                if (effectiveSyscallActions[nr] == null || effectiveSyscallActions[nr] == SeccompAction.ACT_ALLOW) {
+                    effectiveSyscallActions[nr] = SeccompAction.ACT_NOTIFY
+                }
+            }
+        }
+
         val defaultNativeAction = resolveNativeAction(defaultAction, profilingMode)
 
         // Syscalls absolutely required for safepoints, GC, and thread stability.
@@ -110,7 +131,7 @@ object BpfFilter {
         // 2. Specialized Syscall Argument Inspections (Plugin-based)
         val handledNrs = mutableSetOf<Int>()
         val context = io.mazewall.seccomp.InspectionContext(
-            syscallActions,
+            effectiveSyscallActions,
             defaultAction,
             jvmCriticalNrs,
             allowMmapExec,
@@ -126,7 +147,7 @@ object BpfFilter {
         pipeline.emitSpecial(builder, arch, context, handledNrs)
 
         // 3. Block-based checks (Linear Scan)
-        emitLinearScan(builder, syscallActions, jvmCriticalNrs, profilingMode, defaultNativeAction, handledNrs)
+        emitLinearScan(builder, effectiveSyscallActions, jvmCriticalNrs, profilingMode, defaultNativeAction, handledNrs)
 
         // 4. Default Action & Build
         return builder.ret(defaultNativeAction).build().instructions

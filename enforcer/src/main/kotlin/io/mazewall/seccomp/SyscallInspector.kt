@@ -97,25 +97,35 @@ internal class MmapExecInspector : SyscallInspector {
 /**
  * Inspects clone to ensure it is only used for creating threads (CLONE_THREAD)
  * and not full processes, when non-thread cloning is not allowed.
+ *
+ * ### Safepoint Deadlock Prevention
+ * JVM thread creation (via `Thread.start()`) calls `clone(CLONE_THREAD | ...)`.
+ * If this syscall is intercepted and sent to the JVM supervisor, the supervisor
+ * will call `Thread.getStackTrace()`, which triggers a JVM safepoint.
+ * However, the thread-creating thread holds internal JVM locks that are required
+ * for a safepoint to complete, leading to a permanent deadlock.
+ *
+ * SOLUTION: The BPF filter must unconditionally ALLOW `clone` when `CLONE_THREAD`
+ * is set, bypassing seccomp interception entirely for Java thread creation.
  */
 internal class ThreadCloneInspector : SyscallInspector {
     override fun getInspections(arch: Arch, context: InspectionContext): List<SyscallInspection> {
-        if (context.allowNonThreadClone || arch.clone < 0) return emptyList()
+        if (arch.clone < 0) return emptyList()
 
         val nr = arch.clone
         return listOf(
             SyscallInspection(
                 syscallNumber = nr,
                 argIndex = 0, // clone flags are the 1st argument
-                check = ArgCheck.MaskEquals(CLONE_VM_THREAD_MASK, CLONE_VM_THREAD_MASK),
-                ifMatched = context.resolveEffectiveAction(nr),
-                ifNotMatched = SeccompAction.ACT_ERRNO,
+                check = ArgCheck.MaskEquals(CLONE_THREAD, CLONE_THREAD),
+                ifMatched = SeccompAction.ACT_ALLOW, // Bypass supervisor for JVM threads
+                ifNotMatched = context.resolveEffectiveAction(nr),
             )
         )
     }
 
     private companion object {
-        private const val CLONE_VM_THREAD_MASK = 0x00010100L
+        private const val CLONE_THREAD = 0x00010000L
     }
 }
 

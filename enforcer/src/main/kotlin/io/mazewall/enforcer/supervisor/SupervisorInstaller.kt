@@ -114,7 +114,7 @@ internal class JVMValidationListener(
         }
     }
 
-    @Suppress("CyclomaticComplexMethod", "NestedBlockDepth")
+    @Suppress("CyclomaticComplexMethod", "NestedBlockDepth", "LongMethod")
     private fun runValidationReactor(inputStream: SupervisorSocketInputStream, arena: Arena, readyLatch: CountDownLatch) {
         System.err.println("[JVM-VALIDATION] validation reactor thread started")
         try {
@@ -133,6 +133,11 @@ internal class JVMValidationListener(
 
             val responseSegment = with(arena) { io.mazewall.ffi.memory.SupervisorResponseSegment.allocate() }
 
+            val arch = Arch.current()
+            val forkNr = arch.fork
+            val vforkNr = arch.vfork
+            val cloneNr = arch.clone
+
             while (!closed.get()) {
                 val id = try {
                     dis.readLong()
@@ -140,15 +145,29 @@ internal class JVMValidationListener(
                     break
                 }
                 val pidVal = dis.readInt()
+                val ppidVal = dis.readInt()
                 val nr = dis.readInt()
                 val argCount = dis.readInt()
 
                 val argsList = readRequestArgs(dis, argCount)
-                System.err.println("[JVM-VALIDATION] Received request: id=$id, pid=$pidVal, nr=$nr, args=$argsList")
+                System.err.println("[JVM-VALIDATION] Received request: id=$id, pid=$pidVal, ppid=$ppidVal, nr=$nr, args=$argsList")
 
                 val startMs = System.currentTimeMillis()
                 val targetThread = SupervisorInstaller.threadRegistry[Tid(pidVal)]
-                val validationState = JvmStackInspector.inspect(nr, argsList, targetThread)
+                var validationState = JvmStackInspector.inspect(nr, argsList, targetThread)
+
+                // --- STACKTRACE PROPAGATION LOGIC ---
+                if (nr == arch.execve || nr == arch.execveat) {
+                    if (validationState is ScopingValidationState.SafeToValidate && validationState.rawStack.isEmpty()) {
+                        // Empty stack trace on execve suggests a child process.
+                        // We resolve the propagated stack trace from the parent thread.
+                        val parentStack = PendingSpawnRegistry.get(Tid(ppidVal))
+                        if (parentStack != null) {
+                            System.err.println("[JVM-VALIDATION] Propagating parent stack trace (TID=$ppidVal) to child process (PID=$pidVal)")
+                            validationState = ScopingValidationState.SafeToValidate.create(parentStack.toTypedArray(), nr, argsList)
+                        }
+                    }
+                }
 
                 val inspectMs = System.currentTimeMillis() - startMs
                 if (inspectMs > SLOW_INSPECT_THRESHOLD_MS) {
@@ -158,6 +177,15 @@ internal class JVMValidationListener(
                 val isAllowed = when (validationState) {
                     is ScopingValidationState.SafeToValidate -> {
                         val stackTrace = validationState.rawStack.toList()
+
+                        // --- SPAWN REGISTRATION LOGIC ---
+                        if (nr == forkNr || nr == vforkNr || nr == cloneNr) {
+                            if (stackTrace.isNotEmpty()) {
+                                System.err.println("[JVM-VALIDATION] Registering pending spawn for TID=$pidVal")
+                                PendingSpawnRegistry.register(Tid(pidVal), stackTrace)
+                            }
+                        }
+
                         val sb = StringBuilder()
                         sb.append("Validation stack for nr=${validationState.nr}, targetThread=$targetThread:\n")
                         if (stackTrace.isEmpty()) {
@@ -192,6 +220,10 @@ internal class JVMValidationListener(
                     }
                 } else {
                     0.toByte()
+                }
+
+                if (isAllowed && (nr == arch.execve || nr == arch.execveat)) {
+                    PendingSpawnRegistry.remove(Tid(ppidVal))
                 }
 
                 val errorNr = if (decision.toInt() == 0) NativeConstants.EPERM else 0

@@ -1,7 +1,7 @@
 ---
 title: "Stacktrace-Enforced Process Spawning Safepoint Deadlock and Trace Propagation Gotchas"
 severity: "HIGH"
-status: "open"
+status: "resolved"
 priority: 9
 dependencies: []
 component: "unknown"

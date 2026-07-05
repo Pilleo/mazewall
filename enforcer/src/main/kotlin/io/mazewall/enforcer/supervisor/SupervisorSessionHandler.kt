@@ -278,7 +278,8 @@ internal class SupervisorSessionHandler(
 
             val tid = Tid(pidVal)
             val extracted = extractNotificationArgs(nr, tid, args)
-            logger.info { "[SUPERVISOR-DEBUG] Received syscall notification: id=$id, pid=$pidVal, nr=$nr, path=${extracted.pathStr}" }
+            val ppid = getPpid(pidVal)
+            logger.info { "[SUPERVISOR-DEBUG] Received syscall notification: id=$id, pid=$pidVal, ppid=$ppid, nr=$nr, path=${extracted.pathStr}" }
 
             // --- DAEMON-SIDE FAST-PATH BYPASS ---
             // HAZARD: When the sandboxed thread triggers lazy classloading (e.g., loading IOException
@@ -319,7 +320,7 @@ internal class SupervisorSessionHandler(
             }
 
             logger.info { "[SUPERVISOR-DEBUG] Forwarding request to JVM validation listener" }
-            val success = sendRequestToJvm(id, pidVal, nr, args, extracted.pathStr, extracted.sockaddrBytes)
+            val success = sendRequestToJvm(id, pidVal, ppid, nr, args, extracted.pathStr, extracted.sockaddrBytes)
             if (!success) {
                 logger.severe { "[SUPERVISOR-DEBUG] Failed to send request to JVM" }
                 return false
@@ -398,13 +399,14 @@ internal class SupervisorSessionHandler(
     private fun sendRequestToJvm(
         id: Long,
         pidVal: Int,
+        ppid: Int,
         nr: Int,
         args: LongArray,
         pathStr: String?,
         sockaddrBytes: ByteArray?
     ): Boolean {
         return Arena.ofConfined().use { arena ->
-            val sizeOfMeta = SIZE_META
+            val sizeOfMeta = SIZE_META + SIZE_INT // Include PPID
             val sizeOfArgHeader = SIZE_ARG_HEADER
             val totalSize = sizeOfMeta + (
                 if (pathStr != null) {
@@ -422,6 +424,7 @@ internal class SupervisorSessionHandler(
 
             netBuf.writeLong(offset, id); offset += BYTES_PER_LONG
             netBuf.writeInt(offset, pidVal); offset += SIZE_INT
+            netBuf.writeInt(offset, ppid); offset += SIZE_INT
             netBuf.writeInt(offset, nr); offset += SIZE_INT
 
             if (pathStr != null) {
@@ -734,6 +737,22 @@ internal class SupervisorSessionHandler(
             }
         } catch (ignored: Exception) {}
         return tid
+    }
+
+    private fun getPpid(pid: Int): Int {
+        try {
+            val statFile = java.io.File("/proc/$pid/stat")
+            if (statFile.exists()) {
+                val content = statFile.readText()
+                // Format: pid (comm) state ppid ...
+                // parts[0] is empty (space between ')' and state), parts[1] is state, parts[2] is ppid
+                val parts = content.substringAfterLast(')').split(' ')
+                if (parts.size >= 3) {
+                    return parts[2].toInt()
+                }
+            }
+        } catch (ignored: Exception) {}
+        return 0
     }
 
     private fun handleAcceptAsync(
