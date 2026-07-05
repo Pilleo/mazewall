@@ -2,6 +2,10 @@
 title: "`IterativeProfiler` infinite retry loop and failure on disjoint prefix file paths"
 severity: "HIGH"
 status: "open"
+priority: 9
+dependencies: []
+component: "profiler"
+effort: "medium"
 ---
 
 # 🔴 [Severity: HIGH]: `IterativeProfiler` infinite retry loop and failure on disjoint prefix file paths

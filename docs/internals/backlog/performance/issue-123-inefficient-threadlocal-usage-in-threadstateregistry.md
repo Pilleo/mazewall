@@ -2,6 +2,10 @@
 title: "Inefficient ThreadLocal usage in `ThreadStateRegistry`"
 severity: "HIGH"
 status: "open"
+priority: 9
+dependencies: []
+component: "enforcer"
+effort: "small"
 ---
 
 # 🔴 [Severity: PERFORMANCE]: Inefficient ThreadLocal usage in `ThreadStateRegistry`

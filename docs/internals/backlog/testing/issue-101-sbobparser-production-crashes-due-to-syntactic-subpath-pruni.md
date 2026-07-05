@@ -2,6 +2,10 @@
 title: "SbobParser Production Crashes due to Syntactic Subpath Pruning of Unresolved/Symlinked Paths"
 severity: "HIGH"
 status: "open"
+priority: 9
+dependencies: []
+component: "unknown"
+effort: "medium"
 ---
 
 # 🔴 [Severity: HIGH]: SbobParser Production Crashes due to Syntactic Subpath Pruning of Unresolved/Symlinked Paths

@@ -2,6 +2,10 @@
 title: "Memory Alignment verification for `Layouts.kt` FFM Structures"
 severity: "HIGH"
 status: "open"
+priority: 9
+dependencies: []
+component: "enforcer"
+effort: "small"
 ---
 
 # 🔴 [Severity: LOW]: Memory Alignment verification for `Layouts.kt` FFM Structures

@@ -2,6 +2,10 @@
 title: "Type-State for `FileDescriptor` Lifecycles (Compile-Time Use-After-Close Safety)"
 severity: "ENHANCEMENT"
 status: "open"
+priority: 2
+dependencies: []
+component: "unknown"
+effort: "medium"
 ---
 
 # 🔵 [Severity: ENHANCEMENT]: Type-State for `FileDescriptor` Lifecycles (Compile-Time Use-After-Close Safety)

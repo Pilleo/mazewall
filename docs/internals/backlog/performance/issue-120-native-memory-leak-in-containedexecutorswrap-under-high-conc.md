@@ -2,6 +2,10 @@
 title: "Native Memory Leak in `ContainedExecutors.wrap` under High Concurrency"
 severity: "HIGH"
 status: "open"
+priority: 9
+dependencies: []
+component: "enforcer"
+effort: "small"
 ---
 
 # 🔴 [Severity: MEDIUM]: Native Memory Leak in `ContainedExecutors.wrap` under High Concurrency

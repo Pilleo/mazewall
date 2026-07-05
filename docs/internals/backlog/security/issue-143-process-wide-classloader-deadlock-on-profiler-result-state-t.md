@@ -2,6 +2,10 @@
 title: "Process-Wide Classloader Deadlock on Profiler Result / State Types"
 severity: "HIGH"
 status: "open"
+priority: 9
+dependencies: []
+component: "profiler"
+effort: "small"
 ---
 
 # 🔴 [Severity: HIGH]: Process-Wide Classloader Deadlock on Profiler Result / State Types

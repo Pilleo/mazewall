@@ -2,6 +2,10 @@
 title: "Uncaught Native Exceptions Escaping Landlock Installation"
 severity: "HIGH"
 status: "open"
+priority: 9
+dependencies: []
+component: "enforcer"
+effort: "small"
 ---
 
 # 🔴 [Severity: MEDIUM]: Uncaught Native Exceptions Escaping Landlock Installation

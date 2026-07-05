@@ -2,6 +2,10 @@
 title: "Supervisor Proxy Pattern (FD Injection) & Stacktrace Scoping"
 severity: "ENHANCEMENT"
 status: "open"
+priority: 2
+dependencies: []
+component: "unknown"
+effort: "medium"
 ---
 
 # 🔵 [Severity: ENHANCEMENT]: Supervisor Proxy Pattern (FD Injection) & Stacktrace Scoping

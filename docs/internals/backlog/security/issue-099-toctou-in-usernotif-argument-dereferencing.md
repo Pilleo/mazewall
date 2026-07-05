@@ -2,6 +2,10 @@
 title: "TOCTOU in `USER_NOTIF` Argument Dereferencing"
 severity: "HIGH"
 status: "open"
+priority: 9
+dependencies: []
+component: "profiler"
+effort: "small"
 ---
 
 # 🔴 [Severity: MEDIUM]: TOCTOU in `USER_NOTIF` Argument Dereferencing

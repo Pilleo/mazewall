@@ -2,6 +2,10 @@
 title: "JVM Validation Timeout Causes Denial of Service on Valid Syscalls"
 severity: "MEDIUM"
 status: "open"
+priority: 6
+dependencies: []
+component: "unknown"
+effort: "medium"
 ---
 
 # 🔴 [Severity: MEDIUM]: JVM Validation Timeout Causes Denial of Service on Valid Syscalls

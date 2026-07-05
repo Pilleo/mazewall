@@ -2,6 +2,10 @@
 title: "Missing Support for `O_PATH` and `O_CLOEXEC` in `Landlock` fallback"
 severity: "HIGH"
 status: "open"
+priority: 9
+dependencies: []
+component: "enforcer"
+effort: "small"
 ---
 
 # 🔴 [Severity: MEDIUM]: Missing Support for `O_PATH` and `O_CLOEXEC` in `Landlock` fallback

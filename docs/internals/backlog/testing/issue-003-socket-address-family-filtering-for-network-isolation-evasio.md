@@ -2,6 +2,10 @@
 title: "Socket Address Family Filtering for Network Isolation Evasion Prevention"
 severity: "ENHANCEMENT"
 status: "open"
+priority: 2
+dependencies: []
+component: "unknown"
+effort: "medium"
 ---
 
 # 🔵 [Severity: ENHANCEMENT]: Socket Address Family Filtering for Network Isolation Evasion Prevention

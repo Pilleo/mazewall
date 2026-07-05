@@ -2,6 +2,10 @@
 title: "🔴 [Severity: DX-FRICTION]: Missing Extensibility in Exception Message Parsing"
 severity: "HIGH"
 status: "open"
+priority: 9
+dependencies: []
+component: "enforcer"
+effort: "small"
 ---
 
 # 🔴 [Severity: DX-FRICTION]: Missing Extensibility in Exception Message Parsing

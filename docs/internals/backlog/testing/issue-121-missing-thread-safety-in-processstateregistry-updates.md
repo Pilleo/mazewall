@@ -2,6 +2,10 @@
 title: "Missing Thread-Safety in `ProcessStateRegistry` Updates"
 severity: "HIGH"
 status: "open"
+priority: 9
+dependencies: []
+component: "enforcer"
+effort: "small"
 ---
 
 # 🔴 [Severity: MEDIUM]: Missing Thread-Safety in `ProcessStateRegistry` Updates

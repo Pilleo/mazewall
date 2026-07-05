@@ -2,6 +2,10 @@
 title: "Landlock Excessive Capability Leak on `ENOENT`"
 severity: "MEDIUM"
 status: "open"
+priority: 6
+dependencies: []
+component: "enforcer"
+effort: "medium"
 ---
 
 # 🟡 [Severity: LOW]: Landlock Excessive Capability Leak on `ENOENT`

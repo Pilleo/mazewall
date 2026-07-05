@@ -2,6 +2,10 @@
 title: "Unreliable Test Teardown for Mocked Native Engines"
 severity: "HIGH"
 status: "open"
+priority: 9
+dependencies: []
+component: "enforcer"
+effort: "small"
 ---
 
 # 🔴 [Severity: MEDIUM]: Unreliable Test Teardown for Mocked Native Engines

@@ -2,6 +2,10 @@
 title: "`IterativeProfiler` Context Loss via thread creation"
 severity: "HIGH"
 status: "open"
+priority: 9
+dependencies: []
+component: "profiler"
+effort: "small"
 ---
 
 # 🔴 [Severity: HIGH]: `IterativeProfiler` Context Loss via thread creation

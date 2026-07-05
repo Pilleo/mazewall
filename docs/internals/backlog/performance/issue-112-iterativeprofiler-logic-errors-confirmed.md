@@ -2,6 +2,10 @@
 title: "`IterativeProfiler` Logic Errors (Confirmed)"
 severity: "HIGH"
 status: "open"
+priority: 9
+dependencies: []
+component: "profiler"
+effort: "large"
 ---
 
 # 🔴 [Severity: HIGH]: `IterativeProfiler` Logic Errors (Confirmed)

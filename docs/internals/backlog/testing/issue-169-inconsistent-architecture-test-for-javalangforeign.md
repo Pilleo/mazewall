@@ -2,6 +2,10 @@
 title: "Inconsistent Architecture Test for `java.lang.foreign`"
 severity: "HIGH"
 status: "open"
+priority: 9
+dependencies: []
+component: "enforcer"
+effort: "small"
 ---
 
 # 🔴 [Severity: LOW]: Inconsistent Architecture Test for `java.lang.foreign`

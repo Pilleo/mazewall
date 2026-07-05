@@ -2,6 +2,10 @@
 title: "📝 [NOTE]: Root `:test` task requires host Docker/Podman, not runnable inside dev container"
 severity: "MEDIUM"
 status: "open"
+priority: 4
+dependencies: []
+component: "testing"
+effort: "medium"
 ---
 
 # 📝 [NOTE]: Root `:test` task requires host Docker/Podman, not runnable inside dev container

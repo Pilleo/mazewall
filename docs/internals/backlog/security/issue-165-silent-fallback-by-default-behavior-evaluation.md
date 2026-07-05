@@ -2,6 +2,10 @@
 title: "Silent Fallback by default behavior evaluation"
 severity: "HIGH"
 status: "open"
+priority: 9
+dependencies: []
+component: "enforcer"
+effort: "small"
 ---
 
 # 🔴 [Severity: LOW]: Silent Fallback by default behavior evaluation

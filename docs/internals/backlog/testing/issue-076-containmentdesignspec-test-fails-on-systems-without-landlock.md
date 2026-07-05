@@ -2,6 +2,10 @@
 title: "`ContainmentDesignSpec` test fails on systems without Landlock support"
 severity: "HIGH"
 status: "open"
+priority: 6
+dependencies: []
+component: "enforcer"
+effort: "small"
 ---
 
 # 🔴 [Severity: MEDIUM]: `ContainmentDesignSpec` test fails on systems without Landlock support

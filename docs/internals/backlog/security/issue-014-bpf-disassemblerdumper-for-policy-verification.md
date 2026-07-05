@@ -2,6 +2,10 @@
 title: "BPF Disassembler/Dumper for Policy Verification"
 severity: "ENHANCEMENT"
 status: "open"
+priority: 2
+dependencies: []
+component: "unknown"
+effort: "medium"
 ---
 
 # 🔵 [Severity: ENHANCEMENT]: BPF Disassembler/Dumper for Policy Verification

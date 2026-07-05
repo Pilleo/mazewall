@@ -2,6 +2,10 @@
 title: "Kotlin Inlining Causes ArchUnit noGenericExceptionCatching Violation"
 severity: "HIGH"
 status: "open"
+priority: 9
+dependencies: []
+component: "enforcer"
+effort: "medium"
 ---
 
 # 🔴 [Severity: MEDIUM]: Kotlin Inlining Causes ArchUnit noGenericExceptionCatching Violation

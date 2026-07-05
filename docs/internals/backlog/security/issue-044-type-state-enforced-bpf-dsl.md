@@ -2,6 +2,10 @@
 title: "Type-State Enforced BPF DSL"
 severity: "ENHANCEMENT"
 status: "open"
+priority: 2
+dependencies: []
+component: "seccomp"
+effort: "large"
 ---
 
 # 🔵 [Severity: ENHANCEMENT]: Type-State Enforced BPF DSL

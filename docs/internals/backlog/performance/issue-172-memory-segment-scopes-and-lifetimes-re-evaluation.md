@@ -2,6 +2,10 @@
 title: "Memory Segment Scopes and Lifetimes (Re-evaluation)"
 severity: "HIGH"
 status: "open"
+priority: 9
+dependencies: []
+component: "enforcer"
+effort: "small"
 ---
 
 # 🔴 [Severity: LOW]: Memory Segment Scopes and Lifetimes (Re-evaluation)

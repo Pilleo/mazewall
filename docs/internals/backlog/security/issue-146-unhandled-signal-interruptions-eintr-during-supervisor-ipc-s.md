@@ -2,6 +2,10 @@
 title: "Unhandled Signal Interruptions (`EINTR`) during Supervisor IPC socket communication"
 severity: "HIGH"
 status: "open"
+priority: 9
+dependencies: []
+component: "enforcer"
+effort: "small"
 ---
 
 # 🔴 [Severity: MEDIUM]: Unhandled Signal Interruptions (`EINTR`) during Supervisor IPC socket communication

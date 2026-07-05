@@ -2,6 +2,10 @@
 title: "Architectural DIP (Dependency Inversion) Violations in Native Scopes"
 severity: "HIGH"
 status: "open"
+priority: 3
+dependencies: []
+component: "shared"
+effort: "large"
 ---
 
 # 🔴 [Severity: LOW]: Architectural DIP (Dependency Inversion) Violations in Native Scopes

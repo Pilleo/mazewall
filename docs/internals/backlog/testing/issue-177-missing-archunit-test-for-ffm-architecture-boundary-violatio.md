@@ -2,6 +2,10 @@
 title: "Missing ArchUnit test for FFM architecture boundary violations"
 severity: "HIGH"
 status: "open"
+priority: 9
+dependencies: []
+component: "enforcer"
+effort: "small"
 ---
 
 # 🔴 [Severity: HIGH]: Missing ArchUnit test for FFM architecture boundary violations

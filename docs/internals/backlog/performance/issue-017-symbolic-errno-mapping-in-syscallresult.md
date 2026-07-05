@@ -2,6 +2,10 @@
 title: "Symbolic Errno Mapping in `SyscallResult`"
 severity: "ENHANCEMENT"
 status: "open"
+priority: 2
+dependencies: []
+component: "unknown"
+effort: "medium"
 ---
 
 # 🔵 [Severity: ENHANCEMENT]: Symbolic Errno Mapping in `SyscallResult`

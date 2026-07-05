@@ -2,6 +2,10 @@
 title: "Loom Carrier Poisoning Bypass in `PureJavaBpfEngine`"
 severity: "HIGH"
 status: "open"
+priority: 9
+dependencies: []
+component: "enforcer"
+effort: "medium"
 ---
 
 # 🔴 [Severity: MEDIUM]: Loom Carrier Poisoning Bypass in `PureJavaBpfEngine`

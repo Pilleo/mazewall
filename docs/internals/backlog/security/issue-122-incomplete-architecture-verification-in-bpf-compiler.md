@@ -2,6 +2,10 @@
 title: "Incomplete Architecture Verification in BPF Compiler"
 severity: "HIGH"
 status: "open"
+priority: 9
+dependencies: []
+component: "enforcer"
+effort: "small"
 ---
 
 # 🔴 [Severity: HIGH]: Incomplete Architecture Verification in BPF Compiler

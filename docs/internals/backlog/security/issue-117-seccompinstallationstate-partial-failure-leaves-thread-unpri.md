@@ -2,6 +2,10 @@
 title: "`SeccompInstallationState` Partial Failure Leaves Thread Unprivileged but Uncontained"
 severity: "HIGH"
 status: "open"
+priority: 9
+dependencies: []
+component: "enforcer"
+effort: "small"
 ---
 
 # 🔴 [Severity: HIGH]: `SeccompInstallationState` Partial Failure Leaves Thread Unprivileged but Uncontained

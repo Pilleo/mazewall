@@ -2,6 +2,10 @@
 title: "Contract-Based Invariant Validation"
 severity: "ENHANCEMENT"
 status: "open"
+priority: 2
+dependencies: []
+component: "enforcer"
+effort: "medium"
 ---
 
 # 🔵 [Severity: ENHANCEMENT]: Contract-Based Invariant Validation

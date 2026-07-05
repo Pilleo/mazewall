@@ -2,6 +2,10 @@
 title: "Compile-Time BPF Termination Safety (Type-State RET Enforcement)"
 severity: "ENHANCEMENT"
 status: "open"
+priority: 2
+dependencies: []
+component: "unknown"
+effort: "medium"
 ---
 
 # 🔵 [Severity: ENHANCEMENT]: Compile-Time BPF Termination Safety (Type-State RET Enforcement)

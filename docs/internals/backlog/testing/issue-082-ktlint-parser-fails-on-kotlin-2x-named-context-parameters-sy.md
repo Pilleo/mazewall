@@ -2,6 +2,10 @@
 title: "KtLint parser fails on Kotlin 2.x named context parameters syntax"
 severity: "MEDIUM"
 status: "open"
+priority: 4
+dependencies: []
+component: "testing"
+effort: "medium"
 ---
 
 # 🟡 [Severity: LOW]: KtLint parser fails on Kotlin 2.x named context parameters syntax

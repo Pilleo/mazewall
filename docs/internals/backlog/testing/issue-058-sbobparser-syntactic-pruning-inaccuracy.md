@@ -2,6 +2,10 @@
 title: "`SbobParser` Syntactic Pruning Inaccuracy"
 severity: "HIGH"
 status: "open"
+priority: 9
+dependencies: []
+component: "unknown"
+effort: "small"
 ---
 
 # 🔴 [Severity: MEDIUM]: `SbobParser` Syntactic Pruning Inaccuracy

@@ -2,6 +2,10 @@
 title: "Unhandled Signal Interruptions (`EINTR`) in socket IO"
 severity: "HIGH"
 status: "open"
+priority: 9
+dependencies: []
+component: "profiler"
+effort: "small"
 ---
 
 # 🔴 [Severity: MEDIUM]: Unhandled Signal Interruptions (`EINTR`) in socket IO
