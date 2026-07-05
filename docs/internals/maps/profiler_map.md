@@ -205,7 +205,6 @@ graph TD
     issue_187_archunit_bypass_swallowed_syscallresult_in_supervisorsessionhandler["🔴 Issue: ArchUnit Bypass: Swallowed SyscallResult in SupervisorSessionHandler (HIGH)"]
     issue_188_unbounded_thread_creation_in_supervisordaemonengine_dos["🔴 Issue: Unbounded Thread Creation in SupervisorDaemonEngine (DoS) (HIGH)"]
     issue_189_toctou_vulnerability_in_resolveabsolutepath_via_files_exists["🔴 Issue: TOCTOU Vulnerability in resolveAbsolutePath via Files.exists (HIGH)"]
-    issue_190_gradle_configuration_cache_path_collision_in_ci["🔴 Issue: Gradle Configuration Cache Path Collision in CI (MEDIUM)"]
     issue_190_unhandled_eintr_in_accept_in_supervisordaemonengine["🔴 Issue: Unhandled EINTR in accept in SupervisorDaemonEngine (MEDIUM)"]
     issue_191_jvm_validation_timeout_causes_denial_of_service_on_valid_syscalls["🔴 Issue: JVM Validation Timeout Causes Denial of Service on Valid Syscalls (MEDIUM)"]
     run_containerized_tests_sh["💻 Source: run_containerized_tests.sh"]
@@ -457,7 +456,6 @@ graph TD
     click issue_187_archunit_bypass_swallowed_syscallresult_in_supervisorsessionhandler "../backlog/testing/issue-187-archunit-bypass-swallowed-syscallresult-in-supervisorsessionhandler.md"
     click issue_188_unbounded_thread_creation_in_supervisordaemonengine_dos "../backlog/security/issue-188-unbounded-thread-creation-in-supervisordaemonengine-dos.md"
     click issue_189_toctou_vulnerability_in_resolveabsolutepath_via_files_exists "../backlog/security/issue-189-toctou-vulnerability-in-resolveabsolutepath-via-files-exists.md"
-    click issue_190_gradle_configuration_cache_path_collision_in_ci "../backlog/testing/issue-190-gradle-configuration-cache-path-collision-in-ci.md"
     click issue_190_unhandled_eintr_in_accept_in_supervisordaemonengine "../backlog/security/issue-190-unhandled-eintr-in-accept-in-supervisordaemonengine.md"
     click issue_191_jvm_validation_timeout_causes_denial_of_service_on_valid_syscalls "../backlog/security/issue-191-jvm-validation-timeout-causes-denial-of-service-on-valid-syscalls.md"
 ```

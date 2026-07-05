@@ -34,6 +34,9 @@ podman run --rm \
     -e GITHUB_ACTIONS="${GITHUB_ACTIONS:-false}" \
     -e LANG=C.UTF-8 \
     -e LC_ALL=C.UTF-8 \
+    -e NVD_API_KEY \
+    -e GITHUB_TOKEN \
+    -e GITHUB_ACTOR \
     -w /workspace \
     mazewall-test-runner \
     ./gradlew "$@" --no-daemon --stacktrace

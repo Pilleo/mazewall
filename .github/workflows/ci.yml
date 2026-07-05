@@ -61,7 +61,7 @@ jobs:
                   set -o pipefail
                   ./scripts/run_containerized_tests.sh build 2>&1 | tee build.log
             - name: Run PITest (Host Unit Tests Only)
-              run: ./gradlew :enforcer:pitest -Dpitest.threads=2
+              run: ./scripts/run_containerized_tests.sh :enforcer:pitest -Dpitest.threads=2
             - name: Run Vulnerability Exploitation Demo
               run: ./scripts/run_vulnerable_app_demo.sh
             - name: Save All Podman Images to Cache Folder
@@ -83,12 +83,12 @@ jobs:
                   path: ${{ github.workspace }}/.cache/podman-image
                   key: podman-image-${{ hashFiles('infra/dev/Containerfile', 'demos/vulnerable-web-app/Containerfile') }}-${{ github.sha }}
             - name: Run Security Check
-              run: ./gradlew dependencyCheckAnalyze --info
+              run: ./scripts/run_containerized_tests.sh dependencyCheckAnalyze --info
               env:
                   NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
             - name: Publish to GitHub Packages
               if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
-              run: ./gradlew publishAllPublicationsToGitHubPackagesRepository --info
+              run: ./scripts/run_containerized_tests.sh publishAllPublicationsToGitHubPackagesRepository --info
               env:
                   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
                   GITHUB_ACTOR: ${{ github.actor }}
