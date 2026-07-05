@@ -252,14 +252,14 @@ fun main() {
                                     }
                                 }
                             }
-                        }
-
-                        // Sleep and wait for manual developer merge
-                        val now = System.currentTimeMillis()
-                        if (now - lastWaitingLogTime > 60_000) {
-                            val prUrl = executeCmd("gh", "pr", "view", finalPrNumber, "--json", "url").substringAfter("\"url\":\"").substringBefore("\"")
-                            println("⌛ Waiting for manual merge of PR #$finalPrNumber at: $prUrl")
-                            lastWaitingLogTime = now
+                        } else {
+                            // Sleep and wait for manual developer merge
+                            val now = System.currentTimeMillis()
+                            if (now - lastWaitingLogTime > 60_000) {
+                                val prUrl = executeCmd("gh", "pr", "view", finalPrNumber, "--json", "url").substringAfter("\"url\":\"").substringBefore("\"")
+                                println("⌛ Waiting for manual merge of PR #$finalPrNumber at: $prUrl")
+                                lastWaitingLogTime = now
+                            }
                         }
                         TimeUnit.SECONDS.sleep(30)
                     }
