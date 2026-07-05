@@ -192,7 +192,9 @@ class ProcessContainmentTest : BaseIntegrationTest() {
                 ContainedExecutors.installOnProcess(policyWithFs as Policy<PolicyScope.ProcessWideSafe, io.mazewall.Uncompiled>)
             } catch (e: Exception) {
                 // EACCES is acceptable in this test context as it proves we bypassed the version guard
-                if (e.message?.contains("EACCES") == false && e.message?.contains("13") == false && e !is io.mazewall.UnsupportedKernelFeatureException) {
+                val strerror13 = io.mazewall.ffi.memory.getSystemStrerror(13)
+                val matchesLocale = strerror13 != null && e.message?.contains(strerror13, ignoreCase = true) == true
+                if (e.message?.contains("EACCES") == false && e.message?.contains("13") == false && !matchesLocale && e !is io.mazewall.UnsupportedKernelFeatureException) {
                     throw e
                 }
             }

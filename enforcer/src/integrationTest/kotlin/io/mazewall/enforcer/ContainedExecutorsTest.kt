@@ -245,7 +245,9 @@ class ContainedExecutorsTest : BaseIntegrationTest() {
                 @Suppress("UNCHECKED_CAST")
                 ContainedExecutors.installOnProcess(policy as Policy<PolicyScope.ProcessWideSafe, io.mazewall.Uncompiled>)
             } catch (e: Exception) {
-                if (e.message?.contains("EACCES") == false && e.message?.contains("13") == false && e !is io.mazewall.UnsupportedKernelFeatureException) {
+                val strerror13 = io.mazewall.ffi.memory.getSystemStrerror(13)
+                val matchesLocale = strerror13 != null && e.message?.contains(strerror13, ignoreCase = true) == true
+                if (e.message?.contains("EACCES") == false && e.message?.contains("13") == false && !matchesLocale && e !is io.mazewall.UnsupportedKernelFeatureException) {
                     throw e
                 }
             }
