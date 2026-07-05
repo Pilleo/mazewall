@@ -30,6 +30,19 @@ object ContainmentViolationDetector {
         RegexOption.IGNORE_CASE
     )
 
+    private val LOCALIZED_DENIED_REGEX: Regex? = run {
+        val strerror1 = io.mazewall.ffi.memory.getSystemStrerror(1)
+        val strerror13 = io.mazewall.ffi.memory.getSystemStrerror(13)
+        val list = mutableListOf<String>()
+        if (strerror1 != null && strerror1.isNotEmpty()) list.add(Regex.escape(strerror1))
+        if (strerror13 != null && strerror13.isNotEmpty()) list.add(Regex.escape(strerror13))
+        if (list.isNotEmpty()) {
+            Regex("(?U)\\b(${list.joinToString("|")})\\b", RegexOption.IGNORE_CASE)
+        } else {
+            null
+        }
+    }
+
     init {
         // Register default matchers
         registerMatcher { t -> t is AccessDeniedException }
@@ -39,7 +52,11 @@ object ContainmentViolationDetector {
         }
         registerMatcher { t ->
             val msg = t.message ?: return@registerMatcher false
-            t is IOException && (DENIED_PHRASES_REGEX.containsMatchIn(msg) || msg.contains("Cannot run"))
+            t is IOException && (
+                DENIED_PHRASES_REGEX.containsMatchIn(msg) ||
+                msg.contains("Cannot run") ||
+                (LOCALIZED_DENIED_REGEX != null && LOCALIZED_DENIED_REGEX.containsMatchIn(msg))
+            )
         }
     }
 
@@ -63,7 +80,11 @@ object ContainmentViolationDetector {
         }
         registerMatcher { t ->
             val msg = t.message ?: return@registerMatcher false
-            t is IOException && (DENIED_PHRASES_REGEX.containsMatchIn(msg) || msg.contains("Cannot run"))
+            t is IOException && (
+                DENIED_PHRASES_REGEX.containsMatchIn(msg) ||
+                msg.contains("Cannot run") ||
+                (LOCALIZED_DENIED_REGEX != null && LOCALIZED_DENIED_REGEX.containsMatchIn(msg))
+            )
         }
     }
 

@@ -373,6 +373,17 @@ public fun MemorySegment.writeLongBigEndian(offset: Long, value: Long) {
 public fun MemorySegment.writeLongBigEndianUnaligned(offset: Long, value: Long) {
     this.set(JAVA_LONG_BE_UNALIGNED, offset, value)
 }
-
-
-
+public fun getSystemStrerror(errno: Int): String? {
+    val linker = java.lang.foreign.Linker.nativeLinker()
+    val stdlib = linker.defaultLookup()
+    val strerrorAddress = stdlib.find("strerror").orElse(null) ?: return null
+    val strerror = linker.downcallHandle(
+        strerrorAddress,
+        java.lang.foreign.FunctionDescriptor.of(
+            java.lang.foreign.ValueLayout.ADDRESS,
+            java.lang.foreign.ValueLayout.JAVA_INT
+        )
+    )
+    val segment = strerror.invoke(errno) as java.lang.foreign.MemorySegment
+    return segment.reinterpret(1024).getString(0)
+}
