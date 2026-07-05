@@ -67,7 +67,6 @@ graph TD
     io_mazewall_seccomp_BpfProgram_BDL["💻 Source: io.mazewall.seccomp.BpfProgram.BDL"]
     io_mazewall_seccomp_PureJavaBpfEngine["💻 Source: io.mazewall.seccomp.PureJavaBpfEngine"]
     issue_003_socket_address_family_filtering_for_network_isolation_evasio["🔴 Issue: Socket Address Family Filtering for Network Isolation Evasion Prevention (ENHANCEMENT)"]
-    issue_005_in_process_stacktrace_analysis_classloader_deadlock_in_super["🔴 Issue: In-Process Stacktrace Analysis ClassLoader Deadlock in Supervisor (HIGH)"]
     issue_006_kotlin_inlining_causes_archunit_nogenericexceptioncatching_v["🔴 Issue: Kotlin Inlining Causes ArchUnit noGenericExceptionCatching Violation (HIGH)"]
     issue_008_high_frequency_arena_allocation_overhead_mm_optimization["🔴 Issue: High-Frequency Arena Allocation Overhead (MM Optimization) (MEDIUM)"]
     issue_009_memory_segment_pooling_for_profiler_usernotif["🔴 Issue: Memory Segment Pooling for Profiler USER_NOTIF (ENHANCEMENT)"]
@@ -323,7 +322,6 @@ graph TD
     issue_181_toctou_in_path_normalization_pathnormalizerkt -->|Affects| PathNormalizer_kt
     click containment_design "../containment_design.md"
     click issue_003_socket_address_family_filtering_for_network_isolation_evasio "../backlog/testing/issue-003-socket-address-family-filtering-for-network-isolation-evasio.md"
-    click issue_005_in_process_stacktrace_analysis_classloader_deadlock_in_super "../backlog/security/issue-005-in-process-stacktrace-analysis-classloader-deadlock-in-super.md"
     click issue_006_kotlin_inlining_causes_archunit_nogenericexceptioncatching_v "../backlog/testing/issue-006-kotlin-inlining-causes-archunit-nogenericexceptioncatching-v.md"
     click issue_008_high_frequency_arena_allocation_overhead_mm_optimization "../backlog/performance/issue-008-high-frequency-arena-allocation-overhead-mm-optimization.md"
     click issue_009_memory_segment_pooling_for_profiler_usernotif "../backlog/security/issue-009-memory-segment-pooling-for-profiler-usernotif.md"
