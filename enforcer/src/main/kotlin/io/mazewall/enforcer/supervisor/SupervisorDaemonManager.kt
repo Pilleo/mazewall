@@ -96,15 +96,13 @@ internal object SupervisorDaemonManager {
         val jvmArgs = java.lang.management.ManagementFactory
             .getRuntimeMXBean()
             .inputArguments
-        val jacocoAgent = jvmArgs.find { it.startsWith("-javaagent:") && it.contains("jacoco") }
+        val javaAgents = jvmArgs.filter { it.startsWith("-javaagent:") }
 
         val pbArgs = mutableListOf<String>()
         pbArgs.add(javaBin)
         pbArgs.add("--enable-native-access=ALL-UNNAMED")
         pbArgs.add("-Xmx64m")
-        if (jacocoAgent != null) {
-            pbArgs.add(jacocoAgent)
-        }
+        pbArgs.addAll(javaAgents)
         pbArgs.add("-cp")
         pbArgs.add(classpath)
         pbArgs.add(daemonClassName)

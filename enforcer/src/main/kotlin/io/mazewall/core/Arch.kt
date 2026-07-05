@@ -332,5 +332,12 @@ data class Arch(
                 "aarch64", "arm64" -> AARCH64
                 else -> throw UnsupportedOperationException("Architecture not supported: $osArch")
             }
+
+        fun fromAudit(audit: Int): Arch =
+            when (audit) {
+                AUDIT_ARCH_X86_64 -> AMD64
+                AUDIT_ARCH_AARCH64 -> AARCH64
+                else -> throw UnsupportedOperationException("Audit architecture not supported: $audit")
+            }
     }
 }
