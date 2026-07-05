@@ -89,12 +89,6 @@ internal class JVMValidationListener(
 
     companion object {
         private const val PROTOCOL_ACK_BYTE = 0xAC.toByte()
-        private const val SYS_OPEN = 2
-        private const val SYS_CONNECT = 42
-        private const val SYS_ACCEPT = 43
-        private const val SYS_OPENAT = 257
-        private const val SYS_ACCEPT4 = 288
-        private const val SYS_OPENAT2 = 437
 
         private const val SLOW_INSPECT_THRESHOLD_MS = 500L
         private const val SLOW_AUTH_THRESHOLD_MS = 500L
@@ -133,11 +127,6 @@ internal class JVMValidationListener(
 
             val responseSegment = with(arena) { io.mazewall.ffi.memory.SupervisorResponseSegment.allocate() }
 
-            val arch = Arch.current()
-            val forkNr = arch.fork
-            val vforkNr = arch.vfork
-            val cloneNr = arch.clone
-
             while (!closed.get()) {
                 val id = try {
                     dis.readLong()
@@ -145,19 +134,25 @@ internal class JVMValidationListener(
                     break
                 }
                 val pidVal = dis.readInt()
+                val archVal = dis.readInt()
                 val ppidVal = dis.readInt()
                 val nr = dis.readInt()
                 val argCount = dis.readInt()
 
                 val argsList = readRequestArgs(dis, argCount)
-                System.err.println("[JVM-VALIDATION] Received request: id=$id, pid=$pidVal, ppid=$ppidVal, nr=$nr, args=$argsList")
+                System.err.println("[JVM-VALIDATION] Received request: id=$id, pid=$pidVal, arch=$archVal, ppid=$ppidVal, nr=$nr, args=$argsList")
+
+                val traceeArch = Arch.fromAudit(archVal)
+                val forkNr = traceeArch.fork
+                val vforkNr = traceeArch.vfork
+                val cloneNr = traceeArch.clone
 
                 val startMs = System.currentTimeMillis()
                 val targetThread = SupervisorInstaller.threadRegistry[Tid(pidVal)]
                 var validationState = JvmStackInspector.inspect(nr, argsList, targetThread)
 
                 // --- STACKTRACE PROPAGATION LOGIC ---
-                if (nr == arch.execve || nr == arch.execveat) {
+                if (nr == traceeArch.execve || nr == traceeArch.execveat) {
                     if (validationState is ScopingValidationState.SafeToValidate && validationState.rawStack.isEmpty()) {
                         // Empty stack trace on execve suggests a child process.
                         // We resolve the propagated stack trace from the parent thread.
@@ -195,7 +190,7 @@ internal class JVMValidationListener(
                             stackTrace.forEach { sb.append("  $it\n") }
                         }
                         ValidationLog.logs.add(sb.toString())
-                        val syscall = Syscall.entries.find { it.numberFor(Arch.current()) == validationState.nr } ?: Syscall.OPEN
+                        val syscall = Syscall.entries.find { it.numberFor(traceeArch) == validationState.nr } ?: Syscall.OPEN
                         val authStartMs = System.currentTimeMillis()
                         val handler = scopingPolicy.handlers[syscall]
                         val res = handler?.invoke(Tid(pidVal), validationState.argsList, stackTrace) ?: true
@@ -214,7 +209,9 @@ internal class JVMValidationListener(
 
                 // Decision encoding: 0 = Deny, 1 = Allow Continue, 2 = Allow & Inject FD
                 val decision: Byte = if (isAllowed) {
-                    if (nr == SYS_OPEN || nr == SYS_CONNECT || nr == SYS_OPENAT || nr == SYS_OPENAT2 || nr == SYS_ACCEPT || nr == SYS_ACCEPT4) {
+                    val isInject = nr == traceeArch.open || nr == traceeArch.connect || nr == traceeArch.openat ||
+                                 nr == traceeArch.openat2 || nr == traceeArch.accept || nr == traceeArch.accept4
+                    if (isInject) {
                         2.toByte()
                     } else {
                         1.toByte()

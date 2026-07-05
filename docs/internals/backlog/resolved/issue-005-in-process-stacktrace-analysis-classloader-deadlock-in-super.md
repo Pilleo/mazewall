@@ -1,7 +1,7 @@
 ---
 title: "In-Process Stacktrace Analysis ClassLoader Deadlock in Supervisor"
 severity: "HIGH"
-status: "open"
+status: "resolved"
 priority: 9
 dependencies: []
 component: "unknown"
