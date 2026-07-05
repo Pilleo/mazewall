@@ -2,6 +2,10 @@
 title: "🟢 [WONTFIX]: `ContainedExecutors` Thread-Local State Persistence and Poisoning"
 severity: "MEDIUM"
 status: "open"
+priority: 6
+dependencies: []
+component: "enforcer"
+effort: "medium"
 ---
 
 # 🟢 [WONTFIX]: `ContainedExecutors` Thread-Local State Persistence and Poisoning

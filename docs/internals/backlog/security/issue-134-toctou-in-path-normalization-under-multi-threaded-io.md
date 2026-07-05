@@ -2,6 +2,10 @@
 title: "TOCTOU in Path Normalization under Multi-Threaded I/O"
 severity: "HIGH"
 status: "open"
+priority: 9
+dependencies: []
+component: "profiler"
+effort: "small"
 ---
 
 # 🔴 [Severity: MEDIUM]: TOCTOU in Path Normalization under Multi-Threaded I/O

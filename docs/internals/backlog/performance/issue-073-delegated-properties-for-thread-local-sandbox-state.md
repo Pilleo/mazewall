@@ -2,6 +2,10 @@
 title: "Delegated Properties for Thread-Local Sandbox State"
 severity: "ENHANCEMENT"
 status: "open"
+priority: 2
+dependencies: []
+component: "enforcer"
+effort: "medium"
 ---
 
 # 🔵 [Severity: ENHANCEMENT]: Delegated Properties for Thread-Local Sandbox State

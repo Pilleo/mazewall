@@ -2,6 +2,10 @@
 title: "Unhandled EINTR in accept in SupervisorDaemonEngine"
 severity: "MEDIUM"
 status: "open"
+priority: 6
+dependencies: []
+component: "unknown"
+effort: "medium"
 ---
 
 # 🔴 [Severity: MEDIUM]: Unhandled EINTR in accept in SupervisorDaemonEngine

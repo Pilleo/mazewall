@@ -2,6 +2,10 @@
 title: "Race in Asynchronous / Fire-and-Forget Profiler Event Delivery"
 severity: "CRITICAL"
 status: "open"
+priority: 5
+dependencies: []
+component: "profiler"
+effort: "small"
 ---
 
 # 🔴 [Severity: CRITICAL]: Race in Asynchronous / Fire-and-Forget Profiler Event Delivery

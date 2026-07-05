@@ -2,6 +2,10 @@
 title: "Potential Race Condition in Async IO Thread Shutdown"
 severity: "HIGH"
 status: "open"
+priority: 9
+dependencies: []
+component: "enforcer"
+effort: "small"
 ---
 
 # 🔴 [Severity: MEDIUM]: Potential Race Condition in Async IO Thread Shutdown

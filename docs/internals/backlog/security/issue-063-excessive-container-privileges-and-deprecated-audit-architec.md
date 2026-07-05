@@ -2,6 +2,10 @@
 title: "Excessive container privileges and deprecated Audit architecture in compose.yml files"
 severity: "HIGH"
 status: "open"
+priority: 9
+dependencies: []
+component: "unknown"
+effort: "medium"
 ---
 
 # 🔴 [Severity: MEDIUM]: Excessive container privileges and deprecated Audit architecture in compose.yml files

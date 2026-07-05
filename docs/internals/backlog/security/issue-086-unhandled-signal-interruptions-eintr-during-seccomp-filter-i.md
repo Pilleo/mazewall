@@ -2,6 +2,10 @@
 title: "Unhandled Signal Interruptions (`EINTR`) during `seccomp` Filter Installation"
 severity: "HIGH"
 status: "open"
+priority: 9
+dependencies: []
+component: "seccomp"
+effort: "small"
 ---
 
 # 🔴 [Severity: MEDIUM]: Unhandled Signal Interruptions (`EINTR`) during `seccomp` Filter Installation

@@ -2,6 +2,10 @@
 title: "Potential Buffer Overflow / OutOfBoundsException on Long UNIX Socket Paths"
 severity: "HIGH"
 status: "open"
+priority: 9
+dependencies: []
+component: "enforcer"
+effort: "small"
 ---
 
 # 🔴 [Severity: LOW]: Potential Buffer Overflow / OutOfBoundsException on Long UNIX Socket Paths

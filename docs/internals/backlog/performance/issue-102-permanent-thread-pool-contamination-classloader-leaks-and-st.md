@@ -2,6 +2,10 @@
 title: "🟢 [WONTFIX]: Permanent thread pool contamination, classloader leaks, and state pollution via un-cleared `ThreadLocal` variables"
 severity: "MEDIUM"
 status: "open"
+priority: 6
+dependencies: []
+component: "enforcer"
+effort: "medium"
 ---
 
 # 🟢 [WONTFIX]: Permanent thread pool contamination, classloader leaks, and state pollution via un-cleared `ThreadLocal` variables

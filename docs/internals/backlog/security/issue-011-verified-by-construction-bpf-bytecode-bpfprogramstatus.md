@@ -2,6 +2,10 @@
 title: "Verified-by-Construction BPF Bytecode (BpfProgram<Status>)"
 severity: "ENHANCEMENT"
 status: "open"
+priority: 2
+dependencies: []
+component: "seccomp"
+effort: "medium"
 ---
 
 # 🔵 [Severity: ENHANCEMENT]: Verified-by-Construction BPF Bytecode (BpfProgram<Status>)

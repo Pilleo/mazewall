@@ -2,6 +2,10 @@
 title: "Algebraic Policy Composition (Semigroup/Monoid)"
 severity: "ENHANCEMENT"
 status: "open"
+priority: 2
+dependencies: []
+component: "enforcer"
+effort: "medium"
 ---
 
 # 🔵 [Severity: ENHANCEMENT]: Algebraic Policy Composition (Semigroup/Monoid)

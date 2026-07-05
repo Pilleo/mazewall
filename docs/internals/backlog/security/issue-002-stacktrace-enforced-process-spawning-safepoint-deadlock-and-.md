@@ -2,6 +2,10 @@
 title: "Stacktrace-Enforced Process Spawning Safepoint Deadlock and Trace Propagation Gotchas"
 severity: "HIGH"
 status: "open"
+priority: 9
+dependencies: []
+component: "unknown"
+effort: "medium"
 ---
 
 # 🔴 [Severity: HIGH]: Stacktrace-Enforced Process Spawning Safepoint Deadlock and Trace Propagation Gotchas

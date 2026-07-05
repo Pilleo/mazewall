@@ -2,6 +2,10 @@
 title: "Unhandled `TSYNC` edge cases during JIT classloading"
 severity: "HIGH"
 status: "open"
+priority: 6
+dependencies: []
+component: "enforcer"
+effort: "medium"
 ---
 
 # 🔴 [Severity: MEDIUM]: Unhandled `TSYNC` edge cases during JIT classloading

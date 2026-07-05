@@ -2,6 +2,10 @@
 title: "Overly Broad Catch Block in `ProfilerDaemon.reactorLoop`"
 severity: "HIGH"
 status: "open"
+priority: 9
+dependencies: []
+component: "profiler"
+effort: "small"
 ---
 
 # 🔴 [Severity: LOW]: Overly Broad Catch Block in `ProfilerDaemon.reactorLoop`

@@ -2,6 +2,10 @@
 title: "Introduce Context Parameters for Memory and Engine Scopes"
 severity: "ENHANCEMENT"
 status: "open"
+priority: 3
+dependencies: []
+component: "enforcer"
+effort: "medium"
 ---
 
 # 🔵 [Severity: ENHANCEMENT]: Introduce Context Parameters for Memory and Engine Scopes

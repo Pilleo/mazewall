@@ -2,6 +2,10 @@
 title: "In-Process Stacktrace Analysis ClassLoader Deadlock in Supervisor"
 severity: "HIGH"
 status: "open"
+priority: 9
+dependencies: []
+component: "unknown"
+effort: "medium"
 ---
 
 # 🔴 [Severity: HIGH]: In-Process Stacktrace Analysis ClassLoader Deadlock in Supervisor

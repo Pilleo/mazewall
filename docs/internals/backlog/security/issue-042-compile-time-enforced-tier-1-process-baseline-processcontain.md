@@ -2,6 +2,10 @@
 title: "Compile-Time Enforced Tier 1 Process Baseline (`ProcessContainmentToken`)"
 severity: "ENHANCEMENT"
 status: "open"
+priority: 2
+dependencies: []
+component: "enforcer"
+effort: "medium"
 ---
 
 # 🔵 [Severity: ENHANCEMENT]: Compile-Time Enforced Tier 1 Process Baseline (`ProcessContainmentToken`)

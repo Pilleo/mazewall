@@ -2,6 +2,10 @@
 title: "CI Podman Container Caching Missing"
 severity: "HIGH"
 status: "open"
+priority: 9
+dependencies: []
+component: "unknown"
+effort: "small"
 ---
 
 # 🔴 [Severity: LOW]: CI Podman Container Caching Missing

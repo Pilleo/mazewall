@@ -2,6 +2,10 @@
 title: "Unhandled Signal Mask Inheritance in `ContainedExecutors`"
 severity: "HIGH"
 status: "open"
+priority: 9
+dependencies: []
+component: "enforcer"
+effort: "small"
 ---
 
 # 🔴 [Severity: MEDIUM]: Unhandled Signal Mask Inheritance in `ContainedExecutors`

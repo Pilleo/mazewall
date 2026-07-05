@@ -2,6 +2,10 @@
 title: "Inefficient Regex Compilation in `ContainmentViolationDetector`"
 severity: "HIGH"
 status: "open"
+priority: 9
+dependencies: []
+component: "enforcer"
+effort: "large"
 ---
 
 # 🔴 [Severity: LOW]: Inefficient Regex Compilation in `ContainmentViolationDetector`

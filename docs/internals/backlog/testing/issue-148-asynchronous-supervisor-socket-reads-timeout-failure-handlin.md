@@ -2,6 +2,10 @@
 title: "Asynchronous Supervisor socket reads timeout failure handling"
 severity: "HIGH"
 status: "open"
+priority: 9
+dependencies: []
+component: "enforcer"
+effort: "small"
 ---
 
 # 🔴 [Severity: MEDIUM]: Asynchronous Supervisor socket reads timeout failure handling

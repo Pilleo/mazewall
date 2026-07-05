@@ -2,6 +2,10 @@
 title: "Refactor Profiler Daemon to use Coroutines (Structured Concurrency)"
 severity: "ENHANCEMENT"
 status: "open"
+priority: 2
+dependencies: []
+component: "profiler"
+effort: "large"
 ---
 
 # 🔵 [Severity: ENHANCEMENT]: Refactor Profiler Daemon to use Coroutines (Structured Concurrency)

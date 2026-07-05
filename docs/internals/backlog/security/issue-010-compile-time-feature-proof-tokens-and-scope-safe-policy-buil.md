@@ -2,6 +2,10 @@
 title: "Compile-Time Feature Proof Tokens and Scope-Safe Policy Builders (Type-State Pattern)"
 severity: "ENHANCEMENT"
 status: "open"
+priority: 2
+dependencies: []
+component: "unknown"
+effort: "medium"
 ---
 
 # 🔵 [Severity: ENHANCEMENT]: Compile-Time Feature Proof Tokens and Scope-Safe Policy Builders (Type-State Pattern)

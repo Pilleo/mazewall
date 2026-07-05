@@ -2,6 +2,10 @@
 title: "Redundant State in `ThreadStateRegistry` vs `Policy`"
 severity: "HIGH"
 status: "open"
+priority: 9
+dependencies: []
+component: "enforcer"
+effort: "medium"
 ---
 
 # 🔴 [Severity: LOW]: Redundant State in `ThreadStateRegistry` vs `Policy`

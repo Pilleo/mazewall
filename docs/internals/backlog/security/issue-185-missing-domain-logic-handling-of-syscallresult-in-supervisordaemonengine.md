@@ -2,6 +2,10 @@
 title: "Missing domain logic handling of SyscallResult in SupervisorDaemonEngine"
 severity: "MEDIUM"
 status: "open"
+priority: 6
+dependencies: []
+component: "enforcer"
+effort: "medium"
 ---
 
 # 🔴 [Severity: MEDIUM]: Missing domain logic handling of SyscallResult in SupervisorDaemonEngine

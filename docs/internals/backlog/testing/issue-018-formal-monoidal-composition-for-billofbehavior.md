@@ -2,6 +2,10 @@
 title: "Formal Monoidal Composition for `BillOfBehavior`"
 severity: "ENHANCEMENT"
 status: "open"
+priority: 2
+dependencies: []
+component: "profiler"
+effort: "medium"
 ---
 
 # 🔵 [Severity: ENHANCEMENT]: Formal Monoidal Composition for `BillOfBehavior`

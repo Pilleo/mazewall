@@ -2,6 +2,10 @@
 title: "Incomplete FFM Architecture Isolation"
 severity: "HIGH"
 status: "open"
+priority: 9
+dependencies: []
+component: "enforcer"
+effort: "small"
 ---
 
 # 🔴 [Severity: LOW]: Incomplete FFM Architecture Isolation

@@ -2,6 +2,10 @@
 title: "Memory Segment Pooling for Profiler USER_NOTIF"
 severity: "ENHANCEMENT"
 status: "open"
+priority: 2
+dependencies: []
+component: "ffi"
+effort: "medium"
 ---
 
 # 🔵 [Severity: ENHANCEMENT]: Memory Segment Pooling for Profiler USER_NOTIF

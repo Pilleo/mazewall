@@ -2,6 +2,10 @@
 title: "Resource Containment via Cgroups v2"
 severity: "ENHANCEMENT"
 status: "open"
+priority: 2
+dependencies: []
+component: "ffi"
+effort: "medium"
 ---
 
 # 🔵 [Severity: ENHANCEMENT]: Resource Containment via Cgroups v2

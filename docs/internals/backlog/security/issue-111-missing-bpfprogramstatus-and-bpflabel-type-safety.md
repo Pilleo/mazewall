@@ -2,6 +2,10 @@
 title: "Missing `BpfProgram<Status>` and `BpfLabel` Type-Safety"
 severity: "HIGH"
 status: "open"
+priority: 9
+dependencies: []
+component: "enforcer"
+effort: "medium"
 ---
 
 # 🔴 [Severity: MEDIUM]: Missing `BpfProgram<Status>` and `BpfLabel` Type-Safety

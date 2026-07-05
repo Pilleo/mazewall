@@ -2,6 +2,10 @@
 title: "Unhandled `O_PATH` Omission on Landlock Fallback Directories"
 severity: "HIGH"
 status: "open"
+priority: 9
+dependencies: []
+component: "unknown"
+effort: "small"
 ---
 
 # 🔴 [Severity: MEDIUM]: Unhandled `O_PATH` Omission on Landlock Fallback Directories

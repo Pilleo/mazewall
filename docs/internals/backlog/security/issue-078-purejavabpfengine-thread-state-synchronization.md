@@ -2,6 +2,10 @@
 title: "`PureJavaBpfEngine` Thread State Synchronization"
 severity: "HIGH"
 status: "open"
+priority: 9
+dependencies: []
+component: "enforcer"
+effort: "small"
 ---
 
 # 🔴 [Severity: MEDIUM]: `PureJavaBpfEngine` Thread State Synchronization

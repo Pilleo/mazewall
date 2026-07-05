@@ -2,6 +2,10 @@
 title: "Phantom Types for Context-Aware Capability Tokens"
 severity: "ENHANCEMENT"
 status: "open"
+priority: 2
+dependencies: []
+component: "unknown"
+effort: "large"
 ---
 
 # 🔵 [Severity: ENHANCEMENT]: Phantom Types for Context-Aware Capability Tokens

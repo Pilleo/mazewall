@@ -2,6 +2,10 @@
 title: "Phantom Types for Thread Pool Containment Constraints (`SandboxedExecutor`)"
 severity: "ENHANCEMENT"
 status: "open"
+priority: 2
+dependencies: []
+component: "enforcer"
+effort: "medium"
 ---
 
 # 🔵 [Severity: ENHANCEMENT]: Phantom Types for Thread Pool Containment Constraints (`SandboxedExecutor`)

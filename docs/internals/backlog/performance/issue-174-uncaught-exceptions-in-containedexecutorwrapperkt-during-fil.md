@@ -2,6 +2,10 @@
 title: "Uncaught exceptions in `ContainedExecutorWrapper.kt` during filter installation"
 severity: "HIGH"
 status: "open"
+priority: 9
+dependencies: []
+component: "enforcer"
+effort: "small"
 ---
 
 # 🔴 [Severity: MEDIUM]: Uncaught exceptions in `ContainedExecutorWrapper.kt` during filter installation

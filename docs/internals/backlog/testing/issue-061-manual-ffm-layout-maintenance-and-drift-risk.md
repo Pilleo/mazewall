@@ -2,6 +2,10 @@
 title: "Manual FFM Layout Maintenance and Drift Risk"
 severity: "MEDIUM"
 status: "open"
+priority: 5
+dependencies: []
+component: "ffi"
+effort: "large"
 ---
 
 # 🟡 [Severity: LOW]: Manual FFM Layout Maintenance and Drift Risk

@@ -2,6 +2,10 @@
 title: "Classloader Deadlock in JVM Validation Listener"
 severity: "CRITICAL"
 status: "open"
+priority: 5
+dependencies: []
+component: "enforcer"
+effort: "small"
 ---
 
 # 🔴 [Severity: CRITICAL]: Classloader Deadlock in JVM Validation Listener
