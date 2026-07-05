@@ -46,8 +46,8 @@ object JulesCli {
             val tokens = trimmed.split(Regex("\\s{2,}"))
             if (tokens.size >= 5) {
                 val id = tokens[0].trim()
-                // Make sure first token is a long number (Jules Session ID)
-                if (id.toLongOrNull() != null) {
+                // Make sure first token is a numeric string (Jules Session ID)
+                if (id.isNotEmpty() && id.all { it.isDigit() }) {
                     val desc = tokens[1].trim()
                     val repo = tokens[2].trim()
                     val status = tokens[4].trim()
@@ -60,13 +60,6 @@ object JulesCli {
 
     private fun execute(vararg command: String): String {
         val pb = ProcessBuilder(*command)
-        val env = pb.environment()
-        val customToken = System.getProperty("GITHUB_TOKEN")
-        if (customToken != null) {
-            env["GITHUB_TOKEN"] = customToken
-        } else {
-            env.remove("GITHUB_TOKEN")
-        }
         val process = pb.redirectErrorStream(true).start()
         val output = process.inputStream.bufferedReader().readText()
         process.waitFor(2, TimeUnit.MINUTES)
@@ -76,13 +69,6 @@ object JulesCli {
     private fun executeWithPipe(vararg command: String): String {
         // Run command piped to cat to disable TUI/terminal truncation
         val pb = ProcessBuilder("bash", "-c", "${command.joinToString(" ")} | cat")
-        val env = pb.environment()
-        val customToken = System.getProperty("GITHUB_TOKEN")
-        if (customToken != null) {
-            env["GITHUB_TOKEN"] = customToken
-        } else {
-            env.remove("GITHUB_TOKEN")
-        }
         val process = pb.redirectErrorStream(true).start()
         val output = process.inputStream.bufferedReader().readText()
         process.waitFor(2, TimeUnit.MINUTES)

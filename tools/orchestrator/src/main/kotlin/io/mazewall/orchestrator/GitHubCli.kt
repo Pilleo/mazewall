@@ -88,6 +88,13 @@ object GitHubCli {
 
     fun checkBuildStatus(prNumber: String): String {
         try {
+            // First check if the PR has merge conflicts
+            val mergeableJson = execute("gh", "pr", "view", prNumber, "--json", "mergeable")
+            val m = json.decodeFromString<GitHubMergeable>(mergeableJson)
+            if (m.mergeable == "CONFLICTING") {
+                return "CONFLICT"
+            }
+
             val checksJson = execute("gh", "pr", "checks", prNumber, "--json", "state,name,bucket,event")
             val checks = json.decodeFromString<List<GitHubCheck>>(checksJson)
             if (checks.isEmpty()) return "IN_PROGRESS"
@@ -100,6 +107,13 @@ object GitHubCli {
             val allSuccess = checks.all { it.state == "SUCCESS" }
             if (allSuccess) return "SUCCESS"
 
+            return "IN_PROGRESS"
+        } catch (e: ProcessExecutionException) {
+            val output = e.output.lowercase()
+            if (output.contains("no checks reported")) {
+                return "IN_PROGRESS"
+            }
+            System.err.println("Error checking build status for PR #$prNumber (exit code ${e.exitCode}): ${e.output}")
             return "IN_PROGRESS"
         } catch (e: Exception) {
             System.err.println("Error checking build status for PR #$prNumber: ${e.message}")
@@ -132,6 +146,17 @@ object GitHubCli {
         return state.contains("\"state\":\"MERGED\"", ignoreCase = true)
     }
 
+    fun getPrComments(prNumber: String): List<GitHubComment> {
+        return try {
+            val jsonText = execute("gh", "pr", "view", prNumber, "--json", "comments")
+            val container = json.decodeFromString<CommentsContainer>(jsonText)
+            container.comments
+        } catch (e: Exception) {
+            System.err.println("Error fetching comments for PR #$prNumber: ${e.message}")
+            emptyList()
+        }
+    }
+
     private fun parseIssues(jsonText: String): List<GitHubIssue> {
         return try {
             json.decodeFromString<List<GitHubIssue>>(jsonText)
@@ -150,16 +175,38 @@ object GitHubCli {
 
     private fun execute(vararg command: String): String {
         val pb = ProcessBuilder(*command)
-        val env = pb.environment()
-        val customToken = System.getProperty("GITHUB_TOKEN")
-        if (customToken != null) {
-            env["GITHUB_TOKEN"] = customToken
-        } else {
-            env.remove("GITHUB_TOKEN")
-        }
         val process = pb.redirectErrorStream(true).start()
         val output = process.inputStream.bufferedReader().readText()
-        process.waitFor(2, TimeUnit.MINUTES)
+        val exitCode = process.waitFor()
+        if (exitCode != 0) {
+            throw ProcessExecutionException(command.joinToString(" "), exitCode, output.trim())
+        }
         return output.trim()
     }
 }
+
+class ProcessExecutionException(val command: String, val exitCode: Int, val output: String) :
+    RuntimeException("Command '$command' failed with exit code $exitCode. Output:\n$output")
+
+@Serializable
+data class GitHubComment(
+    val author: GitHubCommentAuthor? = null,
+    val body: String,
+    val createdAt: String
+)
+
+@Serializable
+data class GitHubCommentAuthor(
+    val login: String
+)
+
+@Serializable
+data class CommentsContainer(
+    val comments: List<GitHubComment>
+)
+
+@Serializable
+data class GitHubMergeable(
+    val mergeable: String
+)
+

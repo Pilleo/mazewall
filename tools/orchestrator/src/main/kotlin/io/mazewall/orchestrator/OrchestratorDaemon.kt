@@ -188,53 +188,70 @@ fun main() {
 
                 when (status) {
                     "SUCCESS" -> {
-                        // If we haven't reviewed this specific SHA yet, check if it was reviewed in a previous session.
-                        // Match both old format (no SHA) and new format (with SHA prefix) comment bodies.
                         if (currentSha != lastReviewedSha) {
-                            val comments = executeCmd("gh", "pr", "view", finalPrNumber, "--json", "comments")
-                            val alreadyReviewed = comments.contains("SHA: ${currentSha.take(7)}") ||
-                                comments.contains("Approved by Antigravity") ||
-                                comments.contains("Rejected by Antigravity")
-                            if (alreadyReviewed) {
-                                println("✨ PR #$finalPrNumber already has a review comment. Skipping re-review.")
+                            val comments = GitHubCli.getPrComments(finalPrNumber)
+                            val shaPrefix = currentSha.take(7)
+
+                            // Check if already reviewed in a previous run/session by agy/antigravity or Jules
+                            val alreadyReviewedByAgy = comments.any {
+                                it.body.contains("Approved by Antigravity") ||
+                                it.body.contains("Rejected by Antigravity")
+                            }
+
+                            if (alreadyReviewedByAgy) {
+                                println("✨ PR #$finalPrNumber already has an Antigravity review. Skipping.")
                                 lastReviewedSha = currentSha
-                            }
-                        }
-
-                        if (currentSha != lastReviewedSha) {
-                            println("🤖 Invoking Antigravity via agy CLI to review PR #$finalPrNumber (SHA: $currentSha)...")
-                            bot?.sendMessage("🤖 *PR #$finalPrNumber Build Passed.* Asking Antigravity to review SHA `${currentSha.take(7)}`...")
-                            
-                            val prompt = """
-                                Perform a PR review on PR #$finalPrNumber at SHA $currentSha using the 'pr_review' skill.
-                                Make sure to run 'gh pr diff $finalPrNumber', inspect the diff, and format your output with <review> tags.
-                            """.trimIndent()
-
-                            val result = executeCmd("agy", "--dangerously-skip-permissions", "--print", prompt)
-                            println("Antigravity Review Output:\n$result")
-                            lastReviewedSha = currentSha
-
-                            val lastLine = result.lines().lastOrNull { it.trim().isNotEmpty() }?.trim()?.uppercase() ?: ""
-                            val prUrl = executeCmd("gh", "pr", "view", finalPrNumber, "--json", "url").substringAfter("\"url\":\"").substringBefore("\"")
-                            
-                            val rawReviewText = if (result.contains("<review>") && result.contains("</review>")) {
-                                result.substringAfter("<review>").substringBefore("</review>").trim()
                             } else {
-                                result.lines().filter { !it.trim().uppercase().equals("APPROVED") && !it.trim().uppercase().equals("REJECTED") }.joinToString("\n").trim()
-                            }
+                                // Find the request comment if it exists
+                                val requestComment = comments.firstOrNull {
+                                    (it.body.contains("@jules") || it.body.contains("@google-labs-jules")) &&
+                                    it.body.contains(shaPrefix)
+                                }
 
-                            if (lastLine.contains("APPROVED")) {
-                                println("🟢 Antigravity approved PR #$finalPrNumber.")
-                                bot?.sendMessage("🟢 *Antigravity Approved PR #$finalPrNumber!* Ready for your final manual review and merge: $prUrl")
-                                executeCmd("gh", "pr", "comment", finalPrNumber, "--body", "🟢 **PR Approved by Antigravity (SHA: ${currentSha.take(7)})**\n\n$rawReviewText")
-                            } else {
-                                println("⚠️ Antigravity rejected or had concerns about PR #$finalPrNumber.")
-                                bot?.sendMessage("⚠️ *Antigravity Rejected PR #$finalPrNumber.* Please check review details: $prUrl")
-                                executeCmd("gh", "pr", "comment", finalPrNumber, "--body", "@jules ⚠️ **PR Rejected by Antigravity (SHA: ${currentSha.take(7)})**\n\n$rawReviewText")
+                                if (requestComment == null) {
+                                    // 1. Request Jules review
+                                    println("🤖 Requesting Jules review for PR #$finalPrNumber (SHA: $currentSha)...")
+                                    bot?.sendMessage("🤖 *PR #$finalPrNumber Build Passed.* Asking @google-labs-jules to review SHA `${shaPrefix}`...")
+
+                                    val prompt = """
+                                        @google-labs-jules @jules Please perform a critical code review on this Pull Request (SHA: $currentSha) as a senior JVM security expert and staff engineer for the `mazewall` project.
+
+                                        Provide a detailed response covering:
+
+                                        1. **Overview**: Describe what this PR is doing and its main objectives.
+                                        2. **Rationale**: Why was the solution implemented in this specific way?
+                                        3. **Comparison & Alternatives**: Why is this solution better than other designs? What alternatives were considered (or should be considered) and what are their trade-offs?
+                                        4. **Critical & Security Analysis**:
+                                           - Evaluate correctness and potential failure modes.
+                                           - Check for JVM sandboxing bypasses, Landlock or Seccomp filter flaws.
+                                           - Verify FFM (Foreign Function & Memory) alignment, lifecycle, and memory leak risks.
+                                           - Analyze concurrency, JVM thread coordination, and Loom virtual thread carrier thread safety (preventing carrier poisoning).
+                                        5. **Conclusion**: Provide your final recommendation (e.g. Approved or needs changes).
+
+                                        Please be concise, extremely precise, and thorough. Use formatting for readability.
+                                    """.trimIndent()
+
+                                    executeCmd("gh", "pr", "comment", finalPrNumber, "--body", prompt)
+                                } else {
+                                    // 2. Check if Jules has replied after the request comment
+                                    val requestTime = java.time.Instant.parse(requestComment.createdAt)
+                                    val julesReply = comments.firstOrNull { comment ->
+                                        val author = comment.author?.login ?: ""
+                                        (author.contains("jules", ignoreCase = true)) &&
+                                        java.time.Instant.parse(comment.createdAt).isAfter(requestTime)
+                                    }
+
+                                    if (julesReply != null) {
+                                        println("🟢 Jules review received for SHA $currentSha.")
+                                        val prUrl = executeCmd("gh", "pr", "view", finalPrNumber, "--json", "url").substringAfter("\"url\":\"").substringBefore("\"")
+                                        bot?.sendMessage("🟢 *Jules reviewed PR #$finalPrNumber!* Ready for final manual review and merge: $prUrl")
+                                        lastReviewedSha = currentSha
+                                        ringTerminalBell(3)
+                                    } else {
+                                        println("⌛ Waiting for Jules (@google-labs-jules) to complete review on PR #$finalPrNumber (SHA: $shaPrefix)...")
+                                    }
+                                }
                             }
-                            
-                            println("🟢 PR #$finalPrNumber is green. Ready for manual review and merge: $prUrl")
-                            ringTerminalBell(3)
                         }
 
                         // Sleep and wait for manual developer merge
@@ -264,6 +281,17 @@ fun main() {
                         
                         // Sleep 5 minutes to let Jules rebuild/re-commit
                         TimeUnit.MINUTES.sleep(5)
+                    }
+                    "CONFLICT" -> {
+                        val now = System.currentTimeMillis()
+                        if (now - lastWaitingLogTime > 60_000) {
+                            val prUrl = executeCmd("gh", "pr", "view", finalPrNumber, "--json", "url").substringAfter("\"url\":\"").substringBefore("\"")
+                            bot?.sendMessage("⚠️ *PR #$finalPrNumber has conflicts!* Please resolve them: $prUrl")
+                            println("\u001B[1;31m🔔 [CONFLICT] PR #$finalPrNumber has conflicts! Please resolve conflicts: $prUrl\u001B[0m")
+                            ringTerminalBell(3)
+                            lastWaitingLogTime = now
+                        }
+                        TimeUnit.SECONDS.sleep(30)
                     }
                     else -> {
                         // Pending / in progress, wait 30 seconds
@@ -345,13 +373,6 @@ private fun ringTerminalBell(times: Int) {
 
 private fun executeCmd(vararg command: String): String {
     val pb = ProcessBuilder(*command)
-    val env = pb.environment()
-    val customToken = System.getProperty("GITHUB_TOKEN")
-    if (customToken != null) {
-        env["GITHUB_TOKEN"] = customToken
-    } else {
-        env.remove("GITHUB_TOKEN")
-    }
     val process = pb.redirectErrorStream(true).start()
     process.outputStream.close() // Close stdin to prevent child blocking
 
