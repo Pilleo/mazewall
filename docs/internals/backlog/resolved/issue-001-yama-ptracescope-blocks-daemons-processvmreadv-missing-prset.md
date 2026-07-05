@@ -1,11 +1,12 @@
 ---
 title: "Yama `ptrace_scope` Blocks Daemon's `process_vm_readv` (Missing `PR_SET_PTRACER`)"
 severity: "HIGH"
-status: "open"
+status: "resolved"
 priority: 9
 dependencies: []
 component: "unknown"
 effort: "medium"
+github_issue: 41
 ---
 
 # 🔴 [Severity: HIGH]: Yama `ptrace_scope` Blocks Daemon's `process_vm_readv` (Missing `PR_SET_PTRACER`)

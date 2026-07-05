@@ -66,7 +66,6 @@ graph TD
     io_mazewall_profiler_strace_StraceProfiler["💻 Source: io.mazewall.profiler.strace.StraceProfiler"]
     io_mazewall_seccomp_BpfProgram_BDL["💻 Source: io.mazewall.seccomp.BpfProgram.BDL"]
     io_mazewall_seccomp_PureJavaBpfEngine["💻 Source: io.mazewall.seccomp.PureJavaBpfEngine"]
-    issue_001_yama_ptracescope_blocks_daemons_processvmreadv_missing_prset["🔴 Issue: Yama `ptrace_scope` Blocks Daemon's `process_vm_readv` (Missing `PR_SET_PTRACER`) (HIGH)"]
     issue_002_stacktrace_enforced_process_spawning_safepoint_deadlock_and_["🔴 Issue: Stacktrace-Enforced Process Spawning Safepoint Deadlock and Trace Propagation Gotchas (HIGH)"]
     issue_003_socket_address_family_filtering_for_network_isolation_evasio["🔴 Issue: Socket Address Family Filtering for Network Isolation Evasion Prevention (ENHANCEMENT)"]
     issue_005_in_process_stacktrace_analysis_classloader_deadlock_in_super["🔴 Issue: In-Process Stacktrace Analysis ClassLoader Deadlock in Supervisor (HIGH)"]
@@ -324,7 +323,6 @@ graph TD
     issue_180_uncaught_exceptions_in_containedexecutorwrapperkt_during_fil -->|Affects| ContainedExecutorWrapper_kt
     issue_181_toctou_in_path_normalization_pathnormalizerkt -->|Affects| PathNormalizer_kt
     click containment_design "../containment_design.md"
-    click issue_001_yama_ptracescope_blocks_daemons_processvmreadv_missing_prset "../backlog/security/issue-001-yama-ptracescope-blocks-daemons-processvmreadv-missing-prset.md"
     click issue_002_stacktrace_enforced_process_spawning_safepoint_deadlock_and_ "../backlog/security/issue-002-stacktrace-enforced-process-spawning-safepoint-deadlock-and-.md"
     click issue_003_socket_address_family_filtering_for_network_isolation_evasio "../backlog/testing/issue-003-socket-address-family-filtering-for-network-isolation-evasio.md"
     click issue_005_in_process_stacktrace_analysis_classloader_deadlock_in_super "../backlog/security/issue-005-in-process-stacktrace-analysis-classloader-deadlock-in-super.md"

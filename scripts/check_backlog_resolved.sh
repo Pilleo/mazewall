@@ -12,8 +12,8 @@ fi
 echo "🔍 Scanning backlog for potentially stale items..."
 echo "--------------------------------------------------"
 
-# Scan all issue markdown files
-for file in "$BACKLOG_DIR"/issue-*.md; do
+# Scan all issue markdown files (at root and recursively in subdirectories)
+for file in "$BACKLOG_DIR"/issue-*.md "$BACKLOG_DIR"/*/issue-*.md; do
     [ -f "$file" ] || continue
 
     # Check if the issue is open (from frontmatter)
@@ -44,8 +44,14 @@ for file in "$BACKLOG_DIR"/issue-*.md; do
         if [ -f "$first_target" ]; then
             found_file="$first_target"
         else
-            # Try to find the file by name if it's a class/partial path
-            file_name=$(basename "$first_target" .kt)
+            # Strip .kt extension first if present
+            target_no_ext=$(echo "$first_target" | sed 's/\.kt$//')
+            # If it contains dots (and no slashes), it might be a fully qualified class name
+            if [[ "$target_no_ext" =~ \. ]] && [[ ! "$target_no_ext" =~ / ]]; then
+                file_name="${target_no_ext##*.}"
+            else
+                file_name=$(basename "$target_no_ext")
+            fi
             found_file=$(find . -name "${file_name}.kt" -o -name "${file_name}" 2>/dev/null | head -n1)
         fi
 

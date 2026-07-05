@@ -2,7 +2,7 @@
 title: "Proof-of-Progress State Machine for Landlock Discovery (`DiscoveryTask<Status>`)"
 severity: "ENHANCEMENT"
 status: "open"
-priority: 2
+priority: 0
 dependencies: []
 component: "profiler"
 effort: "medium"
