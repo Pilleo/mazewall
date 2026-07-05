@@ -28,6 +28,7 @@ class OrchestratorContext {
     var lastBuildStatus: String? = null
     var lastCheckedSha: String? = null
     var lastWaitingLogTime: Long = 0L
+    var lastFailedSha: String? = null
 
     fun load(props: java.util.Properties) {
         state = props.getProperty("state")?.let { OrchestratorState.valueOf(it) } ?: OrchestratorState.SELECT_TASK
@@ -50,6 +51,7 @@ class OrchestratorContext {
         lastBuildStatus = props.getProperty("lastBuildStatus").takeIf { !it.isNullOrEmpty() }
         lastCheckedSha = props.getProperty("lastCheckedSha").takeIf { !it.isNullOrEmpty() }
         lastWaitingLogTime = props.getProperty("lastWaitingLogTime")?.toLongOrNull() ?: 0L
+        lastFailedSha = props.getProperty("lastFailedSha").takeIf { !it.isNullOrEmpty() }
     }
 
     fun save(props: java.util.Properties) {
@@ -67,6 +69,7 @@ class OrchestratorContext {
         props.setProperty("lastBuildStatus", lastBuildStatus ?: "")
         props.setProperty("lastCheckedSha", lastCheckedSha ?: "")
         props.setProperty("lastWaitingLogTime", lastWaitingLogTime.toString())
+        props.setProperty("lastFailedSha", lastFailedSha ?: "")
     }
 }
 
@@ -370,19 +373,25 @@ class OrchestratorDaemonRunner(
                 TimeUnit.SECONDS.sleep(30)
             }
             "FAILURE" -> {
-                println("❌ Build failed on PR #$prNumber. Fetching logs...")
-                val failedLogs = GitHubCli.getFailedBuildLogs(prNumber)
-                val feedback = """
-                    ❌ **CI Build Failed.**
-                    Jules, please review the failing logs and fix the implementation:
+                val currentSha = GitHubCli.getPrHeadSha(prNumber)
+                if (currentSha != context.lastFailedSha) {
+                    println("❌ Build failed on PR #$prNumber. Fetching logs...")
+                    val failedLogs = GitHubCli.getFailedBuildLogs(prNumber)
+                    val feedback = """
+                        ❌ **CI Build Failed.**
+                        Jules, please review the failing logs and fix the implementation:
+                        
+                        ```
+                        $failedLogs
+                        ```
+                    """.trimIndent()
                     
-                    ```
-                    $failedLogs
-                    ```
-                """.trimIndent()
-                
-                executeCmd("gh", "pr", "comment", prNumber, "--body", feedback)
-                bot?.sendMessage("❌ Build failed on PR #$prNumber. Feedback sent to Jules.")
+                    executeCmd("gh", "pr", "comment", prNumber, "--body", feedback)
+                    bot?.sendMessage("❌ Build failed on PR #$prNumber. Feedback sent to Jules.")
+                    context.lastFailedSha = currentSha
+                } else {
+                    println("❌ Build is still failing on SHA $currentSha. Waiting for a new commit...")
+                }
                 TimeUnit.MINUTES.sleep(5)
             }
             "CONFLICT" -> {
@@ -429,6 +438,7 @@ class OrchestratorDaemonRunner(
         context.lastBuildStatus = null
         context.lastCheckedSha = null
         context.lastWaitingLogTime = 0L
+        context.lastFailedSha = null
     }
 }
 
