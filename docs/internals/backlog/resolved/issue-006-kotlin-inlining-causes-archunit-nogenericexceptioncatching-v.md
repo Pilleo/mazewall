@@ -1,7 +1,7 @@
 ---
 title: "Kotlin Inlining Causes ArchUnit noGenericExceptionCatching Violation"
 severity: "HIGH"
-status: "open"
+status: "resolved"
 priority: 9
 dependencies: []
 component: "enforcer"
