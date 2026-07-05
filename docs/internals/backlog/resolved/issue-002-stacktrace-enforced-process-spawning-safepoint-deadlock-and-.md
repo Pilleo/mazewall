@@ -6,7 +6,6 @@ priority: 9
 dependencies: []
 component: "unknown"
 effort: "medium"
-github_issue: 43
 ---
 
 # 🔴 [Severity: HIGH]: Stacktrace-Enforced Process Spawning Safepoint Deadlock and Trace Propagation Gotchas

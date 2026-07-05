@@ -133,7 +133,7 @@ detekt {
 }
 
 subprojects {
-    if (project.path.startsWith(":demos") || project.path.startsWith(":tools")) {
+    if (project.path.startsWith(":demos")) {
         return@subprojects
     }
     apply(plugin = "java")

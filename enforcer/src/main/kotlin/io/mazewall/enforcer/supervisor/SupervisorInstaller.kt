@@ -181,9 +181,8 @@ internal class JVMValidationListener(
                         // --- SPAWN REGISTRATION LOGIC ---
                         if (nr == forkNr || nr == vforkNr || nr == cloneNr) {
                             if (stackTrace.isNotEmpty()) {
-                                val tgid = getTgid(pidVal)
-                                System.err.println("[JVM-VALIDATION] Registering pending spawn for TGID=$tgid (TID=$pidVal)")
-                                PendingSpawnRegistry.register(Tid(tgid), stackTrace)
+                                System.err.println("[JVM-VALIDATION] Registering pending spawn for TID=$pidVal")
+                                PendingSpawnRegistry.register(Tid(pidVal), stackTrace)
                             }
                         }
 
@@ -223,10 +222,9 @@ internal class JVMValidationListener(
                     0.toByte()
                 }
 
-                // We no longer remove the entry immediately on execve because of:
-                // 1. Double execve during JVM process spawn (jspawnhelper -> target).
-                // 2. Path resolution fallbacks in JVM process builder (which calls execve multiple times on different PATH locations).
-                // Instead, the registry relies on a TTL (Time-To-Live) to automatically prune entries after 10 seconds.
+                if (isAllowed && (nr == arch.execve || nr == arch.execveat)) {
+                    PendingSpawnRegistry.remove(Tid(ppidVal))
+                }
 
                 val errorNr = if (decision.toInt() == 0) NativeConstants.EPERM else 0
                 sendResponse(id, decision, errorNr, responseSegment)
@@ -239,28 +237,6 @@ internal class JVMValidationListener(
             arena.close()
             inputStream.close()
         }
-    }
-
-    private fun getTgid(tid: Int): Int {
-        val statusFile = java.io.File("/proc/$tid/status")
-        if (!statusFile.exists()) return tid
-        var reader: java.io.BufferedReader? = null
-        try {
-            reader = statusFile.bufferedReader()
-            while (true) {
-                val line = reader.readLine() ?: break
-                if (line.startsWith("Tgid:")) {
-                    return line.substringAfter("Tgid:").trim().toInt()
-                }
-            }
-        } catch (ignored: java.io.IOException) {
-        } catch (ignored: java.lang.NumberFormatException) {
-        } finally {
-            try {
-                reader?.close()
-            } catch (ignored: java.io.IOException) {}
-        }
-        return tid
     }
 
     private fun readRequestArgs(dis: DataInputStream, argCount: Int): List<Any> {

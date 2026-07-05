@@ -2,7 +2,7 @@
 title: "StraceProfiler completely fails to trace `io_uring` file operations natively"
 severity: "CRITICAL"
 status: "open"
-priority: 1
+priority: 5
 dependencies: []
 component: "profiler"
 effort: "medium"

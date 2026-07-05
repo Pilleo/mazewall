@@ -42,7 +42,7 @@ When fixing bugs or resolving failing tests, you must avoid introducing fragile 
 *   **Regression Check:** Run the full project check (`./gradlew check`) to verify clean compilation, static analysis, and that no tests are broken.
 
 ### 4. Finalization & Logging
-*   **Update Backlog File:** Set `status: "resolved"` in the issue file's YAML frontmatter (e.g. `docs/internals/backlog/security/issue-XXX-name.md`) and move it to.
+*   **Update Backlog File:** Set `status: "resolved"` in the issue file's YAML frontmatter (e.g. `docs/internals/backlog/security/issue-XXX-name.md`).
 *   **Update README:** Move the entry from "Open Issues" to the "Resolved Issues (Archive)" section in [backlog/README.md](file:///home/leanid/Documents/code/java/jseccomp/docs/internals/backlog/README.md) (updating the link path to point to `resolved/issue-XXX-name.md`).
 *   **Move File to Resolved:** Move the resolved issue file from its category folder to `docs/internals/backlog/resolved/`.
 *   **Clean Up:** Remove any temporary reproduction tests unless they provide long-term regression value.

@@ -32,7 +32,5 @@ include(":profiler")
 include(":demos:cli-demo")
 include(":demos:vulnerable-web-app")
 include(":demos:agent-sandbox-demo")
-include(":tools:orchestrator")
-
 
 rootProject.name = "mazewall"

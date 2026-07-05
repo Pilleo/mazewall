@@ -41,7 +41,6 @@ class ProcessSpawnStacktraceTest {
 
         val policy = Policy.builder()
             .addAction(SeccompAction.ACT_NOTIFY, Syscall.EXECVE)
-            .allowMmapExec()
             .build()
 
         SupervisorInstaller.installSupervisedFilterForThread(policy.definition, scopingPolicy).use {
