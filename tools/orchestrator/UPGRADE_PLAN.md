@@ -47,3 +47,10 @@ bot?.sendMessage("✅ GitHub issue #$finalIssueNumber automatically closed.")
 
 ## 5. (Optional) State Machine Refactor
 *For future consideration:* The main loop inside `OrchestratorDaemon.kt` is deeply nested and difficult to test. Refactoring it into a formal State Machine (e.g., states: `PENDING_APPROVAL`, `AWAITING_JULES_START`, `AWAITING_PR`, `CI_RUNNING`, `AWAITING_REVIEW`, `AWAITING_MERGE`) will significantly improve maintainability.
+
+## 6. Additional Resiliency & Configuration Improvements
+*For future consideration:*
+- **Configurable Polling/Timeouts:** Make the `sleep` intervals (currently hardcoded to 15s and 30s) and maximum task timeout limits configurable via `.ENV`. This prevents infinite polling if a remote agent stalls.
+- **GitHub CLI Request Caching:** The daemon calls `gh` frequently. Implement an in-memory cache with short TTLs for PR state and build status checks to drastically reduce API rate-limiting risk.
+- **Persistent State Tracking:** Store active task context (e.g., in a simple local JSON file or SQLite) so that if the Orchestrator Daemon is restarted, it immediately resumes monitoring exactly where it left off without having to re-scan PRs and closed issues.
+- **Retry Mechanism:** Implement an exponential backoff retry mechanism for `executeCmd` to handle transient network errors gracefully when calling external CLIs.
