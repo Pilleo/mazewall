@@ -23,3 +23,6 @@ This module contains the `Autonomous Backlog Orchestrator` which acts as the cen
    - All critical external calls within state handlers must catch errors locally and schedule a retry/sleep cycle instead of crashing the daemon.
    - Keep anti-spam safeguards intact: Use `lastFailedSha` to prevent duplicate build failure comments on PRs for the same failing commit.
    - Ensure you use `java.util.concurrent.TimeUnit` sleep helpers for readability.
+
+5. **Environment & Authentication Invariants**
+   - **DO NOT attempt to modify, filter, or handle the `GITHUB_TOKEN` environment variable in the codebase.** Managing GitHub CLI authentication or environment variables (such as removing/overriding tokens) is strictly the operator's responsibility. The CLI wrappers must run using the system-provided environment without filtering GITHUB_TOKEN.

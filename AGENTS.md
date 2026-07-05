@@ -18,6 +18,7 @@ As an AI agent pair-programming on this project, you are assisting in transition
 *   Never block JVM coordination syscalls (refer to the detailed list in [enforcer/AGENTS.md](enforcer/AGENTS.md#1-never-block-jvm-coordination-system-calls)).
 *   Never combine `SECCOMP_FILTER_FLAG_TSYNC` and `SECCOMP_FILTER_FLAG_NEW_LISTENER`.
 *   Never use `JAVA_LONG` for 32-bit `sock_filter` fields.
+*   **Never modify, filter, or handle the `GITHUB_TOKEN` environment variable in the codebase.** Managing or modifying GitHub CLI credentials or environment variables is strictly the operator's responsibility.
 
 ---
 
