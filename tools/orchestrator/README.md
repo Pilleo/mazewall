@@ -43,17 +43,19 @@ Use the provided shell script to run the daemon:
 ./scripts/run_orchestrator.sh --background
 ```
 
-## Architecture & Flow
+## Architecture & State Machine
 
-1. **Parse Backlog:** Scans the `BACKLOG_PATH` for `.md` files starting with `issue-`.
-2. **Prioritize:** Identifies unblocked tasks (dependencies are resolved/skipped) and picks the one with the highest priority.
-3. **Approval:** Asks the developer for approval via Telegram or Terminal.
-4. **Issue Creation:** Creates a GitHub Issue with the `jules` label.
-5. **Agent Handoff:** Polls the Jules CLI to verify the agent session is active.
-6. **PR Monitoring:** Polls GitHub for a linked Pull Request and checks the CI build status (`SUCCESS`, `FAILURE`, `IN_PROGRESS`).
-7. **Automated Review:** Once CI passes, invokes Antigravity for a first-pass review.
-8. **Merge & Resolve:** Waits for human approval and merge. Upon merge, moves the local backlog file to the `resolved/` directory and regenerates architectural knowledge maps.
+The orchestrator is implemented as a robust State Machine with the following states:
+1. **`SELECT_TASK`:** Scans the `BACKLOG_PATH` for `.md` files starting with `issue-`, calculates dependencies, and prioritizes the next unblocked task.
+2. **`AWAIT_START_APPROVAL`:** Asks the developer for approval via Telegram or Terminal. Once approved, retrieves or creates a GitHub Issue.
+3. **`AWAIT_JULES_START`:** Polls for the automatically triggered Jules session ID.
+4. **`AWAIT_PR_CREATION`:** Monitors the session and waits for Jules to open a Pull Request.
+5. **`MONITOR_PR`:** Polls the PR's CI build status. If the build passes, requests a Jules code review. If the build fails, comments on the PR (deduplicated by commit SHA to prevent spamming) and alerts the developer.
+6. **`RESOLVE_TASK`:** Moves the backlog file to `resolved/`, deletes the local state file, and regenerates the knowledge maps.
+
+### State Persistence
+To prevent context loss across daemon restarts, the orchestrator automatically writes its execution state and active task context (TIDs, SHAs, session IDs, PR/Issue numbers) to `.orchestrator_state.properties` in the workspace root. On boot, it automatically resumes from the last active state.
 
 ## Limitations & Known Issues
-- Currently, Jules session IDs are strictly parsed as Longs, which can cause failures due to integer overflow for large session UUIDs.
 - Polling is frequent; be cautious of GitHub API rate limits.
+- The daemon must run in an environment authenticated with the `gh`, `jules`, and `agy` CLIs.

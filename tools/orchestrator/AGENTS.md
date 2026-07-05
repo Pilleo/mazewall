@@ -9,21 +9,17 @@ This module contains the `Autonomous Backlog Orchestrator` which acts as the cen
    - Code inside `GitHubCli.kt` and `JulesCli.kt` must remain robust wrappers. Do not attempt to replace these with raw API calls (like Retrofit/Ktor) without explicit instruction.
    - When parsing CLI output (especially tables or JSON), prefer JSON output flags (e.g., `gh issue list --json`) over brittle regex table parsing.
 
-2. **Execution Loops and Halts**
-   - `OrchestratorDaemon.kt` contains the main `while(true)` loop.
-   - Operations that sleep or wait for long periods (e.g., waiting for Jules sessions or PR merges) are expected behavior.
-   - **Do not introduce arbitrary timeouts that kill the main process.** The script is meant to be resilient and run infinitely in the background.
+2. **State Machine Architecture**
+   - The loop in `OrchestratorDaemon.kt` executes as a State Machine running state handlers in `OrchestratorDaemonRunner`.
+   - **Do not revert to a monolithic nested loop.** Keep state transitions explicit and well-defined inside separate handler functions.
+   - Any new state added to `OrchestratorState` must be serialized/deserialized in `OrchestratorContext` and handled inside `OrchestratorDaemonRunner.run()`.
 
-3. **Error Handling & Resiliency**
-   - Any external CLI invocation can fail. Network requests fail. Rate limits get hit.
-   - All critical external calls within the main loop must be wrapped in try-catch blocks or use resilient fallback paths so the daemon does not crash.
-   - Graceful degradation: If `agy` (Antigravity) fails or runs out of tokens during a PR review, the flow must log the error and transition to a manual review state rather than crashing or infinitely looping.
+3. **State Persistence and Serialization**
+   - The daemon relies on `.orchestrator_state.properties` for state recovery after restarts.
+   - When introducing new variables to the task tracking context, they **must** be added to `OrchestratorContext` properties serialization/deserialization methods (`load` and `save`).
+   - Keep state file serialization free of external library dependencies by strictly utilizing Java `Properties`.
 
-4. **Code Generation and Formatting**
-   - Follow standard Kotlin conventions.
-   - Ensure you use `java.util.concurrent.TimeUnit.SECONDS.sleep()` instead of `Thread.sleep()` for readability.
-
-## Prototyping Future Improvements
-
-When instructed to upgrade or refactor the Orchestrator, consult `tools/orchestrator/UPGRADE_PLAN.md` for specific planned changes.
-Do not implement changes to execution logic in this module unless explicitly asked to do so by the user.
+4. **Error Handling, Resiliency, & Anti-Spam**
+   - All critical external calls within state handlers must catch errors locally and schedule a retry/sleep cycle instead of crashing the daemon.
+   - Keep anti-spam safeguards intact: Use `lastFailedSha` to prevent duplicate build failure comments on PRs for the same failing commit.
+   - Ensure you use `java.util.concurrent.TimeUnit` sleep helpers for readability.
