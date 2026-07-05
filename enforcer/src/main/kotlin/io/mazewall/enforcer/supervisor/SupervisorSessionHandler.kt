@@ -69,6 +69,7 @@ internal class SupervisorSessionHandler(
         // Seccomp notifications offsets
         private const val NOTIF_ID_OFF = 0L
         private const val NOTIF_PID_OFF = 8L
+        private const val NOTIF_ARCH_OFF = 20L
         private const val NOTIF_NR_OFF = 16L
         private const val NOTIF_ARGS_OFF = 32L
 
@@ -82,15 +83,6 @@ internal class SupervisorSessionHandler(
         private const val ARG_TYPE_LONG: Byte = 0
         private const val ARG_TYPE_STRING: Byte = 1
         private const val ARG_TYPE_SOCKADDR: Byte = 2
-
-        // Syscalls
-        private const val SYS_OPEN = 2
-        private const val SYS_CONNECT = 42
-        private const val SYS_ACCEPT = 43
-        private const val SYS_EXECVE = 59
-        private const val SYS_OPENAT = 257
-        private const val SYS_ACCEPT4 = 288
-        private const val SYS_OPENAT2 = 437
 
         private const val MAX_ARGS = 6
         private const val BYTES_PER_LONG = 8L
@@ -269,6 +261,7 @@ internal class SupervisorSessionHandler(
         val id = notif.readLong(NOTIF_ID_OFF)
         try {
             val pidVal = notif.readInt(NOTIF_PID_OFF)
+            val archVal = notif.readInt(NOTIF_ARCH_OFF)
             val nr = notif.readInt(NOTIF_NR_OFF)
 
             val args = LongArray(MAX_ARGS)
@@ -277,9 +270,10 @@ internal class SupervisorSessionHandler(
             }
 
             val tid = Tid(pidVal)
-            val extracted = extractNotificationArgs(nr, tid, args)
+            val traceeArch = io.mazewall.core.Arch.fromAudit(archVal)
+            val extracted = extractNotificationArgs(nr, tid, args, traceeArch)
             val ppid = getPpid(pidVal)
-            logger.info { "[SUPERVISOR-DEBUG] Received syscall notification: id=$id, pid=$pidVal, ppid=$ppid, nr=$nr, path=${extracted.pathStr}" }
+            logger.info { "[SUPERVISOR-DEBUG] Received syscall notification: id=$id, pid=$pidVal, arch=$archVal, ppid=$ppid, nr=$nr, path=${extracted.pathStr}" }
 
             // --- DAEMON-SIDE FAST-PATH BYPASS ---
             // HAZARD: When the sandboxed thread triggers lazy classloading (e.g., loading IOException
@@ -292,7 +286,8 @@ internal class SupervisorSessionHandler(
             // application classpath, or Java agents. Paths are resolved to absolute form and normalized.
             // Since these paths contain trusted platform/application classes and libraries that are already loaded
             // or destined to be loaded, it is safe to bypass policy evaluation and directly inject the file descriptor.
-            if ((nr == SYS_OPEN || nr == SYS_OPENAT || nr == SYS_OPENAT2) && extracted.pathStr != null) {
+            val isOpen = nr == traceeArch.open || nr == traceeArch.openat || nr == traceeArch.openat2
+            if (isOpen && extracted.pathStr != null) {
                 val pathStr = extracted.pathStr
                 try {
                     val path = resolveAbsolutePath(pidVal, extracted.dirfd, pathStr)
@@ -302,14 +297,14 @@ internal class SupervisorSessionHandler(
                         }
                         if (matched) {
                             val absPathStr = path.toAbsolutePath().toString()
-                            val injectRes = handleInjectFd(id, nr, args, absPathStr, null, resp, Tid(pidVal))
+                            val injectRes = handleInjectFd(id, nr, args, absPathStr, null, resp, Tid(pidVal), traceeArch)
                             logger.info { "[SUPERVISOR-DEBUG] Fast-path handleInjectFd (matched) resolved=$absPathStr result=$injectRes" }
                             return injectRes
                         }
                     } else {
                         // Fallback when /proc absolute path resolution fails (e.g. Yama ptrace_scope block inside container)
                         if (pathStr.endsWith(".class") || pathStr.contains("META-INF/") || pathStr.endsWith(".jar")) {
-                            val injectRes = handleInjectFd(id, nr, args, pathStr, null, resp, Tid(pidVal))
+                            val injectRes = handleInjectFd(id, nr, args, pathStr, null, resp, Tid(pidVal), traceeArch)
                             logger.info { "[SUPERVISOR-DEBUG] Fast-path handleInjectFd (fallback: classloading) result=$injectRes" }
                             return injectRes
                         }
@@ -320,13 +315,13 @@ internal class SupervisorSessionHandler(
             }
 
             logger.info { "[SUPERVISOR-DEBUG] Forwarding request to JVM validation listener" }
-            val success = sendRequestToJvm(id, pidVal, ppid, nr, args, extracted.pathStr, extracted.sockaddrBytes)
+            val success = sendRequestToJvm(id, pidVal, archVal, ppid, nr, args, extracted.pathStr, extracted.sockaddrBytes)
             if (!success) {
                 logger.severe { "[SUPERVISOR-DEBUG] Failed to send request to JVM" }
                 return false
             }
 
-            val res = readAndHandleJvmResponse(id, nr, args, extracted.pathStr, extracted.sockaddrBytes, resp, tid)
+            val res = readAndHandleJvmResponse(id, nr, args, extracted.pathStr, extracted.sockaddrBytes, resp, tid, traceeArch)
             logger.info { "[SUPERVISOR-DEBUG] JVM validation handler response result=$res" }
             return res
         } catch (t: Throwable) {
@@ -340,25 +335,25 @@ internal class SupervisorSessionHandler(
         }
     }
 
-    private fun extractNotificationArgs(nr: Int, tid: Tid, args: LongArray): SyscallArguments {
+    private fun extractNotificationArgs(nr: Int, tid: Tid, args: LongArray, arch: io.mazewall.core.Arch): SyscallArguments {
         var pathStr: String? = null
         var sockaddrBytes: ByteArray? = null
         var dirfd = AT_FDCWD
         when (nr) {
-            SYS_OPEN, SYS_EXECVE -> {
+            arch.open, arch.execve -> {
                 pathStr = readStringFromProcess(tid, args[0])
             }
-            SYS_OPENAT, SYS_OPENAT2 -> {
+            arch.openat, arch.openat2 -> {
                 dirfd = args[0].toInt()
                 pathStr = readStringFromProcess(tid, args[1])
             }
-            SYS_CONNECT -> {
+            arch.connect -> {
                 val addrLen = args[2].toInt()
                 if (addrLen in 1..MAX_ADDR_LEN) {
                     sockaddrBytes = readBytesFromProcess(tid, args[1], addrLen)
                 }
             }
-            SYS_ACCEPT, SYS_ACCEPT4 -> {
+            arch.accept, arch.accept4 -> {
                 dirfd = args[0].toInt()
             }
         }
@@ -399,6 +394,7 @@ internal class SupervisorSessionHandler(
     private fun sendRequestToJvm(
         id: Long,
         pidVal: Int,
+        archVal: Int,
         ppid: Int,
         nr: Int,
         args: LongArray,
@@ -406,7 +402,7 @@ internal class SupervisorSessionHandler(
         sockaddrBytes: ByteArray?
     ): Boolean {
         return Arena.ofConfined().use { arena ->
-            val sizeOfMeta = SIZE_META + SIZE_INT // Include PPID
+            val sizeOfMeta = SIZE_META + SIZE_INT + SIZE_INT // Include PPID and Arch
             val sizeOfArgHeader = SIZE_ARG_HEADER
             val totalSize = sizeOfMeta + (
                 if (pathStr != null) {
@@ -424,6 +420,7 @@ internal class SupervisorSessionHandler(
 
             netBuf.writeLong(offset, id); offset += BYTES_PER_LONG
             netBuf.writeInt(offset, pidVal); offset += SIZE_INT
+            netBuf.writeInt(offset, archVal); offset += SIZE_INT
             netBuf.writeInt(offset, ppid); offset += SIZE_INT
             netBuf.writeInt(offset, nr); offset += SIZE_INT
 
@@ -459,7 +456,8 @@ internal class SupervisorSessionHandler(
         pathStr: String?,
         sockaddrBytes: ByteArray?,
         resp: MemorySegment,
-        tid: Tid
+        tid: Tid,
+        traceeArch: io.mazewall.core.Arch
     ): Boolean {
         return Arena.ofConfined().use { arena ->
             val pollFd = PollFdSegment(arena.allocate(Layouts.POLLFD))
@@ -527,7 +525,7 @@ internal class SupervisorSessionHandler(
                         true
                     }
                     2 -> { // Allow & Inject FD
-                        handleInjectFd(id, nr, args, pathStr, sockaddrBytes, resp, tid)
+                        handleInjectFd(id, nr, args, pathStr, sockaddrBytes, resp, tid, traceeArch)
                     }
                     else -> {
                         sendSeccompError(id, NativeConstants.EPERM, resp)
@@ -549,21 +547,22 @@ internal class SupervisorSessionHandler(
         pathStr: String?,
         sockaddrBytes: ByteArray?,
         resp: MemorySegment,
-        tid: Tid
+        tid: Tid,
+        traceeArch: io.mazewall.core.Arch
     ): Boolean {
         var localFdValue = -1
         try {
             localFdValue = when (nr) {
-                SYS_OPEN, SYS_OPENAT, SYS_OPENAT2 -> {
+                traceeArch.open, traceeArch.openat, traceeArch.openat2 -> {
                     if (pathStr == null) {
                         -NativeConstants.EPERM
                     } else {
-                        val res = openFileInSupervisor(nr, args, pathStr)
+                        val res = openFileInSupervisor(nr, args, pathStr, traceeArch)
                         logger.info { "[SUPERVISOR-DEBUG] openFileInSupervisor path=$pathStr res=$res" }
                         res
                     }
                 }
-                SYS_CONNECT -> {
+                traceeArch.connect -> {
                     if (sockaddrBytes == null) {
                         -NativeConstants.EPERM
                     } else {
@@ -572,8 +571,8 @@ internal class SupervisorSessionHandler(
                         res
                     }
                 }
-                SYS_ACCEPT, SYS_ACCEPT4 -> {
-                    handleAcceptAsync(id, nr, args, tid)
+                traceeArch.accept, traceeArch.accept4 -> {
+                    handleAcceptAsync(id, nr, args, tid, traceeArch)
                     return true
                 }
                 else -> -NativeConstants.EPERM
@@ -612,18 +611,19 @@ internal class SupervisorSessionHandler(
         }
     }
 
-    private fun openFileInSupervisor(nr: Int, args: LongArray, pathStr: String): Int {
-        val flags = if (nr == SYS_OPEN) args[1].toInt() else args[2].toInt()
+    private fun openFileInSupervisor(nr: Int, args: LongArray, pathStr: String, arch: io.mazewall.core.Arch): Int {
+        val flags = if (nr == arch.open) args[1].toInt() else args[2].toInt()
         return Arena.ofConfined().use { arena ->
             val pathSeg = arena.allocateFrom(pathStr)
-            val dirfd = if (nr == SYS_OPEN || pathStr.startsWith("/")) AT_FDCWD else args[0].toInt()
+            val dirfd = if (nr == arch.open || pathStr.startsWith("/")) AT_FDCWD else args[0].toInt()
             val res = LinuxNative.withTransaction {
                 if (dirfd == AT_FDCWD) {
                     LinuxNative.fileSystem.open(pathSeg, flags)
                 } else {
-                    val LinuxSys = 257L // SYS_openat
+                    val myArch = io.mazewall.core.Arch.current()
+                    val myOpenat = myArch.openat.toLong()
                     LinuxNative.syscall(
-                        LinuxSys,
+                        myOpenat,
                         io.mazewall.core.NativeArg.LongArg(dirfd.toLong()),
                         io.mazewall.core.NativeArg.MemoryArg(pathSeg),
                         io.mazewall.core.NativeArg.LongArg(flags.toLong()),
@@ -760,6 +760,7 @@ internal class SupervisorSessionHandler(
         nr: Int,
         args: LongArray,
         tid: Tid,
+        traceeArch: io.mazewall.core.Arch
     ) {
         Thread {
             try {
@@ -817,12 +818,13 @@ internal class SupervisorSessionHandler(
                         val localAddrLen = arena.allocate(4)
                         localAddrLen.writeInt(0, 128)
 
+                        val myArch = io.mazewall.core.Arch.current()
                         val accept4Sys = io.mazewall.core.NetworkSyscallMapper.numberFor(
                             io.mazewall.core.Syscall.ACCEPT4,
-                            io.mazewall.core.Arch.current()
+                            myArch
                         ).toLong()
 
-                        val flags = if (nr == SYS_ACCEPT4) args[3].toInt() else 0
+                        val flags = if (nr == traceeArch.accept4) args[3].toInt() else 0
 
                         val acceptRes = LinuxNative.withTransaction {
                             LinuxNative.syscall(
