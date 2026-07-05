@@ -117,10 +117,13 @@ internal object SupervisorDaemonManager {
         val daemonProcess = pb.start()
         val daemonPid = daemonProcess.pid()
 
-        LinuxNative.withTransaction {
+        val prctlRes = LinuxNative.withTransaction {
             LinuxNative.process.prctl(
                 io.mazewall.core.PrctlCommand.SetPtracer(daemonPid)
             )
+        }
+        if (prctlRes is LinuxNative.SyscallResult.Error) {
+            logger.warning("prctl(PR_SET_PTRACER) failed with errno ${prctlRes.errno}. The daemon may not be able to read process memory if Yama ptrace_scope is restrictive.")
         }
 
         val readyLatch = java.util.concurrent.CountDownLatch(1)
@@ -169,15 +172,6 @@ internal object SupervisorDaemonManager {
             throw IllegalStateException(
                 "SupervisorDaemon failed to signal readiness within 30s (exitCode=$exitCode).",
             )
-        }
-
-        val prctlRes = LinuxNative.withTransaction {
-            LinuxNative.process.prctl(
-                io.mazewall.core.PrctlCommand.SetPtracer(daemonPid)
-            )
-        }
-        if (prctlRes is LinuxNative.SyscallResult.Error) {
-            logger.warning("prctl(PR_SET_PTRACER) failed with errno ${prctlRes.errno}.")
         }
 
         val shutdownHook = Thread {
