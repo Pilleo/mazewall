@@ -38,7 +38,7 @@ class OrchestratorContext {
         githubIssueNumber = props.getProperty("githubIssueNumber").takeIf { !it.isNullOrEmpty() }
         julesSessionId = props.getProperty("julesSessionId").takeIf { !it.isNullOrEmpty() }
         prNumber = props.getProperty("prNumber").takeIf { !it.isNullOrEmpty() }
-        
+
         skippedIds.clear()
         props.getProperty("skippedIds")?.let { ids ->
             if (ids.isNotEmpty()) {
@@ -63,7 +63,7 @@ class OrchestratorContext {
         props.setProperty("julesSessionId", julesSessionId ?: "")
         props.setProperty("prNumber", prNumber ?: "")
         props.setProperty("skippedIds", skippedIds.joinToString(","))
-        
+
         props.setProperty("lastHeadSha", lastHeadSha ?: "")
         props.setProperty("lastReviewedSha", lastReviewedSha ?: "")
         props.setProperty("lastBuildStatus", lastBuildStatus ?: "")
@@ -156,7 +156,7 @@ class OrchestratorDaemonRunner(
                 val telegramText = """
                     🤖 *Request to start task $issueId*
                     *Title:* $issueTitle
-                    
+
                     Please approve or skip in the inline keyboard below.
                 """.trimIndent()
                 bot.sendMessageWithApprovalMarkup(issueId, telegramText)
@@ -339,7 +339,7 @@ class OrchestratorDaemonRunner(
                                    - Analyze concurrency, JVM thread coordination, and Loom virtual thread carrier thread safety (preventing carrier poisoning).
                                 5. **Conclusion**: Provide your final recommendation (e.g. Approved or needs changes).
 
-                                Please be concise, extremely precise, and thorough. Use formatting for readability.
+                                Please be concise, extremely precise, and thorough. If you are not sure -say so. Use formatting for readability. Just leave a comment in the PR, do not commit new files!
                             """.trimIndent()
 
                             executeCmd("gh", "pr", "comment", prNumber, "--body", prompt)
@@ -380,12 +380,12 @@ class OrchestratorDaemonRunner(
                     val feedback = """
                         ❌ **CI Build Failed.**
                         Jules, please review the failing logs and fix the implementation:
-                        
+
                         ```
                         $failedLogs
                         ```
                     """.trimIndent()
-                    
+
                     executeCmd("gh", "pr", "comment", prNumber, "--body", feedback)
                     bot?.sendMessage("❌ Build failed on PR #$prNumber. Feedback sent to Jules.")
                     context.lastFailedSha = currentSha

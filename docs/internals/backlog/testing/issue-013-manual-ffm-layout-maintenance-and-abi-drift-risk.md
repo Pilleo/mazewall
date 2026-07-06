@@ -2,7 +2,7 @@
 title: "Manual FFM Layout Maintenance and ABI Drift Risk"
 severity: "HIGH"
 status: "open"
-priority: 9
+priority: 1
 dependencies: []
 component: "ffi"
 effort: "medium"
