@@ -7,8 +7,10 @@ import io.mazewall.core.Syscall
 import io.mazewall.profiler.engine.TraceEvent
 import org.junit.jupiter.api.Test
 import java.nio.file.Files
+import java.nio.file.Paths
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
 class BillOfBehaviorTest {
@@ -141,18 +143,18 @@ class BillOfBehaviorTest {
 
         val policy = bob.toPolicy(io.mazewall.Policy.PURE_COMPUTE_UNSAFE)
 
-        // Verifying the compiled policy allowed paths are pruned to keep the most specific child (least privilege)!
-        assertEquals(setOf("/home/leanid/.sdkman", "/tmp/config.json"), policy.allowedFsReadPaths.map { it.value }.toSet())
-        assertEquals(setOf("/var/log/app.log"), policy.allowedFsWritePaths.map { it.value }.toSet())
+        // Verifying the compiled policy allowed paths are pruned to keep the most generic parent (covers all children)!
+        assertEquals(setOf("/home", "/tmp"), policy.allowedFsReadPaths.map { it.value }.toSet())
+        assertEquals(setOf("/var/log"), policy.allowedFsWritePaths.map { it.value }.toSet())
 
         // Verifying the generated DSL is also pruned!
         val dsl = bob.toDsl()
-        assertTrue(dsl.contains(".allowFsRead(\"/home/leanid/.sdkman\")"))
-        assertTrue(dsl.contains(".allowFsRead(\"/tmp/config.json\")"))
-        assertFalse(dsl.contains(".allowFsRead(\"/home\")"))
-        assertFalse(dsl.contains(".allowFsRead(\"/tmp\")"))
-        assertTrue(dsl.contains(".allowFsWrite(\"/var/log/app.log\")"))
-        assertFalse(dsl.contains(".allowFsWrite(\"/var/log\")"))
+        assertTrue(dsl.contains(".allowFsRead(\"/home\")"))
+        assertTrue(dsl.contains(".allowFsRead(\"/tmp\")"))
+        assertFalse(dsl.contains(".allowFsRead(\"/home/leanid/.sdkman\")"))
+        assertFalse(dsl.contains(".allowFsRead(\"/tmp/config.json\")"))
+        assertTrue(dsl.contains(".allowFsWrite(\"/var/log\")"))
+        assertFalse(dsl.contains(".allowFsWrite(\"/var/log/app.log\")"))
     }
 
     @Test
@@ -195,9 +197,9 @@ class BillOfBehaviorTest {
         val json = bob.toJson()
         val parsed = BillOfBehavior.fromJson(json)
 
-        // Verifying that they are pruned losslessly!
-        assertEquals(setOf("/home/leanid/.sdkman", "/tmp/config.json"), parsed.opens)
-        assertEquals(setOf("/var/log/app.log"), parsed.fsWritePaths)
+        // Verifying that they are pruned to the most generic parent!
+        assertEquals(setOf("/home", "/tmp"), parsed.opens)
+        assertEquals(setOf("/var/log"), parsed.fsWritePaths)
         assertEquals(setOf(Syscall.OPEN), parsed.syscalls)
     }
 
@@ -275,6 +277,33 @@ class BillOfBehaviorTest {
         assertEquals("FileInputStream.java", parsedTraces1[0][0].fileName)
         assertEquals(123, parsedTraces1[0][0].lineNumber)
         assertEquals("java.base", parsedTraces1[0][0].moduleName)
+    }
+
+    @Test
+    fun `toPolicy should resolve relative paths against baseCwd`() {
+        val bob = BillOfBehavior(opens = setOf("config/settings.json"))
+        val baseCwd = Paths.get("/opt/app")
+        val policy = bob.toPolicy(baseCwd = baseCwd)
+
+        assertEquals(setOf("/opt/app/config/settings.json"), policy.allowedFsReadPaths.map { it.value }.toSet())
+    }
+
+    @Test
+    fun `toPolicy should throw on relative paths when baseCwd is missing`() {
+        val bob = BillOfBehavior(opens = setOf("config/settings.json"))
+
+        assertFailsWith<IllegalArgumentException> {
+            bob.toPolicy()
+        }
+    }
+
+    @Test
+    fun `toJson should throw on relative paths`() {
+        val bob = BillOfBehavior(opens = setOf("config/settings.json"))
+
+        assertFailsWith<IllegalArgumentException> {
+            bob.toJson()
+        }
     }
 
     @Test

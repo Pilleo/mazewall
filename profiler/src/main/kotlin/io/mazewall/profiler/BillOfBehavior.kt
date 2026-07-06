@@ -8,6 +8,7 @@ import io.mazewall.BillOfBehaviorDto
 import io.mazewall.StackProfileEntryDto
 import io.mazewall.StackFrameDto
 import io.mazewall.core.Syscall
+import io.mazewall.sbob.PathNormalizer
 import io.mazewall.profiler.engine.TraceEvent
 import java.io.InputStream
 import java.nio.charset.StandardCharsets
@@ -38,8 +39,12 @@ data class BillOfBehavior(
 ) {
     /**
      * Compiles this bill of behavior into a [io.mazewall.Policy] starting from [base].
+     * Relative paths in the BoB are resolved against [baseCwd].
      */
-    fun toPolicy(base: Policy<*, Uncompiled> = Policy.PURE_COMPUTE_UNSAFE): Policy<PolicyScope.ThreadLocalOnly, Uncompiled> {
+    fun toPolicy(
+        base: Policy<*, Uncompiled> = Policy.PURE_COMPUTE_UNSAFE,
+        baseCwd: Path? = null,
+    ): Policy<PolicyScope.ThreadLocalOnly, Uncompiled> {
         @Suppress("UNCHECKED_CAST")
         val builder = Policy.threadLocalBuilder().base(base as Policy<PolicyScope.ThreadLocalOnly, *>)
         if (base.defaultAction == io.mazewall.core.SeccompAction.ACT_ALLOW) {
@@ -48,8 +53,8 @@ data class BillOfBehavior(
         } else {
             builder.allow(*syscalls.toTypedArray())
         }
-        val pOpens = pruneSubpaths(opens)
-        val pWrites = pruneSubpaths(fsWritePaths)
+        val pOpens = PathNormalizer.normalizeAndPrune(opens, baseCwd)
+        val pWrites = PathNormalizer.normalizeAndPrune(fsWritePaths, baseCwd)
         for (path in pOpens) builder.allowFsRead(io.mazewall.core.SandboxedPath.of(path, allowNonExistent = true))
         for (path in pWrites) builder.allowFsWrite(io.mazewall.core.SandboxedPath.of(path, allowNonExistent = true))
         return builder.build()
@@ -57,14 +62,16 @@ data class BillOfBehavior(
 
     /**
      * Emits a copy-pasteable Kotlin DSL snippet that reproduces the compiled policy.
+     * Relative paths in the BoB are resolved against [baseCwd].
      */
     fun toDsl(
         basePolicyName: String = "Policy.PURE_COMPUTE_UNSAFE",
         base: Policy<*, Uncompiled> = Policy.PURE_COMPUTE_UNSAFE,
+        baseCwd: Path? = null,
     ): String {
         val sb = StringBuilder()
-        val pOpens = pruneSubpaths(opens)
-        val pWrites = pruneSubpaths(fsWritePaths)
+        val pOpens = PathNormalizer.normalizeAndPrune(opens, baseCwd)
+        val pWrites = PathNormalizer.normalizeAndPrune(fsWritePaths, baseCwd)
         val isThreadLocal = pOpens.isNotEmpty() || pWrites.isNotEmpty()
 
         val builderCall = if (isThreadLocal) "Policy.threadLocalBuilder()" else "Policy.builder()"
@@ -89,22 +96,6 @@ data class BillOfBehavior(
         return sb.toString()
     }
 
-    private fun pruneSubpaths(paths: Set<String>): Set<String> {
-        if (paths.size <= 1) return paths
-
-        val sorted = paths.sorted()
-        val result = mutableListOf<String>()
-
-        for (path in sorted) {
-            val hasChild = sorted.any { other ->
-                other != path && other.startsWith(path)
-            }
-            if (!hasChild) {
-                result.add(path)
-            }
-        }
-        return result.toSet()
-    }
 
     /**
      * Merges two bills of behavior (union of all observations).
@@ -146,8 +137,8 @@ data class BillOfBehavior(
      * Serializes this Bill of Behavior into a clean SBoB JSON string.
      */
     fun toJson(): String {
-        val prunedOpens = pruneSubpaths(opens).sorted().toSet()
-        val prunedWrites = pruneSubpaths(fsWritePaths).sorted().toSet()
+        val prunedOpens = PathNormalizer.normalizeAndPrune(opens, null).sorted().toSet()
+        val prunedWrites = PathNormalizer.normalizeAndPrune(fsWritePaths, null).sorted().toSet()
         val sortedSyscalls = syscalls.sortedBy { it.name }.map { it.name }.toSet()
         val sortedExecs = execs.sorted().toSet()
 

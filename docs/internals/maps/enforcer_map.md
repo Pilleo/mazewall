@@ -204,6 +204,17 @@ graph TD
     issue_189_toctou_vulnerability_in_resolveabsolutepath_via_files_exists["🔴 Issue: TOCTOU Vulnerability in resolveAbsolutePath via Files.exists (HIGH)"]
     issue_190_unhandled_eintr_in_accept_in_supervisordaemonengine["🔴 Issue: Unhandled EINTR in accept in SupervisorDaemonEngine (MEDIUM)"]
     issue_191_jvm_validation_timeout_causes_denial_of_service_on_valid_syscalls["🔴 Issue: JVM Validation Timeout Causes Denial of Service on Valid Syscalls (MEDIUM)"]
+    issue_192_silent_test_logging_except_on_failure["🔴 Issue: Silent Test Logging with Vocal Output on Failure (HIGH)"]
+    issue_193_review_orchestrator_prompts_jules_quality_safety_guidelines["🔴 Issue: Review and Enhance Orchestrator Prompts for Jules to Enforce Quality and Safety Guidelines (HIGH)"]
+    issue_194_reduce_telegram_messages_and_terminal_bells["🔴 Issue: Reduce Telegram Notification and Terminal Bell Spam on Status Changes (HIGH)"]
+    issue_195_jules_session_id_parsing_bug["🔴 Issue: Fix Jules Session ID Parsing Bug (HIGH)"]
+    issue_196_token_efficient_pr_review_diff_injection["🔴 Issue: Implement Token-Efficient PR Review via Diff Injection (HIGH)"]
+    issue_197_graceful_fallback_for_ai_agent_failures["🔴 Issue: Graceful Fallback for AI Agent Failures (HIGH)"]
+    issue_198_auto_closing_linked_github_issues["🔴 Issue: Auto-Closing Linked GitHub Issues (HIGH)"]
+    issue_199_orchestrator_state_machine_refactor["🔴 Issue: Orchestrator State Machine Refactor (HIGH)"]
+    issue_200_orchestrator_resiliency_and_configuration_improvements["🔴 Issue: Orchestrator Resiliency and Configuration Improvements (HIGH)"]
+    issue_201_enhance_task_approval_telegram_message_context["🔴 Issue: Enhance Task Approval Telegram Message with Full Context (HIGH)"]
+    issue_202_handle_cli_authentication_failures["🔴 Issue: Detect and Handle CLI Authentication Failures with Actionable Login Alerts (HIGH)"]
     run_containerized_tests_sh["💻 Source: run_containerized_tests.sh"]
     supervisor_proxy_design_md["💻 Source: supervisor_proxy_design.md"]
     BpfFilter_kt -->|Governed by| containment_design
@@ -455,6 +466,17 @@ graph TD
     click issue_189_toctou_vulnerability_in_resolveabsolutepath_via_files_exists "../backlog/security/issue-189-toctou-vulnerability-in-resolveabsolutepath-via-files-exists.md"
     click issue_190_unhandled_eintr_in_accept_in_supervisordaemonengine "../backlog/security/issue-190-unhandled-eintr-in-accept-in-supervisordaemonengine.md"
     click issue_191_jvm_validation_timeout_causes_denial_of_service_on_valid_syscalls "../backlog/security/issue-191-jvm-validation-timeout-causes-denial-of-service-on-valid-syscalls.md"
+    click issue_192_silent_test_logging_except_on_failure "../backlog/testing/issue-192-silent-test-logging-except-on-failure.md"
+    click issue_193_review_orchestrator_prompts_jules_quality_safety_guidelines "../backlog/code_health/issue-193-review-orchestrator-prompts-jules-quality-safety-guidelines.md"
+    click issue_194_reduce_telegram_messages_and_terminal_bells "../backlog/code_health/issue-194-reduce-telegram-messages-and-terminal-bells.md"
+    click issue_195_jules_session_id_parsing_bug "../backlog/code_health/issue-195-jules-session-id-parsing-bug.md"
+    click issue_196_token_efficient_pr_review_diff_injection "../backlog/performance/issue-196-token-efficient-pr-review-diff-injection.md"
+    click issue_197_graceful_fallback_for_ai_agent_failures "../backlog/code_health/issue-197-graceful-fallback-for-ai-agent-failures.md"
+    click issue_198_auto_closing_linked_github_issues "../backlog/code_health/issue-198-auto-closing-linked-github-issues.md"
+    click issue_199_orchestrator_state_machine_refactor "../backlog/code_health/issue-199-orchestrator-state-machine-refactor.md"
+    click issue_200_orchestrator_resiliency_and_configuration_improvements "../backlog/code_health/issue-200-orchestrator-resiliency-and-configuration-improvements.md"
+    click issue_201_enhance_task_approval_telegram_message_context "../backlog/code_health/issue-201-enhance-task-approval-telegram-message-context.md"
+    click issue_202_handle_cli_authentication_failures "../backlog/code_health/issue-202-handle-cli-authentication-failures.md"
 ```
 
 <!-- KNOWLEDGE_MAP_END -->
