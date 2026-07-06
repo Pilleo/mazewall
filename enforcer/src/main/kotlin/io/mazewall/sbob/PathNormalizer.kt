@@ -6,7 +6,7 @@ import java.nio.file.Paths
 /**
  * Handles normalization, canonicalization, and pruning of filesystem paths.
  */
-internal object PathNormalizer {
+public object PathNormalizer {
     /**
      * Resolves all paths against [baseCwd] if they are relative, normalizes them,
      * and prunes redundant subpaths (e.g. if /tmp/ is allowed, /tmp/foo is pruned).

@@ -28,7 +28,7 @@ class JvmFloorProfilingTest : BaseIntegrationTest() {
         val bob = StraceProfiler.profile(JvmFloorWorkloadWrapper::class.java)
 
         println("\n=== GENERATED JVM FLOOR BILL OF BEHAVIOR ===")
-        println(bob.toDsl())
+        println(bob.toDsl(baseCwd = java.nio.file.Paths.get("").toAbsolutePath()))
         println("============================================")
 
         // Basic assertions to ensure we captured the essentials
