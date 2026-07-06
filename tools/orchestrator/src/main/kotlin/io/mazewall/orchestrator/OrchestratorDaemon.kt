@@ -316,16 +316,16 @@ class OrchestratorDaemonRunner(
                         context.lastReviewedSha = currentSha
                     } else {
                         val requestComment = comments.firstOrNull {
-                            (it.body.contains("@jules") || it.body.contains("@google-labs-jules")) &&
+                            (it.body.contains("@jules")) &&
                             it.body.contains(shaPrefix)
                         }
 
                         if (requestComment == null) {
                             println("🤖 Requesting Jules review for PR #$prNumber (SHA: $currentSha)...")
-                            bot?.sendMessage("🤖 *PR #$prNumber Build Passed.* Asking @google-labs-jules to review SHA `${shaPrefix}`...")
+                            bot?.sendMessage("🤖 *PR #$prNumber Build Passed.* Asking @jules to review SHA `${shaPrefix}`...")
 
                             val prompt = """
-                                @google-labs-jules @jules Please perform a critical code review on this Pull Request (SHA: $currentSha) as a senior JVM security expert and staff engineer for the `mazewall` project.
+                                @jules Please perform a critical code review on this Pull Request (SHA: $currentSha) as a senior JVM security expert and staff engineer for the `mazewall` project.
 
                                 Provide a detailed response covering:
 
@@ -358,7 +358,7 @@ class OrchestratorDaemonRunner(
                                 context.lastReviewedSha = currentSha
                                 ringTerminalBell(3)
                             } else {
-                                println("⌛ Waiting for Jules (@google-labs-jules) to complete review on PR #$prNumber (SHA: $shaPrefix)...")
+                                println("⌛ Waiting for Jules (@jules) to complete review on PR #$prNumber (SHA: $shaPrefix)...")
                             }
                         }
                     }

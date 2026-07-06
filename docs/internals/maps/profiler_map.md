@@ -94,7 +94,6 @@ graph TD
     issue_043_phantom_types_for_context_aware_capability_tokens["🔴 Issue: Phantom Types for Context-Aware Capability Tokens (ENHANCEMENT)"]
     issue_044_type_state_enforced_bpf_dsl["🔴 Issue: Type-State Enforced BPF DSL (ENHANCEMENT)"]
     issue_045_standard_java_concurrency_virtual_threads_completablefuture_["🔴 Issue: Standard Java Concurrency (`Virtual Threads`, `CompletableFuture`) trivially bypasses Thread-Scoped (Tier 2) containment without ACE (CRITICAL)"]
-    issue_049_sbobparser_lacks_context_aware_working_directory_resolution_["🔴 Issue: `SbobParser` lacks Context-Aware Working Directory resolution for Relative Paths (HIGH)"]
     issue_056_iterativeprofiler_infinite_retry_loop_and_failure_on_disjoin["🔴 Issue: `IterativeProfiler` infinite retry loop and failure on disjoint prefix file paths (HIGH)"]
     issue_058_sbobparser_syntactic_pruning_inaccuracy["🔴 Issue: `SbobParser` Syntactic Pruning Inaccuracy (HIGH)"]
     issue_059_iterativeprofiler_context_loss_via_thread_creation["🔴 Issue: `IterativeProfiler` Context Loss via thread creation (HIGH)"]
@@ -219,7 +218,6 @@ graph TD
     issue_043_phantom_types_for_context_aware_capability_tokens -->|Affects| io_mazewall_NativeTransaction
     issue_044_type_state_enforced_bpf_dsl -->|Affects| io_mazewall_seccomp_BpfProgram_BDL
     issue_045_standard_java_concurrency_virtual_threads_completablefuture_ -->|Affects| io_mazewall_enforcer_ContainedExecutors
-    issue_049_sbobparser_lacks_context_aware_working_directory_resolution_ -->|Affects| io_mazewall_SbobParser
     issue_056_iterativeprofiler_infinite_retry_loop_and_failure_on_disjoin -->|Affects| IterativeProfiler_kt
     issue_058_sbobparser_syntactic_pruning_inaccuracy -->|Affects| io_mazewall_SbobParser_kt
     issue_059_iterativeprofiler_context_loss_via_thread_creation -->|Affects| IterativeProfiler_kt
@@ -341,7 +339,6 @@ graph TD
     click issue_043_phantom_types_for_context_aware_capability_tokens "../backlog/testing/issue-043-phantom-types-for-context-aware-capability-tokens.md"
     click issue_044_type_state_enforced_bpf_dsl "../backlog/security/issue-044-type-state-enforced-bpf-dsl.md"
     click issue_045_standard_java_concurrency_virtual_threads_completablefuture_ "../backlog/security/issue-045-standard-java-concurrency-virtual-threads-completablefuture-.md"
-    click issue_049_sbobparser_lacks_context_aware_working_directory_resolution_ "../backlog/security/issue-049-sbobparser-lacks-context-aware-working-directory-resolution-.md"
     click issue_056_iterativeprofiler_infinite_retry_loop_and_failure_on_disjoin "../backlog/testing/issue-056-iterativeprofiler-infinite-retry-loop-and-failure-on-disjoin.md"
     click issue_058_sbobparser_syntactic_pruning_inaccuracy "../backlog/testing/issue-058-sbobparser-syntactic-pruning-inaccuracy.md"
     click issue_059_iterativeprofiler_context_loss_via_thread_creation "../backlog/performance/issue-059-iterativeprofiler-context-loss-via-thread-creation.md"
