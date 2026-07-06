@@ -1099,7 +1099,7 @@ io.mazewall.StackProfileEntryDto --> io.mazewall.StackFrameDto
 io.mazewall.core.FileDescriptor --> io.mazewall.core.FileDescriptor
 io.mazewall.enforcer.ContainedExecutors --> io.mazewall.enforcer.ContainedExecutors
 io.mazewall.enforcer.ContainerState --> io.mazewall.seccomp.SeccompInstallationState
-io.mazewall.enforcer.ContainerState --> io.mazewall.PolicyDefinition
+io.mazewall.enforcer.ContainerState --> io.mazewall.core.SandboxedPath
 io.mazewall.enforcer.ContainerState --> io.mazewall.core.SeccompAction
 io.mazewall.enforcer.ContainmentViolationDetector --> io.mazewall.enforcer.ViolationMatcher
 io.mazewall.enforcer.ContainmentViolationDetector --> io.mazewall.enforcer.ContainmentViolationDetector
