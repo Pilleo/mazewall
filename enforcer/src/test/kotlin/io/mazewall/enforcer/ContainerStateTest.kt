@@ -31,4 +31,13 @@ class ContainerStateTest {
 
         assertEquals(SeccompInstallationState.Verified, nextState.engineState)
     }
+
+    @Test
+    fun `test withLandlockPolicy updates state correctly`() {
+        val initialState = ContainerState()
+        val policy = Policy.PURE_COMPUTE.definition
+        val nextState = initialState.withLandlockPolicy(policy)
+
+        assertEquals(policy, nextState.landlockPolicy)
+    }
 }

@@ -1,14 +1,14 @@
 ---
 title: "Redundant State in `ThreadStateRegistry` vs `Policy`"
 severity: "HIGH"
-status: "open"
+status: "resolved"
 priority: 9
 dependencies: []
 component: "enforcer"
 effort: "medium"
 ---
 
-# 🔴 [Severity: LOW]: Redundant State in `ThreadStateRegistry` vs `Policy`
+# ✅ [Severity: LOW]: Redundant State in `ThreadStateRegistry` vs `Policy`
 
 **Target:** `io.mazewall.enforcer.ThreadStateRegistry`
 **Context:** The registry manually tracks `landlockAppliedReads` and `landlockAppliedWrites`, partially duplicating the information already contained within the `Policy` object (DRY violation).
