@@ -209,7 +209,6 @@ graph TD
     issue_196_token_efficient_pr_review_diff_injection["🔴 Issue: Implement Token-Efficient PR Review via Diff Injection (HIGH)"]
     issue_197_graceful_fallback_for_ai_agent_failures["🔴 Issue: Graceful Fallback for AI Agent Failures (HIGH)"]
     issue_198_auto_closing_linked_github_issues["🔴 Issue: Auto-Closing Linked GitHub Issues (HIGH)"]
-    issue_199_orchestrator_state_machine_refactor["🔴 Issue: Orchestrator State Machine Refactor (HIGH)"]
     issue_200_orchestrator_resiliency_and_configuration_improvements["🔴 Issue: Orchestrator Resiliency and Configuration Improvements (HIGH)"]
     issue_201_enhance_task_approval_telegram_message_context["🔴 Issue: Enhance Task Approval Telegram Message with Full Context (HIGH)"]
     issue_202_handle_cli_authentication_failures["🔴 Issue: Detect and Handle CLI Authentication Failures with Actionable Login Alerts (HIGH)"]
@@ -465,7 +464,6 @@ graph TD
     click issue_196_token_efficient_pr_review_diff_injection "../backlog/performance/issue-196-token-efficient-pr-review-diff-injection.md"
     click issue_197_graceful_fallback_for_ai_agent_failures "../backlog/code_health/issue-197-graceful-fallback-for-ai-agent-failures.md"
     click issue_198_auto_closing_linked_github_issues "../backlog/code_health/issue-198-auto-closing-linked-github-issues.md"
-    click issue_199_orchestrator_state_machine_refactor "../backlog/code_health/issue-199-orchestrator-state-machine-refactor.md"
     click issue_200_orchestrator_resiliency_and_configuration_improvements "../backlog/code_health/issue-200-orchestrator-resiliency-and-configuration-improvements.md"
     click issue_201_enhance_task_approval_telegram_message_context "../backlog/code_health/issue-201-enhance-task-approval-telegram-message-context.md"
     click issue_202_handle_cli_authentication_failures "../backlog/code_health/issue-202-handle-cli-authentication-failures.md"
