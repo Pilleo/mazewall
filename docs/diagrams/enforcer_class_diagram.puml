@@ -436,14 +436,13 @@ class "ContainerState" as io.mazewall.enforcer.ContainerState {
   +Set<Syscall> getAllowedSyscalls()
   +SeccompAction getDefaultAction()
   +Map<Syscall, SeccompAction> getSyscallActions()
-  +Set<SandboxedPath> getLandlockAppliedReads()
-  +Set<SandboxedPath> getLandlockAppliedWrites()
+  +PolicyDefinition<?> getLandlockPolicy()
   +SeccompInstallationState getEngineState()
   +boolean getAllowsMmapExec()
   +boolean getAllowsNonThreadClone()
   +boolean getAllowsUnsafePrctl()
   +ContainerState withNewSeccompPolicy(PolicyDefinition<?>, Map<Syscall, ? extends SeccompAction>, SeccompAction)
-  +ContainerState withLandlockPaths(Set<SandboxedPath>, Set<SandboxedPath>)
+  +ContainerState withLandlockPolicy(PolicyDefinition<?>)
   +ContainerState withEngineState(SeccompInstallationState)
 }
 class "ContainmentViolationDetector" as io.mazewall.enforcer.ContainmentViolationDetector {
