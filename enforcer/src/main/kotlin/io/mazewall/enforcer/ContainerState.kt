@@ -14,8 +14,7 @@ internal data class ContainerState(
     val allowedSyscalls: Set<Syscall>? = null,
     val defaultAction: SeccompAction = SeccompAction.ACT_ALLOW,
     val syscallActions: Map<Syscall, SeccompAction> = emptyMap(),
-    val landlockAppliedReads: Set<SandboxedPath>? = null,
-    val landlockAppliedWrites: Set<SandboxedPath>? = null,
+    val landlockPolicy: PolicyDefinition<*>? = null,
     val engineState: SeccompInstallationState = SeccompInstallationState.Uninitialized,
     val allowsMmapExec: Boolean = true,
     val allowsNonThreadClone: Boolean = true,
@@ -55,12 +54,10 @@ internal data class ContainerState(
         )
     }
 
-    fun withLandlockPaths(
-        reads: Set<SandboxedPath>,
-        writes: Set<SandboxedPath>
+    fun withLandlockPolicy(
+        policy: PolicyDefinition<*>
     ): ContainerState = copy(
-        landlockAppliedReads = reads,
-        landlockAppliedWrites = writes
+        landlockPolicy = policy
     )
 
     fun withEngineState(next: SeccompInstallationState): ContainerState = copy(engineState = next)

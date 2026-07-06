@@ -152,24 +152,27 @@ object ContainedExecutors {
         if (!needsLandlock(policy)) return
 
         val state = if (processWide) ProcessStateRegistry.state else ThreadStateRegistry.state
-        val appliedReads = state.landlockAppliedReads
-        val appliedWrites = state.landlockAppliedWrites
+        val landlockPolicy = state.landlockPolicy
 
-        if (appliedReads != null && appliedWrites != null) {
+        if (landlockPolicy != null) {
             // Assert that we are not trying to expand Landlock filesystem permissions on nested containment
-            val readsSubset = isPathSubset(appliedReads, policy.allowedFsReadPaths)
-            val writesSubset = isPathSubset(appliedWrites, policy.allowedFsWritePaths)
+            val readsSubset = isPathSubset(landlockPolicy.allowedFsReadPaths, policy.allowedFsReadPaths)
+            val writesSubset = isPathSubset(landlockPolicy.allowedFsWritePaths, policy.allowedFsWritePaths)
             if (!readsSubset || !writesSubset) {
                 throw IllegalStateException("Cannot expand Landlock filesystem permissions on an already restricted thread.")
             }
         }
 
-        if (appliedReads != policy.allowedFsReadPaths || appliedWrites != policy.allowedFsWritePaths) {
+        val isDifferent = landlockPolicy == null ||
+            landlockPolicy.allowedFsReadPaths != policy.allowedFsReadPaths ||
+            landlockPolicy.allowedFsWritePaths != policy.allowedFsWritePaths
+
+        if (isDifferent) {
             Landlock.applyRuleset(policy, processWide)
             if (processWide) {
-                ProcessStateRegistry.update { it.withLandlockPaths(policy.allowedFsReadPaths, policy.allowedFsWritePaths) }
+                ProcessStateRegistry.update { it.withLandlockPolicy(policy) }
             } else {
-                ThreadStateRegistry.state = ThreadStateRegistry.state.withLandlockPaths(policy.allowedFsReadPaths, policy.allowedFsWritePaths)
+                ThreadStateRegistry.state = ThreadStateRegistry.state.withLandlockPolicy(policy)
             }
         }
     }
@@ -240,8 +243,7 @@ object ContainedExecutors {
             allowsMmapExec = ts.allowsMmapExec && ps.allowsMmapExec,
             allowsNonThreadClone = ts.allowsNonThreadClone && ps.allowsNonThreadClone,
             allowsUnsafePrctl = ts.allowsUnsafePrctl && ps.allowsUnsafePrctl,
-            landlockAppliedReads = ts.landlockAppliedReads,
-            landlockAppliedWrites = ts.landlockAppliedWrites
+            landlockPolicy = ts.landlockPolicy ?: ps.landlockPolicy
         )
     }
 
