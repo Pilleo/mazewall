@@ -97,13 +97,10 @@ object StraceProfiler {
             val args = cleaned.substringAfter("(", "")
             val path = extractQuotedPath(args)
             if (path != null) {
-                // Ensure the path is absolute and normalized at capture time.
-                // For Tier-P StraceProfiler, we assume the child JVM's CWD is the same as the profiler's CWD.
-                val absolutePath = java.nio.file.Paths.get(path).toAbsolutePath().normalize().toString()
                 if (isWriteSyscall(syscallName, args)) {
-                    fsWritePaths.add(absolutePath)
+                    fsWritePaths.add(path)
                 } else {
-                    opens.add(absolutePath)
+                    opens.add(path)
                 }
             }
         }
