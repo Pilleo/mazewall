@@ -70,13 +70,13 @@ allprojects {
             dependsOn("ktlintFormat")
         }
         compilerOptions {
-            jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_22)
+            jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.valueOf("JVM_25"))
             freeCompilerArgs.add("-Xcontext-parameters")
         }
     }
 
     tasks.withType<JavaCompile>().configureEach {
-        options.release.set(22)
+        options.release.set(25)
     }
 
     tasks.matching { it.name == "ktlintCheck" || it.name == "ktlintTestSourceSetCheck" || it.name == "ktlintMainSourceSetCheck" }.configureEach {
