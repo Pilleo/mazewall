@@ -63,7 +63,11 @@ internal class SyscallPathResolver(
         val path = memoryReader.readStringFromProcess(tid, addr)
         ledger.record(SessionEvent.VmReadvResolved(System.nanoTime(), tid.value.toLong(), path != null))
         if (path == null) return null
-        return if (path.startsWith("/")) path else resolveRelativePath(tid, path, dirfd)
+        return if (path.startsWith("/")) {
+            java.nio.file.Paths.get(path).normalize().toString()
+        } else {
+            resolveRelativePath(tid, path, dirfd)
+        }
     }
 
     private fun resolveRelativePath(
@@ -71,7 +75,7 @@ internal class SyscallPathResolver(
         path: String,
         dirfd: Long,
     ): String {
-        val dirPath = if (isAtFdcwd(dirfd)) {
+        val dirPathStr = if (isAtFdcwd(dirfd)) {
             resolveCwd(tid)
         } else if (dirfd >= 0) {
             resolveFdPath(tid, dirfd.toInt())
@@ -79,10 +83,11 @@ internal class SyscallPathResolver(
             null
         }
 
-        if (dirPath == null) {
+        if (dirPathStr == null) {
             throw IllegalStateException("Failed to resolve absolute path for relative path '$path' (dirfd=$dirfd)")
         }
 
-        return if (dirPath.endsWith("/")) "$dirPath$path" else "$dirPath/$path"
+        val dirPath = java.nio.file.Paths.get(dirPathStr)
+        return dirPath.resolve(path).normalize().toString()
     }
 }

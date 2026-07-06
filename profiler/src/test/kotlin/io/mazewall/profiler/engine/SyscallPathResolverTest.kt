@@ -380,4 +380,30 @@ class SyscallPathResolverTest {
         org.junit.jupiter.api.Assertions.assertEquals("/opt/app/relative/path", resolved.paths[0])
         org.junit.jupiter.api.Assertions.assertEquals("/home/user/relative/path", resolved.paths[1])
     }
+
+    @Test
+    fun `test resolve absolute path with dots`() {
+        val reader = RecordingMockReader()
+        val pathPtr = 0x7fff_1000L
+        reader.addressToString[pathPtr] = "/home/user/../../etc/passwd"
+
+        val event = makeRawEvent("OPEN", listOf(pathPtr))
+        val resolved = makeResolver(reader).resolve(event)
+
+        assertEquals(listOf("/etc/passwd"), resolved.paths)
+    }
+
+    @Test
+    fun `test resolve relative path with dots`() {
+        val reader = RecordingMockReader()
+        val dirfd = AT_FDCWD_VAL
+        val pathPtr = 0x7fff_1000L
+        reader.addressToString[pathPtr] = "./relative/path"
+        reader.linkToPath["cwd"] = "/opt/app/."
+
+        val event = makeRawEvent("OPENAT", listOf(dirfd, pathPtr, 0L))
+        val resolved = makeResolver(reader).resolve(event)
+
+        assertEquals(listOf("/opt/app/relative/path"), resolved.paths)
+    }
 }
