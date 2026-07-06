@@ -111,7 +111,9 @@ class OrchestratorDaemonRunner(
                 e.printStackTrace()
                 try {
                     env.sendNotification("⚠️ *Daemon Error in State ${context.state.name}:* `${e.message}`. Retrying in 2 minutes...")
-                } catch (_: Exception) {}
+                } catch (notificationEx: Exception) {
+                    env.errPrintln("⚠️ Failed to send error notification: ${notificationEx.message}")
+                }
                 env.sleep(2, TimeUnit.MINUTES)
             }
         }
