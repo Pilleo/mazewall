@@ -1,5 +1,6 @@
 import org.gradle.api.publish.PublishingExtension
 import java.io.File
+import java.util.concurrent.ConcurrentHashMap
 
 plugins {
     alias(libs.plugins.kotlin)
@@ -61,6 +62,56 @@ allprojects {
     if (System.getenv("JITPACK") == "true") {
         tasks.withType<Test>().configureEach {
             enabled = false
+        }
+    }
+
+    val isVerbose = gradle.startParameter.logLevel in listOf(LogLevel.INFO, LogLevel.DEBUG)
+
+    tasks.withType<Test>().configureEach {
+        val failedTestsOutputs = ConcurrentHashMap<String, StringBuilder>()
+
+        if (isVerbose) {
+            testLogging {
+                events("passed", "skipped", "failed", "standardOut", "standardError")
+                exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
+                showExceptions = true
+                showCauses = true
+                showStackTraces = true
+            }
+        } else {
+            // Only log failed tests to keep console clean
+            testLogging {
+                events = setOf(org.gradle.api.tasks.testing.logging.TestLogEvent.FAILED)
+                exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
+                showExceptions = true
+                showCauses = true
+                showStackTraces = true
+                showStandardStreams = false
+            }
+
+            addTestOutputListener { descriptor, event ->
+                val testId = "${descriptor.className ?: "UnknownClass"}.${descriptor.name}"
+                failedTestsOutputs.getOrPut(testId) { StringBuilder() }.append(event.message)
+            }
+
+            addTestListener(object : TestListener {
+                override fun beforeSuite(suite: TestDescriptor) {}
+                override fun afterSuite(suite: TestDescriptor, result: TestResult) {}
+                override fun beforeTest(testDescriptor: TestDescriptor) {}
+                override fun afterTest(testDescriptor: TestDescriptor, result: TestResult) {
+                    val testId = "${testDescriptor.className ?: "UnknownClass"}.${testDescriptor.name}"
+                    if (result.resultType == TestResult.ResultType.FAILURE) {
+                        val output = failedTestsOutputs[testId]?.toString()
+                        if (!output.isNullOrBlank()) {
+                            // Using println(Any?) which maps to lifecycle
+                            println("\n=== Captured stdout/stderr for $testId ===")
+                            println(output)
+                            println("===========================================\n")
+                        }
+                    }
+                    failedTestsOutputs.remove(testId)
+                }
+            })
         }
     }
 
