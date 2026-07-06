@@ -282,6 +282,7 @@ sealed interface OrchestratorState {
                         """.trimIndent()
 
                         env.commentOnPr(prNumber, prompt)
+                        env.sleep(30, TimeUnit.SECONDS)
                         return this
                     } else {
                         val requestTime = java.time.Instant.parse(requestComment.createdAt)
