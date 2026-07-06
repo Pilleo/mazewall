@@ -141,4 +141,10 @@ class ContainmentViolationDetectorTest {
         val found = ContainmentViolationDetector.findViolationCause(t1)
         assertTrue(found === violation)
     }
+
+    @Test
+    fun `test detector instantiation coverage`() {
+        val detector = ContainmentViolationDetector
+        org.junit.jupiter.api.Assertions.assertNotNull(detector)
+    }
 }

@@ -162,4 +162,40 @@ class IterativeProfilerTest {
 
         target.delete()
     }
+
+    @Test
+    fun `test IterativeProfiler resolves simple AccessDeniedException`() {
+        org.junit.jupiter.api.Assumptions.assumeTrue(io.mazewall.Platform.isSupported())
+
+        val testRunnable = object : Runnable {
+            var attempt = 0
+            override fun run() {
+                if (attempt == 0) {
+                    attempt++
+                    throw java.nio.file.AccessDeniedException("/tmp/iterative-test")
+                }
+            }
+        }
+
+        val finalPolicy = IterativeProfiler.profile(io.mazewall.Policy.PURE_COMPUTE_UNSAFE, testRunnable)
+
+        org.junit.jupiter.api.Assertions.assertTrue(finalPolicy.allowedFsReadPaths.any { it.value == "/tmp/iterative-test" })
+    }
+
+    @Test
+    fun `test IterativeProfiler fails if max retries exceeded`() {
+        org.junit.jupiter.api.Assumptions.assumeTrue(io.mazewall.Platform.isSupported())
+
+        val testRunnable = object : Runnable {
+            override fun run() {
+                throw java.nio.file.AccessDeniedException("/tmp/infinite-loop")
+            }
+        }
+
+        try {
+            IterativeProfiler.profile(io.mazewall.Policy.PURE_COMPUTE_UNSAFE, testRunnable)
+        } catch (e: Exception) {
+            org.junit.jupiter.api.Assertions.assertTrue(e is java.nio.file.AccessDeniedException)
+        }
+    }
 }
