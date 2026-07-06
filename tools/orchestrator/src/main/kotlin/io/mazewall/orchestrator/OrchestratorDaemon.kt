@@ -172,12 +172,11 @@ class OrchestratorDaemonRunner(
         if (!approved) {
             println("⏭️ Task $issueId skipped by user. Postponing.")
             context.skippedIds.add(issueId)
-            bot?.sendMessage("⏭️ Task `$issueId` skipped. Will pick another.")
             context.state = OrchestratorState.SELECT_TASK
             return
         }
 
-        bot?.sendMessage("🚀 Starting task `$issueId`...")
+        println("🚀 Starting task `$issueId`...")
 
         // Retrieve or create GitHub issue
         var newGithubIssueNumber = context.githubIssueNumber
@@ -231,7 +230,6 @@ class OrchestratorDaemonRunner(
 
         if (GitHubCli.isIssueClosed(githubIssueNumber)) {
             println("\n\u001B[1;33m⚠️ GitHub issue #$githubIssueNumber was closed. Canceling task $issueId.\u001B[0m")
-            bot?.sendMessage("⚠️ GitHub issue #$githubIssueNumber was closed. Task `$issueId` canceled.")
             val nextIssue = BacklogParser.parseAllIssues(backlogDir).firstOrNull { it.id == issueId }
             if (nextIssue != null) {
                 BacklogParser.removeGithubIssue(nextIssue)
@@ -255,11 +253,8 @@ class OrchestratorDaemonRunner(
                 println("👉 Respond here: $sessionUrl")
                 ringTerminalBell(5)
             } else if (session.status.equals("Completed", ignoreCase = true)) {
-                val alertMsg = "🟢 *Jules task $issueId is Completed!* Ready to publish PR: $sessionUrl"
-                bot?.sendMessage(alertMsg)
                 println("\n\u001B[1;32m🟢 [COMPLETED] Jules task $issueId is Completed! Please review and publish the PR in the UI.\u001B[0m")
                 println("👉 Publish PR here: $sessionUrl")
-                ringTerminalBell(5)
             }
         }
 
@@ -281,8 +276,7 @@ class OrchestratorDaemonRunner(
         val issueId = context.currentIssueId ?: throw IllegalStateException("currentIssueId is null")
 
         if (GitHubCli.isPrMerged(prNumber)) {
-            println("PR #$prNumber merged!")
-            bot?.sendMessage("🎉 PR #$prNumber merged! resolving issue locally...")
+            println("🎉 PR #$prNumber merged! resolving issue locally...")
             context.state = OrchestratorState.RESOLVE_TASK
             return
         }
@@ -321,8 +315,7 @@ class OrchestratorDaemonRunner(
                         }
 
                         if (requestComment == null) {
-                            println("🤖 Requesting Jules review for PR #$prNumber (SHA: $currentSha)...")
-                            bot?.sendMessage("🤖 *PR #$prNumber Build Passed.* Asking @jules to review SHA `${shaPrefix}`...")
+                            println("🤖 PR #$prNumber Build Passed. Requesting Jules review for SHA: $currentSha")
 
                             val prompt = """
                                 @jules Please perform a critical code review on this Pull Request (SHA: $currentSha) as a senior JVM security expert and staff engineer for the `mazewall` project.
@@ -419,7 +412,7 @@ class OrchestratorDaemonRunner(
 
         println("Regenerating architectural maps...")
         executeCmd("./gradlew", "generateKnowledgeMap")
-        bot?.sendMessage("✅ Resolved issue `$issueId`. Picking next task...")
+        println("✅ Resolved issue `$issueId`. Picking next task...")
 
         clearActiveTask()
         stateFile.delete()
@@ -462,7 +455,7 @@ fun main() {
     val resolvedDir = File(backlogDir, "resolved")
     val stateFile = File(".orchestrator_state.properties")
 
-    bot?.sendMessage("🤖 *Orchestrator Daemon Online* in repo `$julesRepo`.")
+    println("🤖 *Orchestrator Daemon Online* in repo `$julesRepo`.")
 
     val runner = OrchestratorDaemonRunner(bot, backlogDir, resolvedDir, stateFile)
     runner.run()
