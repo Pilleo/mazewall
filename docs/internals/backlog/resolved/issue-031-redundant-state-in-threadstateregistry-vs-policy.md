@@ -1,11 +1,12 @@
 ---
 title: "Redundant State in `ThreadStateRegistry` vs `Policy`"
 severity: "HIGH"
-status: "open"
+status: "resolved"
 priority: 9
 dependencies: []
 component: "enforcer"
 effort: "medium"
+github_issue: 52
 ---
 
 # 🔴 [Severity: LOW]: Redundant State in `ThreadStateRegistry` vs `Policy`

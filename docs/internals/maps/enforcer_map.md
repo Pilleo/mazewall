@@ -51,7 +51,6 @@ graph TD
     io_mazewall_enforcer_ContainedExecutors["💻 Source: io.mazewall.enforcer.ContainedExecutors"]
     io_mazewall_enforcer_ContainedExecutors_kt["💻 Source: io.mazewall.enforcer.ContainedExecutors.kt"]
     io_mazewall_enforcer_ContainerStateRegistry_kt["💻 Source: io.mazewall.enforcer.ContainerStateRegistry.kt"]
-    io_mazewall_enforcer_ThreadStateRegistry["💻 Source: io.mazewall.enforcer.ThreadStateRegistry"]
     io_mazewall_ffi["💻 Source: io.mazewall.ffi"]
     io_mazewall_ffi_Layouts["💻 Source: io.mazewall.ffi.Layouts"]
     io_mazewall_landlock_Landlock["💻 Source: io.mazewall.landlock.Landlock"]
@@ -85,7 +84,6 @@ graph TD
     issue_028_phantom_types_for_thread_pool_containment_constraints_sandbo["🔴 Issue: Phantom Types for Thread Pool Containment Constraints (`SandboxedExecutor`) (ENHANCEMENT)"]
     issue_029_proof_of_progress_state_machine_for_landlock_discovery_disco["🔴 Issue: Proof-of-Progress State Machine for Landlock Discovery (`DiscoveryTask<Status>`) (ENHANCEMENT)"]
     issue_030_architectural_dip_dependency_inversion_violations_in_native_["🔴 Issue: Architectural DIP (Dependency Inversion) Violations in Native Scopes (HIGH)"]
-    issue_031_redundant_state_in_threadstateregistry_vs_policy["🔴 Issue: Redundant State in `ThreadStateRegistry` vs `Policy` (HIGH)"]
     issue_032_compile_time_bpf_termination_safety_type_state_ret_enforceme["🔴 Issue: Compile-Time BPF Termination Safety (Type-State RET Enforcement) (ENHANCEMENT)"]
     issue_034_high_frequency_arena_allocation_overhead_mm_optimization["🔴 Issue: High-Frequency Arena Allocation Overhead (MM Optimization) (MEDIUM)"]
     issue_035_memory_segment_pooling_for_profiler_usernotif["🔴 Issue: Memory Segment Pooling for Profiler USER_NOTIF (ENHANCEMENT)"]
@@ -220,7 +218,6 @@ graph TD
     issue_027_archunit_enforce_errno_capture_locality_wrapper -->|Affects| io_mazewall_ffi
     issue_028_phantom_types_for_thread_pool_containment_constraints_sandbo -->|Affects| io_mazewall_enforcer_ContainedExecutors
     issue_029_proof_of_progress_state_machine_for_landlock_discovery_disco -->|Affects| io_mazewall_profiler_IterativeProfiler
-    issue_031_redundant_state_in_threadstateregistry_vs_policy -->|Affects| io_mazewall_enforcer_ThreadStateRegistry
     issue_036_residual_interface_segregation_violation_isp_in_nativeengine -->|Affects| io_mazewall_NativeEngine
     issue_037_seccompaction_violates_openclosed_principle_ocp -->|Affects| io_mazewall_core_SeccompAction
     issue_038_type_state_for_filedescriptor_lifecycles_compile_time_use_af -->|Affects| io_mazewall_core_FileDescriptor
@@ -340,7 +337,6 @@ graph TD
     click issue_028_phantom_types_for_thread_pool_containment_constraints_sandbo "../backlog/testing/issue-028-phantom-types-for-thread-pool-containment-constraints-sandbo.md"
     click issue_029_proof_of_progress_state_machine_for_landlock_discovery_disco "../backlog/security/issue-029-proof-of-progress-state-machine-for-landlock-discovery-disco.md"
     click issue_030_architectural_dip_dependency_inversion_violations_in_native_ "../backlog/testing/issue-030-architectural-dip-dependency-inversion-violations-in-native-.md"
-    click issue_031_redundant_state_in_threadstateregistry_vs_policy "../backlog/security/issue-031-redundant-state-in-threadstateregistry-vs-policy.md"
     click issue_032_compile_time_bpf_termination_safety_type_state_ret_enforceme "../backlog/code_health/issue-032-compile-time-bpf-termination-safety-type-state-ret-enforceme.md"
     click issue_034_high_frequency_arena_allocation_overhead_mm_optimization "../backlog/performance/issue-034-high-frequency-arena-allocation-overhead-mm-optimization.md"
     click issue_035_memory_segment_pooling_for_profiler_usernotif "../backlog/security/issue-035-memory-segment-pooling-for-profiler-usernotif.md"

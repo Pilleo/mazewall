@@ -6,6 +6,7 @@ priority: 9
 dependencies: []
 component: "unknown"
 effort: "medium"
+github_issue: 54
 ---
 
 # 🔴 [Severity: MEDIUM]: `SbobParser` lacks Context-Aware Working Directory resolution for Relative Paths
