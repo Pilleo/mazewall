@@ -11,6 +11,7 @@ public object PolicyPresets {
     public val PURE_COMPUTE_UNSAFE: PolicyDefinition<PolicyScope.ProcessWideSafe> =
         PolicyBuilder<PolicyScope.ProcessWideSafe>()
             .defaultAction(SeccompAction.ACT_ALLOW)
+            .allowMmapExec()
             .block(Syscall.CONNECT, Syscall.SENDTO, Syscall.SENDMSG, Syscall.SENDMMSG, Syscall.RECVMMSG, Syscall.SOCKET)
             .block(Syscall.BIND, Syscall.LISTEN, Syscall.ACCEPT, Syscall.ACCEPT4)
             .block(Syscall.EXECVE, Syscall.EXECVEAT)
@@ -28,6 +29,7 @@ public object PolicyPresets {
     @JvmField
     public val NO_EXEC: PolicyDefinition<PolicyScope.ProcessWideSafe> =
         PolicyBuilder<PolicyScope.ProcessWideSafe>()
+            .allowMmapExec()
             .block(Syscall.EXECVE, Syscall.EXECVEAT, Syscall.MEMFD_CREATE)
             .build()
 

@@ -14,7 +14,7 @@ fun interface ViolationMatcher {
 object ContainmentViolationDetector {
     private val MATCHERS = CopyOnWriteArrayList<ViolationMatcher>()
 
-    private val ERRNO_VIOLATION_REGEX = Regex("""\b(error|errno)[=:]\s*(1|13)\b""")
+    private val ERRNO_VIOLATION_REGEX = Regex("""\b(error|errno)[=:]?\s*(1|13|22)\b""")
 
     val DENIED_PHRASES = arrayOf(
         "Operation not permitted",
@@ -55,7 +55,7 @@ object ContainmentViolationDetector {
         }
         registerMatcher { t ->
             val msg = t.message ?: return@registerMatcher false
-            t is IOException && VIOLATION_PHRASES_REGEX.containsMatchIn(msg)
+            t is IOException && (VIOLATION_PHRASES_REGEX.containsMatchIn(msg) || ERRNO_VIOLATION_REGEX.containsMatchIn(msg))
         }
     }
 

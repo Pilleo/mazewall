@@ -4,13 +4,11 @@ import io.mazewall.BaseIntegrationTest
 import io.mazewall.IsolatedProcessTester
 import io.mazewall.Policy
 import io.mazewall.core.Syscall
-import io.mazewall.enforcer.supervisor.SupervisorInstaller
 import org.junit.jupiter.api.Test
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
-import kotlin.test.assertTrue
 import kotlin.test.assertEquals
 
 class ShutdownRaceConditionTest : BaseIntegrationTest() {
@@ -24,9 +22,13 @@ class ShutdownRaceConditionTest : BaseIntegrationTest() {
 
         executor.execute {
             try {
+                // Ensure we are in a clean state for this thread
+                // Note: state is thread-local
+                ThreadStateRegistry.state = ContainerState()
+
                 ContainedExecutors.installOnCurrentThread(policy)
             } catch (e: Exception) {
-                // Expected to be interrupted
+                // Expected to be interrupted or fail
             } catch (t: Throwable) {
                 error.set(t)
             } finally {
