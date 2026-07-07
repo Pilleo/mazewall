@@ -16,8 +16,8 @@ sealed interface OrchestratorState {
             val nextIssue = DependencyGraph.selectNextIssue(activeIssues)
 
             if (nextIssue == null) {
-                env.println("💤 No unblocked open issues found. Checking again in 2 minutes...")
-                env.sleep(2, TimeUnit.MINUTES)
+                env.println("💤 No unblocked open issues found. Checking again in ${env.config.backlogCheckIntervalMinutes} minutes...")
+                env.sleep(env.config.backlogCheckIntervalMinutes, TimeUnit.MINUTES)
                 return this
             }
 
@@ -55,6 +55,7 @@ sealed interface OrchestratorState {
             }
 
             env.println("🚀 Starting task `$issueId`...")
+            context.startTime = System.currentTimeMillis()
 
             // Retrieve or create GitHub issue
             var newGithubIssueNumber = context.githubIssueNumber
@@ -87,9 +88,9 @@ sealed interface OrchestratorState {
             val issueId = context.currentIssueId ?: throw IllegalStateException("currentIssueId is null")
             var activeSession = env.getJulesSession(issueId)
             var attempts = 0
-            while (activeSession == null && attempts < 12) {
-                env.println("Waiting for Jules session to be automatically triggered via GitHub issue label (attempt ${attempts + 1}/12)...")
-                env.sleep(15, TimeUnit.SECONDS)
+            while (activeSession == null && attempts < env.config.julesTriggerAttempts) {
+                env.println("Waiting for Jules session to be automatically triggered via GitHub issue label (attempt ${attempts + 1}/${env.config.julesTriggerAttempts})...")
+                env.sleep(env.config.julesTriggerIntervalSeconds, TimeUnit.SECONDS)
                 activeSession = env.getJulesSession(issueId)
                 attempts++
             }
@@ -99,6 +100,11 @@ sealed interface OrchestratorState {
                 context.julesSessionId = activeSession.id
                 AWAITING_PR
             } else {
+                if (isTaskTimedOut(context, env.config)) {
+                    env.errPrintln("❌ Task $issueId timed out waiting for Jules session. Returning to SELECT_TASK.")
+                    context.clearActiveTask()
+                    return SELECT_TASK
+                }
                 env.println("⚠️ Jules session did not trigger. Retrying in 1 minute...")
                 env.sleep(1, TimeUnit.MINUTES)
                 this
@@ -149,8 +155,13 @@ sealed interface OrchestratorState {
                 context.lastBuildStatus = null
                 CI_RUNNING
             } else {
+                if (isTaskTimedOut(context, env.config)) {
+                    env.errPrintln("❌ Task $issueId timed out after ${env.config.taskTimeoutThresholdMinutes} minutes. Returning to SELECT_TASK.")
+                    context.clearActiveTask()
+                    return SELECT_TASK
+                }
                 env.println("Waiting for Jules to open a PR for issue #$githubIssueNumber...")
-                env.sleep(30, TimeUnit.SECONDS)
+                env.sleep(env.config.pollingIntervalSeconds, TimeUnit.SECONDS)
                 this
             }
         }
@@ -180,6 +191,12 @@ sealed interface OrchestratorState {
                 context.lastCheckedSha = currentSha
             }
 
+            if (isTaskTimedOut(context, env.config)) {
+                env.errPrintln("❌ Task $issueId timed out in CI_RUNNING. Returning to SELECT_TASK.")
+                context.clearActiveTask()
+                return SELECT_TASK
+            }
+
             return when (status) {
                 "SUCCESS" -> AWAITING_REVIEW
                 "FAILURE" -> {
@@ -202,7 +219,7 @@ sealed interface OrchestratorState {
                     } else {
                         env.println("❌ Build is still failing on SHA $headSha. Waiting for a new commit...")
                     }
-                    env.sleep(5, TimeUnit.MINUTES)
+                    env.sleep(env.config.ciFailureRetryMinutes, TimeUnit.MINUTES)
                     this
                 }
                 "CONFLICT" -> {
@@ -214,11 +231,11 @@ sealed interface OrchestratorState {
                         env.ringBell(3)
                         context.lastWaitingLogTime = now
                     }
-                    env.sleep(30, TimeUnit.SECONDS)
+                    env.sleep(env.config.pollingIntervalSeconds, TimeUnit.SECONDS)
                     this
                 }
                 else -> {
-                    env.sleep(30, TimeUnit.SECONDS)
+                    env.sleep(env.config.pollingIntervalSeconds, TimeUnit.SECONDS)
                     this
                 }
             }
@@ -229,6 +246,14 @@ sealed interface OrchestratorState {
         override val name = "AWAITING_REVIEW"
         override fun execute(env: OrchestratorEnvironment, context: OrchestratorContext): OrchestratorState {
             val prNumber = context.prNumber ?: throw IllegalStateException("prNumber is null")
+
+            if (isTaskTimedOut(context, env.config)) {
+                val issueId = context.currentIssueId ?: "unknown"
+                env.errPrintln("❌ Task $issueId timed out in AWAITING_REVIEW. Returning to SELECT_TASK.")
+                context.clearActiveTask()
+                return SELECT_TASK
+            }
+
             val currentSha = env.getPrHeadSha(prNumber)
 
             // If PR head changed, go back to CI_RUNNING
@@ -295,7 +320,7 @@ sealed interface OrchestratorState {
                         """.trimIndent()
 
                         env.commentOnPr(prNumber, prompt)
-                        env.sleep(30, TimeUnit.SECONDS)
+                        env.sleep(env.config.pollingIntervalSeconds, TimeUnit.SECONDS)
                         return this
                     } else {
                         val requestTime = java.time.Instant.parse(requestComment.createdAt)
@@ -314,7 +339,7 @@ sealed interface OrchestratorState {
                             return AWAITING_MERGE
                         } else {
                             env.println("⌛ Waiting for Jules (@jules) to complete review on PR #$prNumber (SHA: $shaPrefix)...")
-                            env.sleep(30, TimeUnit.SECONDS)
+                            env.sleep(env.config.pollingIntervalSeconds, TimeUnit.SECONDS)
                             return this
                         }
                     }
@@ -344,15 +369,29 @@ sealed interface OrchestratorState {
                 return CI_RUNNING
             }
 
+            if (isTaskTimedOut(context, env.config)) {
+                val issueId = context.currentIssueId ?: "unknown"
+                env.errPrintln("❌ Task $issueId timed out in AWAITING_MERGE. Returning to SELECT_TASK.")
+                context.clearActiveTask()
+                return SELECT_TASK
+            }
+
             val now = System.currentTimeMillis()
             if (now - context.lastWaitingLogTime > 60_000) {
                 val prUrl = env.getPrUrl(prNumber)
                 env.println("⌛ Waiting for manual merge of PR #$prNumber at: $prUrl")
                 context.lastWaitingLogTime = now
             }
-            env.sleep(30, TimeUnit.SECONDS)
+            env.sleep(env.config.pollingIntervalSeconds, TimeUnit.SECONDS)
             return this
         }
+    }
+
+    fun isTaskTimedOut(context: OrchestratorContext, config: OrchestratorConfig): Boolean {
+        if (context.startTime == 0L) return false
+        val now = System.currentTimeMillis()
+        val elapsedMinutes = TimeUnit.MILLISECONDS.toMinutes(now - context.startTime)
+        return elapsedMinutes >= config.taskTimeoutThresholdMinutes
     }
 
     data object RESOLVE_TASK : OrchestratorState {

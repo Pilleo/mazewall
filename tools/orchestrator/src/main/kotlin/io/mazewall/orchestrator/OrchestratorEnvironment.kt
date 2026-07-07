@@ -3,7 +3,22 @@ package io.mazewall.orchestrator
 import java.io.File
 import java.util.concurrent.TimeUnit
 
+data class OrchestratorConfig(
+    val pollingIntervalSeconds: Long = 30,
+    val backlogCheckIntervalMinutes: Long = 2,
+    val julesTriggerAttempts: Int = 12,
+    val julesTriggerIntervalSeconds: Long = 15,
+    val ciFailureRetryMinutes: Long = 5,
+    val daemonErrorRetryMinutes: Long = 2,
+    val maxExternalCommandTimeoutMinutes: Long = 10,
+    val taskTimeoutThresholdMinutes: Long = 60,
+    val maxRetries: Int = 3,
+    val initialRetryDelayMs: Long = 1000,
+    val githubCacheTtlMs: Long = 10000
+)
+
 interface OrchestratorEnvironment {
+    val config: OrchestratorConfig
     fun println(message: Any?)
     fun print(message: Any?)
     fun errPrintln(message: Any?)
@@ -45,7 +60,8 @@ class RealOrchestratorEnvironment(
     private val bot: TelegramBot?,
     private val backlogDir: File,
     private val resolvedDir: File,
-    private val stateFile: File
+    private val stateFile: File,
+    override val config: OrchestratorConfig = OrchestratorConfig()
 ) : OrchestratorEnvironment {
 
     override fun println(message: Any?) = kotlin.io.println(message)
@@ -146,20 +162,26 @@ class RealOrchestratorEnvironment(
     }
 
     private fun executeCmd(vararg command: String): String {
-        val pb = ProcessBuilder(*command)
-        val process = pb.redirectErrorStream(true).start()
-        process.outputStream.close()
+        return RetryUtils.retry(config.maxRetries, config.initialRetryDelayMs, this) {
+            val pb = ProcessBuilder(*command)
+            val process = pb.redirectErrorStream(true).start()
+            process.outputStream.close()
 
-        val output = java.lang.StringBuilder()
-        val reader = process.inputStream.bufferedReader()
-        var line: String? = reader.readLine()
-        while (line != null) {
-            println("  [exec] $line")
-            output.append(line).append("\n")
-            line = reader.readLine()
+            val output = java.lang.StringBuilder()
+            val reader = process.inputStream.bufferedReader()
+            var line: String? = reader.readLine()
+            while (line != null) {
+                println("  [exec] $line")
+                output.append(line).append("\n")
+                line = reader.readLine()
+            }
+
+            val completed = process.waitFor(config.maxExternalCommandTimeoutMinutes, TimeUnit.MINUTES)
+            if (!completed) {
+                process.destroyForcibly()
+                throw RuntimeException("Command '${command.joinToString(" ")}' timed out after ${config.maxExternalCommandTimeoutMinutes} minutes.")
+            }
+            output.toString().trim()
         }
-
-        process.waitFor(10, TimeUnit.MINUTES)
-        return output.toString().trim()
     }
 }

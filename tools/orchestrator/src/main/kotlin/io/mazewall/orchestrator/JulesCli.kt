@@ -16,6 +16,12 @@ data class JulesSession(
 )
 
 object JulesCli {
+    private var config: OrchestratorConfig = OrchestratorConfig()
+
+    fun init(config: OrchestratorConfig) {
+        this.config = config
+    }
+
     fun triggerSession(repo: String, issueId: String, prompt: String) {
         val sessionDescription = "[$issueId] ${prompt.take(150)}"
         println("🚀 Triggering remote Jules session for issue $issueId...")
@@ -59,19 +65,54 @@ object JulesCli {
     }
 
     private fun execute(vararg command: String): String {
-        val pb = ProcessBuilder(*command)
-        val process = pb.redirectErrorStream(true).start()
-        val output = process.inputStream.bufferedReader().readText()
-        process.waitFor(2, TimeUnit.MINUTES)
-        return output.trim()
+        return RetryUtils.retry(config.maxRetries, config.initialRetryDelayMs, LoggingEnv) {
+            val pb = ProcessBuilder(*command)
+            val process = pb.redirectErrorStream(true).start()
+            val output = process.inputStream.bufferedReader().readText()
+            process.waitFor(config.maxExternalCommandTimeoutMinutes, TimeUnit.MINUTES)
+            output.trim()
+        }
     }
 
     private fun executeWithPipe(vararg command: String): String {
-        // Run command piped to cat to disable TUI/terminal truncation
-        val pb = ProcessBuilder("bash", "-c", "${command.joinToString(" ")} | cat")
-        val process = pb.redirectErrorStream(true).start()
-        val output = process.inputStream.bufferedReader().readText()
-        process.waitFor(2, TimeUnit.MINUTES)
-        return output.trim()
+        return RetryUtils.retry(config.maxRetries, config.initialRetryDelayMs, LoggingEnv) {
+            // Run command piped to cat to disable TUI/terminal truncation
+            val pb = ProcessBuilder("bash", "-c", "${command.joinToString(" ")} | cat")
+            val process = pb.redirectErrorStream(true).start()
+            val output = process.inputStream.bufferedReader().readText()
+            process.waitFor(config.maxExternalCommandTimeoutMinutes, TimeUnit.MINUTES)
+            output.trim()
+        }
+    }
+
+    private object LoggingEnv : OrchestratorEnvironment {
+        override fun println(message: Any?) {}
+        override fun print(message: Any?) {}
+        override fun errPrintln(message: Any?) = System.err.println("  [JulesCli] $message")
+        override fun sleep(duration: Long, unit: TimeUnit) = unit.sleep(duration)
+        override fun ringBell(times: Int) {}
+        override fun readLine(): String? = null
+        override fun sendNotification(message: String) {}
+        override fun requestApproval(issueId: String, text: String): Boolean = false
+        override fun findExistingIssueNumber(issueId: String): String? = null
+        override fun createIssue(title: String, bodyFile: File, label: String): String = ""
+        override fun isIssueClosed(issueNumber: String): Boolean = false
+        override fun findLinkedPR(issueNumber: String, issueId: String, sessionId: String?): String? = null
+        override fun isPrMerged(prNumber: String): Boolean = false
+        override fun getPrHeadSha(prNumber: String): String = ""
+        override fun checkBuildStatus(prNumber: String): String = ""
+        override fun getPrComments(prNumber: String): List<GitHubComment> = emptyList()
+        override fun commentOnPr(prNumber: String, body: String) {}
+        override fun getPrDiff(prNumber: String): String = ""
+        override fun getFailedBuildLogs(prNumber: String): String = ""
+        override fun getPrUrl(prNumber: String): String = ""
+        override fun getJulesSession(issueId: String): JulesSession? = null
+        override fun parseAllIssues(): List<BacklogIssue> = emptyList()
+        override fun writeGithubIssue(issue: BacklogIssue, number: Int) {}
+        override fun removeGithubIssue(issue: BacklogIssue) {}
+        override fun markIssueAsResolved(issue: BacklogIssue) {}
+        override fun deleteStateFile() {}
+        override fun generateKnowledgeMap() {}
+        override val config: OrchestratorConfig get() = JulesCli.config
     }
 }
