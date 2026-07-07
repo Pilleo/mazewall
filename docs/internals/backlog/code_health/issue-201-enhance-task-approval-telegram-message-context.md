@@ -6,6 +6,7 @@ priority: 10
 dependencies: []
 component: "orchestrator"
 effort: "small"
+github_issue: 65
 ---
 
 # 🔴 [Severity: HIGH]: Enhance Task Approval Telegram Message with Full Context

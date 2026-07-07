@@ -1,11 +1,12 @@
 ---
 title: "Orchestrator Resiliency and Configuration Improvements"
 severity: "HIGH"
-status: "open"
+status: "resolved"
 priority: 10
 dependencies: []
 component: "orchestrator"
 effort: "medium"
+github_issue: 63
 ---
 
 # 🔴 [Severity: HIGH]: Orchestrator Resiliency and Configuration Improvements

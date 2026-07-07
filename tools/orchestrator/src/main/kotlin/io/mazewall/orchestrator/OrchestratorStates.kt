@@ -206,13 +206,13 @@ sealed interface OrchestratorState {
                         val failedLogs = env.getFailedBuildLogs(prNumber)
                         val feedback = """
                             ❌ **CI Build Failed.**
-                            Jules, please review the failing logs and fix the implementation:
-
+                            @jules Please review the failing logs and fix the implementation:
+ 
                             ```
                             $failedLogs
                             ```
                         """.trimIndent()
-
+ 
                         env.commentOnPr(prNumber, feedback)
                         env.sendNotification("❌ Build failed on PR #$prNumber. Feedback sent to Jules.")
                         context.lastFailedSha = headSha
@@ -270,78 +270,62 @@ sealed interface OrchestratorState {
                 val comments = env.getPrComments(prNumber)
                 val shaPrefix = currentSha.take(7)
 
-                val alreadyReviewedByJules = comments.any {
-                    val author = it.author?.login ?: ""
-                    author.contains("jules", ignoreCase = true) &&
-                    (it.body.contains("Approved") ||
-                     it.body.contains("Rejected") ||
-                     it.body.contains("review", ignoreCase = true) ||
-                     it.body.contains("Rationale") ||
-                     it.body.contains("Overview"))
+                val requestComment = comments.firstOrNull {
+                    (it.body.contains("@jules")) &&
+                    it.body.contains(shaPrefix)
                 }
 
-                if (alreadyReviewedByJules) {
-                    env.println("✨ PR #$prNumber already has a Jules review. Skipping.")
-                    context.lastReviewedSha = currentSha
-                    return AWAITING_MERGE
+                if (requestComment == null) {
+                    env.println("🤖 PR #$prNumber Build Passed. Requesting Jules review for SHA: $currentSha")
+
+                    val prDiff = env.getPrDiff(prNumber)
+                    val prompt = """
+                        @jules Please perform a critical code review on this Pull Request (SHA: $currentSha) as a senior JVM security expert and staff engineer for the `mazewall` project.
+
+                        ⚠️ **CRITICAL INSTRUCTION**: Do NOT modify the workspace files or make any commits. Only analyze the code changes and provide your code review feedback directly in a comment on the PR.
+
+                        Here is the diff of the changes:
+                        ```diff
+                        $prDiff
+                        ```
+
+                        Provide a detailed response covering:
+
+                        1. **Overview**: Describe what this PR is doing and its main objectives.
+                        2. **Rationale**: Why was the solution implemented in this specific way?
+                        3. **Comparison & Alternatives**: Why is this solution better than other designs? What alternatives were considered (or should be considered) and what are their trade-offs?
+                        4. **Critical & Security Analysis**:
+                           - Evaluate correctness and potential failure modes.
+                           - Check for JVM sandboxing bypasses, Landlock or Seccomp filter flaws.
+                           - Verify FFM (Foreign Function & Memory) alignment, lifecycle, and memory leak risks.
+                           - Analyze concurrency, JVM thread coordination, and Loom virtual thread carrier thread safety (preventing carrier poisoning).
+                        5. **Conclusion**: Provide your final recommendation (e.g. Approved or needs changes).
+
+                        Please be concise, extremely precise, and thorough. If you are not sure -say so. Use formatting for readability. Just leave a comment in the PR, do not commit new files!
+                    """.trimIndent()
+
+                    env.commentOnPr(prNumber, prompt)
+                    env.sleep(env.config.pollingIntervalSeconds, TimeUnit.SECONDS)
+                    return this
                 } else {
-                    val requestComment = comments.firstOrNull {
-                        (it.body.contains("@jules")) &&
-                        it.body.contains(shaPrefix)
+                    val requestTime = java.time.Instant.parse(requestComment.createdAt)
+                    val julesReply = comments.firstOrNull { comment ->
+                        val author = comment.author?.login ?: ""
+                        (author.contains("jules", ignoreCase = true)) &&
+                        java.time.Instant.parse(comment.createdAt).isAfter(requestTime)
                     }
 
-                    if (requestComment == null) {
-                        env.println("🤖 PR #$prNumber Build Passed. Requesting Jules review for SHA: $currentSha")
-
-                        val prDiff = env.getPrDiff(prNumber)
-                        val prompt = """
-                            @jules Please perform a critical code review on this Pull Request (SHA: $currentSha) as a senior JVM security expert and staff engineer for the `mazewall` project.
-
-                            ⚠️ **CRITICAL INSTRUCTION**: Do NOT modify the workspace files or make any commits. Only analyze the code changes and provide your code review feedback directly in a comment on the PR.
-
-                            Here is the diff of the changes:
-                            ```diff
-                            $prDiff
-                            ```
-
-                            Provide a detailed response covering:
-
-                            1. **Overview**: Describe what this PR is doing and its main objectives.
-                            2. **Rationale**: Why was the solution implemented in this specific way?
-                            3. **Comparison & Alternatives**: Why is this solution better than other designs? What alternatives were considered (or should be considered) and what are their trade-offs?
-                            4. **Critical & Security Analysis**:
-                               - Evaluate correctness and potential failure modes.
-                               - Check for JVM sandboxing bypasses, Landlock or Seccomp filter flaws.
-                               - Verify FFM (Foreign Function & Memory) alignment, lifecycle, and memory leak risks.
-                               - Analyze concurrency, JVM thread coordination, and Loom virtual thread carrier thread safety (preventing carrier poisoning).
-                            5. **Conclusion**: Provide your final recommendation (e.g. Approved or needs changes).
-
-                            Please be concise, extremely precise, and thorough. If you are not sure -say so. Use formatting for readability. Just leave a comment in the PR, do not commit new files!
-                        """.trimIndent()
-
-                        env.commentOnPr(prNumber, prompt)
+                    if (julesReply != null) {
+                        env.println("🟢 Jules review received for SHA $currentSha.")
+                        val prUrl = env.getPrUrl(prNumber)
+                        env.sendNotification("🟢 *Jules reviewed PR #$prNumber!* Ready for final manual review and merge: $prUrl")
+                        context.lastReviewedSha = currentSha
+                        env.ringBell(3)
+                        return AWAITING_MERGE
+                    } else {
+                        env.println("⌛ Waiting for Jules (@jules) to complete review on PR #$prNumber (SHA: $shaPrefix)...")
                         env.sleep(env.config.pollingIntervalSeconds, TimeUnit.SECONDS)
                         return this
-                    } else {
-                        val requestTime = java.time.Instant.parse(requestComment.createdAt)
-                        val julesReply = comments.firstOrNull { comment ->
-                            val author = comment.author?.login ?: ""
-                            (author.contains("jules", ignoreCase = true)) &&
-                            java.time.Instant.parse(comment.createdAt).isAfter(requestTime)
-                        }
-
-                        if (julesReply != null) {
-                            env.println("🟢 Jules review received for SHA $currentSha.")
-                            val prUrl = env.getPrUrl(prNumber)
-                            env.sendNotification("🟢 *Jules reviewed PR #$prNumber!* Ready for final manual review and merge: $prUrl")
-                            context.lastReviewedSha = currentSha
-                            env.ringBell(3)
-                            return AWAITING_MERGE
-                        } else {
-                            env.println("⌛ Waiting for Jules (@jules) to complete review on PR #$prNumber (SHA: $shaPrefix)...")
-                            env.sleep(env.config.pollingIntervalSeconds, TimeUnit.SECONDS)
-                            return this
-                        }
                     }
                 }
             }
@@ -377,9 +361,10 @@ sealed interface OrchestratorState {
             }
 
             val now = System.currentTimeMillis()
-            if (now - context.lastWaitingLogTime > 60_000) {
+            if (now - context.lastWaitingLogTime > 600_000) {
                 val prUrl = env.getPrUrl(prNumber)
                 env.println("⌛ Waiting for manual merge of PR #$prNumber at: $prUrl")
+                env.sendNotification("⌛ Waiting for manual merge of PR #$prNumber at: $prUrl")
                 context.lastWaitingLogTime = now
             }
             env.sleep(env.config.pollingIntervalSeconds, TimeUnit.SECONDS)

@@ -206,7 +206,6 @@ graph TD
     issue_195_jules_session_id_parsing_bug["🔴 Issue: Fix Jules Session ID Parsing Bug (HIGH)"]
     issue_197_graceful_fallback_for_ai_agent_failures["🔴 Issue: Graceful Fallback for AI Agent Failures (HIGH)"]
     issue_198_auto_closing_linked_github_issues["🔴 Issue: Auto-Closing Linked GitHub Issues (HIGH)"]
-    issue_200_orchestrator_resiliency_and_configuration_improvements["🔴 Issue: Orchestrator Resiliency and Configuration Improvements (HIGH)"]
     issue_201_enhance_task_approval_telegram_message_context["🔴 Issue: Enhance Task Approval Telegram Message with Full Context (HIGH)"]
     issue_202_handle_cli_authentication_failures["🔴 Issue: Detect and Handle CLI Authentication Failures with Actionable Login Alerts (HIGH)"]
     run_containerized_tests_sh["💻 Source: run_containerized_tests.sh"]
@@ -458,7 +457,6 @@ graph TD
     click issue_195_jules_session_id_parsing_bug "../backlog/code_health/issue-195-jules-session-id-parsing-bug.md"
     click issue_197_graceful_fallback_for_ai_agent_failures "../backlog/code_health/issue-197-graceful-fallback-for-ai-agent-failures.md"
     click issue_198_auto_closing_linked_github_issues "../backlog/code_health/issue-198-auto-closing-linked-github-issues.md"
-    click issue_200_orchestrator_resiliency_and_configuration_improvements "../backlog/code_health/issue-200-orchestrator-resiliency-and-configuration-improvements.md"
     click issue_201_enhance_task_approval_telegram_message_context "../backlog/code_health/issue-201-enhance-task-approval-telegram-message-context.md"
     click issue_202_handle_cli_authentication_failures "../backlog/code_health/issue-202-handle-cli-authentication-failures.md"
 ```
