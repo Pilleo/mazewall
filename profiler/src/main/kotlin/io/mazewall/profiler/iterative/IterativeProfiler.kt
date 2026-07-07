@@ -112,7 +112,8 @@ object IterativeProfiler {
                 if (msg == null) {
                     null
                 } else {
-                    val phraseIdx = findDeniedPhraseIndex(msg)
+                    val phrases = ContainmentViolationDetector.findViolationRanges(msg).toList()
+                    val phraseIdx = phrases.firstOrNull()?.first ?: -1
                     val pathEnd = if (phraseIdx != -1) findPathEnd(msg, phraseIdx) else -1
                     if (pathEnd >= 0) resolveAbsolutePath(msg, pathEnd) else null
                 }
@@ -126,12 +127,6 @@ object IterativeProfiler {
             }
         }
     }
-
-    private fun findDeniedPhraseIndex(msg: String): Int =
-        ContainmentViolationDetector.DENIED_PHRASES.firstNotNullOfOrNull { phrase ->
-            val idx = msg.indexOf(phrase, ignoreCase = true)
-            if (idx != -1) idx else null
-        } ?: -1
 
     private fun findPathEnd(
         msg: String,
