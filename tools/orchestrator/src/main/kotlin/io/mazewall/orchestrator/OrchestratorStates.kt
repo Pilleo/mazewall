@@ -44,7 +44,29 @@ sealed interface OrchestratorState {
                 true
             } else {
                 env.ringBell(3)
-                val approved = env.requestApproval(issueId, "Start task $issueId - $issueTitle?")
+                val issueFile = context.currentIssueFile?.let { File(it) }
+                val issue = issueFile?.let { BacklogParser.parseIssueFile(it) }
+
+                val text = if (issue != null) {
+                    """
+                    🤖 *Approval Request: Start Task ${issue.id}*
+                    *Title:* ${issue.title}
+                    *Severity:* ${issue.severity ?: "N/A"} | *Effort:* ${issue.effort ?: "N/A"} | *Component:* ${issue.component ?: "N/A"}
+
+                    *Context:*
+                    ${issue.context ?: "N/A"}
+
+                    *Needed:*
+                    ${issue.needed ?: "N/A"}
+
+                    Please approve or skip in the inline keyboard below.
+                    """.trimIndent()
+                } else {
+                    "Start task $issueId - $issueTitle?"
+                }
+
+                val truncatedText = if (text.length > 4000) text.substring(0, 3997) + "..." else text
+                val approved = env.requestApproval(issueId, truncatedText)
                 approved
             }
 
