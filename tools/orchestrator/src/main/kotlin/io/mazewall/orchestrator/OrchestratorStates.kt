@@ -373,6 +373,7 @@ sealed interface OrchestratorState {
                 "RESOLVE_TASK" -> RESOLVE_TASK
                 // Compatibility with old enum names
                 "AWAIT_START_APPROVAL" -> PENDING_APPROVAL
+                "AWAIT_JULES_START" -> AWAITING_JULES_START
                 "AWAIT_PR_CREATION" -> AWAITING_PR
                 "MONITOR_PR" -> CI_RUNNING
                 else -> SELECT_TASK
