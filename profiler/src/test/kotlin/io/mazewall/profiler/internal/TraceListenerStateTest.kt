@@ -1,23 +1,62 @@
 package io.mazewall.profiler.internal
 
-import org.junit.jupiter.api.Assertions.assertEquals
-import org.junit.jupiter.api.Assertions.assertTrue
+import io.mazewall.profiler.engine.TraceEvent
+import io.mazewall.core.Tid
+import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.Test
 
 class TraceListenerStateTest {
 
     @Test
-    fun `test state transitions coverage`() {
-        val s1: TraceListenerState = TraceListenerState.AwaitingEvent
-        val s2: TraceListenerState = TraceListenerState.ReadingHeader(pid = 123)
-        val s3: TraceListenerState = TraceListenerState.ReadingSyscall(pid = 123, nameLen = 4)
-        val s4: TraceListenerState = TraceListenerState.ReadingArguments(pid = 123, name = "OPEN", argsCount = 2)
-        val s5: TraceListenerState = TraceListenerState.Disconnected
+    fun `test AwaitingEvent`() {
+        val state = TraceListenerState.AwaitingEvent
+        assertEquals(TraceListenerState.AwaitingEvent, state)
+        assertTrue(state.toString().contains("AwaitingEvent"))
+    }
 
-        assertEquals(TraceListenerState.AwaitingEvent, s1)
-        assertEquals(123, (s2 as TraceListenerState.ReadingHeader).pid)
-        assertEquals(4, (s3 as TraceListenerState.ReadingSyscall).nameLen)
-        assertEquals("OPEN", (s4 as TraceListenerState.ReadingArguments).name)
-        assertTrue(s5 is TraceListenerState.Disconnected)
+    @Test
+    fun `test ReadingHeader`() {
+        val state = TraceListenerState.ReadingHeader(123)
+        assertEquals(123, state.pid)
+        assertTrue(state.toString().contains("ReadingHeader"))
+        assertTrue(state.toString().contains("123"))
+    }
+
+    @Test
+    fun `test ReadingSyscall`() {
+        val state = TraceListenerState.ReadingSyscall(123, 10)
+        assertEquals(123, state.pid)
+        assertEquals(10, state.nameLen)
+        assertTrue(state.toString().contains("ReadingSyscall"))
+    }
+
+    @Test
+    fun `test ReadingArguments`() {
+        val state = TraceListenerState.ReadingArguments(123, "openat", 4)
+        assertEquals(123, state.pid)
+        assertEquals("openat", state.name)
+        assertEquals(4, state.argsCount)
+        assertTrue(state.toString().contains("ReadingArguments"))
+    }
+
+    @Test
+    fun `test ProcessingEvent`() {
+        val event = TraceEvent.invoke(
+            tidValue = 123,
+            syscallName = "OPENAT",
+            args = longArrayOf(0, 0, 0, 0),
+            paths = listOf("/tmp/test"),
+            stackTrace = null
+        )
+        val state = TraceListenerState.ProcessingEvent(event)
+        assertEquals(event, state.event)
+        assertTrue(state.toString().contains("ProcessingEvent"))
+    }
+
+    @Test
+    fun `test Disconnected`() {
+        val state = TraceListenerState.Disconnected
+        assertEquals(TraceListenerState.Disconnected, state)
+        assertTrue(state.toString().contains("Disconnected"))
     }
 }
