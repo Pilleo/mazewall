@@ -41,6 +41,7 @@ class MockOrchestratorEnvironment : OrchestratorEnvironment {
     override fun checkBuildStatus(prNumber: String): String = buildStatus
     override fun getPrComments(prNumber: String): List<GitHubComment> = prComments
     override fun commentOnPr(prNumber: String, body: String) { commentedPrs.add(prNumber to body) }
+    override fun getPrDiff(prNumber: String): String = "mock diff"
     override fun getFailedBuildLogs(prNumber: String): String = "logs"
     override fun getPrUrl(prNumber: String): String = "http://pr/$prNumber"
 

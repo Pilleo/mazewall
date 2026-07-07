@@ -25,6 +25,7 @@ interface OrchestratorEnvironment {
     fun checkBuildStatus(prNumber: String): String
     fun getPrComments(prNumber: String): List<GitHubComment>
     fun commentOnPr(prNumber: String, body: String)
+    fun getPrDiff(prNumber: String): String
     fun getFailedBuildLogs(prNumber: String): String
     fun getPrUrl(prNumber: String): String
 
@@ -113,6 +114,10 @@ class RealOrchestratorEnvironment(
 
     override fun commentOnPr(prNumber: String, body: String) {
         executeCmd("gh", "pr", "comment", prNumber, "--body", body)
+    }
+
+    override fun getPrDiff(prNumber: String): String {
+        return executeCmd("gh", "pr", "diff", prNumber)
     }
 
     override fun getFailedBuildLogs(prNumber: String): String = GitHubCli.getFailedBuildLogs(prNumber)

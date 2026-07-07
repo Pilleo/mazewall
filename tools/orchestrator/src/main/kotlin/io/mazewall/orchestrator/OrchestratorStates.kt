@@ -245,13 +245,18 @@ sealed interface OrchestratorState {
                 val comments = env.getPrComments(prNumber)
                 val shaPrefix = currentSha.take(7)
 
-                val alreadyReviewedByAgy = comments.any {
-                    it.body.contains("Approved by Antigravity") ||
-                    it.body.contains("Rejected by Antigravity")
+                val alreadyReviewedByJules = comments.any {
+                    val author = it.author?.login ?: ""
+                    author.contains("jules", ignoreCase = true) &&
+                    (it.body.contains("Approved") ||
+                     it.body.contains("Rejected") ||
+                     it.body.contains("review", ignoreCase = true) ||
+                     it.body.contains("Rationale") ||
+                     it.body.contains("Overview"))
                 }
 
-                if (alreadyReviewedByAgy) {
-                    env.println("✨ PR #$prNumber already has an Antigravity review. Skipping.")
+                if (alreadyReviewedByJules) {
+                    env.println("✨ PR #$prNumber already has a Jules review. Skipping.")
                     context.lastReviewedSha = currentSha
                     return AWAITING_MERGE
                 } else {
@@ -263,8 +268,16 @@ sealed interface OrchestratorState {
                     if (requestComment == null) {
                         env.println("🤖 PR #$prNumber Build Passed. Requesting Jules review for SHA: $currentSha")
 
+                        val prDiff = env.getPrDiff(prNumber)
                         val prompt = """
                             @jules Please perform a critical code review on this Pull Request (SHA: $currentSha) as a senior JVM security expert and staff engineer for the `mazewall` project.
+
+                            ⚠️ **CRITICAL INSTRUCTION**: Do NOT modify the workspace files or make any commits. Only analyze the code changes and provide your code review feedback directly in a comment on the PR.
+
+                            Here is the diff of the changes:
+                            ```diff
+                            $prDiff
+                            ```
 
                             Provide a detailed response covering:
 
