@@ -45,6 +45,7 @@ graph TD
     io_mazewall_NativeTransaction["💻 Source: io.mazewall.NativeTransaction"]
     io_mazewall_Platform_kt["💻 Source: io.mazewall.Platform.kt"]
     io_mazewall_SbobParser["💻 Source: io.mazewall.SbobParser"]
+    io_mazewall_SbobParser_kt["💻 Source: io.mazewall.SbobParser.kt"]
     io_mazewall_core_FileDescriptor["💻 Source: io.mazewall.core.FileDescriptor"]
     io_mazewall_core_SeccompAction["💻 Source: io.mazewall.core.SeccompAction"]
     io_mazewall_enforcer_ContainedExecutors["💻 Source: io.mazewall.enforcer.ContainedExecutors"]
@@ -95,6 +96,7 @@ graph TD
     issue_044_type_state_enforced_bpf_dsl["🔴 Issue: Type-State Enforced BPF DSL (ENHANCEMENT)"]
     issue_045_standard_java_concurrency_virtual_threads_completablefuture_["🔴 Issue: Standard Java Concurrency (`Virtual Threads`, `CompletableFuture`) trivially bypasses Thread-Scoped (Tier 2) containment without ACE (CRITICAL)"]
     issue_056_iterativeprofiler_infinite_retry_loop_and_failure_on_disjoin["🔴 Issue: `IterativeProfiler` infinite retry loop and failure on disjoint prefix file paths (HIGH)"]
+    issue_058_sbobparser_syntactic_pruning_inaccuracy["🔴 Issue: `SbobParser` Syntactic Pruning Inaccuracy (HIGH)"]
     issue_059_iterativeprofiler_context_loss_via_thread_creation["🔴 Issue: `IterativeProfiler` Context Loss via thread creation (HIGH)"]
     issue_060_iterativeprofiler_path_truncation_on_spaces["🔴 Issue: `IterativeProfiler` Path Truncation on Spaces (HIGH)"]
     issue_061_manual_ffm_layout_maintenance_and_drift_risk["🔴 Issue: Manual FFM Layout Maintenance and Drift Risk (MEDIUM)"]
@@ -116,6 +118,7 @@ graph TD
     issue_081_root_test_task_requires_host_dockerpodman_not_runnable_insid["🔴 Issue: 📝 [NOTE]: Root `:test` task requires host Docker/Podman, not runnable inside dev container (MEDIUM)"]
     issue_082_ktlint_parser_fails_on_kotlin_2x_named_context_parameters_sy["🔴 Issue: KtLint parser fails on Kotlin 2.x named context parameters syntax (MEDIUM)"]
     issue_083_unhandled_ioctl_fallbacks_during_legacy_jvm_syscall_tracing["🔴 Issue: Unhandled `IOCTL` fallbacks during legacy JVM syscall tracing (HIGH)"]
+    issue_084_potential_race_condition_in_async_io_thread_shutdown["🔴 Issue: Potential Race Condition in Async IO Thread Shutdown (HIGH)"]
     issue_085_uncaught_native_exceptions_escaping_bpf_installation["🔴 Issue: Uncaught Native Exceptions Escaping BPF Installation (HIGH)"]
     issue_086_unhandled_signal_interruptions_eintr_during_seccomp_filter_i["🔴 Issue: Unhandled Signal Interruptions (`EINTR`) during `seccomp` Filter Installation (HIGH)"]
     issue_088_suboptimal_bpf_ret_instruction_placement_in_emitlinearscan["🔴 Issue: Suboptimal BPF `RET` instruction placement in `emitLinearScan` (HIGH)"]
@@ -228,6 +231,7 @@ graph TD
     issue_044_type_state_enforced_bpf_dsl -->|Affects| io_mazewall_seccomp_BpfProgram_BDL
     issue_045_standard_java_concurrency_virtual_threads_completablefuture_ -->|Affects| io_mazewall_enforcer_ContainedExecutors
     issue_056_iterativeprofiler_infinite_retry_loop_and_failure_on_disjoin -->|Affects| IterativeProfiler_kt
+    issue_058_sbobparser_syntactic_pruning_inaccuracy -->|Affects| io_mazewall_SbobParser_kt
     issue_059_iterativeprofiler_context_loss_via_thread_creation -->|Affects| IterativeProfiler_kt
     issue_060_iterativeprofiler_path_truncation_on_spaces -->|Affects| IterativeProfiler_kt
     issue_061_manual_ffm_layout_maintenance_and_drift_risk -->|Affects| io_mazewall_ffi_Layouts
@@ -241,6 +245,7 @@ graph TD
     issue_079_unhandled_tsync_edge_cases_during_jit_classloading -->|Affects| PureJavaBpfEngine_kt
     issue_080_inefficient_regex_compilation_in_containmentviolationdetecto -->|Affects| ContainmentViolationDetector_kt
     issue_083_unhandled_ioctl_fallbacks_during_legacy_jvm_syscall_tracing -->|Affects| io_mazewall_profiler_engine_ProfilerDaemon
+    issue_084_potential_race_condition_in_async_io_thread_shutdown -->|Affects| io_mazewall_enforcer_ContainedExecutors
     issue_085_uncaught_native_exceptions_escaping_bpf_installation -->|Affects| io_mazewall_seccomp_PureJavaBpfEngine
     issue_086_unhandled_signal_interruptions_eintr_during_seccomp_filter_i -->|Affects| io_mazewall_seccomp_PureJavaBpfEngine
     issue_088_suboptimal_bpf_ret_instruction_placement_in_emitlinearscan -->|Affects| io_mazewall_BpfFilter
@@ -348,6 +353,7 @@ graph TD
     click issue_044_type_state_enforced_bpf_dsl "../backlog/security/issue-044-type-state-enforced-bpf-dsl.md"
     click issue_045_standard_java_concurrency_virtual_threads_completablefuture_ "../backlog/security/issue-045-standard-java-concurrency-virtual-threads-completablefuture-.md"
     click issue_056_iterativeprofiler_infinite_retry_loop_and_failure_on_disjoin "../backlog/testing/issue-056-iterativeprofiler-infinite-retry-loop-and-failure-on-disjoin.md"
+    click issue_058_sbobparser_syntactic_pruning_inaccuracy "../backlog/testing/issue-058-sbobparser-syntactic-pruning-inaccuracy.md"
     click issue_059_iterativeprofiler_context_loss_via_thread_creation "../backlog/performance/issue-059-iterativeprofiler-context-loss-via-thread-creation.md"
     click issue_060_iterativeprofiler_path_truncation_on_spaces "../backlog/testing/issue-060-iterativeprofiler-path-truncation-on-spaces.md"
     click issue_061_manual_ffm_layout_maintenance_and_drift_risk "../backlog/testing/issue-061-manual-ffm-layout-maintenance-and-drift-risk.md"
@@ -369,6 +375,7 @@ graph TD
     click issue_081_root_test_task_requires_host_dockerpodman_not_runnable_insid "../backlog/testing/issue-081-root-test-task-requires-host-dockerpodman-not-runnable-insid.md"
     click issue_082_ktlint_parser_fails_on_kotlin_2x_named_context_parameters_sy "../backlog/testing/issue-082-ktlint-parser-fails-on-kotlin-2x-named-context-parameters-sy.md"
     click issue_083_unhandled_ioctl_fallbacks_during_legacy_jvm_syscall_tracing "../backlog/testing/issue-083-unhandled-ioctl-fallbacks-during-legacy-jvm-syscall-tracing.md"
+    click issue_084_potential_race_condition_in_async_io_thread_shutdown "../backlog/performance/issue-084-potential-race-condition-in-async-io-thread-shutdown.md"
     click issue_085_uncaught_native_exceptions_escaping_bpf_installation "../backlog/security/issue-085-uncaught-native-exceptions-escaping-bpf-installation.md"
     click issue_086_unhandled_signal_interruptions_eintr_during_seccomp_filter_i "../backlog/security/issue-086-unhandled-signal-interruptions-eintr-during-seccomp-filter-i.md"
     click issue_088_suboptimal_bpf_ret_instruction_placement_in_emitlinearscan "../backlog/performance/issue-088-suboptimal-bpf-ret-instruction-placement-in-emitlinearscan.md"

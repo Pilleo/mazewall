@@ -14,7 +14,7 @@ fun interface ViolationMatcher {
 object ContainmentViolationDetector {
     private val MATCHERS = CopyOnWriteArrayList<ViolationMatcher>()
 
-    private val ERRNO_VIOLATION_REGEX = Regex("""\b(error|errno)[=:]?\s*(1|13|22)\b""")
+    private val ERRNO_VIOLATION_REGEX = Regex("""\b(error|errno)[=:]?\s*(1|13|22)\b""", RegexOption.IGNORE_CASE)
 
     val DENIED_PHRASES = arrayOf(
         "Operation not permitted",
