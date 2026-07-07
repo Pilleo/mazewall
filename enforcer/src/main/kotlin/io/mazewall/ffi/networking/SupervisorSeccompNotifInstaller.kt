@@ -31,6 +31,7 @@ public object SupervisorSeccompNotifInstaller {
         processWide: Boolean = false,
         connectWithRetry: (String) -> Int = { path -> SupervisorSocketUtils.connectWithRetry(path) },
         sendDescriptor: (Int, Int) -> Boolean = { sockFd, fd -> SupervisorSocketUtils.sendDescriptor(sockFd, fd) },
+        onFilterApplied: () -> Unit = {},
         onSocketConnected: (socketFd: Int, readyLatch: CountDownLatch) -> Unit
     ) {
         if (!Platform.featureMatrix.seccompUserNotifSupported) {
@@ -134,11 +135,26 @@ public object SupervisorSeccompNotifInstaller {
                 }
 
                 listenerFdVal.set(rawFd)
+                onFilterApplied()
                 installLatch.countDown() // Release the coordinator to connect & send descriptor
             }
 
             // Block tracee thread until the coordinator completes descriptor passing and listener startup
-            proceedLatch.await()
+            // We wait uninterruptibly to ensure the handshake completes even if the thread is interrupted
+            // during executor shutdown. This prevents state desync between the kernel and JVM.
+            var interrupted = false
+            while (true) {
+                try {
+                    proceedLatch.await()
+                    break
+                } catch (e: InterruptedException) {
+                    interrupted = true
+                }
+            }
+            if (interrupted) {
+                Thread.currentThread().interrupt()
+            }
+
             setupError.get()?.let { throw it }
 
             // Step 2: Synchronize filter tree process-wide if processWide is true
