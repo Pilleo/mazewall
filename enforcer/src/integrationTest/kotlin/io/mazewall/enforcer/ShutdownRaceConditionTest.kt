@@ -14,7 +14,7 @@ import kotlin.test.assertEquals
 class ShutdownRaceConditionTest : BaseIntegrationTest() {
 
     fun testRegistrySyncOnInterruption() {
-        val policy = Policy.builder().block(Syscall.OPEN).build()
+        val policy = Policy.builder().block(Syscall.OPEN).allowMmapExec().build()
         val executor = Executors.newFixedThreadPool(1)
 
         val filterDepthAfterInterruption = AtomicInteger(-1)
@@ -22,13 +22,10 @@ class ShutdownRaceConditionTest : BaseIntegrationTest() {
 
         executor.execute {
             try {
-                // Ensure we are in a clean state for this thread
-                // Note: state is thread-local
                 ThreadStateRegistry.state = ContainerState()
-
                 ContainedExecutors.installOnCurrentThread(policy)
             } catch (e: Exception) {
-                // Expected to be interrupted or fail
+                // Expected to be interrupted
             } catch (t: Throwable) {
                 error.set(t)
             } finally {
@@ -36,7 +33,6 @@ class ShutdownRaceConditionTest : BaseIntegrationTest() {
             }
         }
 
-        // Give it a tiny bit of time to reach the handshake
         Thread.sleep(100)
         executor.shutdownNow()
         executor.awaitTermination(5, TimeUnit.SECONDS)
@@ -45,8 +41,6 @@ class ShutdownRaceConditionTest : BaseIntegrationTest() {
             throw error.get()!!
         }
 
-        // With the fix, even if interrupted during handshake,
-        // the filterDepth should be 1 because it's updated as soon as the filter is applied.
         assertEquals(1, filterDepthAfterInterruption.get(), "Filter depth should be 1 even after interruption")
     }
 
