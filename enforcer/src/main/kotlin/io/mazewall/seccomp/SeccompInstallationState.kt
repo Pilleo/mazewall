@@ -13,14 +13,6 @@ import java.lang.foreign.MemorySegment
 internal sealed interface SeccompInstallationState {
     /** The Seccomp installation process has not started. */
     data object Uninitialized : SeccompInstallationState {
-        fun lockPrivileges(): PrivilegesLocked {
-            PureJavaBpfEngine.setNoNewPrivs()
-            return PrivilegesLocked
-        }
-    }
-
-    /** The thread or process has set `no_new_privs`. */
-    data object PrivilegesLocked : SeccompInstallationState {
         fun buildFilter(arena: Arena, sandbox: CompiledSandbox<*>): FilterBuilt {
             val filters = sandbox.compiledFilters
             val prog = with(arena) { LinuxNative.memory.newSockFProg(filters) }
@@ -30,6 +22,16 @@ internal sealed interface SeccompInstallationState {
 
     /** The BPF program filter has been successfully constructed in memory. */
     data class FilterBuilt(
+        val program: MemorySegment,
+    ) : SeccompInstallationState {
+        fun lockPrivileges(): PrivilegesLocked {
+            PureJavaBpfEngine.setNoNewPrivs()
+            return PrivilegesLocked(program)
+        }
+    }
+
+    /** The thread or process has set `no_new_privs`. */
+    data class PrivilegesLocked(
         val program: MemorySegment,
     ) : SeccompInstallationState {
         fun applyFilter(arch: Arch, useTsync: Boolean): FilterApplied {
