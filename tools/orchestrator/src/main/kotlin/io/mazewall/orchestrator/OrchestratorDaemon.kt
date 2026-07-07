@@ -20,6 +20,7 @@ class OrchestratorContext {
     var lastCheckedSha: String? = null
     var lastWaitingLogTime: Long = 0L
     var lastFailedSha: String? = null
+    var startTime: Long = 0L
 
     fun load(props: java.util.Properties) {
         state = OrchestratorState.fromName(props.getProperty("state"))
@@ -43,6 +44,7 @@ class OrchestratorContext {
         lastCheckedSha = props.getProperty("lastCheckedSha").takeIf { !it.isNullOrEmpty() }
         lastWaitingLogTime = props.getProperty("lastWaitingLogTime")?.toLongOrNull() ?: 0L
         lastFailedSha = props.getProperty("lastFailedSha").takeIf { !it.isNullOrEmpty() }
+        startTime = props.getProperty("startTime")?.toLongOrNull() ?: 0L
     }
 
     fun save(props: java.util.Properties) {
@@ -61,6 +63,7 @@ class OrchestratorContext {
         props.setProperty("lastCheckedSha", lastCheckedSha ?: "")
         props.setProperty("lastWaitingLogTime", lastWaitingLogTime.toString())
         props.setProperty("lastFailedSha", lastFailedSha ?: "")
+        props.setProperty("startTime", startTime.toString())
     }
 
     fun clearActiveTask() {
@@ -76,6 +79,7 @@ class OrchestratorContext {
         lastCheckedSha = null
         lastWaitingLogTime = 0L
         lastFailedSha = null
+        startTime = 0L
     }
 }
 
@@ -110,11 +114,11 @@ class OrchestratorDaemonRunner(
                 env.errPrintln("⚠️ Error in state ${context.state.name}: ${e.message}")
                 e.printStackTrace()
                 try {
-                    env.sendNotification("⚠️ *Daemon Error in State ${context.state.name}:* `${e.message}`. Retrying in 2 minutes...")
+                    env.sendNotification("⚠️ *Daemon Error in State ${context.state.name}:* `${e.message}`. Retrying in ${env.config.daemonErrorRetryMinutes} minutes...")
                 } catch (notificationEx: Exception) {
                     env.errPrintln("⚠️ Failed to send error notification: ${notificationEx.message}")
                 }
-                env.sleep(2, TimeUnit.MINUTES)
+                env.sleep(env.config.daemonErrorRetryMinutes, TimeUnit.MINUTES)
             }
         }
     }
@@ -142,7 +146,24 @@ fun main() {
 
     println("🤖 *Orchestrator Daemon Online* in repo `$julesRepo`.")
 
-    val env = RealOrchestratorEnvironment(bot, backlogDir, resolvedDir, stateFile)
+    val config = OrchestratorConfig(
+        pollingIntervalSeconds = getEnvOr("POLLING_INTERVAL_SECONDS", "30").toLong(),
+        backlogCheckIntervalMinutes = getEnvOr("BACKLOG_CHECK_INTERVAL_MINUTES", "2").toLong(),
+        julesTriggerAttempts = getEnvOr("JULES_TRIGGER_ATTEMPTS", "12").toInt(),
+        julesTriggerIntervalSeconds = getEnvOr("JULES_TRIGGER_INTERVAL_SECONDS", "15").toLong(),
+        ciFailureRetryMinutes = getEnvOr("CI_FAILURE_RETRY_MINUTES", "5").toLong(),
+        daemonErrorRetryMinutes = getEnvOr("DAEMON_ERROR_RETRY_MINUTES", "2").toLong(),
+        maxExternalCommandTimeoutMinutes = getEnvOr("MAX_EXTERNAL_COMMAND_TIMEOUT_MINUTES", "10").toLong(),
+        taskTimeoutThresholdMinutes = getEnvOr("TASK_TIMEOUT_THRESHOLD_MINUTES", "60").toLong(),
+        maxRetries = getEnvOr("MAX_RETRIES", "3").toInt(),
+        initialRetryDelayMs = getEnvOr("INITIAL_RETRY_DELAY_MS", "1000").toLong(),
+        githubCacheTtlMs = getEnvOr("GITHUB_CACHE_TTL_MS", "10000").toLong()
+    )
+
+    GitHubCli.init(config)
+    JulesCli.init(config)
+
+    val env = RealOrchestratorEnvironment(bot, backlogDir, resolvedDir, stateFile, config)
     val runner = OrchestratorDaemonRunner(env, stateFile)
     runner.run()
 }

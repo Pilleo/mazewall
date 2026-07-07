@@ -40,6 +40,26 @@ data class GitHubRun(
 
 object GitHubCli {
     private val json = Json { ignoreUnknownKeys = true }
+    private var config: OrchestratorConfig = OrchestratorConfig()
+
+    fun init(config: OrchestratorConfig) {
+        this.config = config
+    }
+
+    internal data class CachedValue<T>(val value: T, val expiry: Long)
+    internal val cache = mutableMapOf<String, CachedValue<*>>()
+
+    private inline fun <T> withCache(key: String, block: () -> T): T {
+        val now = System.currentTimeMillis()
+        val cached = cache[key]
+        if (cached != null && cached.expiry > now) {
+            @Suppress("UNCHECKED_CAST")
+            return cached.value as T
+        }
+        val result = block()
+        cache[key] = CachedValue(result, now + config.githubCacheTtlMs)
+        return result
+    }
 
     fun createIssue(title: String, bodyFile: File, label: String): String {
         try {
@@ -91,7 +111,7 @@ object GitHubCli {
         return matched?.number?.toString()
     }
 
-    fun checkBuildStatus(prNumber: String): String {
+    fun checkBuildStatus(prNumber: String): String = withCache("checkBuildStatus-$prNumber") {
         try {
             // First check if the PR has merge conflicts
             val mergeableJson = execute("gh", "pr", "view", prNumber, "--json", "mergeable")
@@ -142,9 +162,9 @@ object GitHubCli {
         }
     }
 
-    fun getPrHeadSha(prNumber: String): String {
+    fun getPrHeadSha(prNumber: String): String = withCache("getPrHeadSha-$prNumber") {
         val output = execute("gh", "pr", "view", prNumber, "--json", "headRefOid")
-        return output.substringAfter("\"headRefOid\":\"").substringBefore("\"")
+        output.substringAfter("\"headRefOid\":\"").substringBefore("\"")
     }
 
     fun isIssueClosed(issueNumber: String): Boolean {
@@ -185,14 +205,47 @@ object GitHubCli {
     }
 
     private fun execute(vararg command: String): String {
-        val pb = ProcessBuilder(*command)
-        val process = pb.redirectErrorStream(true).start()
-        val output = process.inputStream.bufferedReader().readText()
-        val exitCode = process.waitFor()
-        if (exitCode != 0) {
-            throw ProcessExecutionException(command.joinToString(" "), exitCode, output.trim())
+        return RetryUtils.retry(config.maxRetries, config.initialRetryDelayMs, LoggingEnv) {
+            val pb = ProcessBuilder(*command)
+            val process = pb.redirectErrorStream(true).start()
+            val output = process.inputStream.bufferedReader().readText()
+            val exitCode = process.waitFor()
+            if (exitCode != 0) {
+                throw ProcessExecutionException(command.joinToString(" "), exitCode, output.trim())
+            }
+            output.trim()
         }
-        return output.trim()
+    }
+
+    private object LoggingEnv : OrchestratorEnvironment {
+        override fun println(message: Any?) {}
+        override fun print(message: Any?) {}
+        override fun errPrintln(message: Any?) = System.err.println("  [GitHubCli] $message")
+        override fun sleep(duration: Long, unit: TimeUnit) = unit.sleep(duration)
+        override fun ringBell(times: Int) {}
+        override fun readLine(): String? = null
+        override fun sendNotification(message: String) {}
+        override fun requestApproval(issueId: String, text: String): Boolean = false
+        override fun findExistingIssueNumber(issueId: String): String? = null
+        override fun createIssue(title: String, bodyFile: File, label: String): String = ""
+        override fun isIssueClosed(issueNumber: String): Boolean = false
+        override fun findLinkedPR(issueNumber: String, issueId: String, sessionId: String?): String? = null
+        override fun isPrMerged(prNumber: String): Boolean = false
+        override fun getPrHeadSha(prNumber: String): String = ""
+        override fun checkBuildStatus(prNumber: String): String = ""
+        override fun getPrComments(prNumber: String): List<GitHubComment> = emptyList()
+        override fun commentOnPr(prNumber: String, body: String) {}
+        override fun getPrDiff(prNumber: String): String = ""
+        override fun getFailedBuildLogs(prNumber: String): String = ""
+        override fun getPrUrl(prNumber: String): String = ""
+        override fun getJulesSession(issueId: String): JulesSession? = null
+        override fun parseAllIssues(): List<BacklogIssue> = emptyList()
+        override fun writeGithubIssue(issue: BacklogIssue, number: Int) {}
+        override fun removeGithubIssue(issue: BacklogIssue) {}
+        override fun markIssueAsResolved(issue: BacklogIssue) {}
+        override fun deleteStateFile() {}
+        override fun generateKnowledgeMap() {}
+        override val config: OrchestratorConfig get() = GitHubCli.config
     }
 }
 
@@ -220,4 +273,3 @@ data class CommentsContainer(
 data class GitHubMergeable(
     val mergeable: String
 )
-

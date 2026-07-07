@@ -5,6 +5,7 @@ import java.util.concurrent.TimeUnit
 import kotlin.test.*
 
 class MockOrchestratorEnvironment : OrchestratorEnvironment {
+    override val config = OrchestratorConfig()
     val printlns = mutableListOf<String>()
     var approved = true
     var existingIssueNumber: String? = null

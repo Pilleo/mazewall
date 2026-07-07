@@ -31,4 +31,12 @@
         <Class name="~io\.mazewall\.enforcer\.supervisor\.SupervisorSessionHandler.*" />
         <Bug pattern="DE_MIGHT_IGNORE" />
     </Match>
+    <Match>
+        <Or>
+            <Class name="io.mazewall.orchestrator.GitHubCli" />
+            <Class name="io.mazewall.orchestrator.JulesCli" />
+        </Or>
+        <Method name="init" />
+        <Bug pattern="ST_WRITE_TO_STATIC_FROM_INSTANCE_METHOD" />
+    </Match>
 </FindBugsFilter>
