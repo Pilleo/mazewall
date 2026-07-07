@@ -20,6 +20,19 @@ import java.util.logging.Logger
 /**
  * Public API for wrapping an existing [java.util.concurrent.ExecutorService] to enforce seccomp containment.
  *
+ * ### Graceful Shutdown
+ * When using wrapped executors, it is strongly recommended to use a graceful shutdown pattern:
+ * ```kotlin
+ * executor.shutdown()
+ * if (!executor.awaitTermination(30, TimeUnit.SECONDS)) {
+ *     executor.shutdownNow()
+ * }
+ * ```
+ * Avoid using `shutdownNow()` immediately, as it interrupts threads during the critical seccomp
+ * installation and handshake phases. While this implementation is robust against such interruptions
+ * to prevent kernel/JVM state desync, an interrupted handshake may still leave the thread in a
+ * partially initialized supervisor state.
+ *
  * ARCHITECTURAL INVARIANT: Container state is maintained via immutable [ContainerState] objects,
  * which are updated atomically via [ThreadStateRegistry] and [ProcessStateRegistry]. This ensures
  * that the library has a consistent and race-free view of the active sandbox configuration
@@ -259,8 +272,12 @@ object ContainedExecutors {
             if (processWide) {
                 throw UnsupportedOperationException("Process-wide supervised filters are not supported. Use thread-scoped supervision instead.")
             }
-            val session = io.mazewall.enforcer.supervisor.SupervisorInstaller.installSupervisedFilterForThread(toInstall, scopingPolicy)
-            updateThreadState(newBlocks, newDefaultAction, toInstall)
+            val onApplied = { updateThreadState(newBlocks, newDefaultAction, toInstall) }
+            val session = io.mazewall.enforcer.supervisor.SupervisorInstaller.installSupervisedFilterForThread(
+                toInstall,
+                scopingPolicy,
+                onApplied
+            )
             return session
         } else {
             val compiledSandbox = toInstall.compile(arch)

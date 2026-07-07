@@ -13,6 +13,13 @@ import java.util.concurrent.TimeUnit
 /**
  * Internal wrapper that applies containment policies before task execution.
  *
+ * ### Graceful Shutdown
+ * Users of this wrapper should prefer [shutdown] and [awaitTermination] over [shutdownNow].
+ * Aggressive interruption via `shutdownNow()` can occur during the delicate FFM seccomp
+ * installation sequence. Although the implementation ensures that the [ThreadStateRegistry]
+ * remains synchronized with the kernel's filter state even upon interruption, it is better
+ * to allow the handshake to complete naturally.
+ *
  * The seccomp filter is installed per-task immediately before [task.call] (or [task.run]).
  * This design is required for correctness because BPF filters are thread-scoped. In a
  * multi-thread executor (e.g. [java.util.concurrent.ThreadPoolExecutor]), each platform thread

@@ -47,7 +47,8 @@ public object SupervisorInstaller {
     @Suppress("LongParameterList", "TooGenericExceptionCaught")
     public fun installSupervisedFilterForThread(
         policy: PolicyDefinition<*>,
-        scopingPolicy: StacktraceScopingPolicy
+        scopingPolicy: StacktraceScopingPolicy,
+        onFilterApplied: () -> Unit = {}
     ): SupervisorSession {
         val context = SupervisorDaemonManager.getOrSpawnSharedDaemon()
         val arch = Arch.current()
@@ -64,7 +65,8 @@ public object SupervisorInstaller {
             SupervisorSeccompNotifInstaller.install(
                 socketPath = context.socketPath,
                 filterInstructions = filter,
-                processWide = false
+                processWide = false,
+                onFilterApplied = onFilterApplied
             ) { socketFd, readyLatch ->
                 val listener = JVMValidationListener(
                     FileDescriptor.unsafe(socketFd),
