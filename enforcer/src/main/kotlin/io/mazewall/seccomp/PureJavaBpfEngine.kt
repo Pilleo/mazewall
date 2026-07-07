@@ -58,35 +58,34 @@ internal object PureJavaBpfEngine : SeccompEngine<EngineState> {
         EngineState.LoadedImpl.toString()
         EngineState.ConfiguredImpl.toString()
         SeccompInstallationState.Uninitialized.toString()
-        SeccompInstallationState.PrivilegesLocked.toString()
+        SeccompInstallationState.PrivilegesLocked::class.java.name
         SeccompInstallationState.SystemCallApplied.toString()
         SeccompInstallationState.FallbackPrctlApplied.toString()
         SeccompInstallationState.Verified.toString()
-        SeccompInstallationState.FilterBuilt::class.java.name.toString()
-        SeccompInstallationState.Failed::class.java.name.toString()
+        SeccompInstallationState.FilterBuilt::class.java.name
+        SeccompInstallationState.Failed::class.java.name
 
         updateState(SeccompInstallationState.Uninitialized)
         try {
             val uninitialized = SeccompInstallationState.Uninitialized
-            val locked = uninitialized.lockPrivileges()
-            updateState(locked)
-
             val arch = Arch.current()
             nativeScope {
-                val built = locked.buildFilter(this, policy)
+                val built = uninitialized.buildFilter(this, policy)
                 updateState(built)
-                val applied = built.applyFilter(arch, useTsync)
+                val locked = built.lockPrivileges()
+                updateState(locked)
+                val applied = locked.applyFilter(arch, useTsync)
                 updateState(applied)
                 val verified = applied.verify(policy.definition)
                 updateState(verified)
             }
         } catch (e: Throwable) {
             val stepName = when (ThreadStateRegistry.state.engineState) {
-                is SeccompInstallationState.FilterBuilt -> "installFilter"
+                is SeccompInstallationState.PrivilegesLocked -> "installFilter"
                 is SeccompInstallationState.SystemCallApplied -> "verifyInstallation"
                 is SeccompInstallationState.FallbackPrctlApplied -> "verifyInstallation"
-                is SeccompInstallationState.PrivilegesLocked -> "buildFilter"
-                is SeccompInstallationState.Uninitialized -> "setNoNewPrivs"
+                is SeccompInstallationState.FilterBuilt -> "setNoNewPrivs"
+                is SeccompInstallationState.Uninitialized -> "buildFilter"
                 is SeccompInstallationState.Verified -> "verified"
                 is SeccompInstallationState.Failed -> "failed"
             }
@@ -107,6 +106,13 @@ internal object PureJavaBpfEngine : SeccompEngine<EngineState> {
         ThreadStateRegistry.state = ThreadStateRegistry.state.withEngineState(next)
     }
 
+    /**
+     * Irreversibly locks the process from gaining new privileges.
+     *
+     * Once set, the PR_SET_NO_NEW_PRIVS flag cannot be cleared. This affects the
+     * current thread/process and all its future children spawned via fork/exec.
+     * This is a prerequisite for installing seccomp filters for unprivileged users.
+     */
     internal fun setNoNewPrivs() {
         // Step 1: Set no_new_privs (mandatory for non-root seccomp)
         val r1 = LinuxNative.withTransaction {
