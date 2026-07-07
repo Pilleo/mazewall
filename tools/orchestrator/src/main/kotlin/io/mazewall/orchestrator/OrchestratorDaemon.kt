@@ -310,15 +310,21 @@ class OrchestratorDaemonRunner(
                         context.lastReviewedSha = currentSha
                     } else {
                         val requestComment = comments.firstOrNull {
-                            (it.body.contains("@jules")) &&
+                            (it.body.contains("@agy")) &&
                             it.body.contains(shaPrefix)
                         }
 
                         if (requestComment == null) {
-                            println("🤖 PR #$prNumber Build Passed. Requesting Jules review for SHA: $currentSha")
+                            println("🤖 PR #$prNumber Build Passed. Requesting @jules review for SHA: $currentSha")
 
+                            val prDiff = executeCmd("gh", "pr", "diff", prNumber)
                             val prompt = """
                                 @jules Please perform a critical code review on this Pull Request (SHA: $currentSha) as a senior JVM security expert and staff engineer for the `mazewall` project.
+
+                                Here is the diff of the changes:
+                                ```diff
+                                $prDiff
+                                ```
 
                                 Provide a detailed response covering:
 
@@ -338,20 +344,24 @@ class OrchestratorDaemonRunner(
                             executeCmd("gh", "pr", "comment", prNumber, "--body", prompt)
                         } else {
                             val requestTime = java.time.Instant.parse(requestComment.createdAt)
-                            val julesReply = comments.firstOrNull { comment ->
+                            val agyReply = comments.firstOrNull { comment ->
                                 val author = comment.author?.login ?: ""
-                                (author.contains("jules", ignoreCase = true)) &&
+                                val body = comment.body
+                                (
+                                 author.contains("jules", ignoreCase = true) ||
+                                 body.contains("Approved by jules") ||
+                                 body.contains("Rejected by jules")) &&
                                 java.time.Instant.parse(comment.createdAt).isAfter(requestTime)
                             }
 
-                            if (julesReply != null) {
-                                println("🟢 Jules review received for SHA $currentSha.")
+                            if (agyReply != null) {
+                                println("🟢 Antigravity review received for SHA $currentSha.")
                                 val prUrl = executeCmd("gh", "pr", "view", prNumber, "--json", "url").substringAfter("\"url\":\"").substringBefore("\"")
-                                bot?.sendMessage("🟢 *Jules reviewed PR #$prNumber!* Ready for final manual review and merge: $prUrl")
+                                bot?.sendMessage("🟢 *Antigravity reviewed PR #$prNumber!* Ready for final manual review and merge: $prUrl")
                                 context.lastReviewedSha = currentSha
                                 ringTerminalBell(3)
                             } else {
-                                println("⌛ Waiting for Jules (@jules) to complete review on PR #$prNumber (SHA: $shaPrefix)...")
+                                println("⌛ Waiting for Antigravity (@agy) to complete review on PR #$prNumber (SHA: $shaPrefix)...")
                             }
                         }
                     }

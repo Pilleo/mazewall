@@ -33,6 +33,11 @@ data class GitHubCheck(
     val event: String? = null
 )
 
+@Serializable
+data class GitHubRun(
+    val databaseId: Long
+)
+
 object GitHubCli {
     private val json = Json { ignoreUnknownKeys = true }
 
@@ -123,8 +128,14 @@ object GitHubCli {
 
     fun getFailedBuildLogs(prNumber: String): String {
         try {
-            // Get the failed logs of the most recent run directly (capture only the tail to avoid token overflow)
-            val fullLogs = execute("gh", "run", "view", "--log-failed")
+            val sha = getPrHeadSha(prNumber)
+            val runsJson = execute("gh", "run", "list", "--commit", sha, "--json", "databaseId")
+            val runs = json.decodeFromString<List<GitHubRun>>(runsJson)
+            if (runs.isEmpty()) {
+                return "Error retrieving failed build logs: No workflow runs found for commit $sha"
+            }
+            val runId = runs.first().databaseId.toString()
+            val fullLogs = execute("gh", "run", "view", runId, "--log-failed")
             return fullLogs.lines().takeLast(80).joinToString("\n")
         } catch (e: Exception) {
             return "Error retrieving failed build logs: ${e.message}"
