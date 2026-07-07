@@ -9,7 +9,12 @@ data class BacklogIssue(
     val priority: Int,
     val status: String,
     val dependencies: List<String>,
-    val githubIssue: Int? = null
+    val githubIssue: Int? = null,
+    val severity: String? = null,
+    val component: String? = null,
+    val effort: String? = null,
+    val context: String? = null,
+    val needed: String? = null
 )
 
 object BacklogParser {
@@ -34,7 +39,10 @@ object BacklogParser {
             val priority = frontmatter["priority"]?.toIntOrNull() ?: 0
             val status = frontmatter["status"]?.removeSurrounding("\"")?.removeSurrounding("'") ?: "open"
             val githubIssue = frontmatter["github_issue"]?.toIntOrNull()
-            
+            val severity = frontmatter["severity"]?.removeSurrounding("\"")?.removeSurrounding("'")
+            val component = frontmatter["component"]?.removeSurrounding("\"")?.removeSurrounding("'")
+            val effort = frontmatter["effort"]?.removeSurrounding("\"")?.removeSurrounding("'")
+
             // Extract dependencies list from the raw value
             val dependenciesRaw = frontmatter["dependencies"] ?: ""
             val dependencies = parseList(dependenciesRaw, content)
@@ -44,7 +52,14 @@ object BacklogParser {
                 "$part1-$part2"
             }
 
-            return BacklogIssue(file, id, title, priority, status, dependencies, githubIssue)
+            val body = content.substringAfter("---", "").substringAfter("---", "").trim()
+            val context = extractSection(body, "Context")
+            val needed = extractSection(body, "Needed")
+
+            return BacklogIssue(
+                file, id, title, priority, status, dependencies, githubIssue,
+                severity, component, effort, context, needed
+            )
         } catch (e: Exception) {
             System.err.println("Error parsing issue file ${file.name}: ${e.message}")
             return null
@@ -127,6 +142,44 @@ object BacklogParser {
         val content = issue.file.readText()
         val lines = content.lines().filter { !it.trim().startsWith("github_issue:") }
         issue.file.writeText(lines.joinToString("\n"))
+    }
+
+    private fun extractSection(body: String, sectionName: String): String? {
+        val markers = listOf("**$sectionName:**", "**$sectionName**:", "### $sectionName", "## $sectionName")
+        var startIndex = -1
+        for (marker in markers) {
+            startIndex = body.indexOf(marker, ignoreCase = true)
+            if (startIndex != -1) {
+                startIndex += marker.length
+                break
+            }
+        }
+        if (startIndex == -1) return null
+
+        val rest = body.substring(startIndex).trim()
+        val lines = rest.lines()
+        val contentLines = mutableListOf<String>()
+
+        val nextSectionMarkers = listOf("**", "###", "##")
+
+        for (line in lines) {
+            val trimmedLine = line.trim()
+            if (trimmedLine.startsWith("###") || trimmedLine.startsWith("##")) {
+                break
+            }
+            if (trimmedLine.startsWith("**") && trimmedLine.endsWith("**")) {
+                val core = trimmedLine.removeSurrounding("**")
+                if (core.endsWith(":") || core.lowercase().contains("needed") || core.lowercase().contains("context")) {
+                    break
+                }
+            }
+            if (trimmedLine.startsWith("**") && trimmedLine.contains(":**")) {
+                break
+            }
+            contentLines.add(line)
+        }
+
+        return contentLines.joinToString("\n").trim()
     }
 
     fun markIssueAsResolved(issue: BacklogIssue, resolvedDir: File) {
