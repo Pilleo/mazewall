@@ -71,6 +71,7 @@ internal object PureJavaBpfEngine : SeccompEngine<EngineState> {
         SeccompInstallationState.Verified.toString()
         SeccompInstallationState.FilterBuilt::class.java.name
         SeccompInstallationState.Failed::class.java.name
+        BpfNativeCache.toString()
 
         updateState(SeccompInstallationState.Uninitialized)
         try {
