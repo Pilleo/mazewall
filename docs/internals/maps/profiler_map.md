@@ -139,9 +139,7 @@ graph TD
     issue_115_cascading_failure_in_verifyinstallation_when_stacking_over_a["🔴 Issue: Cascading Failure in `verifyInstallation` when stacking over a restrictive `prctl` filter (HIGH)"]
     issue_116_suboptimal_bpf_ret_instruction_placement_in_emitlinearscan["🔴 Issue: Suboptimal BPF `RET` instruction placement in `emitLinearScan` (HIGH)"]
     issue_117_seccompinstallationstate_partial_failure_leaves_thread_unpri["🔴 Issue: `SeccompInstallationState` Partial Failure Leaves Thread Unprivileged but Uncontained (HIGH)"]
-    issue_118_native_memory_leak_in_containedexecutorswrap_under_high_conc["🔴 Issue: Native Memory Leak in `ContainedExecutors.wrap` under High Concurrency (HIGH)"]
     issue_119_seccompinstallationstate_partial_failure_leaves_thread_unpri["🔴 Issue: `SeccompInstallationState` Partial Failure Leaves Thread Unprivileged but Uncontained (HIGH)"]
-    issue_120_native_memory_leak_in_containedexecutorswrap_under_high_conc["🔴 Issue: Native Memory Leak in `ContainedExecutors.wrap` under High Concurrency (HIGH)"]
     issue_121_missing_thread_safety_in_processstateregistry_updates["🔴 Issue: Missing Thread-Safety in `ProcessStateRegistry` Updates (HIGH)"]
     issue_122_incomplete_architecture_verification_in_bpf_compiler["🔴 Issue: Incomplete Architecture Verification in BPF Compiler (HIGH)"]
     issue_123_inefficient_threadlocal_usage_in_threadstateregistry["🔴 Issue: Inefficient ThreadLocal usage in `ThreadStateRegistry` (HIGH)"]
@@ -258,9 +256,7 @@ graph TD
     issue_115_cascading_failure_in_verifyinstallation_when_stacking_over_a -->|Affects| PureJavaBpfEngine_kt
     issue_116_suboptimal_bpf_ret_instruction_placement_in_emitlinearscan -->|Affects| BpfFilter_kt
     issue_117_seccompinstallationstate_partial_failure_leaves_thread_unpri -->|Affects| PureJavaBpfEngine_kt
-    issue_118_native_memory_leak_in_containedexecutorswrap_under_high_conc -->|Affects| PureJavaBpfEngine_kt
     issue_119_seccompinstallationstate_partial_failure_leaves_thread_unpri -->|Affects| PureJavaBpfEngine_kt
-    issue_120_native_memory_leak_in_containedexecutorswrap_under_high_conc -->|Affects| PureJavaBpfEngine_kt
     issue_121_missing_thread_safety_in_processstateregistry_updates -->|Affects| ProcessStateRegistry_kt
     issue_122_incomplete_architecture_verification_in_bpf_compiler -->|Affects| BpfProgram_kt
     issue_123_inefficient_threadlocal_usage_in_threadstateregistry -->|Affects| ThreadStateRegistry_kt
@@ -384,9 +380,7 @@ graph TD
     click issue_115_cascading_failure_in_verifyinstallation_when_stacking_over_a "../backlog/security/issue-115-cascading-failure-in-verifyinstallation-when-stacking-over-a.md"
     click issue_116_suboptimal_bpf_ret_instruction_placement_in_emitlinearscan "../backlog/performance/issue-116-suboptimal-bpf-ret-instruction-placement-in-emitlinearscan.md"
     click issue_117_seccompinstallationstate_partial_failure_leaves_thread_unpri "../backlog/security/issue-117-seccompinstallationstate-partial-failure-leaves-thread-unpri.md"
-    click issue_118_native_memory_leak_in_containedexecutorswrap_under_high_conc "../backlog/performance/issue-118-native-memory-leak-in-containedexecutorswrap-under-high-conc.md"
     click issue_119_seccompinstallationstate_partial_failure_leaves_thread_unpri "../backlog/security/issue-119-seccompinstallationstate-partial-failure-leaves-thread-unpri.md"
-    click issue_120_native_memory_leak_in_containedexecutorswrap_under_high_conc "../backlog/performance/issue-120-native-memory-leak-in-containedexecutorswrap-under-high-conc.md"
     click issue_121_missing_thread_safety_in_processstateregistry_updates "../backlog/testing/issue-121-missing-thread-safety-in-processstateregistry-updates.md"
     click issue_122_incomplete_architecture_verification_in_bpf_compiler "../backlog/security/issue-122-incomplete-architecture-verification-in-bpf-compiler.md"
     click issue_123_inefficient_threadlocal_usage_in_threadstateregistry "../backlog/performance/issue-123-inefficient-threadlocal-usage-in-threadstateregistry.md"
