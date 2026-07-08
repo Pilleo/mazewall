@@ -5,6 +5,9 @@ import io.mazewall.Platform
 import io.mazewall.PolicyDefinition
 import io.mazewall.CompiledSandbox
 import io.mazewall.UnsupportedKernelFeatureException
+import java.util.concurrent.ConcurrentHashMap
+import java.lang.foreign.Arena
+import java.lang.foreign.MemorySegment
 import io.mazewall.core.Arch
 import io.mazewall.core.SeccompAction
 import io.mazewall.core.Syscall
@@ -19,6 +22,8 @@ import io.mazewall.ffi.memory.nativeScope
  */
 // @ref: docs/internals/containment_design.md — prctl/seccomp(2) install sequence, TSYNC flag semantics, FFM memory layout
 internal object PureJavaBpfEngine : SeccompEngine<EngineState> {
+    private val sharedArena = Arena.ofShared()
+    private val filterCache = ConcurrentHashMap<List<BpfInstruction>, MemorySegment>()
 
     override val state: EngineState
         get() = when (ThreadStateRegistry.state.engineState) {
@@ -69,8 +74,14 @@ internal object PureJavaBpfEngine : SeccompEngine<EngineState> {
         try {
             val uninitialized = SeccompInstallationState.Uninitialized
             val arch = Arch.current()
+
+            val filters = policy.compiledFilters
+            val cachedProg = filterCache.computeIfAbsent(filters) {
+                with(sharedArena) { LinuxNative.memory.newSockFProg(it) }
+            }
+
             nativeScope {
-                val built = uninitialized.buildFilter(this, policy)
+                val built = SeccompInstallationState.FilterBuilt(cachedProg)
                 updateState(built)
                 val locked = built.lockPrivileges()
                 updateState(locked)
