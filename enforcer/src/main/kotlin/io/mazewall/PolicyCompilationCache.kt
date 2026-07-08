@@ -6,7 +6,7 @@ import java.util.concurrent.ConcurrentHashMap
 /**
  * Global cache for compiled BPF filters.
  */
-public object PolicyCompilationCache {
+internal object PolicyCompilationCache {
     private data class CacheKey(
         val definition: PolicyDefinition<*>,
         val arch: Arch

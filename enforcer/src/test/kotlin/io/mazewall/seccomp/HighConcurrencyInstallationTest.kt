@@ -5,6 +5,7 @@ import io.mazewall.MockNativeEngine
 import io.mazewall.MockPlatformProvider
 import io.mazewall.Platform
 import io.mazewall.Policy
+import io.mazewall.PolicyCompilationCache
 import io.mazewall.enforcer.ContainedExecutors
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
@@ -32,12 +33,15 @@ class HighConcurrencyInstallationTest {
         LinuxNative.setEngine(MockNativeEngine(process = mockProcess))
         Platform.setProvider(MockPlatformProvider())
         io.mazewall.PolicyCompilationCache.clear()
+        PureJavaBpfEngine.clearCache()
     }
 
     @AfterEach
     fun tearDown() {
         LinuxNative.resetToDefault()
         Platform.resetToDefault()
+        io.mazewall.PolicyCompilationCache.clear()
+        PureJavaBpfEngine.clearCache()
     }
 
     @Test

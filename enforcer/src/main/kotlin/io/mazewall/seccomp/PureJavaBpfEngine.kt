@@ -25,6 +25,13 @@ internal object PureJavaBpfEngine : SeccompEngine<EngineState> {
     private val sharedArena = Arena.ofShared()
     private val filterCache = ConcurrentHashMap<List<BpfInstruction>, MemorySegment>()
 
+    /**
+     * Clears the native filter cache. Used for testing.
+     */
+    internal fun clearCache() {
+        filterCache.clear()
+    }
+
     override val state: EngineState
         get() = when (ThreadStateRegistry.state.engineState) {
             is SeccompInstallationState.Uninitialized -> EngineState.UnprivilegedImpl
