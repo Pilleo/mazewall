@@ -21,6 +21,7 @@ class OrchestratorContext {
     var lastWaitingLogTime: Long = 0L
     var lastFailedSha: String? = null
     var startTime: Long = 0L
+    var julesRetries: Int = 0
 
     fun load(props: java.util.Properties) {
         state = OrchestratorState.fromName(props.getProperty("state"))
@@ -45,6 +46,7 @@ class OrchestratorContext {
         lastWaitingLogTime = props.getProperty("lastWaitingLogTime")?.toLongOrNull() ?: 0L
         lastFailedSha = props.getProperty("lastFailedSha").takeIf { !it.isNullOrEmpty() }
         startTime = props.getProperty("startTime")?.toLongOrNull() ?: 0L
+        julesRetries = props.getProperty("julesRetries")?.toIntOrNull() ?: 0
     }
 
     fun save(props: java.util.Properties) {
@@ -64,6 +66,7 @@ class OrchestratorContext {
         props.setProperty("lastWaitingLogTime", lastWaitingLogTime.toString())
         props.setProperty("lastFailedSha", lastFailedSha ?: "")
         props.setProperty("startTime", startTime.toString())
+        props.setProperty("julesRetries", julesRetries.toString())
     }
 
     fun clearActiveTask() {
@@ -80,6 +83,7 @@ class OrchestratorContext {
         lastWaitingLogTime = 0L
         lastFailedSha = null
         startTime = 0L
+        julesRetries = 0
     }
 }
 
@@ -106,6 +110,13 @@ class OrchestratorDaemonRunner(
 
     fun run() {
         loadState()
+        val forcedTaskId = env.getEnvOrNull("FORCE_TASK")?.takeIf { it.isNotEmpty() }
+        if (forcedTaskId != null && context.currentIssueId != forcedTaskId) {
+            env.println("🎯 FORCE_TASK=$forcedTaskId detected. Resetting local state to SELECT_TASK to target it.")
+            context.clearActiveTask()
+            context.state = OrchestratorState.SELECT_TASK
+            saveState()
+        }
         while (true) {
             try {
                 context.state = context.state.execute(env, context)

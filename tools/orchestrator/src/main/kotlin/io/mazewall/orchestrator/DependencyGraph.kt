@@ -11,10 +11,10 @@ object DependencyGraph {
         }
 
         // Sort by priority descending (scale of 0-10, highest first)
-        // If priority is equal, sort by ID alphabetically/numerically (e.g. issue-001 before issue-002)
+        // If priority is equal, sort by ID descending (e.g. issue-188 before issue-001)
         return unblockedIssues.sortedWith(
             compareByDescending<BacklogIssue> { it.priority }
-                .thenBy { it.id }
+                .thenByDescending { it.id }
         ).firstOrNull()
     }
 }

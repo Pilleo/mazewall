@@ -124,15 +124,23 @@ object GitHubCli {
             val checks = json.decodeFromString<List<GitHubCheck>>(checksJson)
             if (checks.isEmpty()) return "IN_PROGRESS"
 
-            // If any check has state FAILURE, the build is failing
-            val isFailing = checks.any { it.state == "FAILURE" }
+            // If any check has failed, was cancelled, or requires action, the build has failed
+            val isFailing = checks.any {
+                it.state == "FAILURE" ||
+                it.state == "CANCELLED" ||
+                it.state == "ACTION_REQUIRED"
+            }
             if (isFailing) return "FAILURE"
 
-            // If all checks are completed and successful
-            val allSuccess = checks.all { it.state == "SUCCESS" }
-            if (allSuccess) return "SUCCESS"
+            // If any check is pending, currently running, or expected to run, the build is in progress
+            val isPending = checks.any {
+                it.state == "PENDING" ||
+                it.state == "IN_PROGRESS" ||
+                it.state == "EXPECTED"
+            }
+            if (isPending) return "IN_PROGRESS"
 
-            return "IN_PROGRESS"
+            return "SUCCESS"
         } catch (e: ProcessExecutionException) {
             val output = e.output.lowercase()
             if (output.contains("no checks reported")) {
@@ -206,14 +214,27 @@ object GitHubCli {
 
     private fun execute(vararg command: String): String {
         return RetryUtils.retry(config.maxRetries, config.initialRetryDelayMs, LoggingEnv) {
-            val pb = ProcessBuilder(*command)
-            val process = pb.redirectErrorStream(true).start()
-            val output = process.inputStream.bufferedReader().readText()
-            val exitCode = process.waitFor()
-            if (exitCode != 0) {
-                throw ProcessExecutionException(command.joinToString(" "), exitCode, output.trim())
+            val directory = File("build/tmp").apply { mkdirs() }
+            val tempFile = File.createTempFile("gh_cmd_", ".log", directory)
+            try {
+                val pb = ProcessBuilder(*command)
+                pb.redirectErrorStream(true)
+                pb.redirectOutput(tempFile)
+                val process = pb.start()
+                val completed = process.waitFor(config.maxExternalCommandTimeoutMinutes, TimeUnit.MINUTES)
+                if (!completed) {
+                    process.destroyForcibly()
+                    throw RuntimeException("Command '${command.joinToString(" ")}' timed out after ${config.maxExternalCommandTimeoutMinutes} minutes.")
+                }
+                val output = tempFile.readText().trim()
+                val exitCode = process.exitValue()
+                if (exitCode != 0) {
+                    throw ProcessExecutionException(command.joinToString(" "), exitCode, output)
+                }
+                output
+            } finally {
+                tempFile.delete()
             }
-            output.trim()
         }
     }
 
@@ -224,6 +245,7 @@ object GitHubCli {
         override fun sleep(duration: Long, unit: TimeUnit) = unit.sleep(duration)
         override fun ringBell(times: Int) {}
         override fun readLine(): String? = null
+        override fun getEnvOrNull(key: String): String? = null
         override fun sendNotification(message: String) {}
         override fun requestApproval(issueId: String, text: String): Boolean = false
         override fun findExistingIssueNumber(issueId: String): String? = null
@@ -235,6 +257,7 @@ object GitHubCli {
         override fun checkBuildStatus(prNumber: String): String = ""
         override fun getPrComments(prNumber: String): List<GitHubComment> = emptyList()
         override fun commentOnPr(prNumber: String, body: String) {}
+        override fun commentOnIssue(issueNumber: String, body: String) {}
         override fun getPrDiff(prNumber: String): String = ""
         override fun getFailedBuildLogs(prNumber: String): String = ""
         override fun getPrUrl(prNumber: String): String = ""

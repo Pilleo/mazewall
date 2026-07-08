@@ -128,8 +128,8 @@ class OrchestratorTest {
         val next = DependencyGraph.selectNextIssue(issues)
 
         assertNotNull(next)
-        // Should resolve to issue-001 due to alphabetical tie-breaker (lower ID first)
-        assertEquals("issue-001", next.id)
+        // Should resolve to issue-002 due to alphabetical tie-breaker (higher ID first, freshest issues first)
+        assertEquals("issue-002", next.id)
     }
 
     @Test

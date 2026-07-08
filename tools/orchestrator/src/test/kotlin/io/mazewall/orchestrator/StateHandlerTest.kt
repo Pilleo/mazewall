@@ -29,6 +29,7 @@ class MockOrchestratorEnvironment : OrchestratorEnvironment {
     override fun sleep(duration: Long, unit: TimeUnit) { sleepCount++ }
     override fun ringBell(times: Int) {}
     override fun readLine(): String? = if (approved) "y" else "n"
+    override fun getEnvOrNull(key: String): String? = null
 
     override fun sendNotification(message: String) {}
     override fun requestApproval(issueId: String, text: String): Boolean = approved
@@ -42,6 +43,7 @@ class MockOrchestratorEnvironment : OrchestratorEnvironment {
     override fun checkBuildStatus(prNumber: String): String = buildStatus
     override fun getPrComments(prNumber: String): List<GitHubComment> = prComments
     override fun commentOnPr(prNumber: String, body: String) { commentedPrs.add(prNumber to body) }
+    override fun commentOnIssue(issueNumber: String, body: String) {}
     override fun getPrDiff(prNumber: String): String = "mock diff"
     override fun getFailedBuildLogs(prNumber: String): String = "logs"
     override fun getPrUrl(prNumber: String): String = "http://pr/$prNumber"

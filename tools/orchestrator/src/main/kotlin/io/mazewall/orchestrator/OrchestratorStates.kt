@@ -12,8 +12,29 @@ sealed interface OrchestratorState {
         override fun execute(env: OrchestratorEnvironment, context: OrchestratorContext): OrchestratorState {
             val allIssues = env.parseAllIssues()
             env.println("📚 Backlog Status: ${allIssues.count { it.status == "open" }} open issues remaining.")
-            val activeIssues = allIssues.filter { it.id !in context.skippedIds }
-            val nextIssue = DependencyGraph.selectNextIssue(activeIssues)
+
+            val forcedTaskId = env.getEnvOrNull("FORCE_TASK")?.takeIf { it.isNotEmpty() }
+            val nextIssue = if (forcedTaskId != null) {
+                val forcedIssue = allIssues.firstOrNull { it.id.equals(forcedTaskId, ignoreCase = true) }
+                if (forcedIssue == null) {
+                    env.errPrintln("⚠️ Forced task '$forcedTaskId' not found in backlog! Falling back to dependency graph.")
+                } else {
+                    env.println("🎯 Forcing specific task: ${forcedIssue.id} - ${forcedIssue.title}")
+                }
+                forcedIssue
+            } else {
+                null
+            } ?: run {
+                val activeIssues = allIssues.filter { it.id !in context.skippedIds }
+                var selected = DependencyGraph.selectNextIssue(activeIssues)
+                if (selected == null && context.skippedIds.isNotEmpty()) {
+                    env.println("♻️ No unblocked tasks available. Clearing skipped tasks list to retry them.")
+                    context.skippedIds.clear()
+                    val resetActiveIssues = allIssues.filter { it.id !in context.skippedIds }
+                    selected = DependencyGraph.selectNextIssue(resetActiveIssues)
+                }
+                selected
+            }
 
             if (nextIssue == null) {
                 env.println("💤 No unblocked open issues found. Checking again in ${env.config.backlogCheckIntervalMinutes} minutes...")
@@ -153,20 +174,68 @@ sealed interface OrchestratorState {
             }
 
             val session = env.getJulesSession(issueId)
-            if (session != null && session.status != context.lastBuildStatus) {
-                env.println("Jules session status changed: ${session.status}")
-                context.lastBuildStatus = session.status
-
+            if (session != null) {
                 val sessionUrl = "https://jules.google.com/session/${session.id}"
-                if (session.status.contains("Awaiting", ignoreCase = true) || session.status.contains("Feedback", ignoreCase = true)) {
-                    val alertMsg = "⚠️ *Jules needs feedback on task $issueId!* Status: `${session.status}`. Please check and respond here: $sessionUrl"
-                    env.sendNotification(alertMsg)
-                    env.println("\n\u001B[1;31m🔔 [FEEDBACK REQUIRED] Jules is blocked waiting for feedback on task $issueId. Status: ${session.status}\u001B[0m")
-                    env.println("👉 Respond here: $sessionUrl")
-                    env.ringBell(5)
-                } else if (session.status.equals("Completed", ignoreCase = true)) {
-                    env.println("\n\u001B[1;32m🟢 [COMPLETED] Jules task $issueId is Completed! Please review and publish the PR in the UI.\u001B[0m")
-                    env.println("👉 Publish PR here: $sessionUrl")
+                val status = session.status.lowercase()
+
+                if (status == "failed" || status == "cancelled") {
+                    if (context.julesRetries < 2) {
+                        context.julesRetries++
+                        env.println("\n⚠️ [RETRY] Jules task $issueId failed with status: ${session.status}. Retrying (Attempt ${context.julesRetries}/2)...")
+                        env.sendNotification("⚠️ *Jules task failed* for $issueId (Status: ${session.status}). Commenting 'Retry' to trigger a new session (Attempt ${context.julesRetries}/2).")
+                        env.commentOnIssue(githubIssueNumber, "Retry")
+                        context.julesSessionId = null
+                        context.lastBuildStatus = null
+                        return AWAITING_JULES_START
+                    } else {
+                        env.println("\n❌ [FAILED] Jules task $issueId failed with status: ${session.status} after ${context.julesRetries} retries.")
+                        env.sendNotification("❌ *Jules task failed* for $issueId (Status: ${session.status}) after ${context.julesRetries} retries. Returning to SELECT_TASK.")
+                        val nextIssue = env.parseAllIssues().firstOrNull { it.id == issueId }
+                        if (nextIssue != null) {
+                            env.removeGithubIssue(nextIssue)
+                        }
+                        context.skippedIds.add(issueId)
+                        context.clearActiveTask()
+                        return SELECT_TASK
+                    }
+                }
+
+                if (session.status != context.lastBuildStatus) {
+                    env.println("Jules session status changed: ${session.status}")
+                    context.lastBuildStatus = session.status
+
+                    if (session.status.contains("Awaiting", ignoreCase = true) || session.status.contains("Feedback", ignoreCase = true)) {
+                        val alertMsg = "⚠️ *Jules needs feedback on task $issueId!* Status: `${session.status}`. Please check and respond here: $sessionUrl"
+                        env.sendNotification(alertMsg)
+                        env.println("\n\u001B[1;31m🔔 [FEEDBACK REQUIRED] Jules is blocked waiting for feedback on task $issueId. Status: ${session.status}\u001B[0m")
+                        env.println("👉 Respond here: $sessionUrl")
+                        env.ringBell(5)
+                    } else if (session.status.equals("Completed", ignoreCase = true)) {
+                        env.println("\n\u001B[1;32m🟢 [COMPLETED] Jules task $issueId is Completed! Please review and publish the PR in the UI.\u001B[0m")
+                        env.println("👉 Publish PR here: $sessionUrl")
+                    }
+                }
+
+                if (status == "completed" && env.findLinkedPR(githubIssueNumber, issueId, sessionId) == null) {
+                    if (context.julesRetries < 2) {
+                        context.julesRetries++
+                        env.println("\n⚠️ [RETRY] Jules task $issueId finished as Completed but did not open a PR. Retrying (Attempt ${context.julesRetries}/2)...")
+                        env.sendNotification("⚠️ *Jules task finished* for $issueId without creating a PR. Commenting 'Retry' to trigger a new session (Attempt ${context.julesRetries}/2).")
+                        env.commentOnIssue(githubIssueNumber, "Retry")
+                        context.julesSessionId = null
+                        context.lastBuildStatus = null
+                        return AWAITING_JULES_START
+                    } else {
+                        env.println("\n❌ [FAILED] Jules task $issueId finished as Completed but did not open a PR after ${context.julesRetries} retries.")
+                        env.sendNotification("❌ *Jules task finished* for $issueId without creating a PR after ${context.julesRetries} retries. Returning to SELECT_TASK.")
+                        val nextIssue = env.parseAllIssues().firstOrNull { it.id == issueId }
+                        if (nextIssue != null) {
+                            env.removeGithubIssue(nextIssue)
+                        }
+                        context.skippedIds.add(issueId)
+                        context.clearActiveTask()
+                        return SELECT_TASK
+                    }
                 }
             }
 
@@ -211,12 +280,6 @@ sealed interface OrchestratorState {
                 env.println("PR #$prNumber build check: $status")
                 context.lastBuildStatus = status
                 context.lastCheckedSha = currentSha
-            }
-
-            if (isTaskTimedOut(context, env.config)) {
-                env.errPrintln("❌ Task $issueId timed out in CI_RUNNING. Returning to SELECT_TASK.")
-                context.clearActiveTask()
-                return SELECT_TASK
             }
 
             return when (status) {
@@ -268,12 +331,9 @@ sealed interface OrchestratorState {
         override val name = "AWAITING_REVIEW"
         override fun execute(env: OrchestratorEnvironment, context: OrchestratorContext): OrchestratorState {
             val prNumber = context.prNumber ?: throw IllegalStateException("prNumber is null")
-
-            if (isTaskTimedOut(context, env.config)) {
-                val issueId = context.currentIssueId ?: "unknown"
-                env.errPrintln("❌ Task $issueId timed out in AWAITING_REVIEW. Returning to SELECT_TASK.")
-                context.clearActiveTask()
-                return SELECT_TASK
+            if (env.isPrMerged(prNumber)) {
+                env.println("🎉 PR #$prNumber merged! resolving issue locally...")
+                return RESOLVE_TASK
             }
 
             val currentSha = env.getPrHeadSha(prNumber)
@@ -305,11 +365,6 @@ sealed interface OrchestratorState {
                         @jules Please perform a critical code review on this Pull Request (SHA: $currentSha) as a senior JVM security expert and staff engineer for the `mazewall` project.
 
                         ⚠️ **CRITICAL INSTRUCTION**: Do NOT modify the workspace files or make any commits. Only analyze the code changes and provide your code review feedback directly in a comment on the PR.
-
-                        Here is the diff of the changes:
-                        ```diff
-                        $prDiff
-                        ```
 
                         Provide a detailed response covering:
 
@@ -373,13 +428,6 @@ sealed interface OrchestratorState {
             val status = env.checkBuildStatus(prNumber)
             if (status != "SUCCESS") {
                 return CI_RUNNING
-            }
-
-            if (isTaskTimedOut(context, env.config)) {
-                val issueId = context.currentIssueId ?: "unknown"
-                env.errPrintln("❌ Task $issueId timed out in AWAITING_MERGE. Returning to SELECT_TASK.")
-                context.clearActiveTask()
-                return SELECT_TASK
             }
 
             val now = System.currentTimeMillis()

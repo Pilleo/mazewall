@@ -25,6 +25,7 @@ interface OrchestratorEnvironment {
     fun sleep(duration: Long, unit: TimeUnit)
     fun ringBell(times: Int)
     fun readLine(): String?
+    fun getEnvOrNull(key: String): String?
 
     // Bot
     fun sendNotification(message: String)
@@ -40,6 +41,7 @@ interface OrchestratorEnvironment {
     fun checkBuildStatus(prNumber: String): String
     fun getPrComments(prNumber: String): List<GitHubComment>
     fun commentOnPr(prNumber: String, body: String)
+    fun commentOnIssue(issueNumber: String, body: String)
     fun getPrDiff(prNumber: String): String
     fun getFailedBuildLogs(prNumber: String): String
     fun getPrUrl(prNumber: String): String
@@ -94,6 +96,10 @@ class RealOrchestratorEnvironment(
 
     override fun readLine(): String? = readlnOrNull()
 
+    override fun getEnvOrNull(key: String): String? {
+        return System.getenv(key) ?: System.getProperty(key)
+    }
+
     override fun sendNotification(message: String) {
         bot?.sendMessage(message)
     }
@@ -129,7 +135,25 @@ class RealOrchestratorEnvironment(
     override fun getPrComments(prNumber: String): List<GitHubComment> = GitHubCli.getPrComments(prNumber)
 
     override fun commentOnPr(prNumber: String, body: String) {
-        executeCmd("gh", "pr", "comment", prNumber, "--body", body)
+        val directory = File("build/tmp").apply { mkdirs() }
+        val tempFile = File.createTempFile("pr_comment_", ".tmp", directory)
+        try {
+            tempFile.writeText(body)
+            executeCmd("gh", "pr", "comment", prNumber, "--body-file", tempFile.absolutePath)
+        } finally {
+            tempFile.delete()
+        }
+    }
+
+    override fun commentOnIssue(issueNumber: String, body: String) {
+        val directory = File("build/tmp").apply { mkdirs() }
+        val tempFile = File.createTempFile("issue_comment_", ".tmp", directory)
+        try {
+            tempFile.writeText(body)
+            executeCmd("gh", "issue", "comment", issueNumber, "--body-file", tempFile.absolutePath)
+        } finally {
+            tempFile.delete()
+        }
     }
 
     override fun getPrDiff(prNumber: String): String {

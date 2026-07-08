@@ -114,12 +114,9 @@ graph TD
     issue_077_landlock_getaccessmask_missing_abi_4_support_net_capabilitie["🔴 Issue: `Landlock` getAccessMask missing ABI 4 Support (Net Capabilities) (HIGH)"]
     issue_078_purejavabpfengine_thread_state_synchronization["🔴 Issue: `PureJavaBpfEngine` Thread State Synchronization (HIGH)"]
     issue_079_unhandled_tsync_edge_cases_during_jit_classloading["🔴 Issue: Unhandled `TSYNC` edge cases during JIT classloading (HIGH)"]
-    issue_080_inefficient_regex_compilation_in_containmentviolationdetecto["🔴 Issue: Inefficient Regex Compilation in `ContainmentViolationDetector` (HIGH)"]
     issue_081_root_test_task_requires_host_dockerpodman_not_runnable_insid["🔴 Issue: 📝 [NOTE]: Root `:test` task requires host Docker/Podman, not runnable inside dev container (MEDIUM)"]
     issue_082_ktlint_parser_fails_on_kotlin_2x_named_context_parameters_sy["🔴 Issue: KtLint parser fails on Kotlin 2.x named context parameters syntax (MEDIUM)"]
     issue_083_unhandled_ioctl_fallbacks_during_legacy_jvm_syscall_tracing["🔴 Issue: Unhandled `IOCTL` fallbacks during legacy JVM syscall tracing (HIGH)"]
-    issue_084_potential_race_condition_in_async_io_thread_shutdown["🔴 Issue: Potential Race Condition in Async IO Thread Shutdown (HIGH)"]
-    issue_085_uncaught_native_exceptions_escaping_bpf_installation["🔴 Issue: Uncaught Native Exceptions Escaping BPF Installation (HIGH)"]
     issue_086_unhandled_signal_interruptions_eintr_during_seccomp_filter_i["🔴 Issue: Unhandled Signal Interruptions (`EINTR`) during `seccomp` Filter Installation (HIGH)"]
     issue_088_suboptimal_bpf_ret_instruction_placement_in_emitlinearscan["🔴 Issue: Suboptimal BPF `RET` instruction placement in `emitLinearScan` (HIGH)"]
     issue_089_missing_extensibility_in_exception_message_parsing["🔴 Issue: 🔴 [Severity: DX-FRICTION]: Missing Extensibility in Exception Message Parsing (HIGH)"]
@@ -137,16 +134,12 @@ graph TD
     issue_101_sbobparser_production_crashes_due_to_syntactic_subpath_pruni["🔴 Issue: SbobParser Production Crashes due to Syntactic Subpath Pruning of Unresolved/Symlinked Paths (HIGH)"]
     issue_102_permanent_thread_pool_contamination_classloader_leaks_and_st["🔴 Issue: 🟢 [WONTFIX]: Permanent thread pool contamination, classloader leaks, and state pollution via un-cleared `ThreadLocal` variables (MEDIUM)"]
     issue_103_containedexecutors_thread_local_state_persistence_and_poison["🔴 Issue: 🟢 [WONTFIX]: `ContainedExecutors` Thread-Local State Persistence and Poisoning (MEDIUM)"]
-    issue_111_missing_bpfprogramstatus_and_bpflabel_type_safety["🔴 Issue: Missing `BpfProgram<Status>` and `BpfLabel` Type-Safety (HIGH)"]
     issue_112_iterativeprofiler_logic_errors_confirmed["🔴 Issue: `IterativeProfiler` Logic Errors (Confirmed) (HIGH)"]
     issue_113_loom_carrier_poisoning_bypass_in_purejavabpfengine["🔴 Issue: Loom Carrier Poisoning Bypass in `PureJavaBpfEngine` (HIGH)"]
     issue_114_landlock_excessive_capability_leak_on_enoent["🔴 Issue: Landlock Excessive Capability Leak on `ENOENT` (MEDIUM)"]
-    issue_115_cascading_failure_in_verifyinstallation_when_stacking_over_a["🔴 Issue: Cascading Failure in `verifyInstallation` when stacking over a restrictive `prctl` filter (HIGH)"]
     issue_116_suboptimal_bpf_ret_instruction_placement_in_emitlinearscan["🔴 Issue: Suboptimal BPF `RET` instruction placement in `emitLinearScan` (HIGH)"]
     issue_117_seccompinstallationstate_partial_failure_leaves_thread_unpri["🔴 Issue: `SeccompInstallationState` Partial Failure Leaves Thread Unprivileged but Uncontained (HIGH)"]
-    issue_118_native_memory_leak_in_containedexecutorswrap_under_high_conc["🔴 Issue: Native Memory Leak in `ContainedExecutors.wrap` under High Concurrency (HIGH)"]
     issue_119_seccompinstallationstate_partial_failure_leaves_thread_unpri["🔴 Issue: `SeccompInstallationState` Partial Failure Leaves Thread Unprivileged but Uncontained (HIGH)"]
-    issue_120_native_memory_leak_in_containedexecutorswrap_under_high_conc["🔴 Issue: Native Memory Leak in `ContainedExecutors.wrap` under High Concurrency (HIGH)"]
     issue_121_missing_thread_safety_in_processstateregistry_updates["🔴 Issue: Missing Thread-Safety in `ProcessStateRegistry` Updates (HIGH)"]
     issue_122_incomplete_architecture_verification_in_bpf_compiler["🔴 Issue: Incomplete Architecture Verification in BPF Compiler (HIGH)"]
     issue_123_inefficient_threadlocal_usage_in_threadstateregistry["🔴 Issue: Inefficient ThreadLocal usage in `ThreadStateRegistry` (HIGH)"]
@@ -199,16 +192,14 @@ graph TD
     issue_185_missing_domain_logic_handling_of_syscallresult_in_supervisordaemonengine["🔴 Issue: Missing domain logic handling of SyscallResult in SupervisorDaemonEngine (MEDIUM)"]
     issue_186_memorysegment_lifetime_scope_violation_in_supervisordaemon["🔴 Issue: MemorySegment Lifetime/Scope Violation in SupervisorSessionHandler (HIGH)"]
     issue_187_archunit_bypass_swallowed_syscallresult_in_supervisorsessionhandler["🔴 Issue: ArchUnit Bypass: Swallowed SyscallResult in SupervisorSessionHandler (HIGH)"]
-    issue_188_unbounded_thread_creation_in_supervisordaemonengine_dos["🔴 Issue: Unbounded Thread Creation in SupervisorDaemonEngine (DoS) (HIGH)"]
-    issue_189_sbobunicodetest_fails_on_ascii_encodings["🔴 Issue: SbobUnicodeTest fails on systems with ASCII/non-UTF-8 JNU encoding (MEDIUM)"]
     issue_189_toctou_vulnerability_in_resolveabsolutepath_via_files_exists["🔴 Issue: TOCTOU Vulnerability in resolveAbsolutePath via Files.exists (HIGH)"]
     issue_190_unhandled_eintr_in_accept_in_supervisordaemonengine["🔴 Issue: Unhandled EINTR in accept in SupervisorDaemonEngine (MEDIUM)"]
     issue_191_jvm_validation_timeout_causes_denial_of_service_on_valid_syscalls["🔴 Issue: JVM Validation Timeout Causes Denial of Service on Valid Syscalls (MEDIUM)"]
     issue_193_review_orchestrator_prompts_jules_quality_safety_guidelines["🔴 Issue: Review and Enhance Orchestrator Prompts for Jules to Enforce Quality and Safety Guidelines (HIGH)"]
+    issue_193_sbobunicodetest_fails_on_ascii_encodings["🔴 Issue: SbobUnicodeTest fails on systems with ASCII/non-UTF-8 JNU encoding (MEDIUM)"]
     issue_195_jules_session_id_parsing_bug["🔴 Issue: Fix Jules Session ID Parsing Bug (HIGH)"]
     issue_197_graceful_fallback_for_ai_agent_failures["🔴 Issue: Graceful Fallback for AI Agent Failures (HIGH)"]
     issue_198_auto_closing_linked_github_issues["🔴 Issue: Auto-Closing Linked GitHub Issues (HIGH)"]
-    issue_201_enhance_task_approval_telegram_message_context["🔴 Issue: Enhance Task Approval Telegram Message with Full Context (HIGH)"]
     issue_202_handle_cli_authentication_failures["🔴 Issue: Detect and Handle CLI Authentication Failures with Actionable Login Alerts (HIGH)"]
     run_containerized_tests_sh["💻 Source: run_containerized_tests.sh"]
     supervisor_proxy_design_md["💻 Source: supervisor_proxy_design.md"]
@@ -243,10 +234,7 @@ graph TD
     issue_077_landlock_getaccessmask_missing_abi_4_support_net_capabilitie -->|Affects| Landlock_kt
     issue_078_purejavabpfengine_thread_state_synchronization -->|Affects| PureJavaBpfEngine_kt
     issue_079_unhandled_tsync_edge_cases_during_jit_classloading -->|Affects| PureJavaBpfEngine_kt
-    issue_080_inefficient_regex_compilation_in_containmentviolationdetecto -->|Affects| ContainmentViolationDetector_kt
     issue_083_unhandled_ioctl_fallbacks_during_legacy_jvm_syscall_tracing -->|Affects| io_mazewall_profiler_engine_ProfilerDaemon
-    issue_084_potential_race_condition_in_async_io_thread_shutdown -->|Affects| io_mazewall_enforcer_ContainedExecutors
-    issue_085_uncaught_native_exceptions_escaping_bpf_installation -->|Affects| io_mazewall_seccomp_PureJavaBpfEngine
     issue_086_unhandled_signal_interruptions_eintr_during_seccomp_filter_i -->|Affects| io_mazewall_seccomp_PureJavaBpfEngine
     issue_088_suboptimal_bpf_ret_instruction_placement_in_emitlinearscan -->|Affects| io_mazewall_BpfFilter
     issue_089_missing_extensibility_in_exception_message_parsing -->|Affects| io_mazewall_profiler_iterative_IterativeProfiler
@@ -264,16 +252,12 @@ graph TD
     issue_101_sbobparser_production_crashes_due_to_syntactic_subpath_pruni -->|Affects| io_mazewall_SbobParser
     issue_102_permanent_thread_pool_contamination_classloader_leaks_and_st -->|Affects| ContainedExecutors_kt
     issue_103_containedexecutors_thread_local_state_persistence_and_poison -->|Affects| io_mazewall_enforcer_ContainedExecutors_kt
-    issue_111_missing_bpfprogramstatus_and_bpflabel_type_safety -->|Affects| BpfProgram_kt
     issue_112_iterativeprofiler_logic_errors_confirmed -->|Affects| IterativeProfiler_kt
     issue_113_loom_carrier_poisoning_bypass_in_purejavabpfengine -->|Affects| PureJavaBpfEngine_kt
     issue_114_landlock_excessive_capability_leak_on_enoent -->|Affects| Landlock_kt
-    issue_115_cascading_failure_in_verifyinstallation_when_stacking_over_a -->|Affects| PureJavaBpfEngine_kt
     issue_116_suboptimal_bpf_ret_instruction_placement_in_emitlinearscan -->|Affects| BpfFilter_kt
     issue_117_seccompinstallationstate_partial_failure_leaves_thread_unpri -->|Affects| PureJavaBpfEngine_kt
-    issue_118_native_memory_leak_in_containedexecutorswrap_under_high_conc -->|Affects| PureJavaBpfEngine_kt
     issue_119_seccompinstallationstate_partial_failure_leaves_thread_unpri -->|Affects| PureJavaBpfEngine_kt
-    issue_120_native_memory_leak_in_containedexecutorswrap_under_high_conc -->|Affects| PureJavaBpfEngine_kt
     issue_121_missing_thread_safety_in_processstateregistry_updates -->|Affects| ProcessStateRegistry_kt
     issue_122_incomplete_architecture_verification_in_bpf_compiler -->|Affects| BpfProgram_kt
     issue_123_inefficient_threadlocal_usage_in_threadstateregistry -->|Affects| ThreadStateRegistry_kt
@@ -371,12 +355,9 @@ graph TD
     click issue_077_landlock_getaccessmask_missing_abi_4_support_net_capabilitie "../backlog/security/issue-077-landlock-getaccessmask-missing-abi-4-support-net-capabilitie.md"
     click issue_078_purejavabpfengine_thread_state_synchronization "../backlog/security/issue-078-purejavabpfengine-thread-state-synchronization.md"
     click issue_079_unhandled_tsync_edge_cases_during_jit_classloading "../backlog/testing/issue-079-unhandled-tsync-edge-cases-during-jit-classloading.md"
-    click issue_080_inefficient_regex_compilation_in_containmentviolationdetecto "../backlog/performance/issue-080-inefficient-regex-compilation-in-containmentviolationdetecto.md"
     click issue_081_root_test_task_requires_host_dockerpodman_not_runnable_insid "../backlog/testing/issue-081-root-test-task-requires-host-dockerpodman-not-runnable-insid.md"
     click issue_082_ktlint_parser_fails_on_kotlin_2x_named_context_parameters_sy "../backlog/testing/issue-082-ktlint-parser-fails-on-kotlin-2x-named-context-parameters-sy.md"
     click issue_083_unhandled_ioctl_fallbacks_during_legacy_jvm_syscall_tracing "../backlog/testing/issue-083-unhandled-ioctl-fallbacks-during-legacy-jvm-syscall-tracing.md"
-    click issue_084_potential_race_condition_in_async_io_thread_shutdown "../backlog/performance/issue-084-potential-race-condition-in-async-io-thread-shutdown.md"
-    click issue_085_uncaught_native_exceptions_escaping_bpf_installation "../backlog/security/issue-085-uncaught-native-exceptions-escaping-bpf-installation.md"
     click issue_086_unhandled_signal_interruptions_eintr_during_seccomp_filter_i "../backlog/security/issue-086-unhandled-signal-interruptions-eintr-during-seccomp-filter-i.md"
     click issue_088_suboptimal_bpf_ret_instruction_placement_in_emitlinearscan "../backlog/performance/issue-088-suboptimal-bpf-ret-instruction-placement-in-emitlinearscan.md"
     click issue_089_missing_extensibility_in_exception_message_parsing "../backlog/performance/issue-089-missing-extensibility-in-exception-message-parsing.md"
@@ -394,16 +375,12 @@ graph TD
     click issue_101_sbobparser_production_crashes_due_to_syntactic_subpath_pruni "../backlog/testing/issue-101-sbobparser-production-crashes-due-to-syntactic-subpath-pruni.md"
     click issue_102_permanent_thread_pool_contamination_classloader_leaks_and_st "../backlog/performance/issue-102-permanent-thread-pool-contamination-classloader-leaks-and-st.md"
     click issue_103_containedexecutors_thread_local_state_persistence_and_poison "../backlog/performance/issue-103-containedexecutors-thread-local-state-persistence-and-poison.md"
-    click issue_111_missing_bpfprogramstatus_and_bpflabel_type_safety "../backlog/security/issue-111-missing-bpfprogramstatus-and-bpflabel-type-safety.md"
     click issue_112_iterativeprofiler_logic_errors_confirmed "../backlog/performance/issue-112-iterativeprofiler-logic-errors-confirmed.md"
     click issue_113_loom_carrier_poisoning_bypass_in_purejavabpfengine "../backlog/security/issue-113-loom-carrier-poisoning-bypass-in-purejavabpfengine.md"
     click issue_114_landlock_excessive_capability_leak_on_enoent "../backlog/security/issue-114-landlock-excessive-capability-leak-on-enoent.md"
-    click issue_115_cascading_failure_in_verifyinstallation_when_stacking_over_a "../backlog/security/issue-115-cascading-failure-in-verifyinstallation-when-stacking-over-a.md"
     click issue_116_suboptimal_bpf_ret_instruction_placement_in_emitlinearscan "../backlog/performance/issue-116-suboptimal-bpf-ret-instruction-placement-in-emitlinearscan.md"
     click issue_117_seccompinstallationstate_partial_failure_leaves_thread_unpri "../backlog/security/issue-117-seccompinstallationstate-partial-failure-leaves-thread-unpri.md"
-    click issue_118_native_memory_leak_in_containedexecutorswrap_under_high_conc "../backlog/performance/issue-118-native-memory-leak-in-containedexecutorswrap-under-high-conc.md"
     click issue_119_seccompinstallationstate_partial_failure_leaves_thread_unpri "../backlog/security/issue-119-seccompinstallationstate-partial-failure-leaves-thread-unpri.md"
-    click issue_120_native_memory_leak_in_containedexecutorswrap_under_high_conc "../backlog/performance/issue-120-native-memory-leak-in-containedexecutorswrap-under-high-conc.md"
     click issue_121_missing_thread_safety_in_processstateregistry_updates "../backlog/testing/issue-121-missing-thread-safety-in-processstateregistry-updates.md"
     click issue_122_incomplete_architecture_verification_in_bpf_compiler "../backlog/security/issue-122-incomplete-architecture-verification-in-bpf-compiler.md"
     click issue_123_inefficient_threadlocal_usage_in_threadstateregistry "../backlog/performance/issue-123-inefficient-threadlocal-usage-in-threadstateregistry.md"
@@ -456,16 +433,14 @@ graph TD
     click issue_185_missing_domain_logic_handling_of_syscallresult_in_supervisordaemonengine "../backlog/security/issue-185-missing-domain-logic-handling-of-syscallresult-in-supervisordaemonengine.md"
     click issue_186_memorysegment_lifetime_scope_violation_in_supervisordaemon "../backlog/testing/issue-186-memorysegment-lifetime-scope-violation-in-supervisordaemon.md"
     click issue_187_archunit_bypass_swallowed_syscallresult_in_supervisorsessionhandler "../backlog/testing/issue-187-archunit-bypass-swallowed-syscallresult-in-supervisorsessionhandler.md"
-    click issue_188_unbounded_thread_creation_in_supervisordaemonengine_dos "../backlog/security/issue-188-unbounded-thread-creation-in-supervisordaemonengine-dos.md"
-    click issue_189_sbobunicodetest_fails_on_ascii_encodings "../backlog/testing/issue-189-sbobunicodetest-fails-on-ascii-encodings.md"
     click issue_189_toctou_vulnerability_in_resolveabsolutepath_via_files_exists "../backlog/security/issue-189-toctou-vulnerability-in-resolveabsolutepath-via-files-exists.md"
     click issue_190_unhandled_eintr_in_accept_in_supervisordaemonengine "../backlog/security/issue-190-unhandled-eintr-in-accept-in-supervisordaemonengine.md"
     click issue_191_jvm_validation_timeout_causes_denial_of_service_on_valid_syscalls "../backlog/security/issue-191-jvm-validation-timeout-causes-denial-of-service-on-valid-syscalls.md"
     click issue_193_review_orchestrator_prompts_jules_quality_safety_guidelines "../backlog/code_health/issue-193-review-orchestrator-prompts-jules-quality-safety-guidelines.md"
+    click issue_193_sbobunicodetest_fails_on_ascii_encodings "../backlog/testing/issue-193-sbobunicodetest-fails-on-ascii-encodings.md"
     click issue_195_jules_session_id_parsing_bug "../backlog/code_health/issue-195-jules-session-id-parsing-bug.md"
     click issue_197_graceful_fallback_for_ai_agent_failures "../backlog/code_health/issue-197-graceful-fallback-for-ai-agent-failures.md"
     click issue_198_auto_closing_linked_github_issues "../backlog/code_health/issue-198-auto-closing-linked-github-issues.md"
-    click issue_201_enhance_task_approval_telegram_message_context "../backlog/code_health/issue-201-enhance-task-approval-telegram-message-context.md"
     click issue_202_handle_cli_authentication_failures "../backlog/code_health/issue-202-handle-cli-authentication-failures.md"
 ```
 

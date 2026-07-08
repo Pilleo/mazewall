@@ -1,11 +1,12 @@
 ---
 title: "Uncaught Native Exceptions Escaping BPF Installation"
 severity: "HIGH"
-status: "open"
+status: "resolved"
 priority: 9
 dependencies: []
 component: "seccomp"
 effort: "small"
+github_issue: 73
 ---
 
 # 🔴 [Severity: MEDIUM]: Uncaught Native Exceptions Escaping BPF Installation

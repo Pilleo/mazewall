@@ -92,6 +92,7 @@ object JulesCli {
         override fun sleep(duration: Long, unit: TimeUnit) = unit.sleep(duration)
         override fun ringBell(times: Int) {}
         override fun readLine(): String? = null
+        override fun getEnvOrNull(key: String): String? = null
         override fun sendNotification(message: String) {}
         override fun requestApproval(issueId: String, text: String): Boolean = false
         override fun findExistingIssueNumber(issueId: String): String? = null
@@ -103,6 +104,7 @@ object JulesCli {
         override fun checkBuildStatus(prNumber: String): String = ""
         override fun getPrComments(prNumber: String): List<GitHubComment> = emptyList()
         override fun commentOnPr(prNumber: String, body: String) {}
+        override fun commentOnIssue(issueNumber: String, body: String) {}
         override fun getPrDiff(prNumber: String): String = ""
         override fun getFailedBuildLogs(prNumber: String): String = ""
         override fun getPrUrl(prNumber: String): String = ""

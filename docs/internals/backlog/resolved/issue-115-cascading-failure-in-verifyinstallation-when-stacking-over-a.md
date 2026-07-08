@@ -1,11 +1,12 @@
 ---
 title: "Cascading Failure in `verifyInstallation` when stacking over a restrictive `prctl` filter"
 severity: "HIGH"
-status: "open"
+status: "resolved"
 priority: 9
 dependencies: []
 component: "enforcer"
 effort: "small"
+github_issue: 83
 ---
 
 # 🔴 [Severity: MEDIUM]: Cascading Failure in `verifyInstallation` when stacking over a restrictive `prctl` filter

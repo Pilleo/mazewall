@@ -23,4 +23,13 @@ tasks.named<JavaExec>("run") {
     workingDir = rootProject.projectDir
     // Ensure terminal colors and bells propagate
     environment("TERM", System.getenv("TERM") ?: "xterm")
+    
+    // Explicitly forward FORCE_TASK env variable or project property to the application JVM
+    val forceTask = System.getenv("FORCE_TASK") ?: System.getProperty("FORCE_TASK")
+    if (forceTask != null) {
+        environment("FORCE_TASK", forceTask)
+    }
+    if (project.hasProperty("forceTask")) {
+        environment("FORCE_TASK", project.property("forceTask").toString())
+    }
 }

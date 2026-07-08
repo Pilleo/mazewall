@@ -1,11 +1,12 @@
 ---
 title: "Unbounded Thread Creation in SupervisorDaemonEngine (DoS)"
 severity: "HIGH"
-status: "open"
+status: "resolved"
 priority: 9
 dependencies: []
 component: "unknown"
 effort: "medium"
+github_issue: 77
 ---
 
 # 🔴 [Severity: HIGH]: Unbounded Thread Creation in SupervisorDaemonEngine (DoS)

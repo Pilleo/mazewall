@@ -1,11 +1,12 @@
 ---
 title: "Inefficient Regex Compilation in `ContainmentViolationDetector`"
 severity: "HIGH"
-status: "open"
+status: "resolved"
 priority: 9
 dependencies: []
 component: "enforcer"
 effort: "large"
+github_issue: 69
 ---
 
 # 🔴 [Severity: LOW]: Inefficient Regex Compilation in `ContainmentViolationDetector`
