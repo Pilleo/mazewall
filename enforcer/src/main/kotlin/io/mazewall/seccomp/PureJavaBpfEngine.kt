@@ -5,8 +5,6 @@ import io.mazewall.Platform
 import io.mazewall.PolicyDefinition
 import io.mazewall.CompiledSandbox
 import io.mazewall.UnsupportedKernelFeatureException
-import java.util.concurrent.ConcurrentHashMap
-import java.lang.foreign.Arena
 import java.lang.foreign.MemorySegment
 import io.mazewall.core.Arch
 import io.mazewall.core.SeccompAction
@@ -22,14 +20,11 @@ import io.mazewall.ffi.memory.nativeScope
  */
 // @ref: docs/internals/containment_design.md — prctl/seccomp(2) install sequence, TSYNC flag semantics, FFM memory layout
 internal object PureJavaBpfEngine : SeccompEngine<EngineState> {
-    private val sharedArena = Arena.ofShared()
-    private val filterCache = ConcurrentHashMap<List<BpfInstruction>, MemorySegment>()
-
     /**
      * Clears the native filter cache. Used for testing.
      */
     internal fun clearCache() {
-        filterCache.clear()
+        BpfNativeCache.clear()
     }
 
     override val state: EngineState
@@ -76,27 +71,22 @@ internal object PureJavaBpfEngine : SeccompEngine<EngineState> {
         SeccompInstallationState.Verified.toString()
         SeccompInstallationState.FilterBuilt::class.java.name
         SeccompInstallationState.Failed::class.java.name
+        BpfNativeCache.toString()
 
         updateState(SeccompInstallationState.Uninitialized)
         try {
-            val uninitialized = SeccompInstallationState.Uninitialized
             val arch = Arch.current()
-
             val filters = policy.compiledFilters
-            val cachedProg = filterCache.computeIfAbsent(filters) {
-                with(sharedArena) { LinuxNative.memory.newSockFProg(it) }
-            }
+            val cachedProg = BpfNativeCache.getOrCompute(filters)
 
-            nativeScope {
-                val built = SeccompInstallationState.FilterBuilt(cachedProg)
-                updateState(built)
-                val locked = built.lockPrivileges()
-                updateState(locked)
-                val applied = locked.applyFilter(arch, useTsync)
-                updateState(applied)
-                val verified = applied.verify(policy.definition)
-                updateState(verified)
-            }
+            val built = SeccompInstallationState.FilterBuilt(cachedProg)
+            updateState(built)
+            val locked = built.lockPrivileges()
+            updateState(locked)
+            val applied = locked.applyFilter(arch, useTsync)
+            updateState(applied)
+            val verified = applied.verify(policy.definition)
+            updateState(verified)
         } catch (e: Throwable) {
             val stepName = when (ThreadStateRegistry.state.engineState) {
                 is SeccompInstallationState.PrivilegesLocked -> "installFilter"
