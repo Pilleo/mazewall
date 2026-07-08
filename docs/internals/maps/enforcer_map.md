@@ -195,7 +195,6 @@ graph TD
     issue_185_missing_domain_logic_handling_of_syscallresult_in_supervisordaemonengine["🔴 Issue: Missing domain logic handling of SyscallResult in SupervisorDaemonEngine (MEDIUM)"]
     issue_186_memorysegment_lifetime_scope_violation_in_supervisordaemon["🔴 Issue: MemorySegment Lifetime/Scope Violation in SupervisorSessionHandler (HIGH)"]
     issue_187_archunit_bypass_swallowed_syscallresult_in_supervisorsessionhandler["🔴 Issue: ArchUnit Bypass: Swallowed SyscallResult in SupervisorSessionHandler (HIGH)"]
-    issue_188_unbounded_thread_creation_in_supervisordaemonengine_dos["🔴 Issue: Unbounded Thread Creation in SupervisorDaemonEngine (DoS) (HIGH)"]
     issue_189_sbobunicodetest_fails_on_ascii_encodings["🔴 Issue: SbobUnicodeTest fails on systems with ASCII/non-UTF-8 JNU encoding (MEDIUM)"]
     issue_189_toctou_vulnerability_in_resolveabsolutepath_via_files_exists["🔴 Issue: TOCTOU Vulnerability in resolveAbsolutePath via Files.exists (HIGH)"]
     issue_190_unhandled_eintr_in_accept_in_supervisordaemonengine["🔴 Issue: Unhandled EINTR in accept in SupervisorDaemonEngine (MEDIUM)"]
@@ -446,7 +445,6 @@ graph TD
     click issue_185_missing_domain_logic_handling_of_syscallresult_in_supervisordaemonengine "../backlog/security/issue-185-missing-domain-logic-handling-of-syscallresult-in-supervisordaemonengine.md"
     click issue_186_memorysegment_lifetime_scope_violation_in_supervisordaemon "../backlog/testing/issue-186-memorysegment-lifetime-scope-violation-in-supervisordaemon.md"
     click issue_187_archunit_bypass_swallowed_syscallresult_in_supervisorsessionhandler "../backlog/testing/issue-187-archunit-bypass-swallowed-syscallresult-in-supervisorsessionhandler.md"
-    click issue_188_unbounded_thread_creation_in_supervisordaemonengine_dos "../backlog/security/issue-188-unbounded-thread-creation-in-supervisordaemonengine-dos.md"
     click issue_189_sbobunicodetest_fails_on_ascii_encodings "../backlog/testing/issue-189-sbobunicodetest-fails-on-ascii-encodings.md"
     click issue_189_toctou_vulnerability_in_resolveabsolutepath_via_files_exists "../backlog/security/issue-189-toctou-vulnerability-in-resolveabsolutepath-via-files-exists.md"
     click issue_190_unhandled_eintr_in_accept_in_supervisordaemonengine "../backlog/security/issue-190-unhandled-eintr-in-accept-in-supervisordaemonengine.md"

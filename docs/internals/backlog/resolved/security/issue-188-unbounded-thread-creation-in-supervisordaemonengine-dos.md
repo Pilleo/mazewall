@@ -1,7 +1,7 @@
 ---
 title: "Unbounded Thread Creation in SupervisorDaemonEngine (DoS)"
 severity: "HIGH"
-status: "open"
+status: "resolved"
 priority: 9
 dependencies: []
 component: "unknown"
