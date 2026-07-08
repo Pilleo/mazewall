@@ -161,7 +161,13 @@ internal class SupervisorDaemonEngine(
                 }
 
                 clientSockets.add(clientFd)
-                connectionExecutor.execute { handleConnection(clientFd) }
+                try {
+                    connectionExecutor.execute { handleConnection(clientFd) }
+                } catch (e: Exception) {
+                    System.err.println("[SUPERVISOR] Failed to execute connection handler: ${e.message}")
+                    clientSockets.remove(clientFd)
+                    closeFd(clientFd)
+                }
             }
         } catch (ignored: java.io.IOException) {
             // Ignore during shutdown
@@ -186,8 +192,12 @@ internal class SupervisorDaemonEngine(
         } finally {
             clientSockets.remove(socketFd)
             closeFd(socketFd)
-            if (connection is io.mazewall.ffi.networking.SeccompConnection.FdAttached) {
-                val lFd = connection.listenerFd
+            val lFd = when (connection) {
+                is io.mazewall.ffi.networking.SeccompConnection.FdAttached -> connection.listenerFd
+                is io.mazewall.ffi.networking.SeccompConnection.Active -> connection.listenerFd
+                else -> null
+            }
+            if (lFd != null) {
                 activeListeners.remove(lFd)
                 closeFd(lFd)
             }
