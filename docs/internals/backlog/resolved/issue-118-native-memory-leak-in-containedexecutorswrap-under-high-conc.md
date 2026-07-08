@@ -1,7 +1,7 @@
 ---
 title: "Native Memory Leak in `ContainedExecutors.wrap` under High Concurrency"
 severity: "HIGH"
-status: "open"
+status: "resolved"
 priority: 9
 dependencies: []
 component: "enforcer"
