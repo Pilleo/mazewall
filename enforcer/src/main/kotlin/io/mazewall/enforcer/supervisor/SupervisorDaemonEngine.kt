@@ -190,15 +190,15 @@ internal class SupervisorDaemonEngine(
                 }
             }
         } finally {
-            clientSockets.remove(socketFd)
-            closeFd(socketFd)
+            if (clientSockets.remove(socketFd)) {
+                closeFd(socketFd)
+            }
             val lFd = when (connection) {
                 is io.mazewall.ffi.networking.SeccompConnection.FdAttached -> connection.listenerFd
                 is io.mazewall.ffi.networking.SeccompConnection.Active -> connection.listenerFd
                 else -> null
             }
-            if (lFd != null) {
-                activeListeners.remove(lFd)
+            if (lFd != null && activeListeners.remove(lFd)) {
                 closeFd(lFd)
             }
         }
@@ -280,8 +280,9 @@ internal class SupervisorDaemonEngine(
                 }
             }
         } finally {
-            activeListeners.remove(listenerFd)
-            closeFd(listenerFd)
+            if (activeListeners.remove(listenerFd)) {
+                closeFd(listenerFd)
+            }
         }
     }
 
