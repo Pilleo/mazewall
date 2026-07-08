@@ -9,6 +9,8 @@ Maps design documents, source files, and open issues for the `:enforcer` module 
 
 ```mermaid
 graph TD
+     instead of ["💻 Source:  instead of "]
+    , ["💻 Source: , "]
     ArchitectureTest_kt["💻 Source: ArchitectureTest.kt"]
     BpfFilter_kt["💻 Source: BpfFilter.kt"]
     BpfProgram_kt["💻 Source: BpfProgram.kt"]
@@ -201,6 +203,13 @@ graph TD
     issue_197_graceful_fallback_for_ai_agent_failures["🔴 Issue: Graceful Fallback for AI Agent Failures (HIGH)"]
     issue_198_auto_closing_linked_github_issues["🔴 Issue: Auto-Closing Linked GitHub Issues (HIGH)"]
     issue_202_handle_cli_authentication_failures["🔴 Issue: Detect and Handle CLI Authentication Failures with Actionable Login Alerts (HIGH)"]
+    issue_202_orchestrator_build_github_issue_body_dynamically_with_project_preamble["🔴 Issue: Orchestrator: Build GitHub Issue Body Dynamically with Project Preamble (HIGH)"]
+    issue_203_orchestrator_validate_issue_context_and_needed_before_github_issue_creation["🔴 Issue: Orchestrator: Validate Issue Context and Needed Before GitHub Issue Creation (HIGH)"]
+    issue_204_orchestrator_structured_ci_failure_comment_with_diagnosis_guidance["🔴 Issue: Orchestrator: Structured CI Failure Comment with Diagnosis Guidance for Jules (MEDIUM)"]
+    issue_205_orchestrator_add_failure_context_to_jules_retry_comments["🔴 Issue: Orchestrator: Add Failure Context to Jules Retry and Completed-Without-PR Comments (MEDIUM)"]
+    issue_206_orchestrator_close_github_issue_automatically_on_resolve_task["🔴 Issue: Orchestrator: Close GitHub Issue Automatically on RESOLVE_TASK (LOW)"]
+    issue_207_orchestrator_notify_human_when_ci_stuck_in_pending_unknown["🔴 Issue: Orchestrator: Notify Human When CI Build Status is Stuck in PENDING/UNKNOWN (MEDIUM)"]
+    issue_208_orchestrator_auto_merge_pr_on_verdict_approved_when_autonomous["🔴 Issue: Orchestrator: Auto-Merge PR on VERDICT: APPROVED When autonomy=autonomous and solution_approved=true (MEDIUM)"]
     run_containerized_tests_sh["💻 Source: run_containerized_tests.sh"]
     supervisor_proxy_design_md["💻 Source: supervisor_proxy_design.md"]
     BpfFilter_kt -->|Governed by| containment_design
@@ -305,6 +314,8 @@ graph TD
     issue_179_uncaught_native_exceptions_escaping_landlock_installation -->|Affects| LandlockState_kt
     issue_180_uncaught_exceptions_in_containedexecutorwrapperkt_during_fil -->|Affects| ContainedExecutorWrapper_kt
     issue_181_toctou_in_path_normalization_pathnormalizerkt -->|Affects| PathNormalizer_kt
+    issue_202_orchestrator_build_github_issue_body_dynamically_with_project_preamble -->|Affects| , 
+    issue_203_orchestrator_validate_issue_context_and_needed_before_github_issue_creation -->|Affects|  instead of 
     click containment_design "../containment_design.md"
     click issue_003_socket_address_family_filtering_for_network_isolation_evasio "../backlog/testing/issue-003-socket-address-family-filtering-for-network-isolation-evasio.md"
     click issue_008_high_frequency_arena_allocation_overhead_mm_optimization "../backlog/performance/issue-008-high-frequency-arena-allocation-overhead-mm-optimization.md"
@@ -442,6 +453,13 @@ graph TD
     click issue_197_graceful_fallback_for_ai_agent_failures "../backlog/code_health/issue-197-graceful-fallback-for-ai-agent-failures.md"
     click issue_198_auto_closing_linked_github_issues "../backlog/code_health/issue-198-auto-closing-linked-github-issues.md"
     click issue_202_handle_cli_authentication_failures "../backlog/code_health/issue-202-handle-cli-authentication-failures.md"
+    click issue_202_orchestrator_build_github_issue_body_dynamically_with_project_preamble "../backlog/code_health/issue-202-orchestrator-build-github-issue-body-dynamically-with-project-preamble.md"
+    click issue_203_orchestrator_validate_issue_context_and_needed_before_github_issue_creation "../backlog/code_health/issue-203-orchestrator-validate-issue-context-and-needed-before-github-issue-creation.md"
+    click issue_204_orchestrator_structured_ci_failure_comment_with_diagnosis_guidance "../backlog/code_health/issue-204-orchestrator-structured-ci-failure-comment-with-diagnosis-guidance.md"
+    click issue_205_orchestrator_add_failure_context_to_jules_retry_comments "../backlog/code_health/issue-205-orchestrator-add-failure-context-to-jules-retry-comments.md"
+    click issue_206_orchestrator_close_github_issue_automatically_on_resolve_task "../backlog/code_health/issue-206-orchestrator-close-github-issue-automatically-on-resolve-task.md"
+    click issue_207_orchestrator_notify_human_when_ci_stuck_in_pending_unknown "../backlog/code_health/issue-207-orchestrator-notify-human-when-ci-stuck-in-pending-unknown.md"
+    click issue_208_orchestrator_auto_merge_pr_on_verdict_approved_when_autonomous "../backlog/code_health/issue-208-orchestrator-auto-merge-pr-on-verdict-approved-when-autonomous.md"
 ```
 
 <!-- KNOWLEDGE_MAP_END -->

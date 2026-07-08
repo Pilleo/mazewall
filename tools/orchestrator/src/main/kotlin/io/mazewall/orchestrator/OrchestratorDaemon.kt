@@ -22,6 +22,7 @@ class OrchestratorContext {
     var lastFailedSha: String? = null
     var startTime: Long = 0L
     var julesRetries: Int = 0
+    var julesReviewPushCount: Int = 0
 
     fun load(props: java.util.Properties) {
         state = OrchestratorState.fromName(props.getProperty("state"))
@@ -47,6 +48,7 @@ class OrchestratorContext {
         lastFailedSha = props.getProperty("lastFailedSha").takeIf { !it.isNullOrEmpty() }
         startTime = props.getProperty("startTime")?.toLongOrNull() ?: 0L
         julesRetries = props.getProperty("julesRetries")?.toIntOrNull() ?: 0
+        julesReviewPushCount = props.getProperty("julesReviewPushCount")?.toIntOrNull() ?: 0
     }
 
     fun save(props: java.util.Properties) {
@@ -67,6 +69,7 @@ class OrchestratorContext {
         props.setProperty("lastFailedSha", lastFailedSha ?: "")
         props.setProperty("startTime", startTime.toString())
         props.setProperty("julesRetries", julesRetries.toString())
+        props.setProperty("julesReviewPushCount", julesReviewPushCount.toString())
     }
 
     fun clearActiveTask() {
@@ -84,6 +87,7 @@ class OrchestratorContext {
         lastFailedSha = null
         startTime = 0L
         julesRetries = 0
+        julesReviewPushCount = 0
     }
 }
 

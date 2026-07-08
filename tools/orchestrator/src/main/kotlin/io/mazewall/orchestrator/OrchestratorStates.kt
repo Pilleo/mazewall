@@ -338,8 +338,43 @@ sealed interface OrchestratorState {
 
             val currentSha = env.getPrHeadSha(prNumber)
 
-            // If PR head changed, go back to CI_RUNNING
+            // If the PR head SHA changed it means Jules pushed a new commit instead of just reviewing.
             if (currentSha != context.lastHeadSha) {
+                context.julesReviewPushCount++
+                env.println(
+                    "⚠️ [REVIEW→PUSH] Jules pushed a new commit on PR #$prNumber during the review phase " +
+                    "(push #${context.julesReviewPushCount}). SHA changed: ${context.lastHeadSha?.take(7)} → ${currentSha.take(7)}"
+                )
+
+                if (context.julesReviewPushCount >= 2) {
+                    // Jules keeps committing instead of reviewing — escalate to human.
+                    val prUrl = env.getPrUrl(prNumber)
+                    env.sendNotification(
+                        "⚠️ *Jules pushed instead of reviewing ${context.julesReviewPushCount}x on PR #$prNumber.* " +
+                        "Please manually review and merge (or close) the PR: $prUrl"
+                    )
+                    env.println("🔔 [ESCALATE] Jules review-push loop escalated to human after ${context.julesReviewPushCount} pushes.")
+                    env.ringBell(5)
+                    // Treat the latest pushed commit as the candidate; hand off to human.
+                    return AWAITING_MERGE
+                }
+
+                // Post a correction comment on the PR to re-orient Jules before CI re-runs.
+                val correctionComment = """
+                    @jules You pushed a new commit instead of leaving a code review comment.
+                    
+                    ⛔ **STOP. Do NOT push any more commits.**
+                    
+                    Your task for this PR is **read-only code review only**. The implementation is already 
+                    complete. Please do NOT modify any files or push any commits.
+                    
+                    When CI passes on the latest commit, you will receive a new review request. 
+                    At that point, respond ONLY with a comment containing your review findings — no file edits, no commits.
+                """.trimIndent()
+                env.commentOnPr(prNumber, correctionComment)
+                env.sendNotification("⚠️ Jules pushed instead of reviewing on PR #$prNumber. Correction comment sent. Returning to CI_RUNNING.")
+
+                // The new commit needs to go through CI before we review it.
                 return CI_RUNNING
             }
 
@@ -360,26 +395,56 @@ sealed interface OrchestratorState {
                 if (requestComment == null) {
                     env.println("🤖 PR #$prNumber Build Passed. Requesting Jules review for SHA: $currentSha")
 
-                    val prDiff = env.getPrDiff(prNumber)
-                    val prompt = """
-                        @jules Please perform a critical code review on this Pull Request (SHA: $currentSha) as a senior JVM security expert and staff engineer for the `mazewall` project.
+                    // If Jules already pushed once instead of reviewing, use a stronger framing.
+                    val pushWarning = if (context.julesReviewPushCount > 0) {
+                        "\n\n🚨 **IMPORTANT — PREVIOUS ATTEMPT PUSHED CODE**: Your previous review attempt " +
+                        "resulted in a commit push instead of a comment. This is incorrect. " +
+                        "You must NOT push anything. Read the instructions below carefully before acting."
+                    } else ""
 
-                        ⚠️ **CRITICAL INSTRUCTION**: Do NOT modify the workspace files or make any commits. Only analyze the code changes and provide your code review feedback directly in a comment on the PR.
+                    val prompt = buildString {
+                        append("⛔ READ-ONLY TASK — DO NOT COMMIT, PUSH, OR EDIT ANY FILES ⛔")
+                        append(pushWarning)
+                        append("""
 
-                        Provide a detailed response covering:
 
-                        1. **Overview**: Describe what this PR is doing and its main objectives.
-                        2. **Rationale**: Why was the solution implemented in this specific way?
-                        3. **Comparison & Alternatives**: Why is this solution better than other designs? What alternatives were considered (or should be considered) and what are their trade-offs?
-                        4. **Critical & Security Analysis**:
-                           - Evaluate correctness and potential failure modes.
-                           - Check for JVM sandboxing bypasses, Landlock or Seccomp filter flaws.
-                           - Verify FFM (Foreign Function & Memory) alignment, lifecycle, and memory leak risks.
-                           - Analyze concurrency, JVM thread coordination, and Loom virtual thread carrier thread safety (preventing carrier poisoning).
-                        5. **Conclusion**: Provide your final recommendation (e.g. Approved or needs changes).
+@jules You are acting as a **code reviewer**, not an implementer, on PR #$prNumber (SHA: $shaPrefix).
 
-                        Please be concise, extremely precise, and thorough. If you are not sure -say so. Use formatting for readability. Just leave a comment in the PR, do not commit new files!
-                    """.trimIndent()
+Your ONLY deliverable is a **single comment on this PR** containing your review.
+Do NOT open the workspace editor. Do NOT stage, commit, or push any changes.
+Do NOT create new files. Just write a comment.
+
+---
+
+Review the diff as a senior JVM security expert and staff engineer for `mazewall`
+— a kernel-enforced JVM sandboxing library using Linux Seccomp-BPF and Landlock LSM
+via the JDK Foreign Function & Memory (FFM) API.
+
+Structure your comment as follows:
+
+**1. Overview** — What does this PR do and what problem does it solve?
+
+**2. Rationale** — Why was this specific implementation approach chosen?
+
+**3. Security & Correctness Analysis**
+   - JVM sandboxing bypasses (Seccomp/Landlock filter gaps)
+   - FFM layout correctness: alignment, padding, `JAVA_LONG` misuse on 32-bit fields
+   - Memory lifecycle: arena scope, off-heap leak risk
+   - Concurrency: JVM thread coordination, Loom carrier thread safety (carrier poisoning)
+   - Silent error swallowing: any `catch` that ignores `EPERM`/`EACCES`/`EINTR`
+
+**4. Missed Edge Cases** — What scenarios are not covered by this PR?
+
+**5. Alternatives** — What other approaches exist and why is this one better or worse?
+
+**6. Verdict** — End your comment with EXACTLY one of these lines (on its own line):
+`VERDICT: APPROVED`
+`VERDICT: NEEDS_CHANGES`
+`VERDICT: UNCERTAIN`
+
+---
+⛔ Reminder: post your review as a **comment only**. Do NOT edit files or push commits. ⛔""")
+                    }
 
                     env.commentOnPr(prNumber, prompt)
                     env.sleep(env.config.pollingIntervalSeconds, TimeUnit.SECONDS)
@@ -394,8 +459,15 @@ sealed interface OrchestratorState {
 
                     if (julesReply != null) {
                         env.println("🟢 Jules review received for SHA $currentSha.")
+                        val verdict = when {
+                            julesReply.body.contains("VERDICT: APPROVED") -> "✅ APPROVED"
+                            julesReply.body.contains("VERDICT: NEEDS_CHANGES") -> "🔶 NEEDS_CHANGES"
+                            julesReply.body.contains("VERDICT: UNCERTAIN") -> "❓ UNCERTAIN"
+                            else -> "⚠️ NO_VERDICT (Jules did not include a structured verdict)"
+                        }
+                        env.println("Jules verdict on PR #$prNumber: $verdict")
                         val prUrl = env.getPrUrl(prNumber)
-                        env.sendNotification("🟢 *Jules reviewed PR #$prNumber!* Ready for final manual review and merge: $prUrl")
+                        env.sendNotification("🟢 *Jules reviewed PR #$prNumber!* Verdict: $verdict\nReady for merge: $prUrl")
                         context.lastReviewedSha = currentSha
                         env.ringBell(3)
                         return AWAITING_MERGE
