@@ -134,6 +134,13 @@ object ContainedExecutors {
         combinedPolicy: PolicyDefinition<*>,
         scopingPolicy: StacktraceScopingPolicy
     ) : AutoCloseable {
+        // FAST PATH: Check if the current thread state already satisfies the policy without locking
+        val fastState = resolveCurrentState()
+        val fastPlan = FilterInstallationPlanner.calculateNewFilter(combinedPolicy, fastState)
+        if (!fastPlan.needsNewFilter && (!combinedPolicy.hasSupervisedSyscalls || processWide)) {
+            return AutoCloseable {}
+        }
+
         synchronized(processLock) {
             val state = resolveCurrentState()
             val plan = FilterInstallationPlanner.calculateNewFilter(combinedPolicy, state)
@@ -280,7 +287,7 @@ object ContainedExecutors {
             )
             return session
         } else {
-            val compiledSandbox = toInstall.compile(arch)
+            val compiledSandbox = io.mazewall.PolicyCompilationCache.getOrCompile(toInstall, arch)
             if (processWide) {
                 PureJavaBpfEngine.installOnProcess(compiledSandbox)
                 updateProcessState(newBlocks, newDefaultAction, toInstall)

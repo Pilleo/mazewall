@@ -20,6 +20,8 @@ class PureJavaBpfEngineReproductionTest {
     @AfterEach
     fun tearDown() {
         LinuxNative.resetToDefault()
+        PureJavaBpfEngine.clearCache()
+        io.mazewall.PolicyCompilationCache.clear()
     }
 
     @Test
