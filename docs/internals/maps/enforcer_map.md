@@ -137,10 +137,8 @@ graph TD
     issue_112_iterativeprofiler_logic_errors_confirmed["🔴 Issue: `IterativeProfiler` Logic Errors (Confirmed) (HIGH)"]
     issue_113_loom_carrier_poisoning_bypass_in_purejavabpfengine["🔴 Issue: Loom Carrier Poisoning Bypass in `PureJavaBpfEngine` (HIGH)"]
     issue_114_landlock_excessive_capability_leak_on_enoent["🔴 Issue: Landlock Excessive Capability Leak on `ENOENT` (MEDIUM)"]
-    issue_115_cascading_failure_in_verifyinstallation_when_stacking_over_a["🔴 Issue: Cascading Failure in `verifyInstallation` when stacking over a restrictive `prctl` filter (HIGH)"]
     issue_116_suboptimal_bpf_ret_instruction_placement_in_emitlinearscan["🔴 Issue: Suboptimal BPF `RET` instruction placement in `emitLinearScan` (HIGH)"]
     issue_117_seccompinstallationstate_partial_failure_leaves_thread_unpri["🔴 Issue: `SeccompInstallationState` Partial Failure Leaves Thread Unprivileged but Uncontained (HIGH)"]
-    issue_118_native_memory_leak_in_containedexecutorswrap_under_high_conc["🔴 Issue: Native Memory Leak in `ContainedExecutors.wrap` under High Concurrency (HIGH)"]
     issue_119_seccompinstallationstate_partial_failure_leaves_thread_unpri["🔴 Issue: `SeccompInstallationState` Partial Failure Leaves Thread Unprivileged but Uncontained (HIGH)"]
     issue_120_native_memory_leak_in_containedexecutorswrap_under_high_conc["🔴 Issue: Native Memory Leak in `ContainedExecutors.wrap` under High Concurrency (HIGH)"]
     issue_121_missing_thread_safety_in_processstateregistry_updates["🔴 Issue: Missing Thread-Safety in `ProcessStateRegistry` Updates (HIGH)"]
@@ -261,10 +259,8 @@ graph TD
     issue_112_iterativeprofiler_logic_errors_confirmed -->|Affects| IterativeProfiler_kt
     issue_113_loom_carrier_poisoning_bypass_in_purejavabpfengine -->|Affects| PureJavaBpfEngine_kt
     issue_114_landlock_excessive_capability_leak_on_enoent -->|Affects| Landlock_kt
-    issue_115_cascading_failure_in_verifyinstallation_when_stacking_over_a -->|Affects| PureJavaBpfEngine_kt
     issue_116_suboptimal_bpf_ret_instruction_placement_in_emitlinearscan -->|Affects| BpfFilter_kt
     issue_117_seccompinstallationstate_partial_failure_leaves_thread_unpri -->|Affects| PureJavaBpfEngine_kt
-    issue_118_native_memory_leak_in_containedexecutorswrap_under_high_conc -->|Affects| PureJavaBpfEngine_kt
     issue_119_seccompinstallationstate_partial_failure_leaves_thread_unpri -->|Affects| PureJavaBpfEngine_kt
     issue_120_native_memory_leak_in_containedexecutorswrap_under_high_conc -->|Affects| PureJavaBpfEngine_kt
     issue_121_missing_thread_safety_in_processstateregistry_updates -->|Affects| ProcessStateRegistry_kt
@@ -388,10 +384,8 @@ graph TD
     click issue_112_iterativeprofiler_logic_errors_confirmed "../backlog/performance/issue-112-iterativeprofiler-logic-errors-confirmed.md"
     click issue_113_loom_carrier_poisoning_bypass_in_purejavabpfengine "../backlog/security/issue-113-loom-carrier-poisoning-bypass-in-purejavabpfengine.md"
     click issue_114_landlock_excessive_capability_leak_on_enoent "../backlog/security/issue-114-landlock-excessive-capability-leak-on-enoent.md"
-    click issue_115_cascading_failure_in_verifyinstallation_when_stacking_over_a "../backlog/security/issue-115-cascading-failure-in-verifyinstallation-when-stacking-over-a.md"
     click issue_116_suboptimal_bpf_ret_instruction_placement_in_emitlinearscan "../backlog/performance/issue-116-suboptimal-bpf-ret-instruction-placement-in-emitlinearscan.md"
     click issue_117_seccompinstallationstate_partial_failure_leaves_thread_unpri "../backlog/security/issue-117-seccompinstallationstate-partial-failure-leaves-thread-unpri.md"
-    click issue_118_native_memory_leak_in_containedexecutorswrap_under_high_conc "../backlog/performance/issue-118-native-memory-leak-in-containedexecutorswrap-under-high-conc.md"
     click issue_119_seccompinstallationstate_partial_failure_leaves_thread_unpri "../backlog/security/issue-119-seccompinstallationstate-partial-failure-leaves-thread-unpri.md"
     click issue_120_native_memory_leak_in_containedexecutorswrap_under_high_conc "../backlog/performance/issue-120-native-memory-leak-in-containedexecutorswrap-under-high-conc.md"
     click issue_121_missing_thread_safety_in_processstateregistry_updates "../backlog/testing/issue-121-missing-thread-safety-in-processstateregistry-updates.md"

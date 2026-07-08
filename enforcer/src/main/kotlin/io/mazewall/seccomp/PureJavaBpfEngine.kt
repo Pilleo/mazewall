@@ -11,6 +11,7 @@ import io.mazewall.core.SeccompAction
 import io.mazewall.core.Syscall
 import io.mazewall.core.PrctlCommand
 import io.mazewall.enforcer.ThreadStateRegistry
+import io.mazewall.enforcer.ContainerState
 import io.mazewall.ffi.NativeConstants
 import io.mazewall.ffi.memory.nativeScope
 
@@ -180,11 +181,12 @@ internal object PureJavaBpfEngine : SeccompEngine<EngineState> {
     }
 
     internal fun verifyInstallation(definition: PolicyDefinition<*>) {
-        val prctlAction = definition.syscallActions[Syscall.PRCTL] ?: definition.defaultAction
-        val canVerify = prctlAction == SeccompAction.ACT_ALLOW
+        val currentState = ContainerState.resolveCurrentState()
+        val canVerify = currentState.isSyscallAllowed(Syscall.PRCTL) &&
+            definition.isSyscallAllowed(Syscall.PRCTL)
 
         if (!canVerify) {
-            return // Cannot verify because prctl itself is restricted
+            return // Cannot verify because prctl itself is restricted (now or previously)
         }
 
         // Verify filter is actually installed
