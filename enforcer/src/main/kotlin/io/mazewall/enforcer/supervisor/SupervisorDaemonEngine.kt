@@ -22,6 +22,8 @@ import java.lang.foreign.MemorySegment
 import java.lang.foreign.ValueLayout
 import java.nio.charset.StandardCharsets
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
 
 internal sealed interface SupervisorDaemonState {
@@ -55,6 +57,13 @@ internal class SupervisorDaemonEngine(
     private val activeListeners = CopyOnWriteArrayList<FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open>>()
     private val stateRef = AtomicReference<SupervisorDaemonState>(SupervisorDaemonState.Uninitialized)
 
+    private val connectionExecutor = Executors.newFixedThreadPool(MAX_CONNECTIONS) { r ->
+        Thread(r).apply {
+            isDaemon = true
+            name = "supervisor-conn"
+        }
+    }
+
     var state: SupervisorDaemonState
         get() = stateRef.get()
         private set(value) = stateRef.set(value)
@@ -72,6 +81,7 @@ internal class SupervisorDaemonEngine(
         private const val EINTR = 4
         private const val BACKLOG_SIZE = 128
         private const val SOCKADDR_UN_SIZE = 110
+        private const val MAX_CONNECTIONS = 200
     }
 
     fun run() {
@@ -91,6 +101,15 @@ internal class SupervisorDaemonEngine(
         } finally {
             state = SupervisorDaemonState.Terminated
             closeFd(serverFd)
+            connectionExecutor.shutdown()
+            try {
+                if (!connectionExecutor.awaitTermination(5, TimeUnit.SECONDS)) {
+                    connectionExecutor.shutdownNow()
+                }
+            } catch (e: InterruptedException) {
+                connectionExecutor.shutdownNow()
+                Thread.currentThread().interrupt()
+            }
         }
     }
 
@@ -134,11 +153,15 @@ internal class SupervisorDaemonEngine(
             val res = LinuxNative.withTransaction { LinuxNative.networking.accept(serverFd, MemorySegment.NULL, MemorySegment.NULL) }
             if (res is LinuxNative.SyscallResult.Success) {
                 val clientFd = FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(res.value.toInt())
-                clientSockets.add(clientFd)
-                Thread { handleConnection(clientFd) }.apply {
-                    name = "supervisor-conn-handler-${clientFd.value}"
-                    start()
+
+                if (clientSockets.size >= MAX_CONNECTIONS) {
+                    System.err.println("[SUPERVISOR] Rejecting connection: too many clients (${clientSockets.size})")
+                    closeFd(clientFd)
+                    return
                 }
+
+                clientSockets.add(clientFd)
+                connectionExecutor.execute { handleConnection(clientFd) }
             }
         } catch (ignored: java.io.IOException) {
             // Ignore during shutdown
