@@ -47,7 +47,6 @@ graph TD
     io_mazewall_NativeTransaction["💻 Source: io.mazewall.NativeTransaction"]
     io_mazewall_Platform_kt["💻 Source: io.mazewall.Platform.kt"]
     io_mazewall_SbobParser["💻 Source: io.mazewall.SbobParser"]
-    io_mazewall_SbobParser_kt["💻 Source: io.mazewall.SbobParser.kt"]
     io_mazewall_core_FileDescriptor["💻 Source: io.mazewall.core.FileDescriptor"]
     io_mazewall_core_SeccompAction["💻 Source: io.mazewall.core.SeccompAction"]
     io_mazewall_enforcer_ContainedExecutors["💻 Source: io.mazewall.enforcer.ContainedExecutors"]
@@ -98,7 +97,6 @@ graph TD
     issue_044_type_state_enforced_bpf_dsl["🔴 Issue: Type-State Enforced BPF DSL (ENHANCEMENT)"]
     issue_045_standard_java_concurrency_virtual_threads_completablefuture_["🔴 Issue: Standard Java Concurrency (`Virtual Threads`, `CompletableFuture`) trivially bypasses Thread-Scoped (Tier 2) containment without ACE (CRITICAL)"]
     issue_056_iterativeprofiler_infinite_retry_loop_and_failure_on_disjoin["🔴 Issue: `IterativeProfiler` infinite retry loop and failure on disjoint prefix file paths (HIGH)"]
-    issue_058_sbobparser_syntactic_pruning_inaccuracy["🔴 Issue: `SbobParser` Syntactic Pruning Inaccuracy (HIGH)"]
     issue_059_iterativeprofiler_context_loss_via_thread_creation["🔴 Issue: `IterativeProfiler` Context Loss via thread creation (HIGH)"]
     issue_060_iterativeprofiler_path_truncation_on_spaces["🔴 Issue: `IterativeProfiler` Path Truncation on Spaces (HIGH)"]
     issue_061_manual_ffm_layout_maintenance_and_drift_risk["🔴 Issue: Manual FFM Layout Maintenance and Drift Risk (MEDIUM)"]
@@ -231,7 +229,6 @@ graph TD
     issue_044_type_state_enforced_bpf_dsl -->|Affects| io_mazewall_seccomp_BpfProgram_BDL
     issue_045_standard_java_concurrency_virtual_threads_completablefuture_ -->|Affects| io_mazewall_enforcer_ContainedExecutors
     issue_056_iterativeprofiler_infinite_retry_loop_and_failure_on_disjoin -->|Affects| IterativeProfiler_kt
-    issue_058_sbobparser_syntactic_pruning_inaccuracy -->|Affects| io_mazewall_SbobParser_kt
     issue_059_iterativeprofiler_context_loss_via_thread_creation -->|Affects| IterativeProfiler_kt
     issue_060_iterativeprofiler_path_truncation_on_spaces -->|Affects| IterativeProfiler_kt
     issue_061_manual_ffm_layout_maintenance_and_drift_risk -->|Affects| io_mazewall_ffi_Layouts
@@ -348,7 +345,6 @@ graph TD
     click issue_044_type_state_enforced_bpf_dsl "../backlog/security/issue-044-type-state-enforced-bpf-dsl.md"
     click issue_045_standard_java_concurrency_virtual_threads_completablefuture_ "../backlog/security/issue-045-standard-java-concurrency-virtual-threads-completablefuture-.md"
     click issue_056_iterativeprofiler_infinite_retry_loop_and_failure_on_disjoin "../backlog/testing/issue-056-iterativeprofiler-infinite-retry-loop-and-failure-on-disjoin.md"
-    click issue_058_sbobparser_syntactic_pruning_inaccuracy "../backlog/testing/issue-058-sbobparser-syntactic-pruning-inaccuracy.md"
     click issue_059_iterativeprofiler_context_loss_via_thread_creation "../backlog/performance/issue-059-iterativeprofiler-context-loss-via-thread-creation.md"
     click issue_060_iterativeprofiler_path_truncation_on_spaces "../backlog/testing/issue-060-iterativeprofiler-path-truncation-on-spaces.md"
     click issue_061_manual_ffm_layout_maintenance_and_drift_risk "../backlog/testing/issue-061-manual-ffm-layout-maintenance-and-drift-risk.md"

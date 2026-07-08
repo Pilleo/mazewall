@@ -20,6 +20,19 @@ import java.util.logging.Logger
 /**
  * Public API for wrapping an existing [java.util.concurrent.ExecutorService] to enforce seccomp containment.
  *
+ * ### Graceful Shutdown
+ * When using wrapped executors, it is strongly recommended to use a graceful shutdown pattern:
+ * ```kotlin
+ * executor.shutdown()
+ * if (!executor.awaitTermination(30, TimeUnit.SECONDS)) {
+ *     executor.shutdownNow()
+ * }
+ * ```
+ * Avoid using `shutdownNow()` immediately, as it interrupts threads during the critical seccomp
+ * installation and handshake phases. While this implementation is robust against such interruptions
+ * to prevent kernel/JVM state desync, an interrupted handshake may still leave the thread in a
+ * partially initialized supervisor state.
+ *
  * ARCHITECTURAL INVARIANT: Container state is maintained via immutable [ContainerState] objects,
  * which are updated atomically via [ThreadStateRegistry] and [ProcessStateRegistry]. This ensures
  * that the library has a consistent and race-free view of the active sandbox configuration
@@ -121,6 +134,13 @@ object ContainedExecutors {
         combinedPolicy: PolicyDefinition<*>,
         scopingPolicy: StacktraceScopingPolicy
     ) : AutoCloseable {
+        // FAST PATH: Check if the current thread state already satisfies the policy without locking
+        val fastState = resolveCurrentState()
+        val fastPlan = FilterInstallationPlanner.calculateNewFilter(combinedPolicy, fastState)
+        if (!fastPlan.needsNewFilter && (!combinedPolicy.hasSupervisedSyscalls || processWide)) {
+            return AutoCloseable {}
+        }
+
         synchronized(processLock) {
             val state = resolveCurrentState()
             val plan = FilterInstallationPlanner.calculateNewFilter(combinedPolicy, state)
@@ -213,39 +233,7 @@ object ContainedExecutors {
         }
     }
 
-    private fun resolveCurrentState(): ContainerState {
-        val ts = ThreadStateRegistry.state
-        val ps = ProcessStateRegistry.state
-
-        val mergedActions = ts.syscallActions.toMutableMap()
-        for ((sys, action) in ps.syscallActions) {
-            val current = mergedActions[sys]
-            if (current == null || action.priority > current.priority) {
-                mergedActions[sys] = action
-            }
-        }
-
-        val mergedDefault = if (ts.defaultAction.priority > ps.defaultAction.priority) ts.defaultAction else ps.defaultAction
-
-        val mergedAllowed = if (ts.allowedSyscalls == null) {
-            ps.allowedSyscalls
-        } else if (ps.allowedSyscalls == null) {
-            ts.allowedSyscalls
-        } else {
-            ts.allowedSyscalls.intersect(ps.allowedSyscalls)
-        }
-
-        return ContainerState(
-            filterDepth = ts.filterDepth + ps.filterDepth,
-            syscallActions = mergedActions,
-            defaultAction = mergedDefault,
-            allowedSyscalls = mergedAllowed,
-            allowsMmapExec = ts.allowsMmapExec && ps.allowsMmapExec,
-            allowsNonThreadClone = ts.allowsNonThreadClone && ps.allowsNonThreadClone,
-            allowsUnsafePrctl = ts.allowsUnsafePrctl && ps.allowsUnsafePrctl,
-            landlockPolicy = ts.landlockPolicy ?: ps.landlockPolicy
-        )
-    }
+    private fun resolveCurrentState(): ContainerState = ContainerState.resolveCurrentState()
 
     private fun applyBpfFilter(
         processWide: Boolean,
@@ -259,11 +247,15 @@ object ContainedExecutors {
             if (processWide) {
                 throw UnsupportedOperationException("Process-wide supervised filters are not supported. Use thread-scoped supervision instead.")
             }
-            val session = io.mazewall.enforcer.supervisor.SupervisorInstaller.installSupervisedFilterForThread(toInstall, scopingPolicy)
-            updateThreadState(newBlocks, newDefaultAction, toInstall)
+            val onApplied = { updateThreadState(newBlocks, newDefaultAction, toInstall) }
+            val session = io.mazewall.enforcer.supervisor.SupervisorInstaller.installSupervisedFilterForThread(
+                toInstall,
+                scopingPolicy,
+                onApplied
+            )
             return session
         } else {
-            val compiledSandbox = toInstall.compile(arch)
+            val compiledSandbox = io.mazewall.PolicyCompilationCache.getOrCompile(toInstall, arch)
             if (processWide) {
                 PureJavaBpfEngine.installOnProcess(compiledSandbox)
                 updateProcessState(newBlocks, newDefaultAction, toInstall)

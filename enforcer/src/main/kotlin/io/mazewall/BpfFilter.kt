@@ -188,22 +188,23 @@ object BpfFilter {
 
                 when (val check = inspection.check) {
                     is io.mazewall.seccomp.ArgCheck.EqualsAny -> {
+                        val allowLabel = nextLabel("${labelPrefix}_allow")
                         check.allowedValues.forEachIndexed { valIdx, value ->
                             val hi = (value ushr 32).toInt()
                             val lo = value.toInt()
 
-                            val nextValLabel = "${labelPrefix}_next_$valIdx"
-                            val checkLoLabel = "${labelPrefix}_check_lo_$valIdx"
+                            val nextValLabel = nextLabel("${labelPrefix}_next_$valIdx")
+                            val checkLoLabel = nextLabel("${labelPrefix}_check_lo_$valIdx")
 
                             loadAbsolute(argOffsetHi)
                             jumpIfEqual(hi, jt = checkLoLabel, jf = nextValLabel)
-                            label(checkLoLabel)
+                            mark(checkLoLabel)
                             loadAbsolute(argOffsetLo)
-                            jumpIfEqual(lo, jt = "${labelPrefix}_allow", jf = nextValLabel)
-                            label(nextValLabel)
+                            jumpIfEqual(lo, jt = allowLabel, jf = nextValLabel)
+                            mark(nextValLabel)
                         }
                         ret(ifNotMatchedNative)
-                        label("${labelPrefix}_allow")
+                        mark(allowLabel)
                         ret(ifMatchedNative)
                     }
 
@@ -213,16 +214,20 @@ object BpfFilter {
                         val maskLo = check.mask.toInt()
                         val expectedLo = check.expected.toInt()
 
+                        val checkLoLabel = nextLabel("${labelPrefix}_check_lo")
+                        val denyLabel = nextLabel("${labelPrefix}_deny")
+                        val allowLabel = nextLabel("${labelPrefix}_allow")
+
                         loadAbsolute(argOffsetHi)
                         and(maskHi)
-                        jumpIfEqual(expectedHi, jt = "${labelPrefix}_check_lo", jf = "${labelPrefix}_deny")
-                        label("${labelPrefix}_check_lo")
+                        jumpIfEqual(expectedHi, jt = checkLoLabel, jf = denyLabel)
+                        mark(checkLoLabel)
                         loadAbsolute(argOffsetLo)
                         and(maskLo)
-                        jumpIfEqual(expectedLo, jt = "${labelPrefix}_allow", jf = "${labelPrefix}_deny")
-                        label("${labelPrefix}_deny")
+                        jumpIfEqual(expectedLo, jt = allowLabel, jf = denyLabel)
+                        mark(denyLabel)
                         ret(ifNotMatchedNative)
-                        label("${labelPrefix}_allow")
+                        mark(allowLabel)
                         ret(ifMatchedNative)
                     }
                 }

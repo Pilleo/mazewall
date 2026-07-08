@@ -14,7 +14,7 @@ fun interface ViolationMatcher {
 object ContainmentViolationDetector {
     private val MATCHERS = CopyOnWriteArrayList<ViolationMatcher>()
 
-    private val ERRNO_VIOLATION_REGEX = Regex("""\b(error|errno)[=:]\s*(1|13)\b""")
+    private val ERRNO_VIOLATION_REGEX = Regex("""\b(error|errno)[=:]?\s*(1|13|22)\b""", RegexOption.IGNORE_CASE)
 
     val DENIED_PHRASES = arrayOf(
         "Operation not permitted",
@@ -24,27 +24,30 @@ object ContainmentViolationDetector {
         "negado",
     )
 
-    // Using \b word boundaries as per security requirements to avoid false positives on substrings
-    private val DENIED_PHRASES_REGEX = Regex(
-        """\b(${DENIED_PHRASES.joinToString("|")})\b""",
-        RegexOption.IGNORE_CASE
-    )
+    private val REASON_PHRASES_REGEX: Regex = run {
+        val list = mutableListOf<String>()
+        DENIED_PHRASES.forEach { list.add(Regex.escape(it)) }
 
-    private val LOCALIZED_DENIED_REGEX: Regex? = run {
         val strerror1 = io.mazewall.ffi.memory.getSystemStrerror(1)
         val strerror13 = io.mazewall.ffi.memory.getSystemStrerror(13)
-        val list = mutableListOf<String>()
         if (strerror1 != null && strerror1.isNotEmpty()) list.add(Regex.escape(strerror1))
         if (strerror13 != null && strerror13.isNotEmpty()) list.add(Regex.escape(strerror13))
-        if (list.isNotEmpty()) {
-            Regex("(?U)\\b(${list.joinToString("|")})\\b", RegexOption.IGNORE_CASE)
-        } else {
-            null
-        }
+
+        Regex("(?U)\\b(${list.distinct().joinToString("|")})\\b", RegexOption.IGNORE_CASE)
+    }
+
+    private val VIOLATION_PHRASES_REGEX: Regex = run {
+        // Extract the inner group from REASON_PHRASES_REGEX pattern
+        val pattern = REASON_PHRASES_REGEX.pattern.substringAfter('(').substringBeforeLast(')')
+        val extended = "$pattern|${Regex.escape("Cannot run")}"
+        Regex("(?U)\\b($extended)\\b", RegexOption.IGNORE_CASE)
     }
 
     init {
-        // Register default matchers
+        registerDefaultMatchers()
+    }
+
+    private fun registerDefaultMatchers() {
         registerMatcher { t -> t is AccessDeniedException }
         registerMatcher { t ->
             val msg = t.message ?: return@registerMatcher false
@@ -52,11 +55,7 @@ object ContainmentViolationDetector {
         }
         registerMatcher { t ->
             val msg = t.message ?: return@registerMatcher false
-            t is IOException && (
-                DENIED_PHRASES_REGEX.containsMatchIn(msg) ||
-                msg.contains("Cannot run") ||
-                (LOCALIZED_DENIED_REGEX != null && LOCALIZED_DENIED_REGEX.containsMatchIn(msg))
-            )
+            t is IOException && (VIOLATION_PHRASES_REGEX.containsMatchIn(msg) || ERRNO_VIOLATION_REGEX.containsMatchIn(msg))
         }
     }
 
@@ -72,20 +71,15 @@ object ContainmentViolationDetector {
      */
     fun resetToDefaults() {
         MATCHERS.clear()
-        // Re-add defaults
-        registerMatcher { t -> t is AccessDeniedException }
-        registerMatcher { t ->
-            val msg = t.message ?: return@registerMatcher false
-            ERRNO_VIOLATION_REGEX.containsMatchIn(msg)
-        }
-        registerMatcher { t ->
-            val msg = t.message ?: return@registerMatcher false
-            t is IOException && (
-                DENIED_PHRASES_REGEX.containsMatchIn(msg) ||
-                msg.contains("Cannot run") ||
-                (LOCALIZED_DENIED_REGEX != null && LOCALIZED_DENIED_REGEX.containsMatchIn(msg))
-            )
-        }
+        registerDefaultMatchers()
+    }
+
+    /**
+     * Finds the ranges of all violation "reason" phrases in the message.
+     * This intentionally excludes generic "Cannot run" prefixes to aid in path extraction.
+     */
+    fun findViolationRanges(msg: String): Sequence<IntRange> {
+        return REASON_PHRASES_REGEX.findAll(msg).map { it.range }
     }
 
     fun isContainmentViolation(t: Throwable): Boolean {

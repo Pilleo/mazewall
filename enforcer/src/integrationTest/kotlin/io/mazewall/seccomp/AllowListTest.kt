@@ -49,16 +49,15 @@ class AllowListTest : BaseIntegrationTest() {
         // This is the legitimate use of pre-loading — targeted to THIS test's policy.
         io.mazewall.seccomp.SeccompInstallationState.Uninitialized
             .toString()
-        io.mazewall.seccomp.SeccompInstallationState.PrivilegesLocked
-            .toString()
+        io.mazewall.seccomp.SeccompInstallationState.PrivilegesLocked::class.java.name
         io.mazewall.seccomp.SeccompInstallationState.Verified
             .toString()
         io.mazewall.seccomp.SeccompInstallationState.SystemCallApplied
             .toString()
         io.mazewall.seccomp.SeccompInstallationState.FallbackPrctlApplied
             .toString()
-        io.mazewall.seccomp.SeccompInstallationState.FilterBuilt::class.java
-        io.mazewall.seccomp.SeccompInstallationState.Failed::class.java
+        io.mazewall.seccomp.SeccompInstallationState.FilterBuilt::class.java.name
+        io.mazewall.seccomp.SeccompInstallationState.Failed::class.java.name
         Arch.current()
         // Force native symbol linking for LinuxNative downcall stubs
         LinuxNative.withTransaction {

@@ -9,8 +9,8 @@ import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
 import io.mazewall.core.NativeArg
 import io.mazewall.ffi.NativeConstants
-import io.mazewall.ffi.memory.nativeScope
 import io.mazewall.getFdOrThrow
+import io.mazewall.seccomp.BpfNativeCache
 import java.lang.foreign.MemorySegment
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.atomic.AtomicInteger
@@ -31,6 +31,7 @@ public object SupervisorSeccompNotifInstaller {
         processWide: Boolean = false,
         connectWithRetry: (String) -> Int = { path -> SupervisorSocketUtils.connectWithRetry(path) },
         sendDescriptor: (Int, Int) -> Boolean = { sockFd, fd -> SupervisorSocketUtils.sendDescriptor(sockFd, fd) },
+        onFilterApplied: () -> Unit = {},
         onSocketConnected: (socketFd: Int, readyLatch: CountDownLatch) -> Unit
     ) {
         if (!Platform.featureMatrix.seccompUserNotifSupported) {
@@ -110,35 +111,48 @@ public object SupervisorSeccompNotifInstaller {
         }
 
         try {
-            nativeScope {
-                val prog = LinuxNative.memory.newSockFProg(filterInstructions)
-                
-                // Install seccomp user notifier filter (applied to the current tracee thread)
-                val r = LinuxNative.withTransaction {
-                    LinuxNative.syscall(
-                        arch.seccompSyscallNumber.toLong(),
-                        NativeArg.LongArg(NativeConstants.SECCOMP_SET_MODE_FILTER.toLong()),
-                        NativeArg.LongArg(NativeConstants.SECCOMP_FILTER_FLAG_NEW_LISTENER.toLong()),
-                        NativeArg.MemoryArg(prog),
-                    )
-                }
+            val prog = BpfNativeCache.getOrCompute(filterInstructions)
 
-                val rawFd = when (r) {
-                    is LinuxNative.SyscallResult.Success -> r.value.toInt()
-                    is LinuxNative.SyscallResult.Error -> {
-                        setupError.set(IllegalStateException("seccomp syscall failed with errno ${r.errno}"))
-                        installLatch.countDown()
-                        proceedLatch.countDown()
-                        return@nativeScope
-                    }
-                }
-
-                listenerFdVal.set(rawFd)
-                installLatch.countDown() // Release the coordinator to connect & send descriptor
+            // Install seccomp user notifier filter (applied to the current tracee thread)
+            val r = LinuxNative.withTransaction {
+                LinuxNative.syscall(
+                    arch.seccompSyscallNumber.toLong(),
+                    NativeArg.LongArg(NativeConstants.SECCOMP_SET_MODE_FILTER.toLong()),
+                    NativeArg.LongArg(NativeConstants.SECCOMP_FILTER_FLAG_NEW_LISTENER.toLong()),
+                    NativeArg.MemoryArg(prog),
+                )
             }
 
+            val rawFd = when (r) {
+                is LinuxNative.SyscallResult.Success -> r.value.toInt()
+                is LinuxNative.SyscallResult.Error -> {
+                    setupError.set(IllegalStateException("seccomp syscall failed with errno ${r.errno}"))
+                    installLatch.countDown()
+                    proceedLatch.countDown()
+                    return
+                }
+            }
+
+            listenerFdVal.set(rawFd)
+            onFilterApplied()
+            installLatch.countDown() // Release the coordinator to connect & send descriptor
+
             // Block tracee thread until the coordinator completes descriptor passing and listener startup
-            proceedLatch.await()
+            // We wait uninterruptibly to ensure the handshake completes even if the thread is interrupted
+            // during executor shutdown. This prevents state desync between the kernel and JVM.
+            var interrupted = false
+            while (true) {
+                try {
+                    proceedLatch.await()
+                    break
+                } catch (e: InterruptedException) {
+                    interrupted = true
+                }
+            }
+            if (interrupted) {
+                Thread.currentThread().interrupt()
+            }
+
             setupError.get()?.let { throw it }
 
             // Step 2: Synchronize filter tree process-wide if processWide is true
@@ -146,28 +160,26 @@ public object SupervisorSeccompNotifInstaller {
             // This prevents the coordinator and listener threads from being subject to the seccomp
             // filter during their startup and handshake, avoiding fatal circular deadlocks.
             if (processWide && dummyBpf != null) {
-                nativeScope {
-                    val dummyProg = LinuxNative.memory.newSockFProg(dummyBpf)
-                    val tsyncRes = LinuxNative.withTransaction {
-                        LinuxNative.syscall(
-                            arch.seccompSyscallNumber.toLong(),
-                            NativeArg.LongArg(NativeConstants.SECCOMP_SET_MODE_FILTER.toLong()),
-                            NativeArg.LongArg(NativeConstants.SECCOMP_FILTER_FLAG_TSYNC.toLong()),
-                            NativeArg.MemoryArg(dummyProg),
+                val dummyProg = BpfNativeCache.getOrCompute(dummyBpf)
+                val tsyncRes = LinuxNative.withTransaction {
+                    LinuxNative.syscall(
+                        arch.seccompSyscallNumber.toLong(),
+                        NativeArg.LongArg(NativeConstants.SECCOMP_SET_MODE_FILTER.toLong()),
+                        NativeArg.LongArg(NativeConstants.SECCOMP_FILTER_FLAG_TSYNC.toLong()),
+                        NativeArg.MemoryArg(dummyProg),
+                    )
+                }
+                if (tsyncRes is LinuxNative.SyscallResult.Error) {
+                    val errno = tsyncRes.errno
+                    if (errno == 13) {
+                        throw IllegalStateException(
+                            "Process-wide profiling failed with EACCES (Permission denied). " +
+                            "This typically occurs because sibling threads (such as GC or JIT compiler threads) " +
+                            "do not have the 'no_new_privs' flag set. Process-wide profiling requires running " +
+                            "inside a container (where privilege escalation is disabled at the container boundary)."
                         )
-                    }
-                    if (tsyncRes is LinuxNative.SyscallResult.Error) {
-                        val errno = tsyncRes.errno
-                        if (errno == 13) {
-                            throw IllegalStateException(
-                                "Process-wide profiling failed with EACCES (Permission denied). " +
-                                "This typically occurs because sibling threads (such as GC or JIT compiler threads) " +
-                                "do not have the 'no_new_privs' flag set. Process-wide profiling requires running " +
-                                "inside a container (where privilege escalation is disabled at the container boundary)."
-                            )
-                        } else {
-                            throw IllegalStateException("Process-wide profiling TSYNC failed with errno $errno")
-                        }
+                    } else {
+                        throw IllegalStateException("Process-wide profiling TSYNC failed with errno $errno")
                     }
                 }
             }

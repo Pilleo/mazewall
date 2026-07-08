@@ -5,14 +5,32 @@ import io.mazewall.core.Arch
 import io.mazewall.core.SeccompAction
 import io.mazewall.core.Syscall
 import io.mazewall.ffi.NativeConstants
-import java.util.UUID
 import java.util.function.Consumer
 import java.util.function.Function
 
 /**
- * A compiled seccomp policy containing the BPF filter instructions ready for installation.
+ * Represents the verification status of a BPF program.
  */
-public class BpfProgram(
+public sealed interface BpfStatus {
+    /** The program has been built but not yet verified by the kernel. */
+    public data object Unverified : BpfStatus
+
+    /** The program has been successfully verified and installed by the kernel. */
+    public data object Verified : BpfStatus
+}
+
+/**
+ * A type-safe token representing a jump target within a BPF program.
+ */
+@JvmInline
+public value class BpfLabel(internal val name: String)
+
+/**
+ * A compiled seccomp policy containing the BPF filter instructions ready for installation.
+ *
+ * @param S The [BpfStatus] of the program.
+ */
+public class BpfProgram<out S : BpfStatus>(
     public val instructions: List<BpfInstruction>,
 ) {
     public companion object {
@@ -26,7 +44,10 @@ public class BpfProgram(
          * Enforces that the program ends with a termination instruction.
          */
         @JvmStatic
-        public fun dsl(arch: Arch, block: Function<BpfBuilder.NrLoaded, BpfBuilder.Terminated>): BpfProgram {
+        public fun dsl(
+            arch: Arch,
+            block: Function<BpfBuilder.NrLoaded, BpfBuilder.Terminated>
+        ): BpfProgram<BpfStatus.Unverified> {
             val nrLoaded = BpfBuilder.Uninitialized()
                 .checkArch(arch)
                 .loadSyscallNr()
@@ -38,7 +59,10 @@ public class BpfProgram(
          * Kotlin-friendly declarative entry point for building BPF programs.
          * Enforces that the program ends with a termination instruction.
          */
-        public inline fun dsl(arch: Arch, block: BpfBuilder.NrLoaded.() -> BpfBuilder.Terminated): BpfProgram =
+        public inline fun dsl(
+            arch: Arch,
+            block: BpfBuilder.NrLoaded.() -> BpfBuilder.Terminated
+        ): BpfProgram<BpfStatus.Unverified> =
             BpfBuilder.Uninitialized()
                 .checkArch(arch)
                 .loadSyscallNr()
@@ -56,8 +80,8 @@ public sealed class BpfBuilder protected constructor(
     internal val labelCounter: java.util.concurrent.atomic.AtomicInteger = java.util.concurrent.atomic.AtomicInteger(0)
 ) {
 
-    internal fun nextLabel(prefix: String): String {
-        return "${prefix}_${labelCounter.incrementAndGet()}"
+    internal fun nextLabel(prefix: String): BpfLabel {
+        return BpfLabel("${prefix}_${labelCounter.incrementAndGet()}")
     }
 
     /**
@@ -132,7 +156,7 @@ public sealed class BpfBuilder protected constructor(
             val skipLabel = nextLabel("skip")
             jumpIfEqual(nr, jf = skipLabel)
             this.block()
-            label(skipLabel)
+            mark(skipLabel)
             return this
         }
 
@@ -141,7 +165,7 @@ public sealed class BpfBuilder protected constructor(
             val skipLabel = nextLabel("skip")
             jumpIfEqual(nr, jf = skipLabel)
             block.accept(this)
-            label(skipLabel)
+            mark(skipLabel)
             return this
         }
 
@@ -164,12 +188,12 @@ public sealed class BpfBuilder protected constructor(
             return this
         }
 
-        public fun jumpIfEqual(k: Int, jt: String? = null, jf: String? = null): NrLoaded {
+        public fun jumpIfEqual(k: Int, jt: BpfLabel? = null, jf: BpfLabel? = null): NrLoaded {
             ops.add(BpfMacro.JumpIfEqual(k, jt, jf))
             return this
         }
 
-        public fun jumpIfSet(k: Int, jt: String? = null, jf: String? = null): NrLoaded {
+        public fun jumpIfSet(k: Int, jt: BpfLabel? = null, jf: BpfLabel? = null): NrLoaded {
             ops.add(BpfMacro.JumpIfSet(k, jt, jf))
             return this
         }
@@ -188,8 +212,8 @@ public sealed class BpfBuilder protected constructor(
             return Terminated(ops)
         }
 
-        public fun label(name: String): NrLoaded {
-            ops.add(BpfMacro.Label(name))
+        public fun mark(label: BpfLabel): NrLoaded {
+            ops.add(BpfMacro.Label(label))
             return this
         }
 
@@ -205,15 +229,15 @@ public sealed class BpfBuilder protected constructor(
         /**
          * Compiles the high-level instructions into raw seccomp-bpf opcodes.
          */
-        public fun build(): BpfProgram {
-            val labelPositions = mutableMapOf<String, Int>()
+        public fun build(): BpfProgram<BpfStatus.Unverified> {
+            val labelPositions = mutableMapOf<BpfLabel, Int>()
             val filteredOps = mutableListOf<BpfMacro>()
 
             // First pass: locate all labels and strip them from the instruction stream
             var currentPos = 0
             for (op in ops) {
                 if (op is BpfMacro.Label) {
-                    labelPositions[op.name] = currentPos
+                    labelPositions[op.label] = currentPos
                 } else {
                     filteredOps.add(op)
                     currentPos++
@@ -238,10 +262,10 @@ public sealed class BpfBuilder protected constructor(
         private fun compileJump(
             code: Short,
             k: Int,
-            jtLabel: String?,
-            jfLabel: String?,
+            jtLabel: BpfLabel?,
+            jfLabel: BpfLabel?,
             currentIndex: Int,
-            labelPositions: Map<String, Int>,
+            labelPositions: Map<BpfLabel, Int>,
         ): BpfInstruction.Jmp {
             val jt = resolveLabel(jtLabel, currentIndex, labelPositions)
             val jf = resolveLabel(jfLabel, currentIndex, labelPositions)
@@ -249,15 +273,15 @@ public sealed class BpfBuilder protected constructor(
         }
 
         private fun resolveLabel(
-            label: String?,
+            label: BpfLabel?,
             currentIndex: Int,
-            labelPositions: Map<String, Int>,
+            labelPositions: Map<BpfLabel, Int>,
         ): Short {
             if (label == null) return 0
-            val pos = labelPositions[label] ?: throw IllegalArgumentException("Unknown label: $label")
+            val pos = labelPositions[label] ?: throw IllegalArgumentException("Unknown label: ${label.name}")
             val offset = pos - (currentIndex + 1)
-            require(offset >= 0) { "Backward jumps are not allowed: $label" }
-            require(offset <= MAX_BPF_JUMP_OFFSET) { "Jump offset too large for $label: $offset" }
+            require(offset >= 0) { "Backward jumps are not allowed: ${label.name}" }
+            require(offset <= MAX_BPF_JUMP_OFFSET) { "Jump offset too large for ${label.name}: $offset" }
             return offset.toShort()
         }
 
@@ -277,9 +301,9 @@ public sealed class BpfBuilder protected constructor(
  */
 internal sealed interface BpfMacro {
     data class LoadAbsolute(val offset: Int) : BpfMacro
-    data class JumpIfEqual(val k: Int, val jt: String? = null, val jf: String? = null) : BpfMacro
-    data class JumpIfSet(val k: Int, val jt: String? = null, val jf: String? = null) : BpfMacro
+    data class JumpIfEqual(val k: Int, val jt: BpfLabel? = null, val jf: BpfLabel? = null) : BpfMacro
+    data class JumpIfSet(val k: Int, val jt: BpfLabel? = null, val jf: BpfLabel? = null) : BpfMacro
     data class And(val k: Int) : BpfMacro
     data class Ret(val action: Int) : BpfMacro
-    data class Label(val name: String) : BpfMacro
+    data class Label(val label: BpfLabel) : BpfMacro
 }

@@ -5,11 +5,13 @@ import io.mazewall.Platform
 import io.mazewall.PolicyDefinition
 import io.mazewall.CompiledSandbox
 import io.mazewall.UnsupportedKernelFeatureException
+import java.lang.foreign.MemorySegment
 import io.mazewall.core.Arch
 import io.mazewall.core.SeccompAction
 import io.mazewall.core.Syscall
 import io.mazewall.core.PrctlCommand
 import io.mazewall.enforcer.ThreadStateRegistry
+import io.mazewall.enforcer.ContainerState
 import io.mazewall.ffi.NativeConstants
 import io.mazewall.ffi.memory.nativeScope
 
@@ -19,6 +21,12 @@ import io.mazewall.ffi.memory.nativeScope
  */
 // @ref: docs/internals/containment_design.md — prctl/seccomp(2) install sequence, TSYNC flag semantics, FFM memory layout
 internal object PureJavaBpfEngine : SeccompEngine<EngineState> {
+    /**
+     * Clears the native filter cache. Used for testing.
+     */
+    internal fun clearCache() {
+        BpfNativeCache.clear()
+    }
 
     override val state: EngineState
         get() = when (ThreadStateRegistry.state.engineState) {
@@ -58,35 +66,35 @@ internal object PureJavaBpfEngine : SeccompEngine<EngineState> {
         EngineState.LoadedImpl.toString()
         EngineState.ConfiguredImpl.toString()
         SeccompInstallationState.Uninitialized.toString()
-        SeccompInstallationState.PrivilegesLocked.toString()
+        SeccompInstallationState.PrivilegesLocked::class.java.name
         SeccompInstallationState.SystemCallApplied.toString()
         SeccompInstallationState.FallbackPrctlApplied.toString()
         SeccompInstallationState.Verified.toString()
-        SeccompInstallationState.FilterBuilt::class.java.name.toString()
-        SeccompInstallationState.Failed::class.java.name.toString()
+        SeccompInstallationState.FilterBuilt::class.java.name
+        SeccompInstallationState.Failed::class.java.name
+        BpfNativeCache.toString()
 
         updateState(SeccompInstallationState.Uninitialized)
         try {
-            val uninitialized = SeccompInstallationState.Uninitialized
-            val locked = uninitialized.lockPrivileges()
-            updateState(locked)
-
             val arch = Arch.current()
-            nativeScope {
-                val built = locked.buildFilter(this, policy)
-                updateState(built)
-                val applied = built.applyFilter(arch, useTsync)
-                updateState(applied)
-                val verified = applied.verify(policy.definition)
-                updateState(verified)
-            }
+            val filters = policy.compiledFilters
+            val cachedProg = BpfNativeCache.getOrCompute(filters)
+
+            val built = SeccompInstallationState.FilterBuilt(cachedProg)
+            updateState(built)
+            val locked = built.lockPrivileges()
+            updateState(locked)
+            val applied = locked.applyFilter(arch, useTsync)
+            updateState(applied)
+            val verified = applied.verify(policy.definition)
+            updateState(verified)
         } catch (e: Throwable) {
             val stepName = when (ThreadStateRegistry.state.engineState) {
-                is SeccompInstallationState.FilterBuilt -> "installFilter"
+                is SeccompInstallationState.PrivilegesLocked -> "installFilter"
                 is SeccompInstallationState.SystemCallApplied -> "verifyInstallation"
                 is SeccompInstallationState.FallbackPrctlApplied -> "verifyInstallation"
-                is SeccompInstallationState.PrivilegesLocked -> "buildFilter"
-                is SeccompInstallationState.Uninitialized -> "setNoNewPrivs"
+                is SeccompInstallationState.FilterBuilt -> "setNoNewPrivs"
+                is SeccompInstallationState.Uninitialized -> "buildFilter"
                 is SeccompInstallationState.Verified -> "verified"
                 is SeccompInstallationState.Failed -> "failed"
             }
@@ -107,6 +115,13 @@ internal object PureJavaBpfEngine : SeccompEngine<EngineState> {
         ThreadStateRegistry.state = ThreadStateRegistry.state.withEngineState(next)
     }
 
+    /**
+     * Irreversibly locks the process from gaining new privileges.
+     *
+     * Once set, the PR_SET_NO_NEW_PRIVS flag cannot be cleared. This affects the
+     * current thread/process and all its future children spawned via fork/exec.
+     * This is a prerequisite for installing seccomp filters for unprivileged users.
+     */
     internal fun setNoNewPrivs() {
         // Step 1: Set no_new_privs (mandatory for non-root seccomp)
         val r1 = LinuxNative.withTransaction {
@@ -166,11 +181,12 @@ internal object PureJavaBpfEngine : SeccompEngine<EngineState> {
     }
 
     internal fun verifyInstallation(definition: PolicyDefinition<*>) {
-        val prctlAction = definition.syscallActions[Syscall.PRCTL] ?: definition.defaultAction
-        val canVerify = prctlAction == SeccompAction.ACT_ALLOW
+        val currentState = ContainerState.resolveCurrentState()
+        val canVerify = currentState.isSyscallAllowed(Syscall.PRCTL) &&
+            definition.isSyscallAllowed(Syscall.PRCTL)
 
         if (!canVerify) {
-            return // Cannot verify because prctl itself is restricted
+            return // Cannot verify because prctl itself is restricted (now or previously)
         }
 
         // Verify filter is actually installed

@@ -1,7 +1,7 @@
 ---
 title: "`SbobParser` Syntactic Pruning Inaccuracy"
 severity: "HIGH"
-status: "open"
+status: "resolved"
 priority: 9
 dependencies: []
 component: "unknown"
