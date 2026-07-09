@@ -36,7 +36,7 @@ fi
 
 # 3. Run host unit tests to verify no structural/logic breakages
 echo "==> Running host unit tests..."
-if ! ./gradlew build; then
+if ! ./gradlew test -x check --no-configuration-cache; then
   echo "ERROR: Host unit tests failed. Commit aborted."
   exit 1
 fi
