@@ -12,13 +12,13 @@ This subproject implements unprivileged sandboxing using Linux **Seccomp-BPF** a
 > ```kotlin
 > ContainedExecutors.installOnProcess(Policy.NO_EXEC) // call once in main()
 > ```
-> See [SECURITY_CONSIDERATIONS.md](../docs/internals/SECURITY_CONSIDERATIONS.md) for the complete threat model.
+> See [architecture/security-considerations.md](../docs/internals/architecture/security-considerations.md) for the complete threat model.
 
 ---
 
 ## Technical Architecture
 
-For a detailed class hierarchy and structural relationship map, see the [Enforcer Module Architecture documentation](../docs/internals/enforcer_architecture.md).
+For a detailed class hierarchy and structural relationship map, see the [Enforcer Module Architecture documentation](../docs/internals/architecture/enforcer-architecture.md).
 
 - **FFM Native Bindings:** Uses the JDK Foreign Function & Memory API to map native Linux system calls directly from Kotlin, eliminating the need for JNI or dynamic C library dependencies.
 - **BPF Program Compilation:** Generates deterministic BPF instruction arrays. The compiler uses an inverted linear scan to handle complex syscall policies within the 8-bit seccomp relative jump limitation.

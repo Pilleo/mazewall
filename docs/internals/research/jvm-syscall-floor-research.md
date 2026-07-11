@@ -3,7 +3,7 @@
 **Status: DEFERRED** — Problem scoped and documented. Implementation blocked pending
 a verifiable solution to GraalVM coverage and source analysis completeness.
 
-**Related backlog entry**: [issue-075-jvm-invariant-syscall-floor-is-incomplete.md](backlog/issue-075-jvm-invariant-syscall-floor-is-incomplete.md) (Medium: JVM Invariant Floor)
+**Related backlog entry**: [issue-075-jvm-invariant-syscall-floor-is-incomplete.md](../backlog/issue-075-jvm-invariant-syscall-floor-is-incomplete.md) (Medium: JVM Invariant Floor)
 
 ---
 
@@ -208,7 +208,7 @@ You can run this workload via Gradle to profile it on any new platform:
 
 1. **Short term (now)**: Keep the existing hardcoded floor but explicitly add `RT_SIGPROCMASK`
    and `MMAP`/`MPROTECT` (non-EXEC variants), which are confirmed missing and low-risk to add.
-   These are provably needed from existing `containment_design.md §3e` analysis.
+   These are provably needed from existing `design-specs/containment-design.md §3e` analysis.
 
 2. **Medium term**: Implement Option E as a project-internal tooling task:
    - Write a `jvm-stress` Gradle task that runs a multi-threaded allocation/JIT/Loom

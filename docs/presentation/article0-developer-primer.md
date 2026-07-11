@@ -174,5 +174,5 @@ fun main() {
 
 ## Where to go next
 
-**[Part 1: Do You Really Know What Your App Is Doing at Runtime? →](article.md)**
+**[Part 1: Do You Really Know What Your App Is Doing at Runtime? →](article1-threat-model.md)**
 The case for behavioral security: why knowing what a library *is* is not the same as knowing what it *does* at runtime.

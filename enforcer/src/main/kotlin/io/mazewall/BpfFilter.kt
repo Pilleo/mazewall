@@ -19,8 +19,8 @@ import java.util.logging.Logger
  * allowing new inspections (e.g., for `openat2`) to be added to the BPF build loop
  * without modifying the core [BpfFilter] logic.
  */
-// @ref: docs/internals/containment_design.md — BPF linear scan architecture, instruction limits, and 8-bit relative jump constraint
-// @ref: docs/internals/jvm_syscall_floor_research.md — JVM coordination syscalls that must never be blocked
+// @ref: docs/internals/design-specs/containment-design.md — BPF linear scan architecture, instruction limits, and 8-bit relative jump constraint
+// @ref: docs/internals/research/jvm-syscall-floor-research.md — JVM coordination syscalls that must never be blocked
 object BpfFilter {
     private val logger = Logger.getLogger(BpfFilter::class.java.name)
 

@@ -176,6 +176,12 @@ class "PolicyBuilder" as io.mazewall.PolicyBuilder<S extends PolicyScope> {
   +PolicyBuilder<S> allowUnsafePrctl()
   +PolicyDefinition<S> build()
 }
+class "PolicyCompilationCache" as io.mazewall.PolicyCompilationCache {
+  + {static}PolicyCompilationCache INSTANCE
+  __
+  +CompiledSandbox<S> getOrCompile(PolicyDefinition<? extends S>, Arch)
+  +void clear()
+}
 class "PolicyDefinition" as io.mazewall.PolicyDefinition<S extends PolicyScope> {
   + {static}Companion Companion
   __
@@ -432,6 +438,8 @@ class "ContainedExecutors" as io.mazewall.enforcer.ContainedExecutors {
   +ExecutorService wrap(ExecutorService, Policy<?, ? extends Uncompiled>, StacktraceScopingPolicy)
 }
 class "ContainerState" as io.mazewall.enforcer.ContainerState {
+  + {static}Companion Companion
+  __
   +int getFilterDepth()
   +Set<Syscall> getAllowedSyscalls()
   +SeccompAction getDefaultAction()
@@ -441,6 +449,7 @@ class "ContainerState" as io.mazewall.enforcer.ContainerState {
   +boolean getAllowsMmapExec()
   +boolean getAllowsNonThreadClone()
   +boolean getAllowsUnsafePrctl()
+  +boolean isSyscallAllowed(Syscall)
   +ContainerState withNewSeccompPolicy(PolicyDefinition<?>, Map<Syscall, ? extends SeccompAction>, SeccompAction)
   +ContainerState withLandlockPolicy(PolicyDefinition<?>)
   +ContainerState withEngineState(SeccompInstallationState)
@@ -451,6 +460,7 @@ class "ContainmentViolationDetector" as io.mazewall.enforcer.ContainmentViolatio
   +String[] getDENIED_PHRASES()
   +void registerMatcher(ViolationMatcher)
   +void resetToDefaults()
+  +Sequence<IntRange> findViolationRanges(String)
   +boolean isContainmentViolation(Throwable)
   +Throwable findViolationCause(Throwable)
 }
@@ -588,7 +598,7 @@ class "SupervisorInstaller" as io.mazewall.enforcer.supervisor.SupervisorInstall
   +ConcurrentHashMap<Tid, Thread> getThreadRegistry()
   +void registerThread(int)
   +void unregisterThread(int)
-  +SupervisorSession installSupervisedFilterForThread(PolicyDefinition<?>, StacktraceScopingPolicy)
+  +SupervisorSession installSupervisedFilterForThread(PolicyDefinition<?>, StacktraceScopingPolicy, Function0<Unit>)
 }
 class "SupervisorSession" as io.mazewall.enforcer.supervisor.SupervisorSession {
   +void close()
@@ -887,7 +897,7 @@ abstract class "SeccompConnection" as io.mazewall.ffi.networking.SeccompConnecti
 class "SupervisorSeccompNotifInstaller" as io.mazewall.ffi.networking.SupervisorSeccompNotifInstaller {
   + {static}SupervisorSeccompNotifInstaller INSTANCE
   __
-  +void install(String, List<? extends BpfInstruction>, boolean, Function1<? super String, Integer>, Function2<? super Integer, ? super Integer, Boolean>, Function2<? super Integer, ? super CountDownLatch, Unit>)
+  +void install(String, List<? extends BpfInstruction>, boolean, Function1<? super String, Integer>, Function2<? super Integer, ? super Integer, Boolean>, Function0<Unit>, Function2<? super Integer, ? super CountDownLatch, Unit>)
 }
 class "SupervisorSocketUtils" as io.mazewall.ffi.networking.SupervisorSocketUtils {
   + {static}SupervisorSocketUtils INSTANCE
@@ -979,14 +989,29 @@ abstract class "BpfInstruction" as io.mazewall.seccomp.BpfInstruction {
   + {abstract}short getJf()
   + {abstract}int getK()
 }
+class "BpfLabel" as io.mazewall.seccomp.BpfLabel {
+  + {static}String toString-impl(String)
+  + {static}int hashCode-impl(String)
+  + {static}boolean equals-impl(String, Object)
+  + {static}String constructor-impl(String)
+  + {static}boolean equals-impl0(String, String)
+}
 interface "BpfMacro" as io.mazewall.seccomp.BpfMacro {
 }
-class "BpfProgram" as io.mazewall.seccomp.BpfProgram {
+class "BpfNativeCache" as io.mazewall.seccomp.BpfNativeCache {
+  + {static}BpfNativeCache INSTANCE
+  __
+  +MemorySegment getOrCompute(List<? extends BpfInstruction>)
+  +void clear()
+}
+class "BpfProgram" as io.mazewall.seccomp.BpfProgram<S extends BpfStatus> {
   + {static}Companion Companion
   __
   +List<BpfInstruction> getInstructions()
   + {static}Uninitialized builder()
-  + {static}BpfProgram dsl(Arch, Function<NrLoaded, Terminated>)
+  + {static}BpfProgram<Unverified> dsl(Arch, Function<NrLoaded, Terminated>)
+}
+interface "BpfStatus" as io.mazewall.seccomp.BpfStatus {
 }
 class "Clone3Inspector" as io.mazewall.seccomp.Clone3Inspector {
   +void emitSpecial(NrLoaded, Arch, InspectionContext, Set<Integer>)
@@ -1015,6 +1040,7 @@ class "MmapExecInspector" as io.mazewall.seccomp.MmapExecInspector {
 class "PureJavaBpfEngine" as io.mazewall.seccomp.PureJavaBpfEngine {
   + {static}PureJavaBpfEngine INSTANCE
   __
+  +void clearCache()
   +EngineState getState()
   +boolean isSupported()
   +SeccompEngine<Loaded> install(CompiledSandbox<?>)
@@ -1071,6 +1097,8 @@ io.mazewall.Policy <--> io.mazewall.Policy
 io.mazewall.Policy --> io.mazewall.seccomp.BpfInstruction
 io.mazewall.PolicyBuilder --> io.mazewall.core.SandboxedPath
 io.mazewall.PolicyBuilder --> io.mazewall.core.SeccompAction
+io.mazewall.PolicyCompilationCache --> io.mazewall.PolicyCompilationCache
+io.mazewall.PolicyCompilationCache --> io.mazewall.CompiledSandbox
 io.mazewall.PolicyDefinition --> io.mazewall.core.SandboxedPath
 io.mazewall.PolicyDefinition --> io.mazewall.core.SeccompAction
 io.mazewall.PolicyPresets --> io.mazewall.PolicyDefinition
@@ -1146,6 +1174,8 @@ io.mazewall.sbob.BobDeserializer --> io.mazewall.sbob.BobDeserializer
 io.mazewall.sbob.PathNormalizer --> io.mazewall.sbob.PathNormalizer
 io.mazewall.sbob.PolicyTransformer --> io.mazewall.sbob.PolicyTransformer
 io.mazewall.seccomp.BpfBuilder --> io.mazewall.seccomp.BpfMacro
+io.mazewall.seccomp.BpfNativeCache --> io.mazewall.seccomp.BpfNativeCache
+io.mazewall.seccomp.BpfNativeCache --> io.mazewall.seccomp.BpfInstruction
 io.mazewall.seccomp.BpfProgram --> io.mazewall.seccomp.BpfInstruction
 io.mazewall.seccomp.Clone3Inspector .u.|> io.mazewall.seccomp.SyscallInspector
 io.mazewall.seccomp.DefaultSyscallInspectionPipeline .u.|> io.mazewall.seccomp.SyscallInspectionPipeline

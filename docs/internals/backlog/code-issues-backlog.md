@@ -4,7 +4,7 @@ The code issues backlog has been modularized and split into individual files to 
 
 Please refer to the new backlog directory and index:
 
-👉 **[Backlog Index Directory (docs/internals/backlog/README.md)](backlog/README.md)**
+👉 **[Backlog Index Directory (docs/internals/backlog/README.md)](../backlog/README.md)**
 
 ---
 

@@ -1,6 +1,6 @@
 # Dynamic Policy Profiling in mazewall
 
-[![← Part 1](https://img.shields.io/badge/←_Part_1-SBoB_Concepts-6366f1)](article.md)
+[![← Part 1](https://img.shields.io/badge/←_Part_1-SBoB_Concepts-6366f1)](article1-threat-model.md)
 [![Series Home](https://img.shields.io/badge/Series-Home-1e293b)](../../README.md)
 [![Part 3 →](https://img.shields.io/badge/Part_3_→-JVM_Mechanics-6366f1)](article3-enforcement.md)
 

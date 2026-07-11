@@ -25,4 +25,4 @@ This file contains essential information for developers contributing to the `maz
     - Follow strict engineering rules in `enforcer/AGENTS.md` and `profiler/AGENTS.md`.
     - Components interact with OS resources exclusively through `NativeEngine` trait interfaces for testability.
     - Off-heap allocations must be scoped using `Arena.ofConfined().use { }`.
-- **Documentation**: All new architectural findings, kernel behavior discoveries, or security nuances must be documented immediately in `/docs/internals/`. Critical insights must be logged in `docs/internals/code_issues_backlog.md`.
+- **Documentation**: All new architectural findings, kernel behavior discoveries, or security nuances must be documented immediately in `/docs/internals/`. Critical insights must be logged in `docs/internals/backlog/code-issues-backlog.md`.

@@ -108,7 +108,7 @@ println(result.behavior.toDsl())
 
 Paste the output, wrap your executor — done. No manual BPF assembly, no trial-and-error deadlocks.
 
-This observe → generate → enforce workflow is the foundation of [SBoB (Software Bill of Behavior)](docs/presentation/article.md) — a behavioral contract that travels alongside your application, analogous to an SBOM for composition but capturing *what your code is allowed to do at runtime*, not just what it contains.
+This observe → generate → enforce workflow is the foundation of [SBoB (Software Bill of Behavior)](docs/presentation/article1-threat-model.md) — a behavioral contract that travels alongside your application, analogous to an SBOM for composition but capturing *what your code is allowed to do at runtime*, not just what it contains.
 
 ---
 
@@ -147,7 +147,7 @@ mazewall operates in two tiers. Think of it as the difference between the buildi
 | **Tier 2** | `ContainedExecutors.wrap(executor, policy)` | One thread pool | Surgical restriction — stops data-plane attacks (SSRF, XXE, path traversal) on specific pools |
 
 > [!IMPORTANT]
-> **Stack Tier 1 first.** Tier 2 alone does not fully isolate malicious code that can use standard Java concurrency APIs (`CompletableFuture`, virtual threads) to escape to unrestricted sibling threads. See [SECURITY_CONSIDERATIONS.md](docs/internals/SECURITY_CONSIDERATIONS.md) for the complete threat model.
+> **Stack Tier 1 first.** Tier 2 alone does not fully isolate malicious code that can use standard Java concurrency APIs (`CompletableFuture`, virtual threads) to escape to unrestricted sibling threads. See [architecture/security-considerations.md](docs/internals/architecture/security-considerations.md) for the complete threat model.
 
 ---
 
@@ -194,7 +194,7 @@ Policies are composable via a builder — see [GETTING_STARTED.md](GETTING_START
 | Install and write my first policy | [GETTING_STARTED.md](GETTING_STARTED.md) |
 | Auto-generate a policy from my workload | [profiler/README.md](profiler/README.md) |
 | See it block real CVEs (Log4Shell, SSRF, XXE) | [Demo README](demos/vulnerable-web-app/README.md) |
-| Understand the threat model and what it can't stop | [SECURITY_CONSIDERATIONS.md](docs/internals/SECURITY_CONSIDERATIONS.md) |
+| Understand the threat model and what it can't stop | [architecture/security-considerations.md](docs/internals/architecture/security-considerations.md) |
 | Read the deep-dive article series | [Article series](#article-series) |
 | Contribute or modify the codebase | [CONTRIBUTING.md](CONTRIBUTING.md) |
 
@@ -224,7 +224,7 @@ Background reading on the kernel mechanics and threat model:
 | Part | Title | Focus |
 |---|---|---|
 | **0** | [Your Threads Are All Equally Trusted — Should They Be?](docs/presentation/article0-developer-primer.md) | Process-wide vs thread-scoped sandbox basics |
-| **1** | [Do You Really Know What Your App Is Doing at Runtime?](docs/presentation/article.md) | Seccomp, Landlock, SBoB concepts |
+| **1** | [Do You Really Know What Your App Is Doing at Runtime?](docs/presentation/article1-threat-model.md) | Seccomp, Landlock, SBoB concepts |
 | **2** | [Let Your Code Build Its Own Sandbox](docs/presentation/article2-profiler.md) | Dynamic profiling, USER_NOTIF daemon |
 | **3** | [Thread-Scoped JVM Containment: The Mechanics](docs/presentation/article3-enforcement.md) | FFM bridge, GC safepoints, Loom VT |
 | **4** | [The Attacks We Actually Stop](docs/presentation/article4-attacks.md) | Log4Shell, fileless malware, io_uring bypass |

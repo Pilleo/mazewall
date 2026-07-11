@@ -21,7 +21,6 @@ We need to refactor and expand the orchestrator's prompt generation to:
    * **Zero Silent Bypasses:** Never swallow `EPERM` or `EACCES` exceptions or downgrade sandboxing failures to warnings.
    * **JVM Coordination Invariants:** Never block system calls critical for JVM operations (parking, GC, safepoints).
    * **FFM Safety:** Ensure correct layout alignments, arena lifecycles, and off-heap memory safety.
-   * **Loom Carrier Protection:** Prevent virtual thread carrier thread poisoning.
 2. **Standardize the Review Prompt:**
    Similarly, the PR review prompt generated in `OrchestratorDaemon.kt` should enforce these constraints. The reviewer agent must verify that the PR adheres to all these restrictions and explicitly state if there are areas of uncertainty.
 

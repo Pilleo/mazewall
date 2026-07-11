@@ -19,7 +19,7 @@ import io.mazewall.ffi.memory.nativeScope
  * Pure Java implementation of the seccomp engine.
  * Generates BPF filters manually and installs them using Downcalls.
  */
-// @ref: docs/internals/containment_design.md — prctl/seccomp(2) install sequence, TSYNC flag semantics, FFM memory layout
+// @ref: docs/internals/design-specs/containment-design.md — prctl/seccomp(2) install sequence, TSYNC flag semantics, FFM memory layout
 internal object PureJavaBpfEngine : SeccompEngine<EngineState> {
     /**
      * Clears the native filter cache. Used for testing.

@@ -30,7 +30,7 @@ import java.lang.foreign.ValueLayout
 class ProfilerDesignSpec :
     FreeSpec({
 
-        "ACK Protocol Constants (profiler_design.md Section 2 / architectural_map.md Section 2)" - {
+        "ACK Protocol Constants (design-specs/profiler-design.md Section 2 / architecture/architectural-map.md Section 2)" - {
             "PROTOCOL_ACK_BYTE is exactly 0xAC" {
                 PROTOCOL_ACK_BYTE shouldBe 0xAC.toByte()
             }
@@ -44,7 +44,7 @@ class ProfilerDesignSpec :
             }
         }
 
-        "Profiler Transport Invariants (profiler_design.md Section 5 Operational Hazards)" - {
+        "Profiler Transport Invariants (design-specs/profiler-design.md Section 5 Operational Hazards)" - {
             "SOCKADDR_UN path field is 108 bytes (sun_path POSIX limit)" {
                 SOCKADDR_UN_PATH_SIZE shouldBe 108
                 val pathElement = Layouts.SOCKADDR_UN.select(MemoryLayout.PathElement.groupElement("sun_path"))

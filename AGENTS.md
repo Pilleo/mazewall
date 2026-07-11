@@ -69,7 +69,7 @@ When presenting a fix or creating a PR, use the following format:
 *   **Rigorous Decision Making:** Every choice must be double and triple checked. A single missed detail can result in catastrophic failure (JVM deadlocks, kernel instability, silent security bypasses).
 *   **Honest Limitations:** Every security boundary must be documented with its exact threat model, caveats, and failure modes. If you are not 100% sure about a kernel behavior, JVM internal mechanism, or system call side-effect:
     1.  **Do not guess or assume.**
-    2.  Search the codebase, `SECURITY_CONSIDERATIONS.md`, `profiler_design.md`, `containment_design.md`, and Linux manual pages — in that order. These files contain hard-won, project-specific kernel behavior discoveries that man pages do not cover.
+    2.  Search the codebase, `architecture/security-considerations.md`, `design-specs/profiler-design.md`, `design-specs/containment-design.md`, and Linux manual pages — in that order. These files contain hard-won, project-specific kernel behavior discoveries that man pages do not cover.
     3.  Flag the uncertainty explicitly in comments and discuss it with the developer.
 *   **Documentation Split:**
     *   **`/presentation`:** Addressed to general Backend/Software Engineers. Conceptually accessible; no BPF jump tables.
@@ -120,7 +120,7 @@ Responsible for unprivileged system call profiling and Landlock path discovery u
 
 Thread-scoped seccomp is **not** an absolute security boundary against an attacker with Arbitrary Code Execution (ACE) on the sandboxed thread. Because all JVM threads share the same address space and heap, a native memory corruption exploit (e.g., via buffer overflow or FFM `Unsafe` pointer manipulation) on a contained thread can corrupt memory on unrestricted sibling or helper threads to achieve escape.
 
-*   **Mandatory Baseline:** Tier 1 (process-wide `NO_EXEC` baseline, via `ContainedExecutors.installOnProcess`) is an absolute architectural backstop, not an optional recommendation. Stacking thread-scoped Tier 2 containment on top mitigates the blast radius of data-oriented attacks (SSRF, XXE, SQLi), but must never be presented alone as a complete security boundary. Refer to [SECURITY_CONSIDERATIONS.md](docs/internals/SECURITY_CONSIDERATIONS.md) for the complete threat matrix.
+*   **Mandatory Baseline:** Tier 1 (process-wide `NO_EXEC` baseline, via `ContainedExecutors.installOnProcess`) is an absolute architectural backstop, not an optional recommendation. Stacking thread-scoped Tier 2 containment on top mitigates the blast radius of data-oriented attacks (SSRF, XXE, SQLi), but must never be presented alone as a complete security boundary. Refer to [architecture/security-considerations.md](docs/internals/architecture/security-considerations.md) for the complete threat matrix.
 *   **Namespaces & cgroups Roadmap (Tier 1 Expansion):** Process-wide Mount/Network/PID namespaces and cgroups v2 limits are planned on the roadmap to reinforce the Tier 1 baseline at process initialization, ensuring escapes from memory corruption remain contained inside the process boundaries. Thread-local namespaces are explicitly rejected due to JVM coordination conflicts.
 
 ---
@@ -159,9 +159,9 @@ Before modifying components, read the relevant design document:
 
 | Document | Covers |
 |---|---|
-| [containment_design.md](docs/internals/containment_design.md) | BPF scan loops, argument inspections, Landlock ordering, FFM layouts. |
-| [profiler_design.md](docs/internals/profiler_design.md) | USER_NOTIF architecture, socket SCM_RIGHTS, ACK loop protocol. |
-| [SECURITY_CONSIDERATIONS.md](docs/internals/SECURITY_CONSIDERATIONS.md) | Full threat model, ACE escape caveats, K8s custom profiles, Yama scopes. |
+| [design-specs/containment-design.md](docs/internals/design-specs/containment-design.md) | BPF scan loops, argument inspections, Landlock ordering, FFM layouts. |
+| [design-specs/profiler-design.md](docs/internals/design-specs/profiler-design.md) | USER_NOTIF architecture, socket SCM_RIGHTS, ACK loop protocol. |
+| [architecture/security-considerations.md](docs/internals/architecture/security-considerations.md) | Full threat model, ACE escape caveats, K8s custom profiles, Yama scopes. |
 
 ## 8. Cross-Module Change Protocol
 If a change touches both `:enforcer` and `:profiler`:

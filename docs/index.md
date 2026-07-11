@@ -14,7 +14,7 @@ While the examples are JVM-specific, the underlying concepts (Seccomp-BPF, Landl
 1. **[Part 0: Your Threads Are All Equally Trusted — Should They Be?](presentation/article0-developer-primer.html)**  
    Process-wide vs thread-scoped sandbox basics, ExecutorService wrapping, and architectural trade-offs.
 
-2. **[Part 1: Do You Really Know What Your App Is Doing at Runtime?](presentation/article.html)**  
+2. **[Part 1: Do You Really Know What Your App Is Doing at Runtime?](presentation/article1-threat-model.html)**  
    The threat model, SBoB concept, and why container-level profiles aren't enough.
 
 3. **[Part 2: Let Your Code Build Its Own Sandbox](presentation/article2-profiler.html)**  
@@ -37,4 +37,4 @@ While the examples are JVM-specific, the underlying concepts (Seccomp-BPF, Landl
 ## Repository
 
 - **Source & Quick Start:** [github.com/Pilleo/mazewall](https://github.com/Pilleo/mazewall)
-- **Design Docs:** [Containment Design](internals/containment_design.html) | [Security Considerations](internals/SECURITY_CONSIDERATIONS.html) | [Architectural Map](internals/architectural_map.html) | [Kernel Primitives Roadmap](internals/kernel_primitives_roadmap.html) | [Documentation Standards](internals/documentation_standards.html)
+- **Design Docs:** [Containment Design](internals/design-specs/containment-design.html) | [Security Considerations](internals/architecture/security-considerations.html) | [Architectural Map](internals/architecture/architectural-map.html) | [Kernel Primitives Roadmap](internals/architecture/kernel-primitives-roadmap.html) | [Documentation Standards](internals/documentation-standards.html)

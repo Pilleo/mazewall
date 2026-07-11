@@ -146,7 +146,7 @@ class StateHandlerTest {
         val nextState = OrchestratorState.AWAITING_REVIEW.execute(env, context)
 
         assertEquals(OrchestratorState.AWAITING_REVIEW, nextState)
-        assertTrue(env.commentedPrs.any { it.second.contains("@jules Please perform a critical code review") })
+        assertTrue(env.commentedPrs.any { it.second.contains("@jules You are acting as a **code reviewer**") })
     }
 
     @Test
