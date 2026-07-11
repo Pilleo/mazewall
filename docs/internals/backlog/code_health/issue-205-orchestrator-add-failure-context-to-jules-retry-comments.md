@@ -6,10 +6,10 @@ priority: 10
 dependencies: []
 component: "orchestrator"
 effort: "trivial"
-autonomy: "autonomous"
-solution_approved: true
-chosen_solution: "A"
-blast_radius: "low"
+reversible: true
+autonomy: "supervised"
+solution_approved: false
+blast_radius: "medium"
 reversible: true
 ---
 

@@ -6,10 +6,15 @@ priority: 10
 dependencies: []
 component: "orchestrator"
 effort: "small"
+autonomy: "supervised"
+solution_approved: false
+blast_radius: "medium"
+reversible: true
 ---
 
 # 🔴 [Severity: HIGH]: Review and Enhance Orchestrator Prompts for Jules to Enforce Quality and Safety Guidelines
 
+**Context:**
 **Context:**
 The Autonomous Backlog Orchestrator interacts with Jules (the remote coding agent) by creating GitHub Issues and prompting it for Pull Request reviews. Currently, these prompts do not systematically convey key quality, safety, and architectural boundaries of the `mazewall` project. When Jules receives an issue description or a code review request, it relies purely on general JVM and security knowledge rather than project-specific invariants (e.g., FFM safety, Loom virtual thread limits, silent bypass restrictions).
 
@@ -21,9 +26,32 @@ We need to refactor and expand the orchestrator's prompt generation to:
    * **Zero Silent Bypasses:** Never swallow `EPERM` or `EACCES` exceptions or downgrade sandboxing failures to warnings.
    * **JVM Coordination Invariants:** Never block system calls critical for JVM operations (parking, GC, safepoints).
    * **FFM Safety:** Ensure correct layout alignments, arena lifecycles, and off-heap memory safety.
+   * **Loom Carrier Protection:** Prevent virtual thread carrier thread poisoning.
 2. **Standardize the Review Prompt:**
    Similarly, the PR review prompt generated in `OrchestratorDaemon.kt` should enforce these constraints. The reviewer agent must verify that the PR adheres to all these restrictions and explicitly state if there are areas of uncertainty.
 
 ### Target Areas:
 * **Task Prompting:** Modify how the issue/task body is constructed or passed to Jules. Instead of passing only the raw issue markdown file, append/inject a structured "Guidelines and Safety Boundaries" section to the issue description during creation, or post a systemic comment right after creation to configure the session context.
 * **Review Prompting:** Update the inline `prompt` string in `OrchestratorDaemon.kt` (lines 327–343) to align with these detailed criteria, emphasizing honesty regarding uncertainty ("if not sure, say so").
+
+**Needed:**
+1. Implement a fix based on the issue description.
+
+## Solution Options
+
+### Option A — Refactor implementation
+Implement the recommendation described in the Needed section to resolve the issue directly. Target area: `Unknown`
+**Pros:** Resolves the root cause of the issue.
+**Cons:** Requires careful implementation and testing.
+**Risk:** MEDIUM
+**Effort:** small
+
+---
+**Chosen:** *(not yet approved — requires human decision)*
+
+**Acceptance Criteria:**
+- [ ] Tests verify the fix works as expected.
+- [ ] Issue is fully resolved in the codebase.
+
+**Implementation Hints:**
+- Ensure you read existing tests and implementation carefully before modifying code.
