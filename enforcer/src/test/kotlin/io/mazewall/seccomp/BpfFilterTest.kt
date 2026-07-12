@@ -316,9 +316,11 @@ class BpfFilterTest {
         val criticalSyscalls = listOf(
             Syscall.FUTEX, Syscall.SCHED_YIELD, Syscall.RT_SIGRETURN, Syscall.RT_SIGACTION,
             Syscall.MADVISE, Syscall.GETTID, Syscall.CLOSE, Syscall.RT_SIGPROCMASK,
+            Syscall.READ, Syscall.WRITE, Syscall.PREAD64, Syscall.PWRITE64,
+            Syscall.FSTAT, Syscall.LSEEK, Syscall.FCNTL,
             Syscall.GETDENTS, Syscall.GETDENTS64,
             Syscall.MMAP, Syscall.MPROTECT, Syscall.PKEY_MPROTECT, Syscall.MUNMAP, Syscall.BRK,
-            Syscall.USERFAULTFD, Syscall.MEMFD_CREATE, Syscall.TGKILL, Syscall.SCHED_GETAFFINITY,
+            Syscall.USERFAULTFD, Syscall.TGKILL, Syscall.SCHED_GETAFFINITY,
             Syscall.PIPE2, Syscall.EVENTFD2, Syscall.EPOLL_CREATE1, Syscall.EPOLL_CTL,
             Syscall.EPOLL_WAIT, Syscall.EPOLL_PWAIT
         )
