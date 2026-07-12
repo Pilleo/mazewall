@@ -22,16 +22,18 @@ class MockOrchestratorEnvironment : OrchestratorEnvironment {
     var mapsRegenerated = false
     var stateFileDeleted = false
     var sleepCount = 0
+    val notifications = mutableListOf<String>()
+    var bellRungCount = 0
 
     override fun println(message: Any?) { printlns.add(message.toString()) }
     override fun print(message: Any?) {}
     override fun errPrintln(message: Any?) {}
     override fun sleep(duration: Long, unit: TimeUnit) { sleepCount++ }
-    override fun ringBell(times: Int) {}
+    override fun ringBell(times: Int) { bellRungCount += times }
     override fun readLine(): String? = if (approved) "y" else "n"
     override fun getEnvOrNull(key: String): String? = null
 
-    override fun sendNotification(message: String) {}
+    override fun sendNotification(message: String) { notifications.add(message) }
     override fun requestApproval(issueId: String, text: String): Boolean = approved
 
     override fun findExistingIssueNumber(issueId: String): String? = existingIssueNumber
@@ -197,5 +199,35 @@ class StateHandlerTest {
         assertNull(context.currentIssueId)
         assertTrue(env.stateFileDeleted)
         assertTrue(env.mapsRegenerated)
+    }
+
+    @Test
+    fun testCiRunningNotifiesWhenStuckInPending() {
+        val env = MockOrchestratorEnvironment()
+        val context = OrchestratorContext().apply {
+            prNumber = "pr-1"
+            currentIssueId = "issue-1"
+            lastHeadSha = "sha123"
+        }
+        env.prHeadSha = "sha123"
+        env.buildStatus = "PENDING"
+
+        // First execution sets the initial status
+        OrchestratorState.CI_RUNNING.execute(env, context)
+        assertEquals("PENDING", context.lastKnownStatus)
+        assertEquals(0, env.notifications.size)
+
+        // Mock passage of time
+        context.lastStatusChangeTime = System.currentTimeMillis() - 1_000_000 // > 900_000 threshold
+
+        // Second execution should trigger notification
+        OrchestratorState.CI_RUNNING.execute(env, context)
+        assertEquals(1, env.notifications.size)
+        assertTrue(env.notifications[0].contains("stuck in PENDING"))
+        assertEquals(1, env.bellRungCount)
+
+        // Third execution should not trigger notification again
+        OrchestratorState.CI_RUNNING.execute(env, context)
+        assertEquals(1, env.notifications.size)
     }
 }

@@ -19,6 +19,9 @@ class OrchestratorContext {
     var lastBuildStatus: String? = null
     var lastCheckedSha: String? = null
     var lastWaitingLogTime: Long = 0L
+    var lastStatusChangeTime: Long = 0L
+    var lastKnownStatus: String? = null
+    var lastPendingNotificationTime: Long = 0L
     var lastFailedSha: String? = null
     var startTime: Long = 0L
     var julesRetries: Int = 0
@@ -45,6 +48,9 @@ class OrchestratorContext {
         lastBuildStatus = props.getProperty("lastBuildStatus").takeIf { !it.isNullOrEmpty() }
         lastCheckedSha = props.getProperty("lastCheckedSha").takeIf { !it.isNullOrEmpty() }
         lastWaitingLogTime = props.getProperty("lastWaitingLogTime")?.toLongOrNull() ?: 0L
+        lastStatusChangeTime = props.getProperty("lastStatusChangeTime")?.toLongOrNull() ?: 0L
+        lastKnownStatus = props.getProperty("lastKnownStatus").takeIf { !it.isNullOrEmpty() }
+        lastPendingNotificationTime = props.getProperty("lastPendingNotificationTime")?.toLongOrNull() ?: 0L
         lastFailedSha = props.getProperty("lastFailedSha").takeIf { !it.isNullOrEmpty() }
         startTime = props.getProperty("startTime")?.toLongOrNull() ?: 0L
         julesRetries = props.getProperty("julesRetries")?.toIntOrNull() ?: 0
@@ -66,6 +72,9 @@ class OrchestratorContext {
         props.setProperty("lastBuildStatus", lastBuildStatus ?: "")
         props.setProperty("lastCheckedSha", lastCheckedSha ?: "")
         props.setProperty("lastWaitingLogTime", lastWaitingLogTime.toString())
+        props.setProperty("lastStatusChangeTime", lastStatusChangeTime.toString())
+        props.setProperty("lastKnownStatus", lastKnownStatus ?: "")
+        props.setProperty("lastPendingNotificationTime", lastPendingNotificationTime.toString())
         props.setProperty("lastFailedSha", lastFailedSha ?: "")
         props.setProperty("startTime", startTime.toString())
         props.setProperty("julesRetries", julesRetries.toString())
@@ -84,6 +93,9 @@ class OrchestratorContext {
         lastBuildStatus = null
         lastCheckedSha = null
         lastWaitingLogTime = 0L
+        lastStatusChangeTime = 0L
+        lastKnownStatus = null
+        lastPendingNotificationTime = 0L
         lastFailedSha = null
         startTime = 0L
         julesRetries = 0
@@ -172,7 +184,8 @@ fun main() {
         taskTimeoutThresholdMinutes = getEnvOr("TASK_TIMEOUT_THRESHOLD_MINUTES", "60").toLong(),
         maxRetries = getEnvOr("MAX_RETRIES", "3").toInt(),
         initialRetryDelayMs = getEnvOr("INITIAL_RETRY_DELAY_MS", "1000").toLong(),
-        githubCacheTtlMs = getEnvOr("GITHUB_CACHE_TTL_MS", "10000").toLong()
+        githubCacheTtlMs = getEnvOr("GITHUB_CACHE_TTL_MS", "10000").toLong(),
+        stuckPendingThresholdMs = getEnvOr("STUCK_PENDING_THRESHOLD_MS", "900000").toLong()
     )
 
     GitHubCli.init(config)
