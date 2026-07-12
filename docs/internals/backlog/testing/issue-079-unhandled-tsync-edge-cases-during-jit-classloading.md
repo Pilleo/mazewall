@@ -6,7 +6,10 @@ priority: 6
 dependencies: []
 component: "enforcer"
 effort: "medium"
+autonomy: "supervised"
+solution_approved: false
 ---
+
 
 # 🔴 [Severity: MEDIUM]: Unhandled `TSYNC` edge cases during JIT classloading
 
@@ -16,3 +19,17 @@ effort: "medium"
 *   **Context & Proof:** `PureJavaBpfEngine.installInternal` locks privileges and applies the filter using `SECCOMP_FILTER_FLAG_TSYNC`. The kernel ensures atomicity of filter application, but the JVM provides no safety guarantee that background threads are not actively engaged in IO or network calls that are about to be denied. While `mazewall` documents JIT `mmap(PROT_EXEC)` deadlocks, it does not explicitly handle TOCTTOU race conditions where `TSYNC` cuts off actively running operations, leading to non-deterministic JIT aborts in production.
 *   **Cascading Risk Potential:** Medium stability risk. Can cause random, hard-to-debug JVM crashes during process-wide filter installation in high-traffic applications.
 *   **Recommendation:** Document the inherent risks of `TSYNC` concurrency in `designs/core/security-considerations.md` and recommend applying process-wide policies only during application initialization (e.g. `public static void main`) before extensive multithreading or JIT activity begins.
+
+## Solution Options
+
+### Option A
+(To be filled)
+
+---
+**Chosen:** *(not yet approved — requires human decision)*
+
+**Acceptance Criteria:**
+- [ ]
+
+**Implementation Hints:**
+-

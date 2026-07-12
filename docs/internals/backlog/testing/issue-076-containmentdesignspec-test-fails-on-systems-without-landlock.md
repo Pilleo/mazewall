@@ -6,7 +6,10 @@ priority: 6
 dependencies: []
 component: "enforcer"
 effort: "small"
+autonomy: "supervised"
+solution_approved: false
 ---
+
 
 # 🔴 [Severity: MEDIUM]: `ContainmentDesignSpec` test fails on systems without Landlock support
 
@@ -16,3 +19,17 @@ effort: "small"
 *   **Context & Proof:** The test execution log shows `java.util.concurrent.ExecutionException: java.lang.UnsupportedOperationException: Landlock is not supported on this kernel but FS rules were requested.` which originates from `handleUnsupportedLandlock`. Since tests are executed in a sandbox environment that lacks Landlock, this test deterministically fails, breaking the build.
 *   **Cascading Risk Potential:** Medium. Breaks CI pipelines and test suites on environments lacking advanced kernel features.
 *   **Recommendation:** Wrap the execution in an `Assumptions.assumeTrue(Landlock.isSupported())` or skip it natively. Wait, as an agent I cannot fix the source code, but the backlog must track this CI failure.
+
+## Solution Options
+
+### Option A
+(To be filled)
+
+---
+**Chosen:** *(not yet approved — requires human decision)*
+
+**Acceptance Criteria:**
+- [ ]
+
+**Implementation Hints:**
+-

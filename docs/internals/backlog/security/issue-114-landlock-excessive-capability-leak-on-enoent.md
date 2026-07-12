@@ -6,7 +6,10 @@ priority: 6
 dependencies: []
 component: "enforcer"
 effort: "medium"
+autonomy: "supervised"
+solution_approved: false
 ---
+
 
 # 🟡 [Severity: LOW]: Landlock Excessive Capability Leak on `ENOENT`
 
@@ -14,3 +17,17 @@ effort: "medium"
 *   **Target Area:** `enforcer/src/main/kotlin/io/mazewall/landlock/Landlock.kt`
 *   **Observation:** When a path does not exist, `addRule` falls back to the parent directory. This grants access to the *entire* directory when the user only intended to allow a specific (future) file.
 *   **Needed:** Implement `O_CREAT` awareness or document this broad fallback as a known limitation.
+
+## Solution Options
+
+### Option A
+(To be filled)
+
+---
+**Chosen:** *(not yet approved — requires human decision)*
+
+**Acceptance Criteria:**
+- [ ]
+
+**Implementation Hints:**
+-

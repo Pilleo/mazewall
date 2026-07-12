@@ -6,11 +6,12 @@ priority: 6
 dependencies: []
 component: "orchestrator"
 effort: "trivial"
-autonomy: "supervised"
-solution_approved: false
 blast_radius: "low"
 reversible: true
+autonomy: "supervised"
+solution_approved: false
 ---
+
 
 # 🔵 [Severity: LOW]: Orchestrator: Close GitHub Issue Automatically on RESOLVE_TASK
 

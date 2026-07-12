@@ -6,11 +6,12 @@ priority: 5
 dependencies: ["issue-202", "issue-203"]
 component: "orchestrator"
 effort: "medium"
-autonomy: "supervised"
-solution_approved: false
 blast_radius: "medium"
 reversible: true
+autonomy: "supervised"
+solution_approved: false
 ---
+
 
 # 🟡 [Severity: MEDIUM]: Orchestrator: Auto-Merge PR on VERDICT: APPROVED When autonomy=autonomous and solution_approved=true
 

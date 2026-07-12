@@ -6,7 +6,10 @@ priority: 6
 dependencies: []
 component: "enforcer"
 effort: "medium"
+autonomy: "supervised"
+solution_approved: false
 ---
+
 
 # 🟢 [WONTFIX]: `ContainedExecutors` Thread-Local State Persistence and Poisoning
 
@@ -23,3 +26,17 @@ effort: "medium"
 **The Correct Solution:** Developers MUST NOT share thread pools between differently-sandboxed tasks. Restricted tasks must run on a dedicated `ExecutorService` that is shut down (`executor.shutdown()`) when the application/container stops. Shutting down the executor kills the OS threads, inherently cleaning up both the ClassLoader references and the permanent OS sandboxes without any memory leaks.
 
 ## Resolved & WONTFIX Historical Backlog
+
+## Solution Options
+
+### Option A
+(To be filled)
+
+---
+**Chosen:** *(not yet approved — requires human decision)*
+
+**Acceptance Criteria:**
+- [ ]
+
+**Implementation Hints:**
+-

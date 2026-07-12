@@ -6,7 +6,10 @@ priority: 5
 dependencies: []
 component: "ffi"
 effort: "large"
+autonomy: "supervised"
+solution_approved: false
 ---
+
 
 # 🟡 [Severity: LOW]: Manual FFM Layout Maintenance and Drift Risk
 
@@ -19,3 +22,17 @@ effort: "large"
     *   **Strategy A (Multi-Arch Bindings):** Generate separate packages for `x86_64` and `aarch64`, checking both into the repo and switching at runtime via `Arch.current()`. (Highest safety, but increases JAR bloat).
     *   **Strategy B (Validation Oracle):** Use `jextract` purely as a test-time oracle. CI generates bindings dynamically and reflects on them to verify that the manual `Layouts.kt` is mathematically correct against the ground-truth C headers. (Minimal JAR size, prevents human error during release, but requires manual layout updates).
 **Needed:** Decide between Strategy A (full automation) and Strategy B (automated verification of manual layouts) to eliminate ABI drift risk without sacrificing multi-arch compatibility.
+
+## Solution Options
+
+### Option A
+(To be filled)
+
+---
+**Chosen:** *(not yet approved — requires human decision)*
+
+**Acceptance Criteria:**
+- [ ]
+
+**Implementation Hints:**
+-

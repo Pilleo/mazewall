@@ -6,7 +6,10 @@ priority: 6
 dependencies: []
 component: "profiler"
 effort: "medium"
+autonomy: "supervised"
+solution_approved: false
 ---
+
 
 # 🔴 [Severity: MEDIUM]: Unhandled Endianness in `process_vm_readv` Socket Message Tracing
 
@@ -16,3 +19,17 @@ effort: "medium"
 *   **Context & Proof:** The Linux `process_vm_readv` syscall copies raw bytes. `ProfilerDaemon` uses `ValueLayout.JAVA_SHORT` and `ValueLayout.JAVA_INT` to read these values. FFM `ValueLayout` defaults to the host byte order. While `mazewall` currently only supports Linux x86_64 and aarch64 (both typically little-endian), `sun_family` is often evaluated as a network byte order or host byte order depending on the socket domain. If any structural parsing assumes host-byte order but the struct is packed or network-byte-ordered, it will fail.
 *   **Cascading Risk Potential:** Medium feature failure. Can break profiler socket address resolution on specific edge-case architectures.
 *   **Recommendation:** Explicitly define the byte order for FFM layouts reading C structs (e.g., `.withOrder(ByteOrder.nativeOrder())`), and double-check `sun_family` endianness rules.
+
+## Solution Options
+
+### Option A
+(To be filled)
+
+---
+**Chosen:** *(not yet approved — requires human decision)*
+
+**Acceptance Criteria:**
+- [ ]
+
+**Implementation Hints:**
+-

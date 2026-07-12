@@ -6,7 +6,10 @@ priority: 5
 dependencies: []
 component: "enforcer"
 effort: "small"
+autonomy: "supervised"
+solution_approved: false
 ---
+
 
 # 🔴 [Severity: CRITICAL]: Standard Java Concurrency (`Virtual Threads`, `CompletableFuture`) trivially bypasses Thread-Scoped (Tier 2) containment without ACE
 
@@ -16,3 +19,17 @@ effort: "small"
 **Vulnerability Chain Potential:** Critical. Completely invalidates the security boundary of Tier 2 `wrap()` for any workload that isn't strictly synchronous and single-threaded. Malicious libraries can easily initiate SSRF or read files by simply hopping threads.
 **Needed:**
 1. Document this fundamental architectural bypass clearly in `designs/core/security-considerations.md` alongside the ACE pivot. Emphasize that Tier 2 containment only restricts synchronous execution on the current thread.
+
+## Solution Options
+
+### Option A
+(To be filled)
+
+---
+**Chosen:** *(not yet approved — requires human decision)*
+
+**Acceptance Criteria:**
+- [ ]
+
+**Implementation Hints:**
+-

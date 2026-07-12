@@ -6,7 +6,10 @@ priority: 5
 dependencies: []
 component: "profiler"
 effort: "medium"
+autonomy: "supervised"
+solution_approved: false
 ---
+
 
 # 🔴 [Severity: CRITICAL]: StraceProfiler completely fails to trace `io_uring` file operations natively
 
@@ -19,3 +22,17 @@ effort: "medium"
 **Needed:**
 1. Update `docs/internals/designs/profiler/profiler-design.md` to remove the false claim that Tier P traces async `io_uring` natively. Emphasize that Tier A (Iterative Profiler) is the *only* profiler that can correctly learn `io_uring` Landlock paths (by failing and retrying) unless the application's `io_uring` is disabled during tracing (the Hybrid approach).
 2. For Tier P, developers must either run with the Hybrid approach (disabling `io_uring` during profiling to force fallback to standard POSIX I/O) or rely on Iterative profiling.
+
+## Solution Options
+
+### Option A
+(To be filled)
+
+---
+**Chosen:** *(not yet approved — requires human decision)*
+
+**Acceptance Criteria:**
+- [ ]
+
+**Implementation Hints:**
+-

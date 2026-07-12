@@ -6,7 +6,10 @@ priority: 5
 dependencies: []
 component: "enforcer"
 effort: "medium"
+autonomy: "supervised"
+solution_approved: false
 ---
+
 
 # 🔴 [Severity: MEDIUM]: Missing BPF Instruction Limit Validation in `newSockFProg`
 
@@ -16,3 +19,17 @@ effort: "medium"
 *   **Context & Proof:** While there is a test checking this, there might not be explicit runtime validation before attempting the syscall. A complex policy with hundreds of file paths or network addresses could exceed the limit.
 *   **Cascading Risk Potential:** Medium. `EINVAL` from seccomp is notoriously hard to debug.
 *   **Recommendation:** Add an explicit check in `buildFilter` or `newSockFProg` to throw a descriptive `IllegalArgumentException` if the instruction count exceeds `BPF_MAXINSNS` (4096).
+
+## Solution Options
+
+### Option A
+(To be filled)
+
+---
+**Chosen:** *(not yet approved — requires human decision)*
+
+**Acceptance Criteria:**
+- [ ]
+
+**Implementation Hints:**
+-
