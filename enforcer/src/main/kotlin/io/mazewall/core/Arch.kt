@@ -104,6 +104,14 @@ data class Arch(
     val ftruncate: Int,
     val pause: Int,
     val nanosleep: Int,
+    val tgkill: Int,
+    val sched_getaffinity: Int,
+    val pipe2: Int,
+    val eventfd2: Int,
+    val epoll_create1: Int,
+    val epoll_ctl: Int,
+    val epoll_wait: Int,
+    val epoll_pwait: Int,
     val seccompSyscallNumber: Int,
 ) {
     companion object {
@@ -215,6 +223,14 @@ data class Arch(
                 ftruncate = 77,
                 pause = 34,
                 nanosleep = 35,
+                tgkill = 234,
+                sched_getaffinity = 204,
+                pipe2 = 293,
+                eventfd2 = 290,
+                epoll_create1 = 291,
+                epoll_ctl = 233,
+                epoll_wait = 232,
+                epoll_pwait = 281,
                 seccompSyscallNumber = 317,
             )
 
@@ -323,6 +339,14 @@ data class Arch(
                 ftruncate = 46,
                 pause = -1,
                 nanosleep = 101,
+                tgkill = 131,
+                sched_getaffinity = 123,
+                pipe2 = 59,
+                eventfd2 = 19,
+                epoll_create1 = 20,
+                epoll_ctl = 21,
+                epoll_wait = -1,
+                epoll_pwait = 22,
                 seccompSyscallNumber = 277,
             )
 

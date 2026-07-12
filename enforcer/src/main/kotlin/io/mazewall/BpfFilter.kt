@@ -60,6 +60,7 @@ object BpfFilter {
                 io.mazewall.seccomp.ThreadCloneInspector(),
                 io.mazewall.seccomp.UnsafePrctlInspector(),
                 io.mazewall.seccomp.Clone3Inspector(),
+                io.mazewall.seccomp.IoctlInspector(),
             )
         )
     }
@@ -166,6 +167,18 @@ object BpfFilter {
             Syscall.MMAP.numberFor(arch),
             Syscall.MPROTECT.numberFor(arch),
             Syscall.PKEY_MPROTECT.numberFor(arch),
+            Syscall.MUNMAP.numberFor(arch),
+            Syscall.BRK.numberFor(arch),
+            Syscall.USERFAULTFD.numberFor(arch),
+            Syscall.MEMFD_CREATE.numberFor(arch),
+            Syscall.TGKILL.numberFor(arch),
+            Syscall.SCHED_GETAFFINITY.numberFor(arch),
+            Syscall.PIPE2.numberFor(arch),
+            Syscall.EVENTFD2.numberFor(arch),
+            Syscall.EPOLL_CREATE1.numberFor(arch),
+            Syscall.EPOLL_CTL.numberFor(arch),
+            Syscall.EPOLL_WAIT.numberFor(arch),
+            Syscall.EPOLL_PWAIT.numberFor(arch),
         ).filter { it >= 0 }.toSet()
 
     internal fun emitInspections(

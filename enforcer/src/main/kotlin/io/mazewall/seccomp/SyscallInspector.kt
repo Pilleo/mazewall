@@ -153,3 +153,35 @@ internal class UnsafePrctlInspector : SyscallInspector {
         private val SAFE_PRCTL_OPTIONS = listOf(15L, 16L, 21L, 22L, 38L, 39L)
     }
 }
+
+/**
+ * Inspects ioctl to allow essential JVM operations (NIO, ZGC) while blocking others.
+ */
+internal class IoctlInspector : SyscallInspector {
+    override fun getInspections(arch: Arch, context: InspectionContext): List<SyscallInspection> {
+        if (arch.ioctl < 0) return emptyList()
+
+        val nr = arch.ioctl
+        return listOf(
+            SyscallInspection(
+                syscallNumber = nr,
+                argIndex = 1, // ioctl request is the 2nd argument
+                check = ArgCheck.EqualsAny(ALLOWED_IOCTLS),
+                ifMatched = SeccompAction.ACT_ALLOW,
+                ifNotMatched = context.resolveEffectiveAction(nr),
+            )
+        )
+    }
+
+    private companion object {
+        private val ALLOWED_IOCTLS = listOf(
+            NativeConstants.FIONBIO.toLong(),
+            NativeConstants.FIONREAD.toLong(),
+            NativeConstants.UFFDIO_API,
+            NativeConstants.UFFDIO_REGISTER,
+            NativeConstants.UFFDIO_UNREGISTER,
+            NativeConstants.UFFDIO_COPY,
+            NativeConstants.UFFDIO_ZEROPAGE,
+        )
+    }
+}

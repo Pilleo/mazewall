@@ -50,6 +50,7 @@ class SyscallTest {
         Syscall.GETGID to arch.getgid,
         Syscall.GETEGID to arch.getegid,
         Syscall.PTRACE to arch.ptrace,
+        Syscall.TGKILL to arch.tgkill,
     )
 
     private fun getNetworkMappings(arch: Arch) =
@@ -81,6 +82,7 @@ class SyscallTest {
         Syscall.FCNTL to arch.fcntl,
         Syscall.FSYNC to arch.fsync,
         Syscall.FDATASYNC to arch.fdatasync,
+        Syscall.PIPE2 to arch.pipe2,
     )
 
     private fun getFsAttrMappings(arch: Arch) =
@@ -159,6 +161,12 @@ class SyscallTest {
         Syscall.NANOSLEEP to arch.nanosleep,
         Syscall.INIT_MODULE to arch.initModule,
         Syscall.FINIT_MODULE to arch.finitModule,
+        Syscall.SCHED_GETAFFINITY to arch.sched_getaffinity,
+        Syscall.EVENTFD2 to arch.eventfd2,
+        Syscall.EPOLL_CREATE1 to arch.epoll_create1,
+        Syscall.EPOLL_CTL to arch.epoll_ctl,
+        Syscall.EPOLL_WAIT to arch.epoll_wait,
+        Syscall.EPOLL_PWAIT to arch.epoll_pwait,
     )
 
     @Test

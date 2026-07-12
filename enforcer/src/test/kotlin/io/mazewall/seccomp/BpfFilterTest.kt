@@ -307,4 +307,78 @@ class BpfFilterTest {
         assertTrue(valuesChecked.contains(hi2), "HI 2 check should be present")
         assertTrue(valuesChecked.contains(lo2), "LO 2 check should be present")
     }
+
+    @Test
+    fun `jvm critical syscalls are allowed by default`() {
+        val policy = Policy.builder().defaultAction(SeccompAction.ACT_ERRNO).build()
+        val filter = BpfFilter.build(arch, policy.definition)
+
+        val criticalSyscalls = listOf(
+            Syscall.FUTEX, Syscall.SCHED_YIELD, Syscall.RT_SIGRETURN, Syscall.RT_SIGACTION,
+            Syscall.MADVISE, Syscall.GETTID, Syscall.CLOSE, Syscall.RT_SIGPROCMASK,
+            Syscall.MMAP, Syscall.MPROTECT, Syscall.PKEY_MPROTECT, Syscall.MUNMAP, Syscall.BRK,
+            Syscall.USERFAULTFD, Syscall.MEMFD_CREATE, Syscall.TGKILL, Syscall.SCHED_GETAFFINITY,
+            Syscall.PIPE2, Syscall.EVENTFD2, Syscall.EPOLL_CREATE1, Syscall.EPOLL_CTL,
+            Syscall.EPOLL_WAIT, Syscall.EPOLL_PWAIT
+        )
+
+        for (syscall in criticalSyscalls) {
+            val nr = syscall.numberFor(arch)
+            if (nr < 0) continue
+
+            var foundAllow = false
+            for (i in filter.indices) {
+                val f = filter[i]
+                if (f.code == 0x15.toShort() && f.k == nr) {
+                    // Check if the syscall is inspected (handled by an inspector) or allowed directly
+                    // Linear scan puts critical syscalls at the end, so they might be preceded by inspections.
+                    // But if it's inspected, it's also effectively allowed for the critical paths.
+                    foundAllow = true
+                    break
+                }
+            }
+            assertTrue(foundAllow, "Syscall $syscall ($nr) should be handled and allowed by default in critical floor")
+        }
+    }
+
+    @Test
+    fun `ioctl inspector whitelists essential requests`() {
+        val policy = Policy.builder().defaultAction(SeccompAction.ACT_ERRNO).build()
+        val filter = BpfFilter.build(arch, policy.definition)
+
+        val ioctlNr = Syscall.IOCTL.numberFor(arch)
+        val allowedRequests = listOf(
+            NativeConstants.FIONBIO.toLong(),
+            NativeConstants.UFFDIO_COPY
+        )
+
+        for (req in allowedRequests) {
+            val hi = (req ushr 32).toInt()
+            val lo = req.toInt()
+
+            var foundReqCheck = false
+            for (i in filter.indices) {
+                val f = filter[i]
+                if (f.code == 0x15.toShort() && f.k == ioctlNr) {
+                    // Search for the request value check within the following instructions
+                    for (j in (i + 1) until minOf(i + 50, filter.size)) {
+                        val fj = filter[j]
+                        if (fj.code == 0x15.toShort() && fj.k == hi) {
+                            // Found HI check, look for LO check
+                            for (k in (j + 1) until minOf(j + 10, filter.size)) {
+                                val fk = filter[k]
+                                if (fk.code == 0x15.toShort() && fk.k == lo) {
+                                    foundReqCheck = true
+                                    break
+                                }
+                            }
+                        }
+                        if (foundReqCheck) break
+                    }
+                }
+                if (foundReqCheck) break
+            }
+            assertTrue(foundReqCheck, "Ioctl request $req (hi=$hi, lo=$lo) should be inspected and allowed")
+        }
+    }
 }

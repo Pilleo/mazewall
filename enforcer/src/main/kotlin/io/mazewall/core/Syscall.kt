@@ -66,6 +66,14 @@ enum class Syscall {
     CLOCK_GETTIME,
     EXIT,
     EXIT_GROUP,
+    TGKILL,
+    SCHED_GETAFFINITY,
+    PIPE2,
+    EVENTFD2,
+    EPOLL_CREATE1,
+    EPOLL_CTL,
+    EPOLL_WAIT,
+    EPOLL_PWAIT,
 
     // Harmless/Utility syscalls for fine-grained control and testing
     GETPID,
@@ -126,6 +134,7 @@ internal object SyscallMapper {
         when (syscall) {
             Syscall.FORK, Syscall.VFORK, Syscall.CLONE, Syscall.CLONE3, Syscall.EXECVE, Syscall.EXECVEAT, Syscall.EXIT, Syscall.EXIT_GROUP,
             Syscall.GETTID, Syscall.GETPID, Syscall.GETPPID, Syscall.GETUID, Syscall.GETEUID, Syscall.GETGID, Syscall.GETEGID, Syscall.PTRACE,
+            Syscall.TGKILL,
             ->
                 ProcessSyscallMapper.numberFor(syscall, arch)
 
@@ -134,6 +143,7 @@ internal object SyscallMapper {
 
             Syscall.OPEN, Syscall.OPENAT, Syscall.OPENAT2, Syscall.READ, Syscall.WRITE, Syscall.CLOSE, Syscall.FSTAT, Syscall.LSEEK,
             Syscall.PREAD64, Syscall.PWRITE64, Syscall.FCNTL, Syscall.FSYNC, Syscall.FDATASYNC,
+            Syscall.PIPE2,
             ->
                 FsSyscallMapper.numberForBasic(syscall, arch)
 
@@ -162,7 +172,7 @@ internal object ProcessSyscallMapper {
     ): Int =
         when (syscall) {
             Syscall.FORK, Syscall.VFORK, Syscall.CLONE, Syscall.CLONE3 -> numberForLifecycle(syscall, arch)
-            Syscall.EXECVE, Syscall.EXECVEAT, Syscall.EXIT, Syscall.EXIT_GROUP -> numberForExecution(syscall, arch)
+            Syscall.EXECVE, Syscall.EXECVEAT, Syscall.EXIT, Syscall.EXIT_GROUP, Syscall.TGKILL -> numberForExecution(syscall, arch)
             else -> numberForIdentity(syscall, arch)
         }
 
@@ -187,6 +197,7 @@ internal object ProcessSyscallMapper {
             Syscall.EXECVEAT -> arch.execveat
             Syscall.EXIT -> arch.exit
             Syscall.EXIT_GROUP -> arch.exit_group
+            Syscall.TGKILL -> arch.tgkill
             else -> -1
         }
 
@@ -274,6 +285,7 @@ internal object FsSyscallMapper {
             Syscall.FDATASYNC -> arch.fdatasync
             Syscall.MUNMAP -> arch.munmap
             Syscall.BRK -> arch.brk
+            Syscall.PIPE2 -> arch.pipe2
             else -> -1
         }
 
@@ -466,6 +478,12 @@ internal object OtherSyscallMapper {
             Syscall.NANOSLEEP -> arch.nanosleep
             Syscall.INIT_MODULE -> arch.initModule
             Syscall.FINIT_MODULE -> arch.finitModule
+            Syscall.SCHED_GETAFFINITY -> arch.sched_getaffinity
+            Syscall.EVENTFD2 -> arch.eventfd2
+            Syscall.EPOLL_CREATE1 -> arch.epoll_create1
+            Syscall.EPOLL_CTL -> arch.epoll_ctl
+            Syscall.EPOLL_WAIT -> arch.epoll_wait
+            Syscall.EPOLL_PWAIT -> arch.epoll_pwait
             else -> -1
         }
 }
