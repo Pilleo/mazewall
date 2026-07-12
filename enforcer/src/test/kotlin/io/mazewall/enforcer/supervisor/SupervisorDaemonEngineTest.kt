@@ -59,10 +59,7 @@ class SupervisorDaemonEngineTest {
             // We can do this by making the mock engine return success for poll()
             mockEngine.pollResult = LinuxNative.SyscallResult.Success(1L)
 
-            val result = engine.javaClass.getDeclaredMethods().find { it.name.startsWith("processConnectionStep") }?.let {
-                it.isAccessible = true
-                it.invoke(engine, arena, connection, socketFd, pollFd) as io.mazewall.ffi.networking.SeccompConnection?
-            }
+            val result = engine.processConnectionStep(arena, connection, socketFd, pollFd)
 
             assertNotNull(result, "processConnectionStep should return non-null on successful retry")
             assertEquals(2, writeCalls)
@@ -98,10 +95,7 @@ class SupervisorDaemonEngineTest {
         val engine = SupervisorDaemonEngine("/tmp/test.sock")
         val serverFd = FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(5)
 
-        engine.javaClass.getDeclaredMethods().find { it.name.startsWith("handleNewConnection") }?.let {
-            it.isAccessible = true
-            it.invoke(engine, serverFd)
-        }
+        engine.handleNewConnection(serverFd)
 
         assertEquals(2, acceptCalls)
     }

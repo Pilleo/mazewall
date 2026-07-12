@@ -148,7 +148,7 @@ internal class SupervisorDaemonEngine(
         }
     }
 
-    private fun handleNewConnection(serverFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>) {
+    internal fun handleNewConnection(serverFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>) {
         try {
             while (true) {
                 val res = LinuxNative.withTransaction {
@@ -213,7 +213,7 @@ internal class SupervisorDaemonEngine(
         }
     }
 
-    private fun processConnectionStep(
+    internal fun processConnectionStep(
         arena: Arena,
         connection: io.mazewall.ffi.networking.SeccompConnection,
         socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>,
