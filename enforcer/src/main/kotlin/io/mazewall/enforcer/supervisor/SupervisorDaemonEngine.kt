@@ -148,25 +148,34 @@ internal class SupervisorDaemonEngine(
         }
     }
 
-    private fun handleNewConnection(serverFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>) {
+    internal fun handleNewConnection(serverFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>) {
         try {
-            val res = LinuxNative.withTransaction { LinuxNative.networking.accept(serverFd, MemorySegment.NULL, MemorySegment.NULL) }
-            if (res is LinuxNative.SyscallResult.Success) {
-                val clientFd = FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(res.value.toInt())
-
-                if (clientSockets.size >= MAX_CONNECTIONS) {
-                    System.err.println("[SUPERVISOR] Rejecting connection: too many clients (${clientSockets.size})")
-                    closeFd(clientFd)
-                    return
+            while (true) {
+                val res = LinuxNative.withTransaction {
+                    LinuxNative.networking.accept(serverFd, MemorySegment.NULL, MemorySegment.NULL)
                 }
+                if (res is LinuxNative.SyscallResult.Success) {
+                    val clientFd = FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(res.value.toInt())
 
-                clientSockets.add(clientFd)
-                try {
-                    connectionExecutor.execute { handleConnection(clientFd) }
-                } catch (e: Exception) {
-                    System.err.println("[SUPERVISOR] Failed to execute connection handler: ${e.message}")
-                    clientSockets.remove(clientFd)
-                    closeFd(clientFd)
+                    if (clientSockets.size >= MAX_CONNECTIONS) {
+                        System.err.println("[SUPERVISOR] Rejecting connection: too many clients (${clientSockets.size})")
+                        closeFd(clientFd)
+                        return
+                    }
+
+                    clientSockets.add(clientFd)
+                    try {
+                        connectionExecutor.execute { handleConnection(clientFd) }
+                    } catch (e: Exception) {
+                        System.err.println("[SUPERVISOR] Failed to execute connection handler: ${e.message}")
+                        clientSockets.remove(clientFd)
+                        closeFd(clientFd)
+                    }
+                    return
+                } else {
+                    val errno = (res as LinuxNative.SyscallResult.Error).errno
+                    if (errno == NativeConstants.EINTR) continue
+                    return
                 }
             }
         } catch (ignored: java.io.IOException) {
@@ -204,7 +213,7 @@ internal class SupervisorDaemonEngine(
         }
     }
 
-    private fun processConnectionStep(
+    internal fun processConnectionStep(
         arena: Arena,
         connection: io.mazewall.ffi.networking.SeccompConnection,
         socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>,
@@ -235,8 +244,20 @@ internal class SupervisorDaemonEngine(
                 System.err.println("[SUPERVISOR] Sending handshake ACK to socket ${socketFd.value}")
                 val ackBuf = arena.allocate(ACK_BUF_SIZE)
                 ackBuf.writeByte(0L, PROTOCOL_ACK_BYTE)
-                LinuxNative.withTransaction { LinuxNative.memory.write(socketFd, ackBuf, ACK_BUF_SIZE) }
-                current.handshakeComplete()
+                var result: io.mazewall.ffi.networking.SeccompConnection? = null
+                while (true) {
+                    val res = LinuxNative.withTransaction { LinuxNative.memory.write(socketFd, ackBuf, ACK_BUF_SIZE) }
+                    if (res is LinuxNative.SyscallResult.Success) {
+                        result = current.handshakeComplete()
+                        break
+                    } else {
+                        val errno = (res as LinuxNative.SyscallResult.Error).errno
+                        if (errno == NativeConstants.EINTR) continue
+                        result = null
+                        break
+                    }
+                }
+                result
             }
 
             is io.mazewall.ffi.networking.SeccompConnection.Active -> {

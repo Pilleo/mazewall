@@ -193,7 +193,7 @@ class ArchitectureTest {
         methods()
             .that()
             .areDeclaredInClassesThat()
-            .resideInAnyPackage("io.mazewall.seccomp..", "io.mazewall.landlock..")
+            .resideInAnyPackage("io.mazewall.seccomp..", "io.mazewall.landlock..", "io.mazewall.enforcer.supervisor..")
             .and()
             .haveRawReturnType(LinuxNative.SyscallResult::class.java)
             .should()
@@ -215,7 +215,7 @@ class ArchitectureTest {
         methods()
             .that()
             .areDeclaredInClassesThat()
-            .resideInAnyPackage("io.mazewall.seccomp..", "io.mazewall.landlock..")
+            .resideInAnyPackage("io.mazewall.seccomp..", "io.mazewall.landlock..", "io.mazewall.enforcer.supervisor..")
             .and()
             .haveNameNotMatching(".*\\$.*") // Ignore Kotlin internal mangled names
             .should()
