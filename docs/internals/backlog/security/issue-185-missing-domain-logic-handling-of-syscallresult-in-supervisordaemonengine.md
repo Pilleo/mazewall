@@ -6,6 +6,7 @@ priority: 6
 dependencies: []
 component: "enforcer"
 effort: "medium"
+github_issue: 92
 ---
 
 # 🔴 [Severity: MEDIUM]: Missing domain logic handling of SyscallResult in SupervisorDaemonEngine
