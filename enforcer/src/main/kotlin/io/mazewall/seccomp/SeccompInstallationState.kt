@@ -3,6 +3,7 @@ package io.mazewall.seccomp
 import io.mazewall.LinuxNative
 import io.mazewall.PolicyDefinition
 import io.mazewall.CompiledSandbox
+import io.mazewall.enforcer.validateLinuxAndNotVirtual
 import io.mazewall.core.Arch
 import java.lang.foreign.Arena
 import java.lang.foreign.MemorySegment
@@ -25,6 +26,7 @@ internal sealed interface SeccompInstallationState {
         val program: MemorySegment,
     ) : SeccompInstallationState {
         fun lockPrivileges(): PrivilegesLocked {
+            validateLinuxAndNotVirtual()
             PureJavaBpfEngine.setNoNewPrivs()
             return PrivilegesLocked(program)
         }

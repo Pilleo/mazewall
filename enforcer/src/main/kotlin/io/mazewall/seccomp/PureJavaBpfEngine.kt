@@ -58,9 +58,6 @@ internal object PureJavaBpfEngine : SeccompEngine<EngineState> {
         policy: CompiledSandbox<*>,
         useTsync: Boolean,
     ) {
-        if (Thread.currentThread().isVirtual) {
-            throw IllegalStateException("Cannot install seccomp filter on a virtual thread.")
-        }
         // Pre-charge classloading of engine states to prevent deadlocks/failures under active filters
         EngineState.UnprivilegedImpl.toString()
         EngineState.LoadedImpl.toString()
