@@ -185,7 +185,7 @@ fun main() {
         maxRetries = getEnvOr("MAX_RETRIES", "3").toInt(),
         initialRetryDelayMs = getEnvOr("INITIAL_RETRY_DELAY_MS", "1000").toLong(),
         githubCacheTtlMs = getEnvOr("GITHUB_CACHE_TTL_MS", "10000").toLong(),
-        stuckPendingThresholdMs = getEnvOr("STUCK_PENDING_THRESHOLD_MS", "900000").toLong()
+        stuckPendingThresholdMs = getEnvOr("STUCK_PENDING_THRESHOLD_MS", "3600000").toLong()
     )
 
     GitHubCli.init(config)

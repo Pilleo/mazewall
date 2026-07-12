@@ -11,6 +11,7 @@ solution_approved: true
 chosen_solution: "A"
 blast_radius: "low"
 reversible: true
+github_issue: 89
 ---
 
 # 🟡 [Severity: MEDIUM]: Orchestrator: Notify Human When CI Build Status is Stuck in PENDING/UNKNOWN

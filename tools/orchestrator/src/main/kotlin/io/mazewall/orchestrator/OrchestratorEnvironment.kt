@@ -15,7 +15,7 @@ data class OrchestratorConfig(
     val maxRetries: Int = 3,
     val initialRetryDelayMs: Long = 1000,
     val githubCacheTtlMs: Long = 10000,
-    val stuckPendingThresholdMs: Long = 900_000
+    val stuckPendingThresholdMs: Long = 3_600_000
 )
 
 interface OrchestratorEnvironment {
