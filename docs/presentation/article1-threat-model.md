@@ -1,5 +1,4 @@
 # Do You Really Know What Your App Is Doing at Runtime?
-![maze_security_walls_new.png](maze_security_walls_new.png)
 > **Series overview:** This is Part 1 of a 5-part series on behavioral security for cloud-native applications.
  
 We have become very good at answering one specific supply-chain question:

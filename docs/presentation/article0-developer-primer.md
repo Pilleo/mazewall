@@ -1,5 +1,5 @@
 # Your Threads Are All Equally Trusted — Should They Be?
-
+![maze_security_walls_new.png](maze_security_walls_new.png)
 > **What this is:** A developer-first introduction to mazewall—how to enforce OS-level sandboxing constraints directly on your JVM thread pools.
 >
 > After reading this, you will understand what thread-level OS sandboxing is, why your service likely lacks it today, and what it looks like to add it.
