@@ -273,6 +273,9 @@ sealed interface OrchestratorState {
             if (currentSha != context.lastHeadSha) {
                 env.println("🔄 New commits detected on PR #$prNumber (Head SHA: $currentSha). Checking build status...")
                 context.lastHeadSha = currentSha
+                context.lastKnownStatus = null
+                context.lastStatusChangeTime = 0L
+                context.lastPendingNotificationTime = 0L
             }
 
             val status = env.checkBuildStatus(prNumber)
@@ -320,6 +323,19 @@ sealed interface OrchestratorState {
                     this
                 }
                 else -> {
+                    val now = System.currentTimeMillis()
+                    if (status != context.lastKnownStatus) {
+                        context.lastKnownStatus = status
+                        context.lastStatusChangeTime = now
+                        context.lastPendingNotificationTime = 0L
+                    } else if (now - context.lastStatusChangeTime > env.config.stuckPendingThresholdMs && context.lastPendingNotificationTime == 0L) {
+                        val prUrl = env.getPrUrl(prNumber)
+                        val msg = "⚠️ *PR #$prNumber build status is stuck in $status!* Please check the runner: $prUrl"
+                        env.println("\u001B[1;31m🔔 [STUCK] PR #$prNumber build status is stuck in $status! Please check the runner: $prUrl\u001B[0m")
+                        env.sendNotification(msg)
+                        env.ringBell(1)
+                        context.lastPendingNotificationTime = now
+                    }
                     env.sleep(env.config.pollingIntervalSeconds, TimeUnit.SECONDS)
                     this
                 }
