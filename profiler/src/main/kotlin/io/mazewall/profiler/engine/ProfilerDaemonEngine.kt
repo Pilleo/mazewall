@@ -21,8 +21,8 @@ import java.util.concurrent.CopyOnWriteArrayList
  * Communicates with the parent JVM via a [ProfilerTransport], sending binary [SyscallEvent]
  * structures and resolving memory using [ProfilerMemoryReader].
  */
-// @ref: docs/internals/design-specs/profiler-design.md — USER_NOTIF ACK loop protocol, deadlock prevention, SCM_RIGHTS socket FD transfer
-// @ref: docs/internals/architecture/architectural-map.md — Profiler-Enforcer ACK loop sequence diagram
+// @ref: docs/internals/designs/profiler/profiler-design.md — USER_NOTIF ACK loop protocol, deadlock prevention, SCM_RIGHTS socket FD transfer
+// @ref: docs/internals/designs/core/architectural-map.md — Profiler-Enforcer ACK loop sequence diagram
 internal class ProfilerDaemonEngine(
     private val socketPath: String,
     private val transport: ProfilerTransport = RealProfilerTransport,

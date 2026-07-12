@@ -16,7 +16,7 @@ import java.lang.foreign.ValueLayout
 class ContainmentDesignSpec :
     FreeSpec({
 
-        "FFM Struct Layouts (design-specs/containment-design.md Section 7)" - {
+        "FFM Struct Layouts (designs/enforcer/containment-design.md Section 7)" - {
             "sock_filter is exactly 8 bytes" {
                 Layouts.SOCK_FILTER_SIZE shouldBe 8L
                 Layouts.SOCK_FILTER.byteSize() shouldBe 8L
@@ -68,7 +68,7 @@ class ContainmentDesignSpec :
             }
         }
 
-        "Linear BPF Scan Constraints (design-specs/containment-design.md Section 2)" - {
+        "Linear BPF Scan Constraints (designs/enforcer/containment-design.md Section 2)" - {
             val arch = Arch.AMD64
 
             "jt and jf fields are unsigned 8-bit — max valid offset is 255" {
@@ -99,7 +99,7 @@ class ContainmentDesignSpec :
             }
         }
 
-        "32-Filter Depth Limit (design-specs/containment-design.md Section 4)" - {
+        "32-Filter Depth Limit (designs/enforcer/containment-design.md Section 4)" - {
             "FilterInstallationPlanner rejects depth >= 32 with IllegalStateException" {
                 val exception = io.kotest.assertions.throwables.shouldThrow<IllegalStateException> {
                     FilterInstallationPlanner.verifyFilterDepth(32)
@@ -112,7 +112,7 @@ class ContainmentDesignSpec :
             }
         }
 
-        "JVM Coordination Syscalls Must Never Be Blocked (design-specs/containment-design.md Section 3e)" - {
+        "JVM Coordination Syscalls Must Never Be Blocked (designs/enforcer/containment-design.md Section 3e)" - {
             val arch = Arch.AMD64
 
             "futex, sched_yield, rt_sigreturn, rt_sigaction, madvise, gettid, close are always allowed by BpfFilter" {
@@ -142,7 +142,7 @@ class ContainmentDesignSpec :
             }
         }
 
-        "clone3 unconditional ENOSYS trap (design-specs/containment-design.md Section 3c)" - {
+        "clone3 unconditional ENOSYS trap (designs/enforcer/containment-design.md Section 3c)" - {
             val arch = Arch.AMD64
 
             "BpfFilter always emits ENOSYS for clone3 regardless of policy mode" {
@@ -164,7 +164,7 @@ class ContainmentDesignSpec :
             }
         }
 
-        "Sandbox Cleanliness (design-specs/containment-design.md)" - {
+        "Sandbox Cleanliness (designs/enforcer/containment-design.md)" - {
             "Pre-warmed JVM task runs successfully inside sandboxed executor without JIT crashes" {
                 val isSupported = io.mazewall.Platform.isSupported() && try {
                     Arch.current()

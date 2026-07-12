@@ -17,14 +17,14 @@ As a contributor, keep the north star in mind: give developers easy-to-use tools
 | [AGENTS.md](AGENTS.md) | Hard boundaries for AI and human contributors: what never to block, what never to bypass |
 | [enforcer/AGENTS.md](enforcer/AGENTS.md) | JVM coordination syscalls, Loom carrier thread rules, FFM errno safety |
 | [profiler/AGENTS.md](profiler/AGENTS.md) | USER_NOTIF ACK loop deadlock prevention, ptrace scope, strace parsing |
-| [docs/internals/architecture/architectural-map.md](docs/internals/architecture/architectural-map.md) | Component diagram, the ACK loop sequence, cross-module dependencies |
-| [docs/internals/architecture/security-considerations.md](docs/internals/architecture/security-considerations.md) | Full threat model — what mazewall stops and what it doesn't |
+| [docs/internals/designs/core/architectural-map.md](docs/internals/designs/core/architectural-map.md) | Component diagram, the ACK loop sequence, cross-module dependencies |
+| [docs/internals/designs/core/security-considerations.md](docs/internals/designs/core/security-considerations.md) | Full threat model — what mazewall stops and what it doesn't |
 
 ---
 
 ## Architecture in One Paragraph
 
-mazewall has two production modules: **`:enforcer`** (zero-dependency production runtime — BPF compilation, filter installation, Landlock, `ContainedExecutors`) and **`:profiler`** (dev/test tool — `USER_NOTIF` daemon, iterative Landlock profiler, `BillOfBehavior` compiler). The demo subprojects in `demos/` consume both. The most critical architectural constraint is the profiler's **ACK loop**: the daemon must always ACK every intercepted syscall or the worker thread deadlocks permanently. See `architecture/architectural-map.md` for the full sequence diagram.
+mazewall has two production modules: **`:enforcer`** (zero-dependency production runtime — BPF compilation, filter installation, Landlock, `ContainedExecutors`) and **`:profiler`** (dev/test tool — `USER_NOTIF` daemon, iterative Landlock profiler, `BillOfBehavior` compiler). The demo subprojects in `demos/` consume both. The most critical architectural constraint is the profiler's **ACK loop**: the daemon must always ACK every intercepted syscall or the worker thread deadlocks permanently. See `designs/core/architectural-map.md` for the full sequence diagram.
 
 ---
 

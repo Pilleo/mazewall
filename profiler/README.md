@@ -116,7 +116,7 @@ behavior.toStackTracesJson() // → String (JSON mapping stack traces to events)
 
 ## Technical Architecture
 
-For a detailed class hierarchy and structural relationship map, see the [Profiler Technical Design documentation](../docs/internals/design-specs/profiler-design.md).
+For a detailed class hierarchy and structural relationship map, see the [Profiler Technical Design documentation](../docs/internals/designs/profiler/profiler-design.md).
 
 - **`Profiler` / `ProfilerDaemon`**: Implements the out-of-process `USER_NOTIF` engine. The daemon receives the seccomp listener FD via UNIX socket `SCM_RIGHTS` passing, intercepts trapped syscalls, resolves paths via `process_vm_readv`, and sends an ACK back to release the worker thread.
 - **`ProfilerTraceListener`**: Bridge between the daemon and the JVM — receives `TraceEvent`s and correlates them with JVM stack traces via `ThreadRegistry`.
@@ -124,7 +124,7 @@ For a detailed class hierarchy and structural relationship map, see the [Profile
 - **`StraceProfiler` / `StraceWorkloadRunner`**: Spawns target workloads under `strace -f` and parses the log stream.
 - **`BobCompiler` / `BillOfBehavior`**: Deduplicates raw high-frequency syscall streams and compiles the structured behavioral contract.
 
-For the critical ACK loop architecture and deadlock prevention rules, see [architecture/architectural-map.md](../docs/internals/architecture/architectural-map.md).
+For the critical ACK loop architecture and deadlock prevention rules, see [designs/core/architectural-map.md](../docs/internals/designs/core/architectural-map.md).
 
 ---
 

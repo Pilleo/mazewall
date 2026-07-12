@@ -38,8 +38,8 @@ import java.util.logging.Logger
  * that the library has a consistent and race-free view of the active sandbox configuration
  * during concurrent or nested filter installations.
  */
-// @ref: docs/internals/architecture/security-considerations.md — Shared-memory ACE escape threat model, Tier 1/Tier 2 boundary definitions
-// @ref: docs/internals/design-specs/containment-design.md — Filter installation ordering (Landlock before Seccomp), TSYNC semantics
+// @ref: docs/internals/designs/core/security-considerations.md — Shared-memory ACE escape threat model, Tier 1/Tier 2 boundary definitions
+// @ref: docs/internals/designs/enforcer/containment-design.md — Filter installation ordering (Landlock before Seccomp), TSYNC semantics
 object ContainedExecutors {
     private val logger = Logger.getLogger(ContainedExecutors::class.java.name)
     private val processLock = Any()

@@ -176,7 +176,7 @@ catastrophic JVM instability:
 | `gettid`       | Thread identification used by GC and diagnostic paths.                                                                                  |
 | `close`        | JVM and FFM close file descriptors constantly. Blocking causes fd leaks and runtime instability.                                        |
 
-Do not add any of these to a policy's block-list. See `architecture/security-considerations.md §9`
+Do not add any of these to a policy's block-list. See `designs/core/security-considerations.md §9`
 for the full safepoint/GC deadlock analysis.
 
 ### 3f. `allowMmapExec = false` Is a Hidden Default for ALL Policies

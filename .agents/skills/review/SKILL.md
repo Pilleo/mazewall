@@ -32,7 +32,7 @@ Evaluate the project across these core operational areas:
    - Ensure tests clean up global settings (like resetting native mock engines) to avoid state leakage.
 
 5. **Architectural Patterns Compliance (The Integrity View):**
-   - Verify compliance with core architectural patterns defined in `docs/internals/architecture/architectural-map.md#7-core-architectural-paradigms--patterns`:
+   - Verify compliance with core architectural patterns defined in `docs/internals/designs/core/architectural-map.md#7-core-architectural-paradigms--patterns`:
      - **Type-State Machine Pattern:** sequential protocols must be verified by design.
      - **Monadic Result Types:** native downcalls use `SyscallResult<T>` instead of raw exceptions.
      - **DDD wrappers:** `value class` wrappers for `FileDescriptor`, `Pid`, `SyscallNumber` to avoid primitive obsession.

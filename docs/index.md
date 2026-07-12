@@ -37,4 +37,4 @@ While the examples are JVM-specific, the underlying concepts (Seccomp-BPF, Landl
 ## Repository
 
 - **Source & Quick Start:** [github.com/Pilleo/mazewall](https://github.com/Pilleo/mazewall)
-- **Design Docs:** [Containment Design](internals/design-specs/containment-design.html) | [Security Considerations](internals/architecture/security-considerations.html) | [Architectural Map](internals/architecture/architectural-map.html) | [Kernel Primitives Roadmap](internals/architecture/kernel-primitives-roadmap.html) | [Documentation Standards](internals/documentation-standards.html)
+- **Design Docs:** [Containment Design](internals/designs/enforcer/containment-design.html) | [Security Considerations](internals/designs/core/security-considerations.html) | [Architectural Map](internals/designs/core/architectural-map.html) | [Kernel Primitives Roadmap](internals/designs/core/kernel-primitives-roadmap.html) | [Documentation Standards](internals/documentation-standards.html)

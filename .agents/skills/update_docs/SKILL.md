@@ -13,7 +13,7 @@ This skill provides a protocol for keeping design and internal documentation in 
 - **Identify Gaps:** Look for renamed methods, changed thread-local variables, or updated security invariants that are no longer accurately described.
 
 ### 3. Synchronize (Readability & Modularity)
-- **Update Design Docs:** Modify `design-specs/containment-design.md` or `design-specs/profiler-design.md` to reflect the new reality. Ensure the logic is modularly described.
+- **Update Design Docs:** Modify `designs/enforcer/containment-design.md` or `designs/profiler/profiler-design.md` to reflect the new reality. Ensure the logic is modularly described.
 - **Update presentation:** If the change affects how developers interact with the library, update the relevant files in `docs/presentation/`.
 - **Maintain Consistency:** Ensure that the same terminology is used across code, KDocs, and Markdown files. Terminology must be precise and consistent with the established `NativeEngine` trait nomenclature.
 - **Readability:** Ensure that updated documentation remains accessible and free of jargon that hasn't been defined.

@@ -42,14 +42,14 @@ The workspace `.agents/` directory is the entry point for AI agent rules. Placin
 ### Standard:
 *   The `.agents/AGENTS.md` and child agents files (e.g., `enforcer/AGENTS.md`) must only contain **behavioral invariants, compile targets, and critical boundaries**.
 *   All design layouts, FFM mappings, and research notes must be kept out of the rule files and referenced via **absolute file links** (which agents resolve to physical paths) or relative paths:
-    > "When editing memory mapping code or JIT safety checks, you MUST read the layout design guidelines in [design-specs/containment-design.md](design-specs/containment-design.md)."
+    > "When editing memory mapping code or JIT safety checks, you MUST read the layout design guidelines in [designs/enforcer/containment-design.md](designs/enforcer/containment-design.md)."
 *   This forces the agent to follow a JIT retrieval strategy: it scans the rule index first, and then selectively calls `view_file` on the target design document only if the active task touches that area.
 
 ---
 
 ## 4. Architecture-as-Code (Interactive Knowledge Graph)
 
-To maintain a clear relationship graph of how JVM code coordinates with native systems, the repository maintains an interactive component map at [architecture/architectural-map.md](architecture/architectural-map.md).
+To maintain a clear relationship graph of how JVM code coordinates with native systems, the repository maintains an interactive component map at [designs/core/architectural-map.md](designs/core/architectural-map.md).
 
 ### Standard:
 *   Use standard Mermaid flowcharts to model cross-module dependency structures and trace notification sequence flows.
@@ -57,9 +57,9 @@ To maintain a clear relationship graph of how JVM code coordinates with native s
     ```mermaid
     graph TD
         Enforcer[":enforcer Module"] -->|Security Policy| PolicyClass[Policy.kt]
-        Enforcer -->|Design Document| ContainmentDesign[design-specs/containment-design.md]
+        Enforcer -->|Design Document| ContainmentDesign[designs/enforcer/containment-design.md]
         
-        click ContainmentDesign "design-specs/containment-design.md"
+        click ContainmentDesign "designs/enforcer/containment-design.md"
     ```
 *   This enables developers and agents to traverse component boundaries visually, instantly clicking through to the underlying code files or design constraints.
 
@@ -76,7 +76,7 @@ Run the Kotlin script passing the path to any file:
 kotlin scripts/file_structure.main.kts enforcer/src/main/kotlin/io/mazewall/enforcer/ContainedExecutors.kt
 
 # Markdown: outlines heading hierarchy
-kotlin scripts/file_structure.main.kts docs/internals/design-specs/containment-design.md
+kotlin scripts/file_structure.main.kts docs/internals/designs/enforcer/containment-design.md
 
 # YAML/YML: outlines top-level and second-level keys
 kotlin scripts/file_structure.main.kts .github/workflows/ci.yml
@@ -98,7 +98,7 @@ To create bidirectional navigation between source code and design documents, cri
 
 ### Standard Format:
 ```kotlin
-// @ref: docs/internals/design-specs/containment-design.md — Description of what the link covers
+// @ref: docs/internals/designs/enforcer/containment-design.md — Description of what the link covers
 // @issue: docs/internals/backlog/issue-042-tsync-race.md — Known issue affecting this code
 ```
 
@@ -111,7 +111,7 @@ To create bidirectional navigation between source code and design documents, cri
 
 ### Example:
 ```kotlin
-// @ref: docs/internals/design-specs/containment-design.md — BPF linear scan and 8-bit jump limit
+// @ref: docs/internals/designs/enforcer/containment-design.md — BPF linear scan and 8-bit jump limit
 // @ref: docs/internals/research/jvm-syscall-floor-research.md — JVM floor syscall requirements
 internal fun installFilter(arch: Arch, prog: MemorySegment, useTsync: Boolean) {
     ...

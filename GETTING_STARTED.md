@@ -230,7 +230,7 @@ io.mazewall.ContainmentViolationException: Containment violation detected: block
 
 ## Known Limitations
 
-- **Thread-scope vs Process-scope Isolation**: All JVM threads share the same heap. If an attacker achieves native Arbitrary Code Execution on a sandboxed thread, they can potentially corrupt heap memory on an unsandboxed sibling thread. Combine with a process-wide `NO_EXEC` baseline (Tier 1) for defense-in-depth. See [architecture/security-considerations.md](docs/internals/architecture/security-considerations.md) for the full threat model.
+- **Thread-scope vs Process-scope Isolation**: All JVM threads share the same heap. If an attacker achieves native Arbitrary Code Execution on a sandboxed thread, they can potentially corrupt heap memory on an unsandboxed sibling thread. Combine with a process-wide `NO_EXEC` baseline (Tier 1) for defense-in-depth. See [designs/core/security-considerations.md](docs/internals/designs/core/security-considerations.md) for the full threat model.
 - **JIT Compiler Coexistence**: The background threads that run JVM JIT compilation are unconstrained by thread-scoped policies. Therefore, thread-local executors wrapped with `Policy.NO_EXEC` or `Policy.PURE_COMPUTE` will *not* trigger JIT compiler `mmap(PROT_EXEC)` failures. However, if you apply a process-wide lockdown via `ContainedExecutors.installOnProcess(Policy.NO_EXEC)`, you *must* append `.allowMmapExec()` if JIT compilation is still active.
 - **Platform threads only**: Virtual threads (Loom) are explicitly rejected at runtime. Use platform thread pools for sandboxed work.
 - **Linux only**: macOS and Windows do not have Seccomp-BPF or Landlock. The library will fail to install and throw (configurable via the `IO_MAZEWALL_FALLBACK` env var).
@@ -242,5 +242,5 @@ io.mazewall.ContainmentViolationException: Containment violation detected: block
 - **Demos:** See real CVE exploits blocked live → [demos/vulnerable-web-app/README.md](demos/vulnerable-web-app/README.md)
 - **Profiler:** Automatically discover the minimal policy your workload needs → [profiler README](profiler/README.md)
 - **Enforcer API reference:** Full policy builder docs → [enforcer/README.md](enforcer/README.md)
-- **Threat model:** What mazewall stops and what it doesn't → [architecture/security-considerations.md](docs/internals/architecture/security-considerations.md)
+- **Threat model:** What mazewall stops and what it doesn't → [designs/core/security-considerations.md](docs/internals/designs/core/security-considerations.md)
 

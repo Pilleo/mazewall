@@ -1,7 +1,7 @@
 ---
 title: "Orchestrator: Notify Human When CI Build Status is Stuck in PENDING/UNKNOWN"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: 7
 dependencies: []
 component: "orchestrator"

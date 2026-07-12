@@ -147,7 +147,7 @@ mazewall operates in two tiers. Think of it as the difference between the buildi
 | **Tier 2** | `ContainedExecutors.wrap(executor, policy)` | One thread pool | Surgical restriction — stops data-plane attacks (SSRF, XXE, path traversal) on specific pools |
 
 > [!IMPORTANT]
-> **Stack Tier 1 first.** Tier 2 alone does not fully isolate malicious code that can use standard Java concurrency APIs (`CompletableFuture`, virtual threads) to escape to unrestricted sibling threads. See [architecture/security-considerations.md](docs/internals/architecture/security-considerations.md) for the complete threat model.
+> **Stack Tier 1 first.** Tier 2 alone does not fully isolate malicious code that can use standard Java concurrency APIs (`CompletableFuture`, virtual threads) to escape to unrestricted sibling threads. See [designs/core/security-considerations.md](docs/internals/designs/core/security-considerations.md) for the complete threat model.
 
 ---
 
@@ -194,7 +194,7 @@ Policies are composable via a builder — see [GETTING_STARTED.md](GETTING_START
 | Install and write my first policy | [GETTING_STARTED.md](GETTING_STARTED.md) |
 | Auto-generate a policy from my workload | [profiler/README.md](profiler/README.md) |
 | See it block real CVEs (Log4Shell, SSRF, XXE) | [Demo README](demos/vulnerable-web-app/README.md) |
-| Understand the threat model and what it can't stop | [architecture/security-considerations.md](docs/internals/architecture/security-considerations.md) |
+| Understand the threat model and what it can't stop | [designs/core/security-considerations.md](docs/internals/designs/core/security-considerations.md) |
 | Read the deep-dive article series | [Article series](#article-series) |
 | Contribute or modify the codebase | [CONTRIBUTING.md](CONTRIBUTING.md) |
 

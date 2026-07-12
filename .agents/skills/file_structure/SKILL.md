@@ -59,7 +59,7 @@ codanna mcp get_calls buildFromActions
 codanna mcp find_callers getJvmCriticalNrs
 
 # Before reading a design doc — see which sections it has:
-kotlin scripts/file_structure.main.kts docs/internals/design-specs/containment-design.md
+kotlin scripts/file_structure.main.kts docs/internals/designs/enforcer/containment-design.md
 
 # Before reading a CI workflow — see what jobs are defined:
 kotlin scripts/file_structure.main.kts .github/workflows/ci.yml
