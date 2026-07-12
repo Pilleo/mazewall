@@ -525,9 +525,13 @@ Structure your comment as follows:
         override val name = "RESOLVE_TASK"
         override fun execute(env: OrchestratorEnvironment, context: OrchestratorContext): OrchestratorState {
             val issueId = context.currentIssueId ?: throw IllegalStateException("currentIssueId is null")
-            val nextIssue = env.parseAllIssues().firstOrNull { it.id == issueId } ?: throw IllegalStateException("nextIssue not found in backlog")
+            val nextIssue = env.parseAllIssues().firstOrNull { it.id == issueId }
 
-            env.markIssueAsResolved(nextIssue)
+            if (nextIssue != null) {
+                env.markIssueAsResolved(nextIssue)
+            } else {
+                env.println("⚠️ Issue `$issueId` not found in active backlog. It may have already been resolved and moved in the merged PR.")
+            }
 
             env.println("Regenerating architectural maps...")
             env.generateKnowledgeMap()
