@@ -103,6 +103,8 @@ class SyscallTest {
         Syscall.MKDIR to arch.mkdir,
         Syscall.MKDIRAT to arch.mkdirat,
         Syscall.RMDIR to arch.rmdir,
+        Syscall.FACCESSAT to arch.faccessat,
+        Syscall.FACCESSAT2 to arch.faccessat2,
     )
 
     private fun getFsOpsMappings(arch: Arch) =
@@ -169,6 +171,7 @@ class SyscallTest {
         Syscall.EPOLL_CTL to arch.epoll_ctl,
         Syscall.EPOLL_WAIT to arch.epoll_wait,
         Syscall.EPOLL_PWAIT to arch.epoll_pwait,
+        Syscall.POLL to arch.poll,
     )
 
     @Test

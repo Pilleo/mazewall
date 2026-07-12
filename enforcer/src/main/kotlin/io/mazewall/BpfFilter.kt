@@ -164,6 +164,10 @@ object BpfFilter {
             Syscall.MADVISE.numberFor(arch),
             Syscall.GETTID.numberFor(arch),
             Syscall.GETPID.numberFor(arch),
+            Syscall.GETUID.numberFor(arch),
+            Syscall.GETGID.numberFor(arch),
+            Syscall.GETEUID.numberFor(arch),
+            Syscall.GETEGID.numberFor(arch),
             Syscall.CLOSE.numberFor(arch),
             Syscall.READ.numberFor(arch),
             Syscall.WRITE.numberFor(arch),
@@ -176,11 +180,17 @@ object BpfFilter {
             Syscall.FCNTL.numberFor(arch),
             Syscall.GETDENTS.numberFor(arch),
             Syscall.GETDENTS64.numberFor(arch),
+            Syscall.READLINK.numberFor(arch),
+            Syscall.READLINKAT.numberFor(arch),
+            Syscall.FACCESSAT.numberFor(arch),
+            Syscall.FACCESSAT2.numberFor(arch),
+            Syscall.POLL.numberFor(arch),
             Syscall.MMAP.numberFor(arch),
             Syscall.MPROTECT.numberFor(arch),
             Syscall.PKEY_MPROTECT.numberFor(arch),
             Syscall.MUNMAP.numberFor(arch),
             Syscall.BRK.numberFor(arch),
+            Syscall.PRCTL.numberFor(arch),
             Syscall.CLOCK_GETTIME.numberFor(arch),
             Syscall.GETRANDOM.numberFor(arch),
             Syscall.EXIT.numberFor(arch),
@@ -229,6 +239,20 @@ object BpfFilter {
                             mark(checkLoLabel)
                             loadAbsolute(argOffsetLo)
                             jumpIfEqual(lo, jt = allowLabel, jf = nextValLabel)
+                            mark(nextValLabel)
+                        }
+                        ret(ifNotMatchedNative)
+                        mark(allowLabel)
+                        ret(ifMatchedNative)
+                    }
+
+                    is io.mazewall.seccomp.ArgCheck.EqualsAny32 -> {
+                        val allowLabel = nextLabel("${labelPrefix}_allow")
+                        check.allowedValues.forEachIndexed { valIdx, value ->
+                            val nextValLabel = nextLabel("${labelPrefix}_next_$valIdx")
+
+                            loadAbsolute(argOffsetLo)
+                            jumpIfEqual(value, jt = allowLabel, jf = nextValLabel)
                             mark(nextValLabel)
                         }
                         ret(ifNotMatchedNative)

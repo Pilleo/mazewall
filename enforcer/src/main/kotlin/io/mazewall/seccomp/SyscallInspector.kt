@@ -142,7 +142,7 @@ internal class UnsafePrctlInspector : SyscallInspector {
             SyscallInspection(
                 syscallNumber = nr,
                 argIndex = 0, // prctl option is the 1st argument
-                check = ArgCheck.EqualsAny(SAFE_PRCTL_OPTIONS),
+                check = ArgCheck.EqualsAny32(SAFE_PRCTL_OPTIONS),
                 ifMatched = context.resolveEffectiveAction(nr),
                 ifNotMatched = SeccompAction.ACT_ERRNO,
             )
@@ -150,7 +150,9 @@ internal class UnsafePrctlInspector : SyscallInspector {
     }
 
     private companion object {
-        private val SAFE_PRCTL_OPTIONS = listOf(15L, 16L, 21L, 22L, 38L, 39L)
+        // Options: PR_SET_NAME, PR_GET_NAME, PR_GET_SECCOMP, PR_SET_SECCOMP,
+        // PR_SET_NO_NEW_PRIVS, PR_GET_NO_NEW_PRIVS, PR_CAP_AMBIENT.
+        private val SAFE_PRCTL_OPTIONS = listOf(15, 16, 21, 22, 38, 39, 47)
     }
 }
 
@@ -166,7 +168,7 @@ internal class IoctlInspector : SyscallInspector {
             SyscallInspection(
                 syscallNumber = nr,
                 argIndex = 1, // ioctl request is the 2nd argument
-                check = ArgCheck.EqualsAny(ALLOWED_IOCTLS),
+                check = ArgCheck.EqualsAny32(ALLOWED_IOCTLS),
                 ifMatched = SeccompAction.ACT_ALLOW,
                 ifNotMatched = context.resolveEffectiveAction(nr),
             )
@@ -175,13 +177,13 @@ internal class IoctlInspector : SyscallInspector {
 
     private companion object {
         private val ALLOWED_IOCTLS = listOf(
-            NativeConstants.FIONBIO.toLong(),
-            NativeConstants.FIONREAD.toLong(),
-            NativeConstants.UFFDIO_API,
-            NativeConstants.UFFDIO_REGISTER,
-            NativeConstants.UFFDIO_UNREGISTER,
-            NativeConstants.UFFDIO_COPY,
-            NativeConstants.UFFDIO_ZEROPAGE,
+            NativeConstants.FIONBIO.toInt(),
+            NativeConstants.FIONREAD.toInt(),
+            NativeConstants.UFFDIO_API.toInt(),
+            NativeConstants.UFFDIO_REGISTER.toInt(),
+            NativeConstants.UFFDIO_UNREGISTER.toInt(),
+            NativeConstants.UFFDIO_COPY.toInt(),
+            NativeConstants.UFFDIO_ZEROPAGE.toInt(),
         )
     }
 }

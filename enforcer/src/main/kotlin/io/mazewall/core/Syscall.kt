@@ -74,6 +74,9 @@ enum class Syscall {
     EPOLL_CTL,
     EPOLL_WAIT,
     EPOLL_PWAIT,
+    FACCESSAT,
+    FACCESSAT2,
+    POLL,
 
     // Harmless/Utility syscalls for fine-grained control and testing
     GETPID,
@@ -439,6 +442,7 @@ internal object OtherSyscallMapper {
         when (syscall) {
             Syscall.UNSHARE, Syscall.SETNS, Syscall.MOUNT, Syscall.UMOUNT2 -> numberForResource(syscall, arch)
             Syscall.RT_SIGACTION, Syscall.RT_SIGPROCMASK, Syscall.RT_SIGRETURN -> numberForSignal(syscall, arch)
+            Syscall.FACCESSAT, Syscall.FACCESSAT2, Syscall.POLL -> numberForSystemMisc(syscall, arch)
             else -> numberForSystemMisc(syscall, arch)
         }
 
@@ -488,6 +492,9 @@ internal object OtherSyscallMapper {
             Syscall.EPOLL_CTL -> arch.epoll_ctl
             Syscall.EPOLL_WAIT -> arch.epoll_wait
             Syscall.EPOLL_PWAIT -> arch.epoll_pwait
+            Syscall.FACCESSAT -> arch.faccessat
+            Syscall.FACCESSAT2 -> arch.faccessat2
+            Syscall.POLL -> arch.poll
             else -> -1
         }
 }

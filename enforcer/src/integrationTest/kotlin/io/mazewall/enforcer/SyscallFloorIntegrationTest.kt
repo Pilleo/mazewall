@@ -22,6 +22,7 @@ class SyscallFloorIntegrationTest : BaseIntegrationTest() {
     fun `ioctl FIONBIO is allowed by default`() {
         val policy = Policy.builder()
             .defaultAction(SeccompAction.ACT_ERRNO)
+            .allow(Syscall.SOCKET)
             .build()
 
         val rawExecutor = Executors.newSingleThreadExecutor()

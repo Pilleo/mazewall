@@ -162,9 +162,9 @@ class BpfFilterTest {
         for (i in filter.indices) {
             val f = filter[i]
             if (f.code == 0x15.toShort() && f.k == prctlNr) {
-                // Should load args[0] HI (offset 16 + 4 = 20)
+                // Should load args[0] LO (offset 16)
                 val ldArgs = filter[i + 1]
-                if (ldArgs.code == 0x20.toShort() && ldArgs.k == 20) {
+                if (ldArgs.code == 0x20.toShort() && ldArgs.k == 16) {
                     foundInspection = true
                 }
             }
@@ -316,12 +316,14 @@ class BpfFilterTest {
         val criticalSyscalls = listOf(
             Syscall.FUTEX, Syscall.SCHED_YIELD, Syscall.RT_SIGRETURN, Syscall.RT_SIGACTION,
             Syscall.RT_SIGPROCMASK, Syscall.MADVISE, Syscall.GETTID, Syscall.GETPID,
+            Syscall.GETUID, Syscall.GETGID, Syscall.GETEUID, Syscall.GETEGID,
             Syscall.CLOSE, Syscall.READ, Syscall.WRITE, Syscall.PREAD64, Syscall.PWRITE64,
             Syscall.FSTAT, Syscall.FSTATAT, Syscall.STATX, Syscall.LSEEK, Syscall.FCNTL,
-            Syscall.GETDENTS, Syscall.GETDENTS64, Syscall.MMAP, Syscall.MPROTECT,
-            Syscall.PKEY_MPROTECT, Syscall.MUNMAP, Syscall.BRK, Syscall.CLOCK_GETTIME,
-            Syscall.GETRANDOM, Syscall.EXIT, Syscall.EXIT_GROUP, Syscall.USERFAULTFD,
-            Syscall.TGKILL, Syscall.SCHED_GETAFFINITY, Syscall.PIPE2, Syscall.EVENTFD2,
+            Syscall.GETDENTS, Syscall.GETDENTS64, Syscall.READLINK, Syscall.READLINKAT,
+            Syscall.FACCESSAT, Syscall.FACCESSAT2, Syscall.POLL,
+            Syscall.MMAP, Syscall.MPROTECT, Syscall.PKEY_MPROTECT, Syscall.MUNMAP, Syscall.BRK,
+            Syscall.PRCTL, Syscall.CLOCK_GETTIME, Syscall.GETRANDOM, Syscall.EXIT, Syscall.EXIT_GROUP,
+            Syscall.USERFAULTFD, Syscall.TGKILL, Syscall.SCHED_GETAFFINITY, Syscall.PIPE2, Syscall.EVENTFD2,
             Syscall.EPOLL_CREATE1, Syscall.EPOLL_CTL, Syscall.EPOLL_WAIT, Syscall.EPOLL_PWAIT
         )
 
@@ -351,37 +353,27 @@ class BpfFilterTest {
 
         val ioctlNr = Syscall.IOCTL.numberFor(arch)
         val allowedRequests = listOf(
-            NativeConstants.FIONBIO.toLong(),
-            NativeConstants.UFFDIO_COPY
+            NativeConstants.FIONBIO.toInt(),
+            NativeConstants.UFFDIO_COPY.toInt()
         )
 
-        for (req in allowedRequests) {
-            val hi = (req ushr 32).toInt()
-            val lo = req.toInt()
-
+        for (lo in allowedRequests) {
             var foundReqCheck = false
             for (i in filter.indices) {
                 val f = filter[i]
                 if (f.code == 0x15.toShort() && f.k == ioctlNr) {
-                    // Search for the request value check within the following instructions
+                    // Search for the request value check (LO only) within the following instructions
                     for (j in (i + 1) until minOf(i + 50, filter.size)) {
                         val fj = filter[j]
-                        if (fj.code == 0x15.toShort() && fj.k == hi) {
-                            // Found HI check, look for LO check
-                            for (k in (j + 1) until minOf(j + 10, filter.size)) {
-                                val fk = filter[k]
-                                if (fk.code == 0x15.toShort() && fk.k == lo) {
-                                    foundReqCheck = true
-                                    break
-                                }
-                            }
+                        if (fj.code == 0x15.toShort() && fj.k == lo) {
+                            foundReqCheck = true
+                            break
                         }
-                        if (foundReqCheck) break
                     }
                 }
                 if (foundReqCheck) break
             }
-            assertTrue(foundReqCheck, "Ioctl request $req (hi=$hi, lo=$lo) should be inspected and allowed")
+            assertTrue(foundReqCheck, "Ioctl request (lo=$lo) should be inspected and allowed")
         }
     }
 }

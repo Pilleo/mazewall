@@ -114,6 +114,9 @@ data class Arch(
     val epoll_ctl: Int,
     val epoll_wait: Int,
     val epoll_pwait: Int,
+    val faccessat: Int,
+    val faccessat2: Int,
+    val poll: Int,
     val seccompSyscallNumber: Int,
 ) {
     companion object {
@@ -235,6 +238,9 @@ data class Arch(
                 epoll_ctl = 233,
                 epoll_wait = 232,
                 epoll_pwait = 281,
+                faccessat = 269,
+                faccessat2 = 439,
+                poll = 7,
                 seccompSyscallNumber = 317,
             )
 
@@ -353,6 +359,9 @@ data class Arch(
                 epoll_ctl = 21,
                 epoll_wait = -1,
                 epoll_pwait = 22,
+                faccessat = 48,
+                faccessat2 = 439,
+                poll = 73,
                 seccompSyscallNumber = 277,
             )
 

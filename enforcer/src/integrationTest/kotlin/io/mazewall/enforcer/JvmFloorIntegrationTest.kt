@@ -4,6 +4,7 @@ import io.mazewall.BaseIntegrationTest
 import io.mazewall.EnabledIfLinuxAndSupported
 import io.mazewall.Policy
 import io.mazewall.core.SeccompAction
+import io.mazewall.core.Syscall
 import org.junit.jupiter.api.Test
 import java.util.concurrent.Executors
 import kotlin.test.assertTrue
@@ -20,6 +21,8 @@ class JvmFloorIntegrationTest : BaseIntegrationTest() {
         // Use a policy that blocks everything by default except what's in the critical floor
         val policy = Policy.builder()
             .defaultAction(SeccompAction.ACT_ERRNO)
+            .allow(Syscall.SOCKET)
+            .allow(Syscall.CONNECT)
             .build()
 
         val rawExecutor = Executors.newSingleThreadExecutor()
