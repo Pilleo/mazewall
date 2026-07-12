@@ -218,7 +218,7 @@ class StateHandlerTest {
         assertEquals(0, env.notifications.size)
 
         // Mock passage of time
-        context.lastStatusChangeTime = System.currentTimeMillis() - 4_000_000 // > 3_600_000 threshold
+        context.lastStatusChangeTime = System.currentTimeMillis() - 1_000_000 // > 900_000 threshold
 
         // Second execution should trigger notification
         OrchestratorState.CI_RUNNING.execute(env, context)
