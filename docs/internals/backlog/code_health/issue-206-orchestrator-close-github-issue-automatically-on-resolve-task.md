@@ -6,9 +6,8 @@ priority: 6
 dependencies: []
 component: "orchestrator"
 effort: "trivial"
-autonomy: "autonomous"
-solution_approved: true
-chosen_solution: "A"
+autonomy: "supervised"
+solution_approved: false
 blast_radius: "low"
 reversible: true
 ---
@@ -42,7 +41,7 @@ Add the interface method and real implementation. Call it from RESOLVE_TASK.
 **Files changed:** `OrchestratorEnvironment.kt`, `OrchestratorStates.kt`
 
 ---
-**Chosen:** Option A
+**Chosen:** *(not yet approved — requires human decision)*
 
 **Acceptance Criteria:**
 - [ ] `./gradlew :tools:orchestrator:test` passes.
