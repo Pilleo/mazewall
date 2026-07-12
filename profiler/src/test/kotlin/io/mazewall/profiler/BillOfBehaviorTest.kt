@@ -328,4 +328,37 @@ class BillOfBehaviorTest {
         assertEquals("Class1", traces[0][0].className)
         assertEquals("Class2", traces[1][0].className)
     }
+
+    @Test
+    fun `test filterPaths removes matching paths`() {
+        val profile = BaselinePathProfile(pathPrefixes = setOf("/proc"))
+        val bob = BillOfBehavior(
+            opens = setOf("/etc/passwd", "/proc/self/maps"),
+            fsWritePaths = setOf("/var/log/app.log", "/proc/sys/kernel/domainname"),
+            execs = setOf("/bin/ls", "/proc/self/exe"),
+            stackProfile = mapOf(
+                TraceEvent(0, "OPEN", longArrayOf(), listOf("/etc/passwd")) to emptyList(),
+                TraceEvent(0, "OPEN", longArrayOf(), listOf("/proc/self/maps")) to emptyList()
+            )
+        )
+
+        val filtered = bob.filterPaths(profile)
+
+        assertEquals(setOf("/etc/passwd"), filtered.opens)
+        assertEquals(setOf("/var/log/app.log"), filtered.fsWritePaths)
+        assertEquals(setOf("/bin/ls"), filtered.execs)
+        assertEquals(1, filtered.stackProfile.size)
+        assertTrue(filtered.stackProfile.keys.all { it.paths.none { p -> p.startsWith("/proc") } })
+    }
+
+    @Test
+    fun `test toStackTracesJson serialization`() {
+        val event = TraceEvent(0, "OPEN", longArrayOf(1), listOf("/test"))
+        val stack = arrayOf(StackTraceElement("Class", "method", "File.kt", 1))
+        val bob = BillOfBehavior(stackProfile = mapOf(event to listOf(stack)))
+
+        val json = bob.toStackTracesJson()
+        assertTrue(json.contains("\"syscall\": \"OPEN\""))
+        assertTrue(json.contains("\"className\": \"Class\""))
+    }
 }
