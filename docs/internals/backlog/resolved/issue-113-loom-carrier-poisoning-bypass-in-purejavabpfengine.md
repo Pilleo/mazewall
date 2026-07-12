@@ -10,6 +10,7 @@ autonomy: "supervised"
 solution_approved: false
 blast_radius: "medium"
 reversible: true
+github_issue: 86
 ---
 
 # 🔴 [Severity: MEDIUM]: Loom Carrier Poisoning Bypass in `PureJavaBpfEngine`

@@ -16,27 +16,39 @@ else
 fi
 
 echo "Starting integration tests in Podman..."
-# We use the same flags that were in ContainerizedTestRunner.kt
-podman run --rm \
-    --name "${CONTAINER_NAME}" \
-    --network host \
-    --userns host \
-    --security-opt "seccomp=${SECCOMP_PROFILE}" \
-    --cap-add AUDIT_READ \
-    --cap-add AUDIT_CONTROL \
-    --cap-add SYS_ADMIN \
-    --cap-add SYS_PTRACE \
-    -v "${PROJECT_ROOT}:/workspace" \
-    -v "${HOME}/.gradle:/root/.gradle" \
-    -e GRADLE_USER_HOME=/root/.gradle \
-    -e IO_MAZEWALL_TEST=true \
-    -e MAZEWALL_IN_CONTAINER=true \
-    -e GITHUB_ACTIONS="${GITHUB_ACTIONS:-false}" \
-    -e LANG=C.UTF-8 \
-    -e LC_ALL=C.UTF-8 \
-    -e NVD_API_KEY \
-    -e GITHUB_TOKEN \
-    -e GITHUB_ACTOR \
-    -w /workspace \
-    mazewall-test-runner \
-    ./gradlew "$@" --no-daemon --stacktrace
+PODMAN_ARGS=(
+    --name "${CONTAINER_NAME}"
+    --network host
+    --userns host
+    --security-opt "seccomp=${SECCOMP_PROFILE}"
+    --cap-add AUDIT_READ
+    --cap-add AUDIT_CONTROL
+    --cap-add SYS_ADMIN
+    --cap-add SYS_PTRACE
+    -v "${PROJECT_ROOT}:/workspace"
+    -v "${HOME}/.gradle:/root/.gradle"
+    -e GRADLE_USER_HOME=/root/.gradle
+    -e IO_MAZEWALL_TEST=true
+    -e MAZEWALL_IN_CONTAINER=true
+    -e GITHUB_ACTIONS="${GITHUB_ACTIONS:-false}"
+    -e LANG=C.UTF-8
+    -e LC_ALL=C.UTF-8
+    -e NVD_API_KEY
+    -e GITHUB_TOKEN
+    -e GITHUB_ACTOR
+    -w /workspace
+)
+
+if [ "${GITHUB_ACTIONS:-false}" == "true" ] && [ -n "${RUNNER_TEMP}" ]; then
+    PODMAN_ARGS+=(
+        -v "${RUNNER_TEMP}:${RUNNER_TEMP}"
+        -e RUNNER_TEMP
+        -e GITHUB_STEP_SUMMARY
+        -e GITHUB_STATE
+        -e GITHUB_OUTPUT
+        -e GITHUB_ENV
+        -e GITHUB_WORKSPACE
+    )
+fi
+
+podman run --rm "${PODMAN_ARGS[@]}" mazewall-test-runner ./gradlew "$@" --no-daemon --stacktrace
