@@ -11,42 +11,20 @@ Maps design documents, source files, and open issues for the `:enforcer` module 
 graph TD
      instead of ["💻 Source:  instead of "]
     , ["💻 Source: , "]
-    ArchitectureTest_kt["💻 Source: ArchitectureTest.kt"]
     BpfFilter_kt["💻 Source: BpfFilter.kt"]
-    BpfProgram_kt["💻 Source: BpfProgram.kt"]
-    ContainedExecutorWrapper_kt["💻 Source: ContainedExecutorWrapper.kt"]
     ContainedExecutors_kt["💻 Source: ContainedExecutors.kt"]
     ContainmentDesignSpec_kt["💻 Source: ContainmentDesignSpec.kt"]
-    ContainmentViolationDetector_kt["💻 Source: ContainmentViolationDetector.kt"]
     IterativeProfiler_kt["💻 Source: IterativeProfiler.kt"]
-    LandlockCoverageTest_kt["💻 Source: LandlockCoverageTest.kt"]
-    LandlockState_kt["💻 Source: LandlockState.kt"]
     Landlock_kt["💻 Source: Landlock.kt"]
-    Layouts_kt["💻 Source: Layouts.kt"]
-    PathNormalizer_kt["💻 Source: PathNormalizer.kt"]
-    Platform_kt["💻 Source: Platform.kt"]
-    ProcessStateRegistry_kt["💻 Source: ProcessStateRegistry.kt"]
-    ProfilerDaemon_kt["💻 Source: ProfilerDaemon.kt"]
     ProfilerSessionHandler_kt["💻 Source: ProfilerSessionHandler.kt"]
-    ProfilerSocket_kt["💻 Source: ProfilerSocket.kt"]
-    ProfilerTraceListener_kt["💻 Source: ProfilerTraceListener.kt"]
-    Profiler_kt["💻 Source: Profiler.kt"]
     PureJavaBpfEngine_kt["💻 Source: PureJavaBpfEngine.kt"]
-    SbobParser_kt["💻 Source: SbobParser.kt"]
-    SessionHandler_kt["💻 Source: SessionHandler.kt"]
     SockFProg_kt["💻 Source: SockFProg.kt"]
-    StraceProfiler_kt["💻 Source: StraceProfiler.kt"]
     SupervisorInstaller_kt["💻 Source: SupervisorInstaller.kt"]
-    SupervisorSeccompNotifInstaller_kt["💻 Source: SupervisorSeccompNotifInstaller.kt"]
     SupervisorSessionHandler_kt["💻 Source: SupervisorSessionHandler.kt"]
-    SupervisorSocketUtils_kt["💻 Source: SupervisorSocketUtils.kt"]
-    ThreadStateRegistry_kt["💻 Source: ThreadStateRegistry.kt"]
     containment_design["📄 Design: Technical Design: Containment Engine & Incremental Filter Stacking"]
-    io_mazewall_BpfFilter["💻 Source: io.mazewall.BpfFilter"]
     io_mazewall_NativeEngine["💻 Source: io.mazewall.NativeEngine"]
     io_mazewall_NativeTransaction["💻 Source: io.mazewall.NativeTransaction"]
     io_mazewall_Platform_kt["💻 Source: io.mazewall.Platform.kt"]
-    io_mazewall_SbobParser["💻 Source: io.mazewall.SbobParser"]
     io_mazewall_core_FileDescriptor["💻 Source: io.mazewall.core.FileDescriptor"]
     io_mazewall_core_SeccompAction["💻 Source: io.mazewall.core.SeccompAction"]
     io_mazewall_enforcer_ContainedExecutors["💻 Source: io.mazewall.enforcer.ContainedExecutors"]
@@ -54,18 +32,13 @@ graph TD
     io_mazewall_enforcer_ContainerStateRegistry_kt["💻 Source: io.mazewall.enforcer.ContainerStateRegistry.kt"]
     io_mazewall_ffi["💻 Source: io.mazewall.ffi"]
     io_mazewall_ffi_Layouts["💻 Source: io.mazewall.ffi.Layouts"]
-    io_mazewall_landlock_Landlock["💻 Source: io.mazewall.landlock.Landlock"]
     io_mazewall_profiler_BillOfBehavior["💻 Source: io.mazewall.profiler.BillOfBehavior"]
     io_mazewall_profiler_IterativeProfiler["💻 Source: io.mazewall.profiler.IterativeProfiler"]
     io_mazewall_profiler_Profiler["💻 Source: io.mazewall.profiler.Profiler"]
     io_mazewall_profiler_engine_ProfilerDaemonEngine["💻 Source: io.mazewall.profiler.engine.ProfilerDaemonEngine"]
     io_mazewall_profiler_engine_ProfilerDaemon["💻 Source: io.mazewall.profiler.engine.ProfilerDaemon"]
-    io_mazewall_profiler_engine_ProfilerSessionHandler["💻 Source: io.mazewall.profiler.engine.ProfilerSessionHandler"]
-    io_mazewall_profiler_internal_ProfilerSocket["💻 Source: io.mazewall.profiler.internal.ProfilerSocket"]
-    io_mazewall_profiler_iterative_IterativeProfiler["💻 Source: io.mazewall.profiler.iterative.IterativeProfiler"]
     io_mazewall_profiler_strace_StraceProfiler["💻 Source: io.mazewall.profiler.strace.StraceProfiler"]
     io_mazewall_seccomp_BpfProgram_BDL["💻 Source: io.mazewall.seccomp.BpfProgram.BDL"]
-    io_mazewall_seccomp_PureJavaBpfEngine["💻 Source: io.mazewall.seccomp.PureJavaBpfEngine"]
     issue_003_socket_address_family_filtering_for_network_isolation_evasio["🔴 Issue: Socket Address Family Filtering for Network Isolation Evasion Prevention (ENHANCEMENT)"]
     issue_008_high_frequency_arena_allocation_overhead_mm_optimization["🔴 Issue: High-Frequency Arena Allocation Overhead (MM Optimization) (MEDIUM)"]
     issue_009_memory_segment_pooling_for_profiler_usernotif["🔴 Issue: Memory Segment Pooling for Profiler USER_NOTIF (ENHANCEMENT)"]
@@ -135,7 +108,6 @@ graph TD
     issue_102_permanent_thread_pool_contamination_classloader_leaks_and_st["🔴 Issue: 🟢 [WONTFIX]: Permanent thread pool contamination, classloader leaks, and state pollution via un-cleared `ThreadLocal` variables (MEDIUM)"]
     issue_103_containedexecutors_thread_local_state_persistence_and_poison["🔴 Issue: 🟢 [WONTFIX]: `ContainedExecutors` Thread-Local State Persistence and Poisoning (MEDIUM)"]
     issue_112_iterativeprofiler_logic_errors_confirmed["🔴 Issue: `IterativeProfiler` Logic Errors (Confirmed) (HIGH)"]
-    issue_113_loom_carrier_poisoning_bypass_in_purejavabpfengine["🔴 Issue: Loom Carrier Poisoning Bypass in `PureJavaBpfEngine` (HIGH)"]
     issue_114_landlock_excessive_capability_leak_on_enoent["🔴 Issue: Landlock Excessive Capability Leak on `ENOENT` (MEDIUM)"]
     issue_116_suboptimal_bpf_ret_instruction_placement_in_emitlinearscan["🔴 Issue: Suboptimal BPF `RET` instruction placement in `emitLinearScan` (HIGH)"]
     issue_117_seccompinstallationstate_partial_failure_leaves_thread_unpri["🔴 Issue: `SeccompInstallationState` Partial Failure Leaves Thread Unprivileged but Uncontained (HIGH)"]
@@ -208,7 +180,6 @@ graph TD
     issue_206_orchestrator_close_github_issue_automatically_on_resolve_task["🔴 Issue: Orchestrator: Close GitHub Issue Automatically on RESOLVE_TASK (LOW)"]
     issue_207_orchestrator_notify_human_when_ci_stuck_in_pending_unknown["🔴 Issue: Orchestrator: Notify Human When CI Build Status is Stuck in PENDING/UNKNOWN (MEDIUM)"]
     issue_208_orchestrator_auto_merge_pr_on_verdict_approved_when_autonomous["🔴 Issue: Orchestrator: Auto-Merge PR on VERDICT: APPROVED When autonomy=autonomous and solution_approved=true (MEDIUM)"]
-    run_containerized_tests_sh["💻 Source: run_containerized_tests.sh"]
     supervisor_proxy_design_md["💻 Source: supervisor-proxy-design.md"]
     BpfFilter_kt -->|Governed by| containment_design
     ContainedExecutors_kt -->|Governed by| containment_design
@@ -228,89 +199,24 @@ graph TD
     issue_043_phantom_types_for_context_aware_capability_tokens -->|Affects| io_mazewall_NativeTransaction
     issue_044_type_state_enforced_bpf_dsl -->|Affects| io_mazewall_seccomp_BpfProgram_BDL
     issue_045_standard_java_concurrency_virtual_threads_completablefuture_ -->|Affects| io_mazewall_enforcer_ContainedExecutors
-    issue_056_iterativeprofiler_infinite_retry_loop_and_failure_on_disjoin -->|Affects| IterativeProfiler_kt
-    issue_059_iterativeprofiler_context_loss_via_thread_creation -->|Affects| IterativeProfiler_kt
-    issue_060_iterativeprofiler_path_truncation_on_spaces -->|Affects| IterativeProfiler_kt
     issue_061_manual_ffm_layout_maintenance_and_drift_risk -->|Affects| io_mazewall_ffi_Layouts
     issue_066_straceprofiler_completely_fails_to_trace_iouring_file_operat -->|Affects| io_mazewall_profiler_strace_StraceProfiler
     issue_068_supervisor_proxy_pattern_fd_injection_stacktrace_scoping -->|Affects| supervisor_proxy_design_md
     issue_072_contract_based_invariant_validation -->|Affects| io_mazewall_Platform_kt
     issue_073_delegated_properties_for_thread_local_sandbox_state -->|Affects| io_mazewall_enforcer_ContainerStateRegistry_kt
     issue_076_containmentdesignspec_test_fails_on_systems_without_landlock -->|Affects| ContainmentDesignSpec_kt
-    issue_077_landlock_getaccessmask_missing_abi_4_support_net_capabilitie -->|Affects| Landlock_kt
-    issue_078_purejavabpfengine_thread_state_synchronization -->|Affects| PureJavaBpfEngine_kt
     issue_079_unhandled_tsync_edge_cases_during_jit_classloading -->|Affects| PureJavaBpfEngine_kt
-    issue_083_unhandled_ioctl_fallbacks_during_legacy_jvm_syscall_tracing -->|Affects| io_mazewall_profiler_engine_ProfilerDaemon
-    issue_086_unhandled_signal_interruptions_eintr_during_seccomp_filter_i -->|Affects| io_mazewall_seccomp_PureJavaBpfEngine
-    issue_088_suboptimal_bpf_ret_instruction_placement_in_emitlinearscan -->|Affects| io_mazewall_BpfFilter
-    issue_089_missing_extensibility_in_exception_message_parsing -->|Affects| io_mazewall_profiler_iterative_IterativeProfiler
-    issue_090_unhandled_ocloexec_omission_on_profiler_unix_sockets -->|Affects| io_mazewall_profiler_internal_ProfilerSocket
-    issue_091_unhandled_opath_omission_on_landlock_fallback_directories -->|Affects| io_mazewall_landlock_Landlock
-    issue_092_memory_segment_lifetime_leak_in_async_profiler_events -->|Affects| io_mazewall_profiler_engine_ProfilerSessionHandler
-    issue_093_toctou_vulnerability_in_prctl_argument_inspection -->|Affects| io_mazewall_BpfFilter
-    issue_094_overly_broad_catch_block_in_profilerdaemonreactorloop -->|Affects| io_mazewall_profiler_engine_ProfilerDaemon
     issue_095_unhandled_endianness_in_processvmreadv_socket_message_tracin -->|Affects| io_mazewall_profiler_engine_ProfilerDaemon
-    issue_096_missing_bpf_instruction_limit_validation_in_newsockfprog -->|Affects| io_mazewall_seccomp_PureJavaBpfEngine
-    issue_097_toctou_in_path_normalization_under_multi_threaded_io -->|Affects| io_mazewall_SbobParser
-    issue_098_unhandled_signal_mask_inheritance_in_containedexecutors -->|Affects| io_mazewall_enforcer_ContainedExecutors
-    issue_099_toctou_in_usernotif_argument_dereferencing -->|Affects| io_mazewall_profiler_engine_ProfilerDaemon
-    issue_100_missing_return_value_check_for_seccompnotifresp_ack -->|Affects| io_mazewall_profiler_engine_ProfilerSessionHandler
-    issue_101_sbobparser_production_crashes_due_to_syntactic_subpath_pruni -->|Affects| io_mazewall_SbobParser
     issue_102_permanent_thread_pool_contamination_classloader_leaks_and_st -->|Affects| ContainedExecutors_kt
     issue_103_containedexecutors_thread_local_state_persistence_and_poison -->|Affects| io_mazewall_enforcer_ContainedExecutors_kt
     issue_112_iterativeprofiler_logic_errors_confirmed -->|Affects| IterativeProfiler_kt
-    issue_113_loom_carrier_poisoning_bypass_in_purejavabpfengine -->|Affects| PureJavaBpfEngine_kt
     issue_114_landlock_excessive_capability_leak_on_enoent -->|Affects| Landlock_kt
-    issue_116_suboptimal_bpf_ret_instruction_placement_in_emitlinearscan -->|Affects| BpfFilter_kt
-    issue_117_seccompinstallationstate_partial_failure_leaves_thread_unpri -->|Affects| PureJavaBpfEngine_kt
-    issue_119_seccompinstallationstate_partial_failure_leaves_thread_unpri -->|Affects| PureJavaBpfEngine_kt
-    issue_121_missing_thread_safety_in_processstateregistry_updates -->|Affects| ProcessStateRegistry_kt
-    issue_122_incomplete_architecture_verification_in_bpf_compiler -->|Affects| BpfProgram_kt
-    issue_123_inefficient_threadlocal_usage_in_threadstateregistry -->|Affects| ThreadStateRegistry_kt
-    issue_124_missing_support_for_opath_and_ocloexec_in_landlock_fallback -->|Affects| Landlock_kt
-    issue_125_opaque_exceptions_on_landlock_initialization_failure -->|Affects| Landlock_kt
-    issue_126_memory_segment_lifetime_leak_in_async_profiler_events -->|Affects| SessionHandler_kt
     issue_127_unhandled_signal_mask_inheritance_in_containedexecutors -->|Affects| ContainedExecutors_kt
-    issue_128_missing_extensibility_in_exception_message_parsing -->|Affects| ContainmentViolationDetector_kt
-    issue_129_toctou_in_usernotif_argument_dereferencing -->|Affects| StraceProfiler_kt
-    issue_130_unhandled_endianness_in_processvmreadv_socket_message_tracin -->|Affects| StraceProfiler_kt
-    issue_131_missing_return_value_check_for_seccompnotifresp_ack -->|Affects| StraceProfiler_kt
     issue_132_missing_bpf_instruction_limit_validation_in_newsockfprog -->|Affects| SockFProg_kt
-    issue_133_unhandled_ocloexec_omission_on_profiler_unix_sockets -->|Affects| ProfilerSocket_kt
-    issue_134_toctou_in_path_normalization_under_multi_threaded_io -->|Affects| SbobParser_kt
-    issue_135_uncaught_native_exceptions_escaping_bpf_installation -->|Affects| PureJavaBpfEngine_kt
-    issue_136_sbobparser_production_crashes_due_to_syntactic_subpath_pruni -->|Affects| SbobParser_kt
-    issue_137_overly_broad_catch_block_in_profilerdaemonreactorloop -->|Affects| ProfilerDaemon_kt
-    issue_138_unhandled_signal_interruptions_eintr_during_seccomp_filter_i -->|Affects| PureJavaBpfEngine_kt
-    issue_139_unhandled_ioctl_fallbacks_during_legacy_jvm_syscall_tracing -->|Affects| ProfilerDaemon_kt
-    issue_140_potential_race_condition_in_async_io_thread_shutdown -->|Affects| ContainedExecutors_kt
-    issue_141_missing_bpfprogramstatus_and_bpflabel_type_safety -->|Affects| BpfProgram_kt
     issue_142_race_in_asynchronous_fire_and_forget_profiler_event_delivery -->|Affects| ProfilerSessionHandler_kt
-    issue_143_process_wide_classloader_deadlock_on_profiler_result_state_t -->|Affects| Profiler_kt
     issue_144_confused_deputy_time_of_check_to_time_of_use_toctou_via_path -->|Affects| SupervisorSessionHandler_kt
     issue_145_toctou_pointer_re_targeting_via_sockaddrbytes_mutation_durin -->|Affects| SupervisorSessionHandler_kt
-    issue_146_unhandled_signal_interruptions_eintr_during_supervisor_ipc_s -->|Affects| SupervisorSessionHandler_kt
-    issue_147_unhandled_signal_interruptions_eintr_during_supervisor_initi -->|Affects| SupervisorSeccompNotifInstaller_kt
-    issue_148_asynchronous_supervisor_socket_reads_timeout_failure_handlin -->|Affects| SupervisorSessionHandler_kt
     issue_149_classloader_deadlock_in_jvm_validation_listener -->|Affects| SupervisorInstaller_kt
-    issue_150_incomplete_ffm_architecture_isolation -->|Affects| SupervisorInstaller_kt
-    issue_152_ci_podman_container_caching_missing -->|Affects| run_containerized_tests_sh
-    issue_159_potential_buffer_overflow_outofboundsexception_on_long_unix_ -->|Affects| SupervisorSocketUtils_kt
-    issue_162_memory_alignment_verification_for_layoutskt_ffm_structures -->|Affects| Layouts_kt
-    issue_163_memory_segment_scopes_and_lifetimes -->|Affects| SupervisorSessionHandler_kt
-    issue_164_toctou_vulnerability_in_supervisor_syscall_emulation_via_pro -->|Affects| SupervisorSessionHandler_kt
-    issue_165_silent_fallback_by_default_behavior_evaluation -->|Affects| Platform_kt
-    issue_169_inconsistent_architecture_test_for_javalangforeign -->|Affects| ArchitectureTest_kt
-    issue_172_memory_segment_scopes_and_lifetimes_re_evaluation -->|Affects| SupervisorSessionHandler_kt
-    issue_173_unhandled_signal_interruptions_eintr_in_socket_io -->|Affects| ProfilerTraceListener_kt
-    issue_174_uncaught_exceptions_in_containedexecutorwrapperkt_during_fil -->|Affects| ContainedExecutorWrapper_kt
-    issue_175_uncaught_native_exceptions_in_landlock_landlockstatekt -->|Affects| LandlockState_kt
-    issue_176_toctou_in_path_normalization_pathnormalizerkt -->|Affects| PathNormalizer_kt
-    issue_177_missing_archunit_test_for_ffm_architecture_boundary_violatio -->|Affects| ArchitectureTest_kt
-    issue_178_unreliable_test_teardown_for_mocked_native_engines -->|Affects| LandlockCoverageTest_kt
-    issue_179_uncaught_native_exceptions_escaping_landlock_installation -->|Affects| LandlockState_kt
-    issue_180_uncaught_exceptions_in_containedexecutorwrapperkt_during_fil -->|Affects| ContainedExecutorWrapper_kt
-    issue_181_toctou_in_path_normalization_pathnormalizerkt -->|Affects| PathNormalizer_kt
     issue_202_orchestrator_build_github_issue_body_dynamically_with_project_preamble -->|Affects| , 
     issue_203_orchestrator_validate_issue_context_and_needed_before_github_issue_creation -->|Affects|  instead of 
     click containment_design "../design-specs/containment-design.md"
@@ -383,7 +289,6 @@ graph TD
     click issue_102_permanent_thread_pool_contamination_classloader_leaks_and_st "../backlog/performance/issue-102-permanent-thread-pool-contamination-classloader-leaks-and-st.md"
     click issue_103_containedexecutors_thread_local_state_persistence_and_poison "../backlog/performance/issue-103-containedexecutors-thread-local-state-persistence-and-poison.md"
     click issue_112_iterativeprofiler_logic_errors_confirmed "../backlog/performance/issue-112-iterativeprofiler-logic-errors-confirmed.md"
-    click issue_113_loom_carrier_poisoning_bypass_in_purejavabpfengine "../backlog/security/issue-113-loom-carrier-poisoning-bypass-in-purejavabpfengine.md"
     click issue_114_landlock_excessive_capability_leak_on_enoent "../backlog/security/issue-114-landlock-excessive-capability-leak-on-enoent.md"
     click issue_116_suboptimal_bpf_ret_instruction_placement_in_emitlinearscan "../backlog/performance/issue-116-suboptimal-bpf-ret-instruction-placement-in-emitlinearscan.md"
     click issue_117_seccompinstallationstate_partial_failure_leaves_thread_unpri "../backlog/security/issue-117-seccompinstallationstate-partial-failure-leaves-thread-unpri.md"

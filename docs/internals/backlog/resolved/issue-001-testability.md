@@ -1,7 +1,7 @@
 ---
 title: "Improve testability to reach 80% coverage for kernel and FFM modules"
 scope: "all"
-status: "open"
+status: "resolved"
 priority: 9
 severity: "HIGH"
 ---
