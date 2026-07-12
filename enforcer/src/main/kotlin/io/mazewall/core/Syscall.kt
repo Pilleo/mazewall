@@ -84,6 +84,8 @@ enum class Syscall {
     GETEGID,
     GETTID,
     GETCWD,
+    GETDENTS,
+    GETDENTS64,
     UMASK,
     CHOWN,
     LCHOWN,
@@ -147,7 +149,7 @@ internal object SyscallMapper {
             ->
                 FsSyscallMapper.numberForBasic(syscall, arch)
 
-            Syscall.TRUNCATE, Syscall.FTRUNCATE, Syscall.GETCWD, Syscall.UMASK, Syscall.CHOWN, Syscall.LCHOWN, Syscall.FCHOWN, Syscall.FCHOWNAT,
+            Syscall.TRUNCATE, Syscall.FTRUNCATE, Syscall.GETCWD, Syscall.GETDENTS, Syscall.GETDENTS64, Syscall.UMASK, Syscall.CHOWN, Syscall.LCHOWN, Syscall.FCHOWN, Syscall.FCHOWNAT,
             Syscall.UTIME, Syscall.UTIMES, Syscall.UTIMENSAT, Syscall.MKDIR, Syscall.MKDIRAT, Syscall.RMDIR,
             ->
                 FsSyscallMapper.numberForAttr(syscall, arch)
@@ -294,7 +296,7 @@ internal object FsSyscallMapper {
         arch: Arch,
     ): Int =
         when (syscall) {
-            Syscall.TRUNCATE, Syscall.FTRUNCATE, Syscall.GETCWD, Syscall.UMASK -> numberForAttrBasic(syscall, arch)
+            Syscall.TRUNCATE, Syscall.FTRUNCATE, Syscall.GETCWD, Syscall.GETDENTS, Syscall.GETDENTS64, Syscall.UMASK -> numberForAttrBasic(syscall, arch)
             else -> numberForAttrAdvanced(syscall, arch)
         }
 
@@ -306,6 +308,8 @@ internal object FsSyscallMapper {
             Syscall.TRUNCATE -> arch.truncate
             Syscall.FTRUNCATE -> arch.ftruncate
             Syscall.GETCWD -> arch.getcwd
+            Syscall.GETDENTS -> arch.getdents
+            Syscall.GETDENTS64 -> arch.getdents64
             Syscall.UMASK -> arch.umask
             else -> -1
         }

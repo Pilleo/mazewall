@@ -90,6 +90,8 @@ class SyscallTest {
         Syscall.TRUNCATE to arch.truncate,
         Syscall.FTRUNCATE to arch.ftruncate,
         Syscall.GETCWD to arch.getcwd,
+        Syscall.GETDENTS to arch.getdents,
+        Syscall.GETDENTS64 to arch.getdents64,
         Syscall.UMASK to arch.umask,
         Syscall.CHOWN to arch.chown,
         Syscall.LCHOWN to arch.lchown,
