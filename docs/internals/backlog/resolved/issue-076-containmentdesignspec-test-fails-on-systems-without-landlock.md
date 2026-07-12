@@ -1,11 +1,12 @@
 ---
 title: "`ContainmentDesignSpec` test fails on systems without Landlock support"
 severity: "HIGH"
-status: "open"
+status: "resolved"
 priority: 6
 dependencies: []
 component: "enforcer"
 effort: "small"
+github_issue: 94
 ---
 
 # 🔴 [Severity: MEDIUM]: `ContainmentDesignSpec` test fails on systems without Landlock support

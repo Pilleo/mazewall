@@ -13,7 +13,6 @@ graph TD
     , ["💻 Source: , "]
     BpfFilter_kt["💻 Source: BpfFilter.kt"]
     ContainedExecutors_kt["💻 Source: ContainedExecutors.kt"]
-    ContainmentDesignSpec_kt["💻 Source: ContainmentDesignSpec.kt"]
     IterativeProfiler_kt["💻 Source: IterativeProfiler.kt"]
     Landlock_kt["💻 Source: Landlock.kt"]
     ProfilerSessionHandler_kt["💻 Source: ProfilerSessionHandler.kt"]
@@ -83,7 +82,6 @@ graph TD
     issue_072_contract_based_invariant_validation["🔴 Issue: Contract-Based Invariant Validation (ENHANCEMENT)"]
     issue_073_delegated_properties_for_thread_local_sandbox_state["🔴 Issue: Delegated Properties for Thread-Local Sandbox State (ENHANCEMENT)"]
     issue_075_jvm_invariant_syscall_floor_is_incomplete["🔴 Issue: 🟡 [DEFERRED — Medium]: JVM Invariant Syscall Floor is Incomplete (MEDIUM)"]
-    issue_076_containmentdesignspec_test_fails_on_systems_without_landlock["🔴 Issue: `ContainmentDesignSpec` test fails on systems without Landlock support (HIGH)"]
     issue_077_landlock_getaccessmask_missing_abi_4_support_net_capabilitie["🔴 Issue: `Landlock` getAccessMask missing ABI 4 Support (Net Capabilities) (HIGH)"]
     issue_078_purejavabpfengine_thread_state_synchronization["🔴 Issue: `PureJavaBpfEngine` Thread State Synchronization (HIGH)"]
     issue_079_unhandled_tsync_edge_cases_during_jit_classloading["🔴 Issue: Unhandled `TSYNC` edge cases during JIT classloading (HIGH)"]
@@ -161,7 +159,6 @@ graph TD
     issue_180_uncaught_exceptions_in_containedexecutorwrapperkt_during_fil["🔴 Issue: Uncaught exceptions in `ContainedExecutorWrapper.kt` during filter installation (HIGH)"]
     issue_181_toctou_in_path_normalization_pathnormalizerkt["🔴 Issue: TOCTOU in Path Normalization `PathNormalizer.kt` (HIGH)"]
     issue_183_potential_buffer_overflow_outofboundsexception_on_long_unix_["🔴 Issue: Potential Buffer Overflow / OutOfBoundsException on Long UNIX Socket Paths (LOW)"]
-    issue_185_missing_domain_logic_handling_of_syscallresult_in_supervisordaemonengine["🔴 Issue: Missing domain logic handling of SyscallResult in SupervisorDaemonEngine (MEDIUM)"]
     issue_186_memorysegment_lifetime_scope_violation_in_supervisordaemon["🔴 Issue: MemorySegment Lifetime/Scope Violation in SupervisorSessionHandler (HIGH)"]
     issue_187_archunit_bypass_swallowed_syscallresult_in_supervisorsessionhandler["🔴 Issue: ArchUnit Bypass: Swallowed SyscallResult in SupervisorSessionHandler (HIGH)"]
     issue_189_toctou_vulnerability_in_resolveabsolutepath_via_files_exists["🔴 Issue: TOCTOU Vulnerability in resolveAbsolutePath via Files.exists (HIGH)"]
@@ -203,7 +200,6 @@ graph TD
     issue_068_supervisor_proxy_pattern_fd_injection_stacktrace_scoping -->|Affects| supervisor_proxy_design_md
     issue_072_contract_based_invariant_validation -->|Affects| io_mazewall_Platform_kt
     issue_073_delegated_properties_for_thread_local_sandbox_state -->|Affects| io_mazewall_enforcer_ContainerStateRegistry_kt
-    issue_076_containmentdesignspec_test_fails_on_systems_without_landlock -->|Affects| ContainmentDesignSpec_kt
     issue_079_unhandled_tsync_edge_cases_during_jit_classloading -->|Affects| PureJavaBpfEngine_kt
     issue_095_unhandled_endianness_in_processvmreadv_socket_message_tracin -->|Affects| io_mazewall_profiler_engine_ProfilerDaemon
     issue_102_permanent_thread_pool_contamination_classloader_leaks_and_st -->|Affects| ContainedExecutors_kt
@@ -263,7 +259,6 @@ graph TD
     click issue_072_contract_based_invariant_validation "../../../backlog/testing/issue-072-contract-based-invariant-validation.md"
     click issue_073_delegated_properties_for_thread_local_sandbox_state "../../../backlog/performance/issue-073-delegated-properties-for-thread-local-sandbox-state.md"
     click issue_075_jvm_invariant_syscall_floor_is_incomplete "../../../backlog/performance/issue-075-jvm-invariant-syscall-floor-is-incomplete.md"
-    click issue_076_containmentdesignspec_test_fails_on_systems_without_landlock "../../../backlog/testing/issue-076-containmentdesignspec-test-fails-on-systems-without-landlock.md"
     click issue_077_landlock_getaccessmask_missing_abi_4_support_net_capabilitie "../../../backlog/security/issue-077-landlock-getaccessmask-missing-abi-4-support-net-capabilitie.md"
     click issue_078_purejavabpfengine_thread_state_synchronization "../../../backlog/security/issue-078-purejavabpfengine-thread-state-synchronization.md"
     click issue_079_unhandled_tsync_edge_cases_during_jit_classloading "../../../backlog/testing/issue-079-unhandled-tsync-edge-cases-during-jit-classloading.md"
@@ -341,7 +336,6 @@ graph TD
     click issue_180_uncaught_exceptions_in_containedexecutorwrapperkt_during_fil "../../../backlog/security/issue-180-uncaught-exceptions-in-containedexecutorwrapperkt-during-fil.md"
     click issue_181_toctou_in_path_normalization_pathnormalizerkt "../../../backlog/security/issue-181-toctou-in-path-normalization-pathnormalizerkt.md"
     click issue_183_potential_buffer_overflow_outofboundsexception_on_long_unix_ "../../../backlog/performance/issue-183-potential-buffer-overflow-outofboundsexception-on-long-unix-.md"
-    click issue_185_missing_domain_logic_handling_of_syscallresult_in_supervisordaemonengine "../../../backlog/security/issue-185-missing-domain-logic-handling-of-syscallresult-in-supervisordaemonengine.md"
     click issue_186_memorysegment_lifetime_scope_violation_in_supervisordaemon "../../../backlog/testing/issue-186-memorysegment-lifetime-scope-violation-in-supervisordaemon.md"
     click issue_187_archunit_bypass_swallowed_syscallresult_in_supervisorsessionhandler "../../../backlog/testing/issue-187-archunit-bypass-swallowed-syscallresult-in-supervisorsessionhandler.md"
     click issue_189_toctou_vulnerability_in_resolveabsolutepath_via_files_exists "../../../backlog/security/issue-189-toctou-vulnerability-in-resolveabsolutepath-via-files-exists.md"

