@@ -18,15 +18,15 @@ public object SupervisorProcessMemoryWriter {
         bytes: ByteArray
     ): Boolean {
         if (remoteAddr == 0L || bytes.isEmpty()) return false
-        return Arena.ofConfined().use { arena ->
-            val localBuf = arena.allocate(bytes.size.toLong())
+        return nativeScope {
+            val localBuf = allocate(bytes.size.toLong())
             MemorySegment.copy(bytes, 0, localBuf, ValueLayout.JAVA_BYTE, 0L, bytes.size)
 
-            val localIov = IovecSegment(arena.allocate(Layouts.IOVEC))
+            val localIov = IovecSegment.allocate()
             localIov.setIovBase(localBuf)
             localIov.setIovLen(bytes.size.toLong())
 
-            val remoteIov = IovecSegment(arena.allocate(Layouts.IOVEC))
+            val remoteIov = IovecSegment.allocate()
             remoteIov.setIovBase(MemorySegment.ofAddress(remoteAddr))
             remoteIov.setIovLen(bytes.size.toLong())
 

@@ -13,6 +13,7 @@ import io.mazewall.ffi.memory.SeccompNotifAddFdSegment
 import io.mazewall.ffi.memory.IovecSegment
 import io.mazewall.ffi.memory.SupervisorResponseSegment
 import io.mazewall.ffi.memory.SupervisorProcessMemoryWriter
+import io.mazewall.ffi.memory.nativeScope
 import io.mazewall.ffi.memory.readByte
 import io.mazewall.ffi.memory.readInt
 import io.mazewall.ffi.memory.readLong
@@ -230,30 +231,30 @@ internal class SupervisorSessionHandler(
         pollFds: MemorySegment,
         notif: MemorySegment,
         resp: MemorySegment
-    ): LoopAction {
+    ): LoopAction = nativeScope {
         val pfd2 = PollFdSegment(pollFds.asSlice(Layouts.POLLFD.byteSize(), Layouts.POLLFD.byteSize()))
         val socketRevents = pfd2.getRevents().toInt()
         val errorOrHup = NativeConstants.POLLERR.toInt() or NativeConstants.POLLHUP.toInt() or NativeConstants.POLLNVAL.toInt()
         if ((socketRevents and (NativeConstants.POLLIN.toInt() or errorOrHup)) != 0) {
             // JVM socket closed, errored, or sent shutdown
-            return LoopAction.Shutdown
-        }
-
-        val pfd1 = PollFdSegment(pollFds.asSlice(0L, Layouts.POLLFD.byteSize()))
-        val listenerRevents = pfd1.getRevents()
-        if ((listenerRevents.toInt() and NativeConstants.POLLIN.toInt()) != 0) {
-            notif.fill(0)
-            val recvRes = LinuxNative.withTransaction {
-                LinuxNative.ioctl(listenerFd, NativeConstants.SECCOMP_IOCTL_NOTIF_RECV, notif)
+            LoopAction.Shutdown
+        } else {
+            val pfd1 = PollFdSegment(pollFds.asSlice(0L, Layouts.POLLFD.byteSize()))
+            val listenerRevents = pfd1.getRevents()
+            var action: LoopAction = LoopAction.Continue
+            if ((listenerRevents.toInt() and NativeConstants.POLLIN.toInt()) != 0) {
+                notif.fill(0)
+                var ok = false
+                LinuxNative.withTransaction {
+                    LinuxNative.ioctl(listenerFd, NativeConstants.SECCOMP_IOCTL_NOTIF_RECV, notif).onSuccess {
+                        ok = processNotification(notif, resp)
+                    }
+                    Unit
+                }
+                if (!ok) action = LoopAction.Break
             }
-            var ok = false
-            recvRes.onSuccess {
-                ok = processNotification(notif, resp)
-            }
-            if (!ok) return LoopAction.Break
+            action
         }
-
-        return LoopAction.Continue
     }
 
     @Suppress("TooGenericExceptionCaught")
