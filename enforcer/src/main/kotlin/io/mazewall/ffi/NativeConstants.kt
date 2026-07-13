@@ -35,6 +35,7 @@ object NativeConstants {
     // Seccomp
     const val SECCOMP_SET_MODE_FILTER = 1
     const val SECCOMP_MODE_FILTER = 2
+    const val BPF_MAXINSNS = 4096
     const val SECCOMP_FILTER_FLAG_TSYNC = 1
     const val SECCOMP_FILTER_FLAG_NEW_LISTENER = (1L shl 3)
     const val SECCOMP_USER_NOTIF_FLAG_CONTINUE = (1L shl 0)
