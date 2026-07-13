@@ -10,6 +10,7 @@ jobs:
     build-test-publish:
         name: Build, Test, Security Scan & Publish
         runs-on: ubuntu-24.04
+        timeout-minutes: 10
         permissions:
             contents: read
             packages: write
@@ -92,20 +93,4 @@ jobs:
               env:
                   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
                   GITHUB_ACTOR: ${{ github.actor }}
-            - name: Post Failure Comment on PR
-              if: failure() && github.event_name == 'pull_request'
-              run: |
-                  echo "### ❌ CI Build Failed" > pr_comment.md
-                  echo "The CI/CD pipeline encountered an error during execution. Here are the failure logs:" >> pr_comment.md
-                  
-                  if [ -f build.log ]; then
-                      echo "" >> pr_comment.md
-                      echo "#### Build Log (Tail):" >> pr_comment.md
-                      echo "\`\`\`text" >> pr_comment.md
-                      tail -n 45 build.log >> pr_comment.md
-                      echo "\`\`\`" >> pr_comment.md
-                  fi
-                  
-                  gh pr comment ${{ github.event.pull_request.number }} --body-file pr_comment.md
-              env:
-                  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
