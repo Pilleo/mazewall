@@ -60,10 +60,16 @@ class SyscallTest {
         Syscall.LISTEN to arch.listen,
         Syscall.ACCEPT to arch.accept,
         Syscall.ACCEPT4 to arch.accept4,
+        Syscall.GETSOCKNAME to arch.getsockname,
+        Syscall.GETPEERNAME to arch.getpeername,
         Syscall.SENDTO to arch.sendto,
         Syscall.SENDMSG to arch.sendmsg,
         Syscall.SENDMMSG to arch.sendmmsg,
+        Syscall.RECVFROM to arch.recvfrom,
+        Syscall.RECVMSG to arch.recvmsg,
         Syscall.RECVMMSG to arch.recvmmsg,
+        Syscall.GETSOCKOPT to arch.getsockopt,
+        Syscall.SETSOCKOPT to arch.setsockopt,
         Syscall.SOCKET to arch.socket,
     )
 

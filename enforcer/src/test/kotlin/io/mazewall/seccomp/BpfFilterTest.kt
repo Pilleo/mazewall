@@ -352,9 +352,14 @@ class BpfFilterTest {
             Syscall.CLOSE, Syscall.READ, Syscall.WRITE, Syscall.PREAD64, Syscall.PWRITE64,
             Syscall.FSTAT, Syscall.FSTATAT, Syscall.STATX, Syscall.LSEEK, Syscall.FCNTL,
             Syscall.GETDENTS, Syscall.GETDENTS64, Syscall.READLINK, Syscall.READLINKAT,
-            Syscall.FACCESSAT, Syscall.FACCESSAT2, Syscall.POLL,
+            Syscall.FACCESSAT, Syscall.FACCESSAT2, Syscall.POLL, Syscall.NANOSLEEP,
             Syscall.MMAP, Syscall.MPROTECT, Syscall.PKEY_MPROTECT, Syscall.MUNMAP, Syscall.BRK,
-            Syscall.PRCTL, Syscall.CLOCK_GETTIME, Syscall.GETRANDOM, Syscall.EXIT, Syscall.EXIT_GROUP,
+            Syscall.PRCTL, Syscall.CLOCK_GETTIME, Syscall.GETRANDOM,
+            Syscall.GETSOCKOPT, Syscall.SETSOCKOPT,
+            Syscall.GETSOCKNAME, Syscall.GETPEERNAME,
+            Syscall.RECVFROM, Syscall.RECVMSG,
+            Syscall.SENDTO, Syscall.SENDMSG,
+            Syscall.EXIT, Syscall.EXIT_GROUP,
             Syscall.USERFAULTFD, Syscall.TGKILL, Syscall.SCHED_GETAFFINITY, Syscall.PIPE2, Syscall.EVENTFD2,
             Syscall.EPOLL_CREATE1, Syscall.EPOLL_CTL, Syscall.EPOLL_WAIT, Syscall.EPOLL_PWAIT
         )
