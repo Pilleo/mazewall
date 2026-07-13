@@ -6,7 +6,6 @@ priority: 6
 dependencies: []
 component: "ffi"
 effort: "medium"
-github_issue: 99
 ---
 
 # 🟡 [Severity: LOW]: High-Frequency Arena Allocation Overhead (MM Optimization)
