@@ -4,7 +4,6 @@ import io.mazewall.LinuxNative
 import io.mazewall.core.Pid
 import io.mazewall.core.Tid
 import io.mazewall.ffi.Layouts
-import io.mazewall.ffi.memory.nativeScope
 import io.mazewall.map
 import io.mazewall.onFailure
 import io.mazewall.onSuccess
@@ -49,13 +48,13 @@ object RealMemoryReader : ProfilerMemoryReader {
         link: String,
     ): String? {
         val procPath = "/proc/${tid.value}/$link"
-        return nativeScope {
-            val pathSeg = allocateFrom(procPath)
-            val buf = allocate(PATH_MAX_VAL)
+        Arena.ofConfined().use { arena ->
+            val pathSeg = arena.allocateFrom(procPath)
+            val buf = arena.allocate(PATH_MAX_VAL)
             val res = LinuxNative.withTransaction {
                 LinuxNative.fileSystem.readlink(pathSeg, buf, PATH_MAX_VAL)
             }
-            res.onSuccess { }.map { buf.copyToString(it.toInt()).removeSuffix(" (deleted)") }.getOrNull()
+            return res.onSuccess { }.map { buf.copyToString(it.toInt()).removeSuffix(" (deleted)") }.getOrNull()
         }
     }
 

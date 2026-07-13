@@ -33,13 +33,13 @@ public object SupervisorProcessMemoryReader {
         warnOnEperm: Boolean = false
     ): ByteArray? {
         if (remoteAddr == 0L) return null
-        return nativeScope {
-            val localBuf = allocate(len.toLong())
+        return Arena.ofConfined().use { arena ->
+            val localBuf = arena.allocate(len.toLong())
             localBuf.fill(0)
-            val localIov = IovecSegment.allocate()
+            val localIov = IovecSegment(arena.allocate(Layouts.IOVEC))
             localIov.setIovBase(localBuf)
             localIov.setIovLen(len.toLong())
-            val remoteIov = IovecSegment.allocate()
+            val remoteIov = IovecSegment(arena.allocate(Layouts.IOVEC))
             remoteIov.setIovBase(MemorySegment.ofAddress(remoteAddr))
             remoteIov.setIovLen(len.toLong())
 
@@ -63,10 +63,9 @@ public object SupervisorProcessMemoryReader {
                     if (warnOnEperm) {
                         System.err.println("[DAEMON] WARN: Permission denied reading memory from TID ${tid.value}. (Yama ptrace_scope?)")
                     }
-                    "<YAMA_ERROR_UNKNOWN_PATH>".toByteArray(StandardCharsets.UTF_8)
-                } else {
-                    null
+                    return "<YAMA_ERROR_UNKNOWN_PATH>".toByteArray(StandardCharsets.UTF_8)
                 }
+                null
             }
         }
     }

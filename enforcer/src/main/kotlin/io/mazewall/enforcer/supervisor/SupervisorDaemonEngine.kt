@@ -16,7 +16,6 @@ import io.mazewall.ffi.memory.IovecSegment
 import io.mazewall.ffi.memory.MsghdrSegment
 import io.mazewall.ffi.memory.CmsghdrSegment
 import io.mazewall.ffi.memory.writeByte
-import io.mazewall.ffi.memory.nativeScope
 import java.lang.foreign.Arena
 import java.lang.foreign.MemoryLayout
 import java.lang.foreign.MemorySegment
@@ -95,7 +94,7 @@ internal class SupervisorDaemonEngine(
         System.out.flush()
 
         try {
-            nativeScope { arena ->
+            Arena.ofConfined().use { arena ->
                 state = listeningState.active()
                 acceptConnections(serverFd, arena)
             }
@@ -189,7 +188,7 @@ internal class SupervisorDaemonEngine(
     private fun handleConnection(socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>) {
         var connection: io.mazewall.ffi.networking.SeccompConnection = io.mazewall.ffi.networking.SeccompConnection.Accepted(socketFd)
         try {
-            nativeScope { arena ->
+            Arena.ofConfined().use { arena ->
                 val pollFd = PollFdSegment(arena.allocate(Layouts.POLLFD))
                 pollFd.setFd(socketFd.value)
                 pollFd.setEvents(NativeConstants.POLLIN)
@@ -276,7 +275,7 @@ internal class SupervisorDaemonEngine(
     ) {
         val sessionHandler = SupervisorSessionHandler(socketFd, listenerFd)
         try {
-            nativeScope { arena ->
+            Arena.ofConfined().use { arena ->
                 val pollFds = arena.allocate(MemoryLayout.sequenceLayout(2, Layouts.POLLFD))
                 val pfd1 = PollFdSegment(pollFds.asSlice(0L, Layouts.POLLFD.byteSize()))
                 pfd1.setFd(listenerFd.value)
@@ -292,7 +291,7 @@ internal class SupervisorDaemonEngine(
                 while (!isGlobalShutdown()) {
                     val pollRes = LinuxNative.withTransaction { LinuxNative.poll(pollFds, 2L, POLL_TIMEOUT_MS) }
                     val count = pollRes.recover { errno, _ ->
-                        if (errno != NativeConstants.EINTR) return@nativeScope
+                        if (errno != NativeConstants.EINTR) return@use
                         0L
                     }
                     if (count <= 0) continue
@@ -317,7 +316,7 @@ internal class SupervisorDaemonEngine(
             )
         }.getFdOrThrow("socket(AF_UNIX)").let { FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(it.value) }
 
-        nativeScope { arena ->
+        Arena.ofConfined().use { arena ->
             val sockaddrUn = io.mazewall.ffi.networking.SupervisorSocketUtils.setupSockAddrUn(arena, socketPath)
 
             LinuxNative.withTransaction {

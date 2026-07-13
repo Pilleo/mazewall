@@ -1,7 +1,6 @@
 package io.mazewall.profiler.internal
 
 import io.mazewall.LinuxNative
-import io.mazewall.ffi.memory.nativeScope
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
@@ -160,7 +159,7 @@ internal class ProfilerTraceListener(
         // Use a confined native arena — MemorySegment.ofArray() creates a heap segment that
         // cannot be passed to native write() syscalls via the FFM API.
         try {
-            nativeScope { arena ->
+            Arena.ofConfined().use { arena ->
                 val buf = arena.allocate(1)
                 buf.set(java.lang.foreign.ValueLayout.JAVA_BYTE, 0L, commandByte)
                 LinuxNative.withTransaction { LinuxNative.memory.write(socketFd, buf, 1) }

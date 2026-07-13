@@ -13,9 +13,7 @@ import java.lang.foreign.MemorySegment
  * native transaction scope. Required for raw system calls and other sensitive
  * native interactions.
  */
-public interface NativeTransaction {
-    public val arena: Arena
-}
+public interface NativeTransaction
 
 public interface TransactionManager {
     public fun <T> withTransaction(block: NativeTransaction.() -> T): T
@@ -33,7 +31,7 @@ public interface NativeEngine {
     public val process: NativeProcess
     public val memory: NativeMemory
 
-    context(tx: NativeTransaction)
+    context(_: NativeTransaction)
     fun syscall(
         nr: Long,
         a1: io.mazewall.core.NativeArg = io.mazewall.core.NativeArg.LongArg(0L),
@@ -44,7 +42,7 @@ public interface NativeEngine {
         a6: io.mazewall.core.NativeArg = io.mazewall.core.NativeArg.LongArg(0L),
     ): SyscallResult<Long, SyscallHandledState.Unhandled>
 
-    context(tx: NativeTransaction)
+    context(_: NativeTransaction)
     fun syscall4(
         nr: Long,
         a1: io.mazewall.core.NativeArg,
@@ -53,28 +51,28 @@ public interface NativeEngine {
         a4: io.mazewall.core.NativeArg,
     ): SyscallResult<Long, SyscallHandledState.Unhandled>
 
-    context(tx: NativeTransaction)
+    context(_: NativeTransaction)
     fun ioctl(
         fd: FileDescriptor<*, FdState.Open>,
         request: Long,
         arg: MemorySegment,
     ): SyscallResult<Long, SyscallHandledState.Unhandled>
 
-    context(tx: NativeTransaction)
+    context(_: NativeTransaction)
     fun ioctl(
         fd: FileDescriptor<*, FdState.Open>,
         request: Long,
         arg: Long,
     ): SyscallResult<Long, SyscallHandledState.Unhandled>
 
-    context(tx: NativeTransaction)
+    context(_: NativeTransaction)
     fun fcntl(
         fd: FileDescriptor<*, FdState.Open>,
         cmd: Int,
         arg: Long,
     ): SyscallResult<Long, SyscallHandledState.Unhandled>
 
-    context(tx: NativeTransaction)
+    context(_: NativeTransaction)
     fun poll(
         fds: MemorySegment,
         nfds: Long,
@@ -83,20 +81,20 @@ public interface NativeEngine {
 }
 
 public interface NativeFileSystem {
-    context(tx: NativeTransaction)
+    context(_: NativeTransaction)
     fun open(
         path: MemorySegment,
         flags: Int,
     ): SyscallResult<Long, SyscallHandledState.Unhandled>
 
-    context(tx: NativeTransaction)
+    context(_: NativeTransaction)
     fun readlink(
         path: MemorySegment,
         buf: MemorySegment,
         bufsiz: Long,
     ): SyscallResult<Long, SyscallHandledState.Unhandled>
 
-    context(tx: NativeTransaction)
+    context(_: NativeTransaction)
     fun mmap(
         addr: Long,
         length: Long,
@@ -110,7 +108,7 @@ public interface NativeFileSystem {
 }
 
 public interface NativeNetworking {
-    context(tx: NativeTransaction)
+    context(_: NativeTransaction)
     fun socketpair(
         domain: Int,
         type: Int,
@@ -118,55 +116,55 @@ public interface NativeNetworking {
         sv: MemorySegment,
     ): SyscallResult<Long, SyscallHandledState.Unhandled>
 
-    context(tx: NativeTransaction)
+    context(_: NativeTransaction)
     fun socket(
         domain: Int,
         type: Int,
         protocol: Int,
     ): SyscallResult<Long, SyscallHandledState.Unhandled>
 
-    context(tx: NativeTransaction)
+    context(_: NativeTransaction)
     fun bind(
         sockfd: FileDescriptor<*, FdState.Open>,
         addr: MemorySegment,
         addrlen: Int,
     ): SyscallResult<Long, SyscallHandledState.Unhandled>
 
-    context(tx: NativeTransaction)
+    context(_: NativeTransaction)
     fun listen(
         sockfd: FileDescriptor<*, FdState.Open>,
         backlog: Int,
     ): SyscallResult<Long, SyscallHandledState.Unhandled>
 
-    context(tx: NativeTransaction)
+    context(_: NativeTransaction)
     fun accept(
         sockfd: FileDescriptor<*, FdState.Open>,
         addr: MemorySegment,
         addrlen: MemorySegment,
     ): SyscallResult<Long, SyscallHandledState.Unhandled>
 
-    context(tx: NativeTransaction)
+    context(_: NativeTransaction)
     fun connect(
         sockfd: FileDescriptor<*, FdState.Open>,
         addr: MemorySegment,
         addrlen: Int,
     ): SyscallResult<Long, SyscallHandledState.Unhandled>
 
-    context(tx: NativeTransaction)
+    context(_: NativeTransaction)
     fun sendmsg(
         sockfd: FileDescriptor<*, FdState.Open>,
         msg: MemorySegment,
         flags: Int,
     ): SyscallResult<Long, SyscallHandledState.Unhandled>
 
-    context(tx: NativeTransaction)
+    context(_: NativeTransaction)
     fun recvmsg(
         sockfd: FileDescriptor<*, FdState.Open>,
         msg: MemorySegment,
         flags: Int,
     ): SyscallResult<Long, SyscallHandledState.Unhandled>
 
-    context(tx: NativeTransaction)
+    context(_: NativeTransaction)
     fun recv(
         sockfd: FileDescriptor<*, FdState.Open>,
         buf: MemorySegment,
@@ -178,12 +176,12 @@ public interface NativeNetworking {
 public interface NativeProcess {
     fun gettid(): io.mazewall.core.Tid
 
-    context(tx: NativeTransaction)
+    context(_: NativeTransaction)
     fun prctl(command: io.mazewall.core.PrctlCommand): SyscallResult<Long, SyscallHandledState.Unhandled>
 }
 
 public interface NativeMemory {
-    context(tx: NativeTransaction)
+    context(_: NativeTransaction)
     fun processVmReadv(
         pid: io.mazewall.core.Pid,
         localIov: MemorySegment,
@@ -193,7 +191,7 @@ public interface NativeMemory {
         flags: Long,
     ): SyscallResult<Long, SyscallHandledState.Unhandled>
 
-    context(tx: NativeTransaction)
+    context(_: NativeTransaction)
     fun processVmWritev(
         pid: io.mazewall.core.Pid,
         localIov: MemorySegment,
@@ -203,14 +201,14 @@ public interface NativeMemory {
         flags: Long,
     ): SyscallResult<Long, SyscallHandledState.Unhandled>
 
-    context(tx: NativeTransaction)
+    context(_: NativeTransaction)
     fun read(
         fd: FileDescriptor<*, FdState.Open>,
         buf: MemorySegment,
         count: Long,
     ): SyscallResult<Long, SyscallHandledState.Unhandled>
 
-    context(tx: NativeTransaction)
+    context(_: NativeTransaction)
     fun write(
         fd: FileDescriptor<*, FdState.Open>,
         buf: MemorySegment,

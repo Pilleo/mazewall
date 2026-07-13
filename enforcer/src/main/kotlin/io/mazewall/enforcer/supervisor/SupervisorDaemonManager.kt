@@ -4,7 +4,6 @@ import io.mazewall.LinuxNative
 import io.mazewall.getFdOrThrow
 import io.mazewall.onFailure
 import io.mazewall.ffi.Layouts
-import io.mazewall.ffi.memory.nativeScope
 import java.io.IOException
 import java.lang.foreign.Arena
 import java.lang.foreign.MemorySegment
@@ -183,7 +182,7 @@ internal object SupervisorDaemonManager {
 
     private fun triggerDaemonShutdown(socketPath: String) {
         try {
-            nativeScope { arena ->
+            Arena.ofConfined().use { arena ->
                 val fdRes = LinuxNative.withTransaction {
                     LinuxNative.networking.socket(
                         io.mazewall.ffi.networking.SupervisorSocketUtils.AF_UNIX,

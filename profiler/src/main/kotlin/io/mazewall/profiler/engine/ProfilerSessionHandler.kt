@@ -6,7 +6,6 @@ import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
 import io.mazewall.core.Tid
 import io.mazewall.ffi.NativeConstants
-import io.mazewall.ffi.memory.nativeScope
 import io.mazewall.map
 import io.mazewall.onSuccess
 import io.mazewall.recover
@@ -42,17 +41,17 @@ internal class ProfilerSessionHandler(
     var state: ProfilerState = ProfilerState.ActiveSession(socketFd, listenerFd)
         private set
 
-    @Suppress("ReturnCount", "CyclomaticComplexMethod")
+    @Suppress("ReturnCount")
     fun handleActiveListener(
         pollFds: MemorySegment,
         ackBuf: MemorySegment,
         notif: MemorySegment,
         resp: MemorySegment,
         socketPollFd: MemorySegment,
-    ): LoopAction = nativeScope {
+    ): LoopAction {
         val currentState = state
         if (currentState is ProfilerState.Terminated) {
-            return@nativeScope LoopAction.Break
+            return LoopAction.Break
         }
 
         val socketRevents = pollFds.get(ValueLayout.JAVA_SHORT, POLLFD_REVENT_DATA_OFF).toInt()
@@ -61,14 +60,14 @@ internal class ProfilerSessionHandler(
             val isDeadOrShutdown = (socketRevents and errorOrHup) != 0 || handleShutdownRequest(ackBuf)
             if (isDeadOrShutdown) {
                 state = ProfilerState.Terminated(socketFd, listenerFd)
-                return@nativeScope LoopAction.Shutdown
+                return LoopAction.Shutdown
             }
         }
 
         val listenerRevents = pollFds.get(ValueLayout.JAVA_SHORT, POLLFD_REVENTS_OFF).toInt()
         if ((listenerRevents and errorOrHup) != 0) {
             state = ProfilerState.Terminated(socketFd, listenerFd)
-            return@nativeScope LoopAction.Shutdown
+            return LoopAction.Shutdown
         }
 
         if ((listenerRevents and NativeConstants.POLLIN.toInt()) != 0) {
@@ -79,9 +78,9 @@ internal class ProfilerSessionHandler(
                     state = ProfilerState.Terminated(socketFd, listenerFd)
                 }
             }
-            if (state is ProfilerState.Terminated) return@nativeScope LoopAction.Break
+            if (state is ProfilerState.Terminated) return LoopAction.Break
         }
-        return@nativeScope LoopAction.Continue
+        return LoopAction.Continue
     }
 
     @Suppress("ReturnCount")
