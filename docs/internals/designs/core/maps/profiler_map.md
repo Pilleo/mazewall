@@ -79,7 +79,6 @@ graph TD
     issue_071_introduce_context_parameters_for_memory_and_engine_scopes["🔴 Issue: Introduce Context Parameters for Memory and Engine Scopes (ENHANCEMENT)"]
     issue_072_contract_based_invariant_validation["🔴 Issue: Contract-Based Invariant Validation (ENHANCEMENT)"]
     issue_073_delegated_properties_for_thread_local_sandbox_state["🔴 Issue: Delegated Properties for Thread-Local Sandbox State (ENHANCEMENT)"]
-    issue_075_jvm_invariant_syscall_floor_is_incomplete["🔴 Issue: 🟡 [DEFERRED — Medium]: JVM Invariant Syscall Floor is Incomplete (MEDIUM)"]
     issue_077_landlock_getaccessmask_missing_abi_4_support_net_capabilitie["🔴 Issue: `Landlock` getAccessMask missing ABI 4 Support (Net Capabilities) (HIGH)"]
     issue_078_purejavabpfengine_thread_state_synchronization["🔴 Issue: `PureJavaBpfEngine` Thread State Synchronization (HIGH)"]
     issue_079_unhandled_tsync_edge_cases_during_jit_classloading["🔴 Issue: Unhandled `TSYNC` edge cases during JIT classloading (HIGH)"]
@@ -250,7 +249,6 @@ graph TD
     click issue_071_introduce_context_parameters_for_memory_and_engine_scopes "../../../backlog/testing/issue-071-introduce-context-parameters-for-memory-and-engine-scopes.md"
     click issue_072_contract_based_invariant_validation "../../../backlog/testing/issue-072-contract-based-invariant-validation.md"
     click issue_073_delegated_properties_for_thread_local_sandbox_state "../../../backlog/performance/issue-073-delegated-properties-for-thread-local-sandbox-state.md"
-    click issue_075_jvm_invariant_syscall_floor_is_incomplete "../../../backlog/performance/issue-075-jvm-invariant-syscall-floor-is-incomplete.md"
     click issue_077_landlock_getaccessmask_missing_abi_4_support_net_capabilitie "../../../backlog/security/issue-077-landlock-getaccessmask-missing-abi-4-support-net-capabilitie.md"
     click issue_078_purejavabpfengine_thread_state_synchronization "../../../backlog/security/issue-078-purejavabpfengine-thread-state-synchronization.md"
     click issue_079_unhandled_tsync_edge_cases_during_jit_classloading "../../../backlog/testing/issue-079-unhandled-tsync-edge-cases-during-jit-classloading.md"

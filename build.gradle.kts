@@ -123,11 +123,18 @@ allprojects {
         compilerOptions {
             jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_22)
             freeCompilerArgs.add("-Xcontext-parameters")
+            if (!isVerbose) {
+                suppressWarnings.set(true)
+            }
         }
     }
 
     tasks.withType<JavaCompile>().configureEach {
         options.release.set(22)
+        if (!isVerbose) {
+            options.isWarnings = false
+            options.compilerArgs.add("-nowarn")
+        }
     }
 
     tasks.matching { it.name == "ktlintCheck" || it.name == "ktlintTestSourceSetCheck" || it.name == "ktlintMainSourceSetCheck" }.configureEach {
