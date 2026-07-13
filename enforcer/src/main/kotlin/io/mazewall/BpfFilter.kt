@@ -175,6 +175,7 @@ object BpfFilter {
             Syscall.RT_SIGRETURN.numberFor(arch),
             Syscall.RT_SIGACTION.numberFor(arch),
             Syscall.RT_SIGPROCMASK.numberFor(arch),
+            Syscall.RT_SIGQUEUEINFO.numberFor(arch),
             Syscall.MADVISE.numberFor(arch),
             Syscall.GETTID.numberFor(arch),
             Syscall.CLOSE.numberFor(arch),
@@ -198,6 +199,10 @@ object BpfFilter {
             Syscall.EXIT.numberFor(arch),
             Syscall.EXIT_GROUP.numberFor(arch),
             Syscall.PIPE2.numberFor(arch),
+            Syscall.PRLIMIT64.numberFor(arch),
+            Syscall.GETRUSAGE.numberFor(arch),
+            Syscall.SIGALTSTACK.numberFor(arch),
+            Syscall.UNAME.numberFor(arch),
         ).filter { it >= 0 }.toSet()
 
     /**
@@ -217,6 +222,7 @@ object BpfFilter {
             Syscall.FACCESSAT2.numberFor(arch),
             Syscall.POLL.numberFor(arch),
             Syscall.NANOSLEEP.numberFor(arch),
+            Syscall.CLOCK_NANOSLEEP.numberFor(arch),
             Syscall.PRCTL.numberFor(arch),
             Syscall.GETRANDOM.numberFor(arch),
             Syscall.GETSOCKOPT.numberFor(arch),

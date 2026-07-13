@@ -51,6 +51,9 @@ class SyscallTest {
         Syscall.GETEGID to arch.getegid,
         Syscall.PTRACE to arch.ptrace,
         Syscall.TGKILL to arch.tgkill,
+        Syscall.PRLIMIT64 to arch.prlimit64,
+        Syscall.GETRUSAGE to arch.getrusage,
+        Syscall.UNAME to arch.uname,
     )
 
     private fun getNetworkMappings(arch: Arch) =
@@ -65,9 +68,9 @@ class SyscallTest {
         Syscall.SENDTO to arch.sendto,
         Syscall.SENDMSG to arch.sendmsg,
         Syscall.SENDMMSG to arch.sendmmsg,
+        Syscall.RECVMMSG to arch.recvmmsg,
         Syscall.RECVFROM to arch.recvfrom,
         Syscall.RECVMSG to arch.recvmsg,
-        Syscall.RECVMMSG to arch.recvmmsg,
         Syscall.GETSOCKOPT to arch.getsockopt,
         Syscall.SETSOCKOPT to arch.setsockopt,
         Syscall.SOCKET to arch.socket,
@@ -109,8 +112,6 @@ class SyscallTest {
         Syscall.MKDIR to arch.mkdir,
         Syscall.MKDIRAT to arch.mkdirat,
         Syscall.RMDIR to arch.rmdir,
-        Syscall.FACCESSAT to arch.faccessat,
-        Syscall.FACCESSAT2 to arch.faccessat2,
     )
 
     private fun getFsOpsMappings(arch: Arch) =
@@ -163,12 +164,17 @@ class SyscallTest {
         Syscall.RT_SIGACTION to arch.rt_sigaction,
         Syscall.RT_SIGPROCMASK to arch.rt_sigprocmask,
         Syscall.RT_SIGRETURN to arch.rt_sigreturn,
+        Syscall.RT_SIGQUEUEINFO to arch.rt_sigqueueinfo,
+        Syscall.SIGALTSTACK to arch.sigaltstack,
         Syscall.FUTEX to arch.futex,
         Syscall.SCHED_YIELD to arch.sched_yield,
         Syscall.GETRANDOM to arch.getrandom,
         Syscall.CLOCK_GETTIME to arch.clock_gettime,
         Syscall.PAUSE to arch.pause,
         Syscall.NANOSLEEP to arch.nanosleep,
+        Syscall.CLOCK_NANOSLEEP to arch.clock_nanosleep,
+        Syscall.GETITIMER to arch.getitimer,
+        Syscall.SETITIMER to arch.setitimer,
         Syscall.INIT_MODULE to arch.initModule,
         Syscall.FINIT_MODULE to arch.finitModule,
         Syscall.SCHED_GETAFFINITY to arch.sched_getaffinity,
@@ -177,6 +183,8 @@ class SyscallTest {
         Syscall.EPOLL_CTL to arch.epoll_ctl,
         Syscall.EPOLL_WAIT to arch.epoll_wait,
         Syscall.EPOLL_PWAIT to arch.epoll_pwait,
+        Syscall.FACCESSAT to arch.faccessat,
+        Syscall.FACCESSAT2 to arch.faccessat2,
         Syscall.POLL to arch.poll,
     )
 

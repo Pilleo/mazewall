@@ -17,16 +17,10 @@ enum class Syscall {
     LISTEN,
     ACCEPT,
     ACCEPT4,
-    GETSOCKNAME,
-    GETPEERNAME,
     SENDTO,
     SENDMSG,
     SENDMMSG,
-    RECVFROM,
-    RECVMSG,
     RECVMMSG,
-    GETSOCKOPT,
-    SETSOCKOPT,
     OPEN,
     OPENAT,
     OPENAT2,
@@ -83,6 +77,20 @@ enum class Syscall {
     FACCESSAT,
     FACCESSAT2,
     POLL,
+    CLOCK_NANOSLEEP,
+    RT_SIGQUEUEINFO,
+    PRLIMIT64,
+    GETRUSAGE,
+    SIGALTSTACK,
+    UNAME,
+    GETITIMER,
+    SETITIMER,
+    RECVFROM,
+    RECVMSG,
+    GETSOCKOPT,
+    SETSOCKOPT,
+    GETSOCKNAME,
+    GETPEERNAME,
 
     // Harmless/Utility syscalls for fine-grained control and testing
     GETPID,
@@ -145,15 +153,15 @@ internal object SyscallMapper {
         when (syscall) {
             Syscall.FORK, Syscall.VFORK, Syscall.CLONE, Syscall.CLONE3, Syscall.EXECVE, Syscall.EXECVEAT, Syscall.EXIT, Syscall.EXIT_GROUP,
             Syscall.GETTID, Syscall.GETPID, Syscall.GETPPID, Syscall.GETUID, Syscall.GETEUID, Syscall.GETGID, Syscall.GETEGID, Syscall.PTRACE,
-            Syscall.TGKILL,
+            Syscall.TGKILL, Syscall.PRLIMIT64, Syscall.GETRUSAGE, Syscall.UNAME,
             ->
                 ProcessSyscallMapper.numberFor(syscall, arch)
 
             Syscall.CONNECT, Syscall.BIND, Syscall.LISTEN, Syscall.ACCEPT, Syscall.ACCEPT4,
-            Syscall.GETSOCKNAME, Syscall.GETPEERNAME,
-            Syscall.SENDTO, Syscall.SENDMSG, Syscall.SENDMMSG,
-            Syscall.RECVFROM, Syscall.RECVMSG, Syscall.RECVMMSG,
+            Syscall.SENDTO, Syscall.SENDMSG, Syscall.SENDMMSG, Syscall.RECVMMSG,
+            Syscall.RECVFROM, Syscall.RECVMSG,
             Syscall.GETSOCKOPT, Syscall.SETSOCKOPT,
+            Syscall.GETSOCKNAME, Syscall.GETPEERNAME,
             Syscall.SOCKET ->
                 NetworkSyscallMapper.numberFor(syscall, arch)
 
@@ -214,6 +222,9 @@ internal object ProcessSyscallMapper {
             Syscall.EXIT -> arch.exit
             Syscall.EXIT_GROUP -> arch.exit_group
             Syscall.TGKILL -> arch.tgkill
+            Syscall.PRLIMIT64 -> arch.prlimit64
+            Syscall.GETRUSAGE -> arch.getrusage
+            Syscall.UNAME -> arch.uname
             else -> -1
         }
 
@@ -245,16 +256,16 @@ internal object NetworkSyscallMapper {
             Syscall.LISTEN -> arch.listen
             Syscall.ACCEPT -> arch.accept
             Syscall.ACCEPT4 -> arch.accept4
-            Syscall.GETSOCKNAME -> arch.getsockname
-            Syscall.GETPEERNAME -> arch.getpeername
             Syscall.SENDTO -> arch.sendto
             Syscall.SENDMSG -> arch.sendmsg
             Syscall.SENDMMSG -> arch.sendmmsg
+            Syscall.RECVMMSG -> arch.recvmmsg
             Syscall.RECVFROM -> arch.recvfrom
             Syscall.RECVMSG -> arch.recvmsg
-            Syscall.RECVMMSG -> arch.recvmmsg
             Syscall.GETSOCKOPT -> arch.getsockopt
             Syscall.SETSOCKOPT -> arch.setsockopt
+            Syscall.GETSOCKNAME -> arch.getsockname
+            Syscall.GETPEERNAME -> arch.getpeername
             Syscall.SOCKET -> arch.socket
             else -> -1
         }
@@ -458,7 +469,7 @@ internal object OtherSyscallMapper {
     ): Int =
         when (syscall) {
             Syscall.UNSHARE, Syscall.SETNS, Syscall.MOUNT, Syscall.UMOUNT2 -> numberForResource(syscall, arch)
-            Syscall.RT_SIGACTION, Syscall.RT_SIGPROCMASK, Syscall.RT_SIGRETURN -> numberForSignal(syscall, arch)
+            Syscall.RT_SIGACTION, Syscall.RT_SIGPROCMASK, Syscall.RT_SIGRETURN, Syscall.RT_SIGQUEUEINFO, Syscall.SIGALTSTACK -> numberForSignal(syscall, arch)
             Syscall.FACCESSAT, Syscall.FACCESSAT2, Syscall.POLL -> numberForSystemMisc(syscall, arch)
             else -> numberForSystemMisc(syscall, arch)
         }
@@ -483,6 +494,8 @@ internal object OtherSyscallMapper {
             Syscall.RT_SIGACTION -> arch.rt_sigaction
             Syscall.RT_SIGPROCMASK -> arch.rt_sigprocmask
             Syscall.RT_SIGRETURN -> arch.rt_sigreturn
+            Syscall.RT_SIGQUEUEINFO -> arch.rt_sigqueueinfo
+            Syscall.SIGALTSTACK -> arch.sigaltstack
             else -> -1
         }
 
@@ -503,6 +516,9 @@ internal object OtherSyscallMapper {
             Syscall.NANOSLEEP -> arch.nanosleep
             Syscall.INIT_MODULE -> arch.initModule
             Syscall.FINIT_MODULE -> arch.finitModule
+            Syscall.CLOCK_NANOSLEEP -> arch.clock_nanosleep
+            Syscall.GETITIMER -> arch.getitimer
+            Syscall.SETITIMER -> arch.setitimer
             Syscall.SCHED_GETAFFINITY -> arch.sched_getaffinity
             Syscall.EVENTFD2 -> arch.eventfd2
             Syscall.EPOLL_CREATE1 -> arch.epoll_create1

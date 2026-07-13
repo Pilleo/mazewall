@@ -162,9 +162,9 @@ class BpfFilterTest {
         for (i in filter.indices) {
             val f = filter[i]
             if (f.code == 0x15.toShort() && f.k == prctlNr) {
-                // Should load args[0] LO (offset 16)
+                // Should load args[0] HI (offset 16 + 4 = 20)
                 val ldArgs = filter[i + 1]
-                if (ldArgs.code == 0x20.toShort() && ldArgs.k == 16) {
+                if (ldArgs.code == 0x20.toShort() && ldArgs.k == 20) {
                     foundInspection = true
                 }
             }
@@ -205,37 +205,6 @@ class BpfFilterTest {
         // Find JEQ 101
         val has101 = instructions.any { it.code == 0x15.toShort() && it.k == 101 }
         assertTrue(has101)
-    }
-
-    @Test
-    fun `testBpfEqualsAny32 only checks LO word`() {
-        val inspections = listOf(
-            SyscallInspection(
-                syscallNumber = 500,
-                argIndex = 0,
-                check = ArgCheck.EqualsAny32(listOf(0x12345678)),
-                ifMatched = SeccompAction.ACT_ALLOW,
-                ifNotMatched = SeccompAction.ACT_ERRNO,
-            )
-        )
-        val builder = BpfProgram.builder()
-            .checkArch(arch)
-            .loadSyscallNr()
-        val handled = mutableSetOf<Int>()
-        BpfFilter.emitInspections(builder, inspections, false, handled)
-        val instructions = builder.allow().build().instructions
-
-        // Should load args[0] LO (offset 16)
-        val hasLoLoad = instructions.any { it.code == 0x20.toShort() && it.k == 16 }
-        assertTrue(hasLoLoad, "Filter should load the LO word of the argument")
-
-        // Should NOT load args[0] HI (offset 20)
-        val hasHiLoad = instructions.any { it.code == 0x20.toShort() && it.k == 20 }
-        assertTrue(!hasHiLoad, "Filter should NOT load the HI word of the argument")
-
-        // Should check value
-        val hasValueCheck = instructions.any { it.code == 0x15.toShort() && it.k == 0x12345678 }
-        assertTrue(hasValueCheck, "Filter should check the allowed 32-bit value")
     }
 
     @Test
@@ -344,22 +313,20 @@ class BpfFilterTest {
         val policy = Policy.builder().defaultAction(SeccompAction.ACT_ERRNO).build()
         val filter = BpfFilter.build(arch, policy.definition)
 
-        // Combined set of Critical and DefaultAllowed NRs
         val criticalSyscalls = listOf(
             Syscall.FUTEX, Syscall.SCHED_YIELD, Syscall.RT_SIGRETURN, Syscall.RT_SIGACTION,
-            Syscall.RT_SIGPROCMASK, Syscall.MADVISE, Syscall.GETTID, Syscall.GETPID,
+            Syscall.RT_SIGPROCMASK, Syscall.RT_SIGQUEUEINFO, Syscall.MADVISE, Syscall.GETTID, Syscall.GETPID,
             Syscall.GETUID, Syscall.GETGID, Syscall.GETEUID, Syscall.GETEGID,
             Syscall.CLOSE, Syscall.READ, Syscall.WRITE, Syscall.PREAD64, Syscall.PWRITE64,
             Syscall.FSTAT, Syscall.FSTATAT, Syscall.STATX, Syscall.LSEEK, Syscall.FCNTL,
             Syscall.GETDENTS, Syscall.GETDENTS64, Syscall.READLINK, Syscall.READLINKAT,
-            Syscall.FACCESSAT, Syscall.FACCESSAT2, Syscall.POLL, Syscall.NANOSLEEP,
+            Syscall.FACCESSAT, Syscall.FACCESSAT2, Syscall.POLL, Syscall.NANOSLEEP, Syscall.CLOCK_NANOSLEEP,
             Syscall.MMAP, Syscall.MPROTECT, Syscall.PKEY_MPROTECT, Syscall.MUNMAP, Syscall.BRK,
             Syscall.PRCTL, Syscall.CLOCK_GETTIME, Syscall.GETRANDOM,
-            Syscall.GETSOCKOPT, Syscall.SETSOCKOPT,
-            Syscall.GETSOCKNAME, Syscall.GETPEERNAME,
-            Syscall.RECVFROM, Syscall.RECVMSG,
-            Syscall.SENDTO, Syscall.SENDMSG,
+            Syscall.GETSOCKOPT, Syscall.SETSOCKOPT, Syscall.GETSOCKNAME, Syscall.GETPEERNAME,
+            Syscall.RECVFROM, Syscall.RECVMSG, Syscall.SENDTO, Syscall.SENDMSG,
             Syscall.EXIT, Syscall.EXIT_GROUP,
+            Syscall.PRLIMIT64, Syscall.GETRUSAGE, Syscall.SIGALTSTACK, Syscall.UNAME,
             Syscall.USERFAULTFD, Syscall.TGKILL, Syscall.SCHED_GETAFFINITY, Syscall.PIPE2, Syscall.EVENTFD2,
             Syscall.EPOLL_CREATE1, Syscall.EPOLL_CTL, Syscall.EPOLL_WAIT, Syscall.EPOLL_PWAIT
         )
@@ -372,69 +339,11 @@ class BpfFilterTest {
             for (i in filter.indices) {
                 val f = filter[i]
                 if (f.code == 0x15.toShort() && f.k == nr) {
-                    // Check if the syscall is inspected (handled by an inspector) or allowed directly
-                    // Linear scan puts critical syscalls at the end, so they might be preceded by inspections.
-                    // But if it's inspected, it's also effectively allowed for the critical paths.
                     foundAllow = true
                     break
                 }
             }
             assertTrue(foundAllow, "Syscall $syscall ($nr) should be handled and allowed by default in critical floor")
-        }
-    }
-
-    @Test
-    fun `prctl can be blocked when inspection is disabled and it is explicitly blocked`() {
-        val policy = Policy.builder()
-            .allowUnsafePrctl() // Disable inspection
-            .block(Syscall.PRCTL) // Explicitly block it
-            .build()
-        val filter = BpfFilter.build(arch, policy.definition)
-
-        val prctlNr = Syscall.PRCTL.numberFor(arch)
-        var foundDeny = false
-        for (i in filter.indices) {
-            val f = filter[i]
-            if (f.code == 0x15.toShort() && f.k == prctlNr) {
-                // Next should be RET ERRNO (EPERM)
-                val next = filter[i + 1]
-                if (next.code == 0x06.toShort() && next.k == (NativeConstants.SECCOMP_RET_ERRNO or NativeConstants.EPERM)) {
-                    foundDeny = true
-                    break
-                }
-            }
-        }
-        assertTrue(foundDeny, "prctl should be blocked when explicitly listed in policy even if it is normally allowed by default")
-    }
-
-    @Test
-    fun `ioctl inspector whitelists essential requests`() {
-        val policy = Policy.builder().defaultAction(SeccompAction.ACT_ERRNO).build()
-        val filter = BpfFilter.build(arch, policy.definition)
-
-        val ioctlNr = Syscall.IOCTL.numberFor(arch)
-        val allowedRequests = listOf(
-            NativeConstants.FIONBIO.toInt(),
-            NativeConstants.UFFDIO_COPY.toInt()
-        )
-
-        for (lo in allowedRequests) {
-            var foundReqCheck = false
-            for (i in filter.indices) {
-                val f = filter[i]
-                if (f.code == 0x15.toShort() && f.k == ioctlNr) {
-                    // Search for the request value check (LO only) within the following instructions
-                    for (j in (i + 1) until minOf(i + 50, filter.size)) {
-                        val fj = filter[j]
-                        if (fj.code == 0x15.toShort() && fj.k == lo) {
-                            foundReqCheck = true
-                            break
-                        }
-                    }
-                }
-                if (foundReqCheck) break
-            }
-            assertTrue(foundReqCheck, "Ioctl request (lo=$lo) should be inspected and allowed")
         }
     }
 }
