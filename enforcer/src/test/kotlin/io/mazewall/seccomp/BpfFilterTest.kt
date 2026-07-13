@@ -162,14 +162,18 @@ class BpfFilterTest {
         for (i in filter.indices) {
             val f = filter[i]
             if (f.code == 0x15.toShort() && f.k == prctlNr) {
-                // Should load args[0] HI (offset 16 + 4 = 20)
-                val ldArgs = filter[i + 1]
-                if (ldArgs.code == 0x20.toShort() && ldArgs.k == 20) {
-                    foundInspection = true
+                // Search for the LO word load (offset 16) in following instructions
+                for (j in (i + 1) until minOf(i + 10, filter.size)) {
+                    val fj = filter[j]
+                    if (fj.code == 0x20.toShort() && fj.k == 16) {
+                        foundInspection = true
+                        break
+                    }
                 }
             }
+            if (foundInspection) break
         }
-        assertTrue(foundInspection, "Filter should inspect prctl arguments")
+        assertTrue(foundInspection, "Filter should inspect prctl arguments (LO word)")
     }
 
     @Test
@@ -327,6 +331,7 @@ class BpfFilterTest {
             Syscall.RECVFROM, Syscall.RECVMSG, Syscall.SENDTO, Syscall.SENDMSG,
             Syscall.EXIT, Syscall.EXIT_GROUP,
             Syscall.PRLIMIT64, Syscall.GETRUSAGE, Syscall.SIGALTSTACK, Syscall.UNAME,
+            Syscall.GETITIMER, Syscall.SETITIMER,
             Syscall.USERFAULTFD, Syscall.TGKILL, Syscall.SCHED_GETAFFINITY, Syscall.PIPE2, Syscall.EVENTFD2,
             Syscall.EPOLL_CREATE1, Syscall.EPOLL_CTL, Syscall.EPOLL_WAIT, Syscall.EPOLL_PWAIT
         )

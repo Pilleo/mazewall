@@ -196,7 +196,7 @@ internal object ProcessSyscallMapper {
     ): Int =
         when (syscall) {
             Syscall.FORK, Syscall.VFORK, Syscall.CLONE, Syscall.CLONE3 -> numberForLifecycle(syscall, arch)
-            Syscall.EXECVE, Syscall.EXECVEAT, Syscall.EXIT, Syscall.EXIT_GROUP, Syscall.TGKILL -> numberForExecution(syscall, arch)
+            Syscall.EXECVE, Syscall.EXECVEAT, Syscall.EXIT, Syscall.EXIT_GROUP, Syscall.TGKILL, Syscall.PRLIMIT64, Syscall.GETRUSAGE, Syscall.UNAME -> numberForExecution(syscall, arch)
             else -> numberForIdentity(syscall, arch)
         }
 

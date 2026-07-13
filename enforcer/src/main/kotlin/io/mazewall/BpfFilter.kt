@@ -233,6 +233,8 @@ object BpfFilter {
             Syscall.RECVMSG.numberFor(arch),
             Syscall.SENDTO.numberFor(arch),
             Syscall.SENDMSG.numberFor(arch),
+            Syscall.GETITIMER.numberFor(arch),
+            Syscall.SETITIMER.numberFor(arch),
             Syscall.USERFAULTFD.numberFor(arch),
             Syscall.TGKILL.numberFor(arch),
             Syscall.SCHED_GETAFFINITY.numberFor(arch),
