@@ -37,9 +37,6 @@ dependencies {
 tasks.withType<Test> {
     useJUnitPlatform()
     jvmArgs("--enable-native-access=ALL-UNNAMED")
-    testLogging {
-        showStandardStreams = true
-    }
 }
 
 // Disable static analysis for this demo
