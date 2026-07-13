@@ -52,42 +52,36 @@ internal class ProfilerSessionHandler(
     ): LoopAction = nativeScope {
         val currentState = state
         if (currentState is ProfilerState.Terminated) {
-            LoopAction.Break
-        } else {
-            val socketRevents = pollFds.get(ValueLayout.JAVA_SHORT, POLLFD_REVENT_DATA_OFF).toInt()
-            val errorOrHup = NativeConstants.POLLERR.toInt() or NativeConstants.POLLHUP.toInt() or NativeConstants.POLLNVAL.toInt()
-            var action: LoopAction? = null
-            if ((socketRevents and (NativeConstants.POLLIN.toInt() or errorOrHup)) != 0) {
-                val isDeadOrShutdown = (socketRevents and errorOrHup) != 0 || handleShutdownRequest(ackBuf)
-                if (isDeadOrShutdown) {
-                    state = ProfilerState.Terminated(socketFd, listenerFd)
-                    action = LoopAction.Shutdown
-                }
-            }
-
-            if (action == null) {
-                val listenerRevents = pollFds.get(ValueLayout.JAVA_SHORT, POLLFD_REVENTS_OFF).toInt()
-                if ((listenerRevents and errorOrHup) != 0) {
-                    state = ProfilerState.Terminated(socketFd, listenerFd)
-                    action = LoopAction.Shutdown
-                }
-            }
-
-            if (action == null) {
-                val listenerRevents = pollFds.get(ValueLayout.JAVA_SHORT, POLLFD_REVENTS_OFF).toInt()
-                if ((listenerRevents and NativeConstants.POLLIN.toInt()) != 0) {
-                    notif.fill(0)
-                    val recvRes = ioOps.ioctl(listenerFd, SECCOMP_IOCTL_NOTIF_RECV, notif)
-                    recvRes.onSuccess {
-                        if (!processNotification(notif, resp, ackBuf, socketPollFd)) {
-                            state = ProfilerState.Terminated(socketFd, listenerFd)
-                        }
-                    }
-                    if (state is ProfilerState.Terminated) action = LoopAction.Break
-                }
-            }
-            action ?: LoopAction.Continue
+            return@nativeScope LoopAction.Break
         }
+
+        val socketRevents = pollFds.get(ValueLayout.JAVA_SHORT, POLLFD_REVENT_DATA_OFF).toInt()
+        val errorOrHup = NativeConstants.POLLERR.toInt() or NativeConstants.POLLHUP.toInt() or NativeConstants.POLLNVAL.toInt()
+        if ((socketRevents and (NativeConstants.POLLIN.toInt() or errorOrHup)) != 0) {
+            val isDeadOrShutdown = (socketRevents and errorOrHup) != 0 || handleShutdownRequest(ackBuf)
+            if (isDeadOrShutdown) {
+                state = ProfilerState.Terminated(socketFd, listenerFd)
+                return@nativeScope LoopAction.Shutdown
+            }
+        }
+
+        val listenerRevents = pollFds.get(ValueLayout.JAVA_SHORT, POLLFD_REVENTS_OFF).toInt()
+        if ((listenerRevents and errorOrHup) != 0) {
+            state = ProfilerState.Terminated(socketFd, listenerFd)
+            return@nativeScope LoopAction.Shutdown
+        }
+
+        if ((listenerRevents and NativeConstants.POLLIN.toInt()) != 0) {
+            notif.fill(0)
+            val recvRes = ioOps.ioctl(listenerFd, SECCOMP_IOCTL_NOTIF_RECV, notif)
+            recvRes.onSuccess {
+                if (!processNotification(notif, resp, ackBuf, socketPollFd)) {
+                    state = ProfilerState.Terminated(socketFd, listenerFd)
+                }
+            }
+            if (state is ProfilerState.Terminated) return@nativeScope LoopAction.Break
+        }
+        return@nativeScope LoopAction.Continue
     }
 
     @Suppress("ReturnCount")

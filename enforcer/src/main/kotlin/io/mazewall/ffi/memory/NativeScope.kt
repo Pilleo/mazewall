@@ -20,7 +20,7 @@ internal val activeArena: ThreadLocal<Arena> = ThreadLocal()
  * arena is reused instead of creating a new one.
  */
 @OptIn(ExperimentalContracts::class)
-public inline fun <T> nativeScope(crossinline block: Arena.() -> T): T {
+public inline fun <T> nativeScope(block: Arena.() -> T): T {
     contract {
         callsInPlace(block, InvocationKind.EXACTLY_ONCE)
     }

@@ -237,24 +237,24 @@ internal class SupervisorSessionHandler(
         val errorOrHup = NativeConstants.POLLERR.toInt() or NativeConstants.POLLHUP.toInt() or NativeConstants.POLLNVAL.toInt()
         if ((socketRevents and (NativeConstants.POLLIN.toInt() or errorOrHup)) != 0) {
             // JVM socket closed, errored, or sent shutdown
-            LoopAction.Shutdown
-        } else {
-            val pfd1 = PollFdSegment(pollFds.asSlice(0L, Layouts.POLLFD.byteSize()))
-            val listenerRevents = pfd1.getRevents()
-            var action: LoopAction = LoopAction.Continue
-            if ((listenerRevents.toInt() and NativeConstants.POLLIN.toInt()) != 0) {
-                notif.fill(0)
-                var ok = false
-                LinuxNative.withTransaction {
-                    LinuxNative.ioctl(listenerFd, NativeConstants.SECCOMP_IOCTL_NOTIF_RECV, notif).onSuccess {
-                        ok = processNotification(notif, resp)
-                    }
-                    Unit
-                }
-                if (!ok) action = LoopAction.Break
-            }
-            action
+            return@nativeScope LoopAction.Shutdown
         }
+
+        val pfd1 = PollFdSegment(pollFds.asSlice(0L, Layouts.POLLFD.byteSize()))
+        val listenerRevents = pfd1.getRevents()
+        if ((listenerRevents.toInt() and NativeConstants.POLLIN.toInt()) != 0) {
+            notif.fill(0)
+            var ok = false
+            LinuxNative.withTransaction {
+                LinuxNative.ioctl(listenerFd, NativeConstants.SECCOMP_IOCTL_NOTIF_RECV, notif).onSuccess {
+                    ok = processNotification(notif, resp)
+                }
+                Unit
+            }
+            if (!ok) return@nativeScope LoopAction.Break
+        }
+
+        return@nativeScope LoopAction.Continue
     }
 
     @Suppress("TooGenericExceptionCaught")
