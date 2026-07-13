@@ -8,6 +8,7 @@ import io.mazewall.core.FileDescriptorRole
 import io.mazewall.core.Syscall
 import io.mazewall.ffi.Layouts
 import io.mazewall.ffi.NativeConstants
+import io.mazewall.ffi.memory.nativeScope
 import io.mazewall.recover
 import java.lang.foreign.Arena
 import java.lang.foreign.MemoryLayout
@@ -72,7 +73,7 @@ internal class ProfilerDaemonEngine(
         System.out.flush()
 
         try {
-            Arena.ofConfined().use { arena ->
+            nativeScope { arena ->
                 state = listeningState.active()
                 acceptConnections(serverFd, arena)
             }
@@ -136,7 +137,7 @@ internal class ProfilerDaemonEngine(
     private fun handleConnection(socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>) {
         var connection: io.mazewall.ffi.networking.SeccompConnection = io.mazewall.ffi.networking.SeccompConnection.Accepted(socketFd)
         try {
-            Arena.ofConfined().use { arena ->
+            nativeScope { arena ->
                 val pollFd = arena.allocate(Layouts.POLLFD)
                 pollFd.set(ValueLayout.JAVA_INT, POLLFD_FD_OFF, socketFd.value)
                 pollFd.set(ValueLayout.JAVA_SHORT, POLLFD_EVENTS_OFF, NativeConstants.POLLIN)
@@ -146,7 +147,7 @@ internal class ProfilerDaemonEngine(
                     if (connection is io.mazewall.ffi.networking.SeccompConnection.Accepted) {
                         val pollRes = ioOps.poll(pollFd, 1L, POLL_TIMEOUT_MS)
                         val count = pollRes.recover { errno, _ ->
-                            if (errno != NativeConstants.EINTR) return@use // Break from loop
+                            if (errno != NativeConstants.EINTR) return@nativeScope // Break from loop
                             0L
                         }
                         if (count <= 0) continue
@@ -161,7 +162,7 @@ internal class ProfilerDaemonEngine(
                                 connection = current.attachFd(listenerFd)
                                 // Immediately loop to send ACK (don't poll)
                             } else {
-                                return@use
+                                return@nativeScope
                             }
                         }
 
@@ -181,7 +182,7 @@ internal class ProfilerDaemonEngine(
                             // the connection entirely. The trace listener expects EOF on the
                             // socket to know all events are drained.
                             System.err.println("[DAEMON] Session reactor finished. Closing connection.")
-                            return@use
+                            return@nativeScope
                         }
                     }
                 }
@@ -214,7 +215,7 @@ internal class ProfilerDaemonEngine(
             onShutdown = this::triggerGlobalShutdown,
         )
         try {
-            Arena.ofConfined().use { arena ->
+            nativeScope { arena ->
                 val pollFds = with(arena) { setupSessionPoll(socketFd, listenerFd) }
                 val notif = arena.allocate(Layouts.SECCOMP_NOTIF)
                 val resp = arena.allocate(Layouts.SECCOMP_NOTIF_RESP)
@@ -224,7 +225,7 @@ internal class ProfilerDaemonEngine(
                 while (!isGlobalShutdown()) {
                     val pollRes = ioOps.poll(pollFds, 2L, POLL_TIMEOUT_MS)
                     val count = pollRes.recover { errno, _ ->
-                        if (errno != NativeConstants.EINTR) return@use // Break from loop
+                        if (errno != NativeConstants.EINTR) return@nativeScope // Break from loop
                         0L
                     }
                     if (count <= 0) continue

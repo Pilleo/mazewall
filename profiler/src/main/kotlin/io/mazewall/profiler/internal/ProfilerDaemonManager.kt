@@ -3,6 +3,7 @@ package io.mazewall.profiler.internal
 import io.mazewall.LinuxNative
 import io.mazewall.core.NativeArg
 import io.mazewall.ffi.NativeConstants
+import io.mazewall.ffi.memory.nativeScope
 import io.mazewall.getFdOrThrow
 import io.mazewall.onSuccess
 import java.io.IOException
@@ -167,7 +168,7 @@ internal object ProfilerDaemonManager {
 
     private fun triggerDaemonShutdown(socketPath: String) {
         try {
-            Arena.ofConfined().use { arena ->
+            nativeScope { arena ->
                 val (fdRes, addr) = LinuxNative.withTransaction {
                     val r1 = LinuxNative.networking.socket(
                         io.mazewall.ffi.networking.SupervisorSocketUtils.AF_UNIX,

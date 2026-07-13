@@ -6,6 +6,7 @@ import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
 import io.mazewall.ffi.Layouts
 import io.mazewall.ffi.NativeConstants
+import io.mazewall.ffi.memory.nativeScope
 import io.mazewall.getFdOrThrow
 import io.mazewall.onFailure
 import io.mazewall.onSuccess
@@ -126,7 +127,7 @@ object RealProfilerTransport : ProfilerTransport {
         socketFd: FileDescriptor<*, FdState.Open>,
         event: SyscallEvent<SyscallEventState.Resolved>,
     ) {
-        Arena.ofConfined().use { arena ->
+        nativeScope { arena ->
             val syscallNameBytes = event.syscallName.toByteArray(StandardCharsets.UTF_8)
             val pathBytesList = event.paths.map { it.toByteArray(StandardCharsets.UTF_8) }
 
@@ -235,7 +236,7 @@ object RealProfilerTransport : ProfilerTransport {
             )
         }.getFdOrThrow("socket(AF_UNIX)").let { FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(it.value) }
 
-        Arena.ofConfined().use { arena ->
+        nativeScope { arena ->
             val sockaddrUn = io.mazewall.ffi.networking.SupervisorSocketUtils.setupSockAddrUn(arena, socketPath)
 
             LinuxNative.withTransaction {
