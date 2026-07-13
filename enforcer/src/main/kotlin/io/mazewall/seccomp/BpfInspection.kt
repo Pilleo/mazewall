@@ -16,15 +16,6 @@ internal sealed interface ArgCheck {
     data class EqualsAny(
         val allowedValues: List<Long>,
     ) : ArgCheck
-
-    /**
-     * Checks if the lower 32 bits of the argument match any of the allowed values.
-     * This is useful for flags or options that are 32-bit but passed in 64-bit registers
-     * where the upper bits might contain garbage.
-     */
-    data class EqualsAny32(
-        val allowedValues: List<Int>,
-    ) : ArgCheck
 }
 
 /**

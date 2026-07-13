@@ -11,7 +11,6 @@ internal data class InspectionContext(
     val syscallActions: Map<Int, SeccompAction>,
     val defaultAction: SeccompAction,
     val jvmCriticalNrs: Set<Int>,
-    val jvmDefaultAllowedNrs: Set<Int>,
     val allowMmapExec: Boolean,
     val allowNonThreadClone: Boolean,
     val allowUnsafePrctl: Boolean,
@@ -22,11 +21,7 @@ internal data class InspectionContext(
      */
     fun resolveEffectiveAction(nr: Int): SeccompAction {
         if (nr in jvmCriticalNrs) return SeccompAction.ACT_ALLOW
-        return syscallActions[nr] ?: if (nr in jvmDefaultAllowedNrs) {
-            SeccompAction.ACT_ALLOW
-        } else {
-            defaultAction
-        }
+        return syscallActions[nr] ?: defaultAction
     }
 }
 
@@ -147,7 +142,7 @@ internal class UnsafePrctlInspector : SyscallInspector {
             SyscallInspection(
                 syscallNumber = nr,
                 argIndex = 0, // prctl option is the 1st argument
-                check = ArgCheck.EqualsAny32(SAFE_PRCTL_OPTIONS),
+                check = ArgCheck.EqualsAny(SAFE_PRCTL_OPTIONS),
                 ifMatched = context.resolveEffectiveAction(nr),
                 ifNotMatched = SeccompAction.ACT_ERRNO,
             )
@@ -155,40 +150,6 @@ internal class UnsafePrctlInspector : SyscallInspector {
     }
 
     private companion object {
-        // Options: PR_SET_NAME, PR_GET_NAME, PR_GET_SECCOMP, PR_SET_SECCOMP,
-        // PR_SET_NO_NEW_PRIVS, PR_GET_NO_NEW_PRIVS, PR_CAP_AMBIENT.
-        private val SAFE_PRCTL_OPTIONS = listOf(15, 16, 21, 22, 38, 39, 47)
-    }
-}
-
-/**
- * Inspects ioctl to allow essential JVM operations (NIO, ZGC) while blocking others.
- */
-internal class IoctlInspector : SyscallInspector {
-    override fun getInspections(arch: Arch, context: InspectionContext): List<SyscallInspection> {
-        if (arch.ioctl < 0) return emptyList()
-
-        val nr = arch.ioctl
-        return listOf(
-            SyscallInspection(
-                syscallNumber = nr,
-                argIndex = 1, // ioctl request is the 2nd argument
-                check = ArgCheck.EqualsAny32(ALLOWED_IOCTLS),
-                ifMatched = SeccompAction.ACT_ALLOW,
-                ifNotMatched = context.resolveEffectiveAction(nr),
-            )
-        )
-    }
-
-    private companion object {
-        private val ALLOWED_IOCTLS = listOf(
-            NativeConstants.FIONBIO.toInt(),
-            NativeConstants.FIONREAD.toInt(),
-            NativeConstants.UFFDIO_API.toInt(),
-            NativeConstants.UFFDIO_REGISTER.toInt(),
-            NativeConstants.UFFDIO_UNREGISTER.toInt(),
-            NativeConstants.UFFDIO_COPY.toInt(),
-            NativeConstants.UFFDIO_ZEROPAGE.toInt(),
-        )
+        private val SAFE_PRCTL_OPTIONS = listOf(15L, 16L, 21L, 22L, 38L, 39L)
     }
 }

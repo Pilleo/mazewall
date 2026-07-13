@@ -162,18 +162,14 @@ class BpfFilterTest {
         for (i in filter.indices) {
             val f = filter[i]
             if (f.code == 0x15.toShort() && f.k == prctlNr) {
-                // Search for the LO word load (offset 16) in following instructions
-                for (j in (i + 1) until minOf(i + 10, filter.size)) {
-                    val fj = filter[j]
-                    if (fj.code == 0x20.toShort() && fj.k == 16) {
-                        foundInspection = true
-                        break
-                    }
+                // Should load args[0] HI (offset 16 + 4 = 20)
+                val ldArgs = filter[i + 1]
+                if (ldArgs.code == 0x20.toShort() && ldArgs.k == 20) {
+                    foundInspection = true
                 }
             }
-            if (foundInspection) break
         }
-        assertTrue(foundInspection, "Filter should inspect prctl arguments (LO word)")
+        assertTrue(foundInspection, "Filter should inspect prctl arguments")
     }
 
     @Test
@@ -310,45 +306,5 @@ class BpfFilterTest {
         assertTrue(valuesChecked.contains(lo1), "LO 1 check should be present")
         assertTrue(valuesChecked.contains(hi2), "HI 2 check should be present")
         assertTrue(valuesChecked.contains(lo2), "LO 2 check should be present")
-    }
-
-    @Test
-    fun `jvm critical syscalls are allowed by default`() {
-        val policy = Policy.builder().defaultAction(SeccompAction.ACT_ERRNO).build()
-        val filter = BpfFilter.build(arch, policy.definition)
-
-        val criticalSyscalls = listOf(
-            Syscall.FUTEX, Syscall.SCHED_YIELD, Syscall.RT_SIGRETURN, Syscall.RT_SIGACTION,
-            Syscall.RT_SIGPROCMASK, Syscall.RT_SIGQUEUEINFO, Syscall.MADVISE, Syscall.GETTID, Syscall.GETPID,
-            Syscall.GETUID, Syscall.GETGID, Syscall.GETEUID, Syscall.GETEGID,
-            Syscall.CLOSE, Syscall.READ, Syscall.WRITE, Syscall.PREAD64, Syscall.PWRITE64,
-            Syscall.FSTAT, Syscall.FSTATAT, Syscall.STATX, Syscall.LSEEK, Syscall.FCNTL,
-            Syscall.GETDENTS, Syscall.GETDENTS64, Syscall.READLINK, Syscall.READLINKAT,
-            Syscall.FACCESSAT, Syscall.FACCESSAT2, Syscall.POLL, Syscall.NANOSLEEP, Syscall.CLOCK_NANOSLEEP,
-            Syscall.MMAP, Syscall.MPROTECT, Syscall.PKEY_MPROTECT, Syscall.MUNMAP, Syscall.BRK,
-            Syscall.PRCTL, Syscall.CLOCK_GETTIME, Syscall.GETRANDOM,
-            Syscall.GETSOCKOPT, Syscall.SETSOCKOPT, Syscall.GETSOCKNAME, Syscall.GETPEERNAME,
-            Syscall.RECVFROM, Syscall.RECVMSG, Syscall.SENDTO, Syscall.SENDMSG,
-            Syscall.EXIT, Syscall.EXIT_GROUP,
-            Syscall.PRLIMIT64, Syscall.GETRUSAGE, Syscall.SIGALTSTACK, Syscall.UNAME,
-            Syscall.GETITIMER, Syscall.SETITIMER,
-            Syscall.USERFAULTFD, Syscall.TGKILL, Syscall.SCHED_GETAFFINITY, Syscall.PIPE2, Syscall.EVENTFD2,
-            Syscall.EPOLL_CREATE1, Syscall.EPOLL_CTL, Syscall.EPOLL_WAIT, Syscall.EPOLL_PWAIT
-        )
-
-        for (syscall in criticalSyscalls) {
-            val nr = syscall.numberFor(arch)
-            if (nr < 0) continue
-
-            var foundAllow = false
-            for (i in filter.indices) {
-                val f = filter[i]
-                if (f.code == 0x15.toShort() && f.k == nr) {
-                    foundAllow = true
-                    break
-                }
-            }
-            assertTrue(foundAllow, "Syscall $syscall ($nr) should be handled and allowed by default in critical floor")
-        }
     }
 }

@@ -67,15 +67,4 @@ object NativeConstants {
     const val O_PATH = 0x01000000
     const val O_CLOEXEC = 0x00080000
     const val O_NOFOLLOW = 0x00020000
-
-    // IOCTLs
-    const val FIONBIO = 0x5421L
-    const val FIONREAD = 0x541BL
-
-    // Userfaultfd IOCTLs
-    const val UFFDIO_API = 0xc018aa3fL
-    const val UFFDIO_REGISTER = 0xc020aa00L
-    const val UFFDIO_UNREGISTER = 0x8010aa01L
-    const val UFFDIO_COPY = 0xc028aa03L
-    const val UFFDIO_ZEROPAGE = 0xc020aa04L
 }

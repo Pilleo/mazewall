@@ -60,7 +60,6 @@ object BpfFilter {
                 io.mazewall.seccomp.ThreadCloneInspector(),
                 io.mazewall.seccomp.UnsafePrctlInspector(),
                 io.mazewall.seccomp.Clone3Inspector(),
-                io.mazewall.seccomp.IoctlInspector(),
             )
         )
     }
@@ -123,7 +122,6 @@ object BpfFilter {
 
         // Syscalls absolutely required for safepoints, GC, and thread stability.
         val jvmCriticalNrs = getJvmCriticalNrs(arch)
-        val jvmDefaultAllowedNrs = getJvmDefaultAllowedNrs(arch)
 
         // 1. Initialize Builder and enforce sequence: Arch Check -> Load NR
         val builder = BpfProgram.builder()
@@ -136,7 +134,6 @@ object BpfFilter {
             effectiveSyscallActions,
             defaultAction,
             jvmCriticalNrs,
-            jvmDefaultAllowedNrs,
             allowMmapExec,
             allowNonThreadClone,
             allowUnsafePrctl
@@ -150,99 +147,25 @@ object BpfFilter {
         pipeline.emitSpecial(builder, arch, context, handledNrs)
 
         // 3. Block-based checks (Linear Scan)
-        emitLinearScan(
-            builder,
-            effectiveSyscallActions,
-            jvmCriticalNrs,
-            jvmDefaultAllowedNrs,
-            profilingMode,
-            defaultNativeAction,
-            handledNrs,
-        )
+        emitLinearScan(builder, effectiveSyscallActions, jvmCriticalNrs, profilingMode, defaultNativeAction, handledNrs)
 
         // 4. Default Action & Build
         return builder.ret(defaultNativeAction).build().instructions
     }
 
-    /**
-     * Syscalls that are absolutely required for the JVM to function and MUST NOT be blocked.
-     * These will override any explicit user block action.
-     */
     private fun getJvmCriticalNrs(arch: Arch): Set<Int> =
         setOf(
             Syscall.FUTEX.numberFor(arch),
             Syscall.SCHED_YIELD.numberFor(arch),
             Syscall.RT_SIGRETURN.numberFor(arch),
             Syscall.RT_SIGACTION.numberFor(arch),
-            Syscall.RT_SIGPROCMASK.numberFor(arch),
-            Syscall.RT_SIGQUEUEINFO.numberFor(arch),
             Syscall.MADVISE.numberFor(arch),
             Syscall.GETTID.numberFor(arch),
             Syscall.CLOSE.numberFor(arch),
-            Syscall.READ.numberFor(arch),
-            Syscall.WRITE.numberFor(arch),
-            Syscall.PREAD64.numberFor(arch),
-            Syscall.PWRITE64.numberFor(arch),
-            Syscall.FSTAT.numberFor(arch),
-            Syscall.FSTATAT.numberFor(arch),
-            Syscall.STATX.numberFor(arch),
-            Syscall.LSEEK.numberFor(arch),
-            Syscall.FCNTL.numberFor(arch),
-            Syscall.GETDENTS.numberFor(arch),
-            Syscall.GETDENTS64.numberFor(arch),
+            Syscall.RT_SIGPROCMASK.numberFor(arch),
             Syscall.MMAP.numberFor(arch),
             Syscall.MPROTECT.numberFor(arch),
             Syscall.PKEY_MPROTECT.numberFor(arch),
-            Syscall.MUNMAP.numberFor(arch),
-            Syscall.BRK.numberFor(arch),
-            Syscall.CLOCK_GETTIME.numberFor(arch),
-            Syscall.EXIT.numberFor(arch),
-            Syscall.EXIT_GROUP.numberFor(arch),
-            Syscall.PIPE2.numberFor(arch),
-            Syscall.PRLIMIT64.numberFor(arch),
-            Syscall.GETRUSAGE.numberFor(arch),
-            Syscall.SIGALTSTACK.numberFor(arch),
-            Syscall.UNAME.numberFor(arch),
-        ).filter { it >= 0 }.toSet()
-
-    /**
-     * Syscalls that are allowed by default for JVM stability but CAN be blocked
-     * if the user explicitly specifies a block action.
-     */
-    private fun getJvmDefaultAllowedNrs(arch: Arch): Set<Int> =
-        setOf(
-            Syscall.GETPID.numberFor(arch),
-            Syscall.GETUID.numberFor(arch),
-            Syscall.GETGID.numberFor(arch),
-            Syscall.GETEUID.numberFor(arch),
-            Syscall.GETEGID.numberFor(arch),
-            Syscall.READLINK.numberFor(arch),
-            Syscall.READLINKAT.numberFor(arch),
-            Syscall.FACCESSAT.numberFor(arch),
-            Syscall.FACCESSAT2.numberFor(arch),
-            Syscall.POLL.numberFor(arch),
-            Syscall.NANOSLEEP.numberFor(arch),
-            Syscall.CLOCK_NANOSLEEP.numberFor(arch),
-            Syscall.PRCTL.numberFor(arch),
-            Syscall.GETRANDOM.numberFor(arch),
-            Syscall.GETSOCKOPT.numberFor(arch),
-            Syscall.SETSOCKOPT.numberFor(arch),
-            Syscall.GETSOCKNAME.numberFor(arch),
-            Syscall.GETPEERNAME.numberFor(arch),
-            Syscall.RECVFROM.numberFor(arch),
-            Syscall.RECVMSG.numberFor(arch),
-            Syscall.SENDTO.numberFor(arch),
-            Syscall.SENDMSG.numberFor(arch),
-            Syscall.GETITIMER.numberFor(arch),
-            Syscall.SETITIMER.numberFor(arch),
-            Syscall.USERFAULTFD.numberFor(arch),
-            Syscall.TGKILL.numberFor(arch),
-            Syscall.SCHED_GETAFFINITY.numberFor(arch),
-            Syscall.EVENTFD2.numberFor(arch),
-            Syscall.EPOLL_CREATE1.numberFor(arch),
-            Syscall.EPOLL_CTL.numberFor(arch),
-            Syscall.EPOLL_WAIT.numberFor(arch),
-            Syscall.EPOLL_PWAIT.numberFor(arch),
         ).filter { it >= 0 }.toSet()
 
     internal fun emitInspections(
@@ -285,20 +208,6 @@ object BpfFilter {
                         ret(ifMatchedNative)
                     }
 
-                    is io.mazewall.seccomp.ArgCheck.EqualsAny32 -> {
-                        val allowLabel = nextLabel("${labelPrefix}_allow")
-                        check.allowedValues.forEachIndexed { valIdx, value ->
-                            val nextValLabel = nextLabel("${labelPrefix}_next_$valIdx")
-
-                            loadAbsolute(argOffsetLo)
-                            jumpIfEqual(value, jt = allowLabel, jf = nextValLabel)
-                            mark(nextValLabel)
-                        }
-                        ret(ifNotMatchedNative)
-                        mark(allowLabel)
-                        ret(ifMatchedNative)
-                    }
-
                     is io.mazewall.seccomp.ArgCheck.MaskEquals -> {
                         val maskHi = (check.mask ushr 32).toInt()
                         val expectedHi = (check.expected ushr 32).toInt()
@@ -330,7 +239,6 @@ object BpfFilter {
         builder: io.mazewall.seccomp.BpfBuilder.NrLoaded,
         syscallActions: Map<Int, SeccompAction>,
         jvmCriticalNrs: Set<Int>,
-        jvmDefaultAllowedNrs: Set<Int>,
         profilingMode: Boolean,
         defaultNativeAction: Int,
         handledNrs: MutableSet<Int>,
@@ -339,8 +247,6 @@ object BpfFilter {
             if (nr !in handledNrs) {
                 handledNrs.add(nr)
 
-                // Critical NRs override EVERYTHING.
-                // Other NRs (including DefaultAllowed) respect explicit user actions.
                 val effectiveAction = if (nr in jvmCriticalNrs) SeccompAction.ACT_ALLOW else action
                 val nativeAction = resolveNativeAction(effectiveAction, profilingMode)
 
@@ -352,10 +258,9 @@ object BpfFilter {
             }
         }
 
-        // Inject the JVM Immutable Base and Default Allowed set for restrictive default actions (Whitelists)
+        // Inject the JVM Immutable Base for restrictive default actions (Whitelists)
         if (defaultNativeAction != NativeConstants.SECCOMP_RET_ALLOW) {
-            val whitelistNrs = (jvmCriticalNrs + jvmDefaultAllowedNrs).sorted()
-            for (nr in whitelistNrs) {
+            for (nr in jvmCriticalNrs.sorted()) {
                 if (nr in handledNrs) continue
                 handledNrs.add(nr)
 
