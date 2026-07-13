@@ -208,6 +208,37 @@ class BpfFilterTest {
     }
 
     @Test
+    fun `testBpfEqualsAny32 only checks LO word`() {
+        val inspections = listOf(
+            SyscallInspection(
+                syscallNumber = 500,
+                argIndex = 0,
+                check = ArgCheck.EqualsAny32(listOf(0x12345678)),
+                ifMatched = SeccompAction.ACT_ALLOW,
+                ifNotMatched = SeccompAction.ACT_ERRNO,
+            )
+        )
+        val builder = BpfProgram.builder()
+            .checkArch(arch)
+            .loadSyscallNr()
+        val handled = mutableSetOf<Int>()
+        BpfFilter.emitInspections(builder, inspections, false, handled)
+        val instructions = builder.allow().build().instructions
+
+        // Should load args[0] LO (offset 16)
+        val hasLoLoad = instructions.any { it.code == 0x20.toShort() && it.k == 16 }
+        assertTrue(hasLoLoad, "Filter should load the LO word of the argument")
+
+        // Should NOT load args[0] HI (offset 20)
+        val hasHiLoad = instructions.any { it.code == 0x20.toShort() && it.k == 20 }
+        assertTrue(!hasHiLoad, "Filter should NOT load the HI word of the argument")
+
+        // Should check value
+        val hasValueCheck = instructions.any { it.code == 0x15.toShort() && it.k == 0x12345678 }
+        assertTrue(hasValueCheck, "Filter should check the allowed 32-bit value")
+    }
+
+    @Test
     fun `testBpfEqualsAny options size variety`() {
         val inspections = listOf(
             SyscallInspection(
@@ -313,6 +344,7 @@ class BpfFilterTest {
         val policy = Policy.builder().defaultAction(SeccompAction.ACT_ERRNO).build()
         val filter = BpfFilter.build(arch, policy.definition)
 
+        // Combined set of Critical and DefaultAllowed NRs
         val criticalSyscalls = listOf(
             Syscall.FUTEX, Syscall.SCHED_YIELD, Syscall.RT_SIGRETURN, Syscall.RT_SIGACTION,
             Syscall.RT_SIGPROCMASK, Syscall.MADVISE, Syscall.GETTID, Syscall.GETPID,
@@ -344,6 +376,30 @@ class BpfFilterTest {
             }
             assertTrue(foundAllow, "Syscall $syscall ($nr) should be handled and allowed by default in critical floor")
         }
+    }
+
+    @Test
+    fun `prctl can be blocked when inspection is disabled and it is explicitly blocked`() {
+        val policy = Policy.builder()
+            .allowUnsafePrctl() // Disable inspection
+            .block(Syscall.PRCTL) // Explicitly block it
+            .build()
+        val filter = BpfFilter.build(arch, policy.definition)
+
+        val prctlNr = Syscall.PRCTL.numberFor(arch)
+        var foundDeny = false
+        for (i in filter.indices) {
+            val f = filter[i]
+            if (f.code == 0x15.toShort() && f.k == prctlNr) {
+                // Next should be RET ERRNO (EPERM)
+                val next = filter[i + 1]
+                if (next.code == 0x06.toShort() && next.k == (NativeConstants.SECCOMP_RET_ERRNO or NativeConstants.EPERM)) {
+                    foundDeny = true
+                    break
+                }
+            }
+        }
+        assertTrue(foundDeny, "prctl should be blocked when explicitly listed in policy even if it is normally allowed by default")
     }
 
     @Test

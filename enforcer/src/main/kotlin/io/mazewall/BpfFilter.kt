@@ -123,6 +123,7 @@ object BpfFilter {
 
         // Syscalls absolutely required for safepoints, GC, and thread stability.
         val jvmCriticalNrs = getJvmCriticalNrs(arch)
+        val jvmDefaultAllowedNrs = getJvmDefaultAllowedNrs(arch)
 
         // 1. Initialize Builder and enforce sequence: Arch Check -> Load NR
         val builder = BpfProgram.builder()
@@ -135,6 +136,7 @@ object BpfFilter {
             effectiveSyscallActions,
             defaultAction,
             jvmCriticalNrs,
+            jvmDefaultAllowedNrs,
             allowMmapExec,
             allowNonThreadClone,
             allowUnsafePrctl
@@ -148,12 +150,24 @@ object BpfFilter {
         pipeline.emitSpecial(builder, arch, context, handledNrs)
 
         // 3. Block-based checks (Linear Scan)
-        emitLinearScan(builder, effectiveSyscallActions, jvmCriticalNrs, profilingMode, defaultNativeAction, handledNrs)
+        emitLinearScan(
+            builder,
+            effectiveSyscallActions,
+            jvmCriticalNrs,
+            jvmDefaultAllowedNrs,
+            profilingMode,
+            defaultNativeAction,
+            handledNrs,
+        )
 
         // 4. Default Action & Build
         return builder.ret(defaultNativeAction).build().instructions
     }
 
+    /**
+     * Syscalls that are absolutely required for the JVM to function and MUST NOT be blocked.
+     * These will override any explicit user block action.
+     */
     private fun getJvmCriticalNrs(arch: Arch): Set<Int> =
         setOf(
             Syscall.FUTEX.numberFor(arch),
@@ -163,11 +177,6 @@ object BpfFilter {
             Syscall.RT_SIGPROCMASK.numberFor(arch),
             Syscall.MADVISE.numberFor(arch),
             Syscall.GETTID.numberFor(arch),
-            Syscall.GETPID.numberFor(arch),
-            Syscall.GETUID.numberFor(arch),
-            Syscall.GETGID.numberFor(arch),
-            Syscall.GETEUID.numberFor(arch),
-            Syscall.GETEGID.numberFor(arch),
             Syscall.CLOSE.numberFor(arch),
             Syscall.READ.numberFor(arch),
             Syscall.WRITE.numberFor(arch),
@@ -180,25 +189,38 @@ object BpfFilter {
             Syscall.FCNTL.numberFor(arch),
             Syscall.GETDENTS.numberFor(arch),
             Syscall.GETDENTS64.numberFor(arch),
-            Syscall.READLINK.numberFor(arch),
-            Syscall.READLINKAT.numberFor(arch),
-            Syscall.FACCESSAT.numberFor(arch),
-            Syscall.FACCESSAT2.numberFor(arch),
-            Syscall.POLL.numberFor(arch),
             Syscall.MMAP.numberFor(arch),
             Syscall.MPROTECT.numberFor(arch),
             Syscall.PKEY_MPROTECT.numberFor(arch),
             Syscall.MUNMAP.numberFor(arch),
             Syscall.BRK.numberFor(arch),
-            Syscall.PRCTL.numberFor(arch),
             Syscall.CLOCK_GETTIME.numberFor(arch),
-            Syscall.GETRANDOM.numberFor(arch),
             Syscall.EXIT.numberFor(arch),
             Syscall.EXIT_GROUP.numberFor(arch),
+            Syscall.PIPE2.numberFor(arch),
+        ).filter { it >= 0 }.toSet()
+
+    /**
+     * Syscalls that are allowed by default for JVM stability but CAN be blocked
+     * if the user explicitly specifies a block action.
+     */
+    private fun getJvmDefaultAllowedNrs(arch: Arch): Set<Int> =
+        setOf(
+            Syscall.GETPID.numberFor(arch),
+            Syscall.GETUID.numberFor(arch),
+            Syscall.GETGID.numberFor(arch),
+            Syscall.GETEUID.numberFor(arch),
+            Syscall.GETEGID.numberFor(arch),
+            Syscall.READLINK.numberFor(arch),
+            Syscall.READLINKAT.numberFor(arch),
+            Syscall.FACCESSAT.numberFor(arch),
+            Syscall.FACCESSAT2.numberFor(arch),
+            Syscall.POLL.numberFor(arch),
+            Syscall.PRCTL.numberFor(arch),
+            Syscall.GETRANDOM.numberFor(arch),
             Syscall.USERFAULTFD.numberFor(arch),
             Syscall.TGKILL.numberFor(arch),
             Syscall.SCHED_GETAFFINITY.numberFor(arch),
-            Syscall.PIPE2.numberFor(arch),
             Syscall.EVENTFD2.numberFor(arch),
             Syscall.EPOLL_CREATE1.numberFor(arch),
             Syscall.EPOLL_CTL.numberFor(arch),
@@ -291,6 +313,7 @@ object BpfFilter {
         builder: io.mazewall.seccomp.BpfBuilder.NrLoaded,
         syscallActions: Map<Int, SeccompAction>,
         jvmCriticalNrs: Set<Int>,
+        jvmDefaultAllowedNrs: Set<Int>,
         profilingMode: Boolean,
         defaultNativeAction: Int,
         handledNrs: MutableSet<Int>,
@@ -299,6 +322,8 @@ object BpfFilter {
             if (nr !in handledNrs) {
                 handledNrs.add(nr)
 
+                // Critical NRs override EVERYTHING.
+                // Other NRs (including DefaultAllowed) respect explicit user actions.
                 val effectiveAction = if (nr in jvmCriticalNrs) SeccompAction.ACT_ALLOW else action
                 val nativeAction = resolveNativeAction(effectiveAction, profilingMode)
 
@@ -310,9 +335,10 @@ object BpfFilter {
             }
         }
 
-        // Inject the JVM Immutable Base for restrictive default actions (Whitelists)
+        // Inject the JVM Immutable Base and Default Allowed set for restrictive default actions (Whitelists)
         if (defaultNativeAction != NativeConstants.SECCOMP_RET_ALLOW) {
-            for (nr in jvmCriticalNrs.sorted()) {
+            val whitelistNrs = (jvmCriticalNrs + jvmDefaultAllowedNrs).sorted()
+            for (nr in whitelistNrs) {
                 if (nr in handledNrs) continue
                 handledNrs.add(nr)
 

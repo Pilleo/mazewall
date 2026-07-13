@@ -11,6 +11,7 @@ internal data class InspectionContext(
     val syscallActions: Map<Int, SeccompAction>,
     val defaultAction: SeccompAction,
     val jvmCriticalNrs: Set<Int>,
+    val jvmDefaultAllowedNrs: Set<Int>,
     val allowMmapExec: Boolean,
     val allowNonThreadClone: Boolean,
     val allowUnsafePrctl: Boolean,
@@ -21,7 +22,11 @@ internal data class InspectionContext(
      */
     fun resolveEffectiveAction(nr: Int): SeccompAction {
         if (nr in jvmCriticalNrs) return SeccompAction.ACT_ALLOW
-        return syscallActions[nr] ?: defaultAction
+        return syscallActions[nr] ?: if (nr in jvmDefaultAllowedNrs) {
+            SeccompAction.ACT_ALLOW
+        } else {
+            defaultAction
+        }
     }
 }
 
