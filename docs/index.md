@@ -17,6 +17,9 @@ While the examples are JVM-specific, the underlying concepts (Seccomp-BPF, Landl
 2. **[Part 1: Do You Really Know What Your App Is Doing at Runtime?](presentation/article1-threat-model.html)**  
    The threat model, SBoB concept, and why container-level profiles aren't enough.
 
+   * **[Interlude: Why Would We Do the Same Thing That Failed?](presentation/article1b-why-again.html)**  
+     Confronting the skeptic: why thread-level sandboxing failed historically (e.g., in Chromium) and why JVM type-safety changes the threat model.
+
 3. **[Part 2: Let Your Code Build Its Own Sandbox](presentation/article2-profiler.html)**  
    Dynamic profiling: how to observe a workload and auto-generate its minimal policy.
 
