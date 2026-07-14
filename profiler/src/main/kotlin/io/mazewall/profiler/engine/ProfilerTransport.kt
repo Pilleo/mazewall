@@ -18,6 +18,7 @@ import java.nio.charset.StandardCharsets
  * High-level interface for publishing domain events to the parent JVM.
  */
 interface TraceEventPublisher {
+    context(arena: Arena)
     fun sendTraceEvent(
         socketFd: FileDescriptor<*, FdState.Open>,
         event: SyscallEvent<SyscallEventState.Resolved>,
@@ -32,6 +33,7 @@ interface SeccompResponder {
      * Sends a SECCOMP_USER_NOTIF_FLAG_CONTINUE response to the kernel for a successful handshake.
      * Enforced at compile-time to only work with sessions in the Success state.
      */
+    context(arena: Arena)
     fun sendSeccompContinue(
         session: HandshakeSession.Success,
         resp: MemorySegment,
@@ -41,6 +43,7 @@ interface SeccompResponder {
      * Sends an error response (or generic failure) to the kernel for a failed handshake.
      * Enforced at compile-time to only work with sessions in the Failed state.
      */
+    context(arena: Arena)
     fun sendSeccompError(
         session: HandshakeSession.Failed,
         resp: MemorySegment,
@@ -116,49 +119,49 @@ object RealProfilerTransport : ProfilerTransport {
     private val JAVA_INT_BE_UNALIGNED = ValueLayout.JAVA_INT.withOrder(java.nio.ByteOrder.BIG_ENDIAN).withByteAlignment(1)
     private val JAVA_LONG_BE_UNALIGNED = ValueLayout.JAVA_LONG.withOrder(java.nio.ByteOrder.BIG_ENDIAN).withByteAlignment(1)
 
+    context(arena: Arena)
     override fun sendTraceEvent(
         socketFd: FileDescriptor<*, FdState.Open>,
         event: SyscallEvent<SyscallEventState.Resolved>,
     ) {
-        Arena.ofConfined().use { arena ->
-            val syscallNameBytes = event.syscallName.toByteArray(StandardCharsets.UTF_8)
-            val pathBytesList = event.paths.map { it.toByteArray(StandardCharsets.UTF_8) }
+        val syscallNameBytes = event.syscallName.toByteArray(StandardCharsets.UTF_8)
+        val pathBytesList = event.paths.map { it.toByteArray(StandardCharsets.UTF_8) }
 
-            var totalSize = 4 + 4 + syscallNameBytes.size + 4 + (event.args.size * 8) + 4
-            for (p in pathBytesList) {
-                totalSize += 4 + p.size
-            }
-
-            val buf = arena.allocate(totalSize.toLong())
-            var offset = 0L
-            buf.set(JAVA_INT_BE_UNALIGNED, offset, event.tid.value)
-            offset += 4
-            buf.set(JAVA_INT_BE_UNALIGNED, offset, syscallNameBytes.size)
-            offset += 4
-            MemorySegment.copy(syscallNameBytes, 0, buf, ValueLayout.JAVA_BYTE, offset, syscallNameBytes.size)
-            offset += syscallNameBytes.size
-
-            buf.set(JAVA_INT_BE_UNALIGNED, offset, event.args.size)
-            offset += 4
-            for (arg in event.args) {
-                buf.set(JAVA_LONG_BE_UNALIGNED, offset, arg)
-                offset += 8
-            }
-
-            buf.set(JAVA_INT_BE_UNALIGNED, offset, pathBytesList.size)
-            offset += 4
-            for (p in pathBytesList) {
-                buf.set(JAVA_INT_BE_UNALIGNED, offset, p.size)
-                offset += 4
-                MemorySegment.copy(p, 0, buf, ValueLayout.JAVA_BYTE, offset, p.size)
-                offset += p.size
-            }
-
-            val res = LinuxNative.withTransaction { LinuxNative.memory.write(socketFd, buf, totalSize.toLong()) }
-            res.getOrThrow("sendTraceEvent")
+        var totalSize = 4 + 4 + syscallNameBytes.size + 4 + (event.args.size * 8) + 4
+        for (p in pathBytesList) {
+            totalSize += 4 + p.size
         }
+
+        val buf = arena.allocate(totalSize.toLong())
+        var offset = 0L
+        buf.set(JAVA_INT_BE_UNALIGNED, offset, event.tid.value)
+        offset += 4
+        buf.set(JAVA_INT_BE_UNALIGNED, offset, syscallNameBytes.size)
+        offset += 4
+        MemorySegment.copy(syscallNameBytes, 0, buf, ValueLayout.JAVA_BYTE, offset, syscallNameBytes.size)
+        offset += syscallNameBytes.size
+
+        buf.set(JAVA_INT_BE_UNALIGNED, offset, event.args.size)
+        offset += 4
+        for (arg in event.args) {
+            buf.set(JAVA_LONG_BE_UNALIGNED, offset, arg)
+            offset += 8
+        }
+
+        buf.set(JAVA_INT_BE_UNALIGNED, offset, pathBytesList.size)
+        offset += 4
+        for (p in pathBytesList) {
+            buf.set(JAVA_INT_BE_UNALIGNED, offset, p.size)
+            offset += 4
+            MemorySegment.copy(p, 0, buf, ValueLayout.JAVA_BYTE, offset, p.size)
+            offset += p.size
+        }
+
+        val res = LinuxNative.withTransaction { LinuxNative.memory.write(socketFd, buf, totalSize.toLong()) }
+        res.getOrThrow("sendTraceEvent")
     }
 
+    context(arena: Arena)
     override fun sendSeccompContinue(
         session: HandshakeSession.Success,
         resp: MemorySegment,
@@ -171,6 +174,7 @@ object RealProfilerTransport : ProfilerTransport {
         ioctl(session.listenerFd, SECCOMP_IOCTL_NOTIF_SEND, resp).getOrThrow("sendSeccompContinue")
     }
 
+    context(arena: Arena)
     override fun sendSeccompError(
         session: HandshakeSession.Failed,
         resp: MemorySegment,
