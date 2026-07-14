@@ -2,6 +2,7 @@ package io.mazewall.profiler.engine
 
 import io.mazewall.core.Pid
 import io.mazewall.core.Tid
+import java.lang.foreign.Arena
 
 /**
  * Resolves syscall path arguments by reading from the tracee's memory.
@@ -14,6 +15,7 @@ internal class SyscallPathResolver(
     /**
      * Resolves path arguments for a raw syscall event.
      */
+    context(arena: Arena)
     fun resolve(event: SyscallEvent<SyscallEventState.Raw>): SyscallEvent<SyscallEventState.Resolved> {
         val tid = event.tid
         val args = event.args
@@ -29,18 +31,18 @@ internal class SyscallPathResolver(
                 listOfNotNull(tryRead(tid, args[0]), tryRead(tid, args[1]))
 
             "OPENAT", "EXECVEAT", "OPENAT2", "MKDIRAT", "UNLINKAT", "FCHMODAT", "FCHOWNAT", "UTIMENSAT", "FSTATAT", "READLINKAT" ->
-                listOfNotNull(tryRead(tid, args[1], args[0])) // dirfd=0, path=1
+                listOfNotNull(tryRead(tid, args[1], args[0]))
 
             "RENAMEAT", "RENAMEAT2", "LINKAT" ->
                 listOfNotNull(
-                    tryRead(tid, args[1], args[0]), // olddirfd=0, oldpath=1
-                    tryRead(tid, args[3], args[2]), // newdirfd=2, newpath=3
+                    tryRead(tid, args[1], args[0]),
+                    tryRead(tid, args[3], args[2]),
                 )
 
             "SYMLINKAT" ->
                 listOfNotNull(
-                    tryRead(tid, args[0]), // target (oldpath) is relative to CWD
-                    tryRead(tid, args[2], args[1]), // linkpath (newpath) is relative to newdirfd
+                    tryRead(tid, args[0]),
+                    tryRead(tid, args[2], args[1]),
                 )
 
             else -> emptyList()
@@ -48,12 +50,15 @@ internal class SyscallPathResolver(
         return event.resolved(paths)
     }
 
+    context(arena: Arena)
     private fun resolveCwd(tid: Tid): String? = memoryReader.resolveLink(tid, "cwd")
 
+    context(arena: Arena)
     private fun resolveFdPath(tid: Tid, fd: Int): String? = memoryReader.resolveLink(tid, "fd/$fd")
 
     private fun isAtFdcwd(fd: Long): Boolean = fd == AT_FDCWD_VAL || fd == AT_FDCWD_UNSIGNED_VAL || fd.toInt() == AT_FDCWD_INT_VAL
 
+    context(arena: Arena)
     private fun tryRead(
         tid: Tid,
         addr: Long,
@@ -70,6 +75,7 @@ internal class SyscallPathResolver(
         }
     }
 
+    context(arena: Arena)
     private fun resolveRelativePath(
         tid: Tid,
         path: String,

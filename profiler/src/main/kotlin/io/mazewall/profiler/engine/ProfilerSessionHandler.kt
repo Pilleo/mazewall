@@ -1,6 +1,7 @@
 package io.mazewall.profiler.engine
 
 import io.mazewall.LinuxNative
+import java.lang.foreign.Arena
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
@@ -17,9 +18,7 @@ import java.lang.foreign.ValueLayout
  */
 internal sealed class LoopAction {
     object Continue : LoopAction()
-
     object Break : LoopAction()
-
     object Shutdown : LoopAction()
 }
 
@@ -42,6 +41,7 @@ internal class ProfilerSessionHandler(
         private set
 
     @Suppress("ReturnCount")
+    context(arena: Arena)
     fun handleActiveListener(
         pollFds: MemorySegment,
         ackBuf: MemorySegment,
@@ -74,7 +74,8 @@ internal class ProfilerSessionHandler(
             notif.fill(0)
             val recvRes = LinuxNative.withTransaction { ioOps.raw.ioctl(listenerFd, SECCOMP_IOCTL_NOTIF_RECV, notif) }
             recvRes.onSuccess {
-                if (!processNotification(notif, resp, ackBuf, socketPollFd)) {
+                val ok = processNotification(notif, resp, ackBuf, socketPollFd)
+                if (!ok) {
                     state = ProfilerState.Terminated(socketFd, listenerFd)
                 }
             }
@@ -102,6 +103,7 @@ internal class ProfilerSessionHandler(
     }
 
     @Suppress("TooGenericExceptionCaught", "ReturnCount", "CyclomaticComplexMethod")
+    context(arena: Arena)
     internal fun processNotification(
         notif: MemorySegment,
         resp: MemorySegment,
@@ -129,11 +131,13 @@ internal class ProfilerSessionHandler(
 
             // RESOLVE: Transform raw event into a resolved event (read path from tracee memory).
             val resolver = SyscallPathResolver(memoryReader, ledger)
-            val resolvedEvent = resolver.resolve(event = SyscallEvent<SyscallEventState.Raw>(
-                tid = Tid(pidVal),
-                syscallName = syscallMap[nr] ?: "SYSCALL_$nr",
-                args = args.toList()
-            ))
+            val resolvedEvent = resolver.resolve(
+                event = SyscallEvent<SyscallEventState.Raw>(
+                    tid = Tid(pidVal),
+                    syscallName = syscallMap[nr] ?: "SYSCALL_$nr",
+                    args = args.toList()
+                )
+            )
 
             // Optimisation: skip event delivery for JVM-internal paths that generate noise
             // (JDK home, classpath, /proc, /sys).
