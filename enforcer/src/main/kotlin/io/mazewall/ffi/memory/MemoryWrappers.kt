@@ -143,6 +143,14 @@ public value class ErrnoSegment(public val segment: MemorySegment) {
     public fun getErrno(): Int = segment.get(ValueLayout.JAVA_INT, Layouts.ERRNO_OFFSET)
 
     public companion object {
+        private val THREAD_LOCAL_SEGMENT = ThreadLocal.withInitial { Arena.global().allocate(Layouts.ERRNO) }
+
+        /**
+         * Returns a thread-local [ErrnoSegment] used to capture native call errors.
+         * This avoids expensive [Arena.ofConfined] allocations in high-frequency loops.
+         */
+        public fun getThreadLocal(): ErrnoSegment = ErrnoSegment(THREAD_LOCAL_SEGMENT.get())
+
         context(arena: Arena)
         public fun allocate(): ErrnoSegment = ErrnoSegment(arena.allocate(Layouts.ERRNO))
     }
