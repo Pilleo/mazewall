@@ -1,39 +1,59 @@
 package io.mazewall.profiler.internal
 
 import io.mazewall.LinuxNative
-import io.mazewall.core.NativeArg
-import io.mazewall.ffi.NativeConstants
+import io.mazewall.NativeEngine
+import io.mazewall.core.ProcessLauncher
+import io.mazewall.core.RealProcessLauncher
+import io.mazewall.core.RealSocketManager
+import io.mazewall.core.SocketManager
 import io.mazewall.getFdOrThrow
-import io.mazewall.onSuccess
 import java.io.IOException
 import java.lang.foreign.Arena
 import java.lang.foreign.ValueLayout
-import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.attribute.PosixFilePermissions
 import java.util.logging.Logger
 
-data class DaemonContext(
+/**
+ * Context for a running Profiler Daemon.
+ */
+public data class DaemonContext(
     val socketPath: String,
     val socketDir: Path,
     val daemonProcess: Process,
     val shutdownHook: Thread,
 )
 
-internal object ProfilerDaemonManager {
+/**
+ * Manages the lifecycle of the shared Profiler Daemon.
+ */
+public class ProfilerDaemonManager(
+    private val engine: NativeEngine = LinuxNative,
+    private val socketManager: SocketManager = RealSocketManager,
+    private val processLauncher: ProcessLauncher = RealProcessLauncher
+) {
     private val logger = Logger.getLogger(ProfilerDaemonManager::class.java.name)
     private val daemonLock = Any()
     private var sharedDaemonContext: DaemonContext? = null
 
-    private const val SHUTDOWN_COMMAND_BYTE = 0x53.toByte() // 'S'
-    private const val SHUTDOWN_WAIT_MS = 100L
+    public companion object {
+        private const val SHUTDOWN_COMMAND_BYTE = 0x53.toByte() // 'S'
+        private const val SHUTDOWN_WAIT_MS = 100L
+        private val INSTANCE_DEFAULT = ProfilerDaemonManager()
 
-    fun getOrSpawnSharedDaemon(): DaemonContext {
+        @JvmStatic
+        public fun getInstance(): ProfilerDaemonManager = INSTANCE_DEFAULT
+    }
+
+    /**
+     * Returns the existing shared daemon context or spawns a new one.
+     */
+    public fun getOrSpawnSharedDaemon(): DaemonContext {
         synchronized(daemonLock) {
             val existing = sharedDaemonContext
             if (existing != null && existing.daemonProcess.isAlive) {
-                LinuxNative.withTransaction {
-                    LinuxNative.process.prctl(
+                engine.withTransaction {
+                    engine.process.prctl(
                         io.mazewall.core.PrctlCommand.SetPtracer(existing.daemonProcess.pid())
                     )
                 }
@@ -45,7 +65,10 @@ internal object ProfilerDaemonManager {
         }
     }
 
-    fun stop() {
+    /**
+     * Stops the shared daemon and cleans up resources.
+     */
+    public fun stop() {
         synchronized(daemonLock) {
             sharedDaemonContext?.let {
                 cleanupDaemon(it)
@@ -54,20 +77,21 @@ internal object ProfilerDaemonManager {
         }
     }
 
-    fun cleanupDaemon(context: DaemonContext) {
+    public fun cleanupDaemon(context: DaemonContext) {
         try {
-            Runtime.getRuntime().removeShutdownHook(context.shutdownHook)
+            processLauncher.removeShutdownHook(context.shutdownHook)
         } catch (e: IllegalStateException) {
             // Shutdown already in progress - ignore
             logger.log(java.util.logging.Level.FINE, "Shutdown hook removal skipped: shutdown in progress", e)
         } catch (e: SecurityException) {
             logger.log(java.util.logging.Level.WARNING, "Failed to remove shutdown hook", e)
         }
+        triggerDaemonShutdown(context.socketPath)
         context.daemonProcess.destroyForcibly()
         context.daemonProcess.waitFor()
         try {
-            Files.deleteIfExists(context.socketDir.resolve("profiler.sock"))
-            Files.deleteIfExists(context.socketDir)
+            processLauncher.deleteIfExists(context.socketDir.resolve("profiler.sock"))
+            processLauncher.deleteIfExists(context.socketDir)
         } catch (e: IOException) {
             logger.log(
                 java.util.logging.Level.WARNING,
@@ -78,11 +102,10 @@ internal object ProfilerDaemonManager {
     }
 
     private fun spawnDaemon(): DaemonContext {
-        // Diagnostic: ensure the daemon class is accessible (provides compile-time safety)
         val daemonClassName = io.mazewall.profiler.engine.ProfilerDaemon::class.java.name
 
         val perms = PosixFilePermissions.fromString("rwx------")
-        val socketDir = Files.createTempDirectory("mazewall-profiler-", PosixFilePermissions.asFileAttribute(perms))
+        val socketDir = processLauncher.createTempDirectory("mazewall-profiler-", PosixFilePermissions.asFileAttribute(perms))
         val socketPath = socketDir.resolve("profiler.sock").toAbsolutePath().toString()
 
         val javaBin = System.getProperty("java.home") + "/bin/java"
@@ -107,17 +130,15 @@ internal object ProfilerDaemonManager {
 
         logger.info("Spawning ProfilerDaemon: ${pbArgs.joinToString(" ")}")
 
-        val pb = ProcessBuilder(pbArgs)
-        pb.redirectErrorStream(true)
-        val daemonProcess = pb.start()
+        val daemonProcess = processLauncher.startProcess(pbArgs)
         val daemonPid = daemonProcess.pid()
 
-        val prctlRes = LinuxNative.withTransaction {
-            LinuxNative.process.prctl(
+        val prctlRes = engine.withTransaction {
+            engine.process.prctl(
                 io.mazewall.core.PrctlCommand.SetPtracer(daemonPid)
             )
         }
-        if (prctlRes is LinuxNative.SyscallResult.Error) {
+        if (prctlRes is io.mazewall.LinuxNative.SyscallResult.Error) {
             logger.warning("prctl(PR_SET_PTRACER) failed with errno ${prctlRes.errno}. The daemon may not be able to read process memory if Yama ptrace_scope is restrictive.")
         }
 
@@ -142,7 +163,7 @@ internal object ProfilerDaemonManager {
             name = "profiler-daemon-output"
         }.start()
 
-        // Wait for sentinel with 30s timeout (generous for slow CI)
+        // Wait for sentinel with 30s timeout
         @Suppress("MagicNumber")
         val ready = readyLatch.await(30, java.util.concurrent.TimeUnit.SECONDS)
 
@@ -160,7 +181,7 @@ internal object ProfilerDaemonManager {
         val shutdownHook = Thread {
             daemonProcess.destroyForcibly()
         }
-        Runtime.getRuntime().addShutdownHook(shutdownHook)
+        processLauncher.addShutdownHook(shutdownHook)
 
         return DaemonContext(socketPath, socketDir, daemonProcess, shutdownHook)
     }
@@ -168,44 +189,18 @@ internal object ProfilerDaemonManager {
     private fun triggerDaemonShutdown(socketPath: String) {
         try {
             Arena.ofConfined().use { arena ->
-                val (fdRes, addr) = LinuxNative.withTransaction {
-                    val r1 = LinuxNative.networking.socket(
-                        io.mazewall.ffi.networking.SupervisorSocketUtils.AF_UNIX,
-                        io.mazewall.ffi.networking.SupervisorSocketUtils.SOCK_STREAM,
-                        0
-                    )
-                    if (r1 is LinuxNative.SyscallResult.Error) return@withTransaction r1 to null
-                    r1 to io.mazewall.ffi.networking.SupervisorSocketUtils.setupSockAddrUn(arena, socketPath).segment
-                }
-                if (fdRes is LinuxNative.SyscallResult.Error) return
-                val fd = fdRes.getFdOrThrow("socket(AF_UNIX)")
+                val fd = socketManager.connect(socketPath)
                 try {
-                    val connRes = LinuxNative.withTransaction {
-                        LinuxNative.networking.connect(
-                            fd,
-                            addr!!,
-                            io.mazewall.ffi.networking.SupervisorSocketUtils.SOCKADDR_UN_SIZE
-                        )
-                    }
-                    if (connRes is LinuxNative.SyscallResult.Success) {
-                        val cmd = arena.allocate(1)
-                        cmd.set(ValueLayout.JAVA_BYTE, 0L, SHUTDOWN_COMMAND_BYTE)
-                        LinuxNative.withTransaction { LinuxNative.memory.write(fd, cmd, 1) }
-                        Thread.sleep(SHUTDOWN_WAIT_MS)
-                    }
+                    val cmd = arena.allocate(1)
+                    cmd.set(ValueLayout.JAVA_BYTE, 0L, SHUTDOWN_COMMAND_BYTE)
+                    engine.withTransaction { engine.memory.write(fd, cmd, 1) }
+                    Thread.sleep(SHUTDOWN_WAIT_MS)
                 } finally {
-                    LinuxNative.fileSystem.close(fd)
+                    socketManager.close(fd)
                 }
             }
-        } catch (e: InterruptedException) {
-            logger.log(java.util.logging.Level.FINE, "Daemon shutdown signal interrupted (harmless)", e)
-            Thread.currentThread().interrupt()
-        } catch (e: IllegalArgumentException) {
-            logger.log(java.util.logging.Level.FINE, "Daemon shutdown signal failed (harmless)", e)
-        } catch (e: IllegalStateException) {
-            logger.log(java.util.logging.Level.FINE, "Daemon shutdown signal failed (harmless)", e)
-        } catch (e: UnsupportedOperationException) {
-            logger.log(java.util.logging.Level.FINE, "Daemon shutdown signal failed (harmless)", e)
+        } catch (ignored: Exception) {
+            // Ignore
         }
     }
 }
