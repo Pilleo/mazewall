@@ -5,6 +5,7 @@ import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptorRole
 import io.mazewall.ffi.LayoutValidator
 import io.mazewall.ffi.Layouts
+import io.mazewall.ffi.NativeConstants
 import io.mazewall.ffi.memory.ErrnoSegment
 import io.mazewall.ffi.memory.SockFilterSegment
 import io.mazewall.ffi.memory.SockFprogSegment
@@ -934,6 +935,9 @@ internal object RealNativeMemory : NativeMemory {
     override fun newSockFProg(
         filters: List<BpfInstruction>,
     ): MemorySegment {
+        require(filters.size <= NativeConstants.BPF_MAXINSNS) {
+            "BPF program exceeds kernel maximum instruction limit of ${NativeConstants.BPF_MAXINSNS} instructions"
+        }
         val filterArraySeg = SockFilterSegment.allocateArray(filters.size)
         for (i in filters.indices) {
             val f = filters[i]
