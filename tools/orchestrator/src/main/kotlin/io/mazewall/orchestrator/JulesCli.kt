@@ -96,7 +96,7 @@ object JulesCli {
         override fun sendNotification(message: String) {}
         override fun requestApproval(issueId: String, text: String): Boolean = false
         override fun findExistingIssueNumber(issueId: String): String? = null
-        override fun createIssue(title: String, bodyFile: File, label: String): String = ""
+        override fun createIssue(title: String, body: String, label: String): String = ""
         override fun isIssueClosed(issueNumber: String): Boolean = false
         override fun findLinkedPR(issueNumber: String, issueId: String, sessionId: String?): String? = null
         override fun isPrMerged(prNumber: String): Boolean = false
