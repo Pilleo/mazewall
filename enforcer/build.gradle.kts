@@ -45,6 +45,9 @@ val integrationTest =
         jvmArgs("--enable-native-access=ALL-UNNAMED", "-Xmx256m", "-Xms128m", "-Dfile.encoding=UTF-8", "-Dsun.jnu.encoding=UTF-8")
         systemProperty("kotest.framework.classpath.scanning.config.disable", "true")
         forkEvery = 1
+        testLogging {
+            showStandardStreams = true
+        }
     }
 
 tasks.check {
