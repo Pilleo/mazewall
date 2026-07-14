@@ -115,7 +115,7 @@ public object SupervisorSeccompNotifInstaller {
 
             // Install seccomp user notifier filter (applied to the current tracee thread)
             val r = LinuxNative.withTransaction {
-                LinuxNative.syscall(
+                LinuxNative.raw.syscall(
                     arch.seccompSyscallNumber.toLong(),
                     NativeArg.LongArg(NativeConstants.SECCOMP_SET_MODE_FILTER.toLong()),
                     NativeArg.LongArg(NativeConstants.SECCOMP_FILTER_FLAG_NEW_LISTENER.toLong()),
@@ -162,7 +162,7 @@ public object SupervisorSeccompNotifInstaller {
             if (processWide && dummyBpf != null) {
                 val dummyProg = BpfNativeCache.getOrCompute(dummyBpf)
                 val tsyncRes = LinuxNative.withTransaction {
-                    LinuxNative.syscall(
+                    LinuxNative.raw.syscall(
                         arch.seccompSyscallNumber.toLong(),
                         NativeArg.LongArg(NativeConstants.SECCOMP_SET_MODE_FILTER.toLong()),
                         NativeArg.LongArg(NativeConstants.SECCOMP_FILTER_FLAG_TSYNC.toLong()),

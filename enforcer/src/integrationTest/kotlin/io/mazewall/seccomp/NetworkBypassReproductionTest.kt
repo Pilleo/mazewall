@@ -33,7 +33,7 @@ class NetworkBypassReproductionTest : BaseIntegrationTest() {
                     // Attempt sendmmsg (even with invalid args, seccomp EPERM should trigger first before kernel EINVAL/EBADF)
                     // If it bypasses seccomp, the kernel will return EBADF (9) or EFAULT (14) because fd=0 is not a socket or args are null
                     val sendRes = LinuxNative.withTransaction {
-                        LinuxNative.syscall(
+                        LinuxNative.raw.syscall(
                             sendmmsgNr,
                             NativeArg.NullArg,
                             NativeArg.NullArg,
@@ -52,7 +52,7 @@ class NetworkBypassReproductionTest : BaseIntegrationTest() {
 
                     // Attempt recvmmsg
                     val recvRes = LinuxNative.withTransaction {
-                        LinuxNative.syscall(
+                        LinuxNative.raw.syscall(
                             recvmmsgNr,
                             NativeArg.NullArg,
                             NativeArg.NullArg,
@@ -74,7 +74,7 @@ class NetworkBypassReproductionTest : BaseIntegrationTest() {
             if (cause is ContainmentViolationException) {
                 // If we get here, it means ContainedExecutors caught the EPERM correctly from our manual syscalls!
                 // Wait, ContainedExecutors maps EPERM to ContainmentViolationException for known operations if we used java networking,
-                // but direct LinuxNative.syscall doesn't throw, it returns a SyscallResult.
+                // but direct LinuxNative.raw.syscall doesn't throw, it returns a SyscallResult.
                 // If the direct syscall caused a SIGSYS (kill thread), the future would fail.
                 // However, our default action is ACT_ERRNO which returns EPERM in the SyscallResult.
                 // So the syscall SHOULD return normally with errno=1, and we check that manually above.

@@ -1,5 +1,5 @@
 import io.mazewall.LinuxNative
 
 fun main() {
-    LinuxNative.syscall(1L)
+    LinuxNative.raw.syscall(1L)
 }

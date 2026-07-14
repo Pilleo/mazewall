@@ -262,7 +262,7 @@ class MmapProtectionTest : BaseIntegrationTest() {
                             .current()
                         val nr = arch.pkeyMprotect
                         val res = io.mazewall.LinuxNative.withTransaction {
-                            io.mazewall.LinuxNative.syscall(
+                            io.mazewall.LinuxNative.raw.syscall(
                                 nr.toLong(),
                                 io.mazewall.core.NativeArg.MemoryArg(addr),
                                 io.mazewall.core.NativeArg.LongArg(4096L),

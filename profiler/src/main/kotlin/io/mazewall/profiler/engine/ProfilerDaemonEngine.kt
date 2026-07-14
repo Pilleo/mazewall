@@ -108,7 +108,7 @@ internal class ProfilerDaemonEngine(
         pollFd.set(ValueLayout.JAVA_SHORT, POLLFD_EVENTS_OFF, NativeConstants.POLLIN)
 
         while (!isGlobalShutdown()) {
-            val pollRes = ioOps.poll(pollFd, 1L, POLL_TIMEOUT_MS)
+            val pollRes = LinuxNative.withTransaction { ioOps.raw.poll(pollFd, 1L, POLL_TIMEOUT_MS) }
             val count = pollRes.recover { errno, _ ->
                 if (errno != NativeConstants.EINTR) return // Break from loop
                 0L
@@ -144,7 +144,7 @@ internal class ProfilerDaemonEngine(
                 while (!isGlobalShutdown()) {
                     // Only poll if we are waiting for a NEW listener FD (Accepted state)
                     if (connection is io.mazewall.ffi.networking.SeccompConnection.Accepted) {
-                        val pollRes = ioOps.poll(pollFd, 1L, POLL_TIMEOUT_MS)
+                        val pollRes = LinuxNative.withTransaction { ioOps.raw.poll(pollFd, 1L, POLL_TIMEOUT_MS) }
                         val count = pollRes.recover { errno, _ ->
                             if (errno != NativeConstants.EINTR) return@use // Break from loop
                             0L
@@ -222,7 +222,7 @@ internal class ProfilerDaemonEngine(
                 val socketPollFd = arena.allocate(Layouts.POLLFD)
 
                 while (!isGlobalShutdown()) {
-                    val pollRes = ioOps.poll(pollFds, 2L, POLL_TIMEOUT_MS)
+                    val pollRes = LinuxNative.withTransaction { ioOps.raw.poll(pollFds, 2L, POLL_TIMEOUT_MS) }
                     val count = pollRes.recover { errno, _ ->
                         if (errno != NativeConstants.EINTR) return@use // Break from loop
                         0L

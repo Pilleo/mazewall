@@ -179,7 +179,7 @@ class ProfilerIntegrationTest : BaseIntegrationTest() {
                                 val fchmodNr = Syscall.FCHMOD.numberFor(Arch.current()).toLong()
                                 if (fchmodNr >= 0) {
                                     LinuxNative.withTransaction {
-                                        LinuxNative.syscall(
+                                        LinuxNative.raw.syscall(
                                             fchmodNr,
                                             io.mazewall.core.NativeArg.FdArg(fd),
                                             io.mazewall.core.NativeArg.IntArg(0x1FF),

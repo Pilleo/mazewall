@@ -160,7 +160,7 @@ fun testFcntl() {
         val fd = openResult.getFdOrThrow("open")
 
         val flags = LinuxNative.withTransaction {
-            LinuxNative.fcntl(fd, 3, 0) // F_GETFL
+            LinuxNative.raw.fcntl(fd, 3, 0) // F_GETFL
         }
         assertTrue(flags is LinuxNative.SyscallResult.Success)
 
@@ -186,7 +186,7 @@ fun testFcntl() {
         pollFd.setRevents(0.toShort())
 
         val result = LinuxNative.withTransaction {
-            LinuxNative.poll(pollFd.segment, 1L, 0) // 0 timeout
+            LinuxNative.raw.poll(pollFd.segment, 1L, 0) // 0 timeout
         }
         assertTrue(result is LinuxNative.SyscallResult.Success)
     }

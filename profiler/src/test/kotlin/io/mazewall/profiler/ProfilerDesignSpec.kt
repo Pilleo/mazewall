@@ -78,19 +78,51 @@ class ProfilerDesignSpec :
         }
 
         class MockTransport : ProfilerTransport {
-            val sentEvents = mutableListOf<SyscallEvent<SyscallEventState.Resolved>>()
             var nextPollResult: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(1L)
             var nextReadResult: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(1L)
             var ackByte: Byte = 0xAC.toByte()
             val ioctlCalls = mutableListOf<Long>()
-            var createdServerPath: String? = null
-            var acceptedServerFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>? = null
-            val closedFds = mutableListOf<FileDescriptor<*, *>>()
-
             var nextNotifId = 123L
             var nextNotifPid = 456
             var nextNotifNr = 2
             val nextNotifArgs = LongArray(6)
+
+            override val raw: io.mazewall.RawSyscallOperations = object : io.mazewall.MockNativeEngine() {
+                context(_: io.mazewall.NativeTransaction)
+                override fun poll(
+                    fds: MemorySegment,
+                    nfds: Long,
+                    timeout: Int,
+                ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                    if (nfds == 1L) {
+                        fds.set(ValueLayout.JAVA_SHORT, POLLFD_REVENTS_OFF, NativeConstants.POLLIN)
+                    }
+                    return nextPollResult
+                }
+
+                context(_: io.mazewall.NativeTransaction)
+                override fun ioctl(
+                    fd: FileDescriptor<*, FdState.Open>,
+                    request: Long,
+                    arg: MemorySegment,
+                ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                    ioctlCalls.add(request)
+                    if (request == 0xc0502100L) { // RECV
+                        arg.set(ValueLayout.JAVA_LONG, 0L, nextNotifId) // id
+                        arg.set(ValueLayout.JAVA_INT, 8L, nextNotifPid) // pid
+                        arg.set(ValueLayout.JAVA_INT, 16L, nextNotifNr) // nr
+                        for (i in 0 until 6) {
+                            arg.set(ValueLayout.JAVA_LONG, 32L + i * 8, nextNotifArgs[i])
+                        }
+                    }
+                    return LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(0L)
+                }
+            }
+
+            val sentEvents = mutableListOf<SyscallEvent<SyscallEventState.Resolved>>()
+            var createdServerPath: String? = null
+            var acceptedServerFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>? = null
+            val closedFds = mutableListOf<FileDescriptor<*, *>>()
 
             override fun sendTraceEvent(
                 socketFd: FileDescriptor<*, FdState.Open>,
@@ -116,17 +148,6 @@ class ProfilerDesignSpec :
 
             override fun recvDescriptor(socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>): FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open>? =
                 FileDescriptor.unsafe(5)
-
-            override fun poll(
-                fds: MemorySegment,
-                nfds: Long,
-                timeout: Int,
-            ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
-                if (nfds == 1L) {
-                    fds.set(ValueLayout.JAVA_SHORT, POLLFD_REVENTS_OFF, NativeConstants.POLLIN)
-                }
-                return nextPollResult
-            }
 
             override fun read(
                 fd: FileDescriptor<*, FdState.Open>,
@@ -156,21 +177,20 @@ class ProfilerDesignSpec :
                 len
             )
 
+            override fun poll(
+                fds: MemorySegment,
+                nfds: Long,
+                timeout: Int,
+            ): LinuxNative.SyscallResult<Long, *> = LinuxNative.withTransaction {
+                raw.poll(fds, nfds, timeout)
+            }
+
             override fun ioctl(
                 fd: FileDescriptor<*, FdState.Open>,
                 request: Long,
                 arg: MemorySegment,
-            ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
-                ioctlCalls.add(request)
-                if (request == 0xc0502100L) { // RECV
-                    arg.set(ValueLayout.JAVA_LONG, 0L, nextNotifId) // id
-                    arg.set(ValueLayout.JAVA_INT, 8L, nextNotifPid) // pid
-                    arg.set(ValueLayout.JAVA_INT, 16L, nextNotifNr) // nr
-                    for (i in 0 until 6) {
-                        arg.set(ValueLayout.JAVA_LONG, 32L + i * 8, nextNotifArgs[i])
-                    }
-                }
-                return LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(0L)
+            ): LinuxNative.SyscallResult<Long, *> = LinuxNative.withTransaction {
+                raw.ioctl(fd, request, arg)
             }
 
             override fun createServer(socketPath: String): FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open> {

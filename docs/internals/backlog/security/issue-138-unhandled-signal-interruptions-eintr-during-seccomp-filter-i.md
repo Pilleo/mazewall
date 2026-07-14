@@ -17,7 +17,7 @@ reversible: true
 **Context:**
 **Hypothesis:** The `seccomp` syscall itself might return `EINTR` if a signal is delivered to the thread precisely during the kernel's filter installation phase.
 
-`LinuxNative.syscall` is used to invoke `seccomp`. While filter installation is generally fast, if `EINTR` occurs, the installation fails. The current code does not retry the `seccomp` syscall on `EINTR`.
+`LinuxNative.raw.syscall` is used to invoke `seccomp`. While filter installation is generally fast, if `EINTR` occurs, the installation fails. The current code does not retry the `seccomp` syscall on `EINTR`.
 
 
 **Needed:**

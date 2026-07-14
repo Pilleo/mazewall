@@ -66,7 +66,7 @@ class AllowListTest : BaseIntegrationTest() {
         val mmap = Arch.current().mmap.toLong()
         if (mmap >= 0) {
             LinuxNative.withTransaction {
-                LinuxNative.syscall(
+                LinuxNative.raw.syscall(
                     mmap,
                     NativeArg.NullArg,
                     NativeArg.IntArg(4096),
@@ -130,7 +130,7 @@ class AllowListTest : BaseIntegrationTest() {
                     val mmap = Arch.current().mmap.toLong()
                     if (mmap >= 0) {
                         val result = LinuxNative.withTransaction {
-                            LinuxNative.syscall(
+                            LinuxNative.raw.syscall(
                                 mmap,
                                 NativeArg.NullArg,
                                 NativeArg.IntArg(4096),

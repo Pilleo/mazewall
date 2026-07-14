@@ -138,7 +138,7 @@ internal class SupervisorDaemonEngine(
         pollFd.setEvents(NativeConstants.POLLIN)
 
         while (!isGlobalShutdown()) {
-            val pollRes = LinuxNative.withTransaction { LinuxNative.poll(pollFd.segment, 1L, POLL_TIMEOUT_MS) }
+            val pollRes = LinuxNative.withTransaction { LinuxNative.raw.poll(pollFd.segment, 1L, POLL_TIMEOUT_MS) }
             val count = pollRes.recover { errno, _ ->
                 if (errno != NativeConstants.EINTR) return
                 0L
@@ -220,7 +220,7 @@ internal class SupervisorDaemonEngine(
         pollFd: PollFdSegment
     ): io.mazewall.ffi.networking.SeccompConnection? {
         if (connection is io.mazewall.ffi.networking.SeccompConnection.Accepted) {
-            val pollRes = LinuxNative.withTransaction { LinuxNative.poll(pollFd.segment, 1L, POLL_TIMEOUT_MS) }
+            val pollRes = LinuxNative.withTransaction { LinuxNative.raw.poll(pollFd.segment, 1L, POLL_TIMEOUT_MS) }
             val count = pollRes.recover { errno, _ ->
                 if (errno == NativeConstants.EINTR) 0L else -1L
             }
@@ -289,7 +289,7 @@ internal class SupervisorDaemonEngine(
                 val resp = arena.allocate(Layouts.SECCOMP_NOTIF_RESP)
 
                 while (!isGlobalShutdown()) {
-                    val pollRes = LinuxNative.withTransaction { LinuxNative.poll(pollFds, 2L, POLL_TIMEOUT_MS) }
+                    val pollRes = LinuxNative.withTransaction { LinuxNative.raw.poll(pollFds, 2L, POLL_TIMEOUT_MS) }
                     val count = pollRes.recover { errno, _ ->
                         if (errno != NativeConstants.EINTR) return@use
                         0L

@@ -30,7 +30,7 @@ class MemfdCreateBypassTest : BaseIntegrationTest() {
                         nativeScope {
                             val name = allocateFrom("test_memfd")
                             LinuxNative.withTransaction {
-                                LinuxNative.syscall(
+                                LinuxNative.raw.syscall(
                                     arch.memfdCreate.toLong(),
                                     NativeArg.MemoryArg(name),
                                     NativeArg.NullArg,
@@ -65,7 +65,7 @@ class MemfdCreateBypassTest : BaseIntegrationTest() {
                         nativeScope {
                             val name = allocateFrom("test_memfd_blocked")
                             LinuxNative.withTransaction {
-                                LinuxNative.syscall(
+                                LinuxNative.raw.syscall(
                                     arch.memfdCreate.toLong(),
                                     NativeArg.MemoryArg(name),
                                     NativeArg.NullArg,

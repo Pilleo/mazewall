@@ -135,7 +135,7 @@ internal object PureJavaBpfEngine : SeccompEngine<EngineState> {
         // Try modern seccomp(2) syscall first
         val flags = if (useTsync) NativeConstants.SECCOMP_FILTER_FLAG_TSYNC.toLong() else 0L
         val r3 = LinuxNative.withTransaction {
-            LinuxNative.syscall(
+            LinuxNative.raw.syscall(
                 arch.seccompSyscallNumber.toLong(),
                 io.mazewall.core.NativeArg.LongArg(NativeConstants.SECCOMP_SET_MODE_FILTER.toLong()),
                 io.mazewall.core.NativeArg.LongArg(flags),

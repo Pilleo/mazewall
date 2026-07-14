@@ -95,7 +95,7 @@ internal object RealPlatformProvider : PlatformProvider {
     private fun probeSeccompFlag(flag: Long): Boolean {
         val arch = io.mazewall.core.Arch.current()
         val res = LinuxNative.withTransaction {
-            LinuxNative.syscall(
+            LinuxNative.raw.syscall(
                 arch.seccompSyscallNumber.toLong(),
                 io.mazewall.core.NativeArg.LongArg(NativeConstants.SECCOMP_SET_MODE_FILTER.toLong()),
                 io.mazewall.core.NativeArg.LongArg(flag),

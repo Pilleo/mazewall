@@ -30,7 +30,15 @@ public interface NativeEngine {
     public val networking: NativeNetworking
     public val process: NativeProcess
     public val memory: NativeMemory
+    public val raw: RawSyscallOperations
+}
 
+/**
+ * Interface for raw Linux system calls and low-level I/O operations.
+ * Use with caution: these methods bypass high-level domain abstractions and
+ * are intended for use only by core enforcer logic or specialized low-level components.
+ */
+public interface RawSyscallOperations {
     context(_: NativeTransaction)
     fun syscall(
         nr: Long,
