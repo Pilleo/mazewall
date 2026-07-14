@@ -26,6 +26,7 @@ class OrchestratorPromptsTest {
         val pushWarning = "Don't push again!"
         val prompt = OrchestratorPrompts.reviewPrompt(prNumber, shaPrefix, pushWarning)
 
+        assertTrue(prompt.contains("\n\nDon't push again!"))
         assertTrue(prompt.contains(prNumber))
         assertTrue(prompt.contains(shaPrefix))
         assertTrue(prompt.contains(pushWarning))

@@ -26,7 +26,12 @@ $QUALITY_AND_SAFETY_GUIDELINES
     fun reviewPrompt(prNumber: String, shaPrefix: String, pushWarning: String): String {
         return buildString {
             append("⛔ READ-ONLY TASK — DO NOT COMMIT, PUSH, OR EDIT ANY FILES ⛔")
-            append(pushWarning)
+            if (pushWarning.isNotEmpty()) {
+                if (!pushWarning.startsWith("\n")) {
+                    append("\n\n")
+                }
+                append(pushWarning)
+            }
             append("""
 
 
