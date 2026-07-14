@@ -84,54 +84,7 @@ public object LinuxNative : NativeEngine {
     override val networking: NativeNetworking get() = engine.networking
     override val process: NativeProcess get() = engine.process
     override val memory: NativeMemory get() = engine.memory
-
-    context(_: NativeTransaction)
-    override fun syscall(
-        nr: Long,
-        a1: io.mazewall.core.NativeArg,
-        a2: io.mazewall.core.NativeArg,
-        a3: io.mazewall.core.NativeArg,
-        a4: io.mazewall.core.NativeArg,
-        a5: io.mazewall.core.NativeArg,
-        a6: io.mazewall.core.NativeArg,
-    ): SyscallResult<Long, SyscallHandledState.Unhandled> = engine.syscall(nr, a1, a2, a3, a4, a5, a6)
-
-    context(_: NativeTransaction)
-    override fun syscall4(
-        nr: Long,
-        a1: io.mazewall.core.NativeArg,
-        a2: io.mazewall.core.NativeArg,
-        a3: io.mazewall.core.NativeArg,
-        a4: io.mazewall.core.NativeArg,
-    ): SyscallResult<Long, SyscallHandledState.Unhandled> = engine.syscall4(nr, a1, a2, a3, a4)
-
-    context(_: NativeTransaction)
-    override fun ioctl(
-        fd: FileDescriptor<*, FdState.Open>,
-        request: Long,
-        arg: MemorySegment,
-    ): SyscallResult<Long, SyscallHandledState.Unhandled> = engine.ioctl(fd, request, arg)
-
-    context(_: NativeTransaction)
-    override fun ioctl(
-        fd: FileDescriptor<*, FdState.Open>,
-        request: Long,
-        arg: Long,
-    ): SyscallResult<Long, SyscallHandledState.Unhandled> = engine.ioctl(fd, request, arg)
-
-    context(_: NativeTransaction)
-    override fun fcntl(
-        fd: FileDescriptor<*, FdState.Open>,
-        cmd: Int,
-        arg: Long,
-    ): SyscallResult<Long, SyscallHandledState.Unhandled> = engine.fcntl(fd, cmd, arg)
-
-    context(_: NativeTransaction)
-    override fun poll(
-        fds: MemorySegment,
-        nfds: Long,
-        timeout: Int,
-    ): SyscallResult<Long, SyscallHandledState.Unhandled> = engine.poll(fds, nfds, timeout)
+    override val raw: RawSyscallOperations get() = engine.raw
 
     /**
      * Marker interface for system call handling states.
@@ -301,11 +254,12 @@ public fun LinuxNative.SyscallResult<Long, *>.getFdOrThrow(context: String): Fil
 /**
  * Real implementation of NativeEngine using FFM to call Linux system calls.
  */
-internal object RealNativeEngine : NativeEngine {
+internal object RealNativeEngine : NativeEngine, RawSyscallOperations {
     override val fileSystem: NativeFileSystem = RealNativeFileSystem
     override val networking: NativeNetworking = RealNativeNetworking
     override val process: NativeProcess = RealNativeProcess
     override val memory: NativeMemory = RealNativeMemory
+    override val raw: RawSyscallOperations get() = this
 
     private val SYSCALL: MethodHandle =
         RealNativeHelper.downcall(

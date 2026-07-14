@@ -91,7 +91,7 @@ fun runProfileAndEnforce() {
 
             // io_uring_setup(entries = 32, params = NULL)
             val setupResult = LinuxNative.withTransaction {
-                LinuxNative.syscall(setupNr, NativeArg.LongArg(32L), NativeArg.NullArg)
+                LinuxNative.raw.syscall(setupNr, NativeArg.LongArg(32L), NativeArg.NullArg)
             }
             val ioUringStatus: String
 

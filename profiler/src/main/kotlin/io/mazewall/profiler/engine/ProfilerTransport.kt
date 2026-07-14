@@ -52,6 +52,7 @@ interface SeccompResponder {
  * Low-level interface for raw POSIX-like polling and I/O.
  */
 interface NativeIoOperations {
+    val raw: io.mazewall.RawSyscallOperations
     fun poll(
         fds: MemorySegment,
         nfds: Long,
@@ -111,6 +112,7 @@ interface ProfilerTransport :
  */
 @Suppress("MagicNumber", "ReturnCount", "ThrowsCount")
 object RealProfilerTransport : ProfilerTransport {
+    override val raw: io.mazewall.RawSyscallOperations get() = LinuxNative.raw
     private const val CMSG_LEN_VAL = 20L
     private const val CMSG_LEN_OFF = 0L
     private const val CMSG_LEVEL_OFF = 8L
@@ -199,7 +201,7 @@ object RealProfilerTransport : ProfilerTransport {
         fds: MemorySegment,
         nfds: Long,
         timeout: Int,
-    ): LinuxNative.SyscallResult<Long, *> = LinuxNative.withTransaction { LinuxNative.poll(fds, nfds, timeout) }
+    ): LinuxNative.SyscallResult<Long, *> = LinuxNative.withTransaction { LinuxNative.raw.poll(fds, nfds, timeout) }
 
     override fun read(
         fd: FileDescriptor<*, FdState.Open>,
@@ -224,7 +226,7 @@ object RealProfilerTransport : ProfilerTransport {
         fd: FileDescriptor<*, FdState.Open>,
         request: Long,
         arg: MemorySegment,
-    ): LinuxNative.SyscallResult<Long, *> = LinuxNative.withTransaction { LinuxNative.ioctl(fd, request, arg) }
+    ): LinuxNative.SyscallResult<Long, *> = LinuxNative.withTransaction { LinuxNative.raw.ioctl(fd, request, arg) }
 
     override fun createServer(socketPath: String): FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open> {
         val fd = LinuxNative.withTransaction {

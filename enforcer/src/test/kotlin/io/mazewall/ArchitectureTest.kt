@@ -32,10 +32,29 @@ class ArchitectureTest {
             .callMethodWhere(object : DescribedPredicate<JavaMethodCall>("calls to LinuxNative implementation methods") {
                 override fun test(input: JavaMethodCall): Boolean {
                     return input.target.owner.isAssignableTo(LinuxNative::class.java) &&
-                        input.target.name !in listOf("getFileSystem", "getNetworking", "getProcess", "getMemory", "withTransaction", "getTRANSACTION_INSTANCE")
+                        input.target.name !in listOf("getFileSystem", "getNetworking", "getProcess", "getMemory", "getRaw", "withTransaction", "getTRANSACTION_INSTANCE")
                 }
             })
             .because("direct calls to LinuxNative implementation bypass the testable NativeEngine abstraction")
+            .check(allClasses)
+    }
+
+    @ArchTest
+    fun rawSyscallOperationsMustOnlyBeUsedByAllowedPackages(allClasses: com.tngtech.archunit.core.domain.JavaClasses) {
+        noClasses()
+            .that()
+            .resideOutsideOfPackages(
+                "io.mazewall.seccomp..",
+                "io.mazewall.landlock..",
+                "io.mazewall.enforcer.supervisor..",
+                "io.mazewall.ffi.networking..",
+                "io.mazewall", // RealNativeEngine and RealPlatformProvider are in the root package
+                "io.mazewall.profiler.engine..",
+            )
+            .should()
+            .dependOnClassesThat()
+            .haveFullyQualifiedName(RawSyscallOperations::class.java.name)
+            .because("Raw system call operations are sensitive and must only be used by core enforcer/profiler components")
             .check(allClasses)
     }
 
@@ -217,7 +236,7 @@ class ArchitectureTest {
             .areDeclaredInClassesThat()
             .resideInAnyPackage("io.mazewall.seccomp..", "io.mazewall.landlock..", "io.mazewall.enforcer.supervisor..")
             .and()
-            .haveNameNotMatching(".*\\$.*") // Ignore Kotlin internal mangled names
+            .haveNameNotMatching(".*\\\$.*") // Ignore Kotlin internal mangled names
             .should()
             .notHaveRawReturnType(LinuxNative.SyscallResult::class.java)
             .because("Domain logic must not leak raw SyscallResult objects to callers. They must be handled internally.")
@@ -346,4 +365,3 @@ class ArchitectureTest {
             .check(allClasses)
     }
 }
-

@@ -72,7 +72,7 @@ internal class ProfilerSessionHandler(
 
         if ((listenerRevents and NativeConstants.POLLIN.toInt()) != 0) {
             notif.fill(0)
-            val recvRes = ioOps.ioctl(listenerFd, SECCOMP_IOCTL_NOTIF_RECV, notif)
+            val recvRes = LinuxNative.withTransaction { ioOps.raw.ioctl(listenerFd, SECCOMP_IOCTL_NOTIF_RECV, notif) }
             recvRes.onSuccess {
                 if (!processNotification(notif, resp, ackBuf, socketPollFd)) {
                     state = ProfilerState.Terminated(socketFd, listenerFd)

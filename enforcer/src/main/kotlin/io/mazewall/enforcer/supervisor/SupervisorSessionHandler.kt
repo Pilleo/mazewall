@@ -244,7 +244,7 @@ internal class SupervisorSessionHandler(
         if ((listenerRevents.toInt() and NativeConstants.POLLIN.toInt()) != 0) {
             notif.fill(0)
             val recvRes = LinuxNative.withTransaction {
-                LinuxNative.ioctl(listenerFd, NativeConstants.SECCOMP_IOCTL_NOTIF_RECV, notif)
+                LinuxNative.raw.ioctl(listenerFd, NativeConstants.SECCOMP_IOCTL_NOTIF_RECV, notif)
             }
             var ok = false
             recvRes.onSuccess {
@@ -469,7 +469,7 @@ internal class SupervisorSessionHandler(
             var count = 0L
             while (remainingTimeout > 0) {
                 val loopStart = System.currentTimeMillis()
-                val pollRes = LinuxNative.withTransaction { LinuxNative.poll(pollFd.segment, 1L, remainingTimeout.toInt()) }
+                val pollRes = LinuxNative.withTransaction { LinuxNative.raw.poll(pollFd.segment, 1L, remainingTimeout.toInt()) }
                 val elapsed = System.currentTimeMillis() - loopStart
                 remainingTimeout -= elapsed
 
@@ -592,7 +592,7 @@ internal class SupervisorSessionHandler(
                 addfd.setSrcfd(localFdValue)
 
                 LinuxNative.withTransaction {
-                    val res = LinuxNative.ioctl(listenerFd, NativeConstants.SECCOMP_IOCTL_NOTIF_ADDFD, addfd.segment)
+                    val res = LinuxNative.raw.ioctl(listenerFd, NativeConstants.SECCOMP_IOCTL_NOTIF_ADDFD, addfd.segment)
                     logger.info { "[SUPERVISOR-DEBUG] ioctl SECCOMP_IOCTL_NOTIF_ADDFD res=$res" }
                     res is LinuxNative.SyscallResult.Success
                 }
@@ -622,7 +622,7 @@ internal class SupervisorSessionHandler(
                 } else {
                     val myArch = io.mazewall.core.Arch.current()
                     val myOpenat = myArch.openat.toLong()
-                    LinuxNative.syscall(
+                    LinuxNative.raw.syscall(
                         myOpenat,
                         io.mazewall.core.NativeArg.LongArg(dirfd.toLong()),
                         io.mazewall.core.NativeArg.MemoryArg(pathSeg),
@@ -697,7 +697,7 @@ internal class SupervisorSessionHandler(
         resp.writeInt(RESP_ERR_OFF, 0)
         resp.writeInt(RESP_FLAGS_OFF, NativeConstants.SECCOMP_USER_NOTIF_FLAG_CONTINUE.toInt())
         LinuxNative.withTransaction {
-            LinuxNative.ioctl(listenerFd, NativeConstants.SECCOMP_IOCTL_NOTIF_SEND, resp)
+            LinuxNative.raw.ioctl(listenerFd, NativeConstants.SECCOMP_IOCTL_NOTIF_SEND, resp)
             Unit
         }
     }
@@ -709,7 +709,7 @@ internal class SupervisorSessionHandler(
         resp.writeInt(RESP_ERR_OFF, -errorNr)
         resp.writeInt(RESP_FLAGS_OFF, 0)
         LinuxNative.withTransaction {
-            LinuxNative.ioctl(listenerFd, NativeConstants.SECCOMP_IOCTL_NOTIF_SEND, resp)
+            LinuxNative.raw.ioctl(listenerFd, NativeConstants.SECCOMP_IOCTL_NOTIF_SEND, resp)
             Unit
         }
     }
@@ -768,7 +768,7 @@ internal class SupervisorSessionHandler(
                     val tgid = getTgid(tid.value)
                     logger.info { "[SUPERVISOR-DEBUG] Async accept worker started for tid=${tid.value} (tgid=$tgid), targetFd=${args[0].toInt()}" }
                     val pidfdRes = LinuxNative.withTransaction {
-                        LinuxNative.syscall(
+                        LinuxNative.raw.syscall(
                             434L, // SYS_pidfd_open
                             io.mazewall.core.NativeArg.LongArg(tgid.toLong()),
                             io.mazewall.core.NativeArg.LongArg(0L),
@@ -790,7 +790,7 @@ internal class SupervisorSessionHandler(
                     val targetFd = args[0].toInt()
                     logger.info { "[SUPERVISOR-DEBUG] pidfd_open success. pidfd=$pidfd. Duplicating fd $targetFd..." }
                     val dupRes = LinuxNative.withTransaction {
-                        LinuxNative.syscall(
+                        LinuxNative.raw.syscall(
                             438L, // SYS_pidfd_getfd
                             io.mazewall.core.NativeArg.LongArg(pidfd.toLong()),
                             io.mazewall.core.NativeArg.LongArg(targetFd.toLong()),
@@ -827,7 +827,7 @@ internal class SupervisorSessionHandler(
                         val flags = if (nr == traceeArch.accept4) args[3].toInt() else 0
 
                         val acceptRes = LinuxNative.withTransaction {
-                            LinuxNative.syscall(
+                            LinuxNative.raw.syscall(
                                 accept4Sys,
                                 io.mazewall.core.NativeArg.LongArg(dupFd.toLong()),
                                 io.mazewall.core.NativeArg.MemoryArg(localAddr),
@@ -886,7 +886,7 @@ internal class SupervisorSessionHandler(
                             addfd.setSrcfd(clientFd)
 
                             val injectSuccess = LinuxNative.withTransaction {
-                                val res = LinuxNative.ioctl(listenerFd, NativeConstants.SECCOMP_IOCTL_NOTIF_ADDFD, addfd.segment)
+                                val res = LinuxNative.raw.ioctl(listenerFd, NativeConstants.SECCOMP_IOCTL_NOTIF_ADDFD, addfd.segment)
                                 res is LinuxNative.SyscallResult.Success
                             }
 

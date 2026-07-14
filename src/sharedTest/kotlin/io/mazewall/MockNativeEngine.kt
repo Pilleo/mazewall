@@ -15,7 +15,9 @@ public open class MockNativeEngine(
     override val networking: MockNativeNetworking = MockNativeNetworking(),
     override val process: MockNativeProcess = MockNativeProcess(),
     override val memory: MockNativeMemory = MockNativeMemory(),
-) : NativeEngine {
+) : NativeEngine, RawSyscallOperations {
+    override val raw: RawSyscallOperations get() = this
+
     public var syscallResult: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(0L)
     public var ioctlResult: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(0L)
     public var fcntlResult: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(0L)

@@ -33,6 +33,38 @@ class ProfilerDaemonTest {
         var errorSent = false
         var lastErrorNr = 0
 
+        override val raw: io.mazewall.RawSyscallOperations = object : io.mazewall.MockNativeEngine() {
+            context(_: io.mazewall.NativeTransaction)
+            override fun poll(
+                fds: MemorySegment,
+                nfds: Long,
+                timeout: Int,
+            ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                pollCount.incrementAndGet()
+                // In the wait-for-ack loop, we need to set the revents
+                if (nfds == 1L) {
+                    fds.set(ValueLayout.JAVA_SHORT, POLLFD_REVENTS_OFF, NativeConstants.POLLIN)
+                }
+                return nextPollResult
+            }
+
+            context(_: io.mazewall.NativeTransaction)
+            override fun ioctl(
+                fd: FileDescriptor<*, FdState.Open>,
+                request: Long,
+                arg: MemorySegment,
+            ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                ioctlCalls.add(request)
+                if (request == 0xc0502100L) { // RECV
+                    arg.set(ValueLayout.JAVA_LONG, 0L, 123L) // id
+                    arg.set(ValueLayout.JAVA_INT, 8L, 456) // pid
+                    arg.set(ValueLayout.JAVA_INT, 16L, 2) // nr (open)
+                    arg.set(ValueLayout.JAVA_LONG, 32L, 0x1000L) // args[0] = non-zero pointer
+                }
+                return LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(0L)
+            }
+        }
+
         override fun sendTraceEvent(
             socketFd: FileDescriptor<*, FdState.Open>,
             event: SyscallEvent<SyscallEventState.Resolved>,
@@ -60,19 +92,6 @@ class ProfilerDaemonTest {
 
         override fun recvDescriptor(socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>): FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open>? = FileDescriptor.unsafe(5)
 
-        override fun poll(
-            fds: MemorySegment,
-            nfds: Long,
-            timeout: Int,
-        ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
-            pollCount.incrementAndGet()
-            // In the wait-for-ack loop, we need to set the revents
-            if (nfds == 1L) {
-                fds.set(ValueLayout.JAVA_SHORT, POLLFD_REVENTS_OFF, NativeConstants.POLLIN)
-            }
-            return nextPollResult
-        }
-
         override fun read(
             fd: FileDescriptor<*, FdState.Open>,
             buf: MemorySegment,
@@ -97,19 +116,20 @@ class ProfilerDaemonTest {
             flags: Int,
         ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(len)
 
+        override fun poll(
+            fds: MemorySegment,
+            nfds: Long,
+            timeout: Int,
+        ): LinuxNative.SyscallResult<Long, *> = LinuxNative.withTransaction {
+            raw.poll(fds, nfds, timeout)
+        }
+
         override fun ioctl(
             fd: FileDescriptor<*, FdState.Open>,
             request: Long,
             arg: MemorySegment,
-        ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
-            ioctlCalls.add(request)
-            if (request == 0xc0502100L) { // RECV
-                arg.set(ValueLayout.JAVA_LONG, 0L, 123L) // id
-                arg.set(ValueLayout.JAVA_INT, 8L, 456) // pid
-                arg.set(ValueLayout.JAVA_INT, 16L, 2) // nr (open)
-                arg.set(ValueLayout.JAVA_LONG, 32L, 0x1000L) // args[0] = non-zero pointer
-            }
-            return LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(0L)
+        ): LinuxNative.SyscallResult<Long, *> = LinuxNative.withTransaction {
+            raw.ioctl(fd, request, arg)
         }
 
         override fun createServer(socketPath: String): FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open> = FileDescriptor.unsafe(99)

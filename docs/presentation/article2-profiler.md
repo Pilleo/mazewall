@@ -60,7 +60,7 @@ val workload = {
  
     // 3. Initialize high-performance async io_uring
     val setupNr = Syscall.IO_URING_SETUP.numberFor(Arch.current()).toLong()
-    val setupResult = LinuxNative.syscall(setupNr, 32L, 0L)
+    val setupResult = LinuxNative.raw.syscall(setupNr, 32L, 0L)
     
     if (setupResult is LinuxNative.SyscallResult.Success) {
         val ringFd = setupResult.asFd()

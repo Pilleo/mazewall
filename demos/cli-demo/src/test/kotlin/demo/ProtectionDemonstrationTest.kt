@@ -57,7 +57,7 @@ class ProtectionDemonstrationTest {
                     Arena.ofConfined().use { arena ->
                         val name = arena.allocateFrom("test_memfd_protected")
                         val res = LinuxNative.withTransaction {
-                            LinuxNative.syscall(
+                            LinuxNative.raw.syscall(
                                 arch.memfdCreate.toLong(),
                                 io.mazewall.core.NativeArg.MemoryArg(name),
                                 io.mazewall.core.NativeArg.NullArg,

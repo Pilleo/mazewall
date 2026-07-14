@@ -17,7 +17,7 @@ reversible: true
 **Context:**
 **Hypothesis:** When the daemon replies to the kernel via `ioctl(SECCOMP_IOCTL_NOTIF_SEND)`, it might fail (e.g. if the tracee thread died prematurely, receiving `ENOENT`). If the daemon does not check the return value, it might leak internal state or assume the event was successfully handled, leading to desynchronization.
 
-`ProfilerSessionHandler.kt` calls `LinuxNative.ioctl(fd, NativeConstants.SECCOMP_IOCTL_NOTIF_SEND, respSegment.address())`. The return value is a `SyscallResult`. If `returnValue < 0`, the kernel rejected the response.
+`ProfilerSessionHandler.kt` calls `LinuxNative.raw.ioctl(fd, NativeConstants.SECCOMP_IOCTL_NOTIF_SEND, respSegment.address())`. The return value is a `SyscallResult`. If `returnValue < 0`, the kernel rejected the response.
 
 
 **Needed:**

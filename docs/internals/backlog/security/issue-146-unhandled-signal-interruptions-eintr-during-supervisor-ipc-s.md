@@ -17,7 +17,7 @@ reversible: true
 **Context:**
 **Hypothesis:** The JVM validation loop reads from and writes to the supervisor socket. System calls over the socket can be interrupted by signals (`EINTR`).
 
-In `SupervisorSessionHandler.kt`, `LinuxNative.poll`, `LinuxNative.memory.write`, etc. are used. The `readAndHandleJvmResponse` and `sendSeccompError`/`sendSeccompContinue` functions do not properly loop on `EINTR` when calling `write` or `ioctl`. If a signal is received during the `ioctl(SECCOMP_IOCTL_NOTIF_SEND)` call, it may fail with `EINTR`, leaving the tracee suspended forever as the notification is never correctly answered.
+In `SupervisorSessionHandler.kt`, `LinuxNative.raw.poll`, `LinuxNative.memory.write`, etc. are used. The `readAndHandleJvmResponse` and `sendSeccompError`/`sendSeccompContinue` functions do not properly loop on `EINTR` when calling `write` or `ioctl`. If a signal is received during the `ioctl(SECCOMP_IOCTL_NOTIF_SEND)` call, it may fail with `EINTR`, leaving the tracee suspended forever as the notification is never correctly answered.
 
 
 **Needed:**
