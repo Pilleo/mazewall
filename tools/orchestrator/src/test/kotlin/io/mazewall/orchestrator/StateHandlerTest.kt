@@ -37,7 +37,7 @@ class MockOrchestratorEnvironment : OrchestratorEnvironment {
     override fun requestApproval(issueId: String, text: String): Boolean = approved
 
     override fun findExistingIssueNumber(issueId: String): String? = existingIssueNumber
-    override fun createIssue(title: String, bodyFile: File, label: String): String = createdIssueNumber
+    override fun createIssue(title: String, body: String, label: String): String = createdIssueNumber
     override fun isIssueClosed(issueNumber: String): Boolean = issueClosed
     override fun findLinkedPR(issueNumber: String, issueId: String, sessionId: String?): String? = linkedPrNumber
     override fun isPrMerged(prNumber: String): Boolean = prMerged
@@ -77,18 +77,24 @@ class StateHandlerTest {
 
     @Test
     fun testPendingApprovalTransitionsToAwaitingJulesStart() {
-        val env = MockOrchestratorEnvironment()
-        val context = OrchestratorContext().apply {
-            currentIssueId = "issue-1"
-            currentIssueTitle = "Title"
-            currentIssueFile = "test.md"
+        val tempFile = File.createTempFile("issue-1", ".md")
+        tempFile.writeText("Test issue body")
+        try {
+            val env = MockOrchestratorEnvironment()
+            val context = OrchestratorContext().apply {
+                currentIssueId = "issue-1"
+                currentIssueTitle = "Title"
+                currentIssueFile = tempFile.absolutePath
+            }
+            env.issues.add(BacklogIssue(tempFile, "issue-1", "Title", 1, "open", emptyList()))
+
+            val nextState = OrchestratorState.PENDING_APPROVAL.execute(env, context)
+
+            assertEquals(OrchestratorState.AWAITING_JULES_START, nextState)
+            assertEquals("123", context.githubIssueNumber)
+        } finally {
+            tempFile.delete()
         }
-        env.issues.add(BacklogIssue(File("test.md"), "issue-1", "Title", 1, "open", emptyList()))
-
-        val nextState = OrchestratorState.PENDING_APPROVAL.execute(env, context)
-
-        assertEquals(OrchestratorState.AWAITING_JULES_START, nextState)
-        assertEquals("123", context.githubIssueNumber)
     }
 
     @Test

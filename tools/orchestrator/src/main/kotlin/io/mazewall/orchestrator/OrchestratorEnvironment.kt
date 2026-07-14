@@ -34,7 +34,7 @@ interface OrchestratorEnvironment {
 
     // GitHub
     fun findExistingIssueNumber(issueId: String): String?
-    fun createIssue(title: String, bodyFile: File, label: String): String
+    fun createIssue(title: String, body: String, label: String): String
     fun isIssueClosed(issueNumber: String): Boolean
     fun findLinkedPR(issueNumber: String, issueId: String, sessionId: String?): String?
     fun isPrMerged(prNumber: String): Boolean
@@ -119,8 +119,8 @@ class RealOrchestratorEnvironment(
 
     override fun findExistingIssueNumber(issueId: String): String? = GitHubCli.findExistingIssueNumber(issueId)
 
-    override fun createIssue(title: String, bodyFile: File, label: String): String =
-        GitHubCli.createIssue(title, bodyFile, label)
+    override fun createIssue(title: String, body: String, label: String): String =
+        GitHubCli.createIssue(title, body, label)
 
     override fun isIssueClosed(issueNumber: String): Boolean = GitHubCli.isIssueClosed(issueNumber)
 

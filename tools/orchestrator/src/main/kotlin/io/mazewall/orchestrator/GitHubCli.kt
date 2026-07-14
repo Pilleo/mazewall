@@ -61,14 +61,23 @@ object GitHubCli {
         return result
     }
 
-    fun createIssue(title: String, bodyFile: File, label: String): String {
+    fun createIssue(title: String, body: String, label: String): String {
         try {
             // Ensure the label exists in the repository
             execute("gh", "label", "create", label, "--color", "ed0707", "--description", "Trigger Jules Agent")
         } catch (_: Exception) {
             // Ignore error if the label already exists
         }
-        val output = execute("gh", "issue", "create", "--title", title, "--body-file", bodyFile.absolutePath, "--label", label)
+
+        val directory = File("build/tmp").apply { mkdirs() }
+        val tempFile = File.createTempFile("issue_body_", ".tmp", directory)
+        val output = try {
+            tempFile.writeText(body)
+            execute("gh", "issue", "create", "--title", title, "--body-file", tempFile.absolutePath, "--label", label)
+        } finally {
+            tempFile.delete()
+        }
+
         // gh issue create outputs the issue URL (e.g., https://github.com/owner/repo/issues/123)
         val issueNumber = output.substringAfterLast("/").trim()
         if (issueNumber.toIntOrNull() == null) {
@@ -249,7 +258,7 @@ object GitHubCli {
         override fun sendNotification(message: String) {}
         override fun requestApproval(issueId: String, text: String): Boolean = false
         override fun findExistingIssueNumber(issueId: String): String? = null
-        override fun createIssue(title: String, bodyFile: File, label: String): String = ""
+        override fun createIssue(title: String, body: String, label: String): String = ""
         override fun isIssueClosed(issueNumber: String): Boolean = false
         override fun findLinkedPR(issueNumber: String, issueId: String, sessionId: String?): String? = null
         override fun isPrMerged(prNumber: String): Boolean = false
