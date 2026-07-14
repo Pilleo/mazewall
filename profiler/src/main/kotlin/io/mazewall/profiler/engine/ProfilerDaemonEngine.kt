@@ -62,7 +62,7 @@ internal class ProfilerDaemonEngine(
     }
 
     fun run() {
-        val serverFd = socketManager.createServer(socketPath)
+        val serverFd = socketManager.createUnixServer(socketPath)
         val listeningState = (state as ProfilerDaemonState.Uninitialized).listening(serverFd, socketPath)
         state = listeningState
         System.err.println("[DAEMON] Listening on $socketPath (fd=$serverFd)")

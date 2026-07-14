@@ -193,7 +193,7 @@ class ProfilerDesignSpec :
                 raw.ioctl(fd, request, arg)
             }
 
-            override fun createServer(socketPath: String): FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open> {
+            override fun createUnixServer(socketPath: String): FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open> {
                 createdServerPath = socketPath
                 return FileDescriptor.unsafe(99)
             }
@@ -202,6 +202,10 @@ class ProfilerDesignSpec :
                 acceptedServerFd = serverFd
                 return FileDescriptor.unsafe(100)
             }
+
+            override fun connect(socketPath: String): FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open> = FileDescriptor.unsafe(101)
+
+            override fun sendDescriptor(socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>, fdToSend: FileDescriptor<*, FdState.Open>): Boolean = true
 
             override fun close(fd: FileDescriptor<*, FdState.Open>) {
                 closedFds.add(fd)

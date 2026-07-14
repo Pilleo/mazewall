@@ -21,7 +21,7 @@ class SupervisorProxyIntegrationTest : BaseIntegrationTest() {
         @org.junit.jupiter.api.AfterAll
         @JvmStatic
         fun tearDownAll() {
-            io.mazewall.enforcer.supervisor.SupervisorDaemonManager.stop()
+            io.mazewall.enforcer.supervisor.SupervisorDaemonManager.getInstance().stop()
         }
     }
 

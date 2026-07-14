@@ -75,7 +75,7 @@ public object LinuxNative : NativeEngine {
      * Executes the given [block] within a [NativeTransaction] context.
      * Raw system calls and sensitive native operations are only available within this scope.
      */
-    public fun <T> withTransaction(block: NativeTransaction.() -> T): T {
+    override fun <T> withTransaction(block: NativeTransaction.() -> T): T {
         return transactionManager.withTransaction(block)
     }
 
@@ -259,6 +259,10 @@ internal object RealNativeEngine : NativeEngine, RawSyscallOperations {
     override val process: NativeProcess = RealNativeProcess
     override val memory: NativeMemory = RealNativeMemory
     override val raw: RawSyscallOperations get() = this
+
+    override fun <T> withTransaction(block: NativeTransaction.() -> T): T {
+        return RealTransactionManager.withTransaction(block)
+    }
 
     private val SYSCALL: MethodHandle =
         RealNativeHelper.downcall(

@@ -88,15 +88,7 @@ interface NativeIoOperations {
 /**
  * Interface for socket creation and connection handling.
  */
-interface SocketLifecycleManager {
-    fun createServer(socketPath: String): FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>
-
-    fun accept(serverFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>): FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>
-
-    fun close(fd: FileDescriptor<*, FdState.Open>)
-
-    fun recvDescriptor(socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>): FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open>?
-}
+typealias SocketLifecycleManager = io.mazewall.core.SocketManager
 
 /**
  * Legacy composite interface for communicating with the parent JVM and receiving file descriptors.
@@ -193,8 +185,16 @@ object RealProfilerTransport : ProfilerTransport {
         ioctl(session.listenerFd, SECCOMP_IOCTL_NOTIF_SEND, resp).getOrThrow("sendSeccompContinue")
     }
 
+    override fun connect(socketPath: String): FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open> {
+        return io.mazewall.core.RealSocketManager.connect(socketPath)
+    }
+
+    override fun sendDescriptor(socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>, fdToSend: FileDescriptor<*, FdState.Open>): Boolean {
+        return io.mazewall.core.RealSocketManager.sendDescriptor(socketFd, fdToSend)
+    }
+
     override fun recvDescriptor(socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>): FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open>? {
-        return io.mazewall.ffi.networking.SupervisorSocketUtils.recvDescriptor(socketFd)
+        return io.mazewall.core.RealSocketManager.recvDescriptor(socketFd)
     }
 
     override fun poll(
@@ -228,37 +228,12 @@ object RealProfilerTransport : ProfilerTransport {
         arg: MemorySegment,
     ): LinuxNative.SyscallResult<Long, *> = LinuxNative.withTransaction { LinuxNative.raw.ioctl(fd, request, arg) }
 
-    override fun createServer(socketPath: String): FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open> {
-        val fd = LinuxNative.withTransaction {
-            LinuxNative.networking.socket(
-                io.mazewall.ffi.networking.SupervisorSocketUtils.AF_UNIX,
-                io.mazewall.ffi.networking.SupervisorSocketUtils.SOCK_STREAM,
-                0
-            )
-        }.getFdOrThrow("socket(AF_UNIX)").let { FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(it.value) }
-
-        Arena.ofConfined().use { arena ->
-            val sockaddrUn = io.mazewall.ffi.networking.SupervisorSocketUtils.setupSockAddrUn(arena, socketPath)
-
-            LinuxNative.withTransaction {
-                LinuxNative.networking.bind(fd, sockaddrUn.segment, io.mazewall.ffi.networking.SupervisorSocketUtils.SOCKADDR_UN_SIZE)
-            }.onFailure { _, _ ->
-                LinuxNative.fileSystem.close(fd)
-            }.getOrThrow("bind(AF_UNIX)")
-        }
-
-        LinuxNative.withTransaction {
-            LinuxNative.networking.listen(fd, io.mazewall.ffi.networking.SupervisorSocketUtils.BACKLOG_SIZE)
-        }.onFailure { _, _ ->
-            LinuxNative.fileSystem.close(fd)
-        }.getOrThrow("listen")
-
-        return fd
+    override fun createUnixServer(socketPath: String): FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open> {
+        return io.mazewall.core.RealSocketManager.createUnixServer(socketPath)
     }
 
     override fun accept(serverFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>): FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open> {
-        val res = LinuxNative.withTransaction { LinuxNative.networking.accept(serverFd, MemorySegment.NULL, MemorySegment.NULL) }
-        return res.getFdOrThrow("accept").let { FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(it.value) }
+        return io.mazewall.core.RealSocketManager.accept(serverFd)
     }
 
     override fun close(fd: FileDescriptor<*, FdState.Open>) {

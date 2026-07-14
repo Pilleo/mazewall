@@ -116,7 +116,7 @@ object ContainedExecutors {
         validateLinuxAndNotVirtual()
 
         if (augmentedPolicy.hasSupervisedSyscalls) {
-            io.mazewall.enforcer.supervisor.SupervisorDaemonManager.getOrSpawnSharedDaemon()
+            io.mazewall.enforcer.supervisor.SupervisorDaemonManager.getInstance().getOrSpawnSharedDaemon()
         }
 
         applyLandlockIfNecessary(processWide, augmentedPolicy)

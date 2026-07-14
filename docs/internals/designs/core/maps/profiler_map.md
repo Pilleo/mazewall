@@ -56,7 +56,6 @@ graph TD
     issue_029_proof_of_progress_state_machine_for_landlock_discovery_disco["🔴 Issue: Proof-of-Progress State Machine for Landlock Discovery (`DiscoveryTask<Status>`) (ENHANCEMENT)"]
     issue_030_architectural_dip_dependency_inversion_violations_in_native_["🔴 Issue: Architectural DIP (Dependency Inversion) Violations in Native Scopes (HIGH)"]
     issue_032_compile_time_bpf_termination_safety_type_state_ret_enforceme["🔴 Issue: Compile-Time BPF Termination Safety (Type-State RET Enforcement) (ENHANCEMENT)"]
-    issue_034_high_frequency_arena_allocation_overhead_mm_optimization["🔴 Issue: High-Frequency Arena Allocation Overhead (MM Optimization) (MEDIUM)"]
     issue_035_memory_segment_pooling_for_profiler_usernotif["🔴 Issue: Memory Segment Pooling for Profiler USER_NOTIF (ENHANCEMENT)"]
     issue_036_residual_interface_segregation_violation_isp_in_nativeengine["🔴 Issue: Residual Interface Segregation Violation (ISP) in `NativeEngine` (HIGH)"]
     issue_037_seccompaction_violates_openclosed_principle_ocp["🔴 Issue: `SeccompAction` Violates Open/Closed Principle (OCP) (ENHANCEMENT)"]
@@ -164,7 +163,10 @@ graph TD
     issue_190_unhandled_eintr_in_accept_in_supervisordaemonengine["🔴 Issue: Unhandled EINTR in accept in SupervisorDaemonEngine (MEDIUM)"]
     issue_191_jvm_validation_timeout_causes_denial_of_service_on_valid_syscalls["🔴 Issue: JVM Validation Timeout Causes Denial of Service on Valid Syscalls (MEDIUM)"]
     issue_193_review_orchestrator_prompts_jules_quality_safety_guidelines["🔴 Issue: Review and Enhance Orchestrator Prompts for Jules to Enforce Quality and Safety Guidelines (HIGH)"]
+    issue_194_threadlocal_errnosegment_optimization["🔴 Issue: Global/ThreadLocal ErrnoSegment Optimization (HIGH)"]
     issue_195_jules_session_id_parsing_bug["🔴 Issue: Fix Jules Session ID Parsing Bug (HIGH)"]
+    issue_195_reactor_loop_iteration_arena_scoping["🔴 Issue: Reactor Loop Iteration Arena Scoping (HIGH)"]
+    issue_196_decouple_nativeengine_from_implicit_arenas["🔴 Issue: Decouple NativeEngine from Implicit Arenas (MEDIUM)"]
     issue_197_graceful_fallback_for_ai_agent_failures["🔴 Issue: Graceful Fallback for AI Agent Failures (HIGH)"]
     issue_198_auto_closing_linked_github_issues["🔴 Issue: Auto-Closing Linked GitHub Issues (HIGH)"]
     issue_202_handle_cli_authentication_failures["🔴 Issue: Detect and Handle CLI Authentication Failures with Actionable Login Alerts (HIGH)"]
@@ -228,9 +230,8 @@ graph TD
     click issue_029_proof_of_progress_state_machine_for_landlock_discovery_disco "../../../backlog/security/issue-029-proof-of-progress-state-machine-for-landlock-discovery-disco.md"
     click issue_030_architectural_dip_dependency_inversion_violations_in_native_ "../../../backlog/testing/issue-030-architectural-dip-dependency-inversion-violations-in-native-.md"
     click issue_032_compile_time_bpf_termination_safety_type_state_ret_enforceme "../../../backlog/code_health/issue-032-compile-time-bpf-termination-safety-type-state-ret-enforceme.md"
-    click issue_034_high_frequency_arena_allocation_overhead_mm_optimization "../../../backlog/performance/issue-034-high-frequency-arena-allocation-overhead-mm-optimization.md"
     click issue_035_memory_segment_pooling_for_profiler_usernotif "../../../backlog/security/issue-035-memory-segment-pooling-for-profiler-usernotif.md"
-    click issue_036_residual_interface_segregation_violation_isp_in_nativeengine "../../../backlog/testing/issue-036-residual-interface-segregation-violation-isp-in-nativeengine.md"
+    click issue_036_residual_interface_segregation_violation_isp_in_nativeengine "../../../backlog/resolved/issue-036-residual-interface-segregation-violation-isp-in-nativeengine.md"
     click issue_037_seccompaction_violates_openclosed_principle_ocp "../../../backlog/security/issue-037-seccompaction-violates-openclosed-principle-ocp.md"
     click issue_038_type_state_for_filedescriptor_lifecycles_compile_time_use_af "../../../backlog/code_health/issue-038-type-state-for-filedescriptor-lifecycles-compile-time-use-af.md"
     click issue_040_archunit_ban_javalangthread_for_context_preservation "../../../backlog/testing/issue-040-archunit-ban-javalangthread-for-context-preservation.md"
@@ -336,7 +337,10 @@ graph TD
     click issue_190_unhandled_eintr_in_accept_in_supervisordaemonengine "../../../backlog/security/issue-190-unhandled-eintr-in-accept-in-supervisordaemonengine.md"
     click issue_191_jvm_validation_timeout_causes_denial_of_service_on_valid_syscalls "../../../backlog/security/issue-191-jvm-validation-timeout-causes-denial-of-service-on-valid-syscalls.md"
     click issue_193_review_orchestrator_prompts_jules_quality_safety_guidelines "../../../backlog/code_health/issue-193-review-orchestrator-prompts-jules-quality-safety-guidelines.md"
+    click issue_194_threadlocal_errnosegment_optimization "../../../backlog/performance/issue-194-threadlocal-errnosegment-optimization.md"
     click issue_195_jules_session_id_parsing_bug "../../../backlog/code_health/issue-195-jules-session-id-parsing-bug.md"
+    click issue_195_reactor_loop_iteration_arena_scoping "../../../backlog/performance/issue-195-reactor-loop-iteration-arena-scoping.md"
+    click issue_196_decouple_nativeengine_from_implicit_arenas "../../../backlog/code_health/issue-196-decouple-nativeengine-from-implicit-arenas.md"
     click issue_197_graceful_fallback_for_ai_agent_failures "../../../backlog/code_health/issue-197-graceful-fallback-for-ai-agent-failures.md"
     click issue_198_auto_closing_linked_github_issues "../../../backlog/code_health/issue-198-auto-closing-linked-github-issues.md"
     click issue_202_handle_cli_authentication_failures "../../../backlog/code_health/issue-202-handle-cli-authentication-failures.md"

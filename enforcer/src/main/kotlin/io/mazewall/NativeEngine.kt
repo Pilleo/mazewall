@@ -31,6 +31,12 @@ public interface NativeEngine {
     public val process: NativeProcess
     public val memory: NativeMemory
     public val raw: RawSyscallOperations
+
+    /**
+     * Executes the given [block] within a [NativeTransaction] context.
+     * Raw system calls and sensitive native operations are only available within this scope.
+     */
+    public fun <T> withTransaction(block: NativeTransaction.() -> T): T
 }
 
 /**

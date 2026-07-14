@@ -1,42 +1,42 @@
-package io.mazewall.profiler.internal
+package io.mazewall.enforcer.supervisor
 
 import io.mazewall.LinuxNative
 import io.mazewall.MockNativeEngine
-import io.mazewall.Platform
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
 import io.mazewall.core.ProcessLauncher
 import io.mazewall.core.SocketManager
+import io.mazewall.core.Tid
+import io.mazewall.ffi.NativeConstants
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertTrue
-import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Test
-import org.junit.jupiter.api.Assumptions.assumeTrue
 import java.io.ByteArrayInputStream
 import java.io.InputStream
 import java.nio.file.Path
 import java.nio.file.attribute.FileAttribute
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 
-class ProfilerDaemonManagerTest {
+class SupervisorDaemonManagerTest {
 
     class MockProcess(private val pid: Long, private val stdout: String = "") : Process() {
-        private var alive = true
-        override fun destroy() { alive = false }
+        override fun destroy() {}
         override fun exitValue(): Int = 0
         override fun waitFor(): Int = 0
         override fun getOutputStream(): java.io.OutputStream = java.io.ByteArrayOutputStream()
         override fun getInputStream(): InputStream = ByteArrayInputStream(stdout.toByteArray())
         override fun getErrorStream(): InputStream = ByteArrayInputStream(byteArrayOf())
         override fun pid(): Long = pid
-        override fun isAlive(): Boolean = alive
+        override fun isAlive(): Boolean = true
     }
 
     class MockProcessLauncher : ProcessLauncher {
         var startProcessCalled = false
         var lastArgs: List<String>? = null
-        var mockProcess: Process = MockProcess(8888L)
+        var mockProcess: Process = MockProcess(9999L)
         val shutdownHooks = mutableListOf<Thread>()
 
         override fun startProcess(args: List<String>, redirectErrorStream: Boolean): Process {
@@ -54,7 +54,7 @@ class ProfilerDaemonManagerTest {
         }
 
         override fun createTempDirectory(prefix: String, vararg attrs: FileAttribute<*>): Path {
-            return java.nio.file.Paths.get("/tmp/mock-profiler-dir")
+            return java.nio.file.Paths.get("/tmp/mock-dir")
         }
 
         override fun deleteIfExists(path: Path): Boolean = true
@@ -63,13 +63,15 @@ class ProfilerDaemonManagerTest {
 
     class MockSocketManager : SocketManager {
         var connectCalled = false
+        var lastConnectPath: String? = null
         var closeCalledCount = AtomicInteger(0)
 
-        override fun createUnixServer(socketPath: String): FileDescriptor<FileDescriptorRole.UnixSocket, io.mazewall.core.FdState.Open> = FileDescriptor.unsafe(20)
-        override fun accept(serverFd: FileDescriptor<FileDescriptorRole.UnixSocket, io.mazewall.core.FdState.Open>): FileDescriptor<FileDescriptorRole.UnixSocket, io.mazewall.core.FdState.Open> = FileDescriptor.unsafe(21)
+        override fun createUnixServer(socketPath: String): FileDescriptor<FileDescriptorRole.UnixSocket, io.mazewall.core.FdState.Open> = FileDescriptor.unsafe(10)
+        override fun accept(serverFd: FileDescriptor<FileDescriptorRole.UnixSocket, io.mazewall.core.FdState.Open>): FileDescriptor<FileDescriptorRole.UnixSocket, io.mazewall.core.FdState.Open> = FileDescriptor.unsafe(11)
         override fun connect(socketPath: String): FileDescriptor<FileDescriptorRole.UnixSocket, io.mazewall.core.FdState.Open> {
             connectCalled = true
-            return FileDescriptor.unsafe(22)
+            lastConnectPath = socketPath
+            return FileDescriptor.unsafe(12)
         }
         override fun close(fd: FileDescriptor<*, io.mazewall.core.FdState.Open>) {
             closeCalledCount.incrementAndGet()
@@ -79,49 +81,55 @@ class ProfilerDaemonManagerTest {
     }
 
     @Test
-    fun `test dummy test for coverage`() {
-        val clazz = ProfilerDaemonManager::class.java
-        assertNotNull(clazz)
-    }
-
-    @Test
-    fun `test daemon spawn and stop with mocks`() {
+    fun `getOrSpawnSharedDaemon spawns daemon and sets ptracer`() {
         val mockEngine = MockNativeEngine()
         val mockLauncher = MockProcessLauncher()
-        mockLauncher.mockProcess = MockProcess(8888L, io.mazewall.profiler.engine.DAEMON_READY_SENTINEL + "\n")
+        mockLauncher.mockProcess = MockProcess(9999L, SupervisorDaemon.DAEMON_READY_SENTINEL + "\n")
         val mockSocket = MockSocketManager()
 
-        val manager = ProfilerDaemonManager(mockEngine, mockSocket, mockLauncher)
+        val manager = SupervisorDaemonManager(mockEngine, mockSocket, mockLauncher)
+
+        var prctlCalled = false
+        mockEngine.process.onPrctl = { _, command ->
+            if (command is io.mazewall.core.PrctlCommand.SetPtracer && command.tracerPid == 9999L) {
+                prctlCalled = true
+            }
+            LinuxNative.SyscallResult.Success(0L)
+        }
 
         val context = manager.getOrSpawnSharedDaemon()
+
         assertNotNull(context)
-        assertEquals(8888L, context.daemonProcess.pid())
+        assertEquals(9999L, context.daemonProcess.pid())
         assertTrue(mockLauncher.startProcessCalled)
-
-        val context2 = manager.getOrSpawnSharedDaemon()
-        assertTrue(context === context2)
-
-        manager.stop()
-        // No need to check isAlive if we don't have a real process that reacts to SHUTDOWN byte in this mock
-        assertTrue(mockSocket.connectCalled)
+        assertTrue(prctlCalled, "prctl(PR_SET_PTRACER) should be called with daemon PID")
     }
 
     @Test
-    fun `test real daemon spawn and stop`() {
-        assumeTrue(Platform.isSupported())
+    fun `stop cleans up daemon and triggers shutdown`() {
+        val mockEngine = MockNativeEngine()
+        val mockLauncher = MockProcessLauncher()
+        mockLauncher.mockProcess = MockProcess(9999L, SupervisorDaemon.DAEMON_READY_SENTINEL + "\n")
+        val mockSocket = MockSocketManager()
 
-        val manager = ProfilerDaemonManager.getInstance()
-        val context = manager.getOrSpawnSharedDaemon()
-        assertNotNull(context)
-        assertTrue(context.daemonProcess.isAlive)
+        val manager = SupervisorDaemonManager(mockEngine, mockSocket, mockLauncher)
+        manager.getOrSpawnSharedDaemon()
 
-        val context2 = manager.getOrSpawnSharedDaemon()
-        assertTrue(context === context2) // should reuse
+        var writeCalledWithShutdown = false
+        mockEngine.memory.onWrite = { _, _, buf, count ->
+            if (count == 1L) {
+                val byte = buf.get(java.lang.foreign.ValueLayout.JAVA_BYTE, 0L)
+                if (byte == 0x53.toByte()) { // 'S'
+                    writeCalledWithShutdown = true
+                }
+            }
+            LinuxNative.SyscallResult.Success(count)
+        }
 
         manager.stop()
 
-        // Wait for it to die
-        context.daemonProcess.waitFor()
-        assertFalse(context.daemonProcess.isAlive)
+        assertTrue(mockSocket.connectCalled)
+        assertTrue(writeCalledWithShutdown, "Should write shutdown command to daemon socket")
+        assertEquals(1, mockSocket.closeCalledCount.get())
     }
 }

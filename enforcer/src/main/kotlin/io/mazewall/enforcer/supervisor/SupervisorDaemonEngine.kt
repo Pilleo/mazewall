@@ -1,26 +1,18 @@
 package io.mazewall.enforcer.supervisor
 
 import io.mazewall.LinuxNative
+import io.mazewall.NativeEngine
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
+import io.mazewall.core.SocketManager
 import io.mazewall.ffi.Layouts
 import io.mazewall.ffi.NativeConstants
-import io.mazewall.getFdOrThrow
-import io.mazewall.onSuccess
-import io.mazewall.onFailure
 import io.mazewall.recover
 import io.mazewall.ffi.memory.PollFdSegment
-import io.mazewall.ffi.memory.SockaddrUnSegment
-import io.mazewall.ffi.memory.IovecSegment
-import io.mazewall.ffi.memory.MsghdrSegment
-import io.mazewall.ffi.memory.CmsghdrSegment
 import io.mazewall.ffi.memory.writeByte
 import java.lang.foreign.Arena
 import java.lang.foreign.MemoryLayout
-import java.lang.foreign.MemorySegment
-import java.lang.foreign.ValueLayout
-import java.nio.charset.StandardCharsets
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
@@ -51,7 +43,9 @@ internal sealed interface SupervisorDaemonState {
 }
 
 internal class SupervisorDaemonEngine(
-    private val socketPath: String
+    private val socketPath: String,
+    private val engine: NativeEngine = LinuxNative,
+    private val socketManager: SocketManager = io.mazewall.core.RealSocketManager
 ) {
     private val clientSockets = CopyOnWriteArrayList<FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>>()
     private val activeListeners = CopyOnWriteArrayList<FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open>>()
@@ -74,18 +68,11 @@ internal class SupervisorDaemonEngine(
         private const val ACK_BUF_SIZE = 1L
         private const val PROTOCOL_ACK_BYTE = 0xAC.toByte()
 
-        private const val CMSG_RIGHTS_LEN = 20L
-        private const val MSG_CONTROL_BUF_SIZE = 24L
-        private const val SOL_SOCKET = 1
-        private const val SCM_RIGHTS = 1
-        private const val EINTR = 4
-        private const val BACKLOG_SIZE = 128
-        private const val SOCKADDR_UN_SIZE = 110
         private const val MAX_CONNECTIONS = 200
     }
 
     fun run() {
-        val serverFd = createServer(socketPath)
+        val serverFd = socketManager.createUnixServer(socketPath)
         val listeningState = (state as SupervisorDaemonState.Uninitialized).listening(serverFd, socketPath)
         state = listeningState
         System.err.println("[SUPERVISOR] Listening on $socketPath (fd=$serverFd)")
@@ -100,7 +87,7 @@ internal class SupervisorDaemonEngine(
             }
         } finally {
             state = SupervisorDaemonState.Terminated
-            closeFd(serverFd)
+            socketManager.close(serverFd)
             connectionExecutor.shutdown()
             try {
                 if (!connectionExecutor.awaitTermination(5, TimeUnit.SECONDS)) {
@@ -138,7 +125,7 @@ internal class SupervisorDaemonEngine(
         pollFd.setEvents(NativeConstants.POLLIN)
 
         while (!isGlobalShutdown()) {
-            val pollRes = LinuxNative.withTransaction { LinuxNative.raw.poll(pollFd.segment, 1L, POLL_TIMEOUT_MS) }
+            val pollRes = engine.withTransaction { engine.raw.poll(pollFd.segment, 1L, POLL_TIMEOUT_MS) }
             val count = pollRes.recover { errno, _ ->
                 if (errno != NativeConstants.EINTR) return
                 0L
@@ -151,15 +138,15 @@ internal class SupervisorDaemonEngine(
     internal fun handleNewConnection(serverFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>) {
         try {
             while (true) {
-                val res = LinuxNative.withTransaction {
-                    LinuxNative.networking.accept(serverFd, MemorySegment.NULL, MemorySegment.NULL)
+                val res = engine.withTransaction {
+                    engine.networking.accept(serverFd, java.lang.foreign.MemorySegment.NULL, java.lang.foreign.MemorySegment.NULL)
                 }
-                if (res is LinuxNative.SyscallResult.Success) {
+                if (res is io.mazewall.LinuxNative.SyscallResult.Success) {
                     val clientFd = FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(res.value.toInt())
 
                     if (clientSockets.size >= MAX_CONNECTIONS) {
                         System.err.println("[SUPERVISOR] Rejecting connection: too many clients (${clientSockets.size})")
-                        closeFd(clientFd)
+                        socketManager.close(clientFd)
                         return
                     }
 
@@ -169,11 +156,11 @@ internal class SupervisorDaemonEngine(
                     } catch (e: Exception) {
                         System.err.println("[SUPERVISOR] Failed to execute connection handler: ${e.message}")
                         clientSockets.remove(clientFd)
-                        closeFd(clientFd)
+                        socketManager.close(clientFd)
                     }
                     return
                 } else {
-                    val errno = (res as LinuxNative.SyscallResult.Error).errno
+                    val errno = (res as io.mazewall.LinuxNative.SyscallResult.Error).errno
                     if (errno == NativeConstants.EINTR) continue
                     return
                 }
@@ -200,7 +187,7 @@ internal class SupervisorDaemonEngine(
             }
         } finally {
             if (clientSockets.remove(socketFd)) {
-                closeFd(socketFd)
+                socketManager.close(socketFd)
             }
             val lFd = when (connection) {
                 is io.mazewall.ffi.networking.SeccompConnection.FdAttached -> connection.listenerFd
@@ -208,7 +195,7 @@ internal class SupervisorDaemonEngine(
                 else -> null
             }
             if (lFd != null && activeListeners.remove(lFd)) {
-                closeFd(lFd)
+                socketManager.close(lFd)
             }
         }
     }
@@ -220,7 +207,7 @@ internal class SupervisorDaemonEngine(
         pollFd: PollFdSegment
     ): io.mazewall.ffi.networking.SeccompConnection? {
         if (connection is io.mazewall.ffi.networking.SeccompConnection.Accepted) {
-            val pollRes = LinuxNative.withTransaction { LinuxNative.raw.poll(pollFd.segment, 1L, POLL_TIMEOUT_MS) }
+            val pollRes = engine.withTransaction { engine.raw.poll(pollFd.segment, 1L, POLL_TIMEOUT_MS) }
             val count = pollRes.recover { errno, _ ->
                 if (errno == NativeConstants.EINTR) 0L else -1L
             }
@@ -230,7 +217,7 @@ internal class SupervisorDaemonEngine(
 
         return when (val current = connection) {
             is io.mazewall.ffi.networking.SeccompConnection.Accepted -> {
-                val listenerFd = io.mazewall.ffi.networking.SupervisorSocketUtils.recvDescriptor(socketFd)
+                val listenerFd = socketManager.recvDescriptor(socketFd)
                 if (listenerFd != null) {
                     System.err.println("[SUPERVISOR] Received listener FD: ${listenerFd.value}")
                     activeListeners.add(listenerFd)
@@ -246,12 +233,12 @@ internal class SupervisorDaemonEngine(
                 ackBuf.writeByte(0L, PROTOCOL_ACK_BYTE)
                 var result: io.mazewall.ffi.networking.SeccompConnection? = null
                 while (true) {
-                    val res = LinuxNative.withTransaction { LinuxNative.memory.write(socketFd, ackBuf, ACK_BUF_SIZE) }
-                    if (res is LinuxNative.SyscallResult.Success) {
+                    val res = engine.withTransaction { engine.memory.write(socketFd, ackBuf, ACK_BUF_SIZE) }
+                    if (res is io.mazewall.LinuxNative.SyscallResult.Success) {
                         result = current.handshakeComplete()
                         break
                     } else {
-                        val errno = (res as LinuxNative.SyscallResult.Error).errno
+                        val errno = (res as io.mazewall.LinuxNative.SyscallResult.Error).errno
                         if (errno == NativeConstants.EINTR) continue
                         result = null
                         break
@@ -273,7 +260,7 @@ internal class SupervisorDaemonEngine(
         socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>,
         listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open>
     ) {
-        val sessionHandler = SupervisorSessionHandler(socketFd, listenerFd)
+        val sessionHandler = SupervisorSessionHandler(socketFd, listenerFd, engine, socketManager)
         try {
             Arena.ofConfined().use { arena ->
                 val pollFds = arena.allocate(MemoryLayout.sequenceLayout(2, Layouts.POLLFD))
@@ -289,7 +276,7 @@ internal class SupervisorDaemonEngine(
                 val resp = arena.allocate(Layouts.SECCOMP_NOTIF_RESP)
 
                 while (!isGlobalShutdown()) {
-                    val pollRes = LinuxNative.withTransaction { LinuxNative.raw.poll(pollFds, 2L, POLL_TIMEOUT_MS) }
+                    val pollRes = engine.withTransaction { engine.raw.poll(pollFds, 2L, POLL_TIMEOUT_MS) }
                     val count = pollRes.recover { errno, _ ->
                         if (errno != NativeConstants.EINTR) return@use
                         0L
@@ -302,41 +289,9 @@ internal class SupervisorDaemonEngine(
             }
         } finally {
             if (activeListeners.remove(listenerFd)) {
-                closeFd(listenerFd)
+                socketManager.close(listenerFd)
             }
         }
-    }
-
-    private fun createServer(socketPath: String): FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open> {
-        val fd = LinuxNative.withTransaction {
-            LinuxNative.networking.socket(
-                io.mazewall.ffi.networking.SupervisorSocketUtils.AF_UNIX,
-                io.mazewall.ffi.networking.SupervisorSocketUtils.SOCK_STREAM,
-                0
-            )
-        }.getFdOrThrow("socket(AF_UNIX)").let { FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(it.value) }
-
-        Arena.ofConfined().use { arena ->
-            val sockaddrUn = io.mazewall.ffi.networking.SupervisorSocketUtils.setupSockAddrUn(arena, socketPath)
-
-            LinuxNative.withTransaction {
-                LinuxNative.networking.bind(fd, sockaddrUn.segment, io.mazewall.ffi.networking.SupervisorSocketUtils.SOCKADDR_UN_SIZE)
-            }.onFailure { _, _ ->
-                LinuxNative.fileSystem.close(fd)
-            }.getOrThrow("bind(AF_UNIX)")
-        }
-
-        LinuxNative.withTransaction {
-            LinuxNative.networking.listen(fd, io.mazewall.ffi.networking.SupervisorSocketUtils.BACKLOG_SIZE)
-        }.onFailure { _, _ ->
-            LinuxNative.fileSystem.close(fd)
-        }.getOrThrow("listen")
-
-        return fd
-    }
-
-    private fun closeFd(fd: FileDescriptor<*, FdState.Open>) {
-        LinuxNative.fileSystem.close(fd)
     }
 }
 
