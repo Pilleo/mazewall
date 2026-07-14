@@ -368,7 +368,7 @@ internal class SupervisorSessionHandler(
             return try {
                 path.normalize().toRealPath()
             } catch (e: Exception) {
-                path.normalize()
+                null
             }
         }
         try {
@@ -383,9 +383,7 @@ internal class SupervisorSessionHandler(
             for (bypassPath in safeBypassPaths) {
                 try {
                     val resolved = bypassPath.resolve(pathStr).normalize()
-                    if (java.nio.file.Files.exists(resolved)) {
-                        return resolved.toRealPath()
-                    }
+                    return resolved.toRealPath()
                 } catch (ignored: Exception) {}
             }
         }
