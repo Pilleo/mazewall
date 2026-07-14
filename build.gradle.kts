@@ -270,6 +270,9 @@ subprojects {
         listOf(
             "**/io/mazewall/RealNative*",
             "**/io/mazewall/RealTransactionManager*",
+            "**/io/mazewall/enforcer/JvmFloorWorkload*",
+            "**/io/mazewall/enforcer/supervisor/JVMValidationListener*",
+            "**/io/mazewall/ffi/networking/SupervisorSeccompNotifInstaller*",
         )
 
     tasks.withType<org.gradle.testing.jacoco.tasks.JacocoReport>().configureEach {
@@ -315,7 +318,7 @@ subprojects {
                     limit {
                         counter = "INSTRUCTION"
                         value = "COVEREDRATIO"
-                        minimum = "0.68".toBigDecimal()
+                        minimum = "0.70".toBigDecimal()
                     }
                 }
                 rule {
@@ -333,7 +336,7 @@ subprojects {
                     limit {
                         counter = "INSTRUCTION"
                         value = "COVEREDRATIO"
-                        minimum = "0.65".toBigDecimal()
+                        minimum = "0.66".toBigDecimal()
                     }
                 }
             }
