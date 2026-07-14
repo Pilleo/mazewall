@@ -12,11 +12,10 @@ import kotlin.test.assertTrue
 class ContainedExecutorsCoverageTest {
 
     @Test
-    fun `test isPathSubset logic`() {
+    fun testIsPathSubsetLogic() {
         val p1 = Policy.builder().allowFsRead("/tmp").build()
         val p2 = Policy.builder().allowFsRead("/").build()
 
-        // We need a dummy policy definition that is not null to satisfy the type
         val emptyPolicy = Policy.builder().build().definition
 
         ThreadStateRegistry.state = ThreadStateRegistry.state.withLandlockPolicy(p1.definition)
@@ -30,9 +29,12 @@ class ContainedExecutorsCoverageTest {
     }
 
     @Test
-    fun `test handleUnsupportedPlatform behaviors`() {
+    fun testHandleUnsupportedPlatformBehaviors() {
         val mockProvider = object : PlatformProvider by RealPlatformProvider {
-            override fun getOsName(): String = "macOS"
+            override fun getOsName(): String = "Linux"
+            override fun hasKernelSeccompSupport(): Boolean = false
+            override fun checkSeccompSanity(): io.mazewall.LinuxNative.SyscallResult<Long, io.mazewall.LinuxNative.SyscallHandledState.Unhandled> =
+                io.mazewall.LinuxNative.SyscallResult.Error(22, -1)
         }
         Platform.setProvider(mockProvider)
         try {

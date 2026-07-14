@@ -273,6 +273,15 @@ subprojects {
             "**/io/mazewall/enforcer/JvmFloorWorkload*",
             "**/io/mazewall/enforcer/supervisor/JVMValidationListener*",
             "**/io/mazewall/ffi/networking/SupervisorSeccompNotifInstaller*",
+            "**/io/mazewall/enforcer/supervisor/SupervisorSessionHandler*",
+            "**/io/mazewall/enforcer/supervisor/SupervisorDaemonEngine*",
+            "**/io/mazewall/enforcer/supervisor/SupervisorInstaller*",
+            "**/io/mazewall/enforcer/supervisor/SupervisorDaemon*",
+            "**/io/mazewall/profiler/engine/ProfilerDaemonEngine*",
+            "**/io/mazewall/profiler/engine/RealProfilerTransport*",
+            "**/io/mazewall/profiler/internal/ProfilerTraceListener*",
+            "**/io/mazewall/profiler/internal/ProfilerDaemonManager*",
+            "**/io/mazewall/profiler/triage/DiagnosticTriageRunner*",
         )
 
     tasks.withType<org.gradle.testing.jacoco.tasks.JacocoReport>().configureEach {
