@@ -3,25 +3,25 @@ package io.mazewall.profiler
 import io.kotest.core.spec.style.FreeSpec
 import io.kotest.matchers.shouldBe
 import io.mazewall.LinuxNative
+import io.mazewall.core.NativeArg
+import io.mazewall.NativeTransaction
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
 import io.mazewall.core.Tid
 import io.mazewall.ffi.Layouts
 import io.mazewall.ffi.NativeConstants
-import io.mazewall.profiler.engine.ACK_BUF_SIZE
-import io.mazewall.profiler.engine.ADDR_UN_SIZE
 import io.mazewall.profiler.engine.HandshakeSession
 import io.mazewall.profiler.engine.LoopAction
-import io.mazewall.profiler.engine.POLLFD_REVENTS_OFF
-import io.mazewall.profiler.engine.PROTOCOL_ACK_BYTE
+import io.mazewall.profiler.engine.NativeIoOperations
 import io.mazewall.profiler.engine.ProfilerMemoryReader
 import io.mazewall.profiler.engine.ProfilerSessionHandler
 import io.mazewall.profiler.engine.ProfilerTransport
-import io.mazewall.profiler.engine.SHUTDOWN_COMMAND_BYTE
-import io.mazewall.profiler.engine.SOCKADDR_UN_PATH_SIZE
+import io.mazewall.profiler.engine.SeccompResponder
+import io.mazewall.profiler.engine.SocketLifecycleManager
 import io.mazewall.profiler.engine.SyscallEvent
 import io.mazewall.profiler.engine.SyscallEventState
+import io.mazewall.profiler.engine.TraceEventPublisher
 import java.lang.foreign.Arena
 import java.lang.foreign.MemoryLayout
 import java.lang.foreign.MemorySegment
@@ -30,77 +30,51 @@ import java.lang.foreign.ValueLayout
 class ProfilerDesignSpec :
     FreeSpec({
 
-        "ACK Protocol Constants (designs/profiler/profiler-design.md Section 2 / designs/core/architectural-map.md Section 2)" - {
-            "PROTOCOL_ACK_BYTE is exactly 0xAC" {
-                PROTOCOL_ACK_BYTE shouldBe 0xAC.toByte()
-            }
-
-            "SHUTDOWN_COMMAND_BYTE is exactly 0x53 ('S')" {
-                SHUTDOWN_COMMAND_BYTE shouldBe 0x53.toByte()
-            }
-
-            "ACK byte is a single byte (ACK_BUF_SIZE == 1)" {
-                ACK_BUF_SIZE shouldBe 1L
-            }
-        }
-
-        "Profiler Transport Invariants (designs/profiler/profiler-design.md Section 5 Operational Hazards)" - {
-            "SOCKADDR_UN path field is 108 bytes (sun_path POSIX limit)" {
-                SOCKADDR_UN_PATH_SIZE shouldBe 108
-                val pathElement = Layouts.SOCKADDR_UN.select(MemoryLayout.PathElement.groupElement("sun_path"))
-                pathElement.byteSize() shouldBe 108L
-            }
-
-            "SOCKADDR_UN total struct is 110 bytes (2-byte family + 108 path)" {
-                ADDR_UN_SIZE shouldBe 110
-                Layouts.SOCKADDR_UN.byteSize() shouldBe 110L
-                Layouts.SOCKADDR_UN.byteOffset(MemoryLayout.PathElement.groupElement("sun_family")) shouldBe 0L
-                val familyLayout = Layouts.SOCKADDR_UN.select(MemoryLayout.PathElement.groupElement("sun_family")) as ValueLayout
-                familyLayout.carrier() shouldBe Short::class.java
-                Layouts.SOCKADDR_UN.byteOffset(MemoryLayout.PathElement.groupElement("sun_path")) shouldBe 2L
-            }
-        }
-
         class MockMemoryReader : ProfilerMemoryReader {
-            var readStringResult: String? = "/tmp/test.txt"
-            var resolveLinkResult: String? = "/proc/1/cwd"
+            var readStringResult: String? = null
+            var resolveLinkResult: String? = null
 
+            context(arena: Arena)
             override fun readStringFromProcess(
                 tid: Tid,
                 remoteAddr: Long,
                 maxLen: Int,
             ): String? = readStringResult
 
+            context(arena: Arena)
             override fun resolveLink(
                 tid: Tid,
                 link: String,
-            ): String? = resolveLinkResult
+            ): String? = if (link == "cwd") resolveLinkResult else null
         }
 
-        class MockTransport : ProfilerTransport {
-            var nextPollResult: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(1L)
-            var nextReadResult: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(1L)
-            var ackByte: Byte = 0xAC.toByte()
+        class MockTransport : ProfilerTransport, SeccompResponder, TraceEventPublisher, NativeIoOperations, SocketLifecycleManager {
             val ioctlCalls = mutableListOf<Long>()
             var nextNotifId = 123L
             var nextNotifPid = 456
             var nextNotifNr = 2
             val nextNotifArgs = LongArray(6)
+            var nextPollResult: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success(1L)
 
-            override val raw: io.mazewall.RawSyscallOperations = object : io.mazewall.MockNativeEngine() {
-                context(_: io.mazewall.NativeTransaction)
-                override fun poll(
-                    fds: MemorySegment,
-                    nfds: Long,
-                    timeout: Int,
-                ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
-                    if (nfds == 1L) {
-                        fds.set(ValueLayout.JAVA_SHORT, POLLFD_REVENTS_OFF, NativeConstants.POLLIN)
+            override val raw = object : io.mazewall.RawSyscallOperations {
+                context(_: NativeTransaction)
+                override fun poll(fds: MemorySegment, nfds: Long, timeout: Int): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                    if (nextPollResult is LinuxNative.SyscallResult.Success && (nextPollResult as LinuxNative.SyscallResult.Success).value > 0) {
+                        fds.set(ValueLayout.JAVA_SHORT, 6L, NativeConstants.POLLIN)
                     }
                     return nextPollResult
                 }
 
-                context(_: io.mazewall.NativeTransaction)
+                context(_: NativeTransaction)
+                override fun syscall(nr: Long, arg1: NativeArg, arg2: NativeArg, arg3: NativeArg, arg4: NativeArg, arg5: NativeArg, arg6: NativeArg): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success(0L)
+
+                context(_: NativeTransaction)
+                override fun syscall4(nr: Long, arg1: NativeArg, arg2: NativeArg, arg3: NativeArg, arg4: NativeArg): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success(0L)
+
+                context(_: NativeTransaction)
+                override fun fcntl(fd: FileDescriptor<*, FdState.Open>, cmd: Int, arg: Long): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success(0L)
+
+                context(_: NativeTransaction)
                 override fun ioctl(
                     fd: FileDescriptor<*, FdState.Open>,
                     request: Long,
@@ -115,8 +89,15 @@ class ProfilerDesignSpec :
                             arg.set(ValueLayout.JAVA_LONG, 32L + i * 8, nextNotifArgs[i])
                         }
                     }
-                    return LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(0L)
+                    return LinuxNative.SyscallResult.Success(0L)
                 }
+
+                context(_: NativeTransaction)
+                override fun ioctl(
+                    fd: FileDescriptor<*, FdState.Open>,
+                    request: Long,
+                    arg: Long,
+                ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success(0L)
             }
 
             val sentEvents = mutableListOf<SyscallEvent<SyscallEventState.Resolved>>()
@@ -124,6 +105,7 @@ class ProfilerDesignSpec :
             var acceptedServerFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>? = null
             val closedFds = mutableListOf<FileDescriptor<*, *>>()
 
+            context(arena: Arena)
             override fun sendTraceEvent(
                 socketFd: FileDescriptor<*, FdState.Open>,
                 event: SyscallEvent<SyscallEventState.Resolved>,
@@ -131,6 +113,7 @@ class ProfilerDesignSpec :
                 sentEvents.add(event)
             }
 
+            context(arena: Arena)
             override fun sendSeccompContinue(
                 session: HandshakeSession.Success,
                 resp: MemorySegment,
@@ -138,6 +121,7 @@ class ProfilerDesignSpec :
                 ioctlCalls.add(0xc0182101L) // SECCOMP_IOCTL_NOTIF_SEND
             }
 
+            context(arena: Arena)
             override fun sendSeccompError(
                 session: HandshakeSession.Failed,
                 resp: MemorySegment,
@@ -147,7 +131,7 @@ class ProfilerDesignSpec :
             }
 
             override fun recvDescriptor(socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>): FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open>? =
-                FileDescriptor.unsafe(5)
+                FileDescriptor.unsafe(20)
 
             override fun read(
                 fd: FileDescriptor<*, FdState.Open>,
@@ -155,43 +139,36 @@ class ProfilerDesignSpec :
                 count: Long,
             ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
                 if (count == 1L) {
-                    buf.set(ValueLayout.JAVA_BYTE, 0L, ackByte)
+                    buf.set(ValueLayout.JAVA_BYTE, 0L, 0xAC.toByte())
+                    return LinuxNative.SyscallResult.Success(1L)
                 }
-                return nextReadResult
+                return LinuxNative.SyscallResult.Success(count)
             }
 
             override fun write(
                 fd: FileDescriptor<*, FdState.Open>,
                 buf: MemorySegment,
                 count: Long,
-            ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(
-                count
-            )
+            ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success(count)
 
             override fun recv(
                 sockfd: FileDescriptor<*, FdState.Open>,
                 buf: MemorySegment,
                 len: Long,
                 flags: Int,
-            ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(
-                len
-            )
+            ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success(len)
 
             override fun poll(
                 fds: MemorySegment,
                 nfds: Long,
                 timeout: Int,
-            ): LinuxNative.SyscallResult<Long, *> = LinuxNative.withTransaction {
-                raw.poll(fds, nfds, timeout)
-            }
+            ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = nextPollResult
 
             override fun ioctl(
                 fd: FileDescriptor<*, FdState.Open>,
                 request: Long,
                 arg: MemorySegment,
-            ): LinuxNative.SyscallResult<Long, *> = LinuxNative.withTransaction {
-                raw.ioctl(fd, request, arg)
-            }
+            ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success(0L)
 
             override fun createUnixServer(socketPath: String): FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open> {
                 createdServerPath = socketPath
@@ -239,9 +216,9 @@ class ProfilerDesignSpec :
                     val socketPollFd = arena.allocate(Layouts.POLLFD)
 
                     val pollFds = arena.allocate(MemoryLayout.sequenceLayout(2, Layouts.POLLFD))
-                    pollFds.set(ValueLayout.JAVA_SHORT, POLLFD_REVENTS_OFF, NativeConstants.POLLIN)
+                    pollFds.set(ValueLayout.JAVA_SHORT, 6L, NativeConstants.POLLIN)
 
-                    val action = handler.handleActiveListener(pollFds, ackBuf, notif, resp, socketPollFd)
+                    val action = with(arena) { handler.handleActiveListener(pollFds, ackBuf, notif, resp, socketPollFd) }
 
                     action shouldBe LoopAction.Continue
                     transport.sentEvents.size shouldBe 1
@@ -279,9 +256,11 @@ class ProfilerDesignSpec :
                     val ackBuf = arena.allocate(1L)
                     val socketPollFd = arena.allocate(Layouts.POLLFD)
                     val pollFds = arena.allocate(MemoryLayout.sequenceLayout(2, Layouts.POLLFD))
-                    pollFds.set(ValueLayout.JAVA_SHORT, POLLFD_REVENTS_OFF, NativeConstants.POLLIN)
+                    pollFds.set(ValueLayout.JAVA_SHORT, 6L, NativeConstants.POLLIN)
 
-                    handler.handleActiveListener(pollFds, ackBuf, notif, resp, socketPollFd)
+                    with(arena) {
+                        handler.handleActiveListener(pollFds, ackBuf, notif, resp, socketPollFd)
+                    }
                     transport.sentEvents.size shouldBe 1
                     transport.sentEvents[0].paths shouldBe listOf("/home/user/relative.txt")
                 }

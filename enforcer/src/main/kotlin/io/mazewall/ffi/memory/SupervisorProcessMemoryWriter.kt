@@ -12,35 +12,34 @@ import java.lang.foreign.ValueLayout
  * Shared utility for writing memory to remote processes/threads using process_vm_writev.
  */
 public object SupervisorProcessMemoryWriter {
+    context(arena: Arena)
     public fun writeBytes(
         tid: Tid,
         remoteAddr: Long,
         bytes: ByteArray
     ): Boolean {
         if (remoteAddr == 0L || bytes.isEmpty()) return false
-        return Arena.ofConfined().use { arena ->
-            val localBuf = arena.allocate(bytes.size.toLong())
-            MemorySegment.copy(bytes, 0, localBuf, ValueLayout.JAVA_BYTE, 0L, bytes.size)
+        val localBuf = arena.allocate(bytes.size.toLong())
+        MemorySegment.copy(bytes, 0, localBuf, ValueLayout.JAVA_BYTE, 0L, bytes.size)
 
-            val localIov = IovecSegment(arena.allocate(Layouts.IOVEC))
-            localIov.setIovBase(localBuf)
-            localIov.setIovLen(bytes.size.toLong())
+        val localIov = IovecSegment(arena.allocate(Layouts.IOVEC))
+        localIov.setIovBase(localBuf)
+        localIov.setIovLen(bytes.size.toLong())
 
-            val remoteIov = IovecSegment(arena.allocate(Layouts.IOVEC))
-            remoteIov.setIovBase(MemorySegment.ofAddress(remoteAddr))
-            remoteIov.setIovLen(bytes.size.toLong())
+        val remoteIov = IovecSegment(arena.allocate(Layouts.IOVEC))
+        remoteIov.setIovBase(MemorySegment.ofAddress(remoteAddr))
+        remoteIov.setIovLen(bytes.size.toLong())
 
-            var res: LinuxNative.SyscallResult<Long, *>
-            while (true) {
-                res = LinuxNative.withTransaction {
-                    LinuxNative.memory.processVmWritev(Pid(tid.value), localIov.segment, 1, remoteIov.segment, 1, 0)
-                }
-                if (res is LinuxNative.SyscallResult.Error && res.errno == io.mazewall.ffi.NativeConstants.EINTR) {
-                    continue
-                }
-                break
+        var res: LinuxNative.SyscallResult<Long, *>
+        while (true) {
+            res = LinuxNative.withTransaction {
+                LinuxNative.memory.processVmWritev(Pid(tid.value), localIov.segment, 1, remoteIov.segment, 1, 0)
             }
-            res is LinuxNative.SyscallResult.Success && res.value == bytes.size.toLong()
+            if (res is LinuxNative.SyscallResult.Error && res.errno == io.mazewall.ffi.NativeConstants.EINTR) {
+                continue
+            }
+            break
         }
+        return res is LinuxNative.SyscallResult.Success && res.value == bytes.size.toLong()
     }
 }
