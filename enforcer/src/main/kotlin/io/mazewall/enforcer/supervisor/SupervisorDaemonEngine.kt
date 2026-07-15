@@ -142,16 +142,17 @@ internal class SupervisorDaemonEngine(
     internal fun handleNewConnection(serverFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>) {
         try {
             while (true) {
-                val res = engine.withTransaction {
+                val resValue = engine.withTransaction {
                     engine.networking.accept(serverFd, java.lang.foreign.MemorySegment.NULL, java.lang.foreign.MemorySegment.NULL)
                         .onFailure { errno, _ ->
-                            if (errno != NativeConstants.EAGAIN.toInt() && errno != NativeConstants.EWOULDBLOCK.toInt() && errno != NativeConstants.EINTR.toInt()) {
+                            if (errno != NativeConstants.EAGAIN && errno != NativeConstants.EWOULDBLOCK && errno != NativeConstants.EINTR) {
                                 System.err.println("[SUPERVISOR] accept failed: errno=$errno")
                             }
-                        }
+                        }.recover { errno, _ -> if (errno == NativeConstants.EINTR) -1000L else -1L }
                 }
-                if (res is io.mazewall.LinuxNative.SyscallResult.Success) {
-                    val clientFd = FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(res.value.toInt())
+                if (resValue == -1000L) continue
+                if (resValue >= 0) {
+                    val clientFd = FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(resValue.toInt())
 
                     if (clientSockets.size >= MAX_CONNECTIONS) {
                         System.err.println("[SUPERVISOR] Rejecting connection: too many clients (${clientSockets.size})")
@@ -169,8 +170,6 @@ internal class SupervisorDaemonEngine(
                     }
                     return
                 } else {
-                    val errno = (res as io.mazewall.LinuxNative.SyscallResult.Error).errno
-                    if (errno == NativeConstants.EINTR) continue
                     return
                 }
             }
@@ -244,20 +243,19 @@ internal class SupervisorDaemonEngine(
                 ackBuf.writeByte(0L, PROTOCOL_ACK_BYTE)
                 var result: io.mazewall.ffi.networking.SeccompConnection? = null
                 while (true) {
-                    val res = engine.withTransaction {
+                    val resValue = engine.withTransaction {
                         engine.memory.write(socketFd, ackBuf, ACK_BUF_SIZE)
                             .onFailure { errno, _ ->
                                 if (errno != NativeConstants.EINTR) {
                                     System.err.println("[SUPERVISOR] Handshake ACK write failed: errno=$errno")
                                 }
-                            }
+                            }.recover { errno, _ -> if (errno == NativeConstants.EINTR) -1000L else -1L }
                     }
-                    if (res is io.mazewall.LinuxNative.SyscallResult.Success) {
+                    if (resValue == -1000L) continue
+                    if (resValue >= 0) {
                         result = current.handshakeComplete()
                         break
                     } else {
-                        val errno = (res as io.mazewall.LinuxNative.SyscallResult.Error).errno
-                        if (errno == NativeConstants.EINTR) continue
                         result = null
                         break
                     }

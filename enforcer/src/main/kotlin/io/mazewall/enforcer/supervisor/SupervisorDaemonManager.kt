@@ -3,6 +3,7 @@ package io.mazewall.enforcer.supervisor
 import io.mazewall.LinuxNative
 import io.mazewall.NativeEngine
 import io.mazewall.onFailure
+import io.mazewall.recover
 import io.mazewall.core.ProcessLauncher
 import io.mazewall.core.RealProcessLauncher
 import io.mazewall.core.RealSocketManager
@@ -194,12 +195,12 @@ public class SupervisorDaemonManager(
                 val fd = socketManager.connect(socketPath)
                 try {
                     val cmd = arena.allocateFrom(ValueLayout.JAVA_BYTE, SHUTDOWN_COMMAND_BYTE)
-                    var writeRes: io.mazewall.LinuxNative.SyscallResult<Long, *>
                     while (true) {
-                        writeRes = engine.withTransaction { engine.memory.write(fd, cmd, 1) }
-                        if (writeRes is io.mazewall.LinuxNative.SyscallResult.Error && writeRes.errno == io.mazewall.ffi.NativeConstants.EINTR) {
-                            continue
+                        val resValue = engine.withTransaction {
+                            engine.memory.write(fd, cmd, 1)
+                                .recover { errno, _ -> if (errno == io.mazewall.ffi.NativeConstants.EINTR) -1000L else -1L }
                         }
+                        if (resValue == -1000L) continue
                         break
                     }
                     Thread.sleep(SHUTDOWN_WAIT_MS)

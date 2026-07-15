@@ -2,6 +2,7 @@ package io.mazewall.enforcer.supervisor
 
 import io.mazewall.LinuxNative
 import io.mazewall.onFailure
+import io.mazewall.recover
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import java.io.InputStream
@@ -26,24 +27,17 @@ internal class SupervisorSocketInputStream(
 
     override fun read(): Int {
         while (true) {
-            val res = LinuxNative.withTransaction {
+            val resValue = LinuxNative.withTransaction {
                 LinuxNative.memory.read(socketFd, readBuf, 1)
                     .onFailure { errno, _ ->
                         if (errno != EINTR) {
                             System.err.println("[SUPERVISOR-SOCKET] read failed: errno=$errno")
                         }
-                    }
+                    }.recover { errno, _ -> if (errno == EINTR) -1000L else -1L }
             }
-            when (res) {
-                is LinuxNative.SyscallResult.Success -> {
-                    if (res.value <= 0) return -1
-                    return readBuf.readByte(0L).toInt() and BYTE_MASK
-                }
-                is LinuxNative.SyscallResult.Error -> {
-                    if (res.errno == EINTR) continue
-                    return -1
-                }
-            }
+            if (resValue == -1000L) continue
+            if (resValue <= 0) return -1
+            return readBuf.readByte(0L).toInt() and BYTE_MASK
         }
     }
 
@@ -53,29 +47,21 @@ internal class SupervisorSocketInputStream(
         var result = -1
         var done = false
         while (!done) {
-            val res = LinuxNative.withTransaction {
+            val resValue = LinuxNative.withTransaction {
                 LinuxNative.memory.read(socketFd, multiBuf, count)
                     .onFailure { errno, _ ->
                         if (errno != EINTR) {
                             System.err.println("[SUPERVISOR-SOCKET] read multiple failed: errno=$errno")
                         }
-                    }
+                    }.recover { errno, _ -> if (errno == EINTR) -1000L else -1L }
             }
-            when (res) {
-                is LinuxNative.SyscallResult.Success -> {
-                    if (res.value > 0) {
-                        val actualLen = res.value.toInt()
-                        MemorySegment.copy(multiBuf, ValueLayout.JAVA_BYTE, 0L, b, off, actualLen)
-                        result = actualLen
-                    }
-                    done = true
-                }
-                is LinuxNative.SyscallResult.Error -> {
-                    if (res.errno != EINTR) {
-                        done = true
-                    }
-                }
+            if (resValue == -1000L) continue
+            if (resValue > 0) {
+                val actualLen = resValue.toInt()
+                MemorySegment.copy(multiBuf, ValueLayout.JAVA_BYTE, 0L, b, off, actualLen)
+                result = actualLen
             }
+            done = true
         }
         return result
     }
