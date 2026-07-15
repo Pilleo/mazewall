@@ -1,7 +1,6 @@
 package io.mazewall.landlock
 
 import io.mazewall.LinuxNative
-import io.mazewall.NativeTransaction
 import io.mazewall.Platform
 import io.mazewall.PolicyDefinition
 import io.mazewall.PolicyPresets
@@ -190,8 +189,8 @@ object Landlock {
                 io.mazewall.core.NativeArg.LongArg(0L),
                 io.mazewall.core.NativeArg.LongArg(0L),
                 io.mazewall.core.NativeArg.LongArg(NativeConstants.LANDLOCK_CREATE_RULESET_VERSION),
-            ).recover { _, rawValue -> if (rawValue == 123456789L) -1L else 0L }.toInt()
-        }
+            )
+        }.recover { _, _ -> 0L }.toInt()
     }
 
     /**
@@ -262,15 +261,12 @@ object Landlock {
         allowedAccess: Long,
     ) {
         val pathSegment = arena.allocateFrom(path)
-        val fdValue = LinuxNative.withTransaction {
+        val fdResult = LinuxNative.withTransaction {
             LinuxNative.fileSystem.open(pathSegment, NativeConstants.O_PATH or NativeConstants.O_CLOEXEC)
-                .onFailure { errno, rawValue ->
-                    logger.warning("Could not open JVM classpath $path for landlock rule: errno $errno")
-                }.recover { errno, rawValue -> if (rawValue == 123456789L) 0 else -errno.toLong() }
         }
 
-        if (fdValue >= 0) {
-            val pathFd = FileDescriptor.unsafe<FileDescriptorRole.OPath>(fdValue.toInt())
+        fdResult.onSuccess { value ->
+            val pathFd = FileDescriptor.unsafe<FileDescriptorRole.OPath>(value.toInt())
             try {
                 when (val addRes = addRuleToRuleset(ruleset, pathFd, allowedAccess)) {
                     is AddRuleResult.Success -> {}
@@ -281,6 +277,8 @@ object Landlock {
             } finally {
                 LinuxNative.fileSystem.close(pathFd)
             }
+        }.onFailure { errno, _ ->
+            logger.warning("Could not open JVM classpath $path for landlock rule: errno $errno")
         }
     }
 
@@ -292,11 +290,11 @@ object Landlock {
     ) {
         val resolvedPath = path.value
         val openFlags = NativeConstants.O_PATH or NativeConstants.O_CLOEXEC or NativeConstants.O_NOFOLLOW
-        val openRes = LinuxNative.withTransaction {
-            val initialResult = LinuxNative.fileSystem.open(arena.allocateFrom(resolvedPath), openFlags)
-            handleInitialOpenFailure(initialResult, resolvedPath, openFlags)
+        val initialResult = LinuxNative.withTransaction {
+            LinuxNative.fileSystem.open(arena.allocateFrom(resolvedPath), openFlags)
         }
 
+        val openRes = handleInitialOpenFailure(initialResult, resolvedPath, openFlags)
         val (fdResult, isFallback) = when (openRes) {
             is OpenResult.Success -> openRes.fd to openRes.isFallback
             is OpenResult.Error -> {
@@ -314,7 +312,7 @@ object Landlock {
         }
     }
 
-    context(arena: Arena, _: NativeTransaction)
+    context(arena: Arena)
     private fun handleInitialOpenFailure(
         res: LinuxNative.SyscallResult<Long, *>,
         resolvedPath: String,
@@ -325,8 +323,10 @@ object Landlock {
                 return OpenResult.Error(res.errno)
             }
             val parentPath = File(resolvedPath).parent ?: "/"
-            Landlock.logger.info("Path $resolvedPath does not exist, falling back to parent directory: $parentPath")
-            val openResult = LinuxNative.fileSystem.open(arena.allocateFrom(parentPath), flags)
+            logger.info("Path $resolvedPath does not exist, falling back to parent directory: $parentPath")
+            val openResult = LinuxNative.withTransaction {
+                LinuxNative.fileSystem.open(arena.allocateFrom(parentPath), flags)
+            }
             return when (openResult) {
                 is LinuxNative.SyscallResult.Success -> OpenResult.Success(openResult.value.toInt(), true)
                 is LinuxNative.SyscallResult.Error -> OpenResult.Error(openResult.errno)
@@ -384,9 +384,8 @@ object Landlock {
         ruleset: LandlockRuleset<RulesetState.Building>,
         processWide: Boolean = false
     ): LandlockRuleset<RulesetState.Sealed> {
-        LinuxNative.withTransaction {
+        val (prctlResult, restrictResult) = LinuxNative.withTransaction {
             val p = LinuxNative.process.prctl(PrctlCommand.SetNoNewPrivs(true))
-            p.getOrThrow("prctl(PR_SET_NO_NEW_PRIVS)")
 
             val flags = if (processWide) LANDLOCK_RESTRICT_SELF_TSYNC else 0L
             val r = LinuxNative.raw.syscall(
@@ -396,9 +395,10 @@ object Landlock {
                 io.mazewall.core.NativeArg.MemoryArg(MemorySegment.NULL),
                 io.mazewall.core.NativeArg.IntArg(0)
             )
-            r.getOrThrow("landlock_restrict_self")
-            Unit
+            Pair(p, r)
         }
+        prctlResult.getOrThrow("prctl(PR_SET_NO_NEW_PRIVS)")
+        restrictResult.getOrThrow("landlock_restrict_self")
         return LandlockRuleset(ruleset.fd)
     }
 
@@ -463,14 +463,15 @@ object Landlock {
         rulesetAttr.setHandledAccessFs(accessMaskFs)
         rulesetAttr.setHandledAccessNet(0L)
         val size = if (abi >= 4) Layouts.LANDLOCK_RULESET_ATTR.byteSize() else Layouts.LANDLOCK_RULESET_ATTR_V1_SIZE
-        return LinuxNative.withTransaction {
+        val res = LinuxNative.withTransaction {
             LinuxNative.raw.syscall(
                 NativeConstants.LANDLOCK_CREATE_RULESET_NR,
                 io.mazewall.core.NativeArg.MemoryArg(rulesetAttr.segment),
                 io.mazewall.core.NativeArg.LongArg(size),
                 io.mazewall.core.NativeArg.MemoryArg(MemorySegment.NULL)
-            ).getFdOrThrow("landlock_create_ruleset").let { FileDescriptor.unsafe(it.value) }
+            )
         }
+        return res.getFdOrThrow("landlock_create_ruleset").let { FileDescriptor.unsafe(it.value) }
     }
 
     context(arena: Arena)
@@ -482,18 +483,18 @@ object Landlock {
         val pathAttr = LandlockPathBeneathAttrSegment.allocate()
         pathAttr.setAllowedAccess(accessMask)
         pathAttr.setParentFd(pathFd.value)
-        return LinuxNative.withTransaction {
-            val res = LinuxNative.raw.syscall(
+        val res = LinuxNative.withTransaction {
+            LinuxNative.raw.syscall(
                 NativeConstants.LANDLOCK_ADD_RULE_NR,
                 io.mazewall.core.NativeArg.FdArg(ruleset.fd),
                 io.mazewall.core.NativeArg.LongArg(NativeConstants.LANDLOCK_RULE_PATH_BENEATH.toLong()),
                 io.mazewall.core.NativeArg.MemoryArg(pathAttr.segment),
                 io.mazewall.core.NativeArg.IntArg(0)
             )
-            when (res) {
-                is LinuxNative.SyscallResult.Success -> AddRuleResult.Success
-                is LinuxNative.SyscallResult.Error -> AddRuleResult.Error(res.errno)
-            }
+        }
+        return when (res) {
+            is LinuxNative.SyscallResult.Success -> AddRuleResult.Success
+            is LinuxNative.SyscallResult.Error -> AddRuleResult.Error(res.errno)
         }
     }
 }

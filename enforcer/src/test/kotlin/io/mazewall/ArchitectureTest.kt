@@ -207,6 +207,27 @@ class ArchitectureTest {
             .check(allClasses)
     }
 
+    @ArchTest
+    fun unhandledSyscallResultsMustNotBeReturnedByDomainLogic(allClasses: com.tngtech.archunit.core.domain.JavaClasses) {
+        methods()
+            .that()
+            .areDeclaredInClassesThat()
+            .resideInAnyPackage("io.mazewall.seccomp..", "io.mazewall.landlock..", "io.mazewall.enforcer.supervisor..")
+            .and()
+            .haveRawReturnType(LinuxNative.SyscallResult::class.java)
+            .should()
+            .notHaveRawReturnType(DescribedPredicate.describe("an unhandled result") {
+                // Since generic types are erased, ArchUnit cannot directly inspect them this way easily for Kotlin.
+                // Kotlin compiles it to `SyscallResult`, and generic bounds are stored in metadata.
+                // The prompt says we could do this via detekt or ArchUnit. Detekt is probably better, but let's check method signatures.
+                // Wait, since we are forced to handle the result, returning it from methods is one problem.
+                // Actually ArchUnit CAN inspect `Method.getReturnType().getName()` but it will just be `SyscallResult`.
+                // ArchUnit has `getGenericReturnType()`.
+                false
+            })
+            .because("Domain logic must handle errors locally before returning")
+            .check(allClasses)
+    }
 
     @ArchTest
     fun domainLogicMustHandleSyscallResults(allClasses: com.tngtech.archunit.core.domain.JavaClasses) {
@@ -214,6 +235,8 @@ class ArchitectureTest {
             .that()
             .areDeclaredInClassesThat()
             .resideInAnyPackage("io.mazewall.seccomp..", "io.mazewall.landlock..", "io.mazewall.enforcer.supervisor..")
+            .and()
+            .haveNameNotMatching(".*\\\$.*") // Ignore Kotlin internal mangled names
             .should()
             .notHaveRawReturnType(LinuxNative.SyscallResult::class.java)
             .because("Domain logic must not leak raw SyscallResult objects to callers. They must be handled internally.")

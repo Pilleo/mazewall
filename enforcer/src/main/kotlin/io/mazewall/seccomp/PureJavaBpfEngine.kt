@@ -1,9 +1,6 @@
 package io.mazewall.seccomp
 
 import io.mazewall.LinuxNative
-import io.mazewall.onFailure
-import io.mazewall.onSuccess
-import io.mazewall.recover
 import io.mazewall.Platform
 import io.mazewall.PolicyDefinition
 import io.mazewall.CompiledSandbox
@@ -124,11 +121,10 @@ internal object PureJavaBpfEngine : SeccompEngine<EngineState> {
      */
     internal fun setNoNewPrivs() {
         // Step 1: Set no_new_privs (mandatory for non-root seccomp)
-        LinuxNative.withTransaction {
-            val res = LinuxNative.process.prctl(PrctlCommand.SetNoNewPrivs(true))
-            res.getOrThrow("prctl(PR_SET_NO_NEW_PRIVS)")
-            Unit
+        val r1 = LinuxNative.withTransaction {
+            LinuxNative.process.prctl(PrctlCommand.SetNoNewPrivs(true))
         }
+        r1.getOrThrow("prctl(PR_SET_NO_NEW_PRIVS)")
     }
 
     internal fun installFilter(
@@ -138,28 +134,21 @@ internal object PureJavaBpfEngine : SeccompEngine<EngineState> {
     ): SeccompInstallationState.FilterApplied {
         // Try modern seccomp(2) syscall first
         val flags = if (useTsync) NativeConstants.SECCOMP_FILTER_FLAG_TSYNC.toLong() else 0L
-        val r3Value = LinuxNative.withTransaction {
-            val res = LinuxNative.raw.syscall(
+        val r3 = LinuxNative.withTransaction {
+            LinuxNative.raw.syscall(
                 arch.seccompSyscallNumber.toLong(),
                 io.mazewall.core.NativeArg.LongArg(NativeConstants.SECCOMP_SET_MODE_FILTER.toLong()),
                 io.mazewall.core.NativeArg.LongArg(flags),
                 io.mazewall.core.NativeArg.MemoryArg(prog),
             )
-            res.onFailure { errno, rawValue ->
-                if (errno != NativeConstants.ENOSYS) {
-                    val detail = if (useTsync && errno == NativeConstants.EPERM) "TSYNC rejected by kernel" else "errno=$errno"
-                    System.err.println("[SECCOMP] seccomp(2) failed: $detail")
-                }
-            }
-            res.recover { errno, rawValue -> if (rawValue == 123456789L) 0 else -errno.toLong() }
         }
 
-        if (r3Value < 0) {
+        if (r3 is LinuxNative.SyscallResult.Error) {
             // Fall back to prctl for older kernels
-            val errno1 = (-r3Value).toInt()
+            val errno1 = r3.errno
 
             if (useTsync) {
-                val detail = if (errno1 == NativeConstants.EACCES) {
+                val detail = if (errno1 == 13) {
                     "failed with EACCES (Permission denied). This typically occurs because some pre-existing sibling threads (e.g. GC, JIT, or VM helper threads spawned during JVM startup) do not have the 'no_new_privs' flag enabled. To fix this, ensure the JVM process is started with privilege escalation disabled (e.g., OCI/Kubernetes 'allowPrivilegeEscalation: false', or running under a wrapper launcher that sets the flag before calling execve)."
                 } else {
                     "failed with errno $errno1. Your kernel may be too old to support SECCOMP_FILTER_FLAG_TSYNC or the parameters are invalid."
@@ -167,22 +156,18 @@ internal object PureJavaBpfEngine : SeccompEngine<EngineState> {
                 throw IllegalStateException("Process-wide seccomp installation (TSYNC) failed: $detail")
             }
 
-            val r4Value = LinuxNative.withTransaction {
-                val res = LinuxNative.process.prctl(
+            val r4 = LinuxNative.withTransaction {
+                LinuxNative.process.prctl(
                     PrctlCommand.SetSeccomp(
                         NativeConstants.SECCOMP_MODE_FILTER.toLong(),
                         io.mazewall.core.NativeArg.MemoryArg(prog)
                     )
                 )
-                res.onFailure { errno, rawValue ->
-                    System.err.println("[SECCOMP] prctl(PR_SET_SECCOMP) failed: errno=$errno")
-                }
-                res.recover { errno, rawValue -> if (rawValue == 123456789L) 0 else -errno.toLong() }
             }
 
-            if (r4Value < 0) {
+            if (r4 is LinuxNative.SyscallResult.Error) {
                 throw IllegalStateException(
-                    "seccomp installation failed: seccomp(2) errno=$errno1, prctl errno=${(-r4Value).toInt()}",
+                    "seccomp installation failed: seccomp(2) errno=$errno1, prctl errno=${r4.errno}",
                 )
             } else {
                 return SeccompInstallationState.FallbackPrctlApplied
@@ -202,10 +187,10 @@ internal object PureJavaBpfEngine : SeccompEngine<EngineState> {
         }
 
         // Verify filter is actually installed
-        val mode = LinuxNative.withTransaction {
-            val res = LinuxNative.process.prctl(PrctlCommand.GetSeccomp)
-            res.getOrThrow("prctl(PR_GET_SECCOMP)")
+        val r5 = LinuxNative.withTransaction {
+            LinuxNative.process.prctl(PrctlCommand.GetSeccomp)
         }
+        val mode = r5.getOrThrow("prctl(PR_GET_SECCOMP)")
         if (mode != 2L) {
             throw IllegalStateException(
                 "Seccomp filter verification failed: expected mode 2, got $mode",

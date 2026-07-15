@@ -2,8 +2,6 @@ package io.mazewall.enforcer.supervisor
 
 import io.mazewall.LinuxNative
 import io.mazewall.NativeEngine
-import io.mazewall.onFailure
-import io.mazewall.recover
 import io.mazewall.core.ProcessLauncher
 import io.mazewall.core.RealProcessLauncher
 import io.mazewall.core.RealSocketManager
@@ -60,10 +58,7 @@ public class SupervisorDaemonManager(
                 engine.withTransaction {
                     engine.process.prctl(
                         io.mazewall.core.PrctlCommand.SetPtracer(existing.daemonProcess.pid())
-                    ).onFailure { errno, rawValue ->
-                        logger.warning("prctl(PR_SET_PTRACER) failed for existing daemon: errno=$errno")
-                    }
-                    Unit
+                    )
                 }
                 return existing
             }
@@ -137,13 +132,13 @@ public class SupervisorDaemonManager(
         val daemonProcess = processLauncher.startProcess(pbArgs)
         val daemonPid = daemonProcess.pid()
 
-        engine.withTransaction {
+        val prctlRes = engine.withTransaction {
             engine.process.prctl(
                 io.mazewall.core.PrctlCommand.SetPtracer(daemonPid)
-            ).onFailure { errno, rawValue ->
-                logger.warning("prctl(PR_SET_PTRACER) failed with errno $errno. The daemon may not be able to read process memory if Yama ptrace_scope is restrictive.")
-            }
-            Unit
+            )
+        }
+        if (prctlRes is io.mazewall.LinuxNative.SyscallResult.Error) {
+            logger.warning("prctl(PR_SET_PTRACER) failed with errno ${prctlRes.errno}. The daemon may not be able to read process memory if Yama ptrace_scope is restrictive.")
         }
 
         val readyLatch = java.util.concurrent.CountDownLatch(1)
@@ -195,12 +190,12 @@ public class SupervisorDaemonManager(
                 val fd = socketManager.connect(socketPath)
                 try {
                     val cmd = arena.allocateFrom(ValueLayout.JAVA_BYTE, SHUTDOWN_COMMAND_BYTE)
+                    var writeRes: io.mazewall.LinuxNative.SyscallResult<Long, *>
                     while (true) {
-                        val resValue = engine.withTransaction {
-                            engine.memory.write(fd, cmd, 1)
-                                .recover { errno, rawValue -> if (errno == io.mazewall.ffi.NativeConstants.EINTR) -1000L else -1L }
+                        writeRes = engine.withTransaction { engine.memory.write(fd, cmd, 1) }
+                        if (writeRes is io.mazewall.LinuxNative.SyscallResult.Error && writeRes.errno == io.mazewall.ffi.NativeConstants.EINTR) {
+                            continue
                         }
-                        if (resValue == -1000L) continue
                         break
                     }
                     Thread.sleep(SHUTDOWN_WAIT_MS)

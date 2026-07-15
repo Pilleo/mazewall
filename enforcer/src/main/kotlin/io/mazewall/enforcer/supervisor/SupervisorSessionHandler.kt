@@ -22,9 +22,6 @@ import io.mazewall.ffi.memory.writeIntUnaligned
 import io.mazewall.ffi.memory.writeLong
 import io.mazewall.ffi.memory.writeLongUnaligned
 import io.mazewall.ffi.networking.NetworkOrderBuffer
-import io.mazewall.isSuccess
-import io.mazewall.map
-import io.mazewall.onFailure
 import io.mazewall.onSuccess
 import io.mazewall.recover
 import java.lang.foreign.Arena
@@ -248,13 +245,14 @@ internal class SupervisorSessionHandler(
         val listenerRevents = pfd1.getRevents()
         if ((listenerRevents.toInt() and NativeConstants.POLLIN.toInt()) != 0) {
             notif.fill(0)
-            val ok = engine.withTransaction {
+            val recvRes = engine.withTransaction {
                 engine.raw.ioctl(listenerFd, NativeConstants.SECCOMP_IOCTL_NOTIF_RECV, notif)
-                    .onFailure { errno, rawValue ->
-                        logger.severe { "Failed to receive seccomp notification: errno=$errno" }
-                    }.isSuccess()
             }
-            if (!ok || !processNotification(notif, resp)) return LoopAction.Break
+            var ok = false
+            recvRes.onSuccess {
+                ok = processNotification(notif, resp)
+            }
+            if (!ok) return LoopAction.Break
         }
 
         return LoopAction.Continue
@@ -445,12 +443,8 @@ internal class SupervisorSessionHandler(
                 }
             }
 
-            engine.withTransaction {
-                engine.memory.write(socketFd, buf, totalSize.toLong())
-                    .onFailure { errno, rawValue ->
-                        logger.severe { "Failed to send request to JVM: errno=$errno" }
-                    }.isSuccess()
-            }
+            val writeRes = engine.withTransaction { engine.memory.write(socketFd, buf, totalSize.toLong()) }
+            writeRes is LinuxNative.SyscallResult.Success
         }
     }
 
@@ -475,21 +469,24 @@ internal class SupervisorSessionHandler(
             var count = 0L
             while (remainingTimeout > 0) {
                 val loopStart = System.currentTimeMillis()
-                val pollResValue = engine.withTransaction {
-                    engine.raw.poll(pollFd.segment, 1L, remainingTimeout.toInt())
-                        .recover { errno, rawValue ->
-                            if (errno == NativeConstants.EINTR) -1000L else -errno.toLong()
-                        }
-                }
+                val pollRes = engine.withTransaction { engine.raw.poll(pollFd.segment, 1L, remainingTimeout.toInt()) }
                 val elapsed = System.currentTimeMillis() - loopStart
                 remainingTimeout -= elapsed
 
-                if (pollResValue >= 0) {
-                    count = pollResValue
+                var gotEintr = false
+                count = pollRes.recover { errno, _ ->
+                    if (errno == NativeConstants.EINTR) {
+                        gotEintr = true
+                        0L
+                    } else {
+                        0L
+                    }
+                }
+                if (pollRes is LinuxNative.SyscallResult.Success) {
+                    count = pollRes.value
                     break
                 }
-                if (pollResValue != -1000L) {
-                    count = 0
+                if (!gotEintr) {
                     break
                 }
             }
@@ -504,14 +501,10 @@ internal class SupervisorSessionHandler(
             }
 
             val responseBuf = arena.allocate(Layouts.SUPERVISOR_RESPONSE_SIZE)
-            val readSuccess = engine.withTransaction {
+            val readRes = engine.withTransaction {
                 engine.memory.read(socketFd, responseBuf, Layouts.SUPERVISOR_RESPONSE_SIZE)
-                    .onFailure { errno, rawValue ->
-                        logger.severe { "Failed to read response from JVM: errno=$errno" }
-                    }.map { it == Layouts.SUPERVISOR_RESPONSE_SIZE }
-                    .recover { _, rawValue -> false }
             }
-            if (readSuccess) {
+            if (readRes is LinuxNative.SyscallResult.Success && readRes.value == Layouts.SUPERVISOR_RESPONSE_SIZE) {
                 val respSeg = SupervisorResponseSegment(responseBuf)
                 val respId = respSeg.getId()
                 val decision = respSeg.getDecision()
@@ -599,13 +592,9 @@ internal class SupervisorSessionHandler(
                 addfd.setSrcfd(localFdValue)
 
                 engine.withTransaction {
-                    engine.raw.ioctl(listenerFd, NativeConstants.SECCOMP_IOCTL_NOTIF_ADDFD, addfd.segment)
-                        .onSuccess { res ->
-                            logger.info { "[SUPERVISOR-DEBUG] ioctl SECCOMP_IOCTL_NOTIF_ADDFD success: $res" }
-                        }
-                        .onFailure { errno, rawValue ->
-                            logger.severe { "[SUPERVISOR-DEBUG] ioctl SECCOMP_IOCTL_NOTIF_ADDFD failed: errno=$errno" }
-                        }.isSuccess()
+                    val res = engine.raw.ioctl(listenerFd, NativeConstants.SECCOMP_IOCTL_NOTIF_ADDFD, addfd.segment)
+                    logger.info { "[SUPERVISOR-DEBUG] ioctl SECCOMP_IOCTL_NOTIF_ADDFD res=$res" }
+                    res is LinuxNative.SyscallResult.Success
                 }
             }
 
@@ -627,8 +616,8 @@ internal class SupervisorSessionHandler(
         return Arena.ofConfined().use { arena ->
             val pathSeg = arena.allocateFrom(pathStr)
             val dirfd = if (nr == arch.open || pathStr.startsWith("/")) AT_FDCWD else args[0].toInt()
-            engine.withTransaction {
-                val call = if (dirfd == AT_FDCWD) {
+            val res = engine.withTransaction {
+                if (dirfd == AT_FDCWD) {
                     engine.fileSystem.open(pathSeg, flags)
                 } else {
                     val myArch = io.mazewall.core.Arch.current()
@@ -643,7 +632,10 @@ internal class SupervisorSessionHandler(
                         io.mazewall.core.NativeArg.LongArg(0L)
                     )
                 }
-                call.map { it.toInt() }.recover { errno, rawValue -> if (rawValue == 123456789L) 0 else -errno }
+            }
+            when (res) {
+                is LinuxNative.SyscallResult.Success -> res.value.toInt()
+                is LinuxNative.SyscallResult.Error -> -res.errno
             }
         }
     }
@@ -656,9 +648,11 @@ internal class SupervisorSessionHandler(
         }
 
         val socketRes = engine.withTransaction {
-            engine.networking.socket(domain, 1, 0) // SOCK_STREAM = 1
-                .map { it.toInt() }
-                .recover { errno, rawValue -> if (rawValue == 123456789L) 0 else -errno }
+            val res = engine.networking.socket(domain, 1, 0) // SOCK_STREAM = 1
+            when (res) {
+                is LinuxNative.SyscallResult.Success -> res.value.toInt()
+                is LinuxNative.SyscallResult.Error -> -res.errno
+            }
         }
         if (socketRes < 0) return socketRes
 
@@ -667,11 +661,15 @@ internal class SupervisorSessionHandler(
             MemorySegment.copy(sockaddrBytes, 0, addr, ValueLayout.JAVA_BYTE, 0L, sockaddrBytes.size)
 
             engine.withTransaction {
-                engine.networking.connect(
+                val res = engine.networking.connect(
                     FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(socketRes),
                     addr,
                     sockaddrBytes.size
-                ).map { 0 }.recover { errno, rawValue -> if (rawValue == 123456789L) 0 else errno }
+                )
+                when (res) {
+                    is LinuxNative.SyscallResult.Success -> 0
+                    is LinuxNative.SyscallResult.Error -> res.errno
+                }
             }
         }
         if (connectErr != 0) {
@@ -685,9 +683,6 @@ internal class SupervisorSessionHandler(
         try {
             engine.withTransaction {
                 engine.fileSystem.close(FileDescriptor.unsafe<FileDescriptorRole.Generic>(fd))
-                    .onFailure { errno, rawValue ->
-                        logger.warning { "Failed to close local FD $fd: errno=$errno" }
-                    }
                 Unit
             }
         } catch (ignored: IllegalStateException) {
@@ -703,9 +698,6 @@ internal class SupervisorSessionHandler(
         resp.writeInt(RESP_FLAGS_OFF, NativeConstants.SECCOMP_USER_NOTIF_FLAG_CONTINUE.toInt())
         engine.withTransaction {
             engine.raw.ioctl(listenerFd, NativeConstants.SECCOMP_IOCTL_NOTIF_SEND, resp)
-                .onFailure { errno, rawValue ->
-                    logger.severe { "Failed to send seccomp continue for id=$id: errno=$errno" }
-                }
             Unit
         }
     }
@@ -718,9 +710,6 @@ internal class SupervisorSessionHandler(
         resp.writeInt(RESP_FLAGS_OFF, 0)
         engine.withTransaction {
             engine.raw.ioctl(listenerFd, NativeConstants.SECCOMP_IOCTL_NOTIF_SEND, resp)
-                .onFailure { errno, rawValue ->
-                    logger.severe { "Failed to send seccomp error for id=$id: errno=$errno" }
-                }
             Unit
         }
     }
@@ -778,7 +767,7 @@ internal class SupervisorSessionHandler(
                 Arena.ofConfined().use { arena ->
                     val tgid = getTgid(tid.value)
                     logger.info { "[SUPERVISOR-DEBUG] Async accept worker started for tid=${tid.value} (tgid=$tgid), targetFd=${args[0].toInt()}" }
-                    val pidfd = engine.withTransaction {
+                    val pidfdRes = engine.withTransaction {
                         engine.raw.syscall(
                             434L, // SYS_pidfd_open
                             io.mazewall.core.NativeArg.LongArg(tgid.toLong()),
@@ -787,17 +776,20 @@ internal class SupervisorSessionHandler(
                             io.mazewall.core.NativeArg.LongArg(0L),
                             io.mazewall.core.NativeArg.LongArg(0L),
                             io.mazewall.core.NativeArg.LongArg(0L)
-                        ).map { it.toInt() }.recover { errno, rawValue ->
-                            logger.severe { "[SUPERVISOR-DEBUG] pidfd_open failed for tid=${tid.value} with errno $errno" }
-                            sendSeccompError(id, errno, arena.allocate(Layouts.SECCOMP_NOTIF_RESP))
-                            -1
+                        )
+                    }
+                    val pidfd = when (pidfdRes) {
+                        is LinuxNative.SyscallResult.Success -> pidfdRes.value.toInt()
+                        is LinuxNative.SyscallResult.Error -> {
+                            logger.severe { "[SUPERVISOR-DEBUG] pidfd_open failed for tid=${tid.value} with errno ${pidfdRes.errno}" }
+                            sendSeccompError(id, pidfdRes.errno, arena.allocate(Layouts.SECCOMP_NOTIF_RESP))
+                            return@use
                         }
                     }
-                    if (pidfd < 0) return@use
 
                     val targetFd = args[0].toInt()
                     logger.info { "[SUPERVISOR-DEBUG] pidfd_open success. pidfd=$pidfd. Duplicating fd $targetFd..." }
-                    val dupFd = engine.withTransaction {
+                    val dupRes = engine.withTransaction {
                         engine.raw.syscall(
                             438L, // SYS_pidfd_getfd
                             io.mazewall.core.NativeArg.LongArg(pidfd.toLong()),
@@ -806,15 +798,19 @@ internal class SupervisorSessionHandler(
                             io.mazewall.core.NativeArg.LongArg(0L),
                             io.mazewall.core.NativeArg.LongArg(0L),
                             io.mazewall.core.NativeArg.LongArg(0L)
-                        ).map { it.toInt() }.recover { errno, rawValue ->
-                            logger.severe { "[SUPERVISOR-DEBUG] pidfd_getfd failed for targetFd=$targetFd with errno $errno" }
-                            sendSeccompError(id, errno, arena.allocate(Layouts.SECCOMP_NOTIF_RESP))
-                            -1
-                        }
+                        )
                     }
 
                     closeLocalFd(pidfd)
-                    if (dupFd < 0) return@use
+
+                    val dupFd = when (dupRes) {
+                        is LinuxNative.SyscallResult.Success -> dupRes.value.toInt()
+                        is LinuxNative.SyscallResult.Error -> {
+                            logger.severe { "[SUPERVISOR-DEBUG] pidfd_getfd failed for targetFd=$targetFd with errno ${dupRes.errno}" }
+                            sendSeccompError(id, dupRes.errno, arena.allocate(Layouts.SECCOMP_NOTIF_RESP))
+                            return@use
+                        }
+                    }
                     logger.info { "[SUPERVISOR-DEBUG] pidfd_getfd success. dupFd=$dupFd. Starting accept..." }
 
                     try {
@@ -830,7 +826,7 @@ internal class SupervisorSessionHandler(
 
                         val flags = if (nr == traceeArch.accept4) args[3].toInt() else 0
 
-                        val clientFd = engine.withTransaction {
+                        val acceptRes = engine.withTransaction {
                             engine.raw.syscall(
                                 accept4Sys,
                                 io.mazewall.core.NativeArg.LongArg(dupFd.toLong()),
@@ -839,12 +835,16 @@ internal class SupervisorSessionHandler(
                                 io.mazewall.core.NativeArg.LongArg(flags.toLong()),
                                 io.mazewall.core.NativeArg.LongArg(0L),
                                 io.mazewall.core.NativeArg.LongArg(0L)
-                            ).map { it.toInt() }.recover { errno, rawValue ->
-                                sendSeccompError(id, errno, arena.allocate(Layouts.SECCOMP_NOTIF_RESP))
-                                -1
+                            )
+                        }
+
+                        val clientFd = when (acceptRes) {
+                            is LinuxNative.SyscallResult.Success -> acceptRes.value.toInt()
+                            is LinuxNative.SyscallResult.Error -> {
+                                sendSeccompError(id, acceptRes.errno, arena.allocate(Layouts.SECCOMP_NOTIF_RESP))
+                                return@use
                             }
                         }
-                        if (clientFd < 0) return@use
 
                         try {
                             // Copy peer address back if tracee provided a buffer
@@ -886,10 +886,8 @@ internal class SupervisorSessionHandler(
                             addfd.setSrcfd(clientFd)
 
                             val injectSuccess = engine.withTransaction {
-                                engine.raw.ioctl(listenerFd, NativeConstants.SECCOMP_IOCTL_NOTIF_ADDFD, addfd.segment)
-                                    .onFailure { errno, rawValue ->
-                                        logger.severe { "Failed to inject accepted FD: errno=$errno" }
-                                    }.isSuccess()
+                                val res = engine.raw.ioctl(listenerFd, NativeConstants.SECCOMP_IOCTL_NOTIF_ADDFD, addfd.segment)
+                                res is LinuxNative.SyscallResult.Success
                             }
 
                             if (!injectSuccess) {
