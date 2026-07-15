@@ -116,7 +116,7 @@ class ProfilerDaemonTest {
     @Test
     fun `test handshake - handler sends error on ACK timeout`() {
         val transport = MockTransport()
-        transport.nextPollResult = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(0L)
+        transport.nextPollResult = LinuxNative.SyscallResult.Success(0L)
         val reader = MockReader()
         val handler = ProfilerSessionHandler(FileDescriptor.unsafe(10), FileDescriptor.unsafe(20), transport, transport, transport, reader, emptyMap()) { }
 
