@@ -1,0 +1,22 @@
+**1. Overview**
+This PR refactors `SupervisorSessionHandler.kt` to eliminate the use of `NativeArg.MemoryArg` with the generic `engine.raw.syscall` interface for `openat`, `accept4`, `pidfd_open`, and `pidfd_getfd`. It introduces typed methods for these system calls in the `NativeEngine` sub-interfaces and implements them via formal FFM downcalls. This ensures that the FFM Linker is explicitly aware of the `MemorySegment` lifetimes and follows safe ABI practices.
+
+**2. Rationale**
+The previous implementation relied on the implicit blocking behavior of system calls to keep memory valid. While functional for blocking operations, passing raw pointers via `Long` values (masked by `MemoryArg`) bypasses FFM's safety mechanisms. By using `downcallHandle` with `ValueLayout.ADDRESS`, the FFM Linker can properly manage transition states and ensure the memory is held according to the ABI requirements, preventing potential issues if these operations were to become asynchronous or if the JVM's FFM implementation changes its handling of opaque long-passed pointers.
+
+**3. Security & Correctness Analysis**
+- **JVM Sandboxing Bypasses**: No gaps introduced. The transition from `raw.syscall` to libc-wrapped downcalls is safe as the enforcer still controls the parameters before they reach the native layer.
+- **FFM Layout Correctness**: The use of `ValueLayout.ADDRESS` for pointers and `ValueLayout.JAVA_INT` for file descriptors and flags correctly matches the Linux x86_64 and AArch64 C ABIs.
+- **Memory Lifecycle**: `MemorySegment` lifetimes are now explicitly handled by the FFM Linker during the downcall transition. Since the calls remain blocking, there is no risk of Use-After-Free or scope escapes.
+- **Concurrency**: The refactoring in `handleAcceptAsync` maintains thread safety. The explicit type parameters for `FileDescriptor.unsafe` and the results fix the type inference ambiguities introduced by the more complex typed interface.
+- **Silent Error Swallowing**: All new methods return `SyscallResult`, ensuring that errors (like `EPERM` or `EINTR`) must be explicitly handled by the caller.
+
+**4. Missed Edge Cases**
+- **Kernel/Libc Versioning**: `pidfd_open` (Kernel 5.3+) and `pidfd_getfd` (Kernel 5.19+) require modern Linux environments. Given `mazewall` targets Kernel 6.2+, this is an acceptable constraint.
+- **`openat` Mode**: The implementation of `openat` currently does not expose the `mode` parameter for file creation. This matches the existing `open` implementation and the usage patterns in the supervisor (primarily for opening existing files), but remains a point of minor technical debt.
+
+**5. Alternatives**
+The main alternative was to keep the `raw.syscall` interface but "harden" `MemoryArg` to be more ABI-aware. However, this would have required making the generic `syscall` method aware of which arguments are pointers versus values, significantly complicating the core `NativeEngine` abstraction. The chosen path of defining specific, typed methods is much cleaner, more maintainable, and aligns with the project's goal of moving towards a high-level, type-safe native abstraction.
+
+**6. Verdict**
+VERDICT: APPROVED
