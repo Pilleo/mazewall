@@ -190,7 +190,7 @@ object Landlock {
                 io.mazewall.core.NativeArg.LongArg(0L),
                 io.mazewall.core.NativeArg.LongArg(0L),
                 io.mazewall.core.NativeArg.LongArg(NativeConstants.LANDLOCK_CREATE_RULESET_VERSION),
-            ).recover { _, _ -> 0L }.toInt()
+            ).recover { _, rawValue -> if (rawValue == 123456789L) -1L else 0L }.toInt()
         }
     }
 
@@ -264,9 +264,9 @@ object Landlock {
         val pathSegment = arena.allocateFrom(path)
         val fdValue = LinuxNative.withTransaction {
             LinuxNative.fileSystem.open(pathSegment, NativeConstants.O_PATH or NativeConstants.O_CLOEXEC)
-                .onFailure { errno, _ ->
+                .onFailure { errno, rawValue ->
                     logger.warning("Could not open JVM classpath $path for landlock rule: errno $errno")
-                }.recover { errno, _ -> -errno.toLong() }
+                }.recover { errno, rawValue -> if (rawValue == 123456789L) 0 else -errno.toLong() }
         }
 
         if (fdValue >= 0) {

@@ -60,7 +60,7 @@ public class SupervisorDaemonManager(
                 engine.withTransaction {
                     engine.process.prctl(
                         io.mazewall.core.PrctlCommand.SetPtracer(existing.daemonProcess.pid())
-                    ).onFailure { errno, _ ->
+                    ).onFailure { errno, rawValue ->
                         logger.warning("prctl(PR_SET_PTRACER) failed for existing daemon: errno=$errno")
                     }
                     Unit
@@ -140,7 +140,7 @@ public class SupervisorDaemonManager(
         engine.withTransaction {
             engine.process.prctl(
                 io.mazewall.core.PrctlCommand.SetPtracer(daemonPid)
-            ).onFailure { errno, _ ->
+            ).onFailure { errno, rawValue ->
                 logger.warning("prctl(PR_SET_PTRACER) failed with errno $errno. The daemon may not be able to read process memory if Yama ptrace_scope is restrictive.")
             }
             Unit
@@ -198,7 +198,7 @@ public class SupervisorDaemonManager(
                     while (true) {
                         val resValue = engine.withTransaction {
                             engine.memory.write(fd, cmd, 1)
-                                .recover { errno, _ -> if (errno == io.mazewall.ffi.NativeConstants.EINTR) -1000L else -1L }
+                                .recover { errno, rawValue -> if (errno == io.mazewall.ffi.NativeConstants.EINTR) -1000L else -1L }
                         }
                         if (resValue == -1000L) continue
                         break

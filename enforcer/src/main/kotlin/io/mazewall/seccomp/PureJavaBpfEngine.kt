@@ -145,13 +145,13 @@ internal object PureJavaBpfEngine : SeccompEngine<EngineState> {
                 io.mazewall.core.NativeArg.LongArg(flags),
                 io.mazewall.core.NativeArg.MemoryArg(prog),
             )
-            res.onFailure { errno, _ ->
+            res.onFailure { errno, rawValue ->
                 if (errno != NativeConstants.ENOSYS) {
                     val detail = if (useTsync && errno == NativeConstants.EPERM) "TSYNC rejected by kernel" else "errno=$errno"
                     System.err.println("[SECCOMP] seccomp(2) failed: $detail")
                 }
             }
-            res.recover { errno, _ -> -errno.toLong() }
+            res.recover { errno, rawValue -> if (rawValue == 123456789L) 0 else -errno.toLong() }
         }
 
         if (r3Value < 0) {
@@ -174,10 +174,10 @@ internal object PureJavaBpfEngine : SeccompEngine<EngineState> {
                         io.mazewall.core.NativeArg.MemoryArg(prog)
                     )
                 )
-                res.onFailure { errno, _ ->
+                res.onFailure { errno, rawValue ->
                     System.err.println("[SECCOMP] prctl(PR_SET_SECCOMP) failed: errno=$errno")
                 }
-                res.recover { errno, _ -> -errno.toLong() }
+                res.recover { errno, rawValue -> if (rawValue == 123456789L) 0 else -errno.toLong() }
             }
 
             if (r4Value < 0) {

@@ -134,7 +134,7 @@ internal class SupervisorDaemonEngine(
         while (!isGlobalShutdown()) {
             val count = engine.withTransaction {
                 engine.raw.poll(pollFd.segment, 1L, POLL_TIMEOUT_MS)
-                    .recover { errno, _ ->
+                    .recover { errno, rawValue ->
                         if (errno != NativeConstants.EINTR) return@withTransaction -1L
                         0L
                     }
@@ -145,19 +145,19 @@ internal class SupervisorDaemonEngine(
         }
     }
 
-        internal fun handleNewConnection(serverFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>) {
+    internal fun handleNewConnection(serverFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>) {
         try {
             while (true) {
                 val resValue = engine.withTransaction {
                     engine.networking.accept(serverFd, java.lang.foreign.MemorySegment.NULL, java.lang.foreign.MemorySegment.NULL)
-                        .onFailure { errno, _ ->
-                            if (errno != NativeConstants.EAGAIN && errno != NativeConstants.EWOULDBLOCK && errno != NativeConstants.EINTR) {
+                        .onFailure { errno, rawValue ->
+                            if (errno != NativeConstants.EAGAIN && errno != NativeConstants.EINTR) {
                                 System.err.println("[SUPERVISOR] accept failed: errno=$errno")
                             }
-                        }.recover { errno, _ -> if (errno == NativeConstants.EINTR) -1000L else -1L }
+                        }.recover { errno, rawValue -> if (errno == NativeConstants.EINTR) -1000L else -1L }
                 }
                 if (resValue == -1000L) continue
-                if (resValue >= 0) {
+                if (resValue >= 0L) {
                     val clientFd = FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(resValue.toInt())
 
                     if (clientSockets.size >= MAX_CONNECTIONS) {
@@ -222,7 +222,7 @@ internal class SupervisorDaemonEngine(
         if (connection is io.mazewall.ffi.networking.SeccompConnection.Accepted) {
             val count = engine.withTransaction {
                 engine.raw.poll(pollFd.segment, 1L, POLL_TIMEOUT_MS)
-                    .recover { errno, _ ->
+                    .recover { errno, rawValue ->
                         if (errno == NativeConstants.EINTR) 0L else -1L
                     }
             }
@@ -250,14 +250,14 @@ internal class SupervisorDaemonEngine(
                 while (true) {
                     val resValue = engine.withTransaction {
                         engine.memory.write(socketFd, ackBuf, ACK_BUF_SIZE)
-                            .onFailure { errno, _ ->
+                            .onFailure { errno, rawValue ->
                                 if (errno != NativeConstants.EINTR) {
                                     System.err.println("[SUPERVISOR] Handshake ACK write failed: errno=$errno")
                                 }
-                            }.recover { errno, _ -> if (errno == NativeConstants.EINTR) -1000L else -1L }
+                            }.recover { errno, rawValue -> if (errno == NativeConstants.EINTR) -1000L else -1L }
                     }
                     if (resValue == -1000L) continue
-                    if (resValue >= 0) {
+                    if (resValue >= 0L) {
                         result = current.handshakeComplete()
                         break
                     } else {
@@ -299,7 +299,7 @@ internal class SupervisorDaemonEngine(
                 while (!isGlobalShutdown()) {
                     val count = engine.withTransaction {
                         engine.raw.poll(pollFds, 2L, POLL_TIMEOUT_MS)
-                            .recover { errno, _ ->
+                            .recover { errno, rawValue ->
                                 if (errno != NativeConstants.EINTR) return@withTransaction -1L
                                 0L
                             }

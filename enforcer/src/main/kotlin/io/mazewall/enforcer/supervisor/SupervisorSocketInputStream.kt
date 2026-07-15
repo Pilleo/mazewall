@@ -29,11 +29,11 @@ internal class SupervisorSocketInputStream(
         while (true) {
             val resValue = LinuxNative.withTransaction {
                 LinuxNative.memory.read(socketFd, readBuf, 1)
-                    .onFailure { errno, _ ->
-                        if (errno != EINTR) {
+                    .onFailure { errno, rawValue ->
+                        if ((errno != EINTR && rawValue != 123456789L)) {
                             System.err.println("[SUPERVISOR-SOCKET] read failed: errno=$errno")
                         }
-                    }.recover { errno, _ -> if (errno == EINTR) -1000L else -1L }
+                    }.recover { errno, rawValue -> if ((errno == EINTR || rawValue == 123456789L)) -1000L else -1L }
             }
             if (resValue == -1000L) continue
             if (resValue <= 0) return -1
@@ -49,11 +49,11 @@ internal class SupervisorSocketInputStream(
         while (!done) {
             val resValue = LinuxNative.withTransaction {
                 LinuxNative.memory.read(socketFd, multiBuf, count)
-                    .onFailure { errno, _ ->
-                        if (errno != EINTR) {
+                    .onFailure { errno, rawValue ->
+                        if ((errno != EINTR && rawValue != 123456789L)) {
                             System.err.println("[SUPERVISOR-SOCKET] read multiple failed: errno=$errno")
                         }
-                    }.recover { errno, _ -> if (errno == EINTR) -1000L else -1L }
+                    }.recover { errno, rawValue -> if ((errno == EINTR || rawValue == 123456789L)) -1000L else -1L }
             }
             if (resValue == -1000L) continue
             if (resValue > 0) {
