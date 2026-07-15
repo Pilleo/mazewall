@@ -616,21 +616,11 @@ internal class SupervisorSessionHandler(
         val flags = if (nr == arch.open) args[1].toInt() else args[2].toInt()
         val pathSeg = arena.allocateFrom(pathStr)
         val dirfd = if (nr == arch.open || pathStr.startsWith("/")) AT_FDCWD else args[0].toInt()
-        val res = engine.withTransaction {
+        val res: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = engine.withTransaction {
             if (dirfd == AT_FDCWD) {
                 engine.fileSystem.open(pathSeg, flags)
             } else {
-                val myArch = io.mazewall.core.Arch.current()
-                val myOpenat = myArch.openat.toLong()
-                engine.raw.syscall(
-                    myOpenat,
-                    io.mazewall.core.NativeArg.LongArg(dirfd.toLong()),
-                    io.mazewall.core.NativeArg.MemoryArg(pathSeg),
-                    io.mazewall.core.NativeArg.LongArg(flags.toLong()),
-                    io.mazewall.core.NativeArg.LongArg(0L),
-                    io.mazewall.core.NativeArg.LongArg(0L),
-                    io.mazewall.core.NativeArg.LongArg(0L)
-                )
+                engine.fileSystem.openat(dirfd, pathSeg, flags)
             }
         }
         return when (res) {
@@ -767,16 +757,8 @@ internal class SupervisorSessionHandler(
                 Arena.ofConfined().use { arena ->
                     val tgid = getTgid(tid.value)
                     logger.info { "[SUPERVISOR-DEBUG] Async accept worker started for tid=${tid.value} (tgid=$tgid), targetFd=${args[0].toInt()}" }
-                    val pidfdRes = engine.withTransaction {
-                        engine.raw.syscall(
-                            434L, // SYS_pidfd_open
-                            io.mazewall.core.NativeArg.LongArg(tgid.toLong()),
-                            io.mazewall.core.NativeArg.LongArg(0L),
-                            io.mazewall.core.NativeArg.LongArg(0L),
-                            io.mazewall.core.NativeArg.LongArg(0L),
-                            io.mazewall.core.NativeArg.LongArg(0L),
-                            io.mazewall.core.NativeArg.LongArg(0L)
-                        )
+                    val pidfdRes: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = engine.withTransaction {
+                        engine.process.pidfdOpen(tgid, 0)
                     }
                     val pidfd = when (pidfdRes) {
                         is LinuxNative.SyscallResult.Success -> pidfdRes.value.toInt()
@@ -789,16 +771,8 @@ internal class SupervisorSessionHandler(
 
                     val targetFd = args[0].toInt()
                     logger.info { "[SUPERVISOR-DEBUG] pidfd_open success. pidfd=$pidfd. Duplicating fd $targetFd..." }
-                    val dupRes = engine.withTransaction {
-                        engine.raw.syscall(
-                            438L, // SYS_pidfd_getfd
-                            io.mazewall.core.NativeArg.LongArg(pidfd.toLong()),
-                            io.mazewall.core.NativeArg.LongArg(targetFd.toLong()),
-                            io.mazewall.core.NativeArg.LongArg(0L),
-                            io.mazewall.core.NativeArg.LongArg(0L),
-                            io.mazewall.core.NativeArg.LongArg(0L),
-                            io.mazewall.core.NativeArg.LongArg(0L)
-                        )
+                    val dupRes: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = engine.withTransaction {
+                        engine.process.pidfdGetFd(pidfd, targetFd, 0)
                     }
 
                     closeLocalFd(pidfd)
@@ -818,23 +792,14 @@ internal class SupervisorSessionHandler(
                         val localAddrLen = arena.allocate(4)
                         localAddrLen.writeInt(0, 128)
 
-                        val myArch = io.mazewall.core.Arch.current()
-                        val accept4Sys = io.mazewall.core.NetworkSyscallMapper.numberFor(
-                            io.mazewall.core.Syscall.ACCEPT4,
-                            myArch
-                        ).toLong()
-
                         val flags = if (nr == traceeArch.accept4) args[3].toInt() else 0
 
                         val acceptRes = engine.withTransaction {
-                            engine.raw.syscall(
-                                accept4Sys,
-                                io.mazewall.core.NativeArg.LongArg(dupFd.toLong()),
-                                io.mazewall.core.NativeArg.MemoryArg(localAddr),
-                                io.mazewall.core.NativeArg.MemoryArg(localAddrLen),
-                                io.mazewall.core.NativeArg.LongArg(flags.toLong()),
-                                io.mazewall.core.NativeArg.LongArg(0L),
-                                io.mazewall.core.NativeArg.LongArg(0L)
+                            engine.networking.accept4(
+                                FileDescriptor.unsafe<FileDescriptorRole.Generic>(dupFd),
+                                localAddr,
+                                localAddrLen,
+                                flags
                             )
                         }
 
