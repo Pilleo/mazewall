@@ -9,10 +9,15 @@ import java.nio.file.Paths
  * A type-safe, validated, and normalized path for use in sandboxing rules.
  *
  * This value class ensures that all paths added to a security policy are
- * absolute and normalized. Note that this class does NOT resolve symlinks;
- * symlink resolution is intentionally deferred to the kernel (via Landlock's
- * O_NOFOLLOW) to prevent silent bypasses where a user provides a symlink
- * that resolves to a restricted target.
+ * absolute and normalized. Note that this class performs purely **syntactic**
+ * normalization; it does not resolve symlinks. Physical symlink resolution
+ * should be performed prior to creating a [SandboxedPath] (e.g., via
+ * `io.mazewall.sbob.PathNormalizer`) if security guarantees against TOCTOU
+ * are required.
+ *
+ * Symlink resolution at the kernel level is intentionally deferred (via
+ * Landlock's O_NOFOLLOW) to prevent silent bypasses where a user provides
+ * a symlink that resolves to a restricted target.
  */
 @JvmInline
 public value class SandboxedPath private constructor(public val value: String) {
