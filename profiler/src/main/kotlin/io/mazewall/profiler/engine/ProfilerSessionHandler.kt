@@ -76,6 +76,7 @@ internal class ProfilerSessionHandler(
             recvRes.onSuccess {
                 val ok = processNotification(notif, resp, ackBuf, socketPollFd)
                 if (!ok) {
+                    System.err.println("[DAEMON-WARN] Failed to process notification. Terminating session.")
                     state = ProfilerState.Terminated(socketFd, listenerFd)
                 }
             }

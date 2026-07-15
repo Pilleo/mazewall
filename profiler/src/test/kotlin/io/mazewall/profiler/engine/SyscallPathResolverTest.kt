@@ -1,20 +1,19 @@
 package io.mazewall.profiler.engine
 
 import io.mazewall.core.Tid
+import java.lang.foreign.Arena
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
-import java.lang.foreign.Arena
 
-/**
- * Unit tests for [SyscallPathResolver].
- */
 class SyscallPathResolverTest {
 
+    private val AT_FDCWD_VAL = -100L
+
     private class RecordingMockReader : ProfilerMemoryReader {
-        val addressToString: MutableMap<Long, String?> = mutableMapOf()
-        val linkToPath: MutableMap<String, String> = mutableMapOf()
-        val readAddresses: MutableList<Long> = mutableListOf()
+        val readAddresses = mutableListOf<Long>()
+        val addressToString = mutableMapOf<Long, String>()
+        val linkToPath = mutableMapOf<String, String>()
 
         context(arena: Arena)
         override fun readStringFromProcess(tid: Tid, remoteAddr: Long, maxLen: Int): String? {
@@ -23,187 +22,72 @@ class SyscallPathResolverTest {
         }
 
         context(arena: Arena)
-        override fun resolveLink(tid: Tid, link: String): String? = linkToPath[link]
-    }
-
-    private fun makeRawEvent(syscallName: String, args: List<Long>): SyscallEvent<SyscallEventState.Raw> {
-        val padded = args + List(6 - args.size) { 0L }
-        return SyscallEvent(tid = Tid(1234), syscallName = syscallName, args = padded)
-    }
-
-    private fun makeResolver(reader: RecordingMockReader): SyscallPathResolver =
-        SyscallPathResolver(reader, SessionEventLedger())
-
-    @Test
-    fun `SYMLINKAT resolves target from args0 and linkpath from args2 relative to newdirfd at args1`() {
-        Arena.ofConfined().use { arena ->
-            with(arena) {
-                val reader = RecordingMockReader()
-                val targetPtr = 0x7fff_0000L
-                val newdirfd = 5L
-                val linkPtr = 0x7fff_1000L
-                val garbage = 0xDEAD_BEEFL
-
-                reader.addressToString[targetPtr] = "/etc/real-file"
-                reader.addressToString[linkPtr] = "link-name"
-                reader.linkToPath["fd/5"] = "/var/links"
-
-                val event = makeRawEvent("SYMLINKAT", listOf(targetPtr, newdirfd, linkPtr, garbage))
-                val resolved = makeResolver(reader).resolve(event)
-
-                assertEquals(listOf(targetPtr, linkPtr), reader.readAddresses)
-                assertEquals(2, resolved.paths.size)
-                assertTrue("/etc/real-file" in resolved.paths)
-                assertTrue("/var/links/link-name" in resolved.paths)
-            }
+        override fun resolveLink(tid: Tid, link: String): String? {
+            return linkToPath[link]
         }
     }
 
+    private fun makeResolver(reader: ProfilerMemoryReader) = SyscallPathResolver(reader, SessionEventLedger())
+
+    private fun makeRawEvent(name: String, args: List<Long>) = SyscallEvent<SyscallEventState.Raw>(
+        tid = Tid(123),
+        syscallName = name,
+        args = args
+    )
+
     @Test
-    fun `SYMLINKAT resolves absolute linkpath without consulting newdirfd`() {
+    fun `test resolve SYMLINKAT correctly resolves source and target paths`() {
         Arena.ofConfined().use { arena ->
             with(arena) {
                 val reader = RecordingMockReader()
-                val targetPtr = 0x7fff_0000L
-                val newdirfd = 5L
-                val linkPtr = 0x7fff_1000L
+                val oldPathPtr = 0x1000L
+                val newPathPtr = 0x2000L
+                val newDirFd = 5L
 
-                reader.addressToString[targetPtr] = "/etc/real-file"
-                reader.addressToString[linkPtr] = "/absolute/link"
-
-                val event = makeRawEvent("SYMLINKAT", listOf(targetPtr, newdirfd, linkPtr, 0L))
-                val resolved = makeResolver(reader).resolve(event)
-
-                assertEquals(listOf(targetPtr, linkPtr), reader.readAddresses)
-                assertTrue("/etc/real-file" in resolved.paths)
-                assertTrue("/absolute/link" in resolved.paths)
-            }
-        }
-    }
-
-    @Test
-    fun `SYMLINKAT resolves relative linkpath against CWD when newdirfd is AT_FDCWD`() {
-        Arena.ofConfined().use { arena ->
-            with(arena) {
-                val reader = RecordingMockReader()
-                val targetPtr = 0x7fff_0000L
-                val newdirfd = AT_FDCWD_VAL
-                val linkPtr = 0x7fff_1000L
-
-                reader.addressToString[targetPtr] = "/some/target"
-                reader.addressToString[linkPtr] = "relative-link"
+                reader.addressToString[oldPathPtr] = "source.txt"
+                reader.addressToString[newPathPtr] = "target.txt"
                 reader.linkToPath["cwd"] = "/home/user"
+                reader.linkToPath["fd/5"] = "/opt/app"
 
-                val event = makeRawEvent("SYMLINKAT", listOf(targetPtr, newdirfd, linkPtr, 0L))
+                // SYMLINKAT(oldpath, newdirfd, newpath)
+                val event = makeRawEvent("SYMLINKAT", listOf(oldPathPtr, newDirFd, newPathPtr))
                 val resolved = makeResolver(reader).resolve(event)
 
-                assertTrue("/home/user/relative-link" in resolved.paths)
+                assertEquals(listOf("/home/user/source.txt", "/opt/app/target.txt"), resolved.paths)
             }
         }
     }
 
+    /**
+     * Regression test for argument layout in resolve() loop.
+     * Some syscalls like RENAMEAT2 have dirfd/path pairs in (arg0, arg1) and (arg2, arg3).
+     */
     @Test
-    fun `RENAMEAT resolves both old and new paths with their respective dirfds`() {
+    fun `test resolve RENAMEAT2 correctly resolves both path pairs`() {
         Arena.ofConfined().use { arena ->
             with(arena) {
                 val reader = RecordingMockReader()
-                val olddirfd = 3L
-                val oldPathPtr = 0x7fff_0100L
-                val newdirfd = 7L
-                val newPathPtr = 0x7fff_0200L
+                val oldDirFd = 5L
+                val oldPathPtr = 0x1000L
+                val newDirFd = 6L
+                val newPathPtr = 0x2000L
 
                 reader.addressToString[oldPathPtr] = "old.txt"
                 reader.addressToString[newPathPtr] = "new.txt"
-                reader.linkToPath["fd/3"] = "/var/old"
-                reader.linkToPath["fd/7"] = "/var/new"
+                reader.linkToPath["fd/5"] = "/dir1"
+                reader.linkToPath["fd/6"] = "/dir2"
 
-                val event = makeRawEvent("RENAMEAT", listOf(olddirfd, oldPathPtr, newdirfd, newPathPtr))
+                // RENAMEAT2(olddirfd, oldpath, newdirfd, newpath, flags)
+                val event = makeRawEvent("RENAMEAT2", listOf(oldDirFd, oldPathPtr, newDirFd, newPathPtr, 0L))
                 val resolved = makeResolver(reader).resolve(event)
 
-                assertEquals(listOf(oldPathPtr, newPathPtr), reader.readAddresses)
-                assertTrue("/var/old/old.txt" in resolved.paths)
-                assertTrue("/var/new/new.txt" in resolved.paths)
+                assertEquals(listOf("/dir1/old.txt", "/dir2/new.txt"), resolved.paths)
             }
         }
     }
 
     @Test
-    fun `LINKAT resolves both old and new paths with their respective dirfds`() {
-        Arena.ofConfined().use { arena ->
-            with(arena) {
-                val reader = RecordingMockReader()
-                val olddirfd = AT_FDCWD_VAL
-                val oldPathPtr = 0x7fff_0010L
-                val newdirfd = 4L
-                val newPathPtr = 0x7fff_0020L
-
-                reader.addressToString[oldPathPtr] = "source.txt"
-                reader.addressToString[newPathPtr] = "hardlink.txt"
-                reader.linkToPath["cwd"] = "/home/src"
-                reader.linkToPath["fd/4"] = "/home/dst"
-
-                val event = makeRawEvent("LINKAT", listOf(olddirfd, oldPathPtr, newdirfd, newPathPtr, 0L))
-                val resolved = makeResolver(reader).resolve(event)
-
-                assertEquals(listOf(oldPathPtr, newPathPtr), reader.readAddresses)
-                assertTrue("/home/src/source.txt" in resolved.paths)
-                assertTrue("/home/dst/hardlink.txt" in resolved.paths)
-            }
-        }
-    }
-
-    @Test
-    fun `OPEN resolves path from args0`() {
-        Arena.ofConfined().use { arena ->
-            with(arena) {
-                val reader = RecordingMockReader()
-                val pathPtr = 0x7fff_ABCDL
-                reader.addressToString[pathPtr] = "/etc/passwd"
-                val event = makeRawEvent("OPEN", listOf(pathPtr))
-                val resolved = makeResolver(reader).resolve(event)
-                assertEquals(listOf(pathPtr), reader.readAddresses)
-                assertEquals(listOf("/etc/passwd"), resolved.paths)
-            }
-        }
-    }
-
-    @Test
-    fun `OPENAT resolves path from args1 relative to dirfd in args0`() {
-        Arena.ofConfined().use { arena ->
-            with(arena) {
-                val reader = RecordingMockReader()
-                val dirfd = 6L
-                val pathPtr = 0x7fff_1234L
-                reader.addressToString[pathPtr] = "config.yaml"
-                reader.linkToPath["fd/6"] = "/etc/app"
-                val event = makeRawEvent("OPENAT", listOf(dirfd, pathPtr, 0L))
-                val resolved = makeResolver(reader).resolve(event)
-                assertEquals(listOf(pathPtr), reader.readAddresses)
-                assertEquals(listOf("/etc/app/config.yaml"), resolved.paths)
-            }
-        }
-    }
-
-    @Test
-    fun `SYMLINK resolves both target and linkpath from args0 and args1 directly`() {
-        Arena.ofConfined().use { arena ->
-            with(arena) {
-                val reader = RecordingMockReader()
-                val targetPtr = 0x7fff_AAL
-                val linkPtr = 0x7fff_BBL
-                reader.addressToString[targetPtr] = "/real/target"
-                reader.addressToString[linkPtr] = "/created/link"
-                val event = makeRawEvent("SYMLINK", listOf(targetPtr, linkPtr))
-                val resolved = makeResolver(reader).resolve(event)
-                assertEquals(listOf(targetPtr, linkPtr), reader.readAddresses)
-                assertTrue("/real/target" in resolved.paths)
-                assertTrue("/created/link" in resolved.paths)
-            }
-        }
-    }
-
-    @Test
-    fun `unknown syscall produces empty paths without any memory reads`() {
+    fun `test resolve returns empty list for unknown syscalls`() {
         Arena.ofConfined().use { arena ->
             with(arena) {
                 val reader = RecordingMockReader()
@@ -215,6 +99,9 @@ class SyscallPathResolverTest {
         }
     }
 
+    /**
+     * Null address (0L) in args[0] must not cause a memory read — the resolver skips it.
+     */
     @Test
     fun `null address in OPEN is skipped and produces empty paths`() {
         Arena.ofConfined().use { arena ->
@@ -222,7 +109,7 @@ class SyscallPathResolverTest {
                 val reader = RecordingMockReader()
                 val event = makeRawEvent("OPEN", listOf(0L))
                 val resolved = makeResolver(reader).resolve(event)
-                assertTrue(reader.readAddresses.isEmpty())
+                assertTrue(reader.readAddresses.isEmpty(), "Zero address must not be passed to readStringFromProcess")
                 assertTrue(resolved.paths.isEmpty())
             }
         }

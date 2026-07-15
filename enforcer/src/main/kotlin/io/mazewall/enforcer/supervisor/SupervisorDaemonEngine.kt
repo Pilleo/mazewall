@@ -283,8 +283,15 @@ internal class SupervisorDaemonEngine(
                     }
                     if (count <= 0) continue
 
-                    val action = sessionHandler.handleActiveListener(pollFds, notif, resp)
-                    if (action is LoopAction.Break || action is LoopAction.Shutdown) break
+                    io.mazewall.ffi.memory.nativeScope {
+                        val action = with(this) {
+                            sessionHandler.handleActiveListener(pollFds, notif, resp)
+                        }
+                        if (action is LoopAction.Break || action is LoopAction.Shutdown) {
+                            triggerGlobalShutdown("session reactor break")
+                        }
+                    }
+                    if (isGlobalShutdown()) break
                 }
             }
         } finally {

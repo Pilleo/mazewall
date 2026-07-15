@@ -8,6 +8,7 @@ import io.mazewall.MockNativeEngine
 import io.mazewall.MockNativeNetworking
 import io.mazewall.NativeTransaction
 import io.mazewall.RealNativeEngine
+import java.lang.foreign.Arena
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
@@ -49,19 +50,22 @@ class SupervisorSessionHandlerTest {
 
         val method = SupervisorSessionHandler::class.java.getDeclaredMethod(
             "connectSocketInSupervisor",
+            Arena::class.java,
             ByteArray::class.java
         )
         method.isAccessible = true
 
-        // Test normal domain (AF_INET = 2) -> little endian: [2, 0]
-        val normalBytes = byteArrayOf(2, 0)
-        method.invoke(handler, normalBytes)
-        assertEquals(2, capturedDomain)
+        Arena.ofConfined().use { arena ->
+            // Test normal domain (AF_INET = 2) -> little endian: [2, 0]
+            val normalBytes = byteArrayOf(2, 0)
+            method.invoke(handler, arena, normalBytes)
+            assertEquals(2, capturedDomain)
 
-        // Test domain >= 128 (e.g. 128) -> little-endian bytes: [0x80, 0]
-        // 0x80 is 128. As a signed byte it is -128.
-        val highDomainBytes = byteArrayOf(0x80.toByte(), 0)
-        method.invoke(handler, highDomainBytes)
-        assertEquals(128, capturedDomain)
+            // Test domain >= 128 (e.g. 128) -> little-endian bytes: [0x80, 0]
+            // 0x80 is 128. As a signed byte it is -128.
+            val highDomainBytes = byteArrayOf(0x80.toByte(), 0)
+            method.invoke(handler, arena, highDomainBytes)
+            assertEquals(128, capturedDomain)
+        }
     }
 }
