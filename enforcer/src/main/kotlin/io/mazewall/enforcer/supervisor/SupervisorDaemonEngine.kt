@@ -1,5 +1,11 @@
 package io.mazewall.enforcer.supervisor
 
+import io.mazewall.onSuccess
+
+import io.mazewall.map
+
+import io.mazewall.isSuccess
+
 import io.mazewall.LinuxNative
 import io.mazewall.NativeEngine
 import io.mazewall.core.FdState
@@ -139,7 +145,7 @@ internal class SupervisorDaemonEngine(
         }
     }
 
-    internal fun handleNewConnection(serverFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>) {
+        internal fun handleNewConnection(serverFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>) {
         try {
             while (true) {
                 val resValue = engine.withTransaction {
@@ -179,7 +185,6 @@ internal class SupervisorDaemonEngine(
             // Ignore during shutdown
         }
     }
-
     private fun handleConnection(socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>) {
         var connection: io.mazewall.ffi.networking.SeccompConnection = io.mazewall.ffi.networking.SeccompConnection.Accepted(socketFd)
         try {

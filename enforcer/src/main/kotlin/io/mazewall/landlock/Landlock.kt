@@ -262,15 +262,15 @@ object Landlock {
         allowedAccess: Long,
     ) {
         val pathSegment = arena.allocateFrom(path)
-        val fdResult = LinuxNative.withTransaction {
+        val fdValue = LinuxNative.withTransaction {
             LinuxNative.fileSystem.open(pathSegment, NativeConstants.O_PATH or NativeConstants.O_CLOEXEC)
                 .onFailure { errno, _ ->
                     logger.warning("Could not open JVM classpath $path for landlock rule: errno $errno")
-                }
+                }.recover { errno, _ -> -errno.toLong() }
         }
 
-        fdResult.onSuccess { value ->
-            val pathFd = FileDescriptor.unsafe<FileDescriptorRole.OPath>(value.toInt())
+        if (fdValue >= 0) {
+            val pathFd = FileDescriptor.unsafe<FileDescriptorRole.OPath>(fdValue.toInt())
             try {
                 when (val addRes = addRuleToRuleset(ruleset, pathFd, allowedAccess)) {
                     is AddRuleResult.Success -> {}
