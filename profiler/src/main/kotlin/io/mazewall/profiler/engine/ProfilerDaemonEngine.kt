@@ -119,7 +119,9 @@ internal class ProfilerDaemonEngine(
                 name = "conn-handler-${clientFd.value}"
                 start()
             }
-        } catch (e: Exception) {}
+        } catch (e: Exception) {
+            System.err.println("WARN: handleNewConnection failed: ${e.message}")
+        }
     }
 
     private fun handleConnection(socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>) {
@@ -166,6 +168,7 @@ internal class ProfilerDaemonEngine(
                 }
             }
         } catch (e: Exception) {
+            System.err.println("WARN: handleConnection failed: ${e.message}")
         } finally {
             clientSockets.remove(socketFd)
             socketManager.close(socketFd)
