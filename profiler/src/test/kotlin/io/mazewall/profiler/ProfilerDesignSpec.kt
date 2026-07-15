@@ -58,7 +58,12 @@ class ProfilerDesignSpec :
 
             override val raw = object : io.mazewall.RawSyscallOperations {
                 context(_: NativeTransaction)
-                override fun poll(fds: MemorySegment, nfds: Long, timeout: Int): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = nextPollResult
+                override fun poll(fds: MemorySegment, nfds: Long, timeout: Int): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                    if (nextPollResult is LinuxNative.SyscallResult.Success && (nextPollResult as LinuxNative.SyscallResult.Success).value > 0) {
+                        fds.set(ValueLayout.JAVA_SHORT, 6L, NativeConstants.POLLIN)
+                    }
+                    return nextPollResult
+                }
 
                 context(_: NativeTransaction)
                 override fun syscall(nr: Long, arg1: NativeArg, arg2: NativeArg, arg3: NativeArg, arg4: NativeArg, arg5: NativeArg, arg6: NativeArg): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success(0L)

@@ -169,8 +169,23 @@ internal class ProfilerDaemonEngine(
                             System.err.println("[DAEMON] Sending handshake ACK to socket ${socketFd.value}")
                             val ackBuf = arena.allocate(ACK_BUF_SIZE)
                             ackBuf.set(ValueLayout.JAVA_BYTE, 0L, PROTOCOL_ACK_BYTE)
-                            ioOps.write(socketFd, ackBuf, ACK_BUF_SIZE)
-                            connection = current.handshakeComplete()
+                            var success = false
+                            while (true) {
+                                val res = ioOps.write(socketFd, ackBuf, ACK_BUF_SIZE)
+                                if (res is io.mazewall.LinuxNative.SyscallResult.Success) {
+                                    success = true
+                                    break
+                                } else {
+                                    val errno = (res as io.mazewall.LinuxNative.SyscallResult.Error).errno
+                                    if (errno == NativeConstants.EINTR) continue
+                                    break
+                                }
+                            }
+                            if (success) {
+                                connection = current.handshakeComplete()
+                            } else {
+                                return@use
+                            }
                             // Immediately loop to start session reactor (don't poll)
                         }
 
@@ -224,17 +239,17 @@ internal class ProfilerDaemonEngine(
                 while (!isGlobalShutdown()) {
                     val pollRes = LinuxNative.withTransaction { ioOps.raw.poll(pollFds, 2L, POLL_TIMEOUT_MS) }
                     val count = pollRes.recover { errno, _ ->
-                        if (errno != NativeConstants.EINTR) return@use
+                        if (errno != NativeConstants.EINTR) return@use // Break from loop
                         0L
                     }
                     if (count <= 0) continue
 
-                    io.mazewall.ffi.memory.nativeScope {
-                        val action = with(this) {
+                    val action = io.mazewall.ffi.memory.nativeScope {
+                        with(this) {
                             sessionHandler.handleActiveListener(pollFds, ackBuf, notif, resp, socketPollFd)
                         }
-                        if (action !is LoopAction.Continue) triggerGlobalShutdown("session reactor break")
                     }
+                    if (action !is LoopAction.Continue) break
                     if (isGlobalShutdown()) break
                 }
             }
