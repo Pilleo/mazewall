@@ -104,6 +104,8 @@ data class Arch(
     val ftruncate: Int,
     val pause: Int,
     val nanosleep: Int,
+    val pidfdOpen: Int,
+    val pidfdGetFd: Int,
     val seccompSyscallNumber: Int,
 ) {
     companion object {
@@ -215,6 +217,8 @@ data class Arch(
                 ftruncate = 77,
                 pause = 34,
                 nanosleep = 35,
+                pidfdOpen = 434,
+                pidfdGetFd = 438,
                 seccompSyscallNumber = 317,
             )
 
@@ -323,6 +327,8 @@ data class Arch(
                 ftruncate = 46,
                 pause = -1,
                 nanosleep = 101,
+                pidfdOpen = 434,
+                pidfdGetFd = 438,
                 seccompSyscallNumber = 277,
             )
 
