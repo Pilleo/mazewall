@@ -8,7 +8,7 @@ import java.nio.file.Path
 
 class PathNormalizerSymlinkTest {
     @Test
-    fun `test pruning does not occur if parent is a symlink`(@TempDir tempDir: Path) {
+    fun `test pruning DOES occur if parent is a symlink because it is resolved`(@TempDir tempDir: Path) {
         val realParent = tempDir.resolve("real_parent")
         Files.createDirectories(realParent)
         val fileInRealParent = realParent.resolve("file.txt")
@@ -22,14 +22,11 @@ class PathNormalizerSymlinkTest {
             symlinkParent.resolve("file.txt").toString()
         )
 
-        // Pruning should NOT occur because symlinkParent is a symlink.
-        // Both paths should remain in the set.
+        // Pruning SHOULD occur because symlinkParent is resolved to its real path.
         val result = PathNormalizer.normalizeAndPrune(paths, null)
 
-        assertEquals(
-            setOf(symlinkParent.toString(), symlinkParent.resolve("file.txt").toString()),
-            result
-        )
+        val expectedPath = realParent.toRealPath().toString()
+        assertEquals(setOf(expectedPath), result)
     }
 
     @Test
@@ -47,6 +44,6 @@ class PathNormalizerSymlinkTest {
         // Pruning SHOULD occur because realParent is a directory.
         val result = PathNormalizer.normalizeAndPrune(paths, null)
 
-        assertEquals(setOf(realParent.toString()), result)
+        assertEquals(setOf(realParent.toRealPath().toString()), result)
     }
 }
