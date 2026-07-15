@@ -2,6 +2,7 @@ package io.mazewall.enforcer.supervisor
 
 import io.mazewall.LinuxNative
 import io.mazewall.NativeEngine
+import io.mazewall.onFailure
 import io.mazewall.core.ProcessLauncher
 import io.mazewall.core.RealProcessLauncher
 import io.mazewall.core.RealSocketManager
@@ -58,7 +59,10 @@ public class SupervisorDaemonManager(
                 engine.withTransaction {
                     engine.process.prctl(
                         io.mazewall.core.PrctlCommand.SetPtracer(existing.daemonProcess.pid())
-                    )
+                    ).onFailure { errno, _ ->
+                        logger.warning("prctl(PR_SET_PTRACER) failed for existing daemon: errno=$errno")
+                    }
+                    Unit
                 }
                 return existing
             }
@@ -132,13 +136,13 @@ public class SupervisorDaemonManager(
         val daemonProcess = processLauncher.startProcess(pbArgs)
         val daemonPid = daemonProcess.pid()
 
-        val prctlRes = engine.withTransaction {
+        engine.withTransaction {
             engine.process.prctl(
                 io.mazewall.core.PrctlCommand.SetPtracer(daemonPid)
-            )
-        }
-        if (prctlRes is io.mazewall.LinuxNative.SyscallResult.Error) {
-            logger.warning("prctl(PR_SET_PTRACER) failed with errno ${prctlRes.errno}. The daemon may not be able to read process memory if Yama ptrace_scope is restrictive.")
+            ).onFailure { errno, _ ->
+                logger.warning("prctl(PR_SET_PTRACER) failed with errno $errno. The daemon may not be able to read process memory if Yama ptrace_scope is restrictive.")
+            }
+            Unit
         }
 
         val readyLatch = java.util.concurrent.CountDownLatch(1)

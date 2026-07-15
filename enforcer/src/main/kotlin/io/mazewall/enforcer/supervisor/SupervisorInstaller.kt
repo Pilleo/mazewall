@@ -293,6 +293,10 @@ internal class JVMValidationListener(
         resp.setErrorNr(errorNr)
         LinuxNative.withTransaction {
             LinuxNative.memory.write(socketFd, resp.segment, Layouts.SUPERVISOR_RESPONSE_SIZE)
+                .onFailure { errno, _ ->
+                    System.err.println("[SUPERVISOR-INSTALLER] Failed to send response $id to supervisor: errno=$errno")
+                }
+            Unit
         }
     }
 }

@@ -8,6 +8,7 @@ import io.mazewall.core.FileDescriptorRole
 import io.mazewall.core.SocketManager
 import io.mazewall.ffi.Layouts
 import io.mazewall.ffi.NativeConstants
+import io.mazewall.onFailure
 import io.mazewall.recover
 import io.mazewall.ffi.memory.PollFdSegment
 import io.mazewall.ffi.memory.writeByte
@@ -125,12 +126,15 @@ internal class SupervisorDaemonEngine(
         pollFd.setEvents(NativeConstants.POLLIN)
 
         while (!isGlobalShutdown()) {
-            val pollRes = engine.withTransaction { engine.raw.poll(pollFd.segment, 1L, POLL_TIMEOUT_MS) }
-            val count = pollRes.recover { errno, _ ->
-                if (errno != NativeConstants.EINTR) return
-                0L
+            val count = engine.withTransaction {
+                engine.raw.poll(pollFd.segment, 1L, POLL_TIMEOUT_MS)
+                    .recover { errno, _ ->
+                        if (errno != NativeConstants.EINTR) return@withTransaction -1L
+                        0L
+                    }
             }
-            if (count <= 0) continue
+            if (count < 0) return
+            if (count == 0L) continue
             handleNewConnection(serverFd)
         }
     }
@@ -140,6 +144,11 @@ internal class SupervisorDaemonEngine(
             while (true) {
                 val res = engine.withTransaction {
                     engine.networking.accept(serverFd, java.lang.foreign.MemorySegment.NULL, java.lang.foreign.MemorySegment.NULL)
+                        .onFailure { errno, _ ->
+                            if (errno != NativeConstants.EAGAIN.toInt() && errno != NativeConstants.EWOULDBLOCK.toInt() && errno != NativeConstants.EINTR.toInt()) {
+                                System.err.println("[SUPERVISOR] accept failed: errno=$errno")
+                            }
+                        }
                 }
                 if (res is io.mazewall.LinuxNative.SyscallResult.Success) {
                     val clientFd = FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(res.value.toInt())
@@ -207,9 +216,11 @@ internal class SupervisorDaemonEngine(
         pollFd: PollFdSegment
     ): io.mazewall.ffi.networking.SeccompConnection? {
         if (connection is io.mazewall.ffi.networking.SeccompConnection.Accepted) {
-            val pollRes = engine.withTransaction { engine.raw.poll(pollFd.segment, 1L, POLL_TIMEOUT_MS) }
-            val count = pollRes.recover { errno, _ ->
-                if (errno == NativeConstants.EINTR) 0L else -1L
+            val count = engine.withTransaction {
+                engine.raw.poll(pollFd.segment, 1L, POLL_TIMEOUT_MS)
+                    .recover { errno, _ ->
+                        if (errno == NativeConstants.EINTR) 0L else -1L
+                    }
             }
             if (count < 0) return null
             if (count == 0L) return connection
@@ -233,7 +244,14 @@ internal class SupervisorDaemonEngine(
                 ackBuf.writeByte(0L, PROTOCOL_ACK_BYTE)
                 var result: io.mazewall.ffi.networking.SeccompConnection? = null
                 while (true) {
-                    val res = engine.withTransaction { engine.memory.write(socketFd, ackBuf, ACK_BUF_SIZE) }
+                    val res = engine.withTransaction {
+                        engine.memory.write(socketFd, ackBuf, ACK_BUF_SIZE)
+                            .onFailure { errno, _ ->
+                                if (errno != NativeConstants.EINTR) {
+                                    System.err.println("[SUPERVISOR] Handshake ACK write failed: errno=$errno")
+                                }
+                            }
+                    }
                     if (res is io.mazewall.LinuxNative.SyscallResult.Success) {
                         result = current.handshakeComplete()
                         break
@@ -276,12 +294,15 @@ internal class SupervisorDaemonEngine(
                 val resp = arena.allocate(Layouts.SECCOMP_NOTIF_RESP)
 
                 while (!isGlobalShutdown()) {
-                    val pollRes = engine.withTransaction { engine.raw.poll(pollFds, 2L, POLL_TIMEOUT_MS) }
-                    val count = pollRes.recover { errno, _ ->
-                        if (errno != NativeConstants.EINTR) return@use
-                        0L
+                    val count = engine.withTransaction {
+                        engine.raw.poll(pollFds, 2L, POLL_TIMEOUT_MS)
+                            .recover { errno, _ ->
+                                if (errno != NativeConstants.EINTR) return@withTransaction -1L
+                                0L
+                            }
                     }
-                    if (count <= 0) continue
+                    if (count < 0) return@use
+                    if (count == 0L) continue
 
                     val action = sessionHandler.handleActiveListener(pollFds, notif, resp)
                     if (action is LoopAction.Break || action is LoopAction.Shutdown) break

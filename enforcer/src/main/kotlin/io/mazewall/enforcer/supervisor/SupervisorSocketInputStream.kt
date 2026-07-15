@@ -1,6 +1,7 @@
 package io.mazewall.enforcer.supervisor
 
 import io.mazewall.LinuxNative
+import io.mazewall.onFailure
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import java.io.InputStream
@@ -25,7 +26,14 @@ internal class SupervisorSocketInputStream(
 
     override fun read(): Int {
         while (true) {
-            val res = LinuxNative.withTransaction { LinuxNative.memory.read(socketFd, readBuf, 1) }
+            val res = LinuxNative.withTransaction {
+                LinuxNative.memory.read(socketFd, readBuf, 1)
+                    .onFailure { errno, _ ->
+                        if (errno != EINTR) {
+                            System.err.println("[SUPERVISOR-SOCKET] read failed: errno=$errno")
+                        }
+                    }
+            }
             when (res) {
                 is LinuxNative.SyscallResult.Success -> {
                     if (res.value <= 0) return -1
@@ -45,7 +53,14 @@ internal class SupervisorSocketInputStream(
         var result = -1
         var done = false
         while (!done) {
-            val res = LinuxNative.withTransaction { LinuxNative.memory.read(socketFd, multiBuf, count) }
+            val res = LinuxNative.withTransaction {
+                LinuxNative.memory.read(socketFd, multiBuf, count)
+                    .onFailure { errno, _ ->
+                        if (errno != EINTR) {
+                            System.err.println("[SUPERVISOR-SOCKET] read multiple failed: errno=$errno")
+                        }
+                    }
+            }
             when (res) {
                 is LinuxNative.SyscallResult.Success -> {
                     if (res.value > 0) {

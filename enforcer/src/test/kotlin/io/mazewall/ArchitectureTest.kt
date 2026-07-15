@@ -235,8 +235,6 @@ class ArchitectureTest {
             .that()
             .areDeclaredInClassesThat()
             .resideInAnyPackage("io.mazewall.seccomp..", "io.mazewall.landlock..", "io.mazewall.enforcer.supervisor..")
-            .and()
-            .haveNameNotMatching(".*\\\$.*") // Ignore Kotlin internal mangled names
             .should()
             .notHaveRawReturnType(LinuxNative.SyscallResult::class.java)
             .because("Domain logic must not leak raw SyscallResult objects to callers. They must be handled internally.")
