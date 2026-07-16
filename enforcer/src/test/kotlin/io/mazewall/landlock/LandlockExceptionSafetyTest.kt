@@ -13,7 +13,7 @@ import org.junit.jupiter.api.Test
 import kotlin.test.assertTrue
 import kotlin.test.assertFailsWith
 
-class LandlockReproductionTest {
+class LandlockExceptionSafetyTest {
 
     object MockPlatformProvider : PlatformProvider {
         override fun getOsName(): String = "Linux"

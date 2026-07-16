@@ -515,6 +515,9 @@ internal class LandlockSession(
 
             if (processWide && !features.landlockTsyncSupported) {
                 handleProcessWideUnsupported()
+                // If we are warning and bypassing, we only continue if there are no rules.
+                // But if there are rules, we continue and apply them to the current thread only.
+                // Documentation states this is the accepted risk.
             }
 
             if (abi < 1) {
