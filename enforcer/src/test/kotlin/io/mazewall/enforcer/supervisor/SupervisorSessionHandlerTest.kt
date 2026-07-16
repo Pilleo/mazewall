@@ -17,7 +17,7 @@ class SupervisorSessionHandlerTest {
 
     @AfterEach
     fun tearDown() {
-        LinuxNative.setEngine(RealNativeEngine)
+        LinuxNative.resetToDefault()
     }
 
     @Test

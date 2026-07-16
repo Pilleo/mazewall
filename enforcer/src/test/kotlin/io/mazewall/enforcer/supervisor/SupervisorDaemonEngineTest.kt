@@ -20,7 +20,7 @@ class SupervisorDaemonEngineTest {
 
     @AfterEach
     fun tearDown() {
-        LinuxNative.setEngine(RealNativeEngine)
+        LinuxNative.resetToDefault()
     }
 
     @Test
