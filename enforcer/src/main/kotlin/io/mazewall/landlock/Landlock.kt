@@ -508,54 +508,48 @@ internal class LandlockSession(
 
     @Suppress("TooGenericExceptionCaught")
     fun applyRuleset() {
-        val features = Platform.featureMatrix
-        val abi = features.landlockAbiVersion
-        state = LandlockState.QueryingAbi(abi)
+        try {
+            val features = Platform.featureMatrix
+            val abi = features.landlockAbiVersion
+            state = LandlockState.QueryingAbi(abi)
 
-        if (processWide && !features.landlockTsyncSupported) {
-            handleProcessWideUnsupported()
-            // If we are warning and bypassing, we only continue if there are no rules.
-            // But if there are rules, we continue and apply them to the current thread only.
-            // Documentation states this is the accepted risk.
-        }
-
-        if (abi < 1) {
-            if (policy != null) {
-                Landlock.handleUnsupportedLandlock()
-            }
-            state = LandlockState.Applied
-            return
-        }
-
-        val accessMaskFs = if (policy != null) {
-            Landlock.getAccessMask(abi, policy)
-        } else {
-            Landlock.getFullAccessMask(abi)
-        }
-
-        state = LandlockState.CreatingRuleset(abi)
-        nativeScope {
-            val rulesetFd = try {
-                Landlock.createRuleset(accessMaskFs, abi)
-            } catch (e: Exception) {
-                state = LandlockState.Failed(e)
-                throw e
+            if (processWide && !features.landlockTsyncSupported) {
+                handleProcessWideUnsupported()
             }
 
-            val ruleset = LandlockRuleset<RulesetState.Building>(rulesetFd)
-            val created = LandlockLifecycle.RulesetCreated(ruleset, abi, policy)
-            state = LandlockState.ConfiguringRuleset(rulesetFd, abi)
-            try {
-                val added = created.addRules(this)
-                state = LandlockState.Enforcing(rulesetFd)
-                added.restrictSelf(processWide)
+            if (abi < 1) {
+                if (policy != null) {
+                    Landlock.handleUnsupportedLandlock()
+                }
                 state = LandlockState.Applied
-            } catch (e: Exception) {
-                state = LandlockState.Failed(e)
-                throw e
-            } finally {
-                LinuxNative.fileSystem.close(rulesetFd)
+                return
             }
+
+            val accessMaskFs = if (policy != null) {
+                Landlock.getAccessMask(abi, policy)
+            } else {
+                Landlock.getFullAccessMask(abi)
+            }
+
+            state = LandlockState.CreatingRuleset(abi)
+            nativeScope {
+                val rulesetFd = Landlock.createRuleset(accessMaskFs, abi)
+                try {
+                    val ruleset = LandlockRuleset<RulesetState.Building>(rulesetFd)
+                    val created = LandlockLifecycle.RulesetCreated(ruleset, abi, policy)
+                    state = LandlockState.ConfiguringRuleset(rulesetFd, abi)
+
+                    val added = created.addRules(this)
+                    state = LandlockState.Enforcing(rulesetFd)
+                    added.restrictSelf(processWide)
+                    state = LandlockState.Applied
+                } finally {
+                    LinuxNative.fileSystem.close(rulesetFd)
+                }
+            }
+        } catch (t: Throwable) {
+            state = LandlockState.Failed(t)
+            throw t
         }
     }
 
