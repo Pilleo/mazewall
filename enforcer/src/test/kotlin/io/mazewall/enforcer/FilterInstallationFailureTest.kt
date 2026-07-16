@@ -8,6 +8,7 @@ import io.mazewall.LinuxNative
 import io.mazewall.MockNativeEngine
 import io.mazewall.core.SeccompAction
 import io.mazewall.core.Syscall
+import io.mazewall.seccomp.PureJavaBpfEngine
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import java.util.concurrent.Executors
@@ -22,6 +23,8 @@ class FilterInstallationFailureTest {
         LinuxNative.resetToDefault()
         Platform.resetToDefault()
         ThreadStateRegistry.state = ContainerState()
+        System.clearProperty("io.mazewall.fallback")
+        PureJavaBpfEngine.clearCache()
     }
 
     @Test

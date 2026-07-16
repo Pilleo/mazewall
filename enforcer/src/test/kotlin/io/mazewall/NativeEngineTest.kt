@@ -9,6 +9,8 @@ class NativeEngineTest {
     fun tearDown() {
         // Always reset to real engine after each test to avoid polluting other tests
         LinuxNative.resetToDefault()
+        Platform.resetToDefault()
+        System.clearProperty("io.mazewall.fallback")
     }
 
     @Test

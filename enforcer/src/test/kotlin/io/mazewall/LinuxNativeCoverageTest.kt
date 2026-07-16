@@ -15,6 +15,8 @@ class LinuxNativeCoverageTest {
     @AfterEach
     fun tearDown() {
         LinuxNative.resetToDefault()
+        Platform.resetToDefault()
+        System.clearProperty("io.mazewall.fallback")
     }
 
     @Test

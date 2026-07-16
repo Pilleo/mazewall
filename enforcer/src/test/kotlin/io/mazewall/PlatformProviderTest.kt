@@ -11,6 +11,8 @@ class PlatformProviderTest {
     @AfterEach
     fun tearDown() {
         Platform.resetToDefault()
+        LinuxNative.resetToDefault()
+        System.clearProperty("io.mazewall.fallback")
     }
 
     @Test

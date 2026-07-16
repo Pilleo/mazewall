@@ -42,6 +42,7 @@ class HighConcurrencyInstallationTest {
         Platform.resetToDefault()
         io.mazewall.PolicyCompilationCache.clear()
         PureJavaBpfEngine.clearCache()
+        System.clearProperty("io.mazewall.fallback")
     }
 
     @Test

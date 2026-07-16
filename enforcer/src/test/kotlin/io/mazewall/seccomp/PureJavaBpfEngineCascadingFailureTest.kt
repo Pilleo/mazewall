@@ -1,5 +1,6 @@
 package io.mazewall.seccomp
 
+import io.mazewall.Platform
 import io.mazewall.LinuxNative
 import io.mazewall.MockNativeEngine
 import io.mazewall.Policy
@@ -19,9 +20,11 @@ class PureJavaBpfEngineCascadingFailureTest {
     @AfterEach
     fun tearDown() {
         LinuxNative.resetToDefault()
+        Platform.resetToDefault()
         PureJavaBpfEngine.clearCache()
         io.mazewall.PolicyCompilationCache.clear()
         ThreadStateRegistry.state = ContainerState()
+        System.clearProperty("io.mazewall.fallback")
     }
 
     @Test

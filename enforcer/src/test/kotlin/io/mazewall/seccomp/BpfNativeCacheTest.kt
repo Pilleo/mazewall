@@ -1,5 +1,6 @@
 package io.mazewall.seccomp
 
+import io.mazewall.Platform
 import io.mazewall.LinuxNative
 import io.mazewall.MockNativeEngine
 import io.mazewall.MockNativeMemory
@@ -32,7 +33,9 @@ class BpfNativeCacheTest {
     @AfterEach
     fun tearDown() {
         LinuxNative.resetToDefault()
+        Platform.resetToDefault()
         BpfNativeCache.clear()
+        System.clearProperty("io.mazewall.fallback")
     }
 
     @Test

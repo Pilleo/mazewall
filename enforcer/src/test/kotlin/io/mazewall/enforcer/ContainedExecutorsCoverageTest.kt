@@ -15,6 +15,7 @@ class ContainedExecutorsCoverageTest {
     @AfterEach
     fun tearDown() {
         Platform.resetToDefault()
+        LinuxNative.resetToDefault()
         ThreadStateRegistry.state = ContainerState()
         System.clearProperty("io.mazewall.fallback")
     }

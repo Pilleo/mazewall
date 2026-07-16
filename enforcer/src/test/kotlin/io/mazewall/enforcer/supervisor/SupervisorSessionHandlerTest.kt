@@ -3,6 +3,7 @@ package io.mazewall.enforcer.supervisor
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptorRole
+import io.mazewall.Platform
 import io.mazewall.LinuxNative
 import io.mazewall.MockNativeEngine
 import io.mazewall.MockNativeNetworking
@@ -18,6 +19,8 @@ class SupervisorSessionHandlerTest {
     @AfterEach
     fun tearDown() {
         LinuxNative.resetToDefault()
+        Platform.resetToDefault()
+        System.clearProperty("io.mazewall.fallback")
     }
 
     @Test

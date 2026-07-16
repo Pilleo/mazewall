@@ -20,6 +20,7 @@ class LandlockExceptionSafetyTest {
     fun tearDown() {
         LinuxNative.resetToDefault()
         Platform.resetToDefault()
+        System.clearProperty("io.mazewall.fallback")
     }
 
     object MockPlatformProvider : PlatformProvider {

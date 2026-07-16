@@ -2,6 +2,7 @@ package io.mazewall.enforcer
 
 import io.mazewall.Policy
 import io.mazewall.Platform
+import io.mazewall.LinuxNative
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import java.util.concurrent.Callable
@@ -13,6 +14,8 @@ class SandboxDispatcherCoverageTest {
     @AfterEach
     fun tearDown() {
         System.clearProperty("io.mazewall.fallback")
+        LinuxNative.resetToDefault()
+        Platform.resetToDefault()
     }
 
     @Test

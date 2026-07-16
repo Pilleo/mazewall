@@ -1,5 +1,6 @@
 package io.mazewall.enforcer
 
+import io.mazewall.LinuxNative
 import io.mazewall.Platform
 import io.mazewall.PlatformProvider
 import io.mazewall.SeccompMode
@@ -14,6 +15,8 @@ class ValidationCoverageTest {
     @AfterEach
     fun tearDown() {
         Platform.resetToDefault()
+        LinuxNative.resetToDefault()
+        System.clearProperty("io.mazewall.fallback")
     }
 
     @Test
