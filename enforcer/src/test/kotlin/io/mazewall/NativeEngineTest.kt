@@ -8,7 +8,7 @@ class NativeEngineTest {
     @AfterEach
     fun tearDown() {
         // Always reset to real engine after each test to avoid polluting other tests
-        LinuxNative.setEngine(RealNativeEngine)
+        LinuxNative.resetToDefault()
     }
 
     @Test

@@ -5,10 +5,16 @@ import io.mazewall.PlatformProvider
 import io.mazewall.SeccompMode
 import io.mazewall.YamaPtraceScope
 import io.mazewall.LinuxNative.SyscallResult
+import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import kotlin.test.assertFailsWith
 
 class ValidationCoverageTest {
+
+    @AfterEach
+    fun tearDown() {
+        Platform.resetToDefault()
+    }
 
     @Test
     fun `test validateLinuxAndNotVirtual throws on non-Linux`() {
@@ -28,12 +34,8 @@ class ValidationCoverageTest {
         }
 
         Platform.setProvider(mockProvider)
-        try {
-            assertFailsWith<UnsupportedOperationException> {
-                validateLinuxAndNotVirtual()
-            }
-        } finally {
-            Platform.resetToDefault()
+        assertFailsWith<UnsupportedOperationException> {
+            validateLinuxAndNotVirtual()
         }
     }
 }

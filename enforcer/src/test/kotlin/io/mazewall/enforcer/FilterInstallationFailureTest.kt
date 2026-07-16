@@ -8,6 +8,7 @@ import io.mazewall.LinuxNative
 import io.mazewall.MockNativeEngine
 import io.mazewall.core.SeccompAction
 import io.mazewall.core.Syscall
+import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import java.util.concurrent.Executors
 import kotlin.test.assertEquals
@@ -15,6 +16,13 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertNull
 
 class FilterInstallationFailureTest {
+
+    @AfterEach
+    fun tearDown() {
+        LinuxNative.resetToDefault()
+        Platform.resetToDefault()
+        ThreadStateRegistry.state = ContainerState()
+    }
 
     @Test
     fun `test state IS reverted on failure`() {
@@ -43,23 +51,16 @@ class FilterInstallationFailureTest {
 
         LinuxNative.setEngine(mockEngine)
 
-        try {
-            // Initial state
-            val initialState = ContainerState()
-            ThreadStateRegistry.state = initialState
+        // Initial state
+        val initialState = ContainerState()
+        ThreadStateRegistry.state = initialState
 
-            assertFailsWith<IllegalStateException> {
-                ContainedExecutors.installOnCurrentThread(policy)
-            }
-
-            // VERIFY: state WAS reverted
-            assertEquals(initialState, ThreadStateRegistry.state)
-            assertNull(ThreadStateRegistry.state.landlockPolicy)
-
-        } finally {
-            Platform.resetToDefault()
-            LinuxNative.resetToDefault()
-            ThreadStateRegistry.state = ContainerState()
+        assertFailsWith<IllegalStateException> {
+            ContainedExecutors.installOnCurrentThread(policy)
         }
+
+        // VERIFY: state WAS reverted
+        assertEquals(initialState, ThreadStateRegistry.state)
+        assertNull(ThreadStateRegistry.state.landlockPolicy)
     }
 }

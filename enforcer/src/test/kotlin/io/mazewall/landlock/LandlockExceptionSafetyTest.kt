@@ -9,11 +9,18 @@ import io.mazewall.Platform
 import io.mazewall.PlatformProvider
 import io.mazewall.SeccompMode
 import io.mazewall.YamaPtraceScope
+import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import kotlin.test.assertTrue
 import kotlin.test.assertFailsWith
 
 class LandlockExceptionSafetyTest {
+
+    @AfterEach
+    fun tearDown() {
+        LinuxNative.resetToDefault()
+        Platform.resetToDefault()
+    }
 
     object MockPlatformProvider : PlatformProvider {
         override fun getOsName(): String = "Linux"
@@ -49,16 +56,12 @@ class LandlockExceptionSafetyTest {
             }
         }
         LinuxNative.setEngine(mockEngine)
-        try {
-            val session = LandlockSession(Policy.PURE_COMPUTE_UNSAFE.definition)
-            assertFailsWith<NoSuchMethodError> {
-                session.applyRuleset()
-            }
-            // If the bug is present, state will NOT be Failed
-            assertTrue(session.state is LandlockState.Failed, "State should be Failed, but was ${session.state}")
-        } finally {
-            LinuxNative.setEngine(RealNativeEngine)
-            Platform.resetToDefault()
+
+        val session = LandlockSession(Policy.PURE_COMPUTE_UNSAFE.definition)
+        assertFailsWith<NoSuchMethodError> {
+            session.applyRuleset()
         }
+        // If the bug is present, state will NOT be Failed
+        assertTrue(session.state is LandlockState.Failed, "State should be Failed, but was ${session.state}")
     }
 }
