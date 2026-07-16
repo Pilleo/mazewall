@@ -1,10 +1,13 @@
 package io.mazewall.landlock
 
 import io.mazewall.LinuxNative
+import io.mazewall.Platform
 import io.mazewall.PolicyDefinition
+import io.mazewall.UnsupportedKernelFeatureException
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
 import io.mazewall.core.FdState
+import io.mazewall.ffi.memory.nativeScope
 import java.lang.foreign.Arena
 
 /**
@@ -38,7 +41,11 @@ internal sealed interface LandlockState {
     /** Ruleset applied successfully to the thread. */
     data object Applied : LandlockState
 
-    /** Sandboxing session failed; stores the error that occurred. */
+    /**
+     * Sandboxing session failed; stores the error that occurred.
+     * Specifically handles all [Throwable] types to ensure native FFM and
+     * unexpected JVM errors are strictly recorded.
+     */
     data class Failed(
         val error: Throwable,
     ) : LandlockState
@@ -95,4 +102,72 @@ internal sealed interface LandlockLifecycle {
 
     /** Ruleset successfully enforced and thread restricted. */
     data object Restricted : LandlockLifecycle
+}
+
+internal class LandlockSession(
+    private val policy: PolicyDefinition<*>? = null,
+    private val processWide: Boolean = false,
+) {
+    var state: LandlockState = LandlockState.Uninitialized
+        private set
+
+    @Suppress("TooGenericExceptionCaught")
+    fun applyRuleset() {
+        try {
+            val features = Platform.featureMatrix
+            val abi = features.landlockAbiVersion
+            state = LandlockState.QueryingAbi(abi)
+
+            if (processWide && !features.landlockTsyncSupported) {
+                handleProcessWideUnsupported()
+                // If we are warning and bypassing, we only continue if there are no rules.
+                // But if there are rules, we continue and apply them to the current thread only.
+                // Documentation states this is the accepted risk.
+            }
+
+            if (abi < 1) {
+                if (policy != null) {
+                    Landlock.handleUnsupportedLandlock()
+                }
+                state = LandlockState.Applied
+                return
+            }
+
+            val accessMaskFs = if (policy != null) {
+                Landlock.getAccessMask(abi, policy)
+            } else {
+                Landlock.getFullAccessMask(abi)
+            }
+
+            state = LandlockState.CreatingRuleset(abi)
+            nativeScope {
+                val rulesetFd = Landlock.createRuleset(accessMaskFs, abi)
+                try {
+                    val ruleset = LandlockRuleset<RulesetState.Building>(rulesetFd)
+                    val created = LandlockLifecycle.RulesetCreated(ruleset, abi, policy)
+                    state = LandlockState.ConfiguringRuleset(rulesetFd, abi)
+
+                    val added = created.addRules(this)
+                    state = LandlockState.Enforcing(rulesetFd)
+                    added.restrictSelf(processWide)
+                    state = LandlockState.Applied
+                } finally {
+                    LinuxNative.fileSystem.close(rulesetFd)
+                }
+            }
+        } catch (t: Throwable) {
+            state = LandlockState.Failed(t)
+            throw t
+        }
+    }
+
+    private fun handleProcessWideUnsupported() {
+        val fallback = Platform.configuredFallback()
+        val msg = "Process-wide Landlock (TSYNC) requires Linux 7.0+ (ABI v8). This kernel supports ABI v${Platform.featureMatrix.landlockAbiVersion}."
+        if (fallback == Platform.FallbackBehavior.FAIL) {
+            throw UnsupportedKernelFeatureException(msg)
+        } else if (fallback == Platform.FallbackBehavior.WARN_AND_BYPASS) {
+            java.util.logging.Logger.getLogger(Landlock::class.java.name).warning("$msg Rules will only be applied to the current thread and its descendants.")
+        }
+    }
 }
