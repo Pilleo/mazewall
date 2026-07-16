@@ -117,12 +117,12 @@ internal class SupervisorDaemonEngine(
         serverFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>,
         arena: NativeArena
     ) {
-        val pollFd = PollFdSegment.allocate()
+        val pollFd = with(arena) { PollFdSegment.allocate() }
         pollFd.setFd(serverFd.value)
         pollFd.setEvents(NativeConstants.POLLIN)
 
         while (!isGlobalShutdown()) {
-            val pollRes = engine.withTransaction { engine.raw.poll(ConfinedSegment(pollFd.segment), 1L, POLL_TIMEOUT_MS) }
+            val pollRes = engine.withTransaction { engine.raw.poll(pollFd.managed, 1L, POLL_TIMEOUT_MS) }
             val count = pollRes.recover { errno, _ ->
                 if (errno != NativeConstants.EINTR) return
                 0L
@@ -136,7 +136,7 @@ internal class SupervisorDaemonEngine(
         try {
             while (true) {
                 val res = engine.withTransaction {
-                    engine.networking.accept(serverFd, io.mazewall.core.NativeArg.NullArg, io.mazewall.core.NativeArg.NullArg)
+                    engine.networking.accept(serverFd, ManagedSegment.NULL, ManagedSegment.NULL)
                 }
                 if (res is io.mazewall.LinuxNative.SyscallResult.Success) {
                     val clientFd = FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(res.value.toInt())
@@ -173,7 +173,7 @@ internal class SupervisorDaemonEngine(
         var connection: io.mazewall.ffi.networking.SeccompConnection = io.mazewall.ffi.networking.SeccompConnection.Accepted(socketFd)
         try {
             NativeArena.ofConfined().use { arena ->
-                val pollFd = PollFdSegment.allocate()
+                val pollFd = with(arena) { PollFdSegment.allocate() }
                 pollFd.setFd(socketFd.value)
                 pollFd.setEvents(NativeConstants.POLLIN)
 
@@ -204,7 +204,7 @@ internal class SupervisorDaemonEngine(
         pollFd: PollFdSegment
     ): io.mazewall.ffi.networking.SeccompConnection? {
         if (connection is io.mazewall.ffi.networking.SeccompConnection.Accepted) {
-            val pollRes = engine.withTransaction { engine.raw.poll(ConfinedSegment(pollFd.segment), 1L, POLL_TIMEOUT_MS) }
+            val pollRes = engine.withTransaction { engine.raw.poll(pollFd.managed, 1L, POLL_TIMEOUT_MS) }
             val count = pollRes.recover { errno, _ ->
                 if (errno == NativeConstants.EINTR) 0L else -1L
             }
@@ -261,11 +261,11 @@ internal class SupervisorDaemonEngine(
         try {
             NativeArena.ofConfined().use { arena ->
                 val pollFds = ConfinedSegment(arena.arena.allocate(java.lang.foreign.MemoryLayout.sequenceLayout(2, Layouts.POLLFD)))
-                val pfd1 = PollFdSegment(pollFds.native.asSlice(0L, Layouts.POLLFD.byteSize()))
+                val pfd1 = PollFdSegment(ConfinedSegment(pollFds.native.asSlice(0L, Layouts.POLLFD.byteSize())))
                 pfd1.setFd(listenerFd.value)
                 pfd1.setEvents(NativeConstants.POLLIN)
 
-                val pfd2 = PollFdSegment(pollFds.native.asSlice(POLLFD_STRUCT_SIZE, Layouts.POLLFD.byteSize()))
+                val pfd2 = PollFdSegment(ConfinedSegment(pollFds.native.asSlice(POLLFD_STRUCT_SIZE, Layouts.POLLFD.byteSize())))
                 pfd2.setFd(socketFd.value)
                 pfd2.setEvents(NativeConstants.POLLIN)
 

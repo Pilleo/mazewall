@@ -1,7 +1,7 @@
 package io.mazewall.profiler.engine
 
 import io.mazewall.LinuxNative
-import java.lang.foreign.Arena
+import io.mazewall.ffi.memory.NativeArena
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
@@ -41,7 +41,7 @@ internal class ProfilerSessionHandler(
         private set
 
     @Suppress("ReturnCount")
-    context(arena: Arena)
+    context(arena: NativeArena)
     fun handleActiveListener(
         pollFds: MemorySegment,
         ackBuf: MemorySegment,
@@ -104,7 +104,7 @@ internal class ProfilerSessionHandler(
     }
 
     @Suppress("TooGenericExceptionCaught", "ReturnCount", "CyclomaticComplexMethod")
-    context(arena: Arena)
+    context(arena: NativeArena)
     internal fun processNotification(
         notif: MemorySegment,
         resp: MemorySegment,
@@ -131,8 +131,8 @@ internal class ProfilerSessionHandler(
             }
 
             // RESOLVE: Transform raw event into a resolved event (read path from tracee memory).
-            val resolver = SyscallPathResolver(memoryReader, ledger)
-            val resolvedEvent = resolver.resolve(
+            val resolver = with(arena) { SyscallPathResolver(memoryReader, ledger) }
+            val resolvedEvent = with(arena) { resolver.resolve(
                 event = SyscallEvent<SyscallEventState.Raw>(
                     tid = Tid(pidVal),
                     syscallName = syscallMap[nr] ?: "SYSCALL_$nr",

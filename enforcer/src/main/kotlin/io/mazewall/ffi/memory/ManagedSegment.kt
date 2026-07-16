@@ -1,6 +1,7 @@
 package io.mazewall.ffi.memory
 
 import java.lang.foreign.MemorySegment
+import java.lang.foreign.ValueLayout
 
 /**
  * Models ownership and confinement of a native memory segment.
@@ -30,6 +31,20 @@ public sealed interface ManagedSegment {
          * Represents a NULL memory segment.
          */
         public val NULL: ManagedSegment = SharedSegment(MemorySegment.NULL)
+
+        /**
+         * Copies a byte array into a managed segment.
+         */
+        public fun copy(src: ByteArray, srcOffset: Int, dest: ManagedSegment, destOffset: Long, size: Int) {
+            MemorySegment.copy(src, srcOffset, dest.native, ValueLayout.JAVA_BYTE, destOffset, size)
+        }
+
+        /**
+         * Copies from a managed segment into a byte array.
+         */
+        public fun copy(src: ManagedSegment, srcOffset: Long, dest: ByteArray, destOffset: Int, size: Int) {
+            MemorySegment.copy(src.native, ValueLayout.JAVA_BYTE, srcOffset, dest, destOffset, size)
+        }
     }
 }
 

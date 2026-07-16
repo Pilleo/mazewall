@@ -710,7 +710,7 @@ internal object RealNativeMemory : NativeMemory {
         val filterArraySeg = SockFilterSegment.allocateArray(filters.size)
         for (i in filters.indices) {
             val f = filters[i]
-            val segment = SockFilterSegment(filterArraySeg.native.asSlice(i * Layouts.SOCK_FILTER_SIZE, Layouts.SOCK_FILTER_SIZE))
+            val segment = SockFilterSegment(ConfinedSegment(filterArraySeg.native.asSlice(i * Layouts.SOCK_FILTER_SIZE, Layouts.SOCK_FILTER_SIZE)))
             segment.setCode(f.code)
             segment.setJt(f.jt.toByte())
             segment.setJf(f.jf.toByte())

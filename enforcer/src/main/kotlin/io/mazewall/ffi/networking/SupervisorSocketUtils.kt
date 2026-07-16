@@ -54,12 +54,12 @@ public object SupervisorSocketUtils {
         arena: NativeArena,
         socketPath: String,
     ): SockaddrUnSegment {
-        val sockaddrUn = SockaddrUnSegment(arena.arena.allocate(Layouts.SOCKADDR_UN))
+        val sockaddrUn = with(arena) { SockaddrUnSegment.allocate() }
         sockaddrUn.segment.fill(0)
         sockaddrUn.setSunFamily(AF_UNIX.toShort())
         val pathBytes = socketPath.toByteArray(StandardCharsets.UTF_8)
         val pathSeg = sockaddrUn.getSunPath()
-        java.lang.foreign.MemorySegment.copy(pathBytes, 0, pathSeg.native, java.lang.foreign.ValueLayout.JAVA_BYTE, 0L, pathBytes.size)
+        ManagedSegment.copy(pathBytes, 0, pathSeg, 0L, pathBytes.size)
         return sockaddrUn
     }
 
@@ -86,7 +86,7 @@ public object SupervisorSocketUtils {
                 }
                 val fd = FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(fdVal)
                 val connRes = LinuxNative.withTransaction {
-                    LinuxNative.networking.connect(fd, ConfinedSegment(sockaddrUn.segment), SOCKADDR_UN_SIZE)
+                    LinuxNative.networking.connect(fd, sockaddrUn.managed, SOCKADDR_UN_SIZE)
                 }
                 if (connRes is LinuxNative.SyscallResult.Success) {
                     return fdVal
@@ -110,27 +110,27 @@ public object SupervisorSocketUtils {
             val dummyByte = arena.arena.allocate(java.lang.foreign.ValueLayout.JAVA_BYTE)
             dummyByte.set(java.lang.foreign.ValueLayout.JAVA_BYTE, 0L, 0.toByte())
 
-            val controlBuf = arena.arena.allocate(MSG_CONTROL_BUF_SIZE)
-            controlBuf.fill(0)
+            val controlBuf = ConfinedSegment(arena.arena.allocate(MSG_CONTROL_BUF_SIZE))
+            controlBuf.native.fill(0)
             val cmsg = CmsghdrSegment(controlBuf)
             cmsg.setCmsgLen(CMSG_RIGHTS_LEN)
             cmsg.setCmsgLevel(SOL_SOCKET)
             cmsg.setCmsgType(SCM_RIGHTS)
             cmsg.setDataFd(fdToSend)
 
-            val iov = IovecSegment.allocate()
+            val iov = with(arena) { IovecSegment.allocate() }
             iov.setIovBase(ConfinedSegment(dummyByte))
             iov.setIovLen(1L)
 
-            val msg = MsghdrSegment.allocate()
-            msg.setMsgIov(ConfinedSegment(iov.segment))
+            val msg = with(arena) { MsghdrSegment.allocate() }
+            msg.setMsgIov(iov.managed)
             msg.setMsgIovlen(1L)
-            msg.setMsgControl(ConfinedSegment(controlBuf))
+            msg.setMsgControl(controlBuf)
             msg.setMsgControllen(MSG_CONTROL_BUF_SIZE)
 
             while (true) {
                 val res = LinuxNative.withTransaction {
-                    LinuxNative.networking.sendmsg(FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(socketFd), ConfinedSegment(msg.segment), 0)
+                    LinuxNative.networking.sendmsg(FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(socketFd), msg.managed, 0)
                 }
                 if (res is LinuxNative.SyscallResult.Success) {
                     return true
@@ -147,24 +147,24 @@ public object SupervisorSocketUtils {
         socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>
     ): FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open>? {
         return NativeArena.ofConfined().use { arena ->
-            val dummyByte = arena.arena.allocate(java.lang.foreign.ValueLayout.JAVA_BYTE)
-            val controlBuf = arena.arena.allocate(MSG_CONTROL_BUF_SIZE)
-            controlBuf.fill(0)
+            val dummyByte = ConfinedSegment(arena.arena.allocate(java.lang.foreign.ValueLayout.JAVA_BYTE))
+            val controlBuf = ConfinedSegment(arena.arena.allocate(MSG_CONTROL_BUF_SIZE))
+            controlBuf.native.fill(0)
 
-            val iov = IovecSegment.allocate()
-            iov.setIovBase(ConfinedSegment(dummyByte))
+            val iov = with(arena) { IovecSegment.allocate() }
+            iov.setIovBase(dummyByte)
             iov.setIovLen(1L)
 
-            val msg = MsghdrSegment.allocate()
-            msg.setMsgIov(ConfinedSegment(iov.segment))
+            val msg = with(arena) { MsghdrSegment.allocate() }
+            msg.setMsgIov(iov.managed)
             msg.setMsgIovlen(1L)
-            msg.setMsgControl(ConfinedSegment(controlBuf))
+            msg.setMsgControl(controlBuf)
             msg.setMsgControllen(MSG_CONTROL_BUF_SIZE)
 
             val cmsg = CmsghdrSegment(controlBuf)
 
             while (true) {
-                val res = LinuxNative.withTransaction { LinuxNative.networking.recvmsg(socketFd, ConfinedSegment(msg.segment), 0) }
+                val res = LinuxNative.withTransaction { LinuxNative.networking.recvmsg(socketFd, msg.managed, 0) }
                 if (res is LinuxNative.SyscallResult.Success) {
                     val value = res.value
                     if (value == 0L) return@use null

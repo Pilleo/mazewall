@@ -2,7 +2,7 @@ package io.mazewall.profiler.engine
 
 import io.mazewall.core.Pid
 import io.mazewall.core.Tid
-import java.lang.foreign.Arena
+import io.mazewall.ffi.memory.NativeArena
 
 /**
  * Resolves syscall path arguments by reading from the tracee's memory.
@@ -15,34 +15,34 @@ internal class SyscallPathResolver(
     /**
      * Resolves path arguments for a raw syscall event.
      */
-    context(arena: Arena)
+    context(arena: NativeArena)
     fun resolve(event: SyscallEvent<SyscallEventState.Raw>): SyscallEvent<SyscallEventState.Resolved> {
         val tid = event.tid
         val args = event.args
 
         val paths = when (event.syscallName) {
             "OPEN", "EXECVE", "MKDIR", "RMDIR", "CHMOD", "CHOWN", "LCHOWN", "UNLINK", "READLINK", "CHROOT", "UTIME", "UTIMES" ->
-                listOfNotNull(tryRead(tid, args[0]))
+                listOfNotNull(tryRead(arena, tid, args[0]))
 
             "FCHMOD", "FCHOWN", "FSTAT" ->
-                listOfNotNull(resolveFdPath(tid, args[0].toInt()))
+                listOfNotNull(resolveFdPath(arena, tid, args[0].toInt()))
 
             "SYMLINK", "LINK", "RENAME" ->
-                listOfNotNull(tryRead(tid, args[0]), tryRead(tid, args[1]))
+                listOfNotNull(tryRead(arena, tid, args[0]), tryRead(arena, tid, args[1]))
 
             "OPENAT", "EXECVEAT", "OPENAT2", "MKDIRAT", "UNLINKAT", "FCHMODAT", "FCHOWNAT", "UTIMENSAT", "FSTATAT", "READLINKAT" ->
-                listOfNotNull(tryRead(tid, args[1], args[0]))
+                listOfNotNull(tryRead(arena, tid, args[1], args[0]))
 
             "RENAMEAT", "RENAMEAT2", "LINKAT" ->
                 listOfNotNull(
-                    tryRead(tid, args[1], args[0]),
-                    tryRead(tid, args[3], args[2]),
+                    tryRead(arena, tid, args[1], args[0]),
+                    tryRead(arena, tid, args[3], args[2]),
                 )
 
             "SYMLINKAT" ->
                 listOfNotNull(
-                    tryRead(tid, args[0]),
-                    tryRead(tid, args[2], args[1]),
+                    tryRead(arena, tid, args[0]),
+                    tryRead(arena, tid, args[2], args[1]),
                 )
 
             else -> emptyList()
@@ -50,15 +50,15 @@ internal class SyscallPathResolver(
         return event.resolved(paths)
     }
 
-    context(arena: Arena)
-    private fun resolveCwd(tid: Tid): String? = memoryReader.resolveLink(tid, "cwd")
+    context(arena: NativeArena)
+    private fun resolveCwd(tid: Tid): String? = with(arena) { memoryReader.resolveLink(tid, "cwd") }
 
-    context(arena: Arena)
+    context(arena: NativeArena)
     private fun resolveFdPath(tid: Tid, fd: Int): String? = memoryReader.resolveLink(tid, "fd/$fd")
 
     private fun isAtFdcwd(fd: Long): Boolean = fd == AT_FDCWD_VAL || fd == AT_FDCWD_UNSIGNED_VAL || fd.toInt() == AT_FDCWD_INT_VAL
 
-    context(arena: Arena)
+    context(arena: NativeArena)
     private fun tryRead(
         tid: Tid,
         addr: Long,
@@ -71,20 +71,20 @@ internal class SyscallPathResolver(
         return if (path.startsWith("/")) {
             java.nio.file.Paths.get(path).normalize().toString()
         } else {
-            resolveRelativePath(tid, path, dirfd)
+            resolveRelativePath(arena, tid, path, dirfd)
         }
     }
 
-    context(arena: Arena)
+    context(arena: NativeArena)
     private fun resolveRelativePath(
         tid: Tid,
         path: String,
         dirfd: Long,
     ): String {
         val dirPathStr = if (isAtFdcwd(dirfd)) {
-            resolveCwd(tid)
+            resolveCwd(arena, tid)
         } else if (dirfd >= 0) {
-            resolveFdPath(tid, dirfd.toInt())
+            resolveFdPath(arena, tid, dirfd.toInt())
         } else {
             null
         }

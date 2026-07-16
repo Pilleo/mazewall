@@ -1,8 +1,8 @@
 package io.mazewall.profiler.internal
 
 import io.mazewall.ffi.networking.SupervisorSocketUtils
-import java.lang.foreign.Arena
-import java.lang.foreign.MemorySegment
+import io.mazewall.ffi.memory.NativeArena
+import io.mazewall.ffi.memory.ManagedSegment
 
 internal object ProfilerSocket {
     fun connectWithRetry(
@@ -21,9 +21,9 @@ internal object ProfilerSocket {
     }
 
     fun setupSockAddrUn(
-        arena: Arena,
+        arena: NativeArena,
         socketPath: String,
-    ): MemorySegment {
-        return SupervisorSocketUtils.setupSockAddrUn(arena, socketPath).segment
+    ): ManagedSegment {
+        return SupervisorSocketUtils.setupSockAddrUn(arena, socketPath).managed
     }
 }

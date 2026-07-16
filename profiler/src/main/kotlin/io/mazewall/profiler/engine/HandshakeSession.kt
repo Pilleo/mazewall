@@ -5,9 +5,12 @@ import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
 import io.mazewall.ffi.NativeConstants
+import io.mazewall.ffi.memory.ManagedSegment
+import io.mazewall.ffi.memory.readByte
+import io.mazewall.ffi.memory.readShort
+import io.mazewall.ffi.memory.writeByte
+import io.mazewall.ffi.memory.writeShort
 import io.mazewall.recover
-import java.lang.foreign.MemorySegment
-import java.lang.foreign.ValueLayout
 
 /**
  * A type-safe state machine for the seccomp notification handshake.
@@ -32,11 +35,11 @@ sealed class HandshakeSession {
         fun performHandshake(
             socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>,
             ioOps: NativeIoOperations,
-            pollFd: MemorySegment,
-            ackBuf: MemorySegment,
+            pollFd: ManagedSegment,
+            ackBuf: ManagedSegment,
             onShutdown: (String) -> Unit
         ): HandshakeSession {
-            pollFd.set(ValueLayout.JAVA_SHORT, POLLFD_REVENTS_OFF, 0.toShort())
+            pollFd.writeShort(POLL_ACK_REVENTS_OFF, 0.toShort())
 
             while (true) {
                 val pollRes = LinuxNative.withTransaction { ioOps.raw.poll(pollFd, 1L, POLL_ACK_TIMEOUT_MS) }
@@ -47,7 +50,7 @@ sealed class HandshakeSession {
                 if (count == RETRY_SIGNAL) continue
                 if (count == INTERNAL_ERROR_SIGNAL || count == 0L) return failed()
 
-                val revents = pollFd.get(ValueLayout.JAVA_SHORT, POLLFD_REVENTS_OFF)
+                val revents = pollFd.readShort(POLL_ACK_REVENTS_OFF)
                 if ((revents.toInt() and NativeConstants.POLLIN.toInt()) != 0) {
                     return readAndProcessAck(socketFd, ioOps, ackBuf, onShutdown)
                 }
@@ -59,7 +62,7 @@ sealed class HandshakeSession {
         private fun readAndProcessAck(
             socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>,
             ioOps: NativeIoOperations,
-            ackBuf: MemorySegment,
+            ackBuf: ManagedSegment,
             onShutdown: (String) -> Unit
         ): HandshakeSession {
             while (true) {
@@ -73,7 +76,7 @@ sealed class HandshakeSession {
                     return failed()
                 }
                 for (i in 0 until value.toInt()) {
-                    val byte = ackBuf.get(ValueLayout.JAVA_BYTE, i.toLong())
+                    val byte = ackBuf.readByte(i.toLong())
                     if (byte == PROTOCOL_ACK_BYTE) return acknowledged()
                     if (byte == SHUTDOWN_COMMAND_BYTE) {
                         onShutdown("Parent Command during notification")

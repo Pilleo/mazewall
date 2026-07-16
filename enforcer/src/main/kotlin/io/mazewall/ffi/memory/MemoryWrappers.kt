@@ -10,7 +10,7 @@ import java.lang.foreign.ValueLayout
  */
 @JvmInline
 public value class SockFilterSegment(public val managed: ManagedSegment) {
-    internal val segment: MemorySegment get() = managed.native
+    public val segment: MemorySegment get() = managed.native
 
     public fun getCode(): Short = segment.get(ValueLayout.JAVA_SHORT, Layouts.SOCK_FILTER_CODE_OFFSET)
     public fun setCode(value: Short): Unit {
@@ -48,7 +48,7 @@ public value class SockFilterSegment(public val managed: ManagedSegment) {
  */
 @JvmInline
 public value class SockFprogSegment(public val managed: ManagedSegment) {
-    internal val segment: MemorySegment get() = managed.native
+    public val segment: MemorySegment get() = managed.native
 
     public fun getLen(): Short = segment.get(ValueLayout.JAVA_SHORT, Layouts.SOCK_FPROG_LEN_OFFSET)
     public fun setLen(value: Short): Unit {
@@ -72,7 +72,7 @@ public value class SockFprogSegment(public val managed: ManagedSegment) {
  */
 @JvmInline
 public value class LandlockRulesetAttrSegment(public val managed: ManagedSegment) {
-    internal val segment: MemorySegment get() = managed.native
+    public val segment: MemorySegment get() = managed.native
 
     public fun getHandledAccessFs(): Long = segment.get(ValueLayout.JAVA_LONG, Layouts.LANDLOCK_RULESET_ATTR_FS_OFFSET)
     public fun setHandledAccessFs(value: Long): Unit {
@@ -96,7 +96,7 @@ public value class LandlockRulesetAttrSegment(public val managed: ManagedSegment
  */
 @JvmInline
 public value class LandlockPathBeneathAttrSegment(public val managed: ManagedSegment) {
-    internal val segment: MemorySegment get() = managed.native
+    public val segment: MemorySegment get() = managed.native
 
     public fun getAllowedAccess(): Long = segment.get(ValueLayout.JAVA_LONG, Layouts.LANDLOCK_PATH_BENEATH_ATTR_ACCESS_OFFSET)
     public fun setAllowedAccess(value: Long): Unit {
@@ -120,7 +120,7 @@ public value class LandlockPathBeneathAttrSegment(public val managed: ManagedSeg
  */
 @JvmInline
 public value class PollFdSegment(public val managed: ManagedSegment) {
-    internal val segment: MemorySegment get() = managed.native
+    public val segment: MemorySegment get() = managed.native
 
     public fun getFd(): Int = segment.get(ValueLayout.JAVA_INT, Layouts.POLLFD_FD_OFFSET)
     public fun setFd(value: Int): Unit {
@@ -141,6 +141,10 @@ public value class PollFdSegment(public val managed: ManagedSegment) {
         context(arena: NativeArena)
         public fun allocate(): PollFdSegment =
             PollFdSegment(ConfinedSegment(arena.arena.allocate(Layouts.POLLFD)))
+
+        context(arena: NativeArena)
+        public fun allocateArray(size: Int): ManagedSegment =
+            ConfinedSegment(arena.arena.allocate(MemoryLayout.sequenceLayout(size.toLong(), Layouts.POLLFD)))
     }
 }
 
@@ -149,7 +153,7 @@ public value class PollFdSegment(public val managed: ManagedSegment) {
  */
 @JvmInline
 public value class ErrnoSegment(public val managed: ManagedSegment) {
-    internal val segment: MemorySegment get() = managed.native
+    public val segment: MemorySegment get() = managed.native
 
     public fun getErrno(): Int = segment.get(ValueLayout.JAVA_INT, Layouts.ERRNO_OFFSET)
 
@@ -172,7 +176,7 @@ public value class ErrnoSegment(public val managed: ManagedSegment) {
  */
 @JvmInline
 public value class SeccompNotifAddFdSegment(public val managed: ManagedSegment) {
-    internal val segment: MemorySegment get() = managed.native
+    public val segment: MemorySegment get() = managed.native
 
     public fun getId(): Long = segment.get(ValueLayout.JAVA_LONG, Layouts.SECCOMP_NOTIF_ADDFD_ID_OFFSET)
     public fun setId(value: Long): Unit {
@@ -211,7 +215,7 @@ public value class SeccompNotifAddFdSegment(public val managed: ManagedSegment) 
  */
 @JvmInline
 public value class IovecSegment(public val managed: ManagedSegment) {
-    internal val segment: MemorySegment get() = managed.native
+    public val segment: MemorySegment get() = managed.native
 
     public fun getIovBase(): ManagedSegment = ConfinedSegment(segment.get(ValueLayout.ADDRESS, Layouts.IOVEC_BASE_OFFSET))
     public fun setIovBase(value: ManagedSegment): Unit {
@@ -235,7 +239,7 @@ public value class IovecSegment(public val managed: ManagedSegment) {
  */
 @JvmInline
 public value class MsghdrSegment(public val managed: ManagedSegment) {
-    internal val segment: MemorySegment get() = managed.native
+    public val segment: MemorySegment get() = managed.native
 
     public fun getMsgName(): ManagedSegment = ConfinedSegment(segment.get(ValueLayout.ADDRESS, Layouts.MSGHDR_NAME_OFFSET))
     public fun setMsgName(value: ManagedSegment): Unit {
@@ -284,7 +288,7 @@ public value class MsghdrSegment(public val managed: ManagedSegment) {
  */
 @JvmInline
 public value class CmsghdrSegment(public val managed: ManagedSegment) {
-    internal val segment: MemorySegment get() = managed.native
+    public val segment: MemorySegment get() = managed.native
 
     public fun getCmsgLen(): Long = segment.get(ValueLayout.JAVA_LONG, Layouts.CMSGHDR_LEN_OFFSET)
     public fun setCmsgLen(value: Long): Unit {
@@ -318,7 +322,7 @@ public value class CmsghdrSegment(public val managed: ManagedSegment) {
  */
 @JvmInline
 public value class SockaddrUnSegment(public val managed: ManagedSegment) {
-    internal val segment: MemorySegment get() = managed.native
+    public val segment: MemorySegment get() = managed.native
 
     public fun getSunFamily(): Short = segment.get(ValueLayout.JAVA_SHORT, Layouts.SOCKADDR_UN_FAMILY_OFFSET)
     public fun setSunFamily(value: Short): Unit {
@@ -339,7 +343,7 @@ public value class SockaddrUnSegment(public val managed: ManagedSegment) {
  */
 @JvmInline
 public value class SupervisorResponseSegment(public val managed: ManagedSegment) {
-    internal val segment: MemorySegment get() = managed.native
+    public val segment: MemorySegment get() = managed.native
 
     public fun getId(): Long = segment.get(ValueLayout.JAVA_LONG, Layouts.SUPERVISOR_RESPONSE_ID_OFFSET)
     public fun setId(value: Long): Unit {

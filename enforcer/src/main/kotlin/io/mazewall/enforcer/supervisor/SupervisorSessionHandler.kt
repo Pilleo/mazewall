@@ -219,7 +219,7 @@ internal class SupervisorSessionHandler(
         notif: ManagedSegment,
         resp: ManagedSegment
     ): LoopAction {
-        val pfd2 = PollFdSegment(pollFds.native.asSlice(Layouts.POLLFD.byteSize(), Layouts.POLLFD.byteSize()))
+        val pfd2 = PollFdSegment(ConfinedSegment(pollFds.native.asSlice(Layouts.POLLFD.byteSize(), Layouts.POLLFD.byteSize())))
         val socketRevents = pfd2.getRevents().toInt()
         val errorOrHup = NativeConstants.POLLERR.toInt() or NativeConstants.POLLHUP.toInt() or NativeConstants.POLLNVAL.toInt()
         if ((socketRevents and (NativeConstants.POLLIN.toInt() or errorOrHup)) != 0) {
@@ -227,7 +227,7 @@ internal class SupervisorSessionHandler(
             return LoopAction.Shutdown
         }
 
-        val pfd1 = PollFdSegment(pollFds.native.asSlice(0L, Layouts.POLLFD.byteSize()))
+        val pfd1 = PollFdSegment(ConfinedSegment(pollFds.native.asSlice(0L, Layouts.POLLFD.byteSize())))
         val listenerRevents = pfd1.getRevents()
         if ((listenerRevents.toInt() and NativeConstants.POLLIN.toInt()) != 0) {
             notif.native.fill(0)
@@ -417,12 +417,12 @@ internal class SupervisorSessionHandler(
             netBuf.writeByte(offset, ARG_TYPE_STRING); offset += SIZE_BYTE
             val bytes = pathStr.toByteArray(StandardCharsets.UTF_8)
             netBuf.writeIntUnaligned(offset, bytes.size); offset += SIZE_INT
-            java.lang.foreign.MemorySegment.copy(bytes, 0, buf.native, java.lang.foreign.ValueLayout.JAVA_BYTE, offset, bytes.size)
+            ManagedSegment.copy(bytes, 0, buf, offset, bytes.size)
         } else if (sockaddrBytes != null) {
             netBuf.writeInt(offset, ONE_ARG); offset += SIZE_INT
             netBuf.writeByte(offset, ARG_TYPE_SOCKADDR); offset += SIZE_BYTE
             netBuf.writeIntUnaligned(offset, sockaddrBytes.size); offset += SIZE_INT
-            java.lang.foreign.MemorySegment.copy(sockaddrBytes, 0, buf.native, java.lang.foreign.ValueLayout.JAVA_BYTE, offset, sockaddrBytes.size)
+            ManagedSegment.copy(sockaddrBytes, 0, buf, offset, sockaddrBytes.size)
         } else {
             netBuf.writeInt(offset, MAX_ARGS); offset += SIZE_INT
             for (arg in args) {
@@ -447,7 +447,7 @@ internal class SupervisorSessionHandler(
         tid: Tid,
         traceeArch: io.mazewall.core.Arch
     ): Boolean {
-        val pollFd = PollFdSegment.allocate()
+        val pollFd = with(arena) { PollFdSegment.allocate() }
         pollFd.setFd(socketFd.value)
         pollFd.setEvents(NativeConstants.POLLIN)
 
@@ -456,7 +456,7 @@ internal class SupervisorSessionHandler(
         var count = 0L
         while (remainingTimeout > 0) {
             val loopStart = System.currentTimeMillis()
-            val pollRes = engine.withTransaction { engine.raw.poll(ConfinedSegment(pollFd.segment), 1L, remainingTimeout.toInt()) }
+            val pollRes = engine.withTransaction { engine.raw.poll(pollFd.managed, 1L, remainingTimeout.toInt()) }
             val elapsed = System.currentTimeMillis() - loopStart
             remainingTimeout -= elapsed
 
@@ -492,7 +492,7 @@ internal class SupervisorSessionHandler(
             engine.memory.read(socketFd, responseBuf, Layouts.SUPERVISOR_RESPONSE_SIZE)
         }
         if (readRes is LinuxNative.SyscallResult.Success && readRes.value == Layouts.SUPERVISOR_RESPONSE_SIZE) {
-            val respSeg = SupervisorResponseSegment(responseBuf.native)
+            val respSeg = SupervisorResponseSegment(responseBuf)
             val respId = respSeg.getId()
             val decision = respSeg.getDecision()
             val errorNr = respSeg.getErrorNr()
@@ -571,14 +571,14 @@ internal class SupervisorSessionHandler(
                 return false
             }
 
-            val addfd = SeccompNotifAddFdSegment.allocate()
+            val addfd = with(arena) { SeccompNotifAddFdSegment.allocate() }
             addfd.segment.fill(0)
             addfd.setId(id)
             addfd.setFlags(NativeConstants.SECCOMP_ADDFD_FLAG_SEND.toInt())
             addfd.setSrcfd(localFdValue)
 
             val success = engine.withTransaction {
-                val res = engine.raw.ioctl(listenerFd, NativeConstants.SECCOMP_IOCTL_NOTIF_ADDFD, ConfinedSegment(addfd.segment))
+                val res = engine.raw.ioctl(listenerFd, NativeConstants.SECCOMP_IOCTL_NOTIF_ADDFD, addfd.managed)
                 logger.info { "[SUPERVISOR-DEBUG] ioctl SECCOMP_IOCTL_NOTIF_ADDFD res=$res" }
                 res is LinuxNative.SyscallResult.Success
             }
@@ -632,7 +632,7 @@ internal class SupervisorSessionHandler(
         if (socketRes < 0) return socketRes
 
         val addr = ConfinedSegment(arena.arena.allocate(sockaddrBytes.size.toLong()))
-        java.lang.foreign.MemorySegment.copy(sockaddrBytes, 0, addr.native, java.lang.foreign.ValueLayout.JAVA_BYTE, 0L, sockaddrBytes.size)
+        ManagedSegment.copy(sockaddrBytes, 0, addr, 0L, sockaddrBytes.size)
 
         val connectErr = engine.withTransaction {
             val res = engine.networking.connect(
@@ -817,7 +817,7 @@ internal class SupervisorSessionHandler(
                                 val writeLen = minOf(actualLen, traceeAddrLen)
                                 if (writeLen > 0) {
                                     val addrBytes = ByteArray(writeLen)
-                                    java.lang.foreign.MemorySegment.copy(localAddr.native, java.lang.foreign.ValueLayout.JAVA_BYTE, 0L, addrBytes, 0, writeLen)
+                                    ManagedSegment.copy(localAddr, 0L, addrBytes, 0, writeLen)
                                     with(arena) {
                                         SupervisorProcessMemoryWriter.writeBytes(tid, traceeAddrPtr, addrBytes)
                                     }
@@ -835,14 +835,14 @@ internal class SupervisorSessionHandler(
                             }
 
                             // Inject accepted FD
-                            val addfd = SeccompNotifAddFdSegment.allocate()
+                            val addfd = with(arena) { SeccompNotifAddFdSegment.allocate() }
                             addfd.segment.fill(0)
                             addfd.setId(id)
                             addfd.setFlags(NativeConstants.SECCOMP_ADDFD_FLAG_SEND.toInt())
                             addfd.setSrcfd(clientFd)
 
                             val injectSuccess = engine.withTransaction {
-                                val res = engine.raw.ioctl(listenerFd, NativeConstants.SECCOMP_IOCTL_NOTIF_ADDFD, ConfinedSegment(addfd.segment))
+                                val res = engine.raw.ioctl(listenerFd, NativeConstants.SECCOMP_IOCTL_NOTIF_ADDFD, addfd.managed)
                                 res is LinuxNative.SyscallResult.Success
                             }
 

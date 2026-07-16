@@ -9,7 +9,7 @@ import io.mazewall.core.Syscall
 import io.mazewall.ffi.Layouts
 import io.mazewall.ffi.NativeConstants
 import io.mazewall.recover
-import java.lang.foreign.Arena
+import io.mazewall.ffi.memory.NativeArena
 import java.lang.foreign.MemoryLayout
 import java.lang.foreign.MemorySegment
 import java.lang.foreign.ValueLayout
@@ -259,7 +259,7 @@ internal class ProfilerDaemonEngine(
         }
     }
 
-    context(arena: Arena)
+    context(arena: NativeArena)
     private fun setupSessionPoll(
         socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>,
         listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open>,

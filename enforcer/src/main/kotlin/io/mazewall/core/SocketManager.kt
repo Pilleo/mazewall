@@ -41,7 +41,7 @@ public object RealSocketManager : SocketManager {
             val sockaddrUn = io.mazewall.ffi.networking.SupervisorSocketUtils.setupSockAddrUn(arena, socketPath)
 
             LinuxNative.withTransaction {
-                LinuxNative.networking.bind(fd, sockaddrUn.segment, io.mazewall.ffi.networking.SupervisorSocketUtils.SOCKADDR_UN_SIZE)
+                LinuxNative.networking.bind(fd, sockaddrUn.managed, io.mazewall.ffi.networking.SupervisorSocketUtils.SOCKADDR_UN_SIZE)
             }.onFailure { _, _ ->
                 LinuxNative.fileSystem.close(fd)
             }.getOrThrow("bind(AF_UNIX)")
