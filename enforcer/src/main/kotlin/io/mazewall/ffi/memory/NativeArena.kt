@@ -16,6 +16,9 @@ public class NativeArena internal constructor(public val arena: Arena) : AutoClo
 
     public fun allocate(byteSize: Long): ManagedSegment = ConfinedSegment(arena.allocate(byteSize))
     public fun allocate(layout: MemoryLayout): ManagedSegment = ConfinedSegment(arena.allocate(layout))
+    public fun allocate(layout: MemoryLayout, count: Long): ManagedSegment = ConfinedSegment(arena.allocate(layout, count))
+
+    public fun allocateFrom(value: String): ManagedSegment = ConfinedSegment(arena.allocateFrom(value))
 
     public companion object {
         public fun ofConfined(): NativeArena = NativeArena(Arena.ofConfined())

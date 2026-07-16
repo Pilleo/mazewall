@@ -6,6 +6,7 @@ import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
 import io.mazewall.core.Pid
 import io.mazewall.core.Tid
+import io.mazewall.core.LoopAction
 import io.mazewall.ffi.Layouts
 import io.mazewall.ffi.NativeConstants
 import io.mazewall.ffi.memory.*
@@ -87,29 +88,6 @@ internal class SupervisorSessionHandler(
         /**
          * Resolves the set of paths that the supervisor daemon will inject directly
          * without forwarding to the JVM validation listener.
-         *
-         * ### The ClassLoader/Safepoint Deadlock Problem in Stacktrace Analysis
-         *
-         * The [io.mazewall.enforcer.supervisor.StacktraceScopingPolicy] relies on obtaining the Java stack trace
-         * of the target thread using `Thread.getStackTrace()`. This forces a JVM safepoint.
-         * If the target thread triggers a seccomp-supervised syscall (e.g., `openat`) while holding internal JVM
-         * locks (such as the ClassLoader lock during class resolution or a global lock during JaCoCo instrumentation),
-         * forwarding that syscall to the `JVMValidationListener` thread creates a severe risk of a **ClassLoader Deadlock**.
-         *
-         * **The Deadlock Scenario:**
-         * 1. The target thread begins loading a class or instrumenting it (e.g., JaCoCo dumping data, or reading `kotlin-stdlib`).
-         * 2. It holds the ClassLoader lock and triggers an `openat` syscall.
-         * 3. The `openat` is intercepted and sent to the `JVMValidationListener` thread.
-         * 4. The listener invokes the user's `StacktraceScopingPolicy`, which may trigger dynamic class loading
-         *    (e.g., loading a Kotlin lambda class like `stack.any { ... }`).
-         * 5. The listener attempts to acquire the ClassLoader lock and blocks forever because the target thread
-         *    is blocked waiting for the seccomp response.
-         *
-         * **The Solution:**
-         * To prevent this, the daemon implements a fast-path bypass for all internal JVM file accesses.
-         * We unconditionally inject file descriptors for `java.home`, `java.class.path`, `javaagent` jars,
-         * and build/coverage directories. Because these syscalls bypass the JVM listener entirely,
-         * no dynamic class loading is triggered during vulnerable tracee states.
          */
         @Suppress("SwallowedException", "TooGenericExceptionCaught")
         private val safeBypassPaths = mutableListOf<java.nio.file.Path>().apply {
@@ -264,17 +242,6 @@ internal class SupervisorSessionHandler(
             val ppid = getPpid(pidVal)
             logger.info { "[SUPERVISOR-DEBUG] Received syscall notification: id=$id, pid=$pidVal, arch=$archVal, ppid=$ppid, nr=$nr, path=${extracted.pathStr}" }
 
-            // --- DAEMON-SIDE FAST-PATH BYPASS ---
-            // HAZARD: When the sandboxed thread triggers lazy classloading (e.g., loading IOException
-            // or a Kotlin helper) during a blocked file syscall, it holds the JVM's internal ClassLoader lock.
-            // If we dispatch this request back to the JVM validation listener thread, the listener's policy
-            // evaluation could also trigger classloading, blocking the listener on the tracee's ClassLoader lock.
-            // This causes a permanent circular deadlock.
-            //
-            // SOLUTION: The uncontained daemon intercepts file read operations targeting the JVM's home directory,
-            // application classpath, or Java agents. Paths are resolved to absolute form and normalized.
-            // Since these paths contain trusted platform/application classes and libraries that are already loaded
-            // or destined to be loaded, it is safe to bypass policy evaluation and directly inject the file descriptor.
             val isOpen = nr == traceeArch.open || nr == traceeArch.openat || nr == traceeArch.openat2
             if (isOpen && extracted.pathStr != null) {
                 val pathStr = extracted.pathStr
@@ -291,7 +258,7 @@ internal class SupervisorSessionHandler(
                             return injectRes
                         }
                     } else {
-                        // Fallback when /proc absolute path resolution fails (e.g. Yama ptrace_scope block inside container)
+                        // Fallback when /proc absolute path resolution fails
                         if (pathStr.endsWith(".class") || pathStr.contains("META-INF/") || pathStr.endsWith(".jar")) {
                             val injectRes = handleInjectFd(id, nr, args, pathStr, null, resp, Tid(pidVal), traceeArch)
                             logger.info { "[SUPERVISOR-DEBUG] Fast-path handleInjectFd (fallback: classloading) result=$injectRes" }
@@ -367,7 +334,7 @@ internal class SupervisorSessionHandler(
             }
             return baseDir.resolve(path).normalize().toRealPath()
         } catch (e: Exception) {
-            // Fallback: search in safeBypassPaths for relative path matching (needed inside containers due to Yama ptrace_scope)
+            // Fallback: search in safeBypassPaths for relative path matching
             for (bypassPath in safeBypassPaths) {
                 try {
                     val resolved = bypassPath.resolve(pathStr).normalize()
@@ -719,8 +686,6 @@ internal class SupervisorSessionHandler(
             val statFile = java.io.File("/proc/$pid/stat")
             if (statFile.exists()) {
                 val content = statFile.readText()
-                // Format: pid (comm) state ppid ...
-                // parts[0] is empty (space between ')' and state), parts[1] is state, parts[2] is ppid
                 val parts = content.substringAfterLast(')').split(' ')
                 if (parts.size >= 3) {
                     return parts[2].toInt()

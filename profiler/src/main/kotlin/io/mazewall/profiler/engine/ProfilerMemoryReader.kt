@@ -8,6 +8,7 @@ import io.mazewall.map
 import io.mazewall.onFailure
 import io.mazewall.onSuccess
 import io.mazewall.ffi.memory.NativeArena
+import io.mazewall.ffi.memory.ManagedSegment
 import java.lang.foreign.MemorySegment
 import java.lang.foreign.ValueLayout
 import java.nio.charset.StandardCharsets
@@ -60,8 +61,8 @@ object RealMemoryReader : ProfilerMemoryReader {
         return res.onSuccess { }.map { buf.copyToString(it.toInt()).removeSuffix(" (deleted)") }.getOrNull()
     }
 
-    private fun MemorySegment.copyToString(len: Int): String {
-        val bytes = this.asSlice(0L, len.toLong()).toArray(ValueLayout.JAVA_BYTE)
+    private fun ManagedSegment.copyToString(len: Int): String {
+        val bytes = this.native.asSlice(0L, len.toLong()).toArray(ValueLayout.JAVA_BYTE)
         return String(bytes, StandardCharsets.UTF_8)
     }
 }

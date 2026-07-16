@@ -5,12 +5,10 @@ import io.mazewall.NativeEngine
 import io.mazewall.core.ProcessLauncher
 import io.mazewall.core.RealProcessLauncher
 import io.mazewall.core.RealSocketManager
+import io.mazewall.ffi.memory.*
 import io.mazewall.core.SocketManager
 import io.mazewall.getFdOrThrow
 import java.io.IOException
-import io.mazewall.ffi.memory.NativeArena
-import io.mazewall.ffi.memory.ConfinedSegment
-import io.mazewall.ffi.memory.writeByte
 import java.nio.file.Path
 import java.nio.file.attribute.PosixFilePermissions
 import java.util.logging.Logger

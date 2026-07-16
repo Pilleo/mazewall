@@ -5,16 +5,17 @@ import io.mazewall.MockNativeEngine
 import io.mazewall.MockNativeNetworking
 import io.mazewall.MockNativeMemory
 import io.mazewall.NativeTransaction
-import io.mazewall.RealNativeEngine
+import io.mazewall.ffi.internal.RealNativeEngine
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
 import io.mazewall.ffi.NativeConstants
+import io.mazewall.ffi.memory.NativeArena
+import io.mazewall.ffi.memory.PollFdSegment
+import io.mazewall.ffi.memory.ManagedSegment
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Test
-import java.lang.foreign.Arena
-import java.lang.foreign.MemorySegment
 
 class SupervisorDaemonEngineTest {
 
@@ -41,8 +42,8 @@ class SupervisorDaemonEngineTest {
         val listenerFd = FileDescriptor.unsafe<FileDescriptorRole.SeccompNotif>(11)
         val connection = io.mazewall.ffi.networking.SeccompConnection.FdAttached(socketFd, listenerFd)
 
-        Arena.ofConfined().use { arena ->
-            val pollFd = io.mazewall.ffi.memory.PollFdSegment(arena.allocate(8))
+        NativeArena.ofConfined().use { arena ->
+            val pollFd = PollFdSegment(arena.allocate(8))
             mockEngine.onPoll = { _, _, _, _ -> LinuxNative.SyscallResult.Success(1L) }
 
             val result = engine.processConnectionStep(arena, connection, socketFd, pollFd)

@@ -4,12 +4,9 @@ import io.mazewall.LinuxNative
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
+import io.mazewall.ffi.Layouts
 import io.mazewall.ffi.NativeConstants
-import io.mazewall.ffi.memory.ManagedSegment
-import io.mazewall.ffi.memory.readByte
-import io.mazewall.ffi.memory.readShort
-import io.mazewall.ffi.memory.writeByte
-import io.mazewall.ffi.memory.writeShort
+import io.mazewall.ffi.memory.*
 import io.mazewall.recover
 
 /**
@@ -39,7 +36,7 @@ sealed class HandshakeSession {
             ackBuf: ManagedSegment,
             onShutdown: (String) -> Unit
         ): HandshakeSession {
-            pollFd.writeShort(POLL_ACK_REVENTS_OFF, 0.toShort())
+            pollFd.writeShort(Layouts.POLLFD_REVENTS_OFFSET, 0.toShort())
 
             while (true) {
                 val pollRes = LinuxNative.withTransaction { ioOps.raw.poll(pollFd, 1L, POLL_ACK_TIMEOUT_MS) }
@@ -50,7 +47,7 @@ sealed class HandshakeSession {
                 if (count == RETRY_SIGNAL) continue
                 if (count == INTERNAL_ERROR_SIGNAL || count == 0L) return failed()
 
-                val revents = pollFd.readShort(POLL_ACK_REVENTS_OFF)
+                val revents = pollFd.readShort(Layouts.POLLFD_REVENTS_OFFSET)
                 if ((revents.toInt() and NativeConstants.POLLIN.toInt()) != 0) {
                     return readAndProcessAck(socketFd, ioOps, ackBuf, onShutdown)
                 }
@@ -89,6 +86,10 @@ sealed class HandshakeSession {
         }
 
         private companion object {
+            private const val POLL_ACK_TIMEOUT_MS = 1000
+            private const val ACK_BUF_SIZE = 1L
+            private const val PROTOCOL_ACK_BYTE = 0xAC.toByte()
+            private const val SHUTDOWN_COMMAND_BYTE = 0x53.toByte() // 'S'
             private const val RETRY_SIGNAL = -1L
             private const val INTERNAL_ERROR_SIGNAL = -2L
         }

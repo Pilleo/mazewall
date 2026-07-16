@@ -4,9 +4,7 @@ import io.mazewall.LinuxNative
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import java.io.InputStream
-import io.mazewall.ffi.memory.NativeArena
-import io.mazewall.ffi.memory.ManagedSegment
-import io.mazewall.ffi.memory.readByte
+import io.mazewall.ffi.memory.*
 
 internal class NativeSocketInputStream(
     private val socketFd: FileDescriptor<*, FdState.Open>,

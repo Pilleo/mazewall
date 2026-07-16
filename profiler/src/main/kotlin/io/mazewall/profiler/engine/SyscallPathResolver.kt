@@ -22,27 +22,27 @@ internal class SyscallPathResolver(
 
         val paths = when (event.syscallName) {
             "OPEN", "EXECVE", "MKDIR", "RMDIR", "CHMOD", "CHOWN", "LCHOWN", "UNLINK", "READLINK", "CHROOT", "UTIME", "UTIMES" ->
-                listOfNotNull(tryRead(arena, tid, args[0]))
+                listOfNotNull(tryRead(tid, args[0]))
 
             "FCHMOD", "FCHOWN", "FSTAT" ->
-                listOfNotNull(resolveFdPath(arena, tid, args[0].toInt()))
+                listOfNotNull(resolveFdPath(tid, args[0].toInt()))
 
             "SYMLINK", "LINK", "RENAME" ->
-                listOfNotNull(tryRead(arena, tid, args[0]), tryRead(arena, tid, args[1]))
+                listOfNotNull(tryRead(tid, args[0]), tryRead(tid, args[1]))
 
             "OPENAT", "EXECVEAT", "OPENAT2", "MKDIRAT", "UNLINKAT", "FCHMODAT", "FCHOWNAT", "UTIMENSAT", "FSTATAT", "READLINKAT" ->
-                listOfNotNull(tryRead(arena, tid, args[1], args[0]))
+                listOfNotNull(tryRead(tid, args[1], args[0]))
 
             "RENAMEAT", "RENAMEAT2", "LINKAT" ->
                 listOfNotNull(
-                    tryRead(arena, tid, args[1], args[0]),
-                    tryRead(arena, tid, args[3], args[2]),
+                    tryRead(tid, args[1], args[0]),
+                    tryRead(tid, args[3], args[2]),
                 )
 
             "SYMLINKAT" ->
                 listOfNotNull(
-                    tryRead(arena, tid, args[0]),
-                    tryRead(arena, tid, args[2], args[1]),
+                    tryRead(tid, args[0]),
+                    tryRead(tid, args[2], args[1]),
                 )
 
             else -> emptyList()
@@ -54,7 +54,7 @@ internal class SyscallPathResolver(
     private fun resolveCwd(tid: Tid): String? = with(arena) { memoryReader.resolveLink(tid, "cwd") }
 
     context(arena: NativeArena)
-    private fun resolveFdPath(tid: Tid, fd: Int): String? = memoryReader.resolveLink(tid, "fd/$fd")
+    private fun resolveFdPath(tid: Tid, fd: Int): String? = with(arena) { memoryReader.resolveLink(tid, "fd/$fd") }
 
     private fun isAtFdcwd(fd: Long): Boolean = fd == AT_FDCWD_VAL || fd == AT_FDCWD_UNSIGNED_VAL || fd.toInt() == AT_FDCWD_INT_VAL
 
@@ -65,13 +65,13 @@ internal class SyscallPathResolver(
         dirfd: Long = AT_FDCWD_VAL,
     ): String? {
         if (addr == 0L) return null
-        val path = memoryReader.readStringFromProcess(tid, addr)
+        val path = with(arena) { memoryReader.readStringFromProcess(tid, addr) }
         ledger.record(SessionEvent.VmReadvResolved(System.nanoTime(), tid.value.toLong(), path != null))
         if (path == null) return null
         return if (path.startsWith("/")) {
             java.nio.file.Paths.get(path).normalize().toString()
         } else {
-            resolveRelativePath(arena, tid, path, dirfd)
+            resolveRelativePath(tid, path, dirfd)
         }
     }
 
@@ -82,9 +82,9 @@ internal class SyscallPathResolver(
         dirfd: Long,
     ): String {
         val dirPathStr = if (isAtFdcwd(dirfd)) {
-            resolveCwd(arena, tid)
+            resolveCwd(tid)
         } else if (dirfd >= 0) {
-            resolveFdPath(arena, tid, dirfd.toInt())
+            resolveFdPath(tid, dirfd.toInt())
         } else {
             null
         }
@@ -95,5 +95,11 @@ internal class SyscallPathResolver(
 
         val dirPath = java.nio.file.Paths.get(dirPathStr)
         return dirPath.resolve(path).normalize().toString()
+    }
+
+    private companion object {
+        private const val AT_FDCWD_VAL = -100L
+        private const val AT_FDCWD_UNSIGNED_VAL = 4294967196L
+        private const val AT_FDCWD_INT_VAL = -100
     }
 }

@@ -6,6 +6,7 @@ import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
 import io.mazewall.core.SocketManager
+import io.mazewall.core.LoopAction
 import io.mazewall.ffi.Layouts
 import io.mazewall.ffi.NativeConstants
 import io.mazewall.ffi.memory.*
@@ -16,7 +17,7 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
 
 internal sealed interface SupervisorDaemonState {
-    object Uninitialized : SupervisorDaemonState {
+    data object Uninitialized : SupervisorDaemonState {
         fun listening(
             serverFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>,
             socketPath: String
@@ -35,8 +36,8 @@ internal sealed interface SupervisorDaemonState {
         val socketPath: String
     ) : SupervisorDaemonState
 
-    object ShuttingDown : SupervisorDaemonState
-    object Terminated : SupervisorDaemonState
+    data object ShuttingDown : SupervisorDaemonState
+    data object Terminated : SupervisorDaemonState
 }
 
 internal class SupervisorDaemonEngine(
@@ -280,13 +281,11 @@ internal class SupervisorDaemonEngine(
                     }
                     if (count <= 0) continue
 
-                    io.mazewall.ffi.memory.nativeScope {
-                        val action = with(this) {
-                            sessionHandler.handleActiveListener(pollFds, notif, resp)
-                        }
-                        if (action is LoopAction.Break || action is LoopAction.Shutdown) {
-                            triggerGlobalShutdown("session reactor break")
-                        }
+                    val action = io.mazewall.ffi.memory.nativeScope {
+                        sessionHandler.handleActiveListener(pollFds, notif, resp)
+                    }
+                    if (action is LoopAction.Break || action is LoopAction.Shutdown) {
+                        triggerGlobalShutdown("session reactor break")
                     }
                     if (isGlobalShutdown()) break
                 }
@@ -297,10 +296,4 @@ internal class SupervisorDaemonEngine(
             }
         }
     }
-}
-
-internal sealed class LoopAction {
-    object Continue : LoopAction()
-    object Break : LoopAction()
-    object Shutdown : LoopAction()
 }
