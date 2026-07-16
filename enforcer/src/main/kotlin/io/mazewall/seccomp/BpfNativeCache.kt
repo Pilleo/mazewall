@@ -1,27 +1,27 @@
 package io.mazewall.seccomp
 
 import io.mazewall.LinuxNative
-import java.lang.foreign.Arena
-import java.lang.foreign.MemorySegment
+import io.mazewall.ffi.memory.ManagedSegment
+import io.mazewall.ffi.memory.NativeArena
 import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Global cache for native BPF filter segments.
  *
  * This cache ensures that identical BPF filter instructions are compiled and
- * allocated in native memory only once, using a shared [Arena]. This prevents
+ * allocated in native memory only once, using a shared [NativeArena]. This prevents
  * native memory leaks and reduces overhead during high-concurrency filter
  * installations.
  */
 internal object BpfNativeCache {
-    private val sharedArena = Arena.ofShared()
-    private val filterCache = ConcurrentHashMap<List<BpfInstruction>, MemorySegment>()
+    private val sharedArena = NativeArena.ofShared()
+    private val filterCache = ConcurrentHashMap<List<BpfInstruction>, ManagedSegment>()
 
     /**
-     * Gets a cached [MemorySegment] for the given [filters], or computes it using
+     * Gets a cached [ManagedSegment] for the given [filters], or computes it using
      * [LinuxNative.memory.newSockFProg] if not present.
      */
-    fun getOrCompute(filters: List<BpfInstruction>): MemorySegment {
+    fun getOrCompute(filters: List<BpfInstruction>): ManagedSegment {
         return filterCache.computeIfAbsent(filters) {
             with(sharedArena) { LinuxNative.memory.newSockFProg(it) }
         }

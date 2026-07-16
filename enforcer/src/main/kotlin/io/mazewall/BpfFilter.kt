@@ -7,7 +7,6 @@ import io.mazewall.ffi.Layouts
 import io.mazewall.ffi.NativeConstants
 import io.mazewall.seccomp.BpfInstruction
 import io.mazewall.seccomp.BpfProgram
-import java.lang.foreign.MemoryLayout
 import java.util.logging.Logger
 
 /**
@@ -26,16 +25,8 @@ object BpfFilter {
 
     internal const val SECCOMP_DATA_NR_OFFSET = 0
     internal const val SECCOMP_DATA_ARCH_OFFSET = 4
-    private val SECCOMP_ARGS2_OFFSET = Layouts.SECCOMP_DATA
-        .byteOffset(
-            MemoryLayout.PathElement.groupElement("args"),
-            MemoryLayout.PathElement.sequenceElement(2),
-        ).toInt()
-    private val SECCOMP_DATA_ARGS_OFFSET = Layouts.SECCOMP_DATA
-        .byteOffset(
-            MemoryLayout.PathElement.groupElement("args"),
-            MemoryLayout.PathElement.sequenceElement(0),
-        ).toInt()
+    private val SECCOMP_ARGS2_OFFSET = Layouts.SECCOMP_ARGS2_OFFSET
+    private val SECCOMP_DATA_ARGS_OFFSET = Layouts.SECCOMP_DATA_ARGS_OFFSET
 
     fun build(
         arch: Arch,

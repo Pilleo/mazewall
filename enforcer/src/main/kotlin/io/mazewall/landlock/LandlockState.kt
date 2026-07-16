@@ -7,8 +7,8 @@ import io.mazewall.UnsupportedKernelFeatureException
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
 import io.mazewall.core.FdState
+import io.mazewall.ffi.memory.NativeArena
 import io.mazewall.ffi.memory.nativeScope
-import java.lang.foreign.Arena
 
 /**
  * States representing the configuration and application of a Landlock ruleset.
@@ -77,7 +77,7 @@ internal sealed interface LandlockLifecycle {
         val abi: Int,
         val policy: PolicyDefinition<*>?,
     ) : LandlockLifecycle {
-        fun addRules(arena: Arena): RulesAdded {
+        fun addRules(arena: NativeArena): RulesAdded {
             val allFsRead = Landlock.LANDLOCK_ACCESS_FS_READ_FILE or Landlock.LANDLOCK_ACCESS_FS_READ_DIR
             val classpathFlags = allFsRead or Landlock.LANDLOCK_ACCESS_FS_EXECUTE
             with(arena) {

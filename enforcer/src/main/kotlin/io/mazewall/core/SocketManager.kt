@@ -1,10 +1,10 @@
 package io.mazewall.core
 
 import io.mazewall.LinuxNative
+import io.mazewall.ffi.memory.ManagedSegment
+import io.mazewall.ffi.memory.NativeArena
 import io.mazewall.getFdOrThrow
 import io.mazewall.onFailure
-import java.lang.foreign.Arena
-import java.lang.foreign.MemorySegment
 
 /**
  * Interface for socket creation and connection handling.
@@ -37,7 +37,7 @@ public object RealSocketManager : SocketManager {
             )
         }.getFdOrThrow("socket(AF_UNIX)").let { FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(it.value) }
 
-        Arena.ofConfined().use { arena ->
+        NativeArena.ofConfined().use { arena ->
             val sockaddrUn = io.mazewall.ffi.networking.SupervisorSocketUtils.setupSockAddrUn(arena, socketPath)
 
             LinuxNative.withTransaction {
@@ -58,7 +58,7 @@ public object RealSocketManager : SocketManager {
 
     override fun accept(serverFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>): FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open> {
         val res = LinuxNative.withTransaction {
-            LinuxNative.networking.accept(serverFd, MemorySegment.NULL, MemorySegment.NULL)
+            LinuxNative.networking.accept(serverFd, ManagedSegment.NULL, ManagedSegment.NULL)
         }
         return res.getFdOrThrow("accept").let { FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(it.value) }
     }

@@ -5,13 +5,7 @@ import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
 import io.mazewall.ffi.Layouts
-import io.mazewall.ffi.memory.CmsghdrSegment
-import io.mazewall.ffi.memory.IovecSegment
-import io.mazewall.ffi.memory.MsghdrSegment
-import io.mazewall.ffi.memory.SockaddrUnSegment
-import java.lang.foreign.Arena
-import java.lang.foreign.MemorySegment
-import java.lang.foreign.ValueLayout
+import io.mazewall.ffi.memory.*
 import java.nio.charset.StandardCharsets
 
 /**
@@ -57,15 +51,15 @@ public object SupervisorSocketUtils {
     public const val SCM_RIGHTS: Int = 1
 
     public fun setupSockAddrUn(
-        arena: Arena,
+        arena: NativeArena,
         socketPath: String,
     ): SockaddrUnSegment {
-        val sockaddrUn = SockaddrUnSegment(arena.allocate(Layouts.SOCKADDR_UN))
+        val sockaddrUn = SockaddrUnSegment(arena.arena.allocate(Layouts.SOCKADDR_UN))
         sockaddrUn.segment.fill(0)
         sockaddrUn.setSunFamily(AF_UNIX.toShort())
         val pathBytes = socketPath.toByteArray(StandardCharsets.UTF_8)
         val pathSeg = sockaddrUn.getSunPath()
-        MemorySegment.copy(pathBytes, 0, pathSeg, ValueLayout.JAVA_BYTE, 0L, pathBytes.size)
+        java.lang.foreign.MemorySegment.copy(pathBytes, 0, pathSeg.native, java.lang.foreign.ValueLayout.JAVA_BYTE, 0L, pathBytes.size)
         return sockaddrUn
     }
 
@@ -74,7 +68,7 @@ public object SupervisorSocketUtils {
         maxRetries: Int = 500,
         delayMs: Long = 10L
     ): Int {
-        Arena.ofConfined().use { arena ->
+        NativeArena.ofConfined().use { arena ->
             val sockaddrUn = setupSockAddrUn(arena, socketPath)
 
             var lastErrno = 0
@@ -92,7 +86,7 @@ public object SupervisorSocketUtils {
                 }
                 val fd = FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(fdVal)
                 val connRes = LinuxNative.withTransaction {
-                    LinuxNative.networking.connect(fd, sockaddrUn.segment, SOCKADDR_UN_SIZE)
+                    LinuxNative.networking.connect(fd, ConfinedSegment(sockaddrUn.segment), SOCKADDR_UN_SIZE)
                 }
                 if (connRes is LinuxNative.SyscallResult.Success) {
                     return fdVal
@@ -112,11 +106,11 @@ public object SupervisorSocketUtils {
         socketFd: Int,
         fdToSend: Int
     ): Boolean {
-        Arena.ofConfined().use { arena ->
-            val dummyByte = arena.allocate(ValueLayout.JAVA_BYTE)
-            dummyByte.set(ValueLayout.JAVA_BYTE, 0L, 0.toByte())
+        NativeArena.ofConfined().use { arena ->
+            val dummyByte = arena.arena.allocate(java.lang.foreign.ValueLayout.JAVA_BYTE)
+            dummyByte.set(java.lang.foreign.ValueLayout.JAVA_BYTE, 0L, 0.toByte())
 
-            val controlBuf = arena.allocate(MSG_CONTROL_BUF_SIZE)
+            val controlBuf = arena.arena.allocate(MSG_CONTROL_BUF_SIZE)
             controlBuf.fill(0)
             val cmsg = CmsghdrSegment(controlBuf)
             cmsg.setCmsgLen(CMSG_RIGHTS_LEN)
@@ -124,19 +118,19 @@ public object SupervisorSocketUtils {
             cmsg.setCmsgType(SCM_RIGHTS)
             cmsg.setDataFd(fdToSend)
 
-            val iov = IovecSegment(arena.allocate(Layouts.IOVEC))
-            iov.setIovBase(dummyByte)
+            val iov = IovecSegment.allocate()
+            iov.setIovBase(ConfinedSegment(dummyByte))
             iov.setIovLen(1L)
 
-            val msg = MsghdrSegment(arena.allocate(Layouts.MSGHDR))
-            msg.setMsgIov(iov.segment)
+            val msg = MsghdrSegment.allocate()
+            msg.setMsgIov(ConfinedSegment(iov.segment))
             msg.setMsgIovlen(1L)
-            msg.setMsgControl(controlBuf)
+            msg.setMsgControl(ConfinedSegment(controlBuf))
             msg.setMsgControllen(MSG_CONTROL_BUF_SIZE)
 
             while (true) {
                 val res = LinuxNative.withTransaction {
-                    LinuxNative.networking.sendmsg(FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(socketFd), msg.segment, 0)
+                    LinuxNative.networking.sendmsg(FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(socketFd), ConfinedSegment(msg.segment), 0)
                 }
                 if (res is LinuxNative.SyscallResult.Success) {
                     return true
@@ -152,25 +146,25 @@ public object SupervisorSocketUtils {
     public fun recvDescriptor(
         socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>
     ): FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open>? {
-        return Arena.ofConfined().use { arena ->
-            val dummyByte = arena.allocate(ValueLayout.JAVA_BYTE)
-            val controlBuf = arena.allocate(MSG_CONTROL_BUF_SIZE)
+        return NativeArena.ofConfined().use { arena ->
+            val dummyByte = arena.arena.allocate(java.lang.foreign.ValueLayout.JAVA_BYTE)
+            val controlBuf = arena.arena.allocate(MSG_CONTROL_BUF_SIZE)
             controlBuf.fill(0)
 
-            val iov = IovecSegment(arena.allocate(Layouts.IOVEC))
-            iov.setIovBase(dummyByte)
+            val iov = IovecSegment.allocate()
+            iov.setIovBase(ConfinedSegment(dummyByte))
             iov.setIovLen(1L)
 
-            val msg = MsghdrSegment(arena.allocate(Layouts.MSGHDR))
-            msg.setMsgIov(iov.segment)
+            val msg = MsghdrSegment.allocate()
+            msg.setMsgIov(ConfinedSegment(iov.segment))
             msg.setMsgIovlen(1L)
-            msg.setMsgControl(controlBuf)
+            msg.setMsgControl(ConfinedSegment(controlBuf))
             msg.setMsgControllen(MSG_CONTROL_BUF_SIZE)
 
             val cmsg = CmsghdrSegment(controlBuf)
 
             while (true) {
-                val res = LinuxNative.withTransaction { LinuxNative.networking.recvmsg(socketFd, msg.segment, 0) }
+                val res = LinuxNative.withTransaction { LinuxNative.networking.recvmsg(socketFd, ConfinedSegment(msg.segment), 0) }
                 if (res is LinuxNative.SyscallResult.Success) {
                     val value = res.value
                     if (value == 0L) return@use null

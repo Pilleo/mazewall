@@ -263,6 +263,18 @@ class ArchitectureTest {
     }
 
     @ArchTest
+    fun ffmApiMustBeIsolatedToFfiPackage(allClasses: com.tngtech.archunit.core.domain.JavaClasses) {
+        noClasses()
+            .that()
+            .resideOutsideOfPackage("io.mazewall.ffi..")
+            .should()
+            .dependOnClassesThat()
+            .resideInAPackage("java.lang.foreign..")
+            .because("FFM/java.lang.foreign manipulations must be isolated to io.mazewall.ffi to ensure safety and portability.")
+            .check(allClasses)
+    }
+
+    @ArchTest
     fun virtualThreadsAreBannedInProductionCode(allClasses: com.tngtech.archunit.core.domain.JavaClasses) {
         noClasses()
             .that()

@@ -11,7 +11,6 @@ import io.mazewall.core.NativeArg
 import io.mazewall.ffi.NativeConstants
 import io.mazewall.getFdOrThrow
 import io.mazewall.seccomp.BpfNativeCache
-import java.lang.foreign.MemorySegment
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference

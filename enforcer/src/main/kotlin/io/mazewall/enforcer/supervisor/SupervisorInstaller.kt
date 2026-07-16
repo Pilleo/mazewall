@@ -2,34 +2,23 @@ package io.mazewall.enforcer.supervisor
 
 import io.mazewall.BpfFilter
 import io.mazewall.LinuxNative
-import io.mazewall.Platform
 import io.mazewall.PolicyDefinition
-import io.mazewall.UnsupportedKernelFeatureException
 import io.mazewall.core.Arch
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
-import io.mazewall.core.NativeArg
 import io.mazewall.core.Syscall
 import io.mazewall.core.Tid
 import io.mazewall.ffi.Layouts
 import io.mazewall.ffi.NativeConstants
-import io.mazewall.ffi.memory.nativeScope
-import io.mazewall.getFdOrThrow
-import io.mazewall.onFailure
+import io.mazewall.ffi.memory.NativeArena
 import io.mazewall.ffi.networking.SupervisorSeccompNotifInstaller
 import java.io.BufferedInputStream
 import java.io.DataInputStream
-import java.io.InputStream
-import java.lang.foreign.Arena
-import java.lang.foreign.MemorySegment
-import java.lang.foreign.ValueLayout
 import java.nio.charset.StandardCharsets
-import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.atomic.AtomicBoolean
-import java.util.concurrent.atomic.AtomicReference
 import java.util.logging.Logger
 
 public object SupervisorInstaller {
@@ -98,7 +87,7 @@ internal class JVMValidationListener(
     }
 
     fun start(readyLatch: CountDownLatch) {
-        val arena = Arena.ofShared()
+        val arena = NativeArena.ofShared()
         val inputStream = SupervisorSocketInputStream(socketFd, arena)
 
         Thread {
@@ -111,7 +100,7 @@ internal class JVMValidationListener(
     }
 
     @Suppress("CyclomaticComplexMethod", "NestedBlockDepth", "LongMethod")
-    private fun runValidationReactor(inputStream: SupervisorSocketInputStream, arena: Arena, readyLatch: CountDownLatch) {
+    private fun runValidationReactor(inputStream: SupervisorSocketInputStream, arena: NativeArena, readyLatch: CountDownLatch) {
         System.err.println("[JVM-VALIDATION] validation reactor thread started")
         try {
             val dis = DataInputStream(BufferedInputStream(inputStream))
@@ -292,7 +281,7 @@ internal class JVMValidationListener(
         resp.setDecision(decision)
         resp.setErrorNr(errorNr)
         LinuxNative.withTransaction {
-            LinuxNative.memory.write(socketFd, resp.segment, Layouts.SUPERVISOR_RESPONSE_SIZE)
+            LinuxNative.memory.write(socketFd, io.mazewall.ffi.memory.ConfinedSegment(resp.segment), Layouts.SUPERVISOR_RESPONSE_SIZE)
         }
     }
 }
