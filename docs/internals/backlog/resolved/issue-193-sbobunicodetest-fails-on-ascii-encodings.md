@@ -1,12 +1,13 @@
 ---
 title: "SbobUnicodeTest fails on systems with ASCII/non-UTF-8 JNU encoding"
-status: "open"
+status: "resolved"
 priority: 3
 severity: "MEDIUM"
 scope: "enforcer"
 dependencies: []
 target_files:
   - "io.mazewall.SbobUnicodeTest"
+github_issue: 114
 ---
 
 # Description

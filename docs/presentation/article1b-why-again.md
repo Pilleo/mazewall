@@ -37,8 +37,6 @@ A Seccomp filter installed on Thread A only restricts *what Thread A can ask the
 
 If an attacker achieves native code execution on a sandboxed thread — for example, via a memory corruption vulnerability in a C++ component — they can write shellcode directly into a sibling thread's stack or code segment. They don't need to call a system call themselves. They hijack Thread B's execution and *make Thread B do it for them*. The sandboxed thread becomes a relay. The filter is circumvented entirely.
 
-Spectre and Meltdown (2018) made this even more vivid: in environments with shared page tables, speculative execution can leak memory across thread boundaries through timing side-channels, even without a single write.
-
 The conclusion was clear: for C and C++ code, thread-level kernel filtering is a logical boundary, not a physical one. And logical boundaries are only as strong as the code that respects them.
 
 ---
@@ -79,13 +77,13 @@ With both in place, here is what the combined defense actually stops and what it
 |---|---|
 | SSRF / XXE / path traversal on a contained thread | ✅ Blocked by Tier 2 on that thread |
 | Native JNI library tries to spawn a shell | ✅ Blocked by Tier 1 (process-wide, no exec anywhere) |
-| Java deserialization RCE dispatching via `CompletableFuture.runAsync(Runtime.exec(...))` | ✅ Exec is blocked by Tier 1 even on `commonPool` |
+| Java deserialization RCE dispatching via `CompletableFuture.runAsync(Runtime.exec(...))` | ✅ Blocked by Tier 1 (blocked process-wide for all threads) |
 | Java deserialization RCE doing SSRF from `ForkJoinPool.commonPool()` (no Tier 2 filter on it) | ❌ Not blocked — Tier 1 only covers exec, Tier 2 does not cover that thread |
 | `sun.misc.Unsafe` pointer manipulation to corrupt sibling thread memory | ❌ Not blocked — physical memory is shared |
 
 The gap in row four is real and worth being explicit about: if an attacker achieves *arbitrary Java code execution* on any thread, they can dispatch network or filesystem operations to uncontained sibling threads via standard Java concurrency APIs, bypassing Tier 2. Tier 1 prevents them from escalating to a shell, but it does not prevent SSRF or file reads from those uncontained threads.
 
-This is why the threat model is specific. Mazewall is designed for the **data-plane attack scenario** — a backend service running trusted code over untrusted input. The primary threats are SSRF, XXE, path traversal, and native library exploits. Against those threats, the two-tier stack provides a real and meaningful defence. Against an attacker who can already execute arbitrary Java logic in your process, the model is different and the tooling required is different (Tier 1 still limits the worst escalation, but you are in a harder problem space).
+This is why the threat model is specific. Mazewall is designed for the **data-plane attack scenario** — a backend service running trusted code over untrusted input. The primary threats are SSRF, XXE, path traversal, and native library exploits. Against those threats, the two-tier stack provides a real and meaningful defence. Against an attacker who can already execute arbitrary Java logic in your process, the model is different and the tooling required is different (Tier 1 still limits the worst escalation by dropping `execve`, `fork`, `vfork`, and `execveat` globally, but you are in a harder problem space).
 
 The security considerations document covers the full threat matrix in detail, including when GraalVM Native Image fundamentally changes the calculus by making dynamic code execution physically impossible.
 

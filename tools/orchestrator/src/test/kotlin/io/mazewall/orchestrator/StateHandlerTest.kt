@@ -19,6 +19,7 @@ class MockOrchestratorEnvironment : OrchestratorEnvironment {
     val commentedPrs = mutableListOf<Pair<String, String>>()
     var julesSession: JulesSession? = null
     val issues = mutableListOf<BacklogIssue>()
+    val resolvedIssues = mutableListOf<BacklogIssue>()
     var mapsRegenerated = false
     var stateFileDeleted = false
     var sleepCount = 0
@@ -55,7 +56,7 @@ class MockOrchestratorEnvironment : OrchestratorEnvironment {
     override fun parseAllIssues(): List<BacklogIssue> = issues
     override fun writeGithubIssue(issue: BacklogIssue, number: Int) {}
     override fun removeGithubIssue(issue: BacklogIssue) {}
-    override fun markIssueAsResolved(issue: BacklogIssue) {}
+    override fun markIssueAsResolved(issue: BacklogIssue) { resolvedIssues.add(issue) }
     override fun deleteStateFile() { stateFileDeleted = true }
     override fun generateKnowledgeMap() { mapsRegenerated = true }
 }
@@ -229,5 +230,40 @@ class StateHandlerTest {
         // Third execution should not trigger notification again
         OrchestratorState.CI_RUNNING.execute(env, context)
         assertEquals(1, env.notifications.size)
+    }
+
+    @Test
+    fun testPendingApprovalResolvesClosedIssue() {
+        val env = MockOrchestratorEnvironment()
+        val context = OrchestratorContext().apply {
+            currentIssueId = "issue-1"
+            currentIssueTitle = "Title"
+            githubIssueNumber = "123"
+        }
+        env.issueClosed = true
+        env.issues.add(BacklogIssue(File("test.md"), "issue-1", "Title", 1, "open", emptyList()))
+
+        val nextState = OrchestratorState.PENDING_APPROVAL.execute(env, context)
+
+        assertEquals(OrchestratorState.SELECT_TASK, nextState)
+        assertNull(context.currentIssueId)
+        assertTrue(env.resolvedIssues.any { it.id == "issue-1" })
+    }
+
+    @Test
+    fun testAwaitingJulesStartResolvesClosedIssue() {
+        val env = MockOrchestratorEnvironment()
+        val context = OrchestratorContext().apply {
+            currentIssueId = "issue-1"
+            githubIssueNumber = "123"
+        }
+        env.issueClosed = true
+        env.issues.add(BacklogIssue(File("test.md"), "issue-1", "Title", 1, "open", emptyList()))
+
+        val nextState = OrchestratorState.AWAITING_JULES_START.execute(env, context)
+
+        assertEquals(OrchestratorState.SELECT_TASK, nextState)
+        assertNull(context.currentIssueId)
+        assertTrue(env.resolvedIssues.any { it.id == "issue-1" })
     }
 }

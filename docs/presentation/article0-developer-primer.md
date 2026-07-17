@@ -1,4 +1,8 @@
 # Your Threads Are All Equally Trusted — Should They Be?
+
+[![Series Home](https://img.shields.io/badge/Series-Home-1e293b)](../../README.md)
+[![Part 1 →](https://img.shields.io/badge/Part_1_→-Threat_Model-6366f1)](article1-threat-model.md)
+
 ![maze_security_walls_new.png](maze_security_walls_new.png)
 > **What this is:** A developer-first introduction to mazewall—how to enforce OS-level sandboxing constraints directly on your JVM thread pools.
 >
@@ -8,7 +12,7 @@
 
 ## The default you've never questioned
 
-In 2021, Log4Shell didn't just exploit a logging framework. It exposed a fundamental architectural flaw in the JVM: the moment an attacker achieves remote code execution on any thread, they gain the keys to your entire process. 
+In 2021, Log4Shell didn't just exploit a logging framework. It exposed a fundamental architectural flaw in the JVM: the moment an attacker achieves remote code execution on any thread, they gain full OS-level capabilities of your entire process.
 
 Picture a typical backend service. It handles three kinds of work:
 
@@ -78,7 +82,7 @@ No external firewall rules. No container reconfiguration. The policy is declared
 
 ## Two levels of enforcement
 
-mazewall works in two tiers that stack together.
+Two tiers are designed to stack:
 
 ### Tier 1: Process-wide baseline
 
@@ -94,7 +98,7 @@ ContainedExecutors.installOnProcess(Policy.NO_EXEC)
 
 ### Tier 2: Thread-scoped profiles
 
-This is a policy that applies only to threads inside a specific `ExecutorService`. Other threads in the JVM (like GC, class loading, or unrestricted pools) run normally. (For what this means against code-execution attacks and thread-escaping pivots, see the interlude: [Why Would We Do the Same Thing That Failed?](article1b-why-again.md)).
+This is a policy that applies only to threads inside a specific `ExecutorService`. Other threads in the JVM (like GC, class loading, or unrestricted pools) run normally.
 
 ```kotlin
 // This executor's threads can only do pure computation. No network, no disk writes, no subprocesses.
@@ -104,7 +108,7 @@ val pdfPool = ContainedExecutors.wrap(
 )
 ```
 
-Policies are installed on each thread the first time it executes a task—zero startup overhead for idle threads. For a complete multi-pool setup (network, filesystem, and exec policies), see **Part 3**.
+Policies are installed on each thread the first time it executes a task—zero startup overhead for idle threads. (For details on how thread-scoped profiles defend against memory escapes and code-execution pivots, see the interlude: [Why Would We Do the Same Thing That Failed?](article1b-why-again.md)). For a complete multi-pool setup (network, filesystem, and exec policies), see **Part 3**.
 
 ---
 
@@ -129,7 +133,7 @@ val documentPool = ContainedExecutors.wrap(
 )
 ```
 
-The `ExecutorService` interface is unchanged—`submit()`, `invokeAll()`, and `Future` work exactly as before. If you over-restrict and block something a thread legitimately needs, the kernel intercepts the system call and returns a negative error code (usually `EPERM` or `EACCES`), causing the JVM to throw a standard `java.io.IOException` with a message like `"Permission denied"` or `"Operation not permitted"`:
+The `ExecutorService` interface is unchanged—`submit()`, `invokeAll()`, and `Future` work exactly as before. If you over-restrict and block something a thread legitimately needs, the kernel intercepts the system call and returns a negative error code (usually `EPERM` or `EACCES`). This causes the JVM to throw a standard `java.io.IOException` with a message like `"Permission denied"` or `"Operation not permitted"`. This keeps debugging straightforward, as it leverages standard Java exception handling:
 
 ```
 java.io.IOException: Permission denied
@@ -137,8 +141,6 @@ java.io.IOException: Permission denied
     at java.base/sun.nio.ch.FileDispatcherImpl.open(FileDispatcherImpl.java:319)
     ...
 ```
-
-This keeps debugging straightforward, as it leverages standard Java exception handling.
 
 *Tip: You don't need to guess system calls—mazewall includes an automated profiler that discovers the required syscalls and filesystem paths during your test suite runs. Details in Part 2.*
 

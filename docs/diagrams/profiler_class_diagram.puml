@@ -54,6 +54,7 @@ abstract class "HandshakeSession" as io.mazewall.profiler.engine.HandshakeSessio
 abstract class "LoopAction" as io.mazewall.profiler.engine.LoopAction {
 }
 interface "NativeIoOperations" as io.mazewall.profiler.engine.NativeIoOperations {
+  + {abstract}RawSyscallOperations getRaw()
   + {abstract}SyscallResult poll(MemorySegment, long, int)
   + {abstract}SyscallResult read(FileDescriptor<?, ? extends Open>, MemorySegment, long)
   + {abstract}SyscallResult write(FileDescriptor<?, ? extends Open>, MemorySegment, long)
@@ -111,6 +112,7 @@ class "RealMemoryReader" as io.mazewall.profiler.engine.RealMemoryReader {
 class "RealProfilerTransport" as io.mazewall.profiler.engine.RealProfilerTransport {
   + {static}RealProfilerTransport INSTANCE
   __
+  +RawSyscallOperations getRaw()
   +void sendTraceEvent(FileDescriptor<?, ? extends Open>, SyscallEvent<? extends Resolved>)
   +void sendSeccompContinue(Success, MemorySegment)
   +void sendSeccompError(Failed, MemorySegment, int)

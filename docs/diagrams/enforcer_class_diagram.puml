@@ -48,12 +48,7 @@ class "LinuxNative" as io.mazewall.LinuxNative {
   +NativeNetworking getNetworking()
   +NativeProcess getProcess()
   +NativeMemory getMemory()
-  +SyscallResult syscall(NativeTransaction, long, NativeArg, NativeArg, NativeArg, NativeArg, NativeArg, NativeArg)
-  +SyscallResult syscall4(NativeTransaction, long, NativeArg, NativeArg, NativeArg, NativeArg)
-  +SyscallResult ioctl(NativeTransaction, FileDescriptor<?, ? extends Open>, long, MemorySegment)
-  +SyscallResult ioctl(NativeTransaction, FileDescriptor<?, ? extends Open>, long, long)
-  +SyscallResult fcntl(NativeTransaction, FileDescriptor<?, ? extends Open>, int, long)
-  +SyscallResult poll(NativeTransaction, MemorySegment, long, int)
+  +RawSyscallOperations getRaw()
 }
 class "LinuxNativeKt" as io.mazewall.LinuxNativeKt {
   + {static}boolean isSuccess(SyscallResult)
@@ -73,12 +68,7 @@ interface "NativeEngine" as io.mazewall.NativeEngine {
   + {abstract}NativeNetworking getNetworking()
   + {abstract}NativeProcess getProcess()
   + {abstract}NativeMemory getMemory()
-  + {abstract}SyscallResult syscall(NativeTransaction, long, NativeArg, NativeArg, NativeArg, NativeArg, NativeArg, NativeArg)
-  + {abstract}SyscallResult syscall4(NativeTransaction, long, NativeArg, NativeArg, NativeArg, NativeArg)
-  + {abstract}SyscallResult ioctl(NativeTransaction, FileDescriptor<?, ? extends Open>, long, MemorySegment)
-  + {abstract}SyscallResult ioctl(NativeTransaction, FileDescriptor<?, ? extends Open>, long, long)
-  + {abstract}SyscallResult fcntl(NativeTransaction, FileDescriptor<?, ? extends Open>, int, long)
-  + {abstract}SyscallResult poll(NativeTransaction, MemorySegment, long, int)
+  + {abstract}RawSyscallOperations getRaw()
 }
 interface "NativeFileSystem" as io.mazewall.NativeFileSystem {
   + {abstract}SyscallResult open(NativeTransaction, MemorySegment, int)
@@ -216,6 +206,15 @@ interface "PolicyScope" as io.mazewall.PolicyScope {
 }
 interface "PolicyState" as io.mazewall.PolicyState {
 }
+interface "RawSyscallOperations" as io.mazewall.RawSyscallOperations {
+  __
+  + {abstract}SyscallResult syscall(NativeTransaction, long, NativeArg, NativeArg, NativeArg, NativeArg, NativeArg, NativeArg)
+  + {abstract}SyscallResult syscall4(NativeTransaction, long, NativeArg, NativeArg, NativeArg, NativeArg)
+  + {abstract}SyscallResult ioctl(NativeTransaction, FileDescriptor<?, ? extends Open>, long, MemorySegment)
+  + {abstract}SyscallResult ioctl(NativeTransaction, FileDescriptor<?, ? extends Open>, long, long)
+  + {abstract}SyscallResult fcntl(NativeTransaction, FileDescriptor<?, ? extends Open>, int, long)
+  + {abstract}SyscallResult poll(NativeTransaction, MemorySegment, long, int)
+}
 class "RealNativeEngine" as io.mazewall.RealNativeEngine {
   + {static}RealNativeEngine INSTANCE
   __
@@ -223,6 +222,7 @@ class "RealNativeEngine" as io.mazewall.RealNativeEngine {
   +NativeNetworking getNetworking()
   +NativeProcess getProcess()
   +NativeMemory getMemory()
+  +RawSyscallOperations getRaw()
   +SyscallResult syscall(NativeTransaction, long, NativeArg, NativeArg, NativeArg, NativeArg, NativeArg, NativeArg)
   +SyscallResult syscall4(NativeTransaction, long, NativeArg, NativeArg, NativeArg, NativeArg)
   +SyscallResult ioctl(NativeTransaction, FileDescriptor<?, ? extends Open>, long, MemorySegment)
@@ -582,6 +582,8 @@ class "SupervisorDaemonEngine" as io.mazewall.enforcer.supervisor.SupervisorDaem
   +SupervisorDaemonState getState()
   +void run()
   +void triggerGlobalShutdown(String)
+  +void handleNewConnection(FileDescriptor<UnixSocket, ? extends Open>)
+  +SeccompConnection processConnectionStep(Arena, SeccompConnection, FileDescriptor<UnixSocket, ? extends Open>, MemorySegment)
 }
 class "SupervisorDaemonManager" as io.mazewall.enforcer.supervisor.SupervisorDaemonManager {
   + {static}SupervisorDaemonManager INSTANCE
@@ -1104,6 +1106,7 @@ io.mazewall.PolicyDefinition --> io.mazewall.core.SeccompAction
 io.mazewall.PolicyPresets --> io.mazewall.PolicyDefinition
 io.mazewall.PolicyPresets --> io.mazewall.PolicyPresets
 io.mazewall.RealNativeEngine .u.|> io.mazewall.NativeEngine
+io.mazewall.RealNativeEngine .u.|> io.mazewall.RawSyscallOperations
 io.mazewall.RealNativeEngine --> io.mazewall.NativeProcess
 io.mazewall.RealNativeEngine --> io.mazewall.NativeNetworking
 io.mazewall.RealNativeEngine --> io.mazewall.NativeMemory

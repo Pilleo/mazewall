@@ -61,6 +61,15 @@ sealed interface OrchestratorState {
             val githubIssueNumber = context.githubIssueNumber
 
             val approved = if (githubIssueNumber != null) {
+                if (env.isIssueClosed(githubIssueNumber)) {
+                    env.println("\n\u001B[1;33m⚠️ GitHub issue #$githubIssueNumber was closed. Resolving and canceling task $issueId.\u001B[0m")
+                    val nextIssue = env.parseAllIssues().firstOrNull { it.id == issueId }
+                    if (nextIssue != null) {
+                        env.markIssueAsResolved(nextIssue)
+                    }
+                    context.clearActiveTask()
+                    return SELECT_TASK
+                }
                 env.println("🔄 Resuming already-in-progress task $issueId (linked to GitHub issue #$githubIssueNumber)...")
                 true
             } else {
@@ -129,6 +138,18 @@ sealed interface OrchestratorState {
         override val name = "AWAITING_JULES_START"
         override fun execute(env: OrchestratorEnvironment, context: OrchestratorContext): OrchestratorState {
             val issueId = context.currentIssueId ?: throw IllegalStateException("currentIssueId is null")
+            val githubIssueNumber = context.githubIssueNumber
+
+            if (githubIssueNumber != null && env.isIssueClosed(githubIssueNumber)) {
+                env.println("\n\u001B[1;33m⚠️ GitHub issue #$githubIssueNumber was closed. Resolving and canceling task $issueId.\u001B[0m")
+                val nextIssue = env.parseAllIssues().firstOrNull { it.id == issueId }
+                if (nextIssue != null) {
+                    env.markIssueAsResolved(nextIssue)
+                }
+                context.clearActiveTask()
+                return SELECT_TASK
+            }
+
             var activeSession = env.getJulesSession(issueId)
             var attempts = 0
             while (activeSession == null && attempts < env.config.julesTriggerAttempts) {
@@ -163,10 +184,10 @@ sealed interface OrchestratorState {
             val sessionId = context.julesSessionId
 
             if (env.isIssueClosed(githubIssueNumber)) {
-                env.println("\n\u001B[1;33m⚠️ GitHub issue #$githubIssueNumber was closed. Canceling task $issueId.\u001B[0m")
+                env.println("\n\u001B[1;33m⚠️ GitHub issue #$githubIssueNumber was closed. Resolving and canceling task $issueId.\u001B[0m")
                 val nextIssue = env.parseAllIssues().firstOrNull { it.id == issueId }
                 if (nextIssue != null) {
-                    env.removeGithubIssue(nextIssue)
+                    env.markIssueAsResolved(nextIssue)
                 }
                 context.skippedIds.add(issueId)
                 context.clearActiveTask()

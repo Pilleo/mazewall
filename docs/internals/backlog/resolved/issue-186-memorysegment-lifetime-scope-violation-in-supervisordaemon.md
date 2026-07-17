@@ -1,7 +1,7 @@
 ---
 title: "MemorySegment Lifetime/Scope Violation in SupervisorSessionHandler"
 severity: "HIGH"
-status: "open"
+status: "resolved"
 priority: 9
 dependencies: []
 component: "ffi"
@@ -10,6 +10,7 @@ autonomy: "supervised"
 solution_approved: false
 blast_radius: "medium"
 reversible: true
+github_issue: 118
 ---
 
 # 🔴 [Severity: HIGH]: MemorySegment Lifetime/Scope Violation in SupervisorSessionHandler

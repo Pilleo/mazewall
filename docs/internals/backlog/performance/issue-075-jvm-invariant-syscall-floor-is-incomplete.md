@@ -6,7 +6,6 @@ priority: 6
 dependencies: []
 component: "unknown"
 effort: "medium"
-github_issue: 96
 ---
 
 # 🟡 [DEFERRED — Medium]: JVM Invariant Syscall Floor is Incomplete

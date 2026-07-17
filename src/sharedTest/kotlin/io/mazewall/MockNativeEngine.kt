@@ -184,6 +184,7 @@ public open class MockNativeProcess : NativeProcess {
     public var tid: io.mazewall.core.Tid = io.mazewall.core.Tid(1234)
     public var prctlResult: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(0L)
     public var lastPrctlCommand: io.mazewall.core.PrctlCommand? = null
+    public val prctlCommands: MutableList<Pair<Thread, io.mazewall.core.PrctlCommand>> = mutableListOf()
 
     override fun gettid() = tid
 
@@ -192,6 +193,7 @@ public open class MockNativeProcess : NativeProcess {
         command: io.mazewall.core.PrctlCommand,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
         lastPrctlCommand = command
+        prctlCommands.add(Thread.currentThread() to command)
         return prctlResult
     }
 }

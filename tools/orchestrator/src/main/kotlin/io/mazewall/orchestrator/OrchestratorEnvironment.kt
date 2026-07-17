@@ -119,8 +119,27 @@ class RealOrchestratorEnvironment(
 
     override fun findExistingIssueNumber(issueId: String): String? = GitHubCli.findExistingIssueNumber(issueId)
 
-    override fun createIssue(title: String, bodyFile: File, label: String): String =
-        GitHubCli.createIssue(title, bodyFile, label)
+    override fun createIssue(title: String, bodyFile: File, label: String): String {
+        val originalBody = bodyFile.readText()
+        val preamble = """
+            💡 **Jules Instructions Before Starting:**
+            1. **Verify Backlog Items**: Find the code related to this issue and verify if the issue/bug is actually present in the current codebase.
+            2. **Design Before Action**: Carefully review the proposed fix, downsides, benefits, and alternative approaches.
+            3. **Raise Doubts Early**: If you have any doubts about the correctness or architecture of the fix, stop and ask the operator.
+
+            ---
+
+        """.trimIndent()
+
+        val directory = File("build/tmp").apply { mkdirs() }
+        val tempFile = File.createTempFile("issue_body_", ".tmp", directory)
+        return try {
+            tempFile.writeText(preamble + originalBody)
+            GitHubCli.createIssue(title, tempFile, label)
+        } finally {
+            tempFile.delete()
+        }
+    }
 
     override fun isIssueClosed(issueNumber: String): Boolean = GitHubCli.isIssueClosed(issueNumber)
 
