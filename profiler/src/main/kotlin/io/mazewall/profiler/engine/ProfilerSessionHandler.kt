@@ -28,8 +28,8 @@ internal class ProfilerSessionHandler(
     private val syscallMap: Map<Int, String>,
     private val onShutdown: (String) -> Unit,
 ) {
-    private val ledger = SessionEventLedger()
-    private var state: ProfilerState = ProfilerState.ActiveSession(socketFd, listenerFd)
+    internal val ledger = SessionEventLedger()
+    internal var state: ProfilerState = ProfilerState.ActiveSession(socketFd, listenerFd)
 
     private companion object {
         private const val NOTIF_ID_OFF = 0L

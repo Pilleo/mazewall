@@ -8,6 +8,7 @@ import io.mazewall.ffi.memory.*
 import io.mazewall.seccomp.BpfInstruction
 import io.mazewall.core.NativeArg
 import org.junit.jupiter.api.Test
+import java.lang.foreign.Arena
 import java.lang.foreign.ValueLayout
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -107,13 +108,13 @@ class LinuxNativeTest : BaseIntegrationTest() {
 
     @Test
     fun testSocketpair() = nativeScope {
-        val fds = allocate(ValueLayout.JAVA_INT.byteSize() * 2)
+        val fds = allocate(ValueLayout.JAVA_INT, 2)
         val result = LinuxNative.withTransaction {
             LinuxNative.networking.socketpair(1, 1, 0, fds) // AF_UNIX, SOCK_STREAM
         }
         if (result is LinuxNative.SyscallResult.Success) {
-            LinuxNative.fileSystem.close(FileDescriptor.unsafe<FileDescriptorRole.Generic>(fds.readInt(0L)))
-            LinuxNative.fileSystem.close(FileDescriptor.unsafe<FileDescriptorRole.Generic>(fds.readInt(4L)))
+            LinuxNative.fileSystem.close(FileDescriptor.unsafe<FileDescriptorRole.Generic>(fds.get(ValueLayout.JAVA_INT, 0)))
+            LinuxNative.fileSystem.close(FileDescriptor.unsafe<FileDescriptorRole.Generic>(fds.get(ValueLayout.JAVA_INT, 4)))
         }
     }
 
@@ -121,24 +122,24 @@ class LinuxNativeTest : BaseIntegrationTest() {
     fun testProcessVmReadv() = nativeScope {
         // Try reading from our own memory
         val localBuf = allocate(10)
-        localBuf.writeByte(0, 123.toByte())
+        localBuf.set(ValueLayout.JAVA_BYTE, 0, 123)
 
-        val remoteIovec = IovecSegment.allocate()
-        remoteIovec.setIovBase(localBuf)
-        remoteIovec.setIovLen(10L)
+        val remoteIovec = allocate(Layouts.IOVEC)
+        remoteIovec.set(ValueLayout.ADDRESS, 0, localBuf)
+        remoteIovec.set(ValueLayout.JAVA_LONG, 8, 10)
 
-        val localIovec = IovecSegment.allocate()
+        val localIovec = allocate(Layouts.IOVEC)
         val destBuf = allocate(10)
-        localIovec.setIovBase(destBuf)
-        localIovec.setIovLen(10L)
+        localIovec.set(ValueLayout.ADDRESS, 0, destBuf)
+        localIovec.set(ValueLayout.JAVA_LONG, 8, 10)
 
         val result =
             LinuxNative.withTransaction {
                 LinuxNative.memory.processVmReadv(
                     io.mazewall.core.Pid(ProcessHandle.current().pid().toInt()),
-                    localIovec.managed,
+                    localIovec,
                     1,
-                    remoteIovec.managed,
+                    remoteIovec,
                     1,
                     0, // flags
                 )
@@ -148,7 +149,7 @@ class LinuxNativeTest : BaseIntegrationTest() {
 
 @Test
 fun testFcntl() {
-    NativeArena.ofConfined().use { arena ->
+    Arena.ofConfined().use { arena ->
         val tempFile =
             java.nio.file.Files
                 .createTempFile("fcntl-test", ".txt")
@@ -185,7 +186,7 @@ fun testFcntl() {
         pollFd.setRevents(0.toShort())
 
         val result = LinuxNative.withTransaction {
-            LinuxNative.raw.poll(pollFd.managed, 1L, 0) // 0 timeout
+            LinuxNative.raw.poll(pollFd.segment, 1L, 0) // 0 timeout
         }
         assertTrue(result is LinuxNative.SyscallResult.Success)
     }

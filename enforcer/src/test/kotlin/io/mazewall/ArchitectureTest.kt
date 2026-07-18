@@ -48,8 +48,7 @@ class ArchitectureTest {
                 "io.mazewall.landlock..",
                 "io.mazewall.enforcer.supervisor..",
                 "io.mazewall.ffi.networking..",
-                "io.mazewall", // RealPlatformProvider is in the root package
-                "io.mazewall.ffi.internal..", // RealNativeEngine is here
+                "io.mazewall", // RealNativeEngine and RealPlatformProvider are in the root package
                 "io.mazewall.profiler.engine..",
             )
             .should()

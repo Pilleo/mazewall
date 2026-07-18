@@ -197,7 +197,7 @@ internal class SupervisorSessionHandler(
         notif: ManagedSegment,
         resp: ManagedSegment
     ): LoopAction {
-        val pfd2 = PollFdSegment(pollFds.slice(Layouts.POLLFD_SIZE, Layouts.POLLFD_SIZE))
+        val pfd2 = PollFdSegment(ConfinedSegment(pollFds.native.asSlice(Layouts.POLLFD.byteSize(), Layouts.POLLFD.byteSize())))
         val socketRevents = pfd2.getRevents().toInt()
         val errorOrHup = NativeConstants.POLLERR.toInt() or NativeConstants.POLLHUP.toInt() or NativeConstants.POLLNVAL.toInt()
         if ((socketRevents and (NativeConstants.POLLIN.toInt() or errorOrHup)) != 0) {
@@ -205,10 +205,10 @@ internal class SupervisorSessionHandler(
             return LoopAction.Shutdown
         }
 
-        val pfd1 = PollFdSegment(pollFds.slice(0L, Layouts.POLLFD_SIZE))
+        val pfd1 = PollFdSegment(ConfinedSegment(pollFds.native.asSlice(0L, Layouts.POLLFD.byteSize())))
         val listenerRevents = pfd1.getRevents()
         if ((listenerRevents.toInt() and NativeConstants.POLLIN.toInt()) != 0) {
-            notif.fill(0)
+            notif.native.fill(0)
             val recvRes = engine.withTransaction {
                 engine.raw.ioctl(listenerFd, NativeConstants.SECCOMP_IOCTL_NOTIF_RECV, notif)
             }
@@ -369,7 +369,7 @@ internal class SupervisorSessionHandler(
             }
         )
 
-        val buf = arena.allocate(totalSize.toLong())
+        val buf = ConfinedSegment(arena.arena.allocate(totalSize.toLong()))
         val netBuf = NetworkOrderBuffer(buf)
         var offset = 0L
 
@@ -454,7 +454,7 @@ internal class SupervisorSessionHandler(
             return false
         }
 
-        val responseBuf = arena.allocate(Layouts.SUPERVISOR_RESPONSE_SIZE)
+        val responseBuf = ConfinedSegment(arena.arena.allocate(Layouts.SUPERVISOR_RESPONSE_SIZE))
         val readRes = engine.withTransaction {
             engine.memory.read(socketFd, responseBuf, Layouts.SUPERVISOR_RESPONSE_SIZE)
         }
@@ -539,7 +539,7 @@ internal class SupervisorSessionHandler(
             }
 
             val addfd = with(arena) { SeccompNotifAddFdSegment.allocate() }
-            addfd.managed.fill(0)
+            addfd.segment.fill(0)
             addfd.setId(id)
             addfd.setFlags(NativeConstants.SECCOMP_ADDFD_FLAG_SEND.toInt())
             addfd.setSrcfd(localFdValue)
@@ -566,7 +566,7 @@ internal class SupervisorSessionHandler(
     context(arena: NativeArena)
     private fun openFileInSupervisor(nr: Int, args: LongArray, pathStr: String, arch: io.mazewall.core.Arch): Int {
         val flags = if (nr == arch.open) args[1].toInt() else args[2].toInt()
-        val pathSeg = arena.allocateFrom(pathStr)
+        val pathSeg = ConfinedSegment(arena.arena.allocateFrom(pathStr))
         val dirfd = if (nr == arch.open || pathStr.startsWith("/")) AT_FDCWD else args[0].toInt()
         val res: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = engine.withTransaction {
             if (dirfd == AT_FDCWD) {
@@ -598,7 +598,7 @@ internal class SupervisorSessionHandler(
         }
         if (socketRes < 0) return socketRes
 
-        val addr = arena.allocate(sockaddrBytes.size.toLong())
+        val addr = ConfinedSegment(arena.arena.allocate(sockaddrBytes.size.toLong()))
         ManagedSegment.copy(sockaddrBytes, 0, addr, 0L, sockaddrBytes.size)
 
         val connectErr = engine.withTransaction {
@@ -631,7 +631,7 @@ internal class SupervisorSessionHandler(
     }
 
     private fun sendSeccompContinue(id: Long, resp: ManagedSegment) {
-        resp.fill(0)
+        resp.native.fill(0)
         resp.writeLong(RESP_ID_OFF, id)
         resp.writeLong(RESP_VAL_OFF, 0L)
         resp.writeInt(RESP_ERR_OFF, 0)
@@ -643,7 +643,7 @@ internal class SupervisorSessionHandler(
     }
 
     private fun sendSeccompError(id: Long, errorNr: Int, resp: ManagedSegment) {
-        resp.fill(0)
+        resp.native.fill(0)
         resp.writeLong(RESP_ID_OFF, id)
         resp.writeLong(RESP_VAL_OFF, -1L)
         resp.writeInt(RESP_ERR_OFF, -errorNr)
@@ -714,7 +714,7 @@ internal class SupervisorSessionHandler(
                         is LinuxNative.SyscallResult.Success -> pidfdRes.value.toInt()
                         is LinuxNative.SyscallResult.Error -> {
                             logger.severe { "[SUPERVISOR-DEBUG] pidfd_open failed for tid=${tid.value} with errno ${pidfdRes.errno}" }
-                            sendSeccompError(id, pidfdRes.errno, arena.allocate(Layouts.SECCOMP_NOTIF_RESP))
+                            sendSeccompError(id, pidfdRes.errno, ConfinedSegment(arena.arena.allocate(Layouts.SECCOMP_NOTIF_RESP)))
                             return@use
                         }
                     }
@@ -731,15 +731,15 @@ internal class SupervisorSessionHandler(
                         is LinuxNative.SyscallResult.Success -> dupRes.value.toInt()
                         is LinuxNative.SyscallResult.Error -> {
                             logger.severe { "[SUPERVISOR-DEBUG] pidfd_getfd failed for targetFd=$targetFd with errno ${dupRes.errno}" }
-                            sendSeccompError(id, dupRes.errno, arena.allocate(Layouts.SECCOMP_NOTIF_RESP))
+                            sendSeccompError(id, dupRes.errno, ConfinedSegment(arena.arena.allocate(Layouts.SECCOMP_NOTIF_RESP)))
                             return@use
                         }
                     }
                     logger.info { "[SUPERVISOR-DEBUG] pidfd_getfd success. dupFd=$dupFd. Starting accept..." }
 
                     try {
-                        val localAddr = arena.allocate(128)
-                        val localAddrLen = arena.allocate(4)
+                        val localAddr = ConfinedSegment(arena.arena.allocate(128))
+                        val localAddrLen = ConfinedSegment(arena.arena.allocate(4))
                         localAddrLen.writeInt(0, 128)
 
                         val flags = if (nr == traceeArch.accept4) args[3].toInt() else 0
@@ -756,7 +756,7 @@ internal class SupervisorSessionHandler(
                         val clientFd = when (acceptRes) {
                             is LinuxNative.SyscallResult.Success -> acceptRes.value.toInt()
                             is LinuxNative.SyscallResult.Error -> {
-                                sendSeccompError(id, acceptRes.errno, arena.allocate(Layouts.SECCOMP_NOTIF_RESP))
+                                sendSeccompError(id, acceptRes.errno, ConfinedSegment(arena.arena.allocate(Layouts.SECCOMP_NOTIF_RESP)))
                                 return@use
                             }
                         }
@@ -801,7 +801,7 @@ internal class SupervisorSessionHandler(
 
                             // Inject accepted FD
                             val addfd = with(arena) { SeccompNotifAddFdSegment.allocate() }
-                            addfd.managed.fill(0)
+                            addfd.segment.fill(0)
                             addfd.setId(id)
                             addfd.setFlags(NativeConstants.SECCOMP_ADDFD_FLAG_SEND.toInt())
                             addfd.setSrcfd(clientFd)
@@ -812,7 +812,7 @@ internal class SupervisorSessionHandler(
                             }
 
                             if (!injectSuccess) {
-                                sendSeccompError(id, NativeConstants.EPERM, arena.allocate(Layouts.SECCOMP_NOTIF_RESP))
+                                sendSeccompError(id, NativeConstants.EPERM, ConfinedSegment(arena.arena.allocate(Layouts.SECCOMP_NOTIF_RESP)))
                             }
                         } finally {
                             closeLocalFd(clientFd)
@@ -825,7 +825,7 @@ internal class SupervisorSessionHandler(
                 logger.log(java.util.logging.Level.SEVERE, "Error in async accept worker for notification $id", t)
                 try {
                     NativeArena.ofConfined().use { arena ->
-                        sendSeccompError(id, NativeConstants.EPERM, arena.allocate(Layouts.SECCOMP_NOTIF_RESP))
+                        sendSeccompError(id, NativeConstants.EPERM, ConfinedSegment(arena.arena.allocate(Layouts.SECCOMP_NOTIF_RESP)))
                     }
                 } catch (ignored: Throwable) {}
             }

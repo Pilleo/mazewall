@@ -57,12 +57,6 @@ public value class ConfinedSegment(override val native: MemorySegment) : Managed
     override fun byteSize(): Long = native.byteSize()
 }
 
-public fun ManagedSegment.slice(offset: Long, size: Long): ManagedSegment = ConfinedSegment(this.native.asSlice(offset, size))
-
-public fun ManagedSegment.fill(value: Byte) {
-    this.native.fill(value)
-}
-
 /**
  * A segment that can be shared across multiple threads.
  */

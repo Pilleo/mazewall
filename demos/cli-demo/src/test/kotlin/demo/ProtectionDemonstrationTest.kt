@@ -6,6 +6,7 @@ import io.mazewall.core.Arch
 import io.mazewall.enforcer.ContainedExecutors
 import io.mazewall.enforcer.ContainmentViolationException
 import io.mazewall.ffi.NativeConstants
+import io.mazewall.ffi.memory.NativeArena
 import org.junit.jupiter.api.Test
 import java.io.File
 import java.lang.foreign.*
@@ -54,7 +55,7 @@ class ProtectionDemonstrationTest {
             safeExecutor
                 .submit {
                     val arch = Arch.current()
-                    Arena.ofConfined().use { arena ->
+                    NativeArena.ofConfined().use { arena ->
                         val name = arena.allocateFrom("test_memfd_protected")
                         val res = LinuxNative.withTransaction {
                             LinuxNative.raw.syscall(
@@ -186,7 +187,7 @@ class ProtectionDemonstrationTest {
         try {
             safeExecutor
                 .submit {
-                    Arena.ofConfined().use { arena ->
+                    NativeArena.ofConfined().use { arena ->
                         val openResult = LinuxNative.withTransaction {
                             LinuxNative.fileSystem.open(
                                 arena.allocateFrom("/etc/hosts"),

@@ -7,7 +7,7 @@ import io.mazewall.LinuxNative
 import io.mazewall.MockNativeEngine
 import io.mazewall.NativeTransaction
 import io.mazewall.Policy
-import io.mazewall.ffi.internal.RealNativeEngine
+import io.mazewall.RealNativeEngine
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
 import io.mazewall.core.Syscall

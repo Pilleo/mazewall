@@ -5,10 +5,9 @@ import io.mazewall.MockNativeEngine
 import io.mazewall.MockNativeFileSystem
 import io.mazewall.NativeTransaction
 import io.mazewall.core.Tid
-import io.mazewall.ffi.memory.ManagedSegment
-import io.mazewall.ffi.memory.NativeArena
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
+import java.lang.foreign.Arena
 import java.lang.foreign.MemorySegment
 import java.lang.foreign.ValueLayout
 import java.nio.charset.StandardCharsets
@@ -24,9 +23,9 @@ class MemoryReaderTest {
 
         val mockFs = object : MockNativeFileSystem() {
             context(context: NativeTransaction)
-            override fun readlink(path: ManagedSegment, buf: ManagedSegment, bufsiz: Long): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+            override fun readlink(path: MemorySegment, buf: MemorySegment, bufsiz: Long): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
                 val bytes = mockPath.toByteArray(StandardCharsets.UTF_8)
-                java.lang.foreign.MemorySegment.copy(bytes, 0, buf.native, ValueLayout.JAVA_BYTE, 0L, bytes.size)
+                MemorySegment.copy(bytes, 0, buf, ValueLayout.JAVA_BYTE, 0L, bytes.size)
                 return LinuxNative.SyscallResult.Success(bytes.size.toLong())
             }
         }
@@ -37,7 +36,7 @@ class MemoryReaderTest {
 
         LinuxNative.setEngine(mockEngine)
         try {
-            NativeArena.ofConfined().use { arena ->
+            Arena.ofConfined().use { arena ->
                 val reader = RealMemoryReader
                 val result = with(arena) { reader.resolveLink(tid, link) }
                 assertEquals(expectedPath, result)
@@ -55,9 +54,9 @@ class MemoryReaderTest {
 
         val mockMem = object : io.mazewall.MockNativeMemory() {
             context(context: NativeTransaction)
-            override fun processVmReadv(pid: io.mazewall.core.Pid, localIov: ManagedSegment, liovcnt: Long, remoteIov: ManagedSegment, riovcnt: Long, flags: Long): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
-                val localBuf = localIov.native.get(ValueLayout.ADDRESS, 0).reinterpret(mockData.size.toLong())
-                java.lang.foreign.MemorySegment.copy(mockData, 0, localBuf, ValueLayout.JAVA_BYTE, 0L, mockData.size)
+            override fun processVmReadv(pid: io.mazewall.core.Pid, localIov: MemorySegment, liovcnt: Long, remoteIov: MemorySegment, riovcnt: Long, flags: Long): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                val localBuf = localIov.get(ValueLayout.ADDRESS, 0).reinterpret(mockData.size.toLong())
+                MemorySegment.copy(mockData, 0, localBuf, ValueLayout.JAVA_BYTE, 0L, mockData.size)
                 return LinuxNative.SyscallResult.Success(mockData.size.toLong())
             }
         }
@@ -68,7 +67,7 @@ class MemoryReaderTest {
 
         LinuxNative.setEngine(mockEngine)
         try {
-            NativeArena.ofConfined().use { arena ->
+            Arena.ofConfined().use { arena ->
                 val reader = RealMemoryReader
                 val result = with(arena) { reader.readStringFromProcess(tid, remoteAddr, mockData.size) }
                 assertEquals("unterminated string", result)
