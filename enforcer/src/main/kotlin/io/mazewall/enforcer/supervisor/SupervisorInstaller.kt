@@ -50,7 +50,7 @@ public object SupervisorInstaller {
         scopingPolicy: StacktraceScopingPolicy,
         onFilterApplied: () -> Unit = {}
     ): SupervisorSession {
-        val context = SupervisorDaemonManager.getOrSpawnSharedDaemon()
+        val context = SupervisorDaemonManager.getInstance().getOrSpawnSharedDaemon()
         val arch = Arch.current()
 
         // Assert not a virtual thread per Loom carrier poisoning rules

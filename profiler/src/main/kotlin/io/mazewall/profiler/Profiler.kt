@@ -93,7 +93,7 @@ object Profiler {
             listOf("warmup").sorted().joinToString(",")
         } catch (ignored: Exception) {}
 
-        val context = ProfilerDaemonManager.getOrSpawnSharedDaemon()
+        val context = ProfilerDaemonManager.getInstance().getOrSpawnSharedDaemon()
         val localLogs = CopyOnWriteArrayList<TraceEvent>()
         val localStackProfile = ConcurrentHashMap<TraceEvent, MutableList<Array<StackTraceElement>>>()
         val localPathCache = ConcurrentHashMap<String, Long>()
@@ -181,7 +181,7 @@ object Profiler {
         vararg policies: Policy<*, Uncompiled>,
     ): ProfilerExecutorWrapper {
         val policy = PolicyDefinition.combine(*policies.map { it.definition }.toTypedArray())
-        val context = ProfilerDaemonManager.getOrSpawnSharedDaemon()
+        val context = ProfilerDaemonManager.getInstance().getOrSpawnSharedDaemon()
         return ProfilerExecutorWrapper(delegate, policy, context, captureStackTraces)
     }
 

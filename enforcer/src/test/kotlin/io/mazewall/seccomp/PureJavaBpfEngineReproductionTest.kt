@@ -28,6 +28,11 @@ class PureJavaBpfEngineReproductionTest {
     fun `reproduce no_new_privs being set before filter building failure`() {
         PureJavaBpfEngine.clearCache()
         val mockProcess = MockNativeProcess()
+        val prctlCommands = mutableListOf<PrctlCommand>()
+        mockProcess.onPrctl = { _, command ->
+            prctlCommands.add(command)
+            mockProcess.prctlResult
+        }
         val mockMemory = object : MockNativeMemory() {
             context(arena: Arena)
             override fun newSockFProg(filters: List<BpfInstruction>): MemorySegment {
@@ -45,10 +50,7 @@ class PureJavaBpfEngineReproductionTest {
         }
 
         // After the fix, this should be null because buildFilter() is called before setNoNewPrivs()
-        val testThread = Thread.currentThread()
-        val calledSetNoNewPrivs = mockProcess.prctlCommands.any { (thread, cmd) ->
-            thread == testThread && cmd is PrctlCommand.SetNoNewPrivs
-        }
+        val calledSetNoNewPrivs = prctlCommands.any { it is PrctlCommand.SetNoNewPrivs }
         kotlin.test.assertFalse(calledSetNoNewPrivs, "PR_SET_NO_NEW_PRIVS should NOT have been called after the fix")
     }
 }

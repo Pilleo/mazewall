@@ -4,6 +4,7 @@ import io.mazewall.*
 import io.mazewall.core.SandboxedPath
 import io.mazewall.core.SeccompAction
 import io.mazewall.core.Syscall
+import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import java.util.concurrent.Executors
 import kotlin.test.assertFailsWith
@@ -11,20 +12,21 @@ import kotlin.test.assertTrue
 
 class ContainedExecutorsCoverageTest {
 
+    @AfterEach
+    fun tearDown() {
+        Platform.resetToDefault()
+        ThreadStateRegistry.state = ContainerState()
+        System.clearProperty("io.mazewall.fallback")
+    }
+
     @Test
     fun testIsPathSubsetLogic() {
         val p1 = Policy.builder().allowFsRead("/tmp").build()
         val p2 = Policy.builder().allowFsRead("/").build()
 
-        val emptyPolicy = Policy.builder().build().definition
-
         ThreadStateRegistry.state = ThreadStateRegistry.state.withLandlockPolicy(p1.definition)
-        try {
-            assertFailsWith<IllegalStateException> {
-                ContainedExecutors.installOnCurrentThread(p2)
-            }
-        } finally {
-             ThreadStateRegistry.state = ThreadStateRegistry.state.withLandlockPolicy(emptyPolicy)
+        assertFailsWith<IllegalStateException> {
+            ContainedExecutors.installOnCurrentThread(p2)
         }
     }
 
@@ -37,20 +39,16 @@ class ContainedExecutorsCoverageTest {
                 io.mazewall.LinuxNative.SyscallResult.Error(22, -1)
         }
         Platform.setProvider(mockProvider)
-        try {
-            System.setProperty("io.mazewall.fallback", "FAIL")
-            assertFailsWith<UnsupportedOperationException> {
-                ContainedExecutors.installOnCurrentThread(Policy.builder().build())
-            }
 
-            System.setProperty("io.mazewall.fallback", "SILENT_BYPASS")
+        System.setProperty("io.mazewall.fallback", "FAIL")
+        assertFailsWith<UnsupportedOperationException> {
             ContainedExecutors.installOnCurrentThread(Policy.builder().build())
-
-            System.setProperty("io.mazewall.fallback", "WARN_AND_BYPASS")
-            ContainedExecutors.installOnCurrentThread(Policy.builder().build())
-        } finally {
-            Platform.resetToDefault()
-            System.clearProperty("io.mazewall.fallback")
         }
+
+        System.setProperty("io.mazewall.fallback", "SILENT_BYPASS")
+        ContainedExecutors.installOnCurrentThread(Policy.builder().build())
+
+        System.setProperty("io.mazewall.fallback", "WARN_AND_BYPASS")
+        ContainedExecutors.installOnCurrentThread(Policy.builder().build())
     }
 }

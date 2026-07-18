@@ -31,6 +31,12 @@ public interface NativeEngine {
     public val process: NativeProcess
     public val memory: NativeMemory
     public val raw: RawSyscallOperations
+
+    /**
+     * Executes the given [block] within a [NativeTransaction] context.
+     * Raw system calls and sensitive native operations are only available within this scope.
+     */
+    public fun <T> withTransaction(block: NativeTransaction.() -> T): T
 }
 
 /**
@@ -96,6 +102,13 @@ public interface NativeFileSystem {
     ): SyscallResult<Long, SyscallHandledState.Unhandled>
 
     context(_: NativeTransaction)
+    fun openat(
+        dirfd: Int,
+        path: MemorySegment,
+        flags: Int,
+    ): SyscallResult<Long, SyscallHandledState.Unhandled>
+
+    context(_: NativeTransaction)
     fun readlink(
         path: MemorySegment,
         buf: MemorySegment,
@@ -152,6 +165,14 @@ public interface NativeNetworking {
     ): SyscallResult<Long, SyscallHandledState.Unhandled>
 
     context(_: NativeTransaction)
+    fun accept4(
+        sockfd: FileDescriptor<*, FdState.Open>,
+        addr: MemorySegment,
+        addrlen: MemorySegment,
+        flags: Int,
+    ): SyscallResult<Long, SyscallHandledState.Unhandled>
+
+    context(_: NativeTransaction)
     fun connect(
         sockfd: FileDescriptor<*, FdState.Open>,
         addr: MemorySegment,
@@ -186,6 +207,19 @@ public interface NativeProcess {
 
     context(_: NativeTransaction)
     fun prctl(command: io.mazewall.core.PrctlCommand): SyscallResult<Long, SyscallHandledState.Unhandled>
+
+    context(_: NativeTransaction)
+    fun pidfdOpen(
+        pid: Int,
+        flags: Int,
+    ): SyscallResult<Long, SyscallHandledState.Unhandled>
+
+    context(_: NativeTransaction)
+    fun pidfdGetFd(
+        pidfd: Int,
+        targetFd: Int,
+        flags: Int,
+    ): SyscallResult<Long, SyscallHandledState.Unhandled>
 }
 
 public interface NativeMemory {

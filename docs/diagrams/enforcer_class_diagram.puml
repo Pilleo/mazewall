@@ -69,9 +69,11 @@ interface "NativeEngine" as io.mazewall.NativeEngine {
   + {abstract}NativeProcess getProcess()
   + {abstract}NativeMemory getMemory()
   + {abstract}RawSyscallOperations getRaw()
+  + {abstract}T withTransaction(Function1<? super NativeTransaction, ? extends T>)
 }
 interface "NativeFileSystem" as io.mazewall.NativeFileSystem {
   + {abstract}SyscallResult open(NativeTransaction, MemorySegment, int)
+  + {abstract}SyscallResult openat(NativeTransaction, int, MemorySegment, int)
   + {abstract}SyscallResult readlink(NativeTransaction, MemorySegment, MemorySegment, long)
   + {abstract}SyscallResult mmap(NativeTransaction, long, long, int, int, int, long)
   + {abstract}SyscallResult close(FileDescriptor<?, ? extends Open>)
@@ -89,6 +91,7 @@ interface "NativeNetworking" as io.mazewall.NativeNetworking {
   + {abstract}SyscallResult bind(NativeTransaction, FileDescriptor<?, ? extends Open>, MemorySegment, int)
   + {abstract}SyscallResult listen(NativeTransaction, FileDescriptor<?, ? extends Open>, int)
   + {abstract}SyscallResult accept(NativeTransaction, FileDescriptor<?, ? extends Open>, MemorySegment, MemorySegment)
+  + {abstract}SyscallResult accept4(NativeTransaction, FileDescriptor<?, ? extends Open>, MemorySegment, MemorySegment, int)
   + {abstract}SyscallResult connect(NativeTransaction, FileDescriptor<?, ? extends Open>, MemorySegment, int)
   + {abstract}SyscallResult sendmsg(NativeTransaction, FileDescriptor<?, ? extends Open>, MemorySegment, int)
   + {abstract}SyscallResult recvmsg(NativeTransaction, FileDescriptor<?, ? extends Open>, MemorySegment, int)
@@ -97,6 +100,8 @@ interface "NativeNetworking" as io.mazewall.NativeNetworking {
 interface "NativeProcess" as io.mazewall.NativeProcess {
   + {abstract}int gettid()
   + {abstract}SyscallResult prctl(NativeTransaction, PrctlCommand)
+  + {abstract}SyscallResult pidfdOpen(NativeTransaction, int, int)
+  + {abstract}SyscallResult pidfdGetFd(NativeTransaction, int, int, int)
 }
 interface "NativeTransaction" as io.mazewall.NativeTransaction {
 }
@@ -223,6 +228,7 @@ class "RealNativeEngine" as io.mazewall.RealNativeEngine {
   +NativeProcess getProcess()
   +NativeMemory getMemory()
   +RawSyscallOperations getRaw()
+  +T withTransaction(Function1<? super NativeTransaction, ? extends T>)
   +SyscallResult syscall(NativeTransaction, long, NativeArg, NativeArg, NativeArg, NativeArg, NativeArg, NativeArg)
   +SyscallResult syscall4(NativeTransaction, long, NativeArg, NativeArg, NativeArg, NativeArg)
   +SyscallResult ioctl(NativeTransaction, FileDescriptor<?, ? extends Open>, long, MemorySegment)
@@ -234,6 +240,7 @@ class "RealNativeFileSystem" as io.mazewall.RealNativeFileSystem {
   + {static}RealNativeFileSystem INSTANCE
   __
   +SyscallResult open(NativeTransaction, MemorySegment, int)
+  +SyscallResult openat(NativeTransaction, int, MemorySegment, int)
   +SyscallResult mmap(NativeTransaction, long, long, int, int, int, long)
   +SyscallResult close(FileDescriptor<?, ? extends Open>)
   +SyscallResult readlink(NativeTransaction, MemorySegment, MemorySegment, long)
@@ -257,6 +264,7 @@ class "RealNativeNetworking" as io.mazewall.RealNativeNetworking {
   + {static}RealNativeNetworking INSTANCE
   __
   +SyscallResult socketpair(NativeTransaction, int, int, int, MemorySegment)
+  +SyscallResult accept4(NativeTransaction, FileDescriptor<?, ? extends Open>, MemorySegment, MemorySegment, int)
   +SyscallResult socket(NativeTransaction, int, int, int)
   +SyscallResult bind(NativeTransaction, FileDescriptor<?, ? extends Open>, MemorySegment, int)
   +SyscallResult listen(NativeTransaction, FileDescriptor<?, ? extends Open>, int)
@@ -271,6 +279,8 @@ class "RealNativeProcess" as io.mazewall.RealNativeProcess {
   __
   +int gettid()
   +SyscallResult prctl(NativeTransaction, PrctlCommand)
+  +SyscallResult pidfdOpen(NativeTransaction, int, int)
+  +SyscallResult pidfdGetFd(NativeTransaction, int, int, int)
 }
 class "RealPlatformProvider" as io.mazewall.RealPlatformProvider {
   + {static}RealPlatformProvider INSTANCE
@@ -379,6 +389,34 @@ abstract class "PrctlCommand" as io.mazewall.core.PrctlCommand {
   + {abstract}NativeArg getArg4()
   + {abstract}NativeArg getArg5()
 }
+interface "ProcessLauncher" as io.mazewall.core.ProcessLauncher {
+  + {abstract}Process startProcess(List<String>, boolean)
+  + {abstract}void addShutdownHook(Thread)
+  + {abstract}void removeShutdownHook(Thread)
+  + {abstract}Path createTempDirectory(String, FileAttribute<?>[])
+  + {abstract}boolean deleteIfExists(Path)
+  + {abstract}boolean exists(Path)
+}
+class "RealProcessLauncher" as io.mazewall.core.RealProcessLauncher {
+  + {static}RealProcessLauncher INSTANCE
+  __
+  +Process startProcess(List<String>, boolean)
+  +void addShutdownHook(Thread)
+  +void removeShutdownHook(Thread)
+  +Path createTempDirectory(String, FileAttribute<?>[])
+  +boolean deleteIfExists(Path)
+  +boolean exists(Path)
+}
+class "RealSocketManager" as io.mazewall.core.RealSocketManager {
+  + {static}RealSocketManager INSTANCE
+  __
+  +FileDescriptor<UnixSocket, Open> createUnixServer(String)
+  +FileDescriptor<UnixSocket, Open> accept(FileDescriptor<UnixSocket, ? extends Open>)
+  +FileDescriptor<UnixSocket, Open> connect(String)
+  +void close(FileDescriptor<?, ? extends Open>)
+  +FileDescriptor<SeccompNotif, Open> recvDescriptor(FileDescriptor<UnixSocket, ? extends Open>)
+  +boolean sendDescriptor(FileDescriptor<UnixSocket, ? extends Open>, FileDescriptor<?, ? extends Open>)
+}
 class "SandboxedPath" as io.mazewall.core.SandboxedPath {
   + {static}Companion Companion
   __
@@ -400,6 +438,14 @@ enum "SeccompAction" as io.mazewall.core.SeccompAction {
   __
   +int getPriority()
   +int getNativeCode()
+}
+interface "SocketManager" as io.mazewall.core.SocketManager {
+  + {abstract}FileDescriptor<UnixSocket, Open> createUnixServer(String)
+  + {abstract}FileDescriptor<UnixSocket, Open> accept(FileDescriptor<UnixSocket, ? extends Open>)
+  + {abstract}FileDescriptor<UnixSocket, Open> connect(String)
+  + {abstract}void close(FileDescriptor<?, ? extends Open>)
+  + {abstract}FileDescriptor<SeccompNotif, Open> recvDescriptor(FileDescriptor<UnixSocket, ? extends Open>)
+  + {abstract}boolean sendDescriptor(FileDescriptor<UnixSocket, ? extends Open>, FileDescriptor<?, ? extends Open>)
 }
 class "SyscallNumber" as io.mazewall.core.SyscallNumber {
   +int getNr()
@@ -586,11 +632,12 @@ class "SupervisorDaemonEngine" as io.mazewall.enforcer.supervisor.SupervisorDaem
   +SeccompConnection processConnectionStep(Arena, SeccompConnection, FileDescriptor<UnixSocket, ? extends Open>, MemorySegment)
 }
 class "SupervisorDaemonManager" as io.mazewall.enforcer.supervisor.SupervisorDaemonManager {
-  + {static}SupervisorDaemonManager INSTANCE
+  + {static}Companion Companion
   __
   +ConcurrentLinkedQueue<String> getDaemonLogLines()
   +SupervisorContext getOrSpawnSharedDaemon()
   +void stop()
+  + {static}SupervisorDaemonManager getInstance()
 }
 interface "SupervisorDaemonState" as io.mazewall.enforcer.supervisor.SupervisorDaemonState {
 }
@@ -608,7 +655,7 @@ class "SupervisorSession" as io.mazewall.enforcer.supervisor.SupervisorSession {
 class "SupervisorSessionHandler" as io.mazewall.enforcer.supervisor.SupervisorSessionHandler {
   + {static}Companion Companion
   __
-  +LoopAction handleActiveListener(MemorySegment, MemorySegment, MemorySegment)
+  +LoopAction handleActiveListener(Arena, MemorySegment, MemorySegment, MemorySegment)
 }
 class "SupervisorSessionHandlerKt" as io.mazewall.enforcer.supervisor.SupervisorSessionHandlerKt {
 }
@@ -856,13 +903,13 @@ class "SockaddrUnSegment" as io.mazewall.ffi.memory.SockaddrUnSegment {
 class "SupervisorProcessMemoryReader" as io.mazewall.ffi.memory.SupervisorProcessMemoryReader {
   + {static}SupervisorProcessMemoryReader INSTANCE
   __
-  +String readString(int, long, int, boolean)
-  +byte[] readBytes(int, long, int, boolean)
+  +String readString(Arena, int, long, int, boolean)
+  +byte[] readBytes(Arena, int, long, int, boolean)
 }
 class "SupervisorProcessMemoryWriter" as io.mazewall.ffi.memory.SupervisorProcessMemoryWriter {
   + {static}SupervisorProcessMemoryWriter INSTANCE
   __
-  +boolean writeBytes(int, long, byte[])
+  +boolean writeBytes(Arena, int, long, byte[])
 }
 class "SupervisorResponseSegment" as io.mazewall.ffi.memory.SupervisorResponseSegment {
   + {static}Companion Companion
@@ -1128,6 +1175,10 @@ io.mazewall.RealTransactionManager --> io.mazewall.RealTransactionManager
 io.mazewall.SbobParser --> io.mazewall.SbobParser
 io.mazewall.StackProfileEntryDto --> io.mazewall.StackFrameDto
 io.mazewall.core.FileDescriptor --> io.mazewall.core.FileDescriptor
+io.mazewall.core.RealProcessLauncher .u.|> io.mazewall.core.ProcessLauncher
+io.mazewall.core.RealProcessLauncher --> io.mazewall.core.RealProcessLauncher
+io.mazewall.core.RealSocketManager .u.|> io.mazewall.core.SocketManager
+io.mazewall.core.RealSocketManager --> io.mazewall.core.RealSocketManager
 io.mazewall.enforcer.ContainedExecutors --> io.mazewall.enforcer.ContainedExecutors
 io.mazewall.enforcer.ContainerState --> io.mazewall.seccomp.SeccompInstallationState
 io.mazewall.enforcer.ContainerState --> io.mazewall.PolicyDefinition
@@ -1153,12 +1204,19 @@ io.mazewall.enforcer.supervisor.JvmStackInspector --> io.mazewall.enforcer.super
 io.mazewall.enforcer.supervisor.PendingSpawnRegistry --> io.mazewall.enforcer.supervisor.PendingSpawnRegistry
 io.mazewall.enforcer.supervisor.PendingSpawnRegistry --> io.mazewall.core.Tid
 io.mazewall.enforcer.supervisor.SupervisorDaemon --> io.mazewall.enforcer.supervisor.SupervisorDaemon
+io.mazewall.enforcer.supervisor.SupervisorDaemonEngine --> io.mazewall.NativeEngine
 io.mazewall.enforcer.supervisor.SupervisorDaemonEngine --> io.mazewall.core.FileDescriptor
+io.mazewall.enforcer.supervisor.SupervisorDaemonEngine --> io.mazewall.core.SocketManager
 io.mazewall.enforcer.supervisor.SupervisorDaemonEngine --> io.mazewall.enforcer.supervisor.SupervisorDaemonState
+io.mazewall.enforcer.supervisor.SupervisorDaemonManager --> io.mazewall.NativeEngine
+io.mazewall.enforcer.supervisor.SupervisorDaemonManager --> io.mazewall.core.SocketManager
 io.mazewall.enforcer.supervisor.SupervisorDaemonManager --> io.mazewall.enforcer.supervisor.SupervisorContext
+io.mazewall.enforcer.supervisor.SupervisorDaemonManager --> io.mazewall.core.ProcessLauncher
 io.mazewall.enforcer.supervisor.SupervisorDaemonManager --> io.mazewall.enforcer.supervisor.SupervisorDaemonManager
 io.mazewall.enforcer.supervisor.SupervisorInstaller --> io.mazewall.enforcer.supervisor.SupervisorInstaller
 io.mazewall.enforcer.supervisor.SupervisorInstaller --> io.mazewall.core.Tid
+io.mazewall.enforcer.supervisor.SupervisorSessionHandler --> io.mazewall.NativeEngine
+io.mazewall.enforcer.supervisor.SupervisorSessionHandler --> io.mazewall.core.SocketManager
 io.mazewall.enforcer.supervisor.SupervisorSessionHandler --> io.mazewall.core.FileDescriptor
 io.mazewall.enforcer.supervisor.SupervisorSocketInputStream --> io.mazewall.core.FileDescriptor
 io.mazewall.enforcer.supervisor.ValidationLog --> io.mazewall.enforcer.supervisor.ValidationLog

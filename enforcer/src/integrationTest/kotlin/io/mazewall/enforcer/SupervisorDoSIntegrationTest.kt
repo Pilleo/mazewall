@@ -15,7 +15,7 @@ class SupervisorDoSIntegrationTest {
     fun testBoundedThreadCreation() {
         if (!System.getProperty("os.name").equals("Linux", ignoreCase = true)) return
 
-        val context = SupervisorDaemonManager.getOrSpawnSharedDaemon()
+        val context = SupervisorDaemonManager.getInstance().getOrSpawnSharedDaemon()
         val pid = context.daemonProcess.pid()
         val socketPath = context.socketPath
 
@@ -46,7 +46,7 @@ class SupervisorDoSIntegrationTest {
             connections.forEach {
                 LinuxNative.fileSystem.close(FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(it))
             }
-            SupervisorDaemonManager.stop()
+            SupervisorDaemonManager.getInstance().stop()
         }
     }
 

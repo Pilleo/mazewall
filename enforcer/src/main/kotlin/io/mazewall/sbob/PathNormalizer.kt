@@ -1,35 +1,53 @@
 package io.mazewall.sbob
 
+import java.io.IOException
 import java.nio.file.Files
 import java.nio.file.LinkOption
 import java.nio.file.Path
 import java.nio.file.Paths
 
 /**
- * Handles normalization, canonicalization, and pruning of filesystem paths.
+ * Handles normalization, physical resolution (symlink following), and pruning of filesystem paths.
+ *
+ * This component ensures that paths provided in SBoB files are resolved to their physical locations
+ * on disk before being applied as security rules. This prevents Time-of-Check to Time-of-Use (TOCTOU)
+ * vulnerabilities and "dot-dot-through-symlink" attacks where a syntactically harmless path
+ * (e.g., `/app/link/../etc/passwd`) points to a sensitive location.
  */
 public object PathNormalizer {
     /**
-     * Resolves all paths against [baseCwd] if they are relative, normalizes them,
-     * and prunes redundant subpaths (e.g. if /tmp/ is allowed, /tmp/foo is pruned).
+     * Resolves all paths against [baseCwd] if they are relative, resolves them to their physical
+     * real path (following symlinks), and prunes redundant subpaths.
      *
-     * Pruning is ONLY performed if the parent path is a real directory (not a symbolic link),
-     * because Landlock rules with O_NOFOLLOW do not allow recursive access through symlinks.
+     * Pruning is performed to reduce the number of rules added to Landlock. A path is pruned if
+     * it is a subpath of a previously included directory.
+     *
+     * @param paths The set of raw path strings to normalize and prune.
+     * @param baseCwd The base directory to resolve relative paths against.
+     * @return A set of resolved, absolute, and pruned path strings.
      */
     fun normalizeAndPrune(paths: Set<String>, baseCwd: Path?): Set<String> {
         if (paths.isEmpty()) return paths
 
         val resolvedPaths = paths.map { pathStr ->
-            val p = Paths.get(pathStr)
+            var p = Paths.get(pathStr)
             if (!p.isAbsolute) {
                 if (baseCwd == null) {
                     throw IllegalArgumentException("SBoB contains relative path '$pathStr' but no baseCwd was provided.")
                 }
-                baseCwd.resolve(p).normalize()
-            } else {
-                p.normalize()
+                p = baseCwd.resolve(p)
             }
-        }.sorted()
+            try {
+                // toRealPath() resolves symlinks and handles '..' correctly according to the physical VFS.
+                p.toRealPath()
+            } catch (e: IOException) {
+                // If the path does not exist, we fall back to syntactic normalization.
+                // This is necessary for rules targeting files that might be created later.
+                p.toAbsolutePath().normalize()
+            } catch (e: SecurityException) {
+                p.toAbsolutePath().normalize()
+            }
+        }.distinct().sorted()
 
         val result = mutableListOf<Path>()
         var currentParent: Path? = null
@@ -39,8 +57,8 @@ public object PathNormalizer {
             // 1. If we don't have a currentParent, or the current path is NOT a subpath of currentParent,
             //    we must include this path in the result.
             // 2. We only update currentParent if the new path is a real directory (not a symlink).
-            //    If it's a symlink or a regular file, it cannot serve as a parent for recursive pruning
-            //    under Landlock's O_NOFOLLOW semantics.
+            //    Since we use toRealPath(), symlinks are already resolved. We use NOFOLLOW_LINKS
+            //    here to be consistent with Landlock's O_NOFOLLOW requirement for rules.
             if (currentParent == null || !path.startsWith(currentParent)) {
                 result.add(path)
                 if (Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS)) {

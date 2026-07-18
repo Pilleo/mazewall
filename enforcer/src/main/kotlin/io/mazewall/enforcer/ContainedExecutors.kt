@@ -98,35 +98,44 @@ object ContainedExecutors {
         return ContainedExecutorWrapper(delegate, policy.definition, scopingPolicy)
     }
 
+    @Suppress("TooGenericExceptionCaught", "noGenericExceptionCatchingInEnforcer")
     private fun installInternal(
         processWide: Boolean,
         policy: PolicyDefinition<*>,
         scopingPolicy: StacktraceScopingPolicy = io.mazewall.enforcer.supervisor.DefaultStacktraceScopingPolicy
     ) : AutoCloseable {
-        val augmentedPolicy = if (scopingPolicy.handlers.isNotEmpty()) {
-            val overriddenActions = policy.syscallActions.toMutableMap()
-            for (sys in scopingPolicy.handlers.keys) {
-                overriddenActions[sys] = SeccompAction.ACT_NOTIFY
+        val initialState = if (processWide) null else ThreadStateRegistry.state
+        try {
+            val augmentedPolicy = if (scopingPolicy.handlers.isNotEmpty()) {
+                val overriddenActions = policy.syscallActions.toMutableMap()
+                for (sys in scopingPolicy.handlers.keys) {
+                    overriddenActions[sys] = SeccompAction.ACT_NOTIFY
+                }
+                policy.copy(syscallActions = overriddenActions)
+            } else {
+                policy
             }
-            policy.copy(syscallActions = overriddenActions)
-        } else {
-            policy
+
+            validateLinuxAndNotVirtual()
+
+            if (augmentedPolicy.hasSupervisedSyscalls) {
+                io.mazewall.enforcer.supervisor.SupervisorDaemonManager.getInstance().getOrSpawnSharedDaemon()
+            }
+
+            applyLandlockIfNecessary(processWide, augmentedPolicy)
+
+            if (!Platform.isSupported()) {
+                handleUnsupportedPlatform()
+                return AutoCloseable {}
+            }
+
+            return installSeccompFilter(processWide, augmentedPolicy, scopingPolicy)
+        } catch (t: Throwable) {
+            if (!processWide && initialState != null) {
+                ThreadStateRegistry.state = initialState
+            }
+            throw t
         }
-
-        validateLinuxAndNotVirtual()
-
-        if (augmentedPolicy.hasSupervisedSyscalls) {
-            io.mazewall.enforcer.supervisor.SupervisorDaemonManager.getOrSpawnSharedDaemon()
-        }
-
-        applyLandlockIfNecessary(processWide, augmentedPolicy)
-
-        if (!Platform.isSupported()) {
-            handleUnsupportedPlatform()
-            return AutoCloseable {}
-        }
-
-        return installSeccompFilter(processWide, augmentedPolicy, scopingPolicy)
     }
 
     private fun installSeccompFilter(

@@ -1,45 +1,62 @@
 package io.mazewall.enforcer.supervisor
 
 import io.mazewall.LinuxNative
+import io.mazewall.NativeEngine
+import io.mazewall.core.ProcessLauncher
+import io.mazewall.core.RealProcessLauncher
+import io.mazewall.core.RealSocketManager
+import io.mazewall.core.SocketManager
 import io.mazewall.getFdOrThrow
-import io.mazewall.onFailure
-import io.mazewall.ffi.Layouts
 import java.io.IOException
 import java.lang.foreign.Arena
-import java.lang.foreign.MemorySegment
 import java.lang.foreign.ValueLayout
-import java.nio.charset.StandardCharsets
-import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.attribute.PosixFilePermissions
 import java.util.logging.Logger
 
-internal data class SupervisorContext(
+/**
+ * Context for a running Supervisor Daemon.
+ */
+public data class SupervisorContext(
     val socketPath: String,
     val socketDir: Path,
     val daemonProcess: Process,
     val shutdownHook: Thread,
 )
 
-internal object SupervisorDaemonManager {
+/**
+ * Manages the lifecycle of the shared Supervisor Daemon.
+ */
+public class SupervisorDaemonManager(
+    private val engine: NativeEngine = LinuxNative,
+    private val socketManager: SocketManager = RealSocketManager,
+    private val processLauncher: ProcessLauncher = RealProcessLauncher
+) {
     private val logger = Logger.getLogger(SupervisorDaemonManager::class.java.name)
     private val daemonLock = Any()
     private var sharedDaemonContext: SupervisorContext? = null
 
-    private const val SHUTDOWN_COMMAND_BYTE = 0x53.toByte() // 'S'
-    private const val SHUTDOWN_WAIT_MS = 100L
-    private const val SOCKADDR_UN_SIZE = 110
-    private const val LATCH_TIMEOUT_SECONDS = 30L
+    public companion object {
+        private const val SHUTDOWN_COMMAND_BYTE = 0x53.toByte() // 'S'
+        private const val SHUTDOWN_WAIT_MS = 100L
+        private const val LATCH_TIMEOUT_SECONDS = 30L
+        private val INSTANCE_DEFAULT = SupervisorDaemonManager()
 
-    val daemonLogLines = java.util.concurrent.ConcurrentLinkedQueue<String>()
+        @JvmStatic
+        public fun getInstance(): SupervisorDaemonManager = INSTANCE_DEFAULT
+    }
 
-    fun getOrSpawnSharedDaemon(): SupervisorContext {
+    public val daemonLogLines: java.util.concurrent.ConcurrentLinkedQueue<String> = java.util.concurrent.ConcurrentLinkedQueue<String>()
+
+    /**
+     * Returns the existing shared daemon context or spawns a new one.
+     */
+    public fun getOrSpawnSharedDaemon(): SupervisorContext {
         synchronized(daemonLock) {
             val existing = sharedDaemonContext
-            System.err.println("DEBUG: getOrSpawnSharedDaemon - existing = ${existing?.socketPath} (alive=${existing?.daemonProcess?.isAlive})")
             if (existing != null && existing.daemonProcess.isAlive) {
-                LinuxNative.withTransaction {
-                    LinuxNative.process.prctl(
+                engine.withTransaction {
+                    engine.process.prctl(
                         io.mazewall.core.PrctlCommand.SetPtracer(existing.daemonProcess.pid())
                     )
                 }
@@ -51,7 +68,10 @@ internal object SupervisorDaemonManager {
         }
     }
 
-    fun stop() {
+    /**
+     * Stops the shared daemon and cleans up resources.
+     */
+    public fun stop() {
         synchronized(daemonLock) {
             sharedDaemonContext?.let {
                 cleanupDaemon(it)
@@ -62,7 +82,7 @@ internal object SupervisorDaemonManager {
 
     private fun cleanupDaemon(context: SupervisorContext) {
         try {
-            Runtime.getRuntime().removeShutdownHook(context.shutdownHook)
+            processLauncher.removeShutdownHook(context.shutdownHook)
         } catch (ignored: IllegalStateException) {
             // Shutdown already in progress - ignore
         } catch (e: SecurityException) {
@@ -71,8 +91,8 @@ internal object SupervisorDaemonManager {
         triggerDaemonShutdown(context.socketPath)
         context.daemonProcess.destroyForcibly()
         try {
-            Files.deleteIfExists(context.socketDir.resolve("supervisor.sock"))
-            Files.deleteIfExists(context.socketDir)
+            processLauncher.deleteIfExists(context.socketDir.resolve("supervisor.sock"))
+            processLauncher.deleteIfExists(context.socketDir)
         } catch (e: IOException) {
             logger.log(
                 java.util.logging.Level.WARNING,
@@ -83,11 +103,10 @@ internal object SupervisorDaemonManager {
     }
 
     private fun spawnDaemon(): SupervisorContext {
-        System.err.println("DEBUG: spawnDaemon called!")
         val daemonClassName = SupervisorDaemon::class.java.name
 
         val perms = PosixFilePermissions.fromString("rwx------")
-        val socketDir = Files.createTempDirectory("mazewall-supervisor-", PosixFilePermissions.asFileAttribute(perms))
+        val socketDir = processLauncher.createTempDirectory("mazewall-supervisor-", PosixFilePermissions.asFileAttribute(perms))
         val socketPath = socketDir.resolve("supervisor.sock").toAbsolutePath().toString()
 
         val javaBin = System.getProperty("java.home") + "/bin/java"
@@ -110,17 +129,15 @@ internal object SupervisorDaemonManager {
 
         logger.info("Spawning SupervisorDaemon: ${pbArgs.joinToString(" ")}")
 
-        val pb = ProcessBuilder(pbArgs)
-        pb.redirectErrorStream(true)
-        val daemonProcess = pb.start()
+        val daemonProcess = processLauncher.startProcess(pbArgs)
         val daemonPid = daemonProcess.pid()
 
-        val prctlRes = LinuxNative.withTransaction {
-            LinuxNative.process.prctl(
+        val prctlRes = engine.withTransaction {
+            engine.process.prctl(
                 io.mazewall.core.PrctlCommand.SetPtracer(daemonPid)
             )
         }
-        if (prctlRes is LinuxNative.SyscallResult.Error) {
+        if (prctlRes is io.mazewall.LinuxNative.SyscallResult.Error) {
             logger.warning("prctl(PR_SET_PTRACER) failed with errno ${prctlRes.errno}. The daemon may not be able to read process memory if Yama ptrace_scope is restrictive.")
         }
 
@@ -128,13 +145,6 @@ internal object SupervisorDaemonManager {
 
         Thread {
             try {
-                val logFile = java.io.File("/tmp/supervisor_daemon.log")
-                try {
-                    logFile.writeText("") // Clear previous log
-                } catch (e: Exception) {
-                    System.err.println("DEBUG: logFile.writeText failed: ${e.message}")
-                    e.printStackTrace()
-                }
                 val reader = daemonProcess.inputStream.bufferedReader()
                 while (true) {
                     val line = reader.readLine() ?: break
@@ -142,12 +152,6 @@ internal object SupervisorDaemonManager {
                         readyLatch.countDown()
                     }
                     daemonLogLines.add(line)
-                    try {
-                        logFile.appendText("$line\n")
-                    } catch (e: Exception) {
-                        System.err.println("DEBUG: logFile.appendText failed: ${e.message}")
-                        e.printStackTrace()
-                    }
                     System.err.println("[SUPERVISOR-DAEMON] $line")
                     System.err.flush()
                 }
@@ -175,7 +179,7 @@ internal object SupervisorDaemonManager {
         val shutdownHook = Thread {
             daemonProcess.destroyForcibly()
         }
-        Runtime.getRuntime().addShutdownHook(shutdownHook)
+        processLauncher.addShutdownHook(shutdownHook)
 
         return SupervisorContext(socketPath, socketDir, daemonProcess, shutdownHook)
     }
@@ -183,52 +187,23 @@ internal object SupervisorDaemonManager {
     private fun triggerDaemonShutdown(socketPath: String) {
         try {
             Arena.ofConfined().use { arena ->
-                val fdRes = LinuxNative.withTransaction {
-                    LinuxNative.networking.socket(
-                        io.mazewall.ffi.networking.SupervisorSocketUtils.AF_UNIX,
-                        io.mazewall.ffi.networking.SupervisorSocketUtils.SOCK_STREAM,
-                        0
-                    )
-                }
-                val fd = fdRes.getFdOrThrow("socket(AF_UNIX)")
+                val fd = socketManager.connect(socketPath)
                 try {
-                    val sockaddrUn = io.mazewall.ffi.networking.SupervisorSocketUtils.setupSockAddrUn(arena, socketPath)
-
-                    var connRes: LinuxNative.SyscallResult<Long, *>
+                    val cmd = arena.allocateFrom(ValueLayout.JAVA_BYTE, SHUTDOWN_COMMAND_BYTE)
+                    var writeRes: io.mazewall.LinuxNative.SyscallResult<Long, *>
                     while (true) {
-                        connRes = LinuxNative.withTransaction {
-                            LinuxNative.networking.connect(
-                                fd,
-                                sockaddrUn.segment,
-                                io.mazewall.ffi.networking.SupervisorSocketUtils.SOCKADDR_UN_SIZE
-                            )
-                        }
-                        if (connRes is LinuxNative.SyscallResult.Error && connRes.errno == io.mazewall.ffi.NativeConstants.EINTR) {
+                        writeRes = engine.withTransaction { engine.memory.write(fd, cmd, 1) }
+                        if (writeRes is io.mazewall.LinuxNative.SyscallResult.Error && writeRes.errno == io.mazewall.ffi.NativeConstants.EINTR) {
                             continue
                         }
                         break
                     }
-                    if (connRes is LinuxNative.SyscallResult.Success) {
-                        val cmd = arena.allocateFrom(ValueLayout.JAVA_BYTE, SHUTDOWN_COMMAND_BYTE)
-                        var writeRes: LinuxNative.SyscallResult<Long, *>
-                        while (true) {
-                            writeRes = LinuxNative.withTransaction { LinuxNative.memory.write(fd, cmd, 1) }
-                            if (writeRes is LinuxNative.SyscallResult.Error && writeRes.errno == io.mazewall.ffi.NativeConstants.EINTR) {
-                                continue
-                            }
-                            break
-                        }
-                        Thread.sleep(SHUTDOWN_WAIT_MS)
-                    }
+                    Thread.sleep(SHUTDOWN_WAIT_MS)
                 } finally {
-                    LinuxNative.fileSystem.close(fd)
+                    socketManager.close(fd)
                 }
             }
-        } catch (ignored: java.io.IOException) {
-            // Ignore
-        } catch (ignored: IllegalStateException) {
-            // Ignore
-        } catch (ignored: InterruptedException) {
+        } catch (ignored: Exception) {
             // Ignore
         }
     }

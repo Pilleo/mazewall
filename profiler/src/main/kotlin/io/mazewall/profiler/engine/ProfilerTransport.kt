@@ -18,6 +18,7 @@ import java.nio.charset.StandardCharsets
  * High-level interface for publishing domain events to the parent JVM.
  */
 interface TraceEventPublisher {
+    context(arena: Arena)
     fun sendTraceEvent(
         socketFd: FileDescriptor<*, FdState.Open>,
         event: SyscallEvent<SyscallEventState.Resolved>,
@@ -32,6 +33,7 @@ interface SeccompResponder {
      * Sends a SECCOMP_USER_NOTIF_FLAG_CONTINUE response to the kernel for a successful handshake.
      * Enforced at compile-time to only work with sessions in the Success state.
      */
+    context(arena: Arena)
     fun sendSeccompContinue(
         session: HandshakeSession.Success,
         resp: MemorySegment,
@@ -41,6 +43,7 @@ interface SeccompResponder {
      * Sends an error response (or generic failure) to the kernel for a failed handshake.
      * Enforced at compile-time to only work with sessions in the Failed state.
      */
+    context(arena: Arena)
     fun sendSeccompError(
         session: HandshakeSession.Failed,
         resp: MemorySegment,
@@ -88,15 +91,7 @@ interface NativeIoOperations {
 /**
  * Interface for socket creation and connection handling.
  */
-interface SocketLifecycleManager {
-    fun createServer(socketPath: String): FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>
-
-    fun accept(serverFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>): FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>
-
-    fun close(fd: FileDescriptor<*, FdState.Open>)
-
-    fun recvDescriptor(socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>): FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open>?
-}
+typealias SocketLifecycleManager = io.mazewall.core.SocketManager
 
 /**
  * Legacy composite interface for communicating with the parent JVM and receiving file descriptors.
@@ -124,49 +119,49 @@ object RealProfilerTransport : ProfilerTransport {
     private val JAVA_INT_BE_UNALIGNED = ValueLayout.JAVA_INT.withOrder(java.nio.ByteOrder.BIG_ENDIAN).withByteAlignment(1)
     private val JAVA_LONG_BE_UNALIGNED = ValueLayout.JAVA_LONG.withOrder(java.nio.ByteOrder.BIG_ENDIAN).withByteAlignment(1)
 
+    context(arena: Arena)
     override fun sendTraceEvent(
         socketFd: FileDescriptor<*, FdState.Open>,
         event: SyscallEvent<SyscallEventState.Resolved>,
     ) {
-        Arena.ofConfined().use { arena ->
-            val syscallNameBytes = event.syscallName.toByteArray(StandardCharsets.UTF_8)
-            val pathBytesList = event.paths.map { it.toByteArray(StandardCharsets.UTF_8) }
+        val syscallNameBytes = event.syscallName.toByteArray(StandardCharsets.UTF_8)
+        val pathBytesList = event.paths.map { it.toByteArray(StandardCharsets.UTF_8) }
 
-            var totalSize = 4 + 4 + syscallNameBytes.size + 4 + (event.args.size * 8) + 4
-            for (p in pathBytesList) {
-                totalSize += 4 + p.size
-            }
-
-            val buf = arena.allocate(totalSize.toLong())
-            var offset = 0L
-            buf.set(JAVA_INT_BE_UNALIGNED, offset, event.tid.value)
-            offset += 4
-            buf.set(JAVA_INT_BE_UNALIGNED, offset, syscallNameBytes.size)
-            offset += 4
-            MemorySegment.copy(syscallNameBytes, 0, buf, ValueLayout.JAVA_BYTE, offset, syscallNameBytes.size)
-            offset += syscallNameBytes.size
-
-            buf.set(JAVA_INT_BE_UNALIGNED, offset, event.args.size)
-            offset += 4
-            for (arg in event.args) {
-                buf.set(JAVA_LONG_BE_UNALIGNED, offset, arg)
-                offset += 8
-            }
-
-            buf.set(JAVA_INT_BE_UNALIGNED, offset, pathBytesList.size)
-            offset += 4
-            for (p in pathBytesList) {
-                buf.set(JAVA_INT_BE_UNALIGNED, offset, p.size)
-                offset += 4
-                MemorySegment.copy(p, 0, buf, ValueLayout.JAVA_BYTE, offset, p.size)
-                offset += p.size
-            }
-
-            val res = LinuxNative.withTransaction { LinuxNative.memory.write(socketFd, buf, totalSize.toLong()) }
-            res.getOrThrow("sendTraceEvent")
+        var totalSize = 4 + 4 + syscallNameBytes.size + 4 + (event.args.size * 8) + 4
+        for (p in pathBytesList) {
+            totalSize += 4 + p.size
         }
+
+        val buf = arena.allocate(totalSize.toLong())
+        var offset = 0L
+        buf.set(JAVA_INT_BE_UNALIGNED, offset, event.tid.value)
+        offset += 4
+        buf.set(JAVA_INT_BE_UNALIGNED, offset, syscallNameBytes.size)
+        offset += 4
+        MemorySegment.copy(syscallNameBytes, 0, buf, ValueLayout.JAVA_BYTE, offset, syscallNameBytes.size)
+        offset += syscallNameBytes.size
+
+        buf.set(JAVA_INT_BE_UNALIGNED, offset, event.args.size)
+        offset += 4
+        for (arg in event.args) {
+            buf.set(JAVA_LONG_BE_UNALIGNED, offset, arg)
+            offset += 8
+        }
+
+        buf.set(JAVA_INT_BE_UNALIGNED, offset, pathBytesList.size)
+        offset += 4
+        for (p in pathBytesList) {
+            buf.set(JAVA_INT_BE_UNALIGNED, offset, p.size)
+            offset += 4
+            MemorySegment.copy(p, 0, buf, ValueLayout.JAVA_BYTE, offset, p.size)
+            offset += p.size
+        }
+
+        val res = LinuxNative.withTransaction { LinuxNative.memory.write(socketFd, buf, totalSize.toLong()) }
+        res.getOrThrow("sendTraceEvent")
     }
 
+    context(arena: Arena)
     override fun sendSeccompContinue(
         session: HandshakeSession.Success,
         resp: MemorySegment,
@@ -179,6 +174,7 @@ object RealProfilerTransport : ProfilerTransport {
         ioctl(session.listenerFd, SECCOMP_IOCTL_NOTIF_SEND, resp).getOrThrow("sendSeccompContinue")
     }
 
+    context(arena: Arena)
     override fun sendSeccompError(
         session: HandshakeSession.Failed,
         resp: MemorySegment,
@@ -193,8 +189,16 @@ object RealProfilerTransport : ProfilerTransport {
         ioctl(session.listenerFd, SECCOMP_IOCTL_NOTIF_SEND, resp).getOrThrow("sendSeccompContinue")
     }
 
+    override fun connect(socketPath: String): FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open> {
+        return io.mazewall.core.RealSocketManager.connect(socketPath)
+    }
+
+    override fun sendDescriptor(socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>, fdToSend: FileDescriptor<*, FdState.Open>): Boolean {
+        return io.mazewall.core.RealSocketManager.sendDescriptor(socketFd, fdToSend)
+    }
+
     override fun recvDescriptor(socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>): FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open>? {
-        return io.mazewall.ffi.networking.SupervisorSocketUtils.recvDescriptor(socketFd)
+        return io.mazewall.core.RealSocketManager.recvDescriptor(socketFd)
     }
 
     override fun poll(
@@ -228,37 +232,12 @@ object RealProfilerTransport : ProfilerTransport {
         arg: MemorySegment,
     ): LinuxNative.SyscallResult<Long, *> = LinuxNative.withTransaction { LinuxNative.raw.ioctl(fd, request, arg) }
 
-    override fun createServer(socketPath: String): FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open> {
-        val fd = LinuxNative.withTransaction {
-            LinuxNative.networking.socket(
-                io.mazewall.ffi.networking.SupervisorSocketUtils.AF_UNIX,
-                io.mazewall.ffi.networking.SupervisorSocketUtils.SOCK_STREAM,
-                0
-            )
-        }.getFdOrThrow("socket(AF_UNIX)").let { FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(it.value) }
-
-        Arena.ofConfined().use { arena ->
-            val sockaddrUn = io.mazewall.ffi.networking.SupervisorSocketUtils.setupSockAddrUn(arena, socketPath)
-
-            LinuxNative.withTransaction {
-                LinuxNative.networking.bind(fd, sockaddrUn.segment, io.mazewall.ffi.networking.SupervisorSocketUtils.SOCKADDR_UN_SIZE)
-            }.onFailure { _, _ ->
-                LinuxNative.fileSystem.close(fd)
-            }.getOrThrow("bind(AF_UNIX)")
-        }
-
-        LinuxNative.withTransaction {
-            LinuxNative.networking.listen(fd, io.mazewall.ffi.networking.SupervisorSocketUtils.BACKLOG_SIZE)
-        }.onFailure { _, _ ->
-            LinuxNative.fileSystem.close(fd)
-        }.getOrThrow("listen")
-
-        return fd
+    override fun createUnixServer(socketPath: String): FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open> {
+        return io.mazewall.core.RealSocketManager.createUnixServer(socketPath)
     }
 
     override fun accept(serverFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>): FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open> {
-        val res = LinuxNative.withTransaction { LinuxNative.networking.accept(serverFd, MemorySegment.NULL, MemorySegment.NULL) }
-        return res.getFdOrThrow("accept").let { FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(it.value) }
+        return io.mazewall.core.RealSocketManager.accept(serverFd)
     }
 
     override fun close(fd: FileDescriptor<*, FdState.Open>) {

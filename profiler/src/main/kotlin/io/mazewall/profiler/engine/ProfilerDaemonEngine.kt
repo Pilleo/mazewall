@@ -62,7 +62,7 @@ internal class ProfilerDaemonEngine(
     }
 
     fun run() {
-        val serverFd = socketManager.createServer(socketPath)
+        val serverFd = socketManager.createUnixServer(socketPath)
         val listeningState = (state as ProfilerDaemonState.Uninitialized).listening(serverFd, socketPath)
         state = listeningState
         System.err.println("[DAEMON] Listening on $socketPath (fd=$serverFd)")
@@ -110,7 +110,7 @@ internal class ProfilerDaemonEngine(
         while (!isGlobalShutdown()) {
             val pollRes = LinuxNative.withTransaction { ioOps.raw.poll(pollFd, 1L, POLL_TIMEOUT_MS) }
             val count = pollRes.recover { errno, _ ->
-                if (errno != NativeConstants.EINTR) return // Break from loop
+                if (errno != NativeConstants.EINTR) return
                 0L
             }
             if (count <= 0) continue
@@ -128,7 +128,7 @@ internal class ProfilerDaemonEngine(
                 start()
             }
         } catch (e: Exception) {
-            // Socket closed or accept failed during shutdown
+            System.err.println("WARN: handleNewConnection failed: ${e.message}")
         }
     }
 
@@ -169,8 +169,23 @@ internal class ProfilerDaemonEngine(
                             System.err.println("[DAEMON] Sending handshake ACK to socket ${socketFd.value}")
                             val ackBuf = arena.allocate(ACK_BUF_SIZE)
                             ackBuf.set(ValueLayout.JAVA_BYTE, 0L, PROTOCOL_ACK_BYTE)
-                            ioOps.write(socketFd, ackBuf, ACK_BUF_SIZE)
-                            connection = current.handshakeComplete()
+                            var success = false
+                            while (true) {
+                                val res = ioOps.write(socketFd, ackBuf, ACK_BUF_SIZE)
+                                if (res is io.mazewall.LinuxNative.SyscallResult.Success) {
+                                    success = true
+                                    break
+                                } else {
+                                    val errno = (res as io.mazewall.LinuxNative.SyscallResult.Error).errno
+                                    if (errno == NativeConstants.EINTR) continue
+                                    break
+                                }
+                            }
+                            if (success) {
+                                connection = current.handshakeComplete()
+                            } else {
+                                return@use
+                            }
                             // Immediately loop to start session reactor (don't poll)
                         }
 
@@ -218,7 +233,7 @@ internal class ProfilerDaemonEngine(
                 val pollFds = with(arena) { setupSessionPoll(socketFd, listenerFd) }
                 val notif = arena.allocate(Layouts.SECCOMP_NOTIF)
                 val resp = arena.allocate(Layouts.SECCOMP_NOTIF_RESP)
-                val ackBuf = arena.allocate(ACK_BUF_SIZE)
+                val ackBuf = arena.allocate(1L)
                 val socketPollFd = arena.allocate(Layouts.POLLFD)
 
                 while (!isGlobalShutdown()) {
@@ -229,8 +244,13 @@ internal class ProfilerDaemonEngine(
                     }
                     if (count <= 0) continue
 
-                    val action = sessionHandler.handleActiveListener(pollFds, ackBuf, notif, resp, socketPollFd)
+                    val action = io.mazewall.ffi.memory.nativeScope {
+                        with(this) {
+                            sessionHandler.handleActiveListener(pollFds, ackBuf, notif, resp, socketPollFd)
+                        }
+                    }
                     if (action !is LoopAction.Continue) break
+                    if (isGlobalShutdown()) break
                 }
             }
         } finally {

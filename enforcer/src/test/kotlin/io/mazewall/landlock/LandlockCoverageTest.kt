@@ -25,6 +25,8 @@ class LandlockCoverageTest {
     @AfterEach
     fun tearDown() {
         LinuxNative.resetToDefault()
+        Platform.resetToDefault()
+        System.clearProperty("io.mazewall.fallback")
     }
 
     private open class SupportedLandlockMock(
@@ -54,17 +56,8 @@ class LandlockCoverageTest {
 
     @Test
     fun `test handleUnsupportedLandlock with WARN_AND_BYPASS`() {
-        val old = System.getProperty("io.mazewall.fallback")
         System.setProperty("io.mazewall.fallback", "WARN_AND_BYPASS")
-        try {
-            Landlock.handleUnsupportedLandlock()
-        } finally {
-            if (old != null) {
-                System.setProperty("io.mazewall.fallback", old)
-            } else {
-                System.clearProperty("io.mazewall.fallback")
-            }
-        }
+        Landlock.handleUnsupportedLandlock()
     }
 
     @Test
@@ -159,16 +152,10 @@ class LandlockCoverageTest {
         val mockEngine = SupportedLandlockMock()
         LinuxNative.setEngine(mockEngine)
 
-        val old = System.getProperty("io.mazewall.fallback")
+        // Should log warning and continue with thread-scoped
         System.setProperty("io.mazewall.fallback", "WARN_AND_BYPASS")
-        try {
-            // Should log warning and continue with thread-scoped
-            val session = LandlockSession(Policy.builder().build().definition, processWide = true)
-            session.applyRuleset()
-        } finally {
-            if (old != null) System.setProperty("io.mazewall.fallback", old)
-            else System.clearProperty("io.mazewall.fallback")
-        }
+        val session = LandlockSession(Policy.builder().build().definition, processWide = true)
+        session.applyRuleset()
     }
 
     @Test

@@ -13,6 +13,7 @@ import java.nio.charset.StandardCharsets
  * Shared utility for reading memory from remote processes/threads using process_vm_readv.
  */
 public object SupervisorProcessMemoryReader {
+    context(arena: Arena)
     public fun readString(
         tid: Tid,
         remoteAddr: Long,
@@ -26,6 +27,7 @@ public object SupervisorProcessMemoryReader {
         return String(bytes, 0, len, StandardCharsets.UTF_8)
     }
 
+    context(arena: Arena)
     public fun readBytes(
         tid: Tid,
         remoteAddr: Long,
@@ -33,38 +35,37 @@ public object SupervisorProcessMemoryReader {
         warnOnEperm: Boolean = false
     ): ByteArray? {
         if (remoteAddr == 0L) return null
-        return Arena.ofConfined().use { arena ->
-            val localBuf = arena.allocate(len.toLong())
-            localBuf.fill(0)
-            val localIov = IovecSegment(arena.allocate(Layouts.IOVEC))
-            localIov.setIovBase(localBuf)
-            localIov.setIovLen(len.toLong())
-            val remoteIov = IovecSegment(arena.allocate(Layouts.IOVEC))
-            remoteIov.setIovBase(MemorySegment.ofAddress(remoteAddr))
-            remoteIov.setIovLen(len.toLong())
+        val localBuf = arena.allocate(len.toLong())
+        localBuf.fill(0)
+        val localIov = IovecSegment(arena.allocate(Layouts.IOVEC))
+        localIov.setIovBase(localBuf)
+        localIov.setIovLen(len.toLong())
+        val remoteIov = IovecSegment(arena.allocate(Layouts.IOVEC))
+        remoteIov.setIovBase(MemorySegment.ofAddress(remoteAddr))
+        remoteIov.setIovLen(len.toLong())
 
-            var res: LinuxNative.SyscallResult<Long, *>
-            while (true) {
-                res = LinuxNative.withTransaction {
-                    LinuxNative.memory.processVmReadv(Pid(tid.value), localIov.segment, 1, remoteIov.segment, 1, 0)
-                }
-                if (res is LinuxNative.SyscallResult.Error && res.errno == io.mazewall.ffi.NativeConstants.EINTR) {
-                    continue
-                }
-                break
+        var res: LinuxNative.SyscallResult<Long, *>
+        while (true) {
+            res = LinuxNative.withTransaction {
+                LinuxNative.memory.processVmReadv(Pid(tid.value), localIov.segment, 1, remoteIov.segment, 1, 0)
             }
-            if (res is LinuxNative.SyscallResult.Success && res.value > 0) {
-                val bytesRead = res.value.toInt()
-                val dest = ByteArray(bytesRead)
-                MemorySegment.copy(localBuf, ValueLayout.JAVA_BYTE, 0L, dest, 0, bytesRead)
-                dest
-            } else {
-                if (res is LinuxNative.SyscallResult.Error && res.errno == 1) { // EPERM = 1
-                    if (warnOnEperm) {
-                        System.err.println("[DAEMON] WARN: Permission denied reading memory from TID ${tid.value}. (Yama ptrace_scope?)")
-                    }
-                    return "<YAMA_ERROR_UNKNOWN_PATH>".toByteArray(StandardCharsets.UTF_8)
+            if (res is LinuxNative.SyscallResult.Error && res.errno == io.mazewall.ffi.NativeConstants.EINTR) {
+                continue
+            }
+            break
+        }
+        return if (res is LinuxNative.SyscallResult.Success && res.value > 0) {
+            val bytesRead = res.value.toInt()
+            val dest = ByteArray(bytesRead)
+            MemorySegment.copy(localBuf, ValueLayout.JAVA_BYTE, 0L, dest, 0, bytesRead)
+            dest
+        } else {
+            if (res is LinuxNative.SyscallResult.Error && res.errno == 1) { // EPERM = 1
+                if (warnOnEperm) {
+                    System.err.println("[DAEMON] WARN: Permission denied reading memory from TID ${tid.value}. (Yama ptrace_scope?)")
                 }
+                "<YAMA_ERROR_UNKNOWN_PATH>".toByteArray(StandardCharsets.UTF_8)
+            } else {
                 null
             }
         }

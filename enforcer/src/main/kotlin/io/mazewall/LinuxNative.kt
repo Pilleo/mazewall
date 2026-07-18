@@ -75,7 +75,7 @@ public object LinuxNative : NativeEngine {
      * Executes the given [block] within a [NativeTransaction] context.
      * Raw system calls and sensitive native operations are only available within this scope.
      */
-    public fun <T> withTransaction(block: NativeTransaction.() -> T): T {
+    override fun <T> withTransaction(block: NativeTransaction.() -> T): T {
         return transactionManager.withTransaction(block)
     }
 
@@ -259,6 +259,10 @@ internal object RealNativeEngine : NativeEngine, RawSyscallOperations {
     override val process: NativeProcess = RealNativeProcess
     override val memory: NativeMemory = RealNativeMemory
     override val raw: RawSyscallOperations get() = this
+
+    override fun <T> withTransaction(block: NativeTransaction.() -> T): T {
+        return RealTransactionManager.withTransaction(block)
+    }
 
     private val SYSCALL: MethodHandle =
         RealNativeHelper.downcall(
@@ -446,6 +450,13 @@ internal object RealNativeFileSystem : NativeFileSystem {
             Linker.Option.captureCallState("errno"),
         )
 
+    private val OPENAT: MethodHandle =
+        RealNativeHelper.downcall(
+            "openat",
+            FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.JAVA_INT, ValueLayout.ADDRESS, ValueLayout.JAVA_INT),
+            Linker.Option.captureCallState("errno"),
+        )
+
     context(_: NativeTransaction)
     override fun open(
         path: MemorySegment,
@@ -453,6 +464,17 @@ internal object RealNativeFileSystem : NativeFileSystem {
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
         val capturedState = ErrnoSegment.getThreadLocal()
         val ret = OPEN.invokeExact(capturedState.segment, path, flags) as Int
+        return RealNativeHelper.result(ret.toLong(), capturedState.getErrno())
+    }
+
+    context(_: NativeTransaction)
+    override fun openat(
+        dirfd: Int,
+        path: MemorySegment,
+        flags: Int,
+    ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+        val capturedState = ErrnoSegment.getThreadLocal()
+        val ret = OPENAT.invokeExact(capturedState.segment, dirfd, path, flags) as Int
         return RealNativeHelper.result(ret.toLong(), capturedState.getErrno())
     }
 
@@ -544,6 +566,18 @@ internal object RealNativeNetworking : NativeNetworking {
             FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.JAVA_INT, ValueLayout.ADDRESS, ValueLayout.ADDRESS),
             Linker.Option.captureCallState("errno"),
         )
+    private val ACCEPT4: MethodHandle =
+        RealNativeHelper.downcall(
+            "accept4",
+            FunctionDescriptor.of(
+                ValueLayout.JAVA_INT,
+                ValueLayout.JAVA_INT,
+                ValueLayout.ADDRESS,
+                ValueLayout.ADDRESS,
+                ValueLayout.JAVA_INT,
+            ),
+            Linker.Option.captureCallState("errno"),
+        )
     private val CONNECT: MethodHandle =
         RealNativeHelper.downcall(
             "connect",
@@ -599,6 +633,19 @@ internal object RealNativeNetworking : NativeNetworking {
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
         val capturedState = ErrnoSegment.getThreadLocal()
         val ret = SOCKETPAIR.invokeExact(capturedState.segment, domain, type, protocol, sv) as Int
+        return RealNativeHelper.result(ret.toLong(), capturedState.getErrno())
+    }
+
+    context(_: NativeTransaction)
+    override fun accept4(
+        sockfd: FileDescriptor<*, FdState.Open>,
+        addr: MemorySegment,
+        addrlen: MemorySegment,
+        flags: Int,
+    ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+        require(sockfd.isValid) { "FileDescriptor is invalid or closed" }
+        val capturedState = ErrnoSegment.getThreadLocal()
+        val ret = ACCEPT4.invokeExact(capturedState.segment, sockfd.value, addr, addrlen, flags) as Int
         return RealNativeHelper.result(ret.toLong(), capturedState.getErrno())
     }
 
@@ -718,6 +765,18 @@ internal object RealNativeProcess : NativeProcess {
             FunctionDescriptor.of(ValueLayout.JAVA_INT),
             Linker.Option.captureCallState("errno"),
         )
+    private val PIDFD_OPEN: MethodHandle =
+        RealNativeHelper.downcall(
+            "pidfd_open",
+            FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.JAVA_INT, ValueLayout.JAVA_INT),
+            Linker.Option.captureCallState("errno"),
+        )
+    private val PIDFD_GETFD: MethodHandle =
+        RealNativeHelper.downcall(
+            "pidfd_getfd",
+            FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.JAVA_INT, ValueLayout.JAVA_INT, ValueLayout.JAVA_INT),
+            Linker.Option.captureCallState("errno"),
+        )
 
     override fun gettid(): io.mazewall.core.Tid {
         val capturedState = ErrnoSegment.getThreadLocal()
@@ -736,6 +795,27 @@ internal object RealNativeProcess : NativeProcess {
                 command.arg4.asLong,
                 command.arg5.asLong,
             ) as Int
+        return RealNativeHelper.result(ret.toLong(), capturedState.getErrno())
+    }
+
+    context(_: NativeTransaction)
+    override fun pidfdOpen(
+        pid: Int,
+        flags: Int,
+    ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+        val capturedState = ErrnoSegment.getThreadLocal()
+        val ret = PIDFD_OPEN.invokeExact(capturedState.segment, pid, flags) as Int
+        return RealNativeHelper.result(ret.toLong(), capturedState.getErrno())
+    }
+
+    context(_: NativeTransaction)
+    override fun pidfdGetFd(
+        pidfd: Int,
+        targetFd: Int,
+        flags: Int,
+    ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+        val capturedState = ErrnoSegment.getThreadLocal()
+        val ret = PIDFD_GETFD.invokeExact(capturedState.segment, pidfd, targetFd, flags) as Int
         return RealNativeHelper.result(ret.toLong(), capturedState.getErrno())
     }
 }

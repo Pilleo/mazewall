@@ -18,12 +18,24 @@ public open class MockNativeEngine(
 ) : NativeEngine, RawSyscallOperations {
     override val raw: RawSyscallOperations get() = this
 
+    public var onWithTransaction: ((NativeTransaction.() -> Any?) -> Any?)? = null
+
+    @Suppress("UNCHECKED_CAST")
+    override fun <T> withTransaction(block: NativeTransaction.() -> T): T {
+        return onWithTransaction?.invoke(block as NativeTransaction.() -> Any?) as T
+            ?: RealTransactionManager.withTransaction(block)
+    }
+
     public var syscallResult: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(0L)
     public var ioctlResult: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(0L)
     public var fcntlResult: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(0L)
     public var pollResult: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(0L)
 
-    context(_: NativeTransaction)
+    public var onSyscall: (context: NativeTransaction, nr: Long, a1: io.mazewall.core.NativeArg, a2: io.mazewall.core.NativeArg, a3: io.mazewall.core.NativeArg, a4: io.mazewall.core.NativeArg, a5: io.mazewall.core.NativeArg, a6: io.mazewall.core.NativeArg) -> LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = { _, _, _, _, _, _, _, _ -> syscallResult }
+    public var onIoctl: (context: NativeTransaction, fd: FileDescriptor<*, FdState.Open>, request: Long, arg: MemorySegment) -> LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = { _, _, _, _ -> ioctlResult }
+    public var onPoll: (context: NativeTransaction, fds: MemorySegment, nfds: Long, timeout: Int) -> LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = { _, _, _, _ -> pollResult }
+
+    context(context: NativeTransaction)
     override fun syscall(
         nr: Long,
         a1: io.mazewall.core.NativeArg,
@@ -32,30 +44,30 @@ public open class MockNativeEngine(
         a4: io.mazewall.core.NativeArg,
         a5: io.mazewall.core.NativeArg,
         a6: io.mazewall.core.NativeArg,
-    ) = syscallResult
+    ) = onSyscall(context, nr, a1, a2, a3, a4, a5, a6)
 
-    context(_: NativeTransaction)
+    context(context: NativeTransaction)
     override fun syscall4(
         nr: Long,
         a1: io.mazewall.core.NativeArg,
         a2: io.mazewall.core.NativeArg,
         a3: io.mazewall.core.NativeArg,
         a4: io.mazewall.core.NativeArg,
-    ) = syscallResult
+    ) = onSyscall(context, nr, a1, a2, a3, a4, io.mazewall.core.NativeArg.LongArg(0L), io.mazewall.core.NativeArg.LongArg(0L))
 
-    context(_: NativeTransaction)
+    context(context: NativeTransaction)
     override fun ioctl(
         fd: FileDescriptor<*, FdState.Open>,
         request: Long,
         arg: MemorySegment,
-    ) = ioctlResult
+    ) = onIoctl(context, fd, request, arg)
 
-    context(_: NativeTransaction)
+    context(context: NativeTransaction)
     override fun ioctl(
         fd: FileDescriptor<*, FdState.Open>,
         request: Long,
         arg: Long,
-    ) = ioctlResult
+    ) = onIoctl(context, fd, request, MemorySegment.NULL) // Simplified for long args
 
     context(_: NativeTransaction)
     override fun fcntl(
@@ -64,12 +76,12 @@ public open class MockNativeEngine(
         arg: Long,
     ) = fcntlResult
 
-    context(_: NativeTransaction)
+    context(context: NativeTransaction)
     override fun poll(
         fds: MemorySegment,
         nfds: Long,
         timeout: Int,
-    ) = pollResult
+    ) = onPoll(context, fds, nfds, timeout)
 }
 
 public open class MockNativeFileSystem : NativeFileSystem {
@@ -78,11 +90,22 @@ public open class MockNativeFileSystem : NativeFileSystem {
     public var closeResult: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(0L)
     public var mmapResult: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(0L)
 
-    context(_: NativeTransaction)
+    public var onOpen: (context: NativeTransaction, path: MemorySegment, flags: Int) -> LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = { _, _, _ -> openResult }
+    public var onOpenat: (context: NativeTransaction, dirfd: Int, path: MemorySegment, flags: Int) -> LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = { _, _, _, _ -> openResult }
+    public var onClose: (fd: FileDescriptor<*, FdState.Open>) -> LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = { closeResult }
+
+    context(context: NativeTransaction)
     override fun open(
         path: MemorySegment,
         flags: Int,
-    ) = openResult
+    ) = onOpen(context, path, flags)
+
+    context(context: NativeTransaction)
+    override fun openat(
+        dirfd: Int,
+        path: MemorySegment,
+        flags: Int,
+    ) = onOpenat(context, dirfd, path, flags)
 
     context(_: NativeTransaction)
     override fun readlink(
@@ -101,7 +124,7 @@ public open class MockNativeFileSystem : NativeFileSystem {
         offset: Long,
     ) = mmapResult
 
-    override fun close(fd: FileDescriptor<*, FdState.Open>) = closeResult
+    override fun close(fd: FileDescriptor<*, FdState.Open>) = onClose(fd)
 }
 
 public open class MockNativeNetworking : NativeNetworking {
@@ -115,6 +138,13 @@ public open class MockNativeNetworking : NativeNetworking {
     public var recvmsgResult: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(0L)
     public var recvResult: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(0L)
 
+    public var onSocket: (context: NativeTransaction, domain: Int, type: Int, protocol: Int) -> LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = { _, _, _, _ -> socketResult }
+    public var onConnect: (context: NativeTransaction, sockfd: FileDescriptor<*, FdState.Open>, addr: MemorySegment, addrlen: Int) -> LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = { _, _, _, _ -> connectResult }
+    public var onAccept: (context: NativeTransaction, sockfd: FileDescriptor<*, FdState.Open>, addr: MemorySegment, addrlen: MemorySegment) -> LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = { _, _, _, _ -> acceptResult }
+    public var onAccept4: (context: NativeTransaction, sockfd: FileDescriptor<*, FdState.Open>, addr: MemorySegment, addrlen: MemorySegment, flags: Int) -> LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = { _, _, _, _, _ -> acceptResult }
+    public var onBind: (context: NativeTransaction, sockfd: FileDescriptor<*, FdState.Open>, addr: MemorySegment, addrlen: Int) -> LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = { _, _, _, _ -> bindResult }
+    public var onListen: (context: NativeTransaction, sockfd: FileDescriptor<*, FdState.Open>, backlog: Int) -> LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = { _, _, _ -> listenResult }
+
     context(_: NativeTransaction)
     override fun socketpair(
         domain: Int,
@@ -123,39 +153,47 @@ public open class MockNativeNetworking : NativeNetworking {
         sv: MemorySegment,
     ) = socketpairResult
 
-    context(_: NativeTransaction)
+    context(context: NativeTransaction)
     override fun socket(
         domain: Int,
         type: Int,
         protocol: Int,
-    ) = socketResult
+    ) = onSocket(context, domain, type, protocol)
 
-    context(_: NativeTransaction)
+    context(context: NativeTransaction)
     override fun bind(
         sockfd: FileDescriptor<*, FdState.Open>,
         addr: MemorySegment,
         addrlen: Int,
-    ) = bindResult
+    ) = onBind(context, sockfd, addr, addrlen)
 
-    context(_: NativeTransaction)
+    context(context: NativeTransaction)
     override fun listen(
         sockfd: FileDescriptor<*, FdState.Open>,
         backlog: Int,
-    ) = listenResult
+    ) = onListen(context, sockfd, backlog)
 
-    context(_: NativeTransaction)
+    context(context: NativeTransaction)
     override fun accept(
         sockfd: FileDescriptor<*, FdState.Open>,
         addr: MemorySegment,
         addrlen: MemorySegment,
-    ) = acceptResult
+    ) = onAccept(context, sockfd, addr, addrlen)
 
-    context(_: NativeTransaction)
+    context(context: NativeTransaction)
+    override fun accept4(
+        sockfd: FileDescriptor<*, FdState.Open>,
+        addr: MemorySegment,
+        addrlen: MemorySegment,
+        flags: Int,
+    ) = onAccept4(context, sockfd, addr, addrlen, flags)
+
+    context(context: NativeTransaction)
     override fun connect(
         sockfd: FileDescriptor<*, FdState.Open>,
         addr: MemorySegment,
         addrlen: Int,
-    ) = connectResult
+    ) = onConnect(context, sockfd, addr, addrlen)
 
     context(_: NativeTransaction)
     override fun sendmsg(
@@ -184,18 +222,33 @@ public open class MockNativeProcess : NativeProcess {
     public var tid: io.mazewall.core.Tid = io.mazewall.core.Tid(1234)
     public var prctlResult: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(0L)
     public var lastPrctlCommand: io.mazewall.core.PrctlCommand? = null
-    public val prctlCommands: MutableList<Pair<Thread, io.mazewall.core.PrctlCommand>> = mutableListOf()
+
+    public var onPrctl: (context: NativeTransaction, command: io.mazewall.core.PrctlCommand) -> LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = { _, command ->
+        lastPrctlCommand = command
+        prctlResult
+    }
+    public var onPidfdOpen: (context: NativeTransaction, pid: Int, flags: Int) -> LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = { _, _, _ -> LinuxNative.SyscallResult.Success(0L) }
+    public var onPidfdGetFd: (context: NativeTransaction, pidfd: Int, targetFd: Int, flags: Int) -> LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = { _, _, _, _ -> LinuxNative.SyscallResult.Success(0L) }
 
     override fun gettid() = tid
 
-    context(_: NativeTransaction)
+    context(context: NativeTransaction)
     override fun prctl(
         command: io.mazewall.core.PrctlCommand,
-    ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
-        lastPrctlCommand = command
-        prctlCommands.add(Thread.currentThread() to command)
-        return prctlResult
-    }
+    ) = onPrctl(context, command)
+
+    context(context: NativeTransaction)
+    override fun pidfdOpen(
+        pid: Int,
+        flags: Int,
+    ) = onPidfdOpen(context, pid, flags)
+
+    context(context: NativeTransaction)
+    override fun pidfdGetFd(
+        pidfd: Int,
+        targetFd: Int,
+        flags: Int,
+    ) = onPidfdGetFd(context, pidfd, targetFd, flags)
 }
 
 public open class MockNativeMemory : NativeMemory {
@@ -203,6 +256,9 @@ public open class MockNativeMemory : NativeMemory {
     public var processVmWritevResult: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(0L)
     public var readResult: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(0L)
     public var writeResult: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(0L)
+
+    public var onRead: (context: NativeTransaction, fd: FileDescriptor<*, FdState.Open>, buf: MemorySegment, count: Long) -> LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = { _, _, _, _ -> readResult }
+    public var onWrite: (context: NativeTransaction, fd: FileDescriptor<*, FdState.Open>, buf: MemorySegment, count: Long) -> LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = { _, _, _, _ -> writeResult }
 
     context(_: NativeTransaction)
     override fun processVmReadv(
@@ -224,19 +280,19 @@ public open class MockNativeMemory : NativeMemory {
         flags: Long,
     ) = processVmWritevResult
 
-    context(_: NativeTransaction)
+    context(context: NativeTransaction)
     override fun read(
         fd: FileDescriptor<*, FdState.Open>,
         buf: MemorySegment,
         count: Long,
-    ) = readResult
+    ) = onRead(context, fd, buf, count)
 
-    context(_: NativeTransaction)
+    context(context: NativeTransaction)
     override fun write(
         fd: FileDescriptor<*, FdState.Open>,
         buf: MemorySegment,
         count: Long,
-    ) = writeResult
+    ) = onWrite(context, fd, buf, count)
 
     context(arena: Arena)
     override fun newSockFProg(

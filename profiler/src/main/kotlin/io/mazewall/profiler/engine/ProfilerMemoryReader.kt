@@ -16,12 +16,14 @@ import java.nio.charset.StandardCharsets
  * Interface for reading memory and resolving paths from a tracee process or thread.
  */
 interface ProfilerMemoryReader {
+    context(arena: Arena)
     fun readStringFromProcess(
         tid: Tid,
         remoteAddr: Long,
         maxLen: Int = 4096,
     ): String?
 
+    context(arena: Arena)
     fun resolveLink(
         tid: Tid,
         link: String,
@@ -35,6 +37,7 @@ object RealMemoryReader : ProfilerMemoryReader {
     private const val PATH_MAX_VAL = 4096L
     private const val IOV_LEN_OFF = 8L
 
+    context(arena: Arena)
     override fun readStringFromProcess(
         tid: Tid,
         remoteAddr: Long,
@@ -43,19 +46,18 @@ object RealMemoryReader : ProfilerMemoryReader {
         return io.mazewall.ffi.memory.SupervisorProcessMemoryReader.readString(tid, remoteAddr, maxLen, warnOnEperm = true)
     }
 
+    context(arena: Arena)
     override fun resolveLink(
         tid: Tid,
         link: String,
     ): String? {
         val procPath = "/proc/${tid.value}/$link"
-        Arena.ofConfined().use { arena ->
-            val pathSeg = arena.allocateFrom(procPath)
-            val buf = arena.allocate(PATH_MAX_VAL)
-            val res = LinuxNative.withTransaction {
-                LinuxNative.fileSystem.readlink(pathSeg, buf, PATH_MAX_VAL)
-            }
-            return res.onSuccess { }.map { buf.copyToString(it.toInt()).removeSuffix(" (deleted)") }.getOrNull()
+        val pathSeg = arena.allocateFrom(procPath)
+        val buf = arena.allocate(PATH_MAX_VAL)
+        val res = LinuxNative.withTransaction {
+            LinuxNative.fileSystem.readlink(pathSeg, buf, PATH_MAX_VAL)
         }
+        return res.onSuccess { }.map { buf.copyToString(it.toInt()).removeSuffix(" (deleted)") }.getOrNull()
     }
 
     private fun MemorySegment.copyToString(len: Int): String {

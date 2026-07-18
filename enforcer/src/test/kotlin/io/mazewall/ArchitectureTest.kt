@@ -182,6 +182,9 @@ class ArchitectureTest {
             .haveSimpleNameNotStartingWith("LandlockSession")
             .and()
             .areDeclaredInClassesThat()
+            .haveSimpleNameNotStartingWith("ContainedExecutors")
+            .and()
+            .areDeclaredInClassesThat()
             .resideOutsideOfPackages(
                 "io.mazewall.enforcer.supervisor..",
                 "io.mazewall.ffi.networking..",

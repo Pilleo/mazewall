@@ -34,7 +34,7 @@ interface OrchestratorEnvironment {
 
     // GitHub
     fun findExistingIssueNumber(issueId: String): String?
-    fun createIssue(title: String, bodyFile: File, label: String): String
+    fun createIssue(title: String, body: String, label: String): String
     fun isIssueClosed(issueNumber: String): Boolean
     fun findLinkedPR(issueNumber: String, issueId: String, sessionId: String?): String?
     fun isPrMerged(prNumber: String): Boolean
@@ -121,8 +121,7 @@ class RealOrchestratorEnvironment(
 
     override fun findExistingIssueNumber(issueId: String): String? = GitHubCli.findExistingIssueNumber(issueId)
 
-    override fun createIssue(title: String, bodyFile: File, label: String): String {
-        val originalBody = bodyFile.readText()
+    override fun createIssue(title: String, body: String, label: String): String {
         val preamble = """
             💡 **Jules Instructions Before Starting:**
             1. **Verify Backlog Items**: Find the code related to this issue and verify if the issue/bug is actually present in the current codebase.
@@ -133,14 +132,7 @@ class RealOrchestratorEnvironment(
 
         """.trimIndent()
 
-        val directory = File("build/tmp").apply { mkdirs() }
-        val tempFile = File.createTempFile("issue_body_", ".tmp", directory)
-        return try {
-            tempFile.writeText(preamble + originalBody)
-            GitHubCli.createIssue(title, tempFile, label)
-        } finally {
-            tempFile.delete()
-        }
+        return GitHubCli.createIssue(title, preamble + body, label)
     }
 
     override fun isIssueClosed(issueNumber: String): Boolean = GitHubCli.isIssueClosed(issueNumber)
