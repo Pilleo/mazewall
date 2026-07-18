@@ -4,13 +4,14 @@ import io.mazewall.LinuxNative
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
+import io.mazewall.ffi.memory.*
 import io.mazewall.core.Tid
 import io.mazewall.profiler.Profiler
 import io.mazewall.profiler.engine.TraceEvent
 import java.io.BufferedInputStream
 import java.io.DataInputStream
 import java.io.InputStream
-import java.lang.foreign.Arena
+import io.mazewall.ffi.memory.*
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.atomic.AtomicBoolean
@@ -56,7 +57,7 @@ internal class ProfilerTraceListener(
     fun start(readyLatch: CountDownLatch) {
         if (closed.get()) throw IllegalStateException("Listener is already closed")
 
-        val arena = Arena.ofShared()
+        val arena = NativeArena.ofShared()
         val inputStream = NativeSocketInputStream(socketFd, arena)
 
         val thread = Thread {
@@ -159,9 +160,9 @@ internal class ProfilerTraceListener(
         // Use a confined native arena — MemorySegment.ofArray() creates a heap segment that
         // cannot be passed to native write() syscalls via the FFM API.
         try {
-            Arena.ofConfined().use { arena ->
-                val buf = arena.allocate(1)
-                buf.set(java.lang.foreign.ValueLayout.JAVA_BYTE, 0L, commandByte)
+            NativeArena.ofConfined().use { arena ->
+                val buf = ConfinedSegment(arena.arena.allocate(1))
+                buf.writeByte(0L, commandByte)
                 LinuxNative.withTransaction { LinuxNative.memory.write(socketFd, buf, 1) }
             }
         } catch (ignored: Exception) {}

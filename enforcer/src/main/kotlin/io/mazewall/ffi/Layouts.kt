@@ -58,6 +58,16 @@ object Layouts {
         MemoryLayout.sequenceLayout(6, ValueLayout.JAVA_LONG).withName("args"),
     )
 
+    val SECCOMP_ARGS2_OFFSET: Int = SECCOMP_DATA.byteOffset(
+        MemoryLayout.PathElement.groupElement("args"),
+        MemoryLayout.PathElement.sequenceElement(2),
+    ).toInt()
+
+    val SECCOMP_DATA_ARGS_OFFSET: Int = SECCOMP_DATA.byteOffset(
+        MemoryLayout.PathElement.groupElement("args"),
+        MemoryLayout.PathElement.sequenceElement(0),
+    ).toInt()
+
     /**
      * Corresponds to `struct seccomp_notif` in `<linux/seccomp.h>`.
      * Used by the Profiler to receive syscall notification events.

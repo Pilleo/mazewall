@@ -6,19 +6,15 @@ import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
 import io.mazewall.ffi.Layouts
 import io.mazewall.ffi.NativeConstants
+import io.mazewall.ffi.memory.*
 import io.mazewall.getFdOrThrow
-import io.mazewall.onFailure
-import io.mazewall.onSuccess
-import java.lang.foreign.Arena
-import java.lang.foreign.MemorySegment
-import java.lang.foreign.ValueLayout
 import java.nio.charset.StandardCharsets
 
 /**
  * High-level interface for publishing domain events to the parent JVM.
  */
 interface TraceEventPublisher {
-    context(arena: Arena)
+    context(arena: NativeArena)
     fun sendTraceEvent(
         socketFd: FileDescriptor<*, FdState.Open>,
         event: SyscallEvent<SyscallEventState.Resolved>,
@@ -33,20 +29,20 @@ interface SeccompResponder {
      * Sends a SECCOMP_USER_NOTIF_FLAG_CONTINUE response to the kernel for a successful handshake.
      * Enforced at compile-time to only work with sessions in the Success state.
      */
-    context(arena: Arena)
+    context(arena: NativeArena)
     fun sendSeccompContinue(
         session: HandshakeSession.Success,
-        resp: MemorySegment,
+        resp: ManagedSegment,
     )
 
     /**
      * Sends an error response (or generic failure) to the kernel for a failed handshake.
      * Enforced at compile-time to only work with sessions in the Failed state.
      */
-    context(arena: Arena)
+    context(arena: NativeArena)
     fun sendSeccompError(
         session: HandshakeSession.Failed,
-        resp: MemorySegment,
+        resp: ManagedSegment,
         errorNr: Int,
     )
 }
@@ -57,26 +53,26 @@ interface SeccompResponder {
 interface NativeIoOperations {
     val raw: io.mazewall.RawSyscallOperations
     fun poll(
-        fds: MemorySegment,
+        fds: ManagedSegment,
         nfds: Long,
         timeout: Int,
     ): LinuxNative.SyscallResult<Long, *>
 
     fun read(
         fd: FileDescriptor<*, FdState.Open>,
-        buf: MemorySegment,
+        buf: ManagedSegment,
         count: Long,
     ): LinuxNative.SyscallResult<Long, *>
 
     fun write(
         fd: FileDescriptor<*, FdState.Open>,
-        buf: MemorySegment,
+        buf: ManagedSegment,
         count: Long,
     ): LinuxNative.SyscallResult<Long, *>
 
     fun recv(
         sockfd: FileDescriptor<*, FdState.Open>,
-        buf: MemorySegment,
+        buf: ManagedSegment,
         len: Long,
         flags: Int,
     ): LinuxNative.SyscallResult<Long, *>
@@ -84,7 +80,7 @@ interface NativeIoOperations {
     fun ioctl(
         fd: FileDescriptor<*, FdState.Open>,
         request: Long,
-        arg: MemorySegment,
+        arg: ManagedSegment,
     ): LinuxNative.SyscallResult<Long, *>
 }
 
@@ -116,10 +112,7 @@ object RealProfilerTransport : ProfilerTransport {
     private const val SOL_SOCKET_VAL = 1
     private const val SCM_RIGHTS_VAL = 1
 
-    private val JAVA_INT_BE_UNALIGNED = ValueLayout.JAVA_INT.withOrder(java.nio.ByteOrder.BIG_ENDIAN).withByteAlignment(1)
-    private val JAVA_LONG_BE_UNALIGNED = ValueLayout.JAVA_LONG.withOrder(java.nio.ByteOrder.BIG_ENDIAN).withByteAlignment(1)
-
-    context(arena: Arena)
+    context(arena: NativeArena)
     override fun sendTraceEvent(
         socketFd: FileDescriptor<*, FdState.Open>,
         event: SyscallEvent<SyscallEventState.Resolved>,
@@ -132,28 +125,28 @@ object RealProfilerTransport : ProfilerTransport {
             totalSize += 4 + p.size
         }
 
-        val buf = arena.allocate(totalSize.toLong())
+        val buf = ConfinedSegment(arena.arena.allocate(totalSize.toLong()))
         var offset = 0L
-        buf.set(JAVA_INT_BE_UNALIGNED, offset, event.tid.value)
+        buf.writeIntBigEndianUnaligned(offset, event.tid.value)
         offset += 4
-        buf.set(JAVA_INT_BE_UNALIGNED, offset, syscallNameBytes.size)
+        buf.writeIntBigEndianUnaligned(offset, syscallNameBytes.size)
         offset += 4
-        MemorySegment.copy(syscallNameBytes, 0, buf, ValueLayout.JAVA_BYTE, offset, syscallNameBytes.size)
+        ManagedSegment.copy(syscallNameBytes, 0, buf, offset, syscallNameBytes.size)
         offset += syscallNameBytes.size
 
-        buf.set(JAVA_INT_BE_UNALIGNED, offset, event.args.size)
+        buf.writeIntBigEndianUnaligned(offset, event.args.size)
         offset += 4
         for (arg in event.args) {
-            buf.set(JAVA_LONG_BE_UNALIGNED, offset, arg)
+            buf.writeLongBigEndianUnaligned(offset, arg)
             offset += 8
         }
 
-        buf.set(JAVA_INT_BE_UNALIGNED, offset, pathBytesList.size)
+        buf.writeIntBigEndianUnaligned(offset, pathBytesList.size)
         offset += 4
         for (p in pathBytesList) {
-            buf.set(JAVA_INT_BE_UNALIGNED, offset, p.size)
+            buf.writeIntBigEndianUnaligned(offset, p.size)
             offset += 4
-            MemorySegment.copy(p, 0, buf, ValueLayout.JAVA_BYTE, offset, p.size)
+            ManagedSegment.copy(p, 0, buf, offset, p.size)
             offset += p.size
         }
 
@@ -161,31 +154,31 @@ object RealProfilerTransport : ProfilerTransport {
         res.getOrThrow("sendTraceEvent")
     }
 
-    context(arena: Arena)
+    context(arena: NativeArena)
     override fun sendSeccompContinue(
         session: HandshakeSession.Success,
-        resp: MemorySegment,
+        resp: ManagedSegment,
     ) {
-        resp.fill(0)
-        resp.set(ValueLayout.JAVA_LONG, RESP_ID_OFF, session.notifId)
-        resp.set(ValueLayout.JAVA_LONG, RESP_VAL_OFF, 0L)
-        resp.set(ValueLayout.JAVA_INT, RESP_ERR_OFF, 0)
-        resp.set(ValueLayout.JAVA_INT, RESP_FLAGS_OFF, NativeConstants.SECCOMP_USER_NOTIF_FLAG_CONTINUE.toInt())
+        resp.native.fill(0)
+        resp.writeLong(RESP_ID_OFF, session.notifId)
+        resp.writeLong(RESP_VAL_OFF, 0L)
+        resp.writeInt(RESP_ERR_OFF, 0)
+        resp.writeInt(RESP_FLAGS_OFF, NativeConstants.SECCOMP_USER_NOTIF_FLAG_CONTINUE.toInt())
         ioctl(session.listenerFd, SECCOMP_IOCTL_NOTIF_SEND, resp).getOrThrow("sendSeccompContinue")
     }
 
-    context(arena: Arena)
+    context(arena: NativeArena)
     override fun sendSeccompError(
         session: HandshakeSession.Failed,
-        resp: MemorySegment,
+        resp: ManagedSegment,
         errorNr: Int,
     ) {
-        resp.fill(0)
-        resp.set(ValueLayout.JAVA_LONG, RESP_ID_OFF, session.notifId)
-        resp.set(ValueLayout.JAVA_LONG, RESP_VAL_OFF, -1L)
+        resp.native.fill(0)
+        resp.writeLong(RESP_ID_OFF, session.notifId)
+        resp.writeLong(RESP_VAL_OFF, -1L)
         // Error numbers are negative in the 'error' field of seccomp_notif_resp
-        resp.set(ValueLayout.JAVA_INT, RESP_ERR_OFF, -errorNr)
-        resp.set(ValueLayout.JAVA_INT, RESP_FLAGS_OFF, 0)
+        resp.writeInt(RESP_ERR_OFF, -errorNr)
+        resp.writeInt(RESP_FLAGS_OFF, 0)
         ioctl(session.listenerFd, SECCOMP_IOCTL_NOTIF_SEND, resp).getOrThrow("sendSeccompContinue")
     }
 
@@ -202,26 +195,26 @@ object RealProfilerTransport : ProfilerTransport {
     }
 
     override fun poll(
-        fds: MemorySegment,
+        fds: ManagedSegment,
         nfds: Long,
         timeout: Int,
     ): LinuxNative.SyscallResult<Long, *> = LinuxNative.withTransaction { LinuxNative.raw.poll(fds, nfds, timeout) }
 
     override fun read(
         fd: FileDescriptor<*, FdState.Open>,
-        buf: MemorySegment,
+        buf: ManagedSegment,
         count: Long,
     ): LinuxNative.SyscallResult<Long, *> = LinuxNative.withTransaction { LinuxNative.memory.read(fd, buf, count) }
 
     override fun write(
         fd: FileDescriptor<*, FdState.Open>,
-        buf: MemorySegment,
+        buf: ManagedSegment,
         count: Long,
     ): LinuxNative.SyscallResult<Long, *> = LinuxNative.withTransaction { LinuxNative.memory.write(fd, buf, count) }
 
     override fun recv(
         sockfd: FileDescriptor<*, FdState.Open>,
-        buf: MemorySegment,
+        buf: ManagedSegment,
         len: Long,
         flags: Int,
     ): LinuxNative.SyscallResult<Long, *> = LinuxNative.withTransaction { LinuxNative.networking.recv(sockfd, buf, len, flags) }
@@ -229,7 +222,7 @@ object RealProfilerTransport : ProfilerTransport {
     override fun ioctl(
         fd: FileDescriptor<*, FdState.Open>,
         request: Long,
-        arg: MemorySegment,
+        arg: ManagedSegment,
     ): LinuxNative.SyscallResult<Long, *> = LinuxNative.withTransaction { LinuxNative.raw.ioctl(fd, request, arg) }
 
     override fun createUnixServer(socketPath: String): FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open> {

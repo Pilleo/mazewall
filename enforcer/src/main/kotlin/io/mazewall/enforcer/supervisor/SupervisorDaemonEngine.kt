@@ -6,20 +6,18 @@ import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
 import io.mazewall.core.SocketManager
+import io.mazewall.core.LoopAction
 import io.mazewall.ffi.Layouts
 import io.mazewall.ffi.NativeConstants
+import io.mazewall.ffi.memory.*
 import io.mazewall.recover
-import io.mazewall.ffi.memory.PollFdSegment
-import io.mazewall.ffi.memory.writeByte
-import java.lang.foreign.Arena
-import java.lang.foreign.MemoryLayout
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
 
 internal sealed interface SupervisorDaemonState {
-    object Uninitialized : SupervisorDaemonState {
+    data object Uninitialized : SupervisorDaemonState {
         fun listening(
             serverFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>,
             socketPath: String
@@ -38,8 +36,8 @@ internal sealed interface SupervisorDaemonState {
         val socketPath: String
     ) : SupervisorDaemonState
 
-    object ShuttingDown : SupervisorDaemonState
-    object Terminated : SupervisorDaemonState
+    data object ShuttingDown : SupervisorDaemonState
+    data object Terminated : SupervisorDaemonState
 }
 
 internal class SupervisorDaemonEngine(
@@ -81,7 +79,7 @@ internal class SupervisorDaemonEngine(
         System.out.flush()
 
         try {
-            Arena.ofConfined().use { arena ->
+            NativeArena.ofConfined().use { arena ->
                 state = listeningState.active()
                 acceptConnections(serverFd, arena)
             }
@@ -118,14 +116,14 @@ internal class SupervisorDaemonEngine(
 
     private fun acceptConnections(
         serverFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>,
-        arena: Arena
+        arena: NativeArena
     ) {
-        val pollFd = PollFdSegment(arena.allocate(Layouts.POLLFD))
+        val pollFd = with(arena) { PollFdSegment.allocate() }
         pollFd.setFd(serverFd.value)
         pollFd.setEvents(NativeConstants.POLLIN)
 
         while (!isGlobalShutdown()) {
-            val pollRes = engine.withTransaction { engine.raw.poll(pollFd.segment, 1L, POLL_TIMEOUT_MS) }
+            val pollRes = engine.withTransaction { engine.raw.poll(pollFd.managed, 1L, POLL_TIMEOUT_MS) }
             val count = pollRes.recover { errno, _ ->
                 if (errno != NativeConstants.EINTR) return
                 0L
@@ -139,7 +137,7 @@ internal class SupervisorDaemonEngine(
         try {
             while (true) {
                 val res = engine.withTransaction {
-                    engine.networking.accept(serverFd, java.lang.foreign.MemorySegment.NULL, java.lang.foreign.MemorySegment.NULL)
+                    engine.networking.accept(serverFd, ManagedSegment.NULL, ManagedSegment.NULL)
                 }
                 if (res is io.mazewall.LinuxNative.SyscallResult.Success) {
                     val clientFd = FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(res.value.toInt())
@@ -175,8 +173,8 @@ internal class SupervisorDaemonEngine(
     private fun handleConnection(socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>) {
         var connection: io.mazewall.ffi.networking.SeccompConnection = io.mazewall.ffi.networking.SeccompConnection.Accepted(socketFd)
         try {
-            Arena.ofConfined().use { arena ->
-                val pollFd = PollFdSegment(arena.allocate(Layouts.POLLFD))
+            NativeArena.ofConfined().use { arena ->
+                val pollFd = with(arena) { PollFdSegment.allocate() }
                 pollFd.setFd(socketFd.value)
                 pollFd.setEvents(NativeConstants.POLLIN)
 
@@ -201,13 +199,13 @@ internal class SupervisorDaemonEngine(
     }
 
     internal fun processConnectionStep(
-        arena: Arena,
+        arena: NativeArena,
         connection: io.mazewall.ffi.networking.SeccompConnection,
         socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>,
         pollFd: PollFdSegment
     ): io.mazewall.ffi.networking.SeccompConnection? {
         if (connection is io.mazewall.ffi.networking.SeccompConnection.Accepted) {
-            val pollRes = engine.withTransaction { engine.raw.poll(pollFd.segment, 1L, POLL_TIMEOUT_MS) }
+            val pollRes = engine.withTransaction { engine.raw.poll(pollFd.managed, 1L, POLL_TIMEOUT_MS) }
             val count = pollRes.recover { errno, _ ->
                 if (errno == NativeConstants.EINTR) 0L else -1L
             }
@@ -229,7 +227,7 @@ internal class SupervisorDaemonEngine(
 
             is io.mazewall.ffi.networking.SeccompConnection.FdAttached -> {
                 System.err.println("[SUPERVISOR] Sending handshake ACK to socket ${socketFd.value}")
-                val ackBuf = arena.allocate(ACK_BUF_SIZE)
+                val ackBuf = ConfinedSegment(arena.arena.allocate(ACK_BUF_SIZE))
                 ackBuf.writeByte(0L, PROTOCOL_ACK_BYTE)
                 var result: io.mazewall.ffi.networking.SeccompConnection? = null
                 while (true) {
@@ -262,18 +260,18 @@ internal class SupervisorDaemonEngine(
     ) {
         val sessionHandler = SupervisorSessionHandler(socketFd, listenerFd, engine, socketManager)
         try {
-            Arena.ofConfined().use { arena ->
-                val pollFds = arena.allocate(MemoryLayout.sequenceLayout(2, Layouts.POLLFD))
-                val pfd1 = PollFdSegment(pollFds.asSlice(0L, Layouts.POLLFD.byteSize()))
+            NativeArena.ofConfined().use { arena ->
+                val pollFds = ConfinedSegment(arena.arena.allocate(java.lang.foreign.MemoryLayout.sequenceLayout(2, Layouts.POLLFD)))
+                val pfd1 = PollFdSegment(ConfinedSegment(pollFds.native.asSlice(0L, Layouts.POLLFD.byteSize())))
                 pfd1.setFd(listenerFd.value)
                 pfd1.setEvents(NativeConstants.POLLIN)
 
-                val pfd2 = PollFdSegment(pollFds.asSlice(POLLFD_STRUCT_SIZE, Layouts.POLLFD.byteSize()))
+                val pfd2 = PollFdSegment(ConfinedSegment(pollFds.native.asSlice(POLLFD_STRUCT_SIZE, Layouts.POLLFD.byteSize())))
                 pfd2.setFd(socketFd.value)
                 pfd2.setEvents(NativeConstants.POLLIN)
 
-                val notif = arena.allocate(Layouts.SECCOMP_NOTIF)
-                val resp = arena.allocate(Layouts.SECCOMP_NOTIF_RESP)
+                val notif = ConfinedSegment(arena.arena.allocate(Layouts.SECCOMP_NOTIF))
+                val resp = ConfinedSegment(arena.arena.allocate(Layouts.SECCOMP_NOTIF_RESP))
 
                 while (!isGlobalShutdown()) {
                     val pollRes = engine.withTransaction { engine.raw.poll(pollFds, 2L, POLL_TIMEOUT_MS) }
@@ -283,13 +281,11 @@ internal class SupervisorDaemonEngine(
                     }
                     if (count <= 0) continue
 
-                    io.mazewall.ffi.memory.nativeScope {
-                        val action = with(this) {
-                            sessionHandler.handleActiveListener(pollFds, notif, resp)
-                        }
-                        if (action is LoopAction.Break || action is LoopAction.Shutdown) {
-                            triggerGlobalShutdown("session reactor break")
-                        }
+                    val action = io.mazewall.ffi.memory.nativeScope {
+                        sessionHandler.handleActiveListener(pollFds, notif, resp)
+                    }
+                    if (action is LoopAction.Break || action is LoopAction.Shutdown) {
+                        triggerGlobalShutdown("session reactor break")
                     }
                     if (isGlobalShutdown()) break
                 }
@@ -300,10 +296,4 @@ internal class SupervisorDaemonEngine(
             }
         }
     }
-}
-
-internal sealed class LoopAction {
-    object Continue : LoopAction()
-    object Break : LoopAction()
-    object Shutdown : LoopAction()
 }

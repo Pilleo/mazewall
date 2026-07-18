@@ -5,15 +5,14 @@ import io.mazewall.Platform
 import io.mazewall.PolicyDefinition
 import io.mazewall.CompiledSandbox
 import io.mazewall.UnsupportedKernelFeatureException
-import java.lang.foreign.MemorySegment
 import io.mazewall.core.Arch
-import io.mazewall.core.SeccompAction
 import io.mazewall.core.Syscall
 import io.mazewall.core.PrctlCommand
 import io.mazewall.enforcer.ThreadStateRegistry
 import io.mazewall.enforcer.ContainerState
 import io.mazewall.ffi.NativeConstants
-import io.mazewall.ffi.memory.nativeScope
+import io.mazewall.ffi.memory.ManagedSegment
+import io.mazewall.ffi.memory.NativeArena
 
 /**
  * Pure Java implementation of the seccomp engine.
@@ -129,7 +128,7 @@ internal object PureJavaBpfEngine : SeccompEngine<EngineState> {
 
     internal fun installFilter(
         arch: Arch,
-        prog: java.lang.foreign.MemorySegment,
+        prog: ManagedSegment,
         useTsync: Boolean,
     ): SeccompInstallationState.FilterApplied {
         // Try modern seccomp(2) syscall first

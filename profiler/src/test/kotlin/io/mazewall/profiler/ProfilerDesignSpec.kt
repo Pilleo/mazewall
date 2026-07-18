@@ -9,22 +9,12 @@ import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
 import io.mazewall.core.Tid
+import io.mazewall.core.LoopAction
 import io.mazewall.ffi.Layouts
 import io.mazewall.ffi.NativeConstants
-import io.mazewall.profiler.engine.HandshakeSession
-import io.mazewall.profiler.engine.LoopAction
-import io.mazewall.profiler.engine.NativeIoOperations
-import io.mazewall.profiler.engine.ProfilerMemoryReader
-import io.mazewall.profiler.engine.ProfilerSessionHandler
-import io.mazewall.profiler.engine.ProfilerTransport
-import io.mazewall.profiler.engine.SeccompResponder
-import io.mazewall.profiler.engine.SocketLifecycleManager
-import io.mazewall.profiler.engine.SyscallEvent
-import io.mazewall.profiler.engine.SyscallEventState
-import io.mazewall.profiler.engine.TraceEventPublisher
-import java.lang.foreign.Arena
+import io.mazewall.ffi.memory.*
+import io.mazewall.profiler.engine.*
 import java.lang.foreign.MemoryLayout
-import java.lang.foreign.MemorySegment
 import java.lang.foreign.ValueLayout
 
 class ProfilerDesignSpec :
@@ -34,14 +24,14 @@ class ProfilerDesignSpec :
             var readStringResult: String? = null
             var resolveLinkResult: String? = null
 
-            context(arena: Arena)
+            context(arena: NativeArena)
             override fun readStringFromProcess(
                 tid: Tid,
                 remoteAddr: Long,
                 maxLen: Int,
             ): String? = readStringResult
 
-            context(arena: Arena)
+            context(arena: NativeArena)
             override fun resolveLink(
                 tid: Tid,
                 link: String,
@@ -58,9 +48,9 @@ class ProfilerDesignSpec :
 
             override val raw = object : io.mazewall.RawSyscallOperations {
                 context(_: NativeTransaction)
-                override fun poll(fds: MemorySegment, nfds: Long, timeout: Int): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                override fun poll(fds: ManagedSegment, nfds: Long, timeout: Int): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
                     if (nextPollResult is LinuxNative.SyscallResult.Success && (nextPollResult as LinuxNative.SyscallResult.Success).value > 0) {
-                        fds.set(ValueLayout.JAVA_SHORT, 6L, NativeConstants.POLLIN)
+                        fds.writeShort(6L, NativeConstants.POLLIN)
                     }
                     return nextPollResult
                 }
@@ -78,15 +68,15 @@ class ProfilerDesignSpec :
                 override fun ioctl(
                     fd: FileDescriptor<*, FdState.Open>,
                     request: Long,
-                    arg: MemorySegment,
+                    arg: ManagedSegment,
                 ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
                     ioctlCalls.add(request)
                     if (request == 0xc0502100L) { // RECV
-                        arg.set(ValueLayout.JAVA_LONG, 0L, nextNotifId) // id
-                        arg.set(ValueLayout.JAVA_INT, 8L, nextNotifPid) // pid
-                        arg.set(ValueLayout.JAVA_INT, 16L, nextNotifNr) // nr
+                        arg.writeLong(0L, nextNotifId) // id
+                        arg.writeInt(8L, nextNotifPid) // pid
+                        arg.writeInt(16L, nextNotifNr) // nr
                         for (i in 0 until 6) {
-                            arg.set(ValueLayout.JAVA_LONG, 32L + i * 8, nextNotifArgs[i])
+                            arg.writeLong(32L + i * 8, nextNotifArgs[i])
                         }
                     }
                     return LinuxNative.SyscallResult.Success(0L)
@@ -105,7 +95,7 @@ class ProfilerDesignSpec :
             var acceptedServerFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>? = null
             val closedFds = mutableListOf<FileDescriptor<*, *>>()
 
-            context(arena: Arena)
+            context(arena: NativeArena)
             override fun sendTraceEvent(
                 socketFd: FileDescriptor<*, FdState.Open>,
                 event: SyscallEvent<SyscallEventState.Resolved>,
@@ -113,18 +103,18 @@ class ProfilerDesignSpec :
                 sentEvents.add(event)
             }
 
-            context(arena: Arena)
+            context(arena: NativeArena)
             override fun sendSeccompContinue(
                 session: HandshakeSession.Success,
-                resp: MemorySegment,
+                resp: ManagedSegment,
             ) {
                 ioctlCalls.add(0xc0182101L) // SECCOMP_IOCTL_NOTIF_SEND
             }
 
-            context(arena: Arena)
+            context(arena: NativeArena)
             override fun sendSeccompError(
                 session: HandshakeSession.Failed,
-                resp: MemorySegment,
+                resp: ManagedSegment,
                 errorNr: Int,
             ) {
                 ioctlCalls.add(0xc0182101L) // SECCOMP_IOCTL_NOTIF_SEND
@@ -135,11 +125,11 @@ class ProfilerDesignSpec :
 
             override fun read(
                 fd: FileDescriptor<*, FdState.Open>,
-                buf: MemorySegment,
+                buf: ManagedSegment,
                 count: Long,
             ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
                 if (count == 1L) {
-                    buf.set(ValueLayout.JAVA_BYTE, 0L, 0xAC.toByte())
+                    buf.writeByte(0L, 0xAC.toByte())
                     return LinuxNative.SyscallResult.Success(1L)
                 }
                 return LinuxNative.SyscallResult.Success(count)
@@ -147,19 +137,19 @@ class ProfilerDesignSpec :
 
             override fun write(
                 fd: FileDescriptor<*, FdState.Open>,
-                buf: MemorySegment,
+                buf: ManagedSegment,
                 count: Long,
             ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success(count)
 
             override fun recv(
                 sockfd: FileDescriptor<*, FdState.Open>,
-                buf: MemorySegment,
+                buf: ManagedSegment,
                 len: Long,
                 flags: Int,
             ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success(len)
 
             override fun poll(
-                fds: MemorySegment,
+                fds: ManagedSegment,
                 nfds: Long,
                 timeout: Int,
             ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = nextPollResult
@@ -167,7 +157,7 @@ class ProfilerDesignSpec :
             override fun ioctl(
                 fd: FileDescriptor<*, FdState.Open>,
                 request: Long,
-                arg: MemorySegment,
+                arg: ManagedSegment,
             ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success(0L)
 
             override fun createUnixServer(socketPath: String): FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open> {
@@ -209,14 +199,14 @@ class ProfilerDesignSpec :
                     syscallMap
                 ) {}
 
-                Arena.ofConfined().use { arena ->
-                    val notif = arena.allocate(Layouts.SECCOMP_NOTIF)
-                    val resp = arena.allocate(Layouts.SECCOMP_NOTIF_RESP)
+                NativeArena.ofConfined().use { arena ->
+                    val notif = arena.allocate(Layouts.SECCOMP_NOTIF.byteSize())
+                    val resp = arena.allocate(Layouts.SECCOMP_NOTIF_RESP.byteSize())
                     val ackBuf = arena.allocate(1L)
-                    val socketPollFd = arena.allocate(Layouts.POLLFD)
+                    val socketPollFd = arena.allocate(Layouts.POLLFD.byteSize())
 
-                    val pollFds = arena.allocate(MemoryLayout.sequenceLayout(2, Layouts.POLLFD))
-                    pollFds.set(ValueLayout.JAVA_SHORT, 6L, NativeConstants.POLLIN)
+                    val pollFds = arena.allocate(Layouts.POLLFD.byteSize() * 2)
+                    pollFds.writeShort(6L, NativeConstants.POLLIN)
 
                     val action = with(arena) { handler.handleActiveListener(pollFds, ackBuf, notif, resp, socketPollFd) }
 
@@ -250,13 +240,13 @@ class ProfilerDesignSpec :
                     syscallMap
                 ) {}
 
-                Arena.ofConfined().use { arena ->
-                    val notif = arena.allocate(Layouts.SECCOMP_NOTIF)
-                    val resp = arena.allocate(Layouts.SECCOMP_NOTIF_RESP)
+                NativeArena.ofConfined().use { arena ->
+                    val notif = arena.allocate(Layouts.SECCOMP_NOTIF.byteSize())
+                    val resp = arena.allocate(Layouts.SECCOMP_NOTIF_RESP.byteSize())
                     val ackBuf = arena.allocate(1L)
-                    val socketPollFd = arena.allocate(Layouts.POLLFD)
-                    val pollFds = arena.allocate(MemoryLayout.sequenceLayout(2, Layouts.POLLFD))
-                    pollFds.set(ValueLayout.JAVA_SHORT, 6L, NativeConstants.POLLIN)
+                    val socketPollFd = arena.allocate(Layouts.POLLFD.byteSize())
+                    val pollFds = arena.allocate(Layouts.POLLFD.byteSize() * 2)
+                    pollFds.writeShort(6L, NativeConstants.POLLIN)
 
                     with(arena) {
                         handler.handleActiveListener(pollFds, ackBuf, notif, resp, socketPollFd)

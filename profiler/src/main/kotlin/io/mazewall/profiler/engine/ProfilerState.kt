@@ -3,7 +3,7 @@ package io.mazewall.profiler.engine
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
-import java.lang.foreign.MemorySegment
+import io.mazewall.ffi.memory.ManagedSegment
 
 /**
  * States representing the lifecycle of a profiler connection/session.

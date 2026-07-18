@@ -4,13 +4,11 @@ import io.mazewall.LinuxNative
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import java.io.InputStream
-import java.lang.foreign.Arena
-import java.lang.foreign.MemorySegment
-import java.lang.foreign.ValueLayout
+import io.mazewall.ffi.memory.*
 
 internal class NativeSocketInputStream(
     private val socketFd: FileDescriptor<*, FdState.Open>,
-    private val arena: Arena,
+    private val arena: NativeArena,
 ) : InputStream() {
     private val readBuf = arena.allocate(1)
     private val multiBuf = arena.allocate(BUFFER_SIZE.toLong())
@@ -27,7 +25,7 @@ internal class NativeSocketInputStream(
             when (res) {
                 is LinuxNative.SyscallResult.Success -> {
                     if (res.value <= 0) return -1
-                    return readBuf.get(ValueLayout.JAVA_BYTE, 0L).toInt() and BYTE_MASK
+                    return readBuf.readByte(0L).toInt() and BYTE_MASK
                 }
 
                 is LinuxNative.SyscallResult.Error -> {
@@ -59,7 +57,7 @@ internal class NativeSocketInputStream(
                 is LinuxNative.SyscallResult.Success -> {
                     if (res.value <= 0) return -1
                     val actualLen = res.value.toInt()
-                    MemorySegment.copy(multiBuf, ValueLayout.JAVA_BYTE, 0L, b, off, actualLen)
+                    ManagedSegment.copy(multiBuf, 0L, b, off, actualLen)
                     return actualLen
                 }
 

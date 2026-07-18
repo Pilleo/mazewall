@@ -2,7 +2,7 @@ package io.mazewall.profiler.engine
 
 import io.mazewall.core.Pid
 import io.mazewall.core.Tid
-import java.lang.foreign.Arena
+import io.mazewall.ffi.memory.NativeArena
 
 /**
  * Resolves syscall path arguments by reading from the tracee's memory.
@@ -15,7 +15,7 @@ internal class SyscallPathResolver(
     /**
      * Resolves path arguments for a raw syscall event.
      */
-    context(arena: Arena)
+    context(arena: NativeArena)
     fun resolve(event: SyscallEvent<SyscallEventState.Raw>): SyscallEvent<SyscallEventState.Resolved> {
         val tid = event.tid
         val args = event.args
@@ -50,22 +50,22 @@ internal class SyscallPathResolver(
         return event.resolved(paths)
     }
 
-    context(arena: Arena)
-    private fun resolveCwd(tid: Tid): String? = memoryReader.resolveLink(tid, "cwd")
+    context(arena: NativeArena)
+    private fun resolveCwd(tid: Tid): String? = with(arena) { memoryReader.resolveLink(tid, "cwd") }
 
-    context(arena: Arena)
-    private fun resolveFdPath(tid: Tid, fd: Int): String? = memoryReader.resolveLink(tid, "fd/$fd")
+    context(arena: NativeArena)
+    private fun resolveFdPath(tid: Tid, fd: Int): String? = with(arena) { memoryReader.resolveLink(tid, "fd/$fd") }
 
     private fun isAtFdcwd(fd: Long): Boolean = fd == AT_FDCWD_VAL || fd == AT_FDCWD_UNSIGNED_VAL || fd.toInt() == AT_FDCWD_INT_VAL
 
-    context(arena: Arena)
+    context(arena: NativeArena)
     private fun tryRead(
         tid: Tid,
         addr: Long,
         dirfd: Long = AT_FDCWD_VAL,
     ): String? {
         if (addr == 0L) return null
-        val path = memoryReader.readStringFromProcess(tid, addr)
+        val path = with(arena) { memoryReader.readStringFromProcess(tid, addr) }
         ledger.record(SessionEvent.VmReadvResolved(System.nanoTime(), tid.value.toLong(), path != null))
         if (path == null) return null
         return if (path.startsWith("/")) {
@@ -75,7 +75,7 @@ internal class SyscallPathResolver(
         }
     }
 
-    context(arena: Arena)
+    context(arena: NativeArena)
     private fun resolveRelativePath(
         tid: Tid,
         path: String,
@@ -95,5 +95,11 @@ internal class SyscallPathResolver(
 
         val dirPath = java.nio.file.Paths.get(dirPathStr)
         return dirPath.resolve(path).normalize().toString()
+    }
+
+    private companion object {
+        private const val AT_FDCWD_VAL = -100L
+        private const val AT_FDCWD_UNSIGNED_VAL = 4294967196L
+        private const val AT_FDCWD_INT_VAL = -100
     }
 }

@@ -4,7 +4,7 @@ import io.mazewall.LinuxNative
 import io.mazewall.MockNativeEngine
 import io.mazewall.NativeTransaction
 import io.mazewall.Policy
-import io.mazewall.RealNativeEngine
+import io.mazewall.ffi.internal.RealNativeEngine
 import io.mazewall.Platform
 import io.mazewall.PlatformProvider
 import io.mazewall.SeccompMode

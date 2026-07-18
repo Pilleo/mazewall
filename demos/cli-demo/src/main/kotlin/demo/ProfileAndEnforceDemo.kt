@@ -262,7 +262,7 @@ fun runProfileAndEnforce() {
             // ruleset to the io-wq async worker that it applies here — if /etc/hosts is outside the
             // whitelisted scope, the VFS layer rejects the open regardless of whether it came from a
             // synchronous syscall or an io_uring submission queue entry.
-            Arena.ofConfined().use { arena ->
+            io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
                 val fs = LinuxNative.fileSystem
                 val openResult =
                     LinuxNative.withTransaction {

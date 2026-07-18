@@ -1,64 +1,48 @@
 package io.mazewall.profiler.engine
 
 import io.mazewall.LinuxNative
-import io.mazewall.core.Arch
+import io.mazewall.NativeEngine
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
-import io.mazewall.core.Syscall
+import io.mazewall.core.SocketManager
+import io.mazewall.core.LoopAction
 import io.mazewall.ffi.Layouts
 import io.mazewall.ffi.NativeConstants
+import io.mazewall.ffi.memory.*
 import io.mazewall.recover
-import java.lang.foreign.Arena
-import java.lang.foreign.MemoryLayout
-import java.lang.foreign.MemorySegment
-import java.lang.foreign.ValueLayout
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicReference
 
-/**
- * Standalone Profiler Daemon Engine.
- *
- * Communicates with the parent JVM via a [ProfilerTransport], sending binary [SyscallEvent]
- * structures and resolving memory using [ProfilerMemoryReader].
- */
-// @ref: docs/internals/designs/profiler/profiler-design.md — USER_NOTIF ACK loop protocol, deadlock prevention, SCM_RIGHTS socket FD transfer
-// @ref: docs/internals/designs/core/architectural-map.md — Profiler-Enforcer ACK loop sequence diagram
 internal class ProfilerDaemonEngine(
     private val socketPath: String,
-    private val transport: ProfilerTransport = RealProfilerTransport,
+    private val syscallMap: Map<Int, String> = emptyMap(),
+    private val publisher: TraceEventPublisher = RealProfilerTransport,
+    private val responder: SeccompResponder = RealProfilerTransport,
+    private val ioOps: NativeIoOperations = RealProfilerTransport,
     private val memoryReader: ProfilerMemoryReader = RealMemoryReader,
+    private val socketManager: SocketManager = io.mazewall.core.RealSocketManager,
 ) {
-    private val publisher: TraceEventPublisher = transport
-    private val responder: SeccompResponder = transport
-    private val ioOps: NativeIoOperations = transport
-    private val socketManager: SocketLifecycleManager = transport
-
-    private val syscallMap = mutableMapOf<Int, String>()
     private val clientSockets = CopyOnWriteArrayList<FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>>()
     private val activeListeners = CopyOnWriteArrayList<FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open>>()
-    private val stateRef = java.util.concurrent.atomic
-        .AtomicReference<ProfilerDaemonState>(ProfilerDaemonState.Uninitialized)
+    private val stateRef = AtomicReference<ProfilerDaemonState>(ProfilerDaemonState.Uninitialized)
 
     var state: ProfilerDaemonState
         get() = stateRef.get()
         private set(value) = stateRef.set(value)
 
     companion object {
-        private const val DAEMON_READY_SENTINEL = "MAZEWALL_DAEMON_READY"
         private const val POLL_TIMEOUT_MS = 1000
-        private const val POLLFD_FD_OFF = 0L
-        private const val POLLFD_EVENTS_OFF = 4L
         private const val ACK_BUF_SIZE = 1L
         private const val PROTOCOL_ACK_BYTE = 0xAC.toByte()
-        private const val POLLFD_STRUCT_SIZE = 8L
-    }
 
-    init {
-        val arch = Arch.current()
-        for (s in Syscall.entries) {
-            val nr = s.numberFor(arch)
-            if (nr >= 0) syscallMap[nr] = s.name
-        }
+        private const val POLLFD_STRUCT_SIZE = 8L
+        private val POLLFD_FD_OFF = Layouts.POLLFD_FD_OFFSET
+        private val POLLFD_EVENTS_OFF = Layouts.POLLFD_EVENTS_OFFSET
+
+        private const val DAEMON_READY_SENTINEL = "MAZEWALL_PROFILER_DAEMON_READY"
     }
 
     fun run() {
@@ -72,7 +56,7 @@ internal class ProfilerDaemonEngine(
         System.out.flush()
 
         try {
-            Arena.ofConfined().use { arena ->
+            NativeArena.ofConfined().use { arena ->
                 state = listeningState.active()
                 acceptConnections(serverFd, arena)
             }
@@ -101,11 +85,11 @@ internal class ProfilerDaemonEngine(
     @Suppress("LoopWithTooManyJumpStatements")
     private fun acceptConnections(
         serverFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>,
-        arena: Arena,
+        arena: NativeArena,
     ) {
         val pollFd = arena.allocate(Layouts.POLLFD)
-        pollFd.set(ValueLayout.JAVA_INT, POLLFD_FD_OFF, serverFd.value)
-        pollFd.set(ValueLayout.JAVA_SHORT, POLLFD_EVENTS_OFF, NativeConstants.POLLIN)
+        pollFd.writeInt(POLLFD_FD_OFF, serverFd.value)
+        pollFd.writeShort(POLLFD_EVENTS_OFF, NativeConstants.POLLIN)
 
         while (!isGlobalShutdown()) {
             val pollRes = LinuxNative.withTransaction { ioOps.raw.poll(pollFd, 1L, POLL_TIMEOUT_MS) }
@@ -136,10 +120,10 @@ internal class ProfilerDaemonEngine(
     private fun handleConnection(socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>) {
         var connection: io.mazewall.ffi.networking.SeccompConnection = io.mazewall.ffi.networking.SeccompConnection.Accepted(socketFd)
         try {
-            Arena.ofConfined().use { arena ->
+            NativeArena.ofConfined().use { arena ->
                 val pollFd = arena.allocate(Layouts.POLLFD)
-                pollFd.set(ValueLayout.JAVA_INT, POLLFD_FD_OFF, socketFd.value)
-                pollFd.set(ValueLayout.JAVA_SHORT, POLLFD_EVENTS_OFF, NativeConstants.POLLIN)
+                pollFd.writeInt(POLLFD_FD_OFF, socketFd.value)
+                pollFd.writeShort(POLLFD_EVENTS_OFF, NativeConstants.POLLIN)
 
                 while (!isGlobalShutdown()) {
                     // Only poll if we are waiting for a NEW listener FD (Accepted state)
@@ -168,7 +152,7 @@ internal class ProfilerDaemonEngine(
                         is io.mazewall.ffi.networking.SeccompConnection.FdAttached -> {
                             System.err.println("[DAEMON] Sending handshake ACK to socket ${socketFd.value}")
                             val ackBuf = arena.allocate(ACK_BUF_SIZE)
-                            ackBuf.set(ValueLayout.JAVA_BYTE, 0L, PROTOCOL_ACK_BYTE)
+                            ackBuf.writeByte(0L, PROTOCOL_ACK_BYTE)
                             var success = false
                             while (true) {
                                 val res = ioOps.write(socketFd, ackBuf, ACK_BUF_SIZE)
@@ -210,6 +194,10 @@ internal class ProfilerDaemonEngine(
                 val lFd = connection.listenerFd
                 activeListeners.remove(lFd)
                 socketManager.close(lFd)
+            } else if (connection is io.mazewall.ffi.networking.SeccompConnection.Active) {
+                val lFd = (connection as io.mazewall.ffi.networking.SeccompConnection.Active).listenerFd
+                activeListeners.remove(lFd)
+                socketManager.close(lFd)
             }
         }
     }
@@ -229,8 +217,8 @@ internal class ProfilerDaemonEngine(
             onShutdown = this::triggerGlobalShutdown,
         )
         try {
-            Arena.ofConfined().use { arena ->
-                val pollFds = with(arena) { setupSessionPoll(socketFd, listenerFd) }
+            NativeArena.ofConfined().use { arena ->
+                val pollFds = setupSessionPoll(arena, socketFd, listenerFd)
                 val notif = arena.allocate(Layouts.SECCOMP_NOTIF)
                 val resp = arena.allocate(Layouts.SECCOMP_NOTIF_RESP)
                 val ackBuf = arena.allocate(1L)
@@ -244,10 +232,8 @@ internal class ProfilerDaemonEngine(
                     }
                     if (count <= 0) continue
 
-                    val action = io.mazewall.ffi.memory.nativeScope {
-                        with(this) {
-                            sessionHandler.handleActiveListener(pollFds, ackBuf, notif, resp, socketPollFd)
-                        }
+                    val action = nativeScope {
+                        sessionHandler.handleActiveListener(pollFds, ackBuf, notif, resp, socketPollFd)
                     }
                     if (action !is LoopAction.Continue) break
                     if (isGlobalShutdown()) break
@@ -259,18 +245,18 @@ internal class ProfilerDaemonEngine(
         }
     }
 
-    context(arena: Arena)
     private fun setupSessionPoll(
+        arena: NativeArena,
         socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>,
         listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open>,
-    ): MemorySegment {
-        val pollFds = arena.allocate(MemoryLayout.sequenceLayout(2, Layouts.POLLFD))
+    ): ManagedSegment {
+        val pollFds = arena.allocate(Layouts.POLLFD, 2)
         // [0]: Seccomp listener FD
-        pollFds.set(ValueLayout.JAVA_INT, 0L, listenerFd.value)
-        pollFds.set(ValueLayout.JAVA_SHORT, POLLFD_EVENTS_OFF, NativeConstants.POLLIN)
+        pollFds.writeInt(0L, listenerFd.value)
+        pollFds.writeShort(POLLFD_EVENTS_OFF, NativeConstants.POLLIN)
         // [1]: UNIX socket FD (for parent shutdown/ACK)
-        pollFds.set(ValueLayout.JAVA_INT, POLLFD_STRUCT_SIZE, socketFd.value)
-        pollFds.set(ValueLayout.JAVA_SHORT, POLLFD_STRUCT_SIZE + POLLFD_EVENTS_OFF, NativeConstants.POLLIN)
+        pollFds.writeInt(POLLFD_STRUCT_SIZE, socketFd.value)
+        pollFds.writeShort(POLLFD_STRUCT_SIZE + POLLFD_EVENTS_OFF, NativeConstants.POLLIN)
         return pollFds
     }
 }

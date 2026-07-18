@@ -3,19 +3,17 @@ package io.mazewall.enforcer.supervisor
 import io.mazewall.LinuxNative
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
-import java.io.InputStream
-import java.lang.foreign.Arena
-import java.lang.foreign.MemorySegment
-import java.lang.foreign.ValueLayout
-
+import io.mazewall.ffi.memory.ConfinedSegment
+import io.mazewall.ffi.memory.NativeArena
 import io.mazewall.ffi.memory.readByte
+import java.io.InputStream
 
 internal class SupervisorSocketInputStream(
     private val socketFd: FileDescriptor<*, FdState.Open>,
-    private val arena: Arena,
+    private val arena: NativeArena,
 ) : InputStream() {
-    private val readBuf = arena.allocate(1)
-    private val multiBuf = arena.allocate(BUFFER_SIZE.toLong())
+    private val readBuf = ConfinedSegment(arena.arena.allocate(1))
+    private val multiBuf = ConfinedSegment(arena.arena.allocate(BUFFER_SIZE.toLong()))
 
     companion object {
         private const val BUFFER_SIZE = 8192
@@ -50,7 +48,7 @@ internal class SupervisorSocketInputStream(
                 is LinuxNative.SyscallResult.Success -> {
                     if (res.value > 0) {
                         val actualLen = res.value.toInt()
-                        MemorySegment.copy(multiBuf, ValueLayout.JAVA_BYTE, 0L, b, off, actualLen)
+                        java.lang.foreign.MemorySegment.copy(multiBuf.native, java.lang.foreign.ValueLayout.JAVA_BYTE, 0L, b, off, actualLen)
                         result = actualLen
                     }
                     done = true

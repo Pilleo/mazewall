@@ -7,8 +7,8 @@ import io.mazewall.LinuxNative
 import io.mazewall.MockNativeEngine
 import io.mazewall.MockNativeNetworking
 import io.mazewall.NativeTransaction
-import io.mazewall.RealNativeEngine
-import java.lang.foreign.Arena
+import io.mazewall.ffi.internal.RealNativeEngine
+import io.mazewall.ffi.memory.NativeArena
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
@@ -50,12 +50,12 @@ class SupervisorSessionHandlerTest {
 
         val method = SupervisorSessionHandler::class.java.getDeclaredMethod(
             "connectSocketInSupervisor",
-            Arena::class.java,
+            NativeArena::class.java,
             ByteArray::class.java
         )
         method.isAccessible = true
 
-        Arena.ofConfined().use { arena ->
+        NativeArena.ofConfined().use { arena ->
             // Test normal domain (AF_INET = 2) -> little endian: [2, 0]
             val normalBytes = byteArrayOf(2, 0)
             method.invoke(handler, arena, normalBytes)

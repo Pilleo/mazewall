@@ -5,11 +5,10 @@ import io.mazewall.NativeEngine
 import io.mazewall.core.ProcessLauncher
 import io.mazewall.core.RealProcessLauncher
 import io.mazewall.core.RealSocketManager
+import io.mazewall.ffi.memory.*
 import io.mazewall.core.SocketManager
 import io.mazewall.getFdOrThrow
 import java.io.IOException
-import java.lang.foreign.Arena
-import java.lang.foreign.ValueLayout
 import java.nio.file.Path
 import java.nio.file.attribute.PosixFilePermissions
 import java.util.logging.Logger
@@ -188,11 +187,11 @@ public class ProfilerDaemonManager(
 
     private fun triggerDaemonShutdown(socketPath: String) {
         try {
-            Arena.ofConfined().use { arena ->
+            NativeArena.ofConfined().use { arena ->
                 val fd = socketManager.connect(socketPath)
                 try {
-                    val cmd = arena.allocate(1)
-                    cmd.set(ValueLayout.JAVA_BYTE, 0L, SHUTDOWN_COMMAND_BYTE)
+                    val cmd = ConfinedSegment(arena.arena.allocate(1))
+                    cmd.writeByte(0L, SHUTDOWN_COMMAND_BYTE)
                     engine.withTransaction { engine.memory.write(fd, cmd, 1) }
                     Thread.sleep(SHUTDOWN_WAIT_MS)
                 } finally {
