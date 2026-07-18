@@ -1,7 +1,6 @@
 package io.mazewall.ffi.memory
 
 import org.junit.jupiter.api.Test
-import java.lang.foreign.Arena
 import java.lang.foreign.ValueLayout
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -9,7 +8,7 @@ import kotlin.test.assertTrue
 class MemoryWrappersTest {
     @Test
     fun `test SockFilterSegment getters and setters`() {
-        Arena.ofConfined().use { arena ->
+        NativeArena.ofConfined().use { arena ->
             with(arena) {
                 val segment = SockFilterSegment.allocate()
                 segment.setCode(0x1234.toShort())
@@ -27,7 +26,7 @@ class MemoryWrappersTest {
 
     @Test
     fun `test PollFdSegment getters and setters`() {
-        Arena.ofConfined().use { arena ->
+        NativeArena.ofConfined().use { arena ->
             with(arena) {
                 val segment = PollFdSegment.allocate()
                 segment.setFd(42)
@@ -43,7 +42,7 @@ class MemoryWrappersTest {
 
     @Test
     fun `test memory segment extension methods`() {
-        Arena.ofConfined().use { arena ->
+        NativeArena.ofConfined().use { arena ->
             val segment = arena.allocate(100)
 
             segment.writeByte(0, 0x12.toByte())

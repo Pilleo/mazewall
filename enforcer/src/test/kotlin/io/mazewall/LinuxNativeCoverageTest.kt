@@ -3,6 +3,7 @@ package io.mazewall
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
 import io.mazewall.ffi.Layouts
+import io.mazewall.ffi.NativeConstants
 import io.mazewall.ffi.memory.*
 import io.mazewall.seccomp.BpfInstruction
 import org.junit.jupiter.api.AfterEach
@@ -69,7 +70,7 @@ class LinuxNativeCoverageTest {
     }
 
     @Test
-    fun `test LinuxNative engine delegation getters`() {
+    fun `test LinuxNative delegation getters`() {
         assertNotNull(LinuxNative.fileSystem)
         assertNotNull(LinuxNative.networking)
         assertNotNull(LinuxNative.process)
@@ -135,7 +136,7 @@ class LinuxNativeCoverageTest {
 
         assertEquals(2, prog.getLen().toInt())
         val filterArray = prog.getFilter()
-        val f1 = SockFilterSegment(filterArray.asSlice(0, Layouts.SOCK_FILTER_SIZE))
+        val f1 = SockFilterSegment(ConfinedSegment(filterArray.native.asSlice(0, Layouts.SOCK_FILTER_SIZE)))
 
         // Verify first filter
         assertEquals(0x01.toShort(), f1.getCode())

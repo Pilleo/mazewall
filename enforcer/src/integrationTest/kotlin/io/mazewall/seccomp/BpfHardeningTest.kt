@@ -9,6 +9,7 @@ import io.mazewall.core.PrctlCommand
 import io.mazewall.core.Syscall
 import io.mazewall.enforcer.ContainedExecutors
 import org.junit.jupiter.api.Test
+import io.mazewall.ffi.memory.ManagedSegment
 import java.lang.foreign.MemorySegment
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.test.assertEquals
@@ -34,7 +35,7 @@ class BpfHardeningTest : BaseIntegrationTest() {
                     // PR_SET_NAME = 15
                     val res = LinuxNative.withTransaction {
                         LinuxNative.process.prctl(
-                            PrctlCommand.SetName(NativeArg.MemoryArg(MemorySegment.NULL))
+                            PrctlCommand.SetName(NativeArg.MemoryArg(ManagedSegment.NULL))
                         )
                     }
                     result.set(res)

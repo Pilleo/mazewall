@@ -8,6 +8,7 @@ import io.mazewall.core.ProcessLauncher
 import io.mazewall.core.SocketManager
 import io.mazewall.core.Tid
 import io.mazewall.ffi.NativeConstants
+import io.mazewall.ffi.memory.readByte
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -118,7 +119,7 @@ class SupervisorDaemonManagerTest {
         var writeCalledWithShutdown = false
         mockEngine.memory.onWrite = { _, _, buf, count ->
             if (count == 1L) {
-                val byte = buf.get(java.lang.foreign.ValueLayout.JAVA_BYTE, 0L)
+                val byte = buf.readByte(0L)
                 if (byte == 0x53.toByte()) { // 'S'
                     writeCalledWithShutdown = true
                 }

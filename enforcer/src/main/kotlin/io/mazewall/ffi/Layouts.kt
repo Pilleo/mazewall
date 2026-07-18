@@ -215,4 +215,9 @@ object Layouts {
     const val SUPERVISOR_RESPONSE_DECISION_OFFSET: Long = 8L
     const val SUPERVISOR_RESPONSE_ERROR_OFFSET: Long = 12L
     const val SUPERVISOR_RESPONSE_SIZE: Long = 16L
+
+    val POLLFD_SIZE: Long = POLLFD.byteSize()
+    val SECCOMP_NOTIF_SIZE: Long = SECCOMP_NOTIF.byteSize()
+    val SECCOMP_NOTIF_RESP_SIZE: Long = SECCOMP_NOTIF_RESP.byteSize()
+    val LANDLOCK_RULESET_ATTR_SIZE: Long = LANDLOCK_RULESET_ATTR.byteSize()
 }

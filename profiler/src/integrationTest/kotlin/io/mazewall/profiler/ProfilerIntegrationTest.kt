@@ -169,7 +169,7 @@ class ProfilerIntegrationTest : BaseIntegrationTest() {
             wrapped
                 .submit(
                     Callable {
-                        java.lang.foreign.Arena.ofConfined().use { arena ->
+                        io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
                             val pathSeg = arena.allocateFrom(absolutePath)
                             val openRes = LinuxNative.withTransaction {
                                 LinuxNative.fileSystem.open(pathSeg, 0)

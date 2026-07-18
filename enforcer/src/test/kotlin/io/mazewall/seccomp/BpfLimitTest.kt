@@ -2,7 +2,7 @@ package io.mazewall.seccomp
 
 import io.mazewall.LinuxNative
 import io.mazewall.ffi.NativeConstants
-import java.lang.foreign.Arena
+import io.mazewall.ffi.memory.NativeArena
 import kotlin.test.Test
 import kotlin.test.assertFailsWith
 
@@ -13,7 +13,7 @@ class BpfLimitTest {
             BpfInstruction.Ret(0, 0)
         }
 
-        Arena.ofConfined().use { arena ->
+        NativeArena.ofConfined().use { arena ->
             assertFailsWith<IllegalArgumentException> {
                 with(arena) {
                     LinuxNative.memory.newSockFProg(instructions)
@@ -28,7 +28,7 @@ class BpfLimitTest {
             BpfInstruction.Ret(0, 0)
         }
 
-        Arena.ofConfined().use { arena ->
+        NativeArena.ofConfined().use { arena ->
             with(arena) {
                 LinuxNative.memory.newSockFProg(instructions)
             }

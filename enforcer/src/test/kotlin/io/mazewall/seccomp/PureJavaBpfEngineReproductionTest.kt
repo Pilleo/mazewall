@@ -8,10 +8,10 @@ import io.mazewall.Policy
 import io.mazewall.compile
 import io.mazewall.core.Arch
 import io.mazewall.core.PrctlCommand
+import io.mazewall.ffi.memory.ManagedSegment
+import io.mazewall.ffi.memory.NativeArena
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
-import java.lang.foreign.Arena
-import java.lang.foreign.MemorySegment
 import kotlin.test.assertFailsWith
 import kotlin.test.assertNull
 
@@ -28,8 +28,8 @@ class PureJavaBpfEngineReproductionTest {
     fun `reproduce no_new_privs being set before filter building failure`() {
         val mockProcess = MockNativeProcess()
         val mockMemory = object : MockNativeMemory() {
-            context(arena: Arena)
-            override fun newSockFProg(filters: List<BpfInstruction>): MemorySegment {
+            context(arena: NativeArena)
+            override fun newSockFProg(filters: List<BpfInstruction>): ManagedSegment {
                 throw RuntimeException("Simulated filter building failure")
             }
         }

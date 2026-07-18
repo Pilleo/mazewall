@@ -72,7 +72,7 @@ class PrctlProtectionTest : BaseIntegrationTest() {
                         }.getOrThrow("prctl(PR_GET_NAME)")
                         assertEquals(0, res)
 
-                        val name = nameBuffer.getString(0)
+                        val name = nameBuffer.native.getString(0)
                         assertTrue(name.isNotEmpty(), "Expected non-empty thread name")
                     }
                 }.get()

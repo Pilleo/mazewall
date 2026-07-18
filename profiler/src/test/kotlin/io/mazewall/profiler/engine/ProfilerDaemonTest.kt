@@ -12,11 +12,11 @@ import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
 import io.mazewall.core.Tid
+import io.mazewall.core.LoopAction
 import io.mazewall.ffi.Layouts
 import io.mazewall.ffi.NativeConstants
-import java.lang.foreign.Arena
+import io.mazewall.ffi.memory.*
 import java.lang.foreign.MemoryLayout
-import java.lang.foreign.MemorySegment
 import java.lang.foreign.ValueLayout
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
@@ -38,62 +38,62 @@ class ProfilerDaemonTest {
         var nextReadResult: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success(1L)
         var ackByte: Byte = PROTOCOL_ACK_BYTE
 
-        context(arena: Arena)
+        context(arena: NativeArena)
         override fun sendTraceEvent(socketFd: FileDescriptor<*, FdState.Open>, event: SyscallEvent<SyscallEventState.Resolved>) {
             sentEvents.add(event)
         }
 
-        context(arena: Arena)
-        override fun sendSeccompContinue(session: HandshakeSession.Success, resp: MemorySegment) {
+        context(arena: NativeArena)
+        override fun sendSeccompContinue(session: HandshakeSession.Success, resp: ManagedSegment) {
             continueSent = true
         }
 
-        context(arena: Arena)
-        override fun sendSeccompError(session: HandshakeSession.Failed, resp: MemorySegment, errorNr: Int) {
+        context(arena: NativeArena)
+        override fun sendSeccompError(session: HandshakeSession.Failed, resp: ManagedSegment, errorNr: Int) {
             errorSent = true
         }
 
-        override fun read(fd: FileDescriptor<*, FdState.Open>, buf: MemorySegment, count: Long): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = nextReadResult.also {
+        override fun read(fd: FileDescriptor<*, FdState.Open>, buf: ManagedSegment, count: Long): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = nextReadResult.also {
             if (it is LinuxNative.SyscallResult.Success && it.value > 0) {
-                buf.set(ValueLayout.JAVA_BYTE, 0L, ackByte)
+                buf.writeByte(0L, ackByte)
             }
         }
 
-        override fun write(fd: FileDescriptor<*, FdState.Open>, buf: MemorySegment, count: Long): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success(count)
+        override fun write(fd: FileDescriptor<*, FdState.Open>, buf: ManagedSegment, count: Long): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success(count)
 
-        override fun recv(sockfd: FileDescriptor<*, FdState.Open>, buf: MemorySegment, len: Long, flags: Int): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success(len)
+        override fun recv(sockfd: FileDescriptor<*, FdState.Open>, buf: ManagedSegment, len: Long, flags: Int): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success(len)
 
-        override fun poll(fds: MemorySegment, nfds: Long, timeout: Int): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = nextPollResult
+        override fun poll(fds: ManagedSegment, nfds: Long, timeout: Int): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = nextPollResult
 
-        override fun ioctl(fd: FileDescriptor<*, FdState.Open>, request: Long, arg: MemorySegment): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+        override fun ioctl(fd: FileDescriptor<*, FdState.Open>, request: Long, arg: ManagedSegment): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
             ioctlCalls.add(request)
             if (request == SECCOMP_IOCTL_NOTIF_RECV) {
-                arg.set(ValueLayout.JAVA_LONG, NOTIF_ID_OFF, 123L)
-                arg.set(ValueLayout.JAVA_INT, NOTIF_PID_OFF, 456)
-                arg.set(ValueLayout.JAVA_INT, NOTIF_NR_OFF, 2)
+                arg.writeLong(NOTIF_ID_OFF, 123L)
+                arg.writeInt(NOTIF_PID_OFF, 456)
+                arg.writeInt(NOTIF_NR_OFF, 2)
             }
             return LinuxNative.SyscallResult.Success(0L)
         }
 
         override val raw = object : io.mazewall.RawSyscallOperations {
             context(_: NativeTransaction)
-            override fun poll(fds: MemorySegment, nfds: Long, timeout: Int): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+            override fun poll(fds: ManagedSegment, nfds: Long, timeout: Int): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
                 System.err.println("[MOCK] poll nfds=$nfds nextPollResult=$nextPollResult")
                 if (nextPollResult is LinuxNative.SyscallResult.Success && (nextPollResult as LinuxNative.SyscallResult.Success).value > 0) {
-                    fds.set(ValueLayout.JAVA_SHORT, 6L, NativeConstants.POLLIN)
-                    System.err.println("[MOCK] set POLLIN at offset 6. Value=${fds.get(ValueLayout.JAVA_SHORT, 6L)}")
+                    fds.writeShort(6L, NativeConstants.POLLIN)
+                    System.err.println("[MOCK] set POLLIN at offset 6. Value=${fds.readShort(6L)}")
                 }
                 return nextPollResult
             }
 
             context(_: NativeTransaction)
-            override fun ioctl(fd: FileDescriptor<*, FdState.Open>, request: Long, arg: MemorySegment): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+            override fun ioctl(fd: FileDescriptor<*, FdState.Open>, request: Long, arg: ManagedSegment): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
                 ioctlCalls.add(request)
                 if (request == SECCOMP_IOCTL_NOTIF_RECV) {
-                    arg.set(ValueLayout.JAVA_LONG, NOTIF_ID_OFF, 123L)
-                    arg.set(ValueLayout.JAVA_INT, NOTIF_PID_OFF, 456)
-                    arg.set(ValueLayout.JAVA_INT, NOTIF_NR_OFF, 2)
-                    arg.set(ValueLayout.JAVA_LONG, NOTIF_ARGS_OFF, 0x1000L)
+                    arg.writeLong(NOTIF_ID_OFF, 123L)
+                    arg.writeInt(NOTIF_PID_OFF, 456)
+                    arg.writeInt(NOTIF_NR_OFF, 2)
+                    arg.writeLong(NOTIF_ARGS_OFF, 0x1000L)
                 }
                 return LinuxNative.SyscallResult.Success(0L)
             }
@@ -120,9 +120,9 @@ class ProfilerDaemonTest {
     }
 
     private class MockReader : ProfilerMemoryReader {
-        context(arena: Arena)
+        context(arena: NativeArena)
         override fun readStringFromProcess(tid: Tid, remoteAddr: Long, maxLen: Int): String? = "/tmp/test.txt"
-        context(arena: Arena)
+        context(arena: NativeArena)
         override fun resolveLink(tid: Tid, link: String): String? = "/proc/1/cwd"
     }
 
@@ -146,15 +146,15 @@ class ProfilerDaemonTest {
             syscallMap,
         ) { }
 
-        Arena.ofConfined().use { arena ->
-            val notif = arena.allocate(Layouts.SECCOMP_NOTIF)
-            val resp = arena.allocate(Layouts.SECCOMP_NOTIF_RESP)
+        NativeArena.ofConfined().use { arena ->
+            val notif = arena.allocate(Layouts.SECCOMP_NOTIF.byteSize())
+            val resp = arena.allocate(Layouts.SECCOMP_NOTIF_RESP.byteSize())
             val ackBuf = arena.allocate(1L)
-            val socketPollFd = arena.allocate(Layouts.POLLFD)
+            val socketPollFd = arena.allocate(Layouts.POLLFD.byteSize())
 
-            val pollFds = arena.allocate(MemoryLayout.sequenceLayout(2, Layouts.POLLFD))
+            val pollFds = arena.allocate(Layouts.POLLFD.byteSize() * 2)
             // [0]: Seccomp listener FD - set POLLIN
-            pollFds.set(ValueLayout.JAVA_SHORT, Layouts.POLLFD_REVENTS_OFFSET, NativeConstants.POLLIN)
+            pollFds.writeShort(Layouts.POLLFD_REVENTS_OFFSET, NativeConstants.POLLIN)
 
             val action = with(arena) {
                 handler.handleActiveListener(pollFds, ackBuf, notif, resp, socketPollFd)
@@ -188,14 +188,14 @@ class ProfilerDaemonTest {
             syscallMap,
         ) { }
 
-        Arena.ofConfined().use { arena ->
-            val notif = arena.allocate(Layouts.SECCOMP_NOTIF)
-            val resp = arena.allocate(Layouts.SECCOMP_NOTIF_RESP)
+        NativeArena.ofConfined().use { arena ->
+            val notif = arena.allocate(Layouts.SECCOMP_NOTIF.byteSize())
+            val resp = arena.allocate(Layouts.SECCOMP_NOTIF_RESP.byteSize())
             val ackBuf = arena.allocate(1L)
-            val socketPollFd = arena.allocate(Layouts.POLLFD)
+            val socketPollFd = arena.allocate(Layouts.POLLFD.byteSize())
 
-            val pollFds = arena.allocate(MemoryLayout.sequenceLayout(2, Layouts.POLLFD))
-            pollFds.set(ValueLayout.JAVA_SHORT, Layouts.POLLFD_REVENTS_OFFSET, NativeConstants.POLLIN)
+            val pollFds = arena.allocate(Layouts.POLLFD.byteSize() * 2)
+            pollFds.writeShort(Layouts.POLLFD_REVENTS_OFFSET, NativeConstants.POLLIN)
 
             val action = with(arena) {
                 handler.handleActiveListener(pollFds, ackBuf, notif, resp, socketPollFd)
@@ -229,14 +229,14 @@ class ProfilerDaemonTest {
             syscallMap,
         ) { }
 
-        Arena.ofConfined().use { arena ->
-            val notif = arena.allocate(Layouts.SECCOMP_NOTIF)
-            val resp = arena.allocate(Layouts.SECCOMP_NOTIF_RESP)
+        NativeArena.ofConfined().use { arena ->
+            val notif = arena.allocate(Layouts.SECCOMP_NOTIF.byteSize())
+            val resp = arena.allocate(Layouts.SECCOMP_NOTIF_RESP.byteSize())
             val ackBuf = arena.allocate(1L)
-            val socketPollFd = arena.allocate(Layouts.POLLFD)
+            val socketPollFd = arena.allocate(Layouts.POLLFD.byteSize())
 
-            val pollFds = arena.allocate(MemoryLayout.sequenceLayout(2, Layouts.POLLFD))
-            pollFds.set(ValueLayout.JAVA_SHORT, Layouts.POLLFD_REVENTS_OFFSET, NativeConstants.POLLIN)
+            val pollFds = arena.allocate(Layouts.POLLFD.byteSize() * 2)
+            pollFds.writeShort(Layouts.POLLFD_REVENTS_OFFSET, NativeConstants.POLLIN)
 
             with(arena) {
                 handler.handleActiveListener(pollFds, ackBuf, notif, resp, socketPollFd)

@@ -11,7 +11,7 @@ class ManagedSegmentTest {
         Arena.ofConfined().use { arena ->
             val raw = arena.allocate(10)
             val confined = ConfinedSegment(raw)
-            assertEquals(raw, confined.segment)
+            assertEquals(raw, confined.native)
             @Suppress("USELESS_IS_CHECK")
             assertTrue(confined is ManagedSegment)
         }
@@ -22,7 +22,7 @@ class ManagedSegmentTest {
         Arena.ofShared().use { arena ->
             val raw = arena.allocate(10)
             val shared = SharedSegment(raw)
-            assertEquals(raw, shared.segment)
+            assertEquals(raw, shared.native)
             @Suppress("USELESS_IS_CHECK")
             assertTrue(shared is ManagedSegment)
         }
