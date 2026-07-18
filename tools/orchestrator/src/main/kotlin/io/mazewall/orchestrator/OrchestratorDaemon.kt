@@ -43,6 +43,8 @@ class OrchestratorContext {
             }
         }
 
+
+
         lastHeadSha = props.getProperty("lastHeadSha").takeIf { !it.isNullOrEmpty() }
         lastReviewedSha = props.getProperty("lastReviewedSha").takeIf { !it.isNullOrEmpty() }
         lastBuildStatus = props.getProperty("lastBuildStatus").takeIf { !it.isNullOrEmpty() }

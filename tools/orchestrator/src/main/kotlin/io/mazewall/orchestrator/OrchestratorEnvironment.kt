@@ -49,6 +49,8 @@ interface OrchestratorEnvironment {
 
     // Jules
     fun getJulesSession(issueId: String): JulesSession?
+    fun hasUnableToCompleteActivity(sessionId: String): Boolean
+    fun sendJulesSessionMessage(sessionId: String, prompt: String)
 
     // Backlog / Filesystem
     fun parseAllIssues(): List<BacklogIssue>
@@ -188,6 +190,12 @@ class RealOrchestratorEnvironment(
     }
 
     override fun getJulesSession(issueId: String): JulesSession? = JulesCli.getActiveSession(issueId)
+
+    override fun hasUnableToCompleteActivity(sessionId: String): Boolean = JulesCli.hasUnableToCompleteActivity(sessionId)
+
+    override fun sendJulesSessionMessage(sessionId: String, prompt: String) {
+        JulesCli.sendSessionMessage(sessionId, prompt)
+    }
 
     override fun parseAllIssues(): List<BacklogIssue> = BacklogParser.parseAllIssues(backlogDir)
 

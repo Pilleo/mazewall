@@ -262,6 +262,8 @@ object GitHubCli {
         override fun getFailedBuildLogs(prNumber: String): String = ""
         override fun getPrUrl(prNumber: String): String = ""
         override fun getJulesSession(issueId: String): JulesSession? = null
+        override fun hasUnableToCompleteActivity(sessionId: String): Boolean = false
+        override fun sendJulesSessionMessage(sessionId: String, prompt: String) {}
         override fun parseAllIssues(): List<BacklogIssue> = emptyList()
         override fun writeGithubIssue(issue: BacklogIssue, number: Int) {}
         override fun removeGithubIssue(issue: BacklogIssue) {}

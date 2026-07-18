@@ -51,7 +51,11 @@ class MockOrchestratorEnvironment : OrchestratorEnvironment {
     override fun getFailedBuildLogs(prNumber: String): String = "logs"
     override fun getPrUrl(prNumber: String): String = "http://pr/$prNumber"
 
+    var hasUnableToCompleteActivity: Boolean = false
+    val sentJulesMessages = mutableListOf<Pair<String, String>>()
     override fun getJulesSession(issueId: String): JulesSession? = julesSession
+    override fun hasUnableToCompleteActivity(sessionId: String): Boolean = hasUnableToCompleteActivity
+    override fun sendJulesSessionMessage(sessionId: String, prompt: String) { sentJulesMessages.add(sessionId to prompt) }
 
     override fun parseAllIssues(): List<BacklogIssue> = issues
     override fun writeGithubIssue(issue: BacklogIssue, number: Int) {}
@@ -265,5 +269,66 @@ class StateHandlerTest {
         assertEquals(OrchestratorState.SELECT_TASK, nextState)
         assertNull(context.currentIssueId)
         assertTrue(env.resolvedIssues.any { it.id == "issue-1" })
+    }
+
+    @Test
+    fun testCiRunningRetriesOnJulesSessionFailure() {
+        val env = MockOrchestratorEnvironment()
+        val context = OrchestratorContext().apply {
+            prNumber = "pr-1"
+            currentIssueId = "issue-1"
+            githubIssueNumber = "123"
+            julesSessionId = "s1"
+        }
+        env.prHeadSha = "sha123"
+        env.buildStatus = "PENDING"
+        env.julesSession = JulesSession("s1", "description", "repo", "FAILED")
+
+        val nextState = OrchestratorState.CI_RUNNING.execute(env, context)
+
+        assertEquals(OrchestratorState.CI_RUNNING, nextState)
+        assertEquals(1, context.julesRetries)
+        assertEquals("s1", context.julesSessionId)
+        assertEquals("pr-1", context.prNumber)
+        assertTrue(env.sentJulesMessages.any { it.first == "s1" && it.second == "Retry" })
+    }
+
+    @Test
+    fun testAwaitingReviewRetriesOnJulesSessionFailure() {
+        val env = MockOrchestratorEnvironment()
+        val context = OrchestratorContext().apply {
+            prNumber = "pr-1"
+            currentIssueId = "issue-1"
+            githubIssueNumber = "123"
+            julesSessionId = "s1"
+            lastReviewedSha = "sha123"
+        }
+        env.prHeadSha = "sha123"
+        env.buildStatus = "SUCCESS"
+        env.julesSession = JulesSession("s1", "description", "repo", "FAILED")
+
+        val nextState = OrchestratorState.AWAITING_REVIEW.execute(env, context)
+
+        assertEquals(OrchestratorState.AWAITING_REVIEW, nextState)
+        assertNull(context.lastReviewedSha)
+        assertTrue(env.sentJulesMessages.any { it.first == "s1" && it.second == "Retry" })
+    }
+
+    @Test
+    fun testAwaitingPrRetriesOnJulesSessionFailure() {
+        val env = MockOrchestratorEnvironment()
+        val context = OrchestratorContext().apply {
+            currentIssueId = "issue-1"
+            githubIssueNumber = "123"
+            julesSessionId = "s1"
+        }
+        env.julesSession = JulesSession("s1", "description", "repo", "FAILED")
+
+        val nextState = OrchestratorState.AWAITING_PR.execute(env, context)
+
+        assertEquals(OrchestratorState.AWAITING_PR, nextState)
+        assertEquals(1, context.julesRetries)
+        assertEquals("s1", context.julesSessionId)
+        assertTrue(env.sentJulesMessages.any { it.first == "s1" && it.second == "Retry" })
     }
 }

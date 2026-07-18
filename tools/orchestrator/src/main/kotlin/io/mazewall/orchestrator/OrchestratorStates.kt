@@ -203,11 +203,21 @@ sealed interface OrchestratorState {
                     if (context.julesRetries < 2) {
                         context.julesRetries++
                         env.println("\n⚠️ [RETRY] Jules task $issueId failed with status: ${session.status}. Retrying (Attempt ${context.julesRetries}/2)...")
-                        env.sendNotification("⚠️ *Jules task failed* for $issueId (Status: ${session.status}). Commenting 'Retry' to trigger a new session (Attempt ${context.julesRetries}/2).")
-                        env.commentOnIssue(githubIssueNumber, "Retry")
-                        context.julesSessionId = null
+                        env.sendNotification("⚠️ *Jules task failed* for $issueId (Status: ${session.status}). Sending 'Retry' message to Jules (Attempt ${context.julesRetries}/2).")
+                        env.sendJulesSessionMessage(session.id, "Retry")
                         context.lastBuildStatus = null
-                        return AWAITING_JULES_START
+                        
+                        var retriedSession = env.getJulesSession(issueId)
+                        var retryWaitAttempts = 0
+                        while (retriedSession != null && 
+                               (retriedSession.status.lowercase() == "failed" || retriedSession.status.lowercase() == "cancelled") && 
+                               retryWaitAttempts < 15) {
+                            env.println("Waiting for Jules session status to transition out of failure state (attempt ${retryWaitAttempts + 1}/15)...")
+                            env.sleep(20, TimeUnit.SECONDS)
+                            retriedSession = env.getJulesSession(issueId)
+                            retryWaitAttempts++
+                        }
+                        return this
                     } else {
                         env.println("\n❌ [FAILED] Jules task $issueId failed with status: ${session.status} after ${context.julesRetries} retries.")
                         env.sendNotification("❌ *Jules task failed* for $issueId (Status: ${session.status}) after ${context.julesRetries} retries. Returning to SELECT_TASK.")
@@ -241,11 +251,21 @@ sealed interface OrchestratorState {
                     if (context.julesRetries < 2) {
                         context.julesRetries++
                         env.println("\n⚠️ [RETRY] Jules task $issueId finished as Completed but did not open a PR. Retrying (Attempt ${context.julesRetries}/2)...")
-                        env.sendNotification("⚠️ *Jules task finished* for $issueId without creating a PR. Commenting 'Retry' to trigger a new session (Attempt ${context.julesRetries}/2).")
-                        env.commentOnIssue(githubIssueNumber, "Retry")
-                        context.julesSessionId = null
+                        env.sendNotification("⚠️ *Jules task finished* for $issueId without creating a PR. Sending 'Retry' message to Jules (Attempt ${context.julesRetries}/2).")
+                        env.sendJulesSessionMessage(session.id, "Retry")
                         context.lastBuildStatus = null
-                        return AWAITING_JULES_START
+                        
+                        var retriedSession = env.getJulesSession(issueId)
+                        var retryWaitAttempts = 0
+                        while (retriedSession != null && 
+                               (retriedSession.status.lowercase() == "failed" || retriedSession.status.lowercase() == "cancelled") && 
+                               retryWaitAttempts < 15) {
+                            env.println("Waiting for Jules session status to transition out of failure state (attempt ${retryWaitAttempts + 1}/15)...")
+                            env.sleep(20, TimeUnit.SECONDS)
+                            retriedSession = env.getJulesSession(issueId)
+                            retryWaitAttempts++
+                        }
+                        return this
                     } else {
                         env.println("\n❌ [FAILED] Jules task $issueId finished as Completed but did not open a PR after ${context.julesRetries} retries.")
                         env.sendNotification("❌ *Jules task finished* for $issueId without creating a PR after ${context.julesRetries} retries. Returning to SELECT_TASK.")
@@ -283,7 +303,60 @@ sealed interface OrchestratorState {
         override val name = "CI_RUNNING"
         override fun execute(env: OrchestratorEnvironment, context: OrchestratorContext): OrchestratorState {
             val prNumber = context.prNumber ?: throw IllegalStateException("prNumber is null")
-            val issueId = context.currentIssueId ?: throw IllegalStateException("currentIssueId is null")
+            val issueId = context.currentIssueId
+            val githubIssueNumber = context.githubIssueNumber
+            val sessionId = context.julesSessionId
+
+            if (issueId != null && githubIssueNumber != null) {
+                val session = env.getJulesSession(issueId)
+                val isFailed = if (session != null) {
+                    val stat = session.status.lowercase()
+                    stat == "failed" || stat == "cancelled" || env.hasUnableToCompleteActivity(session.id)
+                } else {
+                    sessionId != null && env.hasUnableToCompleteActivity(sessionId)
+                }
+
+                if (isFailed) {
+                    val statText = session?.status ?: "FAILED"
+                    if (context.julesRetries < 2) {
+                        context.julesRetries++
+                        env.println("\n⚠️ [RETRY] Jules session failed during CI: $statText (or has unable to complete activity). Retrying (Attempt ${context.julesRetries}/2)...")
+                        env.sendNotification("⚠️ *Jules session failed* during CI for $issueId (Status: $statText). Sending 'Retry' message to Jules (Attempt ${context.julesRetries}/2).")
+                        val targetSessionId = session?.id ?: sessionId ?: throw IllegalStateException("session ID is null")
+                        env.sendJulesSessionMessage(targetSessionId, "Retry")
+                        context.lastBuildStatus = null
+                        context.lastHeadSha = null
+                        
+                        var retriedSession = env.getJulesSession(issueId)
+                        var retryWaitAttempts = 0
+                        while (retriedSession != null && 
+                               (retriedSession.status.lowercase() == "failed" || retriedSession.status.lowercase() == "cancelled" || env.hasUnableToCompleteActivity(retriedSession.id)) && 
+                               retryWaitAttempts < 15) {
+                            env.println("Waiting for Jules session status to transition out of failure state (attempt ${retryWaitAttempts + 1}/15)...")
+                            env.sleep(20, TimeUnit.SECONDS)
+                            retriedSession = env.getJulesSession(issueId)
+                            retryWaitAttempts++
+                        }
+                        return this
+                    } else {
+                        env.println("\n❌ [FAILED] Jules session failed during CI: $statText after ${context.julesRetries} retries.")
+                        env.sendNotification("❌ *Jules session failed* during CI for $issueId after ${context.julesRetries} retries. Returning to SELECT_TASK.")
+                        val nextIssue = env.parseAllIssues().firstOrNull { it.id == issueId }
+                        if (nextIssue != null) {
+                            env.removeGithubIssue(nextIssue)
+                        }
+                        context.skippedIds.add(issueId)
+                        context.clearActiveTask()
+                        return SELECT_TASK
+                    }
+                }
+
+                if (session != null && session.status.lowercase() == "in_progress") {
+                    env.println("Jules session ${session.id} is actively running (IN_PROGRESS). Waiting...")
+                    env.sleep(env.config.pollingIntervalSeconds, TimeUnit.SECONDS)
+                    return this
+                }
+            }
 
             if (env.isPrMerged(prNumber)) {
                 env.println("🎉 PR #$prNumber merged! resolving issue locally...")
@@ -374,6 +447,45 @@ sealed interface OrchestratorState {
             }
 
             val currentSha = env.getPrHeadSha(prNumber)
+
+            val issueId = context.currentIssueId
+            val sessionId = context.julesSessionId
+            if (issueId != null) {
+                val session = env.getJulesSession(issueId)
+                val isFailed = if (session != null) {
+                    val stat = session.status.lowercase()
+                    stat == "failed" || stat == "cancelled" || env.hasUnableToCompleteActivity(session.id)
+                } else {
+                    sessionId != null && env.hasUnableToCompleteActivity(sessionId)
+                }
+
+                if (isFailed) {
+                    val statText = session?.status ?: "FAILED"
+                    env.println("\n⚠️ [RETRY] Jules session failed during review: $statText (or has unable to complete activity). Retrying...")
+                    env.sendNotification("⚠️ *Jules session failed* during review on PR #$prNumber. Sending 'Retry' message to Jules.")
+                    val targetSessionId = session?.id ?: sessionId ?: throw IllegalStateException("session ID is null")
+                    env.sendJulesSessionMessage(targetSessionId, "Retry")
+                    context.lastReviewedSha = null
+                    
+                    var retriedSession = env.getJulesSession(issueId)
+                    var retryWaitAttempts = 0
+                    while (retriedSession != null && 
+                           (retriedSession.status.lowercase() == "failed" || retriedSession.status.lowercase() == "cancelled" || env.hasUnableToCompleteActivity(retriedSession.id)) && 
+                           retryWaitAttempts < 15) {
+                        env.println("Waiting for Jules session status to transition out of failure state (attempt ${retryWaitAttempts + 1}/15)...")
+                        env.sleep(20, TimeUnit.SECONDS)
+                        retriedSession = env.getJulesSession(issueId)
+                        retryWaitAttempts++
+                    }
+                    return this
+                }
+
+                if (session != null && session.status.lowercase() == "in_progress") {
+                    env.println("Jules session ${session.id} is actively running (IN_PROGRESS) in AWAITING_REVIEW. Waiting...")
+                    env.sleep(env.config.pollingIntervalSeconds, TimeUnit.SECONDS)
+                    return this
+                }
+            }
 
             // If the PR head SHA changed it means Jules pushed a new commit instead of just reviewing.
             if (currentSha != context.lastHeadSha) {
