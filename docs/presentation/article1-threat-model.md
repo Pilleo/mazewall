@@ -20,6 +20,8 @@ And in many cases, the honest answer is uncomfortable: we don’t really know.
  
 An SBOM can tell you that a compression library is present. It cannot tell you that this same library has suddenly started interfering with authentication flows. It can tell you that a logging framework is installed. It cannot tell you that the logger is currently opening outbound network sockets. Composition transparency is valuable, but it is not behavioral transparency.
 
+Consider a concrete pattern you may have already shipped: your service uses a popular PDF-rendering library. No CVEs in your scanner. SBOM is clean. But twice a day, a thread in your process opens an outbound TCP socket to an IP you do not own. Is it a license check? Anonymous telemetry? A beacon quietly introduced through a compromised build pipeline? Your current security tooling cannot answer that — because it sees one process with one uniform permissions profile. It has no behavioral contract to compare against.
+
 To illustrate the difference, here is how they look side-by-side.
 
 **1. The Composition View (SBOM)**
@@ -71,7 +73,7 @@ We move from **coarse-grained perimeter rules** that ask *"Is this container all
  
 > **Wait — doesn't Docker already do this?**
 >
-> Yes, partially — and this is a common and fair question. Docker and Podman use [Namespaces](https://man7.org/linux/man-pages/man7/namespaces.7.html) to isolate process trees, networks, and filesystems between containers; [cgroups v2](https://www.kernel.org/doc/html/latest/admin-guide/cgroup-v2.html) to limit CPU and memory consumption; and a default [Seccomp-BPF](https://docs.docker.com/engine/security/seccomp/) profile to block roughly 44 high-risk syscalls for every process inside the container. That is meaningful protection.
+> Yes, partially — and this is a common and fair question. Docker and Podman use [Namespaces](https://man7.org/linux/man-pages/man7/namespaces.7.html) to isolate process trees, networks, and filesystems between containers; [cgroups v2](https://www.kernel.org/doc/html/latest/admin-guide/cgroup-v2.html) to limit CPU and memory consumption; and a default [Seccomp-BPF](https://docs.docker.com/engine/security/seccomp/) **allowlist** profile that permits roughly 311 syscalls while blocking everything else — including approximately 44 syscalls that are explicitly denied by name — for every process inside the container. That is meaningful protection.
 >
 > The key word is *every process*. Docker applies **one profile to all code running in the container** — your HTTP handler, your background scheduler, your database migration runner, and any malicious code that has compromised one of them. If the compromised code only needs syscalls that the HTTP handler legitimately uses, Docker's profile will not stop it.
 >
@@ -79,7 +81,7 @@ We move from **coarse-grained perimeter rules** that ask *"Is this container all
  
 ## The Catalyst: Practical Runtime Observation with eBPF
  
-For a long time, precise runtime behavioral security was too expensive, too invasive, or too brittle to apply at scale. This was due to the fundamental trade-offs in existing technologies:
+Answering the harder question — enforcing a *distinct* behavioral contract per component — requires knowing exactly what each component does at runtime. For a long time, getting that visibility in production was either too expensive, too invasive, or too brittle to rely on. The core trade-offs were:
  
 *   **Performance Overhead (Expensive):** Tools like the **Java Security Manager (JSM)** required a permission check on almost every sensitive operation (like opening a file or a socket). This introduced a significant performance tax that many high-throughput applications couldn't afford.
 *   **Operational Fragility (Brittle):** Techniques like **LD_PRELOAD** hooking relied on intercepting standard library calls. This was easily bypassed by statically linked binaries or applications that made direct system calls, and often broke during OS or library updates.
@@ -110,9 +112,9 @@ graph TD
  
 The critical feature of eBPF is that programs are **statically verified by the kernel before execution** — non-terminating loops and unsafe memory accesses are rejected at load time. This turns the OS from a rigid substrate into something security tools can dynamically extend.
  
-But it is important to distinguish between **observation** and **enforcement**. While eBPF provides the visibility needed to generate and enforce a Bill of Behavior, physical enforcement often relies on a different set of core Linux primitives. This distinction is critical because of a fundamental architectural trade-off: **Privilege.** 
+eBPF can be used for both **observation** (watching syscalls, flagging anomalies, generating behavioral profiles) and **enforcement** (BPF-LSM hooks that block operations inline). The distinction that actually matters for developers is not observation vs. enforcement — it is **privilege**. eBPF-based enforcement requires elevated kernel privileges (typically `CAP_BPF` plus `CAP_PERFMON`, and in some configurations `CAP_SYS_ADMIN`), which means it is the domain of cluster-level platform agents, not application code.
  
-While eBPF-based enforcement (like BPF-LSM) is extremely powerful, it requires elevated privileges—typically `CAP_BPF` plus `CAP_PERFMON`, and in some configurations `CAP_SYS_ADMIN`. In contrast, Seccomp and Landlock are designed to be **unprivileged**, allowing a standard application to "self-restrict" its own capabilities (once `PR_SET_NO_NEW_PRIVS` is set) without needing root access or cluster-level agents. This makes them the ideal "fast path" for developer-driven security.
+Seccomp and Landlock take a different approach: they are designed from the ground up to let a process restrict *itself* without any special privilege. Once `PR_SET_NO_NEW_PRIVS` is set, any unprivileged application can install a Seccomp filter or a Landlock ruleset — no root, no cluster agent, no deployment change required. That is what makes them the right primitive for developer-driven, in-process security.
  
 ```mermaid
 graph TD
@@ -139,18 +141,22 @@ If BoB is the declaration of intent, the Linux kernel provides five primary mech
 | **BPF-LSM / LSMs** | Deep, context-aware kernel objects (LSM hooks) | Privileged (`CAP_SYS_ADMIN` / `root`) | Complex, **context-aware security policies** loaded by host-level system agents (e.g., AppArmor, SELinux). |
  
 ### 1. Seccomp (Secure Computing)
-Seccomp is the industry's "fast path" for blocking system calls. It is fast, unprivileged, and extremely reliable. However, it requires setting `PR_SET_NO_NEW_PRIVS` first so that the process cannot later gain privileges and bypass the filter. While Seccomp-BPF uses strictly constrained **Classic BPF (cBPF)** bytecode rather than the full eBPF instruction set (which is a deliberate design choice to ensure determinism and prevent infinite loops), it remains the most widely deployed syscall filter in the world. However, it is "path-blind"—it sees the system call being made, but it cannot easily inspect the file paths or network addresses involved.
+Seccomp is the industry's "fast path" for blocking system calls. It is fast, unprivileged, and extremely reliable. However, it requires setting `PR_SET_NO_NEW_PRIVS` first so that the process cannot later gain privileges and bypass the filter.
+
+> **cBPF, not eBPF:** Seccomp-BPF uses strictly constrained **[Classic BPF (cBPF)](https://www.kernel.org/doc/html/latest/bpf/classic_vs_extended.html)** bytecode — *not* the full eBPF instruction set discussed in the previous section. This is a deliberate design choice: cBPF is deterministic, cannot loop indefinitely, and can be statically verified in microseconds. The trade-off is that it cannot inspect arbitrary [kernel objects](https://www.kernel.org/doc/html/latest/bpf/bpf_lsm.html) or carry [persistent state](https://ebpf.io/what-is-ebpf/#maps) the way eBPF programs can.
+
+Seccomp remains the most widely deployed syscall filter in the world and is "path-blind" — it sees the system call number and basic register arguments, but it cannot easily inspect file paths or network addresses involved.
 *   **Where you use it today:** You are likely using it right now. Modern web browsers like **Chrome** and **Firefox** use Seccomp to sandbox their renderer processes, ensuring that a compromised tab cannot escape to the rest of your system. Podman/Docker also apply a default Seccomp profile to every container to block high-risk operations.
  
 ### 2. Landlock
 Landlock is a Linux Security Module designed specifically for unprivileged sandboxing. It provides the path-aware filesystem access control that Seccomp lacks. It operates at the inode level — after the kernel has fully resolved the path — which means it avoids the TOCTOU (time-of-check/time-of-use) race that makes pointer-based path inspection in Seccomp unreliable. An application can declare constraints dynamically (e.g., "This thread can only read from `/app/data`").
-*   **Kernel & ABI Version Nuances:** Landlock degrades gracefully based on the kernel's supported ABI level (ABI v1-v3 for filesystem rules, ABI v4 for TCP limits). As of Linux Kernel 6.7, Landlock has begun expanding into networking, allowing threads to restrict themselves to specific **TCP ports** for `bind` and `connect` operations. While it currently lacks the deep IP-level or endpoint visibility of BPF-LSM, it provides a powerful, unprivileged "port-level" restrictor. For production systems, you must explicitly account for these kernel dependencies: kernels that do not support a given ABI level will silently ignore rules using unsupported features unless the application explicitly checks `LANDLOCK_CREATE_RULESET_VERSION` and degrades gracefully.
+*   **Kernel & ABI Version Nuances:** Landlock capabilities are tied to specific ABI levels: ABI v1 (Linux 5.13, basic filesystem rights), v2 (Linux 5.19, rename/link control), v3 (Linux 6.2, truncation control), v4 (Linux 6.7, TCP `bind`/`connect` port limits), v5 (Linux 6.10, IOCTL on devices), and v6 (Linux 6.12, IPC scope restrictions). Each ABI is additive — always query `LANDLOCK_CREATE_RULESET_VERSION` at runtime and degrade gracefully, because kernels that do not support a given ABI level will silently ignore rules using unsupported features.
  
 ### 3. [Linux Security Modules (LSM)](https://www.redhat.com/en/topics/linux/what-is-selinux)
 LSMs like AppArmor, SELinux, and the modern **BPF-LSM** provide the deepest level of security. They hook into the kernel at a very granular level, allowing for complex, context-aware rules.
 *   **The Trade-off:** Unlike Seccomp or Landlock, managing LSMs usually requires high privileges (`root` or `CAP_MAC_ADMIN`). This makes them ideal for platform-level security (like Android's application sandbox or Kubernetes Pod Security Standards) but harder for individual developers to use for "self-restriction."
  
-By combining these primitives, we move from blunt "allow/deny" container rules to surgical, intent-based security.
+By combining these primitives, we move from blunt "allow/deny" container rules to surgical, intent-based security. The primitives are the enforcement mechanism. What remains is the question of the contract itself: what it looks like, who writes it, and why vendor authorship changes the economics of runtime security entirely.
  
 ## What BoB Actually Is (and Why Vendor Authorship Matters)
  
@@ -225,9 +231,9 @@ But BoB also addresses the reality of modern syscall evasion.
  
 Traditional security often focuses on blocking `execve` (spawning a shell). But sophisticated attackers don't need a shell. They use **fileless malware**—malicious code that lives entirely in RAM, using Linux features like [`memfd_create`](https://sandflysecurity.com/blog/detecting-linux-memfd_create-fileless-malware-with-command-line-forensics/) to execute binaries that never touch the disk. Because there is no file, traditional disk-based scanning is blind.
  
-More advanced attackers use [**`io_uring`**](https://unixism.net/loti/), a high-performance asynchronous I/O API. Older `io_uring` implementations (pre-5.12) allowed attackers to submit I/O operations that bypassed Seccomp filters. Modern kernels apply Seccomp and Landlock checks to `io_uring` operations, but this illustrates why behavioral policy must declare intent (`io_uring_setup` is forbidden) rather than relying on tool-specific observation alone.
+More advanced attackers use [**`io_uring`**](https://unixism.net/loti/), a high-performance asynchronous I/O API. Because `io_uring` submits operations via kernel worker threads that operate independently of the calling thread's Seccomp policy, older kernels allowed attackers to perform I/O that bypassed Seccomp filters entirely. While subsequent hardening (from Linux 5.12 onward) improved this, `io_uring` operations remain only partially covered by Seccomp — which is why Docker, Android, and ChromeOS all **block `io_uring_setup` entirely** in their default security profiles rather than relying on kernel version thresholds. A BoB allows us to express that same intent explicitly: *"`io_uring_setup` is forbidden for this component."*
  
-An BoB allows us to express fine-grained intent that stops these techniques: *"This application is strictly forbidden from using `memfd_create`, `io_uring_setup`, or mapping executable memory."*
+A BoB allows us to express fine-grained intent that stops these techniques: *"This application is strictly forbidden from using `memfd_create`, `io_uring_setup`, or mapping executable memory."*
  
 ## Capability-Based Security in Other Domains
  

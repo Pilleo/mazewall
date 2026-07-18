@@ -133,7 +133,7 @@ val documentPool = ContainedExecutors.wrap(
 )
 ```
 
-The `ExecutorService` interface is unchanged—`submit()`, `invokeAll()`, and `Future` work exactly as before. If you over-restrict and block something a thread legitimately needs, the kernel intercepts the system call and returns a negative error code (usually `EPERM` or `EACCES`). This causes the JVM to throw a standard `java.io.IOException` with a message like `"Permission denied"` or `"Operation not permitted"`. This keeps debugging straightforward, as it leverages standard Java exception handling:
+The `ExecutorService` interface is unchanged—`submit()`, `invokeAll()`, and `Future` work exactly as before. If you over-restrict and block something a thread legitimately needs, the kernel intercepts the system call and returns a negative error code. **Seccomp** always returns `EPERM` ("Operation not permitted"); **Landlock** filesystem checks surface as `EACCES` ("Permission denied") at the filesystem layer. Either way the JVM throws a standard `java.io.IOException`:
 
 ```
 java.io.IOException: Permission denied
@@ -144,7 +144,8 @@ java.io.IOException: Permission denied
 
 *Tip: You don't need to guess system calls—mazewall includes an automated profiler that discovers the required syscalls and filesystem paths during your test suite runs. Details in Part 2.*
 
-*Note: Virtual thread and Kotlin coroutine support, as well as carrier thread pinning behaviour, are covered in [Part 3](article3-enforcement.md) and the [README](../../README.md). Note that because virtual threads run on carrier threads, seccomp constraints apply to the carrier thread; if a virtual thread is unpinned and migrates to an unconstrained carrier thread, it may escape the thread-scoped sandbox (which is why Tier 1 process-wide protection is so critical).*
+> [!IMPORTANT]
+> **Virtual threads and carrier thread migration:** Because virtual threads run on platform (carrier) threads, seccomp constraints apply to the *carrier* thread — not the virtual thread abstraction. If a virtual thread is unmounted and remounted onto an unconstrained carrier thread (which can happen whenever it blocks on I/O or a monitor), it escapes the thread-scoped Tier 2 sandbox. This is the primary reason Tier 1 process-wide protection is architectural, not optional: Tier 1 ensures that even a migrated virtual thread cannot execute the worst escalation primitives (e.g., `execve`). Kotlin coroutine and virtual thread users should treat Tier 2 as blast-radius reduction, not a hard boundary, and rely on Tier 1 as the guarantor. Virtual thread and coroutine dispatcher pinning behaviour is covered in detail in [Part 3](article3-enforcement.md) and the [README](../../README.md).
 
 ---
 

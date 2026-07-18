@@ -206,8 +206,8 @@ graph TD
     issue_144_confused_deputy_time_of_check_to_time_of_use_toctou_via_path -->|Affects| SupervisorSessionHandler_kt
     issue_145_toctou_pointer_re_targeting_via_sockaddrbytes_mutation_durin -->|Affects| SupervisorSessionHandler_kt
     issue_149_classloader_deadlock_in_jvm_validation_listener -->|Affects| SupervisorInstaller_kt
-    issue_202_orchestrator_build_github_issue_body_dynamically_with_project_preamble -->|Affects| ,
-    issue_203_orchestrator_validate_issue_context_and_needed_before_github_issue_creation -->|Affects|  instead of
+    issue_202_orchestrator_build_github_issue_body_dynamically_with_project_preamble -->|Affects| , 
+    issue_203_orchestrator_validate_issue_context_and_needed_before_github_issue_creation -->|Affects|  instead of 
     click containment_design "../../enforcer/containment-design.md"
     click issue_003_socket_address_family_filtering_for_network_isolation_evasio "../../../backlog/testing/issue-003-socket-address-family-filtering-for-network-isolation-evasio.md"
     click issue_008_high_frequency_arena_allocation_overhead_mm_optimization "../../../backlog/performance/issue-008-high-frequency-arena-allocation-overhead-mm-optimization.md"

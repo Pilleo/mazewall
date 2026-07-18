@@ -24,13 +24,17 @@ This article explains why.
 
 ## What Failed, and Why It Failed
 
-In 2009, the Chromium team experimented with an "untrusted thread / trusted helper thread" model. The idea was architecturally attractive: instead of spawning a full separate process for every browser tab (expensive), apply tight system call restrictions directly to the thread handling untrusted content, while keeping a trusted sibling thread available to relay privileged operations.
+In 2009, the Chromium team shipped exactly this idea: a restricted thread handling untrusted web content, a carefully isolated helper thread relaying privileged operations on its behalf — thread-level syscall filtering inside the renderer process.
 
-They abandoned it. Not because the kernel API wasn't capable enough, but because of a more fundamental problem.
+It worked. It shipped. And then they hit a wall that had nothing to do with the kernel API.
+
+The design carried a fundamental architectural fragility that made it impossible to extend safely. When `Seccomp-BPF` arrived in Linux 3.5 (2012) with a cleaner allowlist-based model, Chromium migrated and retired the relay architecture — not because the idea failed, but because something better arrived that did not share the same fragility.
+
+That fragility is worth understanding precisely, because it is exactly the constraint mazewall had to reason through before committing to thread-level filtering on the JVM.
 
 **The Linux kernel does not distinguish between a process and a thread.** Both are Tasks (`task_struct`) internally. The difference is a single `clone()` flag:
 
-- **Processes** are created *without* `CLONE_VM`. They get their own hardware-mapped virtual memory space. Physical page tables separate them at the CPU level.
+- **Processes** are typically created with `fork()`, which internally calls `clone()` *without* `CLONE_VM`. They get their own hardware-mapped virtual memory space. Physical page tables separate them at the CPU level.
 - **Threads** are created *with* `CLONE_VM`. They share the same address space. Every byte of memory on the heap is readable and writable by every thread in the process.
 
 A Seccomp filter installed on Thread A only restricts *what Thread A can ask the kernel to do*. It says nothing about what Thread A can do to Thread B's stack.
@@ -93,7 +97,7 @@ The security considerations document covers the full threat matrix in detail, in
 
 The Chromium team was right for Chromium. A browser renderer handles arbitrary untrusted C++ code, WebGL shaders, and V8 JIT output. A single memory corruption vulnerability can hand an attacker native RCE before any sandbox has time to respond. Process-level isolation with separate page tables is the correct answer when the threat is native memory corruption in untrusted C++ code — a threat that operates below the JVM's type-safety layer entirely.
 
-Chromium *also* uses Intel MPK (memory protection keys) inside the renderer process today — to safely JIT-compile WebAssembly with fast write-XOR-execute page permission toggles. Thread-level isolation came back into Chromium, in the environment where it could be made to work: a runtime-controlled JIT with hardware page tagging.
+Chromium *also* uses Intel MPK (memory protection keys) inside the renderer process today — specifically in V8 to safely JIT-compile WebAssembly with fast write-XOR-execute page permission toggles. MPK is significant because it achieves *thread-local* memory permission control without a system call: a single `WRPKRU` instruction (writing a thread-local register) atomically switches a tagged memory region from writable to executable and back. The kernel is not involved in the toggle itself, so the operation is orders of magnitude faster than `mprotect()`. This is thread-level isolation that came back into Chromium — in the environment where it could be made sound: a runtime-controlled JIT with hardware page tagging providing physical enforcement, not a mere logical boundary. The lesson is not that thread-level isolation is wrong; it is that it requires the right runtime invariants to hold.
 
 Mazewall's use case is narrower: a backend JVM service running trusted code over untrusted data. The threat is not native memory corruption in untrusted C++ modules. It is application-level attacks — malformed inputs, server-side request forgery, injection attacks — that try to abuse what the trusted code does with them. In that scenario, thread-level kernel filtering on the thread that processes those inputs, combined with a process-wide execution block, is a sound and proportionate defence.
 
