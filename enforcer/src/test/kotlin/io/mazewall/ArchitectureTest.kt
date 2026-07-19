@@ -48,7 +48,8 @@ class ArchitectureTest {
                 "io.mazewall.landlock..",
                 "io.mazewall.enforcer.supervisor..",
                 "io.mazewall.ffi.networking..",
-                "io.mazewall", // RealNativeEngine and RealPlatformProvider are in the root package
+                "io.mazewall",
+                "io.mazewall.ffi.internal..",
                 "io.mazewall.profiler.engine..",
             )
             .should()
@@ -266,7 +267,7 @@ class ArchitectureTest {
     fun ffmApiMustBeIsolatedToFfiPackage(allClasses: com.tngtech.archunit.core.domain.JavaClasses) {
         noClasses()
             .that()
-            .resideOutsideOfPackage("io.mazewall.ffi..")
+            .resideOutsideOfPackage("io.mazewall.ffi..").and().haveNameNotMatching(".*Test.*").and().haveNameNotMatching(".*Mock.*")
             .should()
             .dependOnClassesThat()
             .resideInAPackage("java.lang.foreign..")

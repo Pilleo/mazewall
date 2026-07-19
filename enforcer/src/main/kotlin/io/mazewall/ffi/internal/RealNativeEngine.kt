@@ -11,7 +11,7 @@ import java.lang.foreign.*
 import java.lang.invoke.MethodHandle
 import java.lang.invoke.MethodHandles
 
-internal object RealNativeEngine : NativeEngine, RawSyscallOperations {
+public object RealNativeEngine : NativeEngine, RawSyscallOperations {
     override val fileSystem: NativeFileSystem = RealNativeFileSystem
     override val networking: NativeNetworking = RealNativeNetworking
     override val process: NativeProcess = RealNativeProcess

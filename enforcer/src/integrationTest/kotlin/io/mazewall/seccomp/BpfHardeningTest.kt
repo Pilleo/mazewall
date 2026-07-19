@@ -34,7 +34,7 @@ class BpfHardeningTest : BaseIntegrationTest() {
                     // PR_SET_NAME = 15
                     val res = LinuxNative.withTransaction {
                         LinuxNative.process.prctl(
-                            PrctlCommand.SetName(NativeArg.MemoryArg(MemorySegment.NULL))
+                            PrctlCommand.SetName(NativeArg.MemoryArg(io.mazewall.ffi.memory.ManagedSegment.NULL))
                         )
                     }
                     result.set(res)

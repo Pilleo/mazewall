@@ -188,7 +188,7 @@ public class SupervisorDaemonManager(
             NativeArena.ofConfined().use { arena ->
                 val fd = socketManager.connect(socketPath)
                 try {
-                    val cmd = ConfinedSegment(arena.arena.allocateFrom(java.lang.foreign.ValueLayout.JAVA_BYTE, SHUTDOWN_COMMAND_BYTE))
+                    val cmd = arena.allocateFrom(io.mazewall.ffi.Layouts.JAVA_BYTE, SHUTDOWN_COMMAND_BYTE)
                     var writeRes: io.mazewall.LinuxNative.SyscallResult<Long, *>
                     while (true) {
                         writeRes = engine.withTransaction { engine.memory.write(fd, cmd, 1) }

@@ -84,12 +84,12 @@ object Landlock {
      */
     private val logger = Logger.getLogger(Landlock::class.java.name)
 
-    internal sealed interface AddRuleResult {
+    private sealed interface AddRuleResult {
         object Success : AddRuleResult
         data class Error(val errno: Int) : AddRuleResult
     }
 
-    internal sealed interface OpenResult {
+    private sealed interface OpenResult {
         data class Success(val fd: Int, val isFallback: Boolean) : OpenResult
         data class Error(val errno: Int) : OpenResult
     }
@@ -253,7 +253,7 @@ object Landlock {
         path: String,
         allowedAccess: Long,
     ) {
-        val pathSegment = ConfinedSegment(arena.arena.allocateFrom(path))
+        val pathSegment = arena.allocateFrom(path)
         val fdResult = LinuxNative.withTransaction {
             LinuxNative.fileSystem.open(pathSegment, NativeConstants.O_PATH or NativeConstants.O_CLOEXEC)
         }
@@ -284,7 +284,7 @@ object Landlock {
         val resolvedPath = path.value
         val openFlags = NativeConstants.O_PATH or NativeConstants.O_CLOEXEC or NativeConstants.O_NOFOLLOW
         val initialResult = LinuxNative.withTransaction {
-            LinuxNative.fileSystem.open(ConfinedSegment(arena.arena.allocateFrom(resolvedPath)), openFlags)
+            LinuxNative.fileSystem.open(arena.allocateFrom(resolvedPath), openFlags)
         }
 
         val openRes = handleInitialOpenFailure(initialResult, resolvedPath, openFlags)
@@ -306,7 +306,7 @@ object Landlock {
     }
 
     context(arena: NativeArena)
-    internal fun handleInitialOpenFailure(
+    private fun handleInitialOpenFailure(
         res: LinuxNative.SyscallResult<Long, *>,
         resolvedPath: String,
         flags: Int,
@@ -318,7 +318,7 @@ object Landlock {
             val parentPath = File(resolvedPath).parent ?: "/"
             logger.info("Path $resolvedPath does not exist, falling back to parent directory: $parentPath")
             val openResult = LinuxNative.withTransaction {
-                LinuxNative.fileSystem.open(ConfinedSegment(arena.arena.allocateFrom(parentPath)), flags)
+                LinuxNative.fileSystem.open(arena.allocateFrom(parentPath), flags)
             }
             return when (openResult) {
                 is LinuxNative.SyscallResult.Success -> OpenResult.Success(openResult.value.toInt(), true)
@@ -455,7 +455,7 @@ object Landlock {
         val rulesetAttr = LandlockRulesetAttrSegment.allocate()
         rulesetAttr.setHandledAccessFs(accessMaskFs)
         rulesetAttr.setHandledAccessNet(0L)
-        val size = if (abi >= 4) Layouts.LANDLOCK_RULESET_ATTR.byteSize() else Layouts.LANDLOCK_RULESET_ATTR_V1_SIZE
+        val size = if (abi >= 4) Layouts.LANDLOCK_RULESET_ATTR_V1_SIZE else Layouts.LANDLOCK_RULESET_ATTR_V1_SIZE
         val res = LinuxNative.withTransaction {
             LinuxNative.raw.syscall(
                 NativeConstants.LANDLOCK_CREATE_RULESET_NR,

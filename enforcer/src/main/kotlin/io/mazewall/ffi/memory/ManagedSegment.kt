@@ -65,3 +65,23 @@ public value class SharedSegment(override val native: MemorySegment) : ManagedSe
     override fun address(): Long = native.address()
     override fun byteSize(): Long = native.byteSize()
 }
+
+public fun ManagedSegment.fill(value: Byte) { this.native.fill(value) }
+public fun ManagedSegment.asSlice(offset: Long, newSize: Long): ManagedSegment = ConfinedSegment(this.native.asSlice(offset, newSize))
+
+public operator fun ManagedSegment.get(layout: java.lang.foreign.ValueLayout.OfInt, offset: Long): Int = this.native.get(layout, offset)
+public operator fun ManagedSegment.get(layout: java.lang.foreign.ValueLayout.OfLong, offset: Long): Long = this.native.get(layout, offset)
+public operator fun ManagedSegment.get(layout: java.lang.foreign.AddressLayout, offset: Long): java.lang.foreign.MemorySegment = this.native.get(layout, offset)
+
+public operator fun ManagedSegment.set(layout: java.lang.foreign.ValueLayout.OfInt, offset: Long, value: Int) { this.native.set(layout, offset, value) }
+public operator fun ManagedSegment.set(layout: java.lang.foreign.ValueLayout.OfLong, offset: Long, value: Long) { this.native.set(layout, offset, value) }
+public operator fun ManagedSegment.set(layout: java.lang.foreign.AddressLayout, offset: Long, value: java.lang.foreign.MemorySegment) { this.native.set(layout, offset, value) }
+public operator fun ManagedSegment.set(layout: java.lang.foreign.AddressLayout, offset: Long, value: ManagedSegment) { this.native.set(layout, offset, value.native) }
+
+public fun ManagedSegment.getString(offset: Long): String = this.native.getString(offset)
+
+public operator fun ManagedSegment.set(layout: java.lang.foreign.ValueLayout.OfByte, offset: Long, value: Byte) { this.native.set(layout, offset, value) }
+public operator fun ManagedSegment.set(layout: java.lang.foreign.ValueLayout.OfShort, offset: Long, value: Short) { this.native.set(layout, offset, value) }
+public operator fun ManagedSegment.get(layout: java.lang.foreign.ValueLayout.OfByte, offset: Long): Byte = this.native.get(layout, offset)
+public operator fun ManagedSegment.get(layout: java.lang.foreign.ValueLayout.OfShort, offset: Long): Short = this.native.get(layout, offset)
+public fun ManagedSegment.getString(offset: Long, charset: java.nio.charset.Charset): String = this.native.getString(offset, charset)
