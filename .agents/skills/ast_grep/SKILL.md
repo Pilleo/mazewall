@@ -3,8 +3,11 @@ name: ast_grep
 description: >
   Perform structural, syntax-aware search and replace on source code using ast-grep.
   Use when searching for code patterns ignoring comments, spacing, and styling,
-  or when performing systematic refactors.
-  Trigger on: "ast-grep", "structural search", "search pattern in code", "structural replace", "systematic refactoring".
+  performing systematic refactors, finding/removing annotations (like @Suppress),
+  or reviewing code structures.
+  Trigger on: ast-grep, structural search, search pattern in code, structural replace, systematic refactoring,
+  find all usages of, remove all, replace everywhere, @Suppress, find all calls to, refactor, every occurrence,
+  code review, systematic.
 ---
 
 # Skill: Structural Search & Refactoring (ast-grep)

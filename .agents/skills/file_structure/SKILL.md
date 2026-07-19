@@ -1,11 +1,13 @@
 ---
 name: file_structure
 description: >
-  Inspect any file's structure, outline, or API surface before reading its full content.
-  Use this skill when you need to understand what a file contains — classes, functions,
-  headings, YAML keys, XML tags, or JSON keys — without loading the entire file.
-  Trigger on: "inspect file", "outline", "what does X contain", "view api", "file structure",
-  "what is in this file", "show me the structure of", "what methods/functions does X have".
+  MANDATORY first step before reading any Kotlin, Java, or config file.
+  Use BEFORE any task that involves: fixing bugs, reviewing code, refactoring,
+  reading a class, understanding an interface, investigating an issue, or
+  navigating unfamiliar code. Do NOT call view_file on .kt/.java first.
+  Trigger on: any code navigation, reading source files, code review, bug investigation,
+  inspect file, outline, what does X contain, view api, file structure,
+  what is in this file, show me the structure of, what methods/functions does X have.
 ---
 
 # Skill: File Structure Inspection
@@ -75,5 +77,5 @@ kotlin scripts/file_structure.main.kts .github/workflows/ci.yml
 
 ## When to Skip
 
-- The file is already in your active context window from this session.
-- The file is trivially small (e.g., a single-class DTO under 30 lines, a simple config value file).
+- You have already outlined this specific file in the CURRENT turn (not just the session).
+- The file has fewer than 30 lines as confirmed by a previous listing.

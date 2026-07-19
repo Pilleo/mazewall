@@ -19,6 +19,7 @@ As an AI agent pair-programming on this project, you are assisting in transition
 *   Never combine `SECCOMP_FILTER_FLAG_TSYNC` and `SECCOMP_FILTER_FLAG_NEW_LISTENER`.
 *   Never use `JAVA_LONG` for 32-bit `sock_filter` fields.
 *   **Never modify, filter, or handle the `GITHUB_TOKEN` environment variable in the codebase.** Managing or modifying GitHub CLI credentials or environment variables is strictly the operator's responsibility.
+*   **Never call `view_file` on a `.kt` or `.java` file without first running `codanna retrieve describe <ClassName>` or `kotlin scripts/file_structure.main.kts <path_to_file>` to inspect its outline.** The only exception is if you have already outlined this specific file in the CURRENT turn.
 
 ---
 
@@ -178,6 +179,7 @@ You may run more granular checks in the process, but build must be always green 
 To optimize context token consumption and perform precise codebase navigation:
 
 *   **Codanna (Symbol Lookup & Call Graphs):** Use the helper wrapper `./scripts/code_atlas.sh`, or raw `codanna retrieve` / `codanna mcp` directly. It is completely CLI-only/one-shot; no background daemon server needs to be running. Refer to [.agents/skills/file_structure/SKILL.md](file:///.agents/skills/file_structure/SKILL.md) for detail usage.
+*   **Searching for Symbols:** Use `codanna mcp find_symbol <Name>` instead of `grep_search` for class/function definitions. Use `codanna mcp find_callers <Name>` instead of `grep_search` for call-site discovery. Do not use `grep_search` as your primary navigation tool for symbols.
 *   **ast-grep (Structural Code Search):** Use the repository wrapper `./scripts/sg.sh` for syntax-aware pattern searches and refactoring. Refer to [.agents/skills/ast_grep/SKILL.md](file:///.agents/skills/ast_grep/SKILL.md) for detail usage.
 
 ---
