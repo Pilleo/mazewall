@@ -49,6 +49,7 @@ interface OrchestratorEnvironment {
 
     // Jules
     fun getJulesSession(issueId: String): JulesSession?
+    fun getJulesSessionStatus(sessionId: String): String?
     fun hasUnableToCompleteActivity(sessionId: String): Boolean
     fun sendJulesSessionMessage(sessionId: String, prompt: String)
 
@@ -182,6 +183,8 @@ class RealOrchestratorEnvironment(
     }
 
     override fun getJulesSession(issueId: String): JulesSession? = JulesCli.getActiveSession(issueId)
+
+    override fun getJulesSessionStatus(sessionId: String): String? = JulesCli.getSessionStatusFromActivities(sessionId)
 
     override fun hasUnableToCompleteActivity(sessionId: String): Boolean = JulesCli.hasUnableToCompleteActivity(sessionId)
 

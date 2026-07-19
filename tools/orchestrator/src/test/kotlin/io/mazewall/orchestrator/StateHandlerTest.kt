@@ -54,6 +54,7 @@ class MockOrchestratorEnvironment : OrchestratorEnvironment {
     var hasUnableToCompleteActivity: Boolean = false
     val sentJulesMessages = mutableListOf<Pair<String, String>>()
     override fun getJulesSession(issueId: String): JulesSession? = julesSession
+    override fun getJulesSessionStatus(sessionId: String): String? = julesSession?.status
     override fun hasUnableToCompleteActivity(sessionId: String): Boolean = hasUnableToCompleteActivity
     override fun sendJulesSessionMessage(sessionId: String, prompt: String) { sentJulesMessages.add(sessionId to prompt) }
 
