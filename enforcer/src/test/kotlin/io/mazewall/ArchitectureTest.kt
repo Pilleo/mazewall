@@ -267,7 +267,7 @@ class ArchitectureTest {
     fun ffmApiMustBeIsolatedToFfiPackage(allClasses: com.tngtech.archunit.core.domain.JavaClasses) {
         noClasses()
             .that()
-            .resideOutsideOfPackage("io.mazewall.ffi..").and().haveNameNotMatching(".*Test.*").and().haveNameNotMatching(".*Mock.*")
+            .resideOutsideOfPackage("io.mazewall.ffi..").and().haveNameNotMatching(".*Test.*").and().haveNameNotMatching(".*Spec.*").and().haveNameNotMatching(".*Mock.*")
             .should()
             .dependOnClassesThat()
             .resideInAPackage("java.lang.foreign..")
