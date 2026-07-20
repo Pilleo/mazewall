@@ -455,7 +455,7 @@ object Landlock {
         val rulesetAttr = LandlockRulesetAttrSegment.allocate()
         rulesetAttr.setHandledAccessFs(accessMaskFs)
         rulesetAttr.setHandledAccessNet(0L)
-        val size = if (abi >= 4) Layouts.LANDLOCK_RULESET_ATTR_V1_SIZE else Layouts.LANDLOCK_RULESET_ATTR_V1_SIZE
+        val size = if (abi >= 4) Layouts.LANDLOCK_RULESET_ATTR_SIZE else Layouts.LANDLOCK_RULESET_ATTR_V1_SIZE
         val res = LinuxNative.withTransaction {
             LinuxNative.raw.syscall(
                 NativeConstants.LANDLOCK_CREATE_RULESET_NR,

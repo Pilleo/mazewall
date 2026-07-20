@@ -67,7 +67,7 @@ public value class SharedSegment(override val native: MemorySegment) : ManagedSe
 }
 
 public fun ManagedSegment.fill(value: Byte) { this.native.fill(value) }
-public fun ManagedSegment.asSlice(offset: Long, newSize: Long): ManagedSegment = ConfinedSegment(this.native.asSlice(offset, newSize))
+public fun ManagedSegment.asSlice(offset: Long, newSize: Long): ManagedSegment = when (this) { is ConfinedSegment -> ConfinedSegment(this.native.asSlice(offset, newSize)); is SharedSegment -> SharedSegment(this.native.asSlice(offset, newSize)) }
 
 public operator fun ManagedSegment.get(layout: java.lang.foreign.ValueLayout.OfInt, offset: Long): Int = this.native.get(layout, offset)
 public operator fun ManagedSegment.get(layout: java.lang.foreign.ValueLayout.OfLong, offset: Long): Long = this.native.get(layout, offset)

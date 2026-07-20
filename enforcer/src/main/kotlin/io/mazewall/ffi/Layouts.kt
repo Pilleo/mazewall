@@ -163,6 +163,7 @@ object Layouts {
         ValueLayout.JAVA_LONG.withName("handled_access_net"),
     )
     const val LANDLOCK_RULESET_ATTR_V1_SIZE: Long = 8L
+    val LANDLOCK_RULESET_ATTR_SIZE: Long = LANDLOCK_RULESET_ATTR.byteSize()
     val LANDLOCK_RULESET_ATTR_FS_OFFSET: Long =
         LANDLOCK_RULESET_ATTR.byteOffset(MemoryLayout.PathElement.groupElement("handled_access_fs"))
     val LANDLOCK_RULESET_ATTR_NET_OFFSET: Long =

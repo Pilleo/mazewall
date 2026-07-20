@@ -45,4 +45,4 @@ internal const val SECCOMP_IOCTL_NOTIF_SEND = 0xc0182101L
  * Sentinel string printed by the daemon to stdout when it is ready to accept connections.
  * Used by [io.mazewall.profiler.internal.ProfilerDaemonManager] to synchronize startup.
  */
-internal const val DAEMON_READY_SENTINEL = "MAZEWALL_PROFILER_DAEMON_READY"
+internal const val DAEMON_READY_SENTINEL = "MAZEWALL_DAEMON_READY"
