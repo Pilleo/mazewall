@@ -69,6 +69,8 @@ public value class SockFprogSegment(public val segment: MemorySegment) {
  */
 @JvmInline
 public value class LandlockRulesetAttrSegment(public val segment: MemorySegment) {
+    public val managed: ManagedSegment get() = ConfinedSegment(segment)
+
     public fun getHandledAccessFs(): Long = segment.get(ValueLayout.JAVA_LONG, Layouts.LANDLOCK_RULESET_ATTR_FS_OFFSET)
     public fun setHandledAccessFs(value: Long): Unit {
         segment.set(ValueLayout.JAVA_LONG, Layouts.LANDLOCK_RULESET_ATTR_FS_OFFSET, value)
@@ -83,6 +85,10 @@ public value class LandlockRulesetAttrSegment(public val segment: MemorySegment)
         context(arena: Arena)
         public fun allocate(): LandlockRulesetAttrSegment =
             LandlockRulesetAttrSegment(arena.allocate(Layouts.LANDLOCK_RULESET_ATTR))
+
+        context(arena: NativeArena)
+        public fun allocate(): LandlockRulesetAttrSegment =
+            LandlockRulesetAttrSegment(arena.arena.allocate(Layouts.LANDLOCK_RULESET_ATTR))
     }
 }
 
@@ -91,6 +97,8 @@ public value class LandlockRulesetAttrSegment(public val segment: MemorySegment)
  */
 @JvmInline
 public value class LandlockPathBeneathAttrSegment(public val segment: MemorySegment) {
+    public val managed: ManagedSegment get() = ConfinedSegment(segment)
+
     public fun getAllowedAccess(): Long = segment.get(ValueLayout.JAVA_LONG, Layouts.LANDLOCK_PATH_BENEATH_ATTR_ACCESS_OFFSET)
     public fun setAllowedAccess(value: Long): Unit {
         segment.set(ValueLayout.JAVA_LONG, Layouts.LANDLOCK_PATH_BENEATH_ATTR_ACCESS_OFFSET, value)
@@ -105,6 +113,10 @@ public value class LandlockPathBeneathAttrSegment(public val segment: MemorySegm
         context(arena: Arena)
         public fun allocate(): LandlockPathBeneathAttrSegment =
             LandlockPathBeneathAttrSegment(arena.allocate(Layouts.LANDLOCK_PATH_BENEATH_ATTR))
+
+        context(arena: NativeArena)
+        public fun allocate(): LandlockPathBeneathAttrSegment =
+            LandlockPathBeneathAttrSegment(arena.arena.allocate(Layouts.LANDLOCK_PATH_BENEATH_ATTR))
     }
 }
 
