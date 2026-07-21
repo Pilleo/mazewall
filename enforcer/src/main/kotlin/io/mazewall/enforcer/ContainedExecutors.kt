@@ -116,6 +116,11 @@ object ContainedExecutors {
                 policy
             }
 
+            if (!Platform.isSupported()) {
+                handleUnsupportedPlatform()
+                return AutoCloseable {}
+            }
+
             validateLinuxAndNotVirtual()
 
             if (augmentedPolicy.hasSupervisedSyscalls) {
@@ -123,11 +128,6 @@ object ContainedExecutors {
             }
 
             applyLandlockIfNecessary(processWide, augmentedPolicy)
-
-            if (!Platform.isSupported()) {
-                handleUnsupportedPlatform()
-                return AutoCloseable {}
-            }
 
             return installSeccompFilter(processWide, augmentedPolicy, scopingPolicy)
         } catch (t: Throwable) {

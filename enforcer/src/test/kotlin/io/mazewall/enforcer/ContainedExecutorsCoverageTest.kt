@@ -21,6 +21,14 @@ class ContainedExecutorsCoverageTest {
 
     @Test
     fun testIsPathSubsetLogic() {
+        val mockProvider = object : PlatformProvider by RealPlatformProvider {
+            override fun getOsName(): String = "Linux"
+            override fun hasKernelSeccompSupport(): Boolean = true
+            override fun checkSeccompSanity(): io.mazewall.LinuxNative.SyscallResult<Long, io.mazewall.LinuxNative.SyscallHandledState.Unhandled> =
+                io.mazewall.LinuxNative.SyscallResult.Error(22, -1)
+        }
+        Platform.setProvider(mockProvider)
+
         val p1 = Policy.builder().allowFsRead("/tmp").build()
         val p2 = Policy.builder().allowFsRead("/").build()
 
@@ -37,6 +45,25 @@ class ContainedExecutorsCoverageTest {
             override fun hasKernelSeccompSupport(): Boolean = false
             override fun checkSeccompSanity(): io.mazewall.LinuxNative.SyscallResult<Long, io.mazewall.LinuxNative.SyscallHandledState.Unhandled> =
                 io.mazewall.LinuxNative.SyscallResult.Error(22, -1)
+        }
+        Platform.setProvider(mockProvider)
+
+        System.setProperty("io.mazewall.fallback", "FAIL")
+        assertFailsWith<UnsupportedOperationException> {
+            ContainedExecutors.installOnCurrentThread(Policy.builder().build())
+        }
+
+        System.setProperty("io.mazewall.fallback", "SILENT_BYPASS")
+        ContainedExecutors.installOnCurrentThread(Policy.builder().build())
+
+        System.setProperty("io.mazewall.fallback", "WARN_AND_BYPASS")
+        ContainedExecutors.installOnCurrentThread(Policy.builder().build())
+    }
+
+    @Test
+    fun testNonLinuxFallbackBehaviors() {
+        val mockProvider = object : PlatformProvider by RealPlatformProvider {
+            override fun getOsName(): String = "macOS"
         }
         Platform.setProvider(mockProvider)
 

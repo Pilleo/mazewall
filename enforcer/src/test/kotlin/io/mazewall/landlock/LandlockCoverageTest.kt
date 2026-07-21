@@ -240,4 +240,67 @@ class LandlockCoverageTest {
 
         assertEquals(1, deletedPathAttempts.get(), "Should only attempt to open the deleted file path once, with no fallback to parent directory")
     }
+
+    @Test
+    fun `test restrictive barrier on unsupported landlock under fallback FAIL`() {
+        val mockPlatform = MockPlatformProvider()
+        mockPlatform.mockLandlockAbiVersion = 0
+        Platform.setProvider(mockPlatform)
+
+        System.setProperty("io.mazewall.fallback", "FAIL")
+        assertFailsWith<UnsupportedOperationException> {
+            Landlock.applyRestrictiveBarrier()
+        }
+    }
+
+    @Test
+    fun `test restrictive barrier on unsupported landlock under fallback WARN_AND_BYPASS`() {
+        val mockPlatform = MockPlatformProvider()
+        mockPlatform.mockLandlockAbiVersion = 0
+        Platform.setProvider(mockPlatform)
+
+        System.setProperty("io.mazewall.fallback", "WARN_AND_BYPASS")
+        // Should succeed by bypassing
+        Landlock.applyRestrictiveBarrier()
+    }
+
+    @Test
+    fun `test restrictive barrier on unsupported landlock under fallback SILENT_BYPASS`() {
+        val mockPlatform = MockPlatformProvider()
+        mockPlatform.mockLandlockAbiVersion = 0
+        Platform.setProvider(mockPlatform)
+
+        System.setProperty("io.mazewall.fallback", "SILENT_BYPASS")
+        // Should succeed silently
+        Landlock.applyRestrictiveBarrier()
+    }
+
+    @Test
+    fun `test validateAbiSupport under fallback SILENT_BYPASS`() {
+        val mockPlatform = MockPlatformProvider()
+        mockPlatform.mockLandlockAbiVersion = 1
+        Platform.setProvider(mockPlatform)
+
+        System.setProperty("io.mazewall.fallback", "SILENT_BYPASS")
+        // Request policy requiring ABI v2 (rename)
+        val policy = Policy.builder().allowFsRead("/tmp").allow(io.mazewall.core.Syscall.RENAME).build()
+        // Should run and bypass silently without warning or exception
+        val accessMask = Landlock.getAccessMask(1, policy.definition)
+        assertNotNull(accessMask)
+    }
+
+    @Test
+    fun `test handleProcessWideUnsupported under fallback SILENT_BYPASS`() {
+        val mockPlatform = MockPlatformProvider()
+        mockPlatform.mockLandlockAbiVersion = 5
+        Platform.setProvider(mockPlatform)
+
+        val mockEngine = SupportedLandlockMock()
+        LinuxNative.setEngine(mockEngine)
+
+        System.setProperty("io.mazewall.fallback", "SILENT_BYPASS")
+        val session = LandlockSession(Policy.builder().build().definition, processWide = true)
+        // Should run and apply thread-scoped silently without warning or exception
+        session.applyRuleset()
+    }
 }
