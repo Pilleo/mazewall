@@ -10,7 +10,12 @@ import io.mazewall.ffi.Layouts
 import io.mazewall.ffi.NativeConstants
 import io.mazewall.recover
 import io.mazewall.ffi.memory.ConfinedSegment
-import java.lang.foreign.Arena
+import io.mazewall.ffi.memory.NativeArena
+import io.mazewall.ffi.memory.ManagedSegment
+import io.mazewall.ffi.memory.unwrap
+import io.mazewall.ffi.memory.writeInt
+import io.mazewall.ffi.memory.writeShort
+import io.mazewall.ffi.memory.writeByte
 import java.lang.foreign.MemoryLayout
 import java.lang.foreign.MemorySegment
 import java.lang.foreign.ValueLayout
@@ -73,7 +78,7 @@ internal class ProfilerDaemonEngine(
         System.out.flush()
 
         try {
-            Arena.ofConfined().use { arena ->
+            NativeArena.ofConfined().use { arena ->
                 state = listeningState.active()
                 acceptConnections(serverFd, arena)
             }
@@ -102,14 +107,14 @@ internal class ProfilerDaemonEngine(
     @Suppress("LoopWithTooManyJumpStatements")
     private fun acceptConnections(
         serverFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>,
-        arena: Arena,
+        arena: NativeArena,
     ) {
-        val pollFd = arena.allocate(Layouts.POLLFD)
-        pollFd.set(ValueLayout.JAVA_INT, POLLFD_FD_OFF, serverFd.value)
-        pollFd.set(ValueLayout.JAVA_SHORT, POLLFD_EVENTS_OFF, NativeConstants.POLLIN)
+        val pollFd = io.mazewall.ffi.memory.PollFdSegment.of(arena.allocate(Layouts.POLLFD))
+        pollFd.setFd(serverFd.value)
+        pollFd.setEvents(NativeConstants.POLLIN)
 
         while (!isGlobalShutdown()) {
-            val pollRes = LinuxNative.withTransaction { ioOps.raw.poll(ConfinedSegment(pollFd), 1L, POLL_TIMEOUT_MS) }
+            val pollRes = LinuxNative.withTransaction { ioOps.raw.poll(pollFd.managed, 1L, POLL_TIMEOUT_MS) }
             val count = pollRes.recover { errno, _ ->
                 if (errno != NativeConstants.EINTR) return
                 0L
@@ -137,15 +142,15 @@ internal class ProfilerDaemonEngine(
     private fun handleConnection(socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>) {
         var connection: io.mazewall.ffi.networking.SeccompConnection = io.mazewall.ffi.networking.SeccompConnection.Accepted(socketFd)
         try {
-            Arena.ofConfined().use { arena ->
-                val pollFd = arena.allocate(Layouts.POLLFD)
-                pollFd.set(ValueLayout.JAVA_INT, POLLFD_FD_OFF, socketFd.value)
-                pollFd.set(ValueLayout.JAVA_SHORT, POLLFD_EVENTS_OFF, NativeConstants.POLLIN)
+            NativeArena.ofConfined().use { arena ->
+                val pollFd = io.mazewall.ffi.memory.PollFdSegment.of(arena.allocate(Layouts.POLLFD))
+                pollFd.setFd(socketFd.value)
+                pollFd.setEvents(NativeConstants.POLLIN)
 
                 while (!isGlobalShutdown()) {
                     // Only poll if we are waiting for a NEW listener FD (Accepted state)
                     if (connection is io.mazewall.ffi.networking.SeccompConnection.Accepted) {
-                        val pollRes = LinuxNative.withTransaction { ioOps.raw.poll(ConfinedSegment(pollFd), 1L, POLL_TIMEOUT_MS) }
+                        val pollRes = LinuxNative.withTransaction { ioOps.raw.poll(pollFd.managed, 1L, POLL_TIMEOUT_MS) }
                         val count = pollRes.recover { errno, _ ->
                             if (errno != NativeConstants.EINTR) return@use // Break from loop
                             0L
@@ -168,7 +173,7 @@ internal class ProfilerDaemonEngine(
 
                         is io.mazewall.ffi.networking.SeccompConnection.FdAttached -> {
                             System.err.println("[DAEMON] Sending handshake ACK to socket ${socketFd.value}")
-                            val ackBuf = arena.allocate(ACK_BUF_SIZE)
+                            val ackBuf = arena.allocate(ACK_BUF_SIZE).unwrap
                             ackBuf.set(ValueLayout.JAVA_BYTE, 0L, PROTOCOL_ACK_BYTE)
                             var success = false
                             while (true) {
@@ -230,27 +235,27 @@ internal class ProfilerDaemonEngine(
             onShutdown = this::triggerGlobalShutdown,
         )
         try {
-            Arena.ofConfined().use { arena ->
-                val pollFds = with(arena) { setupSessionPoll(socketFd, listenerFd) }
-                val notif = arena.allocate(Layouts.SECCOMP_NOTIF)
-                val resp = arena.allocate(Layouts.SECCOMP_NOTIF_RESP)
-                val ackBuf = arena.allocate(1L)
-                val socketPollFd = arena.allocate(Layouts.POLLFD)
+            NativeArena.ofConfined().use { sessionArena ->
+                val pollFds = with(sessionArena) { setupSessionPoll(socketFd, listenerFd) }
+                val notif = sessionArena.allocate(Layouts.SECCOMP_NOTIF)
+                val resp = sessionArena.allocate(Layouts.SECCOMP_NOTIF_RESP)
+                val ackBuf = sessionArena.allocate(1L)
+                val socketPollFd = sessionArena.allocate(Layouts.POLLFD)
 
                 while (!isGlobalShutdown()) {
-                    val pollRes = LinuxNative.withTransaction { ioOps.raw.poll(ConfinedSegment(pollFds), 2L, POLL_TIMEOUT_MS) }
+                    val pollRes = LinuxNative.withTransaction { ioOps.raw.poll(pollFds, 2L, POLL_TIMEOUT_MS) }
                     val count = pollRes.recover { errno, _ ->
                         if (errno != NativeConstants.EINTR) return@use // Break from loop
                         0L
                     }
                     if (count <= 0) continue
 
-                    val action = io.mazewall.ffi.memory.nativeScope {
-                        with(this) {
+                    NativeArena.ofConfined().use { iterationArena ->
+                        val action = with(iterationArena) {
                             sessionHandler.handleActiveListener(pollFds, ackBuf, notif, resp, socketPollFd)
                         }
+                        if (action !is LoopAction.Continue) break
                     }
-                    if (action !is LoopAction.Continue) break
                     if (isGlobalShutdown()) break
                 }
             }
@@ -260,18 +265,18 @@ internal class ProfilerDaemonEngine(
         }
     }
 
-    context(arena: Arena)
+    context(arena: NativeArena)
     private fun setupSessionPoll(
         socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>,
         listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open>,
-    ): MemorySegment {
+    ): ManagedSegment {
         val pollFds = arena.allocate(MemoryLayout.sequenceLayout(2, Layouts.POLLFD))
         // [0]: Seccomp listener FD
-        pollFds.set(ValueLayout.JAVA_INT, 0L, listenerFd.value)
-        pollFds.set(ValueLayout.JAVA_SHORT, POLLFD_EVENTS_OFF, NativeConstants.POLLIN)
+        pollFds.writeInt(0L, listenerFd.value)
+        pollFds.writeShort(POLLFD_EVENTS_OFF, NativeConstants.POLLIN)
         // [1]: UNIX socket FD (for parent shutdown/ACK)
-        pollFds.set(ValueLayout.JAVA_INT, POLLFD_STRUCT_SIZE, socketFd.value)
-        pollFds.set(ValueLayout.JAVA_SHORT, POLLFD_STRUCT_SIZE + POLLFD_EVENTS_OFF, NativeConstants.POLLIN)
+        pollFds.writeInt(POLLFD_STRUCT_SIZE, socketFd.value)
+        pollFds.writeShort(POLLFD_STRUCT_SIZE + POLLFD_EVENTS_OFF, NativeConstants.POLLIN)
         return pollFds
     }
 }
