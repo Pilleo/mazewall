@@ -266,20 +266,20 @@ internal class SupervisorDaemonEngine(
         val sessionHandler = SupervisorSessionHandler(socketFd, listenerFd, engine, socketManager)
         try {
             NativeArena.ofConfined().use { sessionArena ->
-                val pollFds = sessionArena.allocate(MemoryLayout.sequenceLayout(2, Layouts.POLLFD)).native
-                val pfd1 = PollFdSegment(pollFds.asSlice(0L, Layouts.POLLFD.byteSize()))
+                val pollFds = sessionArena.allocate(MemoryLayout.sequenceLayout(2, Layouts.POLLFD))
+                val pfd1 = PollFdSegment(pollFds.asSlice(0L, Layouts.POLLFD.byteSize()).native)
                 pfd1.setFd(listenerFd.value)
                 pfd1.setEvents(NativeConstants.POLLIN)
 
-                val pfd2 = PollFdSegment(pollFds.asSlice(POLLFD_STRUCT_SIZE, Layouts.POLLFD.byteSize()))
+                val pfd2 = PollFdSegment(pollFds.asSlice(POLLFD_STRUCT_SIZE, Layouts.POLLFD.byteSize()).native)
                 pfd2.setFd(socketFd.value)
                 pfd2.setEvents(NativeConstants.POLLIN)
 
-                val notif = sessionArena.allocate(Layouts.SECCOMP_NOTIF).native
-                val resp = sessionArena.allocate(Layouts.SECCOMP_NOTIF_RESP).native
+                val notif = sessionArena.allocate(Layouts.SECCOMP_NOTIF)
+                val resp = sessionArena.allocate(Layouts.SECCOMP_NOTIF_RESP)
 
                 while (!isGlobalShutdown()) {
-                    val pollRes = engine.withTransaction { engine.raw.poll(ConfinedSegment(pollFds), 2L, POLL_TIMEOUT_MS) }
+                    val pollRes = engine.withTransaction { engine.raw.poll(pollFds, 2L, POLL_TIMEOUT_MS) }
                     val count = pollRes.recover { errno, _ ->
                         if (errno != NativeConstants.EINTR) return@use
                         0L

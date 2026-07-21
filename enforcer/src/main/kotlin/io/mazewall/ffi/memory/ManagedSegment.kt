@@ -21,6 +21,11 @@ public sealed interface ManagedSegment {
      */
     public fun byteSize(): Long
 
+    /**
+     * Returns a slice of this segment.
+     */
+    public fun asSlice(offset: Long, newSize: Long): ManagedSegment
+
     public companion object {
         /**
          * Represents a NULL memory segment.
@@ -50,6 +55,7 @@ public sealed interface ManagedSegment {
 public value class ConfinedSegment(internal val native: MemorySegment) : ManagedSegment {
     override fun address(): Long = native.address()
     override fun byteSize(): Long = native.byteSize()
+    override fun asSlice(offset: Long, newSize: Long): ConfinedSegment = ConfinedSegment(native.asSlice(offset, newSize))
 }
 
 /**
@@ -59,6 +65,7 @@ public value class ConfinedSegment(internal val native: MemorySegment) : Managed
 public value class SharedSegment(internal val native: MemorySegment) : ManagedSegment {
     override fun address(): Long = native.address()
     override fun byteSize(): Long = native.byteSize()
+    override fun asSlice(offset: Long, newSize: Long): SharedSegment = SharedSegment(native.asSlice(offset, newSize))
 }
 
 /**
