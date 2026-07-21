@@ -99,7 +99,7 @@ internal class JVMValidationListener(
     }
 
     fun start(readyLatch: CountDownLatch) {
-        val arena = Arena.ofShared()
+        val arena = io.mazewall.ffi.memory.NativeArena.ofShared()
         val inputStream = SupervisorSocketInputStream(socketFd, arena)
 
         Thread {
@@ -112,7 +112,7 @@ internal class JVMValidationListener(
     }
 
     @Suppress("CyclomaticComplexMethod", "NestedBlockDepth", "LongMethod")
-    private fun runValidationReactor(inputStream: SupervisorSocketInputStream, arena: Arena, readyLatch: CountDownLatch) {
+    private fun runValidationReactor(inputStream: SupervisorSocketInputStream, arena: io.mazewall.ffi.memory.NativeArena, readyLatch: CountDownLatch) {
         System.err.println("[JVM-VALIDATION] validation reactor thread started")
         try {
             val dis = DataInputStream(BufferedInputStream(inputStream))
@@ -128,7 +128,7 @@ internal class JVMValidationListener(
                 readyLatch.countDown()
             }
 
-            val responseSegment = with(arena) { io.mazewall.ffi.memory.SupervisorResponseSegment.allocate() }
+            val responseSegment = with(arena.arena) { io.mazewall.ffi.memory.SupervisorResponseSegment.allocate() }
 
             while (!closed.get()) {
                 val id = try {

@@ -50,12 +50,12 @@ class SupervisorSessionHandlerTest {
 
         val method = SupervisorSessionHandler::class.java.getDeclaredMethod(
             "connectSocketInSupervisor",
-            Arena::class.java,
+            io.mazewall.ffi.memory.NativeArena::class.java,
             ByteArray::class.java
         )
         method.isAccessible = true
 
-        Arena.ofConfined().use { arena ->
+        io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
             // Test normal domain (AF_INET = 2) -> little endian: [2, 0]
             val normalBytes = byteArrayOf(2, 0)
             method.invoke(handler, arena, normalBytes)

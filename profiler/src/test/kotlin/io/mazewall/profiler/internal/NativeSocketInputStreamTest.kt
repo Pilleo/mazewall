@@ -11,9 +11,7 @@ import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.Timeout
 import io.mazewall.ffi.memory.ManagedSegment
-import java.lang.foreign.Arena
-import java.lang.foreign.MemorySegment
-import java.lang.foreign.ValueLayout
+import io.mazewall.ffi.memory.NativeArena
 import java.util.concurrent.TimeUnit
 
 class NativeSocketInputStreamTest {
@@ -31,8 +29,7 @@ class NativeSocketInputStreamTest {
                         LinuxNative.SyscallResult.Error<LinuxNative.SyscallHandledState.Unhandled>(4, -1L)
                     } else {
                         // Return a successful byte (0x42) on the third attempt
-                        val bufSeg = MemorySegment.ofAddress(buf.address()).reinterpret(buf.byteSize())
-                        bufSeg.set(ValueLayout.JAVA_BYTE, 0L, 0x42.toByte())
+                        ManagedSegment.copy(byteArrayOf(0x42.toByte()), 0, buf, 0L, 1)
                         LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(1L)
                     }
                 }
@@ -41,7 +38,7 @@ class NativeSocketInputStreamTest {
 
         LinuxNative.setEngine(mock)
         try {
-            Arena.ofConfined().use { arena ->
+            NativeArena.ofConfined().use { arena ->
                 val stream = NativeSocketInputStream(FileDescriptor.unsafe<FileDescriptorRole.Generic>(1), arena)
                 val result = stream.read()
                 assertEquals(0x42, result)
@@ -66,8 +63,7 @@ class NativeSocketInputStreamTest {
                         LinuxNative.SyscallResult.Error<LinuxNative.SyscallHandledState.Unhandled>(4, -1L)
                     } else {
                         // Return a successful byte (0x42) on the third attempt
-                        val bufSeg = MemorySegment.ofAddress(buf.address()).reinterpret(buf.byteSize())
-                        bufSeg.set(ValueLayout.JAVA_BYTE, 0L, 0x42.toByte())
+                        ManagedSegment.copy(byteArrayOf(0x42.toByte()), 0, buf, 0L, 1)
                         LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(1L)
                     }
                 }
@@ -76,7 +72,7 @@ class NativeSocketInputStreamTest {
 
         LinuxNative.setEngine(mock)
         try {
-            Arena.ofConfined().use { arena ->
+            NativeArena.ofConfined().use { arena ->
                 val stream = NativeSocketInputStream(FileDescriptor.unsafe<FileDescriptorRole.Generic>(1), arena)
                 val buffer = ByteArray(1)
                 val result = stream.read(buffer)

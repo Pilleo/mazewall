@@ -57,7 +57,7 @@ internal class ProfilerTraceListener(
     fun start(readyLatch: CountDownLatch) {
         if (closed.get()) throw IllegalStateException("Listener is already closed")
 
-        val arena = Arena.ofShared()
+        val arena = io.mazewall.ffi.memory.NativeArena.ofShared()
         val inputStream = NativeSocketInputStream(socketFd, arena)
 
         val thread = Thread {

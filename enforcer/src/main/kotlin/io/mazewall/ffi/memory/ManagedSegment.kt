@@ -69,3 +69,27 @@ internal val ManagedSegment.native: MemorySegment
         is ConfinedSegment -> this.native
         is SharedSegment -> this.native
     }
+
+public fun ManagedSegment.readByte(offset: Long): Byte = this.native.readByte(offset)
+public fun ManagedSegment.writeByte(offset: Long, value: Byte): Unit = this.native.writeByte(offset, value)
+
+public fun ManagedSegment.readShort(offset: Long): Short = this.native.readShort(offset)
+public fun ManagedSegment.writeShort(offset: Long, value: Short): Unit = this.native.writeShort(offset, value)
+
+public fun ManagedSegment.readInt(offset: Long): Int = this.native.readInt(offset)
+public fun ManagedSegment.writeInt(offset: Long, value: Int): Unit = this.native.writeInt(offset, value)
+
+public fun ManagedSegment.readIntUnaligned(offset: Long): Int = this.native.readIntUnaligned(offset)
+public fun ManagedSegment.writeIntUnaligned(offset: Long, value: Int): Unit = this.native.writeIntUnaligned(offset, value)
+
+public fun ManagedSegment.readLong(offset: Long): Long = this.native.readLong(offset)
+public fun ManagedSegment.writeLong(offset: Long, value: Long): Unit = this.native.writeLong(offset, value)
+
+public fun ManagedSegment.readLongUnaligned(offset: Long): Long = this.native.readLongUnaligned(offset)
+public fun ManagedSegment.writeLongUnaligned(offset: Long, value: Long): Unit = this.native.writeLongUnaligned(offset, value)
+
+public fun ManagedSegment.fill(value: Byte): Unit { this.native.fill(value) }
+
+public val NativeArena.unwrap: java.lang.foreign.Arena get() = this.arena
+
+public val ManagedSegment.unwrap: java.lang.foreign.MemorySegment get() = this.native
