@@ -72,6 +72,6 @@ internal class NativeSocketInputStream(
     }
 
     override fun close() {
-        LinuxNative.fileSystem.close(socketFd)
+        // Do not close socketFd here, as its lifecycle is managed entirely by ProfilerTraceListener
     }
 }
