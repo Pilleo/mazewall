@@ -1,7 +1,7 @@
 ---
-title: "Memory Segment Scopes and Lifetimes (Re-evaluation)"
+title: "Uncaught exceptions in `ContainedExecutorWrapper.kt` during filter installation"
 severity: "HIGH"
-status: "open"
+status: "resolved"
 priority: 9
 dependencies: []
 component: "enforcer"
@@ -10,23 +10,24 @@ autonomy: "supervised"
 solution_approved: false
 blast_radius: "medium"
 reversible: true
+github_issue: 143
 ---
 
-# 🔴 [Severity: LOW]: Memory Segment Scopes and Lifetimes (Re-evaluation)
+# 🔴 [Severity: MEDIUM]: Uncaught exceptions in `ContainedExecutorWrapper.kt` during filter installation
 
 **Context:**
-**Hypothesis:** `Arena.ofConfined().use { ... }` scopes are heavily utilized. Are there any `MemorySegment` objects escaping their confinement scope?
+**Hypothesis:** If installing a policy fails, does it clean up ThreadLocals?
 
-As previously noted, scopes are solid, but memory allocation could still be further refined.
+Wrapping tasks needs robust try-finally for thread local registries.
 
 
 **Needed:**
-1. FFM scoping here looks solid.
+1. Verify that executor wrappers properly handle seccomp installation failures and clean state.
 
 ## Solution Options
 
 ### Option A — Refactor implementation
-Implement the recommendation described in the Needed section to resolve the issue directly. Target area: ``enforcer/src/main/kotlin/io/mazewall/enforcer/supervisor/SupervisorSessionHandler.kt``
+Implement the recommendation described in the Needed section to resolve the issue directly. Target area: ``enforcer/src/main/kotlin/io/mazewall/enforcer/internal/ContainedExecutorWrapper.kt``
 **Pros:** Resolves the root cause of the issue.
 **Cons:** Requires careful implementation and testing.
 **Risk:** MEDIUM

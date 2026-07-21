@@ -1,7 +1,7 @@
 ---
-title: "Uncaught exceptions in `ContainedExecutorWrapper.kt` during filter installation"
+title: "Uncaught Native Exceptions in Landlock `LandlockState.kt`"
 severity: "HIGH"
-status: "open"
+status: "resolved"
 priority: 9
 dependencies: []
 component: "enforcer"
@@ -10,23 +10,24 @@ autonomy: "supervised"
 solution_approved: false
 blast_radius: "medium"
 reversible: true
+github_issue: 141
 ---
 
-# 🔴 [Severity: MEDIUM]: Uncaught exceptions in `ContainedExecutorWrapper.kt` during filter installation
+# 🔴 [Severity: MEDIUM]: Uncaught Native Exceptions in Landlock `LandlockState.kt`
 
 **Context:**
-**Hypothesis:** If installing a policy fails, does it clean up ThreadLocals?
+**Hypothesis:** If allocating rulesets fails, does it leak FDs?
 
-Wrapping tasks needs robust try-finally for thread local registries.
+`Landlock` uses FDs. If it crashes mid-setup, FD must be closed.
 
 
 **Needed:**
-1. Verify that executor wrappers properly handle seccomp installation failures and clean state.
+1. Verify `use` is thoroughly applied or manual close happens on error paths.
 
 ## Solution Options
 
 ### Option A — Refactor implementation
-Implement the recommendation described in the Needed section to resolve the issue directly. Target area: ``enforcer/src/main/kotlin/io/mazewall/enforcer/internal/ContainedExecutorWrapper.kt``
+Implement the recommendation described in the Needed section to resolve the issue directly. Target area: ``enforcer/src/main/kotlin/io/mazewall/landlock/LandlockState.kt``
 **Pros:** Resolves the root cause of the issue.
 **Cons:** Requires careful implementation and testing.
 **Risk:** MEDIUM

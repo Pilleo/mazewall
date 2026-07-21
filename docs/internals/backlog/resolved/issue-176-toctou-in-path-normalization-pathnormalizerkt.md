@@ -1,7 +1,7 @@
 ---
-title: "Uncaught Native Exceptions in Landlock `LandlockState.kt`"
+title: "TOCTOU in Path Normalization `PathNormalizer.kt`"
 severity: "HIGH"
-status: "open"
+status: "resolved"
 priority: 9
 dependencies: []
 component: "enforcer"
@@ -10,23 +10,24 @@ autonomy: "supervised"
 solution_approved: false
 blast_radius: "medium"
 reversible: true
+github_issue: 131
 ---
 
-# 🔴 [Severity: MEDIUM]: Uncaught Native Exceptions in Landlock `LandlockState.kt`
+# 🔴 [Severity: MEDIUM]: TOCTOU in Path Normalization `PathNormalizer.kt`
 
 **Context:**
-**Hypothesis:** If allocating rulesets fails, does it leak FDs?
+**Hypothesis:** Can an attacker rename directory to bypass path normalizer?
 
-`Landlock` uses FDs. If it crashes mid-setup, FD must be closed.
+`PathNormalizer` does static analysis. Does the system ensure paths aren't modified post-normalization?
 
 
 **Needed:**
-1. Verify `use` is thoroughly applied or manual close happens on error paths.
+1. Verify path resolution constraints are verified against Landlock or Seccomp hooks safely.
 
 ## Solution Options
 
 ### Option A — Refactor implementation
-Implement the recommendation described in the Needed section to resolve the issue directly. Target area: ``enforcer/src/main/kotlin/io/mazewall/landlock/LandlockState.kt``
+Implement the recommendation described in the Needed section to resolve the issue directly. Target area: ``enforcer/src/main/kotlin/io/mazewall/sbob/PathNormalizer.kt``
 **Pros:** Resolves the root cause of the issue.
 **Cons:** Requires careful implementation and testing.
 **Risk:** MEDIUM

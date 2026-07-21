@@ -145,14 +145,7 @@ graph TD
     issue_162_memory_alignment_verification_for_layoutskt_ffm_structures["🔴 Issue: Memory Alignment verification for `Layouts.kt` FFM Structures (HIGH)"]
     issue_163_memory_segment_scopes_and_lifetimes["🔴 Issue: Memory Segment Scopes and Lifetimes (HIGH)"]
     issue_164_toctou_vulnerability_in_supervisor_syscall_emulation_via_pro["🔴 Issue: TOCTOU Vulnerability in Supervisor Syscall Emulation via `process_vm_readv` (HIGH)"]
-    issue_165_silent_fallback_by_default_behavior_evaluation["🔴 Issue: Silent Fallback by default behavior evaluation (HIGH)"]
-    issue_166_architectural_violation_ffm_leaking_outside_iomazewallffi["🔴 Issue: Architectural Violation - FFM Leaking Outside `io.mazewall.ffi` (HIGH)"]
     issue_169_inconsistent_architecture_test_for_javalangforeign["🔴 Issue: Inconsistent Architecture Test for `java.lang.foreign` (HIGH)"]
-    issue_172_memory_segment_scopes_and_lifetimes_re_evaluation["🔴 Issue: Memory Segment Scopes and Lifetimes (Re-evaluation) (HIGH)"]
-    issue_173_unhandled_signal_interruptions_eintr_in_socket_io["🔴 Issue: Unhandled Signal Interruptions (`EINTR`) in socket IO (HIGH)"]
-    issue_174_uncaught_exceptions_in_containedexecutorwrapperkt_during_fil["🔴 Issue: Uncaught exceptions in `ContainedExecutorWrapper.kt` during filter installation (HIGH)"]
-    issue_175_uncaught_native_exceptions_in_landlock_landlockstatekt["🔴 Issue: Uncaught Native Exceptions in Landlock `LandlockState.kt` (HIGH)"]
-    issue_176_toctou_in_path_normalization_pathnormalizerkt["🔴 Issue: TOCTOU in Path Normalization `PathNormalizer.kt` (HIGH)"]
     issue_177_missing_archunit_test_for_ffm_architecture_boundary_violatio["🔴 Issue: Missing ArchUnit test for FFM architecture boundary violations (HIGH)"]
     issue_183_potential_buffer_overflow_outofboundsexception_on_long_unix_["🔴 Issue: Potential Buffer Overflow / OutOfBoundsException on Long UNIX Socket Paths (LOW)"]
     issue_190_unhandled_eintr_in_accept_in_supervisordaemonengine["🔴 Issue: Unhandled EINTR in accept in SupervisorDaemonEngine (MEDIUM)"]
@@ -170,6 +163,7 @@ graph TD
     issue_205_orchestrator_add_failure_context_to_jules_retry_comments["🔴 Issue: Orchestrator: Add Failure Context to Jules Retry and Completed-Without-PR Comments (MEDIUM)"]
     issue_206_orchestrator_close_github_issue_automatically_on_resolve_task["🔴 Issue: Orchestrator: Close GitHub Issue Automatically on RESOLVE_TASK (LOW)"]
     issue_208_orchestrator_auto_merge_pr_on_verdict_approved_when_autonomous["🔴 Issue: Orchestrator: Auto-Merge PR on VERDICT: APPROVED When autonomy=autonomous and solution_approved=true (MEDIUM)"]
+    issue_210_decouple_nativeengine_from_raw_ffm_types["🔴 Issue: Decouple NativeEngine Interface and LinuxNative Entry Point from Raw FFM Types (HIGH)"]
     supervisor_proxy_design_md["💻 Source: supervisor-proxy-design.md"]
     BpfFilter_kt -->|Governed by| containment_design
     ContainedExecutors_kt -->|Governed by| containment_design
@@ -316,14 +310,7 @@ graph TD
     click issue_162_memory_alignment_verification_for_layoutskt_ffm_structures "../../../backlog/security/issue-162-memory-alignment-verification-for-layoutskt-ffm-structures.md"
     click issue_163_memory_segment_scopes_and_lifetimes "../../../backlog/performance/issue-163-memory-segment-scopes-and-lifetimes.md"
     click issue_164_toctou_vulnerability_in_supervisor_syscall_emulation_via_pro "../../../backlog/security/issue-164-toctou-vulnerability-in-supervisor-syscall-emulation-via-pro.md"
-    click issue_165_silent_fallback_by_default_behavior_evaluation "../../../backlog/security/issue-165-silent-fallback-by-default-behavior-evaluation.md"
-    click issue_166_architectural_violation_ffm_leaking_outside_iomazewallffi "../../../backlog/security/issue-166-architectural-violation-ffm-leaking-outside-iomazewallffi.md"
     click issue_169_inconsistent_architecture_test_for_javalangforeign "../../../backlog/testing/issue-169-inconsistent-architecture-test-for-javalangforeign.md"
-    click issue_172_memory_segment_scopes_and_lifetimes_re_evaluation "../../../backlog/performance/issue-172-memory-segment-scopes-and-lifetimes-re-evaluation.md"
-    click issue_173_unhandled_signal_interruptions_eintr_in_socket_io "../../../backlog/performance/issue-173-unhandled-signal-interruptions-eintr-in-socket-io.md"
-    click issue_174_uncaught_exceptions_in_containedexecutorwrapperkt_during_fil "../../../backlog/performance/issue-174-uncaught-exceptions-in-containedexecutorwrapperkt-during-fil.md"
-    click issue_175_uncaught_native_exceptions_in_landlock_landlockstatekt "../../../backlog/security/issue-175-uncaught-native-exceptions-in-landlock-landlockstatekt.md"
-    click issue_176_toctou_in_path_normalization_pathnormalizerkt "../../../backlog/security/issue-176-toctou-in-path-normalization-pathnormalizerkt.md"
     click issue_177_missing_archunit_test_for_ffm_architecture_boundary_violatio "../../../backlog/testing/issue-177-missing-archunit-test-for-ffm-architecture-boundary-violatio.md"
     click issue_183_potential_buffer_overflow_outofboundsexception_on_long_unix_ "../../../backlog/performance/issue-183-potential-buffer-overflow-outofboundsexception-on-long-unix-.md"
     click issue_190_unhandled_eintr_in_accept_in_supervisordaemonengine "../../../backlog/security/issue-190-unhandled-eintr-in-accept-in-supervisordaemonengine.md"
@@ -341,6 +328,7 @@ graph TD
     click issue_205_orchestrator_add_failure_context_to_jules_retry_comments "../../../backlog/code_health/issue-205-orchestrator-add-failure-context-to-jules-retry-comments.md"
     click issue_206_orchestrator_close_github_issue_automatically_on_resolve_task "../../../backlog/code_health/issue-206-orchestrator-close-github-issue-automatically-on-resolve-task.md"
     click issue_208_orchestrator_auto_merge_pr_on_verdict_approved_when_autonomous "../../../backlog/code_health/issue-208-orchestrator-auto-merge-pr-on-verdict-approved-when-autonomous.md"
+    click issue_210_decouple_nativeengine_from_raw_ffm_types "../../../backlog/code_health/issue-210-decouple-nativeengine-from-raw-ffm-types.md"
 ```
 
 <!-- KNOWLEDGE_MAP_END -->

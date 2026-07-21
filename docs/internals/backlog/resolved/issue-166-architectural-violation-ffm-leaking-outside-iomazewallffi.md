@@ -1,7 +1,7 @@
 ---
 title: "Architectural Violation - FFM Leaking Outside `io.mazewall.ffi`"
 severity: "HIGH"
-status: "open"
+status: "resolved"
 priority: 9
 dependencies: []
 component: "enforcer"
@@ -10,6 +10,7 @@ autonomy: "supervised"
 solution_approved: false
 blast_radius: "medium"
 reversible: true
+github_issue: 149
 ---
 
 # 🔴 [Severity: MEDIUM]: Architectural Violation - FFM Leaking Outside `io.mazewall.ffi`

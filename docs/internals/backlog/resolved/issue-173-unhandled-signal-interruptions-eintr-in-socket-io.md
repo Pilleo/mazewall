@@ -1,32 +1,33 @@
 ---
-title: "TOCTOU in Path Normalization `PathNormalizer.kt`"
+title: "Unhandled Signal Interruptions (`EINTR`) in socket IO"
 severity: "HIGH"
-status: "open"
+status: "resolved"
 priority: 9
 dependencies: []
-component: "enforcer"
+component: "profiler"
 effort: "small"
 autonomy: "supervised"
 solution_approved: false
 blast_radius: "medium"
 reversible: true
+github_issue: 145
 ---
 
-# 🔴 [Severity: MEDIUM]: TOCTOU in Path Normalization `PathNormalizer.kt`
+# 🔴 [Severity: MEDIUM]: Unhandled Signal Interruptions (`EINTR`) in socket IO
 
 **Context:**
-**Hypothesis:** Can an attacker rename directory to bypass path normalizer?
+**Hypothesis:** If `socketFd.close()` is interrupted, will it cause resource leak?
 
-`PathNormalizer` does static analysis. Does the system ensure paths aren't modified post-normalization?
+Trace listener uses standard sockets. They can throw exceptions.
 
 
 **Needed:**
-1. Verify path resolution constraints are verified against Landlock or Seccomp hooks safely.
+1. Verify that close routines handle interruptions properly.
 
 ## Solution Options
 
 ### Option A — Refactor implementation
-Implement the recommendation described in the Needed section to resolve the issue directly. Target area: ``enforcer/src/main/kotlin/io/mazewall/sbob/PathNormalizer.kt``
+Implement the recommendation described in the Needed section to resolve the issue directly. Target area: ``profiler/src/main/kotlin/io/mazewall/profiler/internal/ProfilerTraceListener.kt``
 **Pros:** Resolves the root cause of the issue.
 **Cons:** Requires careful implementation and testing.
 **Risk:** MEDIUM

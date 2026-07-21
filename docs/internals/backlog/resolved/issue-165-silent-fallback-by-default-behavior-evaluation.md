@@ -1,7 +1,7 @@
 ---
 title: "Silent Fallback by default behavior evaluation"
 severity: "HIGH"
-status: "open"
+status: "resolved"
 priority: 9
 dependencies: []
 component: "enforcer"
@@ -10,6 +10,7 @@ autonomy: "supervised"
 solution_approved: false
 blast_radius: "medium"
 reversible: true
+github_issue: 151
 ---
 
 # 🔴 [Severity: LOW]: Silent Fallback by default behavior evaluation
