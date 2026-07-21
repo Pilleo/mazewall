@@ -66,8 +66,8 @@ class LandlockCoverageTest {
         mock.fileSystem.openResult = LinuxNative.SyscallResult.Error<LinuxNative.SyscallHandledState.Unhandled>(13, -1) // EACCES
         LinuxNative.setEngine(mock)
 
-        nativeScope {
-            with(this) {
+        NativeArena.ofConfined().use { nativeArena ->
+            with(nativeArena) {
                 Landlock.addJvmClasspathRules(LandlockRuleset<RulesetState.Building>(FileDescriptor.unsafe<FileDescriptorRole.Ruleset>(42)), 0L)
             }
         }
@@ -95,8 +95,8 @@ class LandlockCoverageTest {
         mock.fileSystem.openResult = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(100)
         LinuxNative.setEngine(mock)
 
-        nativeScope {
-            with(this) {
+        NativeArena.ofConfined().use { nativeArena ->
+            with(nativeArena) {
                 Landlock.addJvmClasspathRules(LandlockRuleset<RulesetState.Building>(FileDescriptor.unsafe<FileDescriptorRole.Ruleset>(42)), 0L)
             }
         }

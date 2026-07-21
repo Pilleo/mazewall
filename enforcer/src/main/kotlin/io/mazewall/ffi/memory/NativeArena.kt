@@ -32,3 +32,16 @@ public class NativeArena internal constructor(
         public fun global(): NativeArena = NativeArena(Arena.global(), isShared = true)
     }
 }
+
+context(arena: NativeArena)
+public fun openPath(path: String, flags: Int): io.mazewall.LinuxNative.SyscallResult<Long, *> {
+    val segment = arena.allocateFrom(path)
+    return io.mazewall.LinuxNative.withTransaction {
+        io.mazewall.LinuxNative.fileSystem.open(segment, flags)
+    }
+}
+
+context(arena: NativeArena)
+public fun allocateBpfProgram(filters: List<io.mazewall.seccomp.BpfInstruction>): ManagedSegment {
+    return io.mazewall.LinuxNative.memory.newSockFProg(filters)
+}

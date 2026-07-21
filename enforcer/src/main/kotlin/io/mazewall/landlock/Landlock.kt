@@ -15,17 +15,15 @@ import io.mazewall.ffi.Layouts
 import io.mazewall.ffi.NativeConstants
 import io.mazewall.ffi.memory.LandlockPathBeneathAttrSegment
 import io.mazewall.ffi.memory.LandlockRulesetAttrSegment
-import io.mazewall.ffi.memory.nativeScope
 import io.mazewall.ffi.memory.ConfinedSegment
 import io.mazewall.ffi.memory.ManagedSegment
+import io.mazewall.ffi.memory.NativeArena
+import io.mazewall.ffi.memory.openPath
 import io.mazewall.getFdOrThrow
 import io.mazewall.onFailure
 import io.mazewall.onSuccess
 import io.mazewall.recover
 import java.io.File
-import java.lang.foreign.Arena
-import java.lang.foreign.MemorySegment
-import java.lang.foreign.ValueLayout
 import java.util.logging.Logger
 
 // SUPPRESSION JUSTIFICATION: This object serves as the single cohesive boundary wrapping the Landlock LSM.
@@ -229,14 +227,14 @@ object Landlock {
     }
 
     private fun createRulesetOrThrow(
-        arena: Arena,
+        arena: NativeArena,
         mask: Long,
         abi: Int,
     ): FileDescriptor<FileDescriptorRole.Ruleset, FdState.Open> {
         return with(arena) { createRuleset(mask, abi) }
     }
 
-    context(arena: Arena)
+    context(arena: NativeArena)
     internal fun addJvmClasspathRules(
         ruleset: LandlockRuleset<RulesetState.Building>,
         accessFlags: Long,
@@ -256,16 +254,13 @@ object Landlock {
         }
     }
 
-    context(arena: Arena)
+    context(arena: NativeArena)
     private fun addRuleFollowSymlinks(
         ruleset: LandlockRuleset<RulesetState.Building>,
         path: String,
         allowedAccess: Long,
     ) {
-        val pathSegment = arena.allocateFrom(path)
-        val fdResult = LinuxNative.withTransaction {
-            LinuxNative.fileSystem.open(ConfinedSegment(pathSegment), NativeConstants.O_PATH or NativeConstants.O_CLOEXEC)
-        }
+        val fdResult = openPath(path, NativeConstants.O_PATH or NativeConstants.O_CLOEXEC)
 
         fdResult.onSuccess { value ->
             val pathFd = FileDescriptor.unsafe<FileDescriptorRole.OPath>(value.toInt())
@@ -284,7 +279,7 @@ object Landlock {
         }
     }
 
-    context(arena: Arena)
+    context(arena: NativeArena)
     private fun addRule(
         ruleset: LandlockRuleset<RulesetState.Building>,
         path: SandboxedPath,
@@ -292,9 +287,7 @@ object Landlock {
     ) {
         val resolvedPath = path.value
         val openFlags = NativeConstants.O_PATH or NativeConstants.O_CLOEXEC or NativeConstants.O_NOFOLLOW
-        val initialResult = LinuxNative.withTransaction {
-            LinuxNative.fileSystem.open(ConfinedSegment(arena.allocateFrom(resolvedPath)), openFlags)
-        }
+        val initialResult = openPath(resolvedPath, openFlags)
 
         val openRes = handleInitialOpenFailure(initialResult, resolvedPath, openFlags)
         val (fdResult, isFallback) = when (openRes) {
@@ -314,7 +307,7 @@ object Landlock {
         }
     }
 
-    context(arena: Arena)
+    context(arena: NativeArena)
     private fun handleInitialOpenFailure(
         res: LinuxNative.SyscallResult<Long, *>,
         resolvedPath: String,
@@ -326,9 +319,7 @@ object Landlock {
             }
             val parentPath = File(resolvedPath).parent ?: "/"
             logger.info("Path $resolvedPath does not exist, falling back to parent directory: $parentPath")
-            val openResult = LinuxNative.withTransaction {
-                LinuxNative.fileSystem.open(ConfinedSegment(arena.allocateFrom(parentPath)), flags)
-            }
+            val openResult = openPath(parentPath, flags)
             return when (openResult) {
                 is LinuxNative.SyscallResult.Success -> OpenResult.Success(openResult.value.toInt(), true)
                 is LinuxNative.SyscallResult.Error -> OpenResult.Error(openResult.errno)
@@ -363,7 +354,7 @@ object Landlock {
         return allowedAccess
     }
 
-    context(arena: Arena)
+    context(arena: NativeArena)
     private fun addRuleToRulesetAndVerify(
         ruleset: LandlockRuleset<RulesetState.Building>,
         pathFd: FileDescriptor<FileDescriptorRole.OPath, FdState.Open>,
@@ -404,7 +395,7 @@ object Landlock {
         return LandlockRuleset(ruleset.fd)
     }
 
-    context(arena: Arena)
+    context(arena: NativeArena)
     internal fun applyUserRules(
         ruleset: LandlockRuleset<RulesetState.Building>,
         policy: PolicyDefinition<*>,
@@ -456,7 +447,7 @@ object Landlock {
         }
     }
 
-    context(arena: Arena)
+    context(arena: NativeArena)
     internal fun createRuleset(
         accessMaskFs: Long,
         abi: Int,
@@ -464,11 +455,11 @@ object Landlock {
         val rulesetAttr = LandlockRulesetAttrSegment.allocate()
         rulesetAttr.setHandledAccessFs(accessMaskFs)
         rulesetAttr.setHandledAccessNet(0L)
-        val size = if (abi >= 4) Layouts.LANDLOCK_RULESET_ATTR.byteSize() else Layouts.LANDLOCK_RULESET_ATTR_V1_SIZE
+        val size = if (abi >= 4) Layouts.LANDLOCK_RULESET_ATTR_SIZE else Layouts.LANDLOCK_RULESET_ATTR_V1_SIZE
         val res = LinuxNative.withTransaction {
             LinuxNative.raw.syscall(
                 NativeConstants.LANDLOCK_CREATE_RULESET_NR,
-                io.mazewall.core.NativeArg.MemoryArg(ConfinedSegment(rulesetAttr.segment)),
+                io.mazewall.core.NativeArg.MemoryArg(rulesetAttr.managed),
                 io.mazewall.core.NativeArg.LongArg(size),
                 io.mazewall.core.NativeArg.MemoryArg(ManagedSegment.NULL)
             )
@@ -476,7 +467,7 @@ object Landlock {
         return res.getFdOrThrow("landlock_create_ruleset").let { FileDescriptor.unsafe(it.value) }
     }
 
-    context(arena: Arena)
+    context(arena: NativeArena)
     private fun addRuleToRuleset(
         ruleset: LandlockRuleset<RulesetState.Building>,
         pathFd: FileDescriptor<FileDescriptorRole.OPath, FdState.Open>,
@@ -490,7 +481,7 @@ object Landlock {
                 NativeConstants.LANDLOCK_ADD_RULE_NR,
                 io.mazewall.core.NativeArg.FdArg(ruleset.fd),
                 io.mazewall.core.NativeArg.LongArg(NativeConstants.LANDLOCK_RULE_PATH_BENEATH.toLong()),
-                io.mazewall.core.NativeArg.MemoryArg(ConfinedSegment(pathAttr.segment)),
+                io.mazewall.core.NativeArg.MemoryArg(pathAttr.managed),
                 io.mazewall.core.NativeArg.IntArg(0)
             )
         }
@@ -500,4 +491,3 @@ object Landlock {
         }
     }
 }
-
