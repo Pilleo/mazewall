@@ -15,6 +15,7 @@ import io.mazewall.core.Tid
 import io.mazewall.ffi.Layouts
 import io.mazewall.ffi.NativeConstants
 import io.mazewall.ffi.memory.ManagedSegment
+import io.mazewall.ffi.memory.writeShort
 import java.lang.foreign.Arena
 import java.lang.foreign.MemoryLayout
 import java.lang.foreign.MemorySegment
@@ -149,7 +150,7 @@ class ProfilerDaemonTest {
             syscallMap,
         ) { }
 
-        Arena.ofConfined().use { arena ->
+        io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
             val notif = arena.allocate(Layouts.SECCOMP_NOTIF)
             val resp = arena.allocate(Layouts.SECCOMP_NOTIF_RESP)
             val ackBuf = arena.allocate(1L)
@@ -157,7 +158,7 @@ class ProfilerDaemonTest {
 
             val pollFds = arena.allocate(MemoryLayout.sequenceLayout(2, Layouts.POLLFD))
             // [0]: Seccomp listener FD - set POLLIN
-            pollFds.set(ValueLayout.JAVA_SHORT, Layouts.POLLFD_REVENTS_OFFSET, NativeConstants.POLLIN)
+            pollFds.writeShort(Layouts.POLLFD_REVENTS_OFFSET, NativeConstants.POLLIN)
 
             val action = with(arena) {
                 handler.handleActiveListener(pollFds, ackBuf, notif, resp, socketPollFd)
@@ -191,14 +192,14 @@ class ProfilerDaemonTest {
             syscallMap,
         ) { }
 
-        Arena.ofConfined().use { arena ->
+        io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
             val notif = arena.allocate(Layouts.SECCOMP_NOTIF)
             val resp = arena.allocate(Layouts.SECCOMP_NOTIF_RESP)
             val ackBuf = arena.allocate(1L)
             val socketPollFd = arena.allocate(Layouts.POLLFD)
 
             val pollFds = arena.allocate(MemoryLayout.sequenceLayout(2, Layouts.POLLFD))
-            pollFds.set(ValueLayout.JAVA_SHORT, Layouts.POLLFD_REVENTS_OFFSET, NativeConstants.POLLIN)
+            pollFds.writeShort(Layouts.POLLFD_REVENTS_OFFSET, NativeConstants.POLLIN)
 
             val action = with(arena) {
                 handler.handleActiveListener(pollFds, ackBuf, notif, resp, socketPollFd)
@@ -232,14 +233,14 @@ class ProfilerDaemonTest {
             syscallMap,
         ) { }
 
-        Arena.ofConfined().use { arena ->
+        io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
             val notif = arena.allocate(Layouts.SECCOMP_NOTIF)
             val resp = arena.allocate(Layouts.SECCOMP_NOTIF_RESP)
             val ackBuf = arena.allocate(1L)
             val socketPollFd = arena.allocate(Layouts.POLLFD)
 
             val pollFds = arena.allocate(MemoryLayout.sequenceLayout(2, Layouts.POLLFD))
-            pollFds.set(ValueLayout.JAVA_SHORT, Layouts.POLLFD_REVENTS_OFFSET, NativeConstants.POLLIN)
+            pollFds.writeShort(Layouts.POLLFD_REVENTS_OFFSET, NativeConstants.POLLIN)
 
             with(arena) {
                 handler.handleActiveListener(pollFds, ackBuf, notif, resp, socketPollFd)

@@ -23,6 +23,7 @@ import io.mazewall.profiler.engine.SyscallEvent
 import io.mazewall.profiler.engine.SyscallEventState
 import io.mazewall.profiler.engine.TraceEventPublisher
 import io.mazewall.ffi.memory.ManagedSegment
+import io.mazewall.ffi.memory.writeShort
 import java.lang.foreign.Arena
 import java.lang.foreign.MemoryLayout
 import java.lang.foreign.MemorySegment
@@ -212,14 +213,14 @@ class ProfilerDesignSpec :
                     syscallMap
                 ) {}
 
-                Arena.ofConfined().use { arena ->
+                io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
                     val notif = arena.allocate(Layouts.SECCOMP_NOTIF)
                     val resp = arena.allocate(Layouts.SECCOMP_NOTIF_RESP)
                     val ackBuf = arena.allocate(1L)
                     val socketPollFd = arena.allocate(Layouts.POLLFD)
 
                     val pollFds = arena.allocate(MemoryLayout.sequenceLayout(2, Layouts.POLLFD))
-                    pollFds.set(ValueLayout.JAVA_SHORT, 6L, NativeConstants.POLLIN)
+                    pollFds.writeShort(6L, NativeConstants.POLLIN)
 
                     val action = with(arena) { handler.handleActiveListener(pollFds, ackBuf, notif, resp, socketPollFd) }
 
@@ -253,13 +254,13 @@ class ProfilerDesignSpec :
                     syscallMap
                 ) {}
 
-                Arena.ofConfined().use { arena ->
+                io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
                     val notif = arena.allocate(Layouts.SECCOMP_NOTIF)
                     val resp = arena.allocate(Layouts.SECCOMP_NOTIF_RESP)
                     val ackBuf = arena.allocate(1L)
                     val socketPollFd = arena.allocate(Layouts.POLLFD)
                     val pollFds = arena.allocate(MemoryLayout.sequenceLayout(2, Layouts.POLLFD))
-                    pollFds.set(ValueLayout.JAVA_SHORT, 6L, NativeConstants.POLLIN)
+                    pollFds.writeShort(6L, NativeConstants.POLLIN)
 
                     with(arena) {
                         handler.handleActiveListener(pollFds, ackBuf, notif, resp, socketPollFd)

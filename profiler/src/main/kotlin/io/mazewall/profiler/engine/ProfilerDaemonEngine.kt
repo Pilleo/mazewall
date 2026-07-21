@@ -236,14 +236,14 @@ internal class ProfilerDaemonEngine(
         )
         try {
             NativeArena.ofConfined().use { sessionArena ->
-                val pollFds = with(sessionArena) { setupSessionPoll(socketFd, listenerFd) }.unwrap
-                val notif = sessionArena.allocate(Layouts.SECCOMP_NOTIF).unwrap
-                val resp = sessionArena.allocate(Layouts.SECCOMP_NOTIF_RESP).unwrap
-                val ackBuf = sessionArena.allocate(1L).unwrap
-                val socketPollFd = sessionArena.allocate(Layouts.POLLFD).unwrap
+                val pollFds = with(sessionArena) { setupSessionPoll(socketFd, listenerFd) }
+                val notif = sessionArena.allocate(Layouts.SECCOMP_NOTIF)
+                val resp = sessionArena.allocate(Layouts.SECCOMP_NOTIF_RESP)
+                val ackBuf = sessionArena.allocate(1L)
+                val socketPollFd = sessionArena.allocate(Layouts.POLLFD)
 
                 while (!isGlobalShutdown()) {
-                    val pollRes = LinuxNative.withTransaction { ioOps.raw.poll(ConfinedSegment(pollFds), 2L, POLL_TIMEOUT_MS) }
+                    val pollRes = LinuxNative.withTransaction { ioOps.raw.poll(pollFds, 2L, POLL_TIMEOUT_MS) }
                     val count = pollRes.recover { errno, _ ->
                         if (errno != NativeConstants.EINTR) return@use // Break from loop
                         0L
