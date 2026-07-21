@@ -4,6 +4,7 @@ import io.mazewall.PolicyDefinition
 import io.mazewall.enforcer.ContainedExecutors
 import io.mazewall.enforcer.ContainmentViolationDetector
 import io.mazewall.enforcer.ContainmentViolationException
+import io.mazewall.enforcer.ThreadStateRegistry
 import io.mazewall.enforcer.supervisor.StacktraceScopingPolicy
 import java.util.concurrent.Callable
 import java.util.concurrent.ExecutorService
@@ -54,7 +55,10 @@ internal class ContainedExecutorWrapper(
 ) : ExecutorService by delegate {
     private fun <T> wrapCallable(task: Callable<T>): Callable<T> =
         Callable {
-            ContainedExecutors.installOnCurrentThread(policy, scopingPolicy).use {
+            val initialState = ThreadStateRegistry.state
+            var session: AutoCloseable? = null
+            try {
+                session = ContainedExecutors.installOnCurrentThread(policy, scopingPolicy)
                 val result = runCatching { task.call() }
                 result.getOrElse { e ->
                     if (e is Exception && ContainmentViolationDetector.isContainmentViolation(e)) {
@@ -62,12 +66,22 @@ internal class ContainedExecutorWrapper(
                     }
                     throw e
                 }
+            } catch (t: Throwable) {
+                if (session == null) {
+                    ThreadStateRegistry.state = initialState
+                }
+                throw t
+            } finally {
+                session?.close()
             }
         }
 
     private fun wrapRunnable(task: Runnable): Runnable =
         Runnable {
-            ContainedExecutors.installOnCurrentThread(policy, scopingPolicy).use {
+            val initialState = ThreadStateRegistry.state
+            var session: AutoCloseable? = null
+            try {
+                session = ContainedExecutors.installOnCurrentThread(policy, scopingPolicy)
                 val result = runCatching { task.run() }
                 result.onFailure { e ->
                     if (e is Exception && ContainmentViolationDetector.isContainmentViolation(e)) {
@@ -75,6 +89,13 @@ internal class ContainedExecutorWrapper(
                     }
                     throw e
                 }
+            } catch (t: Throwable) {
+                if (session == null) {
+                    ThreadStateRegistry.state = initialState
+                }
+                throw t
+            } finally {
+                session?.close()
             }
         }
 

@@ -186,6 +186,9 @@ class ArchitectureTest {
             .haveSimpleNameNotStartingWith("ContainedExecutors")
             .and()
             .areDeclaredInClassesThat()
+            .haveSimpleNameNotStartingWith("ContainedExecutorWrapper")
+            .and()
+            .areDeclaredInClassesThat()
             .resideOutsideOfPackages(
                 "io.mazewall.enforcer.supervisor..",
                 "io.mazewall.ffi.networking..",
