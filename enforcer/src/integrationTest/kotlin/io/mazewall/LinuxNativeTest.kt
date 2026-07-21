@@ -50,13 +50,13 @@ class LinuxNativeTest : BaseIntegrationTest() {
         val path = allocateFrom(tempFile.toString())
 
         val openResult = LinuxNative.withTransaction {
-            LinuxNative.fileSystem.open(path, 0) // O_RDONLY
+            LinuxNative.fileSystem.open(ConfinedSegment(path), 0) // O_RDONLY
         }
         val fd = openResult.getFdOrThrow("open")
 
         val buffer = allocate(1024)
         val readResult = LinuxNative.withTransaction {
-            LinuxNative.memory.read(fd, buffer, 1024)
+            LinuxNative.memory.read(fd, ConfinedSegment(buffer), 1024)
         }
         assertTrue(readResult is LinuxNative.SyscallResult.Success)
 
@@ -95,7 +95,7 @@ class LinuxNativeTest : BaseIntegrationTest() {
             nativeScope {
                 val addr = allocate(16) // struct sockaddr_in
                 LinuxNative.withTransaction {
-                    LinuxNative.networking.bind(fd, addr, 16)
+                    LinuxNative.networking.bind(fd, ConfinedSegment(addr), 16)
                 }
             }
 
@@ -110,7 +110,7 @@ class LinuxNativeTest : BaseIntegrationTest() {
     fun testSocketpair() = nativeScope {
         val fds = allocate(ValueLayout.JAVA_INT, 2)
         val result = LinuxNative.withTransaction {
-            LinuxNative.networking.socketpair(1, 1, 0, fds) // AF_UNIX, SOCK_STREAM
+            LinuxNative.networking.socketpair(1, 1, 0, ConfinedSegment(fds)) // AF_UNIX, SOCK_STREAM
         }
         if (result is LinuxNative.SyscallResult.Success) {
             LinuxNative.fileSystem.close(FileDescriptor.unsafe<FileDescriptorRole.Generic>(fds.get(ValueLayout.JAVA_INT, 0)))
@@ -137,9 +137,9 @@ class LinuxNativeTest : BaseIntegrationTest() {
             LinuxNative.withTransaction {
                 LinuxNative.memory.processVmReadv(
                     io.mazewall.core.Pid(ProcessHandle.current().pid().toInt()),
-                    localIovec,
+                    ConfinedSegment(localIovec),
                     1,
-                    remoteIovec,
+                    ConfinedSegment(remoteIovec),
                     1,
                     0, // flags
                 )
@@ -155,7 +155,7 @@ fun testFcntl() {
                 .createTempFile("fcntl-test", ".txt")
         val path = arena.allocateFrom(tempFile.toString())
         val openResult = LinuxNative.withTransaction {
-            LinuxNative.fileSystem.open(path, 0)
+            LinuxNative.fileSystem.open(ConfinedSegment(path), 0)
         }
         val fd = openResult.getFdOrThrow("open")
 
@@ -173,7 +173,7 @@ fun testFcntl() {
         val path = allocateFrom("/proc/self/exe")
         val buffer = allocate(1024)
         val result = LinuxNative.withTransaction {
-            LinuxNative.fileSystem.readlink(path, buffer, 1024)
+            LinuxNative.fileSystem.readlink(ConfinedSegment(path), ConfinedSegment(buffer), 1024)
         }
         assertTrue(result is LinuxNative.SyscallResult.Success)
     }
@@ -186,7 +186,7 @@ fun testFcntl() {
         pollFd.setRevents(0.toShort())
 
         val result = LinuxNative.withTransaction {
-            LinuxNative.raw.poll(pollFd.segment, 1L, 0) // 0 timeout
+            LinuxNative.raw.poll(ConfinedSegment(pollFd.segment), 1L, 0) // 0 timeout
         }
         assertTrue(result is LinuxNative.SyscallResult.Success)
     }

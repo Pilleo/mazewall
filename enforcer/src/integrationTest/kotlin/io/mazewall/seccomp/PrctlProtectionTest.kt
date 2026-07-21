@@ -9,6 +9,7 @@ import io.mazewall.core.PrctlCommand
 import io.mazewall.enforcer.ContainedExecutors
 import io.mazewall.enforcer.ContainmentViolationException
 import io.mazewall.ffi.memory.nativeScope
+import io.mazewall.ffi.memory.ConfinedSegment
 import org.junit.jupiter.api.Test
 import java.lang.foreign.Arena
 import java.util.concurrent.ExecutionException
@@ -43,7 +44,7 @@ class PrctlProtectionTest : BaseIntegrationTest() {
                         val nameSeg = allocateFrom("test-thread-name")
                         val res = LinuxNative.withTransaction {
                             LinuxNative.process.prctl(
-                                PrctlCommand.SetName(NativeArg.MemoryArg(nameSeg))
+                                PrctlCommand.SetName(NativeArg.MemoryArg(ConfinedSegment(nameSeg)))
                             )
                         }.getOrThrow("prctl(PR_SET_NAME)")
                         assertEquals(0, res)
@@ -67,7 +68,7 @@ class PrctlProtectionTest : BaseIntegrationTest() {
                         val nameBuffer = allocate(16)
                         val res = LinuxNative.withTransaction {
                             LinuxNative.process.prctl(
-                                PrctlCommand.GetName(NativeArg.MemoryArg(nameBuffer))
+                                PrctlCommand.GetName(NativeArg.MemoryArg(ConfinedSegment(nameBuffer)))
                             )
                         }.getOrThrow("prctl(PR_GET_NAME)")
                         assertEquals(0, res)
