@@ -435,7 +435,7 @@ object Landlock {
             val fallback = Platform.configuredFallback()
             if (fallback == Platform.FallbackBehavior.FAIL) {
                 throw UnsupportedOperationException(msg)
-            } else {
+            } else if (fallback == Platform.FallbackBehavior.WARN_AND_BYPASS) {
                 logger.warning(msg)
             }
         }

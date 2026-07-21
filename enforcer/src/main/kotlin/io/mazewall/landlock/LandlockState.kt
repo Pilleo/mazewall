@@ -125,9 +125,7 @@ internal class LandlockSession(
             }
 
             if (abi < 1) {
-                if (policy != null) {
-                    Landlock.handleUnsupportedLandlock()
-                }
+                Landlock.handleUnsupportedLandlock()
                 state = LandlockState.Applied
                 return
             }
@@ -162,7 +160,7 @@ internal class LandlockSession(
         val msg = "Process-wide Landlock (TSYNC) requires Linux 7.0+ (ABI v8). This kernel supports ABI v${Platform.featureMatrix.landlockAbiVersion}."
         if (fallback == Platform.FallbackBehavior.FAIL) {
             throw UnsupportedKernelFeatureException(msg)
-        } else {
+        } else if (fallback == Platform.FallbackBehavior.WARN_AND_BYPASS) {
             java.util.logging.Logger.getLogger(Landlock::class.java.name).warning("$msg Rules will only be applied to the current thread and its descendants.")
         }
     }
