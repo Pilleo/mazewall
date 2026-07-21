@@ -7,6 +7,7 @@ import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
 import io.mazewall.core.Tid
 import io.mazewall.ffi.NativeConstants
+import io.mazewall.ffi.memory.ConfinedSegment
 import io.mazewall.map
 import io.mazewall.onSuccess
 import io.mazewall.recover
@@ -72,7 +73,7 @@ internal class ProfilerSessionHandler(
 
         if ((listenerRevents and NativeConstants.POLLIN.toInt()) != 0) {
             notif.fill(0)
-            val recvRes = LinuxNative.withTransaction { ioOps.raw.ioctl(listenerFd, SECCOMP_IOCTL_NOTIF_RECV, notif) }
+            val recvRes = LinuxNative.withTransaction { ioOps.raw.ioctl(listenerFd, SECCOMP_IOCTL_NOTIF_RECV, ConfinedSegment(notif)) }
             recvRes.onSuccess {
                 val ok = processNotification(notif, resp, ackBuf, socketPollFd)
                 if (!ok) {

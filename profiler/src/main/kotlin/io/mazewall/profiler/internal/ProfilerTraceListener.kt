@@ -9,6 +9,7 @@ import io.mazewall.profiler.Profiler
 import io.mazewall.profiler.engine.TraceEvent
 import java.io.BufferedInputStream
 import java.io.DataInputStream
+import io.mazewall.ffi.memory.ConfinedSegment
 import java.io.InputStream
 import java.lang.foreign.Arena
 import java.util.concurrent.CopyOnWriteArrayList
@@ -162,7 +163,7 @@ internal class ProfilerTraceListener(
             Arena.ofConfined().use { arena ->
                 val buf = arena.allocate(1)
                 buf.set(java.lang.foreign.ValueLayout.JAVA_BYTE, 0L, commandByte)
-                LinuxNative.withTransaction { LinuxNative.memory.write(socketFd, buf, 1) }
+                LinuxNative.withTransaction { LinuxNative.memory.write(socketFd, ConfinedSegment(buf), 1) }
             }
         } catch (ignored: Exception) {}
     }

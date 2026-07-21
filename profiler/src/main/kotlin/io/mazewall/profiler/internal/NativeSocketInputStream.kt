@@ -3,6 +3,7 @@ package io.mazewall.profiler.internal
 import io.mazewall.LinuxNative
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
+import io.mazewall.ffi.memory.ConfinedSegment
 import java.io.InputStream
 import java.lang.foreign.Arena
 import java.lang.foreign.MemorySegment
@@ -23,7 +24,7 @@ internal class NativeSocketInputStream(
 
     override fun read(): Int {
         while (true) {
-            val res = LinuxNative.withTransaction { LinuxNative.memory.read(socketFd, readBuf, 1) }
+            val res = LinuxNative.withTransaction { LinuxNative.memory.read(socketFd, ConfinedSegment(readBuf), 1) }
             when (res) {
                 is LinuxNative.SyscallResult.Success -> {
                     if (res.value <= 0) return -1
@@ -54,7 +55,7 @@ internal class NativeSocketInputStream(
     ): Int {
         val count = Math.min(len.toLong(), BUFFER_SIZE.toLong())
         while (true) {
-            val res = LinuxNative.withTransaction { LinuxNative.memory.read(socketFd, multiBuf, count) }
+            val res = LinuxNative.withTransaction { LinuxNative.memory.read(socketFd, ConfinedSegment(multiBuf), count) }
             when (res) {
                 is LinuxNative.SyscallResult.Success -> {
                     if (res.value <= 0) return -1

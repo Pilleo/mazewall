@@ -1,6 +1,8 @@
 package io.mazewall.seccomp
 
 import io.mazewall.LinuxNative
+import io.mazewall.ffi.memory.NativeArena
+import io.mazewall.ffi.memory.native
 import java.lang.foreign.Arena
 import java.lang.foreign.MemorySegment
 import java.util.concurrent.ConcurrentHashMap
@@ -23,7 +25,8 @@ internal object BpfNativeCache {
      */
     fun getOrCompute(filters: List<BpfInstruction>): MemorySegment {
         return filterCache.computeIfAbsent(filters) {
-            with(sharedArena) { LinuxNative.memory.newSockFProg(it) }
+            val nativeArena = NativeArena(sharedArena, isShared = true)
+            with(nativeArena) { LinuxNative.memory.newSockFProg(it) }.native
         }
     }
 

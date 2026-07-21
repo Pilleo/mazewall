@@ -11,6 +11,7 @@ import io.mazewall.core.NativeArg
 import io.mazewall.ffi.NativeConstants
 import io.mazewall.getFdOrThrow
 import io.mazewall.seccomp.BpfNativeCache
+import io.mazewall.ffi.memory.ConfinedSegment
 import java.lang.foreign.MemorySegment
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.atomic.AtomicInteger
@@ -119,7 +120,7 @@ public object SupervisorSeccompNotifInstaller {
                     arch.seccompSyscallNumber.toLong(),
                     NativeArg.LongArg(NativeConstants.SECCOMP_SET_MODE_FILTER.toLong()),
                     NativeArg.LongArg(NativeConstants.SECCOMP_FILTER_FLAG_NEW_LISTENER.toLong()),
-                    NativeArg.MemoryArg(prog),
+                    NativeArg.MemoryArg(ConfinedSegment(prog)),
                 )
             }
 
@@ -166,7 +167,7 @@ public object SupervisorSeccompNotifInstaller {
                         arch.seccompSyscallNumber.toLong(),
                         NativeArg.LongArg(NativeConstants.SECCOMP_SET_MODE_FILTER.toLong()),
                         NativeArg.LongArg(NativeConstants.SECCOMP_FILTER_FLAG_TSYNC.toLong()),
-                        NativeArg.MemoryArg(dummyProg),
+                        NativeArg.MemoryArg(ConfinedSegment(dummyProg)),
                     )
                 }
                 if (tsyncRes is LinuxNative.SyscallResult.Error) {

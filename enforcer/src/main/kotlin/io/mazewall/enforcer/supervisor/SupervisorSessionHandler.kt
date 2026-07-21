@@ -10,6 +10,8 @@ import io.mazewall.ffi.Layouts
 import io.mazewall.ffi.NativeConstants
 import io.mazewall.ffi.memory.PollFdSegment
 import io.mazewall.ffi.memory.SeccompNotifAddFdSegment
+import io.mazewall.ffi.memory.ConfinedSegment
+import io.mazewall.ffi.memory.ManagedSegment
 import io.mazewall.ffi.memory.IovecSegment
 import io.mazewall.ffi.memory.SupervisorResponseSegment
 import io.mazewall.ffi.memory.SupervisorProcessMemoryWriter
@@ -247,7 +249,7 @@ internal class SupervisorSessionHandler(
         if ((listenerRevents.toInt() and NativeConstants.POLLIN.toInt()) != 0) {
             notif.fill(0)
             val recvRes = engine.withTransaction {
-                engine.raw.ioctl(listenerFd, NativeConstants.SECCOMP_IOCTL_NOTIF_RECV, notif)
+                engine.raw.ioctl(listenerFd, NativeConstants.SECCOMP_IOCTL_NOTIF_RECV, ConfinedSegment(notif))
             }
             var ok = false
             recvRes.onSuccess {
@@ -446,8 +448,8 @@ internal class SupervisorSessionHandler(
             }
         }
 
-        val writeRes = engine.withTransaction { engine.memory.write(socketFd, buf, totalSize.toLong()) }
-        return writeRes is LinuxNative.SyscallResult.Success
+        val writeRes = engine.withTransaction { engine.memory.write(socketFd, ConfinedSegment(buf), totalSize.toLong()) }
+        return writeRes is LinuxNative.SyscallResult.Success<*, *>
     }
 
     context(arena: Arena)
@@ -471,7 +473,7 @@ internal class SupervisorSessionHandler(
         var count = 0L
         while (remainingTimeout > 0) {
             val loopStart = System.currentTimeMillis()
-            val pollRes = engine.withTransaction { engine.raw.poll(pollFd.segment, 1L, remainingTimeout.toInt()) }
+            val pollRes = engine.withTransaction { engine.raw.poll(ConfinedSegment(pollFd.segment), 1L, remainingTimeout.toInt()) }
             val elapsed = System.currentTimeMillis() - loopStart
             remainingTimeout -= elapsed
 
@@ -504,7 +506,7 @@ internal class SupervisorSessionHandler(
 
         val responseBuf = arena.allocate(Layouts.SUPERVISOR_RESPONSE_SIZE)
         val readRes = engine.withTransaction {
-            engine.memory.read(socketFd, responseBuf, Layouts.SUPERVISOR_RESPONSE_SIZE)
+            engine.memory.read(socketFd, ConfinedSegment(responseBuf), Layouts.SUPERVISOR_RESPONSE_SIZE)
         }
         if (readRes is LinuxNative.SyscallResult.Success && readRes.value == Layouts.SUPERVISOR_RESPONSE_SIZE) {
             val respSeg = SupervisorResponseSegment(responseBuf)
@@ -593,9 +595,9 @@ internal class SupervisorSessionHandler(
             addfd.setSrcfd(localFdValue)
 
             val success = engine.withTransaction {
-                val res = engine.raw.ioctl(listenerFd, NativeConstants.SECCOMP_IOCTL_NOTIF_ADDFD, addfd.segment)
+                val res = engine.raw.ioctl(listenerFd, NativeConstants.SECCOMP_IOCTL_NOTIF_ADDFD, ConfinedSegment(addfd.segment))
                 logger.info { "[SUPERVISOR-DEBUG] ioctl SECCOMP_IOCTL_NOTIF_ADDFD res=$res" }
-                res is LinuxNative.SyscallResult.Success
+                res is LinuxNative.SyscallResult.Success<*, *>
             }
 
             if (!success) {
@@ -618,9 +620,9 @@ internal class SupervisorSessionHandler(
         val dirfd = if (nr == arch.open || pathStr.startsWith("/")) AT_FDCWD else args[0].toInt()
         val res: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = engine.withTransaction {
             if (dirfd == AT_FDCWD) {
-                engine.fileSystem.open(pathSeg, flags)
+                engine.fileSystem.open(ConfinedSegment(pathSeg), flags)
             } else {
-                engine.fileSystem.openat(dirfd, pathSeg, flags)
+                engine.fileSystem.openat(dirfd, ConfinedSegment(pathSeg), flags)
             }
         }
         return when (res) {
@@ -652,7 +654,7 @@ internal class SupervisorSessionHandler(
         val connectErr = engine.withTransaction {
             val res = engine.networking.connect(
                 FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(socketRes),
-                addr,
+                ConfinedSegment(addr),
                 sockaddrBytes.size
             )
             when (res) {
@@ -685,7 +687,7 @@ internal class SupervisorSessionHandler(
         resp.writeInt(RESP_ERR_OFF, 0)
         resp.writeInt(RESP_FLAGS_OFF, NativeConstants.SECCOMP_USER_NOTIF_FLAG_CONTINUE.toInt())
         engine.withTransaction {
-            engine.raw.ioctl(listenerFd, NativeConstants.SECCOMP_IOCTL_NOTIF_SEND, resp)
+            engine.raw.ioctl(listenerFd, NativeConstants.SECCOMP_IOCTL_NOTIF_SEND, ConfinedSegment(resp))
             Unit
         }
     }
@@ -697,7 +699,7 @@ internal class SupervisorSessionHandler(
         resp.writeInt(RESP_ERR_OFF, -errorNr)
         resp.writeInt(RESP_FLAGS_OFF, 0)
         engine.withTransaction {
-            engine.raw.ioctl(listenerFd, NativeConstants.SECCOMP_IOCTL_NOTIF_SEND, resp)
+            engine.raw.ioctl(listenerFd, NativeConstants.SECCOMP_IOCTL_NOTIF_SEND, ConfinedSegment(resp))
             Unit
         }
     }
@@ -797,8 +799,8 @@ internal class SupervisorSessionHandler(
                         val acceptRes = engine.withTransaction {
                             engine.networking.accept4(
                                 FileDescriptor.unsafe<FileDescriptorRole.Generic>(dupFd),
-                                localAddr,
-                                localAddrLen,
+                                ConfinedSegment(localAddr),
+                                ConfinedSegment(localAddrLen),
                                 flags
                             )
                         }
@@ -857,8 +859,8 @@ internal class SupervisorSessionHandler(
                             addfd.setSrcfd(clientFd)
 
                             val injectSuccess = engine.withTransaction {
-                                val res = engine.raw.ioctl(listenerFd, NativeConstants.SECCOMP_IOCTL_NOTIF_ADDFD, addfd.segment)
-                                res is LinuxNative.SyscallResult.Success
+                                val res = engine.raw.ioctl(listenerFd, NativeConstants.SECCOMP_IOCTL_NOTIF_ADDFD, ConfinedSegment(addfd.segment))
+                                res is LinuxNative.SyscallResult.Success<*, *>
                             }
 
                             if (!injectSuccess) {

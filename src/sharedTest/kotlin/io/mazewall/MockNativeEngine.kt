@@ -4,6 +4,7 @@ import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.ffi.Layouts
 import io.mazewall.ffi.memory.ManagedSegment
+import io.mazewall.ffi.internal.RealTransactionManager
 import io.mazewall.ffi.memory.NativeArena
 import io.mazewall.seccomp.BpfInstruction
 

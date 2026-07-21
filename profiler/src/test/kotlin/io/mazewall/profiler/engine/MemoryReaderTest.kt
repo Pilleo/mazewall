@@ -7,6 +7,7 @@ import io.mazewall.NativeTransaction
 import io.mazewall.core.Tid
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
+import io.mazewall.ffi.memory.ManagedSegment
 import java.lang.foreign.Arena
 import java.lang.foreign.MemorySegment
 import java.lang.foreign.ValueLayout
@@ -23,9 +24,10 @@ class MemoryReaderTest {
 
         val mockFs = object : MockNativeFileSystem() {
             context(context: NativeTransaction)
-            override fun readlink(path: MemorySegment, buf: MemorySegment, bufsiz: Long): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+            override fun readlink(path: ManagedSegment, buf: ManagedSegment, bufsiz: Long): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
                 val bytes = mockPath.toByteArray(StandardCharsets.UTF_8)
-                MemorySegment.copy(bytes, 0, buf, ValueLayout.JAVA_BYTE, 0L, bytes.size)
+                val bufSeg = MemorySegment.ofAddress(buf.address()).reinterpret(buf.byteSize())
+                MemorySegment.copy(bytes, 0, bufSeg, ValueLayout.JAVA_BYTE, 0L, bytes.size)
                 return LinuxNative.SyscallResult.Success(bytes.size.toLong())
             }
         }
@@ -54,8 +56,9 @@ class MemoryReaderTest {
 
         val mockMem = object : io.mazewall.MockNativeMemory() {
             context(context: NativeTransaction)
-            override fun processVmReadv(pid: io.mazewall.core.Pid, localIov: MemorySegment, liovcnt: Long, remoteIov: MemorySegment, riovcnt: Long, flags: Long): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
-                val localBuf = localIov.get(ValueLayout.ADDRESS, 0).reinterpret(mockData.size.toLong())
+            override fun processVmReadv(pid: io.mazewall.core.Pid, localIov: ManagedSegment, liovcnt: Long, remoteIov: ManagedSegment, riovcnt: Long, flags: Long): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                val localIovSeg = MemorySegment.ofAddress(localIov.address()).reinterpret(localIov.byteSize())
+                val localBuf = localIovSeg.get(ValueLayout.ADDRESS, 0).reinterpret(mockData.size.toLong())
                 MemorySegment.copy(mockData, 0, localBuf, ValueLayout.JAVA_BYTE, 0L, mockData.size)
                 return LinuxNative.SyscallResult.Success(mockData.size.toLong())
             }

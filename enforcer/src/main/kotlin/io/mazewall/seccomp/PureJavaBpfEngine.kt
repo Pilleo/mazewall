@@ -6,6 +6,7 @@ import io.mazewall.PolicyDefinition
 import io.mazewall.CompiledSandbox
 import io.mazewall.UnsupportedKernelFeatureException
 import java.lang.foreign.MemorySegment
+import io.mazewall.ffi.memory.ConfinedSegment
 import io.mazewall.core.Arch
 import io.mazewall.core.SeccompAction
 import io.mazewall.core.Syscall
@@ -139,8 +140,8 @@ internal object PureJavaBpfEngine : SeccompEngine<EngineState> {
                 arch.seccompSyscallNumber.toLong(),
                 io.mazewall.core.NativeArg.LongArg(NativeConstants.SECCOMP_SET_MODE_FILTER.toLong()),
                 io.mazewall.core.NativeArg.LongArg(flags),
-                io.mazewall.core.NativeArg.MemoryArg(prog),
-            )
+                io.mazewall.core.NativeArg.MemoryArg(ConfinedSegment(prog)),
+                )
         }
 
         if (r3 is LinuxNative.SyscallResult.Error) {
@@ -160,7 +161,7 @@ internal object PureJavaBpfEngine : SeccompEngine<EngineState> {
                 LinuxNative.process.prctl(
                     PrctlCommand.SetSeccomp(
                         NativeConstants.SECCOMP_MODE_FILTER.toLong(),
-                        io.mazewall.core.NativeArg.MemoryArg(prog)
+                        io.mazewall.core.NativeArg.MemoryArg(ConfinedSegment(prog))
                     )
                 )
             }

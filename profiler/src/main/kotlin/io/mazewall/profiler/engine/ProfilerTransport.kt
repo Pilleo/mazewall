@@ -9,6 +9,7 @@ import io.mazewall.ffi.NativeConstants
 import io.mazewall.getFdOrThrow
 import io.mazewall.onFailure
 import io.mazewall.onSuccess
+import io.mazewall.ffi.memory.ConfinedSegment
 import java.lang.foreign.Arena
 import java.lang.foreign.MemorySegment
 import java.lang.foreign.ValueLayout
@@ -157,7 +158,7 @@ object RealProfilerTransport : ProfilerTransport {
             offset += p.size
         }
 
-        val res = LinuxNative.withTransaction { LinuxNative.memory.write(socketFd, buf, totalSize.toLong()) }
+        val res = LinuxNative.withTransaction { LinuxNative.memory.write(socketFd, ConfinedSegment(buf), totalSize.toLong()) }
         res.getOrThrow("sendTraceEvent")
     }
 
@@ -205,32 +206,32 @@ object RealProfilerTransport : ProfilerTransport {
         fds: MemorySegment,
         nfds: Long,
         timeout: Int,
-    ): LinuxNative.SyscallResult<Long, *> = LinuxNative.withTransaction { LinuxNative.raw.poll(fds, nfds, timeout) }
+    ): LinuxNative.SyscallResult<Long, *> = LinuxNative.withTransaction { LinuxNative.raw.poll(ConfinedSegment(fds), nfds, timeout) }
 
     override fun read(
         fd: FileDescriptor<*, FdState.Open>,
         buf: MemorySegment,
         count: Long,
-    ): LinuxNative.SyscallResult<Long, *> = LinuxNative.withTransaction { LinuxNative.memory.read(fd, buf, count) }
+    ): LinuxNative.SyscallResult<Long, *> = LinuxNative.withTransaction { LinuxNative.memory.read(fd, ConfinedSegment(buf), count) }
 
     override fun write(
         fd: FileDescriptor<*, FdState.Open>,
         buf: MemorySegment,
         count: Long,
-    ): LinuxNative.SyscallResult<Long, *> = LinuxNative.withTransaction { LinuxNative.memory.write(fd, buf, count) }
+    ): LinuxNative.SyscallResult<Long, *> = LinuxNative.withTransaction { LinuxNative.memory.write(fd, ConfinedSegment(buf), count) }
 
     override fun recv(
         sockfd: FileDescriptor<*, FdState.Open>,
         buf: MemorySegment,
         len: Long,
         flags: Int,
-    ): LinuxNative.SyscallResult<Long, *> = LinuxNative.withTransaction { LinuxNative.networking.recv(sockfd, buf, len, flags) }
+    ): LinuxNative.SyscallResult<Long, *> = LinuxNative.withTransaction { LinuxNative.networking.recv(sockfd, ConfinedSegment(buf), len, flags) }
 
     override fun ioctl(
         fd: FileDescriptor<*, FdState.Open>,
         request: Long,
         arg: MemorySegment,
-    ): LinuxNative.SyscallResult<Long, *> = LinuxNative.withTransaction { LinuxNative.raw.ioctl(fd, request, arg) }
+    ): LinuxNative.SyscallResult<Long, *> = LinuxNative.withTransaction { LinuxNative.raw.ioctl(fd, request, ConfinedSegment(arg)) }
 
     override fun createUnixServer(socketPath: String): FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open> {
         return io.mazewall.core.RealSocketManager.createUnixServer(socketPath)

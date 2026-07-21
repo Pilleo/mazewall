@@ -16,6 +16,8 @@ import io.mazewall.ffi.NativeConstants
 import io.mazewall.ffi.memory.LandlockPathBeneathAttrSegment
 import io.mazewall.ffi.memory.LandlockRulesetAttrSegment
 import io.mazewall.ffi.memory.nativeScope
+import io.mazewall.ffi.memory.ConfinedSegment
+import io.mazewall.ffi.memory.ManagedSegment
 import io.mazewall.getFdOrThrow
 import io.mazewall.onFailure
 import io.mazewall.onSuccess
@@ -262,7 +264,7 @@ object Landlock {
     ) {
         val pathSegment = arena.allocateFrom(path)
         val fdResult = LinuxNative.withTransaction {
-            LinuxNative.fileSystem.open(pathSegment, NativeConstants.O_PATH or NativeConstants.O_CLOEXEC)
+            LinuxNative.fileSystem.open(ConfinedSegment(pathSegment), NativeConstants.O_PATH or NativeConstants.O_CLOEXEC)
         }
 
         fdResult.onSuccess { value ->
@@ -291,7 +293,7 @@ object Landlock {
         val resolvedPath = path.value
         val openFlags = NativeConstants.O_PATH or NativeConstants.O_CLOEXEC or NativeConstants.O_NOFOLLOW
         val initialResult = LinuxNative.withTransaction {
-            LinuxNative.fileSystem.open(arena.allocateFrom(resolvedPath), openFlags)
+            LinuxNative.fileSystem.open(ConfinedSegment(arena.allocateFrom(resolvedPath)), openFlags)
         }
 
         val openRes = handleInitialOpenFailure(initialResult, resolvedPath, openFlags)
@@ -325,7 +327,7 @@ object Landlock {
             val parentPath = File(resolvedPath).parent ?: "/"
             logger.info("Path $resolvedPath does not exist, falling back to parent directory: $parentPath")
             val openResult = LinuxNative.withTransaction {
-                LinuxNative.fileSystem.open(arena.allocateFrom(parentPath), flags)
+                LinuxNative.fileSystem.open(ConfinedSegment(arena.allocateFrom(parentPath)), flags)
             }
             return when (openResult) {
                 is LinuxNative.SyscallResult.Success -> OpenResult.Success(openResult.value.toInt(), true)
@@ -392,7 +394,7 @@ object Landlock {
                 NativeConstants.LANDLOCK_RESTRICT_SELF_NR,
                 io.mazewall.core.NativeArg.FdArg(ruleset.fd),
                 io.mazewall.core.NativeArg.LongArg(flags),
-                io.mazewall.core.NativeArg.MemoryArg(MemorySegment.NULL),
+                io.mazewall.core.NativeArg.MemoryArg(ManagedSegment.NULL),
                 io.mazewall.core.NativeArg.IntArg(0)
             )
             Pair(p, r)
@@ -466,9 +468,9 @@ object Landlock {
         val res = LinuxNative.withTransaction {
             LinuxNative.raw.syscall(
                 NativeConstants.LANDLOCK_CREATE_RULESET_NR,
-                io.mazewall.core.NativeArg.MemoryArg(rulesetAttr.segment),
+                io.mazewall.core.NativeArg.MemoryArg(ConfinedSegment(rulesetAttr.segment)),
                 io.mazewall.core.NativeArg.LongArg(size),
-                io.mazewall.core.NativeArg.MemoryArg(MemorySegment.NULL)
+                io.mazewall.core.NativeArg.MemoryArg(ManagedSegment.NULL)
             )
         }
         return res.getFdOrThrow("landlock_create_ruleset").let { FileDescriptor.unsafe(it.value) }
@@ -488,7 +490,7 @@ object Landlock {
                 NativeConstants.LANDLOCK_ADD_RULE_NR,
                 io.mazewall.core.NativeArg.FdArg(ruleset.fd),
                 io.mazewall.core.NativeArg.LongArg(NativeConstants.LANDLOCK_RULE_PATH_BENEATH.toLong()),
-                io.mazewall.core.NativeArg.MemoryArg(pathAttr.segment),
+                io.mazewall.core.NativeArg.MemoryArg(ConfinedSegment(pathAttr.segment)),
                 io.mazewall.core.NativeArg.IntArg(0)
             )
         }

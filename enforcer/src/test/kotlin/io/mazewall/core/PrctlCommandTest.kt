@@ -1,5 +1,6 @@
 package io.mazewall.core
 
+import io.mazewall.ffi.memory.ManagedSegment
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.Test
 import java.lang.foreign.MemorySegment
@@ -21,7 +22,7 @@ class PrctlCommandTest {
         assertEquals(21, PrctlCommand.GetSeccomp.option)
         assertEquals(0L, (PrctlCommand.GetSeccomp.arg2 as NativeArg.LongArg).value)
 
-        val memArg = NativeArg.MemoryArg(MemorySegment.NULL)
+        val memArg = NativeArg.MemoryArg(ManagedSegment.NULL)
         assertEquals(15, PrctlCommand.SetName(memArg).option)
         assertEquals(memArg, PrctlCommand.SetName(memArg).arg2)
         assertEquals(16, PrctlCommand.GetName(memArg).option)

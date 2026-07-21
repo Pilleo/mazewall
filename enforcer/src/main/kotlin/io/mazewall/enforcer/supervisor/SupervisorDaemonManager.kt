@@ -6,6 +6,7 @@ import io.mazewall.core.ProcessLauncher
 import io.mazewall.core.RealProcessLauncher
 import io.mazewall.core.RealSocketManager
 import io.mazewall.core.SocketManager
+import io.mazewall.ffi.memory.ConfinedSegment
 import io.mazewall.getFdOrThrow
 import java.io.IOException
 import java.lang.foreign.Arena
@@ -192,7 +193,7 @@ public class SupervisorDaemonManager(
                     val cmd = arena.allocateFrom(ValueLayout.JAVA_BYTE, SHUTDOWN_COMMAND_BYTE)
                     var writeRes: io.mazewall.LinuxNative.SyscallResult<Long, *>
                     while (true) {
-                        writeRes = engine.withTransaction { engine.memory.write(fd, cmd, 1) }
+                        writeRes = engine.withTransaction { engine.memory.write(fd, ConfinedSegment(cmd), 1) }
                         if (writeRes is io.mazewall.LinuxNative.SyscallResult.Error && writeRes.errno == io.mazewall.ffi.NativeConstants.EINTR) {
                             continue
                         }

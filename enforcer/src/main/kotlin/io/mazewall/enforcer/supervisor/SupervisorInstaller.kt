@@ -15,6 +15,7 @@ import io.mazewall.core.Tid
 import io.mazewall.ffi.Layouts
 import io.mazewall.ffi.NativeConstants
 import io.mazewall.ffi.memory.nativeScope
+import io.mazewall.ffi.memory.ConfinedSegment
 import io.mazewall.getFdOrThrow
 import io.mazewall.onFailure
 import io.mazewall.ffi.networking.SupervisorSeccompNotifInstaller
@@ -292,7 +293,7 @@ internal class JVMValidationListener(
         resp.setDecision(decision)
         resp.setErrorNr(errorNr)
         LinuxNative.withTransaction {
-            LinuxNative.memory.write(socketFd, resp.segment, Layouts.SUPERVISOR_RESPONSE_SIZE)
+            LinuxNative.memory.write(socketFd, ConfinedSegment(resp.segment), Layouts.SUPERVISOR_RESPONSE_SIZE)
         }
     }
 }
