@@ -5,7 +5,6 @@ import io.mazewall.getFdOrThrow
 import io.mazewall.onFailure
 import io.mazewall.ffi.memory.ConfinedSegment
 import io.mazewall.ffi.memory.ManagedSegment
-import java.lang.foreign.Arena
 
 /**
  * Interface for socket creation and connection handling.
@@ -38,7 +37,7 @@ public object RealSocketManager : SocketManager {
             )
         }.getFdOrThrow("socket(AF_UNIX)").let { FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(it.value) }
 
-        Arena.ofConfined().use { arena ->
+        io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
             val sockaddrUn = io.mazewall.ffi.networking.SupervisorSocketUtils.setupSockAddrUn(arena, socketPath)
 
             LinuxNative.withTransaction {

@@ -29,9 +29,6 @@ import io.mazewall.ffi.memory.writeLongUnaligned
 import io.mazewall.ffi.networking.NetworkOrderBuffer
 import io.mazewall.onSuccess
 import io.mazewall.recover
-import java.lang.foreign.Arena
-import java.lang.foreign.MemorySegment
-import java.lang.foreign.ValueLayout
 import java.nio.charset.StandardCharsets
 import java.util.logging.Logger
 
@@ -239,7 +236,7 @@ internal class SupervisorSessionHandler(
         notif: ManagedSegment,
         resp: ManagedSegment
     ): LoopAction {
-        val pfd2 = PollFdSegment(pollFds.asSlice(Layouts.POLLFD.byteSize(), Layouts.POLLFD.byteSize()).native)
+        val pfd2 = PollFdSegment.of(pollFds.asSlice(Layouts.POLLFD.byteSize(), Layouts.POLLFD.byteSize()))
         val socketRevents = pfd2.getRevents().toInt()
         val errorOrHup = NativeConstants.POLLERR.toInt() or NativeConstants.POLLHUP.toInt() or NativeConstants.POLLNVAL.toInt()
         if ((socketRevents and (NativeConstants.POLLIN.toInt() or errorOrHup)) != 0) {
@@ -247,7 +244,7 @@ internal class SupervisorSessionHandler(
             return LoopAction.Shutdown
         }
 
-        val pfd1 = PollFdSegment(pollFds.asSlice(0L, Layouts.POLLFD.byteSize()).native)
+        val pfd1 = PollFdSegment.of(pollFds.asSlice(0L, Layouts.POLLFD.byteSize()))
         val listenerRevents = pfd1.getRevents()
         if ((listenerRevents.toInt() and NativeConstants.POLLIN.toInt()) != 0) {
             notif.fill(0)
@@ -467,7 +464,7 @@ internal class SupervisorSessionHandler(
         tid: Tid,
         traceeArch: io.mazewall.core.Arch
     ): Boolean {
-        val pollFd = PollFdSegment(arena.allocate(Layouts.POLLFD).native)
+        val pollFd = PollFdSegment.of(arena.allocate(Layouts.POLLFD))
         pollFd.setFd(socketFd.value)
         pollFd.setEvents(NativeConstants.POLLIN)
 
@@ -512,7 +509,7 @@ internal class SupervisorSessionHandler(
             engine.memory.read(socketFd, responseBuf, Layouts.SUPERVISOR_RESPONSE_SIZE)
         }
         if (readRes is LinuxNative.SyscallResult.Success && readRes.value == Layouts.SUPERVISOR_RESPONSE_SIZE) {
-            val respSeg = SupervisorResponseSegment(responseBuf.native)
+            val respSeg = SupervisorResponseSegment.of(responseBuf)
             val respId = respSeg.getId()
             val decision = respSeg.getDecision()
             val errorNr = respSeg.getErrorNr()
@@ -591,7 +588,7 @@ internal class SupervisorSessionHandler(
                 return false
             }
 
-            val addfd = SeccompNotifAddFdSegment(arena.allocate(Layouts.SECCOMP_NOTIF_ADDFD).native)
+            val addfd = SeccompNotifAddFdSegment.of(arena.allocate(Layouts.SECCOMP_NOTIF_ADDFD))
             addfd.segment.fill(0)
             addfd.setId(id)
             addfd.setFlags(NativeConstants.SECCOMP_ADDFD_FLAG_SEND.toInt())
@@ -709,16 +706,12 @@ internal class SupervisorSessionHandler(
 
     context(arena: NativeArena)
     private fun readStringFromProcess(tid: Tid, remoteAddr: Long): String? {
-        return with(arena.arena) {
-            io.mazewall.ffi.memory.SupervisorProcessMemoryReader.readString(tid, remoteAddr, MAX_PATH_LEN)
-        }
+        return io.mazewall.ffi.memory.SupervisorProcessMemoryReader.readString(tid, remoteAddr, MAX_PATH_LEN)
     }
 
     context(arena: NativeArena)
     private fun readBytesFromProcess(tid: Tid, remoteAddr: Long, len: Int): ByteArray? {
-        return with(arena.arena) {
-            io.mazewall.ffi.memory.SupervisorProcessMemoryReader.readBytes(tid, remoteAddr, len)
-        }
+        return io.mazewall.ffi.memory.SupervisorProcessMemoryReader.readBytes(tid, remoteAddr, len)
     }
 
     private fun getTgid(tid: Int): Int {
@@ -764,120 +757,116 @@ internal class SupervisorSessionHandler(
         Thread {
             try {
                 NativeArena.ofConfined().use { arena ->
-                    val tgid = getTgid(tid.value)
-                    logger.info { "[SUPERVISOR-DEBUG] Async accept worker started for tid=${tid.value} (tgid=$tgid), targetFd=${args[0].toInt()}" }
-                    val pidfdRes: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = engine.withTransaction {
-                        engine.process.pidfdOpen(tgid, 0)
-                    }
-                    val pidfd = when (pidfdRes) {
-                        is LinuxNative.SyscallResult.Success -> pidfdRes.value.toInt()
-                        is LinuxNative.SyscallResult.Error -> {
-                            logger.severe { "[SUPERVISOR-DEBUG] pidfd_open failed for tid=${tid.value} with errno ${pidfdRes.errno}" }
-                            sendSeccompError(id, pidfdRes.errno, arena.allocate(Layouts.SECCOMP_NOTIF_RESP))
-                            return@use
+                    with(arena) {
+                        val tgid = getTgid(tid.value)
+                        logger.info { "[SUPERVISOR-DEBUG] Async accept worker started for tid=${tid.value} (tgid=$tgid), targetFd=${args[0].toInt()}" }
+                        val pidfdRes: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = engine.withTransaction {
+                            engine.process.pidfdOpen(tgid, 0)
                         }
-                    }
-
-                    val targetFd = args[0].toInt()
-                    logger.info { "[SUPERVISOR-DEBUG] pidfd_open success. pidfd=$pidfd. Duplicating fd $targetFd..." }
-                    val dupRes: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = engine.withTransaction {
-                        engine.process.pidfdGetFd(pidfd, targetFd, 0)
-                    }
-
-                    closeLocalFd(pidfd)
-
-                    val dupFd = when (dupRes) {
-                        is LinuxNative.SyscallResult.Success -> dupRes.value.toInt()
-                        is LinuxNative.SyscallResult.Error -> {
-                            logger.severe { "[SUPERVISOR-DEBUG] pidfd_getfd failed for targetFd=$targetFd with errno ${dupRes.errno}" }
-                            sendSeccompError(id, dupRes.errno, arena.allocate(Layouts.SECCOMP_NOTIF_RESP))
-                            return@use
-                        }
-                    }
-                    logger.info { "[SUPERVISOR-DEBUG] pidfd_getfd success. dupFd=$dupFd. Starting accept..." }
-
-                    try {
-                        val localAddr = arena.allocate(128)
-                        val localAddrLen = arena.allocate(4)
-                        localAddrLen.writeInt(0, 128)
-
-                        val flags = if (nr == traceeArch.accept4) args[3].toInt() else 0
-
-                        val acceptRes = engine.withTransaction {
-                            engine.networking.accept4(
-                                FileDescriptor.unsafe<FileDescriptorRole.Generic>(dupFd),
-                                localAddr,
-                                localAddrLen,
-                                flags
-                            )
-                        }
-
-                        val clientFd = when (acceptRes) {
-                            is LinuxNative.SyscallResult.Success -> acceptRes.value.toInt()
+                        val pidfd = when (pidfdRes) {
+                            is LinuxNative.SyscallResult.Success -> pidfdRes.value.toInt()
                             is LinuxNative.SyscallResult.Error -> {
-                                sendSeccompError(id, acceptRes.errno, arena.allocate(Layouts.SECCOMP_NOTIF_RESP))
+                                logger.severe { "[SUPERVISOR-DEBUG] pidfd_open failed for tid=${tid.value} with errno ${pidfdRes.errno}" }
+                                sendSeccompError(id, pidfdRes.errno, arena.allocate(Layouts.SECCOMP_NOTIF_RESP))
                                 return@use
                             }
                         }
 
+                        val targetFd = args[0].toInt()
+                        logger.info { "[SUPERVISOR-DEBUG] pidfd_open success. pidfd=$pidfd. Duplicating fd $targetFd..." }
+                        val dupRes: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = engine.withTransaction {
+                            engine.process.pidfdGetFd(pidfd, targetFd, 0)
+                        }
+
+                        closeLocalFd(pidfd)
+
+                        val dupFd = when (dupRes) {
+                            is LinuxNative.SyscallResult.Success -> dupRes.value.toInt()
+                            is LinuxNative.SyscallResult.Error -> {
+                                logger.severe { "[SUPERVISOR-DEBUG] pidfd_getfd failed for targetFd=$targetFd with errno ${dupRes.errno}" }
+                                sendSeccompError(id, dupRes.errno, arena.allocate(Layouts.SECCOMP_NOTIF_RESP))
+                                return@use
+                            }
+                        }
+                        logger.info { "[SUPERVISOR-DEBUG] pidfd_getfd success. dupFd=$dupFd. Starting accept..." }
+
                         try {
-                            // Copy peer address back if tracee provided a buffer
-                            val traceeAddrPtr = args[1]
-                            val traceeAddrLenPtr = args[2]
-                            if (traceeAddrPtr != 0L && traceeAddrLenPtr != 0L) {
-                                val actualLen = localAddrLen.readInt(0)
-                                val traceeAddrLenBytes = with(arena.arena) {
-                                    io.mazewall.ffi.memory.SupervisorProcessMemoryReader.readBytes(tid, traceeAddrLenPtr, 4)
-                                }
-                                val traceeAddrLen = if (traceeAddrLenBytes != null && traceeAddrLenBytes.size >= 4) {
-                                    (traceeAddrLenBytes[0].toInt() and 0xFF) or
-                                    ((traceeAddrLenBytes[1].toInt() and 0xFF) shl 8) or
-                                    ((traceeAddrLenBytes[2].toInt() and 0xFF) shl 16) or
-                                    ((traceeAddrLenBytes[3].toInt() and 0xFF) shl 24)
-                                } else {
-                                    0
-                                }
+                            val localAddr = arena.allocate(128)
+                            val localAddrLen = arena.allocate(4)
+                            localAddrLen.writeInt(0, 128)
 
-                                val writeLen = minOf(actualLen, traceeAddrLen)
-                                if (writeLen > 0) {
-                                    val addrBytes = ByteArray(writeLen)
-                                    ManagedSegment.copy(localAddr, 0L, addrBytes, 0, writeLen)
-                                    with(arena.arena) {
-                                        SupervisorProcessMemoryWriter.writeBytes(tid, traceeAddrPtr, addrBytes)
-                                    }
-                                }
+                            val flags = if (nr == traceeArch.accept4) args[3].toInt() else 0
 
-                                val lenBytes = byteArrayOf(
-                                    (actualLen and 0xFF).toByte(),
-                                    ((actualLen shr 8) and 0xFF).toByte(),
-                                    ((actualLen shr 16) and 0xFF).toByte(),
-                                    ((actualLen shr 24) and 0xFF).toByte()
+                            val acceptRes = engine.withTransaction {
+                                engine.networking.accept4(
+                                    FileDescriptor.unsafe<FileDescriptorRole.Generic>(dupFd),
+                                    localAddr,
+                                    localAddrLen,
+                                    flags
                                 )
-                                with(arena.arena) {
-                                    SupervisorProcessMemoryWriter.writeBytes(tid, traceeAddrLenPtr, lenBytes)
+                            }
+
+                            val clientFd = when (acceptRes) {
+                                is LinuxNative.SyscallResult.Success -> acceptRes.value.toInt()
+                                is LinuxNative.SyscallResult.Error -> {
+                                    sendSeccompError(id, acceptRes.errno, arena.allocate(Layouts.SECCOMP_NOTIF_RESP))
+                                    return@use
                                 }
                             }
 
-                            // Inject accepted FD
-                            val addfd = SeccompNotifAddFdSegment(arena.allocate(Layouts.SECCOMP_NOTIF_ADDFD).native)
-                            addfd.segment.fill(0)
-                            addfd.setId(id)
-                            addfd.setFlags(NativeConstants.SECCOMP_ADDFD_FLAG_SEND.toInt())
-                            addfd.setSrcfd(clientFd)
+                            try {
+                                // Copy peer address back if tracee provided a buffer
+                                val traceeAddrPtr = args[1]
+                                val traceeAddrLenPtr = args[2]
+                                if (traceeAddrPtr != 0L && traceeAddrLenPtr != 0L) {
+                                    val actualLen = localAddrLen.readInt(0)
+                                    val traceeAddrLenBytes = io.mazewall.ffi.memory.SupervisorProcessMemoryReader.readBytes(tid, traceeAddrLenPtr, 4)
+                                    val traceeAddrLen = if (traceeAddrLenBytes != null && traceeAddrLenBytes.size >= 4) {
+                                        (traceeAddrLenBytes[0].toInt() and 0xFF) or
+                                        ((traceeAddrLenBytes[1].toInt() and 0xFF) shl 8) or
+                                        ((traceeAddrLenBytes[2].toInt() and 0xFF) shl 16) or
+                                        ((traceeAddrLenBytes[3].toInt() and 0xFF) shl 24)
+                                    } else {
+                                        0
+                                    }
 
-                            val injectSuccess = engine.withTransaction {
-                                val res = engine.raw.ioctl(listenerFd, NativeConstants.SECCOMP_IOCTL_NOTIF_ADDFD, addfd.managed)
-                                res is LinuxNative.SyscallResult.Success<*, *>
-                            }
+                                    val writeLen = minOf(actualLen, traceeAddrLen)
+                                    if (writeLen > 0) {
+                                        val addrBytes = ByteArray(writeLen)
+                                        ManagedSegment.copy(localAddr, 0L, addrBytes, 0, writeLen)
+                                        io.mazewall.ffi.memory.SupervisorProcessMemoryWriter.writeBytes(tid, traceeAddrPtr, addrBytes)
+                                    }
 
-                            if (!injectSuccess) {
-                                sendSeccompError(id, NativeConstants.EPERM, arena.allocate(Layouts.SECCOMP_NOTIF_RESP))
+                                    val lenBytes = byteArrayOf(
+                                        (actualLen and 0xFF).toByte(),
+                                        ((actualLen shr 8) and 0xFF).toByte(),
+                                        ((actualLen shr 16) and 0xFF).toByte(),
+                                        ((actualLen shr 24) and 0xFF).toByte()
+                                    )
+                                    io.mazewall.ffi.memory.SupervisorProcessMemoryWriter.writeBytes(tid, traceeAddrLenPtr, lenBytes)
+                                }
+
+                                // Inject accepted FD
+                                val addfd = SeccompNotifAddFdSegment.of(arena.allocate(Layouts.SECCOMP_NOTIF_ADDFD))
+                                addfd.segment.fill(0)
+                                addfd.setId(id)
+                                addfd.setFlags(NativeConstants.SECCOMP_ADDFD_FLAG_SEND.toInt())
+                                addfd.setSrcfd(clientFd)
+
+                                val injectSuccess = engine.withTransaction {
+                                    val res = engine.raw.ioctl(listenerFd, NativeConstants.SECCOMP_IOCTL_NOTIF_ADDFD, addfd.managed)
+                                    res is LinuxNative.SyscallResult.Success<*, *>
+                                }
+
+                                if (!injectSuccess) {
+                                    sendSeccompError(id, NativeConstants.EPERM, arena.allocate(Layouts.SECCOMP_NOTIF_RESP))
+                                }
+                            } finally {
+                                closeLocalFd(clientFd)
                             }
                         } finally {
-                            closeLocalFd(clientFd)
+                            closeLocalFd(dupFd)
                         }
-                    } finally {
-                        closeLocalFd(dupFd)
                     }
                 }
             } catch (t: Throwable) {

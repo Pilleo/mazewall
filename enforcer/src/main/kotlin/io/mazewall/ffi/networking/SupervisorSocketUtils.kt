@@ -10,6 +10,7 @@ import io.mazewall.ffi.memory.IovecSegment
 import io.mazewall.ffi.memory.MsghdrSegment
 import io.mazewall.ffi.memory.SockaddrUnSegment
 import io.mazewall.ffi.memory.ConfinedSegment
+import io.mazewall.ffi.memory.unwrap
 import java.lang.foreign.Arena
 import java.lang.foreign.MemorySegment
 import java.lang.foreign.ValueLayout
@@ -58,10 +59,10 @@ public object SupervisorSocketUtils {
     public const val SCM_RIGHTS: Int = 1
 
     public fun setupSockAddrUn(
-        arena: Arena,
+        arena: io.mazewall.ffi.memory.NativeArena,
         socketPath: String,
     ): SockaddrUnSegment {
-        val sockaddrUn = SockaddrUnSegment(arena.allocate(Layouts.SOCKADDR_UN))
+        val sockaddrUn = SockaddrUnSegment(arena.allocate(Layouts.SOCKADDR_UN).unwrap)
         sockaddrUn.segment.fill(0)
         sockaddrUn.setSunFamily(AF_UNIX.toShort())
         val pathBytes = socketPath.toByteArray(StandardCharsets.UTF_8)
@@ -75,7 +76,7 @@ public object SupervisorSocketUtils {
         maxRetries: Int = 500,
         delayMs: Long = 10L
     ): Int {
-        Arena.ofConfined().use { arena ->
+        io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
             val sockaddrUn = setupSockAddrUn(arena, socketPath)
 
             var lastErrno = 0

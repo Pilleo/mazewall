@@ -22,9 +22,6 @@ import io.mazewall.ffi.networking.SupervisorSeccompNotifInstaller
 import java.io.BufferedInputStream
 import java.io.DataInputStream
 import java.io.InputStream
-import java.lang.foreign.Arena
-import java.lang.foreign.MemorySegment
-import java.lang.foreign.ValueLayout
 import java.nio.charset.StandardCharsets
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ConcurrentHashMap
@@ -128,7 +125,7 @@ internal class JVMValidationListener(
                 readyLatch.countDown()
             }
 
-            val responseSegment = with(arena.arena) { io.mazewall.ffi.memory.SupervisorResponseSegment.allocate() }
+            val responseSegment = with(arena) { io.mazewall.ffi.memory.SupervisorResponseSegment.allocate() }
 
             while (!closed.get()) {
                 val id = try {
