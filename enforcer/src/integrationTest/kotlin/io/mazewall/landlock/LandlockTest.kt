@@ -631,12 +631,12 @@ class LandlockTest : BaseIntegrationTest() {
         val executor = Executors.newSingleThreadExecutor()
         val safeExecutor = ContainedExecutors.wrap(executor, policy)
 
-        safeExecutor.submit {
-            val allowedPath = Path.of(allowedDir)
-            val forbiddenPath = Path.of(forbiddenDir)
-            val basePath = Path.of(baseDir)
+        val allowedPath = Path.of(allowedDir)
+        val forbiddenPath = Path.of(forbiddenDir)
+        val basePath = Path.of(baseDir)
 
-            // 1. Initial reads before rename:
+        // 1. Initial reads before rename:
+        safeExecutor.submit {
             // Read allowedDir/allowed.txt should succeed
             val allowedTxt = allowedPath.resolve("allowed.txt")
             if (Files.readString(allowedTxt) != "allowed") {
@@ -651,16 +651,15 @@ class LandlockTest : BaseIntegrationTest() {
             } catch (e: Exception) {
                 // Expected
             }
+        }.get()
 
-            // 2. Perform the rename:
-            // Rename allowedDir to allowed_renamed
-            val allowedRenamedPath = basePath.resolve("allowed_renamed")
-            Files.move(allowedPath, allowedRenamedPath)
+        // 2. Perform the rename on the main thread (unrestricted):
+        val allowedRenamedPath = basePath.resolve("allowed_renamed")
+        Files.move(allowedPath, allowedRenamedPath)
+        Files.move(forbiddenPath, allowedPath)
 
-            // Rename forbiddenDir to allowedDir (taking the old name of allowedDir)
-            Files.move(forbiddenPath, allowedPath)
-
-            // 3. Post-rename reads:
+        // 3. Post-rename reads:
+        safeExecutor.submit {
             // Attempt to read the new files at the old path allowedDir/secret.txt (which points to the forbidden directory)
             // This MUST be blocked because the inode of the new allowedDir was never allowed.
             val newSecretInAllowedOldPath = allowedPath.resolve("secret.txt")
