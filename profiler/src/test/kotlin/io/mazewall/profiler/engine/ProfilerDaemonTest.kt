@@ -124,9 +124,9 @@ class ProfilerDaemonTest {
     }
 
     private class MockReader : ProfilerMemoryReader {
-        context(arena: Arena)
+        context(arena: io.mazewall.ffi.memory.NativeArena)
         override fun readStringFromProcess(tid: Tid, remoteAddr: Long, maxLen: Int): String? = "/tmp/test.txt"
-        context(arena: Arena)
+        context(arena: io.mazewall.ffi.memory.NativeArena)
         override fun resolveLink(tid: Tid, link: String): String? = "/proc/1/cwd"
     }
 

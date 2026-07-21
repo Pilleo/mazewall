@@ -34,6 +34,9 @@ public value class SockFilterSegment(public val segment: MemorySegment) {
     }
 
     public companion object {
+        public fun of(managed: ManagedSegment): SockFilterSegment =
+            SockFilterSegment(managed.unwrap)
+
         context(arena: Arena)
         public fun allocate(): SockFilterSegment =
             SockFilterSegment(arena.allocate(Layouts.SOCK_FILTER))
@@ -51,6 +54,8 @@ public value class SockFilterSegment(public val segment: MemorySegment) {
 public value class SockFprogSegment(public val segment: MemorySegment) {
     public val managed: ManagedSegment get() = ConfinedSegment(segment)
 
+    public val managedFilter: ManagedSegment get() = ConfinedSegment(getFilter())
+
     public fun getLen(): Short = segment.get(ValueLayout.JAVA_SHORT, Layouts.SOCK_FPROG_LEN_OFFSET)
     public fun setLen(value: Short): Unit {
         segment.set(ValueLayout.JAVA_SHORT, Layouts.SOCK_FPROG_LEN_OFFSET, value)
@@ -62,6 +67,9 @@ public value class SockFprogSegment(public val segment: MemorySegment) {
     }
 
     public companion object {
+        public fun of(managed: ManagedSegment): SockFprogSegment =
+            SockFprogSegment(managed.unwrap)
+
         context(arena: Arena)
         public fun allocate(): SockFprogSegment =
             SockFprogSegment(arena.allocate(Layouts.SOCK_FPROG))
@@ -212,6 +220,9 @@ public value class SeccompNotifAddFdSegment(public val segment: MemorySegment) {
     }
 
     public companion object {
+        public fun of(managed: ManagedSegment): SeccompNotifAddFdSegment =
+            SeccompNotifAddFdSegment(managed.unwrap)
+
         context(arena: Arena)
         public fun allocate(): SeccompNotifAddFdSegment =
             SeccompNotifAddFdSegment(arena.allocate(Layouts.SECCOMP_NOTIF_ADDFD))
@@ -236,6 +247,9 @@ public value class IovecSegment(public val segment: MemorySegment) {
     }
 
     public companion object {
+        public fun of(managed: ManagedSegment): IovecSegment =
+            IovecSegment(managed.unwrap)
+
         context(arena: Arena)
         public fun allocate(): IovecSegment =
             IovecSegment(arena.allocate(Layouts.IOVEC))
@@ -369,9 +383,12 @@ public value class SupervisorResponseSegment(public val segment: MemorySegment) 
     }
 
     public companion object {
-        context(arena: Arena)
+        public fun of(managed: ManagedSegment): SupervisorResponseSegment =
+            SupervisorResponseSegment(managed.unwrap)
+
+        context(arena: NativeArena)
         public fun allocate(): SupervisorResponseSegment =
-            SupervisorResponseSegment(arena.allocate(Layouts.SUPERVISOR_RESPONSE_SIZE))
+            SupervisorResponseSegment(arena.allocate(Layouts.SUPERVISOR_RESPONSE_SIZE).unwrap)
     }
 }
 

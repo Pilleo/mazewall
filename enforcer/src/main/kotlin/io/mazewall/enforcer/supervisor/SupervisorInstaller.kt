@@ -22,9 +22,6 @@ import io.mazewall.ffi.networking.SupervisorSeccompNotifInstaller
 import java.io.BufferedInputStream
 import java.io.DataInputStream
 import java.io.InputStream
-import java.lang.foreign.Arena
-import java.lang.foreign.MemorySegment
-import java.lang.foreign.ValueLayout
 import java.nio.charset.StandardCharsets
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ConcurrentHashMap
@@ -128,7 +125,7 @@ internal class JVMValidationListener(
                 readyLatch.countDown()
             }
 
-            val responseSegment = with(arena.arena) { io.mazewall.ffi.memory.SupervisorResponseSegment.allocate() }
+            val responseSegment = with(arena) { io.mazewall.ffi.memory.SupervisorResponseSegment.allocate() }
 
             while (!closed.get()) {
                 val id = try {
@@ -229,7 +226,7 @@ internal class JVMValidationListener(
                 // Instead, the registry relies on a TTL (Time-To-Live) to automatically prune entries after 10 seconds.
 
                 val errorNr = if (decision.toInt() == 0) NativeConstants.EPERM else 0
-                sendResponse(id, decision, errorNr, responseSegment)
+                sendResponse(id, decision, errorNr, responseSegment.managed)
             }
         } catch (ignored: java.io.IOException) {
             // Done
@@ -288,12 +285,13 @@ internal class JVMValidationListener(
         return argsList
     }
 
-    private fun sendResponse(id: Long, decision: Byte, errorNr: Int, resp: io.mazewall.ffi.memory.SupervisorResponseSegment) {
+    private fun sendResponse(id: Long, decision: Byte, errorNr: Int, respManaged: io.mazewall.ffi.memory.ManagedSegment) {
+        val resp = io.mazewall.ffi.memory.SupervisorResponseSegment.of(respManaged)
         resp.setId(id)
         resp.setDecision(decision)
         resp.setErrorNr(errorNr)
         LinuxNative.withTransaction {
-            LinuxNative.memory.write(socketFd, ConfinedSegment(resp.segment), Layouts.SUPERVISOR_RESPONSE_SIZE)
+            LinuxNative.memory.write(socketFd, respManaged, Layouts.SUPERVISOR_RESPONSE_SIZE)
         }
     }
 }

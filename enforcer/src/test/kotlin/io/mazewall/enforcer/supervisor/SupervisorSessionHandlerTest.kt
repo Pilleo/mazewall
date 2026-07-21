@@ -8,7 +8,6 @@ import io.mazewall.MockNativeEngine
 import io.mazewall.MockNativeNetworking
 import io.mazewall.NativeTransaction
 import io.mazewall.ffi.internal.RealNativeEngine
-import java.lang.foreign.Arena
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test

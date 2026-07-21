@@ -38,7 +38,7 @@ class MemoryReaderTest {
 
         LinuxNative.setEngine(mockEngine)
         try {
-            Arena.ofConfined().use { arena ->
+            io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
                 val reader = RealMemoryReader
                 val result = with(arena) { reader.resolveLink(tid, link) }
                 assertEquals(expectedPath, result)
@@ -70,7 +70,7 @@ class MemoryReaderTest {
 
         LinuxNative.setEngine(mockEngine)
         try {
-            Arena.ofConfined().use { arena ->
+            io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
                 val reader = RealMemoryReader
                 val result = with(arena) { reader.readStringFromProcess(tid, remoteAddr, mockData.size) }
                 assertEquals("unterminated string", result)

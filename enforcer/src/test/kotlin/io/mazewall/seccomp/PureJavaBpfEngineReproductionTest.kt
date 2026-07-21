@@ -12,8 +12,6 @@ import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import io.mazewall.ffi.memory.NativeArena
 import io.mazewall.ffi.memory.ManagedSegment
-import java.lang.foreign.Arena
-import java.lang.foreign.MemorySegment
 import kotlin.test.assertFailsWith
 import kotlin.test.assertNull
 

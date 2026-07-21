@@ -153,6 +153,9 @@ object Layouts {
     val POLLFD_FD_OFFSET: Long = POLLFD.byteOffset(MemoryLayout.PathElement.groupElement("fd"))
     val POLLFD_EVENTS_OFFSET: Long = POLLFD.byteOffset(MemoryLayout.PathElement.groupElement("events"))
     val POLLFD_REVENTS_OFFSET: Long = POLLFD.byteOffset(MemoryLayout.PathElement.groupElement("revents"))
+    val POLLFD_SIZE: Long = POLLFD.byteSize()
+    val SECCOMP_NOTIF_SIZE: Long = SECCOMP_NOTIF.byteSize()
+    val SECCOMP_NOTIF_RESP_SIZE: Long = SECCOMP_NOTIF_RESP.byteSize()
 
     /**
      * Corresponds to `struct landlock_ruleset_attr` in `<linux/landlock.h>`.

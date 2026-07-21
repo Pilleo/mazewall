@@ -1,9 +1,10 @@
-package io.mazewall.seccomp
+package io.mazewall.ffi.memory
 
 import io.kotest.core.spec.style.FreeSpec
 import io.kotest.matchers.shouldBe
 import io.mazewall.BpfFilter
 import io.mazewall.Policy
+import io.mazewall.seccomp.BpfInstruction
 import io.mazewall.core.Arch
 import io.mazewall.core.SeccompAction
 import io.mazewall.core.Syscall

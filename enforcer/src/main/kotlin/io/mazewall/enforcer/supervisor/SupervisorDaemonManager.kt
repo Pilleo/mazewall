@@ -7,10 +7,9 @@ import io.mazewall.core.RealProcessLauncher
 import io.mazewall.core.RealSocketManager
 import io.mazewall.core.SocketManager
 import io.mazewall.ffi.memory.ConfinedSegment
+import io.mazewall.ffi.memory.writeByte
 import io.mazewall.getFdOrThrow
 import java.io.IOException
-import java.lang.foreign.Arena
-import java.lang.foreign.ValueLayout
 import java.nio.file.Path
 import java.nio.file.attribute.PosixFilePermissions
 import java.util.logging.Logger
@@ -187,13 +186,14 @@ public class SupervisorDaemonManager(
 
     private fun triggerDaemonShutdown(socketPath: String) {
         try {
-            Arena.ofConfined().use { arena ->
+            io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
                 val fd = socketManager.connect(socketPath)
                 try {
-                    val cmd = arena.allocateFrom(ValueLayout.JAVA_BYTE, SHUTDOWN_COMMAND_BYTE)
+                    val cmd = arena.allocate(1L)
+                    cmd.writeByte(0L, SHUTDOWN_COMMAND_BYTE)
                     var writeRes: io.mazewall.LinuxNative.SyscallResult<Long, *>
                     while (true) {
-                        writeRes = engine.withTransaction { engine.memory.write(fd, ConfinedSegment(cmd), 1) }
+                        writeRes = engine.withTransaction { engine.memory.write(fd, cmd, 1) }
                         if (writeRes is io.mazewall.LinuxNative.SyscallResult.Error && writeRes.errno == io.mazewall.ffi.NativeConstants.EINTR) {
                             continue
                         }

@@ -7,8 +7,6 @@ import io.mazewall.ffi.memory.*
 import io.mazewall.seccomp.BpfInstruction
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
-import java.lang.foreign.Arena
-import java.lang.foreign.ValueLayout
 import kotlin.test.*
 
 class LinuxNativeCoverageTest {
@@ -110,7 +108,7 @@ class LinuxNativeCoverageTest {
             LinuxNative.withTransaction {
                 LinuxNative.raw.syscall(
                     -1,
-                    io.mazewall.core.NativeArg.MemoryArg(ConfinedSegment(seg)),
+                    io.mazewall.core.NativeArg.MemoryArg(seg),
                     io.mazewall.core.NativeArg.IntArg(1),
                     io.mazewall.core.NativeArg.IntArg(2),
                     io.mazewall.core.NativeArg.IntArg(3),
@@ -129,14 +127,11 @@ class LinuxNativeCoverageTest {
             BpfInstruction.Jmp(0x01, 2, 3, 0x12345678),
             BpfInstruction.Ld(0x05, 0x00000001),
         )
-        val nativeArena = NativeArena(this, isShared = false)
-        val progSeg = with(nativeArena) { LinuxNative.memory.newSockFProg(filters) }.native
-        val prog = SockFprogSegment(progSeg)
+        val prog = SockFprogSegment.of(LinuxNative.memory.newSockFProg(filters))
         assertNotNull(prog.segment)
 
         assertEquals(2, prog.getLen().toInt())
-        val filterArray = prog.getFilter()
-        val f1 = SockFilterSegment(filterArray.asSlice(0, Layouts.SOCK_FILTER_SIZE))
+        val f1 = SockFilterSegment.of(prog.managedFilter.asSlice(0, Layouts.SOCK_FILTER_SIZE))
 
         // Verify first filter
         assertEquals(0x01.toShort(), f1.getCode())
@@ -156,22 +151,22 @@ class LinuxNativeCoverageTest {
 
         mock.networking.acceptResult = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(10)
         assertEquals(10L, LinuxNative.withTransaction {
-            LinuxNative.networking.accept(fd, ConfinedSegment(seg), ConfinedSegment(seg))
+            LinuxNative.networking.accept(fd, seg, seg)
         }.getOrThrow("test"))
 
         mock.networking.sendmsgResult = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(20)
         assertEquals(20L, LinuxNative.withTransaction {
-            LinuxNative.networking.sendmsg(fd, ConfinedSegment(seg), 0)
+            LinuxNative.networking.sendmsg(fd, seg, 0)
         }.getOrThrow("test"))
 
         mock.networking.recvmsgResult = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(30)
         assertEquals(30L, LinuxNative.withTransaction {
-            LinuxNative.networking.recvmsg(fd, ConfinedSegment(seg), 0)
+            LinuxNative.networking.recvmsg(fd, seg, 0)
         }.getOrThrow("test"))
 
         mock.ioctlResult = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(40)
         assertEquals(40L, LinuxNative.withTransaction {
-            LinuxNative.raw.ioctl(fd, 2L, ConfinedSegment(seg))
+            LinuxNative.raw.ioctl(fd, 2L, seg)
         }.getOrThrow("test"))
         assertEquals(40L, LinuxNative.withTransaction {
             LinuxNative.raw.ioctl(fd, 2L, 3L)
@@ -179,7 +174,7 @@ class LinuxNativeCoverageTest {
 
         mock.networking.recvResult = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(50)
         assertEquals(50L, LinuxNative.withTransaction {
-            LinuxNative.networking.recv(fd, ConfinedSegment(seg), 8L, 0)
+            LinuxNative.networking.recv(fd, seg, 8L, 0)
         }.getOrThrow("test"))
 
         assertEquals(1234, LinuxNative.process.gettid().value)

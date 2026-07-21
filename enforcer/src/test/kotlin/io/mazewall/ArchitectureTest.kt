@@ -371,4 +371,18 @@ class ArchitectureTest {
             .because("Only JVMValidationListener is allowed to invoke authorize to ensure it is guarded by the ClassLoader deadlock bypass.")
             .check(allClasses)
     }
+
+    @ArchTest
+    fun ffmApiMustBeIsolatedToFfiPackage(allClasses: com.tngtech.archunit.core.domain.JavaClasses) {
+        noClasses()
+            .that()
+            .resideInAPackage("io.mazewall..")
+            .and()
+            .resideOutsideOfPackage("io.mazewall.ffi..")
+            .should()
+            .dependOnClassesThat()
+            .resideInAPackage("java.lang.foreign..")
+            .because("The FFM API usage must be isolated to the io.mazewall.ffi package to maintain compile-time safety and architectural boundaries.")
+            .check(allClasses)
+    }
 }

@@ -2,7 +2,7 @@ package io.mazewall.profiler.engine
 
 import io.mazewall.core.Pid
 import io.mazewall.core.Tid
-import java.lang.foreign.Arena
+import io.mazewall.ffi.memory.NativeArena
 
 /**
  * Resolves syscall path arguments by reading from the tracee's memory.
@@ -15,7 +15,7 @@ internal class SyscallPathResolver(
     /**
      * Resolves path arguments for a raw syscall event.
      */
-    context(arena: Arena)
+    context(arena: NativeArena)
     fun resolve(event: SyscallEvent<SyscallEventState.Raw>): SyscallEvent<SyscallEventState.Resolved> {
         val tid = event.tid
         val args = event.args
@@ -50,15 +50,15 @@ internal class SyscallPathResolver(
         return event.resolved(paths)
     }
 
-    context(arena: Arena)
+    context(arena: NativeArena)
     private fun resolveCwd(tid: Tid): String? = memoryReader.resolveLink(tid, "cwd")
 
-    context(arena: Arena)
+    context(arena: NativeArena)
     private fun resolveFdPath(tid: Tid, fd: Int): String? = memoryReader.resolveLink(tid, "fd/$fd")
 
     private fun isAtFdcwd(fd: Long): Boolean = fd == AT_FDCWD_VAL || fd == AT_FDCWD_UNSIGNED_VAL || fd.toInt() == AT_FDCWD_INT_VAL
 
-    context(arena: Arena)
+    context(arena: NativeArena)
     private fun tryRead(
         tid: Tid,
         addr: Long,
@@ -75,7 +75,7 @@ internal class SyscallPathResolver(
         }
     }
 
-    context(arena: Arena)
+    context(arena: NativeArena)
     private fun resolveRelativePath(
         tid: Tid,
         path: String,

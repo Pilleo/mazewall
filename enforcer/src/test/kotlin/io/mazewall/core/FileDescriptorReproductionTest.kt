@@ -2,7 +2,6 @@ package io.mazewall.core
 
 import io.mazewall.LinuxNative
 import org.junit.jupiter.api.Test
-import java.lang.foreign.Arena
 import kotlin.test.*
 
 class FileDescriptorReproductionTest {

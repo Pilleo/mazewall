@@ -36,14 +36,14 @@ class ProfilerDesignSpec :
             var readStringResult: String? = null
             var resolveLinkResult: String? = null
 
-            context(arena: Arena)
+            context(arena: io.mazewall.ffi.memory.NativeArena)
             override fun readStringFromProcess(
                 tid: Tid,
                 remoteAddr: Long,
                 maxLen: Int,
             ): String? = readStringResult
 
-            context(arena: Arena)
+            context(arena: io.mazewall.ffi.memory.NativeArena)
             override fun resolveLink(
                 tid: Tid,
                 link: String,

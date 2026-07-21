@@ -18,7 +18,6 @@ import io.mazewall.ffi.memory.*
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
-import java.lang.foreign.Arena
 import kotlin.test.*
 
 class LandlockCoverageTest {
@@ -223,7 +222,7 @@ class LandlockCoverageTest {
                     path: ManagedSegment,
                     flags: Int,
                 ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
-                    val pathStr = path.native.getString(0)
+                    val pathStr = path.readString(0L)
                     if (pathStr.contains(" (deleted)")) {
                         deletedPathAttempts.incrementAndGet()
                         return LinuxNative.SyscallResult.Error<LinuxNative.SyscallHandledState.Unhandled>(2, -1) // ENOENT
