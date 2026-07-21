@@ -140,8 +140,7 @@ internal class LandlockSession(
 
             state = LandlockState.CreatingRuleset(abi)
             NativeArena.ofConfined().use { arena ->
-                val rulesetFd = with(arena) { Landlock.createRuleset(accessMaskFs, abi) }
-                try {
+                with(arena) { Landlock.createRuleset(accessMaskFs, abi) }.use { rulesetFd ->
                     val ruleset = LandlockRuleset<RulesetState.Building>(rulesetFd)
                     val created = LandlockLifecycle.RulesetCreated(ruleset, abi, policy)
                     state = LandlockState.ConfiguringRuleset(rulesetFd, abi)
@@ -150,8 +149,6 @@ internal class LandlockSession(
                     state = LandlockState.Enforcing(rulesetFd)
                     added.restrictSelf(processWide)
                     state = LandlockState.Applied
-                } finally {
-                    LinuxNative.fileSystem.close(rulesetFd)
                 }
             }
         } catch (t: Throwable) {
