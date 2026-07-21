@@ -615,4 +615,93 @@ class LandlockTest : BaseIntegrationTest() {
         val fCopied = f1.copy(error = err)
         assertEquals(err, fCopied.error)
     }
+
+    fun testDirectoryRenameResistance(
+        baseDir: String,
+        allowedDir: String,
+        forbiddenDir: String,
+    ) {
+        val policy = Policy
+            .builder()
+            .base(Policy.NO_EXEC)
+            .allowMmapExec()
+            .allowJvmClasspath()
+            .allowFsRead(allowedDir)
+            .build()
+        val executor = Executors.newSingleThreadExecutor()
+        val safeExecutor = ContainedExecutors.wrap(executor, policy)
+
+        val allowedPath = Path.of(allowedDir)
+        val forbiddenPath = Path.of(forbiddenDir)
+        val basePath = Path.of(baseDir)
+
+        // 1. Initial reads before rename:
+        safeExecutor.submit {
+            // Read allowedDir/allowed.txt should succeed
+            val allowedTxt = allowedPath.resolve("allowed.txt")
+            if (Files.readString(allowedTxt) != "allowed") {
+                throw IllegalStateException("Failed to read allowed file initially")
+            }
+
+            // Read forbiddenDir/secret.txt should fail
+            val forbiddenTxt = forbiddenPath.resolve("secret.txt")
+            try {
+                Files.readString(forbiddenTxt)
+                throw IllegalStateException("Should have failed to read forbidden file initially")
+            } catch (e: Exception) {
+                // Expected
+            }
+        }.get()
+
+        // 2. Perform the rename on the main thread (unrestricted):
+        val allowedRenamedPath = basePath.resolve("allowed_renamed")
+        Files.move(allowedPath, allowedRenamedPath)
+        Files.move(forbiddenPath, allowedPath)
+
+        // 3. Post-rename reads:
+        safeExecutor.submit {
+            // Attempt to read the new files at the old path allowedDir/secret.txt (which points to the forbidden directory)
+            // This MUST be blocked because the inode of the new allowedDir was never allowed.
+            val newSecretInAllowedOldPath = allowedPath.resolve("secret.txt")
+            try {
+                Files.readString(newSecretInAllowedOldPath)
+                throw IllegalStateException("TOCTOU bypass! Read succeeded on renamed forbidden directory at old allowed path")
+            } catch (e: Exception) {
+                // Expected block
+            }
+
+            // Attempt to read allowed.txt in the renamed allowed directory (allowed_renamed/allowed.txt)
+            // This MUST succeed because Landlock follows the inode, even though its path name was renamed.
+            val allowedInRenamedPath = allowedRenamedPath.resolve("allowed.txt")
+            if (Files.readString(allowedInRenamedPath) != "allowed") {
+                throw IllegalStateException("Failed to read allowed file after rename")
+            }
+        }.get()
+
+        executor.shutdown()
+    }
+
+    @Test
+    @EnabledIfLinuxAndSupported
+    fun `testLandlockDirectoryRenameResistance`() {
+        if (!Landlock.isSupported()) return
+        val baseDir = createTempDirectory("landlock_toctou_base")
+        val allowedDir = Files.createDirectory(baseDir.resolve("allowed"))
+        val forbiddenDir = Files.createDirectory(baseDir.resolve("forbidden"))
+
+        allowedDir.resolve("allowed.txt").writeText("allowed")
+        forbiddenDir.resolve("secret.txt").writeText("secret")
+
+        try {
+            IsolatedProcessTester.runIsolatedMethod(
+                this::class.java.name,
+                "testDirectoryRenameResistance",
+                baseDir.toString(),
+                allowedDir.toString(),
+                forbiddenDir.toString()
+            )
+        } finally {
+            baseDir.toFile().deleteRecursively()
+        }
+    }
 }
