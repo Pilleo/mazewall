@@ -9,9 +9,8 @@ import io.mazewall.core.PrctlCommand
 import io.mazewall.enforcer.ContainedExecutors
 import io.mazewall.enforcer.ContainmentViolationException
 import io.mazewall.ffi.memory.nativeScope
-import io.mazewall.ffi.memory.ConfinedSegment
+import io.mazewall.ffi.memory.readString
 import org.junit.jupiter.api.Test
-import java.lang.foreign.Arena
 import java.util.concurrent.ExecutionException
 import java.util.concurrent.Executors
 import kotlin.test.assertEquals
@@ -44,7 +43,7 @@ class PrctlProtectionTest : BaseIntegrationTest() {
                         val nameSeg = allocateFrom("test-thread-name")
                         val res = LinuxNative.withTransaction {
                             LinuxNative.process.prctl(
-                                PrctlCommand.SetName(NativeArg.MemoryArg(ConfinedSegment(nameSeg)))
+                                PrctlCommand.SetName(NativeArg.MemoryArg(nameSeg))
                             )
                         }.getOrThrow("prctl(PR_SET_NAME)")
                         assertEquals(0, res)
@@ -68,12 +67,12 @@ class PrctlProtectionTest : BaseIntegrationTest() {
                         val nameBuffer = allocate(16)
                         val res = LinuxNative.withTransaction {
                             LinuxNative.process.prctl(
-                                PrctlCommand.GetName(NativeArg.MemoryArg(ConfinedSegment(nameBuffer)))
+                                PrctlCommand.GetName(NativeArg.MemoryArg(nameBuffer))
                             )
                         }.getOrThrow("prctl(PR_GET_NAME)")
                         assertEquals(0, res)
 
-                        val name = nameBuffer.getString(0)
+                        val name = nameBuffer.readString(0L)
                         assertTrue(name.isNotEmpty(), "Expected non-empty thread name")
                     }
                 }.get()

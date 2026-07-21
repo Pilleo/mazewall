@@ -247,6 +247,9 @@ public value class IovecSegment(public val segment: MemorySegment) {
     }
 
     public companion object {
+        public fun of(managed: ManagedSegment): IovecSegment =
+            IovecSegment(managed.unwrap)
+
         context(arena: Arena)
         public fun allocate(): IovecSegment =
             IovecSegment(arena.allocate(Layouts.IOVEC))
