@@ -10,6 +10,7 @@ import io.mazewall.core.Syscall
 import io.mazewall.enforcer.ContainedExecutors
 import io.mazewall.ffi.NativeConstants
 import io.mazewall.ffi.memory.nativeScope
+import io.mazewall.ffi.memory.ConfinedSegment
 import org.junit.jupiter.api.Test
 import java.util.concurrent.Executors
 import kotlin.test.assertTrue
@@ -32,7 +33,7 @@ class MemfdCreateBypassTest : BaseIntegrationTest() {
                             LinuxNative.withTransaction {
                                 LinuxNative.raw.syscall(
                                     arch.memfdCreate.toLong(),
-                                    NativeArg.MemoryArg(name),
+                                    NativeArg.MemoryArg(ConfinedSegment(name)),
                                     NativeArg.NullArg,
                                     NativeArg.NullArg,
                                 )
@@ -67,7 +68,7 @@ class MemfdCreateBypassTest : BaseIntegrationTest() {
                             LinuxNative.withTransaction {
                                 LinuxNative.raw.syscall(
                                     arch.memfdCreate.toLong(),
-                                    NativeArg.MemoryArg(name),
+                                    NativeArg.MemoryArg(ConfinedSegment(name)),
                                     NativeArg.NullArg,
                                     NativeArg.NullArg,
                                 )

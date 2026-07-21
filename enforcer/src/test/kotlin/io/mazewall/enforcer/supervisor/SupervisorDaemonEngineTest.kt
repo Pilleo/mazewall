@@ -5,7 +5,7 @@ import io.mazewall.MockNativeEngine
 import io.mazewall.MockNativeNetworking
 import io.mazewall.MockNativeMemory
 import io.mazewall.NativeTransaction
-import io.mazewall.RealNativeEngine
+import io.mazewall.ffi.internal.RealNativeEngine
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
 import io.mazewall.ffi.NativeConstants

@@ -6,6 +6,7 @@ import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
 import io.mazewall.ffi.NativeConstants
 import io.mazewall.recover
+import io.mazewall.ffi.memory.ConfinedSegment
 import java.lang.foreign.MemorySegment
 import java.lang.foreign.ValueLayout
 
@@ -39,7 +40,7 @@ sealed class HandshakeSession {
             pollFd.set(ValueLayout.JAVA_SHORT, POLLFD_REVENTS_OFF, 0.toShort())
 
             while (true) {
-                val pollRes = LinuxNative.withTransaction { ioOps.raw.poll(pollFd, 1L, POLL_ACK_TIMEOUT_MS) }
+                val pollRes = LinuxNative.withTransaction { ioOps.raw.poll(ConfinedSegment(pollFd), 1L, POLL_ACK_TIMEOUT_MS) }
                 val count = pollRes.recover { errno, _ ->
                     if (errno == NativeConstants.EINTR) return@recover RETRY_SIGNAL
                     return@recover INTERNAL_ERROR_SIGNAL

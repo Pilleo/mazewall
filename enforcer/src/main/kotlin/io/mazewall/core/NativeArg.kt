@@ -1,7 +1,7 @@
 package io.mazewall.core
 
 import io.mazewall.LinuxNative
-import java.lang.foreign.MemorySegment
+import io.mazewall.ffi.memory.ManagedSegment
 
 /**
  * A sealed interface representing valid argument types that can be passed to native system calls.
@@ -24,7 +24,7 @@ public sealed interface NativeArg {
     }
 
     @JvmInline
-    public value class MemoryArg(public val value: MemorySegment) : NativeArg {
+    public value class MemoryArg(public val value: ManagedSegment) : NativeArg {
         override val asLong: Long get() = value.address()
     }
 

@@ -18,6 +18,7 @@ import io.mazewall.recover
 import io.mazewall.enforcer.supervisor.StacktraceScopingPolicy
 import io.mazewall.enforcer.supervisor.ScopingHandler
 import io.mazewall.core.Tid
+import io.mazewall.ffi.memory.ConfinedSegment
 import java.io.File
 import java.io.IOException
 import java.lang.foreign.Arena
@@ -267,7 +268,7 @@ fun runProfileAndEnforce() {
                 val openResult =
                     LinuxNative.withTransaction {
                         fs.open(
-                            arena.allocateFrom(sensitiveFile.canonicalPath),
+                            ConfinedSegment(arena.allocateFrom(sensitiveFile.canonicalPath)),
                             0, // O_RDONLY
                         )
                     }

@@ -7,6 +7,7 @@ import io.mazewall.ffi.Layouts
 import io.mazewall.map
 import io.mazewall.onFailure
 import io.mazewall.onSuccess
+import io.mazewall.ffi.memory.ConfinedSegment
 import java.lang.foreign.Arena
 import java.lang.foreign.MemorySegment
 import java.lang.foreign.ValueLayout
@@ -55,7 +56,7 @@ object RealMemoryReader : ProfilerMemoryReader {
         val pathSeg = arena.allocateFrom(procPath)
         val buf = arena.allocate(PATH_MAX_VAL)
         val res = LinuxNative.withTransaction {
-            LinuxNative.fileSystem.readlink(pathSeg, buf, PATH_MAX_VAL)
+            LinuxNative.fileSystem.readlink(ConfinedSegment(pathSeg), ConfinedSegment(buf), PATH_MAX_VAL)
         }
         return res.onSuccess { }.map { buf.copyToString(it.toInt()).removeSuffix(" (deleted)") }.getOrNull()
     }

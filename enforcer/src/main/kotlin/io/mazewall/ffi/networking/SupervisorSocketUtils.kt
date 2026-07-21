@@ -9,6 +9,7 @@ import io.mazewall.ffi.memory.CmsghdrSegment
 import io.mazewall.ffi.memory.IovecSegment
 import io.mazewall.ffi.memory.MsghdrSegment
 import io.mazewall.ffi.memory.SockaddrUnSegment
+import io.mazewall.ffi.memory.ConfinedSegment
 import java.lang.foreign.Arena
 import java.lang.foreign.MemorySegment
 import java.lang.foreign.ValueLayout
@@ -92,7 +93,7 @@ public object SupervisorSocketUtils {
                 }
                 val fd = FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(fdVal)
                 val connRes = LinuxNative.withTransaction {
-                    LinuxNative.networking.connect(fd, sockaddrUn.segment, SOCKADDR_UN_SIZE)
+                    LinuxNative.networking.connect(fd, ConfinedSegment(sockaddrUn.segment), SOCKADDR_UN_SIZE)
                 }
                 if (connRes is LinuxNative.SyscallResult.Success) {
                     return fdVal
@@ -136,7 +137,7 @@ public object SupervisorSocketUtils {
 
             while (true) {
                 val res = LinuxNative.withTransaction {
-                    LinuxNative.networking.sendmsg(FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(socketFd), msg.segment, 0)
+                    LinuxNative.networking.sendmsg(FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(socketFd), ConfinedSegment(msg.segment), 0)
                 }
                 if (res is LinuxNative.SyscallResult.Success) {
                     return true
@@ -170,7 +171,7 @@ public object SupervisorSocketUtils {
             val cmsg = CmsghdrSegment(controlBuf)
 
             while (true) {
-                val res = LinuxNative.withTransaction { LinuxNative.networking.recvmsg(socketFd, msg.segment, 0) }
+                val res = LinuxNative.withTransaction { LinuxNative.networking.recvmsg(socketFd, ConfinedSegment(msg.segment), 0) }
                 if (res is LinuxNative.SyscallResult.Success) {
                     val value = res.value
                     if (value == 0L) return@use null

@@ -187,7 +187,7 @@ class LandlockCoverageTest {
             fileSystem = object : MockNativeFileSystem() {
                 context(_: NativeTransaction)
                 override fun open(
-                    path: java.lang.foreign.MemorySegment,
+                    path: ManagedSegment,
                     flags: Int,
                 ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
                     val current = calls.incrementAndGet()
@@ -220,10 +220,10 @@ class LandlockCoverageTest {
             fileSystem = object : MockNativeFileSystem() {
                 context(_: NativeTransaction)
                 override fun open(
-                    path: java.lang.foreign.MemorySegment,
+                    path: ManagedSegment,
                     flags: Int,
                 ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
-                    val pathStr = path.getString(0)
+                    val pathStr = path.native.getString(0)
                     if (pathStr.contains(" (deleted)")) {
                         deletedPathAttempts.incrementAndGet()
                         return LinuxNative.SyscallResult.Error<LinuxNative.SyscallHandledState.Unhandled>(2, -1) // ENOENT

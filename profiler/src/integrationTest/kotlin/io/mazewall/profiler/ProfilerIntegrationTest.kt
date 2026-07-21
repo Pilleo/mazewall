@@ -9,6 +9,7 @@ import io.mazewall.core.Syscall
 import io.mazewall.profiler.compiler.BobCompiler
 import io.mazewall.profiler.engine.TraceEvent
 import org.junit.jupiter.api.Test
+import io.mazewall.ffi.memory.ConfinedSegment
 import java.io.File
 import java.util.concurrent.Callable
 import java.util.concurrent.Executors
@@ -172,7 +173,7 @@ class ProfilerIntegrationTest : BaseIntegrationTest() {
                         java.lang.foreign.Arena.ofConfined().use { arena ->
                             val pathSeg = arena.allocateFrom(absolutePath)
                             val openRes = LinuxNative.withTransaction {
-                                LinuxNative.fileSystem.open(pathSeg, 0)
+                                LinuxNative.fileSystem.open(ConfinedSegment(pathSeg), 0)
                             }
                             if (openRes is LinuxNative.SyscallResult.Success) {
                                 val fd = openRes.asFd()

@@ -5,6 +5,8 @@ import io.mazewall.PolicyDefinition
 import io.mazewall.CompiledSandbox
 import io.mazewall.enforcer.validateLinuxAndNotVirtual
 import io.mazewall.core.Arch
+import io.mazewall.ffi.memory.NativeArena
+import io.mazewall.ffi.memory.native
 import java.lang.foreign.Arena
 import java.lang.foreign.MemorySegment
 
@@ -16,7 +18,8 @@ internal sealed interface SeccompInstallationState {
     data object Uninitialized : SeccompInstallationState {
         fun buildFilter(arena: Arena, sandbox: CompiledSandbox<*>): FilterBuilt {
             val filters = sandbox.compiledFilters
-            val prog = with(arena) { LinuxNative.memory.newSockFProg(filters) }
+            val nativeArena = NativeArena(arena, isShared = false)
+            val prog = with(nativeArena) { LinuxNative.memory.newSockFProg(filters) }.native
             return FilterBuilt(prog)
         }
     }
