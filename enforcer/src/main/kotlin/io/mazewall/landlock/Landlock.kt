@@ -263,16 +263,13 @@ object Landlock {
         val fdResult = openPath(path, NativeConstants.O_PATH or NativeConstants.O_CLOEXEC)
 
         fdResult.onSuccess { value ->
-            val pathFd = FileDescriptor.unsafe<FileDescriptorRole.OPath>(value.toInt())
-            try {
+            FileDescriptor.unsafe<FileDescriptorRole.OPath>(value.toInt()).use { pathFd ->
                 when (val addRes = addRuleToRuleset(ruleset, pathFd, allowedAccess)) {
                     is AddRuleResult.Success -> {}
                     is AddRuleResult.Error -> {
                         logger.warning("landlock_add_rule failed for JVM classpath $path with errno ${addRes.errno}")
                     }
                 }
-            } finally {
-                LinuxNative.fileSystem.close(pathFd)
             }
         }.onFailure { errno, _ ->
             logger.warning("Could not open JVM classpath $path for landlock rule: errno $errno")
@@ -298,12 +295,9 @@ object Landlock {
             }
         }
 
-        val pathFd = FileDescriptor.unsafe<FileDescriptorRole.OPath>(fdResult)
-        try {
+        FileDescriptor.unsafe<FileDescriptorRole.OPath>(fdResult).use { pathFd ->
             val finalAccess = calculateFinalAccess(allowedAccess, isFallback, resolvedPath)
             addRuleToRulesetAndVerify(ruleset, pathFd, finalAccess, resolvedPath)
-        } finally {
-            LinuxNative.fileSystem.close(pathFd)
         }
     }
 
