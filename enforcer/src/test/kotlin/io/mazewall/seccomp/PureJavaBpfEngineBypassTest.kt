@@ -5,7 +5,6 @@ import io.mazewall.compile
 import io.mazewall.core.Arch
 import org.junit.jupiter.api.Test
 import java.util.concurrent.Executors
-import java.lang.foreign.MemorySegment
 import kotlin.test.assertFailsWith
 
 class PureJavaBpfEngineBypassTest {
@@ -14,7 +13,7 @@ class PureJavaBpfEngineBypassTest {
         val virtualThreadExecutor = Executors.newVirtualThreadPerTaskExecutor()
 
         virtualThreadExecutor.submit {
-            val built = SeccompInstallationState.FilterBuilt(MemorySegment.NULL)
+            val built = SeccompInstallationState.FilterBuilt(io.mazewall.ffi.memory.ManagedSegment.NULL)
             assertFailsWith<IllegalStateException> {
                 built.lockPrivileges()
             }

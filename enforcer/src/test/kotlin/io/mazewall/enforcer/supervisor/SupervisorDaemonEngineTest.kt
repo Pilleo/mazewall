@@ -9,13 +9,11 @@ import io.mazewall.ffi.internal.RealNativeEngine
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
 import io.mazewall.ffi.NativeConstants
-import io.mazewall.ffi.memory.native
+import io.mazewall.ffi.memory.PollFdSegment
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Test
-import java.lang.foreign.Arena
-import java.lang.foreign.MemorySegment
 
 class SupervisorDaemonEngineTest {
 
@@ -43,10 +41,10 @@ class SupervisorDaemonEngineTest {
         val connection = io.mazewall.ffi.networking.SeccompConnection.FdAttached(socketFd, listenerFd)
 
         io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
-            val pollFd = io.mazewall.ffi.memory.PollFdSegment(arena.allocate(8).native)
+            val pollFd = PollFdSegment.of(arena.allocate(8))
             mockEngine.onPoll = { _, _, _, _ -> LinuxNative.SyscallResult.Success(1L) }
 
-            val result = engine.processConnectionStep(arena, connection, socketFd, pollFd)
+            val result = engine.processConnectionStep(arena, connection, socketFd, pollFd.managed)
 
             assertNotNull(result, "processConnectionStep should return non-null on successful retry")
             assertEquals(2, writeCalls)

@@ -2,14 +2,13 @@ package io.mazewall.ffi.networking
 
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
-import java.lang.foreign.Arena
 import java.nio.charset.StandardCharsets
 
 class SupervisorSocketUtilsTest {
 
     @Test
     fun `test setupSockAddrUn`() {
-        Arena.ofConfined().use { arena ->
+        io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
             val path = "/tmp/test.sock"
             val sockaddr = SupervisorSocketUtils.setupSockAddrUn(arena, path)
 

@@ -3,7 +3,6 @@ package io.mazewall.core
 import io.mazewall.ffi.memory.ManagedSegment
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.Test
-import java.lang.foreign.MemorySegment
 
 class PrctlCommandTest {
 

@@ -8,7 +8,8 @@ import io.mazewall.map
 import io.mazewall.onFailure
 import io.mazewall.onSuccess
 import io.mazewall.ffi.memory.ConfinedSegment
-import java.lang.foreign.Arena
+import io.mazewall.ffi.memory.NativeArena
+import io.mazewall.ffi.memory.unwrap
 import java.lang.foreign.MemorySegment
 import java.lang.foreign.ValueLayout
 import java.nio.charset.StandardCharsets
@@ -17,14 +18,14 @@ import java.nio.charset.StandardCharsets
  * Interface for reading memory and resolving paths from a tracee process or thread.
  */
 interface ProfilerMemoryReader {
-    context(arena: Arena)
+    context(arena: NativeArena)
     fun readStringFromProcess(
         tid: Tid,
         remoteAddr: Long,
         maxLen: Int = 4096,
     ): String?
 
-    context(arena: Arena)
+    context(arena: NativeArena)
     fun resolveLink(
         tid: Tid,
         link: String,
@@ -38,7 +39,7 @@ object RealMemoryReader : ProfilerMemoryReader {
     private const val PATH_MAX_VAL = 4096L
     private const val IOV_LEN_OFF = 8L
 
-    context(arena: Arena)
+    context(arena: NativeArena)
     override fun readStringFromProcess(
         tid: Tid,
         remoteAddr: Long,
@@ -47,7 +48,7 @@ object RealMemoryReader : ProfilerMemoryReader {
         return io.mazewall.ffi.memory.SupervisorProcessMemoryReader.readString(tid, remoteAddr, maxLen, warnOnEperm = true)
     }
 
-    context(arena: Arena)
+    context(arena: NativeArena)
     override fun resolveLink(
         tid: Tid,
         link: String,
@@ -56,9 +57,9 @@ object RealMemoryReader : ProfilerMemoryReader {
         val pathSeg = arena.allocateFrom(procPath)
         val buf = arena.allocate(PATH_MAX_VAL)
         val res = LinuxNative.withTransaction {
-            LinuxNative.fileSystem.readlink(ConfinedSegment(pathSeg), ConfinedSegment(buf), PATH_MAX_VAL)
+            LinuxNative.fileSystem.readlink(ConfinedSegment(pathSeg.unwrap), ConfinedSegment(buf.unwrap), PATH_MAX_VAL)
         }
-        return res.onSuccess { }.map { buf.copyToString(it.toInt()).removeSuffix(" (deleted)") }.getOrNull()
+        return res.onSuccess { }.map { buf.unwrap.copyToString(it.toInt()).removeSuffix(" (deleted)") }.getOrNull()
     }
 
     private fun MemorySegment.copyToString(len: Int): String {

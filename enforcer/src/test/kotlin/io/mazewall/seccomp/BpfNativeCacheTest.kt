@@ -8,8 +8,6 @@ import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import io.mazewall.ffi.memory.NativeArena
 import io.mazewall.ffi.memory.ManagedSegment
-import java.lang.foreign.Arena
-import java.lang.foreign.MemorySegment
 import kotlin.test.assertEquals
 import kotlin.test.assertNotEquals
 

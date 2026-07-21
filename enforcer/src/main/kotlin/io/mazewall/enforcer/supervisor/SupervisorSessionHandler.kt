@@ -236,7 +236,7 @@ internal class SupervisorSessionHandler(
         notif: ManagedSegment,
         resp: ManagedSegment
     ): LoopAction {
-        val pfd2 = PollFdSegment.of(pollFds.asSlice(Layouts.POLLFD.byteSize(), Layouts.POLLFD.byteSize()))
+        val pfd2 = PollFdSegment.of(pollFds.asSlice(Layouts.POLLFD_SIZE, Layouts.POLLFD_SIZE))
         val socketRevents = pfd2.getRevents().toInt()
         val errorOrHup = NativeConstants.POLLERR.toInt() or NativeConstants.POLLHUP.toInt() or NativeConstants.POLLNVAL.toInt()
         if ((socketRevents and (NativeConstants.POLLIN.toInt() or errorOrHup)) != 0) {
@@ -244,7 +244,7 @@ internal class SupervisorSessionHandler(
             return LoopAction.Shutdown
         }
 
-        val pfd1 = PollFdSegment.of(pollFds.asSlice(0L, Layouts.POLLFD.byteSize()))
+        val pfd1 = PollFdSegment.of(pollFds.asSlice(0L, Layouts.POLLFD_SIZE))
         val listenerRevents = pfd1.getRevents()
         if ((listenerRevents.toInt() and NativeConstants.POLLIN.toInt()) != 0) {
             notif.fill(0)
@@ -471,9 +471,10 @@ internal class SupervisorSessionHandler(
         val startMs = System.currentTimeMillis()
         var remainingTimeout = POLL_TIMEOUT_MS.toLong()
         var count = 0L
+        val pollFdManaged = pollFd.managed
         while (remainingTimeout > 0) {
             val loopStart = System.currentTimeMillis()
-            val pollRes = engine.withTransaction { engine.raw.poll(pollFd.managed, 1L, remainingTimeout.toInt()) }
+            val pollRes = engine.withTransaction { engine.raw.poll(pollFdManaged, 1L, remainingTimeout.toInt()) }
             val elapsed = System.currentTimeMillis() - loopStart
             remainingTimeout -= elapsed
 
@@ -589,13 +590,14 @@ internal class SupervisorSessionHandler(
             }
 
             val addfd = SeccompNotifAddFdSegment.of(arena.allocate(Layouts.SECCOMP_NOTIF_ADDFD))
-            addfd.segment.fill(0)
+            addfd.managed.fill(0)
             addfd.setId(id)
             addfd.setFlags(NativeConstants.SECCOMP_ADDFD_FLAG_SEND.toInt())
             addfd.setSrcfd(localFdValue)
 
+            val addfdManaged = addfd.managed
             val success = engine.withTransaction {
-                val res = engine.raw.ioctl(listenerFd, NativeConstants.SECCOMP_IOCTL_NOTIF_ADDFD, addfd.managed)
+                val res = engine.raw.ioctl(listenerFd, NativeConstants.SECCOMP_IOCTL_NOTIF_ADDFD, addfdManaged)
                 logger.info { "[SUPERVISOR-DEBUG] ioctl SECCOMP_IOCTL_NOTIF_ADDFD res=$res" }
                 res is LinuxNative.SyscallResult.Success<*, *>
             }
@@ -848,13 +850,14 @@ internal class SupervisorSessionHandler(
 
                                 // Inject accepted FD
                                 val addfd = SeccompNotifAddFdSegment.of(arena.allocate(Layouts.SECCOMP_NOTIF_ADDFD))
-                                addfd.segment.fill(0)
+                                addfd.managed.fill(0)
                                 addfd.setId(id)
                                 addfd.setFlags(NativeConstants.SECCOMP_ADDFD_FLAG_SEND.toInt())
                                 addfd.setSrcfd(clientFd)
 
+                                val addfdManaged = addfd.managed
                                 val injectSuccess = engine.withTransaction {
-                                    val res = engine.raw.ioctl(listenerFd, NativeConstants.SECCOMP_IOCTL_NOTIF_ADDFD, addfd.managed)
+                                    val res = engine.raw.ioctl(listenerFd, NativeConstants.SECCOMP_IOCTL_NOTIF_ADDFD, addfdManaged)
                                     res is LinuxNative.SyscallResult.Success<*, *>
                                 }
 

@@ -450,10 +450,11 @@ object Landlock {
         rulesetAttr.setHandledAccessFs(accessMaskFs)
         rulesetAttr.setHandledAccessNet(0L)
         val size = if (abi >= 4) Layouts.LANDLOCK_RULESET_ATTR_SIZE else Layouts.LANDLOCK_RULESET_ATTR_V1_SIZE
+        val rulesetAttrManaged = rulesetAttr.managed
         val res = LinuxNative.withTransaction {
             LinuxNative.raw.syscall(
                 NativeConstants.LANDLOCK_CREATE_RULESET_NR,
-                io.mazewall.core.NativeArg.MemoryArg(rulesetAttr.managed),
+                io.mazewall.core.NativeArg.MemoryArg(rulesetAttrManaged),
                 io.mazewall.core.NativeArg.LongArg(size),
                 io.mazewall.core.NativeArg.MemoryArg(ManagedSegment.NULL)
             )
@@ -470,12 +471,13 @@ object Landlock {
         val pathAttr = LandlockPathBeneathAttrSegment.allocate()
         pathAttr.setAllowedAccess(accessMask)
         pathAttr.setParentFd(pathFd.value)
+        val pathAttrManaged = pathAttr.managed
         val res = LinuxNative.withTransaction {
             LinuxNative.raw.syscall(
                 NativeConstants.LANDLOCK_ADD_RULE_NR,
                 io.mazewall.core.NativeArg.FdArg(ruleset.fd),
                 io.mazewall.core.NativeArg.LongArg(NativeConstants.LANDLOCK_RULE_PATH_BENEATH.toLong()),
-                io.mazewall.core.NativeArg.MemoryArg(pathAttr.managed),
+                io.mazewall.core.NativeArg.MemoryArg(pathAttrManaged),
                 io.mazewall.core.NativeArg.IntArg(0)
             )
         }

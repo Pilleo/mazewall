@@ -125,8 +125,9 @@ internal class SupervisorDaemonEngine(
         pollFd.setFd(serverFd.value)
         pollFd.setEvents(NativeConstants.POLLIN)
 
+        val pollFdManaged = pollFd.managed
         while (!isGlobalShutdown()) {
-            val pollRes = engine.withTransaction { engine.raw.poll(pollFd.managed, 1L, POLL_TIMEOUT_MS) }
+            val pollRes = engine.withTransaction { engine.raw.poll(pollFdManaged, 1L, POLL_TIMEOUT_MS) }
             val count = pollRes.recover { errno, _ ->
                 if (errno != NativeConstants.EINTR) return
                 0L
@@ -181,8 +182,9 @@ internal class SupervisorDaemonEngine(
                 pollFd.setFd(socketFd.value)
                 pollFd.setEvents(NativeConstants.POLLIN)
 
+                val pollFdManaged = pollFd.managed
                 while (!isGlobalShutdown()) {
-                    val next = processConnectionStep(arena, connection, socketFd, pollFd) ?: break
+                    val next = processConnectionStep(arena, connection, socketFd, pollFdManaged) ?: break
                     connection = next
                 }
             }
@@ -205,10 +207,11 @@ internal class SupervisorDaemonEngine(
         arena: NativeArena,
         connection: io.mazewall.ffi.networking.SeccompConnection,
         socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>,
-        pollFd: PollFdSegment
+        pollFdManaged: ManagedSegment
     ): io.mazewall.ffi.networking.SeccompConnection? {
+        val pollFd = PollFdSegment.of(pollFdManaged)
         if (connection is io.mazewall.ffi.networking.SeccompConnection.Accepted) {
-            val pollRes = engine.withTransaction { engine.raw.poll(pollFd.managed, 1L, POLL_TIMEOUT_MS) }
+            val pollRes = engine.withTransaction { engine.raw.poll(pollFdManaged, 1L, POLL_TIMEOUT_MS) }
             val count = pollRes.recover { errno, _ ->
                 if (errno == NativeConstants.EINTR) 0L else -1L
             }
@@ -265,11 +268,11 @@ internal class SupervisorDaemonEngine(
         try {
             NativeArena.ofConfined().use { sessionArena ->
                 val pollFds = sessionArena.allocate(Layouts.POLLFD, 2)
-                val pfd1 = PollFdSegment.of(pollFds.asSlice(0L, Layouts.POLLFD.byteSize()))
+                val pfd1 = PollFdSegment.of(pollFds.asSlice(0L, Layouts.POLLFD_SIZE))
                 pfd1.setFd(listenerFd.value)
                 pfd1.setEvents(NativeConstants.POLLIN)
 
-                val pfd2 = PollFdSegment.of(pollFds.asSlice(POLLFD_STRUCT_SIZE, Layouts.POLLFD.byteSize()))
+                val pfd2 = PollFdSegment.of(pollFds.asSlice(POLLFD_STRUCT_SIZE, Layouts.POLLFD_SIZE))
                 pfd2.setFd(socketFd.value)
                 pfd2.setEvents(NativeConstants.POLLIN)
 

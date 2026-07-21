@@ -100,3 +100,5 @@ public fun ManagedSegment.fill(value: Byte): Unit { this.native.fill(value) }
 public val NativeArena.unwrap: java.lang.foreign.Arena get() = this.arena
 
 public val ManagedSegment.unwrap: java.lang.foreign.MemorySegment get() = this.native
+
+public fun ManagedSegment.readString(offset: Long): String = this.native.getString(offset)

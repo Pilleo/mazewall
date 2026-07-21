@@ -37,4 +37,18 @@ class TestArchitectureTest {
                     "Use IsolatedProcessTester instead.",
             ).check(allClasses)
     }
+
+    @ArchTest
+    fun ffmApiMustBeIsolatedToFfiPackage(allClasses: JavaClasses) {
+        noClasses()
+            .that()
+            .resideInAPackage("io.mazewall..")
+            .and()
+            .resideOutsideOfPackage("io.mazewall.ffi..")
+            .should()
+            .dependOnClassesThat()
+            .resideInAPackage("java.lang.foreign..")
+            .because("The FFM API usage must be isolated to the io.mazewall.ffi package to maintain compile-time safety and architectural boundaries.")
+            .check(allClasses)
+    }
 }

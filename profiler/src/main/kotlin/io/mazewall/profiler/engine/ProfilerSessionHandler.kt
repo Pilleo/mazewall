@@ -143,7 +143,7 @@ internal class ProfilerSessionHandler(
 
             // RESOLVE: Transform raw event into a resolved event (read path from tracee memory).
             val resolver = SyscallPathResolver(memoryReader, ledger)
-            val resolvedEvent = with(arena.unwrap) {
+            val resolvedEvent = with(arena) {
                 resolver.resolve(
                     event = SyscallEvent<SyscallEventState.Raw>(
                         tid = Tid(pidVal),
