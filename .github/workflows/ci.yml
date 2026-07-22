@@ -68,23 +68,34 @@ jobs:
             - name: Run Vulnerability Exploitation Demo
               run: ./scripts/run_vulnerable_app_demo.sh
             - name: Save All Podman Images to Cache Folder
+              if: always()
               run: |
                   mkdir -p ${{ github.workspace }}/.cache/podman-image
-                  if [ ! -f ${{ github.workspace }}/.cache/podman-image/mazewall-test-runner.tar ]; then
-                      podman save -o ${{ github.workspace }}/.cache/podman-image/mazewall-test-runner.tar mazewall-test-runner:latest
+                  if podman image exists mazewall-test-runner || podman image exists localhost/mazewall-test-runner; then
+                      podman save -o ${{ github.workspace }}/.cache/podman-image/mazewall-test-runner.tar mazewall-test-runner:latest || true
                   fi
-                  if [ ! -f ${{ github.workspace }}/.cache/podman-image/vulnerable-web-app-unprotected.tar ] && podman image exists vulnerable-web-app-unprotected; then
-                      podman save -o ${{ github.workspace }}/.cache/podman-image/vulnerable-web-app-unprotected.tar vulnerable-web-app-unprotected:latest
+                  if podman image exists vulnerable-web-app-unprotected || podman image exists localhost/vulnerable-web-app-unprotected; then
+                      podman save -o ${{ github.workspace }}/.cache/podman-image/vulnerable-web-app-unprotected.tar vulnerable-web-app-unprotected:latest || true
                   fi
-                  if [ ! -f ${{ github.workspace }}/.cache/podman-image/vulnerable-web-app-protected.tar ] && podman image exists vulnerable-web-app-protected; then
-                      podman save -o ${{ github.workspace }}/.cache/podman-image/vulnerable-web-app-protected.tar vulnerable-web-app-protected:latest
+                  if podman image exists vulnerable-web-app-protected || podman image exists localhost/vulnerable-web-app-protected; then
+                      podman save -o ${{ github.workspace }}/.cache/podman-image/vulnerable-web-app-protected.tar vulnerable-web-app-protected:latest || true
                   fi
             - name: Upload Podman Image Cache
               uses: actions/cache/save@v4
-              if: steps.cache-podman.outputs.cache-matched-key == ''
+              if: always()
               with:
                   path: ${{ github.workspace }}/.cache/podman-image
-                  key: podman-image-${{ hashFiles('infra/dev/Containerfile', 'demos/vulnerable-web-app/Containerfile') }}-${{ github.sha }}
+                  key: podman-image-${{ hashFiles('infra/dev/Containerfile', 'demos/vulnerable-web-app/Containerfile') }}
+            - name: Save Gradle & NVD Cache (Always)
+              uses: actions/cache/save@v4
+              if: always()
+              with:
+                  path: |
+                      ~/.gradle/caches
+                      ~/.gradle/notifications
+                      ~/.gradle/dependency-check-data
+                      ~/.gradle/build-cache
+                  key: gradle-always-${{ runner.os }}-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}-${{ github.run_id }}
             - name: Run Security Check
               run: ./scripts/run_containerized_tests.sh dependencyCheckAnalyze --info
               env:
