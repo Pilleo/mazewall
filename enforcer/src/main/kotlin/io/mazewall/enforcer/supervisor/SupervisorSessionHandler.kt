@@ -350,7 +350,7 @@ internal class SupervisorSessionHandler(
             arch.open, arch.execve -> {
                 pathStr = readStringFromProcess(tid, args[0])
             }
-            arch.openat, arch.openat2 -> {
+            arch.openat, arch.openat2, arch.execveat -> {
                 dirfd = args[0].toInt()
                 pathStr = readStringFromProcess(tid, args[1])
             }
@@ -526,8 +526,30 @@ internal class SupervisorSessionHandler(
                     true
                 }
                 1 -> { // Allow Continue
-                    sendSeccompContinue(id, resp)
-                    true
+                    val isInject = nr == traceeArch.open || nr == traceeArch.connect || nr == traceeArch.openat ||
+                                 nr == traceeArch.openat2 || nr == traceeArch.accept || nr == traceeArch.accept4
+                    if (isInject) {
+                        // Upgrade to emulation to prevent TOCTOU!
+                        handleInjectFd(id, nr, args, pathStr, sockaddrBytes, resp, tid, traceeArch)
+                    } else if (nr == traceeArch.execve || nr == traceeArch.execveat) {
+                        // Register modification is not natively supported by the Linux seccomp user notification API.
+                        // To allow process execution while preventing TOCTOU attacks as robustly as possible, we emulate
+                        // safe execution by writing the exact validated path bytes back to the tracee's address space
+                        // prior to allowing the syscall to continue.
+                        if (pathStr != null) {
+                            val pathAddr = if (nr == traceeArch.execve) args[0] else args[1]
+                            val pathBytes = pathStr.toByteArray(StandardCharsets.UTF_8)
+                            val pathBytesWithNull = ByteArray(pathBytes.size + 1)
+                            System.arraycopy(pathBytes, 0, pathBytesWithNull, 0, pathBytes.size)
+                            pathBytesWithNull[pathBytes.size] = 0.toByte()
+                            SupervisorProcessMemoryWriter.writeBytes(tid, pathAddr, pathBytesWithNull)
+                        }
+                        sendSeccompContinue(id, resp)
+                        true
+                    } else {
+                        sendSeccompContinue(id, resp)
+                        true
+                    }
                 }
                 2 -> { // Allow & Inject FD
                     handleInjectFd(id, nr, args, pathStr, sockaddrBytes, resp, tid, traceeArch)
