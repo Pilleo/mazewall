@@ -149,11 +149,11 @@ class LinuxNativeTest : BaseIntegrationTest() {
 
 @Test
 fun testFcntl() {
-    Arena.ofConfined().use { arena ->
+    nativeScope {
         val tempFile =
             java.nio.file.Files
                 .createTempFile("fcntl-test", ".txt")
-        val path = arena.allocateFrom(tempFile.toString())
+        val path = allocateFrom(tempFile.toString())
         val openResult = LinuxNative.withTransaction {
             LinuxNative.fileSystem.open(path, 0)
         }
@@ -186,7 +186,7 @@ fun testFcntl() {
         pollFd.setRevents(0.toShort())
 
         val result = LinuxNative.withTransaction {
-            LinuxNative.raw.poll(pollFd.segment, 1L, 0) // 0 timeout
+            LinuxNative.raw.poll(io.mazewall.ffi.memory.ConfinedSegment(pollFd.segment), 1L, 0) // 0 timeout
         }
         assertTrue(result is LinuxNative.SyscallResult.Success)
     }

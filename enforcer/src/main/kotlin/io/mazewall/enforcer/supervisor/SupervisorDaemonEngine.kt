@@ -227,7 +227,7 @@ internal class SupervisorDaemonEngine(
 
             is io.mazewall.ffi.networking.SeccompConnection.FdAttached -> {
                 System.err.println("[SUPERVISOR] Sending handshake ACK to socket ${socketFd.value}")
-                val ackBuf = ConfinedSegment(arena.arena.allocate(ACK_BUF_SIZE))
+                val ackBuf = arena.allocate(ACK_BUF_SIZE)
                 ackBuf.writeByte(0L, PROTOCOL_ACK_BYTE)
                 var result: io.mazewall.ffi.networking.SeccompConnection? = null
                 while (true) {
@@ -261,17 +261,17 @@ internal class SupervisorDaemonEngine(
         val sessionHandler = SupervisorSessionHandler(socketFd, listenerFd, engine, socketManager)
         try {
             NativeArena.ofConfined().use { arena ->
-                val pollFds = ConfinedSegment(arena.arena.allocate(java.lang.foreign.MemoryLayout.sequenceLayout(2, Layouts.POLLFD)))
-                val pfd1 = PollFdSegment(ConfinedSegment(pollFds.native.asSlice(0L, Layouts.POLLFD.byteSize())))
+                val pollFds = arena.allocate(Layouts.POLLFD, 2L)
+                val pfd1 = PollFdSegment(pollFds.asSlice(0L, Layouts.POLLFD_SIZE))
                 pfd1.setFd(listenerFd.value)
                 pfd1.setEvents(NativeConstants.POLLIN)
 
-                val pfd2 = PollFdSegment(ConfinedSegment(pollFds.native.asSlice(POLLFD_STRUCT_SIZE, Layouts.POLLFD.byteSize())))
+                val pfd2 = PollFdSegment(pollFds.asSlice(Layouts.POLLFD_SIZE, Layouts.POLLFD_SIZE))
                 pfd2.setFd(socketFd.value)
                 pfd2.setEvents(NativeConstants.POLLIN)
 
-                val notif = ConfinedSegment(arena.arena.allocate(Layouts.SECCOMP_NOTIF))
-                val resp = ConfinedSegment(arena.arena.allocate(Layouts.SECCOMP_NOTIF_RESP))
+                val notif = arena.allocate(Layouts.SECCOMP_NOTIF)
+                val resp = arena.allocate(Layouts.SECCOMP_NOTIF_RESP)
 
                 while (!isGlobalShutdown()) {
                     val pollRes = engine.withTransaction { engine.raw.poll(pollFds, 2L, POLL_TIMEOUT_MS) }

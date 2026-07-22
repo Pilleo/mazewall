@@ -153,6 +153,7 @@ object Layouts {
     val POLLFD_FD_OFFSET: Long = POLLFD.byteOffset(MemoryLayout.PathElement.groupElement("fd"))
     val POLLFD_EVENTS_OFFSET: Long = POLLFD.byteOffset(MemoryLayout.PathElement.groupElement("events"))
     val POLLFD_REVENTS_OFFSET: Long = POLLFD.byteOffset(MemoryLayout.PathElement.groupElement("revents"))
+    val POLLFD_SIZE: Long = POLLFD.byteSize()
 
     /**
      * Corresponds to `struct landlock_ruleset_attr` in `<linux/landlock.h>`.
@@ -162,6 +163,7 @@ object Layouts {
         ValueLayout.JAVA_LONG.withName("handled_access_net"),
     )
     const val LANDLOCK_RULESET_ATTR_V1_SIZE: Long = 8L
+    val LANDLOCK_RULESET_ATTR_SIZE: Long = LANDLOCK_RULESET_ATTR.byteSize()
     val LANDLOCK_RULESET_ATTR_FS_OFFSET: Long =
         LANDLOCK_RULESET_ATTR.byteOffset(MemoryLayout.PathElement.groupElement("handled_access_fs"))
     val LANDLOCK_RULESET_ATTR_NET_OFFSET: Long =
@@ -174,6 +176,7 @@ object Layouts {
         ValueLayout.JAVA_LONG.withByteAlignment(1).withName("allowed_access"),
         ValueLayout.JAVA_INT.withByteAlignment(1).withName("parent_fd"),
     )
+    val LANDLOCK_PATH_BENEATH_ATTR_SIZE: Long = LANDLOCK_PATH_BENEATH_ATTR.byteSize()
     val LANDLOCK_PATH_BENEATH_ATTR_ACCESS_OFFSET: Long =
         LANDLOCK_PATH_BENEATH_ATTR.byteOffset(MemoryLayout.PathElement.groupElement("allowed_access"))
     val LANDLOCK_PATH_BENEATH_ATTR_FD_OFFSET: Long =
@@ -215,4 +218,5 @@ object Layouts {
     const val SUPERVISOR_RESPONSE_DECISION_OFFSET: Long = 8L
     const val SUPERVISOR_RESPONSE_ERROR_OFFSET: Long = 12L
     const val SUPERVISOR_RESPONSE_SIZE: Long = 16L
+    val JAVA_BYTE: java.lang.foreign.ValueLayout.OfByte = java.lang.foreign.ValueLayout.JAVA_BYTE
 }

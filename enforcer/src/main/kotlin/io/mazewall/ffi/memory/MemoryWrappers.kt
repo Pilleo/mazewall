@@ -429,3 +429,5 @@ internal object StrerrorHelper {
 }
 
 public fun getSystemStrerror(errno: Int): String? = StrerrorHelper.getSystemStrerror(errno)
+
+public fun SeccompNotifAddFdSegment.fill(value: Byte) { this.segment.fill(value) }

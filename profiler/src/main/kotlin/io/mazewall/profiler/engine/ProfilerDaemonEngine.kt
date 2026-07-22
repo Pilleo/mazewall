@@ -42,7 +42,7 @@ internal class ProfilerDaemonEngine(
         private val POLLFD_FD_OFF = Layouts.POLLFD_FD_OFFSET
         private val POLLFD_EVENTS_OFF = Layouts.POLLFD_EVENTS_OFFSET
 
-        private const val DAEMON_READY_SENTINEL = "MAZEWALL_PROFILER_DAEMON_READY"
+        private const val DAEMON_READY_SENTINEL = "MAZEWALL_DAEMON_READY"
     }
 
     fun run() {
