@@ -142,10 +142,6 @@ graph TD
     issue_150_incomplete_ffm_architecture_isolation["🔴 Issue: Incomplete FFM Architecture Isolation (HIGH)"]
     issue_162_memory_alignment_verification_for_layoutskt_ffm_structures["🔴 Issue: Memory Alignment verification for `Layouts.kt` FFM Structures (HIGH)"]
     issue_169_inconsistent_architecture_test_for_javalangforeign["🔴 Issue: Inconsistent Architecture Test for `java.lang.foreign` (HIGH)"]
-    issue_172_memory_segment_scopes_and_lifetimes_re_evaluation["🔴 Issue: Memory Segment Scopes and Lifetimes (Re-evaluation) (HIGH)"]
-    issue_173_unhandled_signal_interruptions_eintr_in_socket_io["🔴 Issue: Unhandled Signal Interruptions (`EINTR`) in socket IO (HIGH)"]
-    issue_174_uncaught_exceptions_in_containedexecutorwrapperkt_during_fil["🔴 Issue: Uncaught exceptions in `ContainedExecutorWrapper.kt` during filter installation (HIGH)"]
-    issue_175_uncaught_native_exceptions_in_landlock_landlockstatekt["🔴 Issue: Uncaught Native Exceptions in Landlock `LandlockState.kt` (HIGH)"]
     issue_177_missing_archunit_test_for_ffm_architecture_boundary_violatio["🔴 Issue: Missing ArchUnit test for FFM architecture boundary violations (HIGH)"]
     issue_183_potential_buffer_overflow_outofboundsexception_on_long_unix_["🔴 Issue: Potential Buffer Overflow / OutOfBoundsException on Long UNIX Socket Paths (LOW)"]
     issue_190_unhandled_eintr_in_accept_in_supervisordaemonengine["🔴 Issue: Unhandled EINTR in accept in SupervisorDaemonEngine (MEDIUM)"]
@@ -307,10 +303,6 @@ graph TD
     click issue_150_incomplete_ffm_architecture_isolation "../../../backlog/performance/issue-150-incomplete-ffm-architecture-isolation.md"
     click issue_162_memory_alignment_verification_for_layoutskt_ffm_structures "../../../backlog/security/issue-162-memory-alignment-verification-for-layoutskt-ffm-structures.md"
     click issue_169_inconsistent_architecture_test_for_javalangforeign "../../../backlog/testing/issue-169-inconsistent-architecture-test-for-javalangforeign.md"
-    click issue_172_memory_segment_scopes_and_lifetimes_re_evaluation "../../../backlog/performance/issue-172-memory-segment-scopes-and-lifetimes-re-evaluation.md"
-    click issue_173_unhandled_signal_interruptions_eintr_in_socket_io "../../../backlog/performance/issue-173-unhandled-signal-interruptions-eintr-in-socket-io.md"
-    click issue_174_uncaught_exceptions_in_containedexecutorwrapperkt_during_fil "../../../backlog/performance/issue-174-uncaught-exceptions-in-containedexecutorwrapperkt-during-fil.md"
-    click issue_175_uncaught_native_exceptions_in_landlock_landlockstatekt "../../../backlog/security/issue-175-uncaught-native-exceptions-in-landlock-landlockstatekt.md"
     click issue_177_missing_archunit_test_for_ffm_architecture_boundary_violatio "../../../backlog/testing/issue-177-missing-archunit-test-for-ffm-architecture-boundary-violatio.md"
     click issue_183_potential_buffer_overflow_outofboundsexception_on_long_unix_ "../../../backlog/performance/issue-183-potential-buffer-overflow-outofboundsexception-on-long-unix-.md"
     click issue_190_unhandled_eintr_in_accept_in_supervisordaemonengine "../../../backlog/security/issue-190-unhandled-eintr-in-accept-in-supervisordaemonengine.md"
