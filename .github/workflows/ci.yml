@@ -94,18 +94,30 @@ jobs:
               with:
                   path: ${{ github.workspace }}/.cache/podman-image
                   key: podman-image-${{ hashFiles('infra/dev/Containerfile', 'demos/vulnerable-web-app/Containerfile') }}-${{ github.sha }}
+            - name: Restore NVD Database Cache
+              uses: actions/cache/restore@v4
+              with:
+                  path: ~/.gradle/dependency-check-data
+                  key: nvd-database-${{ runner.os }}-${{ github.run_id }}
+                  restore-keys: |
+                      nvd-database-${{ runner.os }}-
             - name: Run Security Check
               run: ./scripts/run_containerized_tests.sh dependencyCheckAnalyze
               env:
                   NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
-            - name: Save Gradle & NVD Cache (Always)
+            - name: Save NVD Database Cache (Always)
+              uses: actions/cache/save@v4
+              if: always()
+              with:
+                  path: ~/.gradle/dependency-check-data
+                  key: nvd-database-${{ runner.os }}-${{ github.run_id }}
+            - name: Save Gradle Cache (Always)
               uses: actions/cache/save@v4
               if: always()
               with:
                   path: |
                       ~/.gradle/caches
                       ~/.gradle/notifications
-                      ~/.gradle/dependency-check-data
                       ~/.gradle/build-cache
                       ~/.gradle/wrapper
                   key: gradle-cache-${{ runner.os }}-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}-${{ github.sha }}
