@@ -5,8 +5,7 @@ import io.mazewall.core.SeccompAction
 import io.mazewall.core.Syscall
 import io.mazewall.ffi.Layouts
 import io.mazewall.ffi.NativeConstants
-import io.mazewall.seccomp.BpfInstruction
-import io.mazewall.seccomp.BpfProgram
+import io.mazewall.seccomp.*
 import java.util.logging.Logger
 
 /**
@@ -44,13 +43,13 @@ object BpfFilter {
             profilingMode,
         )
 
-    internal fun getSyscallInspectionPipeline(): io.mazewall.seccomp.SyscallInspectionPipeline {
-        return io.mazewall.seccomp.DefaultSyscallInspectionPipeline(
+    internal fun getSyscallInspectionPipeline(): SyscallInspectionPipeline {
+        return DefaultSyscallInspectionPipeline(
             listOf(
-                io.mazewall.seccomp.MmapExecInspector(),
-                io.mazewall.seccomp.ThreadCloneInspector(),
-                io.mazewall.seccomp.UnsafePrctlInspector(),
-                io.mazewall.seccomp.Clone3Inspector(),
+                MmapExecInspector(),
+                ThreadCloneInspector(),
+                UnsafePrctlInspector(),
+                Clone3Inspector(),
             )
         )
     }
@@ -121,7 +120,7 @@ object BpfFilter {
 
         // 2. Specialized Syscall Argument Inspections (Plugin-based)
         val handledNrs = mutableSetOf<Int>()
-        val context = io.mazewall.seccomp.InspectionContext(
+        val context = InspectionContext(
             effectiveSyscallActions,
             defaultAction,
             jvmCriticalNrs,
@@ -160,8 +159,8 @@ object BpfFilter {
         ).filter { it >= 0 }.toSet()
 
     internal fun emitInspections(
-        builder: io.mazewall.seccomp.BpfBuilder.NrLoaded,
-        inspections: List<io.mazewall.seccomp.SyscallInspection>,
+        builder: BpfBuilder<BpfState.NrLoaded>,
+        inspections: List<SyscallInspection>,
         profilingMode: Boolean,
         handledNrs: MutableSet<Int>,
     ) {
@@ -178,7 +177,7 @@ object BpfFilter {
                 val argOffsetHi = argOffsetLo + 4
 
                 when (val check = inspection.check) {
-                    is io.mazewall.seccomp.ArgCheck.EqualsAny -> {
+                    is ArgCheck.EqualsAny -> {
                         val allowLabel = nextLabel("${labelPrefix}_allow")
                         check.allowedValues.forEachIndexed { valIdx, value ->
                             val hi = (value ushr 32).toInt()
@@ -199,7 +198,7 @@ object BpfFilter {
                         ret(ifMatchedNative)
                     }
 
-                    is io.mazewall.seccomp.ArgCheck.MaskEquals -> {
+                    is ArgCheck.MaskEquals -> {
                         val maskHi = (check.mask ushr 32).toInt()
                         val expectedHi = (check.expected ushr 32).toInt()
                         val maskLo = check.mask.toInt()
@@ -227,7 +226,7 @@ object BpfFilter {
     }
 
     private fun emitLinearScan(
-        builder: io.mazewall.seccomp.BpfBuilder.NrLoaded,
+        builder: BpfBuilder<BpfState.NrLoaded>,
         syscallActions: Map<Int, SeccompAction>,
         jvmCriticalNrs: Set<Int>,
         profilingMode: Boolean,

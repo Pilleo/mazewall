@@ -10,7 +10,7 @@ internal interface SyscallInspectionPipeline {
     val inspectors: List<SyscallInspector>
     fun getInspections(arch: Arch, context: InspectionContext): List<SyscallInspection>
     fun emitSpecial(
-        builder: BpfBuilder.NrLoaded,
+        builder: BpfBuilder<BpfState.NrLoaded>,
         arch: Arch,
         context: InspectionContext,
         handledNrs: MutableSet<Int>
@@ -28,7 +28,7 @@ internal class DefaultSyscallInspectionPipeline(
     }
 
     override fun emitSpecial(
-        builder: BpfBuilder.NrLoaded,
+        builder: BpfBuilder<BpfState.NrLoaded>,
         arch: Arch,
         context: InspectionContext,
         handledNrs: MutableSet<Int>

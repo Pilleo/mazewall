@@ -10,7 +10,7 @@ import io.mazewall.core.FileDescriptorRole
 import io.mazewall.core.NativeArg
 import io.mazewall.ffi.NativeConstants
 import io.mazewall.getFdOrThrow
-import io.mazewall.seccomp.BpfNativeCache
+import io.mazewall.seccomp.*
 import io.mazewall.ffi.memory.ConfinedSegment
 import java.lang.foreign.MemorySegment
 import java.util.concurrent.CountDownLatch
@@ -48,10 +48,10 @@ public object SupervisorSeccompNotifInstaller {
 
         // Pre-charge BpfProgram classloading to avoid deadlocks under active seccomp filters
         val dummyBpf = if (processWide) {
-            io.mazewall.seccomp.BpfProgram.dsl(arch) { allow() }.instructions
+            BpfProgram.dsl(arch) { allow() }.instructions
         } else {
             // Also build a dummy program unconditionally to pre-charge classloading
-            io.mazewall.seccomp.BpfProgram.dsl(arch) { allow() }.instructions
+            BpfProgram.dsl(arch) { allow() }.instructions
             null
         }
 
