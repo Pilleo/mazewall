@@ -102,7 +102,7 @@ jobs:
                   restore-keys: |
                       nvd-database-${{ runner.os }}-
             - name: Run Security Check
-              run: ./scripts/run_containerized_tests.sh dependencyCheckAnalyze
+              run: ./scripts/run_containerized_tests.sh dependencyCheckAnalyze --info
               env:
                   NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
             - name: Save NVD Database Cache (Always)
