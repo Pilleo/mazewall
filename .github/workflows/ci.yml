@@ -27,6 +27,7 @@ jobs:
               uses: gradle/actions/setup-gradle@v4
               with:
                   cache-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
+                  cache-read-only: false
                   gradle-home-cache-includes: |
                       caches
                       notifications
