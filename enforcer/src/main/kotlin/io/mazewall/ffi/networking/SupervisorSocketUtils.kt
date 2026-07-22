@@ -5,6 +5,7 @@ import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
 import io.mazewall.ffi.Layouts
+import io.mazewall.ffi.NativeConstants
 import io.mazewall.ffi.memory.CmsghdrSegment
 import io.mazewall.ffi.memory.IovecSegment
 import io.mazewall.ffi.memory.MsghdrSegment
@@ -85,7 +86,7 @@ public object SupervisorSocketUtils {
             var lastErrno = 0
             for (retry in 0 until maxRetries) {
                 val fdRes = LinuxNative.withTransaction {
-                    LinuxNative.networking.socket(AF_UNIX, SOCK_STREAM, 0)
+                    LinuxNative.networking.socket(AF_UNIX, SOCK_STREAM or NativeConstants.SOCK_CLOEXEC, 0)
                 }
                 val fdVal = when (fdRes) {
                     is LinuxNative.SyscallResult.Success -> fdRes.value.toInt()

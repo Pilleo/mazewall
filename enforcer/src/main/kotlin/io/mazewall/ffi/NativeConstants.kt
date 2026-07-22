@@ -68,4 +68,7 @@ object NativeConstants {
     const val O_PATH = 0x01000000
     const val O_CLOEXEC = 0x00080000
     const val O_NOFOLLOW = 0x00020000
+
+    // Socket options
+    const val SOCK_CLOEXEC = 0x00080000
 }

@@ -55,7 +55,7 @@ class SupervisorDaemonEngineTest {
     fun `handleNewConnection retries on EINTR`() {
         var acceptCalls = 0
         val mockEngine = MockNativeEngine()
-        mockEngine.networking.onAccept = { _, _, _, _ ->
+        mockEngine.networking.onAccept4 = { _, _, _, _, _ ->
             acceptCalls++
             if (acceptCalls == 1) {
                 LinuxNative.SyscallResult.Error(NativeConstants.EINTR, -1L)
