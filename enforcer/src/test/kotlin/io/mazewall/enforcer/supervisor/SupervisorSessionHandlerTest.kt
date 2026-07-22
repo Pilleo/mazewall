@@ -76,8 +76,30 @@ class SupervisorSessionHandlerTest {
     fun `readAndHandleJvmResponse handles pointer-based syscalls securely without continue`() {
         var lastIoctlRequest: Long? = null
         var lastIoctlArg: io.mazewall.ffi.memory.ManagedSegment? = null
+        var vmWritevCalled = false
+        var capturedPid: io.mazewall.core.Pid? = null
+        var capturedLocalLen: Long? = null
+        var capturedRemoteBase: Long? = null
+        var capturedRemoteLen: Long? = null
 
         val mockMemory = object : io.mazewall.MockNativeMemory() {
+            context(_: NativeTransaction)
+            override fun processVmWritev(
+                pid: io.mazewall.core.Pid,
+                localIov: io.mazewall.ffi.memory.ManagedSegment,
+                liovcnt: Long,
+                remoteIov: io.mazewall.ffi.memory.ManagedSegment,
+                riovcnt: Long,
+                flags: Long,
+            ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                vmWritevCalled = true
+                capturedPid = pid
+                capturedLocalLen = localIov.readLong(8)
+                capturedRemoteBase = remoteIov.readLong(0)
+                capturedRemoteLen = remoteIov.readLong(8)
+                return LinuxNative.SyscallResult.Success(capturedLocalLen!!)
+            }
+
             context(_: NativeTransaction)
             override fun read(
                 fd: FileDescriptor<*, FdState.Open>,
@@ -126,69 +148,83 @@ class SupervisorSessionHandlerTest {
             }
         }
 
-        LinuxNative.setEngine(mockEngine)
+        try {
+            LinuxNative.setEngine(mockEngine)
 
-        // Instantiate handler with dummy file descriptors
-        val handler = SupervisorSessionHandler(
-            FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(10),
-            FileDescriptor.unsafe<FileDescriptorRole.SeccompNotif>(11)
-        )
-
-        val method = SupervisorSessionHandler::class.java.getDeclaredMethods().first {
-            it.name.startsWith("readAndHandleJvmResponse") && !it.name.contains("$") && it.parameterCount == 9
-        }
-        method.isAccessible = true
-
-        val arch = io.mazewall.core.Arch.current()
-
-        io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
-            val dummyResp = arena.allocate(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_RESP)
-
-            // 1. Test open (should be upgraded to SECCOMP_IOCTL_NOTIF_ADDFD / emulation)
-            lastIoctlRequest = null
-            lastIoctlArg = null
-            val argsOpen = LongArray(6)
-            argsOpen[0] = 0x12345678L
-            val pathStr = "/bin/echo"
-
-            method.invoke(
-                handler,
-                arena,
-                42L, // id
-                arch.open, // nr
-                argsOpen,
-                pathStr,
-                null, // sockaddrBytes
-                dummyResp,
-                999, // tid
-                arch
+            // Instantiate handler with dummy file descriptors
+            val handler = SupervisorSessionHandler(
+                FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(10),
+                FileDescriptor.unsafe<FileDescriptorRole.SeccompNotif>(11)
             )
 
-            // SECCOMP_IOCTL_NOTIF_ADDFD is 0xc0182103L
-            assertEquals(io.mazewall.ffi.NativeConstants.SECCOMP_IOCTL_NOTIF_ADDFD, lastIoctlRequest)
+            val method = SupervisorSessionHandler::class.java.getDeclaredMethods().first {
+                it.name.startsWith("readAndHandleJvmResponse") && !it.name.contains("$") && it.parameterCount == 9
+            }
+            method.isAccessible = true
 
-            // 2. Test execve (cannot be emulated, must be denied with EPERM)
-            lastIoctlRequest = null
-            lastIoctlArg = null
+            val arch = io.mazewall.core.Arch.current()
 
-            method.invoke(
-                handler,
-                arena,
-                42L, // id
-                arch.execve, // nr
-                argsOpen,
-                pathStr,
-                null, // sockaddrBytes
-                dummyResp,
-                999, // tid
-                arch
-            )
+            io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
+                val dummyResp = arena.allocate(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_RESP)
+                val pathStr = "/bin/echo"
 
-            // SECCOMP_IOCTL_NOTIF_SEND is 0xc0182101L
-            assertEquals(io.mazewall.ffi.NativeConstants.SECCOMP_IOCTL_NOTIF_SEND, lastIoctlRequest)
-            // Error code should be -EPERM (which is -1)
-            val errorNr = lastIoctlArg!!.readInt(16)
-            assertEquals(-io.mazewall.ffi.NativeConstants.EPERM, errorNr)
+                val invokeReadAndHandleJvmResponse = { nr: Int, argsArray: LongArray ->
+                    val paramTypes = method.parameterTypes
+                    val argsToPass = arrayOfNulls<Any>(paramTypes.size)
+                    argsToPass[0] = arena
+                    argsToPass[1] = 42L
+                    argsToPass[2] = nr
+                    argsToPass[3] = argsArray
+                    argsToPass[4] = pathStr
+                    argsToPass[5] = null
+                    argsToPass[6] = dummyResp
+                    for (i in paramTypes.indices) {
+                        val type = paramTypes[i]
+                        if (type.name.contains("Tid")) {
+                            argsToPass[i] = io.mazewall.core.Tid(999)
+                        } else if (type.name.contains("Pid")) {
+                            argsToPass[i] = io.mazewall.core.Pid(999)
+                        } else if (i == 7 && (type == Int::class.javaPrimitiveType || type == java.lang.Integer::class.java)) {
+                            argsToPass[i] = 999
+                        }
+                    }
+                    argsToPass[8] = arch
+                    method.invoke(handler, *argsToPass)
+                }
+
+                // 1. Test open (should be upgraded to SECCOMP_IOCTL_NOTIF_ADDFD / emulation)
+                lastIoctlRequest = null
+                lastIoctlArg = null
+                val argsOpen = LongArray(6)
+                argsOpen[0] = 0x12345678L
+
+                invokeReadAndHandleJvmResponse(arch.open, argsOpen)
+
+                // SECCOMP_IOCTL_NOTIF_ADDFD is 0xc0182103L
+                assertEquals(io.mazewall.ffi.NativeConstants.SECCOMP_IOCTL_NOTIF_ADDFD, lastIoctlRequest)
+
+                // 2. Test execve (cannot be natively emulated, so we write back the validated memory and continue)
+                lastIoctlRequest = null
+                lastIoctlArg = null
+                vmWritevCalled = false
+
+                invokeReadAndHandleJvmResponse(arch.execve, argsOpen)
+
+                // SECCOMP_IOCTL_NOTIF_SEND is 0xc0182101L (since we call sendSeccompContinue)
+                assertEquals(io.mazewall.ffi.NativeConstants.SECCOMP_IOCTL_NOTIF_SEND, lastIoctlRequest)
+                // Wait, sendSeccompContinue sets flags to SECCOMP_USER_NOTIF_FLAG_CONTINUE (offset 20)
+                val flags = lastIoctlArg!!.readInt(20)
+                assertEquals(io.mazewall.ffi.NativeConstants.SECCOMP_USER_NOTIF_FLAG_CONTINUE.toInt(), flags)
+
+                // And it must write back the validated string to prevent TOCTOU!
+                assertEquals(true, vmWritevCalled, "process_vm_writev should be called for execve")
+                assertEquals(io.mazewall.core.Pid(999), capturedPid)
+                assertEquals(pathStr.length + 1L, capturedLocalLen)
+                assertEquals(0x12345678L, capturedRemoteBase)
+                assertEquals(pathStr.length + 1L, capturedRemoteLen)
+            }
+        } finally {
+            LinuxNative.resetToDefault()
         }
     }
 }
