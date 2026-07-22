@@ -39,7 +39,7 @@ internal interface SyscallInspector {
      * Used for syscalls that don't fit the standard ArgCheck model (e.g. clone3).
      */
     fun emitSpecial(
-        builder: BpfBuilder.NrLoaded,
+        builder: BpfBuilder<BpfState.NrLoaded>,
         arch: Arch,
         context: InspectionContext,
         handledNrs: MutableSet<Int>
@@ -53,7 +53,7 @@ internal interface SyscallInspector {
  */
 internal class Clone3Inspector : SyscallInspector {
     override fun emitSpecial(
-        builder: BpfBuilder.NrLoaded,
+        builder: BpfBuilder<BpfState.NrLoaded>,
         arch: Arch,
         context: InspectionContext,
         handledNrs: MutableSet<Int>
