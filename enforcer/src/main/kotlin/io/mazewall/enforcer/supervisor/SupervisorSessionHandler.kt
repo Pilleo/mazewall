@@ -500,7 +500,10 @@ internal class SupervisorSessionHandler(
             logger.warning("[SUPERVISOR-DIAGNOSTIC] JVM policy validation took ${durationMs}ms (syscall nr=$nr, path=$pathStr, id=$id). Possible deadlock or slow stack trace resolution.")
         }
         if (count <= 0) {
-            logger.severe("[SUPERVISOR-DIAGNOSTIC] JVM validation timed out or failed after ${durationMs}ms (syscall nr=$nr, path=$pathStr, id=$id). Returning EPERM.")
+            logger.severe("[SUPERVISOR-DIAGNOSTIC] JVM validation timed out or failed after ${durationMs}ms (syscall nr=$nr, path=$pathStr, id=$id). Closing socket to prevent desynchronization and returning EPERM.")
+            try {
+                socketManager.close(socketFd)
+            } catch (ignored: Exception) {}
             sendSeccompError(id, NativeConstants.EPERM, resp)
             return false
         }
