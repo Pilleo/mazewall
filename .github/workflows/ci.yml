@@ -23,6 +23,18 @@ jobs:
               with:
                   java-version: "25"
                   distribution: "temurin"
+            - name: Restore Gradle & NVD Cache
+              uses: actions/cache/restore@v4
+              with:
+                  path: |
+                      ~/.gradle/caches
+                      ~/.gradle/notifications
+                      ~/.gradle/dependency-check-data
+                      ~/.gradle/build-cache
+                  key: gradle-cache-${{ runner.os }}-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}-${{ github.sha }}
+                  restore-keys: |
+                      gradle-cache-${{ runner.os }}-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}-
+                      gradle-cache-${{ runner.os }}-
             - name: Setup Gradle
               uses: gradle/actions/setup-gradle@v4
               with:
@@ -99,7 +111,7 @@ jobs:
                       ~/.gradle/notifications
                       ~/.gradle/dependency-check-data
                       ~/.gradle/build-cache
-                  key: gradle-always-${{ runner.os }}-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}-${{ github.run_id }}
+                  key: gradle-cache-${{ runner.os }}-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}-${{ github.sha }}
             - name: Publish to GitHub Packages
               if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
               run: ./scripts/run_containerized_tests.sh publishAllPublicationsToGitHubPackagesRepository --info
