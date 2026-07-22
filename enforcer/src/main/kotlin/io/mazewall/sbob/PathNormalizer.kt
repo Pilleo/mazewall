@@ -37,16 +37,7 @@ public object PathNormalizer {
                 }
                 p = baseCwd.resolve(p)
             }
-            try {
-                // toRealPath() resolves symlinks and handles '..' correctly according to the physical VFS.
-                p.toRealPath()
-            } catch (e: IOException) {
-                // If the path does not exist, we fall back to syntactic normalization.
-                // This is necessary for rules targeting files that might be created later.
-                p.toAbsolutePath().normalize()
-            } catch (e: SecurityException) {
-                p.toAbsolutePath().normalize()
-            }
+            resolvePhysicalOrSyntactic(p)
         }.distinct().sorted()
 
         val result = mutableListOf<Path>()
@@ -69,5 +60,31 @@ public object PathNormalizer {
             }
         }
         return result.map { it.toString() }.toSet()
+    }
+
+    private fun resolvePhysicalOrSyntactic(p: Path): Path {
+        var current = p.toAbsolutePath()
+        var suffix = Paths.get("")
+        while (current != null) {
+            try {
+                // Try to resolve the current parent prefix physically
+                val real = current.toRealPath()
+                return real.resolve(suffix).normalize()
+            } catch (e: IOException) {
+                // Parent component doesn't exist or can't be resolved, move up
+                val fileName = current.fileName
+                if (fileName != null) {
+                    suffix = Paths.get(fileName.toString()).resolve(suffix)
+                }
+                current = current.parent
+            } catch (e: SecurityException) {
+                val fileName = current.fileName
+                if (fileName != null) {
+                    suffix = Paths.get(fileName.toString()).resolve(suffix)
+                }
+                current = current.parent
+            }
+        }
+        return p.toAbsolutePath().normalize()
     }
 }

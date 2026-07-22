@@ -46,4 +46,24 @@ class PathNormalizerSymlinkTest {
 
         assertEquals(setOf(realParent.toRealPath().toString()), result)
     }
+
+    @Test
+    fun `test symlink with dot dot non existent`(@TempDir tempDir: Path) {
+        val subDir = tempDir.resolve("sub")
+        val dir = subDir.resolve("dir")
+        Files.createDirectories(dir)
+
+        val symlink = tempDir.resolve("sym_link")
+        Files.createSymbolicLink(symlink, dir)
+
+        // Path: tempDir/sym_link/../other_file
+        // Physically: tempDir/sub/dir/../other_file -> tempDir/sub/other_file
+        // Syntactically: tempDir/other_file
+        val pathStr = symlink.resolve("../other_file").toString()
+
+        val result = PathNormalizer.normalizeAndPrune(setOf(pathStr), null)
+
+        val expectedPhysical = subDir.resolve("other_file").toAbsolutePath().normalize().toString()
+        assertEquals(setOf(expectedPhysical), result)
+    }
 }
