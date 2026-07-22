@@ -1,0 +1,3 @@
+# Auto-resolve concurrent backlog additions without textual merge conflicts
+docs/internals/backlog/*.md merge=union
+docs/internals/designs/core/maps/*.md merge=union
