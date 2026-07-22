@@ -122,10 +122,16 @@ internal object PureJavaBpfEngine : SeccompEngine<EngineState> {
      */
     internal fun setNoNewPrivs() {
         // Step 1: Set no_new_privs (mandatory for non-root seccomp)
-        val r1 = LinuxNative.withTransaction {
-            LinuxNative.process.prctl(PrctlCommand.SetNoNewPrivs(true))
+        while (true) {
+            val r1 = LinuxNative.withTransaction {
+                LinuxNative.process.prctl(PrctlCommand.SetNoNewPrivs(true))
+            }
+            if (r1 is LinuxNative.SyscallResult.Error && r1.errno == NativeConstants.EINTR) {
+                continue
+            }
+            r1.getOrThrow("prctl(PR_SET_NO_NEW_PRIVS)")
+            break
         }
-        r1.getOrThrow("prctl(PR_SET_NO_NEW_PRIVS)")
     }
 
     internal fun installFilter(
@@ -135,13 +141,20 @@ internal object PureJavaBpfEngine : SeccompEngine<EngineState> {
     ): SeccompInstallationState.FilterApplied {
         // Try modern seccomp(2) syscall first
         val flags = if (useTsync) NativeConstants.SECCOMP_FILTER_FLAG_TSYNC.toLong() else 0L
-        val r3 = LinuxNative.withTransaction {
-            LinuxNative.raw.syscall(
-                arch.seccompSyscallNumber.toLong(),
-                io.mazewall.core.NativeArg.LongArg(NativeConstants.SECCOMP_SET_MODE_FILTER.toLong()),
-                io.mazewall.core.NativeArg.LongArg(flags),
-                io.mazewall.core.NativeArg.MemoryArg(prog),
+        var r3: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled>
+        while (true) {
+            r3 = LinuxNative.withTransaction {
+                LinuxNative.raw.syscall(
+                    arch.seccompSyscallNumber.toLong(),
+                    io.mazewall.core.NativeArg.LongArg(NativeConstants.SECCOMP_SET_MODE_FILTER.toLong()),
+                    io.mazewall.core.NativeArg.LongArg(flags),
+                    io.mazewall.core.NativeArg.MemoryArg(prog),
                 )
+            }
+            if (r3 is LinuxNative.SyscallResult.Error && r3.errno == NativeConstants.EINTR) {
+                continue
+            }
+            break
         }
 
         if (r3 is LinuxNative.SyscallResult.Error) {
@@ -157,13 +170,20 @@ internal object PureJavaBpfEngine : SeccompEngine<EngineState> {
                 throw IllegalStateException("Process-wide seccomp installation (TSYNC) failed: $detail")
             }
 
-            val r4 = LinuxNative.withTransaction {
-                LinuxNative.process.prctl(
-                    PrctlCommand.SetSeccomp(
-                        NativeConstants.SECCOMP_MODE_FILTER.toLong(),
-                        io.mazewall.core.NativeArg.MemoryArg(prog)
+            var r4: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled>
+            while (true) {
+                r4 = LinuxNative.withTransaction {
+                    LinuxNative.process.prctl(
+                        PrctlCommand.SetSeccomp(
+                            NativeConstants.SECCOMP_MODE_FILTER.toLong(),
+                            io.mazewall.core.NativeArg.MemoryArg(prog)
+                        )
                     )
-                )
+                }
+                if (r4 is LinuxNative.SyscallResult.Error && r4.errno == NativeConstants.EINTR) {
+                    continue
+                }
+                break
             }
 
             if (r4 is LinuxNative.SyscallResult.Error) {
@@ -188,8 +208,15 @@ internal object PureJavaBpfEngine : SeccompEngine<EngineState> {
         }
 
         // Verify filter is actually installed
-        val r5 = LinuxNative.withTransaction {
-            LinuxNative.process.prctl(PrctlCommand.GetSeccomp)
+        var r5: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled>
+        while (true) {
+            r5 = LinuxNative.withTransaction {
+                LinuxNative.process.prctl(PrctlCommand.GetSeccomp)
+            }
+            if (r5 is LinuxNative.SyscallResult.Error && r5.errno == NativeConstants.EINTR) {
+                continue
+            }
+            break
         }
         val mode = r5.getOrThrow("prctl(PR_GET_SECCOMP)")
         if (mode != 2L) {
