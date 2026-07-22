@@ -86,16 +86,16 @@ class "ProfilerInstallerSession" as io.mazewall.profiler.engine.ProfilerInstalle
 interface "ProfilerInstallerState" as io.mazewall.profiler.engine.ProfilerInstallerState {
 }
 interface "ProfilerMemoryReader" as io.mazewall.profiler.engine.ProfilerMemoryReader {
-  + {abstract}String readStringFromProcess(Arena, int, long, int)
-  + {abstract}String resolveLink(Arena, int, String)
+  + {abstract}String readStringFromProcess(NativeArena, int, long, int)
+  + {abstract}String resolveLink(NativeArena, int, String)
 }
 class "ProfilerSessionHandler" as io.mazewall.profiler.engine.ProfilerSessionHandler {
   + {static}Companion Companion
   __
   +SessionEventLedger getLedger()
   +ProfilerState getState()
-  +LoopAction handleActiveListener(Arena, MemorySegment, MemorySegment, MemorySegment, MemorySegment, MemorySegment)
-  +boolean processNotification(Arena, MemorySegment, MemorySegment, MemorySegment, MemorySegment)
+  +LoopAction handleActiveListener(NativeArena, ManagedSegment, ManagedSegment, ManagedSegment, ManagedSegment, ManagedSegment)
+  +boolean processNotification(NativeArena, ManagedSegment, ManagedSegment, ManagedSegment, ManagedSegment)
 }
 interface "ProfilerState" as io.mazewall.profiler.engine.ProfilerState {
   + {abstract}FileDescriptor<UnixSocket, Open> getSocketFd()
@@ -108,8 +108,8 @@ class "ProfilerTransportKt" as io.mazewall.profiler.engine.ProfilerTransportKt {
 class "RealMemoryReader" as io.mazewall.profiler.engine.RealMemoryReader {
   + {static}RealMemoryReader INSTANCE
   __
-  +String readStringFromProcess(Arena, int, long, int)
-  +String resolveLink(Arena, int, String)
+  +String readStringFromProcess(NativeArena, int, long, int)
+  +String resolveLink(NativeArena, int, String)
 }
 class "RealProfilerTransport" as io.mazewall.profiler.engine.RealProfilerTransport {
   + {static}RealProfilerTransport INSTANCE
@@ -158,7 +158,7 @@ class "SyscallEventKt" as io.mazewall.profiler.engine.SyscallEventKt {
 interface "SyscallEventState" as io.mazewall.profiler.engine.SyscallEventState {
 }
 class "SyscallPathResolver" as io.mazewall.profiler.engine.SyscallPathResolver {
-  +SyscallEvent<Resolved> resolve(Arena, SyscallEvent<? extends Raw>)
+  +SyscallEvent<Resolved> resolve(NativeArena, SyscallEvent<? extends Raw>)
 }
 abstract class "TraceEvent" as io.mazewall.profiler.engine.TraceEvent {
   + {static}Companion Companion
@@ -197,7 +197,7 @@ class "ProfilerSocket" as io.mazewall.profiler.internal.ProfilerSocket {
   __
   +int connectWithRetry(String, int, long)
   +boolean sendDescriptor(int, int)
-  +MemorySegment setupSockAddrUn(Arena, String)
+  +MemorySegment setupSockAddrUn(NativeArena, String)
 }
 class "ProfilerTraceListener" as io.mazewall.profiler.internal.ProfilerTraceListener {
   + {static}Companion Companion
