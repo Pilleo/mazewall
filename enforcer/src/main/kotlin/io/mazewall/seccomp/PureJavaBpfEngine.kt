@@ -15,6 +15,8 @@ import io.mazewall.enforcer.ThreadStateRegistry
 import io.mazewall.enforcer.ContainerState
 import io.mazewall.ffi.NativeConstants
 import io.mazewall.ffi.memory.nativeScope
+import java.util.logging.Logger
+import java.util.logging.Level
 
 /**
  * Pure Java implementation of the seccomp engine.
@@ -22,6 +24,8 @@ import io.mazewall.ffi.memory.nativeScope
  */
 // @ref: docs/internals/designs/enforcer/containment-design.md — prctl/seccomp(2) install sequence, TSYNC flag semantics, FFM memory layout
 internal object PureJavaBpfEngine : SeccompEngine<EngineState> {
+    private val logger = Logger.getLogger(PureJavaBpfEngine::class.java.name)
+
     /**
      * Clears the native filter cache. Used for testing.
      */
@@ -86,26 +90,39 @@ internal object PureJavaBpfEngine : SeccompEngine<EngineState> {
             updateState(applied)
             val verified = applied.verify(policy.definition)
             updateState(verified)
-        } catch (e: Throwable) {
-            val stepName = when (ThreadStateRegistry.state.engineState) {
-                is SeccompInstallationState.PrivilegesLocked -> "installFilter"
-                is SeccompInstallationState.SystemCallApplied -> "verifyInstallation"
-                is SeccompInstallationState.FallbackPrctlApplied -> "verifyInstallation"
-                is SeccompInstallationState.FilterBuilt -> "setNoNewPrivs"
-                is SeccompInstallationState.Uninitialized -> "buildFilter"
-                is SeccompInstallationState.Verified -> "verified"
-                is SeccompInstallationState.Failed -> "failed"
-            }
-            val errno = when {
-                e.message?.contains("errno") == true -> {
-                    val match = Regex("errno\\s*=?\\s*(-?\\d+)").find(e.message ?: "")
-                    match?.groupValues?.get(1)?.toIntOrNull() ?: -1
-                }
-
-                else -> -1
-            }
+        } catch (e: Exception) {
+            val stepName = getStepName()
+            val errno = getErrno(e)
             updateState(SeccompInstallationState.Failed(stepName, errno, e))
             throw e
+        } catch (e: Error) {
+            val stepName = getStepName()
+            logger.log(Level.SEVERE, "FATAL: Uncaught native or JVM error during seccomp installation at step $stepName", e)
+            val errno = getErrno(e)
+            updateState(SeccompInstallationState.Failed(stepName, errno, e))
+            throw e
+        }
+    }
+
+    private fun getStepName(): String {
+        return when (ThreadStateRegistry.state.engineState) {
+            is SeccompInstallationState.PrivilegesLocked -> "installFilter"
+            is SeccompInstallationState.SystemCallApplied -> "verifyInstallation"
+            is SeccompInstallationState.FallbackPrctlApplied -> "verifyInstallation"
+            is SeccompInstallationState.FilterBuilt -> "setNoNewPrivs"
+            is SeccompInstallationState.Uninitialized -> "buildFilter"
+            is SeccompInstallationState.Verified -> "verified"
+            is SeccompInstallationState.Failed -> "failed"
+        }
+    }
+
+    private fun getErrno(e: Throwable): Int {
+        return when {
+            e.message?.contains("errno") == true -> {
+                val match = Regex("errno\\s*=?\\s*(-?\\d+)").find(e.message ?: "")
+                match?.groupValues?.get(1)?.toIntOrNull() ?: -1
+            }
+            else -> -1
         }
     }
 
