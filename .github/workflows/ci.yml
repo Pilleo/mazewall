@@ -93,7 +93,7 @@ jobs:
               if: always()
               with:
                   path: ${{ github.workspace }}/.cache/podman-image
-                  key: podman-image-${{ hashFiles('infra/dev/Containerfile', 'demos/vulnerable-web-app/Containerfile') }}
+                  key: podman-image-${{ hashFiles('infra/dev/Containerfile', 'demos/vulnerable-web-app/Containerfile') }}-${{ github.sha }}
             - name: Run Security Check
               run: ./scripts/run_containerized_tests.sh dependencyCheckAnalyze
               env:
