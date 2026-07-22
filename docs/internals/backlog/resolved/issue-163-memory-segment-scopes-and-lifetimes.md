@@ -1,7 +1,7 @@
 ---
 title: "Memory Segment Scopes and Lifetimes"
 severity: "HIGH"
-status: "open"
+status: "resolved"
 priority: 9
 dependencies: []
 component: "enforcer"
@@ -10,6 +10,7 @@ autonomy: "supervised"
 solution_approved: false
 blast_radius: "medium"
 reversible: true
+github_issue: 155
 ---
 
 # 🔴 [Severity: LOW]: Memory Segment Scopes and Lifetimes
