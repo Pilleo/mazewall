@@ -1,4 +1,4 @@
-package io.mazewall.enforcer.supervisor
+package io.mazewall.ffi.networking
 
 import io.mazewall.LinuxNative
 import io.mazewall.core.FdState

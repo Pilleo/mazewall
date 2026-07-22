@@ -138,7 +138,6 @@ graph TD
     issue_148_asynchronous_supervisor_socket_reads_timeout_failure_handlin["🔴 Issue: Asynchronous Supervisor socket reads timeout failure handling (HIGH)"]
     issue_149_classloader_deadlock_in_jvm_validation_listener["🔴 Issue: Classloader Deadlock in JVM Validation Listener (CRITICAL)"]
     issue_150_incomplete_ffm_architecture_isolation["🔴 Issue: Incomplete FFM Architecture Isolation (HIGH)"]
-    issue_152_ci_podman_container_caching_missing["🔴 Issue: CI Podman Container Caching Missing (HIGH)"]
     issue_162_memory_alignment_verification_for_layoutskt_ffm_structures["🔴 Issue: Memory Alignment verification for `Layouts.kt` FFM Structures (HIGH)"]
     issue_163_memory_segment_scopes_and_lifetimes["🔴 Issue: Memory Segment Scopes and Lifetimes (HIGH)"]
     issue_164_toctou_vulnerability_in_supervisor_syscall_emulation_via_pro["🔴 Issue: TOCTOU Vulnerability in Supervisor Syscall Emulation via `process_vm_readv` (HIGH)"]
@@ -302,7 +301,6 @@ graph TD
     click issue_148_asynchronous_supervisor_socket_reads_timeout_failure_handlin "../../../backlog/testing/issue-148-asynchronous-supervisor-socket-reads-timeout-failure-handlin.md"
     click issue_149_classloader_deadlock_in_jvm_validation_listener "../../../backlog/security/issue-149-classloader-deadlock-in-jvm-validation-listener.md"
     click issue_150_incomplete_ffm_architecture_isolation "../../../backlog/performance/issue-150-incomplete-ffm-architecture-isolation.md"
-    click issue_152_ci_podman_container_caching_missing "../../../backlog/testing/issue-152-ci-podman-container-caching-missing.md"
     click issue_162_memory_alignment_verification_for_layoutskt_ffm_structures "../../../backlog/security/issue-162-memory-alignment-verification-for-layoutskt-ffm-structures.md"
     click issue_163_memory_segment_scopes_and_lifetimes "../../../backlog/performance/issue-163-memory-segment-scopes-and-lifetimes.md"
     click issue_164_toctou_vulnerability_in_supervisor_syscall_emulation_via_pro "../../../backlog/security/issue-164-toctou-vulnerability-in-supervisor-syscall-emulation-via-pro.md"
