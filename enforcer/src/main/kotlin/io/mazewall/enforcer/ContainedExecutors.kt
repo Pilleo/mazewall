@@ -134,6 +134,13 @@ object ContainedExecutors {
             if (!processWide && initialState != null) {
                 ThreadStateRegistry.state = initialState
             }
+            val fallback = Platform.configuredFallback()
+            if (fallback != Platform.FallbackBehavior.FAIL) {
+                if (fallback == Platform.FallbackBehavior.valueOf("WARN_AND_BYPASS")) {
+                    logger.warning("Seccomp installation failed: ${t.message}. Code will run uncontained.")
+                }
+                return AutoCloseable {}
+            }
             throw t
         }
     }
