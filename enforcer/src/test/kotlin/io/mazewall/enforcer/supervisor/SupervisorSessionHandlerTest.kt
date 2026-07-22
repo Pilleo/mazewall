@@ -12,6 +12,9 @@ import io.mazewall.RawSyscallOperations
 import io.mazewall.ffi.internal.RealNativeEngine
 import io.mazewall.ffi.memory.readLong
 import io.mazewall.ffi.memory.readInt
+import io.mazewall.ffi.memory.writeLong
+import io.mazewall.ffi.memory.writeInt
+import io.mazewall.ffi.memory.PollFdSegment
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
@@ -312,6 +315,263 @@ class SupervisorSessionHandlerTest {
                 assertEquals(pathStr.length + 1L, capturedLocalLen)
                 assertEquals(0x12345678L, capturedRemoteBase)
                 assertEquals(pathStr.length + 1L, capturedRemoteLen)
+            }
+        } finally {
+            LinuxNative.resetToDefault()
+        }
+    }
+
+    @Test
+    fun `handleActiveListener retries SECCOMP_IOCTL_NOTIF_RECV on EINTR`() {
+        var ioctlCalls = 0
+
+        val mockMemory = object : io.mazewall.MockNativeMemory() {
+            context(_: NativeTransaction)
+            override fun write(
+                fd: FileDescriptor<*, FdState.Open>,
+                buf: io.mazewall.ffi.memory.ManagedSegment,
+                count: Long,
+            ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                return LinuxNative.SyscallResult.Success(count)
+            }
+
+            context(_: NativeTransaction)
+            override fun read(
+                fd: FileDescriptor<*, FdState.Open>,
+                buf: io.mazewall.ffi.memory.ManagedSegment,
+                count: Long,
+            ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                val respSeg = io.mazewall.ffi.memory.SupervisorResponseSegment.of(buf)
+                respSeg.setId(42L)
+                respSeg.setDecision(1.toByte()) // Request Allow Continue
+                respSeg.setErrorNr(0)
+                return LinuxNative.SyscallResult.Success(count)
+            }
+        }
+
+        val mockEngine = object : MockNativeEngine(memory = mockMemory) {
+            override val raw: RawSyscallOperations = object : RawSyscallOperations by this {
+                context(_: NativeTransaction)
+                override fun ioctl(
+                    fd: FileDescriptor<*, FdState.Open>,
+                    request: Long,
+                    arg: io.mazewall.ffi.memory.ManagedSegment,
+                ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                    if (request == io.mazewall.ffi.NativeConstants.SECCOMP_IOCTL_NOTIF_RECV) {
+                        ioctlCalls++
+                        if (ioctlCalls == 1) {
+                            return LinuxNative.SyscallResult.Error(io.mazewall.ffi.NativeConstants.EINTR, -1L)
+                        }
+                        // Write dummy seccomp notification info so processNotification succeeds
+                        arg.writeLong(0L, 42L) // id
+                        arg.writeInt(8L, 999) // pid
+                        val arch = io.mazewall.core.Arch.current()
+                        arg.writeInt(16L, arch.execve) // nr
+                        arg.writeInt(20L, arch.audit) // arch
+                        return LinuxNative.SyscallResult.Success(0L)
+                    }
+                    if (request == io.mazewall.ffi.NativeConstants.SECCOMP_IOCTL_NOTIF_SEND) {
+                        return LinuxNative.SyscallResult.Success(0L)
+                    }
+                    return LinuxNative.SyscallResult.Success(0L)
+                }
+
+                context(_: NativeTransaction)
+                override fun poll(
+                    fds: io.mazewall.ffi.memory.ManagedSegment,
+                    nfds: Long,
+                    timeout: Int,
+                ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                    return LinuxNative.SyscallResult.Success(1L)
+                }
+            }
+        }
+
+        try {
+            LinuxNative.setEngine(mockEngine)
+
+            val handler = SupervisorSessionHandler(
+                FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(10),
+                FileDescriptor.unsafe<FileDescriptorRole.SeccompNotif>(11),
+                engine = mockEngine
+            )
+
+            io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
+                val pollFds = arena.allocate(io.mazewall.ffi.Layouts.POLLFD, 2)
+                val pfd1 = PollFdSegment.of(pollFds.asSlice(0L, io.mazewall.ffi.Layouts.POLLFD_SIZE))
+                pfd1.setFd(11)
+                pfd1.setEvents(io.mazewall.ffi.NativeConstants.POLLIN)
+                pfd1.setRevents(io.mazewall.ffi.NativeConstants.POLLIN)
+
+                val notif = arena.allocate(io.mazewall.ffi.Layouts.SECCOMP_NOTIF)
+                val resp = arena.allocate(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_RESP)
+
+                val action = with(arena) {
+                    handler.handleActiveListener(pollFds, notif, resp)
+                }
+
+                assertEquals(LoopAction.Continue, action)
+                assertEquals(2, ioctlCalls)
+            }
+        } finally {
+            LinuxNative.resetToDefault()
+        }
+    }
+
+    @Test
+    fun `readAndHandleJvmResponse retries on EINTR during read and ioctl`() {
+        var readCalls = 0
+        var ioctlCalls = 0
+
+        val mockMemory = object : io.mazewall.MockNativeMemory() {
+            context(_: NativeTransaction)
+            override fun read(
+                fd: FileDescriptor<*, FdState.Open>,
+                buf: io.mazewall.ffi.memory.ManagedSegment,
+                count: Long,
+            ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                readCalls++
+                if (readCalls == 1) {
+                    return LinuxNative.SyscallResult.Error(io.mazewall.ffi.NativeConstants.EINTR, -1L)
+                }
+                val respSeg = io.mazewall.ffi.memory.SupervisorResponseSegment.of(buf)
+                respSeg.setId(42L)
+                respSeg.setDecision(1.toByte()) // Request Allow Continue
+                respSeg.setErrorNr(0)
+                return LinuxNative.SyscallResult.Success(count)
+            }
+        }
+
+        val mockEngine = object : MockNativeEngine(memory = mockMemory) {
+            override val raw: RawSyscallOperations = object : RawSyscallOperations by this {
+                context(_: NativeTransaction)
+                override fun poll(
+                    fds: io.mazewall.ffi.memory.ManagedSegment,
+                    nfds: Long,
+                    timeout: Int,
+                ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                    return LinuxNative.SyscallResult.Success(1L)
+                }
+
+                context(_: NativeTransaction)
+                override fun ioctl(
+                    fd: FileDescriptor<*, FdState.Open>,
+                    request: Long,
+                    arg: io.mazewall.ffi.memory.ManagedSegment,
+                ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                    if (request == io.mazewall.ffi.NativeConstants.SECCOMP_IOCTL_NOTIF_SEND) {
+                        ioctlCalls++
+                        if (ioctlCalls == 1) {
+                            return LinuxNative.SyscallResult.Error(io.mazewall.ffi.NativeConstants.EINTR, -1L)
+                        }
+                        return LinuxNative.SyscallResult.Success(0L)
+                    }
+                    return LinuxNative.SyscallResult.Success(0L)
+                }
+            }
+        }
+
+        try {
+            LinuxNative.setEngine(mockEngine)
+
+            val handler = SupervisorSessionHandler(
+                FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(10),
+                FileDescriptor.unsafe<FileDescriptorRole.SeccompNotif>(11),
+                engine = mockEngine
+            )
+
+            val method = SupervisorSessionHandler::class.java.getDeclaredMethods().first {
+                it.name.startsWith("readAndHandleJvmResponse") && !it.name.contains("$") && it.parameterCount == 9
+            }
+            method.isAccessible = true
+
+            val arch = io.mazewall.core.Arch.current()
+
+            io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
+                val dummyResp = arena.allocate(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_RESP)
+                val pathStr = "/bin/echo"
+
+                val paramTypes = method.parameterTypes
+                val argsToPass = arrayOfNulls<Any>(paramTypes.size)
+                argsToPass[0] = arena
+                argsToPass[1] = 42L
+                argsToPass[2] = arch.execve
+                argsToPass[3] = LongArray(6)
+                argsToPass[4] = pathStr
+                argsToPass[5] = null
+                argsToPass[6] = dummyResp
+                for (i in paramTypes.indices) {
+                    val type = paramTypes[i]
+                    if (type.name.contains("Tid")) {
+                        argsToPass[i] = io.mazewall.core.Tid(999)
+                    } else if (type.name.contains("Pid")) {
+                        argsToPass[i] = io.mazewall.core.Pid(999)
+                    } else if (i == 7 && (type == Int::class.javaPrimitiveType || type == java.lang.Integer::class.java)) {
+                        argsToPass[i] = 999
+                    }
+                }
+                argsToPass[8] = arch
+
+                val result = method.invoke(handler, *argsToPass) as Boolean
+                assertEquals(true, result)
+                assertEquals(2, readCalls, "Should retry read on EINTR")
+                assertEquals(2, ioctlCalls, "Should retry ioctl on EINTR")
+            }
+        } finally {
+            LinuxNative.resetToDefault()
+        }
+    }
+
+    @Test
+    fun `sendRequestToJvm retries write on EINTR`() {
+        var writeCalls = 0
+
+        val mockMemory = object : io.mazewall.MockNativeMemory() {
+            context(_: NativeTransaction)
+            override fun write(
+                fd: FileDescriptor<*, FdState.Open>,
+                buf: io.mazewall.ffi.memory.ManagedSegment,
+                count: Long,
+            ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                writeCalls++
+                if (writeCalls == 1) {
+                    return LinuxNative.SyscallResult.Error(io.mazewall.ffi.NativeConstants.EINTR, -1L)
+                }
+                return LinuxNative.SyscallResult.Success(count)
+            }
+        }
+
+        val mockEngine = MockNativeEngine(memory = mockMemory)
+        try {
+            LinuxNative.setEngine(mockEngine)
+
+            val handler = SupervisorSessionHandler(
+                FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(10),
+                FileDescriptor.unsafe<FileDescriptorRole.SeccompNotif>(11),
+                engine = mockEngine
+            )
+
+            val method = SupervisorSessionHandler::class.java.getDeclaredMethods().first {
+                it.name.startsWith("sendRequestToJvm") && !it.name.contains("$") && it.parameterCount == 9
+            }
+            method.isAccessible = true
+
+            io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
+                val paramTypes = method.parameterTypes
+                val argsToPass = arrayOfNulls<Any>(paramTypes.size)
+                argsToPass[0] = arena
+                argsToPass[1] = 42L  // id
+                argsToPass[2] = 999  // pid
+                argsToPass[3] = 1    // arch
+                argsToPass[4] = 888  // ppid
+                argsToPass[5] = 2    // nr
+                argsToPass[6] = LongArray(6) // args
+                argsToPass[7] = "/some/path" // pathStr
+                argsToPass[8] = null  // sockaddrBytes
+
+                val result = method.invoke(handler, *argsToPass) as Boolean
+                assertEquals(true, result)
+                assertEquals(2, writeCalls, "Should retry write on EINTR")
             }
         } finally {
             LinuxNative.resetToDefault()
