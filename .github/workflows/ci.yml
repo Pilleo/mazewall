@@ -86,6 +86,10 @@ jobs:
               with:
                   path: ${{ github.workspace }}/.cache/podman-image
                   key: podman-image-${{ hashFiles('infra/dev/Containerfile', 'demos/vulnerable-web-app/Containerfile') }}
+            - name: Run Security Check
+              run: ./scripts/run_containerized_tests.sh dependencyCheckAnalyze --info
+              env:
+                  NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
             - name: Save Gradle & NVD Cache (Always)
               uses: actions/cache/save@v4
               if: always()
@@ -96,10 +100,6 @@ jobs:
                       ~/.gradle/dependency-check-data
                       ~/.gradle/build-cache
                   key: gradle-always-${{ runner.os }}-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}-${{ github.run_id }}
-            - name: Run Security Check
-              run: ./scripts/run_containerized_tests.sh dependencyCheckAnalyze --info
-              env:
-                  NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
             - name: Publish to GitHub Packages
               if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
               run: ./scripts/run_containerized_tests.sh publishAllPublicationsToGitHubPackagesRepository --info
