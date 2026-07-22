@@ -1,13 +1,13 @@
 ---
 title: "Potential Buffer Overflow / OutOfBoundsException on Long UNIX Socket Paths"
 severity: "HIGH"
-status: "open"
+status: "resolved"
 priority: 9
 dependencies: []
 component: "enforcer"
 effort: "small"
 autonomy: "supervised"
-solution_approved: false
+solution_approved: true
 blast_radius: "medium"
 reversible: true
 ---
