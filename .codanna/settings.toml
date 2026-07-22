@@ -8,7 +8,7 @@ version = 1
 index_path = ".codanna/index"
 
 # Workspace root directory (automatically detected)
-workspace_root = "/home/leanid/Documents/code/java/jseccomp"
+workspace_root = "/app"
 
 
 [indexing]
@@ -37,7 +37,7 @@ ignore_patterns = [
 # Add folders using: codanna add-dir <path>
 # Remove folders using: codanna remove-dir <path>
 # List all folders using: codanna list-dirs
-indexed_paths = ["/home/leanid/Documents/code/java/jseccomp"]
+indexed_paths = ["/app"]
 
 # Items per batch before flushing to index (default: 5000)
 batch_size = 5000
@@ -231,7 +231,7 @@ max_context_size = 100000
 
 [semantic_search]
 # Semantic search for natural language code queries
-enabled = true
+enabled = false
 
 # Model to use for embeddings
 # Note: Changing models requires re-indexing (codanna index --force)
