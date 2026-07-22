@@ -10,6 +10,16 @@ import java.nio.file.Path
 
 /**
  * A lightweight parser for Software Bill of Behavior (SBoB) JSON files.
+ *
+ * NOTE ON MULTI-THREADED I/O & TOCTOU: SBoB parsing performing static pruning and
+ * path resolution assumes a stable filesystem layout during execution. If symlinks or
+ * directories within pruned paths (e.g., /opt/app vs /opt/app/config) are modified
+ * concurrently by another process or thread during parsing, static string-based/path-based
+ * pruning might yield incorrect target paths.
+ * Once the compiled Landlock policy is applied, however, Landlock's enforcement is
+ * completely secure and immune to post-normalization rename TOCTOU attacks, because rules
+ * are dynamically evaluated and bound to kernel inodes (via O_PATH file descriptors)
+ * rather than path strings.
  */
 object SbobParser {
     /**

@@ -13,6 +13,13 @@ import java.nio.file.Paths
  * on disk before being applied as security rules. This prevents Time-of-Check to Time-of-Use (TOCTOU)
  * vulnerabilities and "dot-dot-through-symlink" attacks where a syntactically harmless path
  * (e.g., `/app/link/../etc/passwd`) points to a sensitive location.
+ *
+ * NOTE ON MULTI-THREADED I/O & TOCTOU: PathNormalizer performs static path-based pruning which
+ * inherently assumes a stable filesystem layout during the execution of [normalizeAndPrune].
+ * If another thread or process alters directories/symlinks concurrently, the static pruning results
+ * could be inconsistent. Once the sandboxing rules are registered under Landlock, however,
+ * the policy is secured at the kernel level using inode-based tracking, making runtime accesses
+ * immune to directory renaming and symlink swap attacks.
  */
 public object PathNormalizer {
     /**

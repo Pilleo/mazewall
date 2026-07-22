@@ -198,4 +198,32 @@ class IterativeProfilerTest {
             org.junit.jupiter.api.Assertions.assertTrue(e is java.nio.file.AccessDeniedException)
         }
     }
+
+    @Test
+    fun `test iterative profiling path matching avoids naive prefix collision`() {
+        org.junit.jupiter.api.Assumptions.assumeTrue(io.mazewall.Platform.isSupported())
+
+        // Start with a policy that allows reading "/tmp/prefix" (so "/tmp/prefix" is in allowedFsReadPaths)
+        val initialPolicy = Policy.builder()
+            .allowFsRead(io.mazewall.core.SandboxedPath.of("/tmp/prefix", allowNonExistent = true))
+            .unblock(Syscall.OPEN, Syscall.OPENAT, Syscall.OPENAT2)
+            .build()
+
+        var attempt = 0
+        val testRunnable = object : Runnable {
+            override fun run() {
+                if (attempt == 0) {
+                    attempt++
+                    // Access /tmp/prefix-other which shares prefix "/tmp/prefix" but is NOT a subpath
+                    throw java.nio.file.AccessDeniedException("/tmp/prefix-other")
+                }
+            }
+        }
+
+        val compiledPolicy = IterativeProfiler.profile(initialPolicy, testRunnable)
+
+        // It should have correctly added "/tmp/prefix-other" as a READ permission, NOT as a WRITE permission.
+        assertTrue(compiledPolicy.allowedFsReadPaths.any { it.value == "/tmp/prefix-other" })
+        assertTrue(compiledPolicy.allowedFsWritePaths.none { it.value == "/tmp/prefix-other" })
+    }
 }

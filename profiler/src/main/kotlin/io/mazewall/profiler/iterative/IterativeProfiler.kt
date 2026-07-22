@@ -90,7 +90,11 @@ object IterativeProfiler {
     ): Policy<*, Uncompiled> {
         @Suppress("UNCHECKED_CAST")
         val builder = Policy.threadLocalBuilder().base(currentPolicy as Policy<PolicyScope.ThreadLocalOnly, *>)
-        val isCurrentlyReadAllowed = currentPolicy.allowedFsReadPaths.any { path.startsWith(it.value) }
+        val p = java.nio.file.Paths.get(path)
+        val isCurrentlyReadAllowed = currentPolicy.allowedFsReadPaths.any {
+            val allowedPath = java.nio.file.Paths.get(it.value)
+            p.startsWith(allowedPath)
+        }
 
         if (isCurrentlyReadAllowed) {
             // If read is already allowed but we still got denied, it's a write attempt.
