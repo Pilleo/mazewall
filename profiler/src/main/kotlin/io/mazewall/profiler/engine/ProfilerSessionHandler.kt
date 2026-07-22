@@ -7,6 +7,17 @@ import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
 import io.mazewall.core.Tid
 import io.mazewall.ffi.NativeConstants
+import io.mazewall.ffi.memory.ConfinedSegment
+import io.mazewall.ffi.memory.NativeArena
+import io.mazewall.ffi.memory.ManagedSegment
+import io.mazewall.ffi.memory.unwrap
+import io.mazewall.ffi.memory.writeInt
+import io.mazewall.ffi.memory.writeShort
+import io.mazewall.ffi.memory.readInt
+import io.mazewall.ffi.memory.readLong
+import io.mazewall.ffi.memory.readShort
+import io.mazewall.ffi.memory.readByte
+import io.mazewall.ffi.memory.fill
 import io.mazewall.map
 import io.mazewall.onSuccess
 import io.mazewall.recover
@@ -41,20 +52,20 @@ internal class ProfilerSessionHandler(
         private set
 
     @Suppress("ReturnCount")
-    context(arena: Arena)
+    context(arena: NativeArena)
     fun handleActiveListener(
-        pollFds: MemorySegment,
-        ackBuf: MemorySegment,
-        notif: MemorySegment,
-        resp: MemorySegment,
-        socketPollFd: MemorySegment,
+        pollFds: ManagedSegment,
+        ackBuf: ManagedSegment,
+        notif: ManagedSegment,
+        resp: ManagedSegment,
+        socketPollFd: ManagedSegment,
     ): LoopAction {
         val currentState = state
         if (currentState is ProfilerState.Terminated) {
             return LoopAction.Break
         }
 
-        val socketRevents = pollFds.get(ValueLayout.JAVA_SHORT, POLLFD_REVENT_DATA_OFF).toInt()
+        val socketRevents = pollFds.readShort(POLLFD_REVENT_DATA_OFF).toInt()
         val errorOrHup = NativeConstants.POLLERR.toInt() or NativeConstants.POLLHUP.toInt() or NativeConstants.POLLNVAL.toInt()
         if ((socketRevents and (NativeConstants.POLLIN.toInt() or errorOrHup)) != 0) {
             val isDeadOrShutdown = (socketRevents and errorOrHup) != 0 || handleShutdownRequest(ackBuf)
@@ -64,7 +75,7 @@ internal class ProfilerSessionHandler(
             }
         }
 
-        val listenerRevents = pollFds.get(ValueLayout.JAVA_SHORT, POLLFD_REVENTS_OFF).toInt()
+        val listenerRevents = pollFds.readShort(POLLFD_REVENTS_OFF).toInt()
         if ((listenerRevents and errorOrHup) != 0) {
             state = ProfilerState.Terminated(socketFd, listenerFd)
             return LoopAction.Shutdown
@@ -86,11 +97,11 @@ internal class ProfilerSessionHandler(
     }
 
     @Suppress("ReturnCount")
-    private fun handleShutdownRequest(ackBuf: MemorySegment): Boolean {
-        val res = ioOps.recv(socketFd, ackBuf, 1L, 0)
+    private fun handleShutdownRequest(ackBuf: ManagedSegment): Boolean {
+        val res = ioOps.recv(socketFd, ackBuf.unwrap, 1L, 0)
         return res.map { value ->
             if (value > 0) {
-                val command = ackBuf.get(ValueLayout.JAVA_BYTE, 0L)
+                val command = ackBuf.readByte(0L)
                 if (command == SHUTDOWN_COMMAND_BYTE) {
                     onShutdown("Parent Command")
                     true
@@ -104,18 +115,18 @@ internal class ProfilerSessionHandler(
     }
 
     @Suppress("TooGenericExceptionCaught", "ReturnCount", "CyclomaticComplexMethod")
-    context(arena: Arena)
+    context(arena: NativeArena)
     internal fun processNotification(
-        notif: MemorySegment,
-        resp: MemorySegment,
-        ackBuf: MemorySegment,
-        socketPollFd: MemorySegment,
+        notif: ManagedSegment,
+        resp: ManagedSegment,
+        ackBuf: ManagedSegment,
+        socketPollFd: ManagedSegment,
     ): Boolean {
         val currentState = state as? ProfilerState.ActiveSession ?: return false
 
-        val id = notif.get(ValueLayout.JAVA_LONG, NOTIF_ID_OFF)
-        val pidVal = notif.get(ValueLayout.JAVA_INT, NOTIF_PID_OFF)
-        val nr = notif.get(ValueLayout.JAVA_INT, NOTIF_NR_OFF)
+        val id = notif.readLong(NOTIF_ID_OFF)
+        val pidVal = notif.readInt(NOTIF_PID_OFF)
+        val nr = notif.readInt(NOTIF_NR_OFF)
 
         System.err.println("[DAEMON-DEBUG] Received notification: id=$id, pid=$pidVal, nr=$nr")
         val handshake = HandshakeSession.Active(id, listenerFd)
@@ -127,18 +138,20 @@ internal class ProfilerSessionHandler(
 
             val args = LongArray(MAX_SYSCALL_ARGS)
             for (i in 0 until MAX_SYSCALL_ARGS) {
-                args[i] = notif.get(ValueLayout.JAVA_LONG, NOTIF_ARGS_OFF + i * ValueLayout.JAVA_LONG.byteSize())
+                args[i] = notif.readLong(NOTIF_ARGS_OFF + i * 8L)
             }
 
             // RESOLVE: Transform raw event into a resolved event (read path from tracee memory).
             val resolver = SyscallPathResolver(memoryReader, ledger)
-            val resolvedEvent = resolver.resolve(
-                event = SyscallEvent<SyscallEventState.Raw>(
-                    tid = Tid(pidVal),
-                    syscallName = syscallMap[nr] ?: "SYSCALL_$nr",
-                    args = args.toList()
+            val resolvedEvent = with(arena) {
+                resolver.resolve(
+                    event = SyscallEvent<SyscallEventState.Raw>(
+                        tid = Tid(pidVal),
+                        syscallName = syscallMap[nr] ?: "SYSCALL_$nr",
+                        args = args.toList()
+                    )
                 )
-            )
+            }
 
             // Optimisation: skip event delivery for JVM-internal paths that generate noise
             // (JDK home, classpath, /proc, /sys).
@@ -151,7 +164,9 @@ internal class ProfilerSessionHandler(
                     }
                     System.err.println("[DAEMON-DEBUG] Noise-filter check: path=$pathStr, skip=$matched")
                     if (matched) {
-                        responder.sendSeccompContinue(handshake.acknowledged(), resp)
+                        with(arena.unwrap) {
+                            responder.sendSeccompContinue(handshake.acknowledged(), resp.unwrap)
+                        }
                         return true
                     }
                 } catch (ignored: Exception) {}
@@ -161,12 +176,14 @@ internal class ProfilerSessionHandler(
             val waitingState = notifiedState.waitingForAck()
             state = waitingState
 
-            socketPollFd.set(ValueLayout.JAVA_INT, POLLFD_FD_OFF, socketFd.value)
-            socketPollFd.set(ValueLayout.JAVA_SHORT, POLLFD_EVENTS_OFF, NativeConstants.POLLIN)
+            socketPollFd.writeInt(POLLFD_FD_OFF, socketFd.value)
+            socketPollFd.writeShort(POLLFD_EVENTS_OFF, NativeConstants.POLLIN)
 
             // DELIVER: Write event to JVM listener socket.
             System.err.println("[DAEMON-DEBUG] Sending event to JVM listener: tid=$pidVal, syscall=${resolvedEvent.syscallName}, paths=${resolvedEvent.paths}")
-            publisher.sendTraceEvent(socketFd, resolvedEvent)
+            with(arena.unwrap) {
+                publisher.sendTraceEvent(socketFd, resolvedEvent)
+            }
             System.err.println("[DAEMON-DEBUG] Event sent to JVM listener.")
             ledger.record(SessionEvent.EventSent(System.nanoTime(), pidVal.toLong()))
 
@@ -174,12 +191,14 @@ internal class ProfilerSessionHandler(
             // This blocking synchronization is physically required: if the daemon sends CONTINUE immediately
             // (asynchronous fire-and-forget), the tracee thread resumes and moves past the system call frame
             // before the JVM listener thread can capture its stack trace, resulting in empty or incorrect traces.
-            val result = handshake.performHandshake(socketFd, ioOps, socketPollFd, ackBuf, onShutdown)
+            val result = handshake.performHandshake(socketFd, ioOps, socketPollFd.unwrap, ackBuf.unwrap, onShutdown)
             return when (result) {
                 is HandshakeSession.Success -> {
                     ledger.record(SessionEvent.AckReceived(System.nanoTime(), pidVal.toLong()))
                     state = waitingState.acknowledged()
-                    responder.sendSeccompContinue(result, resp)
+                    with(arena.unwrap) {
+                        responder.sendSeccompContinue(result, resp.unwrap)
+                    }
                     continueSent = true
                     ledger.record(SessionEvent.ContinueReplied(System.nanoTime(), pidVal.toLong(), 0L))
                     true
@@ -187,7 +206,9 @@ internal class ProfilerSessionHandler(
                 is HandshakeSession.Failed -> {
                     System.err.println("[DAEMON-WARN] Handshake failed or shutdown triggered")
                     state = waitingState.terminate()
-                    responder.sendSeccompError(result, resp, ECONNRESET)
+                    with(arena.unwrap) {
+                        responder.sendSeccompError(result, resp.unwrap, ECONNRESET)
+                    }
                     ledger.record(SessionEvent.ErrorReplied(System.nanoTime(), pidVal.toLong(), ECONNRESET))
                     false
                 }
@@ -205,7 +226,9 @@ internal class ProfilerSessionHandler(
                 state = ProfilerState.ActiveSession(socketFd, listenerFd)
                 return true
             }
-            responder.sendSeccompError(handshake.failed(), resp, ECONNRESET)
+            with(arena.unwrap) {
+                responder.sendSeccompError(handshake.failed(), resp.unwrap, ECONNRESET)
+            }
             ledger.record(SessionEvent.ErrorReplied(System.nanoTime(), pidVal.toLong(), ECONNRESET))
             return false
         }

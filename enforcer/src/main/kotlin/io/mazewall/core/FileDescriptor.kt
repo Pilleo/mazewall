@@ -1,7 +1,7 @@
 package io.mazewall.core
 
 import io.mazewall.LinuxNative
-import java.lang.foreign.Arena
+import io.mazewall.ffi.memory.NativeArena
 
 /**
  * Marker interfaces for File Descriptor lifecycle states.
@@ -49,15 +49,15 @@ public sealed interface FileDescriptorRole {
  * @param R The role of this file descriptor (e.g., [FileDescriptorRole.UnixSocket], [FileDescriptorRole.Ruleset]).
  * @param S The state of this file descriptor (e.g., [FdState.Open], [FdState.Closed]).
  * @property value The raw integer file descriptor.
- * @property arena An optional [Arena] that owns the native memory lifetime of this descriptor.
+ * @property arena An optional [NativeArena] that owns the native memory lifetime of this descriptor.
  */
 public class FileDescriptor<out R : FileDescriptorRole, out S : FdState>(
     public val value: Int,
-    public val arena: Arena? = null
+    public val arena: NativeArena? = null
 ) : AutoCloseable {
 
     /** Returns true if the file descriptor is open and valid. */
-    public val isValid: Boolean get() = value >= 0 && (arena == null || arena.scope().isAlive)
+    public val isValid: Boolean get() = value >= 0 && (arena == null || arena.isAlive)
 
     /** Returns true if the file descriptor is closed or invalid. */
     public val isInvalid: Boolean get() = !isValid

@@ -18,7 +18,6 @@ import io.mazewall.ffi.memory.*
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
-import java.lang.foreign.Arena
 import kotlin.test.*
 
 class LandlockCoverageTest {
@@ -66,8 +65,8 @@ class LandlockCoverageTest {
         mock.fileSystem.openResult = LinuxNative.SyscallResult.Error<LinuxNative.SyscallHandledState.Unhandled>(13, -1) // EACCES
         LinuxNative.setEngine(mock)
 
-        nativeScope {
-            with(this) {
+        NativeArena.ofConfined().use { nativeArena ->
+            with(nativeArena) {
                 Landlock.addJvmClasspathRules(LandlockRuleset<RulesetState.Building>(FileDescriptor.unsafe<FileDescriptorRole.Ruleset>(42)), 0L)
             }
         }
@@ -95,8 +94,8 @@ class LandlockCoverageTest {
         mock.fileSystem.openResult = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(100)
         LinuxNative.setEngine(mock)
 
-        nativeScope {
-            with(this) {
+        NativeArena.ofConfined().use { nativeArena ->
+            with(nativeArena) {
                 Landlock.addJvmClasspathRules(LandlockRuleset<RulesetState.Building>(FileDescriptor.unsafe<FileDescriptorRole.Ruleset>(42)), 0L)
             }
         }
@@ -187,7 +186,7 @@ class LandlockCoverageTest {
             fileSystem = object : MockNativeFileSystem() {
                 context(_: NativeTransaction)
                 override fun open(
-                    path: java.lang.foreign.MemorySegment,
+                    path: ManagedSegment,
                     flags: Int,
                 ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
                     val current = calls.incrementAndGet()
@@ -220,10 +219,10 @@ class LandlockCoverageTest {
             fileSystem = object : MockNativeFileSystem() {
                 context(_: NativeTransaction)
                 override fun open(
-                    path: java.lang.foreign.MemorySegment,
+                    path: ManagedSegment,
                     flags: Int,
                 ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
-                    val pathStr = path.getString(0)
+                    val pathStr = path.readString(0L)
                     if (pathStr.contains(" (deleted)")) {
                         deletedPathAttempts.incrementAndGet()
                         return LinuxNative.SyscallResult.Error<LinuxNative.SyscallHandledState.Unhandled>(2, -1) // ENOENT
@@ -240,5 +239,68 @@ class LandlockCoverageTest {
         session.applyRuleset()
 
         assertEquals(1, deletedPathAttempts.get(), "Should only attempt to open the deleted file path once, with no fallback to parent directory")
+    }
+
+    @Test
+    fun `test restrictive barrier on unsupported landlock under fallback FAIL`() {
+        val mockPlatform = MockPlatformProvider()
+        mockPlatform.mockLandlockAbiVersion = 0
+        Platform.setProvider(mockPlatform)
+
+        System.setProperty("io.mazewall.fallback", "FAIL")
+        assertFailsWith<UnsupportedOperationException> {
+            Landlock.applyRestrictiveBarrier()
+        }
+    }
+
+    @Test
+    fun `test restrictive barrier on unsupported landlock under fallback WARN_AND_BYPASS`() {
+        val mockPlatform = MockPlatformProvider()
+        mockPlatform.mockLandlockAbiVersion = 0
+        Platform.setProvider(mockPlatform)
+
+        System.setProperty("io.mazewall.fallback", "WARN_AND_BYPASS")
+        // Should succeed by bypassing
+        Landlock.applyRestrictiveBarrier()
+    }
+
+    @Test
+    fun `test restrictive barrier on unsupported landlock under fallback SILENT_BYPASS`() {
+        val mockPlatform = MockPlatformProvider()
+        mockPlatform.mockLandlockAbiVersion = 0
+        Platform.setProvider(mockPlatform)
+
+        System.setProperty("io.mazewall.fallback", "SILENT_BYPASS")
+        // Should succeed silently
+        Landlock.applyRestrictiveBarrier()
+    }
+
+    @Test
+    fun `test validateAbiSupport under fallback SILENT_BYPASS`() {
+        val mockPlatform = MockPlatformProvider()
+        mockPlatform.mockLandlockAbiVersion = 1
+        Platform.setProvider(mockPlatform)
+
+        System.setProperty("io.mazewall.fallback", "SILENT_BYPASS")
+        // Request policy requiring ABI v2 (rename)
+        val policy = Policy.builder().allowFsRead("/tmp").allow(io.mazewall.core.Syscall.RENAME).build()
+        // Should run and bypass silently without warning or exception
+        val accessMask = Landlock.getAccessMask(1, policy.definition)
+        assertNotNull(accessMask)
+    }
+
+    @Test
+    fun `test handleProcessWideUnsupported under fallback SILENT_BYPASS`() {
+        val mockPlatform = MockPlatformProvider()
+        mockPlatform.mockLandlockAbiVersion = 5
+        Platform.setProvider(mockPlatform)
+
+        val mockEngine = SupportedLandlockMock()
+        LinuxNative.setEngine(mockEngine)
+
+        System.setProperty("io.mazewall.fallback", "SILENT_BYPASS")
+        val session = LandlockSession(Policy.builder().build().definition, processWide = true)
+        // Should run and apply thread-scoped silently without warning or exception
+        session.applyRuleset()
     }
 }

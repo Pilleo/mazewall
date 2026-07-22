@@ -13,7 +13,7 @@ import java.nio.charset.StandardCharsets
  * Shared utility for reading memory from remote processes/threads using process_vm_readv.
  */
 public object SupervisorProcessMemoryReader {
-    context(arena: Arena)
+    context(arena: NativeArena)
     public fun readString(
         tid: Tid,
         remoteAddr: Long,
@@ -27,7 +27,7 @@ public object SupervisorProcessMemoryReader {
         return String(bytes, 0, len, StandardCharsets.UTF_8)
     }
 
-    context(arena: Arena)
+    context(arena: NativeArena)
     public fun readBytes(
         tid: Tid,
         remoteAddr: Long,
@@ -37,17 +37,17 @@ public object SupervisorProcessMemoryReader {
         if (remoteAddr == 0L) return null
         val localBuf = arena.allocate(len.toLong())
         localBuf.fill(0)
-        val localIov = IovecSegment(arena.allocate(Layouts.IOVEC))
-        localIov.setIovBase(localBuf)
+        val localIov = IovecSegment(arena.allocate(Layouts.IOVEC).unwrap)
+        localIov.setIovBase(localBuf.unwrap)
         localIov.setIovLen(len.toLong())
-        val remoteIov = IovecSegment(arena.allocate(Layouts.IOVEC))
+        val remoteIov = IovecSegment(arena.allocate(Layouts.IOVEC).unwrap)
         remoteIov.setIovBase(MemorySegment.ofAddress(remoteAddr))
         remoteIov.setIovLen(len.toLong())
 
         var res: LinuxNative.SyscallResult<Long, *>
         while (true) {
             res = LinuxNative.withTransaction {
-                LinuxNative.memory.processVmReadv(Pid(tid.value), localIov.segment, 1, remoteIov.segment, 1, 0)
+                LinuxNative.memory.processVmReadv(Pid(tid.value), ConfinedSegment(localIov.segment), 1, ConfinedSegment(remoteIov.segment), 1, 0)
             }
             if (res is LinuxNative.SyscallResult.Error && res.errno == io.mazewall.ffi.NativeConstants.EINTR) {
                 continue
@@ -57,7 +57,7 @@ public object SupervisorProcessMemoryReader {
         return if (res is LinuxNative.SyscallResult.Success && res.value > 0) {
             val bytesRead = res.value.toInt()
             val dest = ByteArray(bytesRead)
-            MemorySegment.copy(localBuf, ValueLayout.JAVA_BYTE, 0L, dest, 0, bytesRead)
+            MemorySegment.copy(localBuf.unwrap, ValueLayout.JAVA_BYTE, 0L, dest, 0, bytesRead)
             dest
         } else {
             if (res is LinuxNative.SyscallResult.Error && res.errno == 1) { // EPERM = 1

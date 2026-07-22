@@ -9,8 +9,8 @@ import io.mazewall.core.PrctlCommand
 import io.mazewall.enforcer.ContainedExecutors
 import io.mazewall.enforcer.ContainmentViolationException
 import io.mazewall.ffi.memory.nativeScope
+import io.mazewall.ffi.memory.readString
 import org.junit.jupiter.api.Test
-import java.lang.foreign.Arena
 import java.util.concurrent.ExecutionException
 import java.util.concurrent.Executors
 import kotlin.test.assertEquals
@@ -72,7 +72,7 @@ class PrctlProtectionTest : BaseIntegrationTest() {
                         }.getOrThrow("prctl(PR_GET_NAME)")
                         assertEquals(0, res)
 
-                        val name = nameBuffer.getString(0)
+                        val name = nameBuffer.readString(0L)
                         assertTrue(name.isNotEmpty(), "Expected non-empty thread name")
                     }
                 }.get()

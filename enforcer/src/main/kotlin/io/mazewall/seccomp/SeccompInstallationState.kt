@@ -5,8 +5,8 @@ import io.mazewall.PolicyDefinition
 import io.mazewall.CompiledSandbox
 import io.mazewall.enforcer.validateLinuxAndNotVirtual
 import io.mazewall.core.Arch
-import java.lang.foreign.Arena
-import java.lang.foreign.MemorySegment
+import io.mazewall.ffi.memory.NativeArena
+import io.mazewall.ffi.memory.ManagedSegment
 
 /**
  * States representing the progress of a Seccomp program installation.
@@ -14,7 +14,7 @@ import java.lang.foreign.MemorySegment
 internal sealed interface SeccompInstallationState {
     /** The Seccomp installation process has not started. */
     data object Uninitialized : SeccompInstallationState {
-        fun buildFilter(arena: Arena, sandbox: CompiledSandbox<*>): FilterBuilt {
+        fun buildFilter(arena: NativeArena, sandbox: CompiledSandbox<*>): FilterBuilt {
             val filters = sandbox.compiledFilters
             val prog = with(arena) { LinuxNative.memory.newSockFProg(filters) }
             return FilterBuilt(prog)
@@ -23,7 +23,7 @@ internal sealed interface SeccompInstallationState {
 
     /** The BPF program filter has been successfully constructed in memory. */
     data class FilterBuilt(
-        val program: MemorySegment,
+        val program: ManagedSegment,
     ) : SeccompInstallationState {
         fun lockPrivileges(): PrivilegesLocked {
             validateLinuxAndNotVirtual()
@@ -34,7 +34,7 @@ internal sealed interface SeccompInstallationState {
 
     /** The thread or process has set `no_new_privs`. */
     data class PrivilegesLocked(
-        val program: MemorySegment,
+        val program: ManagedSegment,
     ) : SeccompInstallationState {
         fun applyFilter(arch: Arch, useTsync: Boolean): FilterApplied {
             return PureJavaBpfEngine.installFilter(arch, program, useTsync)

@@ -10,8 +10,8 @@ import io.mazewall.core.Arch
 import io.mazewall.core.PrctlCommand
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
-import java.lang.foreign.Arena
-import java.lang.foreign.MemorySegment
+import io.mazewall.ffi.memory.NativeArena
+import io.mazewall.ffi.memory.ManagedSegment
 import kotlin.test.assertFailsWith
 import kotlin.test.assertNull
 
@@ -34,8 +34,8 @@ class PureJavaBpfEngineReproductionTest {
             mockProcess.prctlResult
         }
         val mockMemory = object : MockNativeMemory() {
-            context(arena: Arena)
-            override fun newSockFProg(filters: List<BpfInstruction>): MemorySegment {
+            context(arena: NativeArena)
+            override fun newSockFProg(filters: List<BpfInstruction>): ManagedSegment {
                 throw RuntimeException("Simulated filter building failure")
             }
         }

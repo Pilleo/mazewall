@@ -7,8 +7,6 @@ import io.mazewall.ffi.memory.*
 import io.mazewall.seccomp.BpfInstruction
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
-import java.lang.foreign.Arena
-import java.lang.foreign.ValueLayout
 import kotlin.test.*
 
 class LinuxNativeCoverageTest {
@@ -129,13 +127,11 @@ class LinuxNativeCoverageTest {
             BpfInstruction.Jmp(0x01, 2, 3, 0x12345678),
             BpfInstruction.Ld(0x05, 0x00000001),
         )
-        val progSeg = LinuxNative.memory.newSockFProg(filters)
-        val prog = SockFprogSegment(progSeg)
+        val prog = SockFprogSegment.of(LinuxNative.memory.newSockFProg(filters))
         assertNotNull(prog.segment)
 
         assertEquals(2, prog.getLen().toInt())
-        val filterArray = prog.getFilter()
-        val f1 = SockFilterSegment(filterArray.asSlice(0, Layouts.SOCK_FILTER_SIZE))
+        val f1 = SockFilterSegment.of(prog.managedFilter.asSlice(0, Layouts.SOCK_FILTER_SIZE))
 
         // Verify first filter
         assertEquals(0x01.toShort(), f1.getCode())

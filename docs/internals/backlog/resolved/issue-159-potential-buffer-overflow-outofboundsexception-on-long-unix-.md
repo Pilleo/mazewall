@@ -7,7 +7,7 @@ dependencies: []
 component: "enforcer"
 effort: "small"
 autonomy: "supervised"
-solution_approved: false
+solution_approved: true
 blast_radius: "medium"
 reversible: true
 github_issue: 157

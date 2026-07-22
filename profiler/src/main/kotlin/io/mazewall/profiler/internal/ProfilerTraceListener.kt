@@ -9,6 +9,7 @@ import io.mazewall.profiler.Profiler
 import io.mazewall.profiler.engine.TraceEvent
 import java.io.BufferedInputStream
 import java.io.DataInputStream
+import io.mazewall.ffi.memory.ConfinedSegment
 import java.io.InputStream
 import java.lang.foreign.Arena
 import java.util.concurrent.CopyOnWriteArrayList
@@ -56,7 +57,7 @@ internal class ProfilerTraceListener(
     fun start(readyLatch: CountDownLatch) {
         if (closed.get()) throw IllegalStateException("Listener is already closed")
 
-        val arena = Arena.ofShared()
+        val arena = io.mazewall.ffi.memory.NativeArena.ofShared()
         val inputStream = NativeSocketInputStream(socketFd, arena)
 
         val thread = Thread {
@@ -64,12 +65,12 @@ internal class ProfilerTraceListener(
                 runListenerLoop(inputStream, readyLatch)
             } catch (t: Throwable) {
                 logger.log(java.util.logging.Level.SEVERE, "ProfilerTraceListener worker thread crashed with fatal error", t)
+            } finally {
                 if (closed.compareAndSet(false, true)) {
                     try {
                         socketFd.close()
                     } catch (ignored: Exception) {}
                 }
-            } finally {
                 arena.close()
                 inputStream.close()
             }
@@ -96,29 +97,31 @@ internal class ProfilerTraceListener(
 
         logger.fine("Closing ProfilerTraceListener for fd=${socketFd.value}")
 
-        // Step 1: Signal the daemon to finish up. The daemon receives this byte in
-        // handleShutdownRequest(), terminates its session loop, and then closes its
-        // side of the socket. This triggers EOF on our read side.
-        sendShutdownCommand()
+        try {
+            // Step 1: Signal the daemon to finish up. The daemon receives this byte in
+            // handleShutdownRequest(), terminates its session loop, and then closes its
+            // side of the socket. This triggers EOF on our read side.
+            sendShutdownCommand()
 
-        // Step 2: Wait for the listener thread to drain remaining events and see EOF.
-        // The thread exits via EOFException once the daemon closes its socket end.
-        workerThread?.let {
-            try {
-                it.join(JOIN_TIMEOUT_MS)
-                if (it.isAlive) {
-                    logger.warning("Trace listener thread for fd=${socketFd.value} did not terminate within $JOIN_TIMEOUT_MS ms")
-                    it.interrupt()
-                    it.join(INTERRUPT_JOIN_TIMEOUT_MS)
+            // Step 2: Wait for the listener thread to drain remaining events and see EOF.
+            // The thread exits via EOFException once the daemon closes its socket end.
+            workerThread?.let {
+                try {
+                    it.join(JOIN_TIMEOUT_MS)
+                    if (it.isAlive) {
+                        logger.warning("Trace listener thread for fd=${socketFd.value} did not terminate within $JOIN_TIMEOUT_MS ms")
+                        it.interrupt()
+                        it.join(INTERRUPT_JOIN_TIMEOUT_MS)
+                    }
+                } catch (e: InterruptedException) {
+                    Thread.currentThread().interrupt()
                 }
-            } catch (e: InterruptedException) {
-                Thread.currentThread().interrupt()
             }
+        } finally {
+            // Step 3: Close the socket FD only after draining.
+            socketFd.close()
+            workerThread = null
         }
-
-        // Step 3: Close the socket FD only after draining.
-        socketFd.close()
-        workerThread = null
     }
 
     private fun sendShutdownCommand() {
@@ -136,22 +139,24 @@ internal class ProfilerTraceListener(
 
         logger.fine("Entering Pass-Through mode for ProfilerTraceListener fd=${socketFd.value}")
 
-        sendCommand(PASS_THROUGH_COMMAND_BYTE)
+        try {
+            sendCommand(PASS_THROUGH_COMMAND_BYTE)
 
-        workerThread?.let {
-            try {
-                it.join(JOIN_TIMEOUT_MS)
-                if (it.isAlive) {
-                    logger.warning("Trace listener thread for fd=${socketFd.value} did not terminate within $JOIN_TIMEOUT_MS ms during passThrough")
-                    it.interrupt()
+            workerThread?.let {
+                try {
+                    it.join(JOIN_TIMEOUT_MS)
+                    if (it.isAlive) {
+                        logger.warning("Trace listener thread for fd=${socketFd.value} did not terminate within $JOIN_TIMEOUT_MS ms during passThrough")
+                        it.interrupt()
+                    }
+                } catch (e: InterruptedException) {
+                    Thread.currentThread().interrupt()
                 }
-            } catch (e: InterruptedException) {
-                Thread.currentThread().interrupt()
             }
+        } finally {
+            socketFd.close()
+            workerThread = null
         }
-        
-        socketFd.close()
-        workerThread = null
     }
 
     private fun sendCommand(commandByte: Byte) {
@@ -162,7 +167,7 @@ internal class ProfilerTraceListener(
             Arena.ofConfined().use { arena ->
                 val buf = arena.allocate(1)
                 buf.set(java.lang.foreign.ValueLayout.JAVA_BYTE, 0L, commandByte)
-                LinuxNative.withTransaction { LinuxNative.memory.write(socketFd, buf, 1) }
+                LinuxNative.withTransaction { LinuxNative.memory.write(socketFd, ConfinedSegment(buf), 1) }
             }
         } catch (ignored: Exception) {}
     }

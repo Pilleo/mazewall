@@ -4,6 +4,8 @@ services:
         build:
             context: .
             dockerfile: Containerfile
+            cache_from:
+                - vulnerable-web-app-unprotected:latest
         ports:
             - "8082:8080"
         environment:
@@ -16,6 +18,8 @@ services:
         build:
             context: .
             dockerfile: Containerfile
+            cache_from:
+                - vulnerable-web-app-protected:latest
         ports:
             - "8081:8081"
         environment:

@@ -1,7 +1,7 @@
 package io.mazewall.profiler.engine
 
 import io.mazewall.core.Tid
-import java.lang.foreign.Arena
+import io.mazewall.ffi.memory.NativeArena
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
@@ -15,13 +15,13 @@ class SyscallPathResolverTest {
         val addressToString = mutableMapOf<Long, String>()
         val linkToPath = mutableMapOf<String, String>()
 
-        context(arena: Arena)
+        context(arena: NativeArena)
         override fun readStringFromProcess(tid: Tid, remoteAddr: Long, maxLen: Int): String? {
             readAddresses.add(remoteAddr)
             return addressToString[remoteAddr]
         }
 
-        context(arena: Arena)
+        context(arena: NativeArena)
         override fun resolveLink(tid: Tid, link: String): String? {
             return linkToPath[link]
         }
@@ -37,7 +37,7 @@ class SyscallPathResolverTest {
 
     @Test
     fun `test resolve SYMLINKAT correctly resolves source and target paths`() {
-        Arena.ofConfined().use { arena ->
+        NativeArena.ofConfined().use { arena ->
             with(arena) {
                 val reader = RecordingMockReader()
                 val oldPathPtr = 0x1000L
@@ -64,7 +64,7 @@ class SyscallPathResolverTest {
      */
     @Test
     fun `test resolve RENAMEAT2 correctly resolves both path pairs`() {
-        Arena.ofConfined().use { arena ->
+        NativeArena.ofConfined().use { arena ->
             with(arena) {
                 val reader = RecordingMockReader()
                 val oldDirFd = 5L
@@ -88,7 +88,7 @@ class SyscallPathResolverTest {
 
     @Test
     fun `test resolve returns empty list for unknown syscalls`() {
-        Arena.ofConfined().use { arena ->
+        NativeArena.ofConfined().use { arena ->
             with(arena) {
                 val reader = RecordingMockReader()
                 val event = makeRawEvent("UNKNOWN_SYSCALL", listOf(0x1000L, 0x2000L))
@@ -104,7 +104,7 @@ class SyscallPathResolverTest {
      */
     @Test
     fun `null address in OPEN is skipped and produces empty paths`() {
-        Arena.ofConfined().use { arena ->
+        NativeArena.ofConfined().use { arena ->
             with(arena) {
                 val reader = RecordingMockReader()
                 val event = makeRawEvent("OPEN", listOf(0L))
@@ -116,14 +116,14 @@ class SyscallPathResolverTest {
     }
 
     private val stubMemoryReader = object : ProfilerMemoryReader {
-        context(arena: Arena)
+        context(arena: NativeArena)
         override fun readStringFromProcess(tid: Tid, remoteAddr: Long, maxLen: Int): String? {
             if (remoteAddr == 100L) return "/etc/passwd"
             if (remoteAddr == 101L) return "relative/path"
             if (remoteAddr == 102L) return "/var/log"
             return null
         }
-        context(arena: Arena)
+        context(arena: NativeArena)
         override fun resolveLink(tid: Tid, path: String): String? {
             if (path == "cwd") return "/home/user"
             if (path == "fd/5") return "/opt/app"
@@ -133,7 +133,7 @@ class SyscallPathResolverTest {
 
     @Test
     fun `test resolve single string arg syscall`() {
-        Arena.ofConfined().use { arena ->
+        NativeArena.ofConfined().use { arena ->
             with(arena) {
                 val resolver = SyscallPathResolver(stubMemoryReader, SessionEventLedger())
                 val event = SyscallEvent<SyscallEventState.Raw>(Tid(1), "OPEN", listOf(100L))
@@ -146,7 +146,7 @@ class SyscallPathResolverTest {
 
     @Test
     fun `test resolve dirfd syscall with absolute path`() {
-        Arena.ofConfined().use { arena ->
+        NativeArena.ofConfined().use { arena ->
             with(arena) {
                 val resolver = SyscallPathResolver(stubMemoryReader, SessionEventLedger())
                 val event = SyscallEvent<SyscallEventState.Raw>(Tid(1), "OPENAT", listOf(5L, 100L))
@@ -159,7 +159,7 @@ class SyscallPathResolverTest {
 
     @Test
     fun `test resolve dirfd syscall with relative path and AT_FDCWD`() {
-        Arena.ofConfined().use { arena ->
+        NativeArena.ofConfined().use { arena ->
             with(arena) {
                 val resolver = SyscallPathResolver(stubMemoryReader, SessionEventLedger())
                 val event = SyscallEvent<SyscallEventState.Raw>(Tid(1), "OPENAT", listOf(-100L, 101L))
@@ -172,7 +172,7 @@ class SyscallPathResolverTest {
 
     @Test
     fun `test resolve dirfd syscall with relative path and valid dirfd`() {
-        Arena.ofConfined().use { arena ->
+        NativeArena.ofConfined().use { arena ->
             with(arena) {
                 val resolver = SyscallPathResolver(stubMemoryReader, SessionEventLedger())
                 val event = SyscallEvent<SyscallEventState.Raw>(Tid(1), "OPENAT", listOf(5L, 101L))
@@ -185,7 +185,7 @@ class SyscallPathResolverTest {
 
     @Test
     fun `test resolve rename syscall`() {
-        Arena.ofConfined().use { arena ->
+        NativeArena.ofConfined().use { arena ->
             with(arena) {
                 val resolver = SyscallPathResolver(stubMemoryReader, SessionEventLedger())
                 val event = SyscallEvent<SyscallEventState.Raw>(Tid(1), "RENAME", listOf(100L, 102L))
@@ -199,7 +199,7 @@ class SyscallPathResolverTest {
 
     @Test
     fun `test resolve renameat syscall`() {
-        Arena.ofConfined().use { arena ->
+        NativeArena.ofConfined().use { arena ->
             with(arena) {
                 val resolver = SyscallPathResolver(stubMemoryReader, SessionEventLedger())
                 val event = SyscallEvent<SyscallEventState.Raw>(Tid(1), "RENAMEAT", listOf(5L, 101L, -100L, 101L))
@@ -213,7 +213,7 @@ class SyscallPathResolverTest {
 
     @Test
     fun `test resolve absolute path with dots`() {
-        Arena.ofConfined().use { arena ->
+        NativeArena.ofConfined().use { arena ->
             with(arena) {
                 val reader = RecordingMockReader()
                 val pathPtr = 0x7fff_1000L
@@ -227,7 +227,7 @@ class SyscallPathResolverTest {
 
     @Test
     fun `test resolve relative path with dots`() {
-        Arena.ofConfined().use { arena ->
+        NativeArena.ofConfined().use { arena ->
             with(arena) {
                 val reader = RecordingMockReader()
                 val dirfd = AT_FDCWD_VAL

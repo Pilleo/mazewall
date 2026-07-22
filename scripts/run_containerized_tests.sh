@@ -10,7 +10,7 @@ CONTAINER_NAME="mazewall-integration-tests"
 
 if ! podman image exists mazewall-test-runner && ! podman image exists localhost/mazewall-test-runner; then
     echo "Building test runner image..."
-    podman build --pull=missing -t mazewall-test-runner -f infra/dev/Containerfile .
+    podman build --pull=missing --cache-from=mazewall-test-runner -t mazewall-test-runner -f infra/dev/Containerfile .
 else
     echo "Using cached test runner image."
 fi

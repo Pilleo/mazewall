@@ -6,6 +6,7 @@ import io.mazewall.core.Arch
 import io.mazewall.enforcer.ContainedExecutors
 import io.mazewall.enforcer.ContainmentViolationException
 import io.mazewall.ffi.NativeConstants
+import io.mazewall.ffi.memory.ConfinedSegment
 import org.junit.jupiter.api.Test
 import java.io.File
 import java.lang.foreign.*
@@ -59,7 +60,7 @@ class ProtectionDemonstrationTest {
                         val res = LinuxNative.withTransaction {
                             LinuxNative.raw.syscall(
                                 arch.memfdCreate.toLong(),
-                                io.mazewall.core.NativeArg.MemoryArg(name),
+                                io.mazewall.core.NativeArg.MemoryArg(ConfinedSegment(name)),
                                 io.mazewall.core.NativeArg.NullArg,
                             )
                         }
@@ -189,7 +190,7 @@ class ProtectionDemonstrationTest {
                     Arena.ofConfined().use { arena ->
                         val openResult = LinuxNative.withTransaction {
                             LinuxNative.fileSystem.open(
-                                arena.allocateFrom("/etc/hosts"),
+                                ConfinedSegment(arena.allocateFrom("/etc/hosts")),
                                 0, // O_RDONLY
                             )
                         }

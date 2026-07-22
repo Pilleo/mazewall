@@ -22,6 +22,8 @@ import io.mazewall.profiler.engine.SocketLifecycleManager
 import io.mazewall.profiler.engine.SyscallEvent
 import io.mazewall.profiler.engine.SyscallEventState
 import io.mazewall.profiler.engine.TraceEventPublisher
+import io.mazewall.ffi.memory.ManagedSegment
+import io.mazewall.ffi.memory.writeShort
 import java.lang.foreign.Arena
 import java.lang.foreign.MemoryLayout
 import java.lang.foreign.MemorySegment
@@ -34,14 +36,14 @@ class ProfilerDesignSpec :
             var readStringResult: String? = null
             var resolveLinkResult: String? = null
 
-            context(arena: Arena)
+            context(arena: io.mazewall.ffi.memory.NativeArena)
             override fun readStringFromProcess(
                 tid: Tid,
                 remoteAddr: Long,
                 maxLen: Int,
             ): String? = readStringResult
 
-            context(arena: Arena)
+            context(arena: io.mazewall.ffi.memory.NativeArena)
             override fun resolveLink(
                 tid: Tid,
                 link: String,
@@ -58,9 +60,10 @@ class ProfilerDesignSpec :
 
             override val raw = object : io.mazewall.RawSyscallOperations {
                 context(_: NativeTransaction)
-                override fun poll(fds: MemorySegment, nfds: Long, timeout: Int): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                override fun poll(fds: ManagedSegment, nfds: Long, timeout: Int): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
                     if (nextPollResult is LinuxNative.SyscallResult.Success && (nextPollResult as LinuxNative.SyscallResult.Success).value > 0) {
-                        fds.set(ValueLayout.JAVA_SHORT, 6L, NativeConstants.POLLIN)
+                        val fdsSeg = MemorySegment.ofAddress(fds.address()).reinterpret(fds.byteSize())
+                        fdsSeg.set(ValueLayout.JAVA_SHORT, 6L, NativeConstants.POLLIN)
                     }
                     return nextPollResult
                 }
@@ -78,15 +81,16 @@ class ProfilerDesignSpec :
                 override fun ioctl(
                     fd: FileDescriptor<*, FdState.Open>,
                     request: Long,
-                    arg: MemorySegment,
+                    arg: ManagedSegment,
                 ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
                     ioctlCalls.add(request)
                     if (request == 0xc0502100L) { // RECV
-                        arg.set(ValueLayout.JAVA_LONG, 0L, nextNotifId) // id
-                        arg.set(ValueLayout.JAVA_INT, 8L, nextNotifPid) // pid
-                        arg.set(ValueLayout.JAVA_INT, 16L, nextNotifNr) // nr
+                        val argSeg = MemorySegment.ofAddress(arg.address()).reinterpret(arg.byteSize())
+                        argSeg.set(ValueLayout.JAVA_LONG, 0L, nextNotifId) // id
+                        argSeg.set(ValueLayout.JAVA_INT, 8L, nextNotifPid) // pid
+                        argSeg.set(ValueLayout.JAVA_INT, 16L, nextNotifNr) // nr
                         for (i in 0 until 6) {
-                            arg.set(ValueLayout.JAVA_LONG, 32L + i * 8, nextNotifArgs[i])
+                            argSeg.set(ValueLayout.JAVA_LONG, 32L + i * 8, nextNotifArgs[i])
                         }
                     }
                     return LinuxNative.SyscallResult.Success(0L)
@@ -209,14 +213,14 @@ class ProfilerDesignSpec :
                     syscallMap
                 ) {}
 
-                Arena.ofConfined().use { arena ->
+                io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
                     val notif = arena.allocate(Layouts.SECCOMP_NOTIF)
                     val resp = arena.allocate(Layouts.SECCOMP_NOTIF_RESP)
                     val ackBuf = arena.allocate(1L)
                     val socketPollFd = arena.allocate(Layouts.POLLFD)
 
                     val pollFds = arena.allocate(MemoryLayout.sequenceLayout(2, Layouts.POLLFD))
-                    pollFds.set(ValueLayout.JAVA_SHORT, 6L, NativeConstants.POLLIN)
+                    pollFds.writeShort(6L, NativeConstants.POLLIN)
 
                     val action = with(arena) { handler.handleActiveListener(pollFds, ackBuf, notif, resp, socketPollFd) }
 
@@ -250,13 +254,13 @@ class ProfilerDesignSpec :
                     syscallMap
                 ) {}
 
-                Arena.ofConfined().use { arena ->
+                io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
                     val notif = arena.allocate(Layouts.SECCOMP_NOTIF)
                     val resp = arena.allocate(Layouts.SECCOMP_NOTIF_RESP)
                     val ackBuf = arena.allocate(1L)
                     val socketPollFd = arena.allocate(Layouts.POLLFD)
                     val pollFds = arena.allocate(MemoryLayout.sequenceLayout(2, Layouts.POLLFD))
-                    pollFds.set(ValueLayout.JAVA_SHORT, 6L, NativeConstants.POLLIN)
+                    pollFds.writeShort(6L, NativeConstants.POLLIN)
 
                     with(arena) {
                         handler.handleActiveListener(pollFds, ackBuf, notif, resp, socketPollFd)

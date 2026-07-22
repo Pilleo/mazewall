@@ -6,6 +6,7 @@ import io.mazewall.core.ProcessLauncher
 import io.mazewall.core.RealProcessLauncher
 import io.mazewall.core.RealSocketManager
 import io.mazewall.core.SocketManager
+import io.mazewall.ffi.memory.ConfinedSegment
 import io.mazewall.getFdOrThrow
 import java.io.IOException
 import java.lang.foreign.Arena
@@ -193,7 +194,7 @@ public class ProfilerDaemonManager(
                 try {
                     val cmd = arena.allocate(1)
                     cmd.set(ValueLayout.JAVA_BYTE, 0L, SHUTDOWN_COMMAND_BYTE)
-                    engine.withTransaction { engine.memory.write(fd, cmd, 1) }
+                    engine.withTransaction { engine.memory.write(fd, ConfinedSegment(cmd), 1) }
                     Thread.sleep(SHUTDOWN_WAIT_MS)
                 } finally {
                     socketManager.close(fd)

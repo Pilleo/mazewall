@@ -6,8 +6,8 @@ import io.mazewall.MockNativeMemory
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
-import java.lang.foreign.Arena
-import java.lang.foreign.MemorySegment
+import io.mazewall.ffi.memory.NativeArena
+import io.mazewall.ffi.memory.ManagedSegment
 import kotlin.test.assertEquals
 import kotlin.test.assertNotEquals
 
@@ -19,8 +19,8 @@ class BpfNativeCacheTest {
     fun setUp() {
         allocationCount = 0
         val mockMemory = object : MockNativeMemory() {
-            context(arena: Arena)
-            override fun newSockFProg(filters: List<BpfInstruction>): MemorySegment {
+            context(arena: NativeArena)
+            override fun newSockFProg(filters: List<BpfInstruction>): ManagedSegment {
                 allocationCount++
                 return super.newSockFProg(filters)
             }

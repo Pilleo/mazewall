@@ -14,6 +14,8 @@ import io.mazewall.core.FileDescriptorRole
 import io.mazewall.core.Tid
 import io.mazewall.ffi.Layouts
 import io.mazewall.ffi.NativeConstants
+import io.mazewall.ffi.memory.ManagedSegment
+import io.mazewall.ffi.memory.writeShort
 import java.lang.foreign.Arena
 import java.lang.foreign.MemoryLayout
 import java.lang.foreign.MemorySegment
@@ -77,23 +79,25 @@ class ProfilerDaemonTest {
 
         override val raw = object : io.mazewall.RawSyscallOperations {
             context(_: NativeTransaction)
-            override fun poll(fds: MemorySegment, nfds: Long, timeout: Int): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+            override fun poll(fds: ManagedSegment, nfds: Long, timeout: Int): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
                 System.err.println("[MOCK] poll nfds=$nfds nextPollResult=$nextPollResult")
                 if (nextPollResult is LinuxNative.SyscallResult.Success && (nextPollResult as LinuxNative.SyscallResult.Success).value > 0) {
-                    fds.set(ValueLayout.JAVA_SHORT, 6L, NativeConstants.POLLIN)
-                    System.err.println("[MOCK] set POLLIN at offset 6. Value=${fds.get(ValueLayout.JAVA_SHORT, 6L)}")
+                    val fdsSeg = MemorySegment.ofAddress(fds.address()).reinterpret(fds.byteSize())
+                    fdsSeg.set(ValueLayout.JAVA_SHORT, 6L, NativeConstants.POLLIN)
+                    System.err.println("[MOCK] set POLLIN at offset 6. Value=${fdsSeg.get(ValueLayout.JAVA_SHORT, 6L)}")
                 }
                 return nextPollResult
             }
 
             context(_: NativeTransaction)
-            override fun ioctl(fd: FileDescriptor<*, FdState.Open>, request: Long, arg: MemorySegment): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+            override fun ioctl(fd: FileDescriptor<*, FdState.Open>, request: Long, arg: ManagedSegment): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
                 ioctlCalls.add(request)
                 if (request == SECCOMP_IOCTL_NOTIF_RECV) {
-                    arg.set(ValueLayout.JAVA_LONG, NOTIF_ID_OFF, 123L)
-                    arg.set(ValueLayout.JAVA_INT, NOTIF_PID_OFF, 456)
-                    arg.set(ValueLayout.JAVA_INT, NOTIF_NR_OFF, 2)
-                    arg.set(ValueLayout.JAVA_LONG, NOTIF_ARGS_OFF, 0x1000L)
+                    val argSeg = MemorySegment.ofAddress(arg.address()).reinterpret(arg.byteSize())
+                    argSeg.set(ValueLayout.JAVA_LONG, NOTIF_ID_OFF, 123L)
+                    argSeg.set(ValueLayout.JAVA_INT, NOTIF_PID_OFF, 456)
+                    argSeg.set(ValueLayout.JAVA_INT, NOTIF_NR_OFF, 2)
+                    argSeg.set(ValueLayout.JAVA_LONG, NOTIF_ARGS_OFF, 0x1000L)
                 }
                 return LinuxNative.SyscallResult.Success(0L)
             }
@@ -120,9 +124,9 @@ class ProfilerDaemonTest {
     }
 
     private class MockReader : ProfilerMemoryReader {
-        context(arena: Arena)
+        context(arena: io.mazewall.ffi.memory.NativeArena)
         override fun readStringFromProcess(tid: Tid, remoteAddr: Long, maxLen: Int): String? = "/tmp/test.txt"
-        context(arena: Arena)
+        context(arena: io.mazewall.ffi.memory.NativeArena)
         override fun resolveLink(tid: Tid, link: String): String? = "/proc/1/cwd"
     }
 
@@ -146,7 +150,7 @@ class ProfilerDaemonTest {
             syscallMap,
         ) { }
 
-        Arena.ofConfined().use { arena ->
+        io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
             val notif = arena.allocate(Layouts.SECCOMP_NOTIF)
             val resp = arena.allocate(Layouts.SECCOMP_NOTIF_RESP)
             val ackBuf = arena.allocate(1L)
@@ -154,7 +158,7 @@ class ProfilerDaemonTest {
 
             val pollFds = arena.allocate(MemoryLayout.sequenceLayout(2, Layouts.POLLFD))
             // [0]: Seccomp listener FD - set POLLIN
-            pollFds.set(ValueLayout.JAVA_SHORT, Layouts.POLLFD_REVENTS_OFFSET, NativeConstants.POLLIN)
+            pollFds.writeShort(Layouts.POLLFD_REVENTS_OFFSET, NativeConstants.POLLIN)
 
             val action = with(arena) {
                 handler.handleActiveListener(pollFds, ackBuf, notif, resp, socketPollFd)
@@ -188,14 +192,14 @@ class ProfilerDaemonTest {
             syscallMap,
         ) { }
 
-        Arena.ofConfined().use { arena ->
+        io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
             val notif = arena.allocate(Layouts.SECCOMP_NOTIF)
             val resp = arena.allocate(Layouts.SECCOMP_NOTIF_RESP)
             val ackBuf = arena.allocate(1L)
             val socketPollFd = arena.allocate(Layouts.POLLFD)
 
             val pollFds = arena.allocate(MemoryLayout.sequenceLayout(2, Layouts.POLLFD))
-            pollFds.set(ValueLayout.JAVA_SHORT, Layouts.POLLFD_REVENTS_OFFSET, NativeConstants.POLLIN)
+            pollFds.writeShort(Layouts.POLLFD_REVENTS_OFFSET, NativeConstants.POLLIN)
 
             val action = with(arena) {
                 handler.handleActiveListener(pollFds, ackBuf, notif, resp, socketPollFd)
@@ -229,14 +233,14 @@ class ProfilerDaemonTest {
             syscallMap,
         ) { }
 
-        Arena.ofConfined().use { arena ->
+        io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
             val notif = arena.allocate(Layouts.SECCOMP_NOTIF)
             val resp = arena.allocate(Layouts.SECCOMP_NOTIF_RESP)
             val ackBuf = arena.allocate(1L)
             val socketPollFd = arena.allocate(Layouts.POLLFD)
 
             val pollFds = arena.allocate(MemoryLayout.sequenceLayout(2, Layouts.POLLFD))
-            pollFds.set(ValueLayout.JAVA_SHORT, Layouts.POLLFD_REVENTS_OFFSET, NativeConstants.POLLIN)
+            pollFds.writeShort(Layouts.POLLFD_REVENTS_OFFSET, NativeConstants.POLLIN)
 
             with(arena) {
                 handler.handleActiveListener(pollFds, ackBuf, notif, resp, socketPollFd)

@@ -9,6 +9,8 @@ import io.mazewall.ffi.memory.CmsghdrSegment
 import io.mazewall.ffi.memory.IovecSegment
 import io.mazewall.ffi.memory.MsghdrSegment
 import io.mazewall.ffi.memory.SockaddrUnSegment
+import io.mazewall.ffi.memory.ConfinedSegment
+import io.mazewall.ffi.memory.unwrap
 import java.lang.foreign.Arena
 import java.lang.foreign.MemorySegment
 import java.lang.foreign.ValueLayout
@@ -57,13 +59,16 @@ public object SupervisorSocketUtils {
     public const val SCM_RIGHTS: Int = 1
 
     public fun setupSockAddrUn(
-        arena: Arena,
+        arena: io.mazewall.ffi.memory.NativeArena,
         socketPath: String,
     ): SockaddrUnSegment {
-        val sockaddrUn = SockaddrUnSegment(arena.allocate(Layouts.SOCKADDR_UN))
+        val sockaddrUn = SockaddrUnSegment(arena.allocate(Layouts.SOCKADDR_UN).unwrap)
         sockaddrUn.segment.fill(0)
         sockaddrUn.setSunFamily(AF_UNIX.toShort())
         val pathBytes = socketPath.toByteArray(StandardCharsets.UTF_8)
+        require(pathBytes.size < 108) {
+            "Socket path too long: $socketPath (length: ${pathBytes.size}, max: 107)"
+        }
         val pathSeg = sockaddrUn.getSunPath()
         MemorySegment.copy(pathBytes, 0, pathSeg, ValueLayout.JAVA_BYTE, 0L, pathBytes.size)
         return sockaddrUn
@@ -74,7 +79,7 @@ public object SupervisorSocketUtils {
         maxRetries: Int = 500,
         delayMs: Long = 10L
     ): Int {
-        Arena.ofConfined().use { arena ->
+        io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
             val sockaddrUn = setupSockAddrUn(arena, socketPath)
 
             var lastErrno = 0
@@ -92,7 +97,7 @@ public object SupervisorSocketUtils {
                 }
                 val fd = FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(fdVal)
                 val connRes = LinuxNative.withTransaction {
-                    LinuxNative.networking.connect(fd, sockaddrUn.segment, SOCKADDR_UN_SIZE)
+                    LinuxNative.networking.connect(fd, ConfinedSegment(sockaddrUn.segment), SOCKADDR_UN_SIZE)
                 }
                 if (connRes is LinuxNative.SyscallResult.Success) {
                     return fdVal
@@ -136,7 +141,7 @@ public object SupervisorSocketUtils {
 
             while (true) {
                 val res = LinuxNative.withTransaction {
-                    LinuxNative.networking.sendmsg(FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(socketFd), msg.segment, 0)
+                    LinuxNative.networking.sendmsg(FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(socketFd), ConfinedSegment(msg.segment), 0)
                 }
                 if (res is LinuxNative.SyscallResult.Success) {
                     return true
@@ -170,7 +175,7 @@ public object SupervisorSocketUtils {
             val cmsg = CmsghdrSegment(controlBuf)
 
             while (true) {
-                val res = LinuxNative.withTransaction { LinuxNative.networking.recvmsg(socketFd, msg.segment, 0) }
+                val res = LinuxNative.withTransaction { LinuxNative.networking.recvmsg(socketFd, ConfinedSegment(msg.segment), 0) }
                 if (res is LinuxNative.SyscallResult.Success) {
                     val value = res.value
                     if (value == 0L) return@use null

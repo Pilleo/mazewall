@@ -12,6 +12,7 @@ import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
+import io.mazewall.ffi.memory.readByte
 import java.io.ByteArrayInputStream
 import java.io.InputStream
 import java.nio.file.Path
@@ -118,7 +119,7 @@ class SupervisorDaemonManagerTest {
         var writeCalledWithShutdown = false
         mockEngine.memory.onWrite = { _, _, buf, count ->
             if (count == 1L) {
-                val byte = buf.get(java.lang.foreign.ValueLayout.JAVA_BYTE, 0L)
+                val byte = buf.readByte(0L)
                 if (byte == 0x53.toByte()) { // 'S'
                     writeCalledWithShutdown = true
                 }

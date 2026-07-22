@@ -57,6 +57,16 @@ object Layouts {
         ValueLayout.JAVA_LONG.withName("instruction_pointer"),
         MemoryLayout.sequenceLayout(6, ValueLayout.JAVA_LONG).withName("args"),
     )
+    val SECCOMP_DATA_NR_OFFSET: Long = 0L
+    val SECCOMP_DATA_ARCH_OFFSET: Long = 4L
+    val SECCOMP_DATA_ARGS_OFFSET: Long = SECCOMP_DATA.byteOffset(
+        MemoryLayout.PathElement.groupElement("args"),
+        MemoryLayout.PathElement.sequenceElement(0)
+    )
+    val SECCOMP_ARGS2_OFFSET: Long = SECCOMP_DATA.byteOffset(
+        MemoryLayout.PathElement.groupElement("args"),
+        MemoryLayout.PathElement.sequenceElement(2)
+    )
 
     /**
      * Corresponds to `struct seccomp_notif` in `<linux/seccomp.h>`.
@@ -143,6 +153,9 @@ object Layouts {
     val POLLFD_FD_OFFSET: Long = POLLFD.byteOffset(MemoryLayout.PathElement.groupElement("fd"))
     val POLLFD_EVENTS_OFFSET: Long = POLLFD.byteOffset(MemoryLayout.PathElement.groupElement("events"))
     val POLLFD_REVENTS_OFFSET: Long = POLLFD.byteOffset(MemoryLayout.PathElement.groupElement("revents"))
+    val POLLFD_SIZE: Long = POLLFD.byteSize()
+    val SECCOMP_NOTIF_SIZE: Long = SECCOMP_NOTIF.byteSize()
+    val SECCOMP_NOTIF_RESP_SIZE: Long = SECCOMP_NOTIF_RESP.byteSize()
 
     /**
      * Corresponds to `struct landlock_ruleset_attr` in `<linux/landlock.h>`.
@@ -152,6 +165,7 @@ object Layouts {
         ValueLayout.JAVA_LONG.withName("handled_access_net"),
     )
     const val LANDLOCK_RULESET_ATTR_V1_SIZE: Long = 8L
+    val LANDLOCK_RULESET_ATTR_SIZE: Long = LANDLOCK_RULESET_ATTR.byteSize()
     val LANDLOCK_RULESET_ATTR_FS_OFFSET: Long =
         LANDLOCK_RULESET_ATTR.byteOffset(MemoryLayout.PathElement.groupElement("handled_access_fs"))
     val LANDLOCK_RULESET_ATTR_NET_OFFSET: Long =

@@ -7,8 +7,7 @@ import io.mazewall.UnsupportedKernelFeatureException
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
 import io.mazewall.core.FdState
-import io.mazewall.ffi.memory.nativeScope
-import java.lang.foreign.Arena
+import io.mazewall.ffi.memory.NativeArena
 
 /**
  * States representing the configuration and application of a Landlock ruleset.
@@ -77,7 +76,7 @@ internal sealed interface LandlockLifecycle {
         val abi: Int,
         val policy: PolicyDefinition<*>?,
     ) : LandlockLifecycle {
-        fun addRules(arena: Arena): RulesAdded {
+        fun addRules(arena: NativeArena): RulesAdded {
             val allFsRead = Landlock.LANDLOCK_ACCESS_FS_READ_FILE or Landlock.LANDLOCK_ACCESS_FS_READ_DIR
             val classpathFlags = allFsRead or Landlock.LANDLOCK_ACCESS_FS_EXECUTE
             with(arena) {
@@ -126,9 +125,7 @@ internal class LandlockSession(
             }
 
             if (abi < 1) {
-                if (policy != null) {
-                    Landlock.handleUnsupportedLandlock()
-                }
+                Landlock.handleUnsupportedLandlock()
                 state = LandlockState.Applied
                 return
             }
@@ -140,19 +137,16 @@ internal class LandlockSession(
             }
 
             state = LandlockState.CreatingRuleset(abi)
-            nativeScope {
-                val rulesetFd = Landlock.createRuleset(accessMaskFs, abi)
-                try {
+            NativeArena.ofConfined().use { arena ->
+                with(arena) { Landlock.createRuleset(accessMaskFs, abi) }.use { rulesetFd ->
                     val ruleset = LandlockRuleset<RulesetState.Building>(rulesetFd)
                     val created = LandlockLifecycle.RulesetCreated(ruleset, abi, policy)
                     state = LandlockState.ConfiguringRuleset(rulesetFd, abi)
 
-                    val added = created.addRules(this)
+                    val added = created.addRules(arena)
                     state = LandlockState.Enforcing(rulesetFd)
                     added.restrictSelf(processWide)
                     state = LandlockState.Applied
-                } finally {
-                    LinuxNative.fileSystem.close(rulesetFd)
                 }
             }
         } catch (t: Throwable) {
@@ -166,7 +160,7 @@ internal class LandlockSession(
         val msg = "Process-wide Landlock (TSYNC) requires Linux 7.0+ (ABI v8). This kernel supports ABI v${Platform.featureMatrix.landlockAbiVersion}."
         if (fallback == Platform.FallbackBehavior.FAIL) {
             throw UnsupportedKernelFeatureException(msg)
-        } else {
+        } else if (fallback == Platform.FallbackBehavior.WARN_AND_BYPASS) {
             java.util.logging.Logger.getLogger(Landlock::class.java.name).warning("$msg Rules will only be applied to the current thread and its descendants.")
         }
     }
