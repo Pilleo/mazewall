@@ -21,6 +21,10 @@ import java.util.concurrent.TimeUnit
  * remains synchronized with the kernel's filter state even upon interruption, it is better
  * to allow the handshake to complete naturally.
  *
+ * Concurrently modifying global process-wide security policies (e.g., calling `ContainedExecutors.installOnProcess`)
+ * while tasks are executing on this wrapped executor or during its shutdown phase is unsupported and
+ * can lead to unpredictable sandbox states.
+ *
  * The seccomp filter is installed per-task immediately before [task.call] (or [task.run]).
  * This design is required for correctness because BPF filters are thread-scoped. In a
  * multi-thread executor (e.g. [java.util.concurrent.ThreadPoolExecutor]), each platform thread

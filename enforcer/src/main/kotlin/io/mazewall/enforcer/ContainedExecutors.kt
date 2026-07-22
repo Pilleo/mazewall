@@ -37,6 +37,14 @@ import java.util.logging.Logger
  * which are updated atomically via [ThreadStateRegistry] and [ProcessStateRegistry]. This ensures
  * that the library has a consistent and race-free view of the active sandbox configuration
  * during concurrent or nested filter installations.
+ *
+ * ### Thread Safety & Global Policies
+ * Modifying process-wide global security policies (e.g., via [installOnProcess]) while
+ * asynchronous wrapped executors ([ContainedExecutorWrapper]) are active, executing tasks,
+ * or undergoing shutdown is unsupported. Doing so can cause late-running tasks in the queue to
+ * resolve an inconsistent security state because global state transitions and per-task filter
+ * installations may interleave unpredictably. All global policies should be fully installed
+ * before wrapping or running asynchronous task executors.
  */
 // @ref: docs/internals/designs/core/security-considerations.md — Shared-memory ACE escape threat model, Tier 1/Tier 2 boundary definitions
 // @ref: docs/internals/designs/enforcer/containment-design.md — Filter installation ordering (Landlock before Seccomp), TSYNC semantics
@@ -187,28 +195,30 @@ object ContainedExecutors {
     ) {
         if (!needsLandlock(policy)) return
 
-        val state = if (processWide) ProcessStateRegistry.state else ThreadStateRegistry.state
-        val landlockPolicy = state.landlockPolicy
+        synchronized(processLock) {
+            val state = if (processWide) ProcessStateRegistry.state else ThreadStateRegistry.state
+            val landlockPolicy = state.landlockPolicy
 
-        if (landlockPolicy != null) {
-            // Assert that we are not trying to expand Landlock filesystem permissions on nested containment
-            val readsSubset = isPathSubset(landlockPolicy.allowedFsReadPaths, policy.allowedFsReadPaths)
-            val writesSubset = isPathSubset(landlockPolicy.allowedFsWritePaths, policy.allowedFsWritePaths)
-            if (!readsSubset || !writesSubset) {
-                throw IllegalStateException("Cannot expand Landlock filesystem permissions on an already restricted thread.")
+            if (landlockPolicy != null) {
+                // Assert that we are not trying to expand Landlock filesystem permissions on nested containment
+                val readsSubset = isPathSubset(landlockPolicy.allowedFsReadPaths, policy.allowedFsReadPaths)
+                val writesSubset = isPathSubset(landlockPolicy.allowedFsWritePaths, policy.allowedFsWritePaths)
+                if (!readsSubset || !writesSubset) {
+                    throw IllegalStateException("Cannot expand Landlock filesystem permissions on an already restricted thread.")
+                }
             }
-        }
 
-        val isDifferent = landlockPolicy == null ||
-            landlockPolicy.allowedFsReadPaths != policy.allowedFsReadPaths ||
-            landlockPolicy.allowedFsWritePaths != policy.allowedFsWritePaths
+            val isDifferent = landlockPolicy == null ||
+                landlockPolicy.allowedFsReadPaths != policy.allowedFsReadPaths ||
+                landlockPolicy.allowedFsWritePaths != policy.allowedFsWritePaths
 
-        if (isDifferent) {
-            Landlock.applyRuleset(policy, processWide)
-            if (processWide) {
-                ProcessStateRegistry.update { it.withLandlockPolicy(policy) }
-            } else {
-                ThreadStateRegistry.state = ThreadStateRegistry.state.withLandlockPolicy(policy)
+            if (isDifferent) {
+                Landlock.applyRuleset(policy, processWide)
+                if (processWide) {
+                    ProcessStateRegistry.update { it.withLandlockPolicy(policy) }
+                } else {
+                    ThreadStateRegistry.state = ThreadStateRegistry.state.withLandlockPolicy(policy)
+                }
             }
         }
     }
