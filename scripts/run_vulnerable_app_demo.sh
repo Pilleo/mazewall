@@ -35,7 +35,21 @@ mkdir -p demos/output
 echo -e "\n${CYAN}[STEP 2/5] Launching containerized environment...${RESET}"
 COMPOSE_FILE="demos/vulnerable-web-app/compose.yml"
 $COMPOSE_CMD -f "$COMPOSE_FILE" down --remove-orphans &>/dev/null || true
-$COMPOSE_CMD -f "$COMPOSE_FILE" up -d --build
+
+HAS_IMAGES=false
+if command -v podman &>/dev/null && (podman image exists vulnerable-web-app-unprotected || podman image exists localhost/vulnerable-web-app-unprotected) && (podman image exists vulnerable-web-app-protected || podman image exists localhost/vulnerable-web-app-protected); then
+    HAS_IMAGES=true
+elif command -v docker &>/dev/null && docker image inspect vulnerable-web-app-unprotected &>/dev/null && docker image inspect vulnerable-web-app-protected &>/dev/null; then
+    HAS_IMAGES=true
+fi
+
+if [ "$HAS_IMAGES" = true ]; then
+    echo -e "${GREEN}[INFO] Reusing pre-built container images for vulnerable-web-app.${RESET}"
+    $COMPOSE_CMD -f "$COMPOSE_FILE" up -d
+else
+    echo -e "${CYAN}[INFO] Building container environment...${RESET}"
+    $COMPOSE_CMD -f "$COMPOSE_FILE" up -d --build
+fi
 
 # Guarantee clean container teardown on exit
 cleanup() {
