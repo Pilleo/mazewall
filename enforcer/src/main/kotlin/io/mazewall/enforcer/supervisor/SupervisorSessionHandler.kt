@@ -350,7 +350,7 @@ internal class SupervisorSessionHandler(
             arch.open, arch.execve -> {
                 pathStr = readStringFromProcess(tid, args[0])
             }
-            arch.openat, arch.openat2 -> {
+            arch.openat, arch.openat2, arch.execveat -> {
                 dirfd = args[0].toInt()
                 pathStr = readStringFromProcess(tid, args[1])
             }
@@ -526,8 +526,19 @@ internal class SupervisorSessionHandler(
                     true
                 }
                 1 -> { // Allow Continue
-                    sendSeccompContinue(id, resp)
-                    true
+                    val isInject = nr == traceeArch.open || nr == traceeArch.connect || nr == traceeArch.openat ||
+                                 nr == traceeArch.openat2 || nr == traceeArch.accept || nr == traceeArch.accept4
+                    if (isInject) {
+                        // Upgrade to emulation to prevent TOCTOU!
+                        handleInjectFd(id, nr, args, pathStr, sockaddrBytes, resp, tid, traceeArch)
+                    } else if (nr == traceeArch.execve || nr == traceeArch.execveat) {
+                        // Cannot emulate execve/execveat safely, must deny to prevent TOCTOU!
+                        sendSeccompError(id, NativeConstants.EPERM, resp)
+                        true
+                    } else {
+                        sendSeccompContinue(id, resp)
+                        true
+                    }
                 }
                 2 -> { // Allow & Inject FD
                     handleInjectFd(id, nr, args, pathStr, sockaddrBytes, resp, tid, traceeArch)
