@@ -133,13 +133,19 @@ internal class ProfilerDaemonEngine(
                 name = "conn-handler-${clientFd.value}"
                 start()
             }
+        } catch (e: InterruptedException) {
+            System.err.println("WARN: handleNewConnection interrupted: ${e.message}")
+            Thread.currentThread().interrupt()
+        } catch (e: java.nio.channels.ClosedByInterruptException) {
+            System.err.println("WARN: handleNewConnection channel closed by interrupt: ${e.message}")
+            Thread.currentThread().interrupt()
         } catch (e: Exception) {
             System.err.println("WARN: handleNewConnection failed: ${e.message}")
         }
     }
 
     @Suppress("NestedBlockDepth", "LoopWithTooManyJumpStatements", "CyclomaticComplexMethod", "TooGenericExceptionCaught")
-    private fun handleConnection(socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>) {
+    internal fun handleConnection(socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>) {
         var connection: io.mazewall.ffi.networking.SeccompConnection = io.mazewall.ffi.networking.SeccompConnection.Accepted(socketFd)
         try {
             NativeArena.ofConfined().use { arena ->
@@ -207,6 +213,12 @@ internal class ProfilerDaemonEngine(
                     }
                 }
             }
+        } catch (e: InterruptedException) {
+            System.err.println("[DAEMON] Connection handler interrupted: ${e.message}")
+            Thread.currentThread().interrupt()
+        } catch (e: java.nio.channels.ClosedByInterruptException) {
+            System.err.println("[DAEMON] Connection handler channel closed by interrupt: ${e.message}")
+            Thread.currentThread().interrupt()
         } catch (e: Exception) {
             System.err.println("[DAEMON-WARN] Connection handler terminated with exception: ${e.message}")
         } finally {

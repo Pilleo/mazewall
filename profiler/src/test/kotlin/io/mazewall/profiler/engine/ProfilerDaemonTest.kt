@@ -16,10 +16,13 @@ import io.mazewall.ffi.Layouts
 import io.mazewall.ffi.NativeConstants
 import io.mazewall.ffi.memory.ManagedSegment
 import io.mazewall.ffi.memory.writeShort
+import io.mazewall.ffi.memory.writeInt
+import io.mazewall.ffi.memory.writeLong
 import java.lang.foreign.Arena
 import java.lang.foreign.MemoryLayout
 import java.lang.foreign.MemorySegment
 import java.lang.foreign.ValueLayout
+import java.nio.channels.ClosedByInterruptException
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -31,7 +34,7 @@ class ProfilerDaemonTest {
         private const val PROTOCOL_ACK_BYTE = 0xAC.toByte()
     }
 
-    private class MockTransport : ProfilerTransport, SeccompResponder, TraceEventPublisher, NativeIoOperations, SocketLifecycleManager {
+    private open class MockTransport : ProfilerTransport, SeccompResponder, TraceEventPublisher, NativeIoOperations, SocketLifecycleManager {
         val sentEvents = mutableListOf<SyscallEvent<SyscallEventState.Resolved>>()
         var continueSent = false
         var errorSent = false
@@ -119,7 +122,7 @@ class ProfilerDaemonTest {
         override fun accept(serverFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>): FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open> = FileDescriptor.unsafe(100)
         override fun connect(socketPath: String): FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open> = FileDescriptor.unsafe(101)
         override fun sendDescriptor(socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>, fdToSend: FileDescriptor<*, FdState.Open>): Boolean = true
-        override fun recvDescriptor(socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>): FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open>? = FileDescriptor.unsafe(20)
+        open override fun recvDescriptor(socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>): FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open>? = FileDescriptor.unsafe(20)
         override fun close(fd: FileDescriptor<*, FdState.Open>) {}
     }
 
@@ -264,5 +267,91 @@ class ProfilerDaemonTest {
     fun `test profiler daemon instantiation coverage`() {
         val clazz = ProfilerDaemon::class.java
         org.junit.jupiter.api.Assertions.assertNotNull(clazz)
+    }
+
+    @Test
+    fun `test handleConnection restores interrupt status on InterruptedException`() {
+        val transport = object : MockTransport() {
+            override fun recvDescriptor(socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>): FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open>? {
+                throw InterruptedException("Simulated interruption")
+            }
+        }
+        val engine = ProfilerDaemonEngine("/tmp/test.sock", transport, MockReader())
+
+        // Clear interrupt status if any
+        Thread.interrupted()
+
+        engine.handleConnection(FileDescriptor.unsafe(10))
+
+        assertTrue(Thread.currentThread().isInterrupted, "Thread interrupt status should be restored")
+        // Clear interrupt status after test to avoid affecting other tests
+        Thread.interrupted()
+    }
+
+    @Test
+    fun `test handleConnection restores interrupt status on ClosedByInterruptException`() {
+        val transport = object : MockTransport() {
+            override fun recvDescriptor(socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>): FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open>? {
+                throw ClosedByInterruptException()
+            }
+        }
+        val engine = ProfilerDaemonEngine("/tmp/test.sock", transport, MockReader())
+
+        // Clear interrupt status if any
+        Thread.interrupted()
+
+        engine.handleConnection(FileDescriptor.unsafe(10))
+
+        assertTrue(Thread.currentThread().isInterrupted, "Thread interrupt status should be restored")
+        // Clear interrupt status after test to avoid affecting other tests
+        Thread.interrupted()
+    }
+
+    @Test
+    fun `test processNotification rethrows InterruptedException`() {
+        val transport = MockTransport()
+        val reader = object : ProfilerMemoryReader {
+            context(arena: io.mazewall.ffi.memory.NativeArena)
+            override fun readStringFromProcess(tid: Tid, remoteAddr: Long, maxLen: Int): String? {
+                throw InterruptedException("Simulated interruption")
+            }
+            context(arena: io.mazewall.ffi.memory.NativeArena)
+            override fun resolveLink(tid: Tid, link: String): String? = null
+        }
+        val syscallMap = mapOf(2 to "OPEN")
+        val handler = ProfilerSessionHandler(
+            FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(10),
+            FileDescriptor.unsafe<FileDescriptorRole.SeccompNotif>(20),
+            transport,
+            transport,
+            transport,
+            reader,
+            syscallMap,
+        ) { }
+
+        io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
+            val notif = arena.allocate(Layouts.SECCOMP_NOTIF)
+            val resp = arena.allocate(Layouts.SECCOMP_NOTIF_RESP)
+            val ackBuf = arena.allocate(1L)
+            val socketPollFd = arena.allocate(Layouts.POLLFD)
+
+            // Setup notification data
+            notif.writeLong(NOTIF_ID_OFF, 123L)
+            notif.writeInt(NOTIF_PID_OFF, 456)
+            notif.writeInt(NOTIF_NR_OFF, 2)
+            notif.writeLong(NOTIF_ARGS_OFF, 0x1000L)
+
+            // Clear interrupt status
+            Thread.interrupted()
+
+            org.junit.jupiter.api.assertThrows<InterruptedException> {
+                with(arena) {
+                    handler.processNotification(notif, resp, ackBuf, socketPollFd)
+                }
+            }
+
+            assertTrue(Thread.currentThread().isInterrupted, "Thread interrupt status should be restored")
+            Thread.interrupted()
+        }
     }
 }

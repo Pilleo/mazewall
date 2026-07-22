@@ -34,6 +34,14 @@ object ProfilerDaemon {
             name = "stdin-monitor"
         }.start()
 
-        engine.run()
+        try {
+            engine.run()
+        } catch (e: InterruptedException) {
+            System.err.println("[DAEMON] Main loop interrupted: ${e.message}")
+            Thread.currentThread().interrupt()
+        } catch (e: java.nio.channels.ClosedByInterruptException) {
+            System.err.println("[DAEMON] Main loop channel closed by interrupt: ${e.message}")
+            Thread.currentThread().interrupt()
+        }
     }
 }

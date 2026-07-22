@@ -169,6 +169,12 @@ internal class ProfilerSessionHandler(
                         }
                         return true
                     }
+                } catch (e: InterruptedException) {
+                    Thread.currentThread().interrupt()
+                    throw e
+                } catch (e: java.nio.channels.ClosedByInterruptException) {
+                    Thread.currentThread().interrupt()
+                    throw e
                 } catch (ignored: Exception) {}
             }
 
@@ -217,6 +223,12 @@ internal class ProfilerSessionHandler(
                     false
                 }
             }
+        } catch (e: InterruptedException) {
+            Thread.currentThread().interrupt()
+            throw e
+        } catch (e: java.nio.channels.ClosedByInterruptException) {
+            Thread.currentThread().interrupt()
+            throw e
         } catch (e: Throwable) {
             logger.severe {
                 "Exception in processNotification: ${e.message}. Dumping SessionEventLedger:\n" +
