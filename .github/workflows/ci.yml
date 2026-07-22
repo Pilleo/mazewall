@@ -46,6 +46,7 @@ jobs:
                   key: podman-image-${{ hashFiles('infra/dev/Containerfile', 'demos/vulnerable-web-app/Containerfile') }}-${{ github.sha }}
                   restore-keys: |
                       podman-image-${{ hashFiles('infra/dev/Containerfile', 'demos/vulnerable-web-app/Containerfile') }}-
+                      podman-image-
             - name: Load Cached Podman Images
               run: |
                   if [ -f ${{ github.workspace }}/.cache/podman-image/mazewall-test-runner.tar ]; then
@@ -67,6 +68,14 @@ jobs:
               run: ./scripts/run_vulnerable_app_demo.sh
             - name: Save All Podman Images to Cache Folder
               run: |
+                  EXPECTED_PREFIX="podman-image-${{ hashFiles('infra/dev/Containerfile', 'demos/vulnerable-web-app/Containerfile') }}-"
+                  MATCHED_KEY="${{ steps.cache-podman.outputs.cache-matched-key }}"
+                  echo "Matched Key: $MATCHED_KEY"
+                  echo "Expected Prefix: $EXPECTED_PREFIX"
+                  if [[ "$MATCHED_KEY" != "$EXPECTED_PREFIX"* ]]; then
+                      echo "Containerfiles changed or no cache matched. Cleaning up old cached tarballs..."
+                      rm -f ${{ github.workspace }}/.cache/podman-image/*.tar
+                  fi
                   mkdir -p ${{ github.workspace }}/.cache/podman-image
                   if [ ! -f ${{ github.workspace }}/.cache/podman-image/mazewall-test-runner.tar ]; then
                       podman save -o ${{ github.workspace }}/.cache/podman-image/mazewall-test-runner.tar mazewall-test-runner:latest
@@ -79,7 +88,9 @@ jobs:
                   fi
             - name: Upload Podman Image Cache
               uses: actions/cache/save@v4
-              if: steps.cache-podman.outputs.cache-matched-key == ''
+              if: |
+                  steps.cache-podman.outputs.cache-matched-key == '' ||
+                  !startsWith(steps.cache-podman.outputs.cache-matched-key, format('podman-image-{0}-', hashFiles('infra/dev/Containerfile', 'demos/vulnerable-web-app/Containerfile')))
               with:
                   path: ${{ github.workspace }}/.cache/podman-image
                   key: podman-image-${{ hashFiles('infra/dev/Containerfile', 'demos/vulnerable-web-app/Containerfile') }}-${{ github.sha }}
