@@ -31,6 +31,7 @@ jobs:
                       ~/.gradle/notifications
                       ~/.gradle/dependency-check-data
                       ~/.gradle/build-cache
+                      ~/.gradle/wrapper
                   key: gradle-cache-${{ runner.os }}-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}-${{ github.sha }}
                   restore-keys: |
                       gradle-cache-${{ runner.os }}-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}-
@@ -94,7 +95,7 @@ jobs:
                   path: ${{ github.workspace }}/.cache/podman-image
                   key: podman-image-${{ hashFiles('infra/dev/Containerfile', 'demos/vulnerable-web-app/Containerfile') }}
             - name: Run Security Check
-              run: ./scripts/run_containerized_tests.sh dependencyCheckAnalyze --info
+              run: ./scripts/run_containerized_tests.sh dependencyCheckAnalyze
               env:
                   NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
             - name: Save Gradle & NVD Cache (Always)
@@ -106,10 +107,11 @@ jobs:
                       ~/.gradle/notifications
                       ~/.gradle/dependency-check-data
                       ~/.gradle/build-cache
+                      ~/.gradle/wrapper
                   key: gradle-cache-${{ runner.os }}-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}-${{ github.sha }}
             - name: Publish to GitHub Packages
               if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
-              run: ./scripts/run_containerized_tests.sh publishAllPublicationsToGitHubPackagesRepository --info
+              run: ./scripts/run_containerized_tests.sh publishAllPublicationsToGitHubPackagesRepository
               env:
                   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
                   GITHUB_ACTOR: ${{ github.actor }}
