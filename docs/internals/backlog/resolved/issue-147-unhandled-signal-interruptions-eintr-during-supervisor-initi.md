@@ -1,7 +1,7 @@
 ---
 title: "Unhandled Signal Interruptions (`EINTR`) during Supervisor Initialization"
 severity: "HIGH"
-status: "open"
+status: "resolved"
 priority: 9
 dependencies: []
 component: "enforcer"

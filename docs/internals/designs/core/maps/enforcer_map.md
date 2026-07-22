@@ -136,9 +136,7 @@ graph TD
     issue_144_confused_deputy_time_of_check_to_time_of_use_toctou_via_path["🔴 Issue: Confused Deputy / Time-of-Check to Time-of-Use (TOCTOU) via Path Modification (CRITICAL)"]
     issue_145_toctou_pointer_re_targeting_via_sockaddrbytes_mutation_durin["🔴 Issue: TOCTOU / Pointer Re-targeting via `sockaddrBytes` Mutation during Connect Validation (CRITICAL)"]
     issue_146_unhandled_signal_interruptions_eintr_during_supervisor_ipc_s["🔴 Issue: Unhandled Signal Interruptions (`EINTR`) during Supervisor IPC socket communication (HIGH)"]
-    issue_147_unhandled_signal_interruptions_eintr_during_supervisor_initi["🔴 Issue: Unhandled Signal Interruptions (`EINTR`) during Supervisor Initialization (HIGH)"]
     issue_149_classloader_deadlock_in_jvm_validation_listener["🔴 Issue: Classloader Deadlock in JVM Validation Listener (CRITICAL)"]
-    issue_150_incomplete_ffm_architecture_isolation["🔴 Issue: Incomplete FFM Architecture Isolation (HIGH)"]
     issue_162_memory_alignment_verification_for_layoutskt_ffm_structures["🔴 Issue: Memory Alignment verification for `Layouts.kt` FFM Structures (HIGH)"]
     issue_169_inconsistent_architecture_test_for_javalangforeign["🔴 Issue: Inconsistent Architecture Test for `java.lang.foreign` (HIGH)"]
     issue_177_missing_archunit_test_for_ffm_architecture_boundary_violatio["🔴 Issue: Missing ArchUnit test for FFM architecture boundary violations (HIGH)"]
@@ -296,9 +294,7 @@ graph TD
     click issue_144_confused_deputy_time_of_check_to_time_of_use_toctou_via_path "../../../backlog/security/issue-144-confused-deputy-time-of-check-to-time-of-use-toctou-via-path.md"
     click issue_145_toctou_pointer_re_targeting_via_sockaddrbytes_mutation_durin "../../../backlog/security/issue-145-toctou-pointer-re-targeting-via-sockaddrbytes-mutation-durin.md"
     click issue_146_unhandled_signal_interruptions_eintr_during_supervisor_ipc_s "../../../backlog/security/issue-146-unhandled-signal-interruptions-eintr-during-supervisor-ipc-s.md"
-    click issue_147_unhandled_signal_interruptions_eintr_during_supervisor_initi "../../../backlog/security/issue-147-unhandled-signal-interruptions-eintr-during-supervisor-initi.md"
     click issue_149_classloader_deadlock_in_jvm_validation_listener "../../../backlog/security/issue-149-classloader-deadlock-in-jvm-validation-listener.md"
-    click issue_150_incomplete_ffm_architecture_isolation "../../../backlog/performance/issue-150-incomplete-ffm-architecture-isolation.md"
     click issue_162_memory_alignment_verification_for_layoutskt_ffm_structures "../../../backlog/security/issue-162-memory-alignment-verification-for-layoutskt-ffm-structures.md"
     click issue_169_inconsistent_architecture_test_for_javalangforeign "../../../backlog/testing/issue-169-inconsistent-architecture-test-for-javalangforeign.md"
     click issue_177_missing_archunit_test_for_ffm_architecture_boundary_violatio "../../../backlog/testing/issue-177-missing-archunit-test-for-ffm-architecture-boundary-violatio.md"
