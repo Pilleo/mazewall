@@ -25,9 +25,9 @@ PODMAN_ARGS=(
     --cap-add AUDIT_CONTROL
     --cap-add SYS_ADMIN
     --cap-add SYS_PTRACE
-    -v "${PROJECT_ROOT}:/workspace"
-    -v "${HOME}/.gradle:/root/.gradle"
-    -e GRADLE_USER_HOME=/root/.gradle
+    -v "${PROJECT_ROOT}:${PROJECT_ROOT}"
+    -v "${HOME}/.gradle:${HOME}/.gradle"
+    -e GRADLE_USER_HOME="${HOME}/.gradle"
     -e IO_MAZEWALL_TEST=true
     -e MAZEWALL_IN_CONTAINER=true
     -e GITHUB_ACTIONS="${GITHUB_ACTIONS:-false}"
@@ -36,7 +36,7 @@ PODMAN_ARGS=(
     -e NVD_API_KEY
     -e GITHUB_TOKEN
     -e GITHUB_ACTOR
-    -w /workspace
+    -w "${PROJECT_ROOT}"
 )
 
 if [ "${GITHUB_ACTIONS:-false}" == "true" ] && [ -n "${RUNNER_TEMP}" ]; then
