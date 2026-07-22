@@ -32,7 +32,7 @@ public object RealSocketManager : SocketManager {
         val fd = LinuxNative.withTransaction {
             LinuxNative.networking.socket(
                 io.mazewall.ffi.networking.SupervisorSocketUtils.AF_UNIX,
-                io.mazewall.ffi.networking.SupervisorSocketUtils.SOCK_STREAM,
+                io.mazewall.ffi.networking.SupervisorSocketUtils.SOCK_STREAM or io.mazewall.ffi.NativeConstants.SOCK_CLOEXEC,
                 0
             )
         }.getFdOrThrow("socket(AF_UNIX)").let { FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(it.value) }
@@ -59,7 +59,12 @@ public object RealSocketManager : SocketManager {
 
     override fun accept(serverFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>): FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open> {
         val res = LinuxNative.withTransaction {
-            LinuxNative.networking.accept(serverFd, ManagedSegment.NULL, ManagedSegment.NULL)
+            LinuxNative.networking.accept4(
+                serverFd,
+                ManagedSegment.NULL,
+                ManagedSegment.NULL,
+                io.mazewall.ffi.NativeConstants.SOCK_CLOEXEC
+            )
         }
         return res.getFdOrThrow("accept").let { FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(it.value) }
     }

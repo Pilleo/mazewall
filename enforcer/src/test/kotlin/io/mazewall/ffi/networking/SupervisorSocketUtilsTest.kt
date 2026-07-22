@@ -182,4 +182,82 @@ class SupervisorSocketUtilsTest {
         assertNull(result)
         assertEquals(1, callCount)
     }
+
+    @Test
+    fun `connectWithRetry specifies SOCK_CLOEXEC`() {
+        var socketTypeArg = 0
+        val mockNetworking = object : MockNativeNetworking() {
+            context(_: NativeTransaction)
+            override fun socket(
+                domain: Int,
+                type: Int,
+                protocol: Int,
+            ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                socketTypeArg = type
+                return LinuxNative.SyscallResult.Error(111, -1L) // Fail immediately to stop retries
+            }
+        }
+
+        val mockEngine = object : MockNativeEngine(networking = mockNetworking) {}
+        LinuxNative.setEngine(mockEngine)
+
+        assertThrows<IllegalStateException> {
+            SupervisorSocketUtils.connectWithRetry("/tmp/test_nonexistent.sock", maxRetries = 1)
+        }
+
+        val expectedType = SupervisorSocketUtils.SOCK_STREAM or io.mazewall.ffi.NativeConstants.SOCK_CLOEXEC
+        assertEquals(expectedType, socketTypeArg)
+    }
+
+    @Test
+    fun `RealSocketManager createUnixServer specifies SOCK_CLOEXEC`() {
+        var socketTypeArg = 0
+        val mockNetworking = object : MockNativeNetworking() {
+            context(_: NativeTransaction)
+            override fun socket(
+                domain: Int,
+                type: Int,
+                protocol: Int,
+            ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                socketTypeArg = type
+                return LinuxNative.SyscallResult.Error(111, -1L) // Fail to prevent actual bind/listen
+            }
+        }
+
+        val mockEngine = object : MockNativeEngine(networking = mockNetworking) {}
+        LinuxNative.setEngine(mockEngine)
+
+        assertThrows<IllegalStateException> {
+            io.mazewall.core.RealSocketManager.createUnixServer("/tmp/test_server.sock")
+        }
+
+        val expectedType = SupervisorSocketUtils.SOCK_STREAM or io.mazewall.ffi.NativeConstants.SOCK_CLOEXEC
+        assertEquals(expectedType, socketTypeArg)
+    }
+
+    @Test
+    fun `RealSocketManager accept calls accept4 with SOCK_CLOEXEC`() {
+        var accept4Flags = 0
+        val mockNetworking = object : MockNativeNetworking() {
+            context(_: NativeTransaction)
+            override fun accept4(
+                sockfd: FileDescriptor<*, FdState.Open>,
+                addr: ManagedSegment,
+                addrlen: ManagedSegment,
+                flags: Int,
+            ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                accept4Flags = flags
+                return LinuxNative.SyscallResult.Success(99L)
+            }
+        }
+
+        val mockEngine = object : MockNativeEngine(networking = mockNetworking) {}
+        LinuxNative.setEngine(mockEngine)
+
+        val serverFd = FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(10)
+        val clientFd = io.mazewall.core.RealSocketManager.accept(serverFd)
+
+        assertEquals(99, clientFd.value)
+        assertEquals(io.mazewall.ffi.NativeConstants.SOCK_CLOEXEC, accept4Flags)
+    }
 }

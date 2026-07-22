@@ -141,7 +141,12 @@ internal class SupervisorDaemonEngine(
         try {
             while (true) {
                 val res = engine.withTransaction {
-                    engine.networking.accept(serverFd, ManagedSegment.NULL, ManagedSegment.NULL)
+                    engine.networking.accept4(
+                        serverFd,
+                        ManagedSegment.NULL,
+                        ManagedSegment.NULL,
+                        NativeConstants.SOCK_CLOEXEC
+                    )
                 }
                 if (res is io.mazewall.LinuxNative.SyscallResult.Success) {
                     val clientFd = FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(res.value.toInt())
