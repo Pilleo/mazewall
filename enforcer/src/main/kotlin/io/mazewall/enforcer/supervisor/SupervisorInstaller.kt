@@ -12,16 +12,13 @@ import io.mazewall.core.FileDescriptorRole
 import io.mazewall.core.NativeArg
 import io.mazewall.core.Syscall
 import io.mazewall.core.Tid
-import io.mazewall.ffi.Layouts
 import io.mazewall.ffi.NativeConstants
-import io.mazewall.ffi.memory.nativeScope
-import io.mazewall.ffi.memory.ConfinedSegment
 import io.mazewall.getFdOrThrow
 import io.mazewall.onFailure
 import io.mazewall.ffi.networking.SupervisorSeccompNotifInstaller
+import io.mazewall.ffi.networking.SupervisorValidationChannel
 import java.io.BufferedInputStream
 import java.io.DataInputStream
-import java.io.InputStream
 import java.nio.charset.StandardCharsets
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ConcurrentHashMap
@@ -96,11 +93,10 @@ internal class JVMValidationListener(
     }
 
     fun start(readyLatch: CountDownLatch) {
-        val arena = io.mazewall.ffi.memory.NativeArena.ofShared()
-        val inputStream = SupervisorSocketInputStream(socketFd, arena)
+        val channel = SupervisorValidationChannel(socketFd)
 
         Thread {
-            runValidationReactor(inputStream, arena, readyLatch)
+            runValidationReactor(channel, readyLatch)
         }.apply {
             isDaemon = true
             name = "supervisor-validation-listener-${socketFd.value}"
@@ -109,10 +105,10 @@ internal class JVMValidationListener(
     }
 
     @Suppress("CyclomaticComplexMethod", "NestedBlockDepth", "LongMethod")
-    private fun runValidationReactor(inputStream: SupervisorSocketInputStream, arena: io.mazewall.ffi.memory.NativeArena, readyLatch: CountDownLatch) {
+    private fun runValidationReactor(channel: SupervisorValidationChannel, readyLatch: CountDownLatch) {
         System.err.println("[JVM-VALIDATION] validation reactor thread started")
         try {
-            val dis = DataInputStream(BufferedInputStream(inputStream))
+            val dis = DataInputStream(BufferedInputStream(channel.inputStream))
             try {
                 // Read handshake ACK
                 System.err.println("[JVM-VALIDATION] reading handshake ACK...")
@@ -124,8 +120,6 @@ internal class JVMValidationListener(
             } finally {
                 readyLatch.countDown()
             }
-
-            val responseSegment = with(arena) { io.mazewall.ffi.memory.SupervisorResponseSegment.allocate() }
 
             while (!closed.get()) {
                 val id = try {
@@ -226,15 +220,14 @@ internal class JVMValidationListener(
                 // Instead, the registry relies on a TTL (Time-To-Live) to automatically prune entries after 10 seconds.
 
                 val errorNr = if (decision.toInt() == 0) NativeConstants.EPERM else 0
-                sendResponse(id, decision, errorNr, responseSegment.managed)
+                channel.sendResponse(id, decision, errorNr)
             }
         } catch (ignored: java.io.IOException) {
             // Done
         } catch (ignored: IllegalStateException) {
             // Done
         } finally {
-            arena.close()
-            inputStream.close()
+            channel.close()
         }
     }
 
@@ -285,15 +278,6 @@ internal class JVMValidationListener(
         return argsList
     }
 
-    private fun sendResponse(id: Long, decision: Byte, errorNr: Int, respManaged: io.mazewall.ffi.memory.ManagedSegment) {
-        val resp = io.mazewall.ffi.memory.SupervisorResponseSegment.of(respManaged)
-        resp.setId(id)
-        resp.setDecision(decision)
-        resp.setErrorNr(errorNr)
-        LinuxNative.withTransaction {
-            LinuxNative.memory.write(socketFd, respManaged, Layouts.SUPERVISOR_RESPONSE_SIZE)
-        }
-    }
 }
 
 public object ValidationLog {
