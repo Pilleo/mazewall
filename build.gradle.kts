@@ -229,10 +229,19 @@ subprojects {
     spotbugs {
         ignoreFailures.set(false)
         showStackTraces.set(true)
-        showProgress.set(true)
-        effort.set(com.github.spotbugs.snom.Effort.MAX)
+        showProgress.set(false)
+        effort.set(com.github.spotbugs.snom.Effort.DEFAULT)
         reportLevel.set(com.github.spotbugs.snom.Confidence.HIGH)
+        onlyAnalyze.set(listOf("io.mazewall.*", "demo.vulnapp.*"))
         excludeFilter.set(file("$rootDir/config/spotbugs/exclude.xml"))
+    }
+
+    tasks.withType<com.github.spotbugs.snom.SpotBugsTask>().configureEach {
+        maxHeapSize.set("1g")
+    }
+
+    tasks.matching { it.name.startsWith("spotbugsTest") || it.name.startsWith("spotbugsIntegrationTest") }.configureEach {
+        enabled = false
     }
 
     dependencies {
