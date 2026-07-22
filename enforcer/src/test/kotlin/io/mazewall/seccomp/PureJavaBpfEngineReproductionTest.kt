@@ -14,6 +14,8 @@ import io.mazewall.ffi.memory.NativeArena
 import io.mazewall.ffi.memory.ManagedSegment
 import kotlin.test.assertFailsWith
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
+import kotlin.test.assertFalse
 
 class PureJavaBpfEngineReproductionTest {
 
@@ -51,7 +53,33 @@ class PureJavaBpfEngineReproductionTest {
 
         // After the fix, this should be null because buildFilter() is called before setNoNewPrivs()
         val calledSetNoNewPrivs = prctlCommands.any { it is PrctlCommand.SetNoNewPrivs }
-        kotlin.test.assertFalse(calledSetNoNewPrivs, "PR_SET_NO_NEW_PRIVS should NOT have been called after the fix")
+        assertFalse(calledSetNoNewPrivs, "PR_SET_NO_NEW_PRIVS should NOT have been called after the fix")
+    }
+
+    @Test
+    fun `test error propagation and state logging on JVM Error`() {
+        PureJavaBpfEngine.clearCache()
+        val mockProcess = MockNativeProcess()
+        val mockMemory = object : MockNativeMemory() {
+            context(arena: NativeArena)
+            override fun newSockFProg(filters: List<BpfInstruction>): ManagedSegment {
+                throw AssertionError("Simulated fatal AssertionError")
+            }
+        }
+        val mockEngine = MockNativeEngine(process = mockProcess, memory = mockMemory)
+        LinuxNative.setEngine(mockEngine)
+
+        val policy = Policy.builder().build()
+        val compiled = policy.definition.compile(Arch.current())
+
+        assertFailsWith<AssertionError> {
+            PureJavaBpfEngine.install(compiled)
+        }
+
+        val currentState = io.mazewall.enforcer.ThreadStateRegistry.state.engineState
+        assertTrue(currentState is SeccompInstallationState.Failed, "Engine state should transition to Failed under fatal JVM Error")
+        kotlin.test.assertEquals("buildFilter", currentState.step)
+        assertTrue(currentState.error is AssertionError, "Wrapped error must be the AssertionError")
     }
 
     @Test
