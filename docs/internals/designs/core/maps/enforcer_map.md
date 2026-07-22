@@ -135,7 +135,6 @@ graph TD
     issue_143_process_wide_classloader_deadlock_on_profiler_result_state_t["🔴 Issue: Process-Wide Classloader Deadlock on Profiler Result / State Types (HIGH)"]
     issue_144_confused_deputy_time_of_check_to_time_of_use_toctou_via_path["🔴 Issue: Confused Deputy / Time-of-Check to Time-of-Use (TOCTOU) via Path Modification (CRITICAL)"]
     issue_145_toctou_pointer_re_targeting_via_sockaddrbytes_mutation_durin["🔴 Issue: TOCTOU / Pointer Re-targeting via `sockaddrBytes` Mutation during Connect Validation (CRITICAL)"]
-    issue_146_unhandled_signal_interruptions_eintr_during_supervisor_ipc_s["🔴 Issue: Unhandled Signal Interruptions (`EINTR`) during Supervisor IPC socket communication (HIGH)"]
     issue_149_classloader_deadlock_in_jvm_validation_listener["🔴 Issue: Classloader Deadlock in JVM Validation Listener (CRITICAL)"]
     issue_162_memory_alignment_verification_for_layoutskt_ffm_structures["🔴 Issue: Memory Alignment verification for `Layouts.kt` FFM Structures (HIGH)"]
     issue_169_inconsistent_architecture_test_for_javalangforeign["🔴 Issue: Inconsistent Architecture Test for `java.lang.foreign` (HIGH)"]
@@ -293,7 +292,6 @@ graph TD
     click issue_143_process_wide_classloader_deadlock_on_profiler_result_state_t "../../../backlog/security/issue-143-process-wide-classloader-deadlock-on-profiler-result-state-t.md"
     click issue_144_confused_deputy_time_of_check_to_time_of_use_toctou_via_path "../../../backlog/security/issue-144-confused-deputy-time-of-check-to-time-of-use-toctou-via-path.md"
     click issue_145_toctou_pointer_re_targeting_via_sockaddrbytes_mutation_durin "../../../backlog/security/issue-145-toctou-pointer-re-targeting-via-sockaddrbytes-mutation-durin.md"
-    click issue_146_unhandled_signal_interruptions_eintr_during_supervisor_ipc_s "../../../backlog/security/issue-146-unhandled-signal-interruptions-eintr-during-supervisor-ipc-s.md"
     click issue_149_classloader_deadlock_in_jvm_validation_listener "../../../backlog/security/issue-149-classloader-deadlock-in-jvm-validation-listener.md"
     click issue_162_memory_alignment_verification_for_layoutskt_ffm_structures "../../../backlog/security/issue-162-memory-alignment-verification-for-layoutskt-ffm-structures.md"
     click issue_169_inconsistent_architecture_test_for_javalangforeign "../../../backlog/testing/issue-169-inconsistent-architecture-test-for-javalangforeign.md"

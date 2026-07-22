@@ -9,8 +9,8 @@ on:
 jobs:
     build-test-publish:
         name: Build, Test, Security Scan & Publish
-        runs-on: ubuntu-24.04
-        timeout-minutes: 80
+        runs-on: ubuntu-26.04
+        timeout-minutes: 90
         permissions:
             contents: read
             packages: write
