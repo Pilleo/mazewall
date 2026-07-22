@@ -248,8 +248,15 @@ internal class SupervisorSessionHandler(
         val listenerRevents = pfd1.getRevents()
         if ((listenerRevents.toInt() and NativeConstants.POLLIN.toInt()) != 0) {
             notif.fill(0)
-            val recvRes = engine.withTransaction {
-                engine.raw.ioctl(listenerFd, NativeConstants.SECCOMP_IOCTL_NOTIF_RECV, notif)
+            var recvRes: LinuxNative.SyscallResult<Long, *>
+            while (true) {
+                recvRes = engine.withTransaction {
+                    engine.raw.ioctl(listenerFd, NativeConstants.SECCOMP_IOCTL_NOTIF_RECV, notif)
+                }
+                if (recvRes is LinuxNative.SyscallResult.Error && recvRes.errno == NativeConstants.EINTR) {
+                    continue
+                }
+                break
             }
             var ok = false
             recvRes.onSuccess {
@@ -448,7 +455,14 @@ internal class SupervisorSessionHandler(
             }
         }
 
-        val writeRes = engine.withTransaction { engine.memory.write(socketFd, buf, totalSize.toLong()) }
+        var writeRes: LinuxNative.SyscallResult<Long, *>
+        while (true) {
+            writeRes = engine.withTransaction { engine.memory.write(socketFd, buf, totalSize.toLong()) }
+            if (writeRes is LinuxNative.SyscallResult.Error && writeRes.errno == NativeConstants.EINTR) {
+                continue
+            }
+            break
+        }
         return writeRes is LinuxNative.SyscallResult.Success<*, *>
     }
 
@@ -509,8 +523,15 @@ internal class SupervisorSessionHandler(
         }
 
         val responseBuf = arena.allocate(Layouts.SUPERVISOR_RESPONSE_SIZE)
-        val readRes = engine.withTransaction {
-            engine.memory.read(socketFd, responseBuf, Layouts.SUPERVISOR_RESPONSE_SIZE)
+        var readRes: LinuxNative.SyscallResult<Long, *>
+        while (true) {
+            readRes = engine.withTransaction {
+                engine.memory.read(socketFd, responseBuf, Layouts.SUPERVISOR_RESPONSE_SIZE)
+            }
+            if (readRes is LinuxNative.SyscallResult.Error && readRes.errno == NativeConstants.EINTR) {
+                continue
+            }
+            break
         }
         if (readRes is LinuxNative.SyscallResult.Success && readRes.value == Layouts.SUPERVISOR_RESPONSE_SIZE) {
             val respSeg = SupervisorResponseSegment.of(responseBuf)
@@ -621,10 +642,20 @@ internal class SupervisorSessionHandler(
             addfd.setSrcfd(localFdValue)
 
             val addfdManaged = addfd.managed
-            val success = engine.withTransaction {
-                val res = engine.raw.ioctl(listenerFd, NativeConstants.SECCOMP_IOCTL_NOTIF_ADDFD, addfdManaged)
-                logger.info { "[SUPERVISOR-DEBUG] ioctl SECCOMP_IOCTL_NOTIF_ADDFD res=$res" }
-                res is LinuxNative.SyscallResult.Success<*, *>
+            var success = false
+            while (true) {
+                val ioctlRes = engine.withTransaction {
+                    engine.raw.ioctl(listenerFd, NativeConstants.SECCOMP_IOCTL_NOTIF_ADDFD, addfdManaged)
+                }
+                logger.info { "[SUPERVISOR-DEBUG] ioctl SECCOMP_IOCTL_NOTIF_ADDFD res=$ioctlRes" }
+                if (ioctlRes is LinuxNative.SyscallResult.Success) {
+                    success = true
+                    break
+                } else if (ioctlRes is LinuxNative.SyscallResult.Error && ioctlRes.errno == NativeConstants.EINTR) {
+                    continue
+                } else {
+                    break
+                }
             }
 
             if (!success) {
@@ -713,9 +744,14 @@ internal class SupervisorSessionHandler(
         resp.writeLong(RESP_VAL_OFF, 0L)
         resp.writeInt(RESP_ERR_OFF, 0)
         resp.writeInt(RESP_FLAGS_OFF, NativeConstants.SECCOMP_USER_NOTIF_FLAG_CONTINUE.toInt())
-        engine.withTransaction {
-            engine.raw.ioctl(listenerFd, NativeConstants.SECCOMP_IOCTL_NOTIF_SEND, resp)
-            Unit
+        while (true) {
+            val res = engine.withTransaction {
+                engine.raw.ioctl(listenerFd, NativeConstants.SECCOMP_IOCTL_NOTIF_SEND, resp)
+            }
+            if (res is LinuxNative.SyscallResult.Error && res.errno == NativeConstants.EINTR) {
+                continue
+            }
+            break
         }
     }
 
@@ -725,9 +761,14 @@ internal class SupervisorSessionHandler(
         resp.writeLong(RESP_VAL_OFF, -1L)
         resp.writeInt(RESP_ERR_OFF, -errorNr)
         resp.writeInt(RESP_FLAGS_OFF, 0)
-        engine.withTransaction {
-            engine.raw.ioctl(listenerFd, NativeConstants.SECCOMP_IOCTL_NOTIF_SEND, resp)
-            Unit
+        while (true) {
+            val res = engine.withTransaction {
+                engine.raw.ioctl(listenerFd, NativeConstants.SECCOMP_IOCTL_NOTIF_SEND, resp)
+            }
+            if (res is LinuxNative.SyscallResult.Error && res.errno == NativeConstants.EINTR) {
+                continue
+            }
+            break
         }
     }
 
@@ -881,9 +922,19 @@ internal class SupervisorSessionHandler(
                                 addfd.setSrcfd(clientFd)
 
                                 val addfdManaged = addfd.managed
-                                val injectSuccess = engine.withTransaction {
-                                    val res = engine.raw.ioctl(listenerFd, NativeConstants.SECCOMP_IOCTL_NOTIF_ADDFD, addfdManaged)
-                                    res is LinuxNative.SyscallResult.Success<*, *>
+                                var injectSuccess = false
+                                while (true) {
+                                    val ioctlRes = engine.withTransaction {
+                                        engine.raw.ioctl(listenerFd, NativeConstants.SECCOMP_IOCTL_NOTIF_ADDFD, addfdManaged)
+                                    }
+                                    if (ioctlRes is LinuxNative.SyscallResult.Success) {
+                                        injectSuccess = true
+                                        break
+                                    } else if (ioctlRes is LinuxNative.SyscallResult.Error && ioctlRes.errno == NativeConstants.EINTR) {
+                                        continue
+                                    } else {
+                                        break
+                                    }
                                 }
 
                                 if (!injectSuccess) {
