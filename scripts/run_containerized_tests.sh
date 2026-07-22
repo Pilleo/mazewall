@@ -8,7 +8,10 @@ PROJECT_ROOT=$(pwd)
 SECCOMP_PROFILE="${PROJECT_ROOT}/infra/dev/podman-seccomp.json"
 CONTAINER_NAME="mazewall-integration-tests"
 
-if ! podman image exists mazewall-test-runner; then
+if [ "${GITHUB_ACTIONS:-false}" == "true" ]; then
+    echo "Building test runner image (with cache-from)..."
+    podman build --cache-from=mazewall-test-runner -t mazewall-test-runner -f infra/dev/Containerfile .
+elif ! podman image exists mazewall-test-runner; then
     echo "Building test runner image..."
     podman build -t mazewall-test-runner -f infra/dev/Containerfile .
 else
