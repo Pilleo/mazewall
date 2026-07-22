@@ -126,9 +126,7 @@ graph TD
     issue_134_toctou_in_path_normalization_under_multi_threaded_io["🔴 Issue: TOCTOU in Path Normalization under Multi-Threaded I/O (HIGH)"]
     issue_135_uncaught_native_exceptions_escaping_bpf_installation["🔴 Issue: Uncaught Native Exceptions Escaping BPF Installation (HIGH)"]
     issue_136_sbobparser_production_crashes_due_to_syntactic_subpath_pruni["🔴 Issue: `SbobParser` Production Crashes due to Syntactic Subpath Pruning of Unresolved/Symlinked Paths (HIGH)"]
-    issue_138_unhandled_signal_interruptions_eintr_during_seccomp_filter_i["🔴 Issue: Unhandled Signal Interruptions (`EINTR`) during `seccomp` Filter Installation (HIGH)"]
     issue_139_unhandled_ioctl_fallbacks_during_legacy_jvm_syscall_tracing["🔴 Issue: Unhandled `IOCTL` fallbacks during legacy JVM syscall tracing (HIGH)"]
-    issue_140_potential_race_condition_in_async_io_thread_shutdown["🔴 Issue: Potential Race Condition in Async IO Thread Shutdown (HIGH)"]
     issue_141_missing_bpfprogramstatus_and_bpflabel_type_safety["🔴 Issue: Missing `BpfProgram<Status>` and `BpfLabel` Type-Safety (HIGH)"]
     issue_142_race_in_asynchronous_fire_and_forget_profiler_event_delivery["🔴 Issue: Race in Asynchronous / Fire-and-Forget Profiler Event Delivery (CRITICAL)"]
     issue_143_process_wide_classloader_deadlock_on_profiler_result_state_t["🔴 Issue: Process-Wide Classloader Deadlock on Profiler Result / State Types (HIGH)"]
@@ -282,9 +280,7 @@ graph TD
     click issue_134_toctou_in_path_normalization_under_multi_threaded_io "../../../backlog/security/issue-134-toctou-in-path-normalization-under-multi-threaded-io.md"
     click issue_135_uncaught_native_exceptions_escaping_bpf_installation "../../../backlog/testing/issue-135-uncaught-native-exceptions-escaping-bpf-installation.md"
     click issue_136_sbobparser_production_crashes_due_to_syntactic_subpath_pruni "../../../backlog/performance/issue-136-sbobparser-production-crashes-due-to-syntactic-subpath-pruni.md"
-    click issue_138_unhandled_signal_interruptions_eintr_during_seccomp_filter_i "../../../backlog/security/issue-138-unhandled-signal-interruptions-eintr-during-seccomp-filter-i.md"
     click issue_139_unhandled_ioctl_fallbacks_during_legacy_jvm_syscall_tracing "../../../backlog/testing/issue-139-unhandled-ioctl-fallbacks-during-legacy-jvm-syscall-tracing.md"
-    click issue_140_potential_race_condition_in_async_io_thread_shutdown "../../../backlog/testing/issue-140-potential-race-condition-in-async-io-thread-shutdown.md"
     click issue_141_missing_bpfprogramstatus_and_bpflabel_type_safety "../../../backlog/security/issue-141-missing-bpfprogramstatus-and-bpflabel-type-safety.md"
     click issue_142_race_in_asynchronous_fire_and_forget_profiler_event_delivery "../../../backlog/testing/issue-142-race-in-asynchronous-fire-and-forget-profiler-event-delivery.md"
     click issue_143_process_wide_classloader_deadlock_on_profiler_result_state_t "../../../backlog/security/issue-143-process-wide-classloader-deadlock-on-profiler-result-state-t.md"
