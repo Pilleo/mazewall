@@ -66,6 +66,9 @@ public object SupervisorSocketUtils {
         sockaddrUn.segment.fill(0)
         sockaddrUn.setSunFamily(AF_UNIX.toShort())
         val pathBytes = socketPath.toByteArray(StandardCharsets.UTF_8)
+        require(pathBytes.size < 108) {
+            "Socket path too long: $socketPath (length: ${pathBytes.size}, max: 107)"
+        }
         val pathSeg = sockaddrUn.getSunPath()
         MemorySegment.copy(pathBytes, 0, pathSeg, ValueLayout.JAVA_BYTE, 0L, pathBytes.size)
         return sockaddrUn
