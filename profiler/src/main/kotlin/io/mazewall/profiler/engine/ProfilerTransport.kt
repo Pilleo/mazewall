@@ -172,7 +172,11 @@ object RealProfilerTransport : ProfilerTransport {
         resp.set(ValueLayout.JAVA_LONG, RESP_VAL_OFF, 0L)
         resp.set(ValueLayout.JAVA_INT, RESP_ERR_OFF, 0)
         resp.set(ValueLayout.JAVA_INT, RESP_FLAGS_OFF, NativeConstants.SECCOMP_USER_NOTIF_FLAG_CONTINUE.toInt())
-        ioctl(session.listenerFd, SECCOMP_IOCTL_NOTIF_SEND, resp).getOrThrow("sendSeccompContinue")
+        val res = ioctl(session.listenerFd, SECCOMP_IOCTL_NOTIF_SEND, resp)
+        if (res is LinuxNative.SyscallResult.Error && res.errno == NativeConstants.ENOENT) {
+            return
+        }
+        res.getOrThrow("sendSeccompContinue")
     }
 
     context(arena: Arena)
@@ -187,7 +191,11 @@ object RealProfilerTransport : ProfilerTransport {
         // Error numbers are negative in the 'error' field of seccomp_notif_resp
         resp.set(ValueLayout.JAVA_INT, RESP_ERR_OFF, -errorNr)
         resp.set(ValueLayout.JAVA_INT, RESP_FLAGS_OFF, 0)
-        ioctl(session.listenerFd, SECCOMP_IOCTL_NOTIF_SEND, resp).getOrThrow("sendSeccompContinue")
+        val res = ioctl(session.listenerFd, SECCOMP_IOCTL_NOTIF_SEND, resp)
+        if (res is LinuxNative.SyscallResult.Error && res.errno == NativeConstants.ENOENT) {
+            return
+        }
+        res.getOrThrow("sendSeccompError")
     }
 
     override fun connect(socketPath: String): FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open> {

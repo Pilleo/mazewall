@@ -23,12 +23,18 @@ import java.lang.foreign.MemoryLayout
 import java.lang.foreign.MemorySegment
 import java.lang.foreign.ValueLayout
 import java.nio.channels.ClosedByInterruptException
+import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
 class ProfilerDaemonTest {
+
+    @AfterEach
+    fun tearDown() {
+        LinuxNative.resetToDefault()
+    }
 
     private companion object {
         private const val PROTOCOL_ACK_BYTE = 0xAC.toByte()
@@ -352,6 +358,31 @@ class ProfilerDaemonTest {
 
             assertTrue(Thread.currentThread().isInterrupted, "Thread interrupt status should be restored")
             Thread.interrupted()
+        }
+    }
+
+    @Test
+    fun `test RealProfilerTransport sendSeccompContinue and sendSeccompError ignore ENOENT`() {
+        val mockEngine = MockNativeEngine()
+        mockEngine.ioctlResult = LinuxNative.SyscallResult.Error(NativeConstants.ENOENT, -1L)
+
+        LinuxNative.setEngine(mockEngine)
+
+        Arena.ofConfined().use { arena ->
+            val resp = arena.allocate(Layouts.SECCOMP_NOTIF_RESP)
+            val successSession = HandshakeSession.Success(123L, FileDescriptor.unsafe(20))
+            val failedSession = HandshakeSession.Failed(123L, FileDescriptor.unsafe(20))
+
+            org.junit.jupiter.api.assertDoesNotThrow {
+                with(arena) {
+                    RealProfilerTransport.sendSeccompContinue(successSession, resp)
+                }
+            }
+            org.junit.jupiter.api.assertDoesNotThrow {
+                with(arena) {
+                    RealProfilerTransport.sendSeccompError(failedSession, resp, 5) // EIO = 5
+                }
+            }
         }
     }
 }
