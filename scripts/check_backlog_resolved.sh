@@ -55,9 +55,22 @@ for file in "$BACKLOG_DIR"/issue-*.md; do
              change_count=$(git rev-list --count HEAD --since="7 days ago" -- "$found_file")
 
              if [ "$change_count" -gt 0 ]; then
+                 # Extract explicit github_issue number if present in frontmatter
+                 gh_issue=$(grep "^github_issue:" "$file" | head -n1 | awk '{print $2}')
+                 commit_match=""
+                 if [ -n "$gh_issue" ]; then
+                     commit_match=$(git log --grep="[Ff]ixes #${gh_issue}" --grep="[Cc]loses #${gh_issue}" --grep="issue-${gh_issue}" --grep="gh-${gh_issue}" --oneline -n 1 -- "$found_file")
+                 fi
+
                  echo "⚠️  POTENTIALLY STALE: $title"
                  echo "   - File: $file"
                  echo "   - Target: $found_file"
+                 if [ -n "$gh_issue" ]; then
+                     echo "   - GitHub Issue ID: #$gh_issue"
+                 fi
+                 if [ -n "$commit_match" ]; then
+                     echo "   - Direct Match Commit: $commit_match"
+                 fi
                  echo "   - Recent Changes: $change_count commit(s) in the last 7 days (Last: $last_change)"
                  echo "   - Action: Verify if this issue was addressed in recent commits."
                  echo ""
