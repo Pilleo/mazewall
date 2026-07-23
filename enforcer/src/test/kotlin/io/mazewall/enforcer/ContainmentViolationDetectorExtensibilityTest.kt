@@ -69,4 +69,36 @@ class ContainmentViolationDetectorExtensibilityTest {
         assertTrue(matchedText.contains("Permission denied", ignoreCase = true), "Should match 'Permission denied', got '$matchedText'")
         assertFalse(matchedText.contains("Cannot run", ignoreCase = true), "Should NOT match 'Cannot run'")
     }
+
+    @Test
+    fun `default detector automatically loads violation matchers via ServiceLoader`() {
+        val spiException = IOException("This is a SPI_VIOLATION_TRIGGER_KEYWORD error!")
+
+        // This should be true because of TestServiceViolationMatcher registered via META-INF/services
+        assertTrue(ContainmentViolationDetector.isContainmentViolation(spiException))
+
+        // Unrelated exception should still be false
+        assertFalse(ContainmentViolationDetector.isContainmentViolation(IOException("Unrelated message")))
+    }
+
+    @Test
+    fun `can instantiate independent detector class with custom configuration`() {
+        // Create an instance that does NOT use default matchers and has a specific custom matcher
+        val customDetector = ContainmentViolationDetector(
+            customMatchers = listOf(ViolationMatcher { t -> t.message?.contains("SPECIFIC_TEST_KEYWORD") == true }),
+            useDefaults = false,
+            loadServices = false // Disables service loader for this instance
+        )
+
+        val customException = IOException("contains SPECIFIC_TEST_KEYWORD")
+        val defaultException = IOException("Permission denied")
+
+        // Custom detector matches custom keyword but NOT standard defaults
+        assertTrue(customDetector.isContainmentViolation(customException))
+        assertFalse(customDetector.isContainmentViolation(defaultException))
+
+        // Default detector matches standard defaults but NOT custom keyword
+        assertTrue(ContainmentViolationDetector.isContainmentViolation(defaultException))
+        assertFalse(ContainmentViolationDetector.isContainmentViolation(customException))
+    }
 }
