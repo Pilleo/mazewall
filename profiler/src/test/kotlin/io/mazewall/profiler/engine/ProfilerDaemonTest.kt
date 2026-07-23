@@ -385,4 +385,48 @@ class ProfilerDaemonTest {
             }
         }
     }
+
+    @Test
+    fun `test processNotification handles exception during reply transmission gracefully`() {
+        val failingTransport = object : MockTransport() {
+            context(arena: Arena)
+            override fun sendTraceEvent(socketFd: FileDescriptor<*, FdState.Open>, event: SyscallEvent<SyscallEventState.Resolved>) {
+                throw RuntimeException("Simulated socket write failure during event delivery")
+            }
+        }
+
+        val reader = MockReader()
+        val syscallMap = mapOf(2 to "OPEN")
+        val handler = ProfilerSessionHandler(
+            FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(10),
+            FileDescriptor.unsafe<FileDescriptorRole.SeccompNotif>(20),
+            failingTransport,
+            failingTransport,
+            failingTransport,
+            reader,
+            syscallMap,
+        ) { }
+
+        io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
+            val notif = arena.allocate(Layouts.SECCOMP_NOTIF)
+            val resp = arena.allocate(Layouts.SECCOMP_NOTIF_RESP)
+            val ackBuf = arena.allocate(1L)
+            val socketPollFd = arena.allocate(Layouts.POLLFD)
+
+            // Setup notification data
+            notif.writeLong(NOTIF_ID_OFF, 123L)
+            notif.writeInt(NOTIF_PID_OFF, 456)
+            notif.writeInt(NOTIF_NR_OFF, 2)
+            notif.writeLong(NOTIF_ARGS_OFF, 0x1000L)
+
+            val ok = with(arena) {
+                handler.processNotification(notif, resp, ackBuf, socketPollFd)
+            }
+
+            // The method must return false (signifying processing failure/session termination)
+            assertFalse(ok)
+            // It must have fallen back to send the seccomp error response
+            assertTrue(failingTransport.errorSent, "Should have sent seccomp error response on delivery failure")
+        }
+    }
 }
