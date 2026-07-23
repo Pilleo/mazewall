@@ -18,12 +18,22 @@ class BpfFilterTest {
         val filter = BpfFilter.build(arch, Policy.builder().build().definition)
 
         // Find LD W ABS 4 (Load architecture audit ID)
-        val hasArchLoad = filter.any { it.code == 0x20.toShort() && it.k == 4 }
-        assertTrue(hasArchLoad, "Filter should contain instruction to load architecture audit ID")
+        val ldIndex = filter.indexOfFirst { it.code == 0x20.toShort() && it.k == 4 }
+        assertTrue(ldIndex >= 0, "Filter should contain instruction to load architecture audit ID")
 
-        // Find JEQ AUDIT_ARCH_X86_64
-        val hasArchCheck = filter.any { it.code == 0x15.toShort() && it.k == Arch.AUDIT_ARCH_X86_64 }
-        assertTrue(hasArchCheck, "Filter should contain check for X86_64 architecture")
+        // Next instruction must be the JEQ audit arch check
+        val jmpIndex = ldIndex + 1
+        val jmpIns = filter[jmpIndex]
+        assertEquals(0x15.toShort(), jmpIns.code, "Next instruction should be JEQ check")
+        assertEquals(Arch.AUDIT_ARCH_X86_64, jmpIns.k, "Filter should check for X86_64 architecture")
+        assertEquals(1, jmpIns.jt, "jt jump offset should be 1 to skip the kill instruction on success")
+        assertEquals(0, jmpIns.jf, "jf jump offset should be 0 to fall through to the kill instruction on failure")
+
+        // If mismatch, fall through to the strict RET SECCOMP_RET_KILL_PROCESS
+        val killIndex = jmpIndex + 1
+        val killIns = filter[killIndex]
+        assertEquals(0x06.toShort(), killIns.code, "Instruction after JEQ should be RET")
+        assertEquals(NativeConstants.SECCOMP_RET_KILL_PROCESS, killIns.k, "Architecture check mismatch should strictly return SECCOMP_RET_KILL_PROCESS")
     }
 
     @Test
