@@ -11,14 +11,11 @@ While the examples are JVM-specific, the underlying concepts (Seccomp-BPF, Landl
 
 ## Read the Article Series
 
-1. **[Part 0: Your Threads Are All Equally Trusted — Should They Be?](presentation/article0-developer-primer.html)**  
-   Process-wide vs thread-scoped sandbox basics, ExecutorService wrapping, and architectural trade-offs.
+1. **[Prologue: The History of Linux Trust Issues (And Why You Should Develop Them Too)](presentation/article0a-history.html)**  
+   How OS boundaries evolved from 2005 to 2021, why thread isolation failed in C++, and how managed runtimes change the rules.
 
 2. **[Part 1: Do You Really Know What Your App Is Doing at Runtime?](presentation/article1-threat-model.html)**  
    The threat model, SBoB concept, and why container-level profiles aren't enough.
-
-   * **[Interlude: Why Would We Do the Same Thing That Failed?](presentation/article1b-why-again.html)**  
-     Confronting the skeptic: why thread-level sandboxing failed historically (e.g., in Chromium) and why JVM type-safety changes the threat model.
 
 3. **[Part 2: Let Your Code Build Its Own Sandbox](presentation/article2-profiler.html)**  
    Dynamic profiling: how to observe a workload and auto-generate its minimal policy.

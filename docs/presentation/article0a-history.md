@@ -1,4 +1,4 @@
-# The Kernel Has Always Known Better Than Your Code
+# The History of Linux Trust Issues (And Why You Should Develop Them Too)
 
 [![Series Home](https://img.shields.io/badge/Series-Home-1e293b)](../../README.md)
 
