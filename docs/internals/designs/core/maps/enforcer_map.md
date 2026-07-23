@@ -118,7 +118,6 @@ graph TD
     issue_126_memory_segment_lifetime_leak_in_async_profiler_events["🔴 Issue: Memory Segment Lifetime Leak in Async Profiler Events (HIGH)"]
     issue_127_unhandled_signal_mask_inheritance_in_containedexecutors["🔴 Issue: Unhandled Signal Mask Inheritance in `ContainedExecutors` (HIGH)"]
     issue_128_missing_extensibility_in_exception_message_parsing["🔴 Issue: 🔴 [Severity: DX-FRICTION]: Missing Extensibility in Exception Message Parsing (HIGH)"]
-    issue_129_toctou_in_usernotif_argument_dereferencing["🔴 Issue: TOCTOU in `USER_NOTIF` Argument Dereferencing (HIGH)"]
     issue_130_unhandled_endianness_in_processvmreadv_socket_message_tracin["🔴 Issue: Unhandled Endianness in `process_vm_readv` Socket Message Tracing (HIGH)"]
     issue_131_missing_return_value_check_for_seccompnotifresp_ack["🔴 Issue: Missing Return Value Check for `SECCOMP_NOTIF_RESP` ACK (HIGH)"]
     issue_132_missing_bpf_instruction_limit_validation_in_newsockfprog["🔴 Issue: Missing BPF Instruction Limit Validation in `newSockFProg` (HIGH)"]
@@ -272,7 +271,6 @@ graph TD
     click issue_126_memory_segment_lifetime_leak_in_async_profiler_events "../../../backlog/performance/issue-126-memory-segment-lifetime-leak-in-async-profiler-events.md"
     click issue_127_unhandled_signal_mask_inheritance_in_containedexecutors "../../../backlog/testing/issue-127-unhandled-signal-mask-inheritance-in-containedexecutors.md"
     click issue_128_missing_extensibility_in_exception_message_parsing "../../../backlog/testing/issue-128-missing-extensibility-in-exception-message-parsing.md"
-    click issue_129_toctou_in_usernotif_argument_dereferencing "../../../backlog/security/issue-129-toctou-in-usernotif-argument-dereferencing.md"
     click issue_130_unhandled_endianness_in_processvmreadv_socket_message_tracin "../../../backlog/testing/issue-130-unhandled-endianness-in-processvmreadv-socket-message-tracin.md"
     click issue_131_missing_return_value_check_for_seccompnotifresp_ack "../../../backlog/security/issue-131-missing-return-value-check-for-seccompnotifresp-ack.md"
     click issue_132_missing_bpf_instruction_limit_validation_in_newsockfprog "../../../backlog/testing/issue-132-missing-bpf-instruction-limit-validation-in-newsockfprog.md"

@@ -1,13 +1,13 @@
 ---
 title: "TOCTOU in `USER_NOTIF` Argument Dereferencing"
 severity: "HIGH"
-status: "open"
+status: "resolved"
 priority: 9
 dependencies: []
 component: "profiler"
 effort: "small"
 autonomy: "supervised"
-solution_approved: false
+solution_approved: true
 blast_radius: "medium"
 reversible: true
 ---
@@ -33,11 +33,11 @@ Implement the recommendation described in the Needed section to resolve the issu
 **Effort:** small
 
 ---
-**Chosen:** *(not yet approved — requires human decision)*
+**Chosen:** Option A — Refactor implementation
 
 **Acceptance Criteria:**
-- [ ] Tests verify the fix works as expected.
-- [ ] Issue is fully resolved in the codebase.
+- [x] Tests verify the fix works as expected.
+- [x] Issue is fully resolved in the codebase.
 
 **Implementation Hints:**
 - Ensure you read existing tests and implementation carefully before modifying code.
