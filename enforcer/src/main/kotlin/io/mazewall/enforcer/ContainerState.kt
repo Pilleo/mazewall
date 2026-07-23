@@ -85,37 +85,7 @@ internal data class ContainerState(
          * tasks may interleave with global state transitions.
          */
         fun resolveCurrentState(): ContainerState {
-            val ts = ThreadStateRegistry.state
-            val ps = ProcessStateRegistry.state
-
-            val mergedActions = ts.syscallActions.toMutableMap()
-            for ((sys, action) in ps.syscallActions) {
-                val current = mergedActions[sys]
-                if (current == null || action.priority > current.priority) {
-                    mergedActions[sys] = action
-                }
-            }
-
-            val mergedDefault = if (ts.defaultAction.priority > ps.defaultAction.priority) ts.defaultAction else ps.defaultAction
-
-            val mergedAllowed = if (ts.allowedSyscalls == null) {
-                ps.allowedSyscalls
-            } else if (ps.allowedSyscalls == null) {
-                ts.allowedSyscalls
-            } else {
-                ts.allowedSyscalls.intersect(ps.allowedSyscalls)
-            }
-
-            return ContainerState(
-                filterDepth = ts.filterDepth + ps.filterDepth,
-                syscallActions = mergedActions,
-                defaultAction = mergedDefault,
-                allowedSyscalls = mergedAllowed,
-                allowsMmapExec = ts.allowsMmapExec && ps.allowsMmapExec,
-                allowsNonThreadClone = ts.allowsNonThreadClone && ps.allowsNonThreadClone,
-                allowsUnsafePrctl = ts.allowsUnsafePrctl && ps.allowsUnsafePrctl,
-                landlockPolicy = ts.landlockPolicy ?: ps.landlockPolicy
-            )
+            return ThreadStateRegistry.resolveCurrentState(ProcessStateRegistry.state)
         }
     }
 }
