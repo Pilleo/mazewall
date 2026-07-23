@@ -317,4 +317,47 @@ class BpfFilterTest {
         assertTrue(valuesChecked.contains(hi2), "HI 2 check should be present")
         assertTrue(valuesChecked.contains(lo2), "LO 2 check should be present")
     }
+
+    @Test
+    fun `test BpfFilter groups identical native actions and uses shared RET block`() {
+        // Create a policy where 5 syscalls are mapped to ACT_ERRNO
+        val sys1 = Syscall.GETEUID
+        val sys2 = Syscall.GETPPID
+        val sys3 = Syscall.GETUID
+        val sys4 = Syscall.GETGID
+        val sys5 = Syscall.GETEGID
+
+        val policy = Policy.builder()
+            .block(sys1, sys2, sys3, sys4, sys5)
+            .build()
+
+        val filter = BpfFilter.build(arch, policy.definition)
+
+        val nr1 = sys1.numberFor(arch)
+        val nr2 = sys2.numberFor(arch)
+        val nr3 = sys3.numberFor(arch)
+        val nr4 = sys4.numberFor(arch)
+        val nr5 = sys5.numberFor(arch)
+        val nrs = setOf(nr1, nr2, nr3, nr4, nr5)
+
+        val targetRetAction = NativeConstants.SECCOMP_RET_ERRNO or NativeConstants.EPERM
+
+        // For each of the blocked syscall numbers, locate its JEQ check and resolve its target index
+        val resolvedTargetsMap = nrs.associateWith { nr ->
+            val jeqIdx = filter.indexOfFirst { it.code == 0x15.toShort() && it.k == nr }
+            assertTrue(jeqIdx >= 0, "Should find JEQ check for syscall $nr")
+            val jeqInst = filter[jeqIdx]
+            val resolvedTargetIdx = jeqIdx + jeqInst.jt + 1
+            resolvedTargetIdx
+        }
+        val resolvedTargets = resolvedTargetsMap.values.toSet()
+
+        // All 5 syscall checks should jump to the exact same RET instruction index
+        assertEquals(1, resolvedTargets.size, "All blocked syscalls should jump to the exact same instruction index: $resolvedTargetsMap")
+
+        val sharedRetIdx = resolvedTargets.first()
+        val sharedRetInst = filter[sharedRetIdx]
+        assertEquals(0x06.toShort(), sharedRetInst.code, "Target instruction should be a RET instruction")
+        assertEquals(targetRetAction, sharedRetInst.k, "Shared RET instruction should return the blocked action")
+    }
 }

@@ -34,14 +34,16 @@ class SupervisorBpfCompilationTest {
             val f = filter[i]
             if (f.code == 0x15.toShort()) { // JEQ
                 if (f.k == openatNr) {
-                    val next = filter[i + 1]
-                    if (next.code == 0x06.toShort() && next.k == NativeConstants.SECCOMP_RET_USER_NOTIF) {
+                    val targetIdx = i + f.jt + 1
+                    val targetInsn = filter[targetIdx]
+                    if (targetInsn.code == 0x06.toShort() && targetInsn.k == NativeConstants.SECCOMP_RET_USER_NOTIF) {
                         foundOpenatNotify = true
                     }
                 }
                 if (f.k == connectNr) {
-                    val next = filter[i + 1]
-                    if (next.code == 0x06.toShort() && next.k == NativeConstants.SECCOMP_RET_USER_NOTIF) {
+                    val targetIdx = i + f.jt + 1
+                    val targetInsn = filter[targetIdx]
+                    if (targetInsn.code == 0x06.toShort() && targetInsn.k == NativeConstants.SECCOMP_RET_USER_NOTIF) {
                         foundConnectNotify = true
                     }
                 }
