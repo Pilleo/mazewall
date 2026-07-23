@@ -3,6 +3,7 @@ package io.mazewall
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.ffi.Layouts
+import io.mazewall.ffi.NativeConstants
 import io.mazewall.ffi.memory.ManagedSegment
 import io.mazewall.ffi.internal.RealTransactionManager
 import io.mazewall.ffi.memory.NativeArena
@@ -299,6 +300,9 @@ public open class MockNativeMemory : NativeMemory {
     override fun newSockFProg(
         filters: List<BpfInstruction>,
     ): ManagedSegment {
+        require(filters.size <= NativeConstants.BPF_MAXINSNS) {
+            "BPF program exceeds kernel maximum instruction limit"
+        }
         return arena.allocate(Layouts.SOCK_FPROG)
     }
 }
