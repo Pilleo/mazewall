@@ -314,7 +314,8 @@ object Landlock {
             }
             val parentPath = File(resolvedPath).parent ?: "/"
             logger.info("Path $resolvedPath does not exist, falling back to parent directory: $parentPath")
-            val openResult = openPath(parentPath, flags)
+            val fallbackFlags = (flags or NativeConstants.O_PATH or NativeConstants.O_CLOEXEC) and NativeConstants.O_NOFOLLOW.inv()
+            val openResult = openPath(parentPath, fallbackFlags)
             return when (openResult) {
                 is LinuxNative.SyscallResult.Success -> OpenResult.Success(openResult.value.toInt(), true)
                 is LinuxNative.SyscallResult.Error -> OpenResult.Error(openResult.errno)
