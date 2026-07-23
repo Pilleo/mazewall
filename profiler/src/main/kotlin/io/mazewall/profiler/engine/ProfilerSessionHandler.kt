@@ -116,6 +116,16 @@ internal class ProfilerSessionHandler(
         }.recover { _, _ -> false }
     }
 
+    /**
+     * Processes a single incoming seccomp notification.
+     *
+     * ### ⚠️ FFM Memory Safety & Lifetime Invariant:
+     * To prevent off-heap/native memory segment leaks, high GC pressure, and lifetime issues,
+     * any raw seccomp_data structural slices or other native/off-heap memory resolved inside this method
+     * **must be strictly materialized into JVM heap objects** before crossing the [TraceEvent] or
+     * [SyscallEvent] boundaries (which is done here when [SyscallPathResolver.resolve] is called
+     * and the resulting event is published via [TraceEventPublisher.sendTraceEvent]).
+     */
     @Suppress("TooGenericExceptionCaught", "ReturnCount", "CyclomaticComplexMethod")
     context(arena: NativeArena)
     internal fun processNotification(
