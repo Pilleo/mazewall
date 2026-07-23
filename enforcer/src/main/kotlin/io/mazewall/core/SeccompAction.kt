@@ -18,7 +18,17 @@ public enum class SeccompAction(
     /** Immediately terminates the calling thread. */
     ACT_KILL_THREAD(6, NativeConstants.SECCOMP_RET_KILL_THREAD),
 
-    /** Sends a SIGSYS signal to the calling thread (native interception). */
+    /**
+     * Sends a SIGSYS signal to the calling thread (native interception).
+     *
+     * WARNING: This action relies on the kernel delivering SIGSYS. In environments where
+     * native libraries (JNI/FFM) modify thread signal masks (e.g., via `sigprocmask` / `rt_sigprocmask`) or
+     * alternate signal stacks (`sigaltstack`), or where standard JVM thread pools reuse
+     * threads without resetting POSIX signal masks, SIGSYS delivery can be blocked or
+     * delayed indefinitely, or result in an unkillable thread state. This makes ACT_TRAP
+     * unreliable under such conditions. Use ACT_KILL_PROCESS or ACT_KILL_THREAD for guaranteed
+     * immediate enforcement in environments utilizing arbitrary native libraries.
+     */
     ACT_TRAP(5, NativeConstants.SECCOMP_RET_TRAP),
 
     /** Returns EPERM (or ENOSYS for clone3) to the calling thread. */
