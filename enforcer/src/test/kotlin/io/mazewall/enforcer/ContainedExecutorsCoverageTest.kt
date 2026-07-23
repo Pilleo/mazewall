@@ -104,4 +104,36 @@ class ContainedExecutorsCoverageTest {
             "SeccompAction.kt should document ACT_TRAP unreliability regarding signal masks"
         )
     }
+
+    @Test
+    fun `test that allowUnsafePrctl contains TOCTOU KDoc documentation`() {
+        var rootDir = java.io.File(".").absoluteFile
+        while (rootDir.parentFile != null && !java.io.File(rootDir, "enforcer").exists()) {
+            rootDir = rootDir.parentFile
+        }
+
+        val bpfFilterFile = java.io.File(rootDir, "enforcer/src/main/kotlin/io/mazewall/BpfFilter.kt")
+        val policyFile = java.io.File(rootDir, "enforcer/src/main/kotlin/io/mazewall/Policy.kt")
+        val policyBuilderFile = java.io.File(rootDir, "enforcer/src/main/kotlin/io/mazewall/PolicyBuilder.kt")
+        val policyDefinitionFile = java.io.File(rootDir, "enforcer/src/main/kotlin/io/mazewall/PolicyDefinition.kt")
+        val syscallInspectorFile = java.io.File(rootDir, "enforcer/src/main/kotlin/io/mazewall/seccomp/SyscallInspector.kt")
+
+        assertTrue(bpfFilterFile.exists(), "BpfFilter.kt should be found")
+        assertTrue(policyFile.exists(), "Policy.kt should be found")
+        assertTrue(policyBuilderFile.exists(), "PolicyBuilder.kt should be found")
+        assertTrue(policyDefinitionFile.exists(), "PolicyDefinition.kt should be found")
+        assertTrue(syscallInspectorFile.exists(), "SyscallInspector.kt should be found")
+
+        val bpfFilterContent = bpfFilterFile.readText()
+        val policyContent = policyFile.readText()
+        val policyBuilderContent = policyBuilderFile.readText()
+        val policyDefinitionContent = policyDefinitionFile.readText()
+        val syscallInspectorContent = syscallInspectorFile.readText()
+
+        assertTrue(bpfFilterContent.contains("TOCTOU") && bpfFilterContent.contains("allowUnsafePrctl"), "BpfFilter.kt should document TOCTOU warnings for allowUnsafePrctl")
+        assertTrue(policyContent.contains("TOCTOU") && policyContent.contains("allowUnsafePrctl"), "Policy.kt should document TOCTOU warnings for allowUnsafePrctl")
+        assertTrue(policyBuilderContent.contains("TOCTOU") && policyBuilderContent.contains("allowUnsafePrctl"), "PolicyBuilder.kt should document TOCTOU warnings for allowUnsafePrctl")
+        assertTrue(policyDefinitionContent.contains("TOCTOU") && policyDefinitionContent.contains("allowUnsafePrctl"), "PolicyDefinition.kt should document TOCTOU warnings for allowUnsafePrctl")
+        assertTrue(syscallInspectorContent.contains("TOCTOU") && syscallInspectorContent.contains("UnsafePrctlInspector"), "SyscallInspector.kt should document TOCTOU warnings for UnsafePrctlInspector")
+    }
 }

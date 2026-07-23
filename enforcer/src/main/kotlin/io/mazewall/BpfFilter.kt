@@ -76,6 +76,12 @@ object BpfFilter {
 
     /**
      * Constructs the BPF bytecode using a linear scan approach.
+     *
+     * @param allowUnsafePrctl When set to true, allows dangerous prctl options. WARNING: enabling this is
+     * extremely dangerous and inherently vulnerable to concurrent memory mutation attacks (TOCTOU) by sibling threads.
+     * While the register-based prctl option argument (args[0]) is immune to TOCTOU, pointer-based arguments in
+     * options like PR_SET_MM or PR_SET_NAME can point to memory regions that are concurrently mutated by sibling threads
+     * after the seccomp check but before kernel execution.
      */
     internal fun buildFromActions(
         arch: Arch,
