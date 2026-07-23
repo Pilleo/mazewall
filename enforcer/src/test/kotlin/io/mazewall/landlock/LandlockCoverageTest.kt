@@ -447,4 +447,52 @@ class LandlockCoverageTest {
             assertTrue(ex.message!!.contains("requires Linux kernel 5.13+"))
         }
     }
+
+    @Test
+    fun `test fallback parent open flags include O_PATH and O_CLOEXEC and exclude O_NOFOLLOW`() {
+        val observedFlags = mutableListOf<Pair<String, Int>>()
+        val mockFallback = SupportedLandlockMock(
+            fileSystem = object : MockNativeFileSystem() {
+                context(_: NativeTransaction)
+                override fun open(
+                    path: ManagedSegment,
+                    flags: Int,
+                ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                    val pathStr = path.readString(0L)
+                    if (pathStr == "/nonexistent/file") {
+                        observedFlags.add(pathStr to flags)
+                        return LinuxNative.SyscallResult.Error<LinuxNative.SyscallHandledState.Unhandled>(2, -1)
+                    }
+                    if (pathStr == "/nonexistent") {
+                        observedFlags.add(pathStr to flags)
+                        return LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(100)
+                    }
+                    return LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(100)
+                }
+            }
+        )
+        LinuxNative.setEngine(mockFallback)
+
+        val session = LandlockSession(
+            Policy.builder().allowFsRead(SandboxedPath.of("/nonexistent/file", true)).build().definition
+        )
+        session.applyRuleset()
+
+        // Check that exactly two target open calls were made
+        assertEquals(2, observedFlags.size)
+
+        // First call should be for /nonexistent/file with O_PATH, O_CLOEXEC, and O_NOFOLLOW
+        val (firstPath, firstFlags) = observedFlags[0]
+        assertEquals("/nonexistent/file", firstPath)
+        assertTrue((firstFlags and io.mazewall.ffi.NativeConstants.O_PATH) != 0, "First call must contain O_PATH")
+        assertTrue((firstFlags and io.mazewall.ffi.NativeConstants.O_CLOEXEC) != 0, "First call must contain O_CLOEXEC")
+        assertTrue((firstFlags and io.mazewall.ffi.NativeConstants.O_NOFOLLOW) != 0, "First call must contain O_NOFOLLOW")
+
+        // Second call (fallback) should be for parent /nonexistent, must contain O_PATH, O_CLOEXEC, and MUST NOT contain O_NOFOLLOW
+        val (secondPath, secondFlags) = observedFlags[1]
+        assertEquals("/nonexistent", secondPath)
+        assertTrue((secondFlags and io.mazewall.ffi.NativeConstants.O_PATH) != 0, "Fallback call must contain O_PATH")
+        assertTrue((secondFlags and io.mazewall.ffi.NativeConstants.O_CLOEXEC) != 0, "Fallback call must contain O_CLOEXEC")
+        assertTrue((secondFlags and io.mazewall.ffi.NativeConstants.O_NOFOLLOW) == 0, "Fallback call must NOT contain O_NOFOLLOW")
+    }
 }
