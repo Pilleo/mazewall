@@ -23,24 +23,10 @@ jobs:
               with:
                   java-version: "25"
                   distribution: "temurin"
-            - name: Restore Gradle & NVD Cache
-              uses: actions/cache/restore@v4
-              with:
-                  path: |
-                      ~/.gradle/caches
-                      ~/.gradle/notifications
-                      ~/.gradle/dependency-check-data
-                      ~/.gradle/build-cache
-                      ~/.gradle/wrapper
-                  key: gradle-cache-${{ runner.os }}-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}-${{ github.sha }}
-                  restore-keys: |
-                      gradle-cache-${{ runner.os }}-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}-
-                      gradle-cache-${{ runner.os }}-
             - name: Setup Gradle
               uses: gradle/actions/setup-gradle@v4
               with:
                   cache-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
-                  cache-read-only: true
             - name: Grant Execute Permission for Gradlew
               run: chmod +x gradlew
             - name: Setup Podman Socket
@@ -111,20 +97,9 @@ jobs:
               with:
                   path: ~/.gradle/dependency-check-data
                   key: nvd-database-${{ runner.os }}-${{ github.run_id }}
-            - name: Save Gradle Cache (Always)
-              uses: actions/cache/save@v4
-              if: always()
-              with:
-                  path: |
-                      ~/.gradle/caches
-                      ~/.gradle/notifications
-                      ~/.gradle/build-cache
-                      ~/.gradle/wrapper
-                  key: gradle-cache-${{ runner.os }}-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}-${{ github.sha }}
             - name: Publish to GitHub Packages
               if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
               run: ./scripts/run_containerized_tests.sh publishAllPublicationsToGitHubPackagesRepository
               env:
                   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
                   GITHUB_ACTOR: ${{ github.actor }}
-
