@@ -1,6 +1,6 @@
 # Do You Really Know What Your App Is Doing at Runtime?
 
-[![← Intro](https://img.shields.io/badge/←_Intro-Developer_Primer-6366f1)](article0-developer-primer.md)
+[![← Prologue](https://img.shields.io/badge/←_Prologue-History-6366f1)](article0a-history.md)
 [![Series Home](https://img.shields.io/badge/Series-Home-1e293b)](../../README.md)
 [![Part 2 →](https://img.shields.io/badge/Part_2_→-Dynamic_Profiling-6366f1)](article2-profiler.md)
 

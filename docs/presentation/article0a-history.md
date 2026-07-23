@@ -48,17 +48,17 @@ And then they hit a wall.
 
 ## The Wall: Why Thread-Level Filtering Failed in C++
 
-The wall is not an API limitation. It is a property of the execution environment.
+The wall is not an API limitation. It is a property of C++ as an execution environment.
 
-A Seccomp filter on a thread restricts what *that thread* can ask the kernel to do. It says nothing about what that thread can do to the memory of its siblings. Threads, unlike processes, share an address space. Every byte of heap memory is accessible to every thread in the process.
+In C++, native code execution means arbitrary memory access. An attacker who achieves code execution on a restricted thread — through a buffer overflow, use-after-free, or type confusion — does not need to make syscalls from that restricted thread. They write to sibling thread memory directly and hitch a ride on an unrestricted one. The Seccomp filter on the restricted thread never sees any of this: it guards the syscall interface of one thread; it cannot guard the shared heap.
 
-To work around the brutal 4-syscall limit of original seccomp without kernel changes, Markus Gutschke and the Chromium team built an extraordinarily creative hack: a **trusted thread** architecture. When a sandboxed thread needed to issue a forbidden system call (like `open` or `mmap`), it sent an RPC request over a socket pair to a trusted sibling thread inside the same process, which validated the request and made the syscall on its behalf.
+Chromium's engineers understood the constraint and tried to work within it anyway, using Linux's original seccomp strict mode. The strict mode was brutal — it locked a thread to exactly four syscalls — so to allow a sandboxed thread to do anything useful, they needed a relay. Markus Gutschke built a **trusted thread** architecture: the sandboxed thread sends an RPC request over a socket pair, the trusted thread validates the request, and the trusted thread makes the syscall on behalf of the sandboxed one.
 
-Because the untrusted thread shared memory with the trusted thread, the trusted thread could not trust the stack or heap at all—a compromised untrusted thread could overwrite stack variables mid-execution. To prevent memory tampering, the Chromium team wrote the trusted thread's validation loop in **handcrafted assembly** (x86/x86_64). The trusted thread operated exclusively out of CPU registers, never touching memory for sensitive state validation ([LWN: Secure computing sandboxes](https://lwn.net/Articles/346800/), [ImperialViolet: Seccomp improvements](https://www.imperialviolet.org/2009/08/26/seccomp.html)).
+The problem was that trusted and sandboxed threads shared an address space. A compromised sandboxed thread could corrupt the trusted thread's stack mid-execution. To prevent this, the Chromium team wrote the trusted thread's validation loop in **handcrafted x86/x86_64 assembly**, operating exclusively out of CPU registers — never touching memory for sensitive state ([LWN: Secure computing sandboxes](https://lwn.net/Articles/346902/), [ImperialViolet: Seccomp improvements](https://www.imperialviolet.org/2009/08/26/seccomp.html)).
 
-It was an engineering marvel, but it highlighted the fundamental challenge: an attacker who achieves native code execution on a restricted C++ thread — through a buffer overflow, use-after-free, or type confusion — operates below logical boundaries. They can corrupt sibling thread memory or hijack execution pointers directly.
+The assembly made the trusted thread's logic resistant to in-process tampering. But it did not solve the fundamental problem. A C++ attacker with code execution does not need to corrupt the trusted thread's validator. They can write directly to the stack of *any other unrestricted thread* in the process. The trusted thread architecture protected its own logic; it could not protect every other thread from one that had arbitrary memory access.
 
-The heroic assembly hack was eventually retired when proper kernel filter support arrived.
+When Seccomp-BPF arrived in 2012, it solved the expressiveness problem — filters could now express complex allowlists, not just four syscalls — but not the memory-safety problem. Chrome's renderer sandbox moved back to process isolation, reinforced with Seccomp-BPF filters on each *process*. The thread-level approach was abandoned.
 
 ---
 
@@ -103,6 +103,8 @@ From the kernel's perspective, every thread in the process is identical. A compr
 That requires thread-scoped restriction. And we established above that thread-scoped restriction failed in Chromium's case.
 
 The key variable is not the kernel. It is not the language per se either. It is two separate questions: can an exploit in one thread *arbitrarily write to the memory of another*? And do the units of work you want to isolate actually map to OS-level threads?
+
+---
 
 ## When Thread-Level Filtering Is Actually Sound
 
@@ -160,7 +162,7 @@ The practical upshot of this history:
 
 **Process-wide syscall restriction** — available since Linux 3.5 (2012), in production at scale since at least Elasticsearch 5.0 (2016). Applied once at startup. Blocks the most dangerous escalation syscalls globally across every thread. Almost free at runtime. Dramatically underused by application developers, who leave it entirely to their container runtime with a generic profile.
 
-**Thread-scoped syscall restriction** — the approach Chromium could not safely use in C++, but that changes for managed and memory-safe runtimes. Applied per component. Restricts specific thread pools to the syscalls and filesystem paths they genuinely require. Turns a compromised PDF processor into a thread that physically cannot open a network socket, regardless of what vulnerability was exploited.
+**Thread-scoped syscall restriction** — the approach Chromium could not safely use in C++, but that changes for managed and memory-safe runtimes. Applied per component. Restricts specific thread pools to the syscalls and filesystem paths they genuinely require. For runtimes where thread-level isolation is sound, turns a compromised PDF processor into a thread that physically cannot open a network socket, regardless of what vulnerability was exploited.
 
 Neither requires new hardware. Neither requires privileged access — both Seccomp and Landlock can be installed by any unprivileged process after setting `PR_SET_NO_NEW_PRIVS`. The primitives have been in the kernel for over a decade.
 
@@ -176,8 +178,8 @@ The kernel primitives that make this possible have existed since 2005 and 2012. 
 
 ---
 
-**The next question is practical:** to install a Seccomp filter, you need to know exactly which system calls your application makes — under normal conditions, under load, across all code paths. Guess wrong and you crash your own service. Guess too conservatively and you leave the filter useless.
+The history answers the *how* — what these mechanisms are, which runtimes they actually protect, and why the 2009 Chromium experiment failed where a JVM or .NET service today would not.
 
-How do you generate that list without manual inspection of every library in your dependency tree? And how do you express it at thread granularity rather than for the whole process?
+The harder question is the *what*: what should your service's behavioral contract look like? Your SBOM tells you which libraries you've deployed. It cannot tell you that one of them opens an outbound socket twice a day — to an address you don't own, for reasons no one on your team chose. To express a Seccomp policy you trust, you first need to know what your service actually does, at the syscall level, across all code paths and all dependency internals.
 
-*Those questions are what the next article in this series addresses.*
+That gap — between having the mechanism and knowing what to put in it — is what the next article addresses.
