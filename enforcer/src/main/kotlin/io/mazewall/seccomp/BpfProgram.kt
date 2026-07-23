@@ -108,7 +108,7 @@ public fun BpfBuilder<BpfState.Uninitialized>.checkArch(arch: Arch): BpfBuilder<
     ops.add(BpfMacro.LoadAbsolute(BpfFilter.SECCOMP_DATA_ARCH_OFFSET))
     val archOkLabel = nextLabel("arch_ok")
     ops.add(BpfMacro.JumpIfEqual(arch.audit, jt = archOkLabel))
-    ops.add(BpfMacro.Ret(NativeConstants.SECCOMP_RET_KILL_PROCESS))
+    ops.add(BpfMacro.Ret(NativeConstants.SECCOMP_RET_KILL_THREAD))
     ops.add(BpfMacro.Label(archOkLabel))
     return BpfBuilder(ops, labelCounter)
 }
