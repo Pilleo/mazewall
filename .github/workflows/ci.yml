@@ -23,6 +23,28 @@ jobs:
               with:
                   java-version: "25"
                   distribution: "temurin"
+            - name: Check file changes
+              id: filter
+              uses: dorny/paths-filter@v3
+              with:
+                  filters: |
+                      code:
+                          - '**/*.kt'
+                          - '**/*.java'
+                          - '**/*.kts'
+                          - '**/gradle.properties'
+                          - '**/Containerfile'
+                          - 'scripts/**'
+
+            - name: Restore Gradle Build Cache
+              uses: actions/cache/restore@v4
+              with:
+                  path: ~/.gradle/build-cache
+                  key: gradle-build-cache-${{ runner.os }}-${{ hashFiles('**/*.gradle*', '**/gradle.properties') }}-${{ github.sha }}
+                  restore-keys: |
+                      gradle-build-cache-${{ runner.os }}-${{ hashFiles('**/*.gradle*', '**/gradle.properties') }}-
+                      gradle-build-cache-${{ runner.os }}-
+
             - name: Setup Gradle
               uses: gradle/actions/setup-gradle@v4
               with:
@@ -58,8 +80,10 @@ jobs:
                   set -o pipefail
                   ./scripts/run_containerized_tests.sh build 2>&1 | tee build.log
             - name: Run PITest (Host Unit Tests Only)
+              if: steps.filter.outputs.code == 'true'
               run: ./scripts/run_containerized_tests.sh :enforcer:pitest -Dpitest.threads=2
             - name: Run Vulnerability Exploitation Demo
+              if: steps.filter.outputs.code == 'true'
               run: ./scripts/run_vulnerable_app_demo.sh
             - name: Save All Podman Images to Cache Folder
               if: always()
@@ -88,6 +112,7 @@ jobs:
                   restore-keys: |
                       nvd-database-${{ runner.os }}-
             - name: Run Security Check
+              if: steps.filter.outputs.code == 'true'
               run: ./scripts/run_containerized_tests.sh dependencyCheckAnalyze --info
               env:
                   NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
@@ -97,6 +122,12 @@ jobs:
               with:
                   path: ~/.gradle/dependency-check-data
                   key: nvd-database-${{ runner.os }}-${{ github.run_id }}
+            - name: Save Gradle Build Cache (Master Only)
+              uses: actions/cache/save@v4
+              if: always() && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+              with:
+                  path: ~/.gradle/build-cache
+                  key: gradle-build-cache-${{ runner.os }}-${{ hashFiles('**/*.gradle*', '**/gradle.properties') }}-${{ github.sha }}
             - name: Publish to GitHub Packages
               if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
               run: ./scripts/run_containerized_tests.sh publishAllPublicationsToGitHubPackagesRepository
