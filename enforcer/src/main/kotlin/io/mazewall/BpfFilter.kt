@@ -233,6 +233,8 @@ object BpfFilter {
         defaultNativeAction: Int,
         handledNrs: MutableSet<Int>,
     ) {
+        val actionsToEmit = mutableListOf<Pair<Int, Int>>()
+
         for ((nr, action) in syscallActions.entries.sortedBy { it.key }) {
             if (nr !in handledNrs) {
                 handledNrs.add(nr)
@@ -241,9 +243,7 @@ object BpfFilter {
                 val nativeAction = resolveNativeAction(effectiveAction, profilingMode)
 
                 if (nativeAction != defaultNativeAction) {
-                    builder.expect(nr) {
-                        ret(nativeAction)
-                    }
+                    actionsToEmit.add(nr to nativeAction)
                 }
             }
         }
@@ -254,9 +254,33 @@ object BpfFilter {
                 if (nr in handledNrs) continue
                 handledNrs.add(nr)
 
-                builder.expect(nr) {
-                    ret(NativeConstants.SECCOMP_RET_ALLOW)
+                actionsToEmit.add(nr to NativeConstants.SECCOMP_RET_ALLOW)
+            }
+        }
+
+        // Group by nativeAction and ensure deterministic order by sorting keys and values
+        val groups = actionsToEmit.groupBy { it.second }
+            .mapValues { (_, pairs) -> pairs.map { it.first }.sorted() }
+            .toSortedMap()
+
+        for ((nativeAction, nrs) in groups) {
+            // To prevent jump offset overflows (limit is 255), we chunk syscalls.
+            // Chunk size of 100 ensures max offset is well within boundaries.
+            for (chunk in nrs.chunked(100)) {
+                val actionLabel = builder.nextLabel("action_ret")
+                val skipLabel = builder.nextLabel("skip_ret")
+
+                for (nr in chunk) {
+                    builder.jumpIfEqual(nr, jt = actionLabel)
                 }
+
+                // Unconditional jump to skip the RET instruction when no syscall in the chunk matched
+                builder.jumpIfEqual(0, jt = skipLabel, jf = skipLabel)
+
+                builder.mark(actionLabel)
+                builder.ret(nativeAction)
+
+                builder.mark(skipLabel)
             }
         }
     }

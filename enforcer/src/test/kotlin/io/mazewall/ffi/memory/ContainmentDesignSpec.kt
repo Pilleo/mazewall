@@ -133,9 +133,10 @@ class ContainmentDesignSpec :
                 for (i in filter.indices) {
                     val inst = filter[i]
                     if (inst.code == 0x15.toShort() && inst.k == futexNr) {
-                        val next = filter[i + 1]
-                        next.code shouldBe 0x06.toShort()
-                        next.k shouldBe NativeConstants.SECCOMP_RET_ALLOW
+                        val targetIdx = i + inst.jt + 1
+                        val targetInsn = filter[targetIdx]
+                        targetInsn.code shouldBe 0x06.toShort()
+                        targetInsn.k shouldBe NativeConstants.SECCOMP_RET_ALLOW
                         foundFutex = true
                     }
                 }
