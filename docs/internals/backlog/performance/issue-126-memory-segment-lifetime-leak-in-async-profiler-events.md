@@ -10,6 +10,7 @@ autonomy: "supervised"
 solution_approved: false
 blast_radius: "medium"
 reversible: true
+github_issue: 193
 ---
 
 # 🔴 [Severity: LOW]: Memory Segment Lifetime Leak in Async Profiler Events
