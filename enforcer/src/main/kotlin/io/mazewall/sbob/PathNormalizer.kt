@@ -44,22 +44,25 @@ public object PathNormalizer {
                 }
                 p = baseCwd.resolve(p)
             }
-            resolvePhysicalOrSyntactic(p)
-        }.distinct().sorted()
+            val absP = p.toAbsolutePath().normalize()
+            val hasSymlink = hasSymbolicLinkComponent(absP)
+            val resolved = resolvePhysicalOrSyntactic(p)
+            resolved to hasSymlink
+        }.groupBy({ it.first }, { it.second })
+         .map { (resolved, hasSymlinkList) -> resolved to hasSymlinkList.any { it } }
+         .sortedBy { it.first }
 
         val result = mutableListOf<Path>()
         var currentParent: Path? = null
 
-        for (path in resolvedPaths) {
+        for ((path, hasSymlink) in resolvedPaths) {
             // Pruning logic:
             // 1. If we don't have a currentParent, or the current path is NOT a subpath of currentParent,
-            //    we must include this path in the result.
-            // 2. We only update currentParent if the new path is a real directory (not a symlink).
-            //    Since we use toRealPath(), symlinks are already resolved. We use NOFOLLOW_LINKS
-            //    here to be consistent with Landlock's O_NOFOLLOW requirement for rules.
-            if (currentParent == null || !path.startsWith(currentParent)) {
+            //    or if the current path has a symlink component, we must include this path in the result.
+            // 2. We only update currentParent if the new path is a real directory (not a symlink) and has no symlink component.
+            if (currentParent == null || hasSymlink || !path.startsWith(currentParent)) {
                 result.add(path)
-                if (Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS)) {
+                if (Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS) && !hasSymlink) {
                     currentParent = path
                 } else {
                     currentParent = null
@@ -67,6 +70,17 @@ public object PathNormalizer {
             }
         }
         return result.map { it.toString() }.toSet()
+    }
+
+    private fun hasSymbolicLinkComponent(p: Path): Boolean {
+        var current: Path? = p
+        while (current != null) {
+            if (Files.isSymbolicLink(current)) {
+                return true
+            }
+            current = current.parent
+        }
+        return false
     }
 
     private fun resolvePhysicalOrSyntactic(p: Path): Path {
