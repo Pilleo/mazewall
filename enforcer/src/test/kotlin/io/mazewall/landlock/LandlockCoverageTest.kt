@@ -1,6 +1,7 @@
 package io.mazewall.landlock
 
 import io.mazewall.LinuxNative
+import io.mazewall.UnsupportedKernelFeatureException
 import io.mazewall.MockNativeEngine
 import io.mazewall.MockNativeFileSystem
 import io.mazewall.MockNativeMemory
@@ -302,5 +303,148 @@ class LandlockCoverageTest {
         val session = LandlockSession(Policy.builder().build().definition, processWide = true)
         // Should run and apply thread-scoped silently without warning or exception
         session.applyRuleset()
+    }
+
+    @Test
+    fun `test handleUnsupportedLandlock throws UnsupportedKernelFeatureException under fallback FAIL`() {
+        System.setProperty("io.mazewall.fallback", "FAIL")
+        val ex = assertFailsWith<UnsupportedKernelFeatureException> {
+            Landlock.handleUnsupportedLandlock()
+        }
+        assertTrue(ex.message!!.contains("Landlock is not supported on this kernel"))
+        assertTrue(ex.message!!.contains("Linux kernel 5.13+"))
+    }
+
+    @Test
+    fun `test createRuleset throws UnsupportedKernelFeatureException on ENOSYS`() {
+        val mock = object : SupportedLandlockMock() {
+            context(_: NativeTransaction)
+            override fun syscall(
+                nr: Long,
+                a1: io.mazewall.core.NativeArg,
+                a2: io.mazewall.core.NativeArg,
+                a3: io.mazewall.core.NativeArg,
+                a4: io.mazewall.core.NativeArg,
+                a5: io.mazewall.core.NativeArg,
+                a6: io.mazewall.core.NativeArg,
+            ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                if (nr == io.mazewall.ffi.NativeConstants.LANDLOCK_CREATE_RULESET_NR &&
+                    a1 is io.mazewall.core.NativeArg.MemoryArg &&
+                    a1.value != ManagedSegment.NULL
+                ) {
+                    return LinuxNative.SyscallResult.Error(io.mazewall.ffi.NativeConstants.ENOSYS, -1)
+                }
+                return super.syscall(nr, a1, a2, a3, a4, a5, a6)
+            }
+        }
+        LinuxNative.setEngine(mock)
+
+        NativeArena.ofConfined().use { arena ->
+            val ex = assertFailsWith<UnsupportedKernelFeatureException> {
+                with(arena) {
+                    Landlock.createRuleset(15L, 1)
+                }
+            }
+            assertTrue(ex.message!!.contains("landlock_create_ruleset failed with ENOSYS"))
+            assertTrue(ex.message!!.contains("requires Linux kernel 5.13+"))
+        }
+    }
+
+    @Test
+    fun `test createRuleset throws UnsupportedKernelFeatureException on EOPNOTSUPP`() {
+        val mock = object : SupportedLandlockMock() {
+            context(_: NativeTransaction)
+            override fun syscall(
+                nr: Long,
+                a1: io.mazewall.core.NativeArg,
+                a2: io.mazewall.core.NativeArg,
+                a3: io.mazewall.core.NativeArg,
+                a4: io.mazewall.core.NativeArg,
+                a5: io.mazewall.core.NativeArg,
+                a6: io.mazewall.core.NativeArg,
+            ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                if (nr == io.mazewall.ffi.NativeConstants.LANDLOCK_CREATE_RULESET_NR &&
+                    a1 is io.mazewall.core.NativeArg.MemoryArg &&
+                    a1.value != ManagedSegment.NULL
+                ) {
+                    return LinuxNative.SyscallResult.Error(95, -1) // EOPNOTSUPP
+                }
+                return super.syscall(nr, a1, a2, a3, a4, a5, a6)
+            }
+        }
+        LinuxNative.setEngine(mock)
+
+        NativeArena.ofConfined().use { arena ->
+            val ex = assertFailsWith<UnsupportedKernelFeatureException> {
+                with(arena) {
+                    Landlock.createRuleset(15L, 1)
+                }
+            }
+            assertTrue(ex.message!!.contains("landlock_create_ruleset failed with EOPNOTSUPP"))
+            assertTrue(ex.message!!.contains("requires Linux kernel 5.13+"))
+        }
+    }
+
+    @Test
+    fun `test enforceRuleset throws UnsupportedKernelFeatureException on ENOSYS`() {
+        val mock = object : SupportedLandlockMock() {
+            context(_: NativeTransaction)
+            override fun syscall(
+                nr: Long,
+                a1: io.mazewall.core.NativeArg,
+                a2: io.mazewall.core.NativeArg,
+                a3: io.mazewall.core.NativeArg,
+                a4: io.mazewall.core.NativeArg,
+                a5: io.mazewall.core.NativeArg,
+                a6: io.mazewall.core.NativeArg,
+            ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                if (nr == io.mazewall.ffi.NativeConstants.LANDLOCK_RESTRICT_SELF_NR) {
+                    return LinuxNative.SyscallResult.Error(io.mazewall.ffi.NativeConstants.ENOSYS, -1)
+                }
+                return super.syscall(nr, a1, a2, a3, a4, a5, a6)
+            }
+        }
+        LinuxNative.setEngine(mock)
+
+        val ruleset = LandlockRuleset<RulesetState.Building>(FileDescriptor.unsafe(42))
+        val ex = assertFailsWith<UnsupportedKernelFeatureException> {
+            Landlock.enforceRuleset(ruleset, false)
+        }
+        assertTrue(ex.message!!.contains("landlock_restrict_self failed with ENOSYS"))
+        assertTrue(ex.message!!.contains("requires Linux kernel 5.13+"))
+    }
+
+    @Test
+    fun `test addRuleToRuleset throws UnsupportedKernelFeatureException on ENOSYS`() {
+        val mock = object : SupportedLandlockMock() {
+            context(_: NativeTransaction)
+            override fun syscall(
+                nr: Long,
+                a1: io.mazewall.core.NativeArg,
+                a2: io.mazewall.core.NativeArg,
+                a3: io.mazewall.core.NativeArg,
+                a4: io.mazewall.core.NativeArg,
+                a5: io.mazewall.core.NativeArg,
+                a6: io.mazewall.core.NativeArg,
+            ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                if (nr == io.mazewall.ffi.NativeConstants.LANDLOCK_ADD_RULE_NR) {
+                    return LinuxNative.SyscallResult.Error(io.mazewall.ffi.NativeConstants.ENOSYS, -1)
+                }
+                return super.syscall(nr, a1, a2, a3, a4, a5, a6)
+            }
+        }
+        mock.fileSystem.openResult = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(100)
+        LinuxNative.setEngine(mock)
+
+        NativeArena.ofConfined().use { arena ->
+            val ruleset = LandlockRuleset<RulesetState.Building>(FileDescriptor.unsafe(42))
+            val ex = assertFailsWith<UnsupportedKernelFeatureException> {
+                with(arena) {
+                    Landlock.addJvmClasspathRules(ruleset, 0L)
+                }
+            }
+            assertTrue(ex.message!!.contains("landlock_add_rule failed with ENOSYS"))
+            assertTrue(ex.message!!.contains("requires Linux kernel 5.13+"))
+        }
     }
 }
