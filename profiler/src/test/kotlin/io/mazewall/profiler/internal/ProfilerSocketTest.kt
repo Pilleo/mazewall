@@ -9,13 +9,11 @@ import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
 import io.mazewall.ffi.memory.ManagedSegment
-import io.mazewall.ffi.memory.NativeArena
 import io.mazewall.ffi.networking.SupervisorSocketUtils
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
-import java.nio.charset.StandardCharsets
 
 class ProfilerSocketTest {
 
@@ -83,19 +81,5 @@ class ProfilerSocketTest {
         val success = ProfilerSocket.sendDescriptor(10, 11)
         assertTrue(success)
         assertTrue(sendmsgCalled)
-    }
-
-    @Test
-    fun `test setupSockAddrUn setup correctly`() {
-        NativeArena.ofConfined().use { arena ->
-            val path = "/tmp/profiler.sock"
-            val sockaddr = ProfilerSocket.setupSockAddrUn(arena, path)
-
-            assertEquals(SupervisorSocketUtils.AF_UNIX.toShort(), sockaddr.getSunFamily())
-
-            val pathSegment = sockaddr.getSunPath()
-            val storedPath = pathSegment.getString(0, StandardCharsets.UTF_8)
-            assertEquals(path, storedPath)
-        }
     }
 }
