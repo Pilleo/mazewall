@@ -1,6 +1,7 @@
 package io.mazewall.profiler.engine
 
 import io.mazewall.LinuxNative
+import java.io.IOException
 import java.lang.foreign.Arena
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
@@ -235,9 +236,9 @@ internal class ProfilerSessionHandler(
         } catch (e: java.nio.channels.ClosedByInterruptException) {
             Thread.currentThread().interrupt()
             throw e
-        } catch (e: Throwable) {
+        } catch (e: IOException) {
             logger.severe {
-                "Exception in processNotification: ${e.message}. Dumping SessionEventLedger:\n" +
+                "IOException in processNotification: ${e.message}. Dumping SessionEventLedger:\n" +
                     ledger.dump().joinToString("\n")
             }
             if (continueSent) {
@@ -254,6 +255,12 @@ internal class ProfilerSessionHandler(
             } catch (ignored: Throwable) {}
             ledger.record(SessionEvent.ErrorReplied(System.nanoTime(), pidVal.toLong(), ECONNRESET))
             return false
+        } catch (e: Throwable) {
+            logger.severe {
+                "Structural or unrecoverable error in processNotification: ${e.message}. Dumping SessionEventLedger:\n" +
+                    ledger.dump().joinToString("\n")
+            }
+            throw e
         }
     }
 
