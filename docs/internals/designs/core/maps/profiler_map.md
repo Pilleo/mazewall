@@ -113,17 +113,9 @@ graph TD
     issue_123_inefficient_threadlocal_usage_in_threadstateregistry["🔴 Issue: Inefficient ThreadLocal usage in `ThreadStateRegistry` (HIGH)"]
     issue_124_missing_support_for_opath_and_ocloexec_in_landlock_fallback["🔴 Issue: Missing Support for `O_PATH` and `O_CLOEXEC` in `Landlock` fallback (HIGH)"]
     issue_125_opaque_exceptions_on_landlock_initialization_failure["🔴 Issue: 🔴 [Severity: DX-FRICTION]: Opaque Exceptions on Landlock Initialization Failure (HIGH)"]
-    issue_126_memory_segment_lifetime_leak_in_async_profiler_events["🔴 Issue: Memory Segment Lifetime Leak in Async Profiler Events (HIGH)"]
     issue_127_unhandled_signal_mask_inheritance_in_containedexecutors["🔴 Issue: Unhandled Signal Mask Inheritance in `ContainedExecutors` (HIGH)"]
-    issue_130_unhandled_endianness_in_processvmreadv_socket_message_tracin["🔴 Issue: Unhandled Endianness in `process_vm_readv` Socket Message Tracing (HIGH)"]
-    issue_131_missing_return_value_check_for_seccompnotifresp_ack["🔴 Issue: Missing Return Value Check for `SECCOMP_NOTIF_RESP` ACK (HIGH)"]
     issue_132_missing_bpf_instruction_limit_validation_in_newsockfprog["🔴 Issue: Missing BPF Instruction Limit Validation in `newSockFProg` (HIGH)"]
-    issue_133_unhandled_ocloexec_omission_on_profiler_unix_sockets["🔴 Issue: Unhandled `O_CLOEXEC` Omission on Profiler Unix Sockets (HIGH)"]
-    issue_134_toctou_in_path_normalization_under_multi_threaded_io["🔴 Issue: TOCTOU in Path Normalization under Multi-Threaded I/O (HIGH)"]
-    issue_135_uncaught_native_exceptions_escaping_bpf_installation["🔴 Issue: Uncaught Native Exceptions Escaping BPF Installation (HIGH)"]
-    issue_136_sbobparser_production_crashes_due_to_syntactic_subpath_pruni["🔴 Issue: `SbobParser` Production Crashes due to Syntactic Subpath Pruning of Unresolved/Symlinked Paths (HIGH)"]
     issue_139_unhandled_ioctl_fallbacks_during_legacy_jvm_syscall_tracing["🔴 Issue: Unhandled `IOCTL` fallbacks during legacy JVM syscall tracing (HIGH)"]
-    issue_141_missing_bpfprogramstatus_and_bpflabel_type_safety["🔴 Issue: Missing `BpfProgram<Status>` and `BpfLabel` Type-Safety (HIGH)"]
     issue_142_race_in_asynchronous_fire_and_forget_profiler_event_delivery["🔴 Issue: Race in Asynchronous / Fire-and-Forget Profiler Event Delivery (CRITICAL)"]
     issue_143_process_wide_classloader_deadlock_on_profiler_result_state_t["🔴 Issue: Process-Wide Classloader Deadlock on Profiler Result / State Types (HIGH)"]
     issue_144_confused_deputy_time_of_check_to_time_of_use_toctou_via_path["🔴 Issue: Confused Deputy / Time-of-Check to Time-of-Use (TOCTOU) via Path Modification (CRITICAL)"]
@@ -260,17 +252,9 @@ graph TD
     click issue_123_inefficient_threadlocal_usage_in_threadstateregistry "../../../backlog/performance/issue-123-inefficient-threadlocal-usage-in-threadstateregistry.md"
     click issue_124_missing_support_for_opath_and_ocloexec_in_landlock_fallback "../../../backlog/security/issue-124-missing-support-for-opath-and-ocloexec-in-landlock-fallback.md"
     click issue_125_opaque_exceptions_on_landlock_initialization_failure "../../../backlog/security/issue-125-opaque-exceptions-on-landlock-initialization-failure.md"
-    click issue_126_memory_segment_lifetime_leak_in_async_profiler_events "../../../backlog/performance/issue-126-memory-segment-lifetime-leak-in-async-profiler-events.md"
     click issue_127_unhandled_signal_mask_inheritance_in_containedexecutors "../../../backlog/testing/issue-127-unhandled-signal-mask-inheritance-in-containedexecutors.md"
-    click issue_130_unhandled_endianness_in_processvmreadv_socket_message_tracin "../../../backlog/testing/issue-130-unhandled-endianness-in-processvmreadv-socket-message-tracin.md"
-    click issue_131_missing_return_value_check_for_seccompnotifresp_ack "../../../backlog/security/issue-131-missing-return-value-check-for-seccompnotifresp-ack.md"
     click issue_132_missing_bpf_instruction_limit_validation_in_newsockfprog "../../../backlog/testing/issue-132-missing-bpf-instruction-limit-validation-in-newsockfprog.md"
-    click issue_133_unhandled_ocloexec_omission_on_profiler_unix_sockets "../../../backlog/performance/issue-133-unhandled-ocloexec-omission-on-profiler-unix-sockets.md"
-    click issue_134_toctou_in_path_normalization_under_multi_threaded_io "../../../backlog/security/issue-134-toctou-in-path-normalization-under-multi-threaded-io.md"
-    click issue_135_uncaught_native_exceptions_escaping_bpf_installation "../../../backlog/testing/issue-135-uncaught-native-exceptions-escaping-bpf-installation.md"
-    click issue_136_sbobparser_production_crashes_due_to_syntactic_subpath_pruni "../../../backlog/performance/issue-136-sbobparser-production-crashes-due-to-syntactic-subpath-pruni.md"
     click issue_139_unhandled_ioctl_fallbacks_during_legacy_jvm_syscall_tracing "../../../backlog/testing/issue-139-unhandled-ioctl-fallbacks-during-legacy-jvm-syscall-tracing.md"
-    click issue_141_missing_bpfprogramstatus_and_bpflabel_type_safety "../../../backlog/security/issue-141-missing-bpfprogramstatus-and-bpflabel-type-safety.md"
     click issue_142_race_in_asynchronous_fire_and_forget_profiler_event_delivery "../../../backlog/testing/issue-142-race-in-asynchronous-fire-and-forget-profiler-event-delivery.md"
     click issue_143_process_wide_classloader_deadlock_on_profiler_result_state_t "../../../backlog/security/issue-143-process-wide-classloader-deadlock-on-profiler-result-state-t.md"
     click issue_144_confused_deputy_time_of_check_to_time_of_use_toctou_via_path "../../../backlog/security/issue-144-confused-deputy-time-of-check-to-time-of-use-toctou-via-path.md"

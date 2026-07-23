@@ -1,7 +1,7 @@
 ---
 title: "Memory Segment Lifetime Leak in Async Profiler Events"
 severity: "HIGH"
-status: "open"
+status: "resolved"
 priority: 9
 dependencies: []
 component: "profiler"
