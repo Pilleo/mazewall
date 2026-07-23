@@ -19,6 +19,14 @@ public sealed interface SyscallEventState {
  * This class ensures that diagnostic events carry strongly-typed identifiers ([Tid])
  * and maintain immutability for the captured system call arguments and paths.
  *
+ * ### ⚠️ FFM Memory Safety & Lifetime Invariant:
+ * To prevent memory segment lifetime leaks, high GC pressure, and native memory leaks,
+ * all data from foreign function and memory (FFM) `MemorySegment` objects (such as path strings
+ * or raw register structs) **must be fully materialized into JVM heap objects** (e.g., standard
+ * [String], [LongArray], [List], etc.) before crossing the [SyscallEvent] boundary into the compiler or logger.
+ * No `MemorySegment` references, slices, or views of off-heap memory may escape or be stored within
+ * any [SyscallEvent] instance.
+ *
  * @param S The resolution state of the event (e.g., [SyscallEventState.Raw], [SyscallEventState.Resolved]).
  * @property tid The Thread ID (LWP) of the process that triggered the system call.
  * @property syscallName The mnemonic name of the system call (e.g., "OPENAT").

@@ -7,6 +7,14 @@ import io.mazewall.core.Tid
  *
  * Instead of raw register arrays, this hierarchy provides named, typed properties
  * for syscall parameters, eliminating brittle index-based access in the analysis engine.
+ *
+ * ### ⚠️ FFM Memory Safety & Lifetime Invariant:
+ * To prevent memory segment lifetime leaks, high GC pressure, and native memory leaks,
+ * all data from foreign function and memory (FFM) `MemorySegment` objects (such as path strings
+ * or raw register structs) **must be fully materialized into JVM heap objects** (e.g., standard
+ * [String], [LongArray], [List], etc.) before crossing the [TraceEvent] boundary into the compiler or logger.
+ * No `MemorySegment` references, slices, or views of off-heap memory may escape or be stored within
+ * any [TraceEvent] instance.
  */
 public sealed class TraceEvent {
     public abstract val tid: Tid
