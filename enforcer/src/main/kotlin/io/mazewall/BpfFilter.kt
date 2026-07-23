@@ -140,7 +140,11 @@ object BpfFilter {
         emitLinearScan(builder, effectiveSyscallActions, jvmCriticalNrs, profilingMode, defaultNativeAction, handledNrs)
 
         // 4. Default Action & Build
-        return builder.ret(defaultNativeAction).build().instructions
+        val instructions = builder.ret(defaultNativeAction).build().instructions
+        require(instructions.size <= NativeConstants.BPF_MAXINSNS) {
+            "BPF program exceeds kernel maximum instruction limit"
+        }
+        return instructions
     }
 
     private fun getJvmCriticalNrs(arch: Arch): Set<Int> =
