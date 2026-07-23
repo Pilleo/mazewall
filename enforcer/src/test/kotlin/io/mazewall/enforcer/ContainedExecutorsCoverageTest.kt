@@ -78,4 +78,30 @@ class ContainedExecutorsCoverageTest {
         System.setProperty("io.mazewall.fallback", "WARN_AND_BYPASS")
         ContainedExecutors.installOnCurrentThread(Policy.builder().build())
     }
+
+    @Test
+    fun `test that ContainedExecutors and SeccompAction contain ACT_TRAP signal mask warning`() {
+        var rootDir = java.io.File(".").absoluteFile
+        while (rootDir.parentFile != null && !java.io.File(rootDir, "enforcer").exists()) {
+            rootDir = rootDir.parentFile
+        }
+
+        val executorsFile = java.io.File(rootDir, "enforcer/src/main/kotlin/io/mazewall/enforcer/ContainedExecutors.kt")
+        val actionFile = java.io.File(rootDir, "enforcer/src/main/kotlin/io/mazewall/core/SeccompAction.kt")
+
+        assertTrue(executorsFile.exists(), "ContainedExecutors.kt should be found at ${executorsFile.absolutePath}")
+        assertTrue(actionFile.exists(), "SeccompAction.kt should be found at ${actionFile.absolutePath}")
+
+        val executorsContent = executorsFile.readText()
+        val actionContent = actionFile.readText()
+
+        assertTrue(
+            executorsContent.contains("ACT_TRAP") && executorsContent.contains("sigprocmask") && executorsContent.contains("sigaltstack"),
+            "ContainedExecutors.kt should document ACT_TRAP unreliability regarding signal masks"
+        )
+        assertTrue(
+            actionContent.contains("ACT_TRAP") && actionContent.contains("sigprocmask") && actionContent.contains("sigaltstack"),
+            "SeccompAction.kt should document ACT_TRAP unreliability regarding signal masks"
+        )
+    }
 }

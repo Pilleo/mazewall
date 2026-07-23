@@ -45,6 +45,17 @@ import java.util.logging.Logger
  * resolve an inconsistent security state because global state transitions and per-task filter
  * installations may interleave unpredictably. All global policies should be fully installed
  * before wrapping or running asynchronous task executors.
+ *
+ * ### Signal Mask Inheritance Warning
+ * When using [wrap] or thread installations with policies that configure `SeccompAction.ACT_TRAP`, the seccomp
+ * filter relies on the kernel delivering `SIGSYS` to the violating thread. Standard JVM thread pools
+ * (such as [ExecutorService]) do not automatically reset POSIX signal masks (`sigprocmask`) or alternate
+ * signal stacks (`sigaltstack`) when reusing threads. If a previous uncontained task executing native code (JNI/FFM)
+ * blocked `SIGSYS` or corrupted the signal stack, a subsequently contained task on that same carrier thread
+ * will not receive `SIGSYS` when it violates the seccomp policy, defeating `ACT_TRAP` actions.
+ * Therefore, `ACT_TRAP` is unreliable in environments where native libraries might modify thread signal masks.
+ * For guaranteed immediate enforcement in such environments, prefer process- or thread-killing actions like
+ * `ACT_KILL_PROCESS` or `ACT_KILL_THREAD`.
  */
 // @ref: docs/internals/designs/core/security-considerations.md — Shared-memory ACE escape threat model, Tier 1/Tier 2 boundary definitions
 // @ref: docs/internals/designs/enforcer/containment-design.md — Filter installation ordering (Landlock before Seccomp), TSYNC semantics
