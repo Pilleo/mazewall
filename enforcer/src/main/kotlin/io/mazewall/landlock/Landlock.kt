@@ -219,10 +219,11 @@ object Landlock {
 
     internal fun handleUnsupportedLandlock() {
         val fallback = Platform.configuredFallback()
+        val msg = "Landlock is not supported on this kernel (requires Linux kernel 5.13+ with Landlock LSM enabled) but FS rules were requested."
         if (fallback == Platform.FallbackBehavior.FAIL) {
-            throw UnsupportedOperationException("Landlock is not supported on this kernel but FS rules were requested.")
+            throw UnsupportedKernelFeatureException(msg)
         } else if (fallback == Platform.FallbackBehavior.WARN_AND_BYPASS) {
-            logger.warning("Landlock not supported, FS rules will be ignored.")
+            logger.warning(msg)
         }
     }
 
@@ -385,8 +386,21 @@ object Landlock {
             Pair(p, r)
         }
         prctlResult.getOrThrow("prctl(PR_SET_NO_NEW_PRIVS)")
-        restrictResult.getOrThrow("landlock_restrict_self")
-        return LandlockRuleset(ruleset.fd)
+        return when (restrictResult) {
+            is LinuxNative.SyscallResult.Success -> LandlockRuleset(ruleset.fd)
+            is LinuxNative.SyscallResult.Error -> {
+                if (restrictResult.errno == NativeConstants.ENOSYS || restrictResult.errno == 95 /* EOPNOTSUPP */) {
+                    val errnoName = if (restrictResult.errno == NativeConstants.ENOSYS) "ENOSYS" else "EOPNOTSUPP"
+                    throw UnsupportedKernelFeatureException(
+                        "landlock_restrict_self failed with $errnoName. " +
+                        "Landlock is not supported or enabled on this system. " +
+                        "Landlock requires Linux kernel 5.13+ and must be enabled via the 'landlock' LSM " +
+                        "(check /sys/kernel/security/lsm or the kernel boot parameters, e.g., 'lsm=landlock,capability,yama,apparmor')."
+                    )
+                }
+                restrictResult.throwErrno("landlock_restrict_self")
+            }
+        }
     }
 
     context(arena: NativeArena)
@@ -459,7 +473,21 @@ object Landlock {
                 io.mazewall.core.NativeArg.MemoryArg(ManagedSegment.NULL)
             )
         }
-        return res.getFdOrThrow("landlock_create_ruleset").let { FileDescriptor.unsafe(it.value) }
+        return when (res) {
+            is LinuxNative.SyscallResult.Success -> FileDescriptor.unsafe(res.value.toInt())
+            is LinuxNative.SyscallResult.Error -> {
+                if (res.errno == NativeConstants.ENOSYS || res.errno == 95 /* EOPNOTSUPP */) {
+                    val errnoName = if (res.errno == NativeConstants.ENOSYS) "ENOSYS" else "EOPNOTSUPP"
+                    throw UnsupportedKernelFeatureException(
+                        "landlock_create_ruleset failed with $errnoName. " +
+                        "Landlock is not supported or enabled on this system. " +
+                        "Landlock requires Linux kernel 5.13+ and must be enabled via the 'landlock' LSM " +
+                        "(check /sys/kernel/security/lsm or the kernel boot parameters, e.g., 'lsm=landlock,capability,yama,apparmor')."
+                    )
+                }
+                res.throwErrno("landlock_create_ruleset")
+            }
+        }
     }
 
     context(arena: NativeArena)
@@ -483,7 +511,18 @@ object Landlock {
         }
         return when (res) {
             is LinuxNative.SyscallResult.Success -> AddRuleResult.Success
-            is LinuxNative.SyscallResult.Error -> AddRuleResult.Error(res.errno)
+            is LinuxNative.SyscallResult.Error -> {
+                if (res.errno == NativeConstants.ENOSYS || res.errno == 95 /* EOPNOTSUPP */) {
+                    val errnoName = if (res.errno == NativeConstants.ENOSYS) "ENOSYS" else "EOPNOTSUPP"
+                    throw UnsupportedKernelFeatureException(
+                        "landlock_add_rule failed with $errnoName. " +
+                        "Landlock is not supported or enabled on this system. " +
+                        "Landlock requires Linux kernel 5.13+ and must be enabled via the 'landlock' LSM " +
+                        "(check /sys/kernel/security/lsm or the kernel boot parameters, e.g., 'lsm=landlock,capability,yama,apparmor')."
+                    )
+                }
+                AddRuleResult.Error(res.errno)
+            }
         }
     }
 }
