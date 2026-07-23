@@ -112,8 +112,6 @@ graph TD
     issue_119_seccompinstallationstate_partial_failure_leaves_thread_unpri["🔴 Issue: `SeccompInstallationState` Partial Failure Leaves Thread Unprivileged but Uncontained (HIGH)"]
     issue_121_missing_thread_safety_in_processstateregistry_updates["🔴 Issue: Missing Thread-Safety in `ProcessStateRegistry` Updates (HIGH)"]
     issue_122_incomplete_architecture_verification_in_bpf_compiler["🔴 Issue: Incomplete Architecture Verification in BPF Compiler (HIGH)"]
-    issue_123_inefficient_threadlocal_usage_in_threadstateregistry["🔴 Issue: Inefficient ThreadLocal usage in `ThreadStateRegistry` (HIGH)"]
-    issue_124_missing_support_for_opath_and_ocloexec_in_landlock_fallback["🔴 Issue: Missing Support for `O_PATH` and `O_CLOEXEC` in `Landlock` fallback (HIGH)"]
     issue_125_opaque_exceptions_on_landlock_initialization_failure["🔴 Issue: 🔴 [Severity: DX-FRICTION]: Opaque Exceptions on Landlock Initialization Failure (HIGH)"]
     issue_127_unhandled_signal_mask_inheritance_in_containedexecutors["🔴 Issue: Unhandled Signal Mask Inheritance in `ContainedExecutors` (HIGH)"]
     issue_132_missing_bpf_instruction_limit_validation_in_newsockfprog["🔴 Issue: Missing BPF Instruction Limit Validation in `newSockFProg` (HIGH)"]
@@ -256,8 +254,6 @@ graph TD
     click issue_119_seccompinstallationstate_partial_failure_leaves_thread_unpri "../../../backlog/security/issue-119-seccompinstallationstate-partial-failure-leaves-thread-unpri.md"
     click issue_121_missing_thread_safety_in_processstateregistry_updates "../../../backlog/testing/issue-121-missing-thread-safety-in-processstateregistry-updates.md"
     click issue_122_incomplete_architecture_verification_in_bpf_compiler "../../../backlog/security/issue-122-incomplete-architecture-verification-in-bpf-compiler.md"
-    click issue_123_inefficient_threadlocal_usage_in_threadstateregistry "../../../backlog/performance/issue-123-inefficient-threadlocal-usage-in-threadstateregistry.md"
-    click issue_124_missing_support_for_opath_and_ocloexec_in_landlock_fallback "../../../backlog/security/issue-124-missing-support-for-opath-and-ocloexec-in-landlock-fallback.md"
     click issue_125_opaque_exceptions_on_landlock_initialization_failure "../../../backlog/security/issue-125-opaque-exceptions-on-landlock-initialization-failure.md"
     click issue_127_unhandled_signal_mask_inheritance_in_containedexecutors "../../../backlog/testing/issue-127-unhandled-signal-mask-inheritance-in-containedexecutors.md"
     click issue_132_missing_bpf_instruction_limit_validation_in_newsockfprog "../../../backlog/testing/issue-132-missing-bpf-instruction-limit-validation-in-newsockfprog.md"
