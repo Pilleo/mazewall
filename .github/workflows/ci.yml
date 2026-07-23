@@ -40,7 +40,6 @@ jobs:
               uses: gradle/actions/setup-gradle@v4
               with:
                   cache-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
-                  cache-disabled: true
             - name: Grant Execute Permission for Gradlew
               run: chmod +x gradlew
             - name: Setup Podman Socket
