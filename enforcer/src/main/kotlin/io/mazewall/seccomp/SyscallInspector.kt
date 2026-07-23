@@ -132,6 +132,12 @@ internal class ThreadCloneInspector : SyscallInspector {
 /**
  * Inspects prctl to block dangerous sub-commands (like PR_SET_MM or PR_SET_PTRACER)
  * when unsafe prctl operations are not explicitly allowed.
+ *
+ * WARNING: While inspecting registers such as args[0] (the prctl option code) is immune to TOCTOU,
+ * allowing unsafe prctl options or relying on pointer arguments in some prctl options (such as
+ * PR_SET_MM or PR_SET_NAME) is inherently vulnerable to concurrent memory mutation attacks (TOCTOU)
+ * by sibling threads. This is because a sibling thread can modify the memory pointed to by the prctl
+ * pointer argument concurrently after the BPF check but before kernel execution.
  */
 internal class UnsafePrctlInspector : SyscallInspector {
     override fun getInspections(arch: Arch, context: InspectionContext): List<SyscallInspection> {

@@ -47,6 +47,13 @@ public class Policy<out S : PolicyScope, out State : PolicyState> internal const
     public val syscallActions: Map<Syscall, SeccompAction> get() = definition.syscallActions
     public val allowMmapExec: Boolean get() = definition.allowMmapExec
     public val allowNonThreadClone: Boolean get() = definition.allowNonThreadClone
+
+    /**
+     * Whether unsafe prctl options are allowed.
+     *
+     * WARNING: This option is extremely dangerous and inherently vulnerable to concurrent memory mutation
+     * attacks (TOCTOU) by sibling threads. See [Policy.Builder.allowUnsafePrctl] for more details.
+     */
     public val allowUnsafePrctl: Boolean get() = definition.allowUnsafePrctl
     public val allowedFsReadPaths: Set<SandboxedPath> get() = definition.allowedFsReadPaths
     public val allowedFsWritePaths: Set<SandboxedPath> get() = definition.allowedFsWritePaths
@@ -195,6 +202,15 @@ public class Policy<out S : PolicyScope, out State : PolicyState> internal const
             return this
         }
 
+        /**
+         * Allows unsafe prctl operations.
+         *
+         * WARNING: This option is extremely dangerous and inherently vulnerable to concurrent memory mutation
+         * attacks (TOCTOU) by sibling threads. While register-based arguments (like args[0], the prctl option code)
+         * are immune to TOCTOU, pointer-based arguments in options such as PR_SET_MM or PR_SET_NAME are subject
+         * to TOCTOU. A sibling thread can modify the memory pointed to by the register argument concurrently
+         * after the BPF filter's check but before kernel execution.
+         */
         public fun allowUnsafePrctl(): Builder<S> {
             internalBuilder.allowUnsafePrctl()
             return this

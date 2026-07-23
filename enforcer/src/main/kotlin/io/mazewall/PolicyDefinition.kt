@@ -19,6 +19,15 @@ public data class PolicyDefinition<out S : PolicyScope>(
     public val syscallActions: Map<Syscall, SeccompAction> = emptyMap(),
     public val allowMmapExec: Boolean = false,
     public val allowNonThreadClone: Boolean = false,
+    /**
+     * Whether unsafe prctl options are allowed.
+     *
+     * WARNING: This option is extremely dangerous and inherently vulnerable to concurrent memory mutation
+     * attacks (TOCTOU) by sibling threads. While register-based arguments (like args[0], the prctl option code)
+     * are immune to TOCTOU, pointer-based arguments in options such as PR_SET_MM or PR_SET_NAME are subject
+     * to TOCTOU. A sibling thread can modify the memory pointed to by the register argument concurrently
+     * after the BPF filter's check but before kernel execution.
+     */
     public val allowUnsafePrctl: Boolean = false,
     public val allowedFsReadPaths: Set<SandboxedPath> = emptySet(),
     public val allowedFsWritePaths: Set<SandboxedPath> = emptySet(),
