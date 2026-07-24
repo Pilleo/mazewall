@@ -21,8 +21,6 @@ PODMAN_ARGS=(
     --network host
     --userns host
     --security-opt "seccomp=${SECCOMP_PROFILE}"
-    --cap-add AUDIT_READ
-    --cap-add AUDIT_CONTROL
     --cap-add SYS_ADMIN
     --cap-add SYS_PTRACE
     -v "${PROJECT_ROOT}:${PROJECT_ROOT}"

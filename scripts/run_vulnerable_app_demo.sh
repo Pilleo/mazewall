@@ -33,7 +33,8 @@ mkdir -p demos/output
 
 # 3. Boot up the unprotected and protected instances
 echo -e "\n${CYAN}[STEP 2/5] Launching containerized environment...${RESET}"
-COMPOSE_FILE="demos/vulnerable-web-app/compose.yml"
+cd demos/vulnerable-web-app
+COMPOSE_FILE="compose.yml"
 $COMPOSE_CMD -f "$COMPOSE_FILE" down --remove-orphans &>/dev/null || true
 
 HAS_IMAGES=false
@@ -50,11 +51,14 @@ else
     echo -e "${CYAN}[INFO] Building container environment...${RESET}"
     $COMPOSE_CMD -f "$COMPOSE_FILE" up -d --build
 fi
+cd - &>/dev/null
 
 # Guarantee clean container teardown on exit
 cleanup() {
     echo -e "\n${YELLOW}🧹 Gracefully cleaning up containers...${RESET}"
-    $COMPOSE_CMD -f "$COMPOSE_FILE" down &>/dev/null || true
+    cd demos/vulnerable-web-app
+    $COMPOSE_CMD -f "compose.yml" down &>/dev/null || true
+    cd - &>/dev/null
     echo -e "${GREEN}✅ Teardown complete. Goodbye!${RESET}"
 }
 trap cleanup EXIT

@@ -11,7 +11,7 @@ services:
         environment:
             - MAZEWALL_ENABLED=false
         annotations:
-            io.podman.annotations.seccomp: ${PWD}/infra/dev/podman-seccomp.json
+            io.podman.annotations.seccomp: ${PWD}/../../infra/dev/podman-seccomp.json
 
     protected:
         image: vulnerable-web-app-protected:latest
@@ -30,4 +30,4 @@ services:
         volumes:
             - ../output:/app/output:rw
         annotations:
-            io.podman.annotations.seccomp: ${PWD}/infra/dev/podman-seccomp.json
+            io.podman.annotations.seccomp: ${PWD}/../../infra/dev/podman-seccomp.json

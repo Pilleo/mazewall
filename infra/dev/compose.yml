@@ -11,13 +11,6 @@ services:
             - GRADLE_USER_HOME=/root/.gradle
             - GITHUB_ACTOR
             - GITHUB_TOKEN
-        # Audit subsystem requires sharing the host network namespace and initial user namespace.
-        # This is necessary for the Profiler to ingest asynchronous io_uring operations.
-        network_mode: host
-        userns_mode: host
-        cap_add:
-            - AUDIT_READ
-            - AUDIT_CONTROL
         # Use a custom seccomp profile via annotation to whitelist filter stacking.
         # This maintains container isolation while allowing nested sandboxes.
         annotations:
