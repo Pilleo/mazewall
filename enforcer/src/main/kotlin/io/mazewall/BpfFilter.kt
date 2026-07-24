@@ -268,6 +268,30 @@ object BpfFilter {
             }
         }
 
+        // If default action is ALLOW (blacklist) and actionsToEmit size is within safe bounds (<= 32),
+        // we can build a Binary Search Tree (BST) to reach the decisions much faster.
+        if (defaultNativeAction == NativeConstants.SECCOMP_RET_ALLOW && actionsToEmit.isNotEmpty() && actionsToEmit.size <= 32) {
+            val sortedActions = actionsToEmit.sortedBy { it.first }
+            val actionLabels = mutableMapOf<Int, BpfLabel>()
+            for (action in sortedActions.map { it.second }.distinct()) {
+                actionLabels[action] = builder.nextLabel("action_ret")
+            }
+
+            emitBst(builder, sortedActions, 0, sortedActions.size - 1, actionLabels)
+
+            // Unconditional jump to skip RET blocks on fallthrough (not matched in BST)
+            val doneLabel = builder.nextLabel("bst_done")
+            builder.jumpIfEqual(0, jt = doneLabel, jf = doneLabel)
+
+            for ((action, label) in actionLabels) {
+                builder.mark(label)
+                builder.ret(action)
+            }
+
+            builder.mark(doneLabel)
+            return
+        }
+
         // Group by nativeAction and ensure deterministic order by sorting keys and values
         val groups = actionsToEmit.groupBy { it.second }
             .mapValues { (_, pairs) -> pairs.map { it.first }.sorted() }
@@ -292,6 +316,59 @@ object BpfFilter {
 
                 builder.mark(skipLabel)
             }
+        }
+    }
+
+    private fun emitBst(
+        builder: BpfBuilder<BpfState.NrLoaded>,
+        actionsToEmit: List<Pair<Int, Int>>,
+        low: Int,
+        high: Int,
+        actionLabels: Map<Int, BpfLabel>,
+    ) {
+        if (low > high) return
+
+        if (low == high) {
+            val (nr, action) = actionsToEmit[low]
+            val label = actionLabels[action] ?: throw IllegalStateException("Missing label for action $action")
+            builder.jumpIfEqual(nr, jt = label)
+            return
+        }
+
+        val mid = (low + high) ushr 1
+        val (midNr, midAction) = actionsToEmit[mid]
+
+        val matchLabel = actionLabels[midAction] ?: throw IllegalStateException("Missing label for action $midAction")
+        builder.jumpIfEqual(midNr, jt = matchLabel)
+
+        if (low <= mid - 1 && mid + 1 <= high) {
+            val rightLabel = builder.nextLabel("bst_right")
+            val nextLabel = builder.nextLabel("bst_next")
+
+            builder.jumpIfGreaterThan(midNr, jt = rightLabel)
+
+            // Left subtree
+            emitBst(builder, actionsToEmit, low, mid - 1, actionLabels)
+            builder.jumpIfEqual(0, jt = nextLabel, jf = nextLabel)
+
+            // Right subtree
+            builder.mark(rightLabel)
+            emitBst(builder, actionsToEmit, mid + 1, high, actionLabels)
+
+            builder.mark(nextLabel)
+        } else if (low <= mid - 1) {
+            // Only Left subtree exists
+            emitBst(builder, actionsToEmit, low, mid - 1, actionLabels)
+        } else if (mid + 1 <= high) {
+            // Only Right subtree exists
+            val rightLabel = builder.nextLabel("bst_right")
+            val nextLabel = builder.nextLabel("bst_next")
+            builder.jumpIfGreaterThan(midNr, jt = rightLabel)
+            builder.jumpIfEqual(0, jt = nextLabel, jf = nextLabel)
+
+            builder.mark(rightLabel)
+            emitBst(builder, actionsToEmit, mid + 1, high, actionLabels)
+            builder.mark(nextLabel)
         }
     }
 }
