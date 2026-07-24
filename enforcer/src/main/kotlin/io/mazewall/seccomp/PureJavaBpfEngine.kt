@@ -13,6 +13,7 @@ import io.mazewall.core.Syscall
 import io.mazewall.core.PrctlCommand
 import io.mazewall.enforcer.ThreadStateRegistry
 import io.mazewall.enforcer.ContainerState
+import io.mazewall.enforcer.ProcessStateRegistry
 import io.mazewall.ffi.NativeConstants
 import io.mazewall.ffi.memory.nativeScope
 import java.util.logging.Logger
@@ -34,7 +35,7 @@ internal object PureJavaBpfEngine : SeccompEngine<EngineState> {
     }
 
     override val state: EngineState
-        get() = when (ThreadStateRegistry.state.engineState) {
+        get() = when (ContainerState.resolveCurrentState().engineState) {
             is SeccompInstallationState.Uninitialized -> EngineState.UnprivilegedImpl
             is SeccompInstallationState.Verified -> EngineState.LoadedImpl
             else -> EngineState.ConfiguredImpl
@@ -76,36 +77,36 @@ internal object PureJavaBpfEngine : SeccompEngine<EngineState> {
         SeccompInstallationState.Failed::class.java.name
         BpfNativeCache.toString()
 
-        updateState(SeccompInstallationState.Uninitialized)
+        updateState(SeccompInstallationState.Uninitialized, useTsync)
         try {
             val arch = Arch.current()
             val filters = policy.compiledFilters
             val cachedProg = BpfNativeCache.getOrCompute(filters)
 
             val built = SeccompInstallationState.FilterBuilt(cachedProg)
-            updateState(built)
+            updateState(built, useTsync)
             val locked = built.lockPrivileges()
-            updateState(locked)
+            updateState(locked, useTsync)
             val applied = locked.applyFilter(arch, useTsync)
-            updateState(applied)
+            updateState(applied, useTsync)
             val verified = applied.verify(policy.definition)
-            updateState(verified)
+            updateState(verified, useTsync)
         } catch (e: Exception) {
             val stepName = getStepName()
             val errno = getErrno(e)
-            updateState(SeccompInstallationState.Failed(stepName, errno, e))
+            updateState(SeccompInstallationState.Failed(stepName, errno, e), useTsync)
             throw e
         } catch (e: Error) {
             val stepName = getStepName()
             logger.log(Level.SEVERE, "FATAL: Uncaught native or JVM error during seccomp installation at step $stepName", e)
             val errno = getErrno(e)
-            updateState(SeccompInstallationState.Failed(stepName, errno, e))
+            updateState(SeccompInstallationState.Failed(stepName, errno, e), useTsync)
             throw e
         }
     }
 
     private fun getStepName(): String {
-        return when (ThreadStateRegistry.state.engineState) {
+        return when (ContainerState.resolveCurrentState().engineState) {
             is SeccompInstallationState.PrivilegesLocked -> "installFilter"
             is SeccompInstallationState.SystemCallApplied -> "verifyInstallation"
             is SeccompInstallationState.FallbackPrctlApplied -> "verifyInstallation"
@@ -126,7 +127,10 @@ internal object PureJavaBpfEngine : SeccompEngine<EngineState> {
         }
     }
 
-    private fun updateState(next: SeccompInstallationState) {
+    private fun updateState(next: SeccompInstallationState, useTsync: Boolean) {
+        if (useTsync) {
+            ProcessStateRegistry.update { it.withEngineState(next) }
+        }
         ThreadStateRegistry.state = ThreadStateRegistry.state.withEngineState(next)
     }
 
