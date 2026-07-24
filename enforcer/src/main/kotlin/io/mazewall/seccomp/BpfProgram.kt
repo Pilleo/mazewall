@@ -99,6 +99,10 @@ public class BpfBuilder<out S : BpfState> internal constructor(
     public fun nextLabel(prefix: String): BpfLabel {
         return BpfLabel("${prefix}_${labelCounter.incrementAndGet()}")
     }
+
+    public fun createLabel(prefix: String = "label"): BpfLabel {
+        return nextLabel(prefix)
+    }
 }
 
 /**
@@ -230,6 +234,18 @@ public fun BpfBuilder<BpfState.NrLoaded>.and(k: Int): BpfBuilder<BpfState.NrLoad
     return this
 }
 
+public fun BpfBuilder<BpfState.NrLoaded>.jmp(label: BpfLabel): BpfBuilder<BpfState.NrLoaded> {
+    return jumpIfEqual(0, jt = label, jf = label)
+}
+
+public fun BpfBuilder<BpfState.NrLoaded>.jmpIfTrue(label: BpfLabel): BpfBuilder<BpfState.NrLoaded> {
+    return jumpIfEqual(0, jf = label)
+}
+
+public fun BpfBuilder<BpfState.NrLoaded>.jmpIfFalse(label: BpfLabel): BpfBuilder<BpfState.NrLoaded> {
+    return jumpIfEqual(0, jt = label)
+}
+
 /**
  * Ends the instruction sequence with a RET instruction.
  * Transitions the builder to the [BpfState.Terminated] state.
@@ -255,6 +271,9 @@ public fun BpfBuilder<BpfState.Terminated>.build(): BpfProgram<BpfStatus.Unverif
     var currentPos = 0
     for (op in ops) {
         if (op is BpfMacro.Label) {
+            if (labelPositions.containsKey(op.label)) {
+                throw IllegalArgumentException("Duplicate label marked: ${op.label.name}")
+            }
             labelPositions[op.label] = currentPos
         } else {
             filteredOps.add(op)
