@@ -153,7 +153,15 @@ object BpfFilter {
         return instructions
     }
 
-    private fun getJvmCriticalNrs(arch: Arch): Set<Int> =
+    /**
+     * Returns the set of system calls absolutely required for safepoints, GC, and thread stability.
+     * Crucially, this list includes `rt_sigprocmask`, `rt_sigaction`, and `rt_sigreturn`. This ensures that
+     * even if a policy attempts to restrict these system calls, they are unconditionally whitelisted
+     * to protect against unhandled signal mask inheritance risks (where newly spawned threads inheriting
+     * parent signal masks would otherwise remain trapped with blocked signals, causing missed thread interrupts
+     * or unkillable JVM threads).
+     */
+    internal fun getJvmCriticalNrs(arch: Arch): Set<Int> =
         setOf(
             Syscall.FUTEX.numberFor(arch),
             Syscall.SCHED_YIELD.numberFor(arch),

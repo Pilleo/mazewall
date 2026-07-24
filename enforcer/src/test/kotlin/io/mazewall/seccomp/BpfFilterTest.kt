@@ -446,4 +446,24 @@ class BpfFilterTest {
         assertEquals(allowAction, evalBpf(filter, 323))
         assertEquals(allowAction, evalBpf(filter, 1000))
     }
+
+    @Test
+    fun `test getJvmCriticalNrs explicitly and unconditionally contains signal handling syscalls`() {
+        for (a in listOf(Arch.AMD64, Arch.AARCH64)) {
+            val criticalNrs = BpfFilter.getJvmCriticalNrs(a)
+            val rtSigprocmaskNr = Syscall.RT_SIGPROCMASK.numberFor(a)
+            val rtSigactionNr = Syscall.RT_SIGACTION.numberFor(a)
+            val rtSigreturnNr = Syscall.RT_SIGRETURN.numberFor(a)
+
+            if (rtSigprocmaskNr >= 0) {
+                assertTrue(criticalNrs.contains(rtSigprocmaskNr), "JVM critical NRs for $a must contain rt_sigprocmask")
+            }
+            if (rtSigactionNr >= 0) {
+                assertTrue(criticalNrs.contains(rtSigactionNr), "JVM critical NRs for $a must contain rt_sigaction")
+            }
+            if (rtSigreturnNr >= 0) {
+                assertTrue(criticalNrs.contains(rtSigreturnNr), "JVM critical NRs for $a must contain rt_sigreturn")
+            }
+        }
+    }
 }
