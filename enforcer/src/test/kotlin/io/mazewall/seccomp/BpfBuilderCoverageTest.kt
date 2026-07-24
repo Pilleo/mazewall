@@ -81,7 +81,7 @@ class BpfBuilderCoverageTest {
     }
 
     @Test
-    fun `test NrLoaded helper methods`() {
+    fun `test Active helper methods`() {
         BpfProgram.dsl(Arch.AMD64) {
             expect(1) {
                 allow()
@@ -100,8 +100,8 @@ class BpfBuilderCoverageTest {
 
     @Test
     fun `test dsl Function overload`() {
-        BpfProgram.dsl(Arch.AMD64, object : Function<BpfBuilder<BpfState.NrLoaded>, BpfBuilder<BpfState.Terminated>> {
-            override fun apply(t: BpfBuilder<BpfState.NrLoaded>): BpfBuilder<BpfState.Terminated> {
+        BpfProgram.dsl(Arch.AMD64, object : Function<BpfBuilder<BpfState.Active>, BpfBuilder<BpfState.Terminated>> {
+            override fun apply(t: BpfBuilder<BpfState.Active>): BpfBuilder<BpfState.Terminated> {
                 return t.allow()
             }
         })
