@@ -6,6 +6,7 @@ priority: 6
 dependencies: []
 component: "enforcer"
 effort: "medium"
+github_issue: 255
 ---
 
 # 🟡 [Severity: LOW]: Landlock Excessive Capability Leak on `ENOENT`

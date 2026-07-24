@@ -1,11 +1,12 @@
 ---
 title: "Deprecate and Eliminate Redundant NativeTransaction Scaffolding"
 severity: "HIGH"
-status: "open"
+status: "resolved"
 priority: 10
 dependencies: []
 component: "enforcer"
 effort: "medium"
+github_issue: 253
 ---
 
 # 🔴 [Severity: HIGH]: Deprecate and Eliminate Redundant NativeTransaction Scaffolding
