@@ -6,6 +6,7 @@ priority: 2
 dependencies: []
 component: "unknown"
 effort: "medium"
+github_issue: 278
 ---
 
 # 🔵 [Severity: ENHANCEMENT]: Compile-Time BPF Termination Safety (Type-State RET Enforcement)

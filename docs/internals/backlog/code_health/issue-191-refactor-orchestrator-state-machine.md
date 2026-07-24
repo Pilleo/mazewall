@@ -1,11 +1,12 @@
 ---
 title: "Refactor Orchestrator State Machine Testability"
 priority: 8
-status: "open"
+status: "resolved"
 dependencies: ["issue-190"]
 severity: "HIGH"
 component: "orchestrator"
 effort: "MEDIUM"
+github_issue: 249
 ---
 
 # Refactor Orchestrator State Machine Testability

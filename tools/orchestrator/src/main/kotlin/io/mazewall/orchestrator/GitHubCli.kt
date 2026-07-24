@@ -90,9 +90,8 @@ object GitHubCli {
     fun findExistingIssueNumber(issueId: String): String? {
         return try {
             val openJson = execute("gh", "issue", "list", "--state", "open", "--json", "number,title")
-            val closedJson = execute("gh", "issue", "list", "--state", "closed", "--json", "number,title")
-            val allIssues = parseIssues(openJson) + parseIssues(closedJson)
-            allIssues.firstOrNull { it.title.contains("[$issueId]", ignoreCase = true) }?.number?.toString()
+            val openIssues = parseIssues(openJson)
+            openIssues.firstOrNull { it.title.contains("[$issueId]", ignoreCase = true) }?.number?.toString()
         } catch (e: Exception) {
             null
         }
