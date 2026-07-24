@@ -16,6 +16,10 @@ import kotlin.contracts.contract
  * decoupled from the native engine via an internal TransactionManager. This separation
  * ensures that [LinuxNative] remains mockable and that memory allocation strategies
  * can be swapped (e.g., for arena pooling) without modifying call dispatch logic.
+ *
+ * DESIGN INVARIANT: This entry point is completely decoupled from implicit [nativeScope] or
+ * raw FFM [Arena] allocations. All wrappers require pre-allocated [ManagedSegment]s,
+ * shifting transient memory lifecycle management entirely to the caller.
  */
 @Suppress("TooManyFunctions")
 public object LinuxNative : NativeEngine {
