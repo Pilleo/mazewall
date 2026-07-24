@@ -1,7 +1,7 @@
 ---
 title: "Unhandled `IOCTL` fallbacks during legacy JVM syscall tracing"
 severity: "HIGH"
-status: "open"
+status: "resolved"
 priority: 9
 dependencies: []
 component: "profiler"
@@ -10,6 +10,7 @@ autonomy: "supervised"
 solution_approved: false
 blast_radius: "medium"
 reversible: true
+github_issue: 235
 ---
 
 # 🔴 [Severity: MEDIUM]: Unhandled `IOCTL` fallbacks during legacy JVM syscall tracing

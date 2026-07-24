@@ -1,7 +1,7 @@
 ---
 title: "ArchUnit: Ban `java.lang.Thread` for Context Preservation"
 severity: "HIGH"
-status: "open"
+status: "resolved"
 priority: 9
 dependencies: []
 component: "unknown"
@@ -10,6 +10,7 @@ autonomy: "supervised"
 solution_approved: false
 blast_radius: "medium"
 reversible: true
+github_issue: 245
 ---
 
 # 🔴 [Severity: MEDIUM]: ArchUnit: Ban `java.lang.Thread` for Context Preservation

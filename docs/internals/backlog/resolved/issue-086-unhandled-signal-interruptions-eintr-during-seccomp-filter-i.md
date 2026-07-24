@@ -1,7 +1,7 @@
 ---
 title: "Unhandled Signal Interruptions (`EINTR`) during `seccomp` Filter Installation"
 severity: "HIGH"
-status: "open"
+status: "resolved"
 priority: 9
 dependencies: []
 component: "seccomp"
@@ -10,6 +10,7 @@ autonomy: "supervised"
 solution_approved: false
 blast_radius: "medium"
 reversible: true
+github_issue: 233
 ---
 
 # 🔴 [Severity: MEDIUM]: Unhandled Signal Interruptions (`EINTR`) during `seccomp` Filter Installation

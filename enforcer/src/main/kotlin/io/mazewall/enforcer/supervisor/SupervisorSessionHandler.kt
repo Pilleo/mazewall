@@ -762,7 +762,7 @@ internal class SupervisorSessionHandler(
         resp.writeInt(RESP_ERR_OFF, -errorNr)
         resp.writeInt(RESP_FLAGS_OFF, 0)
         while (true) {
-            val res = engine.withTransaction {
+            val res = engine.withTransaction  {
                 engine.raw.ioctl(listenerFd, NativeConstants.SECCOMP_IOCTL_NOTIF_SEND, resp)
             }
             if (res is LinuxNative.SyscallResult.Error && res.errno == NativeConstants.EINTR) {

@@ -1,7 +1,7 @@
 ---
 title: "Suboptimal BPF `RET` instruction placement in `emitLinearScan`"
 severity: "HIGH"
-status: "open"
+status: "resolved"
 priority: 9
 dependencies: []
 component: "unknown"
@@ -10,6 +10,7 @@ autonomy: "supervised"
 solution_approved: false
 blast_radius: "medium"
 reversible: true
+github_issue: 231
 ---
 
 # 🔴 [Severity: LOW]: Suboptimal BPF `RET` instruction placement in `emitLinearScan`

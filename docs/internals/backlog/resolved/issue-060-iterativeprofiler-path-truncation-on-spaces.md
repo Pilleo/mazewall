@@ -1,7 +1,7 @@
 ---
 title: "`IterativeProfiler` Path Truncation on Spaces"
 severity: "HIGH"
-status: "open"
+status: "resolved"
 priority: 9
 dependencies: []
 component: "profiler"
@@ -10,6 +10,7 @@ autonomy: "supervised"
 solution_approved: false
 blast_radius: "medium"
 reversible: true
+github_issue: 243
 ---
 
 # 🔴 [Severity: HIGH]: `IterativeProfiler` Path Truncation on Spaces
