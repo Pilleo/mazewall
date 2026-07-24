@@ -4,7 +4,6 @@ import io.mazewall.LinuxNative
 import io.mazewall.MockNativeEngine
 import io.mazewall.MockNativeNetworking
 import io.mazewall.MockNativeMemory
-import io.mazewall.NativeTransaction
 import io.mazewall.ffi.internal.RealNativeEngine
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
@@ -26,7 +25,7 @@ class SupervisorDaemonEngineTest {
     fun `processConnectionStep retries on EINTR during ACK write`() {
         var writeCalls = 0
         val mockEngine = MockNativeEngine()
-        mockEngine.memory.onWrite = { _, _, _, _ ->
+        mockEngine.memory.onWrite = { _, _, _ ->
             writeCalls++
             if (writeCalls == 1) {
                 LinuxNative.SyscallResult.Error(NativeConstants.EINTR, -1L)
@@ -42,7 +41,7 @@ class SupervisorDaemonEngineTest {
 
         io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
             val pollFd = PollFdSegment.of(arena.allocate(8))
-            mockEngine.onPoll = { _, _, _, _ -> LinuxNative.SyscallResult.Success(1L) }
+            mockEngine.onPoll = { _, _, _ -> LinuxNative.SyscallResult.Success(1L) }
 
             val result = engine.processConnectionStep(arena, connection, socketFd, pollFd.managed)
 
@@ -55,7 +54,7 @@ class SupervisorDaemonEngineTest {
     fun `handleNewConnection retries on EINTR`() {
         var acceptCalls = 0
         val mockEngine = MockNativeEngine()
-        mockEngine.networking.onAccept4 = { _, _, _, _, _ ->
+        mockEngine.networking.onAccept4 = { _, _, _, _ ->
             acceptCalls++
             if (acceptCalls == 1) {
                 LinuxNative.SyscallResult.Error(NativeConstants.EINTR, -1L)
@@ -77,7 +76,7 @@ class SupervisorDaemonEngineTest {
     fun `handleNewConnection retries on EINTR and then successfully accepts client connection`() {
         var acceptCalls = 0
         val mockEngine = MockNativeEngine()
-        mockEngine.networking.onAccept4 = { _, _, _, _, _ ->
+        mockEngine.networking.onAccept4 = { _, _, _, _ ->
             acceptCalls++
             if (acceptCalls == 1) {
                 LinuxNative.SyscallResult.Error(NativeConstants.EINTR, -1L)
@@ -86,7 +85,7 @@ class SupervisorDaemonEngineTest {
             }
         }
         // Force processConnectionStep to fail and return null to immediately exit handleConnection thread
-        mockEngine.onPoll = { _, _, _, _ ->
+        mockEngine.onPoll = { _, _, _ ->
             LinuxNative.SyscallResult.Error(NativeConstants.EPERM, -1L)
         }
 

@@ -41,7 +41,7 @@ class FilterInstallationFailureTest {
         val policy = Policy.builder().allowFsRead("/tmp").build()
 
         // PureJavaBpfEngine.install calls LinuxNative.raw.syscall(SECCOMP_SET_MODE_FILTER, ...)
-        mockEngine.onSyscall = { _, nr, _, _, _, _, _, _ ->
+        mockEngine.onSyscall = { nr, _, _, _, _, _, _ ->
             if (nr == io.mazewall.core.Arch.current().seccompSyscallNumber.toLong()) {
                 LinuxNative.SyscallResult.Error(22, -1) // EINVAL
             } else {

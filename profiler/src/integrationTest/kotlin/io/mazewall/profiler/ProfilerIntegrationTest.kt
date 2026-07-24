@@ -172,20 +172,20 @@ class ProfilerIntegrationTest : BaseIntegrationTest() {
                     Callable {
                         java.lang.foreign.Arena.ofConfined().use { arena ->
                             val pathSeg = arena.allocateFrom(absolutePath)
-                            val openRes = LinuxNative.withTransaction {
-                                LinuxNative.fileSystem.open(ConfinedSegment(pathSeg), 0)
-                            }
+                            val openRes =
+                            LinuxNative.fileSystem.open(ConfinedSegment(pathSeg), 0)
+
                             if (openRes is LinuxNative.SyscallResult.Success) {
                                 val fd = openRes.asFd()
                                 val fchmodNr = Syscall.FCHMOD.numberFor(Arch.current()).toLong()
                                 if (fchmodNr >= 0) {
-                                    LinuxNative.withTransaction {
-                                        LinuxNative.raw.syscall(
-                                            fchmodNr,
-                                            io.mazewall.core.NativeArg.FdArg(fd),
-                                            io.mazewall.core.NativeArg.IntArg(0x1FF),
-                                        )
-                                    }
+
+LinuxNative.raw.syscall(
+    fchmodNr,
+    io.mazewall.core.NativeArg.FdArg(fd),
+    io.mazewall.core.NativeArg.IntArg(0x1FF),
+)
+
                                 }
                                 LinuxNative.fileSystem.close(fd)
                             }

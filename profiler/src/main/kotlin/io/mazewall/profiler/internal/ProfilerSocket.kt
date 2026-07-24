@@ -18,13 +18,13 @@ internal object ProfilerSocket {
 
             var lastErrno = 0
             for (retry in 0 until maxRetries) {
-                val fdRes = LinuxNative.withTransaction {
-                    LinuxNative.networking.socket(
-                        SupervisorSocketUtils.AF_UNIX,
-                        SupervisorSocketUtils.SOCK_STREAM or NativeConstants.SOCK_CLOEXEC,
-                        0
-                    )
-                }
+                val fdRes =
+                LinuxNative.networking.socket(
+                    SupervisorSocketUtils.AF_UNIX,
+                    SupervisorSocketUtils.SOCK_STREAM or NativeConstants.SOCK_CLOEXEC,
+                    0
+                )
+
                 val fdVal = when (fdRes) {
                     is LinuxNative.SyscallResult.Success -> fdRes.value.toInt()
                     is LinuxNative.SyscallResult.Error -> {
@@ -34,13 +34,13 @@ internal object ProfilerSocket {
                     }
                 }
                 val fd = FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(fdVal)
-                val connRes = LinuxNative.withTransaction {
-                    LinuxNative.networking.connect(
-                        fd,
-                        ConfinedSegment(sockaddrUn.segment),
-                        SupervisorSocketUtils.SOCKADDR_UN_SIZE
-                    )
-                }
+                val connRes =
+                LinuxNative.networking.connect(
+                    fd,
+                    ConfinedSegment(sockaddrUn.segment),
+                    SupervisorSocketUtils.SOCKADDR_UN_SIZE
+                )
+
                 if (connRes is LinuxNative.SyscallResult.Success) {
                     return fdVal
                 }

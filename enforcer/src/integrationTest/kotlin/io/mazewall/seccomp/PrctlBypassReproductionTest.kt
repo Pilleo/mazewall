@@ -26,11 +26,11 @@ class PrctlBypassReproductionTest : BaseIntegrationTest() {
             safeExecutor
                 .submit(
                     Callable {
-                        val r = LinuxNative.withTransaction {
-                            LinuxNative.process.prctl(
-                                PrctlCommand.SetPdeathsig(15L)
-                            )
-                        }
+                        val r =
+                        LinuxNative.process.prctl(
+                            PrctlCommand.SetPdeathsig(15L)
+                        )
+
                         if (r is LinuxNative.SyscallResult.Error && r.errno != 1) {
                             throw IllegalStateException("SECURITY BYPASS: prctl(PR_SET_PDEATHSIG) reached kernel (errno ${r.errno} instead of EPERM)")
                         }
@@ -64,11 +64,11 @@ class PrctlBypassReproductionTest : BaseIntegrationTest() {
             safeExecutor
                 .submit(
                     Callable {
-                        val r = LinuxNative.withTransaction {
-                            LinuxNative.process.prctl(
-                                PrctlCommand.CapAmbient(2L, 15L)
-                            )
-                        }
+                        val r =
+                        LinuxNative.process.prctl(
+                            PrctlCommand.CapAmbient(2L, 15L)
+                        )
+
                         if (r is LinuxNative.SyscallResult.Error) {
                             if (r.errno == 22) {
                                 throw IllegalStateException("SECURITY BYPASS: prctl(PR_CAP_AMBIENT) reached kernel (EINVAL instead of EPERM)")

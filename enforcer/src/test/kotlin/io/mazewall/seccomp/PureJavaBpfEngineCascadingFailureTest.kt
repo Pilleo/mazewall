@@ -27,7 +27,6 @@ class PureJavaBpfEngineCascadingFailureTest {
     @Test
     fun `test cascading failure when prctl is blocked by existing filter`() {
         val mockProcess = object : io.mazewall.MockNativeProcess() {
-            context(_: io.mazewall.NativeTransaction)
             override fun prctl(command: io.mazewall.core.PrctlCommand): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
                 lastPrctlCommand = command
                 return if (command is io.mazewall.core.PrctlCommand.GetSeccomp) {

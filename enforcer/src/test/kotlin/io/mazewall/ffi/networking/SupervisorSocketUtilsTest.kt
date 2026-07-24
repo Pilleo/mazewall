@@ -3,7 +3,6 @@ package io.mazewall.ffi.networking
 import io.mazewall.LinuxNative
 import io.mazewall.MockNativeEngine
 import io.mazewall.MockNativeNetworking
-import io.mazewall.NativeTransaction
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
@@ -76,7 +75,6 @@ class SupervisorSocketUtilsTest {
     fun `sendDescriptor retries on EINTR and eventually succeeds`() {
         var callCount = 0
         val mockNetworking = object : MockNativeNetworking() {
-            context(_: NativeTransaction)
             override fun sendmsg(
                 sockfd: FileDescriptor<*, FdState.Open>,
                 msg: ManagedSegment,
@@ -103,7 +101,6 @@ class SupervisorSocketUtilsTest {
     fun `sendDescriptor returns false on non-EINTR error`() {
         var callCount = 0
         val mockNetworking = object : MockNativeNetworking() {
-            context(_: NativeTransaction)
             override fun sendmsg(
                 sockfd: FileDescriptor<*, FdState.Open>,
                 msg: ManagedSegment,
@@ -126,7 +123,6 @@ class SupervisorSocketUtilsTest {
     fun `recvDescriptor retries on EINTR and eventually succeeds`() {
         var callCount = 0
         val mockNetworking = object : MockNativeNetworking() {
-            context(_: NativeTransaction)
             override fun recvmsg(
                 sockfd: FileDescriptor<*, FdState.Open>,
                 msg: ManagedSegment,
@@ -163,7 +159,6 @@ class SupervisorSocketUtilsTest {
     fun `recvDescriptor returns null on non-EINTR error`() {
         var callCount = 0
         val mockNetworking = object : MockNativeNetworking() {
-            context(_: NativeTransaction)
             override fun recvmsg(
                 sockfd: FileDescriptor<*, FdState.Open>,
                 msg: ManagedSegment,
@@ -187,7 +182,6 @@ class SupervisorSocketUtilsTest {
     fun `connectWithRetry specifies SOCK_CLOEXEC`() {
         var socketTypeArg = 0
         val mockNetworking = object : MockNativeNetworking() {
-            context(_: NativeTransaction)
             override fun socket(
                 domain: Int,
                 type: Int,
@@ -213,7 +207,6 @@ class SupervisorSocketUtilsTest {
     fun `RealSocketManager createUnixServer specifies SOCK_CLOEXEC`() {
         var socketTypeArg = 0
         val mockNetworking = object : MockNativeNetworking() {
-            context(_: NativeTransaction)
             override fun socket(
                 domain: Int,
                 type: Int,
@@ -239,7 +232,6 @@ class SupervisorSocketUtilsTest {
     fun `RealSocketManager accept calls accept4 with SOCK_CLOEXEC`() {
         var accept4Flags = 0
         val mockNetworking = object : MockNativeNetworking() {
-            context(_: NativeTransaction)
             override fun accept4(
                 sockfd: FileDescriptor<*, FdState.Open>,
                 addr: ManagedSegment,

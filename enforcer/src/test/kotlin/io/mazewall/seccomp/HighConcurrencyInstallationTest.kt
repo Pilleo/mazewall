@@ -21,7 +21,6 @@ class HighConcurrencyInstallationTest {
     @BeforeEach
     fun setup() {
         val mockProcess = object : io.mazewall.MockNativeProcess() {
-            context(_: io.mazewall.NativeTransaction)
             override fun prctl(command: io.mazewall.core.PrctlCommand): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
                 // PR_GET_SECCOMP is option 21
                 if (command is io.mazewall.core.PrctlCommand.GetSeccomp) {

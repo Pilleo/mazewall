@@ -8,7 +8,6 @@ import io.mazewall.MockNativeMemory
 import io.mazewall.MockNativeNetworking
 import io.mazewall.MockNativeProcess
 import io.mazewall.MockPlatformProvider
-import io.mazewall.NativeTransaction
 import io.mazewall.Platform
 import io.mazewall.Policy
 import io.mazewall.core.FdState
@@ -35,7 +34,6 @@ class LandlockCoverageTest {
         process: MockNativeProcess = MockNativeProcess(),
         memory: MockNativeMemory = MockNativeMemory()
     ) : MockNativeEngine(fileSystem, networking, process, memory) {
-        context(_: NativeTransaction)
         override fun syscall(
             nr: Long,
             a1: io.mazewall.core.NativeArg,
@@ -76,7 +74,6 @@ class LandlockCoverageTest {
     @Test
     fun `test addRuleFollowSymlinks with addRule failure`() {
         val mock = object : SupportedLandlockMock() {
-            context(_: NativeTransaction)
             override fun syscall(
                 nr: Long,
                 a1: io.mazewall.core.NativeArg,
@@ -105,7 +102,6 @@ class LandlockCoverageTest {
     @Test
     fun `test restrictSelf failure`() {
         val mock = object : SupportedLandlockMock() {
-            context(_: NativeTransaction)
             override fun syscall(
                 nr: Long,
                 a1: io.mazewall.core.NativeArg,
@@ -185,7 +181,6 @@ class LandlockCoverageTest {
             .AtomicInteger(0)
         val mockFallback = SupportedLandlockMock(
             fileSystem = object : MockNativeFileSystem() {
-                context(_: NativeTransaction)
                 override fun open(
                     path: ManagedSegment,
                     flags: Int,
@@ -218,7 +213,6 @@ class LandlockCoverageTest {
         val deletedPathAttempts = java.util.concurrent.atomic.AtomicInteger(0)
         val mockFallback = SupportedLandlockMock(
             fileSystem = object : MockNativeFileSystem() {
-                context(_: NativeTransaction)
                 override fun open(
                     path: ManagedSegment,
                     flags: Int,
@@ -318,7 +312,6 @@ class LandlockCoverageTest {
     @Test
     fun `test createRuleset throws UnsupportedKernelFeatureException on ENOSYS`() {
         val mock = object : SupportedLandlockMock() {
-            context(_: NativeTransaction)
             override fun syscall(
                 nr: Long,
                 a1: io.mazewall.core.NativeArg,
@@ -353,7 +346,6 @@ class LandlockCoverageTest {
     @Test
     fun `test createRuleset throws UnsupportedKernelFeatureException on EOPNOTSUPP`() {
         val mock = object : SupportedLandlockMock() {
-            context(_: NativeTransaction)
             override fun syscall(
                 nr: Long,
                 a1: io.mazewall.core.NativeArg,
@@ -388,7 +380,6 @@ class LandlockCoverageTest {
     @Test
     fun `test enforceRuleset throws UnsupportedKernelFeatureException on ENOSYS`() {
         val mock = object : SupportedLandlockMock() {
-            context(_: NativeTransaction)
             override fun syscall(
                 nr: Long,
                 a1: io.mazewall.core.NativeArg,
@@ -417,7 +408,6 @@ class LandlockCoverageTest {
     @Test
     fun `test addRuleToRuleset throws UnsupportedKernelFeatureException on ENOSYS`() {
         val mock = object : SupportedLandlockMock() {
-            context(_: NativeTransaction)
             override fun syscall(
                 nr: Long,
                 a1: io.mazewall.core.NativeArg,
@@ -453,7 +443,6 @@ class LandlockCoverageTest {
         val observedFlags = mutableListOf<Pair<String, Int>>()
         val mockFallback = SupportedLandlockMock(
             fileSystem = object : MockNativeFileSystem() {
-                context(_: NativeTransaction)
                 override fun open(
                     path: ManagedSegment,
                     flags: Int,
@@ -531,7 +520,6 @@ class LandlockCoverageTest {
         val observedNetMasks = mutableListOf<Long>()
 
         val mock = object : SupportedLandlockMock() {
-            context(_: NativeTransaction)
             override fun syscall(
                 nr: Long,
                 a1: io.mazewall.core.NativeArg,

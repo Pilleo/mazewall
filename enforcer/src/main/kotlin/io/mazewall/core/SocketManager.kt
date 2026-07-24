@@ -29,43 +29,37 @@ public interface SocketManager {
  */
 public object RealSocketManager : SocketManager {
     override fun createUnixServer(socketPath: String): FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open> {
-        val fd = LinuxNative.withTransaction {
-            LinuxNative.networking.socket(
-                io.mazewall.ffi.networking.SupervisorSocketUtils.AF_UNIX,
-                io.mazewall.ffi.networking.SupervisorSocketUtils.SOCK_STREAM or io.mazewall.ffi.NativeConstants.SOCK_CLOEXEC,
-                0
-            )
-        }.getFdOrThrow("socket(AF_UNIX)").let { FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(it.value) }
+        val fd = LinuxNative.networking.socket(
+            io.mazewall.ffi.networking.SupervisorSocketUtils.AF_UNIX,
+            io.mazewall.ffi.networking.SupervisorSocketUtils.SOCK_STREAM or io.mazewall.ffi.NativeConstants.SOCK_CLOEXEC,
+            0
+        ).getFdOrThrow("socket(AF_UNIX)").let { FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(it.value) }
 
         io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
             val sockaddrUn = io.mazewall.ffi.networking.SupervisorSocketUtils.setupSockAddrUn(arena, socketPath)
             val sockaddrManaged = sockaddrUn.managed
 
-            LinuxNative.withTransaction {
-                LinuxNative.networking.bind(fd, sockaddrManaged, io.mazewall.ffi.networking.SupervisorSocketUtils.SOCKADDR_UN_SIZE)
-            }.onFailure { _, _ ->
-                LinuxNative.fileSystem.close(fd)
-            }.getOrThrow("bind(AF_UNIX)")
+            LinuxNative.networking.bind(fd, sockaddrManaged, io.mazewall.ffi.networking.SupervisorSocketUtils.SOCKADDR_UN_SIZE)
+                .onFailure { _, _ ->
+                    LinuxNative.fileSystem.close(fd)
+                }.getOrThrow("bind(AF_UNIX)")
         }
 
-        LinuxNative.withTransaction {
-            LinuxNative.networking.listen(fd, io.mazewall.ffi.networking.SupervisorSocketUtils.BACKLOG_SIZE)
-        }.onFailure { _, _ ->
-            LinuxNative.fileSystem.close(fd)
-        }.getOrThrow("listen")
+        LinuxNative.networking.listen(fd, io.mazewall.ffi.networking.SupervisorSocketUtils.BACKLOG_SIZE)
+            .onFailure { _, _ ->
+                LinuxNative.fileSystem.close(fd)
+            }.getOrThrow("listen")
 
         return fd
     }
 
     override fun accept(serverFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>): FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open> {
-        val res = LinuxNative.withTransaction {
-            LinuxNative.networking.accept4(
-                serverFd,
-                ManagedSegment.NULL,
-                ManagedSegment.NULL,
-                io.mazewall.ffi.NativeConstants.SOCK_CLOEXEC
-            )
-        }
+        val res = LinuxNative.networking.accept4(
+            serverFd,
+            ManagedSegment.NULL,
+            ManagedSegment.NULL,
+            io.mazewall.ffi.NativeConstants.SOCK_CLOEXEC
+        )
         return res.getFdOrThrow("accept").let { FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(it.value) }
     }
 

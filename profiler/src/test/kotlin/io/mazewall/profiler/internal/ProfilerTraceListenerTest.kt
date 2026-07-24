@@ -4,7 +4,6 @@ import io.mazewall.LinuxNative
 import io.mazewall.MockNativeEngine
 import io.mazewall.MockNativeFileSystem
 import io.mazewall.MockNativeMemory
-import io.mazewall.NativeTransaction
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
@@ -32,13 +31,11 @@ class ProfilerTraceListenerTest {
                 }
             },
             memory = object : MockNativeMemory() {
-                context(context: NativeTransaction)
                 override fun read(fd: FileDescriptor<*, FdState.Open>, buf: ManagedSegment, count: Long): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
                     readLatch.await(5, TimeUnit.SECONDS)
                     return LinuxNative.SyscallResult.Success(0L)
                 }
 
-                context(context: NativeTransaction)
                 override fun write(fd: FileDescriptor<*, FdState.Open>, buf: ManagedSegment, count: Long): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
                     readLatch.countDown()
                     return LinuxNative.SyscallResult.Success(count)
@@ -81,7 +78,6 @@ class ProfilerTraceListenerTest {
                 }
             },
             memory = object : MockNativeMemory() {
-                context(context: NativeTransaction)
                 override fun read(fd: FileDescriptor<*, FdState.Open>, buf: ManagedSegment, count: Long): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
                     // Simulate EOF immediately
                     return LinuxNative.SyscallResult.Success(0L)

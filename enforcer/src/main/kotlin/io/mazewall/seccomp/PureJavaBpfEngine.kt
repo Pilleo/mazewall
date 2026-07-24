@@ -147,9 +147,7 @@ internal object PureJavaBpfEngine : SeccompEngine<EngineState> {
     internal fun setNoNewPrivs() {
         // Step 1: Set no_new_privs (mandatory for non-root seccomp)
         while (true) {
-            val result = LinuxNative.withTransaction {
-                LinuxNative.process.prctl(PrctlCommand.SetNoNewPrivs(true))
-            }
+            val result = LinuxNative.process.prctl(PrctlCommand.SetNoNewPrivs(true))
             if (result is LinuxNative.SyscallResult.Error && result.errno == NativeConstants.EINTR) {
                 continue
             }
@@ -175,14 +173,12 @@ internal object PureJavaBpfEngine : SeccompEngine<EngineState> {
         val flags = if (useTsync) NativeConstants.SECCOMP_FILTER_FLAG_TSYNC.toLong() else 0L
         var seccompResult: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled>
         while (true) {
-            seccompResult = LinuxNative.withTransaction {
-                LinuxNative.raw.syscall(
-                    arch.seccompSyscallNumber.toLong(),
-                    io.mazewall.core.NativeArg.LongArg(NativeConstants.SECCOMP_SET_MODE_FILTER.toLong()),
-                    io.mazewall.core.NativeArg.LongArg(flags),
-                    io.mazewall.core.NativeArg.MemoryArg(prog),
-                )
-            }
+            seccompResult = LinuxNative.raw.syscall(
+                arch.seccompSyscallNumber.toLong(),
+                io.mazewall.core.NativeArg.LongArg(NativeConstants.SECCOMP_SET_MODE_FILTER.toLong()),
+                io.mazewall.core.NativeArg.LongArg(flags),
+                io.mazewall.core.NativeArg.MemoryArg(prog),
+            )
             if (seccompResult is LinuxNative.SyscallResult.Error && seccompResult.errno == NativeConstants.EINTR) {
                 continue
             }
@@ -204,14 +200,12 @@ internal object PureJavaBpfEngine : SeccompEngine<EngineState> {
 
             var prctlResult: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled>
             while (true) {
-                prctlResult = LinuxNative.withTransaction {
-                    LinuxNative.process.prctl(
-                        PrctlCommand.SetSeccomp(
-                            NativeConstants.SECCOMP_MODE_FILTER.toLong(),
-                            io.mazewall.core.NativeArg.MemoryArg(prog)
-                        )
+                prctlResult = LinuxNative.process.prctl(
+                    PrctlCommand.SetSeccomp(
+                        NativeConstants.SECCOMP_MODE_FILTER.toLong(),
+                        io.mazewall.core.NativeArg.MemoryArg(prog)
                     )
-                }
+                )
                 if (prctlResult is LinuxNative.SyscallResult.Error && prctlResult.errno == NativeConstants.EINTR) {
                     continue
                 }
@@ -248,9 +242,7 @@ internal object PureJavaBpfEngine : SeccompEngine<EngineState> {
         // Verify filter is actually installed
         var verifyResult: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled>
         while (true) {
-            verifyResult = LinuxNative.withTransaction {
-                LinuxNative.process.prctl(PrctlCommand.GetSeccomp)
-            }
+            verifyResult = LinuxNative.process.prctl(PrctlCommand.GetSeccomp)
             if (verifyResult is LinuxNative.SyscallResult.Error && verifyResult.errno == NativeConstants.EINTR) {
                 continue
             }

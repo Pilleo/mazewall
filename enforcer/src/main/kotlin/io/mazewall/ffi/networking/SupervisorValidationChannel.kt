@@ -25,9 +25,7 @@ public class SupervisorValidationChannel(
         resp.setId(id)
         resp.setDecision(decision)
         resp.setErrorNr(errorNr)
-        LinuxNative.withTransaction {
-            LinuxNative.memory.write(socketFd, responseSegment.managed, Layouts.SUPERVISOR_RESPONSE_SIZE)
-        }
+        LinuxNative.memory.write(socketFd, responseSegment.managed, Layouts.SUPERVISOR_RESPONSE_SIZE)
     }
 
     override fun close() {

@@ -7,7 +7,6 @@ import io.mazewall.MockNativeMemory
 import io.mazewall.MockNativeNetworking
 import io.mazewall.MockNativeProcess
 import io.mazewall.core.NativeArg
-import io.mazewall.NativeTransaction
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
@@ -88,7 +87,6 @@ class ProfilerDaemonTest {
         }
 
         override val raw = object : io.mazewall.RawSyscallOperations {
-            context(_: NativeTransaction)
             override fun poll(fds: ManagedSegment, nfds: Long, timeout: Int): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
                 System.err.println("[MOCK] poll nfds=$nfds nextPollResult=$nextPollResult")
                 if (nextPollResult is LinuxNative.SyscallResult.Success && (nextPollResult as LinuxNative.SyscallResult.Success).value > 0) {
@@ -99,7 +97,6 @@ class ProfilerDaemonTest {
                 return nextPollResult
             }
 
-            context(_: NativeTransaction)
             override fun ioctl(fd: FileDescriptor<*, FdState.Open>, request: Long, arg: ManagedSegment): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
                 ioctlCalls.add(request)
                 if (request == SECCOMP_IOCTL_NOTIF_RECV) {
@@ -112,16 +109,12 @@ class ProfilerDaemonTest {
                 return LinuxNative.SyscallResult.Success(0L)
             }
 
-            context(_: NativeTransaction)
             override fun ioctl(fd: FileDescriptor<*, FdState.Open>, request: Long, arg: Long): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success(0L)
 
-            context(_: NativeTransaction)
             override fun fcntl(fd: FileDescriptor<*, FdState.Open>, cmd: Int, arg: Long): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success(0L)
 
-            context(_: NativeTransaction)
             override fun syscall(nr: Long, arg1: NativeArg, arg2: NativeArg, arg3: NativeArg, arg4: NativeArg, arg5: NativeArg, arg6: NativeArg): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success(0L)
 
-            context(_: NativeTransaction)
             override fun syscall4(nr: Long, arg1: NativeArg, arg2: NativeArg, arg3: NativeArg, arg4: NativeArg): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success(0L)
         }
 

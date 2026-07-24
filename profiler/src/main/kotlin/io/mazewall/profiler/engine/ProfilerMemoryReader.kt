@@ -56,9 +56,9 @@ object RealMemoryReader : ProfilerMemoryReader {
         val procPath = "/proc/${tid.value}/$link"
         val pathSeg = arena.allocateFrom(procPath)
         val buf = arena.allocate(PATH_MAX_VAL)
-        val res = LinuxNative.withTransaction {
-            LinuxNative.fileSystem.readlink(ConfinedSegment(pathSeg.unwrap), ConfinedSegment(buf.unwrap), PATH_MAX_VAL)
-        }
+        val res =
+        LinuxNative.fileSystem.readlink(ConfinedSegment(pathSeg.unwrap), ConfinedSegment(buf.unwrap), PATH_MAX_VAL)
+
         return res.onSuccess { }.map { buf.unwrap.copyToString(it.toInt()).removeSuffix(" (deleted)") }.getOrNull()
     }
 

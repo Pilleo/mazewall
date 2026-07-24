@@ -53,11 +53,11 @@ public class ProfilerDaemonManager(
         synchronized(daemonLock) {
             val existing = sharedDaemonContext
             if (existing != null && existing.daemonProcess.isAlive) {
-                engine.withTransaction {
-                    engine.process.prctl(
-                        io.mazewall.core.PrctlCommand.SetPtracer(existing.daemonProcess.pid())
-                    )
-                }
+
+engine.process.prctl(
+    io.mazewall.core.PrctlCommand.SetPtracer(existing.daemonProcess.pid())
+)
+
                 return existing
             }
             val newContext = spawnDaemon()
@@ -134,11 +134,11 @@ public class ProfilerDaemonManager(
         val daemonProcess = processLauncher.startProcess(pbArgs)
         val daemonPid = daemonProcess.pid()
 
-        val prctlRes = engine.withTransaction {
-            engine.process.prctl(
-                io.mazewall.core.PrctlCommand.SetPtracer(daemonPid)
-            )
-        }
+        val prctlRes =
+        engine.process.prctl(
+            io.mazewall.core.PrctlCommand.SetPtracer(daemonPid)
+        )
+
         if (prctlRes is io.mazewall.LinuxNative.SyscallResult.Error) {
             logger.warning("prctl(PR_SET_PTRACER) failed with errno ${prctlRes.errno}. The daemon may not be able to read process memory if Yama ptrace_scope is restrictive.")
         }
@@ -194,7 +194,7 @@ public class ProfilerDaemonManager(
                 try {
                     val cmd = arena.allocate(1)
                     cmd.set(ValueLayout.JAVA_BYTE, 0L, SHUTDOWN_COMMAND_BYTE)
-                    engine.withTransaction { engine.memory.write(fd, ConfinedSegment(cmd), 1) }
+                    engine.memory.write(fd, ConfinedSegment(cmd), 1)
                     Thread.sleep(SHUTDOWN_WAIT_MS)
                 } finally {
                     socketManager.close(fd)

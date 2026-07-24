@@ -80,9 +80,7 @@ class LinuxNativeCoverageTest {
         mock.syscallResult = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(444)
         LinuxNative.setEngine(mock)
 
-        val res = LinuxNative.withTransaction {
-            LinuxNative.raw.syscall4(1, io.mazewall.core.NativeArg.IntArg(2), io.mazewall.core.NativeArg.IntArg(3), io.mazewall.core.NativeArg.IntArg(4), io.mazewall.core.NativeArg.IntArg(5))
-        }
+        val res = LinuxNative.raw.syscall4(1, io.mazewall.core.NativeArg.IntArg(2), io.mazewall.core.NativeArg.IntArg(3), io.mazewall.core.NativeArg.IntArg(4), io.mazewall.core.NativeArg.IntArg(5))
         assertEquals(444L, res.getOrThrow("test"))
     }
 
@@ -90,32 +88,28 @@ class LinuxNativeCoverageTest {
     fun `test toLong branches`() {
         // We use LinuxNative methods to test the actual implementation of toLong() in RealNativeEngine
         // null branch
-        LinuxNative.withTransaction {
-            LinuxNative.raw.syscall(
-                -1,
-                io.mazewall.core.NativeArg.NullArg,
-                io.mazewall.core.NativeArg.NullArg,
-                io.mazewall.core.NativeArg.NullArg,
-                io.mazewall.core.NativeArg.NullArg,
-                io.mazewall.core.NativeArg.NullArg,
-                io.mazewall.core.NativeArg.NullArg
-            )
-        }
+        LinuxNative.raw.syscall(
+            -1,
+            io.mazewall.core.NativeArg.NullArg,
+            io.mazewall.core.NativeArg.NullArg,
+            io.mazewall.core.NativeArg.NullArg,
+            io.mazewall.core.NativeArg.NullArg,
+            io.mazewall.core.NativeArg.NullArg,
+            io.mazewall.core.NativeArg.NullArg
+        )
 
         // MemorySegment branch
         nativeScope {
             val seg = allocate(8)
-            LinuxNative.withTransaction {
-                LinuxNative.raw.syscall(
-                    -1,
-                    io.mazewall.core.NativeArg.MemoryArg(seg),
-                    io.mazewall.core.NativeArg.IntArg(1),
-                    io.mazewall.core.NativeArg.IntArg(2),
-                    io.mazewall.core.NativeArg.IntArg(3),
-                    io.mazewall.core.NativeArg.IntArg(4),
-                    io.mazewall.core.NativeArg.IntArg(5)
-                )
-            }
+            LinuxNative.raw.syscall(
+                -1,
+                io.mazewall.core.NativeArg.MemoryArg(seg),
+                io.mazewall.core.NativeArg.IntArg(1),
+                io.mazewall.core.NativeArg.IntArg(2),
+                io.mazewall.core.NativeArg.IntArg(3),
+                io.mazewall.core.NativeArg.IntArg(4),
+                io.mazewall.core.NativeArg.IntArg(5)
+            )
         }
     }
 
@@ -150,32 +144,20 @@ class LinuxNativeCoverageTest {
         val fd = FileDescriptor.unsafe<FileDescriptorRole.Generic>(1)
 
         mock.networking.acceptResult = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(10)
-        assertEquals(10L, LinuxNative.withTransaction {
-            LinuxNative.networking.accept(fd, seg, seg)
-        }.getOrThrow("test"))
+        assertEquals(10L, LinuxNative.networking.accept(fd, seg, seg).getOrThrow("test"))
 
         mock.networking.sendmsgResult = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(20)
-        assertEquals(20L, LinuxNative.withTransaction {
-            LinuxNative.networking.sendmsg(fd, seg, 0)
-        }.getOrThrow("test"))
+        assertEquals(20L, LinuxNative.networking.sendmsg(fd, seg, 0).getOrThrow("test"))
 
         mock.networking.recvmsgResult = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(30)
-        assertEquals(30L, LinuxNative.withTransaction {
-            LinuxNative.networking.recvmsg(fd, seg, 0)
-        }.getOrThrow("test"))
+        assertEquals(30L, LinuxNative.networking.recvmsg(fd, seg, 0).getOrThrow("test"))
 
         mock.ioctlResult = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(40)
-        assertEquals(40L, LinuxNative.withTransaction {
-            LinuxNative.raw.ioctl(fd, 2L, seg)
-        }.getOrThrow("test"))
-        assertEquals(40L, LinuxNative.withTransaction {
-            LinuxNative.raw.ioctl(fd, 2L, 3L)
-        }.getOrThrow("test"))
+        assertEquals(40L, LinuxNative.raw.ioctl(fd, 2L, seg).getOrThrow("test"))
+        assertEquals(40L, LinuxNative.raw.ioctl(fd, 2L, 3L).getOrThrow("test"))
 
         mock.networking.recvResult = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(50)
-        assertEquals(50L, LinuxNative.withTransaction {
-            LinuxNative.networking.recv(fd, seg, 8L, 0)
-        }.getOrThrow("test"))
+        assertEquals(50L, LinuxNative.networking.recv(fd, seg, 8L, 0).getOrThrow("test"))
 
         assertEquals(1234, LinuxNative.process.gettid().value)
     }

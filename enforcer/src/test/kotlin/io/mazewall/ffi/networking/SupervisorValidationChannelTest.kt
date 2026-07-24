@@ -3,7 +3,6 @@ package io.mazewall.ffi.networking
 import io.mazewall.LinuxNative
 import io.mazewall.MockNativeEngine
 import io.mazewall.MockNativeMemory
-import io.mazewall.NativeTransaction
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
 import io.mazewall.core.FdState
@@ -29,7 +28,6 @@ class SupervisorValidationChannelTest {
         var capturedErrorNr: Int? = null
 
         val mockMemory = object : MockNativeMemory() {
-            context(_: NativeTransaction)
             override fun write(
                 fd: FileDescriptor<*, FdState.Open>,
                 buf: io.mazewall.ffi.memory.ManagedSegment,

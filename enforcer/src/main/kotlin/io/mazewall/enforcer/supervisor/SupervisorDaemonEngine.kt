@@ -127,7 +127,7 @@ internal class SupervisorDaemonEngine(
 
         val pollFdManaged = pollFd.managed
         while (!isGlobalShutdown()) {
-            val pollRes = engine.withTransaction { engine.raw.poll(pollFdManaged, 1L, POLL_TIMEOUT_MS) }
+            val pollRes = engine.raw.poll(pollFdManaged, 1L, POLL_TIMEOUT_MS)
             val count = pollRes.recover { errno, _ ->
                 if (errno != NativeConstants.EINTR) return
                 0L
@@ -140,14 +140,12 @@ internal class SupervisorDaemonEngine(
     internal fun handleNewConnection(serverFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>) {
         try {
             while (true) {
-                val res = engine.withTransaction {
-                    engine.networking.accept4(
-                        serverFd,
-                        ManagedSegment.NULL,
-                        ManagedSegment.NULL,
-                        NativeConstants.SOCK_CLOEXEC
-                    )
-                }
+                val res = engine.networking.accept4(
+                    serverFd,
+                    ManagedSegment.NULL,
+                    ManagedSegment.NULL,
+                    NativeConstants.SOCK_CLOEXEC
+                )
                 val clientFdVal = res.recover { errno, _ ->
                     if (errno == NativeConstants.EINTR) {
                         return@recover -1L
@@ -219,7 +217,7 @@ internal class SupervisorDaemonEngine(
     ): io.mazewall.ffi.networking.SeccompConnection? {
         val pollFd = PollFdSegment.of(pollFdManaged)
         if (connection is io.mazewall.ffi.networking.SeccompConnection.Accepted) {
-            val pollRes = engine.withTransaction { engine.raw.poll(pollFdManaged, 1L, POLL_TIMEOUT_MS) }
+            val pollRes = engine.raw.poll(pollFdManaged, 1L, POLL_TIMEOUT_MS)
             val count = pollRes.recover { errno, _ ->
                 if (errno == NativeConstants.EINTR) 0L else -1L
             }
@@ -245,7 +243,7 @@ internal class SupervisorDaemonEngine(
                 ackBuf.writeByte(0L, PROTOCOL_ACK_BYTE)
                 var result: io.mazewall.ffi.networking.SeccompConnection? = null
                 while (true) {
-                    val res = engine.withTransaction { engine.memory.write(socketFd, ackBuf, ACK_BUF_SIZE) }
+                    val res = engine.memory.write(socketFd, ackBuf, ACK_BUF_SIZE)
                     if (res is io.mazewall.LinuxNative.SyscallResult.Success) {
                         result = current.handshakeComplete()
                         break
@@ -288,7 +286,7 @@ internal class SupervisorDaemonEngine(
                 val resp = sessionArena.allocate(Layouts.SECCOMP_NOTIF_RESP)
 
                 while (!isGlobalShutdown()) {
-                    val pollRes = engine.withTransaction { engine.raw.poll(pollFds, 2L, POLL_TIMEOUT_MS) }
+                    val pollRes = engine.raw.poll(pollFds, 2L, POLL_TIMEOUT_MS)
                     val count = pollRes.recover { errno, _ ->
                         if (errno != NativeConstants.EINTR) return@use
                         0L
