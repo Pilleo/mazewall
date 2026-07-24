@@ -69,6 +69,8 @@ internal object ThreadStateRegistry {
             ts.allowedSyscalls.intersect(ps.allowedSyscalls)
         }
 
+        val mergedEngineState = mergeEngineStates(ts.engineState, ps.engineState)
+
         return ContainerState(
             filterDepth = ts.filterDepth + ps.filterDepth,
             syscallActions = mergedActions,
@@ -77,8 +79,30 @@ internal object ThreadStateRegistry {
             allowsMmapExec = ts.allowsMmapExec && ps.allowsMmapExec,
             allowsNonThreadClone = ts.allowsNonThreadClone && ps.allowsNonThreadClone,
             allowsUnsafePrctl = ts.allowsUnsafePrctl && ps.allowsUnsafePrctl,
-            landlockPolicy = ts.landlockPolicy ?: ps.landlockPolicy
+            landlockPolicy = ts.landlockPolicy ?: ps.landlockPolicy,
+            engineState = mergedEngineState
         )
+    }
+
+    private fun mergeEngineStates(
+        ts: io.mazewall.seccomp.SeccompInstallationState,
+        ps: io.mazewall.seccomp.SeccompInstallationState
+    ): io.mazewall.seccomp.SeccompInstallationState {
+        val tsRank = stateRank(ts)
+        val psRank = stateRank(ps)
+        return if (tsRank >= psRank) ts else ps
+    }
+
+    private fun stateRank(state: io.mazewall.seccomp.SeccompInstallationState): Int {
+        return when (state) {
+            is io.mazewall.seccomp.SeccompInstallationState.Uninitialized -> 0
+            is io.mazewall.seccomp.SeccompInstallationState.Failed -> 1
+            is io.mazewall.seccomp.SeccompInstallationState.FilterBuilt -> 2
+            is io.mazewall.seccomp.SeccompInstallationState.PrivilegesLocked -> 3
+            is io.mazewall.seccomp.SeccompInstallationState.SystemCallApplied -> 4
+            is io.mazewall.seccomp.SeccompInstallationState.FallbackPrctlApplied -> 4
+            is io.mazewall.seccomp.SeccompInstallationState.Verified -> 5
+        }
     }
 
     /**
