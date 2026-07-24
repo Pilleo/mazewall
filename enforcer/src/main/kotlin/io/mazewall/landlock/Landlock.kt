@@ -161,6 +161,16 @@ object Landlock {
     /** Allow `ioctl` on device files. ABI v5+ (Linux 6.10). */
     const val LANDLOCK_ACCESS_FS_IOCTL_DEV = (1L shl 15)
 
+    // ── Network access flags ───────────────────────────────────────────
+    // These flags correspond to a bit in the kernel's `handled_access_net` /
+    // `allowed_access` bitmask. Added in ABI v4 (Linux 6.7).
+
+    /** Allow binding a TCP socket to a local port. ABI v4+ (Linux 6.7). */
+    const val LANDLOCK_ACCESS_NET_BIND_TCP = (1L shl 0)
+
+    /** Allow connecting an active TCP socket to a remote port. ABI v4+ (Linux 6.7). */
+    const val LANDLOCK_ACCESS_NET_CONNECT_TCP = (1L shl 1)
+
     /**
      * Applies a restrictive Landlock ruleset that handles all categories but only
      * allows JVM classpath reads. This forces synchronous denials on the calling thread,
@@ -214,6 +224,14 @@ object Landlock {
         if (abi >= 2) mask = mask or LANDLOCK_ACCESS_FS_REFER
         if (abi >= ABI_V3) mask = mask or LANDLOCK_ACCESS_FS_TRUNCATE
         if (abi >= ABI_V5) mask = mask or LANDLOCK_ACCESS_FS_IOCTL_DEV
+        return mask
+    }
+
+    internal fun getFullNetAccessMask(abi: Int): Long {
+        var mask = 0L
+        if (abi >= 4) {
+            mask = mask or LANDLOCK_ACCESS_NET_BIND_TCP or LANDLOCK_ACCESS_NET_CONNECT_TCP
+        }
         return mask
     }
 
@@ -431,6 +449,21 @@ object Landlock {
         return accessMaskFs
     }
 
+    internal fun getNetAccessMask(
+        abi: Int,
+        policy: PolicyDefinition<*>,
+    ): Long {
+        if (abi < 4) return 0L
+        var mask = 0L
+        if (!policy.isSyscallAllowed(Syscall.BIND)) {
+            mask = mask or LANDLOCK_ACCESS_NET_BIND_TCP
+        }
+        if (!policy.isSyscallAllowed(Syscall.CONNECT)) {
+            mask = mask or LANDLOCK_ACCESS_NET_CONNECT_TCP
+        }
+        return mask
+    }
+
     private fun validateAbiSupport(
         abi: Int,
         policy: PolicyDefinition<*>,
@@ -460,10 +493,18 @@ object Landlock {
     internal fun createRuleset(
         accessMaskFs: Long,
         abi: Int,
+    ): FileDescriptor<FileDescriptorRole.Ruleset, FdState.Open> =
+        createRuleset(accessMaskFs, 0L, abi)
+
+    context(arena: NativeArena)
+    internal fun createRuleset(
+        accessMaskFs: Long,
+        accessMaskNet: Long,
+        abi: Int,
     ): FileDescriptor<FileDescriptorRole.Ruleset, FdState.Open> {
         val rulesetAttr = LandlockRulesetAttrSegment.allocate()
         rulesetAttr.setHandledAccessFs(accessMaskFs)
-        rulesetAttr.setHandledAccessNet(0L)
+        rulesetAttr.setHandledAccessNet(accessMaskNet)
         val size = if (abi >= 4) Layouts.LANDLOCK_RULESET_ATTR_SIZE else Layouts.LANDLOCK_RULESET_ATTR_V1_SIZE
         val rulesetAttrManaged = rulesetAttr.managed
         val res = LinuxNative.withTransaction {
