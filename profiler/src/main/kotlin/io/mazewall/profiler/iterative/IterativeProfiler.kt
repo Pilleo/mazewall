@@ -137,8 +137,13 @@ object IterativeProfiler {
         phraseIdx: Int,
     ): Int {
         var end = phraseIdx - 1
-        while (end >= 0 && (msg[end].isWhitespace() || msg[end] == '(')) end--
+        while (end >= 0 && (msg[end].isWhitespace() || msg[end] == '(' || msg[end] == '\'' || msg[end] == '"')) end--
         return end
+    }
+
+    private fun isRestrictedSeparator(c: Char): Boolean {
+        return c == ':' || c == '\'' || c == '"' || c == '(' || c == ')' ||
+                c == '[' || c == ']' || c == '{' || c == '}' || c == ',' || c == ';'
     }
 
     private fun resolveAbsolutePath(
@@ -146,7 +151,30 @@ object IterativeProfiler {
         pathEnd: Int,
     ): String? {
         var start = pathEnd
-        while (start > 0 && !msg[start - 1].isWhitespace() && msg[start - 1] != ':') start--
+        while (start > 0) {
+            val prevChar = msg[start - 1]
+            if (isRestrictedSeparator(prevChar)) {
+                break
+            }
+            if (prevChar.isWhitespace()) {
+                val lastSlash = msg.lastIndexOf('/', start - 1)
+                if (lastSlash != -1) {
+                    var hasSeparator = false
+                    for (i in lastSlash until start) {
+                        if (isRestrictedSeparator(msg[i])) {
+                            hasSeparator = true
+                            break
+                        }
+                    }
+                    if (!hasSeparator) {
+                        start--
+                        continue
+                    }
+                }
+                break
+            }
+            start--
+        }
         return msg.substring(start, pathEnd + 1)
     }
 }
