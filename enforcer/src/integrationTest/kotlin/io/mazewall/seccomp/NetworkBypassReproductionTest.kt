@@ -32,15 +32,15 @@ class NetworkBypassReproductionTest : BaseIntegrationTest() {
 
                     // Attempt sendmmsg (even with invalid args, seccomp EPERM should trigger first before kernel EINVAL/EBADF)
                     // If it bypasses seccomp, the kernel will return EBADF (9) or EFAULT (14) because fd=0 is not a socket or args are null
-                    val sendRes = LinuxNative.withTransaction {
-                        LinuxNative.raw.syscall(
-                            sendmmsgNr,
-                            NativeArg.NullArg,
-                            NativeArg.NullArg,
-                            NativeArg.NullArg,
-                            NativeArg.NullArg,
-                        )
-                    }
+                    val sendRes =
+                    LinuxNative.raw.syscall(
+                        sendmmsgNr,
+                        NativeArg.NullArg,
+                        NativeArg.NullArg,
+                        NativeArg.NullArg,
+                        NativeArg.NullArg,
+                    )
+
 
                     if (sendRes is LinuxNative.SyscallResult.Error) {
                         if (sendRes.errno != 1) { // 1 is EPERM (seccomp block)
@@ -51,16 +51,16 @@ class NetworkBypassReproductionTest : BaseIntegrationTest() {
                     }
 
                     // Attempt recvmmsg
-                    val recvRes = LinuxNative.withTransaction {
-                        LinuxNative.raw.syscall(
-                            recvmmsgNr,
-                            NativeArg.NullArg,
-                            NativeArg.NullArg,
-                            NativeArg.NullArg,
-                            NativeArg.NullArg,
-                            NativeArg.NullArg,
-                        )
-                    }
+                    val recvRes =
+                    LinuxNative.raw.syscall(
+                        recvmmsgNr,
+                        NativeArg.NullArg,
+                        NativeArg.NullArg,
+                        NativeArg.NullArg,
+                        NativeArg.NullArg,
+                        NativeArg.NullArg,
+                    )
+
                     if (recvRes is LinuxNative.SyscallResult.Error) {
                         if (recvRes.errno != 1) { // 1 is EPERM (seccomp block)
                             throw IllegalStateException("SECURITY BYPASS: recvmmsg reached the kernel! Errno was ${recvRes.errno} instead of EPERM(1)")

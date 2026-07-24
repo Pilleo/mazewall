@@ -33,11 +33,11 @@ class BpfHardeningTest : BaseIntegrationTest() {
                 try {
                     ContainedExecutors.installOnCurrentThread(policy)
                     // PR_SET_NAME = 15
-                    val res = LinuxNative.withTransaction {
-                        LinuxNative.process.prctl(
-                            PrctlCommand.SetName(NativeArg.MemoryArg(ManagedSegment.NULL))
-                        )
-                    }
+                    val res =
+                    LinuxNative.process.prctl(
+                        PrctlCommand.SetName(NativeArg.MemoryArg(ManagedSegment.NULL))
+                    )
+
                     result.set(res)
                 } catch (t: Throwable) {
                     error.set(t)
@@ -71,16 +71,16 @@ class BpfHardeningTest : BaseIntegrationTest() {
                     
                     // 1. Calling mmap with PROT_EXEC (7) should be blocked (EPERM)
                     execResult.set(
-                        LinuxNative.withTransaction {
-                            LinuxNative.fileSystem.mmap(0, 4096, 7, 0x22, -1, 0)
-                        }
+
+LinuxNative.fileSystem.mmap(0, 4096, 7, 0x22, -1, 0)
+
                     )
                     
                     // 2. Calling mmap with PROT_READ | PROT_WRITE (3) should succeed because MMAP is critical
                     readWriteResult.set(
-                        LinuxNative.withTransaction {
-                            LinuxNative.fileSystem.mmap(0, 4096, 3, 0x22, -1, 0)
-                        }
+
+LinuxNative.fileSystem.mmap(0, 4096, 3, 0x22, -1, 0)
+
                     )
                 } catch (t: Throwable) {
                     error.set(t)

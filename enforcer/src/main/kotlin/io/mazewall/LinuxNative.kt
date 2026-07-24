@@ -4,18 +4,12 @@ import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptorRole
 import io.mazewall.ffi.internal.RealNativeEngine
-import io.mazewall.ffi.internal.RealTransactionManager
 import kotlin.contracts.ExperimentalContracts
 import kotlin.contracts.InvocationKind
 import kotlin.contracts.contract
 
 /**
  * Entry point for all native Linux interactions.
- *
- * ARCHITECTURAL INVARIANT: The FFM Transaction lifecycle (Arena management) is
- * decoupled from the native engine via an internal TransactionManager. This separation
- * ensures that [LinuxNative] remains mockable and that memory allocation strategies
- * can be swapped (e.g., for arena pooling) without modifying call dispatch logic.
  *
  * DESIGN INVARIANT: This entry point is completely decoupled from implicit [nativeScope] or
  * raw FFM [Arena] allocations. All wrappers require pre-allocated [ManagedSegment]s,
@@ -40,33 +34,6 @@ public object LinuxNative : NativeEngine {
     @Suppress("spotbugs:ST_WRITE_TO_STATIC_FROM_INSTANCE_METHOD")
     fun resetToDefault() {
         engine = RealNativeEngine
-    }
-
-    @Volatile
-    private var transactionManager: TransactionManager = RealTransactionManager
-
-    /**
-     * Swaps the active transaction manager. Used for testing.
-     */
-    @Suppress("spotbugs:ST_WRITE_TO_STATIC_FROM_INSTANCE_METHOD")
-    fun setTransactionManager(newManager: TransactionManager) {
-        transactionManager = newManager
-    }
-
-    /**
-     * Restores the default RealTransactionManager.
-     */
-    @Suppress("spotbugs:ST_WRITE_TO_STATIC_FROM_INSTANCE_METHOD")
-    fun resetTransactionManager() {
-        transactionManager = RealTransactionManager
-    }
-
-    /**
-     * Executes the given [block] within a [NativeTransaction] context.
-     * Raw system calls and sensitive native operations are only available within this scope.
-     */
-    override fun <T> withTransaction(block: NativeTransaction.() -> T): T {
-        return transactionManager.withTransaction(block)
     }
 
     override val fileSystem: NativeFileSystem get() = engine.fileSystem

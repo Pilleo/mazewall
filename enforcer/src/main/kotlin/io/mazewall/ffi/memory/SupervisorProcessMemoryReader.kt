@@ -46,9 +46,7 @@ public object SupervisorProcessMemoryReader {
 
         var res: LinuxNative.SyscallResult<Long, *>
         while (true) {
-            res = LinuxNative.withTransaction {
-                LinuxNative.memory.processVmReadv(Pid(tid.value), ConfinedSegment(localIov.segment), 1, ConfinedSegment(remoteIov.segment), 1, 0)
-            }
+            res = LinuxNative.memory.processVmReadv(Pid(tid.value), ConfinedSegment(localIov.segment), 1, ConfinedSegment(remoteIov.segment), 1, 0)
             if (res is LinuxNative.SyscallResult.Error && res.errno == io.mazewall.ffi.NativeConstants.EINTR) {
                 continue
             }

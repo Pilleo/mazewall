@@ -31,7 +31,7 @@ class PureJavaBpfEngineReproductionTest {
         PureJavaBpfEngine.clearCache()
         val mockProcess = MockNativeProcess()
         val prctlCommands = mutableListOf<PrctlCommand>()
-        mockProcess.onPrctl = { _, command ->
+        mockProcess.onPrctl = { command ->
             prctlCommands.add(command)
             mockProcess.prctlResult
         }
@@ -86,7 +86,7 @@ class PureJavaBpfEngineReproductionTest {
     fun `test seccomp installation retries on EINTR`() {
         PureJavaBpfEngine.clearCache()
         val mockProcess = MockNativeProcess()
-        mockProcess.onPrctl = { _, command ->
+        mockProcess.onPrctl = { command ->
             if (command is PrctlCommand.GetSeccomp) {
                 LinuxNative.SyscallResult.Success(2L)
             } else {
@@ -96,7 +96,7 @@ class PureJavaBpfEngineReproductionTest {
 
         var syscallCalls = 0
         val mockEngine = MockNativeEngine(process = mockProcess)
-        mockEngine.onSyscall = { _, nr, _, _, _, _, _, _ ->
+        mockEngine.onSyscall = { nr, _, _, _, _, _, _ ->
             syscallCalls++
             if (syscallCalls == 1) {
                 LinuxNative.SyscallResult.Error(io.mazewall.ffi.NativeConstants.EINTR, -1L)
@@ -123,7 +123,7 @@ class PureJavaBpfEngineReproductionTest {
         val mockProcess = MockNativeProcess()
 
         var prctlCalls = 0
-        mockProcess.onPrctl = { _, command ->
+        mockProcess.onPrctl = { command ->
             if (command is PrctlCommand.SetSeccomp) {
                 prctlCalls++
                 if (prctlCalls == 1) {
@@ -140,7 +140,7 @@ class PureJavaBpfEngineReproductionTest {
 
         val mockEngine = MockNativeEngine(process = mockProcess)
         // Make the main seccomp syscall return ENOSYS so it triggers the prctl fallback
-        mockEngine.onSyscall = { _, _, _, _, _, _, _, _ ->
+        mockEngine.onSyscall = { _, _, _, _, _, _, _ ->
             LinuxNative.SyscallResult.Error(io.mazewall.ffi.NativeConstants.ENOSYS, -1L)
         }
         LinuxNative.setEngine(mockEngine)
@@ -159,7 +159,7 @@ class PureJavaBpfEngineReproductionTest {
         val mockProcess = MockNativeProcess()
 
         var prctlCalls = 0
-        mockProcess.onPrctl = { _, command ->
+        mockProcess.onPrctl = { command ->
             if (command is PrctlCommand.SetNoNewPrivs) {
                 prctlCalls++
                 if (prctlCalls == 1) {
@@ -191,7 +191,7 @@ class PureJavaBpfEngineReproductionTest {
         val mockProcess = MockNativeProcess()
 
         var prctlCalls = 0
-        mockProcess.onPrctl = { _, command ->
+        mockProcess.onPrctl = { command ->
             if (command is PrctlCommand.GetSeccomp) {
                 prctlCalls++
                 if (prctlCalls == 1) {

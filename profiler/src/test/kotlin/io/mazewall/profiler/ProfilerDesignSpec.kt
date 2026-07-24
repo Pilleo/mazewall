@@ -4,7 +4,6 @@ import io.kotest.core.spec.style.FreeSpec
 import io.kotest.matchers.shouldBe
 import io.mazewall.LinuxNative
 import io.mazewall.core.NativeArg
-import io.mazewall.NativeTransaction
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
@@ -59,7 +58,6 @@ class ProfilerDesignSpec :
             var nextPollResult: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success(1L)
 
             override val raw = object : io.mazewall.RawSyscallOperations {
-                context(_: NativeTransaction)
                 override fun poll(fds: ManagedSegment, nfds: Long, timeout: Int): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
                     if (nextPollResult is LinuxNative.SyscallResult.Success && (nextPollResult as LinuxNative.SyscallResult.Success).value > 0) {
                         val fdsSeg = MemorySegment.ofAddress(fds.address()).reinterpret(fds.byteSize())
@@ -68,16 +66,12 @@ class ProfilerDesignSpec :
                     return nextPollResult
                 }
 
-                context(_: NativeTransaction)
                 override fun syscall(nr: Long, arg1: NativeArg, arg2: NativeArg, arg3: NativeArg, arg4: NativeArg, arg5: NativeArg, arg6: NativeArg): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success(0L)
 
-                context(_: NativeTransaction)
                 override fun syscall4(nr: Long, arg1: NativeArg, arg2: NativeArg, arg3: NativeArg, arg4: NativeArg): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success(0L)
 
-                context(_: NativeTransaction)
                 override fun fcntl(fd: FileDescriptor<*, FdState.Open>, cmd: Int, arg: Long): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success(0L)
 
-                context(_: NativeTransaction)
                 override fun ioctl(
                     fd: FileDescriptor<*, FdState.Open>,
                     request: Long,
@@ -96,7 +90,6 @@ class ProfilerDesignSpec :
                     return LinuxNative.SyscallResult.Success(0L)
                 }
 
-                context(_: NativeTransaction)
                 override fun ioctl(
                     fd: FileDescriptor<*, FdState.Open>,
                     request: Long,

@@ -57,13 +57,13 @@ class ProtectionDemonstrationTest {
                     val arch = Arch.current()
                     Arena.ofConfined().use { arena ->
                         val name = arena.allocateFrom("test_memfd_protected")
-                        val res = LinuxNative.withTransaction {
-                            LinuxNative.raw.syscall(
-                                arch.memfdCreate.toLong(),
-                                io.mazewall.core.NativeArg.MemoryArg(ConfinedSegment(name)),
-                                io.mazewall.core.NativeArg.NullArg,
-                            )
-                        }
+                        val res =
+                        LinuxNative.raw.syscall(
+                            arch.memfdCreate.toLong(),
+                            io.mazewall.core.NativeArg.MemoryArg(ConfinedSegment(name)),
+                            io.mazewall.core.NativeArg.NullArg,
+                        )
+
                         assertTrue(res is LinuxNative.SyscallResult.Error, "memfd_create should be blocked by NO_EXEC")
                         assertEquals(NativeConstants.EPERM, (res as LinuxNative.SyscallResult.Error).errno)
                     }
@@ -188,12 +188,12 @@ class ProtectionDemonstrationTest {
             safeExecutor
                 .submit {
                     Arena.ofConfined().use { arena ->
-                        val openResult = LinuxNative.withTransaction {
-                            LinuxNative.fileSystem.open(
-                                ConfinedSegment(arena.allocateFrom("/etc/hosts")),
-                                0, // O_RDONLY
-                            )
-                        }
+                        val openResult =
+                        LinuxNative.fileSystem.open(
+                            ConfinedSegment(arena.allocateFrom("/etc/hosts")),
+                            0, // O_RDONLY
+                        )
+
                         // If Landlock restricts the path, open returns -1 and errno is EACCES (13)
                         assertTrue(openResult is LinuxNative.SyscallResult.Error, "open of /etc/hosts should fail under Landlock")
                         val errno = (openResult as LinuxNative.SyscallResult.Error).errno

@@ -60,22 +60,22 @@ class AllowListTest : BaseIntegrationTest() {
         io.mazewall.seccomp.SeccompInstallationState.Failed::class.java.name
         Arch.current()
         // Force native symbol linking for LinuxNative downcall stubs
-        LinuxNative.withTransaction {
-            LinuxNative.networking.socket(2, 1, 0)
-        }
+
+LinuxNative.networking.socket(2, 1, 0)
+
         val mmap = Arch.current().mmap.toLong()
         if (mmap >= 0) {
-            LinuxNative.withTransaction {
-                LinuxNative.raw.syscall(
-                    mmap,
-                    NativeArg.NullArg,
-                    NativeArg.IntArg(4096),
-                    NativeArg.NullArg,
-                    NativeArg.IntArg(0x22),
-                    NativeArg.IntArg(-1),
-                    NativeArg.NullArg,
-                )
-            }
+
+LinuxNative.raw.syscall(
+    mmap,
+    NativeArg.NullArg,
+    NativeArg.IntArg(4096),
+    NativeArg.NullArg,
+    NativeArg.IntArg(0x22),
+    NativeArg.IntArg(-1),
+    NativeArg.NullArg,
+)
+
         }
     }
 
@@ -97,9 +97,9 @@ class AllowListTest : BaseIntegrationTest() {
                     ContainedExecutors.installOnCurrentThread(policy)
 
                     // socket() is NOT allowed, should fail with EPERM
-                    val result = LinuxNative.withTransaction {
-                        LinuxNative.networking.socket(2, 1, 0)
-                    }
+                    val result =
+                    LinuxNative.networking.socket(2, 1, 0)
+
                     if (result !is LinuxNative.SyscallResult.Error || result.errno != 1) {
                         throw IllegalStateException("Expected EPERM (1), got $result")
                     }
@@ -129,17 +129,17 @@ class AllowListTest : BaseIntegrationTest() {
                     // mmap with PROT_EXEC should fail even though MMAP is allowed
                     val mmap = Arch.current().mmap.toLong()
                     if (mmap >= 0) {
-                        val result = LinuxNative.withTransaction {
-                            LinuxNative.raw.syscall(
-                                mmap,
-                                NativeArg.NullArg,
-                                NativeArg.IntArg(4096),
-                                NativeArg.IntArg(0x04 /* PROT_EXEC */),
-                                NativeArg.IntArg(0x22),
-                                NativeArg.IntArg(-1),
-                                NativeArg.NullArg,
-                            )
-                        }
+                        val result =
+                        LinuxNative.raw.syscall(
+                            mmap,
+                            NativeArg.NullArg,
+                            NativeArg.IntArg(4096),
+                            NativeArg.IntArg(0x04 /* PROT_EXEC */),
+                            NativeArg.IntArg(0x22),
+                            NativeArg.IntArg(-1),
+                            NativeArg.NullArg,
+                        )
+
                         if (result !is LinuxNative.SyscallResult.Error || result.errno != 1) {
                             throw IllegalStateException("Expected EPERM (1) for mmap(PROT_EXEC), got $result")
                         }

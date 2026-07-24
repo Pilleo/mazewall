@@ -13,14 +13,11 @@ internal object RealPlatformProvider : PlatformProvider {
     override fun getOsVersion(): String = System.getProperty("os.version") ?: "Unknown"
     override fun getOsArch(): String = System.getProperty("os.arch") ?: "Unknown"
 
-    override fun hasKernelSeccompSupport(): Boolean = LinuxNative.withTransaction {
-        LinuxNative.process.prctl(PrctlCommand.GetSeccomp)
-    } is LinuxNative.SyscallResult.Success
+    override fun hasKernelSeccompSupport(): Boolean =
+        LinuxNative.process.prctl(PrctlCommand.GetSeccomp) is LinuxNative.SyscallResult.Success
 
     override fun getSeccompMode(): SeccompMode = try {
-        val seccompVal = LinuxNative.withTransaction {
-            LinuxNative.process.prctl(PrctlCommand.GetSeccomp)
-        }
+        val seccompVal = LinuxNative.process.prctl(PrctlCommand.GetSeccomp)
         when (seccompVal) {
             is LinuxNative.SyscallResult.Error -> SeccompMode.Error(seccompVal.errno)
             is LinuxNative.SyscallResult.Success -> {
@@ -37,14 +34,10 @@ internal object RealPlatformProvider : PlatformProvider {
     }
 
     override fun checkSeccompSanity(): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
-        LinuxNative.withTransaction {
-            LinuxNative.process.prctl(PrctlCommand.SetSeccomp(-1L))
-        }
+        LinuxNative.process.prctl(PrctlCommand.SetSeccomp(-1L))
 
     override fun isNoNewPrivsEnabled(): Boolean = try {
-        val nnpVal = LinuxNative.withTransaction {
-            LinuxNative.process.prctl(PrctlCommand.GetNoNewPrivs)
-        }
+        val nnpVal = LinuxNative.process.prctl(PrctlCommand.GetNoNewPrivs)
         if (nnpVal is LinuxNative.SyscallResult.Success) {
             nnpVal.value == 1L
         } else {
@@ -94,14 +87,12 @@ internal object RealPlatformProvider : PlatformProvider {
      */
     private fun probeSeccompFlag(flag: Long): Boolean {
         val arch = io.mazewall.core.Arch.current()
-        val res = LinuxNative.withTransaction {
-            LinuxNative.raw.syscall(
-                arch.seccompSyscallNumber.toLong(),
-                io.mazewall.core.NativeArg.LongArg(NativeConstants.SECCOMP_SET_MODE_FILTER.toLong()),
-                io.mazewall.core.NativeArg.LongArg(flag),
-                io.mazewall.core.NativeArg.NullArg, // Trigger EFAULT on valid flags
-            )
-        }
+        val res = LinuxNative.raw.syscall(
+            arch.seccompSyscallNumber.toLong(),
+            io.mazewall.core.NativeArg.LongArg(NativeConstants.SECCOMP_SET_MODE_FILTER.toLong()),
+            io.mazewall.core.NativeArg.LongArg(flag),
+            io.mazewall.core.NativeArg.NullArg, // Trigger EFAULT on valid flags
+        )
         // EFAULT (14) means the kernel recognized the flag and tried to read the NULL program.
         @Suppress("MagicNumber")
         return res is LinuxNative.SyscallResult.Error && res.errno == 14

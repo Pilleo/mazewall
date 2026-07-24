@@ -167,7 +167,7 @@ internal class ProfilerTraceListener(
             Arena.ofConfined().use { arena ->
                 val buf = arena.allocate(1)
                 buf.set(java.lang.foreign.ValueLayout.JAVA_BYTE, 0L, commandByte)
-                LinuxNative.withTransaction { LinuxNative.memory.write(socketFd, ConfinedSegment(buf), 1) }
+                LinuxNative.memory.write(socketFd, ConfinedSegment(buf), 1)
             }
         } catch (ignored: Exception) {}
     }

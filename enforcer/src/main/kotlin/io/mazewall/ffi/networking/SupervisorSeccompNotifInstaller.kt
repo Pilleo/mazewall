@@ -40,9 +40,8 @@ public object SupervisorSeccompNotifInstaller {
         }
 
         // Mandatory for non-privileged seccomp
-        LinuxNative.withTransaction {
-            LinuxNative.process.prctl(io.mazewall.core.PrctlCommand.SetNoNewPrivs(true))
-        }.getOrThrow("prctl(PR_SET_NO_NEW_PRIVS)")
+        LinuxNative.process.prctl(io.mazewall.core.PrctlCommand.SetNoNewPrivs(true))
+            .getOrThrow("prctl(PR_SET_NO_NEW_PRIVS)")
 
         val arch = Arch.current()
 
@@ -115,14 +114,12 @@ public object SupervisorSeccompNotifInstaller {
             val prog = BpfNativeCache.getOrCompute(filterInstructions)
 
             // Install seccomp user notifier filter (applied to the current tracee thread)
-            val r = LinuxNative.withTransaction {
-                LinuxNative.raw.syscall(
-                    arch.seccompSyscallNumber.toLong(),
-                    NativeArg.LongArg(NativeConstants.SECCOMP_SET_MODE_FILTER.toLong()),
-                    NativeArg.LongArg(NativeConstants.SECCOMP_FILTER_FLAG_NEW_LISTENER.toLong()),
-                    NativeArg.MemoryArg(prog),
-                )
-            }
+            val r = LinuxNative.raw.syscall(
+                arch.seccompSyscallNumber.toLong(),
+                NativeArg.LongArg(NativeConstants.SECCOMP_SET_MODE_FILTER.toLong()),
+                NativeArg.LongArg(NativeConstants.SECCOMP_FILTER_FLAG_NEW_LISTENER.toLong()),
+                NativeArg.MemoryArg(prog),
+            )
 
             val rawFd = when (r) {
                 is LinuxNative.SyscallResult.Success -> r.value.toInt()
@@ -162,14 +159,12 @@ public object SupervisorSeccompNotifInstaller {
             // filter during their startup and handshake, avoiding fatal circular deadlocks.
             if (processWide && dummyBpf != null) {
                 val dummyProg = BpfNativeCache.getOrCompute(dummyBpf)
-                val tsyncRes = LinuxNative.withTransaction {
-                    LinuxNative.raw.syscall(
-                        arch.seccompSyscallNumber.toLong(),
-                        NativeArg.LongArg(NativeConstants.SECCOMP_SET_MODE_FILTER.toLong()),
-                        NativeArg.LongArg(NativeConstants.SECCOMP_FILTER_FLAG_TSYNC.toLong()),
-                        NativeArg.MemoryArg(dummyProg),
-                    )
-                }
+                val tsyncRes = LinuxNative.raw.syscall(
+                    arch.seccompSyscallNumber.toLong(),
+                    NativeArg.LongArg(NativeConstants.SECCOMP_SET_MODE_FILTER.toLong()),
+                    NativeArg.LongArg(NativeConstants.SECCOMP_FILTER_FLAG_TSYNC.toLong()),
+                    NativeArg.MemoryArg(dummyProg),
+                )
                 if (tsyncRes is LinuxNative.SyscallResult.Error) {
                     val errno = tsyncRes.errno
                     if (errno == 13) {

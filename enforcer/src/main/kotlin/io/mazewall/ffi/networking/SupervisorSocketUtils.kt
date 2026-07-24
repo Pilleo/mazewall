@@ -85,9 +85,7 @@ public object SupervisorSocketUtils {
 
             var lastErrno = 0
             for (retry in 0 until maxRetries) {
-                val fdRes = LinuxNative.withTransaction {
-                    LinuxNative.networking.socket(AF_UNIX, SOCK_STREAM or NativeConstants.SOCK_CLOEXEC, 0)
-                }
+                val fdRes = LinuxNative.networking.socket(AF_UNIX, SOCK_STREAM or NativeConstants.SOCK_CLOEXEC, 0)
                 val fdVal = when (fdRes) {
                     is LinuxNative.SyscallResult.Success -> fdRes.value.toInt()
                     is LinuxNative.SyscallResult.Error -> {
@@ -97,9 +95,7 @@ public object SupervisorSocketUtils {
                     }
                 }
                 val fd = FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(fdVal)
-                val connRes = LinuxNative.withTransaction {
-                    LinuxNative.networking.connect(fd, ConfinedSegment(sockaddrUn.segment), SOCKADDR_UN_SIZE)
-                }
+                val connRes = LinuxNative.networking.connect(fd, ConfinedSegment(sockaddrUn.segment), SOCKADDR_UN_SIZE)
                 if (connRes is LinuxNative.SyscallResult.Success) {
                     return fdVal
                 }
@@ -141,9 +137,7 @@ public object SupervisorSocketUtils {
             msg.setMsgControllen(MSG_CONTROL_BUF_SIZE)
 
             while (true) {
-                val res = LinuxNative.withTransaction {
-                    LinuxNative.networking.sendmsg(FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(socketFd), ConfinedSegment(msg.segment), 0)
-                }
+                val res = LinuxNative.networking.sendmsg(FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(socketFd), ConfinedSegment(msg.segment), 0)
                 if (res is LinuxNative.SyscallResult.Success) {
                     return true
                 } else {
@@ -176,7 +170,7 @@ public object SupervisorSocketUtils {
             val cmsg = CmsghdrSegment(controlBuf)
 
             while (true) {
-                val res = LinuxNative.withTransaction { LinuxNative.networking.recvmsg(socketFd, ConfinedSegment(msg.segment), 0) }
+                val res = LinuxNative.networking.recvmsg(socketFd, ConfinedSegment(msg.segment), 0)
                 if (res is LinuxNative.SyscallResult.Success) {
                     val value = res.value
                     if (value == 0L) return@use null

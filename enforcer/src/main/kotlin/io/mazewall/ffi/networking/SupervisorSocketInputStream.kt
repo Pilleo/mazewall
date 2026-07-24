@@ -23,7 +23,7 @@ internal class SupervisorSocketInputStream(
 
     override fun read(): Int {
         while (true) {
-            val res = LinuxNative.withTransaction { LinuxNative.memory.read(socketFd, readBuf, 1) }
+            val res = LinuxNative.memory.read(socketFd, readBuf, 1)
             when (res) {
                 is LinuxNative.SyscallResult.Success -> {
                     if (res.value <= 0) return -1
@@ -43,7 +43,7 @@ internal class SupervisorSocketInputStream(
         var result = -1
         var done = false
         while (!done) {
-            val res = LinuxNative.withTransaction { LinuxNative.memory.read(socketFd, multiBuf, count) }
+            val res = LinuxNative.memory.read(socketFd, multiBuf, count)
             when (res) {
                 is LinuxNative.SyscallResult.Success -> {
                     if (res.value > 0) {

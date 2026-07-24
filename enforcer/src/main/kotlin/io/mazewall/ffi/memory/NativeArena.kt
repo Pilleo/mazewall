@@ -36,9 +36,7 @@ public class NativeArena internal constructor(
 context(arena: NativeArena)
 public fun openPath(path: String, flags: Int): io.mazewall.LinuxNative.SyscallResult<Long, *> {
     val segment = arena.allocateFrom(path)
-    return io.mazewall.LinuxNative.withTransaction {
-        io.mazewall.LinuxNative.fileSystem.open(segment, flags)
-    }
+    return io.mazewall.LinuxNative.fileSystem.open(segment, flags)
 }
 
 context(arena: NativeArena)
