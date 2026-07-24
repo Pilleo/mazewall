@@ -293,6 +293,19 @@ object Landlock {
         }
     }
 
+    /**
+     * Adds a filesystem path rule to the ruleset.
+     *
+     * ### Fallback behavior and capability leak mitigation
+     * If a path does not exist (resulting in `ENOENT`), Landlock cannot add a rule directly
+     * for its inode. If the path is intended to be created (i.e., has write/creation rights),
+     * we fall back to opening its parent directory so that future files can be created.
+     * However, to prevent a critical read capability leak—where allowing read-only access to a
+     * non-existent file would inadvertently grant read access to the entire parent directory—this
+     * fallback is strictly restricted to cases where the allowed access includes creation/write
+     * rights (such as `LANDLOCK_ACCESS_FS_MAKE_REG` or `LANDLOCK_ACCESS_FS_MAKE_DIR`). Read-only
+     * non-existent paths skip this fallback completely.
+     */
     context(arena: NativeArena)
     private fun addRule(
         ruleset: LandlockRuleset<RulesetState.Building>,
@@ -303,7 +316,7 @@ object Landlock {
         val openFlags = NativeConstants.O_PATH or NativeConstants.O_CLOEXEC or NativeConstants.O_NOFOLLOW
         val initialResult = openPath(resolvedPath, openFlags)
 
-        val openRes = handleInitialOpenFailure(initialResult, resolvedPath, openFlags)
+        val openRes = handleInitialOpenFailure(initialResult, resolvedPath, openFlags, allowedAccess)
         val (fdResult, isFallback) = when (openRes) {
             is OpenResult.Success -> openRes.fd to openRes.isFallback
             is OpenResult.Error -> {
@@ -323,9 +336,22 @@ object Landlock {
         res: LinuxNative.SyscallResult<Long, *>,
         resolvedPath: String,
         flags: Int,
+        allowedAccess: Long,
     ): OpenResult {
         if (res is LinuxNative.SyscallResult.Error && res.errno == 2) { // ENOENT
             if (resolvedPath.endsWith(" (deleted)")) {
+                return OpenResult.Error(res.errno)
+            }
+            val hasCreationRights = (allowedAccess and (
+                LANDLOCK_ACCESS_FS_MAKE_REG or
+                LANDLOCK_ACCESS_FS_MAKE_DIR or
+                LANDLOCK_ACCESS_FS_MAKE_CHAR or
+                LANDLOCK_ACCESS_FS_MAKE_SOCK or
+                LANDLOCK_ACCESS_FS_MAKE_FIFO or
+                LANDLOCK_ACCESS_FS_MAKE_BLOCK or
+                LANDLOCK_ACCESS_FS_MAKE_SYM
+            )) != 0L
+            if (!hasCreationRights) {
                 return OpenResult.Error(res.errno)
             }
             val parentPath = File(resolvedPath).parent ?: "/"

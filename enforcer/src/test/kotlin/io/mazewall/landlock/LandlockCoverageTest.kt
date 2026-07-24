@@ -195,7 +195,8 @@ class LandlockCoverageTest {
             }
         )
         LinuxNative.setEngine(mockFallback)
-        val session1 = LandlockSession(Policy.builder().allowFsRead(SandboxedPath.of("/nonexistent/file", true)).build().definition)
+        // Must use allowFsWrite to have creation capabilities, so that fallback occurs!
+        val session1 = LandlockSession(Policy.builder().allowFsWrite(SandboxedPath.of("/nonexistent/file", true)).build().definition)
         session1.applyRuleset()
 
         LinuxNative.setEngine(mock)
@@ -228,9 +229,9 @@ class LandlockCoverageTest {
         )
         LinuxNative.setEngine(mockFallback)
 
-        // If path ends with " (deleted)", it should NOT call open a second time (meaning no fallback occurs)
+        // Use allowFsWrite to check deleted check when fallback is possible
         org.junit.jupiter.api.Assumptions.assumeTrue(io.mazewall.Platform.isSupported())
-        val session = LandlockSession(Policy.builder().allowFsRead(SandboxedPath.of("/nonexistent/file (deleted)", true)).build().definition)
+        val session = LandlockSession(Policy.builder().allowFsWrite(SandboxedPath.of("/nonexistent/file (deleted)", true)).build().definition)
         session.applyRuleset()
 
         assertEquals(1, deletedPathAttempts.get(), "Should only attempt to open the deleted file path once, with no fallback to parent directory")
@@ -462,8 +463,9 @@ class LandlockCoverageTest {
         )
         LinuxNative.setEngine(mockFallback)
 
+        // Must use allowFsWrite to trigger fallback
         val session = LandlockSession(
-            Policy.builder().allowFsRead(SandboxedPath.of("/nonexistent/file", true)).build().definition
+            Policy.builder().allowFsWrite(SandboxedPath.of("/nonexistent/file", true)).build().definition
         )
         session.applyRuleset()
 
@@ -483,6 +485,38 @@ class LandlockCoverageTest {
         assertTrue((secondFlags and io.mazewall.ffi.NativeConstants.O_PATH) != 0, "Fallback call must contain O_PATH")
         assertTrue((secondFlags and io.mazewall.ffi.NativeConstants.O_CLOEXEC) != 0, "Fallback call must contain O_CLOEXEC")
         assertTrue((secondFlags and io.mazewall.ffi.NativeConstants.O_NOFOLLOW) == 0, "Fallback call must NOT contain O_NOFOLLOW")
+    }
+
+    @Test
+    fun `test read only non existent file does not fallback`() {
+        val observedFlags = mutableListOf<Pair<String, Int>>()
+        val mockFallback = SupportedLandlockMock(
+            fileSystem = object : MockNativeFileSystem() {
+                override fun open(
+                    path: ManagedSegment,
+                    flags: Int,
+                ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                    val pathStr = path.readString(0L)
+                    if (pathStr == "/nonexistent/file" || pathStr == "/nonexistent") {
+                        observedFlags.add(pathStr to flags)
+                    }
+                    if (pathStr == "/nonexistent/file") {
+                        return LinuxNative.SyscallResult.Error<LinuxNative.SyscallHandledState.Unhandled>(2, -1)
+                    }
+                    return LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(100)
+                }
+            }
+        )
+        LinuxNative.setEngine(mockFallback)
+
+        val session = LandlockSession(
+            Policy.builder().allowFsRead(SandboxedPath.of("/nonexistent/file", true)).build().definition
+        )
+        session.applyRuleset()
+
+        // Check that only one open call was made (to the non-existent file itself, no parent directory fallback)
+        assertEquals(1, observedFlags.size)
+        assertEquals("/nonexistent/file", observedFlags[0].first)
     }
 
     @Test
