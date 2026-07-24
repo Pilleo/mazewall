@@ -250,9 +250,7 @@ internal class SupervisorSessionHandler(
             notif.fill(0)
             var recvRes: LinuxNative.SyscallResult<Long, *>
             while (true) {
-                recvRes = engine.withTransaction {
-                    engine.raw.ioctl(listenerFd, NativeConstants.SECCOMP_IOCTL_NOTIF_RECV, notif)
-                }
+                recvRes = engine.raw.ioctl(listenerFd, NativeConstants.SECCOMP_IOCTL_NOTIF_RECV, notif)
                 if (recvRes is LinuxNative.SyscallResult.Error && recvRes.errno == NativeConstants.EINTR) {
                     continue
                 }
@@ -457,7 +455,7 @@ internal class SupervisorSessionHandler(
 
         var writeRes: LinuxNative.SyscallResult<Long, *>
         while (true) {
-            writeRes = engine.withTransaction { engine.memory.write(socketFd, buf, totalSize.toLong()) }
+            writeRes = engine.memory.write(socketFd, buf, totalSize.toLong())
             if (writeRes is LinuxNative.SyscallResult.Error && writeRes.errno == NativeConstants.EINTR) {
                 continue
             }
@@ -494,7 +492,7 @@ internal class SupervisorSessionHandler(
             }
 
             val loopStart = System.currentTimeMillis()
-            val pollRes = engine.withTransaction { engine.raw.poll(pollFdManaged, 1L, remainingTimeout.toInt()) }
+            val pollRes = engine.raw.poll(pollFdManaged, 1L, remainingTimeout.toInt())
             val elapsed = System.currentTimeMillis() - loopStart
             remainingTimeout -= elapsed
 
@@ -545,9 +543,7 @@ internal class SupervisorSessionHandler(
         val responseBuf = arena.allocate(Layouts.SUPERVISOR_RESPONSE_SIZE)
         var readRes: LinuxNative.SyscallResult<Long, *>
         while (true) {
-            readRes = engine.withTransaction {
-                engine.memory.read(socketFd, responseBuf, Layouts.SUPERVISOR_RESPONSE_SIZE)
-            }
+            readRes = engine.memory.read(socketFd, responseBuf, Layouts.SUPERVISOR_RESPONSE_SIZE)
             if (readRes is LinuxNative.SyscallResult.Error && readRes.errno == NativeConstants.EINTR) {
                 continue
             }
@@ -664,9 +660,7 @@ internal class SupervisorSessionHandler(
             val addfdManaged = addfd.managed
             var success = false
             while (true) {
-                val ioctlRes = engine.withTransaction {
-                    engine.raw.ioctl(listenerFd, NativeConstants.SECCOMP_IOCTL_NOTIF_ADDFD, addfdManaged)
-                }
+                val ioctlRes = engine.raw.ioctl(listenerFd, NativeConstants.SECCOMP_IOCTL_NOTIF_ADDFD, addfdManaged)
                 logger.info { "[SUPERVISOR-DEBUG] ioctl SECCOMP_IOCTL_NOTIF_ADDFD res=$ioctlRes" }
                 if (ioctlRes is LinuxNative.SyscallResult.Success) {
                     success = true
@@ -696,13 +690,12 @@ internal class SupervisorSessionHandler(
         val flags = if (nr == arch.open) args[1].toInt() else args[2].toInt()
         val pathSeg = arena.allocateFrom(pathStr)
         val dirfd = if (nr == arch.open || pathStr.startsWith("/")) AT_FDCWD else args[0].toInt()
-        val res: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = engine.withTransaction {
+        val res: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
             if (dirfd == AT_FDCWD) {
                 engine.fileSystem.open(pathSeg, flags)
             } else {
                 engine.fileSystem.openat(dirfd, pathSeg, flags)
             }
-        }
         return when (res) {
             is LinuxNative.SyscallResult.Success -> res.value.toInt()
             is LinuxNative.SyscallResult.Error -> -res.errno
@@ -717,19 +710,19 @@ internal class SupervisorSessionHandler(
             2 // AF_INET = 2
         }
 
-        val socketRes = engine.withTransaction {
+        val socketRes = {
             val res = engine.networking.socket(domain, 1, 0) // SOCK_STREAM = 1
             when (res) {
                 is LinuxNative.SyscallResult.Success -> res.value.toInt()
                 is LinuxNative.SyscallResult.Error -> -res.errno
             }
-        }
+        }()
         if (socketRes < 0) return socketRes
 
         val addr = arena.allocate(sockaddrBytes.size.toLong())
         ManagedSegment.copy(sockaddrBytes, 0, addr, 0L, sockaddrBytes.size)
 
-        val connectErr = engine.withTransaction {
+        val connectErr = {
             val res = engine.networking.connect(
                 FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(socketRes),
                 addr,
@@ -739,7 +732,7 @@ internal class SupervisorSessionHandler(
                 is LinuxNative.SyscallResult.Success -> 0
                 is LinuxNative.SyscallResult.Error -> res.errno
             }
-        }
+        }()
         if (connectErr != 0) {
             closeLocalFd(socketRes)
             return -connectErr
@@ -749,10 +742,7 @@ internal class SupervisorSessionHandler(
 
     private fun closeLocalFd(fd: Int) {
         try {
-            engine.withTransaction {
-                engine.fileSystem.close(FileDescriptor.unsafe<FileDescriptorRole.Generic>(fd))
-                Unit
-            }
+            engine.fileSystem.close(FileDescriptor.unsafe<FileDescriptorRole.Generic>(fd))
         } catch (ignored: IllegalStateException) {
             // Ignore
         }
@@ -765,9 +755,7 @@ internal class SupervisorSessionHandler(
         resp.writeInt(RESP_ERR_OFF, 0)
         resp.writeInt(RESP_FLAGS_OFF, NativeConstants.SECCOMP_USER_NOTIF_FLAG_CONTINUE.toInt())
         while (true) {
-            val res = engine.withTransaction {
-                engine.raw.ioctl(listenerFd, NativeConstants.SECCOMP_IOCTL_NOTIF_SEND, resp)
-            }
+            val res = engine.raw.ioctl(listenerFd, NativeConstants.SECCOMP_IOCTL_NOTIF_SEND, resp)
             if (res is LinuxNative.SyscallResult.Error && res.errno == NativeConstants.EINTR) {
                 continue
             }
@@ -782,9 +770,7 @@ internal class SupervisorSessionHandler(
         resp.writeInt(RESP_ERR_OFF, -errorNr)
         resp.writeInt(RESP_FLAGS_OFF, 0)
         while (true) {
-            val res = engine.withTransaction  {
-                engine.raw.ioctl(listenerFd, NativeConstants.SECCOMP_IOCTL_NOTIF_SEND, resp)
-            }
+            val res = engine.raw.ioctl(listenerFd, NativeConstants.SECCOMP_IOCTL_NOTIF_SEND, resp)
             if (res is LinuxNative.SyscallResult.Error && res.errno == NativeConstants.EINTR) {
                 continue
             }
@@ -848,9 +834,8 @@ internal class SupervisorSessionHandler(
                     with(arena) {
                         val tgid = getTgid(tid.value)
                         logger.info { "[SUPERVISOR-DEBUG] Async accept worker started for tid=${tid.value} (tgid=$tgid), targetFd=${args[0].toInt()}" }
-                        val pidfdRes: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = engine.withTransaction {
+                        val pidfdRes: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
                             engine.process.pidfdOpen(tgid, 0)
-                        }
                         val pidfd = when (pidfdRes) {
                             is LinuxNative.SyscallResult.Success -> pidfdRes.value.toInt()
                             is LinuxNative.SyscallResult.Error -> {
@@ -862,9 +847,8 @@ internal class SupervisorSessionHandler(
 
                         val targetFd = args[0].toInt()
                         logger.info { "[SUPERVISOR-DEBUG] pidfd_open success. pidfd=$pidfd. Duplicating fd $targetFd..." }
-                        val dupRes: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = engine.withTransaction {
+                        val dupRes: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
                             engine.process.pidfdGetFd(pidfd, targetFd, 0)
-                        }
 
                         closeLocalFd(pidfd)
 
@@ -885,14 +869,13 @@ internal class SupervisorSessionHandler(
 
                             val flags = if (nr == traceeArch.accept4) args[3].toInt() else 0
 
-                            val acceptRes = engine.withTransaction {
+                            val acceptRes =
                                 engine.networking.accept4(
                                     FileDescriptor.unsafe<FileDescriptorRole.Generic>(dupFd),
                                     localAddr,
                                     localAddrLen,
                                     flags
                                 )
-                            }
 
                             val clientFd = when (acceptRes) {
                                 is LinuxNative.SyscallResult.Success -> acceptRes.value.toInt()
@@ -944,9 +927,7 @@ internal class SupervisorSessionHandler(
                                 val addfdManaged = addfd.managed
                                 var injectSuccess = false
                                 while (true) {
-                                    val ioctlRes = engine.withTransaction {
-                                        engine.raw.ioctl(listenerFd, NativeConstants.SECCOMP_IOCTL_NOTIF_ADDFD, addfdManaged)
-                                    }
+                                    val ioctlRes = engine.raw.ioctl(listenerFd, NativeConstants.SECCOMP_IOCTL_NOTIF_ADDFD, addfdManaged)
                                     if (ioctlRes is LinuxNative.SyscallResult.Success) {
                                         injectSuccess = true
                                         break

@@ -55,11 +55,9 @@ public class SupervisorDaemonManager(
         synchronized(daemonLock) {
             val existing = sharedDaemonContext
             if (existing != null && existing.daemonProcess.isAlive) {
-                engine.withTransaction {
-                    engine.process.prctl(
-                        io.mazewall.core.PrctlCommand.SetPtracer(existing.daemonProcess.pid())
-                    )
-                }
+                engine.process.prctl(
+                    io.mazewall.core.PrctlCommand.SetPtracer(existing.daemonProcess.pid())
+                )
                 return existing
             }
             val newContext = spawnDaemon()
@@ -132,11 +130,9 @@ public class SupervisorDaemonManager(
         val daemonProcess = processLauncher.startProcess(pbArgs)
         val daemonPid = daemonProcess.pid()
 
-        val prctlRes = engine.withTransaction {
-            engine.process.prctl(
-                io.mazewall.core.PrctlCommand.SetPtracer(daemonPid)
-            )
-        }
+        val prctlRes = engine.process.prctl(
+            io.mazewall.core.PrctlCommand.SetPtracer(daemonPid)
+        )
         if (prctlRes is io.mazewall.LinuxNative.SyscallResult.Error) {
             logger.warning("prctl(PR_SET_PTRACER) failed with errno ${prctlRes.errno}. The daemon may not be able to read process memory if Yama ptrace_scope is restrictive.")
         }
@@ -193,7 +189,7 @@ public class SupervisorDaemonManager(
                     cmd.writeByte(0L, SHUTDOWN_COMMAND_BYTE)
                     var writeRes: io.mazewall.LinuxNative.SyscallResult<Long, *>
                     while (true) {
-                        writeRes = engine.withTransaction { engine.memory.write(fd, cmd, 1) }
+                        writeRes = engine.memory.write(fd, cmd, 1)
                         if (writeRes is io.mazewall.LinuxNative.SyscallResult.Error && writeRes.errno == io.mazewall.ffi.NativeConstants.EINTR) {
                             continue
                         }

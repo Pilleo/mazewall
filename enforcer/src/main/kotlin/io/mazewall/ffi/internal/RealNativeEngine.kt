@@ -32,10 +32,6 @@ internal object RealNativeEngine : NativeEngine, RawSyscallOperations {
     override val memory: NativeMemory = RealNativeMemory
     override val raw: RawSyscallOperations get() = this
 
-    override fun <T> withTransaction(block: NativeTransaction.() -> T): T {
-        return RealTransactionManager.withTransaction(block)
-    }
-
     private val SYSCALL: MethodHandle =
         RealNativeHelper.downcall(
             "syscall",
@@ -100,7 +96,6 @@ internal object RealNativeEngine : NativeEngine, RawSyscallOperations {
         LayoutValidator.validate()
     }
 
-    context(_: NativeTransaction)
     override fun syscall(
         nr: Long,
         a1: io.mazewall.core.NativeArg,
@@ -125,7 +120,6 @@ internal object RealNativeEngine : NativeEngine, RawSyscallOperations {
         return RealNativeHelper.result(ret, capturedState.getErrno())
     }
 
-    context(_: NativeTransaction)
     override fun syscall4(
         nr: Long,
         a1: io.mazewall.core.NativeArg,
@@ -135,7 +129,6 @@ internal object RealNativeEngine : NativeEngine, RawSyscallOperations {
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
         syscall(nr, a1, a2, a3, a4, io.mazewall.core.NativeArg.LongArg(0L), io.mazewall.core.NativeArg.LongArg(0L))
 
-    context(_: NativeTransaction)
     override fun ioctl(
         fd: FileDescriptor<*, FdState.Open>,
         request: Long,
@@ -147,7 +140,6 @@ internal object RealNativeEngine : NativeEngine, RawSyscallOperations {
         return RealNativeHelper.result(ret.toLong(), capturedState.getErrno())
     }
 
-    context(_: NativeTransaction)
     override fun ioctl(
         fd: FileDescriptor<*, FdState.Open>,
         request: Long,
@@ -159,7 +151,6 @@ internal object RealNativeEngine : NativeEngine, RawSyscallOperations {
         return RealNativeHelper.result(ret.toLong(), capturedState.getErrno())
     }
 
-    context(_: NativeTransaction)
     override fun fcntl(
         fd: FileDescriptor<*, FdState.Open>,
         cmd: Int,
@@ -171,7 +162,6 @@ internal object RealNativeEngine : NativeEngine, RawSyscallOperations {
         return RealNativeHelper.result(ret.toLong(), capturedState.getErrno())
     }
 
-    context(_: NativeTransaction)
     override fun poll(
         fds: ManagedSegment,
         nfds: Long,
@@ -229,7 +219,6 @@ internal object RealNativeFileSystem : NativeFileSystem {
             Linker.Option.captureCallState("errno"),
         )
 
-    context(_: NativeTransaction)
     override fun open(
         path: ManagedSegment,
         flags: Int,
@@ -239,7 +228,6 @@ internal object RealNativeFileSystem : NativeFileSystem {
         return RealNativeHelper.result(ret.toLong(), capturedState.getErrno())
     }
 
-    context(_: NativeTransaction)
     override fun openat(
         dirfd: Int,
         path: ManagedSegment,
@@ -250,7 +238,6 @@ internal object RealNativeFileSystem : NativeFileSystem {
         return RealNativeHelper.result(ret.toLong(), capturedState.getErrno())
     }
 
-    context(_: NativeTransaction)
     override fun mmap(
         addr: Long,
         length: Long,
@@ -279,7 +266,6 @@ internal object RealNativeFileSystem : NativeFileSystem {
         return RealNativeHelper.result(ret.toLong(), capturedState.getErrno())
     }
 
-    context(_: NativeTransaction)
     override fun readlink(
         path: ManagedSegment,
         buf: ManagedSegment,
@@ -396,7 +382,6 @@ internal object RealNativeNetworking : NativeNetworking {
             Linker.Option.captureCallState("errno"),
         )
 
-    context(_: NativeTransaction)
     override fun socketpair(
         domain: Int,
         type: Int,
@@ -408,7 +393,6 @@ internal object RealNativeNetworking : NativeNetworking {
         return RealNativeHelper.result(ret.toLong(), capturedState.getErrno())
     }
 
-    context(_: NativeTransaction)
     override fun accept4(
         sockfd: FileDescriptor<*, FdState.Open>,
         addr: ManagedSegment,
@@ -421,7 +405,6 @@ internal object RealNativeNetworking : NativeNetworking {
         return RealNativeHelper.result(ret.toLong(), capturedState.getErrno())
     }
 
-    context(_: NativeTransaction)
     override fun socket(
         domain: Int,
         type: Int,
@@ -432,7 +415,6 @@ internal object RealNativeNetworking : NativeNetworking {
         return RealNativeHelper.result(ret.toLong(), capturedState.getErrno())
     }
 
-    context(_: NativeTransaction)
     override fun bind(
         sockfd: FileDescriptor<*, FdState.Open>,
         addr: ManagedSegment,
@@ -444,7 +426,6 @@ internal object RealNativeNetworking : NativeNetworking {
         return RealNativeHelper.result(ret.toLong(), capturedState.getErrno())
     }
 
-    context(_: NativeTransaction)
     override fun listen(
         sockfd: FileDescriptor<*, FdState.Open>,
         backlog: Int,
@@ -455,7 +436,6 @@ internal object RealNativeNetworking : NativeNetworking {
         return RealNativeHelper.result(ret.toLong(), capturedState.getErrno())
     }
 
-    context(_: NativeTransaction)
     override fun accept(
         sockfd: FileDescriptor<*, FdState.Open>,
         addr: ManagedSegment,
@@ -467,7 +447,6 @@ internal object RealNativeNetworking : NativeNetworking {
         return RealNativeHelper.result(ret.toLong(), capturedState.getErrno())
     }
 
-    context(_: NativeTransaction)
     override fun connect(
         sockfd: FileDescriptor<*, FdState.Open>,
         addr: ManagedSegment,
@@ -479,7 +458,6 @@ internal object RealNativeNetworking : NativeNetworking {
         return RealNativeHelper.result(ret.toLong(), capturedState.getErrno())
     }
 
-    context(_: NativeTransaction)
     override fun sendmsg(
         sockfd: FileDescriptor<*, FdState.Open>,
         msg: ManagedSegment,
@@ -491,7 +469,6 @@ internal object RealNativeNetworking : NativeNetworking {
         return RealNativeHelper.result(ret, capturedState.getErrno())
     }
 
-    context(_: NativeTransaction)
     override fun recvmsg(
         sockfd: FileDescriptor<*, FdState.Open>,
         msg: ManagedSegment,
@@ -503,7 +480,6 @@ internal object RealNativeNetworking : NativeNetworking {
         return RealNativeHelper.result(ret, capturedState.getErrno())
     }
 
-    context(_: NativeTransaction)
     override fun recv(
         sockfd: FileDescriptor<*, FdState.Open>,
         buf: ManagedSegment,
@@ -555,7 +531,6 @@ internal object RealNativeProcess : NativeProcess {
         return io.mazewall.core.Tid(GETTID.invokeExact(capturedState.segment) as Int)
     }
 
-    context(_: NativeTransaction)
     override fun prctl(command: io.mazewall.core.PrctlCommand): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
         val capturedState = ErrnoSegment.getThreadLocal()
         val ret =
@@ -570,7 +545,6 @@ internal object RealNativeProcess : NativeProcess {
         return RealNativeHelper.result(ret.toLong(), capturedState.getErrno())
     }
 
-    context(_: NativeTransaction)
     override fun pidfdOpen(
         pid: Int,
         flags: Int,
@@ -580,7 +554,6 @@ internal object RealNativeProcess : NativeProcess {
         return RealNativeHelper.result(ret.toLong(), capturedState.getErrno())
     }
 
-    context(_: NativeTransaction)
     override fun pidfdGetFd(
         pidfd: Int,
         targetFd: Int,
@@ -644,7 +617,6 @@ internal object RealNativeMemory : NativeMemory {
             Linker.Option.captureCallState("errno"),
         )
 
-    context(_: NativeTransaction)
     override fun processVmReadv(
         pid: io.mazewall.core.Pid,
         localIov: ManagedSegment,
@@ -667,7 +639,6 @@ internal object RealNativeMemory : NativeMemory {
         return RealNativeHelper.result(ret, capturedState.getErrno())
     }
 
-    context(_: NativeTransaction)
     override fun processVmWritev(
         pid: io.mazewall.core.Pid,
         localIov: ManagedSegment,
@@ -690,7 +661,6 @@ internal object RealNativeMemory : NativeMemory {
         return RealNativeHelper.result(ret, capturedState.getErrno())
     }
 
-    context(_: NativeTransaction)
     override fun read(
         fd: FileDescriptor<*, FdState.Open>,
         buf: ManagedSegment,
@@ -702,7 +672,6 @@ internal object RealNativeMemory : NativeMemory {
         return RealNativeHelper.result(ret, capturedState.getErrno())
     }
 
-    context(_: NativeTransaction)
     override fun write(
         fd: FileDescriptor<*, FdState.Open>,
         buf: ManagedSegment,
