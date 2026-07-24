@@ -13,6 +13,10 @@ import java.lang.foreign.ValueLayout
  * method on these layouts to resolve member positions.
  */
 object Layouts {
+    private val NATIVE_SHORT = ValueLayout.JAVA_SHORT.withOrder(java.nio.ByteOrder.nativeOrder())
+    private val NATIVE_INT = ValueLayout.JAVA_INT.withOrder(java.nio.ByteOrder.nativeOrder())
+    private val NATIVE_LONG = ValueLayout.JAVA_LONG.withOrder(java.nio.ByteOrder.nativeOrder())
+
     /**
      * Layout for capturing errno after a native call.
      */
@@ -24,10 +28,10 @@ object Layouts {
      * Used for BPF filter instructions.
      */
     val SOCK_FILTER: StructLayout = MemoryLayout.structLayout(
-        ValueLayout.JAVA_SHORT.withName("code"),
+        NATIVE_SHORT.withName("code"),
         ValueLayout.JAVA_BYTE.withName("jt"),
         ValueLayout.JAVA_BYTE.withName("jf"),
-        ValueLayout.JAVA_INT.withName("k"),
+        NATIVE_INT.withName("k"),
     )
     val SOCK_FILTER_SIZE: Long = SOCK_FILTER.byteSize()
     val SOCK_FILTER_CODE_OFFSET: Long = SOCK_FILTER.byteOffset(MemoryLayout.PathElement.groupElement("code"))
@@ -40,7 +44,7 @@ object Layouts {
      * Used to pass the BPF program to the kernel.
      */
     val SOCK_FPROG: StructLayout = MemoryLayout.structLayout(
-        ValueLayout.JAVA_SHORT.withName("len"),
+        NATIVE_SHORT.withName("len"),
         MemoryLayout.paddingLayout(6), // Align pointer to 8 bytes
         ValueLayout.ADDRESS.withName("filter"),
     )
@@ -52,10 +56,10 @@ object Layouts {
      * Contains the syscall number and arguments for BPF inspection.
      */
     val SECCOMP_DATA: StructLayout = MemoryLayout.structLayout(
-        ValueLayout.JAVA_INT.withName("nr"),
-        ValueLayout.JAVA_INT.withName("arch"),
-        ValueLayout.JAVA_LONG.withName("instruction_pointer"),
-        MemoryLayout.sequenceLayout(6, ValueLayout.JAVA_LONG).withName("args"),
+        NATIVE_INT.withName("nr"),
+        NATIVE_INT.withName("arch"),
+        NATIVE_LONG.withName("instruction_pointer"),
+        MemoryLayout.sequenceLayout(6, NATIVE_LONG).withName("args"),
     )
     val SECCOMP_DATA_NR_OFFSET: Long = 0L
     val SECCOMP_DATA_ARCH_OFFSET: Long = 4L
@@ -73,9 +77,9 @@ object Layouts {
      * Used by the Profiler to receive syscall notification events.
      */
     val SECCOMP_NOTIF: StructLayout = MemoryLayout.structLayout(
-        ValueLayout.JAVA_LONG.withName("id"),
-        ValueLayout.JAVA_INT.withName("pid"),
-        ValueLayout.JAVA_INT.withName("flags"),
+        NATIVE_LONG.withName("id"),
+        NATIVE_INT.withName("pid"),
+        NATIVE_INT.withName("flags"),
         SECCOMP_DATA.withName("data"),
     )
 
@@ -84,10 +88,10 @@ object Layouts {
      * Used by the Profiler to ACK syscall notifications.
      */
     val SECCOMP_NOTIF_RESP: StructLayout = MemoryLayout.structLayout(
-        ValueLayout.JAVA_LONG.withName("id"),
-        ValueLayout.JAVA_LONG.withName("val"),
-        ValueLayout.JAVA_INT.withName("error"),
-        ValueLayout.JAVA_INT.withName("flags"),
+        NATIVE_LONG.withName("id"),
+        NATIVE_LONG.withName("val"),
+        NATIVE_INT.withName("error"),
+        NATIVE_INT.withName("flags"),
     )
 
     /**
@@ -95,11 +99,11 @@ object Layouts {
      * Used to inject a file descriptor into a restricted process.
      */
     val SECCOMP_NOTIF_ADDFD: StructLayout = MemoryLayout.structLayout(
-        ValueLayout.JAVA_LONG.withName("id"),
-        ValueLayout.JAVA_INT.withName("flags"),
-        ValueLayout.JAVA_INT.withName("srcfd"),
-        ValueLayout.JAVA_INT.withName("newfd"),
-        ValueLayout.JAVA_INT.withName("newfd_flags"),
+        NATIVE_LONG.withName("id"),
+        NATIVE_INT.withName("flags"),
+        NATIVE_INT.withName("srcfd"),
+        NATIVE_INT.withName("newfd"),
+        NATIVE_INT.withName("newfd_flags"),
     )
 
     /**
@@ -107,7 +111,7 @@ object Layouts {
      */
     val IOVEC: StructLayout = MemoryLayout.structLayout(
         ValueLayout.ADDRESS.withName("iov_base"),
-        ValueLayout.JAVA_LONG.withName("iov_len"),
+        NATIVE_LONG.withName("iov_len"),
     )
 
     /**
@@ -115,13 +119,13 @@ object Layouts {
      */
     val MSGHDR: StructLayout = MemoryLayout.structLayout(
         ValueLayout.ADDRESS.withName("msg_name"),
-        ValueLayout.JAVA_INT.withName("msg_namelen"),
+        NATIVE_INT.withName("msg_namelen"),
         MemoryLayout.paddingLayout(4),
         ValueLayout.ADDRESS.withName("msg_iov"),
-        ValueLayout.JAVA_LONG.withName("msg_iovlen"),
+        NATIVE_LONG.withName("msg_iovlen"),
         ValueLayout.ADDRESS.withName("msg_control"),
-        ValueLayout.JAVA_LONG.withName("msg_controllen"),
-        ValueLayout.JAVA_INT.withName("msg_flags"),
+        NATIVE_LONG.withName("msg_controllen"),
+        NATIVE_INT.withName("msg_flags"),
         MemoryLayout.paddingLayout(4),
     )
 
@@ -129,16 +133,16 @@ object Layouts {
      * Corresponds to `struct cmsghdr` in `<sys/socket.h>`.
      */
     val CMSGHDR: StructLayout = MemoryLayout.structLayout(
-        ValueLayout.JAVA_LONG.withName("cmsg_len"),
-        ValueLayout.JAVA_INT.withName("cmsg_level"),
-        ValueLayout.JAVA_INT.withName("cmsg_type"),
+        NATIVE_LONG.withName("cmsg_len"),
+        NATIVE_INT.withName("cmsg_level"),
+        NATIVE_INT.withName("cmsg_type"),
     )
 
     /**
      * Corresponds to `struct sockaddr_un` in `<sys/un.h>`.
      */
     val SOCKADDR_UN: StructLayout = MemoryLayout.structLayout(
-        ValueLayout.JAVA_SHORT.withName("sun_family"),
+        NATIVE_SHORT.withName("sun_family"),
         MemoryLayout.sequenceLayout(108, ValueLayout.JAVA_BYTE).withName("sun_path"),
     )
 
@@ -146,9 +150,9 @@ object Layouts {
      * Corresponds to `struct pollfd` in `<poll.h>`.
      */
     val POLLFD: StructLayout = MemoryLayout.structLayout(
-        ValueLayout.JAVA_INT.withName("fd"),
-        ValueLayout.JAVA_SHORT.withName("events"),
-        ValueLayout.JAVA_SHORT.withName("revents"),
+        NATIVE_INT.withName("fd"),
+        NATIVE_SHORT.withName("events"),
+        NATIVE_SHORT.withName("revents"),
     )
     val POLLFD_FD_OFFSET: Long = POLLFD.byteOffset(MemoryLayout.PathElement.groupElement("fd"))
     val POLLFD_EVENTS_OFFSET: Long = POLLFD.byteOffset(MemoryLayout.PathElement.groupElement("events"))
@@ -161,8 +165,8 @@ object Layouts {
      * Corresponds to `struct landlock_ruleset_attr` in `<linux/landlock.h>`.
      */
     val LANDLOCK_RULESET_ATTR: StructLayout = MemoryLayout.structLayout(
-        ValueLayout.JAVA_LONG.withName("handled_access_fs"),
-        ValueLayout.JAVA_LONG.withName("handled_access_net"),
+        NATIVE_LONG.withName("handled_access_fs"),
+        NATIVE_LONG.withName("handled_access_net"),
     )
     const val LANDLOCK_RULESET_ATTR_V1_SIZE: Long = 8L
     val LANDLOCK_RULESET_ATTR_SIZE: Long = LANDLOCK_RULESET_ATTR.byteSize()
@@ -175,8 +179,8 @@ object Layouts {
      * Corresponds to `struct landlock_path_beneath_attr` in `<linux/landlock.h>`.
      */
     val LANDLOCK_PATH_BENEATH_ATTR: StructLayout = MemoryLayout.structLayout(
-        ValueLayout.JAVA_LONG.withByteAlignment(1).withName("allowed_access"),
-        ValueLayout.JAVA_INT.withByteAlignment(1).withName("parent_fd"),
+        NATIVE_LONG.withByteAlignment(1).withName("allowed_access"),
+        NATIVE_INT.withByteAlignment(1).withName("parent_fd"),
     )
     val LANDLOCK_PATH_BENEATH_ATTR_ACCESS_OFFSET: Long =
         LANDLOCK_PATH_BENEATH_ATTR.byteOffset(MemoryLayout.PathElement.groupElement("allowed_access"))

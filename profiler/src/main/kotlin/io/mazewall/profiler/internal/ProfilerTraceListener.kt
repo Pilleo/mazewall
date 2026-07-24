@@ -4,6 +4,7 @@ import io.mazewall.LinuxNative
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
+import io.mazewall.core.close
 import io.mazewall.core.Tid
 import io.mazewall.profiler.Profiler
 import io.mazewall.profiler.engine.TraceEvent

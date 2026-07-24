@@ -11,7 +11,6 @@ import io.mazewall.ffi.NativeConstants
 import io.mazewall.ffi.memory.ConfinedSegment
 import io.mazewall.ffi.memory.NativeArena
 import io.mazewall.ffi.memory.ManagedSegment
-import io.mazewall.ffi.memory.nativeScope
 import io.mazewall.ffi.memory.unwrap
 import io.mazewall.ffi.memory.writeInt
 import io.mazewall.ffi.memory.writeShort
@@ -125,6 +124,13 @@ internal class ProfilerSessionHandler(
      * **must be strictly materialized into JVM heap objects** before crossing the [TraceEvent] or
      * [SyscallEvent] boundaries (which is done here when [SyscallPathResolver.resolve] is called
      * and the resulting event is published via [TraceEventPublisher.sendTraceEvent]).
+     *
+     * ### 🚀 MM Optimization & Arena Reuse:
+     * This method reuses the context-passed `arena` (which is the short-lived `iterationArena`
+     * managed and closed at the end of every loop iteration in [ProfilerDaemonEngine.handleSession]).
+     * This ensures that all transient native allocations (e.g., string reading, socket polling structures)
+     * are deterministically freed when the iteration completes, completely eliminating the overhead of
+     * creating a new confined arena per notification or operation.
      */
     @Suppress("TooGenericExceptionCaught", "ReturnCount", "CyclomaticComplexMethod")
     context(arena: NativeArena)
@@ -153,91 +159,86 @@ internal class ProfilerSessionHandler(
                 args[i] = notif.readLong(NOTIF_ARGS_OFF + i * 8L)
             }
 
-            // Wrap all temporary operations/allocations in a local nativeScope to ensure
-            // immediate deterministic memory cleanup under any success or exception path.
-            return nativeScope {
-                val tempArena = this
-                // RESOLVE: Transform raw event into a resolved event (read path from tracee memory).
-                val resolver = SyscallPathResolver(memoryReader, ledger)
-                val resolvedEvent = with(tempArena) {
-                    resolver.resolve(
-                        event = SyscallEvent<SyscallEventState.Raw>(
-                            tid = Tid(pidVal),
-                            syscallName = syscallMap[nr] ?: "SYSCALL_$nr",
-                            args = args.toList()
-                        )
+            // RESOLVE: Transform raw event into a resolved event (read path from tracee memory).
+            val resolver = SyscallPathResolver(memoryReader, ledger)
+            val resolvedEvent = with(arena) {
+                resolver.resolve(
+                    event = SyscallEvent<SyscallEventState.Raw>(
+                        tid = Tid(pidVal),
+                        syscallName = syscallMap[nr] ?: "SYSCALL_$nr",
+                        args = args.toList()
                     )
-                }
+                )
+            }
 
-                // Optimisation: skip event delivery for JVM-internal paths that generate noise
-                // (JDK home, classpath, /proc, /sys).
-                if ((nr == SYS_OPEN || nr == SYS_OPENAT || nr == SYS_OPENAT2) && resolvedEvent.paths.isNotEmpty()) {
-                    val pathStr = resolvedEvent.paths.first()
-                    try {
-                        val path = java.nio.file.Paths.get(pathStr).toAbsolutePath().normalize()
-                        val matched = safeBypassPaths.any { bypassPath ->
-                            path.startsWith(bypassPath) || path == bypassPath
-                        }
-                        System.err.println("[DAEMON-DEBUG] Noise-filter check: path=$pathStr, skip=$matched")
-                        if (matched) {
-                            with(tempArena.unwrap) {
-                                responder.sendSeccompContinue(handshake.acknowledged(), resp.unwrap)
-                            }
-                            return@nativeScope true
-                        }
-                    } catch (e: InterruptedException) {
-                        Thread.currentThread().interrupt()
-                        throw e
-                    } catch (e: java.nio.channels.ClosedByInterruptException) {
-                        Thread.currentThread().interrupt()
-                        throw e
-                    } catch (ignored: Exception) {}
-                }
-
-                val notifiedState = currentState.notified(id, resolvedEvent)
-                val waitingState = notifiedState.waitingForAck()
-                state = waitingState
-
-                socketPollFd.writeInt(POLLFD_FD_OFF, socketFd.value)
-                socketPollFd.writeShort(POLLFD_EVENTS_OFF, NativeConstants.POLLIN)
-
-                // DELIVER: Write event to JVM listener socket.
-                System.err.println("[DAEMON-DEBUG] Sending event to JVM listener: tid=$pidVal, syscall=${resolvedEvent.syscallName}, paths=${resolvedEvent.paths}")
-                with(tempArena.unwrap) {
-                    publisher.sendTraceEvent(socketFd, resolvedEvent)
-                }
-                System.err.println("[DAEMON-DEBUG] Event sent to JVM listener.")
-                ledger.record(SessionEvent.EventSent(System.nanoTime(), pidVal.toLong()))
-
-                // HANDSHAKE: Wait for the JVM listener to ACK the event before letting the tracee continue.
-                // This blocking synchronization is physically required: if the daemon sends CONTINUE immediately
-                // (asynchronous fire-and-forget), the tracee thread resumes and moves past the system call frame
-                // before the JVM listener thread can capture its stack trace, resulting in empty or incorrect traces.
-                val result = handshake.performHandshake(socketFd, ioOps, socketPollFd.unwrap, ackBuf.unwrap, onShutdown)
-                when (result) {
-                    is HandshakeSession.Success -> {
-                        ledger.record(SessionEvent.AckReceived(System.nanoTime(), pidVal.toLong()))
-                        state = waitingState.acknowledged()
-                        with(tempArena.unwrap) {
-                            responder.sendSeccompContinue(result, resp.unwrap)
-                        }
-                        continueSent = true
-                        ledger.record(SessionEvent.ContinueReplied(System.nanoTime(), pidVal.toLong(), 0L))
-                        true
+            // Optimisation: skip event delivery for JVM-internal paths that generate noise
+            // (JDK home, classpath, /proc, /sys).
+            if ((nr == SYS_OPEN || nr == SYS_OPENAT || nr == SYS_OPENAT2) && resolvedEvent.paths.isNotEmpty()) {
+                val pathStr = resolvedEvent.paths.first()
+                try {
+                    val path = java.nio.file.Paths.get(pathStr).toAbsolutePath().normalize()
+                    val matched = safeBypassPaths.any { bypassPath ->
+                        path.startsWith(bypassPath) || path == bypassPath
                     }
-                    is HandshakeSession.Failed -> {
-                        System.err.println("[DAEMON-WARN] Handshake failed or shutdown triggered")
-                        state = waitingState.terminate()
-                        with(tempArena.unwrap) {
-                            responder.sendSeccompError(result, resp.unwrap, ECONNRESET)
+                    System.err.println("[DAEMON-DEBUG] Noise-filter check: path=$pathStr, skip=$matched")
+                    if (matched) {
+                        with(arena.unwrap) {
+                            responder.sendSeccompContinue(handshake.acknowledged(), resp.unwrap)
                         }
-                        ledger.record(SessionEvent.ErrorReplied(System.nanoTime(), pidVal.toLong(), ECONNRESET))
-                        false
+                        return true
                     }
-                    else -> {
-                        state = ProfilerState.Terminated(socketFd, listenerFd)
-                        false
+                } catch (e: InterruptedException) {
+                    Thread.currentThread().interrupt()
+                    throw e
+                } catch (e: java.nio.channels.ClosedByInterruptException) {
+                    Thread.currentThread().interrupt()
+                    throw e
+                } catch (ignored: Exception) {}
+            }
+
+            val notifiedState = currentState.notified(id, resolvedEvent)
+            val waitingState = notifiedState.waitingForAck()
+            state = waitingState
+
+            socketPollFd.writeInt(POLLFD_FD_OFF, socketFd.value)
+            socketPollFd.writeShort(POLLFD_EVENTS_OFF, NativeConstants.POLLIN)
+
+            // DELIVER: Write event to JVM listener socket.
+            System.err.println("[DAEMON-DEBUG] Sending event to JVM listener: tid=$pidVal, syscall=${resolvedEvent.syscallName}, paths=${resolvedEvent.paths}")
+            with(arena.unwrap) {
+                publisher.sendTraceEvent(socketFd, resolvedEvent)
+            }
+            System.err.println("[DAEMON-DEBUG] Event sent to JVM listener.")
+            ledger.record(SessionEvent.EventSent(System.nanoTime(), pidVal.toLong()))
+
+            // HANDSHAKE: Wait for the JVM listener to ACK the event before letting the tracee continue.
+            // This blocking synchronization is physically required: if the daemon sends CONTINUE immediately
+            // (asynchronous fire-and-forget), the tracee thread resumes and moves past the system call frame
+            // before the JVM listener thread can capture its stack trace, resulting in empty or incorrect traces.
+            val result = handshake.performHandshake(socketFd, ioOps, socketPollFd.unwrap, ackBuf.unwrap, onShutdown)
+            return when (result) {
+                is HandshakeSession.Success -> {
+                    ledger.record(SessionEvent.AckReceived(System.nanoTime(), pidVal.toLong()))
+                    state = waitingState.acknowledged()
+                    with(arena.unwrap) {
+                        responder.sendSeccompContinue(result, resp.unwrap)
                     }
+                    continueSent = true
+                    ledger.record(SessionEvent.ContinueReplied(System.nanoTime(), pidVal.toLong(), 0L))
+                    true
+                }
+                is HandshakeSession.Failed -> {
+                    System.err.println("[DAEMON-WARN] Handshake failed or shutdown triggered")
+                    state = waitingState.terminate()
+                    with(arena.unwrap) {
+                        responder.sendSeccompError(result, resp.unwrap, ECONNRESET)
+                    }
+                    ledger.record(SessionEvent.ErrorReplied(System.nanoTime(), pidVal.toLong(), ECONNRESET))
+                    false
+                }
+                else -> {
+                    state = ProfilerState.Terminated(socketFd, listenerFd)
+                    false
                 }
             }
         } catch (e: InterruptedException) {
@@ -256,11 +257,8 @@ internal class ProfilerSessionHandler(
                 return true
             }
             try {
-                nativeScope {
-                    val errorArena = this
-                    with(errorArena.unwrap) {
-                        responder.sendSeccompError(handshake.failed(), resp.unwrap, ECONNRESET)
-                    }
+                with(arena.unwrap) {
+                    responder.sendSeccompError(handshake.failed(), resp.unwrap, ECONNRESET)
                 }
             } catch (ignored: Throwable) {}
             ledger.record(SessionEvent.ErrorReplied(System.nanoTime(), pidVal.toLong(), ECONNRESET))

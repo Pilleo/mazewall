@@ -203,8 +203,7 @@ internal class JVMValidationListener(
 
                 // Decision encoding: 0 = Deny, 1 = Allow Continue, 2 = Allow & Inject FD
                 val decision: Byte = if (isAllowed) {
-                    val isInject = nr == traceeArch.open || nr == traceeArch.connect || nr == traceeArch.openat ||
-                                 nr == traceeArch.openat2 || nr == traceeArch.accept || nr == traceeArch.accept4
+                    val isInject = nr == traceeArch.accept || nr == traceeArch.accept4
                     if (isInject) {
                         2.toByte()
                     } else {

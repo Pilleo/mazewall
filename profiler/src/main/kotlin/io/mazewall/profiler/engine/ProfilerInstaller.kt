@@ -11,7 +11,6 @@ import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
 import io.mazewall.core.NativeArg
 import io.mazewall.ffi.NativeConstants
-import io.mazewall.ffi.memory.nativeScope
 import io.mazewall.getFdOrThrow
 import io.mazewall.profiler.internal.ProfilerSocket
 import io.mazewall.ffi.networking.SupervisorSeccompNotifInstaller

@@ -308,16 +308,16 @@ internal class SupervisorSessionHandler(
                         }
                         if (matched) {
                             val absPathStr = path.toAbsolutePath().toString()
-                            val injectRes = handleInjectFd(id, nr, args, absPathStr, null, resp, Tid(pidVal), traceeArch)
-                            logger.info { "[SUPERVISOR-DEBUG] Fast-path handleInjectFd (matched) resolved=$absPathStr result=$injectRes" }
-                            return injectRes
+                            sendSeccompContinue(id, resp)
+                            logger.info { "[SUPERVISOR-DEBUG] Fast-path allow continue (matched) resolved=$absPathStr" }
+                            return true
                         }
                     } else {
                         // Fallback when /proc absolute path resolution fails (e.g. Yama ptrace_scope block inside container)
                         if (pathStr.endsWith(".class") || pathStr.contains("META-INF/") || pathStr.endsWith(".jar")) {
-                            val injectRes = handleInjectFd(id, nr, args, pathStr, null, resp, Tid(pidVal), traceeArch)
-                            logger.info { "[SUPERVISOR-DEBUG] Fast-path handleInjectFd (fallback: classloading) result=$injectRes" }
-                            return injectRes
+                            sendSeccompContinue(id, resp)
+                            logger.info { "[SUPERVISOR-DEBUG] Fast-path allow continue (fallback: classloading)" }
+                            return true
                         }
                     }
                 } catch (e: Exception) {
@@ -566,8 +566,7 @@ internal class SupervisorSessionHandler(
                     true
                 }
                 1 -> { // Allow Continue
-                    val isInject = nr == traceeArch.open || nr == traceeArch.connect || nr == traceeArch.openat ||
-                                 nr == traceeArch.openat2 || nr == traceeArch.accept || nr == traceeArch.accept4
+                    val isInject = nr == traceeArch.accept || nr == traceeArch.accept4
                     if (isInject) {
                         // Upgrade to emulation to prevent TOCTOU!
                         handleInjectFd(id, nr, args, pathStr, sockaddrBytes, resp, tid, traceeArch)
@@ -617,27 +616,13 @@ internal class SupervisorSessionHandler(
         tid: Tid,
         traceeArch: io.mazewall.core.Arch
     ): Boolean {
+        if (nr == traceeArch.open || nr == traceeArch.openat || nr == traceeArch.openat2 || nr == traceeArch.connect) {
+            sendSeccompContinue(id, resp)
+            return true
+        }
         var localFdValue = -1
         try {
             localFdValue = when (nr) {
-                traceeArch.open, traceeArch.openat, traceeArch.openat2 -> {
-                    if (pathStr == null) {
-                        -NativeConstants.EPERM
-                    } else {
-                        val res = openFileInSupervisor(nr, args, pathStr, traceeArch)
-                        logger.info { "[SUPERVISOR-DEBUG] openFileInSupervisor path=$pathStr res=$res" }
-                        res
-                    }
-                }
-                traceeArch.connect -> {
-                    if (sockaddrBytes == null) {
-                        -NativeConstants.EPERM
-                    } else {
-                        val res = connectSocketInSupervisor(sockaddrBytes)
-                        logger.info { "[SUPERVISOR-DEBUG] connectSocketInSupervisor res=$res" }
-                        res
-                    }
-                }
                 traceeArch.accept, traceeArch.accept4 -> {
                     handleAcceptAsync(id, nr, args, tid, traceeArch)
                     return true

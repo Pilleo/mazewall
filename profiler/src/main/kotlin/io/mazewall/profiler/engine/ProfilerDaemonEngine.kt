@@ -11,6 +11,7 @@ import io.mazewall.ffi.NativeConstants
 import io.mazewall.recover
 import io.mazewall.ffi.memory.ConfinedSegment
 import io.mazewall.ffi.memory.NativeArena
+import io.mazewall.ffi.memory.SegmentPool
 import io.mazewall.ffi.memory.ManagedSegment
 import io.mazewall.ffi.memory.unwrap
 import io.mazewall.ffi.memory.writeInt
@@ -249,26 +250,31 @@ internal class ProfilerDaemonEngine(
         try {
             NativeArena.ofConfined().use { sessionArena ->
                 val pollFds = with(sessionArena) { setupSessionPoll(socketFd, listenerFd) }
-                val notif = sessionArena.allocate(Layouts.SECCOMP_NOTIF)
-                val resp = sessionArena.allocate(Layouts.SECCOMP_NOTIF_RESP)
-                val ackBuf = sessionArena.allocate(1L)
-                val socketPollFd = sessionArena.allocate(Layouts.POLLFD)
+                val notif = SegmentPool.SECCOMP_NOTIF_POOL.rent()
+                val resp = SegmentPool.SECCOMP_NOTIF_RESP_POOL.rent()
+                try {
+                    val ackBuf = sessionArena.allocate(1L)
+                    val socketPollFd = sessionArena.allocate(Layouts.POLLFD)
 
-                while (!isGlobalShutdown()) {
-                    val pollRes = ioOps.raw.poll(pollFds, 2L, POLL_TIMEOUT_MS)
-                    val count = pollRes.recover { errno, _ ->
-                        if (errno != NativeConstants.EINTR) return@use // Break from loop
-                        0L
-                    }
-                    if (count <= 0) continue
-
-                    NativeArena.ofConfined().use { iterationArena ->
-                        val action = with(iterationArena) {
-                            sessionHandler.handleActiveListener(pollFds, ackBuf, notif, resp, socketPollFd)
+                    while (!isGlobalShutdown()) {
+                        val pollRes = ioOps.raw.poll(pollFds, 2L, POLL_TIMEOUT_MS)
+                        val count = pollRes.recover { errno, _ ->
+                            if (errno != NativeConstants.EINTR) return@use // Break from loop
+                            0L
                         }
-                        if (action !is LoopAction.Continue) break
+                        if (count <= 0) continue
+
+                        NativeArena.ofConfined().use { iterationArena ->
+                            val action = with(iterationArena) {
+                                sessionHandler.handleActiveListener(pollFds, ackBuf, notif, resp, socketPollFd)
+                            }
+                            if (action !is LoopAction.Continue) break
+                        }
+                        if (isGlobalShutdown()) break
                     }
-                    if (isGlobalShutdown()) break
+                } finally {
+                    SegmentPool.SECCOMP_NOTIF_POOL.release(notif)
+                    SegmentPool.SECCOMP_NOTIF_RESP_POOL.release(resp)
                 }
             }
         } finally {

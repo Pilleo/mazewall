@@ -6,6 +6,10 @@ import java.lang.foreign.MemoryLayout
 import java.lang.foreign.MemorySegment
 import java.lang.foreign.ValueLayout
 
+private val JAVA_SHORT_NATIVE = ValueLayout.JAVA_SHORT.withOrder(java.nio.ByteOrder.nativeOrder())
+private val JAVA_INT_NATIVE = ValueLayout.JAVA_INT.withOrder(java.nio.ByteOrder.nativeOrder())
+private val JAVA_LONG_NATIVE = ValueLayout.JAVA_LONG.withOrder(java.nio.ByteOrder.nativeOrder())
+
 /**
  * Type-safe wrapper for `struct sock_filter`.
  */
@@ -13,9 +17,9 @@ import java.lang.foreign.ValueLayout
 public value class SockFilterSegment(public val segment: MemorySegment) {
     public val managed: ManagedSegment get() = ConfinedSegment(segment)
 
-    public fun getCode(): Short = segment.get(ValueLayout.JAVA_SHORT, Layouts.SOCK_FILTER_CODE_OFFSET)
+    public fun getCode(): Short = segment.get(JAVA_SHORT_NATIVE, Layouts.SOCK_FILTER_CODE_OFFSET)
     public fun setCode(value: Short): Unit {
-        segment.set(ValueLayout.JAVA_SHORT, Layouts.SOCK_FILTER_CODE_OFFSET, value)
+        segment.set(JAVA_SHORT_NATIVE, Layouts.SOCK_FILTER_CODE_OFFSET, value)
     }
 
     public fun getJt(): Byte = segment.get(ValueLayout.JAVA_BYTE, Layouts.SOCK_FILTER_JT_OFFSET)
@@ -28,9 +32,9 @@ public value class SockFilterSegment(public val segment: MemorySegment) {
         segment.set(ValueLayout.JAVA_BYTE, Layouts.SOCK_FILTER_JF_OFFSET, value)
     }
 
-    public fun getK(): Int = segment.get(ValueLayout.JAVA_INT, Layouts.SOCK_FILTER_K_OFFSET)
+    public fun getK(): Int = segment.get(JAVA_INT_NATIVE, Layouts.SOCK_FILTER_K_OFFSET)
     public fun setK(value: Int): Unit {
-        segment.set(ValueLayout.JAVA_INT, Layouts.SOCK_FILTER_K_OFFSET, value)
+        segment.set(JAVA_INT_NATIVE, Layouts.SOCK_FILTER_K_OFFSET, value)
     }
 
     public companion object {
@@ -56,9 +60,9 @@ public value class SockFprogSegment(public val segment: MemorySegment) {
 
     public val managedFilter: ManagedSegment get() = ConfinedSegment(getFilter())
 
-    public fun getLen(): Short = segment.get(ValueLayout.JAVA_SHORT, Layouts.SOCK_FPROG_LEN_OFFSET)
+    public fun getLen(): Short = segment.get(JAVA_SHORT_NATIVE, Layouts.SOCK_FPROG_LEN_OFFSET)
     public fun setLen(value: Short): Unit {
-        segment.set(ValueLayout.JAVA_SHORT, Layouts.SOCK_FPROG_LEN_OFFSET, value)
+        segment.set(JAVA_SHORT_NATIVE, Layouts.SOCK_FPROG_LEN_OFFSET, value)
     }
 
     public fun getFilter(): MemorySegment = segment.get(ValueLayout.ADDRESS, Layouts.SOCK_FPROG_FILTER_OFFSET).reinterpret(getLen().toLong() * Layouts.SOCK_FILTER_SIZE)
@@ -83,14 +87,14 @@ public value class SockFprogSegment(public val segment: MemorySegment) {
 public value class LandlockRulesetAttrSegment(public val segment: MemorySegment) {
     public val managed: ManagedSegment get() = ConfinedSegment(segment)
 
-    public fun getHandledAccessFs(): Long = segment.get(ValueLayout.JAVA_LONG, Layouts.LANDLOCK_RULESET_ATTR_FS_OFFSET)
+    public fun getHandledAccessFs(): Long = segment.get(JAVA_LONG_NATIVE, Layouts.LANDLOCK_RULESET_ATTR_FS_OFFSET)
     public fun setHandledAccessFs(value: Long): Unit {
-        segment.set(ValueLayout.JAVA_LONG, Layouts.LANDLOCK_RULESET_ATTR_FS_OFFSET, value)
+        segment.set(JAVA_LONG_NATIVE, Layouts.LANDLOCK_RULESET_ATTR_FS_OFFSET, value)
     }
 
-    public fun getHandledAccessNet(): Long = segment.get(ValueLayout.JAVA_LONG, Layouts.LANDLOCK_RULESET_ATTR_NET_OFFSET)
+    public fun getHandledAccessNet(): Long = segment.get(JAVA_LONG_NATIVE, Layouts.LANDLOCK_RULESET_ATTR_NET_OFFSET)
     public fun setHandledAccessNet(value: Long): Unit {
-        segment.set(ValueLayout.JAVA_LONG, Layouts.LANDLOCK_RULESET_ATTR_NET_OFFSET, value)
+        segment.set(JAVA_LONG_NATIVE, Layouts.LANDLOCK_RULESET_ATTR_NET_OFFSET, value)
     }
 
     public companion object {
@@ -111,14 +115,14 @@ public value class LandlockRulesetAttrSegment(public val segment: MemorySegment)
 public value class LandlockPathBeneathAttrSegment(public val segment: MemorySegment) {
     public val managed: ManagedSegment get() = ConfinedSegment(segment)
 
-    public fun getAllowedAccess(): Long = segment.get(ValueLayout.JAVA_LONG, Layouts.LANDLOCK_PATH_BENEATH_ATTR_ACCESS_OFFSET)
+    public fun getAllowedAccess(): Long = segment.get(JAVA_LONG_NATIVE, Layouts.LANDLOCK_PATH_BENEATH_ATTR_ACCESS_OFFSET)
     public fun setAllowedAccess(value: Long): Unit {
-        segment.set(ValueLayout.JAVA_LONG, Layouts.LANDLOCK_PATH_BENEATH_ATTR_ACCESS_OFFSET, value)
+        segment.set(JAVA_LONG_NATIVE, Layouts.LANDLOCK_PATH_BENEATH_ATTR_ACCESS_OFFSET, value)
     }
 
-    public fun getParentFd(): Int = segment.get(ValueLayout.JAVA_INT, Layouts.LANDLOCK_PATH_BENEATH_ATTR_FD_OFFSET)
+    public fun getParentFd(): Int = segment.get(JAVA_INT_NATIVE, Layouts.LANDLOCK_PATH_BENEATH_ATTR_FD_OFFSET)
     public fun setParentFd(value: Int): Unit {
-        segment.set(ValueLayout.JAVA_INT, Layouts.LANDLOCK_PATH_BENEATH_ATTR_FD_OFFSET, value)
+        segment.set(JAVA_INT_NATIVE, Layouts.LANDLOCK_PATH_BENEATH_ATTR_FD_OFFSET, value)
     }
 
     public companion object {
@@ -139,19 +143,19 @@ public value class LandlockPathBeneathAttrSegment(public val segment: MemorySegm
 public value class PollFdSegment(public val segment: MemorySegment) {
     public val managed: ManagedSegment get() = ConfinedSegment(segment)
 
-    public fun getFd(): Int = segment.get(ValueLayout.JAVA_INT, Layouts.POLLFD_FD_OFFSET)
+    public fun getFd(): Int = segment.get(JAVA_INT_NATIVE, Layouts.POLLFD_FD_OFFSET)
     public fun setFd(value: Int): Unit {
-        segment.set(ValueLayout.JAVA_INT, Layouts.POLLFD_FD_OFFSET, value)
+        segment.set(JAVA_INT_NATIVE, Layouts.POLLFD_FD_OFFSET, value)
     }
 
-    public fun getEvents(): Short = segment.get(ValueLayout.JAVA_SHORT, Layouts.POLLFD_EVENTS_OFFSET)
+    public fun getEvents(): Short = segment.get(JAVA_SHORT_NATIVE, Layouts.POLLFD_EVENTS_OFFSET)
     public fun setEvents(value: Short): Unit {
-        segment.set(ValueLayout.JAVA_SHORT, Layouts.POLLFD_EVENTS_OFFSET, value)
+        segment.set(JAVA_SHORT_NATIVE, Layouts.POLLFD_EVENTS_OFFSET, value)
     }
 
-    public fun getRevents(): Short = segment.get(ValueLayout.JAVA_SHORT, Layouts.POLLFD_REVENTS_OFFSET)
+    public fun getRevents(): Short = segment.get(JAVA_SHORT_NATIVE, Layouts.POLLFD_REVENTS_OFFSET)
     public fun setRevents(value: Short): Unit {
-        segment.set(ValueLayout.JAVA_SHORT, Layouts.POLLFD_REVENTS_OFFSET, value)
+        segment.set(JAVA_SHORT_NATIVE, Layouts.POLLFD_REVENTS_OFFSET, value)
     }
 
     public companion object {
@@ -171,7 +175,7 @@ public value class PollFdSegment(public val segment: MemorySegment) {
 public value class ErrnoSegment(public val segment: MemorySegment) {
     public val managed: ManagedSegment get() = ConfinedSegment(segment)
 
-    public fun getErrno(): Int = segment.get(ValueLayout.JAVA_INT, Layouts.ERRNO_OFFSET)
+    public fun getErrno(): Int = segment.get(JAVA_INT_NATIVE, Layouts.ERRNO_OFFSET)
 
     public companion object {
         private val THREAD_LOCAL_SEGMENT = ThreadLocal.withInitial { Arena.global().allocate(Layouts.ERRNO) }
@@ -194,29 +198,29 @@ public value class ErrnoSegment(public val segment: MemorySegment) {
 public value class SeccompNotifAddFdSegment(public val segment: MemorySegment) {
     public val managed: ManagedSegment get() = ConfinedSegment(segment)
 
-    public fun getId(): Long = segment.get(ValueLayout.JAVA_LONG, Layouts.SECCOMP_NOTIF_ADDFD_ID_OFFSET)
+    public fun getId(): Long = segment.get(JAVA_LONG_NATIVE, Layouts.SECCOMP_NOTIF_ADDFD_ID_OFFSET)
     public fun setId(value: Long): Unit {
-        segment.set(ValueLayout.JAVA_LONG, Layouts.SECCOMP_NOTIF_ADDFD_ID_OFFSET, value)
+        segment.set(JAVA_LONG_NATIVE, Layouts.SECCOMP_NOTIF_ADDFD_ID_OFFSET, value)
     }
 
-    public fun getFlags(): Int = segment.get(ValueLayout.JAVA_INT, Layouts.SECCOMP_NOTIF_ADDFD_FLAGS_OFFSET)
+    public fun getFlags(): Int = segment.get(JAVA_INT_NATIVE, Layouts.SECCOMP_NOTIF_ADDFD_FLAGS_OFFSET)
     public fun setFlags(value: Int): Unit {
-        segment.set(ValueLayout.JAVA_INT, Layouts.SECCOMP_NOTIF_ADDFD_FLAGS_OFFSET, value)
+        segment.set(JAVA_INT_NATIVE, Layouts.SECCOMP_NOTIF_ADDFD_FLAGS_OFFSET, value)
     }
 
-    public fun getSrcfd(): Int = segment.get(ValueLayout.JAVA_INT, Layouts.SECCOMP_NOTIF_ADDFD_SRCFD_OFFSET)
+    public fun getSrcfd(): Int = segment.get(JAVA_INT_NATIVE, Layouts.SECCOMP_NOTIF_ADDFD_SRCFD_OFFSET)
     public fun setSrcfd(value: Int): Unit {
-        segment.set(ValueLayout.JAVA_INT, Layouts.SECCOMP_NOTIF_ADDFD_SRCFD_OFFSET, value)
+        segment.set(JAVA_INT_NATIVE, Layouts.SECCOMP_NOTIF_ADDFD_SRCFD_OFFSET, value)
     }
 
-    public fun getNewfd(): Int = segment.get(ValueLayout.JAVA_INT, Layouts.SECCOMP_NOTIF_ADDFD_NEWFD_OFFSET)
+    public fun getNewfd(): Int = segment.get(JAVA_INT_NATIVE, Layouts.SECCOMP_NOTIF_ADDFD_NEWFD_OFFSET)
     public fun setNewfd(value: Int): Unit {
-        segment.set(ValueLayout.JAVA_INT, Layouts.SECCOMP_NOTIF_ADDFD_NEWFD_OFFSET, value)
+        segment.set(JAVA_INT_NATIVE, Layouts.SECCOMP_NOTIF_ADDFD_NEWFD_OFFSET, value)
     }
 
-    public fun getNewfdFlags(): Int = segment.get(ValueLayout.JAVA_INT, Layouts.SECCOMP_NOTIF_ADDFD_NEWFD_FLAGS_OFFSET)
+    public fun getNewfdFlags(): Int = segment.get(JAVA_INT_NATIVE, Layouts.SECCOMP_NOTIF_ADDFD_NEWFD_FLAGS_OFFSET)
     public fun setNewfdFlags(value: Int): Unit {
-        segment.set(ValueLayout.JAVA_INT, Layouts.SECCOMP_NOTIF_ADDFD_NEWFD_FLAGS_OFFSET, value)
+        segment.set(JAVA_INT_NATIVE, Layouts.SECCOMP_NOTIF_ADDFD_NEWFD_FLAGS_OFFSET, value)
     }
 
     public companion object {
@@ -241,9 +245,9 @@ public value class IovecSegment(public val segment: MemorySegment) {
         segment.set(ValueLayout.ADDRESS, Layouts.IOVEC_BASE_OFFSET, value)
     }
 
-    public fun getIovLen(): Long = segment.get(ValueLayout.JAVA_LONG, Layouts.IOVEC_LEN_OFFSET)
+    public fun getIovLen(): Long = segment.get(JAVA_LONG_NATIVE, Layouts.IOVEC_LEN_OFFSET)
     public fun setIovLen(value: Long): Unit {
-        segment.set(ValueLayout.JAVA_LONG, Layouts.IOVEC_LEN_OFFSET, value)
+        segment.set(JAVA_LONG_NATIVE, Layouts.IOVEC_LEN_OFFSET, value)
     }
 
     public companion object {
@@ -268,9 +272,9 @@ public value class MsghdrSegment(public val segment: MemorySegment) {
         segment.set(ValueLayout.ADDRESS, Layouts.MSGHDR_NAME_OFFSET, value)
     }
 
-    public fun getMsgNamelen(): Int = segment.get(ValueLayout.JAVA_INT, Layouts.MSGHDR_NAMELEN_OFFSET)
+    public fun getMsgNamelen(): Int = segment.get(JAVA_INT_NATIVE, Layouts.MSGHDR_NAMELEN_OFFSET)
     public fun setMsgNamelen(value: Int): Unit {
-        segment.set(ValueLayout.JAVA_INT, Layouts.MSGHDR_NAMELEN_OFFSET, value)
+        segment.set(JAVA_INT_NATIVE, Layouts.MSGHDR_NAMELEN_OFFSET, value)
     }
 
     public fun getMsgIov(): MemorySegment = segment.get(ValueLayout.ADDRESS, Layouts.MSGHDR_IOV_OFFSET)
@@ -278,9 +282,9 @@ public value class MsghdrSegment(public val segment: MemorySegment) {
         segment.set(ValueLayout.ADDRESS, Layouts.MSGHDR_IOV_OFFSET, value)
     }
 
-    public fun getMsgIovlen(): Long = segment.get(ValueLayout.JAVA_LONG, Layouts.MSGHDR_IOVLEN_OFFSET)
+    public fun getMsgIovlen(): Long = segment.get(JAVA_LONG_NATIVE, Layouts.MSGHDR_IOVLEN_OFFSET)
     public fun setMsgIovlen(value: Long): Unit {
-        segment.set(ValueLayout.JAVA_LONG, Layouts.MSGHDR_IOVLEN_OFFSET, value)
+        segment.set(JAVA_LONG_NATIVE, Layouts.MSGHDR_IOVLEN_OFFSET, value)
     }
 
     public fun getMsgControl(): MemorySegment = segment.get(ValueLayout.ADDRESS, Layouts.MSGHDR_CONTROL_OFFSET)
@@ -288,14 +292,14 @@ public value class MsghdrSegment(public val segment: MemorySegment) {
         segment.set(ValueLayout.ADDRESS, Layouts.MSGHDR_CONTROL_OFFSET, value)
     }
 
-    public fun getMsgControllen(): Long = segment.get(ValueLayout.JAVA_LONG, Layouts.MSGHDR_CONTROLLEN_OFFSET)
+    public fun getMsgControllen(): Long = segment.get(JAVA_LONG_NATIVE, Layouts.MSGHDR_CONTROLLEN_OFFSET)
     public fun setMsgControllen(value: Long): Unit {
-        segment.set(ValueLayout.JAVA_LONG, Layouts.MSGHDR_CONTROLLEN_OFFSET, value)
+        segment.set(JAVA_LONG_NATIVE, Layouts.MSGHDR_CONTROLLEN_OFFSET, value)
     }
 
-    public fun getMsgFlags(): Int = segment.get(ValueLayout.JAVA_INT, Layouts.MSGHDR_FLAGS_OFFSET)
+    public fun getMsgFlags(): Int = segment.get(JAVA_INT_NATIVE, Layouts.MSGHDR_FLAGS_OFFSET)
     public fun setMsgFlags(value: Int): Unit {
-        segment.set(ValueLayout.JAVA_INT, Layouts.MSGHDR_FLAGS_OFFSET, value)
+        segment.set(JAVA_INT_NATIVE, Layouts.MSGHDR_FLAGS_OFFSET, value)
     }
 
     public companion object {
@@ -312,24 +316,24 @@ public value class MsghdrSegment(public val segment: MemorySegment) {
 public value class CmsghdrSegment(public val segment: MemorySegment) {
     public val managed: ManagedSegment get() = ConfinedSegment(segment)
 
-    public fun getCmsgLen(): Long = segment.get(ValueLayout.JAVA_LONG, Layouts.CMSGHDR_LEN_OFFSET)
+    public fun getCmsgLen(): Long = segment.get(JAVA_LONG_NATIVE, Layouts.CMSGHDR_LEN_OFFSET)
     public fun setCmsgLen(value: Long): Unit {
-        segment.set(ValueLayout.JAVA_LONG, Layouts.CMSGHDR_LEN_OFFSET, value)
+        segment.set(JAVA_LONG_NATIVE, Layouts.CMSGHDR_LEN_OFFSET, value)
     }
 
-    public fun getCmsgLevel(): Int = segment.get(ValueLayout.JAVA_INT, Layouts.CMSGHDR_LEVEL_OFFSET)
+    public fun getCmsgLevel(): Int = segment.get(JAVA_INT_NATIVE, Layouts.CMSGHDR_LEVEL_OFFSET)
     public fun setCmsgLevel(value: Int): Unit {
-        segment.set(ValueLayout.JAVA_INT, Layouts.CMSGHDR_LEVEL_OFFSET, value)
+        segment.set(JAVA_INT_NATIVE, Layouts.CMSGHDR_LEVEL_OFFSET, value)
     }
 
-    public fun getCmsgType(): Int = segment.get(ValueLayout.JAVA_INT, Layouts.CMSGHDR_TYPE_OFFSET)
+    public fun getCmsgType(): Int = segment.get(JAVA_INT_NATIVE, Layouts.CMSGHDR_TYPE_OFFSET)
     public fun setCmsgType(value: Int): Unit {
-        segment.set(ValueLayout.JAVA_INT, Layouts.CMSGHDR_TYPE_OFFSET, value)
+        segment.set(JAVA_INT_NATIVE, Layouts.CMSGHDR_TYPE_OFFSET, value)
     }
 
-    public fun getDataFd(): Int = segment.get(ValueLayout.JAVA_INT, Layouts.CMSGHDR_DATA_OFFSET)
+    public fun getDataFd(): Int = segment.get(JAVA_INT_NATIVE, Layouts.CMSGHDR_DATA_OFFSET)
     public fun setDataFd(value: Int): Unit {
-        segment.set(ValueLayout.JAVA_INT, Layouts.CMSGHDR_DATA_OFFSET, value)
+        segment.set(JAVA_INT_NATIVE, Layouts.CMSGHDR_DATA_OFFSET, value)
     }
 
     public companion object {
@@ -346,9 +350,9 @@ public value class CmsghdrSegment(public val segment: MemorySegment) {
 public value class SockaddrUnSegment(public val segment: MemorySegment) {
     public val managed: ManagedSegment get() = ConfinedSegment(segment)
 
-    public fun getSunFamily(): Short = segment.get(ValueLayout.JAVA_SHORT, Layouts.SOCKADDR_UN_FAMILY_OFFSET)
+    public fun getSunFamily(): Short = segment.get(JAVA_SHORT_NATIVE, Layouts.SOCKADDR_UN_FAMILY_OFFSET)
     public fun setSunFamily(value: Short): Unit {
-        segment.set(ValueLayout.JAVA_SHORT, Layouts.SOCKADDR_UN_FAMILY_OFFSET, value)
+        segment.set(JAVA_SHORT_NATIVE, Layouts.SOCKADDR_UN_FAMILY_OFFSET, value)
     }
 
     public fun getSunPath(): MemorySegment = segment.asSlice(Layouts.SOCKADDR_UN_PATH_OFFSET, Layouts.SOCKADDR_UN_PATH_SIZE)
@@ -367,9 +371,9 @@ public value class SockaddrUnSegment(public val segment: MemorySegment) {
 public value class SupervisorResponseSegment(public val segment: MemorySegment) {
     public val managed: ManagedSegment get() = ConfinedSegment(segment)
 
-    public fun getId(): Long = segment.get(ValueLayout.JAVA_LONG, Layouts.SUPERVISOR_RESPONSE_ID_OFFSET)
+    public fun getId(): Long = segment.get(JAVA_LONG_NATIVE, Layouts.SUPERVISOR_RESPONSE_ID_OFFSET)
     public fun setId(value: Long): Unit {
-        segment.set(ValueLayout.JAVA_LONG, Layouts.SUPERVISOR_RESPONSE_ID_OFFSET, value)
+        segment.set(JAVA_LONG_NATIVE, Layouts.SUPERVISOR_RESPONSE_ID_OFFSET, value)
     }
 
     public fun getDecision(): Byte = segment.get(ValueLayout.JAVA_BYTE, Layouts.SUPERVISOR_RESPONSE_DECISION_OFFSET)
@@ -377,9 +381,9 @@ public value class SupervisorResponseSegment(public val segment: MemorySegment) 
         segment.set(ValueLayout.JAVA_BYTE, Layouts.SUPERVISOR_RESPONSE_DECISION_OFFSET, value)
     }
 
-    public fun getErrorNr(): Int = segment.get(ValueLayout.JAVA_INT, Layouts.SUPERVISOR_RESPONSE_ERROR_OFFSET)
+    public fun getErrorNr(): Int = segment.get(JAVA_INT_NATIVE, Layouts.SUPERVISOR_RESPONSE_ERROR_OFFSET)
     public fun setErrorNr(value: Int): Unit {
-        segment.set(ValueLayout.JAVA_INT, Layouts.SUPERVISOR_RESPONSE_ERROR_OFFSET, value)
+        segment.set(JAVA_INT_NATIVE, Layouts.SUPERVISOR_RESPONSE_ERROR_OFFSET, value)
     }
 
     public companion object {
@@ -395,17 +399,17 @@ public value class SupervisorResponseSegment(public val segment: MemorySegment) 
 public fun MemorySegment.readByte(offset: Long): Byte = this.get(ValueLayout.JAVA_BYTE, offset)
 public fun MemorySegment.writeByte(offset: Long, value: Byte) { this.set(ValueLayout.JAVA_BYTE, offset, value) }
 
-public fun MemorySegment.readShort(offset: Long): Short = this.get(ValueLayout.JAVA_SHORT, offset)
-public fun MemorySegment.writeShort(offset: Long, value: Short) { this.set(ValueLayout.JAVA_SHORT, offset, value) }
+public fun MemorySegment.readShort(offset: Long): Short = this.get(JAVA_SHORT_NATIVE, offset)
+public fun MemorySegment.writeShort(offset: Long, value: Short) { this.set(JAVA_SHORT_NATIVE, offset, value) }
 
-public fun MemorySegment.readInt(offset: Long): Int = this.get(ValueLayout.JAVA_INT, offset)
-public fun MemorySegment.writeInt(offset: Long, value: Int) { this.set(ValueLayout.JAVA_INT, offset, value) }
+public fun MemorySegment.readInt(offset: Long): Int = this.get(JAVA_INT_NATIVE, offset)
+public fun MemorySegment.writeInt(offset: Long, value: Int) { this.set(JAVA_INT_NATIVE, offset, value) }
 
 public fun MemorySegment.readIntUnaligned(offset: Long): Int = this.get(ValueLayout.JAVA_INT_UNALIGNED, offset)
 public fun MemorySegment.writeIntUnaligned(offset: Long, value: Int) { this.set(ValueLayout.JAVA_INT_UNALIGNED, offset, value) }
 
-public fun MemorySegment.readLong(offset: Long): Long = this.get(ValueLayout.JAVA_LONG, offset)
-public fun MemorySegment.writeLong(offset: Long, value: Long) { this.set(ValueLayout.JAVA_LONG, offset, value) }
+public fun MemorySegment.readLong(offset: Long): Long = this.get(JAVA_LONG_NATIVE, offset)
+public fun MemorySegment.writeLong(offset: Long, value: Long) { this.set(JAVA_LONG_NATIVE, offset, value) }
 
 public fun MemorySegment.readLongUnaligned(offset: Long): Long = this.get(ValueLayout.JAVA_LONG_UNALIGNED, offset)
 public fun MemorySegment.writeLongUnaligned(offset: Long, value: Long) { this.set(ValueLayout.JAVA_LONG_UNALIGNED, offset, value) }
@@ -441,7 +445,7 @@ public fun getSystemStrerror(errno: Int): String? {
         strerrorAddress,
         java.lang.foreign.FunctionDescriptor.of(
             java.lang.foreign.ValueLayout.ADDRESS,
-            java.lang.foreign.ValueLayout.JAVA_INT
+            JAVA_INT_NATIVE
         )
     )
     val segment = strerror.invoke(errno) as java.lang.foreign.MemorySegment

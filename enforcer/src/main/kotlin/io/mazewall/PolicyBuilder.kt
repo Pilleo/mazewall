@@ -8,6 +8,17 @@ import java.io.File
 /**
  * A builder for creating immutable [PolicyDefinition] instances.
  *
+ * ### Signal Management & Signal Mask Inheritance Warning
+ * Standard JVM thread management and modern asynchronous or virtual-thread (Loom) frameworks rely on POSIX
+ * signals and signal mask manipulation for I/O interruption, thread parking, and proper thread lifecycle operations.
+ * When a new thread is spawned, it inherits the signal mask of its parent. If a seccomp policy blocks or restricts
+ * `rt_sigprocmask` or `rt_sigaction`, a newly spawned thread can become permanently trapped with blocked signals.
+ * This may lead to unkillable threads, missed thread interruptions (e.g. `Thread.interrupt()` failing to wake up
+ * blocked I/O), or JVM instability.
+ * Therefore, policies should ideally allow `rt_sigprocmask` and `rt_sigaction` for standard JVM thread management.
+ * Note that the compiler automatically whitelists these critical JVM system calls in `BpfFilter.getJvmCriticalNrs`
+ * to protect against thread desynchronization and signal mask inheritance failures.
+ *
  * @param S The [PolicyScope] (ProcessWideSafe or ThreadLocalOnly).
  */
 public class PolicyBuilder<S : PolicyScope> internal constructor(

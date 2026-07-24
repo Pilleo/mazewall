@@ -56,6 +56,13 @@ import java.util.logging.Logger
  * Therefore, `ACT_TRAP` is unreliable in environments where native libraries might modify thread signal masks.
  * For guaranteed immediate enforcement in such environments, prefer process- or thread-killing actions like
  * `ACT_KILL_PROCESS` or `ACT_KILL_THREAD`.
+ *
+ * Furthermore, when a new thread is spawned by a wrapped [ExecutorService], it inherits the signal mask of its parent.
+ * If the seccomp filter restricts `rt_sigprocmask`, the new thread might be permanently trapped with blocked signals.
+ * To prevent unkillable threads or missed interruptions (e.g. `Thread.interrupt()` failing to wake up blocked I/O calls),
+ * policies should ideally allow `rt_sigprocmask` and `rt_sigaction` for standard JVM thread management.
+ * Note that `BpfFilter.getJvmCriticalNrs` explicitly and unconditionally whitelists `rt_sigprocmask`, `rt_sigaction`, and
+ * `rt_sigreturn` to protect against this failure mode.
  */
 // @ref: docs/internals/designs/core/security-considerations.md — Shared-memory ACE escape threat model, Tier 1/Tier 2 boundary definitions
 // @ref: docs/internals/designs/enforcer/containment-design.md — Filter installation ordering (Landlock before Seccomp), TSYNC semantics

@@ -62,10 +62,18 @@ object BpfFilter {
             SeccompAction.ACT_KILL_PROCESS -> NativeConstants.SECCOMP_RET_KILL_PROCESS
             SeccompAction.ACT_KILL_THREAD -> NativeConstants.SECCOMP_RET_KILL_THREAD
             SeccompAction.ACT_TRAP -> NativeConstants.SECCOMP_RET_TRAP
+            is SeccompAction.ACT_ERRNO -> if (profilingMode) {
+                NativeConstants.SECCOMP_RET_USER_NOTIF
+            } else {
+                (NativeConstants.SECCOMP_RET_ERRNO or (action.errno and 0xFFFF))
+            }
             SeccompAction.ACT_ERRNO -> if (profilingMode) {
                 NativeConstants.SECCOMP_RET_USER_NOTIF
             } else {
                 (NativeConstants.SECCOMP_RET_ERRNO or NativeConstants.EPERM)
+            }
+            is SeccompAction.ACT_TRACE -> {
+                (NativeConstants.SECCOMP_RET_TRACE or (action.traceId and 0xFFFF))
             }
 
             SeccompAction.ACT_NOTIFY -> NativeConstants.SECCOMP_RET_USER_NOTIF
@@ -153,7 +161,15 @@ object BpfFilter {
         return instructions
     }
 
-    private fun getJvmCriticalNrs(arch: Arch): Set<Int> =
+    /**
+     * Returns the set of system calls absolutely required for safepoints, GC, and thread stability.
+     * Crucially, this list includes `rt_sigprocmask`, `rt_sigaction`, and `rt_sigreturn`. This ensures that
+     * even if a policy attempts to restrict these system calls, they are unconditionally whitelisted
+     * to protect against unhandled signal mask inheritance risks (where newly spawned threads inheriting
+     * parent signal masks would otherwise remain trapped with blocked signals, causing missed thread interrupts
+     * or unkillable JVM threads).
+     */
+    internal fun getJvmCriticalNrs(arch: Arch): Set<Int> =
         setOf(
             Syscall.FUTEX.numberFor(arch),
             Syscall.SCHED_YIELD.numberFor(arch),

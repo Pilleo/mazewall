@@ -58,6 +58,22 @@ class SyscallPathResolverTest {
         }
     }
 
+    @Test
+    fun `test resolve returns empty list for socket syscalls like sendmsg and recvmsg`() {
+        NativeArena.ofConfined().use { arena ->
+            with(arena) {
+                val reader = RecordingMockReader()
+                val socketSyscalls = listOf("SENDMSG", "RECVMSG", "CONNECT", "BIND", "SENDTO", "RECVFROM")
+                for (syscall in socketSyscalls) {
+                    val event = makeRawEvent(syscall, listOf(0x1000L, 0x2000L, 0x3000L))
+                    val resolved = makeResolver(reader).resolve(event)
+                    assertTrue(reader.readAddresses.isEmpty(), "No memory read should occur for socket syscall $syscall")
+                    assertTrue(resolved.paths.isEmpty(), "No paths should be resolved for socket syscall $syscall")
+                }
+            }
+        }
+    }
+
     /**
      * Regression test for argument layout in resolve() loop.
      * Some syscalls like RENAMEAT2 have dirfd/path pairs in (arg0, arg1) and (arg2, arg3).

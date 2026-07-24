@@ -7,6 +7,7 @@ import java.util.function.Consumer
 import java.util.function.Function
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertTrue
 
 class BpfBuilderCoverageTest {
 
@@ -104,5 +105,55 @@ class BpfBuilderCoverageTest {
                 return t.allow()
             }
         })
+    }
+
+    @Test
+    fun `test strongly-typed BPF DSL helpers`() {
+        val program = BpfProgram.dsl(Arch.AMD64) {
+            val allowLabel = createLabel("allow")
+            val nextLabel = createLabel() // uses default "label" prefix
+
+            loadAbsolute(0)
+            jmpIfTrue(allowLabel)
+            jmpIfFalse(nextLabel)
+            jmp(allowLabel)
+
+            mark(nextLabel)
+            deny(1)
+
+            mark(allowLabel)
+            allow()
+        }
+
+        // Verify that the program compiles and contains correct instructions
+        // Expected layout:
+        // 0: Load SECCOMP_DATA_ARCH_OFFSET (from checkArch)
+        // 1: JumpIfEqual AMD64 (from checkArch)
+        // 2: Ret SECCOMP_RET_KILL_PROCESS (from checkArch)
+        // 3: Load SECCOMP_DATA_NR_OFFSET (from loadSyscallNr)
+        // 4: LoadAbsolute(0)
+        // 5: jumpIfEqual(0, jf = allowLabel) -> jt=0, jf=6
+        // 6: jumpIfEqual(0, jt = nextLabel) -> jt=2, jf=0
+        // 7: jumpIfEqual(0, jt = allowLabel, jf = allowLabel) -> jt=4, jf=4
+        // 8: Ret deny(1)
+        // 9: Ret allow()
+        assertEquals(10, program.instructions.size)
+    }
+
+    @Test
+    fun `test duplicate label marking throws IllegalArgumentException`() {
+        val loaded = BpfProgram.builder()
+            .checkArch(Arch.AMD64)
+            .loadSyscallNr()
+
+        val label = loaded.createLabel("test_dup")
+        loaded.mark(label)
+        loaded.mark(label)
+        val terminated = loaded.allow()
+
+        val ex = assertFailsWith<IllegalArgumentException> {
+            terminated.build()
+        }
+        assertTrue(ex.message!!.startsWith("Duplicate label marked: test_dup_"), "Exception message should indicate duplicate test_dup label")
     }
 }

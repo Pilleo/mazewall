@@ -446,4 +446,50 @@ class BpfFilterTest {
         assertEquals(allowAction, evalBpf(filter, 323))
         assertEquals(allowAction, evalBpf(filter, 1000))
     }
+
+    @Test
+    fun `test getJvmCriticalNrs explicitly and unconditionally contains signal handling syscalls`() {
+        for (a in listOf(Arch.AMD64, Arch.AARCH64)) {
+            val criticalNrs = BpfFilter.getJvmCriticalNrs(a)
+            val rtSigprocmaskNr = Syscall.RT_SIGPROCMASK.numberFor(a)
+            val rtSigactionNr = Syscall.RT_SIGACTION.numberFor(a)
+            val rtSigreturnNr = Syscall.RT_SIGRETURN.numberFor(a)
+
+            if (rtSigprocmaskNr >= 0) {
+                assertTrue(criticalNrs.contains(rtSigprocmaskNr), "JVM critical NRs for $a must contain rt_sigprocmask")
+            }
+            if (rtSigactionNr >= 0) {
+                assertTrue(criticalNrs.contains(rtSigactionNr), "JVM critical NRs for $a must contain rt_sigaction")
+            }
+            if (rtSigreturnNr >= 0) {
+                assertTrue(criticalNrs.contains(rtSigreturnNr), "JVM critical NRs for $a must contain rt_sigreturn")
+            }
+        }
+    }
+
+    @Test
+    fun `test ACT_TRACE dynamic action compilation and evaluation`() {
+        val policy = Policy.builder()
+            .addAction(SeccompAction.ACT_TRACE(1234), Syscall.EXECVE)
+            .addAction(SeccompAction.ACT_TRACE(5678), Syscall.MEMFD_CREATE)
+            .build()
+        val filter = BpfFilter.build(arch, policy.definition)
+
+        val expectedTrace1 = NativeConstants.SECCOMP_RET_TRACE or 1234
+        val expectedTrace2 = NativeConstants.SECCOMP_RET_TRACE or 5678
+
+        assertEquals(expectedTrace1, evalBpf(filter, Syscall.EXECVE.numberFor(arch)))
+        assertEquals(expectedTrace2, evalBpf(filter, Syscall.MEMFD_CREATE.numberFor(arch)))
+    }
+
+    @Test
+    fun `test ACT_ERRNO dynamic action compilation with custom errno`() {
+        val policy = Policy.builder()
+            .addAction(SeccompAction.ACT_ERRNO(99), Syscall.OPEN)
+            .build()
+        val filter = BpfFilter.build(arch, policy.definition)
+
+        val expectedErrno = NativeConstants.SECCOMP_RET_ERRNO or 99
+        assertEquals(expectedErrno, evalBpf(filter, Syscall.OPEN.numberFor(arch)))
+    }
 }
