@@ -86,6 +86,38 @@ class IterativeProfilerTest {
     }
 
     @Test
+    fun `test iterative profiling parses path with spaces from generic exception messages`() {
+        val basePolicy = Policy.PURE_COMPUTE_UNSAFE
+        var attempts = 0
+        val targetPath = "/etc/custom denied path with spaces.txt"
+        val compiledPolicy = IterativeProfiler.profile(basePolicy) {
+            attempts++
+            if (attempts == 1) {
+                throw java.io.IOException("$targetPath (Permission denied)")
+            }
+            // Second attempt succeeds
+        }
+        assertTrue(compiledPolicy.allowedFsReadPaths.any { it.value == targetPath }, "Should allow read access to path: $targetPath")
+        assertTrue(!compiledPolicy.allowedFsWritePaths.any { it.value == targetPath }, "Should not grant write permission by default")
+    }
+
+    @Test
+    fun `test iterative profiling parses relative path with spaces from generic exception messages`() {
+        val basePolicy = Policy.PURE_COMPUTE_UNSAFE
+        var attempts = 0
+        val relativePath = "build/tmp/custom relative path with spaces.txt"
+        val expectedAbsolutePath = java.nio.file.Paths.get(relativePath).toAbsolutePath().normalize().toString()
+        val compiledPolicy = IterativeProfiler.profile(basePolicy) {
+            attempts++
+            if (attempts == 1) {
+                throw java.io.IOException("$relativePath (Permission denied)")
+            }
+            // Second attempt succeeds
+        }
+        assertTrue(compiledPolicy.allowedFsReadPaths.any { it.value == expectedAbsolutePath }, "Should allow read access to path: $expectedAbsolutePath")
+    }
+
+    @Test
     @EnabledIfLinuxAndSupported
     fun `test iterative profiling of existing file read grants read and not write permission`() {
         val parentDir = File("/tmp/iterative_existing_read").absoluteFile
