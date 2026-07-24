@@ -44,12 +44,12 @@ public class BpfProgram<out S : BpfStatus>(
         @JvmStatic
         public fun dsl(
             arch: Arch,
-            block: Function<BpfBuilder<BpfState.NrLoaded>, BpfBuilder<BpfState.Terminated>>
+            block: Function<BpfBuilder<BpfState.Active>, BpfBuilder<BpfState.Terminated>>
         ): BpfProgram<BpfStatus.Unverified> {
-            val nrLoaded = builder()
+            val active = builder()
                 .checkArch(arch)
                 .loadSyscallNr()
-            val terminated = block.apply(nrLoaded)
+            val terminated = block.apply(active)
             return terminated.build()
         }
 
@@ -59,7 +59,7 @@ public class BpfProgram<out S : BpfStatus>(
          */
         public inline fun dsl(
             arch: Arch,
-            block: BpfBuilder<BpfState.NrLoaded>.() -> BpfBuilder<BpfState.Terminated>
+            block: BpfBuilder<BpfState.Active>.() -> BpfBuilder<BpfState.Terminated>
         ): BpfProgram<BpfStatus.Unverified> =
             builder()
                 .checkArch(arch)
@@ -79,8 +79,8 @@ public sealed interface BpfState {
     /** Architecture verified: Only allows loading the syscall number. */
     public interface ArchVerified : BpfState
 
-    /** Syscall number loaded: Allows full filtering logic and final building. */
-    public interface NrLoaded : BpfState
+    /** Syscall number loaded and active filtering logic is being written. */
+    public interface Active : BpfState
 
     /** Terminated state: The BPF program ends with a RET instruction and is ready to be built. */
     public interface Terminated : BpfState
@@ -118,30 +118,30 @@ public fun BpfBuilder<BpfState.Uninitialized>.checkArch(arch: Arch): BpfBuilder<
 }
 
 /**
- * Emits code to load the syscall number and transitions to [BpfState.NrLoaded].
+ * Emits code to load the syscall number and transitions to [BpfState.Active].
  */
-public fun BpfBuilder<BpfState.ArchVerified>.loadSyscallNr(): BpfBuilder<BpfState.NrLoaded> {
+public fun BpfBuilder<BpfState.ArchVerified>.loadSyscallNr(): BpfBuilder<BpfState.Active> {
     ops.add(BpfMacro.LoadAbsolute(BpfFilter.SECCOMP_DATA_NR_OFFSET))
     return BpfBuilder(ops, labelCounter)
 }
 
 /** Returns ACT_ALLOW immediately. */
-public fun BpfBuilder<BpfState.NrLoaded>.allow(): BpfBuilder<BpfState.Terminated> {
+public fun BpfBuilder<BpfState.Active>.allow(): BpfBuilder<BpfState.Terminated> {
     return ret(SeccompAction.ACT_ALLOW.nativeCode)
 }
 
 /** Returns ACT_ERRNO with the given [errno]. */
-public fun BpfBuilder<BpfState.NrLoaded>.deny(errno: Int): BpfBuilder<BpfState.Terminated> {
+public fun BpfBuilder<BpfState.Active>.deny(errno: Int): BpfBuilder<BpfState.Terminated> {
     return ret(SeccompAction.ACT_ERRNO.nativeCode or (errno and 0xFFFF))
 }
 
 /** Returns SECCOMP_RET_KILL_THREAD. */
-public fun BpfBuilder<BpfState.NrLoaded>.killThread(): BpfBuilder<BpfState.Terminated> {
+public fun BpfBuilder<BpfState.Active>.killThread(): BpfBuilder<BpfState.Terminated> {
     return ret(NativeConstants.SECCOMP_RET_KILL_THREAD)
 }
 
 /** Returns SECCOMP_RET_USER_NOTIF (for profiling or complex rules). */
-public fun BpfBuilder<BpfState.NrLoaded>.notifyUser(): BpfBuilder<BpfState.Terminated> {
+public fun BpfBuilder<BpfState.Active>.notifyUser(): BpfBuilder<BpfState.Terminated> {
     return ret(NativeConstants.SECCOMP_RET_USER_NOTIF)
 }
 
@@ -152,10 +152,10 @@ public fun BpfBuilder<BpfState.NrLoaded>.notifyUser(): BpfBuilder<BpfState.Termi
  * Note: The block itself may terminate, but the main sequence continues
  * after the block's end.
  */
-public fun BpfBuilder<BpfState.NrLoaded>.expect(
+public fun BpfBuilder<BpfState.Active>.expect(
     nr: Int,
-    block: BpfBuilder<BpfState.NrLoaded>.() -> Unit
-): BpfBuilder<BpfState.NrLoaded> {
+    block: BpfBuilder<BpfState.Active>.() -> Unit
+): BpfBuilder<BpfState.Active> {
     val skipLabel = nextLabel("skip")
     jumpIfEqual(nr, jf = skipLabel)
     this.block()
@@ -164,10 +164,10 @@ public fun BpfBuilder<BpfState.NrLoaded>.expect(
 }
 
 /** Java-compatible version of [expect]. */
-public fun BpfBuilder<BpfState.NrLoaded>.expect(
+public fun BpfBuilder<BpfState.Active>.expect(
     nr: Int,
-    block: Consumer<BpfBuilder<BpfState.NrLoaded>>
-): BpfBuilder<BpfState.NrLoaded> {
+    block: Consumer<BpfBuilder<BpfState.Active>>
+): BpfBuilder<BpfState.Active> {
     val skipLabel = nextLabel("skip")
     jumpIfEqual(nr, jf = skipLabel)
     block.accept(this)
@@ -176,73 +176,73 @@ public fun BpfBuilder<BpfState.NrLoaded>.expect(
 }
 
 /** Expects a specific [syscall] for the given [arch]. */
-public fun BpfBuilder<BpfState.NrLoaded>.expect(
+public fun BpfBuilder<BpfState.Active>.expect(
     syscall: Syscall,
     arch: Arch,
-    block: BpfBuilder<BpfState.NrLoaded>.() -> Unit
-): BpfBuilder<BpfState.NrLoaded> {
+    block: BpfBuilder<BpfState.Active>.() -> Unit
+): BpfBuilder<BpfState.Active> {
     val nr = syscall.numberFor(arch)
     if (nr >= 0) expect(nr, block)
     return this
 }
 
 /** Java-compatible version of [expect] using [Syscall]. */
-public fun BpfBuilder<BpfState.NrLoaded>.expect(
+public fun BpfBuilder<BpfState.Active>.expect(
     syscall: Syscall,
     arch: Arch,
-    block: Consumer<BpfBuilder<BpfState.NrLoaded>>
-): BpfBuilder<BpfState.NrLoaded> {
+    block: Consumer<BpfBuilder<BpfState.Active>>
+): BpfBuilder<BpfState.Active> {
     val nr = syscall.numberFor(arch)
     if (nr >= 0) expect(nr, block)
     return this
 }
 
-public fun BpfBuilder<BpfState.NrLoaded>.loadAbsolute(offset: Int): BpfBuilder<BpfState.NrLoaded> {
+public fun BpfBuilder<BpfState.Active>.loadAbsolute(offset: Int): BpfBuilder<BpfState.Active> {
     ops.add(BpfMacro.LoadAbsolute(offset))
     return this
 }
 
-public fun BpfBuilder<BpfState.NrLoaded>.jumpIfEqual(
+public fun BpfBuilder<BpfState.Active>.jumpIfEqual(
     k: Int,
     jt: BpfLabel? = null,
     jf: BpfLabel? = null
-): BpfBuilder<BpfState.NrLoaded> {
+): BpfBuilder<BpfState.Active> {
     ops.add(BpfMacro.JumpIfEqual(k, jt, jf))
     return this
 }
 
-public fun BpfBuilder<BpfState.NrLoaded>.jumpIfSet(
+public fun BpfBuilder<BpfState.Active>.jumpIfSet(
     k: Int,
     jt: BpfLabel? = null,
     jf: BpfLabel? = null
-): BpfBuilder<BpfState.NrLoaded> {
+): BpfBuilder<BpfState.Active> {
     ops.add(BpfMacro.JumpIfSet(k, jt, jf))
     return this
 }
 
-public fun BpfBuilder<BpfState.NrLoaded>.jumpIfGreaterThan(
+public fun BpfBuilder<BpfState.Active>.jumpIfGreaterThan(
     k: Int,
     jt: BpfLabel? = null,
     jf: BpfLabel? = null
-): BpfBuilder<BpfState.NrLoaded> {
+): BpfBuilder<BpfState.Active> {
     ops.add(BpfMacro.JumpIfGreaterThan(k, jt, jf))
     return this
 }
 
-public fun BpfBuilder<BpfState.NrLoaded>.and(k: Int): BpfBuilder<BpfState.NrLoaded> {
+public fun BpfBuilder<BpfState.Active>.and(k: Int): BpfBuilder<BpfState.Active> {
     ops.add(BpfMacro.And(k))
     return this
 }
 
-public fun BpfBuilder<BpfState.NrLoaded>.jmp(label: BpfLabel): BpfBuilder<BpfState.NrLoaded> {
+public fun BpfBuilder<BpfState.Active>.jmp(label: BpfLabel): BpfBuilder<BpfState.Active> {
     return jumpIfEqual(0, jt = label, jf = label)
 }
 
-public fun BpfBuilder<BpfState.NrLoaded>.jmpIfTrue(label: BpfLabel): BpfBuilder<BpfState.NrLoaded> {
+public fun BpfBuilder<BpfState.Active>.jmpIfTrue(label: BpfLabel): BpfBuilder<BpfState.Active> {
     return jumpIfEqual(0, jf = label)
 }
 
-public fun BpfBuilder<BpfState.NrLoaded>.jmpIfFalse(label: BpfLabel): BpfBuilder<BpfState.NrLoaded> {
+public fun BpfBuilder<BpfState.Active>.jmpIfFalse(label: BpfLabel): BpfBuilder<BpfState.Active> {
     return jumpIfEqual(0, jt = label)
 }
 
@@ -250,12 +250,12 @@ public fun BpfBuilder<BpfState.NrLoaded>.jmpIfFalse(label: BpfLabel): BpfBuilder
  * Ends the instruction sequence with a RET instruction.
  * Transitions the builder to the [BpfState.Terminated] state.
  */
-public fun BpfBuilder<BpfState.NrLoaded>.ret(action: Int): BpfBuilder<BpfState.Terminated> {
+public fun BpfBuilder<BpfState.Active>.ret(action: Int): BpfBuilder<BpfState.Terminated> {
     ops.add(BpfMacro.Ret(action))
     return BpfBuilder(ops, labelCounter)
 }
 
-public fun BpfBuilder<BpfState.NrLoaded>.mark(label: BpfLabel): BpfBuilder<BpfState.NrLoaded> {
+public fun BpfBuilder<BpfState.Active>.mark(label: BpfLabel): BpfBuilder<BpfState.Active> {
     ops.add(BpfMacro.Label(label))
     return this
 }

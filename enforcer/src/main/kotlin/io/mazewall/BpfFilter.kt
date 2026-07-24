@@ -185,7 +185,7 @@ object BpfFilter {
         ).filter { it >= 0 }.toSet()
 
     internal fun emitInspections(
-        builder: BpfBuilder<BpfState.NrLoaded>,
+        builder: BpfBuilder<BpfState.Active>,
         inspections: List<SyscallInspection>,
         profilingMode: Boolean,
         handledNrs: MutableSet<Int>,
@@ -252,7 +252,7 @@ object BpfFilter {
     }
 
     private fun emitLinearScan(
-        builder: BpfBuilder<BpfState.NrLoaded>,
+        builder: BpfBuilder<BpfState.Active>,
         syscallActions: Map<Int, SeccompAction>,
         jvmCriticalNrs: Set<Int>,
         profilingMode: Boolean,
@@ -336,7 +336,7 @@ object BpfFilter {
     }
 
     private fun emitBst(
-        builder: BpfBuilder<BpfState.NrLoaded>,
+        builder: BpfBuilder<BpfState.Active>,
         actionsToEmit: List<Pair<Int, Int>>,
         low: Int,
         high: Int,
