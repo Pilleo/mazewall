@@ -16,7 +16,6 @@ graph TD
     Landlock_kt["💻 Source: Landlock.kt"]
     ProfilerSessionHandler_kt["💻 Source: ProfilerSessionHandler.kt"]
     PureJavaBpfEngine_kt["💻 Source: PureJavaBpfEngine.kt"]
-    SockFProg_kt["💻 Source: SockFProg.kt"]
     SupervisorInstaller_kt["💻 Source: SupervisorInstaller.kt"]
     SupervisorSessionHandler_kt["💻 Source: SupervisorSessionHandler.kt"]
     io_mazewall_NativeEngine["💻 Source: io.mazewall.NativeEngine"]
@@ -88,7 +87,6 @@ graph TD
     issue_114_landlock_excessive_capability_leak_on_enoent["🔴 Issue: Landlock Excessive Capability Leak on `ENOENT` (MEDIUM)"]
     issue_125_opaque_exceptions_on_landlock_initialization_failure["🔴 Issue: 🔴 [Severity: DX-FRICTION]: Opaque Exceptions on Landlock Initialization Failure (HIGH)"]
     issue_127_unhandled_signal_mask_inheritance_in_containedexecutors["🔴 Issue: Unhandled Signal Mask Inheritance in `ContainedExecutors` (HIGH)"]
-    issue_132_missing_bpf_instruction_limit_validation_in_newsockfprog["🔴 Issue: Missing BPF Instruction Limit Validation in `newSockFProg` (HIGH)"]
     issue_139_unhandled_ioctl_fallbacks_during_legacy_jvm_syscall_tracing["🔴 Issue: Unhandled `IOCTL` fallbacks during legacy JVM syscall tracing (HIGH)"]
     issue_142_race_in_asynchronous_fire_and_forget_profiler_event_delivery["🔴 Issue: Race in Asynchronous / Fire-and-Forget Profiler Event Delivery (CRITICAL)"]
     issue_143_process_wide_classloader_deadlock_on_profiler_result_state_t["🔴 Issue: Process-Wide Classloader Deadlock on Profiler Result / State Types (HIGH)"]
@@ -140,7 +138,6 @@ graph TD
     issue_112_iterativeprofiler_logic_errors_confirmed -->|Affects| IterativeProfiler_kt
     issue_114_landlock_excessive_capability_leak_on_enoent -->|Affects| Landlock_kt
     issue_127_unhandled_signal_mask_inheritance_in_containedexecutors -->|Affects| ContainedExecutors_kt
-    issue_132_missing_bpf_instruction_limit_validation_in_newsockfprog -->|Affects| SockFProg_kt
     issue_142_race_in_asynchronous_fire_and_forget_profiler_event_delivery -->|Affects| ProfilerSessionHandler_kt
     issue_144_confused_deputy_time_of_check_to_time_of_use_toctou_via_path -->|Affects| SupervisorSessionHandler_kt
     issue_145_toctou_pointer_re_targeting_via_sockaddrbytes_mutation_durin -->|Affects| SupervisorSessionHandler_kt
@@ -199,7 +196,6 @@ graph TD
     click issue_114_landlock_excessive_capability_leak_on_enoent "../../../backlog/security/issue-114-landlock-excessive-capability-leak-on-enoent.md"
     click issue_125_opaque_exceptions_on_landlock_initialization_failure "../../../backlog/security/issue-125-opaque-exceptions-on-landlock-initialization-failure.md"
     click issue_127_unhandled_signal_mask_inheritance_in_containedexecutors "../../../backlog/testing/issue-127-unhandled-signal-mask-inheritance-in-containedexecutors.md"
-    click issue_132_missing_bpf_instruction_limit_validation_in_newsockfprog "../../../backlog/testing/issue-132-missing-bpf-instruction-limit-validation-in-newsockfprog.md"
     click issue_139_unhandled_ioctl_fallbacks_during_legacy_jvm_syscall_tracing "../../../backlog/testing/issue-139-unhandled-ioctl-fallbacks-during-legacy-jvm-syscall-tracing.md"
     click issue_142_race_in_asynchronous_fire_and_forget_profiler_event_delivery "../../../backlog/testing/issue-142-race-in-asynchronous-fire-and-forget-profiler-event-delivery.md"
     click issue_143_process_wide_classloader_deadlock_on_profiler_result_state_t "../../../backlog/security/issue-143-process-wide-classloader-deadlock-on-profiler-result-state-t.md"
