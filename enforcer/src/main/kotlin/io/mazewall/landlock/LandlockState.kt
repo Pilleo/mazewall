@@ -135,10 +135,15 @@ internal class LandlockSession(
             } else {
                 Landlock.getFullAccessMask(abi)
             }
+            val accessMaskNet = if (policy != null) {
+                Landlock.getNetAccessMask(abi, policy)
+            } else {
+                Landlock.getFullNetAccessMask(abi)
+            }
 
             state = LandlockState.CreatingRuleset(abi)
             NativeArena.ofConfined().use { arena ->
-                with(arena) { Landlock.createRuleset(accessMaskFs, abi) }.use { rulesetFd ->
+                with(arena) { Landlock.createRuleset(accessMaskFs, accessMaskNet, abi) }.use { rulesetFd ->
                     val ruleset = LandlockRuleset<RulesetState.Building>(rulesetFd)
                     val created = LandlockLifecycle.RulesetCreated(ruleset, abi, policy)
                     state = LandlockState.ConfiguringRuleset(rulesetFd, abi)
