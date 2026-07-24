@@ -43,7 +43,7 @@ public sealed interface FileDescriptorRole {
  *
  * ### Immutability & Lifecycle
  * This class is **strictly immutable**. To ensure compile-time safety against Use-After-Close
- * errors, the [closeFd] method transitions the type from [FdState.Open] to [FdState.Closed] by
+ * errors, the [close] extension method transitions the type from [FdState.Open] to [FdState.Closed] by
  * returning a new instance.
  *
  * @param R The role of this file descriptor (e.g., [FileDescriptorRole.UnixSocket], [FileDescriptorRole.Ruleset]).
@@ -51,50 +51,25 @@ public sealed interface FileDescriptorRole {
  * @property value The raw integer file descriptor.
  * @property arena An optional [NativeArena] that owns the native memory lifetime of this descriptor.
  */
-public class FileDescriptor<out R : FileDescriptorRole, out S : FdState>(
+public class FileDescriptor<out R : FileDescriptorRole, out S : FdState> internal constructor(
     public val value: Int,
-    public val arena: NativeArena? = null
-) : AutoCloseable {
+    public val arena: NativeArena? = null,
+    private val isClosed: Boolean = false
+) {
+
+    /**
+     * Public constructor for file descriptor creation.
+     */
+    public constructor(value: Int, arena: NativeArena? = null) : this(value, arena, false)
 
     /** Returns true if the file descriptor is open and valid. */
-    public val isValid: Boolean get() = value >= 0 && (arena == null || arena.isAlive)
+    public val isValid: Boolean get() = value >= 0 && (arena == null || arena.isAlive) && !isClosed
 
     /** Returns true if the file descriptor is closed or invalid. */
     public val isInvalid: Boolean get() = !isValid
 
-    /**
-     * Closes the descriptor via [LinuxNative.fileSystem].
-     *
-     * Note: This method satisfies [AutoCloseable] for convenience in try-with-resources,
-     * but since [FileDescriptor] is immutable, the instance itself remains of type [FdState.Open].
-     * To obtain a [FdState.Closed] type that is enforced by the compiler, use [closeFd].
-     */
-    override fun close() {
-        if (value < 0) return
-        if (this.isClosedType()) return
-
-        @Suppress("UNCHECKED_CAST")
-        LinuxNative.fileSystem.close(this as FileDescriptor<*, FdState.Open>)
-        arena?.close()
-    }
-
-    /**
-     * Closes the descriptor and returns it cast to a [FdState.Closed] state at compile-time.
-     *
-     * This is the preferred way to close descriptors when you want the type system
-     * to prevent any further usage of the closed resource.
-     *
-     * @return A new [FileDescriptor] instance with the same value but [FdState.Closed] state.
-     */
-    @Suppress("UNCHECKED_CAST")
-    public fun closeFd(): FileDescriptor<R, FdState.Closed> {
-        close()
-        return FileDescriptor<R, FdState.Closed>(value, arena)
-    }
-
-    private fun isClosedType(): Boolean {
-        // We can't easily check S at runtime due to erasure, but we can check if it's INVALID
-        return value < 0
+    internal fun isClosedType(): Boolean {
+        return isClosed || value < 0
     }
 
     override fun toString(): String = if (isValid) "fd($value)" else "fd($value, closed/invalid)"
@@ -113,7 +88,7 @@ public class FileDescriptor<out R : FileDescriptorRole, out S : FdState>(
          * Uses Nothing role to be compatible with all specific FD roles.
          */
         @Suppress("UNCHECKED_CAST")
-        public val INVALID: FileDescriptor<Nothing, FdState.Closed> = FileDescriptor<FileDescriptorRole.Generic, FdState.Closed>(-1) as FileDescriptor<Nothing, FdState.Closed>
+        public val INVALID: FileDescriptor<Nothing, FdState.Closed> = FileDescriptor<FileDescriptorRole.Generic, FdState.Closed>(-1, null, true) as FileDescriptor<Nothing, FdState.Closed>
 
         /**
          * Unsafely creates a [FileDescriptor] from a raw integer.
@@ -125,5 +100,35 @@ public class FileDescriptor<out R : FileDescriptorRole, out S : FdState>(
         @Suppress("UNCHECKED_CAST")
         public fun <R : FileDescriptorRole> unsafe(value: Int): FileDescriptor<R, FdState.Open> =
             FileDescriptor<FileDescriptorRole, FdState.Open>(value) as FileDescriptor<R, FdState.Open>
+    }
+}
+
+/**
+ * Closes the descriptor via [LinuxNative.fileSystem].
+ *
+ * This method is restricted to [FdState.Open] file descriptors and returns a new
+ * [FileDescriptor] of state [FdState.Closed] to provide compile-time safety against
+ * use-after-close errors.
+ *
+ * @return A new [FileDescriptor] instance with the same value but [FdState.Closed] state.
+ */
+public fun <R : FileDescriptorRole, S : FdState.Open> FileDescriptor<R, S>.close(): FileDescriptor<R, FdState.Closed> {
+    if (value >= 0 && !isClosedType()) {
+        @Suppress("UNCHECKED_CAST")
+        LinuxNative.fileSystem.close(this as FileDescriptor<*, FdState.Open>)
+        arena?.close()
+    }
+    return FileDescriptor(value, arena, isClosed = true)
+}
+
+/**
+ * Executes the given [block] with this file descriptor and then closes it correctly,
+ * even if an exception is thrown.
+ */
+public inline fun <R : FileDescriptorRole, S : FdState.Open, T> FileDescriptor<R, S>.use(block: (FileDescriptor<R, S>) -> T): T {
+    try {
+        return block(this)
+    } finally {
+        this.close()
     }
 }
