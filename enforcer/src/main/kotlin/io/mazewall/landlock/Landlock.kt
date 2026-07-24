@@ -7,6 +7,7 @@ import io.mazewall.PolicyPresets
 import io.mazewall.UnsupportedKernelFeatureException
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
+import io.mazewall.core.use
 import io.mazewall.core.PrctlCommand
 import io.mazewall.core.FdState
 import io.mazewall.core.SandboxedPath
