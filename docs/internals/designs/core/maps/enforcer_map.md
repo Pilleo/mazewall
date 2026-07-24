@@ -126,7 +126,6 @@ graph TD
     issue_169_inconsistent_architecture_test_for_javalangforeign["🔴 Issue: Inconsistent Architecture Test for `java.lang.foreign` (HIGH)"]
     issue_177_missing_archunit_test_for_ffm_architecture_boundary_violatio["🔴 Issue: Missing ArchUnit test for FFM architecture boundary violations (HIGH)"]
     issue_183_potential_buffer_overflow_outofboundsexception_on_long_unix_["🔴 Issue: Potential Buffer Overflow / OutOfBoundsException on Long UNIX Socket Paths (LOW)"]
-    issue_190_unhandled_eintr_in_accept_in_supervisordaemonengine["🔴 Issue: Unhandled EINTR in accept in SupervisorDaemonEngine (MEDIUM)"]
     issue_191_jvm_validation_timeout_causes_denial_of_service_on_valid_syscalls["🔴 Issue: JVM Validation Timeout Causes Denial of Service on Valid Syscalls (MEDIUM)"]
     issue_193_review_orchestrator_prompts_jules_quality_safety_guidelines["🔴 Issue: Review and Enhance Orchestrator Prompts for Jules to Enforce Quality and Safety Guidelines (HIGH)"]
     issue_195_jules_session_id_parsing_bug["🔴 Issue: Fix Jules Session ID Parsing Bug (HIGH)"]
@@ -268,7 +267,6 @@ graph TD
     click issue_169_inconsistent_architecture_test_for_javalangforeign "../../../backlog/testing/issue-169-inconsistent-architecture-test-for-javalangforeign.md"
     click issue_177_missing_archunit_test_for_ffm_architecture_boundary_violatio "../../../backlog/testing/issue-177-missing-archunit-test-for-ffm-architecture-boundary-violatio.md"
     click issue_183_potential_buffer_overflow_outofboundsexception_on_long_unix_ "../../../backlog/performance/issue-183-potential-buffer-overflow-outofboundsexception-on-long-unix-.md"
-    click issue_190_unhandled_eintr_in_accept_in_supervisordaemonengine "../../../backlog/security/issue-190-unhandled-eintr-in-accept-in-supervisordaemonengine.md"
     click issue_191_jvm_validation_timeout_causes_denial_of_service_on_valid_syscalls "../../../backlog/security/issue-191-jvm-validation-timeout-causes-denial-of-service-on-valid-syscalls.md"
     click issue_193_review_orchestrator_prompts_jules_quality_safety_guidelines "../../../backlog/code_health/issue-193-review-orchestrator-prompts-jules-quality-safety-guidelines.md"
     click issue_195_jules_session_id_parsing_bug "../../../backlog/code_health/issue-195-jules-session-id-parsing-bug.md"
