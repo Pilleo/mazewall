@@ -29,14 +29,14 @@ class MemfdCreateBypassTest : BaseIntegrationTest() {
                     val res =
                         nativeScope {
                             val name = allocateFrom("test_memfd")
-                            LinuxNative.withTransaction {
-                                LinuxNative.raw.syscall(
-                                    arch.memfdCreate.toLong(),
-                                    NativeArg.MemoryArg(name),
-                                    NativeArg.NullArg,
-                                    NativeArg.NullArg,
-                                )
-                            }
+
+LinuxNative.raw.syscall(
+    arch.memfdCreate.toLong(),
+    NativeArg.MemoryArg(name),
+    NativeArg.NullArg,
+    NativeArg.NullArg,
+)
+
                         }
                     assertTrue(res is LinuxNative.SyscallResult.Error && res.errno == NativeConstants.EPERM, "Expected EPERM, got $res")
                 }.get()
@@ -64,14 +64,14 @@ class MemfdCreateBypassTest : BaseIntegrationTest() {
                     val res =
                         nativeScope {
                             val name = allocateFrom("test_memfd_blocked")
-                            LinuxNative.withTransaction {
-                                LinuxNative.raw.syscall(
-                                    arch.memfdCreate.toLong(),
-                                    NativeArg.MemoryArg(name),
-                                    NativeArg.NullArg,
-                                    NativeArg.NullArg,
-                                )
-                            }
+
+LinuxNative.raw.syscall(
+    arch.memfdCreate.toLong(),
+    NativeArg.MemoryArg(name),
+    NativeArg.NullArg,
+    NativeArg.NullArg,
+)
+
                         }
                     assertTrue(res is LinuxNative.SyscallResult.Error && res.errno == NativeConstants.EPERM, "Expected EPERM, got $res")
                 }.get()

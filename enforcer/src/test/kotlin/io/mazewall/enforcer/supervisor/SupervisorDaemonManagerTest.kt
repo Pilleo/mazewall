@@ -91,7 +91,7 @@ class SupervisorDaemonManagerTest {
         val manager = SupervisorDaemonManager(mockEngine, mockSocket, mockLauncher)
 
         var prctlCalled = false
-        mockEngine.process.onPrctl = { _, command ->
+        mockEngine.process.onPrctl = { command ->
             if (command is io.mazewall.core.PrctlCommand.SetPtracer && command.tracerPid == 9999L) {
                 prctlCalled = true
             }
@@ -117,7 +117,7 @@ class SupervisorDaemonManagerTest {
         manager.getOrSpawnSharedDaemon()
 
         var writeCalledWithShutdown = false
-        mockEngine.memory.onWrite = { _, _, buf, count ->
+        mockEngine.memory.onWrite = { _, buf, count ->
             if (count == 1L) {
                 val byte = buf.readByte(0L)
                 if (byte == 0x53.toByte()) { // 'S'

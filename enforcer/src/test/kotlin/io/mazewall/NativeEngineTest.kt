@@ -18,7 +18,7 @@ class NativeEngineTest {
 
         LinuxNative.setEngine(mock)
 
-        val result = LinuxNative.withTransaction { LinuxNative.process.prctl(io.mazewall.core.PrctlCommand.SetNoNewPrivs(true)) }
+        val result = LinuxNative.process.prctl(io.mazewall.core.PrctlCommand.SetNoNewPrivs(true))
         assertEquals(42L, result.getOrThrow("test"))
     }
 
@@ -29,7 +29,7 @@ class NativeEngineTest {
 
         LinuxNative.setEngine(mock)
 
-        val result = LinuxNative.withTransaction { LinuxNative.raw.syscall(1L) }
+        val result = LinuxNative.raw.syscall(1L)
         assertEquals(13, (result as LinuxNative.SyscallResult.Error).errno)
     }
 

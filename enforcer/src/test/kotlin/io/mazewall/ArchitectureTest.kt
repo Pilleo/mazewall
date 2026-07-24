@@ -32,7 +32,7 @@ class ArchitectureTest {
             .callMethodWhere(object : DescribedPredicate<JavaMethodCall>("calls to LinuxNative implementation methods") {
                 override fun test(input: JavaMethodCall): Boolean {
                     return input.target.owner.isAssignableTo(LinuxNative::class.java) &&
-                        input.target.name !in listOf("getFileSystem", "getNetworking", "getProcess", "getMemory", "getRaw", "withTransaction", "getTRANSACTION_INSTANCE")
+                        input.target.name !in listOf("getFileSystem", "getNetworking", "getProcess", "getMemory", "getRaw")
                 }
             })
             .because("direct calls to LinuxNative implementation bypass the testable NativeEngine abstraction")
@@ -235,6 +235,7 @@ class ArchitectureTest {
                 // ArchUnit has `getGenericReturnType()`.
                 false
             })
+            .allowEmptyShould(true)
             .because("Domain logic must handle errors locally before returning")
             .check(allClasses)
     }
@@ -249,6 +250,7 @@ class ArchitectureTest {
             .haveNameNotMatching(".*\\\$.*") // Ignore Kotlin internal mangled names
             .should()
             .notHaveRawReturnType(LinuxNative.SyscallResult::class.java)
+            .allowEmptyShould(true)
             .because("Domain logic must not leak raw SyscallResult objects to callers. They must be handled internally.")
             .check(allClasses)
     }

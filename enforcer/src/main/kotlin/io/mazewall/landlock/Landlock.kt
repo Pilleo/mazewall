@@ -193,14 +193,12 @@ object Landlock {
      * Queries the kernel for the highest Landlock ABI version it supports.
      */
     fun getAbiVersion(): Int {
-        return LinuxNative.withTransaction {
-            LinuxNative.raw.syscall(
-                NativeConstants.LANDLOCK_CREATE_RULESET_NR,
-                io.mazewall.core.NativeArg.LongArg(0L),
-                io.mazewall.core.NativeArg.LongArg(0L),
-                io.mazewall.core.NativeArg.LongArg(NativeConstants.LANDLOCK_CREATE_RULESET_VERSION),
-            )
-        }.recover { _, _ -> 0L }.toInt()
+        return LinuxNative.raw.syscall(
+            NativeConstants.LANDLOCK_CREATE_RULESET_NR,
+            io.mazewall.core.NativeArg.LongArg(0L),
+            io.mazewall.core.NativeArg.LongArg(0L),
+            io.mazewall.core.NativeArg.LongArg(NativeConstants.LANDLOCK_CREATE_RULESET_VERSION),
+        ).recover { _, _ -> 0L }.toInt()
     }
 
     /**
@@ -391,19 +389,18 @@ object Landlock {
         ruleset: LandlockRuleset<RulesetState.Building>,
         processWide: Boolean = false
     ): LandlockRuleset<RulesetState.Sealed> {
-        val (prctlResult, restrictResult) = LinuxNative.withTransaction {
-            val p = LinuxNative.process.prctl(PrctlCommand.SetNoNewPrivs(true))
+        val p = LinuxNative.process.prctl(PrctlCommand.SetNoNewPrivs(true))
 
-            val flags = if (processWide) LANDLOCK_RESTRICT_SELF_TSYNC else 0L
-            val r = LinuxNative.raw.syscall(
-                NativeConstants.LANDLOCK_RESTRICT_SELF_NR,
-                io.mazewall.core.NativeArg.FdArg(ruleset.fd),
-                io.mazewall.core.NativeArg.LongArg(flags),
-                io.mazewall.core.NativeArg.MemoryArg(ManagedSegment.NULL),
-                io.mazewall.core.NativeArg.IntArg(0)
-            )
-            Pair(p, r)
-        }
+        val flags = if (processWide) LANDLOCK_RESTRICT_SELF_TSYNC else 0L
+        val r = LinuxNative.raw.syscall(
+            NativeConstants.LANDLOCK_RESTRICT_SELF_NR,
+            io.mazewall.core.NativeArg.FdArg(ruleset.fd),
+            io.mazewall.core.NativeArg.LongArg(flags),
+            io.mazewall.core.NativeArg.MemoryArg(ManagedSegment.NULL),
+            io.mazewall.core.NativeArg.IntArg(0)
+        )
+        val prctlResult = p
+        val restrictResult = r
         prctlResult.getOrThrow("prctl(PR_SET_NO_NEW_PRIVS)")
         return when (restrictResult) {
             is LinuxNative.SyscallResult.Success -> LandlockRuleset(ruleset.fd)
@@ -507,14 +504,12 @@ object Landlock {
         rulesetAttr.setHandledAccessNet(accessMaskNet)
         val size = if (abi >= 4) Layouts.LANDLOCK_RULESET_ATTR_SIZE else Layouts.LANDLOCK_RULESET_ATTR_V1_SIZE
         val rulesetAttrManaged = rulesetAttr.managed
-        val res = LinuxNative.withTransaction {
-            LinuxNative.raw.syscall(
-                NativeConstants.LANDLOCK_CREATE_RULESET_NR,
-                io.mazewall.core.NativeArg.MemoryArg(rulesetAttrManaged),
-                io.mazewall.core.NativeArg.LongArg(size),
-                io.mazewall.core.NativeArg.MemoryArg(ManagedSegment.NULL)
-            )
-        }
+        val res = LinuxNative.raw.syscall(
+            NativeConstants.LANDLOCK_CREATE_RULESET_NR,
+            io.mazewall.core.NativeArg.MemoryArg(rulesetAttrManaged),
+            io.mazewall.core.NativeArg.LongArg(size),
+            io.mazewall.core.NativeArg.MemoryArg(ManagedSegment.NULL)
+        )
         return when (res) {
             is LinuxNative.SyscallResult.Success -> FileDescriptor.unsafe(res.value.toInt())
             is LinuxNative.SyscallResult.Error -> {
@@ -542,15 +537,13 @@ object Landlock {
         pathAttr.setAllowedAccess(accessMask)
         pathAttr.setParentFd(pathFd.value)
         val pathAttrManaged = pathAttr.managed
-        val res = LinuxNative.withTransaction {
-            LinuxNative.raw.syscall(
-                NativeConstants.LANDLOCK_ADD_RULE_NR,
-                io.mazewall.core.NativeArg.FdArg(ruleset.fd),
-                io.mazewall.core.NativeArg.LongArg(NativeConstants.LANDLOCK_RULE_PATH_BENEATH.toLong()),
-                io.mazewall.core.NativeArg.MemoryArg(pathAttrManaged),
-                io.mazewall.core.NativeArg.IntArg(0)
-            )
-        }
+        val res = LinuxNative.raw.syscall(
+            NativeConstants.LANDLOCK_ADD_RULE_NR,
+            io.mazewall.core.NativeArg.FdArg(ruleset.fd),
+            io.mazewall.core.NativeArg.LongArg(NativeConstants.LANDLOCK_RULE_PATH_BENEATH.toLong()),
+            io.mazewall.core.NativeArg.MemoryArg(pathAttrManaged),
+            io.mazewall.core.NativeArg.IntArg(0)
+        )
         return when (res) {
             is LinuxNative.SyscallResult.Success -> AddRuleResult.Success
             is LinuxNative.SyscallResult.Error -> {

@@ -2,7 +2,6 @@ package io.mazewall.landlock
 
 import io.mazewall.LinuxNative
 import io.mazewall.MockNativeEngine
-import io.mazewall.NativeTransaction
 import io.mazewall.Policy
 import io.mazewall.ffi.internal.RealNativeEngine
 import io.mazewall.Platform
@@ -41,7 +40,6 @@ class LandlockExceptionSafetyTest {
     fun `testLandlockSessionFailedStateWithThrowable`() {
         Platform.setProvider(MockPlatformProvider)
         val mockEngine = object : MockNativeEngine() {
-            context(context: NativeTransaction)
             override fun syscall(
                 nr: Long,
                 a1: io.mazewall.core.NativeArg,

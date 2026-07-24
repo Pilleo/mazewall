@@ -4,7 +4,6 @@ import io.mazewall.LinuxNative
 import io.mazewall.MockNativeEngine
 import io.mazewall.MockNativeFileSystem
 import io.mazewall.MockNativeNetworking
-import io.mazewall.NativeTransaction
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
@@ -28,7 +27,6 @@ class ProfilerSocketTest {
         var connectCalled = false
 
         val mockNetworking = object : MockNativeNetworking() {
-            context(context: NativeTransaction)
             override fun socket(
                 domain: Int,
                 type: Int,
@@ -38,7 +36,6 @@ class ProfilerSocketTest {
                 return LinuxNative.SyscallResult.Success(99L)
             }
 
-            context(context: NativeTransaction)
             override fun connect(
                 sockfd: FileDescriptor<*, FdState.Open>,
                 addr: ManagedSegment,
@@ -64,7 +61,6 @@ class ProfilerSocketTest {
     fun `test sendDescriptor delegates and succeeds`() {
         var sendmsgCalled = false
         val mockNetworking = object : MockNativeNetworking() {
-            context(context: NativeTransaction)
             override fun sendmsg(
                 sockfd: FileDescriptor<*, FdState.Open>,
                 msg: ManagedSegment,

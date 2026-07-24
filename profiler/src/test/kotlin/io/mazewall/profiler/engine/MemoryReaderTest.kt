@@ -3,7 +3,6 @@ package io.mazewall.profiler.engine
 import io.mazewall.LinuxNative
 import io.mazewall.MockNativeEngine
 import io.mazewall.MockNativeFileSystem
-import io.mazewall.NativeTransaction
 import io.mazewall.core.Tid
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
@@ -23,7 +22,6 @@ class MemoryReaderTest {
         val mockPath = "$expectedPath (deleted)"
 
         val mockFs = object : MockNativeFileSystem() {
-            context(context: NativeTransaction)
             override fun readlink(path: ManagedSegment, buf: ManagedSegment, bufsiz: Long): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
                 val bytes = mockPath.toByteArray(StandardCharsets.UTF_8)
                 val bufSeg = MemorySegment.ofAddress(buf.address()).reinterpret(buf.byteSize())
@@ -55,7 +53,6 @@ class MemoryReaderTest {
         val mockData = "unterminated string".toByteArray(StandardCharsets.UTF_8)
 
         val mockMem = object : io.mazewall.MockNativeMemory() {
-            context(context: NativeTransaction)
             override fun processVmReadv(pid: io.mazewall.core.Pid, localIov: ManagedSegment, liovcnt: Long, remoteIov: ManagedSegment, riovcnt: Long, flags: Long): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
                 val localIovSeg = MemorySegment.ofAddress(localIov.address()).reinterpret(localIov.byteSize())
                 val localBuf = localIovSeg.get(ValueLayout.ADDRESS, 0).reinterpret(mockData.size.toLong())

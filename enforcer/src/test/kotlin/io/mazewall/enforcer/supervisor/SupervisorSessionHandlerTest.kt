@@ -7,7 +7,6 @@ import io.mazewall.LinuxNative
 import io.mazewall.MockNativeEngine
 import io.mazewall.MockNativeMemory
 import io.mazewall.MockNativeNetworking
-import io.mazewall.NativeTransaction
 import io.mazewall.RawSyscallOperations
 import io.mazewall.ffi.internal.RealNativeEngine
 import io.mazewall.ffi.memory.readLong
@@ -45,7 +44,6 @@ class SupervisorSessionHandlerTest {
 
         val mockEngine = object : MockNativeEngine() {
             override val raw: RawSyscallOperations = object : RawSyscallOperations by this {
-                context(_: NativeTransaction)
                 override fun poll(
                     fds: io.mazewall.ffi.memory.ManagedSegment,
                     nfds: Long,
@@ -54,7 +52,6 @@ class SupervisorSessionHandlerTest {
                     return LinuxNative.SyscallResult.Success(0L) // Simulate Timeout
                 }
 
-                context(_: NativeTransaction)
                 override fun ioctl(
                     fd: FileDescriptor<*, FdState.Open>,
                     request: Long,
@@ -121,7 +118,6 @@ class SupervisorSessionHandlerTest {
         var capturedDomain: Int? = null
 
         val mockNetworking = object : MockNativeNetworking() {
-            context(_: NativeTransaction)
             override fun socket(
                 domain: Int,
                 type: Int,
@@ -176,7 +172,6 @@ class SupervisorSessionHandlerTest {
         var capturedRemoteLen: Long? = null
 
         val mockMemory = object : io.mazewall.MockNativeMemory() {
-            context(_: NativeTransaction)
             override fun processVmWritev(
                 pid: io.mazewall.core.Pid,
                 localIov: io.mazewall.ffi.memory.ManagedSegment,
@@ -193,7 +188,6 @@ class SupervisorSessionHandlerTest {
                 return LinuxNative.SyscallResult.Success(capturedLocalLen!!)
             }
 
-            context(_: NativeTransaction)
             override fun read(
                 fd: FileDescriptor<*, FdState.Open>,
                 buf: io.mazewall.ffi.memory.ManagedSegment,
@@ -208,7 +202,6 @@ class SupervisorSessionHandlerTest {
         }
 
         val mockFileSystem = object : io.mazewall.MockNativeFileSystem() {
-            context(_: NativeTransaction)
             override fun open(
                 path: io.mazewall.ffi.memory.ManagedSegment,
                 flags: Int,
@@ -219,7 +212,6 @@ class SupervisorSessionHandlerTest {
 
         val mockEngine = object : MockNativeEngine(memory = mockMemory, fileSystem = mockFileSystem) {
             override val raw: RawSyscallOperations = object : RawSyscallOperations by this {
-                context(_: NativeTransaction)
                 override fun poll(
                     fds: io.mazewall.ffi.memory.ManagedSegment,
                     nfds: Long,
@@ -228,7 +220,6 @@ class SupervisorSessionHandlerTest {
                     return LinuxNative.SyscallResult.Success(1L)
                 }
 
-                context(_: NativeTransaction)
                 override fun ioctl(
                     fd: FileDescriptor<*, FdState.Open>,
                     request: Long,
@@ -326,7 +317,6 @@ class SupervisorSessionHandlerTest {
         var ioctlCalls = 0
 
         val mockMemory = object : io.mazewall.MockNativeMemory() {
-            context(_: NativeTransaction)
             override fun write(
                 fd: FileDescriptor<*, FdState.Open>,
                 buf: io.mazewall.ffi.memory.ManagedSegment,
@@ -335,7 +325,6 @@ class SupervisorSessionHandlerTest {
                 return LinuxNative.SyscallResult.Success(count)
             }
 
-            context(_: NativeTransaction)
             override fun read(
                 fd: FileDescriptor<*, FdState.Open>,
                 buf: io.mazewall.ffi.memory.ManagedSegment,
@@ -351,7 +340,6 @@ class SupervisorSessionHandlerTest {
 
         val mockEngine = object : MockNativeEngine(memory = mockMemory) {
             override val raw: RawSyscallOperations = object : RawSyscallOperations by this {
-                context(_: NativeTransaction)
                 override fun ioctl(
                     fd: FileDescriptor<*, FdState.Open>,
                     request: Long,
@@ -376,7 +364,6 @@ class SupervisorSessionHandlerTest {
                     return LinuxNative.SyscallResult.Success(0L)
                 }
 
-                context(_: NativeTransaction)
                 override fun poll(
                     fds: io.mazewall.ffi.memory.ManagedSegment,
                     nfds: Long,
@@ -424,7 +411,6 @@ class SupervisorSessionHandlerTest {
         var ioctlCalls = 0
 
         val mockMemory = object : io.mazewall.MockNativeMemory() {
-            context(_: NativeTransaction)
             override fun read(
                 fd: FileDescriptor<*, FdState.Open>,
                 buf: io.mazewall.ffi.memory.ManagedSegment,
@@ -444,7 +430,6 @@ class SupervisorSessionHandlerTest {
 
         val mockEngine = object : MockNativeEngine(memory = mockMemory) {
             override val raw: RawSyscallOperations = object : RawSyscallOperations by this {
-                context(_: NativeTransaction)
                 override fun poll(
                     fds: io.mazewall.ffi.memory.ManagedSegment,
                     nfds: Long,
@@ -453,7 +438,6 @@ class SupervisorSessionHandlerTest {
                     return LinuxNative.SyscallResult.Success(1L)
                 }
 
-                context(_: NativeTransaction)
                 override fun ioctl(
                     fd: FileDescriptor<*, FdState.Open>,
                     request: Long,
@@ -527,7 +511,6 @@ class SupervisorSessionHandlerTest {
         var writeCalls = 0
 
         val mockMemory = object : io.mazewall.MockNativeMemory() {
-            context(_: NativeTransaction)
             override fun write(
                 fd: FileDescriptor<*, FdState.Open>,
                 buf: io.mazewall.ffi.memory.ManagedSegment,
@@ -583,7 +566,6 @@ class SupervisorSessionHandlerTest {
         var pollCalls = 0
 
         val mockMemory = object : io.mazewall.MockNativeMemory() {
-            context(_: io.mazewall.NativeTransaction)
             override fun read(
                 fd: FileDescriptor<*, FdState.Open>,
                 buf: io.mazewall.ffi.memory.ManagedSegment,
@@ -599,7 +581,6 @@ class SupervisorSessionHandlerTest {
 
         val mockEngine = object : MockNativeEngine(memory = mockMemory) {
             override val raw: RawSyscallOperations = object : RawSyscallOperations by this {
-                context(_: io.mazewall.NativeTransaction)
                 override fun poll(
                     fds: io.mazewall.ffi.memory.ManagedSegment,
                     nfds: Long,
@@ -612,7 +593,6 @@ class SupervisorSessionHandlerTest {
                     return LinuxNative.SyscallResult.Success(1L)
                 }
 
-                context(_: io.mazewall.NativeTransaction)
                 override fun ioctl(
                     fd: FileDescriptor<*, FdState.Open>,
                     request: Long,
@@ -679,7 +659,6 @@ class SupervisorSessionHandlerTest {
 
         val mockEngine = object : MockNativeEngine() {
             override val raw: RawSyscallOperations = object : RawSyscallOperations by this {
-                context(_: io.mazewall.NativeTransaction)
                 override fun poll(
                     fds: io.mazewall.ffi.memory.ManagedSegment,
                     nfds: Long,
@@ -690,7 +669,6 @@ class SupervisorSessionHandlerTest {
                     return LinuxNative.SyscallResult.Error(io.mazewall.ffi.NativeConstants.EINTR, -1L)
                 }
 
-                context(_: io.mazewall.NativeTransaction)
                 override fun ioctl(
                     fd: FileDescriptor<*, FdState.Open>,
                     request: Long,

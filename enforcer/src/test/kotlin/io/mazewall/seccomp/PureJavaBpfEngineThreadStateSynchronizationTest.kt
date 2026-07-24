@@ -44,7 +44,7 @@ class PureJavaBpfEngineThreadStateSynchronizationTest {
     fun `test installOnProcess synchronizes engineState to sibling threads`() {
         // Setup mock engine
         val mockProcess = MockNativeProcess()
-        mockProcess.onPrctl = { _, command ->
+        mockProcess.onPrctl = { command ->
             if (command is PrctlCommand.GetSeccomp) {
                 LinuxNative.SyscallResult.Success(2L)
             } else {
@@ -52,7 +52,7 @@ class PureJavaBpfEngineThreadStateSynchronizationTest {
             }
         }
         val mockEngine = MockNativeEngine(process = mockProcess)
-        mockEngine.onSyscall = { _, _, _, _, _, _, _, _ ->
+        mockEngine.onSyscall = { _, _, _, _, _, _, _ ->
             LinuxNative.SyscallResult.Success(0L)
         }
         LinuxNative.setEngine(mockEngine)
