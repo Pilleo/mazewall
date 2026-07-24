@@ -11,6 +11,10 @@ import io.mazewall.seccomp.BpfInstruction
 
 /**
  * A mock implementation of [NativeEngine] for testing fault injection.
+ *
+ * DESIGN INVARIANT: Mock allocations are aligned with the decoupled, zero-allocation design
+ * of the core interfaces. Memory signatures use [ManagedSegment]s explicitly, allowing
+ * clean mocking without under-the-hood arena creation.
  */
 public open class MockNativeEngine(
     override val fileSystem: MockNativeFileSystem = MockNativeFileSystem(),

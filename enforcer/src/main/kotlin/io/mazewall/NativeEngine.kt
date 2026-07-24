@@ -23,6 +23,12 @@ public interface TransactionManager {
  * Interface for Linux native system calls and utility functions.
  * Decoupling this allows for mocking and fault injection in tests.
  *
+ * DESIGN INVARIANT: This interface is decoupled from FFM implicit Arenas and
+ * the [nativeScope] utility. To enable zero-allocation execution and clear memory
+ * boundaries, methods requiring off-heap memory accept pre-allocated [ManagedSegment]
+ * parameters exclusively. Callers are responsible for managing the lifecycles of their
+ * own transient arenas (e.g., using iteration-level scopes in high-throughput reactor loops).
+ *
  * All sensitive methods require a [NativeTransaction] capability in context.
  */
 public interface NativeEngine {

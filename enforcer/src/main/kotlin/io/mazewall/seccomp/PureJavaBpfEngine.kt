@@ -15,7 +15,6 @@ import io.mazewall.enforcer.ThreadStateRegistry
 import io.mazewall.enforcer.ContainerState
 import io.mazewall.enforcer.ProcessStateRegistry
 import io.mazewall.ffi.NativeConstants
-import io.mazewall.ffi.memory.nativeScope
 import java.util.logging.Logger
 import java.util.logging.Level
 
