@@ -360,4 +360,90 @@ class BpfFilterTest {
         assertEquals(0x06.toShort(), sharedRetInst.code, "Target instruction should be a RET instruction")
         assertEquals(targetRetAction, sharedRetInst.k, "Shared RET instruction should return the blocked action")
     }
+
+    private fun evalBpf(instructions: List<BpfInstruction>, syscallNr: Int): Int {
+        var pc = 0
+        var accumulator = 0
+        while (pc < instructions.size) {
+            val inst = instructions[pc]
+            when (inst.code) {
+                0x20.toShort() -> { // BPF_LD_ABS
+                    if (inst.k == 0) { // SECCOMP_DATA_NR_OFFSET
+                        accumulator = syscallNr
+                    } else if (inst.k == 4) { // SECCOMP_DATA_ARCH_OFFSET
+                        accumulator = Arch.AUDIT_ARCH_X86_64
+                    } else {
+                        accumulator = 0
+                    }
+                    pc++
+                }
+                0x15.toShort() -> { // BPF_JEQ
+                    if (accumulator == inst.k) {
+                        pc += inst.jt.toInt() + 1
+                    } else {
+                        pc += inst.jf.toInt() + 1
+                    }
+                }
+                0x25.toShort() -> { // BPF_JGT
+                    val accUnsigned = accumulator.toLong() and 0xFFFFFFFFL
+                    val kUnsigned = inst.k.toLong() and 0xFFFFFFFFL
+                    if (accUnsigned > kUnsigned) {
+                        pc += inst.jt.toInt() + 1
+                    } else {
+                        pc += inst.jf.toInt() + 1
+                    }
+                }
+                0x45.toShort() -> { // BPF_JSET
+                    val accUnsigned = accumulator.toLong() and 0xFFFFFFFFL
+                    val kUnsigned = inst.k.toLong() and 0xFFFFFFFFL
+                    if ((accUnsigned and kUnsigned) != 0L) {
+                        pc += inst.jt.toInt() + 1
+                    } else {
+                        pc += inst.jf.toInt() + 1
+                    }
+                }
+                0x54.toShort() -> { // BPF_ALU_AND
+                    accumulator = accumulator and inst.k
+                    pc++
+                }
+                0x06.toShort() -> { // BPF_RET
+                    return inst.k
+                }
+                else -> {
+                    pc++
+                }
+            }
+        }
+        throw IllegalStateException("BPF program fell through without returning")
+    }
+
+    @Test
+    fun `blacklist policy compiled with BST contains greater-than comparisons and routes correctly`() {
+        val policy = Policy.builder()
+            .defaultAction(SeccompAction.ACT_ALLOW)
+            .block(Syscall.EXECVE, Syscall.EXECVEAT, Syscall.MEMFD_CREATE)
+            .build()
+        val filter = BpfFilter.build(arch, policy.definition)
+
+        // Verify that BPF_JMP_JGT (0x25.toShort()) instruction is present in the compiled filter
+        val hasGreaterThan = filter.any { it.code == 0x25.toShort() }
+        assertTrue(hasGreaterThan, "The compiled filter for a blacklist policy should contain BPF_JMP_JGT instructions due to BST optimization")
+
+        val blockAction = NativeConstants.SECCOMP_RET_ERRNO or NativeConstants.EPERM
+        val allowAction = NativeConstants.SECCOMP_RET_ALLOW
+
+        // Verify routing for blocked syscalls
+        assertEquals(blockAction, evalBpf(filter, Syscall.EXECVE.numberFor(arch)))
+        assertEquals(blockAction, evalBpf(filter, Syscall.EXECVEAT.numberFor(arch)))
+        assertEquals(blockAction, evalBpf(filter, Syscall.MEMFD_CREATE.numberFor(arch)))
+
+        // Verify routing for allowed syscalls
+        assertEquals(allowAction, evalBpf(filter, Syscall.READ.numberFor(arch)))
+        assertEquals(allowAction, evalBpf(filter, Syscall.WRITE.numberFor(arch)))
+        assertEquals(allowAction, evalBpf(filter, Syscall.OPEN.numberFor(arch)))
+        assertEquals(allowAction, evalBpf(filter, Syscall.CLOSE.numberFor(arch)))
+        assertEquals(allowAction, evalBpf(filter, Syscall.SOCKET.numberFor(arch)))
+        assertEquals(allowAction, evalBpf(filter, 323))
+        assertEquals(allowAction, evalBpf(filter, 1000))
+    }
 }
