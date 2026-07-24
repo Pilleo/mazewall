@@ -431,4 +431,25 @@ class ArchitectureTest {
             .because("The FFM API usage must be isolated to the io.mazewall.ffi package to maintain compile-time safety and architectural boundaries.")
             .check(allClasses)
     }
+
+    @ArchTest
+    fun methodHandleInvokeExactMustBeEncapsulatedInSyscallInvoker(allClasses: com.tngtech.archunit.core.domain.JavaClasses) {
+        noClasses()
+            .that()
+            .resideInAPackage("io.mazewall..")
+            .and(object : DescribedPredicate<com.tngtech.archunit.core.domain.JavaClass>("is not SyscallInvoker") {
+                override fun test(input: com.tngtech.archunit.core.domain.JavaClass): Boolean {
+                    return input.name != "io.mazewall.ffi.internal.SyscallInvoker"
+                }
+            })
+            .should()
+            .callMethodWhere(object : DescribedPredicate<JavaMethodCall>("calls to MethodHandle.invokeExact") {
+                override fun test(input: JavaMethodCall): Boolean {
+                    return input.target.owner.isAssignableTo("java.lang.invoke.MethodHandle") &&
+                        input.target.name == "invokeExact"
+                }
+            })
+            .because("MethodHandle.invokeExact must only be called within SyscallInvoker to ensure atomic errno capture.")
+            .check(allClasses)
+    }
 }
