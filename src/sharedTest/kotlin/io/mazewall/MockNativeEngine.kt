@@ -3,6 +3,7 @@ package io.mazewall
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.ffi.Layouts
+import io.mazewall.ffi.NativeConstants
 import io.mazewall.ffi.memory.ManagedSegment
 import io.mazewall.ffi.internal.RealTransactionManager
 import io.mazewall.ffi.memory.NativeArena
@@ -10,6 +11,10 @@ import io.mazewall.seccomp.BpfInstruction
 
 /**
  * A mock implementation of [NativeEngine] for testing fault injection.
+ *
+ * DESIGN INVARIANT: Mock allocations are aligned with the decoupled, zero-allocation design
+ * of the core interfaces. Memory signatures use [ManagedSegment]s explicitly, allowing
+ * clean mocking without under-the-hood arena creation.
  */
 public open class MockNativeEngine(
     override val fileSystem: MockNativeFileSystem = MockNativeFileSystem(),
@@ -299,6 +304,9 @@ public open class MockNativeMemory : NativeMemory {
     override fun newSockFProg(
         filters: List<BpfInstruction>,
     ): ManagedSegment {
+        require(filters.size <= NativeConstants.BPF_MAXINSNS) {
+            "BPF program exceeds kernel maximum instruction limit"
+        }
         return arena.allocate(Layouts.SOCK_FPROG)
     }
 }

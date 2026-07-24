@@ -108,6 +108,8 @@ interface ProfilerTransport :
  */
 @Suppress("MagicNumber", "ReturnCount", "ThrowsCount")
 object RealProfilerTransport : ProfilerTransport {
+    private val logger = java.util.logging.Logger.getLogger(RealProfilerTransport::class.java.name)
+
     override val raw: io.mazewall.RawSyscallOperations get() = LinuxNative.raw
     private const val CMSG_LEN_VAL = 20L
     private const val CMSG_LEN_OFF = 0L
@@ -173,8 +175,11 @@ object RealProfilerTransport : ProfilerTransport {
         resp.set(ValueLayout.JAVA_INT, RESP_ERR_OFF, 0)
         resp.set(ValueLayout.JAVA_INT, RESP_FLAGS_OFF, NativeConstants.SECCOMP_USER_NOTIF_FLAG_CONTINUE.toInt())
         val res = ioctl(session.listenerFd, SECCOMP_IOCTL_NOTIF_SEND, resp)
-        if (res is LinuxNative.SyscallResult.Error && res.errno == NativeConstants.ENOENT) {
-            return
+        if (res is LinuxNative.SyscallResult.Error) {
+            logger.warning("SECCOMP_IOCTL_NOTIF_SEND failed with errno=${res.errno}")
+            if (res.errno == NativeConstants.ENOENT) {
+                return
+            }
         }
         res.getOrThrow("sendSeccompContinue")
     }
@@ -192,8 +197,11 @@ object RealProfilerTransport : ProfilerTransport {
         resp.set(ValueLayout.JAVA_INT, RESP_ERR_OFF, -errorNr)
         resp.set(ValueLayout.JAVA_INT, RESP_FLAGS_OFF, 0)
         val res = ioctl(session.listenerFd, SECCOMP_IOCTL_NOTIF_SEND, resp)
-        if (res is LinuxNative.SyscallResult.Error && res.errno == NativeConstants.ENOENT) {
-            return
+        if (res is LinuxNative.SyscallResult.Error) {
+            logger.warning("SECCOMP_IOCTL_NOTIF_SEND failed with errno=${res.errno}")
+            if (res.errno == NativeConstants.ENOENT) {
+                return
+            }
         }
         res.getOrThrow("sendSeccompError")
     }

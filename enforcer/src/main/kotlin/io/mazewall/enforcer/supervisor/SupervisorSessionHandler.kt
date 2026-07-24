@@ -486,7 +486,13 @@ internal class SupervisorSessionHandler(
         var remainingTimeout = POLL_TIMEOUT_MS.toLong()
         var count = 0L
         val pollFdManaged = pollFd.managed
+        var eintrCount = 0
         while (remainingTimeout > 0) {
+            if (Thread.currentThread().isInterrupted) {
+                logger.warning("[SUPERVISOR-DIAGNOSTIC] JVM validation poll interrupted.")
+                break
+            }
+
             val loopStart = System.currentTimeMillis()
             val pollRes = engine.withTransaction { engine.raw.poll(pollFdManaged, 1L, remainingTimeout.toInt()) }
             val elapsed = System.currentTimeMillis() - loopStart
@@ -507,6 +513,20 @@ internal class SupervisorSessionHandler(
             }
             if (!gotEintr) {
                 break
+            }
+
+            eintrCount++
+            if (eintrCount > 1) {
+                if (eintrCount > 3) {
+                    try {
+                        Thread.sleep(1)
+                    } catch (e: InterruptedException) {
+                        Thread.currentThread().interrupt()
+                        break
+                    }
+                } else {
+                    Thread.yield()
+                }
             }
         }
         val durationMs = System.currentTimeMillis() - startMs

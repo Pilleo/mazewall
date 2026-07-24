@@ -76,6 +76,12 @@ object BpfFilter {
 
     /**
      * Constructs the BPF bytecode using a linear scan approach.
+     *
+     * @param allowUnsafePrctl When set to true, allows dangerous prctl options. WARNING: enabling this is
+     * extremely dangerous and inherently vulnerable to concurrent memory mutation attacks (TOCTOU) by sibling threads.
+     * While the register-based prctl option argument (args[0]) is immune to TOCTOU, pointer-based arguments in
+     * options like PR_SET_MM or PR_SET_NAME can point to memory regions that are concurrently mutated by sibling threads
+     * after the seccomp check but before kernel execution.
      */
     internal fun buildFromActions(
         arch: Arch,
@@ -140,7 +146,11 @@ object BpfFilter {
         emitLinearScan(builder, effectiveSyscallActions, jvmCriticalNrs, profilingMode, defaultNativeAction, handledNrs)
 
         // 4. Default Action & Build
-        return builder.ret(defaultNativeAction).build().instructions
+        val instructions = builder.ret(defaultNativeAction).build().instructions
+        require(instructions.size <= NativeConstants.BPF_MAXINSNS) {
+            "BPF program exceeds kernel maximum instruction limit"
+        }
+        return instructions
     }
 
     private fun getJvmCriticalNrs(arch: Arch): Set<Int> =
@@ -233,6 +243,8 @@ object BpfFilter {
         defaultNativeAction: Int,
         handledNrs: MutableSet<Int>,
     ) {
+        val actionsToEmit = mutableListOf<Pair<Int, Int>>()
+
         for ((nr, action) in syscallActions.entries.sortedBy { it.key }) {
             if (nr !in handledNrs) {
                 handledNrs.add(nr)
@@ -241,9 +253,7 @@ object BpfFilter {
                 val nativeAction = resolveNativeAction(effectiveAction, profilingMode)
 
                 if (nativeAction != defaultNativeAction) {
-                    builder.expect(nr) {
-                        ret(nativeAction)
-                    }
+                    actionsToEmit.add(nr to nativeAction)
                 }
             }
         }
@@ -254,10 +264,111 @@ object BpfFilter {
                 if (nr in handledNrs) continue
                 handledNrs.add(nr)
 
-                builder.expect(nr) {
-                    ret(NativeConstants.SECCOMP_RET_ALLOW)
-                }
+                actionsToEmit.add(nr to NativeConstants.SECCOMP_RET_ALLOW)
             }
+        }
+
+        // If default action is ALLOW (blacklist) and actionsToEmit size is within safe bounds (<= 32),
+        // we can build a Binary Search Tree (BST) to reach the decisions much faster.
+        if (defaultNativeAction == NativeConstants.SECCOMP_RET_ALLOW && actionsToEmit.isNotEmpty() && actionsToEmit.size <= 32) {
+            val sortedActions = actionsToEmit.sortedBy { it.first }
+            val actionLabels = mutableMapOf<Int, BpfLabel>()
+            for (action in sortedActions.map { it.second }.distinct()) {
+                actionLabels[action] = builder.nextLabel("action_ret")
+            }
+
+            emitBst(builder, sortedActions, 0, sortedActions.size - 1, actionLabels)
+
+            // Unconditional jump to skip RET blocks on fallthrough (not matched in BST)
+            val doneLabel = builder.nextLabel("bst_done")
+            builder.jumpIfEqual(0, jt = doneLabel, jf = doneLabel)
+
+            for ((action, label) in actionLabels) {
+                builder.mark(label)
+                builder.ret(action)
+            }
+
+            builder.mark(doneLabel)
+            return
+        }
+
+        // Group by nativeAction and ensure deterministic order by sorting keys and values
+        val groups = actionsToEmit.groupBy { it.second }
+            .mapValues { (_, pairs) -> pairs.map { it.first }.sorted() }
+            .toSortedMap()
+
+        for ((nativeAction, nrs) in groups) {
+            // To prevent jump offset overflows (limit is 255), we chunk syscalls.
+            // Chunk size of 100 ensures max offset is well within boundaries.
+            for (chunk in nrs.chunked(100)) {
+                val actionLabel = builder.nextLabel("action_ret")
+                val skipLabel = builder.nextLabel("skip_ret")
+
+                for (nr in chunk) {
+                    builder.jumpIfEqual(nr, jt = actionLabel)
+                }
+
+                // Unconditional jump to skip the RET instruction when no syscall in the chunk matched
+                builder.jumpIfEqual(0, jt = skipLabel, jf = skipLabel)
+
+                builder.mark(actionLabel)
+                builder.ret(nativeAction)
+
+                builder.mark(skipLabel)
+            }
+        }
+    }
+
+    private fun emitBst(
+        builder: BpfBuilder<BpfState.NrLoaded>,
+        actionsToEmit: List<Pair<Int, Int>>,
+        low: Int,
+        high: Int,
+        actionLabels: Map<Int, BpfLabel>,
+    ) {
+        if (low > high) return
+
+        if (low == high) {
+            val (nr, action) = actionsToEmit[low]
+            val label = actionLabels[action] ?: throw IllegalStateException("Missing label for action $action")
+            builder.jumpIfEqual(nr, jt = label)
+            return
+        }
+
+        val mid = (low + high) ushr 1
+        val (midNr, midAction) = actionsToEmit[mid]
+
+        val matchLabel = actionLabels[midAction] ?: throw IllegalStateException("Missing label for action $midAction")
+        builder.jumpIfEqual(midNr, jt = matchLabel)
+
+        if (low <= mid - 1 && mid + 1 <= high) {
+            val rightLabel = builder.nextLabel("bst_right")
+            val nextLabel = builder.nextLabel("bst_next")
+
+            builder.jumpIfGreaterThan(midNr, jt = rightLabel)
+
+            // Left subtree
+            emitBst(builder, actionsToEmit, low, mid - 1, actionLabels)
+            builder.jumpIfEqual(0, jt = nextLabel, jf = nextLabel)
+
+            // Right subtree
+            builder.mark(rightLabel)
+            emitBst(builder, actionsToEmit, mid + 1, high, actionLabels)
+
+            builder.mark(nextLabel)
+        } else if (low <= mid - 1) {
+            // Only Left subtree exists
+            emitBst(builder, actionsToEmit, low, mid - 1, actionLabels)
+        } else if (mid + 1 <= high) {
+            // Only Right subtree exists
+            val rightLabel = builder.nextLabel("bst_right")
+            val nextLabel = builder.nextLabel("bst_next")
+            builder.jumpIfGreaterThan(midNr, jt = rightLabel)
+            builder.jumpIfEqual(0, jt = nextLabel, jf = nextLabel)
+
+            builder.mark(rightLabel)
+            emitBst(builder, actionsToEmit, mid + 1, high, actionLabels)
+            builder.mark(nextLabel)
         }
     }
 }

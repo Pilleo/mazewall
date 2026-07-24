@@ -7,7 +7,7 @@ dependencies: ["issue-194", "issue-195"]
 component: "ffi"
 effort: "large"
 autonomy: "supervised"
-solution_approved: false
+solution_approved: true
 blast_radius: "high"
 reversible: false
 github_issue: 247
@@ -40,13 +40,13 @@ Add `context(Arena)` to any `NativeEngine` method that needs to allocate transie
 **Files changed:** `NativeEngine.kt`, `LinuxNative.kt`, `MockNativeEngine.kt`, all usages.
 
 ---
-**Chosen:** *(not yet approved — requires human decision)*
+**Chosen:** Option A — Explicit MemorySegment Parameters
 
 **Acceptance Criteria:**
-- [ ] `./gradlew check` passes across all modules.
-- [ ] `NativeEngine` interface no longer hides dynamic allocations (except potentially `ErrnoSegment`).
-- [ ] `LinuxNative.kt` does not use `nativeScope { ... }` or `Arena.ofConfined().use { ... }` internally for per-syscall tasks.
-- [ ] Consumers (like `SupervisorSessionHandler`) explicitly manage their memory using their iteration-level arenas.
+- [x] `./gradlew check` passes across all modules.
+- [x] `NativeEngine` interface no longer hides dynamic allocations (except potentially `ErrnoSegment`).
+- [x] `LinuxNative.kt` does not use `nativeScope { ... }` or `Arena.ofConfined().use { ... }` internally for per-syscall tasks.
+- [x] Consumers (like `SupervisorSessionHandler`) explicitly manage their memory using their iteration-level arenas.
 
 **Implementation Hints:**
 - Since this is a massive breaking change, coordinate it carefully after issues 194 and 195 are merged.

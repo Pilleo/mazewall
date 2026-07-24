@@ -169,4 +169,20 @@ class SbobParserTest {
         assertTrue(policy.allowedFsWritePaths.any { it.value == "/tmp/\\slash" })
         assertTrue(policy.allowedFsWritePaths.any { it.value == "/tmp/\n\r\t\b\u000C/foo" })
     }
+
+    @Test
+    fun `test that SbobParser contains Landlock symlink swapping warning KDoc`() {
+        var rootDir = java.io.File(".").absoluteFile
+        while (rootDir.parentFile != null && !java.io.File(rootDir, "enforcer").exists()) {
+            rootDir = rootDir.parentFile
+        }
+
+        val sbobParserFile = java.io.File(rootDir, "enforcer/src/main/kotlin/io/mazewall/SbobParser.kt")
+        assertTrue(sbobParserFile.exists(), "SbobParser.kt should be found at ${sbobParserFile.absolutePath}")
+
+        val content = sbobParserFile.readText()
+        assertTrue(content.contains("symlink swapping"), "SbobParser.kt should document symlink swapping incompatibility")
+        assertTrue(content.contains("Capistrano"), "SbobParser.kt should document Capistrano-style deployments")
+        assertTrue(content.contains("umbrella directory"), "SbobParser.kt should recommend profiling the parent umbrella directory")
+    }
 }

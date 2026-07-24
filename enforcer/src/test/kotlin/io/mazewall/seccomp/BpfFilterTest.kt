@@ -18,12 +18,22 @@ class BpfFilterTest {
         val filter = BpfFilter.build(arch, Policy.builder().build().definition)
 
         // Find LD W ABS 4 (Load architecture audit ID)
-        val hasArchLoad = filter.any { it.code == 0x20.toShort() && it.k == 4 }
-        assertTrue(hasArchLoad, "Filter should contain instruction to load architecture audit ID")
+        val ldIndex = filter.indexOfFirst { it.code == 0x20.toShort() && it.k == 4 }
+        assertTrue(ldIndex >= 0, "Filter should contain instruction to load architecture audit ID")
 
-        // Find JEQ AUDIT_ARCH_X86_64
-        val hasArchCheck = filter.any { it.code == 0x15.toShort() && it.k == Arch.AUDIT_ARCH_X86_64 }
-        assertTrue(hasArchCheck, "Filter should contain check for X86_64 architecture")
+        // Next instruction must be the JEQ audit arch check
+        val jmpIndex = ldIndex + 1
+        val jmpIns = filter[jmpIndex]
+        assertEquals(0x15.toShort(), jmpIns.code, "Next instruction should be JEQ check")
+        assertEquals(Arch.AUDIT_ARCH_X86_64, jmpIns.k, "Filter should check for X86_64 architecture")
+        assertEquals(1, jmpIns.jt, "jt jump offset should be 1 to skip the kill instruction on success")
+        assertEquals(0, jmpIns.jf, "jf jump offset should be 0 to fall through to the kill instruction on failure")
+
+        // If mismatch, fall through to the strict RET SECCOMP_RET_KILL_PROCESS
+        val killIndex = jmpIndex + 1
+        val killIns = filter[killIndex]
+        assertEquals(0x06.toShort(), killIns.code, "Instruction after JEQ should be RET")
+        assertEquals(NativeConstants.SECCOMP_RET_KILL_PROCESS, killIns.k, "Architecture check mismatch should strictly return SECCOMP_RET_KILL_PROCESS")
     }
 
     @Test
@@ -306,5 +316,134 @@ class BpfFilterTest {
         assertTrue(valuesChecked.contains(lo1), "LO 1 check should be present")
         assertTrue(valuesChecked.contains(hi2), "HI 2 check should be present")
         assertTrue(valuesChecked.contains(lo2), "LO 2 check should be present")
+    }
+
+    @Test
+    fun `test BpfFilter groups identical native actions and uses shared RET block`() {
+        // Create a policy where 5 syscalls are mapped to ACT_ERRNO
+        val sys1 = Syscall.GETEUID
+        val sys2 = Syscall.GETPPID
+        val sys3 = Syscall.GETUID
+        val sys4 = Syscall.GETGID
+        val sys5 = Syscall.GETEGID
+
+        val policy = Policy.builder()
+            .block(sys1, sys2, sys3, sys4, sys5)
+            .build()
+
+        val filter = BpfFilter.build(arch, policy.definition)
+
+        val nr1 = sys1.numberFor(arch)
+        val nr2 = sys2.numberFor(arch)
+        val nr3 = sys3.numberFor(arch)
+        val nr4 = sys4.numberFor(arch)
+        val nr5 = sys5.numberFor(arch)
+        val nrs = setOf(nr1, nr2, nr3, nr4, nr5)
+
+        val targetRetAction = NativeConstants.SECCOMP_RET_ERRNO or NativeConstants.EPERM
+
+        // For each of the blocked syscall numbers, locate its JEQ check and resolve its target index
+        val resolvedTargetsMap = nrs.associateWith { nr ->
+            val jeqIdx = filter.indexOfFirst { it.code == 0x15.toShort() && it.k == nr }
+            assertTrue(jeqIdx >= 0, "Should find JEQ check for syscall $nr")
+            val jeqInst = filter[jeqIdx]
+            val resolvedTargetIdx = jeqIdx + jeqInst.jt + 1
+            resolvedTargetIdx
+        }
+        val resolvedTargets = resolvedTargetsMap.values.toSet()
+
+        // All 5 syscall checks should jump to the exact same RET instruction index
+        assertEquals(1, resolvedTargets.size, "All blocked syscalls should jump to the exact same instruction index: $resolvedTargetsMap")
+
+        val sharedRetIdx = resolvedTargets.first()
+        val sharedRetInst = filter[sharedRetIdx]
+        assertEquals(0x06.toShort(), sharedRetInst.code, "Target instruction should be a RET instruction")
+        assertEquals(targetRetAction, sharedRetInst.k, "Shared RET instruction should return the blocked action")
+    }
+
+    private fun evalBpf(instructions: List<BpfInstruction>, syscallNr: Int): Int {
+        var pc = 0
+        var accumulator = 0
+        while (pc < instructions.size) {
+            val inst = instructions[pc]
+            when (inst.code) {
+                0x20.toShort() -> { // BPF_LD_ABS
+                    if (inst.k == 0) { // SECCOMP_DATA_NR_OFFSET
+                        accumulator = syscallNr
+                    } else if (inst.k == 4) { // SECCOMP_DATA_ARCH_OFFSET
+                        accumulator = Arch.AUDIT_ARCH_X86_64
+                    } else {
+                        accumulator = 0
+                    }
+                    pc++
+                }
+                0x15.toShort() -> { // BPF_JEQ
+                    if (accumulator == inst.k) {
+                        pc += inst.jt.toInt() + 1
+                    } else {
+                        pc += inst.jf.toInt() + 1
+                    }
+                }
+                0x25.toShort() -> { // BPF_JGT
+                    val accUnsigned = accumulator.toLong() and 0xFFFFFFFFL
+                    val kUnsigned = inst.k.toLong() and 0xFFFFFFFFL
+                    if (accUnsigned > kUnsigned) {
+                        pc += inst.jt.toInt() + 1
+                    } else {
+                        pc += inst.jf.toInt() + 1
+                    }
+                }
+                0x45.toShort() -> { // BPF_JSET
+                    val accUnsigned = accumulator.toLong() and 0xFFFFFFFFL
+                    val kUnsigned = inst.k.toLong() and 0xFFFFFFFFL
+                    if ((accUnsigned and kUnsigned) != 0L) {
+                        pc += inst.jt.toInt() + 1
+                    } else {
+                        pc += inst.jf.toInt() + 1
+                    }
+                }
+                0x54.toShort() -> { // BPF_ALU_AND
+                    accumulator = accumulator and inst.k
+                    pc++
+                }
+                0x06.toShort() -> { // BPF_RET
+                    return inst.k
+                }
+                else -> {
+                    pc++
+                }
+            }
+        }
+        throw IllegalStateException("BPF program fell through without returning")
+    }
+
+    @Test
+    fun `blacklist policy compiled with BST contains greater-than comparisons and routes correctly`() {
+        val policy = Policy.builder()
+            .defaultAction(SeccompAction.ACT_ALLOW)
+            .block(Syscall.EXECVE, Syscall.EXECVEAT, Syscall.MEMFD_CREATE)
+            .build()
+        val filter = BpfFilter.build(arch, policy.definition)
+
+        // Verify that BPF_JMP_JGT (0x25.toShort()) instruction is present in the compiled filter
+        val hasGreaterThan = filter.any { it.code == 0x25.toShort() }
+        assertTrue(hasGreaterThan, "The compiled filter for a blacklist policy should contain BPF_JMP_JGT instructions due to BST optimization")
+
+        val blockAction = NativeConstants.SECCOMP_RET_ERRNO or NativeConstants.EPERM
+        val allowAction = NativeConstants.SECCOMP_RET_ALLOW
+
+        // Verify routing for blocked syscalls
+        assertEquals(blockAction, evalBpf(filter, Syscall.EXECVE.numberFor(arch)))
+        assertEquals(blockAction, evalBpf(filter, Syscall.EXECVEAT.numberFor(arch)))
+        assertEquals(blockAction, evalBpf(filter, Syscall.MEMFD_CREATE.numberFor(arch)))
+
+        // Verify routing for allowed syscalls
+        assertEquals(allowAction, evalBpf(filter, Syscall.READ.numberFor(arch)))
+        assertEquals(allowAction, evalBpf(filter, Syscall.WRITE.numberFor(arch)))
+        assertEquals(allowAction, evalBpf(filter, Syscall.OPEN.numberFor(arch)))
+        assertEquals(allowAction, evalBpf(filter, Syscall.CLOSE.numberFor(arch)))
+        assertEquals(allowAction, evalBpf(filter, Syscall.SOCKET.numberFor(arch)))
+        assertEquals(allowAction, evalBpf(filter, 323))
+        assertEquals(allowAction, evalBpf(filter, 1000))
     }
 }

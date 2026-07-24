@@ -577,4 +577,182 @@ class SupervisorSessionHandlerTest {
             LinuxNative.resetToDefault()
         }
     }
+
+    @Test
+    fun `readAndHandleJvmResponse backs off on repeated EINTR during poll`() {
+        var pollCalls = 0
+
+        val mockMemory = object : io.mazewall.MockNativeMemory() {
+            context(_: io.mazewall.NativeTransaction)
+            override fun read(
+                fd: FileDescriptor<*, FdState.Open>,
+                buf: io.mazewall.ffi.memory.ManagedSegment,
+                count: Long,
+            ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                val respSeg = io.mazewall.ffi.memory.SupervisorResponseSegment.of(buf)
+                respSeg.setId(42L)
+                respSeg.setDecision(1.toByte()) // Request Allow Continue
+                respSeg.setErrorNr(0)
+                return LinuxNative.SyscallResult.Success(count)
+            }
+        }
+
+        val mockEngine = object : MockNativeEngine(memory = mockMemory) {
+            override val raw: RawSyscallOperations = object : RawSyscallOperations by this {
+                context(_: io.mazewall.NativeTransaction)
+                override fun poll(
+                    fds: io.mazewall.ffi.memory.ManagedSegment,
+                    nfds: Long,
+                    timeout: Int,
+                ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                    pollCalls++
+                    if (pollCalls <= 5) {
+                        return LinuxNative.SyscallResult.Error(io.mazewall.ffi.NativeConstants.EINTR, -1L)
+                    }
+                    return LinuxNative.SyscallResult.Success(1L)
+                }
+
+                context(_: io.mazewall.NativeTransaction)
+                override fun ioctl(
+                    fd: FileDescriptor<*, FdState.Open>,
+                    request: Long,
+                    arg: io.mazewall.ffi.memory.ManagedSegment,
+                ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                    return LinuxNative.SyscallResult.Success(0L)
+                }
+            }
+        }
+
+        try {
+            LinuxNative.setEngine(mockEngine)
+
+            val handler = SupervisorSessionHandler(
+                FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(10),
+                FileDescriptor.unsafe<FileDescriptorRole.SeccompNotif>(11),
+                engine = mockEngine
+            )
+
+            val method = SupervisorSessionHandler::class.java.getDeclaredMethods().first {
+                it.name.startsWith("readAndHandleJvmResponse") && !it.name.contains("$") && it.parameterCount == 9
+            }
+            method.isAccessible = true
+
+            val arch = io.mazewall.core.Arch.current()
+
+            io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
+                val dummyResp = arena.allocate(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_RESP)
+                val pathStr = "/bin/echo"
+
+                val paramTypes = method.parameterTypes
+                val argsToPass = arrayOfNulls<Any>(paramTypes.size)
+                argsToPass[0] = arena
+                argsToPass[1] = 42L
+                argsToPass[2] = arch.execve
+                argsToPass[3] = LongArray(6)
+                argsToPass[4] = pathStr
+                argsToPass[5] = null
+                argsToPass[6] = dummyResp
+                for (i in paramTypes.indices) {
+                    val type = paramTypes[i]
+                    if (type.name.contains("Tid")) {
+                        argsToPass[i] = io.mazewall.core.Tid(999)
+                    } else if (type.name.contains("Pid")) {
+                        argsToPass[i] = io.mazewall.core.Pid(999)
+                    } else if (i == 7 && (type == Int::class.javaPrimitiveType || type == java.lang.Integer::class.java)) {
+                        argsToPass[i] = 999
+                    }
+                }
+                argsToPass[8] = arch
+
+                val result = method.invoke(handler, *argsToPass) as Boolean
+                assertEquals(true, result)
+                assertEquals(6, pollCalls, "Should retry poll on EINTR until success")
+            }
+        } finally {
+            LinuxNative.resetToDefault()
+        }
+    }
+
+    @Test
+    fun `readAndHandleJvmResponse terminates on thread interrupt`() {
+        var pollCalls = 0
+
+        val mockEngine = object : MockNativeEngine() {
+            override val raw: RawSyscallOperations = object : RawSyscallOperations by this {
+                context(_: io.mazewall.NativeTransaction)
+                override fun poll(
+                    fds: io.mazewall.ffi.memory.ManagedSegment,
+                    nfds: Long,
+                    timeout: Int,
+                ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                    pollCalls++
+                    Thread.currentThread().interrupt() // Interrupt on first call
+                    return LinuxNative.SyscallResult.Error(io.mazewall.ffi.NativeConstants.EINTR, -1L)
+                }
+
+                context(_: io.mazewall.NativeTransaction)
+                override fun ioctl(
+                    fd: FileDescriptor<*, FdState.Open>,
+                    request: Long,
+                    arg: io.mazewall.ffi.memory.ManagedSegment,
+                ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                    return LinuxNative.SyscallResult.Success(0L)
+                }
+            }
+        }
+
+        try {
+            LinuxNative.setEngine(mockEngine)
+
+            val handler = SupervisorSessionHandler(
+                FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(10),
+                FileDescriptor.unsafe<FileDescriptorRole.SeccompNotif>(11),
+                engine = mockEngine
+            )
+
+            val method = SupervisorSessionHandler::class.java.getDeclaredMethods().first {
+                it.name.startsWith("readAndHandleJvmResponse") && !it.name.contains("$") && it.parameterCount == 9
+            }
+            method.isAccessible = true
+
+            val arch = io.mazewall.core.Arch.current()
+
+            io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
+                val dummyResp = arena.allocate(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_RESP)
+                val pathStr = "/bin/echo"
+
+                val paramTypes = method.parameterTypes
+                val argsToPass = arrayOfNulls<Any>(paramTypes.size)
+                argsToPass[0] = arena
+                argsToPass[1] = 42L
+                argsToPass[2] = arch.execve
+                argsToPass[3] = LongArray(6)
+                argsToPass[4] = pathStr
+                argsToPass[5] = null
+                argsToPass[6] = dummyResp
+                for (i in paramTypes.indices) {
+                    val type = paramTypes[i]
+                    if (type.name.contains("Tid")) {
+                        argsToPass[i] = io.mazewall.core.Tid(999)
+                    } else if (type.name.contains("Pid")) {
+                        argsToPass[i] = io.mazewall.core.Pid(999)
+                    } else if (i == 7 && (type == Int::class.javaPrimitiveType || type == java.lang.Integer::class.java)) {
+                        argsToPass[i] = 999
+                    }
+                }
+                argsToPass[8] = arch
+
+                // Ensure thread is not currently interrupted
+                Thread.interrupted()
+
+                val result = method.invoke(handler, *argsToPass) as Boolean
+                assertEquals(false, result)
+                assertEquals(1, pollCalls, "Should terminate loop immediately after interruption")
+                assertEquals(true, Thread.currentThread().isInterrupted, "Thread interrupt status should be preserved")
+            }
+        } finally {
+            Thread.interrupted() // Clean up interrupt status
+            LinuxNative.resetToDefault()
+        }
+    }
 }

@@ -447,4 +447,129 @@ class LandlockCoverageTest {
             assertTrue(ex.message!!.contains("requires Linux kernel 5.13+"))
         }
     }
+
+    @Test
+    fun `test fallback parent open flags include O_PATH and O_CLOEXEC and exclude O_NOFOLLOW`() {
+        val observedFlags = mutableListOf<Pair<String, Int>>()
+        val mockFallback = SupportedLandlockMock(
+            fileSystem = object : MockNativeFileSystem() {
+                context(_: NativeTransaction)
+                override fun open(
+                    path: ManagedSegment,
+                    flags: Int,
+                ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                    val pathStr = path.readString(0L)
+                    if (pathStr == "/nonexistent/file") {
+                        observedFlags.add(pathStr to flags)
+                        return LinuxNative.SyscallResult.Error<LinuxNative.SyscallHandledState.Unhandled>(2, -1)
+                    }
+                    if (pathStr == "/nonexistent") {
+                        observedFlags.add(pathStr to flags)
+                        return LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(100)
+                    }
+                    return LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(100)
+                }
+            }
+        )
+        LinuxNative.setEngine(mockFallback)
+
+        val session = LandlockSession(
+            Policy.builder().allowFsRead(SandboxedPath.of("/nonexistent/file", true)).build().definition
+        )
+        session.applyRuleset()
+
+        // Check that exactly two target open calls were made
+        assertEquals(2, observedFlags.size)
+
+        // First call should be for /nonexistent/file with O_PATH, O_CLOEXEC, and O_NOFOLLOW
+        val (firstPath, firstFlags) = observedFlags[0]
+        assertEquals("/nonexistent/file", firstPath)
+        assertTrue((firstFlags and io.mazewall.ffi.NativeConstants.O_PATH) != 0, "First call must contain O_PATH")
+        assertTrue((firstFlags and io.mazewall.ffi.NativeConstants.O_CLOEXEC) != 0, "First call must contain O_CLOEXEC")
+        assertTrue((firstFlags and io.mazewall.ffi.NativeConstants.O_NOFOLLOW) != 0, "First call must contain O_NOFOLLOW")
+
+        // Second call (fallback) should be for parent /nonexistent, must contain O_PATH, O_CLOEXEC, and MUST NOT contain O_NOFOLLOW
+        val (secondPath, secondFlags) = observedFlags[1]
+        assertEquals("/nonexistent", secondPath)
+        assertTrue((secondFlags and io.mazewall.ffi.NativeConstants.O_PATH) != 0, "Fallback call must contain O_PATH")
+        assertTrue((secondFlags and io.mazewall.ffi.NativeConstants.O_CLOEXEC) != 0, "Fallback call must contain O_CLOEXEC")
+        assertTrue((secondFlags and io.mazewall.ffi.NativeConstants.O_NOFOLLOW) == 0, "Fallback call must NOT contain O_NOFOLLOW")
+    }
+
+    @Test
+    fun `test net access mask calculation for ABI versions`() {
+        // ABI < 4
+        assertEquals(0L, Landlock.getFullNetAccessMask(3))
+        val policyWithBlocks = Policy.builder().block(io.mazewall.core.Syscall.BIND, io.mazewall.core.Syscall.CONNECT).build()
+        assertEquals(0L, Landlock.getNetAccessMask(3, policyWithBlocks.definition))
+
+        // ABI >= 4 (getFullNetAccessMask)
+        val fullNetMask = Landlock.LANDLOCK_ACCESS_NET_BIND_TCP or Landlock.LANDLOCK_ACCESS_NET_CONNECT_TCP
+        assertEquals(fullNetMask, Landlock.getFullNetAccessMask(4))
+
+        // ABI >= 4 (getNetAccessMask)
+        // Scenario A: blocks both BIND and CONNECT
+        val policyBlockBoth = Policy.builder().block(io.mazewall.core.Syscall.BIND, io.mazewall.core.Syscall.CONNECT).build()
+        assertEquals(fullNetMask, Landlock.getNetAccessMask(4, policyBlockBoth.definition))
+
+        // Scenario B: blocks only BIND
+        val policyBlockBind = Policy.builder().block(io.mazewall.core.Syscall.BIND).build()
+        assertEquals(Landlock.LANDLOCK_ACCESS_NET_BIND_TCP, Landlock.getNetAccessMask(4, policyBlockBind.definition))
+
+        // Scenario C: blocks only CONNECT
+        val policyBlockConnect = Policy.builder().block(io.mazewall.core.Syscall.CONNECT).build()
+        assertEquals(Landlock.LANDLOCK_ACCESS_NET_CONNECT_TCP, Landlock.getNetAccessMask(4, policyBlockConnect.definition))
+
+        // Scenario D: blocks neither
+        val policyBlockNone = Policy.builder().build()
+        assertEquals(0L, Landlock.getNetAccessMask(4, policyBlockNone.definition))
+    }
+
+    @Test
+    fun `test createRuleset sizes and network masks`() {
+        val observedSizes = mutableListOf<Long>()
+        val observedNetMasks = mutableListOf<Long>()
+
+        val mock = object : SupportedLandlockMock() {
+            context(_: NativeTransaction)
+            override fun syscall(
+                nr: Long,
+                a1: io.mazewall.core.NativeArg,
+                a2: io.mazewall.core.NativeArg,
+                a3: io.mazewall.core.NativeArg,
+                a4: io.mazewall.core.NativeArg,
+                a5: io.mazewall.core.NativeArg,
+                a6: io.mazewall.core.NativeArg,
+            ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                if (nr == io.mazewall.ffi.NativeConstants.LANDLOCK_CREATE_RULESET_NR &&
+                    a1 is io.mazewall.core.NativeArg.MemoryArg &&
+                    a1.value != ManagedSegment.NULL &&
+                    a2 is io.mazewall.core.NativeArg.LongArg
+                ) {
+                    observedSizes.add(a2.value)
+                    val rulesetAttr = LandlockRulesetAttrSegment(a1.value.unwrap)
+                    observedNetMasks.add(rulesetAttr.getHandledAccessNet())
+                    return LinuxNative.SyscallResult.Success(100L)
+                }
+                return super.syscall(nr, a1, a2, a3, a4, a5, a6)
+            }
+        }
+        LinuxNative.setEngine(mock)
+
+        NativeArena.ofConfined().use { arena ->
+            with(arena) {
+                // Test ABI 3 (size should be 8L / V1 size, net mask is unused but let's check)
+                Landlock.createRuleset(15L, Landlock.LANDLOCK_ACCESS_NET_BIND_TCP, 3)
+
+                // Test ABI 4 (size should be 16L / V2 size, net mask should be passed correctly)
+                Landlock.createRuleset(15L, Landlock.LANDLOCK_ACCESS_NET_CONNECT_TCP, 4)
+            }
+        }
+
+        assertEquals(2, observedSizes.size)
+        assertEquals(io.mazewall.ffi.Layouts.LANDLOCK_RULESET_ATTR_V1_SIZE, observedSizes[0])
+        assertEquals(io.mazewall.ffi.Layouts.LANDLOCK_RULESET_ATTR_SIZE, observedSizes[1])
+
+        assertEquals(Landlock.LANDLOCK_ACCESS_NET_CONNECT_TCP, observedNetMasks[1])
+    }
 }

@@ -376,6 +376,47 @@ class ArchitectureTest {
     }
 
     @ArchTest
+    fun javaLangThreadAndStandardExecutorsAreBannedInProductionCode(allClasses: com.tngtech.archunit.core.domain.JavaClasses) {
+        noClasses()
+            .that()
+            .resideInAPackage("io.mazewall..")
+            .and(object : DescribedPredicate<com.tngtech.archunit.core.domain.JavaClass>("are not part of core orchestration classes") {
+                override fun test(input: com.tngtech.archunit.core.domain.JavaClass): Boolean {
+                    val name = input.name
+                    return "SandboxDispatcher" !in name &&
+                        "SupervisorDaemon" !in name &&
+                        "SupervisorSession" !in name &&
+                        "SupervisorInstaller" !in name &&
+                        "SupervisorSeccompNotifInstaller" !in name &&
+                        "JVMValidationListener" !in name &&
+                        "JvmFloorWorkload" !in name &&
+                        "Profiler" !in name &&
+                        "IterativeProfiler" !in name
+                }
+            })
+            .should()
+            .callConstructorWhere(object : DescribedPredicate<com.tngtech.archunit.core.domain.JavaConstructorCall>("calls to Thread or standard Executor constructors") {
+                override fun test(input: com.tngtech.archunit.core.domain.JavaConstructorCall): Boolean {
+                    val owner = input.target.owner
+                    return owner.isAssignableTo(java.lang.Thread::class.java) ||
+                        (owner.isAssignableTo(java.util.concurrent.ExecutorService::class.java) &&
+                            owner.name.startsWith("java.util.concurrent."))
+                }
+            })
+            .orShould()
+            .callMethodWhere(object : DescribedPredicate<com.tngtech.archunit.core.domain.JavaMethodCall>("calls to Thread or standard Executors factory methods") {
+                override fun test(input: com.tngtech.archunit.core.domain.JavaMethodCall): Boolean {
+                    val owner = input.target.owner
+                    return owner.isAssignableTo(java.util.concurrent.Executors::class.java) ||
+                        (owner.isAssignableTo(java.lang.Thread::class.java) &&
+                            input.target.name in setOf("startVirtualThread", "ofVirtual", "ofPlatform"))
+                }
+            })
+            .because("Direct creation of Thread or standard Executors ignores mazewall's containment states and structured concurrency requirements, leading to context leaks. Use SandboxDispatcher or ContainedExecutors instead.")
+            .check(allClasses)
+    }
+
+    @ArchTest
     fun ffmApiMustBeIsolatedToFfiPackage(allClasses: com.tngtech.archunit.core.domain.JavaClasses) {
         noClasses()
             .that()

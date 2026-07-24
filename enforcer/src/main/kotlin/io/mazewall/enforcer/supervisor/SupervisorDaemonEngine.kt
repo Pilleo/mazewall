@@ -148,29 +148,32 @@ internal class SupervisorDaemonEngine(
                         NativeConstants.SOCK_CLOEXEC
                     )
                 }
-                if (res is io.mazewall.LinuxNative.SyscallResult.Success) {
-                    val clientFd = FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(res.value.toInt())
-
-                    if (clientSockets.size >= MAX_CONNECTIONS) {
-                        System.err.println("[SUPERVISOR] Rejecting connection: too many clients (${clientSockets.size})")
-                        socketManager.close(clientFd)
-                        return
+                val clientFdVal = res.recover { errno, _ ->
+                    if (errno == NativeConstants.EINTR) {
+                        return@recover -1L
                     }
-
-                    clientSockets.add(clientFd)
-                    try {
-                        connectionExecutor.execute { handleConnection(clientFd) }
-                    } catch (e: Exception) {
-                        System.err.println("[SUPERVISOR] Failed to execute connection handler: ${e.message}")
-                        clientSockets.remove(clientFd)
-                        socketManager.close(clientFd)
-                    }
-                    return
-                } else {
-                    val errno = (res as io.mazewall.LinuxNative.SyscallResult.Error).errno
-                    if (errno == NativeConstants.EINTR) continue
                     return
                 }
+                if (clientFdVal == -1L) {
+                    continue
+                }
+                val clientFd = FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(clientFdVal.toInt())
+
+                if (clientSockets.size >= MAX_CONNECTIONS) {
+                    System.err.println("[SUPERVISOR] Rejecting connection: too many clients (${clientSockets.size})")
+                    socketManager.close(clientFd)
+                    return
+                }
+
+                clientSockets.add(clientFd)
+                try {
+                    connectionExecutor.execute { handleConnection(clientFd) }
+                } catch (e: Exception) {
+                    System.err.println("[SUPERVISOR] Failed to execute connection handler: ${e.message}")
+                    clientSockets.remove(clientFd)
+                    socketManager.close(clientFd)
+                }
+                return
             }
         } catch (ignored: java.io.IOException) {
             // Ignore during shutdown

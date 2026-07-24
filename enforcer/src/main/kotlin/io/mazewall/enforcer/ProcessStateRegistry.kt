@@ -19,10 +19,6 @@ internal object ProcessStateRegistry {
      * Atomically updates the global security state.
      */
     fun update(block: (ContainerState) -> ContainerState) {
-        while (true) {
-            val current = stateRef.get()
-            val next = block(current)
-            if (stateRef.compareAndSet(current, next)) break
-        }
+        stateRef.updateAndGet { block(it) }
     }
 }

@@ -8,7 +8,7 @@ import java.nio.file.Path
 
 class PathNormalizerSymlinkTest {
     @Test
-    fun `test pruning DOES occur if parent is a symlink because it is resolved`(@TempDir tempDir: Path) {
+    fun `test pruning does NOT occur if parent is a symlink to prevent production crashes`(@TempDir tempDir: Path) {
         val realParent = tempDir.resolve("real_parent")
         Files.createDirectories(realParent)
         val fileInRealParent = realParent.resolve("file.txt")
@@ -22,11 +22,14 @@ class PathNormalizerSymlinkTest {
             symlinkParent.resolve("file.txt").toString()
         )
 
-        // Pruning SHOULD occur because symlinkParent is resolved to its real path.
+        // Pruning should NOT occur because symlinkParent has a symbolic link component.
+        // In Landlock, the symlink will be rejected (O_NOFOLLOW), so we must preserve the nested path
+        // so it can be added to the ruleset and accessed successfully.
         val result = PathNormalizer.normalizeAndPrune(paths, null)
 
-        val expectedPath = realParent.toRealPath().toString()
-        assertEquals(setOf(expectedPath), result)
+        val expectedParent = realParent.toRealPath().toString()
+        val expectedFile = fileInRealParent.toRealPath().toString()
+        assertEquals(setOf(expectedParent, expectedFile), result)
     }
 
     @Test

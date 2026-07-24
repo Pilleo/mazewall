@@ -72,4 +72,29 @@ class SupervisorDaemonEngineTest {
 
         assertEquals(2, acceptCalls)
     }
+
+    @Test
+    fun `handleNewConnection retries on EINTR and then successfully accepts client connection`() {
+        var acceptCalls = 0
+        val mockEngine = MockNativeEngine()
+        mockEngine.networking.onAccept4 = { _, _, _, _, _ ->
+            acceptCalls++
+            if (acceptCalls == 1) {
+                LinuxNative.SyscallResult.Error(NativeConstants.EINTR, -1L)
+            } else {
+                LinuxNative.SyscallResult.Success(12L) // Client socket FD 12
+            }
+        }
+        // Force processConnectionStep to fail and return null to immediately exit handleConnection thread
+        mockEngine.onPoll = { _, _, _, _ ->
+            LinuxNative.SyscallResult.Error(NativeConstants.EPERM, -1L)
+        }
+
+        val engine = SupervisorDaemonEngine("/tmp/test.sock", engine = mockEngine)
+        val serverFd = FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(5)
+
+        engine.handleNewConnection(serverFd)
+
+        assertEquals(2, acceptCalls)
+    }
 }

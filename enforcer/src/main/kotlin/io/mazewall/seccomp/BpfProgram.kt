@@ -108,7 +108,7 @@ public fun BpfBuilder<BpfState.Uninitialized>.checkArch(arch: Arch): BpfBuilder<
     ops.add(BpfMacro.LoadAbsolute(BpfFilter.SECCOMP_DATA_ARCH_OFFSET))
     val archOkLabel = nextLabel("arch_ok")
     ops.add(BpfMacro.JumpIfEqual(arch.audit, jt = archOkLabel))
-    ops.add(BpfMacro.Ret(NativeConstants.SECCOMP_RET_KILL_THREAD))
+    ops.add(BpfMacro.Ret(NativeConstants.SECCOMP_RET_KILL_PROCESS))
     ops.add(BpfMacro.Label(archOkLabel))
     return BpfBuilder(ops, labelCounter)
 }
@@ -216,6 +216,15 @@ public fun BpfBuilder<BpfState.NrLoaded>.jumpIfSet(
     return this
 }
 
+public fun BpfBuilder<BpfState.NrLoaded>.jumpIfGreaterThan(
+    k: Int,
+    jt: BpfLabel? = null,
+    jf: BpfLabel? = null
+): BpfBuilder<BpfState.NrLoaded> {
+    ops.add(BpfMacro.JumpIfGreaterThan(k, jt, jf))
+    return this
+}
+
 public fun BpfBuilder<BpfState.NrLoaded>.and(k: Int): BpfBuilder<BpfState.NrLoaded> {
     ops.add(BpfMacro.And(k))
     return this
@@ -261,6 +270,7 @@ public fun BpfBuilder<BpfState.Terminated>.build(): BpfProgram<BpfStatus.Unverif
             is BpfMacro.Ret -> BpfInstruction.Ret(BPF_RET, op.action)
             is BpfMacro.JumpIfEqual -> compileJump(BPF_JMP_JEQ, op.k, op.jt, op.jf, index, labelPositions)
             is BpfMacro.JumpIfSet -> compileJump(BPF_JMP_JSET, op.k, op.jt, op.jf, index, labelPositions)
+            is BpfMacro.JumpIfGreaterThan -> compileJump(BPF_JMP_JGT, op.k, op.jt, op.jf, index, labelPositions)
             is BpfMacro.Label -> throw IllegalStateException("Label found in filtered ops")
         }
     }
@@ -300,6 +310,7 @@ private const val BPF_ALU_AND: Short = 0x54
 private const val BPF_RET: Short = 0x06
 private const val BPF_JMP_JEQ: Short = 0x15
 private const val BPF_JMP_JSET: Short = 0x45
+private const val BPF_JMP_JGT: Short = 0x25
 
 /**
  * Intermediate symbolic representation of BPF instructions before label resolution.
@@ -308,6 +319,7 @@ internal sealed interface BpfMacro {
     data class LoadAbsolute(val offset: Int) : BpfMacro
     data class JumpIfEqual(val k: Int, val jt: BpfLabel? = null, val jf: BpfLabel? = null) : BpfMacro
     data class JumpIfSet(val k: Int, val jt: BpfLabel? = null, val jf: BpfLabel? = null) : BpfMacro
+    data class JumpIfGreaterThan(val k: Int, val jt: BpfLabel? = null, val jf: BpfLabel? = null) : BpfMacro
     data class And(val k: Int) : BpfMacro
     data class Ret(val action: Int) : BpfMacro
     data class Label(val label: BpfLabel) : BpfMacro

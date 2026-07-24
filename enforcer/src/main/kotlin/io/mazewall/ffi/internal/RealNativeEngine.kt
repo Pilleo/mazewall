@@ -19,6 +19,10 @@ import java.lang.invoke.MethodHandles
 
 /**
  * Real implementation of NativeEngine using FFM to call Linux system calls.
+ *
+ * DESIGN INVARIANT: This implementation is completely pure and allocation-free on the per-syscall
+ * hot paths. It does not utilize [nativeScope] or create internal [Arena] instances.
+ * Captured error states are optimized using thread-local segments via [ErrnoSegment].
  */
 @Suppress("TooManyFunctions")
 internal object RealNativeEngine : NativeEngine, RawSyscallOperations {

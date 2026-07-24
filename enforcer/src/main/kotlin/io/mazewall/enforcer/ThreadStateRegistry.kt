@@ -14,16 +14,96 @@ internal object ThreadStateRegistry {
     // issue-102-permanent-thread-pool-contamination-classloader-leaks-and-st.md
     // for the known limitation and correct fix strategy (scope checks, not cleanup).
 
-    private var stateInternal by threadLocal { ContainerState() }
+    private class ThreadStateHolder {
+        var state: ContainerState = ContainerState()
+        var cachedProcessState: ContainerState? = null
+        var cachedMergedState: ContainerState? = null
+    }
+
+    private val holder = ThreadLocal.withInitial { ThreadStateHolder() }
 
     /**
      * The current security state of the active thread.
      */
     var state: ContainerState
-        get() = stateInternal
+        get() = holder.get().state
         set(value) {
-            stateInternal = value
+            val h = holder.get()
+            h.state = value
+            h.cachedMergedState = null
+            h.cachedProcessState = null
         }
+
+    /**
+     * Fast path to resolve the current merged security state of the active thread.
+     */
+    fun resolveCurrentState(processState: ContainerState): ContainerState {
+        val h = holder.get()
+        val ts = h.state
+        if (h.cachedProcessState === processState && h.cachedMergedState != null) {
+            return h.cachedMergedState!!
+        }
+
+        val merged = mergeStates(ts, processState)
+        h.cachedProcessState = processState
+        h.cachedMergedState = merged
+        return merged
+    }
+
+    private fun mergeStates(ts: ContainerState, ps: ContainerState): ContainerState {
+        val mergedActions = ts.syscallActions.toMutableMap()
+        for ((sys, action) in ps.syscallActions) {
+            val current = mergedActions[sys]
+            if (current == null || action.priority > current.priority) {
+                mergedActions[sys] = action
+            }
+        }
+
+        val mergedDefault = if (ts.defaultAction.priority > ps.defaultAction.priority) ts.defaultAction else ps.defaultAction
+
+        val mergedAllowed = if (ts.allowedSyscalls == null) {
+            ps.allowedSyscalls
+        } else if (ps.allowedSyscalls == null) {
+            ts.allowedSyscalls
+        } else {
+            ts.allowedSyscalls.intersect(ps.allowedSyscalls)
+        }
+
+        val mergedEngineState = mergeEngineStates(ts.engineState, ps.engineState)
+
+        return ContainerState(
+            filterDepth = ts.filterDepth + ps.filterDepth,
+            syscallActions = mergedActions,
+            defaultAction = mergedDefault,
+            allowedSyscalls = mergedAllowed,
+            allowsMmapExec = ts.allowsMmapExec && ps.allowsMmapExec,
+            allowsNonThreadClone = ts.allowsNonThreadClone && ps.allowsNonThreadClone,
+            allowsUnsafePrctl = ts.allowsUnsafePrctl && ps.allowsUnsafePrctl,
+            landlockPolicy = ts.landlockPolicy ?: ps.landlockPolicy,
+            engineState = mergedEngineState
+        )
+    }
+
+    private fun mergeEngineStates(
+        ts: io.mazewall.seccomp.SeccompInstallationState,
+        ps: io.mazewall.seccomp.SeccompInstallationState
+    ): io.mazewall.seccomp.SeccompInstallationState {
+        val tsRank = stateRank(ts)
+        val psRank = stateRank(ps)
+        return if (tsRank >= psRank) ts else ps
+    }
+
+    private fun stateRank(state: io.mazewall.seccomp.SeccompInstallationState): Int {
+        return when (state) {
+            is io.mazewall.seccomp.SeccompInstallationState.Uninitialized -> 0
+            is io.mazewall.seccomp.SeccompInstallationState.Failed -> 1
+            is io.mazewall.seccomp.SeccompInstallationState.FilterBuilt -> 2
+            is io.mazewall.seccomp.SeccompInstallationState.PrivilegesLocked -> 3
+            is io.mazewall.seccomp.SeccompInstallationState.SystemCallApplied -> 4
+            is io.mazewall.seccomp.SeccompInstallationState.FallbackPrctlApplied -> 4
+            is io.mazewall.seccomp.SeccompInstallationState.Verified -> 5
+        }
+    }
 
     /**
      * Explicitly disables state sanitization.

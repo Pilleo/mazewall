@@ -1,6 +1,7 @@
 package io.mazewall.profiler.engine
 
 import io.mazewall.LinuxNative
+import java.io.IOException
 import java.lang.foreign.Arena
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
@@ -115,6 +116,16 @@ internal class ProfilerSessionHandler(
         }.recover { _, _ -> false }
     }
 
+    /**
+     * Processes a single incoming seccomp notification.
+     *
+     * ### ⚠️ FFM Memory Safety & Lifetime Invariant:
+     * To prevent off-heap/native memory segment leaks, high GC pressure, and lifetime issues,
+     * any raw seccomp_data structural slices or other native/off-heap memory resolved inside this method
+     * **must be strictly materialized into JVM heap objects** before crossing the [TraceEvent] or
+     * [SyscallEvent] boundaries (which is done here when [SyscallPathResolver.resolve] is called
+     * and the resulting event is published via [TraceEventPublisher.sendTraceEvent]).
+     */
     @Suppress("TooGenericExceptionCaught", "ReturnCount", "CyclomaticComplexMethod")
     context(arena: NativeArena)
     internal fun processNotification(
@@ -235,9 +246,9 @@ internal class ProfilerSessionHandler(
         } catch (e: java.nio.channels.ClosedByInterruptException) {
             Thread.currentThread().interrupt()
             throw e
-        } catch (e: Throwable) {
+        } catch (e: IOException) {
             logger.severe {
-                "Exception in processNotification: ${e.message}. Dumping SessionEventLedger:\n" +
+                "IOException in processNotification: ${e.message}. Dumping SessionEventLedger:\n" +
                     ledger.dump().joinToString("\n")
             }
             if (continueSent) {
@@ -254,6 +265,12 @@ internal class ProfilerSessionHandler(
             } catch (ignored: Throwable) {}
             ledger.record(SessionEvent.ErrorReplied(System.nanoTime(), pidVal.toLong(), ECONNRESET))
             return false
+        } catch (e: Throwable) {
+            logger.severe {
+                "Structural or unrecoverable error in processNotification: ${e.message}. Dumping SessionEventLedger:\n" +
+                    ledger.dump().joinToString("\n")
+            }
+            throw e
         }
     }
 
