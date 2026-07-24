@@ -16,7 +16,7 @@ reversible: true
 # 🔵 [Severity: LOW]: Orchestrator: Close GitHub Issue Automatically on RESOLVE_TASK
 
 **Context:**
-`RESOLVE_TASK.execute()` marks the local backlog file as resolved, moves it to `docs/internals/backlog/resolved/`, and regenerates the knowledge map. However, it never closes the corresponding GitHub issue. After a PR is merged, the GitHub issue that was used to trigger Jules remains permanently open, cluttering the issue tracker and confusing anyone who looks at open issues. The `context.githubIssueNumber` and `context.prNumber` are both available at this point.
+`RESOLVE_TASK.execute()` marks the local backlog file as resolved, moves it to ``, and regenerates the knowledge map. However, it never closes the corresponding GitHub issue. After a PR is merged, the GitHub issue that was used to trigger Jules remains permanently open, cluttering the issue tracker and confusing anyone who looks at open issues. The `context.githubIssueNumber` and `context.prNumber` are both available at this point.
 
 **Needed:**
 In `RESOLVE_TASK.execute()`, after `env.markIssueAsResolved(nextIssue)` and before `context.clearActiveTask()`, add a call to close the GitHub issue:

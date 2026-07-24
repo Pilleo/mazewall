@@ -1,11 +1,12 @@
 ---
 title: "Unhandled Signal Mask Inheritance in `ContainedExecutors`"
 severity: "HIGH"
-status: "open"
+status: "resolved"
 priority: 5
 dependencies: []
 component: "enforcer"
 effort: "medium"
+github_issue: 267
 ---
 
 # 🔴 [Severity: MEDIUM]: Unhandled Signal Mask Inheritance in `ContainedExecutors`

@@ -1,4 +1,5 @@
-# The History of Linux Trust Issues (And Why You Should Develop Them Too)
+# The History of Linux Trust Issues: From Cpushare to Your Backend
+![dog-side-eye.gif](dog-side-eye.gif)
 
 [![Series Home](https://img.shields.io/badge/Series-Home-1e293b)](../../README.md)
 
@@ -20,9 +21,9 @@ This is not a bug or a memory leak. It is a deliberate security architecture dec
 
 ## 2005: The Kernel Gets a Lock
 
-The story starts not with browsers or containers, but with a grid computing company called Cpushare. In 2005, Andrea Arcangeli contributed a feature to Linux 2.6.12 called **seccomp** — *secure computing mode*.
+The story starts not with browsers or containers, but with a grid computing company called [CPUShare](https://lwn.net/Articles/120647/). In 2005, Andrea Arcangeli contributed a feature to Linux 2.6.12 called **seccomp** — *secure computing mode* ([LWN: Secure computing mode](https://lwn.net/Articles/120647/)).
 
-The original design was blunt. A process that enabled seccomp strict mode was immediately locked to exactly four system calls: `read`, `write`, `exit`, and `sigreturn`. Nothing else. Any other syscall killed the process instantly with `SIGKILL`. The use case was specific: Cpushare wanted to run untrusted code submitted by strangers on their machines without the code being able to do anything harmful. The kernel enforced it. No bypass was possible.
+The original design was blunt. A process that enabled seccomp strict mode was immediately locked to exactly four system calls: `read`, `write`, `exit`, and `sigreturn`. Nothing else. Any other syscall killed the process instantly with `SIGKILL`. The use case was specific: CPUShare wanted to run untrusted code submitted by strangers on their machines without the code being able to do anything harmful. The kernel enforced it. No bypass was possible.
 
 This original strict mode was useful in narrow contexts but too limiting for general applications — most software needs more than four system calls to function. It saw limited adoption outside specialized compute environments.
 
@@ -72,7 +73,7 @@ Chrome adopted Seccomp-BPF immediately for its renderer sandbox. The Chromium th
 
 Docker launched in 2013 and eventually added Seccomp-BPF support. By 2016 it became a default: every Docker container runs with a Seccomp profile blocking about 44 high-risk syscalls out of roughly 350. Your containers today are almost certainly running with this protection — applied by the container runtime, invisibly.
 
-That same year, Elasticsearch 5.0 shipped with process-wide syscall filtering as a **required bootstrap check** on Linux. It refuses to start if the kernel does not support it. Millions of production clusters have been running with this protection since 2016 — a process-wide Seccomp-BPF policy that blocks `execve`, `fork`, module loading, and other high-risk operations for the entire JVM process. The filter has almost never caused a problem, and it has quietly prevented entire categories of post-exploitation attack from working.
+That same year, Elasticsearch 5.0 shipped with process-wide syscall filtering as a **required bootstrap check** on Linux ([Elasticsearch 5.0 Seccomp implementation](https://github.com/elastic/elasticsearch/blob/v5.0.0/core/src/main/java/org/elasticsearch/bootstrap/Seccomp.java)). It refuses to start if the kernel does not support it or if system call filters fail to install. Millions of production clusters have been running with this protection since 2016 — a process-wide Seccomp-BPF policy that blocks `execve`, `fork`, module loading, and other high-risk operations for the entire JVM process. The filter has almost never caused a problem, and it has quietly prevented entire categories of post-exploitation attack from working.
 
 Here is what that means concretely: an attacker who exploits a vulnerability in Elasticsearch — a deserialization gadget, a scripting engine bug, a query parser flaw — achieves remote code execution in the JVM. They then try `execve("/bin/sh")`. The kernel returns `EPERM`. Not Elasticsearch's code rejecting it. The kernel. The reverse shell that would work against almost any unprotected Linux process is dead on arrival.
 
@@ -100,9 +101,7 @@ But process-wide restriction is coarse-grained. Consider a typical backend servi
 
 From the kernel's perspective, every thread in the process is identical. A compromised document processor has the same permission to open network sockets as the outbound integrator. The HTTP handler can attempt to write to arbitrary filesystem paths. Process-wide restriction blocks the worst escalation paths — `execve`, `fork`, module loading — but it cannot express the question: *why should the document processor be allowed to make outbound network connections at all?*
 
-That requires thread-scoped restriction. And we established above that thread-scoped restriction failed in Chromium's case.
-
-The key variable is not the kernel. It is not the language per se either. It is two separate questions: can an exploit in one thread *arbitrarily write to the memory of another*? And do the units of work you want to isolate actually map to OS-level threads?
+That requires thread-scoped restriction. And we established above that thread-scoped restriction failed in Chromium's C++ context.
 
 ---
 
@@ -160,13 +159,13 @@ Process-wide restriction is straightforwardly useful for Python. Thread-scoped f
 
 The practical upshot of this history:
 
-**Process-wide syscall restriction** — available since Linux 3.5 (2012), in production at scale since at least Elasticsearch 5.0 (2016). Applied once at startup. Blocks the most dangerous escalation syscalls globally across every thread. Almost free at runtime. Dramatically underused by application developers, who leave it entirely to their container runtime with a generic profile.
+**Process-wide syscall restriction** — available since Linux 3.5 (2012), in production at scale since at least Elasticsearch 5.0 (2016). Any runtime, any language. Applied once at startup. Blocks the most dangerous escalation syscalls globally. Almost free at runtime. This is the bigger, more universal gap: most backend services leave it entirely to their container runtime with a generic lowest-common-denominator profile, or skip it entirely.
 
-**Thread-scoped syscall restriction** — the approach Chromium could not safely use in C++, but that changes for managed and memory-safe runtimes. Applied per component. Restricts specific thread pools to the syscalls and filesystem paths they genuinely require. For runtimes where thread-level isolation is sound, turns a compromised PDF processor into a thread that physically cannot open a network socket, regardless of what vulnerability was exploited.
+**Thread-scoped syscall restriction** — a bonus layer available on top of the process-wide baseline, but only where the runtime makes it sound. As the analysis above shows, that means managed and memory-safe runtimes: JVM, .NET, and safe Rust. For those runtimes it turns a compromised component into a thread that physically cannot open a network socket, regardless of what vulnerability was exploited. For Go, C++, or single-threaded event loops, the process-wide layer is still the right focus.
 
 Neither requires new hardware. Neither requires privileged access — both Seccomp and Landlock can be installed by any unprivileged process after setting `PR_SET_NO_NEW_PRIVS`. The primitives have been in the kernel for over a decade.
 
-What has been missing is the tooling to apply them at the granularity that application architecture actually demands, and a clear understanding of which runtimes make the thread-level layer meaningful rather than illusory.
+What has been missing is the tooling to apply them at the granularity that application architecture actually demands — and the habit of reaching for them at all.
 
 ## Where This Is Going
 
@@ -182,4 +181,4 @@ The history answers the *how* — what these mechanisms are, which runtimes they
 
 The harder question is the *what*: what should your service's behavioral contract look like? Your SBOM tells you which libraries you've deployed. It cannot tell you that one of them opens an outbound socket twice a day — to an address you don't own, for reasons no one on your team chose. To express a Seccomp policy you trust, you first need to know what your service actually does, at the syscall level, across all code paths and all dependency internals.
 
-That gap — between having the mechanism and knowing what to put in it — is what the next article addresses.
+That gap — between having the kernel primitive and knowing what to put in it — is the subject of the next article. The short version: you almost certainly don't know what your service is actually doing at the syscall level. Neither does your SBOM.

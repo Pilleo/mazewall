@@ -1,11 +1,12 @@
 ---
 title: "`SeccompAction` Violates Open/Closed Principle (OCP)"
 severity: "ENHANCEMENT"
-status: "open"
+status: "resolved"
 priority: 2
 dependencies: []
 component: "unknown"
 effort: "large"
+github_issue: 273
 ---
 
 # 🔵 [Severity: ENHANCEMENT]: `SeccompAction` Violates Open/Closed Principle (OCP)

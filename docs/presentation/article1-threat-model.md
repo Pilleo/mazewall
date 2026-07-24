@@ -1,23 +1,23 @@
 # Do You Really Know What Your App Is Doing at Runtime?
-
+![maze_security_walls_new.png](maze_security_walls_new.png)
 [![← Prologue](https://img.shields.io/badge/←_Prologue-History-6366f1)](article0a-history.md)
 [![Series Home](https://img.shields.io/badge/Series-Home-1e293b)](../../README.md)
 [![Part 2 →](https://img.shields.io/badge/Part_2_→-Dynamic_Profiling-6366f1)](article2-profiler.md)
 
 > **Series overview:** This is Part 1 of a 5-part series on behavioral security for cloud-native applications.
- 
+
 We have become very good at answering one specific supply-chain question:
- 
+
 **What is inside this software?**
- 
+
 That is what an [SBOM](https://www.cisa.gov/sbom) (Software Bill of Materials) gives us. It tells us what components, packages, and libraries are packed into an application or container image. That visibility is critical. If a zero-day vulnerability lands in a popular dependency, an SBOM helps us immediately identify our exposure.
- 
+
 But the moment software is compromised, composition stops being the most important question. The real question becomes:
- 
+
 **What is this software doing right now?**
- 
+
 And in many cases, the honest answer is uncomfortable: we don’t really know.
- 
+
 An SBOM can tell you that a compression library is present. It cannot tell you that this same library has suddenly started interfering with authentication flows. It can tell you that a logging framework is installed. It cannot tell you that the logger is currently opening outbound network sockets. Composition transparency is valuable, but it is not behavioral transparency.
 
 Consider a concrete pattern you may have already shipped: your service uses a popular PDF-rendering library. No CVEs in your scanner. SBOM is clean. But twice a day, a thread in your process opens an outbound TCP socket to an IP you do not own. Is it a license check? Anonymous telemetry? A beacon quietly introduced through a compromised build pipeline? Your current security tooling cannot answer that — because it sees one process with one uniform permissions profile. It has no behavioral contract to compare against.
@@ -40,13 +40,13 @@ graph TD
     A -.->|Blocked Exec| D[ /bin/sh ]
 ```
 
-That gap is exactly where a new, emerging concept starts to matter: **SBoB—the Software Bill of Behavior.**
+That gap is exactly where a new, emerging concept starts to matter: **SBoB — the Software Bill of Behavior** (also referred to simply as **BoB**).
 
 ## From Boundaries to Contracts
 
-For the last decade, cloud-native security has relied on **boundaries**—wrapping apps in containers and namespaces, applying a global security profile at the outer shell. This typically means setting a one-size-fits-all policy for the entire container, such as Docker's default Seccomp profile, a generic AppArmor configuration, or a Kubernetes Network Policy. These are coarse-grained controls applied uniformly to everything inside the container, regardless of the application's internal architecture. 
+For the last decade, cloud-native security has relied on **boundaries**—wrapping apps in containers and namespaces, applying a global security profile at the outer shell. This typically means setting a one-size-fits-all policy for the entire container, such as Docker's default Seccomp profile, a generic AppArmor configuration, or a Kubernetes Network Policy. These are coarse-grained controls applied uniformly to everything inside the container, regardless of the application's internal architecture.
 
-But for developers, this boundary model has a fundamental blind spot: it relies on a **perimeter-based model** that assumes any code running inside the container is trusted. The internal "walls" (your code's modules and architecture) are structurally present, but provide zero physical enforcement at the OS level. If an attacker achieves [Arbitrary Code Execution (ACE)](https://en.wikipedia.org/wiki/Arbitrary_code_execution) inside the application, they can move unrestricted within the container to exfiltrate data or execute payload code. 
+But for developers, this boundary model has a fundamental blind spot: it relies on a **perimeter-based model** that assumes any code running inside the container is trusted. The internal "walls" (your code's modules and architecture) are structurally present, but provide zero physical enforcement at the OS level. If an attacker achieves [Arbitrary Code Execution (ACE)](https://en.wikipedia.org/wiki/Arbitrary_code_execution) inside the application, they can move unrestricted within the container to exfiltrate data or execute payload code.
 
 ```mermaid
 graph LR
@@ -61,16 +61,16 @@ graph LR
     end
 ```
 
-The shift to **contracts** (SBoB) introduces **internal enforcement boundaries**, where the OS kernel validates every system call against a specific behavioral profile.
+The shift to **contracts** (SBoB / BoB) introduces **internal enforcement boundaries**, where the OS kernel validates every system call against a specific behavioral profile.
 
 Instead of a single perimeter, every system call, filesystem path, or socket access becomes a verified enforcement point. Under this contract:
  1. **Behavioral Enforcement:** An attacker who compromises a worker [thread](https://www.baeldung.com/cs/process-vs-thread) is restricted to the specific system calls and files required for that thread's task—they are blocked by the kernel (e.g., via [Seccomp](https://docs.docker.com/engine/security/seccomp/) or [Landlock](https://landlock.io/)).
  2. **Kernel-Level Verification:** The kernel actively verifies that execution strictly matches the application's declared behavioral profile.
- 
+
 We move from **coarse-grained perimeter rules** that ask *"Is this container allowed to talk to the internet?"* to **fine-grained behavioral contracts** that ask *"Is this specific library, at this specific millisecond, allowed to perform this specific system call?"*
- 
-*(A quick note on scope: BoB is still emerging, tooling is early, and standards are actively forming. What follows is a picture of where cloud-native security is heading — a direction that is becoming technically feasible and strategically hard to ignore.)*
- 
+
+*(A quick note on scope: SBoB / BoB is still emerging, tooling is early, and standards are actively forming. What follows is a picture of where cloud-native security is heading — a direction that is becoming technically feasible and strategically hard to ignore.)*
+
 > **Wait — doesn't Docker already do this?**
 >
 > Yes, partially — and this is a common and fair question. Docker and Podman use [Namespaces](https://man7.org/linux/man-pages/man7/namespaces.7.html) to isolate process trees, networks, and filesystems between containers; [cgroups v2](https://www.kernel.org/doc/html/latest/admin-guide/cgroup-v2.html) to limit CPU and memory consumption; and a default [Seccomp-BPF](https://docs.docker.com/engine/security/seccomp/) **allowlist** profile that permits roughly 311 syscalls while blocking everything else — including approximately 44 syscalls that are explicitly denied by name — for every process inside the container. That is meaningful protection.
@@ -78,30 +78,30 @@ We move from **coarse-grained perimeter rules** that ask *"Is this container all
 > The key word is *every process*. Docker applies **one profile to all code running in the container** — your HTTP handler, your background scheduler, your database migration runner, and any malicious code that has compromised one of them. If the compromised code only needs syscalls that the HTTP handler legitimately uses, Docker's profile will not stop it.
 >
 > BoB — and tools like Kubescape and mazewall — ask a harder question: can we enforce a *distinct* contract for each component, where the migration runner cannot touch network sockets and the HTTP handler cannot spawn child processes? The outer container wall remains essential. What is missing is the system of locks on the rooms inside.
- 
+
 ## The Catalyst: Practical Runtime Observation with eBPF
- 
+
 Answering the harder question — enforcing a *distinct* behavioral contract per component — requires knowing exactly what each component does at runtime. For a long time, getting that visibility in production was either too expensive, too invasive, or too brittle to rely on. The core trade-offs were:
- 
+
 *   **Performance Overhead (Expensive):** Tools like the **Java Security Manager (JSM)** required a permission check on almost every sensitive operation (like opening a file or a socket). This introduced a significant performance tax that many high-throughput applications couldn't afford.
 *   **Operational Fragility (Brittle):** Techniques like **LD_PRELOAD** hooking relied on intercepting standard library calls. This was easily bypassed by statically linked binaries or applications that made direct system calls, and often broke during OS or library updates.
 *   **Context Incompatibility (Invasive):** Debugging-based approaches like **ptrace** (used by `strace`) allowed for deep inspection but forced a context switch on every system call, effectively slowing the application to a crawl and making them unusable for production environments.
- 
+
 That changed with [eBPF](https://ebpf.io/what-is-ebpf/). eBPF moves these checks directly into the kernel, allowing for high-performance observation without the overhead of user-space context switching or the fragility of library-level hooking.
- 
+
 **eBPF provides the high-performance telemetry** required to generate and verify these behavioral contracts at runtime.
- 
+
 At a high level, eBPF gives modern Linux systems a safe, highly performant way to observe and react to what is happening at runtime. Syscalls, process executions, network behaviors, and file accesses become instantly visible and actionable.
- 
-eBPF provides a **sandboxed, event-driven execution environment** within the Linux kernel, allowing security tools to attach to system calls, file opens, and network activity without requiring custom kernel modules. 
- 
+
+eBPF provides a **sandboxed, event-driven execution environment** within the Linux kernel, allowing security tools to attach to system calls, file opens, and network activity without requiring custom kernel modules.
+
 ```mermaid
 graph TD
     subgraph LoadTime ["1. Load Time (Pre-Execution)"]
         SecTool[User Space Security Tool] -->|Loads Bytecode| Verifier{eBPF Verifier}
         Verifier -->|Passes Safety Check| eBPFProg[Sandboxed eBPF Program]
     end
-     
+
     subgraph RunTime ["2. Run Time (Execution)"]
         UserApp[User Space Application] -->|Triggers Event| KernelHooks((Kernel Hooks))
         KernelHooks -->|Syscalls, Network, Files| eBPFProg
@@ -109,29 +109,29 @@ graph TD
         BPFMaps -->|Asynchronous Read| SecTool
     end
 ```
- 
+
 The critical feature of eBPF is that programs are **statically verified by the kernel before execution** — non-terminating loops and unsafe memory accesses are rejected at load time. This turns the OS from a rigid substrate into something security tools can dynamically extend.
- 
+
 eBPF can be used for both **observation** (watching syscalls, flagging anomalies, generating behavioral profiles) and **enforcement** (BPF-LSM hooks that block operations inline). The distinction that actually matters for developers is not observation vs. enforcement — it is **privilege**. eBPF-based enforcement requires elevated kernel privileges (typically `CAP_BPF` plus `CAP_PERFMON`, and in some configurations `CAP_SYS_ADMIN`), which means it is the domain of cluster-level platform agents, not application code.
- 
+
 Seccomp and Landlock take a different approach: they are designed from the ground up to let a process restrict *itself* without any special privilege. Once `PR_SET_NO_NEW_PRIVS` is set, any unprivileged application can install a Seccomp filter or a Landlock ruleset — no root, no cluster agent, no deployment change required. That is what makes them the right primitive for developer-driven, in-process security.
- 
+
 ```mermaid
 graph TD
     UserSpace[Application / User Space] -->|Issues System Call| SyscallInterface((Syscall Interface))
-     
+
     SyscallInterface -.->|1. Async Event| eBPF[eBPF Observer]
     eBPF -.->|Read-only| Logs[Security Logs / Alerts]
-     
+
     SyscallInterface -->|2. Inline Check| Gates{Seccomp & Landlock}
     Gates -->|Allowed| Kernel[Kernel Execution]
     Gates -.->|Denied| Error[EPERM / Killed]
 ```
- 
+
 ## The Primitives: How BoB Is Enforced
- 
+
 If BoB is the declaration of intent, the Linux kernel provides five primary mechanisms to turn that intent into a hard boundary:
- 
+
 | Linux Primitive | Enforcement Scope / Target | Privilege Required | Role in Container / Sandbox Context |
 | :--- | :--- | :--- | :--- |
 | **Namespaces** | Process trees, Network, Mounts, PID, IPC, UTS, User | Unprivileged (User namespaces) / Privileged (Root creation) | Provides **virtualization** boundaries (isolates what resources a process can *see*). |
@@ -139,7 +139,7 @@ If BoB is the declaration of intent, the Linux kernel provides five primary mech
 | **Seccomp** | System calls (number and basic register arguments) | Unprivileged (requires `PR_SET_NO_NEW_PRIVS`) | Restricts the **syscall execution surface** (blocks high-risk operations like `execve` / `fork`). |
 | **Landlock** | Path-based Filesystem & TCP Ports (bind/connect) | Unprivileged | Surgical **file and directory containment** (prevents path traversal and raw socket binds). |
 | **BPF-LSM / LSMs** | Deep, context-aware kernel objects (LSM hooks) | Privileged (`CAP_SYS_ADMIN` / `root`) | Complex, **context-aware security policies** loaded by host-level system agents (e.g., AppArmor, SELinux). |
- 
+
 ### 1. Seccomp (Secure Computing)
 Seccomp is the industry's "fast path" for blocking system calls. It is fast, unprivileged, and extremely reliable. However, it requires setting `PR_SET_NO_NEW_PRIVS` first so that the process cannot later gain privileges and bypass the filter.
 
@@ -147,135 +147,135 @@ Seccomp is the industry's "fast path" for blocking system calls. It is fast, unp
 
 Seccomp remains the most widely deployed syscall filter in the world and is "path-blind" — it sees the system call number and basic register arguments, but it cannot easily inspect file paths or network addresses involved.
 *   **Where you use it today:** You are likely using it right now. Modern web browsers like **Chrome** and **Firefox** use Seccomp to sandbox their renderer processes, ensuring that a compromised tab cannot escape to the rest of your system. Podman/Docker also apply a default Seccomp profile to every container to block high-risk operations.
- 
+
 ### 2. Landlock
 Landlock is a Linux Security Module designed specifically for unprivileged sandboxing. It provides the path-aware filesystem access control that Seccomp lacks. It operates at the inode level — after the kernel has fully resolved the path — which means it avoids the TOCTOU (time-of-check/time-of-use) race that makes pointer-based path inspection in Seccomp unreliable. An application can declare constraints dynamically (e.g., "This thread can only read from `/app/data`").
 *   **Kernel & ABI Version Nuances:** Landlock capabilities are tied to specific ABI levels: ABI v1 (Linux 5.13, basic filesystem rights), v2 (Linux 5.19, rename/link control), v3 (Linux 6.2, truncation control), v4 (Linux 6.7, TCP `bind`/`connect` port limits), v5 (Linux 6.10, IOCTL on devices), and v6 (Linux 6.12, IPC scope restrictions). Each ABI is additive — always query `LANDLOCK_CREATE_RULESET_VERSION` at runtime and degrade gracefully, because kernels that do not support a given ABI level will silently ignore rules using unsupported features.
- 
+
 ### 3. [Linux Security Modules (LSM)](https://www.redhat.com/en/topics/linux/what-is-selinux)
 LSMs like AppArmor, SELinux, and the modern **BPF-LSM** provide the deepest level of security. They hook into the kernel at a very granular level, allowing for complex, context-aware rules.
 *   **The Trade-off:** Unlike Seccomp or Landlock, managing LSMs usually requires high privileges (`root` or `CAP_MAC_ADMIN`). This makes them ideal for platform-level security (like Android's application sandbox or Kubernetes Pod Security Standards) but harder for individual developers to use for "self-restriction."
- 
+
 By combining these primitives, we move from blunt "allow/deny" container rules to surgical, intent-based security. The primitives are the enforcement mechanism. What remains is the question of the contract itself: what it looks like, who writes it, and why vendor authorship changes the economics of runtime security entirely.
- 
+
 ## What BoB Actually Is (and Why Vendor Authorship Matters)
- 
+
 If an SBOM is the bill of materials for software composition, a BoB (Bill of Behavior) is its behavioral companion. In practical terms, a BoB captures expected runtime boundaries: network communication, file access, process execution, and Linux capabilities.
- 
+
 Today, runtime security forces the end user to infer safe behavior after deployment. Platform engineers watch logs, tune detection rules, silence false positives, and slowly assemble a fragile model of what the software seems to be doing.
- 
-BoB introduces a different model: the producer of the software should ship the first behavioral contract. 
- 
+
+BoB introduces a different model: the producer of the software should ship the first behavioral contract.
+
 Physically, this contract is not a proprietary security appliance rule. It is an [emerging, machine-readable specification](https://billofbehavior.com/bob/docs/drafts/spec-v0.0.1/). It is designed to be distributed alongside the application, attached to the container image as an [OCI artifact](https://opencontainers.org/) or applied as a Kubernetes Custom Resource.
- 
+
 The vendor is the party that actually knows what the software is intended to do, what the test coverage looks like, and which behaviors are essential. Instead of forcing thousands of customers to reverse-engineer the same runtime policy from scratch, the software producer ships a reviewable baseline. This moves runtime security from a "guess" to a **verifiable attestation of intent.**
- 
+
 ## The Concept of Scopes: When is a Behavior Expected?
- 
+
 A Bill of Behavior (BoB) isn't just a flat list of syscalls; to be effective, it must be context-aware. This is where the concept of **Scopes** becomes critical. We can categorize these into two main groups: those that are practically achievable today, and those that remain aspirational.
- 
+
 ### 1. Lifecycle Scopes (The Pragmatic Path)
 The most realistic way to implement Scopes is by aligning with the application's natural lifecycle. This approach is currently being implemented in **Kubescape**:
- 
+
 *   **Startup Scope:** Broad permissions needed to load configurations, establish connection pools, and initialize the JIT. This scope ends once the application passes its first health check.
 *   **Runtime Scope:** A much narrower "steady-state" set of permissions. This is where the majority of an application's life is spent.
 *   **Shutdown Scope:** Permissions required for graceful termination, such as flushing logs or closing connections.
- 
+
 By using Kubernetes health checks as a trigger, the runtime engine can automatically "rotate" the active security contract. This provides a clear, automated enforcement boundary that matches how developers already think about their apps.
- 
+
 ```mermaid
 stateDiagram-v2
     [*] --> Startup
-     
+
     Startup --> Runtime : Health Check Passes
     Runtime --> Shutdown : SIGTERM Received
     Shutdown --> [*]
-     
+
     note right of Startup
         Broad Permissions:
         - Classloading
         - JIT Compilation
         - Open Config Files
     end note
-     
+
     note right of Runtime
         Restricted Permissions:
         - Read-only DB queries
         - Active connections
         - Block new processes
     end note
-     
+
     note right of Shutdown
         Cleanup Permissions:
         - Flush logs
         - Close sockets
     end note
 ```
- 
+
 ### 2. Granular Scopes (The Experimental Frontier)
 Beyond lifecycle phases, we can theoretically define scopes at a much deeper level. While these make for powerful Proofs of Concept (PoC), turning them into stable, production-ready technology faces significant architectural challenges:
- 
+
 *   **Process/Thread Scopes:** Restricting behavior based on which specific OS thread is executing.
     > [!WARNING]
     > **The Shared-Memory Trap:** Thread-scoped restrictions alone are **never** a complete security boundary against attackers who gain Arbitrary Code Execution (ACE). Since all JVM threads share the same address space and heap, a native memory corruption exploit (e.g., via buffer overflow or unsafe pointer manipulation) on a restricted thread can modify memory on an unrestricted helper thread to bypass the sandbox. Thread-scoped sandboxing must be stacked on top of a process-wide baseline (such as blocking new process execution globally) to limit the worst escalation vectors.
 *   **Module/Library Scopes:** Restricting behavior based on which JAR or package is currently on the stack.
 *   **Stacktrace Scopes:** Using the calling context to decide if a syscall is valid (e.g., "Allow `socket()` only if called via the AWS SDK").
- 
+
 While thread-scoped filtering is actively implemented in libraries like mazewall, other granular scopes like Module/Library and Stacktrace Scopes remain aspirational due to high performance overhead and requirements for deep runtime integration.
- 
+
 ## Mitigating Advanced Evasion Techniques
- 
+
 It’s tempting to view BoB simply as a tool to reduce false positives in anomaly detection. And yes, instead of asking a vague statistical question—*"Is this weird?"*—the runtime can ask a concrete one: *"Is this expected behavior for this specific artifact?"*
- 
-But BoB also addresses the reality of modern syscall evasion. 
- 
+
+But BoB also addresses the reality of modern syscall evasion.
+
 Traditional security often focuses on blocking `execve` (spawning a shell). But sophisticated attackers don't need a shell. They use **fileless malware**—malicious code that lives entirely in RAM, using Linux features like [`memfd_create`](https://sandflysecurity.com/blog/detecting-linux-memfd_create-fileless-malware-with-command-line-forensics/) to execute binaries that never touch the disk. Because there is no file, traditional disk-based scanning is blind.
- 
-More advanced attackers use [**`io_uring`**](https://unixism.net/loti/), a high-performance asynchronous I/O API. Because `io_uring` submits operations via kernel worker threads that operate independently of the calling thread's Seccomp policy, older kernels allowed attackers to perform I/O that bypassed Seccomp filters entirely. While subsequent hardening (from Linux 5.12 onward) improved this, `io_uring` operations remain only partially covered by Seccomp — which is why Docker, Android, and ChromeOS all **block `io_uring_setup` entirely** in their default security profiles rather than relying on kernel version thresholds. A BoB allows us to express that same intent explicitly: *"`io_uring_setup` is forbidden for this component."*
- 
-A BoB allows us to express fine-grained intent that stops these techniques: *"This application is strictly forbidden from using `memfd_create`, `io_uring_setup`, or mapping executable memory."*
- 
+
+More advanced attackers use [**`io_uring`**](https://unixism.net/loti/), a high-performance asynchronous I/O API. Because `io_uring` submits operations via kernel worker threads that operate independently of the calling thread's Seccomp policy, older kernels allowed attackers to perform I/O that bypassed Seccomp filters entirely. While subsequent hardening (from Linux 5.12 onward) improved this, `io_uring` operations remain only partially covered by Seccomp — which is why Docker, Android, and ChromeOS all **block `io_uring_setup` entirely** in their default security profiles rather than relying on kernel version thresholds.
+
+A BoB makes this intent explicit and auditable: `io_uring_setup` or mapping executable memory is forbidden for components that do not need it, and the kernel enforces that without relying on version thresholds or documentation.
+
 ## Capability-Based Security in Other Domains
- 
+
 If declaring upfront capabilities sounds like a radical shift, it isn't. In fact, this approach is already the standard in almost every other area of IT.
- 
+
 Think about mobile apps. An Android `AndroidManifest.xml` or an iOS Entitlement explicitly declares what the application is allowed to do (access the camera, read contacts, use the network). Web browsers work the same way, explicitly asking for permission before a script can access your location or clipboard. WebAssembly (Wasm) takes this even further, running in a default-deny sandbox where modules cannot touch the network or file system without explicit host capabilities being granted.
- 
+
 In this context, server-side Linux containers are the anomaly. BoB is simply bringing capability-based security to the cloud-native server side.
- 
+
 ## The First Step: [VEX (Vulnerability Exploitability eXchange)](https://cyclonedx.org/capabilities/vex/)
 We are already seeing a "BoB-lite" emerge in the form of **VEX**. While an SBOM tells you a vulnerable library exists on your disk, a VEX document tells you if that library is actually loaded and reachable at runtime. For example, a VEX advisory can formally state that an application is **"not affected"** by a vulnerability because the specific vulnerable function (e.g., a high-risk network appender in a logging library) is never called by the application logic—a justification standardized as [`code_not_reachable`](https://www.cisa.gov/resources-tools/resources/vulnerability-exploitability-exchange-vex). VEX can be generated through multiple means — runtime observation (tools like Kubescape contribute behavioral evidence via eBPF), static analysis, or manual attestation. Regardless of how it is produced, VEX is the industry's first standardized realization that composition is a poor proxy for risk; only behavior matters.
- 
+
 ## Practical Value: From "Trust Me" to "Verify Me"
- 
+
 Beyond the technical mechanics of eBPF and Seccomp, the move toward BoB solves two high-stakes business problems that traditional security cannot address.
- 
+
 ### 1. Behavioral Attestation for Regulated Data
 In industries like Fintech, Healthcare, and Legal, "trust" is often handled via manual audit. BoB allows you to move that trust into the Linux kernel.
- 
+
 Consider a thread pool responsible for processing highly sensitive data (PII, payment card data, or privileged documents). By applying a behavioral contract (like `Policy.PURE_COMPUTE` and Landlock path restrictions), you establish a contract that the kernel itself enforces:
  - **"No network call was made."** Since `connect` and `sendmsg` are blocked at the syscall level, it is physically impossible for the data to have been exfiltrated during that execution block.
  - **"No file was written outside the declared path."** Even if a misconfigured logger or a malicious library attempts to write sensitive data elsewhere, the kernel blocks the operation.
  - **"No subprocess was spawned."** The data cannot be passed to an external utility or an in-memory executor.
- 
+
 This is **kernel-enforced attestation, not software-asserted**. The guarantee comes from the OS — not from application-level checks that an attacker could bypass.
- 
+
 ### 2. Zero-Trust for Internal Libraries (Blast Radius Control)
 Modern applications pull in hundreds of internal and third-party dependencies. You may trust your core team, but do you trust every library used by the "Experimental Feature" team?
- 
+
 By default, every thread in a JVM process shares the same permissions. If a minor utility library has a vulnerability, it has the same network and filesystem access as your most critical core service. BoB allows for **surgical self-restriction**:
  - **The PDF Generator** can read fonts but has no network access.
  - **The Image Processor** can read/write to a temp folder but has no exec permissions.
  - **The Legacy Integration** is restricted to a single specific IP address.
- 
+
 If any of these libraries are compromised, the "blast radius" is limited to the specific capabilities you explicitly granted them.
- 
+
 ## The Runtime Security Stack Is Already Here
- 
+
 This is no longer a speculative academic exercise. The building blocks are already in production. What is instructive, though, is that these tools are **not alternatives to each other** — they operate at fundamentally different layers and solve complementary problems. Each has its own perfect fit.
- 
+
 ### Three Layers, Three Perfect Fits
- 
+
 | | **Docker / Podman** | **Kubescape** | **mazewall** |
 |---|---|---|---|
 | **Metaphor** | The city wall | The cluster observatory | The room locks |
@@ -287,25 +287,25 @@ This is no longer a speculative academic exercise. The building blocks are alrea
 | **Privilege required** | Container runtime (rootless possible with Podman) | Privileged cluster-level agent (`CAP_SYS_ADMIN` / `CAP_BPF` for eBPF) | None — standard unprivileged library dependency |
 | **Language / runtime scope** | Any process, any language | Any process, any language | JVM 22+ only |
 | **Perfect fit** | Baseline outer wall for every container workload | Cluster-wide behavioral visibility, profile generation, and future policy distribution for Kubernetes | In-process, developer-driven dual-tier sandboxing for JVM services |
- 
-Notice that Docker and mazewall share the same fundamental primitive — **Seccomp-BPF** — but apply it at completely different scopes. Docker calls `prctl(PR_SET_SECCOMP, ...)` once, process-wide, before your application code ever runs. 
- 
+
+Notice that Docker and mazewall share the same fundamental primitive — **Seccomp-BPF** — but apply it at completely different scopes. Docker calls `prctl(PR_SET_SECCOMP, ...)` once, process-wide, before your application code ever runs.
+
 mazewall combines both scopes in a **dual-tier model**:
  1. **Tier 1 (Process-Wide Baseline):** It establishes a global, process-wide filter at startup (e.g., restricting process execution `execve` or system capabilities globally). This serves as the absolute backstop because isolating threads alone is vulnerable to shared-memory bypasses (where an attacker compromises a restricted thread and corrupts memory on an unrestricted helper thread).
  2. **Tier 2 (Thread-Scoped Profiles):** On top of the process-wide baseline, it applies thread-scoped profiles dynamically using thread-specific filters to restrict network socket creation or filesystem path accesses.
- 
+
 The kernel mechanisms are identical to standard container controls, but the scope, runtime flexibility, and developer authorship are completely different.
- 
+
 Kubescape occupies a different dimension entirely. Where Docker and mazewall enforce locally, Kubescape **observes globally** — watching every workload across the cluster and building a behavioral model that no individual container or library can see on its own. Its BoB support means those cluster-level observations can eventually be expressed as portable, vendor-reviewable contracts that feed back into container-level enforcement. Enforcement coming to Kubescape will close the loop: observe cluster-wide with eBPF, distribute a verified BoB profile as an OCI artifact, and enforce it locally at the container wall (Docker/Podman seccomp) and inside the JVM (mazewall).
- 
+
 On the commercial side, companies like **Oligo Security** use behavioral context to detect suspicious activity by observing what libraries do inside running applications.
- 
+
 The message is clear: the runtime security stack is already here. These layers are designed to be stacked, not chosen between. What is still missing is a standardized, portable, vendor-supplied way to describe what software is expected to do — so that all three layers can enforce the same contract.
- 
+
 ---
- 
+
 ### Next Up: Let Your Code Build Its Own Sandbox
- 
+
 In Part 2 of this series, we move from theory to practice. We will focus on **the profiler and policy-generation workflow** in mazewall, demonstrating how your test suite can automatically discover and generate the exact syscall policies your application needs with no manual configuration.
- 
+
 **[Read Part 2: Let Your Code Build Its Own Sandbox: Introducing Mazewall](article2-profiler.md)**

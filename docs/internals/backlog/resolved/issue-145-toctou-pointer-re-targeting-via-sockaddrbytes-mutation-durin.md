@@ -1,11 +1,12 @@
 ---
 title: "TOCTOU / Pointer Re-targeting via `sockaddrBytes` Mutation during Connect Validation"
 severity: "CRITICAL"
-status: "open"
+status: "resolved"
 priority: 5
 dependencies: []
 component: "enforcer"
 effort: "small"
+github_issue: 261
 ---
 
 # 🔴 [Severity: CRITICAL]: TOCTOU / Pointer Re-targeting via `sockaddrBytes` Mutation during Connect Validation

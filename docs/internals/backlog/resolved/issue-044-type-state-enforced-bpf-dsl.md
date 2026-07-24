@@ -1,11 +1,12 @@
 ---
 title: "Type-State Enforced BPF DSL"
 severity: "ENHANCEMENT"
-status: "open"
+status: "resolved"
 priority: 2
 dependencies: []
 component: "seccomp"
 effort: "large"
+github_issue: 269
 ---
 
 # 🔵 [Severity: ENHANCEMENT]: Type-State Enforced BPF DSL

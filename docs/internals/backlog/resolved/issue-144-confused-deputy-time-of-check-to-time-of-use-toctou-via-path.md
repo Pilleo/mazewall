@@ -1,11 +1,12 @@
 ---
 title: "Confused Deputy / Time-of-Check to Time-of-Use (TOCTOU) via Path Modification"
 severity: "CRITICAL"
-status: "open"
+status: "resolved"
 priority: 5
 dependencies: []
 component: "enforcer"
 effort: "small"
+github_issue: 263
 ---
 
 # 🔴 [Severity: CRITICAL]: Confused Deputy / Time-of-Check to Time-of-Use (TOCTOU) via Path Modification

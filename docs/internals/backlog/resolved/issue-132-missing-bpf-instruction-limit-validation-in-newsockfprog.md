@@ -1,11 +1,12 @@
 ---
 title: "Missing BPF Instruction Limit Validation in `newSockFProg`"
 severity: "HIGH"
-status: "open"
+status: "resolved"
 priority: 5
 dependencies: []
 component: "enforcer"
 effort: "medium"
+github_issue: 265
 ---
 
 # 🔴 [Severity: MEDIUM]: Missing BPF Instruction Limit Validation in `newSockFProg`

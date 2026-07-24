@@ -6,6 +6,7 @@ priority: 2
 dependencies: []
 component: "ffi"
 effort: "medium"
+github_issue: 276
 ---
 
 # 🔵 [Severity: ENHANCEMENT]: Memory Segment Pooling for Profiler USER_NOTIF

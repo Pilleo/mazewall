@@ -17,15 +17,12 @@ graph TD
     Landlock_kt["💻 Source: Landlock.kt"]
     ProfilerSessionHandler_kt["💻 Source: ProfilerSessionHandler.kt"]
     PureJavaBpfEngine_kt["💻 Source: PureJavaBpfEngine.kt"]
-    SockFProg_kt["💻 Source: SockFProg.kt"]
     SupervisorInstaller_kt["💻 Source: SupervisorInstaller.kt"]
-    SupervisorSessionHandler_kt["💻 Source: SupervisorSessionHandler.kt"]
     containment_design["📄 Design: Technical Design: Containment Engine & Incremental Filter Stacking"]
     io_mazewall_NativeEngine["💻 Source: io.mazewall.NativeEngine"]
     io_mazewall_NativeTransaction["💻 Source: io.mazewall.NativeTransaction"]
     io_mazewall_Platform_kt["💻 Source: io.mazewall.Platform.kt"]
     io_mazewall_core_FileDescriptor["💻 Source: io.mazewall.core.FileDescriptor"]
-    io_mazewall_core_SeccompAction["💻 Source: io.mazewall.core.SeccompAction"]
     io_mazewall_enforcer_ContainedExecutors["💻 Source: io.mazewall.enforcer.ContainedExecutors"]
     io_mazewall_enforcer_ContainedExecutors_kt["💻 Source: io.mazewall.enforcer.ContainedExecutors.kt"]
     io_mazewall_enforcer_ContainerStateRegistry_kt["💻 Source: io.mazewall.enforcer.ContainerStateRegistry.kt"]
@@ -35,11 +32,8 @@ graph TD
     io_mazewall_profiler_IterativeProfiler["💻 Source: io.mazewall.profiler.IterativeProfiler"]
     io_mazewall_profiler_Profiler["💻 Source: io.mazewall.profiler.Profiler"]
     io_mazewall_profiler_engine_ProfilerDaemonEngine["💻 Source: io.mazewall.profiler.engine.ProfilerDaemonEngine"]
-    io_mazewall_profiler_engine_ProfilerDaemon["💻 Source: io.mazewall.profiler.engine.ProfilerDaemon"]
     io_mazewall_profiler_strace_StraceProfiler["💻 Source: io.mazewall.profiler.strace.StraceProfiler"]
-    io_mazewall_seccomp_BpfProgram_BDL["💻 Source: io.mazewall.seccomp.BpfProgram.BDL"]
     issue_003_socket_address_family_filtering_for_network_isolation_evasio["🔴 Issue: Socket Address Family Filtering for Network Isolation Evasion Prevention (ENHANCEMENT)"]
-    issue_008_high_frequency_arena_allocation_overhead_mm_optimization["🔴 Issue: High-Frequency Arena Allocation Overhead (MM Optimization) (MEDIUM)"]
     issue_009_memory_segment_pooling_for_profiler_usernotif["🔴 Issue: Memory Segment Pooling for Profiler USER_NOTIF (ENHANCEMENT)"]
     issue_010_compile_time_feature_proof_tokens_and_scope_safe_policy_buil["🔴 Issue: Compile-Time Feature Proof Tokens and Scope-Safe Policy Builders (Type-State Pattern) (ENHANCEMENT)"]
     issue_011_verified_by_construction_bpf_bytecode_bpfprogramstatus["🔴 Issue: Verified-by-Construction BPF Bytecode (BpfProgram<Status>) (ENHANCEMENT)"]
@@ -60,11 +54,9 @@ graph TD
     issue_032_compile_time_bpf_termination_safety_type_state_ret_enforceme["🔴 Issue: Compile-Time BPF Termination Safety (Type-State RET Enforcement) (ENHANCEMENT)"]
     issue_035_memory_segment_pooling_for_profiler_usernotif["🔴 Issue: Memory Segment Pooling for Profiler USER_NOTIF (ENHANCEMENT)"]
     issue_036_residual_interface_segregation_violation_isp_in_nativeengine["🔴 Issue: Residual Interface Segregation Violation (ISP) in `NativeEngine` (HIGH)"]
-    issue_037_seccompaction_violates_openclosed_principle_ocp["🔴 Issue: `SeccompAction` Violates Open/Closed Principle (OCP) (ENHANCEMENT)"]
     issue_038_type_state_for_filedescriptor_lifecycles_compile_time_use_af["🔴 Issue: Type-State for `FileDescriptor` Lifecycles (Compile-Time Use-After-Close Safety) (ENHANCEMENT)"]
     issue_042_compile_time_enforced_tier_1_process_baseline_processcontain["🔴 Issue: Compile-Time Enforced Tier 1 Process Baseline (`ProcessContainmentToken`) (ENHANCEMENT)"]
     issue_043_phantom_types_for_context_aware_capability_tokens["🔴 Issue: Phantom Types for Context-Aware Capability Tokens (ENHANCEMENT)"]
-    issue_044_type_state_enforced_bpf_dsl["🔴 Issue: Type-State Enforced BPF DSL (ENHANCEMENT)"]
     issue_045_standard_java_concurrency_virtual_threads_completablefuture_["🔴 Issue: Standard Java Concurrency (`Virtual Threads`, `CompletableFuture`) trivially bypasses Thread-Scoped (Tier 2) containment without ACE (CRITICAL)"]
     issue_056_iterativeprofiler_infinite_retry_loop_and_failure_on_disjoin["🔴 Issue: `IterativeProfiler` infinite retry loop and failure on disjoint prefix file paths (HIGH)"]
     issue_059_iterativeprofiler_context_loss_via_thread_creation["🔴 Issue: `IterativeProfiler` Context Loss via thread creation (HIGH)"]
@@ -83,19 +75,13 @@ graph TD
     issue_081_root_test_task_requires_host_dockerpodman_not_runnable_insid["🔴 Issue: 📝 [NOTE]: Root `:test` task requires host Docker/Podman, not runnable inside dev container (MEDIUM)"]
     issue_082_ktlint_parser_fails_on_kotlin_2x_named_context_parameters_sy["🔴 Issue: KtLint parser fails on Kotlin 2.x named context parameters syntax (MEDIUM)"]
     issue_089_missing_extensibility_in_exception_message_parsing["🔴 Issue: 🔴 [Severity: DX-FRICTION]: Missing Extensibility in Exception Message Parsing (HIGH)"]
-    issue_095_unhandled_endianness_in_processvmreadv_socket_message_tracin["🔴 Issue: Unhandled Endianness in `process_vm_readv` Socket Message Tracing (HIGH)"]
     issue_102_permanent_thread_pool_contamination_classloader_leaks_and_st["🔴 Issue: 🟢 [WONTFIX]: Permanent thread pool contamination, classloader leaks, and state pollution via un-cleared `ThreadLocal` variables (MEDIUM)"]
     issue_103_containedexecutors_thread_local_state_persistence_and_poison["🔴 Issue: 🟢 [WONTFIX]: `ContainedExecutors` Thread-Local State Persistence and Poisoning (MEDIUM)"]
     issue_112_iterativeprofiler_logic_errors_confirmed["🔴 Issue: `IterativeProfiler` Logic Errors (Confirmed) (HIGH)"]
-    issue_114_landlock_excessive_capability_leak_on_enoent["🔴 Issue: Landlock Excessive Capability Leak on `ENOENT` (MEDIUM)"]
     issue_125_opaque_exceptions_on_landlock_initialization_failure["🔴 Issue: 🔴 [Severity: DX-FRICTION]: Opaque Exceptions on Landlock Initialization Failure (HIGH)"]
-    issue_127_unhandled_signal_mask_inheritance_in_containedexecutors["🔴 Issue: Unhandled Signal Mask Inheritance in `ContainedExecutors` (HIGH)"]
-    issue_132_missing_bpf_instruction_limit_validation_in_newsockfprog["🔴 Issue: Missing BPF Instruction Limit Validation in `newSockFProg` (HIGH)"]
     issue_139_unhandled_ioctl_fallbacks_during_legacy_jvm_syscall_tracing["🔴 Issue: Unhandled `IOCTL` fallbacks during legacy JVM syscall tracing (HIGH)"]
     issue_142_race_in_asynchronous_fire_and_forget_profiler_event_delivery["🔴 Issue: Race in Asynchronous / Fire-and-Forget Profiler Event Delivery (CRITICAL)"]
     issue_143_process_wide_classloader_deadlock_on_profiler_result_state_t["🔴 Issue: Process-Wide Classloader Deadlock on Profiler Result / State Types (HIGH)"]
-    issue_144_confused_deputy_time_of_check_to_time_of_use_toctou_via_path["🔴 Issue: Confused Deputy / Time-of-Check to Time-of-Use (TOCTOU) via Path Modification (CRITICAL)"]
-    issue_145_toctou_pointer_re_targeting_via_sockaddrbytes_mutation_durin["🔴 Issue: TOCTOU / Pointer Re-targeting via `sockaddrBytes` Mutation during Connect Validation (CRITICAL)"]
     issue_149_classloader_deadlock_in_jvm_validation_listener["🔴 Issue: Classloader Deadlock in JVM Validation Listener (CRITICAL)"]
     issue_162_memory_alignment_verification_for_layoutskt_ffm_structures["🔴 Issue: Memory Alignment verification for `Layouts.kt` FFM Structures (HIGH)"]
     issue_169_inconsistent_architecture_test_for_javalangforeign["🔴 Issue: Inconsistent Architecture Test for `java.lang.foreign` (HIGH)"]
@@ -127,11 +113,9 @@ graph TD
     issue_028_phantom_types_for_thread_pool_containment_constraints_sandbo -->|Affects| io_mazewall_enforcer_ContainedExecutors
     issue_029_proof_of_progress_state_machine_for_landlock_discovery_disco -->|Affects| io_mazewall_profiler_IterativeProfiler
     issue_036_residual_interface_segregation_violation_isp_in_nativeengine -->|Affects| io_mazewall_NativeEngine
-    issue_037_seccompaction_violates_openclosed_principle_ocp -->|Affects| io_mazewall_core_SeccompAction
     issue_038_type_state_for_filedescriptor_lifecycles_compile_time_use_af -->|Affects| io_mazewall_core_FileDescriptor
     issue_042_compile_time_enforced_tier_1_process_baseline_processcontain -->|Affects| io_mazewall_enforcer_ContainedExecutors
     issue_043_phantom_types_for_context_aware_capability_tokens -->|Affects| io_mazewall_NativeTransaction
-    issue_044_type_state_enforced_bpf_dsl -->|Affects| io_mazewall_seccomp_BpfProgram_BDL
     issue_045_standard_java_concurrency_virtual_threads_completablefuture_ -->|Affects| io_mazewall_enforcer_ContainedExecutors
     issue_061_manual_ffm_layout_maintenance_and_drift_risk -->|Affects| io_mazewall_ffi_Layouts
     issue_066_straceprofiler_completely_fails_to_trace_iouring_file_operat -->|Affects| io_mazewall_profiler_strace_StraceProfiler
@@ -139,22 +123,15 @@ graph TD
     issue_072_contract_based_invariant_validation -->|Affects| io_mazewall_Platform_kt
     issue_073_delegated_properties_for_thread_local_sandbox_state -->|Affects| io_mazewall_enforcer_ContainerStateRegistry_kt
     issue_079_unhandled_tsync_edge_cases_during_jit_classloading -->|Affects| PureJavaBpfEngine_kt
-    issue_095_unhandled_endianness_in_processvmreadv_socket_message_tracin -->|Affects| io_mazewall_profiler_engine_ProfilerDaemon
     issue_102_permanent_thread_pool_contamination_classloader_leaks_and_st -->|Affects| ContainedExecutors_kt
     issue_103_containedexecutors_thread_local_state_persistence_and_poison -->|Affects| io_mazewall_enforcer_ContainedExecutors_kt
     issue_112_iterativeprofiler_logic_errors_confirmed -->|Affects| IterativeProfiler_kt
-    issue_114_landlock_excessive_capability_leak_on_enoent -->|Affects| Landlock_kt
-    issue_127_unhandled_signal_mask_inheritance_in_containedexecutors -->|Affects| ContainedExecutors_kt
-    issue_132_missing_bpf_instruction_limit_validation_in_newsockfprog -->|Affects| SockFProg_kt
     issue_142_race_in_asynchronous_fire_and_forget_profiler_event_delivery -->|Affects| ProfilerSessionHandler_kt
-    issue_144_confused_deputy_time_of_check_to_time_of_use_toctou_via_path -->|Affects| SupervisorSessionHandler_kt
-    issue_145_toctou_pointer_re_targeting_via_sockaddrbytes_mutation_durin -->|Affects| SupervisorSessionHandler_kt
     issue_149_classloader_deadlock_in_jvm_validation_listener -->|Affects| SupervisorInstaller_kt
     issue_202_orchestrator_build_github_issue_body_dynamically_with_project_preamble -->|Affects| , 
     issue_203_orchestrator_validate_issue_context_and_needed_before_github_issue_creation -->|Affects|  instead of 
     click containment_design "../../enforcer/containment-design.md"
     click issue_003_socket_address_family_filtering_for_network_isolation_evasio "../../../backlog/testing/issue-003-socket-address-family-filtering-for-network-isolation-evasio.md"
-    click issue_008_high_frequency_arena_allocation_overhead_mm_optimization "../../../backlog/performance/issue-008-high-frequency-arena-allocation-overhead-mm-optimization.md"
     click issue_009_memory_segment_pooling_for_profiler_usernotif "../../../backlog/security/issue-009-memory-segment-pooling-for-profiler-usernotif.md"
     click issue_010_compile_time_feature_proof_tokens_and_scope_safe_policy_buil "../../../backlog/security/issue-010-compile-time-feature-proof-tokens-and-scope-safe-policy-buil.md"
     click issue_011_verified_by_construction_bpf_bytecode_bpfprogramstatus "../../../backlog/security/issue-011-verified-by-construction-bpf-bytecode-bpfprogramstatus.md"
@@ -175,11 +152,9 @@ graph TD
     click issue_032_compile_time_bpf_termination_safety_type_state_ret_enforceme "../../../backlog/code_health/issue-032-compile-time-bpf-termination-safety-type-state-ret-enforceme.md"
     click issue_035_memory_segment_pooling_for_profiler_usernotif "../../../backlog/security/issue-035-memory-segment-pooling-for-profiler-usernotif.md"
     click issue_036_residual_interface_segregation_violation_isp_in_nativeengine "../../../backlog/resolved/issue-036-residual-interface-segregation-violation-isp-in-nativeengine.md"
-    click issue_037_seccompaction_violates_openclosed_principle_ocp "../../../backlog/security/issue-037-seccompaction-violates-openclosed-principle-ocp.md"
     click issue_038_type_state_for_filedescriptor_lifecycles_compile_time_use_af "../../../backlog/code_health/issue-038-type-state-for-filedescriptor-lifecycles-compile-time-use-af.md"
     click issue_042_compile_time_enforced_tier_1_process_baseline_processcontain "../../../backlog/security/issue-042-compile-time-enforced-tier-1-process-baseline-processcontain.md"
     click issue_043_phantom_types_for_context_aware_capability_tokens "../../../backlog/testing/issue-043-phantom-types-for-context-aware-capability-tokens.md"
-    click issue_044_type_state_enforced_bpf_dsl "../../../backlog/security/issue-044-type-state-enforced-bpf-dsl.md"
     click issue_045_standard_java_concurrency_virtual_threads_completablefuture_ "../../../backlog/security/issue-045-standard-java-concurrency-virtual-threads-completablefuture-.md"
     click issue_056_iterativeprofiler_infinite_retry_loop_and_failure_on_disjoin "../../../backlog/testing/issue-056-iterativeprofiler-infinite-retry-loop-and-failure-on-disjoin.md"
     click issue_059_iterativeprofiler_context_loss_via_thread_creation "../../../backlog/performance/issue-059-iterativeprofiler-context-loss-via-thread-creation.md"
@@ -198,19 +173,13 @@ graph TD
     click issue_081_root_test_task_requires_host_dockerpodman_not_runnable_insid "../../../backlog/testing/issue-081-root-test-task-requires-host-dockerpodman-not-runnable-insid.md"
     click issue_082_ktlint_parser_fails_on_kotlin_2x_named_context_parameters_sy "../../../backlog/testing/issue-082-ktlint-parser-fails-on-kotlin-2x-named-context-parameters-sy.md"
     click issue_089_missing_extensibility_in_exception_message_parsing "../../../backlog/performance/issue-089-missing-extensibility-in-exception-message-parsing.md"
-    click issue_095_unhandled_endianness_in_processvmreadv_socket_message_tracin "../../../backlog/testing/issue-095-unhandled-endianness-in-processvmreadv-socket-message-tracin.md"
     click issue_102_permanent_thread_pool_contamination_classloader_leaks_and_st "../../../backlog/performance/issue-102-permanent-thread-pool-contamination-classloader-leaks-and-st.md"
     click issue_103_containedexecutors_thread_local_state_persistence_and_poison "../../../backlog/performance/issue-103-containedexecutors-thread-local-state-persistence-and-poison.md"
     click issue_112_iterativeprofiler_logic_errors_confirmed "../../../backlog/performance/issue-112-iterativeprofiler-logic-errors-confirmed.md"
-    click issue_114_landlock_excessive_capability_leak_on_enoent "../../../backlog/security/issue-114-landlock-excessive-capability-leak-on-enoent.md"
     click issue_125_opaque_exceptions_on_landlock_initialization_failure "../../../backlog/security/issue-125-opaque-exceptions-on-landlock-initialization-failure.md"
-    click issue_127_unhandled_signal_mask_inheritance_in_containedexecutors "../../../backlog/testing/issue-127-unhandled-signal-mask-inheritance-in-containedexecutors.md"
-    click issue_132_missing_bpf_instruction_limit_validation_in_newsockfprog "../../../backlog/testing/issue-132-missing-bpf-instruction-limit-validation-in-newsockfprog.md"
     click issue_139_unhandled_ioctl_fallbacks_during_legacy_jvm_syscall_tracing "../../../backlog/testing/issue-139-unhandled-ioctl-fallbacks-during-legacy-jvm-syscall-tracing.md"
     click issue_142_race_in_asynchronous_fire_and_forget_profiler_event_delivery "../../../backlog/testing/issue-142-race-in-asynchronous-fire-and-forget-profiler-event-delivery.md"
     click issue_143_process_wide_classloader_deadlock_on_profiler_result_state_t "../../../backlog/security/issue-143-process-wide-classloader-deadlock-on-profiler-result-state-t.md"
-    click issue_144_confused_deputy_time_of_check_to_time_of_use_toctou_via_path "../../../backlog/security/issue-144-confused-deputy-time-of-check-to-time-of-use-toctou-via-path.md"
-    click issue_145_toctou_pointer_re_targeting_via_sockaddrbytes_mutation_durin "../../../backlog/security/issue-145-toctou-pointer-re-targeting-via-sockaddrbytes-mutation-durin.md"
     click issue_149_classloader_deadlock_in_jvm_validation_listener "../../../backlog/security/issue-149-classloader-deadlock-in-jvm-validation-listener.md"
     click issue_162_memory_alignment_verification_for_layoutskt_ffm_structures "../../../backlog/security/issue-162-memory-alignment-verification-for-layoutskt-ffm-structures.md"
     click issue_169_inconsistent_architecture_test_for_javalangforeign "../../../backlog/testing/issue-169-inconsistent-architecture-test-for-javalangforeign.md"
@@ -226,7 +195,7 @@ graph TD
     click issue_203_orchestrator_validate_issue_context_and_needed_before_github_issue_creation "../../../backlog/code_health/issue-203-orchestrator-validate-issue-context-and-needed-before-github-issue-creation.md"
     click issue_204_orchestrator_structured_ci_failure_comment_with_diagnosis_guidance "../../../backlog/code_health/issue-204-orchestrator-structured-ci-failure-comment-with-diagnosis-guidance.md"
     click issue_205_orchestrator_add_failure_context_to_jules_retry_comments "../../../backlog/code_health/issue-205-orchestrator-add-failure-context-to-jules-retry-comments.md"
-    click issue_206_orchestrator_close_github_issue_automatically_on_resolve_task "../../../backlog/code_health/issue-206-orchestrator-close-github-issue-automatically-on-resolve-task.md"
+    click issue_206_orchestrator_close_github_issue_automatically_on_resolve_task "../../../backlog/resolved/issue-206-orchestrator-close-github-issue-automatically-on-resolve-task.md"
     click issue_208_orchestrator_auto_merge_pr_on_verdict_approved_when_autonomous "../../../backlog/code_health/issue-208-orchestrator-auto-merge-pr-on-verdict-approved-when-autonomous.md"
     click issue_210_decouple_nativeengine_from_raw_ffm_types "../../../backlog/code_health/issue-210-decouple-nativeengine-from-raw-ffm-types.md"
 ```

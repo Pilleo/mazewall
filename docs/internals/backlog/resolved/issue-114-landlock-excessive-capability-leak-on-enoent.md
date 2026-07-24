@@ -1,7 +1,7 @@
 ---
 title: "Landlock Excessive Capability Leak on `ENOENT`"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: 6
 dependencies: []
 component: "enforcer"

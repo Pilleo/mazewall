@@ -1,11 +1,12 @@
 ---
 title: "High-Frequency Arena Allocation Overhead (MM Optimization)"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: 6
 dependencies: []
 component: "ffi"
 effort: "medium"
+github_issue: 259
 ---
 
 # 🟡 [Severity: LOW]: High-Frequency Arena Allocation Overhead (MM Optimization)
