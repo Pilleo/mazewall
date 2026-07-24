@@ -136,21 +136,33 @@ internal object PureJavaBpfEngine : SeccompEngine<EngineState> {
      * Once set, the PR_SET_NO_NEW_PRIVS flag cannot be cleared. This affects the
      * current thread/process and all its future children spawned via fork/exec.
      * This is a prerequisite for installing seccomp filters for unprivileged users.
+     *
+     * Note: This system call is executed within a retry loop to handle signal
+     * interruptions (EINTR) robustly, ensuring that temporary interruptions do not
+     * abort or bypass privilege locking.
      */
     internal fun setNoNewPrivs() {
         // Step 1: Set no_new_privs (mandatory for non-root seccomp)
         while (true) {
-            val r1 = LinuxNative.withTransaction {
+            val result = LinuxNative.withTransaction {
                 LinuxNative.process.prctl(PrctlCommand.SetNoNewPrivs(true))
             }
-            if (r1 is LinuxNative.SyscallResult.Error && r1.errno == NativeConstants.EINTR) {
+            if (result is LinuxNative.SyscallResult.Error && result.errno == NativeConstants.EINTR) {
                 continue
             }
-            r1.getOrThrow("prctl(PR_SET_NO_NEW_PRIVS)")
+            result.getOrThrow("prctl(PR_SET_NO_NEW_PRIVS)")
             break
         }
     }
 
+    /**
+     * Installs the compiled BPF filter program into the kernel.
+     *
+     * Note: This invokes the modern seccomp(2) syscall first and falls back to
+     * prctl if seccomp(2) is unsupported. Both system calls are explicitly wrapped
+     * in retry loops that check for and handle signal interruptions (EINTR). This
+     * prevents premature failures due to asynchronous signals (e.g., JVM GC, JIT, or profiling).
+     */
     internal fun installFilter(
         arch: Arch,
         prog: ManagedSegment,
@@ -158,9 +170,9 @@ internal object PureJavaBpfEngine : SeccompEngine<EngineState> {
     ): SeccompInstallationState.FilterApplied {
         // Try modern seccomp(2) syscall first
         val flags = if (useTsync) NativeConstants.SECCOMP_FILTER_FLAG_TSYNC.toLong() else 0L
-        var r3: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled>
+        var seccompResult: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled>
         while (true) {
-            r3 = LinuxNative.withTransaction {
+            seccompResult = LinuxNative.withTransaction {
                 LinuxNative.raw.syscall(
                     arch.seccompSyscallNumber.toLong(),
                     io.mazewall.core.NativeArg.LongArg(NativeConstants.SECCOMP_SET_MODE_FILTER.toLong()),
@@ -168,15 +180,15 @@ internal object PureJavaBpfEngine : SeccompEngine<EngineState> {
                     io.mazewall.core.NativeArg.MemoryArg(prog),
                 )
             }
-            if (r3 is LinuxNative.SyscallResult.Error && r3.errno == NativeConstants.EINTR) {
+            if (seccompResult is LinuxNative.SyscallResult.Error && seccompResult.errno == NativeConstants.EINTR) {
                 continue
             }
             break
         }
 
-        if (r3 is LinuxNative.SyscallResult.Error) {
+        if (seccompResult is LinuxNative.SyscallResult.Error) {
             // Fall back to prctl for older kernels
-            val errno1 = r3.errno
+            val errno1 = seccompResult.errno
 
             if (useTsync) {
                 val detail = if (errno1 == 13) {
@@ -187,9 +199,9 @@ internal object PureJavaBpfEngine : SeccompEngine<EngineState> {
                 throw IllegalStateException("Process-wide seccomp installation (TSYNC) failed: $detail")
             }
 
-            var r4: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled>
+            var prctlResult: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled>
             while (true) {
-                r4 = LinuxNative.withTransaction {
+                prctlResult = LinuxNative.withTransaction {
                     LinuxNative.process.prctl(
                         PrctlCommand.SetSeccomp(
                             NativeConstants.SECCOMP_MODE_FILTER.toLong(),
@@ -197,15 +209,15 @@ internal object PureJavaBpfEngine : SeccompEngine<EngineState> {
                         )
                     )
                 }
-                if (r4 is LinuxNative.SyscallResult.Error && r4.errno == NativeConstants.EINTR) {
+                if (prctlResult is LinuxNative.SyscallResult.Error && prctlResult.errno == NativeConstants.EINTR) {
                     continue
                 }
                 break
             }
 
-            if (r4 is LinuxNative.SyscallResult.Error) {
+            if (prctlResult is LinuxNative.SyscallResult.Error) {
                 throw IllegalStateException(
-                    "seccomp installation failed: seccomp(2) errno=$errno1, prctl errno=${r4.errno}",
+                    "seccomp installation failed: seccomp(2) errno=$errno1, prctl errno=${prctlResult.errno}",
                 )
             } else {
                 return SeccompInstallationState.FallbackPrctlApplied
@@ -215,6 +227,12 @@ internal object PureJavaBpfEngine : SeccompEngine<EngineState> {
         }
     }
 
+    /**
+     * Verifies that the seccomp filter was successfully installed and is active.
+     *
+     * Note: This invokes the PR_GET_SECCOMP prctl wrapped in a retry loop to robustly
+     * handle signal interruptions (EINTR).
+     */
     internal fun verifyInstallation(definition: PolicyDefinition<*>) {
         val currentState = ContainerState.resolveCurrentState()
         val canVerify = currentState.isSyscallAllowed(Syscall.PRCTL) &&
@@ -225,17 +243,17 @@ internal object PureJavaBpfEngine : SeccompEngine<EngineState> {
         }
 
         // Verify filter is actually installed
-        var r5: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled>
+        var verifyResult: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled>
         while (true) {
-            r5 = LinuxNative.withTransaction {
+            verifyResult = LinuxNative.withTransaction {
                 LinuxNative.process.prctl(PrctlCommand.GetSeccomp)
             }
-            if (r5 is LinuxNative.SyscallResult.Error && r5.errno == NativeConstants.EINTR) {
+            if (verifyResult is LinuxNative.SyscallResult.Error && verifyResult.errno == NativeConstants.EINTR) {
                 continue
             }
             break
         }
-        val mode = r5.getOrThrow("prctl(PR_GET_SECCOMP)")
+        val mode = verifyResult.getOrThrow("prctl(PR_GET_SECCOMP)")
         if (mode != 2L) {
             throw IllegalStateException(
                 "Seccomp filter verification failed: expected mode 2, got $mode",

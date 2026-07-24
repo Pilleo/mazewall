@@ -86,7 +86,6 @@ graph TD
     issue_081_root_test_task_requires_host_dockerpodman_not_runnable_insid["🔴 Issue: 📝 [NOTE]: Root `:test` task requires host Docker/Podman, not runnable inside dev container (MEDIUM)"]
     issue_082_ktlint_parser_fails_on_kotlin_2x_named_context_parameters_sy["🔴 Issue: KtLint parser fails on Kotlin 2.x named context parameters syntax (MEDIUM)"]
     issue_083_unhandled_ioctl_fallbacks_during_legacy_jvm_syscall_tracing["🔴 Issue: Unhandled `IOCTL` fallbacks during legacy JVM syscall tracing (HIGH)"]
-    issue_086_unhandled_signal_interruptions_eintr_during_seccomp_filter_i["🔴 Issue: Unhandled Signal Interruptions (`EINTR`) during `seccomp` Filter Installation (HIGH)"]
     issue_088_suboptimal_bpf_ret_instruction_placement_in_emitlinearscan["🔴 Issue: Suboptimal BPF `RET` instruction placement in `emitLinearScan` (HIGH)"]
     issue_089_missing_extensibility_in_exception_message_parsing["🔴 Issue: 🔴 [Severity: DX-FRICTION]: Missing Extensibility in Exception Message Parsing (HIGH)"]
     issue_090_unhandled_ocloexec_omission_on_profiler_unix_sockets["🔴 Issue: Unhandled `O_CLOEXEC` Omission on Profiler Unix Sockets (HIGH)"]
@@ -225,7 +224,6 @@ graph TD
     click issue_081_root_test_task_requires_host_dockerpodman_not_runnable_insid "../../../backlog/testing/issue-081-root-test-task-requires-host-dockerpodman-not-runnable-insid.md"
     click issue_082_ktlint_parser_fails_on_kotlin_2x_named_context_parameters_sy "../../../backlog/testing/issue-082-ktlint-parser-fails-on-kotlin-2x-named-context-parameters-sy.md"
     click issue_083_unhandled_ioctl_fallbacks_during_legacy_jvm_syscall_tracing "../../../backlog/testing/issue-083-unhandled-ioctl-fallbacks-during-legacy-jvm-syscall-tracing.md"
-    click issue_086_unhandled_signal_interruptions_eintr_during_seccomp_filter_i "../../../backlog/security/issue-086-unhandled-signal-interruptions-eintr-during-seccomp-filter-i.md"
     click issue_088_suboptimal_bpf_ret_instruction_placement_in_emitlinearscan "../../../backlog/performance/issue-088-suboptimal-bpf-ret-instruction-placement-in-emitlinearscan.md"
     click issue_089_missing_extensibility_in_exception_message_parsing "../../../backlog/performance/issue-089-missing-extensibility-in-exception-message-parsing.md"
     click issue_090_unhandled_ocloexec_omission_on_profiler_unix_sockets "../../../backlog/performance/issue-090-unhandled-ocloexec-omission-on-profiler-unix-sockets.md"
