@@ -70,7 +70,6 @@ Instead of a single perimeter, every system call, filesystem path, or socket acc
 We move from **coarse-grained perimeter rules** that ask *"Is this container allowed to talk to the internet?"* to **fine-grained behavioral contracts** that ask *"Is this specific library, at this specific millisecond, allowed to perform this specific system call?"*
 
 *(A quick note on scope: SBoB / BoB is still emerging, tooling is early, and standards are actively forming. What follows is a picture of where cloud-native security is heading — a direction that is becoming technically feasible and strategically hard to ignore.)*
-
 > **Wait — doesn't Docker already do this?**
 >
 > Yes, partially — and this is a common and fair question. Docker and Podman use [Namespaces](https://man7.org/linux/man-pages/man7/namespaces.7.html) to isolate process trees, networks, and filesystems between containers; [cgroups v2](https://www.kernel.org/doc/html/latest/admin-guide/cgroup-v2.html) to limit CPU and memory consumption; and a default [Seccomp-BPF](https://docs.docker.com/engine/security/seccomp/) **allowlist** profile that permits roughly 311 syscalls while blocking everything else — including approximately 44 syscalls that are explicitly denied by name — for every process inside the container. That is meaningful protection.
@@ -234,7 +233,6 @@ Traditional security often focuses on blocking `execve` (spawning a shell). But 
 More advanced attackers use [**`io_uring`**](https://unixism.net/loti/), a high-performance asynchronous I/O API. Because `io_uring` submits operations via kernel worker threads that operate independently of the calling thread's Seccomp policy, older kernels allowed attackers to perform I/O that bypassed Seccomp filters entirely. While subsequent hardening (from Linux 5.12 onward) improved this, `io_uring` operations remain only partially covered by Seccomp — which is why Docker, Android, and ChromeOS all **block `io_uring_setup` entirely** in their default security profiles rather than relying on kernel version thresholds.
 
 A BoB makes this intent explicit and auditable: `io_uring_setup` or mapping executable memory is forbidden for components that do not need it, and the kernel enforces that without relying on version thresholds or documentation.
-
 ## Capability-Based Security in Other Domains
 
 If declaring upfront capabilities sounds like a radical shift, it isn't. In fact, this approach is already the standard in almost every other area of IT.
