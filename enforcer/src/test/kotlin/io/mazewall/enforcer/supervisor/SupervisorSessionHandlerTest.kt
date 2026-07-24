@@ -276,7 +276,7 @@ class SupervisorSessionHandlerTest {
                     method.invoke(handler, *argsToPass)
                 }
 
-                // 1. Test open (should be upgraded to SECCOMP_IOCTL_NOTIF_ADDFD / emulation)
+                // 1. Test open (should NOT be upgraded to ADDFD/emulation, but should call sendSeccompContinue)
                 lastIoctlRequest = null
                 lastIoctlArg = null
                 val argsOpen = LongArray(6)
@@ -284,8 +284,10 @@ class SupervisorSessionHandlerTest {
 
                 invokeReadAndHandleJvmResponse(arch.open, argsOpen)
 
-                // SECCOMP_IOCTL_NOTIF_ADDFD is 0xc0182103L
-                assertEquals(io.mazewall.ffi.NativeConstants.SECCOMP_IOCTL_NOTIF_ADDFD, lastIoctlRequest)
+                // SECCOMP_IOCTL_NOTIF_SEND is 0xc0182101L (since we call sendSeccompContinue)
+                assertEquals(io.mazewall.ffi.NativeConstants.SECCOMP_IOCTL_NOTIF_SEND, lastIoctlRequest)
+                val flagsOpen = lastIoctlArg!!.readInt(20)
+                assertEquals(io.mazewall.ffi.NativeConstants.SECCOMP_USER_NOTIF_FLAG_CONTINUE.toInt(), flagsOpen)
 
                 // 2. Test execve (cannot be natively emulated, so we write back the validated memory and continue)
                 lastIoctlRequest = null

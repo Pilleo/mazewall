@@ -566,8 +566,7 @@ internal class SupervisorSessionHandler(
                     true
                 }
                 1 -> { // Allow Continue
-                    val isInject = nr == traceeArch.open || nr == traceeArch.connect || nr == traceeArch.openat ||
-                                 nr == traceeArch.openat2 || nr == traceeArch.accept || nr == traceeArch.accept4
+                    val isInject = nr == traceeArch.accept || nr == traceeArch.accept4
                     if (isInject) {
                         // Upgrade to emulation to prevent TOCTOU!
                         handleInjectFd(id, nr, args, pathStr, sockaddrBytes, resp, tid, traceeArch)
