@@ -215,7 +215,9 @@ internal class ProfilerSessionHandler(
             // This blocking synchronization is physically required: if the daemon sends CONTINUE immediately
             // (asynchronous fire-and-forget), the tracee thread resumes and moves past the system call frame
             // before the JVM listener thread can capture its stack trace, resulting in empty or incorrect traces.
+            System.err.println("[DAEMON-DEBUG] Awaiting synchronous handshake ACK...")
             val result = handshake.performHandshake(socketFd, ioOps, socketPollFd.unwrap, ackBuf.unwrap, onShutdown)
+            System.err.println("[DAEMON-DEBUG] Handshake result received: $result")
             return when (result) {
                 is HandshakeSession.Success -> {
                     ledger.record(SessionEvent.AckReceived(System.nanoTime(), pidVal.toLong()))

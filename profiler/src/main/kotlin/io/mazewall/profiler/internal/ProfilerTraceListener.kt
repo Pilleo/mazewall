@@ -331,6 +331,7 @@ internal class ProfilerTraceListener(
     }
 
     private fun sendAck() {
+        System.err.println("[TRACE-LISTENER-DEBUG] sendAck: Sending PROTOCOL_ACK_BYTE to resume tracee.")
         sendCommand(PROTOCOL_ACK_BYTE)
     }
 
