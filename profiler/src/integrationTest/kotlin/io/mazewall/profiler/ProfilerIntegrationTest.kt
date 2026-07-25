@@ -27,6 +27,20 @@ class ProfilerIntegrationTest : BaseIntegrationTest() {
         }
     }
 
+    private fun awaitLogs(wrapped: Profiler.ProfilerExecutorWrapper, expectedCountAtLeast: Int) {
+        val start = System.currentTimeMillis()
+        while (wrapped.recentLogs.size < expectedCountAtLeast && System.currentTimeMillis() - start < 3000) {
+            Thread.sleep(10)
+        }
+    }
+
+    private fun awaitStackProfiles(wrapped: Profiler.ProfilerExecutorWrapper, expectedCountAtLeast: Int) {
+        val start = System.currentTimeMillis()
+        while (wrapped.recentStackProfiles.size < expectedCountAtLeast && System.currentTimeMillis() - start < 3000) {
+            Thread.sleep(10)
+        }
+    }
+
     @Test
     fun `test profiler intercepts and logs file opens with path resolving and stack trace capture`() {
         val targetFile = File("/etc/hostname")
@@ -193,6 +207,7 @@ LinuxNative.raw.syscall(
                     },
                 ).get(5, TimeUnit.SECONDS)
 
+            awaitLogs(wrapped, 1)
             val eventsWithPath = wrapped.recentLogs.filter { it.paths.contains(absolutePath) }
             assertTrue(
                 eventsWithPath.any { it.syscallName == "FCHMOD" || it.syscallName == "OPENAT" || it.syscallName == "OPEN" },
@@ -252,6 +267,7 @@ LinuxNative.raw.syscall(
                 )
             future.get(5, TimeUnit.SECONDS)
 
+            awaitLogs(wrapped, 1)
             val bob = wrapped.compileBillOfBehavior()
             assertTrue(
                 bob.opens.contains("/etc/hostname"),
@@ -281,6 +297,8 @@ LinuxNative.raw.syscall(
                 }
             tasks.forEach { it.get(5, TimeUnit.SECONDS) }
 
+            awaitLogs(wrapped, 1)
+            Thread.sleep(200) // Allow any other concurrent events to be processed asynchronously
             val bob = wrapped.compileBillOfBehavior()
             // The number of OPEN/OPENAT events in recentLogs for /etc/hostname should be low
             // due to deduplication, even if triggered from different threads.
@@ -333,6 +351,7 @@ LinuxNative.raw.syscall(
                     },
                 ).get(5, TimeUnit.SECONDS)
 
+            awaitStackProfiles(wrapped, 1)
             assertTrue(
                 wrapped.recentStackProfiles.isNotEmpty(),
                 "Stack profiles should be captured in wrapped executor",
