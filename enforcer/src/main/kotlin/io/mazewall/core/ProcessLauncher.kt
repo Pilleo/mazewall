@@ -17,6 +17,8 @@ public interface ProcessLauncher {
 
     public fun createTempDirectory(prefix: String, vararg attrs: FileAttribute<*>): Path
 
+    public fun createTempDirectory(dir: Path, prefix: String, vararg attrs: FileAttribute<*>): Path
+
     public fun deleteIfExists(path: Path): Boolean
 
     public fun exists(path: Path): Boolean
@@ -42,6 +44,10 @@ public object RealProcessLauncher : ProcessLauncher {
 
     override fun createTempDirectory(prefix: String, vararg attrs: FileAttribute<*>): Path {
         return java.nio.file.Files.createTempDirectory(prefix, *attrs)
+    }
+
+    override fun createTempDirectory(dir: Path, prefix: String, vararg attrs: FileAttribute<*>): Path {
+        return java.nio.file.Files.createTempDirectory(dir, prefix, *attrs)
     }
 
     override fun deleteIfExists(path: Path): Boolean {

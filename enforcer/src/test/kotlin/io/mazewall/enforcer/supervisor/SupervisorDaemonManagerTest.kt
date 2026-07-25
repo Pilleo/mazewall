@@ -34,7 +34,7 @@ class SupervisorDaemonManagerTest {
         override fun isAlive(): Boolean = true
     }
 
-    class MockProcessLauncher : ProcessLauncher {
+    open class MockProcessLauncher : ProcessLauncher {
         var startProcessCalled = false
         var lastArgs: List<String>? = null
         var mockProcess: Process = MockProcess(9999L)
@@ -56,6 +56,10 @@ class SupervisorDaemonManagerTest {
 
         override fun createTempDirectory(prefix: String, vararg attrs: FileAttribute<*>): Path {
             return java.nio.file.Paths.get("/tmp/mock-dir")
+        }
+
+        override fun createTempDirectory(dir: Path, prefix: String, vararg attrs: FileAttribute<*>): Path {
+            return java.nio.file.Paths.get("/tmp/fallback-mock-dir")
         }
 
         override fun deleteIfExists(path: Path): Boolean = true
@@ -132,5 +136,34 @@ class SupervisorDaemonManagerTest {
         assertTrue(mockSocket.connectCalled)
         assertTrue(writeCalledWithShutdown, "Should write shutdown command to daemon socket")
         assertEquals(1, mockSocket.closeCalledCount.get())
+    }
+
+    @Test
+    fun `spawnDaemon falls back to short temp directory when default socket path is too long`() {
+        val mockEngine = MockNativeEngine()
+        val mockLauncher = object : MockProcessLauncher() {
+            override fun createTempDirectory(prefix: String, vararg attrs: FileAttribute<*>): Path {
+                // Return an excessively long path that exceeds 107 bytes when suffix and /supervisor.sock is appended
+                return java.nio.file.Paths.get("/" + "a".repeat(120))
+            }
+
+            override fun createTempDirectory(dir: Path, prefix: String, vararg attrs: FileAttribute<*>): Path {
+                return java.nio.file.Paths.get("/tmp/fallback-mock-dir")
+            }
+        }
+        mockLauncher.mockProcess = MockProcess(9999L, SupervisorDaemon.DAEMON_READY_SENTINEL + "\n")
+        val mockSocket = MockSocketManager()
+
+        val manager = SupervisorDaemonManager(mockEngine, mockSocket, mockLauncher)
+        val context = manager.getOrSpawnSharedDaemon()
+
+        try {
+            assertNotNull(context)
+            val pathBytes = context.socketPath.toByteArray(java.nio.charset.StandardCharsets.UTF_8)
+            assertTrue(pathBytes.size < 108, "Fallback path should be under 108 bytes: ${context.socketPath}")
+            assertEquals("/tmp/fallback-mock-dir/supervisor.sock", context.socketPath)
+        } finally {
+            manager.stop()
+        }
     }
 }
