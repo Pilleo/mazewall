@@ -1,5 +1,6 @@
 package io.mazewall.ffi.memory
 
+import io.mazewall.enforcer.threadLocal
 import io.mazewall.ffi.Layouts
 import java.lang.foreign.Arena
 import java.lang.foreign.MemoryLayout
@@ -178,13 +179,13 @@ public value class ErrnoSegment(public val segment: MemorySegment) {
     public fun getErrno(): Int = segment.get(JAVA_INT_NATIVE, Layouts.ERRNO_OFFSET)
 
     public companion object {
-        private val THREAD_LOCAL_SEGMENT = ThreadLocal.withInitial { Arena.global().allocate(Layouts.ERRNO) }
+        private val threadLocalSegment by threadLocal { Arena.global().allocate(Layouts.ERRNO) }
 
         /**
          * Returns a thread-local [ErrnoSegment] used to capture native call errors.
          * This avoids expensive [Arena.ofConfined] allocations in high-frequency loops.
          */
-        public fun getThreadLocal(): ErrnoSegment = ErrnoSegment(THREAD_LOCAL_SEGMENT.get())
+        public fun getThreadLocal(): ErrnoSegment = ErrnoSegment(threadLocalSegment)
 
         context(arena: Arena)
         public fun allocate(): ErrnoSegment = ErrnoSegment(arena.allocate(Layouts.ERRNO))

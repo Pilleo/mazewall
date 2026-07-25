@@ -20,15 +20,15 @@ internal object ThreadStateRegistry {
         var cachedMergedState: ContainerState? = null
     }
 
-    private val holder = ThreadLocal.withInitial { ThreadStateHolder() }
+    private val holder by threadLocal { ThreadStateHolder() }
 
     /**
      * The current security state of the active thread.
      */
     var state: ContainerState
-        get() = holder.get().state
+        get() = holder.state
         set(value) {
-            val h = holder.get()
+            val h = holder
             h.state = value
             h.cachedMergedState = null
             h.cachedProcessState = null
@@ -38,7 +38,7 @@ internal object ThreadStateRegistry {
      * Fast path to resolve the current merged security state of the active thread.
      */
     fun resolveCurrentState(processState: ContainerState): ContainerState {
-        val h = holder.get()
+        val h = holder
         val ts = h.state
         if (h.cachedProcessState === processState && h.cachedMergedState != null) {
             return h.cachedMergedState!!

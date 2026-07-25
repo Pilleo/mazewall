@@ -1,5 +1,6 @@
 package io.mazewall.profiler
 
+import io.mazewall.enforcer.threadLocal
 import io.mazewall.LinuxNative
 import io.mazewall.Policy
 import io.mazewall.PolicyDefinition
@@ -244,7 +245,7 @@ object Profiler {
         private val context: io.mazewall.profiler.internal.DaemonContext,
         private val captureStackTraces: Boolean = true,
     ) : ExecutorService by delegate {
-        private val threadApplied = ThreadLocal.withInitial { false }
+        private var threadApplied by threadLocal { false }
         val recentLogs = CopyOnWriteArrayList<TraceEvent>()
         val recentStackProfiles =
             ConcurrentHashMap<TraceEvent, MutableList<Array<StackTraceElement>>>()
@@ -275,22 +276,22 @@ object Profiler {
         fun compileBillOfBehavior(): BillOfBehavior = BobCompiler.compile(recentLogs)
 
         private fun applyProfilingIfNecessary() {
-            if (!threadApplied.get()) {
+            if (!threadApplied) {
                 val currentThread = Thread.currentThread()
                 if (currentThread.isVirtual) {
                     throw IllegalStateException("Cannot run profiler inside virtual threads")
                 }
                 threadRegistry[LinuxNative.process.gettid()] = currentThread
                 installProfilingFilterForThread(
-                    context.socketPath,
-                    policy,
-                    recentLogs,
-                    if (captureStackTraces) recentStackProfiles else null,
-                    pathCache,
-                    false,
-                    { currentThread }
+                    socketPath = context.socketPath,
+                    policy = policy,
+                    accumulatedLogs = recentLogs,
+                    stackTracesMap = if (captureStackTraces) recentStackProfiles else null,
+                    pathCache = pathCache,
+                    processWide = false,
+                    onListenerCreated = {}
                 )
-                threadApplied.set(true)
+                threadApplied = true
             }
         }
 
