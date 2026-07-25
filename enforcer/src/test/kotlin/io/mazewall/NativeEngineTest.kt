@@ -3,12 +3,49 @@ package io.mazewall
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.MethodSource
+import io.mazewall.ffi.IoctlCommand
+import io.mazewall.ffi.IoctlPayload
+import io.mazewall.ffi.typed
+import io.mazewall.core.FileDescriptor
+import io.mazewall.core.FileDescriptorRole
 
 class NativeEngineTest {
+    companion object {
+        @JvmStatic
+        fun ioctlCommands() = listOf(
+            IoctlCommand.SECCOMP_IOCTL_NOTIF_RECV,
+            IoctlCommand.SECCOMP_IOCTL_NOTIF_SEND,
+            IoctlCommand.SECCOMP_IOCTL_NOTIF_ADDFD
+        )
+    }
+
     @AfterEach
     fun tearDown() {
         // Always reset to real engine after each test to avoid polluting other tests
         LinuxNative.resetToDefault()
+    }
+
+    @ParameterizedTest
+    @MethodSource("ioctlCommands")
+    fun `strongly typed ioctl signature delegates correctly and integrates with MockNativeEngine`(command: IoctlCommand<*, *>) {
+        val mock = MockNativeEngine()
+        var lastCommandCode = -1L
+        mock.onIoctl = { _, request, _ ->
+            lastCommandCode = request
+            LinuxNative.SyscallResult.Success(99L)
+        }
+
+        LinuxNative.setEngine(mock)
+
+        val dummyFd = FileDescriptor.unsafe<FileDescriptorRole.Generic>(100)
+        val dummySegment = io.mazewall.ffi.memory.ManagedSegment.NULL
+
+        @Suppress("UNCHECKED_CAST")
+        val result = LinuxNative.raw.ioctl(dummyFd, command as IoctlCommand<Any, Any>, dummySegment.typed<IoctlPayload.SeccompNotif>())
+        assertEquals(99L, result.getOrThrow("test"))
+        assertEquals(command.code, lastCommandCode)
     }
 
     @Test
