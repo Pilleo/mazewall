@@ -57,6 +57,21 @@ class RealGitHubClient(private val config: OrchestratorConfig) : GitHubClient {
     }
 
     override fun createIssue(title: String, body: String, label: String): String {
+        val preamble = """
+            💡 **Jules Instructions Before Starting:**
+            You are an experienced, java/kotlin developer, expert in linux, seccomp, landlock, security. This is your task:
+            1. **Verify Backlog Items**: Find the code related to this issue and verify if the issue/bug is actually present in the current codebase.
+            2. **Design Before Action**: Carefully review the proposed fix, downsides, benefits, and alternative approaches.
+            3. **Raise Doubts Early**: If you have any doubts about the correctness or architecture of the fix, stop and ask the operator.
+            4. **Doable scope**: Verify the issue is actually singular. If it tries to fix many big things - create subissues and notify
+            5. **Challenge**: Question the description of an issue and suggested fix. Is it really an issue? Is the fix making things better, or is it just a hack?
+
+            ---
+
+        """.trimIndent()
+
+        val fullBody = preamble + body
+
         try {
             // Ensure the label exists in the repository
             execute("gh", "label", "create", label, "--color", "ed0707", "--description", "Trigger Jules Agent")
@@ -67,7 +82,7 @@ class RealGitHubClient(private val config: OrchestratorConfig) : GitHubClient {
         val directory = File("build/tmp").apply { mkdirs() }
         val tempFile = File.createTempFile("issue_body_", ".tmp", directory)
         val output = try {
-            tempFile.writeText(body)
+            tempFile.writeText(fullBody)
             execute("gh", "issue", "create", "--title", title, "--body-file", tempFile.absolutePath, "--label", label)
         } finally {
             tempFile.delete()
