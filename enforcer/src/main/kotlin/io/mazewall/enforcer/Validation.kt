@@ -5,22 +5,16 @@ import kotlin.contracts.ExperimentalContracts
 import kotlin.contracts.contract
 
 /**
- * Validates that the current environment is suitable for applying thread-scoped
- * sandboxing rules.
+ * Validates that the current thread is not a Virtual Thread (Loom carrier poisoning protection).
  *
- * This function uses a Kotlin contract to formalize the invariant that the
- * code is running on a standard Linux platform thread (not a Virtual Thread).
+ * This function uses a Kotlin contract to formalize this invariant, allowing the compiler to
+ * perform flow analysis under the guarantee that the current thread is a platform thread.
  */
 @OptIn(ExperimentalContracts::class)
-internal fun validateLinuxAndNotVirtual() {
+public fun validateNotVirtual() {
     contract {
-        returns() implies true
+        returns()
     }
-
-    if (!Platform.isLinux) {
-        throw UnsupportedOperationException("Mazewall requires Linux for kernel-level containment.")
-    }
-
     if (Thread.currentThread().isVirtual) {
         throw IllegalStateException(
             "Attempted to apply seccomp containment inside a virtual thread. " +
@@ -29,4 +23,21 @@ internal fun validateLinuxAndNotVirtual() {
                 "Use a dedicated platform thread pool for sandboxed tasks.",
         )
     }
+}
+
+/**
+ * Validates that the current environment is suitable for applying thread-scoped
+ * sandboxing rules.
+ *
+ * This function uses a Kotlin contract to formalize the invariant that the
+ * code is running on a standard Linux platform thread (not a Virtual Thread).
+ */
+@OptIn(ExperimentalContracts::class)
+public fun validateLinuxAndNotVirtual() {
+    contract {
+        returns()
+    }
+
+    Platform.validateLinux()
+    validateNotVirtual()
 }

@@ -5,6 +5,8 @@ import io.mazewall.ffi.NativeConstants
 import io.mazewall.LinuxNative.SyscallResult
 import io.mazewall.LinuxNative.SyscallHandledState
 import java.util.logging.Logger
+import kotlin.contracts.ExperimentalContracts
+import kotlin.contracts.contract
 
 /**
  * Platform checks and fallback configuration.
@@ -76,6 +78,21 @@ public object Platform {
     public val isLinux: Boolean get() = provider.getOsName().equals("Linux", ignoreCase = true)
 
     /**
+     * Validates that the current operating system is Linux.
+     *
+     * This function uses a Kotlin contract to formalize this invariant.
+     */
+    @OptIn(ExperimentalContracts::class)
+    public fun validateLinux() {
+        contract {
+            returns()
+        }
+        if (!isLinux) {
+            throw UnsupportedOperationException("Mazewall requires Linux for kernel-level containment.")
+        }
+    }
+
+    /**
      * Returns true if the current platform supports seccomp filters.
      */
     public fun isSupported(): Boolean =
@@ -83,6 +100,21 @@ public object Platform {
             provider.hasKernelSeccompSupport() &&
             isSeccompSanityCheckPassing() &&
             isArchitectureSupported()
+
+    /**
+     * Validates that the current platform supports seccomp filters.
+     *
+     * This function uses a Kotlin contract to formalize this invariant.
+     */
+    @OptIn(ExperimentalContracts::class)
+    public fun validateSupported() {
+        contract {
+            returns()
+        }
+        if (!isSupported()) {
+            throw UnsupportedOperationException("Platform is not supported.")
+        }
+    }
 
     private fun isSeccompSanityCheckPassing(): Boolean {
         // Bogus Sanity Check: Ensure the kernel actively enforces seccomp.
