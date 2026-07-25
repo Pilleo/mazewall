@@ -317,21 +317,24 @@ internal class ProfilerTraceListener(
 
     private fun processEvent(event: TraceEvent) {
          try {
-             System.err.println("[TRACE-LISTENER-DEBUG] processEvent: tid=${event.tid.value}, syscall=${event.syscallName}")
-             if (event.paths.isNotEmpty() && isDuplicate(event)) {
-                 System.err.println("[TRACE-LISTENER-DEBUG] duplicate event, skipping")
-                 return
-             }
-
-             event.jvmStackTrace = captureStackTrace(event)
-             eventChannel.trySend(event)
+             processAndQueueEvent(event)
          } finally {
              sendAck()
          }
     }
 
+    private fun processAndQueueEvent(event: TraceEvent) {
+         System.err.println("[TRACE-LISTENER-DEBUG] processEvent: tid=${event.tid.value}, syscall=${event.syscallName}")
+         if (event.paths.isNotEmpty() && isDuplicate(event)) {
+             System.err.println("[TRACE-LISTENER-DEBUG] duplicate event, skipping")
+             return
+         }
+
+         event.jvmStackTrace = captureStackTrace(event)
+         eventChannel.trySend(event)
+    }
+
     private fun sendAck() {
-        System.err.println("[TRACE-LISTENER-DEBUG] sendAck: Sending PROTOCOL_ACK_BYTE to resume tracee.")
         sendCommand(PROTOCOL_ACK_BYTE)
     }
 
