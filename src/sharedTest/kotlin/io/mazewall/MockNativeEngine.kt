@@ -2,7 +2,6 @@ package io.mazewall
 
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
-import java.lang.foreign.StructLayout
 import io.mazewall.ffi.IoctlCommand
 import io.mazewall.ffi.Layouts
 import io.mazewall.ffi.NativeConstants

@@ -422,17 +422,7 @@ class ArchitectureTest {
     fun ffmApiMustBeIsolatedToFfiPackage(allClasses: com.tngtech.archunit.core.domain.JavaClasses) {
         noClasses()
             .that()
-            .resideInAPackage("io.mazewall..")
-            .and()
             .resideOutsideOfPackage("io.mazewall.ffi..")
-            .and(object : DescribedPredicate<com.tngtech.archunit.core.domain.JavaClass>("is not NativeEngine or RawSyscallOperations") {
-                override fun test(input: com.tngtech.archunit.core.domain.JavaClass): Boolean {
-                    val name = input.name
-                    return name != "io.mazewall.NativeEngine" &&
-                           name != "io.mazewall.RawSyscallOperations" &&
-                           !name.startsWith("io.mazewall.RawSyscallOperations$")
-                }
-            })
             .should()
             .dependOnClassesThat()
             .resideInAPackage("java.lang.foreign..")
