@@ -8,6 +8,9 @@ import io.mazewall.core.Pid
 import io.mazewall.core.Tid
 import io.mazewall.ffi.Layouts
 import io.mazewall.ffi.NativeConstants
+import io.mazewall.ffi.IoctlCommand
+import io.mazewall.ffi.IoctlPayload
+import io.mazewall.ffi.typed
 import io.mazewall.ffi.memory.PollFdSegment
 import io.mazewall.ffi.memory.SeccompNotifAddFdSegment
 import io.mazewall.ffi.memory.ConfinedSegment
@@ -250,8 +253,8 @@ internal class SupervisorSessionHandler(
             notif.fill(0)
             var recvRes: LinuxNative.SyscallResult<Long, *>
             while (true) {
-                recvRes = engine.raw.ioctl(listenerFd, NativeConstants.SECCOMP_IOCTL_NOTIF_RECV, notif)
-                if (recvRes is LinuxNative.SyscallResult.Error && recvRes.errno == NativeConstants.EINTR) {
+                recvRes = engine.raw.ioctl(listenerFd, IoctlCommand.SECCOMP_IOCTL_NOTIF_RECV, notif.typed<IoctlPayload.SeccompNotif>())
+                if (recvRes is LinuxNative.SyscallResult.Error<*> && recvRes.errno == NativeConstants.EINTR) {
                     continue
                 }
                 break
@@ -645,12 +648,12 @@ internal class SupervisorSessionHandler(
             val addfdManaged = addfd.managed
             var success = false
             while (true) {
-                val ioctlRes = engine.raw.ioctl(listenerFd, NativeConstants.SECCOMP_IOCTL_NOTIF_ADDFD, addfdManaged)
+                val ioctlRes = engine.raw.ioctl(listenerFd, IoctlCommand.SECCOMP_IOCTL_NOTIF_ADDFD, addfdManaged.typed<IoctlPayload.SeccompNotifAddFd>())
                 logger.info { "[SUPERVISOR-DEBUG] ioctl SECCOMP_IOCTL_NOTIF_ADDFD res=$ioctlRes" }
-                if (ioctlRes is LinuxNative.SyscallResult.Success) {
+                if (ioctlRes is LinuxNative.SyscallResult.Success<*, *>) {
                     success = true
                     break
-                } else if (ioctlRes is LinuxNative.SyscallResult.Error && ioctlRes.errno == NativeConstants.EINTR) {
+                } else if (ioctlRes is LinuxNative.SyscallResult.Error<*> && ioctlRes.errno == NativeConstants.EINTR) {
                     continue
                 } else {
                     break
@@ -740,8 +743,8 @@ internal class SupervisorSessionHandler(
         resp.writeInt(RESP_ERR_OFF, 0)
         resp.writeInt(RESP_FLAGS_OFF, NativeConstants.SECCOMP_USER_NOTIF_FLAG_CONTINUE.toInt())
         while (true) {
-            val res = engine.raw.ioctl(listenerFd, NativeConstants.SECCOMP_IOCTL_NOTIF_SEND, resp)
-            if (res is LinuxNative.SyscallResult.Error && res.errno == NativeConstants.EINTR) {
+            val res = engine.raw.ioctl(listenerFd, IoctlCommand.SECCOMP_IOCTL_NOTIF_SEND, resp.typed<IoctlPayload.SeccompNotifResp>())
+            if (res is LinuxNative.SyscallResult.Error<*> && res.errno == NativeConstants.EINTR) {
                 continue
             }
             break
@@ -755,8 +758,8 @@ internal class SupervisorSessionHandler(
         resp.writeInt(RESP_ERR_OFF, -errorNr)
         resp.writeInt(RESP_FLAGS_OFF, 0)
         while (true) {
-            val res = engine.raw.ioctl(listenerFd, NativeConstants.SECCOMP_IOCTL_NOTIF_SEND, resp)
-            if (res is LinuxNative.SyscallResult.Error && res.errno == NativeConstants.EINTR) {
+            val res = engine.raw.ioctl(listenerFd, IoctlCommand.SECCOMP_IOCTL_NOTIF_SEND, resp.typed<IoctlPayload.SeccompNotifResp>())
+            if (res is LinuxNative.SyscallResult.Error<*> && res.errno == NativeConstants.EINTR) {
                 continue
             }
             break
@@ -912,11 +915,11 @@ internal class SupervisorSessionHandler(
                                 val addfdManaged = addfd.managed
                                 var injectSuccess = false
                                 while (true) {
-                                    val ioctlRes = engine.raw.ioctl(listenerFd, NativeConstants.SECCOMP_IOCTL_NOTIF_ADDFD, addfdManaged)
-                                    if (ioctlRes is LinuxNative.SyscallResult.Success) {
+                                    val ioctlRes = engine.raw.ioctl(listenerFd, IoctlCommand.SECCOMP_IOCTL_NOTIF_ADDFD, addfdManaged.typed<IoctlPayload.SeccompNotifAddFd>())
+                                    if (ioctlRes is LinuxNative.SyscallResult.Success<*, *>) {
                                         injectSuccess = true
                                         break
-                                    } else if (ioctlRes is LinuxNative.SyscallResult.Error && ioctlRes.errno == NativeConstants.EINTR) {
+                                    } else if (ioctlRes is LinuxNative.SyscallResult.Error<*> && ioctlRes.errno == NativeConstants.EINTR) {
                                         continue
                                     } else {
                                         break

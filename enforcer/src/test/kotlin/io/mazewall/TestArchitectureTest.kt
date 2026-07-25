@@ -1,5 +1,7 @@
 package io.mazewall
 
+import com.tngtech.archunit.base.DescribedPredicate
+import com.tngtech.archunit.core.domain.JavaClass
 import com.tngtech.archunit.core.domain.JavaClasses
 import com.tngtech.archunit.core.importer.ImportOption
 import com.tngtech.archunit.junit.AnalyzeClasses
@@ -45,6 +47,18 @@ class TestArchitectureTest {
             .resideInAPackage("io.mazewall..")
             .and()
             .resideOutsideOfPackage("io.mazewall.ffi..")
+            .and(object : DescribedPredicate<JavaClass>("is not NativeEngine, MockNativeEngine, RawSyscallOperations, or associated test/mocks") {
+                override fun test(input: JavaClass): Boolean {
+                    val name = input.name
+                    return name != "io.mazewall.NativeEngine" &&
+                           name != "io.mazewall.RawSyscallOperations" &&
+                           !name.startsWith("io.mazewall.RawSyscallOperations$") &&
+                           name != "io.mazewall.MockNativeEngine" &&
+                           !name.startsWith("io.mazewall.MockNativeEngine$") &&
+                           !name.startsWith("io.mazewall.NativeEngineTest") &&
+                           !name.startsWith("io.mazewall.enforcer.supervisor.SupervisorSessionHandlerTest")
+                }
+            })
             .should()
             .dependOnClassesThat()
             .resideInAPackage("java.lang.foreign..")

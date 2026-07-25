@@ -4,6 +4,7 @@ import io.mazewall.LinuxNative.SyscallResult
 import io.mazewall.LinuxNative.SyscallHandledState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FdState
+import io.mazewall.ffi.IoctlCommand
 import io.mazewall.ffi.memory.ManagedSegment
 import io.mazewall.ffi.memory.NativeArena
 import io.mazewall.seccomp.BpfInstruction
@@ -49,6 +50,19 @@ public interface RawSyscallOperations {
         a3: io.mazewall.core.NativeArg,
         a4: io.mazewall.core.NativeArg,
     ): SyscallResult<Long, SyscallHandledState.Unhandled>
+
+    fun <Req, Res> ioctl(
+        fd: FileDescriptor<*, FdState.Open>,
+        command: IoctlCommand<Req, Res>,
+        arg: Req,
+    ): SyscallResult<Long, SyscallHandledState.Unhandled> {
+        val segment = when (arg) {
+            is io.mazewall.ffi.TypedSegment<*> -> arg.segment
+            is ManagedSegment -> arg
+            else -> throw IllegalArgumentException("Unsupported ioctl argument type")
+        }
+        return ioctl(fd, command.code, segment)
+    }
 
     fun ioctl(
         fd: FileDescriptor<*, FdState.Open>,

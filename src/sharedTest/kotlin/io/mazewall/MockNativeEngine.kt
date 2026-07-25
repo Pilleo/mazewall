@@ -2,6 +2,8 @@ package io.mazewall
 
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
+import java.lang.foreign.StructLayout
+import io.mazewall.ffi.IoctlCommand
 import io.mazewall.ffi.Layouts
 import io.mazewall.ffi.NativeConstants
 import io.mazewall.ffi.memory.ManagedSegment
@@ -49,6 +51,19 @@ public open class MockNativeEngine(
         a3: io.mazewall.core.NativeArg,
         a4: io.mazewall.core.NativeArg,
     ) = onSyscall(nr, a1, a2, a3, a4, io.mazewall.core.NativeArg.LongArg(0L), io.mazewall.core.NativeArg.LongArg(0L))
+
+    override fun <Req, Res> ioctl(
+        fd: FileDescriptor<*, FdState.Open>,
+        command: IoctlCommand<Req, Res>,
+        arg: Req,
+    ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+        val segment = when (arg) {
+            is io.mazewall.ffi.TypedSegment<*> -> arg.segment
+            is ManagedSegment -> arg
+            else -> throw IllegalArgumentException("Unsupported ioctl argument type")
+        }
+        return raw.ioctl(fd, command.code, segment)
+    }
 
     override fun ioctl(
         fd: FileDescriptor<*, FdState.Open>,
