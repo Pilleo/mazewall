@@ -173,7 +173,7 @@ internal class ProfilerSessionHandler(
 
             // Optimisation: skip event delivery for JVM-internal paths that generate noise
             // (JDK home, classpath, /proc, /sys).
-            if (checkAndBypassNoisePath(nr, resolvedEvent, handshake, resp)) {
+            if (checkAndBypassNoisePath(arena, nr, resolvedEvent, handshake, resp)) {
                 return true
             }
 
@@ -256,8 +256,8 @@ internal class ProfilerSessionHandler(
     /**
      * Noise filter bypass logic helper.
      */
-    context(arena: NativeArena)
     private fun checkAndBypassNoisePath(
+        arena: NativeArena,
         nr: Int,
         resolvedEvent: SyscallEvent<SyscallEventState.Resolved>,
         handshake: HandshakeSession.Active,
