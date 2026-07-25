@@ -18,6 +18,7 @@ class MockOrchestratorEnvironment : OrchestratorEnvironment {
     val prComments = mutableListOf<GitHubComment>()
     val commentedPrs = mutableListOf<Pair<String, String>>()
     var julesSession: JulesSession? = null
+    val sentJulesMessages = mutableListOf<Pair<String, String>>()
     val issues = mutableListOf<BacklogIssue>()
     val resolvedIssues = mutableListOf<BacklogIssue>()
     var mapsRegenerated = false
@@ -37,26 +38,34 @@ class MockOrchestratorEnvironment : OrchestratorEnvironment {
     override fun sendNotification(message: String) { notifications.add(message) }
     override fun requestApproval(issueId: String, text: String): Boolean = approved
 
-    override fun findExistingIssueNumber(issueId: String): String? = existingIssueNumber
-    override fun createIssue(title: String, body: String, label: String): String = createdIssueNumber
-    override fun isIssueClosed(issueNumber: String): Boolean = issueClosed
-    override fun findLinkedPR(issueNumber: String, issueId: String, sessionId: String?): String? = linkedPrNumber
-    override fun isPrMerged(prNumber: String): Boolean = prMerged
-    override fun getPrHeadSha(prNumber: String): String = prHeadSha
-    override fun checkBuildStatus(prNumber: String): String = buildStatus
-    override fun getPrComments(prNumber: String): List<GitHubComment> = prComments
-    override fun commentOnPr(prNumber: String, body: String) { commentedPrs.add(prNumber to body) }
-    override fun commentOnIssue(issueNumber: String, body: String) {}
-    override fun getPrDiff(prNumber: String): String = "mock diff"
-    override fun getFailedBuildLogs(prNumber: String): String = "logs"
-    override fun getPrUrl(prNumber: String): String = "http://pr/$prNumber"
 
     var hasUnableToCompleteActivity: Boolean = false
-    val sentJulesMessages = mutableListOf<Pair<String, String>>()
-    override fun getJulesSession(issueId: String): JulesSession? = julesSession
-    override fun getJulesSessionStatus(sessionId: String): String? = julesSession?.status
-    override fun hasUnableToCompleteActivity(sessionId: String): Boolean = hasUnableToCompleteActivity
-    override fun sendJulesSessionMessage(sessionId: String, prompt: String) { sentJulesMessages.add(sessionId to prompt) }
+
+
+    override val gitHubClient = object : GitHubClient {
+        override fun findExistingIssueNumber(issueId: String): String? = existingIssueNumber
+        override fun createIssue(title: String, body: String, label: String): String = createdIssueNumber
+        override fun isIssueClosed(issueNumber: String): Boolean = issueClosed
+        override fun findLinkedPR(issueNumber: String, issueId: String, sessionId: String?): String? = linkedPrNumber
+        override fun isPrMerged(prNumber: String): Boolean = prMerged
+        override fun getPrHeadSha(prNumber: String): String = prHeadSha
+        override fun checkBuildStatus(prNumber: String): String = buildStatus
+        override fun getPrComments(prNumber: String): List<GitHubComment> = prComments
+        override fun commentOnPr(prNumber: String, body: String) { commentedPrs.add(prNumber to body) }
+        override fun commentOnIssue(issueNumber: String, body: String) {}
+        override fun getPrDiff(prNumber: String): String = "mock diff"
+        override fun getFailedBuildLogs(prNumber: String): String = "mock failed logs"
+        override fun getPrUrl(prNumber: String): String = "mock url"
+    }
+
+    override val julesClient = object : JulesClient {
+        override fun getActiveSession(issueId: String): JulesSession? = julesSession
+        override fun getSessionStatusFromActivities(sessionId: String): String? = julesSession?.status
+        override fun hasUnableToCompleteActivity(sessionId: String): Boolean = false
+        override fun triggerSession(repo: String, issueId: String, prompt: String) {}
+        override fun sendSessionMessage(sessionId: String, prompt: String) { sentJulesMessages.add(sessionId to prompt) }
+        override fun listSessions(): List<JulesSession> = emptyList()
+    }
 
     override fun parseAllIssues(): List<BacklogIssue> = issues
     override fun writeGithubIssue(issue: BacklogIssue, number: Int) {}

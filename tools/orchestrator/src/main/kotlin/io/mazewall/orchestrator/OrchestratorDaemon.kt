@@ -190,10 +190,10 @@ fun main() {
         stuckPendingThresholdMs = getEnvOr("STUCK_PENDING_THRESHOLD_MS", "900000").toLong()
     )
 
-    GitHubCli.init(config)
-    JulesCli.init(config)
+    val gitHubClient = RealGitHubClient(config)
+    val julesClient = RealJulesClient(config)
 
-    val env = RealOrchestratorEnvironment(bot, backlogDir, resolvedDir, stateFile, config)
+    val env = RealOrchestratorEnvironment(bot, backlogDir, resolvedDir, stateFile, gitHubClient, julesClient, config)
     val runner = OrchestratorDaemonRunner(env, stateFile)
     runner.run()
 }

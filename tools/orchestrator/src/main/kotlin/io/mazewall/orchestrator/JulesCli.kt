@@ -125,8 +125,7 @@ private data class ListActivitiesResponse(
 
 // ─── JulesCli ─────────────────────────────────────────────────────────────────
 
-object JulesCli {
-    private var config: OrchestratorConfig = OrchestratorConfig()
+class RealJulesClient(private val config: OrchestratorConfig) : JulesClient {
     private val json = Json { ignoreUnknownKeys = true }
     private val client = HttpClient.newBuilder()
         .connectTimeout(Duration.ofSeconds(10))
@@ -170,7 +169,7 @@ object JulesCli {
      * *after* the most recent "Retry" user message. Uses the typed API model
      * instead of string-matching on raw text fields.
      */
-    fun hasUnableToCompleteActivity(sessionId: String): Boolean {
+    override fun hasUnableToCompleteActivity(sessionId: String): Boolean {
         return try {
             val activities = fetchActivities(sessionId)
             val lastRetryIndex = activities.indexOfLast {
@@ -195,7 +194,7 @@ object JulesCli {
      * Returns one of: `"failed"`, `"completed"`, `"in_progress"`, or `null` on
      * error.
      */
-    fun getSessionStatusFromActivities(sessionId: String): String? {
+    override fun getSessionStatusFromActivities(sessionId: String): String? {
         return try {
             val activities = fetchActivities(sessionId)
             val last = activities.lastOrNull()
@@ -211,11 +210,8 @@ object JulesCli {
         }
     }
 
-    fun init(config: OrchestratorConfig) {
-        this.config = config
-    }
 
-    fun triggerSession(repo: String, issueId: String, prompt: String) {
+    override fun triggerSession(repo: String, issueId: String, prompt: String) {
         val sessionDescription = "[$issueId] ${prompt.take(150)}"
         println("🚀 Triggering remote Jules session for issue $issueId via REST API...")
 
@@ -250,7 +246,7 @@ object JulesCli {
         }
     }
 
-    fun sendSessionMessage(sessionId: String, prompt: String) {
+    override fun sendSessionMessage(sessionId: String, prompt: String) {
         println("💬 Sending message to remote Jules session $sessionId via REST API...")
 
         val requestPayload = mapOf("prompt" to prompt)
@@ -275,7 +271,7 @@ object JulesCli {
         }
     }
 
-    fun getActiveSession(issueId: String): JulesSession? {
+    override fun getActiveSession(issueId: String): JulesSession? {
         val sessions = listSessions()
         // Find the session where description contains the issue ID marker, e.g. "[issue-001]"
         return sessions
@@ -285,7 +281,7 @@ object JulesCli {
     }
 
     /** Lists active remote Jules sessions by querying the REST API. */
-    fun listSessions(): List<JulesSession> {
+    override fun listSessions(): List<JulesSession> {
         val request = HttpRequest.newBuilder()
             .uri(URI.create("https://jules.googleapis.com/v1alpha/sessions"))
             .header("X-Goog-Api-Key", apiKey)

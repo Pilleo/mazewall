@@ -27,31 +27,14 @@ interface OrchestratorEnvironment {
     fun ringBell(times: Int)
     fun readLine(): String?
     fun getEnvOrNull(key: String): String?
+    val gitHubClient: GitHubClient
+    val julesClient: JulesClient
 
     // Bot
     fun sendNotification(message: String)
     fun requestApproval(issueId: String, text: String): Boolean
 
-    // GitHub
-    fun findExistingIssueNumber(issueId: String): String?
-    fun createIssue(title: String, body: String, label: String): String
-    fun isIssueClosed(issueNumber: String): Boolean
-    fun findLinkedPR(issueNumber: String, issueId: String, sessionId: String?): String?
-    fun isPrMerged(prNumber: String): Boolean
-    fun getPrHeadSha(prNumber: String): String
-    fun checkBuildStatus(prNumber: String): String
-    fun getPrComments(prNumber: String): List<GitHubComment>
-    fun commentOnPr(prNumber: String, body: String)
-    fun commentOnIssue(issueNumber: String, body: String)
-    fun getPrDiff(prNumber: String): String
-    fun getFailedBuildLogs(prNumber: String): String
-    fun getPrUrl(prNumber: String): String
 
-    // Jules
-    fun getJulesSession(issueId: String): JulesSession?
-    fun getJulesSessionStatus(sessionId: String): String?
-    fun hasUnableToCompleteActivity(sessionId: String): Boolean
-    fun sendJulesSessionMessage(sessionId: String, prompt: String)
 
     // Backlog / Filesystem
     fun parseAllIssues(): List<BacklogIssue>
@@ -67,6 +50,8 @@ class RealOrchestratorEnvironment(
     private val backlogDir: File,
     private val resolvedDir: File,
     private val stateFile: File,
+    override val gitHubClient: GitHubClient,
+    override val julesClient: JulesClient,
     override val config: OrchestratorConfig = OrchestratorConfig()
 ) : OrchestratorEnvironment {
 
@@ -120,80 +105,23 @@ class RealOrchestratorEnvironment(
         }
     }
 
-    override fun findExistingIssueNumber(issueId: String): String? = GitHubCli.findExistingIssueNumber(issueId)
 
-    override fun createIssue(title: String, body: String, label: String): String {
-        val preamble = """
-            💡 **Jules Instructions Before Starting:**
-            You are an experienced, java/kotlin developer, expert in linux, seccomp, landlock, security. This is your task:
-            1. **Verify Backlog Items**: Find the code related to this issue and verify if the issue/bug is actually present in the current codebase.
-            2. **Design Before Action**: Carefully review the proposed fix, downsides, benefits, and alternative approaches.
-            3. **Raise Doubts Early**: If you have any doubts about the correctness or architecture of the fix, stop and ask the operator.
-            4. **Doable scope**: Verify the issue is actually singular. If it tries to fix many big things - create subissues and notify
-            5. **Challenge**: Question the description of an issue and suggested fix. Is it really an issue? Is the fix making things better, or is it just a hack?
 
-            ---
 
-        """.trimIndent()
 
-        return GitHubCli.createIssue(title, preamble + body, label)
-    }
 
-    override fun isIssueClosed(issueNumber: String): Boolean = GitHubCli.isIssueClosed(issueNumber)
 
-    override fun findLinkedPR(issueNumber: String, issueId: String, sessionId: String?): String? =
-        GitHubCli.findLinkedPR(issueNumber, issueId, sessionId)
 
-    override fun isPrMerged(prNumber: String): Boolean = GitHubCli.isPrMerged(prNumber)
 
-    override fun getPrHeadSha(prNumber: String): String = GitHubCli.getPrHeadSha(prNumber)
 
-    override fun checkBuildStatus(prNumber: String): String = GitHubCli.checkBuildStatus(prNumber)
 
-    override fun getPrComments(prNumber: String): List<GitHubComment> = GitHubCli.getPrComments(prNumber)
 
-    override fun commentOnPr(prNumber: String, body: String) {
-        val directory = File("build/tmp").apply { mkdirs() }
-        val tempFile = File.createTempFile("pr_comment_", ".tmp", directory)
-        try {
-            tempFile.writeText(body)
-            executeCmd("gh", "pr", "comment", prNumber, "--body-file", tempFile.absolutePath)
-        } finally {
-            tempFile.delete()
-        }
-    }
 
-    override fun commentOnIssue(issueNumber: String, body: String) {
-        val directory = File("build/tmp").apply { mkdirs() }
-        val tempFile = File.createTempFile("issue_comment_", ".tmp", directory)
-        try {
-            tempFile.writeText(body)
-            executeCmd("gh", "issue", "comment", issueNumber, "--body-file", tempFile.absolutePath)
-        } finally {
-            tempFile.delete()
-        }
-    }
 
-    override fun getPrDiff(prNumber: String): String {
-        return executeCmd("gh", "pr", "diff", prNumber)
-    }
 
-    override fun getFailedBuildLogs(prNumber: String): String = GitHubCli.getFailedBuildLogs(prNumber)
 
-    override fun getPrUrl(prNumber: String): String {
-        return executeCmd("gh", "pr", "view", prNumber, "--json", "url")
-            .substringAfter("\"url\":\"").substringBefore("\"")
-    }
 
-    override fun getJulesSession(issueId: String): JulesSession? = JulesCli.getActiveSession(issueId)
 
-    override fun getJulesSessionStatus(sessionId: String): String? = JulesCli.getSessionStatusFromActivities(sessionId)
-
-    override fun hasUnableToCompleteActivity(sessionId: String): Boolean = JulesCli.hasUnableToCompleteActivity(sessionId)
-
-    override fun sendJulesSessionMessage(sessionId: String, prompt: String) {
-        JulesCli.sendSessionMessage(sessionId, prompt)
-    }
 
     override fun parseAllIssues(): List<BacklogIssue> = BacklogParser.parseAllIssues(backlogDir)
 
@@ -212,7 +140,7 @@ class RealOrchestratorEnvironment(
     }
 
     private fun executeCmd(vararg command: String): String {
-        return RetryUtils.retry(config.maxRetries, config.initialRetryDelayMs, this) {
+        return RetryUtils.retry(config.maxRetries, config.initialRetryDelayMs, { errPrintln(it) }) {
             val pb = ProcessBuilder(*command)
             val process = pb.redirectErrorStream(true).start()
             process.outputStream.close()

@@ -1,7 +1,7 @@
 ---
 title: "Refactor GitHubCli and JulesCli for Testability"
 priority: 8
-status: "open"
+status: "resolved"
 dependencies: []
 severity: "HIGH"
 component: "orchestrator"

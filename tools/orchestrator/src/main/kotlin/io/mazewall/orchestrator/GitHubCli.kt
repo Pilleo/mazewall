@@ -38,13 +38,8 @@ data class GitHubRun(
     val databaseId: Long
 )
 
-object GitHubCli {
+class RealGitHubClient(private val config: OrchestratorConfig) : GitHubClient {
     private val json = Json { ignoreUnknownKeys = true }
-    private var config: OrchestratorConfig = OrchestratorConfig()
-
-    fun init(config: OrchestratorConfig) {
-        this.config = config
-    }
 
     internal data class CachedValue<T>(val value: T, val expiry: Long)
     internal val cache = mutableMapOf<String, CachedValue<*>>()
@@ -61,7 +56,7 @@ object GitHubCli {
         return result
     }
 
-    fun createIssue(title: String, body: String, label: String): String {
+    override fun createIssue(title: String, body: String, label: String): String {
         try {
             // Ensure the label exists in the repository
             execute("gh", "label", "create", label, "--color", "ed0707", "--description", "Trigger Jules Agent")
@@ -86,8 +81,7 @@ object GitHubCli {
         return issueNumber
     }
 
-    /** Search GitHub for an existing issue matching the given title prefix (the [issueId] part). Returns the issue number or null. */
-    fun findExistingIssueNumber(issueId: String): String? {
+    override fun findExistingIssueNumber(issueId: String): String? {
         return try {
             val openJson = execute("gh", "issue", "list", "--state", "open", "--json", "number,title")
             val closedJson = execute("gh", "issue", "list", "--state", "closed", "--json", "number,title")
@@ -98,42 +92,35 @@ object GitHubCli {
         }
     }
 
-    fun findLinkedPR(issueNumber: String, issueId: String, julesSessionId: String?): String? {
-        // Try to search via standard linked PR references
+    override fun findLinkedPR(issueNumber: String, issueId: String, julesSessionId: String?): String? {
         var prListJson = execute("gh", "pr", "list", "--search", "fixes #$issueNumber", "--json", "number,title,headRefName,body")
         var prs = parsePRs(prListJson)
         if (prs.isNotEmpty()) return prs.first().number.toString()
 
-        // Fallback: search open PRs with JSON details
         prListJson = execute("gh", "pr", "list", "--json", "number,title,headRefName,body")
         prs = parsePRs(prListJson)
         
         val matched = prs.firstOrNull { pr ->
-            // Match branch name containing session ID
             (julesSessionId != null && pr.headRefName.contains(julesSessionId)) ||
-            // Match body containing fixes #issueNumber
             (pr.body?.contains("#$issueNumber") == true) ||
-            // Match body/branch containing local issue ID (e.g. "issue-001")
             pr.headRefName.contains(issueId, ignoreCase = true) ||
             (pr.body?.contains(issueId, ignoreCase = true) == true)
         }
         return matched?.number?.toString()
     }
 
-    fun checkBuildStatus(prNumber: String): String = withCache("checkBuildStatus-$prNumber") {
+    override fun checkBuildStatus(prNumber: String): String = withCache("checkBuildStatus-$prNumber") {
         try {
-            // First check if the PR has merge conflicts
             val mergeableJson = execute("gh", "pr", "view", prNumber, "--json", "mergeable")
-            val m = json.decodeFromString<GitHubMergeable>(mergeableJson)
+            val m = json.decodeFromString(GitHubMergeable.serializer(), mergeableJson)
             if (m.mergeable == "CONFLICTING") {
                 return "CONFLICT"
             }
 
             val checksJson = execute("gh", "pr", "checks", prNumber, "--json", "state,name,bucket,event")
-            val checks = json.decodeFromString<List<GitHubCheck>>(checksJson)
+            val checks = json.decodeFromString(kotlinx.serialization.builtins.ListSerializer(GitHubCheck.serializer()), checksJson)
             if (checks.isEmpty()) return "IN_PROGRESS"
 
-            // If any check has failed, was cancelled, or requires action, the build has failed
             val isFailing = checks.any {
                 it.state == "FAILURE" ||
                 it.state == "CANCELLED" ||
@@ -141,7 +128,6 @@ object GitHubCli {
             }
             if (isFailing) return "FAILURE"
 
-            // If any check is pending, currently running, or expected to run, the build is in progress
             val isPending = checks.any {
                 it.state == "PENDING" ||
                 it.state == "IN_PROGRESS" ||
@@ -163,11 +149,11 @@ object GitHubCli {
         }
     }
 
-    fun getFailedBuildLogs(prNumber: String): String {
+    override fun getFailedBuildLogs(prNumber: String): String {
         try {
             val sha = getPrHeadSha(prNumber)
             val runsJson = execute("gh", "run", "list", "--commit", sha, "--json", "databaseId")
-            val runs = json.decodeFromString<List<GitHubRun>>(runsJson)
+            val runs = json.decodeFromString(kotlinx.serialization.builtins.ListSerializer(GitHubRun.serializer()), runsJson)
             if (runs.isEmpty()) {
                 return "Error retrieving failed build logs: No workflow runs found for commit $sha"
             }
@@ -179,25 +165,25 @@ object GitHubCli {
         }
     }
 
-    fun getPrHeadSha(prNumber: String): String = withCache("getPrHeadSha-$prNumber") {
+    override fun getPrHeadSha(prNumber: String): String = withCache("getPrHeadSha-$prNumber") {
         val output = execute("gh", "pr", "view", prNumber, "--json", "headRefOid")
         output.substringAfter("\"headRefOid\":\"").substringBefore("\"")
     }
 
-    fun isIssueClosed(issueNumber: String): Boolean {
+    override fun isIssueClosed(issueNumber: String): Boolean {
         val state = execute("gh", "issue", "view", issueNumber, "--json", "state")
         return state.contains("\"state\":\"CLOSED\"", ignoreCase = true)
     }
 
-    fun isPrMerged(prNumber: String): Boolean {
+    override fun isPrMerged(prNumber: String): Boolean {
         val state = execute("gh", "pr", "view", prNumber, "--json", "state")
         return state.contains("\"state\":\"MERGED\"", ignoreCase = true)
     }
 
-    fun getPrComments(prNumber: String): List<GitHubComment> {
+    override fun getPrComments(prNumber: String): List<GitHubComment> {
         return try {
             val jsonText = execute("gh", "pr", "view", prNumber, "--json", "comments")
-            val container = json.decodeFromString<CommentsContainer>(jsonText)
+            val container = json.decodeFromString(CommentsContainer.serializer(), jsonText)
             container.comments
         } catch (e: Exception) {
             System.err.println("Error fetching comments for PR #$prNumber: ${e.message}")
@@ -207,7 +193,7 @@ object GitHubCli {
 
     private fun parseIssues(jsonText: String): List<GitHubIssue> {
         return try {
-            json.decodeFromString<List<GitHubIssue>>(jsonText)
+            json.decodeFromString(kotlinx.serialization.builtins.ListSerializer(GitHubIssue.serializer()), jsonText)
         } catch (e: Exception) {
             emptyList()
         }
@@ -215,14 +201,14 @@ object GitHubCli {
 
     private fun parsePRs(jsonText: String): List<GitHubPR> {
         return try {
-            json.decodeFromString<List<GitHubPR>>(jsonText)
+            json.decodeFromString(kotlinx.serialization.builtins.ListSerializer(GitHubPR.serializer()), jsonText)
         } catch (e: Exception) {
             emptyList()
         }
     }
 
     private fun execute(vararg command: String): String {
-        return RetryUtils.retry(config.maxRetries, config.initialRetryDelayMs, LoggingEnv) {
+        return RetryUtils.retry(config.maxRetries, config.initialRetryDelayMs, { System.err.println("  [GitHubCli] $it") }) {
             val directory = File("build/tmp").apply { mkdirs() }
             val tempFile = File.createTempFile("gh_cmd_", ".log", directory)
             try {
@@ -247,40 +233,35 @@ object GitHubCli {
         }
     }
 
-    private object LoggingEnv : OrchestratorEnvironment {
-        override fun println(message: Any?) {}
-        override fun print(message: Any?) {}
-        override fun errPrintln(message: Any?) = System.err.println("  [GitHubCli] $message")
-        override fun sleep(duration: Long, unit: TimeUnit) = unit.sleep(duration)
-        override fun ringBell(times: Int) {}
-        override fun readLine(): String? = null
-        override fun getEnvOrNull(key: String): String? = null
-        override fun sendNotification(message: String) {}
-        override fun requestApproval(issueId: String, text: String): Boolean = false
-        override fun findExistingIssueNumber(issueId: String): String? = null
-        override fun createIssue(title: String, body: String, label: String): String = ""
-        override fun isIssueClosed(issueNumber: String): Boolean = false
-        override fun findLinkedPR(issueNumber: String, issueId: String, sessionId: String?): String? = null
-        override fun isPrMerged(prNumber: String): Boolean = false
-        override fun getPrHeadSha(prNumber: String): String = ""
-        override fun checkBuildStatus(prNumber: String): String = ""
-        override fun getPrComments(prNumber: String): List<GitHubComment> = emptyList()
-        override fun commentOnPr(prNumber: String, body: String) {}
-        override fun commentOnIssue(issueNumber: String, body: String) {}
-        override fun getPrDiff(prNumber: String): String = ""
-        override fun getFailedBuildLogs(prNumber: String): String = ""
-        override fun getPrUrl(prNumber: String): String = ""
-        override fun getJulesSession(issueId: String): JulesSession? = null
-        override fun getJulesSessionStatus(sessionId: String): String? = null
-        override fun hasUnableToCompleteActivity(sessionId: String): Boolean = false
-        override fun sendJulesSessionMessage(sessionId: String, prompt: String) {}
-        override fun parseAllIssues(): List<BacklogIssue> = emptyList()
-        override fun writeGithubIssue(issue: BacklogIssue, number: Int) {}
-        override fun removeGithubIssue(issue: BacklogIssue) {}
-        override fun markIssueAsResolved(issue: BacklogIssue) {}
-        override fun deleteStateFile() {}
-        override fun generateKnowledgeMap() {}
-        override val config: OrchestratorConfig get() = GitHubCli.config
+    override fun commentOnPr(prNumber: String, body: String) {
+        val directory = File("build/tmp").apply { mkdirs() }
+        val tempFile = File.createTempFile("pr_comment_", ".tmp", directory)
+        try {
+            tempFile.writeText(body)
+            execute("gh", "pr", "comment", prNumber, "--body-file", tempFile.absolutePath)
+        } finally {
+            tempFile.delete()
+        }
+    }
+
+    override fun commentOnIssue(issueNumber: String, body: String) {
+        val directory = File("build/tmp").apply { mkdirs() }
+        val tempFile = File.createTempFile("issue_comment_", ".tmp", directory)
+        try {
+            tempFile.writeText(body)
+            execute("gh", "issue", "comment", issueNumber, "--body-file", tempFile.absolutePath)
+        } finally {
+            tempFile.delete()
+        }
+    }
+
+    override fun getPrDiff(prNumber: String): String {
+        return execute("gh", "pr", "diff", prNumber)
+    }
+
+    override fun getPrUrl(prNumber: String): String {
+        return execute("gh", "pr", "view", prNumber, "--json", "url")
+            .substringAfter("\"url\":\"").substringBefore("\"")
     }
 }
 

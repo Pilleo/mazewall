@@ -1,12 +1,10 @@
 package io.mazewall.orchestrator
 
-import java.util.concurrent.TimeUnit
-
 object RetryUtils {
     fun <T> retry(
         maxRetries: Int = 3,
         initialDelayMs: Long = 1000,
-        env: OrchestratorEnvironment? = null,
+        logError: ((String) -> Unit)? = null,
         block: () -> T
     ): T {
         var lastException: Exception? = null
@@ -18,7 +16,7 @@ object RetryUtils {
             } catch (e: Exception) {
                 lastException = e
                 if (attempt < maxRetries) {
-                    env?.errPrintln("⚠️ Attempt $attempt failed: ${e.message}. Retrying in ${currentDelay}ms...")
+                    logError?.invoke("⚠️ Attempt $attempt failed: ${e.message}. Retrying in ${currentDelay}ms...")
                     Thread.sleep(currentDelay)
                     currentDelay *= 2
                 }
