@@ -437,8 +437,16 @@ object Landlock {
         return when (restrictResult) {
             is LinuxNative.SyscallResult.Success -> LandlockRuleset(ruleset.fd)
             is LinuxNative.SyscallResult.Error -> {
-                if (restrictResult.errno == NativeConstants.ENOSYS || restrictResult.errno == 95 /* EOPNOTSUPP */) {
-                    val errnoName = if (restrictResult.errno == NativeConstants.ENOSYS) "ENOSYS" else "EOPNOTSUPP"
+                if (restrictResult.errno == NativeConstants.ENOSYS ||
+                    restrictResult.errno == NativeConstants.EOPNOTSUPP ||
+                    restrictResult.errno == NativeConstants.ENOPKG
+                ) {
+                    val errnoName = when (restrictResult.errno) {
+                        NativeConstants.ENOSYS -> "ENOSYS"
+                        NativeConstants.EOPNOTSUPP -> "EOPNOTSUPP"
+                        NativeConstants.ENOPKG -> "ENOPKG"
+                        else -> "UNKNOWN"
+                    }
                     throw UnsupportedKernelFeatureException(
                         "landlock_restrict_self failed with $errnoName. " +
                         "Landlock is not supported or enabled on this system. " +
@@ -545,8 +553,16 @@ object Landlock {
         return when (res) {
             is LinuxNative.SyscallResult.Success -> FileDescriptor.unsafe(res.value.toInt())
             is LinuxNative.SyscallResult.Error -> {
-                if (res.errno == NativeConstants.ENOSYS || res.errno == 95 /* EOPNOTSUPP */) {
-                    val errnoName = if (res.errno == NativeConstants.ENOSYS) "ENOSYS" else "EOPNOTSUPP"
+                if (res.errno == NativeConstants.ENOSYS ||
+                    res.errno == NativeConstants.EOPNOTSUPP ||
+                    res.errno == NativeConstants.ENOPKG
+                ) {
+                    val errnoName = when (res.errno) {
+                        NativeConstants.ENOSYS -> "ENOSYS"
+                        NativeConstants.EOPNOTSUPP -> "EOPNOTSUPP"
+                        NativeConstants.ENOPKG -> "ENOPKG"
+                        else -> "UNKNOWN"
+                    }
                     throw UnsupportedKernelFeatureException(
                         "landlock_create_ruleset failed with $errnoName. " +
                         "Landlock is not supported or enabled on this system. " +
@@ -579,8 +595,16 @@ object Landlock {
         return when (res) {
             is LinuxNative.SyscallResult.Success -> AddRuleResult.Success
             is LinuxNative.SyscallResult.Error -> {
-                if (res.errno == NativeConstants.ENOSYS || res.errno == 95 /* EOPNOTSUPP */) {
-                    val errnoName = if (res.errno == NativeConstants.ENOSYS) "ENOSYS" else "EOPNOTSUPP"
+                if (res.errno == NativeConstants.ENOSYS ||
+                    res.errno == NativeConstants.EOPNOTSUPP ||
+                    res.errno == NativeConstants.ENOPKG
+                ) {
+                    val errnoName = when (res.errno) {
+                        NativeConstants.ENOSYS -> "ENOSYS"
+                        NativeConstants.EOPNOTSUPP -> "EOPNOTSUPP"
+                        NativeConstants.ENOPKG -> "ENOPKG"
+                        else -> "UNKNOWN"
+                    }
                     throw UnsupportedKernelFeatureException(
                         "landlock_add_rule failed with $errnoName. " +
                         "Landlock is not supported or enabled on this system. " +

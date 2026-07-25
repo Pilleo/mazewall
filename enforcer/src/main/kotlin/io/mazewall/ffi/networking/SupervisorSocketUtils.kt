@@ -67,6 +67,7 @@ public object SupervisorSocketUtils {
         sockaddrUn.segment.fill(0)
         sockaddrUn.setSunFamily(AF_UNIX.toShort())
         val pathBytes = socketPath.toByteArray(StandardCharsets.UTF_8)
+        // Strict bounds check to prevent native buffer overflow / OutOfBoundsException on long paths
         require(pathBytes.size < 108) {
             "Socket path too long: $socketPath (length: ${pathBytes.size}, max: 107)"
         }

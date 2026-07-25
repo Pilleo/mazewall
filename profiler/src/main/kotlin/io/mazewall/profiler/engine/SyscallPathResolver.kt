@@ -45,6 +45,10 @@ internal class SyscallPathResolver(
                     tryRead(tid, args[2], args[1]),
                 )
 
+            // IOCTL is highly command-dependent and its arguments are not standard string pointers.
+            // We treat it as a generic opaque operation without attempting deep pointer dereferencing.
+            "IOCTL" -> emptyList()
+
             else -> emptyList()
         }
         return event.resolved(paths)

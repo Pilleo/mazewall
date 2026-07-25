@@ -173,27 +173,8 @@ internal class ProfilerSessionHandler(
 
             // Optimisation: skip event delivery for JVM-internal paths that generate noise
             // (JDK home, classpath, /proc, /sys).
-            if ((nr == SYS_OPEN || nr == SYS_OPENAT || nr == SYS_OPENAT2) && resolvedEvent.paths.isNotEmpty()) {
-                val pathStr = resolvedEvent.paths.first()
-                try {
-                    val path = java.nio.file.Paths.get(pathStr).toAbsolutePath().normalize()
-                    val matched = safeBypassPaths.any { bypassPath ->
-                        path.startsWith(bypassPath) || path == bypassPath
-                    }
-                    System.err.println("[DAEMON-DEBUG] Noise-filter check: path=$pathStr, skip=$matched")
-                    if (matched) {
-                        with(arena.unwrap) {
-                            responder.sendSeccompContinue(handshake.acknowledged(), resp.unwrap)
-                        }
-                        return true
-                    }
-                } catch (e: InterruptedException) {
-                    Thread.currentThread().interrupt()
-                    throw e
-                } catch (e: java.nio.channels.ClosedByInterruptException) {
-                    Thread.currentThread().interrupt()
-                    throw e
-                } catch (ignored: Exception) {}
+            if (checkAndBypassNoisePath(arena, nr, resolvedEvent, handshake, resp)) {
+                return true
             }
 
             val notifiedState = currentState.notified(id, resolvedEvent)
@@ -270,6 +251,41 @@ internal class ProfilerSessionHandler(
             }
             throw e
         }
+    }
+
+    /**
+     * Noise filter bypass logic helper.
+     */
+    private fun checkAndBypassNoisePath(
+        arena: NativeArena,
+        nr: Int,
+        resolvedEvent: SyscallEvent<SyscallEventState.Resolved>,
+        handshake: HandshakeSession.Active,
+        resp: ManagedSegment,
+    ): Boolean {
+        if ((nr == SYS_OPEN || nr == SYS_OPENAT || nr == SYS_OPENAT2) && resolvedEvent.paths.isNotEmpty()) {
+            val pathStr = resolvedEvent.paths.first()
+            try {
+                val path = java.nio.file.Paths.get(pathStr).toAbsolutePath().normalize()
+                val matched = safeBypassPaths.any { bypassPath ->
+                    path.startsWith(bypassPath) || path == bypassPath
+                }
+                System.err.println("[DAEMON-DEBUG] Noise-filter check: path=$pathStr, skip=$matched")
+                if (matched) {
+                    with(arena.unwrap) {
+                        responder.sendSeccompContinue(handshake.acknowledged(), resp.unwrap)
+                    }
+                    return true
+                }
+            } catch (e: InterruptedException) {
+                Thread.currentThread().interrupt()
+                throw e
+            } catch (e: java.nio.channels.ClosedByInterruptException) {
+                Thread.currentThread().interrupt()
+                throw e
+            } catch (ignored: Exception) {}
+        }
+        return false
     }
 
 
