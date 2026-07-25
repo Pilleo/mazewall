@@ -72,6 +72,39 @@ class SyscallResultTest {
         val ex = assertThrows(IllegalStateException::class.java) {
             error.getOrThrow("test")
         }
-        assertTrue(ex.message!!.contains("test failed with errno=1"))
+        assertTrue(ex.message!!.contains("test failed with errno=1 (EPERM)"))
+    }
+
+    @Test
+    fun `symbolic mapping should resolve common errnos`() {
+        val eperm = io.mazewall.core.ErrnoMapping.getSymbolicName(1)
+        assertEquals("EPERM", eperm)
+
+        val eacces = io.mazewall.core.ErrnoMapping.getSymbolicName(13)
+        assertEquals("EACCES", eacces)
+
+        val einval = io.mazewall.core.ErrnoMapping.getSymbolicName(22)
+        assertEquals("EINVAL", einval)
+
+        val unknown = io.mazewall.core.ErrnoMapping.getSymbolicName(9999)
+        assertNull(unknown)
+    }
+
+    @Test
+    fun `SyscallResult Error toString should include symbolic name`() {
+        val errorWithSymbol = LinuxNative.SyscallResult.Error<LinuxNative.SyscallHandledState.Unhandled>(13, -1L)
+        assertEquals("Error(errno=13 (EACCES), rawValue=-1)", errorWithSymbol.toString())
+
+        val errorUnknown = LinuxNative.SyscallResult.Error<LinuxNative.SyscallHandledState.Unhandled>(9999, -1L)
+        assertEquals("Error(errno=9999, rawValue=-1)", errorUnknown.toString())
+    }
+
+    @Test
+    fun `throwErrno should format correctly with unknown errno`() {
+        val error = LinuxNative.SyscallResult.Error<LinuxNative.SyscallHandledState.Unhandled>(9999, -42L)
+        val ex = assertThrows(IllegalStateException::class.java) {
+            error.throwErrno("action")
+        }
+        assertEquals("action failed with errno=9999 (raw return=-42)", ex.message)
     }
 }

@@ -63,7 +63,15 @@ public object LinuxNative : NativeEngine {
         public data class Error<out Handled : SyscallHandledState>(val errno: Int, val rawValue: Long) : SyscallResult<Nothing, Handled> {
             /** Throws an [IllegalStateException] with the given [context]. */
             public fun throwErrno(context: String): Nothing {
-                throw IllegalStateException("$context failed with errno=$errno (raw return=$rawValue)")
+                val symbol = io.mazewall.core.ErrnoMapping.getSymbolicName(errno)
+                val errnoStr = if (symbol != null) "$errno ($symbol)" else "$errno"
+                throw IllegalStateException("$context failed with errno=$errnoStr (raw return=$rawValue)")
+            }
+
+            override fun toString(): String {
+                val symbol = io.mazewall.core.ErrnoMapping.getSymbolicName(errno)
+                val errnoStr = if (symbol != null) "$errno ($symbol)" else "$errno"
+                return "Error(errno=$errnoStr, rawValue=$rawValue)"
             }
         }
 
