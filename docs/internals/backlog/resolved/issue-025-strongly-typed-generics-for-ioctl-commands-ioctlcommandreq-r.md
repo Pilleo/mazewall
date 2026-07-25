@@ -1,11 +1,12 @@
 ---
 title: "Strongly-Typed Generics for `ioctl` Commands (`IoctlCommand<Req, Res>`)"
 severity: "ENHANCEMENT"
-status: "open"
+status: "resolved"
 priority: 2
 dependencies: []
 component: "ffi"
 effort: "medium"
+github_issue: 282
 ---
 
 # 🔵 [Severity: ENHANCEMENT]: Strongly-Typed Generics for `ioctl` Commands (`IoctlCommand<Req, Res>`)

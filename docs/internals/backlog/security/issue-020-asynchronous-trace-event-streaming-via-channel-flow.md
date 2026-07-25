@@ -6,6 +6,7 @@ priority: 2
 dependencies: []
 component: "profiler"
 effort: "medium"
+github_issue: 285
 ---
 
 # 🔵 [Severity: ENHANCEMENT]: Asynchronous Trace Event Streaming via `Channel` / `Flow`

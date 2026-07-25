@@ -26,7 +26,6 @@ graph TD
     io_mazewall_enforcer_ContainedExecutors["💻 Source: io.mazewall.enforcer.ContainedExecutors"]
     io_mazewall_enforcer_ContainedExecutors_kt["💻 Source: io.mazewall.enforcer.ContainedExecutors.kt"]
     io_mazewall_enforcer_ContainerStateRegistry_kt["💻 Source: io.mazewall.enforcer.ContainerStateRegistry.kt"]
-    io_mazewall_ffi["💻 Source: io.mazewall.ffi"]
     io_mazewall_ffi_Layouts["💻 Source: io.mazewall.ffi.Layouts"]
     io_mazewall_profiler_BillOfBehavior["💻 Source: io.mazewall.profiler.BillOfBehavior"]
     io_mazewall_profiler_IterativeProfiler["💻 Source: io.mazewall.profiler.IterativeProfiler"]
@@ -46,12 +45,9 @@ graph TD
     issue_018_formal_monoidal_composition_for_billofbehavior["🔴 Issue: Formal Monoidal Composition for `BillOfBehavior` (ENHANCEMENT)"]
     issue_019_refactor_profiler_daemon_to_use_coroutines_structured_concur["🔴 Issue: Refactor Profiler Daemon to use Coroutines (Structured Concurrency) (ENHANCEMENT)"]
     issue_020_asynchronous_trace_event_streaming_via_channel_flow["🔴 Issue: Asynchronous Trace Event Streaming via `Channel` / `Flow` (ENHANCEMENT)"]
-    issue_025_strongly_typed_generics_for_ioctl_commands_ioctlcommandreq_r["🔴 Issue: Strongly-Typed Generics for `ioctl` Commands (`IoctlCommand<Req, Res>`) (ENHANCEMENT)"]
-    issue_027_archunit_enforce_errno_capture_locality_wrapper["🔴 Issue: ArchUnit: Enforce `Errno` Capture Locality Wrapper (ENHANCEMENT)"]
     issue_028_phantom_types_for_thread_pool_containment_constraints_sandbo["🔴 Issue: Phantom Types for Thread Pool Containment Constraints (`SandboxedExecutor`) (ENHANCEMENT)"]
     issue_029_proof_of_progress_state_machine_for_landlock_discovery_disco["🔴 Issue: Proof-of-Progress State Machine for Landlock Discovery (`DiscoveryTask<Status>`) (ENHANCEMENT)"]
     issue_030_architectural_dip_dependency_inversion_violations_in_native_["🔴 Issue: Architectural DIP (Dependency Inversion) Violations in Native Scopes (HIGH)"]
-    issue_032_compile_time_bpf_termination_safety_type_state_ret_enforceme["🔴 Issue: Compile-Time BPF Termination Safety (Type-State RET Enforcement) (ENHANCEMENT)"]
     issue_036_residual_interface_segregation_violation_isp_in_nativeengine["🔴 Issue: Residual Interface Segregation Violation (ISP) in `NativeEngine` (HIGH)"]
     issue_038_type_state_for_filedescriptor_lifecycles_compile_time_use_af["🔴 Issue: Type-State for `FileDescriptor` Lifecycles (Compile-Time Use-After-Close Safety) (ENHANCEMENT)"]
     issue_042_compile_time_enforced_tier_1_process_baseline_processcontain["🔴 Issue: Compile-Time Enforced Tier 1 Process Baseline (`ProcessContainmentToken`) (ENHANCEMENT)"]
@@ -104,8 +100,6 @@ graph TD
     issue_018_formal_monoidal_composition_for_billofbehavior -->|Affects| io_mazewall_profiler_BillOfBehavior
     issue_019_refactor_profiler_daemon_to_use_coroutines_structured_concur -->|Affects| io_mazewall_profiler_engine_ProfilerDaemonEngine
     issue_020_asynchronous_trace_event_streaming_via_channel_flow -->|Affects| io_mazewall_profiler_Profiler
-    issue_025_strongly_typed_generics_for_ioctl_commands_ioctlcommandreq_r -->|Affects| io_mazewall_NativeEngine
-    issue_027_archunit_enforce_errno_capture_locality_wrapper -->|Affects| io_mazewall_ffi
     issue_028_phantom_types_for_thread_pool_containment_constraints_sandbo -->|Affects| io_mazewall_enforcer_ContainedExecutors
     issue_029_proof_of_progress_state_machine_for_landlock_discovery_disco -->|Affects| io_mazewall_profiler_IterativeProfiler
     issue_036_residual_interface_segregation_violation_isp_in_nativeengine -->|Affects| io_mazewall_NativeEngine
@@ -140,12 +134,9 @@ graph TD
     click issue_018_formal_monoidal_composition_for_billofbehavior "../../../backlog/testing/issue-018-formal-monoidal-composition-for-billofbehavior.md"
     click issue_019_refactor_profiler_daemon_to_use_coroutines_structured_concur "../../../backlog/code_health/issue-019-refactor-profiler-daemon-to-use-coroutines-structured-concur.md"
     click issue_020_asynchronous_trace_event_streaming_via_channel_flow "../../../backlog/security/issue-020-asynchronous-trace-event-streaming-via-channel-flow.md"
-    click issue_025_strongly_typed_generics_for_ioctl_commands_ioctlcommandreq_r "../../../backlog/performance/issue-025-strongly-typed-generics-for-ioctl-commands-ioctlcommandreq-r.md"
-    click issue_027_archunit_enforce_errno_capture_locality_wrapper "../../../backlog/testing/issue-027-archunit-enforce-errno-capture-locality-wrapper.md"
     click issue_028_phantom_types_for_thread_pool_containment_constraints_sandbo "../../../backlog/testing/issue-028-phantom-types-for-thread-pool-containment-constraints-sandbo.md"
     click issue_029_proof_of_progress_state_machine_for_landlock_discovery_disco "../../../backlog/security/issue-029-proof-of-progress-state-machine-for-landlock-discovery-disco.md"
     click issue_030_architectural_dip_dependency_inversion_violations_in_native_ "../../../backlog/testing/issue-030-architectural-dip-dependency-inversion-violations-in-native-.md"
-    click issue_032_compile_time_bpf_termination_safety_type_state_ret_enforceme "../../../backlog/code_health/issue-032-compile-time-bpf-termination-safety-type-state-ret-enforceme.md"
     click issue_036_residual_interface_segregation_violation_isp_in_nativeengine "../../../backlog/resolved/issue-036-residual-interface-segregation-violation-isp-in-nativeengine.md"
     click issue_038_type_state_for_filedescriptor_lifecycles_compile_time_use_af "../../../backlog/code_health/issue-038-type-state-for-filedescriptor-lifecycles-compile-time-use-af.md"
     click issue_042_compile_time_enforced_tier_1_process_baseline_processcontain "../../../backlog/security/issue-042-compile-time-enforced-tier-1-process-baseline-processcontain.md"

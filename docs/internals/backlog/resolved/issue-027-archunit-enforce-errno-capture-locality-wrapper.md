@@ -1,11 +1,12 @@
 ---
 title: "ArchUnit: Enforce `Errno` Capture Locality Wrapper"
 severity: "ENHANCEMENT"
-status: "open"
+status: "resolved"
 priority: 2
 dependencies: []
 component: "ffi"
 effort: "medium"
+github_issue: 280
 ---
 
 # 🔵 [Severity: ENHANCEMENT]: ArchUnit: Enforce `Errno` Capture Locality Wrapper
