@@ -33,7 +33,7 @@ class ProfilerDaemonManagerTest {
         override fun isAlive(): Boolean = alive
     }
 
-    class MockProcessLauncher : ProcessLauncher {
+    open class MockProcessLauncher : ProcessLauncher {
         var startProcessCalled = false
         var lastArgs: List<String>? = null
         var mockProcess: Process = MockProcess(8888L)
@@ -55,6 +55,10 @@ class ProfilerDaemonManagerTest {
 
         override fun createTempDirectory(prefix: String, vararg attrs: FileAttribute<*>): Path {
             return java.nio.file.Paths.get("/tmp/mock-profiler-dir")
+        }
+
+        override fun createTempDirectory(dir: Path, prefix: String, vararg attrs: FileAttribute<*>): Path {
+            return java.nio.file.Paths.get("/tmp/fallback-mock-profiler-dir")
         }
 
         override fun deleteIfExists(path: Path): Boolean = true
@@ -123,5 +127,34 @@ class ProfilerDaemonManagerTest {
         // Wait for it to die
         context.daemonProcess.waitFor()
         assertFalse(context.daemonProcess.isAlive)
+    }
+
+    @Test
+    fun `spawnDaemon falls back to short temp directory when default socket path is too long`() {
+        val mockEngine = MockNativeEngine()
+        val mockLauncher = object : MockProcessLauncher() {
+            override fun createTempDirectory(prefix: String, vararg attrs: FileAttribute<*>): Path {
+                // Return an excessively long path that exceeds 107 bytes when suffix and /profiler.sock is appended
+                return java.nio.file.Paths.get("/" + "a".repeat(120))
+            }
+
+            override fun createTempDirectory(dir: Path, prefix: String, vararg attrs: FileAttribute<*>): Path {
+                return java.nio.file.Paths.get("/tmp/fallback-mock-profiler-dir")
+            }
+        }
+        mockLauncher.mockProcess = MockProcess(8888L, io.mazewall.profiler.engine.DAEMON_READY_SENTINEL + "\n")
+        val mockSocket = MockSocketManager()
+
+        val manager = ProfilerDaemonManager(mockEngine, mockSocket, mockLauncher)
+        val context = manager.getOrSpawnSharedDaemon()
+
+        try {
+            assertNotNull(context)
+            val pathBytes = context.socketPath.toByteArray(java.nio.charset.StandardCharsets.UTF_8)
+            assertTrue(pathBytes.size < 108, "Fallback path should be under 108 bytes: ${context.socketPath}")
+            assertEquals("/tmp/fallback-mock-profiler-dir/profiler.sock", context.socketPath)
+        } finally {
+            manager.stop()
+        }
     }
 }

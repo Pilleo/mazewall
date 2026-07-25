@@ -106,8 +106,23 @@ engine.process.prctl(
         val daemonClassName = io.mazewall.profiler.engine.ProfilerDaemon::class.java.name
 
         val perms = PosixFilePermissions.fromString("rwx------")
-        val socketDir = processLauncher.createTempDirectory("mazewall-profiler-", PosixFilePermissions.asFileAttribute(perms))
-        val socketPath = socketDir.resolve("profiler.sock").toAbsolutePath().toString()
+        var socketDir = processLauncher.createTempDirectory("mazewall-profiler-", PosixFilePermissions.asFileAttribute(perms))
+        var socketPath = socketDir.resolve("profiler.sock").toAbsolutePath().toString()
+
+        if (socketPath.toByteArray(java.nio.charset.StandardCharsets.UTF_8).size >= 108) {
+            try {
+                processLauncher.deleteIfExists(socketDir.resolve("profiler.sock"))
+                processLauncher.deleteIfExists(socketDir)
+            } catch (ignored: Exception) {}
+
+            val tmpDir = java.nio.file.Path.of("/tmp")
+            socketDir = processLauncher.createTempDirectory(tmpDir, "mazewall-profiler-", PosixFilePermissions.asFileAttribute(perms))
+            socketPath = socketDir.resolve("profiler.sock").toAbsolutePath().toString()
+
+            require(socketPath.toByteArray(java.nio.charset.StandardCharsets.UTF_8).size < 108) {
+                "Failed to generate a safe UNIX socket path (exceeds 107 bytes): $socketPath"
+            }
+        }
 
         val javaBin = System.getProperty("java.home") + "/bin/java"
         val classpath = System.getProperty("java.class.path")
