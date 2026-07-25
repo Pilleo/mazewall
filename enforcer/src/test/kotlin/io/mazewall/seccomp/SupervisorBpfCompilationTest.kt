@@ -21,7 +21,8 @@ class SupervisorBpfCompilationTest {
 
         assertTrue(policy.definition.hasSupervisedSyscalls)
 
-        val filter = BpfFilter.build(arch, policy.definition)
+        val program = BpfFilter.build(arch, policy.definition)
+        val filter = program.instructions
 
         // Verify that there is a check for OPENAT and CONNECT that jumps to RET USER_NOTIF
         val openatNr = Syscall.OPENAT.numberFor(arch)

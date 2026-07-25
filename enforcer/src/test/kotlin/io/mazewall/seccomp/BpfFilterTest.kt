@@ -15,7 +15,7 @@ class BpfFilterTest {
 
     @Test
     fun `filter contains arch check`() {
-        val filter = BpfFilter.build(arch, Policy.builder().build().definition)
+        val filter = BpfFilter.build(arch, Policy.builder().build().definition).instructions
 
         // Find LD W ABS 4 (Load architecture audit ID)
         val ldIndex = filter.indexOfFirst { it.code == 0x20.toShort() && it.k == 4 }
@@ -38,7 +38,7 @@ class BpfFilterTest {
 
     @Test
     fun `filter contains syscall nr load`() {
-        val filter = BpfFilter.build(arch, Policy.builder().build().definition)
+        val filter = BpfFilter.build(arch, Policy.builder().build().definition).instructions
         // Load syscall NR (LD W ABS 0)
         val hasSyscallLoad = filter.any { it.code == 0x20.toShort() && it.k == 0 }
         assertTrue(hasSyscallLoad, "Filter should contain instruction to load syscall number")
@@ -46,7 +46,7 @@ class BpfFilterTest {
 
     @Test
     fun `empty policy allows all syscalls`() {
-        val filter = BpfFilter.build(arch, Policy.builder().build().definition)
+        val filter = BpfFilter.build(arch, Policy.builder().build().definition).instructions
         // The last instruction should be RET ALLOW
         val last = filter.last()
         assertEquals(0x06.toShort(), last.code, "Last instruction should be RET")
@@ -56,7 +56,7 @@ class BpfFilterTest {
     @Test
     fun `ALLOW_LIST mode has RET DENY as default`() {
         val policy = Policy.builder().defaultAction(io.mazewall.core.SeccompAction.ACT_ERRNO).build()
-        val filter = BpfFilter.build(arch, policy.definition)
+        val filter = BpfFilter.build(arch, policy.definition).instructions
         val last = filter.last()
         assertEquals(0x06.toShort(), last.code)
         assertEquals(NativeConstants.SECCOMP_RET_ERRNO or NativeConstants.EPERM, last.k)
@@ -70,7 +70,7 @@ class BpfFilterTest {
                 .defaultAction(io.mazewall.core.SeccompAction.ACT_ERRNO)
                 .allow(Syscall.READ)
                 .build()
-        val filter = BpfFilter.build(arch, policy.definition)
+        val filter = BpfFilter.build(arch, policy.definition).instructions
 
         // Find JEQ read -> RET ALLOW
         val readNr = Syscall.READ.numberFor(arch)
@@ -92,7 +92,7 @@ class BpfFilterTest {
     @Test
     fun `clone3 always returns ENOSYS even in ALLOW_LIST`() {
         val policy = Policy.builder().defaultAction(io.mazewall.core.SeccompAction.ACT_ERRNO).build()
-        val filter = BpfFilter.build(arch, policy.definition)
+        val filter = BpfFilter.build(arch, policy.definition).instructions
 
         val clone3Nr = arch.clone3
         var found = false
@@ -112,7 +112,7 @@ class BpfFilterTest {
     @Test
     fun `testBpfMmapArgumentInspection`() {
         val policy = Policy.builder().unblock(Syscall.MMAP).build() // NO_EXEC by default blocks mmap exec
-        val filter = BpfFilter.build(arch, policy.definition)
+        val filter = BpfFilter.build(arch, policy.definition).instructions
 
         // Find JEQ mmap -> check PROT_EXEC
         val mmapNr = Syscall.MMAP.numberFor(arch)
@@ -141,7 +141,7 @@ class BpfFilterTest {
     @Test
     fun `testBpfCloneArgumentInspection`() {
         val policy = Policy.builder().build() // NO_EXEC by default protects clone
-        val filter = BpfFilter.build(arch, policy.definition)
+        val filter = BpfFilter.build(arch, policy.definition).instructions
 
         val cloneNr = Syscall.CLONE.numberFor(arch)
         var foundInspection = false
@@ -165,7 +165,7 @@ class BpfFilterTest {
     @Test
     fun `testBpfPrctlArgumentInspection`() {
         val policy = Policy.builder().build() // NO_EXEC protects prctl
-        val filter = BpfFilter.build(arch, policy.definition)
+        val filter = BpfFilter.build(arch, policy.definition).instructions
 
         val prctlNr = Syscall.PRCTL.numberFor(arch)
         var foundInspection = false
@@ -331,7 +331,7 @@ class BpfFilterTest {
             .block(sys1, sys2, sys3, sys4, sys5)
             .build()
 
-        val filter = BpfFilter.build(arch, policy.definition)
+        val filter = BpfFilter.build(arch, policy.definition).instructions
 
         val nr1 = sys1.numberFor(arch)
         val nr2 = sys2.numberFor(arch)
@@ -423,7 +423,7 @@ class BpfFilterTest {
             .defaultAction(SeccompAction.ACT_ALLOW)
             .block(Syscall.EXECVE, Syscall.EXECVEAT, Syscall.MEMFD_CREATE)
             .build()
-        val filter = BpfFilter.build(arch, policy.definition)
+        val filter = BpfFilter.build(arch, policy.definition).instructions
 
         // Verify that BPF_JMP_JGT (0x25.toShort()) instruction is present in the compiled filter
         val hasGreaterThan = filter.any { it.code == 0x25.toShort() }
@@ -473,7 +473,7 @@ class BpfFilterTest {
             .addAction(SeccompAction.ACT_TRACE(1234), Syscall.EXECVE)
             .addAction(SeccompAction.ACT_TRACE(5678), Syscall.MEMFD_CREATE)
             .build()
-        val filter = BpfFilter.build(arch, policy.definition)
+        val filter = BpfFilter.build(arch, policy.definition).instructions
 
         val expectedTrace1 = NativeConstants.SECCOMP_RET_TRACE or 1234
         val expectedTrace2 = NativeConstants.SECCOMP_RET_TRACE or 5678
@@ -487,7 +487,7 @@ class BpfFilterTest {
         val policy = Policy.builder()
             .addAction(SeccompAction.ACT_ERRNO(99), Syscall.OPEN)
             .build()
-        val filter = BpfFilter.build(arch, policy.definition)
+        val filter = BpfFilter.build(arch, policy.definition).instructions
 
         val expectedErrno = NativeConstants.SECCOMP_RET_ERRNO or 99
         assertEquals(expectedErrno, evalBpf(filter, Syscall.OPEN.numberFor(arch)))

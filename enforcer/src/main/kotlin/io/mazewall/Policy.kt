@@ -237,8 +237,8 @@ public class Policy<out S : PolicyScope, out State : PolicyState> internal const
  * Compiles the high-level policy into kernel-ready BPF instructions for the given [arch].
  */
 internal fun <S : PolicyScope> Policy<S, Uncompiled>.compile(arch: Arch): Policy<S, Compiled> {
-    val filters = BpfFilter.build(arch, this.definition)
-    return Policy.compile(this, filters)
+    val program = BpfFilter.build(arch, this.definition)
+    return Policy.compile(this, program.instructions)
 }
 
 /**
