@@ -77,7 +77,17 @@ sealed interface OrchestratorState {
                 val issueFile = context.currentIssueFile?.let { File(it) }
                 val issue = issueFile?.let { BacklogParser.parseIssueFile(it) }
 
-                val text = if (issue != null) {
+                val text = if (issueFile != null && issueFile.exists()) {
+                    val rawBody = issueFile.readText().trim()
+                    """
+                    🤖 *Approval Request: Start Task ${issueId}*
+
+                    $rawBody
+
+                    ----------------------------------
+                    Please approve or skip using the inline keyboard below.
+                    """.trimIndent()
+                } else if (issue != null) {
                     """
                     🤖 *Approval Request: Start Task ${issue.id}*
                     *Title:* ${issue.title}
@@ -89,7 +99,7 @@ sealed interface OrchestratorState {
                     *Needed:*
                     ${issue.needed ?: "N/A"}
 
-                    Please approve or skip in the inline keyboard below.
+                    Please approve or skip using the inline keyboard below.
                     """.trimIndent()
                 } else {
                     "Start task $issueId - $issueTitle?"
