@@ -61,7 +61,7 @@ sealed interface OrchestratorState {
             val githubIssueNumber = context.githubIssueNumber
 
             val approved = if (githubIssueNumber != null) {
-                if (env.isIssueClosed(githubIssueNumber)) {
+                if (env.gitHubClient.isIssueClosed(githubIssueNumber)) {
                     env.println("\n\u001B[1;33m⚠️ GitHub issue #$githubIssueNumber was closed. Resolving and canceling task $issueId.\u001B[0m")
                     val nextIssue = env.parseAllIssues().firstOrNull { it.id == issueId }
                     if (nextIssue != null) {
@@ -112,7 +112,7 @@ sealed interface OrchestratorState {
             // Retrieve or create GitHub issue
             var newGithubIssueNumber = context.githubIssueNumber
             if (newGithubIssueNumber == null) {
-                val existingIssueNumber = env.findExistingIssueNumber(issueId)
+                val existingIssueNumber = env.gitHubClient.findExistingIssueNumber(issueId)
                 if (existingIssueNumber != null) {
                     env.println("♻️ Recovered existing GitHub issue #$existingIssueNumber for $issueId (was missing from backlog file).")
                     newGithubIssueNumber = existingIssueNumber
@@ -122,7 +122,7 @@ sealed interface OrchestratorState {
                     val issueFile = File(context.currentIssueFile!!)
                     val issueBody = issueFile.readText()
                     val enhancedBody = OrchestratorPrompts.taskPrompt(issueBody)
-                    newGithubIssueNumber = env.createIssue(issueTitleForGit, enhancedBody, "jules")
+                    newGithubIssueNumber = env.gitHubClient.createIssue(issueTitleForGit, enhancedBody, "jules")
                     env.println("Created GitHub issue #$newGithubIssueNumber")
                 }
                 // Write it to issue file
@@ -143,7 +143,7 @@ sealed interface OrchestratorState {
             val issueId = context.currentIssueId ?: throw IllegalStateException("currentIssueId is null")
             val githubIssueNumber = context.githubIssueNumber
 
-            if (githubIssueNumber != null && env.isIssueClosed(githubIssueNumber)) {
+            if (githubIssueNumber != null && env.gitHubClient.isIssueClosed(githubIssueNumber)) {
                 env.println("\n\u001B[1;33m⚠️ GitHub issue #$githubIssueNumber was closed. Resolving and canceling task $issueId.\u001B[0m")
                 val nextIssue = env.parseAllIssues().firstOrNull { it.id == issueId }
                 if (nextIssue != null) {
@@ -153,12 +153,12 @@ sealed interface OrchestratorState {
                 return SELECT_TASK
             }
 
-            var activeSession = env.getJulesSession(issueId)
+            var activeSession = env.julesClient.getActiveSession(issueId)
             var attempts = 0
             while (activeSession == null && attempts < env.config.julesTriggerAttempts) {
                 env.println("Waiting for Jules session to be automatically triggered via GitHub issue label (attempt ${attempts + 1}/${env.config.julesTriggerAttempts})...")
                 env.sleep(env.config.julesTriggerIntervalSeconds, TimeUnit.SECONDS)
-                activeSession = env.getJulesSession(issueId)
+                activeSession = env.julesClient.getActiveSession(issueId)
                 attempts++
             }
 
@@ -186,7 +186,7 @@ sealed interface OrchestratorState {
             val githubIssueNumber = context.githubIssueNumber ?: throw IllegalStateException("githubIssueNumber is null")
             val sessionId = context.julesSessionId
 
-            if (env.isIssueClosed(githubIssueNumber)) {
+            if (env.gitHubClient.isIssueClosed(githubIssueNumber)) {
                 env.println("\n\u001B[1;33m⚠️ GitHub issue #$githubIssueNumber was closed. Resolving and canceling task $issueId.\u001B[0m")
                 val nextIssue = env.parseAllIssues().firstOrNull { it.id == issueId }
                 if (nextIssue != null) {
@@ -197,7 +197,7 @@ sealed interface OrchestratorState {
                 return SELECT_TASK
             }
 
-            val session = env.getJulesSession(issueId)
+            val session = env.julesClient.getActiveSession(issueId)
             if (session != null) {
                 val sessionUrl = "https://jules.google.com/session/${session.id}"
                 val status = session.status.lowercase()
@@ -207,17 +207,17 @@ sealed interface OrchestratorState {
                         context.julesRetries++
                         env.println("\n⚠️ [RETRY] Jules task $issueId failed with status: ${session.status}. Retrying (Attempt ${context.julesRetries}/2)...")
                         env.sendNotification("⚠️ *Jules task failed* for $issueId (Status: ${session.status}). Sending 'Retry' message to Jules (Attempt ${context.julesRetries}/2).")
-                        env.sendJulesSessionMessage(session.id, "Retry")
+                        env.julesClient.sendSessionMessage(session.id, "Retry")
                         context.lastBuildStatus = null
                         
-                        var retriedSession = env.getJulesSession(issueId)
+                        var retriedSession = env.julesClient.getActiveSession(issueId)
                         var retryWaitAttempts = 0
                         while (retriedSession != null && 
                                (retriedSession.status.lowercase() == "failed" || retriedSession.status.lowercase() == "cancelled") && 
                                retryWaitAttempts < 15) {
                             env.println("Waiting for Jules session status to transition out of failure state (attempt ${retryWaitAttempts + 1}/15)...")
                             env.sleep(20, TimeUnit.SECONDS)
-                            retriedSession = env.getJulesSession(issueId)
+                            retriedSession = env.julesClient.getActiveSession(issueId)
                             retryWaitAttempts++
                         }
                         return this
@@ -250,22 +250,22 @@ sealed interface OrchestratorState {
                     }
                 }
 
-                if (status == "completed" && env.findLinkedPR(githubIssueNumber, issueId, sessionId) == null) {
+                if (status == "completed" && env.gitHubClient.findLinkedPR(githubIssueNumber, issueId, sessionId) == null) {
                     if (context.julesRetries < 2) {
                         context.julesRetries++
                         env.println("\n⚠️ [RETRY] Jules task $issueId finished as Completed but did not open a PR. Retrying (Attempt ${context.julesRetries}/2)...")
                         env.sendNotification("⚠️ *Jules task finished* for $issueId without creating a PR. Sending 'Retry' message to Jules (Attempt ${context.julesRetries}/2).")
-                        env.sendJulesSessionMessage(session.id, "Retry")
+                        env.julesClient.sendSessionMessage(session.id, "Retry")
                         context.lastBuildStatus = null
                         
-                        var retriedSession = env.getJulesSession(issueId)
+                        var retriedSession = env.julesClient.getActiveSession(issueId)
                         var retryWaitAttempts = 0
                         while (retriedSession != null && 
                                (retriedSession.status.lowercase() == "failed" || retriedSession.status.lowercase() == "cancelled") && 
                                retryWaitAttempts < 15) {
                             env.println("Waiting for Jules session status to transition out of failure state (attempt ${retryWaitAttempts + 1}/15)...")
                             env.sleep(20, TimeUnit.SECONDS)
-                            retriedSession = env.getJulesSession(issueId)
+                            retriedSession = env.julesClient.getActiveSession(issueId)
                             retryWaitAttempts++
                         }
                         return this
@@ -283,7 +283,7 @@ sealed interface OrchestratorState {
                 }
             }
 
-            val prNumber = env.findLinkedPR(githubIssueNumber, issueId, sessionId)
+            val prNumber = env.gitHubClient.findLinkedPR(githubIssueNumber, issueId, sessionId)
             return if (prNumber != null) {
                 env.println("Jules opened PR #$prNumber")
                 context.prNumber = prNumber
@@ -311,12 +311,12 @@ sealed interface OrchestratorState {
             val sessionId = context.julesSessionId
 
             if (issueId != null && githubIssueNumber != null) {
-                val session = env.getJulesSession(issueId)
+                val session = env.julesClient.getActiveSession(issueId)
                 val isFailed = if (session != null) {
                     val stat = session.status.lowercase()
-                    stat == "failed" || stat == "cancelled" || env.hasUnableToCompleteActivity(session.id)
+                    stat == "failed" || stat == "cancelled" || env.julesClient.hasUnableToCompleteActivity(session.id)
                 } else {
-                    sessionId != null && env.hasUnableToCompleteActivity(sessionId)
+                    sessionId != null && env.julesClient.hasUnableToCompleteActivity(sessionId)
                 }
 
                 if (isFailed) {
@@ -326,18 +326,18 @@ sealed interface OrchestratorState {
                         env.println("\n⚠️ [RETRY] Jules session failed during CI: $statText (or has unable to complete activity). Retrying (Attempt ${context.julesRetries}/2)...")
                         env.sendNotification("⚠️ *Jules session failed* during CI for $issueId (Status: $statText). Sending 'Retry' message to Jules (Attempt ${context.julesRetries}/2).")
                         val targetSessionId = session?.id ?: sessionId ?: throw IllegalStateException("session ID is null")
-                        env.sendJulesSessionMessage(targetSessionId, "Retry")
+                        env.julesClient.sendSessionMessage(targetSessionId, "Retry")
                         context.lastBuildStatus = null
                         context.lastHeadSha = null
                         
-                        var retriedSession = env.getJulesSession(issueId)
+                        var retriedSession = env.julesClient.getActiveSession(issueId)
                         var retryWaitAttempts = 0
                         while (retriedSession != null && 
-                               (retriedSession.status.lowercase() == "failed" || retriedSession.status.lowercase() == "cancelled" || env.hasUnableToCompleteActivity(retriedSession.id)) && 
+                               (retriedSession.status.lowercase() == "failed" || retriedSession.status.lowercase() == "cancelled" || env.julesClient.hasUnableToCompleteActivity(retriedSession.id)) &&
                                retryWaitAttempts < 15) {
                             env.println("Waiting for Jules session status to transition out of failure state (attempt ${retryWaitAttempts + 1}/15)...")
                             env.sleep(20, TimeUnit.SECONDS)
-                            retriedSession = env.getJulesSession(issueId)
+                            retriedSession = env.julesClient.getActiveSession(issueId)
                             retryWaitAttempts++
                         }
                         return this
@@ -361,12 +361,12 @@ sealed interface OrchestratorState {
                 }
             }
 
-            if (env.isPrMerged(prNumber)) {
+            if (env.gitHubClient.isPrMerged(prNumber)) {
                 env.println("🎉 PR #$prNumber merged! resolving issue locally...")
                 return RESOLVE_TASK
             }
 
-            val currentSha = env.getPrHeadSha(prNumber)
+            val currentSha = env.gitHubClient.getPrHeadSha(prNumber)
             if (currentSha != context.lastHeadSha) {
                 env.println("🔄 New commits detected on PR #$prNumber (Head SHA: $currentSha). Checking build status...")
                 context.lastHeadSha = currentSha
@@ -375,7 +375,7 @@ sealed interface OrchestratorState {
                 context.lastPendingNotificationTime = 0L
             }
 
-            val status = env.checkBuildStatus(prNumber)
+            val status = env.gitHubClient.checkBuildStatus(prNumber)
             if (status != context.lastBuildStatus || currentSha != context.lastCheckedSha) {
                 env.println("PR #$prNumber build check: $status")
                 context.lastBuildStatus = status
@@ -385,10 +385,10 @@ sealed interface OrchestratorState {
             return when (status) {
                 "SUCCESS" -> AWAITING_REVIEW
                 "FAILURE" -> {
-                    val headSha = env.getPrHeadSha(prNumber)
+                    val headSha = env.gitHubClient.getPrHeadSha(prNumber)
                     if (headSha != context.lastFailedSha) {
                         env.println("❌ Build failed on PR #$prNumber. Fetching logs...")
-                        val failedLogs = env.getFailedBuildLogs(prNumber)
+                        val failedLogs = env.gitHubClient.getFailedBuildLogs(prNumber)
                         val feedback = """
                             ❌ **CI Build Failed.**
                             @jules Please review the failing logs and fix the implementation:
@@ -398,7 +398,7 @@ sealed interface OrchestratorState {
                             ```
                         """.trimIndent()
  
-                        env.commentOnPr(prNumber, feedback)
+                        env.gitHubClient.commentOnPr(prNumber, feedback)
                         env.sendNotification("❌ Build failed on PR #$prNumber. Feedback sent to Jules.")
                         context.lastFailedSha = headSha
                     } else {
@@ -410,7 +410,7 @@ sealed interface OrchestratorState {
                 "CONFLICT" -> {
                     val now = System.currentTimeMillis()
                     if (now - context.lastWaitingLogTime > 60_000) {
-                        val prUrl = env.getPrUrl(prNumber)
+                        val prUrl = env.gitHubClient.getPrUrl(prNumber)
                         env.sendNotification("⚠️ *PR #$prNumber has conflicts!* Please resolve them: $prUrl")
                         env.println("\u001B[1;31m🔔 [CONFLICT] PR #$prNumber has conflicts! Please resolve conflicts: $prUrl\u001B[0m")
                         env.ringBell(3)
@@ -426,7 +426,7 @@ sealed interface OrchestratorState {
                         context.lastStatusChangeTime = now
                         context.lastPendingNotificationTime = 0L
                     } else if (now - context.lastStatusChangeTime > env.config.stuckPendingThresholdMs && context.lastPendingNotificationTime == 0L) {
-                        val prUrl = env.getPrUrl(prNumber)
+                        val prUrl = env.gitHubClient.getPrUrl(prNumber)
                         val msg = "⚠️ *PR #$prNumber build status is stuck in $status!* Please check the runner: $prUrl"
                         env.println("\u001B[1;31m🔔 [STUCK] PR #$prNumber build status is stuck in $status! Please check the runner: $prUrl\u001B[0m")
                         env.sendNotification(msg)
@@ -444,22 +444,22 @@ sealed interface OrchestratorState {
         override val name = "AWAITING_REVIEW"
         override fun execute(env: OrchestratorEnvironment, context: OrchestratorContext): OrchestratorState {
             val prNumber = context.prNumber ?: throw IllegalStateException("prNumber is null")
-            if (env.isPrMerged(prNumber)) {
+            if (env.gitHubClient.isPrMerged(prNumber)) {
                 env.println("🎉 PR #$prNumber merged! resolving issue locally...")
                 return RESOLVE_TASK
             }
 
-            val currentSha = env.getPrHeadSha(prNumber)
+            val currentSha = env.gitHubClient.getPrHeadSha(prNumber)
 
             val issueId = context.currentIssueId
             val sessionId = context.julesSessionId
             if (issueId != null) {
-                val session = env.getJulesSession(issueId)
+                val session = env.julesClient.getActiveSession(issueId)
                 val isFailed = if (session != null) {
                     val stat = session.status.lowercase()
-                    stat == "failed" || stat == "cancelled" || env.hasUnableToCompleteActivity(session.id)
+                    stat == "failed" || stat == "cancelled" || env.julesClient.hasUnableToCompleteActivity(session.id)
                 } else {
-                    sessionId != null && env.hasUnableToCompleteActivity(sessionId)
+                    sessionId != null && env.julesClient.hasUnableToCompleteActivity(sessionId)
                 }
 
                 if (isFailed) {
@@ -467,17 +467,17 @@ sealed interface OrchestratorState {
                     env.println("\n⚠️ [RETRY] Jules session failed during review: $statText (or has unable to complete activity). Retrying...")
                     env.sendNotification("⚠️ *Jules session failed* during review on PR #$prNumber. Sending 'Retry' message to Jules.")
                     val targetSessionId = session?.id ?: sessionId ?: throw IllegalStateException("session ID is null")
-                    env.sendJulesSessionMessage(targetSessionId, "Retry")
+                    env.julesClient.sendSessionMessage(targetSessionId, "Retry")
                     context.lastReviewedSha = null
                     
-                    var retriedSession = env.getJulesSession(issueId)
+                    var retriedSession = env.julesClient.getActiveSession(issueId)
                     var retryWaitAttempts = 0
                     while (retriedSession != null && 
-                           (retriedSession.status.lowercase() == "failed" || retriedSession.status.lowercase() == "cancelled" || env.hasUnableToCompleteActivity(retriedSession.id)) && 
+                           (retriedSession.status.lowercase() == "failed" || retriedSession.status.lowercase() == "cancelled" || env.julesClient.hasUnableToCompleteActivity(retriedSession.id)) &&
                            retryWaitAttempts < 15) {
                         env.println("Waiting for Jules session status to transition out of failure state (attempt ${retryWaitAttempts + 1}/15)...")
                         env.sleep(20, TimeUnit.SECONDS)
-                        retriedSession = env.getJulesSession(issueId)
+                        retriedSession = env.julesClient.getActiveSession(issueId)
                         retryWaitAttempts++
                     }
                     return this
@@ -500,7 +500,7 @@ sealed interface OrchestratorState {
 
                 if (context.julesReviewPushCount >= 2) {
                     // Jules keeps committing instead of reviewing — escalate to human.
-                    val prUrl = env.getPrUrl(prNumber)
+                    val prUrl = env.gitHubClient.getPrUrl(prNumber)
                     env.sendNotification(
                         "⚠️ *Jules pushed instead of reviewing ${context.julesReviewPushCount}x on PR #$prNumber.* " +
                         "Please manually review and merge (or close) the PR: $prUrl"
@@ -523,20 +523,20 @@ sealed interface OrchestratorState {
                     When CI passes on the latest commit, you will receive a new review request. 
                     At that point, respond ONLY with a comment containing your review findings — no file edits, no commits.
                 """.trimIndent()
-                env.commentOnPr(prNumber, correctionComment)
+                env.gitHubClient.commentOnPr(prNumber, correctionComment)
                 env.sendNotification("⚠️ Jules pushed instead of reviewing on PR #$prNumber. Correction comment sent. Returning to CI_RUNNING.")
 
                 // The new commit needs to go through CI before we review it.
                 return CI_RUNNING
             }
 
-            val status = env.checkBuildStatus(prNumber)
+            val status = env.gitHubClient.checkBuildStatus(prNumber)
             if (status != "SUCCESS") {
                 return CI_RUNNING
             }
 
             if (currentSha != context.lastReviewedSha) {
-                val comments = env.getPrComments(prNumber)
+                val comments = env.gitHubClient.getPrComments(prNumber)
                 val shaPrefix = currentSha.take(7)
 
                 val requestComment = comments.firstOrNull {
@@ -556,7 +556,7 @@ sealed interface OrchestratorState {
 
                     val prompt = OrchestratorPrompts.reviewPrompt(prNumber, shaPrefix, pushWarning)
 
-                    env.commentOnPr(prNumber, prompt)
+                    env.gitHubClient.commentOnPr(prNumber, prompt)
                     env.sleep(env.config.pollingIntervalSeconds, TimeUnit.SECONDS)
                     return this
                 } else {
@@ -576,7 +576,7 @@ sealed interface OrchestratorState {
                             else -> "⚠️ NO_VERDICT (Jules did not include a structured verdict)"
                         }
                         env.println("Jules verdict on PR #$prNumber: $verdict")
-                        val prUrl = env.getPrUrl(prNumber)
+                        val prUrl = env.gitHubClient.getPrUrl(prNumber)
                         env.sendNotification("🟢 *Jules reviewed PR #$prNumber!* Verdict: $verdict\nReady for merge: $prUrl")
                         context.lastReviewedSha = currentSha
                         env.ringBell(3)
@@ -597,24 +597,24 @@ sealed interface OrchestratorState {
         override fun execute(env: OrchestratorEnvironment, context: OrchestratorContext): OrchestratorState {
             val prNumber = context.prNumber ?: throw IllegalStateException("prNumber is null")
 
-            if (env.isPrMerged(prNumber)) {
+            if (env.gitHubClient.isPrMerged(prNumber)) {
                 env.println("🎉 PR #$prNumber merged! resolving issue locally...")
                 return RESOLVE_TASK
             }
 
-            val currentSha = env.getPrHeadSha(prNumber)
+            val currentSha = env.gitHubClient.getPrHeadSha(prNumber)
             if (currentSha != context.lastHeadSha) {
                 return CI_RUNNING
             }
 
-            val status = env.checkBuildStatus(prNumber)
+            val status = env.gitHubClient.checkBuildStatus(prNumber)
             if (status != "SUCCESS") {
                 return CI_RUNNING
             }
 
             val now = System.currentTimeMillis()
             if (now - context.lastWaitingLogTime > 600_000) {
-                val prUrl = env.getPrUrl(prNumber)
+                val prUrl = env.gitHubClient.getPrUrl(prNumber)
                 env.println("⌛ Waiting for manual merge of PR #$prNumber at: $prUrl")
                 env.sendNotification("⌛ Waiting for manual merge of PR #$prNumber at: $prUrl")
                 context.lastWaitingLogTime = now
