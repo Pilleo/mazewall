@@ -4,6 +4,8 @@ severity: "HIGH"
 status: "open"
 priority: 10
 dependencies: []
+target_files: []
+target_modules: [\":tools:orchestrator\"]
 component: "orchestrator"
 effort: "small"
 autonomy: "supervised"

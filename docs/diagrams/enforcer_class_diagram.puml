@@ -362,6 +362,7 @@ interface "ProcessLauncher" as io.mazewall.core.ProcessLauncher {
   + {abstract}void addShutdownHook(Thread)
   + {abstract}void removeShutdownHook(Thread)
   + {abstract}Path createTempDirectory(String, FileAttribute<?>[])
+  + {abstract}Path createTempDirectory(Path, String, FileAttribute<?>[])
   + {abstract}boolean deleteIfExists(Path)
   + {abstract}boolean exists(Path)
 }
@@ -372,6 +373,7 @@ class "RealProcessLauncher" as io.mazewall.core.RealProcessLauncher {
   +void addShutdownHook(Thread)
   +void removeShutdownHook(Thread)
   +Path createTempDirectory(String, FileAttribute<?>[])
+  +Path createTempDirectory(Path, String, FileAttribute<?>[])
   +boolean deleteIfExists(Path)
   +boolean exists(Path)
 }
@@ -1356,6 +1358,7 @@ io.mazewall.enforcer.ProcessStateRegistry --> io.mazewall.enforcer.ProcessStateR
 io.mazewall.enforcer.ProcessStateRegistry --> io.mazewall.enforcer.ContainerState
 io.mazewall.enforcer.SandboxDispatcher --> io.mazewall.enforcer.SandboxDispatcher
 io.mazewall.enforcer.SandboxDispatcher --> io.mazewall.PolicyDefinition
+io.mazewall.enforcer.ThreadStateRegistry --> io.mazewall.enforcer.ThreadLocalDelegate
 io.mazewall.enforcer.ThreadStateRegistry --> io.mazewall.enforcer.ThreadStateRegistry
 io.mazewall.enforcer.internal.ContainedExecutorWrapper --> io.mazewall.enforcer.supervisor.StacktraceScopingPolicy
 io.mazewall.enforcer.internal.ContainedExecutorWrapper --> io.mazewall.PolicyDefinition
@@ -1405,6 +1408,7 @@ io.mazewall.ffi.internal.RealNativeProcess .u.|> io.mazewall.NativeProcess
 io.mazewall.ffi.internal.RealNativeProcess --> io.mazewall.ffi.internal.RealNativeProcess
 io.mazewall.ffi.internal.SyscallInvoker --> io.mazewall.ffi.internal.SyscallInvoker
 io.mazewall.ffi.memory.ConfinedSegment .u.|> io.mazewall.ffi.memory.ManagedSegment
+io.mazewall.ffi.memory.ErrnoSegment --> io.mazewall.enforcer.ThreadLocalDelegate
 io.mazewall.ffi.memory.SegmentPool --> io.mazewall.ffi.memory.NativeArena
 io.mazewall.ffi.memory.SegmentPool <--> io.mazewall.ffi.memory.SegmentPool
 io.mazewall.ffi.memory.SegmentPool --> io.mazewall.ffi.memory.ManagedSegment

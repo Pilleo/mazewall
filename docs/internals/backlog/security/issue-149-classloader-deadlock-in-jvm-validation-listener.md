@@ -4,6 +4,8 @@ severity: "CRITICAL"
 status: "open"
 priority: 5
 dependencies: []
+target_files: []
+target_modules: [\":enforcer\"]
 component: "enforcer"
 effort: "small"
 ---

@@ -17,14 +17,12 @@ graph TD
     SupervisorInstaller_kt["💻 Source: SupervisorInstaller.kt"]
     io_mazewall_NativeEngine["💻 Source: io.mazewall.NativeEngine"]
     io_mazewall_NativeTransaction["💻 Source: io.mazewall.NativeTransaction"]
-    io_mazewall_Platform_kt["💻 Source: io.mazewall.Platform.kt"]
     io_mazewall_core_FileDescriptor["💻 Source: io.mazewall.core.FileDescriptor"]
     io_mazewall_enforcer_ContainedExecutors["💻 Source: io.mazewall.enforcer.ContainedExecutors"]
     io_mazewall_enforcer_ContainedExecutors_kt["💻 Source: io.mazewall.enforcer.ContainedExecutors.kt"]
     io_mazewall_ffi_Layouts["💻 Source: io.mazewall.ffi.Layouts"]
     io_mazewall_profiler_BillOfBehavior["💻 Source: io.mazewall.profiler.BillOfBehavior"]
     io_mazewall_profiler_IterativeProfiler["💻 Source: io.mazewall.profiler.IterativeProfiler"]
-    io_mazewall_profiler_Profiler["💻 Source: io.mazewall.profiler.Profiler"]
     io_mazewall_profiler_engine_ProfilerDaemonEngine["💻 Source: io.mazewall.profiler.engine.ProfilerDaemonEngine"]
     io_mazewall_profiler_strace_StraceProfiler["💻 Source: io.mazewall.profiler.strace.StraceProfiler"]
     issue_003_socket_address_family_filtering_for_network_isolation_evasio["🔴 Issue: Socket Address Family Filtering for Network Isolation Evasion Prevention (ENHANCEMENT)"]
@@ -39,7 +37,6 @@ graph TD
     issue_017_symbolic_errno_mapping_in_syscallresult["🔴 Issue: Symbolic Errno Mapping in `SyscallResult` (ENHANCEMENT)"]
     issue_018_formal_monoidal_composition_for_billofbehavior["🔴 Issue: Formal Monoidal Composition for `BillOfBehavior` (ENHANCEMENT)"]
     issue_019_refactor_profiler_daemon_to_use_coroutines_structured_concur["🔴 Issue: Refactor Profiler Daemon to use Coroutines (Structured Concurrency) (ENHANCEMENT)"]
-    issue_020_asynchronous_trace_event_streaming_via_channel_flow["🔴 Issue: Asynchronous Trace Event Streaming via `Channel` / `Flow` (ENHANCEMENT)"]
     issue_028_phantom_types_for_thread_pool_containment_constraints_sandbo["🔴 Issue: Phantom Types for Thread Pool Containment Constraints (`SandboxedExecutor`) (ENHANCEMENT)"]
     issue_029_proof_of_progress_state_machine_for_landlock_discovery_disco["🔴 Issue: Proof-of-Progress State Machine for Landlock Discovery (`DiscoveryTask<Status>`) (ENHANCEMENT)"]
     issue_030_architectural_dip_dependency_inversion_violations_in_native_["🔴 Issue: Architectural DIP (Dependency Inversion) Violations in Native Scopes (HIGH)"]
@@ -57,7 +54,6 @@ graph TD
     issue_069_resource_containment_via_cgroups_v2["🔴 Issue: Resource Containment via Cgroups v2 (ENHANCEMENT)"]
     issue_070_network_isolation_via_namespaces_clonenewnet["🔴 Issue: Network Isolation via Namespaces (`CLONE_NEWNET`) (ENHANCEMENT)"]
     issue_071_introduce_context_parameters_for_memory_and_engine_scopes["🔴 Issue: Introduce Context Parameters for Memory and Engine Scopes (ENHANCEMENT)"]
-    issue_072_contract_based_invariant_validation["🔴 Issue: Contract-Based Invariant Validation (ENHANCEMENT)"]
     issue_075_implement_floor_fixes["🔴 Issue: 🔴 [REOPENED]: JVM Invariant Syscall Floor Implementation Fixes (HIGH)"]
     issue_075_jvm_invariant_syscall_floor_is_incomplete["🔴 Issue: 🟡 [DEFERRED — Medium]: JVM Invariant Syscall Floor is Incomplete (MEDIUM)"]
     issue_079_unhandled_tsync_edge_cases_during_jit_classloading["🔴 Issue: Unhandled `TSYNC` edge cases during JIT classloading (HIGH)"]
@@ -67,8 +63,6 @@ graph TD
     issue_102_permanent_thread_pool_contamination_classloader_leaks_and_st["🔴 Issue: 🟢 [WONTFIX]: Permanent thread pool contamination, classloader leaks, and state pollution via un-cleared `ThreadLocal` variables (MEDIUM)"]
     issue_103_containedexecutors_thread_local_state_persistence_and_poison["🔴 Issue: 🟢 [WONTFIX]: `ContainedExecutors` Thread-Local State Persistence and Poisoning (MEDIUM)"]
     issue_112_iterativeprofiler_logic_errors_confirmed["🔴 Issue: `IterativeProfiler` Logic Errors (Confirmed) (HIGH)"]
-    issue_125_opaque_exceptions_on_landlock_initialization_failure["🔴 Issue: 🔴 [Severity: DX-FRICTION]: Opaque Exceptions on Landlock Initialization Failure (HIGH)"]
-    issue_139_unhandled_ioctl_fallbacks_during_legacy_jvm_syscall_tracing["🔴 Issue: Unhandled `IOCTL` fallbacks during legacy JVM syscall tracing (HIGH)"]
     issue_143_process_wide_classloader_deadlock_on_profiler_result_state_t["🔴 Issue: Process-Wide Classloader Deadlock on Profiler Result / State Types (HIGH)"]
     issue_149_classloader_deadlock_in_jvm_validation_listener["🔴 Issue: Classloader Deadlock in JVM Validation Listener (CRITICAL)"]
     issue_162_memory_alignment_verification_for_layoutskt_ffm_structures["🔴 Issue: Memory Alignment verification for `Layouts.kt` FFM Structures (HIGH)"]
@@ -77,6 +71,8 @@ graph TD
     issue_195_reactor_loop_iteration_arena_scoping["🔴 Issue: Reactor Loop Iteration Arena Scoping (HIGH)"]
     issue_197_graceful_fallback_for_ai_agent_failures["🔴 Issue: Graceful Fallback for AI Agent Failures (HIGH)"]
     issue_198_auto_closing_linked_github_issues["🔴 Issue: Auto-Closing Linked GitHub Issues (HIGH)"]
+    issue_20260726_04_parallel_orchestrator_task_scheduler_and_conflict_avoidance["🔴 Issue: Multi-Issue Parallel Execution & Conflict-Free Task Scheduler (HIGH)"]
+    issue_20260726_05_detect_empty_commits_during_jules_review_loop["🔴 Issue: Detect Empty Commits in Jules Review Loop to Prevent Redundant Correction Comments (MEDIUM)"]
     issue_202_handle_cli_authentication_failures["🔴 Issue: Detect and Handle CLI Authentication Failures with Actionable Login Alerts (HIGH)"]
     issue_202_orchestrator_build_github_issue_body_dynamically_with_project_preamble["🔴 Issue: Orchestrator: Build GitHub Issue Body Dynamically with Project Preamble (HIGH)"]
     issue_203_orchestrator_validate_issue_context_and_needed_before_github_issue_creation["🔴 Issue: Orchestrator: Validate Issue Context and Needed Before GitHub Issue Creation (HIGH)"]
@@ -87,7 +83,6 @@ graph TD
     supervisor_proxy_design_md["💻 Source: supervisor-proxy-design.md"]
     issue_018_formal_monoidal_composition_for_billofbehavior -->|Affects| io_mazewall_profiler_BillOfBehavior
     issue_019_refactor_profiler_daemon_to_use_coroutines_structured_concur -->|Affects| io_mazewall_profiler_engine_ProfilerDaemonEngine
-    issue_020_asynchronous_trace_event_streaming_via_channel_flow -->|Affects| io_mazewall_profiler_Profiler
     issue_028_phantom_types_for_thread_pool_containment_constraints_sandbo -->|Affects| io_mazewall_enforcer_ContainedExecutors
     issue_029_proof_of_progress_state_machine_for_landlock_discovery_disco -->|Affects| io_mazewall_profiler_IterativeProfiler
     issue_036_residual_interface_segregation_violation_isp_in_nativeengine -->|Affects| io_mazewall_NativeEngine
@@ -98,7 +93,6 @@ graph TD
     issue_061_manual_ffm_layout_maintenance_and_drift_risk -->|Affects| io_mazewall_ffi_Layouts
     issue_066_straceprofiler_completely_fails_to_trace_iouring_file_operat -->|Affects| io_mazewall_profiler_strace_StraceProfiler
     issue_068_supervisor_proxy_pattern_fd_injection_stacktrace_scoping -->|Affects| supervisor_proxy_design_md
-    issue_072_contract_based_invariant_validation -->|Affects| io_mazewall_Platform_kt
     issue_079_unhandled_tsync_edge_cases_during_jit_classloading -->|Affects| PureJavaBpfEngine_kt
     issue_102_permanent_thread_pool_contamination_classloader_leaks_and_st -->|Affects| ContainedExecutors_kt
     issue_103_containedexecutors_thread_local_state_persistence_and_poison -->|Affects| io_mazewall_enforcer_ContainedExecutors_kt
@@ -118,7 +112,6 @@ graph TD
     click issue_017_symbolic_errno_mapping_in_syscallresult "../../../backlog/performance/issue-017-symbolic-errno-mapping-in-syscallresult.md"
     click issue_018_formal_monoidal_composition_for_billofbehavior "../../../backlog/testing/issue-018-formal-monoidal-composition-for-billofbehavior.md"
     click issue_019_refactor_profiler_daemon_to_use_coroutines_structured_concur "../../../backlog/code_health/issue-019-refactor-profiler-daemon-to-use-coroutines-structured-concur.md"
-    click issue_020_asynchronous_trace_event_streaming_via_channel_flow "../../../backlog/security/issue-020-asynchronous-trace-event-streaming-via-channel-flow.md"
     click issue_028_phantom_types_for_thread_pool_containment_constraints_sandbo "../../../backlog/testing/issue-028-phantom-types-for-thread-pool-containment-constraints-sandbo.md"
     click issue_029_proof_of_progress_state_machine_for_landlock_discovery_disco "../../../backlog/security/issue-029-proof-of-progress-state-machine-for-landlock-discovery-disco.md"
     click issue_030_architectural_dip_dependency_inversion_violations_in_native_ "../../../backlog/testing/issue-030-architectural-dip-dependency-inversion-violations-in-native-.md"
@@ -136,7 +129,6 @@ graph TD
     click issue_069_resource_containment_via_cgroups_v2 "../../../backlog/security/issue-069-resource-containment-via-cgroups-v2.md"
     click issue_070_network_isolation_via_namespaces_clonenewnet "../../../backlog/security/issue-070-network-isolation-via-namespaces-clonenewnet.md"
     click issue_071_introduce_context_parameters_for_memory_and_engine_scopes "../../../backlog/testing/issue-071-introduce-context-parameters-for-memory-and-engine-scopes.md"
-    click issue_072_contract_based_invariant_validation "../../../backlog/testing/issue-072-contract-based-invariant-validation.md"
     click issue_075_implement_floor_fixes "../../../backlog/implementation/issue-075-implement-floor-fixes.md"
     click issue_075_jvm_invariant_syscall_floor_is_incomplete "../../../backlog/performance/issue-075-jvm-invariant-syscall-floor-is-incomplete.md"
     click issue_079_unhandled_tsync_edge_cases_during_jit_classloading "../../../backlog/testing/issue-079-unhandled-tsync-edge-cases-during-jit-classloading.md"
@@ -146,8 +138,6 @@ graph TD
     click issue_102_permanent_thread_pool_contamination_classloader_leaks_and_st "../../../backlog/performance/issue-102-permanent-thread-pool-contamination-classloader-leaks-and-st.md"
     click issue_103_containedexecutors_thread_local_state_persistence_and_poison "../../../backlog/performance/issue-103-containedexecutors-thread-local-state-persistence-and-poison.md"
     click issue_112_iterativeprofiler_logic_errors_confirmed "../../../backlog/performance/issue-112-iterativeprofiler-logic-errors-confirmed.md"
-    click issue_125_opaque_exceptions_on_landlock_initialization_failure "../../../backlog/security/issue-125-opaque-exceptions-on-landlock-initialization-failure.md"
-    click issue_139_unhandled_ioctl_fallbacks_during_legacy_jvm_syscall_tracing "../../../backlog/testing/issue-139-unhandled-ioctl-fallbacks-during-legacy-jvm-syscall-tracing.md"
     click issue_143_process_wide_classloader_deadlock_on_profiler_result_state_t "../../../backlog/security/issue-143-process-wide-classloader-deadlock-on-profiler-result-state-t.md"
     click issue_149_classloader_deadlock_in_jvm_validation_listener "../../../backlog/security/issue-149-classloader-deadlock-in-jvm-validation-listener.md"
     click issue_162_memory_alignment_verification_for_layoutskt_ffm_structures "../../../backlog/security/issue-162-memory-alignment-verification-for-layoutskt-ffm-structures.md"
@@ -156,6 +146,8 @@ graph TD
     click issue_195_reactor_loop_iteration_arena_scoping "../../../backlog/performance/issue-195-reactor-loop-iteration-arena-scoping.md"
     click issue_197_graceful_fallback_for_ai_agent_failures "../../../backlog/code_health/issue-197-graceful-fallback-for-ai-agent-failures.md"
     click issue_198_auto_closing_linked_github_issues "../../../backlog/code_health/issue-198-auto-closing-linked-github-issues.md"
+    click issue_20260726_04_parallel_orchestrator_task_scheduler_and_conflict_avoidance "../../../backlog/code_health/issue-20260726-04-parallel-orchestrator-task-scheduler-and-conflict-avoidance.md"
+    click issue_20260726_05_detect_empty_commits_during_jules_review_loop "../../../backlog/code_health/issue-20260726-05-detect-empty-commits-during-jules-review-loop.md"
     click issue_202_handle_cli_authentication_failures "../../../backlog/code_health/issue-202-handle-cli-authentication-failures.md"
     click issue_202_orchestrator_build_github_issue_body_dynamically_with_project_preamble "../../../backlog/code_health/issue-202-orchestrator-build-github-issue-body-dynamically-with-project-preamble.md"
     click issue_203_orchestrator_validate_issue_context_and_needed_before_github_issue_creation "../../../backlog/code_health/issue-203-orchestrator-validate-issue-context-and-needed-before-github-issue-creation.md"

@@ -37,3 +37,16 @@ tasks.named<JavaExec>("run") {
         environment("FORCE_TASK", project.property("forceTask").toString())
     }
 }
+
+val checkBacklog by tasks.registering(JavaExec::class) {
+    group = "verification"
+    description = "Validates backlog issue YAML frontmatters, required fields, and dependency references"
+    dependsOn(tasks.compileKotlin)
+    classpath = sourceSets.main.get().runtimeClasspath
+    mainClass.set("io.mazewall.orchestrator.BacklogValidatorKt")
+    args = listOf(rootProject.projectDir.absolutePath)
+}
+
+tasks.named("check") {
+    dependsOn(checkBacklog)
+}

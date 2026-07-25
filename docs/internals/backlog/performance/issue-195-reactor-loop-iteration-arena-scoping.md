@@ -4,7 +4,9 @@ severity: "HIGH"
 status: "open"
 priority: 9
 dependencies: ["issue-194"]
-component: "daemon"
+target_files: []
+target_modules: [\":profiler\"]
+component: "profiler"
 effort: "medium"
 autonomy: "supervised"
 solution_approved: false

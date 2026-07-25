@@ -4,7 +4,9 @@ severity: "ENHANCEMENT"
 status: "open"
 priority: 2
 dependencies: []
-component: "unknown"
+target_files: []
+target_modules: [\":enforcer\"]
+component: "enforcer"
 effort: "large"
 ---
 

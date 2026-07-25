@@ -47,9 +47,18 @@ object BacklogParser {
             val dependenciesRaw = frontmatter["dependencies"] ?: ""
             val dependencies = parseList(dependenciesRaw, content)
 
-            val id = file.name.substringBefore("-").let { part1 ->
-                val part2 = file.name.substringAfter("-").substringBefore("-")
-                "$part1-$part2"
+            val id = frontmatter["id"]?.removeSurrounding("\"")?.removeSurrounding("'") ?: run {
+                val nameWithoutExt = file.name.removeSuffix(".md")
+                val parts = nameWithoutExt.split("-")
+                if (parts.size >= 3 && parts[1].matches(Regex("\\d{8}"))) {
+                    // Timestamp ID format: issue-YYYYMMDD-HHMM or issue-YYYYMMDD-01
+                    "${parts[0]}-${parts[1]}-${parts[2]}"
+                } else if (parts.size >= 2) {
+                    // Legacy sequential format: issue-190
+                    "${parts[0]}-${parts[1]}"
+                } else {
+                    nameWithoutExt
+                }
             }
 
             val body = content.substringAfter("---", "").substringAfter("---", "").trim()

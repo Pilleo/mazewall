@@ -4,6 +4,8 @@ severity: "HIGH"
 status: "open"
 priority: 1
 dependencies: ["issue-075"]
+target_files: []
+target_modules: [\":enforcer\"]
 component: "enforcer"
 effort: "medium"
 ---

@@ -1,7 +1,7 @@
 ---
 title: "Contract-Based Invariant Validation"
 severity: "ENHANCEMENT"
-status: "open"
+status: "resolved"
 priority: 2
 dependencies: []
 component: "enforcer"

@@ -195,7 +195,7 @@ The `.agents/skills/` directory contains reusable, step-by-step workflows for co
 | `ffm_safety` | Making any FFM/off-heap memory changes (layouts, arenas, downcalls) |
 | `fix_backlog_item` | Fixing bugs/backlog items cleanly without warmups, swallows, or hacks |
 | `loop_driven_development` | Iterative red-green-refactor TDD cycle for new features |
-| `report_security_issue` | Discovering a new vulnerability, bypass risk, or kernel behavior gap |
+| `create_backlog_issue` | Documenting a new bug, feature, architectural gap, or security/performance finding |
 | `review` | Code review of a patch, PR, or proposed design |
 | `spec_driven_development` | Building a feature from a written spec document |
 | `update_docs` | Keeping design docs in sync after code changes |

@@ -4,6 +4,8 @@ priority: 8
 status: "resolved"
 dependencies: ["issue-190"]
 severity: "HIGH"
+target_files: []
+target_modules: [\":tools:orchestrator\"]
 component: "orchestrator"
 effort: "MEDIUM"
 github_issue: 249

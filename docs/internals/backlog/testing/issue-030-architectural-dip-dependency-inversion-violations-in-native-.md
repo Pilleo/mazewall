@@ -4,7 +4,9 @@ severity: "HIGH"
 status: "open"
 priority: 3
 dependencies: []
-component: "shared"
+target_files: []
+target_modules: [\":enforcer\"]
+component: "enforcer"
 effort: "large"
 ---
 

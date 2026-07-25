@@ -4,6 +4,8 @@ severity: "ENHANCEMENT"
 status: "open"
 priority: 2
 dependencies: []
+target_files: []
+target_modules: [\":profiler\"]
 component: "profiler"
 effort: "large"
 ---

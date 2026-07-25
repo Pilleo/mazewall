@@ -133,4 +133,29 @@ class BacklogParserEnhancedTest {
         assertTrue(truncatedText.length <= 4000)
         assertTrue(truncatedText.endsWith("..."))
     }
+
+    @Test
+    fun testTimestampBasedIssueIdParsing() {
+        val file = File(tempDir, "issue-20260726-02-timestamp-based-issue-ids.md")
+        file.writeText("""
+            ---
+            title: "Transition Orchestrator to Timestamp-Based Issue IDs"
+            severity: "HIGH"
+            status: "open"
+            priority: 9
+            dependencies: ["issue-20260726-01"]
+            component: "orchestrator"
+            ---
+
+            # 🔴 [Severity: HIGH]: Title
+
+            **Context:** Test context
+            **Needed:** Test needed
+        """.trimIndent())
+
+        val issue = BacklogParser.parseIssueFile(file)
+        assertNotNull(issue)
+        assertEquals("issue-20260726-02", issue.id)
+        assertEquals("issue-20260726-01", issue.dependencies.first())
+    }
 }

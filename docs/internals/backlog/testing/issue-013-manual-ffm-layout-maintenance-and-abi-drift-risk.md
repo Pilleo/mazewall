@@ -4,7 +4,9 @@ severity: "HIGH"
 status: "open"
 priority: 1
 dependencies: []
-component: "ffi"
+target_files: []
+target_modules: [\":enforcer\"]
+component: "enforcer"
 effort: "medium"
 ---
 

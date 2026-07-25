@@ -4,6 +4,8 @@ severity: "ENHANCEMENT"
 status: "open"
 priority: 3
 dependencies: []
+target_files: []
+target_modules: [\":enforcer\"]
 component: "enforcer"
 effort: "medium"
 ---

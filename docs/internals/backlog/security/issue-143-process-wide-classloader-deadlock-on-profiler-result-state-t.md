@@ -4,6 +4,8 @@ severity: "HIGH"
 status: "open"
 priority: 9
 dependencies: []
+target_files: []
+target_modules: [\":profiler\"]
 component: "profiler"
 effort: "small"
 autonomy: "supervised"

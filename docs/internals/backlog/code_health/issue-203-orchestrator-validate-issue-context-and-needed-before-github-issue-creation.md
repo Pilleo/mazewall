@@ -4,6 +4,8 @@ severity: "HIGH"
 status: "open"
 priority: 10
 dependencies: ["issue-202"]
+target_files: []
+target_modules: [\":tools:orchestrator\"]
 component: "orchestrator"
 effort: "trivial"
 reversible: true

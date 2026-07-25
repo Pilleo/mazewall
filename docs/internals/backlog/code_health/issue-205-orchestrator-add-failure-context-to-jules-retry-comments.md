@@ -4,6 +4,8 @@ severity: "MEDIUM"
 status: "open"
 priority: 10
 dependencies: []
+target_files: []
+target_modules: [\":tools:orchestrator\"]
 component: "orchestrator"
 effort: "trivial"
 reversible: true

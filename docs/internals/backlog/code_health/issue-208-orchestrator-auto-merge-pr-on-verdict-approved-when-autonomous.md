@@ -4,6 +4,8 @@ severity: "MEDIUM"
 status: "open"
 priority: 5
 dependencies: ["issue-202", "issue-203"]
+target_files: []
+target_modules: [\":tools:orchestrator\"]
 component: "orchestrator"
 effort: "medium"
 autonomy: "supervised"

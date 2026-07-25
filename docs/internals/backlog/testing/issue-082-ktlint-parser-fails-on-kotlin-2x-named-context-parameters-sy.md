@@ -4,6 +4,8 @@ severity: "MEDIUM"
 status: "open"
 priority: 4
 dependencies: []
+target_files: []
+target_modules: [\":enforcer\"]
 component: "testing"
 effort: "medium"
 ---

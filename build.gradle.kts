@@ -626,6 +626,7 @@ val installGitHooks by tasks.registering(Copy::class) {
 tasks.named("check") {
     dependsOn(generateKnowledgeMap)
     dependsOn(installGitHooks)
+    dependsOn(":tools:orchestrator:checkBacklog")
 }
 
 
