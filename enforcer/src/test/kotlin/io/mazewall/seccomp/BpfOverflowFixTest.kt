@@ -14,7 +14,8 @@ class BpfOverflowFixTest {
         val blocked = IntArray(100) { it + 1000 } // Use numbers that won't clash with preamble
 
         val actions = blocked.associateWith { io.mazewall.core.SeccompAction.ACT_ERRNO }
-        val filters = BpfFilter.buildFromActions(arch, actions, io.mazewall.core.SeccompAction.ACT_ALLOW, DefaultSyscallInspectionPipeline(emptyList()))
+        val program = BpfFilter.buildFromActions(arch, actions, io.mazewall.core.SeccompAction.ACT_ALLOW, DefaultSyscallInspectionPipeline(emptyList()))
+        val filters = program.instructions
 
         assertTrue(filters.isNotEmpty())
         println("Filter with 100 syscalls: ${filters.size} instructions")
@@ -28,7 +29,8 @@ class BpfOverflowFixTest {
     @Test
     fun `PURE_COMPUTE_UNSAFE policy builds successfully on current arch`() {
         val arch = Arch.current()
-        val filters = BpfFilter.build(arch, Policy.PURE_COMPUTE_UNSAFE.definition)
+        val program = BpfFilter.build(arch, Policy.PURE_COMPUTE_UNSAFE.definition)
+        val filters = program.instructions
         assertTrue(filters.isNotEmpty())
         println("PURE_COMPUTE_UNSAFE filter size: ${filters.size} instructions")
     }

@@ -84,7 +84,7 @@ class ContainmentDesignSpec :
                 Syscall.entries.take(127).forEach {
                     builder.block(it)
                 }
-                val filter = BpfFilter.build(arch, builder.build().definition)
+                val filter = BpfFilter.build(arch, builder.build().definition).instructions
                 // Under linear scan, each syscall check is:
                 // JEQ nr -> skip 0, dest 1 -> RET nativeAction
                 // Therefore, max jump offset is 1, which is always < 255.
@@ -95,7 +95,7 @@ class ContainmentDesignSpec :
             }
 
             "total instruction count for PURE_COMPUTE_UNSAFE stays below the 4096 kernel limit" {
-                val filter = BpfFilter.build(arch, Policy.PURE_COMPUTE_UNSAFE.definition)
+                val filter = BpfFilter.build(arch, Policy.PURE_COMPUTE_UNSAFE.definition).instructions
                 (filter.size in 0..4095) shouldBe true
             }
         }
@@ -124,7 +124,7 @@ class ContainmentDesignSpec :
                     .defaultAction(SeccompAction.ACT_ERRNO)
                     .build()
 
-                val filter = BpfFilter.build(arch, whitelistPolicy.definition)
+                val filter = BpfFilter.build(arch, whitelistPolicy.definition).instructions
 
                 // Let's verify that BpfFilter allows these syscall numbers.
                 // When we find a check for futex (JEQ futexNr), the action should be RET ALLOW (0x7fff0000)
@@ -149,7 +149,7 @@ class ContainmentDesignSpec :
 
             "BpfFilter always emits ENOSYS for clone3 regardless of policy mode" {
                 val policy = Policy.builder().defaultAction(SeccompAction.ACT_ALLOW).build()
-                val filter = BpfFilter.build(arch, policy.definition)
+                val filter = BpfFilter.build(arch, policy.definition).instructions
 
                 val clone3Nr = arch.clone3
                 var foundClone3 = false

@@ -31,8 +31,8 @@ object BpfFilter {
         arch: Arch,
         policy: PolicyDefinition<*>,
         profilingMode: Boolean = false,
-    ): List<BpfInstruction> =
-        buildFromActions(
+    ): BpfProgram<BpfStatus.Verified> {
+        val unverified = buildFromActions(
             arch,
             policy.syscallActionNumbers(arch),
             policy.defaultAction,
@@ -42,6 +42,8 @@ object BpfFilter {
             policy.allowUnsafePrctl,
             profilingMode,
         )
+        return BpfStaticVerifier.verify(unverified)
+    }
 
     internal fun getSyscallInspectionPipeline(): SyscallInspectionPipeline {
         return DefaultSyscallInspectionPipeline(
@@ -100,7 +102,7 @@ object BpfFilter {
         allowNonThreadClone: Boolean = false,
         allowUnsafePrctl: Boolean = false,
         profilingMode: Boolean = false,
-    ): List<BpfInstruction> {
+    ): BpfProgram<BpfStatus.Unverified> {
         val effectiveSyscallActions = syscallActions.toMutableMap()
 
         // --- STACKTRACE PROPAGATION FOR PROCESS SPAWNING ---
@@ -154,11 +156,11 @@ object BpfFilter {
         emitLinearScan(builder, effectiveSyscallActions, jvmCriticalNrs, profilingMode, defaultNativeAction, handledNrs)
 
         // 4. Default Action & Build
-        val instructions = builder.ret(defaultNativeAction).build().instructions
-        require(instructions.size <= NativeConstants.BPF_MAXINSNS) {
+        val program = builder.ret(defaultNativeAction).build()
+        require(program.instructions.size <= NativeConstants.BPF_MAXINSNS) {
             "BPF program exceeds kernel maximum instruction limit"
         }
-        return instructions
+        return program
     }
 
     /**
