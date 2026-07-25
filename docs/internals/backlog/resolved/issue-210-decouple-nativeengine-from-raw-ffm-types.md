@@ -1,7 +1,7 @@
 ---
 title: "Decouple NativeEngine Interface and LinuxNative Entry Point from Raw FFM Types"
 severity: "HIGH"
-status: "open"
+status: "resolved"
 priority: 10
 dependencies: ["issue-209"]
 component: "enforcer"

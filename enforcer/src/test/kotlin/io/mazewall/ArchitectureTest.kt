@@ -430,6 +430,21 @@ class ArchitectureTest {
             .check(allClasses)
     }
 
+    @org.junit.jupiter.api.Test
+    fun ffmApiMustBeIsolatedToFfiPackageRuleDetectsViolation() {
+        val rule = noClasses()
+            .that()
+            .resideOutsideOfPackage("io.mazewall.ffi..")
+            .should()
+            .dependOnClassesThat()
+            .resideInAPackage("java.lang.foreign..")
+
+        val classes = com.tngtech.archunit.core.importer.ClassFileImporter().importClasses(DummyViolatingClass::class.java)
+        org.junit.jupiter.api.assertThrows<AssertionError> {
+            rule.check(classes)
+        }
+    }
+
     @ArchTest
     fun methodHandleInvokeExactMustBeEncapsulatedInSyscallInvoker(allClasses: com.tngtech.archunit.core.domain.JavaClasses) {
         noClasses()
@@ -450,4 +465,8 @@ class ArchitectureTest {
             .because("MethodHandle.invokeExact must only be called within SyscallInvoker to ensure atomic errno capture.")
             .check(allClasses)
     }
+}
+
+private class DummyViolatingClass {
+    lateinit var segment: java.lang.foreign.MemorySegment
 }
