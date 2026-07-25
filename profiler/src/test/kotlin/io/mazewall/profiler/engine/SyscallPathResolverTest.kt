@@ -256,4 +256,17 @@ class SyscallPathResolverTest {
             }
         }
     }
+
+    @Test
+    fun `test resolve IOCTL returns empty paths and does not read memory`() {
+        NativeArena.ofConfined().use { arena ->
+            with(arena) {
+                val reader = RecordingMockReader()
+                val event = makeRawEvent("IOCTL", listOf(5L, 0x12345678L, 0x7fff_1000L))
+                val resolved = makeResolver(reader).resolve(event)
+                assertTrue(reader.readAddresses.isEmpty(), "No memory read should occur for IOCTL")
+                assertTrue(resolved.paths.isEmpty(), "No paths should be resolved for IOCTL")
+            }
+        }
+    }
 }

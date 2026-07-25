@@ -492,4 +492,13 @@ class BpfFilterTest {
         val expectedErrno = NativeConstants.SECCOMP_RET_ERRNO or 99
         assertEquals(expectedErrno, evalBpf(filter, Syscall.OPEN.numberFor(arch)))
     }
+
+    @Test
+    fun `test ioctl is whitelisted in profilingMode`() {
+        val policy = Policy.builder()
+            .block(Syscall.IOCTL)
+            .build()
+        val filter = BpfFilter.build(arch, policy.definition, profilingMode = true).instructions
+        assertEquals(NativeConstants.SECCOMP_RET_ALLOW, evalBpf(filter, Syscall.IOCTL.numberFor(arch)))
+    }
 }

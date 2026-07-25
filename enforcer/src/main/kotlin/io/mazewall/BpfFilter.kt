@@ -105,6 +105,10 @@ object BpfFilter {
     ): BpfProgram<BpfStatus.Unverified> {
         val effectiveSyscallActions = syscallActions.toMutableMap()
 
+        if (profilingMode) {
+            effectiveSyscallActions[arch.ioctl] = SeccompAction.ACT_ALLOW
+        }
+
         // --- STACKTRACE PROPAGATION FOR PROCESS SPAWNING ---
         // To enforce stacktrace scoping on execve/execveat, we must first capture the
         // parent thread's stack trace during the spawn entry (fork/vfork/clone).
