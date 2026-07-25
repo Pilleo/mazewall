@@ -1,5 +1,6 @@
 package io.mazewall.enforcer.supervisor
 
+import io.mazewall.enforcer.validateNotVirtual
 import io.mazewall.BpfFilter
 import io.mazewall.LinuxNative
 import io.mazewall.Platform
@@ -49,9 +50,7 @@ public object SupervisorInstaller {
         val arch = Arch.current()
 
         // Assert not a virtual thread per Loom carrier poisoning rules
-        if (Thread.currentThread().isVirtual) {
-            throw IllegalStateException("Cannot install seccomp filter directly on a virtual thread.")
-        }
+        validateNotVirtual()
 
         val filter = BpfFilter.build(arch, policy)
         val tid = LinuxNative.process.gettid()

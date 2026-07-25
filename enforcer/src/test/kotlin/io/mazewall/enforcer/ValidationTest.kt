@@ -27,4 +27,22 @@ class ValidationTest {
         }
         assumeTrue(e.cause is IllegalStateException)
     }
+
+    @Test
+    fun `test validateNotVirtual passes on platform thread`() {
+        // Should not throw
+        validateNotVirtual()
+    }
+
+    @Test
+    fun `test validateNotVirtual throws on virtual thread`() {
+        val executor = Executors.newVirtualThreadPerTaskExecutor()
+        val future = executor.submit {
+            validateNotVirtual()
+        }
+        val e = assertThrows(java.util.concurrent.ExecutionException::class.java) {
+            future.get()
+        }
+        assumeTrue(e.cause is IllegalStateException)
+    }
 }

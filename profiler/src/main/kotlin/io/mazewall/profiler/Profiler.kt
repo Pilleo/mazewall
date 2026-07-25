@@ -1,6 +1,7 @@
 package io.mazewall.profiler
 
 import io.mazewall.enforcer.threadLocal
+import io.mazewall.enforcer.validateNotVirtual
 import io.mazewall.LinuxNative
 import io.mazewall.Policy
 import io.mazewall.PolicyDefinition
@@ -53,9 +54,7 @@ object Profiler {
         captureStackTraces: Boolean = true,
         block: () -> T,
     ): ProfilingResult<T> {
-        if (Thread.currentThread().isVirtual) {
-            throw IllegalStateException("Cannot run profiler inside virtual threads")
-        }
+        validateNotVirtual()
 
         // Pre-warm classloading to prevent circular classloader deadlocks
         // when seccomp filters intercept file system reads during dynamic class loading.
@@ -278,9 +277,7 @@ object Profiler {
         private fun applyProfilingIfNecessary() {
             if (!threadApplied) {
                 val currentThread = Thread.currentThread()
-                if (currentThread.isVirtual) {
-                    throw IllegalStateException("Cannot run profiler inside virtual threads")
-                }
+                validateNotVirtual()
                 threadRegistry[LinuxNative.process.gettid()] = currentThread
                 installProfilingFilterForThread(
                     socketPath = context.socketPath,
