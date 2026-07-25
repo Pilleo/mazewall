@@ -75,7 +75,7 @@ internal class ProfilerInstallerSession(
 
         SupervisorSeccompNotifInstaller.install(
             socketPath = socketPath,
-            filterInstructions = filter.instructions,
+            filter = filter,
             processWide = processWide,
             connectWithRetry = connectWithRetry,
             sendDescriptor = { sockFd, fd -> ProfilerSocket.sendDescriptor(sockFd, fd) }
