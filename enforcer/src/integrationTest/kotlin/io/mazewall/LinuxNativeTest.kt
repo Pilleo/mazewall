@@ -48,7 +48,7 @@ class LinuxNativeTest : BaseIntegrationTest() {
         val path = allocateFrom(tempFile.toString())
 
         val openResult =
-        LinuxNative.fileSystem.open(path, 0) // O_RDONLY
+        LinuxNative.fileSystem.open(path, io.mazewall.core.OpenFlags(0)) // O_RDONLY
 
         val fd = openResult.getFdOrThrow("open")
 
@@ -155,7 +155,7 @@ LinuxNative.memory.processVmReadv(
                     .createTempFile("fcntl-test", ".txt")
             val path = arena.allocateFrom(tempFile.toString())
             val openResult =
-            LinuxNative.fileSystem.open(path, 0)
+            LinuxNative.fileSystem.open(path, io.mazewall.core.OpenFlags(0))
 
             val fd = openResult.getFdOrThrow("open")
 

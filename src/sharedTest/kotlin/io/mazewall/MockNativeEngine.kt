@@ -96,19 +96,19 @@ public open class MockNativeFileSystem : NativeFileSystem {
     public var closeResult: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(0L)
     public var mmapResult: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(0L)
 
-    public var onOpen: (path: ManagedSegment, flags: Int) -> LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = { _, _ -> openResult }
-    public var onOpenat: (dirfd: Int, path: ManagedSegment, flags: Int) -> LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = { _, _, _ -> openResult }
+    public var onOpen: (path: ManagedSegment, flags: io.mazewall.core.OpenFlags) -> LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = { _, _ -> openResult }
+    public var onOpenat: (dirfd: Int, path: ManagedSegment, flags: io.mazewall.core.OpenFlags) -> LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = { _, _, _ -> openResult }
     public var onClose: (fd: FileDescriptor<*, FdState.Open>) -> LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = { closeResult }
 
     override fun open(
         path: ManagedSegment,
-        flags: Int,
+        flags: io.mazewall.core.OpenFlags,
     ) = onOpen(path, flags)
 
     override fun openat(
         dirfd: Int,
         path: ManagedSegment,
-        flags: Int,
+        flags: io.mazewall.core.OpenFlags,
     ) = onOpenat(dirfd, path, flags)
 
     override fun readlink(
@@ -120,8 +120,8 @@ public open class MockNativeFileSystem : NativeFileSystem {
     override fun mmap(
         addr: Long,
         length: Long,
-        prot: Int,
-        flags: Int,
+        prot: io.mazewall.core.MmapProt,
+        flags: io.mazewall.core.MmapFlags,
         fd: Int,
         offset: Long,
     ) = mmapResult

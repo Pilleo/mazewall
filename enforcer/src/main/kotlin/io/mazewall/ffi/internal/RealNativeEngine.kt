@@ -210,28 +210,28 @@ internal object RealNativeFileSystem : NativeFileSystem {
 
     override fun open(
         path: ManagedSegment,
-        flags: Int,
+        flags: io.mazewall.core.OpenFlags,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
-        return SyscallInvoker.open(OPEN, path.native, flags)
+        return SyscallInvoker.open(OPEN, path.native, flags.value)
     }
 
     override fun openat(
         dirfd: Int,
         path: ManagedSegment,
-        flags: Int,
+        flags: io.mazewall.core.OpenFlags,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
-        return SyscallInvoker.openat(OPENAT, dirfd, path.native, flags)
+        return SyscallInvoker.openat(OPENAT, dirfd, path.native, flags.value)
     }
 
     override fun mmap(
         addr: Long,
         length: Long,
-        prot: Int,
-        flags: Int,
+        prot: io.mazewall.core.MmapProt,
+        flags: io.mazewall.core.MmapFlags,
         fd: Int,
         offset: Long,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
-        return SyscallInvoker.mmap(MMAP, MemorySegment.ofAddress(addr), length, prot, flags, fd, offset)
+        return SyscallInvoker.mmap(MMAP, MemorySegment.ofAddress(addr), length, prot.value, flags.value, fd, offset)
     }
 
     override fun close(fd: FileDescriptor<*, FdState.Open>): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
@@ -647,6 +647,24 @@ internal object RealNativeHelper {
     fun result(ret: Long, errno: Int): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
         if (ret < 0) LinuxNative.SyscallResult.Error(errno, ret)
         else LinuxNative.SyscallResult.Success(ret)
+
+    fun toLong(value: Any?): Long = when (value) {
+        null -> 0L
+        is Long -> value
+        is Int -> value.toLong()
+        is Short -> value.toLong()
+        is Byte -> value.toLong()
+        is io.mazewall.core.OpenFlags -> value.value.toLong()
+        is io.mazewall.core.MmapProt -> value.value.toLong()
+        is io.mazewall.core.MmapFlags -> value.value.toLong()
+        is io.mazewall.core.CloneFlags -> value.value
+        is io.mazewall.core.Pid -> value.value.toLong()
+        is io.mazewall.core.Tid -> value.value.toLong()
+        is io.mazewall.core.Uid -> value.value.toLong()
+        is io.mazewall.core.MemoryAddress -> value.value
+        is io.mazewall.core.FileDescriptor<*, *> -> value.value.toLong()
+        else -> throw IllegalArgumentException("Unsupported type for conversion to Long: ${value::class.simpleName}")
+    }
 
     fun downcall(
         name: String,

@@ -680,9 +680,9 @@ internal class SupervisorSessionHandler(
         val dirfd = if (nr == arch.open || pathStr.startsWith("/")) AT_FDCWD else args[0].toInt()
         val res: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
             if (dirfd == AT_FDCWD) {
-                engine.fileSystem.open(pathSeg, flags)
+                engine.fileSystem.open(pathSeg, io.mazewall.core.OpenFlags(flags))
             } else {
-                engine.fileSystem.openat(dirfd, pathSeg, flags)
+                engine.fileSystem.openat(dirfd, pathSeg, io.mazewall.core.OpenFlags(flags))
             }
         return when (res) {
             is LinuxNative.SyscallResult.Success -> res.value.toInt()

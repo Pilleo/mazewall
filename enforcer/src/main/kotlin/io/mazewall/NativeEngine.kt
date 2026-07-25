@@ -92,13 +92,13 @@ public interface RawSyscallOperations {
 public interface NativeFileSystem {
     fun open(
         path: ManagedSegment,
-        flags: Int,
+        flags: io.mazewall.core.OpenFlags,
     ): SyscallResult<Long, SyscallHandledState.Unhandled>
 
     fun openat(
         dirfd: Int,
         path: ManagedSegment,
-        flags: Int,
+        flags: io.mazewall.core.OpenFlags,
     ): SyscallResult<Long, SyscallHandledState.Unhandled>
 
     fun readlink(
@@ -110,8 +110,8 @@ public interface NativeFileSystem {
     fun mmap(
         addr: Long,
         length: Long,
-        prot: Int,
-        flags: Int,
+        prot: io.mazewall.core.MmapProt,
+        flags: io.mazewall.core.MmapFlags,
         fd: Int,
         offset: Long,
     ): SyscallResult<Long, SyscallHandledState.Unhandled>

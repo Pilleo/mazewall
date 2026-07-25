@@ -191,7 +191,7 @@ class ProtectionDemonstrationTest {
                         val openResult =
                         LinuxNative.fileSystem.open(
                             ConfinedSegment(arena.allocateFrom("/etc/hosts")),
-                            0, // O_RDONLY
+                            io.mazewall.core.OpenFlags(0), // O_RDONLY
                         )
 
                         // If Landlock restricts the path, open returns -1 and errno is EACCES (13)

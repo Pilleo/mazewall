@@ -183,7 +183,7 @@ class LandlockCoverageTest {
             fileSystem = object : MockNativeFileSystem() {
                 override fun open(
                     path: ManagedSegment,
-                    flags: Int,
+                    flags: io.mazewall.core.OpenFlags,
                 ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
                     val current = calls.incrementAndGet()
                     return if (current == 1) {
@@ -216,7 +216,7 @@ class LandlockCoverageTest {
             fileSystem = object : MockNativeFileSystem() {
                 override fun open(
                     path: ManagedSegment,
-                    flags: Int,
+                    flags: io.mazewall.core.OpenFlags,
                 ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
                     val pathStr = path.readString(0L)
                     if (pathStr.contains(" (deleted)")) {
@@ -446,15 +446,15 @@ class LandlockCoverageTest {
             fileSystem = object : MockNativeFileSystem() {
                 override fun open(
                     path: ManagedSegment,
-                    flags: Int,
+                    flags: io.mazewall.core.OpenFlags,
                 ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
                     val pathStr = path.readString(0L)
                     if (pathStr == "/nonexistent/file") {
-                        observedFlags.add(pathStr to flags)
+                        observedFlags.add(pathStr to flags.value)
                         return LinuxNative.SyscallResult.Error<LinuxNative.SyscallHandledState.Unhandled>(2, -1)
                     }
                     if (pathStr == "/nonexistent") {
-                        observedFlags.add(pathStr to flags)
+                        observedFlags.add(pathStr to flags.value)
                         return LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(100)
                     }
                     return LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(100)
@@ -494,11 +494,11 @@ class LandlockCoverageTest {
             fileSystem = object : MockNativeFileSystem() {
                 override fun open(
                     path: ManagedSegment,
-                    flags: Int,
+                    flags: io.mazewall.core.OpenFlags,
                 ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
                     val pathStr = path.readString(0L)
                     if (pathStr == "/nonexistent/file" || pathStr == "/nonexistent") {
-                        observedFlags.add(pathStr to flags)
+                        observedFlags.add(pathStr to flags.value)
                     }
                     if (pathStr == "/nonexistent/file") {
                         return LinuxNative.SyscallResult.Error<LinuxNative.SyscallHandledState.Unhandled>(2, -1)

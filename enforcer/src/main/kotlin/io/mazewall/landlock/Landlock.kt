@@ -278,7 +278,7 @@ object Landlock {
         path: String,
         allowedAccess: Long,
     ) {
-        val fdResult = openPath(path, NativeConstants.O_PATH or NativeConstants.O_CLOEXEC)
+        val fdResult = openPath(path, io.mazewall.core.OpenFlags(NativeConstants.O_PATH or NativeConstants.O_CLOEXEC))
 
         fdResult.onSuccess { value ->
             FileDescriptor.unsafe<FileDescriptorRole.OPath>(value.toInt()).use { pathFd ->
@@ -314,7 +314,7 @@ object Landlock {
         allowedAccess: Long,
     ) {
         val resolvedPath = path.value
-        val openFlags = NativeConstants.O_PATH or NativeConstants.O_CLOEXEC or NativeConstants.O_NOFOLLOW
+        val openFlags = io.mazewall.core.OpenFlags(NativeConstants.O_PATH or NativeConstants.O_CLOEXEC or NativeConstants.O_NOFOLLOW)
         val initialResult = openPath(resolvedPath, openFlags)
 
         val openRes = handleInitialOpenFailure(initialResult, resolvedPath, openFlags, allowedAccess)
@@ -336,7 +336,7 @@ object Landlock {
     private fun handleInitialOpenFailure(
         res: LinuxNative.SyscallResult<Long, *>,
         resolvedPath: String,
-        flags: Int,
+        flags: io.mazewall.core.OpenFlags,
         allowedAccess: Long,
     ): OpenResult {
         if (res is LinuxNative.SyscallResult.Error && res.errno == 2) { // ENOENT
@@ -357,7 +357,7 @@ object Landlock {
             }
             val parentPath = File(resolvedPath).parent ?: "/"
             logger.info("Path $resolvedPath does not exist, falling back to parent directory: $parentPath")
-            val fallbackFlags = (flags or NativeConstants.O_PATH or NativeConstants.O_CLOEXEC) and NativeConstants.O_NOFOLLOW.inv()
+            val fallbackFlags = io.mazewall.core.OpenFlags((flags.value or NativeConstants.O_PATH or NativeConstants.O_CLOEXEC) and NativeConstants.O_NOFOLLOW.inv())
             val openResult = openPath(parentPath, fallbackFlags)
             return when (openResult) {
                 is LinuxNative.SyscallResult.Success -> OpenResult.Success(openResult.value.toInt(), true)
