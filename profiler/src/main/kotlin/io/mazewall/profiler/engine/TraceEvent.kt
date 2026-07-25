@@ -27,6 +27,9 @@ public sealed class TraceEvent {
      */
     public open val paths: List<String> get() = emptyList()
 
+    @Volatile
+    public var jvmStackTrace: Array<StackTraceElement>? = null
+
     /**
      * A generic event for syscalls that don't have a specialized type yet.
      */

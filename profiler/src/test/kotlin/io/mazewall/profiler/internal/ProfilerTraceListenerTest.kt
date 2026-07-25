@@ -11,6 +11,8 @@ import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.Timeout
 import io.mazewall.ffi.memory.ManagedSegment
+import io.mazewall.ffi.memory.*
+import io.mazewall.profiler.engine.TraceEvent
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
@@ -109,6 +111,84 @@ class ProfilerTraceListenerTest {
 
             // Verify total close calls remains 1
             assertEquals(1, closeCount.get())
+        } finally {
+            LinuxNative.resetToDefault()
+        }
+    }
+
+    @Test
+    @Timeout(value = 5, unit = TimeUnit.SECONDS)
+    fun `test that trace events are successfully streamed into the channel and processed asynchronously`() {
+        val accumulatedLogs = mutableListOf<TraceEvent>()
+        val stackTracesMap = mutableMapOf<TraceEvent, MutableList<Array<StackTraceElement>>>()
+
+        val mock = MockNativeEngine(
+            memory = object : MockNativeMemory() {
+                private var callCount = 0
+                override fun read(fd: FileDescriptor<*, FdState.Open>, buf: ManagedSegment, count: Long): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                    if (callCount == 0) {
+                        buf.writeByte(0L, 0xAC.toByte())
+                        callCount++
+                        return LinuxNative.SyscallResult.Success(1L)
+                    } else if (callCount == 1) {
+                        var offset = 0L
+
+                        buf.writeIntUnaligned(offset, java.lang.Integer.reverseBytes(42))
+                        offset += 4
+
+                        buf.writeIntUnaligned(offset, java.lang.Integer.reverseBytes(4))
+                        offset += 4
+
+                        buf.writeByte(offset, 'O'.code.toByte())
+                        buf.writeByte(offset + 1, 'P'.code.toByte())
+                        buf.writeByte(offset + 2, 'E'.code.toByte())
+                        buf.writeByte(offset + 3, 'N'.code.toByte())
+                        offset += 4
+
+                        buf.writeIntUnaligned(offset, java.lang.Integer.reverseBytes(0))
+                        offset += 4
+
+                        buf.writeIntUnaligned(offset, java.lang.Integer.reverseBytes(1))
+                        offset += 4
+
+                        buf.writeIntUnaligned(offset, java.lang.Integer.reverseBytes(5))
+                        offset += 4
+
+                        buf.writeByte(offset, 'h'.code.toByte())
+                        buf.writeByte(offset + 1, 'e'.code.toByte())
+                        buf.writeByte(offset + 2, 'l'.code.toByte())
+                        buf.writeByte(offset + 3, 'l'.code.toByte())
+                        buf.writeByte(offset + 4, 'o'.code.toByte())
+                        offset += 5
+
+                        callCount++
+                        return LinuxNative.SyscallResult.Success(offset)
+                    } else {
+                        return LinuxNative.SyscallResult.Success(0L)
+                    }
+                }
+            }
+        )
+
+        LinuxNative.setEngine(mock)
+        try {
+            val socketFd = FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(102)
+            val listener = ProfilerTraceListener(
+                socketFd = socketFd,
+                accumulatedLogs = accumulatedLogs,
+                stackTracesMap = stackTracesMap,
+                pathCache = mutableMapOf()
+            )
+
+            val readyLatch = CountDownLatch(1)
+            listener.start(readyLatch)
+            readyLatch.await(2, TimeUnit.SECONDS)
+
+            listener.close()
+
+            assertEquals(1, accumulatedLogs.size)
+            assertEquals("OPEN", accumulatedLogs[0].syscallName)
+            assertEquals(listOf("hello"), accumulatedLogs[0].paths)
         } finally {
             LinuxNative.resetToDefault()
         }

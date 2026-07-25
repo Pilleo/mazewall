@@ -66,6 +66,7 @@ dependencies {
     plantumlConfig(libs.plantuml.core)
     implementation(project(":enforcer"))
     implementation(libs.kotlinxSerialization)
+    implementation(libs.kotlinxCoroutines)
 
     testImplementation(kotlin("test"))
     testImplementation(libs.junit.jupiter.api)

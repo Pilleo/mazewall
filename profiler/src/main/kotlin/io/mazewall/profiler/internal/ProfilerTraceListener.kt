@@ -13,6 +13,10 @@ import java.io.DataInputStream
 import io.mazewall.ffi.memory.ConfinedSegment
 import java.io.InputStream
 import java.lang.foreign.Arena
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.receiveAsFlow
+import kotlinx.coroutines.runBlocking
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.atomic.AtomicBoolean
@@ -36,6 +40,10 @@ internal class ProfilerTraceListener(
     private val logger = Logger.getLogger(ProfilerTraceListener::class.java.name)
     private val closed = AtomicBoolean(false)
     private var workerThread: Thread? = null
+    private var collectorThread: Thread? = null
+
+    val eventChannel = Channel<TraceEvent>(Channel.UNLIMITED)
+    val eventFlow: Flow<TraceEvent> = eventChannel.receiveAsFlow()
 
     var state: TraceListenerState = TraceListenerState.Disconnected
         private set
@@ -82,6 +90,29 @@ internal class ProfilerTraceListener(
 
         workerThread = thread
         thread.start()
+
+        val collector = Thread {
+            try {
+                runBlocking {
+                    for (event in eventChannel) {
+                        accumulatedLogs.add(event)
+                        val jvmFrames = event.jvmStackTrace
+                        if (jvmFrames != null && stackTracesMap != null) {
+                            stackTracesMap.computeIfAbsent(event) {
+                                CopyOnWriteArrayList<Array<StackTraceElement>>()
+                            }.add(jvmFrames)
+                        }
+                    }
+                }
+            } catch (t: Throwable) {
+                logger.log(java.util.logging.Level.SEVERE, "ProfilerTraceListener collector thread crashed with fatal error", t)
+            }
+        }.apply {
+            isDaemon = true
+            name = "trace-collector-${socketFd.value}"
+        }
+        collectorThread = collector
+        collector.start()
     }
 
     /**
@@ -118,10 +149,23 @@ internal class ProfilerTraceListener(
                     Thread.currentThread().interrupt()
                 }
             }
+
+            collectorThread?.let {
+                try {
+                    it.join(JOIN_TIMEOUT_MS)
+                    if (it.isAlive) {
+                        logger.warning("Trace collector thread for fd=${socketFd.value} did not terminate within $JOIN_TIMEOUT_MS ms")
+                        it.interrupt()
+                    }
+                } catch (e: InterruptedException) {
+                    Thread.currentThread().interrupt()
+                }
+            }
         } finally {
             // Step 3: Close the socket FD only after draining.
             socketFd.close()
             workerThread = null
+            collectorThread = null
         }
     }
 
@@ -154,9 +198,22 @@ internal class ProfilerTraceListener(
                     Thread.currentThread().interrupt()
                 }
             }
+
+            collectorThread?.let {
+                try {
+                    it.join(JOIN_TIMEOUT_MS)
+                    if (it.isAlive) {
+                        logger.warning("Trace collector thread for fd=${socketFd.value} did not terminate within $JOIN_TIMEOUT_MS ms during passThrough")
+                        it.interrupt()
+                    }
+                } catch (e: InterruptedException) {
+                    Thread.currentThread().interrupt()
+                }
+            }
         } finally {
             socketFd.close()
             workerThread = null
+            collectorThread = null
         }
     }
 
@@ -216,6 +273,7 @@ internal class ProfilerTraceListener(
             logger.log(java.util.logging.Level.WARNING, "Trace listener error", e)
         } finally {
             state = TraceListenerState.Disconnected
+            eventChannel.close()
         }
     }
 
@@ -252,7 +310,7 @@ internal class ProfilerTraceListener(
         // NOTE: This protocol is strictly synchronous. The daemon suspends the tracee thread
         // in kernel space using seccomp and awaits an ACK from this listener thread. While the
         // tracee thread is suspended in the kernel, we can safely and reliably capture its JVM
-        // stack trace (via accumulateStackTrace) without the thread moving past the active syscall frame.
+        // stack trace (via captureStackTrace) without the thread moving past the active syscall frame.
         // Once the stack trace is captured, we send the ACK to unblock the tracee.
         return TraceEvent(tidValue = tidValue, syscallName = syscallName, args = args, paths = paths, stackTrace = null)
     }
@@ -265,8 +323,8 @@ internal class ProfilerTraceListener(
                  return
              }
 
-             accumulatedLogs.add(event)
-             accumulateStackTrace(event)
+             event.jvmStackTrace = captureStackTrace(event)
+             eventChannel.trySend(event)
          } finally {
              sendAck()
          }
@@ -289,17 +347,13 @@ internal class ProfilerTraceListener(
         }
     }
 
-    private fun accumulateStackTrace(event: TraceEvent) {
-        if (stackTracesMap == null || event.tid.value == 0) return
+    private fun captureStackTrace(event: TraceEvent): Array<StackTraceElement>? {
+        if (stackTracesMap == null || event.tid.value == 0) return null
         val threadToProfile = Profiler.threadRegistry[event.tid]
-        val frames = if (threadToProfile != null) {
+        return if (threadToProfile != null) {
             threadToProfile.stackTrace
         } else {
             arrayOf(StackTraceElement("<untracked_descendant_thread>", "run", null, -1))
         }
-        stackTracesMap
-            .computeIfAbsent(event) {
-                CopyOnWriteArrayList<Array<StackTraceElement>>()
-            }.add(frames)
     }
 }
