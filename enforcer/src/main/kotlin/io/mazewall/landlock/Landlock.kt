@@ -85,6 +85,11 @@ import java.util.logging.Logger
  */
 object Landlock {
     /**
+     * ARCHITECTURAL INVARIANT: FFM Isolation boundary. Landlock must never import or leak
+     * raw FFM [java.lang.foreign] types. It must rely entirely on [ManagedSegment], [NativeArena],
+     * and safe wrappers provided by the [io.mazewall.ffi] package.
+     */
+    /**
      * ARCHITECTURAL INVARIANT: Landlock ruleset mutability is enforced via the Type-State
      * pattern (using RulesetState.Building and RulesetState.Sealed). This ensures that
      * rules can only be added before the ruleset is restricted, preventing runtime errors

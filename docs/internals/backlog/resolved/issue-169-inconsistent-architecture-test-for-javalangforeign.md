@@ -1,7 +1,7 @@
 ---
 title: "Inconsistent Architecture Test for `java.lang.foreign`"
 severity: "HIGH"
-status: "open"
+status: "resolved"
 priority: 9
 dependencies: []
 component: "enforcer"

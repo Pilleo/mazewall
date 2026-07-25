@@ -80,8 +80,6 @@ graph TD
     issue_143_process_wide_classloader_deadlock_on_profiler_result_state_t["🔴 Issue: Process-Wide Classloader Deadlock on Profiler Result / State Types (HIGH)"]
     issue_149_classloader_deadlock_in_jvm_validation_listener["🔴 Issue: Classloader Deadlock in JVM Validation Listener (CRITICAL)"]
     issue_162_memory_alignment_verification_for_layoutskt_ffm_structures["🔴 Issue: Memory Alignment verification for `Layouts.kt` FFM Structures (HIGH)"]
-    issue_169_inconsistent_architecture_test_for_javalangforeign["🔴 Issue: Inconsistent Architecture Test for `java.lang.foreign` (HIGH)"]
-    issue_177_missing_archunit_test_for_ffm_architecture_boundary_violatio["🔴 Issue: Missing ArchUnit test for FFM architecture boundary violations (HIGH)"]
     issue_183_potential_buffer_overflow_outofboundsexception_on_long_unix_["🔴 Issue: Potential Buffer Overflow / OutOfBoundsException on Long UNIX Socket Paths (LOW)"]
     issue_193_review_orchestrator_prompts_jules_quality_safety_guidelines["🔴 Issue: Review and Enhance Orchestrator Prompts for Jules to Enforce Quality and Safety Guidelines (HIGH)"]
     issue_195_jules_session_id_parsing_bug["🔴 Issue: Fix Jules Session ID Parsing Bug (HIGH)"]
@@ -95,7 +93,6 @@ graph TD
     issue_205_orchestrator_add_failure_context_to_jules_retry_comments["🔴 Issue: Orchestrator: Add Failure Context to Jules Retry and Completed-Without-PR Comments (MEDIUM)"]
     issue_206_orchestrator_close_github_issue_automatically_on_resolve_task["🔴 Issue: Orchestrator: Close GitHub Issue Automatically on RESOLVE_TASK (LOW)"]
     issue_208_orchestrator_auto_merge_pr_on_verdict_approved_when_autonomous["🔴 Issue: Orchestrator: Auto-Merge PR on VERDICT: APPROVED When autonomy=autonomous and solution_approved=true (MEDIUM)"]
-    issue_210_decouple_nativeengine_from_raw_ffm_types["🔴 Issue: Decouple NativeEngine Interface and LinuxNative Entry Point from Raw FFM Types (HIGH)"]
     supervisor_proxy_design_md["💻 Source: supervisor-proxy-design.md"]
     issue_018_formal_monoidal_composition_for_billofbehavior -->|Affects| io_mazewall_profiler_BillOfBehavior
     issue_019_refactor_profiler_daemon_to_use_coroutines_structured_concur -->|Affects| io_mazewall_profiler_engine_ProfilerDaemonEngine
@@ -172,8 +169,6 @@ graph TD
     click issue_143_process_wide_classloader_deadlock_on_profiler_result_state_t "../../../backlog/security/issue-143-process-wide-classloader-deadlock-on-profiler-result-state-t.md"
     click issue_149_classloader_deadlock_in_jvm_validation_listener "../../../backlog/security/issue-149-classloader-deadlock-in-jvm-validation-listener.md"
     click issue_162_memory_alignment_verification_for_layoutskt_ffm_structures "../../../backlog/security/issue-162-memory-alignment-verification-for-layoutskt-ffm-structures.md"
-    click issue_169_inconsistent_architecture_test_for_javalangforeign "../../../backlog/testing/issue-169-inconsistent-architecture-test-for-javalangforeign.md"
-    click issue_177_missing_archunit_test_for_ffm_architecture_boundary_violatio "../../../backlog/testing/issue-177-missing-archunit-test-for-ffm-architecture-boundary-violatio.md"
     click issue_183_potential_buffer_overflow_outofboundsexception_on_long_unix_ "../../../backlog/performance/issue-183-potential-buffer-overflow-outofboundsexception-on-long-unix-.md"
     click issue_193_review_orchestrator_prompts_jules_quality_safety_guidelines "../../../backlog/code_health/issue-193-review-orchestrator-prompts-jules-quality-safety-guidelines.md"
     click issue_195_jules_session_id_parsing_bug "../../../backlog/code_health/issue-195-jules-session-id-parsing-bug.md"
@@ -187,7 +182,6 @@ graph TD
     click issue_205_orchestrator_add_failure_context_to_jules_retry_comments "../../../backlog/code_health/issue-205-orchestrator-add-failure-context-to-jules-retry-comments.md"
     click issue_206_orchestrator_close_github_issue_automatically_on_resolve_task "../../../backlog/resolved/issue-206-orchestrator-close-github-issue-automatically-on-resolve-task.md"
     click issue_208_orchestrator_auto_merge_pr_on_verdict_approved_when_autonomous "../../../backlog/code_health/issue-208-orchestrator-auto-merge-pr-on-verdict-approved-when-autonomous.md"
-    click issue_210_decouple_nativeengine_from_raw_ffm_types "../../../backlog/code_health/issue-210-decouple-nativeengine-from-raw-ffm-types.md"
 ```
 
 <!-- KNOWLEDGE_MAP_END -->

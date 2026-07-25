@@ -430,6 +430,21 @@ class ArchitectureTest {
             .check(allClasses)
     }
 
+    @org.junit.jupiter.api.Test
+    fun ffmApiMustBeIsolatedToFfiPackageRuleDetectsViolation() {
+        val rule = noClasses()
+            .that()
+            .resideOutsideOfPackage("io.mazewall.ffi..")
+            .should()
+            .dependOnClassesThat()
+            .resideInAPackage("java.lang.foreign..")
+
+        val classes = com.tngtech.archunit.core.importer.ClassFileImporter().importClasses(dummy.violator.DummyViolatingClass::class.java)
+        org.junit.jupiter.api.assertThrows<AssertionError> {
+            rule.check(classes)
+        }
+    }
+
     @ArchTest
     fun methodHandleInvokeExactMustBeEncapsulatedInSyscallInvoker(allClasses: com.tngtech.archunit.core.domain.JavaClasses) {
         noClasses()

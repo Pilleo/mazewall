@@ -184,6 +184,13 @@ class ProfilerTraceListenerTest {
             listener.start(readyLatch)
             readyLatch.await(2, TimeUnit.SECONDS)
 
+            // Wait for the asynchronous collector thread to process the event
+            var elapsed = 0
+            while (accumulatedLogs.size < 1 && elapsed < 2000) {
+                Thread.sleep(10)
+                elapsed += 10
+            }
+
             listener.close()
 
             assertEquals(1, accumulatedLogs.size)
