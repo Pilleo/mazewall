@@ -439,7 +439,7 @@ class ArchitectureTest {
             .dependOnClassesThat()
             .resideInAPackage("java.lang.foreign..")
 
-        val classes = com.tngtech.archunit.core.importer.ClassFileImporter().importClasses(DummyViolatingClass::class.java)
+        val classes = com.tngtech.archunit.core.importer.ClassFileImporter().importClasses(dummy.violator.DummyViolatingClass::class.java)
         org.junit.jupiter.api.assertThrows<AssertionError> {
             rule.check(classes)
         }
@@ -465,8 +465,4 @@ class ArchitectureTest {
             .because("MethodHandle.invokeExact must only be called within SyscallInvoker to ensure atomic errno capture.")
             .check(allClasses)
     }
-}
-
-private class DummyViolatingClass {
-    lateinit var segment: java.lang.foreign.MemorySegment
 }
