@@ -187,7 +187,7 @@ class ProfilerIntegrationTest : BaseIntegrationTest() {
                         java.lang.foreign.Arena.ofConfined().use { arena ->
                             val pathSeg = arena.allocateFrom(absolutePath)
                             val openRes =
-                            LinuxNative.fileSystem.open(ConfinedSegment(pathSeg), 0)
+                            LinuxNative.fileSystem.open(ConfinedSegment(pathSeg), io.mazewall.core.OpenFlags(0))
 
                             if (openRes is LinuxNative.SyscallResult.Success) {
                                 val fd = openRes.asFd()

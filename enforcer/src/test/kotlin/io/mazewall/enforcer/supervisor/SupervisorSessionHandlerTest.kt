@@ -204,7 +204,7 @@ class SupervisorSessionHandlerTest {
         val mockFileSystem = object : io.mazewall.MockNativeFileSystem() {
             override fun open(
                 path: io.mazewall.ffi.memory.ManagedSegment,
-                flags: Int,
+                flags: io.mazewall.core.OpenFlags,
             ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
                 return LinuxNative.SyscallResult.Success(99L) // Mock opened FD
             }

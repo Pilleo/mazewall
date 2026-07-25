@@ -62,3 +62,39 @@ public value class MemoryAddress(val value: Long) {
     @Suppress("MagicNumber")
     override fun toString(): String = "0x${value.toString(16)}"
 }
+
+/**
+ * Type-safe wrapper for open system call flags (e.g., O_RDONLY, O_CLOEXEC).
+ */
+@JvmInline
+public value class OpenFlags(public val value: Int) {
+    public companion object {
+        public val RDONLY: OpenFlags = OpenFlags(0)
+    }
+
+    override fun toString(): String = "openFlags($value)"
+}
+
+/**
+ * Type-safe wrapper for mmap memory protection flags (e.g., PROT_READ, PROT_WRITE).
+ */
+@JvmInline
+public value class MmapProt(public val value: Int) {
+    override fun toString(): String = "mmapProt($value)"
+}
+
+/**
+ * Type-safe wrapper for mmap mapping flags (e.g., MAP_SHARED, MAP_PRIVATE).
+ */
+@JvmInline
+public value class MmapFlags(public val value: Int) {
+    override fun toString(): String = "mmapFlags($value)"
+}
+
+/**
+ * Type-safe wrapper for clone flags (e.g., CLONE_VM, CLONE_THREAD).
+ */
+@JvmInline
+public value class CloneFlags(public val value: Long) {
+    override fun toString(): String = "cloneFlags($value)"
+}

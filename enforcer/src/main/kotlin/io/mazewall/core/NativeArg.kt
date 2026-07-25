@@ -48,6 +48,26 @@ public sealed interface NativeArg {
         override val asLong: Long get() = addr.value
     }
 
+    @JvmInline
+    public value class OpenFlagsArg(public val flags: OpenFlags) : NativeArg {
+        override val asLong: Long get() = flags.value.toLong()
+    }
+
+    @JvmInline
+    public value class MmapProtArg(public val prot: MmapProt) : NativeArg {
+        override val asLong: Long get() = prot.value.toLong()
+    }
+
+    @JvmInline
+    public value class MmapFlagsArg(public val flags: MmapFlags) : NativeArg {
+        override val asLong: Long get() = flags.value.toLong()
+    }
+
+    @JvmInline
+    public value class CloneFlagsArg(public val flags: CloneFlags) : NativeArg {
+        override val asLong: Long get() = flags.value
+    }
+
     public data object NullArg : NativeArg {
         override val asLong: Long get() = 0L
     }

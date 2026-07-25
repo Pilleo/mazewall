@@ -269,7 +269,7 @@ fun runProfileAndEnforce() {
 
 fs.open(
     ConfinedSegment(arena.allocateFrom(sensitiveFile.canonicalPath)),
-    0, // O_RDONLY
+    io.mazewall.core.OpenFlags(0), // O_RDONLY
 )
 
 
