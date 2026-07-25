@@ -32,25 +32,26 @@ class ProfilerArchitectureTest {
     }
     @ArchTest
     fun `handshake ordering (0xAC Protocol)`(allClasses: com.tngtech.archunit.core.domain.JavaClasses) {
-        val requireAckBeforeContinue = object : ArchCondition<JavaMethod>("ensure waitForParentAck occurs before sendContinueResponse") {
+        val requireAckBeforeContinue = object : ArchCondition<JavaMethod>("ensure performHandshake occurs before sendSeccompContinue") {
             override fun check(
                 method: JavaMethod,
                 events: ConditionEvents,
             ) {
                 var waitLine = -1
-                var continueLine = -1
+                val continueLines = mutableListOf<Int>()
 
                 for (call in method.methodCallsFromSelf) {
-                    if (call.target.name == "waitForParentAck") {
+                    if (call.target.name == "performHandshake") {
                         waitLine = call.lineNumber
-                    } else if (call.target.name == "sendContinueResponse") {
-                        continueLine = call.lineNumber
+                    } else if (call.target.name == "sendSeccompContinue") {
+                        continueLines.add(call.lineNumber)
                     }
                 }
 
-                if (waitLine != -1 && continueLine != -1) {
-                    if (waitLine > continueLine) {
-                        events.add(SimpleConditionEvent.violated(method, "Method ${method.fullName} calls sendContinueResponse before waitForParentAck."))
+                if (waitLine != -1) {
+                    val hasContinueAfterWait = continueLines.any { it > waitLine }
+                    if (!hasContinueAfterWait) {
+                        events.add(SimpleConditionEvent.violated(method, "Method ${method.fullName} does not call sendSeccompContinue after performHandshake."))
                     }
                 }
             }
