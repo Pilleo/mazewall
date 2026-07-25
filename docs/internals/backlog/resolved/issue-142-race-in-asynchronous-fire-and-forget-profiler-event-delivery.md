@@ -1,11 +1,12 @@
 ---
 title: "Race in Asynchronous / Fire-and-Forget Profiler Event Delivery"
 severity: "CRITICAL"
-status: "open"
+status: "resolved"
 priority: 5
 dependencies: []
 component: "profiler"
 effort: "small"
+github_issue: 301
 ---
 
 # 🔴 [Severity: CRITICAL]: Race in Asynchronous / Fire-and-Forget Profiler Event Delivery

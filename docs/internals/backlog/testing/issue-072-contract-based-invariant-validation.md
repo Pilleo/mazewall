@@ -6,6 +6,7 @@ priority: 2
 dependencies: []
 component: "enforcer"
 effort: "medium"
+github_issue: 307
 ---
 
 # 🔵 [Severity: ENHANCEMENT]: Contract-Based Invariant Validation

@@ -3,19 +3,19 @@
 
 [![Series Home](https://img.shields.io/badge/Series-Home-1e293b)](../../README.md)
 
-> **No prior knowledge assumed.** If you have ever wondered why browsers run multiple processes for a handful of tabs, why Elasticsearch refuses to start without certain kernel features, or why your backend service trusts all of its own threads equally — this is for you.
+> If you have ever wondered what actually stops an attacker who gets past your application logic, why Chrome spawns a dozen processes just to browse a few tabs while your backend runs everything in one, or what your HTTP handler is actually allowed to do at the kernel level right now — this is for you.
 
 ---
 
-## The Software You Trust Is Already Sandboxed. Yours Isn't.
+## The Software You Trust Is Already Sandboxed. Yours Is Not Sandboxed *Well Enough*.
 
 Open Activity Monitor or `htop` right now. Find Chrome or Firefox. Count their processes.
 
 Even with only a handful of tabs open, you will see a dozen or more separate OS processes: a main browser process, several renderer processes grouping tabs by site origin, a GPU process, a network service process, extension processes. Firefox similarly runs a pool of up to eight content processes shared across all tabs. Neither browser runs one renderer per tab — they use process *pools* — but even so, the count is deliberately much higher than a naive single-process implementation would require.
 
-This is not a bug or a memory leak. It is a deliberate security architecture decision. And behind it sits a Linux kernel feature that has been quietly protecting production systems since 2005 — one that most backend services have never touched.
+This is not a bug or a memory leak. It is a deliberate security architecture decision. And behind it sits a Linux kernel feature that has been quietly protecting production systems since 2005.
 
-**Why doesn't your application use it?**
+Your backend service is almost certainly running inside a container with a default Seccomp profile applied by Docker or Podman — a generic allowlist tuned for compatibility, not for what your application specifically does. The mechanisms exist. The question is how coarsely they are applied and who controls them.
 
 ---
 
@@ -169,7 +169,7 @@ The practical upshot of this history:
 
 **Process-wide syscall restriction** — available since Linux 3.5 (2012), in production at scale since at least Elasticsearch 5.0 (2016). Any runtime, any language. Applied once at startup. Blocks the most dangerous escalation syscalls globally. Almost free at runtime. This is the bigger, more universal gap: most backend services leave it entirely to their container runtime with a generic lowest-common-denominator profile, or skip it entirely.
 
-**Thread-scoped syscall restriction** — a bonus layer available on top of the process-wide baseline, but only where the runtime makes it sound. As the analysis above shows, that means managed and memory-safe runtimes: JVM, .NET, and safe Rust. For those runtimes it turns a compromised component into a thread that physically cannot open a network socket, regardless of what vulnerability was exploited. For Go, C++, or single-threaded event loops, the process-wide layer is still the right focus.
+**Thread-scoped syscall restriction** — a bonus layer available on top of the process-wide baseline, but only where the runtime makes it sound. As the analysis above shows, that means managed and memory-safe runtimes: JVM, .NET, and safe Rust. For those runtimes, the typical backend attack vectors — injection, SSRF, deserialization gadgets — achieve bytecode-level code execution but cannot forge raw memory addresses. A compromised component becomes a thread that physically cannot open a network socket, regardless of what bytecode it runs. This does not hold if the attacker achieves native code execution through a JNI vulnerability or a JVM bug itself — that is a different, higher-severity threat model where the process-wide baseline matters most. For Go, C++, or single-threaded event loops, the process-wide layer is the right focus regardless.
 
 Neither requires new hardware. Neither requires privileged access — both Seccomp and Landlock can be installed by any unprivileged process after setting `PR_SET_NO_NEW_PRIVS`. The primitives have been in the kernel for over a decade.
 
@@ -185,7 +185,7 @@ The kernel primitives that make this possible have existed since 2005 and 2012. 
 
 ---
 
-The history answers the *how* — what these mechanisms are, which runtimes they actually protect, and why the 2009 Chromium experiment failed where a JVM or .NET service today would not.
+The history answers the *how* — what these mechanisms are, which runtimes they actually protect, and why the 2009 Chromium experiment failed where a service running in pure managed JVM or .NET bytecode would not.
 
 The harder question is the *what*: what should your service's behavioral contract look like? Your SBOM tells you which libraries you've deployed. It cannot tell you that one of them opens an outbound socket twice a day — to an address you don't own, for reasons no one on your team chose. To express a Seccomp policy you trust, you first need to know what your service actually does, at the syscall level, across all code paths and all dependency internals.
 

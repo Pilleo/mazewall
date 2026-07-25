@@ -72,6 +72,7 @@ class "ProfilerDaemonEngine" as io.mazewall.profiler.engine.ProfilerDaemonEngine
   +ProfilerDaemonState getState()
   +void run()
   +void triggerGlobalShutdown(String)
+  +void handleConnection(FileDescriptor<UnixSocket, ? extends Open>)
 }
 interface "ProfilerDaemonState" as io.mazewall.profiler.engine.ProfilerDaemonState {
 }
@@ -167,6 +168,8 @@ abstract class "TraceEvent" as io.mazewall.profiler.engine.TraceEvent {
   + {abstract}String getSyscallName()
   + {abstract}List<String> getStackTrace()
   +List<String> getPaths()
+  +StackTraceElement[] getJvmStackTrace()
+  +void setJvmStackTrace(StackTraceElement[])
 }
 interface "TraceEventPublisher" as io.mazewall.profiler.engine.TraceEventPublisher {
   + {abstract}void sendTraceEvent(Arena, FileDescriptor<?, ? extends Open>, SyscallEvent<? extends Resolved>)
@@ -197,11 +200,12 @@ class "ProfilerSocket" as io.mazewall.profiler.internal.ProfilerSocket {
   __
   +int connectWithRetry(String, int, long)
   +boolean sendDescriptor(int, int)
-  +MemorySegment setupSockAddrUn(NativeArena, String)
 }
 class "ProfilerTraceListener" as io.mazewall.profiler.internal.ProfilerTraceListener {
   + {static}Companion Companion
   __
+  +Channel<TraceEvent> getEventChannel()
+  +Flow<TraceEvent> getEventFlow()
   +TraceListenerState getState()
   +void start(CountDownLatch)
   +void close()

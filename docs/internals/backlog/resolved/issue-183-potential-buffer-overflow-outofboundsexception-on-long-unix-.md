@@ -1,11 +1,12 @@
 ---
 title: "Potential Buffer Overflow / OutOfBoundsException on Long UNIX Socket Paths"
 severity: "LOW"
-status: "open"
+status: "resolved"
 priority: 3
 dependencies: []
 component: "unknown"
 effort: "medium"
+github_issue: 303
 ---
 
 # 🔴 [Severity: LOW]: Potential Buffer Overflow / OutOfBoundsException on Long UNIX Socket Paths

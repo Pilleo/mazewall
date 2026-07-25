@@ -68,3 +68,26 @@ If your generated policy is missing file paths but your app uses `io_uring`, the
 
 ### "io_uring_setup fails with EPERM"
 Standard container runtimes (like Docker/Podman) often block `io_uring` by default in their seccomp profiles. You may need to run with `--security-opt seccomp=unconfined` or a custom profile that whitelists the `io_uring_*` syscall family to profile them.
+
+---
+
+## 3. Kernel Subsystem Control: `IORING_REGISTER_RESTRICTIONS`
+
+Linux 5.10 introduced `IORING_REGISTER_RESTRICTIONS` via `io_uring_register(2)` to allow applications to self-impose an allowlist on individual rings.
+
+### What it CAN do:
+*   **Opcode Allowlisting (`IORING_RESTRICTION_SQE_OP`):** Restricts the ring to specific SQE opcodes (e.g., allowing `IORING_OP_READ` while rejecting `IORING_OP_OPENAT`).
+*   **Register Opcode Allowlisting (`IORING_RESTRICTION_REGISTER_OP`):** Controls permitted `io_uring_register` management operations.
+*   **SQE Flag Constraints (`IORING_RESTRICTION_SQE_FLAGS_ALLOWED` / `REQUIRED`):** Permits or mandates specific SQE flags (e.g., forcing `IOSQE_FIXED_FILE`).
+*   **Immutable Sealing:** Applied while the ring is disabled (`IORING_SETUP_R_DISABLED`) before enabling (`IORING_REGISTER_ENABLE_RINGS`). Once enabled, restrictions cannot be modified or relaxed (`-EBUSY`).
+
+### What it CANNOT do:
+*   **No Path or Argument Filtering:** It is a bitwise opcode and flag mask only. It **cannot** inspect file paths, IP addresses, or buffer parameters.
+*   **No Voluntary Isolation Bypass Protection:** It applies per-ring. An untrusted thread can spawn a new unrestricted ring unless `seccomp` blocks `io_uring_setup`.
+*   **No External Supervision:** Cannot be injected retroactively into an existing ring by an out-of-process tracer.
+
+### Complementary Defense Model in `mazewall`:
+1.  **Seccomp:** Blocks `io_uring_setup` for untrusted threads to prevent unmonitored ring creation.
+2.  **Landlock LSM:** Intercepts filesystem VFS operations for allowed `io_uring` instances (since Landlock credentials propagate to kernel `io-wq` workers).
+3.  **`IORING_REGISTER_RESTRICTIONS`:** Used by cooperative application code to limit ring opcodes before submitting I/O.
+

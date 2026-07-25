@@ -13,7 +13,6 @@ graph TD
     , ["💻 Source: , "]
     ContainedExecutors_kt["💻 Source: ContainedExecutors.kt"]
     IterativeProfiler_kt["💻 Source: IterativeProfiler.kt"]
-    ProfilerSessionHandler_kt["💻 Source: ProfilerSessionHandler.kt"]
     PureJavaBpfEngine_kt["💻 Source: PureJavaBpfEngine.kt"]
     SupervisorInstaller_kt["💻 Source: SupervisorInstaller.kt"]
     io_mazewall_NativeEngine["💻 Source: io.mazewall.NativeEngine"]
@@ -22,7 +21,6 @@ graph TD
     io_mazewall_core_FileDescriptor["💻 Source: io.mazewall.core.FileDescriptor"]
     io_mazewall_enforcer_ContainedExecutors["💻 Source: io.mazewall.enforcer.ContainedExecutors"]
     io_mazewall_enforcer_ContainedExecutors_kt["💻 Source: io.mazewall.enforcer.ContainedExecutors.kt"]
-    io_mazewall_enforcer_ContainerStateRegistry_kt["💻 Source: io.mazewall.enforcer.ContainerStateRegistry.kt"]
     io_mazewall_ffi_Layouts["💻 Source: io.mazewall.ffi.Layouts"]
     io_mazewall_profiler_BillOfBehavior["💻 Source: io.mazewall.profiler.BillOfBehavior"]
     io_mazewall_profiler_IterativeProfiler["💻 Source: io.mazewall.profiler.IterativeProfiler"]
@@ -60,7 +58,6 @@ graph TD
     issue_070_network_isolation_via_namespaces_clonenewnet["🔴 Issue: Network Isolation via Namespaces (`CLONE_NEWNET`) (ENHANCEMENT)"]
     issue_071_introduce_context_parameters_for_memory_and_engine_scopes["🔴 Issue: Introduce Context Parameters for Memory and Engine Scopes (ENHANCEMENT)"]
     issue_072_contract_based_invariant_validation["🔴 Issue: Contract-Based Invariant Validation (ENHANCEMENT)"]
-    issue_073_delegated_properties_for_thread_local_sandbox_state["🔴 Issue: Delegated Properties for Thread-Local Sandbox State (ENHANCEMENT)"]
     issue_075_implement_floor_fixes["🔴 Issue: 🔴 [REOPENED]: JVM Invariant Syscall Floor Implementation Fixes (HIGH)"]
     issue_075_jvm_invariant_syscall_floor_is_incomplete["🔴 Issue: 🟡 [DEFERRED — Medium]: JVM Invariant Syscall Floor is Incomplete (MEDIUM)"]
     issue_079_unhandled_tsync_edge_cases_during_jit_classloading["🔴 Issue: Unhandled `TSYNC` edge cases during JIT classloading (HIGH)"]
@@ -70,13 +67,9 @@ graph TD
     issue_102_permanent_thread_pool_contamination_classloader_leaks_and_st["🔴 Issue: 🟢 [WONTFIX]: Permanent thread pool contamination, classloader leaks, and state pollution via un-cleared `ThreadLocal` variables (MEDIUM)"]
     issue_103_containedexecutors_thread_local_state_persistence_and_poison["🔴 Issue: 🟢 [WONTFIX]: `ContainedExecutors` Thread-Local State Persistence and Poisoning (MEDIUM)"]
     issue_112_iterativeprofiler_logic_errors_confirmed["🔴 Issue: `IterativeProfiler` Logic Errors (Confirmed) (HIGH)"]
-    issue_125_opaque_exceptions_on_landlock_initialization_failure["🔴 Issue: 🔴 [Severity: DX-FRICTION]: Opaque Exceptions on Landlock Initialization Failure (HIGH)"]
-    issue_139_unhandled_ioctl_fallbacks_during_legacy_jvm_syscall_tracing["🔴 Issue: Unhandled `IOCTL` fallbacks during legacy JVM syscall tracing (HIGH)"]
-    issue_142_race_in_asynchronous_fire_and_forget_profiler_event_delivery["🔴 Issue: Race in Asynchronous / Fire-and-Forget Profiler Event Delivery (CRITICAL)"]
     issue_143_process_wide_classloader_deadlock_on_profiler_result_state_t["🔴 Issue: Process-Wide Classloader Deadlock on Profiler Result / State Types (HIGH)"]
     issue_149_classloader_deadlock_in_jvm_validation_listener["🔴 Issue: Classloader Deadlock in JVM Validation Listener (CRITICAL)"]
     issue_162_memory_alignment_verification_for_layoutskt_ffm_structures["🔴 Issue: Memory Alignment verification for `Layouts.kt` FFM Structures (HIGH)"]
-    issue_183_potential_buffer_overflow_outofboundsexception_on_long_unix_["🔴 Issue: Potential Buffer Overflow / OutOfBoundsException on Long UNIX Socket Paths (LOW)"]
     issue_193_review_orchestrator_prompts_jules_quality_safety_guidelines["🔴 Issue: Review and Enhance Orchestrator Prompts for Jules to Enforce Quality and Safety Guidelines (HIGH)"]
     issue_195_jules_session_id_parsing_bug["🔴 Issue: Fix Jules Session ID Parsing Bug (HIGH)"]
     issue_195_reactor_loop_iteration_arena_scoping["🔴 Issue: Reactor Loop Iteration Arena Scoping (HIGH)"]
@@ -104,12 +97,10 @@ graph TD
     issue_066_straceprofiler_completely_fails_to_trace_iouring_file_operat -->|Affects| io_mazewall_profiler_strace_StraceProfiler
     issue_068_supervisor_proxy_pattern_fd_injection_stacktrace_scoping -->|Affects| supervisor_proxy_design_md
     issue_072_contract_based_invariant_validation -->|Affects| io_mazewall_Platform_kt
-    issue_073_delegated_properties_for_thread_local_sandbox_state -->|Affects| io_mazewall_enforcer_ContainerStateRegistry_kt
     issue_079_unhandled_tsync_edge_cases_during_jit_classloading -->|Affects| PureJavaBpfEngine_kt
     issue_102_permanent_thread_pool_contamination_classloader_leaks_and_st -->|Affects| ContainedExecutors_kt
     issue_103_containedexecutors_thread_local_state_persistence_and_poison -->|Affects| io_mazewall_enforcer_ContainedExecutors_kt
     issue_112_iterativeprofiler_logic_errors_confirmed -->|Affects| IterativeProfiler_kt
-    issue_142_race_in_asynchronous_fire_and_forget_profiler_event_delivery -->|Affects| ProfilerSessionHandler_kt
     issue_149_classloader_deadlock_in_jvm_validation_listener -->|Affects| SupervisorInstaller_kt
     issue_202_orchestrator_build_github_issue_body_dynamically_with_project_preamble -->|Affects| , 
     issue_203_orchestrator_validate_issue_context_and_needed_before_github_issue_creation -->|Affects|  instead of 
@@ -144,7 +135,6 @@ graph TD
     click issue_070_network_isolation_via_namespaces_clonenewnet "../../../backlog/security/issue-070-network-isolation-via-namespaces-clonenewnet.md"
     click issue_071_introduce_context_parameters_for_memory_and_engine_scopes "../../../backlog/testing/issue-071-introduce-context-parameters-for-memory-and-engine-scopes.md"
     click issue_072_contract_based_invariant_validation "../../../backlog/testing/issue-072-contract-based-invariant-validation.md"
-    click issue_073_delegated_properties_for_thread_local_sandbox_state "../../../backlog/performance/issue-073-delegated-properties-for-thread-local-sandbox-state.md"
     click issue_075_implement_floor_fixes "../../../backlog/implementation/issue-075-implement-floor-fixes.md"
     click issue_075_jvm_invariant_syscall_floor_is_incomplete "../../../backlog/performance/issue-075-jvm-invariant-syscall-floor-is-incomplete.md"
     click issue_079_unhandled_tsync_edge_cases_during_jit_classloading "../../../backlog/testing/issue-079-unhandled-tsync-edge-cases-during-jit-classloading.md"
@@ -154,13 +144,9 @@ graph TD
     click issue_102_permanent_thread_pool_contamination_classloader_leaks_and_st "../../../backlog/performance/issue-102-permanent-thread-pool-contamination-classloader-leaks-and-st.md"
     click issue_103_containedexecutors_thread_local_state_persistence_and_poison "../../../backlog/performance/issue-103-containedexecutors-thread-local-state-persistence-and-poison.md"
     click issue_112_iterativeprofiler_logic_errors_confirmed "../../../backlog/performance/issue-112-iterativeprofiler-logic-errors-confirmed.md"
-    click issue_125_opaque_exceptions_on_landlock_initialization_failure "../../../backlog/security/issue-125-opaque-exceptions-on-landlock-initialization-failure.md"
-    click issue_139_unhandled_ioctl_fallbacks_during_legacy_jvm_syscall_tracing "../../../backlog/testing/issue-139-unhandled-ioctl-fallbacks-during-legacy-jvm-syscall-tracing.md"
-    click issue_142_race_in_asynchronous_fire_and_forget_profiler_event_delivery "../../../backlog/testing/issue-142-race-in-asynchronous-fire-and-forget-profiler-event-delivery.md"
     click issue_143_process_wide_classloader_deadlock_on_profiler_result_state_t "../../../backlog/security/issue-143-process-wide-classloader-deadlock-on-profiler-result-state-t.md"
     click issue_149_classloader_deadlock_in_jvm_validation_listener "../../../backlog/security/issue-149-classloader-deadlock-in-jvm-validation-listener.md"
     click issue_162_memory_alignment_verification_for_layoutskt_ffm_structures "../../../backlog/security/issue-162-memory-alignment-verification-for-layoutskt-ffm-structures.md"
-    click issue_183_potential_buffer_overflow_outofboundsexception_on_long_unix_ "../../../backlog/performance/issue-183-potential-buffer-overflow-outofboundsexception-on-long-unix-.md"
     click issue_193_review_orchestrator_prompts_jules_quality_safety_guidelines "../../../backlog/code_health/issue-193-review-orchestrator-prompts-jules-quality-safety-guidelines.md"
     click issue_195_jules_session_id_parsing_bug "../../../backlog/code_health/issue-195-jules-session-id-parsing-bug.md"
     click issue_195_reactor_loop_iteration_arena_scoping "../../../backlog/performance/issue-195-reactor-loop-iteration-arena-scoping.md"
