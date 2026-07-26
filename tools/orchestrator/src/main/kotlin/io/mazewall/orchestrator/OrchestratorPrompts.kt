@@ -15,9 +15,26 @@ Adhere strictly to the following project invariants:
 
 """
 
+    const val REVIEW_SKILL_HEADER = "Please review profiler module using .agents/skills/review/SKILL.md skill. Create issues using skill .agents/skills/create_backlog_issue/SKILL.md"
+
     fun taskPrompt(originalIssueBody: String): String {
         return """
 $originalIssueBody
+
+---
+
+$QUALITY_AND_SAFETY_GUIDELINES
+""".trimIndent()
+    }
+
+    fun reviewTaskIssueBody(additionalComments: String): String {
+        val commentsSection = if (additionalComments.isNotBlank() && additionalComments.lowercase() != "all" && additionalComments.lowercase() != "none" && additionalComments.lowercase() != "default") {
+            "\n\n**Additional Focus Instructions:**\n$additionalComments"
+        } else {
+            ""
+        }
+        return """
+$REVIEW_SKILL_HEADER$commentsSection
 
 ---
 
