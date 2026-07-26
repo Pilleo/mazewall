@@ -58,7 +58,7 @@ public object SupervisorInstaller {
         try {
             SupervisorSeccompNotifInstaller.install(
                 socketPath = context.socketPath,
-                filterInstructions = filter.instructions,
+                filter = filter,
                 processWide = false,
                 onFilterApplied = onFilterApplied
             ) { socketFd, readyLatch ->

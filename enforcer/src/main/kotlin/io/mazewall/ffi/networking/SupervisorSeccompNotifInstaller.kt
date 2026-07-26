@@ -28,7 +28,7 @@ public object SupervisorSeccompNotifInstaller {
     @Suppress("LongParameterList", "ThrowsCount", "MagicNumber", "TooGenericExceptionCaught", "CyclomaticComplexMethod", "LongMethod")
     public fun install(
         socketPath: String,
-        filterInstructions: List<io.mazewall.seccomp.BpfInstruction>,
+        filter: BpfProgram<BpfStatus.Verified>,
         processWide: Boolean = false,
         connectWithRetry: (String) -> Int = { path -> SupervisorSocketUtils.connectWithRetry(path) },
         sendDescriptor: (Int, Int) -> Boolean = { sockFd, fd -> SupervisorSocketUtils.sendDescriptor(sockFd, fd) },
@@ -111,7 +111,7 @@ public object SupervisorSeccompNotifInstaller {
         }
 
         try {
-            val prog = BpfNativeCache.getOrCompute(filterInstructions)
+            val prog = BpfNativeCache.getOrCompute(filter.instructions)
 
             // Install seccomp user notifier filter (applied to the current tracee thread)
             val r = LinuxNative.raw.syscall(

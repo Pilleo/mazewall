@@ -31,7 +31,6 @@ graph TD
     issue_003_socket_address_family_filtering_for_network_isolation_evasio["🔴 Issue: Socket Address Family Filtering for Network Isolation Evasion Prevention (ENHANCEMENT)"]
     issue_009_memory_segment_pooling_for_profiler_usernotif["🔴 Issue: Memory Segment Pooling for Profiler USER_NOTIF (ENHANCEMENT)"]
     issue_010_compile_time_feature_proof_tokens_and_scope_safe_policy_buil["🔴 Issue: Compile-Time Feature Proof Tokens and Scope-Safe Policy Builders (Type-State Pattern) (ENHANCEMENT)"]
-    issue_011_verified_by_construction_bpf_bytecode_bpfprogramstatus["🔴 Issue: Verified-by-Construction BPF Bytecode (BpfProgram<Status>) (ENHANCEMENT)"]
     issue_012_algebraic_policy_composition_semigroupmonoid["🔴 Issue: Algebraic Policy Composition (Semigroup/Monoid) (ENHANCEMENT)"]
     issue_013_manual_ffm_layout_maintenance_and_abi_drift_risk["🔴 Issue: Manual FFM Layout Maintenance and ABI Drift Risk (HIGH)"]
     issue_014_bpf_disassemblerdumper_for_policy_verification["🔴 Issue: BPF Disassembler/Dumper for Policy Verification (ENHANCEMENT)"]
@@ -110,7 +109,6 @@ graph TD
     click issue_003_socket_address_family_filtering_for_network_isolation_evasio "../../../backlog/testing/issue-003-socket-address-family-filtering-for-network-isolation-evasio.md"
     click issue_009_memory_segment_pooling_for_profiler_usernotif "../../../backlog/security/issue-009-memory-segment-pooling-for-profiler-usernotif.md"
     click issue_010_compile_time_feature_proof_tokens_and_scope_safe_policy_buil "../../../backlog/security/issue-010-compile-time-feature-proof-tokens-and-scope-safe-policy-buil.md"
-    click issue_011_verified_by_construction_bpf_bytecode_bpfprogramstatus "../../../backlog/security/issue-011-verified-by-construction-bpf-bytecode-bpfprogramstatus.md"
     click issue_012_algebraic_policy_composition_semigroupmonoid "../../../backlog/testing/issue-012-algebraic-policy-composition-semigroupmonoid.md"
     click issue_013_manual_ffm_layout_maintenance_and_abi_drift_risk "../../../backlog/testing/issue-013-manual-ffm-layout-maintenance-and-abi-drift-risk.md"
     click issue_014_bpf_disassemblerdumper_for_policy_verification "../../../backlog/security/issue-014-bpf-disassemblerdumper-for-policy-verification.md"
