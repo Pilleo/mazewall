@@ -28,7 +28,7 @@ object ReviewIssueLauncher {
             ---
             title: "Review Task: Profiler Module & Security Audit"
             severity: "HIGH"
-            status: "in_progress"
+            status: "open"
             priority: 10
             component: "profiler"
             target_modules: [":profiler", ":enforcer"]
@@ -36,7 +36,7 @@ object ReviewIssueLauncher {
             effort: "medium"
             dependencies: []
             ---
-            
+
         """.trimIndent()
 
         issueFile.writeText(frontmatter + body)
@@ -44,19 +44,38 @@ object ReviewIssueLauncher {
         val issue = BacklogParser.parseIssueFile(issueFile)
             ?: throw IllegalStateException("Failed to parse newly created review issue file ${issueFile.name}")
 
-        // Add to active slots for immediate execution
-        var slot = context.activeSlots.firstOrNull { it.currentIssueId == issue.id }
+        // 1. Create GitHub issue immediately with "jules" label so Jules triggers on GitHub
+        val issueTitleForGit = "[$issueId] ${issue.title}"
+        val enhancedBody = OrchestratorPrompts.taskPrompt(issueFile.readText())
+        val githubIssueNumber = try {
+            env.gitHubClient.createIssue(issueTitleForGit, enhancedBody, "jules")
+        } catch (e: Exception) {
+            env.errPrintln("Error creating GitHub issue for review task $issueId: ${e.message}")
+            null
+        }
+
+        val updatedIssue = if (githubIssueNumber != null) {
+            env.println("Created GitHub issue #$githubIssueNumber for review task $issueId")
+            env.writeGithubIssue(issue, githubIssueNumber.toInt())
+            BacklogParser.parseIssueFile(issueFile) ?: issue
+        } else {
+            issue
+        }
+
+        // 2. Add slot and set state directly to AWAITING_JULES_START (or PENDING_APPROVAL if issue creation failed)
+        var slot = context.activeSlots.firstOrNull { it.currentIssueId == updatedIssue.id }
         if (slot == null) {
-            slot = SlotContext(issue.id)
+            slot = SlotContext(updatedIssue.id)
             context.activeSlots.add(slot)
         }
-        slot.state = OrchestratorState.PENDING_APPROVAL
-        slot.currentIssueTitle = issue.title
+        slot.currentIssueTitle = updatedIssue.title
         slot.currentIssueFile = issueFile.path
+        slot.githubIssueNumber = githubIssueNumber
+        slot.state = if (githubIssueNumber != null) OrchestratorState.AWAITING_JULES_START else OrchestratorState.PENDING_APPROVAL
 
-        env.println("🚀 [IMMEDIATE LAUNCH] Created and launched review task `${issue.id}` (Priority: 10).")
-        env.sendNotification("🚀 *Launched Review Task immediately:* `${issue.id}`\nPriority: 10 | Target: `:profiler`, `:enforcer`")
+        env.println("🚀 [IMMEDIATE LAUNCH] Created GitHub issue #${githubIssueNumber ?: "N/A"} and launched review task `${updatedIssue.id}` (Priority: 10).")
+        env.sendNotification("🚀 *Launched Review Task immediately on GitHub (Issue #${githubIssueNumber ?: "N/A"}):* `${updatedIssue.id}`\nPriority: 10 | Target: `:profiler`, `:enforcer`")
 
-        return issue
+        return updatedIssue
     }
 }

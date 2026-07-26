@@ -30,7 +30,7 @@ class ReviewIssueLauncherTest {
         // 1. Verify issue properties
         assertNotNull(issue)
         assertEquals(10, issue.priority)
-        assertEquals("in_progress", issue.status)
+        assertEquals("open", issue.status)
         assertEquals("profiler", issue.component)
         assertEquals(listOf(":profiler", ":enforcer"), issue.targetModules)
 
@@ -41,7 +41,7 @@ class ReviewIssueLauncherTest {
         assertTrue(fileContent.contains(comments))
         assertTrue(fileContent.contains("Quality and Safety Guidelines"))
 
-        // 3. Verify immediate slot creation
+        // 3. Verify immediate slot creation and state transition
         assertEquals(1, context.activeSlots.size)
         val activeSlot = context.activeSlots.first()
         assertEquals(issue.id, activeSlot.currentIssueId)

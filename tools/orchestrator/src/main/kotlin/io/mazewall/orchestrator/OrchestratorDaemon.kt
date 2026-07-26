@@ -39,7 +39,17 @@ class OrchestratorDaemonRunner(
 
                 // 2. If we have active slots, execute their state machine
                 if (context.activeSlots.isNotEmpty()) {
-                    val slotsToProcess = context.activeSlots.toList()
+                    // Process active running tasks (AWAITING_PR, AWAITING_JULES_START) before PENDING_APPROVAL tasks
+                    val slotsToProcess = context.activeSlots.sortedWith(
+                        compareBy<SlotContext> {
+                            when (it.state) {
+                                is OrchestratorState.AWAITING_PR -> 1
+                                is OrchestratorState.AWAITING_JULES_START -> 2
+                                is OrchestratorState.PENDING_APPROVAL -> 3
+                                else -> 4
+                            }
+                        }
+                    )
                     for (slot in slotsToProcess) {
                         try {
                             val nextState = slot.state.execute(env, context, slot)

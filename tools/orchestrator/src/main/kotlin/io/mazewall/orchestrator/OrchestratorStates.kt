@@ -302,11 +302,23 @@ sealed interface OrchestratorState {
                         env.println("👉 Respond here: $sessionUrl")
                         env.ringBell(5)
                     } else if (session.status.equals("Completed", ignoreCase = true)) {
-                        val now = System.currentTimeMillis()
-                        if (now - slot.lastWaitingLogTime > 600_000) {
-                            env.println("\n\u001B[1;32m🟢 [COMPLETED] Jules task $issueId is Completed! Please review and publish the PR in the UI.\u001B[0m")
-                            env.println("👉 Publish PR here: $sessionUrl")
-                            slot.lastWaitingLogTime = now
+                        val isReviewTask = issueId.contains("review-task")
+                        if (isReviewTask) {
+                            env.println("\n\u001B[1;32m🟢 [REVIEW TASK COMPLETED] Review task $issueId is Completed!\u001B[0m")
+                            env.sendNotification("🟢 *Review Task Completed!* `$issueId` (GitHub Issue #$githubIssueNumber)\n👉 Check results on GitHub issue #$githubIssueNumber or Jules UI: $sessionUrl")
+                            val nextIssue = env.parseAllIssues().firstOrNull { it.id == issueId }
+                            if (nextIssue != null) {
+                                env.markIssueAsResolved(nextIssue)
+                            }
+                            context.activeSlots.remove(slot)
+                            return SELECT_TASK
+                        } else {
+                            val now = System.currentTimeMillis()
+                            if (now - slot.lastWaitingLogTime > 600_000) {
+                                env.println("\n\u001B[1;32m🟢 [COMPLETED] Jules task $issueId is Completed! Please review and publish the PR in the UI.\u001B[0m")
+                                env.println("👉 Publish PR here: $sessionUrl")
+                                slot.lastWaitingLogTime = now
+                            }
                         }
                     }
                 }

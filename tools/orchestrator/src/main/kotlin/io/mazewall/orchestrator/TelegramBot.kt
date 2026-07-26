@@ -84,7 +84,7 @@ class TelegramBot(private val botToken: String, private val chatId: String) {
         }
     }
 
-    fun sendMessage(text: String, includeReviewButton: Boolean = true) {
+    fun sendMessage(text: String, includeReviewButton: Boolean = false) {
         val url = "https://api.telegram.org/bot$botToken/sendMessage"
         val markup = if (includeReviewButton) {
             ReplyMarkup(
@@ -139,7 +139,11 @@ class TelegramBot(private val botToken: String, private val chatId: String) {
                                 return false
                             } else if (data.startsWith("review")) {
                                 answerCallback(callbackQuery.id)
-                                handleReviewCallback()
+                                val launched = handleReviewCallback()
+                                if (launched) {
+                                    // Review task launched. Postpone current task so orchestrator can execute review task.
+                                    return false
+                                }
                             }
                         }
                     }
@@ -151,10 +155,12 @@ class TelegramBot(private val botToken: String, private val chatId: String) {
         }
     }
 
-    private fun handleReviewCallback() {
+    private fun handleReviewCallback(): Boolean {
         sendMessage("💬 *Review Task Focus Prompt*\n\nPlease reply with specific areas or comments you want Jules to focus on during this review (or type 'all'):", includeReviewButton = false)
         val focusComments = waitForUserTextMessage()
+        if (focusComments.isBlank()) return false
         onReviewRequested?.invoke(focusComments)
+        return true
     }
 
     fun waitForUserTextMessage(): String {
