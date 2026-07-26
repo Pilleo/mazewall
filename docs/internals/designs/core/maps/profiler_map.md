@@ -69,6 +69,21 @@ graph TD
     issue_195_reactor_loop_iteration_arena_scoping["🔴 Issue: Reactor Loop Iteration Arena Scoping (HIGH)"]
     issue_197_graceful_fallback_for_ai_agent_failures["🔴 Issue: Graceful Fallback for AI Agent Failures (HIGH)"]
     issue_198_auto_closing_linked_github_issues["🔴 Issue: Auto-Closing Linked GitHub Issues (HIGH)"]
+    issue_20260726_011928_01_supervisor_session_handler_catch_throwable["🔴 Issue: SupervisorSessionHandler catch(Throwable) swallows critical errors causing resource leaks (MEDIUM)"]
+    issue_20260726_011928_02_supervisor_daemon_thread_interruption_swallowed["🔴 Issue: SupervisorSessionHandler loop swallows ThreadInterruptedException breaking graceful shutdown (MEDIUM)"]
+    issue_20260726_011928_03_supervisor_session_handler_path_resolution_toctou["🔴 Issue: SupervisorSessionHandler TOCTOU vulnerability during string extraction for paths (MEDIUM)"]
+    issue_20260726_011928_04_supervisor_daemon_manager_unchecked_throwable["🔴 Issue: SupervisorDaemonManager fails to catch throwable during daemon execution leading to silently dead supervisor (MEDIUM)"]
+    issue_20260726_011928_05_toctou_unsafe_prctl["🔴 Issue: Unsafe prctl TOCTOU vulnerability documented but not properly prevented (MEDIUM)"]
+    issue_20260726_011928_06_memorysegment_scoping_closure_leak["🔴 Issue: Arena MemorySegment leak in JVMValidationListener during async response loop (MEDIUM)"]
+    issue_20260726_011928_07_bpf_jump_out_of_bounds_unverified["🔴 Issue: BPF Static Verifier fails to catch backward jumps that overflow (MEDIUM)"]
+    issue_20260726_011928_08_supervisor_proxy_fd_leak_on_socket_close["🔴 Issue: SupervisorDaemonEngine fd leak when handleActiveListener throws (MEDIUM)"]
+    issue_20260726_011928_09_missing_thread_interruption_reset["🔴 Issue: SupervisorSocketUtils swallows Thread.sleep InterruptedException without setting interrupt status (MEDIUM)"]
+    issue_20260726_011928_10_profiler_trace_listener_memory_segment_escape["🔴 Issue: TraceEvent receives FFM values risking Use-After-Free due to Arena closure (MEDIUM)"]
+    issue_20260726_011928_11_thread_pool_exhaustion_iterative_profiler["🔴 Issue: IterativeProfiler can exhaust thread pools on recursive containerization limits (MEDIUM)"]
+    issue_20260726_011928_12_jvm_floor_workload_thread_leak["🔴 Issue: JvmFloorWorkload OS Thread leak due to infinite retry loop on exception (MEDIUM)"]
+    issue_20260726_011928_13_profiler_trace_event_buffer_truncation["🔴 Issue: TraceEvent buffer truncation on excessively long extracted string paths (MEDIUM)"]
+    issue_20260726_011928_14_missing_socket_cleanup_on_eintr["🔴 Issue: SupervisorDaemonEngine leaks sockets on interrupted accept4 (MEDIUM)"]
+    issue_20260726_011928_15_fail_open_path_resolution_ignored_exceptions["🔴 Issue: SupervisorSessionHandler ignores critical exceptions during path resolution leading to fail-open bypass (MEDIUM)"]
     issue_20260726_04_parallel_orchestrator_task_scheduler_and_conflict_avoidance["🔴 Issue: Multi-Issue Parallel Execution & Conflict-Free Task Scheduler (HIGH)"]
     issue_20260726_05_detect_empty_commits_during_jules_review_loop["🔴 Issue: Detect Empty Commits in Jules Review Loop to Prevent Redundant Correction Comments (MEDIUM)"]
     issue_202_handle_cli_authentication_failures["🔴 Issue: Detect and Handle CLI Authentication Failures with Actionable Login Alerts (HIGH)"]
@@ -142,6 +157,21 @@ graph TD
     click issue_195_reactor_loop_iteration_arena_scoping "../../../backlog/performance/issue-195-reactor-loop-iteration-arena-scoping.md"
     click issue_197_graceful_fallback_for_ai_agent_failures "../../../backlog/code_health/issue-197-graceful-fallback-for-ai-agent-failures.md"
     click issue_198_auto_closing_linked_github_issues "../../../backlog/code_health/issue-198-auto-closing-linked-github-issues.md"
+    click issue_20260726_011928_01_supervisor_session_handler_catch_throwable "../../../backlog/security/issue-20260726_011928_01_supervisor-session-handler-catch-throwable.md"
+    click issue_20260726_011928_02_supervisor_daemon_thread_interruption_swallowed "../../../backlog/security/issue-20260726_011928_02_supervisor-daemon-thread-interruption-swallowed.md"
+    click issue_20260726_011928_03_supervisor_session_handler_path_resolution_toctou "../../../backlog/security/issue-20260726_011928_03_supervisor-session-handler-path-resolution-toctou.md"
+    click issue_20260726_011928_04_supervisor_daemon_manager_unchecked_throwable "../../../backlog/security/issue-20260726_011928_04_supervisor-daemon-manager-unchecked-throwable.md"
+    click issue_20260726_011928_05_toctou_unsafe_prctl "../../../backlog/security/issue-20260726_011928_05_toctou-unsafe-prctl.md"
+    click issue_20260726_011928_06_memorysegment_scoping_closure_leak "../../../backlog/security/issue-20260726_011928_06_memorysegment-scoping-closure-leak.md"
+    click issue_20260726_011928_07_bpf_jump_out_of_bounds_unverified "../../../backlog/security/issue-20260726_011928_07_bpf-jump-out-of-bounds-unverified.md"
+    click issue_20260726_011928_08_supervisor_proxy_fd_leak_on_socket_close "../../../backlog/security/issue-20260726_011928_08_supervisor-proxy-fd-leak-on-socket-close.md"
+    click issue_20260726_011928_09_missing_thread_interruption_reset "../../../backlog/security/issue-20260726_011928_09_missing-thread-interruption-reset.md"
+    click issue_20260726_011928_10_profiler_trace_listener_memory_segment_escape "../../../backlog/security/issue-20260726_011928_10_profiler-trace-listener-memory-segment-escape.md"
+    click issue_20260726_011928_11_thread_pool_exhaustion_iterative_profiler "../../../backlog/security/issue-20260726_011928_11_thread-pool-exhaustion-iterative-profiler.md"
+    click issue_20260726_011928_12_jvm_floor_workload_thread_leak "../../../backlog/security/issue-20260726_011928_12_jvm-floor-workload-thread-leak.md"
+    click issue_20260726_011928_13_profiler_trace_event_buffer_truncation "../../../backlog/security/issue-20260726_011928_13_profiler-trace-event-buffer-truncation.md"
+    click issue_20260726_011928_14_missing_socket_cleanup_on_eintr "../../../backlog/security/issue-20260726_011928_14_missing-socket-cleanup-on-eintr.md"
+    click issue_20260726_011928_15_fail_open_path_resolution_ignored_exceptions "../../../backlog/security/issue-20260726_011928_15_fail-open-path-resolution-ignored-exceptions.md"
     click issue_20260726_04_parallel_orchestrator_task_scheduler_and_conflict_avoidance "../../../backlog/code_health/issue-20260726-04-parallel-orchestrator-task-scheduler-and-conflict-avoidance.md"
     click issue_20260726_05_detect_empty_commits_during_jules_review_loop "../../../backlog/code_health/issue-20260726-05-detect-empty-commits-during-jules-review-loop.md"
     click issue_202_handle_cli_authentication_failures "../../../backlog/code_health/issue-202-handle-cli-authentication-failures.md"
