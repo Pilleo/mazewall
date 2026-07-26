@@ -227,6 +227,12 @@ public open class MockNativeProcess : NativeProcess {
         command: io.mazewall.core.PrctlCommand,
     ) = onPrctl(command)
 
+    public var onArchPrctlLong: (code: Int, addr: Long) -> LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = { _, _ -> LinuxNative.SyscallResult.Success(0L) }
+    public var onArchPrctlSegment: (code: Int, addr: io.mazewall.ffi.memory.ManagedSegment) -> LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = { _, _ -> LinuxNative.SyscallResult.Success(0L) }
+
+    override fun archPrctl(code: Int, addr: Long) = onArchPrctlLong(code, addr)
+    override fun archPrctl(code: Int, addr: io.mazewall.ffi.memory.ManagedSegment) = onArchPrctlSegment(code, addr)
+
     override fun pidfdOpen(
         pid: Int,
         flags: Int,

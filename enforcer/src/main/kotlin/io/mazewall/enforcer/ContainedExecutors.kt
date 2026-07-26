@@ -153,6 +153,10 @@ object ContainedExecutors {
                 io.mazewall.enforcer.supervisor.SupervisorDaemonManager.getInstance().getOrSpawnSharedDaemon()
             }
 
+            if (augmentedPolicy.lockIntelCet) {
+                armIntelCet()
+            }
+
             applyLandlockIfNecessary(processWide, augmentedPolicy)
 
             return installSeccompFilter(processWide, augmentedPolicy, scopingPolicy)
@@ -270,10 +274,65 @@ object ContainedExecutors {
             Platform.FallbackBehavior.FAIL ->
                 throw UnsupportedOperationException("Platform does not support seccomp")
 
-            Platform.FallbackBehavior.WARN_AND_BYPASS ->
-                logger.warning("Platform does not support seccomp. Code will run uncontained.")
-
             Platform.FallbackBehavior.SILENT_BYPASS -> {}
+            else ->
+                logger.warning("Platform does not support seccomp. Code will run uncontained.")
+        }
+    }
+
+    private fun armIntelCet() {
+        if (!Platform.isLinux || !Platform.isArchitectureSupported() || io.mazewall.core.Arch.current() != io.mazewall.core.Arch.AMD64) {
+            handleCetUnsupported("Intel CET is requested but the current platform/architecture does not support it.")
+            return
+        }
+
+        // 1. Query current status to prevent redundant enabling
+        val initialStatus = Platform.queryIntelCetStatus()
+        val isAlreadyEnabled = (initialStatus and io.mazewall.ffi.NativeConstants.ARCH_SHSTK_SHSTK) != 0L
+
+        if (!isAlreadyEnabled) {
+            // Enable Shadow Stack: arch_prctl(ARCH_SHSTK_ENABLE, ARCH_SHSTK_SHSTK)
+            val enableRes = io.mazewall.LinuxNative.process.archPrctl(
+                io.mazewall.ffi.NativeConstants.ARCH_SHSTK_ENABLE,
+                io.mazewall.ffi.NativeConstants.ARCH_SHSTK_SHSTK
+            )
+
+            if (enableRes is io.mazewall.LinuxNative.SyscallResult.Error) {
+                handleCetUnsupported("Failed to enable Intel CET Shadow Stack: ${enableRes.toString()}")
+                return
+            }
+        }
+
+        // 2. Lock Shadow Stack configuration: arch_prctl(ARCH_SHSTK_LOCK, ARCH_SHSTK_SHSTK)
+        val lockRes = io.mazewall.LinuxNative.process.archPrctl(
+            io.mazewall.ffi.NativeConstants.ARCH_SHSTK_LOCK,
+            io.mazewall.ffi.NativeConstants.ARCH_SHSTK_SHSTK
+        )
+
+        if (lockRes is io.mazewall.LinuxNative.SyscallResult.Error) {
+            // EPERM (1) is returned if CET is already locked. If verification is successful, we can ignore this.
+            if (lockRes.errno != io.mazewall.ffi.NativeConstants.EPERM) {
+                handleCetUnsupported("Failed to lock Intel CET Shadow Stack: ${lockRes.toString()}")
+                return
+            }
+        }
+
+        // 3. Verify status to be absolutely sure:
+        val activeStatus = Platform.queryIntelCetStatus()
+        if ((activeStatus and io.mazewall.ffi.NativeConstants.ARCH_SHSTK_SHSTK) == 0L) {
+            handleCetUnsupported("Intel CET is enabled and locked, but verification of status failed.")
+            return
+        }
+
+        logger.info("Intel CET Shadow Stack successfully enabled and locked.")
+    }
+
+    private fun handleCetUnsupported(reason: String) {
+        val fallback = Platform.configuredFallback()
+        if (fallback == Platform.FallbackBehavior.FAIL) {
+            throw UnsupportedOperationException(reason)
+        } else if (fallback != Platform.FallbackBehavior.SILENT_BYPASS) {
+            logger.warning("$reason Code will run without CET protection.")
         }
     }
 

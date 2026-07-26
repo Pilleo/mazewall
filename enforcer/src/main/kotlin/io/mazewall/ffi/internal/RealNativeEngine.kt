@@ -475,6 +475,32 @@ internal object RealNativeProcess : NativeProcess {
             FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.JAVA_INT, ValueLayout.JAVA_INT, ValueLayout.JAVA_INT),
             Linker.Option.captureCallState("errno"),
         )
+    private val ARCH_PRCTL_LONG: MethodHandle? = try {
+        RealNativeHelper.downcall(
+            "arch_prctl",
+            FunctionDescriptor.of(
+                ValueLayout.JAVA_INT,
+                ValueLayout.JAVA_INT,
+                ValueLayout.JAVA_LONG,
+            ),
+            Linker.Option.captureCallState("errno"),
+        )
+    } catch (e: Throwable) {
+        null
+    }
+    private val ARCH_PRCTL_ADDR: MethodHandle? = try {
+        RealNativeHelper.downcall(
+            "arch_prctl",
+            FunctionDescriptor.of(
+                ValueLayout.JAVA_INT,
+                ValueLayout.JAVA_INT,
+                ValueLayout.ADDRESS,
+            ),
+            Linker.Option.captureCallState("errno"),
+        )
+    } catch (e: Throwable) {
+        null
+    }
 
     override fun gettid(): io.mazewall.core.Tid {
         return SyscallInvoker.gettid(GETTID)
@@ -504,6 +530,16 @@ internal object RealNativeProcess : NativeProcess {
         flags: Int,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
         return SyscallInvoker.pidfdGetFd(PIDFD_GETFD, pidfd, targetFd, flags)
+    }
+
+    override fun archPrctl(code: Int, addr: Long): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+        val handle = ARCH_PRCTL_LONG ?: return LinuxNative.SyscallResult.Error(NativeConstants.ENOSYS, -1L)
+        return SyscallInvoker.archPrctlLong(handle, code, addr)
+    }
+
+    override fun archPrctl(code: Int, addr: ManagedSegment): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+        val handle = ARCH_PRCTL_ADDR ?: return LinuxNative.SyscallResult.Error(NativeConstants.ENOSYS, -1L)
+        return SyscallInvoker.archPrctlAddr(handle, code, addr.native)
     }
 }
 

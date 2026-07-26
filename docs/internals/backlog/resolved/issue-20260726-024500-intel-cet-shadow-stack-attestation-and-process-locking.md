@@ -1,7 +1,7 @@
 ---
 title: "Implement Intel CET Shadow Stack Attestation and Process Locking via sys_arch_prctl FFM"
 severity: "ENHANCEMENT"
-status: "open"
+status: "resolved"
 priority: 8
 component: "enforcer"
 target_modules: [":enforcer"]

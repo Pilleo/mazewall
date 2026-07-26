@@ -198,6 +198,10 @@ public interface NativeProcess {
         targetFd: Int,
         flags: Int,
     ): SyscallResult<Long, SyscallHandledState.Unhandled>
+
+    fun archPrctl(code: Int, addr: Long): SyscallResult<Long, SyscallHandledState.Unhandled>
+
+    fun archPrctl(code: Int, addr: ManagedSegment): SyscallResult<Long, SyscallHandledState.Unhandled>
 }
 
 public interface NativeMemory {
