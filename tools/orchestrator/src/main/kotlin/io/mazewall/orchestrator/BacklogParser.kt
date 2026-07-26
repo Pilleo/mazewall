@@ -85,6 +85,8 @@ object BacklogParser {
         }
     }
 
+    private val KEY_PATTERN = Regex("^[a-zA-Z0-9_-]+:\\s*(.*)$")
+
     private fun extractFrontmatter(content: String): Map<String, String>? {
         val lines = content.lines()
         if (lines.isEmpty() || lines[0].trim() != "---") return null
@@ -106,7 +108,7 @@ object BacklogParser {
             if (trimmed.startsWith("-") && currentKey != null) {
                 // Multiline list item (e.g. for dependencies)
                 currentValBuilder.append("\n").append(trimmed)
-            } else if (line.contains(":")) {
+            } else if (KEY_PATTERN.matches(line)) {
                 // Key-value pair
                 if (currentKey != null) {
                     frontmatter[currentKey] = currentValBuilder.toString().trim()
