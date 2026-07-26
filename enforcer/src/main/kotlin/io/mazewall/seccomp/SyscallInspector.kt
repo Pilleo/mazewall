@@ -159,33 +159,3 @@ internal class UnsafePrctlInspector : SyscallInspector {
         private val SAFE_PRCTL_OPTIONS = listOf(15L, 16L, 21L, 22L, 38L, 39L)
     }
 }
-
-/**
- * Inspects socket creation to permit only local Unix Domain Sockets (AF_UNIX = 1)
- * while denying IP and other remote network families when the policy restricts sockets.
- */
-internal class SocketAddressFamilyInspector : SyscallInspector {
-    override fun getInspections(arch: Arch, context: InspectionContext): List<SyscallInspection> {
-        if (arch.socket < 0) return emptyList()
-
-        val socketNr = arch.socket
-        val effectiveAction = context.resolveEffectiveAction(socketNr)
-        if (effectiveAction == SeccompAction.ACT_ALLOW) {
-            return emptyList()
-        }
-
-        return listOf(
-            SyscallInspection(
-                syscallNumber = socketNr,
-                argIndex = 0, // domain (Address Family) is the 1st argument
-                check = ArgCheck.EqualsAny(listOf(AF_UNIX)),
-                ifMatched = SeccompAction.ACT_ALLOW, // Preserve local Unix Domain Sockets (AF_UNIX)
-                ifNotMatched = effectiveAction,
-            )
-        )
-    }
-
-    private companion object {
-        private const val AF_UNIX = 1L
-    }
-}
