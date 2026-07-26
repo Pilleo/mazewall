@@ -5,60 +5,101 @@ import java.util.concurrent.TimeUnit
 
 sealed interface OrchestratorState {
     val name: String
-    fun execute(env: OrchestratorEnvironment, context: OrchestratorContext): OrchestratorState
+    fun execute(env: OrchestratorEnvironment, context: OrchestratorContext, slot: SlotContext): OrchestratorState
+
+    fun execute(env: OrchestratorEnvironment, context: OrchestratorContext): OrchestratorState {
+        // Find existing slot or create a default/fallback slot from the legacy context properties
+        val issueId = context.currentIssueId ?: "dummy-issue-id"
+        var slot = context.activeSlots.firstOrNull { it.currentIssueId == issueId }
+        if (slot == null) {
+            slot = SlotContext(issueId)
+            context.activeSlots.add(slot)
+        }
+
+        // Always sync context fields to slot fields before execution
+        slot.state = this
+        slot.currentIssueTitle = context.currentIssueTitle
+        slot.currentIssueFile = context.currentIssueFile
+        slot.githubIssueNumber = context.githubIssueNumber
+        slot.julesSessionId = context.julesSessionId
+        slot.prNumber = context.prNumber
+
+        slot.lastHeadSha = context.lastHeadSha
+        slot.lastReviewedSha = context.lastReviewedSha
+        slot.lastBuildStatus = context.lastBuildStatus
+        slot.lastCheckedSha = context.lastCheckedSha
+        slot.lastWaitingLogTime = context.lastWaitingLogTime
+        slot.lastStatusChangeTime = context.lastStatusChangeTime
+        slot.lastKnownStatus = context.lastKnownStatus
+        slot.lastPendingNotificationTime = context.lastPendingNotificationTime
+        slot.lastFailedSha = context.lastFailedSha
+        slot.startTime = context.startTime
+        slot.julesRetries = context.julesRetries
+        slot.julesReviewPushCount = context.julesReviewPushCount
+
+        val nextState = execute(env, context, slot)
+
+        // Propagate changes back to legacy fields for tests asserting on context fields directly
+        context.currentIssueId = slot.currentIssueId
+        context.currentIssueTitle = slot.currentIssueTitle
+        context.currentIssueFile = slot.currentIssueFile
+        context.githubIssueNumber = slot.githubIssueNumber
+        context.julesSessionId = slot.julesSessionId
+        context.prNumber = slot.prNumber
+
+        context.lastHeadSha = slot.lastHeadSha
+        context.lastReviewedSha = slot.lastReviewedSha
+        context.lastBuildStatus = slot.lastBuildStatus
+        context.lastCheckedSha = slot.lastCheckedSha
+        context.lastWaitingLogTime = slot.lastWaitingLogTime
+        context.lastStatusChangeTime = slot.lastStatusChangeTime
+        context.lastKnownStatus = slot.lastKnownStatus
+        context.lastPendingNotificationTime = slot.lastPendingNotificationTime
+        context.lastFailedSha = slot.lastFailedSha
+        context.startTime = slot.startTime
+        context.julesRetries = slot.julesRetries
+        context.julesReviewPushCount = slot.julesReviewPushCount
+
+        if (nextState == SELECT_TASK && !context.activeSlots.contains(slot)) {
+            context.clearActiveTask()
+        }
+        return nextState
+    }
 
     data object SELECT_TASK : OrchestratorState {
         override val name = "SELECT_TASK"
-        override fun execute(env: OrchestratorEnvironment, context: OrchestratorContext): OrchestratorState {
+        override fun execute(env: OrchestratorEnvironment, context: OrchestratorContext, slot: SlotContext): OrchestratorState {
+            // SELECT_TASK is handled globally by the daemon runner to support multi-issue parallel execution,
+            // but we implement a compliant single-slot fallback for backwards compatibility / unit tests.
             val allIssues = env.parseAllIssues()
-            env.println("📚 Backlog Status: ${allIssues.count { it.status == "open" }} open issues remaining.")
-
-            val forcedTaskId = env.getEnvOrNull("FORCE_TASK")?.takeIf { it.isNotEmpty() }
-            val nextIssue = if (forcedTaskId != null) {
-                val forcedIssue = allIssues.firstOrNull { it.id.equals(forcedTaskId, ignoreCase = true) }
-                if (forcedIssue == null) {
-                    env.errPrintln("⚠️ Forced task '$forcedTaskId' not found in backlog! Falling back to dependency graph.")
-                } else {
-                    env.println("🎯 Forcing specific task: ${forcedIssue.id} - ${forcedIssue.title}")
-                }
-                forcedIssue
-            } else {
-                null
-            } ?: run {
-                val activeIssues = allIssues.filter { it.id !in context.skippedIds }
-                var selected = DependencyGraph.selectNextIssue(activeIssues)
-                if (selected == null && context.skippedIds.isNotEmpty()) {
-                    env.println("♻️ No unblocked tasks available. Clearing skipped tasks list to retry them.")
-                    context.skippedIds.clear()
-                    val resetActiveIssues = allIssues.filter { it.id !in context.skippedIds }
-                    selected = DependencyGraph.selectNextIssue(resetActiveIssues)
-                }
-                selected
+            val activeIssues = allIssues.filter { it.id !in context.skippedIds && context.activeSlots.none { s -> s.currentIssueId == it.id } }
+            var selected = DependencyGraph.selectNextIssue(activeIssues)
+            if (selected == null && context.skippedIds.isNotEmpty()) {
+                context.skippedIds.clear()
+                val resetActiveIssues = allIssues.filter { it.id !in context.skippedIds && context.activeSlots.none { s -> s.currentIssueId == it.id } }
+                selected = DependencyGraph.selectNextIssue(resetActiveIssues)
             }
 
-            if (nextIssue == null) {
-                env.println("💤 No unblocked open issues found. Checking again in ${env.config.backlogCheckIntervalMinutes} minutes...")
-                env.sleep(env.config.backlogCheckIntervalMinutes, TimeUnit.MINUTES)
+            if (selected == null) {
                 return this
             }
 
-            env.println("\n🎯 Next prioritized task: ${nextIssue.id} - ${nextIssue.title} (Priority: ${nextIssue.priority})")
-            context.currentIssueId = nextIssue.id
-            context.currentIssueTitle = nextIssue.title
-            context.currentIssueFile = nextIssue.file.path
-            context.githubIssueNumber = nextIssue.githubIssue?.toString()
-            context.julesSessionId = null
-            context.prNumber = null
+            slot.currentIssueId = selected.id
+            slot.currentIssueTitle = selected.title
+            slot.currentIssueFile = selected.file.path
+            slot.githubIssueNumber = selected.githubIssue?.toString()
+            slot.julesSessionId = null
+            slot.prNumber = null
             return PENDING_APPROVAL
         }
     }
 
     data object PENDING_APPROVAL : OrchestratorState {
         override val name = "PENDING_APPROVAL"
-        override fun execute(env: OrchestratorEnvironment, context: OrchestratorContext): OrchestratorState {
-            val issueId = context.currentIssueId ?: throw IllegalStateException("currentIssueId is null")
-            val issueTitle = context.currentIssueTitle ?: throw IllegalStateException("currentIssueTitle is null")
-            val githubIssueNumber = context.githubIssueNumber
+        override fun execute(env: OrchestratorEnvironment, context: OrchestratorContext, slot: SlotContext): OrchestratorState {
+            val issueId = slot.currentIssueId
+            val issueTitle = slot.currentIssueTitle ?: throw IllegalStateException("currentIssueTitle is null")
+            val githubIssueNumber = slot.githubIssueNumber
 
             val approved = if (githubIssueNumber != null) {
                 if (env.gitHubClient.isIssueClosed(githubIssueNumber)) {
@@ -67,14 +108,14 @@ sealed interface OrchestratorState {
                     if (nextIssue != null) {
                         env.markIssueAsResolved(nextIssue)
                     }
-                    context.clearActiveTask()
+                    context.activeSlots.remove(slot)
                     return SELECT_TASK
                 }
                 env.println("🔄 Resuming already-in-progress task $issueId (linked to GitHub issue #$githubIssueNumber)...")
                 true
             } else {
                 env.ringBell(3)
-                val issueFile = context.currentIssueFile?.let { File(it) }
+                val issueFile = slot.currentIssueFile?.let { File(it) }
                 val issue = issueFile?.let { BacklogParser.parseIssueFile(it) }
 
                 val text = if (issueFile != null && issueFile.exists()) {
@@ -113,14 +154,15 @@ sealed interface OrchestratorState {
             if (!approved) {
                 env.println("⏭️ Task $issueId skipped by user. Postponing.")
                 context.skippedIds.add(issueId)
+                context.activeSlots.remove(slot)
                 return SELECT_TASK
             }
 
             env.println("🚀 Starting task `$issueId`...")
-            context.startTime = System.currentTimeMillis()
+            slot.startTime = System.currentTimeMillis()
 
             // Retrieve or create GitHub issue
-            var newGithubIssueNumber = context.githubIssueNumber
+            var newGithubIssueNumber = slot.githubIssueNumber
             if (newGithubIssueNumber == null) {
                 val existingIssueNumber = env.gitHubClient.findExistingIssueNumber(issueId)
                 if (existingIssueNumber != null) {
@@ -129,7 +171,7 @@ sealed interface OrchestratorState {
                 } else {
                     env.println("Creating GitHub issue for $issueId...")
                     val issueTitleForGit = "[$issueId] $issueTitle"
-                    val issueFile = File(context.currentIssueFile!!)
+                    val issueFile = File(slot.currentIssueFile!!)
                     val issueBody = issueFile.readText()
                     val enhancedBody = OrchestratorPrompts.taskPrompt(issueBody)
                     newGithubIssueNumber = env.gitHubClient.createIssue(issueTitleForGit, enhancedBody, "jules")
@@ -140,7 +182,7 @@ sealed interface OrchestratorState {
                 if (nextIssue != null) {
                     env.writeGithubIssue(nextIssue, newGithubIssueNumber.toInt())
                 }
-                context.githubIssueNumber = newGithubIssueNumber
+                slot.githubIssueNumber = newGithubIssueNumber
             }
 
             return AWAITING_JULES_START
@@ -149,9 +191,9 @@ sealed interface OrchestratorState {
 
     data object AWAITING_JULES_START : OrchestratorState {
         override val name = "AWAITING_JULES_START"
-        override fun execute(env: OrchestratorEnvironment, context: OrchestratorContext): OrchestratorState {
-            val issueId = context.currentIssueId ?: throw IllegalStateException("currentIssueId is null")
-            val githubIssueNumber = context.githubIssueNumber
+        override fun execute(env: OrchestratorEnvironment, context: OrchestratorContext, slot: SlotContext): OrchestratorState {
+            val issueId = slot.currentIssueId
+            val githubIssueNumber = slot.githubIssueNumber
 
             if (githubIssueNumber != null && env.gitHubClient.isIssueClosed(githubIssueNumber)) {
                 env.println("\n\u001B[1;33m⚠️ GitHub issue #$githubIssueNumber was closed. Resolving and canceling task $issueId.\u001B[0m")
@@ -159,7 +201,7 @@ sealed interface OrchestratorState {
                 if (nextIssue != null) {
                     env.markIssueAsResolved(nextIssue)
                 }
-                context.clearActiveTask()
+                context.activeSlots.remove(slot)
                 return SELECT_TASK
             }
 
@@ -174,12 +216,12 @@ sealed interface OrchestratorState {
 
             return if (activeSession != null) {
                 env.println("Linked Jules session: ID=${activeSession.id}, Status=${activeSession.status}")
-                context.julesSessionId = activeSession.id
+                slot.julesSessionId = activeSession.id
                 AWAITING_PR
             } else {
-                if (isTaskTimedOut(context, env.config)) {
+                if (isTaskTimedOut(slot, env.config)) {
                     env.errPrintln("❌ Task $issueId timed out waiting for Jules session. Returning to SELECT_TASK.")
-                    context.clearActiveTask()
+                    context.activeSlots.remove(slot)
                     return SELECT_TASK
                 }
                 env.println("⚠️ Jules session did not trigger. Retrying in 1 minute...")
@@ -191,10 +233,10 @@ sealed interface OrchestratorState {
 
     data object AWAITING_PR : OrchestratorState {
         override val name = "AWAITING_PR"
-        override fun execute(env: OrchestratorEnvironment, context: OrchestratorContext): OrchestratorState {
-            val issueId = context.currentIssueId ?: throw IllegalStateException("currentIssueId is null")
-            val githubIssueNumber = context.githubIssueNumber ?: throw IllegalStateException("githubIssueNumber is null")
-            val sessionId = context.julesSessionId
+        override fun execute(env: OrchestratorEnvironment, context: OrchestratorContext, slot: SlotContext): OrchestratorState {
+            val issueId = slot.currentIssueId
+            val githubIssueNumber = slot.githubIssueNumber ?: throw IllegalStateException("githubIssueNumber is null")
+            val sessionId = slot.julesSessionId
 
             if (env.gitHubClient.isIssueClosed(githubIssueNumber)) {
                 env.println("\n\u001B[1;33m⚠️ GitHub issue #$githubIssueNumber was closed. Resolving and canceling task $issueId.\u001B[0m")
@@ -203,7 +245,7 @@ sealed interface OrchestratorState {
                     env.markIssueAsResolved(nextIssue)
                 }
                 context.skippedIds.add(issueId)
-                context.clearActiveTask()
+                context.activeSlots.remove(slot)
                 return SELECT_TASK
             }
 
@@ -211,11 +253,11 @@ sealed interface OrchestratorState {
             val prNumber = env.gitHubClient.findLinkedPR(githubIssueNumber, issueId, sessionId)
             if (prNumber != null) {
                 env.println("🎉 Jules opened PR #$prNumber")
-                context.prNumber = prNumber
-                context.lastBuildStatus = null
-                context.lastHeadSha = null
-                context.lastCheckedSha = null
-                context.julesRetries = 0
+                slot.prNumber = prNumber
+                slot.lastBuildStatus = null
+                slot.lastHeadSha = null
+                slot.lastCheckedSha = null
+                slot.julesRetries = 0
                 return CI_RUNNING
             }
 
@@ -226,29 +268,29 @@ sealed interface OrchestratorState {
                 val status = session.status.lowercase()
 
                 if (status == "failed" || status == "cancelled" || env.julesClient.hasUnableToCompleteActivity(session.id)) {
-                    if (context.julesRetries < 2) {
-                        context.julesRetries++
-                        env.println("\n⚠️ [RETRY] Jules task $issueId failed with status: ${session.status}. Retrying (Attempt ${context.julesRetries}/2)...")
+                    if (slot.julesRetries < 2) {
+                        slot.julesRetries++
+                        env.println("\n⚠️ [RETRY] Jules task $issueId failed with status: ${session.status}. Retrying (Attempt ${slot.julesRetries}/2)...")
                         env.sendNotification("⚠️ *Jules task failed* for $issueId (Status: ${session.status}). Sending 'Retry' message to Jules.")
                         env.julesClient.sendSessionMessage(session.id, "Retry")
-                        context.lastBuildStatus = null
+                        slot.lastBuildStatus = null
                         return this
                     } else {
-                        env.println("\n❌ [FAILED] Jules task $issueId failed with status: ${session.status} after ${context.julesRetries} retries.")
-                        env.sendNotification("❌ *Jules task failed* for $issueId (Status: ${session.status}) after ${context.julesRetries} retries. Returning to SELECT_TASK.")
+                        env.println("\n❌ [FAILED] Jules task $issueId failed with status: ${session.status} after ${slot.julesRetries} retries.")
+                        env.sendNotification("❌ *Jules task failed* for $issueId (Status: ${session.status}) after ${slot.julesRetries} retries. Returning to SELECT_TASK.")
                         val nextIssue = env.parseAllIssues().firstOrNull { it.id == issueId }
                         if (nextIssue != null) {
                             env.removeGithubIssue(nextIssue)
                         }
                         context.skippedIds.add(issueId)
-                        context.clearActiveTask()
+                        context.activeSlots.remove(slot)
                         return SELECT_TASK
                     }
                 }
 
-                if (session.status != context.lastBuildStatus) {
+                if (session.status != slot.lastBuildStatus) {
                     env.println("Jules session status changed: ${session.status}")
-                    context.lastBuildStatus = session.status
+                    slot.lastBuildStatus = session.status
 
                     if (session.status.contains("Awaiting", ignoreCase = true) || session.status.contains("Feedback", ignoreCase = true)) {
                         val alertMsg = "⚠️ *Jules needs feedback on task $issueId!* Status: `${session.status}`. Please check and respond here: $sessionUrl"
@@ -258,19 +300,19 @@ sealed interface OrchestratorState {
                         env.ringBell(5)
                     } else if (session.status.equals("Completed", ignoreCase = true)) {
                         val now = System.currentTimeMillis()
-                        if (now - context.lastWaitingLogTime > 600_000) {
+                        if (now - slot.lastWaitingLogTime > 600_000) {
                             env.println("\n\u001B[1;32m🟢 [COMPLETED] Jules task $issueId is Completed! Please review and publish the PR in the UI.\u001B[0m")
                             env.println("👉 Publish PR here: $sessionUrl")
-                            context.lastWaitingLogTime = now
+                            slot.lastWaitingLogTime = now
                         }
                     }
                 }
             }
 
             val now = System.currentTimeMillis()
-            if (now - context.lastWaitingLogTime > 600_000) {
+            if (now - slot.lastWaitingLogTime > 600_000) {
                 env.println("⌛ Waiting for Jules PR to be published for task $issueId...")
-                context.lastWaitingLogTime = now
+                slot.lastWaitingLogTime = now
             }
 
             return this
@@ -279,13 +321,13 @@ sealed interface OrchestratorState {
 
     data object CI_RUNNING : OrchestratorState {
         override val name = "CI_RUNNING"
-        override fun execute(env: OrchestratorEnvironment, context: OrchestratorContext): OrchestratorState {
-            val prNumber = context.prNumber ?: throw IllegalStateException("prNumber is null")
-            val issueId = context.currentIssueId
-            val githubIssueNumber = context.githubIssueNumber
-            val sessionId = context.julesSessionId
+        override fun execute(env: OrchestratorEnvironment, context: OrchestratorContext, slot: SlotContext): OrchestratorState {
+            val prNumber = slot.prNumber ?: throw IllegalStateException("prNumber is null")
+            val issueId = slot.currentIssueId
+            val githubIssueNumber = slot.githubIssueNumber
+            val sessionId = slot.julesSessionId
 
-            if (issueId != null && githubIssueNumber != null) {
+            if (githubIssueNumber != null) {
                 val session = env.julesClient.getActiveSession(issueId)
                 val isFailed = if (session != null) {
                     val stat = session.status.lowercase()
@@ -296,14 +338,14 @@ sealed interface OrchestratorState {
 
                 if (isFailed) {
                     val statText = session?.status ?: "FAILED"
-                    if (context.julesRetries < 2) {
-                        context.julesRetries++
-                        env.println("\n⚠️ [RETRY] Jules session failed during CI: $statText (or has unable to complete activity). Retrying (Attempt ${context.julesRetries}/2)...")
-                        env.sendNotification("⚠️ *Jules session failed* during CI for $issueId (Status: $statText). Sending 'Retry' message to Jules (Attempt ${context.julesRetries}/2).")
+                    if (slot.julesRetries < 2) {
+                        slot.julesRetries++
+                        env.println("\n⚠️ [RETRY] Jules session failed during CI: $statText (or has unable to complete activity). Retrying (Attempt ${slot.julesRetries}/2)...")
+                        env.sendNotification("⚠️ *Jules session failed* during CI for $issueId (Status: $statText). Sending 'Retry' message to Jules (Attempt ${slot.julesRetries}/2).")
                         val targetSessionId = session?.id ?: sessionId ?: throw IllegalStateException("session ID is null")
                         env.julesClient.sendSessionMessage(targetSessionId, "Retry")
-                        context.lastBuildStatus = null
-                        context.lastHeadSha = null
+                        slot.lastBuildStatus = null
+                        slot.lastHeadSha = null
                         
                         var retriedSession = env.julesClient.getActiveSession(issueId)
                         var retryWaitAttempts = 0
@@ -317,14 +359,14 @@ sealed interface OrchestratorState {
                         }
                         return this
                     } else {
-                        env.println("\n❌ [FAILED] Jules session failed during CI: $statText after ${context.julesRetries} retries.")
-                        env.sendNotification("❌ *Jules session failed* during CI for $issueId after ${context.julesRetries} retries. Returning to SELECT_TASK.")
+                        env.println("\n❌ [FAILED] Jules session failed during CI: $statText after ${slot.julesRetries} retries.")
+                        env.sendNotification("❌ *Jules session failed* during CI for $issueId after ${slot.julesRetries} retries. Returning to SELECT_TASK.")
                         val nextIssue = env.parseAllIssues().firstOrNull { it.id == issueId }
                         if (nextIssue != null) {
                             env.removeGithubIssue(nextIssue)
                         }
                         context.skippedIds.add(issueId)
-                        context.clearActiveTask()
+                        context.activeSlots.remove(slot)
                         return SELECT_TASK
                     }
                 }
@@ -342,26 +384,26 @@ sealed interface OrchestratorState {
             }
 
             val currentSha = env.gitHubClient.getPrHeadSha(prNumber)
-            if (currentSha != context.lastHeadSha) {
+            if (currentSha != slot.lastHeadSha) {
                 env.println("🔄 New commits detected on PR #$prNumber (Head SHA: $currentSha). Checking build status...")
-                context.lastHeadSha = currentSha
-                context.lastKnownStatus = null
-                context.lastStatusChangeTime = 0L
-                context.lastPendingNotificationTime = 0L
+                slot.lastHeadSha = currentSha
+                slot.lastKnownStatus = null
+                slot.lastStatusChangeTime = 0L
+                slot.lastPendingNotificationTime = 0L
             }
 
             val status = env.gitHubClient.checkBuildStatus(prNumber)
-            if (status != context.lastBuildStatus || currentSha != context.lastCheckedSha) {
+            if (status != slot.lastBuildStatus || currentSha != slot.lastCheckedSha) {
                 env.println("PR #$prNumber build check: $status")
-                context.lastBuildStatus = status
-                context.lastCheckedSha = currentSha
+                slot.lastBuildStatus = status
+                slot.lastCheckedSha = currentSha
             }
 
             return when (status) {
                 "SUCCESS" -> AWAITING_REVIEW
                 "FAILURE" -> {
                     val headSha = env.gitHubClient.getPrHeadSha(prNumber)
-                    if (headSha != context.lastFailedSha) {
+                    if (headSha != slot.lastFailedSha) {
                         env.println("❌ Build failed on PR #$prNumber. Fetching logs...")
                         val failedLogs = env.gitHubClient.getFailedBuildLogs(prNumber)
                         val feedback = """
@@ -375,7 +417,7 @@ sealed interface OrchestratorState {
  
                         env.gitHubClient.commentOnPr(prNumber, feedback)
                         env.sendNotification("❌ Build failed on PR #$prNumber. Feedback sent to Jules.")
-                        context.lastFailedSha = headSha
+                        slot.lastFailedSha = headSha
                     } else {
                         env.println("❌ Build is still failing on SHA $headSha. Waiting for a new commit...")
                     }
@@ -384,29 +426,29 @@ sealed interface OrchestratorState {
                 }
                 "CONFLICT" -> {
                     val now = System.currentTimeMillis()
-                    if (now - context.lastWaitingLogTime > 60_000) {
+                    if (now - slot.lastWaitingLogTime > 60_000) {
                         val prUrl = env.gitHubClient.getPrUrl(prNumber)
                         env.sendNotification("⚠️ *PR #$prNumber has conflicts!* Please resolve them: $prUrl")
                         env.println("\u001B[1;31m🔔 [CONFLICT] PR #$prNumber has conflicts! Please resolve conflicts: $prUrl\u001B[0m")
                         env.ringBell(3)
-                        context.lastWaitingLogTime = now
+                        slot.lastWaitingLogTime = now
                     }
                     env.sleep(env.config.pollingIntervalSeconds, TimeUnit.SECONDS)
                     this
                 }
                 else -> {
                     val now = System.currentTimeMillis()
-                    if (status != context.lastKnownStatus) {
-                        context.lastKnownStatus = status
-                        context.lastStatusChangeTime = now
-                        context.lastPendingNotificationTime = 0L
-                    } else if (now - context.lastStatusChangeTime > env.config.stuckPendingThresholdMs && context.lastPendingNotificationTime == 0L) {
+                    if (status != slot.lastKnownStatus) {
+                        slot.lastKnownStatus = status
+                        slot.lastStatusChangeTime = now
+                        slot.lastPendingNotificationTime = 0L
+                    } else if (now - slot.lastStatusChangeTime > env.config.stuckPendingThresholdMs && slot.lastPendingNotificationTime == 0L) {
                         val prUrl = env.gitHubClient.getPrUrl(prNumber)
                         val msg = "⚠️ *PR #$prNumber build status is stuck in $status!* Please check the runner: $prUrl"
                         env.println("\u001B[1;31m🔔 [STUCK] PR #$prNumber build status is stuck in $status! Please check the runner: $prUrl\u001B[0m")
                         env.sendNotification(msg)
                         env.ringBell(1)
-                        context.lastPendingNotificationTime = now
+                        slot.lastPendingNotificationTime = now
                     }
                     env.sleep(env.config.pollingIntervalSeconds, TimeUnit.SECONDS)
                     this
@@ -417,8 +459,8 @@ sealed interface OrchestratorState {
 
     data object AWAITING_REVIEW : OrchestratorState {
         override val name = "AWAITING_REVIEW"
-        override fun execute(env: OrchestratorEnvironment, context: OrchestratorContext): OrchestratorState {
-            val prNumber = context.prNumber ?: throw IllegalStateException("prNumber is null")
+        override fun execute(env: OrchestratorEnvironment, context: OrchestratorContext, slot: SlotContext): OrchestratorState {
+            val prNumber = slot.prNumber ?: throw IllegalStateException("prNumber is null")
             if (env.gitHubClient.isPrMerged(prNumber)) {
                 env.println("🎉 PR #$prNumber merged! resolving issue locally...")
                 return RESOLVE_TASK
@@ -426,8 +468,8 @@ sealed interface OrchestratorState {
 
             val currentSha = env.gitHubClient.getPrHeadSha(prNumber)
 
-            val issueId = context.currentIssueId
-            val sessionId = context.julesSessionId
+            val issueId = slot.currentIssueId
+            val sessionId = slot.julesSessionId
             if (issueId != null) {
                 val session = env.julesClient.getActiveSession(issueId)
                 val isFailed = if (session != null) {
@@ -443,7 +485,7 @@ sealed interface OrchestratorState {
                     env.sendNotification("⚠️ *Jules session failed* during review on PR #$prNumber. Sending 'Retry' message to Jules.")
                     val targetSessionId = session?.id ?: sessionId ?: throw IllegalStateException("session ID is null")
                     env.julesClient.sendSessionMessage(targetSessionId, "Retry")
-                    context.lastReviewedSha = null
+                    slot.lastReviewedSha = null
                     
                     var retriedSession = env.julesClient.getActiveSession(issueId)
                     var retryWaitAttempts = 0
@@ -466,15 +508,15 @@ sealed interface OrchestratorState {
             }
 
             // If the PR head SHA changed it means Jules pushed a new commit instead of just reviewing.
-            if (currentSha != context.lastHeadSha) {
-                val shaOld = context.lastHeadSha ?: ""
+            if (currentSha != slot.lastHeadSha) {
+                val shaOld = slot.lastHeadSha ?: ""
                 val isEmpty = if (shaOld.isNotEmpty()) {
                     env.gitHubClient.isCommitEmpty(prNumber, shaOld, currentSha)
                 } else {
                     false
                 }
 
-                context.lastHeadSha = currentSha // Update the head SHA to the new one
+                slot.lastHeadSha = currentSha // Update the head SHA to the new one
 
                 if (isEmpty) {
                     env.println("⚠️ Jules pushed an empty commit during review phase on PR #$prNumber")
@@ -482,7 +524,7 @@ sealed interface OrchestratorState {
                     env.ringBell(5)
                     return AWAITING_MERGE
                 } else {
-                    context.julesReviewPushCount = 0
+                    slot.julesReviewPushCount = 0
                     env.println("🟢 Jules pushed a non-empty commit on PR #$prNumber. Treating as real problem resolution. Resetting push count and returning to CI_RUNNING.")
                     return CI_RUNNING
                 }
@@ -493,7 +535,7 @@ sealed interface OrchestratorState {
                 return CI_RUNNING
             }
 
-            if (currentSha != context.lastReviewedSha) {
+            if (currentSha != slot.lastReviewedSha) {
                 val comments = env.gitHubClient.getPrComments(prNumber)
                 val shaPrefix = currentSha.take(7)
 
@@ -506,7 +548,7 @@ sealed interface OrchestratorState {
                     env.println("🤖 PR #$prNumber Build Passed. Requesting Jules review for SHA: $currentSha")
 
                     // If Jules already pushed once instead of reviewing, use a stronger framing.
-                    val pushWarning = if (context.julesReviewPushCount > 0) {
+                    val pushWarning = if (slot.julesReviewPushCount > 0) {
                         "\n\n🚨 **IMPORTANT — PREVIOUS ATTEMPT PUSHED CODE**: Your previous review attempt " +
                         "resulted in a commit push instead of a comment. This is incorrect. " +
                         "You must NOT push anything. Read the instructions below carefully before acting."
@@ -536,7 +578,7 @@ sealed interface OrchestratorState {
                         env.println("Jules verdict on PR #$prNumber: $verdict")
                         val prUrl = env.gitHubClient.getPrUrl(prNumber)
                         env.sendNotification("🟢 *Jules reviewed PR #$prNumber!* Verdict: $verdict\nReady for merge: $prUrl")
-                        context.lastReviewedSha = currentSha
+                        slot.lastReviewedSha = currentSha
                         env.ringBell(3)
                         return AWAITING_MERGE
                     } else {
@@ -552,8 +594,8 @@ sealed interface OrchestratorState {
 
     data object AWAITING_MERGE : OrchestratorState {
         override val name = "AWAITING_MERGE"
-        override fun execute(env: OrchestratorEnvironment, context: OrchestratorContext): OrchestratorState {
-            val prNumber = context.prNumber ?: throw IllegalStateException("prNumber is null")
+        override fun execute(env: OrchestratorEnvironment, context: OrchestratorContext, slot: SlotContext): OrchestratorState {
+            val prNumber = slot.prNumber ?: throw IllegalStateException("prNumber is null")
 
             if (env.gitHubClient.isPrMerged(prNumber)) {
                 env.println("🎉 PR #$prNumber merged! resolving issue locally...")
@@ -561,7 +603,7 @@ sealed interface OrchestratorState {
             }
 
             val currentSha = env.gitHubClient.getPrHeadSha(prNumber)
-            if (currentSha != context.lastHeadSha) {
+            if (currentSha != slot.lastHeadSha) {
                 return CI_RUNNING
             }
 
@@ -571,28 +613,28 @@ sealed interface OrchestratorState {
             }
 
             val now = System.currentTimeMillis()
-            if (now - context.lastWaitingLogTime > 600_000) {
+            if (now - slot.lastWaitingLogTime > 600_000) {
                 val prUrl = env.gitHubClient.getPrUrl(prNumber)
                 env.println("⌛ Waiting for manual merge of PR #$prNumber at: $prUrl")
                 env.sendNotification("⌛ Waiting for manual merge of PR #$prNumber at: $prUrl")
-                context.lastWaitingLogTime = now
+                slot.lastWaitingLogTime = now
             }
             env.sleep(env.config.pollingIntervalSeconds, TimeUnit.SECONDS)
             return this
         }
     }
 
-    fun isTaskTimedOut(context: OrchestratorContext, config: OrchestratorConfig): Boolean {
-        if (context.startTime == 0L) return false
+    fun isTaskTimedOut(slot: SlotContext, config: OrchestratorConfig): Boolean {
+        if (slot.startTime == 0L) return false
         val now = System.currentTimeMillis()
-        val elapsedMinutes = TimeUnit.MILLISECONDS.toMinutes(now - context.startTime)
+        val elapsedMinutes = TimeUnit.MILLISECONDS.toMinutes(now - slot.startTime)
         return elapsedMinutes >= config.taskTimeoutThresholdMinutes
     }
 
     data object RESOLVE_TASK : OrchestratorState {
         override val name = "RESOLVE_TASK"
-        override fun execute(env: OrchestratorEnvironment, context: OrchestratorContext): OrchestratorState {
-            val issueId = context.currentIssueId ?: throw IllegalStateException("currentIssueId is null")
+        override fun execute(env: OrchestratorEnvironment, context: OrchestratorContext, slot: SlotContext): OrchestratorState {
+            val issueId = slot.currentIssueId
             val nextIssue = env.parseAllIssues().firstOrNull { it.id == issueId }
 
             if (nextIssue != null) {
@@ -605,7 +647,7 @@ sealed interface OrchestratorState {
             env.generateKnowledgeMap()
             env.println("✅ Resolved issue `$issueId`. Picking next task...")
 
-            context.clearActiveTask()
+            context.activeSlots.remove(slot)
             env.deleteStateFile()
             return SELECT_TASK
         }

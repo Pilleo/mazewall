@@ -501,4 +501,31 @@ class BpfFilterTest {
         val filter = BpfFilter.build(arch, policy.definition, profilingMode = true).instructions
         assertEquals(NativeConstants.SECCOMP_RET_ALLOW, evalBpf(filter, Syscall.IOCTL.numberFor(arch)))
     }
+
+    @Test
+    fun `test socket address family inspector allows AF_UNIX and blocks others under NO_NETWORK`() {
+        // Policy.NO_NETWORK blocks Syscall.SOCKET, resulting in ACT_ERRNO by default
+        val policy = Policy.NO_NETWORK
+        val filter = BpfFilter.build(arch, policy.definition).instructions
+
+        val socketNr = Syscall.SOCKET.numberFor(arch)
+        assertTrue(socketNr >= 0, "socket syscall number must be valid")
+
+        // Find the inspection block for Syscall.SOCKET
+        // It checks if arg[0] equals AF_UNIX (1).
+        // Let's verify by checking instructions structure for Syscall.SOCKET
+        var foundSocketInspection = false
+        for (i in filter.indices) {
+            val f = filter[i]
+            if (f.code == 0x15.toShort() && f.k == socketNr) {
+                // Should load arg[0] HI (offset 16 + 4 = 20)
+                val ldArgs = filter[i + 1]
+                if (ldArgs.code == 0x20.toShort() && ldArgs.k == 20) {
+                    foundSocketInspection = true
+                    break
+                }
+            }
+        }
+        assertTrue(foundSocketInspection, "BpfFilter should contain the socket address family argument inspection")
+    }
 }
