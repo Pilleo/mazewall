@@ -656,7 +656,7 @@ internal class SupervisorSessionHandler(
             if (localFdValue < 0) {
                 logger.warning { "[SUPERVISOR-DEBUG] localFdValue is negative error: $localFdValue. Sending seccomp error." }
                 sendSeccompError(id, -localFdValue, resp)
-                return false
+                return true
             }
 
             val addfd = SeccompNotifAddFdSegment.of(arena.allocate(Layouts.SECCOMP_NOTIF_ADDFD))
@@ -683,7 +683,7 @@ internal class SupervisorSessionHandler(
             if (!success) {
                 logger.severe { "[SUPERVISOR-DEBUG] ioctl SECCOMP_IOCTL_NOTIF_ADDFD failed. Sending EPERM." }
                 sendSeccompError(id, NativeConstants.EPERM, resp)
-                return false
+                return true
             }
             return true
         } finally {
