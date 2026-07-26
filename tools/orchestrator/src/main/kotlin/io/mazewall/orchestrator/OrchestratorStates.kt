@@ -249,15 +249,20 @@ sealed interface OrchestratorState {
                 return SELECT_TASK
             }
 
-            // 1. Check if PR has been published on GitHub
-            val prNumber = env.gitHubClient.findLinkedPR(githubIssueNumber, issueId, sessionId)
+            val prNumber = slot.prNumber ?: env.gitHubClient.findLinkedPR(githubIssueNumber, issueId, sessionId)
             if (prNumber != null) {
-                env.println("🎉 Jules opened PR #$prNumber")
-                slot.prNumber = prNumber
-                slot.lastBuildStatus = null
-                slot.lastHeadSha = null
-                slot.lastCheckedSha = null
-                slot.julesRetries = 0
+                if (slot.prNumber == null) {
+                    env.println("🎉 Jules opened PR #$prNumber")
+                    slot.prNumber = prNumber
+                    slot.lastBuildStatus = null
+                    slot.lastHeadSha = null
+                    slot.lastCheckedSha = null
+                    slot.julesRetries = 0
+                }
+
+                if (handleRebaseAndConflicts(env, slot, prNumber)) {
+                    env.sleep(env.config.pollingIntervalSeconds, TimeUnit.SECONDS)
+                }
                 return CI_RUNNING
             }
 
@@ -341,6 +346,11 @@ sealed interface OrchestratorState {
             val issueId = slot.currentIssueId
             val githubIssueNumber = slot.githubIssueNumber
             val sessionId = slot.julesSessionId
+
+            if (handleRebaseAndConflicts(env, slot, prNumber)) {
+                env.sleep(env.config.pollingIntervalSeconds, TimeUnit.SECONDS)
+                return this
+            }
 
             if (githubIssueNumber != null) {
                 val session = env.julesClient.getActiveSession(issueId)
@@ -440,21 +450,6 @@ sealed interface OrchestratorState {
                     this
                 }
                 "CONFLICT" -> {
-                    env.println("🔄 Attempting automated rebase of PR #$prNumber onto master...")
-                    val rebaseSuccess = env.gitHubClient.rebaseBranch(prNumber)
-                    if (rebaseSuccess) {
-                        env.println("✅ Successfully auto-rebased PR #$prNumber onto master.")
-                        slot.lastWaitingLogTime = 0L
-                    } else {
-                        val now = System.currentTimeMillis()
-                        if (now - slot.lastWaitingLogTime > 60_000) {
-                            val prUrl = env.gitHubClient.getPrUrl(prNumber)
-                            env.sendNotification("⚠️ *PR #$prNumber has conflicts!* Automated rebase failed. Please resolve them: $prUrl")
-                            env.println("\u001B[1;31m🔔 [CONFLICT] PR #$prNumber has conflicts! Automated rebase failed. Please resolve: $prUrl\u001B[0m")
-                            env.ringBell(3)
-                            slot.lastWaitingLogTime = now
-                        }
-                    }
                     env.sleep(env.config.pollingIntervalSeconds, TimeUnit.SECONDS)
                     this
                 }
@@ -488,16 +483,14 @@ sealed interface OrchestratorState {
                 return RESOLVE_TASK
             }
 
+            if (handleRebaseAndConflicts(env, slot, prNumber)) {
+                env.sleep(env.config.pollingIntervalSeconds, TimeUnit.SECONDS)
+                return CI_RUNNING
+            }
+
             val currentSha = env.gitHubClient.getPrHeadSha(prNumber)
 
             val buildStatus = env.gitHubClient.checkBuildStatus(prNumber)
-            if (buildStatus == "CONFLICT") {
-                env.println("🔄 Conflict detected in AWAITING_REVIEW for PR #$prNumber. Attempting automated rebase onto master...")
-                if (env.gitHubClient.rebaseBranch(prNumber)) {
-                    env.println("✅ Successfully auto-rebased PR #$prNumber onto master.")
-                    return CI_RUNNING
-                }
-            }
 
             val issueId = slot.currentIssueId
             val sessionId = slot.julesSessionId
@@ -703,4 +696,31 @@ sealed interface OrchestratorState {
             }
         }
     }
+}
+
+private fun handleRebaseAndConflicts(env: OrchestratorEnvironment, slot: SlotContext, prNumber: String): Boolean {
+    val status = env.gitHubClient.getPrMergeStatus(prNumber)
+    val isBehind = status.behindBy > 0
+    val isConflicting = status.mergeable == "CONFLICTING"
+
+    if (isBehind || isConflicting) {
+        val reason = if (isConflicting) "conflict status" else "behind master by ${status.behindBy} commits"
+        env.println("🔄 Active PR #$prNumber is $reason. Attempting automated rebase onto master...")
+        val rebaseSuccess = env.gitHubClient.rebaseBranch(prNumber)
+        if (rebaseSuccess) {
+            env.println("✅ Successfully auto-rebased PR #$prNumber onto master.")
+            slot.lastWaitingLogTime = 0L
+            return true
+        } else {
+            val now = System.currentTimeMillis()
+            if (now - slot.lastWaitingLogTime > 60_000) {
+                val prUrl = env.gitHubClient.getPrUrl(prNumber)
+                env.sendNotification("⚠️ *PR #$prNumber has conflicts!* Automated local worktree rebase failed. Human intervention required: $prUrl")
+                env.println("\u001B[1;31m🔔 [CONFLICT] PR #$prNumber has conflicts! Automated local worktree rebase failed. Please resolve: $prUrl\u001B[0m")
+                env.ringBell(3)
+                slot.lastWaitingLogTime = now
+            }
+        }
+    }
+    return false
 }
