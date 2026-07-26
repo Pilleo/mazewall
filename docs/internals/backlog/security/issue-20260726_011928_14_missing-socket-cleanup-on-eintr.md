@@ -3,10 +3,15 @@ title: SupervisorDaemonEngine leaks sockets on interrupted accept4
 type: issue
 status: open
 priority: 3
-labels: ["security", "enforcer", "fd-leak"]
+labels:
+- security
+- enforcer
+- fd-leak
 component: enforcer
-target_modules: [":enforcer"]
-target_files: ["io.mazewall.enforcer.supervisor.SupervisorDaemonEngine.kt"]
+target_modules:
+- :enforcer
+target_files:
+- enforcer/src/main/kotlin/io/mazewall/enforcer/supervisor/SupervisorDaemonEngine.kt
 ---
 
 # Issue: `SupervisorDaemonEngine` fails to clean up sockets on interrupted or failed loop

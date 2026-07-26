@@ -1,16 +1,21 @@
 ---
-title: "Orchestrator: Auto-Merge PR on VERDICT: APPROVED When autonomy=autonomous and solution_approved=true"
-severity: "MEDIUM"
-status: "open"
+title: 'Orchestrator: Auto-Merge PR on VERDICT: APPROVED When autonomy=autonomous
+  and solution_approved=true'
+severity: MEDIUM
+status: open
 priority: 5
-dependencies: ["issue-202", "issue-203"]
-target_files: []
-target_modules: [\":tools:orchestrator\"]
-component: "orchestrator"
-effort: "medium"
-autonomy: "supervised"
+dependencies:
+- issue-202
+- issue-203
+target_files:
+- tools/orchestrator/src/main/kotlin/io/mazewall/orchestrator/OrchestratorDaemon.kt
+target_modules:
+- :tools:orchestrator
+component: orchestrator
+effort: medium
+autonomy: supervised
 solution_approved: false
-blast_radius: "medium"
+blast_radius: medium
 reversible: true
 ---
 

@@ -1,17 +1,16 @@
 ---
-title: "Implement Serial PR Merge Queue in Orchestrator to Prevent Rebase Races"
-severity: "HIGH"
-status: "open"
+title: Implement Serial PR Merge Queue in Orchestrator to Prevent Rebase Races
+severity: HIGH
+status: open
 priority: 10
 dependencies: []
-component: "orchestrator"
+component: orchestrator
 target_modules:
-  - ":tools:orchestrator"
+- :tools:orchestrator
 target_files:
-  - "tools/orchestrator/src/main/kotlin/io/mazewall/orchestrator/OrchestratorDaemon.kt"
-  - "tools/orchestrator/src/main/kotlin/io/mazewall/orchestrator/OrchestratorStates.kt"
-effort: "medium"
-autonomy: "autonomous"
+- tools/orchestrator/src/main/kotlin/io/mazewall/orchestrator/OrchestratorDaemon.kt
+effort: medium
+autonomy: autonomous
 ---
 
 # 🔴 [Severity: HIGH]: Implement Serial PR Merge Queue in Orchestrator to Prevent Rebase Races

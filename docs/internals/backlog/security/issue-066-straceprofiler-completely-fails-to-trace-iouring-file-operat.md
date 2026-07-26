@@ -1,13 +1,15 @@
 ---
-title: "StraceProfiler completely fails to trace `io_uring` file operations natively"
-severity: "CRITICAL"
-status: "open"
+title: StraceProfiler completely fails to trace `io_uring` file operations natively
+severity: CRITICAL
+status: open
 priority: 5
 dependencies: []
-target_files: []
-target_modules: [\":profiler\"]
-component: "profiler"
-effort: "medium"
+target_files:
+- profiler/src/main/kotlin/io/mazewall/profiler/strace/StraceProfiler.kt
+target_modules:
+- :profiler
+component: profiler
+effort: medium
 ---
 
 # 🔴 [Severity: CRITICAL]: StraceProfiler completely fails to trace `io_uring` file operations natively

@@ -1,12 +1,19 @@
 ---
-title: SupervisorSessionHandler TOCTOU vulnerability during string extraction for paths
+title: SupervisorSessionHandler TOCTOU vulnerability during string extraction for
+  paths
 type: issue
 status: open
 priority: 8
-labels: ["security", "enforcer", "toctou", "sandbox-bypass"]
+labels:
+- security
+- enforcer
+- toctou
+- sandbox-bypass
 component: enforcer
-target_modules: [":enforcer"]
-target_files: ["io.mazewall.enforcer.supervisor.SupervisorSessionHandler.kt"]
+target_modules:
+- :enforcer
+target_files:
+- enforcer/src/main/kotlin/io/mazewall/enforcer/supervisor/SupervisorSessionHandler.kt
 ---
 
 # Issue: `SupervisorSessionHandler` Path Extraction TOCTOU

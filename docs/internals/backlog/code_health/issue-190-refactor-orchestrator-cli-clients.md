@@ -1,13 +1,15 @@
 ---
-title: "Refactor GitHubCli and JulesCli for Testability"
+title: Refactor GitHubCli and JulesCli for Testability
 priority: 8
-status: "resolved"
+status: resolved
 dependencies: []
-severity: "HIGH"
-target_files: []
-target_modules: [\":tools:orchestrator\"]
-component: "orchestrator"
-effort: "MEDIUM"
+severity: HIGH
+target_files:
+- tools/orchestrator/src/main/kotlin/io/mazewall/orchestrator/GitHubCli.kt
+target_modules:
+- :tools:orchestrator
+component: orchestrator
+effort: MEDIUM
 github_issue: 251
 ---
 

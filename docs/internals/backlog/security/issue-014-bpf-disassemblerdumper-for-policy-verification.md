@@ -1,13 +1,15 @@
 ---
-title: "BPF Disassembler/Dumper for Policy Verification"
-severity: "ENHANCEMENT"
-status: "open"
+title: BPF Disassembler/Dumper for Policy Verification
+severity: ENHANCEMENT
+status: open
 priority: 2
 dependencies: []
-target_files: []
-target_modules: [\":enforcer\"]
-component: "enforcer"
-effort: "medium"
+target_files:
+- enforcer/src/main/kotlin/io/mazewall/seccomp/BpfStaticVerifier.kt
+target_modules:
+- :enforcer
+component: enforcer
+effort: medium
 ---
 
 # 🔵 [Severity: ENHANCEMENT]: BPF Disassembler/Dumper for Policy Verification

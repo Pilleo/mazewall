@@ -1,13 +1,15 @@
 ---
-title: "Compile-Time Enforced Tier 1 Process Baseline (`ProcessContainmentToken`)"
-severity: "ENHANCEMENT"
-status: "open"
+title: Compile-Time Enforced Tier 1 Process Baseline (`ProcessContainmentToken`)
+severity: ENHANCEMENT
+status: open
 priority: 2
 dependencies: []
-target_files: []
-target_modules: [\":enforcer\"]
-component: "enforcer"
-effort: "medium"
+target_files:
+- enforcer/src/main/kotlin/io/mazewall/enforcer/ContainedExecutors.kt
+target_modules:
+- :enforcer
+component: enforcer
+effort: medium
 ---
 
 # 🔵 [Severity: ENHANCEMENT]: Compile-Time Enforced Tier 1 Process Baseline (`ProcessContainmentToken`)

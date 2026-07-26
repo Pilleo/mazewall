@@ -1,18 +1,18 @@
 ---
-title: "Enforce Mandatory Schema Gating and Skill Header Injection in Issue Creation API"
-severity: "HIGH"
-status: "open"
+title: Enforce Mandatory Schema Gating and Skill Header Injection in Issue Creation
+  API
+severity: HIGH
+status: open
 priority: 9
 dependencies:
-  - "issue-20260726-205802"
-component: "orchestrator"
+- issue-20260726-205802
+component: orchestrator
 target_modules:
-  - ":tools:orchestrator"
+- :tools:orchestrator
 target_files:
-  - "tools/orchestrator/src/main/kotlin/io/mazewall/orchestrator/ReviewIssueLauncher.kt"
-  - "tools/orchestrator/src/main/kotlin/io/mazewall/orchestrator/BacklogParser.kt"
-effort: "small"
-autonomy: "autonomous"
+- tools/orchestrator/src/main/kotlin/io/mazewall/orchestrator/ReviewIssueLauncher.kt
+effort: small
+autonomy: autonomous
 ---
 
 # 🔴 [Severity: HIGH]: Enforce Mandatory Schema Gating and Skill Header Injection in Issue Creation API

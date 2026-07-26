@@ -1,16 +1,17 @@
 ---
-title: "Isolate Orchestrator Git Operations from Main Working Directory using Temporary Worktrees"
-severity: "HIGH"
-status: "open"
+title: Isolate Orchestrator Git Operations from Main Working Directory using Temporary
+  Worktrees
+severity: HIGH
+status: open
 priority: 9
 dependencies: []
-component: "orchestrator"
+component: orchestrator
 target_modules:
-  - ":tools:orchestrator"
+- :tools:orchestrator
 target_files:
-  - "tools/orchestrator/src/main/kotlin/io/mazewall/orchestrator/GitHubCli.kt"
-effort: "medium"
-autonomy: "autonomous"
+- tools/orchestrator/src/main/kotlin/io/mazewall/orchestrator/GitHubCli.kt
+effort: medium
+autonomy: autonomous
 ---
 
 # 🔴 [Severity: HIGH]: Isolate Orchestrator Git Operations from Main Working Directory using Temporary Worktrees

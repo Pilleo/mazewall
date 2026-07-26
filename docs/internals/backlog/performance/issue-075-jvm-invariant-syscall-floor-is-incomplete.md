@@ -1,13 +1,15 @@
 ---
-title: "🟡 [DEFERRED — Medium]: JVM Invariant Syscall Floor is Incomplete"
-severity: "MEDIUM"
-status: "open"
+title: "\U0001F7E1 [DEFERRED \u2014 Medium]: JVM Invariant Syscall Floor is Incomplete"
+severity: MEDIUM
+status: open
 priority: 6
 dependencies: []
-target_files: []
-target_modules: [\":enforcer\"]
-component: "enforcer"
-effort: "medium"
+target_files:
+- enforcer/src/main/kotlin/io/mazewall/seccomp/PureJavaBpfEngine.kt
+target_modules:
+- :enforcer
+component: enforcer
+effort: medium
 ---
 
 # 🟡 [DEFERRED — Medium]: JVM Invariant Syscall Floor is Incomplete

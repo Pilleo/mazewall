@@ -1,16 +1,18 @@
 ---
-title: "Auto-Closing Linked GitHub Issues"
-severity: "HIGH"
-status: "open"
+title: Auto-Closing Linked GitHub Issues
+severity: HIGH
+status: open
 priority: 10
 dependencies: []
-target_files: []
-target_modules: [\":tools:orchestrator\"]
-component: "orchestrator"
-effort: "small"
-autonomy: "supervised"
+target_files:
+- tools/orchestrator/src/main/kotlin/io/mazewall/orchestrator/OrchestratorDaemon.kt
+target_modules:
+- :tools:orchestrator
+component: orchestrator
+effort: small
+autonomy: supervised
 solution_approved: false
-blast_radius: "medium"
+blast_radius: medium
 reversible: true
 ---
 

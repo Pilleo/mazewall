@@ -1,16 +1,18 @@
 ---
-title: "Memory Alignment verification for `Layouts.kt` FFM Structures"
-severity: "HIGH"
-status: "open"
+title: Memory Alignment verification for `Layouts.kt` FFM Structures
+severity: HIGH
+status: open
 priority: 9
 dependencies: []
-target_files: []
-target_modules: [\":enforcer\"]
-component: "enforcer"
-effort: "small"
-autonomy: "supervised"
+target_files:
+- enforcer/src/main/kotlin/io/mazewall/ffi/Layouts.kt
+target_modules:
+- :enforcer
+component: enforcer
+effort: small
+autonomy: supervised
 solution_approved: false
-blast_radius: "medium"
+blast_radius: medium
 reversible: true
 ---
 

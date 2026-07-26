@@ -1,16 +1,17 @@
 ---
-title: "Enforce Non-Empty Target Modules in Backlog Validator and Safe Empty Scheduler Fallback"
-severity: "MEDIUM"
-status: "open"
+title: Enforce Non-Empty Target Modules in Backlog Validator and Safe Empty Scheduler
+  Fallback
+severity: MEDIUM
+status: open
 priority: 8
 dependencies: []
-component: "orchestrator"
+component: orchestrator
 target_modules:
-  - ":tools:orchestrator"
+- :tools:orchestrator
 target_files:
-  - "tools/orchestrator/src/main/kotlin/io/mazewall/orchestrator/BacklogValidator.kt"
-effort: "small"
-autonomy: "autonomous"
+- tools/orchestrator/src/main/kotlin/io/mazewall/orchestrator/BacklogValidator.kt
+effort: small
+autonomy: autonomous
 ---
 
 # 🔶 [Severity: MEDIUM]: Enforce Non-Empty Target Modules in Backlog Validator and Safe Empty Scheduler Fallback

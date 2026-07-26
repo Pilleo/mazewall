@@ -100,6 +100,8 @@ interface "NativeProcess" as io.mazewall.NativeProcess {
   + {abstract}SyscallResult prctl(PrctlCommand)
   + {abstract}SyscallResult pidfdOpen(int, int)
   + {abstract}SyscallResult pidfdGetFd(int, int, int)
+  + {abstract}SyscallResult archPrctl(int, long)
+  + {abstract}SyscallResult archPrctl(int, ManagedSegment)
 }
 class "Platform" as io.mazewall.Platform {
   + {static}Platform INSTANCE
@@ -113,6 +115,10 @@ class "Platform" as io.mazewall.Platform {
   +void validateSupported()
   +boolean isArchitectureSupported()
   +FallbackBehavior configuredFallback()
+  +Boolean isCpuCetSupportedOverride()
+  +void setCpuCetSupportedOverride(Boolean)
+  +boolean isCpuCetSupported()
+  +long queryIntelCetStatus()
   +Diagnostics diagnose()
 }
 interface "PlatformProvider" as io.mazewall.PlatformProvider {
@@ -167,6 +173,7 @@ class "PolicyBuilder" as io.mazewall.PolicyBuilder<S extends PolicyScope> {
   +PolicyBuilder<S> allowMmapExec()
   +PolicyBuilder<S> allowNonThreadClone()
   +PolicyBuilder<S> allowUnsafePrctl()
+  +PolicyBuilder<S> lockIntelCet()
   +PolicyDefinition<S> build()
 }
 class "PolicyCompilationCache" as io.mazewall.PolicyCompilationCache {
@@ -183,6 +190,7 @@ class "PolicyDefinition" as io.mazewall.PolicyDefinition<S extends PolicyScope> 
   +boolean getAllowMmapExec()
   +boolean getAllowNonThreadClone()
   +boolean getAllowUnsafePrctl()
+  +boolean getLockIntelCet()
   +Set<SandboxedPath> getAllowedFsReadPaths()
   +Set<SandboxedPath> getAllowedFsWritePaths()
   +boolean getEnforceLandlock()
@@ -718,6 +726,8 @@ class "RealNativeProcess" as io.mazewall.ffi.internal.RealNativeProcess {
   +SyscallResult prctl(PrctlCommand)
   +SyscallResult pidfdOpen(int, int)
   +SyscallResult pidfdGetFd(int, int, int)
+  +SyscallResult archPrctl(int, long)
+  +SyscallResult archPrctl(int, ManagedSegment)
 }
 class "SyscallInvoker" as io.mazewall.ffi.internal.SyscallInvoker {
   + {static}SyscallInvoker INSTANCE
@@ -750,6 +760,8 @@ class "SyscallInvoker" as io.mazewall.ffi.internal.SyscallInvoker {
   +SyscallResult processVmWritev(MethodHandle, int, MemorySegment, long, MemorySegment, long, long)
   +SyscallResult read(MethodHandle, int, MemorySegment, long)
   +SyscallResult write(MethodHandle, int, MemorySegment, long)
+  +SyscallResult archPrctlLong(MethodHandle, int, long)
+  +SyscallResult archPrctlAddr(MethodHandle, int, MemorySegment)
 }
 class "CmsghdrSegment" as io.mazewall.ffi.memory.CmsghdrSegment {
   + {static}Companion Companion

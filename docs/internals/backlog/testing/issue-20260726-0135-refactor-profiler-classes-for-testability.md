@@ -1,19 +1,19 @@
 ---
-title: "Refactor Profiler core classes for testability and test them"
-severity: "MEDIUM"
-status: "open"
+title: Refactor Profiler core classes for testability and test them
+severity: MEDIUM
+status: open
 priority: 8
 dependencies: []
-component: "profiler"
+component: profiler
 target_modules:
-  - ":profiler"
+- :profiler
 target_files:
-  - "profiler/src/main/kotlin/io/mazewall/profiler/iterative/IterativeProfiler.kt"
-  - "profiler/src/main/kotlin/io/mazewall/profiler/Profiler.kt"
-  - "profiler/src/main/kotlin/io/mazewall/profiler/engine/ProfilerDaemon.kt"
-  - "profiler/src/main/kotlin/io/mazewall/profiler/engine/ProfilerSessionHandler.kt"
-effort: "large"
-autonomy: "supervised"
+- profiler/src/main/kotlin/io/mazewall/profiler/iterative/IterativeProfiler.kt
+- profiler/src/main/kotlin/io/mazewall/profiler/Profiler.kt
+- profiler/src/main/kotlin/io/mazewall/profiler/engine/ProfilerDaemon.kt
+- profiler/src/main/kotlin/io/mazewall/profiler/engine/ProfilerSessionHandler.kt
+effort: large
+autonomy: supervised
 ---
 
 # 🔴 [Severity: MEDIUM]: Refactor Profiler core classes for testability and test them

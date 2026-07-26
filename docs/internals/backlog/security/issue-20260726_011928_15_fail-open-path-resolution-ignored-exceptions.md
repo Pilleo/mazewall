@@ -1,12 +1,19 @@
 ---
-title: SupervisorSessionHandler ignores critical exceptions during path resolution leading to fail-open bypass
+title: SupervisorSessionHandler ignores critical exceptions during path resolution
+  leading to fail-open bypass
 type: issue
 status: open
 priority: 8
-labels: ["security", "enforcer", "fail-open", "sandbox-bypass"]
+labels:
+- security
+- enforcer
+- fail-open
+- sandbox-bypass
 component: enforcer
-target_modules: [":enforcer"]
-target_files: ["io.mazewall.enforcer.supervisor.SupervisorSessionHandler.kt"]
+target_modules:
+- :enforcer
+target_files:
+- enforcer/src/main/kotlin/io/mazewall/enforcer/supervisor/SupervisorSessionHandler.kt
 ---
 
 # Issue: `SupervisorSessionHandler` fails open on ignored exceptions

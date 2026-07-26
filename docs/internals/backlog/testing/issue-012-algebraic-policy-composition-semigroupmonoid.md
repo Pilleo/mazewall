@@ -1,13 +1,15 @@
 ---
-title: "Algebraic Policy Composition (Semigroup/Monoid)"
-severity: "ENHANCEMENT"
-status: "open"
+title: Algebraic Policy Composition (Semigroup/Monoid)
+severity: ENHANCEMENT
+status: open
 priority: 2
 dependencies: []
-target_files: []
-target_modules: [\":enforcer\"]
-component: "enforcer"
-effort: "medium"
+target_files:
+- enforcer/src/main/kotlin/io/mazewall/Policy.kt
+target_modules:
+- :enforcer
+component: enforcer
+effort: medium
 ---
 
 # 🔵 [Severity: ENHANCEMENT]: Algebraic Policy Composition (Semigroup/Monoid)

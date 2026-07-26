@@ -1,13 +1,15 @@
 ---
-title: "Architectural DIP (Dependency Inversion) Violations in Native Scopes"
-severity: "HIGH"
-status: "open"
+title: Architectural DIP (Dependency Inversion) Violations in Native Scopes
+severity: HIGH
+status: open
 priority: 3
 dependencies: []
-target_files: []
-target_modules: [\":enforcer\"]
-component: "enforcer"
-effort: "large"
+target_files:
+- enforcer/src/main/kotlin/io/mazewall/NativeEngine.kt
+target_modules:
+- :enforcer
+component: enforcer
+effort: large
 ---
 
 # 🔴 [Severity: LOW]: Architectural DIP (Dependency Inversion) Violations in Native Scopes

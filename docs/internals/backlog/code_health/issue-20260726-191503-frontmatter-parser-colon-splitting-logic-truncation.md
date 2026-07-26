@@ -1,16 +1,16 @@
 ---
-title: "Fix Custom Frontmatter Parser Colon-Splitting Logic Bug"
-severity: "HIGH"
-status: "open"
+title: Fix Custom Frontmatter Parser Colon-Splitting Logic Bug
+severity: HIGH
+status: open
 priority: 9
 dependencies: []
-component: "orchestrator"
+component: orchestrator
 target_modules:
-  - ":tools:orchestrator"
+- :tools:orchestrator
 target_files:
-  - "tools/orchestrator/src/main/kotlin/io/mazewall/orchestrator/BacklogParser.kt"
-effort: "small"
-autonomy: "autonomous"
+- tools/orchestrator/src/main/kotlin/io/mazewall/orchestrator/BacklogParser.kt
+effort: small
+autonomy: autonomous
 ---
 
 # 🔴 [Severity: HIGH]: Fix Custom Frontmatter Parser Colon-Splitting Logic Bug

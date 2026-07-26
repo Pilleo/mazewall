@@ -1,12 +1,14 @@
 ---
-title: "Hardware-Aware CI Test Suite and Graceful Fallback Assertions for Intel CET"
-severity: "ENHANCEMENT"
-status: "open"
+title: Hardware-Aware CI Test Suite and Graceful Fallback Assertions for Intel CET
+severity: ENHANCEMENT
+status: open
 priority: 7
-component: "enforcer"
-target_modules: [":enforcer"]
-target_files: []
-effort: "medium"
+component: enforcer
+target_modules:
+- :enforcer
+target_files:
+- enforcer/src/main/kotlin/io/mazewall/ffi/internal/RealNativeEngine.kt
+effort: medium
 dependencies: []
 ---
 

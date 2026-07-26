@@ -1,12 +1,19 @@
 ---
-title: SupervisorSessionHandler loop swallows ThreadInterruptedException breaking graceful shutdown
+title: SupervisorSessionHandler loop swallows ThreadInterruptedException breaking
+  graceful shutdown
 type: issue
 status: open
 priority: 8
-labels: ["security", "enforcer", "graceful-shutdown", "deadlock"]
+labels:
+- security
+- enforcer
+- graceful-shutdown
+- deadlock
 component: enforcer
-target_modules: [":enforcer"]
-target_files: ["io.mazewall.enforcer.supervisor.SupervisorSessionHandler.kt", "io.mazewall.enforcer.supervisor.SupervisorDaemonEngine.kt"]
+target_modules:
+- :enforcer
+target_files:
+- enforcer/src/main/kotlin/io/mazewall/enforcer/supervisor/SupervisorSessionHandler.kt
 ---
 
 # Issue: `SupervisorSessionHandler` Loop Swallows Thread Interruption

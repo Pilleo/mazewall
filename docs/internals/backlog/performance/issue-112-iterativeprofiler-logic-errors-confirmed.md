@@ -1,16 +1,18 @@
 ---
-title: "`IterativeProfiler` Logic Errors (Confirmed)"
-severity: "HIGH"
-status: "open"
+title: '`IterativeProfiler` Logic Errors (Confirmed)'
+severity: HIGH
+status: open
 priority: 9
 dependencies: []
-target_files: []
-target_modules: [\":profiler\"]
-component: "profiler"
-effort: "large"
-autonomy: "supervised"
+target_files:
+- profiler/src/main/kotlin/io/mazewall/profiler/iterative/IterativeProfiler.kt
+target_modules:
+- :profiler
+component: profiler
+effort: large
+autonomy: supervised
 solution_approved: false
-blast_radius: "medium"
+blast_radius: medium
 reversible: true
 ---
 

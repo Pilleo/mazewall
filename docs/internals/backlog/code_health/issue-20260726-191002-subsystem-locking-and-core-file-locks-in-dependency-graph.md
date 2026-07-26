@@ -1,18 +1,18 @@
 ---
-title: "Implement Subsystem Domain Locking and Core File Exclusive Execution in Dependency Graph"
-severity: "HIGH"
-status: "open"
+title: Implement Subsystem Domain Locking and Core File Exclusive Execution in Dependency
+  Graph
+severity: HIGH
+status: open
 priority: 10
 dependencies:
-  - "issue-20260726-191001"
-component: "orchestrator"
+- issue-20260726-191001
+component: orchestrator
 target_modules:
-  - ":tools:orchestrator"
+- :tools:orchestrator
 target_files:
-  - "tools/orchestrator/src/main/kotlin/io/mazewall/orchestrator/DependencyGraph.kt"
-  - "tools/orchestrator/src/test/kotlin/io/mazewall/orchestrator/DependencyGraphConflictTest.kt"
-effort: "medium"
-autonomy: "autonomous"
+- tools/orchestrator/src/main/kotlin/io/mazewall/orchestrator/DependencyGraph.kt
+effort: medium
+autonomy: autonomous
 ---
 
 # 🔴 [Severity: HIGH]: Implement Subsystem Domain Locking and Core File Exclusive Execution in Dependency Graph

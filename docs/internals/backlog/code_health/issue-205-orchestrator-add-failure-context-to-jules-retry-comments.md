@@ -1,18 +1,20 @@
 ---
-title: "Orchestrator: Add Failure Context to Jules Retry and Completed-Without-PR Comments"
-severity: "MEDIUM"
-status: "open"
+title: 'Orchestrator: Add Failure Context to Jules Retry and Completed-Without-PR
+  Comments'
+severity: MEDIUM
+status: open
 priority: 10
 dependencies: []
-target_files: []
-target_modules: [\":tools:orchestrator\"]
-component: "orchestrator"
-effort: "trivial"
+target_files:
+- tools/orchestrator/src/main/kotlin/io/mazewall/orchestrator/OrchestratorDaemon.kt
+target_modules:
+- :tools:orchestrator
+component: orchestrator
+effort: trivial
 reversible: true
-autonomy: "supervised"
+autonomy: supervised
 solution_approved: false
-blast_radius: "medium"
-reversible: true
+blast_radius: medium
 ---
 
 # 🟡 [Severity: MEDIUM]: Orchestrator: Add Failure Context to Jules Retry and Completed-Without-PR Comments
