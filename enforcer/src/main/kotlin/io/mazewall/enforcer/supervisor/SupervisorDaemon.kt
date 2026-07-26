@@ -44,6 +44,13 @@ public object SupervisorDaemon {
             name = "stdin-monitor"
         }.start()
 
-        engine.run()
+        try {
+            engine.run()
+        } catch (t: Throwable) {
+            System.err.println("[SUPERVISOR-FATAL] Fatal error in SupervisorDaemon: ${t.message}")
+            t.printStackTrace(System.err)
+            System.err.flush()
+            exitProcess(1)
+        }
     }
 }
