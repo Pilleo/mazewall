@@ -14,4 +14,5 @@ interface GitHubClient {
     fun commentOnIssue(issueNumber: String, body: String)
     fun getPrDiff(prNumber: String): String
     fun getPrUrl(prNumber: String): String
+    fun isCommitEmpty(prNumber: String, shaOld: String, shaNew: String): Boolean
 }

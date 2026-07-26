@@ -26,6 +26,7 @@ class MockOrchestratorEnvironment : OrchestratorEnvironment {
     var sleepCount = 0
     val notifications = mutableListOf<String>()
     var bellRungCount = 0
+    var isCommitEmptyResult = false
 
     override fun println(message: Any?) { printlns.add(message.toString()) }
     override fun print(message: Any?) {}
@@ -46,7 +47,7 @@ class MockOrchestratorEnvironment : OrchestratorEnvironment {
         override fun findExistingIssueNumber(issueId: String): String? = existingIssueNumber
         override fun createIssue(title: String, body: String, label: String): String = createdIssueNumber
         override fun isIssueClosed(issueNumber: String): Boolean = issueClosed
-        override fun findLinkedPR(issueNumber: String, issueId: String, sessionId: String?): String? = linkedPrNumber
+        override fun findLinkedPR(issueNumber: String, issueId: String, julesSessionId: String?): String? = linkedPrNumber
         override fun isPrMerged(prNumber: String): Boolean = prMerged
         override fun getPrHeadSha(prNumber: String): String = prHeadSha
         override fun checkBuildStatus(prNumber: String): String = buildStatus
@@ -56,6 +57,7 @@ class MockOrchestratorEnvironment : OrchestratorEnvironment {
         override fun getPrDiff(prNumber: String): String = "mock diff"
         override fun getFailedBuildLogs(prNumber: String): String = "mock failed logs"
         override fun getPrUrl(prNumber: String): String = "mock url"
+        override fun isCommitEmpty(prNumber: String, shaOld: String, shaNew: String): Boolean = isCommitEmptyResult
     }
 
     override val julesClient = object : JulesClient {
@@ -346,5 +348,43 @@ class StateHandlerTest {
         assertEquals(1, context.julesRetries)
         assertEquals("s1", context.julesSessionId)
         assertTrue(env.sentJulesMessages.any { it.first == "s1" && it.second == "Retry" })
+    }
+
+    @Test
+    fun testAwaitingReviewEmptyCommitEscalatesToHuman() {
+        val env = MockOrchestratorEnvironment()
+        val context = OrchestratorContext().apply {
+            prNumber = "pr-1"
+            lastHeadSha = "sha123"
+            julesReviewPushCount = 1
+        }
+        env.prHeadSha = "sha456"
+        env.isCommitEmptyResult = true
+
+        val nextState = OrchestratorState.AWAITING_REVIEW.execute(env, context)
+
+        assertEquals(OrchestratorState.AWAITING_MERGE, nextState)
+        assertEquals("sha456", context.lastHeadSha)
+        assertTrue(env.notifications.any { it == "⚠️ Jules pushed an empty commit during review phase on PR #pr-1" })
+        assertTrue(env.commentedPrs.isEmpty(), "No correction comment should be sent for empty commits")
+    }
+
+    @Test
+    fun testAwaitingReviewNonEmptyCommitReturnsToCiRunning() {
+        val env = MockOrchestratorEnvironment()
+        val context = OrchestratorContext().apply {
+            prNumber = "pr-1"
+            lastHeadSha = "sha123"
+            julesReviewPushCount = 1
+        }
+        env.prHeadSha = "sha456"
+        env.isCommitEmptyResult = false
+
+        val nextState = OrchestratorState.AWAITING_REVIEW.execute(env, context)
+
+        assertEquals(OrchestratorState.CI_RUNNING, nextState)
+        assertEquals("sha456", context.lastHeadSha)
+        assertEquals(0, context.julesReviewPushCount)
+        assertTrue(env.commentedPrs.isEmpty(), "No correction comment should be sent for non-empty commits")
     }
 }
