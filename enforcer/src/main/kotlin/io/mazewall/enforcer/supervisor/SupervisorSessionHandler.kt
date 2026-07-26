@@ -624,22 +624,27 @@ internal class SupervisorSessionHandler(
         tid: Tid,
         traceeArch: io.mazewall.core.Arch
     ): Boolean {
+        if (nr == traceeArch.open || nr == traceeArch.openat || nr == traceeArch.openat2) {
+            if (pathStr == null) {
+                sendSeccompContinue(id, resp)
+                return true
+            }
+        }
+        if (nr == traceeArch.connect) {
+            if (sockaddrBytes == null) {
+                sendSeccompContinue(id, resp)
+                return true
+            }
+        }
+
         var localFdValue = -1
         try {
             localFdValue = when (nr) {
                 traceeArch.open, traceeArch.openat, traceeArch.openat2 -> {
-                    if (pathStr == null) {
-                        -NativeConstants.EPERM
-                    } else {
-                        openFileInSupervisor(nr, args, pathStr, traceeArch)
-                    }
+                    openFileInSupervisor(nr, args, pathStr!!, traceeArch)
                 }
                 traceeArch.connect -> {
-                    if (sockaddrBytes == null) {
-                        -NativeConstants.EPERM
-                    } else {
-                        connectSocketInSupervisor(sockaddrBytes)
-                    }
+                    connectSocketInSupervisor(sockaddrBytes!!)
                 }
                 traceeArch.accept, traceeArch.accept4 -> {
                     handleAcceptAsync(id, nr, args, tid, traceeArch)
