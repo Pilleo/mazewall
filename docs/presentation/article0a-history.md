@@ -20,20 +20,34 @@ Your backend service is almost certainly running inside a container with a defau
 ---
 
 ```mermaid
-timeline
-    title Seccomp & Sandboxing: A 20-Year History
-    2005 : CPUShare → seccomp strict mode merged into Linux 2.6.12
-         : Only 4 syscalls allowed. Any other → SIGKILL.
-    2008 : Chrome ships renderer process isolation
-         : Separate OS processes per site origin
-    2009 : Chromium tries thread-level filtering in C++
-         : Abandoned — shared memory lets attackers hitch a ride
-    2012 : Seccomp-BPF merged into Linux 3.5
-         : Arbitrary syscall allowlists. Chrome adopts immediately.
-    2016 : Docker default Seccomp profile (44 syscalls blocked)
-         : Elasticsearch 5.0 makes it a required bootstrap check
-         : Minijail, nsjail, Bubblewrap mature
-    2021 : Landlock LSM — unprivileged filesystem & network sandboxing
+graph LR
+    Y2005["📅 **2005**
+Seccomp strict mode
+Linux 2.6.12 — CPUShare"]
+    Y2008["📅 **2008**
+Chrome: process isolation
+One OS process per site origin"]
+    Y2009["⚠️ **2009**
+Chromium thread filtering
+Failed — C++ memory escape"]
+    Y2012["✅ **2012**
+Seccomp-BPF
+Linux 3.5 — arbitrary filters"]
+    Y2016["✅ **2016**
+Docker defaults + Elasticsearch
+Application-level enforcement"]
+    Y2021["✅ **2021**
+Landlock LSM
+Filesystem & network control"]
+
+    Y2005 --> Y2008 --> Y2009 --> Y2012 --> Y2016 --> Y2021
+
+    style Y2005 fill:#1e3a5f,color:#bfdbfe,stroke:#3b82f6
+    style Y2008 fill:#1e3a5f,color:#bfdbfe,stroke:#3b82f6
+    style Y2009 fill:#7f1d1d,color:#fca5a5,stroke:#dc2626
+    style Y2012 fill:#14532d,color:#bbf7d0,stroke:#22c55e
+    style Y2016 fill:#14532d,color:#bbf7d0,stroke:#22c55e
+    style Y2021 fill:#14532d,color:#bbf7d0,stroke:#22c55e
 ```
 
 ---
@@ -82,17 +96,20 @@ The assembly made the trusted thread's logic resistant to in-process tampering. 
 When Seccomp-BPF arrived in 2012, it solved the expressiveness problem — filters could now express complex allowlists, not just four syscalls — but not the memory-safety problem. Chrome's renderer sandbox moved back to process isolation, reinforced with Seccomp-BPF filters on each *process*. The thread-level approach was abandoned.
 
 ```mermaid
-flowchart TD
-    A["Attacker achieves code execution\non restricted thread"] --> B{"Use restricted thread's\nsyscall path?"}
-    B -- "❌ Blocked by Seccomp" --> C["EPERM / SIGKILL"]
-    B -- "✅ Ignore it entirely" --> D["Write directly to\nunrestricted thread memory"]
-    D --> E["Corrupt stack / instruction pointer\nof unrestricted sibling thread"]
-    E --> F["Unrestricted thread makes\nthe syscall instead"]
-    F --> G["✅ Syscall succeeds — kernel\nnever saw the restricted thread"]
+sequenceDiagram
+    participant AT as 🎯 Restricted Thread
+    participant MEM as 💾 Shared Process Memory
+    participant UT as 🧵 Unrestricted Thread
+    participant K as 🐧 Linux Kernel
 
-    style C fill:#dc2626,color:#fff
-    style G fill:#16a34a,color:#fff
-    style D fill:#d97706,color:#fff
+    AT->>K: execve("/bin/sh")
+    K-->>AT: ❌ EPERM — Seccomp blocks it
+
+    Note over AT,MEM: Seccomp only guards this thread's syscall gate.<br/>Shared memory has no boundary.
+    AT->>MEM: Overwrite unrestricted thread's stack frame
+    MEM->>UT: Thread resumes with attacker-controlled instruction pointer
+    UT->>K: execve("/bin/sh")
+    K-->>UT: ✅ Success — no Seccomp filter on this thread
 ```
 
 > **The key insight:** Seccomp filters guard the syscall *gate* of one thread. In C++, an attacker with code execution never needs to use that gate — they write directly to another thread's memory and exit through an unrestricted path.
