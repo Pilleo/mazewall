@@ -30,6 +30,8 @@ class BacklogValidatorTest {
             priority: 9
             dependencies: []
             component: "enforcer"
+            target_modules: [":enforcer"]
+            target_files: []
             ---
 
             # 🔴 [Severity: HIGH]: Valid Title

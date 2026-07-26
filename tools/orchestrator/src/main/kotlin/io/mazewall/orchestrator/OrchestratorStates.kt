@@ -207,29 +207,31 @@ sealed interface OrchestratorState {
                 return SELECT_TASK
             }
 
+            // 1. Check if PR has been published on GitHub
+            val prNumber = env.gitHubClient.findLinkedPR(githubIssueNumber, issueId, sessionId)
+            if (prNumber != null) {
+                env.println("🎉 Jules opened PR #$prNumber")
+                context.prNumber = prNumber
+                context.lastBuildStatus = null
+                context.lastHeadSha = null
+                context.lastCheckedSha = null
+                context.julesRetries = 0
+                return CI_RUNNING
+            }
+
+            // 2. Check Jules session status
             val session = env.julesClient.getActiveSession(issueId)
             if (session != null) {
                 val sessionUrl = "https://jules.google.com/session/${session.id}"
                 val status = session.status.lowercase()
 
-                if (status == "failed" || status == "cancelled") {
+                if (status == "failed" || status == "cancelled" || env.julesClient.hasUnableToCompleteActivity(session.id)) {
                     if (context.julesRetries < 2) {
                         context.julesRetries++
                         env.println("\n⚠️ [RETRY] Jules task $issueId failed with status: ${session.status}. Retrying (Attempt ${context.julesRetries}/2)...")
-                        env.sendNotification("⚠️ *Jules task failed* for $issueId (Status: ${session.status}). Sending 'Retry' message to Jules (Attempt ${context.julesRetries}/2).")
+                        env.sendNotification("⚠️ *Jules task failed* for $issueId (Status: ${session.status}). Sending 'Retry' message to Jules.")
                         env.julesClient.sendSessionMessage(session.id, "Retry")
                         context.lastBuildStatus = null
-                        
-                        var retriedSession = env.julesClient.getActiveSession(issueId)
-                        var retryWaitAttempts = 0
-                        while (retriedSession != null && 
-                               (retriedSession.status.lowercase() == "failed" || retriedSession.status.lowercase() == "cancelled") && 
-                               retryWaitAttempts < 15) {
-                            env.println("Waiting for Jules session status to transition out of failure state (attempt ${retryWaitAttempts + 1}/15)...")
-                            env.sleep(20, TimeUnit.SECONDS)
-                            retriedSession = env.julesClient.getActiveSession(issueId)
-                            retryWaitAttempts++
-                        }
                         return this
                     } else {
                         env.println("\n❌ [FAILED] Jules task $issueId failed with status: ${session.status} after ${context.julesRetries} retries.")
@@ -255,60 +257,23 @@ sealed interface OrchestratorState {
                         env.println("👉 Respond here: $sessionUrl")
                         env.ringBell(5)
                     } else if (session.status.equals("Completed", ignoreCase = true)) {
-                        env.println("\n\u001B[1;32m🟢 [COMPLETED] Jules task $issueId is Completed! Please review and publish the PR in the UI.\u001B[0m")
-                        env.println("👉 Publish PR here: $sessionUrl")
-                    }
-                }
-
-                if (status == "completed" && env.gitHubClient.findLinkedPR(githubIssueNumber, issueId, sessionId) == null) {
-                    if (context.julesRetries < 2) {
-                        context.julesRetries++
-                        env.println("\n⚠️ [RETRY] Jules task $issueId finished as Completed but did not open a PR. Retrying (Attempt ${context.julesRetries}/2)...")
-                        env.sendNotification("⚠️ *Jules task finished* for $issueId without creating a PR. Sending 'Retry' message to Jules (Attempt ${context.julesRetries}/2).")
-                        env.julesClient.sendSessionMessage(session.id, "Retry")
-                        context.lastBuildStatus = null
-                        
-                        var retriedSession = env.julesClient.getActiveSession(issueId)
-                        var retryWaitAttempts = 0
-                        while (retriedSession != null && 
-                               (retriedSession.status.lowercase() == "failed" || retriedSession.status.lowercase() == "cancelled") && 
-                               retryWaitAttempts < 15) {
-                            env.println("Waiting for Jules session status to transition out of failure state (attempt ${retryWaitAttempts + 1}/15)...")
-                            env.sleep(20, TimeUnit.SECONDS)
-                            retriedSession = env.julesClient.getActiveSession(issueId)
-                            retryWaitAttempts++
+                        val now = System.currentTimeMillis()
+                        if (now - context.lastWaitingLogTime > 600_000) {
+                            env.println("\n\u001B[1;32m🟢 [COMPLETED] Jules task $issueId is Completed! Please review and publish the PR in the UI.\u001B[0m")
+                            env.println("👉 Publish PR here: $sessionUrl")
+                            context.lastWaitingLogTime = now
                         }
-                        return this
-                    } else {
-                        env.println("\n❌ [FAILED] Jules task $issueId finished as Completed but did not open a PR after ${context.julesRetries} retries.")
-                        env.sendNotification("❌ *Jules task finished* for $issueId without creating a PR after ${context.julesRetries} retries. Returning to SELECT_TASK.")
-                        val nextIssue = env.parseAllIssues().firstOrNull { it.id == issueId }
-                        if (nextIssue != null) {
-                            env.removeGithubIssue(nextIssue)
-                        }
-                        context.skippedIds.add(issueId)
-                        context.clearActiveTask()
-                        return SELECT_TASK
                     }
                 }
             }
 
-            val prNumber = env.gitHubClient.findLinkedPR(githubIssueNumber, issueId, sessionId)
-            return if (prNumber != null) {
-                env.println("Jules opened PR #$prNumber")
-                context.prNumber = prNumber
-                context.lastBuildStatus = null
-                CI_RUNNING
-            } else {
-                if (isTaskTimedOut(context, env.config)) {
-                    env.errPrintln("❌ Task $issueId timed out after ${env.config.taskTimeoutThresholdMinutes} minutes. Returning to SELECT_TASK.")
-                    context.clearActiveTask()
-                    return SELECT_TASK
-                }
-                env.println("Waiting for Jules to open a PR for issue #$githubIssueNumber...")
-                env.sleep(env.config.pollingIntervalSeconds, TimeUnit.SECONDS)
-                this
+            val now = System.currentTimeMillis()
+            if (now - context.lastWaitingLogTime > 600_000) {
+                env.println("⌛ Waiting for Jules PR to be published for task $issueId...")
+                context.lastWaitingLogTime = now
             }
+
+            return this
         }
     }
 

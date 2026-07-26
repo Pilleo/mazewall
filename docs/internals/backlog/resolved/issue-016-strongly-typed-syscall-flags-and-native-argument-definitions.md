@@ -4,9 +4,11 @@ severity: "ENHANCEMENT"
 status: "resolved"
 priority: 2
 dependencies: []
-component: "unknown"
+target_files: []
+target_modules: [\":enforcer\"]
+component: "enforcer"
 effort: "medium"
-github_issue: 289
+github_issue: 309
 ---
 
 # 🔵 [Severity: ENHANCEMENT]: Strongly Typed Syscall Flags and Native Argument Definitions

@@ -33,7 +33,6 @@ graph TD
     issue_013_manual_ffm_layout_maintenance_and_abi_drift_risk["🔴 Issue: Manual FFM Layout Maintenance and ABI Drift Risk (HIGH)"]
     issue_014_bpf_disassemblerdumper_for_policy_verification["🔴 Issue: BPF Disassembler/Dumper for Policy Verification (ENHANCEMENT)"]
     issue_015_algebraic_policy_composition_semigroupmonoid["🔴 Issue: Algebraic Policy Composition (Semigroup/Monoid) (ENHANCEMENT)"]
-    issue_016_strongly_typed_syscall_flags_and_native_argument_definitions["🔴 Issue: Strongly Typed Syscall Flags and Native Argument Definitions (ENHANCEMENT)"]
     issue_017_symbolic_errno_mapping_in_syscallresult["🔴 Issue: Symbolic Errno Mapping in `SyscallResult` (ENHANCEMENT)"]
     issue_018_formal_monoidal_composition_for_billofbehavior["🔴 Issue: Formal Monoidal Composition for `BillOfBehavior` (ENHANCEMENT)"]
     issue_019_refactor_profiler_daemon_to_use_coroutines_structured_concur["🔴 Issue: Refactor Profiler Daemon to use Coroutines (Structured Concurrency) (ENHANCEMENT)"]
@@ -108,7 +107,6 @@ graph TD
     click issue_013_manual_ffm_layout_maintenance_and_abi_drift_risk "../../../backlog/testing/issue-013-manual-ffm-layout-maintenance-and-abi-drift-risk.md"
     click issue_014_bpf_disassemblerdumper_for_policy_verification "../../../backlog/security/issue-014-bpf-disassemblerdumper-for-policy-verification.md"
     click issue_015_algebraic_policy_composition_semigroupmonoid "../../../backlog/testing/issue-015-algebraic-policy-composition-semigroupmonoid.md"
-    click issue_016_strongly_typed_syscall_flags_and_native_argument_definitions "../../../backlog/performance/issue-016-strongly-typed-syscall-flags-and-native-argument-definitions.md"
     click issue_017_symbolic_errno_mapping_in_syscallresult "../../../backlog/performance/issue-017-symbolic-errno-mapping-in-syscallresult.md"
     click issue_018_formal_monoidal_composition_for_billofbehavior "../../../backlog/testing/issue-018-formal-monoidal-composition-for-billofbehavior.md"
     click issue_019_refactor_profiler_daemon_to_use_coroutines_structured_concur "../../../backlog/code_health/issue-019-refactor-profiler-daemon-to-use-coroutines-structured-concur.md"
