@@ -7,7 +7,7 @@ component: "enforcer"
 target_modules: [":enforcer"]
 target_files: []
 effort: "medium"
-dependencies: ["issue-20260726-024500"]
+dependencies: []
 ---
 
 # 🔵 [Severity: ENHANCEMENT]: Hardware-Aware CI Test Suite and Graceful Fallback Assertions for Intel CET

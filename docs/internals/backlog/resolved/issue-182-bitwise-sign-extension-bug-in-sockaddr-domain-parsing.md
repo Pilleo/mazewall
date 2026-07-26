@@ -2,6 +2,7 @@
 title: "Bitwise Sign-Extension Bug in `sockaddr` Domain Parsing"
 severity: "HIGH"
 status: "resolved"
+priority: 8
 ---
 
 # 🔴 [Severity: HIGH]: Bitwise Sign-Extension Bug in `sockaddr` Domain Parsing

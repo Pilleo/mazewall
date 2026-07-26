@@ -2,6 +2,7 @@
 title: "Gradle Configuration Cache Path Collision in CI"
 severity: "MEDIUM"
 status: "resolved"
+priority: 5
 ---
 
 # 🟡 [Severity: MEDIUM]: Gradle Configuration Cache Path Collision in CI

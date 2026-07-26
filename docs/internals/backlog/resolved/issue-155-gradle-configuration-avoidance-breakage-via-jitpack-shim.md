@@ -2,6 +2,7 @@
 title: "Gradle Configuration Avoidance Breakage via JitPack Shim"
 severity: "RESOLVED"
 status: "resolved"
+priority: 5
 ---
 
 # ✅ [RESOLVED]: Gradle Configuration Avoidance Breakage via JitPack Shim

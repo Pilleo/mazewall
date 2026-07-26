@@ -2,6 +2,7 @@
 title: "Blacklist policies trigger silent Landlock filesystem lockdown due to `io_uring` check"
 severity: "RESOLVED"
 status: "resolved"
+priority: 5
 ---
 
 # ✅ [RESOLVED]: Blacklist policies trigger silent Landlock filesystem lockdown due to `io_uring` check

@@ -2,6 +2,7 @@
 title: "Silent failure of Profiler path resolution under Yama `ptrace_scope` > 1 leads to catastrophic Landlock enforcement failures"
 severity: "RESOLVED"
 status: "resolved"
+priority: 5
 ---
 
 # ✅ [RESOLVED]: Silent failure of Profiler path resolution under Yama `ptrace_scope` > 1 leads to catastrophic Landlock enforcement failures

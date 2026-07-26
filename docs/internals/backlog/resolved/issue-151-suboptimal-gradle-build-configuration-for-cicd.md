@@ -2,6 +2,7 @@
 title: "Suboptimal Gradle Build Configuration for CI/CD"
 severity: "RESOLVED"
 status: "resolved"
+priority: 5
 ---
 
 # ✅ [RESOLVED]: Suboptimal Gradle Build Configuration for CI/CD

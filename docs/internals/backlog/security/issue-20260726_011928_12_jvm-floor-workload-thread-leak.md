@@ -2,7 +2,7 @@
 title: JvmFloorWorkload OS Thread leak due to infinite retry loop on exception
 type: issue
 status: open
-priority: medium
+priority: 5
 labels: ["security", "enforcer", "resource-exhaustion"]
 component: enforcer
 target_modules: [":enforcer"]

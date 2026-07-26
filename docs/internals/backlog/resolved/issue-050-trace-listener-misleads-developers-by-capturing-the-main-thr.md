@@ -2,6 +2,7 @@
 title: "Trace Listener misleads developers by capturing the Main Thread stack trace for unmapped child threads"
 severity: "RESOLVED"
 status: "resolved"
+priority: 5
 ---
 
 # ✅ [RESOLVED]: Trace Listener misleads developers by capturing the Main Thread stack trace for unmapped child threads

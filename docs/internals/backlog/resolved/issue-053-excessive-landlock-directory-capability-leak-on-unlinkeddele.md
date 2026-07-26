@@ -2,6 +2,7 @@
 title: "Excessive Landlock directory capability leak on unlinked/deleted files ending in ` (deleted)`"
 severity: "RESOLVED"
 status: "resolved"
+priority: 5
 ---
 
 # ✅ [RESOLVED]: Excessive Landlock directory capability leak on unlinked/deleted files ending in ` (deleted)`

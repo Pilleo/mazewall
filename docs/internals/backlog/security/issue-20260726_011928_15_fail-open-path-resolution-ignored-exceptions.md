@@ -2,7 +2,7 @@
 title: SupervisorSessionHandler ignores critical exceptions during path resolution leading to fail-open bypass
 type: issue
 status: open
-priority: high
+priority: 8
 labels: ["security", "enforcer", "fail-open", "sandbox-bypass"]
 component: enforcer
 target_modules: [":enforcer"]

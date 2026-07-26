@@ -2,7 +2,7 @@
 title: Arena MemorySegment leak in JVMValidationListener during async response loop
 type: issue
 status: open
-priority: high
+priority: 8
 labels: ["security", "enforcer", "ffm", "memory-leak"]
 component: enforcer
 target_modules: [":enforcer"]
