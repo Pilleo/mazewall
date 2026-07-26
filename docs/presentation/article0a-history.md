@@ -19,7 +19,27 @@ Your backend service is almost certainly running inside a container with a defau
 
 ---
 
+```mermaid
+timeline
+    title Seccomp & Sandboxing: A 20-Year History
+    2005 : CPUShare → seccomp strict mode merged into Linux 2.6.12
+         : Only 4 syscalls allowed. Any other → SIGKILL.
+    2008 : Chrome ships renderer process isolation
+         : Separate OS processes per site origin
+    2009 : Chromium tries thread-level filtering in C++
+         : Abandoned — shared memory lets attackers hitch a ride
+    2012 : Seccomp-BPF merged into Linux 3.5
+         : Arbitrary syscall allowlists. Chrome adopts immediately.
+    2016 : Docker default Seccomp profile (44 syscalls blocked)
+         : Elasticsearch 5.0 makes it a required bootstrap check
+         : Minijail, nsjail, Bubblewrap mature
+    2021 : Landlock LSM — unprivileged filesystem & network sandboxing
+```
+
+---
+
 ## 2005: The Kernel Gets a Lock
+
 
 The story starts not with browsers or containers, but with a grid computing company called [CPUShare](https://lwn.net/Articles/120647/). In 2005, Andrea Arcangeli contributed a feature to Linux 2.6.12 called **seccomp** — *secure computing mode* ([LWN: Secure computing mode](https://lwn.net/Articles/120647/)).
 
@@ -60,6 +80,22 @@ The problem was that trusted and sandboxed threads shared an address space. A co
 The assembly made the trusted thread's logic resistant to in-process tampering. But it did not solve the fundamental problem. A C++ attacker with code execution does not need to corrupt the trusted thread's validator. They can write directly to the stack of *any other unrestricted thread* in the process. The trusted thread architecture protected its own logic; it could not protect every other thread from one that had arbitrary memory access.
 
 When Seccomp-BPF arrived in 2012, it solved the expressiveness problem — filters could now express complex allowlists, not just four syscalls — but not the memory-safety problem. Chrome's renderer sandbox moved back to process isolation, reinforced with Seccomp-BPF filters on each *process*. The thread-level approach was abandoned.
+
+```mermaid
+flowchart TD
+    A["Attacker achieves code execution\non restricted thread"] --> B{"Use restricted thread's\nsyscall path?"}
+    B -- "❌ Blocked by Seccomp" --> C["EPERM / SIGKILL"]
+    B -- "✅ Ignore it entirely" --> D["Write directly to\nunrestricted thread memory"]
+    D --> E["Corrupt stack / instruction pointer\nof unrestricted sibling thread"]
+    E --> F["Unrestricted thread makes\nthe syscall instead"]
+    F --> G["✅ Syscall succeeds — kernel\nnever saw the restricted thread"]
+
+    style C fill:#dc2626,color:#fff
+    style G fill:#16a34a,color:#fff
+    style D fill:#d97706,color:#fff
+```
+
+> **The key insight:** Seccomp filters guard the syscall *gate* of one thread. In C++, an attacker with code execution never needs to use that gate — they write directly to another thread's memory and exit through an unrestricted path.
 
 ---
 
@@ -122,6 +158,16 @@ This is not a flaw unique to C++. Any execution environment that permits arbitra
 But memory safety alone is not sufficient. The second requirement is that the work units you want to isolate — the "HTTP handler scope" or the "document processor scope" — must actually correspond to *OS-level threads*, because Seccomp filters operate at the OS thread level. The kernel has no concept of goroutines, fibers, green threads, or event loop tasks.
 
 With both criteria in mind:
+
+| Runtime | Memory Safe | Thread = OS Thread | Process-Wide | Thread-Scoped | Notes |
+|---|---|---|---|---|---|
+| **JVM (Java/Kotlin/Scala)** | ✅ Bytecode verifier | ✅ 1:1 guaranteed | ✅ | ✅ | Applies to injection, SSRF, deserialization vectors. JNI/FFM vulnerabilities break the guarantee. |
+| **.NET (C#/F#)** | ✅ IL verifier | ✅ 1:1 | ✅ | ✅ | Same strong fit as JVM. |
+| **Rust (safe code)** | ✅ Ownership system | ✅ 1:1 | ✅ | ⚠️ Conditional | `unsafe` blocks and FFI restore C/C++ risk. Depends on dependency footprint. |
+| **Go** | ✅ Memory safe | ❌ M:N goroutines | ✅ | ❌ | Goroutines migrate between OS threads — the kernel cannot see goroutine boundaries. |
+| **Node.js** | ✅ (V8 managed) | ❌ Single event loop | ✅ | ⚠️ Workers only | Thread filtering only meaningful if architecture deliberately uses Worker Threads for isolation. |
+| **Python** | ✅ Interpreter | ✅ 1:1 | ✅ | ⚠️ Conditional | C extensions bypass memory safety. GIL limits damage surface but free-threaded mode (3.12+) changes this. |
+| **C / C++** | ❌ Manual memory | ✅ 1:1 | ✅ | ❌ | The Chromium wall. Code execution → arbitrary memory writes → filter bypass. |
 
 ### JVM languages (Java, Kotlin, Scala)
 
