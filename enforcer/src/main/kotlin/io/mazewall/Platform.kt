@@ -165,6 +165,39 @@ public object Platform {
         return FallbackBehavior.FAIL
     }
 
+    @Volatile
+    internal var isCpuCetSupportedOverride: Boolean? = null
+
+    private var isCpuCetSupportedCached: Boolean? = null
+
+    /**
+     * Checks if the CPU supports Intel CET Shadow Stack by reading /proc/cpuinfo.
+     */
+    public fun isCpuCetSupported(): Boolean {
+        val override = isCpuCetSupportedOverride
+        if (override != null) return override
+
+        val cached = isCpuCetSupportedCached
+        if (cached != null) return cached
+
+        val result = try {
+            val file = java.io.File("/proc/cpuinfo")
+            if (file.exists()) {
+                file.useLines { lines ->
+                    lines.any { line ->
+                        line.startsWith("flags") && line.contains("shstk", ignoreCase = true)
+                    }
+                }
+            } else {
+                false
+            }
+        } catch (e: Throwable) {
+            false
+        }
+        isCpuCetSupportedCached = result
+        return result
+    }
+
     /**
      * Queries the kernel for active Intel CET Shadow Stack status.
      * Returns a bitmask of enabled options (e.g. 1 for ARCH_SHSTK_SHSTK), or 0 if unsupported/disabled/error.
@@ -172,6 +205,7 @@ public object Platform {
     public fun queryIntelCetStatus(): Long {
         if (!isLinux || !isArchitectureSupported()) return 0L
         if (io.mazewall.core.Arch.current() != io.mazewall.core.Arch.AMD64) return 0L
+        if (!isCpuCetSupported()) return 0L
 
         return try {
             NativeArena.ofConfined().use { arena ->

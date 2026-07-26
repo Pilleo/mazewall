@@ -17,12 +17,23 @@ class IntelCetTest {
     fun setUp() {
         LinuxNative.setEngine(mockEngine)
         Platform.resetToDefault()
+        Platform.isCpuCetSupportedOverride = true
     }
 
     @AfterEach
     fun tearDown() {
         LinuxNative.resetToDefault()
         Platform.resetToDefault()
+        Platform.isCpuCetSupportedOverride = null
+    }
+
+    @Test
+    fun `isCpuCetSupported works correctly`() {
+        // Clear override to test real or cached behavior
+        Platform.isCpuCetSupportedOverride = null
+        val supported = Platform.isCpuCetSupported()
+        // It shouldn't throw, and should return false on test runners lacking shstk flag
+        assertFalse(supported)
     }
 
     @Test
