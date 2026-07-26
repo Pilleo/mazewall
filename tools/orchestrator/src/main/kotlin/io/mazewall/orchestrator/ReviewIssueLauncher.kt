@@ -32,7 +32,7 @@ object ReviewIssueLauncher {
             priority: 10
             component: "profiler"
             target_modules: [":profiler", ":enforcer"]
-            target_files: []
+            target_files: ["profiler/src/main/kotlin/io/mazewall/profiler/Profiler.kt", "enforcer/src/main/kotlin/io/mazewall/enforcer/supervisor/SupervisorSessionHandler.kt"]
             effort: "medium"
             dependencies: []
             ---
