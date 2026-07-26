@@ -1,7 +1,7 @@
 ---
 title: "Multi-Issue Parallel Execution & Conflict-Free Task Scheduler"
 severity: "HIGH"
-status: "open"
+status: "resolved"
 priority: 8
 dependencies: ["issue-20260726-03"]
 component: "orchestrator"
@@ -12,6 +12,7 @@ target_files:
   - "tools/orchestrator/src/main/kotlin/io/mazewall/orchestrator/OrchestratorStates.kt"
 effort: "large"
 autonomy: "supervised"
+github_issue: 315
 ---
 
 # 🔴 [Severity: HIGH]: Multi-Issue Parallel Execution & Conflict-Free Task Scheduler

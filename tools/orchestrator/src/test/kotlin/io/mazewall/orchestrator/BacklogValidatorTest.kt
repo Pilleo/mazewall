@@ -21,7 +21,7 @@ class BacklogValidatorTest {
 
     @Test
     fun testValidBacklogPasses() {
-        val validFile = File(tempDir, "issue-20260726-01-valid.md")
+        val validFile = File(tempDir, "issue-20260726-123456-valid.md")
         validFile.writeText("""
             ---
             title: "Valid Title"

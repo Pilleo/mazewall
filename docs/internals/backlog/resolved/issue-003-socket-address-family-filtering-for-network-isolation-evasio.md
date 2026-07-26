@@ -1,13 +1,14 @@
 ---
 title: "Socket Address Family Filtering for Network Isolation Evasion Prevention"
 severity: "ENHANCEMENT"
-status: "open"
+status: "resolved"
 priority: 2
 dependencies: []
 target_files: []
 target_modules: [\":enforcer\"]
 component: "enforcer"
 effort: "medium"
+github_issue: 318
 ---
 
 # 🔵 [Severity: ENHANCEMENT]: Socket Address Family Filtering for Network Isolation Evasion Prevention
