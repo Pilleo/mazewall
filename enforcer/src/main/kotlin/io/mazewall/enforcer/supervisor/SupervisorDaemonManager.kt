@@ -36,6 +36,11 @@ public class SupervisorDaemonManager(
     private val daemonLock = Any()
     private var sharedDaemonContext: SupervisorContext? = null
 
+    // Visible for testing: allows test suites to intercept unexpected exit without terminating the JVM
+    internal var onUnexpectedExit: (exitCode: Int) -> Unit = {
+        Runtime.getRuntime().halt(1)
+    }
+
     public companion object {
         private const val SHUTDOWN_COMMAND_BYTE = 0x53.toByte() // 'S'
         private const val SHUTDOWN_WAIT_MS = 100L
@@ -152,6 +157,14 @@ public class SupervisorDaemonManager(
             logger.warning("prctl(PR_SET_PTRACER) failed with errno ${prctlRes.errno}. The daemon may not be able to read process memory if Yama ptrace_scope is restrictive.")
         }
 
+        val shutdownHook = Thread {
+            daemonProcess.destroyForcibly()
+        }
+        processLauncher.addShutdownHook(shutdownHook)
+
+        val context = SupervisorContext(socketPath, socketDir, daemonProcess, shutdownHook)
+        sharedDaemonContext = context
+
         val readyLatch = java.util.concurrent.CountDownLatch(1)
 
         Thread {
@@ -168,6 +181,23 @@ public class SupervisorDaemonManager(
                 }
             } catch (ignored: IOException) {
                 // Stopped
+            } catch (t: Throwable) {
+                logger.log(java.util.logging.Level.SEVERE, "Exception inside supervisor-daemon-output thread", t)
+            } finally {
+                synchronized(daemonLock) {
+                    val currentContext = sharedDaemonContext
+                    if (currentContext != null && currentContext.daemonProcess == daemonProcess) {
+                        if (!daemonProcess.isAlive) {
+                            val exitCode = try { daemonProcess.exitValue() } catch (e: Exception) { -1 }
+                            logger.severe("SupervisorDaemon (PID=${daemonProcess.pid()}) exited unexpectedly with exit code $exitCode!")
+                            logger.severe("Last daemon log lines:")
+                            daemonLogLines.forEach { line ->
+                                logger.severe("[SUPERVISOR-DAEMON-CRASH-LOG] $line")
+                            }
+                            onUnexpectedExit(exitCode)
+                        }
+                    }
+                }
             }
         }.apply {
             isDaemon = true
@@ -187,12 +217,7 @@ public class SupervisorDaemonManager(
             )
         }
 
-        val shutdownHook = Thread {
-            daemonProcess.destroyForcibly()
-        }
-        processLauncher.addShutdownHook(shutdownHook)
-
-        return SupervisorContext(socketPath, socketDir, daemonProcess, shutdownHook)
+        return context
     }
 
     private fun triggerDaemonShutdown(socketPath: String) {
