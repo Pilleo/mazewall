@@ -52,6 +52,7 @@ object BpfFilter {
                 ThreadCloneInspector(),
                 UnsafePrctlInspector(),
                 Clone3Inspector(),
+                SocketAddressFamilyInspector(),
             )
         )
     }
