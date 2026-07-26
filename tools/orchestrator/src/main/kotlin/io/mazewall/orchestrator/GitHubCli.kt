@@ -289,6 +289,16 @@ class RealGitHubClient(private val config: OrchestratorConfig) : GitHubClient {
             false
         }
     }
+
+    override fun rebaseBranch(prNumber: String): Boolean {
+        return try {
+            execute("gh", "pr", "update-branch", prNumber, "--rebase")
+            true
+        } catch (e: Exception) {
+            System.err.println("Notice/Error rebasing branch for PR #$prNumber via gh pr update-branch: ${e.message}")
+            false
+        }
+    }
 }
 
 class ProcessExecutionException(val command: String, val exitCode: Int, val output: String) :

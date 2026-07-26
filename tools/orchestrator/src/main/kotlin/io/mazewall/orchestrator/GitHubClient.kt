@@ -15,4 +15,5 @@ interface GitHubClient {
     fun getPrDiff(prNumber: String): String
     fun getPrUrl(prNumber: String): String
     fun isCommitEmpty(prNumber: String, shaOld: String, shaNew: String): Boolean
+    fun rebaseBranch(prNumber: String): Boolean
 }

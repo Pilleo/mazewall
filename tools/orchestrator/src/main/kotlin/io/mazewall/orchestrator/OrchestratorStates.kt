@@ -428,13 +428,20 @@ sealed interface OrchestratorState {
                     this
                 }
                 "CONFLICT" -> {
-                    val now = System.currentTimeMillis()
-                    if (now - slot.lastWaitingLogTime > 60_000) {
-                        val prUrl = env.gitHubClient.getPrUrl(prNumber)
-                        env.sendNotification("⚠️ *PR #$prNumber has conflicts!* Please resolve them: $prUrl")
-                        env.println("\u001B[1;31m🔔 [CONFLICT] PR #$prNumber has conflicts! Please resolve conflicts: $prUrl\u001B[0m")
-                        env.ringBell(3)
-                        slot.lastWaitingLogTime = now
+                    env.println("🔄 Attempting automated rebase of PR #$prNumber onto master...")
+                    val rebaseSuccess = env.gitHubClient.rebaseBranch(prNumber)
+                    if (rebaseSuccess) {
+                        env.println("✅ Successfully auto-rebased PR #$prNumber onto master.")
+                        slot.lastWaitingLogTime = 0L
+                    } else {
+                        val now = System.currentTimeMillis()
+                        if (now - slot.lastWaitingLogTime > 60_000) {
+                            val prUrl = env.gitHubClient.getPrUrl(prNumber)
+                            env.sendNotification("⚠️ *PR #$prNumber has conflicts!* Automated rebase failed. Please resolve them: $prUrl")
+                            env.println("\u001B[1;31m🔔 [CONFLICT] PR #$prNumber has conflicts! Automated rebase failed. Please resolve: $prUrl\u001B[0m")
+                            env.ringBell(3)
+                            slot.lastWaitingLogTime = now
+                        }
                     }
                     env.sleep(env.config.pollingIntervalSeconds, TimeUnit.SECONDS)
                     this
@@ -470,6 +477,15 @@ sealed interface OrchestratorState {
             }
 
             val currentSha = env.gitHubClient.getPrHeadSha(prNumber)
+
+            val buildStatus = env.gitHubClient.checkBuildStatus(prNumber)
+            if (buildStatus == "CONFLICT") {
+                env.println("🔄 Conflict detected in AWAITING_REVIEW for PR #$prNumber. Attempting automated rebase onto master...")
+                if (env.gitHubClient.rebaseBranch(prNumber)) {
+                    env.println("✅ Successfully auto-rebased PR #$prNumber onto master.")
+                    return CI_RUNNING
+                }
+            }
 
             val issueId = slot.currentIssueId
             val sessionId = slot.julesSessionId
@@ -533,8 +549,7 @@ sealed interface OrchestratorState {
                 }
             }
 
-            val status = env.gitHubClient.checkBuildStatus(prNumber)
-            if (status != "SUCCESS") {
+            if (buildStatus != "SUCCESS") {
                 return CI_RUNNING
             }
 

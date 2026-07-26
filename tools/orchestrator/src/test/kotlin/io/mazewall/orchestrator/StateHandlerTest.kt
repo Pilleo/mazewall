@@ -58,6 +58,7 @@ class MockOrchestratorEnvironment : OrchestratorEnvironment {
         override fun getFailedBuildLogs(prNumber: String): String = "mock failed logs"
         override fun getPrUrl(prNumber: String): String = "mock url"
         override fun isCommitEmpty(prNumber: String, shaOld: String, shaNew: String): Boolean = isCommitEmptyResult
+        override fun rebaseBranch(prNumber: String): Boolean = true
     }
 
     override val julesClient = object : JulesClient {
