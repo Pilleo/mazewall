@@ -72,6 +72,7 @@ graph TD
     issue_195_reactor_loop_iteration_arena_scoping["🔴 Issue: Reactor Loop Iteration Arena Scoping (HIGH)"]
     issue_197_graceful_fallback_for_ai_agent_failures["🔴 Issue: Graceful Fallback for AI Agent Failures (HIGH)"]
     issue_198_auto_closing_linked_github_issues["🔴 Issue: Auto-Closing Linked GitHub Issues (HIGH)"]
+    issue_20260726_0135_refactor_profiler_classes_for_testability["🔴 Issue: Refactor Profiler core classes for testability and test them (MEDIUM)"]
     issue_20260726_04_parallel_orchestrator_task_scheduler_and_conflict_avoidance["🔴 Issue: Multi-Issue Parallel Execution & Conflict-Free Task Scheduler (HIGH)"]
     issue_20260726_05_detect_empty_commits_during_jules_review_loop["🔴 Issue: Detect Empty Commits in Jules Review Loop to Prevent Redundant Correction Comments (MEDIUM)"]
     issue_202_handle_cli_authentication_failures["🔴 Issue: Detect and Handle CLI Authentication Failures with Actionable Login Alerts (HIGH)"]
@@ -150,6 +151,7 @@ graph TD
     click issue_195_reactor_loop_iteration_arena_scoping "../../../backlog/performance/issue-195-reactor-loop-iteration-arena-scoping.md"
     click issue_197_graceful_fallback_for_ai_agent_failures "../../../backlog/code_health/issue-197-graceful-fallback-for-ai-agent-failures.md"
     click issue_198_auto_closing_linked_github_issues "../../../backlog/code_health/issue-198-auto-closing-linked-github-issues.md"
+    click issue_20260726_0135_refactor_profiler_classes_for_testability "../../../backlog/testing/issue-20260726-0135-refactor-profiler-classes-for-testability.md"
     click issue_20260726_04_parallel_orchestrator_task_scheduler_and_conflict_avoidance "../../../backlog/code_health/issue-20260726-04-parallel-orchestrator-task-scheduler-and-conflict-avoidance.md"
     click issue_20260726_05_detect_empty_commits_during_jules_review_loop "../../../backlog/code_health/issue-20260726-05-detect-empty-commits-during-jules-review-loop.md"
     click issue_202_handle_cli_authentication_failures "../../../backlog/code_health/issue-202-handle-cli-authentication-failures.md"
