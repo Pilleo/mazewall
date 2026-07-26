@@ -2,7 +2,7 @@
 title: SupervisorDaemonManager fails to catch throwable during daemon execution leading to silently dead supervisor
 type: issue
 status: open
-priority: 8
+priority: high
 labels: ["security", "enforcer", "fail-open", "daemon"]
 component: enforcer
 target_modules: [":enforcer"]

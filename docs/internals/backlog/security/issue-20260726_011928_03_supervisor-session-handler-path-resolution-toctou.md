@@ -2,7 +2,7 @@
 title: SupervisorSessionHandler TOCTOU vulnerability during string extraction for paths
 type: issue
 status: open
-priority: 8
+priority: high
 labels: ["security", "enforcer", "toctou", "sandbox-bypass"]
 component: enforcer
 target_modules: [":enforcer"]

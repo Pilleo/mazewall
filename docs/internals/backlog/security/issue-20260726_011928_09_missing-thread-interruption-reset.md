@@ -2,7 +2,7 @@
 title: SupervisorSocketUtils swallows Thread.sleep InterruptedException without setting interrupt status
 type: issue
 status: open
-priority: 5
+priority: medium
 labels: ["security", "enforcer", "deadlock"]
 component: enforcer
 target_modules: [":enforcer"]

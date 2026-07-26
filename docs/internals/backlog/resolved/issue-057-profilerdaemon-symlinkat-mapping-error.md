@@ -2,7 +2,6 @@
 title: "`ProfilerDaemon` `SYMLINKAT` Mapping Error"
 severity: "RESOLVED"
 status: "resolved"
-priority: 5
 ---
 
 # ✅ [RESOLVED]: `ProfilerDaemon` `SYMLINKAT` Mapping Error

@@ -2,7 +2,7 @@
 title: BPF Static Verifier fails to catch backward jumps that overflow
 type: issue
 status: open
-priority: 3
+priority: low
 labels: ["security", "enforcer", "bpf", "static-verifier"]
 component: enforcer
 target_modules: [":enforcer"]

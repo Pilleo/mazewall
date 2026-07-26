@@ -2,7 +2,7 @@
 title: IterativeProfiler can exhaust thread pools on recursive containerization limits
 type: issue
 status: open
-priority: 5
+priority: medium
 labels: ["security", "enforcer", "resource-exhaustion"]
 component: enforcer
 target_modules: [":enforcer"]

@@ -170,17 +170,6 @@ If a change touches both `:enforcer` and `:profiler`:
 2. Run `:enforcer:check` before starting `:profiler` work.
 3. Update `Syscall.kt` and `Arch.kt` in `:enforcer` before referencing the new enum in profiler.
 
-### 8.1 Git Conflict Resolution Protocol (Working Tree Safety)
-Whenever updating a working branch or resolving git conflicts between `origin/master` and a feature/Jules branch:
-1. **Isolate Local Uncommitted Work First:** Run `git status`. If uncommitted changes exist (modified, staged, or untracked files), run `git stash push --include-untracked -m "WIP before conflict resolution"` before running any `git checkout`, `git pull`, `git merge`, or `git rebase`.
-2. **Surgical Logic Resolution:** Resolve conflict markers by inspecting symbol outlines (`codanna` / `file_structure.main.kts`). Preserve both features/overloads without dropping incoming interface methods.
-3. **Mandatory Multi-Stage Verification:** Before committing a conflict resolution, run:
-   - `./gradlew compileKotlin :tools:orchestrator:compileKotlin`
-   - `./gradlew test :tools:orchestrator:test`
-   - `./gradlew :tools:orchestrator:checkBacklog`
-   - `./.git/hooks/pre-commit`
-4. **Restore Stash:** Stage specific resolved files, complete commit, and run `git stash pop` to safely restore local uncommitted work.
-
 ## 9. Task verification protocol
 After any code changes, run `./gradlew build` to verify the final changes.
 You may run more granular checks in the process, but build must be always green before you submit the results.

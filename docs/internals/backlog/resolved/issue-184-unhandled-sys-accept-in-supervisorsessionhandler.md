@@ -2,7 +2,6 @@
 title: "Unhandled `SYS_ACCEPT` in SupervisorSessionHandler"
 severity: "HIGH"
 status: "resolved"
-priority: 8
 ---
 
 # 🔴 [Severity: HIGH]: Unhandled `SYS_ACCEPT` in SupervisorSessionHandler

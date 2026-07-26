@@ -2,7 +2,6 @@
 title: "Classloader Lock Deadlock in `JVMValidationListener` under `StacktraceScopingPolicy`"
 severity: "RESOLVED"
 status: "resolved"
-priority: 5
 ---
 
 # ✅ [RESOLVED]: Classloader Lock Deadlock in `JVMValidationListener` under `StacktraceScopingPolicy`

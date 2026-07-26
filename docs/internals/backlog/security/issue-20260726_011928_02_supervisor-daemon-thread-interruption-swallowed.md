@@ -2,7 +2,7 @@
 title: SupervisorSessionHandler loop swallows ThreadInterruptedException breaking graceful shutdown
 type: issue
 status: open
-priority: 8
+priority: high
 labels: ["security", "enforcer", "graceful-shutdown", "deadlock"]
 component: enforcer
 target_modules: [":enforcer"]

@@ -2,7 +2,6 @@
 title: "`SyscallPathResolver` correctly resolves `SYMLINKAT` path parameters"
 severity: "RESOLVED"
 status: "resolved"
-priority: 5
 ---
 
 # ✅ [RESOLVED]: `SyscallPathResolver` correctly resolves `SYMLINKAT` path parameters

@@ -2,7 +2,6 @@
 title: "JVM Safepoint / seccomp USER_NOTIF Circular Deadlock in `ProfilerTraceListener`"
 severity: "RESOLVED"
 status: "resolved"
-priority: 5
 ---
 
 # ✅ [RESOLVED]: JVM Safepoint / seccomp USER_NOTIF Circular Deadlock in `ProfilerTraceListener`

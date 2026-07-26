@@ -2,7 +2,6 @@
 title: "Thread-Safety Violation: Mutable `LongArray` in `SyscallEvent`"
 severity: "RESOLVED"
 status: "resolved"
-priority: 5
 ---
 
 # ✅ [RESOLVED]: Thread-Safety Violation: Mutable `LongArray` in `SyscallEvent`

@@ -2,7 +2,6 @@
 title: "🟢 [RESOLVED]: Seccomp Filter Bypass via `pkey_mprotect`"
 severity: "RESOLVED"
 status: "resolved"
-priority: 5
 ---
 
 # 🟢 [RESOLVED]: Seccomp Filter Bypass via `pkey_mprotect`

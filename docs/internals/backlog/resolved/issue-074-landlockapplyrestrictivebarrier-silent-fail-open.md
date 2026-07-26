@@ -2,7 +2,6 @@
 title: "Landlock.applyRestrictiveBarrier() Silent Fail-Open"
 severity: "RESOLVED"
 status: "resolved"
-priority: 5
 ---
 
 # ✅ [RESOLVED]: Landlock.applyRestrictiveBarrier() Silent Fail-Open

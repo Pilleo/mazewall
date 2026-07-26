@@ -2,12 +2,11 @@
 title: TraceEvent receives FFM values risking Use-After-Free due to Arena closure
 type: issue
 status: open
-priority: 8
+priority: high
 labels: ["security", "enforcer", "ffm", "use-after-free", "memory-escape"]
 component: enforcer
 target_modules: [":profiler"]
 target_files: ["io.mazewall.profiler.internal.ProfilerTraceListener.kt"]
-github_issue: 327
 ---
 
 # Issue: FFM MemorySegment pointer escape in TraceEvent
