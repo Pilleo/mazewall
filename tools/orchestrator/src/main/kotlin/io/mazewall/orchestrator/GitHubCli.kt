@@ -291,11 +291,36 @@ class RealGitHubClient(private val config: OrchestratorConfig) : GitHubClient {
     }
 
     override fun rebaseBranch(prNumber: String): Boolean {
-        return try {
+        // 1. Try GitHub API native branch update with rebase first
+        try {
             execute("gh", "pr", "update-branch", prNumber, "--rebase")
-            true
+            return true
         } catch (e: Exception) {
-            System.err.println("Notice/Error rebasing branch for PR #$prNumber via gh pr update-branch: ${e.message}")
+            System.err.println("gh pr update-branch --rebase failed for PR #$prNumber (${e.message}). Attempting local git fetch and rebase...")
+        }
+
+        // 2. Fallback to local git rebase and force push
+        return try {
+            val branchName = execute("gh", "pr", "view", prNumber, "--json", "headRefName", "--jq", ".headRefName").trim()
+            if (branchName.isBlank()) return false
+
+            execute("git", "fetch", "origin", branchName)
+            execute("git", "fetch", "origin", "master")
+
+            // Create temporary worktree or checkout branch safely
+            val currentBranch = execute("git", "rev-parse", "--abbrev-ref", "HEAD").trim()
+            try {
+                execute("git", "checkout", branchName)
+                execute("git", "rebase", "origin/master")
+                execute("git", "push", "--force-with-lease", "origin", branchName)
+                true
+            } finally {
+                if (currentBranch.isNotBlank() && currentBranch != "HEAD") {
+                    execute("git", "checkout", currentBranch)
+                }
+            }
+        } catch (e: Exception) {
+            System.err.println("Local git rebase failed for PR #$prNumber: ${e.message}")
             false
         }
     }
