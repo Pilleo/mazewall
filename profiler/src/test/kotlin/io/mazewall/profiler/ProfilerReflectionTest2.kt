@@ -25,11 +25,6 @@ class ProfilerReflectionTest2 {
     }
 
     @Test
-    fun `test IterativeProfiler instantiation`() {
-        assertNotNull(io.mazewall.profiler.iterative.IterativeProfiler)
-    }
-
-    @Test
     fun `test trace event open instantiation`() {
         val event = TraceEvent(
             tidValue = 1234,

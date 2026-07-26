@@ -107,7 +107,7 @@ object IterativeProfiler {
         return builder.build()
     }
 
-    internal fun extractViolationPath(t: Throwable): String? {
+    private fun extractViolationPath(t: Throwable): String? {
         val violation = io.mazewall.enforcer.ContainmentViolationDetector.findViolationCause(t) ?: return null
         val path = when {
             violation is AccessDeniedException -> violation.file
@@ -132,7 +132,7 @@ object IterativeProfiler {
         }
     }
 
-    internal fun findPathEnd(
+    private fun findPathEnd(
         msg: String,
         phraseIdx: Int,
     ): Int {
@@ -141,12 +141,12 @@ object IterativeProfiler {
         return end
     }
 
-    internal fun isRestrictedSeparator(c: Char): Boolean {
+    private fun isRestrictedSeparator(c: Char): Boolean {
         return c == ':' || c == '\'' || c == '"' || c == '(' || c == ')' ||
                 c == '[' || c == ']' || c == '{' || c == '}' || c == ',' || c == ';'
     }
 
-    internal fun resolveAbsolutePath(
+    private fun resolveAbsolutePath(
         msg: String,
         pathEnd: Int,
     ): String? {

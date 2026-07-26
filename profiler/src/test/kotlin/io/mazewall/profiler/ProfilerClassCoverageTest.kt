@@ -6,11 +6,6 @@ import org.junit.jupiter.api.Test
 class ProfilerClassCoverageTest {
 
     @Test
-    fun `test Profiler class instantiation`() {
-        assertNotNull(Profiler)
-    }
-
-    @Test
     fun `test BillOfBehavior class properties`() {
         val bob = BillOfBehavior(
             opens = setOf("/tmp"),

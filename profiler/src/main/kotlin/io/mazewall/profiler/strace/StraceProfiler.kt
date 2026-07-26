@@ -77,7 +77,7 @@ object StraceProfiler {
         )
     }
 
-    internal fun parseLine(
+    private fun parseLine(
         line: String,
         opens: MutableSet<String>,
         fsWritePaths: MutableSet<String>,
@@ -116,7 +116,7 @@ object StraceProfiler {
         }
     }
 
-    internal fun isFsSyscall(name: String): Boolean {
+    private fun isFsSyscall(name: String): Boolean {
         return name in setOf(
             "OPEN",
             "OPENAT",
@@ -142,7 +142,7 @@ object StraceProfiler {
         )
     }
 
-    internal fun isWriteSyscall(
+    private fun isWriteSyscall(
         name: String,
         args: String,
     ): Boolean {
@@ -172,7 +172,7 @@ object StraceProfiler {
         return isWriteOp || isOpenWrite
     }
 
-    internal fun extractQuotedPath(args: String): String? {
+    private fun extractQuotedPath(args: String): String? {
         val match = "\"(.*?)\"".toRegex().find(args)
         return match?.groupValues?.get(1)
     }
