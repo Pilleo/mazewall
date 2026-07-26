@@ -108,7 +108,9 @@ class "Platform" as io.mazewall.Platform {
   +void setProvider(PlatformProvider)
   +void resetToDefault()
   +boolean isLinux()
+  +void validateLinux()
   +boolean isSupported()
+  +void validateSupported()
   +boolean isArchitectureSupported()
   +FallbackBehavior configuredFallback()
   +Diagnostics diagnose()
@@ -519,6 +521,7 @@ class "ThreadStateRegistry" as io.mazewall.enforcer.ThreadStateRegistry {
   +void sanitize()
 }
 class "ValidationKt" as io.mazewall.enforcer.ValidationKt {
+  + {static}void validateNotVirtual()
   + {static}void validateLinuxAndNotVirtual()
 }
 interface "ViolationMatcher" as io.mazewall.enforcer.ViolationMatcher {
@@ -1082,7 +1085,7 @@ abstract class "SeccompConnection" as io.mazewall.ffi.networking.SeccompConnecti
 class "SupervisorSeccompNotifInstaller" as io.mazewall.ffi.networking.SupervisorSeccompNotifInstaller {
   + {static}SupervisorSeccompNotifInstaller INSTANCE
   __
-  +void install(String, List<? extends BpfInstruction>, boolean, Function1<? super String, Integer>, Function2<? super Integer, ? super Integer, Boolean>, Function0<Unit>, Function2<? super Integer, ? super CountDownLatch, Unit>)
+  +void install(String, BpfProgram<Verified>, boolean, Function1<? super String, Integer>, Function2<? super Integer, ? super Integer, Boolean>, Function0<Unit>, Function2<? super Integer, ? super CountDownLatch, Unit>)
 }
 class "SupervisorSocketInputStream" as io.mazewall.ffi.networking.SupervisorSocketInputStream {
   + {static}Companion Companion

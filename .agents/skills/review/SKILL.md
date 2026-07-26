@@ -44,29 +44,17 @@ Evaluate the project across these core operational areas:
 
 This is a **continuous, hypothesis-driven execution loop**. You are authorized to run indefinitely. Do not summarize prematurely.
 
-1. **Phase 1: Research & Hypothesis:** 
+1. **Phase 1: Research & Hypothesis:**
    - Check [backlog/README.md](file:///home/leanid/Documents/code/java/jseccomp/docs/internals/backlog/README.md) for existing open issues.
    - Use `./scripts/code_atlas.sh describe <Symbol>` or `./scripts/code_atlas.sh callers <Symbol>` to trace symbol relationships and codebase hierarchies.
    - Use the generated PlantUML diagrams under `docs/diagrams/` to align on the class architectures.
    - Formulate a specific security or architectural failure hypothesis.
-2. **Phase 2: Source Code & Structural Audit:** 
+2. **Phase 2: Source Code & Structural Audit:**
    - Use `./scripts/sg.sh` to run structural queries against your hypothesis (e.g. search for swallowed exceptions: `try { $$$ } catch ($E: Exception) { }`).
    - Audit target files, checking both core logic and their associated tests.
- 3. **Phase 3: Backlog Entry:** If you find a vulnerability, bug, or gap, create a new markdown file in the appropriate backlog subdirectory (e.g. `docs/internals/backlog/security/issue-XXX-some-bug.md`, or under `performance/`, `testing/`, `code_health/`) using the following format:
+ 3. **Phase 3: Backlog Entry:** If you find a vulnerability, bug, or gap, create a new markdown file in the appropriate backlog subdirectory (e.g. `docs/internals/backlog/security/issue-XXX-some-bug.md`, or under `performance/`, `testing/`, `code_health/`). Use `/.agents/skills/create_backlog_issue/SKILL.md` skill to create an issue properly.
 
-```markdown
----
-title: "Title of Issue"
-severity: "HIGH/MEDIUM/LOW/CRITICAL/ENHANCEMENT"
-status: "open"
----
 
-# 🔴 [Severity: Severity]: Title of Issue
-**Context:** [What you found and why it exists]
-**Needed:** [How to fix or prevent it]
-```
-
-Register your new issue in the **Open Issues** table inside `docs/internals/backlog/README.md` (ensuring the link references the category folder).
 
 ---
 
