@@ -65,4 +65,30 @@ class BacklogValidatorTest {
         assertTrue(errors.any { it.contains("Priority '99' out of bounds") })
         assertTrue(errors.any { it.contains("References non-existent dependency") })
     }
+
+    @Test
+    fun testEmptyTargetModulesPassesValidationButExposesRisk() {
+        val file = File(tempDir, "issue-20260726-111111-empty-modules.md")
+        file.writeText("""
+            ---
+            title: "Empty Target Modules"
+            severity: "HIGH"
+            status: "open"
+            priority: 9
+            dependencies: []
+            component: "enforcer"
+            target_modules: []
+            target_files: []
+            ---
+
+            # 🔴 [Severity: HIGH]: Empty Target Modules
+            **Context:** valid context
+            **Needed:** valid needed
+        """.trimIndent())
+
+        val errors = BacklogValidator.validateBacklog(tempDir)
+        // Currently, empty target_modules list passes validation because there is no non-empty check.
+        // This test documents the gap that needs to be addressed in the documented issue.
+        assertTrue(errors.isEmpty(), "Currently empty target_modules list passes validation")
+    }
 }
