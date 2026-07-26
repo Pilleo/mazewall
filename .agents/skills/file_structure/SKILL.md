@@ -23,6 +23,13 @@ This dramatically reduces token usage and prevents "lost in the middle" context 
 
 ## Command & Tools
 
+0. **For whole-module architecture (fastest first orientation):**
+   Before diving into individual symbols, check the generated artifacts:
+   - **Class diagrams** (PlantUML/SVG): `docs/diagrams/enforcer_class_diagram.puml`, `docs/diagrams/profiler_class_diagram.puml`
+     - Regenerate: `./gradlew :enforcer:generateClassDiagrams :profiler:generateClassDiagrams`
+   - **Knowledge maps** (Mermaid — links source files, design docs, and open issues): `docs/internals/designs/core/maps/enforcer_map.md`, `docs/internals/designs/core/maps/profiler_map.md`
+     - Regenerate: `./gradlew generateKnowledgeMap`
+
 1. **For JVM Code symbols (Kotlin/Java classes, methods)**:
    Prefer using **Codanna** to inspect structures and relationships:
    ```bash

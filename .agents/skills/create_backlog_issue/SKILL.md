@@ -9,14 +9,29 @@ This skill provides a standardized protocol for documenting a newly discovered b
 
 ## Protocol
 
-### 1. Classification
-Determine the severity based on the following impact criteria:
+### 1. Classification & Priority Assignment
+
+**Severity Criteria:**
 - **CRITICAL:** Remote execution bypass, trivial sandbox escape without ACE, severe memory corruption.
 - **HIGH:** Local privilege escalation within sandbox, core whitelist bypass, architectural boundary break.
 - **MEDIUM:** Information leak, usability flaw, performance regression, multi-threading race condition.
 - **LOW:** Documentation drift, minor nitpicks, non-critical DX friction.
 
-### 2. Naming & File Placement
+**Priority Assignment (1-10):**
+Assign **HIGH PRIORITY (8-10)** to changes that multiply developer velocity, safety, and autonomy:
+- Refactorings that introduce type safety (e.g. Type-State pattern, value classes, compile-time token proofs).
+- Improvements to testing harness, ArchUnit rules, and automated test coverage.
+- Enhancements to CI/CD pipelines, build barriers, and validation rules.
+- Orchestrator tooling improvements (parallel task scheduling, conflict avoidance, Jules review loop handling).
+- Simplifications that make future development faster, safer, and less error-prone.
+
+### 2. Issue Granularity & Decomposition Rule
+**Every issue MUST be tightly scoped and atomic:**
+- **Single Responsibility:** An issue must cover one specific refactoring, bug fix, or feature capability. Do NOT create monolithic catch-all issues.
+- **Decomposition Mandate:** If an issue touches multiple sub-components, requires changing more than ~3-5 distinct files, or spans multiple architectural layers (e.g., FFM layout changes + API redesign + profiler integration), **split it into multiple smaller, ordered issues**.
+- **Dependency Chaining:** Use the `dependencies: ["issue-YYYYMMDD-HHMM-parent-slug"]` frontmatter field to define precise execution order across decomposed issues so the orchestrator can schedule them safely in sequence.
+
+### 3. Naming & File Placement
 Create a new markdown issue file under the appropriate category subdirectory in `docs/internals/backlog/{category}/`:
 - `docs/internals/backlog/code_health/` for refactoring, architectural health, and orchestrator tooling issues
 - `docs/internals/backlog/security/` for security and sandbox boundary findings

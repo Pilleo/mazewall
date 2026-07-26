@@ -12,6 +12,7 @@ target_files:
   - "tools/orchestrator/src/main/kotlin/io/mazewall/orchestrator/OrchestratorEnvironment.kt"
 effort: "small"
 autonomy: "autonomous"
+github_issue: 313
 ---
 
 # 🔴 [Severity: MEDIUM]: Detect Empty Commits in Jules Review Loop to Prevent Redundant Correction Comments
