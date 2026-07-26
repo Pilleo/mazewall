@@ -85,6 +85,7 @@ graph TD
     issue_20260726_011928_13_profiler_trace_event_buffer_truncation["🔴 Issue: TraceEvent buffer truncation on excessively long extracted string paths (MEDIUM)"]
     issue_20260726_011928_14_missing_socket_cleanup_on_eintr["🔴 Issue: SupervisorDaemonEngine leaks sockets on interrupted accept4 (MEDIUM)"]
     issue_20260726_011928_15_fail_open_path_resolution_ignored_exceptions["🔴 Issue: SupervisorSessionHandler ignores critical exceptions during path resolution leading to fail-open bypass (MEDIUM)"]
+    issue_20260726_0135_refactor_profiler_classes_for_testability["🔴 Issue: Refactor Profiler core classes for testability and test them (MEDIUM)"]
     issue_20260726_04_parallel_orchestrator_task_scheduler_and_conflict_avoidance["🔴 Issue: Multi-Issue Parallel Execution & Conflict-Free Task Scheduler (HIGH)"]
     issue_20260726_05_detect_empty_commits_during_jules_review_loop["🔴 Issue: Detect Empty Commits in Jules Review Loop to Prevent Redundant Correction Comments (MEDIUM)"]
     issue_202_handle_cli_authentication_failures["🔴 Issue: Detect and Handle CLI Authentication Failures with Actionable Login Alerts (HIGH)"]
@@ -174,6 +175,7 @@ graph TD
     click issue_20260726_011928_13_profiler_trace_event_buffer_truncation "../../../backlog/security/issue-20260726_011928_13_profiler-trace-event-buffer-truncation.md"
     click issue_20260726_011928_14_missing_socket_cleanup_on_eintr "../../../backlog/security/issue-20260726_011928_14_missing-socket-cleanup-on-eintr.md"
     click issue_20260726_011928_15_fail_open_path_resolution_ignored_exceptions "../../../backlog/security/issue-20260726_011928_15_fail-open-path-resolution-ignored-exceptions.md"
+    click issue_20260726_0135_refactor_profiler_classes_for_testability "../../../backlog/testing/issue-20260726-0135-refactor-profiler-classes-for-testability.md"
     click issue_20260726_04_parallel_orchestrator_task_scheduler_and_conflict_avoidance "../../../backlog/code_health/issue-20260726-04-parallel-orchestrator-task-scheduler-and-conflict-avoidance.md"
     click issue_20260726_05_detect_empty_commits_during_jules_review_loop "../../../backlog/code_health/issue-20260726-05-detect-empty-commits-during-jules-review-loop.md"
     click issue_202_handle_cli_authentication_failures "../../../backlog/code_health/issue-202-handle-cli-authentication-failures.md"
