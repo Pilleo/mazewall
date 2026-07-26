@@ -367,4 +367,24 @@ internal object SyscallInvoker {
         val ret = handle.invokeExact(capturedState.segment, fd, buf, count) as Long
         return RealNativeHelper.result(ret, capturedState.getErrno())
     }
+
+    fun archPrctlLong(
+        handle: MethodHandle,
+        code: Int,
+        addr: Long,
+    ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+        val capturedState = ErrnoSegment.getThreadLocal()
+        val ret = handle.invokeExact(capturedState.segment, code, addr) as Int
+        return RealNativeHelper.result(ret.toLong(), capturedState.getErrno())
+    }
+
+    fun archPrctlAddr(
+        handle: MethodHandle,
+        code: Int,
+        addr: MemorySegment,
+    ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+        val capturedState = ErrnoSegment.getThreadLocal()
+        val ret = handle.invokeExact(capturedState.segment, code, addr) as Int
+        return RealNativeHelper.result(ret.toLong(), capturedState.getErrno())
+    }
 }

@@ -221,6 +221,13 @@ public open class MockNativeProcess : NativeProcess {
     public var onPidfdOpen: (pid: Int, flags: Int) -> LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = { _, _ -> LinuxNative.SyscallResult.Success(0L) }
     public var onPidfdGetFd: (pidfd: Int, targetFd: Int, flags: Int) -> LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = { _, _, _ -> LinuxNative.SyscallResult.Success(0L) }
 
+    public var archPrctlLongResult: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success(0L)
+    public var archPrctlAddrResult: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success(0L)
+
+    public var lastArchPrctlCode: Int? = null
+    public var lastArchPrctlLong: Long? = null
+    public var lastArchPrctlAddr: ManagedSegment? = null
+
     override fun gettid() = tid
 
     override fun prctl(
@@ -237,6 +244,18 @@ public open class MockNativeProcess : NativeProcess {
         targetFd: Int,
         flags: Int,
     ) = onPidfdGetFd(pidfd, targetFd, flags)
+
+    override fun archPrctl(code: Int, addr: Long): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+        lastArchPrctlCode = code
+        lastArchPrctlLong = addr
+        return archPrctlLongResult
+    }
+
+    override fun archPrctl(code: Int, addr: ManagedSegment): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+        lastArchPrctlCode = code
+        lastArchPrctlAddr = addr
+        return archPrctlAddrResult
+    }
 }
 
 public open class MockNativeMemory : NativeMemory {
