@@ -17,7 +17,14 @@ data class TelegramResponse<T>(
 @Serializable
 data class TelegramUpdate(
     val update_id: Long,
+    val message: TelegramMessage? = null,
     val callback_query: CallbackQuery? = null
+)
+
+@Serializable
+data class TelegramMessage(
+    val message_id: Long,
+    val text: String? = null
 )
 
 @Serializable
@@ -54,6 +61,7 @@ class TelegramBot(private val botToken: String, private val chatId: String) {
     private val client = HttpClient.newHttpClient()
     private val json = Json { ignoreUnknownKeys = true }
     private var lastUpdateId = 0L
+    var onReviewRequested: ((focusComments: String) -> Unit)? = null
 
     init {
         // Run a fast getUpdates to find the current offset so we don't process historical alerts
@@ -76,9 +84,17 @@ class TelegramBot(private val botToken: String, private val chatId: String) {
         }
     }
 
-    fun sendMessage(text: String) {
+    fun sendMessage(text: String, includeReviewButton: Boolean = false) {
         val url = "https://api.telegram.org/bot$botToken/sendMessage"
-        val payload = SendMessageRequest(chat_id = chatId, text = text)
+        val markup = if (includeReviewButton) {
+            ReplyMarkup(
+                inline_keyboard = listOf(
+                    listOf(InlineKeyboardButton(text = "🔍 Review", callback_data = "review"))
+                )
+            )
+        } else null
+
+        val payload = SendMessageRequest(chat_id = chatId, text = text, reply_markup = markup)
         post(url, json.encodeToString(SendMessageRequest.serializer(), payload))
     }
 
@@ -88,7 +104,8 @@ class TelegramBot(private val botToken: String, private val chatId: String) {
             inline_keyboard = listOf(
                 listOf(
                     InlineKeyboardButton(text = "✅ Approve", callback_data = "approve:$issueId"),
-                    InlineKeyboardButton(text = "⏭️ Skip", callback_data = "skip:$issueId")
+                    InlineKeyboardButton(text = "⏭️ Skip", callback_data = "skip:$issueId"),
+                    InlineKeyboardButton(text = "🔍 Review", callback_data = "review:$issueId")
                 )
             )
         )
@@ -120,12 +137,52 @@ class TelegramBot(private val botToken: String, private val chatId: String) {
                             } else if (data == "skip:$issueId") {
                                 answerCallback(callbackQuery.id)
                                 return false
+                            } else if (data.startsWith("review")) {
+                                answerCallback(callbackQuery.id)
+                                val launched = handleReviewCallback()
+                                if (launched) {
+                                    // Review task launched. Postpone current task so orchestrator can execute review task.
+                                    return false
+                                }
                             }
                         }
                     }
                 }
             } catch (e: Exception) {
                 System.err.println("Error parsing Telegram updates: ${e.message}")
+            }
+            Thread.sleep(1000)
+        }
+    }
+
+    private fun handleReviewCallback(): Boolean {
+        sendMessage("💬 *Review Task Focus Prompt*\n\nPlease reply with specific areas or comments you want Jules to focus on during this review (or type 'all'):", includeReviewButton = false)
+        val focusComments = waitForUserTextMessage()
+        if (focusComments.isBlank()) return false
+        onReviewRequested?.invoke(focusComments)
+        return true
+    }
+
+    fun waitForUserTextMessage(): String {
+        println("⏳ Waiting for user text reply on Telegram...")
+        while (true) {
+            val url = "https://api.telegram.org/bot$botToken/getUpdates?offset=$lastUpdateId&timeout=30"
+            val responseText = get(url)
+            if (responseText != null) {
+                try {
+                    val updatesResponse = json.decodeFromString<TelegramResponse<List<TelegramUpdate>>>(responseText)
+                    if (updatesResponse.ok && updatesResponse.result != null) {
+                        for (update in updatesResponse.result) {
+                            lastUpdateId = update.update_id + 1
+                            val text = update.message?.text
+                            if (!text.isNullOrBlank()) {
+                                return text.trim()
+                            }
+                        }
+                    }
+                } catch (e: Exception) {
+                    System.err.println("Error reading Telegram text reply: ${e.message}")
+                }
             }
             Thread.sleep(1000)
         }

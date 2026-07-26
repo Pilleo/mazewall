@@ -36,6 +36,12 @@ val integrationTestRuntimeOnly by configurations.getting {
     extendsFrom(configurations.testRuntimeOnly.get())
 }
 
+val compileVulnerableRop = tasks.register<Exec>("compileVulnerableRop") {
+    group = "build"
+    description = "Compiles the vulnerable C library for CET testing"
+    commandLine("bash", "${rootDir}/scripts/run_cet_demo.sh")
+}
+
 val integrationTest =
     tasks.register<Test>("integrationTest") {
         group = "verification"
@@ -48,6 +54,7 @@ val integrationTest =
         testLogging {
             showStandardStreams = true
         }
+        dependsOn(compileVulnerableRop)
     }
 
 tasks.check {

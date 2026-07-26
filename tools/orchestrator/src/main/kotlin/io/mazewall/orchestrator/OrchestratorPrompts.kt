@@ -11,13 +11,30 @@ Adhere strictly to the following project invariants:
 3. **JVM Coordination Invariants**: Never block system calls critical for JVM operations (parking, GC, safepoints).
 4. **FFM Safety**: Ensure correct layout alignments, arena lifecycles, and off-heap memory safety. Use `JAVA_LONG` correctly and avoid its misuse on 32-bit fields.
 5. **Loom Carrier Protection**: Prevent virtual thread carrier thread poisoning. Never apply seccomp filters that restrict the underlying OS carrier thread in a way that affects other virtual threads.
-6. **Pull latest master**: You are working in a team of other agents, so amster is updated all the time. Before submitting your work always pull in latest origin master, and push only after that.
+6. **Pull latest master**: You are working in a team of other agents, so master is updated all the time. Before submitting your work always pull in latest origin master, and push only after that.
 
 """
+
+    const val REVIEW_SKILL_HEADER = "Please review profiler module using .agents/skills/review/SKILL.md skill. Create issues using skill .agents/skills/create_backlog_issue/SKILL.md"
 
     fun taskPrompt(originalIssueBody: String): String {
         return """
 $originalIssueBody
+
+---
+
+$QUALITY_AND_SAFETY_GUIDELINES
+""".trimIndent()
+    }
+
+    fun reviewTaskIssueBody(additionalComments: String): String {
+        val commentsSection = if (additionalComments.isNotBlank() && additionalComments.lowercase() != "all" && additionalComments.lowercase() != "none" && additionalComments.lowercase() != "default") {
+            "\n\n**Additional Focus Instructions:**\n$additionalComments"
+        } else {
+            ""
+        }
+        return """
+$REVIEW_SKILL_HEADER$commentsSection
 
 ---
 

@@ -269,83 +269,86 @@ internal class SupervisorSessionHandler(
         return LoopAction.Continue
     }
 
-    context(arena: NativeArena)
     @Suppress("TooGenericExceptionCaught")
     private fun processNotification(notif: ManagedSegment, resp: ManagedSegment): Boolean {
-        val id = notif.readLong(NOTIF_ID_OFF)
-        try {
-            val pidVal = notif.readInt(NOTIF_PID_OFF)
-            val archVal = notif.readInt(NOTIF_ARCH_OFF)
-            val nr = notif.readInt(NOTIF_NR_OFF)
-
-            val args = LongArray(MAX_ARGS)
-            for (i in 0 until MAX_ARGS) {
-                args[i] = notif.readLong(NOTIF_ARGS_OFF + i * BYTES_PER_LONG)
-            }
-
-            val tid = Tid(pidVal)
-            val traceeArch = io.mazewall.core.Arch.fromAudit(archVal)
-            val extracted = extractNotificationArgs(nr, tid, args, traceeArch)
-            val ppid = getPpid(pidVal)
-            logger.info { "[SUPERVISOR-DEBUG] Received syscall notification: id=$id, pid=$pidVal, arch=$archVal, ppid=$ppid, nr=$nr, path=${extracted.pathStr}" }
-
-            // --- DAEMON-SIDE FAST-PATH BYPASS ---
-            // HAZARD: When the sandboxed thread triggers lazy classloading (e.g., loading IOException
-            // or a Kotlin helper) during a blocked file syscall, it holds the JVM's internal ClassLoader lock.
-            // If we dispatch this request back to the JVM validation listener thread, the listener's policy
-            // evaluation could also trigger classloading, blocking the listener on the tracee's ClassLoader lock.
-            // This causes a permanent circular deadlock.
-            //
-            // SOLUTION: The uncontained daemon intercepts file read operations targeting the JVM's home directory,
-            // application classpath, or Java agents. Paths are resolved to absolute form and normalized.
-            // Since these paths contain trusted platform/application classes and libraries that are already loaded
-            // or destined to be loaded, it is safe to bypass policy evaluation and directly inject the file descriptor.
-            val isOpen = nr == traceeArch.open || nr == traceeArch.openat || nr == traceeArch.openat2
-            if (isOpen && extracted.pathStr != null) {
-                val pathStr = extracted.pathStr
+        return NativeArena.ofConfined().use { notificationArena ->
+            with(notificationArena) {
+                val id = notif.readLong(NOTIF_ID_OFF)
                 try {
-                    val path = resolveAbsolutePath(pidVal, extracted.dirfd, pathStr)
-                    if (path != null) {
-                        val matched = safeBypassPaths.any { bypassPath ->
-                            path.startsWith(bypassPath) || path == bypassPath
-                        }
-                        if (matched) {
-                            val absPathStr = path.toAbsolutePath().toString()
-                            sendSeccompContinue(id, resp)
-                            logger.info { "[SUPERVISOR-DEBUG] Fast-path allow continue (matched) resolved=$absPathStr" }
-                            return true
-                        }
-                    } else {
-                        // Fallback when /proc absolute path resolution fails (e.g. Yama ptrace_scope block inside container)
-                        if (pathStr.endsWith(".class") || pathStr.contains("META-INF/") || pathStr.endsWith(".jar")) {
-                            sendSeccompContinue(id, resp)
-                            logger.info { "[SUPERVISOR-DEBUG] Fast-path allow continue (fallback: classloading)" }
-                            return true
+                    val pidVal = notif.readInt(NOTIF_PID_OFF)
+                    val archVal = notif.readInt(NOTIF_ARCH_OFF)
+                    val nr = notif.readInt(NOTIF_NR_OFF)
+
+                    val args = LongArray(MAX_ARGS)
+                    for (i in 0 until MAX_ARGS) {
+                        args[i] = notif.readLong(NOTIF_ARGS_OFF + i * BYTES_PER_LONG)
+                    }
+
+                    val tid = Tid(pidVal)
+                    val traceeArch = io.mazewall.core.Arch.fromAudit(archVal)
+                    val extracted = extractNotificationArgs(nr, tid, args, traceeArch)
+                    val ppid = getPpid(pidVal)
+                    logger.info { "[SUPERVISOR-DEBUG] Received syscall notification: id=$id, pid=$pidVal, arch=$archVal, ppid=$ppid, nr=$nr, path=${extracted.pathStr}" }
+
+                    // --- DAEMON-SIDE FAST-PATH BYPASS ---
+                    // HAZARD: When the sandboxed thread triggers lazy classloading (e.g., loading IOException
+                    // or a Kotlin helper) during a blocked file syscall, it holds the JVM's internal ClassLoader lock.
+                    // If we dispatch this request back to the JVM validation listener thread, the listener's policy
+                    // evaluation could also trigger classloading, blocking the listener on the tracee's ClassLoader lock.
+                    // This causes a permanent circular deadlock.
+                    //
+                    // SOLUTION: The uncontained daemon intercepts file read operations targeting the JVM's home directory,
+                    // application classpath, or Java agents. Paths are resolved to absolute form and normalized.
+                    // Since these paths contain trusted platform/application classes and libraries that are already loaded
+                    // or destined to be loaded, it is safe to bypass policy evaluation and directly inject the file descriptor.
+                    val isOpen = nr == traceeArch.open || nr == traceeArch.openat || nr == traceeArch.openat2
+                    if (isOpen && extracted.pathStr != null) {
+                        val pathStr = extracted.pathStr
+                        try {
+                            val path = resolveAbsolutePath(pidVal, extracted.dirfd, pathStr)
+                            if (path != null) {
+                                val matched = safeBypassPaths.any { bypassPath ->
+                                    path.startsWith(bypassPath) || path == bypassPath
+                                }
+                                if (matched) {
+                                    val absPathStr = path.toAbsolutePath().toString()
+                                    sendSeccompContinue(id, resp)
+                                    logger.info { "[SUPERVISOR-DEBUG] Fast-path allow continue (matched) resolved=$absPathStr" }
+                                    return true
+                                }
+                            } else {
+                                // Fallback when /proc absolute path resolution fails (e.g. Yama ptrace_scope block inside container)
+                                if (pathStr.endsWith(".class") || pathStr.contains("META-INF/") || pathStr.endsWith(".jar")) {
+                                    sendSeccompContinue(id, resp)
+                                    logger.info { "[SUPERVISOR-DEBUG] Fast-path allow continue (fallback: classloading)" }
+                                    return true
+                                }
+                            }
+                        } catch (e: Exception) {
+                            logger.warning { "[SUPERVISOR-DEBUG] Fast-path check failed with error: ${e.message}" }
                         }
                     }
-                } catch (e: Exception) {
-                    logger.warning { "[SUPERVISOR-DEBUG] Fast-path check failed with error: ${e.message}" }
+
+                    logger.info { "[SUPERVISOR-DEBUG] Forwarding request to JVM validation listener" }
+                    val success = sendRequestToJvm(id, pidVal, archVal, ppid, nr, args, extracted.pathStr, extracted.sockaddrBytes)
+                    if (!success) {
+                        logger.severe { "[SUPERVISOR-DEBUG] Failed to send request to JVM" }
+                        return false
+                    }
+
+                    val res = readAndHandleJvmResponse(id, nr, args, extracted.pathStr, extracted.sockaddrBytes, resp, tid, traceeArch)
+                    logger.info { "[SUPERVISOR-DEBUG] JVM validation handler response result=$res" }
+                    return res
+                } catch (t: Throwable) {
+                    logger.log(java.util.logging.Level.SEVERE, "Fatal error processing notification $id", t)
+                    try {
+                        sendSeccompError(id, NativeConstants.EPERM, resp)
+                    } catch (ignored: Throwable) {
+                        // Ignore secondary errors
+                    }
+                    return false
                 }
             }
-
-            logger.info { "[SUPERVISOR-DEBUG] Forwarding request to JVM validation listener" }
-            val success = sendRequestToJvm(id, pidVal, archVal, ppid, nr, args, extracted.pathStr, extracted.sockaddrBytes)
-            if (!success) {
-                logger.severe { "[SUPERVISOR-DEBUG] Failed to send request to JVM" }
-                return false
-            }
-
-            val res = readAndHandleJvmResponse(id, nr, args, extracted.pathStr, extracted.sockaddrBytes, resp, tid, traceeArch)
-            logger.info { "[SUPERVISOR-DEBUG] JVM validation handler response result=$res" }
-            return res
-        } catch (t: Throwable) {
-            logger.log(java.util.logging.Level.SEVERE, "Fatal error processing notification $id", t)
-            try {
-                sendSeccompError(id, NativeConstants.EPERM, resp)
-            } catch (ignored: Throwable) {
-                // Ignore secondary errors
-            }
-            return false
         }
     }
 
