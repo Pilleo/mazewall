@@ -7,7 +7,7 @@ description: >
   or reviewing code structures.
   Trigger on: ast-grep, structural search, search pattern in code, structural replace, systematic refactoring,
   find all usages of, remove all, replace everywhere, @Suppress, find all calls to, refactor, every occurrence,
-  code review, systematic.
+  systematic, find all implementations of, find all subclasses of.
 ---
 
 # Skill: Structural Search & Refactoring (ast-grep)
@@ -26,12 +26,19 @@ Use ast-grep (via the repository wrapper `./scripts/sg.sh`) when you need to per
    ./scripts/sg.sh run --pattern 'fun $METHOD($$$)' --lang kotlin enforcer/src/
    ```
 
-2. **Find error handling swallows (violates Fail-Closed invariant)**:
+2. **Find all implementations of an interface (impact analysis before a breaking change):**
+   ```bash
+   # Finds all classes that implement or extend a given interface/class:
+   ./scripts/sg.sh run --pattern 'class $NAME($$$) : $IFACE($$$)' --lang kotlin
+   ./scripts/sg.sh run --pattern 'object $NAME : $IFACE' --lang kotlin
+   ```
+
+3. **Find error handling swallows (violates Fail-Closed invariant)**:
    ```bash
    ./scripts/sg.sh run --pattern 'try { $$$ } catch ($E: Exception) { }' --lang kotlin enforcer/src/
    ```
 
-3. **Find specific system call number registration**:
+4. **Find specific system call number registration**:
    ```bash
    ./scripts/sg.sh run --pattern 'Syscall.$SYS.numberFor($ARCH)' --lang kotlin
    ```
