@@ -76,6 +76,10 @@ object BacklogValidator {
                 errors.add("${file.name}: Missing required 'target_files' field (e.g. list of file paths or [])")
             }
 
+            if ((issue.status == "open" || issue.status == "in_progress") && issue.targetFiles.isEmpty()) {
+                errors.add("${file.name}: Missing or empty 'target_files' list for active issue")
+            }
+
             // Check dependencies existence
             for (dep in issue.dependencies) {
                 if (dep.isNotBlank() && dep !in knownIssueIds) {
