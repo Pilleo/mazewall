@@ -160,3 +160,53 @@ By adopting Chromium's CET initialization model, `mazewall` establishes a 4-tier
 2. **Landlock LSM** isolates filesystem paths and network ports.
 3. **`PR_SET_MDWE`** prevents creating writable-executable memory pages.
 4. **Intel CET (`arch_prctl`)** ensures return addresses on the stack cannot be tampered with, triggering a hardware `#CP` exception before ROP/JOP payloads can attempt a sandbox escape.
+
+---
+
+## Beyond Intel CET: Advanced Hardware & OS Security Primitives
+
+Beyond Intel CET, Chromium (Google Chrome), modern browser engines (V8), and mobile platforms (Android/iOS) utilize several other hardware-assisted and low-level OS security primitives. These can be integrated into JVM applications via Java FFM (`java.lang.foreign`) and Linux `prctl`/syscall APIs:
+
+### 1. ARM PAC & BTI (ARM64 Pointer Authentication & Branch Target Identification)
+On ARM64 (Apple Silicon, Android 14+, AWS Graviton), Chromium uses ARM's hardware control-flow mitigations:
+
+* **PAC (Pointer Authentication Code):** Uses cryptographic HMAC signatures embedded into unused high bits of pointers (via `PACIA` / `AUTIA` CPU instructions). Overwriting a return address or pointer causes signature verification failure, raising an immediate hardware exception.
+* **BTI (Branch Target Identification):** The ARM64 counterpart to Intel CET's Indirect Branch Tracking (IBT). Requires all indirect jump targets (`BR`, `BLR`) to land on a `BTI` instruction.
+* **JVM & FFM Application:** OpenJDK 21+ supports ARM PAC/BTI via `-XX:+UsePAC` and `-XX:+UseBTI`. On Linux ARM64, `prctl(PR_SET_PAC_ENABLED)` configures pointer authentication rules for FFM native downcalls.
+
+### 2. Intel MPK / Protection Keys (`pkey_mprotect` & `WRPKRU`)
+Intel MPK (Memory Protection Keys) is used in Chrome's **V8 Sandbox** initiative to partition user-space memory without syscall overhead.
+
+* **Mechanism:** Memory pages are tagged with a 4-bit key (0–15) via `pkey_mprotect`. Threads grant or revoke Read/Write permissions to entire page domains in **1 CPU clock cycle** using the unprivileged `WRPKRU` CPU instruction, completely bypassing the `mprotect` system call.
+* **JVM & FFM Application:** `mazewall` can allocate Protection Keys via `sys_pkey_alloc` and tag sensitive off-heap `MemorySegment` buffers (e.g. cryptographic keys, session tokens). Worker threads execute `WRPKRU` to lock access to sensitive memory pages before running untrusted tasks, then restore access afterward.
+
+### 3. ARM MTE (Memory Tagging Extension)
+Deployed in Android 14+ and ARMv8.5+ processors, **MTE** eliminates Use-After-Free (UAF) and Out-Of-Bounds (OOB) memory corruption.
+
+* **Mechanism:** The CPU hardware assigns a 4-bit tag to every 16-byte granule of memory and a matching 4-bit tag to pointer references. If a pointer dereference tag does not match the memory granule tag, the CPU hardware raises a `SIGSEGV` instantly.
+* **JVM & FFM Application:** Configured on Linux ARM64 via `prctl(PR_SET_TAGGED_ADDR_CTRL, PR_MTE_TCF_SYNC)`. Off-heap FFM allocators can leverage MTE to ensure native off-heap memory is immune to UAF/OOB buffer overflows.
+
+### 4. Memory Deny Write Execute (`PR_SET_MDWE`)
+Chromium enforces strict **W^X (Write XOR Execute)** memory rules: writable memory pages can never be converted to executable (`PROT_EXEC`).
+
+* **Mechanism:** Executing `prctl(PR_SET_MDWE, PR_MDWE_NO_EMBED)` instructs the Linux kernel to reject any attempt to make writable memory executable.
+* **JVM Application:** `mazewall` enforces `PR_SET_MDWE` process-wide or thread-wide, operating cleanly in Ahead-Of-Time (AOT) GraalVM Native Images where JIT dynamic code compilation is absent.
+
+### 5. Memory Caging (Chromium V8 Sandbox Pattern)
+Chrome 123+ introduced the **V8 Sandbox** to protect against shared-memory ACE escapes.
+
+* **Mechanism:** Instead of trusting 64-bit raw pointers inside the V8 heap, V8 uses **32-bit Sandboxed Pointers** (offsets relative to a reserved 1TB Virtual Address Space cage) and **External Pointer Tables**. Any array index corruption inside V8 is mathematically trapped inside the 1TB memory cage.
+* **JVM Parallel:** In the JVM ecosystem, this pattern is mirrored by **GraalVM Isolates** (independent, non-overlapping Java heaps inside the same process) and **WebAssembly (Wasm) runtimes** (executing untrusted modules inside sandboxed linear byte arrays).
+
+---
+
+## Hardware & OS Security Matrix
+
+| Feature | Primitive / Syscall | Target Vulnerability | JVM & FFM Implementation Strategy |
+| :--- | :--- | :--- | :--- |
+| **Intel CET** | `arch_prctl(ARCH_SHSTK_ENABLE)` | ROP / JOP Stack Hijacking | FFM downcall to lock Shadow Stack (`ARCH_SHSTK_LOCK`). |
+| **ARM PAC / BTI** | `prctl(PR_SET_PAC_ENABLED)` | Pointer & Return Address Hijacking (ARM64) | Enables ARM64 hardware pointer authentication & branch target checks. |
+| **Intel MPK (PKEYs)** | `pkey_mprotect` / `WRPKRU` | Unauthorized Heap Access / Memory Leak | 1-cycle CPU memory domain locking for off-heap FFM buffers. |
+| **ARM MTE** | `prctl(PR_SET_TAGGED_ADDR_CTRL)` | Use-After-Free & Buffer Overflows (ARM64) | Hardware tag validation for off-heap native memory allocations. |
+| **Strict W^X** | `prctl(PR_SET_MDWE)` | Binary Shellcode Injection | Prevents converting writable memory pages into executable ones. |
+
