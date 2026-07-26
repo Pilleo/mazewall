@@ -31,6 +31,7 @@ public class PolicyBuilder<S : PolicyScope> internal constructor(
      * by sibling threads. See [allowUnsafePrctl] for details.
      */
     private var allowUnsafePrctl: Boolean = false,
+    private var lockIntelCet: Boolean = false,
     private val allowedFsReadPaths: MutableSet<SandboxedPath> = mutableSetOf(),
     private val allowedFsWritePaths: MutableSet<SandboxedPath> = mutableSetOf(),
 ) {
@@ -58,6 +59,7 @@ public class PolicyBuilder<S : PolicyScope> internal constructor(
         if (policy.allowMmapExec) allowMmapExec = true
         if (policy.allowNonThreadClone) allowNonThreadClone = true
         if (policy.allowUnsafePrctl) allowUnsafePrctl = true
+        if (policy.lockIntelCet) lockIntelCet = true
         allowedFsReadPaths.addAll(policy.allowedFsReadPaths)
         allowedFsWritePaths.addAll(policy.allowedFsWritePaths)
         return this
@@ -135,6 +137,11 @@ public class PolicyBuilder<S : PolicyScope> internal constructor(
         return this
     }
 
+    public fun lockIntelCet(): PolicyBuilder<S> {
+        this.lockIntelCet = true
+        return this
+    }
+
     public fun build(): PolicyDefinition<S> {
         val enforceLandlock = allowedFsReadPaths.isNotEmpty() || allowedFsWritePaths.isNotEmpty()
         val finalSyscalls = syscallActions.toMutableMap()
@@ -161,6 +168,7 @@ public class PolicyBuilder<S : PolicyScope> internal constructor(
             allowMmapExec = allowMmapExec,
             allowNonThreadClone = allowNonThreadClone,
             allowUnsafePrctl = allowUnsafePrctl,
+            lockIntelCet = lockIntelCet,
             allowedFsReadPaths = allowedFsReadPaths.toSet(),
             allowedFsWritePaths = allowedFsWritePaths.toSet(),
             enforceLandlock = enforceLandlock,

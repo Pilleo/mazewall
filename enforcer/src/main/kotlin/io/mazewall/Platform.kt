@@ -2,6 +2,8 @@ package io.mazewall
 
 import io.mazewall.core.Arch
 import io.mazewall.ffi.NativeConstants
+import io.mazewall.ffi.memory.NativeArena
+import io.mazewall.ffi.memory.readLong
 import io.mazewall.LinuxNative.SyscallResult
 import io.mazewall.LinuxNative.SyscallHandledState
 import java.util.logging.Logger
@@ -161,6 +163,31 @@ public object Platform {
             }
         }
         return FallbackBehavior.FAIL
+    }
+
+    /**
+     * Queries the kernel for active Intel CET Shadow Stack status.
+     * Returns a bitmask of enabled options (e.g. 1 for ARCH_SHSTK_SHSTK), or 0 if unsupported/disabled/error.
+     */
+    public fun queryIntelCetStatus(): Long {
+        if (!isLinux || !isArchitectureSupported()) return 0L
+        if (io.mazewall.core.Arch.current() != io.mazewall.core.Arch.AMD64) return 0L
+
+        return try {
+            NativeArena.ofConfined().use { arena ->
+                val statusSeg = arena.allocate(8)
+                val res = LinuxNative.process.archPrctl(NativeConstants.ARCH_SHSTK_STATUS, statusSeg)
+                if (res is SyscallResult.Success && res.value == 0L) {
+                    statusSeg.readLong(0)
+                } else {
+                    0L
+                }
+            }
+        } catch (e: UnsupportedOperationException) {
+            0L
+        } catch (e: IllegalStateException) {
+            0L
+        }
     }
 
     /**

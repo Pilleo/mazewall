@@ -227,6 +227,11 @@ public class Policy<out S : PolicyScope, out State : PolicyState> internal const
             return this
         }
 
+        public fun lockIntelCet(): Builder<S> {
+            internalBuilder.lockIntelCet()
+            return this
+        }
+
         public fun build(): Policy<S, Uncompiled> {
             return Policy(internalBuilder.build())
         }
