@@ -277,6 +277,18 @@ class RealGitHubClient(private val config: OrchestratorConfig) : GitHubClient {
         return execute("gh", "pr", "view", prNumber, "--json", "url")
             .substringAfter("\"url\":\"").substringBefore("\"")
     }
+
+    override fun isCommitEmpty(prNumber: String, shaOld: String, shaNew: String): Boolean {
+        if (shaOld.isEmpty() || shaNew.isEmpty()) return false
+        return try {
+            val output = execute("gh", "api", "repos/:owner/:repo/compare/$shaOld...$shaNew", "--jq", ".files | length")
+            val filesChanged = output.trim().toIntOrNull() ?: 0
+            filesChanged == 0
+        } catch (e: Exception) {
+            System.err.println("Error checking if commit is empty via gh api compare: ${e.message}")
+            false
+        }
+    }
 }
 
 class ProcessExecutionException(val command: String, val exitCode: Int, val output: String) :

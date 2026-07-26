@@ -467,42 +467,25 @@ sealed interface OrchestratorState {
 
             // If the PR head SHA changed it means Jules pushed a new commit instead of just reviewing.
             if (currentSha != context.lastHeadSha) {
-                context.julesReviewPushCount++
-                env.println(
-                    "⚠️ [REVIEW→PUSH] Jules pushed a new commit on PR #$prNumber during the review phase " +
-                    "(push #${context.julesReviewPushCount}). SHA changed: ${context.lastHeadSha?.take(7)} → ${currentSha.take(7)}"
-                )
-
-                if (context.julesReviewPushCount >= 2) {
-                    // Jules keeps committing instead of reviewing — escalate to human.
-                    val prUrl = env.gitHubClient.getPrUrl(prNumber)
-                    env.sendNotification(
-                        "⚠️ *Jules pushed instead of reviewing ${context.julesReviewPushCount}x on PR #$prNumber.* " +
-                        "Please manually review and merge (or close) the PR: $prUrl"
-                    )
-                    env.println("🔔 [ESCALATE] Jules review-push loop escalated to human after ${context.julesReviewPushCount} pushes.")
-                    env.ringBell(5)
-                    // Treat the latest pushed commit as the candidate; hand off to human.
-                    return AWAITING_MERGE
+                val shaOld = context.lastHeadSha ?: ""
+                val isEmpty = if (shaOld.isNotEmpty()) {
+                    env.gitHubClient.isCommitEmpty(prNumber, shaOld, currentSha)
+                } else {
+                    false
                 }
 
-                // Post a correction comment on the PR to re-orient Jules before CI re-runs.
-                val correctionComment = """
-                    @jules You pushed a new commit instead of leaving a code review comment.
-                    
-                    ⛔ **STOP. Do NOT push any more commits.**
-                    
-                    Your task for this PR is **read-only code review only**. The implementation is already 
-                    complete. Please do NOT modify any files or push any commits.
-                    
-                    When CI passes on the latest commit, you will receive a new review request. 
-                    At that point, respond ONLY with a comment containing your review findings — no file edits, no commits.
-                """.trimIndent()
-                env.gitHubClient.commentOnPr(prNumber, correctionComment)
-                env.sendNotification("⚠️ Jules pushed instead of reviewing on PR #$prNumber. Correction comment sent. Returning to CI_RUNNING.")
+                context.lastHeadSha = currentSha // Update the head SHA to the new one
 
-                // The new commit needs to go through CI before we review it.
-                return CI_RUNNING
+                if (isEmpty) {
+                    env.println("⚠️ Jules pushed an empty commit during review phase on PR #$prNumber")
+                    env.sendNotification("⚠️ Jules pushed an empty commit during review phase on PR #$prNumber")
+                    env.ringBell(5)
+                    return AWAITING_MERGE
+                } else {
+                    context.julesReviewPushCount = 0
+                    env.println("🟢 Jules pushed a non-empty commit on PR #$prNumber. Treating as real problem resolution. Resetting push count and returning to CI_RUNNING.")
+                    return CI_RUNNING
+                }
             }
 
             val status = env.gitHubClient.checkBuildStatus(prNumber)
