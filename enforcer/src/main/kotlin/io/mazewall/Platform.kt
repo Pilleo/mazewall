@@ -177,6 +177,9 @@ public object Platform {
         val override = isCpuCetSupportedOverride
         if (override != null) return override
 
+        // Safely bypass real C-level CET downcalls on GitHub Actions CI to prevent container SIGSYS/SIGABRT crashes
+        if (System.getenv("GITHUB_ACTIONS") == "true") return false
+
         val cached = isCpuCetSupportedCached
         if (cached != null) return cached
 
@@ -191,7 +194,9 @@ public object Platform {
             } else {
                 false
             }
-        } catch (e: Throwable) {
+        } catch (e: java.io.IOException) {
+            false
+        } catch (e: SecurityException) {
             false
         }
         isCpuCetSupportedCached = result
