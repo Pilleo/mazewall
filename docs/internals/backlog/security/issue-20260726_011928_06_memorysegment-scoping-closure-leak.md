@@ -9,10 +9,9 @@ labels:
 - ffm
 - memory-leak
 component: enforcer
-target_modules:
-- :enforcer
-target_files:
-- enforcer/src/main/kotlin/io/mazewall/enforcer/supervisor/SupervisorSessionHandler.kt
+target_modules: [":enforcer"]
+target_files: ["io.mazewall.enforcer.supervisor.SupervisorSessionHandler.kt"]
+github_issue: 335
 ---
 
 # Issue: Arena MemorySegment leak during async response loop
