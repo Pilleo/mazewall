@@ -1,18 +1,20 @@
 ---
-title: "Orchestrator: Validate Issue Context and Needed Before GitHub Issue Creation"
-severity: "HIGH"
-status: "open"
+title: 'Orchestrator: Validate Issue Context and Needed Before GitHub Issue Creation'
+severity: HIGH
+status: open
 priority: 10
-dependencies: ["issue-202"]
-target_files: []
-target_modules: [\":tools:orchestrator\"]
-component: "orchestrator"
-effort: "trivial"
+dependencies:
+- issue-202
+target_files:
+- tools/orchestrator/src/main/kotlin/io/mazewall/orchestrator/ReviewIssueLauncher.kt
+target_modules:
+- :tools:orchestrator
+component: orchestrator
+effort: trivial
 reversible: true
-autonomy: "supervised"
+autonomy: supervised
 solution_approved: false
-blast_radius: "medium"
-reversible: true
+blast_radius: medium
 ---
 
 # 🔴 [Severity: HIGH]: Orchestrator: Validate Issue Context and Needed Before GitHub Issue Creation

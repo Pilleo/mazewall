@@ -1,18 +1,17 @@
 ---
-title: "Implement Pre-Commit Working Tree Sanitization Barrier in Orchestrator Tasks"
-severity: "HIGH"
-status: "open"
+title: Implement Pre-Commit Working Tree Sanitization Barrier in Orchestrator Tasks
+severity: HIGH
+status: open
 priority: 10
 dependencies:
-  - "issue-20260726-205801"
-component: "orchestrator"
+- issue-20260726-205801
+component: orchestrator
 target_modules:
-  - ":tools:orchestrator"
+- :tools:orchestrator
 target_files:
-  - "tools/orchestrator/src/main/kotlin/io/mazewall/orchestrator/GitHubCli.kt"
-  - "tools/orchestrator/src/main/kotlin/io/mazewall/orchestrator/OrchestratorStates.kt"
-effort: "medium"
-autonomy: "autonomous"
+- tools/orchestrator/src/main/kotlin/io/mazewall/orchestrator/GitHubCli.kt
+effort: medium
+autonomy: autonomous
 ---
 
 # 🔴 [Severity: HIGH]: Implement Pre-Commit Working Tree Sanitization Barrier in Orchestrator Tasks

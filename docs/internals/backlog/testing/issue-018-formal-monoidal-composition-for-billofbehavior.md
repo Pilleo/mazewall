@@ -1,13 +1,15 @@
 ---
-title: "Formal Monoidal Composition for `BillOfBehavior`"
-severity: "ENHANCEMENT"
-status: "open"
+title: Formal Monoidal Composition for `BillOfBehavior`
+severity: ENHANCEMENT
+status: open
 priority: 2
 dependencies: []
-target_files: []
-target_modules: [\":profiler\"]
-component: "profiler"
-effort: "medium"
+target_files:
+- profiler/src/main/kotlin/io/mazewall/profiler/BillOfBehavior.kt
+target_modules:
+- :profiler
+component: profiler
+effort: medium
 ---
 
 # 🔵 [Severity: ENHANCEMENT]: Formal Monoidal Composition for `BillOfBehavior`

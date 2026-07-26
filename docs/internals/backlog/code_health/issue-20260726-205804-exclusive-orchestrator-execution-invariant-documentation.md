@@ -1,17 +1,17 @@
 ---
-title: "Document Single Control Plane Development Invariants in AGENTS.md"
-severity: "HIGH"
-status: "open"
+title: Document Single Control Plane Development Invariants in AGENTS.md
+severity: HIGH
+status: open
 priority: 9
 dependencies:
-  - "issue-20260726-205803"
-component: "docs"
+- issue-20260726-205803
+component: docs
 target_modules:
-  - ":tools:orchestrator"
+- :tools:orchestrator
 target_files:
-  - "AGENTS.md"
-effort: "small"
-autonomy: "autonomous"
+- AGENTS.md
+effort: small
+autonomy: autonomous
 ---
 
 # 🔴 [Severity: HIGH]: Document Single Control Plane Development Invariants in AGENTS.md

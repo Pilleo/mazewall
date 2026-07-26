@@ -1,17 +1,16 @@
 ---
-title: "Integrate Mergiraf AST Syntax-Aware Git Merge Driver into Repository Configuration"
-severity: "HIGH"
-status: "open"
+title: Integrate Mergiraf AST Syntax-Aware Git Merge Driver into Repository Configuration
+severity: HIGH
+status: open
 priority: 10
 dependencies: []
-component: "ci"
+component: ci
 target_modules:
-  - ":tools:orchestrator"
+- :tools:orchestrator
 target_files:
-  - ".gitattributes"
-  - "scripts/setup_mergiraf.sh"
-effort: "small"
-autonomy: "autonomous"
+- build.gradle.kts
+effort: small
+autonomy: autonomous
 ---
 
 # 🔴 [Severity: HIGH]: Integrate Mergiraf AST Syntax-Aware Git Merge Driver into Repository Configuration

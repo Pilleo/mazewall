@@ -3,10 +3,17 @@ title: TraceEvent buffer truncation on excessively long extracted string paths
 type: issue
 status: open
 priority: 3
-labels: ["security", "profiler", "buffer-overflow", "truncation"]
+labels:
+- security
+- profiler
+- buffer-overflow
+- truncation
 component: enforcer
-target_modules: [":enforcer", ":profiler"]
-target_files: ["io.mazewall.ffi.memory.SupervisorProcessMemoryReader.kt"]
+target_modules:
+- :enforcer
+- :profiler
+target_files:
+- enforcer/src/main/kotlin/io/mazewall/ffi/memory/SupervisorProcessMemoryReader.kt
 ---
 
 # Issue: TraceEvent Path Truncation Vulnerability

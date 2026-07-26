@@ -1,12 +1,18 @@
 ---
-title: SupervisorSocketUtils swallows Thread.sleep InterruptedException without setting interrupt status
+title: SupervisorSocketUtils swallows Thread.sleep InterruptedException without setting
+  interrupt status
 type: issue
 status: open
 priority: 5
-labels: ["security", "enforcer", "deadlock"]
+labels:
+- security
+- enforcer
+- deadlock
 component: enforcer
-target_modules: [":enforcer"]
-target_files: ["io.mazewall.ffi.networking.SupervisorSocketUtils.kt"]
+target_modules:
+- :enforcer
+target_files:
+- enforcer/src/main/kotlin/io/mazewall/ffi/networking/SupervisorSocketUtils.kt
 ---
 
 # Issue: `SupervisorSocketUtils` Swallows `InterruptedException`

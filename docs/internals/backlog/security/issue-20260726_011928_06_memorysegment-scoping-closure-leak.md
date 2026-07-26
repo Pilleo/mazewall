@@ -3,7 +3,11 @@ title: Arena MemorySegment leak in JVMValidationListener during async response l
 type: issue
 status: open
 priority: 8
-labels: ["security", "enforcer", "ffm", "memory-leak"]
+labels:
+- security
+- enforcer
+- ffm
+- memory-leak
 component: enforcer
 target_modules: [":enforcer"]
 target_files: ["io.mazewall.enforcer.supervisor.SupervisorSessionHandler.kt"]

@@ -1,12 +1,19 @@
 ---
-title: SupervisorSessionHandler catch(Throwable) swallows critical errors causing resource leaks
+title: SupervisorSessionHandler catch(Throwable) swallows critical errors causing
+  resource leaks
 type: issue
 status: open
 priority: 8
-labels: ["security", "enforcer", "resource-leak", "fail-open"]
+labels:
+- security
+- enforcer
+- resource-leak
+- fail-open
 component: enforcer
-target_modules: [":enforcer"]
-target_files: ["io.mazewall.enforcer.supervisor.SupervisorSessionHandler.kt"]
+target_modules:
+- :enforcer
+target_files:
+- enforcer/src/main/kotlin/io/mazewall/enforcer/supervisor/SupervisorSessionHandler.kt
 ---
 
 # Issue: `SupervisorSessionHandler.handleActiveListener` Swallows `Throwable`

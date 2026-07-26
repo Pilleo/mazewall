@@ -1,16 +1,19 @@
 ---
-title: "Reactor Loop Iteration Arena Scoping"
-severity: "HIGH"
-status: "open"
+title: Reactor Loop Iteration Arena Scoping
+severity: HIGH
+status: open
 priority: 9
-dependencies: ["issue-194"]
-target_files: []
-target_modules: [\":profiler\"]
-component: "profiler"
-effort: "medium"
-autonomy: "supervised"
+dependencies:
+- issue-194
+target_files:
+- profiler/src/main/kotlin/io/mazewall/profiler/engine/ProfilerDaemonEngine.kt
+target_modules:
+- :profiler
+component: profiler
+effort: medium
+autonomy: supervised
 solution_approved: false
-blast_radius: "medium"
+blast_radius: medium
 reversible: true
 ---
 

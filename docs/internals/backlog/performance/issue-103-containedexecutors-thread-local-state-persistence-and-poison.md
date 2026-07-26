@@ -1,13 +1,16 @@
 ---
-title: "🟢 [WONTFIX]: `ContainedExecutors` Thread-Local State Persistence and Poisoning"
-severity: "MEDIUM"
-status: "open"
+title: "\U0001F7E2 [WONTFIX]: `ContainedExecutors` Thread-Local State Persistence\
+  \ and Poisoning"
+severity: MEDIUM
+status: open
 priority: 6
 dependencies: []
-target_files: []
-target_modules: [\":enforcer\"]
-component: "enforcer"
-effort: "medium"
+target_files:
+- enforcer/src/main/kotlin/io/mazewall/enforcer/ContainedExecutors.kt
+target_modules:
+- :enforcer
+component: enforcer
+effort: medium
 ---
 
 # 🟢 [WONTFIX]: `ContainedExecutors` Thread-Local State Persistence and Poisoning

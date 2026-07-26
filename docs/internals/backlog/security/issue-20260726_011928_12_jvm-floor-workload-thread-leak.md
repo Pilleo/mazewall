@@ -3,10 +3,15 @@ title: JvmFloorWorkload OS Thread leak due to infinite retry loop on exception
 type: issue
 status: open
 priority: 5
-labels: ["security", "enforcer", "resource-exhaustion"]
+labels:
+- security
+- enforcer
+- resource-exhaustion
 component: enforcer
-target_modules: [":enforcer"]
-target_files: ["io.mazewall.enforcer.JvmFloorWorkload.kt"]
+target_modules:
+- :enforcer
+target_files:
+- enforcer/src/main/kotlin/io/mazewall/enforcer/JvmFloorWorkload.kt
 ---
 
 # Issue: `JvmFloorWorkload` Background OS Thread Leak

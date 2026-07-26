@@ -1,13 +1,15 @@
 ---
-title: "Refactor Profiler Daemon to use Coroutines (Structured Concurrency)"
-severity: "ENHANCEMENT"
-status: "open"
+title: Refactor Profiler Daemon to use Coroutines (Structured Concurrency)
+severity: ENHANCEMENT
+status: open
 priority: 2
 dependencies: []
-target_files: []
-target_modules: [\":profiler\"]
-component: "profiler"
-effort: "large"
+target_files:
+- profiler/src/main/kotlin/io/mazewall/profiler/engine/ProfilerDaemon.kt
+target_modules:
+- :profiler
+component: profiler
+effort: large
 ---
 
 # 🔵 [Severity: ENHANCEMENT]: Refactor Profiler Daemon to use Coroutines (Structured Concurrency)

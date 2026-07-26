@@ -1,16 +1,16 @@
 ---
-title: "Implement Atomic Write-Ahead Pattern for Orchestrator State File Persistence"
-severity: "HIGH"
-status: "open"
+title: Implement Atomic Write-Ahead Pattern for Orchestrator State File Persistence
+severity: HIGH
+status: open
 priority: 8
 dependencies: []
-component: "orchestrator"
+component: orchestrator
 target_modules:
-  - ":tools:orchestrator"
+- :tools:orchestrator
 target_files:
-  - "tools/orchestrator/src/main/kotlin/io/mazewall/orchestrator/OrchestratorDaemon.kt"
-effort: "small"
-autonomy: "autonomous"
+- tools/orchestrator/src/main/kotlin/io/mazewall/orchestrator/OrchestratorDaemon.kt
+effort: small
+autonomy: autonomous
 ---
 
 # 🔴 [Severity: HIGH]: Implement Atomic Write-Ahead Pattern for Orchestrator State File Persistence

@@ -1,18 +1,17 @@
 ---
-title: "Dynamic Post-Push Target File Tracking in Orchestrator Active Slots"
-severity: "HIGH"
-status: "open"
+title: Dynamic Post-Push Target File Tracking in Orchestrator Active Slots
+severity: HIGH
+status: open
 priority: 10
 dependencies:
-  - "issue-20260726-191002"
-component: "orchestrator"
+- issue-20260726-191002
+component: orchestrator
 target_modules:
-  - ":tools:orchestrator"
+- :tools:orchestrator
 target_files:
-  - "tools/orchestrator/src/main/kotlin/io/mazewall/orchestrator/OrchestratorStates.kt"
-  - "tools/orchestrator/src/main/kotlin/io/mazewall/orchestrator/OrchestratorEnvironment.kt"
-effort: "medium"
-autonomy: "autonomous"
+- tools/orchestrator/src/main/kotlin/io/mazewall/orchestrator/OrchestratorStates.kt
+effort: medium
+autonomy: autonomous
 ---
 
 # 🔴 [Severity: HIGH]: Dynamic Post-Push Target File Tracking in Orchestrator Active Slots

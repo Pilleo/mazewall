@@ -3,10 +3,16 @@ title: BPF Static Verifier fails to catch backward jumps that overflow
 type: issue
 status: open
 priority: 3
-labels: ["security", "enforcer", "bpf", "static-verifier"]
+labels:
+- security
+- enforcer
+- bpf
+- static-verifier
 component: enforcer
-target_modules: [":enforcer"]
-target_files: ["io.mazewall.seccomp.BpfStaticVerifier.kt"]
+target_modules:
+- :enforcer
+target_files:
+- enforcer/src/main/kotlin/io/mazewall/seccomp/BpfStaticVerifier.kt
 ---
 
 # Issue: BPF Static Verifier Potential Overflow

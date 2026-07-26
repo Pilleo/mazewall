@@ -1,13 +1,15 @@
 ---
-title: "KtLint parser fails on Kotlin 2.x named context parameters syntax"
-severity: "MEDIUM"
-status: "open"
+title: KtLint parser fails on Kotlin 2.x named context parameters syntax
+severity: MEDIUM
+status: open
 priority: 4
 dependencies: []
-target_files: []
-target_modules: [\":enforcer\"]
-component: "testing"
-effort: "medium"
+target_files:
+- build.gradle.kts
+target_modules:
+- :enforcer
+component: testing
+effort: medium
 ---
 
 # 🟡 [Severity: LOW]: KtLint parser fails on Kotlin 2.x named context parameters syntax

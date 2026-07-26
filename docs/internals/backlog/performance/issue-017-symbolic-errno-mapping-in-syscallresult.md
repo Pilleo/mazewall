@@ -1,13 +1,15 @@
 ---
-title: "Symbolic Errno Mapping in `SyscallResult`"
-severity: "ENHANCEMENT"
-status: "open"
+title: Symbolic Errno Mapping in `SyscallResult`
+severity: ENHANCEMENT
+status: open
 priority: 2
 dependencies: []
-target_files: []
-target_modules: [\":enforcer\"]
-component: "enforcer"
-effort: "medium"
+target_files:
+- enforcer/src/main/kotlin/io/mazewall/seccomp/PureJavaBpfEngine.kt
+target_modules:
+- :enforcer
+component: enforcer
+effort: medium
 ---
 
 # 🔵 [Severity: ENHANCEMENT]: Symbolic Errno Mapping in `SyscallResult`

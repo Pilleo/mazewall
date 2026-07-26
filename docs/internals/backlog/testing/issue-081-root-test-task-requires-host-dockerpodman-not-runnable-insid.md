@@ -1,13 +1,16 @@
 ---
-title: "📝 [NOTE]: Root `:test` task requires host Docker/Podman, not runnable inside dev container"
-severity: "MEDIUM"
-status: "open"
+title: "\U0001F4DD [NOTE]: Root `:test` task requires host Docker/Podman, not runnable\
+  \ inside dev container"
+severity: MEDIUM
+status: open
 priority: 4
 dependencies: []
-target_files: []
-target_modules: [\":enforcer\"]
-component: "testing"
-effort: "medium"
+target_files:
+- build.gradle.kts
+target_modules:
+- :enforcer
+component: testing
+effort: medium
 ---
 
 # 📝 [NOTE]: Root `:test` task requires host Docker/Podman, not runnable inside dev container

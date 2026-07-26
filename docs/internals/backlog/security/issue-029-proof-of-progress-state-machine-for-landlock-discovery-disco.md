@@ -1,13 +1,15 @@
 ---
-title: "Proof-of-Progress State Machine for Landlock Discovery (`DiscoveryTask<Status>`)"
-severity: "ENHANCEMENT"
-status: "open"
+title: Proof-of-Progress State Machine for Landlock Discovery (`DiscoveryTask<Status>`)
+severity: ENHANCEMENT
+status: open
 priority: 2
 dependencies: []
-target_files: []
-target_modules: [\":profiler\"]
-component: "profiler"
-effort: "medium"
+target_files:
+- profiler/src/main/kotlin/io/mazewall/profiler/iterative/IterativeProfiler.kt
+target_modules:
+- :profiler
+component: profiler
+effort: medium
 ---
 
 # 🔵 [Severity: ENHANCEMENT]: Proof-of-Progress State Machine for Landlock Discovery (`DiscoveryTask<Status>`)

@@ -3,10 +3,15 @@ title: SupervisorDaemonEngine fd leak when handleActiveListener throws
 type: issue
 status: open
 priority: 5
-labels: ["security", "enforcer", "fd-leak"]
+labels:
+- security
+- enforcer
+- fd-leak
 component: enforcer
-target_modules: [":enforcer"]
-target_files: ["io.mazewall.enforcer.supervisor.SupervisorDaemonEngine.kt", "io.mazewall.enforcer.supervisor.SupervisorSessionHandler.kt"]
+target_modules:
+- :enforcer
+target_files:
+- enforcer/src/main/kotlin/io/mazewall/enforcer/supervisor/SupervisorDaemonEngine.kt
 ---
 
 # Issue: `SupervisorDaemonEngine` fails to close listener FDs on exception

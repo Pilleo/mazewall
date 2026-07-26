@@ -1,16 +1,18 @@
 ---
-title: "Process-Wide Classloader Deadlock on Profiler Result / State Types"
-severity: "HIGH"
-status: "open"
+title: Process-Wide Classloader Deadlock on Profiler Result / State Types
+severity: HIGH
+status: open
 priority: 9
 dependencies: []
-target_files: []
-target_modules: [\":profiler\"]
-component: "profiler"
-effort: "small"
-autonomy: "supervised"
+target_files:
+- profiler/src/main/kotlin/io/mazewall/profiler/ProfilingResult.kt
+target_modules:
+- :profiler
+component: profiler
+effort: small
+autonomy: supervised
 solution_approved: false
-blast_radius: "medium"
+blast_radius: medium
 reversible: true
 ---
 

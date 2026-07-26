@@ -3,10 +3,15 @@ title: IterativeProfiler can exhaust thread pools on recursive containerization 
 type: issue
 status: open
 priority: 5
-labels: ["security", "enforcer", "resource-exhaustion"]
+labels:
+- security
+- enforcer
+- resource-exhaustion
 component: enforcer
-target_modules: [":enforcer"]
-target_files: ["io.mazewall.profiler.IterativeProfiler.kt"]
+target_modules:
+- :enforcer
+target_files:
+- profiler/src/main/kotlin/io/mazewall/profiler/iterative/IterativeProfiler.kt
 ---
 
 # Issue: `IterativeProfiler` Thread Exhaustion

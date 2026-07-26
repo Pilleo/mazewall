@@ -1,13 +1,16 @@
 ---
-title: "Refactor Orchestrator State Machine Testability"
+title: Refactor Orchestrator State Machine Testability
 priority: 8
-status: "resolved"
-dependencies: ["issue-190"]
-severity: "HIGH"
-target_files: []
-target_modules: [\":tools:orchestrator\"]
-component: "orchestrator"
-effort: "MEDIUM"
+status: resolved
+dependencies:
+- issue-190
+severity: HIGH
+target_files:
+- tools/orchestrator/src/main/kotlin/io/mazewall/orchestrator/OrchestratorStates.kt
+target_modules:
+- :tools:orchestrator
+component: orchestrator
+effort: MEDIUM
 github_issue: 249
 ---
 

@@ -1,12 +1,19 @@
 ---
-title: SupervisorDaemonManager fails to catch throwable during daemon execution leading to silently dead supervisor
+title: SupervisorDaemonManager fails to catch throwable during daemon execution leading
+  to silently dead supervisor
 type: issue
 status: open
 priority: 8
-labels: ["security", "enforcer", "fail-open", "daemon"]
+labels:
+- security
+- enforcer
+- fail-open
+- daemon
 component: enforcer
-target_modules: [":enforcer"]
-target_files: ["io.mazewall.enforcer.supervisor.SupervisorDaemonManager.kt", "io.mazewall.enforcer.supervisor.SupervisorDaemon.kt"]
+target_modules:
+- :enforcer
+target_files:
+- enforcer/src/main/kotlin/io/mazewall/enforcer/supervisor/SupervisorDaemonManager.kt
 ---
 
 # Issue: `SupervisorDaemonManager` silently ignores process death or `Throwable`s

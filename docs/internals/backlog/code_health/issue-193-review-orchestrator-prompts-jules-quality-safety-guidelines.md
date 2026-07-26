@@ -1,16 +1,19 @@
 ---
-title: "Review and Enhance Orchestrator Prompts for Jules to Enforce Quality and Safety Guidelines"
-severity: "HIGH"
-status: "open"
+title: Review and Enhance Orchestrator Prompts for Jules to Enforce Quality and Safety
+  Guidelines
+severity: HIGH
+status: open
 priority: 10
 dependencies: []
-target_files: []
-target_modules: [\":tools:orchestrator\"]
-component: "orchestrator"
-effort: "small"
-autonomy: "supervised"
+target_files:
+- tools/orchestrator/src/main/kotlin/io/mazewall/orchestrator/OrchestratorPrompts.kt
+target_modules:
+- :tools:orchestrator
+component: orchestrator
+effort: small
+autonomy: supervised
 solution_approved: false
-blast_radius: "medium"
+blast_radius: medium
 reversible: true
 ---
 

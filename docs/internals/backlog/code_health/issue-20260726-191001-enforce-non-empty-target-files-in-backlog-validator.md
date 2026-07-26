@@ -1,17 +1,17 @@
 ---
-title: "Enforce Mandatory target_files in Backlog Validator for Conflict-Free Parallel Scheduling"
-severity: "HIGH"
-status: "open"
+title: Enforce Mandatory target_files in Backlog Validator for Conflict-Free Parallel
+  Scheduling
+severity: HIGH
+status: open
 priority: 10
 dependencies: []
-component: "orchestrator"
+component: orchestrator
 target_modules:
-  - ":tools:orchestrator"
+- :tools:orchestrator
 target_files:
-  - "tools/orchestrator/src/main/kotlin/io/mazewall/orchestrator/BacklogValidator.kt"
-  - "tools/orchestrator/src/test/kotlin/io/mazewall/orchestrator/BacklogValidatorTest.kt"
-effort: "small"
-autonomy: "autonomous"
+- tools/orchestrator/src/main/kotlin/io/mazewall/orchestrator/BacklogValidator.kt
+effort: small
+autonomy: autonomous
 ---
 
 # 🔴 [Severity: HIGH]: Enforce Mandatory target_files in Backlog Validator for Conflict-Free Parallel Scheduling

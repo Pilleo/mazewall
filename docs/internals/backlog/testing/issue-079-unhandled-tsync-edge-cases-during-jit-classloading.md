@@ -1,13 +1,15 @@
 ---
-title: "Unhandled `TSYNC` edge cases during JIT classloading"
-severity: "HIGH"
-status: "open"
+title: Unhandled `TSYNC` edge cases during JIT classloading
+severity: HIGH
+status: open
 priority: 6
 dependencies: []
-target_files: []
-target_modules: [\":enforcer\"]
-component: "enforcer"
-effort: "medium"
+target_files:
+- enforcer/src/main/kotlin/io/mazewall/seccomp/PureJavaBpfEngine.kt
+target_modules:
+- :enforcer
+component: enforcer
+effort: medium
 ---
 
 # 🔴 [Severity: MEDIUM]: Unhandled `TSYNC` edge cases during JIT classloading

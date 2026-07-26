@@ -1,18 +1,19 @@
 ---
-title: "Orchestrator: Structured CI Failure Comment with Diagnosis Guidance for Jules"
-severity: "MEDIUM"
-status: "open"
+title: 'Orchestrator: Structured CI Failure Comment with Diagnosis Guidance for Jules'
+severity: MEDIUM
+status: open
 priority: 10
 dependencies: []
-target_files: []
-target_modules: [\":tools:orchestrator\"]
-component: "orchestrator"
-effort: "small"
+target_files:
+- tools/orchestrator/src/main/kotlin/io/mazewall/orchestrator/OrchestratorDaemon.kt
+target_modules:
+- :tools:orchestrator
+component: orchestrator
+effort: small
 reversible: true
-autonomy: "supervised"
+autonomy: supervised
 solution_approved: false
-blast_radius: "medium"
-reversible: true
+blast_radius: medium
 ---
 
 # 🟡 [Severity: MEDIUM]: Orchestrator: Structured CI Failure Comment with Diagnosis Guidance for Jules

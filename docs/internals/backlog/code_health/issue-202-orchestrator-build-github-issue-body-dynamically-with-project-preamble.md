@@ -1,18 +1,19 @@
 ---
-title: "Orchestrator: Build GitHub Issue Body Dynamically with Project Preamble"
-severity: "HIGH"
-status: "open"
+title: 'Orchestrator: Build GitHub Issue Body Dynamically with Project Preamble'
+severity: HIGH
+status: open
 priority: 10
 dependencies: []
-target_files: []
-target_modules: [\":tools:orchestrator\"]
-component: "orchestrator"
-effort: "small"
+target_files:
+- tools/orchestrator/src/main/kotlin/io/mazewall/orchestrator/OrchestratorDaemon.kt
+target_modules:
+- :tools:orchestrator
+component: orchestrator
+effort: small
 reversible: true
-autonomy: "supervised"
+autonomy: supervised
 solution_approved: false
-blast_radius: "medium"
-reversible: true
+blast_radius: medium
 ---
 
 # 🔴 [Severity: HIGH]: Orchestrator: Build GitHub Issue Body Dynamically with Project Preamble

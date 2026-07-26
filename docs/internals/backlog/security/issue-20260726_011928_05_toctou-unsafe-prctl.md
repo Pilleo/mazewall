@@ -3,10 +3,16 @@ title: Unsafe prctl TOCTOU vulnerability documented but not properly prevented
 type: issue
 status: open
 priority: 5
-labels: ["security", "enforcer", "toctou", "documentation"]
+labels:
+- security
+- enforcer
+- toctou
+- documentation
 component: enforcer
-target_modules: [":enforcer"]
-target_files: ["io.mazewall.seccomp.UnsafePrctlInspector.kt"]
+target_modules:
+- :enforcer
+target_files:
+- enforcer/src/main/kotlin/io/mazewall/seccomp/UnsafePrctlInspector.kt
 ---
 
 # Issue: TOCTOU in Unsafe Prctl Policy Options

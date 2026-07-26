@@ -1,13 +1,16 @@
 ---
-title: "🔴 [REOPENED]: JVM Invariant Syscall Floor Implementation Fixes"
-severity: "HIGH"
-status: "open"
+title: "\U0001F534 [REOPENED]: JVM Invariant Syscall Floor Implementation Fixes"
+severity: HIGH
+status: open
 priority: 1
-dependencies: ["issue-075"]
-target_files: []
-target_modules: [\":enforcer\"]
-component: "enforcer"
-effort: "medium"
+dependencies:
+- issue-075
+target_files:
+- enforcer/src/main/kotlin/io/mazewall/seccomp/PureJavaBpfEngine.kt
+target_modules:
+- :enforcer
+component: enforcer
+effort: medium
 ---
 ### Context
 Initial attempt to expand the JVM invariant syscall floor (PR #98) identified several critical mapping and stability issues. The JVM requires a much larger set of syscalls for modern features (Loom, ZGC) and networking. Additionally, 64-bit register garbage causes BPF inspection failures.

@@ -1,13 +1,15 @@
 ---
-title: "Type-State for `FileDescriptor` Lifecycles (Compile-Time Use-After-Close Safety)"
-severity: "ENHANCEMENT"
-status: "open"
+title: Type-State for `FileDescriptor` Lifecycles (Compile-Time Use-After-Close Safety)
+severity: ENHANCEMENT
+status: open
 priority: 2
 dependencies: []
-target_files: []
-target_modules: [\":enforcer\"]
-component: "enforcer"
-effort: "medium"
+target_files:
+- enforcer/src/main/kotlin/io/mazewall/core/FileDescriptor.kt
+target_modules:
+- :enforcer
+component: enforcer
+effort: medium
 ---
 
 # 🔵 [Severity: ENHANCEMENT]: Type-State for `FileDescriptor` Lifecycles (Compile-Time Use-After-Close Safety)
