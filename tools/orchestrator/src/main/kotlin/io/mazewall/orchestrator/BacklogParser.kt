@@ -14,7 +14,9 @@ data class BacklogIssue(
     val component: String? = null,
     val effort: String? = null,
     val context: String? = null,
-    val needed: String? = null
+    val needed: String? = null,
+    val targetFiles: List<String> = emptyList(),
+    val targetModules: List<String> = emptyList()
 )
 
 object BacklogParser {
@@ -47,6 +49,12 @@ object BacklogParser {
             val dependenciesRaw = frontmatter["dependencies"] ?: ""
             val dependencies = parseList(dependenciesRaw, content)
 
+            val targetFilesRaw = frontmatter["target_files"] ?: ""
+            val targetFiles = parseList(targetFilesRaw, content)
+
+            val targetModulesRaw = frontmatter["target_modules"] ?: ""
+            val targetModules = parseList(targetModulesRaw, content)
+
             val id = frontmatter["id"]?.removeSurrounding("\"")?.removeSurrounding("'") ?: run {
                 val nameWithoutExt = file.name.removeSuffix(".md")
                 val parts = nameWithoutExt.split("-")
@@ -67,7 +75,7 @@ object BacklogParser {
 
             return BacklogIssue(
                 file, id, title, priority, status, dependencies, githubIssue,
-                severity, component, effort, context, needed
+                severity, component, effort, context, needed, targetFiles, targetModules
             )
         } catch (e: Exception) {
             System.err.println("Error parsing issue file ${file.name}: ${e.message}")
@@ -117,10 +125,22 @@ object BacklogParser {
 
     private fun parseList(raw: String, fullContent: String): List<String> {
         val cleanRaw = raw.trim()
+        val cleaner = { s: String ->
+            var current = s.trim()
+            while (true) {
+                val next = current.removeSurrounding("\"").removeSurrounding("'")
+                    .removeSurrounding("\\\"").removeSurrounding("\\'")
+                    .trim()
+                if (next == current) break
+                current = next
+            }
+            current
+        }
+
         if (cleanRaw.startsWith("[") && cleanRaw.endsWith("]")) {
             return cleanRaw.substring(1, cleanRaw.length - 1)
                 .split(",")
-                .map { it.trim().removeSurrounding("\"").removeSurrounding("'") }
+                .map { cleaner(it) }
                 .filter { it.isNotEmpty() }
         }
 
@@ -128,7 +148,7 @@ object BacklogParser {
         return cleanRaw.lines()
             .map { it.trim() }
             .filter { it.startsWith("-") }
-            .map { it.removePrefix("-").trim().removeSurrounding("\"").removeSurrounding("'") }
+            .map { cleaner(it.removePrefix("-")) }
             .filter { it.isNotEmpty() }
     }
 
