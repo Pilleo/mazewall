@@ -72,6 +72,9 @@ graph TD
     issue_195_reactor_loop_iteration_arena_scoping["🔴 Issue: Reactor Loop Iteration Arena Scoping (HIGH)"]
     issue_197_graceful_fallback_for_ai_agent_failures["🔴 Issue: Graceful Fallback for AI Agent Failures (HIGH)"]
     issue_198_auto_closing_linked_github_issues["🔴 Issue: Auto-Closing Linked GitHub Issues (HIGH)"]
+    issue_20260726_0145_manual_resource_closing_in_trace_listener["🔴 Issue: Manual Resource Closing in Trace Listener thread (MEDIUM)"]
+    issue_20260726_0150_manual_resource_closing_in_validation_channel["🔴 Issue: Manual Resource Closing in Supervisor Validation Channel (LOW)"]
+    issue_20260726_0200_type_state_engine_installation["🔴 Issue: Type-State Seccomp Installation Safety (Phantom Types) (ENHANCEMENT)"]
     issue_20260726_04_parallel_orchestrator_task_scheduler_and_conflict_avoidance["🔴 Issue: Multi-Issue Parallel Execution & Conflict-Free Task Scheduler (HIGH)"]
     issue_20260726_05_detect_empty_commits_during_jules_review_loop["🔴 Issue: Detect Empty Commits in Jules Review Loop to Prevent Redundant Correction Comments (MEDIUM)"]
     issue_202_handle_cli_authentication_failures["🔴 Issue: Detect and Handle CLI Authentication Failures with Actionable Login Alerts (HIGH)"]
@@ -150,6 +153,9 @@ graph TD
     click issue_195_reactor_loop_iteration_arena_scoping "../../../backlog/performance/issue-195-reactor-loop-iteration-arena-scoping.md"
     click issue_197_graceful_fallback_for_ai_agent_failures "../../../backlog/code_health/issue-197-graceful-fallback-for-ai-agent-failures.md"
     click issue_198_auto_closing_linked_github_issues "../../../backlog/code_health/issue-198-auto-closing-linked-github-issues.md"
+    click issue_20260726_0145_manual_resource_closing_in_trace_listener "../../../backlog/code_health/issue-20260726-0145-manual-resource-closing-in-trace-listener.md"
+    click issue_20260726_0150_manual_resource_closing_in_validation_channel "../../../backlog/code_health/issue-20260726-0150-manual-resource-closing-in-validation-channel.md"
+    click issue_20260726_0200_type_state_engine_installation "../../../backlog/code_health/issue-20260726-0200-type-state-engine-installation.md"
     click issue_20260726_04_parallel_orchestrator_task_scheduler_and_conflict_avoidance "../../../backlog/code_health/issue-20260726-04-parallel-orchestrator-task-scheduler-and-conflict-avoidance.md"
     click issue_20260726_05_detect_empty_commits_during_jules_review_loop "../../../backlog/code_health/issue-20260726-05-detect-empty-commits-during-jules-review-loop.md"
     click issue_202_handle_cli_authentication_failures "../../../backlog/code_health/issue-202-handle-cli-authentication-failures.md"
