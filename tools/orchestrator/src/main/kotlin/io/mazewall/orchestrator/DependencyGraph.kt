@@ -3,11 +3,11 @@ package io.mazewall.orchestrator
 object DependencyGraph {
     fun selectNextIssue(issues: List<BacklogIssue>): BacklogIssue? {
         val openIssues = issues.filter { it.status == "open" }
-        val allActiveIds = issues.map { it.id }.toSet()
+        val openIds = openIssues.map { it.id }.toSet()
 
-        // An issue is unblocked if none of its dependencies are currently in any active non-resolved status
+        // An issue is unblocked if none of its dependencies are currently open
         val unblockedIssues = openIssues.filter { issue ->
-            issue.dependencies.none { dep -> allActiveIds.contains(dep) }
+            issue.dependencies.none { dep -> openIds.contains(dep) }
         }
 
         // Sort by priority descending (scale of 0-10, highest first)

@@ -3,18 +3,120 @@ package io.mazewall.orchestrator
 import java.io.File
 import java.util.concurrent.TimeUnit
 
+class OrchestratorContext {
+    var state: OrchestratorState = OrchestratorState.SELECT_TASK
+    var currentIssueId: String? = null
+    var currentIssueTitle: String? = null
+    var currentIssueFile: String? = null
+    var githubIssueNumber: String? = null
+    var julesSessionId: String? = null
+    var prNumber: String? = null
+    val skippedIds: MutableSet<String> = mutableSetOf()
+
+    // Monitoring state/cache variables
+    var lastHeadSha: String? = null
+    var lastReviewedSha: String? = null
+    var lastBuildStatus: String? = null
+    var lastCheckedSha: String? = null
+    var lastWaitingLogTime: Long = 0L
+    var lastStatusChangeTime: Long = 0L
+    var lastKnownStatus: String? = null
+    var lastPendingNotificationTime: Long = 0L
+    var lastFailedSha: String? = null
+    var startTime: Long = 0L
+    var julesRetries: Int = 0
+    var julesReviewPushCount: Int = 0
+
+    fun load(props: java.util.Properties) {
+        state = OrchestratorState.fromName(props.getProperty("state"))
+        currentIssueId = props.getProperty("currentIssueId").takeIf { !it.isNullOrEmpty() }
+        currentIssueTitle = props.getProperty("currentIssueTitle").takeIf { !it.isNullOrEmpty() }
+        currentIssueFile = props.getProperty("currentIssueFile").takeIf { !it.isNullOrEmpty() }
+        githubIssueNumber = props.getProperty("githubIssueNumber").takeIf { !it.isNullOrEmpty() }
+        julesSessionId = props.getProperty("julesSessionId").takeIf { !it.isNullOrEmpty() }
+        prNumber = props.getProperty("prNumber").takeIf { !it.isNullOrEmpty() }
+
+        skippedIds.clear()
+        props.getProperty("skippedIds")?.let { ids ->
+            if (ids.isNotEmpty()) {
+                skippedIds.addAll(ids.split(","))
+            }
+        }
+
+
+
+        lastHeadSha = props.getProperty("lastHeadSha").takeIf { !it.isNullOrEmpty() }
+        lastReviewedSha = props.getProperty("lastReviewedSha").takeIf { !it.isNullOrEmpty() }
+        lastBuildStatus = props.getProperty("lastBuildStatus").takeIf { !it.isNullOrEmpty() }
+        lastCheckedSha = props.getProperty("lastCheckedSha").takeIf { !it.isNullOrEmpty() }
+        lastWaitingLogTime = props.getProperty("lastWaitingLogTime")?.toLongOrNull() ?: 0L
+        lastStatusChangeTime = props.getProperty("lastStatusChangeTime")?.toLongOrNull() ?: 0L
+        lastKnownStatus = props.getProperty("lastKnownStatus").takeIf { !it.isNullOrEmpty() }
+        lastPendingNotificationTime = props.getProperty("lastPendingNotificationTime")?.toLongOrNull() ?: 0L
+        lastFailedSha = props.getProperty("lastFailedSha").takeIf { !it.isNullOrEmpty() }
+        startTime = props.getProperty("startTime")?.toLongOrNull() ?: 0L
+        julesRetries = props.getProperty("julesRetries")?.toIntOrNull() ?: 0
+        julesReviewPushCount = props.getProperty("julesReviewPushCount")?.toIntOrNull() ?: 0
+    }
+
+    fun save(props: java.util.Properties) {
+        props.setProperty("state", state.name)
+        props.setProperty("currentIssueId", currentIssueId ?: "")
+        props.setProperty("currentIssueTitle", currentIssueTitle ?: "")
+        props.setProperty("currentIssueFile", currentIssueFile ?: "")
+        props.setProperty("githubIssueNumber", githubIssueNumber ?: "")
+        props.setProperty("julesSessionId", julesSessionId ?: "")
+        props.setProperty("prNumber", prNumber ?: "")
+        props.setProperty("skippedIds", skippedIds.joinToString(","))
+
+        props.setProperty("lastHeadSha", lastHeadSha ?: "")
+        props.setProperty("lastReviewedSha", lastReviewedSha ?: "")
+        props.setProperty("lastBuildStatus", lastBuildStatus ?: "")
+        props.setProperty("lastCheckedSha", lastCheckedSha ?: "")
+        props.setProperty("lastWaitingLogTime", lastWaitingLogTime.toString())
+        props.setProperty("lastStatusChangeTime", lastStatusChangeTime.toString())
+        props.setProperty("lastKnownStatus", lastKnownStatus ?: "")
+        props.setProperty("lastPendingNotificationTime", lastPendingNotificationTime.toString())
+        props.setProperty("lastFailedSha", lastFailedSha ?: "")
+        props.setProperty("startTime", startTime.toString())
+        props.setProperty("julesRetries", julesRetries.toString())
+        props.setProperty("julesReviewPushCount", julesReviewPushCount.toString())
+    }
+
+    fun clearActiveTask() {
+        currentIssueId = null
+        currentIssueTitle = null
+        currentIssueFile = null
+        githubIssueNumber = null
+        julesSessionId = null
+        prNumber = null
+        lastHeadSha = null
+        lastReviewedSha = null
+        lastBuildStatus = null
+        lastCheckedSha = null
+        lastWaitingLogTime = 0L
+        lastStatusChangeTime = 0L
+        lastKnownStatus = null
+        lastPendingNotificationTime = 0L
+        lastFailedSha = null
+        startTime = 0L
+        julesRetries = 0
+        julesReviewPushCount = 0
+    }
+}
+
 class OrchestratorDaemonRunner(
     private val env: OrchestratorEnvironment,
     private val stateFile: File
 ) {
-    val context = OrchestratorContext()
+    private val context = OrchestratorContext()
 
     fun loadState() {
         if (stateFile.exists()) {
             val props = java.util.Properties()
             stateFile.inputStream().use { props.load(it) }
             context.load(props)
-            env.println("♻️ State machine context loaded from ${stateFile.name}")
+            env.println("♻️ State machine context loaded from ${stateFile.name} (State: ${context.state.name})")
         }
     }
 
@@ -27,132 +129,26 @@ class OrchestratorDaemonRunner(
     fun run() {
         loadState()
         val forcedTaskId = env.getEnvOrNull("FORCE_TASK")?.takeIf { it.isNotEmpty() }
-        if (forcedTaskId != null && context.activeSlots.none { it.currentIssueId == forcedTaskId }) {
-            env.println("🎯 FORCE_TASK=$forcedTaskId detected. Resetting active slots.")
+        if (forcedTaskId != null && context.currentIssueId != forcedTaskId) {
+            env.println("🎯 FORCE_TASK=$forcedTaskId detected. Resetting local state to SELECT_TASK to target it.")
             context.clearActiveTask()
+            context.state = OrchestratorState.SELECT_TASK
             saveState()
         }
         while (true) {
             try {
-                // 1. Try to select and start new tasks
-                selectAndStartTasks()
-
-                // 2. If we have active slots, execute their state machine
-                if (context.activeSlots.isNotEmpty()) {
-                    val slotsToProcess = context.activeSlots.toList()
-                    for (slot in slotsToProcess) {
-                        try {
-                            val nextState = slot.state.execute(env, context, slot)
-                            if (nextState != slot.state) {
-                                env.println("Slot [${slot.currentIssueId}]: Transitioned from ${slot.state.name} to ${nextState.name}")
-                                slot.state = nextState
-                                saveState()
-                            }
-                        } catch (e: Exception) {
-                            env.errPrintln("⚠️ Error in state ${slot.state.name} for slot ${slot.currentIssueId}: ${e.message}")
-                            e.printStackTrace()
-                            try {
-                                env.sendNotification("⚠️ *Daemon Error in State ${slot.state.name} for slot ${slot.currentIssueId}:* `${e.message}`. Retrying in ${env.config.daemonErrorRetryMinutes} minutes...")
-                            } catch (notificationEx: Exception) {
-                                env.errPrintln("⚠️ Failed to send error notification: ${notificationEx.message}")
-                            }
-                        }
-                    }
-                } else {
-                    // No active tasks and no new tasks found, sleep before checking again
-                    env.println("💤 No active tasks. Checking again in ${env.config.backlogCheckIntervalMinutes} minutes...")
-                    env.sleep(env.config.backlogCheckIntervalMinutes, TimeUnit.MINUTES)
-                }
-
-                // Always save state after processing
+                context.state = context.state.execute(env, context)
                 saveState()
-
-                // To prevent high-CPU spin, sleep for a short polling interval (e.g. 5 seconds) if there are active tasks
-                if (context.activeSlots.isNotEmpty()) {
-                    env.sleep(5, TimeUnit.SECONDS)
-                }
             } catch (e: Exception) {
-                env.errPrintln("⚠️ Error in orchestrator loop: ${e.message}")
+                env.errPrintln("⚠️ Error in state ${context.state.name}: ${e.message}")
                 e.printStackTrace()
+                try {
+                    env.sendNotification("⚠️ *Daemon Error in State ${context.state.name}:* `${e.message}`. Retrying in ${env.config.daemonErrorRetryMinutes} minutes...")
+                } catch (notificationEx: Exception) {
+                    env.errPrintln("⚠️ Failed to send error notification: ${notificationEx.message}")
+                }
                 env.sleep(env.config.daemonErrorRetryMinutes, TimeUnit.MINUTES)
             }
-        }
-    }
-
-    fun selectAndStartTasks() {
-        val allIssues = env.parseAllIssues()
-        val forcedTaskId = env.getEnvOrNull("FORCE_TASK")?.takeIf { it.isNotEmpty() }
-
-        if (forcedTaskId != null) {
-            // If forced task is specified, check if it's already active or resolved
-            val alreadyActive = context.activeSlots.any { it.currentIssueId.equals(forcedTaskId, ignoreCase = true) }
-            if (!alreadyActive) {
-                val forcedIssue = allIssues.firstOrNull { it.id.equals(forcedTaskId, ignoreCase = true) }
-                if (forcedIssue != null && forcedIssue.status == "open") {
-                    env.println("🎯 Forcing specific task: ${forcedIssue.id} - ${forcedIssue.title}")
-                    val slot = SlotContext(forcedIssue.id)
-                    slot.currentIssueTitle = forcedIssue.title
-                    slot.currentIssueFile = forcedIssue.file.path
-                    slot.githubIssueNumber = forcedIssue.githubIssue?.toString()
-                    slot.state = OrchestratorState.PENDING_APPROVAL
-                    context.activeSlots.add(slot)
-                    saveState()
-                }
-            }
-            return
-        }
-
-        // Standard task selection with conflict check
-        while (true) {
-            val activeIssues = allIssues.filter { issue -> context.activeSlots.any { it.currentIssueId == issue.id } }
-            val activeFiles = activeIssues.flatMap { it.targetFiles }.toSet()
-            val activeModules = activeIssues.flatMap { it.targetModules }.toSet()
-
-            // Filter out issues that are already active or skipped
-            val candidateIssues = allIssues.filter {
-                it.id !in context.skippedIds &&
-                context.activeSlots.none { slot -> slot.currentIssueId == it.id }
-            }
-
-            // Find an unblocked candidate using the DependencyGraph selection logic
-            val openIssues = candidateIssues.filter { it.status == "open" }
-            val openIds = allIssues.filter { it.status == "open" }.map { it.id }.toSet()
-
-            val unblockedIssues = openIssues.filter { issue ->
-                issue.dependencies.none { dep -> openIds.contains(dep) }
-            }
-
-            // Filter for conflict-free: target_files(B) ∩ target_files(active) = ∅ AND target_modules(B) ∩ target_modules(active) = ∅
-            val conflictFreeIssues = unblockedIssues.filter { issue ->
-                issue.targetFiles.none { it in activeFiles } &&
-                issue.targetModules.none { it in activeModules }
-            }
-
-            // Sort by priority descending, then ID descending
-            val nextIssue = conflictFreeIssues.sortedWith(
-                compareByDescending<BacklogIssue> { it.priority }
-                    .thenByDescending { it.id }
-            ).firstOrNull()
-
-            if (nextIssue == null) {
-                // If there are no conflict-free unblocked tasks available but we have skipped tasks,
-                // and there are NO active slots running, we can clear skipped tasks and retry.
-                if (context.activeSlots.isEmpty() && context.skippedIds.isNotEmpty()) {
-                    env.println("♻️ No unblocked tasks available. Clearing skipped tasks list to retry them.")
-                    context.skippedIds.clear()
-                    continue // retry selection
-                }
-                break
-            }
-
-            env.println("\n🎯 Next prioritized task selected: ${nextIssue.id} - ${nextIssue.title} (Priority: ${nextIssue.priority})")
-            val slot = SlotContext(nextIssue.id)
-            slot.currentIssueTitle = nextIssue.title
-            slot.currentIssueFile = nextIssue.file.path
-            slot.githubIssueNumber = nextIssue.githubIssue?.toString()
-            slot.state = OrchestratorState.PENDING_APPROVAL
-            context.activeSlots.add(slot)
-            saveState()
         }
     }
 }
