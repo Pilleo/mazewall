@@ -29,13 +29,6 @@ object NativeConstants {
     const val PR_CAP_AMBIENT = 47
     const val PR_SET_PTRACER = 0x59616d61
 
-    // Intel CET arch_prctl options
-    const val ARCH_SHSTK_ENABLE = 0x5001
-    const val ARCH_SHSTK_DISABLE = 0x5002
-    const val ARCH_SHSTK_LOCK = 0x5003
-    const val ARCH_SHSTK_STATUS = 0x5004
-    const val ARCH_SHSTK_SHSTK = 0x1L
-
     // prctl sub-options
     const val PR_CAP_AMBIENT_RAISE = 2
 

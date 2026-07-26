@@ -92,6 +92,8 @@ graph TD
     issue_20260726_0145_manual_resource_closing_in_trace_listener["🔴 Issue: Manual Resource Closing in Trace Listener thread (MEDIUM)"]
     issue_20260726_0150_manual_resource_closing_in_validation_channel["🔴 Issue: Manual Resource Closing in Supervisor Validation Channel (LOW)"]
     issue_20260726_0200_type_state_engine_installation["🔴 Issue: Type-State Seccomp Installation Safety (Phantom Types) (ENHANCEMENT)"]
+    issue_20260726_04_parallel_orchestrator_task_scheduler_and_conflict_avoidance["🔴 Issue: Multi-Issue Parallel Execution & Conflict-Free Task Scheduler (HIGH)"]
+    issue_20260726_05_detect_empty_commits_during_jules_review_loop["🔴 Issue: Detect Empty Commits in Jules Review Loop to Prevent Redundant Correction Comments (MEDIUM)"]
     issue_20260726_024500_intel_cet_shadow_stack_attestation_and_process_locking["🔴 Issue: Implement Intel CET Shadow Stack Attestation and Process Locking via sys_arch_prctl FFM (ENHANCEMENT)"]
     issue_20260726_024600_native_buffer_overflow_rop_exploit_demo_suite["🔴 Issue: Native Buffer Overflow & ROP Exploit Demo Suite for Intel CET Validation (ENHANCEMENT)"]
     issue_20260726_024700_hardware_aware_ci_test_suite_and_fallback_assertions_for_intel_cet["🔴 Issue: Hardware-Aware CI Test Suite and Graceful Fallback Assertions for Intel CET (ENHANCEMENT)"]
@@ -191,6 +193,8 @@ graph TD
     click issue_20260726_0145_manual_resource_closing_in_trace_listener "../../../backlog/code_health/issue-20260726-0145-manual-resource-closing-in-trace-listener.md"
     click issue_20260726_0150_manual_resource_closing_in_validation_channel "../../../backlog/code_health/issue-20260726-0150-manual-resource-closing-in-validation-channel.md"
     click issue_20260726_0200_type_state_engine_installation "../../../backlog/code_health/issue-20260726-0200-type-state-engine-installation.md"
+    click issue_20260726_04_parallel_orchestrator_task_scheduler_and_conflict_avoidance "../../../backlog/code_health/issue-20260726-04-parallel-orchestrator-task-scheduler-and-conflict-avoidance.md"
+    click issue_20260726_05_detect_empty_commits_during_jules_review_loop "../../../backlog/code_health/issue-20260726-05-detect-empty-commits-during-jules-review-loop.md"
     click issue_20260726_024500_intel_cet_shadow_stack_attestation_and_process_locking "../../../backlog/security/issue-20260726-024500-intel-cet-shadow-stack-attestation-and-process-locking.md"
     click issue_20260726_024600_native_buffer_overflow_rop_exploit_demo_suite "../../../backlog/testing/issue-20260726-024600-native-buffer-overflow-rop-exploit-demo-suite.md"
     click issue_20260726_024700_hardware_aware_ci_test_suite_and_fallback_assertions_for_intel_cet "../../../backlog/testing/issue-20260726-024700-hardware-aware-ci-test-suite-and-fallback-assertions-for-intel-cet.md"

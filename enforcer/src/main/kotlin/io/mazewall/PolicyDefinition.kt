@@ -29,7 +29,6 @@ public data class PolicyDefinition<out S : PolicyScope>(
      * after the BPF filter's check but before kernel execution.
      */
     public val allowUnsafePrctl: Boolean = false,
-    public val lockIntelCet: Boolean = false,
     public val allowedFsReadPaths: Set<SandboxedPath> = emptySet(),
     public val allowedFsWritePaths: Set<SandboxedPath> = emptySet(),
     internal val enforceLandlock: Boolean = false,
@@ -78,7 +77,6 @@ public data class PolicyDefinition<out S : PolicyScope>(
             val mmapExec = policies.all { it.allowMmapExec }
             val cloneNonThread = policies.all { it.allowNonThreadClone }
             val unsafePrctl = policies.all { it.allowUnsafePrctl }
-            val lockCet = policies.any { it.lockIntelCet }
 
             val allReadSets = policies.map { it.allowedFsReadPaths }.filter { it.isNotEmpty() }
             val fsReads = if (allReadSets.isEmpty()) emptySet() else allReadSets.reduce { acc, set -> intersectPaths(acc, set) }
@@ -113,7 +111,6 @@ public data class PolicyDefinition<out S : PolicyScope>(
                 allowMmapExec = mmapExec,
                 allowNonThreadClone = cloneNonThread,
                 allowUnsafePrctl = unsafePrctl,
-                lockIntelCet = lockCet,
                 allowedFsReadPaths = fsReads,
                 allowedFsWritePaths = fsWrites,
                 enforceLandlock = enforceLandlock,

@@ -176,8 +176,8 @@ object BpfFilter {
      * parent signal masks would otherwise remain trapped with blocked signals, causing missed thread interrupts
      * or unkillable JVM threads).
      */
-    internal fun getJvmCriticalNrs(arch: Arch): Set<Int> {
-        val nrs = mutableSetOf(
+    internal fun getJvmCriticalNrs(arch: Arch): Set<Int> =
+        setOf(
             Syscall.FUTEX.numberFor(arch),
             Syscall.SCHED_YIELD.numberFor(arch),
             Syscall.RT_SIGRETURN.numberFor(arch),
@@ -189,12 +189,7 @@ object BpfFilter {
             Syscall.MMAP.numberFor(arch),
             Syscall.MPROTECT.numberFor(arch),
             Syscall.PKEY_MPROTECT.numberFor(arch),
-        )
-        if (arch == Arch.AMD64) {
-            nrs.add(158) // arch_prctl on x86_64
-        }
-        return nrs.filter { it >= 0 }.toSet()
-    }
+        ).filter { it >= 0 }.toSet()
 
     internal fun emitInspections(
         builder: BpfBuilder<BpfState.Active>,
