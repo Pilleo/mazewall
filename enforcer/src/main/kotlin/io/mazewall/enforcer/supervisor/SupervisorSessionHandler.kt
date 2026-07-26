@@ -572,7 +572,9 @@ internal class SupervisorSessionHandler(
                     true
                 }
                 1 -> { // Allow Continue
-                    val isInject = nr == traceeArch.accept || nr == traceeArch.accept4
+                    val isInject = nr == traceeArch.accept || nr == traceeArch.accept4 ||
+                        nr == traceeArch.open || nr == traceeArch.openat || nr == traceeArch.openat2 ||
+                        nr == traceeArch.connect
                     if (isInject) {
                         // Upgrade to emulation to prevent TOCTOU!
                         handleInjectFd(id, nr, args, pathStr, sockaddrBytes, resp, tid, traceeArch)
@@ -622,13 +624,23 @@ internal class SupervisorSessionHandler(
         tid: Tid,
         traceeArch: io.mazewall.core.Arch
     ): Boolean {
-        if (nr == traceeArch.open || nr == traceeArch.openat || nr == traceeArch.openat2 || nr == traceeArch.connect) {
-            sendSeccompContinue(id, resp)
-            return true
-        }
         var localFdValue = -1
         try {
             localFdValue = when (nr) {
+                traceeArch.open, traceeArch.openat, traceeArch.openat2 -> {
+                    if (pathStr == null) {
+                        -NativeConstants.EPERM
+                    } else {
+                        openFileInSupervisor(nr, args, pathStr, traceeArch)
+                    }
+                }
+                traceeArch.connect -> {
+                    if (sockaddrBytes == null) {
+                        -NativeConstants.EPERM
+                    } else {
+                        connectSocketInSupervisor(sockaddrBytes)
+                    }
+                }
                 traceeArch.accept, traceeArch.accept4 -> {
                     handleAcceptAsync(id, nr, args, tid, traceeArch)
                     return true

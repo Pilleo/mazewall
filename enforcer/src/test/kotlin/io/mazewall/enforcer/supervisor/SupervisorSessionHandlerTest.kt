@@ -276,7 +276,7 @@ class SupervisorSessionHandlerTest {
                     method.invoke(handler, *argsToPass)
                 }
 
-                // 1. Test open (should NOT be upgraded to ADDFD/emulation, but should call sendSeccompContinue)
+                // 1. Test open (should be upgraded to ADDFD/emulation, and call SECCOMP_IOCTL_NOTIF_ADDFD)
                 lastIoctlRequest = null
                 lastIoctlArg = null
                 val argsOpen = LongArray(6)
@@ -284,10 +284,11 @@ class SupervisorSessionHandlerTest {
 
                 invokeReadAndHandleJvmResponse(arch.open, argsOpen)
 
-                // SECCOMP_IOCTL_NOTIF_SEND is 0xc0182101L (since we call sendSeccompContinue)
-                assertEquals(io.mazewall.ffi.NativeConstants.SECCOMP_IOCTL_NOTIF_SEND, lastIoctlRequest)
-                val flagsOpen = lastIoctlArg!!.readInt(20)
-                assertEquals(io.mazewall.ffi.NativeConstants.SECCOMP_USER_NOTIF_FLAG_CONTINUE.toInt(), flagsOpen)
+                assertEquals(io.mazewall.ffi.NativeConstants.SECCOMP_IOCTL_NOTIF_ADDFD, lastIoctlRequest)
+                val addfd = io.mazewall.ffi.memory.SeccompNotifAddFdSegment.of(lastIoctlArg!!)
+                assertEquals(42L, addfd.getId())
+                assertEquals(io.mazewall.ffi.NativeConstants.SECCOMP_ADDFD_FLAG_SEND.toInt(), addfd.getFlags())
+                assertEquals(99, addfd.getSrcfd())
 
                 // 2. Test execve (cannot be natively emulated, so we write back the validated memory and continue)
                 lastIoctlRequest = null
@@ -737,7 +738,7 @@ class SupervisorSessionHandlerTest {
     }
 
     @Test
-    fun `handleInjectFd responds with CONTINUE for pointer-based system calls`() {
+    fun `handleInjectFd performs FD injection for pointer-based system calls`() {
         var ioctlCalled = false
         var capturedRequest: Long? = null
         var capturedArg: io.mazewall.ffi.memory.ManagedSegment? = null
@@ -782,6 +783,12 @@ class SupervisorSessionHandlerTest {
                     capturedRequest = null
                     capturedArg = null
 
+                    val sockaddrBytes = if (syscall == arch.connect) {
+                        byteArrayOf(2, 0) // AF_INET little endian
+                    } else {
+                        null
+                    }
+
                     val result = handleInjectFdMethod.invoke(
                         handler,
                         arena, // context receiver
@@ -789,7 +796,7 @@ class SupervisorSessionHandlerTest {
                         syscall, // nr
                         LongArray(6), // args
                         "/bin/echo", // pathStr
-                        null, // sockaddrBytes
+                        sockaddrBytes, // sockaddrBytes
                         dummyResp, // resp
                         999, // tid (compiled as primitive Int)
                         arch // traceeArch
@@ -797,9 +804,10 @@ class SupervisorSessionHandlerTest {
 
                     assertEquals(true, result, "handleInjectFd should return true for pointer-based syscalls")
                     assertEquals(true, ioctlCalled, "ioctl should be called for pointer-based syscalls")
-                    assertEquals(io.mazewall.ffi.NativeConstants.SECCOMP_IOCTL_NOTIF_SEND, capturedRequest)
-                    val flags = capturedArg!!.readInt(20) // RESP_FLAGS_OFF
-                    assertEquals(io.mazewall.ffi.NativeConstants.SECCOMP_USER_NOTIF_FLAG_CONTINUE.toInt(), flags)
+                    assertEquals(io.mazewall.ffi.NativeConstants.SECCOMP_IOCTL_NOTIF_ADDFD, capturedRequest)
+                    val addfd = io.mazewall.ffi.memory.SeccompNotifAddFdSegment.of(capturedArg!!)
+                    assertEquals(12345L, addfd.getId())
+                    assertEquals(io.mazewall.ffi.NativeConstants.SECCOMP_ADDFD_FLAG_SEND.toInt(), addfd.getFlags())
                 }
             }
         } finally {
