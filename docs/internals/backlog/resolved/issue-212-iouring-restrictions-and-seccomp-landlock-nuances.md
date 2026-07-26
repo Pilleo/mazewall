@@ -2,6 +2,7 @@
 title: "Kernel Invariants and Limitations of io_uring Restrictions (seccomp, Landlock, and IORING_REGISTER_RESTRICTIONS)"
 severity: "MEDIUM"
 status: "closed"
+priority: 5
 ---
 
 # 🟡 [Severity: MEDIUM]: Kernel Invariants and Limitations of io_uring Restrictions

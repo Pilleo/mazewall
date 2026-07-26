@@ -2,7 +2,7 @@
 title: SupervisorDaemonEngine leaks sockets on interrupted accept4
 type: issue
 status: open
-priority: low
+priority: 3
 labels: ["security", "enforcer", "fd-leak"]
 component: enforcer
 target_modules: [":enforcer"]

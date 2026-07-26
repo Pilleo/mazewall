@@ -89,12 +89,21 @@ class RealOrchestratorEnvironment(
         return System.getenv(key) ?: System.getProperty(key)
     }
 
+    init {
+        bot?.onReviewRequested = { focusComments ->
+            ReviewIssueLauncher.launchReviewTask(focusComments, backlogDir, this, OrchestratorContext())
+        }
+    }
+
     override fun sendNotification(message: String) {
         bot?.sendMessage(message)
     }
 
     override fun requestApproval(issueId: String, text: String): Boolean {
         return if (bot != null) {
+            bot.onReviewRequested = { focusComments ->
+                ReviewIssueLauncher.launchReviewTask(focusComments, backlogDir, this, OrchestratorContext())
+            }
             bot.sendMessageWithApprovalMarkup(issueId, text)
             bot.waitForApproval(issueId)
         } else {

@@ -38,7 +38,9 @@ object BacklogParser {
             val frontmatter = extractFrontmatter(content) ?: return null
 
             val title = frontmatter["title"]?.removeSurrounding("\"")?.removeSurrounding("'") ?: file.name
-            val priority = frontmatter["priority"]?.toIntOrNull() ?: 0
+            val priorityRaw = frontmatter["priority"]?.removeSurrounding("\"")?.removeSurrounding("'")
+            val priority = priorityRaw?.toIntOrNull()
+                ?: throw IllegalArgumentException("Frontmatter 'priority' must be a valid integer between 0 and 10 (got '$priorityRaw')")
             val status = frontmatter["status"]?.removeSurrounding("\"")?.removeSurrounding("'") ?: "open"
             val githubIssue = frontmatter["github_issue"]?.toIntOrNull()
             val severity = frontmatter["severity"]?.removeSurrounding("\"")?.removeSurrounding("'")

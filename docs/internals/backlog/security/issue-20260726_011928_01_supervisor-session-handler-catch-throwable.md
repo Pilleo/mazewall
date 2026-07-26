@@ -2,7 +2,7 @@
 title: SupervisorSessionHandler catch(Throwable) swallows critical errors causing resource leaks
 type: issue
 status: open
-priority: high
+priority: 8
 labels: ["security", "enforcer", "resource-leak", "fail-open"]
 component: enforcer
 target_modules: [":enforcer"]

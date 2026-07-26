@@ -2,7 +2,7 @@
 title: SupervisorDaemonEngine fd leak when handleActiveListener throws
 type: issue
 status: open
-priority: medium
+priority: 5
 labels: ["security", "enforcer", "fd-leak"]
 component: enforcer
 target_modules: [":enforcer"]

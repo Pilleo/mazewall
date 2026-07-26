@@ -2,6 +2,7 @@
 title: "ALLOW_LIST policies that block `openat` require targeted class pre-loading"
 severity: "RESOLVED"
 status: "resolved"
+priority: 5
 ---
 
 # ✅ [RESOLVED]: ALLOW_LIST policies that block `openat` require targeted class pre-loading

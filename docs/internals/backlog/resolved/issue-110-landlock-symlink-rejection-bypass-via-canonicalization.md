@@ -2,6 +2,7 @@
 title: "Landlock Symlink Rejection Bypass via Canonicalization"
 severity: "RESOLVED"
 status: "resolved"
+priority: 5
 ---
 
 # ✅ [RESOLVED]: Landlock Symlink Rejection Bypass via Canonicalization

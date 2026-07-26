@@ -2,7 +2,7 @@
 title: TraceEvent buffer truncation on excessively long extracted string paths
 type: issue
 status: open
-priority: low
+priority: 3
 labels: ["security", "profiler", "buffer-overflow", "truncation"]
 component: enforcer
 target_modules: [":enforcer", ":profiler"]

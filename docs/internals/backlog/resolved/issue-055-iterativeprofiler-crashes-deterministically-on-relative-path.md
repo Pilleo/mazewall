@@ -2,6 +2,7 @@
 title: "`IterativeProfiler` crashes deterministically on relative-path filesystem violations"
 severity: "RESOLVED"
 status: "resolved"
+priority: 5
 ---
 
 # ✅ [RESOLVED]: `IterativeProfiler` crashes deterministically on relative-path filesystem violations

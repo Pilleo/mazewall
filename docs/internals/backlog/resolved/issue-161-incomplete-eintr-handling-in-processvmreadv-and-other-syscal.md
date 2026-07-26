@@ -2,6 +2,7 @@
 title: "Incomplete EINTR Handling in process_vm_readv and Other Syscalls"
 severity: "RESOLVED"
 status: "resolved"
+priority: 5
 ---
 
 # ✅ [RESOLVED]: Incomplete EINTR Handling in process_vm_readv and Other Syscalls

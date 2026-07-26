@@ -2,7 +2,7 @@
 title: TraceEvent receives FFM values risking Use-After-Free due to Arena closure
 type: issue
 status: resolved
-priority: high
+priority: 9
 labels: ["security", "enforcer", "ffm", "use-after-free", "memory-escape"]
 component: enforcer
 target_modules: [":profiler"]

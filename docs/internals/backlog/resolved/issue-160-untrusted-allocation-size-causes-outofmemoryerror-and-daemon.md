@@ -2,6 +2,7 @@
 title: "Untrusted Allocation Size Causes `OutOfMemoryError` and Daemon Crash via `connect()`"
 severity: "RESOLVED"
 status: "resolved"
+priority: 5
 ---
 
 # ✅ [RESOLVED]: Untrusted Allocation Size Causes `OutOfMemoryError` and Daemon Crash via `connect()`

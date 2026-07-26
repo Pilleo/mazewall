@@ -60,6 +60,7 @@ class BacklogParserEnhancedTest {
         file.writeText("""
             ---
             title: "Marker Test"
+            priority: 5
             ---
             ### Context
             Some context here.
@@ -83,6 +84,7 @@ class BacklogParserEnhancedTest {
         file.writeText("""
             ---
             title: "Bold Test"
+            priority: 5
             ---
             ### Context
             This is a **high** priority item with **bold** text.
