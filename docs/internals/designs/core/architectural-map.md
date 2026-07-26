@@ -141,15 +141,4 @@ Security is a structural property. We use ArchUnit to ensure that memory-unsafe 
 - **Application:** Banning direct `java.lang.foreign` or `Unsafe` access outside of the `io.mazewall.ffi` package to prevent structural bypasses of our memory-safety model.
 
 
-## 8. Dynamic Knowledge Map
 
-<!-- KNOWLEDGE_MAP_START -->
-
-### Sub-Maps (auto-generated per module):
-
-- [enforcer_map.md](maps/enforcer_map.md) — BPF filter, containment, FFM bindings
-- [profiler_map.md](maps/profiler_map.md) — USER_NOTIF daemon, trace events, iterative profiler
-
-> Each sub-map links design documents to source files and open backlog issues for that scope.
-
-<!-- KNOWLEDGE_MAP_END -->

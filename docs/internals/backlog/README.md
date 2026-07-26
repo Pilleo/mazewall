@@ -32,4 +32,4 @@ status: "open"
 **Needed:** ...
 ```
 
-Once the file is saved, run `./gradlew generateKnowledgeMap` (or `./gradlew check` / `./gradlew build`) to automatically parse and link the issue in the respective knowledge maps.
+Once the file is saved, run `./gradlew check` or `./gradlew build` to verify the backlog issue formatting.

@@ -136,7 +136,7 @@ class RealOrchestratorEnvironment(
     }
 
     override fun generateKnowledgeMap() {
-        executeCmd("./gradlew", "generateKnowledgeMap")
+        // No-op: Knowledge sub-maps (enforcer_map.md, profiler_map.md) have been removed.
     }
 
     private fun executeCmd(vararg command: String): String {

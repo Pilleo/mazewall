@@ -1293,6 +1293,10 @@ interface "SeccompEngine" as io.mazewall.seccomp.SeccompEngine<S extends EngineS
 }
 interface "SeccompInstallationState" as io.mazewall.seccomp.SeccompInstallationState {
 }
+class "SocketAddressFamilyInspector" as io.mazewall.seccomp.SocketAddressFamilyInspector {
+  +List<SyscallInspection> getInspections(Arch, InspectionContext)
+  +void emitSpecial(BpfBuilder<? extends Active>, Arch, InspectionContext, Set<Integer>)
+}
 class "SyscallInspection" as io.mazewall.seccomp.SyscallInspection {
   +int getSyscallNumber()
   +int getArgIndex()
@@ -1446,6 +1450,7 @@ io.mazewall.seccomp.InspectionContext --> io.mazewall.core.SeccompAction
 io.mazewall.seccomp.MmapExecInspector .u.|> io.mazewall.seccomp.SyscallInspector
 io.mazewall.seccomp.PureJavaBpfEngine .u.|> io.mazewall.seccomp.SeccompEngine
 io.mazewall.seccomp.PureJavaBpfEngine --> io.mazewall.seccomp.PureJavaBpfEngine
+io.mazewall.seccomp.SocketAddressFamilyInspector .u.|> io.mazewall.seccomp.SyscallInspector
 io.mazewall.seccomp.SyscallInspection --> io.mazewall.seccomp.ArgCheck
 io.mazewall.seccomp.SyscallInspection --> io.mazewall.core.SeccompAction
 io.mazewall.seccomp.ThreadCloneInspector .u.|> io.mazewall.seccomp.SyscallInspector
