@@ -68,6 +68,9 @@ graph TD
     issue_195_reactor_loop_iteration_arena_scoping["🔴 Issue: Reactor Loop Iteration Arena Scoping (HIGH)"]
     issue_197_graceful_fallback_for_ai_agent_failures["🔴 Issue: Graceful Fallback for AI Agent Failures (HIGH)"]
     issue_198_auto_closing_linked_github_issues["🔴 Issue: Auto-Closing Linked GitHub Issues (HIGH)"]
+    issue_20260726_024500_intel_cet_shadow_stack_attestation_and_process_locking["🔴 Issue: Implement Intel CET Shadow Stack Attestation and Process Locking via sys_arch_prctl FFM (ENHANCEMENT)"]
+    issue_20260726_024600_native_buffer_overflow_rop_exploit_demo_suite["🔴 Issue: Native Buffer Overflow & ROP Exploit Demo Suite for Intel CET Validation (ENHANCEMENT)"]
+    issue_20260726_024700_hardware_aware_ci_test_suite_and_fallback_assertions_for_intel_cet["🔴 Issue: Hardware-Aware CI Test Suite and Graceful Fallback Assertions for Intel CET (ENHANCEMENT)"]
     issue_20260726_011928_01_supervisor_session_handler_catch_throwable["🔴 Issue: SupervisorSessionHandler catch(Throwable) swallows critical errors causing resource leaks (MEDIUM)"]
     issue_20260726_011928_02_supervisor_daemon_thread_interruption_swallowed["🔴 Issue: SupervisorSessionHandler loop swallows ThreadInterruptedException breaking graceful shutdown (MEDIUM)"]
     issue_20260726_011928_03_supervisor_session_handler_path_resolution_toctou["🔴 Issue: SupervisorSessionHandler TOCTOU vulnerability during string extraction for paths (MEDIUM)"]
@@ -159,6 +162,9 @@ graph TD
     click issue_195_reactor_loop_iteration_arena_scoping "../../../backlog/performance/issue-195-reactor-loop-iteration-arena-scoping.md"
     click issue_197_graceful_fallback_for_ai_agent_failures "../../../backlog/code_health/issue-197-graceful-fallback-for-ai-agent-failures.md"
     click issue_198_auto_closing_linked_github_issues "../../../backlog/code_health/issue-198-auto-closing-linked-github-issues.md"
+    click issue_20260726_024500_intel_cet_shadow_stack_attestation_and_process_locking "../../../backlog/security/issue-20260726-024500-intel-cet-shadow-stack-attestation-and-process-locking.md"
+    click issue_20260726_024600_native_buffer_overflow_rop_exploit_demo_suite "../../../backlog/testing/issue-20260726-024600-native-buffer-overflow-rop-exploit-demo-suite.md"
+    click issue_20260726_024700_hardware_aware_ci_test_suite_and_fallback_assertions_for_intel_cet "../../../backlog/testing/issue-20260726-024700-hardware-aware-ci-test-suite-and-fallback-assertions-for-intel-cet.md"
     click issue_20260726_011928_01_supervisor_session_handler_catch_throwable "../../../backlog/security/issue-20260726_011928_01_supervisor-session-handler-catch-throwable.md"
     click issue_20260726_011928_02_supervisor_daemon_thread_interruption_swallowed "../../../backlog/security/issue-20260726_011928_02_supervisor-daemon-thread-interruption-swallowed.md"
     click issue_20260726_011928_03_supervisor_session_handler_path_resolution_toctou "../../../backlog/security/issue-20260726_011928_03_supervisor-session-handler-path-resolution-toctou.md"
