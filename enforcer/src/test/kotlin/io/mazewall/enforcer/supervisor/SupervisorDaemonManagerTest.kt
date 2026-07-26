@@ -23,15 +23,24 @@ import java.util.concurrent.atomic.AtomicInteger
 
 class SupervisorDaemonManagerTest {
 
-    class MockProcess(private val pid: Long, private val stdout: String = "") : Process() {
+    class MockProcess(
+        private val pid: Long,
+        private val stdout: String = "",
+        private val exitVal: Int = 0,
+        @Volatile private var alive: Boolean = true
+    ) : Process() {
         override fun destroy() {}
-        override fun exitValue(): Int = 0
-        override fun waitFor(): Int = 0
+        override fun exitValue(): Int = exitVal
+        override fun waitFor(): Int = exitVal
         override fun getOutputStream(): java.io.OutputStream = java.io.ByteArrayOutputStream()
         override fun getInputStream(): InputStream = ByteArrayInputStream(stdout.toByteArray())
         override fun getErrorStream(): InputStream = ByteArrayInputStream(byteArrayOf())
         override fun pid(): Long = pid
-        override fun isAlive(): Boolean = true
+        override fun isAlive(): Boolean = alive
+
+        fun setAlive(value: Boolean) {
+            alive = value
+        }
     }
 
     open class MockProcessLauncher : ProcessLauncher {
@@ -136,6 +145,31 @@ class SupervisorDaemonManagerTest {
         assertTrue(mockSocket.connectCalled)
         assertTrue(writeCalledWithShutdown, "Should write shutdown command to daemon socket")
         assertEquals(1, mockSocket.closeCalledCount.get())
+    }
+
+    @Test
+    fun `detects unexpected daemon exit and invokes handler`() {
+        val mockEngine = MockNativeEngine()
+        val mockLauncher = MockProcessLauncher()
+        val mockProcess = MockProcess(9999L, SupervisorDaemon.DAEMON_READY_SENTINEL + "\n", exitVal = 42, alive = false)
+        mockLauncher.mockProcess = mockProcess
+        val mockSocket = MockSocketManager()
+
+        val manager = SupervisorDaemonManager(mockEngine, mockSocket, mockLauncher)
+
+        val exitLatch = CountDownLatch(1)
+        val exitCodeReceived = java.util.concurrent.atomic.AtomicInteger(-1)
+        manager.onUnexpectedExit = { exitCode ->
+            exitCodeReceived.set(exitCode)
+            exitLatch.countDown()
+        }
+
+        val context = manager.getOrSpawnSharedDaemon()
+        assertNotNull(context)
+
+        val completed = exitLatch.await(5, TimeUnit.SECONDS)
+        assertTrue(completed, "Expected unexpected exit handler to be invoked")
+        assertEquals(42, exitCodeReceived.get())
     }
 
     @Test
