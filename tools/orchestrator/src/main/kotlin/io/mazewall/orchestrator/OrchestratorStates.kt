@@ -221,31 +221,35 @@ sealed interface OrchestratorState {
 
             // 2. Check Jules session status
             val session = env.julesClient.getActiveSession(issueId)
-            if (session != null) {
-                val sessionUrl = "https://jules.google.com/session/${session.id}"
-                val status = session.status.lowercase()
+            val currentSessionId = session?.id ?: sessionId
+            val status = session?.status?.lowercase() ?: ""
+            val isFailed = status == "failed" || status == "cancelled" ||
+                    (currentSessionId != null && env.julesClient.hasUnableToCompleteActivity(currentSessionId))
 
-                if (status == "failed" || status == "cancelled" || env.julesClient.hasUnableToCompleteActivity(session.id)) {
-                    if (context.julesRetries < 2) {
-                        context.julesRetries++
-                        env.println("\n⚠️ [RETRY] Jules task $issueId failed with status: ${session.status}. Retrying (Attempt ${context.julesRetries}/2)...")
-                        env.sendNotification("⚠️ *Jules task failed* for $issueId (Status: ${session.status}). Sending 'Retry' message to Jules.")
-                        env.julesClient.sendSessionMessage(session.id, "Retry")
-                        context.lastBuildStatus = null
-                        return this
-                    } else {
-                        env.println("\n❌ [FAILED] Jules task $issueId failed with status: ${session.status} after ${context.julesRetries} retries.")
-                        env.sendNotification("❌ *Jules task failed* for $issueId (Status: ${session.status}) after ${context.julesRetries} retries. Returning to SELECT_TASK.")
-                        val nextIssue = env.parseAllIssues().firstOrNull { it.id == issueId }
-                        if (nextIssue != null) {
-                            env.removeGithubIssue(nextIssue)
-                        }
-                        context.skippedIds.add(issueId)
-                        context.clearActiveTask()
-                        return SELECT_TASK
+            if (isFailed && currentSessionId != null) {
+                val sessionUrl = "https://jules.google.com/session/${currentSessionId.substringAfterLast("/")}"
+                if (context.julesRetries < 2) {
+                    context.julesRetries++
+                    env.println("\n⚠️ [RETRY] Jules task $issueId failed with status: ${session?.status ?: "FAILED"}. Retrying (Attempt ${context.julesRetries}/2)...")
+                    env.sendNotification("⚠️ *Jules task failed* for $issueId (Status: ${session?.status ?: "FAILED"}). Sending 'Retry' message to Jules.")
+                    env.julesClient.sendSessionMessage(currentSessionId, "Retry")
+                    context.lastBuildStatus = null
+                    return this
+                } else {
+                    env.println("\n❌ [FAILED] Jules task $issueId failed after ${context.julesRetries} retries.")
+                    env.sendNotification("❌ *Jules task failed* for $issueId after ${context.julesRetries} retries. Returning to SELECT_TASK.")
+                    val nextIssue = env.parseAllIssues().firstOrNull { it.id == issueId }
+                    if (nextIssue != null) {
+                        env.removeGithubIssue(nextIssue)
                     }
+                    context.skippedIds.add(issueId)
+                    context.clearActiveTask()
+                    return SELECT_TASK
                 }
+            }
 
+            if (session != null) {
+                val sessionUrl = "https://jules.google.com/session/${session.id.substringAfterLast("/")}"
                 if (session.status != context.lastBuildStatus) {
                     env.println("Jules session status changed: ${session.status}")
                     context.lastBuildStatus = session.status

@@ -8,6 +8,7 @@ object BacklogValidator {
     private val VALID_SEVERITIES = setOf("CRITICAL", "HIGH", "MEDIUM", "LOW", "ENHANCEMENT")
     private val VALID_STATUSES = setOf("open", "in_progress", "resolved", "deferred")
     private val VALID_COMPONENTS = setOf("enforcer", "profiler", "orchestrator", "docs", "ci", "testing")
+    private val VALID_FILENAME_PATTERN = Regex("^issue-(?:\\d{8}-\\d{6}|\\d{1,4})-[a-z0-9-]+\\.md$")
 
     fun validateBacklog(backlogDir: File): List<String> {
         if (!backlogDir.exists() || !backlogDir.isDirectory) {
@@ -31,6 +32,10 @@ object BacklogValidator {
             .toList()
 
         for (file in activeFiles) {
+            if (!VALID_FILENAME_PATTERN.matches(file.name)) {
+                errors.add("${file.name}: Invalid filename format. Date-based issue filenames must include 6-digit seconds 'issue-YYYYMMDD-HHMMSS-slug.md'")
+            }
+
             val content = file.readText()
             if (!content.startsWith("---")) {
                 errors.add("${file.name}: Missing YAML frontmatter header (must start with '---')")

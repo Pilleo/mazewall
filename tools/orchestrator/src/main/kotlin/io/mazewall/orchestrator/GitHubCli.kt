@@ -73,8 +73,8 @@ class RealGitHubClient(private val config: OrchestratorConfig) : GitHubClient {
         val fullBody = preamble + body
 
         try {
-            // Ensure the label exists in the repository
-            execute("gh", "label", "create", label, "--color", "ed0707", "--description", "Trigger Jules Agent")
+            // Ensure the label exists in the repository (use --force to update/ignore if already exists)
+            execute("gh", "label", "create", label, "--force", "--color", "ed0707", "--description", "Trigger Jules Agent")
         } catch (_: Exception) {
             // Ignore error if the label already exists
         }

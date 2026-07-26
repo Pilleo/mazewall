@@ -28,8 +28,6 @@ graph TD
     io_mazewall_profiler_IterativeProfiler["💻 Source: io.mazewall.profiler.IterativeProfiler"]
     io_mazewall_profiler_engine_ProfilerDaemonEngine["💻 Source: io.mazewall.profiler.engine.ProfilerDaemonEngine"]
     io_mazewall_profiler_strace_StraceProfiler["💻 Source: io.mazewall.profiler.strace.StraceProfiler"]
-    issue_003_socket_address_family_filtering_for_network_isolation_evasio["🔴 Issue: Socket Address Family Filtering for Network Isolation Evasion Prevention (ENHANCEMENT)"]
-    issue_009_memory_segment_pooling_for_profiler_usernotif["🔴 Issue: Memory Segment Pooling for Profiler USER_NOTIF (ENHANCEMENT)"]
     issue_010_compile_time_feature_proof_tokens_and_scope_safe_policy_buil["🔴 Issue: Compile-Time Feature Proof Tokens and Scope-Safe Policy Builders (Type-State Pattern) (ENHANCEMENT)"]
     issue_012_algebraic_policy_composition_semigroupmonoid["🔴 Issue: Algebraic Policy Composition (Semigroup/Monoid) (ENHANCEMENT)"]
     issue_013_manual_ffm_layout_maintenance_and_abi_drift_risk["🔴 Issue: Manual FFM Layout Maintenance and ABI Drift Risk (HIGH)"]
@@ -72,8 +70,9 @@ graph TD
     issue_195_reactor_loop_iteration_arena_scoping["🔴 Issue: Reactor Loop Iteration Arena Scoping (HIGH)"]
     issue_197_graceful_fallback_for_ai_agent_failures["🔴 Issue: Graceful Fallback for AI Agent Failures (HIGH)"]
     issue_198_auto_closing_linked_github_issues["🔴 Issue: Auto-Closing Linked GitHub Issues (HIGH)"]
-    issue_20260726_04_parallel_orchestrator_task_scheduler_and_conflict_avoidance["🔴 Issue: Multi-Issue Parallel Execution & Conflict-Free Task Scheduler (HIGH)"]
-    issue_20260726_05_detect_empty_commits_during_jules_review_loop["🔴 Issue: Detect Empty Commits in Jules Review Loop to Prevent Redundant Correction Comments (MEDIUM)"]
+    issue_20260726_024500_intel_cet_shadow_stack_attestation_and_process_locking["🔴 Issue: Implement Intel CET Shadow Stack Attestation and Process Locking via sys_arch_prctl FFM (ENHANCEMENT)"]
+    issue_20260726_024600_native_buffer_overflow_rop_exploit_demo_suite["🔴 Issue: Native Buffer Overflow & ROP Exploit Demo Suite for Intel CET Validation (ENHANCEMENT)"]
+    issue_20260726_024700_hardware_aware_ci_test_suite_and_fallback_assertions_for_intel_cet["🔴 Issue: Hardware-Aware CI Test Suite and Graceful Fallback Assertions for Intel CET (ENHANCEMENT)"]
     issue_202_handle_cli_authentication_failures["🔴 Issue: Detect and Handle CLI Authentication Failures with Actionable Login Alerts (HIGH)"]
     issue_202_orchestrator_build_github_issue_body_dynamically_with_project_preamble["🔴 Issue: Orchestrator: Build GitHub Issue Body Dynamically with Project Preamble (HIGH)"]
     issue_203_orchestrator_validate_issue_context_and_needed_before_github_issue_creation["🔴 Issue: Orchestrator: Validate Issue Context and Needed Before GitHub Issue Creation (HIGH)"]
@@ -106,8 +105,6 @@ graph TD
     issue_202_orchestrator_build_github_issue_body_dynamically_with_project_preamble -->|Affects| , 
     issue_203_orchestrator_validate_issue_context_and_needed_before_github_issue_creation -->|Affects|  instead of 
     click containment_design "../../enforcer/containment-design.md"
-    click issue_003_socket_address_family_filtering_for_network_isolation_evasio "../../../backlog/testing/issue-003-socket-address-family-filtering-for-network-isolation-evasio.md"
-    click issue_009_memory_segment_pooling_for_profiler_usernotif "../../../backlog/security/issue-009-memory-segment-pooling-for-profiler-usernotif.md"
     click issue_010_compile_time_feature_proof_tokens_and_scope_safe_policy_buil "../../../backlog/security/issue-010-compile-time-feature-proof-tokens-and-scope-safe-policy-buil.md"
     click issue_012_algebraic_policy_composition_semigroupmonoid "../../../backlog/testing/issue-012-algebraic-policy-composition-semigroupmonoid.md"
     click issue_013_manual_ffm_layout_maintenance_and_abi_drift_risk "../../../backlog/testing/issue-013-manual-ffm-layout-maintenance-and-abi-drift-risk.md"
@@ -150,8 +147,9 @@ graph TD
     click issue_195_reactor_loop_iteration_arena_scoping "../../../backlog/performance/issue-195-reactor-loop-iteration-arena-scoping.md"
     click issue_197_graceful_fallback_for_ai_agent_failures "../../../backlog/code_health/issue-197-graceful-fallback-for-ai-agent-failures.md"
     click issue_198_auto_closing_linked_github_issues "../../../backlog/code_health/issue-198-auto-closing-linked-github-issues.md"
-    click issue_20260726_04_parallel_orchestrator_task_scheduler_and_conflict_avoidance "../../../backlog/code_health/issue-20260726-04-parallel-orchestrator-task-scheduler-and-conflict-avoidance.md"
-    click issue_20260726_05_detect_empty_commits_during_jules_review_loop "../../../backlog/code_health/issue-20260726-05-detect-empty-commits-during-jules-review-loop.md"
+    click issue_20260726_024500_intel_cet_shadow_stack_attestation_and_process_locking "../../../backlog/security/issue-20260726-024500-intel-cet-shadow-stack-attestation-and-process-locking.md"
+    click issue_20260726_024600_native_buffer_overflow_rop_exploit_demo_suite "../../../backlog/testing/issue-20260726-024600-native-buffer-overflow-rop-exploit-demo-suite.md"
+    click issue_20260726_024700_hardware_aware_ci_test_suite_and_fallback_assertions_for_intel_cet "../../../backlog/testing/issue-20260726-024700-hardware-aware-ci-test-suite-and-fallback-assertions-for-intel-cet.md"
     click issue_202_handle_cli_authentication_failures "../../../backlog/code_health/issue-202-handle-cli-authentication-failures.md"
     click issue_202_orchestrator_build_github_issue_body_dynamically_with_project_preamble "../../../backlog/code_health/issue-202-orchestrator-build-github-issue-body-dynamically-with-project-preamble.md"
     click issue_203_orchestrator_validate_issue_context_and_needed_before_github_issue_creation "../../../backlog/code_health/issue-203-orchestrator-validate-issue-context-and-needed-before-github-issue-creation.md"

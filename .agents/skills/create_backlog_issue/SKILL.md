@@ -39,8 +39,9 @@ Create a new markdown issue file under the appropriate category subdirectory in 
 - `docs/internals/backlog/testing/` for unit, integration, and architecture test coverage
 - `docs/internals/backlog/implementation/` for feature additions and sub-project implementations
 
-**Filename Convention:** Use timestamp-based unique identifiers:
-`issue-YYYYMMDD-HHMM-short-descriptive-slug.md` (e.g. `issue-20260726-1845-decouple-nativeengine-from-raw-ffm-types.md`).
+**Filename Convention:** Every issue file MUST use a timestamp-based unique identifier containing full date and time down to seconds:
+`issue-YYYYMMDD-HHMMSS-short-descriptive-slug.md` (e.g. `issue-20260726-035221-decouple-nativeengine-from-raw-ffm-types.md`).
+Including seconds (`HHMMSS`) prevents timestamp collision when multiple issues are created rapidly.
 
 ### 3. Structured Frontmatter & Template
 Every backlog issue file MUST contain complete YAML frontmatter at the top of the file:

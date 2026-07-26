@@ -128,6 +128,19 @@ While OpenJDK 21+ includes the `-XX:+UseCET` flag, its responsibilities differ f
 | **Attestation & Policy** | Disabled by default in standard JVM distributions. | Verifies CET status; fails closed (`FallbackBehavior.FAIL`) if inactive. |
 | **Native Library Audit** | Does not check external FFM/JNI `.so` binaries. | Can audit ELF `.note.gnu.property` markers before invoking FFM downcalls. |
 
+### 3. Why OpenJDK Does Not Issue `ARCH_SHSTK_LOCK` by Default
+
+The OpenJDK runtime deliberately avoids issuing a kernel-level `ARCH_SHSTK_LOCK` call by default due to three fundamental compatibility and architectural constraints:
+
+1. **Dynamic Native Library Loading (JNI / FFM `dlopen`):**
+   The HotSpot JVM is a general-purpose runtime. At any point during an application's lifecycle, Java code can dynamically load third-party C/C++ shared libraries (`.so` files) via JNI (`System.loadLibrary`) or FFM (`java.lang.foreign`). If OpenJDK automatically locked the Shadow Stack at startup (`ARCH_SHSTK_LOCK`), and the application later loaded a legacy JNI library that was compiled *without* CET support (missing `-fcf-protection=full`), calling into that library would instantly crash the entire JVM process with a hardware `#CP` exception. Because OpenJDK cannot predict whether an application will load an un-instrumented C library hours later, it does not lock the CET configuration at startup.
+
+2. **Native Profilers, Debuggers & Signal Handlers:**
+   Diagnostic tools (e.g., `async-profiler`, JDWP debuggers, native APM agents) inspect and unwind native stack frames during `SIGPROF` or `SIGTRAP` signals. Some profiling tools swap or modify stack frame contexts (`ucontext_t`) during signal returns. If the kernel Shadow Stack is permanently locked via `ARCH_SHSTK_LOCK`, stack frame manipulations attempted by native agents trigger an unrecoverable `#CP` crash.
+
+3. **The "Late-Jail" Security Pattern:**
+   Linux security architecture delegates locking decisions to application-level security boundaries. The JVM runtime provides the JIT compiler CET support (`-XX:+UseCET` emitting `ENDBR64` instructions and Loom continuation handling), but delegates permanent kernel locking (`ARCH_SHSTK_LOCK`) to security frameworks like `mazewall` that know when initialization is complete and can guarantee native library compatibility.
+
 ---
 
 ## Architectural Summary

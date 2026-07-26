@@ -140,11 +140,21 @@ class RealJulesClient(private val config: OrchestratorConfig) : JulesClient {
 
     // ── Private helpers ──────────────────────────────────────────────────────
 
+    private fun sanitizeSessionPath(sessionId: String): String {
+        val raw = sessionId.trim()
+        return if (raw.startsWith("sessions/") || raw.startsWith("projects/")) {
+            raw
+        } else {
+            "sessions/$raw"
+        }
+    }
+
     private fun fetchActivities(sessionId: String): List<Activity> {
         val activities = mutableListOf<Activity>()
         var pageToken: String? = null
+        val sessionPath = sanitizeSessionPath(sessionId)
         do {
-            val uriStr = "https://jules.googleapis.com/v1alpha/sessions/$sessionId/activities?pageSize=300" +
+            val uriStr = "https://jules.googleapis.com/v1alpha/$sessionPath/activities?pageSize=300" +
                     (if (pageToken != null) "&pageToken=$pageToken" else "")
             val request = HttpRequest.newBuilder()
                 .uri(URI.create(uriStr))
@@ -165,9 +175,8 @@ class RealJulesClient(private val config: OrchestratorConfig) : JulesClient {
     // ── Public API ───────────────────────────────────────────────────────────
 
     /**
-     * Returns true if a `sessionFailed` event is present in the activities
-     * *after* the most recent "Retry" user message. Uses the typed API model
-     * instead of string-matching on raw text fields.
+     * Returns true if a `sessionFailed` event or an "unable to complete" message is present in the activities
+     * *after* the most recent "Retry" user message.
      */
     override fun hasUnableToCompleteActivity(sessionId: String): Boolean {
         return try {
@@ -180,7 +189,12 @@ class RealJulesClient(private val config: OrchestratorConfig) : JulesClient {
             } else {
                 activities
             }
-            activitiesToCheck.any { it.sessionFailed != null }
+            activitiesToCheck.any { activity ->
+                activity.sessionFailed != null ||
+                activity.progressUpdated?.description?.contains("unable to complete", ignoreCase = true) == true ||
+                activity.progressUpdated?.title?.contains("unable to complete", ignoreCase = true) == true ||
+                activity.userMessaged?.userMessage?.contains("unable to complete", ignoreCase = true) == true
+            }
         } catch (e: Exception) {
             System.err.println("  [Jules API] Error listing activities: ${e.message}")
             false
@@ -197,10 +211,16 @@ class RealJulesClient(private val config: OrchestratorConfig) : JulesClient {
     override fun getSessionStatusFromActivities(sessionId: String): String? {
         return try {
             val activities = fetchActivities(sessionId)
+            val hasFailed = activities.any { activity ->
+                activity.sessionFailed != null ||
+                activity.progressUpdated?.description?.contains("unable to complete", ignoreCase = true) == true ||
+                activity.progressUpdated?.title?.contains("unable to complete", ignoreCase = true) == true ||
+                activity.userMessaged?.userMessage?.contains("unable to complete", ignoreCase = true) == true
+            }
             val last = activities.lastOrNull()
             when {
+                hasFailed -> "failed"
                 last == null -> null
-                last.sessionFailed != null -> "failed"
                 last.sessionCompleted != null -> "completed"
                 else -> "in_progress"
             }
@@ -251,9 +271,10 @@ class RealJulesClient(private val config: OrchestratorConfig) : JulesClient {
 
         val requestPayload = mapOf("prompt" to prompt)
         val requestBody = json.encodeToString(requestPayload)
+        val sessionPath = sanitizeSessionPath(sessionId)
 
         val request = HttpRequest.newBuilder()
-            .uri(URI.create("https://jules.googleapis.com/v1alpha/sessions/$sessionId:sendMessage"))
+            .uri(URI.create("https://jules.googleapis.com/v1alpha/$sessionPath:sendMessage"))
             .header("Content-Type", "application/json")
             .header("X-Goog-Api-Key", apiKey)
             .POST(HttpRequest.BodyPublishers.ofString(requestBody))
