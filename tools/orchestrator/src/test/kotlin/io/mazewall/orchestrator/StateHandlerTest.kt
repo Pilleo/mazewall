@@ -905,6 +905,19 @@ class StateHandlerTest {
                 return output
             }
 
+            fun runGitInDir(dir: File, vararg command: String): String {
+                val pb = ProcessBuilder(*command)
+                pb.directory(dir)
+                pb.redirectErrorStream(true)
+                val process = pb.start()
+                val output = process.inputStream.bufferedReader().readText().trim()
+                process.waitFor()
+                if (process.exitValue() != 0) {
+                    throw RuntimeException("Command '${command.joinToString(" ")}' failed in ${dir.name} with exit code ${process.exitValue()}: $output")
+                }
+                return output
+            }
+
             // 1. Init git repo
             runGit("git", "init")
             runGit("git", "config", "user.name", "Test User")
@@ -938,29 +951,41 @@ class StateHandlerTest {
             // master has: initial.txt, master_only.txt
             // jules-branch has: initial.txt, jules_work.txt (stale: lacks master_only.txt)
 
-            // Let's find the merge-base between master and jules-branch
-            val mergeBase = runGit("git", "merge-base", "master", "jules-branch").trim()
-            assertFalse(mergeBase.isEmpty())
+            // Let's compute INITIAL_BASE exactly as done in GitHubCli:
+            val firstCommit = try {
+                runGit("git", "rev-list", "--reverse", "master..jules-branch").lines().firstOrNull { it.isNotBlank() }?.trim() ?: ""
+            } catch (_: Exception) {
+                ""
+            }
 
-            // Compute Jules's NET diff (merge-base -> jules-branch)
-            val diffText = runGit("git", "diff", mergeBase, "jules-branch")
+            val initialBase = if (firstCommit.isNotEmpty()) {
+                try {
+                    runGit("git", "rev-parse", "$firstCommit~1").trim()
+                } catch (_: Exception) {
+                    runGit("git", "merge-base", "master", "jules-branch").trim()
+                }
+            } else {
+                runGit("git", "merge-base", "master", "jules-branch").trim()
+            }
+
+            // Extract intended files using --diff-filter=AM
+            val intendedFilesOutput = runGit("git", "diff", "--name-only", "--diff-filter=AM", initialBase, "jules-branch")
+            val intendedFiles = intendedFilesOutput.lines().map { it.trim() }.filter { it.isNotEmpty() }
+
+            // Verify jules_work.txt is identified as intended, but master_only.txt is NOT
+            assertTrue(intendedFiles.contains("jules_work.txt"))
+            assertFalse(intendedFiles.contains("master_only.txt"))
 
             // Create a worktree/clean directory of master
             val worktreeDir = File(tempDir, "worktree-clean")
             worktreeDir.mkdirs()
             runGit("git", "worktree", "add", worktreeDir.absolutePath, "master", "--detach")
 
-            // Inside worktreeDir, write the patch and apply it
-            val patchFile = File(worktreeDir, "patch.diff")
-            patchFile.writeText(diffText)
-
-            val pbApply = ProcessBuilder("git", "apply", "--3way", "patch.diff")
-            pbApply.directory(worktreeDir)
-            val pApply = pbApply.start()
-            pApply.waitFor()
-            assertEquals(0, pApply.exitValue(), "git apply --3way should succeed")
-
-            patchFile.delete()
+            // Surgically checkout ONLY intended files in the worktree
+            for (file in intendedFiles) {
+                runGitInDir(worktreeDir, "git", "checkout", "jules-branch", "--", file)
+                runGitInDir(worktreeDir, "git", "add", file)
+            }
 
             // Verify that master_only.txt exists and was NOT deleted in the worktree
             val masterOnlyInWorktree = File(worktreeDir, "master_only.txt")

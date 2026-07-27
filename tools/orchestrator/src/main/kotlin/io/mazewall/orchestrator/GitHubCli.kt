@@ -391,7 +391,29 @@ class RealGitHubClient(private val config: OrchestratorConfig) : GitHubClient {
             execute("git", "fetch", "origin", "master")
             execute("git", "fetch", "origin", branchName)
 
-            val mergeBase = execute("git", "merge-base", "origin/master", "origin/$branchName").trim()
+            val firstCommit = try {
+                execute("git", "rev-list", "--reverse", "origin/master..origin/$branchName").lines().firstOrNull { it.isNotBlank() }?.trim() ?: ""
+            } catch (_: Exception) {
+                ""
+            }
+
+            val initialBase = if (firstCommit.isNotEmpty()) {
+                try {
+                    execute("git", "rev-parse", "$firstCommit~1").trim()
+                } catch (_: Exception) {
+                    execute("git", "merge-base", "origin/master", "origin/$branchName").trim()
+                }
+            } else {
+                execute("git", "merge-base", "origin/master", "origin/$branchName").trim()
+            }
+
+            val intendedFilesOutput = execute("git", "diff", "--name-only", "--diff-filter=AM", initialBase, "origin/$branchName")
+            val intendedFiles = intendedFilesOutput.lines().map { it.trim() }.filter { it.isNotEmpty() }
+
+            if (intendedFiles.isEmpty()) {
+                System.err.println("No intended added/modified files found on PR branch relative to initial base.")
+                return RebaseResult(success = true, conflictCount = 0)
+            }
 
             // Clean up any stale worktree of the same name first
             try {
@@ -406,43 +428,9 @@ class RealGitHubClient(private val config: OrchestratorConfig) : GitHubClient {
 
             execute("git", "worktree", "add", worktreeDir.absolutePath, "origin/master", "--detach")
 
-            val diffText = execute("git", "diff", mergeBase, "origin/$branchName")
-            val patchFile = File(worktreeDir, "patch.diff")
-            patchFile.writeText(diffText)
-
-            var applySuccess = true
-            try {
-                executeInDir(worktreeDir, "git", "apply", "--3way", "patch.diff")
-            } catch (e: Exception) {
-                applySuccess = false
-            } finally {
-                patchFile.delete()
-            }
-
-            if (!applySuccess) {
-                val conflictedOutput = executeInDir(worktreeDir, "git", "diff", "--name-only", "--diff-filter=U")
-                val conflictedFiles = conflictedOutput.lines().map { it.trim() }.filter { it.isNotEmpty() }
-
-                for (file in conflictedFiles) {
-                    val existsInJules = try {
-                        execute("git", "show", "origin/$branchName:$file")
-                        true
-                    } catch (_: Exception) {
-                        false
-                    }
-                    if (!existsInJules) {
-                        System.err.println("Resolving delete-modify conflict for $file by keeping master's version")
-                        executeInDir(worktreeDir, "git", "checkout", "origin/master", "--", file)
-                        executeInDir(worktreeDir, "git", "add", file)
-                    }
-                }
-
-                val remainingConflictedOutput = executeInDir(worktreeDir, "git", "diff", "--name-only", "--diff-filter=U")
-                val remainingConflicts = remainingConflictedOutput.lines().map { it.trim() }.filter { it.isNotEmpty() }
-                if (remainingConflicts.isNotEmpty()) {
-                    System.err.println("Rebase failed on PR #$prNumber due to unresolved conflicts: $remainingConflicts")
-                    return RebaseResult(success = false, conflictCount = remainingConflicts.size, conflictedFiles = remainingConflicts)
-                }
+            for (file in intendedFiles) {
+                executeInDir(worktreeDir, "git", "checkout", "origin/$branchName", "--", file)
+                executeInDir(worktreeDir, "git", "add", file)
             }
 
             val statusOutput = executeInDir(worktreeDir, "git", "status", "--porcelain").trim()
@@ -451,8 +439,7 @@ class RealGitHubClient(private val config: OrchestratorConfig) : GitHubClient {
                 return RebaseResult(success = true, conflictCount = 0)
             }
 
-            executeInDir(worktreeDir, "git", "add", "-A")
-            executeInDir(worktreeDir, "git", "commit", "-m", "chore(orchestrator): rebase PR #$prNumber onto master via merge-base diff apply")
+            executeInDir(worktreeDir, "git", "commit", "-m", "chore(orchestrator): rebase PR #$prNumber onto master via intended-files apply")
 
             try {
                 executeInDir(worktreeDir, "./gradlew", "compileKotlin", ":tools:orchestrator:compileKotlin")
