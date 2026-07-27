@@ -260,6 +260,11 @@ sealed interface OrchestratorState {
                     slot.julesRetries = 0
                 }
 
+                val currentSha = env.gitHubClient.getPrHeadSha(prNumber)
+                if (currentSha != slot.lastHeadSha) {
+                    env.gitHubClient.clearPrCache(prNumber)
+                }
+
                 if (handleRebaseAndConflicts(env, slot, prNumber)) {
                     env.sleep(env.config.pollingIntervalSeconds, TimeUnit.SECONDS)
                 }
@@ -347,6 +352,11 @@ sealed interface OrchestratorState {
             val githubIssueNumber = slot.githubIssueNumber
             val sessionId = slot.julesSessionId
 
+            val currentSha = env.gitHubClient.getPrHeadSha(prNumber)
+            if (currentSha != slot.lastHeadSha) {
+                env.gitHubClient.clearPrCache(prNumber)
+            }
+
             if (handleRebaseAndConflicts(env, slot, prNumber)) {
                 env.sleep(env.config.pollingIntervalSeconds, TimeUnit.SECONDS)
                 return this
@@ -408,7 +418,6 @@ sealed interface OrchestratorState {
                 return RESOLVE_TASK
             }
 
-            val currentSha = env.gitHubClient.getPrHeadSha(prNumber)
             if (currentSha != slot.lastHeadSha) {
                 env.println("🔄 New commits detected on PR #$prNumber (Head SHA: $currentSha). Checking build status...")
                 slot.lastHeadSha = currentSha
@@ -483,12 +492,15 @@ sealed interface OrchestratorState {
                 return RESOLVE_TASK
             }
 
+            val currentSha = env.gitHubClient.getPrHeadSha(prNumber)
+            if (currentSha != slot.lastHeadSha) {
+                env.gitHubClient.clearPrCache(prNumber)
+            }
+
             if (handleRebaseAndConflicts(env, slot, prNumber)) {
                 env.sleep(env.config.pollingIntervalSeconds, TimeUnit.SECONDS)
                 return CI_RUNNING
             }
-
-            val currentSha = env.gitHubClient.getPrHeadSha(prNumber)
 
             val buildStatus = env.gitHubClient.checkBuildStatus(prNumber)
 
@@ -726,7 +738,8 @@ private fun handleRebaseAndConflicts(env: OrchestratorEnvironment, slot: SlotCon
     if (isBehind || isConflicting) {
         val reason = if (isConflicting) "conflict status" else "behind master by ${status.behindBy} commits"
         env.println("🔄 Active PR #$prNumber is $reason. Attempting automated rebase onto master...")
-        val rebaseSuccess = env.gitHubClient.rebaseBranch(prNumber)
+        val rebaseResult = env.gitHubClient.rebaseBranch(prNumber)
+        val rebaseSuccess = rebaseResult.success
         if (rebaseSuccess) {
             env.println("✅ Successfully auto-rebased PR #$prNumber onto master.")
             slot.lastWaitingLogTime = 0L
@@ -735,8 +748,9 @@ private fun handleRebaseAndConflicts(env: OrchestratorEnvironment, slot: SlotCon
             val now = System.currentTimeMillis()
             if (now - slot.lastWaitingLogTime > 60_000) {
                 val prUrl = env.gitHubClient.getPrUrl(prNumber)
-                env.sendNotification("⚠️ *PR #$prNumber has conflicts!* Automated local worktree rebase failed. Human intervention required: $prUrl")
-                env.println("\u001B[1;31m🔔 [CONFLICT] PR #$prNumber has conflicts! Automated local worktree rebase failed. Please resolve: $prUrl\u001B[0m")
+                val conflictSuffix = if (rebaseResult.conflictCount > 0) " (Conflicts in ${rebaseResult.conflictCount} files: ${rebaseResult.conflictedFiles})" else ""
+                env.sendNotification("⚠️ *PR #$prNumber has conflicts!* Automated local worktree rebase failed$conflictSuffix. Human intervention required: $prUrl")
+                env.println("\u001B[1;31m🔔 [CONFLICT] PR #$prNumber has conflicts! Automated local worktree rebase failed$conflictSuffix. Please resolve: $prUrl\u001B[0m")
                 env.ringBell(3)
                 slot.lastWaitingLogTime = now
             }
