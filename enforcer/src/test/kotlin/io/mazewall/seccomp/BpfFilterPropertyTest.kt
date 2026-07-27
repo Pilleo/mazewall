@@ -1,9 +1,5 @@
 package io.mazewall.seccomp
 import kotlin.test.assertTrue
-import io.kotest.matchers.shouldBe
-import io.kotest.property.Exhaustive
-import io.kotest.property.checkAll
-import io.kotest.property.exhaustive.collection
 import io.mazewall.BpfFilter
 import io.mazewall.Policy
 import io.mazewall.core.Arch
@@ -15,8 +11,7 @@ class BpfFilterPropertyTest {
     @Test
     fun `bpf filter generation handles random combinations of syscalls without exceeding size limits`() {
         runBlocking {
-            // Fuzz test with combinations of blocked syscalls
-            checkAll(Exhaustive.collection(Syscall.entries.chunked(10))) { randomSyscalls ->
+            Syscall.entries.chunked(10).forEach { randomSyscalls ->
                 val policy = Policy
                     .builder()
                     .apply {
