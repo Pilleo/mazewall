@@ -158,6 +158,11 @@ public class SupervisorDaemonManager(
         }
 
         val shutdownHook = Thread {
+            synchronized(daemonLock) {
+                if (sharedDaemonContext?.daemonProcess == daemonProcess) {
+                    sharedDaemonContext = null
+                }
+            }
             daemonProcess.destroyForcibly()
         }
         processLauncher.addShutdownHook(shutdownHook)
