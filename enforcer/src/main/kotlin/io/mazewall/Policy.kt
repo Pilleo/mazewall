@@ -264,3 +264,10 @@ public operator fun <S : PolicyScope> Policy<S, Uncompiled>.plus(
     @Suppress("UNCHECKED_CAST")
     return Policy.combine(this, other) as Policy<PolicyScope.ThreadLocalOnly, Uncompiled>
 }
+
+/**
+ * Installs this policy on the current thread.
+ */
+public fun <S : PolicyScope> Policy<S, Uncompiled>.install(): AutoCloseable {
+    return io.mazewall.enforcer.ContainedExecutors.installOnCurrentThread(this.definition)
+}
