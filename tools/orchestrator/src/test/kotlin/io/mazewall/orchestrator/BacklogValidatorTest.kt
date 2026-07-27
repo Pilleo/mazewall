@@ -115,4 +115,128 @@ class BacklogValidatorTest {
         assertFalse(errors.isEmpty(), "Invalid target_modules should fail validation")
         assertTrue(errors.any { it.contains("Invalid Gradle module ':invalid-module' in target_modules") }, "Expected invalid target_modules error")
     }
+
+    @Test
+    fun testInvalidFilenameFormat() {
+        val file = File(tempDir, "issue-invalid.md")
+        file.writeText("""
+            ---
+            title: "Valid Title"
+            severity: "HIGH"
+            status: "open"
+            priority: 9
+            dependencies: []
+            component: "enforcer"
+            target_modules: [":enforcer"]
+            target_files: []
+            ---
+        """.trimIndent())
+
+        val errors = BacklogValidator.validateBacklog(tempDir)
+        assertFalse(errors.isEmpty())
+        assertTrue(errors.any { it.contains("Invalid filename format") })
+    }
+
+    @Test
+    fun testMissingFrontmatterHeader() {
+        val file = File(tempDir, "issue-20260726-123456-no-header.md")
+        file.writeText("""
+            title: "No Header"
+            status: "open"
+        """.trimIndent())
+
+        val errors = BacklogValidator.validateBacklog(tempDir)
+        assertFalse(errors.isEmpty())
+        assertTrue(errors.any { it.contains("Missing YAML frontmatter header") })
+    }
+
+    @Test
+    fun testMissingTitle() {
+        val file = File(tempDir, "issue-20260726-123456-missing-title.md")
+        file.writeText("""
+            ---
+            title: ""
+            severity: "HIGH"
+            status: "open"
+            priority: 9
+            dependencies: []
+            component: "enforcer"
+            target_modules: [":enforcer"]
+            target_files: []
+            ---
+        """.trimIndent())
+
+        val errors = BacklogValidator.validateBacklog(tempDir)
+        assertFalse(errors.isEmpty())
+        assertTrue(errors.any { it.contains("Missing or empty 'title'") })
+    }
+
+    @Test
+    fun testInvalidComponent() {
+        val file = File(tempDir, "issue-20260726-123456-invalid-comp.md")
+        file.writeText("""
+            ---
+            title: "Invalid Comp"
+            severity: "HIGH"
+            status: "open"
+            priority: 9
+            dependencies: []
+            component: "invalid-component"
+            target_modules: [":enforcer"]
+            target_files: []
+            ---
+        """.trimIndent())
+
+        val errors = BacklogValidator.validateBacklog(tempDir)
+        assertFalse(errors.isEmpty())
+        assertTrue(errors.any { it.contains("Invalid or missing component") })
+    }
+
+    @Test
+    fun testMissingTargetFiles() {
+        val file = File(tempDir, "issue-20260726-123456-missing-files.md")
+        file.writeText("""
+            ---
+            title: "Missing Files"
+            severity: "HIGH"
+            status: "open"
+            priority: 9
+            dependencies: []
+            component: "enforcer"
+            target_modules: [":enforcer"]
+            ---
+        """.trimIndent())
+
+        val errors = BacklogValidator.validateBacklog(tempDir)
+        assertFalse(errors.isEmpty())
+        assertTrue(errors.any { it.contains("Missing required 'target_files' field") })
+    }
+
+    @Test
+    fun testMissingTargetModules() {
+        val file = File(tempDir, "issue-20260726-123456-missing-modules.md")
+        file.writeText("""
+            ---
+            title: "Missing Modules"
+            severity: "HIGH"
+            status: "open"
+            priority: 9
+            dependencies: []
+            component: "enforcer"
+            target_files: []
+            ---
+        """.trimIndent())
+
+        val errors = BacklogValidator.validateBacklog(tempDir)
+        assertFalse(errors.isEmpty())
+        assertTrue(errors.any { it.contains("Missing required 'target_modules' field") })
+    }
+
+    @Test
+    fun testNonExistentBacklogDir() {
+        val nonExistent = File(tempDir, "non-existent")
+        val errors = BacklogValidator.validateBacklog(nonExistent)
+        assertEquals(1, errors.size)
+        assertTrue(errors[0].contains("Backlog directory does not exist"))
+    }
 }
