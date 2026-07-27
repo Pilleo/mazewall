@@ -422,93 +422,75 @@ class RealGitHubClient(private val config: OrchestratorConfig) : GitHubClient {
      * Executed within a detached temporary worktree (`../temp-rebase-<prNumber>`) to ensure absolute isolation.
      * This prevents working-tree pollution or conflicts with uncommitted/untracked local edits in the main agent workspace.
      */
-    override fun rebaseBranch(prNumber: String): RebaseResult {
+    override fun mergeMasterIntoBranch(prNumber: String): RebaseResult {
         clearPrCache(prNumber)
-
-        val worktreeDir = File("../temp-rebase-$prNumber")
+        val worktreeDir = File("../temp-merge-$prNumber")
         try {
             val branchName = execute("gh", "pr", "view", prNumber, "--json", "headRefName", "--jq", ".headRefName").trim()
-            if (branchName.isBlank()) {
-                return RebaseResult(success = false, conflictCount = 0)
-            }
+            if (branchName.isBlank()) return RebaseResult(success = false, conflictCount = 0)
 
             execute("git", "fetch", "origin", "master")
             execute("git", "fetch", "origin", branchName)
 
-            // 1. Locate Jules's original divergence point before any rebase/force-pushed commits.
-            val firstCommit = try {
-                execute("git", "rev-list", "--reverse", "origin/master..origin/$branchName").lines().firstOrNull { it.isNotBlank() }?.trim() ?: ""
-            } catch (_: Exception) {
-                ""
-            }
-
-            val initialBase = if (firstCommit.isNotEmpty()) {
-                try {
-                    execute("git", "rev-parse", "$firstCommit~1").trim()
-                } catch (_: Exception) {
-                    execute("git", "merge-base", "origin/master", "origin/$branchName").trim()
-                }
-            } else {
-                execute("git", "merge-base", "origin/master", "origin/$branchName").trim()
-            }
-
-            // 2. Extract ONLY Jules's intended changes (Added or Modified only) from Jules's branch.
-            val intendedFilesOutput = execute("git", "diff", "--name-only", "--diff-filter=AM", initialBase, "origin/$branchName")
-            val intendedFiles = intendedFilesOutput.lines().map { it.trim() }.filter { it.isNotEmpty() }
-
-            if (intendedFiles.isEmpty()) {
-                System.err.println("No intended added/modified files found on PR branch relative to initial base.")
-                return RebaseResult(success = true, conflictCount = 0)
-            }
-
+            // Clean up any previous worktree
             try {
                 executeWithoutRetry("git", "worktree", "remove", worktreeDir.absolutePath, "--force")
             } catch (_: Exception) {}
-            if (worktreeDir.exists()) {
-                worktreeDir.deleteRecursively()
-            }
+            worktreeDir.deleteRecursively()
             try {
                 executeWithoutRetry("git", "worktree", "prune")
             } catch (_: Exception) {}
 
-            // 3. Create clean, detached worktree from the fresh origin/master.
-            execute("git", "worktree", "add", worktreeDir.absolutePath, "origin/master", "--detach")
+            // Create worktree on the PR branch (not master — we're merging INTO the branch)
+            execute("git", "worktree", "add", worktreeDir.absolutePath, "origin/$branchName", "--detach")
 
-            // 4. Checkout and stage ONLY intended task files from the PR branch into the fresh worktree.
-            for (file in intendedFiles) {
-                executeInDir(worktreeDir, "git", "checkout", "origin/$branchName", "--", file)
-                executeInDir(worktreeDir, "git", "add", file)
+            // Merge master into the branch. Conflicts = failure, signal human intervention.
+            try {
+                executeInDir(
+                    worktreeDir, "git", "merge", "origin/master",
+                    "--no-edit",
+                    "-m", "chore: merge master into PR #$prNumber to keep up to date",
+                    retry = false
+                )
+            } catch (e: Exception) {
+                // Merge conflict — abort and signal
+                try {
+                    executeInDir(worktreeDir, "git", "merge", "--abort", retry = false)
+                } catch (_: Exception) {}
+                System.err.println("Merge conflict on PR #$prNumber: ${e.message}")
+                return RebaseResult(success = false, conflictCount = 1)
             }
 
-            val statusOutput = executeInDir(worktreeDir, "git", "status", "--porcelain").trim()
-            if (statusOutput.isEmpty()) {
-                System.err.println("Nothing to commit for PR #$prNumber (clean branch matches master)")
+            // Check if anything actually changed (branch might already be up to date)
+            val aheadOfMaster = executeInDir(
+                worktreeDir, "git", "rev-list", "--count", "origin/master..HEAD"
+            ).trim().toIntOrNull() ?: 0
+
+            if (aheadOfMaster == 0) {
+                // Nothing to merge — already up to date (shouldn't happen if caller checks, but safe)
+                System.err.println("Nothing to merge for PR #$prNumber — already up to date")
                 return RebaseResult(success = true, conflictCount = 0)
             }
 
-            executeInDir(worktreeDir, "git", "commit", "-m", "chore(orchestrator): rebase PR #$prNumber onto master via intended-files apply")
-
-            // Validate that the newly constructed branch compiles cleanly before force-pushing.
+            // Validate that the merged branch compiles cleanly before force-pushing.
             try {
                 executeInDir(worktreeDir, "./gradlew", "compileKotlin", ":tools:orchestrator:compileKotlin")
             } catch (e: Exception) {
-                System.err.println("Compilation failed on rebased branch for PR #$prNumber: ${e.message}")
+                System.err.println("Compilation failed on merged branch for PR #$prNumber: ${e.message}")
                 return RebaseResult(success = false, conflictCount = 0)
             }
 
-            // Force-push with lease onto the PR branch.
             executeInDir(worktreeDir, "git", "push", "--force-with-lease", "origin", "HEAD:$branchName")
             return RebaseResult(success = true, conflictCount = 0)
+
         } catch (e: Exception) {
-            System.err.println("Local worktree rebase failed for PR #$prNumber: ${e.message}")
+            System.err.println("Merge failed for PR #$prNumber: ${e.message}")
             return RebaseResult(success = false, conflictCount = 0)
         } finally {
             try {
                 executeWithoutRetry("git", "worktree", "remove", worktreeDir.absolutePath, "--force")
             } catch (_: Exception) {}
-            if (worktreeDir.exists()) {
-                worktreeDir.deleteRecursively()
-            }
+            worktreeDir.deleteRecursively()
             try {
                 executeWithoutRetry("git", "worktree", "prune")
             } catch (_: Exception) {}

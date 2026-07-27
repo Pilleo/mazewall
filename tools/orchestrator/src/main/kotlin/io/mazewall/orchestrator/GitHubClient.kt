@@ -44,7 +44,16 @@ interface GitHubClient {
     fun getPrDiff(prNumber: String): String
     fun getPrUrl(prNumber: String): String
     fun isCommitEmpty(prNumber: String, shaOld: String, shaNew: String): Boolean
-    fun rebaseBranch(prNumber: String): RebaseResult
+
+    /**
+     * Merges the current origin/master into the given PR branch using an isolated
+     * worktree. Preserves Jules's original commits and authorship. The resulting
+     * PR diff will contain exactly Jules's session changes relative to master.
+     *
+     * Returns [RebaseResult.success = true] if the merge succeeded and was pushed.
+     * Returns [RebaseResult.success = false] if there are merge conflicts (human intervention required).
+     */
+    fun mergeMasterIntoBranch(prNumber: String): RebaseResult
 
     /**
      * Clears all cached properties and statuses associated with a PR (such as merge status, head SHA, build status).
