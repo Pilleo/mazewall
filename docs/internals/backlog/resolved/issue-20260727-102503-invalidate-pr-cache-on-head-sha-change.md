@@ -1,7 +1,7 @@
 ---
 title: "Replace git rebase with Surgical Intended-Files Apply in Orchestrator's rebaseBranch()"
 severity: "HIGH"
-status: "open"
+status: "resolved"
 priority: 10
 dependencies: []
 component: "orchestrator"
@@ -15,6 +15,7 @@ target_files:
 effort: "medium"
 autonomy: "supervised"
 github_issue:
+github_issue: 373
 ---
 
 # 🔴 [Severity: HIGH]: Replace git rebase with Surgical Intended-Files Apply in Orchestrator's rebaseBranch()

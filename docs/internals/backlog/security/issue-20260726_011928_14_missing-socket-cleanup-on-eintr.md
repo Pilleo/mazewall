@@ -12,6 +12,7 @@ target_modules:
 - :enforcer
 target_files:
 - enforcer/src/main/kotlin/io/mazewall/enforcer/supervisor/SupervisorDaemonEngine.kt
+github_issue: 376
 ---
 
 # Issue: `SupervisorDaemonEngine` fails to clean up sockets on interrupted or failed loop

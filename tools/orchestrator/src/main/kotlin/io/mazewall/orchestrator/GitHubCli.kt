@@ -303,11 +303,15 @@ class RealGitHubClient(private val config: OrchestratorConfig) : GitHubClient {
     }
 
     private fun execute(vararg command: String): String {
-        return executeInDir(null, *command)
+        return executeInDir(null, *command, retry = true)
     }
 
-    private fun executeInDir(workingDir: File?, vararg command: String): String {
-        return RetryUtils.retry(config.maxRetries, config.initialRetryDelayMs, { System.err.println("  [GitHubCli] $it") }) {
+    private fun executeWithoutRetry(vararg command: String): String {
+        return executeInDir(null, *command, retry = false)
+    }
+
+    private fun executeInDir(workingDir: File?, vararg command: String, retry: Boolean = true): String {
+        val action = {
             val directory = File("build/tmp").apply { mkdirs() }
             val tempFile = File.createTempFile("gh_cmd_", ".log", directory)
             try {
@@ -332,6 +336,12 @@ class RealGitHubClient(private val config: OrchestratorConfig) : GitHubClient {
             } finally {
                 tempFile.delete()
             }
+        }
+
+        return if (retry) {
+            RetryUtils.retry(config.maxRetries, config.initialRetryDelayMs, { System.err.println("  [GitHubCli] $it") }, action)
+        } else {
+            action()
         }
     }
 
@@ -451,15 +461,14 @@ class RealGitHubClient(private val config: OrchestratorConfig) : GitHubClient {
                 return RebaseResult(success = true, conflictCount = 0)
             }
 
-            // Clean up any stale worktree of the same name first to prevent locking/addition errors.
             try {
-                execute("git", "worktree", "remove", worktreeDir.absolutePath, "--force")
+                executeWithoutRetry("git", "worktree", "remove", worktreeDir.absolutePath, "--force")
             } catch (_: Exception) {}
             if (worktreeDir.exists()) {
                 worktreeDir.deleteRecursively()
             }
             try {
-                execute("git", "worktree", "prune")
+                executeWithoutRetry("git", "worktree", "prune")
             } catch (_: Exception) {}
 
             // 3. Create clean, detached worktree from the fresh origin/master.
@@ -495,13 +504,13 @@ class RealGitHubClient(private val config: OrchestratorConfig) : GitHubClient {
             return RebaseResult(success = false, conflictCount = 0)
         } finally {
             try {
-                execute("git", "worktree", "remove", worktreeDir.absolutePath, "--force")
+                executeWithoutRetry("git", "worktree", "remove", worktreeDir.absolutePath, "--force")
             } catch (_: Exception) {}
             if (worktreeDir.exists()) {
                 worktreeDir.deleteRecursively()
             }
             try {
-                execute("git", "worktree", "prune")
+                executeWithoutRetry("git", "worktree", "prune")
             } catch (_: Exception) {}
         }
     }
