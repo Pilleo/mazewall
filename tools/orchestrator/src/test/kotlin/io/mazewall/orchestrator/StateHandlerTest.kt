@@ -1295,7 +1295,15 @@ class StateHandlerTest {
                 val normalizedFile = file.replace('\\', '/').trim()
                 val isAllowed = normalizedFile.startsWith("docs/internals/backlog/") || targetFiles.any { target ->
                     val normalizedTarget = target.replace('\\', '/').trim().removePrefix(":")
-                    normalizedFile == normalizedTarget || normalizedFile.endsWith("/$normalizedTarget")
+                    if (normalizedFile == normalizedTarget || normalizedFile.endsWith("/$normalizedTarget")) return@any true
+                    if (normalizedTarget.contains("/src/main/")) {
+                        val testTarget = normalizedTarget
+                            .replace("/src/main/", "/src/test/")
+                            .replace(".kt", "Test.kt")
+                            .replace(".java", "Test.java")
+                        if (normalizedFile == testTarget || normalizedFile.endsWith("/$testTarget")) return@any true
+                    }
+                    false
                 }
 
                 if (!isAllowed) {

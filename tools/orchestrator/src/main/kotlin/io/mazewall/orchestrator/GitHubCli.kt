@@ -427,7 +427,19 @@ class RealGitHubClient(private val config: OrchestratorConfig) : GitHubClient {
         val normalizedFile = file.replace('\\', '/').trim()
         return targetFiles.any { target ->
             val normalizedTarget = target.replace('\\', '/').trim().removePrefix(":")
-            normalizedFile == normalizedTarget || normalizedFile.endsWith("/$normalizedTarget")
+
+            // Exact match or suffix match
+            if (normalizedFile == normalizedTarget || normalizedFile.endsWith("/$normalizedTarget")) return true
+
+            // If the target is a main file, also allow its corresponding test file
+            if (normalizedTarget.contains("/src/main/")) {
+                val testTarget = normalizedTarget
+                    .replace("/src/main/", "/src/test/")
+                    .replace(".kt", "Test.kt")
+                    .replace(".java", "Test.java")
+                if (normalizedFile == testTarget || normalizedFile.endsWith("/$testTarget")) return true
+            }
+            false
         }
     }
 

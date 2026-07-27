@@ -63,6 +63,70 @@ if ! git merge origin/master --no-edit -m "chore: merge master into PR #$PR_NUMB
   exit 1
 fi
 
+# 🧹 Self-healing: Discard modifications to any files that are not explicitly allowed.
+echo "🧹 Finding linked issue and target files for self-healing checkout..."
+ISSUE_NUMBER=$(env -u GITHUB_TOKEN gh pr view "$PR_NUMBER" --json closingIssuesReferences --jq '.[0].number' 2>/dev/null || echo "")
+if [ -z "$ISSUE_NUMBER" ]; then
+  PR_BODY=$(env -u GITHUB_TOKEN gh pr view "$PR_NUMBER" --json body --jq '.body' 2>/dev/null || echo "")
+  ISSUE_NUMBER=$(echo "$PR_BODY" | grep -ioE 'fixes\s+#?[0-9]+' | grep -oE '[0-9]+' | head -n 1 || echo "")
+fi
+
+ISSUE_FILE=""
+if [ -n "$ISSUE_NUMBER" ]; then
+  ISSUE_FILE=$(grep -rl "github_issue: $ISSUE_NUMBER" docs/internals/backlog/ 2>/dev/null | head -n 1 || echo "")
+fi
+
+TARGET_FILES=""
+if [ -n "$ISSUE_FILE" ] && [ -f "$ISSUE_FILE" ]; then
+  TARGET_FILES=$(sed -n '/^target_files:/,/^[a-zA-Z0-9_-]\+:/p' "$ISSUE_FILE" | grep -E '^\s*-\s*' | sed 's/^\s*-\s*//' | sed 's/^://' | sed "s/['\"]//g" || echo "")
+fi
+
+echo "📋 Backlog file: ${ISSUE_FILE:-None}"
+echo "📋 Allowed target files:"
+echo "$TARGET_FILES" | sed 's/^/  - /'
+
+is_file_allowed() {
+  local f="$1"
+  if [[ "$f" =~ ^docs/internals/backlog/.*\.md$ ]]; then
+    return 0
+  fi
+  [ -z "$TARGET_FILES" ] && return 0 # If no targets found, do not discard anything as a fallback
+
+  while read -r target; do
+    [ -z "$target" ] && continue
+    target="${target#:}"
+    if [ "$f" = "$target" ] || [[ "$f" = */"$target" ]]; then
+      return 0
+    fi
+    if [[ "$target" = *"/src/main/"* ]]; then
+      local test_target="${target//\/src\/main\//\/src\/test\/}"
+      test_target="${test_target%.kt}Test.kt"
+      test_target="${test_target%.java}Test.java"
+      if [ "$f" = "$test_target" ] || [[ "$f" = */"$test_target" ]]; then
+        return 0
+      fi
+    fi
+  done <<< "$TARGET_FILES"
+  return 1
+}
+
+DIFFERENT_FILES=$(git diff --name-only origin/master 2>/dev/null || echo "")
+CLEANED_ANY=0
+
+for f in $DIFFERENT_FILES; do
+  [ -z "$f" ] && continue
+  if ! is_file_allowed "$f"; then
+    echo "🧹 DISCARDING UNINTENDED MODIFICATION: File '$f' is not allowed. Restoring from master..."
+    git checkout origin/master -- "$f"
+    git add "$f"
+    CLEANED_ANY=1
+  fi
+done
+
+if [ "$CLEANED_ANY" -eq 1 ]; then
+  git commit --amend --no-edit
+fi
+
 # Check if anything actually changed (branch might already be up to date)
 AHEAD_OF_MASTER=$(git rev-list --count "origin/master..HEAD" || echo "0")
 if [ "$AHEAD_OF_MASTER" -eq 0 ]; then
