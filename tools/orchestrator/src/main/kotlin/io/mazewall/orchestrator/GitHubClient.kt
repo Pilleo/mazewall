@@ -3,7 +3,9 @@ package io.mazewall.orchestrator
 data class RebaseResult(
     val success: Boolean,
     val conflictCount: Int,
-    val conflictedFiles: List<String> = emptyList()
+    val conflictedFiles: List<String> = emptyList(),
+    val needsRescueApproval: Boolean = false,
+    val rescueBranchName: String? = null
 )
 
 data class PrMergeStatus(
@@ -54,6 +56,7 @@ interface GitHubClient {
      * Returns [RebaseResult.success = false] if there are merge conflicts (human intervention required).
      */
     fun mergeMasterIntoBranch(prNumber: String, targetFiles: List<String>): RebaseResult
+    fun approveRescue(prNumber: String, rescueBranchName: String)
 
     /**
      * Clears all cached properties and statuses associated with a PR (such as merge status, head SHA, build status).

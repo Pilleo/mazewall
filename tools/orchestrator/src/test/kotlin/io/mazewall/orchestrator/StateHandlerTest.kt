@@ -69,6 +69,7 @@ class MockOrchestratorEnvironment : OrchestratorEnvironment {
             mergeMasterIntoBranchCallCount++
             return mergeMasterIntoBranchResult
         }
+        override fun approveRescue(prNumber: String, rescueBranchName: String) {}
         override fun clearPrCache(prNumber: String) { clearPrCacheCount++ }
     }
 
@@ -1210,6 +1211,142 @@ class StateHandlerTest {
         assertTrue(env.sleepCount > 0, "Should sleep-wait for the active session")
     }
 
+
+
+    @Test
+    fun testMergeMasterIntoBranchUnrelatedHistoriesRescue() {
+        val tempDir = java.nio.file.Files.createTempDirectory("test-git-unrelated-rescue").toFile()
+        try {
+            fun runGit(vararg command: String): String {
+                val pb = ProcessBuilder(*command)
+                pb.directory(tempDir)
+                pb.redirectErrorStream(true)
+                val process = pb.start()
+                val output = process.inputStream.bufferedReader().readText().trim()
+                process.waitFor()
+                if (process.exitValue() != 0) {
+                    throw RuntimeException("Command '${command.joinToString(" ")}' failed with exit code ${process.exitValue()}: $output")
+                }
+                return output
+            }
+
+            fun runGitInDir(dir: java.io.File, vararg command: String): String {
+                val pb = ProcessBuilder(*command)
+                pb.directory(dir)
+                pb.redirectErrorStream(true)
+                val process = pb.start()
+                val output = process.inputStream.bufferedReader().readText().trim()
+                process.waitFor()
+                if (process.exitValue() != 0) {
+                    if (command.contains("merge") && output.contains("unrelated histories")) {
+                        throw RuntimeException(output)
+                    }
+                    throw RuntimeException("Command '${command.joinToString(" ")}' failed in ${dir.name} with exit code ${process.exitValue()}: $output")
+                }
+                return output
+            }
+
+            // Init git repo
+            runGit("git", "init")
+            runGit("git", "config", "user.name", "Test User")
+            runGit("git", "config", "user.email", "test@example.com")
+            try {
+                runGit("git", "checkout", "-b", "master")
+            } catch (_: Exception) {}
+
+            // Create initial files on master
+            val allowedFile = java.io.File(tempDir, "allowed.txt")
+            allowedFile.writeText("allowed initial content")
+            val masterOnlyFile = java.io.File(tempDir, "master_only.txt")
+            masterOnlyFile.writeText("master content")
+            runGit("git", "add", "allowed.txt", "master_only.txt")
+            runGit("git", "commit", "-m", "initial commit")
+
+            // Create a completely unrelated orphaned branch simulating Jules root commit
+            runGit("git", "checkout", "--orphan", "jules-branch")
+            runGit("git", "rm", "-rf", ".") // Clear index
+
+            // Jules modifies allowed.txt (intended) AND disallowed.txt (unintended reversion/pollution)
+            allowedFile.writeText("allowed modified content")
+            val disallowedFile = java.io.File(tempDir, "disallowed.txt")
+            disallowedFile.writeText("disallowed modified content")
+            runGit("git", "add", "allowed.txt", "disallowed.txt")
+            runGit("git", "commit", "-m", "jules changes")
+
+            // Create worktree on jules-branch
+            val worktreeDir = java.io.File(tempDir, "worktree-unrelated-rescue")
+            worktreeDir.mkdirs()
+            runGit("git", "worktree", "add", worktreeDir.absolutePath, "jules-branch", "--detach")
+
+            // Simulate the rescue logic from GitHubCli!
+            var thrown = false
+            try {
+                runGitInDir(worktreeDir, "git", "merge", "master", "--no-edit")
+            } catch (e: Exception) {
+                if (e.message?.contains("unrelated histories") == true) {
+                    thrown = true
+
+                    // 1. Abort
+                    try { runGitInDir(worktreeDir, "git", "merge", "--abort") } catch (_: Exception) {}
+
+                    // 2. Diff against origin/master to find everything that differs
+                    val allDifferentFiles = runGitInDir(worktreeDir, "git", "diff", "--name-only", "master", "jules-branch")
+                        .lines().map { it.trim() }.filter { it.isNotEmpty() }
+
+                    // 3. Reset hard to master
+                    runGitInDir(worktreeDir, "git", "reset", "--hard", "master")
+
+                    val targetFiles = listOf("allowed.txt")
+
+                    for (file in allDifferentFiles) {
+                        val normalizedFile = file.replace('\\', '/').trim()
+                        val isAllowed = normalizedFile.startsWith("docs/internals/backlog/") || targetFiles.any { target ->
+                            val normalizedTarget = target.replace('\\', '/').trim().removePrefix(":")
+                            if (normalizedFile == normalizedTarget || normalizedFile.endsWith("/$normalizedTarget")) return@any true
+                            false
+                        }
+
+                        if (isAllowed) {
+                            val exists = runGitInDir(worktreeDir, "git", "ls-tree", "-r", "jules-branch", "--name-only")
+                                .lines().any { it.trim() == file }
+                            if (exists) {
+                                runGitInDir(worktreeDir, "git", "checkout", "jules-branch", "--", file)
+                                runGitInDir(worktreeDir, "git", "add", file)
+                            } else {
+                                runGitInDir(worktreeDir, "git", "rm", "--ignore-unmatch", file)
+                            }
+                        }
+                    }
+
+                    runGitInDir(worktreeDir, "git", "commit", "-m", "chore(orchestrator): rescue PR onto master")
+                }
+            }
+
+            assertTrue(thrown, "Expected unrelated histories exception to trigger rescue logic")
+
+            // Verify that after rescue, allowed.txt is still modified with Jules's changes
+            val finalAllowedFile = java.io.File(worktreeDir, "allowed.txt")
+            assertEquals("allowed modified content", finalAllowedFile.readText().trim())
+
+            // Verify that master_only.txt is preserved exactly as it was on master
+            val finalMasterOnlyFile = java.io.File(worktreeDir, "master_only.txt")
+            assertEquals("master content", finalMasterOnlyFile.readText().trim())
+
+            // Verify that disallowed.txt DOES NOT EXIST in the worktree because it was not in targetFiles
+            val finalDisallowedFile = java.io.File(worktreeDir, "disallowed.txt")
+            assertFalse(finalDisallowedFile.exists(), "disallowed.txt should have been discarded because it was not allowed!")
+
+            // Verify merge base! The new commit should have 'master' as its parent!
+            val parents = runGitInDir(worktreeDir, "git", "log", "-n", "1", "--format=%P")
+            val masterSha = runGitInDir(worktreeDir, "git", "rev-parse", "master")
+            assertTrue(parents.contains(masterSha), "The rescued commit must have master as its parent!")
+
+            // Clean up worktree
+            runGit("git", "worktree", "remove", worktreeDir.absolutePath, "--force")
+        } finally {
+            tempDir.deleteRecursively()
+        }
+    }
     @Test
     fun testMergeMasterIntoBranchSelfHealingReconstruction() {
         val tempDir = java.nio.file.Files.createTempDirectory("test-git-self-healing").toFile()
