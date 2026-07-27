@@ -50,16 +50,23 @@ class RealGitHubClient(private val config: OrchestratorConfig) : GitHubClient {
         cache.remove("getPrHeadSha-$prNumber")
     }
 
-    override fun getPrMergeStatus(prNumber: String): PrMergeStatus = withCache("getPrMergeStatus-$prNumber") {
-        try {
-            val jsonText = execute("gh", "pr", "view", prNumber, "--json", "mergeable,mergeStateStatus")
-            val status = json.decodeFromString(GitHubPrStatus.serializer(), jsonText)
-            val isBehind = status.mergeStateStatus == "BEHIND"
-            PrMergeStatus(status.mergeable, if (isBehind) 1 else 0)
-        } catch (e: Exception) {
-            System.err.println("Error getting PR merge status for PR #$prNumber: ${e.message}")
-            PrMergeStatus("UNKNOWN", 0)
+    override fun getPrMergeStatus(prNumber: String): PrMergeStatus {
+        val cacheKey = "getPrMergeStatus-$prNumber"
+        val result = withCache(cacheKey) {
+            try {
+                val jsonText = execute("gh", "pr", "view", prNumber, "--json", "mergeable,mergeStateStatus")
+                val status = json.decodeFromString(GitHubPrStatus.serializer(), jsonText)
+                val isBehind = status.mergeStateStatus == "BEHIND"
+                PrMergeStatus(status.mergeable, if (isBehind) 1 else 0)
+            } catch (e: Exception) {
+                System.err.println("Error getting PR merge status for PR #$prNumber: ${e.message}")
+                PrMergeStatus("UNKNOWN", 0, isError = true, errorMessage = e.message ?: e.toString())
+            }
         }
+        if (result.isError) {
+            cache.remove(cacheKey)
+        }
+        return result
     }
 
     private inline fun <T> withCache(key: String, block: () -> T): T {

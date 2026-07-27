@@ -699,7 +699,27 @@ sealed interface OrchestratorState {
 }
 
 private fun handleRebaseAndConflicts(env: OrchestratorEnvironment, slot: SlotContext, prNumber: String): Boolean {
-    val status = env.gitHubClient.getPrMergeStatus(prNumber)
+    var status = env.gitHubClient.getPrMergeStatus(prNumber)
+    if (status.isError) {
+        env.println("⚠️ Error retrieving PR merge status: ${status.errorMessage}. Retrying status retrieval...")
+        if (status.isAuthError()) {
+            env.sendNotification("🚨 *GitHub CLI Authentication/Query Failure on PR #$prNumber!* Error: ${status.errorMessage}")
+        }
+
+        var attempts = 1
+        while (status.isError && attempts < 3) {
+            env.sleep(2, TimeUnit.SECONDS)
+            attempts++
+            env.println("🔄 Retrying PR merge status retrieval (attempt $attempts/3)...")
+            status = env.gitHubClient.getPrMergeStatus(prNumber)
+        }
+
+        if (status.isError) {
+            env.println("❌ Failed to retrieve PR merge status after retries. Aborting current check iteration and waiting.")
+            return true
+        }
+    }
+
     val isBehind = status.behindBy > 0
     val isConflicting = status.mergeable == "CONFLICTING"
 
