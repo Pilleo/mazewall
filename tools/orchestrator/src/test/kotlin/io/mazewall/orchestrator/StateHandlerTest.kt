@@ -66,7 +66,7 @@ class MockOrchestratorEnvironment : OrchestratorEnvironment {
     override val julesClient = object : JulesClient {
         override fun getActiveSession(issueId: String): JulesSession? = julesSession
         override fun getSessionStatusFromActivities(sessionId: String): String? = julesSession?.status
-        override fun hasUnableToCompleteActivity(sessionId: String): Boolean = false
+        override fun hasUnableToCompleteActivity(sessionId: String): Boolean = hasUnableToCompleteActivity
         override fun triggerSession(repo: String, issueId: String, prompt: String) {}
         override fun sendSessionMessage(sessionId: String, prompt: String) { sentJulesMessages.add(sessionId to prompt) }
         override fun listSessions(): List<JulesSession> = emptyList()
@@ -466,5 +466,405 @@ class StateHandlerTest {
         // Verify we retried status retrieval 3 times (the first call + 2 retries = 3 calls total)
         // Total sleep count should be 3 (2 for retry delays, 1 for polling interval sleep inside CI_RUNNING because handleRebaseAndConflicts returned true)
         assertEquals(3, env.sleepCount, "Should sleep for retries and polling interval")
+    }
+
+    @Test
+    fun testAwaitingPrIssueClosedResolvesTask() {
+        val env = MockOrchestratorEnvironment()
+        val context = OrchestratorContext().apply {
+            currentIssueId = "issue-1"
+            githubIssueNumber = "123"
+        }
+        env.issueClosed = true
+        val issue = BacklogIssue(File("test.md"), "issue-1", "Title", 1, "open", emptyList())
+        env.issues.add(issue)
+
+        val nextState = OrchestratorState.AWAITING_PR.execute(env, context)
+
+        assertEquals(OrchestratorState.SELECT_TASK, nextState)
+        assertTrue(env.resolvedIssues.contains(issue))
+        assertTrue(context.skippedIds.contains("issue-1"))
+    }
+
+    @Test
+    fun testAwaitingPrJulesSessionFailedExceedsRetryLimit() {
+        val env = MockOrchestratorEnvironment()
+        val context = OrchestratorContext().apply {
+            currentIssueId = "issue-1"
+            githubIssueNumber = "123"
+            julesSessionId = "s1"
+            julesRetries = 2
+        }
+        env.julesSession = JulesSession("s1", "desc", "repo", "FAILED")
+        val issue = BacklogIssue(File("test.md"), "issue-1", "Title", 1, "open", emptyList())
+        env.issues.add(issue)
+
+        val nextState = OrchestratorState.AWAITING_PR.execute(env, context)
+
+        assertEquals(OrchestratorState.SELECT_TASK, nextState)
+        assertTrue(context.skippedIds.contains("issue-1"))
+    }
+
+    @Test
+    fun testAwaitingPrCompletedReviewTask() {
+        val env = MockOrchestratorEnvironment()
+        val context = OrchestratorContext().apply {
+            currentIssueId = "review-task-1"
+            githubIssueNumber = "123"
+            julesSessionId = "s1"
+        }
+        env.julesSession = JulesSession("s1", "desc", "repo", "Completed")
+        val issue = BacklogIssue(File("test.md"), "review-task-1", "Title", 1, "open", emptyList())
+        env.issues.add(issue)
+
+        val nextState = OrchestratorState.AWAITING_PR.execute(env, context)
+
+        assertEquals(OrchestratorState.SELECT_TASK, nextState)
+        assertTrue(env.resolvedIssues.contains(issue))
+    }
+
+    @Test
+    fun testAwaitingPrFeedbackNeededNotifies() {
+        val env = MockOrchestratorEnvironment()
+        val context = OrchestratorContext().apply {
+            currentIssueId = "issue-1"
+            githubIssueNumber = "123"
+            julesSessionId = "s1"
+        }
+        env.julesSession = JulesSession("s1", "desc", "repo", "Awaiting Feedback")
+
+        val nextState = OrchestratorState.AWAITING_PR.execute(env, context)
+
+        assertEquals(OrchestratorState.AWAITING_PR, nextState)
+        assertTrue(env.notifications.any { it.contains("Jules needs feedback") })
+        assertEquals(5, env.bellRungCount)
+    }
+
+    @Test
+    fun testCiRunningSessionFailedWithRetry() {
+        val env = MockOrchestratorEnvironment()
+        val context = OrchestratorContext().apply {
+            currentIssueId = "issue-1"
+            githubIssueNumber = "123"
+            prNumber = "pr-1"
+            julesSessionId = "s1"
+            julesRetries = 0
+        }
+        // Fail but wait until state transition out of failure
+        env.julesSession = JulesSession("s1", "desc", "repo", "FAILED")
+
+        val nextState = OrchestratorState.CI_RUNNING.execute(env, context)
+
+        assertEquals(OrchestratorState.CI_RUNNING, nextState)
+        assertEquals(1, context.julesRetries)
+    }
+
+    @Test
+    fun testCiRunningSessionFailedExceedsRetryLimit() {
+        val env = MockOrchestratorEnvironment()
+        val context = OrchestratorContext().apply {
+            currentIssueId = "issue-1"
+            githubIssueNumber = "123"
+            prNumber = "pr-1"
+            julesSessionId = "s1"
+            julesRetries = 2
+        }
+        env.julesSession = JulesSession("s1", "desc", "repo", "FAILED")
+        val issue = BacklogIssue(File("test.md"), "issue-1", "Title", 1, "open", emptyList())
+        env.issues.add(issue)
+
+        val nextState = OrchestratorState.CI_RUNNING.execute(env, context)
+
+        assertEquals(OrchestratorState.SELECT_TASK, nextState)
+        assertTrue(context.skippedIds.contains("issue-1"))
+    }
+
+    @Test
+    fun testCiRunningSessionInProgressWaits() {
+        val env = MockOrchestratorEnvironment()
+        val context = OrchestratorContext().apply {
+            currentIssueId = "issue-1"
+            githubIssueNumber = "123"
+            prNumber = "pr-1"
+            julesSessionId = "s1"
+        }
+        env.julesSession = JulesSession("s1", "desc", "repo", "in_progress")
+
+        val nextState = OrchestratorState.CI_RUNNING.execute(env, context)
+
+        assertEquals(OrchestratorState.CI_RUNNING, nextState)
+        assertTrue(env.sleepCount > 0)
+    }
+
+    @Test
+    fun testCiRunningPrMergedResolvesTask() {
+        val env = MockOrchestratorEnvironment()
+        val context = OrchestratorContext().apply {
+            currentIssueId = "issue-1"
+            githubIssueNumber = "123"
+            prNumber = "pr-1"
+        }
+        env.prMerged = true
+
+        val nextState = OrchestratorState.CI_RUNNING.execute(env, context)
+
+        assertEquals(OrchestratorState.RESOLVE_TASK, nextState)
+    }
+
+    @Test
+    fun testCiRunningBuildFailedSendsLogsFeedback() {
+        val env = MockOrchestratorEnvironment()
+        val context = OrchestratorContext().apply {
+            currentIssueId = "issue-1"
+            githubIssueNumber = "123"
+            prNumber = "pr-1"
+            lastHeadSha = "sha123"
+        }
+        env.prHeadSha = "sha123"
+        env.buildStatus = "FAILURE"
+
+        val nextState = OrchestratorState.CI_RUNNING.execute(env, context)
+
+        assertEquals(OrchestratorState.CI_RUNNING, nextState)
+        assertTrue(env.commentedPrs.any { it.first == "pr-1" && it.second.contains("CI Build Failed") })
+        assertEquals("sha123", context.lastFailedSha)
+    }
+
+    @Test
+    fun testCiRunningBuildFailedAlreadyNotifiedDoesNotRepeat() {
+        val env = MockOrchestratorEnvironment()
+        val context = OrchestratorContext().apply {
+            currentIssueId = "issue-1"
+            githubIssueNumber = "123"
+            prNumber = "pr-1"
+            lastHeadSha = "sha123"
+            lastFailedSha = "sha123"
+        }
+        env.prHeadSha = "sha123"
+        env.buildStatus = "FAILURE"
+
+        val nextState = OrchestratorState.CI_RUNNING.execute(env, context)
+
+        assertEquals(OrchestratorState.CI_RUNNING, nextState)
+        assertTrue(env.commentedPrs.isEmpty())
+    }
+
+    @Test
+    fun testAwaitingReviewPrMerged() {
+        val env = MockOrchestratorEnvironment()
+        val context = OrchestratorContext().apply {
+            prNumber = "pr-1"
+        }
+        env.prMerged = true
+
+        val nextState = OrchestratorState.AWAITING_REVIEW.execute(env, context)
+
+        assertEquals(OrchestratorState.RESOLVE_TASK, nextState)
+    }
+
+    @Test
+    fun testAwaitingReviewSessionFailedWithRetry() {
+        val env = MockOrchestratorEnvironment()
+        val context = OrchestratorContext().apply {
+            currentIssueId = "issue-1"
+            githubIssueNumber = "123"
+            prNumber = "pr-1"
+            julesSessionId = "s1"
+        }
+        env.julesSession = JulesSession("s1", "desc", "repo", "FAILED")
+
+        val nextState = OrchestratorState.AWAITING_REVIEW.execute(env, context)
+
+        assertEquals(OrchestratorState.AWAITING_REVIEW, nextState)
+        assertNull(context.lastReviewedSha)
+    }
+
+    @Test
+    fun testAwaitingReviewSessionInProgress() {
+        val env = MockOrchestratorEnvironment()
+        val context = OrchestratorContext().apply {
+            currentIssueId = "issue-1"
+            githubIssueNumber = "123"
+            prNumber = "pr-1"
+            julesSessionId = "s1"
+        }
+        env.julesSession = JulesSession("s1", "desc", "repo", "in_progress")
+
+        val nextState = OrchestratorState.AWAITING_REVIEW.execute(env, context)
+
+        assertEquals(OrchestratorState.AWAITING_REVIEW, nextState)
+        assertTrue(env.sleepCount > 0)
+    }
+
+    @Test
+    fun testAwaitingReviewNoReviewRequestedYet() {
+        val env = MockOrchestratorEnvironment()
+        val context = OrchestratorContext().apply {
+            prNumber = "pr-1"
+            lastHeadSha = "sha123"
+        }
+        env.prHeadSha = "sha123"
+        env.buildStatus = "SUCCESS"
+
+        val nextState = OrchestratorState.AWAITING_REVIEW.execute(env, context)
+
+        assertEquals(OrchestratorState.AWAITING_REVIEW, nextState)
+        assertTrue(env.commentedPrs.any { it.first == "pr-1" && it.second.contains("@jules") })
+    }
+
+    @Test
+    fun testAwaitingReviewNoReviewRequestedYetPreviousWarning() {
+        val env = MockOrchestratorEnvironment()
+        val context = OrchestratorContext().apply {
+            prNumber = "pr-1"
+            lastHeadSha = "sha123"
+            julesReviewPushCount = 1
+        }
+        env.prHeadSha = "sha123"
+        env.buildStatus = "SUCCESS"
+
+        val nextState = OrchestratorState.AWAITING_REVIEW.execute(env, context)
+
+        assertEquals(OrchestratorState.AWAITING_REVIEW, nextState)
+        assertTrue(env.commentedPrs.any { it.first == "pr-1" && it.second.contains("PREVIOUS ATTEMPT PUSHED CODE") })
+    }
+
+    @Test
+    fun testAwaitingReviewWaitingForJulesReply() {
+        val env = MockOrchestratorEnvironment()
+        val context = OrchestratorContext().apply {
+            prNumber = "pr-1"
+            lastHeadSha = "sha123"
+        }
+        env.prHeadSha = "sha123"
+        env.buildStatus = "SUCCESS"
+        env.prComments.add(GitHubComment(GitHubCommentAuthor("user"), "@jules sha123", "2023-01-01T00:00:00Z"))
+
+        val nextState = OrchestratorState.AWAITING_REVIEW.execute(env, context)
+
+        assertEquals(OrchestratorState.AWAITING_REVIEW, nextState)
+        assertTrue(env.sleepCount > 0)
+    }
+
+    @Test
+    fun testAwaitingReviewJulesReplyWithVerdictApproved() {
+        val env = MockOrchestratorEnvironment()
+        val context = OrchestratorContext().apply {
+            prNumber = "pr-1"
+            lastHeadSha = "sha123"
+        }
+        env.prHeadSha = "sha123"
+        env.buildStatus = "SUCCESS"
+        env.prComments.add(GitHubComment(GitHubCommentAuthor("user"), "@jules sha123", "2023-01-01T00:00:00Z"))
+        env.prComments.add(GitHubComment(GitHubCommentAuthor("jules"), "VERDICT: APPROVED", "2023-01-01T00:01:00Z"))
+
+        val nextState = OrchestratorState.AWAITING_REVIEW.execute(env, context)
+
+        assertEquals(OrchestratorState.AWAITING_MERGE, nextState)
+        assertEquals("sha123", context.lastReviewedSha)
+    }
+
+    @Test
+    fun testAwaitingReviewJulesReplyWithOtherVerdicts() {
+        val verdicts = listOf("VERDICT: NEEDS_CHANGES", "VERDICT: UNCERTAIN", "NO_VERDICT")
+        for (v in verdicts) {
+            val env = MockOrchestratorEnvironment()
+            val context = OrchestratorContext().apply {
+                prNumber = "pr-1"
+                lastHeadSha = "sha123"
+            }
+            env.prHeadSha = "sha123"
+            env.buildStatus = "SUCCESS"
+            env.prComments.add(GitHubComment(GitHubCommentAuthor("user"), "@jules sha123", "2023-01-01T00:00:00Z"))
+            env.prComments.add(GitHubComment(GitHubCommentAuthor("jules"), v, "2023-01-01T00:01:00Z"))
+
+            val nextState = OrchestratorState.AWAITING_REVIEW.execute(env, context)
+
+            assertEquals(OrchestratorState.AWAITING_MERGE, nextState)
+        }
+    }
+
+    @Test
+    fun testAwaitingMergePrMerged() {
+        val env = MockOrchestratorEnvironment()
+        val context = OrchestratorContext().apply {
+            prNumber = "pr-1"
+        }
+        env.prMerged = true
+
+        val nextState = OrchestratorState.AWAITING_MERGE.execute(env, context)
+
+        assertEquals(OrchestratorState.RESOLVE_TASK, nextState)
+    }
+
+    @Test
+    fun testAwaitingMergeNewCommitsDetected() {
+        val env = MockOrchestratorEnvironment()
+        val context = OrchestratorContext().apply {
+            prNumber = "pr-1"
+            lastHeadSha = "sha123"
+        }
+        env.prHeadSha = "sha456"
+
+        val nextState = OrchestratorState.AWAITING_MERGE.execute(env, context)
+
+        assertEquals(OrchestratorState.CI_RUNNING, nextState)
+    }
+
+    @Test
+    fun testAwaitingMergeBuildStatusFails() {
+        val env = MockOrchestratorEnvironment()
+        val context = OrchestratorContext().apply {
+            prNumber = "pr-1"
+            lastHeadSha = "sha123"
+        }
+        env.prHeadSha = "sha123"
+        env.buildStatus = "FAILURE"
+
+        val nextState = OrchestratorState.AWAITING_MERGE.execute(env, context)
+
+        assertEquals(OrchestratorState.CI_RUNNING, nextState)
+    }
+
+    @Test
+    fun testAwaitingMergeManualMergeLogTime() {
+        val env = MockOrchestratorEnvironment()
+        val context = OrchestratorContext().apply {
+            prNumber = "pr-1"
+            lastHeadSha = "sha123"
+            lastWaitingLogTime = System.currentTimeMillis() - 700_000
+        }
+        env.prHeadSha = "sha123"
+        env.buildStatus = "SUCCESS"
+
+        val nextState = OrchestratorState.AWAITING_MERGE.execute(env, context)
+
+        assertEquals(OrchestratorState.AWAITING_MERGE, nextState)
+        assertTrue(env.notifications.any { it.contains("Waiting for manual merge") })
+    }
+
+    @Test
+    fun testSelectTaskWithNoCandidates() {
+        val env = MockOrchestratorEnvironment()
+        val context = OrchestratorContext()
+
+        val nextState = OrchestratorState.SELECT_TASK.execute(env, context)
+
+        assertEquals(OrchestratorState.SELECT_TASK, nextState)
+    }
+
+    @Test
+    fun testSelectTaskClearsSkippedWhenNoUnblockedTasksAvailable() {
+        val env = MockOrchestratorEnvironment()
+        val context = OrchestratorContext().apply {
+            skippedIds.add("issue-1")
+        }
+        val issue = BacklogIssue(File("test.md"), "issue-1", "Title", 1, "open", emptyList())
+        env.issues.add(issue)
+
+        val nextState = OrchestratorState.SELECT_TASK.execute(env, context)
+
+        assertEquals(OrchestratorState.PENDING_APPROVAL, nextState)
+        assertTrue(context.skippedIds.isEmpty())
     }
 }

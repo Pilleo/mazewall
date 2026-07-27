@@ -284,6 +284,11 @@ subprojects {
             "**/io/mazewall/profiler/internal/ProfilerTraceListener*",
             "**/io/mazewall/profiler/internal/ProfilerDaemonManager*",
             "**/io/mazewall/profiler/triage/DiagnosticTriageRunner*",
+            "**/io/mazewall/orchestrator/OrchestratorDaemonKt*",
+            "**/io/mazewall/orchestrator/RealGitHubClient*",
+            "**/io/mazewall/orchestrator/RealJulesClient*",
+            "**/io/mazewall/orchestrator/TelegramBot*",
+            "**/io/mazewall/orchestrator/RealOrchestratorEnvironment*",
         )
 
     tasks.withType<org.gradle.testing.jacoco.tasks.JacocoReport>().configureEach {
@@ -348,6 +353,15 @@ subprojects {
                         counter = "INSTRUCTION"
                         value = "COVEREDRATIO"
                         minimum = "0.71".toBigDecimal()
+                    }
+                }
+            } else if (project.name == "orchestrator") {
+                rule {
+                    element = "BUNDLE"
+                    limit {
+                        counter = "INSTRUCTION"
+                        value = "COVEREDRATIO"
+                        minimum = "0.80".toBigDecimal()
                     }
                 }
             }

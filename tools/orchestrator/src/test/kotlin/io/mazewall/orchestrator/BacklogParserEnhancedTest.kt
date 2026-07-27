@@ -197,4 +197,143 @@ class BacklogParserEnhancedTest {
         assertEquals("Review Task: Profiler Module & Security Audit", issue.title,
             "Quoted value with a colon should be parsed completely without truncation.")
     }
+
+    @Test
+    fun testParseListWithMultiline() {
+        val file = File(tempDir, "issue-multiline-list.md")
+        file.writeText("""
+            ---
+            title: "Multiline List Test"
+            priority: 5
+            status: "open"
+            target_files:
+              - "file1.txt"
+              - "file2.txt"
+            ---
+            # Description
+        """.trimIndent())
+
+        val issue = BacklogParser.parseIssueFile(file)
+        assertNotNull(issue)
+        assertEquals(2, issue.targetFiles.size)
+        assertEquals("file1.txt", issue.targetFiles[0])
+        assertEquals("file2.txt", issue.targetFiles[1])
+    }
+
+    @Test
+    fun testParseListWithNestedAndEscapedQuotes() {
+        val file = File(tempDir, "issue-quotes-list.md")
+        file.writeText("""
+            ---
+            title: "Quotes List Test"
+            priority: 5
+            status: "open"
+            target_files: ["\"file1.txt\"", "'file2.txt'", "\'file3.txt\'"]
+            ---
+            # Description
+        """.trimIndent())
+
+        val issue = BacklogParser.parseIssueFile(file)
+        assertNotNull(issue)
+        assertEquals(3, issue.targetFiles.size)
+        assertEquals("file1.txt", issue.targetFiles[0])
+        assertEquals("file2.txt", issue.targetFiles[1])
+        assertEquals("file3.txt", issue.targetFiles[2])
+    }
+
+    @Test
+    fun testParseIssueFileWithMissingRequiredPriority() {
+        val file = File(tempDir, "issue-invalid-priority.md")
+        file.writeText("""
+            ---
+            title: "Invalid Priority"
+            priority: "not-an-integer"
+            status: "open"
+            ---
+            # Description
+        """.trimIndent())
+
+        val issue = BacklogParser.parseIssueFile(file)
+        assertNull(issue) // should catch IllegalArgumentException and print error, returning null
+    }
+
+    @Test
+    fun testParseAllIssuesNonExistentDir() {
+        val nonExistent = File(tempDir, "non-existent-sub-dir")
+        val issues = BacklogParser.parseAllIssues(nonExistent)
+        assertTrue(issues.isEmpty())
+    }
+
+    @Test
+    fun testWriteAndRemoveGithubIssue() {
+        val file = File(tempDir, "issue-123.md")
+        file.writeText("""
+            ---
+            title: "Issue 123"
+            priority: 5
+            status: "open"
+            ---
+            # Description
+        """.trimIndent())
+
+        val issue = BacklogParser.parseIssueFile(file)
+        assertNotNull(issue)
+
+        // Write
+        BacklogParser.writeGithubIssue(issue, 999)
+        val afterWrite = BacklogParser.parseIssueFile(file)
+        assertNotNull(afterWrite)
+        assertEquals(999, afterWrite.githubIssue)
+
+        // Remove
+        BacklogParser.removeGithubIssue(afterWrite)
+        val afterRemove = BacklogParser.parseIssueFile(file)
+        assertNotNull(afterRemove)
+        assertNull(afterRemove.githubIssue)
+    }
+
+    @Test
+    fun testMarkIssueAsResolved() {
+        val file = File(tempDir, "issue-123-resolve.md")
+        file.writeText("""
+            ---
+            title: "Resolve Test"
+            priority: 5
+            status: "open"
+            ---
+            # Description
+        """.trimIndent())
+
+        val issue = BacklogParser.parseIssueFile(file)
+        assertNotNull(issue)
+
+        val resolvedDir = File(tempDir, "resolved")
+        BacklogParser.markIssueAsResolved(issue, resolvedDir)
+
+        assertFalse(file.exists())
+        val movedFile = File(resolvedDir, "issue-123-resolve.md")
+        assertTrue(movedFile.exists())
+
+        val resolvedIssue = BacklogParser.parseIssueFile(movedFile)
+        assertNotNull(resolvedIssue)
+        assertEquals("resolved", resolvedIssue.status)
+    }
+
+    @Test
+    fun testExtractSectionMissingSection() {
+        val file = File(tempDir, "issue-no-section.md")
+        file.writeText("""
+            ---
+            title: "No Section"
+            priority: 5
+            status: "open"
+            ---
+            # Description
+        """.trimIndent())
+
+        val issue = BacklogParser.parseIssueFile(file)
+        assertNotNull(issue)
+        assertNull(issue.context)
+        assertNull(issue.needed)
+    }
 }
