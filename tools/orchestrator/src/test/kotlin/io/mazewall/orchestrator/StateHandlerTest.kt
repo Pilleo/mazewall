@@ -445,4 +445,26 @@ class StateHandlerTest {
         // Check if sleep was triggered during the rebase workflow
         assertTrue(env.sleepCount > 0, "Should sleep after triggering rebase")
     }
+
+    @Test
+    fun testHandleRebaseAndConflictsHandlesAuthErrorAndAlerts() {
+        val env = MockOrchestratorEnvironment()
+        val context = OrchestratorContext().apply {
+            prNumber = "pr-1"
+            currentIssueId = "issue-1"
+        }
+        env.prMergeStatus = PrMergeStatus("UNKNOWN", 0, isError = true, errorMessage = "HTTP 401: Bad credentials")
+        env.buildStatus = "SUCCESS"
+
+        val nextState = OrchestratorState.CI_RUNNING.execute(env, context)
+
+        // It should stay in CI_RUNNING
+        assertEquals(OrchestratorState.CI_RUNNING, nextState)
+        // Verify notification was sent
+        assertTrue(env.notifications.any { it.contains("GitHub CLI Authentication/Query Failure") || it.contains("HTTP 401: Bad credentials") },
+            "Notification should be sent for authentication error")
+        // Verify we retried status retrieval 3 times (the first call + 2 retries = 3 calls total)
+        // Total sleep count should be 3 (2 for retry delays, 1 for polling interval sleep inside CI_RUNNING because handleRebaseAndConflicts returned true)
+        assertEquals(3, env.sleepCount, "Should sleep for retries and polling interval")
+    }
 }
