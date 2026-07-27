@@ -77,6 +77,118 @@ class ParallelTaskSchedulerTest {
     }
 
     @Test
+    fun testEmptyTargetsScheduledSequentially() {
+        // Part 1: No active tasks. Tasks with empty target list can start.
+        val env1 = MockOrchestratorEnvironment()
+        val runner1 = OrchestratorDaemonRunner(env1, File(tempDir, ".state1.properties"))
+
+        val issueEmptyModules = BacklogIssue(
+            file = File(tempDir, "issue-empty-mod.md"),
+            id = "issue-empty-mod",
+            title = "Empty Modules Task",
+            priority = 10,
+            status = "open",
+            dependencies = emptyList(),
+            targetFiles = listOf("Main.kt"),
+            targetModules = emptyList() // empty!
+        )
+        env1.issues.add(issueEmptyModules)
+        runner1.selectAndStartTasks()
+
+        assertTrue(runner1.context.activeSlots.any { it.currentIssueId == "issue-empty-mod" }, "Should select empty-mod task when nothing is active")
+
+        // Part 2: Active task has non-empty targets, candidate task has empty targets.
+        val env2 = MockOrchestratorEnvironment()
+        val runner2 = OrchestratorDaemonRunner(env2, File(tempDir, ".state2.properties"))
+
+        val issueActive = BacklogIssue(
+            file = File(tempDir, "issue-active.md"),
+            id = "issue-active",
+            title = "Active Task",
+            priority = 10,
+            status = "open",
+            dependencies = emptyList(),
+            targetFiles = listOf("Enforcer.kt"),
+            targetModules = listOf(":enforcer")
+        )
+
+        val candidateEmptyFiles = BacklogIssue(
+            file = File(tempDir, "issue-empty-files.md"),
+            id = "issue-empty-files",
+            title = "Candidate Empty Files",
+            priority = 8,
+            status = "open",
+            dependencies = emptyList(),
+            targetFiles = emptyList(), // empty!
+            targetModules = listOf(":profiler")
+        )
+
+        val candidateDistinct = BacklogIssue(
+            file = File(tempDir, "issue-distinct.md"),
+            id = "issue-distinct",
+            title = "Candidate Distinct",
+            priority = 6,
+            status = "open",
+            dependencies = emptyList(),
+            targetFiles = listOf("Profiler.kt"),
+            targetModules = listOf(":profiler")
+        )
+
+        env2.issues.addAll(listOf(issueActive, candidateEmptyFiles, candidateDistinct))
+
+        // Set issue-active as already active
+        val slotActive = SlotContext("issue-active").apply {
+            state = OrchestratorState.CI_RUNNING
+        }
+        runner2.context.activeSlots.add(slotActive)
+
+        runner2.selectAndStartTasks()
+
+        val activeIds2 = runner2.context.activeSlots.map { it.currentIssueId }.toSet()
+        assertTrue(activeIds2.contains("issue-distinct"), "Distinct task with non-empty targets should start")
+        assertFalse(activeIds2.contains("issue-empty-files"), "Task with empty target files should NOT start in parallel with active tasks")
+
+        // Part 3: Active task has empty targets, candidate has non-empty targets.
+        val env3 = MockOrchestratorEnvironment()
+        val runner3 = OrchestratorDaemonRunner(env3, File(tempDir, ".state3.properties"))
+
+        val issueActiveEmpty = BacklogIssue(
+            file = File(tempDir, "issue-active-empty.md"),
+            id = "issue-active-empty",
+            title = "Active Empty Target Task",
+            priority = 10,
+            status = "open",
+            dependencies = emptyList(),
+            targetFiles = emptyList(), // empty!
+            targetModules = listOf(":enforcer")
+        )
+
+        val candidateNonEmpty = BacklogIssue(
+            file = File(tempDir, "issue-non-empty.md"),
+            id = "issue-non-empty",
+            title = "Candidate Non-Empty",
+            priority = 8,
+            status = "open",
+            dependencies = emptyList(),
+            targetFiles = listOf("Profiler.kt"),
+            targetModules = listOf(":profiler")
+        )
+
+        env3.issues.addAll(listOf(issueActiveEmpty, candidateNonEmpty))
+
+        // Set issueActiveEmpty as already active
+        val slotActiveEmpty = SlotContext("issue-active-empty").apply {
+            state = OrchestratorState.CI_RUNNING
+        }
+        runner3.context.activeSlots.add(slotActiveEmpty)
+
+        runner3.selectAndStartTasks()
+
+        val activeIds3 = runner3.context.activeSlots.map { it.currentIssueId }.toSet()
+        assertFalse(activeIds3.contains("issue-non-empty"), "Should NOT start any parallel task when active task has empty targets")
+    }
+
+    @Test
     fun testSerializationOfMultipleSlots() {
         val context = OrchestratorContext()
 
