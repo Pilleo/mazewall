@@ -974,4 +974,161 @@ class StateHandlerTest {
             tempDir.deleteRecursively()
         }
     }
+
+    @Test
+    fun testMergeMasterIntoBranchConflictReconstruction() {
+        val tempDir = java.nio.file.Files.createTempDirectory("test-git-merge-conflict").toFile()
+        try {
+            fun runGit(vararg command: String): String {
+                val pb = ProcessBuilder(*command)
+                pb.directory(tempDir)
+                pb.redirectErrorStream(true)
+                val process = pb.start()
+                val output = process.inputStream.bufferedReader().readText().trim()
+                process.waitFor()
+                if (process.exitValue() != 0) {
+                    throw RuntimeException("Command '${command.joinToString(" ")}' failed with exit code ${process.exitValue()}: $output")
+                }
+                return output
+            }
+
+            fun runGitInDir(dir: File, vararg command: String): String {
+                val pb = ProcessBuilder(*command)
+                pb.directory(dir)
+                pb.redirectErrorStream(true)
+                val process = pb.start()
+                val output = process.inputStream.bufferedReader().readText().trim()
+                process.waitFor()
+                return output
+            }
+
+            // Init git repo
+            runGit("git", "init")
+            runGit("git", "config", "user.name", "Test User")
+            runGit("git", "config", "user.email", "test@example.com")
+            try {
+                runGit("git", "checkout", "-b", "master")
+            } catch (_: Exception) {}
+
+            // Create initial file on master
+            val initialFile = File(tempDir, "initial.txt")
+            initialFile.writeText("initial content")
+            runGit("git", "add", "initial.txt")
+            runGit("git", "commit", "-m", "initial commit")
+
+            // Create PR branch and modify initial.txt
+            runGit("git", "checkout", "-b", "jules-branch")
+            initialFile.writeText("jules modified initial.txt")
+            runGit("git", "add", "initial.txt")
+            runGit("git", "commit", "-m", "jules commit 1")
+
+            // Switch to master and modify initial.txt (causing conflict)
+            runGit("git", "checkout", "master")
+            initialFile.writeText("master modified initial.txt differently")
+            runGit("git", "add", "initial.txt")
+            runGit("git", "commit", "-m", "master commit 1")
+
+            // Create worktree on jules-branch
+            val worktreeDir = File(tempDir, "worktree-conflict")
+            worktreeDir.mkdirs()
+            runGit("git", "worktree", "add", worktreeDir.absolutePath, "jules-branch", "--detach")
+
+            // Merge master into the branch, expecting failure/conflict
+            val pbMerge = ProcessBuilder("git", "merge", "master", "--no-edit")
+            pbMerge.directory(worktreeDir)
+            pbMerge.redirectErrorStream(true)
+            val processMerge = pbMerge.start()
+            val outputMerge = processMerge.inputStream.bufferedReader().readText().trim()
+            processMerge.waitFor()
+
+            // It should exit with non-zero code due to merge conflict
+            assertNotEquals(0, processMerge.exitValue())
+            assertTrue(outputMerge.contains("CONFLICT"), "Output should mention CONFLICT")
+
+            // Abort the merge
+            runGitInDir(worktreeDir, "git", "merge", "--abort")
+
+            // Clean up worktree
+            runGit("git", "worktree", "remove", worktreeDir.absolutePath, "--force")
+        } finally {
+            tempDir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun testMergeMasterIntoBranchAlreadyUpToDateReconstruction() {
+        val tempDir = java.nio.file.Files.createTempDirectory("test-git-merge-up-to-date").toFile()
+        try {
+            fun runGit(vararg command: String): String {
+                val pb = ProcessBuilder(*command)
+                pb.directory(tempDir)
+                pb.redirectErrorStream(true)
+                val process = pb.start()
+                val output = process.inputStream.bufferedReader().readText().trim()
+                process.waitFor()
+                if (process.exitValue() != 0) {
+                    throw RuntimeException("Command '${command.joinToString(" ")}' failed with exit code ${process.exitValue()}: $output")
+                }
+                return output
+            }
+
+            fun runGitInDir(dir: File, vararg command: String): String {
+                val pb = ProcessBuilder(*command)
+                pb.directory(dir)
+                pb.redirectErrorStream(true)
+                val process = pb.start()
+                val output = process.inputStream.bufferedReader().readText().trim()
+                process.waitFor()
+                if (process.exitValue() != 0) {
+                    throw RuntimeException("Command '${command.joinToString(" ")}' failed in ${dir.name} with exit code ${process.exitValue()}: $output")
+                }
+                return output
+            }
+
+            // Init git repo
+            runGit("git", "init")
+            runGit("git", "config", "user.name", "Test User")
+            runGit("git", "config", "user.email", "test@example.com")
+            try {
+                runGit("git", "checkout", "-b", "master")
+            } catch (_: Exception) {}
+
+            // Create initial file on master
+            val initialFile = File(tempDir, "initial.txt")
+            initialFile.writeText("initial content")
+            runGit("git", "add", "initial.txt")
+            runGit("git", "commit", "-m", "initial commit")
+
+            // Create PR branch
+            runGit("git", "checkout", "-b", "jules-branch")
+
+            // Jules commits some work
+            val julesFile = File(tempDir, "jules_work.txt")
+            julesFile.writeText("jules content")
+            runGit("git", "add", "jules_work.txt")
+            runGit("git", "commit", "-m", "jules commit 1")
+
+            // Create worktree on jules-branch
+            val worktreeDir = File(tempDir, "worktree-up-to-date")
+            worktreeDir.mkdirs()
+            runGit("git", "worktree", "add", worktreeDir.absolutePath, "jules-branch", "--detach")
+
+            // Merge master into the branch inside the worktree
+            val mergeOutput = runGitInDir(worktreeDir, "git", "merge", "master", "--no-edit")
+            assertTrue(mergeOutput.contains("Already up to date") || mergeOutput.contains("Already up-to-date"), "Should be already up to date")
+
+            // Check how many commits are ahead of master (should be 1 because of jules_work.txt)
+            val aheadOfMaster = runGitInDir(worktreeDir, "git", "rev-list", "--count", "master..HEAD").trim().toIntOrNull() ?: 0
+            assertEquals(1, aheadOfMaster)
+
+            // Let's checkout master and check how many commits on master are ahead of jules-branch (should be 0)
+            val behindMasterCount = runGitInDir(worktreeDir, "git", "rev-list", "--count", "HEAD..master").trim().toIntOrNull() ?: 0
+            assertEquals(0, behindMasterCount, "No master commits should be missing from jules-branch")
+
+            // Clean up worktree
+            runGit("git", "worktree", "remove", worktreeDir.absolutePath, "--force")
+        } finally {
+            tempDir.deleteRecursively()
+        }
+    }
 }
