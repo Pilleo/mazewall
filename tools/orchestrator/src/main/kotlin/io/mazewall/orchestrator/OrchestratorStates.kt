@@ -261,15 +261,6 @@ sealed interface OrchestratorState {
                     slot.lastCheckedSha = null
                     slot.julesRetries = 0
                 }
-
-                val currentSha = env.gitHubClient.getPrHeadSha(prNumber)
-                if (currentSha != slot.lastHeadSha) {
-                    env.gitHubClient.clearPrCache(prNumber)
-                }
-
-                if (handleRebaseAndConflicts(env, slot, prNumber)) {
-                    env.sleep(env.config.pollingIntervalSeconds, TimeUnit.SECONDS)
-                }
                 return CI_RUNNING
             }
 
@@ -359,11 +350,8 @@ sealed interface OrchestratorState {
                 env.gitHubClient.clearPrCache(prNumber)
             }
 
-            if (handleRebaseAndConflicts(env, slot, prNumber)) {
-                env.sleep(env.config.pollingIntervalSeconds, TimeUnit.SECONDS)
-                return this
-            }
-
+            // ⚠️ CRITICAL: Check if a Jules session is actively in progress BEFORE attempting to merge or rebase.
+            // Modifying the PR branch while Jules is actively coding causes race conditions and code loss.
             if (githubIssueNumber != null) {
                 val session = env.julesClient.getActiveSession(issueId)
                 val isFailed = if (session != null) {
@@ -413,6 +401,11 @@ sealed interface OrchestratorState {
                     env.sleep(env.config.pollingIntervalSeconds, TimeUnit.SECONDS)
                     return this
                 }
+            }
+
+            if (handleRebaseAndConflicts(env, slot, prNumber)) {
+                env.sleep(env.config.pollingIntervalSeconds, TimeUnit.SECONDS)
+                return this
             }
 
             if (env.gitHubClient.isPrMerged(prNumber)) {
@@ -500,13 +493,8 @@ sealed interface OrchestratorState {
                 env.gitHubClient.clearPrCache(prNumber)
             }
 
-            if (handleRebaseAndConflicts(env, slot, prNumber)) {
-                env.sleep(env.config.pollingIntervalSeconds, TimeUnit.SECONDS)
-                return CI_RUNNING
-            }
-
-            val buildStatus = env.gitHubClient.checkBuildStatus(prNumber)
-
+            // ⚠️ CRITICAL: Check if a Jules session is actively in progress BEFORE attempting to merge or rebase.
+            // Modifying the PR branch while Jules is actively coding/reviewing causes race conditions and code loss.
             val issueId = slot.currentIssueId
             val sessionId = slot.julesSessionId
             if (issueId != null) {
@@ -545,6 +533,13 @@ sealed interface OrchestratorState {
                     return this
                 }
             }
+
+            if (handleRebaseAndConflicts(env, slot, prNumber)) {
+                env.sleep(env.config.pollingIntervalSeconds, TimeUnit.SECONDS)
+                return CI_RUNNING
+            }
+
+            val buildStatus = env.gitHubClient.checkBuildStatus(prNumber)
 
             // If the PR head SHA changed it means Jules pushed a new commit instead of just reviewing.
             if (currentSha != slot.lastHeadSha) {

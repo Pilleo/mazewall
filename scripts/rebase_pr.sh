@@ -76,8 +76,8 @@ echo "🔨 Verifying compilation on merged branch..."
 echo "✅ Compilation clean."
 echo ""
 
-echo "🚀 Force-pushing merged branch '${BRANCH_NAME}' to origin..."
-git push --force-with-lease origin "HEAD:${BRANCH_NAME}"
+echo "🚀 Pushing merged branch '${BRANCH_NAME}' to origin..."
+git push origin "HEAD:${BRANCH_NAME}"
 
 echo ""
 echo "✅ Successfully merged master into PR #${PR_NUMBER} ('${BRANCH_NAME}')!"

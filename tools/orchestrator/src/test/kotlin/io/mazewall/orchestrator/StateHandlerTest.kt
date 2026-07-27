@@ -31,6 +31,7 @@ class MockOrchestratorEnvironment : OrchestratorEnvironment {
     var prMergeStatus = PrMergeStatus("MERGEABLE", 0)
     var clearPrCacheCount = 0
     var mergeMasterIntoBranchResult = RebaseResult(true, 0, emptyList())
+    var mergeMasterIntoBranchCallCount = 0
 
     override fun println(message: Any?) { printlns.add(message.toString()) }
     override fun print(message: Any?) {}
@@ -64,7 +65,10 @@ class MockOrchestratorEnvironment : OrchestratorEnvironment {
         override fun getFailedBuildLogs(prNumber: String): String = "mock failed logs"
         override fun getPrUrl(prNumber: String): String = "mock url"
         override fun isCommitEmpty(prNumber: String, shaOld: String, shaNew: String): Boolean = isCommitEmptyResult
-        override fun mergeMasterIntoBranch(prNumber: String): RebaseResult = mergeMasterIntoBranchResult
+        override fun mergeMasterIntoBranch(prNumber: String): RebaseResult {
+            mergeMasterIntoBranchCallCount++
+            return mergeMasterIntoBranchResult
+        }
         override fun clearPrCache(prNumber: String) { clearPrCacheCount++ }
     }
 
@@ -425,12 +429,17 @@ class StateHandlerTest {
         env.linkedPrNumber = "pr-1"
         env.prMergeStatus = PrMergeStatus("CONFLICTING", 0)
 
-        val nextState = OrchestratorState.AWAITING_PR.execute(env, context)
+        var nextState = OrchestratorState.AWAITING_PR.execute(env, context)
 
         // It should transition to CI_RUNNING
         assertEquals(OrchestratorState.CI_RUNNING, nextState)
-        // Check if sleep was triggered during the rebase workflow
-        assertTrue(env.sleepCount > 0, "Should sleep after triggering rebase")
+
+        // Now execute CI_RUNNING state to trigger the merge handling
+        nextState = nextState.execute(env, context)
+        assertEquals(OrchestratorState.CI_RUNNING, nextState)
+
+        // Check if sleep was triggered during the merge workflow
+        assertTrue(env.sleepCount > 0, "Should sleep after triggering merge")
     }
 
     @Test
@@ -1155,5 +1164,49 @@ class StateHandlerTest {
         } finally {
             tempDir.deleteRecursively()
         }
+    }
+
+    @Test
+    fun testCiRunningDoesNotMergeWhenJulesSessionInProgress() {
+        val env = MockOrchestratorEnvironment()
+        val context = OrchestratorContext().apply {
+            prNumber = "pr-1"
+            currentIssueId = "issue-1"
+            githubIssueNumber = "123"
+        }
+        env.prMergeStatus = PrMergeStatus("MERGEABLE", 5) // Behind by 5 commits
+        env.buildStatus = "PENDING"
+        env.julesSession = JulesSession("s1", "desc", "repo", "in_progress") // Session is active!
+
+        val nextState = OrchestratorState.CI_RUNNING.execute(env, context)
+
+        // It should stay in CI_RUNNING
+        assertEquals(OrchestratorState.CI_RUNNING, nextState)
+        // Verify that it did NOT call mergeMasterIntoBranch because the session was active!
+        assertEquals(0, env.mergeMasterIntoBranchCallCount)
+        // Verify it sleep-waited for the session
+        assertTrue(env.sleepCount > 0, "Should sleep-wait for the active session")
+    }
+
+    @Test
+    fun testAwaitingReviewDoesNotMergeWhenJulesSessionInProgress() {
+        val env = MockOrchestratorEnvironment()
+        val context = OrchestratorContext().apply {
+            prNumber = "pr-1"
+            currentIssueId = "issue-1"
+            githubIssueNumber = "123"
+        }
+        env.prMergeStatus = PrMergeStatus("MERGEABLE", 5) // Behind by 5 commits
+        env.buildStatus = "SUCCESS"
+        env.julesSession = JulesSession("s1", "desc", "repo", "in_progress") // Session is active!
+
+        val nextState = OrchestratorState.AWAITING_REVIEW.execute(env, context)
+
+        // It should stay in AWAITING_REVIEW
+        assertEquals(OrchestratorState.AWAITING_REVIEW, nextState)
+        // Verify that it did NOT call mergeMasterIntoBranch because the session was active!
+        assertEquals(0, env.mergeMasterIntoBranchCallCount)
+        // Verify it sleep-waited for the session
+        assertTrue(env.sleepCount > 0, "Should sleep-wait for the active session")
     }
 }

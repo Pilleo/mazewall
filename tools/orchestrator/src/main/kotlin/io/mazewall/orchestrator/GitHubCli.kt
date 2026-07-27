@@ -480,7 +480,7 @@ class RealGitHubClient(private val config: OrchestratorConfig) : GitHubClient {
                 return RebaseResult(success = false, conflictCount = 0)
             }
 
-            executeInDir(worktreeDir, "git", "push", "--force-with-lease", "origin", "HEAD:$branchName")
+            executeInDir(worktreeDir, "git", "push", "origin", "HEAD:$branchName")
             return RebaseResult(success = true, conflictCount = 0)
 
         } catch (e: Exception) {
