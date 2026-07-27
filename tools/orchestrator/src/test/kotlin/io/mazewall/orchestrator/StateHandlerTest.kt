@@ -29,6 +29,8 @@ class MockOrchestratorEnvironment : OrchestratorEnvironment {
     var bellRungCount = 0
     var isCommitEmptyResult = false
     var prMergeStatus = PrMergeStatus("MERGEABLE", 0)
+    var clearPrCacheCount = 0
+    var rebaseBranchResult = RebaseResult(true, 0, emptyList())
 
     override fun println(message: Any?) { printlns.add(message.toString()) }
     override fun print(message: Any?) {}
@@ -62,7 +64,8 @@ class MockOrchestratorEnvironment : OrchestratorEnvironment {
         override fun getFailedBuildLogs(prNumber: String): String = "mock failed logs"
         override fun getPrUrl(prNumber: String): String = "mock url"
         override fun isCommitEmpty(prNumber: String, shaOld: String, shaNew: String): Boolean = isCommitEmptyResult
-        override fun rebaseBranch(prNumber: String): Boolean = true
+        override fun rebaseBranch(prNumber: String): RebaseResult = rebaseBranchResult
+        override fun clearPrCache(prNumber: String) { clearPrCacheCount++ }
     }
 
     override val julesClient = object : JulesClient {
@@ -868,5 +871,111 @@ class StateHandlerTest {
 
         assertEquals(OrchestratorState.PENDING_APPROVAL, nextState)
         assertTrue(context.skippedIds.isEmpty())
+    }
+
+    @Test
+    fun testCacheInvalidationOnShaChange() {
+        val env = MockOrchestratorEnvironment()
+        val context = OrchestratorContext().apply {
+            prNumber = "pr-1"
+            lastHeadSha = "sha123"
+        }
+        env.prHeadSha = "sha456" // new commits!
+
+        OrchestratorState.CI_RUNNING.execute(env, context)
+
+        // It should have cleared the PR cache once
+        assertEquals(1, env.clearPrCacheCount)
+    }
+
+    @Test
+    fun testMergeBaseDiffApplyReconstruction() {
+        val tempDir = java.nio.file.Files.createTempDirectory("test-git-rebase").toFile()
+        try {
+            fun runGit(vararg command: String): String {
+                val pb = ProcessBuilder(*command)
+                pb.directory(tempDir)
+                pb.redirectErrorStream(true)
+                val process = pb.start()
+                val output = process.inputStream.bufferedReader().readText().trim()
+                process.waitFor()
+                if (process.exitValue() != 0) {
+                    throw RuntimeException("Command '${command.joinToString(" ")}' failed with exit code ${process.exitValue()}: $output")
+                }
+                return output
+            }
+
+            // 1. Init git repo
+            runGit("git", "init")
+            runGit("git", "config", "user.name", "Test User")
+            runGit("git", "config", "user.email", "test@example.com")
+            // Set initial branch to master (older git versions use master, newer might use main)
+            try {
+                runGit("git", "checkout", "-b", "master")
+            } catch (_: Exception) {}
+
+            // 2. Create initial file on master and commit
+            val initialFile = File(tempDir, "initial.txt")
+            initialFile.writeText("initial content")
+            runGit("git", "add", "initial.txt")
+            runGit("git", "commit", "-m", "initial commit")
+
+            // 3. Create branch and commit a new file (simulating Jules's PR branch)
+            runGit("git", "checkout", "-b", "jules-branch")
+            val julesFile = File(tempDir, "jules_work.txt")
+            julesFile.writeText("jules content")
+            runGit("git", "add", "jules_work.txt")
+            runGit("git", "commit", "-m", "jules commit")
+
+            // 4. Switch back to master and add a master-only file (added after Jules diverged)
+            runGit("git", "checkout", "master")
+            val masterFile = File(tempDir, "master_only.txt")
+            masterFile.writeText("master content")
+            runGit("git", "add", "master_only.txt")
+            runGit("git", "commit", "-m", "master commit")
+
+            // At this point, the repository looks like this:
+            // master has: initial.txt, master_only.txt
+            // jules-branch has: initial.txt, jules_work.txt (stale: lacks master_only.txt)
+
+            // Let's find the merge-base between master and jules-branch
+            val mergeBase = runGit("git", "merge-base", "master", "jules-branch").trim()
+            assertFalse(mergeBase.isEmpty())
+
+            // Compute Jules's NET diff (merge-base -> jules-branch)
+            val diffText = runGit("git", "diff", mergeBase, "jules-branch")
+
+            // Create a worktree/clean directory of master
+            val worktreeDir = File(tempDir, "worktree-clean")
+            worktreeDir.mkdirs()
+            runGit("git", "worktree", "add", worktreeDir.absolutePath, "master", "--detach")
+
+            // Inside worktreeDir, write the patch and apply it
+            val patchFile = File(worktreeDir, "patch.diff")
+            patchFile.writeText(diffText)
+
+            val pbApply = ProcessBuilder("git", "apply", "--3way", "patch.diff")
+            pbApply.directory(worktreeDir)
+            val pApply = pbApply.start()
+            pApply.waitFor()
+            assertEquals(0, pApply.exitValue(), "git apply --3way should succeed")
+
+            patchFile.delete()
+
+            // Verify that master_only.txt exists and was NOT deleted in the worktree
+            val masterOnlyInWorktree = File(worktreeDir, "master_only.txt")
+            assertTrue(masterOnlyInWorktree.exists(), "master_only.txt should NOT be deleted!")
+            assertEquals("master content", masterOnlyInWorktree.readText().trim())
+
+            // Verify that jules_work.txt exists in the worktree
+            val julesWorkInWorktree = File(worktreeDir, "jules_work.txt")
+            assertTrue(julesWorkInWorktree.exists(), "jules_work.txt should exist!")
+            assertEquals("jules content", julesWorkInWorktree.readText().trim())
+
+            // Clean up worktree
+            runGit("git", "worktree", "remove", worktreeDir.absolutePath, "--force")
+        } finally {
+            tempDir.deleteRecursively()
+        }
     }
 }
