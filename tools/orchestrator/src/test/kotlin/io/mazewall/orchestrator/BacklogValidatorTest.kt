@@ -67,7 +67,7 @@ class BacklogValidatorTest {
     }
 
     @Test
-    fun testEmptyTargetModulesPassesValidationButExposesRisk() {
+    fun testEmptyTargetModulesFailsValidation() {
         val file = File(tempDir, "issue-20260726-111111-empty-modules.md")
         file.writeText("""
             ---
@@ -87,8 +87,32 @@ class BacklogValidatorTest {
         """.trimIndent())
 
         val errors = BacklogValidator.validateBacklog(tempDir)
-        // Currently, empty target_modules list passes validation because there is no non-empty check.
-        // This test documents the gap that needs to be addressed in the documented issue.
-        assertTrue(errors.isEmpty(), "Currently empty target_modules list passes validation")
+        assertFalse(errors.isEmpty(), "Empty target_modules should fail validation")
+        assertTrue(errors.any { it.contains("target_modules' must contain at least one valid Gradle module") }, "Expected empty target_modules error")
+    }
+
+    @Test
+    fun testInvalidTargetModulesFailsValidation() {
+        val file = File(tempDir, "issue-20260726-222222-invalid-modules.md")
+        file.writeText("""
+            ---
+            title: "Invalid Target Modules"
+            severity: "HIGH"
+            status: "open"
+            priority: 9
+            dependencies: []
+            component: "enforcer"
+            target_modules: [":invalid-module"]
+            target_files: []
+            ---
+
+            # 🔴 [Severity: HIGH]: Invalid Target Modules
+            **Context:** valid context
+            **Needed:** valid needed
+        """.trimIndent())
+
+        val errors = BacklogValidator.validateBacklog(tempDir)
+        assertFalse(errors.isEmpty(), "Invalid target_modules should fail validation")
+        assertTrue(errors.any { it.contains("Invalid Gradle module ':invalid-module' in target_modules") }, "Expected invalid target_modules error")
     }
 }
