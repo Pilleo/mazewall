@@ -132,10 +132,18 @@ class OrchestratorDaemonRunner(
                 issue.dependencies.none { dep -> openIds.contains(dep) }
             }
 
-            // Filter for conflict-free: target_files(B) ∩ target_files(active) = ∅ AND target_modules(B) ∩ target_modules(active) = ∅
+            // Filter for conflict-free: handle empty target_modules or target_files conservatively (treating empty targets as a conflict with all active tasks).
             val conflictFreeIssues = unblockedIssues.filter { issue ->
-                issue.targetFiles.none { it in activeFiles } &&
-                issue.targetModules.none { it in activeModules }
+                if (activeIssues.isEmpty()) {
+                    true
+                } else {
+                    issue.targetFiles.isNotEmpty() && issue.targetModules.isNotEmpty() &&
+                    activeIssues.none { active ->
+                        active.targetFiles.isEmpty() || active.targetModules.isEmpty() ||
+                        issue.targetFiles.any { it in active.targetFiles } ||
+                        issue.targetModules.any { it in active.targetModules }
+                    }
+                }
             }
 
             // Sort by priority descending, then ID descending
