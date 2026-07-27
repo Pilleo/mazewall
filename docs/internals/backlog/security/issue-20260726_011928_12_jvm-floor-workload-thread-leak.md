@@ -12,6 +12,7 @@ target_modules:
 - :enforcer
 target_files:
 - enforcer/src/main/kotlin/io/mazewall/enforcer/JvmFloorWorkload.kt
+github_issue: 365
 ---
 
 # Issue: `JvmFloorWorkload` Background OS Thread Leak

@@ -10,6 +10,7 @@ target_files:
 - enforcer/src/main/kotlin/io/mazewall/ffi/internal/RealNativeEngine.kt
 effort: medium
 dependencies: []
+github_issue: 360
 ---
 
 # 🔵 [Severity: ENHANCEMENT]: Hardware-Aware CI Test Suite and Graceful Fallback Assertions for Intel CET

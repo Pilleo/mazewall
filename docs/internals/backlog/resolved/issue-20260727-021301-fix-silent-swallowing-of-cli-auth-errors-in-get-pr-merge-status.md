@@ -1,7 +1,7 @@
 ---
 title: "Fix Silent Swallowing of CLI Authentication Errors in getPrMergeStatus"
 severity: "HIGH"
-status: "open"
+status: "resolved"
 priority: 9
 dependencies: []
 component: "orchestrator"

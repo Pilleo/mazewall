@@ -132,20 +132,70 @@ class RealGitHubClient(private val config: OrchestratorConfig) : GitHubClient {
     }
 
     override fun findLinkedPR(issueNumber: String, issueId: String, julesSessionId: String?): String? {
-        var prListJson = execute("gh", "pr", "list", "--search", "fixes #$issueNumber", "--json", "number,title,headRefName,body")
-        var prs = parsePRs(prListJson)
-        if (prs.isNotEmpty()) return prs.first().number.toString()
+        val cleanSessionId = julesSessionId?.substringAfterLast("/")?.trim()?.takeIf { it.isNotBlank() }
 
-        prListJson = execute("gh", "pr", "list", "--json", "number,title,headRefName,body")
-        prs = parsePRs(prListJson)
-        
-        val matched = prs.firstOrNull { pr ->
-            (julesSessionId != null && pr.headRefName.contains(julesSessionId)) ||
-            (pr.body?.contains("#$issueNumber") == true) ||
-            pr.headRefName.contains(issueId, ignoreCase = true) ||
-            (pr.body?.contains(issueId, ignoreCase = true) == true)
+        val searchQueries = mutableListOf<String>()
+        if (issueNumber.isNotBlank()) {
+            searchQueries.add("fixes #$issueNumber")
+            searchQueries.add("#$issueNumber")
         }
-        return matched?.number?.toString()
+        if (cleanSessionId != null) {
+            searchQueries.add(cleanSessionId)
+        }
+        if (issueId.isNotBlank()) {
+            searchQueries.add(issueId)
+        }
+
+        for (query in searchQueries) {
+            try {
+                val prListJson = execute("gh", "pr", "list", "--search", query, "--json", "number,title,headRefName,body")
+                val prs = parsePRs(prListJson)
+                val matched = prs.firstOrNull { isPrMatching(it, issueNumber, issueId, cleanSessionId) }
+                if (matched != null) return matched.number.toString()
+            } catch (_: Exception) {
+                // Ignore failure of specific search query and try next fallback
+            }
+        }
+
+        return try {
+            val prListJson = execute("gh", "pr", "list", "--state", "open", "--json", "number,title,headRefName,body")
+            val prs = parsePRs(prListJson)
+            val matched = prs.firstOrNull { isPrMatching(it, issueNumber, issueId, cleanSessionId) }
+            matched?.number?.toString()
+        } catch (e: Exception) {
+            System.err.println("Error finding linked PR for issue #$issueNumber ($issueId): ${e.message}")
+            null
+        }
+    }
+
+    internal fun isPrMatching(pr: GitHubPR, issueNumber: String, issueId: String, cleanSessionId: String?): Boolean {
+        if (cleanSessionId != null) {
+            if (pr.headRefName.contains(cleanSessionId, ignoreCase = true) ||
+                (pr.body?.contains(cleanSessionId, ignoreCase = true) == true)) {
+                return true
+            }
+        }
+
+        if (issueNumber.isNotBlank()) {
+            val body = pr.body ?: ""
+            val title = pr.title
+            if (body.contains("#$issueNumber") ||
+                body.contains("issue $issueNumber", ignoreCase = true) ||
+                title.contains("#$issueNumber") ||
+                title.contains("issue $issueNumber", ignoreCase = true)) {
+                return true
+            }
+        }
+
+        if (issueId.isNotBlank()) {
+            if (pr.headRefName.contains(issueId, ignoreCase = true) ||
+                (pr.body?.contains(issueId, ignoreCase = true) == true) ||
+                pr.title.contains(issueId, ignoreCase = true)) {
+                return true
+            }
+        }
+
+        return false
     }
 
     override fun checkBuildStatus(prNumber: String): String = withCache("checkBuildStatus-$prNumber") {
@@ -212,6 +262,12 @@ class RealGitHubClient(private val config: OrchestratorConfig) : GitHubClient {
     override fun isIssueClosed(issueNumber: String): Boolean {
         val state = execute("gh", "issue", "view", issueNumber, "--json", "state")
         return state.contains("\"state\":\"CLOSED\"", ignoreCase = true)
+    }
+
+    override fun isPrClosed(prNumber: String): Boolean {
+        val state = execute("gh", "pr", "view", prNumber, "--json", "state")
+        return state.contains("\"state\":\"CLOSED\"", ignoreCase = true) ||
+               state.contains("\"state\":\"MERGED\"", ignoreCase = true)
     }
 
     override fun isPrMerged(prNumber: String): Boolean {

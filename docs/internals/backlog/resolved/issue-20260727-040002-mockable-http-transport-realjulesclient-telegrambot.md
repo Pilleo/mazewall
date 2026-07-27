@@ -1,12 +1,13 @@
 ---
 title: "Mockable HTTP transport abstraction for RealJulesClient and TelegramBot"
 severity: "HIGH"
-status: "open"
+status: "resolved"
 priority: 5
 dependencies: []
 component: "orchestrator"
 target_modules: [":tools:orchestrator"]
 target_files: ["tools/orchestrator/src/main/kotlin/io/mazewall/orchestrator/JulesCli.kt", "tools/orchestrator/src/main/kotlin/io/mazewall/orchestrator/TelegramBot.kt"]
+github_issue: 364
 ---
 
 # 🔴 [Severity: HIGH]: Mockable HTTP transport abstraction for RealJulesClient and TelegramBot
