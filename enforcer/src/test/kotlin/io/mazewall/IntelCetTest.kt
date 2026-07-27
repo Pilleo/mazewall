@@ -67,7 +67,27 @@ class IntelCetTest {
         val policy = Policy.builder().lockIntelCet().build()
 
         assertThrows<UnsupportedOperationException> {
-            ContainedExecutors.installOnCurrentThread(policy)
+            policy.install()
+        }
+    }
+
+    @Test
+    fun `armIntelCet fails fast on non-CET Linux when lockIntelCet is true under FallbackBehavior FAIL`() {
+        val linuxAmd64Provider = object : PlatformProvider by RealPlatformProvider {
+            override fun getOsName(): String = "Linux"
+            override fun getOsArch(): String = "amd64"
+            override fun hasKernelSeccompSupport(): Boolean = true
+            override fun checkSeccompSanity(): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
+                LinuxNative.SyscallResult.Error(22, -1L) // EINVAL
+            override fun getSeccompMode(): SeccompMode = SeccompMode.Filter
+        }
+        Platform.setProvider(linuxAmd64Provider)
+        Platform.isCpuCetSupportedOverride = false
+
+        val policy = Policy.builder().lockIntelCet().build()
+
+        assertThrows<UnsupportedPlatformException> {
+            policy.install()
         }
     }
 
@@ -83,7 +103,32 @@ class IntelCetTest {
         try {
             val policy = Policy.builder().lockIntelCet().build()
             assertDoesNotThrow {
-                ContainedExecutors.installOnCurrentThread(policy)
+                policy.install().close()
+            }
+        } finally {
+            System.clearProperty("io.mazewall.fallback")
+        }
+    }
+
+    @Test
+    fun `armIntelCet warns and bypasses on non-CET Linux under FallbackBehavior WARN_AND_BYPASS`() {
+        val linuxAmd64Provider = object : PlatformProvider by RealPlatformProvider {
+            override fun getOsName(): String = "Linux"
+            override fun getOsArch(): String = "amd64"
+            override fun hasKernelSeccompSupport(): Boolean = true
+            override fun checkSeccompSanity(): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
+                LinuxNative.SyscallResult.Error(22, -1L) // EINVAL
+            override fun getSeccompMode(): SeccompMode = SeccompMode.Filter
+        }
+        Platform.setProvider(linuxAmd64Provider)
+        Platform.isCpuCetSupportedOverride = false
+
+        System.setProperty("io.mazewall.fallback", "WARN_AND_BYPASS")
+
+        try {
+            val policy = Policy.builder().lockIntelCet().build()
+            assertDoesNotThrow {
+                policy.install().close()
             }
         } finally {
             System.clearProperty("io.mazewall.fallback")

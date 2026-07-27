@@ -165,30 +165,47 @@ public object Platform {
         return FallbackBehavior.FAIL
     }
 
+    private fun isKernelCetSupported(): Boolean {
+        if (!isLinux || !isArchitectureSupported()) return false
+        if (io.mazewall.core.Arch.current() != io.mazewall.core.Arch.AMD64) return false
+        return try {
+            NativeArena.ofConfined().use { arena ->
+                val statusSeg = arena.allocate(8)
+                val res = LinuxNative.process.archPrctl(NativeConstants.ARCH_SHSTK_STATUS, statusSeg)
+                res is SyscallResult.Success
+            }
+        } catch (e: UnsupportedOperationException) {
+            false
+        } catch (e: IllegalStateException) {
+            false
+        }
+    }
+
     @Volatile
     internal var isCpuCetSupportedOverride: Boolean? = null
 
     private var isCpuCetSupportedCached: Boolean? = null
 
     /**
-     * Checks if the CPU supports Intel CET Shadow Stack by reading /proc/cpuinfo.
+     * Checks if the CPU supports Intel CET Shadow Stack by reading /proc/cpuinfo
+     * and querying sys_arch_prctl(ARCH_SHSTK_STATUS).
      */
     public fun isCpuCetSupported(): Boolean {
         val override = isCpuCetSupportedOverride
         if (override != null) return override
 
-        // Safely bypass real C-level CET downcalls on GitHub Actions CI to prevent container SIGSYS/SIGABRT crashes
-        if (System.getenv("GITHUB_ACTIONS") == "true") return false
-
         val cached = isCpuCetSupportedCached
         if (cached != null) return cached
 
-        val result = try {
+        val cpuSupported = try {
             val file = java.io.File("/proc/cpuinfo")
             if (file.exists()) {
                 file.useLines { lines ->
                     lines.any { line ->
-                        line.startsWith("flags") && line.contains("shstk", ignoreCase = true)
+                        line.startsWith("flags") && (
+                            line.contains("shstk", ignoreCase = true) ||
+                            line.contains("ibt", ignoreCase = true)
+                        )
                     }
                 }
             } else {
@@ -199,6 +216,8 @@ public object Platform {
         } catch (e: SecurityException) {
             false
         }
+
+        val result = cpuSupported && isKernelCetSupported()
         isCpuCetSupportedCached = result
         return result
     }
