@@ -45,5 +45,10 @@ interface GitHubClient {
     fun getPrUrl(prNumber: String): String
     fun isCommitEmpty(prNumber: String, shaOld: String, shaNew: String): Boolean
     fun rebaseBranch(prNumber: String): RebaseResult
+
+    /**
+     * Clears all cached properties and statuses associated with a PR (such as merge status, head SHA, build status).
+     * This is crucial to ensure that subsequent queries fetch fresh, non-stale data from the GitHub API.
+     */
     fun clearPrCache(prNumber: String)
 }

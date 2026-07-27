@@ -378,6 +378,40 @@ class RealGitHubClient(private val config: OrchestratorConfig) : GitHubClient {
         }
     }
 
+    /**
+     * Integrates PR branch changes with origin/master using the Surgical Intended-Files Apply algorithm.
+     *
+     * 🧠 DESIGN DECISIONS (WHY, WHAT, WHEN, WHERE):
+     *
+     * 🟢 WHY:
+     * Standard `git rebase` replays every individual commit. This is highly vulnerable to merge conflicts.
+     * Standard full-tree patch apply (`git apply --3way`) computes a full-tree diff and applies it onto master.
+     * However, Jules operates in a stale/frozen workspace. If master advances (adding new files or modifying other files)
+     * after Jules diverged, those master-added files won't be in Jules's stale workspace. Applying a full-tree diff
+     * would silently DELETE those new master files from the final PR branch perspective, causing serious regression bugs.
+     * Furthermore, standard git merge-base checkout sequences can pollute the directory or error out on moved files.
+     * To be 100% deterministic, we must completely ignore stale workspace deletions and only apply files Jules *intended* to touch.
+     *
+     * 🔵 WHAT:
+     * We employ Surgical Intended-Files Extraction:
+     * 1. Find the parent of the first commit on Jules's branch (`INITIAL_BASE`) using `git rev-list --reverse` to track
+     *    the exact point where Jules diverged from master before any rebase/merge commits. Fallback to `git merge-base` if needed.
+     * 2. Extract `INTENDED_FILES` using `git diff --name-only --diff-filter=AM`. The `--diff-filter=AM` ensures that we ONLY
+     *    capture files that Jules Added (A) or Modified (M) for the task. We explicitly ignore Deleted (D) files, meaning stale
+     *    workspace deletions are completely bypassed.
+     * 3. Set up a fresh worktree pointing to origin/master.
+     * 4. For each intended file, copy its exact version from origin/$branchName (`git checkout origin/$BRANCH -- <file>`) and
+     *    stage it (`git add <file>`). This overwrites any master version of only these files, while master-only files added
+     *    after divergence remain completely untouched and preserved.
+     *
+     * 🟡 WHEN:
+     * This is triggered whenever the orchestrator daemon detects a PR is out of date (behind master) or has merge conflicts
+     * (CONFLICTING status) during active polling loops.
+     *
+     * 🔴 WHERE:
+     * Executed within a detached temporary worktree (`../temp-rebase-<prNumber>`) to ensure absolute isolation.
+     * This prevents working-tree pollution or conflicts with uncommitted/untracked local edits in the main agent workspace.
+     */
     override fun rebaseBranch(prNumber: String): RebaseResult {
         clearPrCache(prNumber)
 
@@ -391,9 +425,33 @@ class RealGitHubClient(private val config: OrchestratorConfig) : GitHubClient {
             execute("git", "fetch", "origin", "master")
             execute("git", "fetch", "origin", branchName)
 
-            val mergeBase = execute("git", "merge-base", "origin/master", "origin/$branchName").trim()
+            // 1. Locate Jules's original divergence point before any rebase/force-pushed commits.
+            val firstCommit = try {
+                execute("git", "rev-list", "--reverse", "origin/master..origin/$branchName").lines().firstOrNull { it.isNotBlank() }?.trim() ?: ""
+            } catch (_: Exception) {
+                ""
+            }
 
-            // Clean up any stale worktree of the same name first
+            val initialBase = if (firstCommit.isNotEmpty()) {
+                try {
+                    execute("git", "rev-parse", "$firstCommit~1").trim()
+                } catch (_: Exception) {
+                    execute("git", "merge-base", "origin/master", "origin/$branchName").trim()
+                }
+            } else {
+                execute("git", "merge-base", "origin/master", "origin/$branchName").trim()
+            }
+
+            // 2. Extract ONLY Jules's intended changes (Added or Modified only) from Jules's branch.
+            val intendedFilesOutput = execute("git", "diff", "--name-only", "--diff-filter=AM", initialBase, "origin/$branchName")
+            val intendedFiles = intendedFilesOutput.lines().map { it.trim() }.filter { it.isNotEmpty() }
+
+            if (intendedFiles.isEmpty()) {
+                System.err.println("No intended added/modified files found on PR branch relative to initial base.")
+                return RebaseResult(success = true, conflictCount = 0)
+            }
+
+            // Clean up any stale worktree of the same name first to prevent locking/addition errors.
             try {
                 execute("git", "worktree", "remove", worktreeDir.absolutePath, "--force")
             } catch (_: Exception) {}
@@ -404,45 +462,13 @@ class RealGitHubClient(private val config: OrchestratorConfig) : GitHubClient {
                 execute("git", "worktree", "prune")
             } catch (_: Exception) {}
 
+            // 3. Create clean, detached worktree from the fresh origin/master.
             execute("git", "worktree", "add", worktreeDir.absolutePath, "origin/master", "--detach")
 
-            val diffText = execute("git", "diff", mergeBase, "origin/$branchName")
-            val patchFile = File(worktreeDir, "patch.diff")
-            patchFile.writeText(diffText)
-
-            var applySuccess = true
-            try {
-                executeInDir(worktreeDir, "git", "apply", "--3way", "patch.diff")
-            } catch (e: Exception) {
-                applySuccess = false
-            } finally {
-                patchFile.delete()
-            }
-
-            if (!applySuccess) {
-                val conflictedOutput = executeInDir(worktreeDir, "git", "diff", "--name-only", "--diff-filter=U")
-                val conflictedFiles = conflictedOutput.lines().map { it.trim() }.filter { it.isNotEmpty() }
-
-                for (file in conflictedFiles) {
-                    val existsInJules = try {
-                        execute("git", "show", "origin/$branchName:$file")
-                        true
-                    } catch (_: Exception) {
-                        false
-                    }
-                    if (!existsInJules) {
-                        System.err.println("Resolving delete-modify conflict for $file by keeping master's version")
-                        executeInDir(worktreeDir, "git", "checkout", "origin/master", "--", file)
-                        executeInDir(worktreeDir, "git", "add", file)
-                    }
-                }
-
-                val remainingConflictedOutput = executeInDir(worktreeDir, "git", "diff", "--name-only", "--diff-filter=U")
-                val remainingConflicts = remainingConflictedOutput.lines().map { it.trim() }.filter { it.isNotEmpty() }
-                if (remainingConflicts.isNotEmpty()) {
-                    System.err.println("Rebase failed on PR #$prNumber due to unresolved conflicts: $remainingConflicts")
-                    return RebaseResult(success = false, conflictCount = remainingConflicts.size, conflictedFiles = remainingConflicts)
-                }
+            // 4. Checkout and stage ONLY intended task files from the PR branch into the fresh worktree.
+            for (file in intendedFiles) {
+                executeInDir(worktreeDir, "git", "checkout", "origin/$branchName", "--", file)
+                executeInDir(worktreeDir, "git", "add", file)
             }
 
             val statusOutput = executeInDir(worktreeDir, "git", "status", "--porcelain").trim()
@@ -451,9 +477,9 @@ class RealGitHubClient(private val config: OrchestratorConfig) : GitHubClient {
                 return RebaseResult(success = true, conflictCount = 0)
             }
 
-            executeInDir(worktreeDir, "git", "add", "-A")
-            executeInDir(worktreeDir, "git", "commit", "-m", "chore(orchestrator): rebase PR #$prNumber onto master via merge-base diff apply")
+            executeInDir(worktreeDir, "git", "commit", "-m", "chore(orchestrator): rebase PR #$prNumber onto master via intended-files apply")
 
+            // Validate that the newly constructed branch compiles cleanly before force-pushing.
             try {
                 executeInDir(worktreeDir, "./gradlew", "compileKotlin", ":tools:orchestrator:compileKotlin")
             } catch (e: Exception) {
@@ -461,6 +487,7 @@ class RealGitHubClient(private val config: OrchestratorConfig) : GitHubClient {
                 return RebaseResult(success = false, conflictCount = 0)
             }
 
+            // Force-push with lease onto the PR branch.
             executeInDir(worktreeDir, "git", "push", "--force-with-lease", "origin", "HEAD:$branchName")
             return RebaseResult(success = true, conflictCount = 0)
         } catch (e: Exception) {
