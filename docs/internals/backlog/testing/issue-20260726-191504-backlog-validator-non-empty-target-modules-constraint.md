@@ -12,6 +12,7 @@ target_files:
 - tools/orchestrator/src/main/kotlin/io/mazewall/orchestrator/BacklogValidator.kt
 effort: small
 autonomy: autonomous
+github_issue: 351
 ---
 
 # 🔶 [Severity: MEDIUM]: Enforce Non-Empty Target Modules in Backlog Validator and Safe Empty Scheduler Fallback
