@@ -44,7 +44,7 @@ class RealGitHubClient(private val config: OrchestratorConfig) : GitHubClient {
     internal data class CachedValue<T>(val value: T, val expiry: Long)
     internal val cache = mutableMapOf<String, CachedValue<*>>()
 
-    private fun clearPrCache(prNumber: String) {
+    override fun clearPrCache(prNumber: String) {
         cache.remove("checkBuildStatus-$prNumber")
         cache.remove("getPrMergeStatus-$prNumber")
         cache.remove("getPrHeadSha-$prNumber")
@@ -378,33 +378,20 @@ class RealGitHubClient(private val config: OrchestratorConfig) : GitHubClient {
         }
     }
 
-    override fun rebaseBranch(prNumber: String): Boolean {
-        // Clear PR cache to prevent stale status
+    override fun rebaseBranch(prNumber: String): RebaseResult {
         clearPrCache(prNumber)
 
-        // 1. Try GitHub API native branch update with rebase first
-        try {
-            execute("gh", "pr", "update-branch", prNumber, "--rebase")
-            return true
-        } catch (e: Exception) {
-            System.err.println("gh pr update-branch --rebase failed for PR #$prNumber (${e.message}). Attempting local git fetch and rebase in worktree...")
-        }
-
-        // 2. Fallback to local git rebase in an isolated worktree and force push
         val worktreeDir = File("../temp-rebase-$prNumber")
-        var currentBranch = ""
-        var branchName = ""
         try {
-            branchName = execute("gh", "pr", "view", prNumber, "--json", "headRefName", "--jq", ".headRefName").trim()
-            if (branchName.isBlank()) return false
-
-            currentBranch = execute("git", "rev-parse", "--abbrev-ref", "HEAD").trim()
-            if (currentBranch == branchName) {
-                execute("git", "checkout", "--detach")
+            val branchName = execute("gh", "pr", "view", prNumber, "--json", "headRefName", "--jq", ".headRefName").trim()
+            if (branchName.isBlank()) {
+                return RebaseResult(success = false, conflictCount = 0)
             }
 
-            execute("git", "fetch", "origin", branchName)
             execute("git", "fetch", "origin", "master")
+            execute("git", "fetch", "origin", branchName)
+
+            val mergeBase = execute("git", "merge-base", "origin/master", "origin/$branchName").trim()
 
             // Clean up any stale worktree of the same name first
             try {
@@ -417,18 +404,68 @@ class RealGitHubClient(private val config: OrchestratorConfig) : GitHubClient {
                 execute("git", "worktree", "prune")
             } catch (_: Exception) {}
 
-            execute("git", "branch", "-f", branchName, "origin/$branchName")
-            execute("git", "worktree", "add", worktreeDir.absolutePath, branchName)
+            execute("git", "worktree", "add", worktreeDir.absolutePath, "origin/master", "--detach")
 
-            // Run rebase, compile, and push in the worktree
-            executeInDir(worktreeDir, "git", "rebase", "origin/master")
-            executeInDir(worktreeDir, "./gradlew", "compileKotlin")
-            executeInDir(worktreeDir, "git", "push", "--force-with-lease", "origin", branchName)
+            val diffText = execute("git", "diff", mergeBase, "origin/$branchName")
+            val patchFile = File(worktreeDir, "patch.diff")
+            patchFile.writeText(diffText)
 
-            return true
+            var applySuccess = true
+            try {
+                executeInDir(worktreeDir, "git", "apply", "--3way", "patch.diff")
+            } catch (e: Exception) {
+                applySuccess = false
+            } finally {
+                patchFile.delete()
+            }
+
+            if (!applySuccess) {
+                val conflictedOutput = executeInDir(worktreeDir, "git", "diff", "--name-only", "--diff-filter=U")
+                val conflictedFiles = conflictedOutput.lines().map { it.trim() }.filter { it.isNotEmpty() }
+
+                for (file in conflictedFiles) {
+                    val existsInJules = try {
+                        execute("git", "show", "origin/$branchName:$file")
+                        true
+                    } catch (_: Exception) {
+                        false
+                    }
+                    if (!existsInJules) {
+                        System.err.println("Resolving delete-modify conflict for $file by keeping master's version")
+                        executeInDir(worktreeDir, "git", "checkout", "origin/master", "--", file)
+                        executeInDir(worktreeDir, "git", "add", file)
+                    }
+                }
+
+                val remainingConflictedOutput = executeInDir(worktreeDir, "git", "diff", "--name-only", "--diff-filter=U")
+                val remainingConflicts = remainingConflictedOutput.lines().map { it.trim() }.filter { it.isNotEmpty() }
+                if (remainingConflicts.isNotEmpty()) {
+                    System.err.println("Rebase failed on PR #$prNumber due to unresolved conflicts: $remainingConflicts")
+                    return RebaseResult(success = false, conflictCount = remainingConflicts.size, conflictedFiles = remainingConflicts)
+                }
+            }
+
+            val statusOutput = executeInDir(worktreeDir, "git", "status", "--porcelain").trim()
+            if (statusOutput.isEmpty()) {
+                System.err.println("Nothing to commit for PR #$prNumber (clean branch matches master)")
+                return RebaseResult(success = true, conflictCount = 0)
+            }
+
+            executeInDir(worktreeDir, "git", "add", "-A")
+            executeInDir(worktreeDir, "git", "commit", "-m", "chore(orchestrator): rebase PR #$prNumber onto master via merge-base diff apply")
+
+            try {
+                executeInDir(worktreeDir, "./gradlew", "compileKotlin", ":tools:orchestrator:compileKotlin")
+            } catch (e: Exception) {
+                System.err.println("Compilation failed on rebased branch for PR #$prNumber: ${e.message}")
+                return RebaseResult(success = false, conflictCount = 0)
+            }
+
+            executeInDir(worktreeDir, "git", "push", "--force-with-lease", "origin", "HEAD:$branchName")
+            return RebaseResult(success = true, conflictCount = 0)
         } catch (e: Exception) {
             System.err.println("Local worktree rebase failed for PR #$prNumber: ${e.message}")
-            return false
+            return RebaseResult(success = false, conflictCount = 0)
         } finally {
             try {
                 execute("git", "worktree", "remove", worktreeDir.absolutePath, "--force")
@@ -439,11 +476,6 @@ class RealGitHubClient(private val config: OrchestratorConfig) : GitHubClient {
             try {
                 execute("git", "worktree", "prune")
             } catch (_: Exception) {}
-            if (currentBranch.isNotBlank() && currentBranch != "HEAD") {
-                try {
-                    execute("git", "checkout", currentBranch)
-                } catch (_: Exception) {}
-            }
         }
     }
 }
