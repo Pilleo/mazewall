@@ -606,6 +606,8 @@ class "SupervisorDaemonEngine" as io.mazewall.enforcer.supervisor.SupervisorDaem
 class "SupervisorDaemonManager" as io.mazewall.enforcer.supervisor.SupervisorDaemonManager {
   + {static}Companion Companion
   __
+  +Function1<Integer, Unit> getOnUnexpectedExit()
+  +void setOnUnexpectedExit(Function1<? super Integer, Unit>)
   +ConcurrentLinkedQueue<String> getDaemonLogLines()
   +SupervisorContext getOrSpawnSharedDaemon()
   +void stop()

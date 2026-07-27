@@ -11,6 +11,7 @@ class MockOrchestratorEnvironment : OrchestratorEnvironment {
     var existingIssueNumber: String? = null
     var createdIssueNumber = "123"
     var issueClosed = false
+    var prClosed = false
     var linkedPrNumber: String? = null
     var prMerged = false
     var prHeadSha = "sha123"
@@ -49,6 +50,7 @@ class MockOrchestratorEnvironment : OrchestratorEnvironment {
         override fun findExistingIssueNumber(issueId: String): String? = existingIssueNumber
         override fun createIssue(title: String, body: String, label: String): String = createdIssueNumber
         override fun isIssueClosed(issueNumber: String): Boolean = issueClosed
+        override fun isPrClosed(prNumber: String): Boolean = prClosed
         override fun findLinkedPR(issueNumber: String, issueId: String, julesSessionId: String?): String? = linkedPrNumber
         override fun isPrMerged(prNumber: String): Boolean = prMerged
         override fun getPrHeadSha(prNumber: String): String = prHeadSha

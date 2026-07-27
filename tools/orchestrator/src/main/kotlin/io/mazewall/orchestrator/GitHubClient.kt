@@ -29,6 +29,7 @@ interface GitHubClient {
     fun getFailedBuildLogs(prNumber: String): String
     fun getPrHeadSha(prNumber: String): String
     fun isIssueClosed(issueNumber: String): Boolean
+    fun isPrClosed(prNumber: String): Boolean
     fun isPrMerged(prNumber: String): Boolean
     fun getPrComments(prNumber: String): List<GitHubComment>
     fun createIssue(title: String, body: String, label: String): String
