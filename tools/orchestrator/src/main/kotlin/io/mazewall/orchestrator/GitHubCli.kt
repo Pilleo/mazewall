@@ -422,7 +422,16 @@ class RealGitHubClient(private val config: OrchestratorConfig) : GitHubClient {
      * Executed within a detached temporary worktree (`../temp-rebase-<prNumber>`) to ensure absolute isolation.
      * This prevents working-tree pollution or conflicts with uncommitted/untracked local edits in the main agent workspace.
      */
-    override fun mergeMasterIntoBranch(prNumber: String): RebaseResult {
+    private fun isFileAllowed(file: String, targetFiles: List<String>): Boolean {
+        if (file.startsWith("docs/internals/backlog/") && file.endsWith(".md")) return true
+        val normalizedFile = file.replace('\\', '/').trim()
+        return targetFiles.any { target ->
+            val normalizedTarget = target.replace('\\', '/').trim().removePrefix(":")
+            normalizedFile == normalizedTarget || normalizedFile.endsWith("/$normalizedTarget")
+        }
+    }
+
+    override fun mergeMasterIntoBranch(prNumber: String, targetFiles: List<String>): RebaseResult {
         clearPrCache(prNumber)
         val worktreeDir = File("../temp-merge-$prNumber")
         try {
@@ -459,6 +468,31 @@ class RealGitHubClient(private val config: OrchestratorConfig) : GitHubClient {
                 } catch (_: Exception) {}
                 System.err.println("Merge conflict on PR #$prNumber: ${e.message}")
                 return RebaseResult(success = false, conflictCount = 1)
+            }
+
+            // Discard modifications to any files that are not explicitly in targetFiles or backlog directory.
+            // This heals the PR from accidental master reversions / untracked workspace file pollutions.
+            val differentFiles = executeInDir(worktreeDir, "git", "diff", "--name-only", "origin/master").lines().map { it.trim() }.filter { it.isNotEmpty() }
+            var cleanedAny = false
+            for (file in differentFiles) {
+                if (!isFileAllowed(file, targetFiles)) {
+                    System.err.println("🧹 DISCARDING UNINTENDED MODIFICATION: File '$file' is not in targetFiles. Restoring from master...")
+                    try {
+                        executeInDir(worktreeDir, "git", "checkout", "origin/master", "--", file)
+                        executeInDir(worktreeDir, "git", "add", file)
+                        cleanedAny = true
+                    } catch (e: Exception) {
+                        System.err.println("Failed to discard unintended modification on '$file': ${e.message}")
+                    }
+                }
+            }
+
+            if (cleanedAny) {
+                try {
+                    executeInDir(worktreeDir, "git", "commit", "--amend", "--no-edit")
+                } catch (e: Exception) {
+                    System.err.println("Failed to amend merge commit during self-healing checkout: ${e.message}")
+                }
             }
 
             // Check if anything actually changed (branch might already be up to date)

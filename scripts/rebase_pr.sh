@@ -26,7 +26,7 @@ fi
 PR_NUMBER="$1"
 echo "🔍 Inspecting PR #${PR_NUMBER} on GitHub..."
 
-BRANCH_NAME=$(env -u GITHUB_TOKEN gh pr view "$PR_NUMBER" --json headRefName --jq .headRefName)
+BRANCH_NAME=$(env -u GITHUB_TOKEN gh pr view "$PR_NUMBER" --json headRefName --jq .headRefName 2>/dev/null || echo "${BRANCH_NAME:-}")
 if [ -z "$BRANCH_NAME" ]; then
   echo "❌ Could not determine head branch name for PR #${PR_NUMBER}"
   exit 1

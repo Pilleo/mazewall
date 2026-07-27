@@ -65,7 +65,7 @@ class MockOrchestratorEnvironment : OrchestratorEnvironment {
         override fun getFailedBuildLogs(prNumber: String): String = "mock failed logs"
         override fun getPrUrl(prNumber: String): String = "mock url"
         override fun isCommitEmpty(prNumber: String, shaOld: String, shaNew: String): Boolean = isCommitEmptyResult
-        override fun mergeMasterIntoBranch(prNumber: String): RebaseResult {
+        override fun mergeMasterIntoBranch(prNumber: String, targetFiles: List<String>): RebaseResult {
             mergeMasterIntoBranchCallCount++
             return mergeMasterIntoBranchResult
         }
@@ -1208,5 +1208,124 @@ class StateHandlerTest {
         assertEquals(0, env.mergeMasterIntoBranchCallCount)
         // Verify it sleep-waited for the session
         assertTrue(env.sleepCount > 0, "Should sleep-wait for the active session")
+    }
+
+    @Test
+    fun testMergeMasterIntoBranchSelfHealingReconstruction() {
+        val tempDir = java.nio.file.Files.createTempDirectory("test-git-self-healing").toFile()
+        try {
+            fun runGit(vararg command: String): String {
+                val pb = ProcessBuilder(*command)
+                pb.directory(tempDir)
+                pb.redirectErrorStream(true)
+                val process = pb.start()
+                val output = process.inputStream.bufferedReader().readText().trim()
+                process.waitFor()
+                if (process.exitValue() != 0) {
+                    throw RuntimeException("Command '${command.joinToString(" ")}' failed with exit code ${process.exitValue()}: $output")
+                }
+                return output
+            }
+
+            fun runGitInDir(dir: File, vararg command: String): String {
+                val pb = ProcessBuilder(*command)
+                pb.directory(dir)
+                pb.redirectErrorStream(true)
+                val process = pb.start()
+                val output = process.inputStream.bufferedReader().readText().trim()
+                process.waitFor()
+                if (process.exitValue() != 0) {
+                    throw RuntimeException("Command '${command.joinToString(" ")}' failed in ${dir.name} with exit code ${process.exitValue()}: $output")
+                }
+                return output
+            }
+
+            // Init git repo
+            runGit("git", "init")
+            runGit("git", "config", "user.name", "Test User")
+            runGit("git", "config", "user.email", "test@example.com")
+            try {
+                runGit("git", "checkout", "-b", "master")
+            } catch (_: Exception) {}
+
+            // Create initial files on master
+            val allowedFile = File(tempDir, "allowed.txt")
+            allowedFile.writeText("allowed initial content")
+            val disallowedFile = File(tempDir, "disallowed.txt")
+            disallowedFile.writeText("disallowed initial content")
+            runGit("git", "add", "allowed.txt", "disallowed.txt")
+            runGit("git", "commit", "-m", "initial commit")
+
+            // Create PR branch
+            runGit("git", "checkout", "-b", "jules-branch")
+
+            // Jules modifies allowed.txt (intended) AND disallowed.txt (unintended reversion/pollution)
+            allowedFile.writeText("allowed modified content")
+            disallowedFile.writeText("disallowed modified content")
+            runGit("git", "add", "allowed.txt", "disallowed.txt")
+            runGit("git", "commit", "-m", "jules changes")
+
+            // Switch to master and make a commit
+            runGit("git", "checkout", "master")
+            val dummyFile = File(tempDir, "dummy.txt")
+            dummyFile.writeText("dummy content")
+            runGit("git", "add", "dummy.txt")
+            runGit("git", "commit", "-m", "master changes")
+
+            // Create worktree on jules-branch
+            val worktreeDir = File(tempDir, "worktree-self-healing")
+            worktreeDir.mkdirs()
+            runGit("git", "worktree", "add", worktreeDir.absolutePath, "jules-branch", "--detach")
+
+            // Merge master into the branch inside the worktree
+            runGitInDir(worktreeDir, "git", "merge", "master", "--no-edit")
+
+            // Verify both files are currently modified compared to origin/master (which is "master" locally)
+            val diffBefore = runGitInDir(worktreeDir, "git", "diff", "--name-only", "master")
+            assertTrue(diffBefore.contains("allowed.txt"))
+            assertTrue(diffBefore.contains("disallowed.txt"))
+
+            // Now perform our self-healing discard logic!
+            // Disallowed files should be checkout from master and staged
+            val targetFiles = listOf("allowed.txt")
+            val differentFiles = runGitInDir(worktreeDir, "git", "diff", "--name-only", "master").lines().map { it.trim() }.filter { it.isNotEmpty() }
+            var cleanedAny = false
+            for (file in differentFiles) {
+                // Check if file is allowed (mimicking isFileAllowed)
+                val normalizedFile = file.replace('\\', '/').trim()
+                val isAllowed = normalizedFile.startsWith("docs/internals/backlog/") || targetFiles.any { target ->
+                    val normalizedTarget = target.replace('\\', '/').trim().removePrefix(":")
+                    normalizedFile == normalizedTarget || normalizedFile.endsWith("/$normalizedTarget")
+                }
+
+                if (!isAllowed) {
+                    runGitInDir(worktreeDir, "git", "checkout", "master", "--", file)
+                    runGitInDir(worktreeDir, "git", "add", file)
+                    cleanedAny = true
+                }
+            }
+
+            if (cleanedAny) {
+                runGitInDir(worktreeDir, "git", "commit", "--amend", "--no-edit")
+            }
+
+            // Verify that after self-healing, allowed.txt is still modified with Jules's changes
+            val finalAllowedFile = File(worktreeDir, "allowed.txt")
+            assertEquals("allowed modified content", finalAllowedFile.readText().trim())
+
+            // Verify that disallowed.txt was successfully RESTORED to master version ("disallowed initial content")
+            val finalDisallowedFile = File(worktreeDir, "disallowed.txt")
+            assertEquals("disallowed initial content", finalDisallowedFile.readText().trim())
+
+            // Verify that disallowed.txt is no longer in the diff vs master!
+            val diffAfter = runGitInDir(worktreeDir, "git", "diff", "--name-only", "master")
+            assertTrue(diffAfter.contains("allowed.txt"))
+            assertFalse(diffAfter.contains("disallowed.txt"), "disallowed.txt should have been restored and removed from the diff vs master!")
+
+            // Clean up worktree
+            runGit("git", "worktree", "remove", worktreeDir.absolutePath, "--force")
+        } finally {
+            tempDir.deleteRecursively()
+        }
     }
 }

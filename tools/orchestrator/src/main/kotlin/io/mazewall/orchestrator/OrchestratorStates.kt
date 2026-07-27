@@ -740,7 +740,18 @@ private fun handleRebaseAndConflicts(env: OrchestratorEnvironment, slot: SlotCon
     if (isBehind || isConflicting) {
         val reason = if (isConflicting) "conflict status" else "behind master by ${status.behindBy} commits"
         env.println("🔄 Active PR #$prNumber is $reason. Attempting automated merge of master into branch...")
-        val rebaseResult = env.gitHubClient.mergeMasterIntoBranch(prNumber)
+
+        // Parse the backlog issue file to get target_files
+        val targetFiles = slot.currentIssueFile?.let { path ->
+            val file = File(path)
+            if (file.exists()) {
+                BacklogParser.parseIssueFile(file)?.targetFiles
+            } else {
+                null
+            }
+        } ?: emptyList()
+
+        val rebaseResult = env.gitHubClient.mergeMasterIntoBranch(prNumber, targetFiles)
         val rebaseSuccess = rebaseResult.success
         if (rebaseSuccess) {
             env.println("✅ Successfully auto-merged master into PR #$prNumber.")
