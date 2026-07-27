@@ -125,11 +125,15 @@ internal data class ListActivitiesResponse(
 
 // ─── JulesCli ─────────────────────────────────────────────────────────────────
 
-class RealJulesClient(private val config: OrchestratorConfig) : JulesClient {
+class RealJulesClient(
+    private val config: OrchestratorConfig,
+    private val transport: HttpTransport = RealHttpTransport(
+        HttpClient.newBuilder()
+            .connectTimeout(Duration.ofSeconds(10))
+            .build()
+    )
+) : JulesClient {
     private val json = Json { ignoreUnknownKeys = true }
-    private val client = HttpClient.newBuilder()
-        .connectTimeout(Duration.ofSeconds(10))
-        .build()
 
     private val apiKey: String
         get() = System.getenv("JULES_API_KEY")
@@ -161,7 +165,7 @@ class RealJulesClient(private val config: OrchestratorConfig) : JulesClient {
                 .header("X-Goog-Api-Key", apiKey)
                 .GET()
                 .build()
-            val response = client.send(request, HttpResponse.BodyHandlers.ofString())
+            val response = transport.send(request)
             if (response.statusCode() !in 200..299) {
                 throw RuntimeException("Failed to list activities (HTTP ${response.statusCode()}): ${response.body()}")
             }
@@ -254,7 +258,7 @@ class RealJulesClient(private val config: OrchestratorConfig) : JulesClient {
             .build()
 
         try {
-            val response = client.send(request, HttpResponse.BodyHandlers.ofString())
+            val response = transport.send(request)
             if (response.statusCode() !in 200..299) {
                 throw RuntimeException("Failed to trigger Jules session (HTTP ${response.statusCode()}): ${response.body()}")
             }
@@ -281,7 +285,7 @@ class RealJulesClient(private val config: OrchestratorConfig) : JulesClient {
             .build()
 
         try {
-            val response = client.send(request, HttpResponse.BodyHandlers.ofString())
+            val response = transport.send(request)
             if (response.statusCode() !in 200..299) {
                 throw RuntimeException("Failed to send message to Jules session (HTTP ${response.statusCode()}): ${response.body()}")
             }
@@ -310,7 +314,7 @@ class RealJulesClient(private val config: OrchestratorConfig) : JulesClient {
             .build()
 
         return try {
-            val response = client.send(request, HttpResponse.BodyHandlers.ofString())
+            val response = transport.send(request)
             if (response.statusCode() !in 200..299) {
                 throw RuntimeException("Failed to list Jules sessions (HTTP ${response.statusCode()}): ${response.body()}")
             }

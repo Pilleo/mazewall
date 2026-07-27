@@ -57,8 +57,11 @@ data class AnswerCallbackQueryRequest(
     val callback_query_id: String
 )
 
-class TelegramBot(private val botToken: String, private val chatId: String) {
-    private val client = HttpClient.newHttpClient()
+class TelegramBot(
+    private val botToken: String,
+    private val chatId: String,
+    private val transport: HttpTransport = RealHttpTransport(HttpClient.newHttpClient())
+) {
     private val json = Json { ignoreUnknownKeys = true }
     private var lastUpdateId = 0L
     var onReviewRequested: ((focusComments: String) -> Unit)? = null
@@ -201,7 +204,7 @@ class TelegramBot(private val botToken: String, private val chatId: String) {
             .POST(HttpRequest.BodyPublishers.ofString(jsonBody))
             .build()
         return try {
-            val response = client.send(request, HttpResponse.BodyHandlers.ofString())
+            val response = transport.send(request)
             if (response.statusCode() !in 200..299) {
                 System.err.println("Telegram POST to $url returned status code ${response.statusCode()}: ${response.body()}")
             }
@@ -218,7 +221,7 @@ class TelegramBot(private val botToken: String, private val chatId: String) {
             .GET()
             .build()
         return try {
-            val response = client.send(request, HttpResponse.BodyHandlers.ofString())
+            val response = transport.send(request)
             response.body()
         } catch (e: Exception) {
             System.err.println("HTTP GET to $url failed: ${e.message}")
