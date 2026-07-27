@@ -465,7 +465,7 @@ class RealGitHubClient(private val config: OrchestratorConfig) : GitHubClient {
             // Create worktree on the PR branch (not master — we're merging INTO the branch)
             execute("git", "worktree", "add", worktreeDir.absolutePath, "origin/$branchName", "--detach")
 
-            // Merge master into the branch. Conflicts = failure, signal human intervention.
+            // Merge master into the branch.
             try {
                 executeInDir(
                     worktreeDir, "git", "merge", "origin/master",
@@ -474,12 +474,62 @@ class RealGitHubClient(private val config: OrchestratorConfig) : GitHubClient {
                     retry = false
                 )
             } catch (e: Exception) {
-                // Merge conflict — abort and signal
-                try {
-                    executeInDir(worktreeDir, "git", "merge", "--abort", retry = false)
-                } catch (_: Exception) {}
-                System.err.println("Merge conflict on PR #$prNumber: ${e.message}")
-                return RebaseResult(success = false, conflictCount = 1)
+                val errorMsg = e.message ?: ""
+                if (errorMsg.contains("unrelated histories")) {
+                    System.err.println("Unrelated histories detected for PR #$prNumber. Falling back to patch rescue logic.")
+
+                    // 1. Abort any merge in progress just in case
+                    try { executeInDir(worktreeDir, "git", "merge", "--abort", retry = false) } catch (_: Exception) {}
+
+                    // 2. Diff against origin/master to find everything that differs
+                    val allDifferentFiles = executeInDir(worktreeDir, "git", "diff", "--name-only", "origin/master", "origin/$branchName")
+                        .lines().map { it.trim() }.filter { it.isNotEmpty() }
+
+                    // 3. Reset hard to master
+                    executeInDir(worktreeDir, "git", "reset", "--hard", "origin/master")
+
+                    var rescuedAny = false
+                    for (file in allDifferentFiles) {
+                        if (isFileAllowed(file, targetFiles)) {
+                            try {
+                                val exists = executeInDir(worktreeDir, "git", "ls-tree", "-r", "origin/$branchName", "--name-only")
+                                    .lines().any { it.trim() == file }
+                                if (exists) {
+                                    executeInDir(worktreeDir, "git", "checkout", "origin/$branchName", "--", file)
+                                    executeInDir(worktreeDir, "git", "add", file)
+                                } else {
+                                    executeInDir(worktreeDir, "git", "rm", "--ignore-unmatch", file)
+                                }
+                                rescuedAny = true
+                            } catch (eRescue: Exception) {
+                                System.err.println("Failed to rescue file '$file': ${eRescue.message}")
+                            }
+                        }
+                    }
+
+                    if (rescuedAny) {
+                        executeInDir(worktreeDir, "git", "commit", "-m", "chore(orchestrator): rescue PR #$prNumber onto master via target-files apply")
+                        // Push and return immediately for rescued branch
+                        try {
+                            executeInDir(worktreeDir, "./gradlew", "compileKotlin", ":tools:orchestrator:compileKotlin")
+                        } catch (eCompile: Exception) {
+                            System.err.println("Compilation failed on rescued branch for PR #$prNumber: ${eCompile.message}")
+                            return RebaseResult(success = false, conflictCount = 0)
+                        }
+                        executeInDir(worktreeDir, "git", "push", "--force-with-lease", "origin", "HEAD:$branchName")
+                        return RebaseResult(success = true, conflictCount = 0)
+                    } else {
+                        System.err.println("No target files found to rescue for PR #$prNumber")
+                        return RebaseResult(success = false, conflictCount = 1)
+                    }
+                } else {
+                    // Normal Merge conflict — abort and signal
+                    try {
+                        executeInDir(worktreeDir, "git", "merge", "--abort", retry = false)
+                    } catch (_: Exception) {}
+                    System.err.println("Merge conflict on PR #$prNumber: ${e.message}")
+                    return RebaseResult(success = false, conflictCount = 1)
+                }
             }
 
             // Discard modifications to any files that are not explicitly in targetFiles or backlog directory.
