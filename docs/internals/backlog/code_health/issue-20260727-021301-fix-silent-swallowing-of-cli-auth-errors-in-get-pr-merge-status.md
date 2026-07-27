@@ -12,6 +12,7 @@ target_files:
   - "tools/orchestrator/src/main/kotlin/io/mazewall/orchestrator/OrchestratorStates.kt"
 effort: "small"
 autonomy: "supervised"
+github_issue: 354
 ---
 
 # 🔴 [Severity: HIGH]: Fix Silent Swallowing of CLI Authentication Errors in getPrMergeStatus
