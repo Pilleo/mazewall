@@ -31,6 +31,7 @@ class MockOrchestratorEnvironment : OrchestratorEnvironment {
     var prMergeStatus = PrMergeStatus("MERGEABLE", 0)
     var clearPrCacheCount = 0
     var mergeMasterIntoBranchResult = RebaseResult(true, 0, emptyList())
+    var mergeMasterIntoBranchCallCount = 0
 
     override fun println(message: Any?) { printlns.add(message.toString()) }
     override fun print(message: Any?) {}
@@ -64,7 +65,10 @@ class MockOrchestratorEnvironment : OrchestratorEnvironment {
         override fun getFailedBuildLogs(prNumber: String): String = "mock failed logs"
         override fun getPrUrl(prNumber: String): String = "mock url"
         override fun isCommitEmpty(prNumber: String, shaOld: String, shaNew: String): Boolean = isCommitEmptyResult
-        override fun mergeMasterIntoBranch(prNumber: String): RebaseResult = mergeMasterIntoBranchResult
+        override fun mergeMasterIntoBranch(prNumber: String, targetFiles: List<String>): RebaseResult {
+            mergeMasterIntoBranchCallCount++
+            return mergeMasterIntoBranchResult
+        }
         override fun clearPrCache(prNumber: String) { clearPrCacheCount++ }
     }
 
@@ -425,12 +429,42 @@ class StateHandlerTest {
         env.linkedPrNumber = "pr-1"
         env.prMergeStatus = PrMergeStatus("CONFLICTING", 0)
 
-        val nextState = OrchestratorState.AWAITING_PR.execute(env, context)
+        var nextState = OrchestratorState.AWAITING_PR.execute(env, context)
 
         // It should transition to CI_RUNNING
         assertEquals(OrchestratorState.CI_RUNNING, nextState)
-        // Check if sleep was triggered during the rebase workflow
-        assertTrue(env.sleepCount > 0, "Should sleep after triggering rebase")
+
+        // Now execute CI_RUNNING state to trigger the merge handling
+        nextState = nextState.execute(env, context)
+        assertEquals(OrchestratorState.CI_RUNNING, nextState)
+
+        // Check if sleep was triggered during the merge workflow
+        assertTrue(env.sleepCount > 0, "Should sleep after triggering merge")
+    }
+
+    @Test
+    fun testAwaitingReviewAutomatedMergePreservesReviewStatus() {
+        val env = MockOrchestratorEnvironment()
+        val context = OrchestratorContext().apply {
+            prNumber = "pr-1"
+            currentIssueId = "issue-1"
+            lastHeadSha = "sha_old"
+            lastReviewedSha = "sha_old"
+            lastRequestedReviewSha = "sha_old"
+        }
+        env.prMergeStatus = PrMergeStatus("MERGEABLE", 1) // Behind by 1 commit
+        env.buildStatus = "SUCCESS"
+        env.prHeadSha = "sha_new" // The new head after merge
+        env.mergeMasterIntoBranchResult = RebaseResult(true, 0) // Merge succeeds!
+
+        val nextState = OrchestratorState.AWAITING_REVIEW.execute(env, context)
+
+        // It should transition to CI_RUNNING to verify the build of the merge commit
+        assertEquals(OrchestratorState.CI_RUNNING, nextState)
+        // Verify that slot properties were successfully updated to the new SHA!
+        assertEquals("sha_new", context.lastHeadSha)
+        assertEquals("sha_new", context.lastReviewedSha)
+        assertEquals("sha_new", context.lastRequestedReviewSha)
     }
 
     @Test
@@ -1124,6 +1158,177 @@ class StateHandlerTest {
             // Let's checkout master and check how many commits on master are ahead of jules-branch (should be 0)
             val behindMasterCount = runGitInDir(worktreeDir, "git", "rev-list", "--count", "HEAD..master").trim().toIntOrNull() ?: 0
             assertEquals(0, behindMasterCount, "No master commits should be missing from jules-branch")
+
+            // Clean up worktree
+            runGit("git", "worktree", "remove", worktreeDir.absolutePath, "--force")
+        } finally {
+            tempDir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun testCiRunningDoesNotMergeWhenJulesSessionInProgress() {
+        val env = MockOrchestratorEnvironment()
+        val context = OrchestratorContext().apply {
+            prNumber = "pr-1"
+            currentIssueId = "issue-1"
+            githubIssueNumber = "123"
+        }
+        env.prMergeStatus = PrMergeStatus("MERGEABLE", 5) // Behind by 5 commits
+        env.buildStatus = "PENDING"
+        env.julesSession = JulesSession("s1", "desc", "repo", "in_progress") // Session is active!
+
+        val nextState = OrchestratorState.CI_RUNNING.execute(env, context)
+
+        // It should stay in CI_RUNNING
+        assertEquals(OrchestratorState.CI_RUNNING, nextState)
+        // Verify that it did NOT call mergeMasterIntoBranch because the session was active!
+        assertEquals(0, env.mergeMasterIntoBranchCallCount)
+        // Verify it sleep-waited for the session
+        assertTrue(env.sleepCount > 0, "Should sleep-wait for the active session")
+    }
+
+    @Test
+    fun testAwaitingReviewDoesNotMergeWhenJulesSessionInProgress() {
+        val env = MockOrchestratorEnvironment()
+        val context = OrchestratorContext().apply {
+            prNumber = "pr-1"
+            currentIssueId = "issue-1"
+            githubIssueNumber = "123"
+        }
+        env.prMergeStatus = PrMergeStatus("MERGEABLE", 5) // Behind by 5 commits
+        env.buildStatus = "SUCCESS"
+        env.julesSession = JulesSession("s1", "desc", "repo", "in_progress") // Session is active!
+
+        val nextState = OrchestratorState.AWAITING_REVIEW.execute(env, context)
+
+        // It should stay in AWAITING_REVIEW
+        assertEquals(OrchestratorState.AWAITING_REVIEW, nextState)
+        // Verify that it did NOT call mergeMasterIntoBranch because the session was active!
+        assertEquals(0, env.mergeMasterIntoBranchCallCount)
+        // Verify it sleep-waited for the session
+        assertTrue(env.sleepCount > 0, "Should sleep-wait for the active session")
+    }
+
+    @Test
+    fun testMergeMasterIntoBranchSelfHealingReconstruction() {
+        val tempDir = java.nio.file.Files.createTempDirectory("test-git-self-healing").toFile()
+        try {
+            fun runGit(vararg command: String): String {
+                val pb = ProcessBuilder(*command)
+                pb.directory(tempDir)
+                pb.redirectErrorStream(true)
+                val process = pb.start()
+                val output = process.inputStream.bufferedReader().readText().trim()
+                process.waitFor()
+                if (process.exitValue() != 0) {
+                    throw RuntimeException("Command '${command.joinToString(" ")}' failed with exit code ${process.exitValue()}: $output")
+                }
+                return output
+            }
+
+            fun runGitInDir(dir: File, vararg command: String): String {
+                val pb = ProcessBuilder(*command)
+                pb.directory(dir)
+                pb.redirectErrorStream(true)
+                val process = pb.start()
+                val output = process.inputStream.bufferedReader().readText().trim()
+                process.waitFor()
+                if (process.exitValue() != 0) {
+                    throw RuntimeException("Command '${command.joinToString(" ")}' failed in ${dir.name} with exit code ${process.exitValue()}: $output")
+                }
+                return output
+            }
+
+            // Init git repo
+            runGit("git", "init")
+            runGit("git", "config", "user.name", "Test User")
+            runGit("git", "config", "user.email", "test@example.com")
+            try {
+                runGit("git", "checkout", "-b", "master")
+            } catch (_: Exception) {}
+
+            // Create initial files on master
+            val allowedFile = File(tempDir, "allowed.txt")
+            allowedFile.writeText("allowed initial content")
+            val disallowedFile = File(tempDir, "disallowed.txt")
+            disallowedFile.writeText("disallowed initial content")
+            runGit("git", "add", "allowed.txt", "disallowed.txt")
+            runGit("git", "commit", "-m", "initial commit")
+
+            // Create PR branch
+            runGit("git", "checkout", "-b", "jules-branch")
+
+            // Jules modifies allowed.txt (intended) AND disallowed.txt (unintended reversion/pollution)
+            allowedFile.writeText("allowed modified content")
+            disallowedFile.writeText("disallowed modified content")
+            runGit("git", "add", "allowed.txt", "disallowed.txt")
+            runGit("git", "commit", "-m", "jules changes")
+
+            // Switch to master and make a commit
+            runGit("git", "checkout", "master")
+            val dummyFile = File(tempDir, "dummy.txt")
+            dummyFile.writeText("dummy content")
+            runGit("git", "add", "dummy.txt")
+            runGit("git", "commit", "-m", "master changes")
+
+            // Create worktree on jules-branch
+            val worktreeDir = File(tempDir, "worktree-self-healing")
+            worktreeDir.mkdirs()
+            runGit("git", "worktree", "add", worktreeDir.absolutePath, "jules-branch", "--detach")
+
+            // Merge master into the branch inside the worktree
+            runGitInDir(worktreeDir, "git", "merge", "master", "--no-edit")
+
+            // Verify both files are currently modified compared to origin/master (which is "master" locally)
+            val diffBefore = runGitInDir(worktreeDir, "git", "diff", "--name-only", "master")
+            assertTrue(diffBefore.contains("allowed.txt"))
+            assertTrue(diffBefore.contains("disallowed.txt"))
+
+            // Now perform our self-healing discard logic!
+            // Disallowed files should be checkout from master and staged
+            val targetFiles = listOf("allowed.txt")
+            val differentFiles = runGitInDir(worktreeDir, "git", "diff", "--name-only", "master").lines().map { it.trim() }.filter { it.isNotEmpty() }
+            var cleanedAny = false
+            for (file in differentFiles) {
+                // Check if file is allowed (mimicking isFileAllowed)
+                val normalizedFile = file.replace('\\', '/').trim()
+                val isAllowed = normalizedFile.startsWith("docs/internals/backlog/") || targetFiles.any { target ->
+                    val normalizedTarget = target.replace('\\', '/').trim().removePrefix(":")
+                    if (normalizedFile == normalizedTarget || normalizedFile.endsWith("/$normalizedTarget")) return@any true
+                    if (normalizedTarget.contains("/src/main/")) {
+                        val testTarget = normalizedTarget
+                            .replace("/src/main/", "/src/test/")
+                            .replace(".kt", "Test.kt")
+                            .replace(".java", "Test.java")
+                        if (normalizedFile == testTarget || normalizedFile.endsWith("/$testTarget")) return@any true
+                    }
+                    false
+                }
+
+                if (!isAllowed) {
+                    runGitInDir(worktreeDir, "git", "checkout", "master", "--", file)
+                    runGitInDir(worktreeDir, "git", "add", file)
+                    cleanedAny = true
+                }
+            }
+
+            if (cleanedAny) {
+                runGitInDir(worktreeDir, "git", "commit", "-m", "chore: discard unintended file modifications")
+            }
+
+            // Verify that after self-healing, allowed.txt is still modified with Jules's changes
+            val finalAllowedFile = File(worktreeDir, "allowed.txt")
+            assertEquals("allowed modified content", finalAllowedFile.readText().trim())
+
+            // Verify that disallowed.txt was successfully RESTORED to master version ("disallowed initial content")
+            val finalDisallowedFile = File(worktreeDir, "disallowed.txt")
+            assertEquals("disallowed initial content", finalDisallowedFile.readText().trim())
+
+            // Verify that disallowed.txt is no longer in the diff vs master!
+            val diffAfter = runGitInDir(worktreeDir, "git", "diff", "--name-only", "master")
+            assertTrue(diffAfter.contains("allowed.txt"))
+            assertFalse(diffAfter.contains("disallowed.txt"), "disallowed.txt should have been restored and removed from the diff vs master!")
 
             // Clean up worktree
             runGit("git", "worktree", "remove", worktreeDir.absolutePath, "--force")
