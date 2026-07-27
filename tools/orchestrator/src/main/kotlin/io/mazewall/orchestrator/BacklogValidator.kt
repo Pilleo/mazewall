@@ -9,6 +9,14 @@ object BacklogValidator {
     private val VALID_STATUSES = setOf("open", "in_progress", "resolved", "deferred")
     private val VALID_COMPONENTS = setOf("enforcer", "profiler", "orchestrator", "docs", "ci", "testing")
     private val VALID_FILENAME_PATTERN = Regex("^issue-(?:\\d{8}[-_]\\d{6}(?:[-_]\\d{2})?|\\d{8}[-_]\\d{2,4}|\\d{1,4})[-_][a-z0-9_-]+\\.md$")
+    private val VALID_GRADLE_MODULES = setOf(
+        ":enforcer",
+        ":profiler",
+        ":demos:cli-demo",
+        ":demos:vulnerable-web-app",
+        ":demos:agent-sandbox-demo",
+        ":tools:orchestrator"
+    )
 
     fun validateBacklog(backlogDir: File): List<String> {
         if (!backlogDir.exists() || !backlogDir.isDirectory) {
@@ -70,6 +78,14 @@ object BacklogValidator {
 
             if (!content.contains("target_modules:")) {
                 errors.add("${file.name}: Missing required 'target_modules' field (e.g. [\":enforcer\"])")
+            } else if (issue.targetModules.isEmpty()) {
+                errors.add("${file.name}: 'target_modules' must contain at least one valid Gradle module (got empty list)")
+            } else {
+                for (module in issue.targetModules) {
+                    if (module !in VALID_GRADLE_MODULES) {
+                        errors.add("${file.name}: Invalid Gradle module '$module' in target_modules. Allowed: $VALID_GRADLE_MODULES")
+                    }
+                }
             }
 
             if (!content.contains("target_files:")) {
