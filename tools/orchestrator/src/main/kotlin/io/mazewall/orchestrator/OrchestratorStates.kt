@@ -752,6 +752,25 @@ private fun handleRebaseAndConflicts(env: OrchestratorEnvironment, slot: SlotCon
         } ?: emptyList()
 
         val rebaseResult = env.gitHubClient.mergeMasterIntoBranch(prNumber, targetFiles)
+        if (rebaseResult.needsRescueApproval && rebaseResult.rescueBranchName != null) {
+            env.println("🚨 PR #$prNumber has unrelated histories. Rescue branch prepared.")
+            env.sendNotification( "🚨 Unrelated histories detected on PR #$prNumber. I've prepared a rescued branch: ${rebaseResult.rescueBranchName}. Approve to forcefully overwrite the PR branch.")
+            val approved = env.requestApproval(slot.currentIssueId, "🚨 Unrelated histories detected on PR #${prNumber}. I've prepared a rescued branch: ${rebaseResult.rescueBranchName}. Approve to forcefully overwrite the PR branch.")
+            if (approved) {
+                env.println("Rescue approved. Pushing to PR...")
+                env.gitHubClient.approveRescue(prNumber, rebaseResult.rescueBranchName)
+                slot.lastWaitingLogTime = 0L
+                val newSha = env.gitHubClient.getPrHeadSha(prNumber)
+                val oldSha = slot.lastHeadSha
+                slot.lastHeadSha = newSha
+                if (slot.lastReviewedSha == oldSha && oldSha != null) slot.lastReviewedSha = newSha
+                if (slot.lastRequestedReviewSha == oldSha && oldSha != null) slot.lastRequestedReviewSha = newSha
+                return true
+            } else {
+                env.println("Rescue rejected by user.")
+                return false
+            }
+        }
         val rebaseSuccess = rebaseResult.success
         if (rebaseSuccess) {
             env.println("✅ Successfully auto-merged master into PR #$prNumber.")

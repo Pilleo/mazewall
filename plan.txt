@@ -1,0 +1,18 @@
+AH! `BranchRebaserTest` failed: `java.lang.IllegalStateException: Unexpected state`.
+Wait, why did it hit unexpected state?
+In `BranchRebaser.kt`:
+```kotlin
+        while (state !is RebaseProcessState.Completed && state !is RebaseProcessState.Failed) {
+            state = when (state) {
+                is RebaseProcessState.Init -> handleInit(state)
+                is RebaseProcessState.SetupWorktree -> handleSetupWorktree(state)
+                is RebaseProcessState.AttemptMerge -> handleAttemptMerge(state)
+                is RebaseProcessState.HandleRescue -> handleRescue(state)
+                is RebaseProcessState.VerifyAndPush -> handleVerifyAndPush(state)
+                else -> throw IllegalStateException("Unexpected state")
+            }
+        }
+```
+Wait! I added `SelfHeal` to `RebaseProcessState` and in `handleAttemptMerge`, I return `RebaseProcessState.SelfHeal(state.prNumber, ...)`.
+BUT I FORGOT TO ADD IT TO THE `when` BLOCK IN `run`!
+Let me fix `BranchRebaser.kt` line 48!

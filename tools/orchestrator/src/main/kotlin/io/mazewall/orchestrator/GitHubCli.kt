@@ -44,6 +44,13 @@ class RealGitHubClient(private val config: OrchestratorConfig) : GitHubClient {
     internal data class CachedValue<T>(val value: T, val expiry: Long)
     internal val cache = mutableMapOf<String, CachedValue<*>>()
 
+    override fun approveRescue(prNumber: String, rescueBranchName: String) {
+        val branchName = execute("gh", "pr", "view", prNumber, "--json", "headRefName", "--jq", ".headRefName").trim()
+        execute("git", "push", "--force", "origin", "origin/$rescueBranchName:$branchName")
+        // Clean up rescue branch
+        execute("git", "push", "origin", "--delete", rescueBranchName)
+    }
+
     override fun clearPrCache(prNumber: String) {
         cache.remove("checkBuildStatus-$prNumber")
         cache.remove("getPrMergeStatus-$prNumber")
@@ -444,103 +451,12 @@ class RealGitHubClient(private val config: OrchestratorConfig) : GitHubClient {
     }
 
     override fun mergeMasterIntoBranch(prNumber: String, targetFiles: List<String>): RebaseResult {
-        clearPrCache(prNumber)
-        val worktreeDir = File("../temp-merge-$prNumber")
-        try {
-            val branchName = execute("gh", "pr", "view", prNumber, "--json", "headRefName", "--jq", ".headRefName").trim()
-            if (branchName.isBlank()) return RebaseResult(success = false, conflictCount = 0)
-
-            execute("git", "fetch", "origin", "master")
-            execute("git", "fetch", "origin", branchName)
-
-            // Clean up any previous worktree
-            try {
-                executeWithoutRetry("git", "worktree", "remove", worktreeDir.absolutePath, "--force")
-            } catch (_: Exception) {}
-            worktreeDir.deleteRecursively()
-            try {
-                executeWithoutRetry("git", "worktree", "prune")
-            } catch (_: Exception) {}
-
-            // Create worktree on the PR branch (not master — we're merging INTO the branch)
-            execute("git", "worktree", "add", worktreeDir.absolutePath, "origin/$branchName", "--detach")
-
-            // Merge master into the branch. Conflicts = failure, signal human intervention.
-            try {
-                executeInDir(
-                    worktreeDir, "git", "merge", "origin/master",
-                    "--no-edit",
-                    "-m", "chore: merge master into PR #$prNumber to keep up to date",
-                    retry = false
-                )
-            } catch (e: Exception) {
-                // Merge conflict — abort and signal
-                try {
-                    executeInDir(worktreeDir, "git", "merge", "--abort", retry = false)
-                } catch (_: Exception) {}
-                System.err.println("Merge conflict on PR #$prNumber: ${e.message}")
-                return RebaseResult(success = false, conflictCount = 1)
-            }
-
-            // Discard modifications to any files that are not explicitly in targetFiles or backlog directory.
-            // This heals the PR from accidental master reversions / untracked workspace file pollutions.
-            val differentFiles = executeInDir(worktreeDir, "git", "diff", "--name-only", "origin/master").lines().map { it.trim() }.filter { it.isNotEmpty() }
-            var cleanedAny = false
-            for (file in differentFiles) {
-                if (!isFileAllowed(file, targetFiles)) {
-                    System.err.println("🧹 DISCARDING UNINTENDED MODIFICATION: File '$file' is not in targetFiles. Restoring from master...")
-                    try {
-                        executeInDir(worktreeDir, "git", "checkout", "origin/master", "--", file)
-                        executeInDir(worktreeDir, "git", "add", file)
-                        cleanedAny = true
-                    } catch (e: Exception) {
-                        System.err.println("Failed to discard unintended modification on '$file': ${e.message}")
-                    }
-                }
-            }
-
-            if (cleanedAny) {
-                try {
-                    executeInDir(worktreeDir, "git", "commit", "-m", "chore: discard unintended file modifications")
-                } catch (e: Exception) {
-                    System.err.println("Failed to commit self-healing cleanup: ${e.message}")
-                }
-            }
-
-            // Check if anything actually changed (branch might already be up to date)
-            val aheadOfMaster = executeInDir(
-                worktreeDir, "git", "rev-list", "--count", "origin/master..HEAD"
-            ).trim().toIntOrNull() ?: 0
-
-            if (aheadOfMaster == 0) {
-                // Nothing to merge — already up to date (shouldn't happen if caller checks, but safe)
-                System.err.println("Nothing to merge for PR #$prNumber — already up to date")
-                return RebaseResult(success = true, conflictCount = 0)
-            }
-
-            // Validate that the merged branch compiles cleanly before force-pushing.
-            try {
-                executeInDir(worktreeDir, "./gradlew", "compileKotlin", ":tools:orchestrator:compileKotlin")
-            } catch (e: Exception) {
-                System.err.println("Compilation failed on merged branch for PR #$prNumber: ${e.message}")
-                return RebaseResult(success = false, conflictCount = 0)
-            }
-
-            executeInDir(worktreeDir, "git", "push", "origin", "HEAD:$branchName")
-            return RebaseResult(success = true, conflictCount = 0)
-
-        } catch (e: Exception) {
-            System.err.println("Merge failed for PR #$prNumber: ${e.message}")
-            return RebaseResult(success = false, conflictCount = 0)
-        } finally {
-            try {
-                executeWithoutRetry("git", "worktree", "remove", worktreeDir.absolutePath, "--force")
-            } catch (_: Exception) {}
-            worktreeDir.deleteRecursively()
-            try {
-                executeWithoutRetry("git", "worktree", "prune")
-            } catch (_: Exception) {}
-        }
+        return BranchRebaser(
+            execute = { args -> execute(*args) },
+            executeInDir = { dir, args -> executeInDir(dir, *args) },
+            executeInDirNoRetry = { dir, args -> executeInDir(dir, *args) },
+            clearPrCache = ::clearPrCache
+        ).run(prNumber, targetFiles)
     }
 }
 
