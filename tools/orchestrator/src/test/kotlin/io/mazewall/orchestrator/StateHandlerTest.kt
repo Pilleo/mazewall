@@ -69,6 +69,7 @@ class MockOrchestratorEnvironment : OrchestratorEnvironment {
             mergeMasterIntoBranchCallCount++
             return mergeMasterIntoBranchResult
         }
+        override fun approveRescue(prNumber: String, rescueBranchName: String) {}
         override fun clearPrCache(prNumber: String) { clearPrCacheCount++ }
     }
 
