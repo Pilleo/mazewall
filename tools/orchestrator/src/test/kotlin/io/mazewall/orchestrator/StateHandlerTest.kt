@@ -27,7 +27,6 @@ class MockOrchestratorEnvironment : OrchestratorEnvironment {
     val notifications = mutableListOf<String>()
     var bellRungCount = 0
     var isCommitEmptyResult = false
-    var prMergeStatus = PrMergeStatus("MERGEABLE", 0)
 
     override fun println(message: Any?) { printlns.add(message.toString()) }
     override fun print(message: Any?) {}
@@ -45,7 +44,6 @@ class MockOrchestratorEnvironment : OrchestratorEnvironment {
 
 
     override val gitHubClient = object : GitHubClient {
-        override fun getPrMergeStatus(prNumber: String): PrMergeStatus = prMergeStatus
         override fun findExistingIssueNumber(issueId: String): String? = existingIssueNumber
         override fun createIssue(title: String, body: String, label: String): String = createdIssueNumber
         override fun isIssueClosed(issueNumber: String): Boolean = issueClosed
@@ -389,60 +387,5 @@ class StateHandlerTest {
         assertEquals("sha456", context.lastHeadSha)
         assertEquals(0, context.julesReviewPushCount)
         assertTrue(env.commentedPrs.isEmpty(), "No correction comment should be sent for non-empty commits")
-    }
-
-    @Test
-    fun testCiRunningDetectsBehindPrAndRebases() {
-        val env = MockOrchestratorEnvironment()
-        val context = OrchestratorContext().apply {
-            prNumber = "pr-1"
-            currentIssueId = "issue-1"
-        }
-        env.prMergeStatus = PrMergeStatus("MERGEABLE", 5) // behind by 5 commits
-        env.buildStatus = "PENDING"
-
-        val nextState = OrchestratorState.CI_RUNNING.execute(env, context)
-
-        // It should stay in CI_RUNNING after attempting rebase
-        assertEquals(OrchestratorState.CI_RUNNING, nextState)
-        // Check if sleep was triggered (which happens after handleRebaseAndConflicts returns true)
-        assertTrue(env.sleepCount > 0, "Should sleep after triggering rebase")
-    }
-
-    @Test
-    fun testAwaitingPrDetectsConflictingPrAndRebases() {
-        val env = MockOrchestratorEnvironment()
-        val context = OrchestratorContext().apply {
-            currentIssueId = "issue-1"
-            githubIssueNumber = "123"
-            julesSessionId = "s1"
-        }
-        env.linkedPrNumber = "pr-1"
-        env.prMergeStatus = PrMergeStatus("CONFLICTING", 0)
-
-        val nextState = OrchestratorState.AWAITING_PR.execute(env, context)
-
-        // It should transition to CI_RUNNING
-        assertEquals(OrchestratorState.CI_RUNNING, nextState)
-        // Check if sleep was triggered during the rebase workflow
-        assertTrue(env.sleepCount > 0, "Should sleep after triggering rebase")
-    }
-
-    @Test
-    fun testAwaitingReviewDetectsConflictingPrAndRebases() {
-        val env = MockOrchestratorEnvironment()
-        val context = OrchestratorContext().apply {
-            prNumber = "pr-1"
-            currentIssueId = "issue-1"
-        }
-        env.prMergeStatus = PrMergeStatus("CONFLICTING", 0)
-        env.buildStatus = "SUCCESS"
-
-        val nextState = OrchestratorState.AWAITING_REVIEW.execute(env, context)
-
-        // It should transition to CI_RUNNING on successful rebase
-        assertEquals(OrchestratorState.CI_RUNNING, nextState)
-        // Check if sleep was triggered during the rebase workflow
-        assertTrue(env.sleepCount > 0, "Should sleep after triggering rebase")
     }
 }
