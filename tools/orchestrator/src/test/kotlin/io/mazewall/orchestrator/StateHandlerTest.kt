@@ -922,34 +922,56 @@ class StateHandlerTest {
             runGit("git", "init")
             runGit("git", "config", "user.name", "Test User")
             runGit("git", "config", "user.email", "test@example.com")
-            // Set initial branch to master (older git versions use master, newer might use main)
+            // Set initial branch to master
             try {
                 runGit("git", "checkout", "-b", "master")
             } catch (_: Exception) {}
 
-            // 2. Create initial file on master and commit
+            // 2. Create initial files on master and commit
             val initialFile = File(tempDir, "initial.txt")
             initialFile.writeText("initial content")
-            runGit("git", "add", "initial.txt")
+            val toDeleteFile = File(tempDir, "to_delete.txt")
+            toDeleteFile.writeText("to delete content")
+            runGit("git", "add", "initial.txt", "to_delete.txt")
             runGit("git", "commit", "-m", "initial commit")
 
-            // 3. Create branch and commit a new file (simulating Jules's PR branch)
+            // 3. Create branch and commit multiple changes (simulating Jules's PR branch with multiple commits)
             runGit("git", "checkout", "-b", "jules-branch")
+
+            // First Jules commit: Add jules_work.txt
             val julesFile = File(tempDir, "jules_work.txt")
             julesFile.writeText("jules content")
             runGit("git", "add", "jules_work.txt")
-            runGit("git", "commit", "-m", "jules commit")
+            runGit("git", "commit", "-m", "jules commit 1")
 
-            // 4. Switch back to master and add a master-only file (added after Jules diverged)
+            // Second Jules commit: Modify initial.txt and delete to_delete.txt (stale/accidental deletion)
+            initialFile.writeText("initial content modified by jules")
+            toDeleteFile.delete()
+            runGit("git", "add", "initial.txt")
+            runGit("git", "rm", "to_delete.txt")
+            runGit("git", "commit", "-m", "jules commit 2")
+
+            // 4. Switch back to master and add/modify master-only files (added/modified after Jules diverged)
             runGit("git", "checkout", "master")
+
+            // Add a new master-only file (added after Jules diverged)
             val masterFile = File(tempDir, "master_only.txt")
             masterFile.writeText("master content")
             runGit("git", "add", "master_only.txt")
-            runGit("git", "commit", "-m", "master commit")
+            runGit("git", "commit", "-m", "master commit 1")
 
-            // At this point, the repository looks like this:
-            // master has: initial.txt, master_only.txt
-            // jules-branch has: initial.txt, jules_work.txt (stale: lacks master_only.txt)
+            // Modify the same initial.txt differently on master (overlapping modification - conflict scenario)
+            initialFile.writeText("initial content modified by master")
+            runGit("git", "add", "initial.txt")
+            runGit("git", "commit", "-m", "master commit 2")
+
+            // At this point:
+            // - master has: initial.txt (modified by master), master_only.txt (newly added), to_delete.txt (still exists!)
+            // - jules-branch has: initial.txt (modified by jules), jules_work.txt (newly added), to_delete.txt (deleted!)
+            // We want the surgical checkout algorithm to:
+            // - Keep master_only.txt (which Jules's stale branch lacked).
+            // - Overwrite initial.txt with Jules's version (cleanly overriding master's modification without merge conflicts).
+            // - Keep to_delete.txt (completely ignoring Jules's stale workspace deletion!).
 
             // Let's compute INITIAL_BASE exactly as done in GitHubCli:
             val firstCommit = try {
@@ -972,9 +994,11 @@ class StateHandlerTest {
             val intendedFilesOutput = runGit("git", "diff", "--name-only", "--diff-filter=AM", initialBase, "jules-branch")
             val intendedFiles = intendedFilesOutput.lines().map { it.trim() }.filter { it.isNotEmpty() }
 
-            // Verify jules_work.txt is identified as intended, but master_only.txt is NOT
+            // Verify jules_work.txt and initial.txt are identified as intended, but master_only.txt and to_delete.txt are NOT
             assertTrue(intendedFiles.contains("jules_work.txt"))
+            assertTrue(intendedFiles.contains("initial.txt"))
             assertFalse(intendedFiles.contains("master_only.txt"))
+            assertFalse(intendedFiles.contains("to_delete.txt")) // Crucial: stale deletion of to_delete.txt is ignored!
 
             // Create a worktree/clean directory of master
             val worktreeDir = File(tempDir, "worktree-clean")
@@ -992,10 +1016,20 @@ class StateHandlerTest {
             assertTrue(masterOnlyInWorktree.exists(), "master_only.txt should NOT be deleted!")
             assertEquals("master content", masterOnlyInWorktree.readText().trim())
 
+            // Verify that to_delete.txt exists and was NOT deleted in the worktree (stale deletion ignored!)
+            val toDeleteInWorktree = File(worktreeDir, "to_delete.txt")
+            assertTrue(toDeleteInWorktree.exists(), "to_delete.txt should NOT be deleted because it was not in diff-filter=AM!")
+            assertEquals("to delete content", toDeleteInWorktree.readText().trim())
+
             // Verify that jules_work.txt exists in the worktree
             val julesWorkInWorktree = File(worktreeDir, "jules_work.txt")
             assertTrue(julesWorkInWorktree.exists(), "jules_work.txt should exist!")
             assertEquals("jules content", julesWorkInWorktree.readText().trim())
+
+            // Verify that initial.txt was successfully overwritten with Jules's version
+            val initialInWorktree = File(worktreeDir, "initial.txt")
+            assertTrue(initialInWorktree.exists())
+            assertEquals("initial content modified by jules", initialInWorktree.readText().trim())
 
             // Clean up worktree
             runGit("git", "worktree", "remove", worktreeDir.absolutePath, "--force")
