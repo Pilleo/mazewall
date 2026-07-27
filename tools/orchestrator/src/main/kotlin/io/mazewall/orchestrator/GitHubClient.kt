@@ -1,6 +1,12 @@
 package io.mazewall.orchestrator
 
+data class PrMergeStatus(
+    val mergeable: String,
+    val behindBy: Int
+)
+
 interface GitHubClient {
+    fun getPrMergeStatus(prNumber: String): PrMergeStatus
     fun findExistingIssueNumber(issueId: String): String?
     fun findLinkedPR(issueNumber: String, issueId: String, julesSessionId: String?): String?
     fun checkBuildStatus(prNumber: String): String
