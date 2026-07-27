@@ -572,7 +572,9 @@ internal class SupervisorSessionHandler(
                     true
                 }
                 1 -> { // Allow Continue
-                    val isInject = nr == traceeArch.accept || nr == traceeArch.accept4
+                    val isInject = nr == traceeArch.accept || nr == traceeArch.accept4 ||
+                        nr == traceeArch.open || nr == traceeArch.openat || nr == traceeArch.openat2 ||
+                        nr == traceeArch.connect
                     if (isInject) {
                         // Upgrade to emulation to prevent TOCTOU!
                         handleInjectFd(id, nr, args, pathStr, sockaddrBytes, resp, tid, traceeArch)
@@ -622,13 +624,28 @@ internal class SupervisorSessionHandler(
         tid: Tid,
         traceeArch: io.mazewall.core.Arch
     ): Boolean {
-        if (nr == traceeArch.open || nr == traceeArch.openat || nr == traceeArch.openat2 || nr == traceeArch.connect) {
-            sendSeccompContinue(id, resp)
-            return true
+        if (nr == traceeArch.open || nr == traceeArch.openat || nr == traceeArch.openat2) {
+            if (pathStr == null) {
+                sendSeccompContinue(id, resp)
+                return true
+            }
         }
+        if (nr == traceeArch.connect) {
+            if (sockaddrBytes == null) {
+                sendSeccompContinue(id, resp)
+                return true
+            }
+        }
+
         var localFdValue = -1
         try {
             localFdValue = when (nr) {
+                traceeArch.open, traceeArch.openat, traceeArch.openat2 -> {
+                    openFileInSupervisor(nr, args, pathStr!!, traceeArch)
+                }
+                traceeArch.connect -> {
+                    connectSocketInSupervisor(sockaddrBytes!!)
+                }
                 traceeArch.accept, traceeArch.accept4 -> {
                     handleAcceptAsync(id, nr, args, tid, traceeArch)
                     return true
@@ -639,7 +656,7 @@ internal class SupervisorSessionHandler(
             if (localFdValue < 0) {
                 logger.warning { "[SUPERVISOR-DEBUG] localFdValue is negative error: $localFdValue. Sending seccomp error." }
                 sendSeccompError(id, -localFdValue, resp)
-                return false
+                return true
             }
 
             val addfd = SeccompNotifAddFdSegment.of(arena.allocate(Layouts.SECCOMP_NOTIF_ADDFD))
@@ -666,7 +683,7 @@ internal class SupervisorSessionHandler(
             if (!success) {
                 logger.severe { "[SUPERVISOR-DEBUG] ioctl SECCOMP_IOCTL_NOTIF_ADDFD failed. Sending EPERM." }
                 sendSeccompError(id, NativeConstants.EPERM, resp)
-                return false
+                return true
             }
             return true
         } finally {
