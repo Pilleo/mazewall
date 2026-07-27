@@ -44,6 +44,23 @@ class RealGitHubClient(private val config: OrchestratorConfig) : GitHubClient {
     internal data class CachedValue<T>(val value: T, val expiry: Long)
     internal val cache = mutableMapOf<String, CachedValue<*>>()
 
+    private fun clearPrCache(prNumber: String) {
+        cache.remove("checkBuildStatus-$prNumber")
+        cache.remove("getPrMergeStatus-$prNumber")
+        cache.remove("getPrHeadSha-$prNumber")
+    }
+
+    override fun getPrMergeStatus(prNumber: String): PrMergeStatus = withCache("getPrMergeStatus-$prNumber") {
+        try {
+            val jsonText = execute("gh", "pr", "view", prNumber, "--json", "mergeable,behindBy")
+            val status = json.decodeFromString(GitHubPrStatus.serializer(), jsonText)
+            PrMergeStatus(status.mergeable, status.behindBy)
+        } catch (e: Exception) {
+            System.err.println("Error getting PR merge status for PR #$prNumber: ${e.message}")
+            PrMergeStatus("UNKNOWN", 0)
+        }
+    }
+
     private inline fun <T> withCache(key: String, block: () -> T): T {
         val now = System.currentTimeMillis()
         val cached = cache[key]
@@ -222,11 +239,18 @@ class RealGitHubClient(private val config: OrchestratorConfig) : GitHubClient {
     }
 
     private fun execute(vararg command: String): String {
+        return executeInDir(null, *command)
+    }
+
+    private fun executeInDir(workingDir: File?, vararg command: String): String {
         return RetryUtils.retry(config.maxRetries, config.initialRetryDelayMs, { System.err.println("  [GitHubCli] $it") }) {
             val directory = File("build/tmp").apply { mkdirs() }
             val tempFile = File.createTempFile("gh_cmd_", ".log", directory)
             try {
                 val pb = ProcessBuilder(*command)
+                if (workingDir != null) {
+                    pb.directory(workingDir)
+                }
                 pb.redirectErrorStream(true)
                 pb.redirectOutput(tempFile)
                 val process = pb.start()
@@ -291,37 +315,71 @@ class RealGitHubClient(private val config: OrchestratorConfig) : GitHubClient {
     }
 
     override fun rebaseBranch(prNumber: String): Boolean {
+        // Clear PR cache to prevent stale status
+        clearPrCache(prNumber)
+
         // 1. Try GitHub API native branch update with rebase first
         try {
             execute("gh", "pr", "update-branch", prNumber, "--rebase")
             return true
         } catch (e: Exception) {
-            System.err.println("gh pr update-branch --rebase failed for PR #$prNumber (${e.message}). Attempting local git fetch and rebase...")
+            System.err.println("gh pr update-branch --rebase failed for PR #$prNumber (${e.message}). Attempting local git fetch and rebase in worktree...")
         }
 
-        // 2. Fallback to local git rebase and force push
-        return try {
-            val branchName = execute("gh", "pr", "view", prNumber, "--json", "headRefName", "--jq", ".headRefName").trim()
+        // 2. Fallback to local git rebase in an isolated worktree and force push
+        val worktreeDir = File("../temp-rebase-$prNumber")
+        var currentBranch = ""
+        var branchName = ""
+        try {
+            branchName = execute("gh", "pr", "view", prNumber, "--json", "headRefName", "--jq", ".headRefName").trim()
             if (branchName.isBlank()) return false
+
+            currentBranch = execute("git", "rev-parse", "--abbrev-ref", "HEAD").trim()
+            if (currentBranch == branchName) {
+                execute("git", "checkout", "--detach")
+            }
 
             execute("git", "fetch", "origin", branchName)
             execute("git", "fetch", "origin", "master")
 
-            // Create temporary worktree or checkout branch safely
-            val currentBranch = execute("git", "rev-parse", "--abbrev-ref", "HEAD").trim()
+            // Clean up any stale worktree of the same name first
             try {
-                execute("git", "checkout", branchName)
-                execute("git", "rebase", "origin/master")
-                execute("git", "push", "--force-with-lease", "origin", branchName)
-                true
-            } finally {
-                if (currentBranch.isNotBlank() && currentBranch != "HEAD") {
-                    execute("git", "checkout", currentBranch)
-                }
+                execute("git", "worktree", "remove", worktreeDir.absolutePath, "--force")
+            } catch (_: Exception) {}
+            if (worktreeDir.exists()) {
+                worktreeDir.deleteRecursively()
             }
+            try {
+                execute("git", "worktree", "prune")
+            } catch (_: Exception) {}
+
+            execute("git", "branch", "-f", branchName, "origin/$branchName")
+            execute("git", "worktree", "add", worktreeDir.absolutePath, branchName)
+
+            // Run rebase, compile, and push in the worktree
+            executeInDir(worktreeDir, "git", "rebase", "origin/master")
+            executeInDir(worktreeDir, "./gradlew", "compileKotlin")
+            executeInDir(worktreeDir, "git", "push", "--force-with-lease", "origin", branchName)
+
+            return true
         } catch (e: Exception) {
-            System.err.println("Local git rebase failed for PR #$prNumber: ${e.message}")
-            false
+            System.err.println("Local worktree rebase failed for PR #$prNumber: ${e.message}")
+            return false
+        } finally {
+            try {
+                execute("git", "worktree", "remove", worktreeDir.absolutePath, "--force")
+            } catch (_: Exception) {}
+            if (worktreeDir.exists()) {
+                worktreeDir.deleteRecursively()
+            }
+            try {
+                execute("git", "worktree", "prune")
+            } catch (_: Exception) {}
+            if (currentBranch.isNotBlank() && currentBranch != "HEAD") {
+                try {
+                    execute("git", "checkout", currentBranch)
+                } catch (_: Exception) {}
+            }
         }
     }
 }
@@ -349,4 +407,10 @@ data class CommentsContainer(
 @Serializable
 data class GitHubMergeable(
     val mergeable: String
+)
+
+@Serializable
+data class GitHubPrStatus(
+    val mergeable: String,
+    val behindBy: Int
 )
