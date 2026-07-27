@@ -205,6 +205,7 @@ class "PolicyKt" as io.mazewall.PolicyKt {
   + {static}Policy<S, Compiled> compile(Policy<? extends S, ? extends Uncompiled>, Arch)
   + {static}Policy<ProcessWideSafe, Uncompiled> plusProcessWide(Policy<? extends ProcessWideSafe, ? extends Uncompiled>, Policy<? extends ProcessWideSafe, ? extends Uncompiled>)
   + {static}Policy<ThreadLocalOnly, Uncompiled> plusThreadLocal(Policy<? extends S, ? extends Uncompiled>, Policy<? extends ThreadLocalOnly, ? extends Uncompiled>)
+  + {static}AutoCloseable install(Policy<? extends S, ? extends Uncompiled>)
 }
 class "PolicyPresets" as io.mazewall.PolicyPresets {
   + {static}PolicyPresets INSTANCE
@@ -273,6 +274,8 @@ class "StackProfileEntryDto" as io.mazewall.StackProfileEntryDto {
   +List<StackFrameDto> getStackTrace()
 }
 class "UnsupportedKernelFeatureException" as io.mazewall.UnsupportedKernelFeatureException {
+}
+class "UnsupportedPlatformException" as io.mazewall.UnsupportedPlatformException {
 }
 interface "YamaPtraceScope" as io.mazewall.YamaPtraceScope {
 }
