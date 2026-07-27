@@ -501,9 +501,9 @@ class RealGitHubClient(private val config: OrchestratorConfig) : GitHubClient {
 
             if (cleanedAny) {
                 try {
-                    executeInDir(worktreeDir, "git", "commit", "--amend", "--no-edit")
+                    executeInDir(worktreeDir, "git", "commit", "-m", "chore: discard unintended file modifications")
                 } catch (e: Exception) {
-                    System.err.println("Failed to amend merge commit during self-healing checkout: ${e.message}")
+                    System.err.println("Failed to commit self-healing cleanup: ${e.message}")
                 }
             }
 

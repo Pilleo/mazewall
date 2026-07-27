@@ -26,7 +26,7 @@ fi
 PR_NUMBER="$1"
 echo "🔍 Inspecting PR #${PR_NUMBER} on GitHub..."
 
-BRANCH_NAME=$(env -u GITHUB_TOKEN gh pr view "$PR_NUMBER" --json headRefName --jq .headRefName 2>/dev/null || echo "${BRANCH_NAME:-}")
+BRANCH_NAME=$(gh pr view "$PR_NUMBER" --json headRefName --jq .headRefName 2>/dev/null || echo "${BRANCH_NAME:-}")
 if [ -z "$BRANCH_NAME" ]; then
   echo "❌ Could not determine head branch name for PR #${PR_NUMBER}"
   exit 1
@@ -65,9 +65,9 @@ fi
 
 # 🧹 Self-healing: Discard modifications to any files that are not explicitly allowed.
 echo "🧹 Finding linked issue and target files for self-healing checkout..."
-ISSUE_NUMBER=$(env -u GITHUB_TOKEN gh pr view "$PR_NUMBER" --json closingIssuesReferences --jq '.[0].number' 2>/dev/null || echo "")
+ISSUE_NUMBER=$(gh pr view "$PR_NUMBER" --json closingIssuesReferences --jq '.[0].number' 2>/dev/null || echo "")
 if [ -z "$ISSUE_NUMBER" ]; then
-  PR_BODY=$(env -u GITHUB_TOKEN gh pr view "$PR_NUMBER" --json body --jq '.body' 2>/dev/null || echo "")
+  PR_BODY=$(gh pr view "$PR_NUMBER" --json body --jq '.body' 2>/dev/null || echo "")
   ISSUE_NUMBER=$(echo "$PR_BODY" | grep -ioE 'fixes\s+#?[0-9]+' | grep -oE '[0-9]+' | head -n 1 || echo "")
 fi
 
@@ -124,7 +124,7 @@ for f in $DIFFERENT_FILES; do
 done
 
 if [ "$CLEANED_ANY" -eq 1 ]; then
-  git commit --amend --no-edit
+  git commit -m "chore: discard unintended file modifications"
 fi
 
 # Check if anything actually changed (branch might already be up to date)

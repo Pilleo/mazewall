@@ -1314,7 +1314,7 @@ class StateHandlerTest {
             }
 
             if (cleanedAny) {
-                runGitInDir(worktreeDir, "git", "commit", "--amend", "--no-edit")
+                runGitInDir(worktreeDir, "git", "commit", "-m", "chore: discard unintended file modifications")
             }
 
             // Verify that after self-healing, allowed.txt is still modified with Jules's changes
