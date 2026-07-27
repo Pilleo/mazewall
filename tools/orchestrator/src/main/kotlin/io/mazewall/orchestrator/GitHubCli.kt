@@ -52,9 +52,10 @@ class RealGitHubClient(private val config: OrchestratorConfig) : GitHubClient {
 
     override fun getPrMergeStatus(prNumber: String): PrMergeStatus = withCache("getPrMergeStatus-$prNumber") {
         try {
-            val jsonText = execute("gh", "pr", "view", prNumber, "--json", "mergeable,behindBy")
+            val jsonText = execute("gh", "pr", "view", prNumber, "--json", "mergeable,mergeStateStatus")
             val status = json.decodeFromString(GitHubPrStatus.serializer(), jsonText)
-            PrMergeStatus(status.mergeable, status.behindBy)
+            val isBehind = status.mergeStateStatus == "BEHIND"
+            PrMergeStatus(status.mergeable, if (isBehind) 1 else 0)
         } catch (e: Exception) {
             System.err.println("Error getting PR merge status for PR #$prNumber: ${e.message}")
             PrMergeStatus("UNKNOWN", 0)
@@ -411,6 +412,6 @@ data class GitHubMergeable(
 
 @Serializable
 data class GitHubPrStatus(
-    val mergeable: String,
-    val behindBy: Int
+    val mergeable: String = "UNKNOWN",
+    val mergeStateStatus: String = "UNKNOWN"
 )
