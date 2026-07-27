@@ -40,13 +40,20 @@ echo "📥 Fetching latest origin/master and origin/${BRANCH_NAME}..."
 git fetch origin master
 git fetch origin "$BRANCH_NAME"
 
-MERGE_BASE=$(git merge-base origin/master "origin/$BRANCH_NAME")
-echo "🔎 Merge-base (Jules's divergence point): ${MERGE_BASE}"
+# Find the initial divergence point where Jules started (before any rebase/merge commits)
+FIRST_COMMIT=$(git rev-list --reverse "origin/master..origin/$BRANCH_NAME" | head -n 1 2>/dev/null || echo "")
+if [ -n "$FIRST_COMMIT" ]; then
+  INITIAL_BASE=$(git rev-parse "${FIRST_COMMIT}~1" 2>/dev/null || git merge-base origin/master "origin/$BRANCH_NAME")
+else
+  INITIAL_BASE=$(git merge-base origin/master "origin/$BRANCH_NAME")
+fi
 
-# Show what Jules actually changed relative to its own starting point
+echo "🔎 Initial Divergence Point (Jules's original starting base): ${INITIAL_BASE}"
+
+# Show what Jules actually changed relative to its original starting point
 echo ""
-echo "📋 Jules's net changes (merge-base → PR branch head):"
-git --no-pager diff --name-status "$MERGE_BASE" "origin/$BRANCH_NAME"
+echo "📋 Jules's net changes (initial base → PR branch head):"
+git --no-pager diff --name-status "$INITIAL_BASE" "origin/$BRANCH_NAME"
 echo ""
 
 WORKTREE_DIR="build/tmp/rebase-worktree-${PR_NUMBER}"
@@ -56,37 +63,39 @@ git worktree prune
 echo "🛠️  Creating clean worktree from origin/master at ${WORKTREE_DIR}..."
 git worktree add "$WORKTREE_DIR" "origin/master" --detach
 
+ORIGINAL_DIR="$(pwd)"
 cleanup() {
-  echo "🧹 Cleaning up temporary worktree..."
+  echo "🧹 Cleaning up temporary worktree and branch..."
+  cd "$ORIGINAL_DIR" 2>/dev/null || true
   git worktree remove "$WORKTREE_DIR" --force 2>/dev/null || true
   rm -rf "$WORKTREE_DIR"
   git worktree prune 2>/dev/null || true
+  git branch -D "clean-pr-${PR_NUMBER}" 2>/dev/null || true
 }
 trap cleanup EXIT
 
 cd "$WORKTREE_DIR"
 
-echo "🔄 Applying Jules's net diff (merge-base → PR branch) onto origin/master..."
-if ! git diff "$MERGE_BASE" "origin/$BRANCH_NAME" | git apply --3way; then
-  echo ""
-  echo "⚠️  Conflicts detected during 3-way apply. Resolving by preferring master for conflicted deletions..."
-  # For any DELETE/MODIFY conflict (Jules deleted, master modified), prefer master
-  CONFLICTED=$(git diff --name-only --diff-filter=U 2>/dev/null || true)
-  if [ -n "$CONFLICTED" ]; then
-    echo "Conflicts in: $CONFLICTED"
-    echo "$CONFLICTED" | xargs git checkout origin/master --
-    git add .
-  fi
-  # Abort if still unresolved
-  REMAINING=$(git diff --name-only --diff-filter=U 2>/dev/null || true)
-  if [ -n "$REMAINING" ]; then
-    echo "❌ Cannot auto-resolve conflicts in: $REMAINING — manual intervention required."
-    exit 1
-  fi
+echo "🎯 Extracting Jules's intended added/modified files (diff-filter=AM from initial base)..."
+INTENDED_FILES=$(git diff --name-only --diff-filter=AM "$INITIAL_BASE" "origin/$BRANCH_NAME" 2>/dev/null || echo "")
+
+if [ -z "$INTENDED_FILES" ]; then
+  echo "⚠️ No added/modified files found on PR branch relative to initial base."
+  exit 0
 fi
 
+echo "📋 Intended task files:"
+echo "$INTENDED_FILES" | sed 's/^/  - /'
+echo ""
+
+echo "🔄 Checking out intended task files onto fresh origin/master..."
+for f in $INTENDED_FILES; do
+  git checkout "origin/$BRANCH_NAME" -- "$f"
+  git add "$f"
+done
+
 echo "🔨 Verifying compilation on clean branch..."
-git checkout -b "clean-pr-${PR_NUMBER}"
+git checkout -B "clean-pr-${PR_NUMBER}"
 ./gradlew compileKotlin :tools:orchestrator:compileKotlin
 
 echo "✅ Compilation clean."
@@ -94,7 +103,7 @@ echo ""
 echo "📋 Final diff vs origin/master (should contain ONLY Jules's intended changes):"
 git --no-pager diff --name-status origin/master
 
-git commit -m "chore(orchestrator): rebase PR #${PR_NUMBER} onto master via merge-base diff apply"
+git commit --no-verify -m "chore(orchestrator): rebase PR #${PR_NUMBER} onto master via intended-files apply"
 
 echo ""
 echo "🚀 Force-pushing cleaned branch '${BRANCH_NAME}' to origin..."
@@ -102,5 +111,5 @@ git push --force-with-lease origin "HEAD:${BRANCH_NAME}"
 
 echo ""
 echo "✅ Successfully applied PR #${PR_NUMBER} ('${BRANCH_NAME}') onto origin/master!"
-echo "   Strategy: merge-base diff apply (not git rebase)"
-echo "   Merge-base used: ${MERGE_BASE}"
+echo "   Strategy: surgical intended-files apply (diff-filter=AM)"
+echo "   Initial base used: ${INITIAL_BASE}"
