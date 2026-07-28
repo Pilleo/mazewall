@@ -970,21 +970,21 @@ class StateHandlerTest {
             val initialFile = File(tempDir, "initial.txt")
             initialFile.writeText("initial content")
             runGit("git", "add", "initial.txt")
-            runGit("git", "commit", "-m", "initial commit")
+            runGit("git", "commit", "--no-verify", "-m", "initial commit")
 
             // 3. Create PR branch and commit changes
             runGit("git", "checkout", "-b", "jules-branch")
             val julesFile = File(tempDir, "jules_work.txt")
             julesFile.writeText("jules content")
             runGit("git", "add", "jules_work.txt")
-            runGit("git", "commit", "-m", "jules commit 1")
+            runGit("git", "commit", "--no-verify", "-m", "jules commit 1")
 
             // 4. Switch back to master and add/modify master-only files (non-conflicting)
             runGit("git", "checkout", "master")
             val masterFile = File(tempDir, "master_only.txt")
             masterFile.writeText("master content")
             runGit("git", "add", "master_only.txt")
-            runGit("git", "commit", "-m", "master commit 1")
+            runGit("git", "commit", "--no-verify", "-m", "master commit 1")
 
             // 5. Simulate our mergeMasterIntoBranch behavior using an isolated worktree
             val worktreeDir = File(tempDir, "worktree-merge")
@@ -1054,19 +1054,19 @@ class StateHandlerTest {
             val initialFile = File(tempDir, "initial.txt")
             initialFile.writeText("initial content")
             runGit("git", "add", "initial.txt")
-            runGit("git", "commit", "-m", "initial commit")
+            runGit("git", "commit", "--no-verify", "-m", "initial commit")
 
             // Create PR branch and modify initial.txt
             runGit("git", "checkout", "-b", "jules-branch")
             initialFile.writeText("jules modified initial.txt")
             runGit("git", "add", "initial.txt")
-            runGit("git", "commit", "-m", "jules commit 1")
+            runGit("git", "commit", "--no-verify", "-m", "jules commit 1")
 
             // Switch to master and modify initial.txt (causing conflict)
             runGit("git", "checkout", "master")
             initialFile.writeText("master modified initial.txt differently")
             runGit("git", "add", "initial.txt")
-            runGit("git", "commit", "-m", "master commit 1")
+            runGit("git", "commit", "--no-verify", "-m", "master commit 1")
 
             // Create worktree on jules-branch
             val worktreeDir = File(tempDir, "worktree-conflict")
@@ -1137,7 +1137,7 @@ class StateHandlerTest {
             val initialFile = File(tempDir, "initial.txt")
             initialFile.writeText("initial content")
             runGit("git", "add", "initial.txt")
-            runGit("git", "commit", "-m", "initial commit")
+            runGit("git", "commit", "--no-verify", "-m", "initial commit")
 
             // Create PR branch
             runGit("git", "checkout", "-b", "jules-branch")
@@ -1146,7 +1146,7 @@ class StateHandlerTest {
             val julesFile = File(tempDir, "jules_work.txt")
             julesFile.writeText("jules content")
             runGit("git", "add", "jules_work.txt")
-            runGit("git", "commit", "-m", "jules commit 1")
+            runGit("git", "commit", "--no-verify", "-m", "jules commit 1")
 
             // Create worktree on jules-branch
             val worktreeDir = File(tempDir, "worktree-up-to-date")
@@ -1265,7 +1265,7 @@ class StateHandlerTest {
             val masterOnlyFile = java.io.File(tempDir, "master_only.txt")
             masterOnlyFile.writeText("master content")
             runGit("git", "add", "allowed.txt", "master_only.txt")
-            runGit("git", "commit", "-m", "initial commit")
+            runGit("git", "commit", "--no-verify", "-m", "initial commit")
 
             // Create a completely unrelated orphaned branch simulating Jules root commit
             runGit("git", "checkout", "--orphan", "jules-branch")
@@ -1276,7 +1276,7 @@ class StateHandlerTest {
             val disallowedFile = java.io.File(tempDir, "disallowed.txt")
             disallowedFile.writeText("disallowed modified content")
             runGit("git", "add", "allowed.txt", "disallowed.txt")
-            runGit("git", "commit", "-m", "jules changes")
+            runGit("git", "commit", "--no-verify", "-m", "jules changes")
 
             // Create worktree on jules-branch
             val worktreeDir = java.io.File(tempDir, "worktree-unrelated-rescue")
@@ -1396,7 +1396,7 @@ class StateHandlerTest {
             val disallowedFile = File(tempDir, "disallowed.txt")
             disallowedFile.writeText("disallowed initial content")
             runGit("git", "add", "allowed.txt", "disallowed.txt")
-            runGit("git", "commit", "-m", "initial commit")
+            runGit("git", "commit", "--no-verify", "-m", "initial commit")
 
             // Create PR branch
             runGit("git", "checkout", "-b", "jules-branch")
@@ -1405,14 +1405,14 @@ class StateHandlerTest {
             allowedFile.writeText("allowed modified content")
             disallowedFile.writeText("disallowed modified content")
             runGit("git", "add", "allowed.txt", "disallowed.txt")
-            runGit("git", "commit", "-m", "jules changes")
+            runGit("git", "commit", "--no-verify", "-m", "jules changes")
 
             // Switch to master and make a commit
             runGit("git", "checkout", "master")
             val dummyFile = File(tempDir, "dummy.txt")
             dummyFile.writeText("dummy content")
             runGit("git", "add", "dummy.txt")
-            runGit("git", "commit", "-m", "master changes")
+            runGit("git", "commit", "--no-verify", "-m", "master changes")
 
             // Create worktree on jules-branch
             val worktreeDir = File(tempDir, "worktree-self-healing")
