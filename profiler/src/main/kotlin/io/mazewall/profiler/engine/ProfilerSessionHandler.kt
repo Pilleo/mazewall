@@ -45,6 +45,7 @@ internal class ProfilerSessionHandler(
     private val ioOps: NativeIoOperations,
     private val memoryReader: ProfilerMemoryReader,
     private val syscallMap: Map<Int, String>,
+    private val parser: SeccompNotificationParser = RealSeccompNotificationParser,
     private val onShutdown: (String) -> Unit,
 ) {
     val ledger = SessionEventLedger()
@@ -66,7 +67,8 @@ internal class ProfilerSessionHandler(
             return LoopAction.Break
         }
 
-        val socketRevents = pollFds.readShort(POLLFD_REVENT_DATA_OFF).toInt()
+        val pollEvents = parser.readPollEvents(pollFds)
+        val socketRevents = pollEvents.socketRevents.toInt()
         val errorOrHup = NativeConstants.POLLERR.toInt() or NativeConstants.POLLHUP.toInt() or NativeConstants.POLLNVAL.toInt()
         if ((socketRevents and (NativeConstants.POLLIN.toInt() or errorOrHup)) != 0) {
             val isDeadOrShutdown = (socketRevents and errorOrHup) != 0 || handleShutdownRequest(ackBuf)
@@ -76,7 +78,7 @@ internal class ProfilerSessionHandler(
             }
         }
 
-        val listenerRevents = pollFds.readShort(POLLFD_REVENTS_OFF).toInt()
+        val listenerRevents = pollEvents.listenerRevents.toInt()
         if ((listenerRevents and errorOrHup) != 0) {
             state = ProfilerState.Terminated(socketFd, listenerFd)
             return LoopAction.Shutdown
@@ -142,9 +144,10 @@ internal class ProfilerSessionHandler(
     ): Boolean {
         val currentState = state as? ProfilerState.ActiveSession ?: return false
 
-        val id = notif.readLong(NOTIF_ID_OFF)
-        val pidVal = notif.readInt(NOTIF_PID_OFF)
-        val nr = notif.readInt(NOTIF_NR_OFF)
+        val parsedNotif = parser.readNotif(notif)
+        val id = parsedNotif.id
+        val pidVal = parsedNotif.pid
+        val nr = parsedNotif.nr
 
         System.err.println("[DAEMON-DEBUG] Received notification: id=$id, pid=$pidVal, nr=$nr")
         val handshake = HandshakeSession.Active(id, listenerFd)
@@ -154,10 +157,7 @@ internal class ProfilerSessionHandler(
         try {
             ledger.record(SessionEvent.Notified(System.nanoTime(), pidVal.toLong(), nr.toLong()))
 
-            val args = LongArray(MAX_SYSCALL_ARGS)
-            for (i in 0 until MAX_SYSCALL_ARGS) {
-                args[i] = notif.readLong(NOTIF_ARGS_OFF + i * 8L)
-            }
+            val args = parsedNotif.args
 
             // RESOLVE: Transform raw event into a resolved event (read path from tracee memory).
             val resolver = SyscallPathResolver(memoryReader, ledger)
@@ -181,8 +181,7 @@ internal class ProfilerSessionHandler(
             val waitingState = notifiedState.waitingForAck()
             state = waitingState
 
-            socketPollFd.writeInt(POLLFD_FD_OFF, socketFd.value)
-            socketPollFd.writeShort(POLLFD_EVENTS_OFF, NativeConstants.POLLIN)
+            parser.writeSocketPoll(socketPollFd, socketFd.value, NativeConstants.POLLIN)
 
             // DELIVER: Write event to JVM listener socket.
             System.err.println("[DAEMON-DEBUG] Sending event to JVM listener: tid=$pidVal, syscall=${resolvedEvent.syscallName}, paths=${resolvedEvent.paths}")
