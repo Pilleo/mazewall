@@ -8,9 +8,6 @@ class BranchRebaserTest {
 
     @Test
     fun `test successful merge without rescue`() {
-        val tempBacklog = java.io.File.createTempFile("issue-20260727-140934-some-issue", ".md")
-        tempBacklog.writeText("target_files: [test_target.txt]")
-        println("TEST WROTE: " + tempBacklog.readText())
 
         var clearCacheCalled = false
         val commands = mutableListOf<String>()
@@ -21,8 +18,7 @@ class BranchRebaserTest {
                 commands.add(cmd)
                 if (cmd.contains("headRefName")) return@BranchRebaser "test-branch"
                 if (cmd.contains("body")) return@BranchRebaser "Resolves issue-20260727-140934-some-issue"
-                if (cmd.contains("find")) return@BranchRebaser tempBacklog.absolutePath
-                ""
+                                ""
             },
             executeInDir = { dir, args ->
                 val cmd = args.joinToString(" ")
@@ -45,11 +41,10 @@ class BranchRebaserTest {
         worktreeDir.mkdirs()
 
         val result = try {
-            rebaser.run("123", "session_abc")
+            rebaser.run("123", "session_abc", listOf("test_target.txt"))
         } finally {
             worktreeDir.deleteRecursively()
-            tempBacklog.delete()
-        }
+                    }
 
         println(commands)
 
@@ -63,9 +58,6 @@ class BranchRebaserTest {
 
     @Test
     fun `test merge aborts on normal conflict`() {
-        val tempBacklog = java.io.File.createTempFile("issue-20260727-140934-some-issue", ".md")
-        tempBacklog.writeText("target_files: [test_target.txt]")
-        println("TEST WROTE: " + tempBacklog.readText())
 
         val rebaser = BranchRebaser(
             execute = { args ->
@@ -73,7 +65,7 @@ class BranchRebaserTest {
                 when (cmd) {
                     "gh pr view 123 --json headRefName --jq .headRefName" -> "test-branch"
                     "gh pr view 123 --json body --jq .body" -> "Resolves issue-20260727-140934-some-issue"
-                    "find docs/internals/backlog -name issue-20260727-140934-some-issue.md" -> tempBacklog.absolutePath
+                    "find docs/internals/backlog -name issue-20260727-140934-some-issue.md" -> ""
                     else -> ""
                 }
             },
@@ -91,11 +83,10 @@ class BranchRebaserTest {
         worktreeDir.mkdirs()
 
         val result = try {
-            rebaser.run("123", "session_abc")
+            rebaser.run("123", "session_abc", listOf("test_target.txt"))
         } finally {
             worktreeDir.deleteRecursively()
-            tempBacklog.delete()
-        }
+                    }
 
         assertFalse(result.success)
         assertTrue(result.conflictCount > 0)
@@ -104,9 +95,6 @@ class BranchRebaserTest {
 
     @Test
     fun `test fallback to rescue on unrelated histories`() {
-        val tempBacklog = java.io.File.createTempFile("issue-20260727-140934-some-issue", ".md")
-        tempBacklog.writeText("target_files: [test_target.txt]")
-        println("TEST WROTE: " + tempBacklog.readText())
 
         val commands = mutableListOf<String>()
 
@@ -117,7 +105,7 @@ class BranchRebaserTest {
                 when (cmd) {
                     "gh pr view 123 --json headRefName --jq .headRefName" -> "test-branch"
                     "gh pr view 123 --json body --jq .body" -> "Resolves issue-20260727-140934-some-issue"
-                    "find docs/internals/backlog -name issue-20260727-140934-some-issue.md" -> tempBacklog.absolutePath
+                    "find docs/internals/backlog -name issue-20260727-140934-some-issue.md" -> ""
                     else -> ""
                 }
             },
@@ -139,11 +127,10 @@ class BranchRebaserTest {
         worktreeDir.mkdirs()
 
         val result = try {
-            rebaser.run("123", "session_abc")
+            rebaser.run("123", "session_abc", listOf("test_target.txt"))
         } finally {
             worktreeDir.deleteRecursively()
-            tempBacklog.delete()
-        }
+                    }
 
         assertFalse(result.success)
         assertTrue(result.conflictCount > 0)
