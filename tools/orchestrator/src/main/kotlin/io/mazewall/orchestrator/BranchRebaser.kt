@@ -3,10 +3,10 @@ package io.mazewall.orchestrator
 import java.io.File
 
 sealed class RebaseProcessState {
-    data class Init(val prNumber: String, val sessionId: String?) : RebaseProcessState()
-    data class SetupWorktree(val prNumber: String, val branchName: String, val worktreeDir: File, val sessionId: String?) : RebaseProcessState()
-    data class AttemptMerge(val prNumber: String, val branchName: String, val worktreeDir: File, val sessionId: String?) : RebaseProcessState()
-    data class HandleRescue(val prNumber: String, val branchName: String, val worktreeDir: File, val sessionId: String?) : RebaseProcessState()
+    data class Init(val prNumber: String, val sessionId: String?, val issueId: String?) : RebaseProcessState()
+    data class SetupWorktree(val prNumber: String, val branchName: String, val worktreeDir: File, val sessionId: String?, val issueId: String?) : RebaseProcessState()
+    data class AttemptMerge(val prNumber: String, val branchName: String, val worktreeDir: File, val sessionId: String?, val issueId: String?) : RebaseProcessState()
+    data class HandleRescue(val prNumber: String, val branchName: String, val worktreeDir: File, val sessionId: String?, val issueId: String?) : RebaseProcessState()
     data class VerifyAndPush(val prNumber: String, val branchName: String, val worktreeDir: File, val isRescue: Boolean) : RebaseProcessState()
     data class Completed(val result: RebaseResult) : RebaseProcessState()
     data class Failed(val result: RebaseResult) : RebaseProcessState()
@@ -19,8 +19,8 @@ class BranchRebaser(
     private val clearPrCache: (String) -> Unit
 ) {
 
-    fun run(prNumber: String, sessionId: String?): RebaseResult {
-        var state: RebaseProcessState = RebaseProcessState.Init(prNumber, sessionId)
+    fun run(prNumber: String, sessionId: String?, issueId: String? = null): RebaseResult {
+        var state: RebaseProcessState = RebaseProcessState.Init(prNumber, sessionId, issueId)
         while (state !is RebaseProcessState.Completed && state !is RebaseProcessState.Failed) {
             state = when (state) {
                 is RebaseProcessState.Init -> handleInit(state)
@@ -59,7 +59,7 @@ class BranchRebaser(
         if (branchName.isBlank()) return RebaseProcessState.Failed(RebaseResult(success = false, conflictCount = 0))
 
         val worktreeDir = File("../temp-rebase-${state.prNumber}")
-        return RebaseProcessState.SetupWorktree(state.prNumber, branchName, worktreeDir, state.sessionId)
+        return RebaseProcessState.SetupWorktree(state.prNumber, branchName, worktreeDir, state.sessionId, state.issueId)
     }
 
     private fun handleSetupWorktree(state: RebaseProcessState.SetupWorktree): RebaseProcessState {
@@ -90,23 +90,26 @@ class BranchRebaser(
             return RebaseProcessState.Failed(RebaseResult(success = false, conflictCount = 0))
         }
 
-        return RebaseProcessState.AttemptMerge(state.prNumber, state.branchName, state.worktreeDir, state.sessionId)
+        return RebaseProcessState.AttemptMerge(state.prNumber, state.branchName, state.worktreeDir, state.sessionId, state.issueId)
     }
 
         private fun handleAttemptMerge(state: RebaseProcessState.AttemptMerge): RebaseProcessState {
         try {
-            val issueBody = execute(arrayOf("gh", "pr", "view", state.prNumber, "--json", "body", "--jq", ".body"))
-            val backlogIssueMatch = Regex("""\bissue-[0-9]{8}-[0-9]{6}[a-zA-Z0-9_-]+(\.md)?\b""").find(issueBody)
+                        var backlogFileName: String? = state.issueId?.let { if (it.endsWith(".md")) it else "$it.md" }
+            if (backlogFileName == null) {
+                val issueBody = execute(arrayOf("gh", "pr", "view", state.prNumber, "--json", "body", "--jq", ".body"))
+                val backlogIssueMatch = Regex("""\bissue-[0-9]{8}-[0-9]{6}[a-zA-Z0-9_-]+(\.md)?\b""").find(issueBody)
+                if (backlogIssueMatch != null) {
+                    backlogFileName = backlogIssueMatch.value
+                    if (!backlogFileName.endsWith(".md")) backlogFileName += ".md"
+                }
+            }
 
-            if (backlogIssueMatch == null) {
-                System.err.println("Could not find backlog issue reference in PR #${state.prNumber} body.")
+            if (backlogFileName == null) {
+                System.err.println("Could not find backlog issue reference for PR #${state.prNumber} (no issueId provided and not found in body).")
                 return RebaseProcessState.Failed(RebaseResult(success = false, conflictCount = 0))
             }
 
-            var backlogFileName = backlogIssueMatch.value
-            if (!backlogFileName.endsWith(".md")) {
-                backlogFileName += ".md"
-            }
             val backlogCommandOutput = execute(arrayOf("find", "docs/internals/backlog", "-name", backlogFileName))
             val backlogFile = java.io.File(backlogCommandOutput.lines().firstOrNull { it.isNotBlank() } ?: "")
             if (!backlogFile.exists()) {

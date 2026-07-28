@@ -742,7 +742,7 @@ private fun handleRebaseAndConflicts(env: OrchestratorEnvironment, slot: SlotCon
         env.println("🔄 Active PR #$prNumber is $reason. Attempting automated merge of master into branch...")
 
         val sessionId = env.julesClient.getActiveSession(slot.currentIssueId)?.id
-        val rebaseResult = env.gitHubClient.mergeMasterIntoBranch(prNumber, sessionId)
+        val rebaseResult = env.gitHubClient.mergeMasterIntoBranch(prNumber, sessionId, slot.currentIssueId)
         if (rebaseResult.needsRescueApproval && rebaseResult.rescueBranchName != null) {
             env.println("🚨 PR #$prNumber has unrelated histories. Rescue branch prepared.")
             env.sendNotification( "🚨 Unrelated histories detected on PR #$prNumber. I've prepared a rescued branch: ${rebaseResult.rescueBranchName}. Approve to forcefully overwrite the PR branch.")

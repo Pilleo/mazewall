@@ -65,7 +65,7 @@ class MockOrchestratorEnvironment : OrchestratorEnvironment {
         override fun getFailedBuildLogs(prNumber: String): String = "mock failed logs"
         override fun getPrUrl(prNumber: String): String = "mock url"
         override fun isCommitEmpty(prNumber: String, shaOld: String, shaNew: String): Boolean = isCommitEmptyResult
-        override fun mergeMasterIntoBranch(prNumber: String, sessionId: String?): RebaseResult {
+        override fun mergeMasterIntoBranch(prNumber: String, sessionId: String?, issueId: String?): RebaseResult {
             mergeMasterIntoBranchCallCount++
             return mergeMasterIntoBranchResult
         }
