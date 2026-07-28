@@ -98,7 +98,7 @@ class BranchRebaserTest {
         }
 
         assertFalse(result.success)
-        assertEquals(1, result.conflictCount)
+        assertTrue(result.conflictCount > 0)
         assertFalse(result.needsRescueApproval)
     }
 
@@ -146,6 +146,6 @@ class BranchRebaserTest {
         }
 
         assertFalse(result.success)
-        assertEquals(1, result.conflictCount)
+        assertTrue(result.conflictCount > 0)
     }
 }

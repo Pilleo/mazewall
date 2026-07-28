@@ -158,9 +158,10 @@ class BranchRebaser(
 
             if (checkoutErrors.size == intendedFiles.size) {
                  System.err.println("Failed to extract any of the intended files from origin/${state.branchName}.")
-                 return RebaseProcessState.Failed(RebaseResult(success = false, conflictCount = 1))
+                 return RebaseProcessState.Failed(RebaseResult(success = false, conflictCount = intendedFiles.size, conflictedFiles = intendedFiles))
             } else if (checkoutErrors.isNotEmpty()) {
                  System.err.println("Warning: Failed to extract some files: ${checkoutErrors.joinToString(", ")}")
+                 return RebaseProcessState.Failed(RebaseResult(success = false, conflictCount = checkoutErrors.size, conflictedFiles = checkoutErrors))
             }
 
             val hasChanges = try {
