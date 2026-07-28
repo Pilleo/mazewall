@@ -50,7 +50,7 @@ class BranchRebaserTest {
         assertTrue(commands.contains("git fetch origin test-branch"))
         assertTrue(commands.contains("inDirNoRetry: git merge origin/master --no-edit -m chore: merge master into PR #123 to keep up to date"))
         assertTrue(commands.contains("inDir: git checkout origin/master -- disallowed.txt"))
-        assertTrue(commands.contains("inDir: git commit -m chore: discard unintended file modifications"))
+        assertTrue(commands.contains("inDir: git commit --no-verify -m chore: discard unintended file modifications"))
         assertTrue(commands.contains("inDir: git push --force-with-lease origin HEAD:test-branch"))
     }
 
@@ -134,7 +134,7 @@ class BranchRebaserTest {
         assertTrue(commands.contains("inDir: git reset --hard origin/master"))
         assertTrue(commands.contains("inDir: git apply --3way jules-rescue.patch"))
         assertTrue(commands.contains("inDir: git add ."))
-        assertTrue(commands.contains("inDir: git commit -m chore(orchestrator): rescue PR #123 onto master via patch apply"))
+        assertTrue(commands.contains("inDir: git commit --no-verify -m chore(orchestrator): rescue PR #123 onto master via patch apply"))
         assertTrue(commands.contains("inDir: git push --force origin HEAD:test-branch-rescue"))
     }
 }

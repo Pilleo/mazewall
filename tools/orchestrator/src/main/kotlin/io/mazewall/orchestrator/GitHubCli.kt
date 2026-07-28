@@ -454,7 +454,7 @@ class RealGitHubClient(private val config: OrchestratorConfig) : GitHubClient {
         return BranchRebaser(
             execute = { args -> execute(*args) },
             executeInDir = { dir, args -> executeInDir(dir, *args) },
-            executeInDirNoRetry = { dir, args -> executeInDir(dir, *args) },
+            executeInDirNoRetry = { dir, args -> executeInDir(dir, *args, retry = false) },
             clearPrCache = ::clearPrCache,
             fetchJulesPatch = fetchJulesPatch ?: { null }
         ).run(prNumber, targetFiles)

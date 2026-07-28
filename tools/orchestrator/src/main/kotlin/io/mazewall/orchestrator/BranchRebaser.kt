@@ -140,7 +140,7 @@ class BranchRebaser(
                     }
                     if (midMergeCleaned) {
                         try {
-                            executeInDir(state.worktreeDir, arrayOf("git", "commit", "--no-edit"))
+                            executeInDir(state.worktreeDir, arrayOf("git", "commit", "--no-verify", "--no-edit"))
                             return RebaseProcessState.SelfHeal(state.prNumber, state.branchName, state.worktreeDir, state.targetFiles)
                         } catch (ex: Exception) {
                             System.err.println("Failed to commit resolved dirty files mid-merge: ${ex.message}")
@@ -181,7 +181,7 @@ class BranchRebaser(
 
         if (cleanedAny) {
             try {
-                executeInDir(state.worktreeDir, arrayOf("git", "commit", "-m", "chore: discard unintended file modifications"))
+                executeInDir(state.worktreeDir, arrayOf("git", "commit", "--no-verify", "-m", "chore: discard unintended file modifications"))
             } catch (e: Exception) {
                 System.err.println("Failed to commit self-healing cleanup: ${e.message}")
             }
@@ -235,7 +235,7 @@ class BranchRebaser(
             }
 
             if (hasChanges) {
-                executeInDir(state.worktreeDir, arrayOf("git", "commit", "-m", "chore(orchestrator): rescue PR #${state.prNumber} onto master via patch apply"))
+                executeInDir(state.worktreeDir, arrayOf("git", "commit", "--no-verify", "-m", "chore(orchestrator): rescue PR #${state.prNumber} onto master via patch apply"))
                 return RebaseProcessState.VerifyAndPush(state.prNumber, state.branchName, state.worktreeDir, isRescue = true)
             } else {
                 System.err.println("Jules patch applied but resulted in no changes for PR #${state.prNumber}")
