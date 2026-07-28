@@ -95,71 +95,90 @@ class BranchRebaser(
 
         private fun handleAttemptMerge(state: RebaseProcessState.AttemptMerge): RebaseProcessState {
         try {
-            executeInDirNoRetry(
-                state.worktreeDir, arrayOf("git", "merge", "origin/master", "--no-edit", "-m", "chore: merge master into PR #${state.prNumber} to keep up to date")
-            )
-            // If merge succeeds cleanly, check if we're actually ahead of master
-            val aheadOfMaster = try {
-                executeInDir(state.worktreeDir, arrayOf("git", "rev-list", "--count", "origin/master..HEAD")).trim().toIntOrNull() ?: 0
-            } catch (e: Exception) {
-                0
+            val issueBody = execute(arrayOf("gh", "pr", "view", state.prNumber, "--json", "body", "--jq", ".body"))
+            val backlogIssueMatch = Regex("""\bissue-[0-9]{8}-[0-9]{6}[a-zA-Z0-9_-]+\.md\b""").find(issueBody)
+
+            if (backlogIssueMatch == null) {
+                System.err.println("Could not find backlog issue reference in PR #${state.prNumber} body.")
+                return RebaseProcessState.Failed(RebaseResult(success = false, conflictCount = 0))
             }
-            if (aheadOfMaster == 0) {
-                System.err.println("Nothing to merge for PR #${state.prNumber} — already up to date")
-                return RebaseProcessState.Completed(RebaseResult(success = true, conflictCount = 0))
+
+            val backlogFileName = backlogIssueMatch.value
+            val backlogCommandOutput = execute(arrayOf("find", "docs/internals/backlog", "-name", backlogFileName))
+            val backlogFile = java.io.File(backlogCommandOutput.lines().firstOrNull { it.isNotBlank() } ?: "")
+            if (!backlogFile.exists()) {
+                System.err.println("Backlog file ${backlogFile.absolutePath} not found for PR #${state.prNumber}.")
+                return RebaseProcessState.Failed(RebaseResult(success = false, conflictCount = 0))
             }
-            return RebaseProcessState.VerifyAndPush(state.prNumber, state.branchName, state.worktreeDir, isRescue = false)
-        } catch (e: Exception) {
-            val errorMsg = e.message ?: ""
-            System.err.println("Merge failed for PR #${state.prNumber}. Output:\n$errorMsg")
-            // Any merge failure (conflict, unrelated histories, etc) transitions to the pristine Jules API rescue
-            try {
-                executeInDirNoRetry(state.worktreeDir, arrayOf("git", "merge", "--abort"))
-            } catch (_: Exception) {}
-            return RebaseProcessState.HandleRescue(state.prNumber, state.branchName, state.worktreeDir, state.sessionId)
-        }
-    }
 
-        private fun handleRescue(state: RebaseProcessState.HandleRescue): RebaseProcessState {
-        System.err.println("Unrelated histories detected for PR #${state.prNumber}. Falling back to 'jules remote pull' rescue logic.")
-        try { executeInDirNoRetry(state.worktreeDir, arrayOf("git", "merge", "--abort")) } catch (_: Exception) {}
+            val content = backlogFile.readText()
+            val targetFilesMatch = Regex("""target_files:\s*\[(.*?)\]""", RegexOption.DOT_MATCHES_ALL).find(content)
+            if (targetFilesMatch == null) {
+                System.err.println("target_files not found in backlog issue $backlogFileName.")
+                return RebaseProcessState.Failed(RebaseResult(success = false, conflictCount = 0))
+            }
+            val rawFiles = targetFilesMatch.groupValues[1]
+            val intendedFiles = rawFiles.split(',')
+                .map { it.trim().removeSurrounding("\"").removeSurrounding("'") }
+                .filter { it.isNotBlank() }
 
-        if (state.sessionId.isNullOrBlank()) {
-            System.err.println("No Jules session ID available for PR #${state.prNumber}. Cannot rescue using jules remote pull.")
-            return RebaseProcessState.Failed(RebaseResult(success = false, conflictCount = 1))
-        }
+            if (intendedFiles.isEmpty()) {
+                System.err.println("No intended files parsed from $backlogFileName.")
+                return RebaseProcessState.Failed(RebaseResult(success = false, conflictCount = 0))
+            }
 
-        try {
-            executeInDir(state.worktreeDir, arrayOf("git", "reset", "--hard", "origin/master"))
+            executeInDirNoRetry(state.worktreeDir, arrayOf("git", "reset", "--hard", "origin/master"))
 
-            try {
-                System.err.println("Executing 'jules remote pull ${state.sessionId}'...")
-                executeInDirNoRetry(state.worktreeDir, arrayOf("jules", "remote", "pull", state.sessionId))
-                executeInDirNoRetry(state.worktreeDir, arrayOf("git", "add", "."))
-            } catch (ePull: Exception) {
-                val output = ePull.message ?: ""
-                System.err.println("Failed to execute jules remote pull for PR #${state.prNumber}. Output:\n$output")
-                return RebaseProcessState.Failed(RebaseResult(success = false, conflictCount = 1))
+            val checkoutErrors = mutableListOf<String>()
+            for (file in intendedFiles) {
+                try {
+                    executeInDirNoRetry(state.worktreeDir, arrayOf("git", "checkout", "origin/${state.branchName}", "--", file))
+                } catch (e: Exception) {
+                    checkoutErrors.add(file)
+                }
+            }
+
+            for (file in intendedFiles) {
+                if (file.contains("/src/main/")) {
+                    val testTarget = file
+                        .replace("/src/main/", "/src/test/")
+                        .replace(".kt", "Test.kt")
+                        .replace(".java", "Test.java")
+                    try {
+                        executeInDirNoRetry(state.worktreeDir, arrayOf("git", "checkout", "origin/${state.branchName}", "--", testTarget))
+                    } catch (e: Exception) {}
+                }
+            }
+
+            if (checkoutErrors.size == intendedFiles.size) {
+                 System.err.println("Failed to extract any of the intended files from origin/${state.branchName}.")
+                 return RebaseProcessState.Failed(RebaseResult(success = false, conflictCount = 1))
+            } else if (checkoutErrors.isNotEmpty()) {
+                 System.err.println("Warning: Failed to extract some files: ${checkoutErrors.joinToString(", ")}")
             }
 
             val hasChanges = try {
-                executeInDir(state.worktreeDir, arrayOf("git", "diff", "--staged", "--quiet"))
+                executeInDirNoRetry(state.worktreeDir, arrayOf("git", "diff", "--staged", "--quiet"))
                 false
             } catch (_: Exception) {
-                true // diff --quiet returns 1 if there are changes
+                true
             }
 
-            if (hasChanges) {
-                executeInDir(state.worktreeDir, arrayOf("git", "commit", "--no-verify", "-m", "chore(orchestrator): rescue PR #${state.prNumber} onto master via jules remote pull"))
-                return RebaseProcessState.VerifyAndPush(state.prNumber, state.branchName, state.worktreeDir, isRescue = true)
-            } else {
-                System.err.println("Jules remote pull succeeded but resulted in no changes for PR #${state.prNumber}")
-                return RebaseProcessState.Failed(RebaseResult(success = false, conflictCount = 1))
+            if (!hasChanges) {
+                System.err.println("Extraction resulted in no changes for PR #${state.prNumber} (already up to date).")
+                return RebaseProcessState.Completed(RebaseResult(success = true, conflictCount = 0))
             }
+
+            executeInDirNoRetry(state.worktreeDir, arrayOf("git", "commit", "--no-verify", "-m", "chore: rescue clean intended files for PR #${state.prNumber} onto master"))
+            return RebaseProcessState.VerifyAndPush(state.prNumber, state.branchName, state.worktreeDir, isRescue = true)
         } catch (e: Exception) {
-            System.err.println("Failed to handle rescue: ${e.message}")
+            System.err.println("Rescue extraction failed for PR #${state.prNumber}. Output:\n${e.message}")
             return RebaseProcessState.Failed(RebaseResult(success = false, conflictCount = 1))
         }
+    }
+
+    private fun handleRescue(state: RebaseProcessState.HandleRescue): RebaseProcessState {
+        return RebaseProcessState.Failed(RebaseResult(success = false, conflictCount = 1))
     }
 
     private fun handleVerifyAndPush(state: RebaseProcessState.VerifyAndPush): RebaseProcessState {
@@ -171,14 +190,8 @@ class BranchRebaser(
         }
 
         try {
-            if (state.isRescue) {
-                val rescueBranch = "${state.branchName}-rescue"
-                executeInDir(state.worktreeDir, arrayOf("git", "push", "--force", "origin", "HEAD:$rescueBranch"))
-                return RebaseProcessState.Completed(RebaseResult(success = false, conflictCount = 0, needsRescueApproval = true, rescueBranchName = rescueBranch))
-            } else {
-                executeInDir(state.worktreeDir, arrayOf("git", "push", "--force-with-lease", "origin", "HEAD:${state.branchName}"))
-                return RebaseProcessState.Completed(RebaseResult(success = true, conflictCount = 0))
-            }
+             executeInDir(state.worktreeDir, arrayOf("git", "push", "--force", "origin", "HEAD:${state.branchName}"))
+             return RebaseProcessState.Completed(RebaseResult(success = true, conflictCount = 0))
         } catch (ePush: Exception) {
             System.err.println("Failed to push branch: ${ePush.message}")
             return RebaseProcessState.Failed(RebaseResult(success = false, conflictCount = 0))
