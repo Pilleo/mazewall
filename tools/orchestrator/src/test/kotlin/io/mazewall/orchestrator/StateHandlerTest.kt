@@ -959,7 +959,7 @@ class StateHandlerTest {
             }
 
             // 1. Init git repo
-            runGit("git", "init")
+            runGit("git", "init", "--template=")
             runGit("git", "config", "user.name", "Test User")
             runGit("git", "config", "user.email", "test@example.com")
             try {
@@ -1043,7 +1043,7 @@ class StateHandlerTest {
             }
 
             // Init git repo
-            runGit("git", "init")
+            runGit("git", "init", "--template=")
             runGit("git", "config", "user.name", "Test User")
             runGit("git", "config", "user.email", "test@example.com")
             try {
@@ -1126,7 +1126,7 @@ class StateHandlerTest {
             }
 
             // Init git repo
-            runGit("git", "init")
+            runGit("git", "init", "--template=")
             runGit("git", "config", "user.name", "Test User")
             runGit("git", "config", "user.email", "test@example.com")
             try {
@@ -1252,7 +1252,7 @@ class StateHandlerTest {
             }
 
             // Init git repo
-            runGit("git", "init")
+            runGit("git", "init", "--template=")
             runGit("git", "config", "user.name", "Test User")
             runGit("git", "config", "user.email", "test@example.com")
             try {
@@ -1383,7 +1383,7 @@ class StateHandlerTest {
             }
 
             // Init git repo
-            runGit("git", "init")
+            runGit("git", "init", "--template=")
             runGit("git", "config", "user.name", "Test User")
             runGit("git", "config", "user.email", "test@example.com")
             try {
