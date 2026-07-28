@@ -111,6 +111,8 @@ class BranchRebaser(
             }
             return RebaseProcessState.VerifyAndPush(state.prNumber, state.branchName, state.worktreeDir, isRescue = false)
         } catch (e: Exception) {
+            val errorMsg = e.message ?: ""
+            System.err.println("Merge failed for PR #${state.prNumber}. Output:\n$errorMsg")
             // Any merge failure (conflict, unrelated histories, etc) transitions to the pristine Jules API rescue
             try {
                 executeInDirNoRetry(state.worktreeDir, arrayOf("git", "merge", "--abort"))
@@ -139,13 +141,19 @@ class BranchRebaser(
                 executeInDirNoRetry(state.worktreeDir, arrayOf("git", "apply", "--3way", "jules-rescue.patch"))
                 executeInDirNoRetry(state.worktreeDir, arrayOf("git", "add", "."))
             } catch (eApply: Exception) {
-                System.err.println("Failed to apply Jules patch cleanly for PR #${state.prNumber}: ${eApply.message}")
+                val output = eApply.message ?: ""
+                System.err.println("Failed to apply Jules patch cleanly for PR #${state.prNumber}. Output:\n$output")
 
-                // Parse the output to find the conflicted files
-                val conflictedFiles = try {
-                    executeInDirNoRetry(state.worktreeDir, arrayOf("git", "diff", "--name-only", "--diff-filter=U"))
-                        .lines().map { it.trim() }.filter { it.isNotEmpty() }
-                } catch (_: Exception) { emptyList() }
+                // Parse the git apply output directly to find conflicted files
+                // git apply output looks like: "Applied patch to 'build.gradle.kts' with conflicts."
+                val conflictRegex = Regex("Applied patch to '(.*?)' with conflicts\\.")
+                val conflictedFiles = conflictRegex.findAll(output).map { it.groupValues[1] }.toList()
+
+                if (conflictedFiles.isNotEmpty()) {
+                    System.err.println("Conflicts identified in: ${conflictedFiles.joinToString(", ")}")
+                } else {
+                    System.err.println("Could not parse specific conflicted files from git output.")
+                }
 
                 return RebaseProcessState.Failed(RebaseResult(
                     success = false,
