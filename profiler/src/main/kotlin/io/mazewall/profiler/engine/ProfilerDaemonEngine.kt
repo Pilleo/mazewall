@@ -30,7 +30,7 @@ import java.util.concurrent.CopyOnWriteArrayList
  */
 // @ref: docs/internals/designs/profiler/profiler-design.md — USER_NOTIF ACK loop protocol, deadlock prevention, SCM_RIGHTS socket FD transfer
 // @ref: docs/internals/designs/core/architectural-map.md — Profiler-Enforcer ACK loop sequence diagram
-internal class ProfilerDaemonEngine(
+public class ProfilerDaemonEngine(
     private val socketPath: String,
     private val transport: ProfilerTransport = RealProfilerTransport,
     private val memoryReader: ProfilerMemoryReader = RealMemoryReader,
@@ -46,7 +46,7 @@ internal class ProfilerDaemonEngine(
     private val stateRef = java.util.concurrent.atomic
         .AtomicReference<ProfilerDaemonState>(ProfilerDaemonState.Uninitialized)
 
-    var state: ProfilerDaemonState
+    internal var state: ProfilerDaemonState
         get() = stateRef.get()
         private set(value) = stateRef.set(value)
 

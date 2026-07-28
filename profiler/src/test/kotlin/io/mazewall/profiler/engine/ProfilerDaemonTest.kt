@@ -74,7 +74,12 @@ class ProfilerDaemonTest {
 
         override fun recv(sockfd: FileDescriptor<*, FdState.Open>, buf: MemorySegment, len: Long, flags: Int): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success(len)
 
-        override fun poll(fds: MemorySegment, nfds: Long, timeout: Int): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = nextPollResult
+        override fun poll(fds: MemorySegment, nfds: Long, timeout: Int): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+            if (nextPollResult is LinuxNative.SyscallResult.Success && (nextPollResult as LinuxNative.SyscallResult.Success).value == 0L) {
+                Thread.sleep(10)
+            }
+            return nextPollResult
+        }
 
         override fun ioctl(fd: FileDescriptor<*, FdState.Open>, request: Long, arg: MemorySegment): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
             ioctlCalls.add(request)
@@ -89,6 +94,9 @@ class ProfilerDaemonTest {
         override val raw = object : io.mazewall.RawSyscallOperations {
             override fun poll(fds: ManagedSegment, nfds: Long, timeout: Int): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
                 System.err.println("[MOCK] poll nfds=$nfds nextPollResult=$nextPollResult")
+                if (nextPollResult is LinuxNative.SyscallResult.Success && (nextPollResult as LinuxNative.SyscallResult.Success).value == 0L) {
+                    Thread.sleep(10)
+                }
                 if (nextPollResult is LinuxNative.SyscallResult.Success && (nextPollResult as LinuxNative.SyscallResult.Success).value > 0) {
                     val fdsSeg = MemorySegment.ofAddress(fds.address()).reinterpret(fds.byteSize())
                     fdsSeg.set(ValueLayout.JAVA_SHORT, 6L, NativeConstants.POLLIN)
