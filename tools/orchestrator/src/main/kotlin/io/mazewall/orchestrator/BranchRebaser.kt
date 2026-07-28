@@ -17,7 +17,8 @@ class BranchRebaser(
     private val execute: (Array<out String>) -> String,
     private val executeInDir: (File?, Array<out String>) -> String,
     private val executeInDirNoRetry: (File?, Array<out String>) -> String,
-    private val clearPrCache: (String) -> Unit
+    private val clearPrCache: (String) -> Unit,
+    private val fetchJulesPatch: (prNumber: String) -> String? = { null }
 ) {
 
     private fun isFileAllowed(file: String, targetFiles: List<String>): Boolean {
@@ -205,35 +206,39 @@ class BranchRebaser(
         try { executeInDirNoRetry(state.worktreeDir, arrayOf("git", "merge", "--abort")) } catch (_: Exception) {}
 
         try {
-            val allDifferentFiles = executeInDir(state.worktreeDir, arrayOf("git", "diff", "--name-only", "origin/master", "origin/${state.branchName}"))
-                .lines().map { it.trim() }.filter { it.isNotEmpty() }
-
             executeInDir(state.worktreeDir, arrayOf("git", "reset", "--hard", "origin/master"))
 
-            var rescuedAny = false
-            for (file in allDifferentFiles) {
-                if (isFileAllowed(file, state.targetFiles)) {
-                    try {
-                        val exists = executeInDir(state.worktreeDir, arrayOf("git", "ls-tree", "-r", "origin/${state.branchName}", "--name-only"))
-                            .lines().any { it.trim() == file }
-                        if (exists) {
-                            executeInDir(state.worktreeDir, arrayOf("git", "checkout", "origin/${state.branchName}", "--", file))
-                            executeInDir(state.worktreeDir, arrayOf("git", "add", file))
-                        } else {
-                            executeInDir(state.worktreeDir, arrayOf("git", "rm", "--ignore-unmatch", file))
-                        }
-                        rescuedAny = true
-                    } catch (eRescue: Exception) {
-                        System.err.println("Failed to rescue file '$file': ${eRescue.message}")
-                    }
-                }
+            val patch = fetchJulesPatch(state.prNumber)
+            if (patch.isNullOrBlank()) {
+                System.err.println("Failed to fetch Jules patch for PR #${state.prNumber}. Cannot rescue.")
+                return RebaseProcessState.Failed(RebaseResult(success = false, conflictCount = 1))
             }
 
-            if (rescuedAny) {
-                executeInDir(state.worktreeDir, arrayOf("git", "commit", "-m", "chore(orchestrator): rescue PR #${state.prNumber} onto master via target-files apply"))
+            val patchFile = File(state.worktreeDir, "jules-rescue.patch")
+            patchFile.writeText(patch)
+
+            try {
+                executeInDir(state.worktreeDir, arrayOf("git", "apply", "--3way", "jules-rescue.patch"))
+                executeInDir(state.worktreeDir, arrayOf("git", "add", "."))
+            } catch (eApply: Exception) {
+                System.err.println("Failed to apply Jules patch cleanly for PR #${state.prNumber}: ${eApply.message}")
+                return RebaseProcessState.Failed(RebaseResult(success = false, conflictCount = 1))
+            } finally {
+                patchFile.delete()
+            }
+
+            val hasChanges = try {
+                executeInDir(state.worktreeDir, arrayOf("git", "diff", "--staged", "--quiet"))
+                false
+            } catch (_: Exception) {
+                true // diff --quiet returns 1 if there are changes
+            }
+
+            if (hasChanges) {
+                executeInDir(state.worktreeDir, arrayOf("git", "commit", "-m", "chore(orchestrator): rescue PR #${state.prNumber} onto master via patch apply"))
                 return RebaseProcessState.VerifyAndPush(state.prNumber, state.branchName, state.worktreeDir, isRescue = true)
             } else {
-                System.err.println("No target files found to rescue for PR #${state.prNumber}")
+                System.err.println("Jules patch applied but resulted in no changes for PR #${state.prNumber}")
                 return RebaseProcessState.Failed(RebaseResult(success = false, conflictCount = 1))
             }
         } catch (e: Exception) {

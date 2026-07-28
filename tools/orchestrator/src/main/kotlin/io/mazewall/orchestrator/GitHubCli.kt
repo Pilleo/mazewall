@@ -450,12 +450,13 @@ class RealGitHubClient(private val config: OrchestratorConfig) : GitHubClient {
         }
     }
 
-    override fun mergeMasterIntoBranch(prNumber: String, targetFiles: List<String>): RebaseResult {
+    override fun mergeMasterIntoBranch(prNumber: String, targetFiles: List<String>, fetchJulesPatch: ((String) -> String?)?): RebaseResult {
         return BranchRebaser(
             execute = { args -> execute(*args) },
             executeInDir = { dir, args -> executeInDir(dir, *args) },
             executeInDirNoRetry = { dir, args -> executeInDir(dir, *args) },
-            clearPrCache = ::clearPrCache
+            clearPrCache = ::clearPrCache,
+            fetchJulesPatch = fetchJulesPatch ?: { null }
         ).run(prNumber, targetFiles)
     }
 }

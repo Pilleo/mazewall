@@ -6,8 +6,8 @@ set -euo pipefail
 #
 # This script rescues PRs that were pushed as single root commits (no parents)
 # or had their histories irreversibly corrupted (causing unrelated histories).
-# It fetches the exact diff of the PR from GitHub and applies it directly
-# onto a pristine origin/master branch as a patch.
+# It fetches the exact target files Jules intended to change and applies them
+# directly onto a pristine origin/master branch.
 # ---------------------------------------------------------------------------
 
 if [ -z "${1:-}" ]; then
@@ -47,70 +47,88 @@ cleanup() {
 }
 trap cleanup EXIT
 
-echo "📥 Fetching PR patch from GitHub..."
-PATCH_FILE="${ORIGINAL_DIR}/build/tmp/rescue-${PR_NUMBER}.patch"
-mkdir -p "${ORIGINAL_DIR}/build/tmp"
-
-if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
-  echo "Using gh cli to fetch patch..."
-  gh pr diff "$PR_NUMBER" --patch > "$PATCH_FILE"
-else
-  echo "gh cli not available or not authenticated, falling back to curl..."
-  REPO_URL=$(git config --get remote.origin.url || echo "")
-  REPO_FULL_NAME=""
-  if [[ "$REPO_URL" =~ github\.com[:/]([^/]+/[^/.]+)(\.git)? ]]; then
-      REPO_FULL_NAME="${BASH_REMATCH[1]}"
-      # Remove .git suffix if present
-      REPO_FULL_NAME="${REPO_FULL_NAME%.git}"
-      curl -s -f -H "Accept: application/vnd.github.v3.diff" "https://api.github.com/repos/$REPO_FULL_NAME/pulls/$PR_NUMBER" > "$PATCH_FILE" || {
-          echo "❌ Failed to download patch via curl for $REPO_FULL_NAME"
-          # intentional fail
-          cat "force_exit" 2>/dev/null
-      }
-  else
-      echo "❌ Could not determine GitHub repo from remote origin URL: $REPO_URL"
-      # intentional fail
-      cat "force_exit" 2>/dev/null
-  fi
+echo "🧹 Finding linked issue and target files for surgical checkout..."
+ISSUE_NUMBER=$(gh pr view "$PR_NUMBER" --json closingIssuesReferences --jq '.[0].number' 2>/dev/null || echo "")
+if [ -z "$ISSUE_NUMBER" ] || [ "$ISSUE_NUMBER" == "null" ]; then
+  PR_BODY=$(gh pr view "$PR_NUMBER" --json body --jq '.body' 2>/dev/null || echo "")
+  ISSUE_NUMBER=$(echo "$PR_BODY" | grep -ioE 'fixes\s+#?[0-9]+' | grep -oE '[0-9]+' | head -n 1 || echo "")
 fi
 
-if [ ! -s "$PATCH_FILE" ]; then
-  echo "⚠️ Downloaded patch file is empty. PR #${PR_NUMBER} might not have any changes!"
-else
-  cd "$WORKTREE_DIR"
-
-  echo "🔄 Applying patch to clean master branch..."
-  if git apply --3way "$PATCH_FILE"; then
-    echo "✅ Patch applied successfully."
-  else
-    echo "❌ Failed to apply patch cleanly! There are merge conflicts."
-    echo "The patch was applied with conflicts. Please resolve them manually or abort."
-    # intentional fail
-    cat "force_exit" 2>/dev/null
-  fi
-
-  # Stage any changes introduced by the patch
-  git add .
-
-  # Check if there are actually any changes staged
-  if git diff --staged --quiet; then
-      echo "⚠️ Patch applied but resulted in no changes to master."
-  else
-      echo "🔨 Verifying compilation on rescued branch..."
-      ./gradlew compileKotlin :tools:orchestrator:compileKotlin
-
-      echo "✅ Compilation clean."
-      echo ""
-
-      git commit -m "chore(orchestrator): rescue PR #${PR_NUMBER} onto master via patch apply"
-
-      echo "🚀 Pushing rescued branch '${BRANCH_NAME}' to origin..."
-      # Use force-with-lease to protect against concurrent updates
-      eval "git push --force-with-lease origin HEAD:${BRANCH_NAME}"
-
-      echo ""
-      echo "✅ Successfully rescued and integrated PR #${PR_NUMBER} ('${BRANCH_NAME}')!"
-  fi
+ISSUE_FILE=""
+if [ -n "$ISSUE_NUMBER" ]; then
+  ISSUE_FILE=$(grep -rl "github_issue: $ISSUE_NUMBER" docs/internals/backlog/ 2>/dev/null | head -n 1 || echo "")
 fi
 
-rm -f "$PATCH_FILE"
+TARGET_FILES=""
+if [ -n "$ISSUE_FILE" ] && [ -f "$ISSUE_FILE" ]; then
+  TARGET_FILES=$(sed -n '/^target_files:/,/^[a-zA-Z0-9_-]\+:/p' "$ISSUE_FILE" | grep -E '^\s*-\s*' | sed 's/^\s*-\s*//' | sed 's/^://' | sed "s/['\"]//g" || echo "")
+fi
+
+echo "📋 Backlog file: ${ISSUE_FILE:-None}"
+echo "📋 Allowed target files:"
+echo "$TARGET_FILES" | sed 's/^/  - /'
+
+is_file_allowed() {
+  local f="$1"
+  if [[ "$f" =~ ^docs/internals/backlog/.*\.md$ ]]; then
+    return 0
+  fi
+  [ -z "$TARGET_FILES" ] && return 0 # If no targets found, apply everything from PR as a fallback
+
+  while read -r target; do
+    [ -z "$target" ] && continue
+    target="${target#:}"
+    if [ "$f" == "$target" ] || [[ "$f" == */"$target" ]]; then
+      return 0
+    fi
+    if [[ "$target" == *"/src/main/"* ]]; then
+      local test_target="${target//\/src\/main\//\/src\/test\/}"
+      test_target="${test_target%.kt}Test.kt"
+      test_target="${test_target%.java}Test.java"
+      if [ "$f" == "$test_target" ] || [[ "$f" == */"$test_target" ]]; then
+        return 0
+      fi
+    fi
+  done <<< "$TARGET_FILES"
+  return 1
+}
+
+cd "$WORKTREE_DIR"
+
+echo "🔄 Diffing origin/master against PR branch '${BRANCH_NAME}'..."
+DIFFERENT_FILES=$(git diff --name-only origin/master "${BRANCH_NAME}" 2>/dev/null || echo "")
+RESCUED_ANY=0
+
+for f in $DIFFERENT_FILES; do
+  [ -z "$f" ] && continue
+  if is_file_allowed "$f"; then
+    if git ls-tree -r "${BRANCH_NAME}" --name-only | grep -qx "$f"; then
+      echo "✅ RESCUING TARGET FILE: Checking out '$f' from PR branch..."
+      git checkout "${BRANCH_NAME}" -- "$f"
+      git add "$f"
+    else
+      echo "🗑️ RESCUING TARGET FILE: Deleting '$f' (removed in PR branch)..."
+      git rm --ignore-unmatch "$f" >/dev/null 2>&1 || true
+    fi
+    RESCUED_ANY=1
+  fi
+done
+
+if [ "$RESCUED_ANY" -eq 0 ]; then
+  echo "⚠️ No target files found to rescue for PR #${PR_NUMBER}!"
+else
+  echo "🔨 Verifying compilation on rescued branch..."
+  ./gradlew compileKotlin :tools:orchestrator:compileKotlin
+
+  echo "✅ Compilation clean."
+  echo ""
+
+  git commit -m "chore(orchestrator): rescue PR #${PR_NUMBER} onto master via target-files apply"
+
+  echo "🚀 Pushing rescued branch '${BRANCH_NAME}' to origin..."
+  # Use force-with-lease to protect against concurrent updates
+  eval "git push --force-with-lease origin HEAD:${BRANCH_NAME}"
+
+  echo ""
+  echo "✅ Successfully rescued and integrated PR #${PR_NUMBER} ('${BRANCH_NAME}')!"
+fi

@@ -65,7 +65,7 @@ class MockOrchestratorEnvironment : OrchestratorEnvironment {
         override fun getFailedBuildLogs(prNumber: String): String = "mock failed logs"
         override fun getPrUrl(prNumber: String): String = "mock url"
         override fun isCommitEmpty(prNumber: String, shaOld: String, shaNew: String): Boolean = isCommitEmptyResult
-        override fun mergeMasterIntoBranch(prNumber: String, targetFiles: List<String>): RebaseResult {
+        override fun mergeMasterIntoBranch(prNumber: String, targetFiles: List<String>, fetchJulesPatch: ((String) -> String?)?): RebaseResult {
             mergeMasterIntoBranchCallCount++
             return mergeMasterIntoBranchResult
         }
@@ -80,6 +80,11 @@ class MockOrchestratorEnvironment : OrchestratorEnvironment {
         override fun triggerSession(repo: String, issueId: String, prompt: String) {}
         override fun sendSessionMessage(sessionId: String, prompt: String) { sentJulesMessages.add(sessionId to prompt) }
         override fun listSessions(): List<JulesSession> = emptyList()
+
+        override fun getSessionPatch(sessionId: String): String? {
+            return null
+        }
+
     }
 
     override fun parseAllIssues(): List<BacklogIssue> = issues

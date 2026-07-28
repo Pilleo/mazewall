@@ -33,11 +33,17 @@ class BranchRebaserTest {
             clearPrCache = { clearCacheCalled = true }
         )
 
-        val result = rebaser.run("123", listOf("allowed.txt"))
+        val worktreeDir = java.io.File("../temp-rebase-123")
+        worktreeDir.mkdirs()
+        val result = try {
+            rebaser.run("123", listOf("allowed.txt"))
+        } finally {
+            worktreeDir.deleteRecursively()
+        }
 
         assertTrue(clearCacheCalled)
         assertTrue(result.success)
-        assertEquals(0, result.conflictCount)
+        println("Commands: $commands"); println("Result: $result"); assertEquals(0, result.conflictCount)
         assertFalse(result.needsRescueApproval)
         assertNull(result.rescueBranchName)
 
@@ -64,7 +70,13 @@ class BranchRebaserTest {
             clearPrCache = {}
         )
 
-        val result = rebaser.run("123", listOf("allowed.txt"))
+        val worktreeDir = java.io.File("../temp-rebase-123")
+        worktreeDir.mkdirs()
+        val result = try {
+            rebaser.run("123", listOf("allowed.txt"))
+        } finally {
+            worktreeDir.deleteRecursively()
+        }
 
         assertFalse(result.success)
         assertEquals(1, result.conflictCount)
@@ -74,19 +86,23 @@ class BranchRebaserTest {
     @Test
     fun `test fallback to rescue on unrelated histories`() {
         val commands = mutableListOf<String>()
+        var patchFetched = false
 
         val rebaser = BranchRebaser(
             execute = { args ->
                 val cmd = args.joinToString(" ")
                 commands.add(cmd)
+                if (cmd.startsWith("git worktree add")) {
+                    java.io.File(args[3]).mkdirs()
+                }
                 if (cmd == "gh pr view 123 --json headRefName --jq .headRefName") "test-branch" else ""
             },
             executeInDir = { _, args ->
                 val cmd = args.joinToString(" ")
                 commands.add("inDir: $cmd")
-                if (cmd.startsWith("git diff --name-only origin/master origin/test-branch")) "allowed.txt\nmaster_only.txt"
-                else if (cmd.startsWith("git ls-tree")) "allowed.txt" // Exists in branch
-                else ""
+                if (cmd.startsWith("git diff --staged --quiet")) throw RuntimeException("Has changes")
+                if (cmd.startsWith("git push")) { } // Do nothing, just return success
+                ""
             },
             executeInDirNoRetry = { _, args ->
                 val cmd = args.joinToString(" ")
@@ -94,19 +110,31 @@ class BranchRebaserTest {
                 if (cmd.startsWith("git merge origin/master")) throw RuntimeException("fatal: refusing to merge unrelated histories")
                 ""
             },
-            clearPrCache = {}
+            clearPrCache = {},
+            fetchJulesPatch = {
+                patchFetched = true
+                "fake-patch-data"
+            }
         )
 
-        val result = rebaser.run("123", listOf("allowed.txt"))
+        val worktreeDir = java.io.File("../temp-rebase-123")
+        worktreeDir.mkdirs()
+        val result = try {
+            rebaser.run("123", listOf("allowed.txt"))
+        } finally {
+            worktreeDir.deleteRecursively()
+        }
 
         assertFalse(result.success)
-        assertEquals(0, result.conflictCount)
+        println("Commands: $commands"); println("Result: $result"); assertEquals(0, result.conflictCount)
         assertTrue(result.needsRescueApproval)
         assertEquals("test-branch-rescue", result.rescueBranchName)
+        assertTrue(patchFetched)
 
         assertTrue(commands.contains("inDir: git reset --hard origin/master"))
-        assertTrue(commands.contains("inDir: git checkout origin/test-branch -- allowed.txt"))
-        assertTrue(commands.contains("inDir: git commit -m chore(orchestrator): rescue PR #123 onto master via target-files apply"))
+        assertTrue(commands.contains("inDir: git apply --3way jules-rescue.patch"))
+        assertTrue(commands.contains("inDir: git add ."))
+        assertTrue(commands.contains("inDir: git commit -m chore(orchestrator): rescue PR #123 onto master via patch apply"))
         assertTrue(commands.contains("inDir: git push --force origin HEAD:test-branch-rescue"))
     }
 }
