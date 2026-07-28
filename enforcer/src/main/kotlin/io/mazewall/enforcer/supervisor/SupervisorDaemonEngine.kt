@@ -89,6 +89,27 @@ internal class SupervisorDaemonEngine(
         } finally {
             state = SupervisorDaemonState.Terminated
             socketManager.close(serverFd)
+
+            val clientsToClose = ArrayList(clientSockets)
+            clientSockets.clear()
+            for (clientFd in clientsToClose) {
+                try {
+                    socketManager.close(clientFd)
+                } catch (e: Exception) {
+                    System.err.println("[SUPERVISOR] Failed to close client socket ${clientFd.value}: ${e.message}")
+                }
+            }
+
+            val listenersToClose = ArrayList(activeListeners)
+            activeListeners.clear()
+            for (listenerFd in listenersToClose) {
+                try {
+                    socketManager.close(listenerFd)
+                } catch (e: Exception) {
+                    System.err.println("[SUPERVISOR] Failed to close listener socket ${listenerFd.value}: ${e.message}")
+                }
+            }
+
             connectionExecutor.shutdown()
             try {
                 if (!connectionExecutor.awaitTermination(5, TimeUnit.SECONDS)) {

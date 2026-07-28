@@ -1,5 +1,8 @@
 package io.mazewall.enforcer
 
+import java.io.InterruptedIOException
+import java.net.SocketTimeoutException
+import java.util.concurrent.Callable
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 
@@ -39,11 +42,18 @@ object JvmFloorWorkload {
     fun run() {
         println("[JVM FLOOR] Starting stress workload...")
 
+        if (Thread.currentThread().isInterrupted) {
+            throw InterruptedException("Workload interrupted before start")
+        }
+
         // 1. JIT Compiler Pressure
         // Force methods to reach the compilation threshold
         val startTime = System.nanoTime()
         var count = 0
         repeat(JIT_ITERATIONS) {
+            if (Thread.currentThread().isInterrupted) {
+                throw InterruptedException("JIT stress interrupted")
+            }
             count += "jit-stress-iteration-$it".hashCode()
         }
         val jitDuration = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startTime)
@@ -55,6 +65,9 @@ object JvmFloorWorkload {
         val gcStartTime = System.nanoTime()
         val garbage = mutableListOf<ByteArray>()
         repeat(GC_ALLOCATION_COUNT) {
+            if (Thread.currentThread().isInterrupted) {
+                throw InterruptedException("GC stress interrupted during allocation")
+            }
             garbage.add(ByteArray(MB_SIZE)) // 1MB chunks
         }
         // Retain a small amount of memory to prevent the heap from being completely empty
@@ -75,25 +88,60 @@ object JvmFloorWorkload {
         // Spawning virtual threads that yield to exercise the ForkJoinPool scheduler
         val loomStartTime = System.nanoTime()
         val executor = Executors.newVirtualThreadPerTaskExecutor()
-        val tasks = (1..LOOM_TASK_COUNT).map { id ->
-            executor.submit {
-                Thread.sleep(LOOM_SLEEP_MS)
-                Thread.yield() // Force carrier thread switch
-                id * id
+        try {
+            val tasks = (1..LOOM_TASK_COUNT).map { id ->
+                executor.submit(Callable {
+                    if (Thread.currentThread().isInterrupted) {
+                        return@Callable 0
+                    }
+                    try {
+                        Thread.sleep(LOOM_SLEEP_MS)
+                        Thread.yield() // Force carrier thread switch
+                        id * id
+                    } catch (e: InterruptedException) {
+                        Thread.currentThread().interrupt() // restore status
+                        0
+                    }
+                })
+            }
+            for (task in tasks) {
+                if (Thread.currentThread().isInterrupted) {
+                    throw InterruptedException("Loom stress interrupted while waiting for tasks")
+                }
+                task.get()
+            }
+        } catch (e: InterruptedException) {
+            Thread.currentThread().interrupt()
+            throw e
+        } finally {
+            executor.shutdown()
+            try {
+                if (!executor.awaitTermination(5, TimeUnit.SECONDS)) {
+                    executor.shutdownNow()
+                }
+            } catch (e: InterruptedException) {
+                executor.shutdownNow()
+                Thread.currentThread().interrupt()
             }
         }
-        tasks.forEach { it.get() }
-        executor.shutdown()
         val loomDuration = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - loomStartTime)
         println("[JVM FLOOR] Loom stress completed in ${loomDuration}ms")
 
         // 4. NIO & Native Networking Warmup
         // Ensure classes like epoll/poll/selector and socket are loaded and initialized
+        if (Thread.currentThread().isInterrupted) {
+            throw InterruptedException("NIO warmup interrupted before start")
+        }
         java.nio.channels.Selector.open().use { selector ->
             try {
                 java.net.Socket().use { socket ->
                     socket.connect(java.net.InetSocketAddress("127.0.0.1", 1), 1)
                 }
+            } catch (e: SocketTimeoutException) {
+                // Connection timeout is expected and fine, we just want the syscalls
+            } catch (e: InterruptedIOException) {
+                Thread.currentThread().interrupt()
+                throw InterruptedException("NIO warmup interrupted: $e")
             } catch (ignored: java.io.IOException) {
                 // Connection failure is expected and fine, we just want the syscalls
             }
@@ -102,13 +150,34 @@ object JvmFloorWorkload {
 
         // 5. OS Thread Coordination
         // Standard OS thread lifecycle
+        if (Thread.currentThread().isInterrupted) {
+            throw InterruptedException("OS Thread coordination interrupted before start")
+        }
         val thread = Thread {
-            repeat(OS_THREAD_ITERATIONS) {
-                Thread.sleep(OS_THREAD_SLEEP_MS)
+            try {
+                repeat(OS_THREAD_ITERATIONS) {
+                    if (Thread.currentThread().isInterrupted) {
+                        return@Thread
+                    }
+                    Thread.sleep(OS_THREAD_SLEEP_MS)
+                }
+            } catch (e: InterruptedException) {
+                Thread.currentThread().interrupt()
             }
         }
         thread.start()
-        thread.join()
+        try {
+            thread.join()
+        } catch (e: InterruptedException) {
+            thread.interrupt() // Signal background thread to stop
+            try {
+                thread.join(1000) // Clean wait with timeout
+            } catch (ignored: InterruptedException) {
+                // Ignore secondary interruption during join cleanup
+            }
+            Thread.currentThread().interrupt() // restore status
+            throw e
+        }
         println("[JVM FLOOR] OS Thread coordination completed")
 
         println("[JVM FLOOR] Workload successfully finished.")

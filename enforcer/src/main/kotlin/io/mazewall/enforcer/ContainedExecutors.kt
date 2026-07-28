@@ -331,7 +331,7 @@ object ContainedExecutors {
     private fun handleCetUnsupported(reason: String) {
         val fallback = Platform.configuredFallback()
         if (fallback == Platform.FallbackBehavior.FAIL) {
-            throw UnsupportedOperationException(reason)
+            throw io.mazewall.UnsupportedPlatformException(reason)
         } else if (fallback == Platform.FallbackBehavior.WARN_AND_BYPASS) {
             logger.warning("$reason Code will run without CET protection.")
         }

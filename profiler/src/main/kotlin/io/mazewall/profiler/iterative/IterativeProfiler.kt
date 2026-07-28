@@ -16,6 +16,8 @@ import java.nio.file.AccessDeniedException
  * This provides 100% unprivileged visibility into io_uring ring operations.
  */
 object IterativeProfiler {
+    public var taskExecutor: IterativeTaskExecutor = RealIterativeTaskExecutor
+
     fun profile(
         basePolicy: Policy<*, Uncompiled> = Policy.PURE_COMPUTE_UNSAFE,
         task: Runnable,
@@ -29,7 +31,7 @@ object IterativeProfiler {
                     if (currentState.iteration >= maxRetries) {
                         IterativeProfilerState.Exceeded(currentState.policy)
                     } else {
-                        val error = executeTask(currentState.policy, task)
+                        val error = taskExecutor.executeTask(currentState.policy, task)
                         if (error == null) {
                             IterativeProfilerState.Converged(currentState.policy)
                         } else {
@@ -60,28 +62,6 @@ object IterativeProfiler {
                 }
             }
         }
-    }
-
-    private fun executeTask(
-        currentPolicy: Policy<*, Uncompiled>,
-        task: Runnable,
-    ): Throwable? {
-        var error: Throwable? = null
-        val thread =
-            Thread {
-                // Ensure Landlock is active even for empty policies to force discovery
-                if (currentPolicy.allowedFsReadPaths.isEmpty() && currentPolicy.allowedFsWritePaths.isEmpty()) {
-                    Landlock.applyRestrictiveBarrier()
-                }
-                ContainedExecutors.installOnCurrentThread(currentPolicy)
-                task.run()
-            }
-        thread.uncaughtExceptionHandler = Thread.UncaughtExceptionHandler { _, e ->
-            error = e
-        }
-        thread.start()
-        thread.join()
-        return error
     }
 
     private fun updatePolicyForViolation(

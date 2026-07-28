@@ -26,6 +26,7 @@ sealed interface OrchestratorState {
 
         slot.lastHeadSha = context.lastHeadSha
         slot.lastReviewedSha = context.lastReviewedSha
+        slot.lastRequestedReviewSha = context.lastRequestedReviewSha
         slot.lastBuildStatus = context.lastBuildStatus
         slot.lastCheckedSha = context.lastCheckedSha
         slot.lastWaitingLogTime = context.lastWaitingLogTime
@@ -49,6 +50,7 @@ sealed interface OrchestratorState {
 
         context.lastHeadSha = slot.lastHeadSha
         context.lastReviewedSha = slot.lastReviewedSha
+        context.lastRequestedReviewSha = slot.lastRequestedReviewSha
         context.lastBuildStatus = slot.lastBuildStatus
         context.lastCheckedSha = slot.lastCheckedSha
         context.lastWaitingLogTime = slot.lastWaitingLogTime
@@ -259,10 +261,6 @@ sealed interface OrchestratorState {
                     slot.lastCheckedSha = null
                     slot.julesRetries = 0
                 }
-
-                if (handleRebaseAndConflicts(env, slot, prNumber)) {
-                    env.sleep(env.config.pollingIntervalSeconds, TimeUnit.SECONDS)
-                }
                 return CI_RUNNING
             }
 
@@ -347,11 +345,13 @@ sealed interface OrchestratorState {
             val githubIssueNumber = slot.githubIssueNumber
             val sessionId = slot.julesSessionId
 
-            if (handleRebaseAndConflicts(env, slot, prNumber)) {
-                env.sleep(env.config.pollingIntervalSeconds, TimeUnit.SECONDS)
-                return this
+            val currentSha = env.gitHubClient.getPrHeadSha(prNumber)
+            if (currentSha != slot.lastHeadSha) {
+                env.gitHubClient.clearPrCache(prNumber)
             }
 
+            // ⚠️ CRITICAL: Check if a Jules session is actively in progress BEFORE attempting to merge or rebase.
+            // Modifying the PR branch while Jules is actively coding causes race conditions and code loss.
             if (githubIssueNumber != null) {
                 val session = env.julesClient.getActiveSession(issueId)
                 val isFailed = if (session != null) {
@@ -403,18 +403,23 @@ sealed interface OrchestratorState {
                 }
             }
 
+            if (handleRebaseAndConflicts(env, slot, prNumber)) {
+                env.sleep(env.config.pollingIntervalSeconds, TimeUnit.SECONDS)
+                return this
+            }
+
             if (env.gitHubClient.isPrMerged(prNumber)) {
                 env.println("🎉 PR #$prNumber merged! resolving issue locally...")
                 return RESOLVE_TASK
             }
 
-            val currentSha = env.gitHubClient.getPrHeadSha(prNumber)
             if (currentSha != slot.lastHeadSha) {
                 env.println("🔄 New commits detected on PR #$prNumber (Head SHA: $currentSha). Checking build status...")
                 slot.lastHeadSha = currentSha
                 slot.lastKnownStatus = null
                 slot.lastStatusChangeTime = 0L
                 slot.lastPendingNotificationTime = 0L
+                slot.lastRequestedReviewSha = null // Reset requested SHA for new commits!
             }
 
             val status = env.gitHubClient.checkBuildStatus(prNumber)
@@ -483,15 +488,13 @@ sealed interface OrchestratorState {
                 return RESOLVE_TASK
             }
 
-            if (handleRebaseAndConflicts(env, slot, prNumber)) {
-                env.sleep(env.config.pollingIntervalSeconds, TimeUnit.SECONDS)
-                return CI_RUNNING
+            val currentSha = env.gitHubClient.getPrHeadSha(prNumber)
+            if (currentSha != slot.lastHeadSha) {
+                env.gitHubClient.clearPrCache(prNumber)
             }
 
-            val currentSha = env.gitHubClient.getPrHeadSha(prNumber)
-
-            val buildStatus = env.gitHubClient.checkBuildStatus(prNumber)
-
+            // ⚠️ CRITICAL: Check if a Jules session is actively in progress BEFORE attempting to merge or rebase.
+            // Modifying the PR branch while Jules is actively coding/reviewing causes race conditions and code loss.
             val issueId = slot.currentIssueId
             val sessionId = slot.julesSessionId
             if (issueId != null) {
@@ -531,6 +534,13 @@ sealed interface OrchestratorState {
                 }
             }
 
+            if (handleRebaseAndConflicts(env, slot, prNumber)) {
+                env.sleep(env.config.pollingIntervalSeconds, TimeUnit.SECONDS)
+                return CI_RUNNING
+            }
+
+            val buildStatus = env.gitHubClient.checkBuildStatus(prNumber)
+
             // If the PR head SHA changed it means Jules pushed a new commit instead of just reviewing.
             if (currentSha != slot.lastHeadSha) {
                 val shaOld = slot.lastHeadSha ?: ""
@@ -541,6 +551,7 @@ sealed interface OrchestratorState {
                 }
 
                 slot.lastHeadSha = currentSha // Update the head SHA to the new one
+                slot.lastRequestedReviewSha = null // Reset requested SHA for new commits!
 
                 if (isEmpty) {
                     env.println("⚠️ Jules pushed an empty commit during review phase on PR #$prNumber")
@@ -560,7 +571,8 @@ sealed interface OrchestratorState {
 
             if (currentSha != slot.lastReviewedSha) {
                 val comments = env.gitHubClient.getPrComments(prNumber)
-                val shaPrefix = currentSha.take(7)
+                val searchSha = slot.lastRequestedReviewSha ?: currentSha
+                val shaPrefix = searchSha.take(7)
 
                 val requestComment = comments.firstOrNull {
                     (it.body.contains("@jules")) &&
@@ -568,6 +580,7 @@ sealed interface OrchestratorState {
                 }
 
                 if (requestComment == null) {
+                    val currentShaPrefix = currentSha.take(7)
                     env.println("🤖 PR #$prNumber Build Passed. Requesting Jules review for SHA: $currentSha")
 
                     // If Jules already pushed once instead of reviewing, use a stronger framing.
@@ -577,9 +590,10 @@ sealed interface OrchestratorState {
                         "You must NOT push anything. Read the instructions below carefully before acting."
                     } else ""
 
-                    val prompt = OrchestratorPrompts.reviewPrompt(prNumber, shaPrefix, pushWarning)
+                    val prompt = OrchestratorPrompts.reviewPrompt(prNumber, currentShaPrefix, pushWarning)
 
                     env.gitHubClient.commentOnPr(prNumber, prompt)
+                    slot.lastRequestedReviewSha = currentSha // Record the requested SHA
                     env.sleep(env.config.pollingIntervalSeconds, TimeUnit.SECONDS)
                     return this
                 } else {
@@ -725,18 +739,65 @@ private fun handleRebaseAndConflicts(env: OrchestratorEnvironment, slot: SlotCon
 
     if (isBehind || isConflicting) {
         val reason = if (isConflicting) "conflict status" else "behind master by ${status.behindBy} commits"
-        env.println("🔄 Active PR #$prNumber is $reason. Attempting automated rebase onto master...")
-        val rebaseSuccess = env.gitHubClient.rebaseBranch(prNumber)
+        env.println("🔄 Active PR #$prNumber is $reason. Attempting automated merge of master into branch...")
+
+        // Parse the backlog issue file to get target_files
+        val targetFiles = slot.currentIssueFile?.let { path ->
+            val file = File(path)
+            if (file.exists()) {
+                BacklogParser.parseIssueFile(file)?.targetFiles
+            } else {
+                null
+            }
+        } ?: emptyList()
+
+        val rebaseResult = env.gitHubClient.mergeMasterIntoBranch(prNumber, targetFiles)
+        if (rebaseResult.needsRescueApproval && rebaseResult.rescueBranchName != null) {
+            env.println("🚨 PR #$prNumber has unrelated histories. Rescue branch prepared.")
+            env.sendNotification( "🚨 Unrelated histories detected on PR #$prNumber. I've prepared a rescued branch: ${rebaseResult.rescueBranchName}. Approve to forcefully overwrite the PR branch.")
+            val approved = env.requestApproval(slot.currentIssueId, "🚨 Unrelated histories detected on PR #${prNumber}. I've prepared a rescued branch: ${rebaseResult.rescueBranchName}. Approve to forcefully overwrite the PR branch.")
+            if (approved) {
+                env.println("Rescue approved. Pushing to PR...")
+                env.gitHubClient.approveRescue(prNumber, rebaseResult.rescueBranchName)
+                slot.lastWaitingLogTime = 0L
+                val newSha = env.gitHubClient.getPrHeadSha(prNumber)
+                val oldSha = slot.lastHeadSha
+                slot.lastHeadSha = newSha
+                if (slot.lastReviewedSha == oldSha && oldSha != null) slot.lastReviewedSha = newSha
+                if (slot.lastRequestedReviewSha == oldSha && oldSha != null) slot.lastRequestedReviewSha = newSha
+                return true
+            } else {
+                env.println("Rescue rejected by user.")
+                return false
+            }
+        }
+        val rebaseSuccess = rebaseResult.success
         if (rebaseSuccess) {
-            env.println("✅ Successfully auto-rebased PR #$prNumber onto master.")
+            env.println("✅ Successfully auto-merged master into PR #$prNumber.")
             slot.lastWaitingLogTime = 0L
+
+            // Fetch the new head SHA after successful merge and update slot properties
+            val newSha = env.gitHubClient.getPrHeadSha(prNumber)
+            val oldSha = slot.lastHeadSha
+            slot.lastHeadSha = newSha
+
+            // If Jules already reviewed the pre-merge commit, preserve the reviewed status for the merged commit
+            if (slot.lastReviewedSha == oldSha && oldSha != null) {
+                slot.lastReviewedSha = newSha
+            }
+            // If a review comment was requested on the pre-merge commit, update the last requested SHA
+            // so we recognize the existing comment for the merged commit
+            if (slot.lastRequestedReviewSha == oldSha && oldSha != null) {
+                slot.lastRequestedReviewSha = newSha
+            }
             return true
         } else {
             val now = System.currentTimeMillis()
             if (now - slot.lastWaitingLogTime > 60_000) {
                 val prUrl = env.gitHubClient.getPrUrl(prNumber)
-                env.sendNotification("⚠️ *PR #$prNumber has conflicts!* Automated local worktree rebase failed. Human intervention required: $prUrl")
-                env.println("\u001B[1;31m🔔 [CONFLICT] PR #$prNumber has conflicts! Automated local worktree rebase failed. Please resolve: $prUrl\u001B[0m")
+                val conflictSuffix = if (rebaseResult.conflictCount > 0) " (Conflicts in ${rebaseResult.conflictCount} files: ${rebaseResult.conflictedFiles})" else ""
+                env.sendNotification("⚠️ *PR #$prNumber has conflicts!* Automated local worktree merge failed$conflictSuffix. Human intervention required: $prUrl")
+                env.println("\u001B[1;31m🔔 [CONFLICT] PR #$prNumber has conflicts! Automated local worktree merge failed$conflictSuffix. Please resolve: $prUrl\u001B[0m")
                 env.ringBell(3)
                 slot.lastWaitingLogTime = now
             }

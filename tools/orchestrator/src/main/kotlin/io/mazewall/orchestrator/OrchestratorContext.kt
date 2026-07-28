@@ -13,6 +13,7 @@ class SlotContext(var currentIssueId: String) {
     // Monitoring state/cache variables
     var lastHeadSha: String? = null
     var lastReviewedSha: String? = null
+    var lastRequestedReviewSha: String? = null
     var lastBuildStatus: String? = null
     var lastCheckedSha: String? = null
     var lastWaitingLogTime: Long = 0L
@@ -34,6 +35,7 @@ class SlotContext(var currentIssueId: String) {
 
         lastHeadSha = props.getProperty("$prefix.lastHeadSha").takeIf { !it.isNullOrEmpty() }
         lastReviewedSha = props.getProperty("$prefix.lastReviewedSha").takeIf { !it.isNullOrEmpty() }
+        lastRequestedReviewSha = props.getProperty("$prefix.lastRequestedReviewSha").takeIf { !it.isNullOrEmpty() }
         lastBuildStatus = props.getProperty("$prefix.lastBuildStatus").takeIf { !it.isNullOrEmpty() }
         lastCheckedSha = props.getProperty("$prefix.lastCheckedSha").takeIf { !it.isNullOrEmpty() }
         lastWaitingLogTime = props.getProperty("$prefix.lastWaitingLogTime")?.toLongOrNull() ?: 0L
@@ -57,6 +59,7 @@ class SlotContext(var currentIssueId: String) {
 
         props.setProperty("$prefix.lastHeadSha", lastHeadSha ?: "")
         props.setProperty("$prefix.lastReviewedSha", lastReviewedSha ?: "")
+        props.setProperty("$prefix.lastRequestedReviewSha", lastRequestedReviewSha ?: "")
         props.setProperty("$prefix.lastBuildStatus", lastBuildStatus ?: "")
         props.setProperty("$prefix.lastCheckedSha", lastCheckedSha ?: "")
         props.setProperty("$prefix.lastWaitingLogTime", lastWaitingLogTime.toString())
@@ -83,6 +86,7 @@ class OrchestratorContext {
     // Monitoring state/cache variables
     var lastHeadSha: String? = null
     var lastReviewedSha: String? = null
+    var lastRequestedReviewSha: String? = null
     var lastBuildStatus: String? = null
     var lastCheckedSha: String? = null
     var lastWaitingLogTime: Long = 0L
@@ -114,6 +118,7 @@ class OrchestratorContext {
 
         lastHeadSha = props.getProperty("lastHeadSha").takeIf { !it.isNullOrEmpty() }
         lastReviewedSha = props.getProperty("lastReviewedSha").takeIf { !it.isNullOrEmpty() }
+        lastRequestedReviewSha = props.getProperty("lastRequestedReviewSha").takeIf { !it.isNullOrEmpty() }
         lastBuildStatus = props.getProperty("lastBuildStatus").takeIf { !it.isNullOrEmpty() }
         lastCheckedSha = props.getProperty("lastCheckedSha").takeIf { !it.isNullOrEmpty() }
         lastWaitingLogTime = props.getProperty("lastWaitingLogTime")?.toLongOrNull() ?: 0L
@@ -151,6 +156,7 @@ class OrchestratorContext {
 
                 slot.lastHeadSha = lastHeadSha
                 slot.lastReviewedSha = lastReviewedSha
+                slot.lastRequestedReviewSha = lastRequestedReviewSha
                 slot.lastBuildStatus = lastBuildStatus
                 slot.lastCheckedSha = lastCheckedSha
                 slot.lastWaitingLogTime = lastWaitingLogTime
@@ -178,6 +184,7 @@ class OrchestratorContext {
 
         props.setProperty("lastHeadSha", lastHeadSha ?: "")
         props.setProperty("lastReviewedSha", lastReviewedSha ?: "")
+        props.setProperty("lastRequestedReviewSha", lastRequestedReviewSha ?: "")
         props.setProperty("lastBuildStatus", lastBuildStatus ?: "")
         props.setProperty("lastCheckedSha", lastCheckedSha ?: "")
         props.setProperty("lastWaitingLogTime", lastWaitingLogTime.toString())
@@ -204,6 +211,7 @@ class OrchestratorContext {
         prNumber = null
         lastHeadSha = null
         lastReviewedSha = null
+        lastRequestedReviewSha = null
         lastBuildStatus = null
         lastCheckedSha = null
         lastWaitingLogTime = 0L

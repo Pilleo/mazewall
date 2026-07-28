@@ -44,7 +44,14 @@ class RealGitHubClient(private val config: OrchestratorConfig) : GitHubClient {
     internal data class CachedValue<T>(val value: T, val expiry: Long)
     internal val cache = mutableMapOf<String, CachedValue<*>>()
 
-    private fun clearPrCache(prNumber: String) {
+    override fun approveRescue(prNumber: String, rescueBranchName: String) {
+        val branchName = execute("gh", "pr", "view", prNumber, "--json", "headRefName", "--jq", ".headRefName").trim()
+        execute("git", "push", "--force", "origin", "origin/$rescueBranchName:$branchName")
+        // Clean up rescue branch
+        execute("git", "push", "origin", "--delete", rescueBranchName)
+    }
+
+    override fun clearPrCache(prNumber: String) {
         cache.remove("checkBuildStatus-$prNumber")
         cache.remove("getPrMergeStatus-$prNumber")
         cache.remove("getPrHeadSha-$prNumber")
@@ -132,20 +139,70 @@ class RealGitHubClient(private val config: OrchestratorConfig) : GitHubClient {
     }
 
     override fun findLinkedPR(issueNumber: String, issueId: String, julesSessionId: String?): String? {
-        var prListJson = execute("gh", "pr", "list", "--search", "fixes #$issueNumber", "--json", "number,title,headRefName,body")
-        var prs = parsePRs(prListJson)
-        if (prs.isNotEmpty()) return prs.first().number.toString()
+        val cleanSessionId = julesSessionId?.substringAfterLast("/")?.trim()?.takeIf { it.isNotBlank() }
 
-        prListJson = execute("gh", "pr", "list", "--json", "number,title,headRefName,body")
-        prs = parsePRs(prListJson)
-        
-        val matched = prs.firstOrNull { pr ->
-            (julesSessionId != null && pr.headRefName.contains(julesSessionId)) ||
-            (pr.body?.contains("#$issueNumber") == true) ||
-            pr.headRefName.contains(issueId, ignoreCase = true) ||
-            (pr.body?.contains(issueId, ignoreCase = true) == true)
+        val searchQueries = mutableListOf<String>()
+        if (issueNumber.isNotBlank()) {
+            searchQueries.add("fixes #$issueNumber")
+            searchQueries.add("#$issueNumber")
         }
-        return matched?.number?.toString()
+        if (cleanSessionId != null) {
+            searchQueries.add(cleanSessionId)
+        }
+        if (issueId.isNotBlank()) {
+            searchQueries.add(issueId)
+        }
+
+        for (query in searchQueries) {
+            try {
+                val prListJson = execute("gh", "pr", "list", "--search", query, "--json", "number,title,headRefName,body")
+                val prs = parsePRs(prListJson)
+                val matched = prs.firstOrNull { isPrMatching(it, issueNumber, issueId, cleanSessionId) }
+                if (matched != null) return matched.number.toString()
+            } catch (_: Exception) {
+                // Ignore failure of specific search query and try next fallback
+            }
+        }
+
+        return try {
+            val prListJson = execute("gh", "pr", "list", "--state", "open", "--json", "number,title,headRefName,body")
+            val prs = parsePRs(prListJson)
+            val matched = prs.firstOrNull { isPrMatching(it, issueNumber, issueId, cleanSessionId) }
+            matched?.number?.toString()
+        } catch (e: Exception) {
+            System.err.println("Error finding linked PR for issue #$issueNumber ($issueId): ${e.message}")
+            null
+        }
+    }
+
+    internal fun isPrMatching(pr: GitHubPR, issueNumber: String, issueId: String, cleanSessionId: String?): Boolean {
+        if (cleanSessionId != null) {
+            if (pr.headRefName.contains(cleanSessionId, ignoreCase = true) ||
+                (pr.body?.contains(cleanSessionId, ignoreCase = true) == true)) {
+                return true
+            }
+        }
+
+        if (issueNumber.isNotBlank()) {
+            val body = pr.body ?: ""
+            val title = pr.title
+            if (body.contains("#$issueNumber") ||
+                body.contains("issue $issueNumber", ignoreCase = true) ||
+                title.contains("#$issueNumber") ||
+                title.contains("issue $issueNumber", ignoreCase = true)) {
+                return true
+            }
+        }
+
+        if (issueId.isNotBlank()) {
+            if (pr.headRefName.contains(issueId, ignoreCase = true) ||
+                (pr.body?.contains(issueId, ignoreCase = true) == true) ||
+                pr.title.contains(issueId, ignoreCase = true)) {
+                return true
+            }
+        }
+
+        return false
     }
 
     override fun checkBuildStatus(prNumber: String): String = withCache("checkBuildStatus-$prNumber") {
@@ -214,6 +271,12 @@ class RealGitHubClient(private val config: OrchestratorConfig) : GitHubClient {
         return state.contains("\"state\":\"CLOSED\"", ignoreCase = true)
     }
 
+    override fun isPrClosed(prNumber: String): Boolean {
+        val state = execute("gh", "pr", "view", prNumber, "--json", "state")
+        return state.contains("\"state\":\"CLOSED\"", ignoreCase = true) ||
+               state.contains("\"state\":\"MERGED\"", ignoreCase = true)
+    }
+
     override fun isPrMerged(prNumber: String): Boolean {
         val state = execute("gh", "pr", "view", prNumber, "--json", "state")
         return state.contains("\"state\":\"MERGED\"", ignoreCase = true)
@@ -247,11 +310,15 @@ class RealGitHubClient(private val config: OrchestratorConfig) : GitHubClient {
     }
 
     private fun execute(vararg command: String): String {
-        return executeInDir(null, *command)
+        return executeInDir(null, *command, retry = true)
     }
 
-    private fun executeInDir(workingDir: File?, vararg command: String): String {
-        return RetryUtils.retry(config.maxRetries, config.initialRetryDelayMs, { System.err.println("  [GitHubCli] $it") }) {
+    private fun executeWithoutRetry(vararg command: String): String {
+        return executeInDir(null, *command, retry = false)
+    }
+
+    private fun executeInDir(workingDir: File?, vararg command: String, retry: Boolean = true): String {
+        val action = {
             val directory = File("build/tmp").apply { mkdirs() }
             val tempFile = File.createTempFile("gh_cmd_", ".log", directory)
             try {
@@ -276,6 +343,12 @@ class RealGitHubClient(private val config: OrchestratorConfig) : GitHubClient {
             } finally {
                 tempFile.delete()
             }
+        }
+
+        return if (retry) {
+            RetryUtils.retry(config.maxRetries, config.initialRetryDelayMs, { System.err.println("  [GitHubCli] $it") }, action)
+        } else {
+            action()
         }
     }
 
@@ -322,73 +395,68 @@ class RealGitHubClient(private val config: OrchestratorConfig) : GitHubClient {
         }
     }
 
-    override fun rebaseBranch(prNumber: String): Boolean {
-        // Clear PR cache to prevent stale status
-        clearPrCache(prNumber)
+    /**
+     * Integrates PR branch changes with origin/master using the Surgical Intended-Files Apply algorithm.
+     *
+     * 🧠 DESIGN DECISIONS (WHY, WHAT, WHEN, WHERE):
+     *
+     * 🟢 WHY:
+     * Standard `git rebase` replays every individual commit. This is highly vulnerable to merge conflicts.
+     * Standard full-tree patch apply (`git apply --3way`) computes a full-tree diff and applies it onto master.
+     * However, Jules operates in a stale/frozen workspace. If master advances (adding new files or modifying other files)
+     * after Jules diverged, those master-added files won't be in Jules's stale workspace. Applying a full-tree diff
+     * would silently DELETE those new master files from the final PR branch perspective, causing serious regression bugs.
+     * Furthermore, standard git merge-base checkout sequences can pollute the directory or error out on moved files.
+     * To be 100% deterministic, we must completely ignore stale workspace deletions and only apply files Jules *intended* to touch.
+     *
+     * 🔵 WHAT:
+     * We employ Surgical Intended-Files Extraction:
+     * 1. Find the parent of the first commit on Jules's branch (`INITIAL_BASE`) using `git rev-list --reverse` to track
+     *    the exact point where Jules diverged from master before any rebase/merge commits. Fallback to `git merge-base` if needed.
+     * 2. Extract `INTENDED_FILES` using `git diff --name-only --diff-filter=AM`. The `--diff-filter=AM` ensures that we ONLY
+     *    capture files that Jules Added (A) or Modified (M) for the task. We explicitly ignore Deleted (D) files, meaning stale
+     *    workspace deletions are completely bypassed.
+     * 3. Set up a fresh worktree pointing to origin/master.
+     * 4. For each intended file, copy its exact version from origin/$branchName (`git checkout origin/$BRANCH -- <file>`) and
+     *    stage it (`git add <file>`). This overwrites any master version of only these files, while master-only files added
+     *    after divergence remain completely untouched and preserved.
+     *
+     * 🟡 WHEN:
+     * This is triggered whenever the orchestrator daemon detects a PR is out of date (behind master) or has merge conflicts
+     * (CONFLICTING status) during active polling loops.
+     *
+     * 🔴 WHERE:
+     * Executed within a detached temporary worktree (`../temp-rebase-<prNumber>`) to ensure absolute isolation.
+     * This prevents working-tree pollution or conflicts with uncommitted/untracked local edits in the main agent workspace.
+     */
+    private fun isFileAllowed(file: String, targetFiles: List<String>): Boolean {
+        if (file.startsWith("docs/internals/backlog/") && file.endsWith(".md")) return true
+        val normalizedFile = file.replace('\\', '/').trim()
+        return targetFiles.any { target ->
+            val normalizedTarget = target.replace('\\', '/').trim().removePrefix(":")
 
-        // 1. Try GitHub API native branch update with rebase first
-        try {
-            execute("gh", "pr", "update-branch", prNumber, "--rebase")
-            return true
-        } catch (e: Exception) {
-            System.err.println("gh pr update-branch --rebase failed for PR #$prNumber (${e.message}). Attempting local git fetch and rebase in worktree...")
+            // Exact match or suffix match
+            if (normalizedFile == normalizedTarget || normalizedFile.endsWith("/$normalizedTarget")) return true
+
+            // If the target is a main file, also allow its corresponding test file
+            if (normalizedTarget.contains("/src/main/")) {
+                val testTarget = normalizedTarget
+                    .replace("/src/main/", "/src/test/")
+                    .replace(".kt", "Test.kt")
+                    .replace(".java", "Test.java")
+                if (normalizedFile == testTarget || normalizedFile.endsWith("/$testTarget")) return true
+            }
+            false
         }
+    }
 
-        // 2. Fallback to local git rebase in an isolated worktree and force push
-        val worktreeDir = File("../temp-rebase-$prNumber")
-        var currentBranch = ""
-        var branchName = ""
-        try {
-            branchName = execute("gh", "pr", "view", prNumber, "--json", "headRefName", "--jq", ".headRefName").trim()
-            if (branchName.isBlank()) return false
-
-            currentBranch = execute("git", "rev-parse", "--abbrev-ref", "HEAD").trim()
-            if (currentBranch == branchName) {
-                execute("git", "checkout", "--detach")
-            }
-
-            execute("git", "fetch", "origin", branchName)
-            execute("git", "fetch", "origin", "master")
-
-            // Clean up any stale worktree of the same name first
-            try {
-                execute("git", "worktree", "remove", worktreeDir.absolutePath, "--force")
-            } catch (_: Exception) {}
-            if (worktreeDir.exists()) {
-                worktreeDir.deleteRecursively()
-            }
-            try {
-                execute("git", "worktree", "prune")
-            } catch (_: Exception) {}
-
-            execute("git", "branch", "-f", branchName, "origin/$branchName")
-            execute("git", "worktree", "add", worktreeDir.absolutePath, branchName)
-
-            // Run rebase, compile, and push in the worktree
-            executeInDir(worktreeDir, "git", "rebase", "origin/master")
-            executeInDir(worktreeDir, "./gradlew", "compileKotlin")
-            executeInDir(worktreeDir, "git", "push", "--force-with-lease", "origin", branchName)
-
-            return true
-        } catch (e: Exception) {
-            System.err.println("Local worktree rebase failed for PR #$prNumber: ${e.message}")
-            return false
-        } finally {
-            try {
-                execute("git", "worktree", "remove", worktreeDir.absolutePath, "--force")
-            } catch (_: Exception) {}
-            if (worktreeDir.exists()) {
-                worktreeDir.deleteRecursively()
-            }
-            try {
-                execute("git", "worktree", "prune")
-            } catch (_: Exception) {}
-            if (currentBranch.isNotBlank() && currentBranch != "HEAD") {
-                try {
-                    execute("git", "checkout", currentBranch)
-                } catch (_: Exception) {}
-            }
-        }
+    override fun mergeMasterIntoBranch(prNumber: String, targetFiles: List<String>): RebaseResult {
+        return BranchRebaser(
+            execute = { args -> execute(*args) },
+            executeInDir = { dir, args -> executeInDir(dir, *args) },
+            executeInDirNoRetry = { dir, args -> executeInDir(dir, *args) },
+            clearPrCache = ::clearPrCache
+        ).run(prNumber, targetFiles)
     }
 }
 

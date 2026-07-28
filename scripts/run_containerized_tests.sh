@@ -28,6 +28,7 @@ PODMAN_ARGS=(
     -e GRADLE_USER_HOME="${HOME}/.gradle"
     -e IO_MAZEWALL_TEST=true
     -e MAZEWALL_IN_CONTAINER=true
+    -e QEMU_CPU="${QEMU_CPU:-host}"
     -e CI="${CI:-false}"
     -e GITHUB_ACTIONS="${GITHUB_ACTIONS:-false}"
     -e LANG=C.UTF-8

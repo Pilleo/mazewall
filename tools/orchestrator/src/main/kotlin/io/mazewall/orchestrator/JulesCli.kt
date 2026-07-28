@@ -19,41 +19,41 @@ data class JulesSession(
 // ─── Request payloads ────────────────────────────────────────────────────────
 
 @Serializable
-private data class CreateSessionRequest(
+internal data class CreateSessionRequest(
     val prompt: String,
     val sourceContext: SourceContext,
     val title: String
 )
 
 @Serializable
-private data class SourceContext(
+internal data class SourceContext(
     val source: String,
     val githubRepoContext: GithubRepoContext
 )
 
 @Serializable
-private data class GithubRepoContext(
+internal data class GithubRepoContext(
     val startingBranch: String
 )
 
 // ─── Sessions list response ───────────────────────────────────────────────────
 
 @Serializable
-private data class SessionResponse(
+internal data class SessionResponse(
     val name: String,
     val title: String? = null,
     val state: String? = null
 )
 
 @Serializable
-private data class ListSessionsResponse(
+internal data class ListSessionsResponse(
     val sessions: List<SessionResponse> = emptyList()
 )
 
 // ─── Typed activity payload types ─────────────────────────────────────────────
 
 @Serializable
-private data class PlanStep(
+internal data class PlanStep(
     val id: String = "",
     val title: String = "",
     val description: String = "",
@@ -61,48 +61,48 @@ private data class PlanStep(
 )
 
 @Serializable
-private data class Plan(
+internal data class Plan(
     val id: String = "",
     val steps: List<PlanStep> = emptyList()
 )
 
 @Serializable
-private data class PlanGeneratedPayload(val plan: Plan = Plan())
+internal data class PlanGeneratedPayload(val plan: Plan = Plan())
 
 @Serializable
-private data class PlanApprovedPayload(val planId: String = "")
+internal data class PlanApprovedPayload(val planId: String = "")
 
 @Serializable
-private data class ProgressUpdatedPayload(
+internal data class ProgressUpdatedPayload(
     val title: String = "",
     val description: String = ""
 )
 
 @Serializable
-private data class GitPatch(
+internal data class GitPatch(
     val unidiffPatch: String = "",
     val baseCommitId: String = ""
 )
 
 @Serializable
-private data class ChangeSet(
+internal data class ChangeSet(
     val source: String = "",
     val gitPatch: GitPatch = GitPatch()
 )
 
 @Serializable
-private data class Artifact(val changeSet: ChangeSet = ChangeSet())
+internal data class Artifact(val changeSet: ChangeSet = ChangeSet())
 
 @Serializable
-private data class SessionFailedPayload(val reason: String = "")
+internal data class SessionFailedPayload(val reason: String = "")
 
 @Serializable
-private data class UserMessagedPayload(val userMessage: String = "")
+internal data class UserMessagedPayload(val userMessage: String = "")
 
 // ─── Activity ─────────────────────────────────────────────────────────────────
 
 @Serializable
-private data class Activity(
+internal data class Activity(
     val name: String = "",
     val createTime: String = "",
     val originator: String = "",
@@ -118,18 +118,22 @@ private data class Activity(
 )
 
 @Serializable
-private data class ListActivitiesResponse(
+internal data class ListActivitiesResponse(
     val activities: List<Activity> = emptyList(),
     val nextPageToken: String? = null
 )
 
 // ─── JulesCli ─────────────────────────────────────────────────────────────────
 
-class RealJulesClient(private val config: OrchestratorConfig) : JulesClient {
+class RealJulesClient(
+    private val config: OrchestratorConfig,
+    private val transport: HttpTransport = RealHttpTransport(
+        HttpClient.newBuilder()
+            .connectTimeout(Duration.ofSeconds(10))
+            .build()
+    )
+) : JulesClient {
     private val json = Json { ignoreUnknownKeys = true }
-    private val client = HttpClient.newBuilder()
-        .connectTimeout(Duration.ofSeconds(10))
-        .build()
 
     private val apiKey: String
         get() = System.getenv("JULES_API_KEY")
@@ -161,7 +165,7 @@ class RealJulesClient(private val config: OrchestratorConfig) : JulesClient {
                 .header("X-Goog-Api-Key", apiKey)
                 .GET()
                 .build()
-            val response = client.send(request, HttpResponse.BodyHandlers.ofString())
+            val response = transport.send(request)
             if (response.statusCode() !in 200..299) {
                 throw RuntimeException("Failed to list activities (HTTP ${response.statusCode()}): ${response.body()}")
             }
@@ -254,7 +258,7 @@ class RealJulesClient(private val config: OrchestratorConfig) : JulesClient {
             .build()
 
         try {
-            val response = client.send(request, HttpResponse.BodyHandlers.ofString())
+            val response = transport.send(request)
             if (response.statusCode() !in 200..299) {
                 throw RuntimeException("Failed to trigger Jules session (HTTP ${response.statusCode()}): ${response.body()}")
             }
@@ -281,7 +285,7 @@ class RealJulesClient(private val config: OrchestratorConfig) : JulesClient {
             .build()
 
         try {
-            val response = client.send(request, HttpResponse.BodyHandlers.ofString())
+            val response = transport.send(request)
             if (response.statusCode() !in 200..299) {
                 throw RuntimeException("Failed to send message to Jules session (HTTP ${response.statusCode()}): ${response.body()}")
             }
@@ -310,7 +314,7 @@ class RealJulesClient(private val config: OrchestratorConfig) : JulesClient {
             .build()
 
         return try {
-            val response = client.send(request, HttpResponse.BodyHandlers.ofString())
+            val response = transport.send(request)
             if (response.statusCode() !in 200..299) {
                 throw RuntimeException("Failed to list Jules sessions (HTTP ${response.statusCode()}): ${response.body()}")
             }
