@@ -64,6 +64,10 @@ class BranchRebaser(
             execute(arrayOf("git", "worktree", "prune"))
         } catch (_: Exception) {}
 
+        try {
+            execute(arrayOf("git", "config", "--local", "core.bare", "false"))
+        } catch (_: Exception) {}
+
         return if (state is RebaseProcessState.Completed) state.result else (state as RebaseProcessState.Failed).result
     }
 
@@ -99,6 +103,10 @@ class BranchRebaser(
         } catch (_: Exception) {}
 
         try {
+            execute(arrayOf("git", "config", "--local", "core.bare", "false"))
+        } catch (_: Exception) {}
+
+        try {
             execute(arrayOf("git", "worktree", "add", state.worktreeDir.absolutePath, "origin/${state.branchName}", "--detach"))
         } catch (e: Exception) {
             return RebaseProcessState.Failed(RebaseResult(success = false, conflictCount = 0))
@@ -131,8 +139,17 @@ class BranchRebaser(
                     var midMergeCleaned = false
                     for (dirtyFile in conflictedFiles) {
                         try {
-                            executeInDir(state.worktreeDir, arrayOf("git", "checkout", "origin/master", "--", dirtyFile))
-                            executeInDir(state.worktreeDir, arrayOf("git", "add", dirtyFile))
+                            val existsInMaster = try {
+                                executeInDir(state.worktreeDir, arrayOf("git", "ls-tree", "-r", "origin/master", "--name-only"))
+                                    .lines().any { it.trim() == dirtyFile }
+                            } catch (_: Exception) { false }
+
+                            if (existsInMaster) {
+                                executeInDir(state.worktreeDir, arrayOf("git", "checkout", "origin/master", "--", dirtyFile))
+                                executeInDir(state.worktreeDir, arrayOf("git", "add", dirtyFile))
+                            } else {
+                                executeInDir(state.worktreeDir, arrayOf("git", "rm", "-f", "--ignore-unmatch", dirtyFile))
+                            }
                             midMergeCleaned = true
                         } catch (ex: Exception) {
                             System.err.println("Failed to discard dirty conflicted file '$dirtyFile': ${ex.message}")
@@ -170,8 +187,17 @@ class BranchRebaser(
             if (!isFileAllowed(file, state.targetFiles)) {
                 System.err.println("🧹 DISCARDING UNINTENDED MODIFICATION: File '$file' is not in targetFiles. Restoring from master...")
                 try {
-                    executeInDir(state.worktreeDir, arrayOf("git", "checkout", "origin/master", "--", file))
-                    executeInDir(state.worktreeDir, arrayOf("git", "add", file))
+                    val existsInMaster = try {
+                        executeInDir(state.worktreeDir, arrayOf("git", "ls-tree", "-r", "origin/master", "--name-only"))
+                            .lines().any { it.trim() == file }
+                    } catch (_: Exception) { false }
+
+                    if (existsInMaster) {
+                        executeInDir(state.worktreeDir, arrayOf("git", "checkout", "origin/master", "--", file))
+                        executeInDir(state.worktreeDir, arrayOf("git", "add", file))
+                    } else {
+                        executeInDir(state.worktreeDir, arrayOf("git", "rm", "-f", "--ignore-unmatch", file))
+                    }
                     cleanedAny = true
                 } catch (e: Exception) {
                     System.err.println("Failed to discard unintended modification on '$file': ${e.message}")

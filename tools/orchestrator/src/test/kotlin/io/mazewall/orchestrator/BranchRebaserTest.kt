@@ -49,7 +49,7 @@ class BranchRebaserTest {
 
         assertTrue(commands.contains("git fetch origin test-branch"))
         assertTrue(commands.contains("inDirNoRetry: git merge origin/master --no-edit -m chore: merge master into PR #123 to keep up to date"))
-        assertTrue(commands.contains("inDir: git checkout origin/master -- disallowed.txt"))
+        assertTrue(commands.contains("inDir: git rm -f --ignore-unmatch disallowed.txt"))
         assertTrue(commands.contains("inDir: git commit --no-verify -m chore: discard unintended file modifications"))
         assertTrue(commands.contains("inDir: git push --force-with-lease origin HEAD:test-branch"))
     }
