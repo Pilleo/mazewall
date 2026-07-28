@@ -35,16 +35,16 @@ class BranchRebaser(
 
         val worktreeDir = File("../temp-rebase-$prNumber")
         try {
-            execute(arrayOf("git", "worktree", "remove", worktreeDir.absolutePath, "--force"))
+            executeInDirNoRetry(null, arrayOf("git", "worktree", "remove", worktreeDir.absolutePath, "--force"))
         } catch (_: Exception) {}
         if (worktreeDir.exists()) {
             worktreeDir.deleteRecursively()
         }
         try {
-            execute(arrayOf("git", "worktree", "prune"))
+            executeInDirNoRetry(null, arrayOf("git", "worktree", "prune"))
         } catch (_: Exception) {}
         try {
-            execute(arrayOf("git", "config", "--local", "core.bare", "false"))
+            executeInDirNoRetry(null, arrayOf("git", "config", "core.bare", "false"))
         } catch (_: Exception) {}
 
         return if (state is RebaseProcessState.Completed) state.result else (state as RebaseProcessState.Failed).result
@@ -72,21 +72,21 @@ class BranchRebaser(
         }
 
         try {
-            execute(arrayOf("git", "worktree", "remove", state.worktreeDir.absolutePath, "--force"))
+            executeInDirNoRetry(null, arrayOf("git", "worktree", "remove", state.worktreeDir.absolutePath, "--force"))
         } catch (_: Exception) {}
         if (state.worktreeDir.exists()) {
             state.worktreeDir.deleteRecursively()
         }
         try {
-            execute(arrayOf("git", "worktree", "prune"))
+            executeInDirNoRetry(null, arrayOf("git", "worktree", "prune"))
         } catch (_: Exception) {}
 
         try {
-            execute(arrayOf("git", "config", "--local", "core.bare", "false"))
+            executeInDirNoRetry(null, arrayOf("git", "config", "core.bare", "false"))
         } catch (_: Exception) {}
 
         try {
-            execute(arrayOf("git", "worktree", "add", state.worktreeDir.absolutePath, "origin/${state.branchName}", "--detach"))
+            executeInDirNoRetry(null, arrayOf("git", "worktree", "add", state.worktreeDir.absolutePath, "origin/${state.branchName}", "--detach"))
         } catch (e: Exception) {
             return RebaseProcessState.Failed(RebaseResult(success = false, conflictCount = 0))
         }
@@ -136,11 +136,22 @@ class BranchRebaser(
             patchFile.writeText(patch)
 
             try {
-                executeInDir(state.worktreeDir, arrayOf("git", "apply", "--3way", "jules-rescue.patch"))
-                executeInDir(state.worktreeDir, arrayOf("git", "add", "."))
+                executeInDirNoRetry(state.worktreeDir, arrayOf("git", "apply", "--3way", "jules-rescue.patch"))
+                executeInDirNoRetry(state.worktreeDir, arrayOf("git", "add", "."))
             } catch (eApply: Exception) {
                 System.err.println("Failed to apply Jules patch cleanly for PR #${state.prNumber}: ${eApply.message}")
-                return RebaseProcessState.Failed(RebaseResult(success = false, conflictCount = 1))
+
+                // Parse the output to find the conflicted files
+                val conflictedFiles = try {
+                    executeInDirNoRetry(state.worktreeDir, arrayOf("git", "diff", "--name-only", "--diff-filter=U"))
+                        .lines().map { it.trim() }.filter { it.isNotEmpty() }
+                } catch (_: Exception) { emptyList() }
+
+                return RebaseProcessState.Failed(RebaseResult(
+                    success = false,
+                    conflictCount = if (conflictedFiles.isNotEmpty()) conflictedFiles.size else 1,
+                    conflictedFiles = conflictedFiles
+                ))
             } finally {
                 patchFile.delete()
             }

@@ -15,9 +15,6 @@ class BranchRebaserTest {
             execute = { args ->
                 val cmd = args.joinToString(" ")
                 commands.add(cmd)
-                if (cmd.startsWith("git worktree add")) {
-                    java.io.File(args[3]).mkdirs()
-                }
                 if (cmd == "gh pr view 123 --json headRefName --jq .headRefName") "test-branch" else ""
             },
             executeInDir = { dir, args ->
@@ -28,6 +25,9 @@ class BranchRebaserTest {
             executeInDirNoRetry = { dir, args ->
                 val cmd = args.joinToString(" ")
                 commands.add("inDirNoRetry: $cmd")
+                if (cmd.startsWith("git worktree add")) {
+                    java.io.File(args[3]).mkdirs()
+                }
                 ""
             },
             clearPrCache = { clearCacheCalled = true }
@@ -86,9 +86,6 @@ class BranchRebaserTest {
             execute = { args ->
                 val cmd = args.joinToString(" ")
                 commands.add(cmd)
-                if (cmd.startsWith("git worktree add")) {
-                    java.io.File(args[3]).mkdirs()
-                }
                 if (cmd == "gh pr view 123 --json headRefName --jq .headRefName") "test-branch" else ""
             },
             executeInDir = { _, args ->
@@ -101,6 +98,9 @@ class BranchRebaserTest {
             executeInDirNoRetry = { _, args ->
                 val cmd = args.joinToString(" ")
                 commands.add("inDirNoRetry: $cmd")
+                if (cmd.startsWith("git worktree add")) {
+                    java.io.File(args[3]).mkdirs()
+                }
                 if (cmd.startsWith("git merge origin/master")) throw RuntimeException("fatal: refusing to merge unrelated histories")
                 ""
             },
@@ -120,14 +120,14 @@ class BranchRebaserTest {
         }
 
         assertFalse(result.success)
-        println("Commands: $commands"); println("Result: $result"); assertEquals(0, result.conflictCount)
+        assertEquals(0, result.conflictCount)
         assertTrue(result.needsRescueApproval)
         assertEquals("test-branch-rescue", result.rescueBranchName)
         assertTrue(patchFetched)
 
         assertTrue(commands.contains("inDir: git reset --hard origin/master"))
-        assertTrue(commands.contains("inDir: git apply --3way jules-rescue.patch"))
-        assertTrue(commands.contains("inDir: git add ."))
+        assertTrue(commands.contains("inDirNoRetry: git apply --3way jules-rescue.patch"))
+        assertTrue(commands.contains("inDirNoRetry: git add ."))
         assertTrue(commands.contains("inDir: git commit --no-verify -m chore(orchestrator): rescue PR #123 onto master via patch apply"))
         assertTrue(commands.contains("inDir: git push --force origin HEAD:test-branch-rescue"))
     }
