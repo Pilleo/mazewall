@@ -3,10 +3,10 @@ package io.mazewall.orchestrator
 import java.io.File
 
 sealed class RebaseProcessState {
-    data class Init(val prNumber: String, val targetFiles: List<String>) : RebaseProcessState()
-    data class SetupWorktree(val prNumber: String, val branchName: String, val worktreeDir: File, val targetFiles: List<String>) : RebaseProcessState()
-    data class AttemptMerge(val prNumber: String, val branchName: String, val worktreeDir: File, val targetFiles: List<String>) : RebaseProcessState()
-    data class HandleRescue(val prNumber: String, val branchName: String, val worktreeDir: File, val targetFiles: List<String>) : RebaseProcessState()
+    data class Init(val prNumber: String, val sessionId: String?) : RebaseProcessState()
+    data class SetupWorktree(val prNumber: String, val branchName: String, val worktreeDir: File, val sessionId: String?) : RebaseProcessState()
+    data class AttemptMerge(val prNumber: String, val branchName: String, val worktreeDir: File, val sessionId: String?) : RebaseProcessState()
+    data class HandleRescue(val prNumber: String, val branchName: String, val worktreeDir: File, val sessionId: String?) : RebaseProcessState()
     data class VerifyAndPush(val prNumber: String, val branchName: String, val worktreeDir: File, val isRescue: Boolean) : RebaseProcessState()
     data class Completed(val result: RebaseResult) : RebaseProcessState()
     data class Failed(val result: RebaseResult) : RebaseProcessState()
@@ -16,12 +16,11 @@ class BranchRebaser(
     private val execute: (Array<out String>) -> String,
     private val executeInDir: (File?, Array<out String>) -> String,
     private val executeInDirNoRetry: (File?, Array<out String>) -> String,
-    private val clearPrCache: (String) -> Unit,
-    private val fetchJulesPatch: (prNumber: String) -> String? = { null }
+    private val clearPrCache: (String) -> Unit
 ) {
 
-    fun run(prNumber: String, targetFiles: List<String>): RebaseResult {
-        var state: RebaseProcessState = RebaseProcessState.Init(prNumber, targetFiles)
+    fun run(prNumber: String, sessionId: String?): RebaseResult {
+        var state: RebaseProcessState = RebaseProcessState.Init(prNumber, sessionId)
         while (state !is RebaseProcessState.Completed && state !is RebaseProcessState.Failed) {
             state = when (state) {
                 is RebaseProcessState.Init -> handleInit(state)
@@ -60,7 +59,7 @@ class BranchRebaser(
         if (branchName.isBlank()) return RebaseProcessState.Failed(RebaseResult(success = false, conflictCount = 0))
 
         val worktreeDir = File("../temp-rebase-${state.prNumber}")
-        return RebaseProcessState.SetupWorktree(state.prNumber, branchName, worktreeDir, state.targetFiles)
+        return RebaseProcessState.SetupWorktree(state.prNumber, branchName, worktreeDir, state.sessionId)
     }
 
     private fun handleSetupWorktree(state: RebaseProcessState.SetupWorktree): RebaseProcessState {
@@ -91,7 +90,7 @@ class BranchRebaser(
             return RebaseProcessState.Failed(RebaseResult(success = false, conflictCount = 0))
         }
 
-        return RebaseProcessState.AttemptMerge(state.prNumber, state.branchName, state.worktreeDir, state.targetFiles)
+        return RebaseProcessState.AttemptMerge(state.prNumber, state.branchName, state.worktreeDir, state.sessionId)
     }
 
         private fun handleAttemptMerge(state: RebaseProcessState.AttemptMerge): RebaseProcessState {
@@ -117,51 +116,30 @@ class BranchRebaser(
             try {
                 executeInDirNoRetry(state.worktreeDir, arrayOf("git", "merge", "--abort"))
             } catch (_: Exception) {}
-            return RebaseProcessState.HandleRescue(state.prNumber, state.branchName, state.worktreeDir, state.targetFiles)
+            return RebaseProcessState.HandleRescue(state.prNumber, state.branchName, state.worktreeDir, state.sessionId)
         }
     }
 
-    private fun handleRescue(state: RebaseProcessState.HandleRescue): RebaseProcessState {
-        System.err.println("Unrelated histories detected for PR #${state.prNumber}. Falling back to patch rescue logic.")
+        private fun handleRescue(state: RebaseProcessState.HandleRescue): RebaseProcessState {
+        System.err.println("Unrelated histories detected for PR #${state.prNumber}. Falling back to 'jules remote pull' rescue logic.")
         try { executeInDirNoRetry(state.worktreeDir, arrayOf("git", "merge", "--abort")) } catch (_: Exception) {}
+
+        if (state.sessionId.isNullOrBlank()) {
+            System.err.println("No Jules session ID available for PR #${state.prNumber}. Cannot rescue using jules remote pull.")
+            return RebaseProcessState.Failed(RebaseResult(success = false, conflictCount = 1))
+        }
 
         try {
             executeInDir(state.worktreeDir, arrayOf("git", "reset", "--hard", "origin/master"))
 
-            val patch = fetchJulesPatch(state.prNumber)
-            if (patch.isNullOrBlank()) {
-                System.err.println("Failed to fetch Jules patch for PR #${state.prNumber}. Cannot rescue.")
-                return RebaseProcessState.Failed(RebaseResult(success = false, conflictCount = 1))
-            }
-
-            val patchFile = File(state.worktreeDir, "jules-rescue.patch")
-            patchFile.writeText(patch)
-
             try {
-                executeInDirNoRetry(state.worktreeDir, arrayOf("git", "apply", "--3way", "jules-rescue.patch"))
+                System.err.println("Executing 'jules remote pull ${state.sessionId}'...")
+                executeInDirNoRetry(state.worktreeDir, arrayOf("jules", "remote", "pull", state.sessionId))
                 executeInDirNoRetry(state.worktreeDir, arrayOf("git", "add", "."))
-            } catch (eApply: Exception) {
-                val output = eApply.message ?: ""
-                System.err.println("Failed to apply Jules patch cleanly for PR #${state.prNumber}. Output:\n$output")
-
-                // Parse the git apply output directly to find conflicted files
-                // git apply output looks like: "Applied patch to 'build.gradle.kts' with conflicts."
-                val conflictRegex = Regex("Applied patch to '(.*?)' with conflicts\\.")
-                val conflictedFiles = conflictRegex.findAll(output).map { it.groupValues[1] }.toList()
-
-                if (conflictedFiles.isNotEmpty()) {
-                    System.err.println("Conflicts identified in: ${conflictedFiles.joinToString(", ")}")
-                } else {
-                    System.err.println("Could not parse specific conflicted files from git output.")
-                }
-
-                return RebaseProcessState.Failed(RebaseResult(
-                    success = false,
-                    conflictCount = if (conflictedFiles.isNotEmpty()) conflictedFiles.size else 1,
-                    conflictedFiles = conflictedFiles
-                ))
-            } finally {
-                patchFile.delete()
+            } catch (ePull: Exception) {
+                val output = ePull.message ?: ""
+                System.err.println("Failed to execute jules remote pull for PR #${state.prNumber}. Output:\n$output")
+                return RebaseProcessState.Failed(RebaseResult(success = false, conflictCount = 1))
             }
 
             val hasChanges = try {
@@ -172,10 +150,10 @@ class BranchRebaser(
             }
 
             if (hasChanges) {
-                executeInDir(state.worktreeDir, arrayOf("git", "commit", "--no-verify", "-m", "chore(orchestrator): rescue PR #${state.prNumber} onto master via patch apply"))
+                executeInDir(state.worktreeDir, arrayOf("git", "commit", "--no-verify", "-m", "chore(orchestrator): rescue PR #${state.prNumber} onto master via jules remote pull"))
                 return RebaseProcessState.VerifyAndPush(state.prNumber, state.branchName, state.worktreeDir, isRescue = true)
             } else {
-                System.err.println("Jules patch applied but resulted in no changes for PR #${state.prNumber}")
+                System.err.println("Jules remote pull succeeded but resulted in no changes for PR #${state.prNumber}")
                 return RebaseProcessState.Failed(RebaseResult(success = false, conflictCount = 1))
             }
         } catch (e: Exception) {
