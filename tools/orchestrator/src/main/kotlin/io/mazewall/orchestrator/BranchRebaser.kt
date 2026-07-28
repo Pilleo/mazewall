@@ -96,14 +96,17 @@ class BranchRebaser(
         private fun handleAttemptMerge(state: RebaseProcessState.AttemptMerge): RebaseProcessState {
         try {
             val issueBody = execute(arrayOf("gh", "pr", "view", state.prNumber, "--json", "body", "--jq", ".body"))
-            val backlogIssueMatch = Regex("""\bissue-[0-9]{8}-[0-9]{6}[a-zA-Z0-9_-]+\.md\b""").find(issueBody)
+            val backlogIssueMatch = Regex("""\bissue-[0-9]{8}-[0-9]{6}[a-zA-Z0-9_-]+(\.md)?\b""").find(issueBody)
 
             if (backlogIssueMatch == null) {
                 System.err.println("Could not find backlog issue reference in PR #${state.prNumber} body.")
                 return RebaseProcessState.Failed(RebaseResult(success = false, conflictCount = 0))
             }
 
-            val backlogFileName = backlogIssueMatch.value
+            var backlogFileName = backlogIssueMatch.value
+            if (!backlogFileName.endsWith(".md")) {
+                backlogFileName += ".md"
+            }
             val backlogCommandOutput = execute(arrayOf("find", "docs/internals/backlog", "-name", backlogFileName))
             val backlogFile = java.io.File(backlogCommandOutput.lines().firstOrNull { it.isNotBlank() } ?: "")
             if (!backlogFile.exists()) {

@@ -20,7 +20,7 @@ class BranchRebaserTest {
                 val cmd = args.joinToString(" ")
                 commands.add(cmd)
                 if (cmd.contains("headRefName")) return@BranchRebaser "test-branch"
-                if (cmd.contains("body")) return@BranchRebaser "Resolves issue-20260727-140934-some-issue.md"
+                if (cmd.contains("body")) return@BranchRebaser "Resolves issue-20260727-140934-some-issue"
                 if (cmd.contains("find")) return@BranchRebaser tempBacklog.absolutePath
                 ""
             },
@@ -72,7 +72,7 @@ class BranchRebaserTest {
                 val cmd = args.joinToString(" ")
                 when (cmd) {
                     "gh pr view 123 --json headRefName --jq .headRefName" -> "test-branch"
-                    "gh pr view 123 --json body --jq .body" -> "Resolves issue-20260727-140934-some-issue.md"
+                    "gh pr view 123 --json body --jq .body" -> "Resolves issue-20260727-140934-some-issue"
                     "find docs/internals/backlog -name issue-20260727-140934-some-issue.md" -> tempBacklog.absolutePath
                     else -> ""
                 }
@@ -116,7 +116,7 @@ class BranchRebaserTest {
                 commands.add(cmd)
                 when (cmd) {
                     "gh pr view 123 --json headRefName --jq .headRefName" -> "test-branch"
-                    "gh pr view 123 --json body --jq .body" -> "Resolves issue-20260727-140934-some-issue.md"
+                    "gh pr view 123 --json body --jq .body" -> "Resolves issue-20260727-140934-some-issue"
                     "find docs/internals/backlog -name issue-20260727-140934-some-issue.md" -> tempBacklog.absolutePath
                     else -> ""
                 }
