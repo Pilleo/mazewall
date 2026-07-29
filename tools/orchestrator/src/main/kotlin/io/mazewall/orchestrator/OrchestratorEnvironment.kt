@@ -33,6 +33,7 @@ interface OrchestratorEnvironment {
     // Bot
     fun sendNotification(message: String)
     fun requestApproval(issueId: String, text: String): Boolean
+    fun pollTelegramUpdates(context: OrchestratorContext)
 
 
 
@@ -97,6 +98,13 @@ class RealOrchestratorEnvironment(
 
     override fun sendNotification(message: String) {
         bot?.sendMessage(message)
+    }
+
+    override fun pollTelegramUpdates(context: OrchestratorContext) {
+        bot?.onReviewRequested = { focusComments ->
+            ReviewIssueLauncher.launchReviewTask(focusComments, backlogDir, this, context)
+        }
+        bot?.pollUpdates()
     }
 
     override fun requestApproval(issueId: String, text: String): Boolean {

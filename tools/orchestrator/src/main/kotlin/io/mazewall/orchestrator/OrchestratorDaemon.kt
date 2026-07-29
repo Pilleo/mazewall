@@ -34,6 +34,9 @@ class OrchestratorDaemonRunner(
         }
         while (true) {
             try {
+                // 0. Poll Telegram updates non-blockingly for incoming review requests
+                env.pollTelegramUpdates(context)
+
                 // 1. Try to select and start new tasks
                 selectAndStartTasks()
 

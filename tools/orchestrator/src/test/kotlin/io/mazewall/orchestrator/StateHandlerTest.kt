@@ -46,6 +46,7 @@ class MockOrchestratorEnvironment : OrchestratorEnvironment {
 
     override fun sendNotification(message: String) { notifications.add(message) }
     override fun requestApproval(issueId: String, text: String): Boolean = approved
+    override fun pollTelegramUpdates(context: OrchestratorContext) {}
 
 
     var hasUnableToCompleteActivity: Boolean = false
