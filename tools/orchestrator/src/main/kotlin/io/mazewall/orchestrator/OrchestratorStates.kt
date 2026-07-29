@@ -37,6 +37,7 @@ sealed interface OrchestratorState {
         slot.startTime = context.startTime
         slot.julesRetries = context.julesRetries
         slot.julesReviewPushCount = context.julesReviewPushCount
+        slot.julesReviewAttemptCount = context.julesReviewAttemptCount
 
         val nextState = execute(env, context, slot)
 
@@ -61,6 +62,7 @@ sealed interface OrchestratorState {
         context.startTime = slot.startTime
         context.julesRetries = slot.julesRetries
         context.julesReviewPushCount = slot.julesReviewPushCount
+        context.julesReviewAttemptCount = slot.julesReviewAttemptCount
 
         if (nextState == SELECT_TASK && !context.activeSlots.contains(slot)) {
             context.clearActiveTask()
@@ -570,6 +572,13 @@ sealed interface OrchestratorState {
             }
 
             if (currentSha != slot.lastReviewedSha) {
+                if (slot.julesReviewAttemptCount >= 3) {
+                    env.println("⚠️ PR #$prNumber Build Passed, but Jules review attempt count exceeded limit (3). Bypassing review.")
+                    env.sendNotification("⚠️ PR #$prNumber: Bypassing Jules review (attempt count exceeded limit).")
+                    slot.lastReviewedSha = currentSha
+                    return AWAITING_MERGE
+                }
+
                 val comments = env.gitHubClient.getPrComments(prNumber)
                 val searchSha = slot.lastRequestedReviewSha ?: currentSha
                 val shaPrefix = searchSha.take(7)
@@ -581,13 +590,6 @@ sealed interface OrchestratorState {
 
                 if (requestComment == null) {
                     val currentShaPrefix = currentSha.take(7)
-
-                    if (slot.julesReviewAttemptCount >= 3) {
-                        env.println("⚠️ PR #$prNumber Build Passed, but Jules review attempt count exceeded limit (3). Bypassing review.")
-                        env.sendNotification("⚠️ PR #$prNumber: Bypassing Jules review (attempt count exceeded limit).")
-                        slot.lastReviewedSha = currentSha
-                        return AWAITING_MERGE
-                    }
 
                     env.println("🤖 PR #$prNumber Build Passed. Requesting Jules review for SHA: $currentSha (Attempt ${slot.julesReviewAttemptCount + 1}/3)")
                     slot.julesReviewAttemptCount++

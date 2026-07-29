@@ -775,6 +775,24 @@ class StateHandlerTest {
     }
 
     @Test
+    fun `testAwaitingReviewExceedsReviewAttemptLimit`() {
+        val env = MockOrchestratorEnvironment()
+        val context = OrchestratorContext().apply {
+            prNumber = "pr-1"
+            lastHeadSha = "sha123"
+            julesReviewAttemptCount = 3
+        }
+        env.prHeadSha = "sha123"
+        env.buildStatus = "SUCCESS"
+
+        val nextState = OrchestratorState.AWAITING_REVIEW.execute(env, context)
+
+        assertEquals(OrchestratorState.AWAITING_MERGE, nextState)
+        assertEquals("sha123", context.lastReviewedSha)
+        assertTrue(env.notifications.any { it.contains("Bypassing Jules review") })
+    }
+
+    @Test
     fun testAwaitingReviewWaitingForJulesReply() {
         val env = MockOrchestratorEnvironment()
         val context = OrchestratorContext().apply {
