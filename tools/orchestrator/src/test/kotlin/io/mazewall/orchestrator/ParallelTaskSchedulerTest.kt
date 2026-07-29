@@ -138,7 +138,10 @@ class ParallelTaskSchedulerTest {
 
         // Set issue-active as already active
         val slotActive = SlotContext("issue-active").apply {
-            state = OrchestratorState.CI_RUNNING
+            githubIssueNumber = "1"
+            julesSessionId = "s1"
+            prNumber = "101"
+            state = CiRunningState("issue-active", "1", "s1", "101")
         }
         runner2.context.activeSlots.add(slotActive)
 
@@ -178,7 +181,10 @@ class ParallelTaskSchedulerTest {
 
         // Set issueActiveEmpty as already active
         val slotActiveEmpty = SlotContext("issue-active-empty").apply {
-            state = OrchestratorState.CI_RUNNING
+            githubIssueNumber = "2"
+            julesSessionId = "s2"
+            prNumber = "102"
+            state = CiRunningState("issue-active-empty", "2", "s2", "102")
         }
         runner3.context.activeSlots.add(slotActiveEmpty)
 
@@ -193,14 +199,17 @@ class ParallelTaskSchedulerTest {
         val context = OrchestratorContext()
 
         val slot1 = SlotContext("issue-1").apply {
-            state = OrchestratorState.CI_RUNNING
-            currentIssueTitle = "Title 1"
+            githubIssueNumber = "1"
+            julesSessionId = "s1"
             prNumber = "101"
+            state = CiRunningState("issue-1", "1", "s1", "101")
+            currentIssueTitle = "Title 1"
             lastBuildStatus = "SUCCESS"
         }
         val slot2 = SlotContext("issue-2").apply {
-            state = OrchestratorState.PENDING_APPROVAL
             currentIssueTitle = "Title 2"
+            currentIssueFile = "issue-2.md"
+            state = PendingApprovalState("issue-2", "Title 2", "issue-2.md")
         }
 
         context.activeSlots.addAll(listOf(slot1, slot2))
@@ -215,14 +224,14 @@ class ParallelTaskSchedulerTest {
 
         val loadedSlot1 = loadedContext.activeSlots.firstOrNull { it.currentIssueId == "issue-1" }
         assertNotNull(loadedSlot1)
-        assertEquals(OrchestratorState.CI_RUNNING, loadedSlot1.state)
+        assertTrue(loadedSlot1.state is CiRunningState)
         assertEquals("Title 1", loadedSlot1.currentIssueTitle)
         assertEquals("101", loadedSlot1.prNumber)
         assertEquals("SUCCESS", loadedSlot1.lastBuildStatus)
 
         val loadedSlot2 = loadedContext.activeSlots.firstOrNull { it.currentIssueId == "issue-2" }
         assertNotNull(loadedSlot2)
-        assertEquals(OrchestratorState.PENDING_APPROVAL, loadedSlot2.state)
+        assertTrue(loadedSlot2.state is PendingApprovalState)
         assertEquals("Title 2", loadedSlot2.currentIssueTitle)
     }
 }
