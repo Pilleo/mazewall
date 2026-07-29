@@ -431,4 +431,5 @@ tasks.register<Exec>("refactorFirstReport") {
     group = "verification"
     description = "Generates a RefactorFirst HTML report using Maven"
     commandLine("mvn", "org.hjug.refactorfirst.plugin:refactor-first-maven-plugin:0.9.0:htmlReport")
+    isIgnoreExitValue = true
 }

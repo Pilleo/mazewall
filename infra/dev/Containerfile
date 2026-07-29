@@ -13,9 +13,6 @@ RUN apt-get update && apt-get install -y \
     zsh \
     && rm -rf /var/lib/apt/lists/*
 
-# Configure Git to accept any directory to prevent dubious ownership errors in containerized builds
-RUN git config --global --add safe.directory '*'
-
 # The project uses Gradle Toolchains to download Java 25.
 # Ensure the container has enough permissions to download and install toolchains.
 
