@@ -94,6 +94,21 @@ class OrchestratorDaemonRunner(
 
     fun selectAndStartTasks() {
         val allIssues = env.parseAllIssues()
+
+        // Auto-resume orphaned in-progress tasks
+        for (issue in allIssues) {
+            if (issue.status == "in_progress" && context.activeSlots.none { it.currentIssueId == issue.id }) {
+                env.println("♻️ Found orphaned in-progress task in backlog: ${issue.id}. Auto-resuming...")
+                val slot = SlotContext(issue.id)
+                slot.currentIssueTitle = issue.title
+                slot.currentIssueFile = issue.file.path
+                slot.githubIssueNumber = issue.githubIssue?.toString()
+                slot.state = PendingApprovalState(issue.id, issue.title, issue.file.path, issue.githubIssue?.toString())
+                context.activeSlots.add(slot)
+                saveState()
+            }
+        }
+
         val forcedTaskId = env.getEnvOrNull("FORCE_TASK")?.takeIf { it.isNotEmpty() }
 
         if (forcedTaskId != null) {

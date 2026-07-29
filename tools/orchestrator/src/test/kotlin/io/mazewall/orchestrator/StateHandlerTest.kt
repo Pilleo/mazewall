@@ -154,6 +154,23 @@ class StateHandlerTest {
     }
 
     @Test
+    fun testAwaitingJulesStartTransitionsToCiRunningIfPrExists() {
+        val env = MockOrchestratorEnvironment()
+        val context = OrchestratorContext().apply {
+            currentIssueId = "issue-1"
+            githubIssueNumber = "123"
+        }
+        env.linkedPrNumber = "pr-1"
+
+        val state = AwaitingJulesStartState("issue-1", "123")
+        val nextState = state.execute(env, context)
+
+        assertTrue(nextState is CiRunningState)
+        assertEquals("pr-1", context.prNumber)
+        assertEquals("dummy-session-id", context.julesSessionId)
+    }
+
+    @Test
     fun testAwaitingPrTransitionsToCiRunning() {
         val env = MockOrchestratorEnvironment()
         val context = OrchestratorContext().apply {

@@ -130,4 +130,33 @@ class OrchestratorDaemonRunnerTest {
         assertTrue(runner.context.activeSlots.any { it.currentIssueId == "issue-clean" })
         assertFalse(runner.context.activeSlots.any { it.currentIssueId == "issue-conflict" })
     }
+
+    @Test
+    fun testAutoResumeOrphanedInProgressTasks() {
+        val env = MockOrchestratorEnvironment()
+        val runner = OrchestratorDaemonRunner(env, stateFile)
+
+        val inProgressIssue = BacklogIssue(
+            file = File(tempDir, "issue-in-progress.md"),
+            id = "issue-in-progress",
+            title = "In Progress Title",
+            priority = 8,
+            status = "in_progress",
+            dependencies = emptyList(),
+            githubIssue = 398,
+            targetFiles = listOf("fileC.kt"),
+            targetModules = listOf(":profiler")
+        )
+        env.issues.add(inProgressIssue)
+
+        // Slots are empty, but selectAndStartTasks should restore/resume the in-progress backlog issue
+        runner.selectAndStartTasks()
+
+        assertEquals(1, runner.context.activeSlots.size)
+        val resumedSlot = runner.context.activeSlots[0]
+        assertEquals("issue-in-progress", resumedSlot.currentIssueId)
+        assertEquals("398", resumedSlot.githubIssueNumber)
+        assertTrue(resumedSlot.state is PendingApprovalState)
+        assertEquals("In Progress Title", resumedSlot.currentIssueTitle)
+    }
 }

@@ -383,6 +383,16 @@ data class AwaitingJulesStartState(
             return SelectTaskState
         }
 
+        // Check if a linked PR already exists on GitHub. If so, immediately transition to CI_RUNNING
+        val existingPr = env.gitHubClient.findLinkedPR(githubIssueNumber, issueId, null)
+        if (existingPr != null) {
+            env.println("🎉 Found already existing/linked PR #$existingPr for issue #$githubIssueNumber ($issueId). Transitioning straight to CI_RUNNING...")
+            val activeSessionId = env.julesClient.getActiveSession(issueId)?.id ?: "dummy-session-id"
+            slot.prNumber = existingPr
+            slot.julesSessionId = activeSessionId
+            return CiRunningState(issueId, githubIssueNumber, activeSessionId, existingPr)
+        }
+
         var activeSession = env.julesClient.getActiveSession(issueId)
         var attempts = 0
         while (activeSession == null && attempts < env.config.julesTriggerAttempts) {
