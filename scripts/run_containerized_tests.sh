@@ -18,7 +18,6 @@ fi
 echo "Starting integration tests in Podman..."
 PODMAN_ARGS=(
     --name "${CONTAINER_NAME}"
-    --runtime runc
     --network host
     --userns host
     --security-opt "seccomp=${SECCOMP_PROFILE}"
