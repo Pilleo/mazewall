@@ -305,7 +305,6 @@ class StateHandlerTest {
 
         // Mock passage of time
         context.lastStatusChangeTime = System.currentTimeMillis() - 1_000_000 // > 900_000 threshold
-        context.retryAfterTime = 0L
 
         // Second execution should trigger notification
         state.execute(env, context)
@@ -314,7 +313,6 @@ class StateHandlerTest {
         assertEquals(1, env.bellRungCount)
 
         // Third execution should not trigger notification again
-        context.retryAfterTime = 0L
         state.execute(env, context)
         assertEquals(1, env.notifications.size)
     }
@@ -484,9 +482,8 @@ class StateHandlerTest {
 
         // It should stay in CI_RUNNING after attempting rebase
         assertTrue(nextState is CiRunningState)
-        // Check if retryAfterTime was set
-        assertTrue(context.retryAfterTime > System.currentTimeMillis(), "Should set retryAfterTime after triggering rebase")
-        assertEquals(0, env.sleepCount)
+        // Check if sleep was triggered (which happens after handleRebaseAndConflicts returns true)
+        assertTrue(env.sleepCount > 0, "Should sleep after triggering rebase")
     }
 
     @Test
@@ -510,9 +507,8 @@ class StateHandlerTest {
         nextState = nextState.execute(env, context)
         assertTrue(nextState is CiRunningState)
 
-        // Check if retryAfterTime was set during the merge workflow
-        assertTrue(context.retryAfterTime > System.currentTimeMillis(), "Should set retryAfterTime after triggering merge")
-        assertEquals(0, env.sleepCount)
+        // Check if sleep was triggered during the merge workflow
+        assertTrue(env.sleepCount > 0, "Should sleep after triggering merge")
     }
 
     @Test
@@ -560,9 +556,8 @@ class StateHandlerTest {
 
         // It should transition to CiRunningState on successful rebase
         assertTrue(nextState is CiRunningState)
-        // Check if retryAfterTime was set during the rebase workflow
-        assertTrue(context.retryAfterTime > System.currentTimeMillis(), "Should set retryAfterTime after triggering rebase")
-        assertEquals(0, env.sleepCount)
+        // Check if sleep was triggered during the rebase workflow
+        assertTrue(env.sleepCount > 0, "Should sleep after triggering rebase")
     }
 
     @Test
@@ -578,30 +573,16 @@ class StateHandlerTest {
         env.buildStatus = "SUCCESS"
 
         val state = CiRunningState("issue-1", "123", "s1", "pr-1")
+        val nextState = state.execute(env, context)
 
-        // 1st attempt
-        var nextState = state.execute(env, context)
+        // It should stay in CiRunningState
         assertTrue(nextState is CiRunningState)
-        assertEquals(1, context.prMergeStatusAttempts)
-        assertTrue(context.retryAfterTime > System.currentTimeMillis())
-
-        // 2nd attempt (mock time passage by resetting retryAfterTime)
-        context.retryAfterTime = 0L
-        nextState = nextState.execute(env, context)
-        assertTrue(nextState is CiRunningState)
-        assertEquals(2, context.prMergeStatusAttempts)
-        assertTrue(context.retryAfterTime > System.currentTimeMillis())
-
-        // 3rd attempt (exceeds limit)
-        context.retryAfterTime = 0L
-        nextState = nextState.execute(env, context)
-        assertTrue(nextState is CiRunningState)
-        assertEquals(0, context.prMergeStatusAttempts) // reset
-
         // Verify notification was sent
         assertTrue(env.notifications.any { it.contains("GitHub CLI Authentication/Query Failure") || it.contains("HTTP 401: Bad credentials") },
             "Notification should be sent for authentication error")
-        assertEquals(0, env.sleepCount)
+        // Verify we retried status retrieval 3 times (the first call + 2 retries = 3 calls total)
+        // Total sleep count should be 3 (2 for retry delays, 1 for polling interval sleep inside CI_RUNNING because handleRebaseAndConflicts returned true)
+        assertEquals(3, env.sleepCount, "Should sleep for retries and polling interval")
     }
 
     @Test
@@ -736,8 +717,7 @@ class StateHandlerTest {
         val nextState = state.execute(env, context)
 
         assertTrue(nextState is CiRunningState)
-        assertTrue(context.retryAfterTime > System.currentTimeMillis())
-        assertEquals(0, env.sleepCount)
+        assertTrue(env.sleepCount > 0)
     }
 
     @Test
@@ -849,8 +829,7 @@ class StateHandlerTest {
         val nextState = state.execute(env, context)
 
         assertTrue(nextState is AwaitingReviewState)
-        assertTrue(context.retryAfterTime > System.currentTimeMillis())
-        assertEquals(0, env.sleepCount)
+        assertTrue(env.sleepCount > 0)
     }
 
     @Test
@@ -934,8 +913,7 @@ class StateHandlerTest {
         val nextState = state.execute(env, context)
 
         assertTrue(nextState is AwaitingReviewState)
-        assertTrue(context.retryAfterTime > System.currentTimeMillis())
-        assertEquals(0, env.sleepCount)
+        assertTrue(env.sleepCount > 0)
     }
 
     @Test
@@ -1367,9 +1345,8 @@ class StateHandlerTest {
         assertTrue(nextState is CiRunningState)
         // Verify that it did NOT call mergeMasterIntoBranch because the session was active!
         assertEquals(0, env.mergeMasterIntoBranchCallCount)
-        // Verify it set retryAfterTime for the session
-        assertTrue(context.retryAfterTime > System.currentTimeMillis(), "Should set retryAfterTime for the active session")
-        assertEquals(0, env.sleepCount)
+        // Verify it sleep-waited for the session
+        assertTrue(env.sleepCount > 0, "Should sleep-wait for the active session")
     }
 
     @Test
@@ -1392,9 +1369,8 @@ class StateHandlerTest {
         assertTrue(nextState is AwaitingReviewState)
         // Verify that it did NOT call mergeMasterIntoBranch because the session was active!
         assertEquals(0, env.mergeMasterIntoBranchCallCount)
-        // Verify it set retryAfterTime for the session
-        assertTrue(context.retryAfterTime > System.currentTimeMillis(), "Should set retryAfterTime for the active session")
-        assertEquals(0, env.sleepCount)
+        // Verify it sleep-waited for the session
+        assertTrue(env.sleepCount > 0, "Should sleep-wait for the active session")
     }
 
     @Test
