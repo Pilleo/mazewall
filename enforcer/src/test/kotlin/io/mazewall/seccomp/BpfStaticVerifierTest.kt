@@ -80,4 +80,44 @@ class BpfStaticVerifierTest {
         }
         assertEquals("BPF verification failed: instruction index 1 is out of bounds", exception.message)
     }
+
+    @Test
+    fun `program with negative jt offset throws verification exception`() {
+        val jmp = BpfInstruction.Jmp(0x15.toShort(), 0.toShort(), 0.toShort(), 0)
+
+        // Bypass Jmp constructor validation via reflection
+        val jtField = BpfInstruction.Jmp::class.java.getDeclaredField("jt")
+        jtField.isAccessible = true
+        jtField.set(jmp, (-1).toShort())
+
+        val instructions = listOf(
+            jmp,
+            BpfInstruction.Ret(0x06.toShort(), 0)
+        )
+        val badProgram = BpfProgram<BpfStatus.Unverified>(instructions)
+        val exception = assertFailsWith<IllegalArgumentException> {
+            BpfStaticVerifier.verify(badProgram)
+        }
+        assertEquals("BPF verification failed: negative jt offset is not allowed: -1", exception.message)
+    }
+
+    @Test
+    fun `program with negative jf offset throws verification exception`() {
+        val jmp = BpfInstruction.Jmp(0x15.toShort(), 0.toShort(), 0.toShort(), 0)
+
+        // Bypass Jmp constructor validation via reflection
+        val jfField = BpfInstruction.Jmp::class.java.getDeclaredField("jf")
+        jfField.isAccessible = true
+        jfField.set(jmp, (-1).toShort())
+
+        val instructions = listOf(
+            jmp,
+            BpfInstruction.Ret(0x06.toShort(), 0)
+        )
+        val badProgram = BpfProgram<BpfStatus.Unverified>(instructions)
+        val exception = assertFailsWith<IllegalArgumentException> {
+            BpfStaticVerifier.verify(badProgram)
+        }
+        assertEquals("BPF verification failed: negative jf offset is not allowed: -1", exception.message)
+    }
 }

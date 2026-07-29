@@ -50,6 +50,13 @@ public object BpfStaticVerifier {
                     }
                 }
                 is BpfInstruction.Jmp -> {
+                    if (ins.jt < 0) {
+                        throw IllegalArgumentException("BPF verification failed: negative jt offset is not allowed: ${ins.jt}")
+                    }
+                    if (ins.jf < 0) {
+                        throw IllegalArgumentException("BPF verification failed: negative jf offset is not allowed: ${ins.jf}")
+                    }
+
                     val jtTarget = idx + 1 + ins.jt.toInt()
                     val jfTarget = idx + 1 + ins.jf.toInt()
 
