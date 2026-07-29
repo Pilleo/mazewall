@@ -7,13 +7,10 @@ dependencies: []
 component: profiler
 target_modules:
 - :profiler
-target_files:
-- profiler/src/main/kotlin/io/mazewall/profiler/iterative/IterativeProfiler.kt
-- profiler/src/main/kotlin/io/mazewall/profiler/Profiler.kt
-- profiler/src/main/kotlin/io/mazewall/profiler/engine/ProfilerDaemon.kt
-- profiler/src/main/kotlin/io/mazewall/profiler/engine/ProfilerSessionHandler.kt
+target_files:[profiler/src/main/kotlin/io/mazewall/profiler/iterative/IterativeProfiler.kt,profiler/src/test/kotlin/io/mazewall/profiler/iterative/IterativeProfilerTest.kt,profiler/src/test/kotlin/io/mazewall/profiler/iterative/IterativeProfilerStateMachineTest.kt,profiler/src/main/kotlin/io/mazewall/profiler/iterative/IterativeTaskExecutor.kt,profiler/src/main/kotlin/io/mazewall/profiler/Profiler.kt,profiler/src/test/kotlin/io/mazewall/profiler/ProfilerTest.kt,profiler/src/main/kotlin/io/mazewall/profiler/engine/ProfilerDaemon.kt,profiler/src/test/kotlin/io/mazewall/profiler/engine/ProfilerDaemonTest.kt,profiler/src/main/kotlin/io/mazewall/profiler/engine/DaemonRunner.kt,profiler/src/main/kotlin/io/mazewall/profiler/engine/ProfilerDaemonEngine.kt,profiler/src/main/kotlin/io/mazewall/profiler/engine/ProfilerInstallerInterface.kt,profiler/src/main/kotlin/io/mazewall/profiler/engine/ProfilerSessionHandler.kt,profiler/src/main/kotlin/io/mazewall/profiler/engine/SeccompNotificationParser.kt]
 effort: large
 autonomy: supervised
+github_issue: 334
 ---
 
 # 🔴 [Severity: MEDIUM]: Refactor Profiler core classes for testability and test them
