@@ -22,6 +22,21 @@ internal class NativeSocketInputStream(
         private const val EINTR = 4
     }
 
+    private fun handleBackoff(eintrCount: Int) {
+        if (eintrCount > 1) {
+            if (eintrCount > 3) {
+                try {
+                    Thread.sleep(1)
+                } catch (e: InterruptedException) {
+                    Thread.currentThread().interrupt()
+                    throw InterruptedIOException("Thread interrupted during EINTR backoff sleep")
+                }
+            } else {
+                Thread.yield()
+            }
+        }
+    }
+
     override fun read(): Int {
         var eintrCount = 0
         while (true) {
@@ -39,18 +54,7 @@ internal class NativeSocketInputStream(
                 is LinuxNative.SyscallResult.Error -> {
                     if (res.errno == EINTR) {
                         eintrCount++
-                        if (eintrCount > 1) {
-                            if (eintrCount > 3) {
-                                try {
-                                    Thread.sleep(1)
-                                } catch (e: InterruptedException) {
-                                    Thread.currentThread().interrupt()
-                                    throw InterruptedIOException("Thread interrupted during EINTR backoff sleep")
-                                }
-                            } else {
-                                Thread.yield()
-                            }
-                        }
+                        handleBackoff(eintrCount)
                         continue
                     }
                     return -1
@@ -92,18 +96,7 @@ internal class NativeSocketInputStream(
                 is LinuxNative.SyscallResult.Error -> {
                     if (res.errno == EINTR) {
                         eintrCount++
-                        if (eintrCount > 1) {
-                            if (eintrCount > 3) {
-                                try {
-                                    Thread.sleep(1)
-                                } catch (e: InterruptedException) {
-                                    Thread.currentThread().interrupt()
-                                    throw InterruptedIOException("Thread interrupted during EINTR backoff sleep")
-                                }
-                            } else {
-                                Thread.yield()
-                            }
-                        }
+                        handleBackoff(eintrCount)
                         continue
                     }
                     return -1

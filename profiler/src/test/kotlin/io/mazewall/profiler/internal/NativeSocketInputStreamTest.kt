@@ -26,10 +26,8 @@ class NativeSocketInputStreamTest {
                 override fun read(fd: FileDescriptor<*, FdState.Open>, buf: ManagedSegment, count: Long): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
                     attempts++
                     return if (attempts <= 2) {
-                        // Simulate EINTR (errno 4) for the first two attempts
                         LinuxNative.SyscallResult.Error<LinuxNative.SyscallHandledState.Unhandled>(4, -1L)
                     } else {
-                        // Return a successful byte (0x42) on the third attempt
                         ManagedSegment.copy(byteArrayOf(0x42.toByte()), 0, buf, 0L, 1)
                         LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(1L)
                     }
@@ -59,10 +57,8 @@ class NativeSocketInputStreamTest {
                 override fun read(fd: FileDescriptor<*, FdState.Open>, buf: ManagedSegment, count: Long): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
                     attempts++
                     return if (attempts <= 2) {
-                        // Simulate EINTR (errno 4) for the first two attempts
                         LinuxNative.SyscallResult.Error<LinuxNative.SyscallHandledState.Unhandled>(4, -1L)
                     } else {
-                        // Return a successful byte (0x42) on the third attempt
                         ManagedSegment.copy(byteArrayOf(0x42.toByte()), 0, buf, 0L, 1)
                         LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(1L)
                     }
@@ -91,7 +87,6 @@ class NativeSocketInputStreamTest {
         val mock = MockNativeEngine(
             memory = object : MockNativeMemory() {
                 override fun read(fd: FileDescriptor<*, FdState.Open>, buf: ManagedSegment, count: Long): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
-                    // Should not even be called if checked before read, or can be called once
                     return LinuxNative.SyscallResult.Error<LinuxNative.SyscallHandledState.Unhandled>(4, -1L)
                 }
             }
@@ -106,10 +101,8 @@ class NativeSocketInputStreamTest {
                     stream.read()
                     fail("Expected InterruptedIOException to be thrown")
                 } catch (e: InterruptedIOException) {
-                    // Expected!
                     assertTrue(Thread.currentThread().isInterrupted, "Interrupted status should be restored/preserved")
                 } finally {
-                    // Clear interrupted status so other tests/framework works fine
                     Thread.interrupted()
                 }
             }
@@ -139,7 +132,6 @@ class NativeSocketInputStreamTest {
                     stream.read(buffer)
                     fail("Expected InterruptedIOException to be thrown")
                 } catch (e: InterruptedIOException) {
-                    // Expected!
                     assertTrue(Thread.currentThread().isInterrupted, "Interrupted status should be restored/preserved")
                 } finally {
                     Thread.interrupted()
@@ -159,7 +151,6 @@ class NativeSocketInputStreamTest {
                 override fun read(fd: FileDescriptor<*, FdState.Open>, buf: ManagedSegment, count: Long): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
                     callCount++
                     if (callCount == 4) {
-                        // On the 4th call, we will interrupt the thread to trigger InterruptedException inside backoff sleep
                         Thread.currentThread().interrupt()
                     }
                     return LinuxNative.SyscallResult.Error<LinuxNative.SyscallHandledState.Unhandled>(4, -1L)
@@ -175,7 +166,199 @@ class NativeSocketInputStreamTest {
                     stream.read()
                     fail("Expected InterruptedIOException from sleep interruption")
                 } catch (e: InterruptedIOException) {
-                    // Expected!
+                    assertTrue(Thread.currentThread().isInterrupted, "Interrupted status should be restored/preserved")
+                } finally {
+                    Thread.interrupted()
+                }
+            }
+        } finally {
+            LinuxNative.resetToDefault()
+        }
+    }
+
+    @Test
+    @Timeout(value = 5, unit = TimeUnit.SECONDS)
+    fun `read should return -1 on EOF`() {
+        val mock = MockNativeEngine(
+            memory = object : MockNativeMemory() {
+                override fun read(fd: FileDescriptor<*, FdState.Open>, buf: ManagedSegment, count: Long): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                    return LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(0L)
+                }
+            }
+        )
+        LinuxNative.setEngine(mock)
+        try {
+            NativeArena.ofConfined().use { arena ->
+                val stream = NativeSocketInputStream(FileDescriptor.unsafe<FileDescriptorRole.Generic>(1), arena)
+                assertEquals(-1, stream.read())
+            }
+        } finally {
+            LinuxNative.resetToDefault()
+        }
+    }
+
+    @Test
+    @Timeout(value = 5, unit = TimeUnit.SECONDS)
+    fun `read should return -1 on non-EINTR error`() {
+        val mock = MockNativeEngine(
+            memory = object : MockNativeMemory() {
+                override fun read(fd: FileDescriptor<*, FdState.Open>, buf: ManagedSegment, count: Long): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                    return LinuxNative.SyscallResult.Error<LinuxNative.SyscallHandledState.Unhandled>(22, -1L) // EINVAL (22)
+                }
+            }
+        )
+        LinuxNative.setEngine(mock)
+        try {
+            NativeArena.ofConfined().use { arena ->
+                val stream = NativeSocketInputStream(FileDescriptor.unsafe<FileDescriptorRole.Generic>(1), arena)
+                assertEquals(-1, stream.read())
+            }
+        } finally {
+            LinuxNative.resetToDefault()
+        }
+    }
+
+    @Test
+    @Timeout(value = 5, unit = TimeUnit.SECONDS)
+    fun `bulk read with length 0 should return 0`() {
+        NativeArena.ofConfined().use { arena ->
+            val stream = NativeSocketInputStream(FileDescriptor.unsafe<FileDescriptorRole.Generic>(1), arena)
+            val buffer = ByteArray(5)
+            assertEquals(0, stream.read(buffer, 0, 0))
+        }
+    }
+
+    @Test
+    @Timeout(value = 5, unit = TimeUnit.SECONDS)
+    fun `bulk read should return -1 on EOF`() {
+        val mock = MockNativeEngine(
+            memory = object : MockNativeMemory() {
+                override fun read(fd: FileDescriptor<*, FdState.Open>, buf: ManagedSegment, count: Long): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                    return LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(0L)
+                }
+            }
+        )
+        LinuxNative.setEngine(mock)
+        try {
+            NativeArena.ofConfined().use { arena ->
+                val stream = NativeSocketInputStream(FileDescriptor.unsafe<FileDescriptorRole.Generic>(1), arena)
+                val buffer = ByteArray(5)
+                assertEquals(-1, stream.read(buffer))
+            }
+        } finally {
+            LinuxNative.resetToDefault()
+        }
+    }
+
+    @Test
+    @Timeout(value = 5, unit = TimeUnit.SECONDS)
+    fun `bulk read should return -1 on non-EINTR error`() {
+        val mock = MockNativeEngine(
+            memory = object : MockNativeMemory() {
+                override fun read(fd: FileDescriptor<*, FdState.Open>, buf: ManagedSegment, count: Long): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                    return LinuxNative.SyscallResult.Error<LinuxNative.SyscallHandledState.Unhandled>(22, -1L) // EINVAL (22)
+                }
+            }
+        )
+        LinuxNative.setEngine(mock)
+        try {
+            NativeArena.ofConfined().use { arena ->
+                val stream = NativeSocketInputStream(FileDescriptor.unsafe<FileDescriptorRole.Generic>(1), arena)
+                val buffer = ByteArray(5)
+                assertEquals(-1, stream.read(buffer))
+            }
+        } finally {
+            LinuxNative.resetToDefault()
+        }
+    }
+
+    @Test
+    @Timeout(value = 5, unit = TimeUnit.SECONDS)
+    fun `read should trigger progressive backoff on consecutive EINTRs and complete successfully`() {
+        var callCount = 0
+        val mock = MockNativeEngine(
+            memory = object : MockNativeMemory() {
+                override fun read(fd: FileDescriptor<*, FdState.Open>, buf: ManagedSegment, count: Long): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                    callCount++
+                    return if (callCount <= 5) {
+                        LinuxNative.SyscallResult.Error<LinuxNative.SyscallHandledState.Unhandled>(4, -1L)
+                    } else {
+                        ManagedSegment.copy(byteArrayOf(0x42.toByte()), 0, buf, 0L, 1)
+                        LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(1L)
+                    }
+                }
+            }
+        )
+
+        LinuxNative.setEngine(mock)
+        try {
+            NativeArena.ofConfined().use { arena ->
+                val stream = NativeSocketInputStream(FileDescriptor.unsafe<FileDescriptorRole.Generic>(1), arena)
+                assertEquals(0x42, stream.read())
+                assertEquals(6, callCount)
+            }
+        } finally {
+            LinuxNative.resetToDefault()
+        }
+    }
+
+    @Test
+    @Timeout(value = 5, unit = TimeUnit.SECONDS)
+    fun `bulk read should trigger progressive backoff on consecutive EINTRs and complete successfully`() {
+        var callCount = 0
+        val mock = MockNativeEngine(
+            memory = object : MockNativeMemory() {
+                override fun read(fd: FileDescriptor<*, FdState.Open>, buf: ManagedSegment, count: Long): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                    callCount++
+                    return if (callCount <= 5) {
+                        LinuxNative.SyscallResult.Error<LinuxNative.SyscallHandledState.Unhandled>(4, -1L)
+                    } else {
+                        ManagedSegment.copy(byteArrayOf(0x42.toByte()), 0, buf, 0L, 1)
+                        LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(1L)
+                    }
+                }
+            }
+        )
+
+        LinuxNative.setEngine(mock)
+        try {
+            NativeArena.ofConfined().use { arena ->
+                val stream = NativeSocketInputStream(FileDescriptor.unsafe<FileDescriptorRole.Generic>(1), arena)
+                val buffer = ByteArray(1)
+                assertEquals(1, stream.read(buffer))
+                assertEquals(0x42.toByte(), buffer[0])
+                assertEquals(6, callCount)
+            }
+        } finally {
+            LinuxNative.resetToDefault()
+        }
+    }
+
+    @Test
+    @Timeout(value = 5, unit = TimeUnit.SECONDS)
+    fun `readWithRetry should trigger progressive backoff on consecutive EINTRs and throw InterruptedIOException if interrupted during sleep`() {
+        var callCount = 0
+        val mock = MockNativeEngine(
+            memory = object : MockNativeMemory() {
+                override fun read(fd: FileDescriptor<*, FdState.Open>, buf: ManagedSegment, count: Long): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                    callCount++
+                    if (callCount == 4) {
+                        Thread.currentThread().interrupt()
+                    }
+                    return LinuxNative.SyscallResult.Error<LinuxNative.SyscallHandledState.Unhandled>(4, -1L)
+                }
+            }
+        )
+
+        LinuxNative.setEngine(mock)
+        try {
+            NativeArena.ofConfined().use { arena ->
+                val stream = NativeSocketInputStream(FileDescriptor.unsafe<FileDescriptorRole.Generic>(1), arena)
+                val buffer = ByteArray(1)
+                try {
+                    stream.read(buffer)
+                    fail("Expected InterruptedIOException from sleep interruption")
+                } catch (e: InterruptedIOException) {
                     assertTrue(Thread.currentThread().isInterrupted, "Interrupted status should be restored/preserved")
                 } finally {
                     Thread.interrupted()
