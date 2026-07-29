@@ -1,7 +1,7 @@
 ---
 title: "Refactor Orchestrator State Machine to Enforce Compile-Time State Invariants via Type-States"
 severity: "HIGH"
-status: "open"
+status: "resolved"
 priority: 10
 dependencies: []
 component: "orchestrator"
@@ -11,6 +11,7 @@ target_files:
   - "tools/orchestrator/src/main/kotlin/io/mazewall/orchestrator/OrchestratorStates.kt"
 effort: "large"
 autonomy: "supervised"
+github_issue: 395
 ---
 
 # 🔴 [Severity: HIGH]: Refactor Orchestrator State Machine to Enforce Compile-Time State Invariants via Type-States

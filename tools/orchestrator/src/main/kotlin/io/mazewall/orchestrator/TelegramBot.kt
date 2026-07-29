@@ -87,6 +87,33 @@ class TelegramBot(
         }
     }
 
+    fun pollUpdates() {
+        try {
+            val url = "https://api.telegram.org/bot$botToken/getUpdates?offset=$lastUpdateId&timeout=0"
+            val responseText = get(url) ?: return
+            val updatesResponse = json.decodeFromString<TelegramResponse<List<TelegramUpdate>>>(responseText)
+            if (updatesResponse.ok && updatesResponse.result != null) {
+                for (update in updatesResponse.result) {
+                    lastUpdateId = update.update_id + 1
+                    val callbackQuery = update.callback_query
+                    if (callbackQuery?.data != null) {
+                        val data = callbackQuery.data
+                        if (data.startsWith("review")) {
+                            answerCallback(callbackQuery.id)
+                            handleReviewCallback()
+                        }
+                    } else if (update.message?.text != null) {
+                        val text = update.message.text.trim()
+                        if (text.startsWith("/review")) {
+                            val comments = text.removePrefix("/review").trim().ifEmpty { "default" }
+                            onReviewRequested?.invoke(comments)
+                        }
+                    }
+                }
+            }
+        } catch (_: Exception) {}
+    }
+
     fun sendMessage(text: String, includeReviewButton: Boolean = false) {
         val url = "https://api.telegram.org/bot$botToken/sendMessage"
         val markup = if (includeReviewButton) {

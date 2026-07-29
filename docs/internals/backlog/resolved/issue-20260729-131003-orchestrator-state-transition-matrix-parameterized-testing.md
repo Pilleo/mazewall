@@ -1,7 +1,7 @@
 ---
 title: "Implement Parameterized Transition Matrix Testing for Orchestrator States"
 severity: "HIGH"
-status: "open"
+status: "resolved"
 priority: 10
 dependencies: []
 component: "orchestrator"
@@ -11,6 +11,7 @@ target_files:
   - "tools/orchestrator/src/test/kotlin/io/mazewall/orchestrator/StateHandlerTest.kt"
 effort: "medium"
 autonomy: "autonomous"
+github_issue: 399
 ---
 
 # 🔴 [Severity: HIGH]: Implement Parameterized Transition Matrix Testing for Orchestrator States
