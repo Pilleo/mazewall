@@ -201,4 +201,120 @@ class SupervisorDaemonEngineTest {
         assertTrue(mockSocket.closedFds.contains(12), "Client socket 12 should be closed")
         assertTrue(mockSocket.closedFds.contains(20), "Listener socket 20 should be closed")
     }
+
+    @Test
+    fun `daemon remains resilient and accepts consecutive client connections after previous session disconnects`() {
+        val client1Accepted = CountDownLatch(1)
+        val client1Finished = CountDownLatch(1)
+        val client2Accepted = CountDownLatch(1)
+        val client2Finished = CountDownLatch(1)
+
+        val mockEngine = MockNativeEngine()
+        val mockSocket = object : TestSocketManager(5) {
+            override fun recvDescriptor(socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>): FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open>? {
+                return if (socketFd.value == 12) {
+                    FileDescriptor.unsafe(20)
+                } else if (socketFd.value == 13) {
+                    FileDescriptor.unsafe(21)
+                } else {
+                    null
+                }
+            }
+
+            override fun close(fd: FileDescriptor<*, FdState.Open>) {
+                super.close(fd)
+                if (fd.value == 12) {
+                    client1Finished.countDown()
+                } else if (fd.value == 13) {
+                    client2Finished.countDown()
+                }
+            }
+        }
+
+        var acceptCount = 0
+        mockEngine.networking.onAccept4 = { _, _, _, _ ->
+            acceptCount++
+            if (acceptCount == 1) {
+                client1Accepted.countDown()
+                LinuxNative.SyscallResult.Success(12L) // Client 1 socket FD 12
+            } else if (acceptCount == 2) {
+                client2Accepted.countDown()
+                LinuxNative.SyscallResult.Success(13L) // Client 2 socket FD 13
+            } else {
+                LinuxNative.SyscallResult.Error(NativeConstants.EINTR, -1L)
+            }
+        }
+
+        mockEngine.memory.onWrite = { _, _, _ ->
+            LinuxNative.SyscallResult.Success(1L)
+        }
+
+        mockEngine.onPoll = { fds, nfds, timeout ->
+            val pfd1 = PollFdSegment.of(fds)
+            val firstFd = pfd1.getFd()
+
+            if (firstFd == 5) {
+                // Polling server FD
+                if (client1Accepted.count == 1L) {
+                    LinuxNative.SyscallResult.Success(1L)
+                } else if (client1Finished.count == 1L) {
+                    Thread.sleep(10)
+                    LinuxNative.SyscallResult.Success(0L)
+                } else if (client2Accepted.count == 1L) {
+                    LinuxNative.SyscallResult.Success(1L)
+                } else if (client2Finished.count == 1L) {
+                    Thread.sleep(10)
+                    LinuxNative.SyscallResult.Success(0L)
+                } else {
+                    // Both finished, wait and exit
+                    Thread.sleep(10)
+                    LinuxNative.SyscallResult.Success(0L)
+                }
+            } else if (firstFd == 12 || firstFd == 13) {
+                // Polling client 1 or 2 socket FD in processConnectionStep (Accepted state)
+                LinuxNative.SyscallResult.Success(1L)
+            } else if (firstFd == 20 || firstFd == 21) {
+                // Polling listener FD & socket FD in handleSession
+                if (nfds == 2L) {
+                    val pfd2 = PollFdSegment.of(fds.asSlice(8L, 8L)) // POLLFD_STRUCT_SIZE is 8
+                    pfd2.setRevents(NativeConstants.POLLIN)
+                    LinuxNative.SyscallResult.Success(1L)
+                } else {
+                    LinuxNative.SyscallResult.Success(0L)
+                }
+            } else {
+                LinuxNative.SyscallResult.Success(0L)
+            }
+        }
+
+        val engine = SupervisorDaemonEngine("/tmp/test_resilient.sock", engine = mockEngine, socketManager = mockSocket)
+
+        // Run the engine in a background thread
+        val engineThread = Thread {
+            try {
+                engine.run()
+            } catch (ignored: Exception) {}
+        }.apply {
+            name = "test-supervisor-engine"
+            start()
+        }
+
+        try {
+            // Wait for both clients to be accepted and then finished
+            assertTrue(client1Accepted.await(5, TimeUnit.SECONDS), "Client 1 should be accepted")
+            assertTrue(client1Finished.await(5, TimeUnit.SECONDS), "Client 1 session should finish and close socket")
+
+            assertTrue(client2Accepted.await(5, TimeUnit.SECONDS), "Client 2 should be accepted")
+            assertTrue(client2Finished.await(5, TimeUnit.SECONDS), "Client 2 session should finish and close socket")
+        } finally {
+            engine.triggerGlobalShutdown("test teardown")
+            engineThread.join(5000)
+        }
+
+        // Verify both sockets and their listeners were closed
+        assertTrue(mockSocket.closedFds.contains(12), "Client socket 12 should be closed")
+        assertTrue(mockSocket.closedFds.contains(20), "Listener socket 20 should be closed")
+        assertTrue(mockSocket.closedFds.contains(13), "Client socket 13 should be closed")
+        assertTrue(mockSocket.closedFds.contains(21), "Listener socket 21 should be closed")
+    }
 }
