@@ -1,4 +1,4 @@
-# The History of Linux Trust Issues: From Cpushare to Your Backend
+# The history of Linux trust issues that made Chrome safer than your backend
 ![dog-side-eye.gif](./dog-side-eye.gif)
 
 [![Series Home](https://img.shields.io/badge/Series-Home-1e293b)](../../README.md)
