@@ -2,7 +2,7 @@
 title: '`IterativeProfiler` infinite retry loop and failure on disjoint prefix file
   paths'
 severity: HIGH
-status: resolved
+status: open
 priority: 9
 dependencies: []
 target_files:

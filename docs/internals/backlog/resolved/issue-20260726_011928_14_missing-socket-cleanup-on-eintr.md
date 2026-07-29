@@ -10,8 +10,8 @@ labels:
 component: enforcer
 target_modules:
 - :enforcer
-target_files: [enforcer/src/main/kotlin/io/mazewall/enforcer/supervisor/SupervisorDaemonEngine.kt,enforcer/src/test/kotlin/io/mazewall/enforcer/supervisor/SupervisorDaemonEngineTest.kt]
-
+target_files:
+- enforcer/src/main/kotlin/io/mazewall/enforcer/supervisor/SupervisorDaemonEngine.kt
 github_issue: 376
 ---
 

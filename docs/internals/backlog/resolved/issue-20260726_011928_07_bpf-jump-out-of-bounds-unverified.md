@@ -13,7 +13,6 @@ target_modules:
 - :enforcer
 target_files:
 - enforcer/src/main/kotlin/io/mazewall/seccomp/BpfStaticVerifier.kt
-github_issue: 385
 ---
 
 # Issue: BPF Static Verifier Potential Overflow

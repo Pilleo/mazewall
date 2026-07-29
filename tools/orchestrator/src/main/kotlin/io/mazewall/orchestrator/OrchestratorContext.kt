@@ -24,6 +24,7 @@ class SlotContext(var currentIssueId: String) {
     var startTime: Long = 0L
     var julesRetries: Int = 0
     var julesReviewPushCount: Int = 0
+    var julesReviewAttemptCount: Int = 0
 
     fun load(props: Properties, prefix: String) {
         state = OrchestratorState.fromName(props.getProperty("$prefix.state"))
@@ -46,6 +47,7 @@ class SlotContext(var currentIssueId: String) {
         startTime = props.getProperty("$prefix.startTime")?.toLongOrNull() ?: 0L
         julesRetries = props.getProperty("$prefix.julesRetries")?.toIntOrNull() ?: 0
         julesReviewPushCount = props.getProperty("$prefix.julesReviewPushCount")?.toIntOrNull() ?: 0
+        julesReviewAttemptCount = props.getProperty("$prefix.julesReviewAttemptCount")?.toIntOrNull() ?: 0
     }
 
     fun save(props: Properties, prefix: String) {
@@ -70,6 +72,7 @@ class SlotContext(var currentIssueId: String) {
         props.setProperty("$prefix.startTime", startTime.toString())
         props.setProperty("$prefix.julesRetries", julesRetries.toString())
         props.setProperty("$prefix.julesReviewPushCount", julesReviewPushCount.toString())
+        props.setProperty("$prefix.julesReviewAttemptCount", julesReviewAttemptCount.toString())
     }
 }
 
@@ -97,6 +100,7 @@ class OrchestratorContext {
     var startTime: Long = 0L
     var julesRetries: Int = 0
     var julesReviewPushCount: Int = 0
+    var julesReviewAttemptCount: Int = 0
 
     val activeSlots = mutableListOf<SlotContext>()
 
@@ -129,6 +133,7 @@ class OrchestratorContext {
         startTime = props.getProperty("startTime")?.toLongOrNull() ?: 0L
         julesRetries = props.getProperty("julesRetries")?.toIntOrNull() ?: 0
         julesReviewPushCount = props.getProperty("julesReviewPushCount")?.toIntOrNull() ?: 0
+        julesReviewAttemptCount = props.getProperty("julesReviewAttemptCount")?.toIntOrNull() ?: 0
 
         activeSlots.clear()
         val activeIdsStr = props.getProperty("activeSlots")
@@ -167,6 +172,7 @@ class OrchestratorContext {
                 slot.startTime = startTime
                 slot.julesRetries = julesRetries
                 slot.julesReviewPushCount = julesReviewPushCount
+                slot.julesReviewAttemptCount = julesReviewAttemptCount
                 activeSlots.add(slot)
             }
         }
@@ -195,6 +201,7 @@ class OrchestratorContext {
         props.setProperty("startTime", startTime.toString())
         props.setProperty("julesRetries", julesRetries.toString())
         props.setProperty("julesReviewPushCount", julesReviewPushCount.toString())
+        props.setProperty("julesReviewAttemptCount", julesReviewAttemptCount.toString())
 
         props.setProperty("activeSlots", activeSlots.map { it.currentIssueId }.joinToString(","))
         for (slot in activeSlots) {
@@ -222,6 +229,7 @@ class OrchestratorContext {
         startTime = 0L
         julesRetries = 0
         julesReviewPushCount = 0
+        julesReviewAttemptCount = 0
         activeSlots.clear()
     }
 }

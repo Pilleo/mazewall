@@ -1,7 +1,7 @@
 ---
 title: "Replace rebaseBranch() with git merge: Use merge to keep Jules PR branches up to date"
 severity: "HIGH"
-status: "resolved"
+status: "open"
 priority: 10
 dependencies: []
 component: "orchestrator"
@@ -14,7 +14,6 @@ target_files:
   - "tools/orchestrator/src/test/kotlin/io/mazewall/orchestrator/StateHandlerTest.kt"
 effort: "small"
 autonomy: "supervised"
-github_issue: 379
 ---
 
 # 🔴 [Severity: HIGH]: Replace rebaseBranch() with git merge

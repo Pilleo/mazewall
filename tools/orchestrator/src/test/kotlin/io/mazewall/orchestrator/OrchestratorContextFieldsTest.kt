@@ -34,6 +34,7 @@ class OrchestratorContextFieldsTest {
         assertEquals(0L, newContext.startTime)
         assertEquals(0, newContext.julesRetries)
         assertEquals(0, newContext.julesReviewPushCount)
+        assertEquals(0, newContext.julesReviewAttemptCount)
         assertEquals(OrchestratorState.SELECT_TASK, newContext.state)
     }
 
@@ -61,6 +62,7 @@ class OrchestratorContextFieldsTest {
         context.startTime = 400L
         context.julesRetries = 5
         context.julesReviewPushCount = 6
+        context.julesReviewAttemptCount = 7
 
         val props = Properties()
         context.save(props)
@@ -89,5 +91,26 @@ class OrchestratorContextFieldsTest {
         assertEquals(400L, newContext.startTime)
         assertEquals(5, newContext.julesRetries)
         assertEquals(6, newContext.julesReviewPushCount)
+        assertEquals(7, newContext.julesReviewAttemptCount)
+    }
+
+    @Test
+    fun `save and load slot context properties`() {
+        val slot = SlotContext("slot-1")
+        slot.state = OrchestratorState.AWAITING_REVIEW
+        slot.julesRetries = 2
+        slot.julesReviewPushCount = 1
+        slot.julesReviewAttemptCount = 3
+
+        val props = Properties()
+        slot.save(props, "slot.slot-1")
+
+        val loadedSlot = SlotContext("slot-1")
+        loadedSlot.load(props, "slot.slot-1")
+
+        assertEquals(OrchestratorState.AWAITING_REVIEW, loadedSlot.state)
+        assertEquals(2, loadedSlot.julesRetries)
+        assertEquals(1, loadedSlot.julesReviewPushCount)
+        assertEquals(3, loadedSlot.julesReviewAttemptCount)
     }
 }

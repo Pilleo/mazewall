@@ -1,7 +1,7 @@
 ---
 title: IterativeProfiler can exhaust thread pools on recursive containerization limits
 type: issue
-status: resolved
+status: open
 priority: 5
 labels:
 - security

@@ -4,4 +4,7 @@
   <groupId>io.mazewall</groupId>
   <artifactId>mazewall</artifactId>
   <version>0.0.1-prealpha-SNAPSHOT</version>
+  <build>
+    <sourceDirectory>enforcer/src/main/kotlin</sourceDirectory>
+  </build>
 </project>
