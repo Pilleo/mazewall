@@ -281,8 +281,8 @@ internal class SupervisorDaemonEngine(
             is io.mazewall.ffi.networking.SeccompConnection.Active -> {
                 System.err.println("[SUPERVISOR] Starting session reactor for listener ${current.listenerFd.value}")
                 handleSession(current.socketFd, current.listenerFd)
-                System.err.println("[SUPERVISOR] Session reactor finished. Closing connection.")
-                null
+                System.err.println("[SUPERVISOR] Session reactor finished. Resetting to Accepted.")
+                io.mazewall.ffi.networking.SeccompConnection.Accepted(current.socketFd)
             }
         }
     }
@@ -314,16 +314,14 @@ internal class SupervisorDaemonEngine(
                     }
                     if (count <= 0) continue
 
-                    var shouldBreak = false
                     NativeArena.ofConfined().use { iterationArena ->
                         val action = with(iterationArena) {
                             sessionHandler.handleActiveListener(pollFds, notif, resp)
                         }
                         if (action is LoopAction.Break || action is LoopAction.Shutdown) {
-                            shouldBreak = true
+                            triggerGlobalShutdown("session reactor break")
                         }
                     }
-                    if (shouldBreak) break
                     if (isGlobalShutdown()) break
                 }
             }
