@@ -93,13 +93,40 @@ class BranchRebaser(
         return RebaseProcessState.AttemptMerge(state.prNumber, state.branchName, state.worktreeDir, state.sessionId, state.targetFiles)
     }
 
-        private fun handleAttemptMerge(state: RebaseProcessState.AttemptMerge): RebaseProcessState {
+    private fun handleAttemptMerge(state: RebaseProcessState.AttemptMerge): RebaseProcessState {
         try {
-                        val intendedFiles = state.targetFiles
+            executeInDirNoRetry(
+                state.worktreeDir, arrayOf("git", "merge", "origin/master", "--no-edit", "-m", "chore: merge master into PR #${state.prNumber} to keep up to date")
+            )
+            // If merge succeeds cleanly, check if we're actually ahead of master
+            val aheadOfMaster = try {
+                executeInDir(state.worktreeDir, arrayOf("git", "rev-list", "--count", "origin/master..HEAD")).trim().toIntOrNull() ?: 0
+            } catch (e: Exception) {
+                0
+            }
+            if (aheadOfMaster == 0) {
+                System.err.println("Nothing to merge for PR #${state.prNumber} — already up to date")
+                return RebaseProcessState.Completed(RebaseResult(success = true, conflictCount = 0))
+            }
+            return RebaseProcessState.VerifyAndPush(state.prNumber, state.branchName, state.worktreeDir, isRescue = false)
+        } catch (e: Exception) {
+            val errorMsg = e.message ?: ""
+            System.err.println("Merge failed for PR #${state.prNumber}. Output:\n$errorMsg")
+            try {
+                executeInDirNoRetry(state.worktreeDir, arrayOf("git", "merge", "--abort"))
+            } catch (_: Exception) {}
+            // Transition to HandleRescue to request approval from telegram for targetFiles extraction
+            return RebaseProcessState.HandleRescue(state.prNumber, state.branchName, state.worktreeDir, state.sessionId, state.targetFiles)
+        }
+    }
+
+    private fun handleRescue(state: RebaseProcessState.HandleRescue): RebaseProcessState {
+        try {
+            val intendedFiles = state.targetFiles
 
             if (intendedFiles.isEmpty()) {
-                System.err.println("No intended files provided.")
-                return RebaseProcessState.Failed(RebaseResult(success = false, conflictCount = 0))
+                System.err.println("No intended files provided for rescue extraction.")
+                return RebaseProcessState.Failed(RebaseResult(success = false, conflictCount = 1))
             }
 
             executeInDirNoRetry(state.worktreeDir, arrayOf("git", "reset", "--hard", "origin/master"))
@@ -148,13 +175,9 @@ class BranchRebaser(
             executeInDirNoRetry(state.worktreeDir, arrayOf("git", "commit", "--no-verify", "-m", "chore: rescue clean intended files for PR #${state.prNumber} onto master"))
             return RebaseProcessState.VerifyAndPush(state.prNumber, state.branchName, state.worktreeDir, isRescue = true)
         } catch (e: Exception) {
-            System.err.println("Rescue extraction failed for PR #${state.prNumber}. Output:\n${e.message}\n${e.stackTraceToString()}")
+            System.err.println("Rescue extraction failed for PR #${state.prNumber}. Exception: ${e.javaClass.name}\nMessage: ${e.message}\nStackTrace: ${e.stackTraceToString()}")
             return RebaseProcessState.Failed(RebaseResult(success = false, conflictCount = 1))
         }
-    }
-
-    private fun handleRescue(state: RebaseProcessState.HandleRescue): RebaseProcessState {
-        return RebaseProcessState.Failed(RebaseResult(success = false, conflictCount = 1))
     }
 
     private fun handleVerifyAndPush(state: RebaseProcessState.VerifyAndPush): RebaseProcessState {
@@ -166,8 +189,14 @@ class BranchRebaser(
         }
 
         try {
-             executeInDir(state.worktreeDir, arrayOf("git", "push", "--force", "origin", "HEAD:${state.branchName}"))
-             return RebaseProcessState.Completed(RebaseResult(success = true, conflictCount = 0))
+            if (state.isRescue) {
+                val rescueBranch = "${state.branchName}-rescue"
+                executeInDir(state.worktreeDir, arrayOf("git", "push", "--force", "origin", "HEAD:$rescueBranch"))
+                return RebaseProcessState.Completed(RebaseResult(success = false, conflictCount = 0, needsRescueApproval = true, rescueBranchName = rescueBranch))
+            } else {
+                executeInDir(state.worktreeDir, arrayOf("git", "push", "--force-with-lease", "origin", "HEAD:${state.branchName}"))
+                return RebaseProcessState.Completed(RebaseResult(success = true, conflictCount = 0))
+            }
         } catch (ePush: Exception) {
             System.err.println("Failed to push branch: ${ePush.message}")
             return RebaseProcessState.Failed(RebaseResult(success = false, conflictCount = 0))
