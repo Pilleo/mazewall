@@ -1,7 +1,7 @@
 ---
 title: '`IterativeProfiler` Logic Errors (Confirmed)'
 severity: HIGH
-status: resolved
+status: open
 priority: 9
 dependencies: []
 target_files:

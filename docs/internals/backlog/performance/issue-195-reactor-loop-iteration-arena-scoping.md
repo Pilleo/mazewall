@@ -1,7 +1,7 @@
 ---
 title: Reactor Loop Iteration Arena Scoping
 severity: HIGH
-status: resolved
+status: open
 priority: 9
 dependencies:
 - issue-194

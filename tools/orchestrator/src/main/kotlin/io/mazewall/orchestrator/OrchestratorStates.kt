@@ -581,7 +581,16 @@ sealed interface OrchestratorState {
 
                 if (requestComment == null) {
                     val currentShaPrefix = currentSha.take(7)
-                    env.println("🤖 PR #$prNumber Build Passed. Requesting Jules review for SHA: $currentSha")
+
+                    if (slot.julesReviewAttemptCount >= 3) {
+                        env.println("⚠️ PR #$prNumber Build Passed, but Jules review attempt count exceeded limit (3). Bypassing review.")
+                        env.sendNotification("⚠️ PR #$prNumber: Bypassing Jules review (attempt count exceeded limit).")
+                        slot.lastReviewedSha = currentSha
+                        return AWAITING_MERGE
+                    }
+
+                    env.println("🤖 PR #$prNumber Build Passed. Requesting Jules review for SHA: $currentSha (Attempt ${slot.julesReviewAttemptCount + 1}/3)")
+                    slot.julesReviewAttemptCount++
 
                     // If Jules already pushed once instead of reviewing, use a stronger framing.
                     val pushWarning = if (slot.julesReviewPushCount > 0) {
