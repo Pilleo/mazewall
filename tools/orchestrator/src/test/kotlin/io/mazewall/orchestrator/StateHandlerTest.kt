@@ -3,6 +3,9 @@ package io.mazewall.orchestrator
 import java.io.File
 import java.util.concurrent.TimeUnit
 import kotlin.test.*
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.MethodSource
+import kotlin.reflect.KClass
 
 class MockOrchestratorEnvironment : OrchestratorEnvironment {
     override val config = OrchestratorConfig()
@@ -1612,5 +1615,105 @@ class StateHandlerTest {
         } finally {
             tempDir.deleteRecursively()
         }
+    }
+
+    data class TransitionTestCase(
+        val description: String,
+        val initialState: OrchestratorState,
+        val issueId: String = "issue-1",
+        val githubIssueNumber: String = "123",
+        val julesSessionId: String = "s1",
+        val prNumber: String = "pr-1",
+        val lastHeadSha: String = "sha123",
+        val buildStatus: String = "SUCCESS",
+        val issueClosed: Boolean = false,
+        val isCommitEmptyResult: Boolean = false,
+        val prHeadSha: String = "sha123",
+        val prMergeStatus: PrMergeStatus = PrMergeStatus("MERGEABLE", 0),
+        val julesSessionStatus: String = "Completed",
+        val expectedStateClass: KClass<out OrchestratorState>
+    ) {
+        override fun toString(): String = description
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("transitionMatrixCases")
+    fun testTransitionMatrix(case: TransitionTestCase) {
+        val env = MockOrchestratorEnvironment()
+        env.buildStatus = case.buildStatus
+        env.issueClosed = case.issueClosed
+        env.isCommitEmptyResult = case.isCommitEmptyResult
+        env.prHeadSha = case.prHeadSha
+        env.prMergeStatus = case.prMergeStatus
+        env.julesSession = JulesSession(case.julesSessionId, "desc", "repo", case.julesSessionStatus)
+
+        val issue = BacklogIssue(File("test.md"), case.issueId, "Title", 1, "open", emptyList())
+        env.issues.add(issue)
+
+        val context = OrchestratorContext().apply {
+            currentIssueId = case.issueId
+            githubIssueNumber = case.githubIssueNumber
+            julesSessionId = case.julesSessionId
+            prNumber = case.prNumber
+            lastHeadSha = case.lastHeadSha
+        }
+
+        val nextState = case.initialState.execute(env, context)
+        assertEquals(
+            case.expectedStateClass,
+            nextState::class,
+            "Failed transition for case: ${case.description}"
+        )
+    }
+
+    companion object {
+        @JvmStatic
+        fun transitionMatrixCases(): List<TransitionTestCase> = listOf(
+            TransitionTestCase(
+                description = "CI_RUNNING -> AWAITING_REVIEW under successful build",
+                initialState = CiRunningState("issue-1", "123", "s1", "pr-1"),
+                buildStatus = "SUCCESS",
+                expectedStateClass = AwaitingReviewState::class
+            ),
+            TransitionTestCase(
+                description = "CI_RUNNING -> CI_RUNNING under pending build with rebase checks",
+                initialState = CiRunningState("issue-1", "123", "s1", "pr-1"),
+                buildStatus = "PENDING",
+                prMergeStatus = PrMergeStatus("MERGEABLE", 5),
+                expectedStateClass = CiRunningState::class
+            ),
+            TransitionTestCase(
+                description = "AWAITING_REVIEW -> CI_RUNNING when Jules pushes non-empty code commit",
+                initialState = AwaitingReviewState("issue-1", "123", "s1", "pr-1", "sha123"),
+                prHeadSha = "sha456",
+                isCommitEmptyResult = false,
+                expectedStateClass = CiRunningState::class
+            ),
+            TransitionTestCase(
+                description = "AWAITING_REVIEW -> AWAITING_MERGE when Jules pushes an empty commit",
+                initialState = AwaitingReviewState("issue-1", "123", "s1", "pr-1", "sha123"),
+                prHeadSha = "sha456",
+                isCommitEmptyResult = true,
+                expectedStateClass = AwaitingMergeState::class
+            ),
+            TransitionTestCase(
+                description = "PENDING_APPROVAL -> SELECT_TASK on abrupt GitHub issue closure",
+                initialState = PendingApprovalState("issue-1", "Title", "test.md", "123"),
+                issueClosed = true,
+                expectedStateClass = SelectTaskState::class
+            ),
+            TransitionTestCase(
+                description = "AWAITING_JULES_START -> SELECT_TASK on abrupt GitHub issue closure",
+                initialState = AwaitingJulesStartState("issue-1", "123"),
+                issueClosed = true,
+                expectedStateClass = SelectTaskState::class
+            ),
+            TransitionTestCase(
+                description = "AWAITING_PR -> SELECT_TASK on abrupt GitHub issue closure",
+                initialState = AwaitingPrState("issue-1", "123", "s1"),
+                issueClosed = true,
+                expectedStateClass = SelectTaskState::class
+            )
+        )
     }
 }

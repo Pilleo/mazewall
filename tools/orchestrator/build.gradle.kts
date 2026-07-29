@@ -16,6 +16,10 @@ dependencies {
     implementation(libs.kotlinxSerialization)
     implementation(libs.kotlinxCoroutines)
     testImplementation(kotlin("test"))
+    testImplementation(platform(libs.junit.bom))
+    testImplementation(libs.junit.jupiter.api)
+    testImplementation(libs.junit.jupiter.params)
+    testRuntimeOnly(libs.junit.jupiter.engine)
 }
 
 application {
@@ -49,4 +53,8 @@ val checkBacklog by tasks.registering(JavaExec::class) {
 
 tasks.named("check") {
     dependsOn(checkBacklog)
+}
+
+tasks.test {
+    useJUnitPlatform()
 }
