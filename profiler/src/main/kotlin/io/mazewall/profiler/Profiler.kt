@@ -45,6 +45,9 @@ object Profiler {
     private val listeners = CopyOnWriteArrayList<ProfilerTraceListener>()
     internal val threadRegistry = ConcurrentHashMap<Tid, Thread>()
 
+    internal var daemonManagerProvider: () -> io.mazewall.profiler.internal.ProfilerDaemonManager = { io.mazewall.profiler.internal.ProfilerDaemonManager.getInstance() }
+    internal var installerProvider: io.mazewall.profiler.engine.ProfilerInstallerInterface = io.mazewall.profiler.engine.RealProfilerInstaller
+
     /**
      * Profiles the given [block] and returns a [BillOfBehavior].
      */
@@ -103,7 +106,7 @@ object Profiler {
             listOf("warmup").sorted().joinToString(",")
         } catch (ignored: Exception) {}
 
-        val context = ProfilerDaemonManager.getInstance().getOrSpawnSharedDaemon()
+        val context = daemonManagerProvider().getOrSpawnSharedDaemon()
         val localLogs = CopyOnWriteArrayList<TraceEvent>()
         val localStackProfile = ConcurrentHashMap<TraceEvent, MutableList<Array<StackTraceElement>>>()
         val localPathCache = ConcurrentHashMap<String, Long>()
@@ -191,7 +194,7 @@ object Profiler {
         vararg policies: Policy<*, Uncompiled>,
     ): ProfilerExecutorWrapper {
         val policy = PolicyDefinition.combine(*policies.map { it.definition }.toTypedArray())
-        val context = ProfilerDaemonManager.getInstance().getOrSpawnSharedDaemon()
+        val context = daemonManagerProvider().getOrSpawnSharedDaemon()
         return ProfilerExecutorWrapper(delegate, policy, context, captureStackTraces)
     }
 
@@ -204,7 +207,7 @@ object Profiler {
         processWide: Boolean,
         onListenerCreated: ((ProfilerTraceListener) -> Unit)? = null,
     ) {
-        ProfilerInstaller.installProfilingFilterForThread(
+        installerProvider.installProfilingFilterForThread(
             socketPath = socketPath,
             policy = policy,
             accumulatedLogs = accumulatedLogs,
