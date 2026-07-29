@@ -885,4 +885,97 @@ class SupervisorSessionHandlerTest {
             LinuxNative.resetToDefault()
         }
     }
+
+    @Test
+    fun `handleAcceptAsync cleans up resources on failures`() {
+        val closedFds = mutableSetOf<Int>()
+
+        val mockEngine = object : MockNativeEngine() {
+            override val fileSystem = object : io.mazewall.MockNativeFileSystem() {
+                override fun close(fd: FileDescriptor<*, FdState.Open>): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                    closedFds.add(fd.value)
+                    return LinuxNative.SyscallResult.Success(0L)
+                }
+            }
+
+            override val process = object : io.mazewall.MockNativeProcess() {
+                override fun pidfdOpen(tgid: Int, flags: Int): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                    return LinuxNative.SyscallResult.Success(100L) // pidfd = 100
+                }
+
+                override fun pidfdGetFd(pidfd: Int, targetFd: Int, flags: Int): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                    // Simulate failure
+                    return LinuxNative.SyscallResult.Error(io.mazewall.ffi.NativeConstants.EBADF, -1L)
+                }
+            }
+
+            override val raw: RawSyscallOperations = object : RawSyscallOperations by this {
+                override fun ioctl(
+                    fd: FileDescriptor<*, FdState.Open>,
+                    request: Long,
+                    arg: io.mazewall.ffi.memory.ManagedSegment,
+                ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                    return LinuxNative.SyscallResult.Success(0L)
+                }
+            }
+        }
+
+        try {
+            LinuxNative.setEngine(mockEngine)
+
+            val handler = SupervisorSessionHandler(
+                FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(10),
+                FileDescriptor.unsafe<FileDescriptorRole.SeccompNotif>(11),
+                engine = mockEngine
+            )
+
+            val handleAcceptAsyncMethod = SupervisorSessionHandler::class.java.getDeclaredMethods().first {
+                it.name.startsWith("handleAcceptAsync") && !it.name.contains("$") && it.parameterCount == 5
+            }
+            handleAcceptAsyncMethod.isAccessible = true
+
+            val arch = io.mazewall.core.Arch.current()
+
+            val paramTypes = handleAcceptAsyncMethod.parameterTypes
+            val argsToPass = arrayOfNulls<Any>(paramTypes.size)
+            for (i in paramTypes.indices) {
+                val type = paramTypes[i]
+                when {
+                    type == Long::class.javaPrimitiveType || type == java.lang.Long::class.java -> {
+                        argsToPass[i] = 12345L
+                    }
+                    type == Int::class.javaPrimitiveType || type == java.lang.Integer::class.java -> {
+                        if (i == 1) {
+                            argsToPass[i] = arch.accept
+                        } else {
+                            argsToPass[i] = 999
+                        }
+                    }
+                    type == LongArray::class.java -> {
+                        argsToPass[i] = LongArray(6) { 55L }
+                    }
+                    type.name.contains("Tid") -> {
+                        argsToPass[i] = io.mazewall.core.Tid(999)
+                    }
+                    type.name.contains("Arch") -> {
+                        argsToPass[i] = arch
+                    }
+                }
+            }
+
+            handleAcceptAsyncMethod.invoke(handler, *argsToPass)
+
+            // Since it runs in a daemon thread, let's wait a bit for it to run and finish.
+            var attempts = 0
+            while (attempts < 20 && !closedFds.contains(100)) {
+                Thread.sleep(50)
+                attempts++
+            }
+
+            // Verify that the opened pidfd (100) was successfully closed even after pidfd_getfd failure!
+            assertEquals(true, closedFds.contains(100), "pidfd should have been closed")
+        } finally {
+            LinuxNative.resetToDefault()
+        }
+    }
 }
