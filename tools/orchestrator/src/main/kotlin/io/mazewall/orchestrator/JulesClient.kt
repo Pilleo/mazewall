@@ -7,4 +7,5 @@ interface JulesClient {
     fun sendSessionMessage(sessionId: String, prompt: String)
     fun getActiveSession(issueId: String): JulesSession?
     fun listSessions(): List<JulesSession>
+    fun getSessionPatch(sessionId: String): String?
 }

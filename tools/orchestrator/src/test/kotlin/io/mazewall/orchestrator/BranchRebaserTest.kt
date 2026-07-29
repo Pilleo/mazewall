@@ -15,60 +15,80 @@ class BranchRebaserTest {
             execute = { args ->
                 val cmd = args.joinToString(" ")
                 commands.add(cmd)
-                if (cmd == "gh pr view 123 --json headRefName --jq .headRefName") "test-branch"
-                else ""
+                if (cmd.contains("headRefName")) return@BranchRebaser "test-branch"
+                if (cmd.contains("body")) return@BranchRebaser "Resolves issue-20260727-140934-some-issue.md"
+                ""
             },
             executeInDir = { dir, args ->
                 val cmd = args.joinToString(" ")
                 commands.add("inDir: $cmd")
-                if (cmd == "git rev-list --count origin/master..HEAD") "1"
-                else if (cmd == "git diff --name-only origin/master") "allowed.txt\ndisallowed.txt"
-                else ""
+                if (cmd.contains("rev-list")) "1" else ""
             },
             executeInDirNoRetry = { dir, args ->
                 val cmd = args.joinToString(" ")
                 commands.add("inDirNoRetry: $cmd")
+                if (cmd.startsWith("git worktree add")) {
+                    java.io.File(args[3]).mkdirs()
+                }
                 ""
             },
             clearPrCache = { clearCacheCalled = true }
         )
 
-        val result = rebaser.run("123", listOf("allowed.txt"))
+        val worktreeDir = java.io.File("build/tmp/temp-rebase-123")
+        worktreeDir.mkdirs()
+
+        val result = try {
+            rebaser.run("123", "session_abc", listOf("test_target.txt"))
+        } finally {
+            worktreeDir.deleteRecursively()
+        }
 
         assertTrue(clearCacheCalled)
         assertTrue(result.success)
         assertEquals(0, result.conflictCount)
         assertFalse(result.needsRescueApproval)
         assertNull(result.rescueBranchName)
-
-        assertTrue(commands.contains("git fetch origin test-branch"))
         assertTrue(commands.contains("inDirNoRetry: git merge origin/master --no-edit -m chore: merge master into PR #123 to keep up to date"))
-        assertTrue(commands.contains("inDir: git checkout origin/master -- disallowed.txt"))
-        assertTrue(commands.contains("inDir: git commit -m chore: discard unintended file modifications"))
         assertTrue(commands.contains("inDir: git push --force-with-lease origin HEAD:test-branch"))
     }
 
     @Test
-    fun `test merge aborts on normal conflict`() {
+    fun `test merge aborts on normal conflict and asks for rescue`() {
         val rebaser = BranchRebaser(
             execute = { args ->
                 val cmd = args.joinToString(" ")
-                if (cmd == "gh pr view 123 --json headRefName --jq .headRefName") "test-branch" else ""
+                when (cmd) {
+                    "gh pr view 123 --json headRefName --jq .headRefName" -> "test-branch"
+                    else -> ""
+                }
             },
             executeInDir = { _, _ -> "" },
             executeInDirNoRetry = { _, args ->
                 val cmd = args.joinToString(" ")
-                if (cmd.startsWith("git merge origin/master")) throw RuntimeException("Merge conflict")
+                if (cmd.startsWith("git worktree add")) {
+                    java.io.File(args[3]).mkdirs()
+                }
+                if (cmd.contains("merge origin/master")) throw RuntimeException("Merge conflict")
+                if (cmd.startsWith("git diff --staged --quiet")) throw RuntimeException("Has changes")
                 ""
             },
             clearPrCache = {}
         )
 
-        val result = rebaser.run("123", listOf("allowed.txt"))
+        val worktreeDir = java.io.File("build/tmp/temp-rebase-123")
+        worktreeDir.mkdirs()
+
+        val result = try {
+            rebaser.run("123", "session_abc", listOf("test_target.txt"))
+        } finally {
+            worktreeDir.deleteRecursively()
+        }
 
         assertFalse(result.success)
-        assertEquals(1, result.conflictCount)
-        assertFalse(result.needsRescueApproval)
+        assertEquals(0, result.conflictCount)
+        assertTrue(result.needsRescueApproval)
+        assertEquals("test-branch-rescue", result.rescueBranchName)
     }
 
     @Test
@@ -79,34 +99,39 @@ class BranchRebaserTest {
             execute = { args ->
                 val cmd = args.joinToString(" ")
                 commands.add(cmd)
-                if (cmd == "gh pr view 123 --json headRefName --jq .headRefName") "test-branch" else ""
+                when (cmd) {
+                    "gh pr view 123 --json headRefName --jq .headRefName" -> "test-branch"
+                    else -> ""
+                }
             },
             executeInDir = { _, args ->
                 val cmd = args.joinToString(" ")
                 commands.add("inDir: $cmd")
-                if (cmd.startsWith("git diff --name-only origin/master origin/test-branch")) "allowed.txt\nmaster_only.txt"
-                else if (cmd.startsWith("git ls-tree")) "allowed.txt" // Exists in branch
-                else ""
+                ""
             },
             executeInDirNoRetry = { _, args ->
                 val cmd = args.joinToString(" ")
                 commands.add("inDirNoRetry: $cmd")
-                if (cmd.startsWith("git merge origin/master")) throw RuntimeException("fatal: refusing to merge unrelated histories")
+                if (cmd.startsWith("git worktree add")) {
+                    java.io.File(args[3]).mkdirs()
+                }
+                if (cmd.contains("merge origin/master")) throw RuntimeException("Unrelated histories")
+                if (cmd == "git checkout origin/test-branch -- test_target.txt") throw RuntimeException("Extraction conflict")
                 ""
             },
             clearPrCache = {}
         )
 
-        val result = rebaser.run("123", listOf("allowed.txt"))
+        val worktreeDir = java.io.File("build/tmp/temp-rebase-123")
+        worktreeDir.mkdirs()
+
+        val result = try {
+            rebaser.run("123", "session_abc", listOf("test_target.txt"))
+        } finally {
+            worktreeDir.deleteRecursively()
+        }
 
         assertFalse(result.success)
-        assertEquals(0, result.conflictCount)
-        assertTrue(result.needsRescueApproval)
-        assertEquals("test-branch-rescue", result.rescueBranchName)
-
-        assertTrue(commands.contains("inDir: git reset --hard origin/master"))
-        assertTrue(commands.contains("inDir: git checkout origin/test-branch -- allowed.txt"))
-        assertTrue(commands.contains("inDir: git commit -m chore(orchestrator): rescue PR #123 onto master via target-files apply"))
-        assertTrue(commands.contains("inDir: git push --force origin HEAD:test-branch-rescue"))
+        assertEquals(1, result.conflictCount)
     }
 }

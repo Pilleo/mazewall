@@ -333,4 +333,22 @@ class RealJulesClient(
             emptyList()
         }
     }
+
+    override fun getSessionPatch(sessionId: String): String? {
+        try {
+            val activities = fetchActivities(sessionId)
+
+            // Find the latest activity that contains artifacts with a gitPatch
+            val patchActivity = activities.lastOrNull { activity ->
+                activity.artifacts?.any { it.changeSet.gitPatch.unidiffPatch.isNotBlank() } == true
+            }
+
+            return patchActivity?.artifacts
+                ?.firstOrNull { it.changeSet.gitPatch.unidiffPatch.isNotBlank() }
+                ?.changeSet?.gitPatch?.unidiffPatch
+        } catch (e: Exception) {
+            System.err.println("Failed to fetch session patch for $sessionId: ${e.message}")
+            return null
+        }
+    }
 }

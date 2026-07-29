@@ -741,17 +741,10 @@ private fun handleRebaseAndConflicts(env: OrchestratorEnvironment, slot: SlotCon
         val reason = if (isConflicting) "conflict status" else "behind master by ${status.behindBy} commits"
         env.println("🔄 Active PR #$prNumber is $reason. Attempting automated merge of master into branch...")
 
-        // Parse the backlog issue file to get target_files
-        val targetFiles = slot.currentIssueFile?.let { path ->
-            val file = File(path)
-            if (file.exists()) {
-                BacklogParser.parseIssueFile(file)?.targetFiles
-            } else {
-                null
-            }
-        } ?: emptyList()
-
-        val rebaseResult = env.gitHubClient.mergeMasterIntoBranch(prNumber, targetFiles)
+        val sessionId = env.julesClient.getActiveSession(slot.currentIssueId)?.id
+        val issue = env.parseAllIssues().firstOrNull { it.id == slot.currentIssueId }
+        val targetFiles = issue?.targetFiles ?: emptyList()
+        val rebaseResult = env.gitHubClient.mergeMasterIntoBranch(prNumber, sessionId, targetFiles)
         if (rebaseResult.needsRescueApproval && rebaseResult.rescueBranchName != null) {
             env.println("🚨 PR #$prNumber has unrelated histories. Rescue branch prepared.")
             env.sendNotification( "🚨 Unrelated histories detected on PR #$prNumber. I've prepared a rescued branch: ${rebaseResult.rescueBranchName}. Approve to forcefully overwrite the PR branch.")

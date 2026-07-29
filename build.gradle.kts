@@ -352,7 +352,7 @@ subprojects {
                     limit {
                         counter = "INSTRUCTION"
                         value = "COVEREDRATIO"
-                        minimum = "0.71".toBigDecimal()
+                        minimum = "0.86".toBigDecimal()
                     }
                 }
             } else if (project.name == "orchestrator") {
@@ -361,7 +361,7 @@ subprojects {
                     limit {
                         counter = "INSTRUCTION"
                         value = "COVEREDRATIO"
-                        minimum = "0.80".toBigDecimal()
+                        minimum = "0.81".toBigDecimal()
                     }
                 }
             }
@@ -384,13 +384,13 @@ tasks.register<JavaExec>("runTriage") {
     description = "Gathers system telemetry and diagnostics on failure."
     classpath = files(":profiler:classes", ":profiler:runtimeClasspath")
     mainClass.set("io.mazewall.profiler.triage.DiagnosticTriageRunner")
-    
+
     val testFailures = objects.listProperty<Boolean>().apply {
         set(provider {
             subprojects.flatMap { it.tasks.withType<Test>() }.map { it.state.failure != null }
         })
     }
-    
+
     // Only run this diagnostic triage task if the test execution actually failed.
     onlyIf {
         testFailures.get().any { it }
