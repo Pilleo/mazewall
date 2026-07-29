@@ -43,9 +43,9 @@ class OrchestratorDaemonRunner(
                     val slotsToProcess = context.activeSlots.sortedWith(
                         compareBy<SlotContext> {
                             when (it.state) {
-                                is OrchestratorState.AWAITING_PR -> 1
-                                is OrchestratorState.AWAITING_JULES_START -> 2
-                                is OrchestratorState.PENDING_APPROVAL -> 3
+                                is AwaitingPrState -> 1
+                                is AwaitingJulesStartState -> 2
+                                is PendingApprovalState -> 3
                                 else -> 4
                             }
                         }
@@ -55,7 +55,7 @@ class OrchestratorDaemonRunner(
                             val nextState = slot.state.execute(env, context, slot)
                             if (nextState != slot.state) {
                                 env.println("Slot [${slot.currentIssueId}]: Transitioned from ${slot.state.name} to ${nextState.name}")
-                                slot.state = nextState
+                                nextState.updateSlot(slot)
                                 saveState()
                             }
                         } catch (e: Exception) {
@@ -104,7 +104,7 @@ class OrchestratorDaemonRunner(
                     slot.currentIssueTitle = forcedIssue.title
                     slot.currentIssueFile = forcedIssue.file.path
                     slot.githubIssueNumber = forcedIssue.githubIssue?.toString()
-                    slot.state = OrchestratorState.PENDING_APPROVAL
+                    slot.state = PendingApprovalState(forcedIssue.id, forcedIssue.title, forcedIssue.file.path, forcedIssue.githubIssue?.toString())
                     context.activeSlots.add(slot)
                     saveState()
                 }
@@ -168,7 +168,7 @@ class OrchestratorDaemonRunner(
             slot.currentIssueTitle = nextIssue.title
             slot.currentIssueFile = nextIssue.file.path
             slot.githubIssueNumber = nextIssue.githubIssue?.toString()
-            slot.state = OrchestratorState.PENDING_APPROVAL
+            slot.state = PendingApprovalState(nextIssue.id, nextIssue.title, nextIssue.file.path, nextIssue.githubIssue?.toString())
             context.activeSlots.add(slot)
             saveState()
         }
