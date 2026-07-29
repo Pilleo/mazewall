@@ -71,7 +71,11 @@ object ReviewIssueLauncher {
         slot.currentIssueTitle = updatedIssue.title
         slot.currentIssueFile = issueFile.path
         slot.githubIssueNumber = githubIssueNumber
-        slot.state = if (githubIssueNumber != null) OrchestratorState.AWAITING_JULES_START else OrchestratorState.PENDING_APPROVAL
+        slot.state = if (githubIssueNumber != null) {
+            AwaitingJulesStartState(updatedIssue.id, githubIssueNumber)
+        } else {
+            PendingApprovalState(updatedIssue.id, updatedIssue.title, issueFile.path, githubIssueNumber)
+        }
 
         env.println("🚀 [IMMEDIATE LAUNCH] Created GitHub issue #${githubIssueNumber ?: "N/A"} and launched review task `${updatedIssue.id}` (Priority: 10).")
         env.sendNotification("🚀 *Launched Review Task immediately on GitHub (Issue #${githubIssueNumber ?: "N/A"}):* `${updatedIssue.id}`\nPriority: 10 | Target: `:profiler`, `:enforcer`")

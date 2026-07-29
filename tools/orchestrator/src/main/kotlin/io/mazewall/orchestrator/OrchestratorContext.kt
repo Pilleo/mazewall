@@ -3,7 +3,7 @@ package io.mazewall.orchestrator
 import java.util.Properties
 
 class SlotContext(var currentIssueId: String) {
-    var state: OrchestratorState = OrchestratorState.SELECT_TASK
+    var state: OrchestratorState = SelectTaskState
     var currentIssueTitle: String? = null
     var currentIssueFile: String? = null
     var githubIssueNumber: String? = null
@@ -27,7 +27,6 @@ class SlotContext(var currentIssueId: String) {
     var julesReviewAttemptCount: Int = 0
 
     fun load(props: Properties, prefix: String) {
-        state = OrchestratorState.fromName(props.getProperty("$prefix.state"))
         currentIssueTitle = props.getProperty("$prefix.currentIssueTitle").takeIf { !it.isNullOrEmpty() }
         currentIssueFile = props.getProperty("$prefix.currentIssueFile").takeIf { !it.isNullOrEmpty() }
         githubIssueNumber = props.getProperty("$prefix.githubIssueNumber").takeIf { !it.isNullOrEmpty() }
@@ -48,6 +47,9 @@ class SlotContext(var currentIssueId: String) {
         julesRetries = props.getProperty("$prefix.julesRetries")?.toIntOrNull() ?: 0
         julesReviewPushCount = props.getProperty("$prefix.julesReviewPushCount")?.toIntOrNull() ?: 0
         julesReviewAttemptCount = props.getProperty("$prefix.julesReviewAttemptCount")?.toIntOrNull() ?: 0
+
+        val stateName = props.getProperty("$prefix.state")
+        state = OrchestratorState.fromSlot(this, stateName)
     }
 
     fun save(props: Properties, prefix: String) {
@@ -77,7 +79,7 @@ class SlotContext(var currentIssueId: String) {
 }
 
 class OrchestratorContext {
-    var state: OrchestratorState = OrchestratorState.SELECT_TASK
+    var state: OrchestratorState = SelectTaskState
     var currentIssueId: String? = null
     var currentIssueTitle: String? = null
     var currentIssueFile: String? = null
@@ -105,7 +107,6 @@ class OrchestratorContext {
     val activeSlots = mutableListOf<SlotContext>()
 
     fun load(props: Properties) {
-        state = OrchestratorState.fromName(props.getProperty("state"))
         currentIssueId = props.getProperty("currentIssueId").takeIf { !it.isNullOrEmpty() }
         currentIssueTitle = props.getProperty("currentIssueTitle").takeIf { !it.isNullOrEmpty() }
         currentIssueFile = props.getProperty("currentIssueFile").takeIf { !it.isNullOrEmpty() }
@@ -135,6 +136,9 @@ class OrchestratorContext {
         julesReviewPushCount = props.getProperty("julesReviewPushCount")?.toIntOrNull() ?: 0
         julesReviewAttemptCount = props.getProperty("julesReviewAttemptCount")?.toIntOrNull() ?: 0
 
+        val stateName = props.getProperty("state")
+        state = OrchestratorState.fromContext(this, stateName)
+
         activeSlots.clear()
         val activeIdsStr = props.getProperty("activeSlots")
         if (!activeIdsStr.isNullOrEmpty()) {
@@ -152,7 +156,7 @@ class OrchestratorContext {
             val legacyId = props.getProperty("currentIssueId")
             if (!legacyState.isNullOrEmpty() && !legacyId.isNullOrEmpty()) {
                 val slot = SlotContext(legacyId)
-                slot.state = OrchestratorState.fromName(legacyState)
+                slot.state = OrchestratorState.fromContext(this, legacyState)
                 slot.currentIssueTitle = currentIssueTitle
                 slot.currentIssueFile = currentIssueFile
                 slot.githubIssueNumber = githubIssueNumber

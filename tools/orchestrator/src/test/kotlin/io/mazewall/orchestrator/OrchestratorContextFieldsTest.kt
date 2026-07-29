@@ -3,6 +3,7 @@ package io.mazewall.orchestrator
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 import java.util.Properties
 
 class OrchestratorContextFieldsTest {
@@ -35,13 +36,13 @@ class OrchestratorContextFieldsTest {
         assertEquals(0, newContext.julesRetries)
         assertEquals(0, newContext.julesReviewPushCount)
         assertEquals(0, newContext.julesReviewAttemptCount)
-        assertEquals(OrchestratorState.SELECT_TASK, newContext.state)
+        assertTrue(newContext.state is SelectTaskState)
     }
 
     @Test
     fun `save and load all properties`() {
         val context = OrchestratorContext()
-        context.state = OrchestratorState.CI_RUNNING
+        context.state = CiRunningState("id-1", "gh-1", "j-1", "pr-1")
         context.currentIssueId = "id-1"
         context.currentIssueTitle = "title-1"
         context.currentIssueFile = "file-1.md"
@@ -70,7 +71,13 @@ class OrchestratorContextFieldsTest {
         val newContext = OrchestratorContext()
         newContext.load(props)
 
-        assertEquals(OrchestratorState.CI_RUNNING, newContext.state)
+        val s = newContext.state
+        assertTrue(s is CiRunningState)
+        assertEquals("id-1", s.issueId)
+        assertEquals("gh-1", s.githubIssueNumber)
+        assertEquals("j-1", s.julesSessionId)
+        assertEquals("pr-1", s.prNumber)
+
         assertEquals("id-1", newContext.currentIssueId)
         assertEquals("title-1", newContext.currentIssueTitle)
         assertEquals("file-1.md", newContext.currentIssueFile)
@@ -97,7 +104,11 @@ class OrchestratorContextFieldsTest {
     @Test
     fun `save and load slot context properties`() {
         val slot = SlotContext("slot-1")
-        slot.state = OrchestratorState.AWAITING_REVIEW
+        slot.state = AwaitingReviewState("slot-1", "gh-1", "j-1", "pr-1", "sha-1")
+        slot.githubIssueNumber = "gh-1"
+        slot.julesSessionId = "j-1"
+        slot.prNumber = "pr-1"
+        slot.lastHeadSha = "sha-1"
         slot.julesRetries = 2
         slot.julesReviewPushCount = 1
         slot.julesReviewAttemptCount = 3
@@ -108,7 +119,14 @@ class OrchestratorContextFieldsTest {
         val loadedSlot = SlotContext("slot-1")
         loadedSlot.load(props, "slot.slot-1")
 
-        assertEquals(OrchestratorState.AWAITING_REVIEW, loadedSlot.state)
+        val s = loadedSlot.state
+        assertTrue(s is AwaitingReviewState)
+        assertEquals("slot-1", s.issueId)
+        assertEquals("gh-1", s.githubIssueNumber)
+        assertEquals("j-1", s.julesSessionId)
+        assertEquals("pr-1", s.prNumber)
+        assertEquals("sha-1", s.lastHeadSha)
+
         assertEquals(2, loadedSlot.julesRetries)
         assertEquals(1, loadedSlot.julesReviewPushCount)
         assertEquals(3, loadedSlot.julesReviewAttemptCount)

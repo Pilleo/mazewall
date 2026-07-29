@@ -72,7 +72,7 @@ class OrchestratorDaemonRunnerTest {
 
         assertEquals(1, runnerForced.context.activeSlots.size)
         assertEquals("issue-1", runnerForced.context.activeSlots[0].currentIssueId)
-        assertEquals(OrchestratorState.PENDING_APPROVAL, runnerForced.context.activeSlots[0].state)
+        assertTrue(runnerForced.context.activeSlots[0].state is PendingApprovalState)
     }
 
     @Test
