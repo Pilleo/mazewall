@@ -69,6 +69,8 @@ public class Policy<out S : PolicyScope, out State : PolicyState> internal const
     public val allowedFsReadPaths: Set<SandboxedPath> get() = definition.allowedFsReadPaths
     public val allowedFsWritePaths: Set<SandboxedPath> get() = definition.allowedFsWritePaths
     internal val enforceLandlock: Boolean get() = definition.enforceLandlock
+    public val customViolationPhrases: List<String> get() = definition.customViolationPhrases
+    public val customViolationRegexes: List<Regex> get() = definition.customViolationRegexes
 
     public val compiledFilters: List<BpfInstruction>
         get() = compiledFiltersField ?: throw IllegalStateException("Policy is not compiled yet")
@@ -229,6 +231,16 @@ public class Policy<out S : PolicyScope, out State : PolicyState> internal const
 
         public fun lockIntelCet(): Builder<S> {
             internalBuilder.lockIntelCet()
+            return this
+        }
+
+        public fun customViolationPhrase(phrase: String): Builder<S> {
+            internalBuilder.customViolationPhrase(phrase)
+            return this
+        }
+
+        public fun customViolationRegex(regex: Regex): Builder<S> {
+            internalBuilder.customViolationRegex(regex)
             return this
         }
 

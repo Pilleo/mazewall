@@ -23,16 +23,15 @@ public data class PolicyDefinition<out S : PolicyScope>(
      * Whether unsafe prctl options are allowed.
      *
      * WARNING: This option is extremely dangerous and inherently vulnerable to concurrent memory mutation
-     * attacks (TOCTOU) by sibling threads. While register-based arguments (like args[0], the prctl option code)
-     * are immune to TOCTOU, pointer-based arguments in options such as PR_SET_MM or PR_SET_NAME are subject
-     * to TOCTOU. A sibling thread can modify the memory pointed to by the register argument concurrently
-     * after the BPF filter's check but before kernel execution.
+     * attacks (TOCTOU) by sibling threads. See [Policy.Builder.allowUnsafePrctl] for more details.
      */
     public val allowUnsafePrctl: Boolean = false,
     public val lockIntelCet: Boolean = false,
     public val allowedFsReadPaths: Set<SandboxedPath> = emptySet(),
     public val allowedFsWritePaths: Set<SandboxedPath> = emptySet(),
     internal val enforceLandlock: Boolean = false,
+    public val customViolationPhrases: List<String> = emptyList(),
+    public val customViolationRegexes: List<Regex> = emptyList()
 ) {
     public val hasSupervisedSyscalls: Boolean get() = syscallActions.values.any { it == SeccompAction.ACT_NOTIFY }
     /** Returns true if the given [syscall] is unconditionally allowed by this policy. */
@@ -88,6 +87,9 @@ public data class PolicyDefinition<out S : PolicyScope>(
 
             val enforceLandlock = policies.any { it.enforceLandlock }
 
+            val combinedPhrases = policies.flatMap { it.customViolationPhrases }.distinct()
+            val combinedRegexes = policies.flatMap { it.customViolationRegexes }.distinct()
+
             if (enforceLandlock) {
                 combinedSyscalls[Syscall.OPEN] = SeccompAction.ACT_ALLOW
                 combinedSyscalls[Syscall.OPENAT] = SeccompAction.ACT_ALLOW
@@ -117,6 +119,8 @@ public data class PolicyDefinition<out S : PolicyScope>(
                 allowedFsReadPaths = fsReads,
                 allowedFsWritePaths = fsWrites,
                 enforceLandlock = enforceLandlock,
+                customViolationPhrases = combinedPhrases,
+                customViolationRegexes = combinedRegexes
             )
         }
 

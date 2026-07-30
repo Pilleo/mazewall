@@ -1,10 +1,12 @@
 package io.mazewall.enforcer
 
+import io.mazewall.Policy
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import java.io.IOException
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
+import kotlin.test.assertEquals
 
 class ContainmentViolationDetectorExtensibilityTest {
 
@@ -27,6 +29,79 @@ class ContainmentViolationDetectorExtensibilityTest {
 
         // Now should be true
         assertTrue(ContainmentViolationDetector.isContainmentViolation(customException))
+    }
+
+    @Test
+    fun `can extend detector with custom phrase`() {
+        val customException = IOException("This action was blocked by sandbox engine")
+
+        // Initially should be false
+        assertFalse(ContainmentViolationDetector.isContainmentViolation(customException))
+
+        // Register custom phrase
+        ContainmentViolationDetector.registerPhrase("blocked by sandbox engine")
+
+        // Now should be true
+        assertTrue(ContainmentViolationDetector.isContainmentViolation(customException))
+
+        // Verify word boundaries
+        assertFalse(ContainmentViolationDetector.isContainmentViolation(IOException("This action was blocked by sandbox enginely")))
+    }
+
+    @Test
+    fun `can extend detector with custom regex`() {
+        val customException = IOException("Access restricted: error 99")
+
+        // Initially should be false
+        assertFalse(ContainmentViolationDetector.isContainmentViolation(customException))
+
+        // Register custom regex
+        ContainmentViolationDetector.registerRegex(Regex("""Access restricted: error \d+"""))
+
+        // Now should be true
+        assertTrue(ContainmentViolationDetector.isContainmentViolation(customException))
+    }
+
+    @Test
+    fun `custom phrases and regexes are found in findViolationRanges`() {
+        ContainmentViolationDetector.registerPhrase("blocked by sandbox")
+        ContainmentViolationDetector.registerRegex(Regex("""restricted: \d+"""))
+
+        val msg = "Operation blocked by sandbox on path /tmp/foo, restricted: 42"
+        val ranges = ContainmentViolationDetector.findViolationRanges(msg).toList()
+
+        assertEquals(2, ranges.size)
+        assertEquals("blocked by sandbox", msg.substring(ranges[0]))
+        assertEquals("restricted: 42", msg.substring(ranges[1]))
+    }
+
+    @Test
+    fun `can configure custom phrases and regexes on independent detector`() {
+        val detector = ContainmentViolationDetector(
+            initialCustomPhrases = listOf("blocked by sandbox"),
+            initialCustomRegexes = listOf(Regex("""restricted: \d+""")),
+            useDefaults = false,
+            loadServices = false
+        )
+
+        val customException1 = IOException("blocked by sandbox")
+        val customException2 = IOException("restricted: 123")
+        val defaultException = IOException("Permission denied")
+
+        assertTrue(detector.isContainmentViolation(customException1))
+        assertTrue(detector.isContainmentViolation(customException2))
+        assertFalse(detector.isContainmentViolation(defaultException))
+    }
+
+    @Test
+    fun `can configure custom phrases and regexes via Policy and PolicyBuilder`() {
+        val policy = Policy.builder()
+            .customViolationPhrase("blocked by sandbox")
+            .customViolationRegex(Regex("""restricted: \d+"""))
+            .build()
+
+        assertTrue(policy.customViolationPhrases.contains("blocked by sandbox"))
+        assertTrue(policy.customViolationRegexes.any { it.pattern == """restricted: \d+""" })
     }
 
     @Test
