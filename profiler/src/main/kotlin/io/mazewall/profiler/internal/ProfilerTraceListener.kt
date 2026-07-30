@@ -39,8 +39,17 @@ internal class ProfilerTraceListener(
 ) : AutoCloseable {
     private val logger = Logger.getLogger(ProfilerTraceListener::class.java.name)
     private val closed = AtomicBoolean(false)
+    private val socketClosed = AtomicBoolean(false)
     private var workerThread: Thread? = null
     private var collectorThread: Thread? = null
+
+    private fun closeSocketOnce() {
+        if (socketClosed.compareAndSet(false, true)) {
+            try {
+                socketFd.close()
+            } catch (ignored: Exception) {}
+        }
+    }
 
     val eventChannel = Channel<TraceEvent>(Channel.UNLIMITED)
     val eventFlow: Flow<TraceEvent> = eventChannel.receiveAsFlow()
@@ -76,9 +85,7 @@ internal class ProfilerTraceListener(
                 logger.log(java.util.logging.Level.SEVERE, "ProfilerTraceListener worker thread crashed with fatal error", t)
             } finally {
                 if (closed.compareAndSet(false, true)) {
-                    try {
-                        socketFd.close()
-                    } catch (ignored: Exception) {}
+                    closeSocketOnce()
                 }
                 arena.close()
                 inputStream.close()
@@ -163,7 +170,7 @@ internal class ProfilerTraceListener(
             }
         } finally {
             // Step 3: Close the socket FD only after draining.
-            socketFd.close()
+            closeSocketOnce()
             workerThread = null
             collectorThread = null
         }
@@ -211,7 +218,7 @@ internal class ProfilerTraceListener(
                 }
             }
         } finally {
-            socketFd.close()
+            closeSocketOnce()
             workerThread = null
             collectorThread = null
         }
