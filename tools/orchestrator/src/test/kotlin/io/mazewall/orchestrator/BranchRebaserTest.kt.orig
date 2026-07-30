@@ -239,37 +239,4 @@ class BranchRebaserTest {
         assertFalse(result.success)
         assertEquals(1, result.conflictCount)
     }
-
-    @Test
-    fun `test fallback rebase uses targetFiles`() {
-        val commands = mutableListOf<String>()
-
-        val rebaser = BranchRebaser(
-            execute = { args ->
-                val cmd = args.joinToString(" ")
-                commands.add(cmd)
-                if (cmd.contains("headRefName")) return@BranchRebaser "test-branch"
-                if (cmd.contains("rev-parse")) return@BranchRebaser "sha_feature_123"
-                ""
-            },
-            executeInDir = { dir, args -> "" },
-            executeInDirNoRetry = { dir, args ->
-                val cmd = args.joinToString(" ")
-                commands.add("inDirNoRetry: $cmd")
-                if (cmd.startsWith("git worktree add")) {
-                    java.io.File(args[3]).mkdirs()
-                }
-                ""
-            },
-            clearPrCache = {}
-        )
-
-        val worktreeDir = java.io.File("build/tmp/temp-rebase-999")
-        worktreeDir.mkdirs()
-        val result = rebaser.runFallback("999", "session_abc", listOf("fileA.txt", "fileB.kt"))
-        
-        assertTrue(result.success)
-        assertTrue(commands.contains("inDirNoRetry: git checkout sha_feature_123 -- fileA.txt"))
-        assertTrue(commands.contains("inDirNoRetry: git checkout sha_feature_123 -- fileB.kt"))
-    }
 }

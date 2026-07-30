@@ -55,8 +55,10 @@ interface GitHubClient {
      * Returns [RebaseResult.success = true] if the merge succeeded and was pushed.
      * Returns [RebaseResult.success = false] if there are merge conflicts (human intervention required).
      */
-    fun mergeMasterIntoBranch(prNumber: String, sessionId: String?, targetFiles: List<String> = emptyList()): RebaseResult
+    fun rebaseBranch(prNumber: String, sessionId: String?): RebaseResult
+    fun rebaseBranchFallback(prNumber: String, sessionId: String?, targetFiles: List<String>): RebaseResult
     fun approveRescue(prNumber: String, rescueBranchName: String)
+
 
     /**
      * Clears all cached properties and statuses associated with a PR (such as merge status, head SHA, build status).

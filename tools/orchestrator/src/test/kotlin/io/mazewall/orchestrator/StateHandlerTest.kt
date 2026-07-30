@@ -71,9 +71,12 @@ class MockOrchestratorEnvironment : OrchestratorEnvironment {
         override fun getFailedBuildLogs(prNumber: String): String = "mock failed logs"
         override fun getPrUrl(prNumber: String): String = "mock url"
         override fun isCommitEmpty(prNumber: String, shaOld: String, shaNew: String): Boolean = isCommitEmptyResult
-        override fun mergeMasterIntoBranch(prNumber: String, sessionId: String?, targetFiles: List<String>): RebaseResult {
+        override fun rebaseBranch(prNumber: String, sessionId: String?): RebaseResult {
             mergeMasterIntoBranchCallCount++
             return mergeMasterIntoBranchResult
+        }
+        override fun rebaseBranchFallback(prNumber: String, sessionId: String?, targetFiles: List<String>): RebaseResult {
+            return RebaseResult(true, 0)
         }
         override fun approveRescue(prNumber: String, rescueBranchName: String) {}
         override fun clearPrCache(prNumber: String) { clearPrCacheCount++ }
@@ -1053,6 +1056,7 @@ class StateHandlerTest {
             githubIssueNumber = "123"
             julesSessionId = "s1"
             lastHeadSha = "sha123"
+            lastSanitizedRebaseSha = "sha123"
             lastWaitingLogTime = System.currentTimeMillis() - 700_000
         }
         env.prHeadSha = "sha123"

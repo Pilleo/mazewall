@@ -48,12 +48,6 @@ sealed interface OrchestratorState {
                 slot.prNumber = this.prNumber
                 slot.lastHeadSha = this.lastHeadSha
             }
-            is AwaitingFallbackApprovalState -> {
-                slot.currentIssueId = this.issueId
-                slot.githubIssueNumber = this.githubIssueNumber
-                slot.julesSessionId = this.julesSessionId
-                slot.prNumber = this.prNumber
-            }
             is ResolveTaskState -> {
                 slot.currentIssueId = this.issueId
             }
@@ -97,8 +91,6 @@ sealed interface OrchestratorState {
         slot.julesSessionFailureWaitAttempts = context.julesSessionFailureWaitAttempts
         slot.julesTriggerAttempts = context.julesTriggerAttempts
         slot.prMergeStatusAttempts = context.prMergeStatusAttempts
-        slot.failedRebaseHeadSha = context.failedRebaseHeadSha
-        slot.lastSanitizedRebaseSha = context.lastSanitizedRebaseSha
 
         val nextState = execute(env, context, slot)
 
@@ -131,8 +123,6 @@ sealed interface OrchestratorState {
         context.julesSessionFailureWaitAttempts = slot.julesSessionFailureWaitAttempts
         context.julesTriggerAttempts = slot.julesTriggerAttempts
         context.prMergeStatusAttempts = slot.prMergeStatusAttempts
-        context.failedRebaseHeadSha = slot.failedRebaseHeadSha
-        context.lastSanitizedRebaseSha = slot.lastSanitizedRebaseSha
 
         if (nextState is SelectTaskState && !context.activeSlots.contains(slot)) {
             context.clearActiveTask()
@@ -200,13 +190,6 @@ sealed interface OrchestratorState {
                     val lastHeadSha = slot.lastHeadSha ?: throw IllegalStateException("lastHeadSha is null in AWAITING_MERGE")
                     AwaitingMergeState(issueId, githubIssueNumber, julesSessionId, prNumber, lastHeadSha)
                 }
-                "AWAITING_FALLBACK_APPROVAL" -> {
-                    val issueId = slot.currentIssueId
-                    val githubIssueNumber = slot.githubIssueNumber ?: throw IllegalStateException("githubIssueNumber is null in AWAITING_FALLBACK_APPROVAL")
-                    val julesSessionId = slot.julesSessionId ?: throw IllegalStateException("julesSessionId is null in AWAITING_FALLBACK_APPROVAL")
-                    val prNumber = slot.prNumber ?: throw IllegalStateException("prNumber is null in AWAITING_FALLBACK_APPROVAL")
-                    AwaitingFallbackApprovalState(issueId, githubIssueNumber, julesSessionId, prNumber)
-                }
                 "RESOLVE_TASK" -> {
                     val issueId = slot.currentIssueId
                     ResolveTaskState(issueId)
@@ -237,7 +220,7 @@ sealed interface OrchestratorState {
                     val julesSessionId = context.julesSessionId ?: "dummy-session-id"
                     AwaitingPrState(issueId, githubIssueNumber, julesSessionId)
                 }
-                "CI_RUNNING" -> {
+                "CI_RUNNING", "MONITOR_PR" -> {
                     val issueId = context.currentIssueId ?: "dummy-issue-id"
                     val githubIssueNumber = context.githubIssueNumber ?: "dummy-github-issue"
                     val julesSessionId = context.julesSessionId ?: "dummy-session-id"
@@ -249,23 +232,16 @@ sealed interface OrchestratorState {
                     val githubIssueNumber = context.githubIssueNumber ?: "dummy-github-issue"
                     val julesSessionId = context.julesSessionId ?: "dummy-session-id"
                     val prNumber = context.prNumber ?: "dummy-pr-number"
-                    val headSha = context.lastHeadSha ?: "dummy-sha"
-                    AwaitingReviewState(issueId, githubIssueNumber, julesSessionId, prNumber, headSha)
+                    val lastHeadSha = context.lastHeadSha ?: "dummy-sha"
+                    AwaitingReviewState(issueId, githubIssueNumber, julesSessionId, prNumber, lastHeadSha)
                 }
                 "AWAITING_MERGE" -> {
                     val issueId = context.currentIssueId ?: "dummy-issue-id"
                     val githubIssueNumber = context.githubIssueNumber ?: "dummy-github-issue"
                     val julesSessionId = context.julesSessionId ?: "dummy-session-id"
                     val prNumber = context.prNumber ?: "dummy-pr-number"
-                    val headSha = context.lastHeadSha ?: "dummy-sha"
-                    AwaitingMergeState(issueId, githubIssueNumber, julesSessionId, prNumber, headSha)
-                }
-                "AWAITING_FALLBACK_APPROVAL" -> {
-                    val issueId = context.currentIssueId ?: "dummy-issue-id"
-                    val githubIssueNumber = context.githubIssueNumber ?: "dummy-github-issue"
-                    val julesSessionId = context.julesSessionId ?: "dummy-session-id"
-                    val prNumber = context.prNumber ?: "dummy-pr-number"
-                    AwaitingFallbackApprovalState(issueId, githubIssueNumber, julesSessionId, prNumber)
+                    val lastHeadSha = context.lastHeadSha ?: "dummy-sha"
+                    AwaitingMergeState(issueId, githubIssueNumber, julesSessionId, prNumber, lastHeadSha)
                 }
                 "RESOLVE_TASK" -> {
                     val issueId = context.currentIssueId ?: "dummy-issue-id"
@@ -668,16 +644,11 @@ data class CiRunningState(
             return this
         }
 
-        val outcome = handleRebaseAndConflicts(env, slot, prNumber, issueId, githubIssueNumber, julesSessionId)
-        when (outcome) {
-            RebaseOutcome.WAITING_RETRY, RebaseOutcome.WAITING_MANUAL_RESCUE, RebaseOutcome.AUTO_MERGED -> {
-                if (slot.retryAfterTime <= currentTime) {
-                    slot.retryAfterTime = currentTime + TimeUnit.SECONDS.toMillis(env.config.pollingIntervalSeconds)
-                }
-                return this
+        if (handleRebaseAndConflicts(env, slot, prNumber)) {
+            if (slot.retryAfterTime <= currentTime) {
+                slot.retryAfterTime = currentTime + TimeUnit.SECONDS.toMillis(env.config.pollingIntervalSeconds)
             }
-            RebaseOutcome.CONFLICT_FALLBACK -> return AwaitingFallbackApprovalState(issueId, githubIssueNumber, julesSessionId, prNumber)
-            RebaseOutcome.ALREADY_SANITIZED -> { /* proceed */ }
+            return this
         }
 
         if (env.gitHubClient.isPrMerged(prNumber)) {
@@ -821,19 +792,11 @@ data class AwaitingReviewState(
             return this
         }
 
-        val outcome = handleRebaseAndConflicts(env, slot, prNumber, issueId, githubIssueNumber, julesSessionId)
-        when (outcome) {
-            RebaseOutcome.WAITING_RETRY, RebaseOutcome.WAITING_MANUAL_RESCUE, RebaseOutcome.AUTO_MERGED -> {
-                if (slot.retryAfterTime <= currentTime) {
-                    slot.retryAfterTime = currentTime + TimeUnit.SECONDS.toMillis(env.config.pollingIntervalSeconds)
-                }
-                if (outcome == RebaseOutcome.AUTO_MERGED) {
-                    return CiRunningState(issueId, githubIssueNumber, julesSessionId, prNumber)
-                }
-                return this
+        if (handleRebaseAndConflicts(env, slot, prNumber)) {
+            if (slot.retryAfterTime <= currentTime) {
+                slot.retryAfterTime = currentTime + TimeUnit.SECONDS.toMillis(env.config.pollingIntervalSeconds)
             }
-            RebaseOutcome.CONFLICT_FALLBACK -> return AwaitingFallbackApprovalState(issueId, githubIssueNumber, julesSessionId, prNumber)
-            RebaseOutcome.ALREADY_SANITIZED -> { /* proceed */ }
+            return CiRunningState(issueId, githubIssueNumber, julesSessionId, prNumber)
         }
 
         val buildStatus = env.gitHubClient.checkBuildStatus(prNumber)
@@ -959,31 +922,6 @@ data class AwaitingMergeState(
             return CiRunningState(issueId, githubIssueNumber, julesSessionId, prNumber)
         }
 
-        // TEMPORARILY DISABLED (2026-07-30):
-        // Automatically rebasing and force-pushing Jules's branches while the agent is still active
-        // breaks Jules's workspace assumptions. Because Jules caches its workspace in the cloud,
-        // force-updating the branch history causes Jules to inadvertently record exact reversions
-        // of new master files when it commits from its stale cache.
-        // We leave this disabled so Jules can natively work on its isolated branch without interference,
-        // letting GitHub handle the final PR merge organically.
-        /*
-        // Run sanitization to ensure the PR contains only legitimate commits before waiting for merge.
-        if (slot.lastSanitizedRebaseSha != currentSha && slot.failedRebaseHeadSha != currentSha) {
-            env.println("🔄 PR #$prNumber SHA ${currentSha.take(7)} not yet sanitized. Running BranchRebaser before merge...")
-            val rebaseResult = env.gitHubClient.rebaseBranch(prNumber, julesSessionId)
-            if (rebaseResult.success) {
-                val newSha = env.gitHubClient.getPrHeadSha(prNumber)
-                slot.lastSanitizedRebaseSha = newSha
-                slot.lastHeadSha = newSha
-                env.println("✅ Sanitization complete for PR #$prNumber. Returning to CI_RUNNING.")
-                return CiRunningState(issueId, githubIssueNumber, julesSessionId, prNumber)
-            } else {
-                slot.failedRebaseHeadSha = currentSha
-                return AwaitingFallbackApprovalState(issueId, githubIssueNumber, julesSessionId, prNumber)
-            }
-        }
-        */
-
         val status = env.gitHubClient.checkBuildStatus(prNumber)
         if (status != "SUCCESS") {
             return CiRunningState(issueId, githubIssueNumber, julesSessionId, prNumber)
@@ -996,43 +934,6 @@ data class AwaitingMergeState(
             env.sendNotification("⌛ Waiting for manual merge of PR #$prNumber at: $prUrl")
             slot.lastWaitingLogTime = now
         }
-        slot.retryAfterTime = currentTime + TimeUnit.SECONDS.toMillis(env.config.pollingIntervalSeconds)
-        return this
-    }
-}
-
-data class AwaitingFallbackApprovalState(
-    val issueId: String,
-    val githubIssueNumber: String,
-    val julesSessionId: String,
-    val prNumber: String
-) : OrchestratorState {
-    override val name = "AWAITING_FALLBACK_APPROVAL"
-    override fun execute(env: OrchestratorEnvironment, context: OrchestratorContext, slot: SlotContext): OrchestratorState {
-        val currentTime = System.currentTimeMillis()
-        if (currentTime < slot.retryAfterTime) {
-            return this
-        }
-
-        val prompt = "🚨 PR #$prNumber automated sanitization failed (Git conflict or build error). Use manual targetFiles fallback?"
-        
-        // Document the logic without fully wiring the manual extraction yet
-        if (env.requestApproval(issueId, prompt)) {
-            val issue = env.parseAllIssues().firstOrNull { it.id == issueId }
-            val targetFiles = issue?.targetFiles ?: emptyList()
-            
-            env.println("Approval granted. Running targetFiles fallback extraction...")
-            val result = env.gitHubClient.rebaseBranchFallback(prNumber, julesSessionId, targetFiles)
-            if (result.success) {
-                return CiRunningState(issueId, githubIssueNumber, julesSessionId, prNumber)
-            } else {
-                env.println("Manual fallback failed. Pausing.")
-            }
-        } else {
-            env.println("Manual fallback rejected or timed out. Returning to SelectTaskState.")
-            return SelectTaskState
-        }
-
         slot.retryAfterTime = currentTime + TimeUnit.SECONDS.toMillis(env.config.pollingIntervalSeconds)
         return this
     }
@@ -1068,15 +969,7 @@ fun isTaskTimedOut(slot: SlotContext, config: OrchestratorConfig): Boolean {
     return elapsedMinutes >= config.taskTimeoutThresholdMinutes
 }
 
-enum class RebaseOutcome {
-    ALREADY_SANITIZED,
-    WAITING_RETRY,
-    WAITING_MANUAL_RESCUE,
-    AUTO_MERGED,
-    CONFLICT_FALLBACK
-}
-
-private fun handleRebaseAndConflicts(env: OrchestratorEnvironment, slot: SlotContext, prNumber: String, issueId: String, githubIssueNumber: String, julesSessionId: String): RebaseOutcome {
+private fun handleRebaseAndConflicts(env: OrchestratorEnvironment, slot: SlotContext, prNumber: String): Boolean {
     val currentTime = System.currentTimeMillis()
     var status = env.gitHubClient.getPrMergeStatus(prNumber)
     if (status.isError) {
@@ -1089,12 +982,12 @@ private fun handleRebaseAndConflicts(env: OrchestratorEnvironment, slot: SlotCon
         if (slot.prMergeStatusAttempts < 3) {
             env.println("🔄 Retrying PR merge status retrieval (attempt ${slot.prMergeStatusAttempts + 1}/3)...")
             slot.retryAfterTime = currentTime + 2000L
-            return RebaseOutcome.WAITING_RETRY
+            return true
         } else {
             slot.prMergeStatusAttempts = 0
             env.println("❌ Failed to retrieve PR merge status after retries. Aborting current check iteration and waiting.")
             slot.retryAfterTime = currentTime + TimeUnit.SECONDS.toMillis(env.config.pollingIntervalSeconds)
-            return RebaseOutcome.WAITING_RETRY
+            return true
         }
     }
 
@@ -1112,14 +1005,16 @@ private fun handleRebaseAndConflicts(env: OrchestratorEnvironment, slot: SlotCon
                 env.println("⚠️ PR #$prNumber has conflict/rebase failure at SHA ${currentSha.take(7)}. Automated rebase previously failed. Waiting for manual resolution or new commit: $prUrl")
                 slot.lastWaitingLogTime = now
             }
-            return RebaseOutcome.ALREADY_SANITIZED // It failed before, we're waiting.
+            return false
         }
 
         val reason = if (isConflicting) "conflict status" else "behind master by ${status.behindBy} commits"
         env.println("🔄 Active PR #$prNumber is $reason. Attempting automated merge of master into branch...")
 
         val sessionId = env.julesClient.getActiveSession(slot.currentIssueId)?.id
-        val rebaseResult = env.gitHubClient.rebaseBranch(prNumber, sessionId)
+        val issue = env.parseAllIssues().firstOrNull { it.id == slot.currentIssueId }
+        val targetFiles = issue?.targetFiles ?: emptyList()
+        val rebaseResult = env.gitHubClient.mergeMasterIntoBranch(prNumber, sessionId, targetFiles)
         if (rebaseResult.needsRescueApproval && rebaseResult.rescueBranchName != null) {
             env.println("🚨 PR #$prNumber has unrelated histories. Rescue branch prepared.")
             env.sendNotification( "🚨 Unrelated histories detected on PR #$prNumber. I've prepared a rescued branch: ${rebaseResult.rescueBranchName}. Approve to forcefully overwrite the PR branch.")
@@ -1133,10 +1028,10 @@ private fun handleRebaseAndConflicts(env: OrchestratorEnvironment, slot: SlotCon
                 slot.lastHeadSha = newSha
                 if (slot.lastReviewedSha == oldSha && oldSha != null) slot.lastReviewedSha = newSha
                 if (slot.lastRequestedReviewSha == oldSha && oldSha != null) slot.lastRequestedReviewSha = newSha
-                return RebaseOutcome.AUTO_MERGED
+                return true
             } else {
                 env.println("Rescue rejected by user.")
-                return RebaseOutcome.WAITING_MANUAL_RESCUE
+                return false
             }
         }
         val rebaseSuccess = rebaseResult.success
@@ -1159,17 +1054,19 @@ private fun handleRebaseAndConflicts(env: OrchestratorEnvironment, slot: SlotCon
             if (slot.lastRequestedReviewSha == oldSha && oldSha != null) {
                 slot.lastRequestedReviewSha = newSha
             }
-            return RebaseOutcome.AUTO_MERGED
+            return true
         } else {
             slot.failedRebaseHeadSha = currentSha
-            val prUrl = env.gitHubClient.getPrUrl(prNumber)
-            val conflictSuffix = if (rebaseResult.conflictCount > 0) " (Conflicts in ${rebaseResult.conflictCount} files: ${rebaseResult.conflictedFiles})" else ""
-            env.sendNotification("⚠️ *PR #$prNumber has conflicts!* Automated cherry-pick sanitization failed$conflictSuffix. Transitioning to manual fallback approval.")
-            env.println("\u001B[1;31m🔔 [CONFLICT] PR #$prNumber has conflicts! Transitioning to fallback approval.\u001B[0m")
-            return RebaseOutcome.CONFLICT_FALLBACK
+            val now = System.currentTimeMillis()
+            if (now - slot.lastWaitingLogTime > 60_000) {
+                val prUrl = env.gitHubClient.getPrUrl(prNumber)
+                val conflictSuffix = if (rebaseResult.conflictCount > 0) " (Conflicts in ${rebaseResult.conflictCount} files: ${rebaseResult.conflictedFiles})" else ""
+                env.sendNotification("⚠️ *PR #$prNumber has conflicts!* Automated local worktree merge failed$conflictSuffix. Human intervention required: $prUrl")
+                env.println("\u001B[1;31m🔔 [CONFLICT] PR #$prNumber has conflicts! Automated local worktree merge failed$conflictSuffix. Please resolve: $prUrl\u001B[0m")
+                env.ringBell(3)
+                slot.lastWaitingLogTime = now
+            }
         }
     }
-
-    slot.lastSanitizedRebaseSha = env.gitHubClient.getPrHeadSha(prNumber)
-    return RebaseOutcome.ALREADY_SANITIZED
+    return false
 }
