@@ -207,27 +207,38 @@ class RealGitHubClient(private val config: OrchestratorConfig) : GitHubClient {
 
     override fun checkBuildStatus(prNumber: String): String = withCache("checkBuildStatus-$prNumber") {
         try {
-            val mergeableJson = execute("gh", "pr", "view", prNumber, "--json", "mergeable")
+            // First check if the PR has merge conflicts (only DIRTY indicates real git conflicts)
+            val mergeableJson = execute("gh", "pr", "view", prNumber, "--json", "mergeable,mergeStateStatus,state")
             val m = json.decodeFromString(GitHubMergeable.serializer(), mergeableJson)
-            if (m.mergeable == "CONFLICTING") {
-                return "CONFLICT"
+            
+            if (m.state != "MERGED" && m.state != "CLOSED") {
+                if (m.mergeStateStatus == "DIRTY" || m.mergeable == "CONFLICTING") {
+                    System.out.println("  [gh pr view #$prNumber] Conflict detected: state=${m.state}, mergeable=${m.mergeable}, mergeStateStatus=${m.mergeStateStatus}")
+                    return "CONFLICT"
+                }
             }
 
             val checksJson = execute("gh", "pr", "checks", prNumber, "--json", "state,name,bucket,event")
             val checks = json.decodeFromString(kotlinx.serialization.builtins.ListSerializer(GitHubCheck.serializer()), checksJson)
             if (checks.isEmpty()) return "IN_PROGRESS"
 
+            // Evaluate check failure using both bucket and state fields
             val isFailing = checks.any {
+                it.bucket == "fail" ||
                 it.state == "FAILURE" ||
                 it.state == "CANCELLED" ||
                 it.state == "ACTION_REQUIRED"
             }
             if (isFailing) return "FAILURE"
 
+            // Evaluate pending build status using bucket and pending states
             val isPending = checks.any {
+                it.bucket == "pending" ||
                 it.state == "PENDING" ||
                 it.state == "IN_PROGRESS" ||
-                it.state == "EXPECTED"
+                it.state == "EXPECTED" ||
+                it.state == "QUEUED" ||
+                it.state == "WAITING"
             }
             if (isPending) return "IN_PROGRESS"
 
@@ -482,7 +493,9 @@ data class CommentsContainer(
 
 @Serializable
 data class GitHubMergeable(
-    val mergeable: String
+    val mergeable: String? = null,
+    val mergeStateStatus: String? = null,
+    val state: String? = null
 )
 
 @Serializable

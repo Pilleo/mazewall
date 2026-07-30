@@ -8,9 +8,10 @@ component: orchestrator
 target_modules:
 - :tools:orchestrator
 target_files:
-- tools/orchestrator/src/main/kotlin/io/mazewall/orchestrator/BacklogParser.kt
-effort: small
-autonomy: autonomous
+  - "tools/orchestrator/src/main/kotlin/io/mazewall/orchestrator/BacklogParser.kt"
+effort: "small"
+autonomy: "autonomous"
+github_issue: 344
 ---
 
 # 🔴 [Severity: HIGH]: Fix Custom Frontmatter Parser Colon-Splitting Logic Bug
