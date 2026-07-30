@@ -10,9 +10,10 @@ labels:
 - fail-open
 - daemon
 component: enforcer
-target_modules: [":enforcer"]
-target_files: ["enforcer/src/main/kotlin/io/mazewall/enforcer/supervisor/SupervisorDaemonManager.kt"]
-github_issue: 342
+target_modules:
+- :enforcer
+target_files:
+- enforcer/src/main/kotlin/io/mazewall/enforcer/supervisor/SupervisorDaemonManager.kt
 ---
 
 # Issue: `SupervisorDaemonManager` silently ignores process death or `Throwable`s

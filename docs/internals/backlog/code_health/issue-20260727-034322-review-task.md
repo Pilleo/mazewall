@@ -8,12 +8,12 @@ target_modules: [":profiler", ":enforcer"]
 target_files: []
 effort: "medium"
 dependencies: []
-github_issue: 391
+github_issue: 358
 ---
 Please review profiler module using .agents/skills/review/SKILL.md skill. Create issues using skill .agents/skills/create_backlog_issue/SKILL.md
 
 **Additional Focus Instructions:**
-orchestrator tool is extremely stateful, yet even more importnat. It has a good coverage, but because there are endless combination of statetes it is not enough. Constatntly i see new critical bugs. Review how can we improve it, simplify, make more testatble, cover with tetss more cases, more combination in a smarter way. See where we can use parametrized tests, type safe state machines, review the logic carefully, search for logical mistakes that can impact usability, reliability, safety, stability. See how can we introduce refactorfirst to make refactoring decisions easier. See what features can improve user friendliness, reliability. Create a detailed backlog issue for each problem and opportunity. Pay special attention to git issues (conflicts of different kinds) and git integration testing.
+please review backlog issues, some of them are not relevant anymore. Review them one by one, if you see not relevant - describe why.
 
 ---
 
