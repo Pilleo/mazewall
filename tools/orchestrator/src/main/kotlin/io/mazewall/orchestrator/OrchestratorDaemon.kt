@@ -150,16 +150,22 @@ class OrchestratorDaemonRunner(
                 issue.dependencies.none { dep -> openIds.contains(dep) }
             }
 
-            // Filter for conflict-free: handle empty target_modules or target_files conservatively (treating empty targets as a conflict with all active tasks).
+            // Filter for conflict-free: non-interfering empty-target tasks can run concurrently with other tasks.
+            // If a task has empty targets and is NOT non-interfering, it is treated conservatively as a global lock/conflict.
             val conflictFreeIssues = unblockedIssues.filter { issue ->
                 if (activeIssues.isEmpty()) {
                     true
                 } else {
-                    issue.targetFiles.isNotEmpty() && issue.targetModules.isNotEmpty() &&
-                    activeIssues.none { active ->
-                        active.targetFiles.isEmpty() || active.targetModules.isEmpty() ||
-                        issue.targetFiles.any { it in active.targetFiles } ||
-                        issue.targetModules.any { it in active.targetModules }
+                    val issueIsEmptyAndInterfering = (issue.targetFiles.isEmpty() || issue.targetModules.isEmpty()) && !issue.isNonInterfering()
+                    if (issueIsEmptyAndInterfering) {
+                        false
+                    } else {
+                        activeIssues.none { active ->
+                            val activeIsEmptyAndInterfering = (active.targetFiles.isEmpty() || active.targetModules.isEmpty()) && !active.isNonInterfering()
+                            activeIsEmptyAndInterfering ||
+                            issue.targetFiles.any { it in active.targetFiles } ||
+                            issue.targetModules.any { it in active.targetModules }
+                        }
                     }
                 }
             }

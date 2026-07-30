@@ -195,6 +195,80 @@ class ParallelTaskSchedulerTest {
     }
 
     @Test
+    fun testNonInterferingEmptyTargetTasksCanRunConcurrently() {
+        val env = MockOrchestratorEnvironment()
+        val runner = OrchestratorDaemonRunner(env, File(tempDir, ".state.noninterfering.properties"))
+
+        // Active task is a standard, module-specific task
+        val activeIssue = BacklogIssue(
+            file = File(tempDir, "issue-active.md"),
+            id = "issue-active",
+            title = "Active module task",
+            priority = 10,
+            status = "open",
+            dependencies = emptyList(),
+            targetFiles = listOf("Enforcer.kt"),
+            targetModules = listOf(":enforcer")
+        )
+
+        // Non-interfering empty-target candidate: e.g. a documentation component
+        val nonInterferingCandidate = BacklogIssue(
+            file = File(tempDir, "issue-noninterfering.md"),
+            id = "issue-noninterfering",
+            title = "Docs Update Task",
+            priority = 8,
+            status = "open",
+            dependencies = emptyList(),
+            targetFiles = emptyList(),
+            targetModules = emptyList(),
+            component = "docs"
+        )
+
+        // Non-interfering empty-target candidate 2: e.g. a review task with "review-task" in the ID
+        val nonInterferingCandidate2 = BacklogIssue(
+            file = File(tempDir, "issue-review-task.md"),
+            id = "review-task-something",
+            title = "Review Task",
+            priority = 7,
+            status = "open",
+            dependencies = emptyList(),
+            targetFiles = emptyList(),
+            targetModules = emptyList()
+        )
+
+        // Interfering empty-target candidate: not non-interfering, should be blocked
+        val interferingCandidate = BacklogIssue(
+            file = File(tempDir, "issue-interfering.md"),
+            id = "issue-interfering",
+            title = "Interfering empty target task",
+            priority = 6,
+            status = "open",
+            dependencies = emptyList(),
+            targetFiles = emptyList(),
+            targetModules = emptyList(),
+            component = "enforcer" // Not a non-interfering component
+        )
+
+        env.issues.addAll(listOf(activeIssue, nonInterferingCandidate, nonInterferingCandidate2, interferingCandidate))
+
+        // Set activeIssue as already active
+        val slotActive = SlotContext("issue-active").apply {
+            githubIssueNumber = "1"
+            julesSessionId = "s1"
+            prNumber = "101"
+            state = CiRunningState("issue-active", "1", "s1", "101")
+        }
+        runner.context.activeSlots.add(slotActive)
+
+        runner.selectAndStartTasks()
+
+        val activeIds = runner.context.activeSlots.map { it.currentIssueId }.toSet()
+        assertTrue(activeIds.contains("issue-noninterfering"), "Non-interfering empty-target task should start concurrently")
+        assertTrue(activeIds.contains("review-task-something"), "Review empty-target task should start concurrently")
+        assertFalse(activeIds.contains("issue-interfering"), "Interfering empty-target task should NOT start concurrently with active tasks")
+    }
+
+    @Test
     fun testSerializationOfMultipleSlots() {
         val context = OrchestratorContext()
 

@@ -17,7 +17,11 @@ data class BacklogIssue(
     val needed: String? = null,
     val targetFiles: List<String> = emptyList(),
     val targetModules: List<String> = emptyList()
-)
+) {
+    fun isNonInterfering(): Boolean {
+        return component == "docs" || component == "ci" || id.contains("review-task")
+    }
+}
 
 object BacklogParser {
     fun parseAllIssues(backlogDir: File): List<BacklogIssue> {
