@@ -32,7 +32,7 @@ object ReviewIssueLauncher {
             priority: 10
             component: "profiler"
             target_modules: [":profiler", ":enforcer"]
-            target_files: []
+            target_files: ["docs/internals/backlog/code_health/$fileName"]
             effort: "medium"
             dependencies: []
             ---
@@ -44,11 +44,11 @@ object ReviewIssueLauncher {
         val issue = BacklogParser.parseIssueFile(issueFile)
             ?: throw IllegalStateException("Failed to parse newly created review issue file ${issueFile.name}")
 
-        // 1. Create GitHub issue immediately with "jules" label so Jules triggers on GitHub
+        // 1. Create GitHub issue immediately with "jules-start" label so Jules triggers on GitHub
         val issueTitleForGit = "[$issueId] ${issue.title}"
         val enhancedBody = OrchestratorPrompts.taskPrompt(issueFile.readText())
         val githubIssueNumber = try {
-            env.gitHubClient.createIssue(issueTitleForGit, enhancedBody, "jules")
+            env.gitHubClient.createIssue(issueTitleForGit, enhancedBody, "jules-start")
         } catch (e: Exception) {
             env.errPrintln("Error creating GitHub issue for review task $issueId: ${e.message}")
             null

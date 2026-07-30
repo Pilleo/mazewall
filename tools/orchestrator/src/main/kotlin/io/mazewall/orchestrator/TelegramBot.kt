@@ -87,6 +87,8 @@ class TelegramBot(
         }
     }
 
+    private val pendingApprovals = java.util.concurrent.ConcurrentHashMap<String, Boolean>()
+
     fun pollUpdates() {
         try {
             val url = "https://api.telegram.org/bot$botToken/getUpdates?offset=$lastUpdateId&timeout=0"
@@ -101,6 +103,14 @@ class TelegramBot(
                         if (data.startsWith("review")) {
                             answerCallback(callbackQuery.id)
                             handleReviewCallback()
+                        } else if (data.startsWith("approve:")) {
+                            answerCallback(callbackQuery.id)
+                            val issueId = data.removePrefix("approve:")
+                            pendingApprovals[issueId] = true
+                        } else if (data.startsWith("skip:")) {
+                            answerCallback(callbackQuery.id)
+                            val issueId = data.removePrefix("skip:")
+                            pendingApprovals[issueId] = false
                         }
                     } else if (update.message?.text != null) {
                         val text = update.message.text.trim()
@@ -144,70 +154,16 @@ class TelegramBot(
     }
 
     fun checkApprovalNonBlocking(issueId: String): Boolean? {
-        try {
-            val url = "https://api.telegram.org/bot$botToken/getUpdates?offset=$lastUpdateId&timeout=0"
-            val responseText = get(url) ?: return null
-            val updatesResponse = json.decodeFromString<TelegramResponse<List<TelegramUpdate>>>(responseText)
-            if (updatesResponse.ok && updatesResponse.result != null) {
-                for (update in updatesResponse.result) {
-                    lastUpdateId = update.update_id + 1
-                    val callbackQuery = update.callback_query
-                    if (callbackQuery != null && callbackQuery.data != null) {
-                        val data = callbackQuery.data
-                        if (data == "approve:$issueId") {
-                            answerCallback(callbackQuery.id)
-                            return true
-                        } else if (data == "skip:$issueId") {
-                            answerCallback(callbackQuery.id)
-                            return false
-                        }
-                    }
-                }
-            }
-        } catch (e: Exception) {
-            System.err.println("Error checking approval non-blocking: ${e.message}")
-        }
-        return null
+        pollUpdates() // Ensure latest updates are polled
+        return pendingApprovals.remove(issueId)
     }
 
     fun waitForApproval(issueId: String): Boolean {
         println("⏳ Waiting for user approval on Telegram for $issueId...")
         while (true) {
-            val url = "https://api.telegram.org/bot$botToken/getUpdates?offset=$lastUpdateId&timeout=30"
-            val responseText = get(url)
-            if (responseText == null) {
-                Thread.sleep(5000)
-                continue
-            }
-            try {
-                // Parse updates using the generic serializer wrapper
-                val updatesResponse = json.decodeFromString<TelegramResponse<List<TelegramUpdate>>>(responseText)
-                if (updatesResponse.ok && updatesResponse.result != null) {
-                    for (update in updatesResponse.result) {
-                        lastUpdateId = update.update_id + 1
-                        val callbackQuery = update.callback_query
-                        if (callbackQuery != null && callbackQuery.data != null) {
-                            val data = callbackQuery.data
-                            if (data == "approve:$issueId") {
-                                answerCallback(callbackQuery.id)
-                                return true
-                            } else if (data == "skip:$issueId") {
-                                answerCallback(callbackQuery.id)
-                                return false
-                            } else if (data.startsWith("review")) {
-                                answerCallback(callbackQuery.id)
-                                val launched = handleReviewCallback()
-                                if (launched) {
-                                    // Review task launched. Postpone current task so orchestrator can execute review task.
-                                    return false
-                                }
-                            }
-                        }
-                    }
-                }
-            } catch (e: Exception) {
-                System.err.println("Error parsing Telegram updates: ${e.message}")
-            }
+            pollUpdates()
+            val result = pendingApprovals.remove(issueId)
+            if (result != null) return result
             Thread.sleep(1000)
         }
     }

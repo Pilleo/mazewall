@@ -210,7 +210,7 @@ class RealGitHubClient(private val config: OrchestratorConfig) : GitHubClient {
             // First check if the PR has merge conflicts (only DIRTY indicates real git conflicts)
             val mergeableJson = execute("gh", "pr", "view", prNumber, "--json", "mergeable,mergeStateStatus,state")
             val m = json.decodeFromString(GitHubMergeable.serializer(), mergeableJson)
-            
+
             if (m.state != "MERGED" && m.state != "CLOSED") {
                 if (m.mergeStateStatus == "DIRTY" || m.mergeable == "CONFLICTING") {
                     System.out.println("  [gh pr view #$prNumber] Conflict detected: state=${m.state}, mergeable=${m.mergeable}, mergeStateStatus=${m.mergeStateStatus}")
@@ -361,6 +361,10 @@ class RealGitHubClient(private val config: OrchestratorConfig) : GitHubClient {
         } else {
             action()
         }
+    }
+
+    override fun addLabel(issueNumber: String, label: String) {
+        execute("gh", "issue", "edit", issueNumber, "--add-label", label)
     }
 
     override fun commentOnPr(prNumber: String, body: String) {

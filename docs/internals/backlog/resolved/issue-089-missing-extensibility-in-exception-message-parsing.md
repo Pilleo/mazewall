@@ -15,6 +15,7 @@ autonomy: supervised
 solution_approved: false
 blast_radius: medium
 reversible: true
+github_issue: 424
 ---
 
 # 🔴 [Severity: DX-FRICTION]: Missing Extensibility in Exception Message Parsing

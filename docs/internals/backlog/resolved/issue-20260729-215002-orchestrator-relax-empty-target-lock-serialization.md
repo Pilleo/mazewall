@@ -1,7 +1,7 @@
 ---
 title: "Relax Scheduler Serialization to Prevent Empty Target Lists from Acting as Global Blocking Locks"
 severity: "HIGH"
-status: "open"
+status: "resolved"
 priority: 9
 dependencies: []
 component: "orchestrator"
