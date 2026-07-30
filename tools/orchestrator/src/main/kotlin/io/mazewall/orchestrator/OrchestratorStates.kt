@@ -87,6 +87,10 @@ sealed interface OrchestratorState {
         slot.julesRetries = context.julesRetries
         slot.julesReviewPushCount = context.julesReviewPushCount
         slot.julesReviewAttemptCount = context.julesReviewAttemptCount
+        slot.retryAfterTime = context.retryAfterTime
+        slot.julesSessionFailureWaitAttempts = context.julesSessionFailureWaitAttempts
+        slot.julesTriggerAttempts = context.julesTriggerAttempts
+        slot.prMergeStatusAttempts = context.prMergeStatusAttempts
 
         val nextState = execute(env, context, slot)
 
@@ -115,6 +119,10 @@ sealed interface OrchestratorState {
         context.julesRetries = slot.julesRetries
         context.julesReviewPushCount = slot.julesReviewPushCount
         context.julesReviewAttemptCount = slot.julesReviewAttemptCount
+        context.retryAfterTime = slot.retryAfterTime
+        context.julesSessionFailureWaitAttempts = slot.julesSessionFailureWaitAttempts
+        context.julesTriggerAttempts = slot.julesTriggerAttempts
+        context.prMergeStatusAttempts = slot.prMergeStatusAttempts
 
         if (nextState is SelectTaskState && !context.activeSlots.contains(slot)) {
             context.clearActiveTask()
@@ -373,6 +381,11 @@ data class AwaitingJulesStartState(
 ) : OrchestratorState {
     override val name = "AWAITING_JULES_START"
     override fun execute(env: OrchestratorEnvironment, context: OrchestratorContext, slot: SlotContext): OrchestratorState {
+        val currentTime = System.currentTimeMillis()
+        if (currentTime < slot.retryAfterTime) {
+            return this
+        }
+
         if (env.gitHubClient.isIssueClosed(githubIssueNumber)) {
             env.println("\n\u001B[1;33m⚠️ GitHub issue #$githubIssueNumber was closed. Resolving and canceling task $issueId.\u001B[0m")
             val nextIssue = env.parseAllIssues().firstOrNull { it.id == issueId }
@@ -390,31 +403,36 @@ data class AwaitingJulesStartState(
             val activeSessionId = env.julesClient.getActiveSession(issueId)?.id ?: "dummy-session-id"
             slot.prNumber = existingPr
             slot.julesSessionId = activeSessionId
+            slot.retryAfterTime = 0L
+            slot.julesTriggerAttempts = 0
             return CiRunningState(issueId, githubIssueNumber, activeSessionId, existingPr)
         }
 
-        var activeSession = env.julesClient.getActiveSession(issueId)
-        var attempts = 0
-        while (activeSession == null && attempts < env.config.julesTriggerAttempts) {
-            env.println("Waiting for Jules session to be automatically triggered via GitHub issue label (attempt ${attempts + 1}/${env.config.julesTriggerAttempts})...")
-            env.sleep(env.config.julesTriggerIntervalSeconds, TimeUnit.SECONDS)
-            activeSession = env.julesClient.getActiveSession(issueId)
-            attempts++
+        val activeSession = env.julesClient.getActiveSession(issueId)
+        if (activeSession != null) {
+            env.println("Linked Jules session: ID=${activeSession.id}, Status=${activeSession.status}")
+            slot.retryAfterTime = 0L
+            slot.julesTriggerAttempts = 0
+            return AwaitingPrState(issueId, githubIssueNumber, activeSession.id)
         }
 
-        return if (activeSession != null) {
-            env.println("Linked Jules session: ID=${activeSession.id}, Status=${activeSession.status}")
-            AwaitingPrState(issueId, githubIssueNumber, activeSession.id)
-        } else {
-            if (isTaskTimedOut(slot, env.config)) {
-                env.errPrintln("❌ Task $issueId timed out waiting for Jules session. Returning to SELECT_TASK.")
-                context.activeSlots.remove(slot)
-                return SelectTaskState
-            }
-            env.println("⚠️ Jules session did not trigger. Retrying in 1 minute...")
-            env.sleep(1, TimeUnit.MINUTES)
-            this
+        if (slot.julesTriggerAttempts < env.config.julesTriggerAttempts) {
+            slot.julesTriggerAttempts++
+            env.println("Waiting for Jules session to be automatically triggered via GitHub issue label (attempt ${slot.julesTriggerAttempts}/${env.config.julesTriggerAttempts})...")
+            slot.retryAfterTime = currentTime + TimeUnit.SECONDS.toMillis(env.config.julesTriggerIntervalSeconds)
+            return this
         }
+
+        if (isTaskTimedOut(slot, env.config)) {
+            env.errPrintln("❌ Task $issueId timed out waiting for Jules session. Returning to SELECT_TASK.")
+            context.activeSlots.remove(slot)
+            return SelectTaskState
+        }
+
+        env.println("⚠️ Jules session did not trigger. Retrying in 1 minute...")
+        slot.julesTriggerAttempts = 0
+        slot.retryAfterTime = currentTime + TimeUnit.MINUTES.toMillis(1)
+        return this
     }
 }
 
@@ -425,6 +443,11 @@ data class AwaitingPrState(
 ) : OrchestratorState {
     override val name = "AWAITING_PR"
     override fun execute(env: OrchestratorEnvironment, context: OrchestratorContext, slot: SlotContext): OrchestratorState {
+        val currentTime = System.currentTimeMillis()
+        if (currentTime < slot.retryAfterTime) {
+            return this
+        }
+
         if (env.gitHubClient.isIssueClosed(githubIssueNumber)) {
             env.println("\n\u001B[1;33m⚠️ GitHub issue #$githubIssueNumber was closed. Resolving and canceling task $issueId.\u001B[0m")
             val nextIssue = env.parseAllIssues().firstOrNull { it.id == issueId }
@@ -530,6 +553,28 @@ data class CiRunningState(
 ) : OrchestratorState {
     override val name = "CI_RUNNING"
     override fun execute(env: OrchestratorEnvironment, context: OrchestratorContext, slot: SlotContext): OrchestratorState {
+        val currentTime = System.currentTimeMillis()
+        if (currentTime < slot.retryAfterTime) {
+            return this
+        }
+
+        // Check if we are currently waiting for a failed session to transition out of failure
+        if (slot.julesSessionFailureWaitAttempts > 0) {
+            val retriedSession = env.julesClient.getActiveSession(issueId)
+            val isStillFailed = retriedSession != null &&
+                    (retriedSession.status.lowercase() == "failed" ||
+                     retriedSession.status.lowercase() == "cancelled" ||
+                     env.julesClient.hasUnableToCompleteActivity(retriedSession.id))
+            if (isStillFailed && slot.julesSessionFailureWaitAttempts < 15) {
+                env.println("Waiting for Jules session status to transition out of failure state (attempt ${slot.julesSessionFailureWaitAttempts}/15)...")
+                slot.julesSessionFailureWaitAttempts++
+                slot.retryAfterTime = currentTime + TimeUnit.SECONDS.toMillis(20)
+                return this
+            } else {
+                slot.julesSessionFailureWaitAttempts = 0
+            }
+        }
+
         val currentSha = env.gitHubClient.getPrHeadSha(prNumber)
         if (currentSha != slot.lastHeadSha) {
             env.gitHubClient.clearPrCache(prNumber)
@@ -556,16 +601,8 @@ data class CiRunningState(
                 slot.lastBuildStatus = null
                 slot.lastHeadSha = null
 
-                var retriedSession = env.julesClient.getActiveSession(issueId)
-                var retryWaitAttempts = 0
-                while (retriedSession != null &&
-                       (retriedSession.status.lowercase() == "failed" || retriedSession.status.lowercase() == "cancelled" || env.julesClient.hasUnableToCompleteActivity(retriedSession.id)) &&
-                       retryWaitAttempts < 15) {
-                    env.println("Waiting for Jules session status to transition out of failure state (attempt ${retryWaitAttempts + 1}/15)...")
-                    env.sleep(20, TimeUnit.SECONDS)
-                    retriedSession = env.julesClient.getActiveSession(issueId)
-                    retryWaitAttempts++
-                }
+                slot.julesSessionFailureWaitAttempts = 1
+                slot.retryAfterTime = currentTime + TimeUnit.SECONDS.toMillis(20)
                 return this
             } else {
                 env.println("\n❌ [FAILED] Jules session failed during CI: $statText after ${slot.julesRetries} retries.")
@@ -582,12 +619,14 @@ data class CiRunningState(
 
         if (session != null && session.status.lowercase() == "in_progress") {
             env.println("Jules session ${session.id} is actively running (IN_PROGRESS). Waiting...")
-            env.sleep(env.config.pollingIntervalSeconds, TimeUnit.SECONDS)
+            slot.retryAfterTime = currentTime + TimeUnit.SECONDS.toMillis(env.config.pollingIntervalSeconds)
             return this
         }
 
         if (handleRebaseAndConflicts(env, slot, prNumber)) {
-            env.sleep(env.config.pollingIntervalSeconds, TimeUnit.SECONDS)
+            if (slot.retryAfterTime <= currentTime) {
+                slot.retryAfterTime = currentTime + TimeUnit.SECONDS.toMillis(env.config.pollingIntervalSeconds)
+            }
             return this
         }
 
@@ -634,11 +673,11 @@ data class CiRunningState(
                 } else {
                     env.println("❌ Build is still failing on SHA $headSha. Waiting for a new commit...")
                 }
-                env.sleep(env.config.ciFailureRetryMinutes, TimeUnit.MINUTES)
+                slot.retryAfterTime = currentTime + TimeUnit.MINUTES.toMillis(env.config.ciFailureRetryMinutes)
                 this
             }
             "CONFLICT" -> {
-                env.sleep(env.config.pollingIntervalSeconds, TimeUnit.SECONDS)
+                slot.retryAfterTime = currentTime + TimeUnit.SECONDS.toMillis(env.config.pollingIntervalSeconds)
                 this
             }
             else -> {
@@ -655,7 +694,7 @@ data class CiRunningState(
                     env.ringBell(1)
                     slot.lastPendingNotificationTime = now
                 }
-                env.sleep(env.config.pollingIntervalSeconds, TimeUnit.SECONDS)
+                slot.retryAfterTime = currentTime + TimeUnit.SECONDS.toMillis(env.config.pollingIntervalSeconds)
                 this
             }
         }
@@ -671,6 +710,28 @@ data class AwaitingReviewState(
 ) : OrchestratorState {
     override val name = "AWAITING_REVIEW"
     override fun execute(env: OrchestratorEnvironment, context: OrchestratorContext, slot: SlotContext): OrchestratorState {
+        val currentTime = System.currentTimeMillis()
+        if (currentTime < slot.retryAfterTime) {
+            return this
+        }
+
+        // Check if we are currently waiting for a failed session to transition out of failure
+        if (slot.julesSessionFailureWaitAttempts > 0) {
+            val retriedSession = env.julesClient.getActiveSession(issueId)
+            val isStillFailed = retriedSession != null &&
+                    (retriedSession.status.lowercase() == "failed" ||
+                     retriedSession.status.lowercase() == "cancelled" ||
+                     env.julesClient.hasUnableToCompleteActivity(retriedSession.id))
+            if (isStillFailed && slot.julesSessionFailureWaitAttempts < 15) {
+                env.println("Waiting for Jules session status to transition out of failure state (attempt ${slot.julesSessionFailureWaitAttempts}/15)...")
+                slot.julesSessionFailureWaitAttempts++
+                slot.retryAfterTime = currentTime + TimeUnit.SECONDS.toMillis(20)
+                return this
+            } else {
+                slot.julesSessionFailureWaitAttempts = 0
+            }
+        }
+
         if (env.gitHubClient.isPrMerged(prNumber)) {
             env.println("🎉 PR #$prNumber merged! resolving issue locally...")
             return ResolveTaskState(issueId)
@@ -699,27 +760,21 @@ data class AwaitingReviewState(
             env.julesClient.sendSessionMessage(targetSessionId, "Retry")
             slot.lastReviewedSha = null
 
-            var retriedSession = env.julesClient.getActiveSession(issueId)
-            var retryWaitAttempts = 0
-            while (retriedSession != null &&
-                   (retriedSession.status.lowercase() == "failed" || retriedSession.status.lowercase() == "cancelled" || env.julesClient.hasUnableToCompleteActivity(retriedSession.id)) &&
-                   retryWaitAttempts < 15) {
-                env.println("Waiting for Jules session status to transition out of failure state (attempt ${retryWaitAttempts + 1}/15)...")
-                env.sleep(20, TimeUnit.SECONDS)
-                retriedSession = env.julesClient.getActiveSession(issueId)
-                retryWaitAttempts++
-            }
+            slot.julesSessionFailureWaitAttempts = 1
+            slot.retryAfterTime = currentTime + TimeUnit.SECONDS.toMillis(20)
             return this
         }
 
         if (session != null && session.status.lowercase() == "in_progress") {
             env.println("Jules session ${session.id} is actively running (IN_PROGRESS) in AWAITING_REVIEW. Waiting...")
-            env.sleep(env.config.pollingIntervalSeconds, TimeUnit.SECONDS)
+            slot.retryAfterTime = currentTime + TimeUnit.SECONDS.toMillis(env.config.pollingIntervalSeconds)
             return this
         }
 
         if (handleRebaseAndConflicts(env, slot, prNumber)) {
-            env.sleep(env.config.pollingIntervalSeconds, TimeUnit.SECONDS)
+            if (slot.retryAfterTime <= currentTime) {
+                slot.retryAfterTime = currentTime + TimeUnit.SECONDS.toMillis(env.config.pollingIntervalSeconds)
+            }
             return CiRunningState(issueId, githubIssueNumber, julesSessionId, prNumber)
         }
 
@@ -787,7 +842,7 @@ data class AwaitingReviewState(
 
                 env.gitHubClient.commentOnPr(prNumber, prompt)
                 slot.lastRequestedReviewSha = currentSha // Record the requested SHA
-                env.sleep(env.config.pollingIntervalSeconds, TimeUnit.SECONDS)
+                slot.retryAfterTime = currentTime + TimeUnit.SECONDS.toMillis(env.config.pollingIntervalSeconds)
                 return this
             } else {
                 val requestTime = java.time.Instant.parse(requestComment.createdAt)
@@ -813,7 +868,7 @@ data class AwaitingReviewState(
                     return AwaitingMergeState(issueId, githubIssueNumber, julesSessionId, prNumber, currentSha)
                 } else {
                     env.println("⌛ Waiting for Jules (@jules) to complete review on PR #$prNumber (SHA: $shaPrefix)...")
-                    env.sleep(env.config.pollingIntervalSeconds, TimeUnit.SECONDS)
+                    slot.retryAfterTime = currentTime + TimeUnit.SECONDS.toMillis(env.config.pollingIntervalSeconds)
                     return this
                 }
             }
@@ -831,6 +886,11 @@ data class AwaitingMergeState(
 ) : OrchestratorState {
     override val name = "AWAITING_MERGE"
     override fun execute(env: OrchestratorEnvironment, context: OrchestratorContext, slot: SlotContext): OrchestratorState {
+        val currentTime = System.currentTimeMillis()
+        if (currentTime < slot.retryAfterTime) {
+            return this
+        }
+
         if (env.gitHubClient.isPrMerged(prNumber)) {
             env.println("🎉 PR #$prNumber merged! resolving issue locally...")
             return ResolveTaskState(issueId)
@@ -853,7 +913,7 @@ data class AwaitingMergeState(
             env.sendNotification("⌛ Waiting for manual merge of PR #$prNumber at: $prUrl")
             slot.lastWaitingLogTime = now
         }
-        env.sleep(env.config.pollingIntervalSeconds, TimeUnit.SECONDS)
+        slot.retryAfterTime = currentTime + TimeUnit.SECONDS.toMillis(env.config.pollingIntervalSeconds)
         return this
     }
 }
@@ -889,26 +949,28 @@ fun isTaskTimedOut(slot: SlotContext, config: OrchestratorConfig): Boolean {
 }
 
 private fun handleRebaseAndConflicts(env: OrchestratorEnvironment, slot: SlotContext, prNumber: String): Boolean {
+    val currentTime = System.currentTimeMillis()
     var status = env.gitHubClient.getPrMergeStatus(prNumber)
     if (status.isError) {
         env.println("⚠️ Error retrieving PR merge status: ${status.errorMessage}. Retrying status retrieval...")
-        if (status.isAuthError()) {
+        if (status.isAuthError() && slot.prMergeStatusAttempts == 0) {
             env.sendNotification("🚨 *GitHub CLI Authentication/Query Failure on PR #$prNumber!* Error: ${status.errorMessage}")
         }
 
-        var attempts = 1
-        while (status.isError && attempts < 3) {
-            env.sleep(2, TimeUnit.SECONDS)
-            attempts++
-            env.println("🔄 Retrying PR merge status retrieval (attempt $attempts/3)...")
-            status = env.gitHubClient.getPrMergeStatus(prNumber)
-        }
-
-        if (status.isError) {
+        slot.prMergeStatusAttempts++
+        if (slot.prMergeStatusAttempts < 3) {
+            env.println("🔄 Retrying PR merge status retrieval (attempt ${slot.prMergeStatusAttempts + 1}/3)...")
+            slot.retryAfterTime = currentTime + 2000L
+            return true
+        } else {
+            slot.prMergeStatusAttempts = 0
             env.println("❌ Failed to retrieve PR merge status after retries. Aborting current check iteration and waiting.")
+            slot.retryAfterTime = currentTime + TimeUnit.SECONDS.toMillis(env.config.pollingIntervalSeconds)
             return true
         }
     }
+
+    slot.prMergeStatusAttempts = 0
 
     val isBehind = status.behindBy > 0
     val isConflicting = status.mergeable == "CONFLICTING"
