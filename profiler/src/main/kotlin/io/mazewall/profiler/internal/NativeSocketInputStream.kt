@@ -7,6 +7,7 @@ import io.mazewall.ffi.memory.ManagedSegment
 import io.mazewall.ffi.memory.NativeArena
 import io.mazewall.ffi.memory.readByte
 import java.io.InputStream
+import java.io.InterruptedIOException
 
 internal class NativeSocketInputStream(
     private val socketFd: FileDescriptor<*, FdState.Open>,
@@ -21,8 +22,28 @@ internal class NativeSocketInputStream(
         private const val EINTR = 4
     }
 
+    private fun handleBackoff(eintrCount: Int) {
+        if (eintrCount > 1) {
+            if (eintrCount > 3) {
+                try {
+                    Thread.sleep(1)
+                } catch (e: InterruptedException) {
+                    Thread.currentThread().interrupt()
+                    throw InterruptedIOException("Thread interrupted during EINTR backoff sleep")
+                }
+            } else {
+                Thread.yield()
+            }
+        }
+    }
+
     override fun read(): Int {
+        var eintrCount = 0
         while (true) {
+            if (Thread.currentThread().isInterrupted) {
+                Thread.currentThread().interrupt()
+                throw InterruptedIOException("Thread interrupted during native socket read")
+            }
             val res = LinuxNative.memory.read(socketFd, readBuf, 1)
             when (res) {
                 is LinuxNative.SyscallResult.Success -> {
@@ -31,7 +52,11 @@ internal class NativeSocketInputStream(
                 }
 
                 is LinuxNative.SyscallResult.Error -> {
-                    if (res.errno == EINTR) continue
+                    if (res.errno == EINTR) {
+                        eintrCount++
+                        handleBackoff(eintrCount)
+                        continue
+                    }
                     return -1
                 }
             }
@@ -53,7 +78,12 @@ internal class NativeSocketInputStream(
         len: Int,
     ): Int {
         val count = Math.min(len.toLong(), BUFFER_SIZE.toLong())
+        var eintrCount = 0
         while (true) {
+            if (Thread.currentThread().isInterrupted) {
+                Thread.currentThread().interrupt()
+                throw InterruptedIOException("Thread interrupted during native socket readWithRetry")
+            }
             val res = LinuxNative.memory.read(socketFd, multiBuf, count)
             when (res) {
                 is LinuxNative.SyscallResult.Success -> {
@@ -64,7 +94,11 @@ internal class NativeSocketInputStream(
                 }
 
                 is LinuxNative.SyscallResult.Error -> {
-                    if (res.errno == EINTR) continue
+                    if (res.errno == EINTR) {
+                        eintrCount++
+                        handleBackoff(eintrCount)
+                        continue
+                    }
                     return -1
                 }
             }
