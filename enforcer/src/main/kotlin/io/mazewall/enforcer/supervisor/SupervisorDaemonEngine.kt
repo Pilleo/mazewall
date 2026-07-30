@@ -315,6 +315,10 @@ internal class SupervisorDaemonEngine(
                     if (count <= 0) continue
 
                     var shouldBreak = false
+                    // [issue-195] Introduce a short-lived PerTaskArena (iterationArena) within the reactor loop.
+                    // Long-lived structures (e.g., pollFds) persist on sessionArena across iterations,
+                    // while any transient memory allocated when processing a notification is freed immediately
+                    // here upon iteration completion, completely mitigating linear off-heap leaks.
                     NativeArena.ofConfined().use { iterationArena ->
                         val action = with(iterationArena) {
                             sessionHandler.handleActiveListener(pollFds, notif, resp)
