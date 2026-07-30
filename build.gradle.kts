@@ -156,6 +156,7 @@ dependencyCheck {
     failBuildOnCVSS = 7.0f
     format = "ALL"
     suppressionFile = "$rootDir/config/dependency-check/suppressions.xml"
+    data.directory = System.getenv("GRADLE_USER_HOME")?.takeIf { it.isNotBlank() }?.let { "$it/dependency-check-data" } ?: "$rootDir/.gradle/dependency-check-data"
     System.getenv("NVD_API_KEY")?.takeIf { it.isNotBlank() }?.let {
         nvd.apiKey = it
     }

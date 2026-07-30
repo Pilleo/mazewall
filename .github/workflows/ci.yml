@@ -107,7 +107,9 @@ jobs:
             - name: Restore NVD Database Cache
               uses: actions/cache/restore@v4
               with:
-                  path: ~/.gradle/dependency-check-data
+                  path: |
+                      ~/.gradle/dependency-check-data
+                      ${{ github.workspace }}/.gradle/dependency-check-data
                   key: nvd-database-${{ runner.os }}-${{ github.run_id }}
                   restore-keys: |
                       nvd-database-${{ runner.os }}-
@@ -120,7 +122,9 @@ jobs:
               uses: actions/cache/save@v4
               if: always()
               with:
-                  path: ~/.gradle/dependency-check-data
+                  path: |
+                      ~/.gradle/dependency-check-data
+                      ${{ github.workspace }}/.gradle/dependency-check-data
                   key: nvd-database-${{ runner.os }}-${{ github.run_id }}
             - name: Save Gradle Build Cache (Master Only)
               uses: actions/cache/save@v4
