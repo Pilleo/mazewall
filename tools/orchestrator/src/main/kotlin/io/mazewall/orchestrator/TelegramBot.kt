@@ -143,6 +143,33 @@ class TelegramBot(
         post(url, json.encodeToString(SendMessageRequest.serializer(), payload))
     }
 
+    fun checkApprovalNonBlocking(issueId: String): Boolean? {
+        try {
+            val url = "https://api.telegram.org/bot$botToken/getUpdates?offset=$lastUpdateId&timeout=0"
+            val responseText = get(url) ?: return null
+            val updatesResponse = json.decodeFromString<TelegramResponse<List<TelegramUpdate>>>(responseText)
+            if (updatesResponse.ok && updatesResponse.result != null) {
+                for (update in updatesResponse.result) {
+                    lastUpdateId = update.update_id + 1
+                    val callbackQuery = update.callback_query
+                    if (callbackQuery != null && callbackQuery.data != null) {
+                        val data = callbackQuery.data
+                        if (data == "approve:$issueId") {
+                            answerCallback(callbackQuery.id)
+                            return true
+                        } else if (data == "skip:$issueId") {
+                            answerCallback(callbackQuery.id)
+                            return false
+                        }
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            System.err.println("Error checking approval non-blocking: ${e.message}")
+        }
+        return null
+    }
+
     fun waitForApproval(issueId: String): Boolean {
         println("⏳ Waiting for user approval on Telegram for $issueId...")
         while (true) {

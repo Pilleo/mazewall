@@ -4,10 +4,9 @@ import java.io.File
 
 sealed class RebaseProcessState {
     data class Init(val prNumber: String, val sessionId: String?, val targetFiles: List<String>) : RebaseProcessState()
-    data class SetupWorktree(val prNumber: String, val branchName: String, val worktreeDir: File, val sessionId: String?, val targetFiles: List<String>) : RebaseProcessState()
-    data class AttemptMerge(val prNumber: String, val branchName: String, val worktreeDir: File, val sessionId: String?, val targetFiles: List<String>) : RebaseProcessState()
-    data class HandleRescue(val prNumber: String, val branchName: String, val worktreeDir: File, val sessionId: String?, val targetFiles: List<String>) : RebaseProcessState()
-    data class VerifyAndPush(val prNumber: String, val branchName: String, val worktreeDir: File, val isRescue: Boolean) : RebaseProcessState()
+    data class SetupWorktree(val prNumber: String, val branchName: String, val featureSha: String, val worktreeDir: File, val sessionId: String?, val targetFiles: List<String>) : RebaseProcessState()
+    data class ReconstructOnMaster(val prNumber: String, val branchName: String, val featureSha: String, val worktreeDir: File, val sessionId: String?, val targetFiles: List<String>) : RebaseProcessState()
+    data class VerifyAndPush(val prNumber: String, val branchName: String, val featureSha: String, val worktreeDir: File) : RebaseProcessState()
     data class Completed(val result: RebaseResult) : RebaseProcessState()
     data class Failed(val result: RebaseResult) : RebaseProcessState()
 }
@@ -25,8 +24,7 @@ class BranchRebaser(
             state = when (state) {
                 is RebaseProcessState.Init -> handleInit(state)
                 is RebaseProcessState.SetupWorktree -> handleSetupWorktree(state)
-                is RebaseProcessState.AttemptMerge -> handleAttemptMerge(state)
-                is RebaseProcessState.HandleRescue -> handleRescue(state)
+                is RebaseProcessState.ReconstructOnMaster -> handleReconstructOnMaster(state)
                 is RebaseProcessState.VerifyAndPush -> handleVerifyAndPush(state)
                 else -> throw IllegalStateException("Unexpected state")
             }
@@ -58,8 +56,14 @@ class BranchRebaser(
         }
         if (branchName.isBlank()) return RebaseProcessState.Failed(RebaseResult(success = false, conflictCount = 0))
 
+        val featureSha = try {
+            execute(arrayOf("git", "rev-parse", "origin/$branchName")).trim()
+        } catch (e: Exception) {
+            return RebaseProcessState.Failed(RebaseResult(success = false, conflictCount = 0))
+        }
+
         val worktreeDir = File("build/tmp/temp-rebase-${state.prNumber}")
-        return RebaseProcessState.SetupWorktree(state.prNumber, branchName, worktreeDir, state.sessionId, state.targetFiles)
+        return RebaseProcessState.SetupWorktree(state.prNumber, branchName, featureSha, worktreeDir, state.sessionId, state.targetFiles)
     }
 
     private fun handleSetupWorktree(state: RebaseProcessState.SetupWorktree): RebaseProcessState {
@@ -84,13 +88,7 @@ class BranchRebaser(
             executeInDirNoRetry(null, arrayOf("git", "config", "core.bare", "false"))
         } catch (_: Exception) {}
 
-        try {
-            executeInDirNoRetry(null, arrayOf("git", "worktree", "add", state.worktreeDir.absolutePath, "origin/${state.branchName}", "--detach"))
-        } catch (e: Exception) {
-            return RebaseProcessState.Failed(RebaseResult(success = false, conflictCount = 0))
-        }
-
-        return RebaseProcessState.AttemptMerge(state.prNumber, state.branchName, state.worktreeDir, state.sessionId, state.targetFiles)
+        return RebaseProcessState.ReconstructOnMaster(state.prNumber, state.branchName, state.featureSha, state.worktreeDir, state.sessionId, state.targetFiles)
     }
 
     private fun isFileAllowed(file: String, targetFiles: List<String>): Boolean {
@@ -114,151 +112,159 @@ class BranchRebaser(
         }
     }
 
-    private fun handleAttemptMerge(state: RebaseProcessState.AttemptMerge): RebaseProcessState {
+    private fun handleReconstructOnMaster(state: RebaseProcessState.ReconstructOnMaster): RebaseProcessState {
+        val baseSha = try {
+            executeInDirNoRetry(null, arrayOf("git", "merge-base", "origin/master", "origin/${state.branchName}")).trim()
+        } catch (e: Exception) {
+            return RebaseProcessState.Failed(RebaseResult(success = false, conflictCount = 1))
+        }
+
+        // 1. Extract first-parent commits from baseSha to featureSha
+        val commitLines = try {
+            executeInDirNoRetry(null, arrayOf("git", "rev-list", "--reverse", "--first-parent", "$baseSha..${state.featureSha}"))
+                .lines()
+                .map { it.trim() }
+                .filter { it.isNotEmpty() }
+        } catch (e: Exception) {
+            emptyList()
+        }
+
+        // 2. Classify candidate commits: exclude merge commits and synthetic sync commits
+        val agentCommits = mutableListOf<String>()
+        for (commit in commitLines) {
+            val parents = try {
+                executeInDirNoRetry(null, arrayOf("git", "show", "-s", "--format=%P", commit))
+                    .trim()
+                    .split("\\s+".toRegex())
+                    .filter { it.isNotBlank() }
+            } catch (_: Exception) {
+                emptyList()
+            }
+
+            // Skip merge commits
+            if (parents.size > 1) {
+                continue
+            }
+
+            val commitMsg = try {
+                executeInDirNoRetry(null, arrayOf("git", "show", "-s", "--format=%B", commit)).trim()
+            } catch (_: Exception) {
+                ""
+            }
+
+            // Skip automated orchestrator sync commits
+            if (commitMsg.startsWith("chore: merge master into PR") || commitMsg.startsWith("chore: strip dirt files")) {
+                continue
+            }
+
+            agentCommits.add(commit)
+        }
+
+        if (agentCommits.isEmpty()) {
+            System.err.println("Nothing to rebase for PR #${state.prNumber} — branch is already up to date or has no non-merge commits")
+            return RebaseProcessState.Completed(RebaseResult(success = true, conflictCount = 0))
+        }
+
+        // 3. Create fresh worktree on origin/master
         try {
-            executeInDirNoRetry(
-                state.worktreeDir, arrayOf("git", "merge", "origin/master", "--no-edit", "-m", "chore: merge master into PR #${state.prNumber} to keep up to date")
-            )
-            // If merge succeeds cleanly, check if we're actually ahead of master
-            val aheadOfMaster = try {
-                executeInDir(state.worktreeDir, arrayOf("git", "rev-list", "--count", "origin/master..HEAD")).trim().toIntOrNull() ?: 0
-            } catch (e: Exception) {
-                0
-            }
-            if (aheadOfMaster == 0) {
-                System.err.println("Nothing to merge for PR #${state.prNumber} — already up to date")
-                return RebaseProcessState.Completed(RebaseResult(success = true, conflictCount = 0))
-            }
+            executeInDirNoRetry(null, arrayOf("git", "worktree", "add", state.worktreeDir.absolutePath, "origin/master", "--detach"))
+        } catch (e: Exception) {
+            System.err.println("Failed to create worktree on origin/master for PR #${state.prNumber}: ${e.message}")
+            return RebaseProcessState.Failed(RebaseResult(success = false, conflictCount = 1))
+        }
 
-            // --- SELF-HEALING / DISCARD LOGIC FOR CLEAN MERGE ---
+        // 4. Replay candidate commits in chronological order via git cherry-pick with dirt-filtering
+        for (commit in agentCommits) {
             try {
-                val differentFiles = executeInDirNoRetry(state.worktreeDir, arrayOf("git", "diff", "--name-only", "origin/master"))
-                    .lines()
-                    .map { it.trim() }
-                    .filter { it.isNotEmpty() }
+                executeInDirNoRetry(state.worktreeDir, arrayOf("git", "cherry-pick", "--keep-redundant-commits", commit))
+            } catch (e: Exception) {
+                val errText = e.message ?: ""
+                if (errText.contains("cherry-pick is now empty") || errText.contains("nothing to commit") || errText.contains("previous cherry-pick is now empty")) {
+                    try {
+                        executeInDirNoRetry(state.worktreeDir, arrayOf("git", "cherry-pick", "--skip"))
+                        continue
+                    } catch (_: Exception) {}
+                }
 
-                var cleanedAny = false
-                for (file in differentFiles) {
+                // Disallowed file conflict resolution: if conflict is in disallowed files (dirt), restore origin/master version
+                val statusFiles = try {
+                    executeInDirNoRetry(state.worktreeDir, arrayOf("git", "status", "--porcelain"))
+                        .lines()
+                        .map { it.trim() }
+                        .filter { it.isNotEmpty() }
+                } catch (_: Exception) {
+                    emptyList()
+                }
+
+                var resolvedDisallowed = false
+                var hasUnresolvedAllowedConflict = false
+
+                for (line in statusFiles) {
+                    if (line.length < 3) continue
+                    val file = line.substring(3).trim()
                     if (!isFileAllowed(file, state.targetFiles)) {
                         try {
                             executeInDirNoRetry(state.worktreeDir, arrayOf("git", "checkout", "origin/master", "--", file))
                             executeInDirNoRetry(state.worktreeDir, arrayOf("git", "add", file))
-                            cleanedAny = true
-                        } catch (eCheckout: Exception) {
-                            System.err.println("Self-healing: failed to checkout origin/master for $file: ${eCheckout.message}")
-                        }
+                            resolvedDisallowed = true
+                        } catch (_: Exception) {}
+                    } else if (line.startsWith("UU") || line.startsWith("AA") || line.startsWith("DD") || line.startsWith("U")) {
+                        hasUnresolvedAllowedConflict = true
                     }
                 }
 
-                if (cleanedAny) {
-                    executeInDirNoRetry(state.worktreeDir, arrayOf("git", "commit", "--amend", "--no-edit", "--no-verify"))
-                    System.err.println("Self-healing: successfully discarded modifications to disallowed files for PR #${state.prNumber}")
+                if (resolvedDisallowed && !hasUnresolvedAllowedConflict) {
+                    try {
+                        executeInDirNoRetry(state.worktreeDir, arrayOf("git", "commit", "-C", commit, "--no-verify"))
+                        System.err.println("Sanitization: successfully resolved cherry-pick conflict for $commit by discarding disallowed file modifications")
+                        continue
+                    } catch (_: Exception) {}
                 }
-            } catch (eSelfHeal: Exception) {
-                System.err.println("Self-healing failed during clean merge for PR #${state.prNumber}: ${eSelfHeal.message}")
-            }
-            // -----------------------------------------------------
 
-            return RebaseProcessState.VerifyAndPush(state.prNumber, state.branchName, state.worktreeDir, isRescue = false)
-        } catch (e: Exception) {
-            val errorMsg = e.message ?: ""
-            System.err.println("Merge failed for PR #${state.prNumber}. Output:\n$errorMsg")
-            try {
-                executeInDirNoRetry(state.worktreeDir, arrayOf("git", "merge", "--abort"))
-            } catch (_: Exception) {}
-            // Transition to HandleRescue to request approval from telegram for targetFiles extraction
-            return RebaseProcessState.HandleRescue(state.prNumber, state.branchName, state.worktreeDir, state.sessionId, state.targetFiles)
-        }
-    }
-
-    private fun handleRescue(state: RebaseProcessState.HandleRescue): RebaseProcessState {
-        try {
-            val backlogFiles = try {
-                executeInDirNoRetry(state.worktreeDir, arrayOf("git", "diff", "--name-only", "origin/master", "origin/${state.branchName}"))
-                    .lines()
-                    .map { it.trim() }
-                    .filter { it.startsWith("docs/internals/backlog/") && it.endsWith(".md") }
-            } catch (e: Exception) {
-                emptyList()
-            }
-
-            val intendedFiles = (state.targetFiles + backlogFiles).distinct()
-
-            if (intendedFiles.isEmpty()) {
-                System.err.println("No intended files provided for rescue extraction.")
+                System.err.println("Cherry-pick failed for PR #${state.prNumber} on commit $commit: ${e.message}")
+                try {
+                    executeInDirNoRetry(state.worktreeDir, arrayOf("git", "cherry-pick", "--abort"))
+                } catch (_: Exception) {}
                 return RebaseProcessState.Failed(RebaseResult(success = false, conflictCount = 1))
             }
 
-            executeInDirNoRetry(state.worktreeDir, arrayOf("git", "reset", "--hard", "origin/master"))
-
-            val checkoutErrors = mutableListOf<String>()
-            for (file in intendedFiles) {
-                try {
-                    executeInDirNoRetry(state.worktreeDir, arrayOf("git", "checkout", "origin/${state.branchName}", "--", file))
-                } catch (e: Exception) {
-                    checkoutErrors.add(file)
+            // Post-cherry-pick sanitization: strip any disallowed file modifications introduced by this commit
+            try {
+                val modifiedInCommit = executeInDirNoRetry(state.worktreeDir, arrayOf("git", "diff", "--name-only", "HEAD~1..HEAD"))
+                    .lines()
+                    .map { it.trim() }
+                    .filter { it.isNotEmpty() }
+                var stripped = false
+                for (file in modifiedInCommit) {
+                    if (!isFileAllowed(file, state.targetFiles)) {
+                        executeInDirNoRetry(state.worktreeDir, arrayOf("git", "checkout", "origin/master", "--", file))
+                        executeInDirNoRetry(state.worktreeDir, arrayOf("git", "add", file))
+                        stripped = true
+                    }
                 }
-            }
-
-            for (file in intendedFiles) {
-                if (file.contains("/src/main/")) {
-                    val testTarget = file
-                        .replace("/src/main/", "/src/test/")
-                        .replace(".kt", "Test.kt")
-                        .replace(".java", "Test.java")
-                    try {
-                        executeInDirNoRetry(state.worktreeDir, arrayOf("git", "checkout", "origin/${state.branchName}", "--", testTarget))
-                    } catch (e: Exception) {}
+                if (stripped) {
+                    executeInDirNoRetry(state.worktreeDir, arrayOf("git", "commit", "--amend", "--no-edit", "--no-verify"))
                 }
-            }
-
-            if (checkoutErrors.size == intendedFiles.size) {
-                 System.err.println("Failed to extract any of the intended files from origin/${state.branchName}.")
-                 return RebaseProcessState.Failed(RebaseResult(success = false, conflictCount = intendedFiles.size, conflictedFiles = intendedFiles))
-            } else if (checkoutErrors.isNotEmpty()) {
-                 System.err.println("Warning: Failed to extract some files: ${checkoutErrors.joinToString(", ")}")
-                 return RebaseProcessState.Failed(RebaseResult(success = false, conflictCount = checkoutErrors.size, conflictedFiles = checkoutErrors))
-            }
-
-            val hasChanges = try {
-                executeInDirNoRetry(state.worktreeDir, arrayOf("git", "diff", "--staged", "--quiet"))
-                false
-            } catch (_: Exception) {
-                true
-            }
-
-            if (!hasChanges) {
-                System.err.println("Extraction resulted in no changes for PR #${state.prNumber} (already up to date).")
-                return RebaseProcessState.Completed(RebaseResult(success = true, conflictCount = 0))
-            }
-
-            executeInDirNoRetry(state.worktreeDir, arrayOf("git", "commit", "--no-verify", "-m", "chore: rescue clean intended files for PR #${state.prNumber} onto master"))
-            return RebaseProcessState.VerifyAndPush(state.prNumber, state.branchName, state.worktreeDir, isRescue = true)
-        } catch (e: Exception) {
-            System.err.println("Rescue extraction failed for PR #${state.prNumber}. Exception: ${e.javaClass.name}\nMessage: ${e.message}\nStackTrace: ${e.stackTraceToString()}")
-            return RebaseProcessState.Failed(RebaseResult(success = false, conflictCount = 1))
+            } catch (_: Exception) {}
         }
+
+        return RebaseProcessState.VerifyAndPush(state.prNumber, state.branchName, state.featureSha, state.worktreeDir)
     }
 
     private fun handleVerifyAndPush(state: RebaseProcessState.VerifyAndPush): RebaseProcessState {
         try {
             executeInDir(state.worktreeDir, arrayOf("./gradlew", "compileKotlin", ":tools:orchestrator:compileKotlin"))
         } catch (eCompile: Exception) {
-            System.err.println("Compilation failed on branch for PR #${state.prNumber}: ${eCompile.message}")
+            System.err.println("Compilation failed on reconstructed branch for PR #${state.prNumber}: ${eCompile.message}")
             return RebaseProcessState.Failed(RebaseResult(success = false, conflictCount = 0))
         }
 
         try {
-            if (state.isRescue) {
-                val rescueBranch = "${state.branchName}-rescue"
-                executeInDir(state.worktreeDir, arrayOf("git", "push", "--force", "origin", "HEAD:$rescueBranch"))
-                return RebaseProcessState.Completed(RebaseResult(success = false, conflictCount = 0, needsRescueApproval = true, rescueBranchName = rescueBranch))
-            } else {
-                executeInDir(state.worktreeDir, arrayOf("git", "push", "--force-with-lease", "origin", "HEAD:${state.branchName}"))
-                return RebaseProcessState.Completed(RebaseResult(success = true, conflictCount = 0))
-            }
+            val leaseArg = "--force-with-lease=refs/heads/${state.branchName}:${state.featureSha}"
+            executeInDir(state.worktreeDir, arrayOf("git", "push", leaseArg, "origin", "HEAD:refs/heads/${state.branchName}"))
+            return RebaseProcessState.Completed(RebaseResult(success = true, conflictCount = 0))
         } catch (ePush: Exception) {
-            System.err.println("Failed to push branch: ${ePush.message}")
+            System.err.println("Failed to push reconstructed branch for PR #${state.prNumber}: ${ePush.message}")
             return RebaseProcessState.Failed(RebaseResult(success = false, conflictCount = 0))
         }
     }

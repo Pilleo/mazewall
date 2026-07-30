@@ -29,6 +29,8 @@ class SlotContext(var currentIssueId: String) {
     var julesSessionFailureWaitAttempts: Int = 0
     var julesTriggerAttempts: Int = 0
     var prMergeStatusAttempts: Int = 0
+    var approvalRequestSent: Boolean = false
+    var failedRebaseHeadSha: String? = null
 
     fun load(props: Properties, prefix: String) {
         currentIssueTitle = props.getProperty("$prefix.currentIssueTitle").takeIf { !it.isNullOrEmpty() }

@@ -194,6 +194,7 @@ class OrchestratorDaemonRunner(
 }
 
 fun main() {
+    setupGlobalLogging()
     println("🤖 Starting Autonomous Backlog Orchestrator Daemon...")
     loadDotEnv()
 
@@ -262,4 +263,44 @@ private fun getEnv(key: String): String {
 
 private fun getEnvOr(key: String, default: String): String {
     return System.getenv(key) ?: System.getProperty(key) ?: default
+}
+
+private class LoggingOutputStream(
+    private val original: java.io.OutputStream,
+    private val logFile: File
+) : java.io.OutputStream() {
+    private val fileStream = java.io.FileOutputStream(logFile, true)
+
+    @Synchronized
+    override fun write(b: Int) {
+        original.write(b)
+        fileStream.write(b)
+    }
+
+    @Synchronized
+    override fun write(b: ByteArray, off: Int, len: Int) {
+        original.write(b, off, len)
+        fileStream.write(b, off, len)
+    }
+
+    @Synchronized
+    override fun flush() {
+        original.flush()
+        fileStream.flush()
+    }
+
+    @Synchronized
+    override fun close() {
+        try { original.close() } catch (_: Exception) {}
+        try { fileStream.close() } catch (_: Exception) {}
+    }
+}
+
+private fun setupGlobalLogging() {
+    val logFilePath = getEnvOr("ORCHESTRATOR_LOG_FILE", "orchestrator.log")
+    val logFile = File(logFilePath)
+    val teeOut = java.io.PrintStream(LoggingOutputStream(System.out, logFile), true, java.nio.charset.StandardCharsets.UTF_8)
+    val teeErr = java.io.PrintStream(LoggingOutputStream(System.err, logFile), true, java.nio.charset.StandardCharsets.UTF_8)
+    System.setOut(teeOut)
+    System.setErr(teeErr)
 }

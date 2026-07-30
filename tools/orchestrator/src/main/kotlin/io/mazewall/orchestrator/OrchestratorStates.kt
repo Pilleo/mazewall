@@ -288,6 +288,11 @@ data class PendingApprovalState(
 ) : OrchestratorState {
     override val name = "PENDING_APPROVAL"
     override fun execute(env: OrchestratorEnvironment, context: OrchestratorContext, slot: SlotContext): OrchestratorState {
+        val currentTime = System.currentTimeMillis()
+        if (currentTime < slot.retryAfterTime) {
+            return this
+        }
+
         val approved = if (githubIssueNumber != null) {
             if (env.gitHubClient.isIssueClosed(githubIssueNumber)) {
                 env.println("\n\u001B[1;33m⚠️ GitHub issue #$githubIssueNumber was closed. Resolving and canceling task $issueId.\u001B[0m")
@@ -298,44 +303,59 @@ data class PendingApprovalState(
                 context.activeSlots.remove(slot)
                 return SelectTaskState
             }
-            env.println("🔄 Resuming already-in-progress task $issueId (linked to GitHub issue #$githubIssueNumber)...")
+            if (!slot.approvalRequestSent) {
+                env.println("🔄 Resuming already-in-progress task $issueId (linked to GitHub issue #$githubIssueNumber)...")
+                slot.approvalRequestSent = true
+            }
             true
         } else {
-            env.ringBell(3)
-            val issueFileObj = File(issueFile)
-            val issue = if (issueFileObj.exists()) BacklogParser.parseIssueFile(issueFileObj) else null
+            if (!slot.approvalRequestSent) {
+                env.ringBell(3)
+                val issueFileObj = File(issueFile)
+                val issue = if (issueFileObj.exists()) BacklogParser.parseIssueFile(issueFileObj) else null
 
-            val text = if (issueFileObj.exists()) {
-                val rawBody = issueFileObj.readText().trim()
-                """
-                🤖 *Approval Request: Start Task ${issueId}*
+                val text = if (issueFileObj.exists()) {
+                    val rawBody = issueFileObj.readText().trim()
+                    """
+                    🤖 *Approval Request: Start Task ${issueId}*
 
-                $rawBody
+                    $rawBody
 
-                ----------------------------------
-                Please approve or skip using the inline keyboard below.
-                """.trimIndent()
-            } else if (issue != null) {
-                """
-                🤖 *Approval Request: Start Task ${issue.id}*
-                *Title:* ${issue.title}
-                *Severity:* ${issue.severity ?: "N/A"} | *Effort:* ${issue.effort ?: "N/A"} | *Component:* ${issue.component ?: "N/A"}
+                    ----------------------------------
+                    Please approve or skip using the inline keyboard below.
+                    """.trimIndent()
+                } else if (issue != null) {
+                    """
+                    🤖 *Approval Request: Start Task ${issue.id}*
+                    *Title:* ${issue.title}
+                    *Severity:* ${issue.severity ?: "N/A"} | *Effort:* ${issue.effort ?: "N/A"} | *Component:* ${issue.component ?: "N/A"}
 
-                *Context:*
-                ${issue.context ?: "N/A"}
+                    *Context:*
+                    ${issue.context ?: "N/A"}
 
-                *Needed:*
-                ${issue.needed ?: "N/A"}
+                    *Needed:*
+                    ${issue.needed ?: "N/A"}
 
-                Please approve or skip using the inline keyboard below.
-                """.trimIndent()
-            } else {
-                "Start task $issueId - $issueTitle?"
+                    Please approve or skip using the inline keyboard below.
+                    """.trimIndent()
+                } else {
+                    "Start task $issueId - $issueTitle?"
+                }
+
+                val truncatedText = if (text.length > 4000) text.substring(0, 3997) + "..." else text
+                env.println("│██? [APPROVAL REQUIRED] Waiting for user approval on Telegram for $issueId... (Press 'Approve' or 'Skip' in Telegram)")
+                env.sendApprovalRequest(issueId, truncatedText)
+                slot.approvalRequestSent = true
+                slot.retryAfterTime = System.currentTimeMillis() + 5000L
+                return this
             }
 
-            val truncatedText = if (text.length > 4000) text.substring(0, 3997) + "..." else text
-            val approved = env.requestApproval(issueId, truncatedText)
-            approved
+            val res = env.checkApprovalNonBlocking(issueId)
+            if (res == null) {
+                slot.retryAfterTime = System.currentTimeMillis() + 5000L
+                return this
+            }
+            res
         }
 
         if (!approved) {
@@ -371,6 +391,7 @@ data class PendingApprovalState(
             }
         }
 
+        slot.githubIssueNumber = newGithubIssueNumber
         return AwaitingJulesStartState(issueId, newGithubIssueNumber)
     }
 }
@@ -976,6 +997,17 @@ private fun handleRebaseAndConflicts(env: OrchestratorEnvironment, slot: SlotCon
     val isConflicting = status.mergeable == "CONFLICTING"
 
     if (isBehind || isConflicting) {
+        val currentSha = env.gitHubClient.getPrHeadSha(prNumber)
+        if (slot.failedRebaseHeadSha == currentSha) {
+            val now = System.currentTimeMillis()
+            if (now - slot.lastWaitingLogTime > 300_000) {
+                val prUrl = env.gitHubClient.getPrUrl(prNumber)
+                env.println("⚠️ PR #$prNumber has conflict/rebase failure at SHA ${currentSha.take(7)}. Automated rebase previously failed. Waiting for manual resolution or new commit: $prUrl")
+                slot.lastWaitingLogTime = now
+            }
+            return false
+        }
+
         val reason = if (isConflicting) "conflict status" else "behind master by ${status.behindBy} commits"
         env.println("🔄 Active PR #$prNumber is $reason. Attempting automated merge of master into branch...")
 
@@ -1005,6 +1037,7 @@ private fun handleRebaseAndConflicts(env: OrchestratorEnvironment, slot: SlotCon
         val rebaseSuccess = rebaseResult.success
         if (rebaseSuccess) {
             env.println("✅ Successfully auto-merged master into PR #$prNumber.")
+            slot.failedRebaseHeadSha = null
             slot.lastWaitingLogTime = 0L
 
             // Fetch the new head SHA after successful merge and update slot properties
@@ -1023,6 +1056,7 @@ private fun handleRebaseAndConflicts(env: OrchestratorEnvironment, slot: SlotCon
             }
             return true
         } else {
+            slot.failedRebaseHeadSha = currentSha
             val now = System.currentTimeMillis()
             if (now - slot.lastWaitingLogTime > 60_000) {
                 val prUrl = env.gitHubClient.getPrUrl(prNumber)

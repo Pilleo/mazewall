@@ -46,6 +46,8 @@ class MockOrchestratorEnvironment : OrchestratorEnvironment {
 
     override fun sendNotification(message: String) { notifications.add(message) }
     override fun requestApproval(issueId: String, text: String): Boolean = approved
+    override fun sendApprovalRequest(issueId: String, text: String) { notifications.add(text) }
+    override fun checkApprovalNonBlocking(issueId: String): Boolean? = approved
     override fun pollTelegramUpdates(context: OrchestratorContext) {}
 
 
@@ -128,10 +130,14 @@ class StateHandlerTest {
             env.issues.add(BacklogIssue(tempFile, "issue-1", "Title", 1, "open", emptyList()))
 
             val state = PendingApprovalState("issue-1", "Title", tempFile.absolutePath)
-            val nextState = state.execute(env, context)
+            val slot = SlotContext("issue-1")
+            context.activeSlots.add(slot)
+            val step1 = state.execute(env, context, slot)
+            slot.retryAfterTime = 0L
+            val nextState = step1.execute(env, context, slot)
 
             assertTrue(nextState is AwaitingJulesStartState)
-            assertEquals("123", context.githubIssueNumber)
+            assertEquals("123", slot.githubIssueNumber)
         } finally {
             tempFile.delete()
         }

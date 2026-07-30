@@ -33,6 +33,8 @@ interface OrchestratorEnvironment {
     // Bot
     fun sendNotification(message: String)
     fun requestApproval(issueId: String, text: String): Boolean
+    fun sendApprovalRequest(issueId: String, text: String)
+    fun checkApprovalNonBlocking(issueId: String): Boolean?
     fun pollTelegramUpdates(context: OrchestratorContext)
 
 
@@ -56,9 +58,23 @@ class RealOrchestratorEnvironment(
     override val config: OrchestratorConfig = OrchestratorConfig()
 ) : OrchestratorEnvironment {
 
-    override fun println(message: Any?) = kotlin.io.println(message)
-    override fun print(message: Any?) = kotlin.io.print(message)
-    override fun errPrintln(message: Any?) = System.err.println(message)
+    override fun println(message: Any?) {
+        val formatted = "[${java.time.LocalDateTime.now()}] $message"
+        kotlin.io.println(formatted)
+        System.out.flush()
+    }
+
+    override fun print(message: Any?) {
+        kotlin.io.print(message)
+        System.out.flush()
+    }
+
+    override fun errPrintln(message: Any?) {
+        val formatted = "[${java.time.LocalDateTime.now()}] [ERROR] $message"
+        System.err.println(formatted)
+        System.err.flush()
+    }
+
     override fun sleep(duration: Long, unit: TimeUnit) = unit.sleep(duration)
 
     override fun ringBell(times: Int) {
@@ -105,6 +121,26 @@ class RealOrchestratorEnvironment(
             ReviewIssueLauncher.launchReviewTask(focusComments, backlogDir, this, context)
         }
         bot?.pollUpdates()
+    }
+
+    override fun sendApprovalRequest(issueId: String, text: String) {
+        if (bot != null) {
+            bot.onReviewRequested = { focusComments ->
+                ReviewIssueLauncher.launchReviewTask(focusComments, backlogDir, this, OrchestratorContext())
+            }
+            bot.sendMessageWithApprovalMarkup(issueId, text)
+        } else {
+            print("\u001B[1;31m🔔 [APPROVAL REQUIRED] $text (y/n): \u001B[0m")
+        }
+    }
+
+    override fun checkApprovalNonBlocking(issueId: String): Boolean? {
+        if (bot != null) {
+            return bot.checkApprovalNonBlocking(issueId)
+        }
+        // Terminal fallback logic
+        val input = readLine()?.lowercase()?.trim() ?: return null
+        return input == "y" || input == "yes"
     }
 
     override fun requestApproval(issueId: String, text: String): Boolean {
