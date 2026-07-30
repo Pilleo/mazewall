@@ -14,6 +14,7 @@ target_modules:
 - :enforcer
 target_files:
 - enforcer/src/main/kotlin/io/mazewall/enforcer/supervisor/SupervisorSessionHandler.kt
+github_issue: 347
 ---
 
 # Issue: `SupervisorSessionHandler` Path Extraction TOCTOU
