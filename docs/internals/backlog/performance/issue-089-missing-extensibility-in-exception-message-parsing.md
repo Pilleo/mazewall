@@ -1,14 +1,18 @@
 ---
-title: "\U0001F534 [Severity: DX-FRICTION]: Missing Extensibility in Exception Message\
-  \ Parsing"
+title: "🔴 [Severity: DX-FRICTION]: Missing Extensibility in Exception Message Parsing"
 severity: HIGH
-status: open
+status: in_progress
 priority: 9
 dependencies: []
 target_files:
-- enforcer/src/main/kotlin/io/mazewall/seccomp/PureJavaBpfEngine.kt
+- enforcer/src/main/kotlin/io/mazewall/enforcer/ContainmentViolationDetector.kt
+- enforcer/src/main/kotlin/io/mazewall/Policy.kt
+- enforcer/src/main/kotlin/io/mazewall/PolicyBuilder.kt
+- enforcer/src/main/kotlin/io/mazewall/PolicyDefinition.kt
+- profiler/src/main/kotlin/io/mazewall/profiler/iterative/IterativeProfiler.kt
 target_modules:
 - :enforcer
+- :profiler
 component: enforcer
 effort: small
 autonomy: supervised

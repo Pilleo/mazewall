@@ -18,6 +18,29 @@ import java.nio.file.AccessDeniedException
 object IterativeProfiler {
     public var taskExecutor: IterativeTaskExecutor = RealIterativeTaskExecutor
 
+    private val customPhrases = java.util.concurrent.CopyOnWriteArrayList<String>()
+    private val customRegexes = java.util.concurrent.CopyOnWriteArrayList<Regex>()
+
+    fun registerPhrase(phrase: String) {
+        customPhrases.add(phrase)
+        ContainmentViolationDetector.registerPhrase(phrase)
+    }
+
+    fun registerRegex(regex: Regex) {
+        customRegexes.add(regex)
+        ContainmentViolationDetector.registerRegex(regex)
+    }
+
+    fun getRegisteredPhrases(): List<String> = customPhrases.toList()
+
+    fun getRegisteredRegexes(): List<Regex> = customRegexes.toList()
+
+    fun resetToDefaults() {
+        customPhrases.clear()
+        customRegexes.clear()
+        ContainmentViolationDetector.resetToDefaults()
+    }
+
     fun profile(
         basePolicy: Policy<*, Uncompiled> = Policy.PURE_COMPUTE_UNSAFE,
         task: Runnable,
@@ -40,7 +63,7 @@ object IterativeProfiler {
                     }
                 }
                 is IterativeProfilerState.Analyzing -> {
-                    val path = extractViolationPath(currentState.error)
+                    val path = extractViolationPath(currentState.error, currentState.policy)
                     if (path != null) {
                         IterativeProfilerState.Updating(currentState.policy, path, currentState.iteration)
                     } else {
@@ -87,8 +110,25 @@ object IterativeProfiler {
         return builder.build()
     }
 
+    private fun getDetectorForPolicy(policy: Policy<*, Uncompiled>): ContainmentViolationDetector {
+        val phrases = customPhrases.toList() + policy.customViolationPhrases
+        val regexes = customRegexes.toList() + policy.customViolationRegexes
+        if (phrases.isEmpty() && regexes.isEmpty()) {
+            return ContainmentViolationDetector()
+        }
+        return ContainmentViolationDetector(
+            initialCustomPhrases = phrases,
+            initialCustomRegexes = regexes
+        )
+    }
+
     private fun extractViolationPath(t: Throwable): String? {
-        val violation = io.mazewall.enforcer.ContainmentViolationDetector.findViolationCause(t) ?: return null
+        return extractViolationPath(t, Policy.PURE_COMPUTE_UNSAFE)
+    }
+
+    private fun extractViolationPath(t: Throwable, policy: Policy<*, Uncompiled>): String? {
+        val detector = getDetectorForPolicy(policy)
+        val violation = detector.findViolationCause(t) ?: return null
         val path = when {
             violation is AccessDeniedException -> violation.file
             else -> {
@@ -96,7 +136,7 @@ object IterativeProfiler {
                 if (msg == null) {
                     null
                 } else {
-                    val phrases = ContainmentViolationDetector.findViolationRanges(msg).toList()
+                    val phrases = detector.findViolationRanges(msg).toList()
                     val phraseIdx = phrases.firstOrNull()?.first ?: -1
                     val pathEnd = if (phraseIdx != -1) findPathEnd(msg, phraseIdx) else -1
                     if (pathEnd >= 0) resolveAbsolutePath(msg, pathEnd) else null

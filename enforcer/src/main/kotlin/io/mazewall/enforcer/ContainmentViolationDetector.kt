@@ -16,9 +16,13 @@ class ContainmentViolationDetector @JvmOverloads constructor(
     private val customMatchers: List<ViolationMatcher> = emptyList(),
     private val useDefaults: Boolean = true,
     private val classLoader: ClassLoader? = Thread.currentThread().contextClassLoader ?: ContainmentViolationDetector::class.java.classLoader,
-    private val loadServices: Boolean = true
+    private val loadServices: Boolean = true,
+    private val initialCustomPhrases: List<String> = emptyList(),
+    private val initialCustomRegexes: List<Regex> = emptyList()
 ) {
     private val MATCHERS = CopyOnWriteArrayList<ViolationMatcher>()
+    private val customPhrases = CopyOnWriteArrayList<String>()
+    private val customRegexes = CopyOnWriteArrayList<Regex>()
 
     init {
         resetToDefaults()
@@ -60,9 +64,39 @@ class ContainmentViolationDetector @JvmOverloads constructor(
     }
 
     /**
+     * Registers a custom violation phrase (matched with word boundaries, case-insensitive).
+     */
+    fun registerPhrase(phrase: String) {
+        customPhrases.add(phrase)
+    }
+
+    /**
+     * Registers a custom violation regex.
+     */
+    fun registerRegex(regex: Regex) {
+        customRegexes.add(regex)
+    }
+
+    fun getRegisteredPhrases(): List<String> = customPhrases.toList()
+
+    fun getRegisteredRegexes(): List<Regex> = customRegexes.toList()
+
+    private fun getCustomPhrasesRegex(): Regex? {
+        val phrases = customPhrases.toList()
+        if (phrases.isEmpty()) return null
+        val escaped = phrases.map { Regex.escape(it) }
+        return Regex("(?U)\\b(${escaped.joinToString("|")})\\b", RegexOption.IGNORE_CASE)
+    }
+
+    /**
      * Resets matchers to default ones. Useful for testing.
      */
     fun resetToDefaults() {
+        customPhrases.clear()
+        customPhrases.addAll(initialCustomPhrases)
+        customRegexes.clear()
+        customRegexes.addAll(initialCustomRegexes)
+
         MATCHERS.clear()
         if (useDefaults) {
             registerDefaultMatchers()
@@ -73,6 +107,14 @@ class ContainmentViolationDetector @JvmOverloads constructor(
         if (loadServices) {
             loadServiceMatchers(classLoader)
         }
+        registerMatcher { t ->
+            val msg = t.message ?: return@registerMatcher false
+            val customPhrasesRegex = getCustomPhrasesRegex()
+            if (customPhrasesRegex != null && customPhrasesRegex.containsMatchIn(msg)) {
+                return@registerMatcher true
+            }
+            customRegexes.any { it.containsMatchIn(msg) }
+        }
     }
 
     /**
@@ -80,7 +122,18 @@ class ContainmentViolationDetector @JvmOverloads constructor(
      * This intentionally excludes generic "Cannot run" prefixes to aid in path extraction.
      */
     fun findViolationRanges(msg: String): Sequence<IntRange> {
-        return REASON_PHRASES_REGEX.findAll(msg).map { it.range }
+        val defaultRanges = REASON_PHRASES_REGEX.findAll(msg).map { it.range }
+        val customPhrasesRegex = getCustomPhrasesRegex()
+        val customPhrasesRanges = if (customPhrasesRegex != null) {
+            customPhrasesRegex.findAll(msg).map { it.range }
+        } else {
+            emptySequence()
+        }
+        val customRegexRanges = customRegexes.asSequence().flatMap { regex ->
+            regex.findAll(msg).map { it.range }
+        }
+        return (defaultRanges + customPhrasesRanges + customRegexRanges)
+            .sortedWith(compareBy({ it.first }, { it.last }))
     }
 
     fun isContainmentViolation(t: Throwable): Boolean {
@@ -158,6 +211,14 @@ class ContainmentViolationDetector @JvmOverloads constructor(
         fun findViolationRanges(msg: String): Sequence<IntRange> = defaultInstance.findViolationRanges(msg)
 
         fun registerMatcher(matcher: ViolationMatcher) = defaultInstance.registerMatcher(matcher)
+
+        fun registerPhrase(phrase: String) = defaultInstance.registerPhrase(phrase)
+
+        fun registerRegex(regex: Regex) = defaultInstance.registerRegex(regex)
+
+        fun getRegisteredPhrases(): List<String> = defaultInstance.getRegisteredPhrases()
+
+        fun getRegisteredRegexes(): List<Regex> = defaultInstance.getRegisteredRegexes()
 
         fun resetToDefaults() = defaultInstance.resetToDefaults()
     }
