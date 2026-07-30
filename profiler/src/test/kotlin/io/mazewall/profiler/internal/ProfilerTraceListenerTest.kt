@@ -200,4 +200,45 @@ class ProfilerTraceListenerTest {
             LinuxNative.resetToDefault()
         }
     }
+
+    @Test
+    @Timeout(value = 5, unit = TimeUnit.SECONDS)
+    fun `close should be safe and idempotent when called concurrently`() {
+        val closeCount = AtomicInteger(0)
+        val mock = MockNativeEngine(
+            fileSystem = object : MockNativeFileSystem() {
+                override fun close(fd: FileDescriptor<*, FdState.Open>): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                    closeCount.incrementAndGet()
+                    return LinuxNative.SyscallResult.Success(0L)
+                }
+            }
+        )
+
+        LinuxNative.setEngine(mock)
+        try {
+            val socketFd = FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(103)
+            val listener = ProfilerTraceListener(
+                socketFd = socketFd,
+                accumulatedLogs = mutableListOf(),
+                stackTracesMap = null,
+                pathCache = mutableMapOf()
+            )
+
+            // Concurrently invoke close() multiple times to ensure idempotency is strictly enforced
+            val threads = List(10) {
+                Thread {
+                    listener.close()
+                }
+            }
+            threads.forEach { it.start() }
+            threads.forEach { it.join() }
+
+            // Double close on the listener directly should also be safe
+            listener.close()
+
+            assertEquals(1, closeCount.get())
+        } finally {
+            LinuxNative.resetToDefault()
+        }
+    }
 }
