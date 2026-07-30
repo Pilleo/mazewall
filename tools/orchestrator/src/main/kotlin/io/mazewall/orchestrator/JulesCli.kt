@@ -154,9 +154,13 @@ class RealJulesClient(
     }
 
     private fun fetchActivities(sessionId: String): List<Activity> {
+        val rawId = sessionId.trim()
+        if (rawId.isBlank() || rawId == "dummy-session-id" || rawId.startsWith("dummy")) {
+            return emptyList()
+        }
         val activities = mutableListOf<Activity>()
         var pageToken: String? = null
-        val sessionPath = sanitizeSessionPath(sessionId)
+        val sessionPath = sanitizeSessionPath(rawId)
         do {
             val uriStr = "https://jules.googleapis.com/v1alpha/$sessionPath/activities?pageSize=300" +
                     (if (pageToken != null) "&pageToken=$pageToken" else "")
@@ -166,6 +170,9 @@ class RealJulesClient(
                 .GET()
                 .build()
             val response = transport.send(request)
+            if (response.statusCode() == 404) {
+                return emptyList()
+            }
             if (response.statusCode() !in 200..299) {
                 throw RuntimeException("Failed to list activities (HTTP ${response.statusCode()}): ${response.body()}")
             }
@@ -271,6 +278,11 @@ class RealJulesClient(
     }
 
     override fun sendSessionMessage(sessionId: String, prompt: String) {
+        val rawId = sessionId.trim()
+        if (rawId.isBlank() || rawId == "dummy-session-id" || rawId.startsWith("dummy")) {
+            println("  [Jules API] Skipping message to dummy/invalid session ID ($sessionId)")
+            return
+        }
         println("💬 Sending message to remote Jules session $sessionId via REST API...")
 
         val requestPayload = mapOf("prompt" to prompt)

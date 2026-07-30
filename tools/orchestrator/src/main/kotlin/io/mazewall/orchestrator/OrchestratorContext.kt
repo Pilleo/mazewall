@@ -29,6 +29,9 @@ class SlotContext(var currentIssueId: String) {
     var julesSessionFailureWaitAttempts: Int = 0
     var julesTriggerAttempts: Int = 0
     var prMergeStatusAttempts: Int = 0
+    var approvalRequestSent: Boolean = false
+    var failedRebaseHeadSha: String? = null
+    var lastSanitizedRebaseSha: String? = null
 
     fun load(props: Properties, prefix: String) {
         currentIssueTitle = props.getProperty("$prefix.currentIssueTitle").takeIf { !it.isNullOrEmpty() }
@@ -58,27 +61,30 @@ class SlotContext(var currentIssueId: String) {
 
         val stateName = props.getProperty("$prefix.state")
         state = OrchestratorState.fromSlot(this, stateName)
+        approvalRequestSent = props.getProperty("$prefix.approvalRequestSent")?.toBoolean() ?: false
+        failedRebaseHeadSha = props.getProperty("$prefix.failedRebaseHeadSha").takeIf { !it.isNullOrEmpty() }
+        lastSanitizedRebaseSha = props.getProperty("$prefix.lastSanitizedRebaseSha").takeIf { !it.isNullOrEmpty() }
     }
 
     fun save(props: Properties, prefix: String) {
         props.setProperty("$prefix.state", state.name)
         props.setProperty("$prefix.currentIssueId", currentIssueId)
-        props.setProperty("$prefix.currentIssueTitle", currentIssueTitle ?: "")
-        props.setProperty("$prefix.currentIssueFile", currentIssueFile ?: "")
-        props.setProperty("$prefix.githubIssueNumber", githubIssueNumber ?: "")
-        props.setProperty("$prefix.julesSessionId", julesSessionId ?: "")
-        props.setProperty("$prefix.prNumber", prNumber ?: "")
+        currentIssueTitle?.let { props.setProperty("$prefix.currentIssueTitle", it) }
+        currentIssueFile?.let { props.setProperty("$prefix.currentIssueFile", it) }
+        githubIssueNumber?.let { props.setProperty("$prefix.githubIssueNumber", it) }
+        julesSessionId?.let { props.setProperty("$prefix.julesSessionId", it) }
+        prNumber?.let { props.setProperty("$prefix.prNumber", it) }
 
-        props.setProperty("$prefix.lastHeadSha", lastHeadSha ?: "")
-        props.setProperty("$prefix.lastReviewedSha", lastReviewedSha ?: "")
-        props.setProperty("$prefix.lastRequestedReviewSha", lastRequestedReviewSha ?: "")
-        props.setProperty("$prefix.lastBuildStatus", lastBuildStatus ?: "")
-        props.setProperty("$prefix.lastCheckedSha", lastCheckedSha ?: "")
+        lastHeadSha?.let { props.setProperty("$prefix.lastHeadSha", it) }
+        lastReviewedSha?.let { props.setProperty("$prefix.lastReviewedSha", it) }
+        lastRequestedReviewSha?.let { props.setProperty("$prefix.lastRequestedReviewSha", it) }
+        lastBuildStatus?.let { props.setProperty("$prefix.lastBuildStatus", it) }
+        lastCheckedSha?.let { props.setProperty("$prefix.lastCheckedSha", it) }
         props.setProperty("$prefix.lastWaitingLogTime", lastWaitingLogTime.toString())
         props.setProperty("$prefix.lastStatusChangeTime", lastStatusChangeTime.toString())
-        props.setProperty("$prefix.lastKnownStatus", lastKnownStatus ?: "")
+        lastKnownStatus?.let { props.setProperty("$prefix.lastKnownStatus", it) }
         props.setProperty("$prefix.lastPendingNotificationTime", lastPendingNotificationTime.toString())
-        props.setProperty("$prefix.lastFailedSha", lastFailedSha ?: "")
+        lastFailedSha?.let { props.setProperty("$prefix.lastFailedSha", it) }
         props.setProperty("$prefix.startTime", startTime.toString())
         props.setProperty("$prefix.julesRetries", julesRetries.toString())
         props.setProperty("$prefix.julesReviewPushCount", julesReviewPushCount.toString())
@@ -87,6 +93,9 @@ class SlotContext(var currentIssueId: String) {
         props.setProperty("$prefix.julesSessionFailureWaitAttempts", julesSessionFailureWaitAttempts.toString())
         props.setProperty("$prefix.julesTriggerAttempts", julesTriggerAttempts.toString())
         props.setProperty("$prefix.prMergeStatusAttempts", prMergeStatusAttempts.toString())
+        props.setProperty("$prefix.approvalRequestSent", approvalRequestSent.toString())
+        failedRebaseHeadSha?.let { props.setProperty("$prefix.failedRebaseHeadSha", it) }
+        lastSanitizedRebaseSha?.let { props.setProperty("$prefix.lastSanitizedRebaseSha", it) }
     }
 }
 
@@ -119,6 +128,8 @@ class OrchestratorContext {
     var julesSessionFailureWaitAttempts: Int = 0
     var julesTriggerAttempts: Int = 0
     var prMergeStatusAttempts: Int = 0
+    var failedRebaseHeadSha: String? = null
+    var lastSanitizedRebaseSha: String? = null
 
     val activeSlots = mutableListOf<SlotContext>()
 
