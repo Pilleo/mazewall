@@ -39,6 +39,10 @@ PODMAN_ARGS=(
     -w "${PROJECT_ROOT}"
 )
 
+if command -v runc &> /dev/null; then
+    PODMAN_ARGS+=(--runtime runc)
+fi
+
 if [ "${GITHUB_ACTIONS:-false}" == "true" ] && [ -n "${RUNNER_TEMP}" ]; then
     PODMAN_ARGS+=(
         -v "${RUNNER_TEMP}:${RUNNER_TEMP}"
@@ -51,4 +55,4 @@ if [ "${GITHUB_ACTIONS:-false}" == "true" ] && [ -n "${RUNNER_TEMP}" ]; then
     )
 fi
 
-podman run --rm "${PODMAN_ARGS[@]}" mazewall-test-runner ./gradlew "$@" --no-daemon --stacktrace
+podman run --rm --replace "${PODMAN_ARGS[@]}" mazewall-test-runner ./gradlew "$@" --no-daemon --stacktrace
