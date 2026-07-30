@@ -34,6 +34,8 @@ public class PolicyBuilder<S : PolicyScope> internal constructor(
     private var lockIntelCet: Boolean = false,
     private val allowedFsReadPaths: MutableSet<SandboxedPath> = mutableSetOf(),
     private val allowedFsWritePaths: MutableSet<SandboxedPath> = mutableSetOf(),
+    private val customViolationPhrases: MutableList<String> = mutableListOf(),
+    private val customViolationRegexes: MutableList<Regex> = mutableListOf()
 ) {
     public fun defaultAction(action: SeccompAction): PolicyBuilder<S> {
         this.defaultAction = action
@@ -62,6 +64,8 @@ public class PolicyBuilder<S : PolicyScope> internal constructor(
         if (policy.lockIntelCet) lockIntelCet = true
         allowedFsReadPaths.addAll(policy.allowedFsReadPaths)
         allowedFsWritePaths.addAll(policy.allowedFsWritePaths)
+        customViolationPhrases.addAll(policy.customViolationPhrases)
+        customViolationRegexes.addAll(policy.customViolationRegexes)
         return this
     }
 
@@ -127,10 +131,7 @@ public class PolicyBuilder<S : PolicyScope> internal constructor(
      * Allows unsafe prctl operations.
      *
      * WARNING: This option is extremely dangerous and inherently vulnerable to concurrent memory mutation
-     * attacks (TOCTOU) by sibling threads. While register-based arguments (like args[0], the prctl option code)
-     * are immune to TOCTOU, pointer-based arguments in options such as PR_SET_MM or PR_SET_NAME are subject
-     * to TOCTOU. A sibling thread can modify the memory pointed to by the register argument concurrently
-     * after the BPF filter's check but before kernel execution.
+     * attacks (TOCTOU) by sibling threads. See [allowUnsafePrctl] for details.
      */
     public fun allowUnsafePrctl(): PolicyBuilder<S> {
         this.allowUnsafePrctl = true
@@ -139,6 +140,16 @@ public class PolicyBuilder<S : PolicyScope> internal constructor(
 
     public fun lockIntelCet(): PolicyBuilder<S> {
         this.lockIntelCet = true
+        return this
+    }
+
+    public fun customViolationPhrase(phrase: String): PolicyBuilder<S> {
+        this.customViolationPhrases.add(phrase)
+        return this
+    }
+
+    public fun customViolationRegex(regex: Regex): PolicyBuilder<S> {
+        this.customViolationRegexes.add(regex)
         return this
     }
 
@@ -172,6 +183,8 @@ public class PolicyBuilder<S : PolicyScope> internal constructor(
             allowedFsReadPaths = allowedFsReadPaths.toSet(),
             allowedFsWritePaths = allowedFsWritePaths.toSet(),
             enforceLandlock = enforceLandlock,
+            customViolationPhrases = customViolationPhrases.toList(),
+            customViolationRegexes = customViolationRegexes.toList()
         )
     }
 }
