@@ -53,6 +53,8 @@ jobs:
               run: chmod +x gradlew
             - name: Setup Podman Socket
               run: |
+                  mkdir -p ~/.config/containers
+                  echo -e '[engine]\nruntime = "runc"' > ~/.config/containers/containers.conf
                   systemctl --user enable --now podman.socket
                   echo "DOCKER_HOST=unix://$XDG_RUNTIME_DIR/podman/podman.sock" >> $GITHUB_ENV
                   echo "MAZEWALL_CONTAINER_ENGINE=podman" >> $GITHUB_ENV
