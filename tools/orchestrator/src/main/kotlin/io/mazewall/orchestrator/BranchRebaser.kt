@@ -93,6 +93,27 @@ class BranchRebaser(
         return RebaseProcessState.AttemptMerge(state.prNumber, state.branchName, state.worktreeDir, state.sessionId, state.targetFiles)
     }
 
+    private fun isFileAllowed(file: String, targetFiles: List<String>): Boolean {
+        if (file.startsWith("docs/internals/backlog/") && file.endsWith(".md")) return true
+        val normalizedFile = file.replace('\\', '/').trim()
+        return targetFiles.any { target ->
+            val normalizedTarget = target.replace('\\', '/').trim().removePrefix(":")
+
+            // Exact match or suffix match
+            if (normalizedFile == normalizedTarget || normalizedFile.endsWith("/$normalizedTarget")) return true
+
+            // If the target is a main file, also allow its corresponding test file
+            if (normalizedTarget.contains("/src/main/")) {
+                val testTarget = normalizedTarget
+                    .replace("/src/main/", "/src/test/")
+                    .replace(".kt", "Test.kt")
+                    .replace(".java", "Test.java")
+                if (normalizedFile == testTarget || normalizedFile.endsWith("/$testTarget")) return true
+            }
+            false
+        }
+    }
+
     private fun handleAttemptMerge(state: RebaseProcessState.AttemptMerge): RebaseProcessState {
         try {
             executeInDirNoRetry(
@@ -108,6 +129,36 @@ class BranchRebaser(
                 System.err.println("Nothing to merge for PR #${state.prNumber} — already up to date")
                 return RebaseProcessState.Completed(RebaseResult(success = true, conflictCount = 0))
             }
+
+            // --- SELF-HEALING / DISCARD LOGIC FOR CLEAN MERGE ---
+            try {
+                val differentFiles = executeInDirNoRetry(state.worktreeDir, arrayOf("git", "diff", "--name-only", "origin/master"))
+                    .lines()
+                    .map { it.trim() }
+                    .filter { it.isNotEmpty() }
+
+                var cleanedAny = false
+                for (file in differentFiles) {
+                    if (!isFileAllowed(file, state.targetFiles)) {
+                        try {
+                            executeInDirNoRetry(state.worktreeDir, arrayOf("git", "checkout", "origin/master", "--", file))
+                            executeInDirNoRetry(state.worktreeDir, arrayOf("git", "add", file))
+                            cleanedAny = true
+                        } catch (eCheckout: Exception) {
+                            System.err.println("Self-healing: failed to checkout origin/master for $file: ${eCheckout.message}")
+                        }
+                    }
+                }
+
+                if (cleanedAny) {
+                    executeInDirNoRetry(state.worktreeDir, arrayOf("git", "commit", "--amend", "--no-edit", "--no-verify"))
+                    System.err.println("Self-healing: successfully discarded modifications to disallowed files for PR #${state.prNumber}")
+                }
+            } catch (eSelfHeal: Exception) {
+                System.err.println("Self-healing failed during clean merge for PR #${state.prNumber}: ${eSelfHeal.message}")
+            }
+            // -----------------------------------------------------
+
             return RebaseProcessState.VerifyAndPush(state.prNumber, state.branchName, state.worktreeDir, isRescue = false)
         } catch (e: Exception) {
             val errorMsg = e.message ?: ""
@@ -122,7 +173,16 @@ class BranchRebaser(
 
     private fun handleRescue(state: RebaseProcessState.HandleRescue): RebaseProcessState {
         try {
-            val intendedFiles = state.targetFiles
+            val backlogFiles = try {
+                executeInDirNoRetry(state.worktreeDir, arrayOf("git", "diff", "--name-only", "origin/master", "origin/${state.branchName}"))
+                    .lines()
+                    .map { it.trim() }
+                    .filter { it.startsWith("docs/internals/backlog/") && it.endsWith(".md") }
+            } catch (e: Exception) {
+                emptyList()
+            }
+
+            val intendedFiles = (state.targetFiles + backlogFiles).distinct()
 
             if (intendedFiles.isEmpty()) {
                 System.err.println("No intended files provided for rescue extraction.")
