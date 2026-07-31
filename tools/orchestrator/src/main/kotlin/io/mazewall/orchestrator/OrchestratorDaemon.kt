@@ -62,6 +62,9 @@ class OrchestratorDaemonRunner(
                                 nextState.updateSlot(slot)
                                 saveState()
                             }
+                        } catch (e: CliAuthenticationException) {
+                            handleCliAuthFailure(env, e)
+                            env.sleep(env.config.daemonErrorRetryMinutes, TimeUnit.MINUTES)
                         } catch (e: Exception) {
                             env.errPrintln("⚠️ Error in state ${slot.state.name} for slot ${slot.currentIssueId}: ${e.message}")
                             e.printStackTrace()
@@ -85,6 +88,9 @@ class OrchestratorDaemonRunner(
                 if (context.activeSlots.isNotEmpty()) {
                     env.sleep(5, TimeUnit.SECONDS)
                 }
+            } catch (e: CliAuthenticationException) {
+                handleCliAuthFailure(env, e)
+                env.sleep(env.config.daemonErrorRetryMinutes, TimeUnit.MINUTES)
             } catch (e: Exception) {
                 env.errPrintln("⚠️ Error in orchestrator loop: ${e.message}")
                 e.printStackTrace()

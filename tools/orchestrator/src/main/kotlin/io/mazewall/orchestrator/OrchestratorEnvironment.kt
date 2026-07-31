@@ -212,6 +212,10 @@ class RealOrchestratorEnvironment(
                 process.destroyForcibly()
                 throw RuntimeException("Command '${command.joinToString(" ")}' timed out after ${config.maxExternalCommandTimeoutMinutes} minutes.")
             }
+            val exitCode = process.exitValue()
+            if (exitCode != 0) {
+                checkForAuthenticationFailure(command, exitCode, output.toString().trim())
+            }
             output.toString().trim()
         }
     }
