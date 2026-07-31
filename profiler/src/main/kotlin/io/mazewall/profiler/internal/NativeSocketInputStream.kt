@@ -9,6 +9,14 @@ import io.mazewall.ffi.memory.readByte
 import java.io.InputStream
 import java.io.InterruptedIOException
 
+/**
+ * A custom [InputStream] implementation that reads from a native socket file descriptor.
+ *
+ * This implementation provides robust thread interruption safety by checking the current
+ * thread's interrupted status at the beginning of each loop iteration. Additionally, it
+ * mitigates high-CPU tight-loop spinning under active signal/interruption spikes by employing
+ * a progressive backoff throttling strategy (yielding and sleeping) on consecutive [EINTR] errors.
+ */
 internal class NativeSocketInputStream(
     private val socketFd: FileDescriptor<*, FdState.Open>,
     private val arena: NativeArena,
@@ -29,7 +37,7 @@ internal class NativeSocketInputStream(
                     Thread.sleep(1)
                 } catch (e: InterruptedException) {
                     Thread.currentThread().interrupt()
-                    throw InterruptedIOException("Thread interrupted during EINTR backoff sleep")
+                    throw InterruptedIOException("Thread [${Thread.currentThread().name}] interrupted during EINTR backoff sleep")
                 }
             } else {
                 Thread.yield()
@@ -42,7 +50,7 @@ internal class NativeSocketInputStream(
         while (true) {
             if (Thread.currentThread().isInterrupted) {
                 Thread.currentThread().interrupt()
-                throw InterruptedIOException("Thread interrupted during native socket read")
+                throw InterruptedIOException("Thread [${Thread.currentThread().name}] interrupted during native socket read")
             }
             val res = LinuxNative.memory.read(socketFd, readBuf, 1)
             when (res) {
@@ -82,7 +90,7 @@ internal class NativeSocketInputStream(
         while (true) {
             if (Thread.currentThread().isInterrupted) {
                 Thread.currentThread().interrupt()
-                throw InterruptedIOException("Thread interrupted during native socket readWithRetry")
+                throw InterruptedIOException("Thread [${Thread.currentThread().name}] interrupted during native socket readWithRetry")
             }
             val res = LinuxNative.memory.read(socketFd, multiBuf, count)
             when (res) {
