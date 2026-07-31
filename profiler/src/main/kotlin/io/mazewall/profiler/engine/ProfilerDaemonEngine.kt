@@ -225,10 +225,17 @@ public class ProfilerDaemonEngine(
         } finally {
             clientSockets.remove(socketFd)
             socketManager.close(socketFd)
-            if (connection is io.mazewall.ffi.networking.SeccompConnection.FdAttached) {
-                val lFd = connection.listenerFd
+
+            val lFd = when (val c = connection) {
+                is io.mazewall.ffi.networking.SeccompConnection.FdAttached -> c.listenerFd
+                is io.mazewall.ffi.networking.SeccompConnection.Active -> c.listenerFd
+                else -> null
+            }
+            if (lFd != null && activeListeners.contains(lFd)) {
                 activeListeners.remove(lFd)
-                socketManager.close(lFd)
+                try {
+                    socketManager.close(lFd)
+                } catch (_: Exception) {}
             }
         }
     }

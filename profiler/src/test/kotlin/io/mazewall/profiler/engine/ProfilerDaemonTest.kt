@@ -14,6 +14,7 @@ import io.mazewall.core.Tid
 import io.mazewall.ffi.Layouts
 import io.mazewall.ffi.NativeConstants
 import io.mazewall.ffi.memory.ManagedSegment
+import io.mazewall.ffi.memory.SegmentPool
 import io.mazewall.ffi.memory.writeShort
 import io.mazewall.ffi.memory.writeInt
 import io.mazewall.ffi.memory.writeLong
@@ -660,6 +661,49 @@ class ProfilerDaemonTest {
                 assertTrue(ok, "processNotification should return true on skipped noise path")
                 assertTrue(transport.continueSent, "Should have called sendSeccompContinue directly")
                 assertEquals(0, transport.sentEvents.size, "Should NOT send trace event to JVM for noise path")
+            }
+        }
+    }
+
+    @Test
+    fun `test handleConnection cleans up both socket and listener FDs if interrupted after FD attachment but prior to session reactor execution`() {
+        val closedFds = mutableListOf<Int>()
+        val transport = object : MockTransport() {
+            override fun close(fd: FileDescriptor<*, FdState.Open>) {
+                closedFds.add(fd.value)
+            }
+
+            override fun write(fd: FileDescriptor<*, FdState.Open>, buf: MemorySegment, count: Long): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                return LinuxNative.SyscallResult.Success(count)
+            }
+        }
+
+        val pool = SegmentPool.SECCOMP_NOTIF_POOL
+        val arenaField = SegmentPool::class.java.getDeclaredField("arena")
+        arenaField.isAccessible = true
+        val originalArena = arenaField.get(pool) as io.mazewall.ffi.memory.NativeArena
+
+        val queueField = SegmentPool::class.java.getDeclaredField("queue")
+        queueField.isAccessible = true
+        val queue = queueField.get(pool) as java.util.concurrent.ConcurrentLinkedQueue<*>
+
+        val tempQueue = ArrayList(queue)
+        queue.clear()
+
+        val closedArena = io.mazewall.ffi.memory.NativeArena.ofConfined().apply { close() }
+        arenaField.set(pool, closedArena)
+
+        try {
+            val engine = ProfilerDaemonEngine("/tmp/test.sock", transport, MockReader())
+            engine.handleConnection(FileDescriptor.unsafe(10))
+
+            assertTrue(closedFds.contains(20), "Listener FD 20 should have been closed")
+            assertTrue(closedFds.contains(10), "Socket FD 10 should have been closed")
+        } finally {
+            arenaField.set(pool, originalArena)
+            for (seg in tempQueue) {
+                @Suppress("UNCHECKED_CAST")
+                (queue as java.util.concurrent.ConcurrentLinkedQueue<Any>).offer(seg)
             }
         }
     }
