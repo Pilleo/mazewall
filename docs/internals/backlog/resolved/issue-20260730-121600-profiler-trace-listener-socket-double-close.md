@@ -1,7 +1,7 @@
 ---
 title: "ProfilerTraceListener socket double-close mitigation and idempotency"
 severity: "HIGH"
-status: "open"
+status: "resolved"
 priority: 9
 dependencies: []
 component: "profiler"
