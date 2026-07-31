@@ -159,7 +159,11 @@ internal object PathNormalizerHelper {
             if (compLen == 1 && path[start] == '.') {
                 continue
             } else if (compLen == 2 && path[start] == '.' && path[start + 1] == '.') {
-                if (stackSize > 0) {
+                val lastStart = if (stackSize > 0) stack[stackSize - 1] else -1
+                val lastLen = if (lastStart >= 0) outLen - lastStart else 0
+                val isLastDotDot = lastLen == 2 && chars[lastStart] == '.' && chars[lastStart + 1] == '.'
+
+                if (stackSize > 0 && !isLastDotDot) {
                     stackSize--
                     val poppedStart = stack[stackSize]
                     outLen = if (poppedStart > 0 && chars[poppedStart - 1] == '/') {

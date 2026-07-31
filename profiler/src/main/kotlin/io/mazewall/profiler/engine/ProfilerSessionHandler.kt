@@ -73,19 +73,6 @@ internal class ProfilerSessionHandler(
         sessionArena.close()
     }
 
-    @Deprecated("Use handleActiveListener(pollFds)")
-    @Suppress("ReturnCount")
-    context(arena: NativeArena)
-    fun handleActiveListener(
-        pollFds: ManagedSegment,
-        ackBuf: ManagedSegment,
-        notif: ManagedSegment,
-        resp: ManagedSegment,
-        socketPollFd: ManagedSegment,
-    ): LoopAction {
-        return handleActiveListener(pollFds)
-    }
-
     @Suppress("ReturnCount")
     context(arena: NativeArena)
     fun handleActiveListener(
@@ -163,18 +150,6 @@ internal class ProfilerSessionHandler(
      * are deterministically freed when the iteration completes, completely eliminating the overhead of
      * creating a new confined arena per notification or operation.
      */
-    @Deprecated("Use processNotification() without parameters")
-    @Suppress("TooGenericExceptionCaught", "ReturnCount", "CyclomaticComplexMethod")
-    context(arena: NativeArena)
-    internal fun processNotification(
-        notif: ManagedSegment,
-        resp: ManagedSegment,
-        ackBuf: ManagedSegment,
-        socketPollFd: ManagedSegment,
-    ): Boolean {
-        return processNotification()
-    }
-
     @Suppress("TooGenericExceptionCaught", "ReturnCount", "CyclomaticComplexMethod")
     context(arena: NativeArena)
     internal fun processNotification(): Boolean {

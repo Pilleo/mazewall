@@ -548,4 +548,119 @@ class ProfilerDaemonTest {
             }
         }
     }
+
+    @Test
+    fun `test handleActiveListener processes shutdown command successfully`() {
+        var shutdownCalled = false
+        val transport = object : MockTransport() {
+            override fun recv(sockfd: FileDescriptor<*, FdState.Open>, buf: MemorySegment, len: Long, flags: Int): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                if (len > 0) {
+                    buf.set(ValueLayout.JAVA_BYTE, 0L, SHUTDOWN_COMMAND_BYTE)
+                    return LinuxNative.SyscallResult.Success(1L)
+                }
+                return LinuxNative.SyscallResult.Success(0L)
+            }
+        }
+        val reader = MockReader()
+        ProfilerSessionHandler(
+            FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(10),
+            FileDescriptor.unsafe<FileDescriptorRole.SeccompNotif>(20),
+            transport,
+            transport,
+            transport,
+            reader,
+            emptyMap(),
+        ) { shutdownCalled = true }.use { handler ->
+            io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
+                val pollFds = arena.allocate(MemoryLayout.sequenceLayout(2, Layouts.POLLFD))
+                // Set socket POLLIN event to trigger handleShutdownRequest
+                val POLLFD_REVENT_DATA_OFF = 14L
+                pollFds.writeShort(POLLFD_REVENT_DATA_OFF, NativeConstants.POLLIN)
+
+                val action = with(arena) {
+                    handler.handleActiveListener(pollFds)
+                }
+
+                assertTrue(action is LoopAction.Shutdown)
+                assertTrue(shutdownCalled, "onShutdown callback should be triggered")
+                assertTrue(handler.state is ProfilerState.Terminated, "State should transition to Terminated")
+            }
+        }
+    }
+
+    @Test
+    fun `test handleActiveListener handles socket close as shutdown`() {
+        val transport = object : MockTransport() {
+            override fun recv(sockfd: FileDescriptor<*, FdState.Open>, buf: MemorySegment, len: Long, flags: Int): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                return LinuxNative.SyscallResult.Success(0L) // EOF (socket closed)
+            }
+        }
+        val reader = MockReader()
+        var shutdownCalled = false
+        ProfilerSessionHandler(
+            FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(10),
+            FileDescriptor.unsafe<FileDescriptorRole.SeccompNotif>(20),
+            transport,
+            transport,
+            transport,
+            reader,
+            emptyMap(),
+        ) { shutdownCalled = true }.use { handler ->
+            io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
+                val pollFds = arena.allocate(MemoryLayout.sequenceLayout(2, Layouts.POLLFD))
+                val POLLFD_REVENT_DATA_OFF = 14L
+                pollFds.writeShort(POLLFD_REVENT_DATA_OFF, NativeConstants.POLLIN)
+
+                val action = with(arena) {
+                    handler.handleActiveListener(pollFds)
+                }
+
+                assertTrue(action is LoopAction.Shutdown)
+                assertFalse(shutdownCalled, "onShutdown callback should not be triggered on simple EOF")
+                assertTrue(handler.state is ProfilerState.Terminated, "State should transition to Terminated")
+            }
+        }
+    }
+
+    @Test
+    fun `test checkAndBypassNoisePath for JDK and normal paths`() {
+        val transport = MockTransport()
+        val javaHome = System.getProperty("java.home")
+        val jdkPath = java.nio.file.Paths.get(javaHome).resolve("lib/rt.jar").toAbsolutePath().toString()
+
+        io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
+            // Setup notification data with a JDK noise path to bypass
+            val customReader = object : ProfilerMemoryReader {
+                context(arena: io.mazewall.ffi.memory.NativeArena)
+                override fun readStringFromProcess(tid: Tid, remoteAddr: Long, maxLen: Int): String? {
+                    return jdkPath
+                }
+                context(arena: io.mazewall.ffi.memory.NativeArena)
+                override fun resolveLink(tid: Tid, link: String): String? = null
+            }
+
+            ProfilerSessionHandler(
+                FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(10),
+                FileDescriptor.unsafe<FileDescriptorRole.SeccompNotif>(20),
+                transport,
+                transport,
+                transport,
+                customReader,
+                mapOf(2 to "OPEN"),
+            ) { }.use { noiseHandler ->
+                val notif = noiseHandler.notif
+                notif.writeLong(NOTIF_ID_OFF, 123L)
+                notif.writeInt(NOTIF_PID_OFF, 456)
+                notif.writeInt(NOTIF_NR_OFF, 2) // nr = 2 (OPEN)
+                notif.writeLong(NOTIF_ARGS_OFF, 0x1000L)
+
+                val ok = with(arena) {
+                    noiseHandler.processNotification()
+                }
+                assertTrue(ok, "processNotification should return true on skipped noise path")
+                assertTrue(transport.continueSent, "Should have called sendSeccompContinue directly")
+                assertEquals(0, transport.sentEvents.size, "Should NOT send trace event to JVM for noise path")
+            }
+        }
+    }
 }

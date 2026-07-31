@@ -269,4 +269,72 @@ class SyscallPathResolverTest {
             }
         }
     }
+
+    @Test
+    fun `test PathNormalizerHelper normalizePath all branches`() {
+        // empty path
+        assertEquals("", PathNormalizerHelper.normalizePath(""))
+
+        // roots
+        assertEquals("/", PathNormalizerHelper.normalizePath("/"))
+        assertEquals(".", PathNormalizerHelper.normalizePath("."))
+        assertEquals("/", PathNormalizerHelper.normalizePath("///"))
+
+        // regular
+        assertEquals("/a/b/c", PathNormalizerHelper.normalizePath("/a/b/c"))
+        assertEquals("a/b/c", PathNormalizerHelper.normalizePath("a/b/c"))
+        assertEquals("/a/b/c", PathNormalizerHelper.normalizePath("///a//b///c///"))
+
+        // dots
+        assertEquals("/a/b", PathNormalizerHelper.normalizePath("/a/./b"))
+        assertEquals("a/b", PathNormalizerHelper.normalizePath("./a/b"))
+        assertEquals("a/b", PathNormalizerHelper.normalizePath("a/b/."))
+
+        // double dots absolute
+        assertEquals("/a/c", PathNormalizerHelper.normalizePath("/a/b/../c"))
+        assertEquals("/a", PathNormalizerHelper.normalizePath("/../a"))
+        assertEquals("/", PathNormalizerHelper.normalizePath("/a/../.."))
+        assertEquals("/", PathNormalizerHelper.normalizePath("/a/b/../../.."))
+
+        // double dots relative
+        assertEquals("a/c", PathNormalizerHelper.normalizePath("a/b/../c"))
+        assertEquals("../a", PathNormalizerHelper.normalizePath("../a"))
+        assertEquals("..", PathNormalizerHelper.normalizePath("a/../.."))
+        assertEquals("../..", PathNormalizerHelper.normalizePath("a/../../.."))
+        assertEquals("../../a", PathNormalizerHelper.normalizePath("a/../../../a"))
+
+        // fallback triggers (stack overflow and size limits)
+        val deepPath = (1..130).joinToString("/") { "a" }
+        assertEquals(java.nio.file.Paths.get(deepPath).normalize().toString(), PathNormalizerHelper.normalizePath(deepPath))
+
+        val longPath = "a".repeat(4100)
+        assertEquals(java.nio.file.Paths.get(longPath).normalize().toString(), PathNormalizerHelper.normalizePath(longPath))
+    }
+
+    @Test
+    fun `test PathNormalizerHelper pathStartsWith all branches`() {
+        assertTrue(PathNormalizerHelper.pathStartsWith("/a/b", "/a/b"))
+        assertTrue(PathNormalizerHelper.pathStartsWith("/a/b", "/"))
+        assertTrue(PathNormalizerHelper.pathStartsWith("/a/b/c", "/a/b"))
+        assertTrue(PathNormalizerHelper.pathStartsWith("/", "/"))
+        assertTrue(PathNormalizerHelper.pathStartsWith("/a", "/"))
+
+        assertTrue(!PathNormalizerHelper.pathStartsWith("/a/b-other", "/a/b"))
+        assertTrue(!PathNormalizerHelper.pathStartsWith("/a/b", "/c"))
+        assertTrue(!PathNormalizerHelper.pathStartsWith("a/b", "/a"))
+    }
+
+    @Test
+    fun `test resolvePaths overload direct call`() {
+        NativeArena.ofConfined().use { arena ->
+            with(arena) {
+                val resolver = SyscallPathResolver(stubMemoryReader, SessionEventLedger())
+                val pathsList = resolver.resolvePaths(Tid(1), "OPEN", listOf(100L))
+                assertEquals(listOf("/etc/passwd"), pathsList)
+
+                val pathsArr = resolver.resolvePaths(Tid(1), "OPEN", longArrayOf(100L))
+                assertEquals(listOf("/etc/passwd"), pathsArr)
+            }
+        }
+    }
 }
