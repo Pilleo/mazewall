@@ -67,9 +67,9 @@ internal class SupervisorSessionHandler(
     private val engine: io.mazewall.NativeEngine = io.mazewall.LinuxNative,
     private val socketManager: io.mazewall.core.SocketManager = io.mazewall.core.RealSocketManager
 ) {
-    private val logger = Logger.getLogger(SupervisorSessionHandler::class.java.name)
-
     companion object {
+        private val logger = Logger.getLogger(SupervisorSessionHandler::class.java.name)
+
         private const val POLL_TIMEOUT_MS = 30000
         private const val AT_FDCWD = -100
 
@@ -131,15 +131,50 @@ internal class SupervisorSessionHandler(
          * and build/coverage directories. Because these syscalls bypass the JVM listener entirely,
          * no dynamic class loading is triggered during vulnerable tracee states.
          */
+        private fun toRealPathWithFallback(path: java.nio.file.Path): java.nio.file.Path {
+            val abs = path.toAbsolutePath().normalize()
+            var current = abs
+            val nonExistentParts = mutableListOf<String>()
+            while (true) {
+                try {
+                    val real = current.toRealPath()
+                    var resolved = real
+                    for (i in nonExistentParts.indices.reversed()) {
+                        resolved = resolved.resolve(nonExistentParts[i])
+                    }
+                    return resolved.normalize()
+                } catch (e: java.nio.file.NoSuchFileException) {
+                    val parent = current.parent ?: break
+                    nonExistentParts.add(current.fileName.toString())
+                    current = parent
+                } catch (e: java.io.FileNotFoundException) {
+                    val parent = current.parent ?: break
+                    nonExistentParts.add(current.fileName.toString())
+                    current = parent
+                }
+            }
+            var resolved = abs.root ?: abs
+            for (i in nonExistentParts.indices.reversed()) {
+                resolved = resolved.resolve(nonExistentParts[i])
+            }
+            return resolved.normalize()
+        }
+
         @Suppress("SwallowedException", "TooGenericExceptionCaught")
         private val safeBypassPaths = mutableListOf<java.nio.file.Path>().apply {
             fun addPathAndReal(path: java.nio.file.Path) {
                 val abs = path.toAbsolutePath().normalize()
                 add(abs)
                 try {
-                    val real = abs.toRealPath()
+                    val real = toRealPathWithFallback(abs)
                     add(real)
-                } catch (ignored: Exception) {}
+                } catch (e: java.nio.file.NoSuchFileException) {
+                    // Normal, path might not exist
+                } catch (e: java.io.FileNotFoundException) {
+                    // Normal, path might not exist
+                } catch (e: Exception) {
+                    logger.warning { "Failed to resolve real path for $abs: ${e.message}" }
+                }
             }
 
             fun parseManifestClassPath(jarPath: java.nio.file.Path) {
@@ -158,11 +193,19 @@ internal class SupervisorSessionHandler(
                                         parentDir.resolve(uri.path).normalize()
                                     }
                                     addPathAndReal(resolvedPath)
-                                } catch (ignored: Exception) {}
+                                } catch (e: java.net.URISyntaxException) {
+                                    // Syntax error in manifest CP, skip
+                                } catch (e: Exception) {
+                                    logger.warning { "Failed to parse manifest entry $entry in $jarPath: ${e.message}" }
+                                }
                             }
                         }
                     }
-                } catch (ignored: Exception) {}
+                } catch (e: java.io.FileNotFoundException) {
+                    // Normal if Jar file doesn't exist
+                } catch (e: Exception) {
+                    logger.warning { "Failed to process manifest Class-Path for $jarPath: ${e.message}" }
+                }
             }
 
             try {
@@ -182,7 +225,11 @@ internal class SupervisorSessionHandler(
                                 if (entry.endsWith(".jar")) {
                                     parseManifestClassPath(path)
                                 }
-                            } catch (ignored: Exception) {}
+                            } catch (e: java.nio.file.InvalidPathException) {
+                                // Normal
+                            } catch (e: Exception) {
+                                logger.warning { "Failed to process classpath entry $entry: ${e.message}" }
+                            }
                         }
                     }
                 }
@@ -195,7 +242,11 @@ internal class SupervisorSessionHandler(
                         if (agentPath.isNotEmpty()) {
                             try {
                                 addPathAndReal(java.nio.file.Paths.get(agentPath))
-                            } catch (ignored: Exception) {}
+                            } catch (e: java.nio.file.InvalidPathException) {
+                                // Normal
+                            } catch (e: Exception) {
+                                logger.warning { "Failed to process javaagent argument $arg: ${e.message}" }
+                            }
                         }
                     }
                 }
@@ -204,7 +255,11 @@ internal class SupervisorSessionHandler(
                 try {
                     addPathAndReal(java.nio.file.Paths.get("build"))
                     addPathAndReal(java.nio.file.Paths.get(".gradle"))
-                } catch (ignored: Exception) {}
+                } catch (e: java.nio.file.InvalidPathException) {
+                    // Normal
+                } catch (e: Exception) {
+                    logger.warning { "Failed to add build/.gradle paths: ${e.message}" }
+                }
 
                 // Add GRADLE_USER_HOME if set to support container/CI cache directories
                 try {
@@ -212,13 +267,21 @@ internal class SupervisorSessionHandler(
                     if (!gradleUserHome.isNullOrEmpty()) {
                         addPathAndReal(java.nio.file.Paths.get(gradleUserHome))
                     }
-                } catch (ignored: Exception) {}
+                } catch (e: java.nio.file.InvalidPathException) {
+                    // Normal
+                } catch (e: Exception) {
+                    logger.warning { "Failed to add GRADLE_USER_HOME: ${e.message}" }
+                }
 
                 // Add /proc and /sys virtual filesystems to prevent GC/JIT thread deadlocks
                 try {
                     addPathAndReal(java.nio.file.Paths.get("/proc"))
                     addPathAndReal(java.nio.file.Paths.get("/sys"))
-                } catch (ignored: Exception) {}
+                } catch (e: java.nio.file.InvalidPathException) {
+                    // Normal
+                } catch (e: Exception) {
+                    logger.warning { "Failed to add /proc or /sys: ${e.message}" }
+                }
 
                 // Add the project root directory to bypass all project classes and build artifacts
                 try {
@@ -226,9 +289,13 @@ internal class SupervisorSessionHandler(
                     if (!userDir.isNullOrEmpty()) {
                         addPathAndReal(java.nio.file.Paths.get(userDir))
                     }
-                } catch (ignored: Exception) {}
+                } catch (e: java.nio.file.InvalidPathException) {
+                    // Normal
+                } catch (e: Exception) {
+                    logger.warning { "Failed to add user.dir: ${e.message}" }
+                }
             } catch (e: Exception) {
-                // Fail-safe
+                logger.severe { "Fatal exception during safeBypassPaths initialization: ${e.message}" }
             }
         }
     }
@@ -306,21 +373,7 @@ internal class SupervisorSessionHandler(
                     if (isOpen && extracted.pathStr != null) {
                         val pathStr = extracted.pathStr
                         try {
-                            var path = resolveAbsolutePath(pidVal, extracted.dirfd, pathStr)
-                            if (path == null) {
-                                if (!pathStr.startsWith("/")) {
-                                    try {
-                                        val baseDir = if (extracted.dirfd == AT_FDCWD) {
-                                            java.nio.file.Paths.get("/proc/$pidVal/cwd").toRealPath()
-                                        } else {
-                                            java.nio.file.Paths.get("/proc/$pidVal/fd/${extracted.dirfd}").toRealPath()
-                                        }
-                                        path = baseDir.resolve(pathStr).normalize()
-                                    } catch (ignored: Exception) {}
-                                } else {
-                                    path = java.nio.file.Paths.get(pathStr).normalize()
-                                }
-                            }
+                            val path = resolveAbsolutePath(pidVal, extracted.dirfd, pathStr)
                             if (path != null) {
                                 val absPathStr = path.toAbsolutePath().toString()
                                 resolvedPathStr = absPathStr
@@ -341,7 +394,8 @@ internal class SupervisorSessionHandler(
                                 }
                             }
                         } catch (e: Exception) {
-                            logger.warning { "[SUPERVISOR-DEBUG] Fast-path check failed with error: ${e.message}" }
+                            logger.severe { "[SUPERVISOR-DEBUG] Fast-path check failed with critical error: ${e.message}" }
+                            throw e
                         }
                     }
 
@@ -397,26 +451,46 @@ internal class SupervisorSessionHandler(
     private fun resolveAbsolutePath(pid: Int, dirfd: Int, pathStr: String): java.nio.file.Path? {
         val path = java.nio.file.Paths.get(pathStr)
         if (path.isAbsolute) {
-            return try {
-                path.normalize().toRealPath()
+            try {
+                return toRealPathWithFallback(path)
+            } catch (e: java.nio.file.NoSuchFileException) {
+                return null
+            } catch (e: java.io.FileNotFoundException) {
+                return null
             } catch (e: Exception) {
-                null
+                logger.severe { "Critical error during absolute path resolution for $pathStr: ${e.message}" }
+                throw e
             }
         }
         try {
             val baseDir = if (dirfd == AT_FDCWD) {
-                java.nio.file.Paths.get("/proc/$pid/cwd").toRealPath()
+                toRealPathWithFallback(java.nio.file.Paths.get("/proc/$pid/cwd"))
             } else {
-                java.nio.file.Paths.get("/proc/$pid/fd/$dirfd").toRealPath()
+                toRealPathWithFallback(java.nio.file.Paths.get("/proc/$pid/fd/$dirfd"))
             }
-            return baseDir.resolve(path).normalize().toRealPath()
+            return toRealPathWithFallback(baseDir.resolve(path))
+        } catch (e: java.nio.file.NoSuchFileException) {
+            // NoSuchFileException is normal when directories under /proc do not exist or path resolution fails normally
+            // Let's attempt relative search fallback
+        } catch (e: java.io.FileNotFoundException) {
+            // Normal
         } catch (e: Exception) {
-            // Fallback: search in safeBypassPaths for relative path matching (needed inside containers due to Yama ptrace_scope)
-            for (bypassPath in safeBypassPaths) {
-                try {
-                    val resolved = bypassPath.resolve(pathStr).normalize()
-                    return resolved.toRealPath()
-                } catch (ignored: Exception) {}
+            logger.severe { "Critical error during baseDir or /proc resolution for pid=$pid dirfd=$dirfd path=$pathStr: ${e.message}" }
+            throw e
+        }
+
+        // Fallback: search in safeBypassPaths for relative path matching (needed inside containers due to Yama ptrace_scope)
+        for (bypassPath in safeBypassPaths) {
+            try {
+                val resolved = bypassPath.resolve(pathStr).normalize()
+                return toRealPathWithFallback(resolved)
+            } catch (e: java.nio.file.NoSuchFileException) {
+                // Normal, skip this bypass path
+            } catch (e: java.io.FileNotFoundException) {
+                // Normal, skip this bypass path
+            } catch (e: Exception) {
+                logger.severe { "Critical error during bypassPath resolution for $pathStr in $bypassPath: ${e.message}" }
+                throw e
             }
         }
         return null
