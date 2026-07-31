@@ -17,10 +17,18 @@ internal class SyscallPathResolver(
      */
     context(arena: NativeArena)
     fun resolve(event: SyscallEvent<SyscallEventState.Raw>): SyscallEvent<SyscallEventState.Resolved> {
-        val tid = event.tid
-        val args = event.args
+        val argsArr = LongArray(event.args.size) { i -> event.args[i] }
+        val paths = resolvePaths(event.tid, event.syscallName, argsArr)
+        return event.resolved(paths)
+    }
 
-        val paths = when (event.syscallName) {
+    context(arena: NativeArena)
+    fun resolvePaths(
+        tid: Tid,
+        syscallName: String,
+        args: LongArray,
+    ): List<String> {
+        val paths = when (syscallName) {
             "OPEN", "EXECVE", "MKDIR", "RMDIR", "CHMOD", "CHOWN", "LCHOWN", "UNLINK", "READLINK", "CHROOT", "UTIME", "UTIMES" ->
                 listOfNotNull(tryRead(tid, args[0]))
 
@@ -51,7 +59,17 @@ internal class SyscallPathResolver(
 
             else -> emptyList()
         }
-        return event.resolved(paths)
+        return paths
+    }
+
+    context(arena: NativeArena)
+    fun resolvePaths(
+        tid: Tid,
+        syscallName: String,
+        args: List<Long>,
+    ): List<String> {
+        val argsArr = LongArray(args.size) { i -> args[i] }
+        return resolvePaths(tid, syscallName, argsArr)
     }
 
     context(arena: NativeArena)
@@ -73,7 +91,7 @@ internal class SyscallPathResolver(
         ledger.record(SessionEvent.VmReadvResolved(System.nanoTime(), tid.value.toLong(), path != null))
         if (path == null) return null
         return if (path.startsWith("/")) {
-            java.nio.file.Paths.get(path).normalize().toString()
+            PathNormalizerHelper.normalizePath(path)
         } else {
             resolveRelativePath(tid, path, dirfd)
         }
@@ -97,7 +115,111 @@ internal class SyscallPathResolver(
             throw IllegalStateException("Failed to resolve absolute path for relative path '$path' (dirfd=$dirfd)")
         }
 
-        val dirPath = java.nio.file.Paths.get(dirPathStr)
-        return dirPath.resolve(path).normalize().toString()
+        val combined = if (dirPathStr.endsWith("/")) {
+            dirPathStr + path
+        } else {
+            "$dirPathStr/$path"
+        }
+        return PathNormalizerHelper.normalizePath(combined)
+    }
+}
+
+internal object PathNormalizerHelper {
+    private val threadLocalCharBuffer = ThreadLocal.withInitial { CharArray(4096) }
+    private val threadLocalIntArray = ThreadLocal.withInitial { IntArray(128) }
+
+    fun normalizePath(path: String): String {
+        if (path.isEmpty()) return path
+
+        val chars = threadLocalCharBuffer.get()
+        val stack = threadLocalIntArray.get()
+        var stackSize = 0
+
+        val isAbsolute = path.startsWith('/')
+        var i = 0
+        val len = path.length
+
+        var outLen = 0
+        if (isAbsolute) {
+            chars[outLen++] = '/'
+        }
+
+        while (i < len) {
+            while (i < len && path[i] == '/') {
+                i++
+            }
+            if (i >= len) break
+
+            val start = i
+            while (i < len && path[i] != '/') {
+                i++
+            }
+            val compLen = i - start
+
+            if (compLen == 1 && path[start] == '.') {
+                continue
+            } else if (compLen == 2 && path[start] == '.' && path[start + 1] == '.') {
+                if (stackSize > 0) {
+                    stackSize--
+                    val poppedStart = stack[stackSize]
+                    outLen = if (poppedStart > 0 && chars[poppedStart - 1] == '/') {
+                        poppedStart - 1
+                    } else {
+                        poppedStart
+                    }
+                    if (isAbsolute && outLen == 0) {
+                        outLen = 1
+                    }
+                } else if (!isAbsolute) {
+                    if (outLen > 0 && chars[outLen - 1] != '/') {
+                        if (outLen + compLen + 1 > chars.size || stackSize >= stack.size) {
+                            return java.nio.file.Paths.get(path).normalize().toString()
+                        }
+                        chars[outLen++] = '/'
+                    }
+                    if (stackSize >= stack.size) {
+                        return java.nio.file.Paths.get(path).normalize().toString()
+                    }
+                    stack[stackSize++] = outLen
+                    if (outLen + compLen > chars.size) {
+                        return java.nio.file.Paths.get(path).normalize().toString()
+                    }
+                    for (k in start until i) {
+                        chars[outLen + k - start] = path[k]
+                    }
+                    outLen += compLen
+                }
+            } else {
+                if (outLen > 0 && chars[outLen - 1] != '/') {
+                    if (outLen + compLen + 1 > chars.size || stackSize >= stack.size) {
+                        return java.nio.file.Paths.get(path).normalize().toString()
+                    }
+                    chars[outLen++] = '/'
+                }
+                if (stackSize >= stack.size) {
+                    return java.nio.file.Paths.get(path).normalize().toString()
+                }
+                stack[stackSize++] = outLen
+                if (outLen + compLen > chars.size) {
+                    return java.nio.file.Paths.get(path).normalize().toString()
+                }
+                for (k in start until i) {
+                    chars[outLen + k - start] = path[k]
+                }
+                outLen += compLen
+            }
+        }
+
+        if (outLen == 0) {
+            return if (isAbsolute) "/" else "."
+        }
+
+        return String(chars, 0, outLen)
+    }
+
+    fun pathStartsWith(path: String, prefix: String): Boolean {
+        if (path == prefix) return true
+        if (prefix == "/") return path.startsWith("/")
+        return path.startsWith(prefix) && path.length > prefix.length && path[prefix.length] == '/'
     }
 }

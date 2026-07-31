@@ -22,6 +22,8 @@ import io.mazewall.ffi.memory.fill
 import io.mazewall.map
 import io.mazewall.onSuccess
 import io.mazewall.recover
+import io.mazewall.ffi.Layouts
+import io.mazewall.ffi.memory.SegmentPool
 import java.lang.foreign.MemorySegment
 import java.lang.foreign.ValueLayout
 
@@ -47,12 +49,31 @@ internal class ProfilerSessionHandler(
     private val syscallMap: Map<Int, String>,
     private val parser: SeccompNotificationParser = RealSeccompNotificationParser,
     private val onShutdown: (String) -> Unit,
-) {
+) : AutoCloseable {
     val ledger = SessionEventLedger()
+
+    private val sessionArena = NativeArena.ofConfined()
+    val ackBuf: ManagedSegment = sessionArena.allocate(1L)
+    val socketPollFd: ManagedSegment = sessionArena.allocate(Layouts.POLLFD)
+    val notif: ManagedSegment = SegmentPool.SECCOMP_NOTIF_POOL.rent()
+    val resp: ManagedSegment = SegmentPool.SECCOMP_NOTIF_RESP_POOL.rent()
+
+    private val resolver = SyscallPathResolver(memoryReader, ledger)
 
     var state: ProfilerState = ProfilerState.ActiveSession(socketFd, listenerFd)
         private set
 
+    override fun close() {
+        try {
+            SegmentPool.SECCOMP_NOTIF_POOL.release(notif)
+        } catch (ignored: Throwable) {}
+        try {
+            SegmentPool.SECCOMP_NOTIF_RESP_POOL.release(resp)
+        } catch (ignored: Throwable) {}
+        sessionArena.close()
+    }
+
+    @Deprecated("Use handleActiveListener(pollFds)")
     @Suppress("ReturnCount")
     context(arena: NativeArena)
     fun handleActiveListener(
@@ -61,6 +82,14 @@ internal class ProfilerSessionHandler(
         notif: ManagedSegment,
         resp: ManagedSegment,
         socketPollFd: ManagedSegment,
+    ): LoopAction {
+        return handleActiveListener(pollFds)
+    }
+
+    @Suppress("ReturnCount")
+    context(arena: NativeArena)
+    fun handleActiveListener(
+        pollFds: ManagedSegment,
     ): LoopAction {
         val currentState = state
         if (currentState is ProfilerState.Terminated) {
@@ -88,7 +117,7 @@ internal class ProfilerSessionHandler(
             notif.fill(0)
             val recvRes = ioOps.raw.ioctl(listenerFd, SECCOMP_IOCTL_NOTIF_RECV, notif)
             recvRes.onSuccess {
-                val ok = processNotification(notif, resp, ackBuf, socketPollFd)
+                val ok = processNotification()
                 if (!ok) {
                     System.err.println("[DAEMON-WARN] Failed to process notification. Terminating session.")
                     state = ProfilerState.Terminated(socketFd, listenerFd)
@@ -134,6 +163,7 @@ internal class ProfilerSessionHandler(
      * are deterministically freed when the iteration completes, completely eliminating the overhead of
      * creating a new confined arena per notification or operation.
      */
+    @Deprecated("Use processNotification() without parameters")
     @Suppress("TooGenericExceptionCaught", "ReturnCount", "CyclomaticComplexMethod")
     context(arena: NativeArena)
     internal fun processNotification(
@@ -142,6 +172,12 @@ internal class ProfilerSessionHandler(
         ackBuf: ManagedSegment,
         socketPollFd: ManagedSegment,
     ): Boolean {
+        return processNotification()
+    }
+
+    @Suppress("TooGenericExceptionCaught", "ReturnCount", "CyclomaticComplexMethod")
+    context(arena: NativeArena)
+    internal fun processNotification(): Boolean {
         val currentState = state as? ProfilerState.ActiveSession ?: return false
 
         val parsedNotif = parser.readNotif(notif)
@@ -158,18 +194,25 @@ internal class ProfilerSessionHandler(
             ledger.record(SessionEvent.Notified(System.nanoTime(), pidVal.toLong(), nr.toLong()))
 
             val args = parsedNotif.args
+            val syscallName = syscallMap[nr] ?: "SYSCALL_$nr"
 
             // RESOLVE: Transform raw event into a resolved event (read path from tracee memory).
-            val resolver = SyscallPathResolver(memoryReader, ledger)
-            val resolvedEvent = with(arena) {
-                resolver.resolve(
-                    event = SyscallEvent<SyscallEventState.Raw>(
-                        tid = Tid(pidVal),
-                        syscallName = syscallMap[nr] ?: "SYSCALL_$nr",
-                        args = args.toList()
-                    )
-                )
+            val paths = with(arena) {
+                resolver.resolvePaths(Tid(pidVal), syscallName, args)
             }
+
+            val argList = ArrayList<Long>(args.size).apply {
+                for (a in args) {
+                    add(a)
+                }
+            }
+
+            val resolvedEvent = SyscallEvent<SyscallEventState.Resolved>(
+                tid = Tid(pidVal),
+                syscallName = syscallName,
+                args = argList,
+                paths = paths
+            )
 
             // Optimisation: skip event delivery for JVM-internal paths that generate noise
             // (JDK home, classpath, /proc, /sys).
@@ -265,9 +308,9 @@ internal class ProfilerSessionHandler(
         if ((nr == SYS_OPEN || nr == SYS_OPENAT || nr == SYS_OPENAT2) && resolvedEvent.paths.isNotEmpty()) {
             val pathStr = resolvedEvent.paths.first()
             try {
-                val path = java.nio.file.Paths.get(pathStr).toAbsolutePath().normalize()
+                val normalizedPathStr = PathNormalizerHelper.normalizePath(pathStr)
                 val matched = safeBypassPaths.any { bypassPath ->
-                    path.startsWith(bypassPath) || path == bypassPath
+                    PathNormalizerHelper.pathStartsWith(normalizedPathStr, bypassPath)
                 }
                 System.err.println("[DAEMON-DEBUG] Noise-filter check: path=$pathStr, skip=$matched")
                 if (matched) {
@@ -297,9 +340,9 @@ internal class ProfilerSessionHandler(
         private const val SYS_OPENAT2 = 437
 
         @Suppress("SwallowedException", "TooGenericExceptionCaught")
-        private val safeBypassPaths = mutableListOf<java.nio.file.Path>().apply {
+        private val safeBypassPaths = mutableListOf<String>().apply {
             try {
-                val javaHome = java.nio.file.Paths.get(System.getProperty("java.home")).toAbsolutePath().normalize()
+                val javaHome = java.nio.file.Paths.get(System.getProperty("java.home")).toAbsolutePath().normalize().toString()
                 add(javaHome)
 
                 val cp = System.getProperty("java.class.path")
@@ -308,7 +351,7 @@ internal class ProfilerSessionHandler(
                     for (entry in cpEntries) {
                         if (entry.isNotEmpty()) {
                             try {
-                                val cpPath = java.nio.file.Paths.get(entry).toAbsolutePath().normalize()
+                                val cpPath = java.nio.file.Paths.get(entry).toAbsolutePath().normalize().toString()
                                 add(cpPath)
                             } catch (ignored: Exception) {}
                         }
@@ -322,7 +365,7 @@ internal class ProfilerSessionHandler(
                         val agentPath = arg.substringAfter("-javaagent:").substringBefore("=")
                         if (agentPath.isNotEmpty()) {
                             try {
-                                val p = java.nio.file.Paths.get(agentPath).toAbsolutePath().normalize()
+                                val p = java.nio.file.Paths.get(agentPath).toAbsolutePath().normalize().toString()
                                 add(p)
                             } catch (ignored: Exception) {}
                         }
@@ -331,14 +374,14 @@ internal class ProfilerSessionHandler(
 
                 // Add CI-specific build directories and test-framework caches to prevent deadlock
                 try {
-                    add(java.nio.file.Paths.get("build").toAbsolutePath().normalize())
-                    add(java.nio.file.Paths.get(".gradle").toAbsolutePath().normalize())
+                    add(java.nio.file.Paths.get("build").toAbsolutePath().normalize().toString())
+                    add(java.nio.file.Paths.get(".gradle").toAbsolutePath().normalize().toString())
                 } catch (ignored: Exception) {}
 
                 // Add /proc and /sys virtual filesystems to prevent GC/JIT thread deadlocks
                 try {
-                    add(java.nio.file.Paths.get("/proc").toAbsolutePath().normalize())
-                    add(java.nio.file.Paths.get("/sys").toAbsolutePath().normalize())
+                    add(java.nio.file.Paths.get("/proc").toAbsolutePath().normalize().toString())
+                    add(java.nio.file.Paths.get("/sys").toAbsolutePath().normalize().toString())
                 } catch (ignored: Exception) {}
             } catch (e: Exception) {
                 // Fail-safe
