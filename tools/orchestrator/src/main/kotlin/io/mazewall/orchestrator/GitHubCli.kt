@@ -363,6 +363,10 @@ class RealGitHubClient(private val config: OrchestratorConfig) : GitHubClient {
         }
     }
 
+    override fun addLabel(issueNumber: String, label: String) {
+        execute("gh", "issue", "edit", issueNumber, "--add-label", label)
+    }
+
     override fun commentOnPr(prNumber: String, body: String) {
         val directory = File("build/tmp").apply { mkdirs() }
         val tempFile = File.createTempFile("pr_comment_", ".tmp", directory)

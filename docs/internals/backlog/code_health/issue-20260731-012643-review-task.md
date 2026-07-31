@@ -5,15 +5,15 @@ status: "open"
 priority: 10
 component: "profiler"
 target_modules: [":profiler", ":enforcer"]
-target_files: []
+target_files: ["docs/internals/backlog/code_health/issue-20260731-012643-review-task.md"]
 effort: "medium"
 dependencies: []
-github_issue: 394
+github_issue: 428
 ---
 Please review profiler module using .agents/skills/review/SKILL.md skill. Create issues using skill .agents/skills/create_backlog_issue/SKILL.md
 
 **Additional Focus Instructions:**
-focus on the enforcer module only please
+Please focus of orchestrator tool. Its logic is fragile, but very important. How can we refactor it to be very safe, hard to break, yet very easy to adapt and change to new needs? Also in created backlog issues provide what tests cases must be tested before each refactoring to make sure no regression introduced
 
 ---
 

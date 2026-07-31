@@ -1,29 +1,19 @@
 ---
 title: "Review Task: Profiler Module & Security Audit"
 severity: "HIGH"
-status: "open"
+status: "resolved"
 priority: 10
 component: "profiler"
 target_modules: [":profiler", ":enforcer"]
 target_files: []
 effort: "medium"
 dependencies: []
-github_issue: 419
+github_issue: 394
 ---
 Please review profiler module using .agents/skills/review/SKILL.md skill. Create issues using skill .agents/skills/create_backlog_issue/SKILL.md
 
 **Additional Focus Instructions:**
-Investigate why "
-ProfilerTraceListenerTest > close should close the socket exactly once on graceful drain() FAILED
-    org.opentest4j.AssertionFailedError: expected: <1> but was: <2>
-        at app//org.junit.jupiter.api.AssertionFailureBuilder.build(AssertionFailureBuilder.java:151)
-        at app//org.junit.jupiter.api.AssertionFailureBuilder.buildAndThrow(AssertionFailureBuilder.java:132)
-        at app//org.junit.jupiter.api.AssertEquals.failNotEqual(AssertEquals.java:197)
-        at app//org.junit.jupiter.api.AssertEquals.assertEquals(AssertEquals.java:150)
-        at app//org.junit.jupiter.api.AssertEquals.assertEquals(AssertEquals.java:145)
-        at app//org.junit.jupiter.api.Assertions.assertEquals(Assertions.java:531)
-        at app//io.mazewall.profiler.internal.ProfilerTraceListenerTest.close should close the socket exactly once on graceful drain(ProfilerTraceListenerTest.kt:65)
-" might fail
+focus on the enforcer module only please
 
 ---
 

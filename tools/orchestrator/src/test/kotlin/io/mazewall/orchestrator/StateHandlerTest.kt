@@ -58,6 +58,7 @@ class MockOrchestratorEnvironment : OrchestratorEnvironment {
         override fun getPrMergeStatus(prNumber: String): PrMergeStatus = prMergeStatus
         override fun findExistingIssueNumber(issueId: String): String? = existingIssueNumber
         override fun createIssue(title: String, body: String, label: String): String = createdIssueNumber
+        override fun addLabel(issueNumber: String, label: String) {}
         override fun isIssueClosed(issueNumber: String): Boolean = issueClosed
         override fun isPrClosed(prNumber: String): Boolean = prClosed
         override fun findLinkedPR(issueNumber: String, issueId: String, julesSessionId: String?): String? = linkedPrNumber

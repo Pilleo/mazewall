@@ -14,6 +14,7 @@ class OrchestratorDaemonRunner(
             val props = java.util.Properties()
             stateFile.inputStream().use { props.load(it) }
             context.load(props)
+            context.activeSlots.forEach { it.approvalRequestSent = false }
             env.println("♻️ State machine context loaded from ${stateFile.name}")
         }
     }

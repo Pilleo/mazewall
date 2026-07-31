@@ -463,6 +463,7 @@ data class AwaitingJulesStartState(
 
         if (slot.julesTriggerAttempts < env.config.julesTriggerAttempts) {
             slot.julesTriggerAttempts++
+            try { env.gitHubClient.addLabel(githubIssueNumber, "jules-start") } catch (e: Exception) {}
             env.println("Waiting for Jules session to be automatically triggered via GitHub issue label (attempt ${slot.julesTriggerAttempts}/${env.config.julesTriggerAttempts})...")
             slot.retryAfterTime = currentTime + TimeUnit.SECONDS.toMillis(env.config.julesTriggerIntervalSeconds)
             return this
