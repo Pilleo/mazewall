@@ -777,6 +777,14 @@ internal class SupervisorSessionHandler(
         }
     }
 
+    private inner class SafeLocalFd(val fd: Int) : AutoCloseable {
+        override fun close() {
+            if (fd >= 0) {
+                closeLocalFd(fd)
+            }
+        }
+    }
+
     private fun sendSeccompContinue(id: Long, resp: ManagedSegment) {
         resp.fill(0)
         resp.writeLong(RESP_ID_OFF, id)
@@ -874,11 +882,11 @@ internal class SupervisorSessionHandler(
                             }
                         }
 
-                        try {
+                        SafeLocalFd(pidfd).use { pidfdSafe ->
                             val targetFd = args[0].toInt()
-                            logger.info { "[SUPERVISOR-DEBUG] pidfd_open success. pidfd=$pidfd. Duplicating fd $targetFd..." }
+                            logger.info { "[SUPERVISOR-DEBUG] pidfd_open success. pidfd=${pidfdSafe.fd}. Duplicating fd $targetFd..." }
                             val dupRes: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
-                                engine.process.pidfdGetFd(pidfd, targetFd, 0)
+                                engine.process.pidfdGetFd(pidfdSafe.fd, targetFd, 0)
 
                             val dupFd = when (dupRes) {
                                 is LinuxNative.SyscallResult.Success -> dupRes.value.toInt()
@@ -889,8 +897,8 @@ internal class SupervisorSessionHandler(
                                 }
                             }
 
-                            try {
-                                logger.info { "[SUPERVISOR-DEBUG] pidfd_getfd success. dupFd=$dupFd. Starting accept..." }
+                            SafeLocalFd(dupFd).use { dupFdSafe ->
+                                logger.info { "[SUPERVISOR-DEBUG] pidfd_getfd success. dupFd=${dupFdSafe.fd}. Starting accept..." }
 
                                 val localAddr = arena.allocate(128)
                                 val localAddrLen = arena.allocate(4)
@@ -900,7 +908,7 @@ internal class SupervisorSessionHandler(
 
                                 val acceptRes =
                                     engine.networking.accept4(
-                                        FileDescriptor.unsafe<FileDescriptorRole.Generic>(dupFd),
+                                        FileDescriptor.unsafe<FileDescriptorRole.Generic>(dupFdSafe.fd),
                                         localAddr,
                                         localAddrLen,
                                         flags
@@ -914,7 +922,7 @@ internal class SupervisorSessionHandler(
                                     }
                                 }
 
-                                try {
+                                SafeLocalFd(clientFd).use { clientFdSafe ->
                                     // Copy peer address back if tracee provided a buffer
                                     val traceeAddrPtr = args[1]
                                     val traceeAddrLenPtr = args[2]
@@ -951,7 +959,7 @@ internal class SupervisorSessionHandler(
                                     addfd.managed.fill(0)
                                     addfd.setId(id)
                                     addfd.setFlags(NativeConstants.SECCOMP_ADDFD_FLAG_SEND.toInt())
-                                    addfd.setSrcfd(clientFd)
+                                    addfd.setSrcfd(clientFdSafe.fd)
 
                                     val addfdManaged = addfd.managed
                                     var injectSuccess = false
@@ -970,14 +978,8 @@ internal class SupervisorSessionHandler(
                                     if (!injectSuccess) {
                                         sendSeccompError(id, NativeConstants.EPERM, arena.allocate(Layouts.SECCOMP_NOTIF_RESP))
                                     }
-                                } finally {
-                                    closeLocalFd(clientFd)
                                 }
-                            } finally {
-                                closeLocalFd(dupFd)
                             }
-                        } finally {
-                            closeLocalFd(pidfd)
                         }
                     }
                 }
