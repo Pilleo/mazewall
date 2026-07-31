@@ -8,4 +8,5 @@ interface JulesClient {
     fun getActiveSession(issueId: String): JulesSession?
     fun listSessions(): List<JulesSession>
     fun getSessionPatch(sessionId: String): String?
+    fun createSessionWithContext(repo: String, issueId: String, githubIssueNumber: String, previousPrUrl: String, previousBranch: String, originalTaskDescription: String): JulesSession
 }

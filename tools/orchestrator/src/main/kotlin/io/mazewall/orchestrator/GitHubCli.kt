@@ -376,8 +376,16 @@ class RealGitHubClient(private val config: OrchestratorConfig) : GitHubClient {
         }
     }
 
+    override fun getRepoName(): String = withCache("repoName") {
+        execute("gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner").trim()
+    }
+
     override fun addLabel(issueNumber: String, label: String) {
         execute("gh", "issue", "edit", issueNumber, "--add-label", label)
+    }
+
+    override fun labelPr(prNumber: String, label: String) {
+        execute("gh", "pr", "edit", prNumber, "--add-label", label)
     }
 
     override fun commentOnPr(prNumber: String, body: String) {

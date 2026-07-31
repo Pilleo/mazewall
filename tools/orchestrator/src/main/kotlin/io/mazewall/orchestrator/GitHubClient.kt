@@ -41,7 +41,9 @@ interface GitHubClient {
     fun isPrMerged(prNumber: String): Boolean
     fun getPrComments(prNumber: String): List<GitHubComment>
     fun createIssue(title: String, body: String, label: String): String
+    fun getRepoName(): String
     fun addLabel(issueNumber: String, label: String)
+    fun labelPr(prNumber: String, label: String)
     fun commentOnPr(prNumber: String, body: String)
     fun commentOnIssue(issueNumber: String, body: String)
     fun getPrDiff(prNumber: String): String
