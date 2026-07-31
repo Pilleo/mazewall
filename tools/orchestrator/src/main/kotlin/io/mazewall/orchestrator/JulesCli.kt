@@ -313,7 +313,7 @@ class RealJulesClient(
         // Find the session where description contains the issue ID marker, e.g. "[issue-001]"
         return sessions
             .filter { it.description.contains("[$issueId]", ignoreCase = true) }
-            .sortedByDescending { it.id }
+            .sortedByDescending { it.id.toULongOrNull() ?: 0UL }
             .firstOrNull()
     }
 
@@ -331,14 +331,18 @@ class RealJulesClient(
                 throw RuntimeException("Failed to list Jules sessions (HTTP ${response.statusCode()}): ${response.body()}")
             }
             val listResponse = json.decodeFromString<ListSessionsResponse>(response.body())
-            listResponse.sessions.map { session ->
+            listResponse.sessions.mapNotNull { session ->
                 val id = session.name.substringAfterLast("/")
-                JulesSession(
-                    id = id,
-                    description = session.title ?: "",
-                    repo = "",
-                    status = session.state ?: ""
-                )
+                if (id.isNotEmpty() && id.all { it.isDigit() }) {
+                    JulesSession(
+                        id = id,
+                        description = session.title ?: "",
+                        repo = "",
+                        status = session.state ?: ""
+                    )
+                } else {
+                    null
+                }
             }
         } catch (e: Exception) {
             System.err.println("  [Jules API] Error listing sessions: ${e.message}")

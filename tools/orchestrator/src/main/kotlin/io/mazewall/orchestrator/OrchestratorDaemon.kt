@@ -3,6 +3,115 @@ package io.mazewall.orchestrator
 import java.io.File
 import java.util.concurrent.TimeUnit
 
+class CommandInterpreter(
+    private val env: OrchestratorEnvironment,
+    private val context: OrchestratorContext,
+    private val slot: SlotContext
+) {
+    fun interpret(command: OrchestratorCommand): Any? {
+        return when (command) {
+            is OrchestratorCommand.PrintLog -> {
+                if (command.isErr) {
+                    env.errPrintln(command.message)
+                } else {
+                    env.println(command.message)
+                }
+                Unit
+            }
+            is OrchestratorCommand.SendTelegramNotification -> {
+                env.sendNotification(command.message)
+                Unit
+            }
+            is OrchestratorCommand.SendApprovalRequest -> {
+                env.sendApprovalRequest(command.issueId, command.text)
+                Unit
+            }
+            is OrchestratorCommand.RingBell -> {
+                env.ringBell(command.times)
+                Unit
+            }
+            is OrchestratorCommand.CreateGitHubIssue -> {
+                val existingIssueNumber = env.gitHubClient.findExistingIssueNumber(command.issueId)
+                if (existingIssueNumber != null) {
+                    env.println("♻️ Recovered existing GitHub issue #$existingIssueNumber for ${command.issueId} (was missing from backlog file).")
+                    existingIssueNumber
+                } else {
+                    env.println("Creating GitHub issue for ${command.issueId}...")
+                    val issueTitleForGit = "[${command.issueId}] ${command.title}"
+                    val issueFileObj = File(command.file)
+                    val issueBody = if (issueFileObj.exists()) issueFileObj.readText() else ""
+                    val enhancedBody = OrchestratorPrompts.taskPrompt(issueBody)
+                    val newNumber = env.gitHubClient.createIssue(issueTitleForGit, enhancedBody, "jules")
+                    env.println("Created GitHub issue #$newNumber")
+                    newNumber
+                }
+            }
+            is OrchestratorCommand.WriteGitHubIssueToBacklog -> {
+                val nextIssue = env.parseAllIssues().firstOrNull { it.id == command.issueId }
+                if (nextIssue != null) {
+                    env.writeGithubIssue(nextIssue, command.issueNumber)
+                }
+                Unit
+            }
+            is OrchestratorCommand.AddLabel -> {
+                try {
+                    env.gitHubClient.addLabel(command.issueNumber, command.label)
+                } catch (e: Exception) {
+                    // Ignore label failures
+                }
+                Unit
+            }
+            is OrchestratorCommand.CommentOnPr -> {
+                env.gitHubClient.commentOnPr(command.prNumber, command.body)
+                Unit
+            }
+            is OrchestratorCommand.SendJulesMessage -> {
+                env.julesClient.sendSessionMessage(command.sessionId, command.message)
+                Unit
+            }
+            is OrchestratorCommand.MarkIssueAsResolved -> {
+                val nextIssue = env.parseAllIssues().firstOrNull { it.id == command.issueId }
+                if (nextIssue != null) {
+                    env.markIssueAsResolved(nextIssue)
+                }
+                Unit
+            }
+            is OrchestratorCommand.RemoveGithubIssue -> {
+                val nextIssue = env.parseAllIssues().firstOrNull { it.id == command.issueId }
+                if (nextIssue != null) {
+                    env.removeGithubIssue(nextIssue)
+                }
+                Unit
+            }
+            is OrchestratorCommand.DeleteStateFile -> {
+                env.deleteStateFile()
+                Unit
+            }
+            is OrchestratorCommand.GenerateKnowledgeMap -> {
+                env.generateKnowledgeMap()
+                Unit
+            }
+            is OrchestratorCommand.ClearPrCache -> {
+                env.gitHubClient.clearPrCache(command.prNumber)
+                Unit
+            }
+            is OrchestratorCommand.RebaseBranch -> {
+                env.gitHubClient.rebaseBranch(command.prNumber, command.sessionId)
+            }
+            is OrchestratorCommand.ApproveRescue -> {
+                env.gitHubClient.approveRescue(command.prNumber, command.rescueBranchName)
+                Unit
+            }
+            is OrchestratorCommand.RequestFallbackApproval -> {
+                env.requestApproval(command.issueId, command.prompt)
+            }
+            is OrchestratorCommand.RebaseBranchFallback -> {
+                env.gitHubClient.rebaseBranchFallback(command.prNumber, command.sessionId, command.targetFiles)
+            }
+        }
+    }
+}
+
 class OrchestratorDaemonRunner(
     private val env: OrchestratorEnvironment,
     private val stateFile: File
@@ -62,6 +171,9 @@ class OrchestratorDaemonRunner(
                                 nextState.updateSlot(slot)
                                 saveState()
                             }
+                        } catch (e: CliAuthenticationException) {
+                            handleCliAuthFailure(env, e)
+                            env.sleep(env.config.daemonErrorRetryMinutes, TimeUnit.MINUTES)
                         } catch (e: Exception) {
                             env.errPrintln("⚠️ Error in state ${slot.state.name} for slot ${slot.currentIssueId}: ${e.message}")
                             e.printStackTrace()
@@ -85,6 +197,9 @@ class OrchestratorDaemonRunner(
                 if (context.activeSlots.isNotEmpty()) {
                     env.sleep(5, TimeUnit.SECONDS)
                 }
+            } catch (e: CliAuthenticationException) {
+                handleCliAuthFailure(env, e)
+                env.sleep(env.config.daemonErrorRetryMinutes, TimeUnit.MINUTES)
             } catch (e: Exception) {
                 env.errPrintln("⚠️ Error in orchestrator loop: ${e.message}")
                 e.printStackTrace()

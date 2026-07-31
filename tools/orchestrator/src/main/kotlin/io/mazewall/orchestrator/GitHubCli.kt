@@ -360,6 +360,7 @@ class RealGitHubClient(private val config: OrchestratorConfig) : GitHubClient {
                 val output = tempFile.readText().trim()
                 val exitCode = process.exitValue()
                 if (exitCode != 0) {
+                    checkForAuthenticationFailure(command, exitCode, output)
                     throw ProcessExecutionException(command.joinToString(" "), exitCode, output)
                 }
                 output
@@ -528,3 +529,82 @@ data class GitHubPrStatus(
     val mergeable: String = "UNKNOWN",
     val mergeStateStatus: String = "UNKNOWN"
 )
+
+class CliAuthenticationException(
+    val tool: String,
+    val output: String,
+    message: String,
+    cause: Throwable? = null
+) : RuntimeException(message, cause)
+
+fun checkForAuthenticationFailure(command: Array<out String>, exitCode: Int, output: String) {
+    val lowerOutput = output.lowercase()
+    val fullCommand = command.joinToString(" ")
+
+    val executable = command.firstOrNull()?.split('/', '\\')?.lastOrNull()?.lowercase()?.removeSuffix(".exe") ?: ""
+    val tool = when (executable) {
+        "gh" -> "gh"
+        "jules" -> "jules"
+        "agy" -> "agy"
+        else -> null
+    }
+
+    if (tool != null) {
+        val isAuthFailure = when (tool) {
+            "gh" -> lowerOutput.contains("not authenticated") || lowerOutput.contains("gh_token") || lowerOutput.contains("sign in")
+            "jules" -> lowerOutput.contains("not logged in") || lowerOutput.contains("authentication required") || lowerOutput.contains("unauthorized")
+            "agy" -> lowerOutput.contains("token validation")
+            else -> false
+        }
+
+        if (isAuthFailure) {
+            val toolFriendlyName = when (tool) {
+                "gh" -> "GitHub CLI"
+                "jules" -> "Jules CLI"
+                "agy" -> "Antigravity CLI"
+                else -> tool
+            }
+            throw CliAuthenticationException(
+                tool = tool,
+                output = output,
+                message = "CLI Authentication Failure: $toolFriendlyName is not authenticated. Command: '$fullCommand'. Output: $output"
+            )
+        }
+    }
+}
+
+fun handleCliAuthFailure(env: OrchestratorEnvironment, ex: CliAuthenticationException) {
+    val resolutionInstructions = when (ex.tool) {
+        "gh" -> "Please run `gh auth login` on the host to continue."
+        "jules" -> "Please run `jules login` on the host to continue."
+        "agy" -> "Please run `agy login` on the host to continue."
+        else -> "Please log in on the host to continue."
+    }
+
+    val toolName = when (ex.tool) {
+        "gh" -> "GitHub CLI"
+        "jules" -> "Jules CLI"
+        "agy" -> "Antigravity CLI"
+        else -> ex.tool
+    }
+
+    val warningBanner = """
+
+        ################################################################################
+        ⚠️ CLI AUTHENTICATION FAILURE DETECTED!
+        Tool: $toolName
+        Error: ${ex.message}
+        Resolution: $resolutionInstructions
+        ################################################################################
+
+    """.trimIndent()
+
+    env.errPrintln(warningBanner)
+
+    val telegramMessage = "⚠️ *$toolName is not authenticated.* $resolutionInstructions"
+    try {
+        env.sendNotification(telegramMessage)
+    } catch (e: Exception) {
+        env.errPrintln("⚠️ Failed to send Telegram notification: ${e.message}")
+    }
+}

@@ -196,7 +196,7 @@ class ProfilerDesignSpec :
                 reader.readStringResult = "/tmp/test.txt"
 
                 val syscallMap = mapOf(2 to "OPEN")
-                val handler = ProfilerSessionHandler(
+                ProfilerSessionHandler(
                     FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(10),
                     FileDescriptor.unsafe<FileDescriptorRole.SeccompNotif>(20),
                     transport,
@@ -204,25 +204,20 @@ class ProfilerDesignSpec :
                     transport,
                     reader,
                     syscallMap
-                ) {}
+                ) {}.use { handler ->
+                    io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
+                        val pollFds = arena.allocate(MemoryLayout.sequenceLayout(2, Layouts.POLLFD))
+                        pollFds.writeShort(6L, NativeConstants.POLLIN)
 
-                io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
-                    val notif = arena.allocate(Layouts.SECCOMP_NOTIF)
-                    val resp = arena.allocate(Layouts.SECCOMP_NOTIF_RESP)
-                    val ackBuf = arena.allocate(1L)
-                    val socketPollFd = arena.allocate(Layouts.POLLFD)
+                        val action = with(arena) { handler.handleActiveListener(pollFds) }
 
-                    val pollFds = arena.allocate(MemoryLayout.sequenceLayout(2, Layouts.POLLFD))
-                    pollFds.writeShort(6L, NativeConstants.POLLIN)
-
-                    val action = with(arena) { handler.handleActiveListener(pollFds, ackBuf, notif, resp, socketPollFd) }
-
-                    action shouldBe LoopAction.Continue
-                    transport.sentEvents.size shouldBe 1
-                    transport.sentEvents[0].syscallName shouldBe "OPEN"
-                    transport.sentEvents[0].tid shouldBe Tid(456)
-                    transport.sentEvents[0].paths shouldBe listOf("/tmp/test.txt")
-                    transport.ioctlCalls.contains(0xc0182101L) shouldBe true // SECCOMP_IOCTL_NOTIF_SEND
+                        action shouldBe LoopAction.Continue
+                        transport.sentEvents.size shouldBe 1
+                        transport.sentEvents[0].syscallName shouldBe "OPEN"
+                        transport.sentEvents[0].tid shouldBe Tid(456)
+                        transport.sentEvents[0].paths shouldBe listOf("/tmp/test.txt")
+                        transport.ioctlCalls.contains(0xc0182101L) shouldBe true // SECCOMP_IOCTL_NOTIF_SEND
+                    }
                 }
             }
 
@@ -237,7 +232,7 @@ class ProfilerDesignSpec :
                 reader.resolveLinkResult = "/home/user"
 
                 val syscallMap = mapOf(257 to "OPENAT")
-                val handler = ProfilerSessionHandler(
+                ProfilerSessionHandler(
                     FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(10),
                     FileDescriptor.unsafe<FileDescriptorRole.SeccompNotif>(20),
                     transport,
@@ -245,21 +240,17 @@ class ProfilerDesignSpec :
                     transport,
                     reader,
                     syscallMap
-                ) {}
+                ) {}.use { handler ->
+                    io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
+                        val pollFds = arena.allocate(MemoryLayout.sequenceLayout(2, Layouts.POLLFD))
+                        pollFds.writeShort(6L, NativeConstants.POLLIN)
 
-                io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
-                    val notif = arena.allocate(Layouts.SECCOMP_NOTIF)
-                    val resp = arena.allocate(Layouts.SECCOMP_NOTIF_RESP)
-                    val ackBuf = arena.allocate(1L)
-                    val socketPollFd = arena.allocate(Layouts.POLLFD)
-                    val pollFds = arena.allocate(MemoryLayout.sequenceLayout(2, Layouts.POLLFD))
-                    pollFds.writeShort(6L, NativeConstants.POLLIN)
-
-                    with(arena) {
-                        handler.handleActiveListener(pollFds, ackBuf, notif, resp, socketPollFd)
+                        with(arena) {
+                            handler.handleActiveListener(pollFds)
+                        }
+                        transport.sentEvents.size shouldBe 1
+                        transport.sentEvents[0].paths shouldBe listOf("/home/user/relative.txt")
                     }
-                    transport.sentEvents.size shouldBe 1
-                    transport.sentEvents[0].paths shouldBe listOf("/home/user/relative.txt")
                 }
             }
         }
