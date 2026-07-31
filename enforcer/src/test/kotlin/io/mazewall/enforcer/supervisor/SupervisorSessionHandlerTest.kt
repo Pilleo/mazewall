@@ -981,6 +981,216 @@ class SupervisorSessionHandlerTest {
     }
 
     @Test
+    fun `handleAcceptAsync cleans up resources on accept4 failure`() {
+        val closedFds = mutableSetOf<Int>()
+
+        val mockEngine = object : MockNativeEngine() {
+            override val fileSystem = object : io.mazewall.MockNativeFileSystem() {
+                override fun close(fd: FileDescriptor<*, FdState.Open>): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                    closedFds.add(fd.value)
+                    return LinuxNative.SyscallResult.Success(0L)
+                }
+            }
+
+            override val process = object : io.mazewall.MockNativeProcess() {
+                override fun pidfdOpen(tgid: Int, flags: Int): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                    return LinuxNative.SyscallResult.Success(100L) // pidfd = 100
+                }
+
+                override fun pidfdGetFd(pidfd: Int, targetFd: Int, flags: Int): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                    return LinuxNative.SyscallResult.Success(200L) // dupFd = 200
+                }
+            }
+
+            override val networking = object : MockNativeNetworking() {
+                override fun accept4(
+                    fd: FileDescriptor<*, FdState.Open>,
+                    addr: io.mazewall.ffi.memory.ManagedSegment,
+                    addrlen: io.mazewall.ffi.memory.ManagedSegment,
+                    flags: Int
+                ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                    // Simulate accept4 failure
+                    return LinuxNative.SyscallResult.Error(io.mazewall.ffi.NativeConstants.EBADF, -1L)
+                }
+            }
+
+            override val raw: RawSyscallOperations = object : RawSyscallOperations by this {
+                override fun ioctl(
+                    fd: FileDescriptor<*, FdState.Open>,
+                    request: Long,
+                    arg: io.mazewall.ffi.memory.ManagedSegment,
+                ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                    return LinuxNative.SyscallResult.Success(0L)
+                }
+            }
+        }
+
+        try {
+            LinuxNative.setEngine(mockEngine)
+
+            val handler = SupervisorSessionHandler(
+                FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(10),
+                FileDescriptor.unsafe<FileDescriptorRole.SeccompNotif>(11),
+                engine = mockEngine
+            )
+
+            val handleAcceptAsyncMethod = SupervisorSessionHandler::class.java.getDeclaredMethods().first {
+                it.name.startsWith("handleAcceptAsync") && !it.name.contains("$") && it.parameterCount == 5
+            }
+            handleAcceptAsyncMethod.isAccessible = true
+
+            val arch = io.mazewall.core.Arch.current()
+
+            val paramTypes = handleAcceptAsyncMethod.parameterTypes
+            val argsToPass = arrayOfNulls<Any>(paramTypes.size)
+            for (i in paramTypes.indices) {
+                val type = paramTypes[i]
+                when {
+                    type == Long::class.javaPrimitiveType || type == java.lang.Long::class.java -> {
+                        argsToPass[i] = 12345L
+                    }
+                    type == Int::class.javaPrimitiveType || type == java.lang.Integer::class.java -> {
+                        if (i == 1) {
+                            argsToPass[i] = arch.accept
+                        } else {
+                            argsToPass[i] = 999
+                        }
+                    }
+                    type == LongArray::class.java -> {
+                        argsToPass[i] = LongArray(6) { 55L }
+                    }
+                    type.name.contains("Tid") -> {
+                        argsToPass[i] = io.mazewall.core.Tid(999)
+                    }
+                    type.name.contains("Arch") -> {
+                        argsToPass[i] = arch
+                    }
+                }
+            }
+
+            handleAcceptAsyncMethod.invoke(handler, *argsToPass)
+
+            // Wait for daemon thread
+            var attempts = 0
+            while (attempts < 20 && (!closedFds.contains(100) || !closedFds.contains(200))) {
+                Thread.sleep(50)
+                attempts++
+            }
+
+            // Verify both pidfd and dupFd are closed
+            assertEquals(true, closedFds.contains(100), "pidfd (100) should have been closed")
+            assertEquals(true, closedFds.contains(200), "dupFd (200) should have been closed")
+        } finally {
+            LinuxNative.resetToDefault()
+        }
+    }
+
+    @Test
+    fun `handleAcceptAsync cleans up resources on success`() {
+        val closedFds = mutableSetOf<Int>()
+
+        val mockEngine = object : MockNativeEngine() {
+            override val fileSystem = object : io.mazewall.MockNativeFileSystem() {
+                override fun close(fd: FileDescriptor<*, FdState.Open>): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                    closedFds.add(fd.value)
+                    return LinuxNative.SyscallResult.Success(0L)
+                }
+            }
+
+            override val process = object : io.mazewall.MockNativeProcess() {
+                override fun pidfdOpen(tgid: Int, flags: Int): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                    return LinuxNative.SyscallResult.Success(100L) // pidfd = 100
+                }
+
+                override fun pidfdGetFd(pidfd: Int, targetFd: Int, flags: Int): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                    return LinuxNative.SyscallResult.Success(200L) // dupFd = 200
+                }
+            }
+
+            override val networking = object : MockNativeNetworking() {
+                override fun accept4(
+                    fd: FileDescriptor<*, FdState.Open>,
+                    addr: io.mazewall.ffi.memory.ManagedSegment,
+                    addrlen: io.mazewall.ffi.memory.ManagedSegment,
+                    flags: Int
+                ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                    return LinuxNative.SyscallResult.Success(300L) // clientFd = 300
+                }
+            }
+
+            override val raw: RawSyscallOperations = object : RawSyscallOperations by this {
+                override fun ioctl(
+                    fd: FileDescriptor<*, FdState.Open>,
+                    request: Long,
+                    arg: io.mazewall.ffi.memory.ManagedSegment,
+                ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                    return LinuxNative.SyscallResult.Success(0L) // successful injection ioctl
+                }
+            }
+        }
+
+        try {
+            LinuxNative.setEngine(mockEngine)
+
+            val handler = SupervisorSessionHandler(
+                FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(10),
+                FileDescriptor.unsafe<FileDescriptorRole.SeccompNotif>(11),
+                engine = mockEngine
+            )
+
+            val handleAcceptAsyncMethod = SupervisorSessionHandler::class.java.getDeclaredMethods().first {
+                it.name.startsWith("handleAcceptAsync") && !it.name.contains("$") && it.parameterCount == 5
+            }
+            handleAcceptAsyncMethod.isAccessible = true
+
+            val arch = io.mazewall.core.Arch.current()
+
+            val paramTypes = handleAcceptAsyncMethod.parameterTypes
+            val argsToPass = arrayOfNulls<Any>(paramTypes.size)
+            for (i in paramTypes.indices) {
+                val type = paramTypes[i]
+                when {
+                    type == Long::class.javaPrimitiveType || type == java.lang.Long::class.java -> {
+                        argsToPass[i] = 12345L
+                    }
+                    type == Int::class.javaPrimitiveType || type == java.lang.Integer::class.java -> {
+                        if (i == 1) {
+                            argsToPass[i] = arch.accept
+                        } else {
+                            argsToPass[i] = 999
+                        }
+                    }
+                    type == LongArray::class.java -> {
+                        argsToPass[i] = LongArray(6) { 55L }
+                    }
+                    type.name.contains("Tid") -> {
+                        argsToPass[i] = io.mazewall.core.Tid(999)
+                    }
+                    type.name.contains("Arch") -> {
+                        argsToPass[i] = arch
+                    }
+                }
+            }
+
+            handleAcceptAsyncMethod.invoke(handler, *argsToPass)
+
+            // Wait for daemon thread
+            var attempts = 0
+            while (attempts < 20 && (!closedFds.contains(100) || !closedFds.contains(200) || !closedFds.contains(300))) {
+                Thread.sleep(50)
+                attempts++
+            }
+
+            // Verify all descriptors are closed
+            assertEquals(true, closedFds.contains(100), "pidfd (100) should have been closed")
+            assertEquals(true, closedFds.contains(200), "dupFd (200) should have been closed")
+            assertEquals(true, closedFds.contains(300), "clientFd (300) should have been closed")
+        } finally {
+            LinuxNative.resetToDefault()
+        }
+    }
+
+    @Test
     fun `testOpenFileInSupervisorWithRelativePath`() {
         var openCalledWithAtFdcwd = false
         var capturedPath: String? = null
