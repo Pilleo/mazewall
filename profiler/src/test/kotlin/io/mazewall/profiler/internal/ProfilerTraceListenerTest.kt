@@ -241,4 +241,41 @@ class ProfilerTraceListenerTest {
             LinuxNative.resetToDefault()
         }
     }
+
+    @Test
+    fun `idempotency guard prevents double close even under multiple sequential and asynchronous close attempts`() {
+        val closeCount = AtomicInteger(0)
+        val mock = MockNativeEngine(
+            fileSystem = object : MockNativeFileSystem() {
+                override fun close(fd: FileDescriptor<*, FdState.Open>): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                    closeCount.incrementAndGet()
+                    return LinuxNative.SyscallResult.Success(0L)
+                }
+            }
+        )
+
+        LinuxNative.setEngine(mock)
+        try {
+            val socketFd = FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(104)
+            val listener = ProfilerTraceListener(
+                socketFd = socketFd,
+                accumulatedLogs = mutableListOf(),
+                stackTracesMap = null,
+                pathCache = mutableMapOf()
+            )
+
+            // Trigger close across all possible sequences:
+            // 1. Explicit listener.close()
+            listener.close()
+            // 2. Sequential call to close()
+            listener.close()
+            // 3. Sequential call to passThrough() which also closes the socket
+            listener.passThrough()
+
+            // Verify the native file system close was called exactly once
+            assertEquals(1, closeCount.get())
+        } finally {
+            LinuxNative.resetToDefault()
+        }
+    }
 }
