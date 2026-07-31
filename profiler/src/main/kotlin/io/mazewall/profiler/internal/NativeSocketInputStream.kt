@@ -48,6 +48,7 @@ internal class NativeSocketInputStream(
     override fun read(): Int {
         var eintrCount = 0
         while (true) {
+            // Guard against tight-loop CPU spinning under interruption spikes by checking interrupted state
             if (Thread.currentThread().isInterrupted) {
                 Thread.currentThread().interrupt()
                 throw InterruptedIOException("Thread [${Thread.currentThread().name}] interrupted during native socket read")
@@ -88,6 +89,7 @@ internal class NativeSocketInputStream(
         val count = Math.min(len.toLong(), BUFFER_SIZE.toLong())
         var eintrCount = 0
         while (true) {
+            // Guard against tight-loop CPU spinning under interruption spikes by checking interrupted state
             if (Thread.currentThread().isInterrupted) {
                 Thread.currentThread().interrupt()
                 throw InterruptedIOException("Thread [${Thread.currentThread().name}] interrupted during native socket readWithRetry")
