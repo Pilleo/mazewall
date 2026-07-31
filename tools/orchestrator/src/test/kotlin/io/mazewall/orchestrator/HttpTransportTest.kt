@@ -45,7 +45,7 @@ class HttpTransportTest {
                         FakeHttpResponse(200, """{"activities": [{"name": "act1", "sessionFailed": {"reason": "Oops"}, "userMessaged": {"userMessage": "unable to complete"}}]}""")
                     }
                     req.uri().path.contains("sessions") -> {
-                        FakeHttpResponse(200, """{"sessions": [{"name": "sessions/s1", "title": "[issue-123] description", "state": "FAILED"}]}""")
+                        FakeHttpResponse(200, """{"sessions": [{"name": "sessions/14927969181089226847", "title": "[issue-123] description", "state": "FAILED"}]}""")
                     }
                     else -> FakeHttpResponse(404, "Not Found")
                 }
@@ -53,10 +53,10 @@ class HttpTransportTest {
             val client = RealJulesClient(config, fakeTransport)
             val sessions = client.listSessions()
             assertEquals(1, sessions.size)
-            assertEquals("s1", sessions[0].id)
+            assertEquals("14927969181089226847", sessions[0].id)
             assertEquals("FAILED", sessions[0].status)
 
-            val status = client.getSessionStatusFromActivities("s1")
+            val status = client.getSessionStatusFromActivities("14927969181089226847")
             assertEquals("failed", status)
         } finally {
             System.clearProperty("JULES_API_KEY")
@@ -90,5 +90,62 @@ class HttpTransportTest {
         val sendMsgRequest = fakeTransport.requests.find { it.uri().path.contains("sendMessage") }
         assertNotNull(sendMsgRequest)
         assertEquals("POST", sendMsgRequest.method())
+    }
+
+    @Test
+    fun testJulesSessionIdParsingAndSortingExceedingLongMax() {
+        System.setProperty("JULES_API_KEY", "fake-api-key")
+        try {
+            val config = OrchestratorConfig()
+            val fakeTransport = FakeHttpTransport { req ->
+                when {
+                    req.uri().path.contains("sessions") -> {
+                        FakeHttpResponse(200, """
+                            {
+                              "sessions": [
+                                {
+                                  "name": "sessions/9223372036854775807",
+                                  "title": "[issue-195] Long.MAX_VALUE",
+                                  "state": "ACTIVE"
+                                },
+                                {
+                                  "name": "sessions/14927969181089226847",
+                                  "title": "[issue-195] Exceeds Long.MAX_VALUE",
+                                  "state": "ACTIVE"
+                                },
+                                {
+                                  "name": "sessions/invalid-id-123",
+                                  "title": "[issue-195] Invalid",
+                                  "state": "ACTIVE"
+                                },
+                                {
+                                  "name": "sessions/500",
+                                  "title": "[issue-195] Small id",
+                                  "state": "ACTIVE"
+                                }
+                              ]
+                            }
+                        """.trimIndent())
+                    }
+                    else -> FakeHttpResponse(404, "Not Found")
+                }
+            }
+            val client = RealJulesClient(config, fakeTransport)
+
+            // 1. Verify listSessions filters out non-numeric and retains numeric IDs (even if > Long.MAX_VALUE)
+            val sessions = client.listSessions()
+            assertEquals(3, sessions.size)
+            assertTrue(sessions.any { it.id == "9223372036854775807" })
+            assertTrue(sessions.any { it.id == "14927969181089226847" })
+            assertTrue(sessions.any { it.id == "500" })
+            assertFalse(sessions.any { it.id == "invalid-id-123" })
+
+            // 2. Verify getActiveSession sorts descending numerically (not lexicographically)
+            val activeSession = client.getActiveSession("issue-195")
+            assertNotNull(activeSession)
+            assertEquals("14927969181089226847", activeSession.id)
+        } finally {
+            System.clearProperty("JULES_API_KEY")
+        }
     }
 }
