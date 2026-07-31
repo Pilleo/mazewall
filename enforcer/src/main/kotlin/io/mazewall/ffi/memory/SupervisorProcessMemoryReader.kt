@@ -23,7 +23,19 @@ public object SupervisorProcessMemoryReader {
         if (remoteAddr == 0L) return null
         val bytes = readBytes(tid, remoteAddr, maxLen, warnOnEperm) ?: return null
         var len = 0
-        while (len < bytes.size && bytes[len] != 0.toByte()) len++
+        var hasNullTerminator = false
+        while (len < bytes.size) {
+            if (bytes[len] == 0.toByte()) {
+                hasNullTerminator = true
+                break
+            }
+            len++
+        }
+        if (!hasNullTerminator) {
+            throw io.mazewall.enforcer.ContainmentViolationException(
+                "Remote string from TID ${tid.value} at address 0x${remoteAddr.toString(16)} lacks null terminator within $maxLen bytes."
+            )
+        }
         return String(bytes, 0, len, StandardCharsets.UTF_8)
     }
 

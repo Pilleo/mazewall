@@ -47,7 +47,7 @@ class MemoryReaderTest {
     }
 
     @Test
-    fun `test readStringFromProcess returns best-effort string when null terminator is missing`() {
+    fun `test readStringFromProcess throws ContainmentViolationException when null terminator is missing`() {
         val tid = Tid(1234)
         val remoteAddr = 0x1000L
         val mockData = "unterminated string".toByteArray(StandardCharsets.UTF_8)
@@ -69,8 +69,9 @@ class MemoryReaderTest {
         try {
             io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
                 val reader = RealMemoryReader
-                val result = with(arena) { reader.readStringFromProcess(tid, remoteAddr, mockData.size) }
-                assertEquals("unterminated string", result)
+                org.junit.jupiter.api.assertThrows<io.mazewall.enforcer.ContainmentViolationException> {
+                    with(arena) { reader.readStringFromProcess(tid, remoteAddr, mockData.size) }
+                }
             }
         } finally {
             LinuxNative.resetToDefault()
