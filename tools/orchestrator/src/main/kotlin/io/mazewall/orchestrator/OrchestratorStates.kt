@@ -604,6 +604,22 @@ data class CiRunningState(
             return this
         }
 
+        if (env.gitHubClient.isPrMerged(prNumber)) {
+            env.println("🎉 PR #$prNumber merged! resolving issue locally...")
+            return ResolveTaskState(issueId)
+        }
+
+        if (env.gitHubClient.isIssueClosed(githubIssueNumber)) {
+            env.println("\n\u001B[1;33m⚠️ GitHub issue #$githubIssueNumber was closed. Resolving and canceling task $issueId.\u001B[0m")
+            val nextIssue = env.parseAllIssues().firstOrNull { it.id == issueId }
+            if (nextIssue != null) {
+                env.markIssueAsResolved(nextIssue)
+            }
+            context.skippedIds.add(issueId)
+            context.activeSlots.remove(slot)
+            return SelectTaskState
+        }
+
         // Check if we are currently waiting for a failed session to transition out of failure
         if (slot.julesSessionFailureWaitAttempts > 0) {
             val retriedSession = env.julesClient.getActiveSession(issueId)
@@ -764,6 +780,17 @@ data class AwaitingReviewState(
         val currentTime = System.currentTimeMillis()
         if (currentTime < slot.retryAfterTime) {
             return this
+        }
+
+        if (env.gitHubClient.isIssueClosed(githubIssueNumber)) {
+            env.println("\n\u001B[1;33m⚠️ GitHub issue #$githubIssueNumber was closed. Resolving and canceling task $issueId.\u001B[0m")
+            val nextIssue = env.parseAllIssues().firstOrNull { it.id == issueId }
+            if (nextIssue != null) {
+                env.markIssueAsResolved(nextIssue)
+            }
+            context.skippedIds.add(issueId)
+            context.activeSlots.remove(slot)
+            return SelectTaskState
         }
 
         // Check if we are currently waiting for a failed session to transition out of failure

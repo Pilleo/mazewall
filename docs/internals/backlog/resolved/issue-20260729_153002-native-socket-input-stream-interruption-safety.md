@@ -11,7 +11,7 @@ target_files:
   - "profiler/src/main/kotlin/io/mazewall/profiler/internal/NativeSocketInputStream.kt"
 effort: "medium"
 autonomy: "autonomous"
-github_issue: 405
+github_issue: 431
 ---
 
 # 🔴 [Severity: HIGH]: Enhance NativeSocketInputStream with Interruption Checking and Backoff Throttling to Prevent CPU Spinning

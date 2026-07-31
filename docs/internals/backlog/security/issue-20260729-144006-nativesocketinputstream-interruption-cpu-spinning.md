@@ -11,6 +11,7 @@ target_files:
   - "profiler/src/main/kotlin/io/mazewall/profiler/internal/NativeSocketInputStream.kt"
 effort: "medium"
 autonomy: "autonomous"
+github_issue: 442
 ---
 
 # 🔴 [Severity: HIGH]: Prevent CPU spinning and infinite loops on EINTR inside NativeSocketInputStream during thread interruption
