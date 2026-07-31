@@ -11,6 +11,7 @@ target_files:
   - "tools/orchestrator/src/main/kotlin/io/mazewall/orchestrator/OrchestratorStates.kt"
 effort: "medium"
 autonomy: "autonomous"
+github_issue: 465
 ---
 
 # 🔴 [Severity: HIGH]: Refactor Orchestrator States to Be Fully Non-Blocking to Enable True Concurrent Task Execution

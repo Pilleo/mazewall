@@ -11,6 +11,7 @@ target_files:
   - "profiler/src/main/kotlin/io/mazewall/profiler/engine/ProfilerDaemonEngine.kt"
 effort: "small"
 autonomy: "autonomous"
+github_issue: 462
 ---
 
 # 🔴 [Severity: HIGH]: Prevent Socket FD Leak in ProfilerDaemonEngine on Connection Thread Spawn Failure
