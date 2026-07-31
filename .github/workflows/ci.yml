@@ -17,9 +17,9 @@ jobs:
             pull-requests: write
         steps:
             - name: Checkout Code
-              uses: actions/checkout@v4
+              uses: actions/checkout@v6
             - name: Set up JDK 25
-              uses: actions/setup-java@v4
+              uses: actions/setup-java@v5
               with:
                   java-version: "25"
                   distribution: "temurin"
@@ -46,7 +46,7 @@ jobs:
                       gradle-build-cache-${{ runner.os }}-
 
             - name: Setup Gradle
-              uses: gradle/actions/setup-gradle@v4
+              uses: gradle/actions/setup-gradle@v6
               with:
                   cache-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
             - name: Grant Execute Permission for Gradlew
@@ -104,13 +104,16 @@ jobs:
               with:
                   path: ${{ github.workspace }}/.cache/podman-image
                   key: podman-image-${{ hashFiles('infra/dev/Containerfile', 'demos/vulnerable-web-app/Containerfile') }}
+            - name: Get Current Date for NVD Cache Key
+              id: nvd-date
+              run: echo "date=$(date -u +'%Y-%m-%d')" >> $GITHUB_OUTPUT
             - name: Restore NVD Database Cache
               uses: actions/cache/restore@v4
               with:
                   path: |
                       ~/.gradle/dependency-check-data
                       ${{ github.workspace }}/.gradle/dependency-check-data
-                  key: nvd-database-${{ runner.os }}-${{ github.run_id }}
+                  key: nvd-database-${{ runner.os }}-${{ steps.nvd-date.outputs.date }}
                   restore-keys: |
                       nvd-database-${{ runner.os }}-
             - name: Run Security Check
@@ -130,7 +133,7 @@ jobs:
                   path: |
                       ~/.gradle/dependency-check-data
                       ${{ github.workspace }}/.gradle/dependency-check-data
-                  key: nvd-database-${{ runner.os }}-${{ github.run_id }}
+                  key: nvd-database-${{ runner.os }}-${{ steps.nvd-date.outputs.date }}
             - name: Save Gradle Build Cache (Master Only)
               uses: actions/cache/save@v4
               if: always() && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
