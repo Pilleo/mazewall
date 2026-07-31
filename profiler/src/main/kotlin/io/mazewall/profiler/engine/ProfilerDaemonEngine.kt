@@ -237,7 +237,7 @@ public class ProfilerDaemonEngine(
         socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>,
         listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open>,
     ) {
-        val sessionHandler = ProfilerSessionHandler(
+        ProfilerSessionHandler(
             socketFd = socketFd,
             listenerFd = listenerFd,
             publisher = publisher,
@@ -246,15 +246,10 @@ public class ProfilerDaemonEngine(
             memoryReader = memoryReader,
             syscallMap = syscallMap,
             onShutdown = this::triggerGlobalShutdown,
-        )
-        try {
-            NativeArena.ofConfined().use { sessionArena ->
-                val pollFds = with(sessionArena) { setupSessionPoll(socketFd, listenerFd) }
-                val notif = SegmentPool.SECCOMP_NOTIF_POOL.rent()
-                val resp = SegmentPool.SECCOMP_NOTIF_RESP_POOL.rent()
-                try {
-                    val ackBuf = sessionArena.allocate(1L)
-                    val socketPollFd = sessionArena.allocate(Layouts.POLLFD)
+        ).use { sessionHandler ->
+            try {
+                NativeArena.ofConfined().use { sessionArena ->
+                    val pollFds = with(sessionArena) { setupSessionPoll(socketFd, listenerFd) }
 
                     while (!isGlobalShutdown()) {
                         val pollRes = ioOps.raw.poll(pollFds, 2L, POLL_TIMEOUT_MS)
@@ -266,20 +261,17 @@ public class ProfilerDaemonEngine(
 
                         NativeArena.ofConfined().use { iterationArena ->
                             val action = with(iterationArena) {
-                                sessionHandler.handleActiveListener(pollFds, ackBuf, notif, resp, socketPollFd)
+                                sessionHandler.handleActiveListener(pollFds)
                             }
                             if (action !is LoopAction.Continue) break
                         }
                         if (isGlobalShutdown()) break
                     }
-                } finally {
-                    SegmentPool.SECCOMP_NOTIF_POOL.release(notif)
-                    SegmentPool.SECCOMP_NOTIF_RESP_POOL.release(resp)
                 }
+            } finally {
+                activeListeners.remove(listenerFd)
+                socketManager.close(listenerFd)
             }
-        } finally {
-            activeListeners.remove(listenerFd)
-            socketManager.close(listenerFd)
         }
     }
 
