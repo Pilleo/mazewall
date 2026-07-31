@@ -9,7 +9,7 @@ import kotlin.test.assertTrue
 
 class VirtualThreadGuardrailTest : BaseIntegrationTest() {
     @Test
-    fun `installOnCurrentThread throws IllegalStateException on virtual thread`() {
+    fun `installOnCurrentThread throws UnsupportedOperationException on virtual thread`() {
         val executor = Executors.newVirtualThreadPerTaskExecutor()
         try {
             val future =
@@ -20,7 +20,7 @@ class VirtualThreadGuardrailTest : BaseIntegrationTest() {
                 assertFailsWith<ExecutionException> {
                     future.get()
                 }
-            assertTrue(exception.cause is IllegalStateException)
+            assertTrue(exception.cause is UnsupportedOperationException)
             assertTrue(exception.cause!!.message!!.contains("virtual thread"))
         } finally {
             executor.shutdown()
@@ -63,7 +63,7 @@ class VirtualThreadGuardrailTest : BaseIntegrationTest() {
     }
 
     @Test
-    fun `installOnProcess throws IllegalStateException on virtual thread`() {
+    fun `installOnProcess throws UnsupportedOperationException on virtual thread`() {
         val executor = Executors.newVirtualThreadPerTaskExecutor()
         try {
             val future =
@@ -74,7 +74,7 @@ class VirtualThreadGuardrailTest : BaseIntegrationTest() {
                 assertFailsWith<ExecutionException> {
                     future.get()
                 }
-            assertTrue(exception.cause is IllegalStateException)
+            assertTrue(exception.cause is UnsupportedOperationException)
             assertTrue(exception.cause!!.message!!.contains("virtual thread"))
         } finally {
             executor.shutdown()
