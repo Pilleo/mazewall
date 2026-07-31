@@ -11,7 +11,7 @@ target_files:
   - "enforcer/src/main/kotlin/io/mazewall/enforcer/supervisor/SupervisorSessionHandler.kt"
 effort: "medium"
 autonomy: "autonomous"
-github_issue: 406
+github_issue: 439
 ---
 
 # 🔴 [Severity: HIGH]: Prevent file descriptor and local socket leaks in Supervisor's async accept worker thread under failure conditions

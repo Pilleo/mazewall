@@ -278,19 +278,31 @@ class RealGitHubClient(private val config: OrchestratorConfig) : GitHubClient {
     }
 
     override fun isIssueClosed(issueNumber: String): Boolean {
-        val state = execute("gh", "issue", "view", issueNumber, "--json", "state")
-        return state.contains("\"state\":\"CLOSED\"", ignoreCase = true)
+        return try {
+            val state = execute("gh", "issue", "view", issueNumber, "--json", "state")
+            state.contains("\"state\":\"CLOSED\"", ignoreCase = true)
+        } catch (_: Exception) {
+            false
+        }
     }
 
     override fun isPrClosed(prNumber: String): Boolean {
-        val state = execute("gh", "pr", "view", prNumber, "--json", "state")
-        return state.contains("\"state\":\"CLOSED\"", ignoreCase = true) ||
-               state.contains("\"state\":\"MERGED\"", ignoreCase = true)
+        return try {
+            val state = execute("gh", "pr", "view", prNumber, "--json", "state")
+            state.contains("\"state\":\"CLOSED\"", ignoreCase = true) ||
+                   state.contains("\"state\":\"MERGED\"", ignoreCase = true)
+        } catch (_: Exception) {
+            false
+        }
     }
 
     override fun isPrMerged(prNumber: String): Boolean {
-        val state = execute("gh", "pr", "view", prNumber, "--json", "state")
-        return state.contains("\"state\":\"MERGED\"", ignoreCase = true)
+        return try {
+            val state = execute("gh", "pr", "view", prNumber, "--json", "state")
+            state.contains("\"state\":\"MERGED\"", ignoreCase = true)
+        } catch (_: Exception) {
+            false
+        }
     }
 
     override fun getPrComments(prNumber: String): List<GitHubComment> {
