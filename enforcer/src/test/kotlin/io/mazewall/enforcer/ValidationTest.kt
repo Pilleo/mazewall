@@ -25,7 +25,7 @@ class ValidationTest {
         val e = assertThrows(java.util.concurrent.ExecutionException::class.java) {
             future.get()
         }
-        assumeTrue(e.cause is IllegalStateException)
+        org.junit.jupiter.api.Assertions.assertTrue(e.cause is UnsupportedOperationException)
     }
 
     @Test
@@ -43,6 +43,19 @@ class ValidationTest {
         val e = assertThrows(java.util.concurrent.ExecutionException::class.java) {
             future.get()
         }
-        assumeTrue(e.cause is IllegalStateException)
+        org.junit.jupiter.api.Assertions.assertTrue(e.cause is UnsupportedOperationException)
+    }
+
+    @Test
+    fun `test validateNotVirtual throws on carrier thread`() {
+        // Run on a ForkJoinPool thread (standard carrier thread name format)
+        val pool = java.util.concurrent.ForkJoinPool.commonPool()
+        val future = pool.submit(java.util.concurrent.Callable {
+            validateNotVirtual()
+        })
+        val e = assertThrows(java.util.concurrent.ExecutionException::class.java) {
+            future.get()
+        }
+        org.junit.jupiter.api.Assertions.assertTrue(e.cause is UnsupportedOperationException)
     }
 }
