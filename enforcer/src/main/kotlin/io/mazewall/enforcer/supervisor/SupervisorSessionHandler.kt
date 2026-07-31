@@ -302,16 +302,32 @@ internal class SupervisorSessionHandler(
                     // Since these paths contain trusted platform/application classes and libraries that are already loaded
                     // or destined to be loaded, it is safe to bypass policy evaluation and directly inject the file descriptor.
                     val isOpen = nr == traceeArch.open || nr == traceeArch.openat || nr == traceeArch.openat2
+                    var resolvedPathStr: String? = extracted.pathStr
                     if (isOpen && extracted.pathStr != null) {
                         val pathStr = extracted.pathStr
                         try {
-                            val path = resolveAbsolutePath(pidVal, extracted.dirfd, pathStr)
+                            var path = resolveAbsolutePath(pidVal, extracted.dirfd, pathStr)
+                            if (path == null) {
+                                if (!pathStr.startsWith("/")) {
+                                    try {
+                                        val baseDir = if (extracted.dirfd == AT_FDCWD) {
+                                            java.nio.file.Paths.get("/proc/$pidVal/cwd").toRealPath()
+                                        } else {
+                                            java.nio.file.Paths.get("/proc/$pidVal/fd/${extracted.dirfd}").toRealPath()
+                                        }
+                                        path = baseDir.resolve(pathStr).normalize()
+                                    } catch (ignored: Exception) {}
+                                } else {
+                                    path = java.nio.file.Paths.get(pathStr).normalize()
+                                }
+                            }
                             if (path != null) {
+                                val absPathStr = path.toAbsolutePath().toString()
+                                resolvedPathStr = absPathStr
                                 val matched = safeBypassPaths.any { bypassPath ->
                                     path.startsWith(bypassPath) || path == bypassPath
                                 }
                                 if (matched) {
-                                    val absPathStr = path.toAbsolutePath().toString()
                                     sendSeccompContinue(id, resp)
                                     logger.info { "[SUPERVISOR-DEBUG] Fast-path allow continue (matched) resolved=$absPathStr" }
                                     return true
@@ -330,13 +346,13 @@ internal class SupervisorSessionHandler(
                     }
 
                     logger.info { "[SUPERVISOR-DEBUG] Forwarding request to JVM validation listener" }
-                    val success = sendRequestToJvm(id, pidVal, archVal, ppid, nr, args, extracted.pathStr, extracted.sockaddrBytes)
+                    val success = sendRequestToJvm(id, pidVal, archVal, ppid, nr, args, resolvedPathStr, extracted.sockaddrBytes)
                     if (!success) {
                         logger.severe { "[SUPERVISOR-DEBUG] Failed to send request to JVM" }
                         return false
                     }
 
-                    val res = readAndHandleJvmResponse(id, nr, args, extracted.pathStr, extracted.sockaddrBytes, resp, tid, traceeArch)
+                    val res = readAndHandleJvmResponse(id, nr, args, resolvedPathStr, extracted.sockaddrBytes, resp, tid, traceeArch)
                     logger.info { "[SUPERVISOR-DEBUG] JVM validation handler response result=$res" }
                     return res
                 } catch (t: Throwable) {
@@ -699,7 +715,7 @@ internal class SupervisorSessionHandler(
         val pathSeg = arena.allocateFrom(pathStr)
         val dirfd = if (nr == arch.open || pathStr.startsWith("/")) AT_FDCWD else args[0].toInt()
         val res: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
-            if (dirfd == AT_FDCWD) {
+            if (dirfd == AT_FDCWD || pathStr.startsWith("/")) {
                 engine.fileSystem.open(pathSeg, io.mazewall.core.OpenFlags(flags))
             } else {
                 engine.fileSystem.openat(dirfd, pathSeg, io.mazewall.core.OpenFlags(flags))
