@@ -605,7 +605,12 @@ internal class SupervisorSessionHandler(
                             val pathBytesWithNull = ByteArray(pathBytes.size + 1)
                             System.arraycopy(pathBytes, 0, pathBytesWithNull, 0, pathBytes.size)
                             pathBytesWithNull[pathBytes.size] = 0.toByte()
-                            SupervisorProcessMemoryWriter.writeBytes(tid, pathAddr, pathBytesWithNull)
+                            val writeSuccess = SupervisorProcessMemoryWriter.writeBytes(tid, pathAddr, pathBytesWithNull)
+                            if (!writeSuccess) {
+                                logger.severe("[SUPERVISOR-DIAGNOSTIC] Failed memory write-back to tracee address space during execve/execveat TOCTOU mitigation. Denying system call with EPERM to fail closed.")
+                                sendSeccompError(id, NativeConstants.EPERM, resp)
+                                return true
+                            }
                         }
                         sendSeccompContinue(id, resp)
                         true

@@ -1055,4 +1055,122 @@ class SupervisorSessionHandlerTest {
             LinuxNative.resetToDefault()
         }
     }
+
+    @Test
+    fun `readAndHandleJvmResponse denies execve when memory writeback fails`() {
+        var lastIoctlRequest: Long? = null
+        var lastIoctlArg: io.mazewall.ffi.memory.ManagedSegment? = null
+        var vmWritevCalled = false
+
+        val mockMemory = object : io.mazewall.MockNativeMemory() {
+            override fun processVmWritev(
+                pid: io.mazewall.core.Pid,
+                localIov: io.mazewall.ffi.memory.ManagedSegment,
+                liovcnt: Long,
+                remoteIov: io.mazewall.ffi.memory.ManagedSegment,
+                riovcnt: Long,
+                flags: Long,
+            ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                vmWritevCalled = true
+                // Simulate write failure by returning an error instead of number of bytes written
+                return LinuxNative.SyscallResult.Error(io.mazewall.ffi.NativeConstants.EPERM, -1L)
+            }
+
+            override fun read(
+                fd: FileDescriptor<*, FdState.Open>,
+                buf: io.mazewall.ffi.memory.ManagedSegment,
+                count: Long,
+            ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                val respSeg = io.mazewall.ffi.memory.SupervisorResponseSegment.of(buf)
+                respSeg.setId(42L)
+                respSeg.setDecision(1.toByte()) // Request Allow Continue
+                respSeg.setErrorNr(0)
+                return LinuxNative.SyscallResult.Success(count)
+            }
+        }
+
+        val mockEngine = object : MockNativeEngine(memory = mockMemory) {
+            override val raw: RawSyscallOperations = object : RawSyscallOperations by this {
+                override fun poll(
+                    fds: io.mazewall.ffi.memory.ManagedSegment,
+                    nfds: Long,
+                    timeout: Int,
+                ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                    return LinuxNative.SyscallResult.Success(1L)
+                }
+
+                override fun ioctl(
+                    fd: FileDescriptor<*, FdState.Open>,
+                    request: Long,
+                    arg: io.mazewall.ffi.memory.ManagedSegment,
+                ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                    lastIoctlRequest = request
+                    lastIoctlArg = arg
+                    return LinuxNative.SyscallResult.Success(0L)
+                }
+            }
+        }
+
+        try {
+            LinuxNative.setEngine(mockEngine)
+
+            // Instantiate handler with dummy file descriptors
+            val handler = SupervisorSessionHandler(
+                FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(10),
+                FileDescriptor.unsafe<FileDescriptorRole.SeccompNotif>(11)
+            )
+
+            val method = SupervisorSessionHandler::class.java.getDeclaredMethods().first {
+                it.name.startsWith("readAndHandleJvmResponse") && !it.name.contains("$") && it.parameterCount == 9
+            }
+            method.isAccessible = true
+
+            val arch = io.mazewall.core.Arch.current()
+
+            io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
+                val dummyResp = arena.allocate(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_RESP)
+                val pathStr = "/bin/echo"
+
+                val paramTypes = method.parameterTypes
+                val argsToPass = arrayOfNulls<Any>(paramTypes.size)
+                argsToPass[0] = arena
+                argsToPass[1] = 42L
+                argsToPass[2] = arch.execve
+                argsToPass[3] = LongArray(6).apply { this[0] = 0x12345678L }
+                argsToPass[4] = pathStr
+                argsToPass[5] = null
+                argsToPass[6] = dummyResp
+                for (i in paramTypes.indices) {
+                    val type = paramTypes[i]
+                    if (type.name.contains("Tid")) {
+                        argsToPass[i] = io.mazewall.core.Tid(999)
+                    } else if (type.name.contains("Pid")) {
+                        argsToPass[i] = io.mazewall.core.Pid(999)
+                    } else if (i == 7 && (type == Int::class.javaPrimitiveType || type == java.lang.Integer::class.java)) {
+                        argsToPass[i] = 999
+                    }
+                }
+                argsToPass[8] = arch
+
+                val result = method.invoke(handler, *argsToPass) as Boolean
+
+                // Since memory writeback failed, it must deny the system call with EPERM, but continue supervisor notification loop.
+                assertEquals(true, result, "Should return true to continue processing notification loop")
+                assertEquals(true, vmWritevCalled, "process_vm_writev should be called for execve")
+
+                // SECCOMP_IOCTL_NOTIF_SEND is 0xc0182101L (since we call sendSeccompError)
+                assertEquals(io.mazewall.ffi.NativeConstants.SECCOMP_IOCTL_NOTIF_SEND, lastIoctlRequest)
+
+                // And it must deny with EPERM (and flags must be 0)
+                // RESP_ERR_OFF is 16, which should be -EPERM (-1)
+                val errVal = lastIoctlArg!!.readInt(16)
+                assertEquals(-io.mazewall.ffi.NativeConstants.EPERM.toInt(), errVal)
+
+                val flags = lastIoctlArg!!.readInt(20)
+                assertEquals(0, flags)
+            }
+        } finally {
+            LinuxNative.resetToDefault()
+        }
+    }
 }
