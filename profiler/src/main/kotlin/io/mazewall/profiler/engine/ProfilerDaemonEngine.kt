@@ -127,8 +127,9 @@ public class ProfilerDaemonEngine(
 
     @Suppress("TooGenericExceptionCaught", "SwallowedException")
     private fun handleNewConnection(serverFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>) {
+        var clientFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>? = null
         try {
-            val clientFd = socketManager.accept(serverFd)
+            clientFd = socketManager.accept(serverFd)
             clientSockets.add(clientFd)
             Thread { handleConnection(clientFd) }.apply {
                 name = "conn-handler-${clientFd.value}"
@@ -136,12 +137,25 @@ public class ProfilerDaemonEngine(
             }
         } catch (e: InterruptedException) {
             System.err.println("WARN: handleNewConnection interrupted: ${e.message}")
+            if (clientFd != null) {
+                clientSockets.remove(clientFd)
+                try { socketManager.close(clientFd) } catch (_: Exception) {}
+            }
             Thread.currentThread().interrupt()
         } catch (e: java.nio.channels.ClosedByInterruptException) {
             System.err.println("WARN: handleNewConnection channel closed by interrupt: ${e.message}")
+            if (clientFd != null) {
+                clientSockets.remove(clientFd)
+                try { socketManager.close(clientFd) } catch (_: Exception) {}
+            }
             Thread.currentThread().interrupt()
-        } catch (e: Exception) {
-            System.err.println("WARN: handleNewConnection failed: ${e.message}")
+        } catch (t: Throwable) {
+            System.err.println("WARN: Failed to start connection handler thread: ${t.message}")
+            if (clientFd != null) {
+                clientSockets.remove(clientFd)
+                try { socketManager.close(clientFd) } catch (_: Exception) {}
+            }
+            if (t is Error) throw t
         }
     }
 
