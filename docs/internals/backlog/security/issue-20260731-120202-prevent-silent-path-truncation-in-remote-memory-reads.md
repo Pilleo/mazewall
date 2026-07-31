@@ -11,6 +11,7 @@ target_files:
   - "enforcer/src/main/kotlin/io/mazewall/ffi/memory/SupervisorProcessMemoryReader.kt"
 effort: "medium"
 autonomy: "autonomous"
+github_issue: 452
 ---
 
 # ☣️ [Severity: CRITICAL]: Prevent Silent Path/String Truncation in Remote Process Memory Reads

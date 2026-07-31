@@ -11,7 +11,7 @@ target_files:
   - "tools/orchestrator/src/main/kotlin/io/mazewall/orchestrator/OrchestratorDaemon.kt"
 effort: "small"
 autonomy: "autonomous"
-github_issue: 404
+github_issue: 446
 ---
 
 # 🔴 [Severity: HIGH]: Automatically Resume and Re-import Orphaned In-Progress Backlog Tasks into Active Slots

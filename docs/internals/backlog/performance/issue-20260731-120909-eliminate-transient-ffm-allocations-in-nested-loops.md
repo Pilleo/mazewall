@@ -12,6 +12,7 @@ target_files:
   - "profiler/src/main/kotlin/io/mazewall/profiler/engine/ProfilerSessionHandler.kt"
 effort: "medium"
 autonomy: "autonomous"
+github_issue: 448
 ---
 
 # 🔶 [Severity: MEDIUM]: Eliminate Transient FFM Allocations and Memory Leaks in Nested Loops
