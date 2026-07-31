@@ -39,15 +39,31 @@ internal class ProfilerTraceListener(
 ) : AutoCloseable {
     private val logger = Logger.getLogger(ProfilerTraceListener::class.java.name)
     private val closed = AtomicBoolean(false)
+    // Thread-safe idempotent close guard to prevent native double-close.
     private val socketClosed = AtomicBoolean(false)
     private var workerThread: Thread? = null
     private var collectorThread: Thread? = null
 
+    /**
+     * Closes the underlying socket file descriptor exactly once in a thread-safe and idempotent manner.
+     *
+     * Since [FileDescriptor] is immutable and calling [FileDescriptor.close] returns a closed copy without
+     * mutating the original reference, the standard [FileDescriptor.isClosedType] checks are insufficient
+     * when close is invoked concurrently or sequentially across different lifecycle phases (e.g., worker
+     * thread shutdown vs listener close).
+     *
+     * This helper uses the [socketClosed] [AtomicBoolean] guard to ensure that [FileDescriptor.close] (and
+     * the underlying native close system call) is executed at most once, eliminating native double-close
+     * vulnerabilities and preventing file descriptor recycling corruption inside the JVM.
+     */
     private fun closeSocketOnce() {
         if (socketClosed.compareAndSet(false, true)) {
             try {
+                logger.fine("Executing idempotent socketFd.close() for fd=${socketFd.value}")
                 socketFd.close()
-            } catch (ignored: Exception) {}
+            } catch (ignored: Exception) {
+                // Ignore any close exceptions
+            }
         }
     }
 
@@ -85,6 +101,7 @@ internal class ProfilerTraceListener(
                 logger.log(java.util.logging.Level.SEVERE, "ProfilerTraceListener worker thread crashed with fatal error", t)
             } finally {
                 if (closed.compareAndSet(false, true)) {
+                    // Safe socket closure unifies cleanup across worker and main threads.
                     closeSocketOnce()
                 }
                 arena.close()
@@ -169,7 +186,7 @@ internal class ProfilerTraceListener(
                 }
             }
         } finally {
-            // Step 3: Close the socket FD only after draining.
+            // Step 3: Close the socket FD only after draining in an idempotent way.
             closeSocketOnce()
             workerThread = null
             collectorThread = null
@@ -218,6 +235,7 @@ internal class ProfilerTraceListener(
                 }
             }
         } finally {
+            // Gracefully close the socket once using the idempotent close guard.
             closeSocketOnce()
             workerThread = null
             collectorThread = null

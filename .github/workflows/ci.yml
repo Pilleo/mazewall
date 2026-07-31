@@ -63,9 +63,7 @@ jobs:
               uses: actions/cache/restore@v4
               with:
                   path: ${{ github.workspace }}/.cache/podman-image
-                  key: podman-image-${{ hashFiles('infra/dev/Containerfile', 'demos/vulnerable-web-app/Containerfile') }}-${{ github.sha }}
-                  restore-keys: |
-                      podman-image-${{ hashFiles('infra/dev/Containerfile', 'demos/vulnerable-web-app/Containerfile') }}-
+                  key: podman-image-${{ hashFiles('infra/dev/Containerfile', 'demos/vulnerable-web-app/Containerfile') }}
             - name: Load Cached Podman Images
               run: |
                   if [ -f ${{ github.workspace }}/.cache/podman-image/mazewall-test-runner.tar ]; then
@@ -88,7 +86,7 @@ jobs:
               if: steps.filter.outputs.code == 'true'
               run: ./scripts/run_vulnerable_app_demo.sh
             - name: Save All Podman Images to Cache Folder
-              if: always()
+              if: always() && steps.cache-podman.outputs.cache-hit != 'true'
               run: |
                   mkdir -p ${{ github.workspace }}/.cache/podman-image
                   if podman image exists mazewall-test-runner || podman image exists localhost/mazewall-test-runner; then
@@ -102,10 +100,10 @@ jobs:
                   fi
             - name: Upload Podman Image Cache
               uses: actions/cache/save@v4
-              if: always()
+              if: always() && steps.cache-podman.outputs.cache-hit != 'true'
               with:
                   path: ${{ github.workspace }}/.cache/podman-image
-                  key: podman-image-${{ hashFiles('infra/dev/Containerfile', 'demos/vulnerable-web-app/Containerfile') }}-${{ github.sha }}
+                  key: podman-image-${{ hashFiles('infra/dev/Containerfile', 'demos/vulnerable-web-app/Containerfile') }}
             - name: Restore NVD Database Cache
               uses: actions/cache/restore@v4
               with:
@@ -120,6 +118,11 @@ jobs:
               run: ./scripts/run_containerized_tests.sh dependencyCheckAnalyze --info
               env:
                   NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
+            - name: Fix Cache Permissions
+              if: always()
+              run: |
+                  sudo chown -R $USER:$USER ~/.gradle || true
+                  sudo chown -R $USER:$USER ${{ github.workspace }} || true
             - name: Save NVD Database Cache (Always)
               uses: actions/cache/save@v4
               if: always()
