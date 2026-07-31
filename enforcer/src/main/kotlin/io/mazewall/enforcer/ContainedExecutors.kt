@@ -70,6 +70,14 @@ object ContainedExecutors {
     private val logger = Logger.getLogger(ContainedExecutors::class.java.name)
     private val processLock = Any()
 
+    /**
+     * Detects if the current thread is a Loom carrier thread or virtual thread.
+     */
+    fun isLoomOrCarrierThread(): Boolean {
+        val t = Thread.currentThread()
+        return t.isVirtual || t.name.contains("ForkJoinPool")
+    }
+
     init {
         // Pre-load exception-related classes to avoid NoClassDefFoundError when classloading under active seccomp
         Class.forName(ContainmentViolationDetector::class.java.name)
@@ -145,6 +153,15 @@ object ContainedExecutors {
             if (!Platform.isSupported()) {
                 handleUnsupportedPlatform()
                 return AutoCloseable {}
+            }
+
+            if (!processWide && isLoomOrCarrierThread()) {
+                throw UnsupportedOperationException(
+                    "Attempted to install a thread-scoped seccomp filter or thread-local Landlock sandbox onto a virtual thread or a carrier thread. " +
+                    "Thread-scoped containment on Loom virtual or carrier threads risks carrier thread poisoning, which permanently " +
+                    "restricts the underlying OS carrier thread and affects unrelated virtual threads. " +
+                    "Use process-wide containment (ContainedExecutors.installOnProcess) or safe wrapped executors (ContainedExecutors.wrap) on platform threads instead."
+                )
             }
 
             validateLinuxAndNotVirtual()

@@ -23,6 +23,15 @@ object SandboxDispatcher {
     private val poolCache = ConcurrentHashMap<PolicyDefinition<*>, ExecutorService>()
 
     /**
+     * Detects if the current thread is a Loom carrier thread or virtual thread.
+     */
+    @JvmStatic
+    fun isLoomOrCarrierThread(): Boolean {
+        val t = Thread.currentThread()
+        return t.isVirtual || t.name.contains("ForkJoinPool")
+    }
+
+    /**
      * Executes the given [block] on a thread pool perfectly constrained by the [policy].
      * Blocks the calling thread until the execution completes.
      *

@@ -14,7 +14,7 @@ class PureJavaBpfEngineBypassTest {
 
         virtualThreadExecutor.submit {
             val built = SeccompInstallationState.FilterBuilt(io.mazewall.ffi.memory.ManagedSegment.NULL)
-            assertFailsWith<IllegalStateException> {
+            assertFailsWith<UnsupportedOperationException> {
                 built.lockPrivileges()
             }
         }.get()
@@ -26,7 +26,7 @@ class PureJavaBpfEngineBypassTest {
         val virtualThreadExecutor = Executors.newVirtualThreadPerTaskExecutor()
 
         virtualThreadExecutor.submit {
-            assertFailsWith<IllegalStateException> {
+            assertFailsWith<UnsupportedOperationException> {
                 PureJavaBpfEngine.install(policy)
             }
         }.get()

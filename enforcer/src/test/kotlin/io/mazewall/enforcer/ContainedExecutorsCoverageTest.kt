@@ -136,4 +136,38 @@ class ContainedExecutorsCoverageTest {
         assertTrue(policyDefinitionContent.contains("TOCTOU") && policyDefinitionContent.contains("allowUnsafePrctl"), "PolicyDefinition.kt should document TOCTOU warnings for allowUnsafePrctl")
         assertTrue(syscallInspectorContent.contains("TOCTOU") && syscallInspectorContent.contains("UnsafePrctlInspector"), "SyscallInspector.kt should document TOCTOU warnings for UnsafePrctlInspector")
     }
+
+    @Test
+    fun testCarrierThreadPoisoningThreadScopedChecks() {
+        val mockProvider = object : PlatformProvider by RealPlatformProvider {
+            override fun getOsName(): String = "Linux"
+            override fun hasKernelSeccompSupport(): Boolean = true
+            override fun checkSeccompSanity(): io.mazewall.LinuxNative.SyscallResult<Long, io.mazewall.LinuxNative.SyscallHandledState.Unhandled> =
+                io.mazewall.LinuxNative.SyscallResult.Error(22, -1)
+        }
+        Platform.setProvider(mockProvider)
+        System.setProperty("io.mazewall.fallback", "FAIL")
+
+        // 1. Thread-scoped install on a Virtual Thread must fail with UnsupportedOperationException
+        val vExecutor = Executors.newVirtualThreadPerTaskExecutor()
+        val future1 = vExecutor.submit {
+            ContainedExecutors.installOnCurrentThread(Policy.builder().build())
+        }
+        val e1 = org.junit.jupiter.api.assertThrows<java.util.concurrent.ExecutionException> {
+            future1.get()
+        }
+        assertTrue(e1.cause is UnsupportedOperationException, "Should throw UnsupportedOperationException on virtual thread")
+        assertTrue(e1.cause?.message?.contains("carrier thread poisoning") == true)
+
+        // 2. Thread-scoped install on a Carrier Thread (ForkJoinPool) must fail with UnsupportedOperationException
+        val pool = java.util.concurrent.ForkJoinPool.commonPool()
+        val future2 = pool.submit(java.util.concurrent.Callable {
+            ContainedExecutors.installOnCurrentThread(Policy.builder().build())
+        })
+        val e2 = org.junit.jupiter.api.assertThrows<java.util.concurrent.ExecutionException> {
+            future2.get()
+        }
+        assertTrue(e2.cause is UnsupportedOperationException, "Should throw UnsupportedOperationException on carrier thread")
+        assertTrue(e2.cause?.message?.contains("carrier thread poisoning") == true)
+    }
 }
