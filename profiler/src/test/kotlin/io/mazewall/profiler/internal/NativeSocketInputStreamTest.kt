@@ -102,6 +102,7 @@ class NativeSocketInputStreamTest {
                     fail("Expected InterruptedIOException to be thrown")
                 } catch (e: InterruptedIOException) {
                     assertTrue(Thread.currentThread().isInterrupted, "Interrupted status should be restored/preserved")
+                    assertTrue(e.message!!.contains("Thread [${Thread.currentThread().name}]"), "Exception message should contain the thread name")
                 } finally {
                     Thread.interrupted()
                 }
@@ -133,6 +134,7 @@ class NativeSocketInputStreamTest {
                     fail("Expected InterruptedIOException to be thrown")
                 } catch (e: InterruptedIOException) {
                     assertTrue(Thread.currentThread().isInterrupted, "Interrupted status should be restored/preserved")
+                    assertTrue(e.message!!.contains("Thread [${Thread.currentThread().name}]"), "Exception message should contain the thread name")
                 } finally {
                     Thread.interrupted()
                 }
