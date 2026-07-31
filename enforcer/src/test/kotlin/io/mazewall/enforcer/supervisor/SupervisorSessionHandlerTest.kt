@@ -9,6 +9,7 @@ import io.mazewall.MockNativeMemory
 import io.mazewall.MockNativeNetworking
 import io.mazewall.RawSyscallOperations
 import io.mazewall.ffi.internal.RealNativeEngine
+import io.mazewall.ffi.memory.readByte
 import io.mazewall.ffi.memory.readLong
 import io.mazewall.ffi.memory.readInt
 import io.mazewall.ffi.memory.writeLong
@@ -974,6 +975,82 @@ class SupervisorSessionHandlerTest {
 
             // Verify that the opened pidfd (100) was successfully closed even after pidfd_getfd failure!
             assertEquals(true, closedFds.contains(100), "pidfd should have been closed")
+        } finally {
+            LinuxNative.resetToDefault()
+        }
+    }
+
+    @Test
+    fun `testOpenFileInSupervisorWithRelativePath`() {
+        var openCalledWithAtFdcwd = false
+        var capturedPath: String? = null
+
+        val mockFileSystem = object : io.mazewall.MockNativeFileSystem() {
+            override fun open(
+                path: io.mazewall.ffi.memory.ManagedSegment,
+                flags: io.mazewall.core.OpenFlags,
+            ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                openCalledWithAtFdcwd = true
+                val bytes = ByteArray(4096)
+                var i = 0
+                while (i < bytes.size) {
+                    val b = path.readByte(i.toLong())
+                    if (b == 0.toByte()) break
+                    bytes[i] = b
+                    i++
+                }
+                capturedPath = String(bytes, 0, i, java.nio.charset.StandardCharsets.UTF_8)
+                return LinuxNative.SyscallResult.Success(99L)
+            }
+
+            override fun openat(
+                dirfd: Int,
+                path: io.mazewall.ffi.memory.ManagedSegment,
+                flags: io.mazewall.core.OpenFlags,
+            ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                return LinuxNative.SyscallResult.Success(99L)
+            }
+        }
+
+        val mockEngine = object : MockNativeEngine(fileSystem = mockFileSystem) {}
+
+        try {
+            LinuxNative.setEngine(mockEngine)
+
+            val handler = SupervisorSessionHandler(
+                FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(10),
+                FileDescriptor.unsafe<FileDescriptorRole.SeccompNotif>(11),
+                engine = mockEngine
+            )
+
+            val openFileMethod = SupervisorSessionHandler::class.java.getDeclaredMethods().first {
+                it.name.startsWith("openFileInSupervisor") && !it.name.contains("$")
+            }
+            openFileMethod.isAccessible = true
+
+            val arch = io.mazewall.core.Arch.current()
+
+            io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
+                val args = LongArray(6)
+                args[0] = 5L // non-standard dirfd
+                args[2] = 0L // flags
+
+                // Since we resolved the relative path (e.g. relative_file.txt) in processNotification,
+                // the path passed to openFileInSupervisor starts with "/" (meaning absolute resolved path)
+                val resolvedPath = "/tmp/resolved_relative_file.txt"
+                val result = openFileMethod.invoke(
+                    handler,
+                    arena,
+                    arch.openat,
+                    args,
+                    resolvedPath,
+                    arch
+                ) as Int
+
+                assertEquals(99, result)
+                assertEquals(true, openCalledWithAtFdcwd, "Should have used open with AT_FDCWD for absolute resolved path")
+                assertEquals(resolvedPath, capturedPath, "Should have opened the correct resolved path")
+            }
         } finally {
             LinuxNative.resetToDefault()
         }
