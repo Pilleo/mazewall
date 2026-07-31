@@ -68,6 +68,12 @@ interface "NativeIoOperations" as io.mazewall.profiler.engine.NativeIoOperations
   + {abstract}SyscallResult recv(FileDescriptor<?, ? extends Open>, MemorySegment, long, int)
   + {abstract}SyscallResult ioctl(FileDescriptor<?, ? extends Open>, long, MemorySegment)
 }
+class "PathNormalizerHelper" as io.mazewall.profiler.engine.PathNormalizerHelper {
+  + {static}PathNormalizerHelper INSTANCE
+  __
+  +String normalizePath(String)
+  +boolean pathStartsWith(String, String)
+}
 class "PollEvents" as io.mazewall.profiler.engine.PollEvents {
   +short getSocketRevents()
   +short getListenerRevents()
@@ -110,9 +116,14 @@ class "ProfilerSessionHandler" as io.mazewall.profiler.engine.ProfilerSessionHan
   + {static}Companion Companion
   __
   +SessionEventLedger getLedger()
+  +ManagedSegment getAckBuf()
+  +ManagedSegment getSocketPollFd()
+  +ManagedSegment getNotif()
+  +ManagedSegment getResp()
   +ProfilerState getState()
-  +LoopAction handleActiveListener(NativeArena, ManagedSegment, ManagedSegment, ManagedSegment, ManagedSegment, ManagedSegment)
-  +boolean processNotification(NativeArena, ManagedSegment, ManagedSegment, ManagedSegment, ManagedSegment)
+  +void close()
+  +LoopAction handleActiveListener(NativeArena, ManagedSegment)
+  +boolean processNotification(NativeArena)
 }
 interface "ProfilerState" as io.mazewall.profiler.engine.ProfilerState {
   + {abstract}FileDescriptor<UnixSocket, Open> getSocketFd()
@@ -202,6 +213,8 @@ interface "SyscallEventState" as io.mazewall.profiler.engine.SyscallEventState {
 }
 class "SyscallPathResolver" as io.mazewall.profiler.engine.SyscallPathResolver {
   +SyscallEvent<Resolved> resolve(NativeArena, SyscallEvent<? extends Raw>)
+  +List<String> resolvePaths(NativeArena, int, String, long[])
+  +List<String> resolvePaths(NativeArena, int, String, List<Long>)
 }
 abstract class "TraceEvent" as io.mazewall.profiler.engine.TraceEvent {
   + {static}Companion Companion
@@ -260,6 +273,11 @@ class "IterativeProfiler" as io.mazewall.profiler.iterative.IterativeProfiler {
   __
   +IterativeTaskExecutor getTaskExecutor()
   +void setTaskExecutor(IterativeTaskExecutor)
+  +void registerPhrase(String)
+  +void registerRegex(Regex)
+  +List<String> getRegisteredPhrases()
+  +List<Regex> getRegisteredRegexes()
+  +void resetToDefaults()
 }
 interface "IterativeProfilerState" as io.mazewall.profiler.iterative.IterativeProfilerState {
 }
@@ -293,6 +311,7 @@ io.mazewall.profiler.Profiler --> io.mazewall.profiler.engine.ProfilerInstallerI
 io.mazewall.profiler.ProfilingResult --> io.mazewall.profiler.BillOfBehavior
 io.mazewall.profiler.ProfilingResult --> io.mazewall.profiler.engine.TraceEvent
 io.mazewall.profiler.compiler.BobCompiler --> io.mazewall.profiler.compiler.BobCompiler
+io.mazewall.profiler.engine.PathNormalizerHelper --> io.mazewall.profiler.engine.PathNormalizerHelper
 io.mazewall.profiler.engine.ProfilerDaemon --> io.mazewall.profiler.engine.DaemonRunner
 io.mazewall.profiler.engine.ProfilerDaemon --> io.mazewall.profiler.engine.ProfilerDaemon
 io.mazewall.profiler.engine.ProfilerDaemonEngine --> io.mazewall.profiler.engine.ProfilerTransport
@@ -304,6 +323,7 @@ io.mazewall.profiler.engine.ProfilerDaemonEngine --> io.mazewall.profiler.engine
 io.mazewall.profiler.engine.ProfilerInstaller --> io.mazewall.profiler.engine.ProfilerInstaller
 io.mazewall.profiler.engine.ProfilerInstallerSession --> io.mazewall.profiler.engine.TraceEvent
 io.mazewall.profiler.engine.ProfilerSessionHandler --> io.mazewall.profiler.engine.SeccompNotificationParser
+io.mazewall.profiler.engine.ProfilerSessionHandler --> io.mazewall.profiler.engine.SyscallPathResolver
 io.mazewall.profiler.engine.ProfilerSessionHandler --> io.mazewall.profiler.engine.SeccompResponder
 io.mazewall.profiler.engine.ProfilerSessionHandler --> io.mazewall.profiler.engine.ProfilerState
 io.mazewall.profiler.engine.ProfilerSessionHandler --> io.mazewall.profiler.engine.TraceEventPublisher

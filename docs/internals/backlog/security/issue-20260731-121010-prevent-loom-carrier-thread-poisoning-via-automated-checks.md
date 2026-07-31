@@ -11,6 +11,7 @@ target_files:
   - "enforcer/src/main/kotlin/io/mazewall/enforcer/ContainedExecutors.kt"
 effort: "medium"
 autonomy: "autonomous"
+github_issue: 458
 ---
 
 # 🔴 [Severity: HIGH]: Prevent Loom Carrier Thread Poisoning Via Automated Checks

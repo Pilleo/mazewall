@@ -9,6 +9,8 @@ class SlotContext(var currentIssueId: String) {
     var githubIssueNumber: String? = null
     var julesSessionId: String? = null
     var prNumber: String? = null
+    var generation: Int = 1
+    var previousPrNumber: String? = null
 
     // Monitoring state/cache variables
     var lastHeadSha: String? = null
@@ -39,6 +41,8 @@ class SlotContext(var currentIssueId: String) {
         githubIssueNumber = props.getProperty("$prefix.githubIssueNumber").takeIf { !it.isNullOrEmpty() }
         julesSessionId = props.getProperty("$prefix.julesSessionId").takeIf { !it.isNullOrEmpty() }
         prNumber = props.getProperty("$prefix.prNumber").takeIf { !it.isNullOrEmpty() }
+        generation = props.getProperty("$prefix.generation")?.toIntOrNull() ?: 1
+        previousPrNumber = props.getProperty("$prefix.previousPrNumber").takeIf { !it.isNullOrEmpty() }
 
         lastHeadSha = props.getProperty("$prefix.lastHeadSha").takeIf { !it.isNullOrEmpty() }
         lastReviewedSha = props.getProperty("$prefix.lastReviewedSha").takeIf { !it.isNullOrEmpty() }
@@ -74,6 +78,8 @@ class SlotContext(var currentIssueId: String) {
         githubIssueNumber?.let { props.setProperty("$prefix.githubIssueNumber", it) }
         julesSessionId?.let { props.setProperty("$prefix.julesSessionId", it) }
         prNumber?.let { props.setProperty("$prefix.prNumber", it) }
+        props.setProperty("$prefix.generation", generation.toString())
+        previousPrNumber?.let { props.setProperty("$prefix.previousPrNumber", it) }
 
         lastHeadSha?.let { props.setProperty("$prefix.lastHeadSha", it) }
         lastReviewedSha?.let { props.setProperty("$prefix.lastReviewedSha", it) }
@@ -107,6 +113,8 @@ class OrchestratorContext {
     var githubIssueNumber: String? = null
     var julesSessionId: String? = null
     var prNumber: String? = null
+    var generation: Int = 1
+    var previousPrNumber: String? = null
     val skippedIds: MutableSet<String> = mutableSetOf()
 
     // Monitoring state/cache variables
@@ -140,6 +148,8 @@ class OrchestratorContext {
         githubIssueNumber = props.getProperty("githubIssueNumber").takeIf { !it.isNullOrEmpty() }
         julesSessionId = props.getProperty("julesSessionId").takeIf { !it.isNullOrEmpty() }
         prNumber = props.getProperty("prNumber").takeIf { !it.isNullOrEmpty() }
+        generation = props.getProperty("generation")?.toIntOrNull() ?: 1
+        previousPrNumber = props.getProperty("previousPrNumber").takeIf { !it.isNullOrEmpty() }
 
         skippedIds.clear()
         props.getProperty("skippedIds")?.let { ids ->
@@ -193,6 +203,8 @@ class OrchestratorContext {
                 slot.githubIssueNumber = githubIssueNumber
                 slot.julesSessionId = julesSessionId
                 slot.prNumber = prNumber
+                slot.generation = generation
+                slot.previousPrNumber = previousPrNumber
 
                 slot.lastHeadSha = lastHeadSha
                 slot.lastReviewedSha = lastReviewedSha
@@ -225,6 +237,8 @@ class OrchestratorContext {
         props.setProperty("githubIssueNumber", githubIssueNumber ?: "")
         props.setProperty("julesSessionId", julesSessionId ?: "")
         props.setProperty("prNumber", prNumber ?: "")
+        props.setProperty("generation", generation.toString())
+        props.setProperty("previousPrNumber", previousPrNumber ?: "")
         props.setProperty("skippedIds", skippedIds.joinToString(","))
 
         props.setProperty("lastHeadSha", lastHeadSha ?: "")
@@ -259,6 +273,8 @@ class OrchestratorContext {
         githubIssueNumber = null
         julesSessionId = null
         prNumber = null
+        generation = 1
+        previousPrNumber = null
         lastHeadSha = null
         lastReviewedSha = null
         lastRequestedReviewSha = null

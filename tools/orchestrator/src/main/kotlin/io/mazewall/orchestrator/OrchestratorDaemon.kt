@@ -102,12 +102,6 @@ class CommandInterpreter(
                 env.gitHubClient.approveRescue(command.prNumber, command.rescueBranchName)
                 Unit
             }
-            is OrchestratorCommand.RequestFallbackApproval -> {
-                env.requestApproval(command.issueId, command.prompt)
-            }
-            is OrchestratorCommand.RebaseBranchFallback -> {
-                env.gitHubClient.rebaseBranchFallback(command.prNumber, command.sessionId, command.targetFiles)
-            }
         }
     }
 }

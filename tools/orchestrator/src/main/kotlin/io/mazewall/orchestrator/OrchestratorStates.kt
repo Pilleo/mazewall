@@ -20,8 +20,6 @@ sealed class OrchestratorEvent {
     data class CommitEmptyChecked(val isEmpty: Boolean, val newSha: String) : OrchestratorEvent()
     data class PrMergedDetected(val prNumber: String) : OrchestratorEvent()
     data class RebaseCompleted(val result: RebaseResult) : OrchestratorEvent()
-    data class FallbackApprovalReceived(val approved: Boolean) : OrchestratorEvent()
-    data class FallbackRebaseCompleted(val result: RebaseResult) : OrchestratorEvent()
 }
 
 sealed class OrchestratorCommand {
@@ -41,8 +39,6 @@ sealed class OrchestratorCommand {
     data class ClearPrCache(val prNumber: String) : OrchestratorCommand()
     data class RebaseBranch(val prNumber: String, val sessionId: String?) : OrchestratorCommand()
     data class ApproveRescue(val prNumber: String, val rescueBranchName: String) : OrchestratorCommand()
-    data class RequestFallbackApproval(val issueId: String, val prompt: String) : OrchestratorCommand()
-    data class RebaseBranchFallback(val prNumber: String, val sessionId: String?, val targetFiles: List<String>) : OrchestratorCommand()
 }
 
 data class Transition(
@@ -98,7 +94,7 @@ sealed interface OrchestratorState {
                 slot.prNumber = this.prNumber
                 slot.lastHeadSha = this.lastHeadSha
             }
-            is AwaitingFallbackApprovalState -> {
+            is CreateGenerationState -> {
                 slot.currentIssueId = this.issueId
                 slot.githubIssueNumber = this.githubIssueNumber
                 slot.julesSessionId = this.julesSessionId
@@ -250,12 +246,12 @@ sealed interface OrchestratorState {
                     val lastHeadSha = slot.lastHeadSha ?: throw IllegalStateException("lastHeadSha is null in AWAITING_MERGE")
                     AwaitingMergeState(issueId, githubIssueNumber, julesSessionId, prNumber, lastHeadSha)
                 }
-                "AWAITING_FALLBACK_APPROVAL" -> {
+                "CREATE_GENERATION" -> {
                     val issueId = slot.currentIssueId
-                    val githubIssueNumber = slot.githubIssueNumber ?: throw IllegalStateException("githubIssueNumber is null in AWAITING_FALLBACK_APPROVAL")
-                    val julesSessionId = slot.julesSessionId ?: throw IllegalStateException("julesSessionId is null in AWAITING_FALLBACK_APPROVAL")
-                    val prNumber = slot.prNumber ?: throw IllegalStateException("prNumber is null in AWAITING_FALLBACK_APPROVAL")
-                    AwaitingFallbackApprovalState(issueId, githubIssueNumber, julesSessionId, prNumber)
+                    val githubIssueNumber = slot.githubIssueNumber ?: throw IllegalStateException("githubIssueNumber is null in CREATE_GENERATION")
+                    val julesSessionId = slot.julesSessionId ?: throw IllegalStateException("julesSessionId is null in CREATE_GENERATION")
+                    val prNumber = slot.prNumber ?: throw IllegalStateException("prNumber is null in CREATE_GENERATION")
+                    CreateGenerationState(issueId, githubIssueNumber, julesSessionId, prNumber)
                 }
                 "RESOLVE_TASK" -> {
                     val issueId = slot.currentIssueId
@@ -310,12 +306,12 @@ sealed interface OrchestratorState {
                     val headSha = context.lastHeadSha ?: "dummy-sha"
                     AwaitingMergeState(issueId, githubIssueNumber, julesSessionId, prNumber, headSha)
                 }
-                "AWAITING_FALLBACK_APPROVAL" -> {
+                "CREATE_GENERATION" -> {
                     val issueId = context.currentIssueId ?: "dummy-issue-id"
                     val githubIssueNumber = context.githubIssueNumber ?: "dummy-github-issue"
                     val julesSessionId = context.julesSessionId ?: "dummy-session-id"
                     val prNumber = context.prNumber ?: "dummy-pr-number"
-                    AwaitingFallbackApprovalState(issueId, githubIssueNumber, julesSessionId, prNumber)
+                    CreateGenerationState(issueId, githubIssueNumber, julesSessionId, prNumber)
                 }
                 "RESOLVE_TASK" -> {
                     val issueId = context.currentIssueId ?: "dummy-issue-id"
@@ -924,12 +920,11 @@ data class CiRunningState(
                         )
                     )
                 } else {
-                    val conflictSuffix = if (result.conflictCount > 0) " (Conflicts in ${result.conflictCount} files: ${result.conflictedFiles})" else ""
                     Transition(
-                        nextState = AwaitingFallbackApprovalState(issueId, githubIssueNumber, julesSessionId, prNumber),
+                        nextState = CreateGenerationState(issueId, githubIssueNumber, julesSessionId, prNumber),
                         commands = listOf(
-                            OrchestratorCommand.SendTelegramNotification("⚠️ *PR #$prNumber has conflicts!* Automated cherry-pick sanitization failed$conflictSuffix. Transitioning to manual fallback approval."),
-                            OrchestratorCommand.PrintLog("\u001B[1;31m🔔 [CONFLICT] PR #$prNumber has conflicts! Transitioning to fallback approval.\u001B[0m")
+                            OrchestratorCommand.SendTelegramNotification("⚠️ *PR #$prNumber has conflicts!* Transitioning to a new generation..."),
+                            OrchestratorCommand.PrintLog("\u001B[1;31m🔔 [CONFLICT] PR #$prNumber has conflicts! Starting new generation.\u001B[0m")
                         )
                     )
                 }
@@ -1068,7 +1063,7 @@ data class CiRunningState(
                 }
                 return this
             }
-            RebaseOutcome.CONFLICT_FALLBACK -> return AwaitingFallbackApprovalState(issueId, githubIssueNumber, julesSessionId, prNumber)
+            RebaseOutcome.CREATE_NEW_GENERATION -> return CreateGenerationState(issueId, githubIssueNumber, julesSessionId, prNumber)
             RebaseOutcome.ALREADY_SANITIZED -> { /* proceed */ }
         }
 
@@ -1363,7 +1358,7 @@ data class AwaitingReviewState(
                 }
                 return this
             }
-            RebaseOutcome.CONFLICT_FALLBACK -> return AwaitingFallbackApprovalState(issueId, githubIssueNumber, julesSessionId, prNumber)
+            RebaseOutcome.CREATE_NEW_GENERATION -> return CreateGenerationState(issueId, githubIssueNumber, julesSessionId, prNumber)
             RebaseOutcome.ALREADY_SANITIZED -> { /* proceed */ }
         }
 
@@ -1521,54 +1516,13 @@ data class AwaitingMergeState(
     }
 }
 
-data class AwaitingFallbackApprovalState(
+data class CreateGenerationState(
     val issueId: String,
     val githubIssueNumber: String,
     val julesSessionId: String,
     val prNumber: String
 ) : OrchestratorState {
-    override val name = "AWAITING_FALLBACK_APPROVAL"
-
-    override fun evaluate(slot: SlotContext, event: OrchestratorEvent): Transition {
-        val currentTime = System.currentTimeMillis()
-        if (currentTime < slot.retryAfterTime) {
-            return Transition(this)
-        }
-
-        return when (event) {
-            is OrchestratorEvent.FallbackApprovalReceived -> {
-                if (event.approved) {
-                    Transition(
-                        nextState = this,
-                        commands = listOf(
-                            OrchestratorCommand.PrintLog("Approval granted. Running targetFiles fallback extraction..."),
-                            OrchestratorCommand.RebaseBranchFallback(prNumber, julesSessionId, emptyList())
-                        )
-                    )
-                } else {
-                    Transition(
-                        nextState = SelectTaskState,
-                        commands = listOf(
-                            OrchestratorCommand.PrintLog("Manual fallback rejected or timed out. Returning to SelectTaskState.")
-                        )
-                    )
-                }
-            }
-            is OrchestratorEvent.FallbackRebaseCompleted -> {
-                if (event.result.success) {
-                    Transition(CiRunningState(issueId, githubIssueNumber, julesSessionId, prNumber))
-                } else {
-                    Transition(
-                        nextState = this,
-                        commands = listOf(
-                            OrchestratorCommand.PrintLog("Manual fallback failed. Pausing.")
-                        )
-                    )
-                }
-            }
-            else -> Transition(this)
-        }
-    }
+    override val name = "CREATE_GENERATION"
 
     override fun execute(env: OrchestratorEnvironment, context: OrchestratorContext, slot: SlotContext): OrchestratorState {
         val currentTime = System.currentTimeMillis()
@@ -1576,32 +1530,56 @@ data class AwaitingFallbackApprovalState(
             return this
         }
 
-        val prompt = "🚨 PR #$prNumber automated sanitization failed (Git conflict or build error). Use manual targetFiles fallback?"
-        val approved = env.requestApproval(issueId, prompt)
+        env.println("🚀 Starting new generation for task $issueId (Gen ${slot.generation + 1})...")
 
-        val transition = evaluate(slot, OrchestratorEvent.FallbackApprovalReceived(approved))
-        val interpreter = CommandInterpreter(env, context, slot)
-        for (cmd in transition.commands) {
-            interpreter.interpret(cmd)
+        // 1. Mark current PR as superseded
+        env.gitHubClient.labelPr(prNumber, "superseded")
+
+        // 2. Extract info
+        val prUrl = env.gitHubClient.getPrUrl(prNumber)
+        val branch = env.gitHubClient.getPrHeadSha(prNumber) // or ref name, but sha is fine, we can use pr details
+        val previousBranch = env.gitHubClient.getPrHeadSha(prNumber)
+        
+        val issue = env.parseAllIssues().firstOrNull { it.id == issueId }
+        val issueDescription = issue?.file?.readText() ?: "Original description unavailable."
+
+        // 3. Create new Jules session
+        val newSession = try {
+            env.julesClient.createSessionWithContext(
+                repo = env.gitHubClient.getRepoName(),
+                issueId = issueId,
+                githubIssueNumber = githubIssueNumber,
+                previousPrUrl = prUrl,
+                previousBranch = "PR #$prNumber (SHA: $previousBranch)",
+                originalTaskDescription = issueDescription
+            )
+        } catch (e: Exception) {
+            env.errPrintln("❌ Failed to create generation session via Jules API: ${e.message}")
+            slot.retryAfterTime = currentTime + TimeUnit.SECONDS.toMillis(env.config.pollingIntervalSeconds)
+            return this
         }
 
-        if (approved) {
-            val issue = env.parseAllIssues().firstOrNull { it.id == issueId }
-            val targetFiles = issue?.targetFiles ?: emptyList()
-            val result = env.gitHubClient.rebaseBranchFallback(prNumber, julesSessionId, targetFiles)
-            val fallbackTransition = evaluate(slot, OrchestratorEvent.FallbackRebaseCompleted(result))
-            for (cmd in fallbackTransition.commands) {
-                interpreter.interpret(cmd)
-            }
-            if (result.success) {
-                return fallbackTransition.nextState
-            }
-        } else {
-            return transition.nextState
-        }
+        // 4. Comment on the issue
+        env.gitHubClient.commentOnIssue(
+            githubIssueNumber,
+            "🚨 Merge conflict detected on PR #$prNumber. Started new Jules session (Generation ${slot.generation + 1}) to resolve conflicts against master: https://jules.google.com/session/${newSession.id}"
+        )
 
-        slot.retryAfterTime = currentTime + TimeUnit.SECONDS.toMillis(env.config.pollingIntervalSeconds)
-        return this
+        // 5. Update slot and transition
+        slot.generation++
+        slot.previousPrNumber = prNumber
+        slot.julesSessionId = newSession.id
+        slot.prNumber = null
+        slot.lastHeadSha = null
+        slot.lastReviewedSha = null
+        slot.lastRequestedReviewSha = null
+        slot.lastBuildStatus = null
+        slot.lastCheckedSha = null
+        slot.julesRetries = 0
+        slot.julesReviewPushCount = 0
+        slot.julesReviewAttemptCount = 0
+
+        return AwaitingPrState(issueId, githubIssueNumber, newSession.id)
     }
 }
 
@@ -1646,7 +1624,7 @@ enum class RebaseOutcome {
     WAITING_RETRY,
     WAITING_MANUAL_RESCUE,
     AUTO_MERGED,
-    CONFLICT_FALLBACK
+    CREATE_NEW_GENERATION
 }
 
 private fun handleRebaseAndConflicts(env: OrchestratorEnvironment, slot: SlotContext, prNumber: String, issueId: String, githubIssueNumber: String, julesSessionId: String): RebaseOutcome {
@@ -1732,10 +1710,9 @@ private fun handleRebaseAndConflicts(env: OrchestratorEnvironment, slot: SlotCon
         } else {
             slot.failedRebaseHeadSha = currentSha
             val prUrl = env.gitHubClient.getPrUrl(prNumber)
-            val conflictSuffix = if (rebaseResult.conflictCount > 0) " (Conflicts in ${rebaseResult.conflictCount} files: ${rebaseResult.conflictedFiles})" else ""
-            env.sendNotification("⚠️ *PR #$prNumber has conflicts!* Automated cherry-pick sanitization failed$conflictSuffix. Transitioning to manual fallback approval.")
-            env.println("\u001B[1;31m🔔 [CONFLICT] PR #$prNumber has conflicts! Transitioning to fallback approval.\u001B[0m")
-            return RebaseOutcome.CONFLICT_FALLBACK
+            env.sendNotification("⚠️ *PR #$prNumber has conflicts!* Automated cherry-pick sanitization failed. Transitioning to Generation ${slot.generation + 1}.")
+            env.println("\u001B[1;31m🔔 [CONFLICT] PR #$prNumber has conflicts! Transitioning to Generation ${slot.generation + 1}.\u001B[0m")
+            return RebaseOutcome.CREATE_NEW_GENERATION
         }
     }
 

@@ -151,6 +151,8 @@ class "Policy" as io.mazewall.Policy<S extends PolicyScope, State extends Policy
   +Set<SandboxedPath> getAllowedFsReadPaths()
   +Set<SandboxedPath> getAllowedFsWritePaths()
   +boolean getEnforceLandlock()
+  +List<String> getCustomViolationPhrases()
+  +List<Regex> getCustomViolationRegexes()
   +List<BpfInstruction> getCompiledFilters()
   +boolean isSyscallAllowed(Syscall)
   +Map<Integer, SeccompAction> syscallActionNumbers(Arch)
@@ -174,6 +176,8 @@ class "PolicyBuilder" as io.mazewall.PolicyBuilder<S extends PolicyScope> {
   +PolicyBuilder<S> allowNonThreadClone()
   +PolicyBuilder<S> allowUnsafePrctl()
   +PolicyBuilder<S> lockIntelCet()
+  +PolicyBuilder<S> customViolationPhrase(String)
+  +PolicyBuilder<S> customViolationRegex(Regex)
   +PolicyDefinition<S> build()
 }
 class "PolicyCompilationCache" as io.mazewall.PolicyCompilationCache {
@@ -194,6 +198,8 @@ class "PolicyDefinition" as io.mazewall.PolicyDefinition<S extends PolicyScope> 
   +Set<SandboxedPath> getAllowedFsReadPaths()
   +Set<SandboxedPath> getAllowedFsWritePaths()
   +boolean getEnforceLandlock()
+  +List<String> getCustomViolationPhrases()
+  +List<Regex> getCustomViolationRegexes()
   +boolean getHasSupervisedSyscalls()
   +boolean isSyscallAllowed(Syscall)
   +Map<Integer, SeccompAction> syscallActionNumbers(Arch)
@@ -478,6 +484,10 @@ class "ContainmentViolationDetector" as io.mazewall.enforcer.ContainmentViolatio
   + {static}Companion Companion
   __
   +void registerMatcher(ViolationMatcher)
+  +void registerPhrase(String)
+  +void registerRegex(Regex)
+  +List<String> getRegisteredPhrases()
+  +List<Regex> getRegisteredRegexes()
   +void resetToDefaults()
   +Sequence<IntRange> findViolationRanges(String)
   +boolean isContainmentViolation(Throwable)

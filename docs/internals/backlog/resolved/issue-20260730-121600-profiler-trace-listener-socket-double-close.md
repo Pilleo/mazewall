@@ -11,6 +11,7 @@ target_files:
   - "profiler/src/main/kotlin/io/mazewall/profiler/internal/ProfilerTraceListener.kt"
 effort: "small"
 autonomy: "autonomous"
+github_issue: 438
 ---
 
 # 🔴 [Severity: HIGH]: ProfilerTraceListener socket double-close mitigation and idempotency

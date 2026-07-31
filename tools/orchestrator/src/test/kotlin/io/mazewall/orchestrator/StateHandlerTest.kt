@@ -58,7 +58,9 @@ class MockOrchestratorEnvironment : OrchestratorEnvironment {
         override fun getPrMergeStatus(prNumber: String): PrMergeStatus = prMergeStatus
         override fun findExistingIssueNumber(issueId: String): String? = existingIssueNumber
         override fun createIssue(title: String, body: String, label: String): String = createdIssueNumber
+        override fun getRepoName(): String = "mock/repo"
         override fun addLabel(issueNumber: String, label: String) {}
+        override fun labelPr(prNumber: String, label: String) {}
         override fun isIssueClosed(issueNumber: String): Boolean = issueClosed
         override fun isPrClosed(prNumber: String): Boolean = prClosed
         override fun findLinkedPR(issueNumber: String, issueId: String, julesSessionId: String?): String? = linkedPrNumber
@@ -88,6 +90,9 @@ class MockOrchestratorEnvironment : OrchestratorEnvironment {
         override fun getSessionStatusFromActivities(sessionId: String): String? = julesSession?.status
         override fun hasUnableToCompleteActivity(sessionId: String): Boolean = hasUnableToCompleteActivity
         override fun triggerSession(repo: String, issueId: String, prompt: String) {}
+        override fun createSessionWithContext(repo: String, issueId: String, githubIssueNumber: String, previousPrUrl: String, previousBranch: String, originalTaskDescription: String): JulesSession {
+            return JulesSession("s-context", "desc", repo, "PENDING")
+        }
         override fun sendSessionMessage(sessionId: String, prompt: String) { sentJulesMessages.add(sessionId to prompt) }
         override fun listSessions(): List<JulesSession> = emptyList()
 

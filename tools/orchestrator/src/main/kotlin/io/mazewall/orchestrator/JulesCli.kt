@@ -367,4 +367,62 @@ class RealJulesClient(
             return null
         }
     }
+
+    override fun createSessionWithContext(repo: String, issueId: String, githubIssueNumber: String, previousPrUrl: String, previousBranch: String, originalTaskDescription: String): JulesSession {
+        val prompt = """
+            🚨 **Merge Conflict Detected - Starting New Generation**
+            
+            This is a continuation of a previous task that encountered a merge conflict against the main branch.
+            Your task is to re-implement the original changes cleanly on top of the current master branch.
+            
+            **Original Task ([${issueId}] Issue #$githubIssueNumber):**
+            $originalTaskDescription
+            
+            **Previous Generation PR:** $previousPrUrl
+            **Previous Branch:** $previousBranch
+            
+            Please adapt the changes from the previous generation to resolve any conflicts with the current codebase.
+        """.trimIndent()
+
+        val sessionDescription = "[$issueId] Conflict Resolution (Generation Update)"
+        println("🚀 Triggering remote Jules session for issue $issueId with conflict context via REST API...")
+
+        val requestPayload = CreateSessionRequest(
+            prompt = prompt,
+            sourceContext = SourceContext(
+                source = "sources/github/$repo",
+                githubRepoContext = GithubRepoContext(startingBranch = "main")
+            ),
+            title = sessionDescription
+        )
+
+        val requestBody = json.encodeToString(CreateSessionRequest.serializer(), requestPayload)
+
+        val request = HttpRequest.newBuilder()
+            .uri(URI.create("https://jules.googleapis.com/v1alpha/sessions"))
+            .header("Content-Type", "application/json")
+            .header("X-Goog-Api-Key", apiKey)
+            .POST(HttpRequest.BodyPublishers.ofString(requestBody))
+            .build()
+
+        try {
+            val response = transport.send(request)
+            if (response.statusCode() !in 200..299) {
+                throw RuntimeException("Failed to trigger Jules session with context (HTTP ${response.statusCode()}): ${response.body()}")
+            }
+            val sessionResponse = json.decodeFromString<SessionResponse>(response.body())
+            val id = sessionResponse.name.substringAfterLast("/")
+            println("  [Jules API] Context Session created successfully: $id")
+            return JulesSession(
+                id = id,
+                description = sessionResponse.title ?: "",
+                repo = repo,
+                status = sessionResponse.state ?: "PENDING"
+            )
+        } catch (e: Exception) {
+            System.err.println("  [Jules API] Error triggering session with context: ${e.message}")
+            throw e
+        }
+    }
 }
+
