@@ -1,7 +1,7 @@
 ---
 title: "Prevent CPU spinning and infinite loops on EINTR inside NativeSocketInputStream during thread interruption"
 severity: "HIGH"
-status: "open"
+status: "resolved"
 priority: 8
 dependencies: []
 component: "profiler"
