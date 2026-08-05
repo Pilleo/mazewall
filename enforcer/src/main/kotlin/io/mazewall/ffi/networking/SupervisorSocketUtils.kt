@@ -91,7 +91,12 @@ public object SupervisorSocketUtils {
                     is LinuxNative.SyscallResult.Success -> fdRes.value.toInt()
                     is LinuxNative.SyscallResult.Error -> {
                         lastErrno = fdRes.errno
-                        Thread.sleep(delayMs)
+                        try {
+                            Thread.sleep(delayMs)
+                        } catch (e: InterruptedException) {
+                            Thread.currentThread().interrupt()
+                            throw IllegalStateException("Interrupted while waiting to retry socket creation for $socketPath", e)
+                        }
                         continue
                     }
                 }
@@ -103,7 +108,12 @@ public object SupervisorSocketUtils {
                 lastErrno = (connRes as LinuxNative.SyscallResult.Error).errno
                 LinuxNative.fileSystem.close(fd)
 
-                Thread.sleep(delayMs)
+                try {
+                    Thread.sleep(delayMs)
+                } catch (e: InterruptedException) {
+                    Thread.currentThread().interrupt()
+                    throw IllegalStateException("Interrupted while waiting to retry socket connection for $socketPath", e)
+                }
             }
             throw IllegalStateException(
                 "Failed to connect to socket at $socketPath after $maxRetries retries. Last errno=$lastErrno"

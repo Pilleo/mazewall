@@ -2,7 +2,7 @@
 title: SupervisorSocketUtils swallows Thread.sleep InterruptedException without setting
   interrupt status
 type: issue
-status: open
+status: resolved
 priority: 5
 labels:
 - security

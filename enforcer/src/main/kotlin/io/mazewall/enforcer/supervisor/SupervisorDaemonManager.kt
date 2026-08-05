@@ -240,7 +240,11 @@ public class SupervisorDaemonManager(
                         }
                         break
                     }
-                    Thread.sleep(SHUTDOWN_WAIT_MS)
+                    try {
+                        Thread.sleep(SHUTDOWN_WAIT_MS)
+                    } catch (e: InterruptedException) {
+                        Thread.currentThread().interrupt()
+                    }
                 } finally {
                     socketManager.close(fd)
                 }
