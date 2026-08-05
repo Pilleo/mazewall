@@ -2,7 +2,7 @@
 title: SupervisorSessionHandler catch(Throwable) swallows critical errors causing
   resource leaks
 type: issue
-status: open
+status: resolved
 priority: 8
 labels:
 - security

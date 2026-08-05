@@ -336,7 +336,7 @@ internal class SupervisorSessionHandler(
         return LoopAction.Continue
     }
 
-    @Suppress("TooGenericExceptionCaught")
+    @Suppress("SwallowedException")
     private fun processNotification(notif: ManagedSegment, resp: ManagedSegment): Boolean {
         return NativeArena.ofConfined().use { notificationArena ->
             with(notificationArena) {
@@ -409,12 +409,12 @@ internal class SupervisorSessionHandler(
                     val res = readAndHandleJvmResponse(id, nr, args, resolvedPathStr, extracted.sockaddrBytes, resp, tid, traceeArch)
                     logger.info { "[SUPERVISOR-DEBUG] JVM validation handler response result=$res" }
                     return res
-                } catch (t: Throwable) {
-                    logger.log(java.util.logging.Level.SEVERE, "Fatal error processing notification $id", t)
+                } catch (e: Exception) {
+                    logger.log(java.util.logging.Level.SEVERE, "Fatal error processing notification $id", e)
                     try {
                         sendSeccompError(id, NativeConstants.EPERM, resp)
-                    } catch (ignored: Throwable) {
-                        // Ignore secondary errors
+                    } catch (ignored: Exception) {
+                        // Ignore secondary errors during best-effort EPERM response
                     }
                     return false
                 }
@@ -1057,13 +1057,13 @@ internal class SupervisorSessionHandler(
                         }
                     }
                 }
-            } catch (t: Throwable) {
-                logger.log(java.util.logging.Level.SEVERE, "Error in async accept worker for notification $id", t)
+            } catch (e: Exception) {
+                logger.log(java.util.logging.Level.SEVERE, "Error in async accept worker for notification $id", e)
                 try {
                     NativeArena.ofConfined().use { arena ->
                         sendSeccompError(id, NativeConstants.EPERM, arena.allocate(Layouts.SECCOMP_NOTIF_RESP))
                     }
-                } catch (ignored: Throwable) {}
+                } catch (ignored: Exception) {}
             }
         }.apply {
             isDaemon = true
