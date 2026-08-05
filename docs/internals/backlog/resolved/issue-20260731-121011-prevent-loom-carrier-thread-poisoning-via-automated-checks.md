@@ -1,7 +1,7 @@
 ---
 title: "Prevent Loom Carrier Thread Poisoning Via Automated Checks"
 severity: "HIGH"
-status: "open"
+status: "resolved"
 priority: 9
 dependencies: []
 component: "enforcer"

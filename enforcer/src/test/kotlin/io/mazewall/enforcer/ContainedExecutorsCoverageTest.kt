@@ -136,4 +136,44 @@ class ContainedExecutorsCoverageTest {
         assertTrue(policyDefinitionContent.contains("TOCTOU") && policyDefinitionContent.contains("allowUnsafePrctl"), "PolicyDefinition.kt should document TOCTOU warnings for allowUnsafePrctl")
         assertTrue(syscallInspectorContent.contains("TOCTOU") && syscallInspectorContent.contains("UnsafePrctlInspector"), "SyscallInspector.kt should document TOCTOU warnings for UnsafePrctlInspector")
     }
+
+    @Test
+    fun `test thread-scoped containment disallowed on virtual and carrier threads`() {
+        val mockProvider = object : PlatformProvider by RealPlatformProvider {
+            override fun getOsName(): String = "Linux"
+            override fun hasKernelSeccompSupport(): Boolean = true
+            override fun checkSeccompSanity(): io.mazewall.LinuxNative.SyscallResult<Long, io.mazewall.LinuxNative.SyscallHandledState.Unhandled> =
+                io.mazewall.LinuxNative.SyscallResult.Error(22, -1)
+        }
+        Platform.setProvider(mockProvider)
+
+        val policy = Policy.builder().allowFsRead("/tmp").build()
+
+        // 1. Verify Virtual Thread is rejected
+        var virtualException: Throwable? = null
+        val vThread = Thread.ofVirtual().start {
+            try {
+                ContainedExecutors.installOnCurrentThread(policy)
+            } catch (t: Throwable) {
+                virtualException = t
+            }
+        }
+        vThread.join()
+        assertTrue(
+            virtualException is IllegalStateException,
+            "Installing thread-scoped containment on a Virtual Thread must throw IllegalStateException, got: $virtualException"
+        )
+
+        // 2. Verify ForkJoinPool Carrier Thread is rejected
+        val carrierFuture = java.util.concurrent.ForkJoinPool.commonPool().submit {
+            ContainedExecutors.installOnCurrentThread(policy)
+        }
+        val carrierException = assertFailsWith<java.util.concurrent.ExecutionException> {
+            carrierFuture.get()
+        }
+        assertTrue(
+            carrierException.cause is IllegalStateException,
+            "Installing thread-scoped containment on a ForkJoinPool carrier thread must throw IllegalStateException, got: ${carrierException.cause}"
+        )
+    }
 }

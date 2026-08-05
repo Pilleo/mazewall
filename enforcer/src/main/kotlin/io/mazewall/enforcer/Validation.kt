@@ -5,7 +5,19 @@ import kotlin.contracts.ExperimentalContracts
 import kotlin.contracts.contract
 
 /**
- * Validates that the current thread is not a Virtual Thread (Loom carrier poisoning protection).
+ * Checks if the given thread is a Virtual Thread or a Loom carrier thread (e.g., ForkJoinWorkerThread).
+ */
+public fun isVirtualOrCarrierThread(thread: Thread = Thread.currentThread()): Boolean {
+    if (thread.isVirtual) return true
+    val className = thread.javaClass.name
+    val name = thread.name
+    return className.contains("ForkJoinWorkerThread") ||
+        name.contains("ForkJoinPool") ||
+        name.contains("carrier", ignoreCase = true)
+}
+
+/**
+ * Validates that the current thread is not a Virtual Thread or Loom carrier thread (Loom carrier poisoning protection).
  *
  * This function uses a Kotlin contract to formalize this invariant, allowing the compiler to
  * perform flow analysis under the guarantee that the current thread is a platform thread.
@@ -15,12 +27,12 @@ public fun validateNotVirtual() {
     contract {
         returns()
     }
-    if (Thread.currentThread().isVirtual) {
+    if (isVirtualOrCarrierThread()) {
         throw IllegalStateException(
-            "Attempted to apply seccomp containment inside a virtual thread. " +
+            "Attempted to apply thread-scoped seccomp containment inside a virtual or carrier thread. " +
                 "Seccomp filters are per-thread and would contaminate the carrier thread, " +
                 "affecting other unrelated virtual threads. " +
-                "Use a dedicated platform thread pool for sandboxed tasks.",
+                "Use process-wide containment (installOnProcess) or ContainedExecutors.wrap(executorService).",
         )
     }
 }
@@ -30,7 +42,7 @@ public fun validateNotVirtual() {
  * sandboxing rules.
  *
  * This function uses a Kotlin contract to formalize the invariant that the
- * code is running on a standard Linux platform thread (not a Virtual Thread).
+ * code is running on a standard Linux platform thread (not a Virtual Thread or carrier thread).
  */
 @OptIn(ExperimentalContracts::class)
 public fun validateLinuxAndNotVirtual() {
