@@ -4,8 +4,10 @@ severity: "HIGH"
 status: "open"
 priority: 5
 dependencies: []
-component: "shared"
+component: "enforcer"
 effort: "large"
+target_modules: [":enforcer"]
+target_files: []
 ---
 
 # 🔴 [Severity: MEDIUM]: Residual Interface Segregation Violation (ISP) in `NativeEngine`

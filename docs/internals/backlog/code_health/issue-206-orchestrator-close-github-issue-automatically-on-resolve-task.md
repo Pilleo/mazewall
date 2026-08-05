@@ -6,6 +6,10 @@ priority: 6
 dependencies: []
 component: "orchestrator"
 effort: "trivial"
+target_modules: [":tools:orchestrator"]
+target_files:
+  - tools/orchestrator/src/main/kotlin/io/mazewall/orchestrator/OrchestratorEnvironment.kt
+  - tools/orchestrator/src/main/kotlin/io/mazewall/orchestrator/OrchestratorStates.kt
 autonomy: "autonomous"
 solution_approved: true
 chosen_solution: "A"

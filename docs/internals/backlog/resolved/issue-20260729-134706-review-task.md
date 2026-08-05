@@ -1,7 +1,7 @@
 ---
 title: "Review Task: Profiler Module & Security Audit"
 severity: "HIGH"
-status: "open"
+status: "resolved"
 priority: 10
 component: "profiler"
 target_modules: [":profiler", ":enforcer"]
