@@ -11,11 +11,17 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
 @Serializable
+data class GitHubLabel(
+    val name: String
+)
+
+@Serializable
 data class GitHubPR(
     val number: Int,
     val title: String,
     val headRefName: String,
-    val body: String? = null
+    val body: String? = null,
+    val labels: List<GitHubLabel> = emptyList()
 )
 
 @Serializable
@@ -155,7 +161,7 @@ class RealGitHubClient(private val config: OrchestratorConfig) : GitHubClient {
 
         for (query in searchQueries) {
             try {
-                val prListJson = execute("gh", "pr", "list", "--search", query, "--json", "number,title,headRefName,body")
+                val prListJson = execute("gh", "pr", "list", "--search", query, "--json", "number,title,headRefName,body,labels")
                 val prs = parsePRs(prListJson)
                 val matched = prs.firstOrNull { isPrMatching(it, issueNumber, issueId, cleanSessionId) }
                 if (matched != null) return matched.number.toString()
@@ -165,7 +171,7 @@ class RealGitHubClient(private val config: OrchestratorConfig) : GitHubClient {
         }
 
         return try {
-            val prListJson = execute("gh", "pr", "list", "--state", "open", "--json", "number,title,headRefName,body")
+            val prListJson = execute("gh", "pr", "list", "--state", "open", "--json", "number,title,headRefName,body,labels")
             val prs = parsePRs(prListJson)
             val matched = prs.firstOrNull { isPrMatching(it, issueNumber, issueId, cleanSessionId) }
             matched?.number?.toString()
@@ -176,6 +182,10 @@ class RealGitHubClient(private val config: OrchestratorConfig) : GitHubClient {
     }
 
     internal fun isPrMatching(pr: GitHubPR, issueNumber: String, issueId: String, cleanSessionId: String?): Boolean {
+        if (pr.labels.any { it.name.equals("superseded", ignoreCase = true) }) {
+            return false
+        }
+
         if (cleanSessionId != null) {
             if (pr.headRefName.contains(cleanSessionId, ignoreCase = true) ||
                 (pr.body?.contains(cleanSessionId, ignoreCase = true) == true)) {
@@ -361,6 +371,25 @@ class RealGitHubClient(private val config: OrchestratorConfig) : GitHubClient {
                 val exitCode = process.exitValue()
                 if (exitCode != 0) {
                     checkForAuthenticationFailure(command, exitCode, output)
+
+                    if (output.contains("network is unreachable", ignoreCase = true) || output.contains("timeout", ignoreCase = true)) {
+                        System.err.println("  [GitHubCli Diagnostics] Command failed with network issue. Dumping environment:")
+                        val envVars = pb.environment()
+                        System.err.println("    HTTP_PROXY: ${envVars["HTTP_PROXY"]}")
+                        System.err.println("    HTTPS_PROXY: ${envVars["HTTPS_PROXY"]}")
+                        System.err.println("    http_proxy: ${envVars["http_proxy"]}")
+                        System.err.println("    https_proxy: ${envVars["https_proxy"]}")
+                        System.err.println("    NO_PROXY: ${envVars["NO_PROXY"]}")
+
+                        try {
+                            val ipRoute = ProcessBuilder("ip", "route").start()
+                            ipRoute.waitFor(2, TimeUnit.SECONDS)
+                            System.err.println("  [GitHubCli Diagnostics] ip route: ${String(ipRoute.inputStream.readAllBytes()).trim()}")
+                        } catch (e: Exception) {
+                            System.err.println("  [GitHubCli Diagnostics] Could not get ip route: ${e.message}")
+                        }
+                    }
+
                     throw ProcessExecutionException(command.joinToString(" "), exitCode, output)
                 }
                 output
@@ -381,6 +410,11 @@ class RealGitHubClient(private val config: OrchestratorConfig) : GitHubClient {
     }
 
     override fun addLabel(issueNumber: String, label: String) {
+        try {
+            execute("gh", "label", "create", label, "--force", "--color", "ed0707", "--description", "Trigger Jules Agent")
+        } catch (e: Exception) {
+            // Ignore if it already exists or auth fails
+        }
         execute("gh", "issue", "edit", issueNumber, "--add-label", label)
     }
 

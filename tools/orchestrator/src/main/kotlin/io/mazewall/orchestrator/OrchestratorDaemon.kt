@@ -69,6 +69,16 @@ class CommandInterpreter(
                 env.julesClient.sendSessionMessage(command.sessionId, command.message)
                 Unit
             }
+            is OrchestratorCommand.TriggerJulesSession -> {
+                val nextIssue = env.parseAllIssues().firstOrNull { it.id == command.issueId }
+                if (nextIssue != null) {
+                    val issueFileObj = nextIssue.file
+                    val issueBody = if (issueFileObj.exists()) issueFileObj.readText() else ""
+                    val prompt = OrchestratorPrompts.taskPrompt(issueBody)
+                    env.julesClient.triggerSession(env.gitHubClient.getRepoName(), command.issueId, prompt)
+                }
+                Unit
+            }
             is OrchestratorCommand.MarkIssueAsResolved -> {
                 val nextIssue = env.parseAllIssues().firstOrNull { it.id == command.issueId }
                 if (nextIssue != null) {

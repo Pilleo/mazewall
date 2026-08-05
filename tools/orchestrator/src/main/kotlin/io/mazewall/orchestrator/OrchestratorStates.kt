@@ -39,6 +39,7 @@ sealed class OrchestratorCommand {
     data class ClearPrCache(val prNumber: String) : OrchestratorCommand()
     data class RebaseBranch(val prNumber: String, val sessionId: String?) : OrchestratorCommand()
     data class ApproveRescue(val prNumber: String, val rescueBranchName: String) : OrchestratorCommand()
+    data class TriggerJulesSession(val issueId: String) : OrchestratorCommand()
 }
 
 data class Transition(
@@ -568,8 +569,8 @@ data class AwaitingJulesStartState(
                     Transition(
                         nextState = this,
                         commands = listOf(
-                            OrchestratorCommand.AddLabel(githubIssueNumber, "jules-start"),
-                            OrchestratorCommand.PrintLog("Waiting for Jules session to be automatically triggered via GitHub issue label (attempt ${slot.julesTriggerAttempts + 1}/12)...")
+                            OrchestratorCommand.TriggerJulesSession(issueId),
+                            OrchestratorCommand.PrintLog("Waiting for Jules session to be automatically triggered via REST API (attempt ${slot.julesTriggerAttempts + 1}/12)...")
                         )
                     )
                 } else if (isTaskTimedOut(slot, OrchestratorConfig())) {
@@ -831,6 +832,12 @@ data class AwaitingPrState(
         if (transition.nextState is SelectTaskState) {
             context.skippedIds.add(issueId)
             context.activeSlots.remove(slot)
+        }
+
+        if (isTaskTimedOut(slot, env.config)) {
+            env.errPrintln("❌ Task $issueId timed out waiting for PR creation. Returning to SELECT_TASK.")
+            context.activeSlots.remove(slot)
+            return SelectTaskState
         }
 
         val now = System.currentTimeMillis()
@@ -1539,7 +1546,7 @@ data class CreateGenerationState(
         val prUrl = env.gitHubClient.getPrUrl(prNumber)
         val branch = env.gitHubClient.getPrHeadSha(prNumber) // or ref name, but sha is fine, we can use pr details
         val previousBranch = env.gitHubClient.getPrHeadSha(prNumber)
-        
+
         val issue = env.parseAllIssues().firstOrNull { it.id == issueId }
         val issueDescription = issue?.file?.readText() ?: "Original description unavailable."
 
