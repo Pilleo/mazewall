@@ -707,4 +707,82 @@ class ProfilerDaemonTest {
             }
         }
     }
+
+    @Test
+    fun `test handleNewConnection socket leak prevention on thread start failure`() {
+        val closedFds = mutableListOf<Int>()
+        val transport = object : MockTransport() {
+            override fun close(fd: FileDescriptor<*, FdState.Open>) {
+                closedFds.add(fd.value)
+            }
+        }
+
+        val engine = ProfilerDaemonEngine("/tmp/test.sock", transport, MockReader())
+
+        // Use reflection to replace clientSockets with a list that throws an OutOfMemoryError on add
+        val throwingList = object : java.util.concurrent.CopyOnWriteArrayList<FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>>() {
+            override fun add(element: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>): Boolean {
+                throw OutOfMemoryError("Simulated OOM on thread spawn limit")
+            }
+        }
+
+        val clientSocketsField = ProfilerDaemonEngine::class.java.getDeclaredField("clientSockets")
+        clientSocketsField.isAccessible = true
+        clientSocketsField.set(engine, throwingList)
+
+        // Call handleNewConnection using reflection
+        val handleNewConnectionMethod = ProfilerDaemonEngine::class.java.getDeclaredMethod(
+            "handleNewConnection",
+            FileDescriptor::class.java
+        )
+        handleNewConnectionMethod.isAccessible = true
+
+        // Because we threw OutOfMemoryError (which is an Error), handleNewConnection should rethrow it.
+        // Reflection wraps it in InvocationTargetException.
+        val exception = org.junit.jupiter.api.assertThrows<java.lang.reflect.InvocationTargetException> {
+            handleNewConnectionMethod.invoke(engine, FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(99))
+        }
+        assertTrue(exception.cause is OutOfMemoryError, "Cause should be OutOfMemoryError")
+
+        // Verify that the accepted client FD (mock transport accept returns 100) was closed
+        assertTrue(closedFds.contains(100), "Socket FD 100 should have been closed to prevent leak")
+    }
+
+    @Test
+    fun `test handleNewConnection socket leak prevention on generic exception`() {
+        val closedFds = mutableListOf<Int>()
+        val transport = object : MockTransport() {
+            override fun close(fd: FileDescriptor<*, FdState.Open>) {
+                closedFds.add(fd.value)
+            }
+        }
+
+        val engine = ProfilerDaemonEngine("/tmp/test.sock", transport, MockReader())
+
+        // Use reflection to replace clientSockets with a list that throws a RuntimeException on add
+        val throwingList = object : java.util.concurrent.CopyOnWriteArrayList<FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>>() {
+            override fun add(element: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>): Boolean {
+                throw RuntimeException("Simulated runtime exception")
+            }
+        }
+
+        val clientSocketsField = ProfilerDaemonEngine::class.java.getDeclaredField("clientSockets")
+        clientSocketsField.isAccessible = true
+        clientSocketsField.set(engine, throwingList)
+
+        // Call handleNewConnection using reflection
+        val handleNewConnectionMethod = ProfilerDaemonEngine::class.java.getDeclaredMethod(
+            "handleNewConnection",
+            FileDescriptor::class.java
+        )
+        handleNewConnectionMethod.isAccessible = true
+
+        // Generic Exception should be swallowed, so this shouldn't throw.
+        org.junit.jupiter.api.assertDoesNotThrow {
+            handleNewConnectionMethod.invoke(engine, FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(99))
+        }
+
+        // Verify that the accepted client FD (100) was closed
+        assertTrue(closedFds.contains(100), "Socket FD 100 should have been closed on generic exception")
+    }
 }
