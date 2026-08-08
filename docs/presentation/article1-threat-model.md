@@ -252,11 +252,11 @@ Beyond the technical mechanics of eBPF and Seccomp, the move toward BoB solves t
 In industries like Fintech, Healthcare, and Legal, "trust" is often handled via manual audit. BoB allows you to move that trust into the Linux kernel.
 
 Consider a thread pool responsible for processing highly sensitive data (PII, payment card data, or privileged documents). By applying a behavioral contract (like `Policy.PURE_COMPUTE` and Landlock path restrictions), you establish a contract that the kernel itself enforces:
- - **"No network call was made."** Since `connect` and `sendmsg` are blocked at the syscall level, it is physically impossible for the data to have been exfiltrated during that execution block.
+ - **"The configured network syscalls were denied on this thread."** This is evidence that those direct operations could not succeed. It is not proof of non-exfiltration through inherited descriptors, allowed syscalls, shared memory, logs, IPC, or an unrestricted sibling thread.
  - **"No file was written outside the declared path."** Even if a misconfigured logger or a malicious library attempts to write sensitive data elsewhere, the kernel blocks the operation.
  - **"No subprocess was spawned."** The data cannot be passed to an external utility or an in-memory executor.
 
-This is **kernel-enforced attestation, not software-asserted**. The guarantee comes from the OS — not from application-level checks that an attacker could bypass.
+These are **kernel-enforced restrictions**, not a complete behavioral attestation. The strength of any higher-level conclusion is limited by the policy's syscall coverage, inherited resources, shared-process channels, and the stated attacker model.
 
 ### 2. Zero-Trust for Internal Libraries (Blast Radius Control)
 Modern applications pull in hundreds of internal and third-party dependencies. You may trust your core team, but do you trust every library used by the "Experimental Feature" team?
@@ -264,7 +264,7 @@ Modern applications pull in hundreds of internal and third-party dependencies. Y
 By default, every thread in a JVM process shares the same permissions. If a minor utility library has a vulnerability, it has the same network and filesystem access as your most critical core service. BoB allows for **surgical self-restriction**:
  - **The PDF Generator** can read fonts but has no network access.
  - **The Image Processor** can read/write to a temp folder but has no exec permissions.
- - **The Legacy Integration** is restricted to a single specific IP address.
+ - **The Legacy Integration** runs under a thread policy while an external network control (for example, a namespace firewall or cgroup/network policy) restricts destination IPs.
 
 If any of these libraries are compromised, the "blast radius" is limited to the specific capabilities you explicitly granted them.
 
