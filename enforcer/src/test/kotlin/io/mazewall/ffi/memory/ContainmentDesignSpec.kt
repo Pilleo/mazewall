@@ -178,7 +178,7 @@ class ContainmentDesignSpec :
                 if (isSupported) {
                     val executor = java.util.concurrent.Executors
                         .newSingleThreadExecutor()
-                    val safeExecutor = io.mazewall.enforcer.ContainedExecutors.wrap(
+                    val safeExecutor = io.mazewall.enforcer.api.ContainedExecutors.wrap(
                         executor,
                         Policy.builder().build(),
                     )

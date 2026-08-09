@@ -67,6 +67,7 @@ interface "NativeIoOperations" as io.mazewall.profiler.engine.NativeIoOperations
   + {abstract}SyscallResult write(FileDescriptor<?, ? extends Open>, MemorySegment, long)
   + {abstract}SyscallResult recv(FileDescriptor<?, ? extends Open>, MemorySegment, long, int)
   + {abstract}SyscallResult ioctl(FileDescriptor<?, ? extends Open>, long, MemorySegment)
+  + {abstract}void close(FileDescriptor<?, ? extends Open>)
 }
 class "PathNormalizerHelper" as io.mazewall.profiler.engine.PathNormalizerHelper {
   + {static}PathNormalizerHelper INSTANCE

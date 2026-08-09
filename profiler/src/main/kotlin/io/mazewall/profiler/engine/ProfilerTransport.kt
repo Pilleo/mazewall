@@ -87,6 +87,8 @@ interface NativeIoOperations {
         request: Long,
         arg: MemorySegment,
     ): LinuxNative.SyscallResult<Long, *>
+
+    fun close(fd: FileDescriptor<*, FdState.Open>)
 }
 
 /**

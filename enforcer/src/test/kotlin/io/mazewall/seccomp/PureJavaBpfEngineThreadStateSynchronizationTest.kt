@@ -10,8 +10,7 @@ import io.mazewall.compile
 import io.mazewall.core.Arch
 import io.mazewall.core.PrctlCommand
 import io.mazewall.enforcer.state.ContainerState
-import io.mazewall.enforcer.state.ProcessStateRegistry
-import io.mazewall.enforcer.state.ThreadStateRegistry
+import io.mazewall.enforcer.state.ContainmentStateRegistry
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -22,8 +21,8 @@ class PureJavaBpfEngineThreadStateSynchronizationTest {
 
     @BeforeEach
     fun setUp() {
-        ProcessStateRegistry.state = ContainerState()
-        ThreadStateRegistry.state = ContainerState()
+        ContainmentStateRegistry.processState = ContainerState()
+        ContainmentStateRegistry.threadState = ContainerState()
         Platform.setProvider(MockPlatformProvider())
         LinuxNative.resetToDefault()
         PureJavaBpfEngine.clearCache()
@@ -32,8 +31,8 @@ class PureJavaBpfEngineThreadStateSynchronizationTest {
 
     @AfterEach
     fun tearDown() {
-        ProcessStateRegistry.state = ContainerState()
-        ThreadStateRegistry.state = ContainerState()
+        ContainmentStateRegistry.processState = ContainerState()
+        ContainmentStateRegistry.threadState = ContainerState()
         Platform.resetToDefault()
         LinuxNative.resetToDefault()
         PureJavaBpfEngine.clearCache()

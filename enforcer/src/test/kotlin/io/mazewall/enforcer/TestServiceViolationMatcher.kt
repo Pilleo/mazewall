@@ -1,6 +1,6 @@
 package io.mazewall.enforcer
 
-import io.mazewall.enforcer.engine.ViolationMatcher
+import io.mazewall.enforcer.diagnostics.ViolationMatcher
 
 class TestServiceViolationMatcher : ViolationMatcher {
     override fun matches(t: Throwable): Boolean {

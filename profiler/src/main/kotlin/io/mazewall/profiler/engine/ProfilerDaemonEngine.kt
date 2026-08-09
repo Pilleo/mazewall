@@ -52,7 +52,7 @@ public class ProfilerDaemonEngine(
 
     companion object {
         private const val DAEMON_READY_SENTINEL = "MAZEWALL_DAEMON_READY"
-        private const val POLL_TIMEOUT_MS = 1000
+        private const val POLL_TIMEOUT_MS = 200
         private const val POLLFD_FD_OFF = 0L
         private const val POLLFD_EVENTS_OFF = 4L
         private const val ACK_BUF_SIZE = 1L

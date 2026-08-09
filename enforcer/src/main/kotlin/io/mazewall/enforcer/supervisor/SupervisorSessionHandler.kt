@@ -679,7 +679,7 @@ internal class SupervisorSessionHandler(
                         // To allow process execution while preventing TOCTOU attacks as robustly as possible, we emulate
                         // safe execution by writing the exact validated path bytes back to the tracee's address space
                         // prior to allowing the syscall to continue.
-                        if (pathStr != null) {
+                        if (pathStr != null && !pathStr.startsWith("<YAMA_ERROR")) {
                             val pathAddr = if (nr == traceeArch.execve) args[0] else args[1]
                             val pathBytes = pathStr.toByteArray(StandardCharsets.UTF_8)
                             val pathBytesWithNull = ByteArray(pathBytes.size + 1)

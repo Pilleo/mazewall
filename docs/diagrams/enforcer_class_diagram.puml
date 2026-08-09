@@ -436,6 +436,13 @@ class "SyscallNumber" as io.mazewall.core.SyscallNumber {
   + {static}int constructor-impl(int)
   + {static}boolean equals-impl0(int, int)
 }
+class "ThreadLocalDelegate" as io.mazewall.core.ThreadLocalDelegate<T> {
+  +T getValue(Object, KProperty<?>)
+  +void setValue(Object, KProperty<?>, T)
+}
+class "ThreadLocalDelegateKt" as io.mazewall.core.ThreadLocalDelegateKt {
+  + {static}ThreadLocalDelegate<T> threadLocal(Function0<? extends T>)
+}
 class "Tid" as io.mazewall.core.Tid {
   +int getValue()
   + {static}String toString-impl(int)
@@ -543,27 +550,16 @@ class "ContainerState" as io.mazewall.enforcer.state.ContainerState {
   +ContainerState withLandlockPolicy(PolicyDefinition<?>)
   +ContainerState withEngineState(SeccompInstallationState)
 }
-class "ProcessStateRegistry" as io.mazewall.enforcer.state.ProcessStateRegistry {
-  + {static}ProcessStateRegistry INSTANCE
+class "ContainmentStateRegistry" as io.mazewall.enforcer.state.ContainmentStateRegistry {
+  + {static}ContainmentStateRegistry INSTANCE
   __
-  +ContainerState getState()
-  +void setState(ContainerState)
-  +void update(Function1<? super ContainerState, ContainerState>)
-}
-class "ThreadLocalDelegate" as io.mazewall.enforcer.state.ThreadLocalDelegate<T> {
-  +T getValue(Object, KProperty<?>)
-  +void setValue(Object, KProperty<?>, T)
-}
-class "ThreadLocalDelegateKt" as io.mazewall.enforcer.state.ThreadLocalDelegateKt {
-  + {static}ThreadLocalDelegate<T> threadLocal(Function0<? extends T>)
-}
-class "ThreadStateRegistry" as io.mazewall.enforcer.state.ThreadStateRegistry {
-  + {static}ThreadStateRegistry INSTANCE
-  __
-  +ContainerState getState()
-  +void setState(ContainerState)
-  +ContainerState resolveCurrentState(ContainerState)
-  +void sanitize()
+  +ContainerState getProcessState()
+  +void setProcessState(ContainerState)
+  +void updateProcessState(Function1<? super ContainerState, ContainerState>)
+  +ContainerState getThreadState()
+  +void setThreadState(ContainerState)
+  +ContainerState resolveCurrentState()
+  +void sanitizeThreadState()
 }
 class "DefaultStacktraceScopingPolicy" as io.mazewall.enforcer.supervisor.DefaultStacktraceScopingPolicy {
   + {static}DefaultStacktraceScopingPolicy INSTANCE
@@ -1393,10 +1389,9 @@ io.mazewall.enforcer.internal.ContainedExecutorWrapper --> io.mazewall.PolicyDef
 io.mazewall.enforcer.state.ContainerState --> io.mazewall.seccomp.SeccompInstallationState
 io.mazewall.enforcer.state.ContainerState --> io.mazewall.PolicyDefinition
 io.mazewall.enforcer.state.ContainerState --> io.mazewall.core.SeccompAction
-io.mazewall.enforcer.state.ProcessStateRegistry --> io.mazewall.enforcer.state.ContainerState
-io.mazewall.enforcer.state.ProcessStateRegistry --> io.mazewall.enforcer.state.ProcessStateRegistry
-io.mazewall.enforcer.state.ThreadStateRegistry --> io.mazewall.enforcer.state.ThreadStateRegistry
-io.mazewall.enforcer.state.ThreadStateRegistry --> io.mazewall.enforcer.state.ThreadLocalDelegate
+io.mazewall.enforcer.state.ContainmentStateRegistry --> io.mazewall.enforcer.state.ContainerState
+io.mazewall.enforcer.state.ContainmentStateRegistry --> io.mazewall.core.ThreadLocalDelegate
+io.mazewall.enforcer.state.ContainmentStateRegistry --> io.mazewall.enforcer.state.ContainmentStateRegistry
 io.mazewall.enforcer.supervisor.DefaultStacktraceScopingPolicy .u.|> io.mazewall.enforcer.supervisor.StacktraceScopingPolicy
 io.mazewall.enforcer.supervisor.DefaultStacktraceScopingPolicy --> io.mazewall.enforcer.supervisor.DefaultStacktraceScopingPolicy
 io.mazewall.enforcer.supervisor.DefaultStacktraceScopingPolicy --> io.mazewall.core.Tid
@@ -1443,7 +1438,7 @@ io.mazewall.ffi.internal.RealNativeProcess .u.|> io.mazewall.NativeProcess
 io.mazewall.ffi.internal.RealNativeProcess --> io.mazewall.ffi.internal.RealNativeProcess
 io.mazewall.ffi.internal.SyscallInvoker --> io.mazewall.ffi.internal.SyscallInvoker
 io.mazewall.ffi.memory.ConfinedSegment .u.|> io.mazewall.ffi.memory.ManagedSegment
-io.mazewall.ffi.memory.ErrnoSegment --> io.mazewall.enforcer.state.ThreadLocalDelegate
+io.mazewall.ffi.memory.ErrnoSegment --> io.mazewall.core.ThreadLocalDelegate
 io.mazewall.ffi.memory.SegmentPool --> io.mazewall.ffi.memory.NativeArena
 io.mazewall.ffi.memory.SegmentPool <--> io.mazewall.ffi.memory.SegmentPool
 io.mazewall.ffi.memory.SegmentPool --> io.mazewall.ffi.memory.ManagedSegment

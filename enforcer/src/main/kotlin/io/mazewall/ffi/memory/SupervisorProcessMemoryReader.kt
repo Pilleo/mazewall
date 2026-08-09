@@ -38,8 +38,9 @@ public object SupervisorProcessMemoryReader {
             len++
         }
         if (!hasNullTerminator) {
+            val preview = bytes.take(64).joinToString("") { "%02X".format(it) }
             throw io.mazewall.enforcer.api.ContainmentViolationException(
-                "Remote string from TID ${tid.value} at address 0x${remoteAddr.toString(16)} lacks null terminator within $maxLen bytes."
+                "Remote string from TID ${tid.value} at address 0x${remoteAddr.toString(16)} lacks null terminator within $maxLen bytes. Read: $len bytes. Hex preview: $preview"
             )
         }
         return String(bytes, 0, len, StandardCharsets.UTF_8)
@@ -80,7 +81,7 @@ public object SupervisorProcessMemoryReader {
                 if (warnOnEperm) {
                     System.err.println("[DAEMON] WARN: Permission denied reading memory from TID ${tid.value}. (Yama ptrace_scope?)")
                 }
-                "<YAMA_ERROR_UNKNOWN_PATH>".toByteArray(StandardCharsets.UTF_8)
+                "<YAMA_ERROR_UNKNOWN_PATH>\u0000".toByteArray(StandardCharsets.UTF_8)
             } else {
                 null
             }

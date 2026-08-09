@@ -60,6 +60,8 @@ internal class ProfilerSessionHandler(
 
     private val resolver = SyscallPathResolver(memoryReader, ledger)
 
+    private var isPassThrough = false
+
     var state: ProfilerState = ProfilerState.ActiveSession(socketFd, listenerFd)
         private set
 
@@ -86,8 +88,8 @@ internal class ProfilerSessionHandler(
         val pollEvents = parser.readPollEvents(pollFds)
         val socketRevents = pollEvents.socketRevents.toInt()
         val errorOrHup = NativeConstants.POLLERR.toInt() or NativeConstants.POLLHUP.toInt() or NativeConstants.POLLNVAL.toInt()
-        if ((socketRevents and (NativeConstants.POLLIN.toInt() or errorOrHup)) != 0) {
-            val isDeadOrShutdown = (socketRevents and errorOrHup) != 0 || handleShutdownRequest(ackBuf)
+        if (!isPassThrough && (socketRevents and (NativeConstants.POLLIN.toInt() or errorOrHup)) != 0) {
+            val isDeadOrShutdown = (socketRevents and errorOrHup) != 0 || handleShutdownRequest(ackBuf, pollFds)
             if (isDeadOrShutdown) {
                 state = ProfilerState.Terminated(socketFd, listenerFd)
                 return LoopAction.Shutdown
@@ -104,10 +106,22 @@ internal class ProfilerSessionHandler(
             notif.fill(0)
             val recvRes = ioOps.raw.ioctl(listenerFd, SECCOMP_IOCTL_NOTIF_RECV, notif)
             recvRes.onSuccess {
-                val ok = processNotification()
-                if (!ok) {
-                    System.err.println("[DAEMON-WARN] Failed to process notification. Terminating session.")
-                    state = ProfilerState.Terminated(socketFd, listenerFd)
+                if (isPassThrough) {
+                    val id = parser.readNotif(notif).id
+                    val dummyResp = SegmentPool.SECCOMP_NOTIF_RESP_POOL.rent()
+                    try {
+                        with(sessionArena.unwrap) {
+                            responder.sendSeccompContinue(HandshakeSession.Success(id, listenerFd), dummyResp.unwrap)
+                        }
+                    } finally {
+                        SegmentPool.SECCOMP_NOTIF_RESP_POOL.release(dummyResp)
+                    }
+                } else {
+                    val ok = processNotification()
+                    if (!ok) {
+                        System.err.println("[DAEMON-WARN] Failed to process notification. Terminating session.")
+                        state = ProfilerState.Terminated(socketFd, listenerFd)
+                    }
                 }
             }
             if (state is ProfilerState.Terminated) return LoopAction.Break
@@ -116,7 +130,7 @@ internal class ProfilerSessionHandler(
     }
 
     @Suppress("ReturnCount")
-    private fun handleShutdownRequest(ackBuf: ManagedSegment): Boolean {
+    private fun handleShutdownRequest(ackBuf: ManagedSegment, pollFds: ManagedSegment): Boolean {
         val res = ioOps.recv(socketFd, ackBuf.unwrap, 1L, 0)
         return res.map { value ->
             if (value > 0) {
@@ -124,13 +138,21 @@ internal class ProfilerSessionHandler(
                 if (command == SHUTDOWN_COMMAND_BYTE) {
                     onShutdown("Parent Command")
                     true
+                } else if (command == PASS_THROUGH_COMMAND_BYTE) {
+                    isPassThrough = true
+                    // Disable polling on the socket FD since we are now in pass-through mode.
+                    // This prevents POLLHUP on the socket from killing the pass-through session
+                    // when the parent JVM closes it.
+                    pollFds.writeInt(8L, -1)
+                    ioOps.close(socketFd)
+                    false
                 } else {
                     false
                 }
             } else {
-                true // parent socket closed
+                !isPassThrough // Only shutdown if not in pass-through
             }
-        }.recover { _, _ -> false }
+        }.recover { _, _ -> true }
     }
 
     /**
@@ -307,6 +329,9 @@ internal class ProfilerSessionHandler(
 
 
     companion object {
+        private const val SHUTDOWN_COMMAND_BYTE: Byte = 0x53.toByte() // 'S'
+        private const val PASS_THROUGH_COMMAND_BYTE: Byte = 0x54.toByte() // 'T' / 'P'
+
         private const val ECONNRESET = 104
         private val logger = java.util.logging.Logger.getLogger(ProfilerSessionHandler::class.java.name)
 

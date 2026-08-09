@@ -1,9 +1,9 @@
 package io.mazewall.enforcer
 
 import io.mazewall.*
-import io.mazewall.core.SandboxedPath
-import io.mazewall.core.SeccompAction
-import io.mazewall.core.Syscall
+import io.mazewall.enforcer.api.ContainedExecutors
+import io.mazewall.enforcer.state.ContainmentStateRegistry
+import io.mazewall.enforcer.state.ContainerState
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import java.util.concurrent.Executors
@@ -15,7 +15,7 @@ class ContainedExecutorsCoverageTest {
     @AfterEach
     fun tearDown() {
         Platform.resetToDefault()
-        ThreadStateRegistry.state = ContainerState()
+        ContainmentStateRegistry.threadState = ContainerState()
         System.clearProperty("io.mazewall.fallback")
     }
 
@@ -32,7 +32,7 @@ class ContainedExecutorsCoverageTest {
         val p1 = Policy.builder().allowFsRead("/tmp").build()
         val p2 = Policy.builder().allowFsRead("/").build()
 
-        ThreadStateRegistry.state = ThreadStateRegistry.state.withLandlockPolicy(p1.definition)
+        ContainmentStateRegistry.threadState = ContainmentStateRegistry.threadState.withLandlockPolicy(p1.definition)
         assertFailsWith<IllegalStateException> {
             ContainedExecutors.installOnCurrentThread(p2)
         }
@@ -86,8 +86,8 @@ class ContainedExecutorsCoverageTest {
             rootDir = rootDir.parentFile
         }
 
-        val executorsFile = java.io.File(rootDir, "enforcer/src/main/kotlin/io/mazewall/enforcer/ContainedExecutors.kt")
-        val actionFile = java.io.File(rootDir, "enforcer/src/main/kotlin/io/mazewall/core/SeccompAction.kt")
+        val executorsFile = java.io.File(rootDir, "enforcer/src/main/kotlin/io/mazewall/enforcer/api/ContainedExecutors.kt")
+        val actionFile = java.io.File(rootDir, "platform/src/main/kotlin/io/mazewall/core/SeccompAction.kt")
 
         assertTrue(executorsFile.exists(), "ContainedExecutors.kt should be found at ${executorsFile.absolutePath}")
         assertTrue(actionFile.exists(), "SeccompAction.kt should be found at ${actionFile.absolutePath}")

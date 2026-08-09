@@ -80,10 +80,10 @@ internal data class ContainerState(
          * merging both thread-local and global process-wide restrictions.
          *
          * Thread-Safety and Concurrency:
-         * This function reads the thread-local state (`ThreadStateRegistry.state`) and the
-         * global process state (`ProcessStateRegistry.state`). Because [ContainerState] and
+         * This function reads the thread-local state (`ContainmentStateRegistry.threadState`) and the
+         * global process state (`ContainmentStateRegistry.processState`). Because [ContainerState] and
          * its contained collections (e.g. [syscallActions], [allowedSyscalls]) are immutable,
-         * and [ProcessStateRegistry.state] is managed via an atomic reference, this function
+         * and [ContainmentStateRegistry.processState] is managed via an atomic reference, this function
          * is fully thread-safe and robust against concurrent modifications of global policies.
          *
          * However, modifying process-wide global policies concurrently while task executors
@@ -91,7 +91,7 @@ internal data class ContainerState(
          * tasks may interleave with global state transitions.
          */
         fun resolveCurrentState(): ContainerState {
-            return ThreadStateRegistry.resolveCurrentState(ProcessStateRegistry.state)
+            return ContainmentStateRegistry.resolveCurrentState()
         }
     }
 }

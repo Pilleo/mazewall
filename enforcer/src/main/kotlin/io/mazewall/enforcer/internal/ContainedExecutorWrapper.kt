@@ -10,7 +10,7 @@ import io.mazewall.PolicyDefinition
 import io.mazewall.enforcer.api.ContainedExecutors
 import io.mazewall.enforcer.diagnostics.ContainmentViolationDetector
 import io.mazewall.enforcer.api.ContainmentViolationException
-import io.mazewall.enforcer.state.ThreadStateRegistry
+import io.mazewall.enforcer.state.ContainmentStateRegistry
 import io.mazewall.enforcer.supervisor.StacktraceScopingPolicy
 import java.util.concurrent.Callable
 import java.util.concurrent.ExecutorService
@@ -23,7 +23,7 @@ import java.util.concurrent.TimeUnit
  * ### Graceful Shutdown
  * Users of this wrapper should prefer [shutdown] and [awaitTermination] over [shutdownNow].
  * Aggressive interruption via `shutdownNow()` can occur during the delicate FFM seccomp
- * installation sequence. Although the implementation ensures that the [ThreadStateRegistry]
+ * installation sequence. Although the implementation ensures that the [ContainmentStateRegistry]
  * remains synchronized with the kernel's filter state even upon interruption, it is better
  * to allow the handshake to complete naturally.
  *
@@ -65,7 +65,7 @@ internal class ContainedExecutorWrapper(
 ) : ExecutorService by delegate {
     private fun <T> wrapCallable(task: Callable<T>): Callable<T> =
         Callable {
-            val initialState = ThreadStateRegistry.state
+            val initialState = ContainmentStateRegistry.threadState
             var session: AutoCloseable? = null
             try {
                 session = ContainedExecutors.installOnCurrentThread(policy, scopingPolicy)
@@ -78,7 +78,7 @@ internal class ContainedExecutorWrapper(
                 }
             } catch (t: Throwable) {
                 if (session == null) {
-                    ThreadStateRegistry.state = initialState
+                    ContainmentStateRegistry.threadState = initialState
                 }
                 throw t
             } finally {
@@ -88,7 +88,7 @@ internal class ContainedExecutorWrapper(
 
     private fun wrapRunnable(task: Runnable): Runnable =
         Runnable {
-            val initialState = ThreadStateRegistry.state
+            val initialState = ContainmentStateRegistry.threadState
             var session: AutoCloseable? = null
             try {
                 session = ContainedExecutors.installOnCurrentThread(policy, scopingPolicy)
@@ -101,7 +101,7 @@ internal class ContainedExecutorWrapper(
                 }
             } catch (t: Throwable) {
                 if (session == null) {
-                    ThreadStateRegistry.state = initialState
+                    ContainmentStateRegistry.threadState = initialState
                 }
                 throw t
             } finally {

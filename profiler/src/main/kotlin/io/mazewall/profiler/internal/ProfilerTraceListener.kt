@@ -243,16 +243,20 @@ internal class ProfilerTraceListener(
     }
 
     private fun sendCommand(commandByte: Byte) {
-        // Best-effort: if the socket is already closed or the daemon is dead, ignore errors.
-        // Use a confined native arena — MemorySegment.ofArray() creates a heap segment that
-        // cannot be passed to native write() syscalls via the FFM API.
         try {
             Arena.ofConfined().use { arena ->
                 val buf = arena.allocate(1)
                 buf.set(java.lang.foreign.ValueLayout.JAVA_BYTE, 0L, commandByte)
-                LinuxNative.memory.write(socketFd, ConfinedSegment(buf), 1)
+                val res = LinuxNative.memory.write(socketFd, ConfinedSegment(buf), 1)
+                if (res is LinuxNative.SyscallResult.Error) {
+                    System.err.println("[TRACE-LISTENER-DEBUG] sendCommand write failed with errno: ${res.errno}")
+                } else {
+                    System.err.println("[TRACE-LISTENER-DEBUG] sendCommand write succeeded")
+                }
             }
-        } catch (ignored: Exception) {}
+        } catch (e: Exception) {
+            System.err.println("[TRACE-LISTENER-DEBUG] sendCommand threw exception: ${e.message}")
+        }
     }
 
     @Suppress("MagicNumber")

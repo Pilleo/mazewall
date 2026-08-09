@@ -51,6 +51,9 @@ sealed class HandshakeSession {
                 val revents = pollFd.get(ValueLayout.JAVA_SHORT, POLLFD_REVENTS_OFF)
                 if ((revents.toInt() and NativeConstants.POLLIN.toInt()) != 0) {
                     return readAndProcessAck(socketFd, ioOps, ackBuf, onShutdown)
+                } else {
+                    System.err.println("[DAEMON-DEBUG] performHandshake poll woke up but POLLIN is not set! revents=${revents}")
+                    Thread.sleep(100) // Prevent tight loop log spam
                 }
                 return failed()
             }

@@ -40,7 +40,7 @@ import java.util.logging.Logger
  * partially initialized supervisor state.
  *
  * ARCHITECTURAL INVARIANT: Container state is maintained via immutable [ContainerState] objects,
- * which are updated atomically via [ThreadStateRegistry] and [ProcessStateRegistry]. This ensures
+ * which are updated atomically via [ContainmentStateRegistry]. This ensures
  * that the library has a consistent and race-free view of the active sandbox configuration
  * during concurrent or nested filter installations.
  *
@@ -136,7 +136,7 @@ object ContainedExecutors {
         policy: PolicyDefinition<*>,
         scopingPolicy: StacktraceScopingPolicy = io.mazewall.enforcer.supervisor.DefaultStacktraceScopingPolicy
     ) : AutoCloseable {
-        val initialState = if (processWide) null else ThreadStateRegistry.state
+        val initialState = if (processWide) null else ContainmentStateRegistry.threadState
         try {
             val augmentedPolicy = if (scopingPolicy.handlers.isNotEmpty()) {
                 val overriddenActions = policy.syscallActions.toMutableMap()
@@ -168,7 +168,7 @@ object ContainedExecutors {
             return installSeccompFilter(processWide, augmentedPolicy, scopingPolicy)
         } catch (t: Throwable) {
             if (!processWide && initialState != null) {
-                ThreadStateRegistry.state = initialState
+                ContainmentStateRegistry.threadState = initialState
             }
             val fallback = Platform.configuredFallback()
             if (fallback != Platform.FallbackBehavior.FAIL) {
@@ -224,7 +224,7 @@ object ContainedExecutors {
         if (!needsLandlock(policy)) return
 
         synchronized(processLock) {
-            val state = if (processWide) ProcessStateRegistry.state else ThreadStateRegistry.state
+            val state = if (processWide) ContainmentStateRegistry.processState else ContainmentStateRegistry.threadState
             val landlockPolicy = state.landlockPolicy
 
             if (landlockPolicy != null) {
@@ -243,9 +243,9 @@ object ContainedExecutors {
             if (isDifferent) {
                 Landlock.applyRuleset(policy, processWide)
                 if (processWide) {
-                    ProcessStateRegistry.update { it.withLandlockPolicy(policy) }
+                    ContainmentStateRegistry.updateProcessState { it.withLandlockPolicy(policy) }
                 } else {
-                    ThreadStateRegistry.state = ThreadStateRegistry.state.withLandlockPolicy(policy)
+                    ContainmentStateRegistry.threadState = ContainmentStateRegistry.threadState.withLandlockPolicy(policy)
                 }
             }
         }
@@ -382,7 +382,7 @@ object ContainedExecutors {
         newDefaultAction: SeccompAction,
         toInstall: PolicyDefinition<*>,
     ) {
-        ProcessStateRegistry.update { current ->
+        ContainmentStateRegistry.updateProcessState { current ->
             current.withNewSeccompPolicy(toInstall, newBlocks, newDefaultAction)
         }
     }
@@ -392,6 +392,6 @@ object ContainedExecutors {
         newDefaultAction: SeccompAction,
         toInstall: PolicyDefinition<*>,
     ) {
-        ThreadStateRegistry.state = ThreadStateRegistry.state.withNewSeccompPolicy(toInstall, newBlocks, newDefaultAction)
+        ContainmentStateRegistry.threadState = ContainmentStateRegistry.threadState.withNewSeccompPolicy(toInstall, newBlocks, newDefaultAction)
     }
 }
