@@ -105,13 +105,7 @@ class CommandInterpreter(
                 env.gitHubClient.clearPrCache(command.prNumber)
                 Unit
             }
-            is OrchestratorCommand.RebaseBranch -> {
-                env.gitHubClient.rebaseBranch(command.prNumber, command.sessionId)
-            }
-            is OrchestratorCommand.ApproveRescue -> {
-                env.gitHubClient.approveRescue(command.prNumber, command.rescueBranchName)
-                Unit
-            }
+
         }
     }
 }

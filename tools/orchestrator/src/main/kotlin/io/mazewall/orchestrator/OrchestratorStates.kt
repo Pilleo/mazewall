@@ -19,7 +19,6 @@ sealed class OrchestratorEvent {
     data class PrCommentsFetched(val comments: List<GitHubComment>) : OrchestratorEvent()
     data class CommitEmptyChecked(val isEmpty: Boolean, val newSha: String) : OrchestratorEvent()
     data class PrMergedDetected(val prNumber: String) : OrchestratorEvent()
-    data class RebaseCompleted(val result: RebaseResult) : OrchestratorEvent()
 }
 
 sealed class OrchestratorCommand {
@@ -37,8 +36,6 @@ sealed class OrchestratorCommand {
     data object DeleteStateFile : OrchestratorCommand()
     data object GenerateKnowledgeMap : OrchestratorCommand()
     data class ClearPrCache(val prNumber: String) : OrchestratorCommand()
-    data class RebaseBranch(val prNumber: String, val sessionId: String?) : OrchestratorCommand()
-    data class ApproveRescue(val prNumber: String, val rescueBranchName: String) : OrchestratorCommand()
     data class TriggerJulesSession(val issueId: String) : OrchestratorCommand()
 }
 
@@ -917,25 +914,6 @@ data class CiRunningState(
                     Transition(this)
                 }
             }
-            is OrchestratorEvent.RebaseCompleted -> {
-                val result = event.result
-                if (result.success) {
-                    Transition(
-                        nextState = this,
-                        commands = listOf(
-                            OrchestratorCommand.PrintLog("✅ Successfully auto-merged master into PR #$prNumber.")
-                        )
-                    )
-                } else {
-                    Transition(
-                        nextState = CreateGenerationState(issueId, githubIssueNumber, julesSessionId, prNumber),
-                        commands = listOf(
-                            OrchestratorCommand.SendTelegramNotification("⚠️ *PR #$prNumber has conflicts!* Transitioning to a new generation..."),
-                            OrchestratorCommand.PrintLog("\u001B[1;31m🔔 [CONFLICT] PR #$prNumber has conflicts! Starting new generation.\u001B[0m")
-                        )
-                    )
-                }
-            }
             is OrchestratorEvent.PrBuildStatusFetched -> {
                 val status = event.status
                 val currentSha = event.headSha
@@ -1064,7 +1042,7 @@ data class CiRunningState(
 
         val outcome = handleRebaseAndConflicts(env, slot, prNumber, issueId, githubIssueNumber, julesSessionId)
         when (outcome) {
-            RebaseOutcome.WAITING_RETRY, RebaseOutcome.WAITING_MANUAL_RESCUE, RebaseOutcome.AUTO_MERGED -> {
+            RebaseOutcome.WAITING_RETRY -> {
                 if (slot.retryAfterTime <= currentTime) {
                     slot.retryAfterTime = currentTime + TimeUnit.SECONDS.toMillis(env.config.pollingIntervalSeconds)
                 }
@@ -1356,12 +1334,9 @@ data class AwaitingReviewState(
 
         val outcome = handleRebaseAndConflicts(env, slot, prNumber, issueId, githubIssueNumber, julesSessionId)
         when (outcome) {
-            RebaseOutcome.WAITING_RETRY, RebaseOutcome.WAITING_MANUAL_RESCUE, RebaseOutcome.AUTO_MERGED -> {
+            RebaseOutcome.WAITING_RETRY -> {
                 if (slot.retryAfterTime <= currentTime) {
                     slot.retryAfterTime = currentTime + TimeUnit.SECONDS.toMillis(env.config.pollingIntervalSeconds)
-                }
-                if (outcome == RebaseOutcome.AUTO_MERGED) {
-                    return CiRunningState(issueId, githubIssueNumber, julesSessionId, prNumber)
                 }
                 return this
             }
@@ -1629,8 +1604,6 @@ fun isTaskTimedOut(slot: SlotContext, config: OrchestratorConfig): Boolean {
 enum class RebaseOutcome {
     ALREADY_SANITIZED,
     WAITING_RETRY,
-    WAITING_MANUAL_RESCUE,
-    AUTO_MERGED,
     CREATE_NEW_GENERATION
 }
 
@@ -1667,60 +1640,18 @@ private fun handleRebaseAndConflicts(env: OrchestratorEnvironment, slot: SlotCon
             val now = System.currentTimeMillis()
             if (now - slot.lastWaitingLogTime > 300_000) {
                 val prUrl = env.gitHubClient.getPrUrl(prNumber)
-                env.println("⚠️ PR #$prNumber has conflict/rebase failure at SHA ${currentSha.take(7)}. Automated rebase previously failed. Waiting for manual resolution or new commit: $prUrl")
+                env.println("⚠️ PR #$prNumber is behind master or conflicting at SHA ${currentSha.take(7)}. Waiting for manual resolution or new commit: $prUrl")
                 slot.lastWaitingLogTime = now
             }
             return RebaseOutcome.ALREADY_SANITIZED
         }
 
-        val reason = if (isConflicting) "conflict status" else "behind master by ${status.behindBy} commits"
-        env.println("🔄 Active PR #$prNumber is $reason. Attempting automated merge of master into branch...")
-
-        val sessionId = env.julesClient.getActiveSession(slot.currentIssueId)?.id
-        val rebaseResult = env.gitHubClient.rebaseBranch(prNumber, sessionId)
-        if (rebaseResult.needsRescueApproval && rebaseResult.rescueBranchName != null) {
-            env.println("🚨 PR #$prNumber has unrelated histories. Rescue branch prepared.")
-            env.sendNotification( "🚨 Unrelated histories detected on PR #$prNumber. I've prepared a rescued branch: ${rebaseResult.rescueBranchName}. Approve to forcefully overwrite the PR branch.")
-            val approved = env.requestApproval(slot.currentIssueId, "🚨 Unrelated histories detected on PR #${prNumber}. I've prepared a rescued branch: ${rebaseResult.rescueBranchName}. Approve to forcefully overwrite the PR branch.")
-            if (approved) {
-                env.println("Rescue approved. Pushing to PR...")
-                env.gitHubClient.approveRescue(prNumber, rebaseResult.rescueBranchName)
-                slot.lastWaitingLogTime = 0L
-                val newSha = env.gitHubClient.getPrHeadSha(prNumber)
-                val oldSha = slot.lastHeadSha
-                slot.lastHeadSha = newSha
-                if (slot.lastReviewedSha == oldSha && oldSha != null) slot.lastReviewedSha = newSha
-                if (slot.lastRequestedReviewSha == oldSha && oldSha != null) slot.lastRequestedReviewSha = newSha
-                return RebaseOutcome.AUTO_MERGED
-            } else {
-                env.println("Rescue rejected by user.")
-                return RebaseOutcome.WAITING_MANUAL_RESCUE
-            }
-        }
-        val rebaseSuccess = rebaseResult.success
-        if (rebaseSuccess) {
-            env.println("✅ Successfully auto-merged master into PR #$prNumber.")
-            slot.failedRebaseHeadSha = null
-            slot.lastWaitingLogTime = 0L
-
-            val newSha = env.gitHubClient.getPrHeadSha(prNumber)
-            val oldSha = slot.lastHeadSha
-            slot.lastHeadSha = newSha
-
-            if (slot.lastReviewedSha == oldSha && oldSha != null) {
-                slot.lastReviewedSha = newSha
-            }
-            if (slot.lastRequestedReviewSha == oldSha && oldSha != null) {
-                slot.lastRequestedReviewSha = newSha
-            }
-            return RebaseOutcome.AUTO_MERGED
-        } else {
-            slot.failedRebaseHeadSha = currentSha
-            val prUrl = env.gitHubClient.getPrUrl(prNumber)
-            env.sendNotification("⚠️ *PR #$prNumber has conflicts!* Automated cherry-pick sanitization failed. Transitioning to Generation ${slot.generation + 1}.")
-            env.println("\u001B[1;31m🔔 [CONFLICT] PR #$prNumber has conflicts! Transitioning to Generation ${slot.generation + 1}.\u001B[0m")
-            return RebaseOutcome.CREATE_NEW_GENERATION
-        }
+        slot.failedRebaseHeadSha = currentSha
+        val prUrl = env.gitHubClient.getPrUrl(prNumber)
+        val reason = if (isConflicting) "has conflicts" else "is behind master"
+        env.sendNotification("⚠️ *PR #$prNumber $reason!* Automated rebasing is disabled. Transitioning to Generation ${slot.generation + 1} for manual or bot resolution.")
+        env.println("\u001B[1;31m🔔 [CONFLICT] PR #$prNumber $reason! Transitioning to Generation ${slot.generation + 1}.\u001B[0m")
+        return RebaseOutcome.CREATE_NEW_GENERATION
     }
 
     slot.lastSanitizedRebaseSha = env.gitHubClient.getPrHeadSha(prNumber)

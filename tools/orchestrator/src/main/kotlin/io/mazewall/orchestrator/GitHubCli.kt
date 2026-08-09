@@ -50,12 +50,7 @@ class RealGitHubClient(private val config: OrchestratorConfig) : GitHubClient {
     internal data class CachedValue<T>(val value: T, val expiry: Long)
     internal val cache = mutableMapOf<String, CachedValue<*>>()
 
-    override fun approveRescue(prNumber: String, rescueBranchName: String) {
-        val branchName = execute("gh", "pr", "view", prNumber, "--json", "headRefName", "--jq", ".headRefName").trim()
-        execute("git", "push", "--force", "origin", "origin/$rescueBranchName:$branchName")
-        // Clean up rescue branch
-        execute("git", "push", "origin", "--delete", rescueBranchName)
-    }
+
 
     override fun clearPrCache(prNumber: String) {
         cache.remove("checkBuildStatus-$prNumber")
@@ -520,23 +515,7 @@ class RealGitHubClient(private val config: OrchestratorConfig) : GitHubClient {
         }
     }
 
-    override fun rebaseBranch(prNumber: String, sessionId: String?): RebaseResult {
-        return BranchRebaser(
-            execute = { args -> execute(*args) },
-            executeInDir = { dir, args -> executeInDir(dir, *args) },
-            executeInDirNoRetry = { dir, args -> executeInDir(dir, *args, retry = false) },
-            clearPrCache = ::clearPrCache
-        ).run(prNumber, sessionId)
-    }
 
-    override fun rebaseBranchFallback(prNumber: String, sessionId: String?, targetFiles: List<String>): RebaseResult {
-        return BranchRebaser(
-            execute = { args -> execute(*args) },
-            executeInDir = { dir, args -> executeInDir(dir, *args) },
-            executeInDirNoRetry = { dir, args -> executeInDir(dir, *args, retry = false) },
-            clearPrCache = ::clearPrCache
-        ).runFallback(prNumber, sessionId, targetFiles)
-    }
 }
 
 class ProcessExecutionException(val command: String, val exitCode: Int, val output: String) :
