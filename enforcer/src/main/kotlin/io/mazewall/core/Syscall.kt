@@ -1,5 +1,11 @@
 package io.mazewall.core
 
+import io.mazewall.enforcer.api.*
+import io.mazewall.enforcer.state.*
+import io.mazewall.enforcer.diagnostics.*
+import io.mazewall.enforcer.engine.*
+import io.mazewall.enforcer.*
+
 /**
  * High-level syscall identifiers. Each variant resolves to an architecture-specific
  * syscall number via [Arch]. Syscalls unavailable on a given architecture (e.g. [OPEN]

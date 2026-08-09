@@ -1,5 +1,11 @@
 package io.mazewall.ffi
 
+import io.mazewall.enforcer.api.*
+import io.mazewall.enforcer.state.*
+import io.mazewall.enforcer.diagnostics.*
+import io.mazewall.enforcer.engine.*
+import io.mazewall.enforcer.*
+
 import java.lang.foreign.MemoryLayout
 import java.lang.foreign.StructLayout
 

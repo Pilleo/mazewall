@@ -8,8 +8,9 @@ import io.mazewall.seccomp.BpfInstruction
 import io.mazewall.core.Arch
 import io.mazewall.core.SeccompAction
 import io.mazewall.core.Syscall
-import io.mazewall.enforcer.FilterInstallationPlanner
+import io.mazewall.enforcer.engine.FilterInstallationPlanner
 import io.mazewall.ffi.Layouts
+import io.mazewall.enforcer.api.ContainedExecutors
 import io.mazewall.ffi.NativeConstants
 import java.lang.foreign.MemoryLayout
 import java.lang.foreign.ValueLayout

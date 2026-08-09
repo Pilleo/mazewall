@@ -9,9 +9,9 @@ import io.mazewall.Policy
 import io.mazewall.compile
 import io.mazewall.core.Arch
 import io.mazewall.core.PrctlCommand
-import io.mazewall.enforcer.ContainerState
-import io.mazewall.enforcer.ProcessStateRegistry
-import io.mazewall.enforcer.ThreadStateRegistry
+import io.mazewall.enforcer.state.ContainerState
+import io.mazewall.enforcer.state.ProcessStateRegistry
+import io.mazewall.enforcer.state.ThreadStateRegistry
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test

@@ -7,6 +7,8 @@ import io.mazewall.MockNativeProcess
 import io.mazewall.Policy
 import io.mazewall.compile
 import io.mazewall.core.Arch
+import io.mazewall.enforcer.state.ThreadStateRegistry
+import io.mazewall.enforcer.state.ContainerState
 import io.mazewall.core.PrctlCommand
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test

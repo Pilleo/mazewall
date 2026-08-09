@@ -5,7 +5,7 @@ import io.mazewall.MockNativeEngine
 import io.mazewall.MockNativeMemory
 import io.mazewall.core.Pid
 import io.mazewall.core.Tid
-import io.mazewall.enforcer.ContainmentViolationException
+import io.mazewall.enforcer.api.ContainmentViolationException
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertThrows

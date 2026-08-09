@@ -1,4 +1,10 @@
-package io.mazewall.enforcer
+package io.mazewall.enforcer.state
+
+import io.mazewall.enforcer.api.*
+import io.mazewall.enforcer.state.*
+import io.mazewall.enforcer.diagnostics.*
+import io.mazewall.enforcer.engine.*
+import io.mazewall.enforcer.*
 
 /**
  * Internal registry for tracking seccomp and Landlock state bound to the current thread.

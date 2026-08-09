@@ -452,7 +452,7 @@ class "Uid" as io.mazewall.core.Uid {
   + {static}int constructor-impl(int)
   + {static}boolean equals-impl0(int, int)
 }
-class "ContainedExecutors" as io.mazewall.enforcer.ContainedExecutors {
+class "ContainedExecutors" as io.mazewall.enforcer.api.ContainedExecutors {
   + {static}ContainedExecutors INSTANCE
   __
   +void installOnCurrentThread(Policy<?, ? extends Uncompiled>[])
@@ -463,24 +463,21 @@ class "ContainedExecutors" as io.mazewall.enforcer.ContainedExecutors {
   +ExecutorService wrap(ExecutorService, Policy<?, ? extends Uncompiled>[])
   +ExecutorService wrap(ExecutorService, Policy<?, ? extends Uncompiled>, StacktraceScopingPolicy)
 }
-class "ContainerState" as io.mazewall.enforcer.ContainerState {
-  + {static}Companion Companion
-  __
-  +int getFilterDepth()
-  +Set<Syscall> getAllowedSyscalls()
-  +SeccompAction getDefaultAction()
-  +Map<Syscall, SeccompAction> getSyscallActions()
-  +PolicyDefinition<?> getLandlockPolicy()
-  +SeccompInstallationState getEngineState()
-  +boolean getAllowsMmapExec()
-  +boolean getAllowsNonThreadClone()
-  +boolean getAllowsUnsafePrctl()
-  +boolean isSyscallAllowed(Syscall)
-  +ContainerState withNewSeccompPolicy(PolicyDefinition<?>, Map<Syscall, ? extends SeccompAction>, SeccompAction)
-  +ContainerState withLandlockPolicy(PolicyDefinition<?>)
-  +ContainerState withEngineState(SeccompInstallationState)
+class "ContainmentViolationException" as io.mazewall.enforcer.api.ContainmentViolationException {
 }
-class "ContainmentViolationDetector" as io.mazewall.enforcer.ContainmentViolationDetector {
+class "SandboxDispatcher" as io.mazewall.enforcer.api.SandboxDispatcher {
+  + {static}SandboxDispatcher INSTANCE
+  __
+  + {static}T execute(Policy<?, ?>, Callable<T>)
+  +T executeBlock(Policy<?, ?>, Function0<? extends T>)
+  +ExecutorService getOrCreateElasticPool(PolicyDefinition<?>)
+  + {static}void shutdownAll()
+}
+class "SandboxDispatcherCoroutinesKt" as io.mazewall.enforcer.api.SandboxDispatcherCoroutinesKt {
+  + {static}Object executeSuspend(SandboxDispatcher, Policy<?, ?>, Function1<? super Continuation<? super T>, ? extends Object>, Continuation<? super T>)
+  + {static}CoroutineDispatcher asDispatcher(Policy<?, ?>)
+}
+class "ContainmentViolationDetector" as io.mazewall.enforcer.diagnostics.ContainmentViolationDetector {
   + {static}Companion Companion
   __
   +void registerMatcher(ViolationMatcher)
@@ -493,60 +490,25 @@ class "ContainmentViolationDetector" as io.mazewall.enforcer.ContainmentViolatio
   +boolean isContainmentViolation(Throwable)
   +Throwable findViolationCause(Throwable)
 }
-class "ContainmentViolationException" as io.mazewall.enforcer.ContainmentViolationException {
+class "ValidationKt" as io.mazewall.enforcer.diagnostics.ValidationKt {
+  + {static}boolean isVirtualOrCarrierThread(Thread)
+  + {static}void validateNotVirtual()
+  + {static}void validateLinuxAndNotVirtual()
 }
-class "FilterInstallationPlanner" as io.mazewall.enforcer.FilterInstallationPlanner {
+interface "ViolationMatcher" as io.mazewall.enforcer.diagnostics.ViolationMatcher {
+  + {abstract}boolean matches(Throwable)
+}
+class "FilterInstallationPlanner" as io.mazewall.enforcer.engine.FilterInstallationPlanner {
   + {static}FilterInstallationPlanner INSTANCE
   __
   +FilterPlan calculateNewFilter(PolicyDefinition<?>, ContainerState)
   +void verifyFilterDepth(int)
 }
-class "JvmFloorWorkload" as io.mazewall.enforcer.JvmFloorWorkload {
+class "JvmFloorWorkload" as io.mazewall.enforcer.engine.JvmFloorWorkload {
   + {static}JvmFloorWorkload INSTANCE
   __
   +void run()
   + {static}void main(String[])
-}
-class "ProcessStateRegistry" as io.mazewall.enforcer.ProcessStateRegistry {
-  + {static}ProcessStateRegistry INSTANCE
-  __
-  +ContainerState getState()
-  +void setState(ContainerState)
-  +void update(Function1<? super ContainerState, ContainerState>)
-}
-class "SandboxDispatcher" as io.mazewall.enforcer.SandboxDispatcher {
-  + {static}SandboxDispatcher INSTANCE
-  __
-  + {static}T execute(Policy<?, ?>, Callable<T>)
-  +T executeBlock(Policy<?, ?>, Function0<? extends T>)
-  +ExecutorService getOrCreateElasticPool(PolicyDefinition<?>)
-  + {static}void shutdownAll()
-}
-class "SandboxDispatcherCoroutinesKt" as io.mazewall.enforcer.SandboxDispatcherCoroutinesKt {
-  + {static}Object executeSuspend(SandboxDispatcher, Policy<?, ?>, Function1<? super Continuation<? super T>, ? extends Object>, Continuation<? super T>)
-  + {static}CoroutineDispatcher asDispatcher(Policy<?, ?>)
-}
-class "ThreadLocalDelegate" as io.mazewall.enforcer.ThreadLocalDelegate<T> {
-  +T getValue(Object, KProperty<?>)
-  +void setValue(Object, KProperty<?>, T)
-}
-class "ThreadLocalDelegateKt" as io.mazewall.enforcer.ThreadLocalDelegateKt {
-  + {static}ThreadLocalDelegate<T> threadLocal(Function0<? extends T>)
-}
-class "ThreadStateRegistry" as io.mazewall.enforcer.ThreadStateRegistry {
-  + {static}ThreadStateRegistry INSTANCE
-  __
-  +ContainerState getState()
-  +void setState(ContainerState)
-  +ContainerState resolveCurrentState(ContainerState)
-  +void sanitize()
-}
-class "ValidationKt" as io.mazewall.enforcer.ValidationKt {
-  + {static}void validateNotVirtual()
-  + {static}void validateLinuxAndNotVirtual()
-}
-interface "ViolationMatcher" as io.mazewall.enforcer.ViolationMatcher {
-  + {abstract}boolean matches(Throwable)
 }
 class "ContainedExecutorWrapper" as io.mazewall.enforcer.internal.ContainedExecutorWrapper {
   +void execute(Runnable)
@@ -563,6 +525,45 @@ class "ContainedExecutorWrapper" as io.mazewall.enforcer.internal.ContainedExecu
   +boolean isShutdown()
   +boolean isTerminated()
   +boolean awaitTermination(long, TimeUnit)
+}
+class "ContainerState" as io.mazewall.enforcer.state.ContainerState {
+  + {static}Companion Companion
+  __
+  +int getFilterDepth()
+  +Set<Syscall> getAllowedSyscalls()
+  +SeccompAction getDefaultAction()
+  +Map<Syscall, SeccompAction> getSyscallActions()
+  +PolicyDefinition<?> getLandlockPolicy()
+  +SeccompInstallationState getEngineState()
+  +boolean getAllowsMmapExec()
+  +boolean getAllowsNonThreadClone()
+  +boolean getAllowsUnsafePrctl()
+  +boolean isSyscallAllowed(Syscall)
+  +ContainerState withNewSeccompPolicy(PolicyDefinition<?>, Map<Syscall, ? extends SeccompAction>, SeccompAction)
+  +ContainerState withLandlockPolicy(PolicyDefinition<?>)
+  +ContainerState withEngineState(SeccompInstallationState)
+}
+class "ProcessStateRegistry" as io.mazewall.enforcer.state.ProcessStateRegistry {
+  + {static}ProcessStateRegistry INSTANCE
+  __
+  +ContainerState getState()
+  +void setState(ContainerState)
+  +void update(Function1<? super ContainerState, ContainerState>)
+}
+class "ThreadLocalDelegate" as io.mazewall.enforcer.state.ThreadLocalDelegate<T> {
+  +T getValue(Object, KProperty<?>)
+  +void setValue(Object, KProperty<?>, T)
+}
+class "ThreadLocalDelegateKt" as io.mazewall.enforcer.state.ThreadLocalDelegateKt {
+  + {static}ThreadLocalDelegate<T> threadLocal(Function0<? extends T>)
+}
+class "ThreadStateRegistry" as io.mazewall.enforcer.state.ThreadStateRegistry {
+  + {static}ThreadStateRegistry INSTANCE
+  __
+  +ContainerState getState()
+  +void setState(ContainerState)
+  +ContainerState resolveCurrentState(ContainerState)
+  +void sanitize()
 }
 class "DefaultStacktraceScopingPolicy" as io.mazewall.enforcer.supervisor.DefaultStacktraceScopingPolicy {
   + {static}DefaultStacktraceScopingPolicy INSTANCE
@@ -1380,22 +1381,22 @@ io.mazewall.core.RealProcessLauncher .u.|> io.mazewall.core.ProcessLauncher
 io.mazewall.core.RealProcessLauncher --> io.mazewall.core.RealProcessLauncher
 io.mazewall.core.RealSocketManager .u.|> io.mazewall.core.SocketManager
 io.mazewall.core.RealSocketManager --> io.mazewall.core.RealSocketManager
-io.mazewall.enforcer.ContainedExecutors --> io.mazewall.enforcer.ContainedExecutors
-io.mazewall.enforcer.ContainerState --> io.mazewall.seccomp.SeccompInstallationState
-io.mazewall.enforcer.ContainerState --> io.mazewall.PolicyDefinition
-io.mazewall.enforcer.ContainerState --> io.mazewall.core.SeccompAction
-io.mazewall.enforcer.ContainmentViolationDetector --> io.mazewall.enforcer.ViolationMatcher
-io.mazewall.enforcer.ContainmentViolationDetector --> io.mazewall.enforcer.ContainmentViolationDetector
-io.mazewall.enforcer.FilterInstallationPlanner --> io.mazewall.enforcer.FilterInstallationPlanner
-io.mazewall.enforcer.JvmFloorWorkload --> io.mazewall.enforcer.JvmFloorWorkload
-io.mazewall.enforcer.ProcessStateRegistry --> io.mazewall.enforcer.ProcessStateRegistry
-io.mazewall.enforcer.ProcessStateRegistry --> io.mazewall.enforcer.ContainerState
-io.mazewall.enforcer.SandboxDispatcher --> io.mazewall.enforcer.SandboxDispatcher
-io.mazewall.enforcer.SandboxDispatcher --> io.mazewall.PolicyDefinition
-io.mazewall.enforcer.ThreadStateRegistry --> io.mazewall.enforcer.ThreadLocalDelegate
-io.mazewall.enforcer.ThreadStateRegistry --> io.mazewall.enforcer.ThreadStateRegistry
+io.mazewall.enforcer.api.ContainedExecutors --> io.mazewall.enforcer.api.ContainedExecutors
+io.mazewall.enforcer.api.SandboxDispatcher --> io.mazewall.PolicyDefinition
+io.mazewall.enforcer.api.SandboxDispatcher --> io.mazewall.enforcer.api.SandboxDispatcher
+io.mazewall.enforcer.diagnostics.ContainmentViolationDetector --> io.mazewall.enforcer.diagnostics.ViolationMatcher
+io.mazewall.enforcer.diagnostics.ContainmentViolationDetector --> io.mazewall.enforcer.diagnostics.ContainmentViolationDetector
+io.mazewall.enforcer.engine.FilterInstallationPlanner --> io.mazewall.enforcer.engine.FilterInstallationPlanner
+io.mazewall.enforcer.engine.JvmFloorWorkload --> io.mazewall.enforcer.engine.JvmFloorWorkload
 io.mazewall.enforcer.internal.ContainedExecutorWrapper --> io.mazewall.enforcer.supervisor.StacktraceScopingPolicy
 io.mazewall.enforcer.internal.ContainedExecutorWrapper --> io.mazewall.PolicyDefinition
+io.mazewall.enforcer.state.ContainerState --> io.mazewall.seccomp.SeccompInstallationState
+io.mazewall.enforcer.state.ContainerState --> io.mazewall.PolicyDefinition
+io.mazewall.enforcer.state.ContainerState --> io.mazewall.core.SeccompAction
+io.mazewall.enforcer.state.ProcessStateRegistry --> io.mazewall.enforcer.state.ContainerState
+io.mazewall.enforcer.state.ProcessStateRegistry --> io.mazewall.enforcer.state.ProcessStateRegistry
+io.mazewall.enforcer.state.ThreadStateRegistry --> io.mazewall.enforcer.state.ThreadStateRegistry
+io.mazewall.enforcer.state.ThreadStateRegistry --> io.mazewall.enforcer.state.ThreadLocalDelegate
 io.mazewall.enforcer.supervisor.DefaultStacktraceScopingPolicy .u.|> io.mazewall.enforcer.supervisor.StacktraceScopingPolicy
 io.mazewall.enforcer.supervisor.DefaultStacktraceScopingPolicy --> io.mazewall.enforcer.supervisor.DefaultStacktraceScopingPolicy
 io.mazewall.enforcer.supervisor.DefaultStacktraceScopingPolicy --> io.mazewall.core.Tid
@@ -1442,7 +1443,7 @@ io.mazewall.ffi.internal.RealNativeProcess .u.|> io.mazewall.NativeProcess
 io.mazewall.ffi.internal.RealNativeProcess --> io.mazewall.ffi.internal.RealNativeProcess
 io.mazewall.ffi.internal.SyscallInvoker --> io.mazewall.ffi.internal.SyscallInvoker
 io.mazewall.ffi.memory.ConfinedSegment .u.|> io.mazewall.ffi.memory.ManagedSegment
-io.mazewall.ffi.memory.ErrnoSegment --> io.mazewall.enforcer.ThreadLocalDelegate
+io.mazewall.ffi.memory.ErrnoSegment --> io.mazewall.enforcer.state.ThreadLocalDelegate
 io.mazewall.ffi.memory.SegmentPool --> io.mazewall.ffi.memory.NativeArena
 io.mazewall.ffi.memory.SegmentPool <--> io.mazewall.ffi.memory.SegmentPool
 io.mazewall.ffi.memory.SegmentPool --> io.mazewall.ffi.memory.ManagedSegment

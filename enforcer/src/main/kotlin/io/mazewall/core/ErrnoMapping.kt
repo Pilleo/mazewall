@@ -1,5 +1,11 @@
 package io.mazewall.core
 
+import io.mazewall.enforcer.api.*
+import io.mazewall.enforcer.state.*
+import io.mazewall.enforcer.diagnostics.*
+import io.mazewall.enforcer.engine.*
+import io.mazewall.enforcer.*
+
 /**
  * Utility to map common POSIX/Linux error numbers to their symbolic names.
  */

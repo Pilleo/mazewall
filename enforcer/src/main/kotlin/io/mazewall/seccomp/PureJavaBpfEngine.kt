@@ -1,5 +1,11 @@
 package io.mazewall.seccomp
 
+import io.mazewall.enforcer.api.*
+import io.mazewall.enforcer.state.*
+import io.mazewall.enforcer.diagnostics.*
+import io.mazewall.enforcer.engine.*
+import io.mazewall.enforcer.*
+
 import io.mazewall.LinuxNative
 import io.mazewall.Platform
 import io.mazewall.PolicyDefinition
@@ -11,9 +17,9 @@ import io.mazewall.core.Arch
 import io.mazewall.core.SeccompAction
 import io.mazewall.core.Syscall
 import io.mazewall.core.PrctlCommand
-import io.mazewall.enforcer.ThreadStateRegistry
-import io.mazewall.enforcer.ContainerState
-import io.mazewall.enforcer.ProcessStateRegistry
+import io.mazewall.enforcer.state.ThreadStateRegistry
+import io.mazewall.enforcer.state.ContainerState
+import io.mazewall.enforcer.state.ProcessStateRegistry
 import io.mazewall.ffi.NativeConstants
 import java.util.logging.Logger
 import java.util.logging.Level

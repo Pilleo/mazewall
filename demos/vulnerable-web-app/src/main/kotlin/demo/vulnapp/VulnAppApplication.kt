@@ -1,7 +1,7 @@
 package demo.vulnapp
 
 import io.mazewall.Policy
-import io.mazewall.enforcer.ContainedExecutors
+import io.mazewall.enforcer.api.ContainedExecutors
 import org.springframework.boot.autoconfigure.SpringBootApplication
 import org.springframework.boot.runApplication
 

@@ -7,8 +7,8 @@ import io.mazewall.compile
 import io.mazewall.core.Arch
 import io.mazewall.core.SeccompAction
 import io.mazewall.core.Syscall
-import io.mazewall.enforcer.ContainerState
-import io.mazewall.enforcer.ThreadStateRegistry
+import io.mazewall.enforcer.state.ContainerState
+import io.mazewall.enforcer.state.ThreadStateRegistry
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import kotlin.test.assertFailsWith

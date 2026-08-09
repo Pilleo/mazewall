@@ -1,6 +1,7 @@
 package io.mazewall.enforcer
 
 import org.junit.jupiter.api.Assertions.assertTrue
+import io.mazewall.enforcer.api.JvmFloorWorkload
 import org.junit.jupiter.api.Test
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit

@@ -6,7 +6,7 @@ import io.mazewall.compile
 import io.mazewall.CompiledSandbox
 import io.mazewall.core.Arch
 import io.mazewall.core.Syscall
-import io.mazewall.enforcer.ContainmentViolationDetector
+import io.mazewall.enforcer.diagnostics.ContainmentViolationDetector
 import org.junit.jupiter.api.Test
 import java.util.concurrent.Executors
 import kotlin.test.assertFailsWith

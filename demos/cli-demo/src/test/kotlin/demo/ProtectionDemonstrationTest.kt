@@ -3,8 +3,8 @@ package demo
 import io.mazewall.LinuxNative
 import io.mazewall.Policy
 import io.mazewall.core.Arch
-import io.mazewall.enforcer.ContainedExecutors
-import io.mazewall.enforcer.ContainmentViolationException
+import io.mazewall.enforcer.api.ContainedExecutors
+import io.mazewall.enforcer.api.ContainmentViolationException
 import io.mazewall.ffi.NativeConstants
 import io.mazewall.ffi.memory.ConfinedSegment
 import org.junit.jupiter.api.Test

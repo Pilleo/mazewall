@@ -4,7 +4,7 @@ import io.mazewall.BaseIntegrationTest
 import io.mazewall.EnabledIfLinuxAndSupported
 import io.mazewall.Policy
 import io.mazewall.core.Syscall
-import io.mazewall.enforcer.ContainedExecutors
+import io.mazewall.enforcer.api.ContainedExecutors
 import io.mazewall.enforcer.supervisor.StacktraceScopingPolicy
 import io.mazewall.enforcer.supervisor.ScopingHandler
 import org.junit.jupiter.api.Test

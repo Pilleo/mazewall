@@ -7,7 +7,7 @@ import io.mazewall.core.Arch
 import io.mazewall.core.NativeArg
 import io.mazewall.core.PrctlCommand
 import io.mazewall.core.Syscall
-import io.mazewall.enforcer.ContainedExecutors
+import io.mazewall.enforcer.api.ContainedExecutors
 import org.junit.jupiter.api.Test
 import io.mazewall.ffi.memory.ManagedSegment
 import java.lang.foreign.MemorySegment

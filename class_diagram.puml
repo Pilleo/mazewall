@@ -1,0 +1,53 @@
+@startuml
+package io.mazewall.enforcer {
+class ContainmentViolationException
+class FilterInstallationPlanner
+class FilterPlan
+class ContainerState
+class ProcessStateRegistry
+class ThreadLocalDelegate
+class ThreadStateRegistry
+class ThreadStateHolder
+class JvmFloorWorkload
+interface ViolationMatcher
+class ContainmentViolationDetector
+class ContainedExecutors
+class SandboxDispatcher
+class ContainedExecutorWrapper
+interface StacktraceScopingPolicy
+class DefaultStacktraceScopingPolicy
+StacktraceScopingPolicy <|-- DefaultStacktraceScopingPolicy
+class SupervisorSession
+interface ScopingValidationState
+class SafeToValidate
+class JvmStackInspector
+class PendingSpawnRegistry
+class PendingSpawn
+class SupervisorInstaller
+class JVMValidationListener
+class ValidationLog
+class SupervisorDaemon
+class SupervisorContext
+class SupervisorDaemonManager
+interface SupervisorDaemonState
+class Uninitialized
+SupervisorDaemonState <|-- Uninitialized
+class Listening
+class Active
+class ShuttingDown
+SupervisorDaemonState
+    object Terminated : SupervisorDaemonState
+}
+
+internal class SupervisorDaemonEngine <|-- ShuttingDown
+private val engine: NativeEngine = LinuxNative <|-- ShuttingDown
+private val socketManager: SocketManager = io.mazewall.core.RealSocketManager
+) <|-- ShuttingDown
+class LoopAction
+class Continue
+LoopAction <|-- Continue
+class SyscallArguments
+class SupervisorSessionHandler
+class SafeLocalFd
+}
+@enduml

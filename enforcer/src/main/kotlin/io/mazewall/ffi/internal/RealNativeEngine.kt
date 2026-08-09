@@ -1,5 +1,11 @@
 package io.mazewall.ffi.internal
 
+import io.mazewall.enforcer.api.*
+import io.mazewall.enforcer.state.*
+import io.mazewall.enforcer.diagnostics.*
+import io.mazewall.enforcer.engine.*
+import io.mazewall.enforcer.*
+
 import io.mazewall.*
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor

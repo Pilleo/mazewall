@@ -1,5 +1,7 @@
 package io.mazewall.enforcer
 
+import io.mazewall.enforcer.state.ContainerState
+import io.mazewall.enforcer.state.ProcessStateRegistry
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertTrue

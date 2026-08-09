@@ -6,6 +6,7 @@ import io.mazewall.SeccompMode
 import io.mazewall.YamaPtraceScope
 import io.mazewall.LinuxNative.SyscallResult
 import org.junit.jupiter.api.AfterEach
+import io.mazewall.enforcer.diagnostics.validateLinuxAndNotVirtual
 import org.junit.jupiter.api.Test
 import kotlin.test.assertFailsWith
 

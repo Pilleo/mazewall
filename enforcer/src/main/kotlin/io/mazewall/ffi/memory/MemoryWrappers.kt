@@ -1,6 +1,9 @@
 package io.mazewall.ffi.memory
 
-import io.mazewall.enforcer.threadLocal
+import io.mazewall.enforcer.api.*
+import io.mazewall.enforcer.state.*
+import io.mazewall.enforcer.diagnostics.*
+import io.mazewall.enforcer.engine.*
 import io.mazewall.ffi.Layouts
 import java.lang.foreign.Arena
 import java.lang.foreign.MemoryLayout

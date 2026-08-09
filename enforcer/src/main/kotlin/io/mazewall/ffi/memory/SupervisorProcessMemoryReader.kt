@@ -1,4 +1,10 @@
 package io.mazewall.ffi.memory
+import io.mazewall.enforcer.api.ContainmentViolationException
+
+import io.mazewall.enforcer.api.*
+import io.mazewall.enforcer.state.*
+import io.mazewall.enforcer.diagnostics.*
+import io.mazewall.enforcer.engine.*
 
 import io.mazewall.LinuxNative
 import io.mazewall.core.Pid
@@ -32,7 +38,7 @@ public object SupervisorProcessMemoryReader {
             len++
         }
         if (!hasNullTerminator) {
-            throw io.mazewall.enforcer.ContainmentViolationException(
+            throw io.mazewall.enforcer.api.ContainmentViolationException(
                 "Remote string from TID ${tid.value} at address 0x${remoteAddr.toString(16)} lacks null terminator within $maxLen bytes."
             )
         }

@@ -4,8 +4,10 @@ import io.mazewall.Policy
 import io.mazewall.Platform
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
+import kotlin.test.assertFailsWith
 import java.util.concurrent.Callable
 import kotlin.test.assertEquals
+import io.mazewall.enforcer.engine.SandboxDispatcher
 import kotlin.test.assertNotNull
 
 class SandboxDispatcherCoverageTest {
