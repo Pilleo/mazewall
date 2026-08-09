@@ -15,6 +15,7 @@ import io.mazewall.ffi.memory.readInt
 import io.mazewall.ffi.memory.writeLong
 import io.mazewall.ffi.memory.writeInt
 import io.mazewall.ffi.memory.PollFdSegment
+import io.mazewall.platform.seccomp.daemon.LoopAction
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test

@@ -5,8 +5,8 @@ import io.mazewall.enforcer.state.*
 import io.mazewall.enforcer.diagnostics.*
 import io.mazewall.enforcer.engine.*
 import io.mazewall.enforcer.*
-
 import io.mazewall.LinuxNative
+import io.mazewall.platform.seccomp.daemon.LoopAction
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
@@ -72,7 +72,22 @@ internal class SupervisorSessionHandler(
     private val listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open>,
     private val engine: io.mazewall.NativeEngine = io.mazewall.LinuxNative,
     private val socketManager: io.mazewall.core.SocketManager = io.mazewall.core.RealSocketManager
-) {
+) : io.mazewall.platform.seccomp.daemon.SeccompNotifHandler {
+
+    context(arena: io.mazewall.ffi.memory.NativeArena)
+    override fun processNotification(
+        notif: io.mazewall.ffi.memory.ManagedSegment,
+        resp: io.mazewall.ffi.memory.ManagedSegment,
+        listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open>,
+        socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>
+    ): io.mazewall.platform.seccomp.daemon.NotifResult {
+        return if (processNotification(notif, resp)) {
+            io.mazewall.platform.seccomp.daemon.NotifResult.HANDLED
+        } else {
+            io.mazewall.platform.seccomp.daemon.NotifResult.TERMINATE
+        }
+    }
+
     companion object {
         private val logger = Logger.getLogger(SupervisorSessionHandler::class.java.name)
 

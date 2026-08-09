@@ -11,7 +11,7 @@ import io.mazewall.core.Tid
 import io.mazewall.ffi.Layouts
 import io.mazewall.ffi.NativeConstants
 import io.mazewall.profiler.engine.HandshakeSession
-import io.mazewall.profiler.engine.LoopAction
+import io.mazewall.platform.seccomp.daemon.LoopAction
 import io.mazewall.profiler.engine.NativeIoOperations
 import io.mazewall.profiler.engine.ProfilerMemoryReader
 import io.mazewall.profiler.engine.ProfilerSessionHandler
@@ -22,6 +22,8 @@ import io.mazewall.profiler.engine.SyscallEvent
 import io.mazewall.profiler.engine.SyscallEventState
 import io.mazewall.profiler.engine.TraceEventPublisher
 import io.mazewall.ffi.memory.ManagedSegment
+import io.mazewall.ffi.memory.writeInt
+import io.mazewall.ffi.memory.writeLong
 import io.mazewall.ffi.memory.writeShort
 import java.lang.foreign.Arena
 import java.lang.foreign.MemoryLayout
@@ -196,9 +198,11 @@ class ProfilerDesignSpec :
                 reader.readStringResult = "/tmp/test.txt"
 
                 val syscallMap = mapOf(2 to "OPEN")
+                val socketFd = FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(10)
+                val listenerFd = FileDescriptor.unsafe<FileDescriptorRole.SeccompNotif>(20)
                 ProfilerSessionHandler(
-                    FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(10),
-                    FileDescriptor.unsafe<FileDescriptorRole.SeccompNotif>(20),
+                    socketFd,
+                    listenerFd,
                     transport,
                     transport,
                     transport,
@@ -206,17 +210,26 @@ class ProfilerDesignSpec :
                     syscallMap
                 ) {}.use { handler ->
                     io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
-                        val pollFds = arena.allocate(MemoryLayout.sequenceLayout(2, Layouts.POLLFD))
-                        pollFds.writeShort(6L, NativeConstants.POLLIN)
+                        val notif = io.mazewall.ffi.memory.SegmentPool.SECCOMP_NOTIF_POOL.rent()
+                        val resp = io.mazewall.ffi.memory.SegmentPool.SECCOMP_NOTIF_RESP_POOL.rent()
+                        try {
+                            notif.writeLong(0L, 123L) // id
+                            notif.writeInt(8L, 456)   // pid
+                            notif.writeInt(16L, 2)    // nr = 2 (OPEN)
+                            // NOTIF_ARGS_OFF = 32L: args[0] = path pointer
+                            notif.writeLong(32L, 0x1000L)
 
-                        val action = with(arena) { handler.handleActiveListener(pollFds) }
+                            val ok = with(arena) { handler.processNotification(notif, resp, listenerFd, socketFd) }
 
-                        action shouldBe LoopAction.Continue
-                        transport.sentEvents.size shouldBe 1
-                        transport.sentEvents[0].syscallName shouldBe "OPEN"
-                        transport.sentEvents[0].tid shouldBe Tid(456)
-                        transport.sentEvents[0].paths shouldBe listOf("/tmp/test.txt")
-                        transport.ioctlCalls.contains(0xc0182101L) shouldBe true // SECCOMP_IOCTL_NOTIF_SEND
+                            ok shouldBe io.mazewall.platform.seccomp.daemon.NotifResult.HANDLED
+                            transport.sentEvents.size shouldBe 1
+                            transport.sentEvents[0].syscallName shouldBe "OPEN"
+                            transport.sentEvents[0].tid shouldBe Tid(456)
+                            transport.sentEvents[0].paths shouldBe listOf("/tmp/test.txt")
+                        } finally {
+                            io.mazewall.ffi.memory.SegmentPool.SECCOMP_NOTIF_POOL.release(notif)
+                            io.mazewall.ffi.memory.SegmentPool.SECCOMP_NOTIF_RESP_POOL.release(resp)
+                        }
                     }
                 }
             }
@@ -232,9 +245,11 @@ class ProfilerDesignSpec :
                 reader.resolveLinkResult = "/home/user"
 
                 val syscallMap = mapOf(257 to "OPENAT")
+                val socketFd = FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(10)
+                val listenerFd = FileDescriptor.unsafe<FileDescriptorRole.SeccompNotif>(20)
                 ProfilerSessionHandler(
-                    FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(10),
-                    FileDescriptor.unsafe<FileDescriptorRole.SeccompNotif>(20),
+                    socketFd,
+                    listenerFd,
                     transport,
                     transport,
                     transport,
@@ -242,14 +257,25 @@ class ProfilerDesignSpec :
                     syscallMap
                 ) {}.use { handler ->
                     io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
-                        val pollFds = arena.allocate(MemoryLayout.sequenceLayout(2, Layouts.POLLFD))
-                        pollFds.writeShort(6L, NativeConstants.POLLIN)
+                        val notif = io.mazewall.ffi.memory.SegmentPool.SECCOMP_NOTIF_POOL.rent()
+                        val resp = io.mazewall.ffi.memory.SegmentPool.SECCOMP_NOTIF_RESP_POOL.rent()
+                        try {
+                            notif.writeLong(0L, 123L)
+                            notif.writeInt(8L, 456)
+                            notif.writeInt(16L, 257) // nr = 257 (OPENAT)
+                            // NOTIF_ARGS_OFF = 32L: args[0] = dirfd, args[1] = path pointer
+                            notif.writeLong(32L, -100L)  // args[0] = AT_FDCWD
+                            notif.writeLong(40L, 0x1000L) // args[1] = path ptr
 
-                        with(arena) {
-                            handler.handleActiveListener(pollFds)
+                            with(arena) {
+                                handler.processNotification(notif, resp, listenerFd, socketFd)
+                            }
+                            transport.sentEvents.size shouldBe 1
+                            transport.sentEvents[0].paths shouldBe listOf("/home/user/relative.txt")
+                        } finally {
+                            io.mazewall.ffi.memory.SegmentPool.SECCOMP_NOTIF_POOL.release(notif)
+                            io.mazewall.ffi.memory.SegmentPool.SECCOMP_NOTIF_RESP_POOL.release(resp)
                         }
-                        transport.sentEvents.size shouldBe 1
-                        transport.sentEvents[0].paths shouldBe listOf("/home/user/relative.txt")
                     }
                 }
             }

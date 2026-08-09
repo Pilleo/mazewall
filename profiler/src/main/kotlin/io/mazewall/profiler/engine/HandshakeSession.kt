@@ -24,6 +24,7 @@ sealed class HandshakeSession {
     ) : HandshakeSession() {
         fun acknowledged() = Success(notifId, listenerFd)
         fun failed() = Failed(notifId, listenerFd)
+        fun passedThrough() = PassedThrough(notifId, listenerFd)
 
         /**
          * Performs the byte-level protocol handshake with the parent JVM.
@@ -79,6 +80,7 @@ sealed class HandshakeSession {
                 for (i in 0 until value.toInt()) {
                     val byte = ackBuf.get(ValueLayout.JAVA_BYTE, i.toLong())
                     if (byte == PROTOCOL_ACK_BYTE) return acknowledged()
+                    if (byte == PASS_THROUGH_COMMAND_BYTE) return passedThrough()
                     if (byte == SHUTDOWN_COMMAND_BYTE) {
                         onShutdown("Parent Command during notification")
                         return failed()
@@ -103,6 +105,12 @@ sealed class HandshakeSession {
 
     /** Handshake failed (timeout, error, or shutdown), must send an error or kill thread. */
     class Failed(
+        override val notifId: Long,
+        override val listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open>,
+    ) : HandshakeSession()
+
+    /** Handshake received pass-through command, ready to send SECCOMP_USER_NOTIF_FLAG_CONTINUE. */
+    class PassedThrough(
         override val notifId: Long,
         override val listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open>,
     ) : HandshakeSession()

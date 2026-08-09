@@ -13,6 +13,7 @@ internal const val POLL_ACK_TIMEOUT_MS = 60000
 internal const val POLL_TIMEOUT_MS = 500
 internal const val PROTOCOL_ACK_BYTE = 0xAC.toByte()
 internal const val SHUTDOWN_COMMAND_BYTE = 0x53.toByte() // 'S'
+internal const val PASS_THROUGH_COMMAND_BYTE = 0x54.toByte() // 'T'
 internal const val ACK_BUF_SIZE = 1L
 internal const val NOTIF_ID_OFF = 0L
 internal const val NOTIF_PID_OFF = 8L

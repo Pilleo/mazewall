@@ -12,6 +12,7 @@ import io.mazewall.ffi.memory.ManagedSegment
 import io.mazewall.ffi.memory.NativeArena
 import io.mazewall.ffi.memory.writeInt
 import io.mazewall.ffi.memory.writeLong
+import io.mazewall.ffi.memory.SegmentPool
 import java.lang.foreign.Arena
 import java.lang.foreign.MemorySegment
 import java.lang.foreign.ValueLayout
@@ -91,29 +92,36 @@ class ProfilerDaemonBenchmarkTest {
 
         val startTime = System.currentTimeMillis()
 
+        val socketFd = FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(10)
+        val listenerFd = FileDescriptor.unsafe<FileDescriptorRole.SeccompNotif>(20)
         ProfilerSessionHandler(
-            FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(10),
-            FileDescriptor.unsafe<FileDescriptorRole.SeccompNotif>(20),
+            socketFd,
+            listenerFd,
             transport,
             transport,
             transport,
             reader,
             syscallMap,
         ) { }.use { handler ->
-            // Pre-warm / pre-allocate notif data
-            val notif = handler.notif
-            notif.writeLong(NOTIF_ID_OFF, 123L)
-            notif.writeInt(NOTIF_PID_OFF, 456)
-            notif.writeInt(NOTIF_NR_OFF, 2)
-            notif.writeLong(NOTIF_ARGS_OFF, 0x1000L)
+            val notif = SegmentPool.SECCOMP_NOTIF_POOL.rent()
+            val resp = SegmentPool.SECCOMP_NOTIF_RESP_POOL.rent()
+            try {
+                notif.writeLong(NOTIF_ID_OFF, 123L)
+                notif.writeInt(NOTIF_PID_OFF, 456)
+                notif.writeInt(NOTIF_NR_OFF, 2)
+                notif.writeLong(NOTIF_ARGS_OFF, 0x1000L)
 
-            val iterations = 100000
-            for (i in 0 until iterations) {
-                NativeArena.ofConfined().use { iterationArena ->
-                    with(iterationArena) {
-                        handler.processNotification()
+                val iterations = 100000
+                for (i in 0 until iterations) {
+                    NativeArena.ofConfined().use { iterationArena ->
+                        with(iterationArena) {
+                            handler.processNotification(notif, resp, listenerFd, socketFd)
+                        }
                     }
                 }
+            } finally {
+                SegmentPool.SECCOMP_NOTIF_POOL.release(notif)
+                SegmentPool.SECCOMP_NOTIF_RESP_POOL.release(resp)
             }
         }
 

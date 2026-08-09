@@ -1,10 +1,8 @@
 package io.mazewall.core
 
-
 import io.mazewall.LinuxNative
 import io.mazewall.getFdOrThrow
 import io.mazewall.onFailure
-import io.mazewall.ffi.memory.ConfinedSegment
 import io.mazewall.ffi.memory.ManagedSegment
 
 /**
