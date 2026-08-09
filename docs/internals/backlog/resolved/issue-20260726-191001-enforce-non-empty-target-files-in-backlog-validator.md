@@ -2,7 +2,7 @@
 title: Enforce Mandatory target_files in Backlog Validator for Conflict-Free Parallel
   Scheduling
 severity: HIGH
-status: open
+status: resolved
 priority: 10
 dependencies: []
 component: orchestrator

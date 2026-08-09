@@ -31,7 +31,7 @@ class BacklogValidatorTest {
             dependencies: []
             component: "enforcer"
             target_modules: [":enforcer"]
-            target_files: []
+            target_files: ["some/file.kt"]
             ---
 
             # 🔴 [Severity: HIGH]: Valid Title
@@ -78,7 +78,7 @@ class BacklogValidatorTest {
             dependencies: []
             component: "enforcer"
             target_modules: []
-            target_files: []
+            target_files: ["some/file.kt"]
             ---
 
             # 🔴 [Severity: HIGH]: Empty Target Modules
@@ -103,7 +103,7 @@ class BacklogValidatorTest {
             dependencies: []
             component: "enforcer"
             target_modules: [":invalid-module"]
-            target_files: []
+            target_files: ["some/file.kt"]
             ---
 
             # 🔴 [Severity: HIGH]: Invalid Target Modules
@@ -128,7 +128,7 @@ class BacklogValidatorTest {
             dependencies: []
             component: "enforcer"
             target_modules: [":enforcer"]
-            target_files: []
+            target_files: ["some/file.kt"]
             ---
         """.trimIndent())
 
@@ -162,7 +162,7 @@ class BacklogValidatorTest {
             dependencies: []
             component: "enforcer"
             target_modules: [":enforcer"]
-            target_files: []
+            target_files: ["some/file.kt"]
             ---
         """.trimIndent())
 
@@ -183,7 +183,7 @@ class BacklogValidatorTest {
             dependencies: []
             component: "invalid-component"
             target_modules: [":enforcer"]
-            target_files: []
+            target_files: ["some/file.kt"]
             ---
         """.trimIndent())
 
@@ -223,13 +223,62 @@ class BacklogValidatorTest {
             priority: 9
             dependencies: []
             component: "enforcer"
-            target_files: []
+            target_files: ["some/file.kt"]
             ---
         """.trimIndent())
 
         val errors = BacklogValidator.validateBacklog(tempDir)
         assertFalse(errors.isEmpty())
         assertTrue(errors.any { it.contains("Missing required 'target_modules' field") })
+    }
+
+    @Test
+    fun testEmptyTargetFilesFailsValidation() {
+        val file = File(tempDir, "issue-20260726-111111-empty-files.md")
+        file.writeText("""
+            ---
+            title: "Empty Target Files"
+            severity: "HIGH"
+            status: "open"
+            priority: 9
+            dependencies: []
+            component: "enforcer"
+            target_modules: [":enforcer"]
+            target_files: []
+            ---
+
+            # 🔴 [Severity: HIGH]: Empty Target Files
+            **Context:** valid context
+            **Needed:** valid needed
+        """.trimIndent())
+
+        val errors = BacklogValidator.validateBacklog(tempDir)
+        assertFalse(errors.isEmpty(), "Empty target_files should fail validation")
+        assertTrue(errors.any { it.contains("'target_files' must contain at least one file path") }, "Expected empty target_files error")
+    }
+
+    @Test
+    fun testEmptyTargetFilesAllowedForDeferred() {
+        val file = File(tempDir, "issue-20260726-111111-deferred-empty-files.md")
+        file.writeText("""
+            ---
+            title: "Deferred Empty Target Files"
+            severity: "HIGH"
+            status: "deferred"
+            priority: 9
+            dependencies: []
+            component: "enforcer"
+            target_modules: [":enforcer"]
+            target_files: []
+            ---
+
+            # 🔴 [Severity: HIGH]: Deferred Empty Target Files
+            **Context:** valid context
+            **Needed:** valid needed
+        """.trimIndent())
+
+        val errors = BacklogValidator.validateBacklog(tempDir)
+        assertTrue(errors.isEmpty(), "Expected no errors for deferred backlog with empty target_files, but got: $errors")
     }
 
     @Test

@@ -7,7 +7,7 @@ dependencies: []
 component: "enforcer"
 effort: "large"
 target_modules: [":enforcer"]
-target_files: []
+target_files: ["enforcer/src/main/kotlin/io/mazewall/NativeEngine.kt"]
 ---
 
 # 🔴 [Severity: MEDIUM]: Residual Interface Segregation Violation (ISP) in `NativeEngine`

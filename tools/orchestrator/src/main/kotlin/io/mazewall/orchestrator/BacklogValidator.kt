@@ -90,6 +90,8 @@ object BacklogValidator {
 
             if (!content.contains("target_files:")) {
                 errors.add("${file.name}: Missing required 'target_files' field (e.g. list of file paths or [])")
+            } else if (issue.targetFiles.isEmpty() && (issue.status == "open" || issue.status == "in_progress")) {
+                errors.add("${file.name}: 'target_files' must contain at least one file path for ${issue.status} issues (got empty list)")
             }
 
             // Check dependencies existence
