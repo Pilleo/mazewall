@@ -103,6 +103,59 @@ class SupervisorDaemonEngineTest {
         assertEquals(2, acceptCalls)
     }
 
+    @Test
+    fun `handleNewConnection safely closes client socket if executor submit throws Error`() {
+        var acceptCalls = 0
+        val mockEngine = MockNativeEngine()
+        mockEngine.networking.onAccept4 = { _, _, _, _ ->
+            acceptCalls++
+            if (acceptCalls == 1) {
+                LinuxNative.SyscallResult.Success(12L) // Client socket FD 12
+            } else {
+                LinuxNative.SyscallResult.Error(NativeConstants.EPERM, -1L)
+            }
+        }
+
+        val mockSocket = object : TestSocketManager(5) {}
+        val engine = SupervisorDaemonEngine("/tmp/test.sock", engine = mockEngine, socketManager = mockSocket)
+        val serverFd = FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(5)
+
+        // Reflection to inject throwing ExecutorService
+        val delegateField = SupervisorDaemonEngine::class.java.getDeclaredField("delegate")
+        delegateField.isAccessible = true
+        val delegate = delegateField.get(engine)
+
+        val executorField = io.mazewall.platform.seccomp.daemon.SeccompDaemonEngine::class.java.getDeclaredField("connectionExecutor")
+        executorField.isAccessible = true
+        executorField.set(delegate, object : java.util.concurrent.ExecutorService {
+            override fun execute(command: Runnable) { throw OutOfMemoryError("Simulated OOM") }
+            override fun submit(task: Runnable): java.util.concurrent.Future<*> { throw OutOfMemoryError("Simulated OOM") }
+            override fun <T> submit(task: java.util.concurrent.Callable<T>): java.util.concurrent.Future<T> { throw OutOfMemoryError("Simulated OOM") }
+            override fun <T> submit(task: Runnable, result: T): java.util.concurrent.Future<T> { throw OutOfMemoryError("Simulated OOM") }
+            override fun shutdown() {}
+            override fun shutdownNow(): List<Runnable> = emptyList()
+            override fun isShutdown(): Boolean = false
+            override fun isTerminated(): Boolean = false
+            override fun awaitTermination(timeout: Long, unit: java.util.concurrent.TimeUnit): Boolean = true
+            override fun <T> invokeAll(tasks: Collection<java.util.concurrent.Callable<T>>): List<java.util.concurrent.Future<T>> = emptyList()
+            override fun <T> invokeAll(tasks: Collection<java.util.concurrent.Callable<T>>, timeout: Long, unit: java.util.concurrent.TimeUnit): List<java.util.concurrent.Future<T>> = emptyList()
+            override fun <T> invokeAny(tasks: Collection<java.util.concurrent.Callable<T>>): T = throw UnsupportedOperationException()
+            override fun <T> invokeAny(tasks: Collection<java.util.concurrent.Callable<T>>, timeout: Long, unit: java.util.concurrent.TimeUnit): T = throw UnsupportedOperationException()
+        })
+
+        var caughtError = false
+        try {
+            engine.handleNewConnection(serverFd)
+        } catch (e: OutOfMemoryError) {
+            caughtError = true
+            assertEquals("Simulated OOM", e.message)
+        }
+
+        assertTrue(caughtError, "OutOfMemoryError should bubble up")
+        assertTrue(mockSocket.closedFds.contains(12), "Client socket 12 should be closed when thread creation fails")
+        assertEquals(0, engine.clientSockets.size, "Client socket should be removed from tracking list")
+    }
+
     open class TestSocketManager(val serverFdVal: Int = 5) : SocketManager {
         val closedFds = CopyOnWriteArrayList<Int>()
 

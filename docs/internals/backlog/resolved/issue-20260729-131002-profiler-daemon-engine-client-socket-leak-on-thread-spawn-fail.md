@@ -1,7 +1,7 @@
 ---
 title: "ProfilerDaemonEngine client socket leak on thread spawning failure"
 severity: "HIGH"
-status: "open"
+status: "resolved"
 priority: 8
 dependencies: []
 component: "profiler"
