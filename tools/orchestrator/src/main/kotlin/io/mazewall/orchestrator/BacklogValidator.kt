@@ -7,7 +7,7 @@ object BacklogValidator {
 
     private val VALID_SEVERITIES = setOf("CRITICAL", "HIGH", "MEDIUM", "LOW", "ENHANCEMENT")
     private val VALID_STATUSES = setOf("open", "in_progress", "resolved", "deferred")
-    private val VALID_COMPONENTS = setOf("enforcer", "profiler", "orchestrator", "docs", "ci", "testing")
+    private val VALID_COMPONENTS = setOf("enforcer", "profiler", "orchestrator", "docs", "ci", "testing", "platform")
     private val VALID_FILENAME_PATTERN = Regex("^issue-(?:\\d{8}[-_]\\d{6}(?:[-_]\\d{2})?|\\d{8}[-_]\\d{2,4}|\\d{1,4})[-_][a-z0-9_-]+\\.md$")
     private val VALID_GRADLE_MODULES = setOf(
         ":platform",
