@@ -173,6 +173,12 @@ internal class ProfilerSessionHandler(
                 }
                 is HandshakeSession.PassedThrough -> {
                     System.err.println("[DAEMON-DEBUG] Handshake returned PassThrough")
+                    state = waitingState.acknowledged()
+                    with(arena.unwrap) {
+                        responder.sendSeccompContinue(result.acknowledged(), resp.unwrap)
+                    }
+                    continueSent = true
+                    ledger.record(SessionEvent.ContinueReplied(System.nanoTime(), pidVal.toLong(), 0L))
                     NotifResult.PASS_THROUGH
                 }
                 else -> {

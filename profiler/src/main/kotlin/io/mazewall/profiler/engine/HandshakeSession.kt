@@ -130,5 +130,7 @@ sealed class HandshakeSession {
     class PassedThrough(
         override val notifId: Long,
         override val listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open>,
-    ) : HandshakeSession()
+    ) : HandshakeSession() {
+        fun acknowledged() = Success(notifId, listenerFd)
+    }
 }

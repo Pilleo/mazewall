@@ -235,6 +235,47 @@ class ProfilerDaemonTest {
     }
 
     @Test
+    fun `test handshake - pass-through continues current notification`() {
+        val transport = MockTransport().apply {
+            ackByte = PASS_THROUGH_COMMAND_BYTE
+        }
+        val socketFd = FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(10)
+        val listenerFd = FileDescriptor.unsafe<FileDescriptorRole.SeccompNotif>(20)
+
+        ProfilerSessionHandler(
+            socketFd,
+            listenerFd,
+            transport,
+            transport,
+            transport,
+            MockReader(),
+            mapOf(2 to "OPEN"),
+        ) { }.use { handler ->
+            io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
+                val notif = SegmentPool.SECCOMP_NOTIF_POOL.rent()
+                val resp = SegmentPool.SECCOMP_NOTIF_RESP_POOL.rent()
+                try {
+                    notif.writeLong(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_ID_OFFSET, 123L)
+                    notif.writeInt(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_PID_OFFSET, 456)
+                    notif.writeInt(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_NR_OFFSET, 2)
+                    notif.writeLong(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_ARGS_OFFSET, 0x1000L)
+
+                    val result = with(arena) {
+                        handler.processNotification(notif, resp, listenerFd, socketFd)
+                    }
+
+                    assertEquals(NotifResult.PASS_THROUGH, result)
+                    assertTrue(transport.continueSent, "Pass-through must continue the in-flight notification")
+                    assertTrue(handler.ledger.dump().any { it is SessionEvent.ContinueReplied })
+                } finally {
+                    SegmentPool.SECCOMP_NOTIF_POOL.release(notif)
+                    SegmentPool.SECCOMP_NOTIF_RESP_POOL.release(resp)
+                }
+            }
+        }
+    }
+
+    @Test
     fun `test SessionEventLedger records CONTINUE and EventSent in handshake mode`() {
         val transport = MockTransport()
         transport.nextPollResult = LinuxNative.SyscallResult.Success(1L)
