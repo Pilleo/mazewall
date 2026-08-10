@@ -21,7 +21,21 @@ public data class InstallationReceipt(
     public val supervisorSession: AutoCloseable? = null,
     public val timestampMillis: Long = System.currentTimeMillis(),
     public val outcome: InstallationOutcome = InstallationOutcome.INSTALLED,
-)
+) {
+    /** Preserves the JVM constructor exposed before [outcome] was added. */
+    public constructor(
+        processWide: Boolean,
+        requestedPolicy: PolicyDefinition<*>,
+        supervisorSession: AutoCloseable?,
+        timestampMillis: Long,
+    ) : this(
+        processWide = processWide,
+        requestedPolicy = requestedPolicy,
+        supervisorSession = supervisorSession,
+        timestampMillis = timestampMillis,
+        outcome = InstallationOutcome.INSTALLED,
+    )
+}
 
 /** The effective result represented by an [InstallationReceipt]. */
 public enum class InstallationOutcome {

@@ -44,4 +44,25 @@ class InstallationReceiptTest {
             InstallationOutcome.entries,
         )
     }
+
+    @Test
+    fun `receipt retains the pre-outcome JVM constructor`() {
+        val constructor =
+            InstallationReceipt::class.java.getConstructor(
+                Boolean::class.javaPrimitiveType,
+                PolicyDefinition::class.java,
+                AutoCloseable::class.java,
+                Long::class.javaPrimitiveType,
+            )
+
+        val receipt =
+            constructor.newInstance(
+                false,
+                Policy.builder().build().definition,
+                null,
+                123L,
+            )
+
+        assertEquals(InstallationOutcome.INSTALLED, receipt.outcome)
+    }
 }
