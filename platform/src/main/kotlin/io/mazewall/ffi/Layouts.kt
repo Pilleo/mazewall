@@ -62,8 +62,8 @@ object Layouts {
         NATIVE_LONG.withName("instruction_pointer"),
         MemoryLayout.sequenceLayout(6, NATIVE_LONG).withName("args"),
     )
-    val SECCOMP_DATA_NR_OFFSET: Long = 0L
-    val SECCOMP_DATA_ARCH_OFFSET: Long = 4L
+    val SECCOMP_DATA_NR_OFFSET: Long = SECCOMP_DATA.byteOffset(MemoryLayout.PathElement.groupElement("nr"))
+    val SECCOMP_DATA_ARCH_OFFSET: Long = SECCOMP_DATA.byteOffset(MemoryLayout.PathElement.groupElement("arch"))
     val SECCOMP_DATA_ARGS_OFFSET: Long = SECCOMP_DATA.byteOffset(
         MemoryLayout.PathElement.groupElement("args"),
         MemoryLayout.PathElement.sequenceElement(0)
@@ -83,6 +83,13 @@ object Layouts {
         NATIVE_INT.withName("flags"),
         SECCOMP_DATA.withName("data"),
     )
+    val SECCOMP_NOTIF_ID_OFFSET: Long = SECCOMP_NOTIF.byteOffset(MemoryLayout.PathElement.groupElement("id"))
+    val SECCOMP_NOTIF_PID_OFFSET: Long = SECCOMP_NOTIF.byteOffset(MemoryLayout.PathElement.groupElement("pid"))
+    val SECCOMP_NOTIF_FLAGS_OFFSET: Long = SECCOMP_NOTIF.byteOffset(MemoryLayout.PathElement.groupElement("flags"))
+    val SECCOMP_NOTIF_DATA_OFFSET: Long = SECCOMP_NOTIF.byteOffset(MemoryLayout.PathElement.groupElement("data"))
+    val SECCOMP_NOTIF_NR_OFFSET: Long = SECCOMP_NOTIF_DATA_OFFSET + SECCOMP_DATA_NR_OFFSET
+    val SECCOMP_NOTIF_ARCH_OFFSET: Long = SECCOMP_NOTIF_DATA_OFFSET + SECCOMP_DATA_ARCH_OFFSET
+    val SECCOMP_NOTIF_ARGS_OFFSET: Long = SECCOMP_NOTIF_DATA_OFFSET + SECCOMP_DATA_ARGS_OFFSET
 
     /**
      * Corresponds to `struct seccomp_notif_resp` in `<linux/seccomp.h>`.
@@ -94,6 +101,10 @@ object Layouts {
         NATIVE_INT.withName("error"),
         NATIVE_INT.withName("flags"),
     )
+    val SECCOMP_NOTIF_RESP_ID_OFFSET: Long = SECCOMP_NOTIF_RESP.byteOffset(MemoryLayout.PathElement.groupElement("id"))
+    val SECCOMP_NOTIF_RESP_VAL_OFFSET: Long = SECCOMP_NOTIF_RESP.byteOffset(MemoryLayout.PathElement.groupElement("val"))
+    val SECCOMP_NOTIF_RESP_ERROR_OFFSET: Long = SECCOMP_NOTIF_RESP.byteOffset(MemoryLayout.PathElement.groupElement("error"))
+    val SECCOMP_NOTIF_RESP_FLAGS_OFFSET: Long = SECCOMP_NOTIF_RESP.byteOffset(MemoryLayout.PathElement.groupElement("flags"))
 
     /**
      * Corresponds to `struct seccomp_notif_addfd` in `<linux/seccomp.h>`.

@@ -25,10 +25,6 @@ class ProfilerDaemonBenchmarkTest {
 
     private companion object {
         private const val PROTOCOL_ACK_BYTE = 0xAC.toByte()
-        private const val NOTIF_ID_OFF = 0L
-        private const val NOTIF_PID_OFF = 8L
-        private const val NOTIF_NR_OFF = 12L
-        private const val NOTIF_ARGS_OFF = 16L
     }
 
     private class BenchmarkTransport : ProfilerTransport, SeccompResponder, TraceEventPublisher, NativeIoOperations, SocketLifecycleManager {
@@ -106,10 +102,10 @@ class ProfilerDaemonBenchmarkTest {
             val notif = SegmentPool.SECCOMP_NOTIF_POOL.rent()
             val resp = SegmentPool.SECCOMP_NOTIF_RESP_POOL.rent()
             try {
-                notif.writeLong(NOTIF_ID_OFF, 123L)
-                notif.writeInt(NOTIF_PID_OFF, 456)
-                notif.writeInt(NOTIF_NR_OFF, 2)
-                notif.writeLong(NOTIF_ARGS_OFF, 0x1000L)
+                notif.writeLong(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_ID_OFFSET, 123L)
+                notif.writeInt(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_PID_OFFSET, 456)
+                notif.writeInt(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_NR_OFFSET, 2)
+                notif.writeLong(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_ARGS_OFFSET, 0x1000L)
 
                 val iterations = 100000
                 for (i in 0 until iterations) {

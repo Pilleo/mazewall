@@ -172,10 +172,10 @@ object RealProfilerTransport : ProfilerTransport {
         resp: MemorySegment,
     ) {
         resp.fill(0)
-        resp.set(ValueLayout.JAVA_LONG, RESP_ID_OFF, session.notifId)
-        resp.set(ValueLayout.JAVA_LONG, RESP_VAL_OFF, 0L)
-        resp.set(ValueLayout.JAVA_INT, RESP_ERR_OFF, 0)
-        resp.set(ValueLayout.JAVA_INT, RESP_FLAGS_OFF, NativeConstants.SECCOMP_USER_NOTIF_FLAG_CONTINUE.toInt())
+        resp.set(ValueLayout.JAVA_LONG, io.mazewall.ffi.Layouts.SECCOMP_NOTIF_RESP_ID_OFFSET, session.notifId)
+        resp.set(ValueLayout.JAVA_LONG, io.mazewall.ffi.Layouts.SECCOMP_NOTIF_RESP_VAL_OFFSET, 0L)
+        resp.set(ValueLayout.JAVA_INT, io.mazewall.ffi.Layouts.SECCOMP_NOTIF_RESP_ERROR_OFFSET, 0)
+        resp.set(ValueLayout.JAVA_INT, io.mazewall.ffi.Layouts.SECCOMP_NOTIF_RESP_FLAGS_OFFSET, NativeConstants.SECCOMP_USER_NOTIF_FLAG_CONTINUE.toInt())
         val res = ioctl(session.listenerFd, SECCOMP_IOCTL_NOTIF_SEND, resp)
         if (res is LinuxNative.SyscallResult.Error) {
             logger.warning("SECCOMP_IOCTL_NOTIF_SEND failed with errno=${res.errno}")
@@ -193,11 +193,11 @@ object RealProfilerTransport : ProfilerTransport {
         errorNr: Int,
     ) {
         resp.fill(0)
-        resp.set(ValueLayout.JAVA_LONG, RESP_ID_OFF, session.notifId)
-        resp.set(ValueLayout.JAVA_LONG, RESP_VAL_OFF, -1L)
+        resp.set(ValueLayout.JAVA_LONG, io.mazewall.ffi.Layouts.SECCOMP_NOTIF_RESP_ID_OFFSET, session.notifId)
+        resp.set(ValueLayout.JAVA_LONG, io.mazewall.ffi.Layouts.SECCOMP_NOTIF_RESP_VAL_OFFSET, -1L)
         // Error numbers are negative in the 'error' field of seccomp_notif_resp
-        resp.set(ValueLayout.JAVA_INT, RESP_ERR_OFF, -errorNr)
-        resp.set(ValueLayout.JAVA_INT, RESP_FLAGS_OFF, 0)
+        resp.set(ValueLayout.JAVA_INT, io.mazewall.ffi.Layouts.SECCOMP_NOTIF_RESP_ERROR_OFFSET, -errorNr)
+        resp.set(ValueLayout.JAVA_INT, io.mazewall.ffi.Layouts.SECCOMP_NOTIF_RESP_FLAGS_OFFSET, 0)
         val res = ioctl(session.listenerFd, SECCOMP_IOCTL_NOTIF_SEND, resp)
         if (res is LinuxNative.SyscallResult.Error) {
             logger.warning("SECCOMP_IOCTL_NOTIF_SEND failed with errno=${res.errno}")

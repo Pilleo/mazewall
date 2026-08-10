@@ -87,9 +87,9 @@ class ProfilerDaemonTest {
         override fun ioctl(fd: FileDescriptor<*, FdState.Open>, request: Long, arg: MemorySegment): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
             ioctlCalls.add(request)
             if (request == SECCOMP_IOCTL_NOTIF_RECV) {
-                arg.set(ValueLayout.JAVA_LONG, NOTIF_ID_OFF, 123L)
-                arg.set(ValueLayout.JAVA_INT, NOTIF_PID_OFF, 456)
-                arg.set(ValueLayout.JAVA_INT, NOTIF_NR_OFF, 2)
+                arg.set(ValueLayout.JAVA_LONG, io.mazewall.ffi.Layouts.SECCOMP_NOTIF_ID_OFFSET, 123L)
+                arg.set(ValueLayout.JAVA_INT, io.mazewall.ffi.Layouts.SECCOMP_NOTIF_PID_OFFSET, 456)
+                arg.set(ValueLayout.JAVA_INT, io.mazewall.ffi.Layouts.SECCOMP_NOTIF_NR_OFFSET, 2)
             }
             return LinuxNative.SyscallResult.Success(0L)
         }
@@ -112,10 +112,10 @@ class ProfilerDaemonTest {
                 ioctlCalls.add(request)
                 if (request == SECCOMP_IOCTL_NOTIF_RECV) {
                     val argSeg = MemorySegment.ofAddress(arg.address()).reinterpret(arg.byteSize())
-                    argSeg.set(ValueLayout.JAVA_LONG, NOTIF_ID_OFF, 123L)
-                    argSeg.set(ValueLayout.JAVA_INT, NOTIF_PID_OFF, 456)
-                    argSeg.set(ValueLayout.JAVA_INT, NOTIF_NR_OFF, 2)
-                    argSeg.set(ValueLayout.JAVA_LONG, NOTIF_ARGS_OFF, 0x1000L)
+                    argSeg.set(ValueLayout.JAVA_LONG, io.mazewall.ffi.Layouts.SECCOMP_NOTIF_ID_OFFSET, 123L)
+                    argSeg.set(ValueLayout.JAVA_INT, io.mazewall.ffi.Layouts.SECCOMP_NOTIF_PID_OFFSET, 456)
+                    argSeg.set(ValueLayout.JAVA_INT, io.mazewall.ffi.Layouts.SECCOMP_NOTIF_NR_OFFSET, 2)
+                    argSeg.set(ValueLayout.JAVA_LONG, io.mazewall.ffi.Layouts.SECCOMP_NOTIF_ARGS_OFFSET, 0x1000L)
                 }
                 return LinuxNative.SyscallResult.Success(0L)
             }
@@ -169,10 +169,10 @@ class ProfilerDaemonTest {
                 val notif = SegmentPool.SECCOMP_NOTIF_POOL.rent()
                 val resp = SegmentPool.SECCOMP_NOTIF_RESP_POOL.rent()
                 try {
-                    notif.writeLong(NOTIF_ID_OFF, 123L)
-                    notif.writeInt(NOTIF_PID_OFF, 456)
-                    notif.writeInt(NOTIF_NR_OFF, 2)
-                    notif.writeLong(NOTIF_ARGS_OFF, 0x1000L)
+                    notif.writeLong(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_ID_OFFSET, 123L)
+                    notif.writeInt(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_PID_OFFSET, 456)
+                    notif.writeInt(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_NR_OFFSET, 2)
+                    notif.writeLong(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_ARGS_OFFSET, 0x1000L)
 
                     val ok = with(arena) {
                         handler.processNotification(notif, resp, listenerFd, socketFd)
@@ -213,10 +213,10 @@ class ProfilerDaemonTest {
                 val notif = SegmentPool.SECCOMP_NOTIF_POOL.rent()
                 val resp = SegmentPool.SECCOMP_NOTIF_RESP_POOL.rent()
                 try {
-                    notif.writeLong(NOTIF_ID_OFF, 123L)
-                    notif.writeInt(NOTIF_PID_OFF, 456)
-                    notif.writeInt(NOTIF_NR_OFF, 2)
-                    notif.writeLong(NOTIF_ARGS_OFF, 0x1000L)
+                    notif.writeLong(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_ID_OFFSET, 123L)
+                    notif.writeInt(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_PID_OFFSET, 456)
+                    notif.writeInt(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_NR_OFFSET, 2)
+                    notif.writeLong(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_ARGS_OFFSET, 0x1000L)
 
                     val ok = with(arena) {
                         handler.processNotification(notif, resp, listenerFd, socketFd)
@@ -258,10 +258,10 @@ class ProfilerDaemonTest {
                 val notif = SegmentPool.SECCOMP_NOTIF_POOL.rent()
                 val resp = SegmentPool.SECCOMP_NOTIF_RESP_POOL.rent()
                 try {
-                    notif.writeLong(NOTIF_ID_OFF, 123L)
-                    notif.writeInt(NOTIF_PID_OFF, 456)
-                    notif.writeInt(NOTIF_NR_OFF, 2)
-                    notif.writeLong(NOTIF_ARGS_OFF, 0x1000L)
+                    notif.writeLong(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_ID_OFFSET, 123L)
+                    notif.writeInt(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_PID_OFFSET, 456)
+                    notif.writeInt(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_NR_OFFSET, 2)
+                    notif.writeLong(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_ARGS_OFFSET, 0x1000L)
 
                     with(arena) {
                         handler.processNotification(notif, resp, listenerFd, socketFd)
@@ -356,10 +356,10 @@ class ProfilerDaemonTest {
                 val resp = SegmentPool.SECCOMP_NOTIF_RESP_POOL.rent()
                 try {
                     // Setup notification data
-                    notif.writeLong(NOTIF_ID_OFF, 123L)
-                    notif.writeInt(NOTIF_PID_OFF, 456)
-                    notif.writeInt(NOTIF_NR_OFF, 2)
-                    notif.writeLong(NOTIF_ARGS_OFF, 0x1000L)
+                    notif.writeLong(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_ID_OFFSET, 123L)
+                    notif.writeInt(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_PID_OFFSET, 456)
+                    notif.writeInt(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_NR_OFFSET, 2)
+                    notif.writeLong(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_ARGS_OFFSET, 0x1000L)
 
                     // Clear interrupt status
                     Thread.interrupted()
@@ -491,10 +491,10 @@ class ProfilerDaemonTest {
                 val resp = SegmentPool.SECCOMP_NOTIF_RESP_POOL.rent()
                 try {
                     // Setup notification data
-                    notif.writeLong(NOTIF_ID_OFF, 123L)
-                    notif.writeInt(NOTIF_PID_OFF, 456)
-                    notif.writeInt(NOTIF_NR_OFF, 2)
-                    notif.writeLong(NOTIF_ARGS_OFF, 0x1000L)
+                    notif.writeLong(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_ID_OFFSET, 123L)
+                    notif.writeInt(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_PID_OFFSET, 456)
+                    notif.writeInt(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_NR_OFFSET, 2)
+                    notif.writeLong(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_ARGS_OFFSET, 0x1000L)
 
                     val ok = with(arena) {
                         handler.processNotification(notif, resp, listenerFd, socketFd)
@@ -540,10 +540,10 @@ class ProfilerDaemonTest {
                 val resp = SegmentPool.SECCOMP_NOTIF_RESP_POOL.rent()
                 try {
                     // Setup notification data
-                    notif.writeLong(NOTIF_ID_OFF, 123L)
-                    notif.writeInt(NOTIF_PID_OFF, 456)
-                    notif.writeInt(NOTIF_NR_OFF, 2)
-                    notif.writeLong(NOTIF_ARGS_OFF, 0x1000L)
+                    notif.writeLong(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_ID_OFFSET, 123L)
+                    notif.writeInt(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_PID_OFFSET, 456)
+                    notif.writeInt(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_NR_OFFSET, 2)
+                    notif.writeLong(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_ARGS_OFFSET, 0x1000L)
 
                     org.junit.jupiter.api.assertThrows<IllegalArgumentException> {
                         with(arena) {
@@ -586,10 +586,10 @@ class ProfilerDaemonTest {
                 val resp = SegmentPool.SECCOMP_NOTIF_RESP_POOL.rent()
                 try {
                     // Setup notification data
-                    notif.writeLong(NOTIF_ID_OFF, 123L)
-                    notif.writeInt(NOTIF_PID_OFF, 456)
-                    notif.writeInt(NOTIF_NR_OFF, 2)
-                    notif.writeLong(NOTIF_ARGS_OFF, 0x1000L)
+                    notif.writeLong(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_ID_OFFSET, 123L)
+                    notif.writeInt(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_PID_OFFSET, 456)
+                    notif.writeInt(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_NR_OFFSET, 2)
+                    notif.writeLong(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_ARGS_OFFSET, 0x1000L)
 
                     val ok = with(arena) {
                         handler.processNotification(notif, resp, listenerFd, socketFd)
@@ -636,10 +636,10 @@ class ProfilerDaemonTest {
                 val notif = SegmentPool.SECCOMP_NOTIF_POOL.rent()
                 val resp = SegmentPool.SECCOMP_NOTIF_RESP_POOL.rent()
                 try {
-                    notif.writeLong(NOTIF_ID_OFF, 123L)
-                    notif.writeInt(NOTIF_PID_OFF, 456)
-                    notif.writeInt(NOTIF_NR_OFF, 2) // nr = 2 (OPEN)
-                    notif.writeLong(NOTIF_ARGS_OFF, 0x1000L)
+                    notif.writeLong(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_ID_OFFSET, 123L)
+                    notif.writeInt(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_PID_OFFSET, 456)
+                    notif.writeInt(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_NR_OFFSET, 2) // nr = 2 (OPEN)
+                    notif.writeLong(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_ARGS_OFFSET, 0x1000L)
 
                     val ok = with(arena) {
                         noiseHandler.processNotification(notif, resp, listenerFd, socketFd)

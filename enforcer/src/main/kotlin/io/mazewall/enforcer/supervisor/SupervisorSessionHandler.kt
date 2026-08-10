@@ -94,18 +94,6 @@ internal class SupervisorSessionHandler(
         private const val POLL_TIMEOUT_MS = 30000
         private const val AT_FDCWD = -100
 
-        // Seccomp notifications offsets
-        private const val NOTIF_ID_OFF = 0L
-        private const val NOTIF_PID_OFF = 8L
-        private const val NOTIF_ARCH_OFF = 20L
-        private const val NOTIF_NR_OFF = 16L
-        private const val NOTIF_ARGS_OFF = 32L
-
-        // Seccomp response offsets
-        private const val RESP_ID_OFF = 0L
-        private const val RESP_VAL_OFF = 8L
-        private const val RESP_ERR_OFF = 16L
-        private const val RESP_FLAGS_OFF = 20L
 
         // Argument types
         private const val ARG_TYPE_LONG: Byte = 0
@@ -361,15 +349,15 @@ internal class SupervisorSessionHandler(
     private fun processNotification(notif: ManagedSegment, resp: ManagedSegment): Boolean {
         return NativeArena.ofConfined().use { notificationArena ->
             with(notificationArena) {
-                val id = notif.readLong(NOTIF_ID_OFF)
+                val id = notif.readLong(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_ID_OFFSET)
                 try {
-                    val pidVal = notif.readInt(NOTIF_PID_OFF)
-                    val archVal = notif.readInt(NOTIF_ARCH_OFF)
-                    val nr = notif.readInt(NOTIF_NR_OFF)
+                    val pidVal = notif.readInt(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_PID_OFFSET)
+                    val archVal = notif.readInt(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_ARCH_OFFSET)
+                    val nr = notif.readInt(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_NR_OFFSET)
 
                     val args = LongArray(MAX_ARGS)
                     for (i in 0 until MAX_ARGS) {
-                        args[i] = notif.readLong(NOTIF_ARGS_OFF + i * BYTES_PER_LONG)
+                        args[i] = notif.readLong(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_ARGS_OFFSET + i * BYTES_PER_LONG)
                     }
 
                     val tid = Tid(pidVal)
@@ -882,10 +870,10 @@ internal class SupervisorSessionHandler(
 
     private fun sendSeccompContinue(id: Long, resp: ManagedSegment) {
         resp.fill(0)
-        resp.writeLong(RESP_ID_OFF, id)
-        resp.writeLong(RESP_VAL_OFF, 0L)
-        resp.writeInt(RESP_ERR_OFF, 0)
-        resp.writeInt(RESP_FLAGS_OFF, NativeConstants.SECCOMP_USER_NOTIF_FLAG_CONTINUE.toInt())
+        resp.writeLong(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_RESP_ID_OFFSET, id)
+        resp.writeLong(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_RESP_VAL_OFFSET, 0L)
+        resp.writeInt(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_RESP_ERROR_OFFSET, 0)
+        resp.writeInt(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_RESP_FLAGS_OFFSET, NativeConstants.SECCOMP_USER_NOTIF_FLAG_CONTINUE.toInt())
         while (true) {
             val res = engine.raw.ioctl(listenerFd, IoctlCommand.SECCOMP_IOCTL_NOTIF_SEND, resp.typed<IoctlPayload.SeccompNotifResp>())
             if (res is LinuxNative.SyscallResult.Error<*> && res.errno == NativeConstants.EINTR) {
@@ -897,10 +885,10 @@ internal class SupervisorSessionHandler(
 
     private fun sendSeccompError(id: Long, errorNr: Int, resp: ManagedSegment) {
         resp.fill(0)
-        resp.writeLong(RESP_ID_OFF, id)
-        resp.writeLong(RESP_VAL_OFF, -1L)
-        resp.writeInt(RESP_ERR_OFF, -errorNr)
-        resp.writeInt(RESP_FLAGS_OFF, 0)
+        resp.writeLong(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_RESP_ID_OFFSET, id)
+        resp.writeLong(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_RESP_VAL_OFFSET, -1L)
+        resp.writeInt(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_RESP_ERROR_OFFSET, -errorNr)
+        resp.writeInt(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_RESP_FLAGS_OFFSET, 0)
         while (true) {
             val res = engine.raw.ioctl(listenerFd, IoctlCommand.SECCOMP_IOCTL_NOTIF_SEND, resp.typed<IoctlPayload.SeccompNotifResp>())
             if (res is LinuxNative.SyscallResult.Error<*> && res.errno == NativeConstants.EINTR) {
