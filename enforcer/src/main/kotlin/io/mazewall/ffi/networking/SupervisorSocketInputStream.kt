@@ -29,6 +29,9 @@ internal class SupervisorSocketInputStream(
 
     override fun read(): Int {
         while (true) {
+            if (Thread.currentThread().isInterrupted) {
+                throw java.io.InterruptedIOException("Thread interrupted while reading from Supervisor socket")
+            }
             val res = LinuxNative.memory.read(socketFd, readBuf, 1)
             when (res) {
                 is LinuxNative.SyscallResult.Success -> {
@@ -36,7 +39,10 @@ internal class SupervisorSocketInputStream(
                     return readBuf.readByte(0L).toInt() and BYTE_MASK
                 }
                 is LinuxNative.SyscallResult.Error -> {
-                    if (res.errno == EINTR) continue
+                    if (res.errno == EINTR) {
+                        Thread.yield()
+                        continue
+                    }
                     return -1
                 }
             }
@@ -49,6 +55,9 @@ internal class SupervisorSocketInputStream(
         var result = -1
         var done = false
         while (!done) {
+            if (Thread.currentThread().isInterrupted) {
+                throw java.io.InterruptedIOException("Thread interrupted while reading from Supervisor socket")
+            }
             val res = LinuxNative.memory.read(socketFd, multiBuf, count)
             when (res) {
                 is LinuxNative.SyscallResult.Success -> {
@@ -62,6 +71,8 @@ internal class SupervisorSocketInputStream(
                 is LinuxNative.SyscallResult.Error -> {
                     if (res.errno != EINTR) {
                         done = true
+                    } else {
+                        Thread.yield()
                     }
                 }
             }
