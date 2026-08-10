@@ -64,6 +64,48 @@ class ResolveAbsolutePathTest {
     }
 
     @Test
+    fun `relative bypass path is matched only after tracee dirfd resolution`() {
+        val handler = SupervisorSessionHandler(
+            FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(-1),
+            FileDescriptor.unsafe<FileDescriptorRole.SeccompNotif>(-1)
+        )
+        val traceeDirectory = Files.createTempDirectory("mazewall-tracee-dir")
+        val tracee = ProcessBuilder(
+            "bash",
+            "-c",
+            "exec 9<\"$traceeDirectory\"; echo $$; sleep 30"
+        ).redirectErrorStream(true).start()
+
+        try {
+            val traceePid = tracee.inputReader().readLine().toInt()
+            val resolveMethod = SupervisorSessionHandler::class.java.getDeclaredMethod(
+                "resolveAbsolutePath",
+                Int::class.javaPrimitiveType,
+                Int::class.javaPrimitiveType,
+                String::class.java
+            )
+            resolveMethod.isAccessible = true
+            val resolvedPath = resolveMethod.invoke(handler, traceePid, 9, "build/secret") as Path
+
+            val bypassMethod = SupervisorSessionHandler::class.java.getDeclaredMethod(
+                "resolveBypassPath",
+                Path::class.java
+            )
+            bypassMethod.isAccessible = true
+
+            // "build" is beneath the daemon working directory and is normally bypassed. It must not
+            // bypass when the tracee asks openat() to resolve that same relative spelling under fd 9.
+            val result = bypassMethod.invoke(handler, resolvedPath) as Path?
+
+            assertNull(result)
+        } finally {
+            tracee.destroyForcibly()
+            tracee.waitFor()
+            Files.deleteIfExists(traceeDirectory)
+        }
+    }
+
+    @Test
     fun `toRealPathWithFallback correctly canonicalizes existing parent of non-existent files`() {
         // Create a temporary file, get its parent, and resolve a non-existent child.
         val tempFile = Files.createTempFile("existing-parent-test", ".tmp")
