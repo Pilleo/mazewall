@@ -126,7 +126,14 @@ public class SeccompSessionHandler(
     }
 
     private fun handleShutdownRequest(ackBuf: ManagedSegment, pollFds: ManagedSegment): Boolean {
-        val res = engine.memory.read(socketFd, ackBuf, 1L)
+        var res: LinuxNative.SyscallResult<Long, *>
+        while (true) {
+            res = engine.memory.read(socketFd, ackBuf, 1L)
+            if (res is LinuxNative.SyscallResult.Error<*> && res.errno == NativeConstants.EINTR) {
+                continue
+            }
+            break
+        }
         return when (res) {
             is LinuxNative.SyscallResult.Success -> {
                 val value = res.value
