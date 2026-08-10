@@ -66,9 +66,9 @@ internal class ContainedExecutorWrapper(
     private fun <T> wrapCallable(task: Callable<T>): Callable<T> =
         Callable {
             val initialState = ContainmentStateRegistry.threadState
-            var session: AutoCloseable? = null
+            var receipt: io.mazewall.InstallationReceipt? = null
             try {
-                session = ContainedExecutors.installOnCurrentThread(policy, scopingPolicy)
+                receipt = ContainedExecutors.installOnCurrentThread(policy, scopingPolicy)
                 val result = runCatching { task.call() }
                 result.getOrElse { e ->
                     if (e is Exception && ContainmentViolationDetector.isContainmentViolation(e)) {
@@ -77,21 +77,21 @@ internal class ContainedExecutorWrapper(
                     throw e
                 }
             } catch (t: Throwable) {
-                if (session == null) {
+                if (receipt == null) {
                     ContainmentStateRegistry.threadState = initialState
                 }
                 throw t
             } finally {
-                session?.close()
+                receipt?.supervisorSession?.close()
             }
         }
 
     private fun wrapRunnable(task: Runnable): Runnable =
         Runnable {
             val initialState = ContainmentStateRegistry.threadState
-            var session: AutoCloseable? = null
+            var receipt: io.mazewall.InstallationReceipt? = null
             try {
-                session = ContainedExecutors.installOnCurrentThread(policy, scopingPolicy)
+                receipt = ContainedExecutors.installOnCurrentThread(policy, scopingPolicy)
                 val result = runCatching { task.run() }
                 result.onFailure { e ->
                     if (e is Exception && ContainmentViolationDetector.isContainmentViolation(e)) {
@@ -100,12 +100,12 @@ internal class ContainedExecutorWrapper(
                     throw e
                 }
             } catch (t: Throwable) {
-                if (session == null) {
+                if (receipt == null) {
                     ContainmentStateRegistry.threadState = initialState
                 }
                 throw t
             } finally {
-                session?.close()
+                receipt?.supervisorSession?.close()
             }
         }
 
