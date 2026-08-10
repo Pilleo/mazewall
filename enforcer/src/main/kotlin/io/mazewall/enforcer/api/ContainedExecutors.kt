@@ -161,7 +161,11 @@ object ContainedExecutors {
 
             if (!Platform.isSupported()) {
                 handleUnsupportedPlatform()
-                return io.mazewall.InstallationReceipt(processWide, policy, null)
+                return io.mazewall.InstallationReceipt(
+                    processWide = processWide,
+                    requestedPolicy = policy,
+                    outcome = io.mazewall.InstallationOutcome.BYPASSED,
+                )
             }
 
             validateLinuxAndNotVirtual()
@@ -186,7 +190,11 @@ object ContainedExecutors {
                 if (fallback == Platform.FallbackBehavior.valueOf("WARN_AND_BYPASS")) {
                     logger.warning("Seccomp installation failed: ${t.message}. Code will run uncontained.")
                 }
-                return io.mazewall.InstallationReceipt(processWide, policy, null)
+                return io.mazewall.InstallationReceipt(
+                    processWide = processWide,
+                    requestedPolicy = policy,
+                    outcome = io.mazewall.InstallationOutcome.BYPASSED,
+                )
             }
             throw t
         }
