@@ -116,7 +116,7 @@ public object SupervisorSocketUtils {
             msg.setMsgIov(iov.segment)
             msg.setMsgIovlen(1L)
             msg.setMsgControl(controlBuf)
-            msg.setMsgControllen(MSG_CONTROL_BUF_SIZE)
+            msg.setMsgControllen(CMSG_RIGHTS_LEN)
 
             while (true) {
                 val res = LinuxNative.networking.sendmsg(FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(socketFd), ConfinedSegment(msg.segment), 0)

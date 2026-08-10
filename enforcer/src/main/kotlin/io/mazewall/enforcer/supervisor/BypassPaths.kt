@@ -23,7 +23,7 @@ public object BypassPaths {
         val abs = path.toAbsolutePath().normalize()
         var current = abs
         val nonExistentParts = mutableListOf<String>()
-        while (true) {
+        while (current.parent != null) {
             try {
                 val real = current.toRealPath()
                 var resolved = real
@@ -32,13 +32,11 @@ public object BypassPaths {
                 }
                 return resolved.normalize()
             } catch (e: NoSuchFileException) {
-                val parent = current.parent ?: break
                 nonExistentParts.add(current.fileName.toString())
-                current = parent
+                current = current.parent ?: break
             } catch (e: FileNotFoundException) {
-                val parent = current.parent ?: break
                 nonExistentParts.add(current.fileName.toString())
-                current = parent
+                current = current.parent ?: break
             }
         }
         var resolved = abs.root ?: abs
@@ -100,6 +98,16 @@ public object BypassPaths {
             val javaHomeStr = System.getProperty("java.home")
             if (!javaHomeStr.isNullOrEmpty()) {
                 addPathAndReal(Paths.get(javaHomeStr))
+            }
+
+            try {
+                val userHome = System.getProperty("user.home")
+                if (!userHome.isNullOrEmpty()) {
+                    addPathAndReal(Paths.get(userHome).resolve(".sdkman"))
+                    addPathAndReal(Paths.get(userHome).resolve(".m2"))
+                }
+            } catch (e: Exception) {
+                logger.warning { "Failed to add user.home paths: ${e.message}" }
             }
 
             val cp = System.getProperty("java.class.path")
@@ -178,8 +186,9 @@ public object BypassPaths {
     }
 
     public fun isBypassPath(path: Path): Boolean {
+        val realPath = try { toRealPathWithFallback(path) } catch (_: Exception) { path }
         return safeBypassPaths.any { bypassPath ->
-            path.startsWith(bypassPath) || path == bypassPath
+            path.startsWith(bypassPath) || path == bypassPath || realPath.startsWith(bypassPath) || realPath == bypassPath
         }
     }
 }

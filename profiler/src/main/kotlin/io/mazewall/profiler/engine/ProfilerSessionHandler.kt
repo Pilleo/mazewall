@@ -51,7 +51,7 @@ internal class ProfilerSessionHandler(
     val ledger = SessionEventLedger()
 
     private val sessionArena = NativeArena.ofConfined()
-    val ackBuf: ManagedSegment = sessionArena.allocate(1L)
+    val ackBuf: ManagedSegment = sessionArena.allocate(ACK_BUF_SIZE)
     val socketPollFd: ManagedSegment = sessionArena.allocate(Layouts.POLLFD)
 
     private val resolver = SyscallPathResolver(memoryReader, ledger)

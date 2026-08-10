@@ -137,7 +137,7 @@ class ProfilerDesignSpec :
                 buf: MemorySegment,
                 count: Long,
             ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
-                if (count == 1L) {
+                if (count > 0L) {
                     buf.set(ValueLayout.JAVA_BYTE, 0L, 0xAC.toByte())
                     return LinuxNative.SyscallResult.Success(1L)
                 }

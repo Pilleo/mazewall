@@ -1121,6 +1121,10 @@ class "NetworkOrderBuffer" as io.mazewall.ffi.networking.NetworkOrderBuffer {
 }
 abstract class "SeccompConnection" as io.mazewall.ffi.networking.SeccompConnection {
   + {abstract}FileDescriptor<UnixSocket, Open> getSocketFd()
+  +FileDescriptor<SeccompNotif, Open> getListenerFd()
+  +SocketManager getSocketManager()
+  +void setSocketManager(SocketManager)
+  +void close()
 }
 class "SupervisorSeccompNotifInstaller" as io.mazewall.ffi.networking.SupervisorSeccompNotifInstaller {
   + {static}SupervisorSeccompNotifInstaller INSTANCE
@@ -1496,6 +1500,7 @@ io.mazewall.ffi.memory.SharedSegment .u.|> io.mazewall.ffi.memory.ManagedSegment
 io.mazewall.ffi.memory.SupervisorProcessMemoryReader .u.|> io.mazewall.ffi.memory.TraceeMemoryReader
 io.mazewall.ffi.memory.SupervisorProcessMemoryReader --> io.mazewall.ffi.memory.SupervisorProcessMemoryReader
 io.mazewall.ffi.memory.SupervisorProcessMemoryWriter --> io.mazewall.ffi.memory.SupervisorProcessMemoryWriter
+io.mazewall.ffi.networking.SeccompConnection --> io.mazewall.core.SocketManager
 io.mazewall.ffi.networking.SupervisorSeccompNotifInstaller --> io.mazewall.ffi.networking.SupervisorSeccompNotifInstaller
 io.mazewall.ffi.networking.SupervisorSocketInputStream --> io.mazewall.ffi.memory.NativeArena
 io.mazewall.ffi.networking.SupervisorSocketInputStream --> io.mazewall.core.FileDescriptor

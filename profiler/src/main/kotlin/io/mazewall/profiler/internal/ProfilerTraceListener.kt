@@ -154,10 +154,14 @@ internal class ProfilerTraceListener(
         logger.fine("Closing ProfilerTraceListener for fd=${socketFd.value}")
 
         try {
-            // Step 1: Signal the daemon to finish up. The daemon receives this byte in
-            // handleShutdownRequest(), terminates its session loop, and then closes its
-            // side of the socket. This triggers EOF on our read side.
-            sendShutdownCommand()
+            // Step 1: Signal the daemon to finish up. The daemon receives this byte,
+            // enters pass-through mode for this session, and closes its side of the socket.
+            // This triggers EOF on our read side without shutting down the global daemon.
+            try {
+                sendCommand(PASS_THROUGH_COMMAND_BYTE)
+            } catch (e: Exception) {
+                logger.fine("Failed to send PASS_THROUGH_COMMAND_BYTE: ${e.message}")
+            }
 
             // Step 2: Wait for the listener thread to drain remaining events and see EOF.
             // The thread exits via EOFException once the daemon closes its socket end.

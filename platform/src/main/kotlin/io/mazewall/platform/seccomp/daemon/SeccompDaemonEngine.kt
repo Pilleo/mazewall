@@ -222,8 +222,11 @@ public class SeccompDaemonEngine(
 
     @Suppress("TooGenericExceptionCaught")
     public fun handleConnection(socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>) {
-        var connection: SeccompConnection = SeccompConnection.Accepted(socketFd)
+        var connection: SeccompConnection = SeccompConnection.Accepted(socketFd).apply {
+            this.socketManager = this@SeccompDaemonEngine.socketManager
+        }
         var interrupted = false
+
         try {
             NativeArena.ofConfined().use { arena ->
                 val pollFd = PollFdSegment.of(arena.allocate(Layouts.POLLFD))
@@ -246,19 +249,8 @@ public class SeccompDaemonEngine(
             System.err.println("[SECCOMP-DAEMON-WARN] Connection handler terminated with exception: ${e.message}")
         } finally {
             clientSockets.remove(socketFd)
-            socketManager.close(socketFd)
-
-            val lFd = when (val c = connection) {
-                is SeccompConnection.FdAttached -> c.listenerFd
-                is SeccompConnection.Active -> c.listenerFd
-                else -> null
-            }
-            if (lFd != null) {
-                activeListeners.remove(lFd)
-                try {
-                    socketManager.close(lFd)
-                } catch (_: Exception) {}
-            }
+            connection.listenerFd?.let { activeListeners.remove(it) }
+            connection.close()
             if (interrupted) {
                 Thread.currentThread().interrupt()
             }
@@ -286,7 +278,7 @@ public class SeccompDaemonEngine(
                 if (listenerFd != null) {
                     System.err.println("[SECCOMP-DAEMON] Received listener FD: ${listenerFd.value}")
                     activeListeners.add(listenerFd)
-                    current.attachFd(listenerFd)
+                    current.attachFd(listenerFd).also { it.socketManager = socketManager }
                 } else {
                     null
                 }
@@ -300,7 +292,7 @@ public class SeccompDaemonEngine(
                 while (true) {
                     val res = engine.memory.write(socketFd, ackBuf, ACK_BUF_SIZE)
                     if (res is LinuxNative.SyscallResult.Success) {
-                        result = current.handshakeComplete()
+                        result = current.handshakeComplete().also { it.socketManager = socketManager }
                         break
                     } else {
                         val errno = (res as LinuxNative.SyscallResult.Error).errno
@@ -358,8 +350,15 @@ public class SeccompDaemonEngine(
                             val action = with(iterationArena) {
                                 sessionHandler.handleActiveListener(pollFds)
                             }
-                            if (action is LoopAction.Break || action is LoopAction.Shutdown) {
-                                shouldBreak = true
+                            when (action) {
+                                is LoopAction.Shutdown -> {
+                                    triggerGlobalShutdown("session reactor shutdown action")
+                                    shouldBreak = true
+                                }
+                                is LoopAction.Break -> {
+                                    shouldBreak = true
+                                }
+                                is LoopAction.Continue -> {}
                             }
                         }
                         if (shouldBreak) break

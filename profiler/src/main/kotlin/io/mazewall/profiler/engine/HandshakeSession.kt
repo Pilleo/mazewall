@@ -77,14 +77,31 @@ sealed class HandshakeSession {
                 if (value <= 0) {
                     return failed()
                 }
+                // Process all bytes received in this read call.
+                // ACK takes priority: if ACK appears before SHUTDOWN in the buffer,
+                // we honour the ACK (let the tracee continue) and trigger shutdown
+                // only after CONTINUE has been sent to the kernel.
+                var ackSeen = false
+                var shutdownSeen = false
                 for (i in 0 until value.toInt()) {
                     val byte = ackBuf.get(ValueLayout.JAVA_BYTE, i.toLong())
-                    if (byte == PROTOCOL_ACK_BYTE) return acknowledged()
-                    if (byte == PASS_THROUGH_COMMAND_BYTE) return passedThrough()
-                    if (byte == SHUTDOWN_COMMAND_BYTE) {
-                        onShutdown("Parent Command during notification")
-                        return failed()
+                    when (byte) {
+                        PROTOCOL_ACK_BYTE -> ackSeen = true
+                        PASS_THROUGH_COMMAND_BYTE -> return passedThrough()
+                        SHUTDOWN_COMMAND_BYTE -> shutdownSeen = true
                     }
+                }
+                if (ackSeen) {
+                    // If shutdown was also requested in the same buffer, schedule
+                    // it after the tracee has been safely unblocked via CONTINUE.
+                    if (shutdownSeen) {
+                        onShutdown("Parent Command (deferred, ACK took priority)")
+                    }
+                    return acknowledged()
+                }
+                if (shutdownSeen) {
+                    onShutdown("Parent Command during notification")
+                    return failed()
                 }
                 break
             }
