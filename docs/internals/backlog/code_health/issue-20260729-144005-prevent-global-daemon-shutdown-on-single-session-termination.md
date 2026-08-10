@@ -1,7 +1,7 @@
 ---
 title: "Prevent global Supervisor daemon shutdown upon single session termination to support multi-connection resilience"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: 7
 dependencies: []
 component: "enforcer"

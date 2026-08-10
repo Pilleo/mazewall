@@ -75,7 +75,7 @@ public class SeccompSessionHandler(
             val isDeadOrShutdown = (socketRevents and errorOrHup) != 0 || handleShutdownRequest(ackBuf, pollFds)
             if (isDeadOrShutdown) {
                 isTerminated = true
-                return LoopAction.Shutdown
+                return LoopAction.Break
             }
         }
 
@@ -83,7 +83,7 @@ public class SeccompSessionHandler(
         val listenerRevents = pfd1.getRevents().toInt()
         if ((listenerRevents and errorOrHup) != 0) {
             isTerminated = true
-            return LoopAction.Shutdown
+            return LoopAction.Break
         }
 
         if ((listenerRevents and NativeConstants.POLLIN.toInt()) != 0) {
