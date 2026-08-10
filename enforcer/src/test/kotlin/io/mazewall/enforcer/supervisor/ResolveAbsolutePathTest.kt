@@ -70,8 +70,8 @@ class ResolveAbsolutePathTest {
         val parentDir = tempFile.parent
         val nonExistentChild = parentDir.resolve("non-existent-child-abc-123")
 
-        val companionClass = Class.forName("io.mazewall.enforcer.supervisor.SupervisorSessionHandler\$Companion")
-        val companionInstance = SupervisorSessionHandler.Companion
+        val companionClass = Class.forName("io.mazewall.enforcer.supervisor.BypassPaths")
+        val companionInstance = BypassPaths
         val method = companionClass.getDeclaredMethod("toRealPathWithFallback", Path::class.java)
         method.isAccessible = true
 
@@ -85,8 +85,8 @@ class ResolveAbsolutePathTest {
 
     @Test
     fun `toRealPathWithFallback propagates critical exceptions like FileSystemLoopException`() {
-        val companionClass = Class.forName("io.mazewall.enforcer.supervisor.SupervisorSessionHandler\$Companion")
-        val companionInstance = SupervisorSessionHandler.Companion
+        val companionClass = Class.forName("io.mazewall.enforcer.supervisor.BypassPaths")
+        val companionInstance = BypassPaths
         val method = companionClass.getDeclaredMethod("toRealPathWithFallback", Path::class.java)
         method.isAccessible = true
 

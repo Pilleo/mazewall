@@ -140,173 +140,7 @@ internal class SupervisorSessionHandler(
          * and build/coverage directories. Because these syscalls bypass the JVM listener entirely,
          * no dynamic class loading is triggered during vulnerable tracee states.
          */
-        private fun toRealPathWithFallback(path: java.nio.file.Path): java.nio.file.Path {
-            val abs = path.toAbsolutePath().normalize()
-            var current = abs
-            val nonExistentParts = mutableListOf<String>()
-            while (true) {
-                try {
-                    val real = current.toRealPath()
-                    var resolved = real
-                    for (i in nonExistentParts.indices.reversed()) {
-                        resolved = resolved.resolve(nonExistentParts[i])
-                    }
-                    return resolved.normalize()
-                } catch (e: java.nio.file.NoSuchFileException) {
-                    val parent = current.parent ?: break
-                    nonExistentParts.add(current.fileName.toString())
-                    current = parent
-                } catch (e: java.io.FileNotFoundException) {
-                    val parent = current.parent ?: break
-                    nonExistentParts.add(current.fileName.toString())
-                    current = parent
-                }
-            }
-            var resolved = abs.root ?: abs
-            for (i in nonExistentParts.indices.reversed()) {
-                resolved = resolved.resolve(nonExistentParts[i])
-            }
-            return resolved.normalize()
-        }
 
-        @Suppress("SwallowedException", "TooGenericExceptionCaught")
-        private val safeBypassPaths = mutableListOf<java.nio.file.Path>().apply {
-            fun addPathAndReal(path: java.nio.file.Path) {
-                val abs = path.toAbsolutePath().normalize()
-                add(abs)
-                try {
-                    val real = toRealPathWithFallback(abs)
-                    add(real)
-                } catch (e: java.nio.file.NoSuchFileException) {
-                    // Normal, path might not exist
-                } catch (e: java.io.FileNotFoundException) {
-                    // Normal, path might not exist
-                } catch (e: Exception) {
-                    logger.warning { "Failed to resolve real path for $abs: ${e.message}" }
-                }
-            }
-
-            fun parseManifestClassPath(jarPath: java.nio.file.Path) {
-                try {
-                    java.util.jar.JarFile(jarPath.toFile()).use { jar ->
-                        val manifest = jar.manifest ?: return
-                        val classPathAttr = manifest.mainAttributes.getValue("Class-Path") ?: return
-                        val parentDir = jarPath.parent ?: return
-                        for (entry in classPathAttr.split(" ")) {
-                            if (entry.isNotEmpty()) {
-                                try {
-                                    val uri = java.net.URI(entry)
-                                    val resolvedPath = if (uri.isAbsolute) {
-                                        java.nio.file.Paths.get(uri)
-                                    } else {
-                                        parentDir.resolve(uri.path).normalize()
-                                    }
-                                    addPathAndReal(resolvedPath)
-                                } catch (e: java.net.URISyntaxException) {
-                                    // Syntax error in manifest CP, skip
-                                } catch (e: Exception) {
-                                    logger.warning { "Failed to parse manifest entry $entry in $jarPath: ${e.message}" }
-                                }
-                            }
-                        }
-                    }
-                } catch (e: java.io.FileNotFoundException) {
-                    // Normal if Jar file doesn't exist
-                } catch (e: Exception) {
-                    logger.warning { "Failed to process manifest Class-Path for $jarPath: ${e.message}" }
-                }
-            }
-
-            try {
-                val javaHomeStr = System.getProperty("java.home")
-                if (!javaHomeStr.isNullOrEmpty()) {
-                    addPathAndReal(java.nio.file.Paths.get(javaHomeStr))
-                }
-
-                val cp = System.getProperty("java.class.path")
-                if (cp != null) {
-                    val cpEntries = cp.split(java.io.File.pathSeparator)
-                    for (entry in cpEntries) {
-                        if (entry.isNotEmpty()) {
-                            try {
-                                val path = java.nio.file.Paths.get(entry)
-                                addPathAndReal(path)
-                                if (entry.endsWith(".jar")) {
-                                    parseManifestClassPath(path)
-                                }
-                            } catch (e: java.nio.file.InvalidPathException) {
-                                // Normal
-                            } catch (e: Exception) {
-                                logger.warning { "Failed to process classpath entry $entry: ${e.message}" }
-                            }
-                        }
-                    }
-                }
-
-                // Add javaagent jars to prevent deadlocks during agent instrumentation
-                val jvmArgs = java.lang.management.ManagementFactory.getRuntimeMXBean().inputArguments
-                for (arg in jvmArgs) {
-                    if (arg.startsWith("-javaagent:")) {
-                        val agentPath = arg.substringAfter("-javaagent:").substringBefore("=")
-                        if (agentPath.isNotEmpty()) {
-                            try {
-                                addPathAndReal(java.nio.file.Paths.get(agentPath))
-                            } catch (e: java.nio.file.InvalidPathException) {
-                                // Normal
-                            } catch (e: Exception) {
-                                logger.warning { "Failed to process javaagent argument $arg: ${e.message}" }
-                            }
-                        }
-                    }
-                }
-
-                // Add CI-specific build directories and test-framework caches to prevent deadlock
-                try {
-                    addPathAndReal(java.nio.file.Paths.get("build"))
-                    addPathAndReal(java.nio.file.Paths.get(".gradle"))
-                } catch (e: java.nio.file.InvalidPathException) {
-                    // Normal
-                } catch (e: Exception) {
-                    logger.warning { "Failed to add build/.gradle paths: ${e.message}" }
-                }
-
-                // Add GRADLE_USER_HOME if set to support container/CI cache directories
-                try {
-                    val gradleUserHome = System.getenv("GRADLE_USER_HOME")
-                    if (!gradleUserHome.isNullOrEmpty()) {
-                        addPathAndReal(java.nio.file.Paths.get(gradleUserHome))
-                    }
-                } catch (e: java.nio.file.InvalidPathException) {
-                    // Normal
-                } catch (e: Exception) {
-                    logger.warning { "Failed to add GRADLE_USER_HOME: ${e.message}" }
-                }
-
-                // Add /proc and /sys virtual filesystems to prevent GC/JIT thread deadlocks
-                try {
-                    addPathAndReal(java.nio.file.Paths.get("/proc"))
-                    addPathAndReal(java.nio.file.Paths.get("/sys"))
-                } catch (e: java.nio.file.InvalidPathException) {
-                    // Normal
-                } catch (e: Exception) {
-                    logger.warning { "Failed to add /proc or /sys: ${e.message}" }
-                }
-
-                // Add the project root directory to bypass all project classes and build artifacts
-                try {
-                    val userDir = System.getProperty("user.dir")
-                    if (!userDir.isNullOrEmpty()) {
-                        addPathAndReal(java.nio.file.Paths.get(userDir))
-                    }
-                } catch (e: java.nio.file.InvalidPathException) {
-                    // Normal
-                } catch (e: Exception) {
-                    logger.warning { "Failed to add user.dir: ${e.message}" }
-                }
-            } catch (e: Exception) {
-                logger.severe { "Fatal exception during safeBypassPaths initialization: ${e.message}" }
-            }
-        }
     }
 
     context(arena: NativeArena)
@@ -386,9 +220,7 @@ internal class SupervisorSessionHandler(
                             if (path != null) {
                                 val absPathStr = path.toAbsolutePath().toString()
                                 resolvedPathStr = absPathStr
-                                val matched = safeBypassPaths.any { bypassPath ->
-                                    path.startsWith(bypassPath) || path == bypassPath
-                                }
+                                val matched = BypassPaths.isBypassPath(path)
                                 if (matched) {
                                     sendSeccompContinue(id, resp)
                                     logger.info { "[SUPERVISOR-DEBUG] Fast-path allow continue (matched) resolved=$absPathStr" }
@@ -461,7 +293,7 @@ internal class SupervisorSessionHandler(
         val path = java.nio.file.Paths.get(pathStr)
         if (path.isAbsolute) {
             try {
-                return toRealPathWithFallback(path)
+                return BypassPaths.toRealPathWithFallback(path)
             } catch (e: java.nio.file.NoSuchFileException) {
                 return null
             } catch (e: java.io.FileNotFoundException) {
@@ -473,11 +305,11 @@ internal class SupervisorSessionHandler(
         }
         try {
             val baseDir = if (dirfd == AT_FDCWD) {
-                toRealPathWithFallback(java.nio.file.Paths.get("/proc/$pid/cwd"))
+                BypassPaths.toRealPathWithFallback(java.nio.file.Paths.get("/proc/$pid/cwd"))
             } else {
-                toRealPathWithFallback(java.nio.file.Paths.get("/proc/$pid/fd/$dirfd"))
+                BypassPaths.toRealPathWithFallback(java.nio.file.Paths.get("/proc/$pid/fd/$dirfd"))
             }
-            return toRealPathWithFallback(baseDir.resolve(path))
+            return BypassPaths.toRealPathWithFallback(baseDir.resolve(path))
         } catch (e: java.nio.file.NoSuchFileException) {
             // NoSuchFileException is normal when directories under /proc do not exist or path resolution fails normally
             // Let's attempt relative search fallback
@@ -489,10 +321,10 @@ internal class SupervisorSessionHandler(
         }
 
         // Fallback: search in safeBypassPaths for relative path matching (needed inside containers due to Yama ptrace_scope)
-        for (bypassPath in safeBypassPaths) {
+        for (bypassPath in BypassPaths.safeBypassPaths) {
             try {
                 val resolved = bypassPath.resolve(pathStr).normalize()
-                return toRealPathWithFallback(resolved)
+                return BypassPaths.toRealPathWithFallback(resolved)
             } catch (e: java.nio.file.NoSuchFileException) {
                 // Normal, skip this bypass path
             } catch (e: java.io.FileNotFoundException) {

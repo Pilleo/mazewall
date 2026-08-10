@@ -561,6 +561,13 @@ class "ContainmentStateRegistry" as io.mazewall.enforcer.state.ContainmentStateR
   +ContainerState resolveCurrentState()
   +void sanitizeThreadState()
 }
+class "BypassPaths" as io.mazewall.enforcer.supervisor.BypassPaths {
+  + {static}BypassPaths INSTANCE
+  __
+  +Path toRealPathWithFallback(Path)
+  +List<Path> getSafeBypassPaths()
+  +boolean isBypassPath(Path)
+}
 class "DefaultStacktraceScopingPolicy" as io.mazewall.enforcer.supervisor.DefaultStacktraceScopingPolicy {
   + {static}DefaultStacktraceScopingPolicy INSTANCE
   __
@@ -1433,6 +1440,7 @@ io.mazewall.enforcer.state.ContainerState --> io.mazewall.core.SeccompAction
 io.mazewall.enforcer.state.ContainmentStateRegistry --> io.mazewall.enforcer.state.ContainerState
 io.mazewall.enforcer.state.ContainmentStateRegistry --> io.mazewall.core.ThreadLocalDelegate
 io.mazewall.enforcer.state.ContainmentStateRegistry --> io.mazewall.enforcer.state.ContainmentStateRegistry
+io.mazewall.enforcer.supervisor.BypassPaths --> io.mazewall.enforcer.supervisor.BypassPaths
 io.mazewall.enforcer.supervisor.DefaultStacktraceScopingPolicy .u.|> io.mazewall.enforcer.supervisor.StacktraceScopingPolicy
 io.mazewall.enforcer.supervisor.DefaultStacktraceScopingPolicy --> io.mazewall.enforcer.supervisor.DefaultStacktraceScopingPolicy
 io.mazewall.enforcer.supervisor.DefaultStacktraceScopingPolicy --> io.mazewall.core.Tid

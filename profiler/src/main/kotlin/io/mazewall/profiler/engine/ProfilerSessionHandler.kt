@@ -225,9 +225,7 @@ internal class ProfilerSessionHandler(
             val pathStr = resolvedEvent.paths.first()
             try {
                 val normalizedPathStr = PathNormalizerHelper.normalizePath(pathStr)
-                val matched = safeBypassPaths.any { bypassPath ->
-                    PathNormalizerHelper.pathStartsWith(normalizedPathStr, bypassPath)
-                }
+                val matched = io.mazewall.enforcer.supervisor.BypassPaths.isBypassPath(java.nio.file.Paths.get(normalizedPathStr))
                 System.err.println("[DAEMON-DEBUG] Noise-filter check: path=$pathStr, skip=$matched")
                 if (matched) {
                     with(arena.unwrap) {
@@ -258,53 +256,6 @@ internal class ProfilerSessionHandler(
         private const val SYS_OPENAT = 257
         private const val SYS_OPENAT2 = 437
 
-        @Suppress("SwallowedException", "TooGenericExceptionCaught")
-        private val safeBypassPaths = mutableListOf<String>().apply {
-            try {
-                val javaHome = java.nio.file.Paths.get(System.getProperty("java.home")).toAbsolutePath().normalize().toString()
-                add(javaHome)
 
-                val cp = System.getProperty("java.class.path")
-                if (cp != null) {
-                    val cpEntries = cp.split(java.io.File.pathSeparator)
-                    for (entry in cpEntries) {
-                        if (entry.isNotEmpty()) {
-                            try {
-                                val cpPath = java.nio.file.Paths.get(entry).toAbsolutePath().normalize().toString()
-                                add(cpPath)
-                            } catch (ignored: Exception) {}
-                        }
-                    }
-                }
-
-                // Add javaagent jars to prevent deadlocks during agent instrumentation
-                val jvmArgs = java.lang.management.ManagementFactory.getRuntimeMXBean().inputArguments
-                for (arg in jvmArgs) {
-                    if (arg.startsWith("-javaagent:")) {
-                        val agentPath = arg.substringAfter("-javaagent:").substringBefore("=")
-                        if (agentPath.isNotEmpty()) {
-                            try {
-                                val p = java.nio.file.Paths.get(agentPath).toAbsolutePath().normalize().toString()
-                                add(p)
-                            } catch (ignored: Exception) {}
-                        }
-                    }
-                }
-
-                // Add CI-specific build directories and test-framework caches to prevent deadlock
-                try {
-                    add(java.nio.file.Paths.get("build").toAbsolutePath().normalize().toString())
-                    add(java.nio.file.Paths.get(".gradle").toAbsolutePath().normalize().toString())
-                } catch (ignored: Exception) {}
-
-                // Add /proc and /sys virtual filesystems to prevent GC/JIT thread deadlocks
-                try {
-                    add(java.nio.file.Paths.get("/proc").toAbsolutePath().normalize().toString())
-                    add(java.nio.file.Paths.get("/sys").toAbsolutePath().normalize().toString())
-                } catch (ignored: Exception) {}
-            } catch (e: Exception) {
-                // Fail-safe
-            }
-        }
     }
 }
