@@ -11,6 +11,7 @@ import io.mazewall.core.SocketManager
 import io.mazewall.core.Syscall
 import io.mazewall.platform.seccomp.daemon.SeccompDaemonEngine
 import io.mazewall.platform.seccomp.daemon.SeccompDaemonState
+import io.mazewall.ffi.memory.native
 
 /**
  * Standalone Profiler Daemon Engine.
@@ -58,6 +59,9 @@ public class ProfilerDaemonEngine(
         maxConnections = MAX_CONNECTIONS,
         engine = engine,
         socketManager = socketManager,
+        raw = transport.raw,
+        handshakeWriter = { fd, buffer, count -> transport.write(fd, buffer.native, count) },
+        connectionAcceptor = transport::accept,
     )
 
     @JvmField

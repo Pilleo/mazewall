@@ -2,6 +2,7 @@ package io.mazewall.platform.seccomp.daemon
 
 import io.mazewall.LinuxNative
 import io.mazewall.NativeEngine
+import io.mazewall.RawSyscallOperations
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
@@ -62,6 +63,15 @@ public class SeccompDaemonEngine(
 
     private val engine: NativeEngine = LinuxNative,
     private val socketManager: SocketManager = RealSocketManager,
+    private val raw: RawSyscallOperations = engine.raw,
+    private val handshakeWriter: (
+        FileDescriptor<*, FdState.Open>,
+        ManagedSegment,
+        Long,
+    ) -> LinuxNative.SyscallResult<Long, *> = engine.memory::write,
+    private val connectionAcceptor: ((
+        FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>,
+    ) -> FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>)? = null,
 ) {
     private val connectionExecutor: ExecutorService = Executors.newFixedThreadPool(maxConnections) { r ->
         Thread(r).apply {
@@ -103,7 +113,7 @@ public class SeccompDaemonEngine(
                 pollFd.setEvents(NativeConstants.POLLIN)
 
                 while (!isGlobalShutdown()) {
-                    val pollRes = engine.raw.poll(pollFd.managed, 1L, POLL_TIMEOUT_MS)
+                    val pollRes = raw.poll(pollFd.managed, 1L, POLL_TIMEOUT_MS)
                     val count = pollRes.recover { errno, _ ->
                         if (errno != NativeConstants.EINTR) return@use
                         0L
@@ -154,34 +164,28 @@ public class SeccompDaemonEngine(
         var clientFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>? = null
         try {
             while (true) {
-                val res = engine.networking.accept4(
-                    serverFd,
-                    ManagedSegment.NULL,
-                    ManagedSegment.NULL,
-                    NativeConstants.SOCK_CLOEXEC
-                )
-                val clientFdVal = res.recover { errno, _ ->
-                    if (errno == NativeConstants.EINTR) return@recover -1L
-                    -2L
-                }
-
-                if (clientFdVal == -1L) {
-                    continue
-                }
-
-                clientFd = if (clientFdVal > 0L) {
-                    FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(clientFdVal.toInt())
+                if (connectionAcceptor != null) {
+                    clientFd = connectionAcceptor.invoke(serverFd)
                 } else {
-                    try {
+                    val res = engine.networking.accept4(
+                        serverFd,
+                        ManagedSegment.NULL,
+                        ManagedSegment.NULL,
+                        NativeConstants.SOCK_CLOEXEC,
+                    )
+                    val clientFdVal = res.recover { errno, _ ->
+                        if (errno == NativeConstants.EINTR) return@recover -1L
+                        -2L
+                    }
+
+                    if (clientFdVal == -1L) {
+                        continue
+                    }
+
+                    clientFd = if (clientFdVal >= 0L) {
+                        FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(clientFdVal.toInt())
+                    } else {
                         socketManager.accept(serverFd)
-                    } catch (e: InterruptedException) {
-                        Thread.currentThread().interrupt()
-                        return
-                    } catch (e: java.nio.channels.ClosedByInterruptException) {
-                        Thread.currentThread().interrupt()
-                        return
-                    } catch (_: Exception) {
-                        return
                     }
                 }
 
@@ -264,7 +268,7 @@ public class SeccompDaemonEngine(
         pollFdManaged: ManagedSegment
     ): SeccompConnection? {
         if (connection is SeccompConnection.Accepted) {
-            val pollRes = engine.raw.poll(pollFdManaged, 1L, POLL_TIMEOUT_MS)
+            val pollRes = raw.poll(pollFdManaged, 1L, POLL_TIMEOUT_MS)
             val count = pollRes.recover { errno, _ ->
                 if (errno == NativeConstants.EINTR) 0L else -1L
             }
@@ -290,7 +294,7 @@ public class SeccompDaemonEngine(
                 ackBuf.writeByte(0L, handshakeAckByte)
                 var result: SeccompConnection? = null
                 while (true) {
-                    val res = engine.memory.write(socketFd, ackBuf, ACK_BUF_SIZE)
+                    val res = handshakeWriter(socketFd, ackBuf, ACK_BUF_SIZE)
                     if (res is LinuxNative.SyscallResult.Success) {
                         result = current.handshakeComplete().also { it.socketManager = socketManager }
                         break
@@ -338,7 +342,7 @@ public class SeccompDaemonEngine(
                     pfd2.setEvents(NativeConstants.POLLIN)
 
                     while (!isGlobalShutdown()) {
-                        val pollRes = engine.raw.poll(pollFds, 2L, POLL_TIMEOUT_MS)
+                        val pollRes = raw.poll(pollFds, 2L, POLL_TIMEOUT_MS)
                         val count = pollRes.recover { errno, _ ->
                             if (errno != NativeConstants.EINTR) return@use
                             0L
