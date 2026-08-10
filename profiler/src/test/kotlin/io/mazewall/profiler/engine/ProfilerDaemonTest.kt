@@ -51,6 +51,10 @@ class ProfilerDaemonTest {
         var nextPollResult: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success(1L)
         var nextReadResult: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success(1L)
         var ackByte: Byte = PROTOCOL_ACK_BYTE
+        var handshakeWrites: Int = 0
+        var rawPolls: Int = 0
+        var nextWriteResult: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
+            LinuxNative.SyscallResult.Success(1L)
 
         context(arena: Arena)
         override fun sendTraceEvent(socketFd: FileDescriptor<*, FdState.Open>, event: SyscallEvent<SyscallEventState.Resolved>) {
@@ -73,7 +77,10 @@ class ProfilerDaemonTest {
             }
         }
 
-        override fun write(fd: FileDescriptor<*, FdState.Open>, buf: MemorySegment, count: Long): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success(count)
+        override fun write(fd: FileDescriptor<*, FdState.Open>, buf: MemorySegment, count: Long): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+            handshakeWrites++
+            return nextWriteResult
+        }
 
         override fun recv(sockfd: FileDescriptor<*, FdState.Open>, buf: MemorySegment, len: Long, flags: Int): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success(len)
 
@@ -96,6 +103,7 @@ class ProfilerDaemonTest {
 
         override val raw = object : io.mazewall.RawSyscallOperations {
             override fun poll(fds: ManagedSegment, nfds: Long, timeout: Int): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                rawPolls++
                 System.err.println("[MOCK] poll nfds=$nfds nextPollResult=$nextPollResult")
                 if (nextPollResult is LinuxNative.SyscallResult.Success && (nextPollResult as LinuxNative.SyscallResult.Success).value == 0L) {
                     Thread.sleep(10)
@@ -142,6 +150,18 @@ class ProfilerDaemonTest {
         override fun readStringFromProcess(tid: Tid, remoteAddr: Long, maxLen: Int): String? = "/tmp/test.txt"
         context(arena: io.mazewall.ffi.memory.NativeArena)
         override fun resolveLink(tid: Tid, link: String): String? = "/proc/1/cwd"
+    }
+
+    @Test
+    fun `test daemon handshake uses injected transport write`() {
+        val transport = MockTransport()
+        transport.nextWriteResult = LinuxNative.SyscallResult.Error(5, -1L)
+        val engine = ProfilerDaemonEngine("/tmp/test.sock", transport, MockReader())
+
+        engine.handleConnection(FileDescriptor.unsafe(10))
+
+        assertEquals(1, transport.handshakeWrites)
+        assertTrue(transport.rawPolls > 0)
     }
 
     @Test
