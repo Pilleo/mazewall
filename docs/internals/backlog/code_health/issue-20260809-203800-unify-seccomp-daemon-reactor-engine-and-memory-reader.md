@@ -1,7 +1,7 @@
 ---
 title: "Unify Seccomp Daemon Reactor Engine and Tracee Memory Reader in :platform"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: 8
 dependencies: []
 component: "enforcer"

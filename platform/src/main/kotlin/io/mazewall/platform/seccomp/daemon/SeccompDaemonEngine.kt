@@ -366,9 +366,7 @@ public class SeccompDaemonEngine(
                     }
                 }
             } finally {
-                if (activeListeners.remove(listenerFd)) {
-                    socketManager.close(listenerFd)
-                }
+                // connection.close() in handleConnection's finally block will handle listenerFd closure.
             }
         }
     }
