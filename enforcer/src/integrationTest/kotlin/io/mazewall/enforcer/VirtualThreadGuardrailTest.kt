@@ -1,8 +1,6 @@
 package io.mazewall.enforcer
-
 import io.mazewall.BaseIntegrationTest
 import io.mazewall.Policy
-import io.mazewall.enforcer.api.ContainedExecutors
 import org.junit.jupiter.api.Test
 import java.util.concurrent.ExecutionException
 import java.util.concurrent.Executors

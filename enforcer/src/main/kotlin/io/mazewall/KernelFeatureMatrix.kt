@@ -1,11 +1,5 @@
 package io.mazewall
 
-import io.mazewall.enforcer.api.*
-import io.mazewall.enforcer.state.*
-import io.mazewall.enforcer.diagnostics.*
-import io.mazewall.enforcer.engine.*
-import io.mazewall.enforcer.*
-
 /**
  * Immutable matrix of supported Linux kernel features.
  *

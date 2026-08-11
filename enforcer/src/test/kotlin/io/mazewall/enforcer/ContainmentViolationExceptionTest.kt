@@ -3,7 +3,6 @@ package io.mazewall.enforcer
 import org.junit.jupiter.api.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertSame
-import io.mazewall.enforcer.api.ContainmentViolationException
 
 class ContainmentViolationExceptionTest {
     @Test

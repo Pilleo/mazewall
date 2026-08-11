@@ -1,10 +1,4 @@
 package io.mazewall
-import io.mazewall.enforcer.api.ContainedExecutors
-
-import io.mazewall.enforcer.api.*
-import io.mazewall.enforcer.state.*
-import io.mazewall.enforcer.diagnostics.*
-import io.mazewall.enforcer.engine.*
 
 import io.mazewall.core.Arch
 import io.mazewall.core.SandboxedPath
@@ -287,5 +281,5 @@ public operator fun <S : PolicyScope> Policy<S, Uncompiled>.plus(
  * Installs this policy on the current thread.
  */
 public fun <S : PolicyScope> Policy<S, Uncompiled>.install(): AutoCloseable {
-    return io.mazewall.enforcer.api.ContainedExecutors.installOnCurrentThread(this.definition)
+    return io.mazewall.enforcer.ContainedExecutors.installOnCurrentThread(this.definition)
 }

@@ -6,8 +6,8 @@ import io.mazewall.LinuxNative
 import io.mazewall.Policy
 import io.mazewall.core.NativeArg
 import io.mazewall.core.PrctlCommand
-import io.mazewall.enforcer.api.ContainedExecutors
-import io.mazewall.enforcer.api.ContainmentViolationException
+import io.mazewall.enforcer.ContainedExecutors
+import io.mazewall.enforcer.ContainmentViolationException
 import io.mazewall.ffi.memory.nativeScope
 import io.mazewall.ffi.memory.readString
 import org.junit.jupiter.api.Test

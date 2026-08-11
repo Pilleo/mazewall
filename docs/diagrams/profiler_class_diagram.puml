@@ -58,6 +58,8 @@ abstract class "HandshakeSession" as io.mazewall.profiler.engine.HandshakeSessio
   + {abstract}long getNotifId()
   + {abstract}FileDescriptor<SeccompNotif, Open> getListenerFd()
 }
+abstract class "LoopAction" as io.mazewall.profiler.engine.LoopAction {
+}
 interface "NativeIoOperations" as io.mazewall.profiler.engine.NativeIoOperations {
   + {abstract}RawSyscallOperations getRaw()
   + {abstract}SyscallResult poll(MemorySegment, long, int)
@@ -65,7 +67,6 @@ interface "NativeIoOperations" as io.mazewall.profiler.engine.NativeIoOperations
   + {abstract}SyscallResult write(FileDescriptor<?, ? extends Open>, MemorySegment, long)
   + {abstract}SyscallResult recv(FileDescriptor<?, ? extends Open>, MemorySegment, long, int)
   + {abstract}SyscallResult ioctl(FileDescriptor<?, ? extends Open>, long, MemorySegment)
-  + {abstract}void close(FileDescriptor<?, ? extends Open>)
 }
 class "PathNormalizerHelper" as io.mazewall.profiler.engine.PathNormalizerHelper {
   + {static}PathNormalizerHelper INSTANCE
@@ -86,13 +87,11 @@ class "ProfilerDaemon" as io.mazewall.profiler.engine.ProfilerDaemon {
 }
 class "ProfilerDaemonEngine" as io.mazewall.profiler.engine.ProfilerDaemonEngine {
   + {static}Companion Companion
-  +CopyOnWriteArrayList<FileDescriptor<UnixSocket, Open>> clientSockets
   __
   +ProfilerDaemonState getState()
-  +void run(Function0<Unit>)
-  +void handleConnection(FileDescriptor<UnixSocket, ? extends Open>)
-  +void handleNewConnection(FileDescriptor<UnixSocket, ? extends Open>)
+  +void run()
   +void triggerGlobalShutdown(String)
+  +void handleConnection(FileDescriptor<UnixSocket, ? extends Open>)
 }
 interface "ProfilerDaemonState" as io.mazewall.profiler.engine.ProfilerDaemonState {
 }
@@ -110,10 +109,8 @@ class "ProfilerInstallerSession" as io.mazewall.profiler.engine.ProfilerInstalle
 interface "ProfilerInstallerState" as io.mazewall.profiler.engine.ProfilerInstallerState {
 }
 interface "ProfilerMemoryReader" as io.mazewall.profiler.engine.ProfilerMemoryReader {
-  +String readStringFromProcess(NativeArena, int, long, int)
-  +String readString(NativeArena, int, long, int, boolean)
-  +byte[] readBytes(NativeArena, int, long, int, boolean)
-  +String resolveLink(NativeArena, int, String)
+  + {abstract}String readStringFromProcess(NativeArena, int, long, int)
+  + {abstract}String resolveLink(NativeArena, int, String)
 }
 class "ProfilerSessionHandler" as io.mazewall.profiler.engine.ProfilerSessionHandler {
   + {static}Companion Companion
@@ -121,9 +118,12 @@ class "ProfilerSessionHandler" as io.mazewall.profiler.engine.ProfilerSessionHan
   +SessionEventLedger getLedger()
   +ManagedSegment getAckBuf()
   +ManagedSegment getSocketPollFd()
+  +ManagedSegment getNotif()
+  +ManagedSegment getResp()
   +ProfilerState getState()
   +void close()
-  +NotifResult processNotification(NativeArena, ManagedSegment, ManagedSegment, FileDescriptor<SeccompNotif, ? extends Open>, FileDescriptor<UnixSocket, ? extends Open>)
+  +LoopAction handleActiveListener(NativeArena, ManagedSegment)
+  +boolean processNotification(NativeArena)
 }
 interface "ProfilerState" as io.mazewall.profiler.engine.ProfilerState {
   + {abstract}FileDescriptor<UnixSocket, Open> getSocketFd()
@@ -140,8 +140,6 @@ class "RealMemoryReader" as io.mazewall.profiler.engine.RealMemoryReader {
   + {static}RealMemoryReader INSTANCE
   __
   +String readStringFromProcess(NativeArena, int, long, int)
-  +String readString(NativeArena, int, long, int, boolean)
-  +byte[] readBytes(NativeArena, int, long, int, boolean)
   +String resolveLink(NativeArena, int, String)
 }
 class "RealProfilerInstaller" as io.mazewall.profiler.engine.RealProfilerInstaller {
@@ -318,6 +316,7 @@ io.mazewall.profiler.engine.ProfilerDaemon --> io.mazewall.profiler.engine.Daemo
 io.mazewall.profiler.engine.ProfilerDaemon --> io.mazewall.profiler.engine.ProfilerDaemon
 io.mazewall.profiler.engine.ProfilerDaemonEngine --> io.mazewall.profiler.engine.ProfilerTransport
 io.mazewall.profiler.engine.ProfilerDaemonEngine --> io.mazewall.profiler.engine.SeccompResponder
+io.mazewall.profiler.engine.ProfilerDaemonEngine --> io.mazewall.profiler.engine.ProfilerDaemonState
 io.mazewall.profiler.engine.ProfilerDaemonEngine --> io.mazewall.profiler.engine.TraceEventPublisher
 io.mazewall.profiler.engine.ProfilerDaemonEngine --> io.mazewall.profiler.engine.NativeIoOperations
 io.mazewall.profiler.engine.ProfilerDaemonEngine --> io.mazewall.profiler.engine.ProfilerMemoryReader

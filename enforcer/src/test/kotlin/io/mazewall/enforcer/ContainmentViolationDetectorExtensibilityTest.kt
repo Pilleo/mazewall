@@ -7,9 +7,6 @@ import java.io.IOException
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 import kotlin.test.assertEquals
-import io.mazewall.enforcer.diagnostics.ContainmentViolationDetector
-import io.mazewall.enforcer.diagnostics.ViolationMatcher
-import io.mazewall.enforcer.api.ContainmentViolationException
 
 class ContainmentViolationDetectorExtensibilityTest {
 

@@ -2,8 +2,6 @@ package io.mazewall.enforcer
 
 import io.mazewall.Platform
 import org.junit.jupiter.api.Assertions.assertThrows
-import io.mazewall.enforcer.diagnostics.validateLinuxAndNotVirtual
-import io.mazewall.enforcer.diagnostics.validateNotVirtual
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.Assumptions.assumeTrue
 import java.util.concurrent.Executors

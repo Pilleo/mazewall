@@ -121,17 +121,17 @@ Standard Java security is completely reactive: it relies on dynamic observation 
 
 In practice, GraalVM *approximates* a closed world: at compile time, it performs a whole-program points-to analysis[^graalvm_static] that must account for all dynamic features, which the developer explicitly registers via **Reachability Metadata**[^graalvm_metadata] (`reflect-config.json`, `proxy-config.json`, `jni-config.json`). Unregistered reflection fails at runtime; registered dynamic features are tracked in the call graph. The closed-world assumption applies to *unregistered* code paths — those are provably absent from the binary.
 
-This approximation allows the native image builder to construct a call graph over the entry points and dynamic features it has been configured to retain. Code outside that model is removed by Dead Code Elimination (DCE); an omitted reflection, JNI, resource, serialization, service-provider, or FFM edge is a modeling error, not a proof that the behavior cannot matter.
+This approximation allows the static native image builder to construct a **provably complete call graph** over the explicitly registered surface of the application. Unreachable code paths are physically removed from the binary via Dead Code Elimination (DCE).
 
 ### Dead Code Elimination as a Pruning Mechanism
 
 In a hypothetical future tooling pipeline, GraalVM’s closed-world compilation solves the "Merge Fallacy" mechanically rather than dynamically:
 
-1. **Statically Modeled Call Graphs:** Static analysis tools can trace library call sites reachable from the configured image entry points and metadata.
-2. **Deterministic Pruning Within the Model:** If only a DynamoDB client is reachable under that model, unrelated SDK implementations may be removed. The conclusion must be re-evaluated when metadata, native code, or dynamic features change.
-3. **Code-Surface Reduction:** Removed implementations cannot be invoked as ordinary managed code from that image. This does not mechanically remove a syscall permission: another retained path, native dependency, or attacker-controlled code-reuse sequence may still exercise the same kernel capability.
+1. **Statically Traced Call-Graphs:** Since the compiler constructs a complete, explicit call graph, static analysis tools can trace exactly which library call sites are reachable from the application entry point.
+2. **Deterministic Pruning:** If your application depends on a large library (like the AWS SDK) but only initializes a DynamoDB client, the compiler's AOT analysis statically proves that the Kinesis and S3 clients are unreachable. 
+3. **Physical Capability Dropping:** The S3 code paths—and their associated syscall behaviors— are permanently deleted from the final binary. The associated capabilities (e.g. TCP connect permissions to S3 buckets) are mechanically dropped from the SBoB without requiring dynamic observation.
 
-Native Image makes the retained managed-code surface more tractable to static analysis. It does not by itself bound the application's syscall set; that also depends on native libraries, runtime substitutions, host interactions, kernel interfaces, and the accuracy of the image configuration.
+By eliminating reflection and dynamic class loading, GraalVM provides the only current mechanism to **statically bound the upper limit** of what a Java application can do at the system call level.
 
 ### Leveraging Reachability Metadata
 
@@ -170,7 +170,7 @@ To function, a standard JVM (or any JIT runtime like Node.js V8 or PyPy) **must*
 
 This is a structural security flaw. If an attacker achieves Arbitrary Code Execution (ACE) via a buffer overflow in a native JNI library, they can use the exact same syscalls the JIT compiler uses to allocate executable memory, inject malicious C shellcode, and run it. **You cannot block `mprotect(PROT_EXEC)` process-wide (Tier 1) in Seccomp on a JIT JVM**, because the JVM's JIT compiler threads require dynamic compilation permissions (though thread-scoped Tier 2 sandboxing can block it on worker threads, as explained in Part 3).
 
-**AOT compilation can remove the application's JIT requirement.** If the selected Native Image runtime and all native dependencies require no later executable mappings, a Seccomp policy can deny new `PROT_EXEC` mappings or transitions. That blocks a common shellcode-injection route, but existing executable code and code-reuse attacks remain available after native compromise; W^X is hardening, not an RCE boundary.
+**AOT compilation eliminates this attack surface.** Because a GraalVM Native Image is AOT-compiled, it never needs to generate new machine code at runtime. You can apply an ultra-strict Seccomp policy that permanently enforces **W^X (Write XOR Execute)** at the OS level by blocking `PROT_EXEC`. Even if an attacker compromises the process, the Linux kernel will physically prevent them from injecting and running new shellcode. The statically compiled nature of AOT makes the behavioral bounds tight and enforceable.
 
 ### Control Flow Integrity
 
@@ -221,3 +221,4 @@ In Part 6 — the final part of this series — we address the two fatal structu
 [^graalvm_metadata]: GraalVM Reachability Metadata repository. https://github.com/oracle/graalvm-reachability-metadata
 [^jqf]: JQF: Coverage-Guided Property-Based Testing for Java. https://github.com/rohanpadhye/JQF
 [^evomaster]: EvoMaster: AI-driven REST API fuzz testing tool. https://github.com/EMResearch/EvoMaster
+

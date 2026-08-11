@@ -1,6 +1,6 @@
 package demo
 
-import io.mazewall.enforcer.api.ContainmentViolationException
+import io.mazewall.enforcer.ContainmentViolationException
 import org.junit.jupiter.api.Test
 import java.io.File
 import kotlin.test.assertFailsWith

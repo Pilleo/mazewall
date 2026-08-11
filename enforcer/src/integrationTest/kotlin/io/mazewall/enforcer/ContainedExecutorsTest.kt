@@ -14,9 +14,6 @@ import java.util.concurrent.TimeUnit
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
-import io.mazewall.enforcer.api.ContainedExecutors
-import io.mazewall.enforcer.api.ContainmentViolationException
-import io.mazewall.enforcer.diagnostics.ContainmentViolationDetector
 
 class ContainedExecutorsTest : BaseIntegrationTest() {
     fun testContainmentWrapperBlocksExecve() {
@@ -179,7 +176,7 @@ class ContainedExecutorsTest : BaseIntegrationTest() {
 
         val executor = Executors.newSingleThreadExecutor()
         val safeExecutor = ContainedExecutors.wrap(executor, Policy.NO_EXEC)
-        val future = safeExecutor.submit(java.util.concurrent.Callable { "success" })
+        val future = safeExecutor.submit { "success" }
         assertEquals("success", future.get())
         executor.shutdown()
     }
@@ -212,7 +209,7 @@ class ContainedExecutorsTest : BaseIntegrationTest() {
             )
             val results = safeExecutor.invokeAll(tasks, 5, TimeUnit.SECONDS)
             assertEquals(2, results.size)
-            assertEquals<String>("task1", results[0].get())
+            assertEquals("task1", results[0].get())
 
             val any = safeExecutor.invokeAny(tasks, 5, TimeUnit.SECONDS)
             assertTrue(any == "task1" || any == "task2")

@@ -2,9 +2,6 @@ package io.mazewall.enforcer
 
 import io.mazewall.BaseIntegrationTest
 import io.mazewall.IsolatedProcessTester
-import io.mazewall.enforcer.api.ContainedExecutors
-import io.mazewall.enforcer.state.ContainmentStateRegistry
-import io.mazewall.enforcer.state.ContainerState
 import io.mazewall.Policy
 import io.mazewall.core.Syscall
 import org.junit.jupiter.api.Test
@@ -25,14 +22,14 @@ class ShutdownRaceConditionTest : BaseIntegrationTest() {
 
         executor.execute {
             try {
-                ContainmentStateRegistry.threadState = ContainerState()
+                ThreadStateRegistry.state = ContainerState()
                 ContainedExecutors.installOnCurrentThread(policy)
             } catch (e: Exception) {
                 // Expected to be interrupted
             } catch (t: Throwable) {
                 error.set(t)
             } finally {
-                filterDepthAfterInterruption.set(ContainmentStateRegistry.threadState.filterDepth)
+                filterDepthAfterInterruption.set(ThreadStateRegistry.state.filterDepth)
             }
         }
 

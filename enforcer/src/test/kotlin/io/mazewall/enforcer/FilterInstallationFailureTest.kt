@@ -6,9 +6,6 @@ import io.mazewall.PlatformProvider
 import io.mazewall.RealPlatformProvider
 import io.mazewall.LinuxNative
 import io.mazewall.MockNativeEngine
-import io.mazewall.enforcer.api.ContainedExecutors
-import io.mazewall.enforcer.state.ContainmentStateRegistry
-import io.mazewall.enforcer.state.ContainerState
 import io.mazewall.core.SeccompAction
 import io.mazewall.core.Syscall
 import org.junit.jupiter.api.AfterEach
@@ -24,7 +21,7 @@ class FilterInstallationFailureTest {
     fun tearDown() {
         LinuxNative.resetToDefault()
         Platform.resetToDefault()
-        ContainmentStateRegistry.threadState = ContainerState()
+        ThreadStateRegistry.state = ContainerState()
     }
 
     @Test
@@ -56,14 +53,14 @@ class FilterInstallationFailureTest {
 
         // Initial state
         val initialState = ContainerState()
-        ContainmentStateRegistry.threadState = initialState
+        ThreadStateRegistry.state = initialState
 
         assertFailsWith<IllegalStateException> {
             ContainedExecutors.installOnCurrentThread(policy)
         }
 
         // VERIFY: state WAS reverted
-        assertEquals(initialState, ContainmentStateRegistry.threadState)
-        assertNull(ContainmentStateRegistry.threadState.landlockPolicy)
+        assertEquals(initialState, ThreadStateRegistry.state)
+        assertNull(ThreadStateRegistry.state.landlockPolicy)
     }
 }

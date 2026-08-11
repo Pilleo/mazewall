@@ -10,8 +10,8 @@ import io.mazewall.ffi.internal.RealNativeEngine
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
 import io.mazewall.core.Syscall
-import io.mazewall.enforcer.api.ContainedExecutors
-import io.mazewall.enforcer.api.ContainmentViolationException
+import io.mazewall.enforcer.ContainedExecutors
+import io.mazewall.enforcer.ContainmentViolationException
 import org.junit.jupiter.api.Test
 import java.nio.file.AccessDeniedException
 import java.nio.file.Files

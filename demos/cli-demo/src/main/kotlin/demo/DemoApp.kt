@@ -1,6 +1,6 @@
 package demo
 
-import io.mazewall.enforcer.api.ContainmentViolationException
+import io.mazewall.enforcer.ContainmentViolationException
 import java.io.File
 import kotlin.system.exitProcess
 

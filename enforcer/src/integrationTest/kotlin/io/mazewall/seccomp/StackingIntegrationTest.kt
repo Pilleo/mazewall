@@ -4,7 +4,7 @@ import io.mazewall.EnabledIfLinuxAndSupported
 import io.mazewall.IsolatedProcessTester
 import io.mazewall.Policy
 import io.mazewall.core.Syscall
-import io.mazewall.enforcer.api.ContainedExecutors
+import io.mazewall.enforcer.ContainedExecutors
 import org.junit.jupiter.api.Test
 
 class StackingIntegrationTest : BaseIntegrationTest() {

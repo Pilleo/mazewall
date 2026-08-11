@@ -3,8 +3,6 @@ package io.mazewall.enforcer
 import io.mazewall.Policy
 import io.mazewall.core.SeccompAction
 import io.mazewall.core.Syscall
-import io.mazewall.enforcer.state.ContainerState
-import io.mazewall.enforcer.engine.FilterInstallationPlanner
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue

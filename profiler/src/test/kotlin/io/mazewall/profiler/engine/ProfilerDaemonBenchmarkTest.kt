@@ -12,7 +12,6 @@ import io.mazewall.ffi.memory.ManagedSegment
 import io.mazewall.ffi.memory.NativeArena
 import io.mazewall.ffi.memory.writeInt
 import io.mazewall.ffi.memory.writeLong
-import io.mazewall.ffi.memory.SegmentPool
 import java.lang.foreign.Arena
 import java.lang.foreign.MemorySegment
 import java.lang.foreign.ValueLayout
@@ -25,6 +24,10 @@ class ProfilerDaemonBenchmarkTest {
 
     private companion object {
         private const val PROTOCOL_ACK_BYTE = 0xAC.toByte()
+        private const val NOTIF_ID_OFF = 0L
+        private const val NOTIF_PID_OFF = 8L
+        private const val NOTIF_NR_OFF = 12L
+        private const val NOTIF_ARGS_OFF = 16L
     }
 
     private class BenchmarkTransport : ProfilerTransport, SeccompResponder, TraceEventPublisher, NativeIoOperations, SocketLifecycleManager {
@@ -88,36 +91,29 @@ class ProfilerDaemonBenchmarkTest {
 
         val startTime = System.currentTimeMillis()
 
-        val socketFd = FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(10)
-        val listenerFd = FileDescriptor.unsafe<FileDescriptorRole.SeccompNotif>(20)
         ProfilerSessionHandler(
-            socketFd,
-            listenerFd,
+            FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(10),
+            FileDescriptor.unsafe<FileDescriptorRole.SeccompNotif>(20),
             transport,
             transport,
             transport,
             reader,
             syscallMap,
         ) { }.use { handler ->
-            val notif = SegmentPool.SECCOMP_NOTIF_POOL.rent()
-            val resp = SegmentPool.SECCOMP_NOTIF_RESP_POOL.rent()
-            try {
-                notif.writeLong(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_ID_OFFSET, 123L)
-                notif.writeInt(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_PID_OFFSET, 456)
-                notif.writeInt(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_NR_OFFSET, 2)
-                notif.writeLong(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_ARGS_OFFSET, 0x1000L)
+            // Pre-warm / pre-allocate notif data
+            val notif = handler.notif
+            notif.writeLong(NOTIF_ID_OFF, 123L)
+            notif.writeInt(NOTIF_PID_OFF, 456)
+            notif.writeInt(NOTIF_NR_OFF, 2)
+            notif.writeLong(NOTIF_ARGS_OFF, 0x1000L)
 
-                val iterations = 100000
-                for (i in 0 until iterations) {
-                    NativeArena.ofConfined().use { iterationArena ->
-                        with(iterationArena) {
-                            handler.processNotification(notif, resp, listenerFd, socketFd)
-                        }
+            val iterations = 100000
+            for (i in 0 until iterations) {
+                NativeArena.ofConfined().use { iterationArena ->
+                    with(iterationArena) {
+                        handler.processNotification()
                     }
                 }
-            } finally {
-                SegmentPool.SECCOMP_NOTIF_POOL.release(notif)
-                SegmentPool.SECCOMP_NOTIF_RESP_POOL.release(resp)
             }
         }
 

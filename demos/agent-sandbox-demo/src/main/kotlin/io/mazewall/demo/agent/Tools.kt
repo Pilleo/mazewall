@@ -3,7 +3,7 @@ package io.mazewall.demo.agent
 import dev.langchain4j.agent.tool.Tool
 import io.mazewall.Policy
 import io.mazewall.core.Syscall
-import io.mazewall.enforcer.api.ContainedExecutors
+import io.mazewall.enforcer.ContainedExecutors
 import io.mazewall.enforcer.supervisor.StacktraceScopingPolicy
 import io.mazewall.enforcer.supervisor.ScopingHandler
 import io.mazewall.core.Tid

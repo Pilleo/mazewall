@@ -28,23 +28,19 @@ class ProcessSpawnStacktraceTest {
         val execveCalled = java.util.concurrent.atomic.AtomicBoolean(false)
         val stackTraceCaptured = java.util.concurrent.atomic.AtomicReference<List<StackTraceElement>>()
 
-        val handler: (Tid, List<Any>, List<StackTraceElement>) -> Boolean = { _: Tid, _: List<Any>, stack: List<StackTraceElement> ->
-            System.err.println("DEBUG: EXECVE/EXECVEAT handler called with stack size: ${stack.size}")
-            stackTraceCaptured.set(stack)
-            execveCalled.set(true)
-            true
-        }
-
         val scopingPolicy = object : StacktraceScopingPolicy {
             override val handlers = mapOf(
-                Syscall.EXECVE to handler,
-                Syscall.EXECVEAT to handler
+                Syscall.EXECVE to { tid: Tid, args: List<Any>, stack: List<StackTraceElement> ->
+                    System.err.println("DEBUG: EXECVE handler called with stack size: ${stack.size}")
+                    stackTraceCaptured.set(stack)
+                    execveCalled.set(true)
+                    true
+                }
             )
         }
 
         val policy = Policy.builder()
             .addAction(SeccompAction.ACT_NOTIFY, Syscall.EXECVE)
-            .addAction(SeccompAction.ACT_NOTIFY, Syscall.EXECVEAT)
             .allowMmapExec()
             .build()
 

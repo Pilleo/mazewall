@@ -6,7 +6,7 @@ import io.mazewall.EnabledIfCetSupported
 import io.mazewall.Platform
 import io.mazewall.Policy
 import io.mazewall.install
-import io.mazewall.enforcer.api.ContainedExecutors
+import io.mazewall.enforcer.ContainedExecutors
 import org.junit.jupiter.api.Test
 import java.util.concurrent.Executors
 import kotlin.test.assertTrue

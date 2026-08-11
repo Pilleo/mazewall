@@ -11,7 +11,6 @@ import java.lang.foreign.Arena
 import java.lang.foreign.MemorySegment
 import java.lang.foreign.ValueLayout
 import java.nio.charset.StandardCharsets
-import io.mazewall.enforcer.api.ContainmentViolationException
 
 class MemoryReaderTest {
 
@@ -70,7 +69,7 @@ class MemoryReaderTest {
         try {
             io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
                 val reader = RealMemoryReader
-                org.junit.jupiter.api.assertThrows<ContainmentViolationException> {
+                org.junit.jupiter.api.assertThrows<io.mazewall.enforcer.ContainmentViolationException> {
                     with(arena) { reader.readStringFromProcess(tid, remoteAddr, mockData.size) }
                 }
             }

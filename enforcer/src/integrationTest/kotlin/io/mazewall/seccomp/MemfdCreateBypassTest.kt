@@ -7,7 +7,7 @@ import io.mazewall.Policy
 import io.mazewall.core.Arch
 import io.mazewall.core.NativeArg
 import io.mazewall.core.Syscall
-import io.mazewall.enforcer.api.ContainedExecutors
+import io.mazewall.enforcer.ContainedExecutors
 import io.mazewall.ffi.NativeConstants
 import io.mazewall.ffi.memory.nativeScope
 import org.junit.jupiter.api.Test
