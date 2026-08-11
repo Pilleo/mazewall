@@ -1514,8 +1514,15 @@ data class CreateGenerationState(
 
         env.println("🚀 Starting new generation for task $issueId (Gen ${slot.generation + 1})...")
 
-        // 1. Mark current PR as superseded
-        env.gitHubClient.labelPr(prNumber, "superseded")
+        // 1. Mark current PR as superseded. Repositories do not necessarily pre-provision this label.
+        try {
+            env.gitHubClient.ensureLabelExists("superseded")
+            env.gitHubClient.labelPr(prNumber, "superseded")
+        } catch (e: Exception) {
+            env.errPrintln("❌ Failed to mark PR #$prNumber as superseded: ${e.message}")
+            slot.retryAfterTime = currentTime + TimeUnit.SECONDS.toMillis(env.config.pollingIntervalSeconds)
+            return this
+        }
 
         // 2. Extract info
         val prUrl = env.gitHubClient.getPrUrl(prNumber)

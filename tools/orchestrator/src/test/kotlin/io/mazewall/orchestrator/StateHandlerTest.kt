@@ -33,6 +33,7 @@ class MockOrchestratorEnvironment : OrchestratorEnvironment {
     var isCommitEmptyResult = false
     var prMergeStatus = PrMergeStatus("MERGEABLE", 0)
     var clearPrCacheCount = 0
+    val ensuredLabels = mutableListOf<String>()
 
     override fun println(message: Any?) { printlns.add(message.toString()) }
     override fun print(message: Any?) {}
@@ -58,6 +59,7 @@ class MockOrchestratorEnvironment : OrchestratorEnvironment {
         override fun createIssue(title: String, body: String, label: String): String = createdIssueNumber
         override fun getRepoName(): String = "mock/repo"
         override fun addLabel(issueNumber: String, label: String) {}
+        override fun ensureLabelExists(label: String) { ensuredLabels.add(label) }
         override fun labelPr(prNumber: String, label: String) {}
         override fun isIssueClosed(issueNumber: String): Boolean = issueClosed
         override fun isPrClosed(prNumber: String): Boolean = prClosed
@@ -531,6 +533,27 @@ class StateHandlerTest {
 
         assertTrue(nextState is SelectTaskState)
         assertTrue(env.resolvedIssues.contains(issue))
+    }
+
+    @Test
+    fun testCreateGenerationEnsuresSupersededLabelBeforeUse() {
+        val env = MockOrchestratorEnvironment()
+        val issueFile = kotlin.io.path.createTempFile().toFile().apply { writeText("Task") }
+        env.issues.add(BacklogIssue(issueFile, "issue-1", "Title", 1, "open", emptyList()))
+        val context = OrchestratorContext().apply {
+            currentIssueId = "issue-1"
+            githubIssueNumber = "123"
+            julesSessionId = "s1"
+            prNumber = "42"
+        }
+
+        try {
+            CreateGenerationState("issue-1", "123", "s1", "42").execute(env, context)
+
+            assertEquals(listOf("superseded"), env.ensuredLabels)
+        } finally {
+            issueFile.delete()
+        }
     }
 
     @Test

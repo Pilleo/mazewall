@@ -35,6 +35,7 @@ interface GitHubClient {
     fun createIssue(title: String, body: String, label: String): String
     fun getRepoName(): String
     fun addLabel(issueNumber: String, label: String)
+    fun ensureLabelExists(label: String)
     fun labelPr(prNumber: String, label: String)
     fun commentOnPr(prNumber: String, body: String)
     fun commentOnIssue(issueNumber: String, body: String)

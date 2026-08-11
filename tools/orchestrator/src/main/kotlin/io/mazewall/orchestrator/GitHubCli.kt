@@ -413,6 +413,20 @@ class RealGitHubClient(private val config: OrchestratorConfig) : GitHubClient {
         execute("gh", "issue", "edit", issueNumber, "--add-label", label)
     }
 
+    override fun ensureLabelExists(label: String) {
+        execute(
+            "gh",
+            "label",
+            "create",
+            label,
+            "--force",
+            "--color",
+            "6f42c1",
+            "--description",
+            "Pull request replaced by a newer generation"
+        )
+    }
+
     override fun labelPr(prNumber: String, label: String) {
         execute("gh", "pr", "edit", prNumber, "--add-label", label)
     }
