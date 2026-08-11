@@ -119,7 +119,7 @@ pitest {
             "io.mazewall.Policy*",
             "io.mazewall.BpfFilter*",
             "io.mazewall.SbobParser*",
-            "io.mazewall.enforcer.FilterInstallationPlanner*",
+            "io.mazewall.enforcer.engine.FilterInstallationPlanner*",
             "io.mazewall.enforcer.PolicyCombining*",
         ),
     )
