@@ -306,23 +306,23 @@ public class SeccompDaemonEngine(
 
             is SeccompConnection.Active -> {
                 System.err.println("[SECCOMP-DAEMON] Starting session reactor for listener ${current.listenerFd.value}")
-                handleSession(current.socketFd, current.listenerFd)
+                handleSession(current)
                 System.err.println("[SECCOMP-DAEMON] Session reactor finished. Closing connection.")
                 null
             }
         }
     }
 
-    private fun handleSession(
-        socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>,
-        listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open>
-    ) {
+    private fun handleSession(connection: SeccompConnection.Active) {
+        val socketFd = connection.socketFd
+        val listenerFd = connection.listenerFd
         val notifHandler = notifHandlerFactory(socketFd, listenerFd)
         SeccompSessionHandler(
             socketFd = socketFd,
             listenerFd = listenerFd,
             notifHandler = notifHandler,
             onShutdown = this::triggerGlobalShutdown,
+            onSocketClosed = connection::markSocketClosed,
             engine = engine,
             socketManager = socketManager,
         ).use { sessionHandler ->
