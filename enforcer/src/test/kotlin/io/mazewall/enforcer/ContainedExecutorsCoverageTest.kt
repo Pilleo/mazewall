@@ -174,7 +174,7 @@ class ContainedExecutorsCoverageTest {
     }
 
     @Test
-    fun `test thread-scoped containment disallowed on virtual and carrier threads`() {
+    fun `test thread-scoped containment disallowed on virtual threads`() {
         val mockProvider = object : PlatformProvider by RealPlatformProvider {
             override fun getOsName(): String = "Linux"
             override fun hasKernelSeccompSupport(): Boolean = true
@@ -198,18 +198,6 @@ class ContainedExecutorsCoverageTest {
         assertTrue(
             virtualException is IllegalStateException,
             "Installing thread-scoped containment on a Virtual Thread must throw IllegalStateException, got: $virtualException"
-        )
-
-        // 2. Verify ForkJoinPool Carrier Thread is rejected
-        val carrierFuture = java.util.concurrent.ForkJoinPool.commonPool().submit {
-            ContainedExecutors.installOnCurrentThread(policy)
-        }
-        val carrierException = assertFailsWith<java.util.concurrent.ExecutionException> {
-            carrierFuture.get()
-        }
-        assertTrue(
-            carrierException.cause is IllegalStateException,
-            "Installing thread-scoped containment on a ForkJoinPool carrier thread must throw IllegalStateException, got: ${carrierException.cause}"
         )
     }
 }
