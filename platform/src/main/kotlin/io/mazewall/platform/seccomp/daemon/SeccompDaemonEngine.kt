@@ -169,7 +169,7 @@ public class SeccompDaemonEngine(
                     continue
                 }
 
-                clientFd = if (clientFdVal > 0L) {
+                clientFd = if (clientFdVal >= 0L) {
                     FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(clientFdVal.toInt())
                 } else {
                     try {

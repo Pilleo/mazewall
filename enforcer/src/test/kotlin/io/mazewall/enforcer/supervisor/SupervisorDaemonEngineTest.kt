@@ -104,6 +104,32 @@ class SupervisorDaemonEngineTest {
     }
 
     @Test
+    fun `handleNewConnection accepts file descriptor zero without falling back`() {
+        var fallbackAcceptCalls = 0
+        val mockEngine = MockNativeEngine()
+        mockEngine.networking.onAccept4 = { _, _, _, _ ->
+            LinuxNative.SyscallResult.Success(0L)
+        }
+        mockEngine.onPoll = { _, _, _ ->
+            LinuxNative.SyscallResult.Error(NativeConstants.EPERM, -1L)
+        }
+        val mockSocket = object : TestSocketManager(5) {
+            override fun accept(
+                serverFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>
+            ): FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open> {
+                fallbackAcceptCalls++
+                return FileDescriptor.unsafe(11)
+            }
+        }
+        val engine = SupervisorDaemonEngine("/tmp/test.sock", engine = mockEngine, socketManager = mockSocket)
+        val serverFd = FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(5)
+
+        engine.handleNewConnection(serverFd)
+
+        assertEquals(0, fallbackAcceptCalls, "accept4 file descriptor zero is a successful result")
+    }
+
+    @Test
     fun `handleNewConnection safely closes client socket if executor submit throws Error`() {
         var acceptCalls = 0
         val mockEngine = MockNativeEngine()
