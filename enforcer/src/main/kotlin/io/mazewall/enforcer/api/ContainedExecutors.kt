@@ -232,7 +232,7 @@ object ContainedExecutors {
                     return io.mazewall.InstallationReceipt(processWide, combinedPolicy, io.mazewall.enforcer.supervisor.SupervisorSession(tid))
                 }
             }
-            return io.mazewall.InstallationReceipt(processWide, combinedPolicy, session)
+            return io.mazewall.InstallationReceipt(processWide, combinedPolicy, null)
         }
     }
 
