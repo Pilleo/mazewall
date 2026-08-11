@@ -160,6 +160,7 @@ internal class ProfilerSessionHandler(
                     }
                     continueSent = true
                     ledger.record(SessionEvent.ContinueReplied(System.nanoTime(), pidVal.toLong(), 0L))
+                    result.deferredShutdownReason?.let(onShutdown)
                     NotifResult.HANDLED
                 }
                 is HandshakeSession.Failed -> {
