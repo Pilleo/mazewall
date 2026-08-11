@@ -5,7 +5,7 @@ import io.mazewall.Policy
 import io.mazewall.PolicyScope
 import io.mazewall.SbobParser
 import io.mazewall.Uncompiled
-import io.mazewall.enforcer.ContainedExecutors
+import io.mazewall.enforcer.api.ContainedExecutors
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration

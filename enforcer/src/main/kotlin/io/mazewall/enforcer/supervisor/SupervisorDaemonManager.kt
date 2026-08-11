@@ -1,5 +1,11 @@
 package io.mazewall.enforcer.supervisor
 
+import io.mazewall.enforcer.api.*
+import io.mazewall.enforcer.state.*
+import io.mazewall.enforcer.diagnostics.*
+import io.mazewall.enforcer.engine.*
+import io.mazewall.enforcer.*
+
 import io.mazewall.LinuxNative
 import io.mazewall.NativeEngine
 import io.mazewall.core.ProcessLauncher
@@ -240,7 +246,11 @@ public class SupervisorDaemonManager(
                         }
                         break
                     }
-                    Thread.sleep(SHUTDOWN_WAIT_MS)
+                    try {
+                        Thread.sleep(SHUTDOWN_WAIT_MS)
+                    } catch (e: InterruptedException) {
+                        Thread.currentThread().interrupt()
+                    }
                 } finally {
                     socketManager.close(fd)
                 }

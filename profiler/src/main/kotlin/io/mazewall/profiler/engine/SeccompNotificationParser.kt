@@ -46,11 +46,11 @@ internal interface SeccompNotificationParser {
 
 internal object RealSeccompNotificationParser : SeccompNotificationParser {
     override fun readNotif(notif: ManagedSegment): SeccompNotification {
-        val id = notif.readLong(NOTIF_ID_OFF)
-        val pidVal = notif.readInt(NOTIF_PID_OFF)
-        val nr = notif.readInt(NOTIF_NR_OFF)
+        val id = notif.readLong(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_ID_OFFSET)
+        val pidVal = notif.readInt(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_PID_OFFSET)
+        val nr = notif.readInt(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_NR_OFFSET)
         val args = LongArray(MAX_SYSCALL_ARGS) { i ->
-            notif.readLong(NOTIF_ARGS_OFF + i * 8L)
+            notif.readLong(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_ARGS_OFFSET + i * 8L)
         }
         return SeccompNotification(id, pidVal, nr, args)
     }

@@ -51,7 +51,9 @@ class ArchitectureTest {
                 "io.mazewall.ffi.internal..",
                 "io.mazewall", // RealNativeEngine and RealPlatformProvider are in the root package
                 "io.mazewall.profiler.engine..",
+                "io.mazewall.platform.seccomp.daemon..",
             )
+
             .should()
             .dependOnClassesThat()
             .haveFullyQualifiedName(RawSyscallOperations::class.java.name)
@@ -194,9 +196,11 @@ class ArchitectureTest {
             .areDeclaredInClassesThat()
             .resideOutsideOfPackages(
                 "io.mazewall.enforcer.supervisor..",
+                "io.mazewall.platform.seccomp.daemon..",
                 "io.mazewall.ffi.networking..",
                 "io.mazewall.ffi.memory..",
             )
+
             .should(object : com.tngtech.archunit.lang.ArchCondition<com.tngtech.archunit.core.domain.JavaMethod>("not catch generic exceptions") {
                 override fun check(item: com.tngtech.archunit.core.domain.JavaMethod, events: com.tngtech.archunit.lang.ConditionEvents) {
                     item.tryCatchBlocks.forEach { tryCatchBlock ->
@@ -387,6 +391,8 @@ class ArchitectureTest {
                     val name = input.name
                     return "SandboxDispatcher" !in name &&
                         "SupervisorDaemon" !in name &&
+                        "SeccompDaemonEngine" !in name &&
+
                         "SupervisorSession" !in name &&
                         "SupervisorInstaller" !in name &&
                         "SupervisorSeccompNotifInstaller" !in name &&

@@ -64,6 +64,7 @@ val plantumlConfig by configurations.creating
 
 dependencies {
     plantumlConfig(libs.plantuml.core)
+    implementation(project(":platform"))
     implementation(project(":enforcer"))
     implementation(libs.kotlinxSerialization)
     implementation(libs.kotlinxCoroutines)

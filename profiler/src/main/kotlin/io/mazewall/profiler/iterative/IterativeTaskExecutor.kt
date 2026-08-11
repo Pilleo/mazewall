@@ -2,7 +2,7 @@ package io.mazewall.profiler.iterative
 
 import io.mazewall.Policy
 import io.mazewall.Uncompiled
-import io.mazewall.enforcer.ContainedExecutors
+import io.mazewall.enforcer.api.ContainedExecutors
 import io.mazewall.landlock.Landlock
 
 public interface IterativeTaskExecutor {

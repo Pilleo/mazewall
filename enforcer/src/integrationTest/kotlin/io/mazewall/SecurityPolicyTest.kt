@@ -1,7 +1,7 @@
 package io.mazewall
-import io.mazewall.enforcer.ContainedExecutors
-import io.mazewall.enforcer.ContainmentViolationDetector
-import io.mazewall.enforcer.ContainmentViolationException
+import io.mazewall.enforcer.api.ContainedExecutors
+import io.mazewall.enforcer.diagnostics.ContainmentViolationDetector
+import io.mazewall.enforcer.api.ContainmentViolationException
 import org.junit.jupiter.api.Test
 import java.net.InetSocketAddress
 import java.net.Socket

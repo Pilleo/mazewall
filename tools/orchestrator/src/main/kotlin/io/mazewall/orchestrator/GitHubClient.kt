@@ -1,13 +1,5 @@
 package io.mazewall.orchestrator
 
-data class RebaseResult(
-    val success: Boolean,
-    val conflictCount: Int,
-    val conflictedFiles: List<String> = emptyList(),
-    val needsRescueApproval: Boolean = false,
-    val rescueBranchName: String? = null
-)
-
 data class PrMergeStatus(
     val mergeable: String,
     val behindBy: Int,
@@ -50,17 +42,6 @@ interface GitHubClient {
     fun getPrUrl(prNumber: String): String
     fun isCommitEmpty(prNumber: String, shaOld: String, shaNew: String): Boolean
 
-    /**
-     * Merges the current origin/master into the given PR branch using an isolated
-     * worktree. Preserves Jules's original commits and authorship. The resulting
-     * PR diff will contain exactly Jules's session changes relative to master.
-     *
-     * Returns [RebaseResult.success = true] if the merge succeeded and was pushed.
-     * Returns [RebaseResult.success = false] if there are merge conflicts (human intervention required).
-     */
-    fun rebaseBranch(prNumber: String, sessionId: String?): RebaseResult
-    fun rebaseBranchFallback(prNumber: String, sessionId: String?, targetFiles: List<String>): RebaseResult
-    fun approveRescue(prNumber: String, rescueBranchName: String)
 
 
     /**

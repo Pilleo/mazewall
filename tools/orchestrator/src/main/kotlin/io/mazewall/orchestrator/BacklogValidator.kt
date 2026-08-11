@@ -10,6 +10,7 @@ object BacklogValidator {
     private val VALID_COMPONENTS = setOf("enforcer", "profiler", "orchestrator", "docs", "ci", "testing")
     private val VALID_FILENAME_PATTERN = Regex("^issue-(?:\\d{8}[-_]\\d{6}(?:[-_]\\d{2})?|\\d{8}[-_]\\d{2,4}|\\d{1,4})[-_][a-z0-9_-]+\\.md$")
     private val VALID_GRADLE_MODULES = setOf(
+        ":platform",
         ":enforcer",
         ":profiler",
         ":demos:cli-demo",
@@ -90,6 +91,8 @@ object BacklogValidator {
 
             if (!content.contains("target_files:")) {
                 errors.add("${file.name}: Missing required 'target_files' field (e.g. list of file paths or [])")
+            } else if (issue.targetFiles.isEmpty() && (issue.status == "open" || issue.status == "in_progress")) {
+                errors.add("${file.name}: 'target_files' must contain at least one file path for ${issue.status} issues (got empty list)")
             }
 
             // Check dependencies existence
