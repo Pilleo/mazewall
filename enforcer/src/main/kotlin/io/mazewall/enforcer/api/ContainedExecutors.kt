@@ -164,7 +164,7 @@ object ContainedExecutors {
                 return io.mazewall.InstallationReceipt(
                     processWide = processWide,
                     requestedPolicy = policy,
-                    outcome = io.mazewall.InstallationOutcome.BYPASSED,
+                    installed = false,
                 )
             }
 
@@ -193,7 +193,7 @@ object ContainedExecutors {
                 return io.mazewall.InstallationReceipt(
                     processWide = processWide,
                     requestedPolicy = policy,
-                    outcome = io.mazewall.InstallationOutcome.BYPASSED,
+                    installed = false,
                 )
             }
             throw t

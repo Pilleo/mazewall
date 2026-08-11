@@ -73,7 +73,7 @@ class ContainedExecutorsCoverageTest {
 
         val receipt = ContainedExecutors.installOnCurrentThread(Policy.builder().build().definition)
 
-        assertEquals(InstallationOutcome.BYPASSED, receipt.outcome)
+        assertEquals(false, receipt.installed)
     }
 
     @Test
@@ -93,7 +93,7 @@ class ContainedExecutorsCoverageTest {
 
         val receipt = ContainedExecutors.installOnCurrentThread(incompatiblePolicy.definition)
 
-        assertEquals(InstallationOutcome.BYPASSED, receipt.outcome)
+        assertEquals(false, receipt.installed)
     }
 
     @Test

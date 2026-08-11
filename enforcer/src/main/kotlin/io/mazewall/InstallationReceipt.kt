@@ -11,18 +11,17 @@ package io.mazewall
  * thread terminates. Closing the supervisor session **does not** uninstall the seccomp filter; it simply tears down 
  * the notification listener. Any subsequent syscalls that would have been routed to the supervisor will receive ENOSYS.
  *
- * Callers performing diagnostics or attestation must check [outcome]. When explicitly configured fallback behavior allows
- * execution to continue after an installation failure, [outcome] is [InstallationOutcome.BYPASSED] and no containment is
- * implied by this receipt.
+ * Callers performing diagnostics or attestation must check [installed]. When explicitly configured fallback behavior allows
+ * execution to continue after an installation failure, [installed] is `false` and no containment is implied by this receipt.
  */
 public data class InstallationReceipt(
     public val processWide: Boolean,
     public val requestedPolicy: PolicyDefinition<*>,
     public val supervisorSession: AutoCloseable? = null,
     public val timestampMillis: Long = System.currentTimeMillis(),
-    public val outcome: InstallationOutcome = InstallationOutcome.INSTALLED,
+    public val installed: Boolean = true,
 ) {
-    /** Preserves the JVM constructor exposed before [outcome] was added. */
+    /** Preserves the JVM constructor exposed before [installed] was added. */
     public constructor(
         processWide: Boolean,
         requestedPolicy: PolicyDefinition<*>,
@@ -33,15 +32,6 @@ public data class InstallationReceipt(
         requestedPolicy = requestedPolicy,
         supervisorSession = supervisorSession,
         timestampMillis = timestampMillis,
-        outcome = InstallationOutcome.INSTALLED,
+        installed = true,
     )
-}
-
-/** The effective result represented by an [InstallationReceipt]. */
-public enum class InstallationOutcome {
-    /** The requested containment is active on the target. */
-    INSTALLED,
-
-    /** Explicit fallback configuration allowed uncontained execution after installation could not complete. */
-    BYPASSED,
 }

@@ -8,7 +8,7 @@ import kotlin.test.assertTrue
 
 class InstallationReceiptTest {
     @Test
-    fun `receipt data operations retain installation outcome`() {
+    fun `receipt data operations retain installation status`() {
         val policy = Policy.builder().build().definition
         val session = AutoCloseable {}
         val receipt =
@@ -17,32 +17,27 @@ class InstallationReceiptTest {
                 requestedPolicy = policy,
                 supervisorSession = session,
                 timestampMillis = 123L,
-                outcome = InstallationOutcome.BYPASSED,
+                installed = false,
             )
 
         assertEquals(false, receipt.component1())
         assertSame(policy, receipt.component2())
         assertSame(session, receipt.component3())
         assertEquals(123L, receipt.component4())
-        assertEquals(InstallationOutcome.BYPASSED, receipt.component5())
+        assertEquals(false, receipt.component5())
 
         val copy = receipt.copy()
         assertEquals(receipt, copy)
         assertEquals(receipt.hashCode(), copy.hashCode())
-        assertTrue(copy.toString().contains("outcome=BYPASSED"))
-        assertNotEquals(receipt, receipt.copy(outcome = InstallationOutcome.INSTALLED))
+        assertTrue(copy.toString().contains("installed=false"))
+        assertNotEquals(receipt, receipt.copy(installed = true))
     }
 
     @Test
-    fun `receipt defaults to installed outcome`() {
+    fun `receipt defaults to installed status`() {
         val receipt = InstallationReceipt(false, Policy.builder().build().definition)
 
-        assertEquals(InstallationOutcome.INSTALLED, receipt.outcome)
-        assertEquals(InstallationOutcome.BYPASSED, InstallationOutcome.valueOf("BYPASSED"))
-        assertEquals(
-            listOf(InstallationOutcome.INSTALLED, InstallationOutcome.BYPASSED),
-            InstallationOutcome.entries,
-        )
+        assertTrue(receipt.installed)
     }
 
     @Test
@@ -63,6 +58,6 @@ class InstallationReceiptTest {
                 123L,
             )
 
-        assertEquals(InstallationOutcome.INSTALLED, receipt.outcome)
+        assertTrue(receipt.installed)
     }
 }
