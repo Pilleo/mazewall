@@ -242,7 +242,7 @@ class RealJulesClient(
     }
 
 
-    override fun triggerSession(repo: String, issueId: String, prompt: String) {
+    override fun triggerSession(repo: String, issueId: String, prompt: String): JulesSession {
         val sessionDescription = "[$issueId] ${prompt.take(150)}"
         println("🚀 Triggering remote Jules session for issue $issueId via REST API...")
 
@@ -271,6 +271,12 @@ class RealJulesClient(
             }
             val session = json.decodeFromString<SessionResponse>(response.body())
             println("  [Jules API] Session created successfully: ${session.name}")
+            return JulesSession(
+                id = session.name.substringAfterLast("/"),
+                description = session.title ?: sessionDescription,
+                repo = repo,
+                status = session.state ?: "PENDING"
+            )
         } catch (e: Exception) {
             System.err.println("  [Jules API] Error triggering session: ${e.message}")
             throw e
@@ -425,4 +431,3 @@ class RealJulesClient(
         }
     }
 }
-
