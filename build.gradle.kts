@@ -152,8 +152,8 @@ tasks.withType<Test>().configureEach {
     useJUnitPlatform()
     // Configure global timeout to prevent infinite test hangs (generous for testcontainers pulls)
     systemProperty("junit.jupiter.execution.timeout.default", "2 m")
-    // When a timeout occurs, dump thread stacks to immediately identify deadlocks
-    systemProperty("junit.jupiter.execution.timeout.mode", "thread_dump")
+    // Run timed tests on a separate thread so JUnit can interrupt hangs and report their stack trace.
+    systemProperty("junit.jupiter.execution.timeout.thread.mode.default", "SEPARATE_THREAD")
     
     testLogging {
         showExceptions = true
