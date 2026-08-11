@@ -676,7 +676,7 @@ internal object RealNativeMemory : NativeMemory {
     }
 }
 
-public object RealNativeHelper {
+internal object RealNativeHelper {
     private val linker: Linker = Linker.nativeLinker()
     private val stdlib: SymbolLookup = linker.defaultLookup()
 
