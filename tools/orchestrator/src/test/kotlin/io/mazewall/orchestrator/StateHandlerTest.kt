@@ -22,6 +22,7 @@ class MockOrchestratorEnvironment : OrchestratorEnvironment {
     val prComments = mutableListOf<GitHubComment>()
     val commentedPrs = mutableListOf<Pair<String, String>>()
     var julesSession: JulesSession? = null
+    var triggeredJulesSessions = 0
     val sentJulesMessages = mutableListOf<Pair<String, String>>()
     val issues = mutableListOf<BacklogIssue>()
     val resolvedIssues = mutableListOf<BacklogIssue>()
@@ -79,7 +80,10 @@ class MockOrchestratorEnvironment : OrchestratorEnvironment {
         override fun getActiveSession(issueId: String): JulesSession? = julesSession
         override fun getSessionStatusFromActivities(sessionId: String): String? = julesSession?.status
         override fun hasUnableToCompleteActivity(sessionId: String): Boolean = hasUnableToCompleteActivity
-        override fun triggerSession(repo: String, issueId: String, prompt: String) {}
+        override fun triggerSession(repo: String, issueId: String, prompt: String): JulesSession {
+            triggeredJulesSessions++
+            return JulesSession("created-session", "desc", repo, "PENDING")
+        }
         override fun createSessionWithContext(repo: String, issueId: String, githubIssueNumber: String, previousPrUrl: String, previousBranch: String, originalTaskDescription: String): JulesSession {
             return JulesSession("s-context", "desc", repo, "PENDING")
         }
@@ -156,6 +160,23 @@ class StateHandlerTest {
 
         assertTrue(nextState is AwaitingPrState)
         assertEquals("s1", context.julesSessionId)
+    }
+
+    @Test
+    fun `awaiting Jules start creates exactly one session and persists its identifier`() {
+        val env = MockOrchestratorEnvironment()
+        env.issues.add(BacklogIssue(File("missing-issue.md"), "issue-1", "Title", 1, "open", emptyList()))
+        val context = OrchestratorContext()
+        val slot = SlotContext("issue-1").apply {
+            currentIssueFile = "missing-issue.md"
+        }
+        val state = AwaitingJulesStartState("issue-1", "123")
+
+        val nextState = state.execute(env, context, slot)
+
+        assertEquals(1, env.triggeredJulesSessions)
+        assertEquals("created-session", slot.julesSessionId)
+        assertEquals(AwaitingPrState("issue-1", "123", "created-session"), nextState)
     }
 
     @Test

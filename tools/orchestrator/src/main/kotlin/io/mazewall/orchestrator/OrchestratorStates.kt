@@ -619,7 +619,11 @@ data class AwaitingJulesStartState(
             if (slot.julesTriggerAttempts < env.config.julesTriggerAttempts) {
                 slot.julesTriggerAttempts++
                 for (cmd in transition.commands) {
-                    interpreter.interpret(cmd)
+                    val result = interpreter.interpret(cmd)
+                    if (cmd is OrchestratorCommand.TriggerJulesSession && result is JulesSession) {
+                        slot.julesSessionId = result.id
+                        return AwaitingPrState(issueId, githubIssueNumber, result.id)
+                    }
                 }
                 slot.retryAfterTime = currentTime + TimeUnit.SECONDS.toMillis(env.config.julesTriggerIntervalSeconds)
                 return this
