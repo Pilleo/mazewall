@@ -182,11 +182,8 @@ public class SeccompDaemonEngine(
                         continue
                     }
 
-                    clientFd = if (clientFdVal >= 0L) {
-                        FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(clientFdVal.toInt())
-                    } else {
-                        socketManager.accept(serverFd)
-                    }
+                    if (clientFdVal < 0L) return
+                    clientFd = FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(clientFdVal.toInt())
                 }
 
                 if (clientSockets.size >= maxConnections) {
