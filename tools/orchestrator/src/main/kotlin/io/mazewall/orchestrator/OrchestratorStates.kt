@@ -832,7 +832,11 @@ data class AwaitingPrState(
         }
 
         if (isTaskTimedOut(slot, env.config)) {
-            env.errPrintln("❌ Task $issueId timed out waiting for PR creation. Returning to SELECT_TASK.")
+            env.errPrintln("❌ Task $issueId timed out waiting for PR creation. Deferring task and returning to SELECT_TASK.")
+            val timedOutIssue = env.parseAllIssues().firstOrNull { it.id == issueId }
+                ?: error("Cannot defer timed-out task $issueId: backlog issue not found")
+            env.markIssueAsDeferred(timedOutIssue)
+            context.skippedIds.add(issueId)
             context.activeSlots.remove(slot)
             return SelectTaskState
         }

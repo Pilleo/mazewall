@@ -44,6 +44,7 @@ interface OrchestratorEnvironment {
     fun writeGithubIssue(issue: BacklogIssue, number: Int)
     fun removeGithubIssue(issue: BacklogIssue)
     fun markIssueAsResolved(issue: BacklogIssue)
+    fun markIssueAsDeferred(issue: BacklogIssue)
     fun deleteStateFile()
     fun generateKnowledgeMap()
 }
@@ -183,6 +184,8 @@ class RealOrchestratorEnvironment(
     override fun removeGithubIssue(issue: BacklogIssue) = BacklogParser.removeGithubIssue(issue)
 
     override fun markIssueAsResolved(issue: BacklogIssue) = BacklogParser.markIssueAsResolved(issue, resolvedDir)
+
+    override fun markIssueAsDeferred(issue: BacklogIssue) = BacklogParser.markIssueAsDeferred(issue)
 
     override fun deleteStateFile() {
         stateFile.delete()

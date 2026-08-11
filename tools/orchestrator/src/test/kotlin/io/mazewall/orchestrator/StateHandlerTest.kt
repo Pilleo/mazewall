@@ -25,6 +25,7 @@ class MockOrchestratorEnvironment : OrchestratorEnvironment {
     val sentJulesMessages = mutableListOf<Pair<String, String>>()
     val issues = mutableListOf<BacklogIssue>()
     val resolvedIssues = mutableListOf<BacklogIssue>()
+    val deferredIssues = mutableListOf<BacklogIssue>()
     var mapsRegenerated = false
     var stateFileDeleted = false
     var sleepCount = 0
@@ -96,6 +97,7 @@ class MockOrchestratorEnvironment : OrchestratorEnvironment {
     override fun writeGithubIssue(issue: BacklogIssue, number: Int) {}
     override fun removeGithubIssue(issue: BacklogIssue) {}
     override fun markIssueAsResolved(issue: BacklogIssue) { resolvedIssues.add(issue) }
+    override fun markIssueAsDeferred(issue: BacklogIssue) { deferredIssues.add(issue) }
     override fun deleteStateFile() { stateFileDeleted = true }
     override fun generateKnowledgeMap() { mapsRegenerated = true }
 }
@@ -512,6 +514,26 @@ class StateHandlerTest {
 
         assertTrue(nextState is SelectTaskState)
         assertTrue(context.skippedIds.contains("issue-1"))
+    }
+
+    @Test
+    fun testAwaitingPrTimeoutDefersTaskBeforeRemovingSlot() {
+        val env = MockOrchestratorEnvironment()
+        val issue = BacklogIssue(File("test.md"), "issue-1", "Title", 1, "in_progress", emptyList())
+        env.issues.add(issue)
+        val slot = SlotContext("issue-1").apply {
+            startTime = System.currentTimeMillis() - TimeUnit.MINUTES.toMillis(61)
+        }
+        val context = OrchestratorContext().apply {
+            activeSlots.add(slot)
+        }
+
+        val nextState = AwaitingPrState("issue-1", "123", "s1").execute(env, context, slot)
+
+        assertTrue(nextState is SelectTaskState)
+        assertEquals(listOf(issue), env.deferredIssues)
+        assertTrue("issue-1" in context.skippedIds)
+        assertFalse(slot in context.activeSlots)
     }
 
     @Test
