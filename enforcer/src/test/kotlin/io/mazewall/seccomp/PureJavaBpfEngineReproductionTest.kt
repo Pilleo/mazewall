@@ -7,8 +7,6 @@ import io.mazewall.MockNativeProcess
 import io.mazewall.Policy
 import io.mazewall.compile
 import io.mazewall.core.Arch
-import io.mazewall.enforcer.state.ContainmentStateRegistry
-import io.mazewall.enforcer.state.ContainerState
 import io.mazewall.core.PrctlCommand
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
@@ -78,7 +76,7 @@ class PureJavaBpfEngineReproductionTest {
             PureJavaBpfEngine.install(compiled)
         }
 
-        val currentState = io.mazewall.enforcer.state.ContainmentStateRegistry.threadState.engineState
+        val currentState = io.mazewall.enforcer.ThreadStateRegistry.state.engineState
         assertTrue(currentState is SeccompInstallationState.Failed, "Engine state should transition to Failed under fatal JVM Error")
         kotlin.test.assertEquals("buildFilter", currentState.step)
         assertTrue(currentState.error is AssertionError, "Wrapped error must be the AssertionError")

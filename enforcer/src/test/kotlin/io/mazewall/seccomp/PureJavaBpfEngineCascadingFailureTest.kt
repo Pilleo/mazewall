@@ -7,8 +7,8 @@ import io.mazewall.compile
 import io.mazewall.core.Arch
 import io.mazewall.core.SeccompAction
 import io.mazewall.core.Syscall
-import io.mazewall.enforcer.state.ContainerState
-import io.mazewall.enforcer.state.ContainmentStateRegistry
+import io.mazewall.enforcer.ContainerState
+import io.mazewall.enforcer.ThreadStateRegistry
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import kotlin.test.assertFailsWith
@@ -21,7 +21,7 @@ class PureJavaBpfEngineCascadingFailureTest {
         LinuxNative.resetToDefault()
         PureJavaBpfEngine.clearCache()
         io.mazewall.PolicyCompilationCache.clear()
-        ContainmentStateRegistry.threadState = ContainerState()
+        ThreadStateRegistry.state = ContainerState()
     }
 
     @Test
@@ -41,7 +41,7 @@ class PureJavaBpfEngineCascadingFailureTest {
 
         // 1. Simulate an existing state where prctl is blocked.
         // This simulates a previous filter that was already installed in the kernel.
-        ContainmentStateRegistry.threadState = ContainerState(
+        ThreadStateRegistry.state = ContainerState(
             syscallActions = mapOf(Syscall.PRCTL to SeccompAction.ACT_ERRNO)
         )
 

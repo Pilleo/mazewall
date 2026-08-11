@@ -250,7 +250,7 @@ class RealJulesClient(
             prompt = prompt,
             sourceContext = SourceContext(
                 source = "sources/github/$repo",
-                githubRepoContext = GithubRepoContext(startingBranch = "master")
+                githubRepoContext = GithubRepoContext(startingBranch = "main")
             ),
             title = sessionDescription
         )
@@ -371,16 +371,16 @@ class RealJulesClient(
     override fun createSessionWithContext(repo: String, issueId: String, githubIssueNumber: String, previousPrUrl: String, previousBranch: String, originalTaskDescription: String): JulesSession {
         val prompt = """
             🚨 **Merge Conflict Detected - Starting New Generation**
-
-            This is a continuation of a previous task that encountered a merge conflict against the master branch.
+            
+            This is a continuation of a previous task that encountered a merge conflict against the main branch.
             Your task is to re-implement the original changes cleanly on top of the current master branch.
-
+            
             **Original Task ([${issueId}] Issue #$githubIssueNumber):**
             $originalTaskDescription
-
+            
             **Previous Generation PR:** $previousPrUrl
             **Previous Branch:** $previousBranch
-
+            
             Please adapt the changes from the previous generation to resolve any conflicts with the current codebase.
         """.trimIndent()
 
@@ -391,7 +391,7 @@ class RealJulesClient(
             prompt = prompt,
             sourceContext = SourceContext(
                 source = "sources/github/$repo",
-                githubRepoContext = GithubRepoContext(startingBranch = "master")
+                githubRepoContext = GithubRepoContext(startingBranch = "main")
             ),
             title = sessionDescription
         )

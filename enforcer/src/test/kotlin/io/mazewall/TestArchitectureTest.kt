@@ -7,7 +7,7 @@ import com.tngtech.archunit.core.importer.ImportOption
 import com.tngtech.archunit.junit.AnalyzeClasses
 import com.tngtech.archunit.junit.ArchTest
 import com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses
-import io.mazewall.enforcer.api.ContainedExecutors
+import io.mazewall.enforcer.ContainedExecutors
 import io.mazewall.seccomp.PureJavaBpfEngine
 
 /**

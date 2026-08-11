@@ -1,7 +1,5 @@
 package io.mazewall.enforcer
 
-import io.mazewall.enforcer.diagnostics.ViolationMatcher
-
 class TestServiceViolationMatcher : ViolationMatcher {
     override fun matches(t: Throwable): Boolean {
         val msg = t.message ?: return false

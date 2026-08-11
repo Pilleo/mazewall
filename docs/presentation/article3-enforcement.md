@@ -134,11 +134,11 @@ In the Java ecosystem, this is pioneered by **Elasticsearch**[^elasticsearch_sec
 While Elasticsearch implements this *in-app* during initialization, operators can achieve a similar process-wide boundary using **language-agnostic wrapper designs**. Tools like **nsjail** or **bubblewrap** wrap the process execution from the outside, enforcing seccomp and namespace restrictions before the JVM even boots. The benefit of these wrappers is their absolute language-agnosticism; however, the trade-off is they operate completely outside the application domain, meaning they cannot dynamically scale or adjust permissions based on internal application lifecycle hooks or specific JVM threads.
 
 > [!CAUTION]
-> **TSYNC prerequisites must be diagnosed, not inferred from JVM startup:**
-> 1. **Seccomp TSYNC:** Linux requires `CAP_SYS_ADMIN` or `no_new_privs` on the calling thread that installs the filter. TSYNC can fail when a sibling is in strict mode or has a divergent Seccomp filter tree; it does not require every sibling to have set `no_new_privs` beforehand. An outer container profile can still reject the nested `seccomp` call, so `installOnProcess()` must fail closed and report the actual kernel result.
+> **TSYNC fails on standard JVMs and LTS kernels:** 
+> 1. **Seccomp TSYNC:** You cannot apply process-wide seccomp isolation by simply calling `ContainedExecutors.installOnProcess()` from Java. The Linux kernel requires that the `no_new_privs` flag be set on *all* threads in the thread group before a seccomp filter can be synchronized process-wide. Because this flag must be set via `prctl` *prior* to thread creation, and because the JVM has already spawned background threads (GC, JIT, VM helpers) before your `main()` method begins execution, calling `TSYNC` in-process fails with `EACCES` (-13).
 > 2. **Landlock TSYNC:** Landlock process-wide synchronization (`LANDLOCK_RESTRICT_SELF_TSYNC`) is only available in Landlock ABI v8 (Linux 7.0+). On older LTS kernels (e.g., 5.15, 6.1, 6.6), Landlock rules remain strictly thread-scoped. An in-process call inside `main()` cannot restrict pre-existing sibling helper threads, leaving a critical security gap.
 > 
-> A launcher or OCI profile remains the strongest way to establish an outer process boundary before JVM initialization, and is required for process-wide Landlock on kernels without Landlock TSYNC. It is not, however, a universal prerequisite for Seccomp TSYNC. The outer profile must explicitly allow the nested Seccomp operations Mazewall needs.
+> To properly establish a secure process-wide lockdown (enforcing both Seccomp and Landlock before the JVM is multi-threaded), the sandbox boundaries must be applied *before* the JVM process starts. Operators can achieve this by configuring an **OCI container profile** (with `allowPrivilegeEscalation: false`, which forces `no_new_privs` at the process tree root prior to exec) or using a **native launcher wrapper** (such as **bubblewrap** or **nsjail**) to sandbox the process tree prior to executing the JVM.
 
 <details>
 <summary><b>🔍 System Configuration: Nested Seccomp in Container Runtimes</b></summary>
@@ -286,3 +286,4 @@ In **Part 4**, we will run a series of concrete attacks—including shell inject
 [^elasticsearch_seccomp]: Elasticsearch SystemCallFilter.java source. https://github.com/elastic/elasticsearch/blob/master/server/src/main/java/org/elasticsearch/bootstrap/SystemCallFilter.java
 [^chromesandbox]: Chromium Sandbox Design. https://chromium.googlesource.com/chromium/src/+/main/docs/design/sandbox.md
 [^futex]: Linux futex(2) manual page. https://man7.org/linux/man-pages/man2/futex.2.html
+

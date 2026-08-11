@@ -27,11 +27,14 @@ import io.mazewall.ffi.memory.SegmentPool
 import java.lang.foreign.MemorySegment
 import java.lang.foreign.ValueLayout
 
-import io.mazewall.profiler.engine.SeccompResponder
-import io.mazewall.platform.seccomp.daemon.NotifResult
-import io.mazewall.platform.seccomp.daemon.LoopAction
-import io.mazewall.platform.seccomp.daemon.SeccompNotifHandler
-
+/**
+ * Result of a reactor loop iteration.
+ */
+internal sealed class LoopAction {
+    object Continue : LoopAction()
+    object Break : LoopAction()
+    object Shutdown : LoopAction()
+}
 
 /**
  * Internal logic for handling active seccomp listeners and shutdown requests.
@@ -46,23 +49,88 @@ internal class ProfilerSessionHandler(
     private val syscallMap: Map<Int, String>,
     private val parser: SeccompNotificationParser = RealSeccompNotificationParser,
     private val onShutdown: (String) -> Unit,
-) : AutoCloseable, SeccompNotifHandler {
-
+) : AutoCloseable {
     val ledger = SessionEventLedger()
 
     private val sessionArena = NativeArena.ofConfined()
-    val ackBuf: ManagedSegment = sessionArena.allocate(ACK_BUF_SIZE)
+    val ackBuf: ManagedSegment = sessionArena.allocate(1L)
     val socketPollFd: ManagedSegment = sessionArena.allocate(Layouts.POLLFD)
+    val notif: ManagedSegment = SegmentPool.SECCOMP_NOTIF_POOL.rent()
+    val resp: ManagedSegment = SegmentPool.SECCOMP_NOTIF_RESP_POOL.rent()
 
     private val resolver = SyscallPathResolver(memoryReader, ledger)
-
-    private var isPassThrough = false
 
     var state: ProfilerState = ProfilerState.ActiveSession(socketFd, listenerFd)
         private set
 
     override fun close() {
+        try {
+            SegmentPool.SECCOMP_NOTIF_POOL.release(notif)
+        } catch (ignored: Throwable) {}
+        try {
+            SegmentPool.SECCOMP_NOTIF_RESP_POOL.release(resp)
+        } catch (ignored: Throwable) {}
         sessionArena.close()
+    }
+
+    @Suppress("ReturnCount")
+    context(arena: NativeArena)
+    fun handleActiveListener(
+        pollFds: ManagedSegment,
+    ): LoopAction {
+        val currentState = state
+        if (currentState is ProfilerState.Terminated) {
+            return LoopAction.Break
+        }
+
+        val pollEvents = parser.readPollEvents(pollFds)
+        val socketRevents = pollEvents.socketRevents.toInt()
+        val errorOrHup = NativeConstants.POLLERR.toInt() or NativeConstants.POLLHUP.toInt() or NativeConstants.POLLNVAL.toInt()
+        if ((socketRevents and (NativeConstants.POLLIN.toInt() or errorOrHup)) != 0) {
+            val isDeadOrShutdown = (socketRevents and errorOrHup) != 0 || handleShutdownRequest(ackBuf)
+            if (isDeadOrShutdown) {
+                state = ProfilerState.Terminated(socketFd, listenerFd)
+                return LoopAction.Shutdown
+            }
+        }
+
+        val listenerRevents = pollEvents.listenerRevents.toInt()
+        if ((listenerRevents and errorOrHup) != 0) {
+            state = ProfilerState.Terminated(socketFd, listenerFd)
+            return LoopAction.Shutdown
+        }
+
+        if ((listenerRevents and NativeConstants.POLLIN.toInt()) != 0) {
+            notif.fill(0)
+            val recvRes = ioOps.raw.ioctl(listenerFd, SECCOMP_IOCTL_NOTIF_RECV, notif)
+            recvRes.onSuccess {
+                val ok = processNotification()
+                if (!ok) {
+                    System.err.println("[DAEMON-WARN] Failed to process notification. Terminating session.")
+                    state = ProfilerState.Terminated(socketFd, listenerFd)
+                }
+            }
+            if (state is ProfilerState.Terminated) return LoopAction.Break
+        }
+        return LoopAction.Continue
+    }
+
+    @Suppress("ReturnCount")
+    private fun handleShutdownRequest(ackBuf: ManagedSegment): Boolean {
+        val res = ioOps.recv(socketFd, ackBuf.unwrap, 1L, 0)
+        return res.map { value ->
+            if (value > 0) {
+                val command = ackBuf.readByte(0L)
+                if (command == SHUTDOWN_COMMAND_BYTE) {
+                    onShutdown("Parent Command")
+                    true
+                } else {
+                    false
+                }
+            } else {
+                true // parent socket closed
+            }
+        }.recover { _, _ -> false }
     }
 
     /**
@@ -84,13 +152,8 @@ internal class ProfilerSessionHandler(
      */
     @Suppress("TooGenericExceptionCaught", "ReturnCount", "CyclomaticComplexMethod")
     context(arena: NativeArena)
-    override fun processNotification(
-        notif: ManagedSegment,
-        resp: ManagedSegment,
-        listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open>,
-        socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>
-    ): NotifResult {
-        val currentState = state as? ProfilerState.ActiveSession ?: return NotifResult.TERMINATE
+    internal fun processNotification(): Boolean {
+        val currentState = state as? ProfilerState.ActiveSession ?: return false
 
         val parsedNotif = parser.readNotif(notif)
         val id = parsedNotif.id
@@ -129,7 +192,7 @@ internal class ProfilerSessionHandler(
             // Optimisation: skip event delivery for JVM-internal paths that generate noise
             // (JDK home, classpath, /proc, /sys).
             if (checkAndBypassNoisePath(arena, nr, resolvedEvent, handshake, resp)) {
-                return NotifResult.HANDLED
+                return true
             }
 
             val notifiedState = currentState.notified(id, resolvedEvent)
@@ -160,7 +223,7 @@ internal class ProfilerSessionHandler(
                     }
                     continueSent = true
                     ledger.record(SessionEvent.ContinueReplied(System.nanoTime(), pidVal.toLong(), 0L))
-                    NotifResult.HANDLED
+                    true
                 }
                 is HandshakeSession.Failed -> {
                     System.err.println("[DAEMON-WARN] Handshake failed or shutdown triggered")
@@ -169,21 +232,11 @@ internal class ProfilerSessionHandler(
                         responder.sendSeccompError(result, resp.unwrap, ECONNRESET)
                     }
                     ledger.record(SessionEvent.ErrorReplied(System.nanoTime(), pidVal.toLong(), ECONNRESET))
-                    NotifResult.TERMINATE
-                }
-                is HandshakeSession.PassedThrough -> {
-                    System.err.println("[DAEMON-DEBUG] Handshake returned PassThrough")
-                    state = waitingState.acknowledged()
-                    with(arena.unwrap) {
-                        responder.sendSeccompContinue(result.acknowledged(), resp.unwrap)
-                    }
-                    continueSent = true
-                    ledger.record(SessionEvent.ContinueReplied(System.nanoTime(), pidVal.toLong(), 0L))
-                    NotifResult.PASS_THROUGH
+                    false
                 }
                 else -> {
                     state = ProfilerState.Terminated(socketFd, listenerFd)
-                    NotifResult.TERMINATE
+                    false
                 }
             }
         } catch (e: InterruptedException) {
@@ -199,7 +252,7 @@ internal class ProfilerSessionHandler(
             }
             if (continueSent) {
                 state = ProfilerState.ActiveSession(socketFd, listenerFd)
-                return NotifResult.HANDLED
+                return true
             }
             try {
                 with(arena.unwrap) {
@@ -207,7 +260,7 @@ internal class ProfilerSessionHandler(
                 }
             } catch (ignored: Throwable) {}
             ledger.record(SessionEvent.ErrorReplied(System.nanoTime(), pidVal.toLong(), ECONNRESET))
-            return NotifResult.TERMINATE
+            return false
         } catch (e: Throwable) {
             logger.severe {
                 "Structural or unrecoverable error in processNotification: ${e.message}. Dumping SessionEventLedger:\n" +
@@ -231,7 +284,9 @@ internal class ProfilerSessionHandler(
             val pathStr = resolvedEvent.paths.first()
             try {
                 val normalizedPathStr = PathNormalizerHelper.normalizePath(pathStr)
-                val matched = io.mazewall.enforcer.supervisor.BypassPaths.isBypassPath(java.nio.file.Paths.get(normalizedPathStr))
+                val matched = safeBypassPaths.any { bypassPath ->
+                    PathNormalizerHelper.pathStartsWith(normalizedPathStr, bypassPath)
+                }
                 System.err.println("[DAEMON-DEBUG] Noise-filter check: path=$pathStr, skip=$matched")
                 if (matched) {
                     with(arena.unwrap) {
@@ -252,9 +307,6 @@ internal class ProfilerSessionHandler(
 
 
     companion object {
-        private const val SHUTDOWN_COMMAND_BYTE: Byte = 0x53.toByte() // 'S'
-        private const val PASS_THROUGH_COMMAND_BYTE: Byte = 0x54.toByte() // 'T' / 'P'
-
         private const val ECONNRESET = 104
         private val logger = java.util.logging.Logger.getLogger(ProfilerSessionHandler::class.java.name)
 
@@ -262,6 +314,53 @@ internal class ProfilerSessionHandler(
         private const val SYS_OPENAT = 257
         private const val SYS_OPENAT2 = 437
 
+        @Suppress("SwallowedException", "TooGenericExceptionCaught")
+        private val safeBypassPaths = mutableListOf<String>().apply {
+            try {
+                val javaHome = java.nio.file.Paths.get(System.getProperty("java.home")).toAbsolutePath().normalize().toString()
+                add(javaHome)
 
+                val cp = System.getProperty("java.class.path")
+                if (cp != null) {
+                    val cpEntries = cp.split(java.io.File.pathSeparator)
+                    for (entry in cpEntries) {
+                        if (entry.isNotEmpty()) {
+                            try {
+                                val cpPath = java.nio.file.Paths.get(entry).toAbsolutePath().normalize().toString()
+                                add(cpPath)
+                            } catch (ignored: Exception) {}
+                        }
+                    }
+                }
+
+                // Add javaagent jars to prevent deadlocks during agent instrumentation
+                val jvmArgs = java.lang.management.ManagementFactory.getRuntimeMXBean().inputArguments
+                for (arg in jvmArgs) {
+                    if (arg.startsWith("-javaagent:")) {
+                        val agentPath = arg.substringAfter("-javaagent:").substringBefore("=")
+                        if (agentPath.isNotEmpty()) {
+                            try {
+                                val p = java.nio.file.Paths.get(agentPath).toAbsolutePath().normalize().toString()
+                                add(p)
+                            } catch (ignored: Exception) {}
+                        }
+                    }
+                }
+
+                // Add CI-specific build directories and test-framework caches to prevent deadlock
+                try {
+                    add(java.nio.file.Paths.get("build").toAbsolutePath().normalize().toString())
+                    add(java.nio.file.Paths.get(".gradle").toAbsolutePath().normalize().toString())
+                } catch (ignored: Exception) {}
+
+                // Add /proc and /sys virtual filesystems to prevent GC/JIT thread deadlocks
+                try {
+                    add(java.nio.file.Paths.get("/proc").toAbsolutePath().normalize().toString())
+                    add(java.nio.file.Paths.get("/sys").toAbsolutePath().normalize().toString())
+                } catch (ignored: Exception) {}
+            } catch (e: Exception) {
+                // Fail-safe
+            }
+        }
     }
 }

@@ -7,7 +7,7 @@ import io.mazewall.core.Arch
 import io.mazewall.core.NativeArg
 import io.mazewall.core.SeccompAction
 import io.mazewall.core.Syscall
-import io.mazewall.enforcer.api.ContainedExecutors
+import io.mazewall.enforcer.ContainedExecutors
 import org.junit.jupiter.api.Test
 import java.util.concurrent.Executors
 

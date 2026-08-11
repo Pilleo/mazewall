@@ -2,7 +2,6 @@ package io.mazewall.enforcer
 import io.mazewall.BaseIntegrationTest
 import io.mazewall.Policy
 import io.mazewall.core.SeccompAction
-import io.mazewall.enforcer.api.ContainedExecutors
 import io.mazewall.core.Syscall
 import org.junit.jupiter.api.Test
 import java.util.concurrent.Executors

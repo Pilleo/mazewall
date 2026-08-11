@@ -7,8 +7,8 @@ import io.mazewall.Platform
 import io.mazewall.Policy
 import io.mazewall.PolicyScope
 import io.mazewall.core.Syscall
-import io.mazewall.enforcer.api.ContainedExecutors
-import io.mazewall.enforcer.diagnostics.ContainmentViolationDetector
+import io.mazewall.enforcer.ContainedExecutors
+import io.mazewall.enforcer.ContainmentViolationDetector
 import org.junit.jupiter.api.Test
 import java.io.IOException
 import java.nio.channels.Selector

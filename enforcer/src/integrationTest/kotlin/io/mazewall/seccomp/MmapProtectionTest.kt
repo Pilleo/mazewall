@@ -5,8 +5,8 @@ import io.mazewall.EnabledIfLinuxAndSupported
 import io.mazewall.Policy
 import io.mazewall.core.Arch
 import io.mazewall.core.Syscall
-import io.mazewall.enforcer.api.ContainedExecutors
-import io.mazewall.enforcer.api.ContainmentViolationException
+import io.mazewall.enforcer.ContainedExecutors
+import io.mazewall.enforcer.ContainmentViolationException
 import io.mazewall.ffi.memory.ConfinedSegment
 import org.junit.jupiter.api.Test
 import java.lang.foreign.FunctionDescriptor

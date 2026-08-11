@@ -104,4 +104,3 @@ target/
 
 ### Compiled Binaries ###
 *.so
-/.codex/config.toml

@@ -8,8 +8,8 @@ import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
 import io.mazewall.core.Syscall
 import io.mazewall.core.NativeArg
-import io.mazewall.enforcer.api.ContainedExecutors
-import io.mazewall.enforcer.api.ContainmentViolationException
+import io.mazewall.enforcer.ContainedExecutors
+import io.mazewall.enforcer.ContainmentViolationException
 import io.mazewall.map
 import io.mazewall.onFailure
 import io.mazewall.onSuccess

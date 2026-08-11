@@ -3,8 +3,8 @@ package io.mazewall.profiler.iterative
 import io.mazewall.Policy
 import io.mazewall.PolicyScope
 import io.mazewall.Uncompiled
-import io.mazewall.enforcer.api.ContainedExecutors
-import io.mazewall.enforcer.diagnostics.ContainmentViolationDetector
+import io.mazewall.enforcer.ContainedExecutors
+import io.mazewall.enforcer.ContainmentViolationDetector
 import io.mazewall.landlock.Landlock
 import java.nio.file.AccessDeniedException
 

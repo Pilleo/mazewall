@@ -71,7 +71,6 @@ val plantumlConfig by configurations.creating
 
 dependencies {
     plantumlConfig(libs.plantuml.core)
-    api(project(":platform"))
     compileOnly(libs.kotlinxCoroutines)
     implementation(libs.kotlinxSerialization)
     testImplementation(kotlin("test"))

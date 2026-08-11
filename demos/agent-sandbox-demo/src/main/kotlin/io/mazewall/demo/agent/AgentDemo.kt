@@ -8,7 +8,7 @@ import dev.langchain4j.model.chat.ChatLanguageModel
 import io.mazewall.Policy
 import io.mazewall.PolicyScope
 import io.mazewall.core.Syscall
-import io.mazewall.enforcer.api.ContainedExecutors
+import io.mazewall.enforcer.ContainedExecutors
 import java.io.File
 import java.lang.reflect.Method
 import kotlin.system.exitProcess

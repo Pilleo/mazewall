@@ -2,7 +2,7 @@ package io.mazewall.enforcer.internal
 
 import io.mazewall.EnabledIfLinuxAndSupported
 import io.mazewall.PolicyDefinition
-import io.mazewall.enforcer.api.ContainmentViolationException
+import io.mazewall.enforcer.ContainmentViolationException
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.Test
 import java.util.concurrent.Callable
