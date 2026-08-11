@@ -368,6 +368,18 @@ subprojects {
                         minimum = "0.84".toBigDecimal()
                     }
                 }
+            } else if (project.name == "platform") {
+                // Keep coverage from the extracted native/FFM and shared seccomp code gated.
+                // This is the platform module's current unit-test baseline, rounded down so
+                // small compiler instrumentation changes do not make the threshold flaky.
+                rule {
+                    element = "BUNDLE"
+                    limit {
+                        counter = "INSTRUCTION"
+                        value = "COVEREDRATIO"
+                        minimum = "0.30".toBigDecimal()
+                    }
+                }
             } else if (project.name == "orchestrator") {
                 rule {
                     element = "BUNDLE"
