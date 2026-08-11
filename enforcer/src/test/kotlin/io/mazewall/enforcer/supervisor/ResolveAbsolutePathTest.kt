@@ -3,6 +3,7 @@ package io.mazewall.enforcer.supervisor
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -14,6 +15,13 @@ import java.nio.file.Path
 import java.nio.file.Paths
 
 class ResolveAbsolutePathTest {
+
+    @Test
+    fun `Maven settings remain subject to supervisor policy evaluation`() {
+        val settings = Paths.get(System.getProperty("user.home"), ".m2", "settings.xml")
+
+        assertFalse(BypassPaths.isBypassPath(settings))
+    }
 
     @Test
     fun `resolveAbsolutePath returns path even for non-existent absolute path`() {
