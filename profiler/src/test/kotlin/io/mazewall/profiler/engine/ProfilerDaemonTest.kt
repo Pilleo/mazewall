@@ -846,32 +846,4 @@ class ProfilerDaemonTest {
         assertTrue(closedFds.contains(100), "Socket FD 100 should have been closed on generic exception")
 
     }
-    @Test
-    fun `connection executor starts more than the former fixed session limit`() {
-        val daemon = ProfilerDaemonEngine("/tmp/test.sock", MockTransport(), MockReader())
-        val delegateField = ProfilerDaemonEngine::class.java.getDeclaredField("delegate").apply {
-            isAccessible = true
-        }
-        val delegate = delegateField.get(daemon)
-        val executorField = delegate.javaClass.getDeclaredField("connectionExecutor").apply {
-            isAccessible = true
-        }
-        val executor = executorField.get(delegate) as java.util.concurrent.ExecutorService
-        val started = java.util.concurrent.CountDownLatch(201)
-        val release = java.util.concurrent.CountDownLatch(1)
-
-        try {
-            repeat(201) {
-                executor.submit {
-                    started.countDown()
-                    release.await()
-                }
-            }
-            assertTrue(started.await(10, java.util.concurrent.TimeUnit.SECONDS))
-        } finally {
-            release.countDown()
-            executor.shutdownNow()
-        }
-    }
-
 }

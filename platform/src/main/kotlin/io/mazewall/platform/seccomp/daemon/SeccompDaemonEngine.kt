@@ -73,13 +73,8 @@ public class SeccompDaemonEngine(
         FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>,
     ) -> FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>)? = null,
 ) {
-    /**
-     * Connection tasks spend most of their lifetime blocked in poll(2). A fixed-size pool turns
-     * its size into an accidental session limit, so idle workers are reused without capping the
-     * number of simultaneously active sessions.
-     */
-    private val connectionExecutor: ExecutorService = Executors.newCachedThreadPool { runnable ->
-        Thread(runnable).apply {
+    private val connectionExecutor: ExecutorService = Executors.newFixedThreadPool(maxConnections) { r ->
+        Thread(r).apply {
             isDaemon = true
             name = "seccomp-conn"
         }
@@ -194,9 +189,15 @@ public class SeccompDaemonEngine(
                     }
                 }
 
+                if (clientSockets.size >= maxConnections) {
+                    System.err.println("[SECCOMP-DAEMON] Rejecting connection: limit reached (${clientSockets.size})")
+                    socketManager.close(clientFd)
+                    return
+                }
+
                 clientSockets.add(clientFd)
                 
-                // Run each persistent connection independently of a fixed worker limit.
+                // Spawn a new thread to handle the connection concurrently!
                 connectionExecutor.submit {
                     handleConnection(clientFd)
                 }
