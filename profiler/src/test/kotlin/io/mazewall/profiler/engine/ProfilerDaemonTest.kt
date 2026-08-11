@@ -28,6 +28,7 @@ import java.nio.channels.ClosedByInterruptException
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import io.mazewall.platform.seccomp.daemon.NotifResult
 import org.junit.jupiter.api.Test
@@ -150,6 +151,18 @@ class ProfilerDaemonTest {
         override fun readStringFromProcess(tid: Tid, remoteAddr: Long, maxLen: Int): String? = "/tmp/test.txt"
         context(arena: io.mazewall.ffi.memory.NativeArena)
         override fun resolveLink(tid: Tid, link: String): String? = "/proc/1/cwd"
+    }
+
+    @Test
+    fun `run invokes setup callback before entering daemon loop`() {
+        val engine = ProfilerDaemonEngine("/tmp/test.sock", MockTransport(), MockReader())
+        val callbackFailure = IllegalStateException("callback invoked")
+
+        val thrown = assertThrows(IllegalStateException::class.java) {
+            engine.run { throw callbackFailure }
+        }
+
+        assertEquals(callbackFailure, thrown)
     }
 
     @Test

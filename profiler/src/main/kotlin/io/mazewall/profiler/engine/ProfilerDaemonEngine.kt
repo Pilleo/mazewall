@@ -83,6 +83,7 @@ public class ProfilerDaemonEngine(
     }
 
     fun run(block: (() -> Unit)? = null) {
+        block?.invoke()
         delegate.run()
     }
 
