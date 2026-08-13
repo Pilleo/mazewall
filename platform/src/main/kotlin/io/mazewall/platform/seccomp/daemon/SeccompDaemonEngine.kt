@@ -318,16 +318,16 @@ public class SeccompDaemonEngine(
         val socketFd = connection.socketFd
         val listenerFd = connection.listenerFd
         val notifHandler = notifHandlerFactory(socketFd, listenerFd)
-        SeccompSessionHandler(
-            socketFd = socketFd,
-            listenerFd = listenerFd,
-            notifHandler = notifHandler,
-            onShutdown = this::triggerGlobalShutdown,
-            onSocketClosed = connection::markSocketClosed,
-            engine = engine,
-            socketManager = socketManager,
-        ).use { sessionHandler ->
-            try {
+        try {
+            SeccompSessionHandler(
+                socketFd = socketFd,
+                listenerFd = listenerFd,
+                notifHandler = notifHandler,
+                onShutdown = this::triggerGlobalShutdown,
+                onSocketClosed = connection::markSocketClosed,
+                engine = engine,
+                socketManager = socketManager,
+            ).use { sessionHandler ->
                 NativeArena.ofConfined().use { sessionArena ->
                     val pollFds = sessionArena.allocate(Layouts.POLLFD, 2)
                     val pfd1 = PollFdSegment.of(pollFds.asSlice(0L, Layouts.POLLFD_SIZE))
@@ -366,9 +366,10 @@ public class SeccompDaemonEngine(
                         if (isGlobalShutdown()) break
                     }
                 }
-            } finally {
-                // connection.close() in handleConnection's finally block will handle listenerFd closure.
             }
+        } finally {
+            (notifHandler as? AutoCloseable)?.close()
+            // connection.close() in handleConnection's finally block will handle listenerFd closure.
         }
     }
 }
