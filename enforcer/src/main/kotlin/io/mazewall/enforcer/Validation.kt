@@ -5,6 +5,16 @@ import kotlin.contracts.ExperimentalContracts
 import kotlin.contracts.contract
 
 /**
+ * Detects if the current thread is a Loom carrier thread or virtual thread.
+ * Loom virtual threads have thread.isVirtual == true.
+ * Loom carrier threads run on ForkJoinPool, so their thread names contain "ForkJoinPool".
+ */
+public fun isLoomOrCarrierThread(): Boolean {
+    val t = Thread.currentThread()
+    return t.isVirtual || t.name.contains("ForkJoinPool")
+}
+
+/**
  * Validates that the current thread is not a Virtual Thread (Loom carrier poisoning protection).
  *
  * This function uses a Kotlin contract to formalize this invariant, allowing the compiler to
@@ -15,9 +25,9 @@ public fun validateNotVirtual() {
     contract {
         returns()
     }
-    if (Thread.currentThread().isVirtual) {
-        throw IllegalStateException(
-            "Attempted to apply seccomp containment inside a virtual thread. " +
+    if (isLoomOrCarrierThread()) {
+        throw UnsupportedOperationException(
+            "Attempted to apply seccomp containment inside a virtual thread or a carrier thread. " +
                 "Seccomp filters are per-thread and would contaminate the carrier thread, " +
                 "affecting other unrelated virtual threads. " +
                 "Use a dedicated platform thread pool for sandboxed tasks.",
