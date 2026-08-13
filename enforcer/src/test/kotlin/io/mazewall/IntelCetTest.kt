@@ -103,7 +103,7 @@ class IntelCetTest {
         try {
             val policy = Policy.builder().lockIntelCet().build()
             assertDoesNotThrow {
-                policy.install().close()
+                policy.install().supervisorSession?.close()
             }
         } finally {
             System.clearProperty("io.mazewall.fallback")
@@ -128,7 +128,7 @@ class IntelCetTest {
         try {
             val policy = Policy.builder().lockIntelCet().build()
             assertDoesNotThrow {
-                policy.install().close()
+                policy.install().supervisorSession?.close()
             }
         } finally {
             System.clearProperty("io.mazewall.fallback")

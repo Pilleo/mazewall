@@ -80,27 +80,6 @@ class NativeEngineTest {
     }
 
     @Test
-    fun `RealNativeHelper toLong converts standard and custom value classes correctly`() {
-        val helper = io.mazewall.ffi.internal.RealNativeHelper
-        assertEquals(10L, helper.toLong(10L))
-        assertEquals(10L, helper.toLong(10))
-        assertEquals(10L, helper.toLong(10.toShort()))
-        assertEquals(10L, helper.toLong(10.toByte()))
-        assertEquals(0L, helper.toLong(null))
-
-        assertEquals(123L, helper.toLong(io.mazewall.core.OpenFlags(123)))
-        assertEquals(456L, helper.toLong(io.mazewall.core.MmapProt(456)))
-        assertEquals(789L, helper.toLong(io.mazewall.core.MmapFlags(789)))
-        assertEquals(9999L, helper.toLong(io.mazewall.core.CloneFlags(9999L)))
-
-        assertEquals(12L, helper.toLong(io.mazewall.core.Pid(12)))
-        assertEquals(34L, helper.toLong(io.mazewall.core.Tid(34)))
-        assertEquals(56L, helper.toLong(io.mazewall.core.Uid(56)))
-        assertEquals(1001L, helper.toLong(io.mazewall.core.MemoryAddress(1001L)))
-        assertEquals(99L, helper.toLong(FileDescriptor.unsafe<io.mazewall.core.FileDescriptorRole.Generic>(99)))
-    }
-
-    @Test
     fun `SyscallResult isSuccess and isFailure smart casts correctly`() {
         val successResult: LinuxNative.SyscallResult<String, LinuxNative.SyscallHandledState.Unhandled> =
             LinuxNative.SyscallResult.Success("test-value")

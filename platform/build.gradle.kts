@@ -1,6 +1,5 @@
 plugins {
     kotlin("jvm")
-    alias(libs.plugins.kotlinPluginSerialization)
 }
 
 kotlin {
@@ -53,8 +52,6 @@ tasks.test {
 }
 
 dependencies {
-    compileOnly(libs.kotlinxCoroutines)
-    implementation(libs.kotlinxSerialization)
     testImplementation(kotlin("test"))
     testImplementation(libs.junit.jupiter.api)
     testImplementation(libs.junit.jupiter.params)

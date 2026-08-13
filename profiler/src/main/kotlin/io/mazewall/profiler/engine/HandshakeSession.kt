@@ -22,7 +22,8 @@ sealed class HandshakeSession {
         override val notifId: Long,
         override val listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open>,
     ) : HandshakeSession() {
-        fun acknowledged() = Success(notifId, listenerFd)
+        fun acknowledged(deferredShutdownReason: String? = null) =
+            Success(notifId, listenerFd, deferredShutdownReason)
         fun failed() = Failed(notifId, listenerFd)
         fun passedThrough() = PassedThrough(notifId, listenerFd)
 
@@ -92,12 +93,12 @@ sealed class HandshakeSession {
                     }
                 }
                 if (ackSeen) {
-                    // If shutdown was also requested in the same buffer, schedule
-                    // it after the tracee has been safely unblocked via CONTINUE.
-                    if (shutdownSeen) {
-                        onShutdown("Parent Command (deferred, ACK took priority)")
+                    val deferredShutdownReason = if (shutdownSeen) {
+                        "Parent Command (deferred, ACK took priority)"
+                    } else {
+                        null
                     }
-                    return acknowledged()
+                    return acknowledged(deferredShutdownReason)
                 }
                 if (shutdownSeen) {
                     onShutdown("Parent Command during notification")
@@ -118,6 +119,7 @@ sealed class HandshakeSession {
     class Success(
         override val notifId: Long,
         override val listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open>,
+        val deferredShutdownReason: String? = null,
     ) : HandshakeSession()
 
     /** Handshake failed (timeout, error, or shutdown), must send an error or kill thread. */

@@ -11,6 +11,7 @@ import io.mazewall.core.SocketManager
 import io.mazewall.core.Syscall
 import io.mazewall.platform.seccomp.daemon.SeccompDaemonEngine
 import io.mazewall.platform.seccomp.daemon.SeccompDaemonState
+import io.mazewall.ffi.memory.native
 import java.util.concurrent.Executors
 
 /**
@@ -59,6 +60,9 @@ public class ProfilerDaemonEngine(
         maxConnections = MAX_CONNECTIONS,
         engine = engine,
         socketManager = socketManager,
+        raw = transport.raw,
+        handshakeWriter = { fd, buffer, count -> transport.write(fd, buffer.native, count) },
+        connectionAcceptor = transport::accept,
         connectionExecutor = Executors.newThreadPerTaskExecutor(
             Thread.ofVirtual().name("profiler-session-", 0L).factory()
         ),
@@ -84,6 +88,7 @@ public class ProfilerDaemonEngine(
     }
 
     fun run(block: (() -> Unit)? = null) {
+        block?.invoke()
         delegate.run()
     }
 

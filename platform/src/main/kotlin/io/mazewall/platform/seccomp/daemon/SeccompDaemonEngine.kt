@@ -2,6 +2,7 @@ package io.mazewall.platform.seccomp.daemon
 
 import io.mazewall.LinuxNative
 import io.mazewall.NativeEngine
+import io.mazewall.RawSyscallOperations
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
@@ -62,6 +63,15 @@ public class SeccompDaemonEngine(
 
     private val engine: NativeEngine = LinuxNative,
     private val socketManager: SocketManager = RealSocketManager,
+    private val raw: RawSyscallOperations = engine.raw,
+    private val handshakeWriter: (
+        FileDescriptor<*, FdState.Open>,
+        ManagedSegment,
+        Long,
+    ) -> LinuxNative.SyscallResult<Long, *> = engine.memory::write,
+    private val connectionAcceptor: ((
+        FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>,
+    ) -> FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>)? = null,
     private val connectionExecutor: ExecutorService = newPlatformConnectionExecutor(maxConnections),
     private val enforceConnectionLimit: Boolean = true,
 ) {
@@ -107,7 +117,7 @@ public class SeccompDaemonEngine(
                 pollFd.setEvents(NativeConstants.POLLIN)
 
                 while (!isGlobalShutdown()) {
-                    val pollRes = engine.raw.poll(pollFd.managed, 1L, POLL_TIMEOUT_MS)
+                    val pollRes = raw.poll(pollFd.managed, 1L, POLL_TIMEOUT_MS)
                     val count = pollRes.recover { errno, _ ->
                         if (errno != NativeConstants.EINTR) return@use
                         0L
@@ -158,35 +168,26 @@ public class SeccompDaemonEngine(
         var clientFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>? = null
         try {
             while (true) {
-                val res = engine.networking.accept4(
-                    serverFd,
-                    ManagedSegment.NULL,
-                    ManagedSegment.NULL,
-                    NativeConstants.SOCK_CLOEXEC
-                )
-                val clientFdVal = res.recover { errno, _ ->
-                    if (errno == NativeConstants.EINTR) return@recover -1L
-                    -2L
-                }
-
-                if (clientFdVal == -1L) {
-                    continue
-                }
-
-                clientFd = if (clientFdVal > 0L) {
-                    FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(clientFdVal.toInt())
+                if (connectionAcceptor != null) {
+                    clientFd = connectionAcceptor.invoke(serverFd)
                 } else {
-                    try {
-                        socketManager.accept(serverFd)
-                    } catch (e: InterruptedException) {
-                        Thread.currentThread().interrupt()
-                        return
-                    } catch (e: java.nio.channels.ClosedByInterruptException) {
-                        Thread.currentThread().interrupt()
-                        return
-                    } catch (_: Exception) {
-                        return
+                    val res = engine.networking.accept4(
+                        serverFd,
+                        ManagedSegment.NULL,
+                        ManagedSegment.NULL,
+                        NativeConstants.SOCK_CLOEXEC,
+                    )
+                    val clientFdVal = res.recover { errno, _ ->
+                        if (errno == NativeConstants.EINTR) return@recover -1L
+                        -2L
                     }
+
+                    if (clientFdVal == -1L) {
+                        continue
+                    }
+
+                    if (clientFdVal < 0L) return
+                    clientFd = FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(clientFdVal.toInt())
                 }
 
                 if (enforceConnectionLimit && clientSockets.size >= maxConnections) {
@@ -268,7 +269,7 @@ public class SeccompDaemonEngine(
         pollFdManaged: ManagedSegment
     ): SeccompConnection? {
         if (connection is SeccompConnection.Accepted) {
-            val pollRes = engine.raw.poll(pollFdManaged, 1L, POLL_TIMEOUT_MS)
+            val pollRes = raw.poll(pollFdManaged, 1L, POLL_TIMEOUT_MS)
             val count = pollRes.recover { errno, _ ->
                 if (errno == NativeConstants.EINTR) 0L else -1L
             }
@@ -294,7 +295,7 @@ public class SeccompDaemonEngine(
                 ackBuf.writeByte(0L, handshakeAckByte)
                 var result: SeccompConnection? = null
                 while (true) {
-                    val res = engine.memory.write(socketFd, ackBuf, ACK_BUF_SIZE)
+                    val res = handshakeWriter(socketFd, ackBuf, ACK_BUF_SIZE)
                     if (res is LinuxNative.SyscallResult.Success) {
                         result = current.handshakeComplete().also { it.socketManager = socketManager }
                         break
@@ -310,27 +311,27 @@ public class SeccompDaemonEngine(
 
             is SeccompConnection.Active -> {
                 System.err.println("[SECCOMP-DAEMON] Starting session reactor for listener ${current.listenerFd.value}")
-                handleSession(current.socketFd, current.listenerFd)
+                handleSession(current)
                 System.err.println("[SECCOMP-DAEMON] Session reactor finished. Closing connection.")
                 null
             }
         }
     }
 
-    private fun handleSession(
-        socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>,
-        listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open>
-    ) {
+    private fun handleSession(connection: SeccompConnection.Active) {
+        val socketFd = connection.socketFd
+        val listenerFd = connection.listenerFd
         val notifHandler = notifHandlerFactory(socketFd, listenerFd)
-        SeccompSessionHandler(
-            socketFd = socketFd,
-            listenerFd = listenerFd,
-            notifHandler = notifHandler,
-            onShutdown = this::triggerGlobalShutdown,
-            engine = engine,
-            socketManager = socketManager,
-        ).use { sessionHandler ->
-            try {
+        try {
+            SeccompSessionHandler(
+                socketFd = socketFd,
+                listenerFd = listenerFd,
+                notifHandler = notifHandler,
+                onShutdown = this::triggerGlobalShutdown,
+                onSocketClosed = connection::markSocketClosed,
+                engine = engine,
+                socketManager = socketManager,
+            ).use { sessionHandler ->
                 NativeArena.ofConfined().use { sessionArena ->
                     val pollFds = sessionArena.allocate(Layouts.POLLFD, 2)
                     val pfd1 = PollFdSegment.of(pollFds.asSlice(0L, Layouts.POLLFD_SIZE))
@@ -342,7 +343,7 @@ public class SeccompDaemonEngine(
                     pfd2.setEvents(NativeConstants.POLLIN)
 
                     while (!isGlobalShutdown()) {
-                        val pollRes = engine.raw.poll(pollFds, 2L, POLL_TIMEOUT_MS)
+                        val pollRes = raw.poll(pollFds, 2L, POLL_TIMEOUT_MS)
                         val count = pollRes.recover { errno, _ ->
                             if (errno != NativeConstants.EINTR) return@use
                             0L
@@ -369,9 +370,10 @@ public class SeccompDaemonEngine(
                         if (isGlobalShutdown()) break
                     }
                 }
-            } finally {
-                // connection.close() in handleConnection's finally block will handle listenerFd closure.
             }
+        } finally {
+            (notifHandler as? AutoCloseable)?.close()
+            // connection.close() in handleConnection's finally block will handle listenerFd closure.
         }
     }
 }

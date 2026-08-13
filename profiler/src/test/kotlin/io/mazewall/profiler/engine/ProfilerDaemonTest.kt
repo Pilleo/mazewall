@@ -28,6 +28,7 @@ import java.nio.channels.ClosedByInterruptException
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import io.mazewall.platform.seccomp.daemon.NotifResult
 import org.junit.jupiter.api.Test
@@ -51,6 +52,11 @@ class ProfilerDaemonTest {
         var nextPollResult: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success(1L)
         var nextReadResult: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success(1L)
         var ackByte: Byte = PROTOCOL_ACK_BYTE
+        var handshakeBytes: ByteArray? = null
+        var handshakeWrites: Int = 0
+        var rawPolls: Int = 0
+        var nextWriteResult: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
+            LinuxNative.SyscallResult.Success(1L)
 
         context(arena: Arena)
         override fun sendTraceEvent(socketFd: FileDescriptor<*, FdState.Open>, event: SyscallEvent<SyscallEventState.Resolved>) {
@@ -69,11 +75,16 @@ class ProfilerDaemonTest {
 
         override fun read(fd: FileDescriptor<*, FdState.Open>, buf: MemorySegment, count: Long): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = nextReadResult.also {
             if (it is LinuxNative.SyscallResult.Success && it.value > 0) {
-                buf.set(ValueLayout.JAVA_BYTE, 0L, ackByte)
+                handshakeBytes?.forEachIndexed { index, byte ->
+                    buf.set(ValueLayout.JAVA_BYTE, index.toLong(), byte)
+                } ?: buf.set(ValueLayout.JAVA_BYTE, 0L, ackByte)
             }
         }
 
-        override fun write(fd: FileDescriptor<*, FdState.Open>, buf: MemorySegment, count: Long): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success(count)
+        override fun write(fd: FileDescriptor<*, FdState.Open>, buf: MemorySegment, count: Long): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+            handshakeWrites++
+            return nextWriteResult
+        }
 
         override fun recv(sockfd: FileDescriptor<*, FdState.Open>, buf: MemorySegment, len: Long, flags: Int): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success(len)
 
@@ -96,6 +107,7 @@ class ProfilerDaemonTest {
 
         override val raw = object : io.mazewall.RawSyscallOperations {
             override fun poll(fds: ManagedSegment, nfds: Long, timeout: Int): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                rawPolls++
                 System.err.println("[MOCK] poll nfds=$nfds nextPollResult=$nextPollResult")
                 if (nextPollResult is LinuxNative.SyscallResult.Success && (nextPollResult as LinuxNative.SyscallResult.Success).value == 0L) {
                     Thread.sleep(10)
@@ -142,6 +154,30 @@ class ProfilerDaemonTest {
         override fun readStringFromProcess(tid: Tid, remoteAddr: Long, maxLen: Int): String? = "/tmp/test.txt"
         context(arena: io.mazewall.ffi.memory.NativeArena)
         override fun resolveLink(tid: Tid, link: String): String? = "/proc/1/cwd"
+    }
+
+    @Test
+    fun `run invokes setup callback before entering daemon loop`() {
+        val engine = ProfilerDaemonEngine("/tmp/test.sock", MockTransport(), MockReader())
+        val callbackFailure = IllegalStateException("callback invoked")
+
+        val thrown = assertThrows(IllegalStateException::class.java) {
+            engine.run { throw callbackFailure }
+        }
+
+        assertEquals(callbackFailure, thrown)
+    }
+
+    @Test
+    fun `test daemon handshake uses injected transport write`() {
+        val transport = MockTransport()
+        transport.nextWriteResult = LinuxNative.SyscallResult.Error(5, -1L)
+        val engine = ProfilerDaemonEngine("/tmp/test.sock", transport, MockReader())
+
+        engine.handleConnection(FileDescriptor.unsafe(10))
+
+        assertEquals(1, transport.handshakeWrites)
+        assertTrue(transport.rawPolls > 0)
     }
 
     @Test
@@ -267,6 +303,49 @@ class ProfilerDaemonTest {
                     assertEquals(NotifResult.PASS_THROUGH, result)
                     assertTrue(transport.continueSent, "Pass-through must continue the in-flight notification")
                     assertTrue(handler.ledger.dump().any { it is SessionEvent.ContinueReplied })
+                } finally {
+                    SegmentPool.SECCOMP_NOTIF_POOL.release(notif)
+                    SegmentPool.SECCOMP_NOTIF_RESP_POOL.release(resp)
+                }
+            }
+        }
+    }
+
+    @Test
+    fun `test handshake - shutdown accompanying ACK is deferred until after continue`() {
+        val transport = MockTransport().apply {
+            handshakeBytes = byteArrayOf(PROTOCOL_ACK_BYTE, SHUTDOWN_COMMAND_BYTE)
+            nextReadResult = LinuxNative.SyscallResult.Success(2L)
+        }
+        val socketFd = FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(10)
+        val listenerFd = FileDescriptor.unsafe<FileDescriptorRole.SeccompNotif>(20)
+        var shutdownObservedContinue = false
+
+        ProfilerSessionHandler(
+            socketFd,
+            listenerFd,
+            transport,
+            transport,
+            transport,
+            MockReader(),
+            mapOf(2 to "OPEN"),
+        ) { shutdownObservedContinue = transport.continueSent }.use { handler ->
+            io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
+                val notif = SegmentPool.SECCOMP_NOTIF_POOL.rent()
+                val resp = SegmentPool.SECCOMP_NOTIF_RESP_POOL.rent()
+                try {
+                    notif.writeLong(Layouts.SECCOMP_NOTIF_ID_OFFSET, 123L)
+                    notif.writeInt(Layouts.SECCOMP_NOTIF_PID_OFFSET, 456)
+                    notif.writeInt(Layouts.SECCOMP_NOTIF_NR_OFFSET, 2)
+                    notif.writeLong(Layouts.SECCOMP_NOTIF_ARGS_OFFSET, 0x1000L)
+
+                    val result = with(arena) {
+                        handler.processNotification(notif, resp, listenerFd, socketFd)
+                    }
+
+                    assertEquals(NotifResult.HANDLED, result)
+                    assertTrue(transport.continueSent)
+                    assertTrue(shutdownObservedContinue, "Shutdown callback must run after CONTINUE is sent")
                 } finally {
                     SegmentPool.SECCOMP_NOTIF_POOL.release(notif)
                     SegmentPool.SECCOMP_NOTIF_RESP_POOL.release(resp)
