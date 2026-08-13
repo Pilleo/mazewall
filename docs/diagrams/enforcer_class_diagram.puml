@@ -28,6 +28,12 @@ class "CompiledSandbox" as io.mazewall.CompiledSandbox<S extends PolicyScope> {
   +BpfProgram<Verified> getProgram()
   +List<BpfInstruction> getCompiledFilters()
 }
+class "InstallationReceipt" as io.mazewall.InstallationReceipt {
+  +boolean getProcessWide()
+  +PolicyDefinition<?> getRequestedPolicy()
+  +AutoCloseable getSupervisorSession()
+  +long getTimestampMillis()
+}
 class "KernelFeatureMatrix" as io.mazewall.KernelFeatureMatrix {
   + {static}Companion Companion
   __
@@ -211,7 +217,7 @@ class "PolicyKt" as io.mazewall.PolicyKt {
   + {static}Policy<S, Compiled> compile(Policy<? extends S, ? extends Uncompiled>, Arch)
   + {static}Policy<ProcessWideSafe, Uncompiled> plusProcessWide(Policy<? extends ProcessWideSafe, ? extends Uncompiled>, Policy<? extends ProcessWideSafe, ? extends Uncompiled>)
   + {static}Policy<ThreadLocalOnly, Uncompiled> plusThreadLocal(Policy<? extends S, ? extends Uncompiled>, Policy<? extends ThreadLocalOnly, ? extends Uncompiled>)
-  + {static}AutoCloseable install(Policy<? extends S, ? extends Uncompiled>)
+  + {static}InstallationReceipt install(Policy<? extends S, ? extends Uncompiled>)
 }
 class "PolicyPresets" as io.mazewall.PolicyPresets {
   + {static}PolicyPresets INSTANCE
@@ -464,8 +470,8 @@ class "ContainedExecutors" as io.mazewall.enforcer.api.ContainedExecutors {
   __
   +void installOnCurrentThread(Policy<?, ? extends Uncompiled>[])
   +void installOnCurrentThread(Policy<?, ? extends Uncompiled>, StacktraceScopingPolicy)
-  +AutoCloseable installOnCurrentThread(PolicyDefinition<?>)
-  +AutoCloseable installOnCurrentThread(PolicyDefinition<?>, StacktraceScopingPolicy)
+  +InstallationReceipt installOnCurrentThread(PolicyDefinition<?>)
+  +InstallationReceipt installOnCurrentThread(PolicyDefinition<?>, StacktraceScopingPolicy)
   +void installOnProcess(Policy<? extends ProcessWideSafe, ? extends Uncompiled>[])
   +ExecutorService wrap(ExecutorService, Policy<?, ? extends Uncompiled>[])
   +ExecutorService wrap(ExecutorService, Policy<?, ? extends Uncompiled>, StacktraceScopingPolicy)
@@ -1401,6 +1407,7 @@ io.mazewall.BillOfBehaviorDto --> io.mazewall.StackProfileEntryDto
 io.mazewall.BpfFilter --> io.mazewall.BpfFilter
 io.mazewall.CompiledSandbox --> io.mazewall.seccomp.BpfProgram
 io.mazewall.CompiledSandbox --> io.mazewall.PolicyDefinition
+io.mazewall.InstallationReceipt --> io.mazewall.PolicyDefinition
 io.mazewall.LinuxNative .u.|> io.mazewall.NativeEngine
 io.mazewall.LinuxNative --> io.mazewall.NativeEngine
 io.mazewall.LinuxNative --> io.mazewall.LinuxNative
@@ -1514,9 +1521,11 @@ io.mazewall.landlock.LandlockSession --> io.mazewall.landlock.LandlockState
 io.mazewall.landlock.LandlockSession --> io.mazewall.PolicyDefinition
 io.mazewall.platform.seccomp.daemon.SeccompDaemonEngine --> io.mazewall.core.SocketManager
 io.mazewall.platform.seccomp.daemon.SeccompDaemonEngine --> io.mazewall.core.FileDescriptor
+io.mazewall.platform.seccomp.daemon.SeccompDaemonEngine --> io.mazewall.RawSyscallOperations
 io.mazewall.platform.seccomp.daemon.SeccompDaemonEngine --> io.mazewall.platform.seccomp.daemon.SeccompDaemonState
 io.mazewall.platform.seccomp.daemon.SeccompDaemonEngine --> io.mazewall.platform.seccomp.daemon.SeccompNotifHandler
 io.mazewall.platform.seccomp.daemon.SeccompDaemonEngine --> io.mazewall.NativeEngine
+io.mazewall.platform.seccomp.daemon.SeccompDaemonEngine --> io.mazewall.ffi.memory.ManagedSegment
 io.mazewall.platform.seccomp.daemon.SeccompSessionHandler --> io.mazewall.ffi.memory.NativeArena
 io.mazewall.platform.seccomp.daemon.SeccompSessionHandler --> io.mazewall.core.SocketManager
 io.mazewall.platform.seccomp.daemon.SeccompSessionHandler --> io.mazewall.core.FileDescriptor

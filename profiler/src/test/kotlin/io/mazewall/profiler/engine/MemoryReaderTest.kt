@@ -16,6 +16,17 @@ import io.mazewall.enforcer.api.ContainmentViolationException
 class MemoryReaderTest {
 
     @Test
+    fun `default profiler memory reader methods do not recurse`() {
+        val reader = object : ProfilerMemoryReader {}
+
+        io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
+            val result = with(arena) { reader.readStringFromProcess(Tid(1234), 0L) }
+
+            assertEquals(null, result)
+        }
+    }
+
+    @Test
     fun `test resolveLink strips deleted suffix`() {
         val tid = Tid(1234)
         val link = "cwd"

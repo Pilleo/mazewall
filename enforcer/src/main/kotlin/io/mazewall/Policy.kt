@@ -286,6 +286,6 @@ public operator fun <S : PolicyScope> Policy<S, Uncompiled>.plus(
 /**
  * Installs this policy on the current thread.
  */
-public fun <S : PolicyScope> Policy<S, Uncompiled>.install(): AutoCloseable {
+public fun <S : PolicyScope> Policy<S, Uncompiled>.install(): io.mazewall.InstallationReceipt {
     return io.mazewall.enforcer.api.ContainedExecutors.installOnCurrentThread(this.definition)
 }

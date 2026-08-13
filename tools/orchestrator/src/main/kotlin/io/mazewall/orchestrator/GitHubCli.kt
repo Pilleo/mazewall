@@ -10,6 +10,9 @@ import java.util.concurrent.TimeUnit
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
+internal fun proxyConfigurationStatus(value: String?): String =
+    if (value.isNullOrBlank()) "not configured" else "configured"
+
 @Serializable
 data class GitHubLabel(
     val name: String
@@ -368,13 +371,11 @@ class RealGitHubClient(private val config: OrchestratorConfig) : GitHubClient {
                     checkForAuthenticationFailure(command, exitCode, output)
 
                     if (output.contains("network is unreachable", ignoreCase = true) || output.contains("timeout", ignoreCase = true)) {
-                        System.err.println("  [GitHubCli Diagnostics] Command failed with network issue. Dumping environment:")
+                        System.err.println("  [GitHubCli Diagnostics] Command failed with network issue. Proxy configuration:")
                         val envVars = pb.environment()
-                        System.err.println("    HTTP_PROXY: ${envVars["HTTP_PROXY"]}")
-                        System.err.println("    HTTPS_PROXY: ${envVars["HTTPS_PROXY"]}")
-                        System.err.println("    http_proxy: ${envVars["http_proxy"]}")
-                        System.err.println("    https_proxy: ${envVars["https_proxy"]}")
-                        System.err.println("    NO_PROXY: ${envVars["NO_PROXY"]}")
+                        listOf("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy", "NO_PROXY").forEach { name ->
+                            System.err.println("    $name: ${proxyConfigurationStatus(envVars[name])}")
+                        }
 
                         try {
                             val ipRoute = ProcessBuilder("ip", "route").start()
@@ -411,6 +412,20 @@ class RealGitHubClient(private val config: OrchestratorConfig) : GitHubClient {
             // Ignore if it already exists or auth fails
         }
         execute("gh", "issue", "edit", issueNumber, "--add-label", label)
+    }
+
+    override fun ensureLabelExists(label: String) {
+        execute(
+            "gh",
+            "label",
+            "create",
+            label,
+            "--force",
+            "--color",
+            "6f42c1",
+            "--description",
+            "Pull request replaced by a newer generation"
+        )
     }
 
     override fun labelPr(prNumber: String, label: String) {

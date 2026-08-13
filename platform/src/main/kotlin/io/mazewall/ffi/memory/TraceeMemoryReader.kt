@@ -4,6 +4,7 @@ import io.mazewall.LinuxNative
 import io.mazewall.core.Pid
 import io.mazewall.core.Tid
 import io.mazewall.ffi.Layouts
+import io.mazewall.ffi.NativeConstants
 import io.mazewall.map
 import io.mazewall.onFailure
 import io.mazewall.onSuccess
@@ -97,11 +98,15 @@ public interface TraceeMemoryReader {
                 MemorySegment.copy(localBuf.unwrap, ValueLayout.JAVA_BYTE, 0L, dest, 0, bytesRead)
                 dest
             } else {
-                if (res is LinuxNative.SyscallResult.Error && res.errno == 1) { // EPERM = 1
+                if (res is LinuxNative.SyscallResult.Error && res.errno == NativeConstants.EPERM) {
                     if (warnOnEperm) {
                         System.err.println("[DAEMON] WARN: Permission denied reading memory from TID ${tid.value}. (Yama ptrace_scope?)")
+                        "<YAMA_ERROR_UNKNOWN_PATH>\u0000".toByteArray(StandardCharsets.UTF_8)
+                    } else {
+                        throw IllegalStateException(
+                            "Permission denied reading memory from TID ${tid.value} at address 0x${remoteAddr.toString(16)}"
+                        )
                     }
-                    "<YAMA_ERROR_UNKNOWN_PATH>\u0000".toByteArray(StandardCharsets.UTF_8)
                 } else {
                     null
                 }
