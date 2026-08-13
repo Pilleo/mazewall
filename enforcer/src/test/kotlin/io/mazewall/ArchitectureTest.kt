@@ -282,6 +282,8 @@ class ArchitectureTest {
             .resideInAPackage("io.mazewall..")
             .and()
             .haveSimpleNameNotStartingWith("JvmFloorWorkload")
+            .and()
+            .haveSimpleNameNotStartingWith("ProfilerDaemonEngine")
             .should()
             .callMethodWhere(object : DescribedPredicate<JavaMethodCall>("calls to virtual thread creation APIs") {
                 override fun test(input: JavaMethodCall): Boolean {
@@ -291,7 +293,10 @@ class ArchitectureTest {
                         (owner.isAssignableTo(java.lang.Thread::class.java) && (name == "ofVirtual" || name == "startVirtualThread"))
                 }
             })
-            .because("Virtual thread executors are not permitted in production runtime paths of mazewall")
+            .because(
+                "Virtual thread executors are prohibited where seccomp can be installed; " +
+                    "ProfilerDaemonEngine is an out-of-process observer and may use them for session I/O"
+            )
             .check(allClasses)
     }
 

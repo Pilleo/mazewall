@@ -826,4 +826,35 @@ class ProfilerDaemonTest {
         assertTrue(closedFds.contains(100), "Socket FD 100 should have been closed on generic exception")
 
     }
+    @Test
+    fun `connection executor uses virtual threads beyond the former fixed session limit`() {
+        val daemon = ProfilerDaemonEngine("/tmp/test.sock", MockTransport(), MockReader())
+        val delegateField = ProfilerDaemonEngine::class.java.getDeclaredField("delegate").apply {
+            isAccessible = true
+        }
+        val delegate = delegateField.get(daemon)
+        val executorField = delegate.javaClass.getDeclaredField("connectionExecutor").apply {
+            isAccessible = true
+        }
+        val executor = executorField.get(delegate) as java.util.concurrent.ExecutorService
+        val started = java.util.concurrent.CountDownLatch(201)
+        val release = java.util.concurrent.CountDownLatch(1)
+        val platformThreadObserved = java.util.concurrent.atomic.AtomicBoolean(false)
+
+        try {
+            repeat(201) {
+                executor.submit {
+                    platformThreadObserved.compareAndSet(false, !Thread.currentThread().isVirtual)
+                    started.countDown()
+                    release.await()
+                }
+            }
+            assertTrue(started.await(10, java.util.concurrent.TimeUnit.SECONDS))
+            assertFalse(platformThreadObserved.get(), "Profiler connection handlers must use virtual threads")
+        } finally {
+            release.countDown()
+            executor.shutdownNow()
+        }
+    }
+
 }

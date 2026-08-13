@@ -11,6 +11,7 @@ import io.mazewall.core.SocketManager
 import io.mazewall.core.Syscall
 import io.mazewall.platform.seccomp.daemon.SeccompDaemonEngine
 import io.mazewall.platform.seccomp.daemon.SeccompDaemonState
+import java.util.concurrent.Executors
 
 /**
  * Standalone Profiler Daemon Engine.
@@ -58,6 +59,10 @@ public class ProfilerDaemonEngine(
         maxConnections = MAX_CONNECTIONS,
         engine = engine,
         socketManager = socketManager,
+        connectionExecutor = Executors.newThreadPerTaskExecutor(
+            Thread.ofVirtual().name("profiler-session-", 0L).factory()
+        ),
+        enforceConnectionLimit = false,
     )
 
     @JvmField

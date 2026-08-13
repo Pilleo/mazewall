@@ -62,13 +62,9 @@ public class SeccompDaemonEngine(
 
     private val engine: NativeEngine = LinuxNative,
     private val socketManager: SocketManager = RealSocketManager,
+    private val connectionExecutor: ExecutorService = newPlatformConnectionExecutor(maxConnections),
+    private val enforceConnectionLimit: Boolean = true,
 ) {
-    private val connectionExecutor: ExecutorService = Executors.newFixedThreadPool(maxConnections) { r ->
-        Thread(r).apply {
-            isDaemon = true
-            name = "seccomp-conn"
-        }
-    }
 
     @JvmField
     public val clientSockets = CopyOnWriteArrayList<FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>>()
@@ -84,6 +80,14 @@ public class SeccompDaemonEngine(
         private const val POLLFD_STRUCT_SIZE = 8L
         private const val ACK_BUF_SIZE = 1L
         private const val PROTOCOL_ACK_BYTE = 0xAC.toByte()
+
+        private fun newPlatformConnectionExecutor(maxConnections: Int): ExecutorService =
+            Executors.newFixedThreadPool(maxConnections) { runnable ->
+                Thread(runnable).apply {
+                    isDaemon = true
+                    name = "seccomp-conn"
+                }
+            }
     }
 
     public fun run() {
@@ -185,15 +189,15 @@ public class SeccompDaemonEngine(
                     }
                 }
 
-                if (clientSockets.size >= maxConnections) {
+                if (enforceConnectionLimit && clientSockets.size >= maxConnections) {
                     System.err.println("[SECCOMP-DAEMON] Rejecting connection: limit reached (${clientSockets.size})")
                     socketManager.close(clientFd)
                     return
                 }
 
                 clientSockets.add(clientFd)
-                
-                // Spawn a new thread to handle the connection concurrently!
+
+                // Run each connection using the executor selected by the calling daemon.
                 connectionExecutor.submit {
                     handleConnection(clientFd)
                 }

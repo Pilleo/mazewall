@@ -146,8 +146,8 @@ This ensures that only actual, dynamic application-level read/write paths and ne
 ### Tier S: Out-of-Process `USER_NOTIF` Supervisor (The Unprivileged Default)
 Placing the supervisor thread inside the *same* JVM leads to fatal safepoint deadlocks. Relying on `strace` leads to noisy, process-wide telemetry and brittle text scraping. Instead, we use `SECCOMP_RET_USER_NOTIF` backed by a lightweight sidecar process communicating via Unix Domain Sockets using a structured binary protocol to prevent log injection.
 
-**Reactive Reactor Loop (`ProfilerDaemonEngine`):**
-The supervisor daemon runs a reactor loop delegating connection lifecycle and event processing to `ProfilerSessionHandler`. This decoupling ensures that the core daemon engine remains resilient to individual session failures or malformed socket data.
+**Reactive Session Handling (`ProfilerDaemonEngine`):**
+The supervisor daemon delegates connection lifecycle and event processing to `ProfilerSessionHandler`. Persistent profiler connections run on virtual threads rather than the shared daemon engine’s fixed platform-thread pool, so long-lived profiling sessions are not capped by an arbitrary worker count and do not require hundreds of native thread stacks. This is safe with respect to carrier poisoning because the daemon is an out-of-process observer: these virtual threads never install seccomp filters. Each session still polls only its own listener and control socket; this is not a single multiplexed native reactor. FFM downcalls can temporarily pin carriers, so a future `epoll` reactor may still improve efficiency at very large session counts.
 
 **Synchronous & Stateless `profile<T>` API:**
 The profiling session is run synchronously inside a dedicated OS platform thread via `Profiler.profile { block() }`. Spawning a dedicated thread ensures the seccomp filter is discarded once the thread exits, preventing filter leakage.
