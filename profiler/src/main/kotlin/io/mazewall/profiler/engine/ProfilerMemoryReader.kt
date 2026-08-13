@@ -25,7 +25,7 @@ public interface ProfilerMemoryReader : TraceeMemoryReader {
         remoteAddr: Long,
         maxLen: Int,
         warnOnEperm: Boolean
-    ): String? = readStringFromProcess(tid, remoteAddr, maxLen)
+    ): String? = TraceeMemoryReader.Real.readString(tid, remoteAddr, maxLen, warnOnEperm)
 
     context(arena: NativeArena)
     override fun readBytes(
@@ -47,5 +47,4 @@ public interface ProfilerMemoryReader : TraceeMemoryReader {
  * Real implementation of [ProfilerMemoryReader] using process_vm_readv and readlink.
  */
 public object RealMemoryReader : ProfilerMemoryReader, TraceeMemoryReader by TraceeMemoryReader.Real
-
 

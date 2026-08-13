@@ -104,7 +104,6 @@ public object BypassPaths {
                 val userHome = System.getProperty("user.home")
                 if (!userHome.isNullOrEmpty()) {
                     addPathAndReal(Paths.get(userHome).resolve(".sdkman"))
-                    addPathAndReal(Paths.get(userHome).resolve(".m2"))
                 }
             } catch (e: Exception) {
                 logger.warning { "Failed to add user.home paths: ${e.message}" }

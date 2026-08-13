@@ -7,6 +7,7 @@ import io.mazewall.enforcer.state.ContainerState
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import java.util.concurrent.Executors
+import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
@@ -58,6 +59,41 @@ class ContainedExecutorsCoverageTest {
 
         System.setProperty("io.mazewall.fallback", "WARN_AND_BYPASS")
         ContainedExecutors.installOnCurrentThread(Policy.builder().build())
+    }
+
+    @Test
+    fun `unsupported-platform fallback receipt reports bypass instead of installation`() {
+        Platform.setProvider(
+            object : PlatformProvider by RealPlatformProvider {
+                override fun getOsName(): String = "Linux"
+                override fun hasKernelSeccompSupport(): Boolean = false
+            },
+        )
+        System.setProperty("io.mazewall.fallback", "SILENT_BYPASS")
+
+        val receipt = ContainedExecutors.installOnCurrentThread(Policy.builder().build().definition)
+
+        assertEquals(false, receipt.installed)
+    }
+
+    @Test
+    fun `failed installation fallback receipt reports bypass instead of installation`() {
+        Platform.setProvider(
+            object : PlatformProvider by RealPlatformProvider {
+                override fun getOsName(): String = "Linux"
+                override fun hasKernelSeccompSupport(): Boolean = true
+                override fun checkSeccompSanity(): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
+                    LinuxNative.SyscallResult.Error(22, -1)
+            },
+        )
+        val existingPolicy = Policy.builder().allowFsRead("/tmp").build()
+        val incompatiblePolicy = Policy.builder().allowFsRead("/").build()
+        ContainmentStateRegistry.threadState = ContainmentStateRegistry.threadState.withLandlockPolicy(existingPolicy.definition)
+        System.setProperty("io.mazewall.fallback", "WARN_AND_BYPASS")
+
+        val receipt = ContainedExecutors.installOnCurrentThread(incompatiblePolicy.definition)
+
+        assertEquals(false, receipt.installed)
     }
 
     @Test

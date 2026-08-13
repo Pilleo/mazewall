@@ -23,6 +23,13 @@ class ResolveAbsolutePathTest {
     }
 
     @Test
+    fun `Maven settings remain subject to supervisor policy evaluation`() {
+        val settings = Paths.get(System.getProperty("user.home"), ".m2", "settings.xml")
+
+        assertFalse(BypassPaths.isBypassPath(settings))
+    }
+
+    @Test
     fun `resolveAbsolutePath returns path even for non-existent absolute path`() {
         val handler = SupervisorSessionHandler(
             FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(-1),

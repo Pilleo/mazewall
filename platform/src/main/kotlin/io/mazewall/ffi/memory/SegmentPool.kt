@@ -63,9 +63,13 @@ public class SegmentPool private constructor(
 
     /**
      * Releases a segment back to the pool.
+     *
+     * The pool retains valid overflow segments so later concurrency waves reuse the native
+     * allocation. [poolSize] controls preallocation, not a retention limit: the shared arena
+     * cannot free individual segments that exceed such a limit.
      */
     public fun release(segment: ManagedSegment) {
-        if (segment.byteSize() == byteSize && queue.size < poolSize) {
+        if (segment.byteSize() == byteSize) {
             queue.offer(segment)
         }
     }
