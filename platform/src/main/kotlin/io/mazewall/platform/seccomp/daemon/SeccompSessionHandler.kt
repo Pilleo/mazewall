@@ -32,6 +32,7 @@ public class SeccompSessionHandler(
     private val listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open>,
     private val notifHandler: SeccompNotifHandler,
     private val onShutdown: (String) -> Unit = {},
+    private val onSocketClosed: () -> Unit = {},
     private val engine: NativeEngine = LinuxNative,
     private val socketManager: SocketManager = RealSocketManager,
 ) : AutoCloseable {
@@ -115,7 +116,7 @@ public class SeccompSessionHandler(
                             isPassThrough = true
                             val pfd2 = PollFdSegment.of(pollFds.asSlice(Layouts.POLLFD_SIZE, Layouts.POLLFD_SIZE))
                             pfd2.setFd(-1)
-                            try { socketManager.close(socketFd) } catch (_: Exception) {}
+                            closeControlSocket()
                         }
                     }
                 }
@@ -126,7 +127,14 @@ public class SeccompSessionHandler(
     }
 
     private fun handleShutdownRequest(ackBuf: ManagedSegment, pollFds: ManagedSegment): Boolean {
-        val res = engine.memory.read(socketFd, ackBuf, 1L)
+        var res: LinuxNative.SyscallResult<Long, *>
+        while (true) {
+            res = engine.memory.read(socketFd, ackBuf, 1L)
+            if (res is LinuxNative.SyscallResult.Error<*> && res.errno == NativeConstants.EINTR) {
+                continue
+            }
+            break
+        }
         return when (res) {
             is LinuxNative.SyscallResult.Success -> {
                 val value = res.value
@@ -140,7 +148,7 @@ public class SeccompSessionHandler(
                         // Disable polling on socketFd by setting its fd to -1
                         val pfd2 = PollFdSegment.of(pollFds.asSlice(Layouts.POLLFD_SIZE, Layouts.POLLFD_SIZE))
                         pfd2.setFd(-1)
-                        try { socketManager.close(socketFd) } catch (_: Exception) {}
+                        closeControlSocket()
                         false
                     } else {
                         false
@@ -153,6 +161,14 @@ public class SeccompSessionHandler(
         }
     }
 
+    private fun closeControlSocket() {
+        try {
+            socketManager.close(socketFd)
+        } catch (_: Exception) {
+            return
+        }
+        onSocketClosed()
+    }
 
     private fun sendSeccompContinue(id: Long, resp: ManagedSegment) {
         resp.fill(0)

@@ -216,18 +216,11 @@ internal class SupervisorSessionHandler(
                     if (isOpen && extracted.pathStr != null) {
                         val pathStr = extracted.pathStr
                         try {
-                            val rawPath = java.nio.file.Paths.get(pathStr)
-                            if (BypassPaths.isBypassPath(rawPath)) {
-                                sendSeccompContinue(id, resp)
-                                logger.info { "[SUPERVISOR-DEBUG] Fast-path allow continue (raw matched) path=$pathStr" }
-                                return true
-                            }
-
                             val path = resolveAbsolutePath(pidVal, extracted.dirfd, pathStr)
                             if (path != null) {
                                 val absPathStr = path.toAbsolutePath().toString()
                                 resolvedPathStr = absPathStr
-                                if (BypassPaths.isBypassPath(path)) {
+                                if (resolveBypassPath(path) != null) {
                                     sendSeccompContinue(id, resp)
                                     logger.info { "[SUPERVISOR-DEBUG] Fast-path allow continue (matched) resolved=$absPathStr" }
                                     return true
@@ -293,6 +286,10 @@ internal class SupervisorSessionHandler(
             }
         }
         return SyscallArguments(pathStr, sockaddrBytes, dirfd)
+    }
+
+    private fun resolveBypassPath(resolvedPath: java.nio.file.Path): java.nio.file.Path? {
+        return resolvedPath.takeIf(BypassPaths::isBypassPath)
     }
 
     private fun resolveAbsolutePath(pid: Int, dirfd: Int, pathStr: String): java.nio.file.Path? {

@@ -619,7 +619,11 @@ data class AwaitingJulesStartState(
             if (slot.julesTriggerAttempts < env.config.julesTriggerAttempts) {
                 slot.julesTriggerAttempts++
                 for (cmd in transition.commands) {
-                    interpreter.interpret(cmd)
+                    val result = interpreter.interpret(cmd)
+                    if (cmd is OrchestratorCommand.TriggerJulesSession && result is JulesSession) {
+                        slot.julesSessionId = result.id
+                        return AwaitingPrState(issueId, githubIssueNumber, result.id)
+                    }
                 }
                 slot.retryAfterTime = currentTime + TimeUnit.SECONDS.toMillis(env.config.julesTriggerIntervalSeconds)
                 return this
@@ -832,7 +836,11 @@ data class AwaitingPrState(
         }
 
         if (isTaskTimedOut(slot, env.config)) {
-            env.errPrintln("❌ Task $issueId timed out waiting for PR creation. Returning to SELECT_TASK.")
+            env.errPrintln("❌ Task $issueId timed out waiting for PR creation. Deferring task and returning to SELECT_TASK.")
+            val timedOutIssue = env.parseAllIssues().firstOrNull { it.id == issueId }
+                ?: error("Cannot defer timed-out task $issueId: backlog issue not found")
+            env.markIssueAsDeferred(timedOutIssue)
+            context.skippedIds.add(issueId)
             context.activeSlots.remove(slot)
             return SelectTaskState
         }
@@ -1514,8 +1522,15 @@ data class CreateGenerationState(
 
         env.println("🚀 Starting new generation for task $issueId (Gen ${slot.generation + 1})...")
 
-        // 1. Mark current PR as superseded
-        env.gitHubClient.labelPr(prNumber, "superseded")
+        // 1. Mark current PR as superseded. Repositories do not necessarily pre-provision this label.
+        try {
+            env.gitHubClient.ensureLabelExists("superseded")
+            env.gitHubClient.labelPr(prNumber, "superseded")
+        } catch (e: Exception) {
+            env.errPrintln("❌ Failed to mark PR #$prNumber as superseded: ${e.message}")
+            slot.retryAfterTime = currentTime + TimeUnit.SECONDS.toMillis(env.config.pollingIntervalSeconds)
+            return this
+        }
 
         // 2. Extract info
         val prUrl = env.gitHubClient.getPrUrl(prNumber)

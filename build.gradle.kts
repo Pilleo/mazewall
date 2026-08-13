@@ -152,8 +152,8 @@ tasks.withType<Test>().configureEach {
     useJUnitPlatform()
     // Configure global timeout to prevent infinite test hangs (generous for testcontainers pulls)
     systemProperty("junit.jupiter.execution.timeout.default", "2 m")
-    // When a timeout occurs, dump thread stacks to immediately identify deadlocks
-    systemProperty("junit.jupiter.execution.timeout.mode", "thread_dump")
+    // Run timed tests on a separate thread so JUnit can interrupt hangs and report their stack trace.
+    systemProperty("junit.jupiter.execution.timeout.thread.mode.default", "SEPARATE_THREAD")
     
     testLogging {
         showExceptions = true
@@ -366,6 +366,18 @@ subprojects {
                         counter = "INSTRUCTION"
                         value = "COVEREDRATIO"
                         minimum = "0.84".toBigDecimal()
+                    }
+                }
+            } else if (project.name == "platform") {
+                // Keep coverage from the extracted native/FFM and shared seccomp code gated.
+                // This is the platform module's current unit-test baseline, rounded down so
+                // small compiler instrumentation changes do not make the threshold flaky.
+                rule {
+                    element = "BUNDLE"
+                    limit {
+                        counter = "INSTRUCTION"
+                        value = "COVEREDRATIO"
+                        minimum = "0.30".toBigDecimal()
                     }
                 }
             } else if (project.name == "orchestrator") {

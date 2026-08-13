@@ -81,4 +81,29 @@ class SupervisorProcessMemoryReaderTest {
             }
         }
     }
+
+    @Test
+    fun `test reading string fails closed when process vm readv returns EPERM`() {
+        val tid = Tid(1234)
+        val mockMemory = object : MockNativeMemory() {
+            override fun processVmReadv(
+                pid: Pid,
+                localIov: ManagedSegment,
+                liovcnt: Long,
+                remoteIov: ManagedSegment,
+                riovcnt: Long,
+                flags: Long
+            ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
+                LinuxNative.SyscallResult.Error(io.mazewall.ffi.NativeConstants.EPERM, -1L)
+        }
+        LinuxNative.setEngine(MockNativeEngine(memory = mockMemory))
+
+        NativeArena.ofConfined().use { arena ->
+            with(arena) {
+                assertThrows(ContainmentViolationException::class.java) {
+                    SupervisorProcessMemoryReader.readString(tid, 0x1000L, 100)
+                }
+            }
+        }
+    }
 }

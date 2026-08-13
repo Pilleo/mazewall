@@ -104,7 +104,6 @@ public object BypassPaths {
                 val userHome = System.getProperty("user.home")
                 if (!userHome.isNullOrEmpty()) {
                     addPathAndReal(Paths.get(userHome).resolve(".sdkman"))
-                    addPathAndReal(Paths.get(userHome).resolve(".m2"))
                 }
             } catch (e: Exception) {
                 logger.warning { "Failed to add user.home paths: ${e.message}" }
@@ -167,16 +166,6 @@ public object BypassPaths {
                 // Normal
             } catch (e: Exception) {
                 logger.warning { "Failed to add GRADLE_USER_HOME: ${e.message}" }
-            }
-
-            // Add /proc and /sys virtual filesystems to prevent GC/JIT thread deadlocks
-            try {
-                addPathAndReal(Paths.get("/proc"))
-                addPathAndReal(Paths.get("/sys"))
-            } catch (e: InvalidPathException) {
-                // Normal
-            } catch (e: Exception) {
-                logger.warning { "Failed to add /proc or /sys: ${e.message}" }
             }
 
             // (Removed user.dir bypass because it breaks profiler tests by bypassing all project files)

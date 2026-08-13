@@ -3,6 +3,7 @@ package io.mazewall.enforcer.supervisor
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -14,6 +15,19 @@ import java.nio.file.Path
 import java.nio.file.Paths
 
 class ResolveAbsolutePathTest {
+
+    @Test
+    fun `proc and sys paths remain subject to supervisor policy evaluation`() {
+        assertFalse(BypassPaths.isBypassPath(Paths.get("/proc/self/environ")))
+        assertFalse(BypassPaths.isBypassPath(Paths.get("/sys/kernel/security")))
+    }
+
+    @Test
+    fun `Maven settings remain subject to supervisor policy evaluation`() {
+        val settings = Paths.get(System.getProperty("user.home"), ".m2", "settings.xml")
+
+        assertFalse(BypassPaths.isBypassPath(settings))
+    }
 
     @Test
     fun `resolveAbsolutePath returns path even for non-existent absolute path`() {
@@ -61,6 +75,48 @@ class ResolveAbsolutePathTest {
         // So the resolved path's prefix will be /proc/0/cwd/build/non-existent-file-12345.
         // Let's verify that this normalized relative path resolution is correctly resolved.
         assertEquals(Paths.get("/proc/0/cwd/build/non-existent-file-12345").normalize(), result)
+    }
+
+    @Test
+    fun `relative bypass path is matched only after tracee dirfd resolution`() {
+        val handler = SupervisorSessionHandler(
+            FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(-1),
+            FileDescriptor.unsafe<FileDescriptorRole.SeccompNotif>(-1)
+        )
+        val traceeDirectory = Files.createTempDirectory("mazewall-tracee-dir")
+        val tracee = ProcessBuilder(
+            "bash",
+            "-c",
+            "exec 9<\"$traceeDirectory\"; echo $$; sleep 30"
+        ).redirectErrorStream(true).start()
+
+        try {
+            val traceePid = tracee.inputReader().readLine().toInt()
+            val resolveMethod = SupervisorSessionHandler::class.java.getDeclaredMethod(
+                "resolveAbsolutePath",
+                Int::class.javaPrimitiveType,
+                Int::class.javaPrimitiveType,
+                String::class.java
+            )
+            resolveMethod.isAccessible = true
+            val resolvedPath = resolveMethod.invoke(handler, traceePid, 9, "build/secret") as Path
+
+            val bypassMethod = SupervisorSessionHandler::class.java.getDeclaredMethod(
+                "resolveBypassPath",
+                Path::class.java
+            )
+            bypassMethod.isAccessible = true
+
+            // "build" is beneath the daemon working directory and is normally bypassed. It must not
+            // bypass when the tracee asks openat() to resolve that same relative spelling under fd 9.
+            val result = bypassMethod.invoke(handler, resolvedPath) as Path?
+
+            assertNull(result)
+        } finally {
+            tracee.destroyForcibly()
+            tracee.waitFor()
+            Files.deleteIfExists(traceeDirectory)
+        }
     }
 
     @Test
