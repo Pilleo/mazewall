@@ -2,13 +2,13 @@ package io.mazewall
 
 /**
  * A receipt describing the result of a seccomp or Landlock sandbox installation attempt.
- * 
+ *
  * **Warning:** Linux containment filters (Seccomp and Landlock) are irreversible for the lifetime of the thread.
  * This receipt is strictly for diagnostic and assessment purposes and cannot be "closed" or "uninstalled" to lift the sandbox.
- * 
- * If the policy required an active out-of-process supervisor (e.g. for dynamic path resolution or logging), 
- * the [supervisorSession] property will contain a closeable session to release the background tracking resources when the 
- * thread terminates. Closing the supervisor session **does not** uninstall the seccomp filter; it simply tears down 
+ *
+ * If the policy required an active out-of-process supervisor (e.g. for dynamic path resolution or logging),
+ * the [supervisorSession] property will contain a closeable session to release the background tracking resources when the
+ * thread terminates. Closing the supervisor session **does not** uninstall the seccomp filter; it simply tears down
  * the notification listener. Any subsequent syscalls that would have been routed to the supervisor will receive ENOSYS.
  *
  * Callers performing diagnostics or attestation must check [installed]. When explicitly configured fallback behavior allows
