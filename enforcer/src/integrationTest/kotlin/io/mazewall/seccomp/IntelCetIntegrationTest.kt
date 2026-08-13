@@ -24,9 +24,12 @@ class IntelCetIntegrationTest : BaseIntegrationTest() {
     @EnabledIfCetSupported
     fun `queryIntelCetStatus returns active status when CET is supported and locked`() {
         val policy = Policy.builder().lockIntelCet().build()
-        policy.install().use {
+        val receipt = policy.install()
+        try {
             val status = Platform.queryIntelCetStatus()
             assertTrue((status and io.mazewall.ffi.NativeConstants.ARCH_SHSTK_SHSTK) != 0L, "Expected ARCH_SHSTK_SHSTK to be active")
+        } finally {
+            receipt.supervisorSession?.close()
         }
     }
 

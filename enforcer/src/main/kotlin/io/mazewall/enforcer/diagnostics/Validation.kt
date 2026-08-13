@@ -11,19 +11,16 @@ import kotlin.contracts.ExperimentalContracts
 import kotlin.contracts.contract
 
 /**
- * Checks if the given thread is a Virtual Thread or a Loom carrier thread (e.g., ForkJoinWorkerThread).
+ * Checks whether containment would be installed from a virtual thread.
+ *
+ * Ordinary [java.util.concurrent.ForkJoinWorkerThread] instances are platform threads. Their class
+ * and name do not establish that they are Loom's private carrier, so rejecting them would prevent
+ * containment from being installed by a regular [java.util.concurrent.ForkJoinPool].
  */
-public fun isVirtualOrCarrierThread(thread: Thread = Thread.currentThread()): Boolean {
-    if (thread.isVirtual) return true
-    val className = thread.javaClass.name
-    val name = thread.name
-    return className.contains("ForkJoinWorkerThread") ||
-        name.contains("ForkJoinPool") ||
-        name.contains("carrier", ignoreCase = true)
-}
+public fun isVirtualOrCarrierThread(thread: Thread = Thread.currentThread()): Boolean = thread.isVirtual
 
 /**
- * Validates that the current thread is not a Virtual Thread or Loom carrier thread (Loom carrier poisoning protection).
+ * Validates that the current thread is not a virtual thread (Loom carrier poisoning protection).
  *
  * This function uses a Kotlin contract to formalize this invariant, allowing the compiler to
  * perform flow analysis under the guarantee that the current thread is a platform thread.
@@ -35,7 +32,7 @@ public fun validateNotVirtual() {
     }
     if (isVirtualOrCarrierThread()) {
         throw IllegalStateException(
-            "Attempted to apply thread-scoped seccomp containment inside a virtual or carrier thread. " +
+            "Attempted to apply thread-scoped seccomp containment inside a virtual thread. " +
                 "Seccomp filters are per-thread and would contaminate the carrier thread, " +
                 "affecting other unrelated virtual threads. " +
                 "Use process-wide containment (installOnProcess) or ContainedExecutors.wrap(executorService).",
@@ -48,7 +45,7 @@ public fun validateNotVirtual() {
  * sandboxing rules.
  *
  * This function uses a Kotlin contract to formalize the invariant that the
- * code is running on a standard Linux platform thread (not a Virtual Thread or carrier thread).
+ * code is running on a standard Linux platform thread (not a virtual thread).
  */
 @OptIn(ExperimentalContracts::class)
 public fun validateLinuxAndNotVirtual() {

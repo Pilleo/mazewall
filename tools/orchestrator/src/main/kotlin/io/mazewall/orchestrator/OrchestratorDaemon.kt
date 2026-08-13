@@ -76,8 +76,9 @@ class CommandInterpreter(
                     val issueBody = if (issueFileObj.exists()) issueFileObj.readText() else ""
                     val prompt = OrchestratorPrompts.taskPrompt(issueBody)
                     env.julesClient.triggerSession(env.gitHubClient.getRepoName(), command.issueId, prompt)
+                } else {
+                    null
                 }
-                Unit
             }
             is OrchestratorCommand.MarkIssueAsResolved -> {
                 val nextIssue = env.parseAllIssues().firstOrNull { it.id == command.issueId }

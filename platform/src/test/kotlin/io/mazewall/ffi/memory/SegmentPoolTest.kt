@@ -8,6 +8,7 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
+import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
 class SegmentPoolTest {
@@ -68,13 +69,15 @@ class SegmentPoolTest {
 
         // Release both
         pool.release(s1)
-        pool.release(s2) // Pool is size 1, so s2 won't be pooled, but no error
+        pool.release(s2)
 
         val s3 = pool.rent()
         val s4 = pool.rent()
 
         assertEquals(16L, s3.byteSize())
         assertEquals(16L, s4.byteSize())
+        assertSame(s1, s3)
+        assertSame(s2, s4, "Overflow segments must be retained for reuse")
     }
 
     @Test

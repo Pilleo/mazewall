@@ -78,8 +78,19 @@ object ContainedExecutors {
 
     init {
         // Pre-load exception-related classes to avoid NoClassDefFoundError when classloading under active seccomp
-        Class.forName(ContainmentViolationDetector::class.java.name)
-        Class.forName(ContainmentViolationException::class.java.name)
+        val classes = listOf(
+            ContainmentViolationDetector::class.java,
+            ContainmentViolationException::class.java,
+            io.mazewall.Platform.FallbackBehavior::class.java,
+            io.mazewall.InstallationReceipt::class.java
+        )
+        for (c in classes) {
+            try {
+                Class.forName(c.name)
+            } catch (e: Exception) {
+                System.err.println("WARNING: Failed to preload class ${c.name} for Seccomp: ${e.message}")
+            }
+        }
     }
 
     /**
@@ -94,11 +105,11 @@ object ContainedExecutors {
         installOnCurrentThread(policy.definition, scopingPolicy)
     }
 
-    internal fun installOnCurrentThread(policy: PolicyDefinition<*>) : AutoCloseable {
+    internal fun installOnCurrentThread(policy: PolicyDefinition<*>) : io.mazewall.InstallationReceipt {
         return installOnCurrentThread(policy, io.mazewall.enforcer.supervisor.DefaultStacktraceScopingPolicy)
     }
 
-    internal fun installOnCurrentThread(policy: PolicyDefinition<*>, scopingPolicy: StacktraceScopingPolicy) : AutoCloseable {
+    internal fun installOnCurrentThread(policy: PolicyDefinition<*>, scopingPolicy: StacktraceScopingPolicy) : io.mazewall.InstallationReceipt {
         return installInternal(false, policy, scopingPolicy)
     }
 
@@ -135,7 +146,7 @@ object ContainedExecutors {
         processWide: Boolean,
         policy: PolicyDefinition<*>,
         scopingPolicy: StacktraceScopingPolicy = io.mazewall.enforcer.supervisor.DefaultStacktraceScopingPolicy
-    ) : AutoCloseable {
+    ) : io.mazewall.InstallationReceipt {
         val initialState = if (processWide) null else ContainmentStateRegistry.threadState
         try {
             val augmentedPolicy = if (scopingPolicy.handlers.isNotEmpty()) {
@@ -150,7 +161,11 @@ object ContainedExecutors {
 
             if (!Platform.isSupported()) {
                 handleUnsupportedPlatform()
-                return AutoCloseable {}
+                return io.mazewall.InstallationReceipt(
+                    processWide = processWide,
+                    requestedPolicy = policy,
+                    installed = false,
+                )
             }
 
             validateLinuxAndNotVirtual()
@@ -175,7 +190,11 @@ object ContainedExecutors {
                 if (fallback == Platform.FallbackBehavior.valueOf("WARN_AND_BYPASS")) {
                     logger.warning("Seccomp installation failed: ${t.message}. Code will run uncontained.")
                 }
-                return AutoCloseable {}
+                return io.mazewall.InstallationReceipt(
+                    processWide = processWide,
+                    requestedPolicy = policy,
+                    installed = false,
+                )
             }
             throw t
         }
@@ -185,12 +204,12 @@ object ContainedExecutors {
         processWide: Boolean,
         combinedPolicy: PolicyDefinition<*>,
         scopingPolicy: StacktraceScopingPolicy
-    ) : AutoCloseable {
+    ) : io.mazewall.InstallationReceipt {
         // FAST PATH: Check if the current thread state already satisfies the policy without locking
         val fastState = resolveCurrentState()
         val fastPlan = FilterInstallationPlanner.calculateNewFilter(combinedPolicy, fastState)
         if (!fastPlan.needsNewFilter && (!combinedPolicy.hasSupervisedSyscalls || processWide)) {
-            return AutoCloseable {}
+            return io.mazewall.InstallationReceipt(processWide, combinedPolicy, null)
         }
 
         synchronized(processLock) {
@@ -201,19 +220,19 @@ object ContainedExecutors {
                 FilterInstallationPlanner.verifyFilterDepth(state.filterDepth)
                 applyBpfFilter(processWide, plan.toInstall, plan.newBlocks, plan.newDefaultAction, scopingPolicy)
             } else {
-                AutoCloseable {}
+                null
             }
 
             if (!processWide && combinedPolicy.hasSupervisedSyscalls) {
                 if (session is io.mazewall.enforcer.supervisor.SupervisorSession) {
-                    return session
+                    return io.mazewall.InstallationReceipt(processWide, combinedPolicy, session)
                 } else {
                     val tid = io.mazewall.LinuxNative.process.gettid()
                     io.mazewall.enforcer.supervisor.SupervisorInstaller.registerThread(tid)
-                    return io.mazewall.enforcer.supervisor.SupervisorSession(tid)
+                    return io.mazewall.InstallationReceipt(processWide, combinedPolicy, io.mazewall.enforcer.supervisor.SupervisorSession(tid))
                 }
             }
-            return session
+            return io.mazewall.InstallationReceipt(processWide, combinedPolicy, null)
         }
     }
 

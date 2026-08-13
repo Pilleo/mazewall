@@ -57,8 +57,9 @@ class SupervisorDaemonEngineTest {
     }
 
     @Test
-    fun `handleNewConnection retries on EINTR`() {
+    fun `handleNewConnection retries EINTR but does not replace another accept error with a blocking accept`() {
         var acceptCalls = 0
+        var socketManagerAcceptCalls = 0
         val mockEngine = MockNativeEngine()
         mockEngine.networking.onAccept4 = { _, _, _, _ ->
             acceptCalls++
@@ -70,12 +71,21 @@ class SupervisorDaemonEngineTest {
             }
         }
 
-        val engine = SupervisorDaemonEngine("/tmp/test.sock", engine = mockEngine)
+        val socketManager = object : TestSocketManager() {
+            override fun accept(
+                serverFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>,
+            ): FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open> {
+                socketManagerAcceptCalls++
+                return super.accept(serverFd)
+            }
+        }
+        val engine = SupervisorDaemonEngine("/tmp/test.sock", engine = mockEngine, socketManager = socketManager)
         val serverFd = FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(5)
 
         engine.handleNewConnection(serverFd)
 
         assertEquals(2, acceptCalls)
+        assertEquals(0, socketManagerAcceptCalls)
     }
 
     @Test
