@@ -43,7 +43,7 @@ public value class SandboxedPath private constructor(public val value: String) {
          * Internal factory for cases where path existence was already verified
          * or for base presets.
          */
-        public fun unsafe(path: String): SandboxedPath = SandboxedPath(path)
+        internal fun unsafe(path: String): SandboxedPath = SandboxedPath(path)
     }
 
     override fun toString(): String = value

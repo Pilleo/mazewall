@@ -87,7 +87,13 @@ internal class SyscallPathResolver(
         dirfd: Long = AT_FDCWD_VAL,
     ): String? {
         if (addr == 0L) return null
-        val path = memoryReader.readStringFromProcess(tid, addr)
+        val path = try {
+            memoryReader.readStringFromProcess(tid, addr)
+        } catch (e: io.mazewall.enforcer.api.ContainmentViolationException) {
+            // Yama ptrace_scope may prevent reading memory from certain tracees (e.g., grandchild processes).
+            // Gracefully return null rather than crashing the daemon.
+            null
+        }
         ledger.record(SessionEvent.VmReadvResolved(System.nanoTime(), tid.value.toLong(), path != null))
         if (path == null) return null
         return if (path.startsWith("/")) {

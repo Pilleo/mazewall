@@ -22,7 +22,6 @@ public interface TraceeMemoryReader {
         tid: Tid,
         remoteAddr: Long,
         maxLen: Int = 4096,
-        warnOnEperm: Boolean = false
     ): String?
 
     context(arena: NativeArena)
@@ -30,7 +29,6 @@ public interface TraceeMemoryReader {
         tid: Tid,
         remoteAddr: Long,
         len: Int,
-        warnOnEperm: Boolean = false
     ): ByteArray?
 
     context(arena: NativeArena)
@@ -45,10 +43,9 @@ public interface TraceeMemoryReader {
             tid: Tid,
             remoteAddr: Long,
             maxLen: Int,
-            warnOnEperm: Boolean
         ): String? {
             if (remoteAddr == 0L) return null
-            val bytes = readBytes(tid, remoteAddr, maxLen, warnOnEperm) ?: return null
+            val bytes = readBytes(tid, remoteAddr, maxLen) ?: return null
             var len = 0
             var hasNullTerminator = false
             while (len < bytes.size) {
@@ -72,7 +69,6 @@ public interface TraceeMemoryReader {
             tid: Tid,
             remoteAddr: Long,
             len: Int,
-            warnOnEperm: Boolean
         ): ByteArray? {
             if (remoteAddr == 0L) return null
             val localBuf = arena.allocate(len.toLong())
@@ -99,14 +95,9 @@ public interface TraceeMemoryReader {
                 dest
             } else {
                 if (res is LinuxNative.SyscallResult.Error && res.errno == NativeConstants.EPERM) {
-                    if (warnOnEperm) {
-                        System.err.println("[DAEMON] WARN: Permission denied reading memory from TID ${tid.value}. (Yama ptrace_scope?)")
-                        "<YAMA_ERROR_UNKNOWN_PATH>\u0000".toByteArray(StandardCharsets.UTF_8)
-                    } else {
-                        throw IllegalStateException(
-                            "Permission denied reading memory from TID ${tid.value} at address 0x${remoteAddr.toString(16)}"
-                        )
-                    }
+                    throw IllegalStateException(
+                        "Permission denied reading memory from TID ${tid.value} at address 0x${remoteAddr.toString(16)}"
+                    )
                 } else {
                     null
                 }

@@ -618,12 +618,16 @@ data class AwaitingJulesStartState(
         if (event is OrchestratorEvent.Tick) {
             if (slot.julesTriggerAttempts < env.config.julesTriggerAttempts) {
                 slot.julesTriggerAttempts++
-                for (cmd in transition.commands) {
-                    val result = interpreter.interpret(cmd)
-                    if (cmd is OrchestratorCommand.TriggerJulesSession && result is JulesSession) {
-                        slot.julesSessionId = result.id
-                        return AwaitingPrState(issueId, githubIssueNumber, result.id)
+                try {
+                    for (cmd in transition.commands) {
+                        val result = interpreter.interpret(cmd)
+                        if (cmd is OrchestratorCommand.TriggerJulesSession && result is JulesSession) {
+                            slot.julesSessionId = result.id
+                            return AwaitingPrState(issueId, githubIssueNumber, result.id)
+                        }
                     }
+                } catch (e: Exception) {
+                    env.errPrintln("❌ Jules session creation failed for $issueId: ${e.message}")
                 }
                 slot.retryAfterTime = currentTime + TimeUnit.SECONDS.toMillis(env.config.julesTriggerIntervalSeconds)
                 return this

@@ -68,18 +68,11 @@ public class SeccompSessionHandler(
         // pollFds layout:
         // [0]: listenerFd (Layouts.POLLFD_SIZE)
         // [1]: socketFd   (Layouts.POLLFD_SIZE)
-        val pfd2 = PollFdSegment.of(pollFds.asSlice(Layouts.POLLFD_SIZE, Layouts.POLLFD_SIZE))
-        val socketRevents = pfd2.getRevents().toInt()
         val errorOrHup = NativeConstants.POLLERR.toInt() or NativeConstants.POLLHUP.toInt() or NativeConstants.POLLNVAL.toInt()
 
-        if (!isPassThrough && (socketRevents and (NativeConstants.POLLIN.toInt() or errorOrHup)) != 0) {
-            val isDeadOrShutdown = (socketRevents and errorOrHup) != 0 || handleShutdownRequest(ackBuf, pollFds)
-            if (isDeadOrShutdown) {
-                isTerminated = true
-                return LoopAction.Break
-            }
-        }
-
+        // Process pending seccomp notifications BEFORE checking for shutdown.
+        // This ensures a blocked tracee always gets a response even if a shutdown
+        // command arrives on the control socket at the same time.
         val pfd1 = PollFdSegment.of(pollFds.asSlice(0L, Layouts.POLLFD_SIZE))
         val listenerRevents = pfd1.getRevents().toInt()
         if ((listenerRevents and errorOrHup) != 0) {
@@ -123,6 +116,18 @@ public class SeccompSessionHandler(
             }
             if (isTerminated) return LoopAction.Break
         }
+
+        // Only check for shutdown after any pending notification has been handled.
+        val pfd2 = PollFdSegment.of(pollFds.asSlice(Layouts.POLLFD_SIZE, Layouts.POLLFD_SIZE))
+        val socketRevents = pfd2.getRevents().toInt()
+        if (!isPassThrough && (socketRevents and (NativeConstants.POLLIN.toInt() or errorOrHup)) != 0) {
+            val isDeadOrShutdown = (socketRevents and errorOrHup) != 0 || handleShutdownRequest(ackBuf, pollFds)
+            if (isDeadOrShutdown) {
+                isTerminated = true
+                return LoopAction.Break
+            }
+        }
+
         return LoopAction.Continue
     }
 

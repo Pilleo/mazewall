@@ -148,7 +148,7 @@ public data class PolicyDefinition<out S : PolicyScope>(
                 val tail = sortedSet2.tailSet(p1.value, false)
                 for (p2 in tail) {
                     if (isParent(p1.value, p2)) {
-                        result.add(SandboxedPath.unsafe(p2))
+                        result.add(SandboxedPath.of(p2, allowNonExistent = true))
                     } else {
                         break
                     }

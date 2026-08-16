@@ -114,13 +114,6 @@ internal class SupervisorSessionHandler(
         private const val SLOW_VALIDATION_THRESHOLD_MS = 2000L
 
         /**
-         * Sentinel value returned by [io.mazewall.ffi.memory.TraceeMemoryReader] when process_vm_readv
-         * fails with EPERM and warnOnEperm is enabled. Must be kept in sync with
-         * TraceeMemoryReader.Real.readBytes.
-         */
-        private const val YAMA_ERROR_UNKNOWN_PATH = "<YAMA_ERROR_UNKNOWN_PATH>"
-
-        /**
          * Resolves the set of paths that the supervisor daemon will inject directly
          * without forwarding to the JVM validation listener.
          *
@@ -275,10 +268,10 @@ internal class SupervisorSessionHandler(
         var sockaddrBytes: ByteArray? = null
         var dirfd = AT_FDCWD
         when (nr) {
-            arch.open, arch.execve -> {
+            arch.open -> {
                 pathStr = readStringFromProcess(tid, args[0])
             }
-            arch.openat, arch.openat2, arch.execveat -> {
+            arch.openat, arch.openat2 -> {
                 dirfd = args[0].toInt()
                 pathStr = readStringFromProcess(tid, args[1])
             }
@@ -291,6 +284,11 @@ internal class SupervisorSessionHandler(
             arch.accept, arch.accept4 -> {
                 dirfd = args[0].toInt()
             }
+            // Note: execve/execveat paths are intentionally NOT read here.
+            // The daemon cannot ptrace child processes (Yama ptrace_scope).
+            // Authorization is performed by the JVM listener using the
+            // parent's propagated stack trace; TOCTOU mitigation is skipped
+            // when pathStr is null (see readAndHandleJvmResponse).
         }
         return SyscallArguments(pathStr, sockaddrBytes, dirfd)
     }
@@ -740,23 +738,14 @@ internal class SupervisorSessionHandler(
         }
     }
 
-    /**
-     * Reads a null-terminated string from tracee memory.
-     *
-     * When [warnOnEperm] is true and the read fails with EPERM (e.g. due to Yama ptrace_scope
-     * restricting access to a child process), the method returns null rather than throwing.
-     * This allows the daemon to fall back to the JVM validation listener for syscalls issued
-     * by child processes that the daemon cannot ptrace.
-     */
     context(arena: NativeArena)
-    private fun readStringFromProcess(tid: Tid, remoteAddr: Long, warnOnEperm: Boolean = true): String? {
-        val raw = io.mazewall.ffi.memory.SupervisorProcessMemoryReader.readString(tid, remoteAddr, MAX_PATH_LEN, warnOnEperm)
-        return if (raw == YAMA_ERROR_UNKNOWN_PATH) null else raw
+    private fun readStringFromProcess(tid: Tid, remoteAddr: Long): String? {
+        return io.mazewall.ffi.memory.SupervisorProcessMemoryReader.readString(tid, remoteAddr, MAX_PATH_LEN)
     }
 
     context(arena: NativeArena)
-    private fun readBytesFromProcess(tid: Tid, remoteAddr: Long, len: Int, warnOnEperm: Boolean = true): ByteArray? {
-        return io.mazewall.ffi.memory.SupervisorProcessMemoryReader.readBytes(tid, remoteAddr, len, warnOnEperm)
+    private fun readBytesFromProcess(tid: Tid, remoteAddr: Long, len: Int): ByteArray? {
+        return io.mazewall.ffi.memory.SupervisorProcessMemoryReader.readBytes(tid, remoteAddr, len)
     }
 
     private fun getTgid(tid: Int): Int {

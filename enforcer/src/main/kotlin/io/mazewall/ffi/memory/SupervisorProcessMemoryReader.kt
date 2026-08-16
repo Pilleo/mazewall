@@ -12,10 +12,9 @@ public object SupervisorProcessMemoryReader : TraceeMemoryReader by TraceeMemory
         tid: Tid,
         remoteAddr: Long,
         maxLen: Int,
-        warnOnEperm: Boolean
     ): String? {
         return try {
-            TraceeMemoryReader.readString(tid, remoteAddr, maxLen, warnOnEperm)
+            TraceeMemoryReader.readString(tid, remoteAddr, maxLen)
         } catch (e: IllegalStateException) {
             throw ContainmentViolationException(e.message ?: "Unknown containment violation", e)
         }

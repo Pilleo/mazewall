@@ -111,8 +111,8 @@ interface "ProfilerInstallerState" as io.mazewall.profiler.engine.ProfilerInstal
 }
 interface "ProfilerMemoryReader" as io.mazewall.profiler.engine.ProfilerMemoryReader {
   +String readStringFromProcess(NativeArena, int, long, int)
-  +String readString(NativeArena, int, long, int, boolean)
-  +byte[] readBytes(NativeArena, int, long, int, boolean)
+  +String readString(NativeArena, int, long, int)
+  +byte[] readBytes(NativeArena, int, long, int)
   +String resolveLink(NativeArena, int, String)
 }
 class "ProfilerSessionHandler" as io.mazewall.profiler.engine.ProfilerSessionHandler {
@@ -140,8 +140,8 @@ class "RealMemoryReader" as io.mazewall.profiler.engine.RealMemoryReader {
   + {static}RealMemoryReader INSTANCE
   __
   +String readStringFromProcess(NativeArena, int, long, int)
-  +String readString(NativeArena, int, long, int, boolean)
-  +byte[] readBytes(NativeArena, int, long, int, boolean)
+  +String readString(NativeArena, int, long, int)
+  +byte[] readBytes(NativeArena, int, long, int)
   +String resolveLink(NativeArena, int, String)
 }
 class "RealProfilerInstaller" as io.mazewall.profiler.engine.RealProfilerInstaller {

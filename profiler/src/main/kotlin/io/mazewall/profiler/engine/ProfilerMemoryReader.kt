@@ -14,7 +14,7 @@ public interface ProfilerMemoryReader : TraceeMemoryReader {
         remoteAddr: Long,
         maxLen: Int = 4096,
     ): String? = try {
-        readString(tid, remoteAddr, maxLen, warnOnEperm = true)
+        readString(tid, remoteAddr, maxLen)
     } catch (e: IllegalStateException) {
         throw io.mazewall.enforcer.api.ContainmentViolationException(e.message ?: "Unknown containment violation", e)
     }
@@ -24,16 +24,14 @@ public interface ProfilerMemoryReader : TraceeMemoryReader {
         tid: Tid,
         remoteAddr: Long,
         maxLen: Int,
-        warnOnEperm: Boolean
-    ): String? = TraceeMemoryReader.Real.readString(tid, remoteAddr, maxLen, warnOnEperm)
+    ): String? = TraceeMemoryReader.Real.readString(tid, remoteAddr, maxLen)
 
     context(arena: NativeArena)
     override fun readBytes(
         tid: Tid,
         remoteAddr: Long,
         len: Int,
-        warnOnEperm: Boolean
-    ): ByteArray? = TraceeMemoryReader.readBytes(tid, remoteAddr, len, warnOnEperm)
+    ): ByteArray? = TraceeMemoryReader.readBytes(tid, remoteAddr, len)
 
     context(arena: NativeArena)
     override fun resolveLink(

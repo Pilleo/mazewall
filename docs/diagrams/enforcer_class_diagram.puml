@@ -1080,8 +1080,8 @@ class "SockaddrUnSegment" as io.mazewall.ffi.memory.SockaddrUnSegment {
 class "SupervisorProcessMemoryReader" as io.mazewall.ffi.memory.SupervisorProcessMemoryReader {
   + {static}SupervisorProcessMemoryReader INSTANCE
   __
-  +String readString(NativeArena, int, long, int, boolean)
-  +byte[] readBytes(NativeArena, int, long, int, boolean)
+  +String readString(NativeArena, int, long, int)
+  +byte[] readBytes(NativeArena, int, long, int)
   +String resolveLink(NativeArena, int, String)
 }
 class "SupervisorProcessMemoryWriter" as io.mazewall.ffi.memory.SupervisorProcessMemoryWriter {
@@ -1109,8 +1109,8 @@ class "SupervisorResponseSegment" as io.mazewall.ffi.memory.SupervisorResponseSe
 interface "TraceeMemoryReader" as io.mazewall.ffi.memory.TraceeMemoryReader {
   + {static}Real Real
   __
-  + {abstract}String readString(NativeArena, int, long, int, boolean)
-  + {abstract}byte[] readBytes(NativeArena, int, long, int, boolean)
+  + {abstract}String readString(NativeArena, int, long, int)
+  + {abstract}byte[] readBytes(NativeArena, int, long, int)
   + {abstract}String resolveLink(NativeArena, int, String)
 }
 class "NetworkOrderBuffer" as io.mazewall.ffi.networking.NetworkOrderBuffer {
