@@ -18,10 +18,28 @@ class FileDescriptorReproductionTest {
 
         val closedFd = fd.close()
         assertEquals(10, closedFd.value)
+        assertFalse(fd.isValid)
+        assertFalse(closedFd.isValid)
 
-        // Even after closing, the original 'fd' reference still exists and its 'value' is unchanged
-        // but it's technically invalid at the OS level. The 'Closed' type provides compile-time safety.
+        // The Closed token cannot be passed to Open-only APIs (close, use, FdArg, I/O).
         @Suppress("USELESS_CAST")
         assertTrue(closedFd is FileDescriptor<*, FdState.Closed>)
+    }
+
+    @Test
+    fun `leftover Open token cannot reach the kernel after close or reuse`() {
+        val leftover = FileDescriptor.generic(90)
+        leftover.close()
+
+        val denied = leftover.ebadfUnlessLive()
+        assertNotNull(denied)
+        assertTrue(denied is LinuxNative.SyscallResult.Error)
+        assertEquals(io.mazewall.ffi.NativeConstants.EBADF, (denied as LinuxNative.SyscallResult.Error).errno)
+
+        val reused = FileDescriptor.generic(90)
+        assertTrue(reused.isLiveForIo())
+        assertFalse(leftover.isLiveForIo())
+        assertNull(reused.ebadfUnlessLive())
+        reused.close()
     }
 }

@@ -2,6 +2,7 @@ package io.mazewall
 
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
+import io.mazewall.core.ebadfUnlessLive
 import io.mazewall.ffi.IoctlCommand
 import io.mazewall.ffi.Layouts
 import io.mazewall.ffi.NativeConstants
@@ -41,7 +42,7 @@ public open class MockNativeEngine(
         a4: io.mazewall.core.NativeArg,
         a5: io.mazewall.core.NativeArg,
         a6: io.mazewall.core.NativeArg,
-    ) = onSyscall(nr, a1, a2, a3, a4, a5, a6)
+    ) = ebadfUnlessLive(a1, a2, a3, a4, a5, a6) ?: onSyscall(nr, a1, a2, a3, a4, a5, a6)
 
     override fun syscall4(
         nr: Long,
@@ -49,7 +50,8 @@ public open class MockNativeEngine(
         a2: io.mazewall.core.NativeArg,
         a3: io.mazewall.core.NativeArg,
         a4: io.mazewall.core.NativeArg,
-    ) = onSyscall(nr, a1, a2, a3, a4, io.mazewall.core.NativeArg.LongArg(0L), io.mazewall.core.NativeArg.LongArg(0L))
+    ) = ebadfUnlessLive(a1, a2, a3, a4)
+        ?: onSyscall(nr, a1, a2, a3, a4, io.mazewall.core.NativeArg.LongArg(0L), io.mazewall.core.NativeArg.LongArg(0L))
 
     override fun <Req, Res> ioctl(
         fd: FileDescriptor<*, FdState.Open>,
@@ -68,19 +70,19 @@ public open class MockNativeEngine(
         fd: FileDescriptor<*, FdState.Open>,
         request: Long,
         arg: ManagedSegment,
-    ) = onIoctl(fd, request, arg)
+    ) = fd.ebadfUnlessLive() ?: onIoctl(fd, request, arg)
 
     override fun ioctl(
         fd: FileDescriptor<*, FdState.Open>,
         request: Long,
         arg: Long,
-    ) = onIoctl(fd, request, ManagedSegment.NULL) // Simplified for long args
+    ) = fd.ebadfUnlessLive() ?: onIoctl(fd, request, ManagedSegment.NULL) // Simplified for long args
 
     override fun fcntl(
         fd: FileDescriptor<*, FdState.Open>,
         cmd: Int,
         arg: Long,
-    ) = fcntlResult
+    ) = fd.ebadfUnlessLive() ?: fcntlResult
 
     override fun poll(
         fds: ManagedSegment,
@@ -90,7 +92,7 @@ public open class MockNativeEngine(
 }
 
 public open class MockNativeFileSystem : NativeFileSystem {
-    public var openResult: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(0L)
+    public var openResult: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(100L)
     public var readlinkResult: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(0L)
     public var closeResult: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(0L)
     public var mmapResult: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(0L)
@@ -125,7 +127,11 @@ public open class MockNativeFileSystem : NativeFileSystem {
         offset: Long,
     ) = mmapResult
 
-    override fun close(fd: FileDescriptor<*, FdState.Open>) = onClose(fd)
+    override fun close(fd: FileDescriptor<*, FdState.Open>) =
+        fd.ebadfUnlessLive() ?: run {
+            fd.retireForClose()
+            onClose(fd)
+        }
 }
 
 public open class MockNativeNetworking : NativeNetworking {
@@ -163,50 +169,50 @@ public open class MockNativeNetworking : NativeNetworking {
         sockfd: FileDescriptor<*, FdState.Open>,
         addr: ManagedSegment,
         addrlen: Int,
-    ) = onBind(sockfd, addr, addrlen)
+    ) = sockfd.ebadfUnlessLive() ?: onBind(sockfd, addr, addrlen)
 
     override fun listen(
         sockfd: FileDescriptor<*, FdState.Open>,
         backlog: Int,
-    ) = onListen(sockfd, backlog)
+    ) = sockfd.ebadfUnlessLive() ?: onListen(sockfd, backlog)
 
     override fun accept(
         sockfd: FileDescriptor<*, FdState.Open>,
         addr: ManagedSegment,
         addrlen: ManagedSegment,
-    ) = onAccept(sockfd, addr, addrlen)
+    ) = sockfd.ebadfUnlessLive() ?: onAccept(sockfd, addr, addrlen)
 
     override fun accept4(
         sockfd: FileDescriptor<*, FdState.Open>,
         addr: ManagedSegment,
         addrlen: ManagedSegment,
         flags: Int,
-    ) = onAccept4(sockfd, addr, addrlen, flags)
+    ) = sockfd.ebadfUnlessLive() ?: onAccept4(sockfd, addr, addrlen, flags)
 
     override fun connect(
         sockfd: FileDescriptor<*, FdState.Open>,
         addr: ManagedSegment,
         addrlen: Int,
-    ) = onConnect(sockfd, addr, addrlen)
+    ) = sockfd.ebadfUnlessLive() ?: onConnect(sockfd, addr, addrlen)
 
     override fun sendmsg(
         sockfd: FileDescriptor<*, FdState.Open>,
         msg: ManagedSegment,
         flags: Int,
-    ) = sendmsgResult
+    ) = sockfd.ebadfUnlessLive() ?: sendmsgResult
 
     override fun recvmsg(
         sockfd: FileDescriptor<*, FdState.Open>,
         msg: ManagedSegment,
         flags: Int,
-    ) = recvmsgResult
+    ) = sockfd.ebadfUnlessLive() ?: recvmsgResult
 
     override fun recv(
         sockfd: FileDescriptor<*, FdState.Open>,
         buf: ManagedSegment,
         len: Long,
         flags: Int,
-    ) = recvResult
+    ) = sockfd.ebadfUnlessLive() ?: recvResult
 }
 
 public open class MockNativeProcess : NativeProcess {
@@ -289,13 +295,13 @@ public open class MockNativeMemory : NativeMemory {
         fd: FileDescriptor<*, FdState.Open>,
         buf: ManagedSegment,
         count: Long,
-    ) = onRead(fd, buf, count)
+    ) = fd.ebadfUnlessLive() ?: onRead(fd, buf, count)
 
     override fun write(
         fd: FileDescriptor<*, FdState.Open>,
         buf: ManagedSegment,
         count: Long,
-    ) = onWrite(fd, buf, count)
+    ) = fd.ebadfUnlessLive() ?: onWrite(fd, buf, count)
 
     context(arena: NativeArena)
     override fun newSockFProg(

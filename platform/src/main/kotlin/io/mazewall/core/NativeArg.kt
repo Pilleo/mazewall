@@ -30,8 +30,14 @@ public sealed interface NativeArg {
     }
 
     @JvmInline
-    public value class FdArg(public val fd: FileDescriptor<*, *>) : NativeArg {
-        override val asLong: Long get() = fd.value.toLong()
+    public value class FdArg(public val fd: FileDescriptor<*, FdState.Open>) : NativeArg {
+        override val asLong: Long
+            get() {
+                check(fd.isLiveForIo()) {
+                    "refusing kernel downcall for retired FileDescriptor fd=${fd.value}"
+                }
+                return fd.value.toLong()
+            }
     }
 
     @JvmInline
