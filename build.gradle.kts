@@ -154,7 +154,7 @@ tasks.withType<Test>().configureEach {
     systemProperty("junit.jupiter.execution.timeout.default", "2 m")
     // Run timed tests on a separate thread so JUnit can interrupt hangs and report their stack trace.
     systemProperty("junit.jupiter.execution.timeout.thread.mode.default", "SEPARATE_THREAD")
-    
+
     testLogging {
         showExceptions = true
         showCauses = true
@@ -455,5 +455,12 @@ tasks.named("check") {
 tasks.register<Exec>("refactorFirstReport") {
     group = "verification"
     description = "Generates a RefactorFirst HTML report using Maven"
+    onlyIf {
+        try {
+            ProcessBuilder("mvn", "-v").redirectError(ProcessBuilder.Redirect.DISCARD).start().waitFor() == 0
+        } catch (e: Exception) {
+            false
+        }
+    }
     commandLine("mvn", "org.hjug.refactorfirst.plugin:refactor-first-maven-plugin:0.9.0:htmlReport")
 }
