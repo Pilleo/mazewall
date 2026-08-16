@@ -23,6 +23,7 @@ import io.mazewall.ffi.memory.writeLong
 import io.mazewall.ffi.typed
 import io.mazewall.onSuccess
 import io.mazewall.recover
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Unified reactor handler for active seccomp user notifications and UNIX domain control sockets.
@@ -46,7 +47,12 @@ public class SeccompSessionHandler(
     public var isTerminated: Boolean = false
         private set
 
+    private val closed = AtomicBoolean(false)
+
     override fun close() {
+        if (!closed.compareAndSet(false, true)) {
+            return
+        }
         try {
             SegmentPool.SECCOMP_NOTIF_POOL.release(notif)
         } catch (_: Throwable) {}

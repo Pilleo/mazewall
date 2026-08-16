@@ -58,6 +58,30 @@ class SegmentPoolTest {
     }
 
     @Test
+    fun `double release does not enqueue the same native segment twice`() {
+        val pool = SegmentPool(16L, poolSize = 1)
+
+        val pooled = pool.rent()
+        val overflow = pool.rent()
+
+        pool.release(pooled)
+        pool.release(pooled)
+        pool.release(overflow)
+
+        val first = pool.rent()
+        val second = pool.rent()
+        try {
+            assertTrue(
+                first.address() != second.address(),
+                "Duplicate release must not let two renters share one native segment",
+            )
+        } finally {
+            pool.release(first)
+            pool.release(second)
+        }
+    }
+
+    @Test
     fun `test SegmentPool exhausted fallback behavior`() {
         val pool = SegmentPool(16L, poolSize = 1)
 

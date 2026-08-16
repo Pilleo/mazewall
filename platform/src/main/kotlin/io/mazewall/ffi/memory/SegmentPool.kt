@@ -3,6 +3,7 @@ package io.mazewall.ffi.memory
 
 import io.mazewall.ffi.Layouts
 import java.lang.foreign.MemoryLayout
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ConcurrentLinkedQueue
 
 /**
@@ -16,6 +17,7 @@ public class SegmentPool private constructor(
     private val arena: NativeArena
 ) {
     private val queue = ConcurrentLinkedQueue<ManagedSegment>()
+    private val checkedOut = ConcurrentHashMap.newKeySet<Long>()
 
     public constructor(
         layout: MemoryLayout,
@@ -48,6 +50,7 @@ public class SegmentPool private constructor(
     public fun rent(): ManagedSegment {
         val segment = queue.poll()
         if (segment != null) {
+            checkout(segment)
             segment.fill(0)
             return segment
         }
@@ -57,6 +60,7 @@ public class SegmentPool private constructor(
         } else {
             arena.allocate(byteSize)
         }
+        checkout(fallback)
         fallback.fill(0)
         return fallback
     }
@@ -67,11 +71,22 @@ public class SegmentPool private constructor(
      * The pool retains valid overflow segments so later concurrency waves reuse the native
      * allocation. [poolSize] controls preallocation, not a retention limit: the shared arena
      * cannot free individual segments that exceed such a limit.
+     *
+     * Release is idempotent: a second return of the same native address is ignored so a
+     * double [io.mazewall.platform.seccomp.daemon.SeccompSessionHandler.close] cannot enqueue
+     * one buffer twice.
      */
     public fun release(segment: ManagedSegment) {
-        if (segment.byteSize() == byteSize) {
+        if (segment.byteSize() != byteSize) {
+            return
+        }
+        if (checkedOut.remove(segment.address())) {
             queue.offer(segment)
         }
+    }
+
+    private fun checkout(segment: ManagedSegment) {
+        checkedOut.add(segment.address())
     }
 
     public companion object {

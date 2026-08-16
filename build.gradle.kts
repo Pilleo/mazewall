@@ -334,7 +334,22 @@ subprojects {
         mustRunAfter(rootProject.tasks.named("test"))
         dependsOn(tasks.withType<org.gradle.testing.jacoco.tasks.JacocoReport>())
         mustRunAfter(tasks.withType<org.gradle.testing.jacoco.tasks.JacocoReport>())
-        executionData.setFrom(fileTree(project.layout.buildDirectory.dir("jacoco")).include("*.exec"))
+        if (project.name == "platform") {
+            // LinuxNative and the shared FFM/seccomp types live in :platform, but the
+            // historical 78% LinuxNative gate is produced by :enforcer unit + integration
+            // tests. Merge that execution data so :platform:check still measures them.
+            dependsOn(":enforcer:test")
+            dependsOn(":enforcer:integrationTest")
+            mustRunAfter(":enforcer:test", ":enforcer:integrationTest")
+            executionData.setFrom(
+                files(
+                    fileTree(project.layout.buildDirectory.dir("jacoco")).include("*.exec"),
+                    fileTree(rootProject.layout.projectDirectory.dir("enforcer/build/jacoco")).include("*.exec"),
+                ),
+            )
+        } else {
+            executionData.setFrom(fileTree(project.layout.buildDirectory.dir("jacoco")).include("*.exec"))
+        }
         classDirectories.setFrom(
             files(
                 classDirectories.files.map {
@@ -373,15 +388,41 @@ subprojects {
                     }
                 }
             } else if (project.name == "platform") {
-                // Keep coverage from the extracted native/FFM and shared seccomp code gated.
-                // This is the platform module's current unit-test baseline, rounded down so
-                // small compiler instrumentation changes do not make the threshold flaky.
+                // Bundle floor is the platform unit-test baseline. Relocated native
+                // classes are also gated per-class so an individual critical type
+                // cannot drop to zero while this bundle still passes.
                 rule {
                     element = "BUNDLE"
                     limit {
                         counter = "INSTRUCTION"
                         value = "COVEREDRATIO"
                         minimum = "0.30".toBigDecimal()
+                    }
+                }
+                rule {
+                    element = "CLASS"
+                    includes = listOf("io.mazewall.LinuxNative")
+                    limit {
+                        counter = "INSTRUCTION"
+                        value = "COVEREDRATIO"
+                        minimum = "0.78".toBigDecimal()
+                    }
+                }
+                rule {
+                    element = "CLASS"
+                    includes =
+                        listOf(
+                            "io.mazewall.ffi.Layouts",
+                            "io.mazewall.ffi.LayoutValidator",
+                            "io.mazewall.ffi.memory.SegmentPool",
+                            "io.mazewall.ffi.memory.NativeArena",
+                            "io.mazewall.ffi.internal.RealNativeFileSystem",
+                            "io.mazewall.ffi.internal.RealNativeProcess",
+                        )
+                    limit {
+                        counter = "INSTRUCTION"
+                        value = "COVEREDRATIO"
+                        minimum = "0.70".toBigDecimal()
                     }
                 }
             } else if (project.name == "orchestrator") {
