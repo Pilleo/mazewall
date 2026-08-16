@@ -1,7 +1,7 @@
 ---
 title: "ProfilerDaemonEngine seccomp listener FD double-close mitigation"
 severity: "HIGH"
-status: "open"
+status: "resolved"
 priority: 8
 dependencies: []
 component: "profiler"

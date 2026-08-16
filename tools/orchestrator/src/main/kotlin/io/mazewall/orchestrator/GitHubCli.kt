@@ -10,12 +10,39 @@ import java.util.concurrent.TimeUnit
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
+internal fun proxyConfigurationStatus(value: String?): String =
+    if (value.isNullOrBlank()) "not configured" else "configured"
+
+/**
+ * Reads stdout from [process] if it exits within [timeout]. On timeout the
+ * child is destroyed and `null` is returned so callers do not block on
+ * `readAllBytes()` after `waitFor` expires.
+ */
+internal fun readProcessOutputOrDestroy(
+    process: Process,
+    timeout: Long,
+    unit: TimeUnit,
+): String? {
+    val finished = process.waitFor(timeout, unit)
+    if (!finished) {
+        process.destroyForcibly()
+        return null
+    }
+    return String(process.inputStream.readAllBytes()).trim()
+}
+
+@Serializable
+data class GitHubLabel(
+    val name: String
+)
+
 @Serializable
 data class GitHubPR(
     val number: Int,
     val title: String,
     val headRefName: String,
-    val body: String? = null
+    val body: String? = null,
+    val labels: List<GitHubLabel> = emptyList()
 )
 
 @Serializable
@@ -44,12 +71,7 @@ class RealGitHubClient(private val config: OrchestratorConfig) : GitHubClient {
     internal data class CachedValue<T>(val value: T, val expiry: Long)
     internal val cache = mutableMapOf<String, CachedValue<*>>()
 
-    override fun approveRescue(prNumber: String, rescueBranchName: String) {
-        val branchName = execute("gh", "pr", "view", prNumber, "--json", "headRefName", "--jq", ".headRefName").trim()
-        execute("git", "push", "--force", "origin", "origin/$rescueBranchName:$branchName")
-        // Clean up rescue branch
-        execute("git", "push", "origin", "--delete", rescueBranchName)
-    }
+
 
     override fun clearPrCache(prNumber: String) {
         cache.remove("checkBuildStatus-$prNumber")
@@ -155,7 +177,7 @@ class RealGitHubClient(private val config: OrchestratorConfig) : GitHubClient {
 
         for (query in searchQueries) {
             try {
-                val prListJson = execute("gh", "pr", "list", "--search", query, "--json", "number,title,headRefName,body")
+                val prListJson = execute("gh", "pr", "list", "--search", query, "--json", "number,title,headRefName,body,labels")
                 val prs = parsePRs(prListJson)
                 val matched = prs.firstOrNull { isPrMatching(it, issueNumber, issueId, cleanSessionId) }
                 if (matched != null) return matched.number.toString()
@@ -165,7 +187,7 @@ class RealGitHubClient(private val config: OrchestratorConfig) : GitHubClient {
         }
 
         return try {
-            val prListJson = execute("gh", "pr", "list", "--state", "open", "--json", "number,title,headRefName,body")
+            val prListJson = execute("gh", "pr", "list", "--state", "open", "--json", "number,title,headRefName,body,labels")
             val prs = parsePRs(prListJson)
             val matched = prs.firstOrNull { isPrMatching(it, issueNumber, issueId, cleanSessionId) }
             matched?.number?.toString()
@@ -176,6 +198,10 @@ class RealGitHubClient(private val config: OrchestratorConfig) : GitHubClient {
     }
 
     internal fun isPrMatching(pr: GitHubPR, issueNumber: String, issueId: String, cleanSessionId: String?): Boolean {
+        if (pr.labels.any { it.name.equals("superseded", ignoreCase = true) }) {
+            return false
+        }
+
         if (cleanSessionId != null) {
             if (pr.headRefName.contains(cleanSessionId, ignoreCase = true) ||
                 (pr.body?.contains(cleanSessionId, ignoreCase = true) == true)) {
@@ -361,6 +387,27 @@ class RealGitHubClient(private val config: OrchestratorConfig) : GitHubClient {
                 val exitCode = process.exitValue()
                 if (exitCode != 0) {
                     checkForAuthenticationFailure(command, exitCode, output)
+
+                    if (output.contains("network is unreachable", ignoreCase = true) || output.contains("timeout", ignoreCase = true)) {
+                        System.err.println("  [GitHubCli Diagnostics] Command failed with network issue. Proxy configuration:")
+                        val envVars = pb.environment()
+                        listOf("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy", "NO_PROXY").forEach { name ->
+                            System.err.println("    $name: ${proxyConfigurationStatus(envVars[name])}")
+                        }
+
+                        try {
+                            val ipRoute = ProcessBuilder("ip", "route").start()
+                            val routeOutput = readProcessOutputOrDestroy(ipRoute, 2, TimeUnit.SECONDS)
+                            if (routeOutput != null) {
+                                System.err.println("  [GitHubCli Diagnostics] ip route: $routeOutput")
+                            } else {
+                                System.err.println("  [GitHubCli Diagnostics] ip route timed out")
+                            }
+                        } catch (e: Exception) {
+                            System.err.println("  [GitHubCli Diagnostics] Could not get ip route: ${e.message}")
+                        }
+                    }
+
                     throw ProcessExecutionException(command.joinToString(" "), exitCode, output)
                 }
                 output
@@ -381,7 +428,26 @@ class RealGitHubClient(private val config: OrchestratorConfig) : GitHubClient {
     }
 
     override fun addLabel(issueNumber: String, label: String) {
+        try {
+            execute("gh", "label", "create", label, "--force", "--color", "ed0707", "--description", "Trigger Jules Agent")
+        } catch (e: Exception) {
+            // Ignore if it already exists or auth fails
+        }
         execute("gh", "issue", "edit", issueNumber, "--add-label", label)
+    }
+
+    override fun ensureLabelExists(label: String) {
+        execute(
+            "gh",
+            "label",
+            "create",
+            label,
+            "--force",
+            "--color",
+            "6f42c1",
+            "--description",
+            "Pull request replaced by a newer generation"
+        )
     }
 
     override fun labelPr(prNumber: String, label: String) {
@@ -486,23 +552,7 @@ class RealGitHubClient(private val config: OrchestratorConfig) : GitHubClient {
         }
     }
 
-    override fun rebaseBranch(prNumber: String, sessionId: String?): RebaseResult {
-        return BranchRebaser(
-            execute = { args -> execute(*args) },
-            executeInDir = { dir, args -> executeInDir(dir, *args) },
-            executeInDirNoRetry = { dir, args -> executeInDir(dir, *args, retry = false) },
-            clearPrCache = ::clearPrCache
-        ).run(prNumber, sessionId)
-    }
 
-    override fun rebaseBranchFallback(prNumber: String, sessionId: String?, targetFiles: List<String>): RebaseResult {
-        return BranchRebaser(
-            execute = { args -> execute(*args) },
-            executeInDir = { dir, args -> executeInDir(dir, *args) },
-            executeInDirNoRetry = { dir, args -> executeInDir(dir, *args, retry = false) },
-            clearPrCache = ::clearPrCache
-        ).runFallback(prNumber, sessionId, targetFiles)
-    }
 }
 
 class ProcessExecutionException(val command: String, val exitCode: Int, val output: String) :

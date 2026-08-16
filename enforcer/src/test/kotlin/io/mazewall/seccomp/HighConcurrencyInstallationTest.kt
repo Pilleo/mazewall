@@ -6,7 +6,7 @@ import io.mazewall.MockPlatformProvider
 import io.mazewall.Platform
 import io.mazewall.Policy
 import io.mazewall.PolicyCompilationCache
-import io.mazewall.enforcer.ContainedExecutors
+import io.mazewall.enforcer.api.ContainedExecutors
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test

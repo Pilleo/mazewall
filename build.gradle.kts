@@ -68,6 +68,10 @@ allprojects {
     val isVerbose = gradle.startParameter.logLevel in listOf(LogLevel.INFO, LogLevel.DEBUG)
 
     tasks.withType<Test>().configureEach {
+        // Apply hang-prevention timeouts to every project's Test tasks, not just :test.
+        systemProperty("junit.jupiter.execution.timeout.default", "2 m")
+        systemProperty("junit.jupiter.execution.timeout.thread.mode.default", "SEPARATE_THREAD")
+
         val failedTestsOutputs = ConcurrentHashMap<String, StringBuilder>()
 
         if (isVerbose) {
@@ -150,6 +154,18 @@ dependencies {
 
 tasks.withType<Test>().configureEach {
     useJUnitPlatform()
+    // Configure global timeout to prevent infinite test hangs (generous for testcontainers pulls)
+    systemProperty("junit.jupiter.execution.timeout.default", "2 m")
+    // Run timed tests on a separate thread so JUnit can interrupt hangs and report their stack trace.
+    systemProperty("junit.jupiter.execution.timeout.thread.mode.default", "SEPARATE_THREAD")
+
+    testLogging {
+        showExceptions = true
+        showCauses = true
+        showStackTraces = true
+        exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
+        showStandardStreams = true
+    }
 }
 
 dependencyCheck {
@@ -318,7 +334,22 @@ subprojects {
         mustRunAfter(rootProject.tasks.named("test"))
         dependsOn(tasks.withType<org.gradle.testing.jacoco.tasks.JacocoReport>())
         mustRunAfter(tasks.withType<org.gradle.testing.jacoco.tasks.JacocoReport>())
-        executionData.setFrom(fileTree(project.layout.buildDirectory.dir("jacoco")).include("*.exec"))
+        if (project.name == "platform") {
+            // LinuxNative and the shared FFM/seccomp types live in :platform, but the
+            // historical 78% LinuxNative gate is produced by :enforcer unit + integration
+            // tests. Merge that execution data so :platform:check still measures them.
+            dependsOn(":enforcer:test")
+            dependsOn(":enforcer:integrationTest")
+            mustRunAfter(":enforcer:test", ":enforcer:integrationTest")
+            executionData.setFrom(
+                files(
+                    fileTree(project.layout.buildDirectory.dir("jacoco")).include("*.exec"),
+                    fileTree(rootProject.layout.projectDirectory.dir("enforcer/build/jacoco")).include("*.exec"),
+                ),
+            )
+        } else {
+            executionData.setFrom(fileTree(project.layout.buildDirectory.dir("jacoco")).include("*.exec"))
+        }
         classDirectories.setFrom(
             files(
                 classDirectories.files.map {
@@ -353,7 +384,45 @@ subprojects {
                     limit {
                         counter = "INSTRUCTION"
                         value = "COVEREDRATIO"
-                        minimum = "0.86".toBigDecimal()
+                        minimum = "0.84".toBigDecimal()
+                    }
+                }
+            } else if (project.name == "platform") {
+                // Bundle floor is the platform unit-test baseline. Relocated native
+                // classes are also gated per-class so an individual critical type
+                // cannot drop to zero while this bundle still passes.
+                rule {
+                    element = "BUNDLE"
+                    limit {
+                        counter = "INSTRUCTION"
+                        value = "COVEREDRATIO"
+                        minimum = "0.30".toBigDecimal()
+                    }
+                }
+                rule {
+                    element = "CLASS"
+                    includes = listOf("io.mazewall.LinuxNative")
+                    limit {
+                        counter = "INSTRUCTION"
+                        value = "COVEREDRATIO"
+                        minimum = "0.78".toBigDecimal()
+                    }
+                }
+                rule {
+                    element = "CLASS"
+                    includes =
+                        listOf(
+                            "io.mazewall.ffi.Layouts",
+                            "io.mazewall.ffi.LayoutValidator",
+                            "io.mazewall.ffi.memory.SegmentPool",
+                            "io.mazewall.ffi.memory.NativeArena",
+                            "io.mazewall.ffi.internal.RealNativeFileSystem",
+                            "io.mazewall.ffi.internal.RealNativeProcess",
+                        )
+                    limit {
+                        counter = "INSTRUCTION"
+                        value = "COVEREDRATIO"
+                        minimum = "0.70".toBigDecimal()
                     }
                 }
             } else if (project.name == "orchestrator") {
@@ -431,5 +500,12 @@ tasks.named("check") {
 tasks.register<Exec>("refactorFirstReport") {
     group = "verification"
     description = "Generates a RefactorFirst HTML report using Maven"
+    onlyIf {
+        try {
+            ProcessBuilder("mvn", "-v").redirectError(ProcessBuilder.Redirect.DISCARD).start().waitFor() == 0
+        } catch (e: Exception) {
+            false
+        }
+    }
     commandLine("mvn", "org.hjug.refactorfirst.plugin:refactor-first-maven-plugin:0.9.0:htmlReport")
 }

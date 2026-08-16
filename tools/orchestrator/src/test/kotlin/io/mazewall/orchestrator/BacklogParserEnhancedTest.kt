@@ -55,6 +55,52 @@ class BacklogParserEnhancedTest {
     }
 
     @Test
+    fun testMarkIssueAsDeferredPersistsTerminalStatus() {
+        val file = File(tempDir, "issue-20260810-150801-timeout.md")
+        file.writeText(
+            """
+            ---
+            title: "Timed-out task"
+            severity: "MEDIUM"
+            status: "in_progress"
+            priority: 8
+            dependencies: []
+            component: "orchestrator"
+            effort: "small"
+            ---
+            """.trimIndent()
+        )
+        val issue = assertNotNull(BacklogParser.parseIssueFile(file))
+
+        BacklogParser.markIssueAsDeferred(issue)
+
+        assertEquals("deferred", BacklogParser.parseIssueFile(file)?.status)
+    }
+
+    @Test
+    fun testMarkIssueAsDeferredAcceptsOpenStatus() {
+        val file = File(tempDir, "issue-20260816-open-timeout.md")
+        file.writeText(
+            """
+            ---
+            title: "Timed-out open task"
+            severity: "MEDIUM"
+            status: "open"
+            priority: 8
+            dependencies: []
+            component: "orchestrator"
+            effort: "small"
+            ---
+            """.trimIndent()
+        )
+        val issue = assertNotNull(BacklogParser.parseIssueFile(file))
+
+        BacklogParser.markIssueAsDeferred(issue)
+
+        assertEquals("deferred", BacklogParser.parseIssueFile(file)?.status)
+    }
+
+    @Test
     fun testExtractSectionWithDifferentMarkers() {
         val file = File(tempDir, "issue-999-markers.md")
         file.writeText("""

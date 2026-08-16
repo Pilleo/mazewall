@@ -3,6 +3,7 @@ package io.mazewall.enforcer.supervisor
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -14,6 +15,19 @@ import java.nio.file.Path
 import java.nio.file.Paths
 
 class ResolveAbsolutePathTest {
+
+    @Test
+    fun `proc and sys paths remain subject to supervisor policy evaluation`() {
+        assertFalse(BypassPaths.isBypassPath(Paths.get("/proc/self/environ")))
+        assertFalse(BypassPaths.isBypassPath(Paths.get("/sys/kernel/security")))
+    }
+
+    @Test
+    fun `Maven settings remain subject to supervisor policy evaluation`() {
+        val settings = Paths.get(System.getProperty("user.home"), ".m2", "settings.xml")
+
+        assertFalse(BypassPaths.isBypassPath(settings))
+    }
 
     @Test
     fun `resolveAbsolutePath returns path even for non-existent absolute path`() {
@@ -64,14 +78,87 @@ class ResolveAbsolutePathTest {
     }
 
     @Test
+    fun `unresolvable relative path is not remapped onto a daemon bypass root`() {
+        val handler = SupervisorSessionHandler(
+            FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(-1),
+            FileDescriptor.unsafe<FileDescriptorRole.SeccompNotif>(-1)
+        )
+        val resolveMethod = SupervisorSessionHandler::class.java.getDeclaredMethod(
+            "resolveAbsolutePath",
+            Int::class.javaPrimitiveType,
+            Int::class.javaPrimitiveType,
+            String::class.java
+        )
+        resolveMethod.isAccessible = true
+        val bypassMethod = SupervisorSessionHandler::class.java.getDeclaredMethod(
+            "resolveBypassPath",
+            Path::class.java
+        )
+        bypassMethod.isAccessible = true
+
+        val resolvedPath = resolveMethod.invoke(handler, 0, 999, "build/secret") as Path?
+
+        if (resolvedPath == null) {
+            return
+        }
+        val bypass = bypassMethod.invoke(handler, resolvedPath) as Path?
+        assertNull(bypass)
+        assertFalse(BypassPaths.safeBypassPaths.any { root ->
+            resolvedPath.normalize().startsWith(root.normalize())
+        })
+    }
+
+    @Test
+    fun `relative bypass path is matched only after tracee dirfd resolution`() {
+        val handler = SupervisorSessionHandler(
+            FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(-1),
+            FileDescriptor.unsafe<FileDescriptorRole.SeccompNotif>(-1)
+        )
+        val traceeDirectory = Files.createTempDirectory("mazewall-tracee-dir")
+        val tracee = ProcessBuilder(
+            "bash",
+            "-c",
+            "exec 9<\"$traceeDirectory\"; echo $$; sleep 30"
+        ).redirectErrorStream(true).start()
+
+        try {
+            val traceePid = tracee.inputReader().readLine().toInt()
+            val resolveMethod = SupervisorSessionHandler::class.java.getDeclaredMethod(
+                "resolveAbsolutePath",
+                Int::class.javaPrimitiveType,
+                Int::class.javaPrimitiveType,
+                String::class.java
+            )
+            resolveMethod.isAccessible = true
+            val resolvedPath = resolveMethod.invoke(handler, traceePid, 9, "build/secret") as Path
+
+            val bypassMethod = SupervisorSessionHandler::class.java.getDeclaredMethod(
+                "resolveBypassPath",
+                Path::class.java
+            )
+            bypassMethod.isAccessible = true
+
+            // "build" is beneath the daemon working directory and is normally bypassed. It must not
+            // bypass when the tracee asks openat() to resolve that same relative spelling under fd 9.
+            val result = bypassMethod.invoke(handler, resolvedPath) as Path?
+
+            assertNull(result)
+        } finally {
+            tracee.destroyForcibly()
+            tracee.waitFor()
+            Files.deleteIfExists(traceeDirectory)
+        }
+    }
+
+    @Test
     fun `toRealPathWithFallback correctly canonicalizes existing parent of non-existent files`() {
         // Create a temporary file, get its parent, and resolve a non-existent child.
         val tempFile = Files.createTempFile("existing-parent-test", ".tmp")
         val parentDir = tempFile.parent
         val nonExistentChild = parentDir.resolve("non-existent-child-abc-123")
 
-        val companionClass = Class.forName("io.mazewall.enforcer.supervisor.SupervisorSessionHandler\$Companion")
-        val companionInstance = SupervisorSessionHandler.Companion
+        val companionClass = Class.forName("io.mazewall.enforcer.supervisor.BypassPaths")
+        val companionInstance = BypassPaths
         val method = companionClass.getDeclaredMethod("toRealPathWithFallback", Path::class.java)
         method.isAccessible = true
 
@@ -85,8 +172,8 @@ class ResolveAbsolutePathTest {
 
     @Test
     fun `toRealPathWithFallback propagates critical exceptions like FileSystemLoopException`() {
-        val companionClass = Class.forName("io.mazewall.enforcer.supervisor.SupervisorSessionHandler\$Companion")
-        val companionInstance = SupervisorSessionHandler.Companion
+        val companionClass = Class.forName("io.mazewall.enforcer.supervisor.BypassPaths")
+        val companionInstance = BypassPaths
         val method = companionClass.getDeclaredMethod("toRealPathWithFallback", Path::class.java)
         method.isAccessible = true
 

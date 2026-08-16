@@ -1,7 +1,7 @@
 package io.mazewall.profiler
 
-import io.mazewall.enforcer.threadLocal
-import io.mazewall.enforcer.validateNotVirtual
+import io.mazewall.core.threadLocal
+import io.mazewall.enforcer.diagnostics.validateNotVirtual
 import io.mazewall.LinuxNative
 import io.mazewall.Policy
 import io.mazewall.PolicyDefinition

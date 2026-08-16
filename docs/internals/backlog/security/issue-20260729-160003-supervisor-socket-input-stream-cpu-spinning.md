@@ -1,7 +1,7 @@
 ---
 title: "Prevent High CPU Spinning in SupervisorSocketInputStream on Interruption"
 severity: "HIGH"
-status: "open"
+status: "resolved"
 priority: 8
 dependencies: []
 component: "enforcer"

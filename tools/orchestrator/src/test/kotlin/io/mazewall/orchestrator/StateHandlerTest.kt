@@ -21,10 +21,15 @@ class MockOrchestratorEnvironment : OrchestratorEnvironment {
     var buildStatus = "SUCCESS"
     val prComments = mutableListOf<GitHubComment>()
     val commentedPrs = mutableListOf<Pair<String, String>>()
+    val commentedIssues = mutableListOf<Pair<String, String>>()
+    var commentOnIssueException: Exception? = null
+    val createdGenerationSessions = mutableListOf<String>()
     var julesSession: JulesSession? = null
+    var triggeredJulesSessions = 0
     val sentJulesMessages = mutableListOf<Pair<String, String>>()
     val issues = mutableListOf<BacklogIssue>()
     val resolvedIssues = mutableListOf<BacklogIssue>()
+    val deferredIssues = mutableListOf<BacklogIssue>()
     var mapsRegenerated = false
     var stateFileDeleted = false
     var sleepCount = 0
@@ -33,8 +38,7 @@ class MockOrchestratorEnvironment : OrchestratorEnvironment {
     var isCommitEmptyResult = false
     var prMergeStatus = PrMergeStatus("MERGEABLE", 0)
     var clearPrCacheCount = 0
-    var mergeMasterIntoBranchResult = RebaseResult(true, 0, emptyList())
-    var mergeMasterIntoBranchCallCount = 0
+    val ensuredLabels = mutableListOf<String>()
 
     override fun println(message: Any?) { printlns.add(message.toString()) }
     override fun print(message: Any?) {}
@@ -60,6 +64,7 @@ class MockOrchestratorEnvironment : OrchestratorEnvironment {
         override fun createIssue(title: String, body: String, label: String): String = createdIssueNumber
         override fun getRepoName(): String = "mock/repo"
         override fun addLabel(issueNumber: String, label: String) {}
+        override fun ensureLabelExists(label: String) { ensuredLabels.add(label) }
         override fun labelPr(prNumber: String, label: String) {}
         override fun isIssueClosed(issueNumber: String): Boolean = issueClosed
         override fun isPrClosed(prNumber: String): Boolean = prClosed
@@ -69,19 +74,14 @@ class MockOrchestratorEnvironment : OrchestratorEnvironment {
         override fun checkBuildStatus(prNumber: String): String = buildStatus
         override fun getPrComments(prNumber: String): List<GitHubComment> = prComments
         override fun commentOnPr(prNumber: String, body: String) { commentedPrs.add(prNumber to body) }
-        override fun commentOnIssue(issueNumber: String, body: String) {}
+        override fun commentOnIssue(issueNumber: String, body: String) {
+            commentOnIssueException?.let { throw it }
+            commentedIssues.add(issueNumber to body)
+        }
         override fun getPrDiff(prNumber: String): String = "mock diff"
         override fun getFailedBuildLogs(prNumber: String): String = "mock failed logs"
         override fun getPrUrl(prNumber: String): String = "mock url"
         override fun isCommitEmpty(prNumber: String, shaOld: String, shaNew: String): Boolean = isCommitEmptyResult
-        override fun rebaseBranch(prNumber: String, sessionId: String?): RebaseResult {
-            mergeMasterIntoBranchCallCount++
-            return mergeMasterIntoBranchResult
-        }
-        override fun rebaseBranchFallback(prNumber: String, sessionId: String?, targetFiles: List<String>): RebaseResult {
-            return RebaseResult(true, 0)
-        }
-        override fun approveRescue(prNumber: String, rescueBranchName: String) {}
         override fun clearPrCache(prNumber: String) { clearPrCacheCount++ }
     }
 
@@ -89,9 +89,14 @@ class MockOrchestratorEnvironment : OrchestratorEnvironment {
         override fun getActiveSession(issueId: String): JulesSession? = julesSession
         override fun getSessionStatusFromActivities(sessionId: String): String? = julesSession?.status
         override fun hasUnableToCompleteActivity(sessionId: String): Boolean = hasUnableToCompleteActivity
-        override fun triggerSession(repo: String, issueId: String, prompt: String) {}
+        override fun triggerSession(repo: String, issueId: String, prompt: String): JulesSession {
+            triggeredJulesSessions++
+            return JulesSession("created-session", "desc", repo, "PENDING")
+        }
         override fun createSessionWithContext(repo: String, issueId: String, githubIssueNumber: String, previousPrUrl: String, previousBranch: String, originalTaskDescription: String): JulesSession {
-            return JulesSession("s-context", "desc", repo, "PENDING")
+            val session = JulesSession("s-context-${createdGenerationSessions.size + 1}", "desc", repo, "PENDING")
+            createdGenerationSessions.add(session.id)
+            return session
         }
         override fun sendSessionMessage(sessionId: String, prompt: String) { sentJulesMessages.add(sessionId to prompt) }
         override fun listSessions(): List<JulesSession> = emptyList()
@@ -106,6 +111,7 @@ class MockOrchestratorEnvironment : OrchestratorEnvironment {
     override fun writeGithubIssue(issue: BacklogIssue, number: Int) {}
     override fun removeGithubIssue(issue: BacklogIssue) {}
     override fun markIssueAsResolved(issue: BacklogIssue) { resolvedIssues.add(issue) }
+    override fun markIssueAsDeferred(issue: BacklogIssue) { deferredIssues.add(issue) }
     override fun deleteStateFile() { stateFileDeleted = true }
     override fun generateKnowledgeMap() { mapsRegenerated = true }
 }
@@ -166,6 +172,23 @@ class StateHandlerTest {
 
         assertTrue(nextState is AwaitingPrState)
         assertEquals("s1", context.julesSessionId)
+    }
+
+    @Test
+    fun `awaiting Jules start creates exactly one session and persists its identifier`() {
+        val env = MockOrchestratorEnvironment()
+        env.issues.add(BacklogIssue(File("missing-issue.md"), "issue-1", "Title", 1, "open", emptyList()))
+        val context = OrchestratorContext()
+        val slot = SlotContext("issue-1").apply {
+            currentIssueFile = "missing-issue.md"
+        }
+        val state = AwaitingJulesStartState("issue-1", "123")
+
+        val nextState = state.execute(env, context, slot)
+
+        assertEquals(1, env.triggeredJulesSessions)
+        assertEquals("created-session", slot.julesSessionId)
+        assertEquals(AwaitingPrState("issue-1", "123", "created-session"), nextState)
     }
 
     @Test
@@ -482,142 +505,8 @@ class StateHandlerTest {
         assertTrue(env.commentedPrs.isEmpty(), "No correction comment should be sent for non-empty commits")
     }
 
-    @Test
-    fun testCiRunningDetectsBehindPrAndRebases() {
-        val env = MockOrchestratorEnvironment()
-        val context = OrchestratorContext().apply {
-            prNumber = "pr-1"
-            currentIssueId = "issue-1"
-            githubIssueNumber = "123"
-            julesSessionId = "s1"
-        }
-        env.prMergeStatus = PrMergeStatus("MERGEABLE", 5) // behind by 5 commits
-        env.buildStatus = "PENDING"
 
-        val state = CiRunningState("issue-1", "123", "s1", "pr-1")
-        val nextState = state.execute(env, context)
 
-        // It should stay in CI_RUNNING after attempting rebase
-        assertTrue(nextState is CiRunningState)
-        // Check if retryAfterTime was set
-        assertTrue(context.retryAfterTime > System.currentTimeMillis(), "Should set retryAfterTime after triggering rebase")
-        assertEquals(0, env.sleepCount)
-    }
-
-    @Test
-    fun testAwaitingPrDetectsConflictingPrAndRebases() {
-        val env = MockOrchestratorEnvironment()
-        val context = OrchestratorContext().apply {
-            currentIssueId = "issue-1"
-            githubIssueNumber = "123"
-            julesSessionId = "s1"
-        }
-        env.linkedPrNumber = "pr-1"
-        env.prMergeStatus = PrMergeStatus("CONFLICTING", 0)
-
-        val state = AwaitingPrState("issue-1", "123", "s1")
-        var nextState = state.execute(env, context)
-
-        // It should transition to CiRunningState
-        assertTrue(nextState is CiRunningState)
-
-        // Now execute CiRunningState to trigger the merge handling
-        nextState = nextState.execute(env, context)
-        assertTrue(nextState is CiRunningState)
-
-        // Check if retryAfterTime was set during the merge workflow
-        assertTrue(context.retryAfterTime > System.currentTimeMillis(), "Should set retryAfterTime after triggering merge")
-        assertEquals(0, env.sleepCount)
-    }
-
-    @Test
-    fun testAwaitingReviewAutomatedMergePreservesReviewStatus() {
-        val env = MockOrchestratorEnvironment()
-        val context = OrchestratorContext().apply {
-            prNumber = "pr-1"
-            currentIssueId = "issue-1"
-            githubIssueNumber = "123"
-            julesSessionId = "s1"
-            lastHeadSha = "sha_old"
-            lastReviewedSha = "sha_old"
-            lastRequestedReviewSha = "sha_old"
-        }
-        env.prMergeStatus = PrMergeStatus("MERGEABLE", 1) // Behind by 1 commit
-        env.buildStatus = "SUCCESS"
-        env.prHeadSha = "sha_new" // The new head after merge
-        env.mergeMasterIntoBranchResult = RebaseResult(true, 0) // Merge succeeds!
-
-        val state = AwaitingReviewState("issue-1", "123", "s1", "pr-1", "sha_old")
-        val nextState = state.execute(env, context)
-
-        // It should transition to CiRunningState to verify the build of the merge commit
-        assertTrue(nextState is CiRunningState)
-        // Verify that slot properties were successfully updated to the new SHA!
-        assertEquals("sha_new", context.lastHeadSha)
-        assertEquals("sha_new", context.lastReviewedSha)
-        assertEquals("sha_new", context.lastRequestedReviewSha)
-    }
-
-    @Test
-    fun testAwaitingReviewDetectsConflictingPrAndRebases() {
-        val env = MockOrchestratorEnvironment()
-        val context = OrchestratorContext().apply {
-            prNumber = "pr-1"
-            currentIssueId = "issue-1"
-            githubIssueNumber = "123"
-            julesSessionId = "s1"
-        }
-        env.prMergeStatus = PrMergeStatus("CONFLICTING", 0)
-        env.buildStatus = "SUCCESS"
-
-        val state = AwaitingReviewState("issue-1", "123", "s1", "pr-1", "sha123")
-        val nextState = state.execute(env, context)
-
-        // It should transition to CiRunningState on successful rebase
-        assertTrue(nextState is CiRunningState)
-        // Check if retryAfterTime was set during the rebase workflow
-        assertTrue(context.retryAfterTime > System.currentTimeMillis(), "Should set retryAfterTime after triggering rebase")
-        assertEquals(0, env.sleepCount)
-    }
-
-    @Test
-    fun testHandleRebaseAndConflictsHandlesAuthErrorAndAlerts() {
-        val env = MockOrchestratorEnvironment()
-        val context = OrchestratorContext().apply {
-            prNumber = "pr-1"
-            currentIssueId = "issue-1"
-            githubIssueNumber = "123"
-            julesSessionId = "s1"
-        }
-        env.prMergeStatus = PrMergeStatus("UNKNOWN", 0, isError = true, errorMessage = "HTTP 401: Bad credentials")
-        env.buildStatus = "SUCCESS"
-
-        val state = CiRunningState("issue-1", "123", "s1", "pr-1")
-
-        // 1st attempt
-        var nextState = state.execute(env, context)
-        assertTrue(nextState is CiRunningState)
-        assertEquals(1, context.prMergeStatusAttempts)
-        assertTrue(context.retryAfterTime > System.currentTimeMillis())
-
-        // 2nd attempt (mock time passage by resetting retryAfterTime)
-        context.retryAfterTime = 0L
-        nextState = nextState.execute(env, context)
-        assertTrue(nextState is CiRunningState)
-        assertEquals(2, context.prMergeStatusAttempts)
-        assertTrue(context.retryAfterTime > System.currentTimeMillis())
-
-        // 3rd attempt (exceeds limit)
-        context.retryAfterTime = 0L
-        nextState = nextState.execute(env, context)
-        assertTrue(nextState is CiRunningState)
-        assertEquals(0, context.prMergeStatusAttempts) // reset
-
-        // Verify notification was sent
-        assertTrue(env.notifications.any { it.contains("GitHub CLI Authentication/Query Failure") || it.contains("HTTP 401: Bad credentials") },
-            "Notification should be sent for authentication error")
-        assertEquals(0, env.sleepCount)
-    }
 
     @Test
     fun testAwaitingPrIssueClosedResolvesTask() {
@@ -659,6 +548,26 @@ class StateHandlerTest {
     }
 
     @Test
+    fun testAwaitingPrTimeoutDefersTaskBeforeRemovingSlot() {
+        val env = MockOrchestratorEnvironment()
+        val issue = BacklogIssue(File("test.md"), "issue-1", "Title", 1, "in_progress", emptyList())
+        env.issues.add(issue)
+        val slot = SlotContext("issue-1").apply {
+            startTime = System.currentTimeMillis() - TimeUnit.MINUTES.toMillis(61)
+        }
+        val context = OrchestratorContext().apply {
+            activeSlots.add(slot)
+        }
+
+        val nextState = AwaitingPrState("issue-1", "123", "s1").execute(env, context, slot)
+
+        assertTrue(nextState is SelectTaskState)
+        assertEquals(listOf(issue), env.deferredIssues)
+        assertTrue("issue-1" in context.skippedIds)
+        assertFalse(slot in context.activeSlots)
+    }
+
+    @Test
     fun testAwaitingPrCompletedReviewTask() {
         val env = MockOrchestratorEnvironment()
         val context = OrchestratorContext().apply {
@@ -675,6 +584,53 @@ class StateHandlerTest {
 
         assertTrue(nextState is SelectTaskState)
         assertTrue(env.resolvedIssues.contains(issue))
+    }
+
+    @Test
+    fun testCreateGenerationTransitionsEvenIfIssueCommentFails() {
+        val env = MockOrchestratorEnvironment()
+        val issueFile = kotlin.io.path.createTempFile().toFile().apply { writeText("Task") }
+        env.issues.add(BacklogIssue(issueFile, "issue-1", "Title", 1, "open", emptyList()))
+        env.commentOnIssueException = RuntimeException("GitHub comment failed")
+        val context = OrchestratorContext().apply {
+            currentIssueId = "issue-1"
+            githubIssueNumber = "123"
+            julesSessionId = "s1"
+            prNumber = "42"
+        }
+
+        try {
+            val nextState = CreateGenerationState("issue-1", "123", "s1", "42").execute(env, context)
+
+            assertTrue(nextState is AwaitingPrState)
+            assertEquals(listOf("s-context-1"), env.createdGenerationSessions)
+            assertEquals("s-context-1", context.julesSessionId)
+            assertEquals(null, context.prNumber)
+            assertTrue(env.commentedIssues.isEmpty())
+        } finally {
+            issueFile.delete()
+        }
+    }
+
+    @Test
+    fun testCreateGenerationEnsuresSupersededLabelBeforeUse() {
+        val env = MockOrchestratorEnvironment()
+        val issueFile = kotlin.io.path.createTempFile().toFile().apply { writeText("Task") }
+        env.issues.add(BacklogIssue(issueFile, "issue-1", "Title", 1, "open", emptyList()))
+        val context = OrchestratorContext().apply {
+            currentIssueId = "issue-1"
+            githubIssueNumber = "123"
+            julesSessionId = "s1"
+            prNumber = "42"
+        }
+
+        try {
+            CreateGenerationState("issue-1", "123", "s1", "42").execute(env, context)
+
+            assertEquals(listOf("superseded"), env.ensuredLabels)
+        } finally {
+            issueFile.delete()
+        }
     }
 
     @Test
@@ -1382,7 +1338,6 @@ class StateHandlerTest {
         // It should stay in CiRunningState
         assertTrue(nextState is CiRunningState)
         // Verify that it did NOT call mergeMasterIntoBranch because the session was active!
-        assertEquals(0, env.mergeMasterIntoBranchCallCount)
         // Verify it set retryAfterTime for the session
         assertTrue(context.retryAfterTime > System.currentTimeMillis(), "Should set retryAfterTime for the active session")
         assertEquals(0, env.sleepCount)
@@ -1407,7 +1362,6 @@ class StateHandlerTest {
         // It should stay in AwaitingReviewState
         assertTrue(nextState is AwaitingReviewState)
         // Verify that it did NOT call mergeMasterIntoBranch because the session was active!
-        assertEquals(0, env.mergeMasterIntoBranchCallCount)
         // Verify it set retryAfterTime for the session
         assertTrue(context.retryAfterTime > System.currentTimeMillis(), "Should set retryAfterTime for the active session")
         assertEquals(0, env.sleepCount)
@@ -1738,7 +1692,7 @@ class StateHandlerTest {
                 initialState = CiRunningState("issue-1", "123", "s1", "pr-1"),
                 buildStatus = "PENDING",
                 prMergeStatus = PrMergeStatus("MERGEABLE", 5),
-                expectedStateClass = CiRunningState::class
+                expectedStateClass = CreateGenerationState::class
             ),
             TransitionTestCase(
                 description = "AWAITING_REVIEW -> CI_RUNNING when Jules pushes non-empty code commit",

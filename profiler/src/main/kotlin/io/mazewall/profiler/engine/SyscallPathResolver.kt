@@ -87,7 +87,15 @@ internal class SyscallPathResolver(
         dirfd: Long = AT_FDCWD_VAL,
     ): String? {
         if (addr == 0L) return null
-        val path = memoryReader.readStringFromProcess(tid, addr)
+        val path = try {
+            memoryReader.readStringFromProcess(tid, addr)
+        } catch (e: io.mazewall.enforcer.api.ContainmentViolationException) {
+            // Yama can deny grandchild memory reads. Record the failed inspection and
+            // keep the session alive so the syscall can be continued; the event is
+            // published without a resolved path rather than as a successful empty read.
+            ledger.record(SessionEvent.VmReadvResolved(System.nanoTime(), tid.value.toLong(), false))
+            return null
+        }
         ledger.record(SessionEvent.VmReadvResolved(System.nanoTime(), tid.value.toLong(), path != null))
         if (path == null) return null
         return if (path.startsWith("/")) {

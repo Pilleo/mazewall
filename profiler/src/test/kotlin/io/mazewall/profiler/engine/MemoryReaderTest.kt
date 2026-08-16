@@ -11,8 +11,20 @@ import java.lang.foreign.Arena
 import java.lang.foreign.MemorySegment
 import java.lang.foreign.ValueLayout
 import java.nio.charset.StandardCharsets
+import io.mazewall.enforcer.api.ContainmentViolationException
 
 class MemoryReaderTest {
+
+    @Test
+    fun `default profiler memory reader methods do not recurse`() {
+        val reader = object : ProfilerMemoryReader {}
+
+        io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
+            val result = with(arena) { reader.readStringFromProcess(Tid(1234), 0L) }
+
+            assertEquals(null, result)
+        }
+    }
 
     @Test
     fun `test resolveLink strips deleted suffix`() {
@@ -69,7 +81,7 @@ class MemoryReaderTest {
         try {
             io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
                 val reader = RealMemoryReader
-                org.junit.jupiter.api.assertThrows<io.mazewall.enforcer.ContainmentViolationException> {
+                org.junit.jupiter.api.assertThrows<ContainmentViolationException> {
                     with(arena) { reader.readStringFromProcess(tid, remoteAddr, mockData.size) }
                 }
             }

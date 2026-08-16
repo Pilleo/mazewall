@@ -2,9 +2,12 @@ package io.mazewall.enforcer
 
 import io.mazewall.Platform
 import org.junit.jupiter.api.Assertions.assertThrows
+import io.mazewall.enforcer.diagnostics.validateLinuxAndNotVirtual
+import io.mazewall.enforcer.diagnostics.validateNotVirtual
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.Assumptions.assumeTrue
 import java.util.concurrent.Executors
+import java.util.concurrent.ForkJoinPool
 
 class ValidationTest {
 
@@ -44,5 +47,23 @@ class ValidationTest {
             future.get()
         }
         assumeTrue(e.cause is IllegalStateException)
+    }
+
+    @Test
+    fun `test validateNotVirtual passes on ordinary ForkJoinPool worker`() {
+        ForkJoinPool(1).use { pool ->
+            pool.submit {
+                validateNotVirtual()
+            }.get()
+        }
+    }
+
+    @Test
+    fun `test validateNotVirtual ignores platform thread name`() {
+        Executors.newSingleThreadExecutor(Thread.ofPlatform().name("application-carrier-worker").factory()).use { executor ->
+            executor.submit {
+                validateNotVirtual()
+            }.get()
+        }
     }
 }

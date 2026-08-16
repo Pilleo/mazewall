@@ -1,5 +1,11 @@
 package io.mazewall
 
+import io.mazewall.enforcer.api.*
+import io.mazewall.enforcer.state.*
+import io.mazewall.enforcer.diagnostics.*
+import io.mazewall.enforcer.engine.*
+import io.mazewall.enforcer.*
+
 import io.mazewall.core.Arch
 import io.mazewall.core.SandboxedPath
 import io.mazewall.core.SeccompAction
@@ -142,7 +148,7 @@ public data class PolicyDefinition<out S : PolicyScope>(
                 val tail = sortedSet2.tailSet(p1.value, false)
                 for (p2 in tail) {
                     if (isParent(p1.value, p2)) {
-                        result.add(SandboxedPath.unsafe(p2))
+                        result.add(SandboxedPath.of(p2, allowNonExistent = true))
                     } else {
                         break
                     }

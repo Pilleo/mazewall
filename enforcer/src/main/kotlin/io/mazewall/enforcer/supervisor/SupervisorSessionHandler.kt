@@ -1,6 +1,12 @@
 package io.mazewall.enforcer.supervisor
 
+import io.mazewall.enforcer.api.*
+import io.mazewall.enforcer.state.*
+import io.mazewall.enforcer.diagnostics.*
+import io.mazewall.enforcer.engine.*
+import io.mazewall.enforcer.*
 import io.mazewall.LinuxNative
+import io.mazewall.platform.seccomp.daemon.LoopAction
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
@@ -66,25 +72,28 @@ internal class SupervisorSessionHandler(
     private val listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open>,
     private val engine: io.mazewall.NativeEngine = io.mazewall.LinuxNative,
     private val socketManager: io.mazewall.core.SocketManager = io.mazewall.core.RealSocketManager
-) {
+) : io.mazewall.platform.seccomp.daemon.SeccompNotifHandler {
+
+    context(arena: io.mazewall.ffi.memory.NativeArena)
+    override fun processNotification(
+        notif: io.mazewall.ffi.memory.ManagedSegment,
+        resp: io.mazewall.ffi.memory.ManagedSegment,
+        listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open>,
+        socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>
+    ): io.mazewall.platform.seccomp.daemon.NotifResult {
+        return if (processNotification(notif, resp)) {
+            io.mazewall.platform.seccomp.daemon.NotifResult.HANDLED
+        } else {
+            io.mazewall.platform.seccomp.daemon.NotifResult.TERMINATE
+        }
+    }
+
     companion object {
         private val logger = Logger.getLogger(SupervisorSessionHandler::class.java.name)
 
         private const val POLL_TIMEOUT_MS = 30000
         private const val AT_FDCWD = -100
 
-        // Seccomp notifications offsets
-        private const val NOTIF_ID_OFF = 0L
-        private const val NOTIF_PID_OFF = 8L
-        private const val NOTIF_ARCH_OFF = 20L
-        private const val NOTIF_NR_OFF = 16L
-        private const val NOTIF_ARGS_OFF = 32L
-
-        // Seccomp response offsets
-        private const val RESP_ID_OFF = 0L
-        private const val RESP_VAL_OFF = 8L
-        private const val RESP_ERR_OFF = 16L
-        private const val RESP_FLAGS_OFF = 20L
 
         // Argument types
         private const val ARG_TYPE_LONG: Byte = 0
@@ -131,173 +140,7 @@ internal class SupervisorSessionHandler(
          * and build/coverage directories. Because these syscalls bypass the JVM listener entirely,
          * no dynamic class loading is triggered during vulnerable tracee states.
          */
-        private fun toRealPathWithFallback(path: java.nio.file.Path): java.nio.file.Path {
-            val abs = path.toAbsolutePath().normalize()
-            var current = abs
-            val nonExistentParts = mutableListOf<String>()
-            while (true) {
-                try {
-                    val real = current.toRealPath()
-                    var resolved = real
-                    for (i in nonExistentParts.indices.reversed()) {
-                        resolved = resolved.resolve(nonExistentParts[i])
-                    }
-                    return resolved.normalize()
-                } catch (e: java.nio.file.NoSuchFileException) {
-                    val parent = current.parent ?: break
-                    nonExistentParts.add(current.fileName.toString())
-                    current = parent
-                } catch (e: java.io.FileNotFoundException) {
-                    val parent = current.parent ?: break
-                    nonExistentParts.add(current.fileName.toString())
-                    current = parent
-                }
-            }
-            var resolved = abs.root ?: abs
-            for (i in nonExistentParts.indices.reversed()) {
-                resolved = resolved.resolve(nonExistentParts[i])
-            }
-            return resolved.normalize()
-        }
 
-        @Suppress("SwallowedException", "TooGenericExceptionCaught")
-        private val safeBypassPaths = mutableListOf<java.nio.file.Path>().apply {
-            fun addPathAndReal(path: java.nio.file.Path) {
-                val abs = path.toAbsolutePath().normalize()
-                add(abs)
-                try {
-                    val real = toRealPathWithFallback(abs)
-                    add(real)
-                } catch (e: java.nio.file.NoSuchFileException) {
-                    // Normal, path might not exist
-                } catch (e: java.io.FileNotFoundException) {
-                    // Normal, path might not exist
-                } catch (e: Exception) {
-                    logger.warning { "Failed to resolve real path for $abs: ${e.message}" }
-                }
-            }
-
-            fun parseManifestClassPath(jarPath: java.nio.file.Path) {
-                try {
-                    java.util.jar.JarFile(jarPath.toFile()).use { jar ->
-                        val manifest = jar.manifest ?: return
-                        val classPathAttr = manifest.mainAttributes.getValue("Class-Path") ?: return
-                        val parentDir = jarPath.parent ?: return
-                        for (entry in classPathAttr.split(" ")) {
-                            if (entry.isNotEmpty()) {
-                                try {
-                                    val uri = java.net.URI(entry)
-                                    val resolvedPath = if (uri.isAbsolute) {
-                                        java.nio.file.Paths.get(uri)
-                                    } else {
-                                        parentDir.resolve(uri.path).normalize()
-                                    }
-                                    addPathAndReal(resolvedPath)
-                                } catch (e: java.net.URISyntaxException) {
-                                    // Syntax error in manifest CP, skip
-                                } catch (e: Exception) {
-                                    logger.warning { "Failed to parse manifest entry $entry in $jarPath: ${e.message}" }
-                                }
-                            }
-                        }
-                    }
-                } catch (e: java.io.FileNotFoundException) {
-                    // Normal if Jar file doesn't exist
-                } catch (e: Exception) {
-                    logger.warning { "Failed to process manifest Class-Path for $jarPath: ${e.message}" }
-                }
-            }
-
-            try {
-                val javaHomeStr = System.getProperty("java.home")
-                if (!javaHomeStr.isNullOrEmpty()) {
-                    addPathAndReal(java.nio.file.Paths.get(javaHomeStr))
-                }
-
-                val cp = System.getProperty("java.class.path")
-                if (cp != null) {
-                    val cpEntries = cp.split(java.io.File.pathSeparator)
-                    for (entry in cpEntries) {
-                        if (entry.isNotEmpty()) {
-                            try {
-                                val path = java.nio.file.Paths.get(entry)
-                                addPathAndReal(path)
-                                if (entry.endsWith(".jar")) {
-                                    parseManifestClassPath(path)
-                                }
-                            } catch (e: java.nio.file.InvalidPathException) {
-                                // Normal
-                            } catch (e: Exception) {
-                                logger.warning { "Failed to process classpath entry $entry: ${e.message}" }
-                            }
-                        }
-                    }
-                }
-
-                // Add javaagent jars to prevent deadlocks during agent instrumentation
-                val jvmArgs = java.lang.management.ManagementFactory.getRuntimeMXBean().inputArguments
-                for (arg in jvmArgs) {
-                    if (arg.startsWith("-javaagent:")) {
-                        val agentPath = arg.substringAfter("-javaagent:").substringBefore("=")
-                        if (agentPath.isNotEmpty()) {
-                            try {
-                                addPathAndReal(java.nio.file.Paths.get(agentPath))
-                            } catch (e: java.nio.file.InvalidPathException) {
-                                // Normal
-                            } catch (e: Exception) {
-                                logger.warning { "Failed to process javaagent argument $arg: ${e.message}" }
-                            }
-                        }
-                    }
-                }
-
-                // Add CI-specific build directories and test-framework caches to prevent deadlock
-                try {
-                    addPathAndReal(java.nio.file.Paths.get("build"))
-                    addPathAndReal(java.nio.file.Paths.get(".gradle"))
-                } catch (e: java.nio.file.InvalidPathException) {
-                    // Normal
-                } catch (e: Exception) {
-                    logger.warning { "Failed to add build/.gradle paths: ${e.message}" }
-                }
-
-                // Add GRADLE_USER_HOME if set to support container/CI cache directories
-                try {
-                    val gradleUserHome = System.getenv("GRADLE_USER_HOME")
-                    if (!gradleUserHome.isNullOrEmpty()) {
-                        addPathAndReal(java.nio.file.Paths.get(gradleUserHome))
-                    }
-                } catch (e: java.nio.file.InvalidPathException) {
-                    // Normal
-                } catch (e: Exception) {
-                    logger.warning { "Failed to add GRADLE_USER_HOME: ${e.message}" }
-                }
-
-                // Add /proc and /sys virtual filesystems to prevent GC/JIT thread deadlocks
-                try {
-                    addPathAndReal(java.nio.file.Paths.get("/proc"))
-                    addPathAndReal(java.nio.file.Paths.get("/sys"))
-                } catch (e: java.nio.file.InvalidPathException) {
-                    // Normal
-                } catch (e: Exception) {
-                    logger.warning { "Failed to add /proc or /sys: ${e.message}" }
-                }
-
-                // Add the project root directory to bypass all project classes and build artifacts
-                try {
-                    val userDir = System.getProperty("user.dir")
-                    if (!userDir.isNullOrEmpty()) {
-                        addPathAndReal(java.nio.file.Paths.get(userDir))
-                    }
-                } catch (e: java.nio.file.InvalidPathException) {
-                    // Normal
-                } catch (e: Exception) {
-                    logger.warning { "Failed to add user.dir: ${e.message}" }
-                }
-            } catch (e: Exception) {
-                logger.severe { "Fatal exception during safeBypassPaths initialization: ${e.message}" }
-            }
-        }
     }
 
     context(arena: NativeArena)
@@ -336,19 +179,19 @@ internal class SupervisorSessionHandler(
         return LoopAction.Continue
     }
 
-    @Suppress("TooGenericExceptionCaught")
+    @Suppress("SwallowedException")
     private fun processNotification(notif: ManagedSegment, resp: ManagedSegment): Boolean {
         return NativeArena.ofConfined().use { notificationArena ->
             with(notificationArena) {
-                val id = notif.readLong(NOTIF_ID_OFF)
+                val id = notif.readLong(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_ID_OFFSET)
                 try {
-                    val pidVal = notif.readInt(NOTIF_PID_OFF)
-                    val archVal = notif.readInt(NOTIF_ARCH_OFF)
-                    val nr = notif.readInt(NOTIF_NR_OFF)
+                    val pidVal = notif.readInt(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_PID_OFFSET)
+                    val archVal = notif.readInt(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_ARCH_OFFSET)
+                    val nr = notif.readInt(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_NR_OFFSET)
 
                     val args = LongArray(MAX_ARGS)
                     for (i in 0 until MAX_ARGS) {
-                        args[i] = notif.readLong(NOTIF_ARGS_OFF + i * BYTES_PER_LONG)
+                        args[i] = notif.readLong(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_ARGS_OFFSET + i * BYTES_PER_LONG)
                     }
 
                     val tid = Tid(pidVal)
@@ -377,10 +220,7 @@ internal class SupervisorSessionHandler(
                             if (path != null) {
                                 val absPathStr = path.toAbsolutePath().toString()
                                 resolvedPathStr = absPathStr
-                                val matched = safeBypassPaths.any { bypassPath ->
-                                    path.startsWith(bypassPath) || path == bypassPath
-                                }
-                                if (matched) {
+                                if (resolveBypassPath(path) != null) {
                                     sendSeccompContinue(id, resp)
                                     logger.info { "[SUPERVISOR-DEBUG] Fast-path allow continue (matched) resolved=$absPathStr" }
                                     return true
@@ -409,12 +249,12 @@ internal class SupervisorSessionHandler(
                     val res = readAndHandleJvmResponse(id, nr, args, resolvedPathStr, extracted.sockaddrBytes, resp, tid, traceeArch)
                     logger.info { "[SUPERVISOR-DEBUG] JVM validation handler response result=$res" }
                     return res
-                } catch (t: Throwable) {
-                    logger.log(java.util.logging.Level.SEVERE, "Fatal error processing notification $id", t)
+                } catch (e: Exception) {
+                    logger.log(java.util.logging.Level.SEVERE, "Fatal error processing notification $id", e)
                     try {
                         sendSeccompError(id, NativeConstants.EPERM, resp)
-                    } catch (ignored: Throwable) {
-                        // Ignore secondary errors
+                    } catch (ignored: Exception) {
+                        // Ignore secondary errors during best-effort EPERM response
                     }
                     return false
                 }
@@ -428,10 +268,10 @@ internal class SupervisorSessionHandler(
         var sockaddrBytes: ByteArray? = null
         var dirfd = AT_FDCWD
         when (nr) {
-            arch.open, arch.execve -> {
+            arch.open -> {
                 pathStr = readStringFromProcess(tid, args[0])
             }
-            arch.openat, arch.openat2, arch.execveat -> {
+            arch.openat, arch.openat2 -> {
                 dirfd = args[0].toInt()
                 pathStr = readStringFromProcess(tid, args[1])
             }
@@ -444,15 +284,26 @@ internal class SupervisorSessionHandler(
             arch.accept, arch.accept4 -> {
                 dirfd = args[0].toInt()
             }
+            arch.execve -> {
+                pathStr = readExecPath(tid, args[0])
+            }
+            arch.execveat -> {
+                dirfd = args[0].toInt()
+                pathStr = readExecPath(tid, args[1])
+            }
         }
         return SyscallArguments(pathStr, sockaddrBytes, dirfd)
+    }
+
+    private fun resolveBypassPath(resolvedPath: java.nio.file.Path): java.nio.file.Path? {
+        return resolvedPath.takeIf(BypassPaths::isBypassPath)
     }
 
     private fun resolveAbsolutePath(pid: Int, dirfd: Int, pathStr: String): java.nio.file.Path? {
         val path = java.nio.file.Paths.get(pathStr)
         if (path.isAbsolute) {
             try {
-                return toRealPathWithFallback(path)
+                return BypassPaths.toRealPathWithFallback(path)
             } catch (e: java.nio.file.NoSuchFileException) {
                 return null
             } catch (e: java.io.FileNotFoundException) {
@@ -464,36 +315,21 @@ internal class SupervisorSessionHandler(
         }
         try {
             val baseDir = if (dirfd == AT_FDCWD) {
-                toRealPathWithFallback(java.nio.file.Paths.get("/proc/$pid/cwd"))
+                BypassPaths.toRealPathWithFallback(java.nio.file.Paths.get("/proc/$pid/cwd"))
             } else {
-                toRealPathWithFallback(java.nio.file.Paths.get("/proc/$pid/fd/$dirfd"))
+                BypassPaths.toRealPathWithFallback(java.nio.file.Paths.get("/proc/$pid/fd/$dirfd"))
             }
-            return toRealPathWithFallback(baseDir.resolve(path))
+            return BypassPaths.toRealPathWithFallback(baseDir.resolve(path))
         } catch (e: java.nio.file.NoSuchFileException) {
-            // NoSuchFileException is normal when directories under /proc do not exist or path resolution fails normally
-            // Let's attempt relative search fallback
+            // /proc/<pid>/cwd or /proc/<pid>/fd/<dirfd> is gone. Do not invent a
+            // path under a daemon bypass root; fail closed and let the caller deny.
+            return null
         } catch (e: java.io.FileNotFoundException) {
-            // Normal
+            return null
         } catch (e: Exception) {
             logger.severe { "Critical error during baseDir or /proc resolution for pid=$pid dirfd=$dirfd path=$pathStr: ${e.message}" }
             throw e
         }
-
-        // Fallback: search in safeBypassPaths for relative path matching (needed inside containers due to Yama ptrace_scope)
-        for (bypassPath in safeBypassPaths) {
-            try {
-                val resolved = bypassPath.resolve(pathStr).normalize()
-                return toRealPathWithFallback(resolved)
-            } catch (e: java.nio.file.NoSuchFileException) {
-                // Normal, skip this bypass path
-            } catch (e: java.io.FileNotFoundException) {
-                // Normal, skip this bypass path
-            } catch (e: Exception) {
-                logger.severe { "Critical error during bypassPath resolution for $pathStr in $bypassPath: ${e.message}" }
-                throw e
-            }
-        }
-        return null
     }
 
     context(arena: NativeArena)
@@ -670,10 +506,11 @@ internal class SupervisorSessionHandler(
                         handleInjectFd(id, nr, args, pathStr, sockaddrBytes, resp, tid, traceeArch)
                     } else if (nr == traceeArch.execve || nr == traceeArch.execveat) {
                         // Register modification is not natively supported by the Linux seccomp user notification API.
-                        // To allow process execution while preventing TOCTOU attacks as robustly as possible, we emulate
-                        // safe execution by writing the exact validated path bytes back to the tracee's address space
-                        // prior to allowing the syscall to continue.
-                        if (pathStr != null) {
+                        // When the path can be read, write the validated bytes back before CONTINUE so a
+                        // TOCTOU swap cannot change the executed file. posix_spawn helpers are often
+                        // unreadable under Yama; those remain authorized by the parent stack and continue
+                        // without write-back rather than denying a policy-approved child exec.
+                        if (pathStr != null && !pathStr.startsWith("<YAMA_ERROR")) {
                             val pathAddr = if (nr == traceeArch.execve) args[0] else args[1]
                             val pathBytes = pathStr.toByteArray(StandardCharsets.UTF_8)
                             val pathBytesWithNull = ByteArray(pathBytes.size + 1)
@@ -861,10 +698,10 @@ internal class SupervisorSessionHandler(
 
     private fun sendSeccompContinue(id: Long, resp: ManagedSegment) {
         resp.fill(0)
-        resp.writeLong(RESP_ID_OFF, id)
-        resp.writeLong(RESP_VAL_OFF, 0L)
-        resp.writeInt(RESP_ERR_OFF, 0)
-        resp.writeInt(RESP_FLAGS_OFF, NativeConstants.SECCOMP_USER_NOTIF_FLAG_CONTINUE.toInt())
+        resp.writeLong(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_RESP_ID_OFFSET, id)
+        resp.writeLong(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_RESP_VAL_OFFSET, 0L)
+        resp.writeInt(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_RESP_ERROR_OFFSET, 0)
+        resp.writeInt(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_RESP_FLAGS_OFFSET, NativeConstants.SECCOMP_USER_NOTIF_FLAG_CONTINUE.toInt())
         while (true) {
             val res = engine.raw.ioctl(listenerFd, IoctlCommand.SECCOMP_IOCTL_NOTIF_SEND, resp.typed<IoctlPayload.SeccompNotifResp>())
             if (res is LinuxNative.SyscallResult.Error<*> && res.errno == NativeConstants.EINTR) {
@@ -876,10 +713,10 @@ internal class SupervisorSessionHandler(
 
     private fun sendSeccompError(id: Long, errorNr: Int, resp: ManagedSegment) {
         resp.fill(0)
-        resp.writeLong(RESP_ID_OFF, id)
-        resp.writeLong(RESP_VAL_OFF, -1L)
-        resp.writeInt(RESP_ERR_OFF, -errorNr)
-        resp.writeInt(RESP_FLAGS_OFF, 0)
+        resp.writeLong(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_RESP_ID_OFFSET, id)
+        resp.writeLong(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_RESP_VAL_OFFSET, -1L)
+        resp.writeInt(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_RESP_ERROR_OFFSET, -errorNr)
+        resp.writeInt(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_RESP_FLAGS_OFFSET, 0)
         while (true) {
             val res = engine.raw.ioctl(listenerFd, IoctlCommand.SECCOMP_IOCTL_NOTIF_SEND, resp.typed<IoctlPayload.SeccompNotifResp>())
             if (res is LinuxNative.SyscallResult.Error<*> && res.errno == NativeConstants.EINTR) {
@@ -892,6 +729,16 @@ internal class SupervisorSessionHandler(
     context(arena: NativeArena)
     private fun readStringFromProcess(tid: Tid, remoteAddr: Long): String? {
         return io.mazewall.ffi.memory.SupervisorProcessMemoryReader.readString(tid, remoteAddr, MAX_PATH_LEN)
+    }
+
+    context(arena: NativeArena)
+    private fun readExecPath(tid: Tid, remoteAddr: Long): String? {
+        return try {
+            readStringFromProcess(tid, remoteAddr)
+        } catch (e: ContainmentViolationException) {
+            logger.warning("[SUPERVISOR-DIAGNOSTIC] Cannot inspect exec path for tid=${tid.value}: ${e.message}")
+            null
+        }
     }
 
     context(arena: NativeArena)
@@ -1057,13 +904,13 @@ internal class SupervisorSessionHandler(
                         }
                     }
                 }
-            } catch (t: Throwable) {
-                logger.log(java.util.logging.Level.SEVERE, "Error in async accept worker for notification $id", t)
+            } catch (e: Exception) {
+                logger.log(java.util.logging.Level.SEVERE, "Error in async accept worker for notification $id", e)
                 try {
                     NativeArena.ofConfined().use { arena ->
                         sendSeccompError(id, NativeConstants.EPERM, arena.allocate(Layouts.SECCOMP_NOTIF_RESP))
                     }
-                } catch (ignored: Throwable) {}
+                } catch (ignored: Exception) {}
             }
         }.apply {
             isDaemon = true

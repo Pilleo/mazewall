@@ -199,7 +199,7 @@ Because the Profiler records the *exact* physical execution of the thread, the a
 Once you have generated your `Policy` using the Profiler, enforcing it in production requires wrapping your thread pool with mazewall's decorator:
 
 ```kotlin
-import io.mazewall.enforcer.ContainedExecutors
+import io.mazewall.enforcer.api.ContainedExecutors
 
 // Create a standard Java thread pool
 val baseExecutor = Executors.newFixedThreadPool(4)

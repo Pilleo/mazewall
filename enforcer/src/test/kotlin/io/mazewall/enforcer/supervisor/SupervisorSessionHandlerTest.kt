@@ -15,6 +15,7 @@ import io.mazewall.ffi.memory.readInt
 import io.mazewall.ffi.memory.writeLong
 import io.mazewall.ffi.memory.writeInt
 import io.mazewall.ffi.memory.PollFdSegment
+import io.mazewall.platform.seccomp.daemon.LoopAction
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
@@ -1378,6 +1379,208 @@ class SupervisorSessionHandlerTest {
 
                 val flags = lastIoctlArg!!.readInt(20)
                 assertEquals(0, flags)
+            }
+        } finally {
+            LinuxNative.resetToDefault()
+        }
+    }
+
+    @Test
+    fun `readAndHandleJvmResponse continues execve without writeback when the target path cannot be inspected`() {
+        var lastIoctlRequest: Long? = null
+        var lastIoctlArg: io.mazewall.ffi.memory.ManagedSegment? = null
+        var vmWritevCalled = false
+
+        val mockMemory = object : io.mazewall.MockNativeMemory() {
+            override fun processVmWritev(
+                pid: io.mazewall.core.Pid,
+                localIov: io.mazewall.ffi.memory.ManagedSegment,
+                liovcnt: Long,
+                remoteIov: io.mazewall.ffi.memory.ManagedSegment,
+                riovcnt: Long,
+                flags: Long,
+            ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                vmWritevCalled = true
+                return LinuxNative.SyscallResult.Success(1L)
+            }
+
+            override fun read(
+                fd: FileDescriptor<*, FdState.Open>,
+                buf: io.mazewall.ffi.memory.ManagedSegment,
+                count: Long,
+            ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                val respSeg = io.mazewall.ffi.memory.SupervisorResponseSegment.of(buf)
+                respSeg.setId(42L)
+                respSeg.setDecision(1.toByte())
+                respSeg.setErrorNr(0)
+                return LinuxNative.SyscallResult.Success(count)
+            }
+        }
+
+        val mockEngine = object : MockNativeEngine(memory = mockMemory) {
+            override val raw: RawSyscallOperations = object : RawSyscallOperations by this {
+                override fun poll(
+                    fds: io.mazewall.ffi.memory.ManagedSegment,
+                    nfds: Long,
+                    timeout: Int,
+                ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                    return LinuxNative.SyscallResult.Success(1L)
+                }
+
+                override fun ioctl(
+                    fd: FileDescriptor<*, FdState.Open>,
+                    request: Long,
+                    arg: io.mazewall.ffi.memory.ManagedSegment,
+                ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                    lastIoctlRequest = request
+                    lastIoctlArg = arg
+                    return LinuxNative.SyscallResult.Success(0L)
+                }
+            }
+        }
+
+        try {
+            LinuxNative.setEngine(mockEngine)
+
+            val handler = SupervisorSessionHandler(
+                FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(10),
+                FileDescriptor.unsafe<FileDescriptorRole.SeccompNotif>(11)
+            )
+
+            val method = SupervisorSessionHandler::class.java.getDeclaredMethods().first {
+                it.name.startsWith("readAndHandleJvmResponse") && !it.name.contains("$") && it.parameterCount == 9
+            }
+            method.isAccessible = true
+
+            val arch = io.mazewall.core.Arch.current()
+
+            io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
+                val dummyResp = arena.allocate(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_RESP)
+                val paramTypes = method.parameterTypes
+                val argsToPass = arrayOfNulls<Any>(paramTypes.size)
+                argsToPass[0] = arena
+                argsToPass[1] = 42L
+                argsToPass[2] = arch.execve
+                argsToPass[3] = LongArray(6).apply { this[0] = 0x12345678L }
+                argsToPass[4] = null
+                argsToPass[5] = null
+                argsToPass[6] = dummyResp
+                for (i in paramTypes.indices) {
+                    val type = paramTypes[i]
+                    if (type.name.contains("Tid")) {
+                        argsToPass[i] = io.mazewall.core.Tid(999)
+                    } else if (type.name.contains("Pid")) {
+                        argsToPass[i] = io.mazewall.core.Pid(999)
+                    } else if (i == 7 && (type == Int::class.javaPrimitiveType || type == java.lang.Integer::class.java)) {
+                        argsToPass[i] = 999
+                    }
+                }
+                argsToPass[8] = arch
+
+                val result = method.invoke(handler, *argsToPass) as Boolean
+
+                assertEquals(true, result)
+                assertEquals(false, vmWritevCalled)
+                assertEquals(io.mazewall.ffi.NativeConstants.SECCOMP_IOCTL_NOTIF_SEND, lastIoctlRequest)
+                assertEquals(io.mazewall.ffi.NativeConstants.SECCOMP_USER_NOTIF_FLAG_CONTINUE.toInt(), lastIoctlArg!!.readInt(20))
+            }
+        } finally {
+            LinuxNative.resetToDefault()
+        }
+    }
+
+    /**
+     * Regression test for: narrowing `catch (t: Throwable)` to `catch (e: Exception)`
+     * in `processNotification`.
+     *
+     * Before the fix, a fatal `OutOfMemoryError` thrown inside the try block would be
+     * silently swallowed by the `catch (t: Throwable)` guard, returning `false` and
+     * leaving tracee threads permanently hung in the kernel (waiting for an EPERM ACK
+     * that would never arrive, since the secondary `sendSeccompError` would also be
+     * executed under an already-exhausted heap).
+     *
+     * After the fix, the `OutOfMemoryError` propagates unimpeded, allowing the JVM to
+     * crash the supervisor thread cleanly rather than silently deadlocking tracees.
+     */
+    @Test
+    fun `processNotification propagates OutOfMemoryError instead of swallowing it`() {
+        val mockMemory = object : MockNativeMemory() {
+            override fun write(
+                fd: FileDescriptor<*, FdState.Open>,
+                buf: io.mazewall.ffi.memory.ManagedSegment,
+                count: Long,
+            ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                throw OutOfMemoryError("Simulated heap exhaustion inside processNotification")
+            }
+        }
+
+        val mockEngine = object : MockNativeEngine() {
+            override val memory = mockMemory
+            override val raw: RawSyscallOperations = object : RawSyscallOperations by this {
+                override fun ioctl(
+                    fd: FileDescriptor<*, FdState.Open>,
+                    request: Long,
+                    arg: io.mazewall.ffi.memory.ManagedSegment,
+                ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                    // Allow SECCOMP_IOCTL_NOTIF_RECV to succeed (entering processNotification)
+                    return LinuxNative.SyscallResult.Success(0L)
+                }
+
+                override fun poll(
+                    fds: io.mazewall.ffi.memory.ManagedSegment,
+                    nfds: Long,
+                    timeout: Int,
+                ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                    return LinuxNative.SyscallResult.Success(0L)
+                }
+            }
+        }
+
+        LinuxNative.setEngine(mockEngine)
+        try {
+            val handler = SupervisorSessionHandler(
+                FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(10),
+                FileDescriptor.unsafe<FileDescriptorRole.SeccompNotif>(11),
+                engine = mockEngine,
+            )
+
+            val processNotificationMethod = SupervisorSessionHandler::class.java
+                .getDeclaredMethod(
+                    "processNotification",
+                    io.mazewall.ffi.memory.ManagedSegment::class.java,
+                    io.mazewall.ffi.memory.ManagedSegment::class.java,
+                )
+            processNotificationMethod.isAccessible = true
+
+            io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
+                val notif = arena.allocate(io.mazewall.ffi.Layouts.SECCOMP_NOTIF)
+                val resp = arena.allocate(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_RESP)
+
+                // Write a valid x86_64 audit arch so Arch.fromAudit succeeds
+                notif.writeInt(20L, io.mazewall.core.Arch.AMD64.audit) // NOTIF_ARCH_OFF = 20
+                // nr = getpid (39) — no path resolution needed, goes straight to sendRequestToJvm
+                notif.writeInt(16L, io.mazewall.core.Arch.AMD64.getpid) // NOTIF_NR_OFF = 16
+                // pid = 1 (init, always readable from /proc)
+                notif.writeInt(8L, 1) // NOTIF_PID_OFF = 8
+
+                val thrownException = org.junit.jupiter.api.Assertions.assertThrows(
+                    java.lang.reflect.InvocationTargetException::class.java,
+                ) {
+                    processNotificationMethod.invoke(handler, notif, resp)
+                }
+
+                // The root cause must be the OutOfMemoryError, not wrapped in a RuntimeException
+                // (which would indicate the old Throwable catch had re-thrown it or suppressed it)
+                val rootCause = thrownException.cause
+                assertEquals(
+                    OutOfMemoryError::class.java, rootCause?.javaClass,
+                    "Fatal JVM errors must propagate out of processNotification unchanged, " +
+                        "not be swallowed by catch (e: Exception)",
+                )
+                assertEquals(
+                    "Simulated heap exhaustion inside processNotification",
+                    rootCause?.message,
+                )
             }
         } finally {
             LinuxNative.resetToDefault()

@@ -1,7 +1,7 @@
 package io.mazewall
 
 import io.mazewall.core.Arch
-import io.mazewall.enforcer.ContainedExecutors
+import io.mazewall.enforcer.api.ContainedExecutors
 import io.mazewall.ffi.NativeConstants
 import io.mazewall.ffi.memory.writeLong
 import org.junit.jupiter.api.AfterEach
@@ -103,7 +103,7 @@ class IntelCetTest {
         try {
             val policy = Policy.builder().lockIntelCet().build()
             assertDoesNotThrow {
-                policy.install().close()
+                policy.install().supervisorSession?.close()
             }
         } finally {
             System.clearProperty("io.mazewall.fallback")
@@ -128,7 +128,7 @@ class IntelCetTest {
         try {
             val policy = Policy.builder().lockIntelCet().build()
             assertDoesNotThrow {
-                policy.install().close()
+                policy.install().supervisorSession?.close()
             }
         } finally {
             System.clearProperty("io.mazewall.fallback")

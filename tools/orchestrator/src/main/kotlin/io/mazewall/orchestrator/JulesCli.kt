@@ -242,7 +242,7 @@ class RealJulesClient(
     }
 
 
-    override fun triggerSession(repo: String, issueId: String, prompt: String) {
+    override fun triggerSession(repo: String, issueId: String, prompt: String): JulesSession {
         val sessionDescription = "[$issueId] ${prompt.take(150)}"
         println("🚀 Triggering remote Jules session for issue $issueId via REST API...")
 
@@ -250,7 +250,7 @@ class RealJulesClient(
             prompt = prompt,
             sourceContext = SourceContext(
                 source = "sources/github/$repo",
-                githubRepoContext = GithubRepoContext(startingBranch = "main")
+                githubRepoContext = GithubRepoContext(startingBranch = "master")
             ),
             title = sessionDescription
         )
@@ -271,6 +271,12 @@ class RealJulesClient(
             }
             val session = json.decodeFromString<SessionResponse>(response.body())
             println("  [Jules API] Session created successfully: ${session.name}")
+            return JulesSession(
+                id = session.name.substringAfterLast("/"),
+                description = session.title ?: sessionDescription,
+                repo = repo,
+                status = session.state ?: "PENDING"
+            )
         } catch (e: Exception) {
             System.err.println("  [Jules API] Error triggering session: ${e.message}")
             throw e
@@ -371,16 +377,16 @@ class RealJulesClient(
     override fun createSessionWithContext(repo: String, issueId: String, githubIssueNumber: String, previousPrUrl: String, previousBranch: String, originalTaskDescription: String): JulesSession {
         val prompt = """
             🚨 **Merge Conflict Detected - Starting New Generation**
-            
-            This is a continuation of a previous task that encountered a merge conflict against the main branch.
+
+            This is a continuation of a previous task that encountered a merge conflict against the master branch.
             Your task is to re-implement the original changes cleanly on top of the current master branch.
-            
+
             **Original Task ([${issueId}] Issue #$githubIssueNumber):**
             $originalTaskDescription
-            
+
             **Previous Generation PR:** $previousPrUrl
             **Previous Branch:** $previousBranch
-            
+
             Please adapt the changes from the previous generation to resolve any conflicts with the current codebase.
         """.trimIndent()
 
@@ -391,7 +397,7 @@ class RealJulesClient(
             prompt = prompt,
             sourceContext = SourceContext(
                 source = "sources/github/$repo",
-                githubRepoContext = GithubRepoContext(startingBranch = "main")
+                githubRepoContext = GithubRepoContext(startingBranch = "master")
             ),
             title = sessionDescription
         )
@@ -425,4 +431,3 @@ class RealJulesClient(
         }
     }
 }
-

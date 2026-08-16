@@ -1,12 +1,13 @@
 package io.mazewall.enforcer
 
 import io.mazewall.*
-import io.mazewall.core.SandboxedPath
-import io.mazewall.core.SeccompAction
-import io.mazewall.core.Syscall
+import io.mazewall.enforcer.api.ContainedExecutors
+import io.mazewall.enforcer.state.ContainmentStateRegistry
+import io.mazewall.enforcer.state.ContainerState
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import java.util.concurrent.Executors
+import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
@@ -15,7 +16,7 @@ class ContainedExecutorsCoverageTest {
     @AfterEach
     fun tearDown() {
         Platform.resetToDefault()
-        ThreadStateRegistry.state = ContainerState()
+        ContainmentStateRegistry.threadState = ContainerState()
         System.clearProperty("io.mazewall.fallback")
     }
 
@@ -32,7 +33,7 @@ class ContainedExecutorsCoverageTest {
         val p1 = Policy.builder().allowFsRead("/tmp").build()
         val p2 = Policy.builder().allowFsRead("/").build()
 
-        ThreadStateRegistry.state = ThreadStateRegistry.state.withLandlockPolicy(p1.definition)
+        ContainmentStateRegistry.threadState = ContainmentStateRegistry.threadState.withLandlockPolicy(p1.definition)
         assertFailsWith<IllegalStateException> {
             ContainedExecutors.installOnCurrentThread(p2)
         }
@@ -61,6 +62,41 @@ class ContainedExecutorsCoverageTest {
     }
 
     @Test
+    fun `unsupported-platform fallback receipt reports bypass instead of installation`() {
+        Platform.setProvider(
+            object : PlatformProvider by RealPlatformProvider {
+                override fun getOsName(): String = "Linux"
+                override fun hasKernelSeccompSupport(): Boolean = false
+            },
+        )
+        System.setProperty("io.mazewall.fallback", "SILENT_BYPASS")
+
+        val receipt = ContainedExecutors.installOnCurrentThread(Policy.builder().build().definition)
+
+        assertEquals(false, receipt.installed)
+    }
+
+    @Test
+    fun `failed installation fallback receipt reports bypass instead of installation`() {
+        Platform.setProvider(
+            object : PlatformProvider by RealPlatformProvider {
+                override fun getOsName(): String = "Linux"
+                override fun hasKernelSeccompSupport(): Boolean = true
+                override fun checkSeccompSanity(): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
+                    LinuxNative.SyscallResult.Error(22, -1)
+            },
+        )
+        val existingPolicy = Policy.builder().allowFsRead("/tmp").build()
+        val incompatiblePolicy = Policy.builder().allowFsRead("/").build()
+        ContainmentStateRegistry.threadState = ContainmentStateRegistry.threadState.withLandlockPolicy(existingPolicy.definition)
+        System.setProperty("io.mazewall.fallback", "WARN_AND_BYPASS")
+
+        val receipt = ContainedExecutors.installOnCurrentThread(incompatiblePolicy.definition)
+
+        assertEquals(false, receipt.installed)
+    }
+
+    @Test
     fun testNonLinuxFallbackBehaviors() {
         val mockProvider = object : PlatformProvider by RealPlatformProvider {
             override fun getOsName(): String = "macOS"
@@ -86,8 +122,8 @@ class ContainedExecutorsCoverageTest {
             rootDir = rootDir.parentFile
         }
 
-        val executorsFile = java.io.File(rootDir, "enforcer/src/main/kotlin/io/mazewall/enforcer/ContainedExecutors.kt")
-        val actionFile = java.io.File(rootDir, "enforcer/src/main/kotlin/io/mazewall/core/SeccompAction.kt")
+        val executorsFile = java.io.File(rootDir, "enforcer/src/main/kotlin/io/mazewall/enforcer/api/ContainedExecutors.kt")
+        val actionFile = java.io.File(rootDir, "platform/src/main/kotlin/io/mazewall/core/SeccompAction.kt")
 
         assertTrue(executorsFile.exists(), "ContainedExecutors.kt should be found at ${executorsFile.absolutePath}")
         assertTrue(actionFile.exists(), "SeccompAction.kt should be found at ${actionFile.absolutePath}")
@@ -135,5 +171,33 @@ class ContainedExecutorsCoverageTest {
         assertTrue(policyBuilderContent.contains("TOCTOU") && policyBuilderContent.contains("allowUnsafePrctl"), "PolicyBuilder.kt should document TOCTOU warnings for allowUnsafePrctl")
         assertTrue(policyDefinitionContent.contains("TOCTOU") && policyDefinitionContent.contains("allowUnsafePrctl"), "PolicyDefinition.kt should document TOCTOU warnings for allowUnsafePrctl")
         assertTrue(syscallInspectorContent.contains("TOCTOU") && syscallInspectorContent.contains("UnsafePrctlInspector"), "SyscallInspector.kt should document TOCTOU warnings for UnsafePrctlInspector")
+    }
+
+    @Test
+    fun `test thread-scoped containment disallowed on virtual threads`() {
+        val mockProvider = object : PlatformProvider by RealPlatformProvider {
+            override fun getOsName(): String = "Linux"
+            override fun hasKernelSeccompSupport(): Boolean = true
+            override fun checkSeccompSanity(): io.mazewall.LinuxNative.SyscallResult<Long, io.mazewall.LinuxNative.SyscallHandledState.Unhandled> =
+                io.mazewall.LinuxNative.SyscallResult.Error(22, -1)
+        }
+        Platform.setProvider(mockProvider)
+
+        val policy = Policy.builder().allowFsRead("/tmp").build()
+
+        // 1. Verify Virtual Thread is rejected
+        var virtualException: Throwable? = null
+        val vThread = Thread.ofVirtual().start {
+            try {
+                ContainedExecutors.installOnCurrentThread(policy)
+            } catch (t: Throwable) {
+                virtualException = t
+            }
+        }
+        vThread.join()
+        assertTrue(
+            virtualException is IllegalStateException,
+            "Installing thread-scoped containment on a Virtual Thread must throw IllegalStateException, got: $virtualException"
+        )
     }
 }

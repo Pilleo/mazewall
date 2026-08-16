@@ -179,7 +179,7 @@ class StateTransitionTest {
 
         assertEquals(state, transition.nextState)
         assertEquals(2, transition.commands.size)
-        assertTrue(transition.commands[0] is OrchestratorCommand.AddLabel)
+        assertTrue(transition.commands[0] is OrchestratorCommand.TriggerJulesSession)
     }
 
     @Test

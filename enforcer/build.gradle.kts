@@ -71,6 +71,7 @@ val plantumlConfig by configurations.creating
 
 dependencies {
     plantumlConfig(libs.plantuml.core)
+    api(project(":platform"))
     compileOnly(libs.kotlinxCoroutines)
     implementation(libs.kotlinxSerialization)
     testImplementation(kotlin("test"))
@@ -105,7 +106,7 @@ tasks.register<JavaExec>("runJvmFloor") {
     group = "verification"
     description = "Runs the synthetic JVM floor workload to exercise JIT, GC, Loom, and NIO subsystems."
     classpath = sourceSets["main"].runtimeClasspath
-    mainClass.set("io.mazewall.enforcer.JvmFloorWorkload")
+    mainClass.set("io.mazewall.enforcer.engine.JvmFloorWorkload")
     jvmArgs("--enable-native-access=ALL-UNNAMED")
 }
 
@@ -118,7 +119,7 @@ pitest {
             "io.mazewall.Policy*",
             "io.mazewall.BpfFilter*",
             "io.mazewall.SbobParser*",
-            "io.mazewall.enforcer.FilterInstallationPlanner*",
+            "io.mazewall.enforcer.engine.FilterInstallationPlanner*",
             "io.mazewall.enforcer.PolicyCombining*",
         ),
     )

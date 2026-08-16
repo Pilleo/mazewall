@@ -1,6 +1,7 @@
 package io.mazewall.enforcer
 
 import io.mazewall.Policy
+import io.mazewall.enforcer.state.ContainerState
 import io.mazewall.core.SeccompAction
 import io.mazewall.core.Syscall
 import io.mazewall.seccomp.SeccompInstallationState
