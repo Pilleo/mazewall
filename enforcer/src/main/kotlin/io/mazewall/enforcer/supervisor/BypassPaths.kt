@@ -100,15 +100,6 @@ public object BypassPaths {
                 addPathAndReal(Paths.get(javaHomeStr))
             }
 
-            try {
-                val userHome = System.getProperty("user.home")
-                if (!userHome.isNullOrEmpty()) {
-                    addPathAndReal(Paths.get(userHome).resolve(".sdkman"))
-                }
-            } catch (e: Exception) {
-                logger.warning { "Failed to add user.home paths: ${e.message}" }
-            }
-
             val cp = System.getProperty("java.class.path")
             if (cp != null) {
                 val cpEntries = cp.split(java.io.File.pathSeparator)

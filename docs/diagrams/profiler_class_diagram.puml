@@ -231,6 +231,20 @@ abstract class "TraceEvent" as io.mazewall.profiler.engine.TraceEvent {
 interface "TraceEventPublisher" as io.mazewall.profiler.engine.TraceEventPublisher {
   + {abstract}void sendTraceEvent(Arena, FileDescriptor<?, ? extends Open>, SyscallEvent<? extends Resolved>)
 }
+class "TransportNativeEngine" as io.mazewall.profiler.engine.TransportNativeEngine {
+  +RawSyscallOperations getRaw()
+  +NativeFileSystem getFileSystem()
+  +NativeProcess getProcess()
+  +NativeNetworking getNetworking()
+  +NativeMemory getMemory()
+}
+class "TransportNativeMemory" as io.mazewall.profiler.engine.TransportNativeMemory {
+  +SyscallResult read(FileDescriptor<?, ? extends Open>, ManagedSegment, long)
+  +SyscallResult write(FileDescriptor<?, ? extends Open>, ManagedSegment, long)
+  +SyscallResult processVmReadv(int, ManagedSegment, long, ManagedSegment, long, long)
+  +SyscallResult processVmWritev(int, ManagedSegment, long, ManagedSegment, long, long)
+  +ManagedSegment newSockFProg(NativeArena, List<? extends BpfInstruction>)
+}
 class "DaemonContext" as io.mazewall.profiler.internal.DaemonContext {
   +String getSocketPath()
   +Path getSocketDir()
@@ -350,6 +364,8 @@ io.mazewall.profiler.engine.RealSeccompNotificationParser --> io.mazewall.profil
 io.mazewall.profiler.engine.SessionEventLedger --> io.mazewall.profiler.engine.SessionEvent
 io.mazewall.profiler.engine.SyscallPathResolver --> io.mazewall.profiler.engine.SessionEventLedger
 io.mazewall.profiler.engine.SyscallPathResolver --> io.mazewall.profiler.engine.ProfilerMemoryReader
+io.mazewall.profiler.engine.TransportNativeEngine --> io.mazewall.profiler.engine.ProfilerTransport
+io.mazewall.profiler.engine.TransportNativeMemory --> io.mazewall.profiler.engine.ProfilerTransport
 io.mazewall.profiler.internal.ProfilerDaemonManager --> io.mazewall.profiler.internal.ProfilerDaemonManager
 io.mazewall.profiler.internal.ProfilerDaemonManager --> io.mazewall.profiler.internal.DaemonContext
 io.mazewall.profiler.internal.ProfilerSocket --> io.mazewall.profiler.internal.ProfilerSocket

@@ -148,6 +148,7 @@ object ContainedExecutors {
         scopingPolicy: StacktraceScopingPolicy = io.mazewall.enforcer.supervisor.DefaultStacktraceScopingPolicy
     ) : io.mazewall.InstallationReceipt {
         val initialState = if (processWide) null else ContainmentStateRegistry.threadState
+        var landlockSuccessfullyApplied = false
         try {
             val augmentedPolicy = if (scopingPolicy.handlers.isNotEmpty()) {
                 val overriddenActions = policy.syscallActions.toMutableMap()
@@ -178,11 +179,13 @@ object ContainedExecutors {
                 armIntelCet()
             }
 
-            applyLandlockIfNecessary(processWide, augmentedPolicy)
+            landlockSuccessfullyApplied = applyLandlockIfNecessary(processWide, augmentedPolicy)
 
             return installSeccompFilter(processWide, augmentedPolicy, scopingPolicy)
         } catch (t: Throwable) {
-            if (!processWide && initialState != null) {
+            // Landlock is irreversible in the kernel. Only revert thread-local seccomp state
+            // if Landlock was NOT applied during this installation attempt.
+            if (!processWide && initialState != null && !landlockSuccessfullyApplied) {
                 ContainmentStateRegistry.threadState = initialState
             }
             val fallback = Platform.configuredFallback()
@@ -239,8 +242,8 @@ object ContainedExecutors {
     private fun applyLandlockIfNecessary(
         processWide: Boolean,
         policy: PolicyDefinition<*>,
-    ) {
-        if (!needsLandlock(policy)) return
+    ): Boolean {
+        if (!needsLandlock(policy)) return false
 
         synchronized(processLock) {
             val state = if (processWide) ContainmentStateRegistry.processState else ContainmentStateRegistry.threadState
@@ -266,7 +269,9 @@ object ContainedExecutors {
                 } else {
                     ContainmentStateRegistry.threadState = ContainmentStateRegistry.threadState.withLandlockPolicy(policy)
                 }
+                return true
             }
+            return false
         }
     }
 

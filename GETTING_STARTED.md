@@ -68,7 +68,7 @@ dependencies {
 ### Step 1 — Block process spawning on a thread pool (most common use case)
 
 ```kotlin
-import io.mazewall.enforcer.ContainedExecutors
+import io.mazewall.enforcer.api.ContainedExecutors
 import io.mazewall.Policy
 import java.util.concurrent.Executors
 

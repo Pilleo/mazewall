@@ -98,7 +98,7 @@ The primary entry point is `ContainedExecutors`, which provides wrappers for sta
 ### 1. Wrapping an Executor
 
 ```kotlin
-import io.mazewall.enforcer.ContainedExecutors
+import io.mazewall.enforcer.api.ContainedExecutors
 import io.mazewall.Policy
 
 val policy = Policy.builder()

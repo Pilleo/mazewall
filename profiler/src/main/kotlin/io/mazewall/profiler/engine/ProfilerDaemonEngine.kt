@@ -14,6 +14,34 @@ import io.mazewall.platform.seccomp.daemon.SeccompDaemonState
 import io.mazewall.ffi.memory.native
 
 /**
+ * Wrapper classes that route all native I/O through the injected [ProfilerTransport]
+ * to ensure the profiler daemon uses the test-provided transport for seccomp
+ * notification recv/send and memory operations.
+ */
+internal class TransportNativeMemory(
+    private val transport: ProfilerTransport,
+    private val delegate: io.mazewall.NativeMemory
+) : io.mazewall.NativeMemory by delegate {
+    @Suppress("UNCHECKED_CAST")
+    override fun read(fd: io.mazewall.core.FileDescriptor<*, io.mazewall.core.FdState.Open>, buf: io.mazewall.ffi.memory.ManagedSegment, count: Long): io.mazewall.LinuxNative.SyscallResult<Long, io.mazewall.LinuxNative.SyscallHandledState.Unhandled> =
+        transport.read(fd, buf.native, count) as io.mazewall.LinuxNative.SyscallResult<Long, io.mazewall.LinuxNative.SyscallHandledState.Unhandled>
+    @Suppress("UNCHECKED_CAST")
+    override fun write(fd: io.mazewall.core.FileDescriptor<*, io.mazewall.core.FdState.Open>, buf: io.mazewall.ffi.memory.ManagedSegment, count: Long): io.mazewall.LinuxNative.SyscallResult<Long, io.mazewall.LinuxNative.SyscallHandledState.Unhandled> =
+        transport.write(fd, buf.native, count) as io.mazewall.LinuxNative.SyscallResult<Long, io.mazewall.LinuxNative.SyscallHandledState.Unhandled>
+}
+
+internal class TransportNativeEngine(
+    private val transport: ProfilerTransport,
+    private val delegate: io.mazewall.NativeEngine
+) : io.mazewall.NativeEngine by delegate {
+    override val raw: io.mazewall.RawSyscallOperations = delegate.raw
+    override val fileSystem: io.mazewall.NativeFileSystem = delegate.fileSystem
+    override val process: io.mazewall.NativeProcess = delegate.process
+    override val networking: io.mazewall.NativeNetworking = delegate.networking
+    override val memory: io.mazewall.NativeMemory = TransportNativeMemory(transport, delegate.memory)
+}
+
+/**
  * Standalone Profiler Daemon Engine.
  *
  * Communicates with the parent JVM via a [ProfilerTransport], sending binary [SyscallEvent]
@@ -57,7 +85,7 @@ public class ProfilerDaemonEngine(
             )
         },
         maxConnections = MAX_CONNECTIONS,
-        engine = engine,
+        engine = TransportNativeEngine(transport, engine),
         socketManager = socketManager,
         raw = transport.raw,
         handshakeWriter = { fd, buffer, count -> transport.write(fd, buffer.native, count) },

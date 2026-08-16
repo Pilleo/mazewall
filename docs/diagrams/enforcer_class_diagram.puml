@@ -33,6 +33,7 @@ class "InstallationReceipt" as io.mazewall.InstallationReceipt {
   +PolicyDefinition<?> getRequestedPolicy()
   +AutoCloseable getSupervisorSession()
   +long getTimestampMillis()
+  +boolean getInstalled()
 }
 class "KernelFeatureMatrix" as io.mazewall.KernelFeatureMatrix {
   + {static}Companion Companion
@@ -1131,6 +1132,7 @@ abstract class "SeccompConnection" as io.mazewall.ffi.networking.SeccompConnecti
   +SocketManager getSocketManager()
   +void setSocketManager(SocketManager)
   +void close()
+  +void markSocketClosed()
 }
 class "SupervisorSeccompNotifInstaller" as io.mazewall.ffi.networking.SupervisorSeccompNotifInstaller {
   + {static}SupervisorSeccompNotifInstaller INSTANCE

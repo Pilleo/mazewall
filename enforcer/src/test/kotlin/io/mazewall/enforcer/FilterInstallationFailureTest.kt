@@ -16,6 +16,7 @@ import org.junit.jupiter.api.Test
 import java.util.concurrent.Executors
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 
 class FilterInstallationFailureTest {
@@ -28,7 +29,7 @@ class FilterInstallationFailureTest {
     }
 
     @Test
-    fun `test state IS reverted on failure`() {
+    fun `test state IS reverted on failure when Landlock is not applied`() {
         val mockPlatform = object : PlatformProvider by RealPlatformProvider {
             override fun getOsName(): String = "Linux"
             override fun getLandlockAbiVersion(): Int = 5
@@ -40,7 +41,47 @@ class FilterInstallationFailureTest {
 
         val mockEngine = MockNativeEngine()
 
-        // Let's use a non-supervised policy.
+        // Policy WITHOUT filesystem paths — Landlock will NOT be applied
+        val policy = Policy.builder().block(Syscall.EXECVE).build()
+
+        // PureJavaBpfEngine.install calls LinuxNative.raw.syscall(SECCOMP_SET_MODE_FILTER, ...)
+        mockEngine.onSyscall = { nr, _, _, _, _, _, _ ->
+            if (nr == io.mazewall.core.Arch.current().seccompSyscallNumber.toLong()) {
+                LinuxNative.SyscallResult.Error(22, -1) // EINVAL
+            } else {
+                LinuxNative.SyscallResult.Success(0L)
+            }
+        }
+
+        LinuxNative.setEngine(mockEngine)
+
+        // Initial state
+        val initialState = ContainerState()
+        ContainmentStateRegistry.threadState = initialState
+
+        assertFailsWith<IllegalStateException> {
+            ContainedExecutors.installOnCurrentThread(policy)
+        }
+
+        // VERIFY: state WAS reverted because Landlock was not applied
+        assertEquals(initialState, ContainmentStateRegistry.threadState)
+        assertNull(ContainmentStateRegistry.threadState.landlockPolicy)
+    }
+
+    @Test
+    fun `test state is NOT reverted on failure when Landlock IS applied`() {
+        val mockPlatform = object : PlatformProvider by RealPlatformProvider {
+            override fun getOsName(): String = "Linux"
+            override fun getLandlockAbiVersion(): Int = 5
+            override fun hasKernelSeccompSupport(): Boolean = true
+            override fun checkSeccompSanity(): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
+                LinuxNative.SyscallResult.Error(22, -1)
+        }
+        Platform.setProvider(mockPlatform)
+
+        val mockEngine = MockNativeEngine()
+
+        // Policy WITH filesystem paths — Landlock WILL be applied (and is irreversible)
         val policy = Policy.builder().allowFsRead("/tmp").build()
 
         // PureJavaBpfEngine.install calls LinuxNative.raw.syscall(SECCOMP_SET_MODE_FILTER, ...)
@@ -62,8 +103,7 @@ class FilterInstallationFailureTest {
             ContainedExecutors.installOnCurrentThread(policy)
         }
 
-        // VERIFY: state WAS reverted
-        assertEquals(initialState, ContainmentStateRegistry.threadState)
-        assertNull(ContainmentStateRegistry.threadState.landlockPolicy)
+        // VERIFY: state was NOT reverted because Landlock was applied and is irreversible
+        assertNotNull(ContainmentStateRegistry.threadState.landlockPolicy)
     }
 }

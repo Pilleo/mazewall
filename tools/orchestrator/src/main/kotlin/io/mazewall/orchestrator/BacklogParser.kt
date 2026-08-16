@@ -242,10 +242,10 @@ object BacklogParser {
 
     fun markIssueAsDeferred(issue: BacklogIssue) {
         val content = issue.file.readText()
-        val statusLine = Regex("(?m)^status:\\s*(['\"]?)in_progress\\1\\s*$")
+        val statusLine = Regex("(?m)^status:\\s*(['\"]?)(?:in_progress|open)\\1\\s*$")
         val updatedContent = content.replaceFirst(statusLine, "status: \"deferred\"")
         check(updatedContent != content) {
-            "Cannot defer ${issue.id}: expected an in_progress status in ${issue.file.path}"
+            "Cannot defer ${issue.id}: expected an in_progress or open status in ${issue.file.path}"
         }
         issue.file.writeText(updatedContent)
     }
