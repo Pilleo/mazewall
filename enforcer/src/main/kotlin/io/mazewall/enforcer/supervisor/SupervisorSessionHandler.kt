@@ -284,11 +284,13 @@ internal class SupervisorSessionHandler(
             arch.accept, arch.accept4 -> {
                 dirfd = args[0].toInt()
             }
-            // Note: execve/execveat paths are intentionally NOT read here.
-            // The daemon cannot ptrace child processes (Yama ptrace_scope).
-            // Authorization is performed by the JVM listener using the
-            // parent's propagated stack trace; TOCTOU mitigation is skipped
-            // when pathStr is null (see readAndHandleJvmResponse).
+            arch.execve -> {
+                pathStr = readExecPath(tid, args[0])
+            }
+            arch.execveat -> {
+                dirfd = args[0].toInt()
+                pathStr = readExecPath(tid, args[1])
+            }
         }
         return SyscallArguments(pathStr, sockaddrBytes, dirfd)
     }
@@ -319,30 +321,15 @@ internal class SupervisorSessionHandler(
             }
             return BypassPaths.toRealPathWithFallback(baseDir.resolve(path))
         } catch (e: java.nio.file.NoSuchFileException) {
-            // NoSuchFileException is normal when directories under /proc do not exist or path resolution fails normally
-            // Let's attempt relative search fallback
+            // /proc/<pid>/cwd or /proc/<pid>/fd/<dirfd> is gone. Do not invent a
+            // path under a daemon bypass root; fail closed and let the caller deny.
+            return null
         } catch (e: java.io.FileNotFoundException) {
-            // Normal
+            return null
         } catch (e: Exception) {
             logger.severe { "Critical error during baseDir or /proc resolution for pid=$pid dirfd=$dirfd path=$pathStr: ${e.message}" }
             throw e
         }
-
-        // Fallback: search in safeBypassPaths for relative path matching (needed inside containers due to Yama ptrace_scope)
-        for (bypassPath in BypassPaths.safeBypassPaths) {
-            try {
-                val resolved = bypassPath.resolve(pathStr).normalize()
-                return BypassPaths.toRealPathWithFallback(resolved)
-            } catch (e: java.nio.file.NoSuchFileException) {
-                // Normal, skip this bypass path
-            } catch (e: java.io.FileNotFoundException) {
-                // Normal, skip this bypass path
-            } catch (e: Exception) {
-                logger.severe { "Critical error during bypassPath resolution for $pathStr in $bypassPath: ${e.message}" }
-                throw e
-            }
-        }
-        return null
     }
 
     context(arena: NativeArena)
@@ -519,9 +506,10 @@ internal class SupervisorSessionHandler(
                         handleInjectFd(id, nr, args, pathStr, sockaddrBytes, resp, tid, traceeArch)
                     } else if (nr == traceeArch.execve || nr == traceeArch.execveat) {
                         // Register modification is not natively supported by the Linux seccomp user notification API.
-                        // To allow process execution while preventing TOCTOU attacks as robustly as possible, we emulate
-                        // safe execution by writing the exact validated path bytes back to the tracee's address space
-                        // prior to allowing the syscall to continue.
+                        // When the path can be read, write the validated bytes back before CONTINUE so a
+                        // TOCTOU swap cannot change the executed file. posix_spawn helpers are often
+                        // unreadable under Yama; those remain authorized by the parent stack and continue
+                        // without write-back rather than denying a policy-approved child exec.
                         if (pathStr != null && !pathStr.startsWith("<YAMA_ERROR")) {
                             val pathAddr = if (nr == traceeArch.execve) args[0] else args[1]
                             val pathBytes = pathStr.toByteArray(StandardCharsets.UTF_8)
@@ -741,6 +729,16 @@ internal class SupervisorSessionHandler(
     context(arena: NativeArena)
     private fun readStringFromProcess(tid: Tid, remoteAddr: Long): String? {
         return io.mazewall.ffi.memory.SupervisorProcessMemoryReader.readString(tid, remoteAddr, MAX_PATH_LEN)
+    }
+
+    context(arena: NativeArena)
+    private fun readExecPath(tid: Tid, remoteAddr: Long): String? {
+        return try {
+            readStringFromProcess(tid, remoteAddr)
+        } catch (e: ContainmentViolationException) {
+            logger.warning("[SUPERVISOR-DIAGNOSTIC] Cannot inspect exec path for tid=${tid.value}: ${e.message}")
+            null
+        }
     }
 
     context(arena: NativeArena)

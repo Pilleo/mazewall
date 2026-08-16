@@ -13,6 +13,24 @@ import kotlinx.serialization.json.Json
 internal fun proxyConfigurationStatus(value: String?): String =
     if (value.isNullOrBlank()) "not configured" else "configured"
 
+/**
+ * Reads stdout from [process] if it exits within [timeout]. On timeout the
+ * child is destroyed and `null` is returned so callers do not block on
+ * `readAllBytes()` after `waitFor` expires.
+ */
+internal fun readProcessOutputOrDestroy(
+    process: Process,
+    timeout: Long,
+    unit: TimeUnit,
+): String? {
+    val finished = process.waitFor(timeout, unit)
+    if (!finished) {
+        process.destroyForcibly()
+        return null
+    }
+    return String(process.inputStream.readAllBytes()).trim()
+}
+
 @Serializable
 data class GitHubLabel(
     val name: String
@@ -379,8 +397,12 @@ class RealGitHubClient(private val config: OrchestratorConfig) : GitHubClient {
 
                         try {
                             val ipRoute = ProcessBuilder("ip", "route").start()
-                            ipRoute.waitFor(2, TimeUnit.SECONDS)
-                            System.err.println("  [GitHubCli Diagnostics] ip route: ${String(ipRoute.inputStream.readAllBytes()).trim()}")
+                            val routeOutput = readProcessOutputOrDestroy(ipRoute, 2, TimeUnit.SECONDS)
+                            if (routeOutput != null) {
+                                System.err.println("  [GitHubCli Diagnostics] ip route: $routeOutput")
+                            } else {
+                                System.err.println("  [GitHubCli Diagnostics] ip route timed out")
+                            }
                         } catch (e: Exception) {
                             System.err.println("  [GitHubCli Diagnostics] Could not get ip route: ${e.message}")
                         }

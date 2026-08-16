@@ -466,6 +466,15 @@ class "Uid" as io.mazewall.core.Uid {
   + {static}int constructor-impl(int)
   + {static}boolean equals-impl0(int, int)
 }
+class "ContainedExecutors" as io.mazewall.enforcer.ContainedExecutors {
+  + {static}ContainedExecutors INSTANCE
+  __
+  +void installOnCurrentThread(Policy<?, ? extends Uncompiled>[])
+  +void installOnCurrentThread(Policy<?, ? extends Uncompiled>, StacktraceScopingPolicy)
+  +void installOnProcess(Policy<? extends ProcessWideSafe, ? extends Uncompiled>[])
+  +ExecutorService wrap(ExecutorService, Policy<?, ? extends Uncompiled>[])
+  +ExecutorService wrap(ExecutorService, Policy<?, ? extends Uncompiled>, StacktraceScopingPolicy)
+}
 class "ContainedExecutors" as io.mazewall.enforcer.api.ContainedExecutors {
   + {static}ContainedExecutors INSTANCE
   __
@@ -1438,6 +1447,7 @@ io.mazewall.core.RealProcessLauncher .u.|> io.mazewall.core.ProcessLauncher
 io.mazewall.core.RealProcessLauncher --> io.mazewall.core.RealProcessLauncher
 io.mazewall.core.RealSocketManager .u.|> io.mazewall.core.SocketManager
 io.mazewall.core.RealSocketManager --> io.mazewall.core.RealSocketManager
+io.mazewall.enforcer.ContainedExecutors --> io.mazewall.enforcer.ContainedExecutors
 io.mazewall.enforcer.api.ContainedExecutors --> io.mazewall.enforcer.api.ContainedExecutors
 io.mazewall.enforcer.api.SandboxDispatcher --> io.mazewall.PolicyDefinition
 io.mazewall.enforcer.api.SandboxDispatcher --> io.mazewall.enforcer.api.SandboxDispatcher

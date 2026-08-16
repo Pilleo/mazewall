@@ -21,6 +21,9 @@ class MockOrchestratorEnvironment : OrchestratorEnvironment {
     var buildStatus = "SUCCESS"
     val prComments = mutableListOf<GitHubComment>()
     val commentedPrs = mutableListOf<Pair<String, String>>()
+    val commentedIssues = mutableListOf<Pair<String, String>>()
+    var commentOnIssueException: Exception? = null
+    val createdGenerationSessions = mutableListOf<String>()
     var julesSession: JulesSession? = null
     var triggeredJulesSessions = 0
     val sentJulesMessages = mutableListOf<Pair<String, String>>()
@@ -71,7 +74,10 @@ class MockOrchestratorEnvironment : OrchestratorEnvironment {
         override fun checkBuildStatus(prNumber: String): String = buildStatus
         override fun getPrComments(prNumber: String): List<GitHubComment> = prComments
         override fun commentOnPr(prNumber: String, body: String) { commentedPrs.add(prNumber to body) }
-        override fun commentOnIssue(issueNumber: String, body: String) {}
+        override fun commentOnIssue(issueNumber: String, body: String) {
+            commentOnIssueException?.let { throw it }
+            commentedIssues.add(issueNumber to body)
+        }
         override fun getPrDiff(prNumber: String): String = "mock diff"
         override fun getFailedBuildLogs(prNumber: String): String = "mock failed logs"
         override fun getPrUrl(prNumber: String): String = "mock url"
@@ -88,7 +94,9 @@ class MockOrchestratorEnvironment : OrchestratorEnvironment {
             return JulesSession("created-session", "desc", repo, "PENDING")
         }
         override fun createSessionWithContext(repo: String, issueId: String, githubIssueNumber: String, previousPrUrl: String, previousBranch: String, originalTaskDescription: String): JulesSession {
-            return JulesSession("s-context", "desc", repo, "PENDING")
+            val session = JulesSession("s-context-${createdGenerationSessions.size + 1}", "desc", repo, "PENDING")
+            createdGenerationSessions.add(session.id)
+            return session
         }
         override fun sendSessionMessage(sessionId: String, prompt: String) { sentJulesMessages.add(sessionId to prompt) }
         override fun listSessions(): List<JulesSession> = emptyList()
@@ -576,6 +584,32 @@ class StateHandlerTest {
 
         assertTrue(nextState is SelectTaskState)
         assertTrue(env.resolvedIssues.contains(issue))
+    }
+
+    @Test
+    fun testCreateGenerationTransitionsEvenIfIssueCommentFails() {
+        val env = MockOrchestratorEnvironment()
+        val issueFile = kotlin.io.path.createTempFile().toFile().apply { writeText("Task") }
+        env.issues.add(BacklogIssue(issueFile, "issue-1", "Title", 1, "open", emptyList()))
+        env.commentOnIssueException = RuntimeException("GitHub comment failed")
+        val context = OrchestratorContext().apply {
+            currentIssueId = "issue-1"
+            githubIssueNumber = "123"
+            julesSessionId = "s1"
+            prNumber = "42"
+        }
+
+        try {
+            val nextState = CreateGenerationState("issue-1", "123", "s1", "42").execute(env, context)
+
+            assertTrue(nextState is AwaitingPrState)
+            assertEquals(listOf("s-context-1"), env.createdGenerationSessions)
+            assertEquals("s-context-1", context.julesSessionId)
+            assertEquals(null, context.prNumber)
+            assertTrue(env.commentedIssues.isEmpty())
+        } finally {
+            issueFile.delete()
+        }
     }
 
     @Test

@@ -128,17 +128,11 @@ public class SeccompDaemonEngine(
             state = SeccompDaemonState.Terminated
             socketManager.close(serverFd)
 
-            val clientsToClose = ArrayList(clientSockets)
             clientSockets.clear()
-            for (clientFd in clientsToClose) {
-                try { socketManager.close(clientFd) } catch (_: Exception) {}
-            }
-
-            val listenersToClose = ArrayList(activeListeners)
             activeListeners.clear()
-            for (listenerFd in listenersToClose) {
-                try { socketManager.close(listenerFd) } catch (_: Exception) {}
-            }
+            // Interrupt connection workers and let each handleConnection() owner
+            // close its descriptors. Closing the same numeric fds here would race
+            // with that owner close() after Linux reused the number.
             connectionExecutor.shutdownNow()
         }
     }

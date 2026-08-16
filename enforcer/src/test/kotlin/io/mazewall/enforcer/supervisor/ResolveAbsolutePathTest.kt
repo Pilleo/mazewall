@@ -78,6 +78,37 @@ class ResolveAbsolutePathTest {
     }
 
     @Test
+    fun `unresolvable relative path is not remapped onto a daemon bypass root`() {
+        val handler = SupervisorSessionHandler(
+            FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(-1),
+            FileDescriptor.unsafe<FileDescriptorRole.SeccompNotif>(-1)
+        )
+        val resolveMethod = SupervisorSessionHandler::class.java.getDeclaredMethod(
+            "resolveAbsolutePath",
+            Int::class.javaPrimitiveType,
+            Int::class.javaPrimitiveType,
+            String::class.java
+        )
+        resolveMethod.isAccessible = true
+        val bypassMethod = SupervisorSessionHandler::class.java.getDeclaredMethod(
+            "resolveBypassPath",
+            Path::class.java
+        )
+        bypassMethod.isAccessible = true
+
+        val resolvedPath = resolveMethod.invoke(handler, 0, 999, "build/secret") as Path?
+
+        if (resolvedPath == null) {
+            return
+        }
+        val bypass = bypassMethod.invoke(handler, resolvedPath) as Path?
+        assertNull(bypass)
+        assertFalse(BypassPaths.safeBypassPaths.any { root ->
+            resolvedPath.normalize().startsWith(root.normalize())
+        })
+    }
+
+    @Test
     fun `relative bypass path is matched only after tracee dirfd resolution`() {
         val handler = SupervisorSessionHandler(
             FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(-1),

@@ -90,9 +90,11 @@ internal class SyscallPathResolver(
         val path = try {
             memoryReader.readStringFromProcess(tid, addr)
         } catch (e: io.mazewall.enforcer.api.ContainmentViolationException) {
-            // Yama ptrace_scope may prevent reading memory from certain tracees (e.g., grandchild processes).
-            // Gracefully return null rather than crashing the daemon.
-            null
+            // Yama can deny grandchild memory reads. Record the failed inspection and
+            // keep the session alive so the syscall can be continued; the event is
+            // published without a resolved path rather than as a successful empty read.
+            ledger.record(SessionEvent.VmReadvResolved(System.nanoTime(), tid.value.toLong(), false))
+            return null
         }
         ledger.record(SessionEvent.VmReadvResolved(System.nanoTime(), tid.value.toLong(), path != null))
         if (path == null) return null

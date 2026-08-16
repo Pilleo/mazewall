@@ -1,6 +1,7 @@
 package io.mazewall.profiler.engine
 
 import io.mazewall.core.Tid
+import io.mazewall.enforcer.api.ContainmentViolationException
 import io.mazewall.ffi.memory.NativeArena
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -144,6 +145,34 @@ class SyscallPathResolverTest {
             if (path == "cwd") return "/home/user"
             if (path == "fd/5") return "/opt/app"
             return null
+        }
+    }
+
+    @Test
+    fun `yama denied path reads abort resolution instead of publishing a pathless event`() {
+        NativeArena.ofConfined().use { arena ->
+            with(arena) {
+                val reader = object : ProfilerMemoryReader {
+                    context(arena: NativeArena)
+                    override fun readStringFromProcess(tid: Tid, remoteAddr: Long, maxLen: Int): String? {
+                        throw ContainmentViolationException("Permission denied reading memory from TID ${tid.value}")
+                    }
+
+                    context(arena: NativeArena)
+                    override fun resolveLink(tid: Tid, link: String): String? = null
+                }
+                val ledger = SessionEventLedger()
+                val resolver = SyscallPathResolver(reader, ledger)
+                val event = SyscallEvent<SyscallEventState.Raw>(Tid(1), "OPEN", listOf(100L))
+                val resolved = resolver.resolve(event)
+                assertTrue(resolved.paths.isEmpty())
+                assertTrue(
+                    ledger.dump().any { event ->
+                        event is SessionEvent.VmReadvResolved && !event.success
+                    },
+                    "Yama-denied path reads must be recorded as failed inspections: ${ledger.dump()}",
+                )
+            }
         }
     }
 

@@ -68,6 +68,10 @@ allprojects {
     val isVerbose = gradle.startParameter.logLevel in listOf(LogLevel.INFO, LogLevel.DEBUG)
 
     tasks.withType<Test>().configureEach {
+        // Apply hang-prevention timeouts to every project's Test tasks, not just :test.
+        systemProperty("junit.jupiter.execution.timeout.default", "2 m")
+        systemProperty("junit.jupiter.execution.timeout.thread.mode.default", "SEPARATE_THREAD")
+
         val failedTestsOutputs = ConcurrentHashMap<String, StringBuilder>()
 
         if (isVerbose) {

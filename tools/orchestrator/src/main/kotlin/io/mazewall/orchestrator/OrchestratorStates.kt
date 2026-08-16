@@ -1560,13 +1560,9 @@ data class CreateGenerationState(
             return this
         }
 
-        // 4. Comment on the issue
-        env.gitHubClient.commentOnIssue(
-            githubIssueNumber,
-            "🚨 Merge conflict detected on PR #$prNumber. Started new Jules session (Generation ${slot.generation + 1}) to resolve conflicts against master: https://jules.google.com/session/${newSession.id}"
-        )
-
-        // 5. Update slot and transition
+        // Persist the new session and leave CREATE_GENERATION before the
+        // nonessential GitHub comment. A transient comment failure must not
+        // recreate another Jules session on the next iteration.
         slot.generation++
         slot.previousPrNumber = prNumber
         slot.julesSessionId = newSession.id
@@ -1579,6 +1575,15 @@ data class CreateGenerationState(
         slot.julesRetries = 0
         slot.julesReviewPushCount = 0
         slot.julesReviewAttemptCount = 0
+
+        try {
+            env.gitHubClient.commentOnIssue(
+                githubIssueNumber,
+                "🚨 Merge conflict detected on PR #$prNumber. Started new Jules session (Generation ${slot.generation}) to resolve conflicts against master: https://jules.google.com/session/${newSession.id}"
+            )
+        } catch (e: Exception) {
+            env.errPrintln("⚠️ Failed to comment on issue #$githubIssueNumber after creating generation session ${newSession.id}: ${e.message}")
+        }
 
         return AwaitingPrState(issueId, githubIssueNumber, newSession.id)
     }
