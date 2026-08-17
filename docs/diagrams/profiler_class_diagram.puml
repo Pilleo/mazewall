@@ -101,6 +101,7 @@ class "ProfileOptions" as io.mazewall.profiler.ProfileOptions {
   +boolean getCaptureStacks()
   +boolean getProcessWide()
   +Boolean getIoUringDisabled()
+  +Path getEbpfEventLog()
 }
 enum "ProfileStrategy" as io.mazewall.profiler.ProfileStrategy {
   USER_NOTIF
@@ -147,8 +148,38 @@ enum "StackAttribution" as io.mazewall.profiler.StackAttribution {
 }
 interface "TraceableWorkload" as io.mazewall.profiler.TraceableWorkload {
 }
-class "BobCompiler" as io.mazewall.profiler.compiler.BobCompiler {
+class "CollectorDrain" as io.mazewall.profiler.collector.CollectorDrain {
+  __
+  +List<ProfileObservation> getObservations()
+  +int getDroppedEvents()
+  +boolean getDrainComplete()
+  +IoUringVisibility getIoUring()
+}
+class "EbpfCollector" as io.mazewall.profiler.collector.EbpfCollector {
+  +ObservationSource getSource()
+  +void start()
+  +CollectorDrain drain()
+  +void close()
+}
+class "EbpfEventParser" as io.mazewall.profiler.collector.EbpfEventParser {
   ..
+  + {static}EbpfEventParser INSTANCE
+  __
+  +List<ProfileObservation> parse(String)
+  +ProfileObservation parseLine(String)
+}
+class "ObservationMerger" as io.mazewall.profiler.collector.ObservationMerger {
+  + {static}ObservationMerger INSTANCE
+  __
+  +CollectorDrain merge(List<CollectorDrain>)
+}
+interface "ProfileCollector" as io.mazewall.profiler.collector.ProfileCollector {
+  + {abstract}ObservationSource getSource()
+  + {abstract}void start()
+  + {abstract}CollectorDrain drain()
+  + {abstract}void close()
+}
+class "BobCompiler" as io.mazewall.profiler.compiler.BobCompiler {
   + {static}BobCompiler INSTANCE
   __
   +BillOfBehavior compile(List<? extends TraceEvent>)
@@ -460,6 +491,13 @@ io.mazewall.profiler.ProfilingCoverage --> io.mazewall.profiler.PathResolutionQu
 io.mazewall.profiler.ProfilingResult --> io.mazewall.profiler.BillOfBehavior
 io.mazewall.profiler.ProfilingResult --> io.mazewall.profiler.ProfilingCoverage
 io.mazewall.profiler.ProfilingResult --> io.mazewall.profiler.engine.TraceEvent
+io.mazewall.profiler.collector.CollectorDrain --> io.mazewall.profiler.IoUringVisibility
+io.mazewall.profiler.collector.CollectorDrain --> io.mazewall.profiler.ProfileObservation
+io.mazewall.profiler.collector.EbpfCollector .u.|> io.mazewall.profiler.collector.ProfileCollector
+io.mazewall.profiler.collector.EbpfCollector --> io.mazewall.profiler.ObservationSource
+io.mazewall.profiler.collector.EbpfCollector --> io.mazewall.profiler.EbpfLoad
+io.mazewall.profiler.collector.EbpfEventParser --> io.mazewall.profiler.collector.EbpfEventParser
+io.mazewall.profiler.collector.ObservationMerger --> io.mazewall.profiler.collector.ObservationMerger
 io.mazewall.profiler.compiler.BobCompiler --> io.mazewall.profiler.compiler.BobCompiler
 io.mazewall.profiler.compiler.StraceLogParser --> io.mazewall.profiler.compiler.StraceLogParser
 io.mazewall.profiler.engine.PathNormalizerHelper --> io.mazewall.profiler.engine.PathNormalizerHelper

@@ -1,0 +1,81 @@
+package io.mazewall.profiler.collector
+
+import io.mazewall.core.Tid
+import io.mazewall.profiler.EbpfLoad
+import io.mazewall.profiler.IncompleteProfileException
+import io.mazewall.profiler.IoUringVisibility
+import io.mazewall.profiler.MazewallProfiler
+import io.mazewall.profiler.NetworkEndpoint
+import io.mazewall.profiler.ObservationCorrelation
+import io.mazewall.profiler.ObservationSource
+import io.mazewall.profiler.ProfileObservation
+import io.mazewall.profiler.ProfileOptions
+import io.mazewall.profiler.ProfileStrategy
+import org.junit.jupiter.api.Test
+import java.nio.file.Files
+import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
+import kotlin.test.assertTrue
+
+class CollectorHybridTest {
+
+    @Test
+    fun `parser reads uring syscall and connect lines`() {
+        val log = """
+            # comment
+            kind=uring tid=8 tgid=7 ktime=1 opcode=IORING_OP_OPENAT path=/tmp/a
+            kind=syscall tid=8 name=io_uring_enter
+            kind=connect tid=8 host=127.0.0.1 port=443
+        """.trimIndent()
+        val obs = EbpfEventParser.parse(log)
+        assertEquals(3, obs.size)
+        assertTrue(obs[0] is ProfileObservation.IoUring)
+        assertEquals("IO_URING_ENTER", (obs[1] as ProfileObservation.Syscall).name)
+        assertEquals(NetworkEndpoint("127.0.0.1", 443), (obs[2] as ProfileObservation.Connect).endpoint)
+    }
+
+    @Test
+    fun `merger prefers OBSERVED and deduplicates`() {
+        val corr = ObservationCorrelation(1, Tid(1), 5)
+        val uring = ProfileObservation.IoUring(corr, ObservationSource.EBPF, "OPENAT", listOf("/x"))
+        val merged = ObservationMerger.merge(
+            listOf(
+                CollectorDrain(listOf(uring), ioUring = IoUringVisibility.UNSEEN),
+                CollectorDrain(listOf(uring), droppedEvents = 2, ioUring = IoUringVisibility.OBSERVED),
+            ),
+        )
+        assertEquals(1, merged.observations.size)
+        assertEquals(2, merged.droppedEvents)
+        assertEquals(IoUringVisibility.OBSERVED, merged.ioUring)
+    }
+
+    @Test
+    fun `recorded eBPF log compiles through the session without live attach`() {
+        val log = Files.createTempFile("ebpf", ".log")
+        Files.writeString(log, "kind=uring tid=1 opcode=IORING_OP_OPENAT path=/tmp/sidecar\n")
+        MazewallProfiler.open(
+            ProfileOptions(strategy = ProfileStrategy.EBPF, ebpfEventLog = log),
+        ).use { session ->
+            val result = session.profile { "ok" }
+            assertEquals("ok", result.value)
+            assertTrue(result.behavior.opens.contains("/tmp/sidecar"))
+            assertEquals(IoUringVisibility.OBSERVED, result.coverage.ioUring)
+            assertEquals(true, result.coverage.complete)
+        }
+    }
+
+    @Test
+    fun `live eBPF attach without a log fails closed`() {
+        MazewallProfiler.open(ProfileOptions(strategy = ProfileStrategy.EBPF)).use { session ->
+            assertFailsWith<IncompleteProfileException> {
+                session.profile { "nope" }
+            }
+        }
+    }
+
+    @Test
+    fun `missing log file fails closed`() {
+        val collector = EbpfCollector(EbpfLoad.Available, recordedLog = java.nio.file.Path.of("/no/such/ebpf.log"))
+        assertFailsWith<IncompleteProfileException> { collector.start() }
+    }
+}

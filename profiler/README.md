@@ -65,7 +65,8 @@ Three profiling strategies are available depending on your environment and what 
 | **S (Recommended)** | `MazewallProfiler` / `Profiler.profile { }` | Standard synchronous workloads, accurate syscall + path capture | Unprivileged |
 | **H (Hybrid)** | `ProfileStrategy.HYBRID_NO_URING` | Disable `io_uring` while profiling; allow `io_uring_*` at runtime and let Landlock bind paths | Unprivileged |
 | **P (strace)** | `StraceProfiler` / `ProfileStrategy.STRACE` | Legacy environments, descendant subprocess tracing | `ptrace_scope ≤ 1` |
-| **eBPF (planned)** | `ProfileStrategy.EBPF` | Transparent `io_uring` path capture | Host `CAP_BPF` in the **init** user ns |
+| **eBPF (recorded)** | `ProfileStrategy.EBPF` + `ebpfEventLog` | Compile a rootful sidecar log (`kind=uring ...`) | Capture needs host `CAP_BPF`; compile does not |
+| **eBPF (live)** | `ProfileStrategy.EBPF` without a log | Not implemented — fails closed | Host `CAP_BPF` in the **init** user ns |
 
 `IterativeProfiler` is deprecated. Deny-and-retry is not a tracer.
 

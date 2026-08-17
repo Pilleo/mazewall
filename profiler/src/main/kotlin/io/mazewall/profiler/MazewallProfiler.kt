@@ -1,5 +1,9 @@
 package io.mazewall.profiler
 
+import io.mazewall.profiler.collector.CollectorDrain
+import io.mazewall.profiler.collector.EbpfCollector
+import io.mazewall.profiler.collector.ObservationMerger
+import io.mazewall.profiler.compiler.BobCompiler
 import io.mazewall.profiler.engine.TraceEvent
 import io.mazewall.profiler.strace.StraceProfiler
 import java.nio.file.Files
@@ -10,11 +14,13 @@ public data class ProfileOptions(
     val captureStacks: Boolean = true,
     val processWide: Boolean = false,
     val ioUringDisabled: Boolean? = null,
+    /** Recorded eBPF sidecar log (`kind=uring ...`). Live attach is not implemented. */
+    val ebpfEventLog: Path? = null,
 )
 
 /**
  * Owned profiling session. [Profiler.profile] is a facade over a single session.
- * eBPF is not implemented yet: [ProfileStrategy.EBPF] fails closed.
+ * eBPF live attach fails closed. A recorded sidecar log can be merged or used alone.
  */
 public class MazewallProfiler private constructor(
     private val options: ProfileOptions,
@@ -28,8 +34,7 @@ public class MazewallProfiler private constructor(
     public fun <T> profile(block: () -> T): ProfilingResult<T> {
         check(!closed) { "MazewallProfiler is closed" }
         if (resolved == ProfileStrategy.EBPF) {
-            val coverage = failEbpf()
-            throw IncompleteProfileException(coverage, "eBPF collector is not implemented; refuse silent fallback")
+            return profileEbpfOnly(block)
         }
         if (resolved == ProfileStrategy.STRACE) {
             throw IllegalArgumentException("STRACE requires profile(workloadClass); a lambda cannot be spawned under strace")
@@ -67,8 +72,46 @@ public class MazewallProfiler private constructor(
         closed = true
     }
 
+    private fun <T> profileEbpfOnly(block: () -> T): ProfilingResult<T> {
+        val drain = drainEbpf(liveIfMissing = true)
+        val value = block()
+        val bob = BobCompiler.compileObservations(drain.observations)
+        val coverage = ProfilingCoverage.infer(
+            strategy = ProfileStrategy.EBPF,
+            strategyReason = reason,
+            processWide = options.processWide,
+            observations = drain.observations,
+            stacks = StackAttribution.SKIPPED,
+            droppedEvents = drain.droppedEvents,
+            drainComplete = drain.drainComplete,
+            environment = environment,
+        )
+        val result = ProfilingResult(value, bob, emptyMap(), coverage)
+        lastSnapshot = ProfilingResult(Unit, bob, emptyMap(), coverage)
+        return result
+    }
+
+    private fun drainEbpf(liveIfMissing: Boolean): CollectorDrain {
+        val collector = EbpfCollector(
+            load = environment.ebpfLoad,
+            recordedLog = options.ebpfEventLog,
+            liveAttach = liveIfMissing && options.ebpfEventLog == null,
+        )
+        collector.start()
+        return collector.use { it.drain() }
+    }
+
     private fun <T> attachCoverage(raw: ProfilingResult<T>): ProfilingResult<T> {
-        val observations = inferObservationsFromBob(raw.behavior, raw.stackProfile.keys)
+        val fromUser = inferObservationsFromBob(raw.behavior, raw.stackProfile.keys)
+        val drains = mutableListOf(CollectorDrain(fromUser))
+        if (options.ebpfEventLog != null) {
+            drains.add(drainEbpf(liveIfMissing = false))
+        }
+        val merged = ObservationMerger.merge(drains)
+        val extraBob = BobCompiler.compileObservations(
+            merged.observations.filter { it.source == ObservationSource.EBPF },
+        )
+        val behavior = raw.behavior + extraBob
         val coverage = ProfilingCoverage.infer(
             strategy = if (options.strategy == ProfileStrategy.HYBRID_NO_URING) {
                 ProfileStrategy.HYBRID_NO_URING
@@ -77,28 +120,16 @@ public class MazewallProfiler private constructor(
             },
             strategyReason = reason,
             processWide = options.processWide,
-            observations = observations,
+            observations = merged.observations,
             stacks = if (options.captureStacks) StackAttribution.CAPTURED else StackAttribution.SKIPPED,
-            droppedEvents = 0,
-            drainComplete = true,
+            droppedEvents = merged.droppedEvents,
+            drainComplete = merged.drainComplete,
             environment = environment,
         )
-        val result = raw.copy(coverage = coverage)
+        val result = raw.copy(behavior = behavior, coverage = coverage)
         lastSnapshot = ProfilingResult(Unit, result.behavior, result.stackProfile, coverage)
         return result
     }
-
-    private fun failEbpf(): ProfilingCoverage =
-        ProfilingCoverage.infer(
-            strategy = ProfileStrategy.EBPF,
-            strategyReason = reason,
-            processWide = options.processWide,
-            observations = emptyList(),
-            stacks = StackAttribution.SKIPPED,
-            droppedEvents = 0,
-            drainComplete = true,
-            environment = environment,
-        )
 
     private fun emptyCoverage(): ProfilingCoverage =
         ProfilingCoverage.infer(
