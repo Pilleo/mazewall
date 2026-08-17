@@ -1,7 +1,7 @@
 ---
 title: "Profiler Trace Listener Unbounded Channel DoS / OOM Vulnerability"
 severity: "HIGH"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "profiler"
@@ -27,3 +27,5 @@ In a highly-concurrent, high-throughput JVM execution environment, a massive flo
 1. Refactor `ProfilerTraceListener` to utilize a bounded channel capacity (e.g. `Channel<TraceEvent>(1024)`) instead of `Channel.UNLIMITED`.
 2. Introduce a proper, non-blocking backpressure strategy for queueing events: if the channel is full, log a warning or drop events gracefully under trace mode, or apply backpressure to preserve stability under heavy profiling workload scenarios.
 3. Verify the changes using a stress/throughput unit test in `ProfilerTraceListenerTest.kt`.
+
+**Resolution:** Duplicate of 131007. Same `TraceEventQueue` bound + drop-newest.

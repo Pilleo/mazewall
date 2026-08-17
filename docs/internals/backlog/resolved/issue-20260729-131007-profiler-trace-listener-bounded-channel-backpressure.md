@@ -1,7 +1,7 @@
 ---
 title: "Refactor Profiler Trace Listener to Use Bounded Channel Capacity and Backpressure Strategy"
 severity: "HIGH"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "profiler"

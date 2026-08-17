@@ -1,7 +1,7 @@
 ---
 title: "ProfilerTraceListener Hangs Due to ACK Buffer Size Mismatch"
 severity: "HIGH"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "profiler"
@@ -56,3 +56,5 @@ This issue needs further refinement, but the hang is clearly caused by the `Prof
 1. Determine why `dis.readByte()` in `ProfilerTraceListener.runListenerLoop()` hangs during `test wrap() executor shutdown waits for pending tasks and avoids ENOSYS`.
 2. Ensure `ProfilerDaemonManager` and `SupervisorDaemonManager` do not prematurely terminate shared daemon processes required by subsequent tests.
 3. Verify if test classes need to be run in isolated JVM forks to prevent global state pollution (both for Seccomp filters and shared daemon processes).
+
+**Resolution:** The 4-vs-1 ACK buffer is not a hang: Unix `read` returns short. Daemon handshake writes 1 byte; the listener reads one byte. `ACK_BUF_SIZE=4` is the daemon/session read of JVM command bytes. Profiler integration tests use `forkEvery = 1` and the wrap/shutdown test passes on current `./gradlew build`.

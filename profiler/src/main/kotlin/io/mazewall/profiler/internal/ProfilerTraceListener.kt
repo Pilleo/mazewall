@@ -67,7 +67,8 @@ internal class ProfilerTraceListener(
         }
     }
 
-    val eventChannel = Channel<TraceEvent>(Channel.UNLIMITED)
+    internal val eventQueue = TraceEventQueue()
+    val eventChannel = eventQueue.channel
     val eventFlow: Flow<TraceEvent> = eventChannel.receiveAsFlow()
 
     var state: TraceListenerState = TraceListenerState.Disconnected
@@ -306,7 +307,7 @@ internal class ProfilerTraceListener(
             logger.log(java.util.logging.Level.WARNING, "Trace listener error", e)
         } finally {
             state = TraceListenerState.Disconnected
-            eventChannel.close()
+            eventQueue.close()
         }
     }
 
@@ -364,7 +365,7 @@ internal class ProfilerTraceListener(
          }
 
          event.jvmStackTrace = captureStackTrace(event)
-         eventChannel.trySend(event)
+         eventQueue.offer(event)
     }
 
     private fun sendAck() {
