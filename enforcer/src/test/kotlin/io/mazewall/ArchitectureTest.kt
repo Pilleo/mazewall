@@ -506,6 +506,21 @@ class ArchitectureTest {
                 "io.mazewall.enforcer.supervisor.BypassPaths\$PathResolution\$Missing",
                 "io.mazewall.enforcer.supervisor.BypassPaths\$PathResolution\$Unsafe",
             ),
+            "io.mazewall.enforcer.supervisor.SupervisedKind" to setOf(
+                "io.mazewall.enforcer.supervisor.SupervisedKind\$Open",
+                "io.mazewall.enforcer.supervisor.SupervisedKind\$Connect",
+                "io.mazewall.enforcer.supervisor.SupervisedKind\$Accept",
+                "io.mazewall.enforcer.supervisor.SupervisedKind\$Exec",
+                "io.mazewall.enforcer.supervisor.SupervisedKind\$Spawn",
+                "io.mazewall.enforcer.supervisor.SupervisedKind\$Unknown",
+            ),
+            "io.mazewall.enforcer.supervisor.SupervisorRoute" to setOf(
+                "io.mazewall.enforcer.supervisor.SupervisorRoute\$Continue",
+                "io.mazewall.enforcer.supervisor.SupervisorRoute\$AskJvm",
+                "io.mazewall.enforcer.supervisor.SupervisorRoute\$InjectFd",
+                "io.mazewall.enforcer.supervisor.SupervisorRoute\$SecureExec",
+                "io.mazewall.enforcer.supervisor.SupervisorRoute\$Abort",
+            ),
         )
         for ((parent, kids) in expected) {
             val actual = allClasses

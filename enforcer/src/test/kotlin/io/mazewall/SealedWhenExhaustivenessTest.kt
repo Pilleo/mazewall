@@ -22,9 +22,11 @@ class SealedWhenExhaustivenessTest {
             Path.of("platform/src/main/kotlin/io/mazewall/platform/daemon/UnixListenDaemonMachine.kt"),
             Path.of("../platform/src/main/kotlin/io/mazewall/ffi/networking/SeccompConnectionMachine.kt"),
             Path.of("platform/src/main/kotlin/io/mazewall/ffi/networking/SeccompConnectionMachine.kt"),
+            Path.of("../profiler/src/main/kotlin/io/mazewall/profiler/engine/ProfilerSessionMachine.kt"),
+            Path.of("profiler/src/main/kotlin/io/mazewall/profiler/engine/ProfilerSessionMachine.kt"),
         )
         val files = roots.filter { it.isRegularFile() }.distinct()
-        assertTrue(files.size >= 3, "expected machine sources on disk, found $files")
+        assertTrue(files.size >= 4, "expected machine sources on disk, found $files")
         for (file in files) {
             val text = file.readText()
             assertTrue(

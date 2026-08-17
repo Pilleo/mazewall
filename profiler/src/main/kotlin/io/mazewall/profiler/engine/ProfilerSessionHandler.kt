@@ -132,9 +132,15 @@ internal class ProfilerSessionHandler(
                 return NotifResult.HANDLED
             }
 
-            val notifiedState = currentState.notified(id, resolvedEvent)
-            val waitingState = notifiedState.waitingForAck()
-            state = waitingState
+            val notified = ProfilerSessionMachine.evaluate(
+                currentState,
+                ProfilerSessionEvent.NotificationReceived(id, resolvedEvent),
+            )
+            val waiting = ProfilerSessionMachine.evaluate(
+                notified.state,
+                ProfilerSessionEvent.EventDelivered,
+            )
+            state = waiting.state
 
             parser.writeSocketPoll(socketPollFd, socketFd.value, NativeConstants.POLLIN)
 
@@ -154,7 +160,10 @@ internal class ProfilerSessionHandler(
             return when (result) {
                 is HandshakeSession.Success -> {
                     ledger.record(SessionEvent.AckReceived(System.nanoTime(), pidVal.toLong()))
-                    state = waitingState.acknowledged()
+                    state = ProfilerSessionMachine.evaluate(
+                        waiting.state,
+                        ProfilerSessionEvent.AckSucceeded,
+                    ).state
                     with(arena.unwrap) {
                         responder.sendSeccompContinue(result, resp.unwrap)
                     }
@@ -165,7 +174,10 @@ internal class ProfilerSessionHandler(
                 }
                 is HandshakeSession.Failed -> {
                     System.err.println("[DAEMON-WARN] Handshake failed or shutdown triggered")
-                    state = waitingState.terminate()
+                    state = ProfilerSessionMachine.evaluate(
+                        waiting.state,
+                        ProfilerSessionEvent.HandshakeFailed,
+                    ).state
                     with(arena.unwrap) {
                         responder.sendSeccompError(result, resp.unwrap, ECONNRESET)
                     }
@@ -174,7 +186,10 @@ internal class ProfilerSessionHandler(
                 }
                 is HandshakeSession.PassedThrough -> {
                     System.err.println("[DAEMON-DEBUG] Handshake returned PassThrough")
-                    state = waitingState.acknowledged()
+                    state = ProfilerSessionMachine.evaluate(
+                        waiting.state,
+                        ProfilerSessionEvent.PassedThrough,
+                    ).state
                     with(arena.unwrap) {
                         responder.sendSeccompContinue(result.acknowledged(), resp.unwrap)
                     }
@@ -182,8 +197,11 @@ internal class ProfilerSessionHandler(
                     ledger.record(SessionEvent.ContinueReplied(System.nanoTime(), pidVal.toLong(), 0L))
                     NotifResult.PASS_THROUGH
                 }
-                else -> {
-                    state = ProfilerState.Terminated(socketFd, listenerFd)
+                is HandshakeSession.Active -> {
+                    state = ProfilerSessionMachine.evaluate(
+                        waiting.state,
+                        ProfilerSessionEvent.HandshakeFailed,
+                    ).state
                     NotifResult.TERMINATE
                 }
             }

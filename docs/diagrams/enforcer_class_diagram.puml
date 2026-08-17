@@ -632,6 +632,8 @@ class "JvmStackInspector" as io.mazewall.enforcer.supervisor.JvmStackInspector {
   __
   +ScopingValidationState inspect(int, List<? extends Object>, Thread)
 }
+interface "JvmVerdict" as io.mazewall.enforcer.supervisor.JvmVerdict {
+}
 class "PendingSpawnRegistry" as io.mazewall.enforcer.supervisor.PendingSpawnRegistry {
   + {static}PendingSpawnRegistry INSTANCE
   __
@@ -645,6 +647,8 @@ interface "StacktraceScopingPolicy" as io.mazewall.enforcer.supervisor.Stacktrac
   + {abstract}Map<Syscall, Function3<Tid, List<? extends Object>, List<StackTraceElement>, Boolean>> getHandlers()
 }
 class "StacktraceScopingPolicyKt" as io.mazewall.enforcer.supervisor.StacktraceScopingPolicyKt {
+}
+interface "SupervisedKind" as io.mazewall.enforcer.supervisor.SupervisedKind {
 }
 class "SupervisorContext" as io.mazewall.enforcer.supervisor.SupervisorContext {
   +String getSocketPath()
@@ -686,6 +690,17 @@ class "SupervisorInstaller" as io.mazewall.enforcer.supervisor.SupervisorInstall
   +void registerThread(int)
   +void unregisterThread(int)
   +SupervisorSession installSupervisedFilterForThread(PolicyDefinition<?>, StacktraceScopingPolicy, Function0<Unit>)
+}
+class "SupervisorNotificationMachine" as io.mazewall.enforcer.supervisor.SupervisorNotificationMachine {
+  + {static}SupervisorNotificationMachine INSTANCE
+  __
+  +SupervisedKind classify(int, Arch)
+  +JvmVerdict parseJvmVerdict(int, int)
+  +SupervisorRoute evaluateFastPath(SupervisedKind, Path, String)
+  +SupervisorRoute evaluateJvm(SupervisedKind, JvmVerdict)
+  +boolean looksLikeClassloading(String)
+}
+interface "SupervisorRoute" as io.mazewall.enforcer.supervisor.SupervisorRoute {
 }
 class "SupervisorSession" as io.mazewall.enforcer.supervisor.SupervisorSession {
   +void close()
@@ -1181,6 +1196,19 @@ abstract class "SeccompConnection" as io.mazewall.ffi.networking.SeccompConnecti
   +void close()
   +void markSocketClosed()
 }
+interface "SeccompConnectionEffect" as io.mazewall.ffi.networking.SeccompConnectionEffect {
+}
+interface "SeccompConnectionEvent" as io.mazewall.ffi.networking.SeccompConnectionEvent {
+}
+class "SeccompConnectionMachine" as io.mazewall.ffi.networking.SeccompConnectionMachine {
+  + {static}SeccompConnectionMachine INSTANCE
+  __
+  +SeccompConnectionTransition evaluate(SeccompConnection, SeccompConnectionEvent)
+}
+class "SeccompConnectionTransition" as io.mazewall.ffi.networking.SeccompConnectionTransition {
+  +SeccompConnection getConnection()
+  +List<SeccompConnectionEffect> getEffects()
+}
 class "SupervisorSeccompNotifInstaller" as io.mazewall.ffi.networking.SupervisorSeccompNotifInstaller {
   + {static}SupervisorSeccompNotifInstaller INSTANCE
   __
@@ -1569,6 +1597,7 @@ io.mazewall.enforcer.supervisor.SupervisorDaemonManager --> io.mazewall.core.Pro
 io.mazewall.enforcer.supervisor.SupervisorDaemonManager --> io.mazewall.enforcer.supervisor.SupervisorDaemonManager
 io.mazewall.enforcer.supervisor.SupervisorInstaller --> io.mazewall.enforcer.supervisor.SupervisorInstaller
 io.mazewall.enforcer.supervisor.SupervisorInstaller --> io.mazewall.core.Tid
+io.mazewall.enforcer.supervisor.SupervisorNotificationMachine --> io.mazewall.enforcer.supervisor.SupervisorNotificationMachine
 io.mazewall.enforcer.supervisor.SupervisorSessionHandler .u.|> io.mazewall.platform.seccomp.daemon.SeccompNotifHandler
 io.mazewall.enforcer.supervisor.SupervisorSessionHandler --> io.mazewall.NativeEngine
 io.mazewall.enforcer.supervisor.SupervisorSessionHandler --> io.mazewall.core.SocketManager
@@ -1606,6 +1635,9 @@ io.mazewall.ffi.memory.SupervisorProcessMemoryReader .u.|> io.mazewall.ffi.memor
 io.mazewall.ffi.memory.SupervisorProcessMemoryReader --> io.mazewall.ffi.memory.SupervisorProcessMemoryReader
 io.mazewall.ffi.memory.SupervisorProcessMemoryWriter --> io.mazewall.ffi.memory.SupervisorProcessMemoryWriter
 io.mazewall.ffi.networking.SeccompConnection --> io.mazewall.core.SocketManager
+io.mazewall.ffi.networking.SeccompConnectionMachine --> io.mazewall.ffi.networking.SeccompConnectionMachine
+io.mazewall.ffi.networking.SeccompConnectionTransition --> io.mazewall.ffi.networking.SeccompConnectionEffect
+io.mazewall.ffi.networking.SeccompConnectionTransition --> io.mazewall.ffi.networking.SeccompConnection
 io.mazewall.ffi.networking.SupervisorSeccompNotifInstaller --> io.mazewall.ffi.networking.SupervisorSeccompNotifInstaller
 io.mazewall.ffi.networking.SupervisorSocketInputStream --> io.mazewall.ffi.memory.NativeArena
 io.mazewall.ffi.networking.SupervisorSocketInputStream --> io.mazewall.core.FileDescriptor

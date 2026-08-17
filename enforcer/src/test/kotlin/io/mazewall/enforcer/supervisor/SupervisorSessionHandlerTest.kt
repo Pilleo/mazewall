@@ -1851,8 +1851,8 @@ class SupervisorSessionHandlerTest {
 
                 // Write a valid x86_64 audit arch so Arch.fromAudit succeeds
                 notif.writeInt(20L, io.mazewall.core.Arch.AMD64.audit) // NOTIF_ARCH_OFF = 20
-                // nr = getpid (39) — no path resolution needed, goes straight to sendRequestToJvm
-                notif.writeInt(16L, io.mazewall.core.Arch.AMD64.getpid) // NOTIF_NR_OFF = 16
+                // nr = clone — supervised spawn, no path, goes to sendRequestToJvm
+                notif.writeInt(16L, io.mazewall.core.Arch.AMD64.clone) // NOTIF_NR_OFF = 16
                 // pid = 1 (init, always readable from /proc)
                 notif.writeInt(8L, 1) // NOTIF_PID_OFF = 8
 

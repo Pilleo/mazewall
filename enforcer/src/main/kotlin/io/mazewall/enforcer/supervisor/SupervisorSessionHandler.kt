@@ -199,6 +199,7 @@ internal class SupervisorSessionHandler(
                     val tid = Tid(pidVal)
                     val traceeArch = io.mazewall.core.Arch.fromAudit(archVal)
                     val extracted = extractNotificationArgs(nr, tid, args, traceeArch)
+                    val kind = SupervisorNotificationMachine.classify(nr, traceeArch)
                     val ppid = getPpid(pidVal)
                     logger.info { "[SUPERVISOR-DEBUG] Received syscall notification: id=$id, pid=$pidVal, arch=$archVal, ppid=$ppid, nr=$nr, path=${extracted.pathStr}" }
 
@@ -213,32 +214,34 @@ internal class SupervisorSessionHandler(
                     // application classpath, or Java agents. Paths are resolved to absolute form and normalized.
                     // Since these paths contain trusted platform/application classes and libraries that are already loaded
                     // or destined to be loaded, it is safe to bypass policy evaluation and directly inject the file descriptor.
-                    val isOpen = nr == traceeArch.open || nr == traceeArch.openat || nr == traceeArch.openat2
                     var resolvedPathStr: String? = extracted.pathStr
-                    if (isOpen && extracted.pathStr != null) {
-                        val pathStr = extracted.pathStr
+                    var resolvedPath: java.nio.file.Path? = null
+                    if (kind is SupervisedKind.Open && extracted.pathStr != null) {
                         try {
-                            val path = resolveAbsolutePath(pidVal, extracted.dirfd, pathStr)
-                            if (path != null) {
-                                val absPathStr = path.toAbsolutePath().toString()
-                                resolvedPathStr = absPathStr
-                                if (resolveBypassPath(path) != null) {
-                                    sendSeccompContinue(id, resp)
-                                    logger.info { "[SUPERVISOR-DEBUG] Fast-path allow continue (matched) resolved=$absPathStr" }
-                                    return true
-                                }
-                            } else {
-                                // Fallback when /proc absolute path resolution fails (e.g. Yama ptrace_scope block inside container)
-                                if (pathStr.endsWith(".class") || pathStr.contains("META-INF/") || pathStr.endsWith(".jar")) {
-                                    sendSeccompContinue(id, resp)
-                                    logger.info { "[SUPERVISOR-DEBUG] Fast-path allow continue (fallback: classloading)" }
-                                    return true
-                                }
+                            resolvedPath = resolveAbsolutePath(pidVal, extracted.dirfd, extracted.pathStr)
+                            if (resolvedPath != null) {
+                                resolvedPathStr = resolvedPath.toAbsolutePath().toString()
                             }
                         } catch (e: Exception) {
                             logger.severe { "[SUPERVISOR-DEBUG] Fast-path check failed with critical error: ${e.message}" }
                             throw e
                         }
+                    }
+                    when (val route = SupervisorNotificationMachine.evaluateFastPath(kind, resolvedPath, extracted.pathStr)) {
+                        is SupervisorRoute.Continue -> {
+                            sendSeccompContinue(id, resp)
+                            logger.info { "[SUPERVISOR-DEBUG] Fast-path allow continue resolved=$resolvedPathStr" }
+                            return true
+                        }
+                        is SupervisorRoute.Abort -> {
+                            logger.severe { "[SUPERVISOR-DEBUG] ${route.reason}" }
+                            sendSeccompError(id, route.errno, resp)
+                            return true
+                        }
+                        is SupervisorRoute.AskJvm -> { }
+                        is SupervisorRoute.InjectFd,
+                        is SupervisorRoute.SecureExec,
+                        -> error("fast-path cannot inject or rewrite")
                     }
 
                     logger.info { "[SUPERVISOR-DEBUG] Forwarding request to JVM validation listener" }
@@ -495,29 +498,26 @@ internal class SupervisorSessionHandler(
             }
 
             val jvmPath = respSeg.getPath()
-            return when (decision.toInt()) {
-                0 -> { // Deny
-                    sendSeccompError(id, errorNr, resp)
+            val kind = SupervisorNotificationMachine.classify(nr, traceeArch)
+            val verdict = SupervisorNotificationMachine.parseJvmVerdict(decision.toInt(), errorNr)
+            if (verdict == null) {
+                sendSeccompError(id, NativeConstants.EPERM, resp)
+                return false
+            }
+            return when (val route = SupervisorNotificationMachine.evaluateJvm(kind, verdict)) {
+                is SupervisorRoute.Abort -> {
+                    sendSeccompError(id, route.errno, resp)
                     true
                 }
-                1 -> { // Allow Continue
-                    val isInject = nr == traceeArch.accept || nr == traceeArch.accept4 ||
-                        nr == traceeArch.open || nr == traceeArch.openat || nr == traceeArch.openat2 ||
-                        nr == traceeArch.connect
-                    if (isInject) {
-                        // Upgrade to emulation to prevent TOCTOU!
-                        handleInjectFd(id, nr, args, pathStr, sockaddrBytes, resp, tid, traceeArch)
-                    } else if (nr == traceeArch.execve || nr == traceeArch.execveat) {
-                        handleSecureExecve(id, nr, args, pathStr, jvmPath, resp, tid, traceeArch)
-                    } else {
-                        sendSeccompContinue(id, resp)
-                        true
-                    }
+                is SupervisorRoute.Continue -> {
+                    sendSeccompContinue(id, resp)
+                    true
                 }
-                2 -> { // Allow & Inject FD
+                is SupervisorRoute.InjectFd ->
                     handleInjectFd(id, nr, args, pathStr, sockaddrBytes, resp, tid, traceeArch)
-                }
-                else -> {
+                is SupervisorRoute.SecureExec ->
+                    handleSecureExecve(id, nr, args, pathStr, jvmPath, resp, tid, traceeArch)
+                is SupervisorRoute.AskJvm -> {
                     sendSeccompError(id, NativeConstants.EPERM, resp)
                     false
                 }
