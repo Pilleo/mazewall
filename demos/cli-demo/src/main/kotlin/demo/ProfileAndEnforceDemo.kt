@@ -17,6 +17,7 @@ import io.mazewall.profiler.Profiler
 import io.mazewall.recover
 import io.mazewall.enforcer.supervisor.StacktraceScopingPolicy
 import io.mazewall.enforcer.supervisor.ScopingHandler
+import io.mazewall.enforcer.supervisor.SupervisorDaemonManager
 import io.mazewall.core.Tid
 import io.mazewall.ffi.memory.ConfinedSegment
 import java.io.File
@@ -125,6 +126,10 @@ fun runProfileAndEnforce() {
         // ------------------------------------------------------------
         println("\u001b[33;1m[PHASE 1] Profiling the Workload...\u001b[0m")
         println("Running the workload under the Tier S USER_NOTIF Profiler to audit exact syscalls & FS access...")
+
+        // USER_NOTIF stays on this thread after profile() and is inherited by clone().
+        // The supervisor JVM must exist first or wrap() cannot spawn it (PR_GET_SECCOMP=2).
+        SupervisorDaemonManager.getInstance().getOrSpawnSharedDaemon()
 
         val profilingResult =
             Profiler.profile {
