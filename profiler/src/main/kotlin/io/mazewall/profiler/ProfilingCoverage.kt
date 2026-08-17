@@ -88,14 +88,18 @@ public data class ProfilingCoverage(
             if (ioUring == IoUringVisibility.UNSEEN && strategy == ProfileStrategy.EBPF) {
                 warnings.add("eBPF did not observe io_uring; destinations are unproven")
             }
-            if (pathQuality == PathResolutionQuality.FAILED || pathQuality == PathResolutionQuality.MIXED) {
-                warnings.add("one or more path-bearing events did not resolve a path")
+            if (pathQuality == PathResolutionQuality.FAILED ||
+                pathQuality == PathResolutionQuality.MIXED ||
+                pathQuality == PathResolutionQuality.TRUNCATED
+            ) {
+                warnings.add("one or more path-bearing events did not fully resolve a path")
             }
             val complete = drainComplete && droppedEvents == 0 &&
                 ioUring != IoUringVisibility.BLIND &&
                 !(ioUring == IoUringVisibility.UNSEEN && strategy == ProfileStrategy.EBPF) &&
                 pathQuality != PathResolutionQuality.FAILED &&
-                pathQuality != PathResolutionQuality.MIXED
+                pathQuality != PathResolutionQuality.MIXED &&
+                pathQuality != PathResolutionQuality.TRUNCATED
             return ProfilingCoverage(
                 strategy = strategy,
                 strategyReason = strategyReason,
@@ -130,7 +134,7 @@ public data class ProfilingCoverage(
         private fun hasUringSyscall(observations: List<ProfileObservation>): Boolean =
             observations.any { obs ->
                 obs is ProfileObservation.Syscall &&
-                    obs.name in setOf("IO_URING_SETUP", "IO_URING_ENTER", "IO_URING_REGISTER")
+                    obs.name.uppercase() in setOf("IO_URING_SETUP", "IO_URING_ENTER", "IO_URING_REGISTER")
             }
 
         private val pathBearingNames =
@@ -143,25 +147,37 @@ public data class ProfilingCoverage(
                 "CREAT", "CHMOD", "FCHMODAT", "CHOWN", "LCHOWN", "FCHOWNAT",
             )
 
+        private fun isUringPathBearing(opcode: String): Boolean {
+            val op = opcode.uppercase()
+            return op.contains("OPEN") ||
+                op.contains("UNLINK") ||
+                op.contains("RENAME") ||
+                op.contains("WRITE") ||
+                op.contains("MKDIR") ||
+                op.contains("RMDIR") ||
+                op.contains("TRUNCATE")
+        }
+
+        private const val TRUNCATION_THRESHOLD = 4096
+
         private fun inferPaths(observations: List<ProfileObservation>): PathResolutionQuality {
             if (observations.isEmpty()) return PathResolutionQuality.NONE
             val pathBearing =
                 observations.filter { obs ->
                     when (obs) {
                         is ProfileObservation.Syscall -> obs.name.uppercase() in pathBearingNames
-                        is ProfileObservation.IoUring ->
-                            obs.opcode.contains("OPEN", ignoreCase = true) ||
-                                obs.opcode.contains("UNLINK", ignoreCase = true) ||
-                                obs.opcode.contains("RENAME", ignoreCase = true)
+                        is ProfileObservation.IoUring -> isUringPathBearing(obs.opcode)
                         is ProfileObservation.Connect -> false
                     }
                 }
             if (pathBearing.isEmpty()) return PathResolutionQuality.NONE
+            val truncated = pathBearing.any { obs -> obs.paths.any { it.length >= TRUNCATION_THRESHOLD } }
             val resolved = pathBearing.count { it.paths.isNotEmpty() }
             val failed = pathBearing.size - resolved
             return when {
-                failed == 0 -> PathResolutionQuality.RESOLVED
-                resolved == 0 -> PathResolutionQuality.FAILED
+                failed == 0 && !truncated -> PathResolutionQuality.RESOLVED
+                failed == pathBearing.size && !truncated -> PathResolutionQuality.FAILED
+                failed == 0 && truncated -> PathResolutionQuality.TRUNCATED
                 else -> PathResolutionQuality.MIXED
             }
         }

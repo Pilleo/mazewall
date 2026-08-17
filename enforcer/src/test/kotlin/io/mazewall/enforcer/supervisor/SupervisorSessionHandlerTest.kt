@@ -194,6 +194,13 @@ class SupervisorSessionHandlerTest {
                 return LinuxNative.SyscallResult.Success(capturedLocalLen!!)
             }
 
+            override fun write(
+                fd: FileDescriptor<*, FdState.Open>,
+                buf: io.mazewall.ffi.memory.ManagedSegment,
+                count: Long,
+            ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
+                LinuxNative.SyscallResult.Success(count)
+
             override fun read(
                 fd: FileDescriptor<*, FdState.Open>,
                 buf: io.mazewall.ffi.memory.ManagedSegment,

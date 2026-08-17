@@ -113,7 +113,7 @@ public class MazewallProfiler private constructor(
             observations = emptyList(),
             stacks = StackAttribution.SKIPPED,
             droppedEvents = 0,
-            drainComplete = true,
+            drainComplete = false,
             environment = environment,
         )
 

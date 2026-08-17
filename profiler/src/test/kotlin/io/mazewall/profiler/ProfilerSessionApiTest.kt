@@ -271,6 +271,85 @@ class ProfilerSessionApiTest {
     }
 
     @Test
+    fun `unused MazewallProfiler snapshot is incomplete`() {
+        MazewallProfiler.open().use { session ->
+            val snap = session.snapshot()
+            assertEquals(false, snap.coverage.complete)
+            assertEquals(false, snap.coverage.drainComplete)
+            assertFailsWith<IncompleteProfileException> { snap.toPolicy() }
+        }
+    }
+
+    @Test
+    fun `lowercase io_uring syscall names are still BLIND`() {
+        val coverage = ProfilingCoverage.infer(
+            strategy = ProfileStrategy.USER_NOTIF,
+            strategyReason = "t",
+            processWide = false,
+            observations = listOf(
+                ProfileObservation.Syscall(
+                    ObservationCorrelation(1, Tid(1)),
+                    ObservationSource.USER_NOTIF,
+                    "io_uring_setup",
+                ),
+            ),
+            stacks = StackAttribution.SKIPPED,
+            droppedEvents = 0,
+            drainComplete = true,
+            environment = ProfileEnvironment("t", EbpfLoad.Denied("x")),
+        )
+        assertEquals(IoUringVisibility.BLIND, coverage.ioUring)
+        assertEquals(false, coverage.complete)
+    }
+
+    @Test
+    fun `max-length paths are TRUNCATED`() {
+        val coverage = ProfilingCoverage.infer(
+            strategy = ProfileStrategy.USER_NOTIF,
+            strategyReason = "t",
+            processWide = false,
+            observations = listOf(
+                ProfileObservation.Syscall(
+                    ObservationCorrelation(1, Tid(1)),
+                    ObservationSource.USER_NOTIF,
+                    "OPENAT",
+                    paths = listOf("x".repeat(4096)),
+                ),
+            ),
+            stacks = StackAttribution.SKIPPED,
+            droppedEvents = 0,
+            drainComplete = true,
+            environment = ProfileEnvironment("t", EbpfLoad.Denied("x")),
+        )
+        assertEquals(PathResolutionQuality.TRUNCATED, coverage.pathResolution)
+        assertEquals(false, coverage.complete)
+    }
+
+    @Test
+    fun `uring write without path is FAILED`() {
+        val coverage = ProfilingCoverage.infer(
+            strategy = ProfileStrategy.EBPF,
+            strategyReason = "t",
+            processWide = false,
+            observations = listOf(
+                ProfileObservation.IoUring(
+                    ObservationCorrelation(1, Tid(1)),
+                    ObservationSource.EBPF,
+                    "IORING_OP_WRITE",
+                    paths = emptyList(),
+                ),
+            ),
+            stacks = StackAttribution.SKIPPED,
+            droppedEvents = 0,
+            drainComplete = true,
+            environment = ProfileEnvironment("t", EbpfLoad.Available),
+        )
+        assertEquals(IoUringVisibility.OBSERVED, coverage.ioUring)
+        assertEquals(PathResolutionQuality.FAILED, coverage.pathResolution)
+        assertEquals(false, coverage.complete)
+    }
+
+    @Test
     fun `legacy three-arg ProfilingResult is incomplete`() {
         val result = ProfilingResult(Unit, BillOfBehavior(), emptyMap())
         assertEquals(false, result.coverage.complete)

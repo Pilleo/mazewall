@@ -128,7 +128,8 @@ object Profiler {
 
         val bob = BobCompiler.compile(localLogs).copy(stackProfile = localStackProfile)
         val observations = localLogs.map { io.mazewall.profiler.ProfileObservation.fromTraceEvent(it) }
-        val dropped = sessionListener.get()?.eventQueue?.droppedCount?.toInt() ?: 0
+        val listener = sessionListener.get()
+        val dropped = listener?.eventQueue?.droppedCount?.toInt() ?: 0
         val coverage = ProfilingCoverage.infer(
             strategy = ProfileStrategy.USER_NOTIF,
             strategyReason = "Profiler.profile USER_NOTIF session",
@@ -136,7 +137,7 @@ object Profiler {
             observations = observations,
             stacks = if (captureStackTraces) StackAttribution.CAPTURED else StackAttribution.SKIPPED,
             droppedEvents = dropped,
-            drainComplete = true,
+            drainComplete = listener?.drainComplete == true,
             environment = ProfileEnvironment(
                 kernelRelease = System.getProperty("os.version") ?: "unknown",
                 ebpfLoad = EbpfCapability.probe(),

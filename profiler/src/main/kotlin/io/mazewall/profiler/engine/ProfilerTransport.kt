@@ -4,6 +4,7 @@ import io.mazewall.LinuxNative
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
+import io.mazewall.core.SocketIo
 import io.mazewall.ffi.Layouts
 import io.mazewall.ffi.NativeConstants
 import io.mazewall.getFdOrThrow
@@ -162,7 +163,12 @@ object RealProfilerTransport : ProfilerTransport {
             offset += p.size
         }
 
-        val res = LinuxNative.memory.write(socketFd, ConfinedSegment(buf), totalSize.toLong())
+        val res = SocketIo.writeFully(
+            LinuxNative.memory,
+            socketFd,
+            ConfinedSegment(buf),
+            totalSize.toLong(),
+        )
         res.getOrThrow("sendTraceEvent")
     }
 

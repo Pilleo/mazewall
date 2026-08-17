@@ -72,6 +72,7 @@ object NativeConstants {
     const val EPERM = 1
     const val ENOENT = 2
     const val EINTR = 4
+    const val EIO = 5
     const val EBADF = 9
     const val ENOPKG = 65
     const val EOPNOTSUPP = 95

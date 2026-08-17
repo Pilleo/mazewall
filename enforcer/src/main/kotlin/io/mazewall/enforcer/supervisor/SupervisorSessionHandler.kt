@@ -388,14 +388,7 @@ internal class SupervisorSessionHandler(
             }
         }
 
-        var writeRes: LinuxNative.SyscallResult<Long, *>
-        while (true) {
-            writeRes = engine.memory.write(socketFd, buf, totalSize.toLong())
-            if (writeRes is LinuxNative.SyscallResult.Error && writeRes.errno == NativeConstants.EINTR) {
-                continue
-            }
-            break
-        }
+        val writeRes = io.mazewall.core.SocketIo.writeFully(engine.memory, socketFd, buf, totalSize.toLong())
         return writeRes is LinuxNative.SyscallResult.Success<*, *>
     }
 
@@ -476,14 +469,12 @@ internal class SupervisorSessionHandler(
         }
 
         val responseBuf = arena.allocate(Layouts.SUPERVISOR_RESPONSE_SIZE)
-        var readRes: LinuxNative.SyscallResult<Long, *>
-        while (true) {
-            readRes = engine.memory.read(socketFd, responseBuf, Layouts.SUPERVISOR_RESPONSE_SIZE)
-            if (readRes is LinuxNative.SyscallResult.Error && readRes.errno == NativeConstants.EINTR) {
-                continue
-            }
-            break
-        }
+        val readRes = io.mazewall.core.SocketIo.readFully(
+            engine.memory,
+            socketFd,
+            responseBuf,
+            Layouts.SUPERVISOR_RESPONSE_SIZE,
+        )
         if (readRes is LinuxNative.SyscallResult.Success && readRes.value == Layouts.SUPERVISOR_RESPONSE_SIZE) {
             val respSeg = SupervisorResponseSegment.of(responseBuf)
             val respId = respSeg.getId()
@@ -631,12 +622,12 @@ internal class SupervisorSessionHandler(
         net.writeLong(24, envp)
         net.writeLong(32, execveatNr)
         net.writeLong(40, tid.value.toLong())
-        val writeRes = engine.memory.write(socketFd, buf, 48)
+        val writeRes = io.mazewall.core.SocketIo.writeFully(engine.memory, socketFd, buf, 48)
         if (writeRes is LinuxNative.SyscallResult.Error) {
             return false
         }
         val ack = arena.allocate(1)
-        val readRes = engine.memory.read(socketFd, ack, 1)
+        val readRes = io.mazewall.core.SocketIo.readFully(engine.memory, socketFd, ack, 1)
         return readRes is LinuxNative.SyscallResult.Success && ack.readByte(0) == 1.toByte()
     }
 

@@ -74,6 +74,11 @@ internal class ProfilerTraceListener(
     var state: TraceListenerState = TraceListenerState.Disconnected
         private set
 
+    /** True only after the listener loop sees EOF (daemon closed the stream). */
+    @Volatile
+    var drainComplete: Boolean = false
+        private set
+
     companion object {
         private const val DEDUPLICATION_WINDOW_MS = 500L
         private const val PROTOCOL_ACK_BYTE = 0xAC.toByte()
@@ -291,6 +296,7 @@ internal class ProfilerTraceListener(
                     readNextEvent(dis)
                 } catch (e: java.io.EOFException) {
                     System.err.println("[TRACE-LISTENER-DEBUG] EOFException, closing loop")
+                    drainComplete = true
                     break // Graceful shutdown or socket closed
                 } catch (e: java.io.IOException) {
                     if (closed.get()) {
