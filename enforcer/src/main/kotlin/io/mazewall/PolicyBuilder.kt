@@ -123,8 +123,19 @@ public class PolicyBuilder<S : PolicyScope> internal constructor(
         return this as PolicyBuilder<PolicyScope.ThreadLocalOnly>
     }
 
+    /**
+     * Advanced compatibility switch. Prefer [forRuntime] so the JIT vs W^X
+     * choice is named rather than a boolean.
+     */
     public fun allowMmapExec(): PolicyBuilder<S> {
         this.allowMmapExec = true
+        return this
+    }
+
+    public fun forRuntime(runtime: RuntimeProfile): PolicyBuilder<S> {
+        if (runtime.allowsExecutableMappings) {
+            this.allowMmapExec = true
+        }
         return this
     }
 

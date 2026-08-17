@@ -64,6 +64,8 @@ public class Policy<out S : PolicyScope, out State : PolicyState> internal const
     public val syscallActions: Map<Syscall, SeccompAction> get() = definition.syscallActions
     public val allowMmapExec: Boolean get() = definition.allowMmapExec
     public val allowNonThreadClone: Boolean get() = definition.allowNonThreadClone
+    /** Inspectable argument-inspection flags (JIT vs W^X, clone, prctl). */
+    public val argumentRules: PolicyArgumentRules get() = PolicyArgumentRules.of(definition)
 
     /**
      * Whether unsafe prctl options are allowed.
@@ -118,6 +120,14 @@ public class Policy<out S : PolicyScope, out State : PolicyState> internal const
         @JvmField
         public val NO_EXEC_HOTSPOT: Policy<PolicyScope.ProcessWideSafe, Uncompiled> =
             Policy(PolicyPresets.NO_EXEC_HOTSPOT)
+
+        /**
+         * Same syscall set as [NO_EXEC]: W^X / Native Image process-wide baseline.
+         * Prefer [ProcessPolicies.denyProcessCreation] with [RuntimeProfile.NATIVE_IMAGE].
+         */
+        @JvmField
+        public val NO_EXEC_NATIVE_IMAGE: Policy<PolicyScope.ProcessWideSafe, Uncompiled> =
+            Policy(PolicyPresets.NO_EXEC_NATIVE_IMAGE)
 
         /**
          * Blocks all network-related system calls. Safe for process-wide application.
@@ -221,8 +231,18 @@ public class Policy<out S : PolicyScope, out State : PolicyState> internal const
             return this as Builder<PolicyScope.ThreadLocalOnly>
         }
 
+        /**
+         * Advanced: allow `mmap`/`mprotect` `PROT_EXEC`. Prefer
+         * [forRuntime] with [RuntimeProfile.HOTSPOT_JIT] on process baselines.
+         */
         public fun allowMmapExec(): Builder<S> {
             internalBuilder.allowMmapExec()
+            return this
+        }
+
+        /** Apply JIT vs W^X executable-mapping policy for [runtime]. */
+        public fun forRuntime(runtime: RuntimeProfile): Builder<S> {
+            internalBuilder.forRuntime(runtime)
             return this
         }
 

@@ -52,8 +52,14 @@ public object PolicyPresets {
     public val NO_EXEC_HOTSPOT: PolicyDefinition<PolicyScope.ProcessWideSafe> =
         PolicyBuilder<PolicyScope.ProcessWideSafe>()
             .base(NO_EXEC)
-            .allowMmapExec()
+            .forRuntime(RuntimeProfile.HOTSPOT_JIT)
             .build()
+
+    /**
+     * Explicit W^X name for [NO_EXEC]. Same filters: no exec/memfd and no `PROT_EXEC`.
+     */
+    @JvmField
+    public val NO_EXEC_NATIVE_IMAGE: PolicyDefinition<PolicyScope.ProcessWideSafe> = NO_EXEC
 
     /**
      * Blocks all network-related system calls. Safe for process-wide application.

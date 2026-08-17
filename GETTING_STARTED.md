@@ -70,11 +70,14 @@ dependencies {
 ```kotlin
 import io.mazewall.enforcer.api.ContainedExecutors
 import io.mazewall.Policy
+import io.mazewall.ProcessPolicies
+import io.mazewall.RuntimeProfile
 import java.util.concurrent.Executors
 
 val sandboxed = ContainedExecutors.wrap(
     Executors.newFixedThreadPool(4),
-    Policy.NO_EXEC_HOTSPOT   // blocks execve/memfd; allows JIT PROT_EXEC (use raw NO_EXEC only for W^X)
+    ProcessPolicies.denyProcessCreation(RuntimeProfile.HOTSPOT_JIT)
+    // or Policy.NO_EXEC_HOTSPOT — same filters; use NATIVE_IMAGE / Policy.NO_EXEC for W^X
 )
 
 // Everything submitted to this pool runs under the kernel-enforced policy.
@@ -90,7 +93,9 @@ This is the recommended first step for *any* application that doesn't dynamicall
 
 ```kotlin
 // Call once, early in main() / Application.run()
-ContainedExecutors.installOnProcess(Policy.NO_EXEC_HOTSPOT)
+ContainedExecutors.installOnProcess(
+    ProcessPolicies.denyProcessCreation(RuntimeProfile.HOTSPOT_JIT),
+)
 ```
 
 > [!IMPORTANT]

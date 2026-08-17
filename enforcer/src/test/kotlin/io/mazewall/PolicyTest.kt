@@ -190,6 +190,31 @@ class PolicyTest {
     }
 
     @Test
+    fun `ProcessPolicies denyProcessCreation is runtime-aware and inspectable`() {
+        val hotspot = ProcessPolicies.denyProcessCreation(RuntimeProfile.HOTSPOT_JIT)
+        val native = ProcessPolicies.denyProcessCreation(RuntimeProfile.NATIVE_IMAGE)
+
+        assertTrue(hotspot.argumentRules.allowExecutableMappings)
+        assertFalse(native.argumentRules.allowExecutableMappings)
+        assertTrue(hotspot.argumentRules.inspectNonThreadClone)
+        assertTrue(hotspot.argumentRules.inspectUnsafePrctl)
+        assertFalse(hotspot.isSyscallAllowed(Syscall.EXECVE))
+        assertFalse(native.isSyscallAllowed(Syscall.MEMFD_CREATE))
+        assertEquals(Policy.NO_EXEC_NATIVE_IMAGE.allowMmapExec, native.allowMmapExec)
+        assertEquals(Policy.NO_EXEC_HOTSPOT.allowMmapExec, hotspot.allowMmapExec)
+    }
+
+    @Test
+    fun `ProcessPolicies denyNetwork does not hide W^X on HotSpot`() {
+        val hotspot = ProcessPolicies.denyNetwork(RuntimeProfile.HOTSPOT_JIT)
+        val native = ProcessPolicies.denyNetwork(RuntimeProfile.NATIVE_IMAGE)
+        assertTrue(hotspot.argumentRules.allowExecutableMappings)
+        assertFalse(native.argumentRules.allowExecutableMappings)
+        assertFalse(hotspot.isSyscallAllowed(Syscall.CONNECT))
+        assertFalse(Policy.NO_NETWORK.argumentRules.allowExecutableMappings)
+    }
+
+    @Test
     fun `plus operator works and resolves types correctly`() {
         val p1 = Policy.NO_EXEC
         val p2 = Policy.NO_NETWORK
