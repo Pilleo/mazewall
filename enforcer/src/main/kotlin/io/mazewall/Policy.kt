@@ -103,11 +103,21 @@ public class Policy<out S : PolicyScope, out State : PolicyState> internal const
             Policy(PolicyPresets.PURE_COMPUTE_UNSAFE)
 
         /**
-         * The absolute minimum baseline for any production JVM process.
+         * Blocks process execution and memfd. **Not** the process-wide HotSpot recipe:
+         * hidden `allowMmapExec = false` denies `PROT_EXEC` mappings and can crash JIT.
+         * Use [NO_EXEC_HOTSPOT] with [io.mazewall.enforcer.api.ContainedExecutors.installOnProcess].
          */
         @JvmField
         public val NO_EXEC: Policy<PolicyScope.ProcessWideSafe, Uncompiled> =
             Policy(PolicyPresets.NO_EXEC)
+
+        /**
+         * Process-wide Tier 1 on HotSpot: no `execve` / `execveat` / `memfd_create`,
+         * but JIT may still create executable mappings.
+         */
+        @JvmField
+        public val NO_EXEC_HOTSPOT: Policy<PolicyScope.ProcessWideSafe, Uncompiled> =
+            Policy(PolicyPresets.NO_EXEC_HOTSPOT)
 
         /**
          * Blocks all network-related system calls. Safe for process-wide application.

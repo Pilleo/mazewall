@@ -121,13 +121,13 @@ The standard approach to container sandboxing is a global seccomp profile applie
 title: "Two-Tier Self-Restriction Stack"
 ---
 graph TD
-    JVM["Tier 1: JVM Process<br/>Policy.NO_EXEC applied before JVM starts (OCI profile / native launcher)<br/>Blocks: execve, execveat, fork, vfork, memfd_create"]
+    JVM["Tier 1: JVM Process<br/>Policy.NO_EXEC_HOTSPOT at JVM startup (in-app)<br/>Blocks: execve, execveat, memfd_create; JIT may mmap PROT_EXEC"]
     Pool["Tier 2: Worker Thread Pool<br/>Strict thread-scoped policies e.g. PURE_COMPUTE_UNSAFE<br/>Enforced per worker thread during task execution"]
     JVM --> Pool
 ```
 
 ### Tier 1: Process-Wide Lockdown
-At application startup, a global process-wide restriction (`Policy.NO_EXEC`) must be applied to permanently disable shell spawning and command execution (`execve`, `execveat`, `fork`, `vfork`, `memfd_create`) for every thread. 
+At application startup, a global process-wide restriction (`Policy.NO_EXEC_HOTSPOT`) must be applied to disable shell spawning (`execve`, `execveat`, `memfd_create`) for every thread without denying HotSpot `mmap(PROT_EXEC)`. Raw `Policy.NO_EXEC` also denies executable mappings and can crash a JIT JVM. 
 
 In the Java ecosystem, this is pioneered by **Elasticsearch**[^elasticsearch_seccomp] (often referred to as the "Elasticsearch Approach"). Elasticsearch installs a process-wide seccomp filter early in the bootstrap phase to block execution calls globally, ensuring that even if an RCE vulnerability (like Log4Shell) is triggered, the attacker cannot spawn an external shell.
 

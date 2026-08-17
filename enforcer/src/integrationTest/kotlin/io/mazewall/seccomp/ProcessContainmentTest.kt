@@ -156,6 +156,31 @@ class ProcessContainmentTest : BaseIntegrationTest() {
         }
     }
 
+    fun testHotspotJitSurvivesNoExecHotspot() {
+        ContainedExecutors.installOnProcess(Policy.NO_EXEC_HOTSPOT)
+        var acc = 0L
+        repeat(80_000) { i ->
+            acc += (i * 31L) xor i.toLong()
+        }
+        if (acc == Long.MIN_VALUE) {
+            throw IllegalStateException("unreachable")
+        }
+        try {
+            ProcessBuilder("echo", "should-fail").start()
+            throw IllegalStateException("Should have failed")
+        } catch (e: Exception) {
+            if (!ContainmentViolationDetector.isContainmentViolation(e)) {
+                throw e
+            }
+        }
+    }
+
+    @Test
+    @EnabledIfLinuxAndSupported
+    fun `process-wide NO_EXEC_HOTSPOT survives JIT work and still blocks exec`() {
+        IsolatedProcessTester.runIsolatedMethod(this::class.java.name, "testHotspotJitSurvivesNoExecHotspot")
+    }
+
     @Test
     @EnabledIfLinuxAndSupported
     fun `installOnProcess applies containment globally`() {

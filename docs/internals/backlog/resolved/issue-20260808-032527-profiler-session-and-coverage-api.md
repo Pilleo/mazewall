@@ -1,7 +1,7 @@
 ---
 title: "Introduce Isolated Profiler Sessions and Structured Coverage"
 severity: "MEDIUM"
-status: "open"
+status: resolved
 priority: 9
 dependencies: []
 component: "profiler"

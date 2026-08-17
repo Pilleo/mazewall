@@ -151,6 +151,7 @@ class "Policy" as io.mazewall.Policy<S extends PolicyScope, State extends Policy
   + {static}Companion Companion
   + {static}Policy<ProcessWideSafe, Uncompiled> PURE_COMPUTE_UNSAFE
   + {static}Policy<ProcessWideSafe, Uncompiled> NO_EXEC
+  + {static}Policy<ProcessWideSafe, Uncompiled> NO_EXEC_HOTSPOT
   + {static}Policy<ProcessWideSafe, Uncompiled> NO_NETWORK
   + {static}Policy<ThreadLocalOnly, Uncompiled> PURE_COMPUTE
   __
@@ -229,6 +230,7 @@ class "PolicyPresets" as io.mazewall.PolicyPresets {
   + {static}PolicyPresets INSTANCE
   + {static}PolicyDefinition<ProcessWideSafe> PURE_COMPUTE_UNSAFE
   + {static}PolicyDefinition<ProcessWideSafe> NO_EXEC
+  + {static}PolicyDefinition<ProcessWideSafe> NO_EXEC_HOTSPOT
   + {static}PolicyDefinition<ProcessWideSafe> NO_NETWORK
   + {static}PolicyDefinition<ThreadLocalOnly> PURE_COMPUTE
 }

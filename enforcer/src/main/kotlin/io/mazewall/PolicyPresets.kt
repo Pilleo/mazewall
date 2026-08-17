@@ -29,12 +29,30 @@ public object PolicyPresets {
             .build()
 
     /**
-     * The absolute minimum baseline for any production JVM process.
+     * Blocks `execve` / `execveat` / `memfd_create`.
+     *
+     * **Not JIT-safe process-wide.** [PolicyBuilder] defaults `allowMmapExec` to false, so this
+     * preset also emits `mmap`/`mprotect` `PROT_EXEC` denies. [installOnProcess][io.mazewall.enforcer.api.ContainedExecutors.installOnProcess]
+     * then reaches HotSpot compiler threads and can fatal the JVM.
+     *
+     * Use [NO_EXEC_HOTSPOT] for a running HotSpot process. Use this preset only when you
+     * intend W^X (AOT / no further code generation) or you will call [PolicyBuilder.allowMmapExec].
      */
     @JvmField
     public val NO_EXEC: PolicyDefinition<PolicyScope.ProcessWideSafe> =
         PolicyBuilder<PolicyScope.ProcessWideSafe>()
             .block(Syscall.EXECVE, Syscall.EXECVEAT, Syscall.MEMFD_CREATE)
+            .build()
+
+    /**
+     * Process-wide Tier 1 for a HotSpot JVM: same syscall blocks as [NO_EXEC], plus
+     * [PolicyBuilder.allowMmapExec] so the JIT code cache can still `mmap(PROT_EXEC)`.
+     */
+    @JvmField
+    public val NO_EXEC_HOTSPOT: PolicyDefinition<PolicyScope.ProcessWideSafe> =
+        PolicyBuilder<PolicyScope.ProcessWideSafe>()
+            .base(NO_EXEC)
+            .allowMmapExec()
             .build()
 
     /**

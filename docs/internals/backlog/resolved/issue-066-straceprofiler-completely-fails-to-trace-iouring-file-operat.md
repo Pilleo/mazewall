@@ -1,7 +1,7 @@
 ---
 title: StraceProfiler completely fails to trace `io_uring` file operations natively
 severity: CRITICAL
-status: open
+status: resolved
 priority: 5
 dependencies: []
 target_files:

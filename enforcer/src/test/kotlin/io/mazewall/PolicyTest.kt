@@ -180,6 +180,16 @@ class PolicyTest {
     }
 
     @Test
+    fun `NO_EXEC is not a JIT-safe process-wide recipe`() {
+        assertFalse(Policy.NO_EXEC.allowMmapExec, "raw NO_EXEC still denies PROT_EXEC mmap/mprotect")
+        assertFalse(Policy.NO_EXEC.isSyscallAllowed(Syscall.EXECVE))
+        assertTrue(Policy.NO_EXEC_HOTSPOT.allowMmapExec)
+        assertFalse(Policy.NO_EXEC_HOTSPOT.isSyscallAllowed(Syscall.EXECVE))
+        assertFalse(Policy.NO_EXEC_HOTSPOT.isSyscallAllowed(Syscall.EXECVEAT))
+        assertFalse(Policy.NO_EXEC_HOTSPOT.isSyscallAllowed(Syscall.MEMFD_CREATE))
+    }
+
+    @Test
     fun `plus operator works and resolves types correctly`() {
         val p1 = Policy.NO_EXEC
         val p2 = Policy.NO_NETWORK

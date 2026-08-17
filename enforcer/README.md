@@ -10,7 +10,7 @@ This subproject implements unprivileged sandboxing using Linux **Seccomp-BPF** a
 >
 > **Always install the Tier 1 process-wide baseline first:**
 > ```kotlin
-> ContainedExecutors.installOnProcess(Policy.NO_EXEC) // call once in main()
+> ContainedExecutors.installOnProcess(Policy.NO_EXEC_HOTSPOT) // call once in main()
 > ```
 > See [designs/core/security-considerations.md](../docs/internals/designs/core/security-considerations.md) for the complete threat model.
 
@@ -117,7 +117,7 @@ val sandboxed = ContainedExecutors.wrap(
 
 ```kotlin
 // Apply a NO_EXEC baseline to the entire JVM process early in main()
-ContainedExecutors.installOnProcess(Policy.NO_EXEC)
+ContainedExecutors.installOnProcess(Policy.NO_EXEC_HOTSPOT)
 ```
 
 ---

@@ -208,7 +208,9 @@ ContainedExecutors.installOnProcess(
 )
 ```
 
-The preset `NO_EXEC` explicitly documents this. `NO_NETWORK` and any custom DENY_LIST
+The preset `NO_EXEC` documents this and is **not** the process-wide HotSpot recipe.
+Use `Policy.NO_EXEC_HOTSPOT` (or `.allowMmapExec()`) when installing on a JIT JVM.
+`NO_NETWORK` and any custom DENY_LIST
 policy must be treated with equal care.
 
 ### 3g. ALLOW_LIST Policies and Lazy Class Loading
