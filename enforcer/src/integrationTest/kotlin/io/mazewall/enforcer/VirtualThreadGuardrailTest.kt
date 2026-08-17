@@ -2,6 +2,7 @@ package io.mazewall.enforcer
 
 import io.mazewall.BaseIntegrationTest
 import io.mazewall.IsolatedProcessTester
+import io.mazewall.NeedsFreshJvm
 import io.mazewall.Policy
 import io.mazewall.enforcer.api.ContainedExecutors
 import org.junit.jupiter.api.Test
@@ -10,6 +11,7 @@ import java.util.concurrent.Executors
 import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
+@NeedsFreshJvm
 class VirtualThreadGuardrailTest : BaseIntegrationTest() {
     @Test
     fun `installOnCurrentThread throws IllegalStateException on virtual thread`() {

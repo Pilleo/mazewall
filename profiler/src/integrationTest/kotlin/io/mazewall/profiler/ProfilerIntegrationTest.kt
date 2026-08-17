@@ -2,6 +2,7 @@ package io.mazewall.profiler
 
 import io.mazewall.BaseIntegrationTest
 import io.mazewall.LinuxNative
+import io.mazewall.NeedsFreshJvm
 import io.mazewall.Policy
 import io.mazewall.asFd
 import io.mazewall.core.Arch
@@ -17,6 +18,7 @@ import java.util.concurrent.TimeUnit
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
+@NeedsFreshJvm
 class ProfilerIntegrationTest : BaseIntegrationTest() {
 
     companion object {

@@ -1,6 +1,7 @@
 package io.mazewall.enforcer
 
 import io.mazewall.LinuxNative
+import io.mazewall.NeedsFreshJvm
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
 import io.mazewall.enforcer.supervisor.SupervisorDaemonManager
@@ -9,6 +10,7 @@ import org.junit.jupiter.api.Test
 import java.io.File
 import kotlin.test.assertTrue
 
+@NeedsFreshJvm
 class SupervisorDoSIntegrationTest {
 
     @Test

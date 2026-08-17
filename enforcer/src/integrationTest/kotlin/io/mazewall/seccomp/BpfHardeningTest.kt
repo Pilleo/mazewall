@@ -2,6 +2,7 @@ package io.mazewall.seccomp
 
 import io.mazewall.BaseIntegrationTest
 import io.mazewall.LinuxNative
+import io.mazewall.NeedsFreshJvm
 import io.mazewall.Policy
 import io.mazewall.core.Arch
 import io.mazewall.core.NativeArg
@@ -15,6 +16,7 @@ import java.util.concurrent.atomic.AtomicReference
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
+@NeedsFreshJvm
 class BpfHardeningTest : BaseIntegrationTest() {
     @Test
     fun `test that prctl can be blocked when inspection is explicitly disabled`() {

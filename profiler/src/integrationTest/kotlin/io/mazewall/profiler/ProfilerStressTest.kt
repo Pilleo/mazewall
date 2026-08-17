@@ -1,5 +1,6 @@
 package io.mazewall.profiler
 import io.mazewall.BaseIntegrationTest
+import io.mazewall.NeedsFreshJvm
 import io.mazewall.Policy
 import org.junit.jupiter.api.Assertions.assertTimeoutPreemptively
 import org.junit.jupiter.api.Test
@@ -10,6 +11,7 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.test.assertTrue
 
+@NeedsFreshJvm
 class ProfilerStressTest : BaseIntegrationTest() {
 
     companion object {

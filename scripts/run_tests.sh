@@ -6,6 +6,6 @@ cd "$(dirname "$0")/.." || exit
 
 echo "🚀 Starting containerized integration tests..."
 # We use --info to ensure we see the security violation logs and seccomp transitions
-./scripts/run_containerized_tests.sh test integrationTest --info "$@"
+./scripts/run_containerized_tests.sh test integrationTest integrationTestFreshJvm --info "$@"
 
 # Tip: you can pass gradle arguments like: ./scripts/run_tests.sh --tests "*.PolicyTest"

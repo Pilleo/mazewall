@@ -341,7 +341,8 @@ subprojects {
             // tests. Merge that execution data so :platform:check still measures them.
             dependsOn(":enforcer:test")
             dependsOn(":enforcer:integrationTest")
-            mustRunAfter(":enforcer:test", ":enforcer:integrationTest")
+            dependsOn(":enforcer:integrationTestFreshJvm")
+            mustRunAfter(":enforcer:test", ":enforcer:integrationTest", ":enforcer:integrationTestFreshJvm")
             executionData.setFrom(
                 files(
                     fileTree(project.layout.buildDirectory.dir("jacoco")).include("*.exec"),

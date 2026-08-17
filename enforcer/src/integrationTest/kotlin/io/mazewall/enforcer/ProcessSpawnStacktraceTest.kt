@@ -1,6 +1,7 @@
 package io.mazewall.enforcer
 
 import io.mazewall.LinuxNative
+import io.mazewall.NeedsFreshJvm
 import io.mazewall.Policy
 import io.mazewall.core.SeccompAction
 import io.mazewall.core.Syscall
@@ -17,6 +18,7 @@ import java.io.File
 import io.mazewall.Platform
 
 @EnabledOnOs(OS.LINUX)
+@NeedsFreshJvm
 class ProcessSpawnStacktraceTest {
 
     @Test

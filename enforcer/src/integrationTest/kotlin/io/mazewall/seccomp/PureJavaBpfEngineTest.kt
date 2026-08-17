@@ -1,6 +1,7 @@
 package io.mazewall.seccomp
 import io.mazewall.BaseIntegrationTest
 import io.mazewall.EnabledIfLinuxAndSupported
+import io.mazewall.NeedsFreshJvm
 import io.mazewall.Policy
 import io.mazewall.compile
 import io.mazewall.CompiledSandbox
@@ -12,6 +13,7 @@ import java.util.concurrent.Executors
 import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
+@NeedsFreshJvm
 class PureJavaBpfEngineTest : BaseIntegrationTest() {
     @Test
     @EnabledIfLinuxAndSupported
