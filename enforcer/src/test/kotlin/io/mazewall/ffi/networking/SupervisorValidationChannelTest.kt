@@ -26,6 +26,7 @@ class SupervisorValidationChannelTest {
         var capturedId: Long? = null
         var capturedDecision: Byte? = null
         var capturedErrorNr: Int? = null
+        var capturedPath: String? = null
 
         val mockMemory = object : MockNativeMemory() {
             override fun write(
@@ -39,6 +40,7 @@ class SupervisorValidationChannelTest {
                 capturedId = resp.getId()
                 capturedDecision = resp.getDecision()
                 capturedErrorNr = resp.getErrorNr()
+                capturedPath = resp.getPath()
                 return LinuxNative.SyscallResult.Success(count)
             }
         }
@@ -49,13 +51,14 @@ class SupervisorValidationChannelTest {
         val socketFd = FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(42)
         val channel = SupervisorValidationChannel(socketFd)
 
-        channel.sendResponse(1001L, 2.toByte(), 13) // ID=1001, Decision=2 (Allow & Inject FD), ErrorNr=13 (EACCES)
+        channel.sendResponse(1001L, 2.toByte(), 13, "/usr/bin/true")
 
         assertEquals(socketFd, writtenFd)
         assertEquals(Layouts.SUPERVISOR_RESPONSE_SIZE, writtenCount)
         assertEquals(1001L, capturedId)
         assertEquals(2.toByte(), capturedDecision)
         assertEquals(13, capturedErrorNr)
+        assertEquals("/usr/bin/true", capturedPath)
 
         // Clean up
         channel.close()

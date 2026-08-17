@@ -1,5 +1,7 @@
 package io.mazewall.core
 
+import io.mazewall.LinuxNative
+import io.mazewall.ffi.memory.writeInt
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.Test
 
@@ -118,6 +120,79 @@ class FileDescriptorTest {
                     ctor.parameterTypes.any { it == Int::class.javaPrimitiveType || it == Int::class.java }
             }
         assertTrue(publicIntCtor.isEmpty(), "public FileDescriptor(int) would mint fake Closed tokens")
+    }
+
+    @Test
+    fun `AT_FDCWD and ANON sentinels are usable without being live kernel fds`() {
+        assertTrue(FileDescriptor.AT_FDCWD.isUsableAsDirfd())
+        assertFalse(FileDescriptor.AT_FDCWD.isLiveForIo())
+        assertNull(FileDescriptor.AT_FDCWD.ebadfUnlessDirfd())
+        assertNotNull(FileDescriptor.AT_FDCWD.ebadfUnlessLive())
+
+        assertTrue(FileDescriptor.ANON.isUsableAsMmapBacking())
+        assertFalse(FileDescriptor.ANON.isLiveForIo())
+        assertNull(FileDescriptor.ANON.ebadfUnlessMmapBacking())
+    }
+
+    @Test
+    fun `leftover dirfd and mmap backing fail closed`() {
+        val dir = FileDescriptor.oPath(91)
+        dir.close()
+        assertNotNull(dir.ebadfUnlessDirfd())
+        assertNotNull(dir.ebadfUnlessMmapBacking())
+
+        val live = FileDescriptor.oPath(92)
+        assertNull(live.ebadfUnlessDirfd())
+        assertNull(live.ebadfUnlessMmapBacking())
+        live.close()
+    }
+
+    @Test
+    fun `dup claims a new generation independent of the source`() {
+        val source = FileDescriptor.generic(93)
+        val dupResult = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(94L)
+            .claimDupIfNeeded(io.mazewall.ffi.NativeConstants.F_DUPFD)
+        assertTrue(dupResult is LinuxNative.SyscallResult.Success)
+        val dup = FileDescriptor.adopt<FileDescriptorRole.Generic>(94)
+        assertTrue(dup.isLiveForIo())
+        source.close()
+        assertTrue(dup.isLiveForIo())
+        assertFalse(source.isLiveForIo())
+        dup.close()
+    }
+
+    @Test
+    fun `replace retires leftover generation then claims the integer`() {
+        val leftover = FileDescriptor.generic(95)
+        leftover.close()
+        val replaced = FileDescriptor.replace<FileDescriptorRole.Generic>(95)
+        assertTrue(replaced.isLiveForIo())
+        assertFalse(leftover.isLiveForIo())
+        assertNotEquals(leftover, replaced)
+        replaced.close()
+    }
+
+    @Test
+    fun `SCM_RIGHTS adopt after close is a new generation`() {
+        val leftover = FileDescriptor.seccompNotif(96)
+        leftover.close()
+        val received = FileDescriptor.adopt<FileDescriptorRole.SeccompNotif>(96)
+        assertTrue(received.isLiveForIo())
+        assertFalse(leftover.isLiveForIo())
+        received.close()
+    }
+
+    @Test
+    fun `poll rejects a retired fd integer`() {
+        val fd = FileDescriptor.generic(97)
+        fd.close()
+        io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
+            val pollfd = arena.allocate(io.mazewall.ffi.Layouts.POLLFD_SIZE)
+            pollfd.writeInt(io.mazewall.ffi.Layouts.POLLFD_FD_OFFSET, 97)
+            val denied = ebadfIfRetiredPollfds(pollfd, 1)
+            assertNotNull(denied)
+            assertEquals(io.mazewall.ffi.NativeConstants.EBADF, (denied as io.mazewall.LinuxNative.SyscallResult.Error).errno)
+        }
     }
 
     @Test

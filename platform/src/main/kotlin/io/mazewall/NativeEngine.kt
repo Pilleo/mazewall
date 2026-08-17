@@ -97,7 +97,7 @@ public interface NativeFileSystem {
     ): SyscallResult<Long, SyscallHandledState.Unhandled>
 
     fun openat(
-        dirfd: Int,
+        dirfd: FileDescriptor<*, FdState.Open>,
         path: ManagedSegment,
         flags: io.mazewall.core.OpenFlags,
     ): SyscallResult<Long, SyscallHandledState.Unhandled>
@@ -113,7 +113,7 @@ public interface NativeFileSystem {
         length: Long,
         prot: io.mazewall.core.MmapProt,
         flags: io.mazewall.core.MmapFlags,
-        fd: Int,
+        fd: FileDescriptor<*, FdState.Open>,
         offset: Long,
     ): SyscallResult<Long, SyscallHandledState.Unhandled>
 
@@ -195,7 +195,7 @@ public interface NativeProcess {
     ): SyscallResult<Long, SyscallHandledState.Unhandled>
 
     fun pidfdGetFd(
-        pidfd: Int,
+        pidfd: FileDescriptor<*, FdState.Open>,
         targetFd: Int,
         flags: Int,
     ): SyscallResult<Long, SyscallHandledState.Unhandled>

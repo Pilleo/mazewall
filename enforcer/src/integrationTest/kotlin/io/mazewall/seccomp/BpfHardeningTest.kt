@@ -72,14 +72,14 @@ class BpfHardeningTest : BaseIntegrationTest() {
                     // 1. Calling mmap with PROT_EXEC (7) should be blocked (EPERM)
                     execResult.set(
 
-LinuxNative.fileSystem.mmap(0, 4096, io.mazewall.core.MmapProt(7), io.mazewall.core.MmapFlags(0x22), -1, 0)
+LinuxNative.fileSystem.mmap(0, 4096, io.mazewall.core.MmapProt(7), io.mazewall.core.MmapFlags(0x22), io.mazewall.core.FileDescriptor.ANON, 0)
 
                     )
                     
                     // 2. Calling mmap with PROT_READ | PROT_WRITE (3) should succeed because MMAP is critical
                     readWriteResult.set(
 
-LinuxNative.fileSystem.mmap(0, 4096, io.mazewall.core.MmapProt(3), io.mazewall.core.MmapFlags(0x22), -1, 0)
+LinuxNative.fileSystem.mmap(0, 4096, io.mazewall.core.MmapProt(3), io.mazewall.core.MmapFlags(0x22), io.mazewall.core.FileDescriptor.ANON, 0)
 
                     )
                 } catch (t: Throwable) {

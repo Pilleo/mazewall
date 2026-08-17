@@ -2,7 +2,11 @@ package io.mazewall
 
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
+import io.mazewall.core.claimDupIfNeeded
+import io.mazewall.core.ebadfIfRetiredPollfds
+import io.mazewall.core.ebadfUnlessDirfd
 import io.mazewall.core.ebadfUnlessLive
+import io.mazewall.core.ebadfUnlessMmapBacking
 import io.mazewall.ffi.IoctlCommand
 import io.mazewall.ffi.Layouts
 import io.mazewall.ffi.NativeConstants
@@ -82,13 +86,13 @@ public open class MockNativeEngine(
         fd: FileDescriptor<*, FdState.Open>,
         cmd: Int,
         arg: Long,
-    ) = fd.ebadfUnlessLive() ?: fcntlResult
+    ) = fd.ebadfUnlessLive() ?: fcntlResult.claimDupIfNeeded(cmd)
 
     override fun poll(
         fds: ManagedSegment,
         nfds: Long,
         timeout: Int,
-    ) = onPoll(fds, nfds, timeout)
+    ) = ebadfIfRetiredPollfds(fds, nfds) ?: onPoll(fds, nfds, timeout)
 }
 
 public open class MockNativeFileSystem : NativeFileSystem {
@@ -98,7 +102,7 @@ public open class MockNativeFileSystem : NativeFileSystem {
     public var mmapResult: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(0L)
 
     public var onOpen: (path: ManagedSegment, flags: io.mazewall.core.OpenFlags) -> LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = { _, _ -> openResult }
-    public var onOpenat: (dirfd: Int, path: ManagedSegment, flags: io.mazewall.core.OpenFlags) -> LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = { _, _, _ -> openResult }
+    public var onOpenat: (dirfd: FileDescriptor<*, FdState.Open>, path: ManagedSegment, flags: io.mazewall.core.OpenFlags) -> LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = { _, _, _ -> openResult }
     public var onClose: (fd: FileDescriptor<*, FdState.Open>) -> LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = { closeResult }
 
     override fun open(
@@ -107,10 +111,10 @@ public open class MockNativeFileSystem : NativeFileSystem {
     ) = onOpen(path, flags)
 
     override fun openat(
-        dirfd: Int,
+        dirfd: FileDescriptor<*, FdState.Open>,
         path: ManagedSegment,
         flags: io.mazewall.core.OpenFlags,
-    ) = onOpenat(dirfd, path, flags)
+    ) = dirfd.ebadfUnlessDirfd() ?: onOpenat(dirfd, path, flags)
 
     override fun readlink(
         path: ManagedSegment,
@@ -123,9 +127,9 @@ public open class MockNativeFileSystem : NativeFileSystem {
         length: Long,
         prot: io.mazewall.core.MmapProt,
         flags: io.mazewall.core.MmapFlags,
-        fd: Int,
+        fd: FileDescriptor<*, FdState.Open>,
         offset: Long,
-    ) = mmapResult
+    ) = fd.ebadfUnlessMmapBacking() ?: mmapResult
 
     override fun close(fd: FileDescriptor<*, FdState.Open>) =
         fd.ebadfUnlessLive() ?: run {
@@ -225,7 +229,7 @@ public open class MockNativeProcess : NativeProcess {
         prctlResult
     }
     public var onPidfdOpen: (pid: Int, flags: Int) -> LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = { _, _ -> LinuxNative.SyscallResult.Success(0L) }
-    public var onPidfdGetFd: (pidfd: Int, targetFd: Int, flags: Int) -> LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = { _, _, _ -> LinuxNative.SyscallResult.Success(0L) }
+    public var onPidfdGetFd: (pidfd: FileDescriptor<*, FdState.Open>, targetFd: Int, flags: Int) -> LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = { _, _, _ -> LinuxNative.SyscallResult.Success(0L) }
 
     public var archPrctlLongResult: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success(0L)
     public var archPrctlAddrResult: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success(0L)
@@ -246,10 +250,10 @@ public open class MockNativeProcess : NativeProcess {
     ) = onPidfdOpen(pid, flags)
 
     override fun pidfdGetFd(
-        pidfd: Int,
+        pidfd: FileDescriptor<*, FdState.Open>,
         targetFd: Int,
         flags: Int,
-    ) = onPidfdGetFd(pidfd, targetFd, flags)
+    ) = pidfd.ebadfUnlessLive() ?: onPidfdGetFd(pidfd, targetFd, flags)
 
     override fun archPrctl(code: Int, addr: Long): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
         lastArchPrctlCode = code

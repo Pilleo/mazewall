@@ -196,4 +196,21 @@ class ResolveAbsolutePathTest {
             Files.deleteIfExists(tempDir)
         }
     }
+
+    @Test
+    fun `isBypassPath fails closed on symlink loops`() {
+        val tempDir = Files.createTempDirectory("bypass-loop")
+        val linkA = tempDir.resolve("linkA")
+        val linkB = tempDir.resolve("linkB")
+        try {
+            Files.createSymbolicLink(linkA, linkB)
+            Files.createSymbolicLink(linkB, linkA)
+            assertTrue(BypassPaths.resolveForPolicy(linkA) is BypassPaths.PathResolution.Unsafe)
+            assertFalse(BypassPaths.isBypassPath(linkA))
+        } finally {
+            Files.deleteIfExists(linkA)
+            Files.deleteIfExists(linkB)
+            Files.deleteIfExists(tempDir)
+        }
+    }
 }

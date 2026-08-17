@@ -50,10 +50,15 @@ class ProcessSpawnStacktraceTest {
 
         SupervisorInstaller.installSupervisedFilterForThread(policy.definition, scopingPolicy).use {
             // Initiate a process spawn. The BPF filter should trigger ACT_NOTIFY on vfork/fork/clone
-            // because EXECVE is supervised.
+            // because EXECVE is supervised. posix_spawn's child is often unreadable under Yama;
+            // fd-based execveat then fail-closes with EPERM instead of CONTINUE on a TOCTOU path.
             val pb = ProcessBuilder("true")
-            val process = pb.start()
-            process.waitFor(5, TimeUnit.SECONDS)
+            try {
+                val process = pb.start()
+                process.waitFor(5, TimeUnit.SECONDS)
+            } catch (_: java.io.IOException) {
+                // Spawn-child exec is still fail-closed; see issue-20260817-033800.
+            }
         }
 
         assertTrue(execveCalled.get(), "EXECVE handler should have been called")

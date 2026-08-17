@@ -1,8 +1,13 @@
+# ✅ [RESOLVED]: Supervisor fail-open on ignored path exceptions
+
+**Status:** RESOLVED (August 2026)
+**Fix:** Bypass matching no longer uses an uncanonicalized path when resolution is unsafe. `resolveForPolicy` classifies loop/denied/security as `Unsafe` → `isBypassPath` is false (deny / no fast-path).
+
 ---
 title: SupervisorSessionHandler ignores critical exceptions during path resolution
   leading to fail-open bypass
 type: issue
-status: open
+status: resolved
 priority: 8
 labels:
 - security

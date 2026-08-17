@@ -4,7 +4,11 @@ package io.mazewall.ffi.internal
 import io.mazewall.*
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
+import io.mazewall.core.claimDupIfNeeded
+import io.mazewall.core.ebadfIfRetiredPollfds
+import io.mazewall.core.ebadfUnlessDirfd
 import io.mazewall.core.ebadfUnlessLive
+import io.mazewall.core.ebadfUnlessMmapBacking
 import io.mazewall.ffi.LayoutValidator
 import io.mazewall.ffi.Layouts
 import io.mazewall.ffi.NativeConstants
@@ -153,7 +157,7 @@ public object RealNativeEngine : NativeEngine, RawSyscallOperations {
         arg: Long,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
         fd.ebadfUnlessLive()?.let { return it }
-        return SyscallInvoker.fcntl(FCNTL, fd.value, cmd, arg)
+        return SyscallInvoker.fcntl(FCNTL, fd.value, cmd, arg).claimDupIfNeeded(cmd)
     }
 
     override fun poll(
@@ -161,6 +165,7 @@ public object RealNativeEngine : NativeEngine, RawSyscallOperations {
         nfds: Long,
         timeout: Int,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+        ebadfIfRetiredPollfds(fds, nfds)?.let { return it }
         return SyscallInvoker.poll(POLL, fds.native, nfds, timeout)
     }
 }
@@ -219,11 +224,12 @@ internal object RealNativeFileSystem : NativeFileSystem {
     }
 
     override fun openat(
-        dirfd: Int,
+        dirfd: FileDescriptor<*, FdState.Open>,
         path: ManagedSegment,
         flags: io.mazewall.core.OpenFlags,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
-        return SyscallInvoker.openat(OPENAT, dirfd, path.native, flags.value)
+        dirfd.ebadfUnlessDirfd()?.let { return it }
+        return SyscallInvoker.openat(OPENAT, dirfd.value, path.native, flags.value)
     }
 
     override fun mmap(
@@ -231,10 +237,11 @@ internal object RealNativeFileSystem : NativeFileSystem {
         length: Long,
         prot: io.mazewall.core.MmapProt,
         flags: io.mazewall.core.MmapFlags,
-        fd: Int,
+        fd: FileDescriptor<*, FdState.Open>,
         offset: Long,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
-        return SyscallInvoker.mmap(MMAP, MemorySegment.ofAddress(addr), length, prot.value, flags.value, fd, offset)
+        fd.ebadfUnlessMmapBacking()?.let { return it }
+        return SyscallInvoker.mmap(MMAP, MemorySegment.ofAddress(addr), length, prot.value, flags.value, fd.value, offset)
     }
 
     override fun close(fd: FileDescriptor<*, FdState.Open>): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
@@ -530,11 +537,12 @@ internal object RealNativeProcess : NativeProcess {
     }
 
     override fun pidfdGetFd(
-        pidfd: Int,
+        pidfd: FileDescriptor<*, FdState.Open>,
         targetFd: Int,
         flags: Int,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
-        return SyscallInvoker.pidfdGetFd(PIDFD_GETFD, pidfd, targetFd, flags)
+        pidfd.ebadfUnlessLive()?.let { return it }
+        return SyscallInvoker.pidfdGetFd(PIDFD_GETFD, pidfd.value, targetFd, flags)
     }
 
     override fun archPrctl(code: Int, addr: Long): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {

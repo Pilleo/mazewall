@@ -78,9 +78,9 @@ interface "NativeEngine" as io.mazewall.NativeEngine {
 }
 interface "NativeFileSystem" as io.mazewall.NativeFileSystem {
   + {abstract}SyscallResult open(ManagedSegment, int)
-  + {abstract}SyscallResult openat(int, ManagedSegment, int)
+  + {abstract}SyscallResult openat(FileDescriptor<?, ? extends Open>, ManagedSegment, int)
   + {abstract}SyscallResult readlink(ManagedSegment, ManagedSegment, long)
-  + {abstract}SyscallResult mmap(long, long, int, int, int, long)
+  + {abstract}SyscallResult mmap(long, long, int, int, FileDescriptor<?, ? extends Open>, long)
   + {abstract}SyscallResult close(FileDescriptor<?, ? extends Open>)
 }
 interface "NativeMemory" as io.mazewall.NativeMemory {
@@ -106,7 +106,7 @@ interface "NativeProcess" as io.mazewall.NativeProcess {
   + {abstract}int gettid()
   + {abstract}SyscallResult prctl(PrctlCommand)
   + {abstract}SyscallResult pidfdOpen(int, int)
-  + {abstract}SyscallResult pidfdGetFd(int, int, int)
+  + {abstract}SyscallResult pidfdGetFd(FileDescriptor<?, ? extends Open>, int, int)
   + {abstract}SyscallResult archPrctl(int, long)
   + {abstract}SyscallResult archPrctl(int, ManagedSegment)
 }
@@ -313,6 +313,23 @@ class "ErrnoMapping" as io.mazewall.core.ErrnoMapping {
   __
   +String getSymbolicName(int)
 }
+class "FdEpoch" as io.mazewall.core.FdEpoch {
+  + {static}FdEpoch INSTANCE
+  __
+  +long claimOpen(int)
+  +void retire(int, long)
+  +boolean isLive(int, long)
+  +boolean isRetired(int)
+  +void forceRetire(int)
+}
+class "FdLifecycle" as io.mazewall.core.FdLifecycle {
+  +int getValue()
+  +NativeArena getArena()
+  +long getGeneration()
+  +FileDescriptorRole getRole()
+  +boolean getClosed()
+  +void setClosed(boolean)
+}
 interface "FdState" as io.mazewall.core.FdState {
 }
 class "FileDescriptor" as io.mazewall.core.FileDescriptor<R extends FileDescriptorRole, S extends FdState> {
@@ -320,11 +337,25 @@ class "FileDescriptor" as io.mazewall.core.FileDescriptor<R extends FileDescript
   __
   +int getValue()
   +NativeArena getArena()
+  +long getGeneration()
+  +FileDescriptorRole getRole()
   +boolean isValid()
   +boolean isInvalid()
+  +boolean isLiveForIo()
+  +boolean isUsableAsDirfd()
+  +boolean isUsableAsMmapBacking()
   +boolean isClosedType()
+  +void markClosed()
+  +void retireForClose()
 }
 class "FileDescriptorKt" as io.mazewall.core.FileDescriptorKt {
+  + {static}SyscallResult ebadfUnlessLive(FileDescriptor<?, ?>)
+  + {static}SyscallResult ebadfUnlessDirfd(FileDescriptor<?, ?>)
+  + {static}SyscallResult ebadfUnlessMmapBacking(FileDescriptor<?, ?>)
+  + {static}SyscallResult ebadfUnlessLive(NativeArg)
+  + {static}SyscallResult ebadfIfRetiredPollfds(ManagedSegment, long)
+  + {static}SyscallResult ebadfUnlessLive(NativeArg[])
+  + {static}SyscallResult claimDupIfNeeded(SyscallResult, int)
   + {static}FileDescriptor<R, Closed> close(FileDescriptor<? extends R, ? extends S>)
   + {static}T use(FileDescriptor<? extends R, ? extends S>, Function1<? super FileDescriptor<? extends R, ? extends S>, ? extends T>)
 }
@@ -580,6 +611,7 @@ class "ContainmentStateRegistry" as io.mazewall.enforcer.state.ContainmentStateR
 class "BypassPaths" as io.mazewall.enforcer.supervisor.BypassPaths {
   + {static}BypassPaths INSTANCE
   __
+  +PathResolution resolveForPolicy(Path)
   +Path toRealPathWithFallback(Path)
   +List<Path> getSafeBypassPaths()
   +boolean isBypassPath(Path)
@@ -672,6 +704,16 @@ class "SyscallArguments" as io.mazewall.enforcer.supervisor.SyscallArguments {
   +byte[] getSockaddrBytes()
   +int getDirfd()
 }
+class "TraceeExecveRegisters" as io.mazewall.enforcer.supervisor.TraceeExecveRegisters {
+  + {static}TraceeExecveRegisters INSTANCE
+  __
+  +boolean cannotSafelyRewriteWhileBlockedInUserNotif(int)
+}
+class "TraceeReadOnlyNul" as io.mazewall.enforcer.supervisor.TraceeReadOnlyNul {
+  + {static}TraceeReadOnlyNul INSTANCE
+  __
+  +Long find(NativeArena, int)
+}
 class "ValidationLog" as io.mazewall.enforcer.supervisor.ValidationLog {
   + {static}ValidationLog INSTANCE
   __
@@ -720,8 +762,8 @@ class "RealNativeFileSystem" as io.mazewall.ffi.internal.RealNativeFileSystem {
   + {static}RealNativeFileSystem INSTANCE
   __
   +SyscallResult open(ManagedSegment, int)
-  +SyscallResult openat(int, ManagedSegment, int)
-  +SyscallResult mmap(long, long, int, int, int, long)
+  +SyscallResult openat(FileDescriptor<?, ? extends Open>, ManagedSegment, int)
+  +SyscallResult mmap(long, long, int, int, FileDescriptor<?, ? extends Open>, long)
   +SyscallResult close(FileDescriptor<?, ? extends Open>)
   +SyscallResult readlink(ManagedSegment, ManagedSegment, long)
 }
@@ -761,7 +803,7 @@ class "RealNativeProcess" as io.mazewall.ffi.internal.RealNativeProcess {
   +int gettid()
   +SyscallResult prctl(PrctlCommand)
   +SyscallResult pidfdOpen(int, int)
-  +SyscallResult pidfdGetFd(int, int, int)
+  +SyscallResult pidfdGetFd(FileDescriptor<?, ? extends Open>, int, int)
   +SyscallResult archPrctl(int, long)
   +SyscallResult archPrctl(int, ManagedSegment)
 }
@@ -1109,6 +1151,8 @@ class "SupervisorResponseSegment" as io.mazewall.ffi.memory.SupervisorResponseSe
   + {static}void setDecision-impl(MemorySegment, byte)
   + {static}int getErrorNr-impl(MemorySegment)
   + {static}void setErrorNr-impl(MemorySegment, int)
+  + {static}String getPath-impl(MemorySegment)
+  + {static}void setPath-impl(MemorySegment, String)
   + {static}String toString-impl(MemorySegment)
   + {static}int hashCode-impl(MemorySegment)
   + {static}boolean equals-impl(MemorySegment, Object)
@@ -1173,7 +1217,8 @@ class "SupervisorSocketUtils" as io.mazewall.ffi.networking.SupervisorSocketUtil
 }
 class "SupervisorValidationChannel" as io.mazewall.ffi.networking.SupervisorValidationChannel {
   +InputStream getInputStream()
-  +void sendResponse(long, byte, int)
+  +void sendResponse(long, byte, int, String)
+  +void sendExecRewriteAck(boolean)
   +void close()
 }
 class "Landlock" as io.mazewall.landlock.Landlock {
@@ -1441,8 +1486,11 @@ io.mazewall.RealPlatformProvider --> io.mazewall.RealPlatformProvider
 io.mazewall.SbobParser --> io.mazewall.SbobParser
 io.mazewall.StackProfileEntryDto --> io.mazewall.StackFrameDto
 io.mazewall.core.ErrnoMapping --> io.mazewall.core.ErrnoMapping
-io.mazewall.core.FileDescriptor --> io.mazewall.ffi.memory.NativeArena
-io.mazewall.core.FileDescriptor --> io.mazewall.core.FileDescriptor
+io.mazewall.core.FdEpoch --> io.mazewall.core.FdEpoch
+io.mazewall.core.FdLifecycle --> io.mazewall.ffi.memory.NativeArena
+io.mazewall.core.FdLifecycle --> io.mazewall.core.FileDescriptorRole
+io.mazewall.core.FileDescriptor <--> io.mazewall.core.FileDescriptor
+io.mazewall.core.FileDescriptor --> io.mazewall.core.FdLifecycle
 io.mazewall.core.RealProcessLauncher .u.|> io.mazewall.core.ProcessLauncher
 io.mazewall.core.RealProcessLauncher --> io.mazewall.core.RealProcessLauncher
 io.mazewall.core.RealSocketManager .u.|> io.mazewall.core.SocketManager
@@ -1488,6 +1536,8 @@ io.mazewall.enforcer.supervisor.SupervisorSessionHandler .u.|> io.mazewall.platf
 io.mazewall.enforcer.supervisor.SupervisorSessionHandler --> io.mazewall.NativeEngine
 io.mazewall.enforcer.supervisor.SupervisorSessionHandler --> io.mazewall.core.SocketManager
 io.mazewall.enforcer.supervisor.SupervisorSessionHandler --> io.mazewall.core.FileDescriptor
+io.mazewall.enforcer.supervisor.TraceeExecveRegisters --> io.mazewall.enforcer.supervisor.TraceeExecveRegisters
+io.mazewall.enforcer.supervisor.TraceeReadOnlyNul --> io.mazewall.enforcer.supervisor.TraceeReadOnlyNul
 io.mazewall.enforcer.supervisor.ValidationLog --> io.mazewall.enforcer.supervisor.ValidationLog
 io.mazewall.ffi.IoctlCommand <--> io.mazewall.ffi.IoctlCommand
 io.mazewall.ffi.IoctlCommand --> io.mazewall.ffi.TypedSegment

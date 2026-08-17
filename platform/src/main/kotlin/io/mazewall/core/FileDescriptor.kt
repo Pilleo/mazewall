@@ -3,7 +3,9 @@ package io.mazewall.core
 
 import io.mazewall.LinuxNative
 import io.mazewall.ffi.NativeConstants
+import io.mazewall.ffi.memory.ManagedSegment
 import io.mazewall.ffi.memory.NativeArena
+import io.mazewall.ffi.memory.readInt
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicReference
 
@@ -36,6 +38,9 @@ public sealed interface FileDescriptorRole {
 
     /** A Unix domain socket file descriptor. */
     public data object UnixSocket : FileDescriptorRole
+
+    /** A pidfd from pidfd_open(2). */
+    public data object Pid : FileDescriptorRole
 }
 
 /**
@@ -80,6 +85,31 @@ internal object FdEpoch {
         if (fd < 0) return false
         val cur = table[fd]?.get() ?: return false
         return cur.live && cur.generation == generation
+    }
+
+    /** True if this integer was claimed and later retired (not an untracked fd). */
+    fun isRetired(fd: Int): Boolean {
+        if (fd < 0) return false
+        val cur = table[fd]?.get() ?: return false
+        return !cur.live && cur.generation > 0L
+    }
+
+    /**
+     * Marks the integer not live so the next [claimOpen] is a new generation.
+     * Used for dup2-style replacement and SECCOMP_ADDFD SETFD.
+     */
+    fun forceRetire(fd: Int) {
+        if (fd < 0) return
+        val ref = table[fd] ?: return
+        while (true) {
+            val cur = ref.get()
+            if (!cur.live) {
+                return
+            }
+            if (ref.compareAndSet(cur, Slot(cur.generation, false))) {
+                return
+            }
+        }
     }
 }
 
@@ -144,6 +174,13 @@ public class FileDescriptor<out R : FileDescriptorRole, out S : FdState> interna
      */
     public fun isLiveForIo(): Boolean = isValid
 
+    /** [AT_FDCWD] or a live directory descriptor. */
+    public fun isUsableAsDirfd(): Boolean =
+        value == NativeConstants.AT_FDCWD || isLiveForIo()
+
+    /** Negative fd (anonymous mmap) or a live backing file. */
+    public fun isUsableAsMmapBacking(): Boolean = value < 0 || isLiveForIo()
+
     internal fun isClosedType(): Boolean {
         return lifecycle.closed || value < 0
     }
@@ -181,6 +218,22 @@ public class FileDescriptor<out R : FileDescriptorRole, out S : FdState> interna
             FileDescriptor<FileDescriptorRole.Generic, FdState.Closed>(
                 FdLifecycle(-1, null, generation = 0L, role = FileDescriptorRole.Generic, closed = true),
             ) as FileDescriptor<Nothing, FdState.Closed>
+
+        /**
+         * Sentinel for openat(2) [NativeConstants.AT_FDCWD]. Not a live kernel fd.
+         */
+        public val AT_FDCWD: FileDescriptor<FileDescriptorRole.OPath, FdState.Open> =
+            FileDescriptor(
+                FdLifecycle(NativeConstants.AT_FDCWD, null, generation = 0L, role = FileDescriptorRole.OPath, closed = false),
+            )
+
+        /**
+         * Sentinel for anonymous mmap(2) (`fd = -1`). Not a live kernel fd.
+         */
+        public val ANON: FileDescriptor<FileDescriptorRole.Generic, FdState.Open> =
+            FileDescriptor(
+                FdLifecycle(-1, null, generation = 0L, role = FileDescriptorRole.Generic, closed = true),
+            )
 
         /**
          * Unsafely creates a [FileDescriptor] from a raw integer.
@@ -227,6 +280,35 @@ public class FileDescriptor<out R : FileDescriptorRole, out S : FdState> interna
         ): FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open> =
             open(value, arena, FileDescriptorRole.SeccompNotif)
 
+        public fun pid(
+            value: Int,
+            arena: NativeArena? = null,
+        ): FileDescriptor<FileDescriptorRole.Pid, FdState.Open> =
+            open(value, arena, FileDescriptorRole.Pid)
+
+        /**
+         * Adopts a newly allocated kernel fd (open, accept, dup, SCM_RIGHTS).
+         * If [value] was retired, this is a new generation; leftover tokens stay dead.
+         */
+        public fun <R : FileDescriptorRole> adopt(
+            value: Int,
+            arena: NativeArena? = null,
+        ): FileDescriptor<R, FdState.Open> = unsafe(value, arena)
+
+        /**
+         * Kernel replaced this integer (dup2, SECCOMP_ADDFD SETFD).
+         * Any leftover generation is retired first.
+         */
+        public fun <R : FileDescriptorRole> replace(
+            value: Int,
+            arena: NativeArena? = null,
+        ): FileDescriptor<R, FdState.Open> {
+            if (value >= 0) {
+                FdEpoch.forceRetire(value)
+            }
+            return unsafe(value, arena)
+        }
+
         @Suppress("UNCHECKED_CAST")
         private fun <R : FileDescriptorRole> open(
             value: Int,
@@ -259,8 +341,38 @@ public fun FileDescriptor<*, *>.ebadfUnlessLive(): LinuxNative.SyscallResult<Lon
     return LinuxNative.SyscallResult.Error(NativeConstants.EBADF, -1L)
 }
 
+public fun FileDescriptor<*, *>.ebadfUnlessDirfd(): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled>? {
+    if (isUsableAsDirfd()) {
+        return null
+    }
+    return LinuxNative.SyscallResult.Error(NativeConstants.EBADF, -1L)
+}
+
+public fun FileDescriptor<*, *>.ebadfUnlessMmapBacking(): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled>? {
+    if (isUsableAsMmapBacking()) {
+        return null
+    }
+    return LinuxNative.SyscallResult.Error(NativeConstants.EBADF, -1L)
+}
+
 public fun NativeArg.ebadfUnlessLive(): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled>? {
     return if (this is NativeArg.FdArg) fd.ebadfUnlessLive() else null
+}
+
+public fun ebadfIfRetiredPollfds(
+    fds: ManagedSegment,
+    nfds: Long,
+): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled>? {
+    val stride = io.mazewall.ffi.Layouts.POLLFD_SIZE
+    var i = 0L
+    while (i < nfds) {
+        val fd = fds.readInt(i * stride + io.mazewall.ffi.Layouts.POLLFD_FD_OFFSET)
+        if (FdEpoch.isRetired(fd)) {
+            return LinuxNative.SyscallResult.Error(NativeConstants.EBADF, -1L)
+        }
+        i++
+    }
+    return null
 }
 
 public fun ebadfUnlessLive(vararg args: NativeArg): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled>? {
@@ -271,6 +383,18 @@ public fun ebadfUnlessLive(vararg args: NativeArg): LinuxNative.SyscallResult<Lo
         }
     }
     return null
+}
+
+public fun LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled>.claimDupIfNeeded(
+    cmd: Int,
+): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+    if (this is LinuxNative.SyscallResult.Success &&
+        (cmd == NativeConstants.F_DUPFD || cmd == NativeConstants.F_DUPFD_CLOEXEC) &&
+        value >= 0L
+    ) {
+        FdEpoch.claimOpen(value.toInt())
+    }
+    return this
 }
 
 /**

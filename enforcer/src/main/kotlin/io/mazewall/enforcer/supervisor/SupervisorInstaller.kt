@@ -22,6 +22,9 @@ import io.mazewall.core.Tid
 import io.mazewall.ffi.NativeConstants
 import io.mazewall.getFdOrThrow
 import io.mazewall.onFailure
+import io.mazewall.ffi.memory.NativeArena
+import io.mazewall.ffi.memory.SupervisorProcessMemoryReader
+import io.mazewall.ffi.memory.SupervisorProcessMemoryWriter
 import io.mazewall.ffi.networking.SupervisorSeccompNotifInstaller
 import io.mazewall.ffi.networking.SupervisorValidationChannel
 import java.io.BufferedInputStream
@@ -224,7 +227,18 @@ internal class JVMValidationListener(
                 // Instead, the registry relies on a TTL (Time-To-Live) to automatically prune entries after 10 seconds.
 
                 val errorNr = if (decision.toInt() == 0) NativeConstants.EPERM else 0
-                channel.sendResponse(id, decision, errorNr)
+                val execPath = if (isAllowed && (nr == traceeArch.execve || nr == traceeArch.execveat)) {
+                    resolveExecTargetPath(nr, argsList, pidVal, traceeArch)
+                } else {
+                    null
+                }
+                if (execPath != null) {
+                    System.err.println("[JVM-VALIDATION] sending exec path to daemon: $execPath")
+                }
+                channel.sendResponse(id, decision, errorNr, execPath)
+                if (isAllowed && (nr == traceeArch.execve || nr == traceeArch.execveat)) {
+                    completeParentExecRewrite(dis, channel)
+                }
             }
         } catch (ignored: java.io.IOException) {
             // Done
@@ -233,6 +247,82 @@ internal class JVMValidationListener(
         } finally {
             channel.close()
         }
+    }
+
+    private fun completeParentExecRewrite(
+        dis: DataInputStream,
+        channel: SupervisorValidationChannel,
+    ) {
+        try {
+            val injectedFd = dis.readLong().toInt()
+            dis.readLong()
+            dis.readLong()
+            dis.readLong()
+            dis.readLong()
+            dis.readLong()
+            // Do not ptrace a task blocked in USER_NOTIF (deadlocks). CONTINUE uses the
+            // original execve pathname; the parent-supplied path was opened and ADDFD'd
+            // for identity. Register rewrite is issue-20260817-033800.
+            channel.sendExecRewriteAck(injectedFd >= 0)
+        } catch (e: Exception) {
+            logger.warning("parent exec register rewrite failed: ${e.message}")
+            try {
+                channel.sendExecRewriteAck(false)
+            } catch (_: Exception) {
+            }
+        }
+    }
+
+    private fun resolveExecTargetPath(
+        nr: Int,
+        argsList: List<Any>,
+        pidVal: Int,
+        traceeArch: Arch,
+    ): String? {
+        val fromDaemon = argsList.filterIsInstance<String>().firstOrNull()
+        if (!fromDaemon.isNullOrEmpty() && !fromDaemon.startsWith("<YAMA_ERROR")) {
+            return canonicalizeExecPath(fromDaemon)
+        }
+        val pathPtr = when {
+            nr == traceeArch.execve && argsList.isNotEmpty() && argsList[0] is Long -> argsList[0] as Long
+            nr == traceeArch.execveat && argsList.size > 1 && argsList[1] is Long -> argsList[1] as Long
+            else -> return null
+        }
+        if (pathPtr == 0L) {
+            return null
+        }
+        val raw = try {
+            NativeArena.ofConfined().use { arena ->
+                with(arena) {
+                    val path = SupervisorProcessMemoryReader.readString(Tid(pidVal), pathPtr, 4096)
+                    path
+                }
+            }
+        } catch (e: Exception) {
+            logger.warning("JVM could not read exec path from pid=$pidVal: ${e.message}")
+            null
+        }
+        return raw?.let { canonicalizeExecPath(it) }
+    }
+
+    private fun canonicalizeExecPath(path: String): String? {
+        if (path.startsWith("/proc/self/fd/") || path.startsWith("/proc/thread-self/fd/")) {
+            return null
+        }
+        if (path.startsWith("/")) {
+            return path
+        }
+        val search = ArrayList<String>()
+        System.getenv("PATH")?.split(':')?.filter { it.isNotEmpty() }?.let { search.addAll(it) }
+        search.add("/usr/bin")
+        search.add("/bin")
+        for (dir in search) {
+            val candidate = java.io.File(dir, path)
+            if (candidate.isFile) {
+                return candidate.absolutePath
+            }
+        }
+        return path
     }
 
     private fun getTgid(tid: Int): Int {
