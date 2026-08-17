@@ -62,9 +62,14 @@ Three profiling strategies are available depending on your environment and what 
 
 | Tier | API | Best For | Privilege |
 |------|-----|----------|-----------|
-| **S (Recommended)** | `Profiler.profile { }` | Standard synchronous workloads, accurate syscall + path capture | Unprivileged |
-| **A (Iterative)** | `IterativeProfiler.profile(basePolicy) { }` | `io_uring`-based workloads, Landlock path discovery without a daemon | Unprivileged |
-| **P (strace)** | `StraceProfiler` | Legacy environments, descendant subprocess tracing | `ptrace_scope ≤ 1` |
+| **S (Recommended)** | `MazewallProfiler` / `Profiler.profile { }` | Standard synchronous workloads, accurate syscall + path capture | Unprivileged |
+| **H (Hybrid)** | `ProfileStrategy.HYBRID_NO_URING` | Disable `io_uring` while profiling; allow `io_uring_*` at runtime and let Landlock bind paths | Unprivileged |
+| **P (strace)** | `StraceProfiler` / `ProfileStrategy.STRACE` | Legacy environments, descendant subprocess tracing | `ptrace_scope ≤ 1` |
+| **eBPF (planned)** | `ProfileStrategy.EBPF` | Transparent `io_uring` path capture | Host `CAP_BPF` in the **init** user ns |
+
+`IterativeProfiler` is deprecated. Deny-and-retry is not a tracer.
+
+`result.toPolicy()` refuses incomplete coverage (for example `io_uring` syscalls with no destinations). Pass `allowIncomplete = true` only if you will not treat the policy as a complete contract.
 
 ### Tier S — `USER_NOTIF` Daemon (Recommended)
 
@@ -104,7 +109,8 @@ val behavior: BillOfBehavior = result.behavior
 behavior.syscalls        // Set<Syscall>  — every syscall observed on the profiled thread
 behavior.opens           // Set<String>   — every filesystem path opened
 behavior.fsWritePaths    // Set<String>   — every path written to
-behavior.networkEndpoints // Set<String>  — every socket destination
+behavior.connects         // Set<NetworkEndpoint> — observed connect() destinations
+behavior.ioUringOps       // Set<String>  — io_uring opcodes (eBPF collector only)
 
 behavior.toPolicy()      // → Policy (ready to pass to ContainedExecutors.wrap)
 behavior.toDsl()         // → String (Kotlin DSL to paste into your codebase)
@@ -120,7 +126,8 @@ For a detailed class hierarchy and structural relationship map, see the [Profile
 
 - **`Profiler` / `ProfilerDaemon`**: Implements the out-of-process `USER_NOTIF` engine. The daemon receives the seccomp listener FD via UNIX socket `SCM_RIGHTS` passing, intercepts trapped syscalls, resolves paths via `process_vm_readv`, and sends an ACK back to release the worker thread.
 - **`ProfilerTraceListener`**: Bridge between the daemon and the JVM — receives `TraceEvent`s and correlates them with JVM stack traces via `ThreadRegistry`.
-- **`IterativeProfiler`**: Implements the deny-and-retry Landlock learning loop.
+- **`MazewallProfiler`**: Owned session, strategy selection, coverage on the result. eBPF fails closed until a collector exists.
+- **`IterativeProfiler`**: Deprecated deny-and-retry Landlock learning loop.
 - **`StraceProfiler` / `StraceWorkloadRunner`**: Spawns target workloads under `strace -f` and parses the log stream.
 - **`BobCompiler` / `BillOfBehavior`**: Deduplicates raw high-frequency syscall streams and compiles the structured behavioral contract.
 

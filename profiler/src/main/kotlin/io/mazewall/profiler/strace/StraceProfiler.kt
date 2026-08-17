@@ -1,6 +1,5 @@
 package io.mazewall.profiler.strace
 
-import io.mazewall.core.Syscall
 import io.mazewall.profiler.BillOfBehavior
 import io.mazewall.profiler.TraceableWorkload
 import java.io.File
@@ -58,122 +57,9 @@ object StraceProfiler {
             throw IllegalStateException("Child JVM failed with exit code $exitCode. Stdout: $outText, Stderr: $errText")
         }
 
-        // Read and parse the log file
-        val opens = mutableSetOf<String>()
-        val fsWritePaths = mutableSetOf<String>()
-        val syscalls = mutableSetOf<Syscall>()
-
-        if (tempLog.exists()) {
-            tempLog.forEachLine { line ->
-                parseLine(line, opens, fsWritePaths, syscalls)
-            }
-            tempLog.delete()
-        }
-
-        return BillOfBehavior(
-            opens = opens,
-            fsWritePaths = fsWritePaths,
-            syscalls = syscalls,
-        )
-    }
-
-    private fun parseLine(
-        line: String,
-        opens: MutableSet<String>,
-        fsWritePaths: MutableSet<String>,
-        syscalls: MutableSet<Syscall>,
-    ) {
-        val cleaned = line.trim()
-        if (cleaned.isEmpty() || cleaned.startsWith("+++") || cleaned.startsWith("---")) return
-
-        // Extract syscall name
-        val beforeParen = cleaned.substringBefore("(", "")
-        if (beforeParen.isEmpty()) return
-
-        // Handle PID prefix in "strace -f" lines (e.g. "12345 openat(...)")
-        val syscallName = beforeParen.split("\\s+".toRegex()).last().uppercase()
-        val syscall = try {
-            Syscall.valueOf(syscallName)
-        } catch (ignored: IllegalArgumentException) {
-            null
-        }
-
-        if (syscall != null) {
-            syscalls.add(syscall)
-        }
-
-        // Extract path if it is a filesystem call
-        if (isFsSyscall(syscallName)) {
-            val args = cleaned.substringAfter("(", "")
-            val path = extractQuotedPath(args)
-            if (path != null) {
-                if (isWriteSyscall(syscallName, args)) {
-                    fsWritePaths.add(path)
-                } else {
-                    opens.add(path)
-                }
-            }
-        }
-    }
-
-    private fun isFsSyscall(name: String): Boolean {
-        return name in setOf(
-            "OPEN",
-            "OPENAT",
-            "OPENAT2",
-            "STAT",
-            "STATX",
-            "LSTAT",
-            "ACCESS",
-            "READLINK",
-            "READLINKAT",
-            "MKDIR",
-            "MKDIRAT",
-            "RMDIR",
-            "UNLINK",
-            "UNLINKAT",
-            "RENAME",
-            "RENAMEAT",
-            "RENAMEAT2",
-            "CHMOD",
-            "FCHMODAT",
-            "CHOWN",
-            "FCHOWNAT",
-        )
-    }
-
-    private fun isWriteSyscall(
-        name: String,
-        args: String,
-    ): Boolean {
-        val isWriteOp = name in setOf(
-            "MKDIR",
-            "MKDIRAT",
-            "RMDIR",
-            "UNLINK",
-            "UNLINKAT",
-            "RENAME",
-            "RENAMEAT",
-            "RENAMEAT2",
-            "CHMOD",
-            "FCHMODAT",
-            "CHOWN",
-            "FCHOWNAT",
-        )
-        val isOpen = name == "OPEN" || name == "OPENAT" || name == "OPENAT2"
-        val isOpenWrite = isOpen &&
-            (
-            args.contains("O_WRONLY") ||
-            args.contains("O_RDWR") ||
-            args.contains("O_CREAT") ||
-            args.contains("O_TRUNC") ||
-            args.contains("O_APPEND")
-        )
-        return isWriteOp || isOpenWrite
-    }
-
-    private fun extractQuotedPath(args: String): String? {
-        val match = "\"(.*?)\"".toRegex().find(args)
-        return match?.groupValues?.get(1)
+        val log = if (tempLog.exists()) tempLog.readText() else ""
+        tempLog.delete()
+        val observations = io.mazewall.profiler.compiler.StraceLogParser.parse(log)
+        return io.mazewall.profiler.compiler.BobCompiler.compileObservations(observations)
     }
 }

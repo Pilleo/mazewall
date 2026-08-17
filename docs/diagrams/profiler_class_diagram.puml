@@ -16,6 +16,8 @@ class "BillOfBehavior" as io.mazewall.profiler.BillOfBehavior {
   +Set<String> getFsWritePaths()
   +Set<Syscall> getSyscalls()
   +Set<String> getExecs()
+  +Set<NetworkEndpoint> getConnects()
+  +Set<String> getIoUringOps()
   +Map<TraceEvent, List<StackTraceElement[]>> getStackProfile()
   +BillOfBehavior plus(BillOfBehavior)
   +BillOfBehavior filterPaths(BaselinePathProfile)
@@ -24,12 +26,91 @@ class "BillOfBehavior" as io.mazewall.profiler.BillOfBehavior {
 }
 class "BillOfBehaviorKt" as io.mazewall.profiler.BillOfBehaviorKt {
 }
+class "EbpfCapability" as io.mazewall.profiler.EbpfCapability {
+  + {static}EbpfCapability INSTANCE
+  __
+  +EbpfLoad probe(Path, Path, Path, Path, Integer)
+  +Long parseCapEff(String)
+  +boolean parseInitUserNamespace(String)
+  +boolean hasCap(long, int)
+  +Integer parseEuid(String)
+}
+interface "EbpfLoad" as io.mazewall.profiler.EbpfLoad {
+}
+class "IncompleteProfileException" as io.mazewall.profiler.IncompleteProfileException {
+  +ProfilingCoverage getCoverage()
+}
+enum "IoUringVisibility" as io.mazewall.profiler.IoUringVisibility {
+  OBSERVED
+  DISABLED_FOR_HYBRID
+  BLIND
+  BLOCKED
+  UNSEEN
+}
 class "JvmBaselineProfiles" as io.mazewall.profiler.JvmBaselineProfiles {
+  ..
   + {static}JvmBaselineProfiles INSTANCE
   __
   +BaselinePathProfile jvmBootstrapNoise()
 }
+class "MazewallProfiler" as io.mazewall.profiler.MazewallProfiler {
+  + {static}Companion Companion
+  __
+  +ProfilingResult<Unit> snapshot()
+  +void close()
+}
+class "NetworkEndpoint" as io.mazewall.profiler.NetworkEndpoint {
+  +String getHost()
+  +Integer getPort()
+}
+class "ObservationCorrelation" as io.mazewall.profiler.ObservationCorrelation {
+  +int getTgid()
+  +int getTid()
+  +Long getKtimeNs()
+  +ObservationCorrelation copy(int, int, Long)
+}
+enum "ObservationSource" as io.mazewall.profiler.ObservationSource {
+  USER_NOTIF
+  STRACE
+  EBPF
+}
+enum "PathResolutionQuality" as io.mazewall.profiler.PathResolutionQuality {
+  RESOLVED
+  TRUNCATED
+  FAILED
+  MIXED
+  NONE
+}
+class "ProfileEnvironment" as io.mazewall.profiler.ProfileEnvironment {
+  __
+  +String getKernelRelease()
+  +EbpfLoad getEbpfLoad()
+  +Integer getLandlockAbi()
+  +Boolean getIoUringDisabled()
+}
+interface "ProfileObservation" as io.mazewall.profiler.ProfileObservation {
+  ..
+  + {static}Companion Companion
+  __
+  + {abstract}ObservationCorrelation getCorrelation()
+  + {abstract}ObservationSource getSource()
+  + {abstract}List<String> getPaths()
+}
+class "ProfileOptions" as io.mazewall.profiler.ProfileOptions {
+  +ProfileStrategy getStrategy()
+  +boolean getCaptureStacks()
+  +boolean getProcessWide()
+  +Boolean getIoUringDisabled()
+}
+enum "ProfileStrategy" as io.mazewall.profiler.ProfileStrategy {
+  USER_NOTIF
+  STRACE
+  EBPF
+  HYBRID_NO_URING
+  AUTO
+}
 class "Profiler" as io.mazewall.profiler.Profiler {
+  ..
   + {static}Profiler INSTANCE
   __
   +ConcurrentHashMap<Tid, Thread> getThreadRegistry()
@@ -39,17 +120,45 @@ class "Profiler" as io.mazewall.profiler.Profiler {
   +void setInstallerProvider(ProfilerInstallerInterface)
   +void shutdown()
 }
+class "ProfilingCoverage" as io.mazewall.profiler.ProfilingCoverage {
+  + {static}Companion Companion
+  __
+  +ProfileStrategy getStrategy()
+  +String getStrategyReason()
+  +boolean getProcessWide()
+  +IoUringVisibility getIoUring()
+  +PathResolutionQuality getPathResolution()
+  +StackAttribution getStacks()
+  +int getDroppedEvents()
+  +boolean getDrainComplete()
+  +ProfileEnvironment getEnvironment()
+  +boolean getComplete()
+  +List<String> getWarnings()
+}
 class "ProfilingResult" as io.mazewall.profiler.ProfilingResult<T> {
   +T getValue()
   +BillOfBehavior getBehavior()
   +Map<TraceEvent, List<StackTraceElement[]>> getStackProfile()
+  +ProfilingCoverage getCoverage()
+}
+enum "StackAttribution" as io.mazewall.profiler.StackAttribution {
+  CAPTURED
+  SKIPPED
 }
 interface "TraceableWorkload" as io.mazewall.profiler.TraceableWorkload {
 }
 class "BobCompiler" as io.mazewall.profiler.compiler.BobCompiler {
+  ..
   + {static}BobCompiler INSTANCE
   __
   +BillOfBehavior compile(List<? extends TraceEvent>)
+  +BillOfBehavior compileObservations(List<? extends ProfileObservation>)
+}
+class "StraceLogParser" as io.mazewall.profiler.compiler.StraceLogParser {
+  + {static}StraceLogParser INSTANCE
+  __
+  +List<ProfileObservation> parse(String)
+  +ProfileObservation parseLine(String)
 }
 interface "DaemonRunner" as io.mazewall.profiler.engine.DaemonRunner {
   + {abstract}void runDaemon(String[])
@@ -328,15 +437,31 @@ class "DiagnosticTriageRunner" as io.mazewall.profiler.triage.DiagnosticTriageRu
   __
   + {static}void main(String[])
 }
+io.mazewall.profiler.BillOfBehavior --> io.mazewall.profiler.NetworkEndpoint
 io.mazewall.profiler.BillOfBehavior --> io.mazewall.profiler.engine.TraceEvent
+io.mazewall.profiler.EbpfCapability --> io.mazewall.profiler.EbpfCapability
+io.mazewall.profiler.IncompleteProfileException --> io.mazewall.profiler.ProfilingCoverage
 io.mazewall.profiler.JvmBaselineProfiles --> io.mazewall.profiler.JvmBaselineProfiles
+io.mazewall.profiler.MazewallProfiler --> io.mazewall.profiler.ProfileStrategy
+io.mazewall.profiler.MazewallProfiler --> io.mazewall.profiler.ProfileOptions
+io.mazewall.profiler.MazewallProfiler --> io.mazewall.profiler.ProfilingResult
+io.mazewall.profiler.MazewallProfiler --> io.mazewall.profiler.ProfileEnvironment
+io.mazewall.profiler.ProfileEnvironment --> io.mazewall.profiler.EbpfLoad
+io.mazewall.profiler.ProfileOptions --> io.mazewall.profiler.ProfileStrategy
 io.mazewall.profiler.Profiler --> io.mazewall.profiler.internal.ProfilerTraceListener
 io.mazewall.profiler.Profiler --> io.mazewall.profiler.Profiler
 io.mazewall.profiler.Profiler --> io.mazewall.profiler.internal.ProfilerDaemonManager
 io.mazewall.profiler.Profiler --> io.mazewall.profiler.engine.ProfilerInstallerInterface
+io.mazewall.profiler.ProfilingCoverage --> io.mazewall.profiler.IoUringVisibility
+io.mazewall.profiler.ProfilingCoverage --> io.mazewall.profiler.ProfileStrategy
+io.mazewall.profiler.ProfilingCoverage --> io.mazewall.profiler.StackAttribution
+io.mazewall.profiler.ProfilingCoverage --> io.mazewall.profiler.ProfileEnvironment
+io.mazewall.profiler.ProfilingCoverage --> io.mazewall.profiler.PathResolutionQuality
 io.mazewall.profiler.ProfilingResult --> io.mazewall.profiler.BillOfBehavior
+io.mazewall.profiler.ProfilingResult --> io.mazewall.profiler.ProfilingCoverage
 io.mazewall.profiler.ProfilingResult --> io.mazewall.profiler.engine.TraceEvent
 io.mazewall.profiler.compiler.BobCompiler --> io.mazewall.profiler.compiler.BobCompiler
+io.mazewall.profiler.compiler.StraceLogParser --> io.mazewall.profiler.compiler.StraceLogParser
 io.mazewall.profiler.engine.PathNormalizerHelper --> io.mazewall.profiler.engine.PathNormalizerHelper
 io.mazewall.profiler.engine.ProfilerDaemon --> io.mazewall.profiler.engine.DaemonRunner
 io.mazewall.profiler.engine.ProfilerDaemon --> io.mazewall.profiler.engine.ProfilerDaemon

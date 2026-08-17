@@ -17,4 +17,22 @@ data class ProfilingResult<T>(
     val value: T,
     val behavior: BillOfBehavior,
     val stackProfile: Map<TraceEvent, List<Array<StackTraceElement>>>,
-)
+    val coverage: ProfilingCoverage = ProfilingCoverage(
+        strategy = ProfileStrategy.USER_NOTIF,
+        strategyReason = "legacy result without coverage",
+        processWide = false,
+        ioUring = IoUringVisibility.UNSEEN,
+        pathResolution = PathResolutionQuality.NONE,
+        stacks = StackAttribution.SKIPPED,
+        droppedEvents = 0,
+        drainComplete = true,
+        environment = ProfileEnvironment("unknown", EbpfLoad.Denied("unprobed")),
+        complete = true,
+    ),
+) {
+    fun toPolicy(
+        base: io.mazewall.Policy<*, io.mazewall.Uncompiled> = io.mazewall.Policy.PURE_COMPUTE_UNSAFE,
+        baseCwd: java.nio.file.Path? = null,
+        allowIncomplete: Boolean = false,
+    ) = behavior.toPolicy(base, baseCwd, coverage, allowIncomplete)
+}

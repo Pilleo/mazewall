@@ -79,6 +79,34 @@ class ProfilerArchitectureTest {
     }
 
     @ArchTest
+    fun observationAndEbpfOutcomesHaveAClosedSubclassSet(allClasses: com.tngtech.archunit.core.domain.JavaClasses) {
+        val expected = mapOf(
+            "io.mazewall.profiler.ProfileObservation" to setOf(
+                "io.mazewall.profiler.ProfileObservation\$Syscall",
+                "io.mazewall.profiler.ProfileObservation\$IoUring",
+                "io.mazewall.profiler.ProfileObservation\$Connect",
+            ),
+            "io.mazewall.profiler.EbpfLoad" to setOf(
+                "io.mazewall.profiler.EbpfLoad\$Available",
+                "io.mazewall.profiler.EbpfLoad\$UserNamespaceRoot",
+                "io.mazewall.profiler.EbpfLoad\$Denied",
+            ),
+        )
+        for ((parent, kids) in expected) {
+            val actual = allClasses
+                .filter { it.isAssignableTo(parent) && it.name != parent }
+                .filter { "\$\$" !in it.name && !it.name.contains("DefaultImpls") }
+                .map { it.name }
+                .toSet()
+            org.junit.jupiter.api.Assertions.assertEquals(
+                kids,
+                actual,
+                "Closed subclass set for $parent changed.",
+            )
+        }
+    }
+
+    @ArchTest
     fun `native-only transport for SCM_RIGHTS`(allClasses: com.tngtech.archunit.core.domain.JavaClasses) {
         noClasses()
             .that()

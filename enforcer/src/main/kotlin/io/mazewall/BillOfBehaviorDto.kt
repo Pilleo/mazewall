@@ -14,6 +14,8 @@ public class BillOfBehaviorDto(
     val fsWritePaths: Set<String> = emptySet(),
     val syscalls: Set<String> = emptySet(),
     val execs: Set<String> = emptySet(),
+    val connects: Set<String> = emptySet(),
+    val ioUringOps: Set<String> = emptySet(),
     val stackProfile: List<StackProfileEntryDto> = emptyList(),
 )
 

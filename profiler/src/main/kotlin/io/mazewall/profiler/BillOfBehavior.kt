@@ -31,6 +31,8 @@ data class BillOfBehavior(
     val fsWritePaths: Set<String> = emptySet(),
     val syscalls: Set<Syscall> = emptySet(),
     val execs: Set<String> = emptySet(),
+    val connects: Set<NetworkEndpoint> = emptySet(),
+    val ioUringOps: Set<String> = emptySet(),
     /**
      * Keyed by [TraceEvent] identity; multiple events for the same syscall name
      * may produce different stack entries if triggered from different call sites.
@@ -44,7 +46,12 @@ data class BillOfBehavior(
     fun toPolicy(
         base: Policy<*, Uncompiled> = Policy.PURE_COMPUTE_UNSAFE,
         baseCwd: Path? = null,
+        coverage: ProfilingCoverage? = null,
+        allowIncomplete: Boolean = false,
     ): Policy<PolicyScope.ThreadLocalOnly, Uncompiled> {
+        if (coverage != null && !coverage.complete && !allowIncomplete) {
+            throw IncompleteProfileException(coverage)
+        }
         @Suppress("UNCHECKED_CAST")
         val builder = Policy.threadLocalBuilder().base(base as Policy<PolicyScope.ThreadLocalOnly, *>)
         if (base.defaultAction == io.mazewall.core.SeccompAction.ACT_ALLOW) {
@@ -113,6 +120,8 @@ data class BillOfBehavior(
             fsWritePaths = fsWritePaths + other.fsWritePaths,
             syscalls = syscalls + other.syscalls,
             execs = execs + other.execs,
+            connects = connects + other.connects,
+            ioUringOps = ioUringOps + other.ioUringOps,
             stackProfile = mergedStackProfile,
         )
     }
@@ -127,6 +136,8 @@ data class BillOfBehavior(
             fsWritePaths = fsWritePaths.filterNot { profile.matches(it) }.toSet(),
             syscalls = syscalls,
             execs = execs.filterNot { profile.matches(it) }.toSet(),
+            connects = connects,
+            ioUringOps = ioUringOps,
             stackProfile = stackProfile.filterKeys { event ->
                 event.paths.none { profile.matches(it) }
             },
@@ -169,6 +180,8 @@ data class BillOfBehavior(
             fsWritePaths = prunedWrites,
             syscalls = sortedSyscalls,
             execs = sortedExecs,
+            connects = connects.map { it.toString() }.toSet(),
+            ioUringOps = ioUringOps.sorted().toSet(),
             stackProfile = stackProfileDtos,
         )
 
@@ -213,6 +226,15 @@ data class BillOfBehavior(
             return fromJson(content)
         }
 
+        private fun parseEndpoint(raw: String): NetworkEndpoint {
+            val split = raw.lastIndexOf(':')
+            if (split > 0) {
+                val port = raw.substring(split + 1).toIntOrNull()
+                if (port != null) return NetworkEndpoint(raw.substring(0, split), port)
+            }
+            return NetworkEndpoint(raw, null)
+        }
+
         fun fromJson(json: String): BillOfBehavior {
             val dto = jsonSerializer.decodeFromString(BillOfBehaviorDto.serializer(), json)
 
@@ -252,6 +274,8 @@ data class BillOfBehavior(
                 fsWritePaths = dto.fsWritePaths,
                 syscalls = mappedSyscalls,
                 execs = dto.execs,
+                connects = dto.connects.map { parseEndpoint(it) }.toSet(),
+                ioUringOps = dto.ioUringOps,
                 stackProfile = stackProfile,
             )
         }
