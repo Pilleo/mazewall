@@ -124,6 +124,11 @@ object ContainedExecutors {
     /**
      * Wraps an [java.util.concurrent.ExecutorService] so that any task submitted to it will have the given
      * [policies] applied before execution.
+     *
+     * The caller still owns [delegate]. Filters stay on each worker after a task returns.
+     * Do not reuse the raw delegate for unrestricted work. An owned
+     * `ContainedExecutorService` is **not** planned (issue 032520 is deferred: high
+     * maintenance risk around thread lifecycle vs irreversible seccomp).
      */
     fun wrap(
         delegate: ExecutorService,

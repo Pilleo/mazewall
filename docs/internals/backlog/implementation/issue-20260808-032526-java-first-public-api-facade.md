@@ -2,9 +2,8 @@
 title: "Provide an Intentional Java Public API Facade"
 severity: "ENHANCEMENT"
 status: "open"
-priority: 8
+priority: high
 dependencies:
-  - "issue-20260808-032520"
   - "issue-20260808-032523"
 component: "enforcer"
 target_modules:

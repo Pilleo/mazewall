@@ -205,6 +205,39 @@ class PolicyTest {
     }
 
     @Test
+    fun `denyList and allowList modes are inspectable and compose restrictively`() {
+        val denied =
+            Policy.denyList(RuntimeProfile.HOTSPOT_JIT) {
+                denyProcessCreation()
+                denyNetwork()
+            }
+        val extra =
+            Policy.denyList(RuntimeProfile.NATIVE_IMAGE) {
+                denyProcessCreation()
+            }
+        assertEquals(PolicyMode.DENY_LIST, denied.mode)
+        assertTrue(denied.argumentRules.allowExecutableMappings)
+        assertFalse(denied.isSyscallAllowed(Syscall.EXECVE))
+        assertFalse(denied.isSyscallAllowed(Syscall.CONNECT))
+
+        val restricted = denied.restrictFurtherWith(extra)
+        val combined = Policy.combine(denied, extra)
+        assertEquals(combined.allowMmapExec, restricted.allowMmapExec)
+        assertEquals(combined.syscallActions, restricted.syscallActions)
+        assertFalse(restricted.argumentRules.allowExecutableMappings)
+
+        val allowListed =
+            Policy.allowList(RuntimeProfile.NATIVE_IMAGE) {
+                allow(Syscall.READ, Syscall.WRITE)
+            }
+        assertEquals(PolicyMode.ALLOW_LIST, allowListed.mode)
+        assertEquals(SeccompAction.ACT_ERRNO, allowListed.defaultAction)
+        assertTrue(allowListed.isSyscallAllowed(Syscall.READ))
+        assertFalse(allowListed.isSyscallAllowed(Syscall.CONNECT))
+        assertFalse(allowListed.argumentRules.allowExecutableMappings)
+    }
+
+    @Test
     fun `ProcessPolicies denyNetwork does not hide W^X on HotSpot`() {
         val hotspot = ProcessPolicies.denyNetwork(RuntimeProfile.HOTSPOT_JIT)
         val native = ProcessPolicies.denyNetwork(RuntimeProfile.NATIVE_IMAGE)

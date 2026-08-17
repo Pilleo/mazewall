@@ -68,6 +68,19 @@ public class Policy<out S : PolicyScope, out State : PolicyState> internal const
     public val argumentRules: PolicyArgumentRules get() = PolicyArgumentRules.of(definition)
 
     /**
+     * [PolicyMode.DENY_LIST] when the default action is allow; [PolicyMode.ALLOW_LIST]
+     * when the default is errno. Other default actions stay [PolicyMode.DENY_LIST]
+     * (legacy kill/trace defaults).
+     */
+    public val mode: PolicyMode
+        get() =
+            if (defaultAction == SeccompAction.ACT_ERRNO) {
+                PolicyMode.ALLOW_LIST
+            } else {
+                PolicyMode.DENY_LIST
+            }
+
+    /**
      * Whether unsafe prctl options are allowed.
      *
      * WARNING: This option is extremely dangerous and inherently vulnerable to concurrent memory mutation
@@ -157,6 +170,30 @@ public class Policy<out S : PolicyScope, out State : PolicyState> internal const
             return Policy(PolicyDefinition.combine(*defs))
         }
 
+        /**
+         * Named intersection of process-wide policies. Same algebra as [combine]:
+         * higher-priority Seccomp actions win; Landlock paths shrink; flags AND.
+         * Does not expand permissions already installed in the kernel.
+         */
+        @JvmStatic
+        public fun restrictFurtherWith(
+            vararg policies: Policy<PolicyScope.ProcessWideSafe, Uncompiled>,
+        ): Policy<PolicyScope.ProcessWideSafe, Uncompiled> = combine(*policies)
+
+        @JvmStatic
+        @JvmOverloads
+        public fun denyList(
+            runtime: RuntimeProfile = RuntimeProfile.HOTSPOT_JIT,
+            configure: DenyListSpec.() -> Unit = {},
+        ): Policy<PolicyScope.ProcessWideSafe, Uncompiled> = PolicyLists.denyList(runtime, configure)
+
+        @JvmStatic
+        @JvmOverloads
+        public fun allowList(
+            runtime: RuntimeProfile = RuntimeProfile.HOTSPOT_JIT,
+            configure: AllowListSpec.() -> Unit = {},
+        ): Policy<PolicyScope.ProcessWideSafe, Uncompiled> = PolicyLists.allowList(runtime, configure)
+
         @JvmStatic
         public fun combine(vararg policies: Policy<*, Uncompiled>): Policy<*, Uncompiled> {
             val defs = policies.map { it.definition }.toTypedArray()
@@ -191,6 +228,10 @@ public class Policy<out S : PolicyScope, out State : PolicyState> internal const
         public fun block(vararg syscalls: Syscall): Builder<S> = addAction(SeccompAction.ACT_ERRNO, *syscalls)
         public fun allow(vararg syscalls: Syscall): Builder<S> = addAction(SeccompAction.ACT_ALLOW, *syscalls)
 
+        /**
+         * Removes an explicit action from this uncompiled builder only.
+         * Installed kernel filters are monotonic and cannot grow.
+         */
         public fun unblock(vararg syscalls: Syscall): Builder<S> {
             internalBuilder.unblock(*syscalls)
             return this
@@ -295,12 +336,17 @@ internal fun <S : PolicyScope> Policy<S, Uncompiled>.compile(arch: Arch): Policy
 }
 
 /**
- * Composes two [PolicyScope.ProcessWideSafe] policies.
+ * Composes two [PolicyScope.ProcessWideSafe] policies (intersection / restrict-further).
  */
 @JvmName("plusProcessWide")
 public operator fun Policy<PolicyScope.ProcessWideSafe, Uncompiled>.plus(
     other: Policy<PolicyScope.ProcessWideSafe, Uncompiled>
-): Policy<PolicyScope.ProcessWideSafe, Uncompiled> = Policy.combine(this, other)
+): Policy<PolicyScope.ProcessWideSafe, Uncompiled> = Policy.restrictFurtherWith(this, other)
+
+/** Restrictive composition; same as [Policy.restrictFurtherWith]. */
+public fun Policy<PolicyScope.ProcessWideSafe, Uncompiled>.restrictFurtherWith(
+    other: Policy<PolicyScope.ProcessWideSafe, Uncompiled>,
+): Policy<PolicyScope.ProcessWideSafe, Uncompiled> = Policy.restrictFurtherWith(this, other)
 
 /**
  * Composes a policy with a thread-local policy.

@@ -66,6 +66,7 @@ public data class PolicyDefinition<out S : PolicyScope>(
     public companion object {
         /**
          * Composes multiple policies into a single one.
+         * Prefer [intersection] when the intent is "strictest wins".
          */
         public fun <S : PolicyScope> combine(vararg policies: PolicyDefinition<out S>): PolicyDefinition<S> {
             require(policies.isNotEmpty()) { "At least one policy is required" }
@@ -131,6 +132,10 @@ public data class PolicyDefinition<out S : PolicyScope>(
                 customViolationRegexes = combinedRegexes
             )
         }
+
+        /** Same as [combine]; name states that the result is never more permissive. */
+        public fun <S : PolicyScope> intersection(vararg policies: PolicyDefinition<out S>): PolicyDefinition<S> =
+            combine(*policies)
 
         private fun intersectPaths(
             set1: Set<SandboxedPath>,

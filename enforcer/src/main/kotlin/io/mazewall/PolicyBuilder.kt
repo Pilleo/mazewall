@@ -56,6 +56,7 @@ public class PolicyBuilder<S : PolicyScope> internal constructor(
     public fun block(vararg syscalls: Syscall): PolicyBuilder<S> = addAction(SeccompAction.ACT_ERRNO, *syscalls)
     public fun allow(vararg syscalls: Syscall): PolicyBuilder<S> = addAction(SeccompAction.ACT_ALLOW, *syscalls)
 
+    /** Uncompiled-definition only. Installed kernel filters cannot grow. */
     public fun unblock(vararg syscalls: Syscall): PolicyBuilder<S> {
         for (sys in syscalls) syscallActions.remove(sys)
         return this
