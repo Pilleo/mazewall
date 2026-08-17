@@ -8,6 +8,7 @@ import io.mazewall.enforcer.*
 
 import io.mazewall.LinuxNative
 import io.mazewall.NativeEngine
+import io.mazewall.seccomp.SeccompInstallationState
 import io.mazewall.core.ProcessLauncher
 import io.mazewall.core.RealProcessLauncher
 import io.mazewall.core.RealSocketManager
@@ -112,17 +113,18 @@ public class SupervisorDaemonManager(
     }
 
     private fun refuseSpawnIfParentIsFiltered() {
-        val mode = when (val res = engine.process.prctl(io.mazewall.core.PrctlCommand.GetSeccomp)) {
-            is LinuxNative.SyscallResult.Success -> res.value
-            is LinuxNative.SyscallResult.Error -> {
-                if (res.errno == io.mazewall.ffi.NativeConstants.ENOSYS) return
-                throw IllegalStateException("prctl(PR_GET_SECCOMP) failed with errno=${res.errno}")
-            }
-        }
-        // 2 == SECCOMP_MODE_FILTER. The child inherits it and cannot drop it.
-        check(mode < 2L) {
-            "Cannot spawn SupervisorDaemon after process-wide seccomp is installed " +
-                "(PR_GET_SECCOMP=$mode). Spawn the daemon before installOnProcess, " +
+        // PR_GET_SECCOMP==2 is also the outer OCI/podman profile. The daemon is meant
+        // to run inside that profile. Only refuse after *this JVM* applied a mazewall filter
+        // (the child would inherit it and could not operate).
+        val merged = ContainmentStateRegistry.resolveCurrentState()
+        val mazewallApplied =
+            merged.filterDepth > 0 ||
+                merged.engineState is SeccompInstallationState.Verified ||
+                merged.engineState is SeccompInstallationState.SystemCallApplied ||
+                merged.engineState is SeccompInstallationState.FallbackPrctlApplied
+        check(!mazewallApplied) {
+            "Cannot spawn SupervisorDaemon after mazewall seccomp is installed on this JVM " +
+                "(filterDepth=${merged.filterDepth}). Spawn the daemon before installOnProcess, " +
                 "or run this test in an isolated JVM."
         }
     }
