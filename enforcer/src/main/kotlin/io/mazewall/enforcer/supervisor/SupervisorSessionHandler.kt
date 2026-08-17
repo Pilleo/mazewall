@@ -6,6 +6,7 @@ import io.mazewall.enforcer.diagnostics.*
 import io.mazewall.enforcer.engine.*
 import io.mazewall.enforcer.*
 import io.mazewall.LinuxNative
+import io.mazewall.platform.seccomp.SupervisedKind
 import io.mazewall.platform.seccomp.daemon.LoopAction
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
@@ -185,16 +186,13 @@ internal class SupervisorSessionHandler(
     private fun processNotification(notif: ManagedSegment, resp: ManagedSegment): Boolean {
         return NativeArena.ofConfined().use { notificationArena ->
             with(notificationArena) {
-                val id = notif.readLong(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_ID_OFFSET)
+                val parsed = io.mazewall.platform.seccomp.SeccompNotifications.read(notif)
+                val id = parsed.id
                 try {
-                    val pidVal = notif.readInt(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_PID_OFFSET)
-                    val archVal = notif.readInt(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_ARCH_OFFSET)
-                    val nr = notif.readInt(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_NR_OFFSET)
-
-                    val args = LongArray(MAX_ARGS)
-                    for (i in 0 until MAX_ARGS) {
-                        args[i] = notif.readLong(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_ARGS_OFFSET + i * BYTES_PER_LONG)
-                    }
+                    val pidVal = parsed.pid
+                    val archVal = parsed.arch
+                    val nr = parsed.nr
+                    val args = parsed.args
 
                     val tid = Tid(pidVal)
                     val traceeArch = io.mazewall.core.Arch.fromAudit(archVal)
@@ -839,33 +837,13 @@ internal class SupervisorSessionHandler(
     }
 
     private fun sendSeccompContinue(id: Long, resp: ManagedSegment) {
-        resp.fill(0)
-        resp.writeLong(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_RESP_ID_OFFSET, id)
-        resp.writeLong(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_RESP_VAL_OFFSET, 0L)
-        resp.writeInt(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_RESP_ERROR_OFFSET, 0)
-        resp.writeInt(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_RESP_FLAGS_OFFSET, NativeConstants.SECCOMP_USER_NOTIF_FLAG_CONTINUE.toInt())
-        while (true) {
-            val res = engine.raw.ioctl(listenerFd, IoctlCommand.SECCOMP_IOCTL_NOTIF_SEND, resp.typed<IoctlPayload.SeccompNotifResp>())
-            if (res is LinuxNative.SyscallResult.Error<*> && res.errno == NativeConstants.EINTR) {
-                continue
-            }
-            break
-        }
+        io.mazewall.platform.seccomp.UserNotifReply.encodeContinue(resp, id)
+        io.mazewall.platform.seccomp.UserNotifReply.send(engine.raw, listenerFd, resp)
     }
 
     private fun sendSeccompError(id: Long, errorNr: Int, resp: ManagedSegment) {
-        resp.fill(0)
-        resp.writeLong(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_RESP_ID_OFFSET, id)
-        resp.writeLong(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_RESP_VAL_OFFSET, -1L)
-        resp.writeInt(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_RESP_ERROR_OFFSET, -errorNr)
-        resp.writeInt(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_RESP_FLAGS_OFFSET, 0)
-        while (true) {
-            val res = engine.raw.ioctl(listenerFd, IoctlCommand.SECCOMP_IOCTL_NOTIF_SEND, resp.typed<IoctlPayload.SeccompNotifResp>())
-            if (res is LinuxNative.SyscallResult.Error<*> && res.errno == NativeConstants.EINTR) {
-                continue
-            }
-            break
-        }
+        io.mazewall.platform.seccomp.UserNotifReply.encodeError(resp, id, errorNr)
+        io.mazewall.platform.seccomp.UserNotifReply.send(engine.raw, listenerFd, resp)
     }
 
     context(arena: NativeArena)

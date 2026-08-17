@@ -52,6 +52,7 @@ class ArchitectureTest {
                 "io.mazewall", // RealNativeEngine and RealPlatformProvider are in the root package
                 "io.mazewall.profiler.engine..",
                 "io.mazewall.platform.seccomp.daemon..",
+                "io.mazewall.platform.seccomp..",
             )
 
             .should()
@@ -506,13 +507,13 @@ class ArchitectureTest {
                 "io.mazewall.enforcer.supervisor.BypassPaths\$PathResolution\$Missing",
                 "io.mazewall.enforcer.supervisor.BypassPaths\$PathResolution\$Unsafe",
             ),
-            "io.mazewall.enforcer.supervisor.SupervisedKind" to setOf(
-                "io.mazewall.enforcer.supervisor.SupervisedKind\$Open",
-                "io.mazewall.enforcer.supervisor.SupervisedKind\$Connect",
-                "io.mazewall.enforcer.supervisor.SupervisedKind\$Accept",
-                "io.mazewall.enforcer.supervisor.SupervisedKind\$Exec",
-                "io.mazewall.enforcer.supervisor.SupervisedKind\$Spawn",
-                "io.mazewall.enforcer.supervisor.SupervisedKind\$Unknown",
+            "io.mazewall.platform.seccomp.SupervisedKind" to setOf(
+                "io.mazewall.platform.seccomp.SupervisedKind\$Open",
+                "io.mazewall.platform.seccomp.SupervisedKind\$Connect",
+                "io.mazewall.platform.seccomp.SupervisedKind\$Accept",
+                "io.mazewall.platform.seccomp.SupervisedKind\$Exec",
+                "io.mazewall.platform.seccomp.SupervisedKind\$Spawn",
+                "io.mazewall.platform.seccomp.SupervisedKind\$Unknown",
             ),
             "io.mazewall.enforcer.supervisor.SupervisorRoute" to setOf(
                 "io.mazewall.enforcer.supervisor.SupervisorRoute\$Continue",

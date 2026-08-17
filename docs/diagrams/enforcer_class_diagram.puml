@@ -648,8 +648,6 @@ interface "StacktraceScopingPolicy" as io.mazewall.enforcer.supervisor.Stacktrac
 }
 class "StacktraceScopingPolicyKt" as io.mazewall.enforcer.supervisor.StacktraceScopingPolicyKt {
 }
-interface "SupervisedKind" as io.mazewall.enforcer.supervisor.SupervisedKind {
-}
 class "SupervisorContext" as io.mazewall.enforcer.supervisor.SupervisorContext {
   +String getSocketPath()
   +Path getSocketDir()
@@ -1327,6 +1325,29 @@ class "UnixListenDaemonTransition" as io.mazewall.platform.daemon.UnixListenDaem
   +UnixListenDaemonState getState()
   +List<UnixListenDaemonEffect> getEffects()
 }
+class "SeccompNotification" as io.mazewall.platform.seccomp.SeccompNotification {
+  +long getId()
+  +int getPid()
+  +int getArch()
+  +int getNr()
+  +long[] getArgs()
+}
+class "SeccompNotifications" as io.mazewall.platform.seccomp.SeccompNotifications {
+  + {static}SeccompNotifications INSTANCE
+  + {static}int ARG_COUNT
+  __
+  +SeccompNotification read(ManagedSegment)
+}
+interface "SupervisedKind" as io.mazewall.platform.seccomp.SupervisedKind {
+  + {static}Companion Companion
+}
+class "UserNotifReply" as io.mazewall.platform.seccomp.UserNotifReply {
+  + {static}UserNotifReply INSTANCE
+  __
+  +void encodeContinue(ManagedSegment, long)
+  +void encodeError(ManagedSegment, long, int)
+  +SyscallResult send(RawSyscallOperations, FileDescriptor<SeccompNotif, ? extends Open>, ManagedSegment)
+}
 abstract class "LoopAction" as io.mazewall.platform.seccomp.daemon.LoopAction {
 }
 enum "NotifResult" as io.mazewall.platform.seccomp.daemon.NotifResult {
@@ -1652,6 +1673,8 @@ io.mazewall.landlock.LandlockSession --> io.mazewall.PolicyDefinition
 io.mazewall.platform.daemon.UnixListenDaemonMachine --> io.mazewall.platform.daemon.UnixListenDaemonMachine
 io.mazewall.platform.daemon.UnixListenDaemonTransition --> io.mazewall.platform.daemon.UnixListenDaemonState
 io.mazewall.platform.daemon.UnixListenDaemonTransition --> io.mazewall.platform.daemon.UnixListenDaemonEffect
+io.mazewall.platform.seccomp.SeccompNotifications --> io.mazewall.platform.seccomp.SeccompNotifications
+io.mazewall.platform.seccomp.UserNotifReply --> io.mazewall.platform.seccomp.UserNotifReply
 io.mazewall.platform.seccomp.daemon.SeccompDaemonEngine --> io.mazewall.core.SocketManager
 io.mazewall.platform.seccomp.daemon.SeccompDaemonEngine --> io.mazewall.core.FileDescriptor
 io.mazewall.platform.seccomp.daemon.SeccompDaemonEngine --> io.mazewall.platform.daemon.UnixListenDaemonState

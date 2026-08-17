@@ -46,13 +46,8 @@ internal interface SeccompNotificationParser {
 
 internal object RealSeccompNotificationParser : SeccompNotificationParser {
     override fun readNotif(notif: ManagedSegment): SeccompNotification {
-        val id = notif.readLong(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_ID_OFFSET)
-        val pidVal = notif.readInt(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_PID_OFFSET)
-        val nr = notif.readInt(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_NR_OFFSET)
-        val args = LongArray(MAX_SYSCALL_ARGS) { i ->
-            notif.readLong(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_ARGS_OFFSET + i * 8L)
-        }
-        return SeccompNotification(id, pidVal, nr, args)
+        val parsed = io.mazewall.platform.seccomp.SeccompNotifications.read(notif)
+        return SeccompNotification(parsed.id, parsed.pid, parsed.nr, parsed.args)
     }
 
     override fun readPollEvents(pollFds: ManagedSegment): PollEvents {

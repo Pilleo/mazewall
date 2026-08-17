@@ -246,7 +246,10 @@ internal class ProfilerSessionHandler(
         handshake: HandshakeSession.Active,
         resp: ManagedSegment,
     ): Boolean {
-        if ((nr == SYS_OPEN || nr == SYS_OPENAT || nr == SYS_OPENAT2) && resolvedEvent.paths.isNotEmpty()) {
+        if (io.mazewall.platform.seccomp.SupervisedKind.classify(nr, io.mazewall.core.Arch.current())
+            is io.mazewall.platform.seccomp.SupervisedKind.Open &&
+            resolvedEvent.paths.isNotEmpty()
+        ) {
             val pathStr = resolvedEvent.paths.first()
             try {
                 val normalizedPathStr = PathNormalizerHelper.normalizePath(pathStr)
@@ -276,11 +279,6 @@ internal class ProfilerSessionHandler(
 
         private const val ECONNRESET = 104
         private val logger = java.util.logging.Logger.getLogger(ProfilerSessionHandler::class.java.name)
-
-        private const val SYS_OPEN = 2
-        private const val SYS_OPENAT = 257
-        private const val SYS_OPENAT2 = 437
-
 
     }
 }

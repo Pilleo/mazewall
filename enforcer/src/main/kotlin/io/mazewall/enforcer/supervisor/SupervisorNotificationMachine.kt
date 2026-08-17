@@ -2,16 +2,7 @@ package io.mazewall.enforcer.supervisor
 
 import io.mazewall.core.Arch
 import io.mazewall.ffi.NativeConstants
-
-/** Known USER_NOTIF kinds. Unknown numbers are never continued. */
-public sealed interface SupervisedKind {
-    public data object Open : SupervisedKind
-    public data object Connect : SupervisedKind
-    public data object Accept : SupervisedKind
-    public data object Exec : SupervisedKind
-    public data object Spawn : SupervisedKind
-    public data object Unknown : SupervisedKind
-}
+import io.mazewall.platform.seccomp.SupervisedKind
 
 public sealed interface JvmVerdict {
     public data class Deny(val errorNr: Int) : JvmVerdict
@@ -28,16 +19,7 @@ public sealed interface SupervisorRoute {
 }
 
 public object SupervisorNotificationMachine {
-    public fun classify(nr: Int, arch: Arch): SupervisedKind {
-        return when (nr) {
-            arch.open, arch.openat, arch.openat2 -> SupervisedKind.Open
-            arch.connect -> SupervisedKind.Connect
-            arch.accept, arch.accept4 -> SupervisedKind.Accept
-            arch.execve, arch.execveat -> SupervisedKind.Exec
-            arch.fork, arch.vfork, arch.clone -> SupervisedKind.Spawn
-            else -> SupervisedKind.Unknown
-        }
-    }
+    public fun classify(nr: Int, arch: Arch): SupervisedKind = SupervisedKind.classify(nr, arch)
 
     public fun parseJvmVerdict(decision: Int, errorNr: Int): JvmVerdict? {
         return when (decision) {
