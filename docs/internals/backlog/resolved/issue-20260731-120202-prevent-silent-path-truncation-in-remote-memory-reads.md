@@ -2,7 +2,7 @@
 title: "Prevent Silent Path/String Truncation in Remote Process Memory Reads"
 severity: "CRITICAL"
 status: "resolved"
-priority: 10
+priority: high
 dependencies: []
 component: "enforcer"
 target_modules:

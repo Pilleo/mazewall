@@ -1,6 +1,6 @@
 ---
 title: Refactor Orchestrator State Machine Testability
-priority: 8
+priority: high
 status: resolved
 dependencies:
 - issue-190

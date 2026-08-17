@@ -3,7 +3,7 @@ title: Standard Java Concurrency (`Virtual Threads`, `CompletableFuture`) trivia
   bypasses Thread-Scoped (Tier 2) containment without ACE
 severity: CRITICAL
 status: open
-priority: 5
+priority: medium
 dependencies: []
 target_files:
 - enforcer/src/main/kotlin/io/mazewall/enforcer/ContainedExecutors.kt

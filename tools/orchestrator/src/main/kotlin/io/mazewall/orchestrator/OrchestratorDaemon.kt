@@ -287,7 +287,7 @@ class OrchestratorDaemonRunner(
 
             // Sort by priority descending, then ID descending
             val nextIssue = conflictFreeIssues.sortedWith(
-                compareByDescending<BacklogIssue> { it.priority }
+                compareByDescending<BacklogIssue> { it.priority.rank }
                     .thenByDescending { it.id }
             ).firstOrNull()
 

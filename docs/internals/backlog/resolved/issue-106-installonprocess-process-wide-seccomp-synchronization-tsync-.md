@@ -2,7 +2,7 @@
 title: "🟢 [RESOLVED]: `installOnProcess` process-wide seccomp synchronization (TSYNC) fails deterministically on standard JVMs"
 severity: "RESOLVED"
 status: "resolved"
-priority: 5
+priority: medium
 ---
 
 # 🟢 [RESOLVED]: `installOnProcess` process-wide seccomp synchronization (TSYNC) fails deterministically on standard JVMs

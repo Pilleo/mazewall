@@ -2,7 +2,7 @@
 title: "`SeccompAction` Violates Open/Closed Principle (OCP)"
 severity: "ENHANCEMENT"
 status: "resolved"
-priority: 2
+priority: low
 dependencies: []
 component: "unknown"
 effort: "large"

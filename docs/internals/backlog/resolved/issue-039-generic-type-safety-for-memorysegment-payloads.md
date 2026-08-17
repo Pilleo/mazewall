@@ -2,7 +2,7 @@
 title: "Generic Type Safety for `MemorySegment` Payloads"
 severity: "RESOLVED"
 status: "resolved"
-priority: 5
+priority: medium
 ---
 
 # ✅ [RESOLVED]: Generic Type Safety for `MemorySegment` Payloads

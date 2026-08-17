@@ -2,7 +2,7 @@
 title: "Add Installation Preflight, Effective Configuration and Typed Results"
 severity: "MEDIUM"
 status: "open"
-priority: 10
+priority: high
 dependencies:
   - "issue-20260808-032521"
   - "issue-20260808-032522"

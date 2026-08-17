@@ -2,7 +2,7 @@
 title: "`SbobParser` Production Crashes due to Syntactic Subpath Pruning of Unresolved/Symlinked Paths"
 severity: "HIGH"
 status: "resolved"
-priority: 9
+priority: high
 dependencies: []
 component: "profiler"
 effort: "small"

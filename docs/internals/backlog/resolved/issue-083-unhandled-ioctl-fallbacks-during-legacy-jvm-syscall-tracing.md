@@ -2,7 +2,7 @@
 title: "Unhandled `IOCTL` fallbacks during legacy JVM syscall tracing"
 severity: "HIGH"
 status: "resolved"
-priority: 9
+priority: high
 dependencies: []
 component: "profiler"
 effort: "small"

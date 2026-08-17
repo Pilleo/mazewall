@@ -2,7 +2,7 @@
 title: "ProfilerTraceListener Hangs Due to ACK Buffer Size Mismatch"
 severity: "HIGH"
 status: "open"
-priority: 9
+priority: high
 dependencies: []
 component: "profiler"
 target_modules:

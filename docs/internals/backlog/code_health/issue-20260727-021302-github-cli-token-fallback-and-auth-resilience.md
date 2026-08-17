@@ -2,7 +2,7 @@
 title: "GitHub CLI Authentication Resilience and Fallback for Invalid GITHUB_TOKEN"
 severity: "MEDIUM"
 status: "open"
-priority: 8
+priority: high
 dependencies:
   - "issue-20260727-021301"
 component: "orchestrator"

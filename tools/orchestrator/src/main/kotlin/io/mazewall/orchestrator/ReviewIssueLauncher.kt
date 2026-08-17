@@ -29,7 +29,7 @@ object ReviewIssueLauncher {
             title: "Review Task: Profiler Module & Security Audit"
             severity: "HIGH"
             status: "open"
-            priority: 10
+            priority: high
             component: "profiler"
             target_modules: [":profiler", ":enforcer"]
             target_files: ["docs/internals/backlog/code_health/$fileName"]

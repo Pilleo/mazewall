@@ -2,7 +2,7 @@
 title: "Send JVM-known exec path in supervisor allow response"
 severity: "HIGH"
 status: "resolved"
-priority: 9
+priority: high
 dependencies: []
 component: "enforcer"
 target_modules:

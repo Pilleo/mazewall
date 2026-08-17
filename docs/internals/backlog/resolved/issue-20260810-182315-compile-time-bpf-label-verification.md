@@ -2,7 +2,7 @@
 title: "Compile-Time BPF Label Verification (Type-Safe AST)"
 severity: "ENHANCEMENT"
 status: "resolved"
-priority: 9
+priority: high
 dependencies: []
 component: "enforcer"
 target_modules:

@@ -2,7 +2,7 @@
 title: "Redundant State in `ThreadStateRegistry` vs `Policy`"
 severity: "HIGH"
 status: "resolved"
-priority: 9
+priority: high
 dependencies: []
 component: "enforcer"
 effort: "medium"

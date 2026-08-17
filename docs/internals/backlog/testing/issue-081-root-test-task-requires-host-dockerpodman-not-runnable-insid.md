@@ -3,7 +3,7 @@ title: "\U0001F4DD [NOTE]: Root `:test` task requires host Docker/Podman, not ru
   \ inside dev container"
 severity: MEDIUM
 status: open
-priority: 4
+priority: medium
 dependencies: []
 target_files:
 - build.gradle.kts

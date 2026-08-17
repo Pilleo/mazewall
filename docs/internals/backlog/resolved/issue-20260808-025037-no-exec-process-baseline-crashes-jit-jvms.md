@@ -2,7 +2,7 @@
 title: "Process-Wide NO_EXEC Baseline Can Fatally Crash a JIT JVM"
 severity: "HIGH"
 status: resolved
-priority: 1
+priority: low
 dependencies: []
 component: "enforcer"
 target_modules:

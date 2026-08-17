@@ -2,7 +2,7 @@
 title: "Silent Test Logging with Vocal Output on Failure"
 severity: "HIGH"
 status: "resolved"
-priority: 10
+priority: high
 dependencies: []
 component: "testing"
 effort: "small"

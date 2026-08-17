@@ -2,7 +2,7 @@
 title: "`SeccompInstallationState` Partial Failure Leaves Thread Unprivileged but Uncontained"
 severity: "HIGH"
 status: "resolved"
-priority: 9
+priority: high
 dependencies: []
 component: "enforcer"
 effort: "small"

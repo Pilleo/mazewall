@@ -2,7 +2,7 @@
 title: "Retain SegmentPool Overflow Allocations"
 severity: "MEDIUM"
 status: "resolved"
-priority: 7
+priority: medium
 dependencies: []
 component: "platform"
 target_modules:

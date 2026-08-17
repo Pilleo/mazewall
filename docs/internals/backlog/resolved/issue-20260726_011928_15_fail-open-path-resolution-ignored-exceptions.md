@@ -8,7 +8,7 @@ title: SupervisorSessionHandler ignores critical exceptions during path resoluti
   leading to fail-open bypass
 type: issue
 status: resolved
-priority: 8
+priority: high
 labels:
 - security
 - enforcer

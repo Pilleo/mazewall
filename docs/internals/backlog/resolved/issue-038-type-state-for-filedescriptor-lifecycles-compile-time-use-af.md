@@ -2,7 +2,7 @@
 title: "Type-State for FileDescriptor Lifecycles (Compile-Time Use-After-Close Safety)"
 severity: "ENHANCEMENT"
 status: "resolved"
-priority: 2
+priority: low
 dependencies: []
 target_files:
 - platform/src/main/kotlin/io/mazewall/core/FileDescriptor.kt

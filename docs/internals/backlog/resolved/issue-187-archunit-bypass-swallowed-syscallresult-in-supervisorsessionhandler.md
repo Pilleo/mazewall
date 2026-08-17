@@ -2,7 +2,7 @@
 title: "ArchUnit Bypass: Swallowed SyscallResult in SupervisorSessionHandler"
 severity: "HIGH"
 status: "resolved"
-priority: 9
+priority: high
 dependencies: []
 component: "unknown"
 effort: "medium"

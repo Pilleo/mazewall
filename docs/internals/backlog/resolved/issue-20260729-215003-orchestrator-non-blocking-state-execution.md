@@ -2,7 +2,7 @@
 title: "Refactor Orchestrator States to Be Fully Non-Blocking to Enable True Concurrent Task Execution"
 severity: "HIGH"
 status: "resolved"
-priority: 9
+priority: high
 dependencies: []
 component: "orchestrator"
 target_modules:

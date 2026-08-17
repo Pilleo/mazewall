@@ -2,7 +2,7 @@
 title: "Uncaught Native Exceptions Escaping BPF Installation"
 severity: "HIGH"
 status: "resolved"
-priority: 9
+priority: high
 dependencies: []
 component: "seccomp"
 effort: "small"

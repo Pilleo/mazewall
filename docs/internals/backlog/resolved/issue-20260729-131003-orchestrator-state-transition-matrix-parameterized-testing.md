@@ -2,7 +2,7 @@
 title: "Implement Parameterized Transition Matrix Testing for Orchestrator States"
 severity: "HIGH"
 status: "resolved"
-priority: 10
+priority: high
 dependencies: []
 component: "orchestrator"
 target_modules:

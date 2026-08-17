@@ -2,7 +2,7 @@
 title: "🔴 [Severity: DX-FRICTION]: Opaque Exceptions on Landlock Initialization Failure"
 severity: "HIGH"
 status: "resolved"
-priority: 9
+priority: high
 dependencies: []
 component: "enforcer"
 effort: "small"

@@ -2,7 +2,7 @@
 title: "Socket Address Family Filtering for Network Isolation Evasion Prevention"
 severity: "ENHANCEMENT"
 status: "resolved"
-priority: 2
+priority: low
 dependencies: []
 target_files: []
 target_modules: [\":enforcer\"]

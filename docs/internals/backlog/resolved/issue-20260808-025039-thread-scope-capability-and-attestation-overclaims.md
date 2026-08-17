@@ -2,7 +2,7 @@
 title: "Thread-Scoped Policies Are Documented as Enforcing Capabilities They Cannot Observe"
 severity: "HIGH"
 status: resolved
-priority: 1
+priority: low
 dependencies: []
 component: "enforcer"
 target_modules:

@@ -69,9 +69,7 @@ object BacklogValidator {
                 errors.add("${file.name}: Invalid status '${issue.status}'. Allowed: $VALID_STATUSES")
             }
 
-            if (issue.priority < 0 || issue.priority > 10) {
-                errors.add("${file.name}: Priority '${issue.priority}' out of bounds (must be 0..10)")
-            }
+            // Priority is parsed as high/medium/low; invalid tokens fail parseIssueFile.
 
             if (issue.component.isNullOrBlank() || issue.component !in VALID_COMPONENTS) {
                 errors.add("${file.name}: Invalid or missing component '${issue.component}'. Allowed: $VALID_COMPONENTS")

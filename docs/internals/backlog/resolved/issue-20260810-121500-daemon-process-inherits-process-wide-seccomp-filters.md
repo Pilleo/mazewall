@@ -2,7 +2,7 @@
 title: "SupervisorDaemon Inherits Process-Wide Seccomp Filters Leading to ENOSYS"
 severity: "HIGH"
 status: resolved
-priority: 9
+priority: high
 dependencies: []
 component: "enforcer"
 target_modules:

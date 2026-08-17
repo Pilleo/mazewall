@@ -121,6 +121,12 @@ class "Profiler" as io.mazewall.profiler.Profiler {
   +void setInstallerProvider(ProfilerInstallerInterface)
   +void shutdown()
 }
+class "ProfilerAckPreload" as io.mazewall.profiler.ProfilerAckPreload {
+  + {static}ProfilerAckPreload INSTANCE
+  __
+  +List<String> getRequiredBinaryNames()
+  +void ensureLoaded()
+}
 class "ProfilingCoverage" as io.mazewall.profiler.ProfilingCoverage {
   + {static}Companion Companion
   __
@@ -494,6 +500,7 @@ io.mazewall.profiler.Profiler --> io.mazewall.profiler.internal.ProfilerTraceLis
 io.mazewall.profiler.Profiler --> io.mazewall.profiler.Profiler
 io.mazewall.profiler.Profiler --> io.mazewall.profiler.internal.ProfilerDaemonManager
 io.mazewall.profiler.Profiler --> io.mazewall.profiler.engine.ProfilerInstallerInterface
+io.mazewall.profiler.ProfilerAckPreload --> io.mazewall.profiler.ProfilerAckPreload
 io.mazewall.profiler.ProfilingCoverage --> io.mazewall.profiler.IoUringVisibility
 io.mazewall.profiler.ProfilingCoverage --> io.mazewall.profiler.ProfileStrategy
 io.mazewall.profiler.ProfilingCoverage --> io.mazewall.profiler.StackAttribution

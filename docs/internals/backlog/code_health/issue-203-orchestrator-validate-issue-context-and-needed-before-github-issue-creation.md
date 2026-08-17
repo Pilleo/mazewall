@@ -2,7 +2,7 @@
 title: 'Orchestrator: Validate Issue Context and Needed Before GitHub Issue Creation'
 severity: HIGH
 status: open
-priority: 10
+priority: high
 dependencies:
 - issue-202
 target_files:
@@ -34,7 +34,7 @@ if (issue.context.isNullOrBlank() || issue.needed.isNullOrBlank()) {
     return SELECT_TASK
 }
 ```
-Also add a warning (not skip) if `issue.component == "unknown"` or `issue.priority == 0`.
+Also add a warning (not skip) if `issue.component == "unknown"` or `issue.priority == BacklogPriority.LOW`.
 
 ## Solution Options
 

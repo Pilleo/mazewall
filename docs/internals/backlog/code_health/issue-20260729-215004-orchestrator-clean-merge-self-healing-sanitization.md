@@ -2,7 +2,7 @@
 title: "Implement Self-Healing Working Tree Sanitization on Successful Merge Paths in BranchRebaser"
 severity: "HIGH"
 status: "open"
-priority: 8
+priority: high
 dependencies: []
 component: "orchestrator"
 target_modules:

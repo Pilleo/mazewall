@@ -2,7 +2,7 @@
 title: "`SbobParser` lacks Context-Aware Working Directory resolution for Relative Paths"
 severity: "HIGH"
 status: "resolved"
-priority: 9
+priority: high
 dependencies: []
 component: "unknown"
 effort: "medium"

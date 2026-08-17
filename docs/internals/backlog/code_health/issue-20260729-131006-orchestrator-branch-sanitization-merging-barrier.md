@@ -2,7 +2,7 @@
 title: "Introduce Branch Sanitization and Checkout Checks in Orchestrator Merging Logic"
 severity: "HIGH"
 status: "open"
-priority: 10
+priority: high
 dependencies: []
 component: "orchestrator"
 target_modules:

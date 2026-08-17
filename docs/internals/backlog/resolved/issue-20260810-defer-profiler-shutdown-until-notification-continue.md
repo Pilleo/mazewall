@@ -2,7 +2,7 @@
 title: "Defer profiler shutdown until the pending notification is continued"
 severity: "HIGH"
 status: "resolved"
-priority: 9
+priority: high
 dependencies: []
 component: "profiler"
 effort: "small"

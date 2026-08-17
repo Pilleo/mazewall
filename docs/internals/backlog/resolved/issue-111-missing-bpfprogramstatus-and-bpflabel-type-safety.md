@@ -2,7 +2,7 @@
 title: "Missing `BpfProgram<Status>` and `BpfLabel` Type-Safety"
 severity: "HIGH"
 status: "resolved"
-priority: 9
+priority: high
 dependencies: []
 component: "enforcer"
 effort: "medium"

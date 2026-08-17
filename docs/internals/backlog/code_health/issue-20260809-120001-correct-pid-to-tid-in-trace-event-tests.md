@@ -2,7 +2,7 @@
 title: "Correct PID to TID in TraceEvent test descriptions"
 severity: "LOW"
 status: "open"
-priority: 2
+priority: low
 dependencies: []
 component: "profiler"
 target_modules:

@@ -3,7 +3,7 @@ title: 'Orchestrator: Add Failure Context to Jules Retry and Completed-Without-P
   Comments'
 severity: MEDIUM
 status: open
-priority: 10
+priority: high
 dependencies: []
 target_files:
 - tools/orchestrator/src/main/kotlin/io/mazewall/orchestrator/OrchestratorDaemon.kt

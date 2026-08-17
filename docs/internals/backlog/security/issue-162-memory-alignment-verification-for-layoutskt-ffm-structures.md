@@ -2,7 +2,7 @@
 title: Memory Alignment verification for `Layouts.kt` FFM Structures
 severity: HIGH
 status: open
-priority: 9
+priority: high
 dependencies: []
 target_files:
 - enforcer/src/main/kotlin/io/mazewall/ffi/Layouts.kt

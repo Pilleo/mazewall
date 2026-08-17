@@ -3,7 +3,7 @@ title: Review and Enhance Orchestrator Prompts for Jules to Enforce Quality and 
   Guidelines
 severity: HIGH
 status: open
-priority: 10
+priority: high
 dependencies: []
 target_files:
 - tools/orchestrator/src/main/kotlin/io/mazewall/orchestrator/OrchestratorPrompts.kt

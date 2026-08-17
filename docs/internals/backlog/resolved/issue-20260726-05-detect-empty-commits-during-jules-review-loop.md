@@ -2,7 +2,7 @@
 title: "Detect Empty Commits in Jules Review Loop to Prevent Redundant Correction Comments"
 severity: "MEDIUM"
 status: "resolved"
-priority: 8
+priority: high
 dependencies: ["issue-20260726-03"]
 component: "orchestrator"
 target_modules: [":tools:orchestrator"]

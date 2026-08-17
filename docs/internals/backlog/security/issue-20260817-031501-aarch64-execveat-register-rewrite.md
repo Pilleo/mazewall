@@ -2,7 +2,7 @@
 title: "execveat AT_EMPTY_PATH register rewrite on aarch64"
 severity: "MEDIUM"
 status: "open"
-priority: 7
+priority: medium
 dependencies: []
 component: "enforcer"
 target_modules:

@@ -2,7 +2,7 @@
 title: "MemorySegment Lifetime/Scope Violation in SupervisorSessionHandler"
 severity: "HIGH"
 status: "resolved"
-priority: 9
+priority: high
 dependencies: []
 component: "ffi"
 effort: "medium"

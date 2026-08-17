@@ -2,7 +2,7 @@
 title: "Delegated Properties for Thread-Local Sandbox State"
 severity: "ENHANCEMENT"
 status: "resolved"
-priority: 2
+priority: low
 dependencies: []
 component: "enforcer"
 effort: "medium"

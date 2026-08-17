@@ -2,7 +2,7 @@
 title: "Suboptimal BPF `RET` instruction placement in `emitLinearScan`"
 severity: "HIGH"
 status: "resolved"
-priority: 9
+priority: high
 dependencies: []
 component: "enforcer"
 effort: "small"

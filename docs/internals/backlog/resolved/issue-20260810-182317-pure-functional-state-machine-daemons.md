@@ -2,7 +2,7 @@
 title: "Pure Functional State Machines for Daemons"
 severity: "HIGH"
 status: "resolved"
-priority: 8
+priority: high
 dependencies: []
 component: "platform"
 target_modules:

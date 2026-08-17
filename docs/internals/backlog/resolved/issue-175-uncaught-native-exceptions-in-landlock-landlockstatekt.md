@@ -2,7 +2,7 @@
 title: "Uncaught Native Exceptions in Landlock `LandlockState.kt`"
 severity: "HIGH"
 status: "resolved"
-priority: 9
+priority: high
 dependencies: []
 component: "enforcer"
 effort: "small"

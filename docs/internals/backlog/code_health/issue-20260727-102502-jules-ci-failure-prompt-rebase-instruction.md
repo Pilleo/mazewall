@@ -2,7 +2,7 @@
 title: "Add Mandatory Origin Master Rebase Prompt Instructions in Jules Retry and Feedback Prompts"
 severity: "HIGH"
 status: "open"
-priority: 10
+priority: high
 dependencies: []
 component: "orchestrator"
 target_modules:

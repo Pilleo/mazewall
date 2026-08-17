@@ -2,7 +2,7 @@
 title: "Silent Fallback by default behavior evaluation"
 severity: "HIGH"
 status: "resolved"
-priority: 9
+priority: high
 dependencies: []
 component: "enforcer"
 effort: "small"

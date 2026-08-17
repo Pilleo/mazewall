@@ -2,7 +2,7 @@
 title: Manual FFM Layout Maintenance and Drift Risk
 severity: MEDIUM
 status: open
-priority: 5
+priority: medium
 dependencies: []
 target_files:
 - enforcer/src/main/kotlin/io/mazewall/ffi/Layouts.kt

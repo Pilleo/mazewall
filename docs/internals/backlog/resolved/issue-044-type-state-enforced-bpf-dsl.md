@@ -2,7 +2,7 @@
 title: "Type-State Enforced BPF DSL"
 severity: "ENHANCEMENT"
 status: "resolved"
-priority: 2
+priority: low
 dependencies: []
 component: "seccomp"
 effort: "large"

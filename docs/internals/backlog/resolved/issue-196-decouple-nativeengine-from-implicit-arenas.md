@@ -2,7 +2,7 @@
 title: "Decouple NativeEngine from Implicit Arenas"
 severity: "MEDIUM"
 status: "resolved"
-priority: 8
+priority: high
 dependencies: ["issue-194", "issue-195"]
 component: "ffi"
 effort: "large"

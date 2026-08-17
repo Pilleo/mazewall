@@ -2,7 +2,7 @@
 title: "Unhandled Signal Interruptions (`EINTR`) during `seccomp` Filter Installation"
 severity: "HIGH"
 status: "resolved"
-priority: 9
+priority: high
 dependencies: []
 component: "enforcer"
 effort: "small"

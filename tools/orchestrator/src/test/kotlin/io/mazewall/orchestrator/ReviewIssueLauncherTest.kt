@@ -29,7 +29,7 @@ class ReviewIssueLauncherTest {
 
         // 1. Verify issue properties
         assertNotNull(issue)
-        assertEquals(10, issue.priority)
+        assertEquals(BacklogPriority.HIGH, issue.priority)
         assertEquals("open", issue.status)
         assertEquals("profiler", issue.component)
         assertEquals(listOf(":profiler", ":enforcer"), issue.targetModules)

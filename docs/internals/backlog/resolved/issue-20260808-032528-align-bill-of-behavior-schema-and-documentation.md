@@ -2,7 +2,7 @@
 title: "Align BillOfBehavior Domain Schema and Documentation"
 severity: "LOW"
 status: resolved
-priority: 7
+priority: medium
 dependencies:
   - "issue-20260808-032527"
 component: "profiler"

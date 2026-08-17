@@ -2,7 +2,7 @@
 title: "Replace Hidden Policy Defaults with Runtime-Aware Baselines"
 severity: "MEDIUM"
 status: "resolved"
-priority: 9
+priority: high
 dependencies:
   - "issue-20260808-025037"
 component: "enforcer"

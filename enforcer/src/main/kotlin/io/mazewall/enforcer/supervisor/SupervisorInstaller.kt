@@ -55,6 +55,7 @@ public object SupervisorInstaller {
         scopingPolicy: StacktraceScopingPolicy,
         onFilterApplied: () -> Unit = {}
     ): SupervisorSession {
+        ValidationListenerPreload.ensureLoaded()
         val context = SupervisorDaemonManager.getInstance().getOrSpawnSharedDaemon()
         val arch = Arch.current()
 

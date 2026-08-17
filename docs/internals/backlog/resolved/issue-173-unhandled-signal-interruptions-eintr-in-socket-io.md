@@ -2,7 +2,7 @@
 title: "Unhandled Signal Interruptions (`EINTR`) in socket IO"
 severity: "HIGH"
 status: "resolved"
-priority: 9
+priority: high
 dependencies: []
 component: "profiler"
 effort: "small"

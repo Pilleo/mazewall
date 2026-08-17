@@ -2,7 +2,7 @@
 title: KtLint parser fails on Kotlin 2.x named context parameters syntax
 severity: MEDIUM
 status: open
-priority: 4
+priority: medium
 dependencies: []
 target_files:
 - build.gradle.kts

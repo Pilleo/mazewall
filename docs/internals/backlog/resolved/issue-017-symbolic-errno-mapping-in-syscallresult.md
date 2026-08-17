@@ -2,7 +2,7 @@
 title: "Symbolic Errno Mapping in `SyscallResult`"
 severity: "ENHANCEMENT"
 status: "resolved"
-priority: 2
+priority: low
 dependencies: []
 component: "unknown"
 effort: "medium"

@@ -2,7 +2,7 @@
 title: "ArchUnit: Strict Isolation of FFM (`java.lang.foreign`) Boundaries"
 severity: "RESOLVED"
 status: "resolved"
-priority: 5
+priority: medium
 ---
 
 # ✅ [RESOLVED]: ArchUnit: Strict Isolation of FFM (`java.lang.foreign`) Boundaries

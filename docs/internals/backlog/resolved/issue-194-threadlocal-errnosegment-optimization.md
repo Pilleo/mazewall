@@ -2,7 +2,7 @@
 title: "Global/ThreadLocal ErrnoSegment Optimization"
 severity: "HIGH"
 status: "resolved"
-priority: 10
+priority: high
 dependencies: []
 component: "enforcer"
 effort: "small"

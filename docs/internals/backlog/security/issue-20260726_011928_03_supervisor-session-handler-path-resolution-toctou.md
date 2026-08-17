@@ -3,7 +3,7 @@ title: SupervisorSessionHandler TOCTOU vulnerability during string extraction fo
   paths
 type: issue
 status: open
-priority: 8
+priority: high
 labels:
 - security
 - enforcer

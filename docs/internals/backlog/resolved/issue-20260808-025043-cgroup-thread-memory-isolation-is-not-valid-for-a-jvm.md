@@ -2,7 +2,7 @@
 title: "Cgroup Thread Memory Isolation Roadmap Is Invalid for a Shared-Heap JVM"
 severity: "HIGH"
 status: resolved
-priority: 2
+priority: low
 dependencies: []
 component: "enforcer"
 target_modules:

@@ -2,7 +2,7 @@
 title: "Unify hardcoded Seccomp notification offsets in Profiler and Supervisor via centralized FFM Layouts"
 severity: "HIGH"
 status: "resolved"
-priority: 8
+priority: high
 dependencies: []
 component: "enforcer"
 target_modules:

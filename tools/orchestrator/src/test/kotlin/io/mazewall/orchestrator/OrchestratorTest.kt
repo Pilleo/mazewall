@@ -25,7 +25,7 @@ class OrchestratorTest {
         file.writeText("""
             ---
             title: "Test Inline Deps"
-            priority: 7
+            priority: medium
             status: "open"
             dependencies: ["issue-002", "issue-003"]
             github_issue: 1234
@@ -38,7 +38,7 @@ class OrchestratorTest {
         assertNotNull(issue)
         assertEquals("issue-001", issue.id)
         assertEquals("Test Inline Deps", issue.title)
-        assertEquals(7, issue.priority)
+        assertEquals(BacklogPriority.MEDIUM, issue.priority)
         assertEquals("open", issue.status)
         assertEquals(listOf("issue-002", "issue-003"), issue.dependencies)
         assertEquals(1234, issue.githubIssue)
@@ -50,7 +50,7 @@ class OrchestratorTest {
         file.writeText("""
             ---
             title: 'Test Multiline Deps'
-            priority: 4
+            priority: medium
             status: 'open'
             dependencies:
               - issue-004
@@ -64,7 +64,7 @@ class OrchestratorTest {
         assertNotNull(issue)
         assertEquals("issue-002", issue.id)
         assertEquals("Test Multiline Deps", issue.title)
-        assertEquals(4, issue.priority)
+        assertEquals(BacklogPriority.MEDIUM, issue.priority)
         assertEquals("open", issue.status)
         assertEquals(listOf("issue-004", "issue-005"), issue.dependencies)
         assertNull(issue.githubIssue)
@@ -76,7 +76,7 @@ class OrchestratorTest {
             file = File(tempDir, "issue-001.md"),
             id = "issue-001",
             title = "Task 1",
-            priority = 5,
+            priority = BacklogPriority.MEDIUM,
             status = "open",
             dependencies = listOf("issue-002") // Blocked by issue-002
         )
@@ -84,7 +84,7 @@ class OrchestratorTest {
             file = File(tempDir, "issue-002.md"),
             id = "issue-002",
             title = "Task 2",
-            priority = 2,
+            priority = BacklogPriority.LOW,
             status = "open",
             dependencies = emptyList() // Unblocked
         )
@@ -92,7 +92,7 @@ class OrchestratorTest {
             file = File(tempDir, "issue-003.md"),
             id = "issue-003",
             title = "Task 3",
-            priority = 8,
+            priority = BacklogPriority.HIGH,
             status = "open",
             dependencies = emptyList() // Unblocked, higher priority than 2
         )
@@ -111,7 +111,7 @@ class OrchestratorTest {
             file = File(tempDir, "issue-001.md"),
             id = "issue-001",
             title = "Task 1",
-            priority = 5,
+            priority = BacklogPriority.MEDIUM,
             status = "open",
             dependencies = emptyList()
         )
@@ -119,7 +119,7 @@ class OrchestratorTest {
             file = File(tempDir, "issue-002.md"),
             id = "issue-002",
             title = "Task 2",
-            priority = 5,
+            priority = BacklogPriority.MEDIUM,
             status = "open",
             dependencies = emptyList()
         )
@@ -138,7 +138,7 @@ class OrchestratorTest {
             file = File(tempDir, "issue-001.md"),
             id = "issue-001",
             title = "Task 1",
-            priority = 5,
+            priority = BacklogPriority.MEDIUM,
             status = "resolved", // Not open
             dependencies = emptyList()
         )

@@ -2,7 +2,7 @@
 title: "TOCTOU in Path Normalization `PathNormalizer.kt`"
 severity: "HIGH"
 status: "resolved"
-priority: 9
+priority: high
 dependencies: []
 component: "enforcer"
 effort: "small"

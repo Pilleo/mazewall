@@ -2,7 +2,7 @@
 title: "memfd_secret Does Not Hide Memory from Same-Process Native ACE"
 severity: "HIGH"
 status: resolved
-priority: 2
+priority: low
 dependencies: []
 component: "enforcer"
 target_modules:

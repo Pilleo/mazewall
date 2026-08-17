@@ -2,7 +2,7 @@
 title: "Unhandled Endianness in `process_vm_readv` Socket Message Tracing"
 severity: "HIGH"
 status: "resolved"
-priority: 6
+priority: medium
 dependencies: []
 component: "profiler"
 effort: "medium"

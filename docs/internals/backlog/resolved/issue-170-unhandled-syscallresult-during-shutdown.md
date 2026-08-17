@@ -2,7 +2,7 @@
 title: "Unhandled `SyscallResult` during Shutdown"
 severity: "RESOLVED"
 status: "resolved"
-priority: 5
+priority: medium
 ---
 
 # ✅ [RESOLVED]: Unhandled `SyscallResult` during Shutdown

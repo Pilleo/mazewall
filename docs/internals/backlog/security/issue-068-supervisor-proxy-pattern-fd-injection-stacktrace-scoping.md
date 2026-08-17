@@ -2,7 +2,7 @@
 title: Supervisor Proxy Pattern (FD Injection) & Stacktrace Scoping
 severity: ENHANCEMENT
 status: open
-priority: 2
+priority: low
 dependencies: []
 target_files:
 - enforcer/src/main/kotlin/io/mazewall/enforcer/supervisor/SupervisorSessionHandler.kt

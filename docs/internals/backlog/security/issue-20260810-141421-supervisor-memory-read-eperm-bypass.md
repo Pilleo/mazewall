@@ -2,7 +2,7 @@
 title: "Fail Closed on Supervisor Memory Read EPERM"
 severity: "HIGH"
 status: "resolved"
-priority: 10
+priority: high
 dependencies: []
 component: "enforcer"
 target_modules:

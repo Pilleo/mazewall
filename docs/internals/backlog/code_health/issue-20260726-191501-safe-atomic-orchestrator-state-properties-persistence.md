@@ -2,7 +2,7 @@
 title: Implement Atomic Write-Ahead Pattern for Orchestrator State File Persistence
 severity: HIGH
 status: open
-priority: 8
+priority: high
 dependencies: []
 component: orchestrator
 target_modules:

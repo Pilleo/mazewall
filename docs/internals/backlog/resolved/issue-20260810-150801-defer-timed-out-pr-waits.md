@@ -2,7 +2,7 @@
 title: "Defer Timed-Out PR Waits"
 severity: "MEDIUM"
 status: "resolved"
-priority: 8
+priority: high
 dependencies: []
 component: "orchestrator"
 target_modules:

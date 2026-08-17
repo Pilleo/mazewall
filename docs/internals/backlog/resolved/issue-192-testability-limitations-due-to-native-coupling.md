@@ -1,7 +1,7 @@
 ---
 title: "Testability Limitations due to Native Coupling prevent 80% coverage"
 status: "resolved"
-priority: 10
+priority: high
 severity: "MEDIUM"
 scope: "all"
 dependencies: []

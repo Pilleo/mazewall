@@ -2,7 +2,7 @@
 title: "Same-Process GraalVM Isolate and WebAssembly Boundaries Are Overstated"
 severity: "HIGH"
 status: resolved
-priority: 1
+priority: low
 dependencies: []
 component: "enforcer"
 target_modules:

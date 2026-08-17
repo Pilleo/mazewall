@@ -17,8 +17,8 @@ This skill provides a standardized protocol for documenting a newly discovered b
 - **MEDIUM:** Information leak, usability flaw, performance regression, multi-threading race condition.
 - **LOW:** Documentation drift, minor nitpicks, non-critical DX friction.
 
-**Priority Assignment (1-10):**
-Assign **HIGH PRIORITY (8-10)** to changes that multiply developer velocity, safety, and autonomy:
+**Priority Assignment (`high` | `medium` | `low`):**
+Assign **`high`** to changes that multiply developer velocity, safety, and autonomy:
 - Refactorings that introduce type safety (e.g. Type-State pattern, value classes, compile-time token proofs).
 - Improvements to testing harness, ArchUnit rules, and automated test coverage.
 - Enhancements to CI/CD pipelines, build barriers, and validation rules.
@@ -51,7 +51,7 @@ Every backlog issue file MUST contain complete YAML frontmatter at the top of th
 title: "Title of Issue"
 severity: "HIGH" # CRITICAL | HIGH | MEDIUM | LOW | ENHANCEMENT
 status: "open" # open | in_progress | resolved | deferred
-priority: 9 # Integer (1-10)
+priority: high # high | medium | low (do not use 0–10)
 dependencies: [] # List of dependency issue IDs
 component: "enforcer" # enforcer | profiler | orchestrator | docs | ci
 target_modules:

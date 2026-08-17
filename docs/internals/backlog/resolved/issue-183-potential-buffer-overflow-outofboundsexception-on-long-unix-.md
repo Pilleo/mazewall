@@ -2,7 +2,7 @@
 title: "Potential Buffer Overflow / OutOfBoundsException on Long UNIX Socket Paths"
 severity: "RESOLVED"
 status: "resolved"
-priority: 3
+priority: low
 dependencies: []
 component: "unknown"
 effort: "medium"

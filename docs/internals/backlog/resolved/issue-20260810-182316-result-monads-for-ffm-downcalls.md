@@ -2,7 +2,7 @@
 title: "Result Monads (No-Throw Error Handling for FFM)"
 severity: "HIGH"
 status: "resolved"
-priority: 9
+priority: high
 dependencies: []
 component: "enforcer"
 target_modules:

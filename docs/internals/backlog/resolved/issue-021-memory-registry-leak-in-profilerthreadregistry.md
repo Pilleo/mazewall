@@ -2,7 +2,7 @@
 title: "Memory Registry Leak in `Profiler.threadRegistry`"
 severity: "RESOLVED"
 status: "resolved"
-priority: 5
+priority: medium
 ---
 
 # ✅ [RESOLVED]: Memory Registry Leak in `Profiler.threadRegistry`

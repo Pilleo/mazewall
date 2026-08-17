@@ -2,7 +2,7 @@
 title: "Prevent file descriptor and local socket leaks in Supervisor's async accept worker thread under failure conditions"
 severity: "HIGH"
 status: "resolved"
-priority: 8
+priority: high
 dependencies: []
 component: "enforcer"
 target_modules:

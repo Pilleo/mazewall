@@ -2,7 +2,7 @@
 title: "Inefficient ThreadLocal usage in `ThreadStateRegistry`"
 severity: "HIGH"
 status: "resolved"
-priority: 9
+priority: high
 dependencies: []
 component: "enforcer"
 effort: "small"

@@ -1,8 +1,8 @@
 ---
 title: Process-Wide Classloader Deadlock on Profiler Result / State Types
 severity: HIGH
-status: open
-priority: 9
+status: resolved
+priority: high
 dependencies: []
 target_files:
 - profiler/src/main/kotlin/io/mazewall/profiler/ProfilingResult.kt
@@ -26,6 +26,8 @@ Integration tests for process-wide profiling threw `NoClassDefFoundError` or hun
 
 **Needed:**
 1. Maintain a robust, static class loading warmup block in `Profiler.kt` that instantiates and calls methods on all core state/result classes (`ProfilingResult`, `BobCompiler`, `TraceListenerState` subclasses) before installing seccomp filters.
+
+**Resolution:** `ProfilerAckPreload.ensureLoaded()` replaces the swallowed dummy-file warmup. Result/listener/compiler types are `Class.forName`-initialized before USER_NOTIF install; missing types fail closed.
 
 ## Solution Options
 

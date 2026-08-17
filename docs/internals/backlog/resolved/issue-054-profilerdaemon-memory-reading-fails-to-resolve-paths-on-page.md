@@ -2,7 +2,7 @@
 title: "`ProfilerDaemon` memory-reading fails to resolve paths on page boundaries or large strings"
 severity: "RESOLVED"
 status: "resolved"
-priority: 5
+priority: medium
 ---
 
 # ✅ [RESOLVED]: `ProfilerDaemon` memory-reading fails to resolve paths on page boundaries or large strings

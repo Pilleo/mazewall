@@ -2,7 +2,7 @@
 title: "Hardware-Hardening Documentation Mixes Implemented CET with Speculative Absolute Controls"
 severity: "HIGH"
 status: resolved
-priority: 2
+priority: low
 dependencies: []
 component: "enforcer"
 target_modules:

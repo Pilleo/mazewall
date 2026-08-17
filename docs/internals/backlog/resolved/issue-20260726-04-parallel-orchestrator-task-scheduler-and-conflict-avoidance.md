@@ -2,7 +2,7 @@
 title: "Multi-Issue Parallel Execution & Conflict-Free Task Scheduler"
 severity: "HIGH"
 status: "resolved"
-priority: 8
+priority: high
 dependencies: ["issue-20260726-03"]
 component: "orchestrator"
 target_modules: [":tools:orchestrator"]

@@ -2,7 +2,7 @@
 title: "Profiler Design Contradicts the Implemented Synchronous ACK Protocol"
 severity: "HIGH"
 status: resolved
-priority: 1
+priority: low
 dependencies: []
 component: "profiler"
 target_modules:

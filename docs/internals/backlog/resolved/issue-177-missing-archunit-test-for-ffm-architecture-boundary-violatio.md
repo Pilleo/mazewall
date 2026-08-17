@@ -2,7 +2,7 @@
 title: "Missing ArchUnit test for FFM architecture boundary violations"
 severity: "HIGH"
 status: "resolved"
-priority: 10
+priority: high
 dependencies: ["issue-209", "issue-210", "issue-211", "issue-212"]
 component: "enforcer"
 effort: "huge"

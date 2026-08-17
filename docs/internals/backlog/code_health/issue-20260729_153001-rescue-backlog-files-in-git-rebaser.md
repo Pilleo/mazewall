@@ -2,7 +2,7 @@
 title: "Rescue Modified Backlog Markdown Files During Automated Git Branch Rescue to Prevent Progress Loss"
 severity: "HIGH"
 status: "open"
-priority: 9
+priority: high
 dependencies: []
 component: "orchestrator"
 target_modules:

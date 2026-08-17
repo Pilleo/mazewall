@@ -2,7 +2,7 @@
 title: "Resolve relative supervisor bypass paths in the tracee context"
 severity: "HIGH"
 status: "resolved"
-priority: 10
+priority: high
 dependencies: []
 component: "enforcer"
 target_modules:

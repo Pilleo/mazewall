@@ -2,7 +2,7 @@
 title: "Inefficient Regex Compilation in `ContainmentViolationDetector`"
 severity: "HIGH"
 status: "resolved"
-priority: 9
+priority: high
 dependencies: []
 component: "enforcer"
 effort: "large"

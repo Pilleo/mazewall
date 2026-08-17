@@ -2,7 +2,7 @@
 title: "Prevent FD Leak during Connection Handshake Transitions in ProfilerDaemonEngine"
 severity: "HIGH"
 status: "resolved"
-priority: 8
+priority: high
 dependencies: []
 component: "profiler"
 target_modules:

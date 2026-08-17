@@ -2,7 +2,7 @@
 title: "Asynchronous Trace Event Streaming via `Channel` / `Flow`"
 severity: "ENHANCEMENT"
 status: "resolved"
-priority: 2
+priority: low
 dependencies: []
 component: "profiler"
 effort: "medium"

@@ -2,7 +2,7 @@
 title: Proof-of-Progress State Machine for Landlock Discovery (`DiscoveryTask<Status>`)
 severity: ENHANCEMENT
 status: open
-priority: 2
+priority: low
 dependencies: []
 target_files:
 - profiler/src/main/kotlin/io/mazewall/profiler/iterative/IterativeProfiler.kt

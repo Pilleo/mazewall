@@ -2,7 +2,7 @@
 title: "Seccomp TSYNC Documentation Uses an Incorrect no_new_privs Premise"
 severity: "HIGH"
 status: resolved
-priority: 1
+priority: low
 dependencies: []
 component: "enforcer"
 target_modules:

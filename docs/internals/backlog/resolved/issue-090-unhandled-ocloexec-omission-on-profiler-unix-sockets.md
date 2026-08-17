@@ -2,7 +2,7 @@
 title: "Unhandled `O_CLOEXEC` Omission on Profiler Unix Sockets"
 severity: "HIGH"
 status: "resolved"
-priority: 9
+priority: high
 dependencies: []
 component: "profiler"
 effort: "small"

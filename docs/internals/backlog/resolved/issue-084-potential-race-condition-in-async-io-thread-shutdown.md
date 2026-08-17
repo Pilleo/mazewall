@@ -2,7 +2,7 @@
 title: "Potential Race Condition in Async IO Thread Shutdown"
 severity: "HIGH"
 status: "resolved"
-priority: 9
+priority: high
 dependencies: []
 component: "enforcer"
 effort: "small"

@@ -2,7 +2,7 @@
 title: "Race in Asynchronous / Fire-and-Forget Profiler Event Delivery"
 severity: "CRITICAL"
 status: "resolved"
-priority: 5
+priority: medium
 dependencies: []
 component: "profiler"
 effort: "small"

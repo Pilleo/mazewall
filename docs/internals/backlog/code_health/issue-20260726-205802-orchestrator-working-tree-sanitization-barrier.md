@@ -2,7 +2,7 @@
 title: Implement Pre-Commit Working Tree Sanitization Barrier in Orchestrator Tasks
 severity: HIGH
 status: open
-priority: 10
+priority: high
 dependencies:
 - issue-20260726-205801
 component: orchestrator

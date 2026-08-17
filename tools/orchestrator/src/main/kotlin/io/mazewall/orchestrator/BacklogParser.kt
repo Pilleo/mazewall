@@ -6,7 +6,7 @@ data class BacklogIssue(
     val file: File,
     val id: String,
     val title: String,
-    val priority: Int,
+    val priority: BacklogPriority,
     val status: String,
     val dependencies: List<String>,
     val githubIssue: Int? = null,
@@ -42,9 +42,7 @@ object BacklogParser {
             val frontmatter = extractFrontmatter(content) ?: return null
 
             val title = frontmatter["title"]?.removeSurrounding("\"")?.removeSurrounding("'") ?: file.name
-            val priorityRaw = frontmatter["priority"]?.removeSurrounding("\"")?.removeSurrounding("'")
-            val priority = priorityRaw?.toIntOrNull()
-                ?: throw IllegalArgumentException("Frontmatter 'priority' must be a valid integer between 0 and 10 (got '$priorityRaw')")
+            val priority = BacklogPriority.parse(frontmatter["priority"])
             val status = frontmatter["status"]?.removeSurrounding("\"")?.removeSurrounding("'") ?: "open"
             val githubIssue = frontmatter["github_issue"]?.toIntOrNull()
             val severity = frontmatter["severity"]?.removeSurrounding("\"")?.removeSurrounding("'")

@@ -2,7 +2,7 @@
 title: "Rename report_security_issue Skill to create_backlog_issue and Expand Schema Protocol"
 severity: "MEDIUM"
 status: "resolved"
-priority: 9
+priority: high
 dependencies: []
 component: "orchestrator"
 target_modules: [":tools:orchestrator"]

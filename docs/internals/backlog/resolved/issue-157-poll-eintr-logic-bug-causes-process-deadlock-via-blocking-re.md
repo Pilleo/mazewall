@@ -2,7 +2,7 @@
 title: "`poll` EINTR Logic Bug Causes Process Deadlock via Blocking `read`"
 severity: "RESOLVED"
 status: "resolved"
-priority: 5
+priority: medium
 ---
 
 # ✅ [RESOLVED]: `poll` EINTR Logic Bug Causes Process Deadlock via Blocking `read`

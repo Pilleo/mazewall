@@ -2,7 +2,7 @@
 title: "TOCTOU / Pointer Re-targeting via `sockaddrBytes` Mutation during Connect Validation"
 severity: "CRITICAL"
 status: "resolved"
-priority: 5
+priority: medium
 dependencies: []
 component: "enforcer"
 effort: "small"

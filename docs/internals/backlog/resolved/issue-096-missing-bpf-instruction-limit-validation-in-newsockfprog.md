@@ -2,7 +2,7 @@
 title: "Missing BPF Instruction Limit Validation in `newSockFProg`"
 severity: "HIGH"
 status: "resolved"
-priority: 9
+priority: high
 dependencies: []
 component: "seccomp"
 effort: "small"

@@ -2,7 +2,7 @@
 title: Manual FFM Layout Maintenance and ABI Drift Risk
 severity: HIGH
 status: open
-priority: 1
+priority: low
 dependencies: []
 target_files:
 - enforcer/src/main/kotlin/io/mazewall/ffi/Layouts.kt

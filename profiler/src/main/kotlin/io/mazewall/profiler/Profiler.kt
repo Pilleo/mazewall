@@ -58,53 +58,7 @@ object Profiler {
         block: () -> T,
     ): ProfilingResult<T> {
         validateNotVirtual()
-
-        // Pre-warm classloading to prevent circular classloader deadlocks
-        // when seccomp filters intercept file system reads during dynamic class loading.
-        @Suppress("TooGenericExceptionCaught")
-        try {
-            val dummyFile = java.io.File.createTempFile("mazewall_warmup", ".tmp")
-            dummyFile.writeText("warmup")
-            dummyFile.readText()
-            dummyFile.delete()
-
-            // Pre-load all classes and code paths utilized inside ProfilerTraceListener
-            val dummyEvent = io.mazewall.profiler.engine.TraceEvent(
-                tidValue = 0,
-                syscallName = "openat",
-                args = longArrayOf(),
-                paths = listOf("warmup"),
-                stackTrace = null
-            )
-            dummyEvent.tid
-            dummyEvent.syscallName
-
-            // Warm up stack trace retrieval, mapping, and stringification
-            Thread.currentThread().stackTrace.map { it.toString() }
-
-            // Warm up BobCompiler and related classes
-            val dummyBob = io.mazewall.profiler.compiler.BobCompiler.compile(java.util.concurrent.CopyOnWriteArrayList(listOf(dummyEvent)))
-
-            // Warm up ProfilingResult
-            val dummyResult = ProfilingResult(Unit, dummyBob, java.util.concurrent.ConcurrentHashMap())
-            dummyResult.toString()
-
-            // Warm up TraceListenerState subclasses
-            val s1 = io.mazewall.profiler.internal.TraceListenerState.AwaitingEvent
-            val s2 = io.mazewall.profiler.internal.TraceListenerState.ReadingHeader(0)
-            val s3 = io.mazewall.profiler.internal.TraceListenerState.ReadingSyscall(0, 0)
-            val s4 = io.mazewall.profiler.internal.TraceListenerState.ReadingArguments(0, "", 0)
-            val s5 = io.mazewall.profiler.internal.TraceListenerState.ProcessingEvent(dummyEvent)
-            val s6 = io.mazewall.profiler.internal.TraceListenerState.Disconnected
-            s1.toString(); s2.toString(); s3.toString(); s4.toString(); s5.toString(); s6.toString()
-
-            // Warm up list, map, and sorting operations
-            val list = java.util.concurrent.CopyOnWriteArrayList<Array<StackTraceElement>>()
-            list.add(emptyArray())
-            val pathCache = java.util.concurrent.ConcurrentHashMap<String, Long>()
-            pathCache["key"] = System.currentTimeMillis()
-            listOf("warmup").sorted().joinToString(",")
-        } catch (ignored: Exception) {}
+        ProfilerAckPreload.ensureLoaded()
 
         val context = daemonManagerProvider().getOrSpawnSharedDaemon()
         val localLogs = CopyOnWriteArrayList<TraceEvent>()

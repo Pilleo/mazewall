@@ -2,7 +2,7 @@
 title: "Tier S Profiler is blind to background threads (No TSYNC/Inheritance)"
 severity: "RESOLVED"
 status: "resolved"
-priority: 5
+priority: medium
 ---
 
 # ✅ [RESOLVED] [Severity: HIGH]: Tier S Profiler is blind to background threads (No TSYNC/Inheritance)

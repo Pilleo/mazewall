@@ -2,7 +2,7 @@
 title: "Encapsulate Landlock and Seccomp C-String & Struct Allocations"
 severity: "HIGH"
 status: "resolved"
-priority: 10
+priority: high
 dependencies: ["issue-209", "issue-210"]
 component: "landlock"
 effort: "medium"

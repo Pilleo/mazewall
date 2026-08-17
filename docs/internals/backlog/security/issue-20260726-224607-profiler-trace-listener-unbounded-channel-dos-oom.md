@@ -2,7 +2,7 @@
 title: "Profiler Trace Listener Unbounded Channel DoS / OOM Vulnerability"
 severity: "HIGH"
 status: "open"
-priority: 8
+priority: high
 dependencies: []
 component: "profiler"
 target_modules:

@@ -1,6 +1,6 @@
 ---
 title: Refactor GitHubCli and JulesCli for Testability
-priority: 8
+priority: high
 status: resolved
 dependencies: []
 severity: HIGH

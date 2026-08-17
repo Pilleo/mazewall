@@ -2,7 +2,7 @@
 title: Unhandled `TSYNC` edge cases during JIT classloading
 severity: HIGH
 status: open
-priority: 6
+priority: medium
 dependencies: []
 target_files:
 - enforcer/src/main/kotlin/io/mazewall/seccomp/PureJavaBpfEngine.kt

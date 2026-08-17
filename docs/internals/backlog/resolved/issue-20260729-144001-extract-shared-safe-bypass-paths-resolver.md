@@ -2,7 +2,7 @@
 title: "Extract shared safe bypass paths resolver to eliminate duplicated JVM scanning logic"
 severity: "HIGH"
 status: "resolved"
-priority: 8
+priority: high
 dependencies: []
 component: "enforcer"
 target_modules:

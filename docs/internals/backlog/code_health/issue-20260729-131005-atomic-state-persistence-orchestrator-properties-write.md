@@ -2,7 +2,7 @@
 title: "Atomic Properties State File Writing in Orchestrator to Prevent Corruption"
 severity: "MEDIUM"
 status: "open"
-priority: 9
+priority: high
 dependencies: []
 component: "orchestrator"
 target_modules:

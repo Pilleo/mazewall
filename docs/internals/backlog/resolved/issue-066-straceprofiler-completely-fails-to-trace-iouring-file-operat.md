@@ -2,7 +2,7 @@
 title: StraceProfiler completely fails to trace `io_uring` file operations natively
 severity: CRITICAL
 status: resolved
-priority: 5
+priority: medium
 dependencies: []
 target_files:
 - profiler/src/main/kotlin/io/mazewall/profiler/strace/StraceProfiler.kt

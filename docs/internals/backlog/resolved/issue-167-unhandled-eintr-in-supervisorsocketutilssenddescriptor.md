@@ -2,7 +2,7 @@
 title: "Unhandled EINTR in `SupervisorSocketUtils.sendDescriptor`"
 severity: "RESOLVED"
 status: "resolved"
-priority: 5
+priority: medium
 ---
 
 # ✅ [RESOLVED]: Unhandled EINTR in `SupervisorSocketUtils.sendDescriptor`

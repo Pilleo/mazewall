@@ -27,7 +27,7 @@ class BacklogParserEnhancedTest {
             title: "Enhance Task Approval Telegram Message with Full Context"
             severity: "HIGH"
             status: "open"
-            priority: 10
+            priority: high
             dependencies: []
             component: "orchestrator"
             effort: "small"
@@ -63,7 +63,7 @@ class BacklogParserEnhancedTest {
             title: "Timed-out task"
             severity: "MEDIUM"
             status: "in_progress"
-            priority: 8
+            priority: high
             dependencies: []
             component: "orchestrator"
             effort: "small"
@@ -86,7 +86,7 @@ class BacklogParserEnhancedTest {
             title: "Timed-out open task"
             severity: "MEDIUM"
             status: "open"
-            priority: 8
+            priority: high
             dependencies: []
             component: "orchestrator"
             effort: "small"
@@ -106,7 +106,7 @@ class BacklogParserEnhancedTest {
         file.writeText("""
             ---
             title: "Marker Test"
-            priority: 5
+            priority: medium
             ---
             ### Context
             Some context here.
@@ -130,7 +130,7 @@ class BacklogParserEnhancedTest {
         file.writeText("""
             ---
             title: "Bold Test"
-            priority: 5
+            priority: medium
             ---
             ### Context
             This is a **high** priority item with **bold** text.
@@ -152,7 +152,7 @@ class BacklogParserEnhancedTest {
             file = File("dummy"),
             id = "issue-123",
             title = "Dummy Title",
-            priority = 5,
+            priority = BacklogPriority.MEDIUM,
             status = "open",
             dependencies = emptyList(),
             severity = "LOW",
@@ -190,7 +190,7 @@ class BacklogParserEnhancedTest {
             title: "Transition Orchestrator to Timestamp-Based Issue IDs"
             severity: "HIGH"
             status: "open"
-            priority: 9
+            priority: high
             dependencies: ["issue-20260726-01"]
             component: "orchestrator"
             ---
@@ -214,7 +214,7 @@ class BacklogParserEnhancedTest {
             ---
             title:
               Review Task: Profiler Module & Security Audit
-            priority: 5
+            priority: medium
             status: "open"
             ---
             # Description
@@ -232,7 +232,7 @@ class BacklogParserEnhancedTest {
         file.writeText("""
             ---
             title: "Review Task: Profiler Module & Security Audit"
-            priority: 5
+            priority: medium
             status: "open"
             ---
             # Description
@@ -250,7 +250,7 @@ class BacklogParserEnhancedTest {
         file.writeText("""
             ---
             title: "Multiline List Test"
-            priority: 5
+            priority: medium
             status: "open"
             target_files:
               - "file1.txt"
@@ -272,7 +272,7 @@ class BacklogParserEnhancedTest {
         file.writeText("""
             ---
             title: "Quotes List Test"
-            priority: 5
+            priority: medium
             status: "open"
             target_files: ["\"file1.txt\"", "'file2.txt'", "\'file3.txt\'"]
             ---
@@ -316,7 +316,7 @@ class BacklogParserEnhancedTest {
         file.writeText("""
             ---
             title: "Issue 123"
-            priority: 5
+            priority: medium
             status: "open"
             ---
             # Description
@@ -344,7 +344,7 @@ class BacklogParserEnhancedTest {
         file.writeText("""
             ---
             title: "Resolve Test"
-            priority: 5
+            priority: medium
             status: "open"
             ---
             # Description
@@ -371,7 +371,7 @@ class BacklogParserEnhancedTest {
         file.writeText("""
             ---
             title: "No Section"
-            priority: 5
+            priority: medium
             status: "open"
             ---
             # Description

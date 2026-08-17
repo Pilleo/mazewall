@@ -2,7 +2,7 @@
 title: "Deprecate and Eliminate Redundant NativeTransaction Scaffolding"
 severity: "HIGH"
 status: "resolved"
-priority: 10
+priority: high
 dependencies: []
 component: "enforcer"
 effort: "medium"

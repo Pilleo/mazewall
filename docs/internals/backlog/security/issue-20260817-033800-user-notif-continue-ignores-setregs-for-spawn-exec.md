@@ -2,7 +2,7 @@
 title: "USER_NOTIF CONTINUE may not honor ptrace SETREGS on posix_spawn exec"
 severity: "HIGH"
 status: "open"
-priority: 9
+priority: high
 dependencies: []
 component: "enforcer"
 target_modules:

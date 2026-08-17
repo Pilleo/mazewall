@@ -2,7 +2,7 @@
 title: "ProfilerDaemonEngine active connection FD leak on session start failure"
 severity: "HIGH"
 status: "resolved"
-priority: 8
+priority: high
 dependencies: []
 component: "profiler"
 target_modules:

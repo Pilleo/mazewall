@@ -2,7 +2,7 @@
 title: "ArchUnit: Ban `java.lang.Thread` for Context Preservation"
 severity: "HIGH"
 status: "resolved"
-priority: 9
+priority: high
 dependencies: []
 component: "unknown"
 effort: "medium"
