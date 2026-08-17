@@ -94,6 +94,10 @@ public object InstallationAssessor {
             reasons.add("policy uses USER_NOTIF but the kernel probe failed")
             stages.add(InstallationStage.USER_NOTIF)
         }
+        if (processWide && userNotifRequired) {
+            reasons.add("process-wide USER_NOTIF is unsupported (NEW_LISTENER cannot combine with TSYNC)")
+            stages.add(InstallationStage.USER_NOTIF)
+        }
 
         val landlockRequired = policy.enforceLandlock
         if (landlockRequired && !matrix.landlockSupported) {

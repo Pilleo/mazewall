@@ -85,9 +85,17 @@ public data class ProfilingCoverage(
             if (droppedEvents > 0) {
                 warnings.add("dropped $droppedEvents events")
             }
+            if (ioUring == IoUringVisibility.UNSEEN && strategy == ProfileStrategy.EBPF) {
+                warnings.add("eBPF did not observe io_uring; destinations are unproven")
+            }
+            if (pathQuality == PathResolutionQuality.FAILED || pathQuality == PathResolutionQuality.MIXED) {
+                warnings.add("one or more path-bearing events did not resolve a path")
+            }
             val complete = drainComplete && droppedEvents == 0 &&
                 ioUring != IoUringVisibility.BLIND &&
-                pathQuality != PathResolutionQuality.FAILED
+                !(ioUring == IoUringVisibility.UNSEEN && strategy == ProfileStrategy.EBPF) &&
+                pathQuality != PathResolutionQuality.FAILED &&
+                pathQuality != PathResolutionQuality.MIXED
             return ProfilingCoverage(
                 strategy = strategy,
                 strategyReason = strategyReason,
@@ -111,15 +119,12 @@ public data class ProfilingCoverage(
             if (observations.any { it is ProfileObservation.IoUring }) {
                 return IoUringVisibility.OBSERVED
             }
-            if (strategy == ProfileStrategy.HYBRID_NO_URING || environment.ioUringDisabled == true) {
+            if (environment.ioUringDisabled == true) {
                 val stillUsedUring = hasUringSyscall(observations)
                 return if (stillUsedUring) IoUringVisibility.BLIND else IoUringVisibility.DISABLED_FOR_HYBRID
             }
             if (hasUringSyscall(observations)) return IoUringVisibility.BLIND
-            return when (strategy) {
-                ProfileStrategy.EBPF -> IoUringVisibility.BLOCKED
-                else -> IoUringVisibility.UNSEEN
-            }
+            return IoUringVisibility.UNSEEN
         }
 
         private fun hasUringSyscall(observations: List<ProfileObservation>): Boolean =
@@ -128,11 +133,37 @@ public data class ProfilingCoverage(
                     obs.name in setOf("IO_URING_SETUP", "IO_URING_ENTER", "IO_URING_REGISTER")
             }
 
+        private val pathBearingNames =
+            setOf(
+                "OPEN", "OPENAT", "OPENAT2", "EXECVE", "EXECVEAT",
+                "UNLINK", "UNLINKAT", "RENAME", "RENAMEAT", "RENAMEAT2",
+                "MKDIR", "MKDIRAT", "RMDIR", "LINK", "LINKAT",
+                "SYMLINK", "SYMLINKAT", "CHDIR", "TRUNCATE",
+                "ACCESS", "FACCESSAT", "FACCESSAT2", "STAT", "NEWFSTATAT",
+                "CREAT", "CHMOD", "FCHMODAT", "CHOWN", "LCHOWN", "FCHOWNAT",
+            )
+
         private fun inferPaths(observations: List<ProfileObservation>): PathResolutionQuality {
-            val withPaths = observations.filter { it.paths.isNotEmpty() }
             if (observations.isEmpty()) return PathResolutionQuality.NONE
-            if (withPaths.isEmpty()) return PathResolutionQuality.NONE
-            return PathResolutionQuality.RESOLVED
+            val pathBearing =
+                observations.filter { obs ->
+                    when (obs) {
+                        is ProfileObservation.Syscall -> obs.name.uppercase() in pathBearingNames
+                        is ProfileObservation.IoUring ->
+                            obs.opcode.contains("OPEN", ignoreCase = true) ||
+                                obs.opcode.contains("UNLINK", ignoreCase = true) ||
+                                obs.opcode.contains("RENAME", ignoreCase = true)
+                        is ProfileObservation.Connect -> false
+                    }
+                }
+            if (pathBearing.isEmpty()) return PathResolutionQuality.NONE
+            val resolved = pathBearing.count { it.paths.isNotEmpty() }
+            val failed = pathBearing.size - resolved
+            return when {
+                failed == 0 -> PathResolutionQuality.RESOLVED
+                resolved == 0 -> PathResolutionQuality.FAILED
+                else -> PathResolutionQuality.MIXED
+            }
         }
     }
 }

@@ -101,6 +101,11 @@ public class SeccompSessionHandler(
                 break
             }
 
+            if (recvRes is LinuxNative.SyscallResult.Error<*>) {
+                isTerminated = true
+                return LoopAction.Break
+            }
+
             recvRes.onSuccess {
                 if (isPassThrough) {
                     sendSeccompContinue(notif.readLong(0L), resp)

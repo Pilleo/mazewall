@@ -22,12 +22,7 @@ public object EbpfEventParser {
     public fun parseLine(line: String): ProfileObservation? {
         val trimmed = line.trim()
         if (trimmed.isEmpty() || trimmed.startsWith("#")) return null
-        val fields = linkedMapOf<String, String>()
-        for (token in trimmed.split(Regex("\\s+"))) {
-            val eq = token.indexOf('=')
-            if (eq <= 0) continue
-            fields[token.substring(0, eq)] = token.substring(eq + 1)
-        }
+        val fields = parseFields(trimmed)
         val tid = fields["tid"]?.toIntOrNull() ?: return null
         val tgid = fields["tgid"]?.toIntOrNull() ?: tid
         val ktime = fields["ktime"]?.toLongOrNull()
@@ -50,5 +45,42 @@ public object EbpfEventParser {
             }
             else -> null
         }
+    }
+
+    /**
+     * `key=value` tokens. Values may be double-quoted and may contain spaces
+     * (`path="/tmp/My File"`). `\"` and `\\` inside quotes are unescaped.
+     */
+    internal fun parseFields(line: String): Map<String, String> {
+        val fields = linkedMapOf<String, String>()
+        var i = 0
+        while (i < line.length) {
+            while (i < line.length && line[i].isWhitespace()) i++
+            if (i >= line.length) break
+            val eq = line.indexOf('=', i)
+            if (eq <= i) break
+            val key = line.substring(i, eq)
+            i = eq + 1
+            if (i < line.length && line[i] == '"') {
+                i++
+                val value = StringBuilder()
+                while (i < line.length && line[i] != '"') {
+                    if (line[i] == '\\' && i + 1 < line.length) {
+                        value.append(line[i + 1])
+                        i += 2
+                    } else {
+                        value.append(line[i])
+                        i++
+                    }
+                }
+                if (i < line.length && line[i] == '"') i++
+                fields[key] = value.toString()
+            } else {
+                val start = i
+                while (i < line.length && !line[i].isWhitespace()) i++
+                fields[key] = line.substring(start, i)
+            }
+        }
+        return fields
     }
 }

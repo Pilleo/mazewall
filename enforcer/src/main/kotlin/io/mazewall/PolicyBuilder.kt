@@ -134,9 +134,7 @@ public class PolicyBuilder<S : PolicyScope> internal constructor(
     }
 
     public fun forRuntime(runtime: RuntimeProfile): PolicyBuilder<S> {
-        if (runtime.allowsExecutableMappings) {
-            this.allowMmapExec = true
-        }
+        this.allowMmapExec = runtime.allowsExecutableMappings
         return this
     }
 

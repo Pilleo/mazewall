@@ -25,9 +25,9 @@ data class ProfilingResult<T>(
         pathResolution = PathResolutionQuality.NONE,
         stacks = StackAttribution.SKIPPED,
         droppedEvents = 0,
-        drainComplete = true,
+        drainComplete = false,
         environment = ProfileEnvironment("unknown", EbpfLoad.Denied("unprobed")),
-        complete = true,
+        complete = false,
     ),
 ) {
     fun toPolicy(

@@ -11,6 +11,7 @@ import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
 import io.mazewall.ffi.Layouts
+import io.mazewall.ffi.NativeConstants
 import io.mazewall.ffi.memory.NativeArena
 import io.mazewall.enforcer.supervisor.JvmVerdict
 import io.mazewall.enforcer.supervisor.SupervisorNotificationMachine
@@ -52,7 +53,25 @@ public class SupervisorValidationChannel(
         }
         resp.setErrorNr(errorNr)
         resp.setPath(path)
-        LinuxNative.memory.write(socketFd, responseSegment.managed, Layouts.SUPERVISOR_RESPONSE_SIZE)
+        writeFully(responseSegment.managed, Layouts.SUPERVISOR_RESPONSE_SIZE)
+    }
+
+    private fun writeFully(buf: io.mazewall.ffi.memory.ManagedSegment, total: Long) {
+        var offset = 0L
+        while (offset < total) {
+            val remaining = total - offset
+            val slice = buf.asSlice(offset, remaining)
+            when (val res = LinuxNative.memory.write(socketFd, slice, remaining)) {
+                is LinuxNative.SyscallResult.Error<*> -> {
+                    if (res.errno == NativeConstants.EINTR) continue
+                    error("Supervisor validation write failed errno=${res.errno}")
+                }
+                is LinuxNative.SyscallResult.Success -> {
+                    check(res.value > 0L) { "Supervisor validation write returned ${res.value}" }
+                    offset += res.value
+                }
+            }
+        }
     }
 
     public fun sendExecRewriteAck(ok: Boolean) {

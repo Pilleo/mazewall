@@ -217,7 +217,8 @@ class ProfilerSessionApiTest {
             drainComplete = true,
             environment = ProfileEnvironment("t", EbpfLoad.Denied("x")),
         )
-        assertEquals(IoUringVisibility.BLOCKED, blocked.ioUring)
+        assertEquals(IoUringVisibility.UNSEEN, blocked.ioUring)
+        assertEquals(false, blocked.complete)
     }
 
     @Test
@@ -267,6 +268,74 @@ class ProfilerSessionApiTest {
         )
         val result = ProfilingResult(Unit, BillOfBehavior(syscalls = setOf(Syscall.IO_URING_SETUP)), emptyMap(), coverage)
         assertFailsWith<IncompleteProfileException> { result.toPolicy() }
+    }
+
+    @Test
+    fun `legacy three-arg ProfilingResult is incomplete`() {
+        val result = ProfilingResult(Unit, BillOfBehavior(), emptyMap())
+        assertEquals(false, result.coverage.complete)
+        assertFailsWith<IncompleteProfileException> { result.toPolicy() }
+    }
+
+    @Test
+    fun `HYBRID_NO_URING without disable evidence is not DISABLED_FOR_HYBRID`() {
+        val coverage = ProfilingCoverage.infer(
+            strategy = ProfileStrategy.HYBRID_NO_URING,
+            strategyReason = "t",
+            processWide = false,
+            observations = emptyList(),
+            stacks = StackAttribution.SKIPPED,
+            droppedEvents = 0,
+            drainComplete = true,
+            environment = ProfileEnvironment("t", EbpfLoad.Denied("x"), ioUringDisabled = null),
+        )
+        assertEquals(IoUringVisibility.UNSEEN, coverage.ioUring)
+    }
+
+    @Test
+    fun `unresolved path-bearing events mark coverage FAILED`() {
+        val coverage = ProfilingCoverage.infer(
+            strategy = ProfileStrategy.USER_NOTIF,
+            strategyReason = "t",
+            processWide = false,
+            observations = listOf(
+                ProfileObservation.Syscall(
+                    ObservationCorrelation(1, Tid(1)),
+                    ObservationSource.USER_NOTIF,
+                    "OPENAT",
+                    paths = emptyList(),
+                ),
+            ),
+            stacks = StackAttribution.SKIPPED,
+            droppedEvents = 0,
+            drainComplete = true,
+            environment = ProfileEnvironment("t", EbpfLoad.Denied("x")),
+        )
+        assertEquals(PathResolutionQuality.FAILED, coverage.pathResolution)
+        assertEquals(false, coverage.complete)
+    }
+
+    @Test
+    fun `portless IPv6 endpoints survive JSON`() {
+        val original = BillOfBehavior(connects = setOf(NetworkEndpoint("2001:db8::1", null)))
+        val parsed = BillOfBehavior.fromJson(original.toJson())
+        assertEquals(original.connects, parsed.connects)
+    }
+
+    @Test
+    fun `uring write opcodes go to fsWritePaths`() {
+        val bob = BobCompiler.compileObservations(
+            listOf(
+                ProfileObservation.IoUring(
+                    ObservationCorrelation(1, Tid(1)),
+                    ObservationSource.EBPF,
+                    "IORING_OP_WRITE",
+                    listOf("/tmp/w"),
+                ),
+            ),
+        )
+        assertEquals(setOf("/tmp/w"), bob.fsWritePaths)
+        assertTrue(bob.opens.isEmpty())
     }
 
     @Test

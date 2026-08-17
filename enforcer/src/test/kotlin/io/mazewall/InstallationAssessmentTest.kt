@@ -79,6 +79,27 @@ class InstallationAssessmentTest {
     }
 
     @Test
+    fun `process-wide USER_NOTIF is never installable`() {
+        Platform.setProvider(
+            MockPlatformProvider().apply {
+                mockOsName = "Linux"
+                mockKernelSeccompSupport = true
+                mockSeccompUserNotifSupported = true
+                mockSeccompTsyncSupported = true
+            },
+        )
+        val policy =
+            Policy
+                .builder()
+                .addAction(io.mazewall.core.SeccompAction.ACT_NOTIFY, Syscall.OPENAT)
+                .build()
+        val assessment = InstallationAssessor.assess(policy.definition, processWide = true)
+        assertTrue(assessment.userNotifRequired)
+        assertFalse(assessment.installable)
+        assertTrue(assessment.blockedStages.contains(InstallationStage.USER_NOTIF))
+    }
+
+    @Test
     fun `supported process-wide HOTSPOT baseline is installable and inspectable`() {
         Platform.setProvider(
             MockPlatformProvider().apply {

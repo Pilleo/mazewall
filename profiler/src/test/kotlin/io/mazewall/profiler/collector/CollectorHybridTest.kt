@@ -35,6 +35,15 @@ class CollectorHybridTest {
     }
 
     @Test
+    fun `parser keeps spaces inside quoted path values`() {
+        val obs =
+            EbpfEventParser.parseLine(
+                """kind=syscall tid=3 name=OPENAT path="/tmp/My File" """,
+            ) as ProfileObservation.Syscall
+        assertEquals(listOf("/tmp/My File"), obs.paths)
+    }
+
+    @Test
     fun `merger prefers OBSERVED and deduplicates`() {
         val corr = ObservationCorrelation(1, Tid(1), 5)
         val uring = ProfileObservation.IoUring(corr, ObservationSource.EBPF, "OPENAT", listOf("/x"))

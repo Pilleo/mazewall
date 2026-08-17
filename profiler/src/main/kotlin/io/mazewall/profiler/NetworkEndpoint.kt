@@ -5,5 +5,10 @@ public data class NetworkEndpoint(
     val host: String,
     val port: Int? = null,
 ) {
-    override fun toString(): String = if (port != null) "$host:$port" else host
+    override fun toString(): String =
+        when {
+            port == null -> host
+            host.contains(':') -> "[$host]:$port"
+            else -> "$host:$port"
+        }
 }

@@ -74,13 +74,13 @@ public data class PolicyDefinition<out S : PolicyScope>(
             val combinedDefaultAction = policies.maxByOrNull { it.defaultAction.priority }!!.defaultAction
 
             val combinedSyscalls = mutableMapOf<Syscall, SeccompAction>()
-            for (policy in policies) {
-                for ((syscall, action) in policy.syscallActions) {
-                    val current = combinedSyscalls[syscall]
-                    if (current == null || action.priority > current.priority) {
-                        combinedSyscalls[syscall] = action
-                    }
-                }
+            val allSyscalls = policies.flatMapTo(mutableSetOf()) { it.syscallActions.keys }
+            for (syscall in allSyscalls) {
+                val effective =
+                    policies
+                        .map { it.syscallActions[syscall] ?: it.defaultAction }
+                        .maxBy { it.priority }
+                combinedSyscalls[syscall] = effective
             }
 
             val mmapExec = policies.all { it.allowMmapExec }

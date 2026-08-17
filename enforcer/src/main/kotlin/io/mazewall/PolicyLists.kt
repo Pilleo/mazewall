@@ -79,7 +79,7 @@ public class DenyListSpec internal constructor(
 
     /** Escape hatch for raw syscall actions. */
     public fun advanced(block: Policy.Builder<PolicyScope.ProcessWideSafe>.() -> Unit): DenyListSpec {
-        inner.block()
+        inner.apply(block)
         return this
     }
 
@@ -124,7 +124,7 @@ public class AllowListSpec internal constructor(
     }
 
     public fun advanced(block: Policy.Builder<PolicyScope.ProcessWideSafe>.() -> Unit): AllowListSpec {
-        inner.block()
+        inner.apply(block)
         return this
     }
 

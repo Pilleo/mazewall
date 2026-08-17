@@ -238,6 +238,46 @@ class PolicyTest {
     }
 
     @Test
+    fun `restrictFurtherWith applies default deny to explicit allows on the other policy`() {
+        val denyByDefault =
+            Policy.allowList(RuntimeProfile.NATIVE_IMAGE) {
+                allow(Syscall.READ)
+            }
+        val explicitAllow =
+            Policy.denyList(RuntimeProfile.HOTSPOT_JIT) {
+                advanced { allow(Syscall.CONNECT) }
+            }
+        val restricted = denyByDefault.restrictFurtherWith(explicitAllow)
+        assertFalse(restricted.isSyscallAllowed(Syscall.CONNECT))
+        assertTrue(restricted.isSyscallAllowed(Syscall.READ))
+    }
+
+    @Test
+    fun `advanced block is applied on denyList and allowList`() {
+        val denied =
+            Policy.denyList(RuntimeProfile.HOTSPOT_JIT) {
+                advanced { block(Syscall.PTRACE) }
+            }
+        assertFalse(denied.isSyscallAllowed(Syscall.PTRACE))
+        val allowed =
+            Policy.allowList(RuntimeProfile.NATIVE_IMAGE) {
+                advanced { allow(Syscall.GETPID) }
+            }
+        assertTrue(allowed.isSyscallAllowed(Syscall.GETPID))
+    }
+
+    @Test
+    fun `forRuntime NATIVE_IMAGE clears a prior HotSpot mmap exec flag`() {
+        val policy =
+            Policy
+                .builder()
+                .forRuntime(RuntimeProfile.HOTSPOT_JIT)
+                .forRuntime(RuntimeProfile.NATIVE_IMAGE)
+                .build()
+        assertFalse(policy.allowMmapExec)
+    }
+
+    @Test
     fun `ProcessPolicies denyNetwork does not hide W^X on HotSpot`() {
         val hotspot = ProcessPolicies.denyNetwork(RuntimeProfile.HOTSPOT_JIT)
         val native = ProcessPolicies.denyNetwork(RuntimeProfile.NATIVE_IMAGE)

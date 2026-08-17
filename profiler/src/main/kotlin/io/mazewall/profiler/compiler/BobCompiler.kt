@@ -35,7 +35,11 @@ object BobCompiler {
             when (obs) {
                 is ProfileObservation.IoUring -> {
                     ioUringOps.add(obs.opcode)
-                    opens.addAll(obs.paths)
+                    if (isUringMutation(obs.opcode)) {
+                        fsWritePaths.addAll(obs.paths)
+                    } else {
+                        opens.addAll(obs.paths)
+                    }
                 }
                 is ProfileObservation.Connect -> {
                     connects.add(obs.endpoint)
@@ -85,6 +89,19 @@ object BobCompiler {
                 }
             }
         }
+    }
+
+    private fun isUringMutation(opcode: String): Boolean {
+        val op = opcode.uppercase(Locale.US)
+        return op.contains("WRITE") ||
+            op.contains("UNLINK") ||
+            op.contains("RENAME") ||
+            op.contains("MKDIR") ||
+            op.contains("RMDIR") ||
+            op.contains("FSYNC") ||
+            op.contains("SYNC") ||
+            op.contains("TRUNCATE") ||
+            op.contains("CLOSE") && op.contains("DIRECT")
     }
 
     private fun isFileSystemMutation(syscallName: String): Boolean =

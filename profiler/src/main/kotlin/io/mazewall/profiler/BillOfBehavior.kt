@@ -227,8 +227,17 @@ data class BillOfBehavior(
         }
 
         private fun parseEndpoint(raw: String): NetworkEndpoint {
-            val split = raw.lastIndexOf(':')
-            if (split > 0) {
+            if (raw.startsWith("[")) {
+                val close = raw.indexOf(']')
+                if (close > 1) {
+                    val host = raw.substring(1, close)
+                    val rest = raw.substring(close + 1)
+                    val port = if (rest.startsWith(":")) rest.substring(1).toIntOrNull() else null
+                    return NetworkEndpoint(host, port)
+                }
+            }
+            if (raw.count { it == ':' } == 1) {
+                val split = raw.lastIndexOf(':')
                 val port = raw.substring(split + 1).toIntOrNull()
                 if (port != null) return NetworkEndpoint(raw.substring(0, split), port)
             }
