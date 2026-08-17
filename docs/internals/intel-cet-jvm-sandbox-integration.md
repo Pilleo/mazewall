@@ -1,10 +1,15 @@
 # Intel CET (Control-flow Enforcement Technology) Integration for JVM Sandboxing
 
+## Status in mazewall
+
+* **Implemented / tested:** x86 shadow-stack enable and lock (`PR_SET_SHADOW_STACK_STATUS` / related CET prctls) where hardware and JDK support it.
+* **Not a mazewall tier:** ARM PAC/BTI, MTE, MPK, `PR_SET_MDWE`, V8 pointer cages, ELF-note audits. Those sections are research notes.
+
+CET *constrains* some ROP/JOP techniques when the compiler, runtime, CPU, and kernel all cooperate. It does not prevent every control-flow hijack.
+
 ## Overview
 
-Intel CET (Control-flow Enforcement Technology) is a hardware-assisted security feature available on modern x86_64 processors (Intel 11th Gen Tiger Lake+ / AMD Zen 3+). It provides hardware-enforced protection against control-flow hijacking attacks—specifically **Return-Oriented Programming (ROP)** via Shadow Stacks and **Jump-Oriented Programming (JOP)** via Indirect Branch Tracking (IBT).
-
-In managed runtime sandboxes (such as Chromium V8 and JVM HotSpot), Intel CET serves as a crucial hardware layer that prevents memory corruption exploits from executing ROP chains to bypass user-space security checks or thread-scoped sandboxes.
+Intel CET is a hardware-assisted feature on some x86_64 CPUs (Intel 11th Gen Tiger Lake+ / AMD Zen 3+). Shadow stacks target return-oriented gadgets; IBT targets some indirect-branch (JOP) gadgets.
 
 ---
 
@@ -181,7 +186,7 @@ Intel MPK (Memory Protection Keys) is used in Chrome's **V8 Sandbox** initiative
 * **JVM & FFM Application:** `mazewall` can allocate Protection Keys via `sys_pkey_alloc` and tag sensitive off-heap `MemorySegment` buffers (e.g. cryptographic keys, session tokens). Worker threads execute `WRPKRU` to lock access to sensitive memory pages before running untrusted tasks, then restore access afterward.
 
 ### 3. ARM MTE (Memory Tagging Extension)
-Deployed in Android 14+ and ARMv8.5+ processors, **MTE** eliminates Use-After-Free (UAF) and Out-Of-Bounds (OOB) memory corruption.
+Deployed in Android 14+ and ARMv8.5+ processors, **MTE** *mitigates* (does not eliminate) many UAF/OOB bugs using finite tags and probabilistic checking.
 
 * **Mechanism:** The CPU hardware assigns a 4-bit tag to every 16-byte granule of memory and a matching 4-bit tag to pointer references. If a pointer dereference tag does not match the memory granule tag, the CPU hardware raises a `SIGSEGV` instantly.
 * **JVM & FFM Application:** Configured on Linux ARM64 via `prctl(PR_SET_TAGGED_ADDR_CTRL, PR_MTE_TCF_SYNC)`. Off-heap FFM allocators can leverage MTE to ensure native off-heap memory is immune to UAF/OOB buffer overflows.
@@ -195,7 +200,7 @@ Chromium enforces strict **W^X (Write XOR Execute)** memory rules: writable memo
 ### 5. Memory Caging (Chromium V8 Sandbox Pattern)
 Chrome 123+ introduced the **V8 Sandbox** to protect against shared-memory ACE escapes.
 
-* **Mechanism:** Instead of trusting 64-bit raw pointers inside the V8 heap, V8 uses **32-bit Sandboxed Pointers** (offsets relative to a reserved 1TB Virtual Address Space cage) and **External Pointer Tables**. Any array index corruption inside V8 is mathematically trapped inside the 1TB memory cage.
+* **Mechanism:** V8 sandboxed pointers (offsets into a reserved cage) *constrain* many in-heap corruptions. They do not mathematically trap all native ACE or untrusted `WRPKRU` / host-function paths. Research-only for mazewall; not an implemented tier.
 * **JVM Parallel:** In the JVM ecosystem, this pattern is mirrored by **GraalVM Isolates** (independent, non-overlapping Java heaps inside the same process) and **WebAssembly (Wasm) runtimes** (executing untrusted modules inside sandboxed linear byte arrays).
 
 ---

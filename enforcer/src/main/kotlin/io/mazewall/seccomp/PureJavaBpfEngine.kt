@@ -195,12 +195,9 @@ internal object PureJavaBpfEngine : SeccompEngine<EngineState> {
             val errno1 = seccompResult.errno
 
             if (useTsync) {
-                val detail = if (errno1 == 13) {
-                    "failed with EACCES (Permission denied). This typically occurs because some pre-existing sibling threads (e.g. GC, JIT, or VM helper threads spawned during JVM startup) do not have the 'no_new_privs' flag enabled. To fix this, ensure the JVM process is started with privilege escalation disabled (e.g., OCI/Kubernetes 'allowPrivilegeEscalation: false', or running under a wrapper launcher that sets the flag before calling execve)."
-                } else {
-                    "failed with errno $errno1. Your kernel may be too old to support SECCOMP_FILTER_FLAG_TSYNC or the parameters are invalid."
-                }
-                throw IllegalStateException("Process-wide seccomp installation (TSYNC) failed: $detail")
+                throw IllegalStateException(
+                    "Process-wide seccomp installation (TSYNC) failed: ${tsyncFailureDetail(errno1, offendingTid = null)}",
+                )
             }
 
             var prctlResult: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled>
@@ -225,7 +222,42 @@ internal object PureJavaBpfEngine : SeccompEngine<EngineState> {
                 return SeccompInstallationState.FallbackPrctlApplied
             }
         } else {
+            val applied = seccompResult as LinuxNative.SyscallResult.Success
+            if (useTsync && applied.value > 0L) {
+                throw IllegalStateException(
+                    "Process-wide seccomp installation (TSYNC) failed: ${
+                        tsyncFailureDetail(errno = null, offendingTid = applied.value)
+                    }",
+                )
+            }
             return SeccompInstallationState.SystemCallApplied
+        }
+    }
+
+    /**
+     * `seccomp(2)`: the caller needs `CAP_SYS_ADMIN` or `no_new_privs`.
+     * TSYNC fails when a sibling is in strict mode or has a divergent filter tree,
+     * or when an outer profile denies nested seccomp. Sibling `no_new_privs` is not
+     * the documented prerequisite.
+     */
+    internal fun tsyncFailureDetail(errno: Int?, offendingTid: Long?): String {
+        if (offendingTid != null && offendingTid > 0L) {
+            return "kernel reported offending sibling tid=$offendingTid " +
+                "(strict-mode or a divergent seccomp filter tree on that thread)"
+        }
+        return when (errno) {
+            13 ->
+                "EACCES. The calling thread needs CAP_SYS_ADMIN or no_new_privs; " +
+                    "or a sibling is in SECCOMP_MODE_STRICT / has a divergent filter tree; " +
+                    "or an outer OCI seccomp profile denied nested seccomp(2). " +
+                    "Sibling threads do not each need no_new_privs beforehand."
+            22 ->
+                "EINVAL. TSYNC unsupported, flags invalid, or a filter-tree mismatch " +
+                    "(pre-5.7 kernels often return EINVAL for any sibling mismatch)."
+            NativeConstants.EPERM ->
+                "EPERM. An outer security policy denied seccomp(2) or the caller lacks privilege."
+            else ->
+                "errno=$errno. Not sibling no_new_privs by default; decode against seccomp(2)."
         }
     }
 

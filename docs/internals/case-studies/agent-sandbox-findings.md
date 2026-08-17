@@ -81,10 +81,10 @@ If this Agent is deployed inside a Docker container, that container **must** be 
 ### Why `mazewall` is Different
 `mazewall` operates at the **Thread** boundary, enabling Agent Compartmentalization *inside* the JVM:
 *   **The Reasoning Thread:** The thread parsing the LLM response is fully locked down. It cannot open files or network sockets.
-*   **The Web Tool Thread:** When `searchWeb` is invoked, it runs on a thread with a `mazewall` seccomp filter that *only* allows outbound connections to public IPs (blocking local subnets).
-*   **The DB Tool Thread:** When `queryDb` is invoked, it runs on a thread with a filter that *only* allows connections to the database IP.
+*   **The Web Tool Thread:** When `searchWeb` is invoked, it runs on a thread whose seccomp policy can **block or allow `connect`/`socket`**. Classic Seccomp does **not** dereference `sockaddr`; it cannot enforce “public IPs only.” Landlock can constrain TCP **ports**, not destinations. Destination-IP control needs a netns, cgroup/eBPF, or an external firewall.
+*   **The DB Tool Thread:** Same limit: you can allow the connect **syscall** (and optionally a port). You cannot attest the peer address from Seccomp-BPF.
 
-**The Strategic Pitch:** Docker secures the application from the host. `mazewall` secures the agent's tools from each other. Because BPF thread filters take microseconds to apply and require zero serialization overhead to pass data (unlike IPC between containers), `mazewall` provides zero-trust isolation between natively executed tools without the latency of containerization.
+**What this is:** blast-radius reduction for **trusted** tool code handling untrusted data (SSRF via a new `connect` on that thread). It is not zero-trust isolation. `System.getenv` is not a syscall. Inherited FDs, sibling threads, shared heap, logs, and IPC are out of scope. Denial of a configured syscall is evidence of that deny, not proof that data was never exfiltrated.
 
 ---
 

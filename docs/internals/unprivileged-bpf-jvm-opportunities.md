@@ -51,7 +51,7 @@ fcntl(mem_fd, F_ADD_SEALS, F_SEAL_WRITE | F_SEAL_SHRINK | F_SEAL_SEAL);
 ```
 
 ### JVM Backend Use Case
-* **Tamper-Proof Off-Heap Memory Buffers:** Populate off-heap configuration or security policies via FFM `MemorySegment`, then apply kernel write seals. Even if an attacker achieves Arbitrary Code Execution (ACE) inside the JVM process heap, the kernel rejects write operations to the memory region with `EPERM`.
+* **Sealed off-heap buffers:** `F_ADD_SEALS` makes *that* memfd mapping reject further writes/shrinks. It does not hide the mapping from same-process native ACE (reads still work; the attacker can use other writable mappings).
 * **Zero-Disk IPC Caches:** Share immutable read-only memory pages between a host JVM process and worker subprocesses without writing physical files to disk.
 
 ---

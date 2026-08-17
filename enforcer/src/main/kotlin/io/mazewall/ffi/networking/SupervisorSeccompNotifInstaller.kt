@@ -171,18 +171,21 @@ public object SupervisorSeccompNotifInstaller {
                     NativeArg.LongArg(NativeConstants.SECCOMP_FILTER_FLAG_TSYNC.toLong()),
                     NativeArg.MemoryArg(dummyProg),
                 )
-                if (tsyncRes is LinuxNative.SyscallResult.Error) {
-                    val errno = tsyncRes.errno
-                    if (errno == 13) {
+                when (tsyncRes) {
+                    is LinuxNative.SyscallResult.Error ->
                         throw IllegalStateException(
-                            "Process-wide profiling failed with EACCES (Permission denied). " +
-                            "This typically occurs because sibling threads (such as GC or JIT compiler threads) " +
-                            "do not have the 'no_new_privs' flag set. Process-wide profiling requires running " +
-                            "inside a container (where privilege escalation is disabled at the container boundary)."
+                            "Process-wide profiling TSYNC failed: ${
+                                io.mazewall.seccomp.PureJavaBpfEngine.tsyncFailureDetail(tsyncRes.errno, null)
+                            }",
                         )
-                    } else {
-                        throw IllegalStateException("Process-wide profiling TSYNC failed with errno $errno")
-                    }
+                    is LinuxNative.SyscallResult.Success ->
+                        if (tsyncRes.value > 0L) {
+                            throw IllegalStateException(
+                                "Process-wide profiling TSYNC failed: ${
+                                    io.mazewall.seccomp.PureJavaBpfEngine.tsyncFailureDetail(null, tsyncRes.value)
+                                }",
+                            )
+                        }
                 }
             }
         } catch (t: Throwable) {

@@ -1523,6 +1523,7 @@ class "PureJavaBpfEngine" as io.mazewall.seccomp.PureJavaBpfEngine {
   +SeccompEngine<Loaded> installOnProcess(CompiledSandbox<?>)
   +void setNoNewPrivs()
   +FilterApplied installFilter(Arch, ManagedSegment, boolean)
+  +String tsyncFailureDetail(Integer, Long)
   +void verifyInstallation(PolicyDefinition<?>)
 }
 interface "SeccompEngine" as io.mazewall.seccomp.SeccompEngine<S extends EngineState> {

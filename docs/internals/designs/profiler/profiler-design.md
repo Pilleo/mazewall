@@ -80,10 +80,9 @@ The calling thread installs the main profiling BPF filter using `SECCOMP_FILTER_
 The calling thread compiles a benign dummy BPF program that permits all syscalls (`BpfProgram.dsl(arch) { allow() }`) and installs it using `SECCOMP_FILTER_FLAG_TSYNC`. 
 The kernel's TSYNC semantics mandate that it copies the entire seccomp filter tree of the calling thread to all sibling threads in the thread group. Since the calling thread's tree already contains the `USER_NOTIF` filter from Step 1, all pre-existing and background JVM threads receive it. Syscall notifications from these background threads are routed to the exact same listener FD created in Step 1.
 
-#### 3. Container & Privilege Boundary (`no_new_privs`)
-The kernel requires `no_new_privs` to be set on all sibling threads in the thread group for TSYNC to succeed. Pre-existing JVM background threads do not automatically inherit `no_new_privs` if it was set after their creation on the host.
-* **On host environments:** Running process-wide profiling directly on the host machine will throw an `EACCES` (errno 13) exception.
-* **In containerized environments:** The container boundary establishes `no_new_privs` at initialization (e.g., via Podman/Docker or Kubernetes `allowPrivilegeEscalation: false`), allowing TSYNC to succeed and process-wide profiling to function.
+#### 3. Privilege boundary (`seccomp(2)` / TSYNC)
+The calling thread needs `CAP_SYS_ADMIN` or `no_new_privs`. TSYNC copies the caller's filter tree to siblings and fails when a sibling is in `SECCOMP_MODE_STRICT` or already has a **divergent** filter tree, or when an outer OCI profile denies nested `seccomp(2)`. Sibling threads do **not** each need `no_new_privs`.
+A container with `allowPrivilegeEscalation: false` can still help (caller NNP at exec), but it is not the TSYNC prerequisite. Diagnose the kernel return (including a positive offending TID) instead of assuming host vs container.
 
 ### Tier P: Privileged / Trace Profiler (eBPF Tracepoints & Strace Limitations)
 
@@ -347,7 +346,9 @@ Landlock Audit logging (`LANDLOCK_ACCESS` records) is a kernel-specific telemetr
 
 ## 6. Architectural Analysis: Why `USER_NOTIF` Is the Wrong Primitive for Tier S Profiling
 
-> **Status:** INTENTIONAL DESIGN INVARIANT. While an asynchronous fire-and-forget design was analyzed to improve performance, we confirmed that JVM stack trace capturing requires the target thread to be suspended (blocked) in kernel space. If the tracee thread is resumed immediately, it moves past the system call frame or terminates before the JVM listener thread can dump its stack trace, resulting in empty or inaccurate traces. Therefore, the synchronous ACK handshake protocol is preserved as a permanent design invariant.
+> **Status (current code):** Synchronous ACK is implemented. The daemon waits for `PROTOCOL_ACK_BYTE` before `FLAG_CONTINUE`. The JVM listener captures `Thread.getStackTrace()` (best-effort) before ACKing. Handshake helpers were not deleted.
+>
+> **Rejected alternative:** Fire-and-forget CONTINUE-then-deliver. It reduces safepoint hold time but stack attribution races and post-CONTINUE socket delivery can drop events. Do not treat later sections that argue for fire-and-forget as the live protocol.
 
 ### 6.1 The Category Error
 
@@ -427,11 +428,11 @@ The tracee is unblocked as soon as `process_vm_readv` completes. The trace-liste
 
 The only reason `USER_NOTIF` was chosen over simpler primitives (like `SECCOMP_RET_LOG`) is that it enables `process_vm_readv` to read path arguments from the tracee's address space **while the tracee is still suspended** — before the path pointer may be overwritten by the returning syscall.
 
-In the fire-and-forget design this invariant is fully preserved: `process_vm_readv` is still called **before** `CONTINUE` is sent. The daemon reads the path, sends `CONTINUE`, and then delivers the already-resolved event to the JVM listener. The path resolution window is not affected. No information is lost.
+In a *hypothetical* fire-and-forget design, `process_vm_readv` could still run before `CONTINUE`. Path bytes can still be captured. Stack attribution and post-CONTINUE socket delivery can still fail or race. That is not “no information lost.” **Current code does not implement this refactor.**
 
-### 6.5 Components Eliminated by This Refactor
+### 6.5 Components that would be deleted *if* fire-and-forget shipped
 
-The following become **dead code** and are deleted:
+Not current. Handshake/ACK types still exist:
 
 | File / Symbol | Fate |
 |---|---|

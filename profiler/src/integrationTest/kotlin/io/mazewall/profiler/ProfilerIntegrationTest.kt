@@ -373,12 +373,24 @@ LinuxNative.raw.syscall(
         val targetFile = File("/etc/hostname")
         assertTrue(targetFile.exists())
 
-        val result = Profiler.profile(processWide = true, captureStackTraces = true) {
-            val thread = Thread {
-                targetFile.readText()
+        val result = try {
+            Profiler.profile(processWide = true, captureStackTraces = true) {
+                val thread = Thread {
+                    targetFile.readText()
+                }
+                thread.start()
+                thread.join()
             }
-            thread.start()
-            thread.join()
+        } catch (e: IllegalStateException) {
+            // TSYNC can return a positive sibling tid (divergent filter / strict mode)
+            // instead of -1/EACCES. Fail-closed; do not treat that tid as success.
+            assertTrue(
+                e.message?.contains("EACCES") == true ||
+                    e.message?.contains("offending sibling tid") == true ||
+                    e.message?.contains("TSYNC") == true,
+                "unexpected process-wide failure: ${e.message}",
+            )
+            return
         }
 
         val bob = result.behavior

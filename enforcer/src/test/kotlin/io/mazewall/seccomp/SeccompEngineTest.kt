@@ -5,6 +5,7 @@ import io.mazewall.compile
 import org.junit.jupiter.api.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertTrue
 
 class SeccompEngineTest {
     @Test
@@ -31,5 +32,15 @@ class SeccompEngineTest {
         }
 
         assertEquals("Global process containment is not supported by this engine.", exception.message)
+    }
+
+    @Test
+    fun `TSYNC failure text does not blame sibling no_new_privs`() {
+        val eacces = PureJavaBpfEngine.tsyncFailureDetail(13, null)
+        assertTrue(eacces.contains("calling thread"))
+        assertTrue(eacces.contains("divergent"))
+        assertTrue(eacces.contains("do not each need no_new_privs"))
+        val tid = PureJavaBpfEngine.tsyncFailureDetail(null, 42L)
+        assertTrue(tid.contains("tid=42"))
     }
 }
