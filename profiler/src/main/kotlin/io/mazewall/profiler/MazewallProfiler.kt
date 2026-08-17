@@ -5,7 +5,6 @@ import io.mazewall.profiler.collector.EbpfCollector
 import io.mazewall.profiler.collector.ObservationMerger
 import io.mazewall.profiler.compiler.BobCompiler
 import io.mazewall.profiler.engine.TraceEvent
-import io.mazewall.profiler.strace.StraceProfiler
 import java.nio.file.Files
 import java.nio.file.Path
 
@@ -19,8 +18,8 @@ public data class ProfileOptions(
 )
 
 /**
- * Owned profiling session. [Profiler.profile] is a facade over a single session.
- * eBPF live attach fails closed. A recorded sidecar log can be merged or used alone.
+ * Owned profiling session. The operator API is [profile] with a lambda.
+ * [Profiler.profile] is a facade over one session. eBPF live attach fails closed.
  */
 public class MazewallProfiler private constructor(
     private val options: ProfileOptions,
@@ -36,33 +35,8 @@ public class MazewallProfiler private constructor(
         if (resolved == ProfileStrategy.EBPF) {
             return profileEbpfOnly(block)
         }
-        if (resolved == ProfileStrategy.STRACE) {
-            throw IllegalArgumentException("STRACE requires profile(workloadClass); a lambda cannot be spawned under strace")
-        }
         val raw = Profiler.profile(options.processWide, options.captureStacks, block)
         return attachCoverage(raw)
-    }
-
-    public fun <W : TraceableWorkload> profile(workloadClass: Class<W>): ProfilingResult<Unit> {
-        check(!closed) { "MazewallProfiler is closed" }
-        if (resolved != ProfileStrategy.STRACE && options.strategy != ProfileStrategy.STRACE) {
-            throw IllegalArgumentException("Class workloads are collected via STRACE")
-        }
-        val bob = StraceProfiler.profile(workloadClass)
-        val observations = bobToSynthetic(bob)
-        val coverage = ProfilingCoverage.infer(
-            strategy = ProfileStrategy.STRACE,
-            strategyReason = reason,
-            processWide = true,
-            observations = observations,
-            stacks = StackAttribution.SKIPPED,
-            droppedEvents = 0,
-            drainComplete = true,
-            environment = environment,
-        )
-        val result = ProfilingResult(Unit, bob, emptyMap(), coverage)
-        lastSnapshot = result
-        return result
     }
 
     public fun snapshot(): ProfilingResult<Unit> =
@@ -145,6 +119,12 @@ public class MazewallProfiler private constructor(
 
     public companion object {
         public fun open(options: ProfileOptions = ProfileOptions()): MazewallProfiler {
+            if (options.strategy == ProfileStrategy.STRACE) {
+                throw IllegalArgumentException(
+                    "STRACE is not an operator session strategy. Use profile { } (USER_NOTIF). " +
+                        "Descendant strace is an internal floor/lab probe, not a workload API.",
+                )
+            }
             val env = ProfileEnvironment(
                 kernelRelease = runCatching { Files.readString(Path.of("/proc/sys/kernel/osrelease")).trim() }
                     .getOrElse { System.getProperty("os.version") ?: "unknown" },
@@ -166,7 +146,7 @@ public class MazewallProfiler private constructor(
                 ProfileStrategy.EBPF ->
                     when (load) {
                         is EbpfLoad.Available ->
-                            ProfileStrategy.EBPF to "CAP_BPF in init ns; collector not implemented"
+                            ProfileStrategy.EBPF to "CAP_BPF in init ns; live attach not implemented, recorded log supported"
                         is EbpfLoad.UserNamespaceRoot ->
                             ProfileStrategy.EBPF to "uid 0 in a user namespace cannot load tracing eBPF"
                         is EbpfLoad.Denied ->
@@ -175,7 +155,7 @@ public class MazewallProfiler private constructor(
                 ProfileStrategy.AUTO ->
                     ProfileStrategy.USER_NOTIF to when (load) {
                         is EbpfLoad.Available ->
-                            "AUTO: eBPF capabilities present but collector not implemented; USER_NOTIF"
+                            "AUTO: eBPF capabilities present but live attach is not implemented; USER_NOTIF"
                         is EbpfLoad.UserNamespaceRoot ->
                             "AUTO: user-namespace root cannot load eBPF; USER_NOTIF"
                         is EbpfLoad.Denied ->

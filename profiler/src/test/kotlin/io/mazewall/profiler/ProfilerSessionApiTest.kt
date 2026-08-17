@@ -96,6 +96,15 @@ class ProfilerSessionApiTest {
     }
 
     @Test
+    fun `AUTO never selects STRACE`() {
+        for (load in listOf(EbpfLoad.Available, EbpfLoad.UserNamespaceRoot, EbpfLoad.Denied("x"))) {
+            val (resolved, _) = MazewallProfiler.resolve(ProfileStrategy.AUTO, load)
+            assertEquals(ProfileStrategy.USER_NOTIF, resolved)
+            assertTrue(resolved != ProfileStrategy.STRACE)
+        }
+    }
+
+    @Test
     fun `EBPF strategy fails closed even when capabilities look available`() {
         MazewallProfiler.open(ProfileOptions(strategy = ProfileStrategy.EBPF)).use { session ->
             val ex = assertFailsWith<IncompleteProfileException> {
@@ -160,18 +169,13 @@ class ProfilerSessionApiTest {
     fun `session lifecycle rejects closed use and wrong entry points`() {
         MazewallProfiler.open(ProfileOptions(strategy = ProfileStrategy.AUTO)).use { session ->
             session.snapshot()
-            assertFailsWith<IllegalArgumentException> {
-                session.profile(TraceableWorkload::class.java)
-            }
             session.close()
             assertFailsWith<IllegalStateException> {
                 session.profile { 1 }
             }
         }
-        MazewallProfiler.open(ProfileOptions(strategy = ProfileStrategy.STRACE)).use { session ->
-            assertFailsWith<IllegalArgumentException> {
-                session.profile { "lambda" }
-            }
+        assertFailsWith<IllegalArgumentException> {
+            MazewallProfiler.open(ProfileOptions(strategy = ProfileStrategy.STRACE))
         }
     }
 

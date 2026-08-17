@@ -179,6 +179,12 @@ interface "ProfileCollector" as io.mazewall.profiler.collector.ProfileCollector 
   + {abstract}CollectorDrain drain()
   + {abstract}void close()
 }
+class "StraceCollector" as io.mazewall.profiler.collector.StraceCollector {
+  +ObservationSource getSource()
+  +void start()
+  +CollectorDrain drain()
+  +void close()
+}
 class "BobCompiler" as io.mazewall.profiler.compiler.BobCompiler {
   + {static}BobCompiler INSTANCE
   __
@@ -401,6 +407,11 @@ class "DaemonContext" as io.mazewall.profiler.internal.DaemonContext {
   +Process getDaemonProcess()
   +Thread getShutdownHook()
 }
+class "DescendantStrace" as io.mazewall.profiler.internal.DescendantStrace {
+  + {static}DescendantStrace INSTANCE
+  __
+  +BillOfBehavior compile(Class<? extends TraceableWorkload>)
+}
 class "NativeSocketInputStream" as io.mazewall.profiler.internal.NativeSocketInputStream {
   + {static}Companion Companion
   __
@@ -498,6 +509,9 @@ io.mazewall.profiler.collector.EbpfCollector --> io.mazewall.profiler.Observatio
 io.mazewall.profiler.collector.EbpfCollector --> io.mazewall.profiler.EbpfLoad
 io.mazewall.profiler.collector.EbpfEventParser --> io.mazewall.profiler.collector.EbpfEventParser
 io.mazewall.profiler.collector.ObservationMerger --> io.mazewall.profiler.collector.ObservationMerger
+io.mazewall.profiler.collector.StraceCollector .u.|> io.mazewall.profiler.collector.ProfileCollector
+io.mazewall.profiler.collector.StraceCollector --> io.mazewall.profiler.TraceableWorkload
+io.mazewall.profiler.collector.StraceCollector --> io.mazewall.profiler.ObservationSource
 io.mazewall.profiler.compiler.BobCompiler --> io.mazewall.profiler.compiler.BobCompiler
 io.mazewall.profiler.compiler.StraceLogParser --> io.mazewall.profiler.compiler.StraceLogParser
 io.mazewall.profiler.engine.PathNormalizerHelper --> io.mazewall.profiler.engine.PathNormalizerHelper
@@ -541,6 +555,7 @@ io.mazewall.profiler.engine.SyscallPathResolver --> io.mazewall.profiler.engine.
 io.mazewall.profiler.engine.SyscallPathResolver --> io.mazewall.profiler.engine.ProfilerMemoryReader
 io.mazewall.profiler.engine.TransportNativeEngine --> io.mazewall.profiler.engine.ProfilerTransport
 io.mazewall.profiler.engine.TransportNativeMemory --> io.mazewall.profiler.engine.ProfilerTransport
+io.mazewall.profiler.internal.DescendantStrace --> io.mazewall.profiler.internal.DescendantStrace
 io.mazewall.profiler.internal.ProfilerDaemonManager --> io.mazewall.profiler.internal.ProfilerDaemonManager
 io.mazewall.profiler.internal.ProfilerDaemonManager --> io.mazewall.profiler.internal.DaemonContext
 io.mazewall.profiler.internal.ProfilerSocket --> io.mazewall.profiler.internal.ProfilerSocket

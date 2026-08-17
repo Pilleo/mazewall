@@ -74,6 +74,30 @@ class CollectorHybridTest {
     }
 
     @Test
+    fun `strace collector compiles a recorded log and marks uring BLIND`() {
+        val log = Files.createTempFile("strace", ".log")
+        Files.writeString(
+            log,
+            """
+            1 openat(AT_FDCWD, "/etc/hostname", O_RDONLY) = 3
+            1 io_uring_enter(3, 1, 1, 0, NULL, 0) = 1
+            """.trimIndent(),
+        )
+        val collector = StraceCollector(recordedLog = log)
+        collector.start()
+        val drain = collector.use { it.drain() }
+        assertTrue(drain.observations.any { it.paths.contains("/etc/hostname") })
+        assertEquals(IoUringVisibility.BLIND, drain.ioUring)
+    }
+
+    @Test
+    fun `strace collector requires a source`() {
+        assertFailsWith<IllegalArgumentException> {
+            StraceCollector().start()
+        }
+    }
+
+    @Test
     fun `missing log file fails closed`() {
         val collector = EbpfCollector(EbpfLoad.Available, recordedLog = java.nio.file.Path.of("/no/such/ebpf.log"))
         assertFailsWith<IncompleteProfileException> { collector.start() }

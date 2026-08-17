@@ -1,8 +1,10 @@
 package io.mazewall.profiler
 
+import io.mazewall.MazewallInternal
+
 /**
- * A marker interface for workloads that can be profiled using the [io.mazewall.profiler.strace.StraceProfiler].
- * Workload classes must have a public no-arg constructor so they can be instantiated
- * dynamically inside the child JVM process.
+ * Marker for descendant-strace child JVMs (floor/lab). Not operator API.
+ * Application profiling uses [MazewallProfiler.profile] with a lambda.
  */
+@MazewallInternal
 interface TraceableWorkload : Runnable

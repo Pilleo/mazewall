@@ -5,11 +5,7 @@ import io.mazewall.profiler.TraceableWorkload
 import java.io.File
 
 /**
- * Tier P Profiler: Traces system calls and path accesses of a workload class
- * by running it in a child JVM process wrapped directly under Linux `strace`.
- *
- * This allows safe, high-speed profiling in rootless, unprivileged containers
- * bypassing Yama ptrace scope restrictions.
+ * Descendant `strace -f` profiler.
  *
  * ### ⚠️ Security Warning & TOCTOU Limitations:
  * Strace-based profiling (which relies on Linux `ptrace`) is inherently subject to **Time-of-Check to Time-of-Use (TOCTOU)**
@@ -20,46 +16,30 @@ import java.io.File
  * For robust, race-free, and kernel-enforced filesystem containment, **Landlock LSM** is the preferred and recommended
  * mechanism, as it evaluates and enforces path-based restrictions directly in the kernel space at the inode level,
  * making it completely immune to pointer-dereferencing TOCTOU attacks.
+ *
+ * @deprecated Application profiling is [MazewallProfiler.profile] with a lambda.
+ * Descendant strace is an internal floor probe, not a workload API.
  */
+@Deprecated(
+    message = "Use MazewallProfiler.open().use { it.profile { workload() } }. Descendant strace is not operator API.",
+    replaceWith = ReplaceWith(
+        "MazewallProfiler.open().use { it.profile { /* workload */ } }",
+        "io.mazewall.profiler.MazewallProfiler",
+    ),
+)
 object StraceProfiler {
+    @Deprecated(
+        message = "Use MazewallProfiler.profile { } for application work",
+        replaceWith = ReplaceWith(
+            "MazewallProfiler.open().use { it.profile { /* workload */ } }",
+            "io.mazewall.profiler.MazewallProfiler",
+        ),
+    )
     fun <T : TraceableWorkload> profile(workloadClass: Class<T>): BillOfBehavior {
-        val javaBin = System.getProperty("java.home") + "/bin/java"
-        val classpath = System.getProperty("java.class.path")
-
-        // Create a temporary strace log file
-        val tempLog = File.createTempFile("strace_prof_", ".log")
-        tempLog.deleteOnExit()
-
-        // Assemble the strace child JVM command
-        val cmd = listOf(
-            "strace",
-            "-f",
-            "-e",
-            "trace=file,network",
-            "-o",
-            tempLog.absolutePath,
-            javaBin,
-            "-cp",
-            classpath,
-            "io.mazewall.profiler.strace.StraceWorkloadRunner",
-            workloadClass.name,
-        )
-
-        // Spawn the process
-        val pb = ProcessBuilder(cmd)
-        val process = pb.start()
-
-        // Wait for the process to finish
-        val exitCode = process.waitFor()
-        if (exitCode != 0) {
-            val errText = process.errorStream.bufferedReader().readText()
-            val outText = process.inputStream.bufferedReader().readText()
-            throw IllegalStateException("Child JVM failed with exit code $exitCode. Stdout: $outText, Stderr: $errText")
+        val collector = io.mazewall.profiler.collector.StraceCollector(workloadClass = workloadClass)
+        collector.start()
+        return collector.use {
+            io.mazewall.profiler.compiler.BobCompiler.compileObservations(it.drain().observations)
         }
-
-        val log = if (tempLog.exists()) tempLog.readText() else ""
-        tempLog.delete()
-        val observations = io.mazewall.profiler.compiler.StraceLogParser.parse(log)
-        return io.mazewall.profiler.compiler.BobCompiler.compileObservations(observations)
     }
 }
