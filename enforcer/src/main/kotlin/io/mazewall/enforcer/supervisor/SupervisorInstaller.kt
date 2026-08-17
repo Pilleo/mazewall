@@ -209,16 +209,13 @@ internal class JVMValidationListener(
                     logger.warning("[SUPERVISOR-DIAGNOSTIC] JVM Validation total processing took ${totalMs}ms for syscall nr=$nr")
                 }
 
-                // Decision encoding: 0 = Deny, 1 = Allow Continue, 2 = Allow & Inject FD
-                val decision: Byte = if (isAllowed) {
-                    val isInject = nr == traceeArch.accept || nr == traceeArch.accept4
-                    if (isInject) {
-                        2.toByte()
-                    } else {
-                        1.toByte()
-                    }
+                val kind = io.mazewall.platform.seccomp.SupervisedKind.classify(nr, traceeArch)
+                val verdict = if (!isAllowed) {
+                    JvmVerdict.Deny(NativeConstants.EPERM)
+                } else if (kind is io.mazewall.platform.seccomp.SupervisedKind.Accept) {
+                    JvmVerdict.InjectFd
                 } else {
-                    0.toByte()
+                    JvmVerdict.Allow
                 }
 
                 // We no longer remove the entry immediately on execve because of:
@@ -226,8 +223,7 @@ internal class JVMValidationListener(
                 // 2. Path resolution fallbacks in JVM process builder (which calls execve multiple times on different PATH locations).
                 // Instead, the registry relies on a TTL (Time-To-Live) to automatically prune entries after 10 seconds.
 
-                val errorNr = if (decision.toInt() == 0) NativeConstants.EPERM else 0
-                val execPath = if (isAllowed && (nr == traceeArch.execve || nr == traceeArch.execveat)) {
+                val execPath = if (isAllowed && kind is io.mazewall.platform.seccomp.SupervisedKind.Exec) {
                     resolveExecTargetPath(nr, argsList, pidVal, traceeArch)
                 } else {
                     null
@@ -235,7 +231,7 @@ internal class JVMValidationListener(
                 if (execPath != null) {
                     System.err.println("[JVM-VALIDATION] sending exec path to daemon: $execPath")
                 }
-                channel.sendResponse(id, decision, errorNr, execPath)
+                channel.sendResponse(id, verdict, execPath)
                 if (isAllowed && (nr == traceeArch.execve || nr == traceeArch.execveat)) {
                     completeParentExecRewrite(dis, channel)
                 }

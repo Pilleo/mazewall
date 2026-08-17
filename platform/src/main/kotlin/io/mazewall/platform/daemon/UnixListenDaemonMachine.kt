@@ -36,7 +36,7 @@ public sealed interface UnixListenDaemonState {
     public object Terminated : UnixListenDaemonState
 }
 
-public sealed interface UnixListenDaemonEvent {
+internal sealed interface UnixListenDaemonEvent {
     public data class Bound(
         val serverFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>,
         val socketPath: String,
@@ -51,7 +51,7 @@ public sealed interface UnixListenDaemonEvent {
     ) : UnixListenDaemonEvent
 }
 
-public sealed interface UnixListenDaemonEffect {
+internal sealed interface UnixListenDaemonEffect {
     public data class LogListening(
         val socketPath: String,
         val serverFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>,
@@ -70,13 +70,13 @@ public sealed interface UnixListenDaemonEffect {
     public data object StopConnectionWorkers : UnixListenDaemonEffect
 }
 
-public data class UnixListenDaemonTransition(
+internal data class UnixListenDaemonTransition(
     val state: UnixListenDaemonState,
     val effects: List<UnixListenDaemonEffect> = emptyList(),
 )
 
-public object UnixListenDaemonMachine {
-    public fun evaluate(
+internal object UnixListenDaemonMachine {
+    internal fun evaluate(
         state: UnixListenDaemonState,
         event: UnixListenDaemonEvent,
     ): UnixListenDaemonTransition {
@@ -93,7 +93,7 @@ public object UnixListenDaemonMachine {
      * CAS-installs the next state, then interprets [UnixListenDaemonTransition.effects].
      * Same-state results still run effects (normally empty) and skip the CAS.
      */
-    public fun apply(
+    internal fun apply(
         stateRef: AtomicReference<UnixListenDaemonState>,
         event: UnixListenDaemonEvent,
         executeEffects: (List<UnixListenDaemonEffect>) -> Unit,

@@ -4,7 +4,7 @@ import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
 
-public sealed interface SeccompConnectionEvent {
+internal sealed interface SeccompConnectionEvent {
     public data class ListenerReceived(
         val listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open>,
     ) : SeccompConnectionEvent
@@ -22,7 +22,7 @@ public sealed interface SeccompConnectionEvent {
     public data object SessionFinished : SeccompConnectionEvent
 }
 
-public sealed interface SeccompConnectionEffect {
+internal sealed interface SeccompConnectionEffect {
     public data class RegisterListener(
         val listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open>,
     ) : SeccompConnectionEffect
@@ -32,7 +32,7 @@ public sealed interface SeccompConnectionEffect {
     public data object RunSession : SeccompConnectionEffect
 }
 
-public data class SeccompConnectionTransition(
+internal data class SeccompConnectionTransition(
     val connection: SeccompConnection?,
     val effects: List<SeccompConnectionEffect> = emptyList(),
 )
@@ -41,8 +41,8 @@ public data class SeccompConnectionTransition(
  * Pure handshake matrix: [SeccompConnection.Accepted] → [SeccompConnection.FdAttached] →
  * [SeccompConnection.Active] → end. Illegal events stay put with no effects.
  */
-public object SeccompConnectionMachine {
-    public fun evaluate(
+internal object SeccompConnectionMachine {
+    internal fun evaluate(
         state: SeccompConnection,
         event: SeccompConnectionEvent,
     ): SeccompConnectionTransition {

@@ -226,7 +226,7 @@ object Landlock {
      * Same as [applyRuleset] but returns a sealed outcome so the caller must handle
      * kernel rejection, operator bypass, or success.
      */
-    public fun tryApplyRuleset(policy: PolicyDefinition<*>, processWide: Boolean = false): LandlockApplyResult {
+    internal fun tryApplyRuleset(policy: PolicyDefinition<*>, processWide: Boolean = false): LandlockApplyResult {
         val session = LandlockSession(policy, processWide)
         return session.tryApplyRuleset()
     }

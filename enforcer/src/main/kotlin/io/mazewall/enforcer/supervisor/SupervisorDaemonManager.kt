@@ -111,7 +111,24 @@ public class SupervisorDaemonManager(
         }
     }
 
+    private fun refuseSpawnIfParentIsFiltered() {
+        val mode = when (val res = engine.process.prctl(io.mazewall.core.PrctlCommand.GetSeccomp)) {
+            is LinuxNative.SyscallResult.Success -> res.value
+            is LinuxNative.SyscallResult.Error -> {
+                if (res.errno == io.mazewall.ffi.NativeConstants.ENOSYS) return
+                throw IllegalStateException("prctl(PR_GET_SECCOMP) failed with errno=${res.errno}")
+            }
+        }
+        // 2 == SECCOMP_MODE_FILTER. The child inherits it and cannot drop it.
+        check(mode < 2L) {
+            "Cannot spawn SupervisorDaemon after process-wide seccomp is installed " +
+                "(PR_GET_SECCOMP=$mode). Spawn the daemon before installOnProcess, " +
+                "or run this test in an isolated JVM."
+        }
+    }
+
     private fun spawnDaemon(): SupervisorContext {
+        refuseSpawnIfParentIsFiltered()
         val daemonClassName = SupervisorDaemon::class.java.name
 
         val perms = PosixFilePermissions.fromString("rwx------")

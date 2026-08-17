@@ -1,9 +1,6 @@
 package io.mazewall.profiler.engine
 
 import io.mazewall.core.FileDescriptor
-import io.mazewall.platform.daemon.UnixListenDaemonEffect
-import io.mazewall.platform.daemon.UnixListenDaemonEvent
-import io.mazewall.platform.daemon.UnixListenDaemonMachine
 import io.mazewall.platform.daemon.UnixListenDaemonState
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertSame
@@ -13,16 +10,12 @@ import org.junit.jupiter.api.Test
 class ProfilerDaemonStateTest {
 
     @Test
-    fun `profiler uses the shared listen-loop machine including socketPath on Active`() {
+    fun `active listen state keeps socketPath`() {
         val serverFd = FileDescriptor.unixSocket(123)
         val listening = UnixListenDaemonState.Uninitialized.listening(serverFd, "/tmp/test.sock")
-        assertEquals("/tmp/test.sock", listening.socketPath)
-
-        val ready = UnixListenDaemonMachine.evaluate(listening, UnixListenDaemonEvent.ReadyAnnounced)
-        val active = ready.state as UnixListenDaemonState.Active
+        val active = listening.active()
         assertEquals(serverFd, active.serverFd)
         assertEquals("/tmp/test.sock", active.socketPath)
-        assertTrue(ready.effects.single() is UnixListenDaemonEffect.PublishReady)
     }
 
     @Test

@@ -4,13 +4,19 @@ import io.mazewall.core.Arch
 import io.mazewall.ffi.NativeConstants
 import io.mazewall.platform.seccomp.SupervisedKind
 
-public sealed interface JvmVerdict {
-    public data class Deny(val errorNr: Int) : JvmVerdict
-    public data object Allow : JvmVerdict
-    public data object InjectFd : JvmVerdict
+internal sealed interface JvmVerdict {
+    data class Deny(val errorNr: Int) : JvmVerdict
+    data object Allow : JvmVerdict
+    data object InjectFd : JvmVerdict
+
+    fun toWire(): Int = when (this) {
+        is Deny -> 0
+        is Allow -> 1
+        is InjectFd -> 2
+    }
 }
 
-public sealed interface SupervisorRoute {
+internal sealed interface SupervisorRoute {
     public data object Continue : SupervisorRoute
     public data object AskJvm : SupervisorRoute
     public data object InjectFd : SupervisorRoute
@@ -18,10 +24,10 @@ public sealed interface SupervisorRoute {
     public data class Abort(val errno: Int, val reason: String) : SupervisorRoute
 }
 
-public object SupervisorNotificationMachine {
-    public fun classify(nr: Int, arch: Arch): SupervisedKind = SupervisedKind.classify(nr, arch)
+internal object SupervisorNotificationMachine {
+    fun classify(nr: Int, arch: Arch): SupervisedKind = SupervisedKind.classify(nr, arch)
 
-    public fun parseJvmVerdict(decision: Int, errorNr: Int): JvmVerdict? {
+    fun parseJvmVerdict(decision: Int, errorNr: Int): JvmVerdict? {
         return when (decision) {
             0 -> JvmVerdict.Deny(errorNr)
             1 -> JvmVerdict.Allow
@@ -30,7 +36,7 @@ public object SupervisorNotificationMachine {
         }
     }
 
-    public fun evaluateFastPath(
+    fun evaluateFastPath(
         kind: SupervisedKind,
         resolvedPath: java.nio.file.Path?,
         rawPath: String?,
@@ -47,7 +53,7 @@ public object SupervisorNotificationMachine {
         }
     }
 
-    public fun evaluateJvm(kind: SupervisedKind, verdict: JvmVerdict): SupervisorRoute {
+    fun evaluateJvm(kind: SupervisedKind, verdict: JvmVerdict): SupervisorRoute {
         return when (verdict) {
             is JvmVerdict.Deny ->
                 SupervisorRoute.Abort(verdict.errorNr, "jvm deny")
@@ -80,4 +86,38 @@ public object SupervisorNotificationMachine {
 
     internal fun looksLikeClassloading(path: String): Boolean =
         path.endsWith(".class") || path.contains("META-INF/") || path.endsWith(".jar")
+}
+
+internal sealed interface InjectTarget {
+    data object Open : InjectTarget
+    data object Connect : InjectTarget
+    data object Accept : InjectTarget
+    data object Unsupported : InjectTarget
+}
+
+internal fun injectTarget(kind: SupervisedKind): InjectTarget = when (kind) {
+    is SupervisedKind.Open -> InjectTarget.Open
+    is SupervisedKind.Connect -> InjectTarget.Connect
+    is SupervisedKind.Accept -> InjectTarget.Accept
+    is SupervisedKind.Exec, is SupervisedKind.Spawn, is SupervisedKind.Unknown -> InjectTarget.Unsupported
+}
+
+internal sealed interface ExecRewritePlan {
+    data class Ready(val path: String) : ExecRewritePlan
+    data object UnsupportedArch : ExecRewritePlan
+    data object MissingPath : ExecRewritePlan
+}
+
+internal fun planExecRewrite(
+    arch: Arch,
+    pathStr: String?,
+    jvmPath: String?,
+): ExecRewritePlan {
+    if (arch.audit != Arch.AUDIT_ARCH_X86_64) return ExecRewritePlan.UnsupportedArch
+    val openPath = when {
+        pathStr != null && !pathStr.startsWith("<YAMA_ERROR") -> pathStr
+        !jvmPath.isNullOrEmpty() && !jvmPath.startsWith("<YAMA_ERROR") -> jvmPath
+        else -> return ExecRewritePlan.MissingPath
+    }
+    return ExecRewritePlan.Ready(openPath)
 }

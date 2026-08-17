@@ -68,6 +68,28 @@ class SupervisorNotificationMachineTest {
     }
 
     @Test
+    fun `jvm verdict wire codes round-trip`() {
+        val deny = JvmVerdict.Deny(NativeConstants.EPERM)
+        assertEquals(deny, SupervisorNotificationMachine.parseJvmVerdict(deny.toWire(), NativeConstants.EPERM))
+        assertEquals(JvmVerdict.Allow, SupervisorNotificationMachine.parseJvmVerdict(JvmVerdict.Allow.toWire(), 0))
+        assertEquals(JvmVerdict.InjectFd, SupervisorNotificationMachine.parseJvmVerdict(JvmVerdict.InjectFd.toWire(), 0))
+    }
+
+    @Test
+    fun `inject target follows kind not raw nr`() {
+        assertEquals(InjectTarget.Open, injectTarget(SupervisedKind.Open))
+        assertEquals(InjectTarget.Accept, injectTarget(SupervisedKind.Accept))
+        assertEquals(InjectTarget.Unsupported, injectTarget(SupervisedKind.Unknown))
+    }
+
+    @Test
+    fun `exec rewrite is unsupported off x86_64`() {
+        assertEquals(ExecRewritePlan.UnsupportedArch, planExecRewrite(Arch.AARCH64, "/bin/true", null))
+        assertEquals(ExecRewritePlan.MissingPath, planExecRewrite(Arch.AMD64, null, null))
+        assertEquals(ExecRewritePlan.Ready("/bin/true"), planExecRewrite(Arch.AMD64, "/bin/true", null))
+    }
+
+    @Test
     fun `jvm allow on unknown kind aborts`() {
         val route = SupervisorNotificationMachine.evaluateJvm(SupervisedKind.Unknown, JvmVerdict.Allow)
         assertTrue(route is SupervisorRoute.Abort)

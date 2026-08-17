@@ -200,4 +200,26 @@ class SupervisorDaemonManagerTest {
             manager.stop()
         }
     }
+
+    @Test
+    fun `spawn refuses when parent already has a seccomp filter`() {
+        val process = object : io.mazewall.MockNativeProcess() {
+            override fun prctl(
+                command: io.mazewall.core.PrctlCommand,
+            ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                if (command is io.mazewall.core.PrctlCommand.GetSeccomp) {
+                    return LinuxNative.SyscallResult.Success(2L)
+                }
+                return super.prctl(command)
+            }
+        }
+        val engine = object : MockNativeEngine() {
+            override val process = process
+        }
+        val manager = SupervisorDaemonManager(engine, MockSocketManager(), MockProcessLauncher())
+        val ex = kotlin.test.assertFailsWith<IllegalStateException> {
+            manager.getOrSpawnSharedDaemon()
+        }
+        assertTrue(ex.message!!.contains("process-wide seccomp"))
+    }
 }

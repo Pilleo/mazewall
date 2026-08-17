@@ -894,11 +894,11 @@ class SupervisorSessionHandlerTest {
                         arch // traceeArch
                     ) as Boolean
 
-                    assertEquals(true, result, "handleInjectFd should return true and succeed")
+                    assertEquals(true, result, "handleInjectFd should return true after fail-closed deny")
                     assertEquals(true, ioctlCalled, "ioctl should be called to send seccomp response")
                     assertEquals(io.mazewall.ffi.NativeConstants.SECCOMP_IOCTL_NOTIF_SEND, capturedRequest)
                     val flags = capturedArg!!.readInt(20) // RESP_FLAGS_OFF
-                    assertEquals(io.mazewall.ffi.NativeConstants.SECCOMP_USER_NOTIF_FLAG_CONTINUE.toInt(), flags)
+                    assertEquals(0, flags, "missing path/sockaddr must not CONTINUE")
                 }
             }
         } finally {

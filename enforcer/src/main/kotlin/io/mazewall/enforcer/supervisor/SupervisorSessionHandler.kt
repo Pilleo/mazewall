@@ -551,13 +551,12 @@ internal class SupervisorSessionHandler(
             sendSeccompError(id, errno, resp)
             return true
         }
-        val openPath = when {
-            pathStr != null && !pathStr.startsWith("<YAMA_ERROR") -> pathStr
-            !jvmPath.isNullOrEmpty() && !jvmPath.startsWith("<YAMA_ERROR") -> jvmPath
-            else -> return abort(NativeConstants.EPERM, "[SUPERVISOR-DIAGNOSTIC] Refusing execve without an inspectable path (fail closed).")
-        }
-        if (traceeArch.audit != io.mazewall.core.Arch.AUDIT_ARCH_X86_64) {
-            return abort(NativeConstants.EPERM, "[SUPERVISOR-DIAGNOSTIC] execve fd emulation requires x86_64 register rewrite. Denying.")
+        val openPath = when (val plan = planExecRewrite(traceeArch, pathStr, jvmPath)) {
+            is ExecRewritePlan.MissingPath ->
+                return abort(NativeConstants.EPERM, "[SUPERVISOR-DIAGNOSTIC] Refusing execve without an inspectable path (fail closed).")
+            is ExecRewritePlan.UnsupportedArch ->
+                return abort(NativeConstants.EPERM, "[SUPERVISOR-DIAGNOSTIC] execve fd emulation requires x86_64 register rewrite. Denying.")
+            is ExecRewritePlan.Ready -> plan.path
         }
 
         val pathSeg = arena.allocateFrom(openPath)
@@ -653,33 +652,28 @@ internal class SupervisorSessionHandler(
         tid: Tid,
         traceeArch: io.mazewall.core.Arch
     ): Boolean {
-        if (nr == traceeArch.open || nr == traceeArch.openat || nr == traceeArch.openat2) {
-            if (pathStr == null) {
-                sendSeccompContinue(id, resp)
-                return true
-            }
-        }
-        if (nr == traceeArch.connect) {
-            if (sockaddrBytes == null) {
-                sendSeccompContinue(id, resp)
-                return true
-            }
-        }
-
         var localFdValue = -1
         try {
-            localFdValue = when (nr) {
-                traceeArch.open, traceeArch.openat, traceeArch.openat2 -> {
-                    openFileInSupervisor(nr, args, pathStr!!, traceeArch, tid)
+            localFdValue = when (injectTarget(SupervisorNotificationMachine.classify(nr, traceeArch))) {
+                is InjectTarget.Open -> {
+                    if (pathStr == null) {
+                        sendSeccompError(id, NativeConstants.EPERM, resp)
+                        return true
+                    }
+                    openFileInSupervisor(nr, args, pathStr, traceeArch, tid)
                 }
-                traceeArch.connect -> {
-                    connectSocketInSupervisor(sockaddrBytes!!)
+                is InjectTarget.Connect -> {
+                    if (sockaddrBytes == null) {
+                        sendSeccompError(id, NativeConstants.EPERM, resp)
+                        return true
+                    }
+                    connectSocketInSupervisor(sockaddrBytes)
                 }
-                traceeArch.accept, traceeArch.accept4 -> {
+                is InjectTarget.Accept -> {
                     handleAcceptAsync(id, nr, args, tid, traceeArch)
                     return true
                 }
-                else -> -NativeConstants.EPERM
+                is InjectTarget.Unsupported -> -NativeConstants.EPERM
             }
 
             if (localFdValue < 0) {

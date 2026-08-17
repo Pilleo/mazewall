@@ -9,14 +9,14 @@ import io.mazewall.platform.daemon.UnixListenDaemonTransition
 /** Shared listen-loop state; name retained for existing seccomp callers. */
 public typealias SeccompDaemonState = UnixListenDaemonState
 
-public typealias SeccompDaemonEvent = UnixListenDaemonEvent
+internal typealias SeccompDaemonEvent = UnixListenDaemonEvent
 
-public typealias SeccompDaemonEffect = UnixListenDaemonEffect
+internal typealias SeccompDaemonEffect = UnixListenDaemonEffect
 
-public typealias SeccompDaemonTransition = UnixListenDaemonTransition
+internal typealias SeccompDaemonTransition = UnixListenDaemonTransition
 
-public object SeccompDaemonMachine {
-    public fun evaluate(
+internal object SeccompDaemonMachine {
+    fun evaluate(
         state: UnixListenDaemonState,
         event: UnixListenDaemonEvent,
     ): UnixListenDaemonTransition = UnixListenDaemonMachine.evaluate(state, event)

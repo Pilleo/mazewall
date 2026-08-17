@@ -12,6 +12,8 @@ import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
 import io.mazewall.ffi.Layouts
 import io.mazewall.ffi.memory.NativeArena
+import io.mazewall.enforcer.supervisor.JvmVerdict
+import io.mazewall.enforcer.supervisor.SupervisorNotificationMachine
 import io.mazewall.ffi.memory.SupervisorResponseSegment
 import io.mazewall.ffi.memory.writeByte
 import java.io.InputStream
@@ -28,9 +30,26 @@ public class SupervisorValidationChannel(
     private val responseSegment = with(arena) { SupervisorResponseSegment.allocate() }
 
     public fun sendResponse(id: Long, decision: Byte, errorNr: Int, path: String? = null) {
+        sendResponse(
+            id,
+            SupervisorNotificationMachine.parseJvmVerdict(decision.toInt(), errorNr)
+                ?: JvmVerdict.Deny(io.mazewall.ffi.NativeConstants.EPERM),
+            path,
+        )
+    }
+
+    internal fun sendResponse(
+        id: Long,
+        verdict: JvmVerdict,
+        path: String? = null,
+    ) {
         val resp = SupervisorResponseSegment.of(responseSegment.managed)
         resp.setId(id)
-        resp.setDecision(decision)
+        resp.setDecision(verdict.toWire().toByte())
+        val errorNr = when (verdict) {
+            is JvmVerdict.Deny -> verdict.errorNr
+            is JvmVerdict.Allow, is JvmVerdict.InjectFd -> 0
+        }
         resp.setErrorNr(errorNr)
         resp.setPath(path)
         LinuxNative.memory.write(socketFd, responseSegment.managed, Layouts.SUPERVISOR_RESPONSE_SIZE)

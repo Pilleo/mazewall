@@ -57,8 +57,12 @@ class SupervisorValidationChannelTest {
         assertEquals(Layouts.SUPERVISOR_RESPONSE_SIZE, writtenCount)
         assertEquals(1001L, capturedId)
         assertEquals(2.toByte(), capturedDecision)
-        assertEquals(13, capturedErrorNr)
+        assertEquals(0, capturedErrorNr)
         assertEquals("/usr/bin/true", capturedPath)
+
+        channel.sendResponse(1002L, 0.toByte(), 13, null)
+        assertEquals(0.toByte(), capturedDecision)
+        assertEquals(13, capturedErrorNr)
 
         // Clean up
         channel.close()

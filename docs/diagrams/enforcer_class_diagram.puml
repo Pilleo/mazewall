@@ -622,6 +622,10 @@ class "DefaultStacktraceScopingPolicy" as io.mazewall.enforcer.supervisor.Defaul
   __
   +Map<Syscall, Function3<Tid, List<? extends Object>, List<StackTraceElement>, Boolean>> getHandlers()
 }
+interface "ExecRewritePlan" as io.mazewall.enforcer.supervisor.ExecRewritePlan {
+}
+interface "InjectTarget" as io.mazewall.enforcer.supervisor.InjectTarget {
+}
 class "JVMValidationListener" as io.mazewall.enforcer.supervisor.JVMValidationListener {
   + {static}Companion Companion
   __
@@ -633,6 +637,7 @@ class "JvmStackInspector" as io.mazewall.enforcer.supervisor.JvmStackInspector {
   +ScopingValidationState inspect(int, List<? extends Object>, Thread)
 }
 interface "JvmVerdict" as io.mazewall.enforcer.supervisor.JvmVerdict {
+  +int toWire()
 }
 class "PendingSpawnRegistry" as io.mazewall.enforcer.supervisor.PendingSpawnRegistry {
   + {static}PendingSpawnRegistry INSTANCE
@@ -697,6 +702,10 @@ class "SupervisorNotificationMachine" as io.mazewall.enforcer.supervisor.Supervi
   +SupervisorRoute evaluateFastPath(SupervisedKind, Path, String)
   +SupervisorRoute evaluateJvm(SupervisedKind, JvmVerdict)
   +boolean looksLikeClassloading(String)
+}
+class "SupervisorNotificationMachineKt" as io.mazewall.enforcer.supervisor.SupervisorNotificationMachineKt {
+  + {static}InjectTarget injectTarget(SupervisedKind)
+  + {static}ExecRewritePlan planExecRewrite(Arch, String, String)
 }
 interface "SupervisorRoute" as io.mazewall.enforcer.supervisor.SupervisorRoute {
 }
@@ -1238,6 +1247,7 @@ class "SupervisorSocketUtils" as io.mazewall.ffi.networking.SupervisorSocketUtil
 class "SupervisorValidationChannel" as io.mazewall.ffi.networking.SupervisorValidationChannel {
   +InputStream getInputStream()
   +void sendResponse(long, byte, int, String)
+  +void sendResponse(long, JvmVerdict, String)
   +void sendExecRewriteAck(boolean)
   +void close()
 }
