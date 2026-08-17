@@ -47,15 +47,55 @@ class "DenyListSpec" as io.mazewall.DenyListSpec {
   +DenyListSpec advanced(Function1<? super Builder<ProcessWideSafe>, Unit>)
   +Policy<ProcessWideSafe, Uncompiled> build()
 }
+class "InstallationAssessment" as io.mazewall.InstallationAssessment {
+  +InstallationScope getScope()
+  +boolean getInstallable()
+  +FallbackBehavior getFallback()
+  +PolicyArgumentRules getArgumentRules()
+  +PolicyMode getMode()
+  +List<String> getWarnings()
+  +List<String> getBlockingReasons()
+  +List<InstallationStage> getBlockedStages()
+  +boolean getLandlockRequired()
+  +int getLandlockAbi()
+  +boolean getUserNotifRequired()
+  +boolean getTsyncRequired()
+  +boolean getVirtualThread()
+  +boolean getSeccompSupported()
+  +InstallationAssessment requireInstallable()
+}
+class "InstallationAssessor" as io.mazewall.InstallationAssessor {
+  + {static}InstallationAssessor INSTANCE
+  __
+  +InstallationAssessment assess(PolicyDefinition<?>, boolean)
+}
 class "InstallationReceipt" as io.mazewall.InstallationReceipt {
   +boolean getProcessWide()
   +PolicyDefinition<?> getRequestedPolicy()
   +AutoCloseable getSupervisorSession()
   +long getTimestampMillis()
   +boolean getInstalled()
+  +FallbackBehavior getFallback()
   +InstallationReceipt requireInstalled()
 }
+class "InstallationRejectedException" as io.mazewall.InstallationRejectedException {
+  +List<InstallationStage> getStages()
+  +List<String> getReasons()
+}
+enum "InstallationScope" as io.mazewall.InstallationScope {
+  PROCESS
+  THREAD
+}
+enum "InstallationStage" as io.mazewall.InstallationStage {
+  PLATFORM
+  VIRTUAL_THREAD
+  SECCOMP
+  TSYNC
+  USER_NOTIF
+  LANDLOCK
+}
 class "KernelFeatureMatrix" as io.mazewall.KernelFeatureMatrix {
+  ..
   + {static}Companion Companion
   __
   +boolean getSeccompSupported()
@@ -585,6 +625,8 @@ class "ContainedExecutors" as io.mazewall.enforcer.api.ContainedExecutors {
   +InstallationReceipt installOnCurrentThread(Policy<?, ? extends Uncompiled>, StacktraceScopingPolicy)
   +InstallationReceipt installOnCurrentThread(PolicyDefinition<?>)
   +InstallationReceipt installOnCurrentThread(PolicyDefinition<?>, StacktraceScopingPolicy)
+  +InstallationAssessment assessOnProcess(Policy<? extends ProcessWideSafe, ? extends Uncompiled>)
+  +InstallationAssessment assessOnCurrentThread(Policy<?, ? extends Uncompiled>)
   +InstallationReceipt installOnProcess(Policy<? extends ProcessWideSafe, ? extends Uncompiled>[])
   +ExecutorService wrap(ExecutorService, Policy<?, ? extends Uncompiled>[])
   +ExecutorService wrap(ExecutorService, Policy<?, ? extends Uncompiled>, StacktraceScopingPolicy)
@@ -1639,7 +1681,13 @@ io.mazewall.BpfFilter --> io.mazewall.BpfFilter
 io.mazewall.CompiledSandbox --> io.mazewall.seccomp.BpfProgram
 io.mazewall.CompiledSandbox --> io.mazewall.PolicyDefinition
 io.mazewall.DenyListSpec --> io.mazewall.PolicyMode
+io.mazewall.InstallationAssessment --> io.mazewall.PolicyArgumentRules
+io.mazewall.InstallationAssessment --> io.mazewall.PolicyMode
+io.mazewall.InstallationAssessment --> io.mazewall.InstallationScope
+io.mazewall.InstallationAssessment --> io.mazewall.InstallationStage
+io.mazewall.InstallationAssessor --> io.mazewall.InstallationAssessor
 io.mazewall.InstallationReceipt --> io.mazewall.PolicyDefinition
+io.mazewall.InstallationRejectedException --> io.mazewall.InstallationStage
 io.mazewall.LinuxNative .u.|> io.mazewall.NativeEngine
 io.mazewall.LinuxNative --> io.mazewall.NativeEngine
 io.mazewall.LinuxNative --> io.mazewall.LinuxNative

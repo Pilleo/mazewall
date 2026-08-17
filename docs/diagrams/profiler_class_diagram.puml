@@ -442,12 +442,22 @@ class "ProfilerSocket" as io.mazewall.profiler.internal.ProfilerSocket {
 class "ProfilerTraceListener" as io.mazewall.profiler.internal.ProfilerTraceListener {
   + {static}Companion Companion
   __
+  +TraceEventQueue getEventQueue()
   +Channel<TraceEvent> getEventChannel()
   +Flow<TraceEvent> getEventFlow()
   +TraceListenerState getState()
   +void start(CountDownLatch)
   +void close()
   +void passThrough()
+}
+class "TraceEventQueue" as io.mazewall.profiler.internal.TraceEventQueue {
+  + {static}Companion Companion
+  + {static}int DEFAULT_CAPACITY
+  __
+  +Channel<TraceEvent> getChannel()
+  +long getDroppedCount()
+  +boolean offer(TraceEvent)
+  +void close()
 }
 interface "TraceListenerState" as io.mazewall.profiler.internal.TraceListenerState {
 }
@@ -566,8 +576,10 @@ io.mazewall.profiler.internal.DescendantStrace --> io.mazewall.profiler.internal
 io.mazewall.profiler.internal.ProfilerDaemonManager --> io.mazewall.profiler.internal.ProfilerDaemonManager
 io.mazewall.profiler.internal.ProfilerDaemonManager --> io.mazewall.profiler.internal.DaemonContext
 io.mazewall.profiler.internal.ProfilerSocket --> io.mazewall.profiler.internal.ProfilerSocket
+io.mazewall.profiler.internal.ProfilerTraceListener --> io.mazewall.profiler.internal.TraceEventQueue
 io.mazewall.profiler.internal.ProfilerTraceListener --> io.mazewall.profiler.engine.TraceEvent
 io.mazewall.profiler.internal.ProfilerTraceListener --> io.mazewall.profiler.internal.TraceListenerState
+io.mazewall.profiler.internal.TraceEventQueue --> io.mazewall.profiler.engine.TraceEvent
 io.mazewall.profiler.iterative.IterativeProfiler --> io.mazewall.profiler.iterative.IterativeProfiler
 io.mazewall.profiler.iterative.IterativeProfiler --> io.mazewall.profiler.iterative.IterativeTaskExecutor
 io.mazewall.profiler.iterative.RealIterativeTaskExecutor .u.|> io.mazewall.profiler.iterative.IterativeTaskExecutor

@@ -20,6 +20,7 @@ public data class InstallationReceipt(
     public val supervisorSession: AutoCloseable? = null,
     public val timestampMillis: Long = System.currentTimeMillis(),
     public val installed: Boolean = true,
+    public val fallback: Platform.FallbackBehavior = Platform.configuredFallback(),
 ) {
     /** Preserves the JVM constructor exposed before [installed] was added. */
     public constructor(

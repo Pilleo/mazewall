@@ -6,6 +6,8 @@ import io.mazewall.enforcer.diagnostics.*
 import io.mazewall.enforcer.engine.*
 import io.mazewall.enforcer.*
 
+import io.mazewall.InstallationAssessment
+import io.mazewall.InstallationAssessor
 import io.mazewall.Platform
 import io.mazewall.Policy
 import io.mazewall.PolicyDefinition
@@ -112,6 +114,14 @@ object ContainedExecutors {
     internal fun installOnCurrentThread(policy: PolicyDefinition<*>, scopingPolicy: StacktraceScopingPolicy) : io.mazewall.InstallationReceipt {
         return installInternal(false, policy, scopingPolicy)
     }
+
+    /** Read-only preflight. Does not install filters. */
+    fun assessOnProcess(policy: Policy<PolicyScope.ProcessWideSafe, Uncompiled>): InstallationAssessment =
+        InstallationAssessor.assess(policy.definition, processWide = true)
+
+    /** Read-only preflight for the current thread. Does not install filters. */
+    fun assessOnCurrentThread(policy: Policy<*, Uncompiled>): InstallationAssessment =
+        InstallationAssessor.assess(policy.definition, processWide = false)
 
     /**
      * Installs the given policies onto the entire process (all threads) immediately.
