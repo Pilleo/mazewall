@@ -1,10 +1,12 @@
 package io.mazewall.platform.seccomp
 
+import io.mazewall.MazewallInternal
 import io.mazewall.ffi.Layouts
 import io.mazewall.ffi.memory.ManagedSegment
 import io.mazewall.ffi.memory.readInt
 import io.mazewall.ffi.memory.readLong
 
+@MazewallInternal
 public data class SeccompNotification(
     val id: Long,
     val pid: Int,
@@ -32,6 +34,7 @@ public data class SeccompNotification(
     }
 }
 
+@MazewallInternal
 public object SeccompNotifications {
     public const val ARG_COUNT: Int = 6
 

@@ -48,6 +48,7 @@ class SupervisorNotificationMachineTest {
     fun `exec allow becomes secure exec not raw continue`() {
         val route = SupervisorNotificationMachine.evaluateJvm(SupervisedKind.Exec, JvmVerdict.Allow)
         assertEquals(SupervisorRoute.SecureExec, route)
+        assertTrue(route !is SupervisorRoute.Continue)
     }
 
     @Test

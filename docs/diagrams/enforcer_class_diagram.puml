@@ -11,6 +11,8 @@ class "BillOfBehaviorDto" as io.mazewall.BillOfBehaviorDto {
   +Set<String> getFsWritePaths()
   +Set<String> getSyscalls()
   +Set<String> getExecs()
+  +Set<String> getConnects()
+  +Set<String> getIoUringOps()
   +List<StackProfileEntryDto> getStackProfile()
 }
 class "BpfFilter" as io.mazewall.BpfFilter {
@@ -69,6 +71,8 @@ class "LinuxNativeKt" as io.mazewall.LinuxNativeKt {
   + {static}FileDescriptor<Generic, Open> asFd(Success)
   + {static}int asInt(SyscallResult)
   + {static}FileDescriptor<Generic, Open> getFdOrThrow(SyscallResult, String)
+}
+annotation "MazewallInternal" as io.mazewall.MazewallInternal {
 }
 interface "NativeEngine" as io.mazewall.NativeEngine {
   + {abstract}NativeFileSystem getFileSystem()

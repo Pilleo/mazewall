@@ -537,4 +537,21 @@ class ArchitectureTest {
             )
         }
     }
+
+    @ArchTest
+    fun operatorApiMustNotDependOnUserNotifProtocolTypes(allClasses: com.tngtech.archunit.core.domain.JavaClasses) {
+        noClasses()
+            .that()
+            .resideInAnyPackage("io.mazewall.enforcer.api..")
+            .should()
+            .dependOnClassesThat()
+            .haveNameMatching(
+                "io\\.mazewall\\.platform\\.seccomp\\.(SupervisedKind|UserNotifReply|SeccompNotifications|SeccompNotification)(\\$.*)?",
+            )
+            .because(
+                "USER_NOTIF protocol types are cross-module internals, not operator API. " +
+                    "Call Policy / ContainedExecutors instead.",
+            )
+            .check(allClasses)
+    }
 }

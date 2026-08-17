@@ -1,5 +1,6 @@
 package io.mazewall.platform.seccomp
 
+import io.mazewall.MazewallInternal
 import io.mazewall.LinuxNative
 import io.mazewall.RawSyscallOperations
 import io.mazewall.core.FdState
@@ -16,6 +17,7 @@ import io.mazewall.ffi.memory.writeInt
 import io.mazewall.ffi.memory.writeLong
 
 /** Shared USER_NOTIF reply layout used by supervisor, profiler, and the daemon reactor. */
+@MazewallInternal
 public object UserNotifReply {
     public fun encodeContinue(resp: ManagedSegment, id: Long) {
         resp.fill(0)

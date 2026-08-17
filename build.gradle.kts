@@ -127,6 +127,7 @@ allprojects {
         compilerOptions {
             jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_22)
             freeCompilerArgs.add("-Xcontext-parameters")
+            freeCompilerArgs.add("-opt-in=io.mazewall.MazewallInternal")
         }
     }
 

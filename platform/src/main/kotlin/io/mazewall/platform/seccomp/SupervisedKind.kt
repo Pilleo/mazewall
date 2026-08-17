@@ -1,8 +1,10 @@
 package io.mazewall.platform.seccomp
 
+import io.mazewall.MazewallInternal
 import io.mazewall.core.Arch
 
 /** USER_NOTIF kinds shared by supervisor policy and profiler noise filtering. */
+@MazewallInternal
 public sealed interface SupervisedKind {
     public data object Open : SupervisedKind
     public data object Connect : SupervisedKind

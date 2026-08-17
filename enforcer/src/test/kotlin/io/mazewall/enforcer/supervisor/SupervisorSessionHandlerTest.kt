@@ -316,7 +316,7 @@ class SupervisorSessionHandlerTest {
                 assertEquals(io.mazewall.ffi.NativeConstants.SECCOMP_IOCTL_NOTIF_SEND, lastIoctlRequest)
                 val flags = lastIoctlArg!!.readInt(20)
                 assertEquals(io.mazewall.ffi.NativeConstants.SECCOMP_USER_NOTIF_FLAG_CONTINUE.toInt(), flags)
-                assertTrue(ioctlRequests.contains(io.mazewall.ffi.NativeConstants.SECCOMP_IOCTL_NOTIF_ADDFD))
+                assertFalse(vmWritevCalled, "exec must not mutate the tracee pathname then CONTINUE")
             }
         } finally {
             LinuxNative.resetToDefault()
@@ -1442,7 +1442,7 @@ class SupervisorSessionHandlerTest {
     }
 
     @Test
-    fun `readAndHandleJvmResponse denies execve when memory writeback fails`() {
+    fun `readAndHandleJvmResponse denies execve when register rewrite is not acknowledged`() {
         var lastIoctlRequest: Long? = null
         var lastIoctlArg: io.mazewall.ffi.memory.ManagedSegment? = null
         var vmWritevCalled = false
@@ -1457,8 +1457,18 @@ class SupervisorSessionHandlerTest {
                 flags: Long,
             ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
                 vmWritevCalled = true
-                // Simulate write failure by returning an error instead of number of bytes written
                 return LinuxNative.SyscallResult.Error(io.mazewall.ffi.NativeConstants.EPERM, -1L)
+            }
+
+            override fun write(
+                fd: FileDescriptor<*, FdState.Open>,
+                buf: io.mazewall.ffi.memory.ManagedSegment,
+                count: Long,
+            ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                if (count == 48L) {
+                    return LinuxNative.SyscallResult.Error(io.mazewall.ffi.NativeConstants.EPERM, -1L)
+                }
+                return LinuxNative.SyscallResult.Success(count)
             }
 
             override fun read(
@@ -1472,7 +1482,7 @@ class SupervisorSessionHandlerTest {
                 }
                 val respSeg = io.mazewall.ffi.memory.SupervisorResponseSegment.of(buf)
                 respSeg.setId(42L)
-                respSeg.setDecision(1.toByte()) // Request Allow Continue
+                respSeg.setDecision(1.toByte())
                 respSeg.setErrorNr(0)
                 return LinuxNative.SyscallResult.Success(count)
             }
@@ -1544,10 +1554,11 @@ class SupervisorSessionHandlerTest {
                 val result = method.invoke(handler, *argsToPass) as Boolean
 
                 assertEquals(true, result, "Should return true to continue processing notification loop")
-
+                assertFalse(vmWritevCalled, "must not rewrite the original exec pathname in tracee memory")
                 assertEquals(io.mazewall.ffi.NativeConstants.SECCOMP_IOCTL_NOTIF_SEND, lastIoctlRequest)
                 val flags = lastIoctlArg!!.readInt(20)
-                assertEquals(io.mazewall.ffi.NativeConstants.SECCOMP_USER_NOTIF_FLAG_CONTINUE.toInt(), flags)
+                assertEquals(0, flags, "must not CONTINUE the original execve pathname after a failed rewrite")
+                assertEquals(-io.mazewall.ffi.NativeConstants.EPERM.toInt(), lastIoctlArg!!.readInt(16))
             }
         } finally {
             LinuxNative.resetToDefault()

@@ -20,6 +20,6 @@ To ensure mazewall is production-grade, secure, and maintainable, all code chang
     - Unit-test the matrix without UNIX sockets. Interpreter tests may use `MockNativeEngine`.
     - Adding a sealed subtype: update `ArchitectureTest.sealedSecurityOutcomesHaveAClosedSubclassSet` in the same commit.
     - `EPERM` / `EACCES`: rethrow or `Rejected` / `Abort`. Never `recover { 0 }`.
-    - Prefer `internal` for machines, events, and effects. `public` is for operator-facing types (`Policy`, `FileDescriptor`, `UnixListenDaemonState`). Cross-module protocol helpers stay public only when another Gradle module must call them.
+    - Prefer `internal` for machines, events, and effects. `public` is for operator-facing types (`Policy`, `FileDescriptor`, `UnixListenDaemonState`). Cross-module protocol helpers stay public only when another Gradle module must call them; mark those with `@MazewallInternal` (`SupervisedKind`, `UserNotifReply`, `SeccompNotifications`).
 
 
