@@ -14,8 +14,9 @@ effort: large
 
 # 🔵 [Severity: ENHANCEMENT]: Phantom Types for Context-Aware Capability Tokens
 
-**Target:** `io.mazewall.NativeTransaction` and `io.mazewall.LinuxNative`
-**Context:** Currently, `NativeTransaction` acts as a blanket capability token, allowing any transaction to perform any native operation (read-only or read-write). This means an auditing or profiling phase can accidentally invoke a mutating system call (like `prctl` or `socket`) when it only intended to read memory.
+**Target:** originally `io.mazewall.NativeTransaction` and `io.mazewall.LinuxNative`
+**Current state:** `NativeTransaction` / `TransactionManager` were removed in resolved issue-211. They were a dummy singleton with no enforcement. Any future read/write split belongs on `NativeEngine` traits (`NativeProcess` vs a read-only memory trait), not a resurrected transaction wrapper.
+**Context:** Historically, `NativeTransaction` was described as a blanket capability token. That type no longer exists. The remaining gap is that a profiler/audit caller can still hold a full `NativeEngine` and call `prctl` / `socket`.
 **Needed:** Implement context-sensitive capability tokens using **Phantom Types**.
 1. Define marker interfaces `ReadOnly` and `ReadWrite`.
 2. Refactor `NativeTransaction` to `NativeTransaction<Mode>`.

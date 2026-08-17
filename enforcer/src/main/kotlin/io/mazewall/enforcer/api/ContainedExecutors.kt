@@ -96,13 +96,13 @@ object ContainedExecutors {
     /**
      * Installs the given policies onto the current thread immediately.
      */
-    fun installOnCurrentThread(vararg policies: Policy<*, Uncompiled>) {
+    fun installOnCurrentThread(vararg policies: Policy<*, Uncompiled>): io.mazewall.InstallationReceipt {
         val combined = PolicyDefinition.combine(*policies.map { it.definition }.toTypedArray())
-        installOnCurrentThread(combined)
+        return installOnCurrentThread(combined)
     }
 
-    fun installOnCurrentThread(policy: Policy<*, Uncompiled>, scopingPolicy: StacktraceScopingPolicy) {
-        installOnCurrentThread(policy.definition, scopingPolicy)
+    fun installOnCurrentThread(policy: Policy<*, Uncompiled>, scopingPolicy: StacktraceScopingPolicy): io.mazewall.InstallationReceipt {
+        return installOnCurrentThread(policy.definition, scopingPolicy)
     }
 
     internal fun installOnCurrentThread(policy: PolicyDefinition<*>) : io.mazewall.InstallationReceipt {
@@ -116,9 +116,9 @@ object ContainedExecutors {
     /**
      * Installs the given policies onto the entire process (all threads) immediately.
      */
-    fun installOnProcess(vararg policies: Policy<PolicyScope.ProcessWideSafe, Uncompiled>) {
+    fun installOnProcess(vararg policies: Policy<PolicyScope.ProcessWideSafe, Uncompiled>): io.mazewall.InstallationReceipt {
         val combined = PolicyDefinition.combine(*policies.map { it.definition }.toTypedArray())
-        installInternal(true, combined)
+        return installInternal(true, combined)
     }
 
     /**
@@ -179,7 +179,17 @@ object ContainedExecutors {
                 armIntelCet()
             }
 
-            landlockSuccessfullyApplied = applyLandlockIfNecessary(processWide, augmentedPolicy)
+            when (val landlock = applyLandlockIfNecessary(processWide, augmentedPolicy)) {
+                LandlockStep.APPLIED -> landlockSuccessfullyApplied = true
+                LandlockStep.BYPASSED -> {
+                    return io.mazewall.InstallationReceipt(
+                        processWide = processWide,
+                        requestedPolicy = policy,
+                        installed = false,
+                    )
+                }
+                LandlockStep.UNCHANGED -> {}
+            }
 
             return installSeccompFilter(processWide, augmentedPolicy, scopingPolicy)
         } catch (t: Throwable) {
@@ -239,11 +249,13 @@ object ContainedExecutors {
         }
     }
 
+    private enum class LandlockStep { UNCHANGED, APPLIED, BYPASSED }
+
     private fun applyLandlockIfNecessary(
         processWide: Boolean,
         policy: PolicyDefinition<*>,
-    ): Boolean {
-        if (!needsLandlock(policy)) return false
+    ): LandlockStep {
+        if (!needsLandlock(policy)) return LandlockStep.UNCHANGED
 
         synchronized(processLock) {
             val state = if (processWide) ContainmentStateRegistry.processState else ContainmentStateRegistry.threadState
@@ -263,15 +275,21 @@ object ContainedExecutors {
                 landlockPolicy.allowedFsWritePaths != policy.allowedFsWritePaths
 
             if (isDifferent) {
-                Landlock.applyRuleset(policy, processWide)
-                if (processWide) {
-                    ContainmentStateRegistry.updateProcessState { it.withLandlockPolicy(policy) }
-                } else {
-                    ContainmentStateRegistry.threadState = ContainmentStateRegistry.threadState.withLandlockPolicy(policy)
+                when (val applied = Landlock.tryApplyRuleset(policy, processWide)) {
+                    is io.mazewall.landlock.LandlockApplyResult.Applied -> {
+                        if (processWide) {
+                            ContainmentStateRegistry.updateProcessState { it.withLandlockPolicy(policy) }
+                        } else {
+                            ContainmentStateRegistry.threadState =
+                                ContainmentStateRegistry.threadState.withLandlockPolicy(policy)
+                        }
+                        return LandlockStep.APPLIED
+                    }
+                    is io.mazewall.landlock.LandlockApplyResult.Bypassed -> return LandlockStep.BYPASSED
+                    is io.mazewall.landlock.LandlockApplyResult.Rejected -> applied.orThrow()
                 }
-                return true
             }
-            return false
+            return LandlockStep.UNCHANGED
         }
     }
 

@@ -34,4 +34,14 @@ public data class InstallationReceipt(
         timestampMillis = timestampMillis,
         installed = true,
     )
+
+    /**
+     * Fail-closed unpack. Throws if this receipt does not represent an installed filter.
+     */
+    public fun requireInstalled(): InstallationReceipt {
+        check(installed) {
+            "Containment installation did not apply; the thread or process is not sandboxed."
+        }
+        return this
+    }
 }

@@ -117,8 +117,12 @@ internal class LandlockSession(
     var state: LandlockState = LandlockState.Uninitialized
         private set
 
-    @Suppress("TooGenericExceptionCaught")
     fun applyRuleset() {
+        tryApplyRuleset().orThrow()
+    }
+
+    @Suppress("TooGenericExceptionCaught")
+    fun tryApplyRuleset(): LandlockApplyResult {
         try {
             val features = Platform.featureMatrix
             val abi = features.landlockAbiVersion
@@ -126,15 +130,17 @@ internal class LandlockSession(
 
             if (processWide && !features.landlockTsyncSupported) {
                 handleProcessWideUnsupported()
-                // If we are warning and bypassing, we only continue if there are no rules.
-                // But if there are rules, we continue and apply them to the current thread only.
-                // Documentation states this is the accepted risk.
             }
 
             if (abi < 1) {
-                Landlock.handleUnsupportedLandlock()
-                state = LandlockState.Applied
-                return
+                val unsupported = Landlock.handleUnsupportedLandlockOutcome()
+                state = when (unsupported) {
+                    is LandlockApplyResult.Rejected -> LandlockState.Failed(
+                        UnsupportedKernelFeatureException(unsupported.reason),
+                    )
+                    else -> LandlockState.Applied
+                }
+                return unsupported
             }
 
             val accessMaskFs = if (policy != null) {
@@ -150,20 +156,45 @@ internal class LandlockSession(
 
             state = LandlockState.CreatingRuleset(abi)
             NativeArena.ofConfined().use { arena ->
-                with(arena) { Landlock.createRuleset(accessMaskFs, accessMaskNet, abi) }.use { rulesetFd ->
-                    val ruleset = LandlockRuleset<RulesetState.Building>(rulesetFd)
-                    val created = LandlockLifecycle.RulesetCreated(ruleset, abi, policy)
-                    state = LandlockState.ConfiguringRuleset(rulesetFd, abi)
+                val created = with(arena) { Landlock.tryCreateRuleset(accessMaskFs, accessMaskNet, abi) }
+                when (created) {
+                    is LandlockFdOutcome.Err -> {
+                        val outcome = Landlock.classifyLandlockErrno(
+                            "landlock_create_ruleset",
+                            created.errno,
+                        )
+                        state = LandlockState.Failed(outcome.toFailure())
+                        return outcome
+                    }
+                    is LandlockFdOutcome.Ok -> {
+                        created.fd.use { rulesetFd ->
+                            val ruleset = LandlockRuleset<RulesetState.Building>(rulesetFd)
+                            val lifecycle = LandlockLifecycle.RulesetCreated(ruleset, abi, policy)
+                            state = LandlockState.ConfiguringRuleset(rulesetFd, abi)
 
-                    val added = created.addRules(arena)
-                    state = LandlockState.Enforcing(rulesetFd)
-                    added.restrictSelf(processWide)
-                    state = LandlockState.Applied
+                            val added = lifecycle.addRules(arena)
+                            state = LandlockState.Enforcing(rulesetFd)
+                            when (val restricted = Landlock.tryEnforceRuleset(ruleset, processWide)) {
+                                is LandlockRestrictOutcome.Err -> {
+                                    val outcome = Landlock.classifyLandlockErrno(
+                                        "landlock_restrict_self",
+                                        restricted.errno,
+                                    )
+                                    state = LandlockState.Failed(outcome.toFailure())
+                                    return outcome
+                                }
+                                is LandlockRestrictOutcome.Ok -> {
+                                    state = LandlockState.Applied
+                                }
+                            }
+                        }
+                    }
                 }
             }
+            return LandlockApplyResult.Applied
         } catch (t: Throwable) {
             state = LandlockState.Failed(t)
-            throw t
+            return LandlockApplyResult.Rejected(t.message ?: t.javaClass.name, cause = t)
         }
     }
 

@@ -1,4 +1,4 @@
-package io.mazewall.profiler.engine
+package io.mazewall.enforcer.supervisor
 
 import io.mazewall.core.FileDescriptor
 import io.mazewall.platform.daemon.UnixListenDaemonEffect
@@ -10,25 +10,28 @@ import org.junit.jupiter.api.Assertions.assertSame
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
-class ProfilerDaemonStateTest {
+class SupervisorDaemonSharedStateTest {
 
     @Test
-    fun `profiler uses the shared listen-loop machine including socketPath on Active`() {
-        val serverFd = FileDescriptor.unixSocket(123)
-        val listening = UnixListenDaemonState.Uninitialized.listening(serverFd, "/tmp/test.sock")
-        assertEquals("/tmp/test.sock", listening.socketPath)
-
+    fun `supervisor uses the shared listen-loop machine`() {
+        val server = FileDescriptor.unixSocket(21)
+        val listening = UnixListenDaemonState.Listening(server, "/tmp/sup.sock")
         val ready = UnixListenDaemonMachine.evaluate(listening, UnixListenDaemonEvent.ReadyAnnounced)
         val active = ready.state as UnixListenDaemonState.Active
-        assertEquals(serverFd, active.serverFd)
-        assertEquals("/tmp/test.sock", active.socketPath)
+        assertEquals("/tmp/sup.sock", active.socketPath)
         assertTrue(ready.effects.single() is UnixListenDaemonEffect.PublishReady)
+
+        val shutdown = UnixListenDaemonMachine.evaluate(
+            active,
+            UnixListenDaemonEvent.ShutdownRequested("supervisor-unit"),
+        )
+        assertTrue(shutdown.state is UnixListenDaemonState.ShuttingDown)
     }
 
     @Test
-    fun `profiler engine state is the shared delegate state`() {
-        val engine = ProfilerDaemonEngine(socketPath = "/tmp/profiler-shared-state.sock")
-        assertSame(engine.state, UnixListenDaemonState.Uninitialized)
+    fun `supervisor engine state is the shared delegate state`() {
+        val engine = SupervisorDaemonEngine(socketPath = "/tmp/supervisor-shared-state.sock")
+        assertSame(UnixListenDaemonState.Uninitialized, engine.state)
         engine.triggerGlobalShutdown("unit")
         assertTrue(engine.state is UnixListenDaemonState.ShuttingDown)
     }

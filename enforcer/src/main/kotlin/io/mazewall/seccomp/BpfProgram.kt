@@ -26,10 +26,28 @@ public sealed interface BpfStatus {
 }
 
 /**
- * A type-safe token representing a jump target within a BPF program.
+ * A jump target that can only be minted by [BpfBuilder.nextLabel] / [BpfBuilder.createLabel].
+ * Equality is builder-identity plus serial, so two builders that pick the same debug name
+ * cannot satisfy each other's jumps.
  */
-@JvmInline
-public value class BpfLabel(internal val name: String)
+public class BpfLabel private constructor(
+    public val name: String,
+    private val owner: Any,
+    private val serial: Int,
+) {
+    override fun equals(other: Any?): Boolean =
+        other is BpfLabel && owner === other.owner && serial == other.serial
+
+    override fun hashCode(): Int = 31 * System.identityHashCode(owner) + serial
+
+    override fun toString(): String = name
+
+    internal fun issuedBy(owner: Any): Boolean = this.owner === owner
+
+    internal companion object {
+        fun issue(name: String, owner: Any, serial: Int): BpfLabel = BpfLabel(name, owner, serial)
+    }
+}
 
 /**
  * A compiled seccomp policy containing the BPF filter instructions ready for installation.
@@ -100,15 +118,26 @@ public sealed interface BpfState {
  */
 public class BpfBuilder<out S : BpfState> internal constructor(
     internal val ops: MutableList<BpfMacro>,
-    internal val labelCounter: java.util.concurrent.atomic.AtomicInteger = java.util.concurrent.atomic.AtomicInteger(0)
+    internal val labelCounter: java.util.concurrent.atomic.AtomicInteger = java.util.concurrent.atomic.AtomicInteger(0),
+    internal val labelOwner: Any = Any(),
 ) {
     public fun nextLabel(prefix: String): BpfLabel {
-        return BpfLabel("${prefix}_${labelCounter.incrementAndGet()}")
+        val serial = labelCounter.incrementAndGet()
+        return BpfLabel.issue("${prefix}_$serial", labelOwner, serial)
     }
 
     public fun createLabel(prefix: String = "label"): BpfLabel {
         return nextLabel(prefix)
     }
+
+    internal fun requireIssued(label: BpfLabel, usage: String) {
+        require(label.issuedBy(labelOwner)) {
+            "BPF label '${label.name}' was not issued by this builder ($usage)"
+        }
+    }
+
+    internal fun <T : BpfState> continueAs(): BpfBuilder<T> =
+        BpfBuilder(ops, labelCounter, labelOwner)
 }
 
 /**
@@ -120,7 +149,7 @@ public fun BpfBuilder<BpfState.Uninitialized>.checkArch(arch: Arch): BpfBuilder<
     ops.add(BpfMacro.JumpIfEqual(arch.audit, jt = archOkLabel))
     ops.add(BpfMacro.Ret(NativeConstants.SECCOMP_RET_KILL_PROCESS))
     ops.add(BpfMacro.Label(archOkLabel))
-    return BpfBuilder(ops, labelCounter)
+    return continueAs()
 }
 
 /**
@@ -128,7 +157,7 @@ public fun BpfBuilder<BpfState.Uninitialized>.checkArch(arch: Arch): BpfBuilder<
  */
 public fun BpfBuilder<BpfState.ArchVerified>.loadSyscallNr(): BpfBuilder<BpfState.Active> {
     ops.add(BpfMacro.LoadAbsolute(BpfFilter.SECCOMP_DATA_NR_OFFSET))
-    return BpfBuilder(ops, labelCounter)
+    return continueAs()
 }
 
 /** Returns ACT_ALLOW immediately. */
@@ -213,6 +242,8 @@ public fun BpfBuilder<BpfState.Active>.jumpIfEqual(
     jt: BpfLabel? = null,
     jf: BpfLabel? = null
 ): BpfBuilder<BpfState.Active> {
+    jt?.let { requireIssued(it, "jumpIfEqual jt") }
+    jf?.let { requireIssued(it, "jumpIfEqual jf") }
     ops.add(BpfMacro.JumpIfEqual(k, jt, jf))
     return this
 }
@@ -222,6 +253,8 @@ public fun BpfBuilder<BpfState.Active>.jumpIfSet(
     jt: BpfLabel? = null,
     jf: BpfLabel? = null
 ): BpfBuilder<BpfState.Active> {
+    jt?.let { requireIssued(it, "jumpIfSet jt") }
+    jf?.let { requireIssued(it, "jumpIfSet jf") }
     ops.add(BpfMacro.JumpIfSet(k, jt, jf))
     return this
 }
@@ -231,6 +264,8 @@ public fun BpfBuilder<BpfState.Active>.jumpIfGreaterThan(
     jt: BpfLabel? = null,
     jf: BpfLabel? = null
 ): BpfBuilder<BpfState.Active> {
+    jt?.let { requireIssued(it, "jumpIfGreaterThan jt") }
+    jf?.let { requireIssued(it, "jumpIfGreaterThan jf") }
     ops.add(BpfMacro.JumpIfGreaterThan(k, jt, jf))
     return this
 }
@@ -258,10 +293,11 @@ public fun BpfBuilder<BpfState.Active>.jmpIfFalse(label: BpfLabel): BpfBuilder<B
  */
 public fun BpfBuilder<BpfState.Active>.ret(action: Int): BpfBuilder<BpfState.Terminated> {
     ops.add(BpfMacro.Ret(action))
-    return BpfBuilder(ops, labelCounter)
+    return continueAs()
 }
 
 public fun BpfBuilder<BpfState.Active>.mark(label: BpfLabel): BpfBuilder<BpfState.Active> {
+    requireIssued(label, "mark")
     ops.add(BpfMacro.Label(label))
     return this
 }

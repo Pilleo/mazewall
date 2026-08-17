@@ -471,4 +471,54 @@ class ArchitectureTest {
             .because("MethodHandle.invokeExact must only be called within SyscallInvoker to ensure atomic errno capture.")
             .check(allClasses)
     }
+
+    @ArchTest
+    fun sealedSecurityOutcomesHaveAClosedSubclassSet(allClasses: com.tngtech.archunit.core.domain.JavaClasses) {
+        val expected = mapOf(
+            "io.mazewall.landlock.LandlockApplyResult" to setOf(
+                "io.mazewall.landlock.LandlockApplyResult\$Applied",
+                "io.mazewall.landlock.LandlockApplyResult\$Bypassed",
+                "io.mazewall.landlock.LandlockApplyResult\$Rejected",
+            ),
+            "io.mazewall.ffi.networking.SeccompConnection" to setOf(
+                "io.mazewall.ffi.networking.SeccompConnection\$Accepted",
+                "io.mazewall.ffi.networking.SeccompConnection\$FdAttached",
+                "io.mazewall.ffi.networking.SeccompConnection\$Active",
+            ),
+            "io.mazewall.ffi.networking.SeccompConnectionEvent" to setOf(
+                "io.mazewall.ffi.networking.SeccompConnectionEvent\$ListenerReceived",
+                "io.mazewall.ffi.networking.SeccompConnectionEvent\$RecvFailed",
+                "io.mazewall.ffi.networking.SeccompConnectionEvent\$PollIdle",
+                "io.mazewall.ffi.networking.SeccompConnectionEvent\$PollFailed",
+                "io.mazewall.ffi.networking.SeccompConnectionEvent\$AckSucceeded",
+                "io.mazewall.ffi.networking.SeccompConnectionEvent\$AckFailed",
+                "io.mazewall.ffi.networking.SeccompConnectionEvent\$SessionFinished",
+            ),
+            "io.mazewall.platform.daemon.UnixListenDaemonState" to setOf(
+                "io.mazewall.platform.daemon.UnixListenDaemonState\$Uninitialized",
+                "io.mazewall.platform.daemon.UnixListenDaemonState\$Listening",
+                "io.mazewall.platform.daemon.UnixListenDaemonState\$Active",
+                "io.mazewall.platform.daemon.UnixListenDaemonState\$ShuttingDown",
+                "io.mazewall.platform.daemon.UnixListenDaemonState\$Terminated",
+            ),
+            "io.mazewall.enforcer.supervisor.BypassPaths\$PathResolution" to setOf(
+                "io.mazewall.enforcer.supervisor.BypassPaths\$PathResolution\$Resolved",
+                "io.mazewall.enforcer.supervisor.BypassPaths\$PathResolution\$Missing",
+                "io.mazewall.enforcer.supervisor.BypassPaths\$PathResolution\$Unsafe",
+            ),
+        )
+        for ((parent, kids) in expected) {
+            val actual = allClasses
+                .filter { it.isAssignableTo(parent) && it.name != parent }
+                .filter { !it.name.contains("DefaultImpls") }
+                .filter { "\$\$" !in it.name }
+                .map { it.name }
+                .toSet()
+            org.junit.jupiter.api.Assertions.assertEquals(
+                kids,
+                actual,
+                "Closed subclass set for $parent changed. Update evaluate()/when branches before adding a variant.",
+            )
+        }
+    }
 }

@@ -71,13 +71,49 @@ class BpfBuilderCoverageTest {
             .checkArch(Arch.AMD64)
             .loadSyscallNr()
 
-        val label1 = BpfLabel("unknown")
+        val label1 = loaded.nextLabel("never_marked")
         loaded.jumpIfEqual(10, jt = label1)
         val terminated = loaded.ret(0)
 
         assertFailsWith<IllegalArgumentException> {
             terminated.build()
         }
+    }
+
+    @Test
+    fun `label issued by another builder is rejected at jump`() {
+        val foreign = BpfProgram.builder()
+            .checkArch(Arch.AMD64)
+            .loadSyscallNr()
+        val stolen = foreign.nextLabel("x")
+
+        val loaded = BpfProgram.builder()
+            .checkArch(Arch.AMD64)
+            .loadSyscallNr()
+
+        val ex = assertFailsWith<IllegalArgumentException> {
+            loaded.jumpIfEqual(10, jt = stolen)
+        }
+        assertTrue(ex.message!!.contains("not issued"), ex.message)
+    }
+
+    @Test
+    fun `label issued by another builder is rejected at mark even if names collide`() {
+        val a = BpfProgram.builder()
+            .checkArch(Arch.AMD64)
+            .loadSyscallNr()
+        val b = BpfProgram.builder()
+            .checkArch(Arch.AMD64)
+            .loadSyscallNr()
+        val aLabel = a.nextLabel("x")
+        val bLabel = b.nextLabel("x")
+        assertTrue(aLabel.name == bLabel.name, "same prefix+counter must not imply same token")
+
+        a.jumpIfEqual(0, jt = aLabel)
+        val ex = assertFailsWith<IllegalArgumentException> {
+            a.mark(bLabel)
+        }
+        assertTrue(ex.message!!.contains("not issued"), ex.message)
     }
 
     @Test

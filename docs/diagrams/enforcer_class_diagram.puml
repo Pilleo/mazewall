@@ -34,6 +34,7 @@ class "InstallationReceipt" as io.mazewall.InstallationReceipt {
   +AutoCloseable getSupervisorSession()
   +long getTimestampMillis()
   +boolean getInstalled()
+  +InstallationReceipt requireInstalled()
 }
 class "KernelFeatureMatrix" as io.mazewall.KernelFeatureMatrix {
   + {static}Companion Companion
@@ -509,11 +510,11 @@ class "ContainedExecutors" as io.mazewall.enforcer.ContainedExecutors {
 class "ContainedExecutors" as io.mazewall.enforcer.api.ContainedExecutors {
   + {static}ContainedExecutors INSTANCE
   __
-  +void installOnCurrentThread(Policy<?, ? extends Uncompiled>[])
-  +void installOnCurrentThread(Policy<?, ? extends Uncompiled>, StacktraceScopingPolicy)
+  +InstallationReceipt installOnCurrentThread(Policy<?, ? extends Uncompiled>[])
+  +InstallationReceipt installOnCurrentThread(Policy<?, ? extends Uncompiled>, StacktraceScopingPolicy)
   +InstallationReceipt installOnCurrentThread(PolicyDefinition<?>)
   +InstallationReceipt installOnCurrentThread(PolicyDefinition<?>, StacktraceScopingPolicy)
-  +void installOnProcess(Policy<? extends ProcessWideSafe, ? extends Uncompiled>[])
+  +InstallationReceipt installOnProcess(Policy<? extends ProcessWideSafe, ? extends Uncompiled>[])
   +ExecutorService wrap(ExecutorService, Policy<?, ? extends Uncompiled>[])
   +ExecutorService wrap(ExecutorService, Policy<?, ? extends Uncompiled>, StacktraceScopingPolicy)
 }
@@ -661,7 +662,7 @@ class "SupervisorDaemonEngine" as io.mazewall.enforcer.supervisor.SupervisorDaem
   + {static}Companion Companion
   +CopyOnWriteArrayList<FileDescriptor<UnixSocket, Open>> clientSockets
   __
-  +SupervisorDaemonState getState()
+  +UnixListenDaemonState getState()
   +void run(Function0<Unit>)
   +void handleConnection(FileDescriptor<UnixSocket, ? extends Open>)
   +void handleNewConnection(FileDescriptor<UnixSocket, ? extends Open>)
@@ -677,8 +678,6 @@ class "SupervisorDaemonManager" as io.mazewall.enforcer.supervisor.SupervisorDae
   +SupervisorContext getOrSpawnSharedDaemon()
   +void stop()
   + {static}SupervisorDaemonManager getInstance()
-}
-interface "SupervisorDaemonState" as io.mazewall.enforcer.supervisor.SupervisorDaemonState {
 }
 class "SupervisorInstaller" as io.mazewall.enforcer.supervisor.SupervisorInstaller {
   + {static}SupervisorInstaller INSTANCE
@@ -703,11 +702,6 @@ class "SyscallArguments" as io.mazewall.enforcer.supervisor.SyscallArguments {
   +String getPathStr()
   +byte[] getSockaddrBytes()
   +int getDirfd()
-}
-class "TraceeExecveRegisters" as io.mazewall.enforcer.supervisor.TraceeExecveRegisters {
-  + {static}TraceeExecveRegisters INSTANCE
-  __
-  +boolean cannotSafelyRewriteWhileBlockedInUserNotif(int)
 }
 class "TraceeReadOnlyNul" as io.mazewall.enforcer.supervisor.TraceeReadOnlyNul {
   + {static}TraceeReadOnlyNul INSTANCE
@@ -1246,18 +1240,36 @@ class "Landlock" as io.mazewall.landlock.Landlock {
   +boolean isSupported()
   +int getAbiVersion()
   +void applyRuleset(PolicyDefinition<?>, boolean)
+  +LandlockApplyResult tryApplyRuleset(PolicyDefinition<?>, boolean)
   +long getFullAccessMask(int)
   +long getFullNetAccessMask(int)
   +void handleUnsupportedLandlock()
+  +LandlockApplyResult classifyLandlockErrno(String, int)
+  +LandlockApplyResult handleUnsupportedLandlockOutcome()
   +void addJvmClasspathRules(NativeArena, LandlockRuleset<? extends Building>, long)
   +LandlockRuleset<Sealed> enforceRuleset(LandlockRuleset<? extends Building>, boolean)
+  +LandlockRestrictOutcome tryEnforceRuleset(LandlockRuleset<? extends Building>, boolean)
   +void applyUserRules(NativeArena, LandlockRuleset<? extends Building>, PolicyDefinition<?>, int, long)
   +long getAccessMask(int, PolicyDefinition<?>)
   +long getNetAccessMask(int, PolicyDefinition<?>)
   +FileDescriptor<Ruleset, Open> createRuleset(NativeArena, long, int)
   +FileDescriptor<Ruleset, Open> createRuleset(NativeArena, long, long, int)
+  +LandlockFdOutcome tryCreateRuleset(NativeArena, long, int)
+  +LandlockFdOutcome tryCreateRuleset(NativeArena, long, long, int)
+}
+interface "LandlockApplyResult" as io.mazewall.landlock.LandlockApplyResult {
+  +void orThrow()
+  +boolean isApplied()
+}
+class "LandlockApplyResultKt" as io.mazewall.landlock.LandlockApplyResultKt {
+  + {static}Throwable toFailure(LandlockApplyResult)
+  + {static}Throwable toException(Rejected)
+}
+interface "LandlockFdOutcome" as io.mazewall.landlock.LandlockFdOutcome {
 }
 interface "LandlockLifecycle" as io.mazewall.landlock.LandlockLifecycle {
+}
+interface "LandlockRestrictOutcome" as io.mazewall.landlock.LandlockRestrictOutcome {
 }
 class "LandlockRuleset" as io.mazewall.landlock.LandlockRuleset<S extends RulesetState> {
   +FileDescriptor<Ruleset, Open> getFd()
@@ -1265,10 +1277,27 @@ class "LandlockRuleset" as io.mazewall.landlock.LandlockRuleset<S extends Rulese
 class "LandlockSession" as io.mazewall.landlock.LandlockSession {
   +LandlockState getState()
   +void applyRuleset()
+  +LandlockApplyResult tryApplyRuleset()
 }
 interface "LandlockState" as io.mazewall.landlock.LandlockState {
 }
 interface "RulesetState" as io.mazewall.landlock.RulesetState {
+}
+interface "UnixListenDaemonEffect" as io.mazewall.platform.daemon.UnixListenDaemonEffect {
+}
+interface "UnixListenDaemonEvent" as io.mazewall.platform.daemon.UnixListenDaemonEvent {
+}
+class "UnixListenDaemonMachine" as io.mazewall.platform.daemon.UnixListenDaemonMachine {
+  + {static}UnixListenDaemonMachine INSTANCE
+  __
+  +UnixListenDaemonTransition evaluate(UnixListenDaemonState, UnixListenDaemonEvent)
+  +UnixListenDaemonTransition apply(AtomicReference<UnixListenDaemonState>, UnixListenDaemonEvent, Function1<? super List<? extends UnixListenDaemonEffect>, Unit>)
+}
+interface "UnixListenDaemonState" as io.mazewall.platform.daemon.UnixListenDaemonState {
+}
+class "UnixListenDaemonTransition" as io.mazewall.platform.daemon.UnixListenDaemonTransition {
+  +UnixListenDaemonState getState()
+  +List<UnixListenDaemonEffect> getEffects()
 }
 abstract class "LoopAction" as io.mazewall.platform.seccomp.daemon.LoopAction {
 }
@@ -1282,15 +1311,21 @@ class "SeccompDaemonEngine" as io.mazewall.platform.seccomp.daemon.SeccompDaemon
   + {static}Companion Companion
   +CopyOnWriteArrayList<FileDescriptor<UnixSocket, Open>> clientSockets
   __
-  +SeccompDaemonState getState()
+  +UnixListenDaemonState getState()
   +void run()
   +void triggerGlobalShutdown(String)
+  +UnixListenDaemonTransition applyEvent(UnixListenDaemonEvent)
   +boolean isGlobalShutdown()
   +void handleNewConnection(FileDescriptor<UnixSocket, ? extends Open>)
   +void handleConnection(FileDescriptor<UnixSocket, ? extends Open>)
   +SeccompConnection processConnectionStep(NativeArena, SeccompConnection, FileDescriptor<UnixSocket, ? extends Open>, ManagedSegment)
 }
-interface "SeccompDaemonState" as io.mazewall.platform.seccomp.daemon.SeccompDaemonState {
+class "SeccompDaemonMachine" as io.mazewall.platform.seccomp.daemon.SeccompDaemonMachine {
+  + {static}SeccompDaemonMachine INSTANCE
+  __
+  +UnixListenDaemonTransition evaluate(UnixListenDaemonState, UnixListenDaemonEvent)
+}
+class "SeccompDaemonMachineKt" as io.mazewall.platform.seccomp.daemon.SeccompDaemonMachineKt {
 }
 interface "SeccompNotifHandler" as io.mazewall.platform.seccomp.daemon.SeccompNotifHandler {
   + {abstract}NotifResult processNotification(NativeArena, ManagedSegment, ManagedSegment, FileDescriptor<SeccompNotif, ? extends Open>, FileDescriptor<UnixSocket, ? extends Open>)
@@ -1322,8 +1357,11 @@ interface "ArgCheck" as io.mazewall.seccomp.ArgCheck {
 class "BpfBuilder" as io.mazewall.seccomp.BpfBuilder<S extends BpfState> {
   +List<BpfMacro> getOps()
   +AtomicInteger getLabelCounter()
-  +String nextLabel(String)
-  +String createLabel(String)
+  +Object getLabelOwner()
+  +BpfLabel nextLabel(String)
+  +BpfLabel createLabel(String)
+  +void requireIssued(BpfLabel, String)
+  +BpfBuilder<T> continueAs()
 }
 abstract class "BpfInstruction" as io.mazewall.seccomp.BpfInstruction {
   + {static}Companion Companion
@@ -1334,11 +1372,10 @@ abstract class "BpfInstruction" as io.mazewall.seccomp.BpfInstruction {
   + {abstract}int getK()
 }
 class "BpfLabel" as io.mazewall.seccomp.BpfLabel {
-  + {static}String toString-impl(String)
-  + {static}int hashCode-impl(String)
-  + {static}boolean equals-impl(String, Object)
-  + {static}String constructor-impl(String)
-  + {static}boolean equals-impl0(String, String)
+  + {static}Companion Companion
+  __
+  +String getName()
+  +boolean issuedBy(Object)
 }
 interface "BpfMacro" as io.mazewall.seccomp.BpfMacro {
 }
@@ -1367,15 +1404,15 @@ class "BpfProgramKt" as io.mazewall.seccomp.BpfProgramKt {
   + {static}BpfBuilder<Active> expect(BpfBuilder<? extends Active>, Syscall, Arch, Function1<? super BpfBuilder<? extends Active>, Unit>)
   + {static}BpfBuilder<Active> expect(BpfBuilder<? extends Active>, Syscall, Arch, Consumer<BpfBuilder<Active>>)
   + {static}BpfBuilder<Active> loadAbsolute(BpfBuilder<? extends Active>, int)
-  + {static}BpfBuilder<Active> jumpIfEqual(BpfBuilder<? extends Active>, int, String, String)
-  + {static}BpfBuilder<Active> jumpIfSet(BpfBuilder<? extends Active>, int, String, String)
-  + {static}BpfBuilder<Active> jumpIfGreaterThan(BpfBuilder<? extends Active>, int, String, String)
+  + {static}BpfBuilder<Active> jumpIfEqual(BpfBuilder<? extends Active>, int, BpfLabel, BpfLabel)
+  + {static}BpfBuilder<Active> jumpIfSet(BpfBuilder<? extends Active>, int, BpfLabel, BpfLabel)
+  + {static}BpfBuilder<Active> jumpIfGreaterThan(BpfBuilder<? extends Active>, int, BpfLabel, BpfLabel)
   + {static}BpfBuilder<Active> and(BpfBuilder<? extends Active>, int)
-  + {static}BpfBuilder<Active> jmp(BpfBuilder<? extends Active>, String)
-  + {static}BpfBuilder<Active> jmpIfTrue(BpfBuilder<? extends Active>, String)
-  + {static}BpfBuilder<Active> jmpIfFalse(BpfBuilder<? extends Active>, String)
+  + {static}BpfBuilder<Active> jmp(BpfBuilder<? extends Active>, BpfLabel)
+  + {static}BpfBuilder<Active> jmpIfTrue(BpfBuilder<? extends Active>, BpfLabel)
+  + {static}BpfBuilder<Active> jmpIfFalse(BpfBuilder<? extends Active>, BpfLabel)
   + {static}BpfBuilder<Terminated> ret(BpfBuilder<? extends Active>, int)
-  + {static}BpfBuilder<Active> mark(BpfBuilder<? extends Active>, String)
+  + {static}BpfBuilder<Active> mark(BpfBuilder<? extends Active>, BpfLabel)
   + {static}BpfProgram<Unverified> build(BpfBuilder<? extends Terminated>)
 }
 interface "BpfState" as io.mazewall.seccomp.BpfState {
@@ -1536,7 +1573,6 @@ io.mazewall.enforcer.supervisor.SupervisorSessionHandler .u.|> io.mazewall.platf
 io.mazewall.enforcer.supervisor.SupervisorSessionHandler --> io.mazewall.NativeEngine
 io.mazewall.enforcer.supervisor.SupervisorSessionHandler --> io.mazewall.core.SocketManager
 io.mazewall.enforcer.supervisor.SupervisorSessionHandler --> io.mazewall.core.FileDescriptor
-io.mazewall.enforcer.supervisor.TraceeExecveRegisters --> io.mazewall.enforcer.supervisor.TraceeExecveRegisters
 io.mazewall.enforcer.supervisor.TraceeReadOnlyNul --> io.mazewall.enforcer.supervisor.TraceeReadOnlyNul
 io.mazewall.enforcer.supervisor.ValidationLog --> io.mazewall.enforcer.supervisor.ValidationLog
 io.mazewall.ffi.IoctlCommand <--> io.mazewall.ffi.IoctlCommand
@@ -1581,13 +1617,17 @@ io.mazewall.landlock.Landlock --> io.mazewall.landlock.Landlock
 io.mazewall.landlock.LandlockRuleset --> io.mazewall.core.FileDescriptor
 io.mazewall.landlock.LandlockSession --> io.mazewall.landlock.LandlockState
 io.mazewall.landlock.LandlockSession --> io.mazewall.PolicyDefinition
+io.mazewall.platform.daemon.UnixListenDaemonMachine --> io.mazewall.platform.daemon.UnixListenDaemonMachine
+io.mazewall.platform.daemon.UnixListenDaemonTransition --> io.mazewall.platform.daemon.UnixListenDaemonState
+io.mazewall.platform.daemon.UnixListenDaemonTransition --> io.mazewall.platform.daemon.UnixListenDaemonEffect
 io.mazewall.platform.seccomp.daemon.SeccompDaemonEngine --> io.mazewall.core.SocketManager
 io.mazewall.platform.seccomp.daemon.SeccompDaemonEngine --> io.mazewall.core.FileDescriptor
+io.mazewall.platform.seccomp.daemon.SeccompDaemonEngine --> io.mazewall.platform.daemon.UnixListenDaemonState
 io.mazewall.platform.seccomp.daemon.SeccompDaemonEngine --> io.mazewall.RawSyscallOperations
-io.mazewall.platform.seccomp.daemon.SeccompDaemonEngine --> io.mazewall.platform.seccomp.daemon.SeccompDaemonState
 io.mazewall.platform.seccomp.daemon.SeccompDaemonEngine --> io.mazewall.platform.seccomp.daemon.SeccompNotifHandler
 io.mazewall.platform.seccomp.daemon.SeccompDaemonEngine --> io.mazewall.NativeEngine
 io.mazewall.platform.seccomp.daemon.SeccompDaemonEngine --> io.mazewall.ffi.memory.ManagedSegment
+io.mazewall.platform.seccomp.daemon.SeccompDaemonMachine --> io.mazewall.platform.seccomp.daemon.SeccompDaemonMachine
 io.mazewall.platform.seccomp.daemon.SeccompSessionHandler --> io.mazewall.ffi.memory.NativeArena
 io.mazewall.platform.seccomp.daemon.SeccompSessionHandler --> io.mazewall.core.SocketManager
 io.mazewall.platform.seccomp.daemon.SeccompSessionHandler --> io.mazewall.core.FileDescriptor

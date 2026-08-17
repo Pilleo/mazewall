@@ -88,13 +88,11 @@ class "ProfilerDaemonEngine" as io.mazewall.profiler.engine.ProfilerDaemonEngine
   + {static}Companion Companion
   +CopyOnWriteArrayList<FileDescriptor<UnixSocket, Open>> clientSockets
   __
-  +ProfilerDaemonState getState()
+  +UnixListenDaemonState getState()
   +void run(Function0<Unit>)
   +void handleConnection(FileDescriptor<UnixSocket, ? extends Open>)
   +void handleNewConnection(FileDescriptor<UnixSocket, ? extends Open>)
   +void triggerGlobalShutdown(String)
-}
-interface "ProfilerDaemonState" as io.mazewall.profiler.engine.ProfilerDaemonState {
 }
 class "ProfilerInstaller" as io.mazewall.profiler.engine.ProfilerInstaller {
   + {static}ProfilerInstaller INSTANCE

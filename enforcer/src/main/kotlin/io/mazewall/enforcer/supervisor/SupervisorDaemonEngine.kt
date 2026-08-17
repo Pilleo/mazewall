@@ -6,32 +6,8 @@ import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
 import io.mazewall.core.SocketManager
+import io.mazewall.platform.daemon.UnixListenDaemonState
 import io.mazewall.platform.seccomp.daemon.SeccompDaemonEngine
-import io.mazewall.platform.seccomp.daemon.SeccompDaemonState
-
-internal sealed interface SupervisorDaemonState {
-    object Uninitialized : SupervisorDaemonState {
-        fun listening(
-            serverFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>,
-            socketPath: String
-        ) = Listening(serverFd, socketPath)
-    }
-
-    data class Listening(
-        val serverFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>,
-        val socketPath: String
-    ) : SupervisorDaemonState {
-        fun active() = Active(serverFd, socketPath)
-    }
-
-    data class Active(
-        val serverFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>,
-        val socketPath: String
-    ) : SupervisorDaemonState
-
-    object ShuttingDown : SupervisorDaemonState
-    object Terminated : SupervisorDaemonState
-}
 
 internal class SupervisorDaemonEngine(
     private val socketPath: String,
@@ -39,7 +15,6 @@ internal class SupervisorDaemonEngine(
     private val socketManager: SocketManager = io.mazewall.core.RealSocketManager
 ) {
     private val delegate = SeccompDaemonEngine(
-
         socketPath = socketPath,
         readySentinel = SupervisorDaemon.DAEMON_READY_SENTINEL,
         notifHandlerFactory = { socketFd, listenerFd ->
@@ -54,15 +29,8 @@ internal class SupervisorDaemonEngine(
     @JvmField
     internal val clientSockets = delegate.clientSockets
 
-
-    val state: SupervisorDaemonState
-        get() = when (val s = delegate.state) {
-            is SeccompDaemonState.Uninitialized -> SupervisorDaemonState.Uninitialized
-            is SeccompDaemonState.Listening -> SupervisorDaemonState.Listening(s.serverFd, s.socketPath)
-            is SeccompDaemonState.Active -> SupervisorDaemonState.Active(s.serverFd, s.socketPath)
-            is SeccompDaemonState.ShuttingDown -> SupervisorDaemonState.ShuttingDown
-            is SeccompDaemonState.Terminated -> SupervisorDaemonState.Terminated
-        }
+    val state: UnixListenDaemonState
+        get() = delegate.state
 
     companion object {
         private const val MAX_CONNECTIONS = 200
@@ -81,10 +49,6 @@ internal class SupervisorDaemonEngine(
         delegate.handleNewConnection(serverFd)
     }
 
-
-
-
-
     internal fun processConnectionStep(
         arena: io.mazewall.ffi.memory.NativeArena,
         connection: io.mazewall.ffi.networking.SeccompConnection,
@@ -95,9 +59,6 @@ internal class SupervisorDaemonEngine(
     }
 
     fun triggerGlobalShutdown(source: String = "unknown") {
-
-
         delegate.triggerGlobalShutdown(source)
     }
 }
-
