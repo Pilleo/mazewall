@@ -74,6 +74,7 @@ class ContainedExecutorsCoverageTest {
         val receipt = ContainedExecutors.installOnCurrentThread(Policy.builder().build().definition)
 
         assertEquals(false, receipt.installed)
+        assertEquals(false, receipt.landlockApplied)
     }
 
     @Test
@@ -94,6 +95,7 @@ class ContainedExecutorsCoverageTest {
         val receipt = ContainedExecutors.installOnCurrentThread(incompatiblePolicy.definition)
 
         assertEquals(false, receipt.installed)
+        assertEquals(true, receipt.landlockApplied)
     }
 
     @Test

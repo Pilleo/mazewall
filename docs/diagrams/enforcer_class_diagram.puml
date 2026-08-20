@@ -76,6 +76,7 @@ class "InstallationReceipt" as io.mazewall.InstallationReceipt {
   +long getTimestampMillis()
   +boolean getInstalled()
   +FallbackBehavior getFallback()
+  +boolean getLandlockApplied()
   +InstallationReceipt requireInstalled()
 }
 class "InstallationRejectedException" as io.mazewall.InstallationRejectedException {
@@ -569,6 +570,12 @@ class "SandboxedPath" as io.mazewall.core.SandboxedPath {
 interface "SeccompAction" as io.mazewall.core.SeccompAction {
   + {abstract}int getPriority()
   + {abstract}int getNativeCode()
+}
+class "SocketIo" as io.mazewall.core.SocketIo {
+  + {static}SocketIo INSTANCE
+  __
+  +SyscallResult writeFully(NativeMemory, FileDescriptor<?, ? extends Open>, ManagedSegment, long)
+  +SyscallResult readFully(NativeMemory, FileDescriptor<?, ? extends Open>, ManagedSegment, long)
 }
 interface "SocketManager" as io.mazewall.core.SocketManager {
   + {abstract}FileDescriptor<UnixSocket, Open> createUnixServer(String)
@@ -1721,6 +1728,7 @@ io.mazewall.core.RealProcessLauncher .u.|> io.mazewall.core.ProcessLauncher
 io.mazewall.core.RealProcessLauncher --> io.mazewall.core.RealProcessLauncher
 io.mazewall.core.RealSocketManager .u.|> io.mazewall.core.SocketManager
 io.mazewall.core.RealSocketManager --> io.mazewall.core.RealSocketManager
+io.mazewall.core.SocketIo --> io.mazewall.core.SocketIo
 io.mazewall.enforcer.ContainedExecutors --> io.mazewall.enforcer.ContainedExecutors
 io.mazewall.enforcer.api.ContainedExecutors --> io.mazewall.enforcer.api.ContainedExecutors
 io.mazewall.enforcer.api.SandboxDispatcher --> io.mazewall.PolicyDefinition

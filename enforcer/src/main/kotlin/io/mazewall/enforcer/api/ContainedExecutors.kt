@@ -206,7 +206,7 @@ object ContainedExecutors {
                 LandlockStep.UNCHANGED -> {}
             }
 
-            return installSeccompFilter(processWide, augmentedPolicy, scopingPolicy)
+            return installSeccompFilter(processWide, augmentedPolicy, scopingPolicy, landlockSuccessfullyApplied)
         } catch (t: Throwable) {
             // Landlock is irreversible in the kernel. Only revert thread-local seccomp state
             // if Landlock was NOT applied during this installation attempt.
@@ -214,14 +214,29 @@ object ContainedExecutors {
                 ContainmentStateRegistry.threadState = initialState
             }
             val fallback = Platform.configuredFallback()
+            val landlockInForce =
+                landlockSuccessfullyApplied ||
+                    (if (processWide) {
+                        ContainmentStateRegistry.processState
+                    } else {
+                        ContainmentStateRegistry.threadState
+                    }).landlockPolicy != null
             if (fallback != Platform.FallbackBehavior.FAIL) {
                 if (fallback == Platform.FallbackBehavior.valueOf("WARN_AND_BYPASS")) {
-                    logger.warning("Seccomp installation failed: ${t.message}. Code will run uncontained.")
+                    if (landlockInForce) {
+                        logger.warning(
+                            "Seccomp installation failed after Landlock applied: ${t.message}. " +
+                                "Filesystem Landlock remains in force; seccomp did not install.",
+                        )
+                    } else {
+                        logger.warning("Seccomp installation failed: ${t.message}. Code will run uncontained.")
+                    }
                 }
                 return io.mazewall.InstallationReceipt(
                     processWide = processWide,
                     requestedPolicy = policy,
                     installed = false,
+                    landlockApplied = landlockInForce,
                 )
             }
             throw t
@@ -231,13 +246,19 @@ object ContainedExecutors {
     private fun installSeccompFilter(
         processWide: Boolean,
         combinedPolicy: PolicyDefinition<*>,
-        scopingPolicy: StacktraceScopingPolicy
+        scopingPolicy: StacktraceScopingPolicy,
+        landlockApplied: Boolean,
     ) : io.mazewall.InstallationReceipt {
         // FAST PATH: Check if the current thread state already satisfies the policy without locking
         val fastState = resolveCurrentState()
         val fastPlan = FilterInstallationPlanner.calculateNewFilter(combinedPolicy, fastState)
         if (!fastPlan.needsNewFilter && (!combinedPolicy.hasSupervisedSyscalls || processWide)) {
-            return io.mazewall.InstallationReceipt(processWide, combinedPolicy, null)
+            return io.mazewall.InstallationReceipt(
+                processWide = processWide,
+                requestedPolicy = combinedPolicy,
+                supervisorSession = null,
+                landlockApplied = landlockApplied,
+            )
         }
 
         synchronized(processLock) {
@@ -253,14 +274,29 @@ object ContainedExecutors {
 
             if (!processWide && combinedPolicy.hasSupervisedSyscalls) {
                 if (session is io.mazewall.enforcer.supervisor.SupervisorSession) {
-                    return io.mazewall.InstallationReceipt(processWide, combinedPolicy, session)
+                    return io.mazewall.InstallationReceipt(
+                        processWide = processWide,
+                        requestedPolicy = combinedPolicy,
+                        supervisorSession = session,
+                        landlockApplied = landlockApplied,
+                    )
                 } else {
                     val tid = io.mazewall.LinuxNative.process.gettid()
                     io.mazewall.enforcer.supervisor.SupervisorInstaller.registerThread(tid)
-                    return io.mazewall.InstallationReceipt(processWide, combinedPolicy, io.mazewall.enforcer.supervisor.SupervisorSession(tid))
+                    return io.mazewall.InstallationReceipt(
+                        processWide = processWide,
+                        requestedPolicy = combinedPolicy,
+                        supervisorSession = io.mazewall.enforcer.supervisor.SupervisorSession(tid),
+                        landlockApplied = landlockApplied,
+                    )
                 }
             }
-            return io.mazewall.InstallationReceipt(processWide, combinedPolicy, null)
+            return io.mazewall.InstallationReceipt(
+                processWide = processWide,
+                requestedPolicy = combinedPolicy,
+                supervisorSession = null,
+                landlockApplied = landlockApplied,
+            )
         }
     }
 

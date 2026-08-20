@@ -12,7 +12,9 @@ package io.mazewall
  * the notification listener. Any subsequent syscalls that would have been routed to the supervisor will receive ENOSYS.
  *
  * Callers performing diagnostics or attestation must check [installed]. When explicitly configured fallback behavior allows
- * execution to continue after an installation failure, [installed] is `false` and no containment is implied by this receipt.
+ * execution to continue after an installation failure, [installed] is `false` and does not imply a seccomp filter.
+ * [landlockApplied] is independent: Landlock cannot be undone, so a failed seccomp step after a successful Landlock
+ * apply still leaves filesystem rules in force.
  */
 public data class InstallationReceipt(
     public val processWide: Boolean,
@@ -21,6 +23,7 @@ public data class InstallationReceipt(
     public val timestampMillis: Long = System.currentTimeMillis(),
     public val installed: Boolean = true,
     public val fallback: Platform.FallbackBehavior = Platform.configuredFallback(),
+    public val landlockApplied: Boolean = false,
 ) {
     /** Preserves the JVM constructor exposed before [installed] was added. */
     public constructor(

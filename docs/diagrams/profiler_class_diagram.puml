@@ -141,12 +141,14 @@ class "ProfilingCoverage" as io.mazewall.profiler.ProfilingCoverage {
   +ProfileEnvironment getEnvironment()
   +boolean getComplete()
   +List<String> getWarnings()
+  +ProfilingCoverage retainStricterPathResolution(ProfilingCoverage)
 }
 class "ProfilingResult" as io.mazewall.profiler.ProfilingResult<T> {
   +T getValue()
   +BillOfBehavior getBehavior()
   +Map<TraceEvent, List<StackTraceElement[]>> getStackProfile()
   +ProfilingCoverage getCoverage()
+  +List<ProfileObservation> getObservations()
 }
 enum "StackAttribution" as io.mazewall.profiler.StackAttribution {
   CAPTURED
@@ -171,8 +173,13 @@ class "EbpfEventParser" as io.mazewall.profiler.collector.EbpfEventParser {
   ..
   + {static}EbpfEventParser INSTANCE
   __
-  +List<ProfileObservation> parse(String)
+  +EbpfParseResult parse(String)
   +ProfileObservation parseLine(String)
+  +Map<String, String> parseFields(String)
+}
+class "EbpfParseResult" as io.mazewall.profiler.collector.EbpfParseResult {
+  +List<ProfileObservation> getObservations()
+  +int getDroppedLines()
 }
 class "ObservationMerger" as io.mazewall.profiler.collector.ObservationMerger {
   + {static}ObservationMerger INSTANCE
@@ -446,6 +453,7 @@ class "ProfilerTraceListener" as io.mazewall.profiler.internal.ProfilerTraceList
   +Channel<TraceEvent> getEventChannel()
   +Flow<TraceEvent> getEventFlow()
   +TraceListenerState getState()
+  +boolean getDrainComplete()
   +void start(CountDownLatch)
   +void close()
   +void passThrough()
@@ -517,6 +525,7 @@ io.mazewall.profiler.ProfilingCoverage --> io.mazewall.profiler.StackAttribution
 io.mazewall.profiler.ProfilingCoverage --> io.mazewall.profiler.ProfileEnvironment
 io.mazewall.profiler.ProfilingCoverage --> io.mazewall.profiler.PathResolutionQuality
 io.mazewall.profiler.ProfilingResult --> io.mazewall.profiler.BillOfBehavior
+io.mazewall.profiler.ProfilingResult --> io.mazewall.profiler.ProfileObservation
 io.mazewall.profiler.ProfilingResult --> io.mazewall.profiler.ProfilingCoverage
 io.mazewall.profiler.ProfilingResult --> io.mazewall.profiler.engine.TraceEvent
 io.mazewall.profiler.collector.CollectorDrain --> io.mazewall.profiler.IoUringVisibility
@@ -525,6 +534,7 @@ io.mazewall.profiler.collector.EbpfCollector .u.|> io.mazewall.profiler.collecto
 io.mazewall.profiler.collector.EbpfCollector --> io.mazewall.profiler.ObservationSource
 io.mazewall.profiler.collector.EbpfCollector --> io.mazewall.profiler.EbpfLoad
 io.mazewall.profiler.collector.EbpfEventParser --> io.mazewall.profiler.collector.EbpfEventParser
+io.mazewall.profiler.collector.EbpfParseResult --> io.mazewall.profiler.ProfileObservation
 io.mazewall.profiler.collector.ObservationMerger --> io.mazewall.profiler.collector.ObservationMerger
 io.mazewall.profiler.collector.StraceCollector .u.|> io.mazewall.profiler.collector.ProfileCollector
 io.mazewall.profiler.collector.StraceCollector --> io.mazewall.profiler.TraceableWorkload

@@ -277,6 +277,68 @@ class PolicyTest {
     }
 
     @Test
+    fun `Landlock composition keeps explicit OPEN denials`() {
+        val landlock =
+            Policy
+                .builder()
+                .allowFsRead("/secret")
+                .build()
+        val denyOpen =
+            Policy
+                .builder()
+                .block(Syscall.OPEN, Syscall.OPENAT, Syscall.OPENAT2)
+                .build()
+        val combined = Policy.combine(landlock, denyOpen)
+        assertFalse(combined.isSyscallAllowed(Syscall.OPEN))
+        assertFalse(combined.isSyscallAllowed(Syscall.OPENAT))
+        assertFalse(combined.isSyscallAllowed(Syscall.OPENAT2))
+    }
+
+    @Test
+    fun `Landlock path intersection is not confused by lexicographic siblings`() {
+        val child =
+            Policy
+                .builder()
+                .allowFsRead("/foo/baz")
+                .build()
+        val parents =
+            Policy
+                .builder()
+                .allowFsRead("/foo")
+                .allowFsRead("/foo-bar")
+                .build()
+        val combined = Policy.combine(child, parents)
+        assertTrue(
+            combined.allowedFsReadPaths.any { it.value == "/foo/baz" },
+            combined.allowedFsReadPaths.toString(),
+        )
+    }
+
+    @Test
+    fun `Landlock path intersection keeps descendants past lexicographic siblings`() {
+        val parent =
+            Policy
+                .builder()
+                .allowFsRead("/foo")
+                .build()
+        val mixed =
+            Policy
+                .builder()
+                .allowFsRead("/foo-bar")
+                .allowFsRead("/foo/bar")
+                .build()
+        val combined = Policy.combine(parent, mixed)
+        assertTrue(
+            combined.allowedFsReadPaths.any { it.value == "/foo/bar" },
+            combined.allowedFsReadPaths.toString(),
+        )
+        assertTrue(
+            combined.allowedFsReadPaths.none { it.value == "/foo-bar" },
+            combined.allowedFsReadPaths.toString(),
+        )
+    }
+
+    @Test
     fun `advanced block is applied on denyList and allowList`() {
         val denied =
             Policy.denyList(RuntimeProfile.HOTSPOT_JIT) {
