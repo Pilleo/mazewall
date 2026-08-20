@@ -283,7 +283,7 @@ public data class ProfilingCoverage(
             val resolved = pathBearing.size - failed
             return when {
                 failed == 0 && !truncated -> PathResolutionQuality.RESOLVED
-                failed == pathBearing.size && !truncated -> PathResolutionQuality.FAILED
+                failed > 0 && !truncated -> PathResolutionQuality.FAILED
                 failed == 0 && truncated -> PathResolutionQuality.TRUNCATED
                 else -> PathResolutionQuality.MIXED
             }
