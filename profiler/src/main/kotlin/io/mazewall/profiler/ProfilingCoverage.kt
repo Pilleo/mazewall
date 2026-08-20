@@ -166,6 +166,13 @@ public data class ProfilingCoverage(
             if (hybridUnproven) {
                 warnings.add("HYBRID_NO_URING without evidence that io_uring was disabled")
             }
+            val unparsedConnect =
+                observations.any { obs ->
+                    obs is ProfileObservation.Syscall && obs.name.uppercase() == "CONNECT"
+                } && observations.none { it is ProfileObservation.Connect }
+            if (unparsedConnect) {
+                warnings.add("CONNECT was observed without a parsed destination")
+            }
             val complete = drainComplete && droppedEvents == 0 &&
                 ioUring != IoUringVisibility.BLIND &&
                 !(ioUring == IoUringVisibility.UNSEEN && strategy == ProfileStrategy.EBPF) &&
@@ -174,7 +181,8 @@ public data class ProfilingCoverage(
                 pathQuality != PathResolutionQuality.TRUNCATED &&
                 !openat2Uninspected &&
                 !uringOpenUninspected &&
-                !hybridUnproven
+                !hybridUnproven &&
+                !unparsedConnect
             return ProfilingCoverage(
                 strategy = strategy,
                 strategyReason = strategyReason,
@@ -234,6 +242,12 @@ public data class ProfilingCoverage(
                 op.contains("TRUNCATE")
         }
 
+        private fun expectedPathOperands(name: String): Int =
+            when (name) {
+                "RENAME", "LINK", "SYMLINK", "RENAMEAT", "RENAMEAT2", "LINKAT", "SYMLINKAT" -> 2
+                else -> 1
+            }
+
         private fun isUringPathBearing(opcode: String): Boolean {
             val op = opcode.uppercase()
             return op.contains("OPEN") ||
@@ -259,8 +273,14 @@ public data class ProfilingCoverage(
                 }
             if (pathBearing.isEmpty()) return PathResolutionQuality.NONE
             val truncated = pathBearing.any { obs -> obs.paths.any { it.length >= TRUNCATION_THRESHOLD } }
-            val resolved = pathBearing.count { it.paths.isNotEmpty() }
-            val failed = pathBearing.size - resolved
+            fun expectedOperands(obs: ProfileObservation): Int =
+                when (obs) {
+                    is ProfileObservation.Syscall -> expectedPathOperands(obs.name.uppercase())
+                    is ProfileObservation.IoUring -> 1
+                    is ProfileObservation.Connect -> 0
+                }
+            val failed = pathBearing.count { obs -> obs.paths.size < expectedOperands(obs) }
+            val resolved = pathBearing.size - failed
             return when {
                 failed == 0 && !truncated -> PathResolutionQuality.RESOLVED
                 failed == pathBearing.size && !truncated -> PathResolutionQuality.FAILED

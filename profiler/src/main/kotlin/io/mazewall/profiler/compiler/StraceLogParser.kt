@@ -13,6 +13,8 @@ import io.mazewall.profiler.ProfileObservation
 public object StraceLogParser {
     private val inet = Regex("""sin_port=htons\((\d+)\).*sin_addr=inet_addr\("([^"]+)"\)""")
     private val inetRev = Regex("""sin_addr=inet_addr\("([^"]+)"\).*sin_port=htons\((\d+)\)""")
+    private val inet6 = Regex("""sin6_port=htons\((\d+)\).*inet_pton\(AF_INET6,\s*"([^"]+)"""")
+    private val inet6Rev = Regex("""inet_pton\(AF_INET6,\s*"([^"]+)".*sin6_port=htons\((\d+)\)""")
 
     public fun parse(log: String): List<ProfileObservation> =
         log.lineSequence().mapNotNull { parseLine(it) }.toList()
@@ -75,6 +77,8 @@ public object StraceLogParser {
     private fun parseConnect(args: String): NetworkEndpoint? {
         inet.find(args)?.let { return NetworkEndpoint(it.groupValues[2], it.groupValues[1].toInt()) }
         inetRev.find(args)?.let { return NetworkEndpoint(it.groupValues[1], it.groupValues[2].toInt()) }
+        inet6.find(args)?.let { return NetworkEndpoint(it.groupValues[2], it.groupValues[1].toInt()) }
+        inet6Rev.find(args)?.let { return NetworkEndpoint(it.groupValues[1], it.groupValues[2].toInt()) }
         return null
     }
 

@@ -74,7 +74,7 @@ public class Policy<out S : PolicyScope, out State : PolicyState> internal const
      */
     public val mode: PolicyMode
         get() =
-            if (defaultAction == SeccompAction.ACT_ERRNO) {
+            if (defaultAction is SeccompAction.ACT_ERRNO || defaultAction == SeccompAction.ACT_ERRNO) {
                 PolicyMode.ALLOW_LIST
             } else {
                 PolicyMode.DENY_LIST

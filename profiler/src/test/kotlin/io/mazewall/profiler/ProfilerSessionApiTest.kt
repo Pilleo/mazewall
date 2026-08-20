@@ -48,6 +48,34 @@ class ProfilerSessionApiTest {
             """100 rename("/tmp/old", "/tmp/new") = 0""",
         ) as ProfileObservation.Syscall
         assertEquals(listOf("/tmp/old", "/tmp/new"), rename.paths)
+        val v6 = StraceLogParser.parseLine(
+            """100 connect(3, {sa_family=AF_INET6, sin6_port=htons(443), inet_pton(AF_INET6, "2001:db8::1", &sin6_addr)}, 28) = 0""",
+        )
+        assertTrue(v6 is ProfileObservation.Connect)
+        assertEquals(NetworkEndpoint("2001:db8::1", 443), (v6 as ProfileObservation.Connect).endpoint)
+    }
+
+    @Test
+    fun `partial rename path list is FAILED not RESOLVED`() {
+        val coverage = ProfilingCoverage.infer(
+            strategy = ProfileStrategy.USER_NOTIF,
+            strategyReason = "t",
+            processWide = false,
+            observations = listOf(
+                ProfileObservation.Syscall(
+                    ObservationCorrelation(1, Tid(1)),
+                    ObservationSource.USER_NOTIF,
+                    "RENAME",
+                    paths = listOf("/tmp/old"),
+                ),
+            ),
+            stacks = StackAttribution.SKIPPED,
+            droppedEvents = 0,
+            drainComplete = true,
+            environment = ProfileEnvironment("t", EbpfLoad.Denied("x")),
+        )
+        assertEquals(PathResolutionQuality.FAILED, coverage.pathResolution)
+        assertEquals(false, coverage.complete)
     }
 
     @Test

@@ -71,6 +71,7 @@ object NativeConstants {
     // Errors
     const val EPERM = 1
     const val ENOENT = 2
+    const val EACCES = 13
     const val EINTR = 4
     const val EIO = 5
     const val EBADF = 9

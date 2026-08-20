@@ -231,6 +231,13 @@ class PolicyTest {
                 allow(Syscall.READ, Syscall.WRITE)
             }
         assertEquals(PolicyMode.ALLOW_LIST, allowListed.mode)
+        val customErrno =
+            Policy
+                .builder()
+                .defaultAction(SeccompAction.ACT_ERRNO(io.mazewall.ffi.NativeConstants.EACCES))
+                .allow(Syscall.READ)
+                .build()
+        assertEquals(PolicyMode.ALLOW_LIST, customErrno.mode)
         assertEquals(SeccompAction.ACT_ERRNO, allowListed.defaultAction)
         assertTrue(allowListed.isSyscallAllowed(Syscall.READ))
         assertFalse(allowListed.isSyscallAllowed(Syscall.CONNECT))

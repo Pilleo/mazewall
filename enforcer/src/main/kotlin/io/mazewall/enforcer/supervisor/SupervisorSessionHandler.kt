@@ -554,7 +554,7 @@ internal class SupervisorSessionHandler(
         val localFd = signedErrno(
             engine.fileSystem.open(
                 pathSeg,
-                OpenFlags(NativeConstants.O_CLOEXEC),
+                OpenFlags(NativeConstants.O_PATH or NativeConstants.O_CLOEXEC),
             ),
         )
         if (localFd < 0) {
@@ -566,6 +566,7 @@ internal class SupervisorSessionHandler(
             addfd.setId(id)
             addfd.setFlags(0)
             addfd.setSrcfd(localFd)
+            addfd.setNewfdFlags(NativeConstants.O_CLOEXEC)
             val addfdRes = engine.raw.ioctl(
                 listenerFd,
                 IoctlCommand.SECCOMP_IOCTL_NOTIF_ADDFD,
@@ -678,6 +679,7 @@ internal class SupervisorSessionHandler(
             addfd.setId(id)
             addfd.setFlags(NativeConstants.SECCOMP_ADDFD_FLAG_SEND.toInt())
             addfd.setSrcfd(localFdValue)
+            addfd.setNewfdFlags(NativeConstants.O_CLOEXEC)
 
             val addfdManaged = addfd.managed
             var success = false
@@ -986,6 +988,7 @@ internal class SupervisorSessionHandler(
                                     addfd.setId(id)
                                     addfd.setFlags(NativeConstants.SECCOMP_ADDFD_FLAG_SEND.toInt())
                                     addfd.setSrcfd(clientFdSafe.fd)
+                                    addfd.setNewfdFlags(NativeConstants.O_CLOEXEC)
 
                                     val addfdManaged = addfd.managed
                                     var injectSuccess = false
