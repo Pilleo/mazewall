@@ -104,6 +104,10 @@ public object InstallationAssessor {
             reasons.add("policy has Landlock paths but landlock ABI is 0")
             stages.add(InstallationStage.LANDLOCK)
         }
+        if (processWide && landlockRequired && !matrix.landlockTsyncSupported) {
+            reasons.add("process-wide Landlock needs TSYNC (Landlock ABI 8+)")
+            stages.add(InstallationStage.LANDLOCK)
+        }
 
         if (processWide && !policy.allowMmapExec) {
             warnings.add("allowMmapExec=false on process-wide policy can fatal a JIT JVM")

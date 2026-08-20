@@ -152,12 +152,11 @@ val policy = Policy.builder()
 
         val bob = BobCompiler.compile(events)
 
-        assertTrue(bob.fsWritePaths.contains("/tmp/openat2-test.txt"), "OPENAT2 should be treated as write")
+        assertTrue(bob.opens.contains("/tmp/openat2-test.txt"), "OPENAT2 without flags is not a proven write")
         assertTrue(bob.fsWritePaths.contains("/tmp/deleted-file.txt"), "UNLINKAT should be treated as write")
         assertTrue(bob.fsWritePaths.contains("/tmp/new-subdir"), "MKDIRAT should be treated as write")
         assertTrue(bob.fsWritePaths.contains("/tmp/old-name"), "RENAMEAT2 should be treated as write")
         assertTrue(bob.fsWritePaths.contains("/tmp/new-name"), "RENAMEAT2 target should be treated as write")
-        assertTrue(bob.opens.isEmpty(), "No paths should be categorized as simple opens in this test")
     }
 
     @Test

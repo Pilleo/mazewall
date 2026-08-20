@@ -41,6 +41,81 @@ class ProfilerSessionApiTest {
     }
 
     @Test
+    fun `OPENAT2 without flags is read-classified and incomplete`() {
+        val corr = ObservationCorrelation(1, Tid(1))
+        val readOnly =
+            ProfileObservation.Syscall(
+                corr,
+                ObservationSource.USER_NOTIF,
+                "OPENAT2",
+                paths = listOf("/tmp/ro"),
+                openFlags = 0L,
+            )
+        val unknown =
+            ProfileObservation.Syscall(
+                corr,
+                ObservationSource.USER_NOTIF,
+                "OPENAT2",
+                paths = listOf("/tmp/x"),
+                openFlags = null,
+            )
+        val readBob = BobCompiler.compileObservations(listOf(readOnly))
+        assertEquals(setOf("/tmp/ro"), readBob.opens)
+        assertTrue(readBob.fsWritePaths.isEmpty())
+        val coverage = ProfilingCoverage.infer(
+            strategy = ProfileStrategy.USER_NOTIF,
+            strategyReason = "t",
+            processWide = false,
+            observations = listOf(unknown),
+            stacks = StackAttribution.SKIPPED,
+            droppedEvents = 0,
+            drainComplete = true,
+            environment = ProfileEnvironment("t", EbpfLoad.Denied("x")),
+        )
+        assertEquals(false, coverage.complete)
+    }
+
+    @Test
+    fun `retainStricterPathResolution keeps FAILED over NONE`() {
+        val failed = ProfilingCoverage.infer(
+            strategy = ProfileStrategy.USER_NOTIF,
+            strategyReason = "raw",
+            processWide = false,
+            observations = listOf(
+                ProfileObservation.Syscall(
+                    ObservationCorrelation(1, Tid(1)),
+                    ObservationSource.USER_NOTIF,
+                    "OPENAT",
+                    paths = emptyList(),
+                ),
+            ),
+            stacks = StackAttribution.SKIPPED,
+            droppedEvents = 0,
+            drainComplete = true,
+            environment = ProfileEnvironment("t", EbpfLoad.Denied("x")),
+        )
+        val rebuilt = ProfilingCoverage.infer(
+            strategy = ProfileStrategy.USER_NOTIF,
+            strategyReason = "synthetic",
+            processWide = false,
+            observations = listOf(
+                ProfileObservation.Syscall(
+                    ObservationCorrelation(1, Tid(1)),
+                    ObservationSource.USER_NOTIF,
+                    "OPENAT",
+                ),
+            ),
+            stacks = StackAttribution.SKIPPED,
+            droppedEvents = failed.droppedEvents,
+            drainComplete = failed.drainComplete,
+            environment = ProfileEnvironment("t", EbpfLoad.Denied("x")),
+        )
+        val kept = rebuilt.retainStricterPathResolution(failed)
+        assertEquals(PathResolutionQuality.FAILED, kept.pathResolution)
+        assertEquals(false, kept.complete)
+    }
+
+    @Test
     fun `toPolicy without coverage is incomplete`() {
         val bob = BillOfBehavior(syscalls = setOf(Syscall.OPENAT))
         assertFailsWith<IncompleteProfileException> { bob.toPolicy() }

@@ -61,7 +61,39 @@ public data class ProfilingCoverage(
     val complete: Boolean,
     val warnings: List<String> = emptyList(),
 ) {
+    internal fun retainStricterPathResolution(prior: ProfilingCoverage): ProfilingCoverage {
+        val kept = worsePath(pathResolution, prior.pathResolution)
+        if (kept == pathResolution) return this
+        val extra =
+            if (kept == PathResolutionQuality.FAILED ||
+                kept == PathResolutionQuality.MIXED ||
+                kept == PathResolutionQuality.TRUNCATED
+            ) {
+                listOf("prior USER_NOTIF path resolution was $kept")
+            } else {
+                emptyList()
+            }
+        return copy(
+            pathResolution = kept,
+            complete = complete && kept != PathResolutionQuality.FAILED &&
+                kept != PathResolutionQuality.MIXED &&
+                kept != PathResolutionQuality.TRUNCATED,
+            warnings = warnings + extra,
+        )
+    }
+
     public companion object {
+        private fun worsePath(a: PathResolutionQuality, b: PathResolutionQuality): PathResolutionQuality {
+            val order =
+                listOf(
+                    PathResolutionQuality.NONE,
+                    PathResolutionQuality.RESOLVED,
+                    PathResolutionQuality.TRUNCATED,
+                    PathResolutionQuality.MIXED,
+                    PathResolutionQuality.FAILED,
+                )
+            return if (order.indexOf(b) > order.indexOf(a)) b else a
+        }
         /** Used when [io.mazewall.profiler.BillOfBehavior.toPolicy] is called without coverage. */
         public fun absent(): ProfilingCoverage =
             ProfilingCoverage(
@@ -110,12 +142,23 @@ public data class ProfilingCoverage(
             ) {
                 warnings.add("one or more path-bearing events did not fully resolve a path")
             }
+            val openat2Uninspected =
+                observations.any { obs ->
+                    obs is ProfileObservation.Syscall &&
+                        obs.name.uppercase() == "OPENAT2" &&
+                        obs.paths.isNotEmpty() &&
+                        obs.openFlags == null
+                }
+            if (openat2Uninspected) {
+                warnings.add("OPENAT2 flags were not observed; do not treat paths as a complete write profile")
+            }
             val complete = drainComplete && droppedEvents == 0 &&
                 ioUring != IoUringVisibility.BLIND &&
                 !(ioUring == IoUringVisibility.UNSEEN && strategy == ProfileStrategy.EBPF) &&
                 pathQuality != PathResolutionQuality.FAILED &&
                 pathQuality != PathResolutionQuality.MIXED &&
-                pathQuality != PathResolutionQuality.TRUNCATED
+                pathQuality != PathResolutionQuality.TRUNCATED &&
+                !openat2Uninspected
             return ProfilingCoverage(
                 strategy = strategy,
                 strategyReason = strategyReason,

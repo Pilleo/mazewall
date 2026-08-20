@@ -59,6 +59,26 @@ class InstallationAssessmentTest {
     }
 
     @Test
+    fun `process-wide Landlock is blocked without TSYNC`() {
+        Platform.setProvider(
+            MockPlatformProvider().apply {
+                mockOsName = "Linux"
+                mockKernelSeccompSupport = true
+                mockLandlockAbiVersion = 5
+            },
+        )
+        val policy =
+            Policy
+                .builder()
+                .allowFsRead("/tmp")
+                .build()
+        val assessment = InstallationAssessor.assess(policy.definition, processWide = true)
+        assertTrue(assessment.landlockRequired)
+        assertFalse(assessment.installable)
+        assertTrue(assessment.blockedStages.contains(InstallationStage.LANDLOCK))
+    }
+
+    @Test
     fun `notify policy is blocked without USER_NOTIF`() {
         Platform.setProvider(
             MockPlatformProvider().apply {

@@ -29,6 +29,7 @@ data class ProfilingResult<T>(
         environment = ProfileEnvironment("unknown", EbpfLoad.Denied("unprobed")),
         complete = false,
     ),
+    val observations: List<ProfileObservation> = emptyList(),
 ) {
     fun toPolicy(
         base: io.mazewall.Policy<*, io.mazewall.Uncompiled> = io.mazewall.Policy.PURE_COMPUTE_UNSAFE,

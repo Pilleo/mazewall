@@ -71,8 +71,7 @@ object BobCompiler {
 
         when {
             name == "EXECVE" || name == "EXECVEAT" -> execs.addAll(obs.paths)
-            name == "OPENAT2" -> fsWritePaths.addAll(obs.paths)
-            name == "OPEN" || name == "OPENAT" -> {
+            name == "OPEN" || name == "OPENAT" || name == "OPENAT2" -> {
                 if (isOpenWrite(obs.openFlags ?: 0L)) {
                     fsWritePaths.addAll(obs.paths)
                 } else {

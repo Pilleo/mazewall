@@ -143,7 +143,7 @@ object Profiler {
                 ebpfLoad = EbpfCapability.probe(),
             ),
         )
-        return ProfilingResult(blockResult.get() as T, bob, localStackProfile, coverage)
+        return ProfilingResult(blockResult.get() as T, bob, localStackProfile, coverage, observations)
     }
 
     /**

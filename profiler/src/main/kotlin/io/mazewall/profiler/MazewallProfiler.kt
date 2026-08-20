@@ -60,8 +60,8 @@ public class MazewallProfiler private constructor(
             drainComplete = false,
             environment = environment,
         )
-        val result = ProfilingResult(value, bob, emptyMap(), coverage)
-        lastSnapshot = ProfilingResult(Unit, bob, emptyMap(), coverage)
+        val result = ProfilingResult(value, bob, emptyMap(), coverage, drain.observations)
+        lastSnapshot = ProfilingResult(Unit, bob, emptyMap(), coverage, drain.observations)
         return result
     }
 
@@ -76,7 +76,12 @@ public class MazewallProfiler private constructor(
     }
 
     private fun <T> attachCoverage(raw: ProfilingResult<T>): ProfilingResult<T> {
-        val fromUser = inferObservationsFromBob(raw.behavior, raw.stackProfile.keys)
+        val fromUser =
+            if (raw.observations.isNotEmpty()) {
+                raw.observations
+            } else {
+                inferObservationsFromBob(raw.behavior, raw.stackProfile.keys)
+            }
         val drains = mutableListOf(
             CollectorDrain(
                 observations = fromUser,
@@ -93,7 +98,7 @@ public class MazewallProfiler private constructor(
             merged.observations.filter { it.source == ObservationSource.EBPF },
         )
         val behavior = raw.behavior + extraBob
-        val coverage = ProfilingCoverage.infer(
+        val inferred = ProfilingCoverage.infer(
             strategy = if (options.strategy == ProfileStrategy.HYBRID_NO_URING) {
                 ProfileStrategy.HYBRID_NO_URING
             } else {
@@ -107,7 +112,8 @@ public class MazewallProfiler private constructor(
             drainComplete = merged.drainComplete,
             environment = environment,
         )
-        val result = raw.copy(behavior = behavior, coverage = coverage)
+        val coverage = inferred.retainStricterPathResolution(raw.coverage)
+        val result = raw.copy(behavior = behavior, coverage = coverage, observations = merged.observations)
         lastSnapshot = ProfilingResult(Unit, result.behavior, result.stackProfile, coverage)
         return result
     }
