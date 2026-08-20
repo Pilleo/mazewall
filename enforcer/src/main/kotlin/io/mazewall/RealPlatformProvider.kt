@@ -109,7 +109,9 @@ internal object RealPlatformProvider : PlatformProvider {
         }
 
         // Check kernel support via arch_prctl
-        return cpuSupported && Platform.isKernelCetSupported()
+        // Also respect the override if set (for testing)
+        return (cpuSupported && Platform.isKernelCetSupported()) ||
+               (Platform.isCpuCetSupportedOverride ?: false)
     }
 
     /**
