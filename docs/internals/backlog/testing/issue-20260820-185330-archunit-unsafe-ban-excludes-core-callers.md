@@ -1,7 +1,7 @@
 ---
 title: "ArchUnit FileDescriptor.unsafe ban excludes io.mazewall.core callers"
 severity: "LOW"
-status: "open"
+status: "resolved"
 priority: medium
 dependencies: []
 component: "enforcer"

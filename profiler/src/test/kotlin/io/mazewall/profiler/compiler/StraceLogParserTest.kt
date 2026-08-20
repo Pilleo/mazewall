@@ -128,4 +128,26 @@ class StraceLogParserTest {
         assertEquals("OPENAT", syscall.name)
         assertEquals(listOf("/etc/passwd"), syscall.paths)
     }
+
+    @Test
+    fun `rename with single quoted string extracts first path`() {
+        val line = "12345 rename(\"/old\", 0x7ffd42a3b4d0) = 0"
+        val result = StraceLogParser.parseLine(line)
+        
+        assert(result is ProfileObservation.Syscall)
+        val syscall = result as ProfileObservation.Syscall
+        assertEquals("RENAME", syscall.name)
+        assertEquals(listOf("/old"), syscall.paths)
+    }
+
+    @Test
+    fun `linkat with single quoted string extracts first path`() {
+        val line = "12345 linkat(AT_FDCWD, \"/source\", AT_FDCWD, 0x7ffd42a3b4d0) = 0"
+        val result = StraceLogParser.parseLine(line)
+        
+        assert(result is ProfileObservation.Syscall)
+        val syscall = result as ProfileObservation.Syscall
+        assertEquals("LINKAT", syscall.name)
+        assertEquals(listOf("/source"), syscall.paths)
+    }
 }

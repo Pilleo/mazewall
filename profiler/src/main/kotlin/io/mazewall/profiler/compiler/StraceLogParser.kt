@@ -115,9 +115,11 @@ public object StraceLogParser {
 
             // Two-path: first and second quoted strings are paths
             in twoPathSyscalls -> {
-                if (matches.size >= 2) {
+                if (matches.isNotEmpty()) {
                     allPaths.add(matches[0])
-                    allPaths.add(matches[1])
+                    if (matches.size >= 2) {
+                        allPaths.add(matches[1])
+                    }
                 }
             }
 
@@ -128,9 +130,11 @@ public object StraceLogParser {
 
             // *at syscalls: matches[0] and matches[1] are the two paths
             in secondAndThirdAtSyscalls -> {
-                if (matches.size >= 2) {
+                if (matches.isNotEmpty()) {
                     allPaths.add(matches[0])
-                    allPaths.add(matches[1])
+                    if (matches.size >= 2) {
+                        allPaths.add(matches[1])
+                    }
                 }
             }
 

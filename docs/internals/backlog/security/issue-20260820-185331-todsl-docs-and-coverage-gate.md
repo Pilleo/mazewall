@@ -1,7 +1,7 @@
 ---
 title: "toDsl fail-closed gate is not reflected in docs, demos, or coverage.complete"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "profiler"

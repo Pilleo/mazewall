@@ -379,7 +379,7 @@ object ContainedExecutors {
     }
 
     private fun armIntelCet() {
-        if (!Platform.isLinux || !Platform.isArchitectureSupported() || io.mazewall.core.Arch.current() != io.mazewall.core.Arch.AMD64 || !Platform.isCpuCetSupported()) {
+        if (!Platform.isLinux || !Platform.isArchitectureSupported() || io.mazewall.core.Arch.current() != io.mazewall.core.Arch.AMD64 || !Platform.featureMatrix.cetSupported) {
             handleCetUnsupported("Intel CET is requested but the current platform/architecture/CPU does not support it.")
             return
         }

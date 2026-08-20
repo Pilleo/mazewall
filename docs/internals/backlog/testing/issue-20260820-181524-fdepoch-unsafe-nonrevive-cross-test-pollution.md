@@ -1,7 +1,7 @@
 ---
 title: "FileDescriptor.unsafe non-revival plus process-wide FdEpoch can poison sibling tests"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: medium
 dependencies: []
 component: "enforcer"

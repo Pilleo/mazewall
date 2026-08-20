@@ -936,7 +936,7 @@ internal class SupervisorSessionHandler(
 
                                 val acceptRes =
                                     engine.networking.accept4(
-                                        FileDescriptor.adopt<FileDescriptorRole.Generic>(dupFdSafe.fd),
+                                        FileDescriptor.adopt(dupFdSafe.fd, FileDescriptorRole.Generic),
                                         localAddr,
                                         localAddrLen,
                                         flags

@@ -97,7 +97,9 @@ val result = Profiler.profile {
     myXmlParser.parse(untrustedInput)   // run it under observation
 }
 
-println(result.behavior.toDsl())
+// toDsl() throws if exec/connect destinations were observed but cannot be enforced.
+// Pass allowIncomplete=true if you cannot enforce all destinations (e.g., dynamic exec).
+println(result.behavior.toDsl(allowIncomplete = true))
 // Output:
 // Policy.builder()
 //     .base(Policy.NO_NETWORK)

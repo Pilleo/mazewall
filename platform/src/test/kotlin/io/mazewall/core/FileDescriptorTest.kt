@@ -155,7 +155,7 @@ class FileDescriptorTest {
         val dupResult = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(94L)
             .claimDupIfNeeded(io.mazewall.ffi.NativeConstants.F_DUPFD)
         assertTrue(dupResult is LinuxNative.SyscallResult.Success)
-        val dup = FileDescriptor.adopt<FileDescriptorRole.Generic>(94)
+        val dup = FileDescriptor.adopt(94, FileDescriptorRole.Generic)
         assertTrue(dup.isLiveForIo())
         source.close()
         assertTrue(dup.isLiveForIo())
@@ -178,7 +178,7 @@ class FileDescriptorTest {
     fun `SCM_RIGHTS adopt after close is a new generation`() {
         val leftover = FileDescriptor.seccompNotif(96)
         leftover.close()
-        val received = FileDescriptor.adopt<FileDescriptorRole.SeccompNotif>(96)
+        val received = FileDescriptor.adopt(96, FileDescriptorRole.SeccompNotif)
         assertTrue(received.isLiveForIo())
         assertFalse(leftover.isLiveForIo())
         received.close()

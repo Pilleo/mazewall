@@ -1,7 +1,7 @@
 ---
 title: "CET support is probed twice: provider matrix vs Platform.isCpuCetSupported"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: medium
 dependencies: []
 component: "enforcer"

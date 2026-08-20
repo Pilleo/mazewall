@@ -87,9 +87,29 @@ internal object RealPlatformProvider : PlatformProvider {
     override fun probeSeccompUserNotif(): Boolean = probeSeccompFlag(NativeConstants.SECCOMP_FILTER_FLAG_NEW_LISTENER)
 
     override fun probeCetSupported(): Boolean {
-        // Delegate to Platform.isCpuCetSupported() which checks both CPU flags (via /proc/cpuinfo)
-        // and kernel support (via ARCH_SHSTK_STATUS arch_prctl)
-        return Platform.isCpuCetSupported()
+        // Check CPU flags via /proc/cpuinfo for CET support (shstk or ibt)
+        val cpuSupported = try {
+            val file = java.io.File("/proc/cpuinfo")
+            if (file.exists()) {
+                file.useLines { lines ->
+                    lines.any { line ->
+                        line.startsWith("flags") && (
+                            line.contains("shstk", ignoreCase = true) ||
+                            line.contains("ibt", ignoreCase = true)
+                        )
+                    }
+                }
+            } else {
+                false
+            }
+        } catch (e: java.io.IOException) {
+            false
+        } catch (e: SecurityException) {
+            false
+        }
+
+        // Check kernel support via arch_prctl
+        return cpuSupported && Platform.isKernelCetSupported()
     }
 
     /**

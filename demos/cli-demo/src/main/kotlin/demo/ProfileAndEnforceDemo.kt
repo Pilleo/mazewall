@@ -145,7 +145,9 @@ fun runProfileAndEnforce() {
         // PHASE 2: Code Generation (BoB DSL)
         // ------------------------------------------------------------
         println("\n\u001b[33;1m[PHASE 2] Generated Bill of Behavior (BoB) DSL:\u001b[0m")
-        val dsl = bob.toDsl("Policy.PURE_COMPUTE_UNSAFE", Policy.PURE_COMPUTE_UNSAFE)
+        // Note: toDsl() throws if exec/connect destinations were observed but cannot be enforced.
+        // This demo workload doesn't have exec/connect, but if it did, pass allowIncomplete=true.
+        val dsl = bob.toDsl("Policy.PURE_COMPUTE_UNSAFE", Policy.PURE_COMPUTE_UNSAFE, allowIncomplete = true)
         println("\u001b[34m$dsl\u001b[0m")
 
         // Always save the compiled Bill of Behavior (SBoB) JSON containing captured stack traces

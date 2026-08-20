@@ -19,7 +19,9 @@ val result = Profiler.profile {
 }
 
 // 2. Print the generated policy DSL
-println(result.behavior.toDsl())
+// Note: toDsl() throws if exec/connect destinations were observed but cannot be enforced.
+// Pass allowIncomplete=true if you cannot enforce all destinations.
+println(result.behavior.toDsl(allowIncomplete = true))
 ```
 
 **Output:**

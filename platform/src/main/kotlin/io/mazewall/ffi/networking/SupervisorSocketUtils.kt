@@ -161,7 +161,7 @@ public object SupervisorSocketUtils {
                     val cmsgLevel = cmsg.getCmsgLevel()
                     val cmsgType = cmsg.getCmsgType()
                     if (cmsgLen >= CMSG_RIGHTS_LEN && cmsgLevel == SOL_SOCKET && cmsgType == SCM_RIGHTS) {
-                        return@use FileDescriptor.adopt<FileDescriptorRole.SeccompNotif>(cmsg.getDataFd())
+                        return@use FileDescriptor.adopt(cmsg.getDataFd(), FileDescriptorRole.SeccompNotif)
                     }
                 } else {
                     val errno = (res as LinuxNative.SyscallResult.Error).errno

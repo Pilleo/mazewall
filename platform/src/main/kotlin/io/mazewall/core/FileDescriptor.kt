@@ -309,12 +309,12 @@ public class FileDescriptor<out R : FileDescriptorRole, out S : FdState> interna
          * Always creates a new generation, even if [value] was previously retired.
          * Leftover Open tokens from the old generation stay dead.
          */
-        @Suppress("UNCHECKED_CAST")
         public fun <R : FileDescriptorRole> adopt(
             value: Int,
+            role: R,
             arena: NativeArena? = null,
         ): FileDescriptor<R, FdState.Open> =
-            open<FileDescriptorRole.Generic>(value, arena, FileDescriptorRole.Generic) as FileDescriptor<R, FdState.Open>
+            open(value, arena, role)
 
         /**
          * Kernel replaced this integer (dup2, SECCOMP_ADDFD SETFD).

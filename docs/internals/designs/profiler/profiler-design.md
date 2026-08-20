@@ -301,7 +301,7 @@ internal fun assertSafeCoordination(blocked: Set<Syscall>) {
 
 ## 4. Policy DSL Compilation Example
 
-At the end of a profiling run, raw observations are converted into a `BillOfBehavior`. Calling `bill.toDsl("Policy.PURE_COMPUTE_UNSAFE")` compiles the bill and produces a clean, copy-pasteable Kotlin DSL code snippet:
+At the end of a profiling run, raw observations are converted into a `BillOfBehavior`. Calling `bill.toDsl("Policy.PURE_COMPUTE_UNSAFE")` compiles the bill and produces a clean, copy-pasteable Kotlin DSL code snippet. Note: `toDsl()` throws if exec/connect destinations were observed but cannot be enforced; pass `allowIncomplete=true` if you cannot enforce all destinations.
 
 ```kotlin
 // Automatically compiled and emitted by BillOfBehavior.toDsl():

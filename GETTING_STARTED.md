@@ -228,7 +228,9 @@ io.mazewall.ContainmentViolationException: Containment violation detected: block
    val result = Profiler.profile {
        // Run the code that failed here
    }
-   println(result.behavior.toDsl()) // Prints the exact Policy builder code needed!
+   // toDsl() throws if exec/connect destinations were observed but cannot be enforced.
+   // Pass allowIncomplete=true if you cannot enforce all destinations (e.g., dynamic exec).
+   println(result.behavior.toDsl(allowIncomplete = true)) // Prints the exact Policy builder code needed!
    ```
 
 ---

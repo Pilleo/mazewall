@@ -560,15 +560,20 @@ class ArchitectureTest {
     fun fileDescriptorUnsafeMustNotBeUsedInProduction(allClasses: com.tngtech.archunit.core.domain.JavaClasses) {
         noClasses()
             .that()
-            .resideOutsideOfPackages("..test..", "io.mazewall.core..")
+            .resideOutsideOfPackages("..test..")
             .should()
             .callMethodWhere(object : DescribedPredicate<JavaMethodCall>("calls to FileDescriptor.unsafe or unsafe\$default") {
                 override fun test(input: JavaMethodCall): Boolean {
                     val ownerName = input.target.owner.name
                     val methodName = input.target.name
-                    return (ownerName == "io.mazewall.core.FileDescriptor\$Companion" ||
+                    val isUnsafeCall = (ownerName == "io.mazewall.core.FileDescriptor\$Companion" ||
                             ownerName == "io.mazewall.core.FileDescriptor") &&
                            (methodName == "unsafe" || methodName == "unsafe\$default")
+                    
+                    // Exclude internal synthetic calls from Companion itself (unsafe$default -> unsafe)
+                    val isCompanionInternalCall = input.origin.owner.name == "io.mazewall.core.FileDescriptor\$Companion"
+                    
+                    return isUnsafeCall && !isCompanionInternalCall
                 }
             })
             .because("Use role-specific factories (generic, unixSocket, ruleset, oPath, seccompNotif, pid) or adopt() for kernel-reused FDs. " +

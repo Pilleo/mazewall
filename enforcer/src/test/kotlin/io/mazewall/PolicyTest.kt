@@ -437,4 +437,34 @@ class PolicyTest {
         val combined = Policy.combine(p1, p2)
         assertFalse(combined.isSyscallAllowed(Syscall.IO_URING_SETUP), "combined policy should block io_uring_setup because open is restricted overall and Landlock is not active")
     }
+
+    @Test
+    fun `hasSupervisedSyscalls is true when defaultAction is ACT_NOTIFY`() {
+        val policy = Policy.builder()
+            .defaultAction(SeccompAction.ACT_NOTIFY)
+            .build()
+        assertTrue(policy.definition.hasSupervisedSyscalls, "hasSupervisedSyscalls should be true when defaultAction is ACT_NOTIFY")
+    }
+
+    @Test
+    fun `hasSupervisedSyscalls is false when defaultAction is ACT_ALLOW`() {
+        val policy = Policy.builder()
+            .defaultAction(SeccompAction.ACT_ALLOW)
+            .build()
+        assertFalse(policy.definition.hasSupervisedSyscalls, "hasSupervisedSyscalls should be false when defaultAction is ACT_ALLOW and no syscalls use ACT_NOTIFY")
+    }
+
+    @Test
+    fun `enforceLandlock is true when Landlock paths are specified`() {
+        val policy = Policy.builder()
+            .allowFsRead("/tmp")
+            .build()
+        assertTrue(policy.enforceLandlock, "enforceLandlock should be true when Landlock paths are specified")
+    }
+
+    @Test
+    fun `enforceLandlock is false when no Landlock paths are specified`() {
+        val emptyPolicy = Policy.builder().build()
+        assertFalse(emptyPolicy.enforceLandlock, "enforceLandlock should be false when no Landlock paths are specified")
+    }
 }
