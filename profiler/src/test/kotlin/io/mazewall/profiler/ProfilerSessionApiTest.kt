@@ -33,6 +33,17 @@ class ProfilerSessionApiTest {
         assertTrue(fromStrace.syscalls.contains(Syscall.OPENAT))
         assertEquals(setOf(NetworkEndpoint("127.0.0.1", 80)), fromStrace.connects)
         assertTrue(fromEvents.syscalls.contains(Syscall.CONNECT))
+        val bind = StraceLogParser.parseLine(
+            """100 bind(3, {sa_family=AF_INET, sin_port=htons(80), sin_addr=inet_addr("127.0.0.1")}, 16) = 0""",
+        )
+        assertTrue(bind is ProfileObservation.Syscall)
+        assertEquals("BIND", (bind as ProfileObservation.Syscall).name)
+    }
+
+    @Test
+    fun `toPolicy without coverage is incomplete`() {
+        val bob = BillOfBehavior(syscalls = setOf(Syscall.OPENAT))
+        assertFailsWith<IncompleteProfileException> { bob.toPolicy() }
     }
 
     @Test

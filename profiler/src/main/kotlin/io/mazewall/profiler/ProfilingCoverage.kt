@@ -62,6 +62,22 @@ public data class ProfilingCoverage(
     val warnings: List<String> = emptyList(),
 ) {
     public companion object {
+        /** Used when [io.mazewall.profiler.BillOfBehavior.toPolicy] is called without coverage. */
+        public fun absent(): ProfilingCoverage =
+            ProfilingCoverage(
+                strategy = ProfileStrategy.USER_NOTIF,
+                strategyReason = "toPolicy() invoked without ProfilingCoverage",
+                processWide = false,
+                ioUring = IoUringVisibility.UNSEEN,
+                pathResolution = PathResolutionQuality.NONE,
+                stacks = StackAttribution.SKIPPED,
+                droppedEvents = 0,
+                drainComplete = false,
+                environment = ProfileEnvironment("unknown", EbpfLoad.Denied("unprobed")),
+                complete = false,
+                warnings = listOf("coverage was not supplied"),
+            )
+
         public fun infer(
             strategy: ProfileStrategy,
             strategyReason: String,

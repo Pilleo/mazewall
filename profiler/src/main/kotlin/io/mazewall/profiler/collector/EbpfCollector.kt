@@ -40,13 +40,18 @@ public class EbpfCollector(
 
     override fun drain(): CollectorDrain {
         check(started) { "EbpfCollector.start() was not called" }
-        val observations = EbpfEventParser.parse(Files.readString(recordedLog!!))
-        val ioUring = if (observations.any { it is io.mazewall.profiler.ProfileObservation.IoUring }) {
+        val parsed = EbpfEventParser.parse(Files.readString(recordedLog!!))
+        val ioUring = if (parsed.observations.any { it is io.mazewall.profiler.ProfileObservation.IoUring }) {
             IoUringVisibility.OBSERVED
         } else {
             IoUringVisibility.UNSEEN
         }
-        return CollectorDrain(observations, droppedEvents = 0, drainComplete = true, ioUring = ioUring)
+        return CollectorDrain(
+            parsed.observations,
+            droppedEvents = parsed.droppedLines,
+            drainComplete = true,
+            ioUring = ioUring,
+        )
     }
 
     override fun close() {

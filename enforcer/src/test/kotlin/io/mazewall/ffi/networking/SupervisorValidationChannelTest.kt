@@ -8,6 +8,7 @@ import io.mazewall.core.FileDescriptorRole
 import io.mazewall.core.FdState
 import io.mazewall.ffi.Layouts
 import io.mazewall.ffi.memory.SupervisorResponseSegment
+import io.mazewall.ffi.memory.readByte
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
@@ -65,6 +66,29 @@ class SupervisorValidationChannelTest {
         assertEquals(13, capturedErrorNr)
 
         // Clean up
+        channel.close()
+    }
+
+    @Test
+    fun `sendExecRewriteAck writes the ack byte fully`() {
+        var writtenCount: Long? = null
+        var ack: Byte? = null
+        val mockMemory = object : MockNativeMemory() {
+            override fun write(
+                fd: FileDescriptor<*, FdState.Open>,
+                buf: io.mazewall.ffi.memory.ManagedSegment,
+                count: Long,
+            ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                writtenCount = count
+                ack = buf.readByte(0)
+                return LinuxNative.SyscallResult.Success(count)
+            }
+        }
+        LinuxNative.setEngine(object : MockNativeEngine(memory = mockMemory) {})
+        val channel = SupervisorValidationChannel(FileDescriptor.unsafe(7))
+        channel.sendExecRewriteAck(true)
+        assertEquals(1L, writtenCount)
+        assertEquals(1.toByte(), ack)
         channel.close()
     }
 }

@@ -66,7 +66,7 @@ public class SupervisorValidationChannel(
     public fun sendExecRewriteAck(ok: Boolean) {
         val ack = with(arena) { allocate(1) }
         ack.writeByte(0, if (ok) 1.toByte() else 0.toByte())
-        LinuxNative.memory.write(socketFd, ack, 1)
+        writeFully(ack, 1)
     }
 
     override fun close() {

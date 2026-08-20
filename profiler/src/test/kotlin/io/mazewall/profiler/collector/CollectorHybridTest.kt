@@ -28,10 +28,11 @@ class CollectorHybridTest {
             kind=connect tid=8 host=127.0.0.1 port=443
         """.trimIndent()
         val obs = EbpfEventParser.parse(log)
-        assertEquals(3, obs.size)
-        assertTrue(obs[0] is ProfileObservation.IoUring)
-        assertEquals("IO_URING_ENTER", (obs[1] as ProfileObservation.Syscall).name)
-        assertEquals(NetworkEndpoint("127.0.0.1", 443), (obs[2] as ProfileObservation.Connect).endpoint)
+        assertEquals(3, obs.observations.size)
+        assertEquals(0, obs.droppedLines)
+        assertTrue(obs.observations[0] is ProfileObservation.IoUring)
+        assertEquals("IO_URING_ENTER", (obs.observations[1] as ProfileObservation.Syscall).name)
+        assertEquals(NetworkEndpoint("127.0.0.1", 443), (obs.observations[2] as ProfileObservation.Connect).endpoint)
     }
 
     @Test
@@ -41,6 +42,20 @@ class CollectorHybridTest {
                 """kind=syscall tid=3 name=OPENAT path="/tmp/My File" """,
             ) as ProfileObservation.Syscall
         assertEquals(listOf("/tmp/My File"), obs.paths)
+    }
+
+    @Test
+    fun `malformed eBPF lines increment droppedLines`() {
+        val parsed =
+            EbpfEventParser.parse(
+                """
+                kind=uring tid=1 opcode=IORING_OP_OPENAT path=/tmp/a
+                kind=garbage tid=1
+                not-a-field-line
+                """.trimIndent(),
+            )
+        assertEquals(1, parsed.observations.size)
+        assertEquals(2, parsed.droppedLines)
     }
 
     @Test
@@ -69,7 +84,8 @@ class CollectorHybridTest {
             assertEquals("ok", result.value)
             assertTrue(result.behavior.opens.contains("/tmp/sidecar"))
             assertEquals(IoUringVisibility.OBSERVED, result.coverage.ioUring)
-            assertEquals(true, result.coverage.complete)
+            assertEquals(false, result.coverage.complete)
+            assertFailsWith<IncompleteProfileException> { result.toPolicy() }
         }
     }
 

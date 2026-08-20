@@ -31,8 +31,10 @@ public object StraceLogParser {
         val corr = ObservationCorrelation(tgid = pid, tid = Tid(pid))
         val args = cleaned.substringAfter("(", "")
 
-        parseConnect(args)?.let { endpoint ->
-            return ProfileObservation.Connect(corr, ObservationSource.STRACE, endpoint)
+        if (syscallName == "CONNECT") {
+            parseConnect(args)?.let { endpoint ->
+                return ProfileObservation.Connect(corr, ObservationSource.STRACE, endpoint)
+            }
         }
 
         val path = extractQuotedPath(args)

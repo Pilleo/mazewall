@@ -49,8 +49,9 @@ data class BillOfBehavior(
         coverage: ProfilingCoverage? = null,
         allowIncomplete: Boolean = false,
     ): Policy<PolicyScope.ThreadLocalOnly, Uncompiled> {
-        if (coverage != null && !coverage.complete && !allowIncomplete) {
-            throw IncompleteProfileException(coverage)
+        val evidence = coverage ?: ProfilingCoverage.absent()
+        if (!evidence.complete && !allowIncomplete) {
+            throw IncompleteProfileException(evidence)
         }
         @Suppress("UNCHECKED_CAST")
         val builder = Policy.threadLocalBuilder().base(base as Policy<PolicyScope.ThreadLocalOnly, *>)

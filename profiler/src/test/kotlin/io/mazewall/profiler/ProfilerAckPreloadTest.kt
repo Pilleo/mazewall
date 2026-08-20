@@ -13,5 +13,6 @@ class ProfilerAckPreloadTest {
         }
         assertTrue(ProfilerAckPreload.requiredBinaryNames.any { it.endsWith("ProfilingResult") })
         assertTrue(ProfilerAckPreload.requiredBinaryNames.any { it.contains("TraceListenerState") })
+        assertTrue(ProfilerAckPreload.requiredBinaryNames.any { it.endsWith("TraceEvent\$Open") || it.endsWith("TraceEvent.Open") })
     }
 }

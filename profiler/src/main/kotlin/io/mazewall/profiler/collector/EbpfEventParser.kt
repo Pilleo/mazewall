@@ -15,9 +15,23 @@ import io.mazewall.profiler.ProfileObservation
  * Example:
  * `kind=uring tid=12 tgid=10 ktime=99 opcode=IORING_OP_OPENAT path=/tmp/x`
  */
+public data class EbpfParseResult(
+    val observations: List<ProfileObservation>,
+    val droppedLines: Int,
+)
+
 public object EbpfEventParser {
-    public fun parse(log: String): List<ProfileObservation> =
-        log.lineSequence().mapNotNull { parseLine(it) }.toList()
+    public fun parse(log: String): EbpfParseResult {
+        val observations = mutableListOf<ProfileObservation>()
+        var dropped = 0
+        for (raw in log.lineSequence()) {
+            val trimmed = raw.trim()
+            if (trimmed.isEmpty() || trimmed.startsWith("#")) continue
+            val obs = parseLine(trimmed)
+            if (obs == null) dropped++ else observations.add(obs)
+        }
+        return EbpfParseResult(observations, dropped)
+    }
 
     public fun parseLine(line: String): ProfileObservation? {
         val trimmed = line.trim()

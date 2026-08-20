@@ -9,9 +9,9 @@ import io.mazewall.profiler.engine.TraceEvent
  * @param behavior Everything the profiler observed during the run.
  * @param stackProfile Map of events to their captured stack traces.
  *
- * To compile a policy: result.behavior.toPolicy(Policy.PURE_COMPUTE_UNSAFE)
+ * To compile a policy: result.toPolicy() (refuses incomplete coverage)
  * To get DSL:          result.behavior.toDsl("Policy.PURE_COMPUTE_UNSAFE")
- * To merge runs:       (run1.behavior + run2.behavior).toPolicy(...)
+ * To merge runs:       (run1.behavior + run2.behavior).toPolicy(..., coverage, allowIncomplete)
  */
 data class ProfilingResult<T>(
     val value: T,

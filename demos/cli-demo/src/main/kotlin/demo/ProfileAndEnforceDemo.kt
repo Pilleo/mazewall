@@ -174,7 +174,8 @@ fun runProfileAndEnforce() {
         // and to verify the complementary sandboxing even when container seccomp profiles block it.
         // In addition, we stack the new JVM-level Supervisor Proxy to audit and authorize OPEN/OPENAT
         // syscalls based on the calling thread's active stack trace context!
-        val baseForEnforcement = bob.toPolicy(Policy.PURE_COMPUTE_UNSAFE)
+        val baseForEnforcement =
+            profilingResult.toPolicy(Policy.PURE_COMPUTE_UNSAFE, allowIncomplete = true)
         val compiledPolicy =
             Policy
                 .threadLocalBuilder()

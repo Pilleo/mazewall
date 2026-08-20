@@ -47,17 +47,17 @@ public class MazewallProfiler private constructor(
     }
 
     private fun <T> profileEbpfOnly(block: () -> T): ProfilingResult<T> {
-        val drain = drainEbpf(liveIfMissing = true)
         val value = block()
+        val drain = drainEbpf(liveIfMissing = true)
         val bob = BobCompiler.compileObservations(drain.observations)
         val coverage = ProfilingCoverage.infer(
             strategy = ProfileStrategy.EBPF,
-            strategyReason = reason,
+            strategyReason = "$reason; recorded log is not contemporaneous with the profiled lambda",
             processWide = options.processWide,
             observations = drain.observations,
             stacks = StackAttribution.SKIPPED,
             droppedEvents = drain.droppedEvents,
-            drainComplete = drain.drainComplete,
+            drainComplete = false,
             environment = environment,
         )
         val result = ProfilingResult(value, bob, emptyMap(), coverage)
@@ -77,7 +77,14 @@ public class MazewallProfiler private constructor(
 
     private fun <T> attachCoverage(raw: ProfilingResult<T>): ProfilingResult<T> {
         val fromUser = inferObservationsFromBob(raw.behavior, raw.stackProfile.keys)
-        val drains = mutableListOf(CollectorDrain(fromUser))
+        val drains = mutableListOf(
+            CollectorDrain(
+                observations = fromUser,
+                droppedEvents = raw.coverage.droppedEvents,
+                drainComplete = raw.coverage.drainComplete,
+                ioUring = raw.coverage.ioUring,
+            ),
+        )
         if (options.ebpfEventLog != null) {
             drains.add(drainEbpf(liveIfMissing = false))
         }

@@ -39,7 +39,7 @@ class BobCompilerTest {
         val bob = BobCompiler.compile(events)
 
         // Transpile to Policy
-        val policy = bob.toPolicy(Policy.PURE_COMPUTE_UNSAFE)
+        val policy = bob.toPolicy(Policy.PURE_COMPUTE_UNSAFE, allowIncomplete = true)
 
         // Verify unrestricted syscalls
         // PURE_COMPUTE blocks CONNECT, OPEN, OPENAT. They should be unrestricted now.
@@ -78,7 +78,7 @@ val policy = Policy.threadLocalBuilder()
     @Test
     fun `test empty events returns unmodified base policy`() {
         val bob = BobCompiler.compile(emptyList())
-        val policy = bob.toPolicy(Policy.PURE_COMPUTE_UNSAFE)
+        val policy = bob.toPolicy(Policy.PURE_COMPUTE_UNSAFE, allowIncomplete = true)
 
         assertFalse(policy.isSyscallAllowed(Syscall.CONNECT))
         assertFalse(policy.isSyscallAllowed(Syscall.MKDIR))
