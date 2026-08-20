@@ -86,6 +86,12 @@ internal object RealPlatformProvider : PlatformProvider {
 
     override fun probeSeccompUserNotif(): Boolean = probeSeccompFlag(NativeConstants.SECCOMP_FILTER_FLAG_NEW_LISTENER)
 
+    override fun probeCetSupported(): Boolean {
+        // Delegate to Platform.isCpuCetSupported() which checks both CPU flags (via /proc/cpuinfo)
+        // and kernel support (via ARCH_SHSTK_STATUS arch_prctl)
+        return Platform.isCpuCetSupported()
+    }
+
     /**
      * Probes for a seccomp flag by performing a dry-run call with a NULL pointer.
      * If the kernel recognizes the flag, it returns EFAULT (Bad Address) because it

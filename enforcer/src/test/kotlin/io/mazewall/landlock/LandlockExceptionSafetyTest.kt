@@ -33,6 +33,7 @@ class LandlockExceptionSafetyTest {
         override fun getLandlockAbiVersion(): Int = 5
         override fun probeSeccompTsync(): Boolean = true
         override fun probeSeccompUserNotif(): Boolean = true
+        override fun probeCetSupported(): Boolean = false
         override fun isContainer(): Boolean = false
     }
 

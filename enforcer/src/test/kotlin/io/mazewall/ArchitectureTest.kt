@@ -8,6 +8,7 @@ import com.tngtech.archunit.junit.ArchTest
 import com.tngtech.archunit.lang.syntax.ArchRuleDefinition.classes
 import com.tngtech.archunit.lang.syntax.ArchRuleDefinition.methods
 import com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses
+import io.mazewall.core.FileDescriptor
 import io.mazewall.enforcer.supervisor.StacktraceScopingPolicy
 
 @AnalyzeClasses(packages = ["io.mazewall"], importOptions = [ImportOption.DoNotIncludeTests::class])
@@ -552,6 +553,26 @@ class ArchitectureTest {
                 "USER_NOTIF protocol types are cross-module internals, not operator API. " +
                     "Call Policy / ContainedExecutors instead.",
             )
+            .check(allClasses)
+    }
+
+    @ArchTest
+    fun fileDescriptorUnsafeMustNotBeUsedInProduction(allClasses: com.tngtech.archunit.core.domain.JavaClasses) {
+        noClasses()
+            .that()
+            .resideOutsideOfPackages("..test..", "io.mazewall.core..")
+            .should()
+            .callMethodWhere(object : DescribedPredicate<JavaMethodCall>("calls to FileDescriptor.unsafe or unsafe\$default") {
+                override fun test(input: JavaMethodCall): Boolean {
+                    val ownerName = input.target.owner.name
+                    val methodName = input.target.name
+                    return (ownerName == "io.mazewall.core.FileDescriptor\$Companion" ||
+                            ownerName == "io.mazewall.core.FileDescriptor") &&
+                           (methodName == "unsafe" || methodName == "unsafe\$default")
+                }
+            })
+            .because("Use role-specific factories (generic, unixSocket, ruleset, oPath, seccompNotif, pid) or adopt() for kernel-reused FDs. " +
+                    "unsafe() creates non-live tokens for retired FDs.")
             .check(allClasses)
     }
 }

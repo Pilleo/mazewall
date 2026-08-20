@@ -91,4 +91,27 @@ class SupervisorValidationChannelTest {
         assertEquals(1.toByte(), ack)
         channel.close()
     }
+
+    @Test
+    fun `sendExecRewriteAck(false) writes 0`() {
+        var writtenCount: Long? = null
+        var ack: Byte? = null
+        val mockMemory = object : MockNativeMemory() {
+            override fun write(
+                fd: FileDescriptor<*, FdState.Open>,
+                buf: io.mazewall.ffi.memory.ManagedSegment,
+                count: Long,
+            ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                writtenCount = count
+                ack = buf.readByte(0)
+                return LinuxNative.SyscallResult.Success(count)
+            }
+        }
+        LinuxNative.setEngine(object : MockNativeEngine(memory = mockMemory) {})
+        val channel = SupervisorValidationChannel(FileDescriptor.unsafe(7))
+        channel.sendExecRewriteAck(false)
+        assertEquals(1L, writtenCount)
+        assertEquals(0.toByte(), ack)
+        channel.close()
+    }
 }

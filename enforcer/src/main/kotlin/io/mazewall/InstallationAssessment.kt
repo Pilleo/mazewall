@@ -16,6 +16,7 @@ public enum class InstallationStage {
     TSYNC,
     USER_NOTIF,
     LANDLOCK,
+    INTEL_CET,
 }
 
 public class InstallationRejectedException(
@@ -107,6 +108,11 @@ public object InstallationAssessor {
         if (processWide && landlockRequired && !matrix.landlockTsyncSupported) {
             reasons.add("process-wide Landlock needs TSYNC (Landlock ABI 8+)")
             stages.add(InstallationStage.LANDLOCK)
+        }
+
+        if (policy.lockIntelCet && !matrix.cetSupported) {
+            reasons.add("lockIntelCet is true but Intel CET is not supported on this platform")
+            stages.add(InstallationStage.INTEL_CET)
         }
 
         if (processWide && !policy.allowMmapExec) {

@@ -94,6 +94,7 @@ enum "InstallationStage" as io.mazewall.InstallationStage {
   TSYNC
   USER_NOTIF
   LANDLOCK
+  INTEL_CET
 }
 class "KernelFeatureMatrix" as io.mazewall.KernelFeatureMatrix {
   ..
@@ -103,6 +104,7 @@ class "KernelFeatureMatrix" as io.mazewall.KernelFeatureMatrix {
   +boolean getSeccompTsyncSupported()
   +boolean getSeccompUserNotifSupported()
   +int getLandlockAbiVersion()
+  +boolean getCetSupported()
   +boolean getLandlockTsyncSupported()
   +boolean getLandlockSupported()
 }
@@ -203,6 +205,7 @@ interface "PlatformProvider" as io.mazewall.PlatformProvider {
   + {abstract}int getLandlockAbiVersion()
   + {abstract}boolean probeSeccompTsync()
   + {abstract}boolean probeSeccompUserNotif()
+  + {abstract}boolean probeCetSupported()
   + {abstract}boolean isContainer()
 }
 class "Policy" as io.mazewall.Policy<S extends PolicyScope, State extends PolicyState> {
@@ -362,6 +365,7 @@ class "RealPlatformProvider" as io.mazewall.RealPlatformProvider {
   +int getLandlockAbiVersion()
   +boolean probeSeccompTsync()
   +boolean probeSeccompUserNotif()
+  +boolean probeCetSupported()
   +boolean isContainer()
 }
 enum "RuntimeProfile" as io.mazewall.RuntimeProfile {

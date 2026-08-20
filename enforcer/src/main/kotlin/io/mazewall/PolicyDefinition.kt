@@ -39,7 +39,9 @@ public data class PolicyDefinition<out S : PolicyScope>(
     public val customViolationPhrases: List<String> = emptyList(),
     public val customViolationRegexes: List<Regex> = emptyList()
 ) {
-    public val hasSupervisedSyscalls: Boolean get() = syscallActions.values.any { it == SeccompAction.ACT_NOTIFY }
+    public val hasSupervisedSyscalls: Boolean get() =
+        syscallActions.values.any { it == SeccompAction.ACT_NOTIFY } ||
+            defaultAction == SeccompAction.ACT_NOTIFY
 
     public val argumentRules: PolicyArgumentRules get() = PolicyArgumentRules.of(this)
     /** Returns true if the given [syscall] is unconditionally allowed by this policy. */

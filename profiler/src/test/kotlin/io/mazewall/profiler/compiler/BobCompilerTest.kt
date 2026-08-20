@@ -218,6 +218,12 @@ val policy = Policy.builder()
             "CHOWN",
             "LCHOWN",
             "FCHOWNAT",
+            "CREAT",
+            "TRUNCATE",
+            "FTRUNCATE",
+            "UTIME",
+            "UTIMES",
+            "UTIMENSAT",
         )
 
         val events = mutations.map {

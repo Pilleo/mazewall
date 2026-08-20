@@ -16,6 +16,29 @@ public object StraceLogParser {
     private val inet6 = Regex("""sin6_port=htons\((\d+)\).*inet_pton\(AF_INET6,\s*"([^"]+)"""")
     private val inet6Rev = Regex("""inet_pton\(AF_INET6,\s*"([^"]+)".*sin6_port=htons\((\d+)\)""")
 
+    // Syscall name sets for path extraction (uppercase as parseLine produces)
+    private val firstOnlySyscalls = setOf(
+        "OPEN", "CREAT", "UNLINK", "RMDIR", "MKDIR", "CHDIR", "CHROOT",
+        "ACCESS", "STAT", "LSTAT", "NEWFSTATAT", "FSTATAT",
+        "CHMOD", "CHOWN", "LCHOWN", "TRUNCATE",
+        "UTIME", "UTIMES", "FCHMOD", "FCHOWN", "FSTAT",
+        "READLINK", "EXECVE", "EXECVEAT",
+        "OPENAT", "OPENAT2",
+    )
+
+    private val twoPathSyscalls = setOf(
+        "LINK", "SYMLINK", "RENAME",
+    )
+
+    private val firstPathAtSyscalls = setOf(
+        "UNLINKAT", "MKDIRAT", "FACCESSAT", "FACCESSAT2",
+        "FCHMODAT", "FCHOWNAT", "READLINKAT", "UTIMENSAT",
+    )
+
+    private val secondAndThirdAtSyscalls = setOf(
+        "SYMLINKAT", "LINKAT", "RENAMEAT", "RENAMEAT2"
+    )
+
     public fun parse(log: String): List<ProfileObservation> =
         log.lineSequence().mapNotNull { parseLine(it) }.toList()
 
@@ -39,7 +62,7 @@ public object StraceLogParser {
             }
         }
 
-        val paths = if (isPathBearing(syscallName)) extractQuotedPaths(args) else emptyList()
+        val paths = if (isPathBearing(syscallName)) extractQuotedPaths(syscallName, args) else emptyList()
         val flags = if (isOpen(syscallName)) straceOpenFlags(args) else null
         return ProfileObservation.Syscall(
             correlation = corr,
@@ -53,17 +76,10 @@ public object StraceLogParser {
     private fun isOpen(name: String): Boolean = name == "OPEN" || name == "OPENAT" || name == "OPENAT2"
 
     private fun isPathBearing(name: String): Boolean =
-        name in
-            setOf(
-                "OPEN", "OPENAT", "OPENAT2", "EXECVE", "EXECVEAT",
-                "UNLINK", "UNLINKAT", "RENAME", "RENAMEAT", "RENAMEAT2",
-                "MKDIR", "MKDIRAT", "RMDIR", "LINK", "LINKAT",
-                "SYMLINK", "SYMLINKAT", "CHDIR", "TRUNCATE",
-                "ACCESS", "FACCESSAT", "FACCESSAT2", "STAT", "NEWFSTATAT", "FSTATAT",
-                "CREAT", "CHMOD", "FCHMODAT", "CHOWN", "LCHOWN", "FCHOWNAT",
-                "READLINK", "READLINKAT", "CHROOT", "UTIME", "UTIMES", "UTIMENSAT",
-                "FCHMOD", "FCHOWN", "FSTAT",
-            )
+        name in firstOnlySyscalls ||
+        name in twoPathSyscalls ||
+        name in firstPathAtSyscalls ||
+        name in secondAndThirdAtSyscalls
 
     private fun straceOpenFlags(args: String): Long {
         var flags = 0L
@@ -82,6 +98,48 @@ public object StraceLogParser {
         return null
     }
 
-    private fun extractQuotedPaths(args: String): List<String> =
-        "\"(.*?)\"".toRegex().findAll(args).map { it.groupValues[1] }.toList()
+    /**
+     * Extracts only the syscall pathname operands from strace args.
+     * Not all quoted strings are paths - e.g., execve argv entries or readlink buffers.
+     * Syscall names are uppercase (from parseLine).
+     */
+    private fun extractQuotedPaths(syscallName: String, args: String): List<String> {
+        val allPaths = mutableListOf<String>()
+        val matches = "\"(.*?)\"" .toRegex().findAll(args).map { it.groupValues[1] }.toList()
+
+        when (syscallName) {
+            // First-only: only the first quoted string is a path
+            in firstOnlySyscalls -> {
+                if (matches.isNotEmpty()) allPaths.add(matches[0])
+            }
+
+            // Two-path: first and second quoted strings are paths
+            in twoPathSyscalls -> {
+                if (matches.size >= 2) {
+                    allPaths.add(matches[0])
+                    allPaths.add(matches[1])
+                }
+            }
+
+            // *at syscalls where first quoted string is the path (dirfd is numeric, not quoted)
+            in firstPathAtSyscalls -> {
+                if (matches.isNotEmpty()) allPaths.add(matches[0])
+            }
+
+            // *at syscalls: matches[0] and matches[1] are the two paths
+            in secondAndThirdAtSyscalls -> {
+                if (matches.size >= 2) {
+                    allPaths.add(matches[0])
+                    allPaths.add(matches[1])
+                }
+            }
+
+            else -> {
+                // Unknown path-bearing syscall: fail closed - no paths
+                // This should not happen as isPathBearing checks the known sets
+            }
+        }
+
+        return allPaths
+    }
 }

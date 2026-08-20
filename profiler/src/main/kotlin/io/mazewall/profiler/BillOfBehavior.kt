@@ -62,6 +62,18 @@ data class BillOfBehavior(
                 throw IncompleteProfileException(withConnects)
             }
         }
+        if (execs.isNotEmpty()) {
+            val withExecs =
+                evidence.copy(
+                    complete = false,
+                    warnings = evidence.warnings +
+                        "exec destinations were observed but cannot be enforced; " +
+                            "toPolicy() only unblocks EXECVE",
+                )
+            if (!allowIncomplete) {
+                throw IncompleteProfileException(withExecs)
+            }
+        }
         if (!evidence.complete && !allowIncomplete) {
             throw IncompleteProfileException(evidence)
         }
@@ -88,7 +100,28 @@ data class BillOfBehavior(
         basePolicyName: String = "Policy.PURE_COMPUTE_UNSAFE",
         base: Policy<*, Uncompiled> = Policy.PURE_COMPUTE_UNSAFE,
         baseCwd: Path? = null,
+        allowIncomplete: Boolean = false,
     ): String {
+        // Gate: same as toPolicy() - fail closed on observed execs/connects unless explicitly allowed
+        if (connects.isNotEmpty() && !allowIncomplete) {
+            throw IncompleteProfileException(
+                ProfilingCoverage.absent().copy(
+                    complete = false,
+                    warnings = listOf("connect destinations were observed but cannot be enforced; " +
+                            "toDsl() only unblocks SOCKET/CONNECT")
+                )
+            )
+        }
+        if (execs.isNotEmpty() && !allowIncomplete) {
+            throw IncompleteProfileException(
+                ProfilingCoverage.absent().copy(
+                    complete = false,
+                    warnings = listOf("exec destinations were observed but cannot be enforced; " +
+                            "toDsl() only unblocks EXECVE")
+                )
+            )
+        }
+
         val sb = StringBuilder()
         val pOpens = PathNormalizer.normalizeAndPrune(opens, baseCwd)
         val pWrites = PathNormalizer.normalizeAndPrune(fsWritePaths, baseCwd)
@@ -112,6 +145,17 @@ data class BillOfBehavior(
         }
         for (path in pOpens.sorted()) sb.append("    .allowFsRead(\"$path\")\n")
         for (path in pWrites.sorted()) sb.append("    .allowFsWrite(\"$path\")\n")
+
+        // Emit warning comment if incomplete coverage is allowed
+        if (allowIncomplete && (execs.isNotEmpty() || connects.isNotEmpty())) {
+            sb.append("    // WARNING: destinations not enforced - ")
+            val warnings = mutableListOf<String>()
+            if (execs.isNotEmpty()) warnings.add("exec")
+            if (connects.isNotEmpty()) warnings.add("connect")
+            sb.append(warnings.joinToString(", "))
+            sb.append(" destinations were observed but cannot be enforced\n")
+        }
+
         sb.append("    .build()")
         return sb.toString()
     }

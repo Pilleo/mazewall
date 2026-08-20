@@ -786,7 +786,7 @@ internal class SupervisorSessionHandler(
 
         val connectErr = {
             val res = engine.networking.connect(
-                FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(socketRes),
+                FileDescriptor.unixSocket(socketRes),
                 addr,
                 sockaddrBytes.size
             )
@@ -936,7 +936,7 @@ internal class SupervisorSessionHandler(
 
                                 val acceptRes =
                                     engine.networking.accept4(
-                                        FileDescriptor.unsafe<FileDescriptorRole.Generic>(dupFdSafe.fd),
+                                        FileDescriptor.adopt<FileDescriptorRole.Generic>(dupFdSafe.fd),
                                         localAddr,
                                         localAddrLen,
                                         flags

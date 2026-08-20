@@ -4,12 +4,14 @@ import io.mazewall.LinuxNative
 import io.mazewall.ffi.memory.writeInt
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.parallel.Isolated
 
+@Isolated
 class FileDescriptorTest {
 
     @Test
     fun `test FileDescriptor creation and close`() {
-        val fd = FileDescriptor.unsafe<FileDescriptorRole.Generic>(100)
+        val fd = FileDescriptor.generic(100)
         assertEquals(100, fd.value)
 
         val closed = fd.close()
@@ -36,15 +38,15 @@ class FileDescriptorTest {
 
     @Test
     fun `test file descriptor basic properties`() {
-        val fd1 = FileDescriptor.unsafe<FileDescriptorRole.Generic>(10)
-        val fd2 = FileDescriptor.unsafe<FileDescriptorRole.Generic>(10)
-        val fd3 = FileDescriptor.unsafe<FileDescriptorRole.Generic>(11)
+        val fd1 = FileDescriptor.generic(200)
+        val fd2 = FileDescriptor.generic(200)
+        val fd3 = FileDescriptor.generic(201)
 
         assertEquals(fd1, fd2)
         assertNotEquals(fd1, fd3)
         assertEquals(fd1.hashCode(), fd2.hashCode())
 
-        assertTrue(fd1.toString().contains("fd(10)"))
+        assertTrue(fd1.toString().contains("fd(200)"))
     }
 
     @Test
@@ -57,17 +59,17 @@ class FileDescriptorTest {
 
     @Test
     fun `open descriptors can be passed as NativeArg FdArg`() {
-        val fd = FileDescriptor.unsafe<FileDescriptorRole.Generic>(7)
+        val fd = FileDescriptor.generic(101)
         val arg = NativeArg.FdArg(fd)
-        assertEquals(7L, arg.asLong)
+        assertEquals(101L, arg.asLong)
         // NativeArg.FdArg(fd.close()) does not compile: FdArg requires FdState.Open.
     }
 
     @Test
     fun `test use extension function`() {
-        val fd = FileDescriptor.unsafe<FileDescriptorRole.Generic>(50)
+        val fd = FileDescriptor.generic(102)
         val result = fd.use { openFd ->
-            assertEquals(50, openFd.value)
+            assertEquals(102, openFd.value)
             "some-result"
         }
         assertEquals("some-result", result)
@@ -193,6 +195,38 @@ class FileDescriptorTest {
             assertNotNull(denied)
             assertEquals(io.mazewall.ffi.NativeConstants.EBADF, (denied as io.mazewall.LinuxNative.SyscallResult.Error).errno)
         }
+    }
+
+    @Test
+    fun `unsafe on retired fd stays dead`() {
+        val fd = FileDescriptor.generic(98)
+        fd.close()
+        // unsafe on a retired fd should NOT revive it
+        val unsafeFd = FileDescriptor.unsafe<FileDescriptorRole.Generic>(98)
+        assertFalse(unsafeFd.isLiveForIo())
+        assertTrue(unsafeFd.isInvalid)
+    }
+
+    @Test
+    fun `same integer double close does not revive`() {
+        val fd1 = FileDescriptor.generic(99)
+        val closed1 = fd1.close()
+        assertFalse(fd1.isValid)
+        assertFalse(closed1.isValid)
+        
+        // Create a new FD with the same integer - should be a new generation
+        val fd2 = FileDescriptor.generic(99)
+        assertTrue(fd2.isValid)
+        assertNotEquals(fd1, fd2)
+        
+        // Close the second one
+        val closed2 = fd2.close()
+        assertFalse(fd2.isValid)
+        assertFalse(closed2.isValid)
+        
+        // The first closed token should still be invalid
+        assertFalse(fd1.isValid)
+        assertFalse(closed1.isValid)
     }
 
     @Test

@@ -30,7 +30,7 @@ class JvmFloorProfilingTest : BaseIntegrationTest() {
         assert(result.coverage.strategy == ProfileStrategy.STRACE)
 
         println("\n=== GENERATED JVM FLOOR BILL OF BEHAVIOR ===")
-        println(bob.toDsl(baseCwd = java.nio.file.Paths.get("").toAbsolutePath()))
+        println(bob.toDsl(baseCwd = java.nio.file.Paths.get("").toAbsolutePath(), allowIncomplete = true))
         println("============================================")
 
         // Basic assertions to ensure we captured the essentials

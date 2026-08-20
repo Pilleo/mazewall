@@ -73,7 +73,7 @@ public object SupervisorInstaller {
                 onFilterApplied = onFilterApplied
             ) { socketFd, readyLatch ->
                 val listener = JVMValidationListener(
-                    FileDescriptor.unsafe(socketFd),
+                    FileDescriptor.unixSocket(socketFd),
                     scopingPolicy
                 )
                 listener.start(readyLatch)
@@ -251,7 +251,7 @@ internal class JVMValidationListener(
         channel: SupervisorValidationChannel,
     ) {
         try {
-            val injectedFd = dis.readLong().toInt()
+            dis.readLong()
             dis.readLong()
             dis.readLong()
             dis.readLong()
@@ -259,8 +259,9 @@ internal class JVMValidationListener(
             dis.readLong()
             // Do not ptrace a task blocked in USER_NOTIF (deadlocks). CONTINUE uses the
             // original execve pathname; the parent-supplied path was opened and ADDFD'd
-            // for identity. Register rewrite is issue-20260817-033800.
-            channel.sendExecRewriteAck(injectedFd >= 0)
+            // for identity. Register rewrite is not yet implemented (issue-20260817-033800),
+            // so always deny exec rewrite requests.
+            channel.sendExecRewriteAck(false)
         } catch (e: Exception) {
             logger.warning("parent exec register rewrite failed: ${e.message}")
             try {

@@ -32,7 +32,7 @@ public object RealSocketManager : SocketManager {
             io.mazewall.ffi.networking.SupervisorSocketUtils.AF_UNIX,
             io.mazewall.ffi.networking.SupervisorSocketUtils.SOCK_STREAM or io.mazewall.ffi.NativeConstants.SOCK_CLOEXEC,
             0
-        ).getFdOrThrow("socket(AF_UNIX)").let { FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(it.value) }
+        ).getFdOrThrow("socket(AF_UNIX)").let { FileDescriptor.unixSocket(it.value) }
 
         io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
             val sockaddrUn = io.mazewall.ffi.networking.SupervisorSocketUtils.setupSockAddrUn(arena, socketPath)
@@ -59,12 +59,12 @@ public object RealSocketManager : SocketManager {
             ManagedSegment.NULL,
             io.mazewall.ffi.NativeConstants.SOCK_CLOEXEC
         )
-        return res.getFdOrThrow("accept").let { FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(it.value) }
+        return res.getFdOrThrow("accept").let { FileDescriptor.adopt<FileDescriptorRole.UnixSocket>(it.value) }
     }
 
     override fun connect(socketPath: String): FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open> {
         val fdVal = io.mazewall.ffi.networking.SupervisorSocketUtils.connectWithRetry(socketPath)
-        return FileDescriptor.unsafe(fdVal)
+        return FileDescriptor.adopt<FileDescriptorRole.UnixSocket>(fdVal)
     }
 
     override fun close(fd: FileDescriptor<*, FdState.Open>) {

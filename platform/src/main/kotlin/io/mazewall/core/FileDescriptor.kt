@@ -237,18 +237,36 @@ public class FileDescriptor<out R : FileDescriptorRole, out S : FdState> interna
 
         /**
          * Unsafely creates a [FileDescriptor] from a raw integer.
+         * Does NOT claim the FD in the epoch - for retired FDs, creates a non-live token.
          * Prefer the role-specific factories ([generic], [unixSocket], [ruleset], [oPath], [seccompNotif]).
+         *
+         * WARNING: This method will NOT revive retired file descriptors. For kernel-reused
+         * integers from dup/accept/SCM_RIGHTS, use [adopt] or [replace] instead.
          *
          * @param value The raw Linux file descriptor integer.
          * @param arena Optional arena bound to this descriptor's native lifetime.
          * @return A type-safe [FileDescriptor] in the [FdState.Open] state.
          */
+        @Deprecated(
+            message = "Use role-specific factories (generic, unixSocket, ruleset, oPath, seccompNotif, pid) or adopt() for kernel-reused FDs. " +
+                      "This method creates non-live tokens for retired FDs and should not be used in production code.",
+            level = DeprecationLevel.WARNING
+        )
         @Suppress("UNCHECKED_CAST")
         public fun <R : FileDescriptorRole> unsafe(
             value: Int,
             arena: NativeArena? = null,
-        ): FileDescriptor<R, FdState.Open> =
-            open<FileDescriptorRole.Generic>(value, arena, FileDescriptorRole.Generic) as FileDescriptor<R, FdState.Open>
+        ): FileDescriptor<R, FdState.Open> {
+            if (value >= 0 && FdEpoch.isRetired(value)) {
+                // Retired FD: mint a non-live token (generation 0, closed)
+                // This prevents leftover Open tokens from operating on reused integers
+                return FileDescriptor<FileDescriptorRole.Generic, FdState.Open>(
+                    FdLifecycle(value, arena, 0L, FileDescriptorRole.Generic, closed = true),
+                ) as FileDescriptor<R, FdState.Open>
+            }
+            // Non-retired or negative: delegate to open which will claim a new generation
+            return open<FileDescriptorRole.Generic>(value, arena, FileDescriptorRole.Generic) as FileDescriptor<R, FdState.Open>
+        }
 
         public fun generic(
             value: Int,
@@ -288,17 +306,21 @@ public class FileDescriptor<out R : FileDescriptorRole, out S : FdState> interna
 
         /**
          * Adopts a newly allocated kernel fd (open, accept, dup, SCM_RIGHTS).
-         * If [value] was retired, this is a new generation; leftover tokens stay dead.
+         * Always creates a new generation, even if [value] was previously retired.
+         * Leftover Open tokens from the old generation stay dead.
          */
+        @Suppress("UNCHECKED_CAST")
         public fun <R : FileDescriptorRole> adopt(
             value: Int,
             arena: NativeArena? = null,
-        ): FileDescriptor<R, FdState.Open> = unsafe(value, arena)
+        ): FileDescriptor<R, FdState.Open> =
+            open<FileDescriptorRole.Generic>(value, arena, FileDescriptorRole.Generic) as FileDescriptor<R, FdState.Open>
 
         /**
          * Kernel replaced this integer (dup2, SECCOMP_ADDFD SETFD).
-         * Any leftover generation is retired first.
+         * Any leftover generation is retired first, then a new generation is claimed.
          */
+        @Suppress("UNCHECKED_CAST")
         public fun <R : FileDescriptorRole> replace(
             value: Int,
             arena: NativeArena? = null,
@@ -306,7 +328,8 @@ public class FileDescriptor<out R : FileDescriptorRole, out S : FdState> interna
             if (value >= 0) {
                 FdEpoch.forceRetire(value)
             }
-            return unsafe(value, arena)
+            // Claim a new generation for the replaced FD
+            return open<FileDescriptorRole.Generic>(value, arena, FileDescriptorRole.Generic) as FileDescriptor<R, FdState.Open>
         }
 
         @Suppress("UNCHECKED_CAST")

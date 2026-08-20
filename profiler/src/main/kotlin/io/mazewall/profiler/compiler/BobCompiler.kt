@@ -80,13 +80,7 @@ object BobCompiler {
             }
             isFileSystemMutation(name) -> fsWritePaths.addAll(obs.paths)
             name == "SOCKET" || name == "CONNECT" || name == "MMAP" -> { }
-            else -> {
-                if (isFileSystemMutation(name)) {
-                    fsWritePaths.addAll(obs.paths)
-                } else {
-                    opens.addAll(obs.paths)
-                }
-            }
+            else -> opens.addAll(obs.paths)
         }
     }
 
@@ -123,6 +117,12 @@ object BobCompiler {
                 "CHOWN",
                 "LCHOWN",
                 "FCHOWNAT",
+                "CREAT",
+                "TRUNCATE",
+                "FTRUNCATE",
+                "UTIME",
+                "UTIMES",
+                "UTIMENSAT",
             )
 
     private fun isOpenWrite(flags: Long): Boolean {

@@ -186,7 +186,7 @@ object Profiler {
             processWide = processWide,
             startTraceListener = { fd, logs, traces, cache, readyLatch ->
                 val listener = ProfilerTraceListener(
-                    FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(fd),
+                    FileDescriptor.unixSocket(fd),
                     logs,
                     traces,
                     cache

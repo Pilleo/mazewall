@@ -345,14 +345,12 @@ object ContainedExecutors {
     }
 
     /**
-     * Landlock is required if there are allowed filesystem paths to enforce.
+     * Landlock is required if the policy enforces Landlock (regardless of whether paths are empty).
      * Note: We no longer implicitly trigger Landlock for io_uring_setup bypass prevention here.
      * Instead, if Landlock is not enforced (empty paths) and a policy restricts open/openat but allows io_uring_setup,
      * PolicyBuilder/PolicyDefinition automatically blocks io_uring_setup in seccomp.
      */
-    private fun needsLandlock(policy: PolicyDefinition<*>) =
-        policy.allowedFsReadPaths.isNotEmpty() ||
-            policy.allowedFsWritePaths.isNotEmpty()
+    private fun needsLandlock(policy: PolicyDefinition<*>) = policy.enforceLandlock
 
     private fun isPathSubset(
         parentPaths: Set<SandboxedPath>,

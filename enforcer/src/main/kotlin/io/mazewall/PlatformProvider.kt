@@ -56,6 +56,12 @@ public interface PlatformProvider {
      */
     fun probeSeccompUserNotif(): Boolean
 
+    /**
+     * Probes for Intel CET Shadow Stack support.
+     * Should return true if the CPU and kernel support Intel CET.
+     */
+    fun probeCetSupported(): Boolean
+
     /** Returns true if the process appears to be running inside a container (Docker/K8s/Podman). */
     fun isContainer(): Boolean
 }

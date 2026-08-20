@@ -290,12 +290,43 @@ class BillOfBehaviorTest {
     }
 
     @Test
+    fun `toPolicy should throw on observed execs without allowIncomplete`() {
+        val bob = BillOfBehavior(execs = setOf("/usr/bin/bash"))
+        assertFailsWith<IncompleteProfileException> {
+            bob.toPolicy()
+        }
+    }
+
+    @Test
     fun `toPolicy should throw on relative paths when baseCwd is missing`() {
         val bob = BillOfBehavior(opens = setOf("config/settings.json"))
 
         assertFailsWith<IllegalArgumentException> {
             bob.toPolicy(allowIncomplete = true)
         }
+    }
+
+    @Test
+    fun `toDsl should throw on observed execs without allowIncomplete`() {
+        val bob = BillOfBehavior(execs = setOf("/usr/bin/bash"))
+        assertFailsWith<IncompleteProfileException> {
+            bob.toDsl()
+        }
+    }
+
+    @Test
+    fun `toDsl should throw on observed connects without allowIncomplete`() {
+        val bob = BillOfBehavior(connects = setOf(NetworkEndpoint("127.0.0.1", 8080)))
+        assertFailsWith<IncompleteProfileException> {
+            bob.toDsl()
+        }
+    }
+
+    @Test
+    fun `toDsl should emit destinations not enforced comment when allowIncomplete is true`() {
+        val bob = BillOfBehavior(execs = setOf("/usr/bin/bash"))
+        val dsl = bob.toDsl(allowIncomplete = true)
+        assertTrue(dsl.contains("// WARNING: destinations not enforced - exec"))
     }
 
     @Test
