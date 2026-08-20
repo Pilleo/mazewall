@@ -74,10 +74,12 @@ internal class ProfilerTraceListener(
     var state: TraceListenerState = TraceListenerState.Disconnected
         private set
 
-    /** True only after the listener loop sees EOF (daemon closed the stream). */
+    /** True only after EOF that follows a locally initiated pass-through/shutdown. */
     @Volatile
     var drainComplete: Boolean = false
         private set
+
+    private val gracefulDrainRequested = java.util.concurrent.atomic.AtomicBoolean(false)
 
     companion object {
         private const val DEDUPLICATION_WINDOW_MS = 500L
@@ -158,6 +160,7 @@ internal class ProfilerTraceListener(
         if (!closed.compareAndSet(false, true)) return
 
         logger.fine("Closing ProfilerTraceListener for fd=${socketFd.value}")
+        gracefulDrainRequested.set(true)
 
         try {
             // Step 1: Signal the daemon to finish up. The daemon receives this byte,
@@ -217,6 +220,7 @@ internal class ProfilerTraceListener(
         if (!closed.compareAndSet(false, true)) return
 
         logger.fine("Entering Pass-Through mode for ProfilerTraceListener fd=${socketFd.value}")
+        gracefulDrainRequested.set(true)
 
         try {
             sendCommand(PASS_THROUGH_COMMAND_BYTE)
@@ -296,8 +300,10 @@ internal class ProfilerTraceListener(
                     readNextEvent(dis)
                 } catch (e: java.io.EOFException) {
                     System.err.println("[TRACE-LISTENER-DEBUG] EOFException, closing loop")
-                    drainComplete = true
-                    break // Graceful shutdown or socket closed
+                    if (gracefulDrainRequested.get()) {
+                        drainComplete = true
+                    }
+                    break
                 } catch (e: java.io.IOException) {
                     if (closed.get()) {
                         logger.log(java.util.logging.Level.FINE, "Trace listener loop interrupted by close", e)

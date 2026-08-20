@@ -38,6 +38,12 @@ class ProfilerSessionApiTest {
         )
         assertTrue(bind is ProfileObservation.Syscall)
         assertEquals("BIND", (bind as ProfileObservation.Syscall).name)
+        val sendto = StraceLogParser.parseLine(
+            """100 sendto(3, "payload", 7, 0, {sa_family=AF_INET, sin_port=htons(80), sin_addr=inet_addr("127.0.0.1")}, 16) = 7""",
+        )
+        assertTrue(sendto is ProfileObservation.Syscall)
+        assertEquals("SENDTO", (sendto as ProfileObservation.Syscall).name)
+        assertTrue((sendto as ProfileObservation.Syscall).paths.isEmpty())
     }
 
     @Test

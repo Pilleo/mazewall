@@ -90,14 +90,18 @@ public class MazewallProfiler private constructor(
                 ioUring = raw.coverage.ioUring,
             ),
         )
+        var recordedObservations = emptyList<ProfileObservation>()
         if (options.ebpfEventLog != null) {
-            drains.add(drainEbpf(liveIfMissing = false))
+            val recorded = drainEbpf(liveIfMissing = false)
+            recordedObservations = recorded.observations
+            drains.add(recorded.copy(drainComplete = false))
         }
         val merged = ObservationMerger.merge(drains)
         val extraBob = BobCompiler.compileObservations(
-            merged.observations.filter { it.source == ObservationSource.EBPF },
+            recordedObservations.filter { it.source == ObservationSource.EBPF },
         )
         val behavior = raw.behavior + extraBob
+        val liveObservations = fromUser
         val inferred = ProfilingCoverage.infer(
             strategy = if (options.strategy == ProfileStrategy.HYBRID_NO_URING) {
                 ProfileStrategy.HYBRID_NO_URING
@@ -106,15 +110,39 @@ public class MazewallProfiler private constructor(
             },
             strategyReason = reason,
             processWide = options.processWide,
-            observations = merged.observations,
+            observations = liveObservations,
             stacks = if (options.captureStacks) StackAttribution.CAPTURED else StackAttribution.SKIPPED,
             droppedEvents = merged.droppedEvents,
-            drainComplete = merged.drainComplete,
+            drainComplete = if (options.ebpfEventLog != null) false else merged.drainComplete,
             environment = environment,
         )
-        val coverage = inferred.retainStricterPathResolution(raw.coverage)
-        val result = raw.copy(behavior = behavior, coverage = coverage, observations = merged.observations)
-        lastSnapshot = ProfilingResult(Unit, result.behavior, result.stackProfile, coverage)
+        val coverage =
+            inferred
+                .retainStricterPathResolution(raw.coverage)
+                .let { kept ->
+                    if (options.ebpfEventLog == null) {
+                        kept
+                    } else {
+                        kept.copy(
+                            complete = false,
+                            drainComplete = false,
+                            warnings = kept.warnings +
+                                "recorded eBPF log is not contemporaneous with this USER_NOTIF run",
+                        )
+                    }
+                }
+        val result = raw.copy(
+            behavior = behavior,
+            coverage = coverage,
+            observations = liveObservations + recordedObservations,
+        )
+        lastSnapshot = ProfilingResult(
+            Unit,
+            result.behavior,
+            result.stackProfile,
+            coverage,
+            result.observations,
+        )
         return result
     }
 

@@ -37,7 +37,7 @@ public object StraceLogParser {
             }
         }
 
-        val path = extractQuotedPath(args)
+        val path = if (isPathBearing(syscallName)) extractQuotedPath(args) else null
         val paths = if (path != null) listOf(path) else emptyList()
         val flags = if (isOpen(syscallName)) straceOpenFlags(args) else null
         return ProfileObservation.Syscall(
@@ -50,6 +50,17 @@ public object StraceLogParser {
     }
 
     private fun isOpen(name: String): Boolean = name == "OPEN" || name == "OPENAT" || name == "OPENAT2"
+
+    private fun isPathBearing(name: String): Boolean =
+        name in
+            setOf(
+                "OPEN", "OPENAT", "OPENAT2", "EXECVE", "EXECVEAT",
+                "UNLINK", "UNLINKAT", "RENAME", "RENAMEAT", "RENAMEAT2",
+                "MKDIR", "MKDIRAT", "RMDIR", "LINK", "LINKAT",
+                "SYMLINK", "SYMLINKAT", "CHDIR", "TRUNCATE",
+                "ACCESS", "FACCESSAT", "FACCESSAT2", "STAT", "NEWFSTATAT",
+                "CREAT", "CHMOD", "FCHMODAT", "CHOWN", "LCHOWN", "FCHOWNAT",
+            )
 
     private fun straceOpenFlags(args: String): Long {
         var flags = 0L
