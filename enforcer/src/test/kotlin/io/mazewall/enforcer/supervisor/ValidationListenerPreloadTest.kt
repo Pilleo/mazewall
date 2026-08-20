@@ -20,5 +20,7 @@ class ValidationListenerPreloadTest {
         assertTrue(names.any { it.endsWith("JVMValidationListener") })
         assertTrue(names.any { it.endsWith("JvmStackInspector") })
         assertTrue(names.any { it.endsWith("DefaultStacktraceScopingPolicy") })
+        assertTrue(names.any { it.contains("JvmVerdict") })
+        assertTrue(names.any { it.contains("SupervisedKind") })
     }
 }

@@ -37,8 +37,7 @@ public object StraceLogParser {
             }
         }
 
-        val path = if (isPathBearing(syscallName)) extractQuotedPath(args) else null
-        val paths = if (path != null) listOf(path) else emptyList()
+        val paths = if (isPathBearing(syscallName)) extractQuotedPaths(args) else emptyList()
         val flags = if (isOpen(syscallName)) straceOpenFlags(args) else null
         return ProfileObservation.Syscall(
             correlation = corr,
@@ -58,8 +57,10 @@ public object StraceLogParser {
                 "UNLINK", "UNLINKAT", "RENAME", "RENAMEAT", "RENAMEAT2",
                 "MKDIR", "MKDIRAT", "RMDIR", "LINK", "LINKAT",
                 "SYMLINK", "SYMLINKAT", "CHDIR", "TRUNCATE",
-                "ACCESS", "FACCESSAT", "FACCESSAT2", "STAT", "NEWFSTATAT",
+                "ACCESS", "FACCESSAT", "FACCESSAT2", "STAT", "NEWFSTATAT", "FSTATAT",
                 "CREAT", "CHMOD", "FCHMODAT", "CHOWN", "LCHOWN", "FCHOWNAT",
+                "READLINK", "READLINKAT", "CHROOT", "UTIME", "UTIMES", "UTIMENSAT",
+                "FCHMOD", "FCHOWN", "FSTAT",
             )
 
     private fun straceOpenFlags(args: String): Long {
@@ -77,8 +78,6 @@ public object StraceLogParser {
         return null
     }
 
-    private fun extractQuotedPath(args: String): String? {
-        val match = "\"(.*?)\"".toRegex().find(args)
-        return match?.groupValues?.get(1)
-    }
+    private fun extractQuotedPaths(args: String): List<String> =
+        "\"(.*?)\"".toRegex().findAll(args).map { it.groupValues[1] }.toList()
 }

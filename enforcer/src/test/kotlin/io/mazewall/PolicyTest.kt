@@ -253,6 +253,23 @@ class PolicyTest {
     }
 
     @Test
+    fun `Landlock intersection treats empty read grants as deny`() {
+        val reads =
+            Policy
+                .builder()
+                .allowFsRead("/secret")
+                .build()
+        val writesOnly =
+            Policy
+                .builder()
+                .allowFsWrite("/tmp")
+                .build()
+        val combined = Policy.combine(reads, writesOnly)
+        assertTrue(combined.allowedFsReadPaths.isEmpty())
+        assertTrue(combined.allowedFsWritePaths.isEmpty())
+    }
+
+    @Test
     fun `advanced block is applied on denyList and allowList`() {
         val denied =
             Policy.denyList(RuntimeProfile.HOTSPOT_JIT) {

@@ -50,6 +50,18 @@ data class BillOfBehavior(
         allowIncomplete: Boolean = false,
     ): Policy<PolicyScope.ThreadLocalOnly, Uncompiled> {
         val evidence = coverage ?: ProfilingCoverage.absent()
+        if (connects.isNotEmpty()) {
+            val withConnects =
+                evidence.copy(
+                    complete = false,
+                    warnings = evidence.warnings +
+                        "connect destinations were observed but cannot be enforced; " +
+                            "toPolicy() only unblocks SOCKET/CONNECT",
+                )
+            if (!allowIncomplete) {
+                throw IncompleteProfileException(withConnects)
+            }
+        }
         if (!evidence.complete && !allowIncomplete) {
             throw IncompleteProfileException(evidence)
         }

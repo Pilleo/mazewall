@@ -44,6 +44,74 @@ class ProfilerSessionApiTest {
         assertTrue(sendto is ProfileObservation.Syscall)
         assertEquals("SENDTO", (sendto as ProfileObservation.Syscall).name)
         assertTrue((sendto as ProfileObservation.Syscall).paths.isEmpty())
+        val rename = StraceLogParser.parseLine(
+            """100 rename("/tmp/old", "/tmp/new") = 0""",
+        ) as ProfileObservation.Syscall
+        assertEquals(listOf("/tmp/old", "/tmp/new"), rename.paths)
+    }
+
+    @Test
+    fun `toPolicy rejects observed connect destinations`() {
+        val bob = BillOfBehavior(connects = setOf(NetworkEndpoint("127.0.0.1", 80)))
+        val complete = ProfilingCoverage.infer(
+            strategy = ProfileStrategy.USER_NOTIF,
+            strategyReason = "t",
+            processWide = false,
+            observations = emptyList(),
+            stacks = StackAttribution.SKIPPED,
+            droppedEvents = 0,
+            drainComplete = true,
+            environment = ProfileEnvironment("t", EbpfLoad.Denied("x")),
+        )
+        assertEquals(true, complete.complete)
+        assertFailsWith<IncompleteProfileException> {
+            bob.toPolicy(coverage = complete)
+        }
+    }
+
+    @Test
+    fun `io_uring OPENAT without flags is incomplete`() {
+        val coverage = ProfilingCoverage.infer(
+            strategy = ProfileStrategy.EBPF,
+            strategyReason = "t",
+            processWide = false,
+            observations = listOf(
+                ProfileObservation.IoUring(
+                    ObservationCorrelation(1, Tid(1)),
+                    ObservationSource.EBPF,
+                    "IORING_OP_OPENAT",
+                    listOf("/tmp/a"),
+                ),
+            ),
+            stacks = StackAttribution.SKIPPED,
+            droppedEvents = 0,
+            drainComplete = true,
+            environment = ProfileEnvironment("t", EbpfLoad.Available),
+        )
+        assertEquals(false, coverage.complete)
+    }
+
+    @Test
+    fun `READLINK without a path is FAILED`() {
+        val coverage = ProfilingCoverage.infer(
+            strategy = ProfileStrategy.USER_NOTIF,
+            strategyReason = "t",
+            processWide = false,
+            observations = listOf(
+                ProfileObservation.Syscall(
+                    ObservationCorrelation(1, Tid(1)),
+                    ObservationSource.USER_NOTIF,
+                    "READLINK",
+                    paths = emptyList(),
+                ),
+            ),
+            stacks = StackAttribution.SKIPPED,
+            droppedEvents = 0,
+            drainComplete = true,
+            environment = ProfileEnvironment("t", EbpfLoad.Denied("x")),
+        )
+        assertEquals(PathResolutionQuality.FAILED, coverage.pathResolution)
+        assertEquals(false, coverage.complete)
     }
 
     @Test
@@ -461,6 +529,7 @@ class ProfilerSessionApiTest {
             environment = ProfileEnvironment("t", EbpfLoad.Denied("x"), ioUringDisabled = null),
         )
         assertEquals(IoUringVisibility.UNSEEN, coverage.ioUring)
+        assertEquals(false, coverage.complete)
     }
 
     @Test

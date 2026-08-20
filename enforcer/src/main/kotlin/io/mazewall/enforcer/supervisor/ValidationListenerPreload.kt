@@ -23,6 +23,15 @@ internal object ValidationListenerPreload {
             ContainmentViolationException::class.java.name,
             SupervisorSessionHandler::class.java.name,
             SupervisorNotificationMachine::class.java.name,
+            JvmVerdict.Deny::class.java.name,
+            JvmVerdict.Allow::class.java.name,
+            JvmVerdict.InjectFd::class.java.name,
+            io.mazewall.platform.seccomp.SupervisedKind.Open::class.java.name,
+            io.mazewall.platform.seccomp.SupervisedKind.Connect::class.java.name,
+            io.mazewall.platform.seccomp.SupervisedKind.Accept::class.java.name,
+            io.mazewall.platform.seccomp.SupervisedKind.Exec::class.java.name,
+            io.mazewall.platform.seccomp.SupervisedKind.Spawn::class.java.name,
+            io.mazewall.platform.seccomp.SupervisedKind.Unknown::class.java.name,
             ValidationLog::class.java.name,
         )
 

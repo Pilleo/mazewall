@@ -88,11 +88,19 @@ public data class PolicyDefinition<out S : PolicyScope>(
             val unsafePrctl = policies.all { it.allowUnsafePrctl }
             val lockCet = policies.any { it.lockIntelCet }
 
-            val allReadSets = policies.map { it.allowedFsReadPaths }.filter { it.isNotEmpty() }
-            val fsReads = if (allReadSets.isEmpty()) emptySet() else allReadSets.reduce { acc, set -> intersectPaths(acc, set) }
-
-            val allWriteSets = policies.map { it.allowedFsWritePaths }.filter { it.isNotEmpty() }
-            val fsWrites = if (allWriteSets.isEmpty()) emptySet() else allWriteSets.reduce { acc, set -> intersectPaths(acc, set) }
+            val landlockPolicies = policies.filter { it.enforceLandlock }
+            val fsReads =
+                if (landlockPolicies.isEmpty()) {
+                    emptySet()
+                } else {
+                    landlockPolicies.map { it.allowedFsReadPaths }.reduce { acc, set -> intersectPaths(acc, set) }
+                }
+            val fsWrites =
+                if (landlockPolicies.isEmpty()) {
+                    emptySet()
+                } else {
+                    landlockPolicies.map { it.allowedFsWritePaths }.reduce { acc, set -> intersectPaths(acc, set) }
+                }
 
             val enforceLandlock = policies.any { it.enforceLandlock }
 

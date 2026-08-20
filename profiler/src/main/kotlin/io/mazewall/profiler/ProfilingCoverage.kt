@@ -152,13 +152,29 @@ public data class ProfilingCoverage(
             if (openat2Uninspected) {
                 warnings.add("OPENAT2 flags were not observed; do not treat paths as a complete write profile")
             }
+            val uringOpenUninspected =
+                observations.any { obs ->
+                    obs is ProfileObservation.IoUring &&
+                        obs.opcode.uppercase().contains("OPEN") &&
+                        !isUringMutation(obs.opcode)
+                }
+            if (uringOpenUninspected) {
+                warnings.add("io_uring open access mode was not observed")
+            }
+            val hybridUnproven =
+                strategy == ProfileStrategy.HYBRID_NO_URING && environment.ioUringDisabled != true
+            if (hybridUnproven) {
+                warnings.add("HYBRID_NO_URING without evidence that io_uring was disabled")
+            }
             val complete = drainComplete && droppedEvents == 0 &&
                 ioUring != IoUringVisibility.BLIND &&
                 !(ioUring == IoUringVisibility.UNSEEN && strategy == ProfileStrategy.EBPF) &&
                 pathQuality != PathResolutionQuality.FAILED &&
                 pathQuality != PathResolutionQuality.MIXED &&
                 pathQuality != PathResolutionQuality.TRUNCATED &&
-                !openat2Uninspected
+                !openat2Uninspected &&
+                !uringOpenUninspected &&
+                !hybridUnproven
             return ProfilingCoverage(
                 strategy = strategy,
                 strategyReason = strategyReason,
@@ -202,9 +218,21 @@ public data class ProfilingCoverage(
                 "UNLINK", "UNLINKAT", "RENAME", "RENAMEAT", "RENAMEAT2",
                 "MKDIR", "MKDIRAT", "RMDIR", "LINK", "LINKAT",
                 "SYMLINK", "SYMLINKAT", "CHDIR", "TRUNCATE",
-                "ACCESS", "FACCESSAT", "FACCESSAT2", "STAT", "NEWFSTATAT",
+                "ACCESS", "FACCESSAT", "FACCESSAT2", "STAT", "NEWFSTATAT", "FSTATAT",
                 "CREAT", "CHMOD", "FCHMODAT", "CHOWN", "LCHOWN", "FCHOWNAT",
+                "READLINK", "READLINKAT", "CHROOT", "UTIME", "UTIMES", "UTIMENSAT",
+                "FCHMOD", "FCHOWN", "FSTAT",
             )
+
+        private fun isUringMutation(opcode: String): Boolean {
+            val op = opcode.uppercase()
+            return op.contains("WRITE") ||
+                op.contains("UNLINK") ||
+                op.contains("RENAME") ||
+                op.contains("MKDIR") ||
+                op.contains("RMDIR") ||
+                op.contains("TRUNCATE")
+        }
 
         private fun isUringPathBearing(opcode: String): Boolean {
             val op = opcode.uppercase()
