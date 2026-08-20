@@ -1,3 +1,19 @@
+---
+title: "Classify mutating io_uring operations as writes"
+severity: "MEDIUM"
+status: "open"
+priority: medium
+component: "profiler"
+dependencies: []
+target_modules:
+  - ":profiler"
+target_files:
+  - "profiler/src/main/kotlin/io/mazewall/profiler/ebpf/*"
+  - "profiler/src/main/kotlin/io/mazewall/profiler/ProfileObservation.kt"
+effort: "medium"
+autonomy: "autonomous"
+---
+
 # Classify Mutating io_uring Operations as Writes
 
 **Source:** Codex PR review comment 3797199301  

@@ -1,3 +1,19 @@
+---
+title: "Preserve whitespace in recorded eBPF field values"
+severity: "MEDIUM"
+status: "open"
+priority: medium
+component: "profiler"
+dependencies: []
+target_modules:
+  - ":profiler"
+target_files:
+  - "profiler/src/main/kotlin/io/mazewall/profiler/ebpf/*"
+  - "profiler/src/main/kotlin/io/mazewall/profiler/collector/EbpfEventParser.kt"
+effort: "small"
+autonomy: "autonomous"
+---
+
 # eBPF Event Field Value Whitespace Preservation
 
 **Source:** Codex PR review comment 3796525664  

@@ -1,3 +1,18 @@
+---
+title: "Worker-installing tests need fresh JVMs"
+severity: "MEDIUM"
+status: "open"
+priority: medium
+component: "testing"
+dependencies: []
+target_modules:
+  - ":enforcer"
+target_files:
+  - "enforcer/src/test/kotlin/io/mazewall/IntelCetIntegrationTest.kt"
+effort: "small"
+autonomy: "autonomous"
+---
+
 # Worker-Installing Tests in Fresh JVMs
 
 **Source:** Codex PR review comment 3797199300  

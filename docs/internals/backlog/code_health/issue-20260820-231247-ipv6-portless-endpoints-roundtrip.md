@@ -1,3 +1,19 @@
+---
+title: "Preserve portless IPv6 endpoints during JSON round trips"
+severity: "MEDIUM"
+status: "open"
+priority: medium
+component: "profiler"
+dependencies: []
+target_modules:
+  - ":profiler"
+target_files:
+  - "profiler/src/main/kotlin/io/mazewall/profiler/BillOfBehaviorDto.kt"
+  - "profiler/src/main/kotlin/io/mazewall/profiler/ProfileObservation.kt"
+effort: "small"
+autonomy: "autonomous"
+---
+
 # Preserve Portless IPv6 Endpoints During JSON Round Trips
 
 **Source:** Codex PR review comment 3797199306  
