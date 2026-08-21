@@ -2,7 +2,7 @@
 title: "Refactor Orchestrator State Machine to Enforce Compile-Time State Invariants via Type-States"
 severity: "HIGH"
 status: "resolved"
-priority: 10
+priority: high
 dependencies: []
 component: "orchestrator"
 target_modules:

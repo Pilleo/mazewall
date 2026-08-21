@@ -2,7 +2,7 @@
 title: "Unhandled EINTR in accept in SupervisorDaemonEngine"
 severity: "MEDIUM"
 status: "resolved"
-priority: 6
+priority: medium
 dependencies: []
 component: "unknown"
 effort: "medium"

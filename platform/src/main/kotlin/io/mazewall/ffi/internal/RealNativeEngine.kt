@@ -4,6 +4,11 @@ package io.mazewall.ffi.internal
 import io.mazewall.*
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
+import io.mazewall.core.claimDupIfNeeded
+import io.mazewall.core.ebadfIfRetiredPollfds
+import io.mazewall.core.ebadfUnlessDirfd
+import io.mazewall.core.ebadfUnlessLive
+import io.mazewall.core.ebadfUnlessMmapBacking
 import io.mazewall.ffi.LayoutValidator
 import io.mazewall.ffi.Layouts
 import io.mazewall.ffi.NativeConstants
@@ -106,6 +111,7 @@ public object RealNativeEngine : NativeEngine, RawSyscallOperations {
         a5: io.mazewall.core.NativeArg,
         a6: io.mazewall.core.NativeArg,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+        ebadfUnlessLive(a1, a2, a3, a4, a5, a6)?.let { return it }
         return SyscallInvoker.syscall(
             SYSCALL,
             nr,
@@ -132,7 +138,7 @@ public object RealNativeEngine : NativeEngine, RawSyscallOperations {
         request: Long,
         arg: ManagedSegment,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
-        require(fd.isValid) { "FileDescriptor is invalid or closed" }
+        fd.ebadfUnlessLive()?.let { return it }
         return SyscallInvoker.ioctlAddr(IOCTL_ADDR, fd.value, request, arg.native)
     }
 
@@ -141,7 +147,7 @@ public object RealNativeEngine : NativeEngine, RawSyscallOperations {
         request: Long,
         arg: Long,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
-        require(fd.isValid) { "FileDescriptor is invalid or closed" }
+        fd.ebadfUnlessLive()?.let { return it }
         return SyscallInvoker.ioctlLong(IOCTL_LONG, fd.value, request, arg)
     }
 
@@ -150,8 +156,8 @@ public object RealNativeEngine : NativeEngine, RawSyscallOperations {
         cmd: Int,
         arg: Long,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
-        require(fd.isValid) { "FileDescriptor is invalid or closed" }
-        return SyscallInvoker.fcntl(FCNTL, fd.value, cmd, arg)
+        fd.ebadfUnlessLive()?.let { return it }
+        return SyscallInvoker.fcntl(FCNTL, fd.value, cmd, arg).claimDupIfNeeded(cmd)
     }
 
     override fun poll(
@@ -159,6 +165,7 @@ public object RealNativeEngine : NativeEngine, RawSyscallOperations {
         nfds: Long,
         timeout: Int,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+        ebadfIfRetiredPollfds(fds, nfds)?.let { return it }
         return SyscallInvoker.poll(POLL, fds.native, nfds, timeout)
     }
 }
@@ -217,11 +224,12 @@ internal object RealNativeFileSystem : NativeFileSystem {
     }
 
     override fun openat(
-        dirfd: Int,
+        dirfd: FileDescriptor<*, FdState.Open>,
         path: ManagedSegment,
         flags: io.mazewall.core.OpenFlags,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
-        return SyscallInvoker.openat(OPENAT, dirfd, path.native, flags.value)
+        dirfd.ebadfUnlessDirfd()?.let { return it }
+        return SyscallInvoker.openat(OPENAT, dirfd.value, path.native, flags.value)
     }
 
     override fun mmap(
@@ -229,13 +237,16 @@ internal object RealNativeFileSystem : NativeFileSystem {
         length: Long,
         prot: io.mazewall.core.MmapProt,
         flags: io.mazewall.core.MmapFlags,
-        fd: Int,
+        fd: FileDescriptor<*, FdState.Open>,
         offset: Long,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
-        return SyscallInvoker.mmap(MMAP, MemorySegment.ofAddress(addr), length, prot.value, flags.value, fd, offset)
+        fd.ebadfUnlessMmapBacking()?.let { return it }
+        return SyscallInvoker.mmap(MMAP, MemorySegment.ofAddress(addr), length, prot.value, flags.value, fd.value, offset)
     }
 
     override fun close(fd: FileDescriptor<*, FdState.Open>): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+        fd.ebadfUnlessLive()?.let { return it }
+        fd.retireForClose()
         return SyscallInvoker.close(CLOSE, fd.value)
     }
 
@@ -368,7 +379,7 @@ internal object RealNativeNetworking : NativeNetworking {
         addrlen: ManagedSegment,
         flags: Int,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
-        require(sockfd.isValid) { "FileDescriptor is invalid or closed" }
+        sockfd.ebadfUnlessLive()?.let { return it }
         return SyscallInvoker.accept4(ACCEPT4, sockfd.value, addr.native, addrlen.native, flags)
     }
 
@@ -385,7 +396,7 @@ internal object RealNativeNetworking : NativeNetworking {
         addr: ManagedSegment,
         addrlen: Int,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
-        require(sockfd.isValid) { "FileDescriptor is invalid or closed" }
+        sockfd.ebadfUnlessLive()?.let { return it }
         return SyscallInvoker.bind(BIND, sockfd.value, addr.native, addrlen)
     }
 
@@ -393,7 +404,7 @@ internal object RealNativeNetworking : NativeNetworking {
         sockfd: FileDescriptor<*, FdState.Open>,
         backlog: Int,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
-        require(sockfd.isValid) { "FileDescriptor is invalid or closed" }
+        sockfd.ebadfUnlessLive()?.let { return it }
         return SyscallInvoker.listen(LISTEN, sockfd.value, backlog)
     }
 
@@ -402,7 +413,7 @@ internal object RealNativeNetworking : NativeNetworking {
         addr: ManagedSegment,
         addrlen: ManagedSegment,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
-        require(sockfd.isValid) { "FileDescriptor is invalid or closed" }
+        sockfd.ebadfUnlessLive()?.let { return it }
         return SyscallInvoker.accept(ACCEPT, sockfd.value, addr.native, addrlen.native)
     }
 
@@ -411,7 +422,7 @@ internal object RealNativeNetworking : NativeNetworking {
         addr: ManagedSegment,
         addrlen: Int,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
-        require(sockfd.isValid) { "FileDescriptor is invalid or closed" }
+        sockfd.ebadfUnlessLive()?.let { return it }
         return SyscallInvoker.connect(CONNECT, sockfd.value, addr.native, addrlen)
     }
 
@@ -420,7 +431,7 @@ internal object RealNativeNetworking : NativeNetworking {
         msg: ManagedSegment,
         flags: Int,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
-        require(sockfd.isValid) { "FileDescriptor is invalid or closed" }
+        sockfd.ebadfUnlessLive()?.let { return it }
         return SyscallInvoker.sendmsg(SENDMSG, sockfd.value, msg.native, flags)
     }
 
@@ -429,7 +440,7 @@ internal object RealNativeNetworking : NativeNetworking {
         msg: ManagedSegment,
         flags: Int,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
-        require(sockfd.isValid) { "FileDescriptor is invalid or closed" }
+        sockfd.ebadfUnlessLive()?.let { return it }
         return SyscallInvoker.recvmsg(RECVMSG, sockfd.value, msg.native, flags)
     }
 
@@ -439,7 +450,7 @@ internal object RealNativeNetworking : NativeNetworking {
         len: Long,
         flags: Int,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
-        require(sockfd.isValid) { "FileDescriptor is invalid or closed" }
+        sockfd.ebadfUnlessLive()?.let { return it }
         return SyscallInvoker.recv(RECV, sockfd.value, buf.native, len, flags)
     }
 }
@@ -526,11 +537,12 @@ internal object RealNativeProcess : NativeProcess {
     }
 
     override fun pidfdGetFd(
-        pidfd: Int,
+        pidfd: FileDescriptor<*, FdState.Open>,
         targetFd: Int,
         flags: Int,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
-        return SyscallInvoker.pidfdGetFd(PIDFD_GETFD, pidfd, targetFd, flags)
+        pidfd.ebadfUnlessLive()?.let { return it }
+        return SyscallInvoker.pidfdGetFd(PIDFD_GETFD, pidfd.value, targetFd, flags)
     }
 
     override fun archPrctl(code: Int, addr: Long): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
@@ -639,7 +651,7 @@ internal object RealNativeMemory : NativeMemory {
         buf: ManagedSegment,
         count: Long,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
-        require(fd.isValid) { "FileDescriptor is invalid or closed" }
+        fd.ebadfUnlessLive()?.let { return it }
         return SyscallInvoker.read(READ, fd.value, buf.native, count)
     }
 
@@ -648,7 +660,7 @@ internal object RealNativeMemory : NativeMemory {
         buf: ManagedSegment,
         count: Long,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
-        require(fd.isValid) { "FileDescriptor is invalid or closed" }
+        fd.ebadfUnlessLive()?.let { return it }
         return SyscallInvoker.write(WRITE, fd.value, buf.native, count)
     }
 

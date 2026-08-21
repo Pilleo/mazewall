@@ -70,11 +70,14 @@ dependencies {
 ```kotlin
 import io.mazewall.enforcer.api.ContainedExecutors
 import io.mazewall.Policy
+import io.mazewall.ProcessPolicies
+import io.mazewall.RuntimeProfile
 import java.util.concurrent.Executors
 
 val sandboxed = ContainedExecutors.wrap(
     Executors.newFixedThreadPool(4),
-    Policy.NO_EXEC   // blocks execve, fork, memfd_create, io_uring, ptrace
+    ProcessPolicies.denyProcessCreation(RuntimeProfile.HOTSPOT_JIT)
+    // or Policy.NO_EXEC_HOTSPOT — same filters; use NATIVE_IMAGE / Policy.NO_EXEC for W^X
 )
 
 // Everything submitted to this pool runs under the kernel-enforced policy.
@@ -90,7 +93,9 @@ This is the recommended first step for *any* application that doesn't dynamicall
 
 ```kotlin
 // Call once, early in main() / Application.run()
-ContainedExecutors.installOnProcess(Policy.NO_EXEC)
+ContainedExecutors.installOnProcess(
+    ProcessPolicies.denyProcessCreation(RuntimeProfile.HOTSPOT_JIT),
+)
 ```
 
 > [!IMPORTANT]
@@ -158,7 +163,7 @@ val auditedPool = ContainedExecutors.wrap(executor, policy)
 ```kotlin
 val policy = Policy.builder()
     // Start from a built-in base
-    .base(Policy.NO_EXEC)
+    .base(Policy.NO_EXEC_HOTSPOT)
 
     // Filesystem access (Landlock — path-exact, inheritable)
     .allowFsRead("/data/in")
@@ -223,7 +228,9 @@ io.mazewall.ContainmentViolationException: Containment violation detected: block
    val result = Profiler.profile {
        // Run the code that failed here
    }
-   println(result.behavior.toDsl()) // Prints the exact Policy builder code needed!
+   // toDsl() throws if exec/connect destinations were observed but cannot be enforced.
+   // Pass allowIncomplete=true if you cannot enforce all destinations (e.g., dynamic exec).
+   println(result.behavior.toDsl(allowIncomplete = true)) // Prints the exact Policy builder code needed!
    ```
 
 ---
@@ -231,7 +238,7 @@ io.mazewall.ContainmentViolationException: Containment violation detected: block
 ## Known Limitations
 
 - **Thread-scope vs Process-scope Isolation**: All JVM threads share the same heap. If an attacker achieves native Arbitrary Code Execution on a sandboxed thread, they can potentially corrupt heap memory on an unsandboxed sibling thread. Combine with a process-wide `NO_EXEC` baseline (Tier 1) for defense-in-depth. See [designs/core/security-considerations.md](docs/internals/designs/core/security-considerations.md) for the full threat model.
-- **JIT Compiler Coexistence**: The background threads that run JVM JIT compilation are unconstrained by thread-scoped policies. Therefore, thread-local executors wrapped with `Policy.NO_EXEC` or `Policy.PURE_COMPUTE` will *not* trigger JIT compiler `mmap(PROT_EXEC)` failures. However, if you apply a process-wide lockdown via `ContainedExecutors.installOnProcess(Policy.NO_EXEC)`, you *must* append `.allowMmapExec()` if JIT compilation is still active.
+- **JIT Compiler Coexistence**: The background threads that run JVM JIT compilation are unconstrained by thread-scoped policies. Therefore, thread-local executors wrapped with `Policy.NO_EXEC` or `Policy.PURE_COMPUTE` will *not* trigger JIT compiler `mmap(PROT_EXEC)` failures. However, if you apply a process-wide lockdown, use `Policy.NO_EXEC_HOTSPOT` (or append `.allowMmapExec()`) if JIT compilation is still active. Raw `Policy.NO_EXEC` denies `PROT_EXEC` mappings and can crash HotSpot.
 - **Platform threads only**: Virtual threads (Loom) are explicitly rejected at runtime. Use platform thread pools for sandboxed work.
 - **Linux only**: macOS and Windows do not have Seccomp-BPF or Landlock. The library will fail to install and throw (configurable via the `IO_MAZEWALL_FALLBACK` env var).
 

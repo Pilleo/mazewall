@@ -2,7 +2,7 @@
 title: "Orchestrator State Machine Refactor"
 severity: "HIGH"
 status: "resolved"
-priority: 10
+priority: high
 dependencies: []
 component: "orchestrator"
 effort: "medium"

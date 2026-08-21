@@ -2,7 +2,7 @@
 title: "SeccompDaemonEngine: pollFds out-of-bounds crash + circular LoopAction typealias"
 severity: "HIGH"
 status: "resolved"
-priority: 10
+priority: high
 component: "enforcer"
 target_modules: [":platform", ":profiler", ":enforcer"]
 target_files: ["platform/src/main/kotlin/io/mazewall/platform/seccomp/daemon/SeccompDaemonEngine.kt", "profiler/src/main/kotlin/io/mazewall/profiler/engine/ProfilerSessionHandler.kt", "enforcer/src/main/kotlin/io/mazewall/enforcer/supervisor/SupervisorSessionHandler.kt"]

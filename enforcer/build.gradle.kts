@@ -42,23 +42,50 @@ val compileVulnerableRop = tasks.register<Exec>("compileVulnerableRop") {
     commandLine("bash", "${rootDir}/scripts/run_cet_demo.sh")
 }
 
+val integrationTestJvmArgs =
+    listOf(
+        "--enable-native-access=ALL-UNNAMED",
+        "-Xmx256m",
+        "-Xms128m",
+        "-Dfile.encoding=UTF-8",
+        "-Dsun.jnu.encoding=UTF-8",
+    )
+
+fun Test.configureIntegrationHarness() {
+    group = "verification"
+    testClassesDirs = sourceSets["integrationTest"].output.classesDirs
+    classpath = sourceSets["integrationTest"].runtimeClasspath
+    jvmArgs(integrationTestJvmArgs)
+    systemProperty("kotest.framework.classpath.scanning.config.disable", "true")
+    testLogging {
+        showStandardStreams = true
+    }
+    dependsOn(compileVulnerableRop)
+}
+
 val integrationTest =
     tasks.register<Test>("integrationTest") {
-        group = "verification"
-        testClassesDirs = sourceSets["integrationTest"].output.classesDirs
-        classpath = sourceSets["integrationTest"].runtimeClasspath
-        useJUnitPlatform()
-        jvmArgs("--enable-native-access=ALL-UNNAMED", "-Xmx256m", "-Xms128m", "-Dfile.encoding=UTF-8", "-Dsun.jnu.encoding=UTF-8")
-        systemProperty("kotest.framework.classpath.scanning.config.disable", "true")
-        forkEvery = 1
-        testLogging {
-            showStandardStreams = true
+        configureIntegrationHarness()
+        description = "Kernel tests that do not install on the JUnit worker JVM"
+        useJUnitPlatform {
+            excludeTags("needs-fresh-jvm")
         }
-        dependsOn(compileVulnerableRop)
+        forkEvery = 0
+        maxParallelForks = 1
+    }
+
+val integrationTestFreshJvm =
+    tasks.register<Test>("integrationTestFreshJvm") {
+        configureIntegrationHarness()
+        description = "Kernel tests that install seccomp/USER_NOTIF on the worker JVM"
+        useJUnitPlatform {
+            includeTags("needs-fresh-jvm")
+        }
+        forkEvery = 1
     }
 
 tasks.check {
-    dependsOn(integrationTest)
+    dependsOn(integrationTest, integrationTestFreshJvm)
 }
 
 tasks.test {

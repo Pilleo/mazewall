@@ -1,7 +1,7 @@
 ---
 title: "SbobUnicodeTest fails on systems with ASCII/non-UTF-8 JNU encoding"
 status: "resolved"
-priority: 3
+priority: low
 severity: "MEDIUM"
 scope: "enforcer"
 dependencies: []

@@ -2,7 +2,7 @@
 title: "Overly Broad Catch Block in `ProfilerDaemon.reactorLoop`"
 severity: "HIGH"
 status: "resolved"
-priority: 9
+priority: high
 dependencies: []
 component: "profiler"
 effort: "small"

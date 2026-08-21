@@ -71,7 +71,9 @@ object NativeConstants {
     // Errors
     const val EPERM = 1
     const val ENOENT = 2
+    const val EACCES = 13
     const val EINTR = 4
+    const val EIO = 5
     const val EBADF = 9
     const val ENOPKG = 65
     const val EOPNOTSUPP = 95
@@ -81,6 +83,27 @@ object NativeConstants {
     const val O_PATH = 0x01000000
     const val O_CLOEXEC = 0x00080000
     const val O_NOFOLLOW = 0x00020000
+    const val AT_FDCWD = -100
+    const val AT_EMPTY_PATH = 0x1000
+    const val F_DUPFD = 0
+    const val F_DUPFD_CLOEXEC = 1030
+
+    // ptrace(2) on x86_64 (fail closed on other arches)
+    const val SYS_PTRACE_X86_64 = 101L
+    const val SYS_WAIT4_X86_64 = 61L
+    const val WAIT_WALL = 0x40000000L
+    const val PTRACE_GETREGS = 12L
+    const val PTRACE_SETREGS = 13L
+    const val PTRACE_ATTACH = 16L
+    const val PTRACE_DETACH = 17L
+    const val USER_REGS_X86_64_SIZE = 216L
+    const val USER_REGS_X86_64_R10 = 56L
+    const val USER_REGS_X86_64_R8 = 72L
+    const val USER_REGS_X86_64_RAX = 80L
+    const val USER_REGS_X86_64_RDX = 96L
+    const val USER_REGS_X86_64_RSI = 104L
+    const val USER_REGS_X86_64_RDI = 112L
+    const val USER_REGS_X86_64_ORIG_RAX = 120L
 
     // Socket options
     const val SOCK_CLOEXEC = 0x00080000

@@ -2,7 +2,7 @@
 title: "Configure Jacoco Coverage Enforcement (80%) for :tools:orchestrator"
 severity: "HIGH"
 status: "resolved"
-priority: 10
+priority: high
 dependencies: []
 component: "orchestrator"
 target_modules:

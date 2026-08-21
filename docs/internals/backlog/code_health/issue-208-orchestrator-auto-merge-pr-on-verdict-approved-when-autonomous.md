@@ -3,7 +3,7 @@ title: 'Orchestrator: Auto-Merge PR on VERDICT: APPROVED When autonomy=autonomou
   and solution_approved=true'
 severity: MEDIUM
 status: open
-priority: 5
+priority: medium
 dependencies:
 - issue-202
 - issue-203

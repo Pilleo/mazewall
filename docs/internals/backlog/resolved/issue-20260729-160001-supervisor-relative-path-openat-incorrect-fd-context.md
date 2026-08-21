@@ -2,7 +2,7 @@
 title: "Fix Confused Deputy and Incorrect FD Context during openat / openat2 Emulation in Supervisor"
 severity: "HIGH"
 status: "resolved"
-priority: 9
+priority: high
 dependencies: []
 component: "enforcer"
 target_modules:

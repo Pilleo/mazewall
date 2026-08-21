@@ -3,7 +3,7 @@ title: Implement Subsystem Domain Locking and Core File Exclusive Execution in D
   Graph
 severity: HIGH
 status: open
-priority: 10
+priority: high
 dependencies:
 - issue-20260726-191001
 component: orchestrator

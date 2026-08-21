@@ -11,10 +11,13 @@ import java.nio.file.AccessDeniedException
 /**
  * Tier A Profiler: Unprivileged "Deny-and-Retry" loop.
  *
- * Intercepts AccessDeniedExceptions from io_uring or standard VFS operations,
- * extracts the failed path, whitelists it, and retries the operation until it succeeds.
- * This provides 100% unprivileged visibility into io_uring ring operations.
+ * @deprecated Deny-and-retry is not a tracer. Prefer [io.mazewall.profiler.MazewallProfiler]
+ * with [ProfileStrategy.HYBRID_NO_URING] or a future eBPF collector. This API will be removed.
  */
+@Deprecated(
+    message = "Deny-and-retry is not a tracer. Use MazewallProfiler (USER_NOTIF or HYBRID_NO_URING).",
+    replaceWith = ReplaceWith("MazewallProfiler.open(ProfileOptions(strategy = ProfileStrategy.HYBRID_NO_URING))", "io.mazewall.profiler.MazewallProfiler", "io.mazewall.profiler.ProfileOptions", "io.mazewall.profiler.ProfileStrategy"),
+)
 object IterativeProfiler {
     public var taskExecutor: IterativeTaskExecutor = RealIterativeTaskExecutor
 

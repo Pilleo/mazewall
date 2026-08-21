@@ -6,6 +6,7 @@ import java.lang.foreign.Arena
 import java.lang.foreign.MemoryLayout
 import java.lang.foreign.MemorySegment
 import java.lang.foreign.ValueLayout
+import java.nio.charset.StandardCharsets
 
 private val JAVA_SHORT_NATIVE = ValueLayout.JAVA_SHORT.withOrder(java.nio.ByteOrder.nativeOrder())
 private val JAVA_INT_NATIVE = ValueLayout.JAVA_INT.withOrder(java.nio.ByteOrder.nativeOrder())
@@ -366,7 +367,7 @@ public value class SockaddrUnSegment(public val segment: MemorySegment) {
 }
 
 /**
- * Type-safe wrapper for supervisor response packet (13 bytes).
+ * Type-safe wrapper for supervisor response packet (header + optional exec path).
  */
 @JvmInline
 public value class SupervisorResponseSegment(public val segment: MemorySegment) {
@@ -385,6 +386,28 @@ public value class SupervisorResponseSegment(public val segment: MemorySegment) 
     public fun getErrorNr(): Int = segment.get(JAVA_INT_NATIVE, Layouts.SUPERVISOR_RESPONSE_ERROR_OFFSET)
     public fun setErrorNr(value: Int): Unit {
         segment.set(JAVA_INT_NATIVE, Layouts.SUPERVISOR_RESPONSE_ERROR_OFFSET, value)
+    }
+
+    public fun getPath(): String? {
+        val len = segment.get(JAVA_INT_NATIVE, Layouts.SUPERVISOR_RESPONSE_PATH_LEN_OFFSET)
+        if (len <= 0) {
+            return null
+        }
+        val capped = minOf(len.toLong(), Layouts.SUPERVISOR_RESPONSE_PATH_CAP).toInt()
+        val bytes = ByteArray(capped)
+        MemorySegment.copy(segment, Layouts.SUPERVISOR_RESPONSE_PATH_OFFSET, MemorySegment.ofArray(bytes), 0L, capped.toLong())
+        return String(bytes, StandardCharsets.UTF_8)
+    }
+
+    public fun setPath(value: String?) {
+        if (value.isNullOrEmpty()) {
+            segment.set(JAVA_INT_NATIVE, Layouts.SUPERVISOR_RESPONSE_PATH_LEN_OFFSET, 0)
+            return
+        }
+        val bytes = value.toByteArray(StandardCharsets.UTF_8)
+        val capped = minOf(bytes.size.toLong(), Layouts.SUPERVISOR_RESPONSE_PATH_CAP).toInt()
+        segment.set(JAVA_INT_NATIVE, Layouts.SUPERVISOR_RESPONSE_PATH_LEN_OFFSET, capped)
+        MemorySegment.copy(MemorySegment.ofArray(bytes), 0L, segment, Layouts.SUPERVISOR_RESPONSE_PATH_OFFSET, capped.toLong())
     }
 
     public companion object {

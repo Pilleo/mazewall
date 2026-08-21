@@ -2,7 +2,7 @@
 title: "Encapsulate Networking Streams and Daemon Reactor Buffers in io.mazewall.ffi"
 severity: "HIGH"
 status: "resolved"
-priority: 10
+priority: high
 dependencies: ["issue-209", "issue-210"]
 component: "supervisor"
 effort: "medium"

@@ -21,9 +21,9 @@ ContainedExecutors.limitResources(parserPool, CpuLimit("10%"), MemoryLimit("128M
 ```
 
 ### Security & Operational Value
-If a thread pool processing untrusted data gets hit with an algorithmic complexity exploit (e.g., a Zip Bomb, ReDoS, or XML entity expansion):
-*   The kernel will throttle CPU shares or invoke the OOM killer *specifically* on the threads inside that sub-cgroup.
-*   The parent JVM and sibling thread pools continue handling normal traffic unhindered, preventing complete Denial of Service.
+**CPU (threaded controller):** moving worker TIDs into a threaded cgroup can throttle *scheduling* of those threads where the kernel supports it.
+
+**Memory:** cgroup v2 memory is a **domain** controller. It does not create a separate heap. JVM allocations, GC, and native mappings cross thread pools. An OOM action is a **process** event, not a safe “kill only the malicious worker.” Hard memory/PID isolation belongs in a **subprocess or container**. Do not design `limitResources(..., MemoryLimit)` as per-thread containment.
 
 ---
 
@@ -40,10 +40,8 @@ val fd = LinuxNative.memfd_secret(0)
 val segment = MemorySegment.mapFile(fd, 0, keySize, MapMode.READ_WRITE, arena)
 ```
 
-### Security Value
-Applications can store highly sensitive transient data (cryptographic keys, decrypted user passwords, session tokens) in memory segments that:
-*   Are completely invisible to standard JVM memory dumps.
-*   Cannot be inspected by raw memory scanners even if an attacker achieves native Arbitrary Code Execution (ACE) on an unrestricted sibling thread.
+### Security Value (limited)
+`memfd_secret` unmaps pages from the **kernel direct map** and reduces *cross-process* / some dump exposure. The mapping is still in **this process**. Every JVM thread shares that address space. Native ACE on a sibling can read the mapped pages. It is not intra-process confidentiality. Use a separate process or a hardware-backed key service if a compromised JVM must not see the secret. The `memfd_secret(2)` manual does not claim an absolute guarantee.
 
 ---
 

@@ -2,7 +2,7 @@
 title: "Expand BranchRebaser Tests with Real Git Repository Simulation"
 severity: "MEDIUM"
 status: "open"
-priority: 8
+priority: high
 dependencies: []
 component: "orchestrator"
 target_modules:

@@ -1,14 +1,17 @@
 package io.mazewall
 
-import com.tngtech.archunit.base.DescribedPredicate
-import com.tngtech.archunit.core.domain.JavaClass
 import com.tngtech.archunit.core.domain.JavaClasses
 import com.tngtech.archunit.core.importer.ImportOption
 import com.tngtech.archunit.junit.AnalyzeClasses
 import com.tngtech.archunit.junit.ArchTest
+import com.tngtech.archunit.lang.ArchCondition
+import com.tngtech.archunit.lang.ConditionEvents
+import com.tngtech.archunit.lang.SimpleConditionEvent
+import com.tngtech.archunit.lang.syntax.ArchRuleDefinition.methods
 import com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses
 import io.mazewall.enforcer.api.ContainedExecutors
 import io.mazewall.seccomp.PureJavaBpfEngine
+import org.junit.jupiter.api.Test
 
 /**
  * Protects the Gradle Test Worker from being poisoned by process-wide seccomp filters
@@ -22,21 +25,49 @@ import io.mazewall.seccomp.PureJavaBpfEngine
 class TestArchitectureTest {
     @ArchTest
     fun processWideContainmentMustOnlyBeCalledInIsolatedProcesses(allClasses: JavaClasses) {
-        noClasses()
+        methods()
             .that()
+            .areAnnotatedWith(Test::class.java)
+            .and()
+            .areDeclaredInClassesThat()
             .doNotHaveFullyQualifiedName("io.mazewall.IsolatedTestRunner")
             .and()
-            .doNotHaveFullyQualifiedName("io.mazewall.seccomp.PureJavaBpfEngine")
-            .and()
-            .doNotHaveFullyQualifiedName("io.mazewall.enforcer.ContainedExecutors")
-            .should()
-            .callMethod(ContainedExecutors::class.java, "installOnProcess", Policy::class.java)
-            .orShould()
-            .callMethod(PureJavaBpfEngine::class.java, "installOnProcess", Policy::class.java)
+            .areDeclaredInClassesThat()
+            .doNotHaveFullyQualifiedName(
+                "io.mazewall.seccomp.PureJavaBpfEngineThreadStateSynchronizationTest",
+            )
+            .should(
+                object : ArchCondition<com.tngtech.archunit.core.domain.JavaMethod>(
+                    "not call installOnProcess in-process",
+                ) {
+                    override fun check(
+                        item: com.tngtech.archunit.core.domain.JavaMethod,
+                        events: ConditionEvents,
+                    ) {
+                        item.methodCallsFromSelf
+                            .filter { call ->
+                                call.target.name == "installOnProcess" &&
+                                    (
+                                        call.targetOwner.isAssignableTo(ContainedExecutors::class.java) ||
+                                            call.targetOwner.isAssignableTo(PureJavaBpfEngine::class.java) ||
+                                            call.targetOwner.name == "io.mazewall.enforcer.ContainedExecutors"
+                                        )
+                            }
+                            .forEach { call ->
+                                events.add(
+                                    SimpleConditionEvent.violated(
+                                        item,
+                                        "${item.fullName} calls ${call.target.fullName} in-process; " +
+                                            "use IsolatedProcessTester so supervisor spawn is not inherited-filter poisoned.",
+                                    ),
+                                )
+                            }
+                    }
+                },
+            )
             .because(
-                "Directly applying process-wide seccomp in unit tests poisons the long-lived Gradle Test Worker, " +
-                    "causing fatal EPERM crashes (e.g. on JIT compilation) in unrelated subsequent tests. " +
-                    "Use IsolatedProcessTester instead.",
+                "A @Test method that calls installOnProcess in-process poisons later tests and " +
+                    "supervisor daemon children (inherited seccomp). Run the body via IsolatedProcessTester.",
             ).check(allClasses)
     }
 

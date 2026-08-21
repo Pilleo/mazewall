@@ -19,7 +19,9 @@ val result = Profiler.profile {
 }
 
 // 2. Print the generated policy DSL
-println(result.behavior.toDsl())
+// Note: toDsl() throws if exec/connect destinations were observed but cannot be enforced.
+// Pass allowIncomplete=true if you cannot enforce all destinations.
+println(result.behavior.toDsl(allowIncomplete = true))
 ```
 
 **Output:**
@@ -62,9 +64,17 @@ Three profiling strategies are available depending on your environment and what 
 
 | Tier | API | Best For | Privilege |
 |------|-----|----------|-----------|
-| **S (Recommended)** | `Profiler.profile { }` | Standard synchronous workloads, accurate syscall + path capture | Unprivileged |
-| **A (Iterative)** | `IterativeProfiler.profile(basePolicy) { }` | `io_uring`-based workloads, Landlock path discovery without a daemon | Unprivileged |
-| **P (strace)** | `StraceProfiler` | Legacy environments, descendant subprocess tracing | `ptrace_scope ≤ 1` |
+| **S (Recommended)** | `MazewallProfiler` / `Profiler.profile { }` | Standard synchronous workloads, accurate syscall + path capture | Unprivileged |
+| **H (Hybrid)** | `ProfileStrategy.HYBRID_NO_URING` | Disable `io_uring` while profiling; allow `io_uring_*` at runtime and let Landlock bind paths | Unprivileged |
+| **P (strace, internal)** | Not a session API | JVM-floor lab dump / USER_NOTIF-unavailable environments | Parent-child `ptrace` |
+| **eBPF (recorded)** | `ProfileStrategy.EBPF` + `ebpfEventLog` | Compile a rootful sidecar log (`kind=uring ...`) | Capture needs host `CAP_BPF`; compile does not |
+| **eBPF (live)** | `ProfileStrategy.EBPF` without a log | Not implemented — fails closed | Host `CAP_BPF` in the **init** user ns |
+
+The operator API is `MazewallProfiler.open().use { it.profile { workload() } }`. There is no `profile(Class)` / `TraceableWorkload` contract.
+
+`IterativeProfiler` is deprecated (not a tracer). `StraceProfiler` is deprecated. Descendant strace is an internal floor probe (`DescendantStrace`), not how you profile application code. `AUTO` never selects STRACE.
+
+`result.toPolicy()` refuses incomplete coverage (for example `io_uring` syscalls with no destinations). Pass `allowIncomplete = true` only if you will not treat the policy as a complete contract.
 
 ### Tier S — `USER_NOTIF` Daemon (Recommended)
 
@@ -104,7 +114,8 @@ val behavior: BillOfBehavior = result.behavior
 behavior.syscalls        // Set<Syscall>  — every syscall observed on the profiled thread
 behavior.opens           // Set<String>   — every filesystem path opened
 behavior.fsWritePaths    // Set<String>   — every path written to
-behavior.networkEndpoints // Set<String>  — every socket destination
+behavior.connects         // Set<NetworkEndpoint> — observed connect() destinations
+behavior.ioUringOps       // Set<String>  — io_uring opcodes (eBPF collector only)
 
 behavior.toPolicy()      // → Policy (ready to pass to ContainedExecutors.wrap)
 behavior.toDsl()         // → String (Kotlin DSL to paste into your codebase)
@@ -120,8 +131,9 @@ For a detailed class hierarchy and structural relationship map, see the [Profile
 
 - **`Profiler` / `ProfilerDaemon`**: Implements the out-of-process `USER_NOTIF` engine. The daemon receives the seccomp listener FD via UNIX socket `SCM_RIGHTS` passing, intercepts trapped syscalls, resolves paths via `process_vm_readv`, and sends an ACK back to release the worker thread.
 - **`ProfilerTraceListener`**: Bridge between the daemon and the JVM — receives `TraceEvent`s and correlates them with JVM stack traces via `ThreadRegistry`.
-- **`IterativeProfiler`**: Implements the deny-and-retry Landlock learning loop.
-- **`StraceProfiler` / `StraceWorkloadRunner`**: Spawns target workloads under `strace -f` and parses the log stream.
+- **`MazewallProfiler`**: Owned session, strategy selection, coverage on the result. eBPF fails closed until a collector exists.
+- **`IterativeProfiler`**: Deprecated deny-and-retry Landlock learning loop.
+- **`DescendantStrace` / `StraceCollector`**: Internal child-JVM `strace -f` for floor dumps. Not operator API.
 - **`BobCompiler` / `BillOfBehavior`**: Deduplicates raw high-frequency syscall streams and compiles the structured behavioral contract.
 
 For the critical ACK loop architecture and deadlock prevention rules, see [designs/core/architectural-map.md](../docs/internals/designs/core/architectural-map.md).
@@ -138,7 +150,7 @@ profiler/src/main/kotlin/io/mazewall/profiler/
 ├── Profiler.kt                # ⭐ Primary public entry point: Profiler.profile { }
 ├── BillOfBehavior.kt          # Structured behavioral contract output (syscalls, paths, network)
 ├── BillOfBehaviorDto.kt       # JSON-serializable DTO for SBoB output
-├── TraceableWorkload.kt       # Functional interface for profiled workloads
+├── TraceableWorkload.kt       # Internal descendant-strace child contract (not operator API)
 ├── ProfilingResult.kt         # Result value wrapping BillOfBehavior + metadata
 │
 ├── engine/

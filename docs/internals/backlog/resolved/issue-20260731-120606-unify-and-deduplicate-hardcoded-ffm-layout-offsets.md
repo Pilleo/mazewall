@@ -2,7 +2,7 @@
 title: "Unify and Deduplicate Hardcoded FFM Layout Offsets Across Profiler and Enforcer"
 severity: "HIGH"
 status: "resolved"
-priority: 9
+priority: high
 dependencies: []
 component: "enforcer"
 target_modules:

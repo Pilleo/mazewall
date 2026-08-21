@@ -2,7 +2,7 @@
 title: Introduce Context Parameters for Memory and Engine Scopes
 severity: ENHANCEMENT
 status: open
-priority: 3
+priority: low
 dependencies: []
 target_files:
 - enforcer/src/main/kotlin/io/mazewall/NativeEngine.kt

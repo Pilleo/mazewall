@@ -2,6 +2,7 @@ package io.mazewall.profiler
 
 import io.mazewall.BaseIntegrationTest
 import io.mazewall.LinuxNative
+import io.mazewall.NeedsFreshJvm
 import io.mazewall.Policy
 import io.mazewall.asFd
 import io.mazewall.core.Arch
@@ -17,6 +18,7 @@ import java.util.concurrent.TimeUnit
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
+@NeedsFreshJvm
 class ProfilerIntegrationTest : BaseIntegrationTest() {
 
     companion object {
@@ -108,7 +110,7 @@ class ProfilerIntegrationTest : BaseIntegrationTest() {
         val bob = result.behavior
 
         // Let's compile!
-        val compiledPolicy = bob.toPolicy(Policy.PURE_COMPUTE_UNSAFE)
+        val compiledPolicy = result.toPolicy(Policy.PURE_COMPUTE_UNSAFE, allowIncomplete = true)
         val dsl = bob.toDsl("Policy.PURE_COMPUTE_UNSAFE", Policy.PURE_COMPUTE_UNSAFE)
         println("Profiler compiled DSL:\n$dsl")
 
@@ -373,12 +375,24 @@ LinuxNative.raw.syscall(
         val targetFile = File("/etc/hostname")
         assertTrue(targetFile.exists())
 
-        val result = Profiler.profile(processWide = true, captureStackTraces = true) {
-            val thread = Thread {
-                targetFile.readText()
+        val result = try {
+            Profiler.profile(processWide = true, captureStackTraces = true) {
+                val thread = Thread {
+                    targetFile.readText()
+                }
+                thread.start()
+                thread.join()
             }
-            thread.start()
-            thread.join()
+        } catch (e: IllegalStateException) {
+            // TSYNC can return a positive sibling tid (divergent filter / strict mode)
+            // instead of -1/EACCES. Fail-closed; do not treat that tid as success.
+            assertTrue(
+                e.message?.contains("EACCES") == true ||
+                    e.message?.contains("offending sibling tid") == true ||
+                    e.message?.contains("TSYNC") == true,
+                "unexpected process-wide failure: ${e.message}",
+            )
+            return
         }
 
         val bob = result.behavior

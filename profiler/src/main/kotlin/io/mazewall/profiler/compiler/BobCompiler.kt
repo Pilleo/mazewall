@@ -2,6 +2,8 @@ package io.mazewall.profiler.compiler
 
 import io.mazewall.core.Syscall
 import io.mazewall.profiler.BillOfBehavior
+import io.mazewall.profiler.NetworkEndpoint
+import io.mazewall.profiler.ProfileObservation
 import io.mazewall.profiler.engine.TraceEvent
 import java.util.*
 
@@ -18,59 +20,32 @@ object BobCompiler {
     /**
      * Parses the given semantic trace events and returns a [BillOfBehavior].
      */
-    fun compile(events: List<TraceEvent>): BillOfBehavior {
+    fun compile(events: List<TraceEvent>): BillOfBehavior =
+        compileObservations(events.map { ProfileObservation.fromTraceEvent(it) })
+
+    fun compileObservations(observations: List<ProfileObservation>): BillOfBehavior {
         val opens = mutableSetOf<String>()
         val fsWritePaths = mutableSetOf<String>()
         val syscalls = mutableSetOf<Syscall>()
         val execs = mutableSetOf<String>()
+        val connects = mutableSetOf<NetworkEndpoint>()
+        val ioUringOps = mutableSetOf<String>()
 
-        for (event in events) {
-            // Map the syscall name to Syscall enum
-            val syscall =
-                runCatching {
-                    Syscall.valueOf(event.syscallName.uppercase(Locale.US))
-                }.getOrNull()
-
-            if (syscall != null) {
-                syscalls.add(syscall)
-            }
-
-            // Categorize paths using polymorphic hierarchy
-            when (event) {
-                is TraceEvent.Open -> {
-                    if (isOpenWrite(event)) {
-                        fsWritePaths.add(event.path)
+        for (obs in observations) {
+            when (obs) {
+                is ProfileObservation.IoUring -> {
+                    ioUringOps.add(obs.opcode)
+                    if (isUringMutation(obs.opcode)) {
+                        fsWritePaths.addAll(obs.paths)
                     } else {
-                        opens.add(event.path)
+                        opens.addAll(obs.paths)
                     }
                 }
-
-                is TraceEvent.Exec -> {
-                    execs.add(event.path)
+                is ProfileObservation.Connect -> {
+                    connects.add(obs.endpoint)
+                    syscalls.add(Syscall.CONNECT)
                 }
-
-                is TraceEvent.FsMutation -> {
-                    fsWritePaths.addAll(event.paths)
-                }
-
-                is TraceEvent.Mmap -> {
-                    // MMAP events could optionally be used to detect executable memory requests
-                    // but for BoB generation we currently focus on path-based security.
-                }
-
-                is TraceEvent.Socket -> {
-                    // Socket domain/type could be used for network BoB generation in the future.
-                }
-
-                is TraceEvent.Generic -> {
-                    // Conservative fallback: treat any paths in a generic event as reads
-                    // unless we know it's a mutation
-                    if (isFileSystemMutation(event.syscallName)) {
-                        fsWritePaths.addAll(event.paths)
-                    } else {
-                        opens.addAll(event.paths)
-                    }
-                }
+                is ProfileObservation.Syscall -> applySyscall(obs, opens, fsWritePaths, syscalls, execs)
             }
         }
 
@@ -79,7 +54,47 @@ object BobCompiler {
             fsWritePaths = fsWritePaths,
             syscalls = syscalls,
             execs = execs,
+            connects = connects,
+            ioUringOps = ioUringOps,
         )
+    }
+
+    private fun applySyscall(
+        obs: ProfileObservation.Syscall,
+        opens: MutableSet<String>,
+        fsWritePaths: MutableSet<String>,
+        syscalls: MutableSet<Syscall>,
+        execs: MutableSet<String>,
+    ) {
+        val name = obs.name.uppercase(Locale.US)
+        runCatching { Syscall.valueOf(name) }.getOrNull()?.let { syscalls.add(it) }
+
+        when {
+            name == "EXECVE" || name == "EXECVEAT" -> execs.addAll(obs.paths)
+            name == "OPEN" || name == "OPENAT" || name == "OPENAT2" -> {
+                if (isOpenWrite(obs.openFlags ?: 0L)) {
+                    fsWritePaths.addAll(obs.paths)
+                } else {
+                    opens.addAll(obs.paths)
+                }
+            }
+            isFileSystemMutation(name) -> fsWritePaths.addAll(obs.paths)
+            name == "SOCKET" || name == "CONNECT" || name == "MMAP" -> { }
+            else -> opens.addAll(obs.paths)
+        }
+    }
+
+    private fun isUringMutation(opcode: String): Boolean {
+        val op = opcode.uppercase(Locale.US)
+        return op.contains("WRITE") ||
+            op.contains("UNLINK") ||
+            op.contains("RENAME") ||
+            op.contains("MKDIR") ||
+            op.contains("RMDIR") ||
+            op.contains("FSYNC") ||
+            op.contains("SYNC") ||
+            op.contains("TRUNCATE") ||
+            op.contains("CLOSE") && op.contains("DIRECT")
     }
 
     private fun isFileSystemMutation(syscallName: String): Boolean =
@@ -102,15 +117,13 @@ object BobCompiler {
                 "CHOWN",
                 "LCHOWN",
                 "FCHOWNAT",
+                "CREAT",
+                "TRUNCATE",
+                "FTRUNCATE",
+                "UTIME",
+                "UTIMES",
+                "UTIMENSAT",
             )
-
-    private fun isOpenWrite(semanticEvent: TraceEvent): Boolean {
-        if (semanticEvent is TraceEvent.Open) {
-            if (semanticEvent.syscallName == "OPENAT2") return true // Pointer to struct open_how, conservatively treat as write
-            return isOpenWrite(semanticEvent.flags)
-        }
-        return false
-    }
 
     private fun isOpenWrite(flags: Long): Boolean {
         val accessMode = flags and 3L

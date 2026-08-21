@@ -2,7 +2,7 @@
 title: "Replace rebaseBranch() with git merge: Use merge to keep Jules PR branches up to date"
 severity: "HIGH"
 status: "resolved"
-priority: 10
+priority: high
 dependencies: []
 component: "orchestrator"
 target_modules:

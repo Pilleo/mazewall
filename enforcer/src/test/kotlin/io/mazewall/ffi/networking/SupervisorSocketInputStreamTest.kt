@@ -25,8 +25,8 @@ class SupervisorSocketInputStreamTest {
             throw AssertionError("socketpair failed: \${res.errno}")
         }
         
-        val readFd = FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>(sv.readInt(0L))
-        val writeFd = FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>(sv.readInt(4L))
+        val readFd = FileDescriptor.unixSocket(sv.readInt(0L))
+        val writeFd = FileDescriptor.unixSocket(sv.readInt(4L))
         
         val inputStream = SupervisorSocketInputStream(readFd, arena)
 
@@ -65,8 +65,8 @@ class SupervisorSocketInputStreamTest {
             throw AssertionError("socketpair failed: \${res.errno}")
         }
         
-        val readFd = FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>(sv.readInt(0L))
-        val writeFd = FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>(sv.readInt(4L))
+        val readFd = FileDescriptor.unixSocket(sv.readInt(0L))
+        val writeFd = FileDescriptor.unixSocket(sv.readInt(4L))
         
         val inputStream = SupervisorSocketInputStream(readFd, arena)
 

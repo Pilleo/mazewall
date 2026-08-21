@@ -39,7 +39,7 @@ class BobCompilerTest {
         val bob = BobCompiler.compile(events)
 
         // Transpile to Policy
-        val policy = bob.toPolicy(Policy.PURE_COMPUTE_UNSAFE)
+        val policy = bob.toPolicy(Policy.PURE_COMPUTE_UNSAFE, allowIncomplete = true)
 
         // Verify unrestricted syscalls
         // PURE_COMPUTE blocks CONNECT, OPEN, OPENAT. They should be unrestricted now.
@@ -78,7 +78,7 @@ val policy = Policy.threadLocalBuilder()
     @Test
     fun `test empty events returns unmodified base policy`() {
         val bob = BobCompiler.compile(emptyList())
-        val policy = bob.toPolicy(Policy.PURE_COMPUTE_UNSAFE)
+        val policy = bob.toPolicy(Policy.PURE_COMPUTE_UNSAFE, allowIncomplete = true)
 
         assertFalse(policy.isSyscallAllowed(Syscall.CONNECT))
         assertFalse(policy.isSyscallAllowed(Syscall.MKDIR))
@@ -152,12 +152,11 @@ val policy = Policy.builder()
 
         val bob = BobCompiler.compile(events)
 
-        assertTrue(bob.fsWritePaths.contains("/tmp/openat2-test.txt"), "OPENAT2 should be treated as write")
+        assertTrue(bob.opens.contains("/tmp/openat2-test.txt"), "OPENAT2 without flags is not a proven write")
         assertTrue(bob.fsWritePaths.contains("/tmp/deleted-file.txt"), "UNLINKAT should be treated as write")
         assertTrue(bob.fsWritePaths.contains("/tmp/new-subdir"), "MKDIRAT should be treated as write")
         assertTrue(bob.fsWritePaths.contains("/tmp/old-name"), "RENAMEAT2 should be treated as write")
         assertTrue(bob.fsWritePaths.contains("/tmp/new-name"), "RENAMEAT2 target should be treated as write")
-        assertTrue(bob.opens.isEmpty(), "No paths should be categorized as simple opens in this test")
     }
 
     @Test
@@ -219,6 +218,12 @@ val policy = Policy.builder()
             "CHOWN",
             "LCHOWN",
             "FCHOWNAT",
+            "CREAT",
+            "TRUNCATE",
+            "FTRUNCATE",
+            "UTIME",
+            "UTIMES",
+            "UTIMENSAT",
         )
 
         val events = mutations.map {

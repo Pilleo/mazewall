@@ -14,4 +14,12 @@ To ensure mazewall is production-grade, secure, and maintainable, all code chang
 10. **FFM & Native Memory Safety:** Off-heap allocations must use deterministic scopes like `Arena.ofConfined().use { }` to prevent memory leaks. Captured native `errno` states must be read immediately after downcalls, and struct layouts must align precisely with host CPU architectures to avoid JVM crashes.
 11. **Fail-Closed Security Default:** Security violations, enforcement failures, or environment mismatches must result in critical exceptions or process termination. Never degrade enforcement to a silent warning-and-bypass.
 
+12. **Pure machines for lifecycle and syscall decisions:**
+    - New daemon, handshake, or session protocol: sealed state + `evaluate(state, event)` + effects. Do not assign `state =` inside I/O.
+    - New supervisor/syscall decision: sealed `SupervisorRoute` / `SupervisedKind`, exhaustive `when`, no `else ->` on those types.
+    - Unit-test the matrix without UNIX sockets. Interpreter tests may use `MockNativeEngine`.
+    - Adding a sealed subtype: update `ArchitectureTest.sealedSecurityOutcomesHaveAClosedSubclassSet` in the same commit.
+    - `EPERM` / `EACCES`: rethrow or `Rejected` / `Abort`. Never `recover { 0 }`.
+    - Prefer `internal` for machines, events, and effects. `public` is for operator-facing types (`Policy`, `FileDescriptor`, `UnixListenDaemonState`). Cross-module protocol helpers stay public only when another Gradle module must call them; mark those with `@MazewallInternal` (`SupervisedKind`, `UserNotifReply`, `SeccompNotifications`).
+
 

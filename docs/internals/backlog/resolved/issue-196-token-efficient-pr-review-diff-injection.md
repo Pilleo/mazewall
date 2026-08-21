@@ -2,7 +2,7 @@
 title: "Implement Token-Efficient PR Review via Diff Injection"
 severity: "HIGH"
 status: "resolved"
-priority: 10
+priority: high
 dependencies: []
 component: "orchestrator"
 effort: "small"

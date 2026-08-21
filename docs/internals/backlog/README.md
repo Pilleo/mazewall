@@ -18,13 +18,14 @@ To log a new bug, architectural gap, kernel-level nuance, or security vulnerabil
 *   `docs/internals/backlog/testing/` for testing findings
 *   `docs/internals/backlog/code_health/` for other code/architectural health improvements
 
-Ensure your file starts with YAML frontmatter containing `title`, `severity`, and `status`:
+Ensure your file starts with YAML frontmatter containing `title`, `severity`, `status`, and `priority` (`high`, `medium`, or `low` — not 0–10):
 
 ```markdown
 ---
 title: "Title of Issue"
 severity: "HIGH/MEDIUM/LOW/CRITICAL/ENHANCEMENT"
 status: "open"
+priority: high
 ---
 
 # 🔴 [Severity: HIGH]: Title of Issue

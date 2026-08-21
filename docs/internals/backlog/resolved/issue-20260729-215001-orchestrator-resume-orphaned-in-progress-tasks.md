@@ -2,7 +2,7 @@
 title: "Automatically Resume and Re-import Orphaned In-Progress Backlog Tasks into Active Slots"
 severity: "HIGH"
 status: "resolved"
-priority: 10
+priority: high
 dependencies: []
 component: "orchestrator"
 target_modules:

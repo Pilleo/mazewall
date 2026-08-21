@@ -2,7 +2,7 @@
 title: "Enhance NativeSocketInputStream with Interruption Checking and Backoff Throttling to Prevent CPU Spinning"
 severity: "HIGH"
 status: "resolved"
-priority: 8
+priority: high
 dependencies: []
 component: "profiler"
 target_modules:

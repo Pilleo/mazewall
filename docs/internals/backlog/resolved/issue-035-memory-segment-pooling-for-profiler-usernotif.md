@@ -2,7 +2,7 @@
 title: "Memory Segment Pooling for Profiler USER_NOTIF"
 severity: "ENHANCEMENT"
 status: "resolved"
-priority: 2
+priority: low
 dependencies: []
 component: "ffi"
 effort: "medium"

@@ -2,7 +2,7 @@
 title: Unprivileged Pivot Root (Empty `tmpfs`)
 severity: ENHANCEMENT
 status: open
-priority: 2
+priority: low
 dependencies: []
 target_files:
 - enforcer/src/main/kotlin/io/mazewall/enforcer/ContainedExecutors.kt

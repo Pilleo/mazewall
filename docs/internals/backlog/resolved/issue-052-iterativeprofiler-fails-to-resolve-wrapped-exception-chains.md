@@ -2,7 +2,7 @@
 title: "`IterativeProfiler` fails to resolve wrapped exception chains"
 severity: "RESOLVED"
 status: "resolved"
-priority: 5
+priority: medium
 ---
 
 # ✅ [RESOLVED]: `IterativeProfiler` fails to resolve wrapped exception chains

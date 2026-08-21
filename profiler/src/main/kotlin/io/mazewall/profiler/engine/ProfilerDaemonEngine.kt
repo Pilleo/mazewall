@@ -6,11 +6,10 @@ import io.mazewall.core.Arch
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
-import io.mazewall.core.RealSocketManager
 import io.mazewall.core.SocketManager
 import io.mazewall.core.Syscall
+import io.mazewall.platform.daemon.UnixListenDaemonState
 import io.mazewall.platform.seccomp.daemon.SeccompDaemonEngine
-import io.mazewall.platform.seccomp.daemon.SeccompDaemonState
 import io.mazewall.ffi.memory.native
 
 /**
@@ -96,14 +95,8 @@ public class ProfilerDaemonEngine(
     internal val clientSockets = delegate.clientSockets
 
 
-    internal val state: ProfilerDaemonState
-        get() = when (val s = delegate.state) {
-            is SeccompDaemonState.Uninitialized -> ProfilerDaemonState.Uninitialized
-            is SeccompDaemonState.Listening -> ProfilerDaemonState.Listening(s.serverFd, s.socketPath)
-            is SeccompDaemonState.Active -> ProfilerDaemonState.Active(s.serverFd)
-            is SeccompDaemonState.ShuttingDown -> ProfilerDaemonState.ShuttingDown
-            is SeccompDaemonState.Terminated -> ProfilerDaemonState.Terminated
-        }
+    internal val state: UnixListenDaemonState
+        get() = delegate.state
 
     companion object {
         private const val DAEMON_READY_SENTINEL = "MAZEWALL_DAEMON_READY"

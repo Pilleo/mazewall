@@ -2,7 +2,7 @@
 title: "Kernel Roadmap Attributes Process and Ring Controls to Sandboxed Threads"
 severity: "MEDIUM"
 status: "open"
-priority: 4
+priority: medium
 dependencies: []
 component: "enforcer"
 target_modules:

@@ -2,7 +2,7 @@
 title: "Mockable HTTP transport abstraction for RealJulesClient and TelegramBot"
 severity: "HIGH"
 status: "resolved"
-priority: 5
+priority: medium
 dependencies: []
 component: "orchestrator"
 target_modules: [":tools:orchestrator"]

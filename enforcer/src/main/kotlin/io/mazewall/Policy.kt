@@ -64,6 +64,21 @@ public class Policy<out S : PolicyScope, out State : PolicyState> internal const
     public val syscallActions: Map<Syscall, SeccompAction> get() = definition.syscallActions
     public val allowMmapExec: Boolean get() = definition.allowMmapExec
     public val allowNonThreadClone: Boolean get() = definition.allowNonThreadClone
+    /** Inspectable argument-inspection flags (JIT vs W^X, clone, prctl). */
+    public val argumentRules: PolicyArgumentRules get() = PolicyArgumentRules.of(definition)
+
+    /**
+     * [PolicyMode.DENY_LIST] when the default action is allow; [PolicyMode.ALLOW_LIST]
+     * when the default is errno. Other default actions stay [PolicyMode.DENY_LIST]
+     * (legacy kill/trace defaults).
+     */
+    public val mode: PolicyMode
+        get() =
+            if (defaultAction is SeccompAction.ACT_ERRNO || defaultAction == SeccompAction.ACT_ERRNO) {
+                PolicyMode.ALLOW_LIST
+            } else {
+                PolicyMode.DENY_LIST
+            }
 
     /**
      * Whether unsafe prctl options are allowed.
@@ -103,11 +118,29 @@ public class Policy<out S : PolicyScope, out State : PolicyState> internal const
             Policy(PolicyPresets.PURE_COMPUTE_UNSAFE)
 
         /**
-         * The absolute minimum baseline for any production JVM process.
+         * Blocks process execution and memfd. **Not** the process-wide HotSpot recipe:
+         * hidden `allowMmapExec = false` denies `PROT_EXEC` mappings and can crash JIT.
+         * Use [NO_EXEC_HOTSPOT] with [io.mazewall.enforcer.api.ContainedExecutors.installOnProcess].
          */
         @JvmField
         public val NO_EXEC: Policy<PolicyScope.ProcessWideSafe, Uncompiled> =
             Policy(PolicyPresets.NO_EXEC)
+
+        /**
+         * Process-wide Tier 1 on HotSpot: no `execve` / `execveat` / `memfd_create`,
+         * but JIT may still create executable mappings.
+         */
+        @JvmField
+        public val NO_EXEC_HOTSPOT: Policy<PolicyScope.ProcessWideSafe, Uncompiled> =
+            Policy(PolicyPresets.NO_EXEC_HOTSPOT)
+
+        /**
+         * Same syscall set as [NO_EXEC]: W^X / Native Image process-wide baseline.
+         * Prefer [ProcessPolicies.denyProcessCreation] with [RuntimeProfile.NATIVE_IMAGE].
+         */
+        @JvmField
+        public val NO_EXEC_NATIVE_IMAGE: Policy<PolicyScope.ProcessWideSafe, Uncompiled> =
+            Policy(PolicyPresets.NO_EXEC_NATIVE_IMAGE)
 
         /**
          * Blocks all network-related system calls. Safe for process-wide application.
@@ -136,6 +169,30 @@ public class Policy<out S : PolicyScope, out State : PolicyState> internal const
             val defs = policies.map { it.definition }.toTypedArray()
             return Policy(PolicyDefinition.combine(*defs))
         }
+
+        /**
+         * Named intersection of process-wide policies. Same algebra as [combine]:
+         * higher-priority Seccomp actions win; Landlock paths shrink; flags AND.
+         * Does not expand permissions already installed in the kernel.
+         */
+        @JvmStatic
+        public fun restrictFurtherWith(
+            vararg policies: Policy<PolicyScope.ProcessWideSafe, Uncompiled>,
+        ): Policy<PolicyScope.ProcessWideSafe, Uncompiled> = combine(*policies)
+
+        @JvmStatic
+        @JvmOverloads
+        public fun denyList(
+            runtime: RuntimeProfile = RuntimeProfile.HOTSPOT_JIT,
+            configure: DenyListSpec.() -> Unit = {},
+        ): Policy<PolicyScope.ProcessWideSafe, Uncompiled> = PolicyLists.denyList(runtime, configure)
+
+        @JvmStatic
+        @JvmOverloads
+        public fun allowList(
+            runtime: RuntimeProfile = RuntimeProfile.HOTSPOT_JIT,
+            configure: AllowListSpec.() -> Unit = {},
+        ): Policy<PolicyScope.ProcessWideSafe, Uncompiled> = PolicyLists.allowList(runtime, configure)
 
         @JvmStatic
         public fun combine(vararg policies: Policy<*, Uncompiled>): Policy<*, Uncompiled> {
@@ -171,6 +228,10 @@ public class Policy<out S : PolicyScope, out State : PolicyState> internal const
         public fun block(vararg syscalls: Syscall): Builder<S> = addAction(SeccompAction.ACT_ERRNO, *syscalls)
         public fun allow(vararg syscalls: Syscall): Builder<S> = addAction(SeccompAction.ACT_ALLOW, *syscalls)
 
+        /**
+         * Removes an explicit action from this uncompiled builder only.
+         * Installed kernel filters are monotonic and cannot grow.
+         */
         public fun unblock(vararg syscalls: Syscall): Builder<S> {
             internalBuilder.unblock(*syscalls)
             return this
@@ -211,8 +272,18 @@ public class Policy<out S : PolicyScope, out State : PolicyState> internal const
             return this as Builder<PolicyScope.ThreadLocalOnly>
         }
 
+        /**
+         * Advanced: allow `mmap`/`mprotect` `PROT_EXEC`. Prefer
+         * [forRuntime] with [RuntimeProfile.HOTSPOT_JIT] on process baselines.
+         */
         public fun allowMmapExec(): Builder<S> {
             internalBuilder.allowMmapExec()
+            return this
+        }
+
+        /** Apply JIT vs W^X executable-mapping policy for [runtime]. */
+        public fun forRuntime(runtime: RuntimeProfile): Builder<S> {
+            internalBuilder.forRuntime(runtime)
             return this
         }
 
@@ -265,12 +336,17 @@ internal fun <S : PolicyScope> Policy<S, Uncompiled>.compile(arch: Arch): Policy
 }
 
 /**
- * Composes two [PolicyScope.ProcessWideSafe] policies.
+ * Composes two [PolicyScope.ProcessWideSafe] policies (intersection / restrict-further).
  */
 @JvmName("plusProcessWide")
 public operator fun Policy<PolicyScope.ProcessWideSafe, Uncompiled>.plus(
     other: Policy<PolicyScope.ProcessWideSafe, Uncompiled>
-): Policy<PolicyScope.ProcessWideSafe, Uncompiled> = Policy.combine(this, other)
+): Policy<PolicyScope.ProcessWideSafe, Uncompiled> = Policy.restrictFurtherWith(this, other)
+
+/** Restrictive composition; same as [Policy.restrictFurtherWith]. */
+public fun Policy<PolicyScope.ProcessWideSafe, Uncompiled>.restrictFurtherWith(
+    other: Policy<PolicyScope.ProcessWideSafe, Uncompiled>,
+): Policy<PolicyScope.ProcessWideSafe, Uncompiled> = Policy.restrictFurtherWith(this, other)
 
 /**
  * Composes a policy with a thread-local policy.

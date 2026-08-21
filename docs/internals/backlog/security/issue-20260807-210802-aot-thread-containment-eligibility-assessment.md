@@ -2,7 +2,7 @@
 title: "Add AOT Reachability Assessment for Thread-Containment Eligibility"
 severity: "ENHANCEMENT"
 status: "open"
-priority: 7
+priority: medium
 dependencies: []
 component: "enforcer"
 target_modules:

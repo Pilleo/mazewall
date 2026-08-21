@@ -3,6 +3,7 @@ package io.mazewall.seccomp
 import io.mazewall.BaseIntegrationTest
 import io.mazewall.EnabledIfLinuxAndSupported
 import io.mazewall.EnabledIfCetSupported
+import io.mazewall.NeedsFreshJvm
 import io.mazewall.Platform
 import io.mazewall.Policy
 import io.mazewall.install
@@ -21,6 +22,7 @@ class IntelCetIntegrationTest : BaseIntegrationTest() {
     }
 
     @Test
+    @NeedsFreshJvm
     @EnabledIfCetSupported
     fun `queryIntelCetStatus returns active status when CET is supported and locked`() {
         val policy = Policy.builder().lockIntelCet().build()

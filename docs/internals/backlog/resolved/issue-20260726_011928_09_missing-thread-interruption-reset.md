@@ -3,7 +3,7 @@ title: SupervisorSocketUtils swallows Thread.sleep InterruptedException without 
   interrupt status
 type: issue
 status: resolved
-priority: 5
+priority: medium
 labels:
 - security
 - enforcer

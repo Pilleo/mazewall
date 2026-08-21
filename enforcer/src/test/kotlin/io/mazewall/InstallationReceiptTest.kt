@@ -38,6 +38,20 @@ class InstallationReceiptTest {
         val receipt = InstallationReceipt(false, Policy.builder().build().definition)
 
         assertTrue(receipt.installed)
+        assertEquals(false, receipt.landlockApplied)
+    }
+
+    @Test
+    fun `receipt can report Landlock without a seccomp install`() {
+        val receipt =
+            InstallationReceipt(
+                processWide = false,
+                requestedPolicy = Policy.builder().build().definition,
+                installed = false,
+                landlockApplied = true,
+            )
+        assertEquals(false, receipt.installed)
+        assertEquals(true, receipt.landlockApplied)
     }
 
     @Test

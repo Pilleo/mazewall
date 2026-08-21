@@ -2,7 +2,7 @@
 title: "Enhance Task Approval Telegram Message with Full Context"
 severity: "HIGH"
 status: "resolved"
-priority: 10
+priority: high
 dependencies: []
 component: "orchestrator"
 effort: "small"

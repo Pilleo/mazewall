@@ -2,7 +2,7 @@
 title: "Verify and Enforce FFM Struct Layout Alignments Against Native C ABIs"
 severity: "HIGH"
 status: "open"
-priority: 8
+priority: high
 dependencies: []
 component: "enforcer"
 target_modules:

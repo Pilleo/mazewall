@@ -2,7 +2,7 @@
 title: "`Landlock` getAccessMask missing ABI 4 Support (Net Capabilities)"
 severity: "HIGH"
 status: "resolved"
-priority: 9
+priority: high
 dependencies: []
 component: "enforcer"
 effort: "small"

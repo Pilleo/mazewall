@@ -2,7 +2,7 @@
 title: Formal Monoidal Composition for `BillOfBehavior`
 severity: ENHANCEMENT
 status: open
-priority: 2
+priority: low
 dependencies: []
 target_files:
 - profiler/src/main/kotlin/io/mazewall/profiler/BillOfBehavior.kt

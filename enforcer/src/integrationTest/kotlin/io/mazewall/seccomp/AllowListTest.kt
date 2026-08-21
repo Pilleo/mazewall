@@ -2,6 +2,7 @@ package io.mazewall.seccomp
 
 import io.mazewall.BaseIntegrationTest
 import io.mazewall.LinuxNative
+import io.mazewall.NeedsFreshJvm
 import io.mazewall.Policy
 import io.mazewall.core.Arch
 import io.mazewall.core.NativeArg
@@ -11,6 +12,7 @@ import io.mazewall.enforcer.api.ContainedExecutors
 import org.junit.jupiter.api.Test
 import java.util.concurrent.Executors
 
+@NeedsFreshJvm
 class AllowListTest : BaseIntegrationTest() {
     private fun jvmFloor(): Array<Syscall> =
         arrayOf(

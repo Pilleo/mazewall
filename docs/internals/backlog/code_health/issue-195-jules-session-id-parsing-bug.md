@@ -2,7 +2,7 @@
 title: Fix Jules Session ID Parsing Bug
 severity: HIGH
 status: open
-priority: 10
+priority: high
 dependencies: []
 target_files:
 - tools/orchestrator/src/main/kotlin/io/mazewall/orchestrator/OrchestratorDaemon.kt

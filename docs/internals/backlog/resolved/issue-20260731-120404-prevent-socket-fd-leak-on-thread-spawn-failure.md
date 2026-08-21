@@ -2,7 +2,7 @@
 title: "Prevent Socket FD Leak in ProfilerDaemonEngine on Connection Thread Spawn Failure"
 severity: "HIGH"
 status: "resolved"
-priority: 8
+priority: high
 dependencies: []
 component: "profiler"
 target_modules:

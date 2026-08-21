@@ -22,7 +22,9 @@ The current Kotlin happy path is compact, uses the familiar `ExecutorService` ab
 
 `ContainedExecutors.wrap(delegate, policy)` accepts an arbitrary executor while the caller retains the raw delegate. Seccomp and Landlock remain on worker threads after a task completes. Reusing the delegate elsewhere can therefore expose unrelated work to permanent restrictions.
 
-The primary API should create and own dedicated workers and return a marker type:
+**Deferred — lowest priority.** An owned `ContainedExecutorService` (issue 032520) is intentionally not scheduled. Owning the pool duplicates JVM thread lifecycle, shutdown, and Loom-rejection work on top of irreversible kernel filters. Prefer documenting `wrap` ownership over building a second executor product.
+
+If that direction is ever approved again, the primary API would create dedicated workers and return a marker type:
 
 ```kotlin
 val parserPool: ContainedExecutorService = mazewall.executors.fixed(

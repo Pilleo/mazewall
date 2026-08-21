@@ -2,7 +2,7 @@
 title: Refactor Profiler core classes for testability and test them
 severity: MEDIUM
 status: open
-priority: 8
+priority: high
 dependencies: []
 component: profiler
 target_modules:

@@ -2,7 +2,7 @@
 title: 'Orchestrator: Build GitHub Issue Body Dynamically with Project Preamble'
 severity: HIGH
 status: open
-priority: 10
+priority: high
 dependencies: []
 target_files:
 - tools/orchestrator/src/main/kotlin/io/mazewall/orchestrator/OrchestratorDaemon.kt

@@ -58,53 +58,7 @@ object Profiler {
         block: () -> T,
     ): ProfilingResult<T> {
         validateNotVirtual()
-
-        // Pre-warm classloading to prevent circular classloader deadlocks
-        // when seccomp filters intercept file system reads during dynamic class loading.
-        @Suppress("TooGenericExceptionCaught")
-        try {
-            val dummyFile = java.io.File.createTempFile("mazewall_warmup", ".tmp")
-            dummyFile.writeText("warmup")
-            dummyFile.readText()
-            dummyFile.delete()
-
-            // Pre-load all classes and code paths utilized inside ProfilerTraceListener
-            val dummyEvent = io.mazewall.profiler.engine.TraceEvent(
-                tidValue = 0,
-                syscallName = "openat",
-                args = longArrayOf(),
-                paths = listOf("warmup"),
-                stackTrace = null
-            )
-            dummyEvent.tid
-            dummyEvent.syscallName
-
-            // Warm up stack trace retrieval, mapping, and stringification
-            Thread.currentThread().stackTrace.map { it.toString() }
-
-            // Warm up BobCompiler and related classes
-            val dummyBob = io.mazewall.profiler.compiler.BobCompiler.compile(java.util.concurrent.CopyOnWriteArrayList(listOf(dummyEvent)))
-
-            // Warm up ProfilingResult
-            val dummyResult = ProfilingResult(Unit, dummyBob, java.util.concurrent.ConcurrentHashMap())
-            dummyResult.toString()
-
-            // Warm up TraceListenerState subclasses
-            val s1 = io.mazewall.profiler.internal.TraceListenerState.AwaitingEvent
-            val s2 = io.mazewall.profiler.internal.TraceListenerState.ReadingHeader(0)
-            val s3 = io.mazewall.profiler.internal.TraceListenerState.ReadingSyscall(0, 0)
-            val s4 = io.mazewall.profiler.internal.TraceListenerState.ReadingArguments(0, "", 0)
-            val s5 = io.mazewall.profiler.internal.TraceListenerState.ProcessingEvent(dummyEvent)
-            val s6 = io.mazewall.profiler.internal.TraceListenerState.Disconnected
-            s1.toString(); s2.toString(); s3.toString(); s4.toString(); s5.toString(); s6.toString()
-
-            // Warm up list, map, and sorting operations
-            val list = java.util.concurrent.CopyOnWriteArrayList<Array<StackTraceElement>>()
-            list.add(emptyArray())
-            val pathCache = java.util.concurrent.ConcurrentHashMap<String, Long>()
-            pathCache["key"] = System.currentTimeMillis()
-            listOf("warmup").sorted().joinToString(",")
-        } catch (ignored: Exception) {}
+        ProfilerAckPreload.ensureLoaded()
 
         val context = daemonManagerProvider().getOrSpawnSharedDaemon()
         val localLogs = CopyOnWriteArrayList<TraceEvent>()
@@ -173,7 +127,23 @@ object Profiler {
         }
 
         val bob = BobCompiler.compile(localLogs).copy(stackProfile = localStackProfile)
-        return ProfilingResult(blockResult.get() as T, bob, localStackProfile)
+        val observations = localLogs.map { io.mazewall.profiler.ProfileObservation.fromTraceEvent(it) }
+        val listener = sessionListener.get()
+        val dropped = listener?.eventQueue?.droppedCount?.toInt() ?: 0
+        val coverage = ProfilingCoverage.infer(
+            strategy = ProfileStrategy.USER_NOTIF,
+            strategyReason = "Profiler.profile USER_NOTIF session",
+            processWide = processWide,
+            observations = observations,
+            stacks = if (captureStackTraces) StackAttribution.CAPTURED else StackAttribution.SKIPPED,
+            droppedEvents = dropped,
+            drainComplete = listener?.drainComplete == true,
+            environment = ProfileEnvironment(
+                kernelRelease = System.getProperty("os.version") ?: "unknown",
+                ebpfLoad = EbpfCapability.probe(),
+            ),
+        )
+        return ProfilingResult(blockResult.get() as T, bob, localStackProfile, coverage, observations)
     }
 
     /**
@@ -216,7 +186,7 @@ object Profiler {
             processWide = processWide,
             startTraceListener = { fd, logs, traces, cache, readyLatch ->
                 val listener = ProfilerTraceListener(
-                    FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(fd),
+                    FileDescriptor.unixSocket(fd),
                     logs,
                     traces,
                     cache

@@ -2,7 +2,7 @@
 title: "Unhandled `O_PATH` Omission on Landlock Fallback Directories"
 severity: "HIGH"
 status: "resolved"
-priority: 9
+priority: high
 dependencies: []
 component: "unknown"
 effort: "small"

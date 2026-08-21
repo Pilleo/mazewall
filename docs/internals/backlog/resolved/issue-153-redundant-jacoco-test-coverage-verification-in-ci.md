@@ -2,7 +2,7 @@
 title: "Redundant JaCoCo Test Coverage Verification in CI"
 severity: "RESOLVED"
 status: "resolved"
-priority: 5
+priority: medium
 ---
 
 # ✅ [RESOLVED]: Redundant JaCoCo Test Coverage Verification in CI

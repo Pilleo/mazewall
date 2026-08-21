@@ -196,7 +196,7 @@ public fun LinuxNative.SyscallResult.Success<Long, *>.asLong(): Long = value
  * Returns the success value as a [FileDescriptor] of [FileDescriptorRole.Generic].
  */
 public fun LinuxNative.SyscallResult.Success<Long, *>.asFd(): FileDescriptor<FileDescriptorRole.Generic, FdState.Open> =
-    FileDescriptor.unsafe(value.toInt())
+    FileDescriptor.adopt(value.toInt(), FileDescriptorRole.Generic)
 
 /**
  * Convenience extension for [LinuxNative.SyscallResult] of [Long].
@@ -212,6 +212,6 @@ public fun LinuxNative.SyscallResult<Long, *>.asInt(): Int =
  */
 public fun LinuxNative.SyscallResult<Long, *>.getFdOrThrow(context: String): FileDescriptor<FileDescriptorRole.Generic, FdState.Open> =
     when (this) {
-        is LinuxNative.SyscallResult.Success -> FileDescriptor.unsafe(value.toInt())
+        is LinuxNative.SyscallResult.Success -> FileDescriptor.adopt(value.toInt(), FileDescriptorRole.Generic)
         is LinuxNative.SyscallResult.Error -> throwErrno(context)
     }

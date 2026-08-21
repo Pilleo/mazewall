@@ -2,7 +2,7 @@
 title: "Strongly Typed Syscall Flags and Native Argument Definitions"
 severity: "ENHANCEMENT"
 status: "resolved"
-priority: 2
+priority: low
 dependencies: []
 target_files: []
 target_modules: [\":enforcer\"]

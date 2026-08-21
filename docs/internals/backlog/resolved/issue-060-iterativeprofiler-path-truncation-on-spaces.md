@@ -2,7 +2,7 @@
 title: "`IterativeProfiler` Path Truncation on Spaces"
 severity: "HIGH"
 status: "resolved"
-priority: 9
+priority: high
 dependencies: []
 component: "profiler"
 effort: "small"

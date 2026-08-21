@@ -3,7 +3,7 @@ title: '`IterativeProfiler` infinite retry loop and failure on disjoint prefix f
   paths'
 severity: HIGH
 status: open
-priority: 9
+priority: high
 dependencies: []
 target_files:
 - profiler/src/main/kotlin/io/mazewall/profiler/iterative/IterativeProfiler.kt

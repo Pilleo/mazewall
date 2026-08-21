@@ -2,7 +2,7 @@
 title: "Replace git rebase with Surgical Intended-Files Apply in Orchestrator's rebaseBranch()"
 severity: "HIGH"
 status: "resolved"
-priority: 10
+priority: high
 dependencies: []
 component: "orchestrator"
 target_modules:

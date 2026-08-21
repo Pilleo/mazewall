@@ -19,7 +19,7 @@ class DependencyGraphTest {
             file = File("issue-001.md"),
             id = "issue-001",
             title = "Parent Task",
-            priority = 5,
+            priority = BacklogPriority.MEDIUM,
             status = "in_progress",
             dependencies = emptyList()
         )
@@ -29,7 +29,7 @@ class DependencyGraphTest {
             file = File("issue-002.md"),
             id = "issue-002",
             title = "Dependent Task",
-            priority = 10,
+            priority = BacklogPriority.HIGH,
             status = "open",
             dependencies = listOf("issue-001")
         )
@@ -48,7 +48,7 @@ class DependencyGraphTest {
             file = File("issue-002.md"),
             id = "issue-002",
             title = "Dependent Task",
-            priority = 10,
+            priority = BacklogPriority.HIGH,
             status = "open",
             dependencies = listOf("issue-001")
         )

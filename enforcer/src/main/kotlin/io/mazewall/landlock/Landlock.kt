@@ -190,7 +190,7 @@ object Landlock {
      */
     fun applyRestrictiveBarrier() {
         val session = LandlockSession(policy = null)
-        session.applyRuleset()
+        session.tryApplyRuleset().orThrow()
     }
 
     /**
@@ -219,8 +219,16 @@ object Landlock {
      * @param processWide If true, attempts to synchronize the ruleset across all threads (Linux 7.0+).
      */
     fun applyRuleset(policy: PolicyDefinition<*>, processWide: Boolean = false) {
+        tryApplyRuleset(policy, processWide).orThrow()
+    }
+
+    /**
+     * Same as [applyRuleset] but returns a sealed outcome so the caller must handle
+     * kernel rejection, operator bypass, or success.
+     */
+    internal fun tryApplyRuleset(policy: PolicyDefinition<*>, processWide: Boolean = false): LandlockApplyResult {
         val session = LandlockSession(policy, processWide)
-        session.applyRuleset()
+        return session.tryApplyRuleset()
     }
 
     internal fun getFullAccessMask(abi: Int): Long {
@@ -246,12 +254,52 @@ object Landlock {
     }
 
     internal fun handleUnsupportedLandlock() {
+        val outcome = handleUnsupportedLandlockOutcome()
+        if (outcome is LandlockApplyResult.Rejected) {
+            throw UnsupportedKernelFeatureException(outcome.reason)
+        }
+    }
+
+    internal fun classifyLandlockErrno(op: String, errno: Int): LandlockApplyResult {
+        val errnoName = when (errno) {
+            NativeConstants.ENOSYS -> "ENOSYS"
+            NativeConstants.EOPNOTSUPP -> "EOPNOTSUPP"
+            NativeConstants.ENOPKG -> "ENOPKG"
+            NativeConstants.EPERM -> "EPERM"
+            else -> errno.toString()
+        }
+        val unsupported = errno == NativeConstants.ENOSYS ||
+            errno == NativeConstants.EOPNOTSUPP ||
+            errno == NativeConstants.ENOPKG
+        val reason = if (unsupported) {
+            "$op failed with $errnoName. " +
+                "Landlock is not supported or enabled on this system. " +
+                "Landlock requires Linux kernel 5.13+ and must be enabled via the 'landlock' LSM " +
+                "(check /sys/kernel/security/lsm or the kernel boot parameters, e.g., 'lsm=landlock,capability,yama,apparmor')."
+        } else {
+            "$op failed with errno=$errnoName"
+        }
+        val fallback = Platform.configuredFallback()
+        return if (unsupported && fallback != Platform.FallbackBehavior.FAIL) {
+            if (fallback == Platform.FallbackBehavior.WARN_AND_BYPASS) {
+                logger.warning(reason)
+            }
+            LandlockApplyResult.Bypassed(reason)
+        } else {
+            LandlockApplyResult.Rejected(reason, errno)
+        }
+    }
+
+    internal fun handleUnsupportedLandlockOutcome(): LandlockApplyResult {
         val fallback = Platform.configuredFallback()
         val msg = "Landlock is not supported on this kernel (requires Linux kernel 5.13+ with Landlock LSM enabled) but FS rules were requested."
-        if (fallback == Platform.FallbackBehavior.FAIL) {
-            throw UnsupportedKernelFeatureException(msg)
-        } else if (fallback == Platform.FallbackBehavior.WARN_AND_BYPASS) {
-            logger.warning(msg)
+        return when (fallback) {
+            Platform.FallbackBehavior.FAIL -> LandlockApplyResult.Rejected(msg)
+            Platform.FallbackBehavior.WARN_AND_BYPASS -> {
+                logger.warning(msg)
+                LandlockApplyResult.Bypassed(msg)
+            }
+            Platform.FallbackBehavior.SILENT_BYPASS -> LandlockApplyResult.Bypassed(msg)
         }
     }
 
@@ -292,7 +340,7 @@ object Landlock {
         val fdResult = openPath(path, io.mazewall.core.OpenFlags(NativeConstants.O_PATH or NativeConstants.O_CLOEXEC))
 
         fdResult.onSuccess { value ->
-            FileDescriptor.unsafe<FileDescriptorRole.OPath>(value.toInt()).use { pathFd ->
+            FileDescriptor.oPath(value.toInt()).use { pathFd ->
                 when (val addRes = addRuleToRuleset(ruleset, pathFd, allowedAccess)) {
                     is AddRuleResult.Success -> {}
                     is AddRuleResult.Error -> {
@@ -337,7 +385,7 @@ object Landlock {
             }
         }
 
-        FileDescriptor.unsafe<FileDescriptorRole.OPath>(fdResult).use { pathFd ->
+        FileDescriptor.oPath(fdResult).use { pathFd ->
             val finalAccess = calculateFinalAccess(allowedAccess, isFallback, resolvedPath)
             addRuleToRulesetAndVerify(ruleset, pathFd, finalAccess, resolvedPath)
         }
@@ -427,42 +475,55 @@ object Landlock {
         ruleset: LandlockRuleset<RulesetState.Building>,
         processWide: Boolean = false
     ): LandlockRuleset<RulesetState.Sealed> {
-        val p = LinuxNative.process.prctl(PrctlCommand.SetNoNewPrivs(true))
+        return when (val result = tryEnforceRuleset(ruleset, processWide)) {
+            is LandlockRestrictOutcome.Ok -> result.ruleset
+            is LandlockRestrictOutcome.Err -> throwRestrictSelf(result.errno)
+        }
+    }
 
+    internal fun tryEnforceRuleset(
+        ruleset: LandlockRuleset<RulesetState.Building>,
+        processWide: Boolean = false,
+    ): LandlockRestrictOutcome {
+        val prctlResult = LinuxNative.process.prctl(PrctlCommand.SetNoNewPrivs(true))
+        if (prctlResult is LinuxNative.SyscallResult.Error) {
+            return LandlockRestrictOutcome.Err(prctlResult.errno)
+        }
         val flags = if (processWide) LANDLOCK_RESTRICT_SELF_TSYNC else 0L
-        val r = LinuxNative.raw.syscall(
+        val restrictResult = LinuxNative.raw.syscall(
             NativeConstants.LANDLOCK_RESTRICT_SELF_NR,
             io.mazewall.core.NativeArg.FdArg(ruleset.fd),
             io.mazewall.core.NativeArg.LongArg(flags),
             io.mazewall.core.NativeArg.MemoryArg(ManagedSegment.NULL),
             io.mazewall.core.NativeArg.IntArg(0)
         )
-        val prctlResult = p
-        val restrictResult = r
-        prctlResult.getOrThrow("prctl(PR_SET_NO_NEW_PRIVS)")
         return when (restrictResult) {
-            is LinuxNative.SyscallResult.Success -> LandlockRuleset(ruleset.fd)
-            is LinuxNative.SyscallResult.Error -> {
-                if (restrictResult.errno == NativeConstants.ENOSYS ||
-                    restrictResult.errno == NativeConstants.EOPNOTSUPP ||
-                    restrictResult.errno == NativeConstants.ENOPKG
-                ) {
-                    val errnoName = when (restrictResult.errno) {
-                        NativeConstants.ENOSYS -> "ENOSYS"
-                        NativeConstants.EOPNOTSUPP -> "EOPNOTSUPP"
-                        NativeConstants.ENOPKG -> "ENOPKG"
-                        else -> "UNKNOWN"
-                    }
-                    throw UnsupportedKernelFeatureException(
-                        "landlock_restrict_self failed with $errnoName. " +
-                        "Landlock is not supported or enabled on this system. " +
-                        "Landlock requires Linux kernel 5.13+ and must be enabled via the 'landlock' LSM " +
-                        "(check /sys/kernel/security/lsm or the kernel boot parameters, e.g., 'lsm=landlock,capability,yama,apparmor')."
-                    )
-                }
-                restrictResult.throwErrno("landlock_restrict_self")
-            }
+            is LinuxNative.SyscallResult.Success ->
+                LandlockRestrictOutcome.Ok(LandlockRuleset(ruleset.fd))
+            is LinuxNative.SyscallResult.Error -> LandlockRestrictOutcome.Err(restrictResult.errno)
         }
+    }
+
+    private fun throwRestrictSelf(errno: Int): Nothing {
+        if (errno == NativeConstants.ENOSYS ||
+            errno == NativeConstants.EOPNOTSUPP ||
+            errno == NativeConstants.ENOPKG
+        ) {
+            val errnoName = when (errno) {
+                NativeConstants.ENOSYS -> "ENOSYS"
+                NativeConstants.EOPNOTSUPP -> "EOPNOTSUPP"
+                NativeConstants.ENOPKG -> "ENOPKG"
+                else -> "UNKNOWN"
+            }
+            throw UnsupportedKernelFeatureException(
+                "landlock_restrict_self failed with $errnoName. " +
+                    "Landlock is not supported or enabled on this system. " +
+                    "Landlock requires Linux kernel 5.13+ and must be enabled via the 'landlock' LSM " +
+                    "(check /sys/kernel/security/lsm or the kernel boot parameters, e.g., 'lsm=landlock,capability,yama,apparmor')."
+            )
+        }
+        LinuxNative.SyscallResult.Error<LinuxNative.SyscallHandledState.Unhandled>(errno, -1L)
+            .throwErrno("landlock_restrict_self")
     }
 
     context(arena: NativeArena)
@@ -556,29 +617,67 @@ object Landlock {
             io.mazewall.core.NativeArg.LongArg(size),
             io.mazewall.core.NativeArg.MemoryArg(ManagedSegment.NULL)
         )
-        return when (res) {
-            is LinuxNative.SyscallResult.Success -> FileDescriptor.unsafe(res.value.toInt())
-            is LinuxNative.SyscallResult.Error -> {
-                if (res.errno == NativeConstants.ENOSYS ||
-                    res.errno == NativeConstants.EOPNOTSUPP ||
-                    res.errno == NativeConstants.ENOPKG
-                ) {
-                    val errnoName = when (res.errno) {
-                        NativeConstants.ENOSYS -> "ENOSYS"
-                        NativeConstants.EOPNOTSUPP -> "EOPNOTSUPP"
-                        NativeConstants.ENOPKG -> "ENOPKG"
-                        else -> "UNKNOWN"
-                    }
-                    throw UnsupportedKernelFeatureException(
-                        "landlock_create_ruleset failed with $errnoName. " +
-                        "Landlock is not supported or enabled on this system. " +
-                        "Landlock requires Linux kernel 5.13+ and must be enabled via the 'landlock' LSM " +
-                        "(check /sys/kernel/security/lsm or the kernel boot parameters, e.g., 'lsm=landlock,capability,yama,apparmor')."
-                    )
-                }
-                res.throwErrno("landlock_create_ruleset")
-            }
+        return when (val created = mapCreateRuleset(res)) {
+            is LandlockFdOutcome.Ok -> created.fd
+            is LandlockFdOutcome.Err -> throwCreateRuleset(created.errno)
         }
+    }
+
+    context(arena: NativeArena)
+    internal fun tryCreateRuleset(
+        accessMaskFs: Long,
+        abi: Int,
+    ): LandlockFdOutcome = tryCreateRuleset(accessMaskFs, 0L, abi)
+
+    context(arena: NativeArena)
+    internal fun tryCreateRuleset(
+        accessMaskFs: Long,
+        accessMaskNet: Long,
+        abi: Int,
+    ): LandlockFdOutcome {
+        val rulesetAttr = LandlockRulesetAttrSegment.allocate()
+        rulesetAttr.setHandledAccessFs(accessMaskFs)
+        rulesetAttr.setHandledAccessNet(accessMaskNet)
+        val size = if (abi >= 4) Layouts.LANDLOCK_RULESET_ATTR_SIZE else Layouts.LANDLOCK_RULESET_ATTR_V1_SIZE
+        val res = LinuxNative.raw.syscall(
+            NativeConstants.LANDLOCK_CREATE_RULESET_NR,
+            io.mazewall.core.NativeArg.MemoryArg(rulesetAttr.managed),
+            io.mazewall.core.NativeArg.LongArg(size),
+            io.mazewall.core.NativeArg.MemoryArg(ManagedSegment.NULL)
+        )
+        return mapCreateRuleset(res)
+    }
+
+    private fun mapCreateRuleset(
+        res: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled>,
+    ): LandlockFdOutcome {
+        return when (res) {
+            is LinuxNative.SyscallResult.Success ->
+                LandlockFdOutcome.Ok(FileDescriptor.ruleset(res.value.toInt()))
+            is LinuxNative.SyscallResult.Error -> LandlockFdOutcome.Err(res.errno, res.rawValue)
+        }
+    }
+
+    private fun throwCreateRuleset(errno: Int): Nothing {
+        if (errno == NativeConstants.ENOSYS ||
+            errno == NativeConstants.EOPNOTSUPP ||
+            errno == NativeConstants.ENOPKG
+        ) {
+            val errnoName = when (errno) {
+                NativeConstants.ENOSYS -> "ENOSYS"
+                NativeConstants.EOPNOTSUPP -> "EOPNOTSUPP"
+                NativeConstants.ENOPKG -> "ENOPKG"
+                else -> "UNKNOWN"
+            }
+            throw UnsupportedKernelFeatureException(
+                "landlock_create_ruleset failed with $errnoName. " +
+                    "Landlock is not supported or enabled on this system. " +
+                    "Landlock requires Linux kernel 5.13+ and must be enabled via the 'landlock' LSM " +
+                    "(check /sys/kernel/security/lsm or the kernel boot parameters, e.g., 'lsm=landlock,capability,yama,apparmor')."
+            )
+        }
+        LinuxNative.SyscallResult.Error<LinuxNative.SyscallHandledState.Unhandled>(errno, -1L)
+            .throwErrno("landlock_create_ruleset")
     }
 
     context(arena: NativeArena)

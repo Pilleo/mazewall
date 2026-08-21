@@ -2,7 +2,7 @@
 title: Integrate Mergiraf AST Syntax-Aware Git Merge Driver into Repository Configuration
 severity: HIGH
 status: open
-priority: 10
+priority: high
 dependencies: []
 component: ci
 target_modules:

@@ -45,21 +45,13 @@ A dynamic trace cannot produce an “exact” policy. `ProfilingResult` should i
 ### Proposed Shape
 
 ```kotlin
-val result = MazewallProfiler.profile(
-    ProfileOptions(
-        strategy = ProfileStrategy.AUTO,
-        captureStacks = true,
-    )
-) {
-    workload()
+MazewallProfiler.open(ProfileOptions(strategy = ProfileStrategy.AUTO)).use { session ->
+    val result = session.profile { workload() }
+    result.value
+    result.behavior
+    result.coverage
+    val policy = result.toPolicy()
 }
-
-result.value
-result.behavior
-result.coverage
-result.warnings
-
-val policy = result.behavior.toThreadPolicy(base = ThreadPolicy.PURE_COMPUTE)
 ```
 
 Executor profiling should return a closeable `ProfilingExecutorSession` that owns its executor or explicitly adopts a dedicated one. Snapshots should be immutable:

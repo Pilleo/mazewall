@@ -2,7 +2,7 @@
 title: "Residual Interface Segregation Violation (ISP) in `NativeEngine`"
 severity: "HIGH"
 status: "open"
-priority: 5
+priority: medium
 dependencies: []
 component: "enforcer"
 effort: "large"

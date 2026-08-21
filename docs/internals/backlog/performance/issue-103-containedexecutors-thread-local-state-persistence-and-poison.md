@@ -3,7 +3,7 @@ title: "\U0001F7E2 [WONTFIX]: `ContainedExecutors` Thread-Local State Persistenc
   \ and Poisoning"
 severity: MEDIUM
 status: open
-priority: 6
+priority: medium
 dependencies: []
 target_files:
 - enforcer/src/main/kotlin/io/mazewall/enforcer/ContainedExecutors.kt

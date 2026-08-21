@@ -10,9 +10,13 @@ import io.mazewall.LinuxNative
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
+import io.mazewall.core.SocketIo
 import io.mazewall.ffi.Layouts
 import io.mazewall.ffi.memory.NativeArena
+import io.mazewall.enforcer.supervisor.JvmVerdict
+import io.mazewall.enforcer.supervisor.SupervisorNotificationMachine
 import io.mazewall.ffi.memory.SupervisorResponseSegment
+import io.mazewall.ffi.memory.writeByte
 import java.io.InputStream
 
 /**
@@ -26,12 +30,43 @@ public class SupervisorValidationChannel(
     public val inputStream: InputStream = SupervisorSocketInputStream(socketFd, arena)
     private val responseSegment = with(arena) { SupervisorResponseSegment.allocate() }
 
-    public fun sendResponse(id: Long, decision: Byte, errorNr: Int) {
+    public fun sendResponse(id: Long, decision: Byte, errorNr: Int, path: String? = null) {
+        sendResponse(
+            id,
+            SupervisorNotificationMachine.parseJvmVerdict(decision.toInt(), errorNr)
+                ?: JvmVerdict.Deny(io.mazewall.ffi.NativeConstants.EPERM),
+            path,
+        )
+    }
+
+    internal fun sendResponse(
+        id: Long,
+        verdict: JvmVerdict,
+        path: String? = null,
+    ) {
         val resp = SupervisorResponseSegment.of(responseSegment.managed)
         resp.setId(id)
-        resp.setDecision(decision)
+        resp.setDecision(verdict.toWire().toByte())
+        val errorNr = when (verdict) {
+            is JvmVerdict.Deny -> verdict.errorNr
+            is JvmVerdict.Allow, is JvmVerdict.InjectFd -> 0
+        }
         resp.setErrorNr(errorNr)
-        LinuxNative.memory.write(socketFd, responseSegment.managed, Layouts.SUPERVISOR_RESPONSE_SIZE)
+        resp.setPath(path)
+        writeFully(responseSegment.managed, Layouts.SUPERVISOR_RESPONSE_SIZE)
+    }
+
+    private fun writeFully(buf: io.mazewall.ffi.memory.ManagedSegment, total: Long) {
+        when (val res = SocketIo.writeFully(LinuxNative.memory, socketFd, buf, total)) {
+            is LinuxNative.SyscallResult.Error<*> -> error("Supervisor validation write failed errno=${res.errno}")
+            is LinuxNative.SyscallResult.Success -> check(res.value == total) { "Supervisor validation short write ${res.value}" }
+        }
+    }
+
+    public fun sendExecRewriteAck(ok: Boolean) {
+        val ack = with(arena) { allocate(1) }
+        ack.writeByte(0, if (ok) 1.toByte() else 0.toByte())
+        writeFully(ack, 1)
     }
 
     override fun close() {

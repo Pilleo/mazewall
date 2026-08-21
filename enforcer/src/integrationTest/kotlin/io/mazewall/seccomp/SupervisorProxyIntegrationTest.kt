@@ -2,6 +2,7 @@ package io.mazewall.seccomp
 
 import io.mazewall.BaseIntegrationTest
 import io.mazewall.EnabledIfLinuxAndSupported
+import io.mazewall.NeedsFreshJvm
 import io.mazewall.Policy
 import io.mazewall.core.Syscall
 import io.mazewall.enforcer.api.ContainedExecutors
@@ -9,12 +10,15 @@ import io.mazewall.enforcer.supervisor.StacktraceScopingPolicy
 import io.mazewall.enforcer.supervisor.ScopingHandler
 import io.mazewall.core.Tid
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.parallel.Isolated
 import java.io.File
 import java.nio.file.Files
 import java.util.concurrent.Executors
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
+@Isolated
+@NeedsFreshJvm
 class SupervisorProxyIntegrationTest : BaseIntegrationTest() {
 
     companion object {

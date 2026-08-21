@@ -2,7 +2,7 @@
 title: "Inefficient DependencyCheck Configuration in CI"
 severity: "RESOLVED"
 status: "resolved"
-priority: 5
+priority: medium
 ---
 
 # ✅ [RESOLVED]: Inefficient DependencyCheck Configuration in CI

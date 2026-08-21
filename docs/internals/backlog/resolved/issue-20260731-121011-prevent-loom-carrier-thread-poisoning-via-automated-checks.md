@@ -2,7 +2,7 @@
 title: "Prevent Loom Carrier Thread Poisoning Via Automated Checks"
 severity: "HIGH"
 status: "resolved"
-priority: 9
+priority: high
 dependencies: []
 component: "enforcer"
 target_modules:

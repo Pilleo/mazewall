@@ -2,7 +2,7 @@
 title: "Automated Rebase and Conflict Resolution for Out-of-Date Jules PR Branches in Orchestrator"
 severity: "HIGH"
 status: "resolved"
-priority: 9
+priority: high
 dependencies: []
 component: "orchestrator"
 target_modules:

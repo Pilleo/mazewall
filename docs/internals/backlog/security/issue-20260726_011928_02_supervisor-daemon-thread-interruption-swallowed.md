@@ -3,7 +3,7 @@ title: SupervisorSessionHandler loop swallows ThreadInterruptedException breakin
   graceful shutdown
 type: issue
 status: open
-priority: 8
+priority: high
 labels:
 - security
 - enforcer

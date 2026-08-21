@@ -29,12 +29,8 @@ This is the most practical approach for most Java developers.
 *   **Mechanism:** The application automatically falls back to standard POSIX I/O (`epoll`, `read`, `write`). The unprivileged Tier S profiler can then transparently capture all syscalls and paths.
 *   **Final Step:** Manually add `.unblock(Syscall.IO_URING_SETUP)` to the generated production policy to re-enable high-performance async I/O in the restricted environment.
 
-### Strategy A: Iterative Learning (Unprivileged)
-Used when you cannot or will not disable `io_uring` during profiling.
-*   **Mechanism:** Leverage Landlock LSM's kernel invariant: **Landlock rulesets are inherited by `io-wq` worker threads.**
-*   **Workflow:** Run the `IterativeProfiler`. When `io_uring` attempts to access a path that is currently denied by Landlock, the kernel blocks the async worker. The `IterativeProfiler` catches the resulting `AccessDeniedException` (or `EACCES` errno), whitelists the path, and retries the workload.
-*   **Pros:** 100% unprivileged; catches real `io_uring` path operations.
-*   **Cons:** Workload must be idempotent (it will be restarted multiple times).
+### Strategy A: Iterative Learning (Deprecated)
+`IterativeProfiler` deny-and-retry is **not** a tracer. Prefer Strategy H, or Strategy P once the eBPF collector exists. `ProfileStrategy.EBPF` currently fails closed instead of falling back to exception scraping.
 
 ### Strategy P: Privileged Tracing (eBPF)
 Used for deep, transparent observability in environments where root/elevated privileges are acceptable.

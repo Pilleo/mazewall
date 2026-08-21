@@ -2,7 +2,7 @@
 title: "Reduce Telegram Notification and Terminal Bell Spam on Status Changes"
 severity: "HIGH"
 status: "resolved"
-priority: 10
+priority: high
 dependencies: []
 component: "orchestrator"
 effort: "small"

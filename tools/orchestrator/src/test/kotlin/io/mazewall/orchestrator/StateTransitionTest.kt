@@ -8,7 +8,7 @@ class StateTransitionTest {
     @Test
     fun `test select task transitions to pending approval`() {
         val slot = SlotContext("issue-1")
-        val issue = BacklogIssue(File("test.md"), "issue-1", "Title", 1, "open", emptyList())
+        val issue = BacklogIssue(File("test.md"), "issue-1", "Title", BacklogPriority.LOW, "open", emptyList())
         val event = OrchestratorEvent.TaskSelected(issue)
 
         val transition = SelectTaskState.evaluate(slot, event)

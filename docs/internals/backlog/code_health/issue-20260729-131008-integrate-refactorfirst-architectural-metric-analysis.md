@@ -2,7 +2,7 @@
 title: "Integrate RefactorFirst Gradle Plugin to Prioritize Architectural Cleanups"
 severity: "LOW"
 status: "open"
-priority: 10
+priority: high
 dependencies: []
 component: "ci"
 target_modules:

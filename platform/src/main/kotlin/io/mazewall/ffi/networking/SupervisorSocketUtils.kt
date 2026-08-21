@@ -71,7 +71,7 @@ public object SupervisorSocketUtils {
                         continue
                     }
                 }
-                val fd = FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(fdVal)
+                val fd = FileDescriptor.unixSocket(fdVal)
                 val connRes = LinuxNative.networking.connect(fd, ConfinedSegment(sockaddrUn.segment), SOCKADDR_UN_SIZE)
                 if (connRes is LinuxNative.SyscallResult.Success) {
                     return fdVal
@@ -119,7 +119,7 @@ public object SupervisorSocketUtils {
             msg.setMsgControllen(CMSG_RIGHTS_LEN)
 
             while (true) {
-                val res = LinuxNative.networking.sendmsg(FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(socketFd), ConfinedSegment(msg.segment), 0)
+                val res = LinuxNative.networking.sendmsg(FileDescriptor.unixSocket(socketFd), ConfinedSegment(msg.segment), 0)
                 if (res is LinuxNative.SyscallResult.Success) {
                     return true
                 } else {
@@ -161,7 +161,7 @@ public object SupervisorSocketUtils {
                     val cmsgLevel = cmsg.getCmsgLevel()
                     val cmsgType = cmsg.getCmsgType()
                     if (cmsgLen >= CMSG_RIGHTS_LEN && cmsgLevel == SOL_SOCKET && cmsgType == SCM_RIGHTS) {
-                        return@use FileDescriptor.unsafe<FileDescriptorRole.SeccompNotif>(cmsg.getDataFd())
+                        return@use FileDescriptor.adopt(cmsg.getDataFd(), FileDescriptorRole.SeccompNotif)
                     }
                 } else {
                     val errno = (res as LinuxNative.SyscallResult.Error).errno

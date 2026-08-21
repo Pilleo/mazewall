@@ -1,6 +1,8 @@
 package io.mazewall.enforcer
 
 import io.mazewall.BaseIntegrationTest
+import io.mazewall.IsolatedProcessTester
+import io.mazewall.NeedsFreshJvm
 import io.mazewall.Policy
 import io.mazewall.enforcer.api.ContainedExecutors
 import org.junit.jupiter.api.Test
@@ -9,6 +11,7 @@ import java.util.concurrent.Executors
 import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
+@NeedsFreshJvm
 class VirtualThreadGuardrailTest : BaseIntegrationTest() {
     @Test
     fun `installOnCurrentThread throws IllegalStateException on virtual thread`() {
@@ -64,8 +67,7 @@ class VirtualThreadGuardrailTest : BaseIntegrationTest() {
         }
     }
 
-    @Test
-    fun `installOnProcess throws IllegalStateException on virtual thread`() {
+    fun testInstallOnProcessOnVirtualThread() {
         val executor = Executors.newVirtualThreadPerTaskExecutor()
         try {
             val future =
@@ -81,5 +83,10 @@ class VirtualThreadGuardrailTest : BaseIntegrationTest() {
         } finally {
             executor.shutdown()
         }
+    }
+
+    @Test
+    fun `installOnProcess throws IllegalStateException on virtual thread`() {
+        IsolatedProcessTester.runIsolatedMethod(this::class.java.name, "testInstallOnProcessOnVirtualThread")
     }
 }

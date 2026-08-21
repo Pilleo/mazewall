@@ -3,7 +3,7 @@ title: Compile-Time Feature Proof Tokens and Scope-Safe Policy Builders (Type-St
   Pattern)
 severity: ENHANCEMENT
 status: open
-priority: 2
+priority: low
 dependencies: []
 target_files:
 - enforcer/src/main/kotlin/io/mazewall/Policy.kt

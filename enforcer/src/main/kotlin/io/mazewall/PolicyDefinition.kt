@@ -39,7 +39,11 @@ public data class PolicyDefinition<out S : PolicyScope>(
     public val customViolationPhrases: List<String> = emptyList(),
     public val customViolationRegexes: List<Regex> = emptyList()
 ) {
-    public val hasSupervisedSyscalls: Boolean get() = syscallActions.values.any { it == SeccompAction.ACT_NOTIFY }
+    public val hasSupervisedSyscalls: Boolean get() =
+        syscallActions.values.any { it == SeccompAction.ACT_NOTIFY } ||
+            defaultAction == SeccompAction.ACT_NOTIFY
+
+    public val argumentRules: PolicyArgumentRules get() = PolicyArgumentRules.of(this)
     /** Returns true if the given [syscall] is unconditionally allowed by this policy. */
     public fun isSyscallAllowed(syscall: Syscall): Boolean {
         val action = syscallActions[syscall] ?: defaultAction
@@ -64,6 +68,7 @@ public data class PolicyDefinition<out S : PolicyScope>(
     public companion object {
         /**
          * Composes multiple policies into a single one.
+         * Prefer [intersection] when the intent is "strictest wins".
          */
         public fun <S : PolicyScope> combine(vararg policies: PolicyDefinition<out S>): PolicyDefinition<S> {
             require(policies.isNotEmpty()) { "At least one policy is required" }
@@ -71,13 +76,13 @@ public data class PolicyDefinition<out S : PolicyScope>(
             val combinedDefaultAction = policies.maxByOrNull { it.defaultAction.priority }!!.defaultAction
 
             val combinedSyscalls = mutableMapOf<Syscall, SeccompAction>()
-            for (policy in policies) {
-                for ((syscall, action) in policy.syscallActions) {
-                    val current = combinedSyscalls[syscall]
-                    if (current == null || action.priority > current.priority) {
-                        combinedSyscalls[syscall] = action
-                    }
-                }
+            val allSyscalls = policies.flatMapTo(mutableSetOf()) { it.syscallActions.keys }
+            for (syscall in allSyscalls) {
+                val effective =
+                    policies
+                        .map { it.syscallActions[syscall] ?: it.defaultAction }
+                        .maxBy { it.priority }
+                combinedSyscalls[syscall] = effective
             }
 
             val mmapExec = policies.all { it.allowMmapExec }
@@ -85,11 +90,19 @@ public data class PolicyDefinition<out S : PolicyScope>(
             val unsafePrctl = policies.all { it.allowUnsafePrctl }
             val lockCet = policies.any { it.lockIntelCet }
 
-            val allReadSets = policies.map { it.allowedFsReadPaths }.filter { it.isNotEmpty() }
-            val fsReads = if (allReadSets.isEmpty()) emptySet() else allReadSets.reduce { acc, set -> intersectPaths(acc, set) }
-
-            val allWriteSets = policies.map { it.allowedFsWritePaths }.filter { it.isNotEmpty() }
-            val fsWrites = if (allWriteSets.isEmpty()) emptySet() else allWriteSets.reduce { acc, set -> intersectPaths(acc, set) }
+            val landlockPolicies = policies.filter { it.enforceLandlock }
+            val fsReads =
+                if (landlockPolicies.isEmpty()) {
+                    emptySet()
+                } else {
+                    landlockPolicies.map { it.allowedFsReadPaths }.reduce { acc, set -> intersectPaths(acc, set) }
+                }
+            val fsWrites =
+                if (landlockPolicies.isEmpty()) {
+                    emptySet()
+                } else {
+                    landlockPolicies.map { it.allowedFsWritePaths }.reduce { acc, set -> intersectPaths(acc, set) }
+                }
 
             val enforceLandlock = policies.any { it.enforceLandlock }
 
@@ -97,21 +110,21 @@ public data class PolicyDefinition<out S : PolicyScope>(
             val combinedRegexes = policies.flatMap { it.customViolationRegexes }.distinct()
 
             if (enforceLandlock) {
-                combinedSyscalls[Syscall.OPEN] = SeccompAction.ACT_ALLOW
-                combinedSyscalls[Syscall.OPENAT] = SeccompAction.ACT_ALLOW
-                combinedSyscalls[Syscall.OPENAT2] = SeccompAction.ACT_ALLOW
-            } else {
-                val openAction = combinedSyscalls[Syscall.OPEN] ?: combinedDefaultAction
-                val openatAction = combinedSyscalls[Syscall.OPENAT] ?: combinedDefaultAction
-                val ioUringAction = combinedSyscalls[Syscall.IO_URING_SETUP] ?: combinedDefaultAction
-
-                val openBlocked = openAction != SeccompAction.ACT_ALLOW
-                val openatBlocked = openatAction != SeccompAction.ACT_ALLOW
-                val ioUringAllowed = ioUringAction == SeccompAction.ACT_ALLOW
-
-                if ((openBlocked || openatBlocked) && ioUringAllowed) {
-                    combinedSyscalls[Syscall.IO_URING_SETUP] = SeccompAction.ACT_ERRNO
+                for (sys in listOf(Syscall.OPEN, Syscall.OPENAT, Syscall.OPENAT2)) {
+                    val current = combinedSyscalls[sys] ?: combinedDefaultAction
+                    if (current.priority <= SeccompAction.ACT_ALLOW.priority) {
+                        combinedSyscalls[sys] = SeccompAction.ACT_ALLOW
+                    }
                 }
+            }
+            val openAction = combinedSyscalls[Syscall.OPEN] ?: combinedDefaultAction
+            val openatAction = combinedSyscalls[Syscall.OPENAT] ?: combinedDefaultAction
+            val ioUringAction = combinedSyscalls[Syscall.IO_URING_SETUP] ?: combinedDefaultAction
+            val openBlocked = openAction != SeccompAction.ACT_ALLOW
+            val openatBlocked = openatAction != SeccompAction.ACT_ALLOW
+            val ioUringAllowed = ioUringAction == SeccompAction.ACT_ALLOW
+            if ((openBlocked || openatBlocked) && ioUringAllowed) {
+                combinedSyscalls[Syscall.IO_URING_SETUP] = SeccompAction.ACT_ERRNO
             }
 
             @Suppress("UNCHECKED_CAST")
@@ -130,6 +143,10 @@ public data class PolicyDefinition<out S : PolicyScope>(
             )
         }
 
+        /** Same as [combine]; name states that the result is never more permissive. */
+        public fun <S : PolicyScope> intersection(vararg policies: PolicyDefinition<out S>): PolicyDefinition<S> =
+            combine(*policies)
+
         private fun intersectPaths(
             set1: Set<SandboxedPath>,
             set2: Set<SandboxedPath>,
@@ -137,20 +154,12 @@ public data class PolicyDefinition<out S : PolicyScope>(
             if (set1.isEmpty() || set2.isEmpty()) return emptySet()
 
             val result = mutableSetOf<SandboxedPath>()
-            val sortedSet2 = java.util.TreeSet(set2.map { it.value })
-
             for (p1 in set1) {
-                val potentialParent = sortedSet2.floor(p1.value)
-                if (potentialParent != null && isParent(potentialParent, p1.value)) {
-                    result.add(p1)
-                }
-
-                val tail = sortedSet2.tailSet(p1.value, false)
-                for (p2 in tail) {
-                    if (isParent(p1.value, p2)) {
-                        result.add(SandboxedPath.of(p2, allowNonExistent = true))
-                    } else {
-                        break
+                for (p2 in set2) {
+                    if (isParent(p2.value, p1.value)) {
+                        result.add(p1)
+                    } else if (isParent(p1.value, p2.value)) {
+                        result.add(p2)
                     }
                 }
             }

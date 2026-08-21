@@ -2,7 +2,7 @@
 title: "Pure FFI Wrapper Type System in io.mazewall.ffi.memory"
 severity: "HIGH"
 status: "resolved"
-priority: 10
+priority: high
 dependencies: []
 component: "ffi"
 effort: "small"

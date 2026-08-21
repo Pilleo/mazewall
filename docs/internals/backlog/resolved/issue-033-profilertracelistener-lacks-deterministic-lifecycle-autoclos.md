@@ -2,7 +2,7 @@
 title: "ProfilerTraceListener Lacks Deterministic Lifecycle (AutoCloseable)"
 severity: "RESOLVED"
 status: "resolved"
-priority: 5
+priority: medium
 ---
 
 # ✅ [RESOLVED]: ProfilerTraceListener Lacks Deterministic Lifecycle (AutoCloseable)

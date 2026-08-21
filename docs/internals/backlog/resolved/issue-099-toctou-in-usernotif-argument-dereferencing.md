@@ -2,7 +2,7 @@
 title: "TOCTOU in `USER_NOTIF` Argument Dereferencing"
 severity: "HIGH"
 status: "resolved"
-priority: 9
+priority: high
 dependencies: []
 component: "profiler"
 effort: "small"

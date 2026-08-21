@@ -2,7 +2,7 @@
 title: "Transition Orchestrator & Backlog Parser to Timestamp-Based Issue IDs"
 severity: "HIGH"
 status: "resolved"
-priority: 9
+priority: high
 dependencies: ["issue-20260726-01-rename-and-expand-create-backlog-issue-skill"]
 component: "orchestrator"
 target_modules: [":tools:orchestrator"]

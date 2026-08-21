@@ -180,6 +180,200 @@ class PolicyTest {
     }
 
     @Test
+    fun `NO_EXEC is not a JIT-safe process-wide recipe`() {
+        assertFalse(Policy.NO_EXEC.allowMmapExec, "raw NO_EXEC still denies PROT_EXEC mmap/mprotect")
+        assertFalse(Policy.NO_EXEC.isSyscallAllowed(Syscall.EXECVE))
+        assertTrue(Policy.NO_EXEC_HOTSPOT.allowMmapExec)
+        assertFalse(Policy.NO_EXEC_HOTSPOT.isSyscallAllowed(Syscall.EXECVE))
+        assertFalse(Policy.NO_EXEC_HOTSPOT.isSyscallAllowed(Syscall.EXECVEAT))
+        assertFalse(Policy.NO_EXEC_HOTSPOT.isSyscallAllowed(Syscall.MEMFD_CREATE))
+    }
+
+    @Test
+    fun `ProcessPolicies denyProcessCreation is runtime-aware and inspectable`() {
+        val hotspot = ProcessPolicies.denyProcessCreation(RuntimeProfile.HOTSPOT_JIT)
+        val native = ProcessPolicies.denyProcessCreation(RuntimeProfile.NATIVE_IMAGE)
+
+        assertTrue(hotspot.argumentRules.allowExecutableMappings)
+        assertFalse(native.argumentRules.allowExecutableMappings)
+        assertTrue(hotspot.argumentRules.inspectNonThreadClone)
+        assertTrue(hotspot.argumentRules.inspectUnsafePrctl)
+        assertFalse(hotspot.isSyscallAllowed(Syscall.EXECVE))
+        assertFalse(native.isSyscallAllowed(Syscall.MEMFD_CREATE))
+        assertEquals(Policy.NO_EXEC_NATIVE_IMAGE.allowMmapExec, native.allowMmapExec)
+        assertEquals(Policy.NO_EXEC_HOTSPOT.allowMmapExec, hotspot.allowMmapExec)
+    }
+
+    @Test
+    fun `denyList and allowList modes are inspectable and compose restrictively`() {
+        val denied =
+            Policy.denyList(RuntimeProfile.HOTSPOT_JIT) {
+                denyProcessCreation()
+                denyNetwork()
+            }
+        val extra =
+            Policy.denyList(RuntimeProfile.NATIVE_IMAGE) {
+                denyProcessCreation()
+            }
+        assertEquals(PolicyMode.DENY_LIST, denied.mode)
+        assertTrue(denied.argumentRules.allowExecutableMappings)
+        assertFalse(denied.isSyscallAllowed(Syscall.EXECVE))
+        assertFalse(denied.isSyscallAllowed(Syscall.CONNECT))
+
+        val restricted = denied.restrictFurtherWith(extra)
+        val combined = Policy.combine(denied, extra)
+        assertEquals(combined.allowMmapExec, restricted.allowMmapExec)
+        assertEquals(combined.syscallActions, restricted.syscallActions)
+        assertFalse(restricted.argumentRules.allowExecutableMappings)
+
+        val allowListed =
+            Policy.allowList(RuntimeProfile.NATIVE_IMAGE) {
+                allow(Syscall.READ, Syscall.WRITE)
+            }
+        assertEquals(PolicyMode.ALLOW_LIST, allowListed.mode)
+        val customErrno =
+            Policy
+                .builder()
+                .defaultAction(SeccompAction.ACT_ERRNO(io.mazewall.ffi.NativeConstants.EACCES))
+                .allow(Syscall.READ)
+                .build()
+        assertEquals(PolicyMode.ALLOW_LIST, customErrno.mode)
+        assertEquals(SeccompAction.ACT_ERRNO, allowListed.defaultAction)
+        assertTrue(allowListed.isSyscallAllowed(Syscall.READ))
+        assertFalse(allowListed.isSyscallAllowed(Syscall.CONNECT))
+        assertFalse(allowListed.argumentRules.allowExecutableMappings)
+    }
+
+    @Test
+    fun `restrictFurtherWith applies default deny to explicit allows on the other policy`() {
+        val denyByDefault =
+            Policy.allowList(RuntimeProfile.NATIVE_IMAGE) {
+                allow(Syscall.READ)
+            }
+        val explicitAllow =
+            Policy.denyList(RuntimeProfile.HOTSPOT_JIT) {
+                advanced { allow(Syscall.CONNECT) }
+            }
+        val restricted = denyByDefault.restrictFurtherWith(explicitAllow)
+        assertFalse(restricted.isSyscallAllowed(Syscall.CONNECT))
+        assertTrue(restricted.isSyscallAllowed(Syscall.READ))
+    }
+
+    @Test
+    fun `Landlock intersection treats empty read grants as deny`() {
+        val reads =
+            Policy
+                .builder()
+                .allowFsRead("/secret")
+                .build()
+        val writesOnly =
+            Policy
+                .builder()
+                .allowFsWrite("/tmp")
+                .build()
+        val combined = Policy.combine(reads, writesOnly)
+        assertTrue(combined.allowedFsReadPaths.isEmpty())
+        assertTrue(combined.allowedFsWritePaths.isEmpty())
+    }
+
+    @Test
+    fun `Landlock composition keeps explicit OPEN denials`() {
+        val landlock =
+            Policy
+                .builder()
+                .allowFsRead("/secret")
+                .build()
+        val denyOpen =
+            Policy
+                .builder()
+                .block(Syscall.OPEN, Syscall.OPENAT, Syscall.OPENAT2)
+                .build()
+        val combined = Policy.combine(landlock, denyOpen)
+        assertFalse(combined.isSyscallAllowed(Syscall.OPEN))
+        assertFalse(combined.isSyscallAllowed(Syscall.OPENAT))
+        assertFalse(combined.isSyscallAllowed(Syscall.OPENAT2))
+    }
+
+    @Test
+    fun `Landlock path intersection is not confused by lexicographic siblings`() {
+        val child =
+            Policy
+                .builder()
+                .allowFsRead("/foo/baz")
+                .build()
+        val parents =
+            Policy
+                .builder()
+                .allowFsRead("/foo")
+                .allowFsRead("/foo-bar")
+                .build()
+        val combined = Policy.combine(child, parents)
+        assertTrue(
+            combined.allowedFsReadPaths.any { it.value == "/foo/baz" },
+            combined.allowedFsReadPaths.toString(),
+        )
+    }
+
+    @Test
+    fun `Landlock path intersection keeps descendants past lexicographic siblings`() {
+        val parent =
+            Policy
+                .builder()
+                .allowFsRead("/foo")
+                .build()
+        val mixed =
+            Policy
+                .builder()
+                .allowFsRead("/foo-bar")
+                .allowFsRead("/foo/bar")
+                .build()
+        val combined = Policy.combine(parent, mixed)
+        assertTrue(
+            combined.allowedFsReadPaths.any { it.value == "/foo/bar" },
+            combined.allowedFsReadPaths.toString(),
+        )
+        assertTrue(
+            combined.allowedFsReadPaths.none { it.value == "/foo-bar" },
+            combined.allowedFsReadPaths.toString(),
+        )
+    }
+
+    @Test
+    fun `advanced block is applied on denyList and allowList`() {
+        val denied =
+            Policy.denyList(RuntimeProfile.HOTSPOT_JIT) {
+                advanced { block(Syscall.PTRACE) }
+            }
+        assertFalse(denied.isSyscallAllowed(Syscall.PTRACE))
+        val allowed =
+            Policy.allowList(RuntimeProfile.NATIVE_IMAGE) {
+                advanced { allow(Syscall.GETPID) }
+            }
+        assertTrue(allowed.isSyscallAllowed(Syscall.GETPID))
+    }
+
+    @Test
+    fun `forRuntime NATIVE_IMAGE clears a prior HotSpot mmap exec flag`() {
+        val policy =
+            Policy
+                .builder()
+                .forRuntime(RuntimeProfile.HOTSPOT_JIT)
+                .forRuntime(RuntimeProfile.NATIVE_IMAGE)
+                .build()
+        assertFalse(policy.allowMmapExec)
+    }
+
+    @Test
+    fun `ProcessPolicies denyNetwork does not hide W^X on HotSpot`() {
+        val hotspot = ProcessPolicies.denyNetwork(RuntimeProfile.HOTSPOT_JIT)
+        val native = ProcessPolicies.denyNetwork(RuntimeProfile.NATIVE_IMAGE)
+        assertTrue(hotspot.argumentRules.allowExecutableMappings)
+        assertFalse(native.argumentRules.allowExecutableMappings)
+        assertFalse(hotspot.isSyscallAllowed(Syscall.CONNECT))
+        assertFalse(Policy.NO_NETWORK.argumentRules.allowExecutableMappings)
+    }
+
+    @Test
     fun `plus operator works and resolves types correctly`() {
         val p1 = Policy.NO_EXEC
         val p2 = Policy.NO_NETWORK
@@ -242,5 +436,35 @@ class PolicyTest {
 
         val combined = Policy.combine(p1, p2)
         assertFalse(combined.isSyscallAllowed(Syscall.IO_URING_SETUP), "combined policy should block io_uring_setup because open is restricted overall and Landlock is not active")
+    }
+
+    @Test
+    fun `hasSupervisedSyscalls is true when defaultAction is ACT_NOTIFY`() {
+        val policy = Policy.builder()
+            .defaultAction(SeccompAction.ACT_NOTIFY)
+            .build()
+        assertTrue(policy.definition.hasSupervisedSyscalls, "hasSupervisedSyscalls should be true when defaultAction is ACT_NOTIFY")
+    }
+
+    @Test
+    fun `hasSupervisedSyscalls is false when defaultAction is ACT_ALLOW`() {
+        val policy = Policy.builder()
+            .defaultAction(SeccompAction.ACT_ALLOW)
+            .build()
+        assertFalse(policy.definition.hasSupervisedSyscalls, "hasSupervisedSyscalls should be false when defaultAction is ACT_ALLOW and no syscalls use ACT_NOTIFY")
+    }
+
+    @Test
+    fun `enforceLandlock is true when Landlock paths are specified`() {
+        val policy = Policy.builder()
+            .allowFsRead("/tmp")
+            .build()
+        assertTrue(policy.enforceLandlock, "enforceLandlock should be true when Landlock paths are specified")
+    }
+
+    @Test
+    fun `enforceLandlock is false when no Landlock paths are specified`() {
+        val emptyPolicy = Policy.builder().build()
+        assertFalse(emptyPolicy.enforceLandlock, "enforceLandlock should be false when no Landlock paths are specified")
     }
 }

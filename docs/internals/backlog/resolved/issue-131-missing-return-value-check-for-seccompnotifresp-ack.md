@@ -2,7 +2,7 @@
 title: "Missing Return Value Check for `SECCOMP_NOTIF_RESP` ACK"
 severity: "HIGH"
 status: "resolved"
-priority: 9
+priority: high
 dependencies: []
 component: "profiler"
 effort: "small"

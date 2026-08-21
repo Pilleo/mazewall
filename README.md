@@ -74,7 +74,7 @@ The filter is applied via Linux `prctl`/`seccomp` — the same mechanism Docker 
 ```kotlin
 val safe = ContainedExecutors.wrap(
     Executors.newSingleThreadExecutor(),
-    Policy.NO_EXEC                        // blocks execve, fork, memfd_create, io_uring
+    Policy.NO_EXEC_HOTSPOT                // blocks execve/memfd; JIT may still mmap PROT_EXEC
 )
 
 safe.submit { vulnerableLogger.log(maliciousInput) }
@@ -97,7 +97,9 @@ val result = Profiler.profile {
     myXmlParser.parse(untrustedInput)   // run it under observation
 }
 
-println(result.behavior.toDsl())
+// toDsl() throws if exec/connect destinations were observed but cannot be enforced.
+// Pass allowIncomplete=true if you cannot enforce all destinations (e.g., dynamic exec).
+println(result.behavior.toDsl(allowIncomplete = true))
 // Output:
 // Policy.builder()
 //     .base(Policy.NO_NETWORK)
@@ -124,7 +126,7 @@ mazewall operates in two tiers. Think of it as the difference between the buildi
 │  │                                                                │ │
 │  │  ┌─────────── JVM Process ────────────────────────────────┐   │ │
 │  │  │                                                         │   │ │
-│  │  │  [Tier 1] installOnProcess(NO_EXEC)  ← process-wide    │   │ │
+│  │  │  [Tier 1] installOnProcess(NO_EXEC_HOTSPOT)            │   │ │
 │  │  │  Nothing in this JVM ever spawns a shell               │   │ │
 │  │  │                                                         │   │ │
 │  │  │  ┌─ HTTP Thread Pool ──┐  ┌─ YAML Import Pool ───────┐ │   │ │
@@ -143,7 +145,7 @@ mazewall operates in two tiers. Think of it as the difference between the buildi
 
 | Tier | API | Scope | Purpose |
 |---|---|---|---|
-| **Tier 1** | `ContainedExecutors.installOnProcess(Policy.NO_EXEC)` | Entire JVM | Global backstop — prevents any thread from ever spawning a child process |
+| **Tier 1** | `ContainedExecutors.installOnProcess(Policy.NO_EXEC_HOTSPOT)` | Entire JVM | Global backstop — no exec/memfd; HotSpot JIT may still create executable mappings |
 | **Tier 2** | `ContainedExecutors.wrap(executor, policy)` | One thread pool | Surgical restriction — stops data-plane attacks (SSRF, XXE, path traversal) on specific pools |
 
 > [!IMPORTANT]
@@ -178,7 +180,8 @@ In addition to static system call blocking, `mazewall` supports **Stacktrace-Enf
 
 | Policy | Blocks | Plain English | Typical use |
 |---|---|---|---|
-| `Policy.NO_EXEC` | `execve`, `fork`, `memfd_create`, `io_uring_*`, `ptrace` | No shell spawning, no child processes, no fileless malware vectors | Process-wide startup lockdown — install this first |
+| `Policy.NO_EXEC_HOTSPOT` | `execve`, `execveat`, `memfd_create` (JIT `mmap(PROT_EXEC)` allowed) | No shell / memfd; HotSpot can still compile | Process-wide startup on a JIT JVM — install this first |
+| `Policy.NO_EXEC` | Same syscalls **plus** `PROT_EXEC` mmap/mprotect denies | W^X-style; can fatal HotSpot if installed process-wide | AOT / no further code generation only |
 | `Policy.NO_NETWORK` | `connect`, `socket`, `sendmsg`, `io_uring_*` | Cannot call the network under any circumstances | XML/YAML/CSV parsers, file format processors |
 | `Policy.PURE_COMPUTE` | Exec + network + filesystem writes + `mmap(PROT_EXEC)`, with JVM classpath auto-whitelisted | Reads code, touches nothing else | Image processing, crypto, ML inference |
 | `Policy.PURE_COMPUTE_UNSAFE` | Same as above, without the JVM classpath whitelist | Strictest possible — may crash on lazy classloading | Pre-warmed, fully initialized workers only |

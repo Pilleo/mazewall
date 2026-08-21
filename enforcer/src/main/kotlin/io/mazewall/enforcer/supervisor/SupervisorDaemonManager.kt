@@ -8,6 +8,7 @@ import io.mazewall.enforcer.*
 
 import io.mazewall.LinuxNative
 import io.mazewall.NativeEngine
+import io.mazewall.seccomp.SeccompInstallationState
 import io.mazewall.core.ProcessLauncher
 import io.mazewall.core.RealProcessLauncher
 import io.mazewall.core.RealSocketManager
@@ -111,7 +112,25 @@ public class SupervisorDaemonManager(
         }
     }
 
+    private fun refuseSpawnIfParentIsFiltered() {
+        // PR_GET_SECCOMP==2 is also the outer OCI/podman profile. The daemon is meant
+        // to run inside that profile. Only refuse after *this JVM* applied a mazewall filter
+        // (the child would inherit it and could not operate).
+        val merged = ContainmentStateRegistry.resolveCurrentState()
+        val mazewallApplied =
+            merged.filterDepth > 0 ||
+                merged.engineState is SeccompInstallationState.Verified ||
+                merged.engineState is SeccompInstallationState.SystemCallApplied ||
+                merged.engineState is SeccompInstallationState.FallbackPrctlApplied
+        check(!mazewallApplied) {
+            "Cannot spawn SupervisorDaemon after mazewall seccomp is installed on this JVM " +
+                "(filterDepth=${merged.filterDepth}). Spawn the daemon before installOnProcess, " +
+                "or run this test in an isolated JVM."
+        }
+    }
+
     private fun spawnDaemon(): SupervisorContext {
+        refuseSpawnIfParentIsFiltered()
         val daemonClassName = SupervisorDaemon::class.java.name
 
         val perms = PosixFilePermissions.fromString("rwx------")

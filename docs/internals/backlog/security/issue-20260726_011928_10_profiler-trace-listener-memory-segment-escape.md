@@ -2,7 +2,7 @@
 title: TraceEvent receives FFM values risking Use-After-Free due to Arena closure
 type: issue
 status: open
-priority: 8
+priority: high
 labels:
 - security
 - enforcer

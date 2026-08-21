@@ -3,7 +3,7 @@ title: Isolate Orchestrator Git Operations from Main Working Directory using Tem
   Worktrees
 severity: HIGH
 status: open
-priority: 9
+priority: high
 dependencies: []
 component: orchestrator
 target_modules:

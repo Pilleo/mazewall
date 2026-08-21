@@ -27,7 +27,7 @@ class BacklogValidatorTest {
             title: "Valid Title"
             severity: "HIGH"
             status: "open"
-            priority: 9
+            priority: high
             dependencies: []
             component: "enforcer"
             target_modules: [":enforcer"]
@@ -51,7 +51,7 @@ class BacklogValidatorTest {
             title: "Invalid Issue"
             severity: "UNKNOWN_SEVERITY"
             status: "invalid_status"
-            priority: 99
+            priority: high
             dependencies: ["issue-non-existent"]
             ---
 
@@ -62,8 +62,28 @@ class BacklogValidatorTest {
         assertFalse(errors.isEmpty())
         assertTrue(errors.any { it.contains("Invalid severity") })
         assertTrue(errors.any { it.contains("Invalid status") })
-        assertTrue(errors.any { it.contains("Priority '99' out of bounds") })
         assertTrue(errors.any { it.contains("References non-existent dependency") })
+    }
+
+    @Test
+    fun testInvalidPriorityLabelFailsParse() {
+        val invalidFile = File(tempDir, "issue-20260726-02-bad-priority.md")
+        invalidFile.writeText(
+            """
+            ---
+            title: "Bad Priority"
+            severity: "HIGH"
+            status: "open"
+            priority: urgent
+            target_modules: [":enforcer"]
+            target_files: ["x.kt"]
+            ---
+
+            # Bad
+            """.trimIndent(),
+        )
+        val errors = BacklogValidator.validateBacklog(tempDir)
+        assertTrue(errors.any { it.contains("Failed to parse") })
     }
 
     @Test
@@ -74,7 +94,7 @@ class BacklogValidatorTest {
             title: "Empty Target Modules"
             severity: "HIGH"
             status: "open"
-            priority: 9
+            priority: high
             dependencies: []
             component: "enforcer"
             target_modules: []
@@ -99,7 +119,7 @@ class BacklogValidatorTest {
             title: "Invalid Target Modules"
             severity: "HIGH"
             status: "open"
-            priority: 9
+            priority: high
             dependencies: []
             component: "enforcer"
             target_modules: [":invalid-module"]
@@ -124,7 +144,7 @@ class BacklogValidatorTest {
             title: "Valid Title"
             severity: "HIGH"
             status: "open"
-            priority: 9
+            priority: high
             dependencies: []
             component: "enforcer"
             target_modules: [":enforcer"]
@@ -158,7 +178,7 @@ class BacklogValidatorTest {
             title: ""
             severity: "HIGH"
             status: "open"
-            priority: 9
+            priority: high
             dependencies: []
             component: "enforcer"
             target_modules: [":enforcer"]
@@ -179,7 +199,7 @@ class BacklogValidatorTest {
             title: "Invalid Comp"
             severity: "HIGH"
             status: "open"
-            priority: 9
+            priority: high
             dependencies: []
             component: "invalid-component"
             target_modules: [":enforcer"]
@@ -200,7 +220,7 @@ class BacklogValidatorTest {
             title: "Missing Files"
             severity: "HIGH"
             status: "open"
-            priority: 9
+            priority: high
             dependencies: []
             component: "enforcer"
             target_modules: [":enforcer"]
@@ -220,7 +240,7 @@ class BacklogValidatorTest {
             title: "Missing Modules"
             severity: "HIGH"
             status: "open"
-            priority: 9
+            priority: high
             dependencies: []
             component: "enforcer"
             target_files: ["some/file.kt"]
@@ -240,7 +260,7 @@ class BacklogValidatorTest {
             title: "Empty Target Files"
             severity: "HIGH"
             status: "open"
-            priority: 9
+            priority: high
             dependencies: []
             component: "enforcer"
             target_modules: [":enforcer"]
@@ -265,7 +285,7 @@ class BacklogValidatorTest {
             title: "Deferred Empty Target Files"
             severity: "HIGH"
             status: "deferred"
-            priority: 9
+            priority: high
             dependencies: []
             component: "enforcer"
             target_modules: [":enforcer"]

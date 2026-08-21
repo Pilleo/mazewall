@@ -2,6 +2,7 @@ package io.mazewall.enforcer
 
 import io.mazewall.BaseIntegrationTest
 import io.mazewall.IsolatedProcessTester
+import io.mazewall.NeedsFreshJvm
 import io.mazewall.Platform
 import io.mazewall.Policy
 import io.mazewall.compile
@@ -18,6 +19,7 @@ import io.mazewall.enforcer.api.ContainedExecutors
 import io.mazewall.enforcer.api.ContainmentViolationException
 import io.mazewall.enforcer.diagnostics.ContainmentViolationDetector
 
+@NeedsFreshJvm
 class ContainedExecutorsTest : BaseIntegrationTest() {
     fun testContainmentWrapperBlocksExecve() {
         val executor = Executors.newSingleThreadExecutor()

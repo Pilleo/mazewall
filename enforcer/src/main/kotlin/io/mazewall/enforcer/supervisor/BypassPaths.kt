@@ -1,5 +1,8 @@
 package io.mazewall.enforcer.supervisor
 
+import java.nio.file.AccessDeniedException
+import java.nio.file.FileSystemException
+import java.nio.file.FileSystemLoopException
 import java.nio.file.Path
 import java.nio.file.Paths
 import java.nio.file.NoSuchFileException
@@ -18,6 +21,36 @@ import java.util.logging.Logger
  */
 public object BypassPaths {
     private val logger = Logger.getLogger(BypassPaths::class.java.name)
+
+    /**
+     * Exhaustive outcome of resolving a path for policy / bypass decisions.
+     * Unsafe results must not be treated as bypass matches.
+     */
+    public sealed interface PathResolution {
+        public data class Resolved(val path: Path) : PathResolution
+        public data class Missing(val normalized: Path) : PathResolution
+        public data class Unsafe(val reason: String) : PathResolution
+    }
+
+    public fun resolveForPolicy(path: Path): PathResolution {
+        return try {
+            PathResolution.Resolved(toRealPathWithFallback(path))
+        } catch (e: FileSystemLoopException) {
+            PathResolution.Unsafe("symlink-loop")
+        } catch (e: AccessDeniedException) {
+            PathResolution.Unsafe("access-denied")
+        } catch (e: NoSuchFileException) {
+            PathResolution.Missing(path.toAbsolutePath().normalize())
+        } catch (e: FileNotFoundException) {
+            PathResolution.Missing(path.toAbsolutePath().normalize())
+        } catch (e: FileSystemException) {
+            PathResolution.Unsafe("filesystem")
+        } catch (e: SecurityException) {
+            PathResolution.Unsafe("security")
+        } catch (e: InvalidPathException) {
+            PathResolution.Unsafe("invalid")
+        }
+    }
 
     public fun toRealPathWithFallback(path: Path): Path {
         val abs = path.toAbsolutePath().normalize()
@@ -51,15 +84,11 @@ public object BypassPaths {
         fun addPathAndReal(path: Path) {
             val abs = path.toAbsolutePath().normalize()
             add(abs)
-            try {
-                val real = toRealPathWithFallback(abs)
-                add(real)
-            } catch (e: NoSuchFileException) {
-                // Normal, path might not exist
-            } catch (e: FileNotFoundException) {
-                // Normal, path might not exist
-            } catch (e: Exception) {
-                logger.warning { "Failed to resolve real path for $abs: ${e.message}" }
+            when (val status = resolveForPolicy(abs)) {
+                is PathResolution.Resolved -> add(status.path)
+                is PathResolution.Missing -> { }
+                is PathResolution.Unsafe ->
+                    logger.warning { "Skipping unsafe real path for $abs: ${status.reason}" }
             }
         }
 
@@ -166,7 +195,11 @@ public object BypassPaths {
     }
 
     public fun isBypassPath(path: Path): Boolean {
-        val realPath = try { toRealPathWithFallback(path) } catch (_: Exception) { path }
+        val realPath = when (val status = resolveForPolicy(path)) {
+            is PathResolution.Resolved -> status.path
+            is PathResolution.Missing -> status.normalized
+            is PathResolution.Unsafe -> return false
+        }
         return safeBypassPaths.any { bypassPath ->
             path.startsWith(bypassPath) || path == bypassPath || realPath.startsWith(bypassPath) || realPath == bypassPath
         }

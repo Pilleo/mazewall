@@ -2,6 +2,7 @@ package io.mazewall.seccomp
 
 import io.mazewall.BaseIntegrationTest
 import io.mazewall.EnabledIfLinuxAndSupported
+import io.mazewall.NeedsFreshJvm
 import io.mazewall.Policy
 import io.mazewall.core.Syscall
 import io.mazewall.enforcer.api.ContainedExecutors
@@ -14,6 +15,7 @@ import java.util.concurrent.Executors
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
+@NeedsFreshJvm
 class SupervisorAcceptIntegrationTest : BaseIntegrationTest() {
 
     companion object {

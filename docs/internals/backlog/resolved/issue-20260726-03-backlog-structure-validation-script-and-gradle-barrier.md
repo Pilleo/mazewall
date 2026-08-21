@@ -2,7 +2,7 @@
 title: "Implement Automated Backlog Schema Validation Script & Gradle Build Barrier"
 severity: "HIGH"
 status: "resolved"
-priority: 10
+priority: high
 dependencies: ["issue-20260726-02"]
 component: "orchestrator"
 target_modules: [":tools:orchestrator"]

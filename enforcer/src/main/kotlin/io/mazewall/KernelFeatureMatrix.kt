@@ -16,12 +16,14 @@ import io.mazewall.enforcer.*
  * @property seccompTsyncSupported True if SECCOMP_FILTER_FLAG_TSYNC is supported (Linux 3.17+).
  * @property seccompUserNotifSupported True if SECCOMP_FILTER_FLAG_NEW_LISTENER is supported (Linux 5.0+).
  * @property landlockAbiVersion The supported Landlock ABI version (0 = Unsupported, 1-8+).
+ * @property cetSupported True if Intel CET Shadow Stack is supported (requires both CPU and kernel support).
  */
 public data class KernelFeatureMatrix(
     val seccompSupported: Boolean,
     val seccompTsyncSupported: Boolean,
     val seccompUserNotifSupported: Boolean,
     val landlockAbiVersion: Int,
+    val cetSupported: Boolean = false,
 ) {
     /** True if Landlock ABI v8 is available, supporting process-wide TSYNC. */
     val landlockTsyncSupported: Boolean get() = landlockAbiVersion >= 8
@@ -39,6 +41,7 @@ public data class KernelFeatureMatrix(
                 seccompTsyncSupported = provider.probeSeccompTsync(),
                 seccompUserNotifSupported = provider.probeSeccompUserNotif(),
                 landlockAbiVersion = provider.getLandlockAbiVersion(),
+                cetSupported = provider.probeCetSupported(),
             )
         }
     }

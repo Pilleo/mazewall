@@ -2,7 +2,7 @@
 title: "Unhandled `SyscallResult` return types leaking into domain logic"
 severity: "RESOLVED"
 status: "resolved"
-priority: 5
+priority: medium
 ---
 
 # ✅ [RESOLVED]: Unhandled `SyscallResult` return types leaking into domain logic

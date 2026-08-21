@@ -8,6 +8,7 @@ import com.tngtech.archunit.junit.ArchTest
 import com.tngtech.archunit.lang.syntax.ArchRuleDefinition.classes
 import com.tngtech.archunit.lang.syntax.ArchRuleDefinition.methods
 import com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses
+import io.mazewall.core.FileDescriptor
 import io.mazewall.enforcer.supervisor.StacktraceScopingPolicy
 
 @AnalyzeClasses(packages = ["io.mazewall"], importOptions = [ImportOption.DoNotIncludeTests::class])
@@ -52,6 +53,7 @@ class ArchitectureTest {
                 "io.mazewall", // RealNativeEngine and RealPlatformProvider are in the root package
                 "io.mazewall.profiler.engine..",
                 "io.mazewall.platform.seccomp.daemon..",
+                "io.mazewall.platform.seccomp..",
             )
 
             .should()
@@ -469,6 +471,113 @@ class ArchitectureTest {
                 }
             })
             .because("MethodHandle.invokeExact must only be called within SyscallInvoker to ensure atomic errno capture.")
+            .check(allClasses)
+    }
+
+    @ArchTest
+    fun sealedSecurityOutcomesHaveAClosedSubclassSet(allClasses: com.tngtech.archunit.core.domain.JavaClasses) {
+        val expected = mapOf(
+            "io.mazewall.landlock.LandlockApplyResult" to setOf(
+                "io.mazewall.landlock.LandlockApplyResult\$Applied",
+                "io.mazewall.landlock.LandlockApplyResult\$Bypassed",
+                "io.mazewall.landlock.LandlockApplyResult\$Rejected",
+            ),
+            "io.mazewall.ffi.networking.SeccompConnection" to setOf(
+                "io.mazewall.ffi.networking.SeccompConnection\$Accepted",
+                "io.mazewall.ffi.networking.SeccompConnection\$FdAttached",
+                "io.mazewall.ffi.networking.SeccompConnection\$Active",
+            ),
+            "io.mazewall.ffi.networking.SeccompConnectionEvent" to setOf(
+                "io.mazewall.ffi.networking.SeccompConnectionEvent\$ListenerReceived",
+                "io.mazewall.ffi.networking.SeccompConnectionEvent\$RecvFailed",
+                "io.mazewall.ffi.networking.SeccompConnectionEvent\$PollIdle",
+                "io.mazewall.ffi.networking.SeccompConnectionEvent\$PollFailed",
+                "io.mazewall.ffi.networking.SeccompConnectionEvent\$AckSucceeded",
+                "io.mazewall.ffi.networking.SeccompConnectionEvent\$AckFailed",
+                "io.mazewall.ffi.networking.SeccompConnectionEvent\$SessionFinished",
+            ),
+            "io.mazewall.platform.daemon.UnixListenDaemonState" to setOf(
+                "io.mazewall.platform.daemon.UnixListenDaemonState\$Uninitialized",
+                "io.mazewall.platform.daemon.UnixListenDaemonState\$Listening",
+                "io.mazewall.platform.daemon.UnixListenDaemonState\$Active",
+                "io.mazewall.platform.daemon.UnixListenDaemonState\$ShuttingDown",
+                "io.mazewall.platform.daemon.UnixListenDaemonState\$Terminated",
+            ),
+            "io.mazewall.enforcer.supervisor.BypassPaths\$PathResolution" to setOf(
+                "io.mazewall.enforcer.supervisor.BypassPaths\$PathResolution\$Resolved",
+                "io.mazewall.enforcer.supervisor.BypassPaths\$PathResolution\$Missing",
+                "io.mazewall.enforcer.supervisor.BypassPaths\$PathResolution\$Unsafe",
+            ),
+            "io.mazewall.platform.seccomp.SupervisedKind" to setOf(
+                "io.mazewall.platform.seccomp.SupervisedKind\$Open",
+                "io.mazewall.platform.seccomp.SupervisedKind\$Connect",
+                "io.mazewall.platform.seccomp.SupervisedKind\$Accept",
+                "io.mazewall.platform.seccomp.SupervisedKind\$Exec",
+                "io.mazewall.platform.seccomp.SupervisedKind\$Spawn",
+                "io.mazewall.platform.seccomp.SupervisedKind\$Unknown",
+            ),
+            "io.mazewall.enforcer.supervisor.SupervisorRoute" to setOf(
+                "io.mazewall.enforcer.supervisor.SupervisorRoute\$Continue",
+                "io.mazewall.enforcer.supervisor.SupervisorRoute\$AskJvm",
+                "io.mazewall.enforcer.supervisor.SupervisorRoute\$InjectFd",
+                "io.mazewall.enforcer.supervisor.SupervisorRoute\$SecureExec",
+                "io.mazewall.enforcer.supervisor.SupervisorRoute\$Abort",
+            ),
+        )
+        for ((parent, kids) in expected) {
+            val actual = allClasses
+                .filter { it.isAssignableTo(parent) && it.name != parent }
+                .filter { !it.name.contains("DefaultImpls") }
+                .filter { "\$\$" !in it.name }
+                .map { it.name }
+                .toSet()
+            org.junit.jupiter.api.Assertions.assertEquals(
+                kids,
+                actual,
+                "Closed subclass set for $parent changed. Update evaluate()/when branches before adding a variant.",
+            )
+        }
+    }
+
+    @ArchTest
+    fun operatorApiMustNotDependOnUserNotifProtocolTypes(allClasses: com.tngtech.archunit.core.domain.JavaClasses) {
+        noClasses()
+            .that()
+            .resideInAnyPackage("io.mazewall.enforcer.api..")
+            .should()
+            .dependOnClassesThat()
+            .haveNameMatching(
+                "io\\.mazewall\\.platform\\.seccomp\\.(SupervisedKind|UserNotifReply|SeccompNotifications|SeccompNotification)(\\$.*)?",
+            )
+            .because(
+                "USER_NOTIF protocol types are cross-module internals, not operator API. " +
+                    "Call Policy / ContainedExecutors instead.",
+            )
+            .check(allClasses)
+    }
+
+    @ArchTest
+    fun fileDescriptorUnsafeMustNotBeUsedInProduction(allClasses: com.tngtech.archunit.core.domain.JavaClasses) {
+        noClasses()
+            .that()
+            .resideOutsideOfPackages("..test..")
+            .should()
+            .callMethodWhere(object : DescribedPredicate<JavaMethodCall>("calls to FileDescriptor.unsafe or unsafe\$default") {
+                override fun test(input: JavaMethodCall): Boolean {
+                    val ownerName = input.target.owner.name
+                    val methodName = input.target.name
+                    val isUnsafeCall = (ownerName == "io.mazewall.core.FileDescriptor\$Companion" ||
+                            ownerName == "io.mazewall.core.FileDescriptor") &&
+                           (methodName == "unsafe" || methodName == "unsafe\$default")
+                    
+                    // Exclude internal synthetic calls from Companion itself (unsafe$default -> unsafe)
+                    val isCompanionInternalCall = input.origin.owner.name == "io.mazewall.core.FileDescriptor\$Companion"
+                    
+                    return isUnsafeCall && !isCompanionInternalCall
+                }
+            })
+            .because("Use role-specific factories (generic, unixSocket, ruleset, oPath, seccompNotif, pid) or adopt() for kernel-reused FDs. " +
+                    "unsafe() creates non-live tokens for retired FDs.")
             .check(allClasses)
     }
 }

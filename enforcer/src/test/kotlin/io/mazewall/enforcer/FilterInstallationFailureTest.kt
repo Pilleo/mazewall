@@ -49,7 +49,7 @@ class FilterInstallationFailureTest {
             if (nr == io.mazewall.core.Arch.current().seccompSyscallNumber.toLong()) {
                 LinuxNative.SyscallResult.Error(22, -1) // EINVAL
             } else {
-                LinuxNative.SyscallResult.Success(0L)
+                LinuxNative.SyscallResult.Success(42L)
             }
         }
 
@@ -89,7 +89,7 @@ class FilterInstallationFailureTest {
             if (nr == io.mazewall.core.Arch.current().seccompSyscallNumber.toLong()) {
                 LinuxNative.SyscallResult.Error(22, -1) // EINVAL
             } else {
-                LinuxNative.SyscallResult.Success(0L)
+                LinuxNative.SyscallResult.Success(42L)
             }
         }
 

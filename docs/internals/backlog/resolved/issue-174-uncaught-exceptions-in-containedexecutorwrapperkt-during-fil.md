@@ -2,7 +2,7 @@
 title: "Uncaught exceptions in `ContainedExecutorWrapper.kt` during filter installation"
 severity: "HIGH"
 status: "resolved"
-priority: 9
+priority: high
 dependencies: []
 component: "enforcer"
 effort: "small"

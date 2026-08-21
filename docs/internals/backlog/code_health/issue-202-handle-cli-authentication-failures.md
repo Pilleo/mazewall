@@ -2,7 +2,7 @@
 title: Detect and Handle CLI Authentication Failures with Actionable Login Alerts
 severity: HIGH
 status: open
-priority: 10
+priority: high
 dependencies: []
 target_files:
 - tools/orchestrator/src/main/kotlin/io/mazewall/orchestrator/GitHubCli.kt

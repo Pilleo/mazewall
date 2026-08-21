@@ -1,26 +1,28 @@
 package io.mazewall.profiler.engine
 
-import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
-import io.mazewall.core.FileDescriptorRole
+import io.mazewall.platform.daemon.UnixListenDaemonState
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertSame
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
 class ProfilerDaemonStateTest {
 
     @Test
-    fun `test state transitions`() {
-        val serverFd = FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(123)
-        val uninitialized = ProfilerDaemonState.Uninitialized
-
-        val listening = uninitialized.listening(serverFd, "/tmp/test.sock")
-        assertTrue(listening is ProfilerDaemonState.Listening)
-        assertEquals("/tmp/test.sock", listening.socketPath)
-        assertEquals(serverFd, listening.serverFd)
-
+    fun `active listen state keeps socketPath`() {
+        val serverFd = FileDescriptor.unixSocket(123)
+        val listening = UnixListenDaemonState.Uninitialized.listening(serverFd, "/tmp/test.sock")
         val active = listening.active()
-        assertTrue(active is ProfilerDaemonState.Active)
         assertEquals(serverFd, active.serverFd)
+        assertEquals("/tmp/test.sock", active.socketPath)
+    }
+
+    @Test
+    fun `profiler engine state is the shared delegate state`() {
+        val engine = ProfilerDaemonEngine(socketPath = "/tmp/profiler-shared-state.sock")
+        assertSame(engine.state, UnixListenDaemonState.Uninitialized)
+        engine.triggerGlobalShutdown("unit")
+        assertTrue(engine.state is UnixListenDaemonState.ShuttingDown)
     }
 }

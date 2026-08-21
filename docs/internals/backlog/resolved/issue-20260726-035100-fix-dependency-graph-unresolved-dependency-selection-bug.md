@@ -2,7 +2,7 @@
 title: "Fix DependencyGraph Selecting Tasks with Unresolved Active Dependencies"
 severity: "HIGH"
 status: "resolved"
-priority: 10
+priority: high
 dependencies: []
 component: "orchestrator"
 target_modules:

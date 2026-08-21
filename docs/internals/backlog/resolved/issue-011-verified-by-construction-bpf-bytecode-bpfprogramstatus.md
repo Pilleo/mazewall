@@ -2,7 +2,7 @@
 title: "Verified-by-Construction BPF Bytecode (BpfProgram<Status>)"
 severity: "ENHANCEMENT"
 status: "resolved"
-priority: 2
+priority: low
 dependencies: []
 component: "seccomp"
 effort: "medium"

@@ -2,7 +2,7 @@
 title: Memory Segment Pooling for Profiler USER_NOTIF
 severity: ENHANCEMENT
 status: open
-priority: 2
+priority: low
 dependencies: []
 target_files:
 - enforcer/src/main/kotlin/io/mazewall/seccomp/PureJavaBpfEngine.kt

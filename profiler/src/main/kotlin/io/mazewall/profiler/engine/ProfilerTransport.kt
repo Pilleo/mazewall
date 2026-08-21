@@ -4,6 +4,7 @@ import io.mazewall.LinuxNative
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
+import io.mazewall.core.SocketIo
 import io.mazewall.ffi.Layouts
 import io.mazewall.ffi.NativeConstants
 import io.mazewall.getFdOrThrow
@@ -162,7 +163,12 @@ object RealProfilerTransport : ProfilerTransport {
             offset += p.size
         }
 
-        val res = LinuxNative.memory.write(socketFd, ConfinedSegment(buf), totalSize.toLong())
+        val res = SocketIo.writeFully(
+            LinuxNative.memory,
+            socketFd,
+            ConfinedSegment(buf),
+            totalSize.toLong(),
+        )
         res.getOrThrow("sendTraceEvent")
     }
 
@@ -171,11 +177,10 @@ object RealProfilerTransport : ProfilerTransport {
         session: HandshakeSession.Success,
         resp: MemorySegment,
     ) {
-        resp.fill(0)
-        resp.set(ValueLayout.JAVA_LONG, io.mazewall.ffi.Layouts.SECCOMP_NOTIF_RESP_ID_OFFSET, session.notifId)
-        resp.set(ValueLayout.JAVA_LONG, io.mazewall.ffi.Layouts.SECCOMP_NOTIF_RESP_VAL_OFFSET, 0L)
-        resp.set(ValueLayout.JAVA_INT, io.mazewall.ffi.Layouts.SECCOMP_NOTIF_RESP_ERROR_OFFSET, 0)
-        resp.set(ValueLayout.JAVA_INT, io.mazewall.ffi.Layouts.SECCOMP_NOTIF_RESP_FLAGS_OFFSET, NativeConstants.SECCOMP_USER_NOTIF_FLAG_CONTINUE.toInt())
+        io.mazewall.platform.seccomp.UserNotifReply.encodeContinue(
+            ConfinedSegment(resp),
+            session.notifId,
+        )
         val res = ioctl(session.listenerFd, SECCOMP_IOCTL_NOTIF_SEND, resp)
         if (res is LinuxNative.SyscallResult.Error) {
             logger.warning("SECCOMP_IOCTL_NOTIF_SEND failed with errno=${res.errno}")
@@ -192,12 +197,11 @@ object RealProfilerTransport : ProfilerTransport {
         resp: MemorySegment,
         errorNr: Int,
     ) {
-        resp.fill(0)
-        resp.set(ValueLayout.JAVA_LONG, io.mazewall.ffi.Layouts.SECCOMP_NOTIF_RESP_ID_OFFSET, session.notifId)
-        resp.set(ValueLayout.JAVA_LONG, io.mazewall.ffi.Layouts.SECCOMP_NOTIF_RESP_VAL_OFFSET, -1L)
-        // Error numbers are negative in the 'error' field of seccomp_notif_resp
-        resp.set(ValueLayout.JAVA_INT, io.mazewall.ffi.Layouts.SECCOMP_NOTIF_RESP_ERROR_OFFSET, -errorNr)
-        resp.set(ValueLayout.JAVA_INT, io.mazewall.ffi.Layouts.SECCOMP_NOTIF_RESP_FLAGS_OFFSET, 0)
+        io.mazewall.platform.seccomp.UserNotifReply.encodeError(
+            ConfinedSegment(resp),
+            session.notifId,
+            errorNr,
+        )
         val res = ioctl(session.listenerFd, SECCOMP_IOCTL_NOTIF_SEND, resp)
         if (res is LinuxNative.SyscallResult.Error) {
             logger.warning("SECCOMP_IOCTL_NOTIF_SEND failed with errno=${res.errno}")

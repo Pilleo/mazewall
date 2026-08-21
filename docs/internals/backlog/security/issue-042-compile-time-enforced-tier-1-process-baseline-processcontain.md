@@ -1,8 +1,8 @@
 ---
 title: Compile-Time Enforced Tier 1 Process Baseline (`ProcessContainmentToken`)
 severity: ENHANCEMENT
-status: open
-priority: 2
+status: deferred
+priority: low
 dependencies: []
 target_files:
 - enforcer/src/main/kotlin/io/mazewall/enforcer/ContainedExecutors.kt
@@ -12,8 +12,10 @@ component: enforcer
 effort: medium
 ---
 
-# 🔵 [Severity: ENHANCEMENT]: Compile-Time Enforced Tier 1 Process Baseline (`ProcessContainmentToken`)
+# ⚪ [Severity: ENHANCEMENT, deferred]: Compile-Time Enforced Tier 1 Process Baseline (`ProcessContainmentToken`)
+
+**Do not implement.** `priority: low` and `deferred`. A phantom token cannot prove the kernel filter is still installed, is unusable from Java without awkward `token` plumbing, and fights tests that only need thread-scoped containment. Docs already say install Tier 1 first.
 
 **Target:** `io.mazewall.enforcer.ContainedExecutors`
 **Context:** `mazewall`'s Threat Model explicitly states that Tier 1 (process-wide `NO_EXEC` baseline) is an absolute architectural backstop against Arbitrary Code Execution (ACE) thread-hopping escapes. If a developer creates a Tier 2 (thread-scoped) sandbox without installing Tier 1, the system is highly vulnerable.
-**Needed:** Make `ContainedExecutors.installOnProcess()` return a `ProcessContainmentToken<Tier1>` singleton. Modify `ContainedExecutors.wrap()` (which creates Tier 2 thread pools) to require this token as an argument. This forces developers to mathematically prove to the compiler that the Tier 1 process-wide baseline has been successfully installed before they can spawn a Tier 2 thread-scoped sandbox.
+**Needed:** Not scheduled. If revisited: `installOnProcess()` would return a `ProcessContainmentToken<Tier1>` and `wrap()` would require it. That still does not prove the filter remains on the process.

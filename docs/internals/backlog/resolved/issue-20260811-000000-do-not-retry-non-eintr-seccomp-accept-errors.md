@@ -2,7 +2,7 @@
 title: "Do Not Retry Non-EINTR Seccomp Accept Errors With a Blocking Accept"
 severity: "MEDIUM"
 status: "resolved"
-priority: 7
+priority: medium
 dependencies: []
 component: "enforcer"
 target_modules:

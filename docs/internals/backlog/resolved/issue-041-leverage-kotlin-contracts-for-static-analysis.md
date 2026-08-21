@@ -2,7 +2,7 @@
 title: "Leverage Kotlin Contracts for Static Analysis"
 severity: "RESOLVED"
 status: "resolved"
-priority: 5
+priority: medium
 ---
 
 # ✅ [RESOLVED]: Leverage Kotlin Contracts for Static Analysis

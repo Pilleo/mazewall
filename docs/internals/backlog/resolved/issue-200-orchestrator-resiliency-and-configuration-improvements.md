@@ -2,7 +2,7 @@
 title: "Orchestrator Resiliency and Configuration Improvements"
 severity: "HIGH"
 status: "resolved"
-priority: 10
+priority: high
 dependencies: []
 component: "orchestrator"
 effort: "medium"

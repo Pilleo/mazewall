@@ -86,6 +86,34 @@ internal object RealPlatformProvider : PlatformProvider {
 
     override fun probeSeccompUserNotif(): Boolean = probeSeccompFlag(NativeConstants.SECCOMP_FILTER_FLAG_NEW_LISTENER)
 
+    override fun probeCetSupported(): Boolean {
+        // Check CPU flags via /proc/cpuinfo for CET support (shstk or ibt)
+        val cpuSupported = try {
+            val file = java.io.File("/proc/cpuinfo")
+            if (file.exists()) {
+                file.useLines { lines ->
+                    lines.any { line ->
+                        line.startsWith("flags") && (
+                            line.contains("shstk", ignoreCase = true) ||
+                            line.contains("ibt", ignoreCase = true)
+                        )
+                    }
+                }
+            } else {
+                false
+            }
+        } catch (e: java.io.IOException) {
+            false
+        } catch (e: SecurityException) {
+            false
+        }
+
+        // Check kernel support via arch_prctl
+        // Also respect the override if set (for testing)
+        return (cpuSupported && Platform.isKernelCetSupported()) ||
+               (Platform.isCpuCetSupportedOverride ?: false)
+    }
+
     /**
      * Probes for a seccomp flag by performing a dry-run call with a NULL pointer.
      * If the kernel recognizes the flag, it returns EFAULT (Bad Address) because it

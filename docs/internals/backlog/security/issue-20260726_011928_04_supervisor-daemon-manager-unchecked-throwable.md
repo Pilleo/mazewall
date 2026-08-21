@@ -3,7 +3,7 @@ title: SupervisorDaemonManager fails to catch throwable during daemon execution 
   to silently dead supervisor
 type: issue
 status: open
-priority: 8
+priority: high
 labels:
 - security
 - enforcer

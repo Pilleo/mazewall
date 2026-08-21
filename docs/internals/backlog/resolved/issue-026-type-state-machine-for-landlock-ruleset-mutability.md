@@ -2,7 +2,7 @@
 title: "Type-State Machine for Landlock Ruleset Mutability"
 severity: "RESOLVED"
 status: "resolved"
-priority: 5
+priority: medium
 ---
 
 # ✅ [RESOLVED]: Type-State Machine for Landlock Ruleset Mutability

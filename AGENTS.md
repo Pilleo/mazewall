@@ -134,6 +134,8 @@ Thread-scoped seccomp is **not** an absolute security boundary against an attack
 *   **Testing is Mandatory:** Any bugfix, behavioral change, or new parameter **must** be accompanied by an automated test.
 *   **Running Tests:** Always run using the nested-seccomp OCI profile via the provided Podman orchestration scripts. This ensures the correct kernel capabilities and seccomp filters are applied:
     - `./gradlew test` — Runs host-side unit tests only (fast, no kernel interaction).
+    - `./gradlew integrationTest` — Kernel tests that do **not** install on the JUnit worker (`forkEvery = 0`).
+    - `./gradlew integrationTestFreshJvm` — Tests tagged `@NeedsFreshJvm` (`forkEvery = 1`).
     - `./scripts/run_tests.sh` — Runs the full integration test suite inside a container.
     - `./scripts/run_vulnerable_app_demo.sh` — Executes the end-to-end CVE exploitation demo.
     - `./scripts/check_coverage.sh` — Verifies Jacoco thresholds.

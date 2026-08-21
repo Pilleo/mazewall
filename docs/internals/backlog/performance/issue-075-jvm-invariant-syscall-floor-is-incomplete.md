@@ -2,7 +2,7 @@
 title: "\U0001F7E1 [DEFERRED \u2014 Medium]: JVM Invariant Syscall Floor is Incomplete"
 severity: MEDIUM
 status: open
-priority: 6
+priority: medium
 dependencies: []
 target_files:
 - enforcer/src/main/kotlin/io/mazewall/seccomp/PureJavaBpfEngine.kt

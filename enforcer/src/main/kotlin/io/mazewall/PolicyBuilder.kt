@@ -56,6 +56,7 @@ public class PolicyBuilder<S : PolicyScope> internal constructor(
     public fun block(vararg syscalls: Syscall): PolicyBuilder<S> = addAction(SeccompAction.ACT_ERRNO, *syscalls)
     public fun allow(vararg syscalls: Syscall): PolicyBuilder<S> = addAction(SeccompAction.ACT_ALLOW, *syscalls)
 
+    /** Uncompiled-definition only. Installed kernel filters cannot grow. */
     public fun unblock(vararg syscalls: Syscall): PolicyBuilder<S> {
         for (sys in syscalls) syscallActions.remove(sys)
         return this
@@ -123,8 +124,17 @@ public class PolicyBuilder<S : PolicyScope> internal constructor(
         return this as PolicyBuilder<PolicyScope.ThreadLocalOnly>
     }
 
+    /**
+     * Advanced compatibility switch. Prefer [forRuntime] so the JIT vs W^X
+     * choice is named rather than a boolean.
+     */
     public fun allowMmapExec(): PolicyBuilder<S> {
         this.allowMmapExec = true
+        return this
+    }
+
+    public fun forRuntime(runtime: RuntimeProfile): PolicyBuilder<S> {
+        this.allowMmapExec = runtime.allowsExecutableMappings
         return this
     }
 

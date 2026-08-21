@@ -2,7 +2,7 @@
 title: "Orchestrator: Close GitHub Issue Automatically on RESOLVE_TASK"
 severity: "LOW"
 status: "open"
-priority: 6
+priority: medium
 dependencies: []
 component: "orchestrator"
 effort: "trivial"

@@ -2,7 +2,7 @@
 title: "Profiler Trace Listener State Mutability Bug"
 severity: "RESOLVED"
 status: "resolved"
-priority: 5
+priority: medium
 ---
 
 # ✅ [RESOLVED]: Profiler Trace Listener State Mutability Bug

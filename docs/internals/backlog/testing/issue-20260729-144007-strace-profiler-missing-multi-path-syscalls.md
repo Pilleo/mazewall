@@ -2,7 +2,7 @@
 title: "Fix StraceProfiler path extraction to support multi-path system calls like rename and symlink"
 severity: "MEDIUM"
 status: "open"
-priority: 7
+priority: medium
 dependencies: []
 component: "profiler"
 target_modules:

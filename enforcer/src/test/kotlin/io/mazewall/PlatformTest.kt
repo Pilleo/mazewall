@@ -79,6 +79,7 @@ class PlatformTest {
             override fun getLandlockAbiVersion(): Int = 0
             override fun probeSeccompTsync(): Boolean = false
             override fun probeSeccompUserNotif(): Boolean = false
+            override fun probeCetSupported(): Boolean = false
             override fun isContainer(): Boolean = false
         }
 
@@ -92,6 +93,54 @@ class PlatformTest {
             org.junit.jupiter.api.assertThrows<UnsupportedOperationException> {
                 Platform.validateSupported()
             }
+        } finally {
+            Platform.resetToDefault()
+        }
+    }
+
+    @Test
+    fun `featureMatrix cetSupported comes from provider probeCetSupported`() {
+        val mockProviderWithCet = MockPlatformProvider().apply {
+            mockOsName = "Linux"
+            mockCetSupported = true
+        }
+        val mockProviderWithoutCet = MockPlatformProvider().apply {
+            mockOsName = "Linux"
+            mockCetSupported = false
+        }
+
+        try {
+            Platform.setProvider(mockProviderWithCet)
+            val matrixWithCet = Platform.featureMatrix
+            assertTrue(matrixWithCet.cetSupported)
+
+            Platform.setProvider(mockProviderWithoutCet)
+            val matrixWithoutCet = Platform.featureMatrix
+            assertFalse(matrixWithoutCet.cetSupported)
+        } finally {
+            Platform.resetToDefault()
+        }
+    }
+
+    @Test
+    fun `InstallationAssessor respects cetSupported from featureMatrix`() {
+        val mockProvider = MockPlatformProvider().apply {
+            mockOsName = "Linux"
+            mockKernelSeccompSupport = true
+            mockSeccompSanityCheckResult = LinuxNative.SyscallResult.Error(22, -1L)
+            mockCetSupported = false
+        }
+
+        try {
+            Platform.setProvider(mockProvider)
+
+            val policy = PolicyDefinition<PolicyScope.ThreadLocalOnly>(
+                lockIntelCet = true,
+            )
+
+            val assessment = InstallationAssessor.assess(policy, processWide = false)
+            assertTrue(assessment.blockedStages.contains(InstallationStage.INTEL_CET))
+            assertTrue(assessment.blockingReasons.any { it.contains("Intel CET") })
         } finally {
             Platform.resetToDefault()
         }

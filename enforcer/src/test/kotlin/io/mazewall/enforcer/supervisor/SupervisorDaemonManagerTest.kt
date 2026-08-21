@@ -11,7 +11,12 @@ import io.mazewall.ffi.NativeConstants
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertTrue
+import io.mazewall.enforcer.state.ContainerState
+import io.mazewall.enforcer.state.ContainmentStateRegistry
+import io.mazewall.seccomp.SeccompInstallationState
+import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.assertThrows
 import io.mazewall.ffi.memory.readByte
 import java.io.ByteArrayInputStream
 import java.io.InputStream
@@ -22,6 +27,12 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 
 class SupervisorDaemonManagerTest {
+
+    @AfterEach
+    fun resetContainmentState() {
+        ContainmentStateRegistry.processState = ContainerState()
+        ContainmentStateRegistry.threadState = ContainerState()
+    }
 
     class MockProcess(
         private val pid: Long,
@@ -92,6 +103,36 @@ class SupervisorDaemonManagerTest {
         }
         override fun recvDescriptor(socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, io.mazewall.core.FdState.Open>): FileDescriptor<FileDescriptorRole.SeccompNotif, io.mazewall.core.FdState.Open>? = null
         override fun sendDescriptor(socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, io.mazewall.core.FdState.Open>, fdToSend: FileDescriptor<*, io.mazewall.core.FdState.Open>): Boolean = true
+    }
+
+    @Test
+    fun `spawn is allowed when only an outer OCI seccomp profile is present`() {
+        val mockEngine = MockNativeEngine()
+        val mockLauncher = MockProcessLauncher()
+        mockLauncher.mockProcess = MockProcess(9999L, SupervisorDaemon.DAEMON_READY_SENTINEL + "\n")
+        val manager = SupervisorDaemonManager(mockEngine, MockSocketManager(), mockLauncher)
+
+        mockEngine.process.onPrctl = {
+            LinuxNative.SyscallResult.Success(2L)
+        }
+
+        val context = manager.getOrSpawnSharedDaemon()
+        assertTrue(mockLauncher.startProcessCalled)
+        assertEquals(9999L, context.daemonProcess.pid())
+    }
+
+    @Test
+    fun `spawn is refused after this JVM applied a mazewall filter`() {
+        ContainmentStateRegistry.processState =
+            ContainerState(filterDepth = 1, engineState = SeccompInstallationState.Verified)
+        val mockEngine = MockNativeEngine()
+        val manager = SupervisorDaemonManager(mockEngine, MockSocketManager(), MockProcessLauncher())
+
+        val ex =
+            assertThrows<IllegalStateException> {
+                manager.getOrSpawnSharedDaemon()
+            }
+        assertTrue(ex.message!!.contains("mazewall seccomp"))
     }
 
     @Test
@@ -200,4 +241,5 @@ class SupervisorDaemonManagerTest {
             manager.stop()
         }
     }
+
 }

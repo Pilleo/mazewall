@@ -2,7 +2,7 @@
 title: "Architectural Violation - FFM Leaking Outside `io.mazewall.ffi`"
 severity: "HIGH"
 status: "resolved"
-priority: 9
+priority: high
 dependencies: []
 component: "enforcer"
 effort: "small"

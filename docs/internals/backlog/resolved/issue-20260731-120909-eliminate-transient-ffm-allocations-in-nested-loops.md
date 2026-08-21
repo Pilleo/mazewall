@@ -2,7 +2,7 @@
 title: "Eliminate Transient FFM Allocations and Memory Leaks in Nested Loops"
 severity: "MEDIUM"
 status: "resolved"
-priority: 8
+priority: high
 dependencies: []
 component: "profiler"
 target_modules:

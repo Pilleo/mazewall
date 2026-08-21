@@ -122,7 +122,7 @@ class StateHandlerTest {
     fun testSelectTaskTransitionsToPendingApproval() {
         val env = MockOrchestratorEnvironment()
         val context = OrchestratorContext()
-        val issue = BacklogIssue(File("test.md"), "issue-1", "Title", 1, "open", emptyList())
+        val issue = BacklogIssue(File("test.md"), "issue-1", "Title", BacklogPriority.LOW, "open", emptyList())
         env.issues.add(issue)
 
         val nextState = SelectTaskState.execute(env, context)
@@ -142,7 +142,7 @@ class StateHandlerTest {
                 currentIssueTitle = "Title"
                 currentIssueFile = tempFile.absolutePath
             }
-            env.issues.add(BacklogIssue(tempFile, "issue-1", "Title", 1, "open", emptyList()))
+            env.issues.add(BacklogIssue(tempFile, "issue-1", "Title", BacklogPriority.LOW, "open", emptyList()))
 
             val state = PendingApprovalState("issue-1", "Title", tempFile.absolutePath)
             val slot = SlotContext("issue-1")
@@ -177,7 +177,7 @@ class StateHandlerTest {
     @Test
     fun `awaiting Jules start creates exactly one session and persists its identifier`() {
         val env = MockOrchestratorEnvironment()
-        env.issues.add(BacklogIssue(File("missing-issue.md"), "issue-1", "Title", 1, "open", emptyList()))
+        env.issues.add(BacklogIssue(File("missing-issue.md"), "issue-1", "Title", BacklogPriority.LOW, "open", emptyList()))
         val context = OrchestratorContext()
         val slot = SlotContext("issue-1").apply {
             currentIssueFile = "missing-issue.md"
@@ -310,7 +310,7 @@ class StateHandlerTest {
         val context = OrchestratorContext().apply {
             currentIssueId = "issue-1"
         }
-        env.issues.add(BacklogIssue(File("test.md"), "issue-1", "Title", 1, "open", emptyList()))
+        env.issues.add(BacklogIssue(File("test.md"), "issue-1", "Title", BacklogPriority.LOW, "open", emptyList()))
 
         val state = ResolveTaskState("issue-1")
         val nextState = state.execute(env, context)
@@ -367,7 +367,7 @@ class StateHandlerTest {
             currentIssueFile = "test.md"
         }
         env.issueClosed = true
-        env.issues.add(BacklogIssue(File("test.md"), "issue-1", "Title", 1, "open", emptyList()))
+        env.issues.add(BacklogIssue(File("test.md"), "issue-1", "Title", BacklogPriority.LOW, "open", emptyList()))
 
         val state = PendingApprovalState("issue-1", "Title", "test.md", "123")
         val nextState = state.execute(env, context)
@@ -385,7 +385,7 @@ class StateHandlerTest {
             githubIssueNumber = "123"
         }
         env.issueClosed = true
-        env.issues.add(BacklogIssue(File("test.md"), "issue-1", "Title", 1, "open", emptyList()))
+        env.issues.add(BacklogIssue(File("test.md"), "issue-1", "Title", BacklogPriority.LOW, "open", emptyList()))
 
         val state = AwaitingJulesStartState("issue-1", "123")
         val nextState = state.execute(env, context)
@@ -516,7 +516,7 @@ class StateHandlerTest {
             githubIssueNumber = "123"
         }
         env.issueClosed = true
-        val issue = BacklogIssue(File("test.md"), "issue-1", "Title", 1, "open", emptyList())
+        val issue = BacklogIssue(File("test.md"), "issue-1", "Title", BacklogPriority.LOW, "open", emptyList())
         env.issues.add(issue)
 
         val state = AwaitingPrState("issue-1", "123", "s1")
@@ -537,7 +537,7 @@ class StateHandlerTest {
             julesRetries = 2
         }
         env.julesSession = JulesSession("s1", "desc", "repo", "FAILED")
-        val issue = BacklogIssue(File("test.md"), "issue-1", "Title", 1, "open", emptyList())
+        val issue = BacklogIssue(File("test.md"), "issue-1", "Title", BacklogPriority.LOW, "open", emptyList())
         env.issues.add(issue)
 
         val state = AwaitingPrState("issue-1", "123", "s1")
@@ -550,7 +550,7 @@ class StateHandlerTest {
     @Test
     fun testAwaitingPrTimeoutDefersTaskBeforeRemovingSlot() {
         val env = MockOrchestratorEnvironment()
-        val issue = BacklogIssue(File("test.md"), "issue-1", "Title", 1, "in_progress", emptyList())
+        val issue = BacklogIssue(File("test.md"), "issue-1", "Title", BacklogPriority.LOW, "in_progress", emptyList())
         env.issues.add(issue)
         val slot = SlotContext("issue-1").apply {
             startTime = System.currentTimeMillis() - TimeUnit.MINUTES.toMillis(61)
@@ -576,7 +576,7 @@ class StateHandlerTest {
             julesSessionId = "s1"
         }
         env.julesSession = JulesSession("s1", "desc", "repo", "Completed")
-        val issue = BacklogIssue(File("test.md"), "review-task-1", "Title", 1, "open", emptyList())
+        val issue = BacklogIssue(File("test.md"), "review-task-1", "Title", BacklogPriority.LOW, "open", emptyList())
         env.issues.add(issue)
 
         val state = AwaitingPrState("review-task-1", "123", "s1")
@@ -590,7 +590,7 @@ class StateHandlerTest {
     fun testCreateGenerationTransitionsEvenIfIssueCommentFails() {
         val env = MockOrchestratorEnvironment()
         val issueFile = kotlin.io.path.createTempFile().toFile().apply { writeText("Task") }
-        env.issues.add(BacklogIssue(issueFile, "issue-1", "Title", 1, "open", emptyList()))
+        env.issues.add(BacklogIssue(issueFile, "issue-1", "Title", BacklogPriority.LOW, "open", emptyList()))
         env.commentOnIssueException = RuntimeException("GitHub comment failed")
         val context = OrchestratorContext().apply {
             currentIssueId = "issue-1"
@@ -616,7 +616,7 @@ class StateHandlerTest {
     fun testCreateGenerationEnsuresSupersededLabelBeforeUse() {
         val env = MockOrchestratorEnvironment()
         val issueFile = kotlin.io.path.createTempFile().toFile().apply { writeText("Task") }
-        env.issues.add(BacklogIssue(issueFile, "issue-1", "Title", 1, "open", emptyList()))
+        env.issues.add(BacklogIssue(issueFile, "issue-1", "Title", BacklogPriority.LOW, "open", emptyList()))
         val context = OrchestratorContext().apply {
             currentIssueId = "issue-1"
             githubIssueNumber = "123"
@@ -682,7 +682,7 @@ class StateHandlerTest {
             julesRetries = 2
         }
         env.julesSession = JulesSession("s1", "desc", "repo", "FAILED")
-        val issue = BacklogIssue(File("test.md"), "issue-1", "Title", 1, "open", emptyList())
+        val issue = BacklogIssue(File("test.md"), "issue-1", "Title", BacklogPriority.LOW, "open", emptyList())
         env.issues.add(issue)
 
         val state = CiRunningState("issue-1", "123", "s1", "pr-1")
@@ -1047,7 +1047,7 @@ class StateHandlerTest {
         val context = OrchestratorContext().apply {
             skippedIds.add("issue-1")
         }
-        val issue = BacklogIssue(File("test.md"), "issue-1", "Title", 1, "open", emptyList())
+        val issue = BacklogIssue(File("test.md"), "issue-1", "Title", BacklogPriority.LOW, "open", emptyList())
         env.issues.add(issue)
 
         val nextState = SelectTaskState.execute(env, context)
@@ -1659,7 +1659,7 @@ class StateHandlerTest {
         env.prMergeStatus = case.prMergeStatus
         env.julesSession = JulesSession(case.julesSessionId, "desc", "repo", case.julesSessionStatus)
 
-        val issue = BacklogIssue(File("test.md"), case.issueId, "Title", 1, "open", emptyList())
+        val issue = BacklogIssue(File("test.md"), case.issueId, "Title", BacklogPriority.LOW, "open", emptyList())
         env.issues.add(issue)
 
         val context = OrchestratorContext().apply {

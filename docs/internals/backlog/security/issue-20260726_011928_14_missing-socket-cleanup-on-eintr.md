@@ -2,7 +2,7 @@
 title: SupervisorDaemonEngine leaks sockets on interrupted accept4
 type: issue
 status: open
-priority: 3
+priority: low
 labels:
 - security
 - enforcer

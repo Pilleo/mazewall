@@ -2,7 +2,7 @@
 title: "Reduce and Version the Supported Public API Surface"
 severity: "MEDIUM"
 status: "open"
-priority: 9
+priority: high
 dependencies: []
 component: "enforcer"
 target_modules:

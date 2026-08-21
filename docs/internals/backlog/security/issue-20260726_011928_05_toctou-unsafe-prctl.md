@@ -2,7 +2,7 @@
 title: Unsafe prctl TOCTOU vulnerability documented but not properly prevented
 type: issue
 status: open
-priority: 5
+priority: medium
 labels:
 - security
 - enforcer

@@ -2,7 +2,7 @@
 title: BPF Static Verifier fails to catch backward jumps that overflow
 type: issue
 status: resolved
-priority: 3
+priority: low
 labels:
 - security
 - enforcer

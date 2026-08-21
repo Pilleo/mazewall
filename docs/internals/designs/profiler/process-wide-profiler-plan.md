@@ -30,8 +30,4 @@
   is the only way to accurately map the true "JVM Floor".
 
   The no_new_privs Caveat
-  As noted in a previously resolved issue in the backlog, TSYNC requires no_new_privs to be set on all threads. This means Profiler.profile(processWide = true) will deterministically throw an EACCES exception if run directly on a host
-  macOS/Linux machine via ./gradlew.
-
-  We will need to catch this specific EACCES exception during Step 2 and throw a clear IllegalStateException advising the developer that process-wide profiling requires running the suite inside a container (e.g., via the provided podman /
-  ./scripts/run_tests.sh scripts) where no_new_privs is established at the container boundary.
+  `seccomp(2)` requires CAP_SYS_ADMIN or no_new_privs on the **calling** thread. TSYNC does not require every sibling to have no_new_privs. Diagnose the kernel result (including a positive offending TID). An outer container profile can still deny nested seccomp.

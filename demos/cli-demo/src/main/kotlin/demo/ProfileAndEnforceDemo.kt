@@ -17,6 +17,7 @@ import io.mazewall.profiler.Profiler
 import io.mazewall.recover
 import io.mazewall.enforcer.supervisor.StacktraceScopingPolicy
 import io.mazewall.enforcer.supervisor.ScopingHandler
+import io.mazewall.enforcer.supervisor.SupervisorDaemonManager
 import io.mazewall.core.Tid
 import io.mazewall.ffi.memory.ConfinedSegment
 import java.io.File
@@ -126,6 +127,10 @@ fun runProfileAndEnforce() {
         println("\u001b[33;1m[PHASE 1] Profiling the Workload...\u001b[0m")
         println("Running the workload under the Tier S USER_NOTIF Profiler to audit exact syscalls & FS access...")
 
+        // USER_NOTIF stays on this thread after profile() and is inherited by clone().
+        // The supervisor JVM must exist first or wrap() cannot spawn it (PR_GET_SECCOMP=2).
+        SupervisorDaemonManager.getInstance().getOrSpawnSharedDaemon()
+
         val profilingResult =
             Profiler.profile {
                 workload()
@@ -140,7 +145,9 @@ fun runProfileAndEnforce() {
         // PHASE 2: Code Generation (BoB DSL)
         // ------------------------------------------------------------
         println("\n\u001b[33;1m[PHASE 2] Generated Bill of Behavior (BoB) DSL:\u001b[0m")
-        val dsl = bob.toDsl("Policy.PURE_COMPUTE_UNSAFE", Policy.PURE_COMPUTE_UNSAFE)
+        // Note: toDsl() throws if exec/connect destinations were observed but cannot be enforced.
+        // This demo workload doesn't have exec/connect, but if it did, pass allowIncomplete=true.
+        val dsl = bob.toDsl("Policy.PURE_COMPUTE_UNSAFE", Policy.PURE_COMPUTE_UNSAFE, allowIncomplete = true)
         println("\u001b[34m$dsl\u001b[0m")
 
         // Always save the compiled Bill of Behavior (SBoB) JSON containing captured stack traces
@@ -169,7 +176,8 @@ fun runProfileAndEnforce() {
         // and to verify the complementary sandboxing even when container seccomp profiles block it.
         // In addition, we stack the new JVM-level Supervisor Proxy to audit and authorize OPEN/OPENAT
         // syscalls based on the calling thread's active stack trace context!
-        val baseForEnforcement = bob.toPolicy(Policy.PURE_COMPUTE_UNSAFE)
+        val baseForEnforcement =
+            profilingResult.toPolicy(Policy.PURE_COMPUTE_UNSAFE, allowIncomplete = true)
         val compiledPolicy =
             Policy
                 .threadLocalBuilder()

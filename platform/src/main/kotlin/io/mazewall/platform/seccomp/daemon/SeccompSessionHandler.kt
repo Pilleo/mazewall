@@ -101,6 +101,11 @@ public class SeccompSessionHandler(
                 break
             }
 
+            if (recvRes is LinuxNative.SyscallResult.Error<*>) {
+                isTerminated = true
+                return LoopAction.Break
+            }
+
             recvRes.onSuccess {
                 if (isPassThrough) {
                     sendSeccompContinue(notif.readLong(0L), resp)
@@ -182,18 +187,8 @@ public class SeccompSessionHandler(
     }
 
     private fun sendSeccompContinue(id: Long, resp: ManagedSegment) {
-        resp.fill(0)
-        resp.writeLong(RESP_ID_OFF, id)
-        resp.writeLong(RESP_VAL_OFF, 0L)
-        resp.writeInt(RESP_ERR_OFF, 0)
-        resp.writeInt(RESP_FLAGS_OFF, NativeConstants.SECCOMP_USER_NOTIF_FLAG_CONTINUE.toInt())
-        while (true) {
-            val res = engine.raw.ioctl(listenerFd, IoctlCommand.SECCOMP_IOCTL_NOTIF_SEND, resp.typed<IoctlPayload.SeccompNotifResp>())
-            if (res is LinuxNative.SyscallResult.Error<*> && res.errno == NativeConstants.EINTR) {
-                continue
-            }
-            break
-        }
+        io.mazewall.platform.seccomp.UserNotifReply.encodeContinue(resp, id)
+        io.mazewall.platform.seccomp.UserNotifReply.send(engine.raw, listenerFd, resp)
     }
 
     public companion object {

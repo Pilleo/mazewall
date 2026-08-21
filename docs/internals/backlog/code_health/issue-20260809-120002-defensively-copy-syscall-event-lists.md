@@ -2,7 +2,7 @@
 title: "Defensively copy SyscallEvent list inputs"
 severity: "MEDIUM"
 status: "open"
-priority: 7
+priority: medium
 dependencies: []
 component: "profiler"
 target_modules:

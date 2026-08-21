@@ -2,7 +2,7 @@
 title: "StraceProfiler Multi-Path Extraction Logic Gap"
 severity: "MEDIUM"
 status: "open"
-priority: 6
+priority: medium
 dependencies: []
 component: "profiler"
 target_modules:

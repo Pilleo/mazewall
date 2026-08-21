@@ -2,7 +2,7 @@
 title: "Unhandled Signal Mask Inheritance in `ContainedExecutors`"
 severity: "HIGH"
 status: "resolved"
-priority: 9
+priority: high
 dependencies: []
 component: "enforcer"
 effort: "small"

@@ -77,7 +77,7 @@ class BillOfBehaviorTest {
 
         // Deny-list mode base policy (blocks OPEN, so should unblock it)
         val denyPolicy = io.mazewall.Policy.PURE_COMPUTE_UNSAFE
-        val compiledDeny = bob.toPolicy(denyPolicy)
+        val compiledDeny = bob.toPolicy(denyPolicy, allowIncomplete = true)
         assertEquals(setOf("/read"), compiledDeny.allowedFsReadPaths.map { it.value }.toSet())
         assertEquals(setOf("/write"), compiledDeny.allowedFsWritePaths.map { it.value }.toSet())
 
@@ -87,10 +87,11 @@ class BillOfBehaviorTest {
                 .builder()
                 .defaultAction(io.mazewall.core.SeccompAction.ACT_ERRNO)
                 .build(),
+            allowIncomplete = true,
         )
         assertEquals(io.mazewall.core.SeccompAction.ACT_ERRNO, policy.defaultAction)
 
-        val policyDenyList = bob.toPolicy()
+        val policyDenyList = bob.toPolicy(allowIncomplete = true)
         assertEquals(io.mazewall.core.SeccompAction.ACT_ALLOW, policyDenyList.defaultAction)
         assertTrue(policyDenyList.isSyscallAllowed(Syscall.OPEN))
         assertTrue(policyDenyList.isSyscallAllowed(Syscall.CONNECT))
@@ -141,7 +142,7 @@ class BillOfBehaviorTest {
                 ),
             )
 
-        val policy = bob.toPolicy(io.mazewall.Policy.PURE_COMPUTE_UNSAFE)
+        val policy = bob.toPolicy(io.mazewall.Policy.PURE_COMPUTE_UNSAFE, allowIncomplete = true)
 
         // Verifying the compiled policy allowed paths are pruned to keep the most generic parent (covers all children)!
         assertEquals(setOf("/home", "/tmp"), policy.allowedFsReadPaths.map { it.value }.toSet())
@@ -283,9 +284,17 @@ class BillOfBehaviorTest {
     fun `toPolicy should resolve relative paths against baseCwd`() {
         val bob = BillOfBehavior(opens = setOf("config/settings.json"))
         val baseCwd = Paths.get("/opt/app")
-        val policy = bob.toPolicy(baseCwd = baseCwd)
+        val policy = bob.toPolicy(baseCwd = baseCwd, allowIncomplete = true)
 
         assertEquals(setOf("/opt/app/config/settings.json"), policy.allowedFsReadPaths.map { it.value }.toSet())
+    }
+
+    @Test
+    fun `toPolicy should throw on observed execs without allowIncomplete`() {
+        val bob = BillOfBehavior(execs = setOf("/usr/bin/bash"))
+        assertFailsWith<IncompleteProfileException> {
+            bob.toPolicy()
+        }
     }
 
     @Test
@@ -293,8 +302,31 @@ class BillOfBehaviorTest {
         val bob = BillOfBehavior(opens = setOf("config/settings.json"))
 
         assertFailsWith<IllegalArgumentException> {
-            bob.toPolicy()
+            bob.toPolicy(allowIncomplete = true)
         }
+    }
+
+    @Test
+    fun `toDsl should throw on observed execs without allowIncomplete`() {
+        val bob = BillOfBehavior(execs = setOf("/usr/bin/bash"))
+        assertFailsWith<IncompleteProfileException> {
+            bob.toDsl()
+        }
+    }
+
+    @Test
+    fun `toDsl should throw on observed connects without allowIncomplete`() {
+        val bob = BillOfBehavior(connects = setOf(NetworkEndpoint("127.0.0.1", 8080)))
+        assertFailsWith<IncompleteProfileException> {
+            bob.toDsl()
+        }
+    }
+
+    @Test
+    fun `toDsl should emit destinations not enforced comment when allowIncomplete is true`() {
+        val bob = BillOfBehavior(execs = setOf("/usr/bin/bash"))
+        val dsl = bob.toDsl(allowIncomplete = true)
+        assertTrue(dsl.contains("// WARNING: destinations not enforced - exec"))
     }
 
     @Test

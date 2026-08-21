@@ -2,7 +2,7 @@
 title: Hardware-Aware CI Test Suite and Graceful Fallback Assertions for Intel CET
 severity: ENHANCEMENT
 status: open
-priority: 7
+priority: medium
 component: enforcer
 target_modules:
 - :enforcer

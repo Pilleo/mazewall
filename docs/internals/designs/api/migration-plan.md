@@ -17,7 +17,7 @@ Implementation includes breaking API changes and therefore requires explicit mai
 
 ## Phase 1: Additive Facade
 
-1. Add `Mazewall`, explicit runtime profiles, assessment/receipt types and owned contained executors.
+1. Add `Mazewall`, explicit runtime profiles, and assessment/receipt types. Do **not** add owned contained executors (issue 032520 is deferred; high maintenance risk).
 2. Add `MazewallProfiler`, session types and coverage metadata.
 3. Add Java-first factories and builders.
 4. Keep current APIs operational while marking unsafe lifecycle behavior in KDoc.
@@ -35,7 +35,7 @@ After a documented compatibility window, remove deprecated APIs and move low-lev
 - Kotlin compile tests for all documented happy paths.
 - Java compile tests without Kotlin-specific invocation patterns.
 - Binary/source compatibility validation for the supported transition window.
-- Integration tests proving owned executors terminate restricted workers.
+- Do not add owned-executor tests unless 032520 is un-deferred.
 - Tests proving receipts and `close()` never imply kernel rollback.
 - Golden tests keeping README snippets and serialized `BillOfBehavior` schemas synchronized.
 - Fail-closed tests for unsupported platforms, incompatible runtime profiles and partial profiler results.

@@ -14,13 +14,13 @@ import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
 import io.mazewall.core.NativeArg
+import io.mazewall.core.close
 import io.mazewall.ffi.NativeConstants
 import io.mazewall.getFdOrThrow
 import io.mazewall.seccomp.*
 import io.mazewall.ffi.memory.ConfinedSegment
 import java.lang.foreign.MemorySegment
 import java.util.concurrent.CountDownLatch
-import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 
 /**
@@ -63,7 +63,8 @@ public object SupervisorSeccompNotifInstaller {
         // Coordination structures
         val installLatch = CountDownLatch(1)
         val proceedLatch = CountDownLatch(1)
-        val listenerFdVal = AtomicInteger(-1)
+        val listenerFdVal: AtomicReference<FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open>> =
+            AtomicReference(FileDescriptor.seccompNotif(-1))
         val setupError = AtomicReference<Throwable?>()
 
         // Coordinator thread spawned BEFORE the seccomp filter is active.
@@ -72,8 +73,8 @@ public object SupervisorSeccompNotifInstaller {
             try {
                 // Wait for the tracee thread to complete the seccomp installation
                 installLatch.await()
-                val fd = listenerFdVal.get()
-                if (fd < 0) {
+                val fdRef = listenerFdVal.get()
+                if (fdRef.value < 0) {
                     val err = setupError.get() ?: IllegalStateException("Failed to install seccomp filter")
                     throw err
                 }
@@ -81,7 +82,7 @@ public object SupervisorSeccompNotifInstaller {
                 // Connect to socket and send the descriptor (runs uncontained)
                 val socketFd = connectWithRetry(socketPath)
                 try {
-                    val sent = sendDescriptor(socketFd, fd)
+                    val sent = sendDescriptor(socketFd, fdRef.value)
                     if (!sent) {
                         throw IllegalStateException("Failed to send seccomp listener FD to daemon")
                     }
@@ -90,7 +91,7 @@ public object SupervisorSeccompNotifInstaller {
                     // We must close our local copy. If we don't, the kernel will not abort
                     // pending notifications when the daemon exits (since our FD would remain open),
                     // causing tracee threads to deadlock forever in __seccomp_filter.
-                    LinuxNative.fileSystem.close(FileDescriptor.unsafe<FileDescriptorRole.SeccompNotif>(fd))
+                    fdRef.close()
 
                     val readyLatch = CountDownLatch(1)
 
@@ -100,7 +101,7 @@ public object SupervisorSeccompNotifInstaller {
                     // Wait until the listener is fully initialized and ready
                     readyLatch.await()
                 } catch (t: Throwable) {
-                    LinuxNative.fileSystem.close(FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(socketFd))
+                    FileDescriptor.unixSocket(socketFd).close()
                     throw t
                 }
 
@@ -137,7 +138,7 @@ public object SupervisorSeccompNotifInstaller {
                 }
             }
 
-            listenerFdVal.set(rawFd)
+            listenerFdVal.set(FileDescriptor.seccompNotif(rawFd))
             onFilterApplied()
             installLatch.countDown() // Release the coordinator to connect & send descriptor
 
@@ -171,24 +172,28 @@ public object SupervisorSeccompNotifInstaller {
                     NativeArg.LongArg(NativeConstants.SECCOMP_FILTER_FLAG_TSYNC.toLong()),
                     NativeArg.MemoryArg(dummyProg),
                 )
-                if (tsyncRes is LinuxNative.SyscallResult.Error) {
-                    val errno = tsyncRes.errno
-                    if (errno == 13) {
+                when (tsyncRes) {
+                    is LinuxNative.SyscallResult.Error ->
                         throw IllegalStateException(
-                            "Process-wide profiling failed with EACCES (Permission denied). " +
-                            "This typically occurs because sibling threads (such as GC or JIT compiler threads) " +
-                            "do not have the 'no_new_privs' flag set. Process-wide profiling requires running " +
-                            "inside a container (where privilege escalation is disabled at the container boundary)."
+                            "Process-wide profiling TSYNC failed: ${
+                                io.mazewall.seccomp.PureJavaBpfEngine.tsyncFailureDetail(tsyncRes.errno, null)
+                            }",
                         )
-                    } else {
-                        throw IllegalStateException("Process-wide profiling TSYNC failed with errno $errno")
-                    }
+
+                    is LinuxNative.SyscallResult.Success ->
+                        if (tsyncRes.value > 0L) {
+                            throw IllegalStateException(
+                                "Process-wide profiling TSYNC failed: ${
+                                    io.mazewall.seccomp.PureJavaBpfEngine.tsyncFailureDetail(null, tsyncRes.value)
+                                }",
+                            )
+                        }
                 }
             }
         } catch (t: Throwable) {
-            val fd = listenerFdVal.get()
-            if (fd >= 0) {
-                LinuxNative.fileSystem.close(FileDescriptor.unsafe<FileDescriptorRole.SeccompNotif>(fd))
+            val fdRef = listenerFdVal.get()
+            if (fdRef.value >= 0) {
+                fdRef.close()
             }
             throw t
         }

@@ -11,10 +11,18 @@ import io.mazewall.core.SocketManager
 import io.mazewall.ffi.Layouts
 import io.mazewall.ffi.NativeConstants
 import io.mazewall.ffi.networking.SeccompConnection
+import io.mazewall.ffi.networking.SeccompConnectionEffect
+import io.mazewall.ffi.networking.SeccompConnectionEvent
+import io.mazewall.ffi.networking.SeccompConnectionMachine
 import io.mazewall.ffi.memory.ManagedSegment
 import io.mazewall.ffi.memory.NativeArena
 import io.mazewall.ffi.memory.PollFdSegment
 import io.mazewall.ffi.memory.writeByte
+import io.mazewall.platform.daemon.UnixListenDaemonEffect
+import io.mazewall.platform.daemon.UnixListenDaemonEvent
+import io.mazewall.platform.daemon.UnixListenDaemonMachine
+import io.mazewall.platform.daemon.UnixListenDaemonState
+import io.mazewall.platform.daemon.UnixListenDaemonTransition
 import io.mazewall.recover
 
 import java.util.concurrent.CopyOnWriteArrayList
@@ -22,30 +30,6 @@ import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
-
-public sealed interface SeccompDaemonState {
-    public object Uninitialized : SeccompDaemonState {
-        public fun listening(
-            serverFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>,
-            socketPath: String
-        ): Listening = Listening(serverFd, socketPath)
-    }
-
-    public data class Listening(
-        val serverFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>,
-        val socketPath: String
-    ) : SeccompDaemonState {
-        public fun active(): Active = Active(serverFd, socketPath)
-    }
-
-    public data class Active(
-        val serverFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>,
-        val socketPath: String
-    ) : SeccompDaemonState
-
-    public object ShuttingDown : SeccompDaemonState
-    public object Terminated : SeccompDaemonState
-}
 
 /**
  * Unified daemon engine for handling seccomp user notification UNIX server, client connections,
@@ -84,8 +68,8 @@ public class SeccompDaemonEngine(
     public val clientSockets = CopyOnWriteArrayList<FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>>()
 
     private val activeListeners = CopyOnWriteArrayList<FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open>>()
-    private val stateRef = AtomicReference<SeccompDaemonState>(SeccompDaemonState.Uninitialized)
-    public var state: SeccompDaemonState
+    private val stateRef = AtomicReference<UnixListenDaemonState>(UnixListenDaemonState.Uninitialized)
+    public var state: UnixListenDaemonState
         get() = stateRef.get()
         private set(value) = stateRef.set(value)
 
@@ -98,15 +82,10 @@ public class SeccompDaemonEngine(
 
     public fun run() {
         val serverFd = socketManager.createUnixServer(socketPath)
-        val listeningState = (state as SeccompDaemonState.Uninitialized).listening(serverFd, socketPath)
-        state = listeningState
-        System.err.println("[SECCOMP-DAEMON] Listening on $socketPath (fd=$serverFd)")
-
-        println(readySentinel)
-        System.out.flush()
+        applyEvent(UnixListenDaemonEvent.Bound(serverFd, socketPath))
+        applyEvent(UnixListenDaemonEvent.ReadyAnnounced)
 
         try {
-            state = listeningState.active()
             NativeArena.ofConfined().use { arena ->
                 val pollFd = PollFdSegment.of(arena.allocate(Layouts.POLLFD))
                 pollFd.setFd(serverFd.value)
@@ -125,32 +104,44 @@ public class SeccompDaemonEngine(
                 }
             }
         } finally {
-            state = SeccompDaemonState.Terminated
-            socketManager.close(serverFd)
-
-            clientSockets.clear()
-            activeListeners.clear()
-            // Interrupt connection workers and let each handleConnection() owner
-            // close its descriptors. Closing the same numeric fds here would race
-            // with that owner close() after Linux reused the number.
-            connectionExecutor.shutdownNow()
+            applyEvent(UnixListenDaemonEvent.AcceptLoopFinished(serverFd))
         }
     }
 
     public fun triggerGlobalShutdown(source: String = "unknown") {
-        while (true) {
-            val curr = stateRef.get()
-            if (curr is SeccompDaemonState.ShuttingDown || curr is SeccompDaemonState.Terminated) return
-            if (stateRef.compareAndSet(curr, SeccompDaemonState.ShuttingDown)) {
-                System.err.println("[SECCOMP-DAEMON] Initiating graceful shutdown. Source: $source.")
-                break
+        applyEvent(UnixListenDaemonEvent.ShutdownRequested(source))
+    }
+
+    internal fun applyEvent(event: UnixListenDaemonEvent): UnixListenDaemonTransition {
+        return UnixListenDaemonMachine.apply(stateRef, event, ::executeEffects)
+    }
+
+    private fun executeEffects(effects: List<UnixListenDaemonEffect>) {
+        for (effect in effects) {
+            when (effect) {
+                is UnixListenDaemonEffect.LogListening ->
+                    System.err.println("[SECCOMP-DAEMON] Listening on ${effect.socketPath} (fd=${effect.serverFd})")
+                is UnixListenDaemonEffect.PublishReady -> {
+                    println(readySentinel)
+                    System.out.flush()
+                }
+                is UnixListenDaemonEffect.LogShutdown ->
+                    System.err.println("[SECCOMP-DAEMON] Initiating graceful shutdown. Source: ${effect.source}.")
+                is UnixListenDaemonEffect.CloseServer ->
+                    socketManager.close(effect.serverFd)
+                is UnixListenDaemonEffect.ClearConnectionTables -> {
+                    clientSockets.clear()
+                    activeListeners.clear()
+                }
+                is UnixListenDaemonEffect.StopConnectionWorkers ->
+                    connectionExecutor.shutdownNow()
             }
         }
     }
 
     public fun isGlobalShutdown(): Boolean {
         val curr = state
-        return curr is SeccompDaemonState.ShuttingDown || curr is SeccompDaemonState.Terminated
+        return curr is UnixListenDaemonState.ShuttingDown || curr is UnixListenDaemonState.Terminated
     }
 
     @Suppress("TooGenericExceptionCaught", "SwallowedException")
@@ -177,7 +168,7 @@ public class SeccompDaemonEngine(
                     }
 
                     if (clientFdVal < 0L) return
-                    clientFd = FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(clientFdVal.toInt())
+                    clientFd = FileDescriptor.adopt(clientFdVal.toInt(), FileDescriptorRole.UnixSocket)
                 }
 
                 if (clientSockets.size >= maxConnections) {
@@ -263,49 +254,66 @@ public class SeccompDaemonEngine(
             val count = pollRes.recover { errno, _ ->
                 if (errno == NativeConstants.EINTR) 0L else -1L
             }
-            if (count < 0) return null
-            if (count == 0L) return connection
+            if (count < 0) {
+                return applyConnectionEvent(connection, SeccompConnectionEvent.PollFailed)
+            }
+            if (count == 0L) {
+                return applyConnectionEvent(connection, SeccompConnectionEvent.PollIdle)
+            }
         }
 
-        return when (val current = connection) {
+        val event = when (connection) {
             is SeccompConnection.Accepted -> {
                 val listenerFd = socketManager.recvDescriptor(socketFd)
                 if (listenerFd != null) {
-                    System.err.println("[SECCOMP-DAEMON] Received listener FD: ${listenerFd.value}")
-                    activeListeners.add(listenerFd)
-                    current.attachFd(listenerFd).also { it.socketManager = socketManager }
+                    SeccompConnectionEvent.ListenerReceived(listenerFd)
                 } else {
-                    null
+                    SeccompConnectionEvent.RecvFailed
                 }
             }
-
             is SeccompConnection.FdAttached -> {
-                System.err.println("[SECCOMP-DAEMON] Sending handshake ACK to socket ${socketFd.value}")
                 val ackBuf = arena.allocate(ACK_BUF_SIZE)
                 ackBuf.writeByte(0L, handshakeAckByte)
-                var result: SeccompConnection? = null
+                var ackOk = false
                 while (true) {
                     val res = handshakeWriter(socketFd, ackBuf, ACK_BUF_SIZE)
                     if (res is LinuxNative.SyscallResult.Success) {
-                        result = current.handshakeComplete().also { it.socketManager = socketManager }
-                        break
-                    } else {
-                        val errno = (res as LinuxNative.SyscallResult.Error).errno
-                        if (errno == NativeConstants.EINTR) continue
-                        result = null
+                        ackOk = true
                         break
                     }
+                    val errno = (res as LinuxNative.SyscallResult.Error).errno
+                    if (errno == NativeConstants.EINTR) continue
+                    break
                 }
-                result
+                if (ackOk) SeccompConnectionEvent.AckSucceeded else SeccompConnectionEvent.AckFailed
             }
+            is SeccompConnection.Active -> SeccompConnectionEvent.SessionFinished
+        }
+        return applyConnectionEvent(connection, event)
+    }
 
-            is SeccompConnection.Active -> {
-                System.err.println("[SECCOMP-DAEMON] Starting session reactor for listener ${current.listenerFd.value}")
-                handleSession(current)
-                System.err.println("[SECCOMP-DAEMON] Session reactor finished. Closing connection.")
-                null
+    private fun applyConnectionEvent(
+        connection: SeccompConnection,
+        event: SeccompConnectionEvent,
+    ): SeccompConnection? {
+        val transition = SeccompConnectionMachine.evaluate(connection, event)
+        for (effect in transition.effects) {
+            when (effect) {
+                is SeccompConnectionEffect.RegisterListener -> {
+                    System.err.println("[SECCOMP-DAEMON] Received listener FD: ${effect.listenerFd.value}")
+                    activeListeners.add(effect.listenerFd)
+                }
+                is SeccompConnectionEffect.LogAck ->
+                    System.err.println("[SECCOMP-DAEMON] Sending handshake ACK to socket ${connection.socketFd.value}")
+                is SeccompConnectionEffect.RunSession -> {
+                    val active = connection as SeccompConnection.Active
+                    System.err.println("[SECCOMP-DAEMON] Starting session reactor for listener ${active.listenerFd.value}")
+                    handleSession(active)
+                    System.err.println("[SECCOMP-DAEMON] Session reactor finished. Closing connection.")
+                }
             }
         }
+        return transition.connection?.also { it.socketManager = socketManager }
     }
 
     private fun handleSession(connection: SeccompConnection.Active) {

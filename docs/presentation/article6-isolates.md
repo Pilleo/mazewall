@@ -63,18 +63,15 @@ graph TD
     end
 ```
 
-### True Physical Heap Isolation
-An Isolate gets a dedicated Java heap, a dedicated GC, and dedicated thread stacks. Even though two Isolates run inside the same Linux process, they cannot share Java objects. An attacker who compromises Isolate A physically cannot see or corrupt the Main Application's memory or Isolate B's memory.
+### Separate *managed* heaps (not a process boundary)
+An Isolate gets its own Java heap, GC, and Java stacks. Isolates do not share Java objects. That is a **runtime invariant**, not physical isolation: they still live in one Linux address space. Native ACE or a runtime/host-function bug can still reach other isolates. Confirm `Isolates.ProtectionDomain` (if used) before claiming hardware-backed isolation.
 
-### Sub-Millisecond Startup
-Because the binary is already loaded, spawning a new Isolate takes **sub-milliseconds to low-milliseconds** (microsecond-scale raw overhead in optimized setups) — making it highly viable for per-request use.
-
-### Compressed Pointers (High Density)
-In Oracle GraalVM (free for production under the GFTC license), Isolates can use **Compressed References** (32-bit pointers on 64-bit architecture), dramatically shrinking memory footprint. You can run thousands of independent Isolates on a single server.
+### Startup and density
+Isolate spawn is typically much cheaper than a new HotSpot process. Treat published “thousands of isolates” / microsecond figures as vendor/setup-dependent, not a mazewall guarantee.
 
 ## The Micro-Sandbox: Isolates + Mazewall
 
-Combining GraalVM Isolates with kernel-level Seccomp/Landlock enforcement gives a sandbox that rivals heavy virtualization (Firecracker, gVisor) but with function-call performance.
+Combining GraalVM Isolates with Seccomp/Landlock reduces *managed-heap* blast radius. Isolates are **not** a separate address space: native ACE, a runtime/JIT bug, or a host-function hole can still reach other isolates in the same process. Firecracker/gVisor remain stronger for hostile native code. Oracle's isolate guidance distinguishes same-process isolation from an external process.
 
 1. **The Trusted Host:** The main application handles HTTP routing and database connections.
 2. **The Untrusted Task:** A request arrives to parse a potentially malicious XML document.
@@ -90,7 +87,7 @@ Combining GraalVM Isolates with kernel-level Seccomp/Landlock enforcement gives 
 
 ### Why is this significantly harder to escape?
 * **Hardware/Memory Isolation:** The Isolate boundary prevents the ACE Pivot — the attacker's native pointers cannot address the main application's heap.
-* **Physical Thread Isolation:** The Isolate has its own independent thread model and cannot submit tasks to the host's global `ForkJoinPool`. Thread-Hopping via `CompletableFuture.runAsync()` is structurally impossible — there is no shared pool to hop to.
+* **Managed thread model:** An isolate does not share the host `ForkJoinPool`. That removes the *trivial* `CompletableFuture.runAsync` hop **if** no host callback or leftover executor is reachable. It is not structural impossibility against native ACE or a compromised isolate runtime.
 * **Kernel Isolation:** The Mazewall Seccomp/Landlock boundary prevents spawning a shell, opening network sockets, or reading files.
 * **W^X Enforcement:** The absence of a JIT compiler allows Seccomp to permanently block `PROT_EXEC`, making binary shellcode injection impossible.
 
@@ -124,7 +121,7 @@ WebAssembly was designed for the most hostile environment on earth: the web brow
 **Chicory Redline & Panama FFM:** Chicory Redline further reduced the performance gap by using Panama FFM to call native Cranelift bindings, JIT-compiling Wasm modules to native machine code at runtime.
 
 > [!NOTE]
-> **The Performance Catch:** WebAssembly on the JVM currently carries a significant performance penalty for CPU-bound tasks compared to native JVM execution. Passing complex Java objects across the Wasm boundary requires heavy serialization; only primitives (ints, floats, memory offsets) pass efficiently. Wasm today is a choice for **absolute security and untrusted plugin isolation**, not peak throughput.
+> **The Performance Catch:** WebAssembly on the JVM currently carries a significant performance penalty for CPU-bound tasks compared to native JVM execution. Passing complex Java objects across the Wasm boundary requires heavy serialization; only primitives (ints, floats, memory offsets) pass efficiently. Wasm linear memory is a useful *language* bound. It is not absolute isolation: host functions, the embedder, and native ACE in the same process sit outside that bound.
 
 ### The Killer Use Case: Sandboxing Deserialization
 

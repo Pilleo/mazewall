@@ -48,6 +48,9 @@ class LandlockCoverageTest {
             ) {
                 return LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(5)
             }
+            if (nr == io.mazewall.ffi.NativeConstants.LANDLOCK_CREATE_RULESET_NR) {
+                return LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(42)
+            }
             return super.syscall(nr, a1, a2, a3, a4, a5, a6)
         }
     }

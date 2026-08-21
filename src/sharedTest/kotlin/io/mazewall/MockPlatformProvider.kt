@@ -16,6 +16,7 @@ public open class MockPlatformProvider : PlatformProvider {
     public var mockLandlockAbiVersion: Int = 5
     public var mockSeccompTsyncSupported: Boolean = true
     public var mockSeccompUserNotifSupported: Boolean = true
+    public var mockCetSupported: Boolean = false
     public var mockContainer: Boolean = false
 
     override fun getOsName(): String = mockOsName
@@ -29,5 +30,6 @@ public open class MockPlatformProvider : PlatformProvider {
     override fun getLandlockAbiVersion(): Int = mockLandlockAbiVersion
     override fun probeSeccompTsync(): Boolean = mockSeccompTsyncSupported
     override fun probeSeccompUserNotif(): Boolean = mockSeccompUserNotifSupported
+    override fun probeCetSupported(): Boolean = mockCetSupported
     override fun isContainer(): Boolean = mockContainer
 }

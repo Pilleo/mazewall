@@ -57,6 +57,7 @@ public object Platform {
         synchronized(this) {
             provider = newProvider
             cachedMatrix = null
+            isCpuCetSupportedCached = null
         }
     }
 
@@ -68,6 +69,7 @@ public object Platform {
         synchronized(this) {
             provider = RealPlatformProvider
             cachedMatrix = null
+            isCpuCetSupportedCached = null
         }
     }
 
@@ -171,7 +173,7 @@ public object Platform {
         return FallbackBehavior.FAIL
     }
 
-    private fun isKernelCetSupported(): Boolean {
+    internal fun isKernelCetSupported(): Boolean {
         if (!isLinux || !isArchitectureSupported()) return false
         if (io.mazewall.core.Arch.current() != io.mazewall.core.Arch.AMD64) return false
         return try {
@@ -193,8 +195,8 @@ public object Platform {
     private var isCpuCetSupportedCached: Boolean? = null
 
     /**
-     * Checks if the CPU supports Intel CET Shadow Stack by reading /proc/cpuinfo
-     * and querying sys_arch_prctl(ARCH_SHSTK_STATUS).
+     * Checks if the CPU supports Intel CET Shadow Stack by delegating to the current
+     * PlatformProvider.probeCetSupported().
      */
     public fun isCpuCetSupported(): Boolean {
         val override = isCpuCetSupportedOverride
@@ -203,27 +205,9 @@ public object Platform {
         val cached = isCpuCetSupportedCached
         if (cached != null) return cached
 
-        val cpuSupported = try {
-            val file = java.io.File("/proc/cpuinfo")
-            if (file.exists()) {
-                file.useLines { lines ->
-                    lines.any { line ->
-                        line.startsWith("flags") && (
-                            line.contains("shstk", ignoreCase = true) ||
-                            line.contains("ibt", ignoreCase = true)
-                        )
-                    }
-                }
-            } else {
-                false
-            }
-        } catch (e: java.io.IOException) {
-            false
-        } catch (e: SecurityException) {
-            false
-        }
+        // Delegate to the current provider's probe
+        val result = provider.probeCetSupported()
 
-        val result = cpuSupported && isKernelCetSupported()
         isCpuCetSupportedCached = result
         return result
     }

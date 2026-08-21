@@ -33,7 +33,7 @@ internal object ProfilerSocket {
                         continue
                     }
                 }
-                val fd = FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(fdVal)
+                val fd = FileDescriptor.unixSocket(fdVal)
                 val connRes =
                 LinuxNative.networking.connect(
                     fd,

@@ -2,7 +2,7 @@
 title: "Unreliable Test Teardown for Mocked Native Engines"
 severity: "HIGH"
 status: "resolved"
-priority: 9
+priority: high
 dependencies: []
 component: "enforcer"
 effort: "small"

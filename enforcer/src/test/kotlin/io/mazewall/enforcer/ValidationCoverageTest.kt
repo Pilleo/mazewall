@@ -31,6 +31,7 @@ class ValidationCoverageTest {
             override fun getLandlockAbiVersion(): Int = 0
             override fun probeSeccompTsync(): Boolean = false
             override fun probeSeccompUserNotif(): Boolean = false
+            override fun probeCetSupported(): Boolean = false
             override fun isContainer(): Boolean = false
         }
 

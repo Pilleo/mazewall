@@ -2,7 +2,7 @@
 title: "Incomplete Architecture Verification in BPF Compiler"
 severity: "HIGH"
 status: "resolved"
-priority: 9
+priority: high
 dependencies: []
 component: "enforcer"
 effort: "small"

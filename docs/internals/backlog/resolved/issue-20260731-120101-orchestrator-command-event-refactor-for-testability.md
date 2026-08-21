@@ -2,7 +2,7 @@
 title: "Refactor Orchestrator States with Command/Event Pattern for Side-Effect Isolation"
 severity: "HIGH"
 status: "resolved"
-priority: 9
+priority: high
 dependencies: []
 component: "orchestrator"
 target_modules:

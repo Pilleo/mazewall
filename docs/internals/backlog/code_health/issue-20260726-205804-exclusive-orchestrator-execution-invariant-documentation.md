@@ -2,7 +2,7 @@
 title: Document Single Control Plane Development Invariants in AGENTS.md
 severity: HIGH
 status: open
-priority: 9
+priority: high
 dependencies:
 - issue-20260726-205803
 component: docs
