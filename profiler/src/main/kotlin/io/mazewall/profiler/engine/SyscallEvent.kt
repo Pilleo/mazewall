@@ -34,13 +34,17 @@ public sealed interface SyscallEventState {
  * @property paths The list of resolved filesystem paths extracted from the tracee's memory.
  * @property stackTrace The captured JVM stack trace of the triggering thread, if available.
  */
-public data class SyscallEvent<out S : SyscallEventState>(
+public class SyscallEvent<out S : SyscallEventState>(
     val tid: Tid,
     val syscallName: String,
-    val args: List<Long>,
-    val paths: List<String> = emptySet<String>().toList(),
-    val stackTrace: List<String>? = null,
+    args: List<Long>,
+    paths: List<String> = emptyList(),
+    stackTrace: List<String>? = null,
 ) {
+    val args: List<Long> = java.util.List.copyOf(args)
+    val paths: List<String> = java.util.List.copyOf(paths)
+    val stackTrace: List<String>? = stackTrace?.let { java.util.List.copyOf(it) }
+
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
         if (other !is SyscallEvent<*>) return false
@@ -60,10 +64,14 @@ public data class SyscallEvent<out S : SyscallEventState>(
         result = 31 * result + (stackTrace?.hashCode() ?: 0)
         return result
     }
+
+    override fun toString(): String {
+        return "SyscallEvent(tid=$tid, syscallName=$syscallName, args=$args, paths=$paths, stackTrace=$stackTrace)"
+    }
 }
 
 /**
  * Extension function to safely transition a raw syscall event to a resolved state by attaching the resolved paths.
  */
 internal fun SyscallEvent<SyscallEventState.Raw>.resolved(paths: List<String>): SyscallEvent<SyscallEventState.Resolved> =
-    SyscallEvent(tid, syscallName, args, paths, stackTrace)
+    SyscallEvent(tid, syscallName, args, java.util.List.copyOf(paths), stackTrace)

@@ -9,6 +9,7 @@ import io.mazewall.profiler.engine.TraceEvent
 import org.junit.jupiter.api.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
@@ -701,6 +702,55 @@ class ProfilerSessionApiTest {
             emptySet(),
         )
         assertTrue(fromBob.any { it is ProfileObservation.IoUring })
+    }
+
+    @Test
+    fun `unparsed CONNECT syscall alongside parsed Connect marks coverage incomplete`() {
+        val corr = ObservationCorrelation(1, Tid(1))
+        val mixedCoverage = ProfilingCoverage.infer(
+            strategy = ProfileStrategy.USER_NOTIF,
+            strategyReason = "test",
+            processWide = false,
+            observations = listOf(
+                ProfileObservation.Connect(corr, ObservationSource.USER_NOTIF, NetworkEndpoint("1.2.3.4", 80)),
+                ProfileObservation.Syscall(corr, ObservationSource.USER_NOTIF, "CONNECT"),
+            ),
+            stacks = StackAttribution.SKIPPED,
+            droppedEvents = 0,
+            drainComplete = true,
+            environment = ProfileEnvironment("test", EbpfLoad.Denied("test")),
+        )
+        assertFalse(mixedCoverage.complete, "A leftover unparsed CONNECT syscall must mark coverage incomplete")
+        assertTrue(mixedCoverage.warnings.any { it.contains("CONNECT") })
+
+        val onlyParsedCoverage = ProfilingCoverage.infer(
+            strategy = ProfileStrategy.USER_NOTIF,
+            strategyReason = "test",
+            processWide = false,
+            observations = listOf(
+                ProfileObservation.Connect(corr, ObservationSource.USER_NOTIF, NetworkEndpoint("1.2.3.4", 80)),
+            ),
+            stacks = StackAttribution.SKIPPED,
+            droppedEvents = 0,
+            drainComplete = true,
+            environment = ProfileEnvironment("test", EbpfLoad.Denied("test")),
+        )
+        assertTrue(onlyParsedCoverage.complete, "Fully parsed connects should be complete")
+
+        val onlyUnparsedCoverage = ProfilingCoverage.infer(
+            strategy = ProfileStrategy.USER_NOTIF,
+            strategyReason = "test",
+            processWide = false,
+            observations = listOf(
+                ProfileObservation.Syscall(corr, ObservationSource.USER_NOTIF, "CONNECT"),
+            ),
+            stacks = StackAttribution.SKIPPED,
+            droppedEvents = 0,
+            drainComplete = true,
+            environment = ProfileEnvironment("test", EbpfLoad.Denied("test")),
+        )
+        assertFalse(onlyUnparsedCoverage.complete)
+        assertTrue(onlyUnparsedCoverage.warnings.contains("CONNECT was observed without a parsed destination"))
     }
 
     private fun syntheticProbe(inInitNs: Boolean, capEff: Long, euid: Int): EbpfLoad {

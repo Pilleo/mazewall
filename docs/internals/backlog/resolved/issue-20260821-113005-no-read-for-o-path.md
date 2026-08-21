@@ -1,7 +1,7 @@
 ---
 title: "Do not grant file reads for O_PATH observations"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: medium
 dependencies: []
 component: "profiler"

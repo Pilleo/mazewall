@@ -1,43 +1,48 @@
 package io.mazewall.core
 
 import io.mazewall.ffi.memory.ManagedSegment
-import org.junit.jupiter.api.Assertions.*
-import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.MethodSource
+import java.util.stream.Stream
 
 class PrctlCommandTest {
 
-    @Test
-    fun `test PrctlCommand objects`() {
-        assertEquals(38, PrctlCommand.SetNoNewPrivs(true).option)
-        assertEquals(1L, (PrctlCommand.SetNoNewPrivs(true).arg2 as NativeArg.LongArg).value)
-        assertEquals(38, PrctlCommand.SetNoNewPrivs(false).option)
-        assertEquals(0L, (PrctlCommand.SetNoNewPrivs(false).arg2 as NativeArg.LongArg).value)
+    data class PrctlTestCase(
+        val name: String,
+        val command: PrctlCommand,
+        val expectedOption: Int,
+        val expectedArg2: NativeArg,
+        val expectedArg3: NativeArg = NativeArg.LongArg(0L),
+    ) {
+        override fun toString(): String = name
+    }
 
-        assertEquals(39, PrctlCommand.GetNoNewPrivs.option)
-        assertEquals(0L, (PrctlCommand.GetNoNewPrivs.arg2 as NativeArg.LongArg).value)
+    companion object {
+        @JvmStatic
+        fun prctlTestCases(): Stream<PrctlTestCase> {
+            val memArg = NativeArg.MemoryArg(ManagedSegment.NULL)
+            return Stream.of(
+                PrctlTestCase("SetNoNewPrivs(true)", PrctlCommand.SetNoNewPrivs(true), 38, NativeArg.LongArg(1L)),
+                PrctlTestCase("SetNoNewPrivs(false)", PrctlCommand.SetNoNewPrivs(false), 38, NativeArg.LongArg(0L)),
+                PrctlTestCase("GetNoNewPrivs", PrctlCommand.GetNoNewPrivs, 39, NativeArg.LongArg(0L)),
+                PrctlTestCase("SetSeccomp(2)", PrctlCommand.SetSeccomp(2), 22, NativeArg.LongArg(2L), NativeArg.NullArg),
+                PrctlTestCase("GetSeccomp", PrctlCommand.GetSeccomp, 21, NativeArg.LongArg(0L)),
+                PrctlTestCase("SetName", PrctlCommand.SetName(memArg), 15, memArg),
+                PrctlTestCase("GetName", PrctlCommand.GetName(memArg), 16, memArg),
+                PrctlTestCase("SetMm(1)", PrctlCommand.SetMm(1), 25, NativeArg.LongArg(1L)),
+                PrctlTestCase("CapAmbient(1, 2)", PrctlCommand.CapAmbient(1, 2), 47, NativeArg.LongArg(1L), NativeArg.LongArg(2L)),
+                PrctlTestCase("SetPtracer(1)", PrctlCommand.SetPtracer(1), 0x59616d61, NativeArg.LongArg(1L)),
+                PrctlTestCase("SetPdeathsig(9)", PrctlCommand.SetPdeathsig(9), 1, NativeArg.LongArg(9L)),
+            )
+        }
+    }
 
-        assertEquals(22, PrctlCommand.SetSeccomp(2).option)
-        assertEquals(2L, (PrctlCommand.SetSeccomp(2).arg2 as NativeArg.LongArg).value)
-        assertEquals(21, PrctlCommand.GetSeccomp.option)
-        assertEquals(0L, (PrctlCommand.GetSeccomp.arg2 as NativeArg.LongArg).value)
-
-        val memArg = NativeArg.MemoryArg(ManagedSegment.NULL)
-        assertEquals(15, PrctlCommand.SetName(memArg).option)
-        assertEquals(memArg, PrctlCommand.SetName(memArg).arg2)
-        assertEquals(16, PrctlCommand.GetName(memArg).option)
-        assertEquals(memArg, PrctlCommand.GetName(memArg).arg2)
-
-        assertEquals(25, PrctlCommand.SetMm(1).option)
-        assertEquals(1L, (PrctlCommand.SetMm(1).arg2 as NativeArg.LongArg).value)
-
-        assertEquals(47, PrctlCommand.CapAmbient(1, 2).option)
-        assertEquals(1L, (PrctlCommand.CapAmbient(1, 2).arg2 as NativeArg.LongArg).value)
-        assertEquals(2L, (PrctlCommand.CapAmbient(1, 2).arg3 as NativeArg.LongArg).value)
-
-        assertEquals(0x59616d61, PrctlCommand.SetPtracer(1).option)
-        assertEquals(1L, (PrctlCommand.SetPtracer(1).arg2 as NativeArg.LongArg).value)
-
-        assertEquals(1, PrctlCommand.SetPdeathsig(9).option)
-        assertEquals(9L, (PrctlCommand.SetPdeathsig(9).arg2 as NativeArg.LongArg).value)
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("prctlTestCases")
+    fun `verify PrctlCommand option and arguments`(testCase: PrctlTestCase) {
+        assertEquals(testCase.expectedOption, testCase.command.option, "option should match")
+        assertEquals(testCase.expectedArg2, testCase.command.arg2, "arg2 should match")
+        assertEquals(testCase.expectedArg3, testCase.command.arg3, "arg3 should match")
     }
 }

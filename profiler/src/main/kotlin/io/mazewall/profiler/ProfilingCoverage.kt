@@ -183,13 +183,19 @@ public data class ProfilingCoverage(
             if (hybridUnproven) {
                 warnings.add("HYBRID_NO_URING without evidence that io_uring was disabled")
             }
-            val unparsedConnect =
-                observations.any { obs ->
+            val unparsedConnectCount =
+                observations.count { obs ->
                     obs is ProfileObservation.Syscall && obs.name.uppercase() == "CONNECT"
-                } && observations.none { it is ProfileObservation.Connect }
-            if (unparsedConnect) {
-                warnings.add("CONNECT was observed without a parsed destination")
+                }
+            val hasParsedConnect = observations.any { it is ProfileObservation.Connect }
+            if (unparsedConnectCount > 0) {
+                if (!hasParsedConnect) {
+                    warnings.add("CONNECT was observed without a parsed destination")
+                } else {
+                    warnings.add("$unparsedConnectCount CONNECT syscall(s) were observed without a parsed destination")
+                }
             }
+            val unparsedConnect = unparsedConnectCount > 0
             val unmappedSyscalls =
                 observations.filter { obs ->
                     obs is ProfileObservation.Syscall &&
@@ -203,6 +209,19 @@ public data class ProfilingCoverage(
                         .distinct()
                 warnings.add("unmapped syscall observations cannot be compiled: ${names.joinToString(",")}")
             }
+            val unenforceableUringOps =
+                observations.filter { obs ->
+                    obs is ProfileObservation.IoUring &&
+                        FsEffect.ofUring(UringOp.parse(obs.opcode), obs.paths) is FsEffect.Unenforceable
+                }
+            if (unenforceableUringOps.isNotEmpty()) {
+                val opcodes =
+                    unenforceableUringOps
+                        .filterIsInstance<ProfileObservation.IoUring>()
+                        .map { it.opcode }
+                        .distinct()
+                warnings.add("unenforceable io_uring opcodes were observed: ${opcodes.joinToString(",")}")
+            }
             val complete = drainComplete && droppedEvents == 0 &&
                 ioUring != IoUringVisibility.BLIND &&
                 !(ioUring == IoUringVisibility.UNSEEN && strategy == ProfileStrategy.EBPF) &&
@@ -213,6 +232,7 @@ public data class ProfilingCoverage(
                 !uringOpenUninspected &&
                 !hybridUnproven &&
                 !unparsedConnect &&
+                unenforceableUringOps.isEmpty() &&
                 unmappedSyscalls.isEmpty()
             return ProfilingCoverage(
                 strategy = strategy,

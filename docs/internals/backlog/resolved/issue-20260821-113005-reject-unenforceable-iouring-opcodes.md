@@ -1,7 +1,7 @@
 ---
 title: "Reject unenforceable io_uring opcodes before compiling"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: medium
 dependencies: []
 component: "profiler"

@@ -1,7 +1,7 @@
 ---
 title: "Defensively copy SyscallEvent list inputs"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: medium
 dependencies: []
 component: "profiler"

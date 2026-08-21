@@ -1,7 +1,7 @@
 ---
 title: "Count each unparsed connect as incomplete"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: medium
 dependencies: []
 component: "profiler"

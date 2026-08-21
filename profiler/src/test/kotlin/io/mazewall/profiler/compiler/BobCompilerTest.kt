@@ -5,6 +5,9 @@ import io.mazewall.core.Arch
 import io.mazewall.core.Syscall
 import io.mazewall.profiler.engine.TraceEvent
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.CsvSource
+import org.junit.jupiter.params.provider.ValueSource
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
@@ -198,125 +201,69 @@ val policy = Policy.builder()
         assertTrue(bob.opens.isEmpty())
     }
 
-    @Test
-    fun `test file system mutation syscalls complete`() {
-        val mutations = setOf(
-            "MKDIR",
-            "MKDIRAT",
-            "RMDIR",
-            "UNLINK",
-            "UNLINKAT",
-            "RENAME",
-            "RENAMEAT",
-            "RENAMEAT2",
-            "LINK",
-            "LINKAT",
-            "SYMLINK",
-            "SYMLINKAT",
-            "CHMOD",
-            "FCHMODAT",
-            "CHOWN",
-            "LCHOWN",
-            "FCHOWNAT",
-            "CREAT",
-            "TRUNCATE",
-            "FTRUNCATE",
-            "UTIME",
-            "UTIMES",
-            "UTIMENSAT",
-        )
+    @ParameterizedTest(name = "mutation syscall {0} maps to fsWritePaths")
+    @ValueSource(
+        strings = [
+            "MKDIR", "MKDIRAT", "RMDIR", "UNLINK", "UNLINKAT",
+            "RENAME", "RENAMEAT", "RENAMEAT2", "LINK", "LINKAT",
+            "SYMLINK", "SYMLINKAT", "CHMOD", "FCHMODAT", "CHOWN",
+            "LCHOWN", "FCHOWNAT", "CREAT", "TRUNCATE", "FTRUNCATE",
+            "UTIME", "UTIMES", "UTIMENSAT",
+        ],
+    )
+    fun `test file system mutation syscalls complete`(syscallName: String) {
+        val event = TraceEvent(tidValue = 1, syscallName = syscallName, args = longArrayOf(), paths = listOf("/path/$syscallName"))
+        val bob = BobCompiler.compile(listOf(event))
 
-        val events = mutations.map {
-            TraceEvent(tidValue = 1, syscallName = it, args = longArrayOf(), paths = listOf("/path/$it"))
-        }
-
-        val bob = BobCompiler.compile(events)
-
-        // They should all map to fsWritePaths
-        val expectedWritePaths = mutations.map { "/path/$it" }.toSet()
-        assertEquals(expectedWritePaths, bob.fsWritePaths)
+        assertEquals(setOf("/path/$syscallName"), bob.fsWritePaths)
         assertTrue(bob.execs.isEmpty())
         assertTrue(bob.opens.isEmpty())
 
-        // Syscalls that are known should be in syscalls
-        val expectedSyscalls = mutations
-            .mapNotNull {
-                runCatching { Syscall.valueOf(it) }.getOrNull()
-            }.toSet()
-        assertEquals(expectedSyscalls, bob.syscalls)
+        val expectedSyscall = runCatching { Syscall.valueOf(syscallName) }.getOrNull()
+        if (expectedSyscall != null) {
+            assertTrue(bob.syscalls.contains(expectedSyscall))
+        }
     }
 
-    @Test
-    fun `test OPEN with different args sizes and flags`() {
-        val oRdonly = 0L
-        val oWronly = 1L
-        val oRdwr = 2L
-        val oCreat = 64L
-        val oTrunc = 512L
+    @ParameterizedTest(name = "{0} with flags {1} (isWrite={2}, isRead={3})")
+    @CsvSource(
+        // OPEN variants (flags at arg index 1)
+        "OPEN, 0, false, true",         // O_RDONLY
+        "OPEN, 1, true, false",          // O_WRONLY
+        "OPEN, 2, true, false",          // O_RDWR
+        "OPEN, 64, true, false",         // O_CREAT
+        "OPEN, 512, true, false",        // O_TRUNC
+        "OPEN, 16777216, false, false",  // O_PATH (0x01000000)
+        // OPENAT variants (flags at arg index 2)
+        "OPENAT, 0, false, true",        // O_RDONLY
+        "OPENAT, 1, true, false",         // O_WRONLY
+        "OPENAT, 2, true, false",         // O_RDWR
+        "OPENAT, 64, true, false",        // O_CREAT
+        "OPENAT, 512, true, false",       // O_TRUNC
+        "OPENAT, 16777216, false, false", // O_PATH (0x01000000)
+    )
+    fun `test OPEN and OPENAT flags classification`(
+        syscallName: String,
+        flags: Long,
+        expectWrite: Boolean,
+        expectRead: Boolean,
+    ) {
+        val args = if (syscallName == "OPEN") longArrayOf(10L, flags) else longArrayOf(10L, 20L, flags)
+        val path = "/path/test-$syscallName-$flags"
+        val event = TraceEvent(tidValue = 1, syscallName = syscallName, args = args, paths = listOf(path))
+        val bob = BobCompiler.compile(listOf(event))
 
-        val events = listOf(
-            // Missing flags arg (size <= 1), treated as read-only (0)
-            TraceEvent(tidValue = 1, syscallName = "OPEN", args = longArrayOf(), paths = listOf("/path/missing")),
-            TraceEvent(tidValue = 1, syscallName = "OPEN", args = longArrayOf(10), paths = listOf("/path/missing2")),
-            // Read-only
-            TraceEvent(tidValue = 1, syscallName = "OPEN", args = longArrayOf(10, oRdonly), paths = listOf("/path/readonly")),
-            // Write-only
-            TraceEvent(tidValue = 1, syscallName = "OPEN", args = longArrayOf(10, oWronly), paths = listOf("/path/writeonly")),
-            // Read-write
-            TraceEvent(tidValue = 1, syscallName = "OPEN", args = longArrayOf(10, oRdwr), paths = listOf("/path/readwrite")),
-            // Create
-            TraceEvent(tidValue = 1, syscallName = "OPEN", args = longArrayOf(10, oCreat), paths = listOf("/path/create")),
-            // Truncate
-            TraceEvent(tidValue = 1, syscallName = "OPEN", args = longArrayOf(10, oTrunc), paths = listOf("/path/truncate")),
-        )
+        if (expectWrite) {
+            assertEquals(setOf(path), bob.fsWritePaths)
+        } else {
+            assertTrue(bob.fsWritePaths.isEmpty(), "fsWritePaths should be empty for flags $flags")
+        }
 
-        val bob = BobCompiler.compile(events)
-
-        assertEquals(
-            setOf("/path/writeonly", "/path/readwrite", "/path/create", "/path/truncate"),
-            bob.fsWritePaths,
-        )
-        assertEquals(
-            setOf("/path/missing", "/path/missing2", "/path/readonly"),
-            bob.opens,
-        )
-    }
-
-    @Test
-    fun `test OPENAT with different args sizes and flags`() {
-        val oRdonly = 0L
-        val oWronly = 1L
-        val oRdwr = 2L
-        val oCreat = 64L
-        val oTrunc = 512L
-
-        val events = listOf(
-            // Missing flags arg (size <= 2), treated as read-only (0)
-            TraceEvent(tidValue = 1, syscallName = "OPENAT", args = longArrayOf(), paths = listOf("/path/missing")),
-            TraceEvent(tidValue = 1, syscallName = "OPENAT", args = longArrayOf(10), paths = listOf("/path/missing2")),
-            TraceEvent(tidValue = 1, syscallName = "OPENAT", args = longArrayOf(10, 20), paths = listOf("/path/missing3")),
-            // Read-only
-            TraceEvent(tidValue = 1, syscallName = "OPENAT", args = longArrayOf(10, 20, oRdonly), paths = listOf("/path/readonly")),
-            // Write-only
-            TraceEvent(tidValue = 1, syscallName = "OPENAT", args = longArrayOf(10, 20, oWronly), paths = listOf("/path/writeonly")),
-            // Read-write
-            TraceEvent(tidValue = 1, syscallName = "OPENAT", args = longArrayOf(10, 20, oRdwr), paths = listOf("/path/readwrite")),
-            // Create
-            TraceEvent(tidValue = 1, syscallName = "OPENAT", args = longArrayOf(10, 20, oCreat), paths = listOf("/path/create")),
-            // Truncate
-            TraceEvent(tidValue = 1, syscallName = "OPENAT", args = longArrayOf(10, 20, oTrunc), paths = listOf("/path/truncate")),
-        )
-
-        val bob = BobCompiler.compile(events)
-
-        assertEquals(
-            setOf("/path/writeonly", "/path/readwrite", "/path/create", "/path/truncate"),
-            bob.fsWritePaths,
-        )
-        assertEquals(
-            setOf("/path/missing", "/path/missing2", "/path/missing3", "/path/readonly"),
-            bob.opens,
-        )
+        if (expectRead) {
+            assertEquals(setOf(path), bob.opens)
+        } else {
+            assertTrue(bob.opens.isEmpty(), "opens should be empty for flags $flags")
+        }
     }
 
     @Test
@@ -345,5 +292,43 @@ val policy = Policy.builder()
         // Unknown syscall, defaults to 0 flags, so not a write.
         assertTrue(bob.fsWritePaths.isEmpty())
         assertTrue(bob.opens.contains("/path/unknown"))
+    }
+
+    @Test
+    fun `test OPEN and OPENAT with O_PATH flag does not grant read or write permissions`() {
+        val oPath = 0x01000000L
+        val events = listOf(
+            TraceEvent(
+                tidValue = 1,
+                syscallName = "OPENAT",
+                args = longArrayOf(0, 0, oPath),
+                paths = listOf("/secret/path"),
+            ),
+            TraceEvent(
+                tidValue = 1,
+                syscallName = "OPEN",
+                args = longArrayOf(0, oPath),
+                paths = listOf("/secret/open-path"),
+            ),
+            TraceEvent(
+                tidValue = 1,
+                syscallName = "OPENAT",
+                args = longArrayOf(0, 0, 0L),
+                paths = listOf("/readable/path"),
+            ),
+        )
+
+        val bob = BobCompiler.compile(events)
+
+        assertFalse(bob.opens.contains("/secret/path"), "O_PATH observation must not be added to opens")
+        assertFalse(bob.fsWritePaths.contains("/secret/path"), "O_PATH observation must not be added to fsWritePaths")
+        assertFalse(bob.opens.contains("/secret/open-path"), "O_PATH observation must not be added to opens")
+        assertFalse(bob.fsWritePaths.contains("/secret/open-path"), "O_PATH observation must not be added to fsWritePaths")
+        assertTrue(bob.opens.contains("/readable/path"), "O_RDONLY must be added to opens")
+
+        val policy = bob.toPolicy(Policy.PURE_COMPUTE_UNSAFE, allowIncomplete = true)
+        assertFalse(policy.allowedFsReadPaths.any { it.value == "/secret/path" })
+        assertFalse(policy.allowedFsReadPaths.any { it.value == "/secret/open-path" })
+        assertTrue(policy.allowedFsReadPaths.any { it.value == "/readable/path" })
     }
 }

@@ -6,6 +6,11 @@ import io.mazewall.ffi.memory.NativeArena
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.CsvSource
+import org.junit.jupiter.params.provider.MethodSource
+import org.junit.jupiter.params.provider.ValueSource
+import java.util.stream.Stream
 
 class SyscallPathResolverTest {
 
@@ -59,18 +64,16 @@ class SyscallPathResolverTest {
         }
     }
 
-    @Test
-    fun `test resolve returns empty list for socket syscalls like sendmsg and recvmsg`() {
+    @ParameterizedTest(name = "socket syscall {0} returns empty paths")
+    @ValueSource(strings = ["SENDMSG", "RECVMSG", "CONNECT", "BIND", "SENDTO", "RECVFROM"])
+    fun `test resolve returns empty list for socket syscalls`(syscall: String) {
         NativeArena.ofConfined().use { arena ->
             with(arena) {
                 val reader = RecordingMockReader()
-                val socketSyscalls = listOf("SENDMSG", "RECVMSG", "CONNECT", "BIND", "SENDTO", "RECVFROM")
-                for (syscall in socketSyscalls) {
-                    val event = makeRawEvent(syscall, listOf(0x1000L, 0x2000L, 0x3000L))
-                    val resolved = makeResolver(reader).resolve(event)
-                    assertTrue(reader.readAddresses.isEmpty(), "No memory read should occur for socket syscall $syscall")
-                    assertTrue(resolved.paths.isEmpty(), "No paths should be resolved for socket syscall $syscall")
-                }
+                val event = makeRawEvent(syscall, listOf(0x1000L, 0x2000L, 0x3000L))
+                val resolved = makeResolver(reader).resolve(event)
+                assertTrue(reader.readAddresses.isEmpty(), "No memory read should occur for socket syscall $syscall")
+                assertTrue(resolved.paths.isEmpty(), "No paths should be resolved for socket syscall $syscall")
             }
         }
     }
@@ -176,82 +179,36 @@ class SyscallPathResolverTest {
         }
     }
 
-    @Test
-    fun `test resolve single string arg syscall`() {
-        NativeArena.ofConfined().use { arena ->
-            with(arena) {
-                val resolver = SyscallPathResolver(stubMemoryReader, SessionEventLedger())
-                val event = SyscallEvent<SyscallEventState.Raw>(Tid(1), "OPEN", listOf(100L))
-                val resolved = resolver.resolve(event)
-                assertEquals(1, resolved.paths.size)
-                assertEquals("/etc/passwd", resolved.paths[0])
-            }
-        }
+    data class StubPathCase(
+        val name: String,
+        val syscall: String,
+        val args: List<Long>,
+        val expectedPaths: List<String>,
+    ) {
+        override fun toString(): String = name
     }
 
-    @Test
-    fun `test resolve dirfd syscall with absolute path`() {
-        NativeArena.ofConfined().use { arena ->
-            with(arena) {
-                val resolver = SyscallPathResolver(stubMemoryReader, SessionEventLedger())
-                val event = SyscallEvent<SyscallEventState.Raw>(Tid(1), "OPENAT", listOf(5L, 100L))
-                val resolved = resolver.resolve(event)
-                assertEquals(1, resolved.paths.size)
-                assertEquals("/etc/passwd", resolved.paths[0])
-            }
-        }
+    companion object {
+        @JvmStatic
+        fun stubPathCases(): Stream<StubPathCase> = Stream.of(
+            StubPathCase("single string arg (OPEN)", "OPEN", listOf(100L), listOf("/etc/passwd")),
+            StubPathCase("dirfd with absolute path (OPENAT)", "OPENAT", listOf(5L, 100L), listOf("/etc/passwd")),
+            StubPathCase("dirfd with relative path and AT_FDCWD (OPENAT)", "OPENAT", listOf(-100L, 101L), listOf("/home/user/relative/path")),
+            StubPathCase("dirfd with relative path and valid dirfd (OPENAT)", "OPENAT", listOf(5L, 101L), listOf("/opt/app/relative/path")),
+            StubPathCase("rename two paths (RENAME)", "RENAME", listOf(100L, 102L), listOf("/etc/passwd", "/var/log")),
+            StubPathCase("renameat two dirfd pairs (RENAMEAT)", "RENAMEAT", listOf(5L, 101L, -100L, 101L), listOf("/opt/app/relative/path", "/home/user/relative/path")),
+        )
     }
 
-    @Test
-    fun `test resolve dirfd syscall with relative path and AT_FDCWD`() {
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("stubPathCases")
+    fun `test resolve syscall path extraction`(testCase: StubPathCase) {
         NativeArena.ofConfined().use { arena ->
             with(arena) {
                 val resolver = SyscallPathResolver(stubMemoryReader, SessionEventLedger())
-                val event = SyscallEvent<SyscallEventState.Raw>(Tid(1), "OPENAT", listOf(-100L, 101L))
+                val event = SyscallEvent<SyscallEventState.Raw>(Tid(1), testCase.syscall, testCase.args)
                 val resolved = resolver.resolve(event)
-                assertEquals(1, resolved.paths.size)
-                assertEquals("/home/user/relative/path", resolved.paths[0])
-            }
-        }
-    }
-
-    @Test
-    fun `test resolve dirfd syscall with relative path and valid dirfd`() {
-        NativeArena.ofConfined().use { arena ->
-            with(arena) {
-                val resolver = SyscallPathResolver(stubMemoryReader, SessionEventLedger())
-                val event = SyscallEvent<SyscallEventState.Raw>(Tid(1), "OPENAT", listOf(5L, 101L))
-                val resolved = resolver.resolve(event)
-                assertEquals(1, resolved.paths.size)
-                assertEquals("/opt/app/relative/path", resolved.paths[0])
-            }
-        }
-    }
-
-    @Test
-    fun `test resolve rename syscall`() {
-        NativeArena.ofConfined().use { arena ->
-            with(arena) {
-                val resolver = SyscallPathResolver(stubMemoryReader, SessionEventLedger())
-                val event = SyscallEvent<SyscallEventState.Raw>(Tid(1), "RENAME", listOf(100L, 102L))
-                val resolved = resolver.resolve(event)
-                assertEquals(2, resolved.paths.size)
-                assertEquals("/etc/passwd", resolved.paths[0])
-                assertEquals("/var/log", resolved.paths[1])
-            }
-        }
-    }
-
-    @Test
-    fun `test resolve renameat syscall`() {
-        NativeArena.ofConfined().use { arena ->
-            with(arena) {
-                val resolver = SyscallPathResolver(stubMemoryReader, SessionEventLedger())
-                val event = SyscallEvent<SyscallEventState.Raw>(Tid(1), "RENAMEAT", listOf(5L, 101L, -100L, 101L))
-                val resolved = resolver.resolve(event)
-                assertEquals(2, resolved.paths.size)
-                assertEquals("/opt/app/relative/path", resolved.paths[0])
-                assertEquals("/home/user/relative/path", resolved.paths[1])
+                assertEquals(testCase.expectedPaths, resolved.paths)
             }
         }
     }
@@ -299,40 +256,34 @@ class SyscallPathResolverTest {
         }
     }
 
+    @ParameterizedTest(name = "normalize \"{0}\" -> \"{1}\"")
+    @CsvSource(
+        "'', ''",
+        "'/', '/'",
+        "'.', '.'",
+        "'///', '/'",
+        "'/a/b/c', '/a/b/c'",
+        "'a/b/c', 'a/b/c'",
+        "'///a//b///c///', '/a/b/c'",
+        "'/a/./b', '/a/b'",
+        "'./a/b', 'a/b'",
+        "'a/b/.', 'a/b'",
+        "'/a/b/../c', '/a/c'",
+        "'/../a', '/a'",
+        "'/a/../..', '/'",
+        "'/a/b/../../..', '/'",
+        "'a/b/../c', 'a/c'",
+        "'../a', '../a'",
+        "'a/../..', '..'",
+        "'a/../../..', '../..'",
+        "'a/../../../a', '../../a'",
+    )
+    fun `test PathNormalizerHelper normalizePath`(input: String, expected: String) {
+        assertEquals(expected, PathNormalizerHelper.normalizePath(input))
+    }
+
     @Test
-    fun `test PathNormalizerHelper normalizePath all branches`() {
-        // empty path
-        assertEquals("", PathNormalizerHelper.normalizePath(""))
-
-        // roots
-        assertEquals("/", PathNormalizerHelper.normalizePath("/"))
-        assertEquals(".", PathNormalizerHelper.normalizePath("."))
-        assertEquals("/", PathNormalizerHelper.normalizePath("///"))
-
-        // regular
-        assertEquals("/a/b/c", PathNormalizerHelper.normalizePath("/a/b/c"))
-        assertEquals("a/b/c", PathNormalizerHelper.normalizePath("a/b/c"))
-        assertEquals("/a/b/c", PathNormalizerHelper.normalizePath("///a//b///c///"))
-
-        // dots
-        assertEquals("/a/b", PathNormalizerHelper.normalizePath("/a/./b"))
-        assertEquals("a/b", PathNormalizerHelper.normalizePath("./a/b"))
-        assertEquals("a/b", PathNormalizerHelper.normalizePath("a/b/."))
-
-        // double dots absolute
-        assertEquals("/a/c", PathNormalizerHelper.normalizePath("/a/b/../c"))
-        assertEquals("/a", PathNormalizerHelper.normalizePath("/../a"))
-        assertEquals("/", PathNormalizerHelper.normalizePath("/a/../.."))
-        assertEquals("/", PathNormalizerHelper.normalizePath("/a/b/../../.."))
-
-        // double dots relative
-        assertEquals("a/c", PathNormalizerHelper.normalizePath("a/b/../c"))
-        assertEquals("../a", PathNormalizerHelper.normalizePath("../a"))
-        assertEquals("..", PathNormalizerHelper.normalizePath("a/../.."))
-        assertEquals("../..", PathNormalizerHelper.normalizePath("a/../../.."))
-        assertEquals("../../a", PathNormalizerHelper.normalizePath("a/../../../a"))
-
-        // fallback triggers (stack overflow and size limits)
+    fun `test PathNormalizerHelper normalizePath large inputs fallback`() {
         val deepPath = (1..130).joinToString("/") { "a" }
         assertEquals(java.nio.file.Paths.get(deepPath).normalize().toString(), PathNormalizerHelper.normalizePath(deepPath))
 
@@ -340,17 +291,19 @@ class SyscallPathResolverTest {
         assertEquals(java.nio.file.Paths.get(longPath).normalize().toString(), PathNormalizerHelper.normalizePath(longPath))
     }
 
-    @Test
-    fun `test PathNormalizerHelper pathStartsWith all branches`() {
-        assertTrue(PathNormalizerHelper.pathStartsWith("/a/b", "/a/b"))
-        assertTrue(PathNormalizerHelper.pathStartsWith("/a/b", "/"))
-        assertTrue(PathNormalizerHelper.pathStartsWith("/a/b/c", "/a/b"))
-        assertTrue(PathNormalizerHelper.pathStartsWith("/", "/"))
-        assertTrue(PathNormalizerHelper.pathStartsWith("/a", "/"))
-
-        assertTrue(!PathNormalizerHelper.pathStartsWith("/a/b-other", "/a/b"))
-        assertTrue(!PathNormalizerHelper.pathStartsWith("/a/b", "/c"))
-        assertTrue(!PathNormalizerHelper.pathStartsWith("a/b", "/a"))
+    @ParameterizedTest(name = "\"{0}\" startsWith \"{1}\" == {2}")
+    @CsvSource(
+        "'/a/b', '/a/b', true",
+        "'/a/b', '/', true",
+        "'/a/b/c', '/a/b', true",
+        "'/', '/', true",
+        "'/a', '/', true",
+        "'/a/b-other', '/a/b', false",
+        "'/a/b', '/c', false",
+        "'a/b', '/a', false",
+    )
+    fun `test PathNormalizerHelper pathStartsWith`(path: String, prefix: String, expected: Boolean) {
+        assertEquals(expected, PathNormalizerHelper.pathStartsWith(path, prefix))
     }
 
     @Test

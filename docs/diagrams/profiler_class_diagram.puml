@@ -388,7 +388,6 @@ class "SyscallEvent" as io.mazewall.profiler.engine.SyscallEvent<S extends Sysca
   +List<Long> getArgs()
   +List<String> getPaths()
   +List<String> getStackTrace()
-  +SyscallEvent<S> copy(int, String, List<Long>, List<String>, List<String>)
 }
 class "SyscallEventKt" as io.mazewall.profiler.engine.SyscallEventKt {
   + {static}SyscallEvent<Resolved> resolved(SyscallEvent<? extends Raw>, List<String>)

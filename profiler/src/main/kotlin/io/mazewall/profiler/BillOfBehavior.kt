@@ -74,6 +74,20 @@ data class BillOfBehavior(
                 throw IncompleteProfileException(withExecs)
             }
         }
+        val unenforceableIoUring = ioUringOps.filter { op ->
+            FsEffect.ofUring(UringOp.parse(op), emptyList()) is FsEffect.Unenforceable
+        }
+        if (unenforceableIoUring.isNotEmpty()) {
+            val withUring =
+                evidence.copy(
+                    complete = false,
+                    warnings = evidence.warnings +
+                        "io_uring opcodes were observed that cannot be enforced by Landlock: ${unenforceableIoUring.joinToString(",")}",
+                )
+            if (!allowIncomplete) {
+                throw IncompleteProfileException(withUring)
+            }
+        }
         requireComplete(evidence, allowIncomplete)
         @Suppress("UNCHECKED_CAST")
         val builder = Policy.threadLocalBuilder().base(base as Policy<PolicyScope.ThreadLocalOnly, *>)
@@ -117,6 +131,18 @@ data class BillOfBehavior(
                     complete = false,
                     warnings = listOf("exec destinations were observed but cannot be enforced; " +
                             "toDsl() only unblocks EXECVE")
+                )
+            )
+        }
+        val unenforceableIoUring = ioUringOps.filter { op ->
+            FsEffect.ofUring(UringOp.parse(op), emptyList()) is FsEffect.Unenforceable
+        }
+        if (unenforceableIoUring.isNotEmpty() && !allowIncomplete) {
+            throw IncompleteProfileException(
+                coverage.copy(
+                    complete = false,
+                    warnings = coverage.warnings +
+                        "io_uring opcodes were observed that cannot be enforced by Landlock: ${unenforceableIoUring.joinToString(",")}",
                 )
             )
         }
