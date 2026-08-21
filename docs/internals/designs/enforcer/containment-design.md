@@ -506,3 +506,20 @@ This ensures process spawning validation is 100% secure, JVM-independent, and fr
 ---
 
 
+
+## Reversible JVM Tracking vs Irreversible Kernel/Daemon Effects
+
+The following table clarifies which effects in mazewall are reversible and which are permanent:
+
+| Effect | Reversible? | JVM tracking |
+|---|---|---|
+| Seccomp filter | No (thread/process lifetime) | `ContainerState.filterDepth` / actions — never clear after apply |
+| Landlock domain | No (nest inward only) | `landlockPolicy` — never rewind after apply |
+| Supervisor session / USER_NOTIF listener | Session closeable; filter stays | Closing session does **not** uninstall; later NOTIFY may get ENOSYS |
+| `InstallationReceipt` | Diagnostic only | `installed` is independent of `landlockApplied` |
+| `sanitizeThreadState` | Forbidden | Throws |
+
+**Related issues:**
+- WONTFIX: [issue-102-permanent-thread-pool-contamination-classloader-leaks-and-st](docs/internals/backlog/performance/issue-102-permanent-thread-pool-contamination-classloader-leaks-and-st.md)
+- WONTFIX: [issue-103-containedexecutors-thread-local-state-persistence-and-poison](docs/internals/backlog/performance/issue-103-containedexecutors-thread-local-state-persistence-and-poison.md)
+- [issue-20260821-113003-report-already-active-landlock](docs/internals/backlog/code_health/issue-20260821-113003-report-already-active-landlock.md)

@@ -772,7 +772,7 @@ class "ContainmentStateRegistry" as io.mazewall.enforcer.state.ContainmentStateR
   +ContainerState getThreadState()
   +void setThreadState(ContainerState)
   +ContainerState resolveCurrentState()
-  +void sanitizeThreadState()
+  +Void sanitizeThreadState()
 }
 class "BypassPaths" as io.mazewall.enforcer.supervisor.BypassPaths {
   + {static}BypassPaths INSTANCE

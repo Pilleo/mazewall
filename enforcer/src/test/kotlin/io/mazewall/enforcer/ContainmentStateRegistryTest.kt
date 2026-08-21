@@ -6,6 +6,7 @@ import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertTrue
+import org.junit.jupiter.api.assertThrows
 import org.junit.jupiter.api.Test
 
 class ContainmentStateRegistryTest {
@@ -88,7 +89,7 @@ class ContainmentStateRegistryTest {
             ContainmentStateRegistry.processState = originalState
         }
     }
-    
+
     @Test
     fun `test state getting and setting`() {
         val original = ContainmentStateRegistry.threadState
@@ -125,5 +126,43 @@ class ContainmentStateRegistryTest {
 
         val state6 = ContainmentStateRegistry.resolveCurrentState()
         assertTrue(state5 === state6, "Expected cached state after new process state resolution")
+    }
+
+    @Test
+    fun `sanitizeThreadState throws UnsupportedOperationException`() {
+        val exception = assertThrows<UnsupportedOperationException> {
+            ContainmentStateRegistry.sanitizeThreadState()
+        }
+        val message = exception.message ?: ""
+        assertTrue(
+            message.contains("permanent") || message.contains("thread") || message.contains("lifetime"),
+            "Exception message should mention permanent restrictions or thread lifetime, got: $message"
+        )
+    }
+
+    @Test
+    fun `sanitizeThreadState has return type Nothing`() {
+        // In Kotlin, a function returning Nothing compiles to Void in Java bytecode.
+        // The Java reflection API returns java.lang.Void.class for the return type.
+        val method = ContainmentStateRegistry::class.java.getDeclaredMethod("sanitizeThreadState")
+        assertEquals(
+            Void::class.java, method.returnType,
+            "Return type should be java.lang.Void (which represents Kotlin's Nothing)"
+        )
+    }
+
+    @Test
+    fun `sanitizeThreadState does not clear threadState on throw`() {
+        val initialState = ContainerState(filterDepth = 3)
+        ContainmentStateRegistry.threadState = initialState
+
+        assertThrows<UnsupportedOperationException> {
+            ContainmentStateRegistry.sanitizeThreadState()
+        }
+
+        assertEquals(
+            3, ContainmentStateRegistry.threadState.filterDepth,
+            "threadState should not be cleared after sanitizeThreadState throws"
+        )
     }
 }

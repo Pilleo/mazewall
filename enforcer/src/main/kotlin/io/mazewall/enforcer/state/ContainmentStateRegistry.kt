@@ -144,7 +144,7 @@ internal object ContainmentStateRegistry {
      * to the OS thread (LWP). Clearing them would cause synchronization loss
      * between JVM state and kernel state, leading to redundant filter installations.
      */
-    fun sanitizeThreadState() {
+    fun sanitizeThreadState(): Nothing {
         throw UnsupportedOperationException(
             "Sanitization of thread state is intentionally disabled. " +
                 "OS-level sandbox restrictions are permanent for the thread's lifetime."
