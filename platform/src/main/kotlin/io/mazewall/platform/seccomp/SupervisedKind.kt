@@ -15,6 +15,7 @@ public sealed interface SupervisedKind {
 
     public companion object {
         public fun classify(nr: Int, arch: Arch): SupervisedKind {
+            if (nr < 0) return Unknown
             return when (nr) {
                 arch.open, arch.openat, arch.openat2 -> Open
                 arch.connect -> Connect

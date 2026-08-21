@@ -1,3 +1,5 @@
+import java.math.BigDecimal
+
 plugins {
     kotlin("jvm")
     id("info.solidsoft.pitest")
@@ -148,6 +150,8 @@ pitest {
             "io.mazewall.SbobParser*",
             "io.mazewall.enforcer.engine.FilterInstallationPlanner*",
             "io.mazewall.enforcer.PolicyCombining*",
+            "io.mazewall.enforcer.supervisor.SupervisorNotificationMachine*",
+            "io.mazewall.enforcer.state.ContainmentStateRegistry*",
         ),
     )
 
@@ -170,11 +174,14 @@ pitest {
             "io.mazewall.seccomp.BpfFilterTest",
             "io.mazewall.SbobParserTest",
             "io.mazewall.enforcer.FilterInstallationPlannerTest",
+            "io.mazewall.enforcer.supervisor.SupervisorNotificationMachineTest",
+            "io.mazewall.enforcer.ContainmentStateRegistryTest",
         ),
     )
 
     jvmArgs.set(listOf("--enable-native-access=ALL-UNNAMED"))
-
+    timeoutConstInMillis.set(2000)
+    timeoutFactor.set(BigDecimal.valueOf(1.25))
     threads.set(System.getProperty("pitest.threads")?.toInt() ?: 4)
 }
 

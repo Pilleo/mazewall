@@ -257,4 +257,83 @@ class FileDescriptorTest {
         assertEquals(1, ctor.parameterCount)
         assertEquals(FileDescriptor::class.java, ctor.parameterTypes.single())
     }
+
+    companion object {
+        @JvmStatic
+        fun roleFactories(): java.util.stream.Stream<org.junit.jupiter.params.provider.Arguments> =
+            java.util.stream.Stream.of(
+                org.junit.jupiter.params.provider.Arguments.of(
+                    "generic",
+                    FileDescriptorRole.Generic,
+                    { fd: Int -> FileDescriptor.generic(fd) },
+                ),
+                org.junit.jupiter.params.provider.Arguments.of(
+                    "unixSocket",
+                    FileDescriptorRole.UnixSocket,
+                    { fd: Int -> FileDescriptor.unixSocket(fd) },
+                ),
+                org.junit.jupiter.params.provider.Arguments.of(
+                    "ruleset",
+                    FileDescriptorRole.Ruleset,
+                    { fd: Int -> FileDescriptor.ruleset(fd) },
+                ),
+                org.junit.jupiter.params.provider.Arguments.of(
+                    "oPath",
+                    FileDescriptorRole.OPath,
+                    { fd: Int -> FileDescriptor.oPath(fd) },
+                ),
+                org.junit.jupiter.params.provider.Arguments.of(
+                    "seccompNotif",
+                    FileDescriptorRole.SeccompNotif,
+                    { fd: Int -> FileDescriptor.seccompNotif(fd) },
+                ),
+                org.junit.jupiter.params.provider.Arguments.of(
+                    "pid",
+                    FileDescriptorRole.Pid,
+                    { fd: Int -> FileDescriptor.pid(fd) },
+                ),
+            )
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest(name = "Role factory {0} -> role {1}")
+    @org.junit.jupiter.params.provider.MethodSource("roleFactories")
+    fun `verify role factories and lifecycle transitions`(
+        roleName: String,
+        expectedRole: FileDescriptorRole,
+        factory: (Int) -> FileDescriptor<*, FdState.Open>,
+    ) {
+        val fd = factory(400 + expectedRole.hashCode().let { if (it < 0) -it else it } % 500)
+        assertTrue(fd.isValid)
+        assertFalse(fd.isInvalid)
+        assertEquals(expectedRole, fd.role)
+
+        val closed = fd.close()
+        assertFalse(fd.isValid)
+        assertFalse(closed.isValid)
+        assertTrue(closed.isClosedType())
+        assertEquals(expectedRole, closed.role)
+    }
+
+    @Test
+    fun `compile-time exhaustive check on FileDescriptorRole variants`() {
+        val roles: List<FileDescriptorRole> = listOf(
+            FileDescriptorRole.Generic,
+            FileDescriptorRole.Ruleset,
+            FileDescriptorRole.OPath,
+            FileDescriptorRole.SeccompNotif,
+            FileDescriptorRole.UnixSocket,
+            FileDescriptorRole.Pid,
+        )
+
+        for (role in roles) {
+            when (role) {
+                is FileDescriptorRole.Generic -> Unit
+                is FileDescriptorRole.Ruleset -> Unit
+                is FileDescriptorRole.OPath -> Unit
+                is FileDescriptorRole.SeccompNotif -> Unit
+                is FileDescriptorRole.UnixSocket -> Unit
+                is FileDescriptorRole.Pid -> Unit
+            }
+        }
+    }
 }
