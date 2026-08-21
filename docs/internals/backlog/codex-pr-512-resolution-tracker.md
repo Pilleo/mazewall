@@ -6,8 +6,8 @@ This document tracks the resolution status of all Codex-generated review comment
 
 | Category | Total | Addressed | Not Changing | Unresolved | Backlogged |
 |---|---|---|---|---|---|
-| P1 | 50+ | 26 | 3 | 15+ | 7 |
-| P2 | 41+ | 16 | 0 | 25+ | 1 |
+| P1 | 50+ | 26 | 3 | 15+ | 11 |
+| P2 | 41+ | 16 | 0 | 25+ | 28 |
 
 ## Resolution Legend
 
@@ -75,9 +75,50 @@ Comments with "Not changing" replies are deemed out of scope or acceptable as-is
 2. **3819861566** → `issue-20260821-000012`: Preserve explicit open denials during restrictive composition
 3. **3819861580** → `issue-20260821-000009`: Detect notification defaults during installation assessment
 4. **3825587200** → `issue-20260820-214309-route-custom-supervised-syscalls`: Route custom supervised syscalls through JVM validation
+5. **3819861587** → `issue-20260821-113000-validation-deadline-full-frame`: Keep validation deadline while reading full frame
+6. **3819982838** → `issue-20260821-113000-perform-exec-rewrite-before-ack`: Perform exec rewrite before acknowledging
+7. **3819982841** → `issue-20260821-113000-constrain-exec-destinations`: Constrain exec destinations during policy compilation
+8. **3819982854** → `issue-20260821-113000-classify-create-truncate`: Classify create/truncate as filesystem mutations
+9. **3819982863** → `issue-20260821-113000-no-revive-retired-descriptors`: Do not revive retired descriptors through unsafe
+10. **3823789271** → `issue-20260821-113000-start-ebpf-collector-before-workload`: Start eBPF collector before workload
+11. **3823789280** → `issue-20260821-113000-require-coverage-for-dsl`: Require coverage when generating DSL
+
+#### P1 Security Issues (BACKLOGGED - Continued)
+12. **3823789292** → `issue-20260821-113000-trace-mutation-syscalls`: Trace mutation syscalls before certifying coverage
+13. **3823789298** → `issue-20260821-113000-decode-openat2-open-how`: Decode openat2's open_how before injecting
+14. **3823789305** → `issue-20260821-113000-forward-creation-mode`: Forward creation mode when emulating open calls
+15. **3825290317** → `issue-20260821-113004-preserve-cet-override`: Preserve CET capability override during installation
+16. **3825290321** → `issue-20260821-113004-preserve-void-installation-entry-points`: Preserve void installation entry points
 
 #### P2 Issues (BACKLOGGED)
 1. **3819861572** → `issue-20260821-000008`: Mark discarded strace records as dropped
+2. **3796525642** → `issue-20260821-113001-terminate-sessions-after-notif-errors`: Terminate sessions after notification receive errors
+3. **3796525657** → `issue-20260821-113001-reject-process-wide-user-notif`: Reject process-wide USER_NOTIF during assessment
+4. **3796525664** → `issue-20260821-113001-preserve-whitespace-ebpf`: Preserve whitespace in recorded eBPF field values
+5. **3797199300** → `issue-20260821-113001-worker-installing-tests-fresh-jvms`: Keep worker-installing tests in fresh JVMs
+6. **3797199301** → `issue-20260821-113001-classify-mutating-iouring`: Classify mutating io_uring operations as writes
+7. **3797199306** → `issue-20260821-113001-preserve-portless-ipv6`: Preserve portless IPv6 endpoints during JSON round trips
+8. **3819324208** → `issue-20260821-113001-reject-process-wide-landlock-no-tsync`: Reject process-wide Landlock when TSYNC unavailable
+9. **3819470485** → `issue-20260821-113002-retain-observations-in-snapshots`: Retain observations in session snapshots
+10. **3819470487** → `issue-20260821-113002-restrict-quoted-paths-to-fs-syscalls`: Restrict quoted paths to filesystem syscalls
+11. **3819590949** → `issue-20260821-113002-capture-every-pathname-operand`: Capture every pathname operand from strace
+12. **3819590960** → `issue-20260821-113002-treat-iouring-open-modes`: Treat io_uring open modes as unresolved
+13. **3819751052** → `issue-20260821-113002-gate-native-memory-assertion`: Gate native-memory assertion on actual availability
+14. **3819751061** → `issue-20260821-113002-preserve-cloexec-injected-exec`: Preserve close-on-exec on injected exec descriptor
+15. **3819751067** → `issue-20260821-113003-open-exec-without-read`: Open executable targets without requiring read permission
+16. **3819751071** → `issue-20260821-113003-classify-every-errno-default`: Classify every errno default as an allow list
+17. **3819861583** → `issue-20260821-113003-preserve-requested-cloexec`: Preserve requested close-on-exec state on injected FDs
+18. **3819982846** → `issue-20260821-113003-extract-only-syscall-pathnames`: Extract only syscall pathname operands from strace
+19. **3819982867** → `issue-20260821-113003-include-cet-in-assessment`: Include Intel CET support in installation assessment
+20. **3823789286** → `issue-20260821-113005-count-each-unparsed-connect`: Count each unparsed connect as incomplete
+21. **3823789313** → `issue-20260821-113003-report-already-active-landlock`: Report already-active Landlock in repeat-install receipts
+22. **3825290323** → `issue-20260821-113004-give-errno-precedence-over-trace`: Give ERRNO precedence over TRACE during intersection
+23. **3825912167** → `issue-20260821-113004-exclude-descriptor-only-calls`: Exclude descriptor-only calls from path completeness
+24. **3825912173** → `issue-20260821-113004-reject-unmappable-observations`: Reject observations that cannot map to a syscall
+25. **3825912176** → `issue-20260821-113005-advance-generation-on-adopt`: Advance generation when adopting new descriptor
+26. **3825912180** → `issue-20260821-113005-no-read-for-o-path`: Do not grant file reads for O_PATH observations
+27. **3825912186** → `issue-20260821-113005-close-injected-exec-descriptor`: Close injected exec descriptor when rewrite fails
+28. **3825912190** → `issue-20260821-113005-reject-unenforceable-iouring-opcodes`: Reject unenforceable io_uring opcodes before compiling
 
 #### Review 4987654735 (BACKLOGGED)
 1. **3825587178** (P2) → `issue-20260820-214309-poll-reused-descriptors`: Do not reject reused live descriptors during poll
