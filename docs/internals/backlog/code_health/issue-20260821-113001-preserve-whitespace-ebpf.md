@@ -1,7 +1,7 @@
 ---
 title: "Preserve whitespace in recorded eBPF field values"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: medium
 dependencies: []
 component: "profiler"
@@ -16,6 +16,8 @@ related_thread: 3796525664
 ---
 
 # 🟡 [Severity: MEDIUM]: Preserve whitespace in recorded eBPF field values
+
+**Review (2026-08-21):** ALREADY FIXED: EbpfEventParser.parseFields supports double-quoted values with spaces. Unquoted spaces remain a sidecar-format contract, not a parser bug.
 
 **Context:** Recorded eBPF events are tokenized on every whitespace boundary with no quoting or escaping support, so a valid path such as `path=/tmp/My File` is compiled as `/tmp/My` while the remaining token is discarded. Profiles for files or endpoints containing spaces consequently produce incorrect Bills of Behavior and enforcement paths.
 

@@ -92,7 +92,7 @@ LinuxNative.raw.syscall(
                     val policy =
                         Policy
                             .builder()
-                            .defaultAction(io.mazewall.core.SeccompAction.ACT_ERRNO)
+                            .defaultAction(io.mazewall.core.SeccompAction.ACT_ERRNO())
                             .allow(*jvmFloor())
                             .build()
 
@@ -122,7 +122,7 @@ LinuxNative.raw.syscall(
                     val policy =
                         Policy
                             .builder()
-                            .defaultAction(io.mazewall.core.SeccompAction.ACT_ERRNO)
+                            .defaultAction(io.mazewall.core.SeccompAction.ACT_ERRNO())
                             .allow(*jvmFloor())
                             .build()
 

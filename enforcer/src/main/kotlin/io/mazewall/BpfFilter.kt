@@ -76,11 +76,6 @@ object BpfFilter {
             } else {
                 (NativeConstants.SECCOMP_RET_ERRNO or (action.errno and 0xFFFF))
             }
-            SeccompAction.ACT_ERRNO -> if (profilingMode) {
-                NativeConstants.SECCOMP_RET_USER_NOTIF
-            } else {
-                (NativeConstants.SECCOMP_RET_ERRNO or NativeConstants.EPERM)
-            }
             is SeccompAction.ACT_TRACE -> {
                 (NativeConstants.SECCOMP_RET_TRACE or (action.traceId and 0xFFFF))
             }

@@ -1,7 +1,7 @@
 ---
 title: "Preserve the CET capability override during installation"
 severity: "HIGH"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "enforcer"
@@ -16,6 +16,8 @@ related_thread: 3825290317
 ---
 
 # 🔴 [Severity: HIGH]: Preserve the CET capability override during installation
+
+**Review (2026-08-21):** ALREADY FIXED: Platform.isCpuCetSupported() honors isCpuCetSupportedOverride; IntelCetTest uses it and passed in ./gradlew build.
 
 **Context:** On hosts without CET, this now ignores `Platform.isCpuCetSupportedOverride`, so the existing mocked-success CET tests fail before reaching their mocked `arch_prctl` calls. Reproduced both failures with `./gradlew :enforcer:test`: `armIntelCet enables locks...` and `armIntelCet is idempotent...` throw `UnsupportedPlatformException`.
 

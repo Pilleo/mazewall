@@ -1,7 +1,7 @@
 ---
 title: "Unbounded readFully after poll deadline"
 severity: "HIGH"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "enforcer"
@@ -16,6 +16,8 @@ related_thread: PRRT_kwDOScnnEM6avSh2
 ---
 
 # 🔴 [Severity: P1]: Unbounded readFully after poll deadline
+
+**Review (2026-08-21):** DUPLICATE of issue-20260821-113000-validation-deadline-full-frame.
 
 **Context:** When the JVM validation peer sends only part of a response and then stalls without closing the socket, the preceding poll deadline ends as soon as the first byte is readable and this blocking `readFully` waits forever for the remainder. The daemon handler and intercepted tracee thread then remain parked permanently, bypassing the timeout specifically intended to prevent validation deadlocks.
 

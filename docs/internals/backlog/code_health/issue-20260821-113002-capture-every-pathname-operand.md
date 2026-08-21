@@ -1,8 +1,10 @@
 ---
 title: "Capture every pathname operand from strace"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: medium
+resolved_in_commit: c6923e5b
+resolved_by: "already fixed by commit (multi-path extractQuotedPaths; 6b0dd1cf only gated first-quote extraction to path-bearing syscalls)"
 dependencies: []
 component: "profiler"
 target_modules:

@@ -13,7 +13,7 @@ class BpfOverflowFixTest {
         val arch = Arch.AMD64
         val blocked = IntArray(100) { it + 1000 } // Use numbers that won't clash with preamble
 
-        val actions = blocked.associateWith { io.mazewall.core.SeccompAction.ACT_ERRNO }
+        val actions = blocked.associateWith { io.mazewall.core.SeccompAction.ACT_ERRNO() }
         val program = BpfFilter.buildFromActions(arch, actions, io.mazewall.core.SeccompAction.ACT_ALLOW, DefaultSyscallInspectionPipeline(emptyList()))
         val filters = program.instructions
 

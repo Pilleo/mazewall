@@ -1,7 +1,7 @@
 ---
 title: "Give ERRNO precedence over TRACE during intersection"
 severity: "LOW"
-status: "open"
+status: "resolved"
 priority: medium
 component: "enforcer"
 dependencies: []
@@ -31,6 +31,8 @@ When one policy assigns `ACT_TRACE` and another assigns `ACT_ERRNO` to the same 
 ## Solution
 
 Give these actions distinct restrictive precedence or explicitly resolve ties toward `ACT_ERRNO`.
+
+Canonical write-up (companion object vs `is ACT_ERRNO`, do not rank by `nativeCode`): `issue-20260821-113004-give-errno-precedence-over-trace`.
 
 ## Related Files
 

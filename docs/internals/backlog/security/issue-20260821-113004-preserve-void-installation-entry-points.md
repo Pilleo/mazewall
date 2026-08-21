@@ -1,7 +1,7 @@
 ---
 title: "Preserve the void installation entry points for existing binaries"
 severity: "HIGH"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "enforcer"
@@ -16,6 +16,8 @@ related_thread: 3825290321
 ---
 
 # 🔴 [Severity: HIGH]: Preserve the void installation entry points for existing binaries
+
+**Review (2026-08-21):** ALREADY FIXED: hidden @Deprecated Unit overloads keep the JVM (...)V descriptor next to InstallationReceipt overloads.
 
 **Context:** Changing `installOnCurrentThread` from a Kotlin `Unit` return to `InstallationReceipt` changes its JVM descriptor from `(...)V` to `(...)Lio/mazewall/InstallationReceipt;`. Applications compiled against the previous release will therefore fail with `NoSuchMethodError` after upgrading even though the new code is binary-compatible in behavior.
 

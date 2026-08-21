@@ -1,5 +1,6 @@
 package io.mazewall.enforcer.supervisor
 
+import io.mazewall.enforcer.api.ContainmentViolationException
 import io.mazewall.enforcer.api.*
 import io.mazewall.enforcer.state.*
 import io.mazewall.enforcer.diagnostics.*
@@ -8,10 +9,12 @@ import io.mazewall.enforcer.*
 import io.mazewall.LinuxNative
 import io.mazewall.platform.seccomp.SupervisedKind
 import io.mazewall.platform.seccomp.daemon.LoopAction
+import io.mazewall.core.Deadline
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
 import io.mazewall.core.NativeArg
+import io.mazewall.core.NewFdFlags
 import io.mazewall.core.OpenFlags
 import io.mazewall.core.Pid
 import io.mazewall.core.Tid
@@ -409,20 +412,17 @@ internal class SupervisorSessionHandler(
         pollFd.setEvents(NativeConstants.POLLIN)
 
         val startMs = System.currentTimeMillis()
-        var remainingTimeout = POLL_TIMEOUT_MS.toLong()
+        val deadline = Deadline.afterMillis(POLL_TIMEOUT_MS.toLong())
         var count = 0L
         val pollFdManaged = pollFd.managed
         var eintrCount = 0
-        while (remainingTimeout > 0) {
+        while (deadline.remainingMillis() > 0) {
             if (Thread.currentThread().isInterrupted) {
                 logger.warning("[SUPERVISOR-DIAGNOSTIC] JVM validation poll interrupted.")
                 break
             }
 
-            val loopStart = System.currentTimeMillis()
-            val pollRes = engine.raw.poll(pollFdManaged, 1L, remainingTimeout.toInt())
-            val elapsed = System.currentTimeMillis() - loopStart
-            remainingTimeout -= elapsed
+            val pollRes = engine.raw.poll(pollFdManaged, 1L, deadline.remainingMillis())
 
             var gotEintr = false
             count = pollRes.recover { errno, _ ->
@@ -474,7 +474,16 @@ internal class SupervisorSessionHandler(
             socketFd,
             responseBuf,
             Layouts.SUPERVISOR_RESPONSE_SIZE,
-        )
+            deadline,
+        ) { timeoutMs -> engine.raw.poll(pollFdManaged, 1L, timeoutMs) }
+        if (readRes is LinuxNative.SyscallResult.Error && readRes.errno == NativeConstants.ETIMEDOUT) {
+            logger.severe("[SUPERVISOR-DIAGNOSTIC] JVM validation frame timed out after ${durationMs}ms (syscall nr=$nr, path=$pathStr, id=$id). Closing socket to prevent desynchronization and returning EPERM.")
+            try {
+                socketManager.close(socketFd)
+            } catch (ignored: Exception) {}
+            sendSeccompError(id, NativeConstants.EPERM, resp)
+            return false
+        }
         if (readRes is LinuxNative.SyscallResult.Success && readRes.value == Layouts.SUPERVISOR_RESPONSE_SIZE) {
             val respSeg = SupervisorResponseSegment.of(responseBuf)
             val respId = respSeg.getId()
@@ -566,7 +575,7 @@ internal class SupervisorSessionHandler(
             addfd.setId(id)
             addfd.setFlags(0)
             addfd.setSrcfd(localFd)
-            addfd.setNewfdFlags(NativeConstants.O_CLOEXEC)
+            addfd.setNewfdFlags(io.mazewall.core.NewFdFlags.forExec().value)
             val addfdRes = engine.raw.ioctl(
                 listenerFd,
                 IoctlCommand.SECCOMP_IOCTL_NOTIF_ADDFD,
@@ -628,7 +637,17 @@ internal class SupervisorSessionHandler(
             return false
         }
         val ack = arena.allocate(1)
-        val readRes = io.mazewall.core.SocketIo.readFully(engine.memory, socketFd, ack, 1)
+        val pollFd = PollFdSegment.of(arena.allocate(Layouts.POLLFD))
+        pollFd.setFd(socketFd.value)
+        pollFd.setEvents(NativeConstants.POLLIN)
+        val pollFdManaged = pollFd.managed
+        val readRes = io.mazewall.core.SocketIo.readFully(
+            engine.memory,
+            socketFd,
+            ack,
+            1,
+            Deadline.afterMillis(POLL_TIMEOUT_MS.toLong()),
+        ) { timeoutMs -> engine.raw.poll(pollFdManaged, 1L, timeoutMs) }
         return readRes is LinuxNative.SyscallResult.Success && ack.readByte(0) == 1.toByte()
     }
 
@@ -645,6 +664,7 @@ internal class SupervisorSessionHandler(
         traceeArch: io.mazewall.core.Arch
     ): Boolean {
         var localFdValue = -1
+        var injectFlags = NewFdFlags.NONE
         try {
             localFdValue = when (injectTarget(SupervisorNotificationMachine.classify(nr, traceeArch))) {
                 is InjectTarget.Open -> {
@@ -652,7 +672,18 @@ internal class SupervisorSessionHandler(
                         sendSeccompError(id, NativeConstants.EPERM, resp)
                         return true
                     }
-                    openFileInSupervisor(nr, args, pathStr, traceeArch, tid)
+                    val req = SupervisedOpen.parse(nr, args, pathStr, traceeArch)
+                    if (req == null) {
+                        sendSeccompError(id, NativeConstants.EPERM, resp)
+                        return true
+                    }
+                    injectFlags =
+                        when (req) {
+                            is SupervisedOpen.Open -> NewFdFlags.forOpen(req.flags)
+                            is SupervisedOpen.OpenAt -> NewFdFlags.forOpen(req.flags)
+                            is SupervisedOpen.OpenAt2 -> NewFdFlags.forOpen(req.how.flags)
+                        }
+                    openFileInSupervisor(req, tid)
                 }
                 is InjectTarget.Connect -> {
                     if (sockaddrBytes == null) {
@@ -679,7 +710,7 @@ internal class SupervisorSessionHandler(
             addfd.setId(id)
             addfd.setFlags(NativeConstants.SECCOMP_ADDFD_FLAG_SEND.toInt())
             addfd.setSrcfd(localFdValue)
-            addfd.setNewfdFlags(NativeConstants.O_CLOEXEC)
+            addfd.setNewfdFlags(injectFlags.value)
 
             val addfdManaged = addfd.managed
             var success = false
@@ -717,13 +748,28 @@ internal class SupervisorSessionHandler(
         arch: io.mazewall.core.Arch,
         tid: Tid,
     ): Int {
-        val flags = if (nr == arch.open) args[1].toInt() else args[2].toInt()
-        val pathSeg = arena.allocateFrom(pathStr)
-        val dirfd = if (nr == arch.open || pathStr.startsWith("/")) AT_FDCWD else args[0].toInt()
-        if (dirfd == AT_FDCWD || pathStr.startsWith("/")) {
-            return signedErrno(engine.fileSystem.open(pathSeg, io.mazewall.core.OpenFlags(flags)))
+        val req = SupervisedOpen.parse(nr, args, pathStr, arch) ?: return -NativeConstants.EPERM
+        return openFileInSupervisor(req, tid)
+    }
+
+    context(arena: NativeArena)
+    private fun openFileInSupervisor(
+        req: SupervisedOpen,
+        tid: Tid,
+    ): Int {
+        val pathSeg = arena.allocateFrom(req.path)
+        return when (req) {
+            is SupervisedOpen.Open ->
+                signedErrno(engine.fileSystem.open(pathSeg, req.flags))
+            is SupervisedOpen.OpenAt -> {
+                if (req.dirfd == AT_FDCWD || req.path.startsWith("/")) {
+                    signedErrno(engine.fileSystem.open(pathSeg, req.flags))
+                } else {
+                    openatRelativeToTraceeDirfd(tid, req.dirfd, pathSeg, req.flags.value)
+                }
+            }
+            is SupervisedOpen.OpenAt2 -> -NativeConstants.EPERM
         }
-        return openatRelativeToTraceeDirfd(tid, dirfd, pathSeg, flags)
     }
 
     /**
@@ -786,7 +832,7 @@ internal class SupervisorSessionHandler(
 
         val connectErr = {
             val res = engine.networking.connect(
-                FileDescriptor.unixSocket(socketRes),
+                FileDescriptor.adopt(socketRes, FileDescriptorRole.UnixSocket),
                 addr,
                 sockaddrBytes.size
             )
@@ -812,7 +858,7 @@ internal class SupervisorSessionHandler(
     private inner class SafeLocalFd(
         val handle: FileDescriptor<*, FdState.Open>,
     ) : AutoCloseable {
-        constructor(fd: Int) : this(FileDescriptor.generic(fd))
+        constructor(fd: Int) : this(FileDescriptor.adopt(fd, FileDescriptorRole.Generic))
 
         val fd: Int get() = handle.value
 
@@ -936,7 +982,7 @@ internal class SupervisorSessionHandler(
 
                                 val acceptRes =
                                     engine.networking.accept4(
-                                        FileDescriptor.adopt(dupFdSafe.fd, FileDescriptorRole.Generic),
+                                        dupFdSafe.handle,
                                         localAddr,
                                         localAddrLen,
                                         flags
@@ -988,7 +1034,8 @@ internal class SupervisorSessionHandler(
                                     addfd.setId(id)
                                     addfd.setFlags(NativeConstants.SECCOMP_ADDFD_FLAG_SEND.toInt())
                                     addfd.setSrcfd(clientFdSafe.fd)
-                                    addfd.setNewfdFlags(NativeConstants.O_CLOEXEC)
+                                    val acceptFlags = if (nr == traceeArch.accept4) args[3].toInt() else 0
+                                    addfd.setNewfdFlags(NewFdFlags.forAccept(acceptFlags).value)
 
                                     val addfdManaged = addfd.managed
                                     var injectSuccess = false

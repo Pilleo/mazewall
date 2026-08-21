@@ -1,7 +1,7 @@
 ---
 title: "Treat io_uring open modes as unresolved"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: medium
 dependencies: []
 component: "profiler"
@@ -9,6 +9,8 @@ target_modules:
   - ":profiler"
 target_files:
   - "profiler/src/main/kotlin/io/mazewall/profiler/compiler/BobCompiler.kt"
+  - "profiler/src/main/kotlin/io/mazewall/profiler/ProfilingCoverage.kt"
+  - "profiler/src/test/kotlin/io/mazewall/profiler/ProfilerSessionApiTest.kt"
 effort: "small"
 autonomy: "autonomous"
 related_pr: 512
@@ -17,20 +19,13 @@ related_thread: 3819590960
 
 # 🟡 [Severity: MEDIUM]: Treat io_uring open modes as unresolved
 
-**Context:** Fresh evidence after the opcode-classification reply is that `ProfileObservation.IoUring` and `EbpfEventParser` still carry no open flags, so every `IORING_OP_OPENAT` reaches this non-mutation branch. A write-mode async open is consequently recorded as read-only, yet coverage can remain complete and produce a policy that denies the observed write.
+**Context:** `ProfileObservation.IoUring` has no open flags. Every `IORING_OP_OPENAT*` is an unknown access mode.
 
-**Problem:**
-- IoUring and EbpfEventParser carry no open flags
-- IORING_OP_OPENAT reaches non-mutation branch
-- Write-mode async open recorded as read-only
-- Policy denies observed write
+**Required behavior:**
+1. Mark coverage **incomplete** and warn `"io_uring open access mode was not observed"` when any IoUring opcode contains `OPEN` (that already includes OPENAT / OPENAT2).
+2. Keep the path in `opens` (read), **not** `fsWritePaths`.
+3. Operators who pass `allowIncomplete=true` must still not receive `allowFsWrite` for that path.
 
-**Impact:**
-- Write operations denied by policy
-- Coverage marked complete but incomplete
-
-**Needed:**
-1. Preserve open flags in IoUring/EbpfEventParser
-2. Or mark io_uring open observations incomplete when access mode unknown
+**Wrong:** Adding `OPENAT` to `BobCompiler.isUringMutation`. That compiles a read-only async open as a Landlock write. Coverage incompleteness is a warning, not a write grant.
 
 **Codex PR Comment:** https://github.com/Pilleo/mazewall/pull/512#discussion_r3819590960

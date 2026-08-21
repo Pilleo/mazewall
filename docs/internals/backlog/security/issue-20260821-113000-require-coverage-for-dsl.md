@@ -9,6 +9,7 @@ target_modules:
   - ":profiler"
 target_files:
   - "profiler/src/main/kotlin/io/mazewall/profiler/BillOfBehavior.kt"
+  - "profiler/src/main/kotlin/io/mazewall/profiler/ProfilingResult.kt"
 effort: "small"
 autonomy: "autonomous"
 related_pr: 512
@@ -17,21 +18,26 @@ related_thread: 3823789280
 
 # 🔴 [Severity: HIGH]: Require coverage evidence when generating DSL
 
-**Context:** When a USER_NOTIF or strace run has dropped or unresolved events but no recorded exec/connect destinations, the documented `result.behavior.toDsl()` path cannot receive `ProfilingResult.coverage`, so this method emits an apparently usable policy even though `result.toPolicy()` correctly rejects the same incomplete run.
+**Review (2026-08-21):** Residual gap. Duplicate `issue-20260821-000002-todsl-coverage-gate` is closed. `toPolicy()` already refuses incomplete coverage. `toDsl()` does **not**.
 
-**Problem:**
-- toDsl() doesn't receive coverage parameter
-- Incomplete runs can generate DSL
-- toPolicy() rejects same incomplete run
-- Inconsistent behavior between toDsl and toPolicy
+**Current tree:**
+- `ProfilingResult.toPolicy()` passes `coverage` into `BillOfBehavior.toPolicy` and throws `IncompleteProfileException` unless `allowIncomplete`.
+- The documented DSL path is `result.behavior.toDsl("Policy.PURE_COMPUTE_UNSAFE")` (`ProfilingResult` KDoc). That method has **no** `coverage` parameter.
+- `toDsl` only fail-closes on non-empty `execs` / `connects`. A USER_NOTIF/strace run with `droppedEvents > 0` or unresolved paths and empty exec/connect sets still emits copy-pasteable policy source.
 
-**Impact:**
-- Security: incomplete profiles can generate DSL
-- Policy may be more permissive than intended
+**Do not:**
+- Delete `toDsl` or make it always succeed with a comment.
+- Gate only execs/connects and call the issue done (already done; that is not enough).
+- Pass `ProfilingCoverage.absent()` as if that were complete evidence.
 
-**Needed:**
-1. Carry coverage through result-level DSL API
-2. Reject !coverage.complete unless caller opts into incomplete
-3. Make toDsl consistent with toPolicy
+**Do:**
+1. Add `coverage: ProfilingCoverage?` (and `allowIncomplete`) to `toDsl`, same contract as `toPolicy`.
+2. Prefer a `ProfilingResult.toDsl(...)` that forwards `this.coverage` so the documented operator path cannot skip evidence.
+3. If `coverage` is omitted on the Bob-level method, treat it as incomplete (`ProfilingCoverage.absent()` already has `complete=false`) and refuse unless `allowIncomplete=true`.
 
-**Codex PR Comment:** https://github.com/Pilleo/mazewall/pull/512#discussion_r3823789280
+**Tests:**
+- `droppedEvents=1`, empty execs/connects: `result.toPolicy()` already throws; `toDsl` must throw too.
+- Same Bob with `allowIncomplete=true` may emit DSL but must not claim completeness.
+- Non-empty `execs` remains rejected (existing gate).
+
+**Codex:** https://github.com/Pilleo/mazewall/pull/512#discussion_r3823789280

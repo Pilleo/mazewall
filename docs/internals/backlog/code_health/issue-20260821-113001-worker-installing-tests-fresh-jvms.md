@@ -1,7 +1,7 @@
 ---
 title: "Keep worker-installing tests in fresh JVMs"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: medium
 dependencies: []
 component: "enforcer"
@@ -16,6 +16,8 @@ related_thread: 3797199300
 ---
 
 # 🟡 [Severity: MEDIUM]: Keep worker-installing tests in fresh JVMs
+
+**Review (2026-08-21):** ALREADY FIXED: the installing IntelCetIntegrationTest method is @NeedsFreshJvm; integrationTest excludes that tag and integrationTestFreshJvm uses forkEvery=1.
 
 **Context:** In the enforcer integration pipeline, `forkEvery=0` now shares one worker among all untagged tests, but `IntelCetIntegrationTest` remains untagged and calls `policy.install()` directly on that JUnit worker. On CET-enabled hosts its irreversible seccomp filter persists into later tests and can deny executable mappings or otherwise contaminate results.
 

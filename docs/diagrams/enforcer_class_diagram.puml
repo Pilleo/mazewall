@@ -187,6 +187,7 @@ class "Platform" as io.mazewall.Platform {
   +void validateSupported()
   +boolean isArchitectureSupported()
   +FallbackBehavior configuredFallback()
+  +boolean isKernelCetSupported()
   +Boolean isCpuCetSupportedOverride()
   +void setCpuCetSupportedOverride(Boolean)
   +boolean isCpuCetSupported()
@@ -417,6 +418,18 @@ class "CloneFlags" as io.mazewall.core.CloneFlags {
   + {static}long constructor-impl(long)
   + {static}boolean equals-impl0(long, long)
 }
+class "Deadline" as io.mazewall.core.Deadline {
+  + {static}Companion Companion
+  __
+  +long getNanoTime()
+  + {static}int remainingMillis-impl(long, long)
+  + {static}boolean isExpired-impl(long, long)
+  + {static}String toString-impl(long)
+  + {static}int hashCode-impl(long)
+  + {static}boolean equals-impl(long, Object)
+  + {static}long constructor-impl(long)
+  + {static}boolean equals-impl0(long, long)
+}
 class "Errno" as io.mazewall.core.Errno {
   +int getValue()
   + {static}String toString-impl(int)
@@ -434,6 +447,7 @@ class "FdEpoch" as io.mazewall.core.FdEpoch {
   + {static}FdEpoch INSTANCE
   __
   +long claimOpen(int)
+  +long adoptKernelReuse(int)
   +void retire(int, long)
   +boolean isLive(int, long)
   +boolean isRetired(int)
@@ -506,10 +520,21 @@ class "MmapProt" as io.mazewall.core.MmapProt {
 interface "NativeArg" as io.mazewall.core.NativeArg {
   + {abstract}long getAsLong()
 }
+class "NewFdFlags" as io.mazewall.core.NewFdFlags {
+  + {static}Companion Companion
+  __
+  +int getValue()
+  + {static}String toString-impl(int)
+  + {static}int hashCode-impl(int)
+  + {static}boolean equals-impl(int, Object)
+  + {static}int constructor-impl(int)
+  + {static}boolean equals-impl0(int, int)
+}
 class "OpenFlags" as io.mazewall.core.OpenFlags {
   + {static}Companion Companion
   __
   +int getValue()
+  + {static}boolean has-impl(int, int)
   + {static}String toString-impl(int)
   + {static}int hashCode-impl(int)
   + {static}boolean equals-impl(int, Object)
@@ -572,14 +597,18 @@ class "SandboxedPath" as io.mazewall.core.SandboxedPath {
   + {static}String of(String, boolean)
 }
 interface "SeccompAction" as io.mazewall.core.SeccompAction {
+  + {static}Companion Companion
+  __
   + {abstract}int getPriority()
   + {abstract}int getNativeCode()
+  +int restrictivenessRank()
+  +SeccompAction stricter(SeccompAction)
 }
 class "SocketIo" as io.mazewall.core.SocketIo {
   + {static}SocketIo INSTANCE
   __
   +SyscallResult writeFully(NativeMemory, FileDescriptor<?, ? extends Open>, ManagedSegment, long)
-  +SyscallResult readFully(NativeMemory, FileDescriptor<?, ? extends Open>, ManagedSegment, long)
+  +SyscallResult readFully(NativeMemory, FileDescriptor<?, ? extends Open>, ManagedSegment, long, long, SocketPoll)
 }
 interface "SocketManager" as io.mazewall.core.SocketManager {
   + {abstract}FileDescriptor<UnixSocket, Open> createUnixServer(String)
@@ -588,6 +617,9 @@ interface "SocketManager" as io.mazewall.core.SocketManager {
   + {abstract}void close(FileDescriptor<?, ? extends Open>)
   + {abstract}FileDescriptor<SeccompNotif, Open> recvDescriptor(FileDescriptor<UnixSocket, ? extends Open>)
   + {abstract}boolean sendDescriptor(FileDescriptor<UnixSocket, ? extends Open>, FileDescriptor<?, ? extends Open>)
+}
+interface "SocketPoll" as io.mazewall.core.SocketPoll {
+  + {abstract}SyscallResult poll(int)
 }
 class "SyscallNumber" as io.mazewall.core.SyscallNumber {
   +int getNr()
@@ -628,6 +660,15 @@ class "ContainedExecutors" as io.mazewall.enforcer.ContainedExecutors {
   +void installOnProcess(Policy<? extends ProcessWideSafe, ? extends Uncompiled>[])
   +ExecutorService wrap(ExecutorService, Policy<?, ? extends Uncompiled>[])
   +ExecutorService wrap(ExecutorService, Policy<?, ? extends Uncompiled>, StacktraceScopingPolicy)
+}
+class "ContainmentViolationException" as io.mazewall.enforcer.ContainmentViolationException {
+}
+class "SandboxDispatcher" as io.mazewall.enforcer.SandboxDispatcher {
+  + {static}SandboxDispatcher INSTANCE
+  __
+  + {static}T execute(Policy<?, ?>, Callable<T>)
+  +T executeBlock(Policy<?, ?>, Function0<? extends T>)
+  + {static}void shutdownAll()
 }
 class "ContainedExecutors" as io.mazewall.enforcer.api.ContainedExecutors {
   + {static}ContainedExecutors INSTANCE
@@ -763,6 +804,12 @@ class "JvmStackInspector" as io.mazewall.enforcer.supervisor.JvmStackInspector {
 interface "JvmVerdict" as io.mazewall.enforcer.supervisor.JvmVerdict {
   +int toWire()
 }
+class "OpenHow" as io.mazewall.enforcer.supervisor.OpenHow {
+  +int getFlags()
+  +long getMode()
+  +long getResolve()
+  +OpenHow copy(int, long, long)
+}
 class "PendingSpawnRegistry" as io.mazewall.enforcer.supervisor.PendingSpawnRegistry {
   + {static}PendingSpawnRegistry INSTANCE
   __
@@ -776,6 +823,11 @@ interface "StacktraceScopingPolicy" as io.mazewall.enforcer.supervisor.Stacktrac
   + {abstract}Map<Syscall, Function3<Tid, List<? extends Object>, List<StackTraceElement>, Boolean>> getHandlers()
 }
 class "StacktraceScopingPolicyKt" as io.mazewall.enforcer.supervisor.StacktraceScopingPolicyKt {
+}
+interface "SupervisedOpen" as io.mazewall.enforcer.supervisor.SupervisedOpen {
+  + {static}Companion Companion
+  __
+  + {abstract}String getPath()
 }
 class "SupervisorContext" as io.mazewall.enforcer.supervisor.SupervisorContext {
   +String getSocketPath()
@@ -1734,7 +1786,9 @@ io.mazewall.core.RealSocketManager .u.|> io.mazewall.core.SocketManager
 io.mazewall.core.RealSocketManager --> io.mazewall.core.RealSocketManager
 io.mazewall.core.SocketIo --> io.mazewall.core.SocketIo
 io.mazewall.enforcer.ContainedExecutors --> io.mazewall.enforcer.ContainedExecutors
+io.mazewall.enforcer.SandboxDispatcher --> io.mazewall.enforcer.SandboxDispatcher
 io.mazewall.enforcer.api.ContainedExecutors --> io.mazewall.enforcer.api.ContainedExecutors
+io.mazewall.enforcer.api.ContainmentViolationException -u-|> io.mazewall.enforcer.ContainmentViolationException
 io.mazewall.enforcer.api.SandboxDispatcher --> io.mazewall.PolicyDefinition
 io.mazewall.enforcer.api.SandboxDispatcher --> io.mazewall.enforcer.api.SandboxDispatcher
 io.mazewall.enforcer.diagnostics.ContainmentViolationDetector --> io.mazewall.enforcer.diagnostics.ViolationMatcher

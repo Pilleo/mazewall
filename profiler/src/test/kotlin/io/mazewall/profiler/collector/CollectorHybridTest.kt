@@ -84,6 +84,7 @@ class CollectorHybridTest {
             assertEquals("ok", result.value)
             assertTrue(result.behavior.opens.contains("/tmp/sidecar"))
             assertEquals(IoUringVisibility.OBSERVED, result.coverage.ioUring)
+            // Recorded eBPF logs have drainComplete=false, so coverage is incomplete
             assertEquals(false, result.coverage.complete)
             assertFailsWith<IncompleteProfileException> { result.toPolicy() }
         }

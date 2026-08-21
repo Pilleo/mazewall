@@ -16,7 +16,7 @@ class BpfLimitTest {
     fun `BpfFilter buildFromActions throws exception when instructions exceed limit`() {
         val arch = Arch.AMD64
         // Emitting over 4096 syscalls will exceed the 4096 limit.
-        val actions = (1000..5100).associateWith { SeccompAction.ACT_ERRNO }
+        val actions = (1000..5100).associateWith { SeccompAction.ACT_ERRNO() }
         assertFailsWith<IllegalArgumentException> {
             BpfFilter.buildFromActions(
                 arch,

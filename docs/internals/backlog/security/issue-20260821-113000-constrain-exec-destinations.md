@@ -1,7 +1,7 @@
 ---
 title: "Constrain recorded exec destinations during policy compilation"
 severity: "HIGH"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "profiler"
@@ -16,6 +16,8 @@ related_thread: 3819982841
 ---
 
 # 🔴 [Severity: HIGH]: Constrain recorded exec destinations during policy compilation
+
+**Review (2026-08-21):** ALREADY FIXED as fail-closed: toPolicy()/toDsl() throw IncompleteProfileException when execs is non-empty unless allowIncomplete. Landlock cannot constrain execve destinations.
 
 **Context:** When a complete profile observes `execve("/usr/bin/tool", ...)`, `BobCompiler` records the destination in `execs`, but this new completeness gate checks only `connects`; the builder subsequently permits the observed `EXECVE` syscall without using or rejecting `execs`. The generated policy therefore permits execution of arbitrary destinations rather than the profiled binary.
 

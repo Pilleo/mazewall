@@ -1,7 +1,7 @@
 ---
 title: "Exclude descriptor-only calls from path completeness"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: medium
 dependencies: []
 component: "profiler"
@@ -17,21 +17,8 @@ related_thread: 3825912167
 
 # 🟡 [Severity: MEDIUM]: Exclude descriptor-only calls from path completeness
 
-**Context:** When a strace profile observes `fstat`, `fchmod`, or `fchown`, these entries classify the event as path-bearing even though those syscalls accept only a file descriptor and therefore legitimately contain no pathname. `inferPaths()` consequently counts the event as failed and marks an otherwise complete descendant-strace profile incomplete.
+**Review (2026-08-21):** DUPLICATE of issue-20260821-000006-descriptor-only-syscalls (fixed: FSTAT/FCHMOD/FCHOWN removed from pathBearingNames).
 
-**Problem:**
-- fstat/fchmod/fchown classified as path-bearing
-- But they accept only file descriptors
-- inferPaths() counts them as failed
-- Complete profiles marked incomplete
-
-**Impact:**
-- Complete profiles marked incomplete
-- False incomplete coverage
-
-**Needed:**
-1. Classify descriptor-only syscalls separately
-2. Don't count them as path-bearing
-3. Or mark them as non-path-bearing explicitly
+**Context:** Duplicate of `issue-20260821-000006-descriptor-only-syscalls`. Same fix: drop `FSTAT` / `FCHMOD` / `FCHOWN` from `pathBearingNames`.
 
 **Codex PR Comment:** https://github.com/Pilleo/mazewall/pull/512#discussion_r3825912167

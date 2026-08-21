@@ -1,7 +1,7 @@
 ---
 title: "Gate the native-memory assertion on actual availability"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: medium
 dependencies: []
 component: "enforcer"
@@ -16,6 +16,8 @@ related_thread: 3819751052
 ---
 
 # 🟡 [Severity: MEDIUM]: Gate the native-memory assertion on actual availability
+
+**Review (2026-08-21):** ALREADY FIXED: TraceeReadOnlyNulTest uses assumeTrue when find() returns null.
 
 **Context:** On Linux hosts where `process_vm_readv` or the relevant mapping read is unavailable, `TraceeReadOnlyNul.find()` legitimately returns null, but this test is guarded only by the operating system and therefore fails the host unit suite. Reproduced with `:enforcer:test --tests io.mazewall.enforcer.supervisor.TraceeReadOnlyNulTest` on x86_64 Linux 6.18.35.
 

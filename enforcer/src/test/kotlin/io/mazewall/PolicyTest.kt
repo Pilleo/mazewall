@@ -238,7 +238,7 @@ class PolicyTest {
                 .allow(Syscall.READ)
                 .build()
         assertEquals(PolicyMode.ALLOW_LIST, customErrno.mode)
-        assertEquals(SeccompAction.ACT_ERRNO, allowListed.defaultAction)
+        assertEquals(SeccompAction.ACT_ERRNO(), allowListed.defaultAction)
         assertTrue(allowListed.isSyscallAllowed(Syscall.READ))
         assertFalse(allowListed.isSyscallAllowed(Syscall.CONNECT))
         assertFalse(allowListed.argumentRules.allowExecutableMappings)
@@ -466,5 +466,53 @@ class PolicyTest {
     fun `enforceLandlock is false when no Landlock paths are specified`() {
         val emptyPolicy = Policy.builder().build()
         assertFalse(emptyPolicy.enforceLandlock, "enforceLandlock should be false when no Landlock paths are specified")
+    }
+
+    @Test
+    fun `combine prefers block companion ERRNO over TRACE regardless of order`() {
+        val deny =
+            Policy
+                .builder()
+                .block(Syscall.OPEN)
+                .build()
+        val trace =
+            Policy
+                .builder()
+                .addAction(SeccompAction.ACT_TRACE(1), Syscall.OPEN)
+                .build()
+
+        assertEquals(SeccompAction.ACT_ERRNO(), deny.syscallActions[Syscall.OPEN])
+        assertEquals(SeccompAction.ACT_ERRNO(), Policy.combine(deny, trace).syscallActions[Syscall.OPEN])
+        assertEquals(SeccompAction.ACT_ERRNO(), Policy.combine(trace, deny).syscallActions[Syscall.OPEN])
+        assertEquals(SeccompAction.ACT_ERRNO(), Policy.restrictFurtherWith(trace, deny).syscallActions[Syscall.OPEN])
+
+        val openNr = Syscall.OPEN.numberFor(Arch.current())
+        assertEquals(
+            SeccompAction.ACT_ERRNO(),
+            Policy.combine(trace, deny).syscallActionNumbers(Arch.current())[openNr],
+        )
+    }
+
+    @Test
+    fun `combine prefers ACT_ERRNO instance over TRACE for defaults`() {
+        val errnoDefault =
+            Policy
+                .builder()
+                .defaultAction(SeccompAction.ACT_ERRNO(io.mazewall.ffi.NativeConstants.EACCES))
+                .build()
+        val traceDefault =
+            Policy
+                .builder()
+                .defaultAction(SeccompAction.ACT_TRACE(1))
+                .build()
+
+        assertEquals(
+            SeccompAction.ACT_ERRNO(io.mazewall.ffi.NativeConstants.EACCES),
+            Policy.combine(errnoDefault, traceDefault).defaultAction,
+        )
+        assertEquals(
+            SeccompAction.ACT_ERRNO(io.mazewall.ffi.NativeConstants.EACCES),
+            Policy.combine(traceDefault, errnoDefault).defaultAction,
+        )
     }
 }

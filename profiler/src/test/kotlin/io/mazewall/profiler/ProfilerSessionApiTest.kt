@@ -9,6 +9,7 @@ import io.mazewall.profiler.engine.TraceEvent
 import org.junit.jupiter.api.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
 class ProfilerSessionApiTest {
@@ -117,6 +118,66 @@ class ProfilerSessionApiTest {
             environment = ProfileEnvironment("t", EbpfLoad.Available),
         )
         assertEquals(false, coverage.complete)
+        assertTrue(coverage.warnings.contains("io_uring open access mode was not observed"))
+    }
+
+    @Test
+    fun `descriptor-only fstat fchmod fchown do not fail path completeness`() {
+        val coverage = ProfilingCoverage.infer(
+            strategy = ProfileStrategy.USER_NOTIF,
+            strategyReason = "t",
+            processWide = false,
+            observations = listOf(
+                ProfileObservation.Syscall(
+                    ObservationCorrelation(1, Tid(1)),
+                    ObservationSource.STRACE,
+                    "FSTAT",
+                    paths = emptyList(),
+                ),
+                ProfileObservation.Syscall(
+                    ObservationCorrelation(2, Tid(1)),
+                    ObservationSource.STRACE,
+                    "FCHMOD",
+                    paths = emptyList(),
+                ),
+                ProfileObservation.Syscall(
+                    ObservationCorrelation(3, Tid(1)),
+                    ObservationSource.STRACE,
+                    "FCHOWN",
+                    paths = emptyList(),
+                ),
+            ),
+            stacks = StackAttribution.SKIPPED,
+            droppedEvents = 0,
+            drainComplete = true,
+            environment = ProfileEnvironment("t", EbpfLoad.Denied("x")),
+        )
+        assertEquals(PathResolutionQuality.NONE, coverage.pathResolution)
+        assertEquals(true, coverage.complete)
+    }
+
+    @Test
+    fun `unmapped syscall names make coverage incomplete`() {
+        val coverage = ProfilingCoverage.infer(
+            strategy = ProfileStrategy.USER_NOTIF,
+            strategyReason = "t",
+            processWide = false,
+            observations = listOf(
+                ProfileObservation.Syscall(
+                    ObservationCorrelation(1, Tid(1)),
+                    ObservationSource.STRACE,
+                    "RECVMSG",
+                    paths = emptyList(),
+                ),
+            ),
+            stacks = StackAttribution.SKIPPED,
+            droppedEvents = 0,
+            drainComplete = true,
+            environment = ProfileEnvironment("t", EbpfLoad.Denied("x")),
+        )
+        assertEquals(false, coverage.complete)
+        assertTrue(coverage.warnings.any { it.contains("unmapped syscall") && it.contains("RECVMSG") })
+        assertIs<ProfileEvidence.Incomplete>(coverage.evidence())
     }
 
     @Test
@@ -335,7 +396,31 @@ class ProfilerSessionApiTest {
         assertEquals(setOf("IORING_OP_OPENAT"), bob.ioUringOps)
         assertEquals(setOf(NetworkEndpoint("::1", 443)), bob.connects)
         assertTrue(bob.opens.contains("/tmp/u"))
+        assertTrue(!bob.fsWritePaths.contains("/tmp/u"))
         assertTrue(bob.syscalls.contains(Syscall.CONNECT))
+        val link = BobCompiler.compileObservations(
+            listOf(
+                ProfileObservation.IoUring(
+                    corr,
+                    ObservationSource.EBPF,
+                    "IORING_OP_LINKAT",
+                    listOf("/tmp/old", "/tmp/new"),
+                ),
+            ),
+        )
+        assertTrue(link.fsWritePaths.contains("/tmp/old"))
+        assertTrue(link.fsWritePaths.contains("/tmp/new"))
+        val symlink = BobCompiler.compileObservations(
+            listOf(
+                ProfileObservation.IoUring(
+                    corr,
+                    ObservationSource.EBPF,
+                    "IORING_OP_SYMLINKAT",
+                    listOf("/tmp/target", "/tmp/link"),
+                ),
+            ),
+        )
+        assertTrue(symlink.fsWritePaths.contains("/tmp/target"))
         val merged = bob + BillOfBehavior(connects = setOf(NetworkEndpoint("10.0.0.1", 9)))
         assertEquals(2, merged.connects.size)
         val json = merged.toJson()

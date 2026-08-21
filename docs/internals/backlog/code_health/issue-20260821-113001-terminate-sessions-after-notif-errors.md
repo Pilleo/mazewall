@@ -1,8 +1,10 @@
 ---
 title: "Terminate sessions after notification receive errors"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: medium
+resolved_in_commit: 74ad6616
+resolved_by: "already fixed in commit"
 dependencies: []
 component: "platform"
 target_modules:

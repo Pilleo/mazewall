@@ -31,6 +31,110 @@ class SupervisorSessionHandlerTest {
     }
 
     @Test
+    fun `readAndHandleJvmResponse closes supervisor socket when the frame stalls after one byte`() {
+        var socketClosed = false
+        val mockSocketManager = object : io.mazewall.core.SocketManager {
+            override fun createUnixServer(socketPath: String) = TODO()
+            override fun accept(serverFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>) = TODO()
+            override fun connect(socketPath: String) = TODO()
+            override fun recvDescriptor(socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>) = TODO()
+            override fun sendDescriptor(socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>, fdToSend: FileDescriptor<*, FdState.Open>) = TODO()
+
+            override fun close(fd: FileDescriptor<*, FdState.Open>) {
+                if (fd.value == 10) {
+                    socketClosed = true
+                }
+            }
+        }
+
+        var polls = 0
+        val mockMemory = object : MockNativeMemory() {
+            override fun read(
+                fd: FileDescriptor<*, FdState.Open>,
+                buf: io.mazewall.ffi.memory.ManagedSegment,
+                count: Long,
+            ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                buf.writeByte(0, 1)
+                return LinuxNative.SyscallResult.Success(1L)
+            }
+        }
+        val mockEngine = object : MockNativeEngine(memory = mockMemory) {
+            override val raw: RawSyscallOperations = object : RawSyscallOperations by this {
+                override fun poll(
+                    fds: io.mazewall.ffi.memory.ManagedSegment,
+                    nfds: Long,
+                    timeout: Int,
+                ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                    polls++
+                    return if (polls <= 2) {
+                        LinuxNative.SyscallResult.Success(1L)
+                    } else {
+                        LinuxNative.SyscallResult.Success(0L)
+                    }
+                }
+
+                override fun ioctl(
+                    fd: FileDescriptor<*, FdState.Open>,
+                    request: Long,
+                    arg: io.mazewall.ffi.memory.ManagedSegment,
+                ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                    return LinuxNative.SyscallResult.Success(0L)
+                }
+            }
+        }
+
+        try {
+            LinuxNative.setEngine(mockEngine)
+
+            val handler = SupervisorSessionHandler(
+                FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(10),
+                FileDescriptor.unsafe<FileDescriptorRole.SeccompNotif>(11),
+                engine = mockEngine,
+                socketManager = mockSocketManager
+            )
+
+            val method = SupervisorSessionHandler::class.java.getDeclaredMethods().first {
+                it.name.startsWith("readAndHandleJvmResponse") && !it.name.contains("$") && it.parameterCount == 9
+            }
+            method.isAccessible = true
+
+            val arch = io.mazewall.core.Arch.current()
+
+            io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
+                val dummyResp = arena.allocate(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_RESP)
+                val pathStr = "/bin/echo"
+
+                val paramTypes = method.parameterTypes
+                val argsToPass = arrayOfNulls<Any>(paramTypes.size)
+                argsToPass[0] = arena
+                argsToPass[1] = 42L
+                argsToPass[2] = arch.open
+                argsToPass[3] = LongArray(6)
+                argsToPass[4] = pathStr
+                argsToPass[5] = null
+                argsToPass[6] = dummyResp
+                for (i in paramTypes.indices) {
+                    val type = paramTypes[i]
+                    if (type.name.contains("Tid")) {
+                        argsToPass[i] = io.mazewall.core.Tid(999)
+                    } else if (type.name.contains("Pid")) {
+                        argsToPass[i] = io.mazewall.core.Pid(999)
+                    } else if (i == 7 && (type == Int::class.javaPrimitiveType || type == java.lang.Integer::class.java)) {
+                        argsToPass[i] = 999
+                    }
+                }
+                argsToPass[8] = arch
+
+                val result = method.invoke(handler, *argsToPass) as Boolean
+                assertEquals(false, result)
+                assertEquals(true, socketClosed, "Should close the supervisor socket when the validation frame stalls")
+            }
+        } finally {
+            LinuxNative.resetToDefault()
+        }
+    }
+
+    @Test
     fun `readAndHandleJvmResponse closes supervisor socket on timeout`() {
         var socketClosed = false
         val mockSocketManager = object : io.mazewall.core.SocketManager {
@@ -676,7 +780,7 @@ class SupervisorSessionHandlerTest {
 
                 val result = method.invoke(handler, *argsToPass) as Boolean
                 assertEquals(true, result)
-                assertEquals(6, pollCalls, "Should retry poll on EINTR until success")
+                assertEquals(7, pollCalls, "Should retry poll on EINTR until success, then poll again for the frame read")
             }
         } finally {
             LinuxNative.resetToDefault()
@@ -804,7 +908,7 @@ class SupervisorSessionHandlerTest {
             io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
                 val dummyResp = arena.allocate(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_RESP)
 
-                val testSyscalls = listOf(arch.open, arch.openat, arch.openat2, arch.connect)
+                val testSyscalls = listOf(arch.open, arch.openat, arch.connect)
                 for (syscall in testSyscalls) {
                     ioctlCalled = false
                     capturedRequest = null
@@ -836,6 +940,24 @@ class SupervisorSessionHandlerTest {
                     assertEquals(12345L, addfd.getId())
                     assertEquals(io.mazewall.ffi.NativeConstants.SECCOMP_ADDFD_FLAG_SEND.toInt(), addfd.getFlags())
                 }
+
+                ioctlCalled = false
+                capturedRequest = null
+                val openat2Denied = handleInjectFdMethod.invoke(
+                    handler,
+                    arena,
+                    12345L,
+                    arch.openat2,
+                    LongArray(6),
+                    "/bin/echo",
+                    null,
+                    dummyResp,
+                    999,
+                    arch,
+                ) as Boolean
+                assertEquals(true, openat2Denied)
+                assertEquals(true, ioctlCalled)
+                assertEquals(io.mazewall.ffi.NativeConstants.SECCOMP_IOCTL_NOTIF_SEND, capturedRequest)
             }
         } finally {
             LinuxNative.resetToDefault()
@@ -882,7 +1004,7 @@ class SupervisorSessionHandlerTest {
             io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
                 val dummyResp = arena.allocate(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_RESP)
 
-                val testSyscalls = listOf(arch.open, arch.openat, arch.openat2, arch.connect)
+                val testSyscalls = listOf(arch.open, arch.openat, arch.connect)
                 for (syscall in testSyscalls) {
                     ioctlCalled = false
                     capturedRequest = null

@@ -122,7 +122,7 @@ class ContainmentDesignSpec :
                 // are explicitly whitelisted and generated in the BpfFilter.
                 val whitelistPolicy = Policy
                     .builder()
-                    .defaultAction(SeccompAction.ACT_ERRNO)
+                    .defaultAction(SeccompAction.ACT_ERRNO())
                     .build()
 
                 val filter = BpfFilter.build(arch, whitelistPolicy.definition).instructions

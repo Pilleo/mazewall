@@ -1,7 +1,7 @@
 ---
 title: "Forward creation mode when emulating open calls"
 severity: "HIGH"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "enforcer"
@@ -16,6 +16,8 @@ related_thread: PRRT_kwDOScnnEM6a5aRR
 ---
 
 # 🔴 [Severity: P1]: Forward creation mode when emulating open calls
+
+**Review (2026-08-21):** DUPLICATE of issue-20260821-113000-forward-creation-mode.
 
 **Context:** For intercepted `open`/`openat` calls containing `O_CREAT` or `O_TMPFILE`, the original mode argument is required, but this path invokes the two-argument `NativeFileSystem.open` API and the relative branch likewise calls `openat` without a mode. The variadic libc call consequently receives no defined creation mode, so authorized workloads can create files with incorrect or overly permissive permissions.
 

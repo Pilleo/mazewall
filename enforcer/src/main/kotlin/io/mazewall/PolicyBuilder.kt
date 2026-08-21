@@ -53,7 +53,7 @@ public class PolicyBuilder<S : PolicyScope> internal constructor(
         return this
     }
 
-    public fun block(vararg syscalls: Syscall): PolicyBuilder<S> = addAction(SeccompAction.ACT_ERRNO, *syscalls)
+    public fun block(vararg syscalls: Syscall): PolicyBuilder<S> = addAction(SeccompAction.ACT_ERRNO(), *syscalls)
     public fun allow(vararg syscalls: Syscall): PolicyBuilder<S> = addAction(SeccompAction.ACT_ALLOW, *syscalls)
 
     /** Uncompiled-definition only. Installed kernel filters cannot grow. */
@@ -186,7 +186,7 @@ public class PolicyBuilder<S : PolicyScope> internal constructor(
             val ioUringAllowed = ioUringAction == SeccompAction.ACT_ALLOW
 
             if ((openBlocked || openatBlocked) && ioUringAllowed) {
-                finalSyscalls[Syscall.IO_URING_SETUP] = SeccompAction.ACT_ERRNO
+                finalSyscalls[Syscall.IO_URING_SETUP] = SeccompAction.ACT_ERRNO()
             }
         }
         return PolicyDefinition<S>(

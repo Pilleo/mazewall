@@ -90,7 +90,7 @@ internal class MmapExecInspector : SyscallInspector {
                     argIndex = 2, // PROT flag is usually the 3rd argument
                     check = ArgCheck.MaskEquals(PROT_EXEC, 0x00L),
                     ifMatched = context.resolveEffectiveAction(nr),
-                    ifNotMatched = SeccompAction.ACT_ERRNO,
+                    ifNotMatched = SeccompAction.ACT_ERRNO(),
                 )
             }
     }
@@ -156,7 +156,7 @@ internal class UnsafePrctlInspector : SyscallInspector {
                 argIndex = 0, // prctl option is the 1st argument
                 check = ArgCheck.EqualsAny(SAFE_PRCTL_OPTIONS),
                 ifMatched = context.resolveEffectiveAction(nr),
-                ifNotMatched = SeccompAction.ACT_ERRNO,
+                ifNotMatched = SeccompAction.ACT_ERRNO(),
             )
         )
     }

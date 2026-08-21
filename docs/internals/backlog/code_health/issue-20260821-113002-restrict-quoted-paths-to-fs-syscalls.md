@@ -1,8 +1,10 @@
 ---
 title: "Restrict quoted paths to filesystem syscalls"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: medium
+resolved_in_commit: 6b0dd1cf7f0df80413b4987a3600e776aa467e47
+resolved_by: "already fixed in commit"
 dependencies: []
 component: "profiler"
 target_modules:

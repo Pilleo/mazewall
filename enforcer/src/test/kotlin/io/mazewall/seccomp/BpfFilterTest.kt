@@ -55,7 +55,7 @@ class BpfFilterTest {
 
     @Test
     fun `ALLOW_LIST mode has RET DENY as default`() {
-        val policy = Policy.builder().defaultAction(io.mazewall.core.SeccompAction.ACT_ERRNO).build()
+        val policy = Policy.builder().defaultAction(io.mazewall.core.SeccompAction.ACT_ERRNO()).build()
         val filter = BpfFilter.build(arch, policy.definition).instructions
         val last = filter.last()
         assertEquals(0x06.toShort(), last.code)
@@ -67,7 +67,7 @@ class BpfFilterTest {
         val policy =
             Policy
                 .builder()
-                .defaultAction(io.mazewall.core.SeccompAction.ACT_ERRNO)
+                .defaultAction(io.mazewall.core.SeccompAction.ACT_ERRNO())
                 .allow(Syscall.READ)
                 .build()
         val filter = BpfFilter.build(arch, policy.definition).instructions
@@ -91,7 +91,7 @@ class BpfFilterTest {
 
     @Test
     fun `clone3 always returns ENOSYS even in ALLOW_LIST`() {
-        val policy = Policy.builder().defaultAction(io.mazewall.core.SeccompAction.ACT_ERRNO).build()
+        val policy = Policy.builder().defaultAction(io.mazewall.core.SeccompAction.ACT_ERRNO()).build()
         val filter = BpfFilter.build(arch, policy.definition).instructions
 
         val clone3Nr = arch.clone3
@@ -190,14 +190,14 @@ class BpfFilterTest {
                 argIndex = 1,
                 check = ArgCheck.MaskEquals(0x04L, 0x00L),
                 ifMatched = SeccompAction.ACT_ALLOW,
-                ifNotMatched = SeccompAction.ACT_ERRNO,
+                ifNotMatched = SeccompAction.ACT_ERRNO(),
             ),
             SyscallInspection(
                 syscallNumber = 101,
                 argIndex = 2,
                 check = ArgCheck.MaskEquals(0x04L, 0x04L),
                 ifMatched = SeccompAction.ACT_ALLOW,
-                ifNotMatched = SeccompAction.ACT_ERRNO,
+                ifNotMatched = SeccompAction.ACT_ERRNO(),
             ),
         )
         val builder = BpfProgram.builder()
@@ -225,14 +225,14 @@ class BpfFilterTest {
                 argIndex = 0,
                 check = ArgCheck.EqualsAny(listOf(5L)),
                 ifMatched = SeccompAction.ACT_ALLOW,
-                ifNotMatched = SeccompAction.ACT_ERRNO,
+                ifNotMatched = SeccompAction.ACT_ERRNO(),
             ),
             SyscallInspection(
                 syscallNumber = 201,
                 argIndex = 0,
                 check = ArgCheck.EqualsAny(listOf(10L, 20L)),
                 ifMatched = SeccompAction.ACT_ALLOW,
-                ifNotMatched = SeccompAction.ACT_ERRNO,
+                ifNotMatched = SeccompAction.ACT_ERRNO(),
             ),
         )
         val builder = BpfProgram.builder()
@@ -263,7 +263,7 @@ class BpfFilterTest {
                 argIndex = 0,
                 check = ArgCheck.MaskEquals(maskVal, maskVal),
                 ifMatched = SeccompAction.ACT_ALLOW,
-                ifNotMatched = SeccompAction.ACT_ERRNO,
+                ifNotMatched = SeccompAction.ACT_ERRNO(),
             ),
         )
         val builder = BpfProgram.builder()
@@ -294,7 +294,7 @@ class BpfFilterTest {
                 argIndex = 0,
                 check = ArgCheck.EqualsAny(listOf(largeVal1, largeVal2)),
                 ifMatched = SeccompAction.ACT_ALLOW,
-                ifNotMatched = SeccompAction.ACT_ERRNO,
+                ifNotMatched = SeccompAction.ACT_ERRNO(),
             ),
         )
         val builder = BpfProgram.builder()

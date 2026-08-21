@@ -1,7 +1,7 @@
 ---
 title: "Exec register rewrite must actually modify tracee registers before CONTINUE"
 severity: "HIGH"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "enforcer"
@@ -18,7 +18,14 @@ related_thread: PRRC_kwDOScnnEM7iSmJE
 
 # 🔴 [Severity: HIGH]: Exec register rewrite must actually modify tracee registers
 
-**Context:** When an exec is authorized, the code sends `CONTINUE` after `requestParentRegisterRewrite()` reports success. However, the parent implementation explicitly only reads the six register values and acknowledges `injectedFd >= 0`; it never actually changes the tracee registers. The kernel therefore executes the original pathname-based `execve`/`execveat`, leaving the validated path pointer mutable by sibling threads and restoring the exec TOCTOU escape this code claims to prevent.
+**Review (2026-08-21):** STALE/DUPLICATE: rewrite is unimplemented (issue-20260817-033800) but current handler fail-closes instead of CONTINUE on original pathname.
+
+**Review (2026-08-21):** STALE as a live CONTINUE-TOCTOU. `completeParentExecRewrite()` always NACKs; the handler **denies** (`sendSeccompError`) when rewrite is false. Remaining implementation is `issue-20260817-033800`. Fd leak after ADDFD+NACK is `113005-close-injected-exec-descriptor`.
+
+**Do not:**
+- CONTINUE the original `execve` so the program “works” while rewrite is unimplemented.
+- Claim this issue is fixed by adding comments only.
+- Implement SETREGS in this ticket without the dedicated rewrite issue’s design (deadlock with USER_NOTIF).
 
 **Problem:**
 - Register rewrite is not implemented (issue-20260817-033800)

@@ -92,7 +92,7 @@ public class AllowListSpec internal constructor(
     private val inner: Policy.Builder<PolicyScope.ProcessWideSafe> =
         Policy
             .builder()
-            .defaultAction(SeccompAction.ACT_ERRNO)
+            .defaultAction(SeccompAction.ACT_ERRNO())
             .forRuntime(runtime)
 
     public val mode: PolicyMode = PolicyMode.ALLOW_LIST

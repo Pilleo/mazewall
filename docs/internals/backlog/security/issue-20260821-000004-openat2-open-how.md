@@ -1,7 +1,7 @@
 ---
 title: "Decode openat2's open_how before injecting the descriptor"
 severity: "HIGH"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "enforcer"
@@ -16,6 +16,8 @@ related_thread: PRRT_kwDOScnnEM6a5aRK
 ---
 
 # 🔴 [Severity: P1]: Decode openat2's open_how before injecting the descriptor
+
+**Review (2026-08-21):** DUPLICATE of issue-20260821-113000-decode-openat2-open-how (keep that one open).
 
 **Context:** When the supervised syscall is `openat2`, argument 2 is a pointer to `struct open_how`, not an integer flags value. Converting that pointer to `Int` and calling ordinary `open`/`openat` uses address bits as flags and discards `mode` and `resolve` constraints such as `RESOLVE_BENEATH` or `RESOLVE_NO_SYMLINKS`, so an allowed call can fail or open a target under materially different semantics.
 

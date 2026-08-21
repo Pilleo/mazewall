@@ -1,7 +1,7 @@
 ---
 title: "Classify every errno default as an allow list"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: medium
 dependencies: []
 component: "enforcer"
@@ -16,6 +16,8 @@ related_thread: 3819751071
 ---
 
 # 🟡 [Severity: MEDIUM]: Classify every errno default as an allow list
+
+**Review (2026-08-21):** ALREADY FIXED: Policy.mode uses `defaultAction is ACT_ERRNO || defaultAction == ACT_ERRNO`, which covers custom errno instances.
 
 **Context:** This equality check recognizes only the `ACT_ERRNO` companion, whose equality is limited to the default `EPERM` value. A policy built with `defaultAction(SeccompAction.ACT_ERRNO(EACCES))`, or any other custom errno, denies every unspecified syscall but is reported as `DENY_LIST`; `InstallationAssessment` repeats the same check.
 

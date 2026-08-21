@@ -1,8 +1,10 @@
 ---
 title: "Preserve close-on-exec on the injected executable descriptor"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: medium
+resolved_in_commit: aa355303
+resolved_by: "already fixed by commit"
 dependencies: []
 component: "enforcer"
 target_modules:

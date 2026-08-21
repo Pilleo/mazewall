@@ -1,7 +1,7 @@
 ---
 title: "Open executable targets without requiring read permission"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: medium
 dependencies: []
 component: "enforcer"
@@ -16,6 +16,8 @@ related_thread: 3819751067
 ---
 
 # 🟡 [Severity: MEDIUM]: Open executable targets without requiring read permission
+
+**Review (2026-08-21):** ALREADY FIXED: exec inject opens with O_PATH|O_CLOEXEC, not O_RDONLY.
 
 **Context:** Opening the validated target with only `O_CLOEXEC` means an `O_RDONLY` open, so an execute-only binary with valid execute permission but no read permission is rejected with `EACCES` before the original `execve` can proceed. Linux execution does not require the caller to have read permission.
 

@@ -1,7 +1,7 @@
 ---
 title: "Require coverage evidence when generating DSL"
 severity: "HIGH"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "profiler"
@@ -17,6 +17,8 @@ related_thread: PRRT_kwDOScnnEM6a5aQ6
 ---
 
 # 🔴 [Severity: P1]: Require coverage evidence when generating DSL
+
+**Review (2026-08-21):** DUPLICATE of issue-20260821-113000-require-coverage-for-dsl.
 
 **Context:** When a USER_NOTIF or strace run has dropped or unresolved events but no recorded exec/connect destinations, the documented `result.behavior.toDsl()` path cannot receive `ProfilingResult.coverage`, so this method emits an apparently usable policy even though `result.toPolicy()` correctly rejects the same incomplete run.
 

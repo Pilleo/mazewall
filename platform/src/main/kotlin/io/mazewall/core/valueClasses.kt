@@ -73,7 +73,31 @@ public value class OpenFlags(public val value: Int) {
         public val RDONLY: OpenFlags = OpenFlags(0)
     }
 
+    public fun has(mask: Int): Boolean = (value and mask) != 0
+
     override fun toString(): String = "openFlags($value)"
+}
+
+/**
+ * `newfd_flags` for SECCOMP_ADDFD. Built from the **tracee syscall** flags, not a
+ * hardcoded CLOEXEC. Exec inject is [forExec].
+ */
+@JvmInline
+public value class NewFdFlags(public val value: Int) {
+    public companion object {
+        public val NONE: NewFdFlags = NewFdFlags(0)
+        public val CLOEXEC: NewFdFlags = NewFdFlags(io.mazewall.ffi.NativeConstants.O_CLOEXEC)
+
+        public fun forOpen(flags: OpenFlags): NewFdFlags =
+            if (flags.has(io.mazewall.ffi.NativeConstants.O_CLOEXEC)) CLOEXEC else NONE
+
+        public fun forAccept(sockFlags: Int): NewFdFlags =
+            if ((sockFlags and io.mazewall.ffi.NativeConstants.SOCK_CLOEXEC) != 0) CLOEXEC else NONE
+
+        public fun forExec(): NewFdFlags = CLOEXEC
+    }
+
+    override fun toString(): String = "newfdFlags($value)"
 }
 
 /**
@@ -98,4 +122,27 @@ public value class MmapFlags(public val value: Int) {
 @JvmInline
 public value class CloneFlags(public val value: Long) {
     override fun toString(): String = "cloneFlags($value)"
+}
+
+/**
+ * Monotonic deadline from [System.nanoTime]. Wall-clock jumps cannot extend it.
+ * [remainingMillis] is 0 when expired so poll/read loops fail closed instead of blocking.
+ */
+@JvmInline
+public value class Deadline(public val nanoTime: Long) {
+    public fun remainingMillis(nowNanoTime: Long = System.nanoTime()): Int {
+        val remainingNs = nanoTime - nowNanoTime
+        if (remainingNs <= 0L) return 0
+        val remainingMs = remainingNs / 1_000_000L
+        return remainingMs.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+    }
+
+    public fun isExpired(nowNanoTime: Long = System.nanoTime()): Boolean = nowNanoTime >= nanoTime
+
+    public companion object {
+        public fun afterMillis(ms: Long, nowNanoTime: Long = System.nanoTime()): Deadline {
+            require(ms >= 0L) { "deadline duration must be non-negative" }
+            return Deadline(nowNanoTime + ms * 1_000_000L)
+        }
+    }
 }

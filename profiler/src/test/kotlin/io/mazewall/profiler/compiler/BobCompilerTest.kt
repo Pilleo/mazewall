@@ -53,7 +53,7 @@ class BobCompilerTest {
         assertTrue(policy.allowedFsWritePaths.any { it.value == "/tmp/new-dir" }, "Should contain write path")
 
         // Compile to DSL
-        val dsl = bob.toDsl("Policy.PURE_COMPUTE_UNSAFE", Policy.PURE_COMPUTE_UNSAFE)
+        val dsl = bob.toDsl("Policy.PURE_COMPUTE_UNSAFE", Policy.PURE_COMPUTE_UNSAFE, allowIncomplete = true)
         println("Generated DSL:\n$dsl")
 
         val expectedDsl =
@@ -86,7 +86,7 @@ val policy = Policy.threadLocalBuilder()
         assertTrue(policy.allowedFsReadPaths.isEmpty())
         assertTrue(policy.allowedFsWritePaths.isEmpty())
 
-        val dsl = bob.toDsl("Policy.PURE_COMPUTE_UNSAFE", Policy.PURE_COMPUTE_UNSAFE)
+        val dsl = bob.toDsl("Policy.PURE_COMPUTE_UNSAFE", Policy.PURE_COMPUTE_UNSAFE, allowIncomplete = true)
         val expectedDsl =
             """
 val policy = Policy.builder()
@@ -109,7 +109,7 @@ val policy = Policy.builder()
         val bob = BobCompiler.compile(events)
 
         // Generate DSL - GETPID should not be listed as unrestricted since PURE_COMPUTE does not block it.
-        val dsl = bob.toDsl("Policy.PURE_COMPUTE_UNSAFE", Policy.PURE_COMPUTE_UNSAFE)
+        val dsl = bob.toDsl("Policy.PURE_COMPUTE_UNSAFE", Policy.PURE_COMPUTE_UNSAFE, allowIncomplete = true)
         val expectedDsl =
             """
 val policy = Policy.builder()

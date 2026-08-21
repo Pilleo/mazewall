@@ -1,7 +1,7 @@
 ---
 title: "Preserve explicit open denials during restrictive policy composition"
 severity: "HIGH"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "enforcer"
@@ -18,7 +18,15 @@ related_thread: PRRC_kwDOScnnEM6H6V
 
 # 🔴 [Severity: HIGH]: Preserve explicit open denials during restrictive composition
 
-**Context:** When composing policies with `restrictFurtherWith()`, if one input explicitly blocks `OPEN`/`OPENAT`/`OPENAT2` and another enables Landlock for `/tmp`, the current implementation delegates to `PolicyDefinition.combine()` which unconditionally replaces all three effective actions with `ACT_ALLOW` when Landlock is present (lines 112-118). The result permits opens under `/tmp`, making `restrictFurtherWith()` more permissive than the first input despite its documented contract.
+**Review (2026-08-21):** WRONG vs current tree: combine() only upgrades OPEN* to ALLOW when current.priority <= ALLOW. Explicit block() is kept. Test `Landlock composition keeps explicit OPEN denials`.
+
+**Review (2026-08-21):** WRONG vs current tree — do not re-implement. `combine()` only sets OPEN* to ALLOW when `current.priority <= ACT_ALLOW.priority`. Explicit `block(OPEN)` (ERRNO, priority 4) is kept. Test: `Landlock composition keeps explicit OPEN denials`.
+
+**Historical context (stale):** An older combine() upgraded OPEN* to ALLOW whenever Landlock was present. That is no longer the code.
+
+**Do not:**
+- Remove the Landlock OPEN* ALLOW upgrade entirely without checking `priority` (JVM/Landlock still needs OPEN allowed when the **effective** action was ALLOW so Landlock can see the path).
+- Rank ERRNO vs ALLOW by `nativeCode`.
 
 **Problem:**
 - `combine()` doesn't preserve explicit open denials when Landlock is present

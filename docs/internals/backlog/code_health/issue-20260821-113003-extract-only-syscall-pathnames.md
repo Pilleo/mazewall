@@ -1,7 +1,7 @@
 ---
 title: "Extract only syscall pathname operands from strace"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: medium
 dependencies: []
 component: "profiler"
@@ -16,6 +16,8 @@ related_thread: 3819982846
 ---
 
 # 🟡 [Severity: MEDIUM]: Extract only syscall pathname operands from strace
+
+**Review (2026-08-21):** ALREADY FIXED: extractQuotedPaths is syscall-specific; EXECVE/READLINK are first-only, so argv and link buffers are not extra paths.
 
 **Context:** Fresh evidence after the multi-path parsing reply is that this regex now treats every quoted argument as a pathname rather than selecting syscall-specific operands. For example, `readlink("/tmp/link", "/secret", ...)` records the returned link text `/secret` as another read path, and `execve` records quoted argv entries as executable paths; `BobCompiler` can consequently widen the Bill of Behavior with paths that were never accessed by the syscall.
 

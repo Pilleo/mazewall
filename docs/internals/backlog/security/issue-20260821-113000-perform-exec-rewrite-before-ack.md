@@ -1,7 +1,7 @@
 ---
 title: "Perform the exec rewrite before acknowledging it"
 severity: "HIGH"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "enforcer"
@@ -16,6 +16,8 @@ related_thread: 3819982838
 ---
 
 # 🔴 [Severity: HIGH]: Perform the exec rewrite before acknowledging it
+
+**Review (2026-08-21):** STALE as a live TOCTOU: completeParentExecRewrite() always ACKs false and the handler denies (does not CONTINUE) when rewrite fails. Remaining work is issue-20260817-033800 (implement rewrite), not this CONTINUE-path claim. Duplicate pair: 000010.
 
 **Context:** When an authorized child reaches this path, all rewrite fields are discarded and the listener ACKs merely because `ADDFD` returned a nonnegative descriptor; the daemon then sends `CONTINUE`, which resumes the original pathname-based `execve`. Fresh evidence is that `completeParentExecRewrite()` explicitly documents that no rewrite occurs, so a sibling can still mutate the tracee's pathname.
 

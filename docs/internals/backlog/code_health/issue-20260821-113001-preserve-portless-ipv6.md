@@ -1,7 +1,7 @@
 ---
 title: "Preserve portless IPv6 endpoints during JSON round trips"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: medium
 dependencies: []
 component: "profiler"
@@ -16,6 +16,8 @@ related_thread: 3797199306
 ---
 
 # 🟡 [Severity: MEDIUM]: Preserve portless IPv6 endpoints during JSON round trips
+
+**Review (2026-08-21):** ALREADY FIXED: parseEndpoint only splits on a single colon; IPv6 stays host+null port. Test `portless IPv6 endpoints survive JSON`.
 
 **Context:** When an eBPF `kind=connect` event supplies an IPv6 host but omits the optional port, serialization writes a bare value such as `2001:db8::1`; this parser then interprets the final numeric segment as port `1` and reloads the host as `2001:db8:`.
 

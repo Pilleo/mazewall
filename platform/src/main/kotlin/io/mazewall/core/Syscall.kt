@@ -1,5 +1,7 @@
 package io.mazewall.core
 
+import java.util.Locale
+
 
 /**
  * High-level syscall identifiers. Each variant resolves to an architecture-specific
@@ -114,6 +116,14 @@ enum class Syscall {
 
     /** Returns the syscall number for the given [arch], or -1 if not available. */
     fun numberFor(arch: Arch): Int = SyscallMapper.numberFor(this, arch)
+
+    public companion object {
+        /** Null if [name] is not a [Syscall] enum constant (e.g. CREAT, recvmsg). */
+        public fun tryParse(name: String): Syscall? {
+            val key = name.uppercase(Locale.US)
+            return entries.find { it.name == key }
+        }
+    }
 }
 
 /**

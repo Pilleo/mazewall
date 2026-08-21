@@ -167,7 +167,7 @@ public fun BpfBuilder<BpfState.Active>.allow(): BpfBuilder<BpfState.Terminated> 
 
 /** Returns ACT_ERRNO with the given [errno]. */
 public fun BpfBuilder<BpfState.Active>.deny(errno: Int): BpfBuilder<BpfState.Terminated> {
-    return ret(SeccompAction.ACT_ERRNO.nativeCode or (errno and 0xFFFF))
+    return ret(NativeConstants.SECCOMP_RET_ERRNO or (errno and 0xFFFF))
 }
 
 /** Returns SECCOMP_RET_KILL_THREAD. */

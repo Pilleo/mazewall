@@ -1,7 +1,7 @@
 ---
 title: "Start the eBPF collector before invoking the workload"
 severity: "HIGH"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "profiler"
@@ -16,6 +16,8 @@ related_thread: PRRT_kwDOScnnEM6a5aQ2
 ---
 
 # 🔴 [Severity: P1]: Start the eBPF collector before invoking the workload
+
+**Review (2026-08-21):** DUPLICATE of issue-20260821-113000-start-ebpf-collector-before-workload.
 
 **Context:** When `ProfileStrategy.EBPF` is selected without a recorded log, or with an invalid log path, this invokes the potentially side-effecting workload before `drainEbpf()` calls `EbpfCollector.start()` and throws `IncompleteProfileException`. The profiling attempt therefore executes completely unobserved, and a caller retrying after the reported setup failure can duplicate external effects.
 

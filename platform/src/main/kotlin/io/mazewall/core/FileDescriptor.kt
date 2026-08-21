@@ -52,6 +52,11 @@ internal object FdEpoch {
 
     private val table = ConcurrentHashMap<Int, AtomicReference<Slot>>()
 
+    /**
+     * Claims this integer as a still-owned live descriptor.
+     * If the slot is already live, returns that generation so aliases of the
+     * same resource share a token. Does not bump a leftover live slot.
+     */
     fun claimOpen(fd: Int): Long {
         if (fd < 0) return 0L
         val ref = table.computeIfAbsent(fd) { AtomicReference(Slot(0L, false)) }
@@ -65,6 +70,17 @@ internal object FdEpoch {
                 return next.generation
             }
         }
+    }
+
+    /**
+     * Kernel reused this integer for a newly minted descriptor
+     * (open, accept, dup, SCM_RIGHTS). Any leftover live generation is retired
+     * so tokens for the old resource cannot operate on the new one.
+     */
+    fun adoptKernelReuse(fd: Int): Long {
+        if (fd < 0) return 0L
+        forceRetire(fd)
+        return claimOpen(fd)
     }
 
     fun retire(fd: Int, generation: Long) {
@@ -306,15 +322,23 @@ public class FileDescriptor<out R : FileDescriptorRole, out S : FdState> interna
 
         /**
          * Adopts a newly allocated kernel fd (open, accept, dup, SCM_RIGHTS).
-         * Always creates a new generation, even if [value] was previously retired.
-         * Leftover Open tokens from the old generation stay dead.
+         *
+         * Always installs a new generation: leftover [FdState.Open] tokens for this
+         * integer, including still-live slots the wrapper never retired, become
+         * dead. Ordinary [generic] / role factories keep the current generation
+         * when the slot is already live (same resource, same owner).
          */
         public fun <R : FileDescriptorRole> adopt(
             value: Int,
             role: R,
             arena: NativeArena? = null,
-        ): FileDescriptor<R, FdState.Open> =
-            open(value, arena, role)
+        ): FileDescriptor<R, FdState.Open> {
+            val closed = value < 0
+            val generation = if (closed) 0L else FdEpoch.adoptKernelReuse(value)
+            return FileDescriptor(
+                FdLifecycle(value, arena, generation, role, closed = closed),
+            )
+        }
 
         /**
          * Kernel replaced this integer (dup2, SECCOMP_ADDFD SETFD).
@@ -415,7 +439,7 @@ public fun LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhan
         (cmd == NativeConstants.F_DUPFD || cmd == NativeConstants.F_DUPFD_CLOEXEC) &&
         value >= 0L
     ) {
-        FdEpoch.claimOpen(value.toInt())
+        FdEpoch.adoptKernelReuse(value.toInt())
     }
     return this
 }

@@ -37,6 +37,11 @@ class "EbpfCapability" as io.mazewall.profiler.EbpfCapability {
 }
 interface "EbpfLoad" as io.mazewall.profiler.EbpfLoad {
 }
+interface "FsEffect" as io.mazewall.profiler.FsEffect {
+  + {static}Companion Companion
+  __
+  + {abstract}List<String> getPaths()
+}
 class "IncompleteProfileException" as io.mazewall.profiler.IncompleteProfileException {
   +ProfilingCoverage getCoverage()
 }
@@ -87,6 +92,8 @@ class "ProfileEnvironment" as io.mazewall.profiler.ProfileEnvironment {
   +EbpfLoad getEbpfLoad()
   +Integer getLandlockAbi()
   +Boolean getIoUringDisabled()
+}
+interface "ProfileEvidence" as io.mazewall.profiler.ProfileEvidence {
 }
 interface "ProfileObservation" as io.mazewall.profiler.ProfileObservation {
   ..
@@ -141,6 +148,7 @@ class "ProfilingCoverage" as io.mazewall.profiler.ProfilingCoverage {
   +ProfileEnvironment getEnvironment()
   +boolean getComplete()
   +List<String> getWarnings()
+  +ProfileEvidence evidence()
   +ProfilingCoverage retainStricterPathResolution(ProfilingCoverage)
 }
 class "ProfilingResult" as io.mazewall.profiler.ProfilingResult<T> {
@@ -156,8 +164,14 @@ enum "StackAttribution" as io.mazewall.profiler.StackAttribution {
 }
 interface "TraceableWorkload" as io.mazewall.profiler.TraceableWorkload {
 }
-class "CollectorDrain" as io.mazewall.profiler.collector.CollectorDrain {
+interface "UringOp" as io.mazewall.profiler.UringOp {
+  ..
+  + {static}Companion Companion
   __
+  +boolean isPathBearing()
+  +boolean isFilesystemMutation()
+}
+class "CollectorDrain" as io.mazewall.profiler.collector.CollectorDrain {
   +List<ProfileObservation> getObservations()
   +int getDroppedEvents()
   +boolean getDrainComplete()
@@ -170,7 +184,6 @@ class "EbpfCollector" as io.mazewall.profiler.collector.EbpfCollector {
   +void close()
 }
 class "EbpfEventParser" as io.mazewall.profiler.collector.EbpfEventParser {
-  ..
   + {static}EbpfEventParser INSTANCE
   __
   +EbpfParseResult parse(String)

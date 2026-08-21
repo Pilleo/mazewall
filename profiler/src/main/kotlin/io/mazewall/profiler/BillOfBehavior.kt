@@ -74,9 +74,7 @@ data class BillOfBehavior(
                 throw IncompleteProfileException(withExecs)
             }
         }
-        if (!evidence.complete && !allowIncomplete) {
-            throw IncompleteProfileException(evidence)
-        }
+        requireComplete(evidence, allowIncomplete)
         @Suppress("UNCHECKED_CAST")
         val builder = Policy.threadLocalBuilder().base(base as Policy<PolicyScope.ThreadLocalOnly, *>)
         if (base.defaultAction == io.mazewall.core.SeccompAction.ACT_ALLOW) {
@@ -100,9 +98,10 @@ data class BillOfBehavior(
         basePolicyName: String = "Policy.PURE_COMPUTE_UNSAFE",
         base: Policy<*, Uncompiled> = Policy.PURE_COMPUTE_UNSAFE,
         baseCwd: Path? = null,
+        coverage: ProfilingCoverage = ProfilingCoverage.absent(),
         allowIncomplete: Boolean = false,
     ): String {
-        // Gate: same as toPolicy() - fail closed on observed execs/connects unless explicitly allowed
+        requireComplete(coverage, allowIncomplete)
         if (connects.isNotEmpty() && !allowIncomplete) {
             throw IncompleteProfileException(
                 ProfilingCoverage.absent().copy(
@@ -344,6 +343,17 @@ data class BillOfBehavior(
                 ioUringOps = dto.ioUringOps,
                 stackProfile = stackProfile,
             )
+        }
+    }
+}
+
+private fun requireComplete(coverage: ProfilingCoverage, allowIncomplete: Boolean) {
+    when (coverage.evidence()) {
+        is ProfileEvidence.Complete -> {}
+        is ProfileEvidence.Incomplete -> {
+            if (!allowIncomplete) {
+                throw IncompleteProfileException(coverage)
+            }
         }
     }
 }

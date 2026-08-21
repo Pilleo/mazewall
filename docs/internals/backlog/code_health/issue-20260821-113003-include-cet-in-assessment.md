@@ -1,7 +1,7 @@
 ---
 title: "Include Intel CET support in installation assessment"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: medium
 dependencies: []
 component: "enforcer"
@@ -16,6 +16,8 @@ related_thread: 3819982867
 ---
 
 # 🟡 [Severity: MEDIUM]: Include Intel CET support in installation assessment
+
+**Review (2026-08-21):** ALREADY FIXED: assess() blocks when lockIntelCet && !matrix.cetSupported.
 
 **Context:** When a policy has `lockIntelCet=true` on a non-AMD64 host or a CPU without CET support, this assessment can still return `installable=true` and `requireInstallable()` succeeds. The immediately following installation deterministically reaches `armIntelCet()` and throws under the default `FAIL` fallback, so the new preflight does not accurately predict installability for one of the policy features it exposes.
 

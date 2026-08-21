@@ -1,7 +1,7 @@
 ---
 title: "Apply Landlock for empty restrictive intersections to deny all paths"
 severity: "HIGH"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "enforcer"
@@ -17,6 +17,8 @@ related_thread: PRRC_kwDOScnnEM6H6P
 ---
 
 # 🔴 [Severity: HIGH]: Apply Landlock for empty restrictive intersections
+
+**Review (2026-08-21):** ALREADY FIXED: needsLandlock is policy.enforceLandlock (empty paths still apply); PolicyTest covers disjoint intersection + enforceLandlock.
 
 **Context:** When policy composition produces `enforceLandlock=true` with empty read and write sets (such as intersecting disjoint filesystem grants), the installer returns `UNCHANGED`, so no Landlock ruleset is installed. Meanwhile, `PolicyDefinition.combine()` permits the open syscalls (lines 112-118). The result allows unrestricted filesystem access instead of denying every path.
 

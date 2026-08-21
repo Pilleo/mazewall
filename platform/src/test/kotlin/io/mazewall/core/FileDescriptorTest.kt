@@ -185,6 +185,28 @@ class FileDescriptorTest {
     }
 
     @Test
+    fun `adopt of a still-live integer advances generation`() {
+        val leftover = FileDescriptor.generic(120)
+        assertTrue(leftover.isLiveForIo())
+        val leftoverGeneration = leftover.generation
+
+        val adopted = FileDescriptor.adopt(120, FileDescriptorRole.Generic)
+        assertTrue(adopted.isLiveForIo())
+        assertFalse(leftover.isLiveForIo())
+        assertNotEquals(leftoverGeneration, adopted.generation)
+        assertNotEquals(leftover, adopted)
+
+        val replacedLeftover = FileDescriptor.generic(121)
+        val replaced = FileDescriptor.replace<FileDescriptorRole.Generic>(121)
+        assertTrue(replaced.isLiveForIo())
+        assertFalse(replacedLeftover.isLiveForIo())
+        assertNotEquals(replacedLeftover, replaced)
+
+        adopted.close()
+        replaced.close()
+    }
+
+    @Test
     fun `poll rejects a retired fd integer`() {
         val fd = FileDescriptor.generic(97)
         fd.close()

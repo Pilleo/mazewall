@@ -1,7 +1,7 @@
 ---
 title: "Reject process-wide Landlock when TSYNC is unavailable"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: medium
 dependencies: []
 component: "enforcer"
@@ -16,6 +16,8 @@ related_thread: 3819324208
 ---
 
 # 🟡 [Severity: MEDIUM]: Reject process-wide Landlock when TSYNC is unavailable
+
+**Review (2026-08-21):** ALREADY FIXED: InstallationAssessor adds a blocking reason when processWide && landlockRequired && !landlockTsyncSupported.
 
 **Context:** On kernels with Landlock ABI 1-7, `landlockSupported` is true while `landlockTsyncSupported` is false, so this check adds no blocking reason and `assessOnProcess()` reports a path-bearing policy as installable. The actual `LandlockSession` rejects the same installation under the default `FAIL` fallback because process-wide Landlock requires TSYNC.
 

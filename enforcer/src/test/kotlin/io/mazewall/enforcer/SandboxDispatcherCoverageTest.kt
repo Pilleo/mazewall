@@ -10,6 +10,7 @@ import kotlin.test.assertEquals
 import io.mazewall.enforcer.api.SandboxDispatcher
 import kotlin.test.assertNotNull
 
+@Suppress("DEPRECATION")
 class SandboxDispatcherCoverageTest {
 
     @AfterEach
@@ -37,5 +38,14 @@ class SandboxDispatcherCoverageTest {
     fun testShutdownAll() {
         SandboxDispatcher.getOrCreateElasticPool(Policy.builder().build().definition)
         SandboxDispatcher.shutdownAll()
+    }
+
+    @Test
+    fun `legacy package SandboxDispatcher forwards execute and shutdownAll`() {
+        System.setProperty("io.mazewall.fallback", "SILENT_BYPASS")
+        val policy = Policy.builder().build()
+        val result = io.mazewall.enforcer.SandboxDispatcher.execute(policy, Callable { "legacy" })
+        assertEquals("legacy", result)
+        io.mazewall.enforcer.SandboxDispatcher.shutdownAll()
     }
 }

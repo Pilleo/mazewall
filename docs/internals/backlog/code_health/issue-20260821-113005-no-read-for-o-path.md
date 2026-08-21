@@ -17,21 +17,20 @@ related_thread: 3825912180
 
 # 🟡 [Severity: MEDIUM]: Do not grant file reads for O_PATH observations
 
-**Context:** When an observed `open` or `openat` uses `O_PATH`, `isOpenWrite()` returns false and this classifies the pathname as a read, even though `O_PATH` obtains only a metadata/path handle and does not require `LANDLOCK_ACCESS_FS_READ_FILE`. `toPolicy()` then adds an `allowFsRead` rule and unblocks open calls, allowing the sandboxed workload to reopen and read files that were only observed with O_PATH.
+**Review (2026-08-21):** Still present. Do not confuse with io_uring unknown OPENAT (`113002-treat-iouring-open-modes`): that path stays in `opens` **and** marks coverage incomplete. This issue is POSIX `open`/`openat` with `O_PATH` in `openFlags`.
 
-**Problem:**
-- O_PATH classified as read
-- But O_PATH doesn't require read access
-- toPolicy() adds allowFsRead rule
-- Workload can reopen and read files
+**Current tree:** `O_PATH` is `0x01000000`. `isOpenWrite` only looks at `O_WRONLY`/`O_RDWR`/`O_CREAT`/`O_TRUNC`. `O_PATH` therefore takes the `opens` branch → `toPolicy()` `allowFsRead`. Landlock `READ_FILE` is then granted for a handle that never read file contents. The compiled policy can reopen the path for real reads.
 
-**Impact:**
-- More permissions granted than observed
-- Security: O_PATH shouldn't grant read
+**Do not:**
+- Put `O_PATH` in `fsWritePaths`.
+- Treat `O_PATH` as incomplete coverage and then still add `allowFsRead` when `allowIncomplete=true` (same over-grant as the io_uring OPENAT mistake).
+- Use `flags == 0` as “read”.
 
-**Needed:**
-1. Don't classify O_PATH as read
-2. O_PATH should not require allowFsRead
-3. Only grant permissions matching observed access
+**Do:**
+1. If `(openFlags & O_PATH) != 0`, do **not** add the path to `opens` or `fsWritePaths`. Recording the syscall in `syscalls` is fine.
+2. If Landlock has no other reason to grant that path, `toPolicy` must not `allowFsRead` it.
+3. Optional: coverage warning that O_PATH was observed without a content-access open.
 
-**Codex PR Comment:** https://github.com/Pilleo/mazewall/pull/512#discussion_r3825912180
+**Tests:** `Syscall("OPENAT", paths=["/secret"], openFlags=O_PATH)` → path not in `opens` or `fsWritePaths`. `allowIncomplete` policy must not contain `allowFsRead("/secret")`. `O_RDONLY` without O_PATH still goes to `opens`.
+
+**Codex:** https://github.com/Pilleo/mazewall/pull/512#discussion_r3825912180

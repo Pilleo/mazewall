@@ -9,6 +9,7 @@ target_modules:
   - ":profiler"
 target_files:
   - "profiler/src/main/kotlin/io/mazewall/profiler/compiler/BobCompiler.kt"
+  - "profiler/src/main/kotlin/io/mazewall/profiler/ProfilingCoverage.kt"
 effort: "small"
 autonomy: "autonomous"
 related_pr: 512
@@ -17,21 +18,20 @@ related_thread: 3825912173
 
 # 🟡 [Severity: MEDIUM]: Reject observations that cannot map to a syscall
 
-**Context:** When strace or eBPF successfully records a syscall absent from the limited `Syscall` enum—such as `epoll_wait`, `readv`, or `recvmsg`—this silently discards it while coverage can still report `complete=true`. Compiling that result against an allow-list base then omits an operation the workload actually required, while the Bill of Behavior inaccurately claims completeness.
+**Review (2026-08-21):** Still present. Adding a few names to `isFileSystemMutation` does **not** fix this.
 
-**Problem:**
-- Syscalls not in Syscall enum are silently discarded
-- Coverage can report complete=true
-- Policy omits operations workload required
-- Bill of Behavior inaccurately claims completeness
+**Current tree:** `applySyscall` does `Syscall.valueOf(name).getOrNull()?.let { syscalls.add(it) }` and otherwise continues. Names absent from `Syscall` (`CREAT`, `recvmsg`, `epoll_wait`, …) never enter `BillOfBehavior.syscalls`. Coverage can still be `complete=true` because it keys off path-bearing sets, not “every observation mapped”. An allow-list compile then omits a syscall the workload used.
 
-**Impact:**
-- Policy may not cover all observed operations
-- Bill of Behavior incomplete
+**Do not:**
+- Silently skip unmapped names (status quo).
+- Expand `Syscall` for the entire Linux table in this issue (that is `add_syscall` work, separate PRs).
+- Mark only path-bearing failures and leave unmapped non-path syscalls as complete.
 
-**Needed:**
-1. Reject or mark incomplete when syscall not in enum
-2. Expand Syscall enum to cover common syscalls
-3. Don't silently discard unmappable observations
+**Do:**
+1. If a `ProfileObservation.Syscall` name does not map to `Syscall`, treat the profile as incomplete: warning + `complete=false`.
+2. Optionally collect unmapped names on the Bob/coverage object for the operator.
+3. Do not add the name to `syscalls` via a fake enum.
 
-**Codex PR Comment:** https://github.com/Pilleo/mazewall/pull/512#discussion_r3825912173
+**Tests:** Observation `name="RECVMSG"` (or another name not in `Syscall`) + otherwise clean coverage inputs → `complete=false` and `toPolicy()` throws without `allowIncomplete`. Mapped names such as `OPENAT` still compile.
+
+**Codex:** https://github.com/Pilleo/mazewall/pull/512#discussion_r3825912173

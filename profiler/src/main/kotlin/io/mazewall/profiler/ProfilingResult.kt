@@ -10,8 +10,11 @@ import io.mazewall.profiler.engine.TraceEvent
  * @param stackProfile Map of events to their captured stack traces.
  *
  * To compile a policy: result.toPolicy() (refuses incomplete coverage)
- * To get DSL:          result.behavior.toDsl("Policy.PURE_COMPUTE_UNSAFE")
+ * To get DSL:          result.toDsl() (same coverage gate as toPolicy)
  * To merge runs:       (run1.behavior + run2.behavior).toPolicy(..., coverage, allowIncomplete)
+ *
+ * Do not call [BillOfBehavior.toDsl] without [ProfilingCoverage]; the default is [ProfilingCoverage.absent]
+ * which is incomplete.
  */
 data class ProfilingResult<T>(
     val value: T,
@@ -36,4 +39,11 @@ data class ProfilingResult<T>(
         baseCwd: java.nio.file.Path? = null,
         allowIncomplete: Boolean = false,
     ) = behavior.toPolicy(base, baseCwd, coverage, allowIncomplete)
+
+    fun toDsl(
+        basePolicyName: String = "Policy.PURE_COMPUTE_UNSAFE",
+        base: io.mazewall.Policy<*, io.mazewall.Uncompiled> = io.mazewall.Policy.PURE_COMPUTE_UNSAFE,
+        baseCwd: java.nio.file.Path? = null,
+        allowIncomplete: Boolean = false,
+    ) = behavior.toDsl(basePolicyName, base, baseCwd, coverage, allowIncomplete)
 }

@@ -125,9 +125,7 @@ public object InstallationAssessor {
             fallback = fallback,
             argumentRules = policy.argumentRules,
             mode =
-                if (policy.defaultAction is io.mazewall.core.SeccompAction.ACT_ERRNO ||
-                    policy.defaultAction == io.mazewall.core.SeccompAction.ACT_ERRNO
-                ) {
+                if (policy.defaultAction is io.mazewall.core.SeccompAction.ACT_ERRNO) {
                     PolicyMode.ALLOW_LIST
                 } else {
                     PolicyMode.DENY_LIST

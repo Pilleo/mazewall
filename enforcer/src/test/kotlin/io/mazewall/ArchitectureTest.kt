@@ -523,6 +523,11 @@ class ArchitectureTest {
                 "io.mazewall.enforcer.supervisor.SupervisorRoute\$SecureExec",
                 "io.mazewall.enforcer.supervisor.SupervisorRoute\$Abort",
             ),
+            "io.mazewall.enforcer.supervisor.SupervisedOpen" to setOf(
+                "io.mazewall.enforcer.supervisor.SupervisedOpen\$Open",
+                "io.mazewall.enforcer.supervisor.SupervisedOpen\$OpenAt",
+                "io.mazewall.enforcer.supervisor.SupervisedOpen\$OpenAt2",
+            ),
         )
         for ((parent, kids) in expected) {
             val actual = allClasses
