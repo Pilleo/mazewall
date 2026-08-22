@@ -45,7 +45,83 @@ class TelegramBridge:
             data["reply_markup"] = reply_markup
         await self.tg_request("sendMessage", data)
 
+
+    async def sync_git_lifecycle(self, identifier):
+        import glob
+        import os
+        import re
+        import shutil
+        import subprocess
+
+        logger.info(f"Syncing git lifecycle for completed issue {identifier}")
+        # Fetch issue metadata
+        url = f"{self.api_url}/api/issues/{identifier}"
+        headers = {"Authorization": f"Bearer {self.api_key}"}
+        async with httpx.AsyncClient() as client:
+            try:
+                resp = await client.get(url, headers=headers)
+                resp.raise_for_status()
+                issue = resp.json()
+            except Exception as e:
+                logger.error(f"Failed to fetch issue {identifier}: {e}")
+                return
+
+        metadata = issue.get("metadata", {}) or {}
+        backlog_file = metadata.get("backlogFile")
+        
+        if not backlog_file:
+            backlog_id = metadata.get("backlog_id")
+            if backlog_id:
+                files = glob.glob(f"docs/internals/backlog/**/issue*{backlog_id}*.md", recursive=True)
+                if files:
+                    backlog_file = files[0]
+            if not backlog_file:
+                # Try finding just by identifier
+                files = glob.glob(f"docs/internals/backlog/**/issue*{identifier.replace('MAZ-', '')}*.md", recursive=True)
+                if files:
+                    backlog_file = files[0]
+
+        if not backlog_file or not os.path.exists(backlog_file):
+            logger.error(f"backlogFile not found for issue {identifier}")
+            return
+            
+        try:
+            # 2. Updates frontmatter to status: resolved
+            with open(backlog_file, "r") as f:
+                file_content = f.read()
+                
+            updated_content = re.sub(r"status:\s*[\'\"]?(?:open|in_progress)[\'\"]?", "status: \"resolved\"", file_content, count=1)
+            
+            with open(backlog_file, "w") as f:
+                f.write(updated_content)
+                
+            # 3. Moves markdown file to docs/internals/backlog/resolved/
+            resolved_dir = "docs/internals/backlog/resolved"
+            os.makedirs(resolved_dir, exist_ok=True)
+            dest = os.path.join(resolved_dir, os.path.basename(backlog_file))
+            shutil.move(backlog_file, dest)
+            
+            # 4. Runs git pull --rebase, stages, and commits
+            # 5. On merge conflict, aborts rebase and alerts Telegram.
+            subprocess.run(["git", "pull", "--rebase"], cwd=".", check=False)
+            
+            git_status = subprocess.run(["git", "status", "--porcelain"], capture_output=True, text=True)
+            if "UU" in git_status.stdout:
+                subprocess.run(["git", "rebase", "--abort"], cwd=".", check=False)
+                await self.send_message(f"🚨 <b>Merge Conflict!</b>\n\nFailed to sync Resolution lifecycle for {identifier}. Rebase aborted. Please reconcile manually.")
+
+                
+                return
+                
+            subprocess.run(["git", "add", backlog_file, dest], cwd=".", check=False)
+            subprocess.run(["git", "commit", "-m", f"Resolve {identifier}"], cwd=".", check=False)
+            logger.info(f"Successfully synced git lifecycle for {identifier}")
+            
+        except Exception as e:
+            logger.error(f"Failed to process git lifecycle for {identifier}: {e}")
+
     async def process_event(self, event):
+
         action = event.get("action")
         if not action:
             return
@@ -80,6 +156,10 @@ class TelegramBridge:
             if "status_changed" in action or (status and status != prev_status):
                 text = f"<b>Issue Status Changed</b>\n\nIssue: {details.get('identifier', entity_id)}\nNew Status: {status}"
                 await self.send_message(text)
+                
+                if status == "done":
+                    await self.sync_git_lifecycle(details.get("identifier", entity_id))
+
 
         # Run Failed
         elif action in ["run.failed", "run_failed"] or (action == "environment.lease_released" and details.get("status") == "failed"):
