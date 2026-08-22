@@ -1,7 +1,7 @@
 ---
 title: Memory Segment Pooling for Profiler USER_NOTIF
 severity: ENHANCEMENT
-status: open
+status: "resolved"
 priority: low
 dependencies: []
 target_files:
@@ -10,6 +10,7 @@ target_modules:
 - :enforcer
 component: enforcer
 effort: medium
+paperclip_issue_id: "2f4e51e8-0275-4533-bc98-f24523564bc6"
 ---
 
 # 🔵 [Severity: ENHANCEMENT]: Memory Segment Pooling for Profiler USER_NOTIF
