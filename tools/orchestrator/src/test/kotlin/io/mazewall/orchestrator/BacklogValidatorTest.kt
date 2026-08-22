@@ -302,6 +302,82 @@ class BacklogValidatorTest {
     }
 
     @Test
+    fun testResolvedStatusOutsideResolvedDirectoryFails() {
+        val file = File(tempDir, "issue-20260726-111111-resolved-wrong-dir.md")
+        file.writeText("""
+            ---
+            title: "Resolved In Wrong Dir"
+            severity: "HIGH"
+            status: "resolved"
+            priority: high
+            dependencies: []
+            component: "enforcer"
+            target_modules: [":enforcer"]
+            target_files: ["some/file.kt"]
+            ---
+
+            # 🔴 [Severity: HIGH]: Resolved In Wrong Dir
+            **Context:** valid context
+            **Needed:** valid needed
+        """.trimIndent())
+
+        val errors = BacklogValidator.validateBacklog(tempDir)
+        assertFalse(errors.isEmpty(), "Resolved issue outside resolved dir should fail validation")
+        assertTrue(errors.any { it.contains("Issue has status 'resolved' but is located in") })
+    }
+
+    @Test
+    fun testNonResolvedStatusInsideResolvedDirectoryFails() {
+        val resolvedDir = File(tempDir, "resolved").apply { mkdirs() }
+        val file = File(resolvedDir, "issue-20260726-111111-open-in-resolved.md")
+        file.writeText("""
+            ---
+            title: "Open In Resolved Dir"
+            severity: "HIGH"
+            status: "open"
+            priority: high
+            dependencies: []
+            component: "enforcer"
+            target_modules: [":enforcer"]
+            target_files: ["some/file.kt"]
+            ---
+
+            # 🔴 [Severity: HIGH]: Open In Resolved Dir
+            **Context:** valid context
+            **Needed:** valid needed
+        """.trimIndent())
+
+        val errors = BacklogValidator.validateBacklog(tempDir)
+        assertFalse(errors.isEmpty(), "Open issue inside resolved dir should fail validation")
+        assertTrue(errors.any { it.contains("Issue is in 'resolved' directory but has status 'open'") })
+    }
+
+    @Test
+    fun testResolvedStatusInsideResolvedDirectoryPasses() {
+        val resolvedDir = File(tempDir, "resolved").apply { mkdirs() }
+        val file = File(resolvedDir, "issue-20260726-111111-valid-resolved.md")
+        file.writeText("""
+            ---
+            title: "Valid Resolved Issue"
+            severity: "HIGH"
+            status: "resolved"
+            priority: high
+            dependencies: []
+            component: "enforcer"
+            target_modules: [":enforcer"]
+            target_files: ["some/file.kt"]
+            ---
+
+            # 🔴 [Severity: HIGH]: Valid Resolved Issue
+            **Context:** valid context
+            **Needed:** valid needed
+        """.trimIndent())
+
+        val errors = BacklogValidator.validateBacklog(tempDir)
+        assertTrue(errors.isEmpty(), "Expected no errors for properly placed resolved issue, but got: $errors")
+    }
+
+    @Test
     fun testNonExistentBacklogDir() {
         val nonExistent = File(tempDir, "non-existent")
         val errors = BacklogValidator.validateBacklog(nonExistent)

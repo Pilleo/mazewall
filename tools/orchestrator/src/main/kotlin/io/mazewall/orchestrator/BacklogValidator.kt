@@ -67,6 +67,8 @@ object BacklogValidator {
 
             if (issue.status !in VALID_STATUSES) {
                 errors.add("${file.name}: Invalid status '${issue.status}'. Allowed: $VALID_STATUSES")
+            } else if (issue.status == "resolved") {
+                errors.add("${file.name}: Issue has status 'resolved' but is located in '${file.parentFile.name}' instead of the 'resolved' directory")
             }
 
             // Priority is parsed as high/medium/low; invalid tokens fail parseIssueFile.
@@ -98,6 +100,19 @@ object BacklogValidator {
                 if (dep.isNotBlank() && dep !in knownIssueIds) {
                     errors.add("${file.name}: References non-existent dependency '$dep'")
                 }
+            }
+        }
+
+        // 3. Validate resolved files (ensure they have status 'resolved')
+        val resolvedFiles = backlogDir.walkTopDown()
+            .filter { it.isFile && it.name.startsWith("issue-") && it.name.endsWith(".md") }
+            .filter { it.absolutePath.contains("${File.separator}resolved${File.separator}") }
+            .toList()
+
+        for (file in resolvedFiles) {
+            val issue = BacklogParser.parseIssueFile(file)
+            if (issue != null && issue.status != "resolved") {
+                errors.add("${file.name}: Issue is in 'resolved' directory but has status '${issue.status}' (expected 'resolved')")
             }
         }
 

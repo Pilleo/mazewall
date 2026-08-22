@@ -1,7 +1,7 @@
 ---
 title: "Replace Misleading Containment AutoCloseable with Installation Receipt"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "enforcer"

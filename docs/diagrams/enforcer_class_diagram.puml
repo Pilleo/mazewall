@@ -941,6 +941,7 @@ class "LayoutValidator" as io.mazewall.ffi.LayoutValidator {
   + {static}LayoutValidator INSTANCE
   __
   +void validate()
+  +void validateLayout(StructLayout, long, long, Function1<? super LayoutValidationScope, Unit>)
 }
 class "TypedSegment" as io.mazewall.ffi.TypedSegment<P extends IoctlPayload> {
   +ManagedSegment getSegment()

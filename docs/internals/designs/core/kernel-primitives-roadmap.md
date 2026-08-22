@@ -50,12 +50,10 @@ val segment = MemorySegment.mapFile(fd, 0, keySize, MapMode.READ_WRITE, arena)
 ### The Concept
 The `userfaultfd` mechanism allows a user-space thread to handle page faults for specific memory addresses. When a thread accesses a page that is not currently mapped in RAM, the kernel suspends the thread and sends an event to a coordinator thread, which can dynamically fetch or populate the page before resuming the thread.
 
-### JVM Integration
-While modern garbage collectors (like ZGC) use virtual memory techniques internally, exposing user-space page fault handling to JVM applications allows for custom zero-copy memory maps or lazily loaded off-heap structures.
-
-### Security & Operational Value
-*   **Zero-Copy Sandboxes:** Guest memory areas (e.g., for WebAssembly guest modules or sub-isolated code) can be lazily mapped on-demand, preventing guest runs from pre-allocating large physical memory spaces or accessing unmapped regions.
-*   **Encrypted Storage Paging:** Page faults can be intercepted to dynamically decrypt data blocks on-the-fly when read, and re-encrypt them when evicted from RAM.
+### Operational Context & Prerequisites
+`userfaultfd` is an on-demand memory paging mechanism, **not a security sandbox or access-control boundary**.
+- **Prerequisites:** On modern Linux kernels (Linux 5.11+), unprivileged `userfaultfd` creation is disabled by default via `vm.unprivileged_userfaultfd=0` (or restricted to `UFFD_USER_MODE_ONLY`) to prevent kernel heap exploitation.
+- **Threat Boundary Limitations:** It does not prevent memory corruption on mapped pages or unauthorized access once a page is populated in the shared process address space.
 
 ---
 
@@ -64,34 +62,36 @@ While modern garbage collectors (like ZGC) use virtual memory techniques interna
 ### The Concept
 `io_uring` is a high-performance asynchronous system call engine using shared memory rings. To prevent evasion attacks (since `io_uring` submissions bypass classic Seccomp checks on standard system call entry), the kernel provides a restriction mechanism (`io_uring_register` with `IORING_REGISTER_RESTRICTIONS`). This allows instantiating a submission queue (SQ) ring and locking it down to permit only a strict subset of asynchronous operations.
 
-### JVM Integration
-Integrating these restrictions directly into high-performance JVM network transports (such as Netty or NIO wrappers):
-
-```kotlin
-// Restricting the queue to reads and writes, blocking network binds or connects
-val ring = IoUring.createRestricted(
-    allowedOps = setOf(IORING_OP_READ, IORING_OP_WRITE, IORING_OP_PROVIDE_BUFFERS)
-)
-```
-
-### Security Value
-Allows implementing thread-scoped, high-throughput network and disk sandboxes without dropping back to synchronous system calls or paying the context-switching penalty of `USER_NOTIF` intercepts.
+### Scope & Required Outer Policy
+- **Object Constrained:** `IORING_REGISTER_RESTRICTIONS` restricts **only the specific ring instance** on which it is registered. It does **not** constrain the thread or process.
+- **Bypass Risk:** Any native code or dependency capable of calling `io_uring_setup(2)` can allocate a new, unrestricted ring.
+- **Required Outer Policy:** Tier 1 / Tier 2 Seccomp filters **must block or supervise `io_uring_setup`** to prevent the creation of unconstrained rings. Sandboxing file I/O on `io_uring` operations additionally relies on Landlock LSM VFS hooks, which kernel `io-wq` worker threads inherit from the sandboxed thread.
 
 ---
 
-## 5. Debugger and Trace Protection (`Yama LSM` & `prctl`)
+## 5. Debugger and Trace Protection (`prctl` & `Yama LSM`)
 
-### The Concept
-The Yama Linux Security Module controls whether processes can attach to other processes using `ptrace` (which is used by debuggers, tracers, and memory dumps). 
+### The Concept & Ptrace Hierarchy
+Controlling external process attachment and memory inspection involves multiple kernel layers:
+1. **Process Dumpability (`PR_SET_DUMPABLE, 0`):** Disables ptrace attachment from non-root callers and prevents kernel core dumps from writing process memory to disk.
+2. **Yama LSM (`/proc/sys/kernel/yama/ptrace_scope`):** Enforces system-wide attachment policies (e.g. Scope 1 restricts ptrace to ancestor processes).
+3. **Yama PTRACER Exception (`PR_SET_PTRACER, pid`):** Declares an explicit exception to allow a specific debugger/profiler PID. Invoking `PR_SET_PTRACER, 0` clears any previously configured exception and returns to the default Yama policy; it does **not** make the process non-dumpable on its own.
 
-### JVM Integration
-During the final bootstrap phase, immediately after the JVM has loaded its required native engines, the application can issue a self-restriction `prctl` call:
+### Security Invariants
+- `PR_SET_DUMPABLE, 0` is the primary primitive to harden process memory against same-UID inspection.
+- When profiling under Yama `ptrace_scope=1`, descendant tracing (e.g. child JVM spawned by profiler) is permitted because parent-child relationships satisfy Yama Scope 1.
 
-```kotlin
-// Prevent any external process (even running under the same UID) from attaching via ptrace
-LinuxNative.prctl(PR_SET_PTRACER, 0)
-```
+---
 
-### Security Value
-*   Blocks tools like `gdb`, `strace`, or unauthorized JVM diagnostic tools from attaching to the production process.
-*   Protects against post-exploitation vectors where an attacker attempts to dump the JVM heap memory to extract credentials or inspect runtime state.
+## 6. Primitive Scope & Prerequisite Reference Matrix
+
+| Primitive | Constrained Object | Scope | Bypass / Threat Vector | Required Outer Policy / Prerequisites |
+| :--- | :--- | :--- | :--- | :--- |
+| **`cgroups v2` (Threaded)** | Thread IDs (`tids`) | Thread CPU scheduling | Domain controllers (Memory) apply process-wide, triggering whole-process OOM | Subprocess isolation for hard memory limits |
+| **`memfd_secret`** | Kernel Direct Map pages | Process-local mapping | Accessible to all sibling threads in same address space | Separate process / hardware enclave for intra-process secrets |
+| **`userfaultfd`** | Address range page faults | Paging mechanism | Does not restrict reads/writes to mapped pages | `vm.unprivileged_userfaultfd=1` / `CAP_SYS_PTRACE` |
+| **`io_uring` Restrictions** | Single `io_uring` FD | Specific Ring only | Call `io_uring_setup` to allocate new unconstrained ring | Seccomp filter blocking/supervising `io_uring_setup` + Landlock |
+| **`PR_SET_DUMPABLE(0)`** | Process dumpability & ptrace | Whole Process | Root / `CAP_SYS_PTRACE` bypass | Process credential isolation |
+| **`PR_SET_PTRACER(0)`** | Yama exception state | Yama policy | Resets to system Yama scope; does not disable ptrace | Pair with `PR_SET_DUMPABLE(0)` and system Yama `ptrace_scope>=1` |
+| **`PR_SET_MDWE(1)`** | W+X memory transitions | Whole Process | Pre-existing executable pages | Apply before loading untrusted plugins |
+
