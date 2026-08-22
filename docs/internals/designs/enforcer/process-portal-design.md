@@ -118,4 +118,20 @@ Phase 2 (plugins): guest classes never load in the broker; worker classpath is c
 ## Open questions
 
 1. Worker heap/CPU: cgroup on the child PID in v1.1, or rely on `-Xmx` only?
-2. When plugins land, is a second Gradle source set required so guest impl is absent from the broker compile classpath?
+
+## Resolved questions
+
+1. **Plugin classpath isolation (was: open question #2):** No, a second Gradle source set (`workerMain`) is **not** required. For Phase 2 plugins, use a **separate Gradle module** (e.g., `:portal-worker`) that depends on `:portal` (stubs + interfaces) and contains only guest implementations. The broker module depends only on `:portal` and never includes the worker module. This gives cleaner isolation than source sets: the worker module can have its own dependencies, and Gradle's dependency resolution guarantees the broker classpath never sees worker classes. A Gradle check (or ArchUnit test) can verify that `PortalBuiltinDispatch` / `@SandboxImpl` annotated classes are not on the broker's runtime classpath.
+
+## Phase 2: Plugin Classpath Layout
+
+Module structure for plugin support:
+
+| Module | Contains | Depends on | Visible to Broker? |
+|---|---|---|---|
+| `:portal` | Stubs, `ProcessBroker`, `Portal`, capability tokens | `:platform`, `:enforcer` | Yes |
+| `:portal-codegen` | KotlinPoet plugin (generates stubs/dispatchers) | `:portal` | Build-time only |
+| `:portal-worker` (new) | Guest implementations, worker dispatcher | `:portal` | **No** |
+| Plugin module (e.g., `:plugin-foo`) | Plugin impl + its deps | `:portal-worker` | **No** |
+
+Broker apps depend only on `:portal`. Worker JVMs are spawned with the `:portal-worker` + plugin modules on their classpath. The codegen plugin generates stubs into `:portal` and dispatchers into `:portal-worker`, ensuring the broker never loads guest code.
