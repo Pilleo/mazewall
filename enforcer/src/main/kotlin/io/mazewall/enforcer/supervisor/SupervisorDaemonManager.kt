@@ -9,6 +9,10 @@ import io.mazewall.enforcer.*
 import io.mazewall.LinuxNative
 import io.mazewall.NativeEngine
 import io.mazewall.seccomp.SeccompInstallationState
+import io.mazewall.core.JavaAgentSelection
+import io.mazewall.core.JvmChildProcess
+import io.mazewall.core.JvmChildSpec
+import io.mazewall.core.PrivateUnixEndpoint
 import io.mazewall.core.ProcessLauncher
 import io.mazewall.core.RealProcessLauncher
 import io.mazewall.core.RealSocketManager
@@ -18,7 +22,6 @@ import io.mazewall.ffi.memory.writeByte
 import io.mazewall.getFdOrThrow
 import java.io.IOException
 import java.nio.file.Path
-import java.nio.file.attribute.PosixFilePermissions
 import java.util.logging.Logger
 
 /**
@@ -131,48 +134,22 @@ public class SupervisorDaemonManager(
 
     private fun spawnDaemon(): SupervisorContext {
         refuseSpawnIfParentIsFiltered()
-        val daemonClassName = SupervisorDaemon::class.java.name
+        val endpoint =
+            PrivateUnixEndpoint.create(processLauncher, "mazewall-supervisor-", "supervisor.sock")
+        val socketDir = endpoint.dir
+        val socketPath = endpoint.path
 
-        val perms = PosixFilePermissions.fromString("rwx------")
-        var socketDir = processLauncher.createTempDirectory("mazewall-supervisor-", PosixFilePermissions.asFileAttribute(perms))
-        var socketPath = socketDir.resolve("supervisor.sock").toAbsolutePath().toString()
-
-        if (socketPath.toByteArray(java.nio.charset.StandardCharsets.UTF_8).size >= 108) {
-            try {
-                processLauncher.deleteIfExists(socketDir.resolve("supervisor.sock"))
-                processLauncher.deleteIfExists(socketDir)
-            } catch (ignored: Exception) {}
-
-            val tmpDir = java.nio.file.Path.of("/tmp")
-            socketDir = processLauncher.createTempDirectory(tmpDir, "mazewall-supervisor-", PosixFilePermissions.asFileAttribute(perms))
-            socketPath = socketDir.resolve("supervisor.sock").toAbsolutePath().toString()
-
-            require(socketPath.toByteArray(java.nio.charset.StandardCharsets.UTF_8).size < 108) {
-                "Failed to generate a safe UNIX socket path (exceeds 107 bytes): $socketPath"
-            }
-        }
-
-        val javaBin = System.getProperty("java.home") + "/bin/java"
-        val classpath = System.getProperty("java.class.path")
-
-        val jvmArgs = java.lang.management.ManagementFactory
-            .getRuntimeMXBean()
-            .inputArguments
-        val javaAgents = jvmArgs.filter { it.startsWith("-javaagent:") }
-
-        val pbArgs = mutableListOf<String>()
-        pbArgs.add(javaBin)
-        pbArgs.add("--enable-native-access=ALL-UNNAMED")
-        pbArgs.add("-Xmx64m")
-        pbArgs.addAll(javaAgents)
-        pbArgs.add("-cp")
-        pbArgs.add(classpath)
-        pbArgs.add(daemonClassName)
-        pbArgs.add(socketPath)
-
+        val spec =
+            JvmChildSpec(
+                mainClass = SupervisorDaemon::class.java.name,
+                mainArgs = listOf(socketPath),
+                maxHeap = "64m",
+                javaAgents = JavaAgentSelection.All,
+            )
+        val pbArgs = JvmChildProcess.commandLine(spec)
         logger.info("Spawning SupervisorDaemon: ${pbArgs.joinToString(" ")}")
 
-        val daemonProcess = processLauncher.startProcess(pbArgs)
+        val daemonProcess = JvmChildProcess.start(processLauncher, spec)
         val daemonPid = daemonProcess.pid()
 
         val prctlRes = engine.process.prctl(
@@ -195,47 +172,39 @@ public class SupervisorDaemonManager(
         val context = SupervisorContext(socketPath, socketDir, daemonProcess, shutdownHook)
         sharedDaemonContext = context
 
-        val readyLatch = java.util.concurrent.CountDownLatch(1)
-
-        Thread {
-            try {
-                val reader = daemonProcess.inputStream.bufferedReader()
-                while (true) {
-                    val line = reader.readLine() ?: break
-                    if (line.contains(SupervisorDaemon.DAEMON_READY_SENTINEL)) {
-                        readyLatch.countDown()
-                    }
+        val pump =
+            JvmChildProcess.startStdoutPump(
+                process = daemonProcess,
+                readySentinel = SupervisorDaemon.DAEMON_READY_SENTINEL,
+                onLine = { line ->
                     daemonLogLines.add(line)
                     System.err.println("[SUPERVISOR-DAEMON] $line")
                     System.err.flush()
-                }
-            } catch (ignored: IOException) {
-                // Stopped
-            } catch (t: Throwable) {
-                logger.log(java.util.logging.Level.SEVERE, "Exception inside supervisor-daemon-output thread", t)
-            } finally {
-                synchronized(daemonLock) {
-                    val currentContext = sharedDaemonContext
-                    if (currentContext != null && currentContext.daemonProcess == daemonProcess) {
-                        if (!daemonProcess.isAlive) {
-                            val exitCode = try { daemonProcess.exitValue() } catch (e: Exception) { -1 }
-                            logger.severe("SupervisorDaemon (PID=${daemonProcess.pid()}) exited unexpectedly with exit code $exitCode!")
-                            logger.severe("Last daemon log lines:")
-                            daemonLogLines.forEach { line ->
-                                logger.severe("[SUPERVISOR-DAEMON-CRASH-LOG] $line")
+                },
+                threadName = "supervisor-daemon-output",
+                onStreamClosed = {
+                    synchronized(daemonLock) {
+                        val currentContext = sharedDaemonContext
+                        if (currentContext != null && currentContext.daemonProcess == daemonProcess) {
+                            if (!daemonProcess.isAlive) {
+                                val exitCode = try {
+                                    daemonProcess.exitValue()
+                                } catch (_: Exception) {
+                                    -1
+                                }
+                                logger.severe("SupervisorDaemon (PID=${daemonProcess.pid()}) exited unexpectedly with exit code $exitCode!")
+                                logger.severe("Last daemon log lines:")
+                                daemonLogLines.forEach { line ->
+                                    logger.severe("[SUPERVISOR-DAEMON-CRASH-LOG] $line")
+                                }
+                                onUnexpectedExit(exitCode)
                             }
-                            onUnexpectedExit(exitCode)
                         }
                     }
-                }
-            }
-        }.apply {
-            isDaemon = true
-            name = "supervisor-daemon-output"
-        }.start()
+                },
+            )
 
-        // Wait for sentinel
-        val ready = readyLatch.await(LATCH_TIMEOUT_SECONDS, java.util.concurrent.TimeUnit.SECONDS)
+        val ready = JvmChildProcess.awaitReady(pump, LATCH_TIMEOUT_SECONDS)
 
         if (!ready) {
             val alive = daemonProcess.isAlive

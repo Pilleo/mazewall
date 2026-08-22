@@ -13,8 +13,8 @@ target_files:
   - "enforcer/src/main/kotlin/io/mazewall/PolicyPresets.kt"
   - "platform/src/main/kotlin/io/mazewall/core/Syscall.kt"
 effort: "medium"
-autonomy: "supervised"
-open_questions: true
+autonomy: "autonomous"
+open_questions: false
 related_pr: 512
 related_thread: 3823789292
 ---
@@ -35,9 +35,13 @@ related_thread: 3823789292
 - Convert **default ALLOW** to USER_NOTIF for every syscall (that poisons JVM coordination; see enforcer AGENTS.md).
 
 **Do:**
-1. Add `Syscall.CREAT` (and any other missing mutation nrs you trap) to `Syscall`/`Arch` **using the add_syscall skill**.
-2. Include `CREAT`, `TRUNCATE`, `FTRUNCATE` in the profiling filter’s explicit ERRNO/NOTIFY set (the profiler preset, not necessarily production `PURE_COMPUTE`).
-3. Alternatively (fail closed): if those nrs are not in the installed profiling filter, `coverage.complete` must be false with a warning that mutation syscalls were not traced.
+1. Add `Syscall.CREAT` (and any other missing mutation nrs you trap) to `Syscall`/`Arch` **using the add_syscall skill** (`x86_64=85`, `aarch64=Arch.UNSUPPORTED`).
+2. Include `CREAT`, `TRUNCATE`, `FTRUNCATE` in `PolicyPresets.PURE_COMPUTE_UNSAFE` (and profiler traps).
+3. If those nrs are not in the installed profiling filter, `coverage.complete` must be false with a warning that mutation syscalls were not traced.
+
+**Design Decisions:**
+1. **Profiler Preset & Production Preset:** `TRUNCATE`, `FTRUNCATE`, and `CREAT` belong in `PolicyPresets.PURE_COMPUTE_UNSAFE` as pure compute lockdown blocks all filesystem mutations.
+2. **Architecture Mapping:** `Syscall.CREAT` is assigned `85` on `x86_64` and `Arch.UNSUPPORTED` (`-1L`) on `aarch64` (where the kernel only provides `openat` with `O_CREAT`). `BpfFilter` automatically filters out `Arch.UNSUPPORTED` numbers when generating architecture-specific BPF jump tables.
 
 **Tests:**
 - Unit: profiling filter action numbers include creat/truncate (or coverage warns they are absent).
@@ -46,7 +50,4 @@ related_thread: 3823789292
 
 **Codex:** https://github.com/Pilleo/mazewall/pull/512#discussion_r3823789292
 
-## ❓ Open Questions
-1. **Profiler Preset vs Production Preset:** Should `CREAT`, `TRUNCATE`, `FTRUNCATE` be added directly into `PolicyPresets.PURE_COMPUTE_UNSAFE` (affecting default `block()` lists), or should we introduce a dedicated `PolicyPresets.PROFILER_SUPERVISED_MUTATIONS` preset specifically for the `USER_NOTIF` profiler session?
-2. **Architecture Support (`CREAT` vs `openat`):** On `aarch64`, `creat(2)` is not implemented as a dedicated syscall (it is routed via `openat(2)` with `O_CREAT`). Should `Syscall.CREAT` be mapped as architecture-conditional (x86_64 only) with aarch64 relying exclusively on `OPENAT`/`OPENAT2` traps, or should `Syscall.CREAT` have a sentinel/noop mapping on aarch64?
 

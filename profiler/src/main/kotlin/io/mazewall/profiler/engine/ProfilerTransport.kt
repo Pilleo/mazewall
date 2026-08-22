@@ -224,6 +224,13 @@ object RealProfilerTransport : ProfilerTransport {
         return io.mazewall.core.RealSocketManager.recvDescriptor(socketFd)
     }
 
+    override fun <R : FileDescriptorRole> recvDescriptor(
+        socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>,
+        role: R,
+    ): FileDescriptor<R, FdState.Open>? {
+        return io.mazewall.core.RealSocketManager.recvDescriptor(socketFd, role)
+    }
+
     override fun poll(
         fds: MemorySegment,
         nfds: Long,

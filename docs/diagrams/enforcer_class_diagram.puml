@@ -419,6 +419,10 @@ class "UnsupportedPlatformException" as io.mazewall.UnsupportedPlatformException
 }
 interface "YamaPtraceScope" as io.mazewall.YamaPtraceScope {
 }
+class "ChildStdoutPump" as io.mazewall.core.ChildStdoutPump {
+  +CountDownLatch getReady()
+  +Thread getThread()
+}
 class "CloneFlags" as io.mazewall.core.CloneFlags {
   +long getValue()
   + {static}String toString-impl(long)
@@ -500,6 +504,25 @@ class "FileDescriptorKt" as io.mazewall.core.FileDescriptorKt {
 }
 interface "FileDescriptorRole" as io.mazewall.core.FileDescriptorRole {
 }
+interface "JavaAgentSelection" as io.mazewall.core.JavaAgentSelection {
+}
+class "JvmChildProcess" as io.mazewall.core.JvmChildProcess {
+  + {static}JvmChildProcess INSTANCE
+  __
+  +List<String> commandLine(JvmChildSpec)
+  +Process start(ProcessLauncher, JvmChildSpec, boolean)
+  +ChildStdoutPump startStdoutPump(Process, String, Function1<? super String, Unit>, String, Function0<Unit>)
+  +boolean awaitReady(ChildStdoutPump, long)
+  +List<String> selectedJavaAgents(JavaAgentSelection)
+}
+class "JvmChildSpec" as io.mazewall.core.JvmChildSpec {
+  +String getMainClass()
+  +List<String> getMainArgs()
+  +String getMaxHeap()
+  +List<String> getExtraJvmArgs()
+  +JavaAgentSelection getJavaAgents()
+  +boolean getEnableNativeAccess()
+}
 class "MemoryAddress" as io.mazewall.core.MemoryAddress {
   +long getValue()
   + {static}long toLong-impl(long)
@@ -564,6 +587,16 @@ abstract class "PrctlCommand" as io.mazewall.core.PrctlCommand {
   + {abstract}NativeArg getArg4()
   + {abstract}NativeArg getArg5()
 }
+class "PrivateUnixEndpoint" as io.mazewall.core.PrivateUnixEndpoint {
+  + {static}Companion Companion
+  + {static}int MAX_SUN_PATH_BYTES
+  __
+  +Path getDir()
+  +String getSocketFileName()
+  +String getPath()
+  +Path socketFile()
+  +void close()
+}
 interface "ProcessLauncher" as io.mazewall.core.ProcessLauncher {
   + {abstract}Process startProcess(List<String>, boolean)
   + {abstract}void addShutdownHook(Thread)
@@ -592,6 +625,7 @@ class "RealSocketManager" as io.mazewall.core.RealSocketManager {
   +FileDescriptor<UnixSocket, Open> connect(String)
   +void close(FileDescriptor<?, ? extends Open>)
   +FileDescriptor<SeccompNotif, Open> recvDescriptor(FileDescriptor<UnixSocket, ? extends Open>)
+  +FileDescriptor<R, Open> recvDescriptor(FileDescriptor<UnixSocket, ? extends Open>, R)
   +boolean sendDescriptor(FileDescriptor<UnixSocket, ? extends Open>, FileDescriptor<?, ? extends Open>)
 }
 class "SandboxedPath" as io.mazewall.core.SandboxedPath {
@@ -624,6 +658,7 @@ interface "SocketManager" as io.mazewall.core.SocketManager {
   + {abstract}FileDescriptor<UnixSocket, Open> connect(String)
   + {abstract}void close(FileDescriptor<?, ? extends Open>)
   + {abstract}FileDescriptor<SeccompNotif, Open> recvDescriptor(FileDescriptor<UnixSocket, ? extends Open>)
+  +FileDescriptor<R, Open> recvDescriptor(FileDescriptor<UnixSocket, ? extends Open>, R)
   + {abstract}boolean sendDescriptor(FileDescriptor<UnixSocket, ? extends Open>, FileDescriptor<?, ? extends Open>)
 }
 interface "SocketPoll" as io.mazewall.core.SocketPoll {
@@ -1439,6 +1474,7 @@ class "SupervisorSocketUtils" as io.mazewall.ffi.networking.SupervisorSocketUtil
   +int connectWithRetry(String, int, long)
   +boolean sendDescriptor(int, int)
   +FileDescriptor<SeccompNotif, Open> recvDescriptor(FileDescriptor<UnixSocket, ? extends Open>)
+  +FileDescriptor<R, Open> recvDescriptor(FileDescriptor<UnixSocket, ? extends Open>, R)
 }
 class "SupervisorValidationChannel" as io.mazewall.ffi.networking.SupervisorValidationChannel {
   +InputStream getInputStream()
@@ -1795,6 +1831,8 @@ io.mazewall.core.FdLifecycle --> io.mazewall.ffi.memory.NativeArena
 io.mazewall.core.FdLifecycle --> io.mazewall.core.FileDescriptorRole
 io.mazewall.core.FileDescriptor <--> io.mazewall.core.FileDescriptor
 io.mazewall.core.FileDescriptor --> io.mazewall.core.FdLifecycle
+io.mazewall.core.JvmChildProcess --> io.mazewall.core.JvmChildProcess
+io.mazewall.core.JvmChildSpec --> io.mazewall.core.JavaAgentSelection
 io.mazewall.core.RealProcessLauncher .u.|> io.mazewall.core.ProcessLauncher
 io.mazewall.core.RealProcessLauncher --> io.mazewall.core.RealProcessLauncher
 io.mazewall.core.RealSocketManager .u.|> io.mazewall.core.SocketManager

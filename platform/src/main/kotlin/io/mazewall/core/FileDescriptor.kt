@@ -41,6 +41,12 @@ public sealed interface FileDescriptorRole {
 
     /** A pidfd from pidfd_open(2). */
     public data object Pid : FileDescriptorRole
+
+    /**
+     * A descriptor granted by a more-privileged process over `SCM_RIGHTS`
+     * (broker → worker). Not a seccomp listener.
+     */
+    public data object Granted : FileDescriptorRole
 }
 
 /**
@@ -254,7 +260,7 @@ public class FileDescriptor<out R : FileDescriptorRole, out S : FdState> interna
         /**
          * Unsafely creates a [FileDescriptor] from a raw integer.
          * Does NOT claim the FD in the epoch - for retired FDs, creates a non-live token.
-         * Prefer the role-specific factories ([generic], [unixSocket], [ruleset], [oPath], [seccompNotif]).
+         * Prefer the role-specific factories ([generic], [unixSocket], [ruleset], [oPath], [seccompNotif], [granted]).
          *
          * WARNING: This method will NOT revive retired file descriptors. For kernel-reused
          * integers from dup/accept/SCM_RIGHTS, use [adopt] or [replace] instead.
@@ -264,8 +270,8 @@ public class FileDescriptor<out R : FileDescriptorRole, out S : FdState> interna
          * @return A type-safe [FileDescriptor] in the [FdState.Open] state.
          */
         @Deprecated(
-            message = "Use role-specific factories (generic, unixSocket, ruleset, oPath, seccompNotif, pid) or adopt() for kernel-reused FDs. " +
-                      "This method creates non-live tokens for retired FDs and should not be used in production code.",
+            message = "Use role-specific factories (generic, unixSocket, ruleset, oPath, seccompNotif, pid, granted) or adopt() for kernel-reused FDs. " +
+                "This method creates non-live tokens for retired FDs and should not be used in production code.",
             level = DeprecationLevel.WARNING
         )
         @Suppress("UNCHECKED_CAST")
@@ -319,6 +325,12 @@ public class FileDescriptor<out R : FileDescriptorRole, out S : FdState> interna
             arena: NativeArena? = null,
         ): FileDescriptor<FileDescriptorRole.Pid, FdState.Open> =
             open(value, arena, FileDescriptorRole.Pid)
+
+        public fun granted(
+            value: Int,
+            arena: NativeArena? = null,
+        ): FileDescriptor<FileDescriptorRole.Granted, FdState.Open> =
+            open(value, arena, FileDescriptorRole.Granted)
 
         /**
          * Adopts a newly allocated kernel fd (open, accept, dup, SCM_RIGHTS).

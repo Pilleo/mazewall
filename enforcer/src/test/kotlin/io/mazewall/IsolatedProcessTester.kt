@@ -6,6 +6,10 @@ import java.io.File
  * Standardized utility for running integration tests in an isolated JVM process.
  * This is required for tests that install irreversible seccomp or Landlock filters,
  * preventing them from "poisoning" the shared Gradle test worker thread/process.
+ *
+ * Do not use [io.mazewall.core.JvmChildProcess] here. Daemon children use a different
+ * argv. Isolated children also drop inherited JAVA_TOOL_OPTIONS so GraalVM JVMCI
+ * is not enabled (C1 mmap PROT_EXEC EPERM / exit 1).
  */
 object IsolatedProcessTester {
     /**
@@ -22,7 +26,9 @@ object IsolatedProcessTester {
 
         val command = mutableListOf(
             javaBin,
-            "-Xmx32m",
+            "-Xmx128m",
+            "-XX:-EnableJVMCI",
+            "-XX:-UseJVMCICompiler",
             "-cp",
             classpath,
             "--enable-native-access=ALL-UNNAMED",
@@ -31,18 +37,21 @@ object IsolatedProcessTester {
         command.addAll(args)
 
         val builder = ProcessBuilder(command)
-        // Redirect error stream to stdout so we can capture everything if needed,
-        // or just inherit it to see it in the logs.
+        // Parent Gradle/Graal workers inject EnableJVMCIProduct via these.
+        // Isolated children inherit them and then crash in C1 mmap(PROT_EXEC).
+        builder.environment().remove("JAVA_TOOL_OPTIONS")
+        builder.environment().remove("_JAVA_OPTIONS")
+        builder.environment().remove("JDK_JAVA_OPTIONS")
         builder.inheritIO()
-
         val process = builder.start()
         val exitCode = process.waitFor()
-
         if (exitCode != 0) {
-            val cmdString = command.joinToString(" ")
-            throw IllegalStateException("Isolated test process failed with exit code $exitCode.\nCommand: $cmdString")
+            throw IllegalStateException(
+                "Isolated test process failed with exit code $exitCode.\nCommand: ${command.joinToString(" ")}",
+            )
         }
     }
+
 
     /**
      * Spawns a new JVM process to instantiate [className] and invoke [methodName] via reflection.
@@ -102,6 +111,7 @@ object IsolatedTestRunner {
                         method.invoke(instance, methodArgs[0])
                     }
                 }
+
                 else -> method.invoke(instance, *methodArgs)
             }
             System.exit(0)

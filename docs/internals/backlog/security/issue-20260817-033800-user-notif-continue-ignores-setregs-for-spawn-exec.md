@@ -12,17 +12,17 @@ target_files:
   - "enforcer/src/main/kotlin/io/mazewall/enforcer/supervisor/SupervisorSessionHandler.kt"
 effort: "large"
 autonomy: "supervised"
-open_questions: true
+open_questions: false
 ---
 
 # 🔴 [Severity: HIGH]: USER_NOTIF CONTINUE may not honor ptrace SETREGS on posix_spawn exec
 
 **Context:**
-The supervisor now opens a validated binary, injects it with `SECCOMP_IOCTL_NOTIF_ADDFD`, and asks the parent JVM to `PTRACE_SETREGS` to `execveat(fd, "", AT_EMPTY_PATH)` before `CONTINUE`. Integration `ProcessBuilder("true")` still fails (`posix_spawn` EPERM/ENOSYS). The daemon cannot ptrace the child (Yama; `PR_SET_PTRACER` is not inherited). The JVM parent can attach, but changing `pt_regs` may not change the registers seccomp will resume for `SECCOMP_USER_NOTIF_FLAG_CONTINUE`.
+The supervisor opens a validated binary, injects it with `SECCOMP_IOCTL_NOTIF_ADDFD`, and asks the parent JVM to `PTRACE_SETREGS` to `execveat(fd, "", AT_EMPTY_PATH)` before `CONTINUE`. Integration `ProcessBuilder("true")` fails (`posix_spawn` EPERM/ENOSYS). The daemon cannot ptrace the child (Yama; `PR_SET_PTRACER` is not inherited). The JVM parent can attach, but changing `pt_regs` does not change the registers seccomp resumes for `SECCOMP_USER_NOTIF_FLAG_CONTINUE`.
 
 **Needed:**
 1. Empirically confirm whether `PTRACE_SETREGS` on a task blocked in `seccomp_unotify` affects the resumed syscall (`orig_rax` / args) on this kernel.
-2. If it does not, do **not** CONTINUE the original execve. Use a kernel-supported replacement (new seccomp addfd/setregs API if one exists) or complete/deny the notification and restart exec from a controlled fd without resuming the original argument set.
+2. If it does not, do **not** CONTINUE the original execve. Use a kernel-supported replacement or complete/deny the notification (fail-closed EPERM) and restart exec from a controlled fd without resuming the original argument set.
 3. Keep fail-closed (EPERM) until that path works. Do not resume a mutable child pathname.
 
 **Empirical notes (August 2026):**
@@ -31,9 +31,12 @@ The supervisor now opens a validated binary, injects it with `SECCOMP_IOCTL_NOTI
 - Staying `PTRACE_ATTACH`ed until after CONTINUE **deadlocked** (`wait4` / helper retry loop of `jspawnhelper`).
 - The parent JVM **can** read the child's pathname (`jspawnhelper`, then `true` once we stop clobbering the buffer). ADDFD of that file works. Resuming a safe exec still needs a kernel-supported register/arg replacement that does not hang.
 
-**Verification:** `ProcessBuilder("true")` under the supervisor exits 0, and a concurrent mutation of the child's pathname buffer cannot change the executed file.
+**Architectural Decision:**
+Dynamic register rewriting via `PTRACE_SETREGS` before `SECCOMP_USER_NOTIF_FLAG_CONTINUE` is fundamentally rejected by the Linux kernel with `ENOSYS` because the kernel dispatches the original trapped syscall. Execution containment must therefore rely on:
+1. **Tier 1 Process-Wide Baseline:** `NO_EXEC` (blocking `execve`/`execveat` entirely via seccomp).
+2. **Landlock LSM Execution Rules:** Landlock ABI v5 `LANDLOCK_ACCESS_FS_EXECUTE` to enforce binary path execution boundaries at the kernel VFS layer without TOCTOU or ptrace interception.
+3. **Fail-Closed:** Supervised execve notifications must respond with `error = -EPERM` when unapproved binaries are executed.
 
-## ❓ Open Questions
-1. **Kernel Syscall Replacement Mechanism:** Since modifying `orig_rax` during a seccomp `USER_NOTIF` pause and issuing `CONTINUE` is rejected by the Linux kernel with `ENOSYS`, should supervised `execve` return `EPERM` fail-closed whenever non-validated binaries are executed, or should execution containment rely on process-wide Tier 1 `NO_EXEC` / Landlock exec restrictions rather than dynamic register redirection?
-2. **Alternative Approaches:** Would Landlock ABI v5 (or Landlock executable rules) or Mount Namespace bind-mounting be the preferred mechanism for exec containment instead of ptrace `SETREGS` interception during `vfork`?
+**Verification:** `ProcessBuilder("true")` under the supervisor fails closed (EPERM), and a concurrent mutation of the child's pathname buffer cannot change the executed file.
+
 

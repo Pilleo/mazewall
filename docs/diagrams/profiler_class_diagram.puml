@@ -342,6 +342,7 @@ class "RealProfilerTransport" as io.mazewall.profiler.engine.RealProfilerTranspo
   +FileDescriptor<UnixSocket, Open> connect(String)
   +boolean sendDescriptor(FileDescriptor<UnixSocket, ? extends Open>, FileDescriptor<?, ? extends Open>)
   +FileDescriptor<SeccompNotif, Open> recvDescriptor(FileDescriptor<UnixSocket, ? extends Open>)
+  +FileDescriptor<R, Open> recvDescriptor(FileDescriptor<UnixSocket, ? extends Open>, R)
   +SyscallResult poll(MemorySegment, long, int)
   +SyscallResult read(FileDescriptor<?, ? extends Open>, MemorySegment, long)
   +SyscallResult write(FileDescriptor<?, ? extends Open>, MemorySegment, long)

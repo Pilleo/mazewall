@@ -171,6 +171,7 @@ Before modifying components, read the relevant design document:
 | Document | Covers |
 |---|---|
 | [designs/enforcer/containment-design.md](docs/internals/designs/enforcer/containment-design.md) | BPF scan loops, argument inspections, Landlock ordering, FFM layouts. |
+| [designs/enforcer/process-portal-design.md](docs/internals/designs/enforcer/process-portal-design.md) | Broker/worker process split, capability FDs, portal codegen. Distinct from the syscall supervisor. |
 | [designs/profiler/profiler-design.md](docs/internals/designs/profiler/profiler-design.md) | USER_NOTIF architecture, socket SCM_RIGHTS, ACK loop protocol. |
 | [designs/core/security-considerations.md](docs/internals/designs/core/security-considerations.md) | Full threat model, ACE escape caveats, K8s custom profiles, Yama scopes. |
 

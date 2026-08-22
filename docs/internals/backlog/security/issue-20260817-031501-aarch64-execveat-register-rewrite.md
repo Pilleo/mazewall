@@ -13,20 +13,20 @@ target_files:
   - "platform/src/main/kotlin/io/mazewall/ffi/NativeConstants.kt"
 effort: "medium"
 autonomy: "supervised"
-open_questions: true
+open_questions: false
 ---
 
 # 🟡 [Severity: MEDIUM]: execveat AT_EMPTY_PATH register rewrite on aarch64
 
 **Context:**
-Secure exec emulation uses `PTRACE_GETREGS`/`SETREGS` and the x86_64 `user_regs_struct`. On aarch64 the supervisor fail-closes every allowed execve. That is correct (no pathname CONTINUE) but it blocks supervised `ProcessBuilder` on arm64 hosts.
+Secure exec emulation on x86_64 evaluated `PTRACE_GETREGS`/`SETREGS`. On aarch64 the supervisor fail-closes every allowed execve. That is correct (no pathname CONTINUE) but blocks supervised `ProcessBuilder` on arm64 hosts.
 
 **Needed:**
-1. Implement `PTRACE_GETREGSET`/`SETREGSET` (`NT_PRSTATUS`) for aarch64 (`x0`–`x8`, `regs[8]` syscall number).
-2. Keep fail-closed if the register rewrite is unavailable.
-3. Cover with a unit test that mocks `ptrace` and asserts `execveat` + `AT_EMPTY_PATH` in the written regset.
+1. Maintain fail-closed (`-EPERM`) behavior for supervised `execve` on both x86_64 and aarch64.
+2. Align with resolution of `issue-20260817-033800`: do not attempt unsound `PTRACE_SETREGSET` rewrites before `CONTINUE` (which the Linux kernel rejects with `ENOSYS`).
+3. Leverage Landlock ABI v5 `LANDLOCK_ACCESS_FS_EXECUTE` and Tier 1 `NO_EXEC` baseline for execution containment on aarch64.
 
-## ❓ Open Questions
-1. **Coupling with Issue 20260817-033800:** Since dynamic register rewriting via `PTRACE_SETREGS` / `SETREGSET` prior to `SECCOMP_USER_NOTIF_FLAG_CONTINUE` is pending kernel confirmation (and triggers `ENOSYS` on x86_64), should aarch64 register rewriting be deferred until the core `USER_NOTIF CONTINUE` syscall replacement protocol is resolved?
-2. **Platform ABI Struct:** Should we add `user_pt_regs` or `elf_gregset_t` layouts for aarch64 directly into `Layouts.kt`?
+**Architectural Decision:**
+Deferred/Superseded by `issue-20260817-033800`. Dynamic register rewriting prior to seccomp `CONTINUE` is rejected by the Linux kernel on all architectures. Safe execution containment relies on Landlock LSM and Tier 1 process-wide baseline filters.
+
 

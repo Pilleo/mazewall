@@ -393,6 +393,7 @@ class ArchitectureTest {
                     val name = input.name
                     return "SandboxDispatcher" !in name &&
                         "SupervisorDaemon" !in name &&
+                        "JvmChildProcess" !in name &&
                         "SeccompDaemonEngine" !in name &&
 
                         "SupervisorSession" !in name &&
@@ -572,17 +573,19 @@ class ArchitectureTest {
                     val ownerName = input.target.owner.name
                     val methodName = input.target.name
                     val isUnsafeCall = (ownerName == "io.mazewall.core.FileDescriptor\$Companion" ||
-                            ownerName == "io.mazewall.core.FileDescriptor") &&
-                           (methodName == "unsafe" || methodName == "unsafe\$default")
-                    
+                        ownerName == "io.mazewall.core.FileDescriptor") &&
+                        (methodName == "unsafe" || methodName == "unsafe\$default")
+
                     // Exclude internal synthetic calls from Companion itself (unsafe$default -> unsafe)
                     val isCompanionInternalCall = input.origin.owner.name == "io.mazewall.core.FileDescriptor\$Companion"
-                    
+
                     return isUnsafeCall && !isCompanionInternalCall
                 }
             })
-            .because("Use role-specific factories (generic, unixSocket, ruleset, oPath, seccompNotif, pid) or adopt() for kernel-reused FDs. " +
-                    "unsafe() creates non-live tokens for retired FDs.")
+            .because(
+                "Use role-specific factories (generic, unixSocket, ruleset, oPath, seccompNotif, pid) or adopt() for kernel-reused FDs. " +
+                    "unsafe() creates non-live tokens for retired FDs."
+            )
             .check(allClasses)
     }
 }

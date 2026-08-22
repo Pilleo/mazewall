@@ -1,7 +1,7 @@
 ---
 title: "GitHub CLI Token Precedence and Environment Authentication Resilience"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "orchestrator"

@@ -11,7 +11,7 @@ target_files:
   - "tools/orchestrator/src/test/kotlin/io/mazewall/orchestrator/BranchRebaserTest.kt"
 effort: "medium"
 autonomy: "autonomous"
-open_questions: true
+open_questions: false
 ---
 
 # 🔶 [Severity: MEDIUM]: Expand BranchRebaser Tests with Real Git Repository Simulation
@@ -29,12 +29,13 @@ The `BranchRebaser` component manages automated branch rebases, self-healing mer
    - Invoke `BranchRebaser.rebaseBranch` or `BranchRebaser.selfHealMerge` and verify that the rebase resolves successfully, conflicts are reported correctly, and rescued backlog files are preserved exactly as expected.
 3. Clean up all temporary files and Git environments after each test run to prevent test state pollution or disk leakage.
 
+**Architectural Decision:**
+1. **Duplicate Consolidation:** Duplicate issue `issue-20260729_153003` has been consolidated into this canonical issue.
+2. **Local Git Execution:** Tests execute the local system `git` binary via `ProcessBuilder` on temporary directories created in the test run. All target CI/CD and developer environments provide `git`.
+
 **Verification/Regression Tests:**
 - Validate that conflict counts and conflicted file lists returned by the rebase match actual files in conflict exactly.
 - Verify that a self-healed branch correctly reverts modifications to disallowed files.
 - Run `./gradlew :tools:orchestrator:test` to guarantee full verification.
 
-## ❓ Open Questions
-1. **Duplicate Issue Consolidation:** This issue duplicates `issue-20260729_153003-git-integration-testing-with-real-git-repos.md`. Should one of the two be marked as resolved/duplicate?
-2. **Local Git Dependency vs JGit:** Should real git integration tests execute the local system `git` binary via `ProcessBuilder` (requiring `git` CLI installed on CI runners), or should they use an embedded JVM Git implementation like JGit?
 

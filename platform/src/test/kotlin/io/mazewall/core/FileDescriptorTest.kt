@@ -185,6 +185,17 @@ class FileDescriptorTest {
     }
 
     @Test
+    fun `granted SCM_RIGHTS adopt is not a seccomp listener role`() {
+        val leftover = FileDescriptor.granted(97)
+        leftover.close()
+        val received = FileDescriptor.adopt(97, FileDescriptorRole.Granted)
+        assertEquals(FileDescriptorRole.Granted, received.role)
+        assertTrue(received.isLiveForIo())
+        assertFalse(leftover.isLiveForIo())
+        received.close()
+    }
+
+    @Test
     fun `adopt of a still-live integer advances generation`() {
         val leftover = FileDescriptor.generic(120)
         assertTrue(leftover.isLiveForIo())
@@ -230,17 +241,17 @@ class FileDescriptorTest {
         val closed1 = fd1.close()
         assertFalse(fd1.isValid)
         assertFalse(closed1.isValid)
-        
+
         // Create a new FD with the same integer - should be a new generation
         val fd2 = FileDescriptor.generic(99)
         assertTrue(fd2.isValid)
         assertNotEquals(fd1, fd2)
-        
+
         // Close the second one
         val closed2 = fd2.close()
         assertFalse(fd2.isValid)
         assertFalse(closed2.isValid)
-        
+
         // The first closed token should still be invalid
         assertFalse(fd1.isValid)
         assertFalse(closed1.isValid)
@@ -287,6 +298,11 @@ class FileDescriptorTest {
                     FileDescriptorRole.Pid,
                     { fd: Int -> FileDescriptor.pid(fd) },
                 ),
+                org.junit.jupiter.params.provider.Arguments.of(
+                    "granted",
+                    FileDescriptorRole.Granted,
+                    { fd: Int -> FileDescriptor.granted(fd) },
+                ),
             )
     }
 
@@ -318,6 +334,7 @@ class FileDescriptorTest {
             FileDescriptorRole.SeccompNotif,
             FileDescriptorRole.UnixSocket,
             FileDescriptorRole.Pid,
+            FileDescriptorRole.Granted,
         )
 
         for (role in roles) {
@@ -328,6 +345,7 @@ class FileDescriptorTest {
                 is FileDescriptorRole.SeccompNotif -> Unit
                 is FileDescriptorRole.UnixSocket -> Unit
                 is FileDescriptorRole.Pid -> Unit
+                is FileDescriptorRole.Granted -> Unit
             }
         }
     }

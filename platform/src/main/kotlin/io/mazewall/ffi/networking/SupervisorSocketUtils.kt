@@ -132,8 +132,14 @@ public object SupervisorSocketUtils {
     }
 
     public fun recvDescriptor(
-        socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>
-    ): FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open>? {
+        socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>,
+    ): FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open>? =
+        recvDescriptor(socketFd, FileDescriptorRole.SeccompNotif)
+
+    public fun <R : FileDescriptorRole> recvDescriptor(
+        socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>,
+        role: R,
+    ): FileDescriptor<R, FdState.Open>? {
         return Arena.ofConfined().use { arena ->
             val dummyByte = arena.allocate(ValueLayout.JAVA_BYTE)
             val controlBuf = arena.allocate(MSG_CONTROL_BUF_SIZE)
@@ -161,7 +167,7 @@ public object SupervisorSocketUtils {
                     val cmsgLevel = cmsg.getCmsgLevel()
                     val cmsgType = cmsg.getCmsgType()
                     if (cmsgLen >= CMSG_RIGHTS_LEN && cmsgLevel == SOL_SOCKET && cmsgType == SCM_RIGHTS) {
-                        return@use FileDescriptor.adopt(cmsg.getDataFd(), FileDescriptorRole.SeccompNotif)
+                        return@use FileDescriptor.adopt(cmsg.getDataFd(), role)
                     }
                 } else {
                     val errno = (res as LinuxNative.SyscallResult.Error).errno
