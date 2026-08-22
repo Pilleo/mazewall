@@ -350,6 +350,7 @@ class "ProcessPolicies" as io.mazewall.ProcessPolicies {
   __
   + {static}Policy<ProcessWideSafe, Uncompiled> denyProcessCreation(RuntimeProfile)
   + {static}Policy<ProcessWideSafe, Uncompiled> denyNetwork(RuntimeProfile)
+  + {static}Policy<ThreadLocalOnly, Uncompiled> workerFilesystem(RuntimeProfile)
 }
 interface "RawSyscallOperations" as io.mazewall.RawSyscallOperations {
   + {abstract}SyscallResult syscall(long, NativeArg, NativeArg, NativeArg, NativeArg, NativeArg, NativeArg)
@@ -513,6 +514,7 @@ class "JvmChildProcess" as io.mazewall.core.JvmChildProcess {
   +Process start(ProcessLauncher, JvmChildSpec, boolean)
   +ChildStdoutPump startStdoutPump(Process, String, Function1<? super String, Unit>, String, Function0<Unit>)
   +boolean awaitReady(ChildStdoutPump, long)
+  +void stripInheritedJvmOptions(Map<String, String>)
   +List<String> selectedJavaAgents(JavaAgentSelection)
 }
 class "JvmChildSpec" as io.mazewall.core.JvmChildSpec {
@@ -522,6 +524,7 @@ class "JvmChildSpec" as io.mazewall.core.JvmChildSpec {
   +List<String> getExtraJvmArgs()
   +JavaAgentSelection getJavaAgents()
   +boolean getEnableNativeAccess()
+  +boolean getDisableJvmci()
 }
 class "MemoryAddress" as io.mazewall.core.MemoryAddress {
   +long getValue()

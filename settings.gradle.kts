@@ -36,6 +36,8 @@ plugins {
 include(":platform")
 include(":enforcer")
 include(":profiler")
+include(":portal")
+include(":portal-codegen")
 include(":demos:cli-demo")
 include(":demos:vulnerable-web-app")
 include(":demos:agent-sandbox-demo")

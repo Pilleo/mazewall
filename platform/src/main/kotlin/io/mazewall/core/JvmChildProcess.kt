@@ -26,6 +26,7 @@ public data class JvmChildSpec(
     val extraJvmArgs: List<String> = emptyList(),
     val javaAgents: JavaAgentSelection = JavaAgentSelection.All,
     val enableNativeAccess: Boolean = true,
+    val disableJvmci: Boolean = true,
 )
 
 @MazewallInternal
@@ -48,6 +49,10 @@ public object JvmChildProcess {
             args.add("--enable-native-access=ALL-UNNAMED")
         }
         args.add("-Xmx" + spec.maxHeap.removePrefix("-Xmx"))
+        if (spec.disableJvmci) {
+            args.add("-XX:-EnableJVMCI")
+            args.add("-XX:-UseJVMCICompiler")
+        }
         args.addAll(selectedJavaAgents(spec.javaAgents))
         args.addAll(spec.extraJvmArgs)
         args.add("-cp")
@@ -100,6 +105,10 @@ public object JvmChildProcess {
         timeoutSeconds: Long,
     ): Boolean = pump.ready.await(timeoutSeconds, TimeUnit.SECONDS)
 
+    public fun stripInheritedJvmOptions(env: MutableMap<String, String>) {
+        INHERITED_JVM_OPTION_KEYS.forEach { env.remove(it) }
+    }
+
     internal fun selectedJavaAgents(selection: JavaAgentSelection): List<String> {
         val jvmArgs =
             java.lang.management.ManagementFactory
@@ -112,4 +121,7 @@ public object JvmChildProcess {
             is JavaAgentSelection.JacocoOnly -> agents.filter { it.contains("jacoco") }
         }
     }
+
+    private val INHERITED_JVM_OPTION_KEYS =
+        listOf("JAVA_TOOL_OPTIONS", "_JAVA_OPTIONS", "JDK_JAVA_OPTIONS")
 }

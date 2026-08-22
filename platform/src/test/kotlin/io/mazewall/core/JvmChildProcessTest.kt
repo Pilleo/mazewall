@@ -23,12 +23,30 @@ class JvmChildProcessTest {
         assertEquals(System.getProperty("java.home") + "/bin/java", cmd[0])
         assertTrue(cmd.contains("--enable-native-access=ALL-UNNAMED"))
         assertTrue(cmd.contains("-Xmx32m"))
+        assertTrue(cmd.contains("-XX:-EnableJVMCI"))
+        assertTrue(cmd.contains("-XX:-UseJVMCICompiler"))
         assertTrue(cmd.contains("-Dfoo=bar"))
         val cpIndex = cmd.indexOf("-cp")
         assertTrue(cpIndex >= 0)
         assertEquals("io.mazewall.ExampleMain", cmd[cpIndex + 2])
         assertEquals("/tmp/sock", cmd.last())
         assertFalse(cmd.any { it.startsWith("-javaagent:") })
+    }
+
+    @Test
+    fun `stripInheritedJvmOptions removes Graal Gradle injectors only`() {
+        val env =
+            mutableMapOf(
+                "JAVA_TOOL_OPTIONS" to "-XX:+EnableJVMCIProduct",
+                "_JAVA_OPTIONS" to "-Xmx8m",
+                "JDK_JAVA_OPTIONS" to "--enable-native-access=ALL-UNNAMED",
+                "PATH" to "/usr/bin",
+            )
+        JvmChildProcess.stripInheritedJvmOptions(env)
+        assertFalse(env.containsKey("JAVA_TOOL_OPTIONS"))
+        assertFalse(env.containsKey("_JAVA_OPTIONS"))
+        assertFalse(env.containsKey("JDK_JAVA_OPTIONS"))
+        assertEquals("/usr/bin", env["PATH"])
     }
 
     @Test

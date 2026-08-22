@@ -37,4 +37,21 @@ public object ProcessPolicies {
             ).block(Syscall.BIND, Syscall.LISTEN, Syscall.ACCEPT, Syscall.ACCEPT4)
             .forRuntime(runtime)
             .build()
+
+    /**
+     * Landlock allowlist of `java.home` and the current JVM classpath entries only.
+     *
+     * Typed [PolicyScope.ThreadLocalOnly] because [Policy.Builder.allowJvmClasspath] is not
+     * process-wide-safe: without Landlock ABI v8 `LANDLOCK_RESTRICT_SELF_TSYNC`, existing
+     * JVM helper threads are not retroactively restricted. Portal workers apply this on the
+     * dispatch thread after Unix connect; later threads inherit the ruleset. Extra readable
+     * paths beyond classpath/`java.home` are deferred.
+     */
+    @JvmStatic
+    public fun workerFilesystem(runtime: RuntimeProfile): Policy<PolicyScope.ThreadLocalOnly, Uncompiled> =
+        Policy
+            .threadLocalBuilder()
+            .allowJvmClasspath()
+            .forRuntime(runtime)
+            .build()
 }

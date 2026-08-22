@@ -13,7 +13,7 @@ keywords: ["process-portal", "broker", "worker", "SCM_RIGHTS", "codegen"]
 
 # Process Portal: Broker/Worker Isolation
 
-> **Status:** Designed. Platform spawn/`SCM_RIGHTS` extract exists. Portal runtime, pool, and KotlinPoet plugin are not implemented.
+> **Status:** Designed. Platform spawn/`SCM_RIGHTS` extract exists. Hand-written `:portal` runtime (`ProcessBroker` pool + Unix RPC + broker→worker FDs) exists. `:portal-codegen` KotlinPoet plugin generates host stubs and worker dispatchers; `Portal.create` fails closed if the stub is missing.
 >
 > This is an **application** portal (Chrome renderer model). It is not the **syscall** supervisor in [supervisor-proxy-design.md](supervisor-proxy-design.md) (`USER_NOTIF` + `SECCOMP_IOCTL_NOTIF_ADDFD`).
 
@@ -47,7 +47,11 @@ app → generated stub
 
 Spawn workers **before** the broker calls `installOnProcess`. Children inherit seccomp; `SupervisorDaemonManager.refuseSpawnIfParentIsFiltered()` already encodes this.
 
-Worker first lines after IPC connect: `ContainedExecutors.installOnProcess(NO_EXEC_HOTSPOT + NO_NETWORK + Landlock)`. `read`/`write` on inherited FDs remain legal; see [security-considerations.md](../core/security-considerations.md).
+Worker first lines after IPC connect:
+1. `ContainedExecutors.installOnProcess(denyProcessCreation + denyNetwork)` (process-wide seccomp).
+2. `ContainedExecutors.installOnCurrentThread(ProcessPolicies.workerFilesystem)` — Landlock allowlist of `java.home` and classpath entries only. `allowJvmClasspath()` is `ThreadLocalOnly` (no ABI v8 TSYNC on existing helper threads). Fail closed if Landlock is unsupported. Extra readable paths are deferred.
+
+`read`/`write` on inherited FDs remain legal; see [security-considerations.md](../core/security-considerations.md).
 
 ## IPC and FDs
 

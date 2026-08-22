@@ -32,6 +32,7 @@ public object RealProcessLauncher : ProcessLauncher {
     override fun startProcess(args: List<String>, redirectErrorStream: Boolean): Process {
         val pb = ProcessBuilder(args)
         pb.redirectErrorStream(redirectErrorStream)
+        JvmChildProcess.stripInheritedJvmOptions(pb.environment())
         return pb.start()
     }
 

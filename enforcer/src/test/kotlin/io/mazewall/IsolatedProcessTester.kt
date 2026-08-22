@@ -39,9 +39,7 @@ object IsolatedProcessTester {
         val builder = ProcessBuilder(command)
         // Parent Gradle/Graal workers inject EnableJVMCIProduct via these.
         // Isolated children inherit them and then crash in C1 mmap(PROT_EXEC).
-        builder.environment().remove("JAVA_TOOL_OPTIONS")
-        builder.environment().remove("_JAVA_OPTIONS")
-        builder.environment().remove("JDK_JAVA_OPTIONS")
+        io.mazewall.core.JvmChildProcess.stripInheritedJvmOptions(builder.environment())
         builder.inheritIO()
         val process = builder.start()
         val exitCode = process.waitFor()

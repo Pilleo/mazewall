@@ -80,7 +80,6 @@ class PolicyTest {
     }
 
 
-
     @Test
     fun `builder base() merges all flags`(@TempDir tempDir: java.nio.file.Path) {
         val rPath = tempDir.resolve("r").toFile().apply { createNewFile() }.absolutePath
@@ -382,6 +381,18 @@ class PolicyTest {
         assertFalse(native.argumentRules.allowExecutableMappings)
         assertFalse(hotspot.isSyscallAllowed(Syscall.CONNECT))
         assertFalse(Policy.NO_NETWORK.argumentRules.allowExecutableMappings)
+    }
+
+    @Test
+    fun `ProcessPolicies workerFilesystem is Landlock classpath plus java home only`() {
+        val hotspot = ProcessPolicies.workerFilesystem(RuntimeProfile.HOTSPOT_JIT)
+        val native = ProcessPolicies.workerFilesystem(RuntimeProfile.NATIVE_IMAGE)
+        val javaHome = System.getProperty("java.home")
+        assertTrue(hotspot.enforceLandlock)
+        assertTrue(hotspot.allowedFsReadPaths.any { it.value == javaHome })
+        assertTrue(hotspot.allowedFsReadPaths.none { it.value == "/etc" || it.value == "/etc/passwd" })
+        assertTrue(hotspot.argumentRules.allowExecutableMappings)
+        assertFalse(native.argumentRules.allowExecutableMappings)
     }
 
     @Test
