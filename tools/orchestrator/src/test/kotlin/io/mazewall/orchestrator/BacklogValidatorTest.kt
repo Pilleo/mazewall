@@ -378,6 +378,88 @@ class BacklogValidatorTest {
     }
 
     @Test
+    fun testOpenQuestionsTrueWithoutSectionFailsValidation() {
+        val file = File(tempDir, "issue-20260726-111111-open-questions-missing-section.md")
+        file.writeText("""
+            ---
+            title: "Missing Questions Section"
+            severity: "HIGH"
+            status: "open"
+            priority: high
+            dependencies: []
+            component: "enforcer"
+            target_modules: [":enforcer"]
+            target_files: ["some/file.kt"]
+            open_questions: true
+            ---
+
+            # 🔴 [Severity: HIGH]: Missing Questions Section
+            **Context:** valid context
+            **Needed:** valid needed
+        """.trimIndent())
+
+        val errors = BacklogValidator.validateBacklog(tempDir)
+        assertFalse(errors.isEmpty(), "open_questions: true without section should fail validation")
+        assertTrue(errors.any { it.contains("Declares 'open_questions: true' in frontmatter but is missing a non-empty '## ❓ Open Questions' section") })
+    }
+
+    @Test
+    fun testOpenQuestionsSectionWithoutFrontmatterDeclarationFailsValidation() {
+        val file = File(tempDir, "issue-20260726-111111-open-questions-missing-frontmatter.md")
+        file.writeText("""
+            ---
+            title: "Missing Frontmatter Flag"
+            severity: "HIGH"
+            status: "open"
+            priority: high
+            dependencies: []
+            component: "enforcer"
+            target_modules: [":enforcer"]
+            target_files: ["some/file.kt"]
+            ---
+
+            # 🔴 [Severity: HIGH]: Missing Frontmatter Flag
+            **Context:** valid context
+            **Needed:** valid needed
+
+            ## ❓ Open Questions
+            1. What is the expected behavior?
+        """.trimIndent())
+
+        val errors = BacklogValidator.validateBacklog(tempDir)
+        assertFalse(errors.isEmpty(), "Open Questions section without frontmatter flag should fail validation")
+        assertTrue(errors.any { it.contains("Contains an 'Open Questions' section in body but frontmatter is missing 'open_questions: true'") })
+    }
+
+    @Test
+    fun testValidOpenQuestionsPassesValidation() {
+        val file = File(tempDir, "issue-20260726-111111-valid-open-questions.md")
+        file.writeText("""
+            ---
+            title: "Valid Open Questions"
+            severity: "HIGH"
+            status: "open"
+            priority: high
+            dependencies: []
+            component: "enforcer"
+            target_modules: [":enforcer"]
+            target_files: ["some/file.kt"]
+            open_questions: true
+            ---
+
+            # 🔴 [Severity: HIGH]: Valid Open Questions
+            **Context:** valid context
+            **Needed:** valid needed
+
+            ## ❓ Open Questions
+            1. What is the expected behavior?
+        """.trimIndent())
+
+        val errors = BacklogValidator.validateBacklog(tempDir)
+        assertTrue(errors.isEmpty(), "Expected no errors for valid open_questions issue, but got: $errors")
+    }
+
+    @Test
     fun testNonExistentBacklogDir() {
         val nonExistent = File(tempDir, "non-existent")
         val errors = BacklogValidator.validateBacklog(nonExistent)

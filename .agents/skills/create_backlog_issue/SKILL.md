@@ -53,19 +53,23 @@ severity: "HIGH" # CRITICAL | HIGH | MEDIUM | LOW | ENHANCEMENT
 status: "open" # open | in_progress | resolved | deferred
 priority: high # high | medium | low (do not use 0–10)
 dependencies: [] # List of dependency issue IDs
-component: "enforcer" # enforcer | profiler | orchestrator | docs | ci
+component: "enforcer" # enforcer | profiler | orchestrator | docs | ci | testing | platform
 target_modules:
   - ":enforcer" # Gradle module paths where code changes will occur
 target_files:
   - "enforcer/src/main/kotlin/io/mazewall/NativeEngine.kt" # Target files to edit
 effort: "medium" # small | medium | large | huge
 autonomy: "supervised" # autonomous | supervised
+open_questions: false # Set to true if pending design/operator feedback
 ---
 
 # 🔴 [Severity: HIGH]: Title of Issue
 
 **Context:** [Detailed description of the bug, security finding, or feature requirement, explaining why it exists and what current behavior is.]
 **Needed:** [Concrete, step-by-step technical requirements for the solution.]
+
+## ❓ Open Questions
+1. [Clarifying design questions, architectural options, or operator trade-offs (required when open_questions: true).]
 ```
 
 ### 4. Target Module & File Declarations for Multi-Task Parallel Scheduling

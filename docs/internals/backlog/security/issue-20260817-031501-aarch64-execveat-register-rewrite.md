@@ -13,6 +13,7 @@ target_files:
   - "platform/src/main/kotlin/io/mazewall/ffi/NativeConstants.kt"
 effort: "medium"
 autonomy: "supervised"
+open_questions: true
 ---
 
 # 🟡 [Severity: MEDIUM]: execveat AT_EMPTY_PATH register rewrite on aarch64
@@ -24,3 +25,8 @@ Secure exec emulation uses `PTRACE_GETREGS`/`SETREGS` and the x86_64 `user_regs_
 1. Implement `PTRACE_GETREGSET`/`SETREGSET` (`NT_PRSTATUS`) for aarch64 (`x0`–`x8`, `regs[8]` syscall number).
 2. Keep fail-closed if the register rewrite is unavailable.
 3. Cover with a unit test that mocks `ptrace` and asserts `execveat` + `AT_EMPTY_PATH` in the written regset.
+
+## ❓ Open Questions
+1. **Coupling with Issue 20260817-033800:** Since dynamic register rewriting via `PTRACE_SETREGS` / `SETREGSET` prior to `SECCOMP_USER_NOTIF_FLAG_CONTINUE` is pending kernel confirmation (and triggers `ENOSYS` on x86_64), should aarch64 register rewriting be deferred until the core `USER_NOTIF CONTINUE` syscall replacement protocol is resolved?
+2. **Platform ABI Struct:** Should we add `user_pt_regs` or `elf_gregset_t` layouts for aarch64 directly into `Layouts.kt`?
+

@@ -14,6 +14,7 @@ target_files:
   - "platform/src/main/kotlin/io/mazewall/core/Syscall.kt"
 effort: "medium"
 autonomy: "supervised"
+open_questions: true
 related_pr: 512
 related_thread: 3823789292
 ---
@@ -44,3 +45,8 @@ related_thread: 3823789292
 - Do not install USER_NOTIF on the JUnit worker without `@NeedsFreshJvm`.
 
 **Codex:** https://github.com/Pilleo/mazewall/pull/512#discussion_r3823789292
+
+## ❓ Open Questions
+1. **Profiler Preset vs Production Preset:** Should `CREAT`, `TRUNCATE`, `FTRUNCATE` be added directly into `PolicyPresets.PURE_COMPUTE_UNSAFE` (affecting default `block()` lists), or should we introduce a dedicated `PolicyPresets.PROFILER_SUPERVISED_MUTATIONS` preset specifically for the `USER_NOTIF` profiler session?
+2. **Architecture Support (`CREAT` vs `openat`):** On `aarch64`, `creat(2)` is not implemented as a dedicated syscall (it is routed via `openat(2)` with `O_CREAT`). Should `Syscall.CREAT` be mapped as architecture-conditional (x86_64 only) with aarch64 relying exclusively on `OPENAT`/`OPENAT2` traps, or should `Syscall.CREAT` have a sentinel/noop mapping on aarch64?
+

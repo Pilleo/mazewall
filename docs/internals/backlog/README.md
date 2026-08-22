@@ -26,11 +26,18 @@ title: "Title of Issue"
 severity: "HIGH/MEDIUM/LOW/CRITICAL/ENHANCEMENT"
 status: "open"
 priority: high
+component: "enforcer"
+target_modules: [":enforcer"]
+target_files: ["enforcer/src/main/kotlin/io/mazewall/SomeFile.kt"]
+open_questions: false # Set to true if pending design/operator feedback
 ---
 
 # 🔴 [Severity: HIGH]: Title of Issue
 **Context:** ...
 **Needed:** ...
+
+## ❓ Open Questions
+1. [Clarifying design questions, architectural options, or operator trade-offs (required when open_questions: true).]
 ```
 
 Once the file is saved, run `./gradlew check` or `./gradlew build` to verify the backlog issue formatting.

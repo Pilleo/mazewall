@@ -33,11 +33,19 @@ Whenever you discover a bug, architectural gap, kernel-level nuance, or security
 title: "Title of Issue"
 severity: "HIGH/MEDIUM/LOW/CRITICAL/ENHANCEMENT"
 status: "open"
+priority: high
+component: "enforcer"
+target_modules: [":enforcer"]
+target_files: ["enforcer/src/main/kotlin/io/mazewall/SomeFile.kt"]
+open_questions: false # Set to true if pending design/operator feedback
 ---
 
 # 🔴 [Severity: HIGH]: Title of Issue
 **Context:** [What you found and why it exists]
 **Needed:** [How to fix or prevent it]
+
+## ❓ Open Questions
+1. [Clarifying design questions, architectural options, or operator trade-offs (required when open_questions: true).]
 ```
 
 ---

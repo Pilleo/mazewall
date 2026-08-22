@@ -11,6 +11,7 @@ target_files:
   - "profiler/src/main/kotlin/io/mazewall/profiler/engine/ProfilerSessionHandler.kt"
 effort: "large"
 autonomy: "supervised"
+open_questions: true
 ---
 
 # 🔴 [Severity: HIGH]: Eliminate potential TOCTOU on pointer-based argument resolution inside ProfilerSessionHandler
@@ -29,3 +30,8 @@ While `enforcer`'s production containment uses secure FD injection for approved 
 2. Ensure that memory reading and path verification operate under rigid process liveness invariants.
 3. If a pointer-based argument is resolved, enforce that the exact same string bytes/struct contents are locked or verified, or transition the profiler to emulate operations via secure FD injection/emulation rather than continuing with native pointer paths where feasible.
 4. Document the exact threat model and safe boundaries of pointer-based argument resolution in `docs/internals/designs/profiler/profiler-design.md` to guide developers.
+
+## ❓ Open Questions
+1. **Diagnostic Profiling vs Adversarial Workloads:** Is profiling intended strictly for trusted workloads under developer diagnostic observation, or must the profiler also withstand adversarial concurrency probes during profiling sessions?
+2. **FD Injection in Profiling Mode:** For `open`/`openat` syscalls during profiling, should the profiler daemon inject an opened file descriptor via `SECCOMP_IOCTL_NOTIF_ADDFD` and return `res.setVal(fd)` (eliminating TOCTOU on pointer path buffers completely), or continue relying on `SECCOMP_USER_NOTIF_FLAG_CONTINUE` to allow the kernel to execute the original open syscall?
+

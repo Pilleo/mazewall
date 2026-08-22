@@ -16,7 +16,9 @@ data class BacklogIssue(
     val context: String? = null,
     val needed: String? = null,
     val targetFiles: List<String> = emptyList(),
-    val targetModules: List<String> = emptyList()
+    val targetModules: List<String> = emptyList(),
+    val openQuestions: String? = null,
+    val hasOpenQuestions: Boolean = false
 ) {
     fun isNonInterfering(): Boolean {
         return component == "docs" || component == "ci" || id.contains("review-task")
@@ -76,10 +78,15 @@ object BacklogParser {
             val body = content.substringAfter("---", "").substringAfter("---", "").trim()
             val context = extractSection(body, "Context")
             val needed = extractSection(body, "Needed")
+            val openQuestions = extractSection(body, "Open Questions") ?: extractSection(body, "❓ Open Questions")
+            val openQuestionsFrontmatter = frontmatter["open_questions"]?.removeSurrounding("\"")?.removeSurrounding("'")
+            val hasOpenQuestions = (openQuestionsFrontmatter?.equals("true", ignoreCase = true) == true) ||
+                (!openQuestions.isNullOrBlank())
 
             return BacklogIssue(
                 file, id, title, priority, status, dependencies, githubIssue,
-                severity, component, effort, context, needed, targetFiles, targetModules
+                severity, component, effort, context, needed, targetFiles, targetModules,
+                openQuestions, hasOpenQuestions
             )
         } catch (e: Exception) {
             System.err.println("Error parsing issue file ${file.name}: ${e.message}")
@@ -180,7 +187,16 @@ object BacklogParser {
     }
 
     private fun extractSection(body: String, sectionName: String): String? {
-        val markers = listOf("**$sectionName:**", "**$sectionName**:", "### $sectionName", "## $sectionName")
+        val markers = listOf(
+            "**$sectionName:**",
+            "**$sectionName**:",
+            "### $sectionName",
+            "## $sectionName",
+            "## ❓ $sectionName",
+            "### ❓ $sectionName",
+            "**❓ $sectionName:**",
+            "**❓ $sectionName**:"
+        )
         var startIndex = -1
         for (marker in markers) {
             startIndex = body.indexOf(marker, ignoreCase = true)

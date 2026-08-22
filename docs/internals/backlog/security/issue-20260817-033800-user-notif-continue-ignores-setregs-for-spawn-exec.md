@@ -12,6 +12,7 @@ target_files:
   - "enforcer/src/main/kotlin/io/mazewall/enforcer/supervisor/SupervisorSessionHandler.kt"
 effort: "large"
 autonomy: "supervised"
+open_questions: true
 ---
 
 # 🔴 [Severity: HIGH]: USER_NOTIF CONTINUE may not honor ptrace SETREGS on posix_spawn exec
@@ -31,3 +32,8 @@ The supervisor now opens a validated binary, injects it with `SECCOMP_IOCTL_NOTI
 - The parent JVM **can** read the child's pathname (`jspawnhelper`, then `true` once we stop clobbering the buffer). ADDFD of that file works. Resuming a safe exec still needs a kernel-supported register/arg replacement that does not hang.
 
 **Verification:** `ProcessBuilder("true")` under the supervisor exits 0, and a concurrent mutation of the child's pathname buffer cannot change the executed file.
+
+## ❓ Open Questions
+1. **Kernel Syscall Replacement Mechanism:** Since modifying `orig_rax` during a seccomp `USER_NOTIF` pause and issuing `CONTINUE` is rejected by the Linux kernel with `ENOSYS`, should supervised `execve` return `EPERM` fail-closed whenever non-validated binaries are executed, or should execution containment rely on process-wide Tier 1 `NO_EXEC` / Landlock exec restrictions rather than dynamic register redirection?
+2. **Alternative Approaches:** Would Landlock ABI v5 (or Landlock executable rules) or Mount Namespace bind-mounting be the preferred mechanism for exec containment instead of ptrace `SETREGS` interception during `vfork`?
+
