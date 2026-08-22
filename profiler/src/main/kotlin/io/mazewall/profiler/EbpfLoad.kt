@@ -52,12 +52,14 @@ public object EbpfCapability {
     }
 
     internal fun parseInitUserNamespace(uidMapText: String): Boolean {
-        val parts = uidMapText.trim().split(Regex("\\s+"))
+        val lines = uidMapText.trim().lines().filter { it.isNotBlank() }
+        if (lines.isEmpty()) return false
+        val parts = lines[0].trim().split(Regex("\\s+"))
         if (parts.size < 3) return false
         val inside = parts[0].toLongOrNull() ?: return false
         val outside = parts[1].toLongOrNull() ?: return false
         val length = parts[2].toLongOrNull() ?: return false
-        return inside == 0L && outside == 0L && length >= 1L
+        return inside == 0L && outside == 0L && length >= 4294967295L
     }
 
     internal fun hasCap(capEff: Long, cap: Int): Boolean = (capEff ushr cap) and 1L == 1L
@@ -69,10 +71,20 @@ public object EbpfCapability {
     }
 
     private fun sameNamespace(selfNs: Path, initNs: Path, uidMap: Path): Boolean {
+        val fromUidMap = runCatching {
+            if (Files.exists(uidMap)) {
+                parseInitUserNamespace(Files.readString(uidMap))
+            } else {
+                null
+            }
+        }.getOrNull()
+
+        if (fromUidMap != null) {
+            return fromUidMap
+        }
+
         return runCatching {
             Files.isSameFile(selfNs, initNs)
-        }.getOrElse {
-            runCatching { parseInitUserNamespace(Files.readString(uidMap)) }.getOrDefault(false)
-        }
+        }.getOrDefault(false)
     }
 }

@@ -1,7 +1,7 @@
 ---
 title: "Strace parser should mark discarded records as dropped to prevent false complete coverage"
 severity: "LOW"
-status: "open"
+status: "resolved"
 priority: low
 dependencies: []
 component: "profiler"

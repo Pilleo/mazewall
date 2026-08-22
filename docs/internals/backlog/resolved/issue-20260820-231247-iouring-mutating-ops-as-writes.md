@@ -1,7 +1,7 @@
 ---
 title: "Classify mutating io_uring operations as writes"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: medium
 component: "profiler"
 dependencies: []

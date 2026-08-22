@@ -1,7 +1,7 @@
 ---
 title: "Preserve requested close-on-exec state on injected FDs"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: medium
 component: "enforcer"
 dependencies: []

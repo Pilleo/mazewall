@@ -1,7 +1,7 @@
 ---
 title: "Wait for the event consumer before certifying the drain"
 severity: "HIGH"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "profiler"

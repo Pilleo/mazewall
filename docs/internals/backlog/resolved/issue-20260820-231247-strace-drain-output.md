@@ -1,7 +1,7 @@
 ---
 title: "Drain child output while waiting for strace"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: medium
 component: "profiler"
 dependencies: []

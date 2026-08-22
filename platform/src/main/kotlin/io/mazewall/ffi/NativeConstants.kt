@@ -78,6 +78,7 @@ object NativeConstants {
     const val ENOPKG = 65
     const val EOPNOTSUPP = 95
     const val ENOSYS = 38
+    const val EFAULT = 14
     const val ETIMEDOUT = 110
 
     // File options

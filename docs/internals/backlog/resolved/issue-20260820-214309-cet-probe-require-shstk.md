@@ -1,7 +1,7 @@
 ---
 title: "Require shadow-stack support for the CET probe"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "enforcer"

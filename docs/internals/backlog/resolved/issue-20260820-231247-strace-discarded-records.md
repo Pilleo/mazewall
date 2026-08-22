@@ -1,7 +1,7 @@
 ---
 title: "Mark discarded strace records as dropped"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: medium
 component: "profiler"
 dependencies: []

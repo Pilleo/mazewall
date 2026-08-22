@@ -356,11 +356,16 @@ class ProfilerSessionApiTest {
 
     @Test
     fun `EBPF strategy fails closed even when capabilities look available`() {
+        var workloadEntered = false
         MazewallProfiler.open(ProfileOptions(strategy = ProfileStrategy.EBPF)).use { session ->
             val ex = assertFailsWith<IncompleteProfileException> {
-                session.profile { "nope" }
+                session.profile {
+                    workloadEntered = true
+                    "nope"
+                }
             }
             assertEquals(ProfileStrategy.EBPF, ex.coverage.strategy)
+            assertFalse(workloadEntered, "Workload must NOT be entered if collector fails to start")
         }
     }
 

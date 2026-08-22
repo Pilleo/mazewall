@@ -32,9 +32,9 @@ class LinuxNativeCoverageTest {
 
     @Test
     fun `test FileDescriptor methods`() {
-        val fd1 = FileDescriptor.unsafe<FileDescriptorRole.Generic>(10)
-        val fd2 = FileDescriptor.unsafe<FileDescriptorRole.Generic>(10)
-        val fd3 = FileDescriptor.unsafe<FileDescriptorRole.Generic>(-1)
+        val fd1 = FileDescriptor.generic(10)
+        val fd2 = FileDescriptor.generic(10)
+        val fd3 = FileDescriptor.generic(-1)
 
         assertEquals(fd1, fd2)
         assertNotEquals(fd1, fd3)

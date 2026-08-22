@@ -1,7 +1,7 @@
 ---
 title: "ArchUnit: ban kotlinx.coroutines on enforcer supervisor/seccomp/landlock/state"
 severity: "HIGH"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "enforcer"

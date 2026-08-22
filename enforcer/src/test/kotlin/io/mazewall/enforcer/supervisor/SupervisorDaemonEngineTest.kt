@@ -41,8 +41,8 @@ class SupervisorDaemonEngineTest {
         }
 
         val engine = SupervisorDaemonEngine("/tmp/test.sock", engine = mockEngine)
-        val socketFd = FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(10)
-        val listenerFd = FileDescriptor.unsafe<FileDescriptorRole.SeccompNotif>(11)
+        val socketFd = FileDescriptor.unixSocket(10)
+        val listenerFd = FileDescriptor.seccompNotif(11)
         val connection = io.mazewall.ffi.networking.SeccompConnection.FdAttached(socketFd, listenerFd)
 
         io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->

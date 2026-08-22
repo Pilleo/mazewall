@@ -39,12 +39,42 @@ public object StraceLogParser {
         "SYMLINKAT", "LINKAT", "RENAMEAT", "RENAMEAT2"
     )
 
+    public data class StraceParseResult(
+        val observations: List<ProfileObservation>,
+        val droppedRecords: Int,
+    )
+
+    public fun parseWithStats(log: String): StraceParseResult {
+        val observations = mutableListOf<ProfileObservation>()
+        var dropped = 0
+        for (line in log.lineSequence()) {
+            val cleaned = line.trim()
+            if (cleaned.isEmpty() || cleaned.startsWith("+++") || cleaned.startsWith("---")) {
+                continue
+            }
+            if (cleaned.contains("<unfinished") || cleaned.contains("resumed>")) {
+                dropped++
+                continue
+            }
+            val obs = parseLine(cleaned)
+            if (obs != null) {
+                observations.add(obs)
+            } else {
+                if (cleaned.contains("(") || cleaned.contains(")")) {
+                    dropped++
+                }
+            }
+        }
+        return StraceParseResult(observations, dropped)
+    }
+
     public fun parse(log: String): List<ProfileObservation> =
-        log.lineSequence().mapNotNull { parseLine(it) }.toList()
+        parseWithStats(log).observations
 
     public fun parseLine(line: String): ProfileObservation? {
         val cleaned = line.trim()
         if (cleaned.isEmpty() || cleaned.startsWith("+++") || cleaned.startsWith("---")) return null
+        if (cleaned.contains("<unfinished") || cleaned.contains("resumed>")) return null
 
         val beforeParen = cleaned.substringBefore("(", "")
         if (beforeParen.isEmpty()) return null

@@ -1,7 +1,7 @@
 ---
 title: "Extract only syscall pathname operands from strace"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: medium
 component: "profiler"
 dependencies: []

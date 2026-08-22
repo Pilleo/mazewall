@@ -1,7 +1,7 @@
 ---
 title: "Preserve portless IPv6 endpoints during JSON round trips"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: medium
 component: "profiler"
 dependencies: []

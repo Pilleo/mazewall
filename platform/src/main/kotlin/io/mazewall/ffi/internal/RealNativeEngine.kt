@@ -5,7 +5,6 @@ import io.mazewall.*
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.claimDupIfNeeded
-import io.mazewall.core.ebadfIfRetiredPollfds
 import io.mazewall.core.ebadfUnlessDirfd
 import io.mazewall.core.ebadfUnlessLive
 import io.mazewall.core.ebadfUnlessMmapBacking
@@ -165,7 +164,6 @@ public object RealNativeEngine : NativeEngine, RawSyscallOperations {
         nfds: Long,
         timeout: Int,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
-        ebadfIfRetiredPollfds(fds, nfds)?.let { return it }
         return SyscallInvoker.poll(POLL, fds.native, nfds, timeout)
     }
 }
@@ -174,7 +172,7 @@ internal object RealNativeFileSystem : NativeFileSystem {
     private val OPEN: MethodHandle =
         RealNativeHelper.downcall(
             "open",
-            FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.ADDRESS, ValueLayout.JAVA_INT),
+            FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.ADDRESS, ValueLayout.JAVA_INT, ValueLayout.JAVA_INT),
             Linker.Option.captureCallState("errno"),
         )
     private val CLOSE: MethodHandle =
@@ -212,24 +210,45 @@ internal object RealNativeFileSystem : NativeFileSystem {
     private val OPENAT: MethodHandle =
         RealNativeHelper.downcall(
             "openat",
-            FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.JAVA_INT, ValueLayout.ADDRESS, ValueLayout.JAVA_INT),
+            FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.JAVA_INT, ValueLayout.ADDRESS, ValueLayout.JAVA_INT, ValueLayout.JAVA_INT),
             Linker.Option.captureCallState("errno"),
         )
 
     override fun open(
         path: ManagedSegment,
         flags: io.mazewall.core.OpenFlags,
+        mode: Int,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
-        return SyscallInvoker.open(OPEN, path.native, flags.value)
+        return SyscallInvoker.open(OPEN, path.native, flags.value, mode)
     }
 
     override fun openat(
         dirfd: FileDescriptor<*, FdState.Open>,
         path: ManagedSegment,
         flags: io.mazewall.core.OpenFlags,
+        mode: Int,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
         dirfd.ebadfUnlessDirfd()?.let { return it }
-        return SyscallInvoker.openat(OPENAT, dirfd.value, path.native, flags.value)
+        return SyscallInvoker.openat(OPENAT, dirfd.value, path.native, flags.value, mode)
+    }
+
+    override fun openat2(
+        dirfd: FileDescriptor<*, FdState.Open>,
+        path: ManagedSegment,
+        how: ManagedSegment,
+        size: Long,
+    ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+        dirfd.ebadfUnlessDirfd()?.let { return it }
+        val nr = io.mazewall.core.Arch.current().openat2.toLong()
+        return RealNativeEngine.syscall(
+            nr,
+            io.mazewall.core.NativeArg.LongArg(dirfd.value.toLong()),
+            io.mazewall.core.NativeArg.LongArg(path.address()),
+            io.mazewall.core.NativeArg.LongArg(how.address()),
+            io.mazewall.core.NativeArg.LongArg(size),
+            io.mazewall.core.NativeArg.LongArg(0L),
+            io.mazewall.core.NativeArg.LongArg(0L),
+        )
     }
 
     override fun mmap(

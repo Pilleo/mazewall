@@ -1,7 +1,7 @@
 ---
 title: "Forward creation mode when emulating open calls"
 severity: "HIGH"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "enforcer"

@@ -47,8 +47,16 @@ public class MazewallProfiler private constructor(
     }
 
     private fun <T> profileEbpfOnly(block: () -> T): ProfilingResult<T> {
-        val value = block()
-        val drain = drainEbpf(liveIfMissing = true)
+        val collector = EbpfCollector(
+            load = environment.ebpfLoad,
+            recordedLog = options.ebpfEventLog,
+            liveAttach = options.ebpfEventLog == null,
+        )
+        collector.start()
+        val (value, drain) = collector.use { c ->
+            val v = block()
+            v to c.drain()
+        }
         val bob = BobCompiler.compileObservations(drain.observations)
         val coverage = ProfilingCoverage.infer(
             strategy = ProfileStrategy.EBPF,

@@ -31,13 +31,19 @@ internal class StraceCollector(
 
     override fun drain(): CollectorDrain {
         val text = checkNotNull(logText) { "StraceCollector.start() was not called" }
-        val observations = StraceLogParser.parse(text)
+        val parseResult = StraceLogParser.parseWithStats(text)
+        val observations = parseResult.observations
         val ioUring = if (observations.any { hasUring(it) }) {
             IoUringVisibility.BLIND
         } else {
             IoUringVisibility.UNSEEN
         }
-        return CollectorDrain(observations, droppedEvents = 0, drainComplete = true, ioUring = ioUring)
+        return CollectorDrain(
+            observations = observations,
+            droppedEvents = parseResult.droppedRecords,
+            drainComplete = true,
+            ioUring = ioUring,
+        )
     }
 
     override fun close() {
@@ -65,10 +71,21 @@ internal class StraceCollector(
                 workloadClass.name,
             )
             val process = ProcessBuilder(cmd).start()
-            val exitCode = process.waitFor()
+            val outFuture = java.util.concurrent.CompletableFuture.supplyAsync {
+                process.inputStream.bufferedReader().readText()
+            }
+            val errFuture = java.util.concurrent.CompletableFuture.supplyAsync {
+                process.errorStream.bufferedReader().readText()
+            }
+            val finished = process.waitFor(60, java.util.concurrent.TimeUnit.SECONDS)
+            if (!finished) {
+                process.destroyForcibly()
+                throw IllegalStateException("Child strace process timed out after 60s")
+            }
+            val exitCode = process.exitValue()
+            val outText = outFuture.get(5, java.util.concurrent.TimeUnit.SECONDS)
+            val errText = errFuture.get(5, java.util.concurrent.TimeUnit.SECONDS)
             if (exitCode != 0) {
-                val errText = process.errorStream.bufferedReader().readText()
-                val outText = process.inputStream.bufferedReader().readText()
                 throw IllegalStateException(
                     "Child JVM failed with exit code $exitCode. Stdout: $outText, Stderr: $errText",
                 )

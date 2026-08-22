@@ -176,16 +176,26 @@ public class Policy<out S : PolicyScope, out State : PolicyState> internal const
          * Does not expand permissions already installed in the kernel.
          */
         @JvmStatic
-        public fun restrictFurtherWith(
-            vararg policies: Policy<PolicyScope.ProcessWideSafe, Uncompiled>,
-        ): Policy<PolicyScope.ProcessWideSafe, Uncompiled> = combine(*policies)
+        public fun <S : PolicyScope> restrictFurtherWith(
+            vararg policies: Policy<out S, Uncompiled>,
+        ): Policy<S, Uncompiled> {
+            val defs = policies.map { it.definition }.toTypedArray()
+            return Policy(PolicyDefinition.combine(*defs))
+        }
 
         @JvmStatic
         @JvmOverloads
         public fun denyList(
             runtime: RuntimeProfile = RuntimeProfile.HOTSPOT_JIT,
             configure: DenyListSpec.() -> Unit = {},
-        ): Policy<PolicyScope.ProcessWideSafe, Uncompiled> = PolicyLists.denyList(runtime, configure)
+        ): Policy<out PolicyScope, Uncompiled> = PolicyLists.denyList(runtime, configure)
+
+        @JvmStatic
+        @JvmOverloads
+        public fun threadLocalDenyList(
+            runtime: RuntimeProfile = RuntimeProfile.HOTSPOT_JIT,
+            configure: DenyListSpec.() -> Unit = {},
+        ): Policy<PolicyScope.ThreadLocalOnly, Uncompiled> = PolicyLists.threadLocalDenyList(runtime, configure)
 
         @JvmStatic
         @JvmOverloads
@@ -344,9 +354,9 @@ public operator fun Policy<PolicyScope.ProcessWideSafe, Uncompiled>.plus(
 ): Policy<PolicyScope.ProcessWideSafe, Uncompiled> = Policy.restrictFurtherWith(this, other)
 
 /** Restrictive composition; same as [Policy.restrictFurtherWith]. */
-public fun Policy<PolicyScope.ProcessWideSafe, Uncompiled>.restrictFurtherWith(
-    other: Policy<PolicyScope.ProcessWideSafe, Uncompiled>,
-): Policy<PolicyScope.ProcessWideSafe, Uncompiled> = Policy.restrictFurtherWith(this, other)
+public fun <S : PolicyScope> Policy<S, Uncompiled>.restrictFurtherWith(
+    other: Policy<out S, Uncompiled>,
+): Policy<S, Uncompiled> = Policy.restrictFurtherWith(this, other)
 
 /**
  * Composes a policy with a thread-local policy.

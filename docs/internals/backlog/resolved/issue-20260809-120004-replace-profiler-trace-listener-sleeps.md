@@ -1,7 +1,7 @@
 ---
 title: "Replace timing sleeps in ProfilerTraceListenerTest with deterministic synchronization"
 severity: "LOW"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "profiler"

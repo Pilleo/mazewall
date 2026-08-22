@@ -1,7 +1,7 @@
 ---
 title: "Check the platform before probing Linux kernel features"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: medium
 component: "enforcer"
 dependencies: []

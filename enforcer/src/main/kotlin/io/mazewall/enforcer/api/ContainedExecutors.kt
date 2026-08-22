@@ -248,7 +248,14 @@ object ContainedExecutors {
                         installed = false,
                     )
                 }
-                LandlockStep.UNCHANGED -> {}
+                LandlockStep.UNCHANGED -> {
+                    val activeState = if (processWide) {
+                        ContainmentStateRegistry.processState
+                    } else {
+                        ContainmentStateRegistry.threadState
+                    }
+                    landlockSuccessfullyApplied = activeState.landlockPolicy != null
+                }
             }
 
             return installSeccompFilter(processWide, augmentedPolicy, scopingPolicy, landlockSuccessfullyApplied)

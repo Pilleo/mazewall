@@ -1,7 +1,7 @@
 ---
 title: "Do not use container PID 1 to identify the initial user namespace"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "profiler"

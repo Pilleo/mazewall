@@ -1,7 +1,7 @@
 ---
 title: "Decode openat2's open_how before injecting the descriptor"
 severity: "HIGH"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "enforcer"

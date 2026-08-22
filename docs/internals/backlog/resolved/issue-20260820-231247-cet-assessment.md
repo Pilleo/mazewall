@@ -1,7 +1,7 @@
 ---
 title: "Include Intel CET support in installation assessment"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: medium
 component: "enforcer"
 dependencies: []

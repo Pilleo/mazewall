@@ -1,7 +1,7 @@
 ---
 title: "Start the eBPF collector before invoking the workload"
 severity: "HIGH"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "profiler"

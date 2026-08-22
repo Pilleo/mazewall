@@ -1,7 +1,7 @@
 ---
 title: "Do not reject reused live descriptors during poll"
 severity: "LOW"
-status: "open"
+status: "resolved"
 priority: low
 dependencies: []
 component: "platform"

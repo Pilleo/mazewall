@@ -331,4 +331,42 @@ val policy = Policy.builder()
         assertFalse(policy.allowedFsReadPaths.any { it.value == "/secret/open-path" })
         assertTrue(policy.allowedFsReadPaths.any { it.value == "/readable/path" })
     }
+
+    @Test
+    fun `test mutating io_uring operations are classified as fsWritePaths`() {
+        val corr = io.mazewall.profiler.ObservationCorrelation(tgid = 1, tid = io.mazewall.core.Tid(1))
+        val observations = listOf(
+            io.mazewall.profiler.ProfileObservation.IoUring(
+                correlation = corr,
+                source = io.mazewall.profiler.ObservationSource.EBPF,
+                opcode = "IORING_OP_WRITE",
+                paths = listOf("/tmp/mutated.txt"),
+            ),
+            io.mazewall.profiler.ProfileObservation.IoUring(
+                correlation = corr,
+                source = io.mazewall.profiler.ObservationSource.EBPF,
+                opcode = "IORING_OP_UNLINKAT",
+                paths = listOf("/tmp/deleted.txt"),
+            ),
+            io.mazewall.profiler.ProfileObservation.IoUring(
+                correlation = corr,
+                source = io.mazewall.profiler.ObservationSource.EBPF,
+                opcode = "IORING_OP_RENAMEAT",
+                paths = listOf("/tmp/renamed.txt"),
+            ),
+            io.mazewall.profiler.ProfileObservation.IoUring(
+                correlation = corr,
+                source = io.mazewall.profiler.ObservationSource.EBPF,
+                opcode = "IORING_OP_OPENAT",
+                paths = listOf("/tmp/opened.txt"),
+            ),
+        )
+
+        val bob = BobCompiler.compileObservations(observations)
+        assertTrue(bob.fsWritePaths.contains("/tmp/mutated.txt"))
+        assertTrue(bob.fsWritePaths.contains("/tmp/deleted.txt"))
+        assertTrue(bob.fsWritePaths.contains("/tmp/renamed.txt"))
+        assertTrue(bob.opens.contains("/tmp/opened.txt"))
+        assertFalse(bob.opens.contains("/tmp/mutated.txt"))
+    }
 }

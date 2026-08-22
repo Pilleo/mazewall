@@ -406,22 +406,6 @@ public fun NativeArg.ebadfUnlessLive(): LinuxNative.SyscallResult<Long, LinuxNat
     return if (this is NativeArg.FdArg) fd.ebadfUnlessLive() else null
 }
 
-public fun ebadfIfRetiredPollfds(
-    fds: ManagedSegment,
-    nfds: Long,
-): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled>? {
-    val stride = io.mazewall.ffi.Layouts.POLLFD_SIZE
-    var i = 0L
-    while (i < nfds) {
-        val fd = fds.readInt(i * stride + io.mazewall.ffi.Layouts.POLLFD_FD_OFFSET)
-        if (FdEpoch.isRetired(fd)) {
-            return LinuxNative.SyscallResult.Error(NativeConstants.EBADF, -1L)
-        }
-        i++
-    }
-    return null
-}
-
 public fun ebadfUnlessLive(vararg args: NativeArg): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled>? {
     for (arg in args) {
         val denied = arg.ebadfUnlessLive()

@@ -1,7 +1,7 @@
 ---
 title: "Worker-installing tests need fresh JVMs"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: medium
 component: "testing"
 dependencies: []

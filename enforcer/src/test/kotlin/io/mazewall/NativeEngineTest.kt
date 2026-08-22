@@ -10,6 +10,9 @@ import io.mazewall.ffi.IoctlPayload
 import io.mazewall.ffi.typed
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
+import io.mazewall.core.close
+import io.mazewall.ffi.memory.writeInt
+import org.junit.jupiter.api.Assertions.assertTrue
 
 class NativeEngineTest {
     companion object {
@@ -39,7 +42,7 @@ class NativeEngineTest {
 
         LinuxNative.setEngine(mock)
 
-        val dummyFd = FileDescriptor.unsafe<FileDescriptorRole.Generic>(100)
+        val dummyFd = FileDescriptor.generic(100)
         val dummySegment = io.mazewall.ffi.memory.ManagedSegment.NULL
 
         @Suppress("UNCHECKED_CAST")
@@ -99,6 +102,26 @@ class NativeEngineTest {
             assertEquals(5, failureResult.errno)
         } else {
             org.junit.jupiter.api.Assertions.fail("Expected failure")
+        }
+    }
+
+    @Test
+    fun `poll delegates to engine without rejecting retired fd integer`() {
+        val fd = FileDescriptor.generic(97)
+        fd.close()
+        val mock = MockNativeEngine()
+        var polled = false
+        mock.onPoll = { _: io.mazewall.ffi.memory.ManagedSegment, _: Long, _: Int ->
+            polled = true
+            LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(1L)
+        }
+        LinuxNative.setEngine(mock)
+        io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
+            val pollfd = arena.allocate(io.mazewall.ffi.Layouts.POLLFD_SIZE)
+            pollfd.writeInt(io.mazewall.ffi.Layouts.POLLFD_FD_OFFSET, 97)
+            val result = LinuxNative.raw.poll(pollfd, 1L, 0)
+            assertEquals(1L, result.getOrThrow("poll"))
+            assertTrue(polled)
         }
     }
 }

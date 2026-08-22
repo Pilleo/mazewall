@@ -1,7 +1,7 @@
 ---
 title: "Downgrade read-only deny lists to thread-local scope"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "enforcer"

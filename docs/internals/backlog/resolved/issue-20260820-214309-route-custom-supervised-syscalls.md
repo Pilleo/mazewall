@@ -1,7 +1,7 @@
 ---
 title: "Route custom supervised syscalls through JVM validation"
 severity: "HIGH"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "enforcer"

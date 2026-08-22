@@ -42,13 +42,12 @@ internal object SupervisorNotificationMachine {
         rawPath: String?,
     ): SupervisorRoute {
         return when (kind) {
-            is SupervisedKind.Unknown ->
-                SupervisorRoute.Abort(NativeConstants.EPERM, "unsupervised syscall number")
             is SupervisedKind.Open -> evaluateOpenFastPath(resolvedPath, rawPath)
             is SupervisedKind.Connect,
             is SupervisedKind.Accept,
             is SupervisedKind.Exec,
             is SupervisedKind.Spawn,
+            is SupervisedKind.Unknown,
             -> SupervisorRoute.AskJvm
         }
     }
@@ -64,9 +63,9 @@ internal object SupervisorNotificationMachine {
                 is SupervisedKind.Accept,
                 -> SupervisorRoute.InjectFd
                 is SupervisedKind.Exec -> SupervisorRoute.SecureExec
-                is SupervisedKind.Spawn -> SupervisorRoute.Continue
-                is SupervisedKind.Unknown ->
-                    SupervisorRoute.Abort(NativeConstants.EPERM, "jvm allow on unknown nr")
+                is SupervisedKind.Spawn,
+                is SupervisedKind.Unknown,
+                -> SupervisorRoute.Continue
             }
         }
     }

@@ -45,7 +45,7 @@ class "DenyListSpec" as io.mazewall.DenyListSpec {
   +DenyListSpec readOnly(String)
   +DenyListSpec readOnly(String)
   +DenyListSpec advanced(Function1<? super Builder<ProcessWideSafe>, Unit>)
-  +Policy<ProcessWideSafe, Uncompiled> build()
+  +Policy<PolicyScope, Uncompiled> build()
 }
 class "InstallationAssessment" as io.mazewall.InstallationAssessment {
   +InstallationScope getScope()
@@ -142,8 +142,11 @@ interface "NativeEngine" as io.mazewall.NativeEngine {
   + {abstract}RawSyscallOperations getRaw()
 }
 interface "NativeFileSystem" as io.mazewall.NativeFileSystem {
-  + {abstract}SyscallResult open(ManagedSegment, int)
-  + {abstract}SyscallResult openat(FileDescriptor<?, ? extends Open>, ManagedSegment, int)
+  +SyscallResult open(ManagedSegment, int)
+  + {abstract}SyscallResult open(ManagedSegment, int, int)
+  +SyscallResult openat(FileDescriptor<?, ? extends Open>, ManagedSegment, int)
+  + {abstract}SyscallResult openat(FileDescriptor<?, ? extends Open>, ManagedSegment, int, int)
+  +SyscallResult openat2(FileDescriptor<?, ? extends Open>, ManagedSegment, ManagedSegment, long)
   + {abstract}SyscallResult readlink(ManagedSegment, ManagedSegment, long)
   + {abstract}SyscallResult mmap(long, long, int, int, FileDescriptor<?, ? extends Open>, long)
   + {abstract}SyscallResult close(FileDescriptor<?, ? extends Open>)
@@ -237,11 +240,14 @@ class "Policy" as io.mazewall.Policy<S extends PolicyScope, State extends Policy
   +SyscallInspectionPipeline getSyscallInspectionPipeline()
   + {static}Builder builder()
   + {static}Builder threadLocalBuilder()
-  + {static}Policy<ProcessWideSafe, Uncompiled> restrictFurtherWith(Policy<? extends ProcessWideSafe, ? extends Uncompiled>[])
-  + {static}Policy<ProcessWideSafe, Uncompiled> denyList(RuntimeProfile, Function1<? super DenyListSpec, Unit>)
+  + {static}Policy<S, Uncompiled> restrictFurtherWith(Policy<? extends S, ? extends Uncompiled>[])
+  + {static}Policy<PolicyScope, Uncompiled> denyList(RuntimeProfile, Function1<? super DenyListSpec, Unit>)
+  + {static}Policy<ThreadLocalOnly, Uncompiled> threadLocalDenyList(RuntimeProfile, Function1<? super DenyListSpec, Unit>)
   + {static}Policy<ProcessWideSafe, Uncompiled> allowList(RuntimeProfile, Function1<? super AllowListSpec, Unit>)
-  + {static}Policy<ProcessWideSafe, Uncompiled> denyList(RuntimeProfile)
-  + {static}Policy<ProcessWideSafe, Uncompiled> denyList()
+  + {static}Policy<PolicyScope, Uncompiled> denyList(RuntimeProfile)
+  + {static}Policy<PolicyScope, Uncompiled> denyList()
+  + {static}Policy<ThreadLocalOnly, Uncompiled> threadLocalDenyList(RuntimeProfile)
+  + {static}Policy<ThreadLocalOnly, Uncompiled> threadLocalDenyList()
   + {static}Policy<ProcessWideSafe, Uncompiled> allowList(RuntimeProfile)
   + {static}Policy<ProcessWideSafe, Uncompiled> allowList()
 }
@@ -304,17 +310,20 @@ class "PolicyDefinitionKt" as io.mazewall.PolicyDefinitionKt {
 class "PolicyKt" as io.mazewall.PolicyKt {
   + {static}Policy<S, Compiled> compile(Policy<? extends S, ? extends Uncompiled>, Arch)
   + {static}Policy<ProcessWideSafe, Uncompiled> plusProcessWide(Policy<? extends ProcessWideSafe, ? extends Uncompiled>, Policy<? extends ProcessWideSafe, ? extends Uncompiled>)
-  + {static}Policy<ProcessWideSafe, Uncompiled> restrictFurtherWith(Policy<? extends ProcessWideSafe, ? extends Uncompiled>, Policy<? extends ProcessWideSafe, ? extends Uncompiled>)
+  + {static}Policy<S, Uncompiled> restrictFurtherWith(Policy<? extends S, ? extends Uncompiled>, Policy<? extends S, ? extends Uncompiled>)
   + {static}Policy<ThreadLocalOnly, Uncompiled> plusThreadLocal(Policy<? extends S, ? extends Uncompiled>, Policy<? extends ThreadLocalOnly, ? extends Uncompiled>)
   + {static}InstallationReceipt install(Policy<? extends S, ? extends Uncompiled>)
 }
 class "PolicyLists" as io.mazewall.PolicyLists {
   + {static}PolicyLists INSTANCE
   __
-  + {static}Policy<ProcessWideSafe, Uncompiled> denyList(RuntimeProfile, Function1<? super DenyListSpec, Unit>)
+  + {static}Policy<PolicyScope, Uncompiled> denyList(RuntimeProfile, Function1<? super DenyListSpec, Unit>)
+  + {static}Policy<ThreadLocalOnly, Uncompiled> threadLocalDenyList(RuntimeProfile, Function1<? super DenyListSpec, Unit>)
   + {static}Policy<ProcessWideSafe, Uncompiled> allowList(RuntimeProfile, Function1<? super AllowListSpec, Unit>)
-  + {static}Policy<ProcessWideSafe, Uncompiled> denyList(RuntimeProfile)
-  + {static}Policy<ProcessWideSafe, Uncompiled> denyList()
+  + {static}Policy<PolicyScope, Uncompiled> denyList(RuntimeProfile)
+  + {static}Policy<PolicyScope, Uncompiled> denyList()
+  + {static}Policy<ThreadLocalOnly, Uncompiled> threadLocalDenyList(RuntimeProfile)
+  + {static}Policy<ThreadLocalOnly, Uncompiled> threadLocalDenyList()
   + {static}Policy<ProcessWideSafe, Uncompiled> allowList(RuntimeProfile)
   + {static}Policy<ProcessWideSafe, Uncompiled> allowList()
 }
@@ -484,7 +493,6 @@ class "FileDescriptorKt" as io.mazewall.core.FileDescriptorKt {
   + {static}SyscallResult ebadfUnlessDirfd(FileDescriptor<?, ?>)
   + {static}SyscallResult ebadfUnlessMmapBacking(FileDescriptor<?, ?>)
   + {static}SyscallResult ebadfUnlessLive(NativeArg)
-  + {static}SyscallResult ebadfIfRetiredPollfds(ManagedSegment, long)
   + {static}SyscallResult ebadfUnlessLive(NativeArg[])
   + {static}SyscallResult claimDupIfNeeded(SyscallResult, int)
   + {static}FileDescriptor<R, Closed> close(FileDescriptor<? extends R, ? extends S>)
@@ -828,6 +836,7 @@ interface "SupervisedOpen" as io.mazewall.enforcer.supervisor.SupervisedOpen {
   + {static}Companion Companion
   __
   + {abstract}String getPath()
+  + {abstract}int getMode()
 }
 class "SupervisorContext" as io.mazewall.enforcer.supervisor.SupervisorContext {
   +String getSocketPath()
@@ -900,6 +909,7 @@ class "SyscallArguments" as io.mazewall.enforcer.supervisor.SyscallArguments {
   +String getPathStr()
   +byte[] getSockaddrBytes()
   +int getDirfd()
+  +OpenHow getOpenHow()
 }
 class "TraceeReadOnlyNul" as io.mazewall.enforcer.supervisor.TraceeReadOnlyNul {
   + {static}TraceeReadOnlyNul INSTANCE
@@ -959,11 +969,14 @@ class "RealNativeEngine" as io.mazewall.ffi.internal.RealNativeEngine {
 class "RealNativeFileSystem" as io.mazewall.ffi.internal.RealNativeFileSystem {
   + {static}RealNativeFileSystem INSTANCE
   __
-  +SyscallResult open(ManagedSegment, int)
-  +SyscallResult openat(FileDescriptor<?, ? extends Open>, ManagedSegment, int)
+  +SyscallResult open(ManagedSegment, int, int)
+  +SyscallResult openat(FileDescriptor<?, ? extends Open>, ManagedSegment, int, int)
+  +SyscallResult openat2(FileDescriptor<?, ? extends Open>, ManagedSegment, ManagedSegment, long)
   +SyscallResult mmap(long, long, int, int, FileDescriptor<?, ? extends Open>, long)
   +SyscallResult close(FileDescriptor<?, ? extends Open>)
   +SyscallResult readlink(ManagedSegment, ManagedSegment, long)
+  +SyscallResult open(ManagedSegment, int)
+  +SyscallResult openat(FileDescriptor<?, ? extends Open>, ManagedSegment, int)
 }
 class "RealNativeHelper" as io.mazewall.ffi.internal.RealNativeHelper {
   + {static}RealNativeHelper INSTANCE
@@ -1013,8 +1026,8 @@ class "SyscallInvoker" as io.mazewall.ffi.internal.SyscallInvoker {
   +SyscallResult ioctlLong(MethodHandle, int, long, long)
   +SyscallResult fcntl(MethodHandle, int, int, long)
   +SyscallResult poll(MethodHandle, MemorySegment, long, int)
-  +SyscallResult open(MethodHandle, MemorySegment, int)
-  +SyscallResult openat(MethodHandle, int, MemorySegment, int)
+  +SyscallResult open(MethodHandle, MemorySegment, int, int)
+  +SyscallResult openat(MethodHandle, int, MemorySegment, int, int)
   +SyscallResult mmap(MethodHandle, MemorySegment, long, int, int, int, long)
   +SyscallResult close(MethodHandle, int)
   +SyscallResult readlink(MethodHandle, MemorySegment, MemorySegment, long)
@@ -1538,6 +1551,7 @@ class "UserNotifReply" as io.mazewall.platform.seccomp.UserNotifReply {
   __
   +void encodeContinue(ManagedSegment, long)
   +void encodeError(ManagedSegment, long, int)
+  +void encodeSuccess(ManagedSegment, long, long)
   +SyscallResult send(RawSyscallOperations, FileDescriptor<SeccompNotif, ? extends Open>, ManagedSegment)
 }
 abstract class "LoopAction" as io.mazewall.platform.seccomp.daemon.LoopAction {
@@ -1829,6 +1843,7 @@ io.mazewall.enforcer.supervisor.SupervisorSessionHandler .u.|> io.mazewall.platf
 io.mazewall.enforcer.supervisor.SupervisorSessionHandler --> io.mazewall.NativeEngine
 io.mazewall.enforcer.supervisor.SupervisorSessionHandler --> io.mazewall.core.SocketManager
 io.mazewall.enforcer.supervisor.SupervisorSessionHandler --> io.mazewall.core.FileDescriptor
+io.mazewall.enforcer.supervisor.SyscallArguments --> io.mazewall.enforcer.supervisor.OpenHow
 io.mazewall.enforcer.supervisor.TraceeReadOnlyNul --> io.mazewall.enforcer.supervisor.TraceeReadOnlyNul
 io.mazewall.enforcer.supervisor.ValidationListenerPreload --> io.mazewall.enforcer.supervisor.ValidationListenerPreload
 io.mazewall.enforcer.supervisor.ValidationLog --> io.mazewall.enforcer.supervisor.ValidationLog

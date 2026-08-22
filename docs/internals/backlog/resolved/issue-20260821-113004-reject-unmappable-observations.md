@@ -1,7 +1,7 @@
 ---
 title: "Reject observations that cannot map to a syscall"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: medium
 dependencies: []
 component: "profiler"

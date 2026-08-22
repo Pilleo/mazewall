@@ -44,14 +44,13 @@ internal class SupervisorNotificationMachineTest {
     }
 
     @Test
-    fun `unknown nr is abort never continue`() {
+    fun `custom supervised nr routes to AskJvm on fast path`() {
         val route = SupervisorNotificationMachine.evaluateFastPath(
             SupervisorNotificationMachine.classify(999_999, arch),
             resolvedPath = null,
             rawPath = null,
         )
-        val abort = route as SupervisorRoute.Abort
-        assertEquals(NativeConstants.EPERM, abort.errno)
+        assertEquals(SupervisorRoute.AskJvm, route)
     }
 
     @Test
@@ -81,7 +80,7 @@ internal class SupervisorNotificationMachineTest {
         "Spawn,   Allow,    Continue",
         "Open,    Allow,    InjectFd",
         "Accept,  Allow,    InjectFd",
-        "Unknown, Allow,    Abort",
+        "Unknown, Allow,    Continue",
     )
     fun `test evaluateJvm routing table`(kindName: String, verdictType: String, expectedRouteType: String) {
         val kind = when (kindName) {

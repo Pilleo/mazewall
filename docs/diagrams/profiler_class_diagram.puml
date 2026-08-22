@@ -220,6 +220,7 @@ class "BobCompiler" as io.mazewall.profiler.compiler.BobCompiler {
 class "StraceLogParser" as io.mazewall.profiler.compiler.StraceLogParser {
   + {static}StraceLogParser INSTANCE
   __
+  +StraceParseResult parseWithStats(String)
   +List<ProfileObservation> parse(String)
   +ProfileObservation parseLine(String)
 }
@@ -464,8 +465,13 @@ class "ProfilerTraceListener" as io.mazewall.profiler.internal.ProfilerTraceList
   +TraceEventQueue getEventQueue()
   +Channel<TraceEvent> getEventChannel()
   +Flow<TraceEvent> getEventFlow()
+  +CountDownLatch getWorkerTerminatedLatch()
+  +CountDownLatch getCollectorTerminatedLatch()
+  +Function1<TraceEvent, Unit> getOnEventCollected()
+  +void setOnEventCollected(Function1<? super TraceEvent, Unit>)
   +TraceListenerState getState()
   +boolean getDrainComplete()
+  +int getDroppedEvents()
   +void start(CountDownLatch)
   +void close()
   +void passThrough()

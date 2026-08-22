@@ -1,7 +1,7 @@
 ---
 title: "Require coverage evidence when generating DSL"
 severity: "HIGH"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "profiler"

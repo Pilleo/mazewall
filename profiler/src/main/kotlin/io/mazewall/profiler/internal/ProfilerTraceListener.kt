@@ -71,12 +71,21 @@ internal class ProfilerTraceListener(
     val eventChannel = eventQueue.channel
     val eventFlow: Flow<TraceEvent> = eventChannel.receiveAsFlow()
 
+    internal val workerTerminatedLatch = CountDownLatch(1)
+    internal val collectorTerminatedLatch = CountDownLatch(1)
+
+    internal var onEventCollected: ((TraceEvent) -> Unit)? = null
+
     var state: TraceListenerState = TraceListenerState.Disconnected
         private set
 
     /** True only after EOF that follows a locally initiated pass-through/shutdown. */
     @Volatile
     var drainComplete: Boolean = false
+        private set
+
+    @Volatile
+    var droppedEvents: Int = 0
         private set
 
     private val gracefulDrainRequested = java.util.concurrent.atomic.AtomicBoolean(false)
@@ -114,6 +123,7 @@ internal class ProfilerTraceListener(
                 }
                 arena.close()
                 inputStream.close()
+                workerTerminatedLatch.countDown()
             }
         }.apply {
             isDaemon = true
@@ -134,10 +144,13 @@ internal class ProfilerTraceListener(
                                 CopyOnWriteArrayList<Array<StackTraceElement>>()
                             }.add(jvmFrames)
                         }
+                        onEventCollected?.invoke(event)
                     }
                 }
             } catch (t: Throwable) {
                 logger.log(java.util.logging.Level.SEVERE, "ProfilerTraceListener collector thread crashed with fatal error", t)
+            } finally {
+                collectorTerminatedLatch.countDown()
             }
         }.apply {
             isDaemon = true
@@ -172,6 +185,9 @@ internal class ProfilerTraceListener(
                 logger.fine("Failed to send PASS_THROUGH_COMMAND_BYTE: ${e.message}")
             }
 
+            var workerJoined = false
+            var collectorJoined = false
+
             // Step 2: Wait for the listener thread to drain remaining events and see EOF.
             // The thread exits via EOFException once the daemon closes its socket end.
             workerThread?.let {
@@ -181,6 +197,8 @@ internal class ProfilerTraceListener(
                         logger.warning("Trace listener thread for fd=${socketFd.value} did not terminate within $JOIN_TIMEOUT_MS ms")
                         it.interrupt()
                         it.join(INTERRUPT_JOIN_TIMEOUT_MS)
+                    } else {
+                        workerJoined = true
                     }
                 } catch (e: InterruptedException) {
                     Thread.currentThread().interrupt()
@@ -193,9 +211,20 @@ internal class ProfilerTraceListener(
                     if (it.isAlive) {
                         logger.warning("Trace collector thread for fd=${socketFd.value} did not terminate within $JOIN_TIMEOUT_MS ms")
                         it.interrupt()
+                    } else {
+                        collectorJoined = true
                     }
                 } catch (e: InterruptedException) {
                     Thread.currentThread().interrupt()
+                }
+            }
+
+            if (gracefulDrainRequested.get() && workerJoined && collectorJoined) {
+                drainComplete = true
+            } else {
+                drainComplete = false
+                if (!collectorJoined) {
+                    droppedEvents += 1
                 }
             }
         } finally {
@@ -225,12 +254,17 @@ internal class ProfilerTraceListener(
         try {
             sendCommand(PASS_THROUGH_COMMAND_BYTE)
 
+            var workerJoined = false
+            var collectorJoined = false
+
             workerThread?.let {
                 try {
                     it.join(JOIN_TIMEOUT_MS)
                     if (it.isAlive) {
                         logger.warning("Trace listener thread for fd=${socketFd.value} did not terminate within $JOIN_TIMEOUT_MS ms during passThrough")
                         it.interrupt()
+                    } else {
+                        workerJoined = true
                     }
                 } catch (e: InterruptedException) {
                     Thread.currentThread().interrupt()
@@ -243,9 +277,20 @@ internal class ProfilerTraceListener(
                     if (it.isAlive) {
                         logger.warning("Trace collector thread for fd=${socketFd.value} did not terminate within $JOIN_TIMEOUT_MS ms during passThrough")
                         it.interrupt()
+                    } else {
+                        collectorJoined = true
                     }
                 } catch (e: InterruptedException) {
                     Thread.currentThread().interrupt()
+                }
+            }
+
+            if (gracefulDrainRequested.get() && workerJoined && collectorJoined) {
+                drainComplete = true
+            } else {
+                drainComplete = false
+                if (!collectorJoined) {
+                    droppedEvents += 1
                 }
             }
         } finally {
@@ -300,9 +345,6 @@ internal class ProfilerTraceListener(
                     readNextEvent(dis)
                 } catch (e: java.io.EOFException) {
                     System.err.println("[TRACE-LISTENER-DEBUG] EOFException, closing loop")
-                    if (gracefulDrainRequested.get()) {
-                        drainComplete = true
-                    }
                     break
                 } catch (e: java.io.IOException) {
                     if (closed.get()) {

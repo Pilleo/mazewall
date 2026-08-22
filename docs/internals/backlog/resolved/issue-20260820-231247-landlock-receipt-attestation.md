@@ -1,7 +1,7 @@
 ---
 title: "Report already-active Landlock in repeat-install receipts"
 severity: "LOW"
-status: "open"
+status: "resolved"
 priority: medium
 component: "enforcer"
 dependencies: []

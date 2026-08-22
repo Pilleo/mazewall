@@ -1,7 +1,7 @@
 ---
 title: "Close the injected exec descriptor when rewrite fails"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: medium
 dependencies: []
 component: "enforcer"

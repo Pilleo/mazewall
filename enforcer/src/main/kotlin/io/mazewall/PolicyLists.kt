@@ -20,10 +20,22 @@ public object PolicyLists {
     public fun denyList(
         runtime: RuntimeProfile = RuntimeProfile.HOTSPOT_JIT,
         configure: DenyListSpec.() -> Unit = {},
-    ): Policy<PolicyScope.ProcessWideSafe, Uncompiled> {
+    ): Policy<out PolicyScope, Uncompiled> {
         val spec = DenyListSpec(runtime)
         spec.configure()
         return spec.build()
+    }
+
+    @JvmStatic
+    @JvmOverloads
+    public fun threadLocalDenyList(
+        runtime: RuntimeProfile = RuntimeProfile.HOTSPOT_JIT,
+        configure: DenyListSpec.() -> Unit = {},
+    ): Policy<PolicyScope.ThreadLocalOnly, Uncompiled> {
+        val spec = DenyListSpec(runtime)
+        spec.configure()
+        @Suppress("UNCHECKED_CAST")
+        return spec.build() as Policy<PolicyScope.ThreadLocalOnly, Uncompiled>
     }
 
     @JvmStatic
@@ -41,8 +53,9 @@ public object PolicyLists {
 public class DenyListSpec internal constructor(
     runtime: RuntimeProfile,
 ) {
-    private val inner: Policy.Builder<PolicyScope.ProcessWideSafe> =
+    private var inner: Policy.Builder<out PolicyScope> =
         Policy.builder().forRuntime(runtime)
+    private var isThreadLocal: Boolean = false
 
     public val mode: PolicyMode = PolicyMode.DENY_LIST
 
@@ -68,22 +81,32 @@ public class DenyListSpec internal constructor(
     }
 
     public fun readOnly(path: String): DenyListSpec {
-        inner.allowFsRead(path)
+        inner = inner.allowFsRead(path)
+        isThreadLocal = true
         return this
     }
 
     public fun readOnly(path: SandboxedPath): DenyListSpec {
-        inner.allowFsRead(path)
+        inner = inner.allowFsRead(path)
+        isThreadLocal = true
         return this
     }
 
     /** Escape hatch for raw syscall actions. */
     public fun advanced(block: Policy.Builder<PolicyScope.ProcessWideSafe>.() -> Unit): DenyListSpec {
-        inner.apply(block)
+        @Suppress("UNCHECKED_CAST")
+        (inner as Policy.Builder<PolicyScope.ProcessWideSafe>).apply(block)
         return this
     }
 
-    internal fun build(): Policy<PolicyScope.ProcessWideSafe, Uncompiled> = inner.build()
+    internal fun build(): Policy<out PolicyScope, Uncompiled> =
+        if (isThreadLocal) {
+            @Suppress("UNCHECKED_CAST")
+            (inner as Policy.Builder<PolicyScope.ThreadLocalOnly>).build()
+        } else {
+            @Suppress("UNCHECKED_CAST")
+            (inner as Policy.Builder<PolicyScope.ProcessWideSafe>).build()
+        }
 }
 
 public class AllowListSpec internal constructor(

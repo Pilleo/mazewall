@@ -84,9 +84,10 @@ internal object SyscallInvoker {
         handle: MethodHandle,
         path: MemorySegment,
         flags: Int,
+        mode: Int = 0,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
         val capturedState = ErrnoSegment.getThreadLocal()
-        val ret = handle.invokeExact(capturedState.segment, path, flags) as Int
+        val ret = handle.invokeExact(capturedState.segment, path, flags, mode) as Int
         return RealNativeHelper.result(ret.toLong(), capturedState.getErrno())
     }
 
@@ -95,9 +96,10 @@ internal object SyscallInvoker {
         dirfd: Int,
         path: MemorySegment,
         flags: Int,
+        mode: Int = 0,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
         val capturedState = ErrnoSegment.getThreadLocal()
-        val ret = handle.invokeExact(capturedState.segment, dirfd, path, flags) as Int
+        val ret = handle.invokeExact(capturedState.segment, dirfd, path, flags, mode) as Int
         return RealNativeHelper.result(ret.toLong(), capturedState.getErrno())
     }
 

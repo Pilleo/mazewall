@@ -94,13 +94,34 @@ public interface NativeFileSystem {
     fun open(
         path: ManagedSegment,
         flags: io.mazewall.core.OpenFlags,
+    ): SyscallResult<Long, SyscallHandledState.Unhandled> = open(path, flags, 0)
+
+    fun open(
+        path: ManagedSegment,
+        flags: io.mazewall.core.OpenFlags,
+        mode: Int,
     ): SyscallResult<Long, SyscallHandledState.Unhandled>
 
     fun openat(
         dirfd: FileDescriptor<*, FdState.Open>,
         path: ManagedSegment,
         flags: io.mazewall.core.OpenFlags,
+    ): SyscallResult<Long, SyscallHandledState.Unhandled> = openat(dirfd, path, flags, 0)
+
+    fun openat(
+        dirfd: FileDescriptor<*, FdState.Open>,
+        path: ManagedSegment,
+        flags: io.mazewall.core.OpenFlags,
+        mode: Int,
     ): SyscallResult<Long, SyscallHandledState.Unhandled>
+
+    fun openat2(
+        dirfd: FileDescriptor<*, FdState.Open>,
+        path: ManagedSegment,
+        how: ManagedSegment,
+        size: Long = 24L,
+    ): SyscallResult<Long, SyscallHandledState.Unhandled> =
+        SyscallResult.Error(io.mazewall.ffi.NativeConstants.ENOSYS, -1L)
 
     fun readlink(
         path: ManagedSegment,

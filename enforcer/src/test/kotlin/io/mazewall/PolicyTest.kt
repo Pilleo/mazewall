@@ -260,6 +260,17 @@ class PolicyTest {
     }
 
     @Test
+    fun `denyList with readOnly produces thread-local policy with Landlock paths`() {
+        val policy = Policy.denyList(RuntimeProfile.HOTSPOT_JIT) {
+            denyProcessCreation()
+            readOnly("/tmp")
+        }
+        assertTrue(policy.enforceLandlock)
+        assertTrue(policy.allowedFsReadPaths.any { it.value == "/tmp" })
+        assertFalse(policy.isSyscallAllowed(Syscall.EXECVE))
+    }
+
+    @Test
     fun `Landlock intersection treats empty read grants as deny`() {
         val reads =
             Policy
