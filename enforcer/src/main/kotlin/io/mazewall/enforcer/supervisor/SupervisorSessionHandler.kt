@@ -979,20 +979,13 @@ internal class SupervisorSessionHandler(
         }
     }
 
-    private fun sendSeccompContinue(id: Long, resp: ManagedSegment) {
-        io.mazewall.platform.seccomp.UserNotifReply.encodeContinue(resp, id)
-        io.mazewall.platform.seccomp.UserNotifReply.send(engine.raw, listenerFd, resp)
+    private val responseWriter by lazy {
+        SupervisorResponseWriter(engine, listenerFd)
     }
 
-    private fun sendSeccompSuccess(id: Long, valVal: Long, resp: ManagedSegment) {
-        io.mazewall.platform.seccomp.UserNotifReply.encodeSuccess(resp, id, valVal)
-        io.mazewall.platform.seccomp.UserNotifReply.send(engine.raw, listenerFd, resp)
-    }
-
-    private fun sendSeccompError(id: Long, errorNr: Int, resp: ManagedSegment) {
-        io.mazewall.platform.seccomp.UserNotifReply.encodeError(resp, id, errorNr)
-        io.mazewall.platform.seccomp.UserNotifReply.send(engine.raw, listenerFd, resp)
-    }
+    private fun sendSeccompContinue(id: Long, resp: ManagedSegment) = responseWriter.sendContinue(id, resp)
+    private fun sendSeccompSuccess(id: Long, valVal: Long, resp: ManagedSegment) = responseWriter.sendSuccess(id, valVal, resp)
+    private fun sendSeccompError(id: Long, errorNr: Int, resp: ManagedSegment) = responseWriter.sendError(id, errorNr, resp)
 
     context(arena: NativeArena)
     private fun readStringFromProcess(tid: Tid, remoteAddr: Long): String? {

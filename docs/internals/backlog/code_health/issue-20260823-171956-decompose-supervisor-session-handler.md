@@ -24,10 +24,10 @@ every supervisor change today lands in one file with high merge-collision probab
 testability (testing/issue-20260726-0135 tracks profiler-side testability), and cognitive overload
 that invites exactly the class of subtle bugs caught recently (JA encoding, ACK-loop hazards).
 
-**Progress (2026-08-23):** Slice 1 landed — `/proc` inspection helpers extracted to
+**Progress (2026-08-23, updated):** Slice 1 landed — `/proc` inspection helpers extracted to
 `ProcFsInspector` (getTgid, getPpid) with handler delegation; SupervisorSessionHandlerTest green.
-Remaining slices: NotificationReader (recv/poll EINTR loops), RouteEvaluator (fast-path bypass +
-SupervisedKind routing), ResponseWriter (continue/error marshalling). Each slice must be preceded
+Slice 2 landed — `SupervisorResponseWriter` extracted (continue/success/error marshalling behind a lazy per-handler instance; all 26 call sites keep their thin delegates).
+Remaining slices: NotificationReader (recv/poll EINTR loops), RouteEvaluator (fast-path bypass + SupervisedKind routing). Each slice must be preceded
 by golden-notification coverage per the plan below.
 
 **Needed:**

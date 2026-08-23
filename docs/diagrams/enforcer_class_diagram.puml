@@ -963,6 +963,11 @@ class "SupervisorNotificationMachineKt" as io.mazewall.enforcer.supervisor.Super
   + {static}InjectTarget injectTarget(SupervisedKind)
   + {static}ExecRewritePlan planExecRewrite(Arch, String, String)
 }
+class "SupervisorResponseWriter" as io.mazewall.enforcer.supervisor.SupervisorResponseWriter {
+  +void sendContinue(long, ManagedSegment)
+  +void sendSuccess(long, long, ManagedSegment)
+  +void sendError(long, int, ManagedSegment)
+}
 interface "SupervisorRoute" as io.mazewall.enforcer.supervisor.SupervisorRoute {
 }
 class "SupervisorSession" as io.mazewall.enforcer.supervisor.SupervisorSession {
@@ -1940,6 +1945,8 @@ io.mazewall.enforcer.supervisor.SupervisorDaemonManager --> io.mazewall.enforcer
 io.mazewall.enforcer.supervisor.SupervisorInstaller --> io.mazewall.enforcer.supervisor.SupervisorInstaller
 io.mazewall.enforcer.supervisor.SupervisorInstaller --> io.mazewall.core.Tid
 io.mazewall.enforcer.supervisor.SupervisorNotificationMachine --> io.mazewall.enforcer.supervisor.SupervisorNotificationMachine
+io.mazewall.enforcer.supervisor.SupervisorResponseWriter --> io.mazewall.NativeEngine
+io.mazewall.enforcer.supervisor.SupervisorResponseWriter --> io.mazewall.core.FileDescriptor
 io.mazewall.enforcer.supervisor.SupervisorSessionHandler .u.|> io.mazewall.platform.seccomp.daemon.SeccompNotifHandler
 io.mazewall.enforcer.supervisor.SupervisorSessionHandler --> io.mazewall.NativeEngine
 io.mazewall.enforcer.supervisor.SupervisorSessionHandler --> io.mazewall.core.SocketManager
