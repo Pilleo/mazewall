@@ -33,6 +33,12 @@ class "BpfFilter" as io.mazewall.BpfFilter {
   +Set<Integer> getJvmCriticalNrs(Arch)
   +void emitInspections(BpfBuilder<? extends Active>, List<SyscallInspection>, boolean, Set<Integer>)
 }
+class "BpfNativeCache" as io.mazewall.BpfNativeCache {
+  + {static}BpfNativeCache INSTANCE
+  __
+  +ManagedSegment getOrCompute(List<? extends BpfInstruction>)
+  +void clear()
+}
 class "CompiledSandbox" as io.mazewall.CompiledSandbox<S extends PolicyScope> {
   +PolicyDefinition<S> getDefinition()
   +BpfProgram<Verified> getProgram()
@@ -111,6 +117,7 @@ class "KernelFeatureMatrix" as io.mazewall.KernelFeatureMatrix {
 class "LinuxNative" as io.mazewall.LinuxNative {
   + {static}LinuxNative INSTANCE
   __
+  +Object getEngineIdentity()
   +void setEngine(NativeEngine)
   +void resetToDefault()
   +NativeFileSystem getFileSystem()
@@ -190,6 +197,7 @@ class "Platform" as io.mazewall.Platform {
   +void validateSupported()
   +boolean isArchitectureSupported()
   +FallbackBehavior configuredFallback()
+  +boolean isCetPlatformEligible()
   +boolean isKernelCetSupported()
   +Boolean isCpuCetSupportedOverride()
   +void setCpuCetSupportedOverride(Boolean)
@@ -640,6 +648,14 @@ class "SandboxedPath" as io.mazewall.core.SandboxedPath {
   + {static}boolean equals-impl(String, Object)
   + {static}boolean equals-impl0(String, String)
   + {static}String of(String, boolean)
+}
+class "SandboxedPathKt" as io.mazewall.core.SandboxedPathKt {
+  + {static}boolean isUnder(Path, Path)
+  + {static}boolean isUnder(String, String)
+  + {static}boolean coveredBy(Set<SandboxedPath>, Set<SandboxedPath>)
+  + {static}boolean coversAll(Set<SandboxedPath>, Set<SandboxedPath>)
+  + {static}boolean isUnderAny(String, Set<SandboxedPath>)
+  + {static}String resolveReal(String)
 }
 interface "SeccompAction" as io.mazewall.core.SeccompAction {
   + {static}Companion Companion
@@ -1674,12 +1690,6 @@ class "BpfLabel" as io.mazewall.seccomp.BpfLabel {
 }
 interface "BpfMacro" as io.mazewall.seccomp.BpfMacro {
 }
-class "BpfNativeCache" as io.mazewall.seccomp.BpfNativeCache {
-  + {static}BpfNativeCache INSTANCE
-  __
-  +ManagedSegment getOrCompute(List<? extends BpfInstruction>)
-  +void clear()
-}
 class "BpfProgram" as io.mazewall.seccomp.BpfProgram<S extends BpfStatus> {
   + {static}Companion Companion
   __
@@ -1709,6 +1719,7 @@ class "BpfProgramKt" as io.mazewall.seccomp.BpfProgramKt {
   + {static}BpfBuilder<Terminated> ret(BpfBuilder<? extends Active>, int)
   + {static}BpfBuilder<Active> mark(BpfBuilder<? extends Active>, BpfLabel)
   + {static}BpfProgram<Unverified> build(BpfBuilder<? extends Terminated>)
+  + {static}BpfBuilder<Active> jumpUnconditional(BpfBuilder<? extends Active>, BpfLabel)
 }
 interface "BpfState" as io.mazewall.seccomp.BpfState {
 }
@@ -1795,6 +1806,9 @@ class "UnsafePrctlInspector" as io.mazewall.seccomp.UnsafePrctlInspector {
 io.mazewall.AllowListSpec --> io.mazewall.PolicyMode
 io.mazewall.BillOfBehaviorDto --> io.mazewall.StackProfileEntryDto
 io.mazewall.BpfFilter --> io.mazewall.BpfFilter
+io.mazewall.BpfNativeCache --> io.mazewall.ffi.memory.NativeArena
+io.mazewall.BpfNativeCache --> io.mazewall.ffi.memory.ManagedSegment
+io.mazewall.BpfNativeCache --> io.mazewall.BpfNativeCache
 io.mazewall.CompiledSandbox --> io.mazewall.seccomp.BpfProgram
 io.mazewall.CompiledSandbox --> io.mazewall.PolicyDefinition
 io.mazewall.DenyListSpec --> io.mazewall.PolicyMode
@@ -1957,10 +1971,6 @@ io.mazewall.sbob.BobDeserializer --> io.mazewall.sbob.BobDeserializer
 io.mazewall.sbob.PathNormalizer --> io.mazewall.sbob.PathNormalizer
 io.mazewall.sbob.PolicyTransformer --> io.mazewall.sbob.PolicyTransformer
 io.mazewall.seccomp.BpfBuilder --> io.mazewall.seccomp.BpfMacro
-io.mazewall.seccomp.BpfNativeCache --> io.mazewall.ffi.memory.NativeArena
-io.mazewall.seccomp.BpfNativeCache --> io.mazewall.ffi.memory.ManagedSegment
-io.mazewall.seccomp.BpfNativeCache --> io.mazewall.seccomp.BpfNativeCache
-io.mazewall.seccomp.BpfNativeCache --> io.mazewall.seccomp.BpfInstruction
 io.mazewall.seccomp.BpfProgram --> io.mazewall.seccomp.BpfInstruction
 io.mazewall.seccomp.BpfStaticVerifier --> io.mazewall.seccomp.BpfStaticVerifier
 io.mazewall.seccomp.Clone3Inspector .u.|> io.mazewall.seccomp.SyscallInspector

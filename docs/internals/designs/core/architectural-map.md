@@ -11,7 +11,7 @@ This document provides a high-level "Knowledge Graph" of the `mazewall` system. 
 | **Profiler Daemon** | Out-of-process `USER_NOTIF` handling & memory reading. | Child Process (Java/JVM) | Long-lived per session. |
 | **Trace Listener** | Bridge between Daemon and JVM Thread Registry. | Target JVM (Dedicated Thread) | Bound to session. |
 | **BobCompiler** | Generates `BillOfBehavior` JSON from trace events. | Target JVM (Tooling) | Static/Post-process. |
-| **Process portal** | Pooled worker JVMs + RPC/`SCM_RIGHTS` for first-party modules. | Broker JVM + worker processes | Implemented (`:portal`, `:portal-worker`). See [process-portal-design.md](../enforcer/process-portal-design.md). Distinct from the syscall supervisor. |
+| **Process portal** | Pooled worker JVMs + RPC/`SCM_RIGHTS` for first-party modules. | Broker JVM + worker processes | Hand-written pool implemented (`:portal`, `:portal-worker`). Plugin classpath isolation is incomplete ([issue-20260823-121500](../../backlog/implementation/issue-20260823-121500-process-portal-plugin-classpath.md)). Distinct from the syscall supervisor. |
 
 ## 2. The Profiler-Enforcer ACK Loop (The "Deadlock Zone")
 

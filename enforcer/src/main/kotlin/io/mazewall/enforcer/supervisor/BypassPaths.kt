@@ -200,8 +200,10 @@ public object BypassPaths {
             is PathResolution.Missing -> status.normalized
             is PathResolution.Unsafe -> return false
         }
+        // Canonical containment predicate; the raw spelling and the resolved realpath are both
+        // matched against each bypass entry (either match authorizes the bypass).
         return safeBypassPaths.any { bypassPath ->
-            path.startsWith(bypassPath) || path == bypassPath || realPath.startsWith(bypassPath) || realPath == bypassPath
+            io.mazewall.core.isUnder(path, bypassPath) || io.mazewall.core.isUnder(realPath, bypassPath)
         }
     }
 }

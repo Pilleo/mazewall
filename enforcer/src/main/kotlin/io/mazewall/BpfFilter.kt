@@ -191,9 +191,8 @@ object BpfFilter {
             Syscall.MPROTECT.numberFor(arch),
             Syscall.PKEY_MPROTECT.numberFor(arch),
         )
-        if (arch == Arch.AMD64) {
-            nrs.add(158) // arch_prctl on x86_64
-        }
+        // arch_prctl exists on x86_64 only (resolves to -1 elsewhere, filtered below).
+        nrs.add(Syscall.ARCH_PRCTL.numberFor(arch))
         return nrs.filter { it >= 0 }.toSet()
     }
 
@@ -310,7 +309,7 @@ object BpfFilter {
 
             // Unconditional jump to skip RET blocks on fallthrough (not matched in BST)
             val doneLabel = builder.nextLabel("bst_done")
-            builder.jumpIfEqual(0, jt = doneLabel, jf = doneLabel)
+            builder.jumpUnconditional(doneLabel)
 
             for ((action, label) in actionLabels) {
                 builder.mark(label)
@@ -338,7 +337,7 @@ object BpfFilter {
                 }
 
                 // Unconditional jump to skip the RET instruction when no syscall in the chunk matched
-                builder.jumpIfEqual(0, jt = skipLabel, jf = skipLabel)
+                builder.jumpUnconditional(skipLabel)
 
                 builder.mark(actionLabel)
                 builder.ret(nativeAction)
@@ -378,7 +377,7 @@ object BpfFilter {
 
             // Left subtree
             emitBst(builder, actionsToEmit, low, mid - 1, actionLabels)
-            builder.jumpIfEqual(0, jt = nextLabel, jf = nextLabel)
+            builder.jumpUnconditional(nextLabel)
 
             // Right subtree
             builder.mark(rightLabel)
@@ -393,7 +392,7 @@ object BpfFilter {
             val rightLabel = builder.nextLabel("bst_right")
             val nextLabel = builder.nextLabel("bst_next")
             builder.jumpIfGreaterThan(midNr, jt = rightLabel)
-            builder.jumpIfEqual(0, jt = nextLabel, jf = nextLabel)
+            builder.jumpUnconditional(nextLabel)
 
             builder.mark(rightLabel)
             emitBst(builder, actionsToEmit, mid + 1, high, actionLabels)

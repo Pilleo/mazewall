@@ -48,3 +48,60 @@ public value class SandboxedPath private constructor(public val value: String) {
 
     override fun toString(): String = value
 }
+
+/**
+ * Syntactic, component-wise path containment: true when [path] equals [ancestor] or lies beneath it.
+ *
+ * This is the single canonical containment definition for policy decisions. Both operands must be
+ * absolute and normalized (guaranteed for [SandboxedPath] values by [SandboxedPath.of]); a relative
+ * or unnormalized operand is never contained.
+ */
+public fun isUnder(path: java.nio.file.Path, ancestor: java.nio.file.Path): Boolean =
+    path.isAbsolute && ancestor.isAbsolute && path.startsWith(ancestor)
+
+/**
+ * True when this path equals [ancestor] or lies beneath it (component-wise; see [isUnder]).
+ */
+public infix fun SandboxedPath.isUnder(ancestor: SandboxedPath): Boolean =
+    isUnder(Paths.get(value), Paths.get(ancestor.value))
+
+/**
+ * True when every child path lies beneath at least one of [parents].
+ * An empty [children] set is trivially covered; no child can be covered by an empty parent set.
+ */
+public fun Set<SandboxedPath>.coveredBy(parents: Set<SandboxedPath>): Boolean =
+    all { child -> parents.any { child isUnder it } }
+
+/** Alias mirroring policy vocabulary: parents cover all children. */
+public fun Set<SandboxedPath>.coversAll(children: Set<SandboxedPath>): Boolean =
+    children.coveredBy(this)
+
+/**
+ * True when this path lies beneath at least one of [ancestors] (see [isUnder]).
+ */
+public fun SandboxedPath.isUnderAny(ancestors: Set<SandboxedPath>): Boolean =
+    ancestors.any { this isUnder it }
+
+/**
+ * Best-effort symlink resolution for comparison purposes.
+ *
+ * Resolves the longest existing ancestor (following symlinks), then re-appends any non-existent
+ * tail components syntactically. Falls back to the syntactic value when nothing can be resolved.
+ */
+public fun SandboxedPath.resolveReal(): SandboxedPath {
+    var current = Paths.get(value)
+    val unresolvedTail = ArrayDeque<String>()
+    while (true) {
+        try {
+            var resolved = current.toRealPath()
+            for (segment in unresolvedTail.asReversed()) {
+                resolved = resolved.resolve(segment)
+            }
+            return SandboxedPath.unsafe(resolved.toString())
+        } catch (e: java.io.IOException) {
+            val name = current.fileName ?: return this
+            unresolvedTail.addLast(name.toString())
+            current = current.parent ?: return this
+        }
+    }
+}

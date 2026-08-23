@@ -22,6 +22,14 @@ public object LinuxNative : NativeEngine {
     private var engine: NativeEngine = RealNativeEngine
 
     /**
+     * Identity of the currently active engine. Callers that cache engine-produced artifacts
+     * (e.g. native memory segments) MUST include this in their cache key: segments produced by a
+     * mock engine are not valid when the real engine (or another mock) becomes active.
+     */
+    val engineIdentity: Any
+        get() = engine
+
+    /**
      * Swaps the active native engine. Used for testing and fault injection.
      */
     @Suppress("spotbugs:ST_WRITE_TO_STATIC_FROM_INSTANCE_METHOD")

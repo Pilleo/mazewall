@@ -90,7 +90,7 @@ data class BillOfBehavior(
         }
         requireComplete(evidence, allowIncomplete)
         @Suppress("UNCHECKED_CAST")
-        val builder = Policy.threadLocalBuilder().base(base as Policy<PolicyScope.ThreadLocalOnly, *>)
+        var builder = Policy.threadLocalBuilder().base(base as Policy<PolicyScope.ThreadLocalOnly, *>)
         if (base.defaultAction == io.mazewall.core.SeccompAction.ACT_ALLOW) {
             val toUnblock = syscalls.filter { !base.isSyscallAllowed(it) }
             builder.unblock(*toUnblock.toTypedArray())
@@ -99,8 +99,9 @@ data class BillOfBehavior(
         }
         val pOpens = PathNormalizer.normalizeAndPrune(opens, baseCwd)
         val pWrites = PathNormalizer.normalizeAndPrune(fsWritePaths, baseCwd)
-        for (path in pOpens) builder.allowFsRead(io.mazewall.core.SandboxedPath.of(path, allowNonExistent = true))
-        for (path in pWrites) builder.allowFsWrite(io.mazewall.core.SandboxedPath.of(path, allowNonExistent = true))
+        // allowFs* are copy-on-promotion: the returned builder must be kept.
+        for (path in pOpens) builder = builder.allowFsRead(io.mazewall.core.SandboxedPath.of(path, allowNonExistent = true))
+        for (path in pWrites) builder = builder.allowFsWrite(io.mazewall.core.SandboxedPath.of(path, allowNonExistent = true))
         return builder.build()
     }
 

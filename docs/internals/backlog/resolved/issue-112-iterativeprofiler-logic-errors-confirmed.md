@@ -1,7 +1,7 @@
 ---
 title: '`IterativeProfiler` Logic Errors (Confirmed)'
 severity: HIGH
-status: open
+status: resolved
 priority: high
 dependencies: []
 target_files:
@@ -31,21 +31,18 @@ reversible: true
 **Needed:**
 1. Implement a fix based on the issue description.
 
-## Solution Options
-
-### Option A — Refactor implementation
-Implement the recommendation described in the Needed section to resolve the issue directly. Target area: ``profiler/src/main/kotlin/io/mazewall/profiler/iterative/IterativeProfiler.kt``
-**Pros:** Resolves the root cause of the issue.
-**Cons:** Requires careful implementation and testing.
-**Risk:** MEDIUM
-**Effort:** small
-
----
-**Chosen:** *(not yet approved — requires human decision)*
-
-**Acceptance Criteria:**
-- [ ] Tests verify the fix works as expected.
-- [ ] Issue is fully resolved in the codebase.
-
-**Implementation Hints:**
-- Ensure you read existing tests and implementation carefully before modifying code.
+**Resolution (2026-08-23, verified against current code):**
+1. *Relative paths fail* — stale. `IterativeProfilerTest.test iterative profiling converges on
+   relative paths` passes; path extraction handles relative paths.
+2. *Path truncation at whitespace* — stale. `parses path with spaces from generic exception
+   messages` and the quoted-path variants pass.
+3. *Disjoint-prefix startsWith* — resolved under issue-056 (hypothesis was stale; `Path.startsWith`
+   is component-wise) and the check now uses the canonical `io.mazewall.core.isUnder` predicate with
+   absolute normalization.
+4. *Thread-per-iteration context loss* — partially valid, partially by design. A fresh thread per
+   iteration is REQUIRED because seccomp filters are permanent for the OS thread lifetime; a
+   less-restrictive next iteration can never run on an already-contained thread. The diagnosability
+   gap was closed by naming worker threads `iterative-profiler-task-<N>` (`RealIterativeTaskExecutor`),
+   making failures attributable in stack dumps and thread dumps. MDC/ThreadLocal replay was not added
+   (no consumer in this codebase); if richer context propagation is ever needed it should be an
+   explicit opt-in parameter to `executeTask`.

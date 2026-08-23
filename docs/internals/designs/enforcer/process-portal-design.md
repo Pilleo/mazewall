@@ -122,7 +122,7 @@ Phase 2 (plugins): guest classes never load in the broker; worker classpath is c
 
 ## Resolved questions
 
-1. **Plugin classpath isolation (was: open question #2):** No, a second Gradle source set (`workerMain`) is **not** required. For Phase 2 plugins, use a **separate Gradle module** (e.g., `:portal-worker`) that depends on `:portal` (stubs + interfaces) and contains only guest implementations. The broker module depends only on `:portal` and never includes the worker module. This gives cleaner isolation than source sets: the worker module can have its own dependencies, and Gradle's dependency resolution guarantees the broker classpath never sees worker classes. A Gradle check (or ArchUnit test) can verify that `PortalBuiltinDispatch` / `@SandboxImpl` annotated classes are not on the broker's runtime classpath.
+1. **Plugin classpath isolation (was: open question #2):** Use a **separate Gradle module** (`:portal-worker`), not a `workerMain` source set. The broker must depend on `:portal` only — **not** `runtimeOnly(:portal-worker)`. Worker JVMs must be spawned with a **curated** classpath (`:portal` + `:portal-worker` + plugin modules), not a copy of the broker's `java.class.path`. A Gradle/ArchUnit check must assert `PortalBuiltinDispatch` / `@SandboxImpl` are absent from the broker runtime. As of the first `:portal-worker` split, `:portal` still uses `runtimeOnly(project(":portal-worker"))` and `JvmChildProcess` copies the parent classpath; see issue-20260823-121500.
 
 ## Phase 2: Plugin Classpath Layout
 

@@ -2,7 +2,7 @@
 title: SupervisorDaemonManager fails to catch throwable during daemon execution leading
   to silently dead supervisor
 type: issue
-status: open
+status: resolved
 priority: high
 labels:
 - security
@@ -19,6 +19,15 @@ github_issue: 342
 
 ## Context
 The enforcer spawns the `SupervisorDaemon` to handle out-of-process seccomp notifications.
+
+**Resolution (2026-08-23, verified in code):** Implemented via the stdout pump lifecycle:
+`SupervisorDaemonManager` starts `JvmChildProcess.startStdoutPump` whose `onStreamClosed` callback
+detects daemon death, logs `SEVERE` with exit code and dumps the last daemon log lines
+(`[SUPERVISOR-DAEMON-CRASH-LOG]`), then invokes `onUnexpectedExit(exitCode)` whose default is
+`Runtime.halt(1)` — fail closed by design (a dead supervisor must never leave tracees silently
+stranded; halting is preferable to an unbounded USER_NOTIF deadlock). A JVM shutdown hook also
+`destroyForcibly()`es the daemon. No heartbeat was needed: stdout EOF is the liveness signal.
+Stale issue file resolved without code change.
 
 ## The Bug
 When `SupervisorDaemon` or `SupervisorDaemonEngine` crashes due to a structural error (e.g. OOM, ABI mismatch, native crash) the Java Process exits.

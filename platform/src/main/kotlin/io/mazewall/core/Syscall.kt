@@ -50,6 +50,7 @@ enum class Syscall {
     CHROOT,
     IOCTL,
     PRCTL,
+    ARCH_PRCTL,
     READ,
     WRITE,
     CLOSE,
@@ -469,6 +470,7 @@ internal object OtherSyscallMapper {
             Syscall.CHROOT -> arch.chroot
             Syscall.IOCTL -> arch.ioctl
             Syscall.PRCTL -> arch.prctl
+            Syscall.ARCH_PRCTL -> arch.archPrctl
             Syscall.FUTEX -> arch.futex
             Syscall.SCHED_YIELD -> arch.sched_yield
             Syscall.GETRANDOM -> arch.getrandom

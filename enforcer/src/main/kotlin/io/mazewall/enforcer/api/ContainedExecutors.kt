@@ -16,6 +16,8 @@ import io.mazewall.PolicyPresets
 import io.mazewall.Uncompiled
 import io.mazewall.compile
 import io.mazewall.core.SandboxedPath
+import io.mazewall.core.isUnderAny
+import io.mazewall.core.resolveReal
 import io.mazewall.core.SeccompAction
 import io.mazewall.core.Syscall
 import io.mazewall.enforcer.internal.ContainedExecutorWrapper
@@ -202,6 +204,29 @@ object ContainedExecutors {
     }
 
     @Suppress("TooGenericExceptionCaught", "noGenericExceptionCatchingInEnforcer")
+    /**
+     * Concurrency model (issue-20260823-135557 resolution):
+     *
+     * - [ContainmentStateRegistry.threadState] is a true ThreadLocal; only the current thread ever
+     *   reads or writes its own state. Therefore the gap between the Landlock critical section
+     *   ([applyLandlockIfNecessary]) and the Seccomp critical section ([installSeccompFilter]) —
+     *   both individually guarded by [processLock] — cannot be corrupted by concurrent
+     *   thread-scoped installs on other threads: their interleaved steps touch exclusively their
+     *   own ThreadLocal state.
+     * - Process-wide installs serialize fully per phase on the same lock. Two process-wide installs
+     *   may interleave phases (P1.landlock, P2.landlock, P2.seccomp, P1.seccomp), but both Landlock
+     *   self-restriction and TSYNC seccomp are monotonic-restrictive with union semantics, so the
+     *   final kernel state is order-independent; [io.mazewall.enforcer.state.ContainmentStateRegistry]
+     *   process state is updated atomically per phase.
+     * - Catch-block rollback restores only this thread's state from the pre-install snapshot,
+     *   which stays valid because no other thread can write it. The
+     *   `landlockSuccessfullyApplied` guard prevents reverting past irreversible Landlock changes.
+     * - Merging the two phases into one critical section was evaluated and rejected: Java monitors
+     *   are reentrant (no self-deadlock either way), and the worst-case lock-hold time is already
+     *   bounded by the supervised-filter handshake that runs inside the lock today. The daemon
+     *   spawn ([io.mazewall.enforcer.supervisor.SupervisorDaemonManager.getOrSpawnSharedDaemon])
+     *   deliberately happens before any locking.
+     */
     private fun installInternal(
         processWide: Boolean,
         policy: PolicyDefinition<*>,
@@ -274,7 +299,7 @@ object ContainedExecutors {
                         ContainmentStateRegistry.threadState
                     }).landlockPolicy != null
             if (fallback != Platform.FallbackBehavior.FAIL) {
-                if (fallback == Platform.FallbackBehavior.valueOf("WARN_AND_BYPASS")) {
+                if (fallback == Platform.FallbackBehavior.WARN_AND_BYPASS) {
                     if (landlockInForce) {
                         logger.warning(
                             "Seccomp installation failed after Landlock applied: ${t.message}. " +
@@ -365,7 +390,10 @@ object ContainedExecutors {
             val landlockPolicy = state.landlockPolicy
 
             if (landlockPolicy != null) {
-                // Assert that we are not trying to expand Landlock filesystem permissions on nested containment
+                // Assert that we are not trying to expand Landlock filesystem permissions on nested containment.
+                // Comparison is realpath-resolved on both sides: Landlock rules bind to dentries, so
+                // syntactically-distinct-but-physically-equal paths must compare equal, and any
+                // unresolvable operand fails the subset check conservatively (fail closed).
                 val readsSubset = isPathSubset(landlockPolicy.allowedFsReadPaths, policy.allowedFsReadPaths)
                 val writesSubset = isPathSubset(landlockPolicy.allowedFsWritePaths, policy.allowedFsWritePaths)
                 if (!readsSubset || !writesSubset) {
@@ -404,17 +432,22 @@ object ContainedExecutors {
      */
     private fun needsLandlock(policy: PolicyDefinition<*>) = policy.enforceLandlock
 
+    /**
+     * True when every [childPaths] entry lies beneath some [parentPaths] entry.
+     *
+     * Uses the canonical [io.mazewall.core.isUnder] containment predicate with realpath resolution
+     * on both sides (see [io.mazewall.core.resolveReal]): Landlock binds rules to dentries, so a
+     * symlinked spelling of an already-allowed directory must compare equal, while an operand that
+     * cannot be resolved compares only by its syntactic value — two different spellings that fail
+     * resolution identically still match, and anything else is rejected (fail closed).
+     */
     private fun isPathSubset(
         parentPaths: Set<SandboxedPath>,
         childPaths: Set<SandboxedPath>,
     ): Boolean {
         if (childPaths.isEmpty()) return true
-        val parents = parentPaths.map { java.nio.file.Paths.get(it.value) }
-        return parents.isNotEmpty() &&
-            childPaths.all { childPath ->
-                val child = java.nio.file.Paths.get(childPath.value)
-                parents.any { parent -> child.startsWith(parent) }
-            }
+        val resolvedParents = parentPaths.map { it.resolveReal() }.toSet()
+        return childPaths.all { child -> child.resolveReal().isUnderAny(resolvedParents) }
     }
 
     private fun handleUnsupportedPlatform() {
@@ -431,7 +464,7 @@ object ContainedExecutors {
     }
 
     private fun armIntelCet() {
-        if (!Platform.isLinux || !Platform.isArchitectureSupported() || io.mazewall.core.Arch.current() != io.mazewall.core.Arch.AMD64 || !Platform.featureMatrix.cetSupported) {
+        if (!Platform.isCetPlatformEligible || !Platform.featureMatrix.cetSupported) {
             handleCetUnsupported("Intel CET is requested but the current platform/architecture/CPU does not support it.")
             return
         }

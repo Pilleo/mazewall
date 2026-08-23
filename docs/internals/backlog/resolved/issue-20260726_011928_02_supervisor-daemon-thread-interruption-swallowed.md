@@ -2,7 +2,7 @@
 title: SupervisorSessionHandler loop swallows ThreadInterruptedException breaking
   graceful shutdown
 type: issue
-status: open
+status: resolved
 priority: high
 labels:
 - security
@@ -20,6 +20,14 @@ target_files:
 
 ## Context
 When reading JVM responses or reading notifications in the supervisor daemon loop, `EINTR` (interrupted system call) is often returned when the process is signaled, or when a shutdown is requested.
+
+**Resolution (2026-08-23, verified in code):** Current `SupervisorSessionHandler` poll/validation
+loops check `Thread.currentThread().isInterrupted` at the top of each iteration, and catch
+`InterruptedException` by re-interrupting and breaking out of deadline-bounded loops
+(`pollForJvmValidation`, lines ~455-495); no broad `catch (Throwable)` remains around interruption
+paths. Daemon-side shutdown does not rely on thread interruption at all (socket command byte +
+POLLHUP detection), so EINTR retries cannot mask shutdown. Remaining InterruptedException handlers
+across `enforcer/src/main` all re-interrupt or rethrow. Stale issue file resolved without code change.
 
 ## The Bug
 In `SupervisorSessionHandler.kt`, `readAndHandleJvmResponse`, there is a progressive backoff loop:

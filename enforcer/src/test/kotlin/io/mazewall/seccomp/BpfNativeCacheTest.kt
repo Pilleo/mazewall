@@ -1,5 +1,6 @@
 package io.mazewall.seccomp
 
+import io.mazewall.BpfNativeCache
 import io.mazewall.LinuxNative
 import io.mazewall.MockNativeEngine
 import io.mazewall.MockNativeMemory

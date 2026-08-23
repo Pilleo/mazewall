@@ -2,7 +2,7 @@
 title: '`IterativeProfiler` infinite retry loop and failure on disjoint prefix file
   paths'
 severity: HIGH
-status: open
+status: resolved
 priority: high
 dependencies: []
 target_files:
@@ -28,21 +28,11 @@ If `currentPolicy` allowed read to `/var/log`, and a trapped read occurs on `/va
 **Needed:**
 1. Implement a fix based on the issue description.
 
-## Solution Options
-
-### Option A — Refactor implementation
-Implement the recommendation described in the Needed section to resolve the issue directly. Target area: `Unknown`
-**Pros:** Resolves the root cause of the issue.
-**Cons:** Requires careful implementation and testing.
-**Risk:** MEDIUM
-**Effort:** small
-
----
-**Chosen:** *(not yet approved — requires human decision)*
-
-**Acceptance Criteria:**
-- [ ] Tests verify the fix works as expected.
-- [ ] Issue is fully resolved in the codebase.
-
-**Implementation Hints:**
-- Ensure you read existing tests and implementation carefully before modifying code.
+**Resolution (2026-08-23):** The hypothesized bug does not exist in the current implementation —
+`updatePolicyForViolation` uses `java.nio.file.Path.startsWith`, which is component-wise:
+`/base/dir-extra` is correctly NOT considered contained under `/base/dir`. A regression test was
+added (`IterativeProfilerTest.test sibling directory with string-prefix name is granted read not
+write`) reproducing the issue's exact scenario and asserting read-grant + convergence. The check was
+additionally migrated onto the canonical containment predicate `io.mazewall.core.isUnder`
+(issue-20260823-135558) with explicit absolute-normalization of the trapped path, so relative or
+unnormalized trapped paths can never produce false containment positives either.

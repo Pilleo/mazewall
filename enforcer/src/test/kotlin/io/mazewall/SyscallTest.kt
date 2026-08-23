@@ -148,6 +148,7 @@ class SyscallTest {
         Syscall.CHROOT to arch.chroot,
         Syscall.IOCTL to arch.ioctl,
         Syscall.PRCTL to arch.prctl,
+        Syscall.ARCH_PRCTL to arch.archPrctl,
         Syscall.RT_SIGACTION to arch.rt_sigaction,
         Syscall.RT_SIGPROCMASK to arch.rt_sigprocmask,
         Syscall.RT_SIGRETURN to arch.rt_sigreturn,

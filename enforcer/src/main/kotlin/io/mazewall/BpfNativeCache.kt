@@ -1,5 +1,6 @@
-package io.mazewall.seccomp
+package io.mazewall
 
+import io.mazewall.seccomp.BpfInstruction
 import io.mazewall.enforcer.api.*
 import io.mazewall.enforcer.state.*
 import io.mazewall.enforcer.diagnostics.*
@@ -21,15 +22,22 @@ import java.util.concurrent.ConcurrentHashMap
  */
 internal object BpfNativeCache {
     private val sharedArena = NativeArena.ofShared()
-    private val filterCache = ConcurrentHashMap<List<BpfInstruction>, ManagedSegment>()
+    private val filterCache = ConcurrentHashMap<NativeCacheKey, ManagedSegment>()
+
+    /**
+     * Cache key includes [LinuxNative.engineIdentity]: native segments produced while a mock
+     * engine was active are garbage for the real engine and must never be reused
+     * (kernel-visible as spurious seccomp EINVAL).
+     */
+    private data class NativeCacheKey(val filters: List<BpfInstruction>, val engine: Any)
 
     /**
      * Gets a cached [ManagedSegment] for the given [filters], or computes it using
      * [LinuxNative.memory.newSockFProg] if not present.
      */
     fun getOrCompute(filters: List<BpfInstruction>): ManagedSegment {
-        return filterCache.computeIfAbsent(filters) {
-            with(sharedArena) { LinuxNative.memory.newSockFProg(it) }
+        return filterCache.computeIfAbsent(NativeCacheKey(filters, LinuxNative.engineIdentity)) {
+            with(sharedArena) { LinuxNative.memory.newSockFProg(it.filters) }
         }
     }
 

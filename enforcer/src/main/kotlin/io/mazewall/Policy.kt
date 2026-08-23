@@ -252,35 +252,23 @@ public class Policy<out S : PolicyScope, out State : PolicyState> internal const
             return this
         }
 
-        public fun allowFsRead(path: String): Builder<PolicyScope.ThreadLocalOnly> {
-            internalBuilder.allowFsRead(path)
-            @Suppress("UNCHECKED_CAST")
-            return this as Builder<PolicyScope.ThreadLocalOnly>
-        }
+        // Soundness note (issue-20260823-135554): FS-adding methods return a NEW wrapper around
+        // the copy-on-promoted internal builder. The receiver is never re-typed via unchecked
+        // casts, so aliasing cannot contradict a builder's declared scope.
+        public fun allowFsRead(path: String): Builder<PolicyScope.ThreadLocalOnly> =
+            Builder(internalBuilder.allowFsRead(path))
 
-        public fun allowFsRead(path: SandboxedPath): Builder<PolicyScope.ThreadLocalOnly> {
-            internalBuilder.allowFsRead(path)
-            @Suppress("UNCHECKED_CAST")
-            return this as Builder<PolicyScope.ThreadLocalOnly>
-        }
+        public fun allowFsRead(path: SandboxedPath): Builder<PolicyScope.ThreadLocalOnly> =
+            Builder(internalBuilder.allowFsRead(path))
 
-        public fun allowJvmClasspath(): Builder<PolicyScope.ThreadLocalOnly> {
-            internalBuilder.allowJvmClasspath()
-            @Suppress("UNCHECKED_CAST")
-            return this as Builder<PolicyScope.ThreadLocalOnly>
-        }
+        public fun allowJvmClasspath(): Builder<PolicyScope.ThreadLocalOnly> =
+            Builder(internalBuilder.allowJvmClasspath())
 
-        public fun allowFsWrite(path: String): Builder<PolicyScope.ThreadLocalOnly> {
-            internalBuilder.allowFsWrite(path)
-            @Suppress("UNCHECKED_CAST")
-            return this as Builder<PolicyScope.ThreadLocalOnly>
-        }
+        public fun allowFsWrite(path: String): Builder<PolicyScope.ThreadLocalOnly> =
+            Builder(internalBuilder.allowFsWrite(path))
 
-        public fun allowFsWrite(path: SandboxedPath): Builder<PolicyScope.ThreadLocalOnly> {
-            internalBuilder.allowFsWrite(path)
-            @Suppress("UNCHECKED_CAST")
-            return this as Builder<PolicyScope.ThreadLocalOnly>
-        }
+        public fun allowFsWrite(path: SandboxedPath): Builder<PolicyScope.ThreadLocalOnly> =
+            Builder(internalBuilder.allowFsWrite(path))
 
         /**
          * Advanced: allow `mmap`/`mprotect` `PROT_EXEC`. Prefer

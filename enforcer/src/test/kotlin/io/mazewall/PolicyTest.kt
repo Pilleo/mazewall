@@ -537,4 +537,37 @@ class PolicyTest {
             Policy.combine(traceDefault, errnoDefault).defaultAction,
         )
     }
+
+    @Test
+    fun `fs promotion must not alias the original builder`(@TempDir tempDir: java.nio.file.Path) {
+        // Regression for issue-20260823-135554: the FS-adding methods used to re-type and mutate
+        // the SAME builder instance, so a ProcessWideSafe-typed reference could silently build a
+        // definition containing Landlock filesystem rules.
+        val rPath = tempDir.resolve("read").toString()
+        val base = Policy.builder()
+
+        base.allowFsRead(rPath)
+        base.allowJvmClasspath()
+
+        val untouched = base.build()
+        assertFalse(untouched.definition.allowedFsReadPaths.isNotEmpty(), "Original builder must not gain FS paths")
+        assertTrue(untouched.definition.allowedFsWritePaths.isEmpty())
+    }
+
+    @Test
+    fun `promoted builder carries fs state and stays thread-local typed`(@TempDir tempDir: java.nio.file.Path) {
+        val rPath = tempDir.resolve("r").toString()
+        val wPath = tempDir.resolve("w").toString()
+
+        val promoted: Policy<PolicyScope.ThreadLocalOnly, Uncompiled> =
+            Policy
+                .builder()
+                .defaultAction(SeccompAction.ACT_ALLOW)
+                .allowFsRead(rPath)
+                .allowFsWrite(wPath)
+                .build()
+
+        assertTrue(promoted.definition.allowedFsReadPaths.any { it.value == SandboxedPath.of(rPath, true).value })
+        assertTrue(promoted.definition.allowedFsWritePaths.any { it.value == SandboxedPath.of(wPath, true).value })
+    }
 }

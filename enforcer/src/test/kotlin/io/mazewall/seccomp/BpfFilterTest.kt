@@ -8,6 +8,7 @@ import io.mazewall.core.Syscall
 import io.mazewall.ffi.NativeConstants
 import org.junit.jupiter.api.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class BpfFilterTest {
@@ -72,21 +73,19 @@ class BpfFilterTest {
                 .build()
         val filter = BpfFilter.build(arch, policy.definition).instructions
 
-        // Find JEQ read -> RET ALLOW
-        val readNr = Syscall.READ.numberFor(arch)
-        var found = false
-        for (i in filter.indices) {
-            val f = filter[i]
-            if (f.code == 0x15.toShort() && f.k == readNr) {
-                // jt=0 (match), next instruction should be RET ALLOW
-                val next = filter[i + 1]
-                if (next.code == 0x06.toShort() && next.k == NativeConstants.SECCOMP_RET_ALLOW) {
-                    found = true
-                    break
-                }
-            }
-        }
-        assertTrue(found, "Filter should return ALLOW for listed syscall in ALLOW_LIST mode")
+        // Simulate the filter for READ: an allow-list policy must return ALLOW (not fall through
+        // to the default errno action, and not match any other NR).
+        assertEquals(
+            NativeConstants.SECCOMP_RET_ALLOW,
+            evalBpf(filter, Syscall.READ.numberFor(arch)),
+            "Filter should return ALLOW for listed syscall in ALLOW_LIST mode",
+        )
+        // Guard against accidental nr==0 aliasing: a different syscall must get the default action.
+        assertEquals(
+            327681, // SECCOMP_RET_ERRNO | EPERM(1)
+            evalBpf(filter, Syscall.CONNECT.numberFor(arch)),
+            "Unlisted syscall must receive the default errno action",
+        )
     }
 
     @Test
@@ -361,60 +360,31 @@ class BpfFilterTest {
         assertEquals(targetRetAction, sharedRetInst.k, "Shared RET instruction should return the blocked action")
     }
 
-    private fun evalBpf(instructions: List<BpfInstruction>, syscallNr: Int): Int {
-        var pc = 0
-        var accumulator = 0
-        while (pc < instructions.size) {
-            val inst = instructions[pc]
-            when (inst.code) {
-                0x20.toShort() -> { // BPF_LD_ABS
-                    if (inst.k == 0) { // SECCOMP_DATA_NR_OFFSET
-                        accumulator = syscallNr
-                    } else if (inst.k == 4) { // SECCOMP_DATA_ARCH_OFFSET
-                        accumulator = Arch.AUDIT_ARCH_X86_64
-                    } else {
-                        accumulator = 0
-                    }
-                    pc++
-                }
-                0x15.toShort() -> { // BPF_JEQ
-                    if (accumulator == inst.k) {
-                        pc += inst.jt.toInt() + 1
-                    } else {
-                        pc += inst.jf.toInt() + 1
-                    }
-                }
-                0x25.toShort() -> { // BPF_JGT
-                    val accUnsigned = accumulator.toLong() and 0xFFFFFFFFL
-                    val kUnsigned = inst.k.toLong() and 0xFFFFFFFFL
-                    if (accUnsigned > kUnsigned) {
-                        pc += inst.jt.toInt() + 1
-                    } else {
-                        pc += inst.jf.toInt() + 1
-                    }
-                }
-                0x45.toShort() -> { // BPF_JSET
-                    val accUnsigned = accumulator.toLong() and 0xFFFFFFFFL
-                    val kUnsigned = inst.k.toLong() and 0xFFFFFFFFL
-                    if ((accUnsigned and kUnsigned) != 0L) {
-                        pc += inst.jt.toInt() + 1
-                    } else {
-                        pc += inst.jf.toInt() + 1
-                    }
-                }
-                0x54.toShort() -> { // BPF_ALU_AND
-                    accumulator = accumulator and inst.k
-                    pc++
-                }
-                0x06.toShort() -> { // BPF_RET
-                    return inst.k
-                }
-                else -> {
-                    pc++
-                }
-            }
+    /**
+     * Delegates to the platform reference interpreter — the single semantic oracle shared by
+     * unit tests, differential kernel tests, and :profiler (issue-20260823-171500/172100).
+     */
+    private fun evalBpf(instructions: List<BpfInstruction>, syscallNr: Int): Int =
+        requireNotNull(BpfSimulator.simulate(instructions, syscallNr, arch)) {
+            "Compiled program fell through without RET for nr=$syscallNr"
         }
-        throw IllegalStateException("BPF program fell through without returning")
+
+    @Test
+    fun `JA instructions encode skip count in k with zero jt and jf`() {
+        // Regression: classic BPF JA jumps by K. Emitting the offset in jt (with k=0) makes the
+        // filter fall through into the next RET block for every syscall.
+        val policy = Policy.builder()
+            .defaultAction(io.mazewall.core.SeccompAction.ACT_ALLOW)
+            .block(Syscall.CONNECT)
+            .build()
+        val filter = BpfFilter.build(arch, policy.definition).instructions
+        val jaInstructions = filter.filter { it.code == 0x05.toShort() }
+        assertTrue(jaInstructions.isNotEmpty(), "Expected at least one JA jump in a blacklist filter")
+        for (ja in jaInstructions) {
+            assertEquals(0.toShort(), ja.jt, "JA jt must be zero")
+            assertEquals(0.toShort(), ja.jf, "JA jf must be zero")
+            assertTrue(ja.k > 0, "JA must carry its forward skip count in k")
+        }
     }
 
     @Test
@@ -463,6 +433,14 @@ class BpfFilterTest {
             }
             if (rtSigreturnNr >= 0) {
                 assertTrue(criticalNrs.contains(rtSigreturnNr), "JVM critical NRs for $a must contain rt_sigreturn")
+            }
+
+            // arch_prctl must be whitelisted on every architecture that provides it (x86_64 only).
+            val archPrctlNr = Syscall.ARCH_PRCTL.numberFor(a)
+            if (archPrctlNr >= 0) {
+                assertTrue(criticalNrs.contains(archPrctlNr), "JVM critical NRs for $a must contain arch_prctl")
+            } else {
+                assertFalse(criticalNrs.contains(archPrctlNr), "$a does not provide arch_prctl; it must not appear")
             }
         }
     }

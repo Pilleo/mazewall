@@ -29,5 +29,8 @@ open_questions: false
 Decision documented in [process-portal-design.md](../../designs/enforcer/process-portal-design.md) § "Phase 2: Plugin Classpath Layout": **Use a separate Gradle module (`:portal-worker`)** rather than a source set. This provides cleaner isolation: the broker depends only on `:portal` (stubs + interfaces), while workers are spawned with `:portal-worker` + plugin modules on their classpath. Gradle's dependency resolution guarantees the broker never loads worker classes.
 
 ## Remaining Tasks
-1. Create `:portal-worker` module with guest implementations and worker dispatcher.
-2. Implement Gradle check or ArchUnit test to verify `PortalBuiltinDispatch` / `@SandboxImpl` classes are not on the broker runtime classpath.
+1. `:portal-worker` exists and `PortalWorkerMain` / `PortalBuiltinDispatch` moved. **Isolation is still incomplete.**
+2. Remove `:portal` `runtimeOnly(project(":portal-worker"))`. That puts guest classes on the **broker** runtime (and on `:portal:test` / `:portal:integrationTest`).
+3. Stop spawning workers with `JvmChildProcess` copying `System.getProperty("java.class.path")`. Give `JvmChildSpec` a curated worker classpath (`:portal` + `:portal-worker` + plugins only).
+4. Gradle/ArchUnit check that must **fail** today: `Class.forName("io.mazewall.portal.worker.PortalBuiltinDispatch")` from `:portal` test runtime. The design claim that Gradle “guarantees the broker never sees worker classes” is currently false.
+5. Codegen still writes host stub and worker dispatcher into one `outputDir`; it does not generate stubs into `:portal` and dispatchers into `:portal-worker`.

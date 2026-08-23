@@ -116,8 +116,6 @@ object Landlock {
     /** Apply ruleset to all threads of the process. ABI v8+ (Linux 7.0). */
     private const val LANDLOCK_RESTRICT_SELF_TSYNC = (1L shl 3)
 
-    private const val ERRNO_EINVAL = 22
-    private const val ERRNO_ELOOP = 40
     private const val ABI_V3 = 3
     private const val ABI_V5 = 5
 
@@ -433,7 +431,7 @@ object Landlock {
         path: String,
         errno: Int,
     ) {
-        if (errno == ERRNO_ELOOP) {
+        if (errno == NativeConstants.ELOOP) {
             logger.warning("Path $path is a symlink and was rejected (O_NOFOLLOW). Use the resolved real path instead.")
         } else {
             logger.warning("Could not open path $path for landlock rule: errno $errno")
@@ -462,7 +460,7 @@ object Landlock {
         when (val res = addRuleToRuleset(ruleset, pathFd, access)) {
             is AddRuleResult.Success -> {}
             is AddRuleResult.Error -> {
-                if (res.errno == ERRNO_EINVAL) {
+                if (res.errno == NativeConstants.EINVAL) {
                     logger.warning("landlock_add_rule rejected $path (EINVAL) — path may be a symlink or unsupported inode type.")
                 } else {
                     throw IllegalStateException("landlock_add_rule failed for $path with errno ${res.errno}")

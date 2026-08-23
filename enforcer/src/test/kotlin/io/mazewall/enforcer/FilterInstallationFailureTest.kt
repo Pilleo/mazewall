@@ -23,6 +23,7 @@ class FilterInstallationFailureTest {
 
     @AfterEach
     fun tearDown() {
+        System.clearProperty("io.mazewall.fallback")
         LinuxNative.resetToDefault()
         Platform.resetToDefault()
         ContainmentStateRegistry.threadState = ContainerState()
@@ -105,5 +106,40 @@ class FilterInstallationFailureTest {
 
         // VERIFY: state was NOT reverted because Landlock was applied and is irreversible
         assertNotNull(ContainmentStateRegistry.threadState.landlockPolicy)
+    }
+
+    @Test
+    fun `test WARN_AND_BYPASS failure path returns non-installed receipt with landlock in force`() {
+        System.setProperty("io.mazewall.fallback", "WARN_AND_BYPASS")
+        val mockPlatform = object : PlatformProvider by RealPlatformProvider {
+            override fun getOsName(): String = "Linux"
+            override fun getLandlockAbiVersion(): Int = 5
+            override fun hasKernelSeccompSupport(): Boolean = true
+            override fun checkSeccompSanity(): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
+                LinuxNative.SyscallResult.Error(22, -1)
+        }
+        Platform.setProvider(mockPlatform)
+
+        val mockEngine = MockNativeEngine()
+
+        // Policy WITH filesystem paths — Landlock WILL be applied before the seccomp failure
+        val policy = Policy.builder().allowFsRead("/tmp").build()
+
+        mockEngine.onSyscall = { nr, _, _, _, _, _, _ ->
+            if (nr == io.mazewall.core.Arch.current().seccompSyscallNumber.toLong()) {
+                LinuxNative.SyscallResult.Error(22, -1) // EINVAL
+            } else {
+                LinuxNative.SyscallResult.Success(42L)
+            }
+        }
+
+        LinuxNative.setEngine(mockEngine)
+
+        val receipt = ContainedExecutors.installOnCurrentThread(policy)
+
+        // VERIFY: no exception is thrown under WARN_AND_BYPASS; receipt reports uncontained,
+        // but Landlock remains in force (irreversible).
+        assertEquals(false, receipt.installed)
+        assertEquals(true, receipt.landlockApplied)
     }
 }
