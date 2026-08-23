@@ -790,6 +790,13 @@ class "FilterInstallationPlanner" as io.mazewall.enforcer.engine.FilterInstallat
   +FilterPlan calculateNewFilter(PolicyDefinition<?>, ContainerState)
   +void verifyFilterDepth(int)
 }
+class "JvmFloorPresets" as io.mazewall.enforcer.engine.JvmFloorPresets {
+  + {static}JvmFloorPresets INSTANCE
+  __
+  +Syscall[] getBOOTSTRAP_READ_CLOSURE()
+  +Syscall[] getTHREAD_COORDINATION_CLOSURE()
+  +Syscall[] fullJvmFloor()
+}
 class "JvmFloorWorkload" as io.mazewall.enforcer.engine.JvmFloorWorkload {
   + {static}JvmFloorWorkload INSTANCE
   __
@@ -1900,6 +1907,7 @@ io.mazewall.enforcer.api.SandboxDispatcher --> io.mazewall.enforcer.api.SandboxD
 io.mazewall.enforcer.diagnostics.ContainmentViolationDetector --> io.mazewall.enforcer.diagnostics.ViolationMatcher
 io.mazewall.enforcer.diagnostics.ContainmentViolationDetector --> io.mazewall.enforcer.diagnostics.ContainmentViolationDetector
 io.mazewall.enforcer.engine.FilterInstallationPlanner --> io.mazewall.enforcer.engine.FilterInstallationPlanner
+io.mazewall.enforcer.engine.JvmFloorPresets --> io.mazewall.enforcer.engine.JvmFloorPresets
 io.mazewall.enforcer.engine.JvmFloorWorkload --> io.mazewall.enforcer.engine.JvmFloorWorkload
 io.mazewall.enforcer.internal.ContainedExecutorWrapper --> io.mazewall.enforcer.supervisor.StacktraceScopingPolicy
 io.mazewall.enforcer.internal.ContainedExecutorWrapper --> io.mazewall.PolicyDefinition

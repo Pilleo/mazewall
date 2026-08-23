@@ -279,13 +279,13 @@ class IssueTemplateGeneratorTest {
     }
 
     @Test
-    fun clarifierClosesQuestionsUsingStrongModel() {
-        val weak = ChatModel { _, _ -> """{"questions":["LRU or FIFO?"]}""" }
-        val strong = ChatModel { _, _ ->
-            """{"context":"Unbounded map grows forever.","needed":"1. Cap size.\n2. Add a unit test."}"""
-        }
-        val filled = IssueClarifier.clarify(
-            request = IssueScaffoldRequest(
+    fun tryClarifyKeepsDraftWhenAcpMissingOrFails() {
+        val draft = IssueTemplateGenerator(
+            repoRoot = tempDir,
+            backlogRoot = File(tempDir, "docs/internals/backlog"),
+            clock = { Instant.parse("2026-08-23T18:30:00Z") },
+        ).scaffold(
+            IssueScaffoldRequest(
                 title = "Cap cache",
                 category = "code_health",
                 severity = "MEDIUM",
@@ -296,14 +296,163 @@ class IssueTemplateGeneratorTest {
                 symbols = emptyList(),
                 dependencies = emptyList(),
             ),
-            files = emptyList(),
+            write = false,
+        )
+        val warnings = mutableListOf<String>()
+        val skipped = IssueClarifier.tryClarify(
+            draft = draft,
             repoRoot = tempDir,
+            scratchDir = File(tempDir, "scratch"),
+            weak = null,
+            strong = null,
+            warn = { warnings += it },
+        )
+        assertTrue(skipped.markdown.contains("FILL:"))
+        assertEquals("skipped", skipped.request.reviewVerdict)
+
+        val failed = IssueClarifier.tryClarify(
+            draft = draft,
+            repoRoot = tempDir,
+            scratchDir = File(tempDir, "scratch2"),
+            weak = ChatModel { _, _ -> error("boom") },
+            strong = ChatModel { _, _ -> error("nope") },
+            warn = { warnings += it },
+        )
+        assertTrue(failed.markdown.contains("FILL:"))
+        assertTrue(warnings.any { it.contains("boom") })
+    }
+
+    @Test
+    fun weakAuthorsThenIndependentStrongReview() {
+        var strongSawAuthorPrompt = false
+        val weak = ChatModel { _, _ ->
+            """{"context":"Unbounded map grows forever.","needed":"1. Cap size.\n2. Add a unit test.","extra_files":[]}"""
+        }
+        val strong = ChatModel { system, user ->
+            if (system.contains("author") || user.contains("Improve this issue")) {
+                strongSawAuthorPrompt = true
+            }
+            """{"verdict":"approved","comments":[]}"""
+        }
+        val draft = IssueTemplateGenerator(
+            repoRoot = tempDir,
+            backlogRoot = File(tempDir, "docs/internals/backlog"),
+            clock = { Instant.parse("2026-08-23T18:30:00Z") },
+        ).scaffold(
+            IssueScaffoldRequest(
+                title = "Cap cache",
+                category = "code_health",
+                severity = "MEDIUM",
+                priority = "high",
+                component = "enforcer",
+                explicitFiles = listOf("enforcer/a.kt"),
+                explicitModules = listOf(":enforcer"),
+                symbols = emptyList(),
+                dependencies = emptyList(),
+            ),
+            write = false,
+        )
+        val out = IssueClarifier.tryClarify(
+            draft = draft,
+            repoRoot = tempDir,
+            scratchDir = File(tempDir, "scratch3"),
             weak = weak,
             strong = strong,
         )
-        assertTrue(filled.openQuestionItems.isEmpty())
-        assertEquals("Unbounded map grows forever.", filled.contextBody)
-        assertTrue(filled.neededBody!!.contains("Cap size"))
+        assertFalse(strongSawAuthorPrompt)
+        assertEquals("approved", out.request.reviewVerdict)
+        assertTrue(out.markdown.contains("Unbounded map grows forever."))
+        assertFalse(out.markdown.contains("FILL:"))
+        assertContains(out.markdown, "review_verdict: approved")
+    }
+
+    @Test
+    fun weakFillOutputIsRejectedByVerifier() {
+        val weak = ChatModel { _, _ -> """{"context":"FILL: x","needed":"FILL: y"}""" }
+        val draft = IssueTemplateGenerator(
+            repoRoot = tempDir,
+            backlogRoot = File(tempDir, "docs/internals/backlog"),
+            clock = { Instant.parse("2026-08-23T18:30:00Z") },
+        ).scaffold(
+            IssueScaffoldRequest(
+                title = "Cap cache",
+                category = "code_health",
+                severity = "MEDIUM",
+                priority = "high",
+                component = "enforcer",
+                explicitFiles = listOf("enforcer/a.kt"),
+                explicitModules = listOf(":enforcer"),
+                symbols = emptyList(),
+                dependencies = emptyList(),
+            ),
+            write = false,
+        )
+        val out = IssueClarifier.tryClarify(
+            draft = draft,
+            repoRoot = tempDir,
+            scratchDir = File(tempDir, "scratch4"),
+            weak = weak,
+            strong = ChatModel { _, _ -> """{"verdict":"approved","comments":[]}""" },
+        )
+        assertTrue(out.markdown.contains("FILL: what is wrong"))
+    }
+
+    @Test
+    fun clarifyModelsNeverUsesApiKeys() {
+        val pair = ClarifyModels.resolve { name ->
+            if (name.contains("KEY")) "secret" else null
+        }
+        assertEquals(null, pair.first)
+        assertEquals(null, pair.second)
+    }
+
+    @Test
+    fun acpCommandResolverReadsEnvAndPresets() {
+        val env = mapOf("ISSUE_CLARIFY_ACP" to "agy --acp")
+        val pair = AcpCommandResolver.resolvePair { env[it] }
+        assertEquals(listOf("agy", "--acp"), pair?.first)
+        assertEquals(listOf("agy", "--acp"), pair?.second)
+        assertEquals(null, AcpCommandResolver.resolvePair { null })
+    }
+
+    @Test
+    fun acpSessionCollectsPromptTextAndCancelsPermissions() {
+        val clientToAgent = java.io.PipedOutputStream()
+        val agentIn = java.io.PipedInputStream(clientToAgent, 65536)
+        val agentToClient = java.io.PipedOutputStream()
+        val clientIn = java.io.PipedInputStream(agentToClient, 65536)
+        val agentOut = java.io.BufferedWriter(java.io.OutputStreamWriter(agentToClient, Charsets.UTF_8))
+        val agentReader = java.io.BufferedReader(java.io.InputStreamReader(agentIn, Charsets.UTF_8))
+        val agent = Thread {
+            fun reply(line: String) {
+                agentOut.write(line)
+                agentOut.write("\n")
+                agentOut.flush()
+            }
+            agentReader.readLine()
+            reply("""{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1}}""")
+            agentReader.readLine()
+            agentReader.readLine()
+            reply("""{"jsonrpc":"2.0","id":2,"result":{"sessionId":"s1"}}""")
+            agentReader.readLine()
+            reply("""{"jsonrpc":"2.0","method":"session/update","params":{"update":{"content":{"type":"text","text":"{\"questions\":[]}"}}}}""")
+            reply("""{"jsonrpc":"2.0","id":99,"method":"session/request_permission","params":{}}""")
+            val cancel = agentReader.readLine()
+            check(cancel.contains("cancelled"))
+            reply("""{"jsonrpc":"2.0","id":3,"result":{"stopReason":"end_turn"}}""")
+        }
+        agent.isDaemon = true
+        agent.start()
+        val session = AcpJsonRpcSession(
+            java.io.BufferedWriter(java.io.OutputStreamWriter(clientToAgent, Charsets.UTF_8)),
+            java.io.BufferedReader(java.io.InputStreamReader(clientIn, Charsets.UTF_8)),
+        )
+        session.initialize()
+        val sid = session.newSession()
+        assertEquals("s1", sid)
+        val text = session.prompt(sid, "ask")
+        assertTrue(text.contains("questions"))
+        agent.join(5_000)
     }
 
     @Test

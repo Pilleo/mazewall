@@ -22,12 +22,21 @@ data class IssueScaffoldRequest(
     val openQuestionItems: List<String> = emptyList(),
     val contextBody: String? = null,
     val neededBody: String? = null,
+    val reviewVerdict: String? = null,
+    val reviewComments: List<String> = emptyList(),
 )
 
 data class IssueScaffoldResult(
     val file: File,
     val markdown: String,
     val id: String,
+    val request: IssueScaffoldRequest,
+    val files: List<String>,
+    val modules: List<String>,
+    val verifyCheap: List<String>,
+    val coreLock: Boolean,
+    val instant: ZonedDateTime,
+    val slug: String,
 )
 
 class IssueTemplateGenerator(
@@ -89,20 +98,33 @@ class IssueTemplateGenerator(
         val (instant, dest) = allocateFile(request.category, slug)
         val id = "issue-" + instant.format(ID)
         val verifyCheap = resolvedFiles.mapNotNull { PathModules.verifyCheapCommand(it) }.distinct()
+        val coreLock = resolvedFiles.any { PathModules.isCoreLock(it) }
+        val finalized = request.copy(component = component)
         val markdown = render(
             idInstant = instant,
             slug = slug,
-            request = request.copy(component = component),
+            request = finalized,
             files = resolvedFiles,
             modules = modules,
             verifyCheap = verifyCheap,
-            coreLock = resolvedFiles.any { PathModules.isCoreLock(it) },
+            coreLock = coreLock,
         )
         if (write) {
             dest.parentFile.mkdirs()
             dest.writeText(markdown)
         }
-        return IssueScaffoldResult(file = dest, markdown = markdown, id = id)
+        return IssueScaffoldResult(
+            file = dest,
+            markdown = markdown,
+            id = id,
+            request = finalized,
+            files = resolvedFiles,
+            modules = modules,
+            verifyCheap = verifyCheap,
+            coreLock = coreLock,
+            instant = instant,
+            slug = slug,
+        )
     }
 
     private fun allocateFile(category: String, slug: String): Pair<ZonedDateTime, File> {
@@ -207,6 +229,9 @@ class IssueTemplateGenerator(
                 appendLine("autonomy: \"${request.autonomy}\"")
                 val open = request.openQuestionItems.filter { it.isNotBlank() }
                 appendLine("open_questions: ${open.isNotEmpty()}")
+                if (!request.reviewVerdict.isNullOrBlank()) {
+                    appendLine("review_verdict: ${request.reviewVerdict}")
+                }
                 appendLine("---")
                 appendLine()
                 appendLine("# $badge [Severity: $severity]: ${request.title.trim()}")
@@ -232,6 +257,9 @@ class IssueTemplateGenerator(
                 appendLine()
                 appendLine("**Verification:** `./gradlew :tools:orchestrator:checkBacklog` plus the `verify_cheap` commands above (if any).")
                 appendLine()
+                if (request.reviewComments.isNotEmpty()) {
+                    appendLine("<!-- independent-review: ${request.reviewComments.joinToString(" | ")} -->")
+                }
                 appendLine("<!-- id: issue-${idInstant.format(ID)}  file: issue-${idInstant.format(ID)}-$slug.md -->")
                 appendLine("<!-- Agent: fill Context and Needed; add files/symbols if the impact walk missed them. Do not rename the file. -->")
             }

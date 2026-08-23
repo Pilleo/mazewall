@@ -40,7 +40,7 @@ Agents must not invent issue filenames. Generate a validator-clean file (UTC `is
 ./scripts/new_backlog_issue.sh --dry-run --title "Docs only" --file AGENTS.md --module :tools:orchestrator --component docs
 ```
 
-`--symbol` walks Kotlin sources for the declaration and `*Test`. A TTY adds `--interactive` (open questions, kernel tests, Context/Needed). Agents: `--non-interactive`. Optional `--clarify` (needs `XAI_API_KEY`) has a weak model ask questions and a strong model fill Context/Needed so `open_questions` stays false.
+`--symbol` walks Kotlin sources for the declaration and `*Test`. A TTY adds `--interactive`. Agents: `--non-interactive`. `--clarify` is ACP-only (`ISSUE_CLARIFY_ACP='agy --acp'`): verify → weak author → verify → independent strong review. Missing or failing agents skip that step and still write the issue. No API keys.
 
 ## Running the Orchestrator
 

@@ -48,7 +48,7 @@ Do **not** invent `issue-YYYYMMDD-HHMMSS-*.md` by hand. Run the scaffold so the 
 
 Then replace the `FILL:` sentences under **Context:** and **Needed:**. Do not rename the file. `--symbol` walks Kotlin sources for the type/function and its `*Test`. `--dry-run` prints markdown without writing.
 
-Humans on a TTY are prompted (open questions, `needs_kernel`, Context/Needed). Agents must pass `--non-interactive` (or no TTY) plus flags. Optional `--clarify` runs a weak model to list blocking questions and a strong model to answer them (`XAI_API_KEY` or `GROK_API_KEY`); the file is written with `open_questions: false`.
+Humans on a TTY are prompted (open questions, `needs_kernel`, Context/Needed). Agents must pass `--non-interactive` (or no TTY) plus flags. Optional `--clarify` runs: verify draft → weak ACP fills Context/Needed → verify again → independent strong ACP review (`ISSUE_CLARIFY_ACP='agy --acp'`, `ISSUE_CLARIFY_STRONG_ACP` for a separate reviewer). No API keys. If an ACP agent is missing or fails, the file is still written.
 
 ### 3. Naming & File Placement
 Create a new markdown issue file under the appropriate category subdirectory in `docs/internals/backlog/{category}/`:

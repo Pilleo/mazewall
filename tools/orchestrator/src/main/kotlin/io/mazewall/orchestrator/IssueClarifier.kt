@@ -1,104 +1,163 @@
 package io.mazewall.orchestrator
 
 import java.io.File
-import java.net.URI
-import java.net.http.HttpClient
-import java.net.http.HttpRequest
-import java.net.http.HttpResponse
-import java.time.Duration
 
 fun interface ChatModel {
     fun complete(system: String, user: String): String
 }
 
-class XaiChatModel(
-    private val apiKey: String,
-    private val model: String,
-    private val client: HttpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(30)).build(),
-    private val endpoint: String = System.getenv("XAI_API_URL") ?: "https://api.x.ai/v1/chat/completions",
-) : ChatModel {
-    override fun complete(system: String, user: String): String {
-        val body = """
-            {"model":"$model","messages":[
-              {"role":"system","content":${jsonString(system)}},
-              {"role":"user","content":${jsonString(user)}}
-            ],"temperature":0}
-        """.trimIndent()
-        val request = HttpRequest.newBuilder(URI.create(endpoint))
-            .timeout(Duration.ofMinutes(2))
-            .header("Authorization", "Bearer $apiKey")
-            .header("Content-Type", "application/json")
-            .POST(HttpRequest.BodyPublishers.ofString(body))
-            .build()
-        val response = client.send(request, HttpResponse.BodyHandlers.ofString())
-        require(response.statusCode() in 200..299) {
-            "LLM HTTP ${response.statusCode()}: ${response.body().take(400)}"
-        }
-        return extractAssistantContent(response.body())
-    }
-}
-
 object IssueClarifier {
-    fun clarify(
-        request: IssueScaffoldRequest,
-        files: List<String>,
+    fun tryClarify(
+        draft: IssueScaffoldResult,
+        repoRoot: File,
+        scratchDir: File,
+        weak: ChatModel?,
+        strong: ChatModel?,
+        warn: (String) -> Unit = { System.err.println(it) },
+    ): IssueScaffoldResult {
+        var current = draft
+        val structural = IssueMarkdownVerifier.structural(current.markdown, scratchDir)
+        if (structural.isNotEmpty()) {
+            warn("clarify: draft failed structural check: ${structural.joinToString("; ")}")
+        }
+
+        if (weak == null) {
+            warn("clarify: weak ACP skipped (set ISSUE_CLARIFY_ACP, e.g. 'agy --acp')")
+        } else {
+            try {
+                val improved = authorWithWeak(current, repoRoot, weak)
+                val files = (current.files + improved.explicitFiles).distinct()
+                val withFiles = current.copy(request = improved, files = files)
+                val markdown = reRender(withFiles, improved)
+                val errors = IssueMarkdownVerifier.readyForReview(markdown, scratchDir)
+                if (errors.isEmpty()) {
+                    current = withFiles.copy(markdown = markdown)
+                } else {
+                    warn("clarify: weak ACP output failed verification, keeping draft: ${errors.joinToString("; ")}")
+                }
+            } catch (e: Exception) {
+                warn("clarify: weak ACP skipped: ${e.message ?: e::class.java.simpleName}")
+            }
+        }
+
+        if (strong == null) {
+            warn("clarify: strong ACP review skipped (set ISSUE_CLARIFY_STRONG_ACP or ISSUE_CLARIFY_ACP)")
+            return current.copy(
+                request = current.request.copy(reviewVerdict = "skipped"),
+                markdown = reRender(current, current.request.copy(reviewVerdict = "skipped")),
+            )
+        }
+        return try {
+            val reviewed = reviewWithStrong(current, strong)
+            current.copy(
+                request = reviewed,
+                markdown = reRender(current, reviewed),
+            )
+        } catch (e: Exception) {
+            warn("clarify: strong ACP review skipped: ${e.message ?: e::class.java.simpleName}")
+            val skipped = current.request.copy(reviewVerdict = "skipped")
+            current.copy(request = skipped, markdown = reRender(current, skipped))
+        }
+    }
+
+    private fun authorWithWeak(
+        draft: IssueScaffoldResult,
         repoRoot: File,
         weak: ChatModel,
-        strong: ChatModel,
         maxExcerptChars: Int = 4000,
     ): IssueScaffoldRequest {
-        val excerpts = files.take(6).joinToString("\n\n") { path ->
+        val excerpts = draft.files.take(6).joinToString("\n\n") { path ->
             val file = File(repoRoot, path)
             val body = if (file.isFile) file.readText().take(maxExcerptChars) else "(missing)"
             "### $path\n$body"
         }
-        val weakUser = """
-            Title: ${request.title}
-            Symbols: ${request.symbols.joinToString(", ").ifBlank { "(none)" }}
-            Files: ${files.joinToString(", ")}
-
-            Excerpts:
-            $excerpts
-
-            Return JSON only: {"questions":["..."]}
-            Ask the smallest set of questions that would otherwise leave this backlog item blocked.
-            If the excerpts already determine the work, return {"questions":[]}.
-        """.trimIndent()
-        val weakRaw = weak.complete(
-            "You are a mazewall backlog triager. Output JSON only.",
-            weakUser,
-        )
-        val questions = parseStringList(weakRaw, "questions")
-        if (questions.isEmpty()) {
-            return request.copy(openQuestionItems = emptyList())
-        }
-        val strongUser = """
-            Title: ${request.title}
-            Questions:
-            ${questions.mapIndexed { i, q -> "${i + 1}. $q" }.joinToString("\n")}
-
-            Excerpts:
-            $excerpts
-
-            Answer every question using the excerpts. Then write the backlog Context and Needed sections.
-            Needed must be numbered, testable steps. Do not leave questions open.
+        val raw = weak.complete(
+            "You author mazewall backlog issues. Output JSON only. Never suggest silent EPERM/EACCES bypasses.",
+            """
+            Improve this issue: fill Context and Needed, collect implementation facts from excerpts, fix formatting.
+            Needed must be numbered testable steps. Do not leave FILL placeholders.
             Return JSON only:
-            {"context":"...","needed":"..."}
-        """.trimIndent()
-        val strongRaw = strong.complete(
-            "You are a mazewall staff engineer. Output JSON only. Fail closed: never suggest silent EPERM bypasses.",
-            strongUser,
+            {"context":"...","needed":"...","extra_files":[]}
+
+            Issue:
+            ${draft.markdown}
+
+            Excerpts:
+            $excerpts
+            """.trimIndent(),
         )
-        val context = parseJsonStringField(strongRaw, "context")
-        val needed = parseJsonStringField(strongRaw, "needed")
-        require(context.isNotBlank() && needed.isNotBlank()) {
-            "strong model did not return context and needed JSON"
-        }
-        return request.copy(
-            openQuestionItems = emptyList(),
+        val context = parseJsonStringField(raw, "context")
+        val needed = parseJsonStringField(raw, "needed")
+        require(context.isNotBlank() && needed.isNotBlank()) { "weak ACP returned empty context/needed" }
+        val extra = parseStringList(raw, "extra_files").map { PathModules.normalize(it) }
+        return draft.request.copy(
+            explicitFiles = (draft.request.explicitFiles + extra).distinct(),
             contextBody = context,
             neededBody = needed,
+            openQuestionItems = emptyList(),
         )
+    }
+
+    private fun reviewWithStrong(draft: IssueScaffoldResult, strong: ChatModel): IssueScaffoldRequest {
+        val raw = strong.complete(
+            "You are an independent reviewer. You did not write this issue. Output JSON only.",
+            """
+            Review this backlog issue on its own. Check: no FILL placeholders, Needed is testable,
+            target files match the work, fail-closed (no silent EPERM bypass).
+            Return JSON only:
+            {"verdict":"approved"|"needs_changes","comments":["..."]}
+
+            Issue:
+            ${draft.markdown}
+            """.trimIndent(),
+        )
+        val verdict = parseJsonStringField(raw, "verdict").lowercase().ifBlank { "needs_changes" }
+        val comments = parseStringList(raw, "comments")
+        val normalized = if (verdict == "approved") "approved" else "needs_changes"
+        return draft.request.copy(reviewVerdict = normalized, reviewComments = comments)
+    }
+
+    private fun reRender(draft: IssueScaffoldResult, request: IssueScaffoldRequest): String {
+        return IssueTemplateGenerator.render(
+            idInstant = draft.instant,
+            slug = draft.slug,
+            request = request,
+            files = draft.files,
+            modules = draft.modules,
+            verifyCheap = draft.verifyCheap,
+            coreLock = draft.coreLock,
+        )
+    }
+}
+
+object IssueMarkdownVerifier {
+    fun structural(markdown: String, scratchDir: File): List<String> {
+        val issue = parse(markdown, scratchDir) ?: return listOf("unparseable markdown")
+        val errors = mutableListOf<String>()
+        if (issue.title.isBlank()) errors += "missing title"
+        if (issue.targetFiles.isEmpty()) errors += "missing target_files"
+        if (issue.targetModules.isEmpty()) errors += "missing target_modules"
+        if (issue.component.isNullOrBlank()) errors += "missing component"
+        return errors
+    }
+
+    fun readyForReview(markdown: String, scratchDir: File): List<String> {
+        val errors = structural(markdown, scratchDir).toMutableList()
+        val issue = parse(markdown, scratchDir) ?: return errors
+        if (issue.context.isNullOrBlank() || issue.context.contains("FILL:")) {
+            errors += "context still FILL"
+        }
+        if (issue.needed.isNullOrBlank() || issue.needed.contains("FILL:")) {
+            errors += "needed still FILL"
+        }
+        return errors
+    }
+
+    private fun parse(markdown: String, scratchDir: File): BacklogIssue? {
+        scratchDir.mkdirs()
+        val file = File(scratchDir, "issue-20200101-000001-verify.md")
+        file.writeText(markdown)
+        return BacklogParser.parseIssueFile(file)
     }
 }
 
@@ -110,39 +169,6 @@ internal fun jsonString(value: String): String {
         .replace("\r", "\\r")
         .replace("\t", "\\t")
     return "\"$escaped\""
-}
-
-internal fun extractAssistantContent(body: String): String {
-    val marker = "\"content\":"
-    val start = body.indexOf(marker)
-    require(start >= 0) { "LLM response missing content field" }
-    var i = start + marker.length
-    while (i < body.length && body[i].isWhitespace()) i++
-    require(i < body.length && body[i] == '"') { "LLM content was not a string" }
-    i++
-    val out = StringBuilder()
-    while (i < body.length) {
-        val c = body[i]
-        if (c == '\\' && i + 1 < body.length) {
-            val n = body[i + 1]
-            out.append(
-                when (n) {
-                    'n' -> '\n'
-                    'r' -> '\r'
-                    't' -> '\t'
-                    '"' -> '"'
-                    '\\' -> '\\'
-                    else -> n
-                },
-            )
-            i += 2
-            continue
-        }
-        if (c == '"') break
-        out.append(c)
-        i++
-    }
-    return out.toString()
 }
 
 internal fun parseJsonObject(raw: String): String {
@@ -166,6 +192,13 @@ internal fun parseStringList(raw: String, key: String): List<String> {
         .map { it.groupValues[1].replace("\\\"", "\"").replace("\\n", "\n") }
         .filter { it.isNotBlank() }
         .toList()
+}
+
+internal object ClarifyModels {
+    fun resolve(env: (String) -> String?): Pair<ChatModel?, ChatModel?> {
+        val acp = AcpCommandResolver.resolvePair(env) ?: return null to null
+        return AcpChatModel(acp.first) to AcpChatModel(acp.second)
+    }
 }
 
 internal fun parseJsonStringField(raw: String, key: String): String {

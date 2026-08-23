@@ -20,32 +20,27 @@ fun main(args: Array<String>) {
                 askKernel = !parsed.needsKernelSpecified,
             )
         }
+        val generator = IssueTemplateGenerator(repoRoot = repoRoot)
+        var result = generator.scaffold(request, write = false)
         if (parsed.clarify) {
-            val apiKey = System.getenv("XAI_API_KEY") ?: System.getenv("GROK_API_KEY")
-            require(!apiKey.isNullOrBlank()) {
-                "--clarify needs XAI_API_KEY or GROK_API_KEY"
-            }
-            val files = (
-                request.explicitFiles +
-                    FilesystemSymbolLocator(repoRoot).filesForSymbols(request.symbols)
-                ).distinct()
-            val weakModel = System.getenv("ISSUE_CLARIFY_WEAK_MODEL") ?: "grok-3-mini"
-            val strongModel = System.getenv("ISSUE_CLARIFY_STRONG_MODEL") ?: "grok-4"
-            request = IssueClarifier.clarify(
-                request = request,
-                files = files,
+            val (weak, strong) = ClarifyModels.resolve { System.getenv(it) }
+            val scratch = File(repoRoot, "build/issue-clarify-scratch").apply { mkdirs() }
+            result = IssueClarifier.tryClarify(
+                draft = result,
                 repoRoot = repoRoot,
-                weak = XaiChatModel(apiKey, weakModel),
-                strong = XaiChatModel(apiKey, strongModel),
+                scratchDir = scratch,
+                weak = weak,
+                strong = strong,
             )
         }
-        val generator = IssueTemplateGenerator(repoRoot = repoRoot)
-        val result = generator.scaffold(request, write = !parsed.dryRun)
         if (parsed.dryRun) {
             print(result.markdown)
         } else {
+            result.file.parentFile.mkdirs()
+            result.file.writeText(result.markdown)
             System.err.println("Wrote ${repoRoot.toPath().relativize(result.file.toPath())}")
             System.err.println("id: ${result.id}")
+            result.request.reviewVerdict?.let { System.err.println("review: $it") }
         }
     } catch (e: IllegalArgumentException) {
         System.err.println(e.message)
@@ -88,8 +83,11 @@ Options:
   --no-open-questions         force open_questions: false
   --interactive               prompt for open questions / kernel / context
   --non-interactive           never prompt (default for agents / non-TTY)
-  --clarify                   weak model asks questions, strong model answers them
-                              (requires XAI_API_KEY or GROK_API_KEY; leaves open_questions: false)
+  --clarify                   optional ACP loop (never aborts the file):
+                              1) verify draft  2) weak ACP fills Context/Needed
+                              3) verify again  4) independent strong ACP review
+                              ISSUE_CLARIFY_ACP='agy --acp'
+                              ISSUE_CLARIFY_STRONG_ACP='...' for a separate reviewer binary
   --dry-run                   print markdown, do not write
   --root DIR                  repository root (default: cwd)
 

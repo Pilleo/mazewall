@@ -1,7 +1,7 @@
 ---
 title: "Lazy Bootstrap Classloads Under Narrow Allow-List Floors Return Corrupted Bytes"
 severity: "HIGH"
-status: "open"
+status: "in_progress"
 priority: high
 component: "enforcer"
 target_modules:
@@ -31,6 +31,18 @@ next lazy class — the problem is systemic for narrow floors.
 
 This matters beyond self-verification: any user task that lazily touches a new boot class under a
 narrow floor is one missed syscall away from a corrupt-class crash instead of a clean EPERM.
+
+**Progress (2026-08-23) — ROOT CAUSE CONFIRMED:** the bootstrap-read path uses **`pread64`**.
+`AllowListTest.jvmFloor()` allowed `READ`+`LSEEK` but not `PREAD64`; adding it made the suite pass
+2/2 WITH self-verification enabled. Delivered: canonical
+`io.mazewall.enforcer.engine.JvmFloorPresets` (`BOOTSTRAP_READ_CLOSURE`,
+`THREAD_COORDINATION_CLOSURE`, `fullJvmFloor()`); AllowListTest migrated to the preset;
+`security-considerations.md §9.1` documents the requirement and operator rules.
+
+**Remaining for full resolution:**
+1. Audit any other hand-rolled floors (docs/examples/demos) against the preset.
+2. Re-evaluate flipping `-Dio.mazewall.selfVerify` default to ON once operators are on the preset.
+3. Decide whether to report the JDK's garbage-bytes ClassFormatError upstream.
 
 **Needed:**
 1. Identify the exact denied syscall on the bootstrap-read path (strace the failing child; compare
