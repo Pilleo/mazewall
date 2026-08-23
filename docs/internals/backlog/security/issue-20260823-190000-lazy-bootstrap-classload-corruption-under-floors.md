@@ -1,7 +1,7 @@
 ---
 title: "Lazy Bootstrap Classloads Under Narrow Allow-List Floors Return Corrupted Bytes"
 severity: "HIGH"
-status: "in_progress"
+status: "resolved"
 priority: high
 component: "enforcer"
 target_modules:
@@ -39,10 +39,8 @@ narrow floor is one missed syscall away from a corrupt-class crash instead of a 
 `THREAD_COORDINATION_CLOSURE`, `fullJvmFloor()`); AllowListTest migrated to the preset;
 `security-considerations.md §9.1` documents the requirement and operator rules.
 
-**Remaining for full resolution:**
-1. Audit any other hand-rolled floors (docs/examples/demos) against the preset.
-2. Re-evaluate flipping `-Dio.mazewall.selfVerify` default to ON once operators are on the preset.
-3. Decide whether to report the JDK's garbage-bytes ClassFormatError upstream.
+~~Remaining for full resolution:~~ see Resolution above; item 3 (upstream JDK report) split out as
+an independent optional task and no longer blocks this issue.
 
 **Needed:**
 1. Identify the exact denied syscall on the bootstrap-read path (strace the failing child; compare
