@@ -37,11 +37,16 @@ public object PortalWorkerMain {
         println(READY)
         System.out.flush()
         val channel = PortalChannel(connected, sockets)
+        // Idle workers must not exit on quiet periods: timeouts are an idle tick (continue),
+        // while genuine socket death (ECONNRESET/POLLHUP from a dead broker) still breaks the
+        // loop and lets the worker exit cleanly.
         try {
             while (true) {
                 val (frame, fds) =
                     try {
                         channel.receive()
+                    } catch (_: io.mazewall.portal.PortalReadTimeoutException) {
+                        continue
                     } catch (_: Exception) {
                         break
                     }

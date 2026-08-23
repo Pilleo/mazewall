@@ -62,6 +62,19 @@ class PortalStubGeneratorTest {
     }
 
     @Test
+    fun `write splits stub and dispatcher into different directories`() {
+        val stubDir = kotlin.io.path.createTempDirectory("portal-stubs").toFile()
+        val dispatcherDir = kotlin.io.path.createTempDirectory("portal-dispatchers").toFile()
+        PortalStubGenerator.write(SampleGreeter::class.java, stubDir, dispatcherDir)
+        val stubFiles = stubDir.walkTopDown().filter { it.isFile }.map { it.name }.toList()
+        val dispatcherFiles = dispatcherDir.walkTopDown().filter { it.isFile }.map { it.name }.toList()
+        assertTrue(stubFiles.any { it.contains("PortalStub") }, stubFiles.toString())
+        assertTrue(dispatcherFiles.any { it.contains("PortalDispatcher") }, dispatcherFiles.toString())
+        assertTrue(stubFiles.none { it.contains("PortalDispatcher") }, stubFiles.toString())
+        assertTrue(dispatcherFiles.none { it.contains("PortalStub") }, dispatcherFiles.toString())
+    }
+
+    @Test
     fun `plugin apply registers generatePortalStubs`() {
         val project = ProjectBuilder.builder().build()
         project.plugins.apply(PortalCodegenPlugin::class.java)

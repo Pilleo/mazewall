@@ -26,17 +26,22 @@ public abstract class GeneratePortalStubsTask : DefaultTask() {
     public abstract val classpath: ConfigurableFileCollection
 
     @get:OutputDirectory
-    public abstract val outputDir: DirectoryProperty
+    public abstract val stubOutputDir: DirectoryProperty
+
+    @get:OutputDirectory
+    public abstract val dispatcherOutputDir: DirectoryProperty
 
     @TaskAction
     public fun generate() {
-        val out = outputDir.get().asFile
-        out.mkdirs()
+        val stubs = stubOutputDir.get().asFile
+        val dispatchers = dispatcherOutputDir.get().asFile
+        stubs.mkdirs()
+        dispatchers.mkdirs()
         val urls = classpath.files.map { it.toURI().toURL() }.toTypedArray()
         URLClassLoader(urls, PortalStubGenerator::class.java.classLoader).use { cl ->
             for (name in interfaceNames.get()) {
                 val type = Class.forName(name, false, cl)
-                PortalStubGenerator.write(type, out)
+                PortalStubGenerator.write(type, stubs, dispatchers)
             }
         }
     }
@@ -51,7 +56,8 @@ public class PortalCodegenPlugin : Plugin<Project> {
                 task.group = "codegen"
                 task.description = "Generate process-portal host stubs and worker dispatchers"
                 task.interfaceNames.set(ext.interfaces)
-                task.outputDir.set(project.layout.buildDirectory.dir("generated/portal"))
+                task.stubOutputDir.set(project.layout.buildDirectory.dir("generated/portal-stubs"))
+                task.dispatcherOutputDir.set(project.layout.buildDirectory.dir("generated/portal-dispatchers"))
                 val compileCp = project.configurations.findByName("compileClasspath")
                 if (compileCp != null) {
                     task.classpath.from(compileCp)
@@ -60,7 +66,7 @@ public class PortalCodegenPlugin : Plugin<Project> {
         project.pluginManager.withPlugin("org.jetbrains.kotlin.jvm") {
             val kotlinExt =
                 project.extensions.getByType(org.jetbrains.kotlin.gradle.dsl.KotlinJvmProjectExtension::class.java)
-            kotlinExt.sourceSets.getByName("main").kotlin.srcDir(generate.map { it.outputDir })
+            kotlinExt.sourceSets.getByName("main").kotlin.srcDir(generate.map { it.stubOutputDir })
             project.tasks.named("compileKotlin").configure { it.dependsOn(generate) }
         }
     }

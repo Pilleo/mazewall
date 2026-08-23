@@ -44,9 +44,13 @@ public object PortalStubGenerator {
 
     public fun write(
         service: Class<*>,
-        outputDir: File,
+        stubDir: File,
+        dispatcherDir: File,
     ) {
-        generate(service).forEach { it.writeTo(outputDir) }
+        generate(service).forEach { spec ->
+            val dest = if (spec.name.endsWith("PortalDispatcher")) dispatcherDir else stubDir
+            spec.writeTo(dest)
+        }
     }
 
     internal fun methodId(

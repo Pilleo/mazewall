@@ -19,6 +19,7 @@ class ProcessBrokerIntegrationTest {
         Files.write(payload, byteArrayOf(1, 2, 3, 4, 5))
         ProcessBroker().use { broker ->
             broker.start()
+            assertEquals(1, broker.spawnedWorkers())
             val expected = Adler32().also { it.update(byteArrayOf(1, 2, 3, 4, 5)) }.value.toInt()
             val granted = broker.openReadOnly(payload.parent, payload.fileName.toString())
             assertEquals(expected, broker.checksum(granted))
@@ -33,7 +34,9 @@ class ProcessBrokerIntegrationTest {
                     matchesLocale,
                 "expected Landlock denial, got: $msg",
             )
+            val afterDeny = broker.spawnedWorkers()
             assertEquals("after-landlock-deny", broker.echo("after-landlock-deny"))
+            assertEquals(afterDeny, broker.spawnedWorkers(), "ERROR must not recycle the worker JVM")
         }
         Files.deleteIfExists(payload)
     }

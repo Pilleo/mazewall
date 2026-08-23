@@ -20,6 +20,11 @@ import io.mazewall.ffi.memory.writeLong
 import io.mazewall.getFdOrThrow
 import java.nio.file.Path
 
+/** Thrown when a portal read deadline expires. Distinct from fatal socket errors so idle
+ *  workers can keep polling (issue: pooled-worker 30s self-exit). */
+public class PortalReadTimeoutException :
+    java.io.IOException("portal read timed out")
+
 public class PortalChannel(
     private val socket: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>,
     private val sockets: SocketManager = RealSocketManager,
@@ -70,7 +75,10 @@ public class PortalChannel(
             val deadline = Deadline.afterMillis(timeoutMs)
             val poll = SocketPoll { timeout -> pollReadable(timeout) }
             when (val res = SocketIo.readFully(LinuxNative.memory, socket, buf, len.toLong(), deadline, poll)) {
-                is LinuxNative.SyscallResult.Error<*> -> error("portal read errno=${res.errno}")
+                is LinuxNative.SyscallResult.Error<*> -> {
+                    if (res.errno == NativeConstants.ETIMEDOUT) throw PortalReadTimeoutException()
+                    error("portal read errno=${res.errno}")
+                }
                 is LinuxNative.SyscallResult.Success -> check(res.value == len.toLong())
             }
             val out = ByteArray(len)

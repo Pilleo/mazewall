@@ -25,14 +25,20 @@ public class ProcessBroker(
     private val callTimeoutMs: Long = 30_000L,
     private val sockets: SocketManager = RealSocketManager,
     private val launcher: ProcessLauncher = RealProcessLauncher,
+    private val workerClasspath: String = "",
 ) : AutoCloseable {
     init {
         require(poolSize >= 1) { "poolSize must be >= 1" }
     }
 
+    public companion object {
+        public const val WORKER_CLASSPATH_PROPERTY: String = "io.mazewall.portal.worker.classpath"
+    }
+
     private val nextId = AtomicInteger(1)
     private val idle = ArrayBlockingQueue<WorkerSlot>(poolSize)
     private val started = AtomicInteger(0)
+    private val spawned = AtomicInteger(0)
 
     public fun start() {
         check(started.compareAndSet(0, 1)) { "broker already started" }
@@ -77,6 +83,8 @@ public class ProcessBroker(
         call(PortalMethods.TRY_OPEN_HOST_PASSWD, ByteArray(0), emptyList())
     }
 
+    internal fun spawnedWorkers(): Int = spawned.get()
+
     internal fun crashIdleWorkerProcess() {
         val slot =
             idle.poll(callTimeoutMs, TimeUnit.MILLISECONDS)
@@ -94,6 +102,7 @@ public class ProcessBroker(
         val slot =
             idle.poll(callTimeoutMs, TimeUnit.MILLISECONDS)
                 ?: throw PortalCallException("timed out waiting for an idle portal worker")
+        var returnedToPool = false
         return try {
             val id = nextId.getAndIncrement()
             slot.channel.send(PortalFrame(PortalKind.REQUEST, id, methodId, payload, fds.size), fds)
@@ -101,16 +110,23 @@ public class ProcessBroker(
             extra.forEach { sockets.close(it) }
             check(reply.requestId == id) { "request id mismatch" }
             if (reply.kind == PortalKind.ERROR) {
+                idle.put(slot)
+                returnedToPool = true
                 throw PortalCallException(reply.payload.toString(StandardCharsets.UTF_8))
             }
             check(reply.kind == PortalKind.RESPONSE) { "unexpected kind ${reply.kind}" }
             idle.put(slot)
+            returnedToPool = true
             reply.payload
         } catch (e: PortalCallException) {
-            recycleDeadWorker(slot)
+            if (!returnedToPool) {
+                recycleDeadWorker(slot)
+            }
             throw e
         } catch (e: Exception) {
-            recycleDeadWorker(slot)
+            if (!returnedToPool) {
+                recycleDeadWorker(slot)
+            }
             throw PortalCallException("portal RPC failed", e)
         }
     }
@@ -122,6 +138,14 @@ public class ProcessBroker(
         started.set(0)
     }
 
+    private fun resolveWorkerClasspath(): String {
+        val cp = workerClasspath.ifBlank { System.getProperty(WORKER_CLASSPATH_PROPERTY).orEmpty() }
+        require(cp.isNotBlank()) {
+            "portal worker classpath is required; set $WORKER_CLASSPATH_PROPERTY or pass workerClasspath"
+        }
+        return cp
+    }
+
     private fun spawnWorker(): WorkerSlot {
         val ep = PrivateUnixEndpoint.create(launcher, "mazewall-portal-", "portal.sock")
         val listen = sockets.createUnixServer(ep.path)
@@ -131,6 +155,7 @@ public class ProcessBroker(
                 mainArgs = listOf(ep.path),
                 maxHeap = "64m",
                 javaAgents = JavaAgentSelection.None,
+                classpath = resolveWorkerClasspath(),
             )
         val proc = JvmChildProcess.start(launcher, spec)
         val pump =
@@ -149,6 +174,7 @@ public class ProcessBroker(
             ep.close()
             error("portal worker failed to become ready")
         }
+        spawned.incrementAndGet()
         return WorkerSlot(proc, channel, ep, listen)
     }
 
