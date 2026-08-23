@@ -20,7 +20,7 @@ import io.mazewall.ffi.memory.writeLong
 import io.mazewall.getFdOrThrow
 import java.nio.file.Path
 
-internal class PortalChannel(
+public class PortalChannel(
     private val socket: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>,
     private val sockets: SocketManager = RealSocketManager,
 ) : AutoCloseable {

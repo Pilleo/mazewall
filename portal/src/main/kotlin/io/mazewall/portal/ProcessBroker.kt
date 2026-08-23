@@ -127,7 +127,7 @@ public class ProcessBroker(
         val listen = sockets.createUnixServer(ep.path)
         val spec =
             JvmChildSpec(
-                mainClass = PortalWorkerMain::class.java.name,
+                mainClass = "io.mazewall.portal.worker.PortalWorkerMain",
                 mainArgs = listOf(ep.path),
                 maxHeap = "64m",
                 javaAgents = JavaAgentSelection.None,
@@ -136,7 +136,7 @@ public class ProcessBroker(
         val pump =
             JvmChildProcess.startStdoutPump(
                 proc,
-                PortalWorkerMain.READY,
+                "MAZEWALL_PORTAL_WORKER_READY",
                 { line -> System.err.println("[PORTAL-WORKER] $line") },
                 "portal-worker-stdout",
             )
