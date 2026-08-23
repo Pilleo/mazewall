@@ -1,7 +1,7 @@
 ---
 title: "Add a work-package CLI that emits impact JSON from Codanna/ast-grep"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: high
 dependencies:
   - issue-20260823-181020

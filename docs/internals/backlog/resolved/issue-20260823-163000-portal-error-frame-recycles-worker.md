@@ -1,7 +1,7 @@
 ---
 title: "Portal ERROR frames recycle the worker process"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: medium
 dependencies:
   - "issue-20260823-121200"

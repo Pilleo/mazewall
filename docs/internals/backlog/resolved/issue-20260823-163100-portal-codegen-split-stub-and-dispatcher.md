@@ -1,7 +1,7 @@
 ---
 title: "Portal codegen writes stub and dispatcher into one output directory"
 severity: "ENHANCEMENT"
-status: "open"
+status: "resolved"
 priority: medium
 dependencies:
   - "issue-20260823-121400"

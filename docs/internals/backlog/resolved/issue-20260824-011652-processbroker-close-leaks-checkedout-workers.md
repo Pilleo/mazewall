@@ -1,7 +1,7 @@
 ---
 title: "ProcessBroker.close() Leaks Checked-Out Workers; Recycle Blocks on Full JVM Spawn"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: high
 component: "enforcer"
 target_modules:
@@ -35,3 +35,9 @@ dependencies: []
    (`ProcessHandle` children of the test JVM or `spawnedWorkers()` bookkeeping); recycle test
    asserts replacement slot is ready without waiting for the old one's teardown.
 
+**Resolution (2026-08-24):** Implemented both items with integration coverage:
+1. Slot registry (trackedSlots) + closed flag; close() destroys idle AND checked-out workers;
+return-to-pool destroys orphans post-close. Test asserts zero surviving PortalWorkerMain
+descendants after close-during-inflight.
+2. Pre-spawn-before-teardown recycle; test asserts replacement exists immediately after the
+crash hook and the pool still serves calls.
