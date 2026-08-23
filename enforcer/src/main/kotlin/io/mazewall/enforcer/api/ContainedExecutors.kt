@@ -86,7 +86,14 @@ object ContainedExecutors {
             ContainmentViolationDetector::class.java,
             ContainmentViolationException::class.java,
             io.mazewall.Platform.FallbackBehavior::class.java,
-            io.mazewall.InstallationReceipt::class.java
+            io.mazewall.InstallationReceipt::class.java,
+            // Post-install self-verification must be resolvable BEFORE any restrictive filter
+            // exists: under a jvmFloor-style policy, reading build/classes/** afterwards is
+            // denied and manifests as NoClassDefFoundError (issue-20260823-172003).
+            io.mazewall.seccomp.InstallSelfVerifier::class.java,
+            io.mazewall.seccomp.InstallSelfVerifier.SelfVerificationException::class.java,
+            io.mazewall.seccomp.BpfSimulator::class.java,
+            io.mazewall.seccomp.SyscallProbeMatrix::class.java
         )
         for (c in classes) {
             try {
@@ -94,6 +101,14 @@ object ContainedExecutors {
             } catch (e: Exception) {
                 System.err.println("WARNING: Failed to preload class ${c.name} for Seccomp: ${e.message}")
             }
+        }
+        // Warm the self-verification transitive closure (method-level, not just Class objects):
+        // lazy JVM/Kotlin machinery must be resolved BEFORE containment makes class reads
+        // unreliable (issue-20260823-172003).
+        try {
+            io.mazewall.seccomp.InstallSelfVerifier.warmup()
+        } catch (t: Throwable) {
+            System.err.println("WARNING: Self-verification warmup failed: $t")
         }
     }
 
@@ -549,6 +564,11 @@ object ContainedExecutors {
                 PureJavaBpfEngine.install(compiledSandbox)
                 updateThreadState(newBlocks, newDefaultAction, toInstall)
             }
+            // Runtime self-verification (issue-20260823-172003): OPT-IN via
+            // -Dio.mazewall.selfVerify=true. Asserts the kernel honors the oracle's predictions;
+            // memoized per program identity. See InstallSelfVerifier gate KDoc for why the
+            // default is off under narrow allow-list floors.
+            io.mazewall.seccomp.InstallSelfVerifier.verify(compiledSandbox.program, arch)
             return AutoCloseable {}
         }
     }

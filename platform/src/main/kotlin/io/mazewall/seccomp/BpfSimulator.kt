@@ -31,6 +31,7 @@ public object BpfSimulator {
         program: List<BpfInstruction>,
         syscallNr: Int,
         auditToken: Int,
+        args: LongArray = LongArray(6),
     ): Int? {
         var pc = 0
         var accumulator = 0
@@ -38,9 +39,16 @@ public object BpfSimulator {
             val inst = program[pc]
             when (inst.code) {
                 0x20.toShort() -> { // BPF_LD | BPF_W | BPF_ABS
-                    accumulator = when (inst.k) {
-                        SECCOMP_DATA_NR_OFFSET -> syscallNr
-                        SECCOMP_DATA_ARCH_OFFSET -> auditToken
+                    accumulator = when {
+                        inst.k == SECCOMP_DATA_NR_OFFSET -> syscallNr
+                        inst.k == SECCOMP_DATA_ARCH_OFFSET -> auditToken
+                        inst.k >= SECCOMP_DATA_ARGS_OFFSET && inst.k < SECCOMP_DATA_ARGS_OFFSET + 48 -> {
+                            // seccomp_data.args[i] are native-endian u64 at 8-byte strides;
+                            // hi/lo word selection matches the emitting compiler's layout.
+                            val idx = (inst.k - SECCOMP_DATA_ARGS_OFFSET) / 8
+                            val shift = if ((inst.k - SECCOMP_DATA_ARGS_OFFSET) % 8 == 4) 32 else 0
+                            ((args.getOrElse(idx) { 0L } ushr shift) and 0xFFFFFFFFL).toInt()
+                        }
                         else -> 0
                     }
                     pc++
@@ -84,6 +92,9 @@ public object BpfSimulator {
     /** Convenience overload resolving the audit token from [arch]. */
     public fun simulate(program: List<BpfInstruction>, syscallNr: Int, arch: Arch): Int? =
         simulate(program, syscallNr, arch.audit)
+
+
+    public const val SECCOMP_DATA_ARGS_OFFSET: Int = 16
 }
 
 /**

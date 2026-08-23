@@ -72,7 +72,13 @@ internal class ContainedExecutorWrapper(
                 val result = runCatching { task.call() }
                 result.getOrElse { e ->
                     if (e is Exception && ContainmentViolationDetector.isContainmentViolation(e)) {
-                        throw ContainmentViolationException("Task violated containment policy", e)
+                        // Preserve structured taxonomy fields when re-raising a library-owned
+                        // violation; only synthesize a wrapper for third-party exceptions.
+                        throw if (e is ContainmentViolationException) {
+                            e
+                        } else {
+                            ContainmentViolationException("Task violated containment policy", e)
+                        }
                     }
                     throw e
                 }
@@ -95,7 +101,13 @@ internal class ContainedExecutorWrapper(
                 val result = runCatching { task.run() }
                 result.onFailure { e ->
                     if (e is Exception && ContainmentViolationDetector.isContainmentViolation(e)) {
-                        throw ContainmentViolationException("Task violated containment policy", e)
+                        // Preserve structured taxonomy fields when re-raising a library-owned
+                        // violation; only synthesize a wrapper for third-party exceptions.
+                        throw if (e is ContainmentViolationException) {
+                            e
+                        } else {
+                            ContainmentViolationException("Task violated containment policy", e)
+                        }
                     }
                     throw e
                 }

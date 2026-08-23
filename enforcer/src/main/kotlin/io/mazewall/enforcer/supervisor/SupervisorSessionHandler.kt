@@ -1014,22 +1014,7 @@ internal class SupervisorSessionHandler(
         return io.mazewall.ffi.memory.SupervisorProcessMemoryReader.readBytes(tid, remoteAddr, len)
     }
 
-    private fun getTgid(tid: Int): Int {
-        try {
-            val statusFile = java.io.File("/proc/$tid/status")
-            if (statusFile.exists()) {
-                statusFile.bufferedReader().use { reader ->
-                    while (true) {
-                        val line = reader.readLine() ?: break
-                        if (line.startsWith("Tgid:")) {
-                            return line.substringAfter("Tgid:").trim().toInt()
-                        }
-                    }
-                }
-            }
-        } catch (ignored: Exception) {}
-        return tid
-    }
+    private fun getTgid(tid: Int): Int = ProcFsInspector.getTgid(tid)
 
     private fun closeTraceeFd(tid: Tid, traceeFd: Int) {
         if (traceeFd < 0) return
@@ -1058,21 +1043,7 @@ internal class SupervisorSessionHandler(
         }
     }
 
-    private fun getPpid(pid: Int): Int {
-        try {
-            val statFile = java.io.File("/proc/$pid/stat")
-            if (statFile.exists()) {
-                val content = statFile.readText()
-                // Format: pid (comm) state ppid ...
-                // parts[0] is empty (space between ')' and state), parts[1] is state, parts[2] is ppid
-                val parts = content.substringAfterLast(')').split(' ')
-                if (parts.size >= 3) {
-                    return parts[2].toInt()
-                }
-            }
-        } catch (ignored: Exception) {}
-        return 0
-    }
+    private fun getPpid(pid: Int): Int = ProcFsInspector.getPpid(pid)
 
     private fun handleAcceptAsync(
         id: Long,

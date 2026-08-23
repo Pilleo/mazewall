@@ -30,6 +30,10 @@ import kotlin.test.assertTrue
  */
 @NeedsFreshJvm
 class SeccompDifferentialVerdictTest : BaseIntegrationTest() {
+    init {
+        // Opt in to runtime self-verification: these policies are probe-safe by design.
+        System.setProperty("io.mazewall.selfVerify", "true")
+    }
 
     private val arch = io.mazewall.core.Arch.current()
 

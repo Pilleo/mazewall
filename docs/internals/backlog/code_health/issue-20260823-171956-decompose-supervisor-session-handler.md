@@ -1,7 +1,7 @@
 ---
 title: "Decompose SupervisorSessionHandler God File Along SupervisedKind Routes"
 severity: "MEDIUM"
-status: "open"
+status: "in_progress"
 priority: high
 component: "enforcer"
 target_modules:
@@ -23,6 +23,12 @@ canonicalizeExecPath), and response marshalling. This is the highest-leverage re
 every supervisor change today lands in one file with high merge-collision probability, weak
 testability (testing/issue-20260726-0135 tracks profiler-side testability), and cognitive overload
 that invites exactly the class of subtle bugs caught recently (JA encoding, ACK-loop hazards).
+
+**Progress (2026-08-23):** Slice 1 landed — `/proc` inspection helpers extracted to
+`ProcFsInspector` (getTgid, getPpid) with handler delegation; SupervisorSessionHandlerTest green.
+Remaining slices: NotificationReader (recv/poll EINTR loops), RouteEvaluator (fast-path bypass +
+SupervisedKind routing), ResponseWriter (continue/error marshalling). Each slice must be preceded
+by golden-notification coverage per the plan below.
 
 **Needed:**
 1. Split along existing seams into collaborators: `NotificationReader` (recv/EINTR loops),

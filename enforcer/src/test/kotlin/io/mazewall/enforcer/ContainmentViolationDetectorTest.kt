@@ -8,6 +8,7 @@ import java.io.IOException
 import java.net.ConnectException
 import java.net.SocketException
 import java.nio.file.AccessDeniedException
+import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
@@ -148,4 +149,28 @@ class ContainmentViolationDetectorTest {
         val detector = ContainmentViolationDetector
         org.junit.jupiter.api.Assertions.assertNotNull(detector)
     }
+
+    @Test
+    fun `structured violation matches even with null message and no defaults`() {
+        // issue-20260823-171958: structured type is matched by construction, before any
+        // message heuristic, and regardless of the useDefaults switch.
+        val detector = ContainmentViolationDetector(useDefaults = false, loadServices = false)
+        val v = io.mazewall.enforcer.api.ContainmentViolationException(
+            message = "denied",
+            errno = io.mazewall.ffi.NativeConstants.EPERM,
+            syscallNr = 42,
+        )
+        assertTrue(detector.isContainmentViolation(v))
+        assertEquals(io.mazewall.ffi.NativeConstants.EPERM, v.errno)
+        assertEquals(42, v.syscallNr)
+    }
+
+    @Test
+    fun `legacy constructor keeps nullable taxonomy fields`() {
+        val v = io.mazewall.enforcer.api.ContainmentViolationException("legacy")
+        assertEquals(null, v.errno)
+        assertEquals(null, v.syscallNr)
+        assertTrue(ContainmentViolationDetector.isContainmentViolation(v))
+    }
 }
+

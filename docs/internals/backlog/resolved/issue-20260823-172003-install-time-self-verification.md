@@ -1,7 +1,7 @@
 ---
 title: "Install-Time Self-Verification Using BpfSimulator Probe Matrix"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: high
 component: "enforcer"
 target_modules:
@@ -11,7 +11,7 @@ target_files:
   - "platform/src/main/kotlin/io/mazewall/seccomp/BpfSimulator.kt"
 effort: "medium"
 autonomy: "supervised"
-open_questions: true
+open_questions: false
 dependencies:
   - "issue-20260823-171500"
 ---
@@ -24,6 +24,23 @@ currently verifies installation coarsely (`prctl(PR_GET_SECCOMP) == MODE_FILTER`
 bookkeeping) but never validates *decision content* after install. The JA misencoding
 (issue-20260823-140500) would have been caught deterministically in production by a single
 post-install liveness probe instead of manifesting as SIGSEGV chaos.
+
+**Resolution (2026-08-23):** Implemented as OPT-IN (`-Dio.mazewall.selfVerify=true`).
+`InstallSelfVerifier` verifies freshly installed non-supervised programs: post-install liveness via
+raw getpid + invocation of up to 4 DENIED probes (structural edges + policy-matched JEQ comparands),
+asserting kernel errno equals the shared oracle's prediction. Probing is side-effect-safe
+(seccomp denies pre-execution), skips KILL_* groups and ARG-INSPECTED syscalls
+(`isArgInspected`: any NR whose matched section loads seccomp_data.args — fabricated arguments
+would assert a verdict real workloads never hit). Memoized per program identity.
+Results are cached per program identity. Fail closed on divergence.
+
+DEFAULT-OFF decision (evidence-driven): enabling deterministically broke AllowListTest —
+verification performs work post-containment, and under narrow jvmFloor-style floors even bootstrap
+lazy-loads return corrupted bytes (ClassFormatError magic=0xFFFFFFFF for LogRecord). Warmup of our
+own closures only moved the failure. Root cause filed separately as
+issue-20260823-190000-lazy-bootstrap-classload-corruption-under-floors; default flips to ON once
+floors cover the bootstrap-read closure. Mitigation template added: `ContainedExecutors.init` now
+warms the verifier's transitive closure (method-level, not just Class.forName).
 
 **Needed:**
 1. After successful filter install (non-supervised paths), execute a bounded self-check on the
@@ -39,6 +56,3 @@ post-install liveness probe instead of manifesting as SIGSEGV chaos.
    overhead (< ~1ms; it is a handful of syscalls) before enabling everywhere.
 4. Reuse `SyscallProbeMatrix` from :platform so test-time and run-time verification cannot diverge.
 
-## ❓ Open Questions
-1. Should self-check results be cached per compiled-program identity (BpfNativeCache key) to avoid
-   re-probing identical filters across wrapped-executor tasks?

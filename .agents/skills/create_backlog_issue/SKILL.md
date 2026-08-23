@@ -31,6 +31,25 @@ Assign **`high`** to changes that multiply developer velocity, safety, and auton
 - **Decomposition Mandate:** If an issue touches multiple sub-components, requires changing more than ~3-5 distinct files, or spans multiple architectural layers (e.g., FFM layout changes + API redesign + profiler integration), **split it into multiple smaller, ordered issues**.
 - **Dependency Chaining:** Use the `dependencies: ["issue-YYYYMMDD-HHMM-parent-slug"]` frontmatter field to define precise execution order across decomposed issues so the orchestrator can schedule them safely in sequence.
 
+### 0. Generate the file (do not hand-name IDs)
+
+Do **not** invent `issue-YYYYMMDD-HHMMSS-*.md` by hand. Run the scaffold so the id is unique, the YAML passes `checkBacklog`, and influenced files are pre-filled from `--file` / `--symbol`:
+
+```bash
+./scripts/new_backlog_issue.sh \
+  --title "Cap PolicyCompilationCache growth" \
+  --category code_health \
+  --severity MEDIUM \
+  --priority high \
+  --symbol PolicyCompilationCache \
+  --file enforcer/src/main/kotlin/io/mazewall/PolicyCompilationCache.kt \
+  --dep issue-20260823-181020
+```
+
+Then replace the `FILL:` sentences under **Context:** and **Needed:**. Do not rename the file. `--symbol` walks Kotlin sources for the type/function and its `*Test`. `--dry-run` prints markdown without writing.
+
+Humans on a TTY are prompted (open questions, `needs_kernel`, Context/Needed). Agents must pass `--non-interactive` (or no TTY) plus flags. Optional `--clarify` runs a weak model to list blocking questions and a strong model to answer them (`XAI_API_KEY` or `GROK_API_KEY`); the file is written with `open_questions: false`.
+
 ### 3. Naming & File Placement
 Create a new markdown issue file under the appropriate category subdirectory in `docs/internals/backlog/{category}/`:
 - `docs/internals/backlog/code_health/` for refactoring, architectural health, and orchestrator tooling issues

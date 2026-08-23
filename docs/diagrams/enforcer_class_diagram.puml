@@ -118,6 +118,7 @@ class "LinuxNative" as io.mazewall.LinuxNative {
   + {static}LinuxNative INSTANCE
   __
   +Object getEngineIdentity()
+  +boolean isRealEngineActive()
   +void setEngine(NativeEngine)
   +void resetToDefault()
   +NativeFileSystem getFileSystem()
@@ -747,6 +748,8 @@ class "ContainedExecutors" as io.mazewall.enforcer.api.ContainedExecutors {
   +ExecutorService wrap(ExecutorService, Policy<?, ? extends Uncompiled>, StacktraceScopingPolicy)
 }
 class "ContainmentViolationException" as io.mazewall.enforcer.api.ContainmentViolationException {
+  +Integer getErrno()
+  +Integer getSyscallNr()
 }
 class "SandboxDispatcher" as io.mazewall.enforcer.api.SandboxDispatcher {
   + {static}SandboxDispatcher INSTANCE
@@ -879,6 +882,12 @@ class "PendingSpawnRegistry" as io.mazewall.enforcer.supervisor.PendingSpawnRegi
   +void register(int, List<StackTraceElement>)
   +List<StackTraceElement> get(int)
   +void remove(int)
+}
+class "ProcFsInspector" as io.mazewall.enforcer.supervisor.ProcFsInspector {
+  + {static}ProcFsInspector INSTANCE
+  __
+  +int getTgid(int)
+  +int getPpid(int)
 }
 interface "ScopingValidationState" as io.mazewall.enforcer.supervisor.ScopingValidationState {
 }
@@ -1726,8 +1735,9 @@ class "BpfSimulator" as io.mazewall.seccomp.BpfSimulator {
   + {static}BpfSimulator INSTANCE
   + {static}int SECCOMP_DATA_NR_OFFSET
   + {static}int SECCOMP_DATA_ARCH_OFFSET
+  + {static}int SECCOMP_DATA_ARGS_OFFSET
   __
-  +Integer simulate(List<? extends BpfInstruction>, int, int)
+  +Integer simulate(List<? extends BpfInstruction>, int, int, long[])
   +Integer simulate(List<? extends BpfInstruction>, int, Arch)
 }
 interface "BpfState" as io.mazewall.seccomp.BpfState {
@@ -1758,6 +1768,16 @@ class "InspectionContext" as io.mazewall.seccomp.InspectionContext {
   +boolean getAllowNonThreadClone()
   +boolean getAllowUnsafePrctl()
   +SeccompAction resolveEffectiveAction(int)
+}
+class "InstallSelfVerifier" as io.mazewall.seccomp.InstallSelfVerifier {
+  + {static}InstallSelfVerifier INSTANCE
+  __
+  +boolean isEnabled()
+  +void warmup()
+  +void reset()
+  +void verify(BpfProgram<Verified>, Arch)
+  +List<Pair<Integer, Integer>> deniedProbeNrs(List<? extends BpfInstruction>, Arch, int)
+  +boolean isArgInspected(List<? extends BpfInstruction>, int)
 }
 class "MmapExecInspector" as io.mazewall.seccomp.MmapExecInspector {
   +List<SyscallInspection> getInspections(Arch, InspectionContext)
@@ -1898,6 +1918,7 @@ io.mazewall.enforcer.supervisor.JVMValidationListener --> io.mazewall.enforcer.s
 io.mazewall.enforcer.supervisor.JvmStackInspector --> io.mazewall.enforcer.supervisor.JvmStackInspector
 io.mazewall.enforcer.supervisor.PendingSpawnRegistry --> io.mazewall.enforcer.supervisor.PendingSpawnRegistry
 io.mazewall.enforcer.supervisor.PendingSpawnRegistry --> io.mazewall.core.Tid
+io.mazewall.enforcer.supervisor.ProcFsInspector --> io.mazewall.enforcer.supervisor.ProcFsInspector
 io.mazewall.enforcer.supervisor.SupervisorDaemon --> io.mazewall.enforcer.supervisor.SupervisorDaemon
 io.mazewall.enforcer.supervisor.SupervisorDaemonEngine --> io.mazewall.NativeEngine
 io.mazewall.enforcer.supervisor.SupervisorDaemonEngine --> io.mazewall.core.FileDescriptor
@@ -1994,6 +2015,8 @@ io.mazewall.seccomp.Clone3Inspector .u.|> io.mazewall.seccomp.SyscallInspector
 io.mazewall.seccomp.DefaultSyscallInspectionPipeline .u.|> io.mazewall.seccomp.SyscallInspectionPipeline
 io.mazewall.seccomp.DefaultSyscallInspectionPipeline --> io.mazewall.seccomp.SyscallInspector
 io.mazewall.seccomp.InspectionContext --> io.mazewall.core.SeccompAction
+io.mazewall.seccomp.InstallSelfVerifier --> io.mazewall.seccomp.InstallSelfVerifier
+io.mazewall.seccomp.InstallSelfVerifier --> io.mazewall.seccomp.BpfInstruction
 io.mazewall.seccomp.MmapExecInspector .u.|> io.mazewall.seccomp.SyscallInspector
 io.mazewall.seccomp.PureJavaBpfEngine .u.|> io.mazewall.seccomp.SeccompEngine
 io.mazewall.seccomp.PureJavaBpfEngine --> io.mazewall.seccomp.PureJavaBpfEngine

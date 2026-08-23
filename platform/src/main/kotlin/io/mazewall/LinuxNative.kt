@@ -30,6 +30,12 @@ public object LinuxNative : NativeEngine {
         get() = engine
 
     /**
+     * True when the active engine is the production [RealNativeEngine]. Metadata probe used by
+     * runtime self-verification gates (see io.mazewall.seccomp.InstallSelfVerifier).
+     */
+    fun isRealEngineActive(): Boolean = engine === RealNativeEngine
+
+    /**
      * Swaps the active native engine. Used for testing and fault injection.
      */
     @Suppress("spotbugs:ST_WRITE_TO_STATIC_FROM_INSTANCE_METHOD")

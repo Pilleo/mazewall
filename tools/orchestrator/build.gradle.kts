@@ -42,6 +42,20 @@ tasks.named<JavaExec>("run") {
     }
 }
 
+val newBacklogIssue by tasks.registering(JavaExec::class) {
+    group = "documentation"
+    description = "Scaffold a validator-clean backlog issue (unique timestamp id, inferred files/modules)"
+    dependsOn(tasks.compileKotlin)
+    classpath = sourceSets.main.get().runtimeClasspath
+    mainClass.set("io.mazewall.orchestrator.NewBacklogIssueKt")
+    workingDir = rootProject.projectDir
+    standardInput = System.`in`
+    val argsFile = project.findProperty("issueArgsFile") as String?
+    if (!argsFile.isNullOrBlank()) {
+        args(file(argsFile).readLines().filter { it.isNotEmpty() })
+    }
+}
+
 val checkBacklog by tasks.registering(JavaExec::class) {
     group = "verification"
     description = "Validates backlog issue YAML frontmatters, required fields, and dependency references"

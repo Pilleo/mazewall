@@ -10,6 +10,7 @@ import java.io.IOException
 import java.nio.file.AccessDeniedException
 import java.util.ServiceLoader
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.logging.Logger
 
 /**
  * Strategy interface for identifying containment violations from exceptions.
@@ -26,6 +27,7 @@ class ContainmentViolationDetector @JvmOverloads constructor(
     private val initialCustomPhrases: List<String> = emptyList(),
     private val initialCustomRegexes: List<Regex> = emptyList()
 ) {
+    private val logger = Logger.getLogger(ContainmentViolationDetector::class.java.name)
     private val MATCHERS = CopyOnWriteArrayList<ViolationMatcher>()
     private val customPhrases = CopyOnWriteArrayList<String>()
     private val customRegexes = CopyOnWriteArrayList<Regex>()
@@ -35,15 +37,37 @@ class ContainmentViolationDetector @JvmOverloads constructor(
     }
 
     private fun registerDefaultMatchers() {
+        // PRECEDENCE 2: structured NIO denial (typed, locale-independent).
         registerMatcher { t -> t is AccessDeniedException }
+
+        // PRECEDENCE 3 (FALLBACK): message heuristics for third-party exceptions raised inside
+        // JDK/library internals, where no structured errno exists. Logged when they decide, so
+        // coverage gaps and JDK message drift surface instead of silently depending on them.
         registerMatcher { t ->
             val msg = t.message ?: return@registerMatcher false
-            ERRNO_VIOLATION_REGEX.containsMatchIn(msg)
+            val matched = ERRNO_VIOLATION_REGEX.containsMatchIn(msg)
+            if (matched) logFallback("errno-regex", t)
+            matched
         }
         registerMatcher { t ->
             val msg = t.message ?: return@registerMatcher false
-            t is IOException && (VIOLATION_PHRASES_REGEX.containsMatchIn(msg) || ERRNO_VIOLATION_REGEX.containsMatchIn(msg))
+            val matched = t is IOException &&
+                (VIOLATION_PHRASES_REGEX.containsMatchIn(msg) || ERRNO_VIOLATION_REGEX.containsMatchIn(msg))
+            if (matched) logFallback("io-phrase", t)
+            matched
         }
+    }
+
+    /**
+     * Logs at FINE that a message-heuristic fallback decided a violation. Operators aggregating
+     * these logs can detect JDK/locale drift before it breaks detection.
+     */
+    private fun logFallback(strategy: String, t: Throwable) {
+        logger.fine(
+            "[VIOLATION-FALLBACK] strategy=$strategy type=${t.javaClass.name} " +
+                "msg='${t.message?.take(120)}' — prefer structured errno/syscallNr reporting " +
+                "(see issue-20260823-171958)",
+        )
     }
 
     private fun loadServiceMatchers(classLoader: ClassLoader?) {
@@ -104,6 +128,11 @@ class ContainmentViolationDetector @JvmOverloads constructor(
         customRegexes.addAll(initialCustomRegexes)
 
         MATCHERS.clear()
+
+        // PRECEDENCE 1 (issue-20260823-171958): structured violations — mazewall observed the
+        // kernel decision itself; no message parsing involved. Registered unconditionally
+        // (even with useDefaults=false): this type is a violation by construction.
+        registerMatcher { t -> t is io.mazewall.enforcer.api.ContainmentViolationException }
         if (useDefaults) {
             registerDefaultMatchers()
         }

@@ -31,6 +31,17 @@ The Orchestrator reads configuration from a `.ENV` file in the working directory
 
 *Note: If Telegram variables are not provided, the daemon falls back to local terminal prompts (requiring manual `y/n` input to start tasks).*
 
+## Scaffolding a backlog issue
+
+Agents must not invent issue filenames. Generate a validator-clean file (UTC `issue-YYYYMMDD-HHMMSS-slug.md`, inferred modules/files) and then fill **Context** / **Needed**:
+
+```bash
+./scripts/new_backlog_issue.sh --title "Cap cache growth" --symbol PolicyCompilationCache --severity MEDIUM
+./scripts/new_backlog_issue.sh --dry-run --title "Docs only" --file AGENTS.md --module :tools:orchestrator --component docs
+```
+
+`--symbol` walks Kotlin sources for the declaration and `*Test`. A TTY adds `--interactive` (open questions, kernel tests, Context/Needed). Agents: `--non-interactive`. Optional `--clarify` (needs `XAI_API_KEY`) has a weak model ask questions and a strong model fill Context/Needed so `open_questions` stays false.
+
 ## Running the Orchestrator
 
 Use the provided shell script to run the daemon:

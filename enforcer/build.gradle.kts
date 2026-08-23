@@ -51,7 +51,7 @@ val integrationTestJvmArgs =
         "-Xms128m",
         "-Dfile.encoding=UTF-8",
         "-Dsun.jnu.encoding=UTF-8",
-    )
+    ) + (if (System.getProperty("debug.disableSelfVerify") == "true") listOf("-Ddebug.disableSelfVerify=true") else emptyList())
 
 
 // issue-20260823-172001: CLI --tests filters that match only 'needs-fresh-jvm' classes fail on
