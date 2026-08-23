@@ -53,6 +53,60 @@ val integrationTestJvmArgs =
         "-Dsun.jnu.encoding=UTF-8",
     )
 
+
+// issue-20260823-172001: CLI --tests filters that match only 'needs-fresh-jvm' classes fail on
+// :enforcer:integrationTest with "No tests found", silently hiding the correct task. Emit a
+// routing hint at CONFIGURATION time (Gradle 9 does not expose CLI patterns to Test tasks).
+val cliTestFilterArgs = gradle.startParameter.taskRequests
+    .flatMap { it.args }
+fun extractCliTestPatterns(args: List<String>): List<String> {
+    val out = mutableListOf<String>()
+    var i = 0
+    while (i < args.size) {
+        val a = args[i]
+        when {
+            a.startsWith("--tests=") -> out += a.substringAfter("=")
+            a == "--tests" && i + 1 < args.size -> { out += args[i + 1]; i++ }
+        }
+        i++
+    }
+    return out.map { it.trim('*', ' ') }.filter { it.isNotBlank() }
+}
+val cliTestPatterns = extractCliTestPatterns(cliTestFilterArgs)
+
+fun findMatchingTaggedClasses(patterns: List<String>, wantTag: Boolean): List<String> {
+    if (patterns.isEmpty()) return emptyList()
+    val hits = mutableListOf<String>()
+    sourceSets["integrationTest"].output.classesDirs.forEach { dir ->
+        if (!dir.isDirectory) return@forEach
+        dir.walkTopDown()
+            .filter { it.isFile && it.extension == "class" }
+            .filter { cls ->
+                val simple = cls.nameWithoutExtension.substringAfterLast('/')
+                patterns.any { pat -> simple.contains(pat.substringAfterLast('.'), ignoreCase = true) }
+            }
+            .forEach { cls ->
+                val bytes = String(cls.readBytes(), Charsets.ISO_8859_1)
+                val tagged = bytes.contains("NeedsFreshJvm")
+                if (tagged == wantTag) {
+                    hits += cls.nameWithoutExtension.substringAfterLast('/')
+                }
+            }
+    }
+    return hits.distinct()
+}
+
+if (cliTestPatterns.isNotEmpty()) {
+    val freshOnly = findMatchingTaggedClasses(cliTestPatterns, wantTag = true)
+    val plain = findMatchingTaggedClasses(cliTestPatterns, wantTag = false)
+    if (plain.isEmpty() && freshOnly.isNotEmpty()) {
+        logger.warn(
+            "[FILTER HINT] ${freshOnly.joinToString()} are tagged 'needs-fresh-jvm' and will NOT run on " +
+                ":enforcer:integrationTest. Use: ./gradlew :enforcer:integrationTestFreshJvm --tests <pattern>",
+        )
+    }
+}
+
 fun Test.configureIntegrationHarness() {
     group = "verification"
     testClassesDirs = sourceSets["integrationTest"].output.classesDirs
@@ -63,6 +117,8 @@ fun Test.configureIntegrationHarness() {
         showStandardStreams = true
     }
     dependsOn(compileVulnerableRop)
+    // issue-20260823-172001: routing hints are emitted at CONFIGURATION time (see
+    // cliTestPatterns logic above) because CLI --tests patterns are not visible here.
 }
 
 val integrationTest =

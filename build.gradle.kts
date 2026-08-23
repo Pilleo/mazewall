@@ -511,3 +511,16 @@ tasks.register<Exec>("refactorFirstReport") {
     }
     commandLine("mvn", "org.hjug.refactorfirst.plugin:refactor-first-maven-plugin:0.9.0:htmlReport")
 }
+
+// Wipes every module's JUnit XML/binary result directories (all test variants).
+// Use before bisecting or comparing runs: stale result XMLs from a previous source
+// revision otherwise produce phantom failures when reading reports
+// (issue-20260823-172001).
+tasks.register("cleanAllTestResults") {
+    group = "verification"
+    description = "Deletes all modules' build/test-results directories (test, integrationTest, integrationTestFreshJvm)."
+    doLast {
+        subprojects { project.delete(layout.buildDirectory.dir("test-results")) }
+        delete(layout.buildDirectory.dir("test-results"))
+    }
+}

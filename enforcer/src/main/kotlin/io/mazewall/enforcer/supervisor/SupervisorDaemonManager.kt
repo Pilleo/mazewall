@@ -101,7 +101,7 @@ public class SupervisorDaemonManager(
         } catch (e: SecurityException) {
             logger.log(java.util.logging.Level.WARNING, "Failed to remove shutdown hook", e)
         }
-        triggerDaemonShutdown(context.socketPath)
+        triggerDaemonShutdown(context.socketPath, context.daemonProcess)
         context.daemonProcess.destroyForcibly()
         try {
             processLauncher.deleteIfExists(context.socketDir.resolve("supervisor.sock"))
@@ -219,32 +219,42 @@ public class SupervisorDaemonManager(
         return context
     }
 
-    private fun triggerDaemonShutdown(socketPath: String) {
+    /**
+     * Best-effort graceful shutdown: send the shutdown command, then wait (bounded) for the daemon
+     * to observe it and exit on its own before the caller escalates to destroyForcibly
+     * (issue-20260823-172000). Sleep-based waiting is replaced by a liveness poll so shutdown
+     * success is observable and fast daemons are not delayed by a fixed 100ms.
+     */
+    private fun triggerDaemonShutdown(socketPath: String, process: Process) {
         try {
             io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
                 val fd = socketManager.connect(socketPath)
                 try {
                     val cmd = arena.allocate(1L)
                     cmd.writeByte(0L, SHUTDOWN_COMMAND_BYTE)
-                    var writeRes: io.mazewall.LinuxNative.SyscallResult<Long, *>
                     while (true) {
-                        writeRes = engine.memory.write(fd, cmd, 1)
+                        val writeRes = engine.memory.write(fd, cmd, 1)
                         if (writeRes is io.mazewall.LinuxNative.SyscallResult.Error && writeRes.errno == io.mazewall.ffi.NativeConstants.EINTR) {
                             continue
                         }
                         break
                     }
-                    try {
-                        Thread.sleep(SHUTDOWN_WAIT_MS)
-                    } catch (e: InterruptedException) {
-                        Thread.currentThread().interrupt()
-                    }
                 } finally {
                     socketManager.close(fd)
                 }
             }
-        } catch (ignored: Exception) {
-            // Ignore
+        } catch (e: Exception) {
+            logger.log(java.util.logging.Level.FINE, "Daemon shutdown command could not be delivered", e)
+            return // destroyForcibly() by the caller is the authoritative escalation.
+        }
+        // Bounded liveness poll: exit as soon as the daemon acknowledges by dying.
+        val deadline = System.currentTimeMillis() + SHUTDOWN_WAIT_MS
+        try {
+            while (process.isAlive && System.currentTimeMillis() < deadline) {
+                Thread.sleep(10)
+            }
+        } catch (e: InterruptedException) {
+            Thread.currentThread().interrupt()
         }
     }
 }

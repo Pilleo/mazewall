@@ -41,6 +41,9 @@ import java.util.logging.Logger
  * making it completely immune to pointer-dereferencing TOCTOU attacks.
  */
 object Profiler {
+    private const val WORKER_JOIN_TIMEOUT_MS = 60_000L
+    private const val GRACE_PERIOD_MS = 5_000L
+
     private val logger = Logger.getLogger(Profiler::class.java.name)
     private val listeners = CopyOnWriteArrayList<ProfilerTraceListener>()
     internal val threadRegistry = ConcurrentHashMap<Tid, Thread>()
@@ -104,7 +107,16 @@ object Profiler {
             start()
         }
 
-        workerThread.join()
+        // Bounded join (issue-20260823-172000): a wedged reactor must not hang the profiler forever.
+        workerThread.join(WORKER_JOIN_TIMEOUT_MS)
+        if (workerThread.isAlive) {
+            workerThread.interrupt()
+            workerThread.join(GRACE_PERIOD_MS)
+            errorRef.get()?.let { throw it }
+            throw IllegalStateException(
+                "Profiler worker '${workerThread.name}' did not terminate within ${WORKER_JOIN_TIMEOUT_MS}ms"
+            )
+        }
 
         errorRef.get()?.let { throw it }
 

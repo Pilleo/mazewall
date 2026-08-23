@@ -140,6 +140,22 @@ To avoid "Primitive Obsession" in a codebase full of pointers and integers, we u
 ### E. Architectural Fitness Functions (ArchUnit)
 Security is a structural property. We use ArchUnit to ensure that memory-unsafe operations are strictly localized.
 - **Application:** Banning direct `java.lang.foreign` or `Unsafe` access outside of the `io.mazewall.ffi` package to prevent structural bypasses of our memory-safety model.
+- **Enforcement:** `ArchitectureTest.rawFfmTypesMustResideInFfiPackages` (enforcer) fails the build when any class outside `io.mazewall.ffi..` gains a dependency on `java.lang.foreign`.
+
+### F. FFM Package Placement (module split rationale)
+Raw FFM code is split across two modules by OWNERSHIP OF ABSTRACTION LEVEL, not arbitrarily:
+- **`:platform` `io.mazewall.ffi..`** owns generic, domain-independent ABI surface: `NativeConstants`,
+  `LinuxNative` + `RealNativeEngine`, memory primitives (`NativeArena`, `ManagedSegment`,
+  layouts), and errno values. Anything reusable without understanding mazewall's policy model
+  belongs here.
+- **`:enforcer` `io.mazewall.ffi..`** owns domain-shaped FFM structures that depend on enforcer
+  concepts: seccomp notification networking (`SupervisorSeccompNotifInstaller`, msghdr/cmsg
+  SCM_RIGHTS plumbing), `sock_fprog` wiring, and supervisor process-memory readers.
+- **Rule of thumb:** if the code would make sense in any sandboxing library, it belongs to
+  `:platform`; if it mentions seccomp/Landlock/supervisor semantics, it belongs to `:enforcer`.
+  Both are covered by the ArchUnit FFM-confinement rule above; module direction
+  (`:enforcer -> :platform`, never reverse) is enforced by Gradle dependencies.
+
 
 
 

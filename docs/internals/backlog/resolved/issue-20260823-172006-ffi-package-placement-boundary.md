@@ -1,7 +1,7 @@
 ---
 title: "FFM Package Placement Boundary: Document or Enforce platform-vs-enforcer ffi Split"
 severity: "LOW"
-status: "open"
+status: "resolved"
 priority: low
 component: "enforcer"
 target_modules:
@@ -26,6 +26,8 @@ memory/FFM/Unsafe manipulations isolated to `io.mazewall.ffi`" but does not stat
 what, why supervisor socket/msghdr FFM lives in :enforcer while LinuxNative lives in :platform, and
 no ArchUnit rule enforces the placement — so drift accumulates silently (new FFM code can appear in
 any package).
+
+**Resolution (2026-08-23):** Rationale documented in `architectural-map.md §E/F`. Enforcement added: ArchUnit rule `rawFfmTypesMustResideInFfiPackages` fails when any class outside `io.mazewall.ffi..` depends on `java.lang.foreign..` — currently zero violations, boundary locked.
 
 **Needed:**
 1. Write the rationale into `architectural-map.md`: platform owns generic ABI constants/engine +

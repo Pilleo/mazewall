@@ -292,6 +292,7 @@ class "PolicyCompilationCache" as io.mazewall.PolicyCompilationCache {
   __
   +CompiledSandbox<S> getOrCompile(PolicyDefinition<? extends S>, Arch)
   +void clear()
+  +int entryCount()
 }
 class "PolicyDefinition" as io.mazewall.PolicyDefinition<S extends PolicyScope> {
   + {static}Companion Companion
@@ -1721,6 +1722,14 @@ class "BpfProgramKt" as io.mazewall.seccomp.BpfProgramKt {
   + {static}BpfProgram<Unverified> build(BpfBuilder<? extends Terminated>)
   + {static}BpfBuilder<Active> jumpUnconditional(BpfBuilder<? extends Active>, BpfLabel)
 }
+class "BpfSimulator" as io.mazewall.seccomp.BpfSimulator {
+  + {static}BpfSimulator INSTANCE
+  + {static}int SECCOMP_DATA_NR_OFFSET
+  + {static}int SECCOMP_DATA_ARCH_OFFSET
+  __
+  +Integer simulate(List<? extends BpfInstruction>, int, int)
+  +Integer simulate(List<? extends BpfInstruction>, int, Arch)
+}
 interface "BpfState" as io.mazewall.seccomp.BpfState {
 }
 class "BpfStaticVerifier" as io.mazewall.seccomp.BpfStaticVerifier {
@@ -1795,6 +1804,14 @@ interface "SyscallInspector" as io.mazewall.seccomp.SyscallInspector {
   +List<SyscallInspection> getInspections(Arch, InspectionContext)
   +void emitSpecial(BpfBuilder<? extends Active>, Arch, InspectionContext, Set<Integer>)
 }
+class "SyscallProbeMatrix" as io.mazewall.seccomp.SyscallProbeMatrix {
+  + {static}SyscallProbeMatrix INSTANCE
+  + {static}int SYNTHETIC_MID_NR
+  + {static}int SYNTHETIC_HIGH_NR
+  __
+  +List<Probe> structural(Arch, Set<Integer>)
+  +List<Probe> matched(Arch, Collection<Integer>)
+}
 class "ThreadCloneInspector" as io.mazewall.seccomp.ThreadCloneInspector {
   +List<SyscallInspection> getInspections(Arch, InspectionContext)
   +void emitSpecial(BpfBuilder<? extends Active>, Arch, InspectionContext, Set<Integer>)
@@ -1831,7 +1848,6 @@ io.mazewall.Policy --> io.mazewall.seccomp.BpfInstruction
 io.mazewall.PolicyBuilder --> io.mazewall.core.SandboxedPath
 io.mazewall.PolicyBuilder --> io.mazewall.core.SeccompAction
 io.mazewall.PolicyCompilationCache --> io.mazewall.PolicyCompilationCache
-io.mazewall.PolicyCompilationCache --> io.mazewall.CompiledSandbox
 io.mazewall.PolicyDefinition --> io.mazewall.core.SandboxedPath
 io.mazewall.PolicyDefinition --> io.mazewall.core.SeccompAction
 io.mazewall.PolicyLists --> io.mazewall.PolicyLists
@@ -1972,6 +1988,7 @@ io.mazewall.sbob.PathNormalizer --> io.mazewall.sbob.PathNormalizer
 io.mazewall.sbob.PolicyTransformer --> io.mazewall.sbob.PolicyTransformer
 io.mazewall.seccomp.BpfBuilder --> io.mazewall.seccomp.BpfMacro
 io.mazewall.seccomp.BpfProgram --> io.mazewall.seccomp.BpfInstruction
+io.mazewall.seccomp.BpfSimulator --> io.mazewall.seccomp.BpfSimulator
 io.mazewall.seccomp.BpfStaticVerifier --> io.mazewall.seccomp.BpfStaticVerifier
 io.mazewall.seccomp.Clone3Inspector .u.|> io.mazewall.seccomp.SyscallInspector
 io.mazewall.seccomp.DefaultSyscallInspectionPipeline .u.|> io.mazewall.seccomp.SyscallInspectionPipeline
@@ -1983,6 +2000,7 @@ io.mazewall.seccomp.PureJavaBpfEngine --> io.mazewall.seccomp.PureJavaBpfEngine
 io.mazewall.seccomp.SocketAddressFamilyInspector .u.|> io.mazewall.seccomp.SyscallInspector
 io.mazewall.seccomp.SyscallInspection --> io.mazewall.seccomp.ArgCheck
 io.mazewall.seccomp.SyscallInspection --> io.mazewall.core.SeccompAction
+io.mazewall.seccomp.SyscallProbeMatrix --> io.mazewall.seccomp.SyscallProbeMatrix
 io.mazewall.seccomp.ThreadCloneInspector .u.|> io.mazewall.seccomp.SyscallInspector
 io.mazewall.seccomp.UnsafePrctlInspector .u.|> io.mazewall.seccomp.SyscallInspector
 @enduml

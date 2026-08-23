@@ -19,7 +19,7 @@ import java.nio.file.AccessDeniedException
     replaceWith = ReplaceWith("MazewallProfiler.open(ProfileOptions(strategy = ProfileStrategy.HYBRID_NO_URING))", "io.mazewall.profiler.MazewallProfiler", "io.mazewall.profiler.ProfileOptions", "io.mazewall.profiler.ProfileStrategy"),
 )
 object IterativeProfiler {
-    public var taskExecutor: IterativeTaskExecutor = RealIterativeTaskExecutor
+    public var taskExecutor: IterativeTaskExecutor = RealIterativeTaskExecutor()
 
     private val customPhrases = java.util.concurrent.CopyOnWriteArrayList<String>()
     private val customRegexes = java.util.concurrent.CopyOnWriteArrayList<Regex>()

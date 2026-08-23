@@ -39,4 +39,14 @@
         <Method name="init" />
         <Bug pattern="ST_WRITE_TO_STATIC_FROM_INSTANCE_METHOD" />
     </Match>
+    <!-- SpotBugs false positive: the bounded LRU is an anonymous LinkedHashMap subclass
+         (access-order eviction, issue-20260823-171953). get/remove are invoked via
+         Map interface call sites, which the analyzer cannot see for anonymous classes. -->
+    <Match>
+        <Class name="~io\.mazewall\.PolicyCompilationCache.*" />
+        <Or>
+            <Bug pattern="UMAC_UNCALLABLE_METHOD_OF_ANONYMOUS_CLASS" />
+            <Bug pattern="UMAC" />
+        </Or>
+    </Match>
 </FindBugsFilter>

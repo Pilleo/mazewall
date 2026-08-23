@@ -1,7 +1,7 @@
 ---
 title: "Bound All Blocking Waits (Task Join, Daemon Shutdown Handshake)"
 severity: "LOW"
-status: "open"
+status: "resolved"
 priority: medium
 component: "profiler"
 target_modules:
@@ -26,6 +26,8 @@ dependencies: []
    exists to debug).
 2. `SupervisorDaemonManager.triggerDaemonShutdown` uses `Thread.sleep(SHUTDOWN_WAIT_MS=100)` and
    swallows all exceptions — shutdown success is unobservable and timing-dependent.
+
+**Resolution (2026-08-23):** `RealIterativeTaskExecutor` gained `iterationTimeoutMs` (default 120s): bounded join → interrupt → 5s grace → hard check (`Thread.stop()` rejected: unusable on modern JDKs); timeout surfaces as distinct `IterativeTaskTimeoutException`. Both daemon shutdown paths replaced fixed sleeps with command-write + bounded liveness poll; exceptions logged instead of swallowed. Profiler worker join bounded at 60s with interrupt escalation. Remaining joins/sleeps are intentional EINTR backoffs / workload stress, documented.
 
 **Needed:**
 1. Replace `join()` with `join(timeout)` + `interrupt()` + documented escalation; surface timeout as

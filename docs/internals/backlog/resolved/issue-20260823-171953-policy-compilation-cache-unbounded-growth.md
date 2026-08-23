@@ -1,7 +1,7 @@
 ---
 title: "PolicyCompilationCache Grows Without Bound for Dynamic Policies"
 severity: "HIGH"
-status: "open"
+status: "resolved"
 priority: high
 component: "enforcer"
 target_modules:
@@ -30,6 +30,8 @@ program:
   forever — `clear()` exists but is test-only. Unbounded heap growth in exactly the
   always-on deployments this library targets.
 - Secondary cost: cache lookups hash/compare entire definitions including path sets and regexes.
+
+**Resolution (2026-08-23):** Key replaced with the program-relevant projection (`defaultAction`, `syscallActions`, arg-inspection flags + arch); FS paths removed from keying so path-only variants share one entry. Cache is now a bounded (256-entry) access-order LRU — safe because the sole caller already holds `processLock`; compilation happens outside the lock. Regression tests (`PolicyCompilationCacheTest`) use instance-identity assertions (immune to concurrent foreign inserts): same-definition reuse, path-only sharing, distinct-action separation, size cap.
 
 **Needed:**
 1. Key the cache on the program-relevant projection: `defaultAction`, `syscallActions`,

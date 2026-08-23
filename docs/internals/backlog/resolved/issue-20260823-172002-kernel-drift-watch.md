@@ -1,7 +1,7 @@
 ---
 title: "Kernel-Drift Watch: io_uring Ops, LSM Stacking, seccomp NOTIF API Growth"
 severity: "LOW"
-status: "open"
+status: "resolved"
 priority: medium
 component: "ci"
 target_modules:
@@ -29,6 +29,13 @@ when Linux grows surfaces mazewall must reason about. Concrete live risks:
   detector reasons about.
 - seccomp USER_NOTIF API growth (e.g. `SECCOMP_IOCTL_NOTIF_ADDFD` vs current SCM_RIGHTS fd passing)
   could simplify/replace supervisor plumbing but also changes TOCTOU semantics.
+
+**Resolution (2026-08-23):** Implemented: (1) quarterly checklist + decision log at
+`docs/internals/research/kernel-drift-watch.md` covering seccomp, Landlock, io_uring ops/SQPOLL,
+LSM stacking, and cBPF verifier/JIT (with the JA-in-K finding as the first logged decision);
+(2) monthly scheduled workflow `.github/workflows/kernel-drift-watch.yml` diffing packaged
+`linux-libc-dev` headers against a committed snapshot (`docs/internals/research/uapi-snapshot/`),
+filing a labeled drift issue on change. Findings feed the knowledge-map flow per existing practice.
 
 **Needed:**
 1. A quarterly (or release-train) drift review checklist doc under `docs/internals/research/`,

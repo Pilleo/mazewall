@@ -505,8 +505,10 @@ interface "IterativeTaskExecutor" as io.mazewall.profiler.iterative.IterativeTas
   + {abstract}Throwable executeTask(Policy<?, ? extends Uncompiled>, Runnable)
 }
 class "RealIterativeTaskExecutor" as io.mazewall.profiler.iterative.RealIterativeTaskExecutor {
-  + {static}RealIterativeTaskExecutor INSTANCE
+  + {static}Companion Companion
+  + {static}long DEFAULT_ITERATION_TIMEOUT_MS
   __
+  +long getIterationTimeoutMs()
   +Throwable executeTask(Policy<?, ? extends Uncompiled>, Runnable)
 }
 class "StraceProfiler" as io.mazewall.profiler.strace.StraceProfiler {
@@ -612,7 +614,6 @@ io.mazewall.profiler.internal.TraceEventQueue --> io.mazewall.profiler.engine.Tr
 io.mazewall.profiler.iterative.IterativeProfiler --> io.mazewall.profiler.iterative.IterativeProfiler
 io.mazewall.profiler.iterative.IterativeProfiler --> io.mazewall.profiler.iterative.IterativeTaskExecutor
 io.mazewall.profiler.iterative.RealIterativeTaskExecutor .u.|> io.mazewall.profiler.iterative.IterativeTaskExecutor
-io.mazewall.profiler.iterative.RealIterativeTaskExecutor --> io.mazewall.profiler.iterative.RealIterativeTaskExecutor
 io.mazewall.profiler.strace.StraceProfiler --> io.mazewall.profiler.strace.StraceProfiler
 io.mazewall.profiler.strace.StraceWorkloadRunner --> io.mazewall.profiler.strace.StraceWorkloadRunner
 io.mazewall.profiler.triage.DiagnosticTriageRunner --> io.mazewall.profiler.triage.DiagnosticTriageRunner

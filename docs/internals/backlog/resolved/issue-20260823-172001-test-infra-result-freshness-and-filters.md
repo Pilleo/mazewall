@@ -1,7 +1,7 @@
 ---
 title: "Test Infrastructure Hygiene: Stale Result Dirs, Broken --tests Filters, Up-to-Date Bisect Pitfalls"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: high
 component: "testing"
 target_modules:
@@ -31,6 +31,15 @@ capable of producing WRONG conclusions during debugging:
    test tasks as up-to-date against pre-existing results, so a "baseline passes" check can be
    vacuous unless `cleanTest`/`--rerun-tasks` is forced (cost several wasted cycles diagnosing
    issue-20260823-140500).
+
+**Resolution (2026-08-23):**
+1. Root task `./gradlew cleanAllTestResults` wipes every module's `build/test-results`.
+2. Configuration-time scan detects CLI `--tests` patterns matching only `@NeedsFreshJvm` classes
+   and emits `[FILTER HINT]` pointing to `:enforcer:integrationTestFreshJvm` (Gradle 9 does not
+   expose CLI patterns to Test tasks; tag detection matches the NeedsFreshJvm annotation reference
+   since meta-annotated tags don't appear in test-class bytes).
+3. AGENTS.md §5 documents both plus mandatory bisect pairing with
+   `cleanAllTestResults --rerun-tasks`.
 
 **Needed:**
 1. Add a `cleanAllTestResults` convenience task wiping every module's `test-results` dirs (all

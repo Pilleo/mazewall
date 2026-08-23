@@ -41,8 +41,21 @@ class ArchitectureTest {
     }
 
     @ArchTest
-    fun rawSyscallOperationsMustOnlyBeUsedByAllowedPackages(allClasses: com.tngtech.archunit.core.domain.JavaClasses) {
+    fun rawFfmTypesMustResideInFfiPackages(allClasses: com.tngtech.archunit.core.domain.JavaClasses) {
+        // issue-20260823-172006: all raw java.lang.foreign usage must live in io.mazewall.ffi..
+        // (platform owns generic ABI/engine primitives; enforcer owns domain structures).
         noClasses()
+            .that()
+            .resideOutsideOfPackages("io.mazewall.ffi..")
+            .should()
+            .dependOnClassesThat()
+            .resideInAPackage("java.lang.foreign..")
+            .because("raw FFM access must be isolated to io.mazewall.ffi.. per architectural-map.md")
+            .check(allClasses)
+    }
+
+    @ArchTest
+    fun rawSyscallOperationsMustOnlyBeUsedByAllowedPackages(allClasses: com.tngtech.archunit.core.domain.JavaClasses) {        noClasses()
             .that()
             .resideOutsideOfPackages(
                 "io.mazewall.seccomp..",

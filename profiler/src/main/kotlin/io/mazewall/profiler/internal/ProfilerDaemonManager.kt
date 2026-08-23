@@ -90,7 +90,7 @@ public class ProfilerDaemonManager(
         } catch (e: SecurityException) {
             logger.log(java.util.logging.Level.WARNING, "Failed to remove shutdown hook", e)
         }
-        triggerDaemonShutdown(context.socketPath)
+        triggerDaemonShutdown(context.socketPath, context.daemonProcess)
         context.daemonProcess.destroyForcibly()
         context.daemonProcess.waitFor()
         try {
@@ -166,7 +166,7 @@ public class ProfilerDaemonManager(
         return DaemonContext(socketPath, socketDir, daemonProcess, shutdownHook)
     }
 
-    private fun triggerDaemonShutdown(socketPath: String) {
+    private fun triggerDaemonShutdown(socketPath: String, process: Process) {
         try {
             Arena.ofConfined().use { arena ->
                 val fd = socketManager.connect(socketPath)
@@ -174,13 +174,22 @@ public class ProfilerDaemonManager(
                     val cmd = arena.allocate(1)
                     cmd.set(ValueLayout.JAVA_BYTE, 0L, SHUTDOWN_COMMAND_BYTE)
                     engine.memory.write(fd, ConfinedSegment(cmd), 1)
-                    Thread.sleep(SHUTDOWN_WAIT_MS)
                 } finally {
                     socketManager.close(fd)
                 }
             }
         } catch (ignored: Exception) {
-            // Ignore
+            // Caller escalates via destroyForcibly().
+            return
+        }
+        // Bounded liveness poll instead of a fixed sleep (issue-20260823-172000).
+        val deadline = System.currentTimeMillis() + SHUTDOWN_WAIT_MS
+        try {
+            while (process.isAlive && System.currentTimeMillis() < deadline) {
+                Thread.sleep(10)
+            }
+        } catch (e: InterruptedException) {
+            Thread.currentThread().interrupt()
         }
     }
 }
