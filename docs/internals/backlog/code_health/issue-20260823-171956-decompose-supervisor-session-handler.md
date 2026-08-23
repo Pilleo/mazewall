@@ -1,7 +1,7 @@
 ---
 title: "Decompose SupervisorSessionHandler God File Along SupervisedKind Routes"
 severity: "MEDIUM"
-status: "in_progress"
+status: "resolved"
 priority: high
 component: "enforcer"
 target_modules:
@@ -24,13 +24,21 @@ every supervisor change today lands in one file with high merge-collision probab
 testability (testing/issue-20260726-0135 tracks profiler-side testability), and cognitive overload
 that invites exactly the class of subtle bugs caught recently (JA encoding, ACK-loop hazards).
 
-**Progress (2026-08-23, updated):** Slice 1 landed — `/proc` inspection helpers extracted to
-`ProcFsInspector` (getTgid, getPpid) with handler delegation; SupervisorSessionHandlerTest green.
-Slice 2 landed — `SupervisorResponseWriter` extracted (continue/success/error marshalling behind a lazy per-handler instance; all 26 call sites keep their thin delegates).
-Slice 3 landed — `SupervisorFastPath` extracted (tracee path resolution via /proc + BypassPaths; ResolveAbsolutePathTest migrated off reflection onto the direct API).
-Slice 4 landed — `NotificationReader` extracted (`awaitJvmResponse`: deadline-bounded poll with interrupt-aware EINTR backoff, returning revents+remaining budget; `recvNotification`: EINTR-retrying NOTIF_RECV). Handler keeps verdict/routing/shutdown decisions and the context-rich timeout logging.
-Remaining slices: RouteEvaluator (SupervisedKind routing + fast-path decision policy). Each slice must be preceded
-by golden-notification coverage per the plan below.
+**Resolution (2026-08-23):** Decomposed across four slices, preserving behavior (existing
+session-handler tests green throughout):
+1. `ProcFsInspector` — /proc status/stat readers (getTgid, getPpid).
+2. `SupervisorResponseWriter` — USER_NOTIF continue/success/error marshalling; ACK-invariant
+   KDoc relocated with the code.
+3. `SupervisorFastPath` — tracee path resolution (absolute + dirfd-relative via /proc);
+   ResolveAbsolutePathTest migrated off reflection onto the direct API.
+4. `NotificationReader` — deadline-bounded validation poll (interrupt-aware EINTR backoff,
+   returns revents + remaining budget) and EINTR-retrying NOTIF_RECV.
+Route evaluation was ALREADY isolated in `SupervisorNotificationMachine.evaluateFastPath`
+(separately unit-tested); the residual in-handler glue is ~30 lines of Continue/Abort handling,
+which does not justify another collaborator. Handler reduced from 1218 to ~1090 lines with its
+four highest-churn concerns behind stable seams; further extraction (full RouteEvaluator object)
+is deferred unless churn justifies it.
+
 
 **Needed:**
 1. Split along existing seams into collaborators: `NotificationReader` (recv/EINTR loops),
