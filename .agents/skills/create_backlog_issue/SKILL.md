@@ -48,7 +48,7 @@ Do **not** invent `issue-YYYYMMDD-HHMMSS-*.md` by hand. Run the scaffold so the 
 
 Then replace the `FILL:` sentences under **Context:** and **Needed:**. Do not rename the file. `--symbol` walks Kotlin sources for the type/function and its `*Test`. `--dry-run` prints markdown without writing.
 
-Humans on a TTY are prompted (open questions, `needs_kernel`, Context/Needed). Agents must pass `--non-interactive` (or no TTY) plus flags. Optional `--clarify` runs: verify draft → weak ACP fills Context/Needed → verify again → independent strong ACP review (`ISSUE_CLARIFY_ACP='agy --acp'`, `ISSUE_CLARIFY_STRONG_ACP` for a separate reviewer). No API keys. If an ACP agent is missing or fails, the file is still written.
+Humans on a TTY are prompted (open questions, `needs_kernel`, side effects, Context/Needed). Agents must pass `--non-interactive` (or no TTY) plus flags. Optional `--clarify` is ACP-only: weak author → verify → side-effect question → AST identifier scan (not a tree dump) → if side effects, weak investigates where/how → weak investigation loop (code/docs/web) documenting investigation points and important details → leftover questions to strong ACP → independent strong final review (weak applies fixes). `ISSUE_CLARIFY_ACP='agy --acp'`, `ISSUE_CLARIFY_STRONG_ACP` for a separate reviewer. Missing/failing ACP skips that step; the file is still written. `--side-effects` / `--no-side-effects` / `--side-effect TEXT` skip the prompt.
 
 ### 3. Naming & File Placement
 Create a new markdown issue file under the appropriate category subdirectory in `docs/internals/backlog/{category}/`:

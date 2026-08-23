@@ -10,14 +10,15 @@ import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * One-shot JSON-RPC ACP client over stdio (newline-delimited JSON).
- * Used only to ask a coding agent a question; filesystem/terminal client
- * methods are rejected so a clarify pass cannot edit the repo through us.
+ * Clarify may read files under the session cwd so the weak investigator can
+ * inspect the repo; writes and terminal methods are rejected.
  */
 class AcpChatModel(
     private val command: List<String>,
     private val timeoutMs: Long = DEFAULT_TIMEOUT_MS,
+    private val workingDirectory: java.io.File = java.io.File(System.getProperty("java.io.tmpdir")),
     private val processFactory: (List<String>) -> Process = { cmd ->
-        ProcessBuilder(cmd).redirectErrorStream(false).start()
+        ProcessBuilder(cmd).directory(workingDirectory).redirectErrorStream(false).start()
     },
 ) : ChatModel {
     override fun complete(system: String, user: String): String {
@@ -25,7 +26,7 @@ class AcpChatModel(
         val future = java.util.concurrent.CompletableFuture.supplyAsync {
             val writer = BufferedWriter(OutputStreamWriter(process.outputStream, StandardCharsets.UTF_8))
             val reader = BufferedReader(InputStreamReader(process.inputStream, StandardCharsets.UTF_8))
-            val session = AcpJsonRpcSession(writer, reader)
+            val session = AcpJsonRpcSession(writer, reader, workingDirectory)
             session.initialize()
             val sessionId = session.newSession()
             session.prompt(sessionId, "$system\n\n$user")
@@ -50,6 +51,7 @@ class AcpChatModel(
 internal class AcpJsonRpcSession(
     private val writer: BufferedWriter,
     private val reader: BufferedReader,
+    private val workingDirectory: java.io.File = java.io.File(System.getProperty("java.io.tmpdir")),
     private val nextId: AtomicInteger = AtomicInteger(1),
 ) {
     fun initialize() {
@@ -62,7 +64,7 @@ internal class AcpJsonRpcSession(
     }
 
     fun newSession(): String {
-        val cwd = System.getProperty("java.io.tmpdir")
+        val cwd = workingDirectory.canonicalPath
         val id = request("session/new", """{"cwd":${jsonString(cwd)},"mcpServers":[]}""")
         val result = waitForResult(id)
         val sessionId = parseJsonStringField(result, "sessionId")
@@ -119,7 +121,7 @@ internal class AcpJsonRpcSession(
                     method.startsWith("terminal/") ||
                     method == "session/request_permission")
             ) {
-                rejectClientRequest(id, method)
+                handleClientRequest(id, method, trimmed)
                 continue
             }
             if (method != null && id == null) {
@@ -136,17 +138,40 @@ internal class AcpJsonRpcSession(
         }
     }
 
-    private fun rejectClientRequest(id: Int?, method: String) {
-        if (id == null) return
-        if (method == "session/request_permission") {
-            write(
-                """{"jsonrpc":"2.0","id":$id,"result":{"outcome":{"outcome":"cancelled"}}}""",
+    private fun handleClientRequest(id: Int, method: String, raw: String) {
+        when (method) {
+            "session/request_permission" -> write(
+                """{"jsonrpc":"2.0","id":$id,"result":{"outcome":{"outcome":"selected","optionId":"allow-once"}}}""",
             )
-        } else {
-            write(
+
+            "fs/read_text_file" -> {
+                val params = jsonObjectAfterKey(raw, "params") ?: "{}"
+                val path = optionalJsonStringField(params, "path")
+                val content = readAllowed(path)
+                if (content == null) {
+                    write(
+                        """{"jsonrpc":"2.0","id":$id,"error":{"code":-32000,"message":"read not allowed"}}""",
+                    )
+                } else {
+                    write(
+                        """{"jsonrpc":"2.0","id":$id,"result":{"content":${jsonString(content)}}}""",
+                    )
+                }
+            }
+
+            else -> write(
                 """{"jsonrpc":"2.0","id":$id,"error":{"code":-32601,"message":"not supported in clarify"}}""",
             )
         }
+    }
+
+    private fun readAllowed(path: String?): String? {
+        if (path.isNullOrBlank()) return null
+        val root = workingDirectory.canonicalFile.toPath()
+        val resolved = workingDirectory.toPath().resolve(path).normalize().toFile().canonicalFile
+        if (!resolved.toPath().startsWith(root)) return null
+        if (!resolved.isFile) return null
+        return resolved.readText().take(8000)
     }
 }
 

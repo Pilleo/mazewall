@@ -15,11 +15,32 @@ class ConsoleLinePrompt : LinePrompt {
 }
 
 object IssueInterview {
-    fun complete(request: IssueScaffoldRequest, prompt: LinePrompt, askOpenQuestions: Boolean, askKernel: Boolean): IssueScaffoldRequest {
+    fun complete(
+        request: IssueScaffoldRequest,
+        prompt: LinePrompt,
+        askOpenQuestions: Boolean,
+        askKernel: Boolean,
+        askSideEffects: Boolean = false,
+    ): IssueScaffoldRequest {
         var next = request
         if (askKernel) {
             val answer = prompt.ask("Need kernel/seccomp/Landlock integration tests (needs_kernel)", "n")
             next = next.copy(needsKernel = isYes(answer))
+        }
+        if (askSideEffects) {
+            val answer = prompt.ask(
+                "Does this change have side effects (callers, other modules, ABI, tests)",
+                "n",
+            )
+            if (isYes(answer)) {
+                val known = prompt.ask("Known side-effect impact (empty to investigate later)", "")
+                next = next.copy(
+                    hasSideEffects = true,
+                    sideEffectImpacts = listOfNotNull(known.trim().takeIf { it.isNotEmpty() }),
+                )
+            } else {
+                next = next.copy(hasSideEffects = false)
+            }
         }
         if (askOpenQuestions) {
             val answer = prompt.ask("Are there open questions a human must answer before work starts", "n")

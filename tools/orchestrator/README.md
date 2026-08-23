@@ -40,7 +40,9 @@ Agents must not invent issue filenames. Generate a validator-clean file (UTC `is
 ./scripts/new_backlog_issue.sh --dry-run --title "Docs only" --file AGENTS.md --module :tools:orchestrator --component docs
 ```
 
-`--symbol` walks Kotlin sources for the declaration and `*Test`. A TTY adds `--interactive`. Agents: `--non-interactive`. `--clarify` is ACP-only (`ISSUE_CLARIFY_ACP='agy --acp'`): verify → weak author → verify → independent strong review. Missing or failing agents skip that step and still write the issue. No API keys.
+`--symbol` walks Kotlin sources for the declaration and `*Test`. A TTY adds `--interactive`. Agents: `--non-interactive`. Planning asks whether the change has side effects (`--side-effects` / `--no-side-effects`, or a prompt). If yes, a compact AST identifier scan (ast-grep via `scripts/sg.sh` when present, otherwise a source walk) lists external callers; weak ACP then writes where and how they may be affected into `## Side effects`. `--clarify` is ACP-only: weak author → verify → side-effect/AST investigation → weak investigation loop (open questions dug in code/docs/web; investigation points and important details are written into the issue) → leftover questions to strong ACP → independent strong final review. Missing or failing agents skip that step and still write the issue.
+
+`:tools:orchestrator` is not part of the default Gradle build. Pass `-PincludeOrchestrator=true` (the scaffold script already does) when you need its tasks.
 
 ## Running the Orchestrator
 

@@ -1,7 +1,7 @@
 ---
 title: "Operator Observability: Structured Diagnostics Events Beyond JUL Strings"
 severity: "LOW"
-status: "open"
+status: "resolved"
 priority: low
 component: "enforcer"
 target_modules:
@@ -11,7 +11,7 @@ target_files:
   - "enforcer/src/main/kotlin/io/mazewall/Platform.kt"
 effort: "medium"
 autonomy: "supervised"
-open_questions: true
+open_questions: false
 dependencies: []
 ---
 
@@ -25,6 +25,16 @@ alert, dump state, or attempt orderly shutdown first. Similarly, fallback bypass
 (WARN_AND_BYPASS), Landlock application, CET arm/lock outcomes, and self-verification results (once
 issue-20260823-172003 lands) are log-only.
 
+**Resolution (2026-08-23):** Implemented `io.mazewall.enforcer.diagnostics.MazewallEvents`:
+sealed `Event` types (DaemonExited, FallbackEngaged, LandlockApplied, CetOutcome,
+SelfVerificationResult) with a CopyOnWriteArrayList listener registry, SAM
+`DiagnosticEventListener`, and swallow-by-default listener isolation (operator/test seam
+`failOnListenerError` to propagate). Wired at: daemon unexpected exit (event emitted BEFORE the
+fail-closed `halt(1)` — open question answered: halt remains non-negotiable, the SPI is
+observability-only), WARN_AND_BYPASS engagement, Landlock application (scope + ABI), CET arm
+outcome, and self-verification result. JUL remains the default sink; ArchUnit generic-catch rule
+whitelists MazewallEvents with justification. Tests: MazewallEventsTest.
+
 **Needed:**
 1. Introduce a tiny event SPI: `MazewallEvents { fun onEvent(event: DiagnosticEvent) }` with a
    default no-op; events are sealed data objects (DaemonExited(exitCode, lastLogLines),
@@ -34,6 +44,3 @@ issue-20260823-172003 lands) are log-only.
 3. JUL adapters remain the default sink so current behavior is unchanged.
 4. Document a recipe: wiring events into Micrometer/OTel in the presentation docs.
 
-## ❓ Open Questions
-1. Should daemon-exited allow a non-halt policy (e.g. graceful drain then halt) via the SPI, given
-   stranded USER_NOTIF waiters cannot be resumed? Default must remain fail-closed halt.

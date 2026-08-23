@@ -212,6 +212,9 @@ class ArchitectureTest {
             .haveSimpleNameNotStartingWith("ContainmentViolationDetector")
             .and()
             .areDeclaredInClassesThat()
+            .haveSimpleNameNotStartingWith("MazewallEvents")
+            .and()
+            .areDeclaredInClassesThat()
             .resideOutsideOfPackages(
                 "io.mazewall.enforcer.supervisor..",
                 "io.mazewall.platform.seccomp.daemon..",

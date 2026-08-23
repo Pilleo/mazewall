@@ -24,6 +24,10 @@ data class IssueScaffoldRequest(
     val neededBody: String? = null,
     val reviewVerdict: String? = null,
     val reviewComments: List<String> = emptyList(),
+    val investigationPoints: List<String> = emptyList(),
+    val importantDetails: List<String> = emptyList(),
+    val hasSideEffects: Boolean? = null,
+    val sideEffectImpacts: List<String> = emptyList(),
 )
 
 data class IssueScaffoldResult(
@@ -232,6 +236,9 @@ class IssueTemplateGenerator(
                 if (!request.reviewVerdict.isNullOrBlank()) {
                     appendLine("review_verdict: ${request.reviewVerdict}")
                 }
+                if (request.hasSideEffects != null) {
+                    appendLine("has_side_effects: ${request.hasSideEffects}")
+                }
                 appendLine("---")
                 appendLine()
                 appendLine("# $badge [Severity: $severity]: ${request.title.trim()}")
@@ -247,6 +254,28 @@ class IssueTemplateGenerator(
                     request.neededBody?.trim()?.takeIf { it.isNotEmpty() }
                         ?: "FILL: numbered, testable steps. Replace this sentence.",
                 )
+                val investigation = request.investigationPoints.map { it.trim() }.filter { it.isNotEmpty() }
+                val details = request.importantDetails.map { it.trim() }.filter { it.isNotEmpty() }
+                if (investigation.isNotEmpty()) {
+                    appendLine()
+                    appendLine("## Investigation")
+                    investigation.forEach { appendLine("- $it") }
+                }
+                if (details.isNotEmpty()) {
+                    appendLine()
+                    appendLine("## Important details")
+                    details.forEach { appendLine("- $it") }
+                }
+                val sideEffects = request.sideEffectImpacts.map { it.trim() }.filter { it.isNotEmpty() }
+                if (request.hasSideEffects == true || sideEffects.isNotEmpty()) {
+                    appendLine()
+                    appendLine("## Side effects")
+                    if (sideEffects.isEmpty()) {
+                        appendLine("- FILL: name callers, modules, ABI, or tests this may break.")
+                    } else {
+                        sideEffects.forEach { appendLine("- $it") }
+                    }
+                }
                 if (open.isNotEmpty()) {
                     appendLine()
                     appendLine("## ❓ Open Questions")

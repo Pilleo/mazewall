@@ -18,12 +18,13 @@ fun main(args: Array<String>) {
                 prompt = ConsoleLinePrompt(),
                 askOpenQuestions = parsed.openQuestionsSpecified == null && !parsed.clarify,
                 askKernel = !parsed.needsKernelSpecified,
+                askSideEffects = parsed.sideEffectsSpecified == null,
             )
         }
         val generator = IssueTemplateGenerator(repoRoot = repoRoot)
         var result = generator.scaffold(request, write = false)
         if (parsed.clarify) {
-            val (weak, strong) = ClarifyModels.resolve { System.getenv(it) }
+            val (weak, strong) = ClarifyModels.resolve(repoRoot) { System.getenv(it) }
             val scratch = File(repoRoot, "build/issue-clarify-scratch").apply { mkdirs() }
             result = IssueClarifier.tryClarify(
                 draft = result,
@@ -32,6 +33,12 @@ fun main(args: Array<String>) {
                 weak = weak,
                 strong = strong,
             )
+        } else if (result.request.hasSideEffects == true) {
+            val hits = FilesystemImpactScanner(repoRoot).scan(
+                impactSymbols(result.request, result.files),
+                result.files,
+            )
+            result = IssueClarifier.withImpactHits(result, hits)
         }
         if (parsed.dryRun) {
             print(result.markdown)
@@ -58,6 +65,7 @@ internal data class ParsedCli(
     val clarify: Boolean = false,
     val openQuestionsSpecified: Boolean? = null,
     val needsKernelSpecified: Boolean = false,
+    val sideEffectsSpecified: Boolean? = null,
 )
 
 internal object IssueCli {
@@ -81,13 +89,19 @@ Options:
   --needs-kernel / --no-kernel
   --open-question TEXT        (repeatable; sets open_questions: true)
   --no-open-questions         force open_questions: false
-  --interactive               prompt for open questions / kernel / context
+  --side-effects              change may impact callers / other modules / ABI / tests
+  --no-side-effects           declare no external impact
+  --side-effect TEXT          (repeatable; known impact line; implies --side-effects)
+  --interactive               prompt for open questions / kernel / side effects / context
   --non-interactive           never prompt (default for agents / non-TTY)
-  --clarify                   optional ACP loop (never aborts the file):
-                              1) verify draft  2) weak ACP fills Context/Needed
-                              3) verify again  4) independent strong ACP review
+  --clarify                   ACP loop (never aborts the file):
+                              weak author → verify → ask/record side effects →
+                              AST identifier scan → weak impact investigation if yes →
+                              weak investigate open questions (code/docs/web) →
+                              leftover questions to strong → independent strong
+                              final review (weak applies fixes).
                               ISSUE_CLARIFY_ACP='agy --acp'
-                              ISSUE_CLARIFY_STRONG_ACP='...' for a separate reviewer binary
+                              ISSUE_CLARIFY_STRONG_ACP='...' for a separate reviewer
   --dry-run                   print markdown, do not write
   --root DIR                  repository root (default: cwd)
 
@@ -109,12 +123,15 @@ Agents: pass flags, no TTY. Humans: TTY auto-adds --interactive unless --non-int
         var nonInteractive = false
         var clarify = false
         var openQuestionsSpecified: Boolean? = null
+        var sideEffectsSpecified: Boolean? = null
+        var hasSideEffects: Boolean? = null
         var root = System.getProperty("user.dir")
         val files = mutableListOf<String>()
         val modules = mutableListOf<String>()
         val symbols = mutableListOf<String>()
         val deps = mutableListOf<String>()
         val openQuestions = mutableListOf<String>()
+        val sideEffects = mutableListOf<String>()
 
         var i = 0
         while (i < args.size) {
@@ -146,6 +163,22 @@ Agents: pass flags, no TTY. Humans: TTY auto-adds --interactive unless --non-int
                 }
 
                 "--no-open-questions" -> openQuestionsSpecified = false
+                "--side-effects" -> {
+                    hasSideEffects = true
+                    sideEffectsSpecified = true
+                }
+
+                "--no-side-effects" -> {
+                    hasSideEffects = false
+                    sideEffectsSpecified = true
+                }
+
+                "--side-effect" -> {
+                    args.getOrNull(++i)?.let { sideEffects += it }
+                    hasSideEffects = true
+                    sideEffectsSpecified = true
+                }
+
                 "--interactive" -> interactive = true
                 "--non-interactive" -> nonInteractive = true
                 "--clarify" -> clarify = true
@@ -174,6 +207,8 @@ Agents: pass flags, no TTY. Humans: TTY auto-adds --interactive unless --non-int
                 autonomy = autonomy.lowercase(),
                 needsKernel = needsKernel,
                 openQuestionItems = items,
+                hasSideEffects = hasSideEffects,
+                sideEffectImpacts = sideEffects,
             ),
             dryRun = dryRun,
             root = root,
@@ -182,6 +217,7 @@ Agents: pass flags, no TTY. Humans: TTY auto-adds --interactive unless --non-int
             clarify = clarify,
             openQuestionsSpecified = openQuestionsSpecified,
             needsKernelSpecified = needsKernelSpecified,
+            sideEffectsSpecified = sideEffectsSpecified,
         )
     }
 }

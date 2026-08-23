@@ -423,6 +423,12 @@ object ContainedExecutors {
             if (isDifferent) {
                 when (val applied = Landlock.tryApplyRuleset(policy, processWide)) {
                     is io.mazewall.landlock.LandlockApplyResult.Applied -> {
+                        io.mazewall.enforcer.diagnostics.MazewallEvents.emit(
+                            io.mazewall.enforcer.diagnostics.MazewallEvents.LandlockApplied(
+                                processWide = processWide,
+                                abiVersion = io.mazewall.landlock.Landlock.getAbiVersion(),
+                            ),
+                        )
                         if (processWide) {
                             ContainmentStateRegistry.updateProcessState { it.withLandlockPolicy(policy) }
                         } else {
@@ -471,8 +477,15 @@ object ContainedExecutors {
             Platform.FallbackBehavior.FAIL ->
                 throw UnsupportedOperationException("Platform does not support seccomp")
 
-            Platform.FallbackBehavior.WARN_AND_BYPASS ->
+            Platform.FallbackBehavior.WARN_AND_BYPASS -> {
                 logger.warning("Platform does not support seccomp. Code will run uncontained.")
+                io.mazewall.enforcer.diagnostics.MazewallEvents.emit(
+                    io.mazewall.enforcer.diagnostics.MazewallEvents.FallbackEngaged(
+                        behaviorName = fallback.name,
+                        reason = "Platform does not support seccomp",
+                    ),
+                )
+            }
 
             Platform.FallbackBehavior.SILENT_BYPASS -> {}
         }
@@ -523,6 +536,12 @@ object ContainedExecutors {
         }
 
         logger.info("Intel CET Shadow Stack successfully enabled and locked.")
+        io.mazewall.enforcer.diagnostics.MazewallEvents.emit(
+            io.mazewall.enforcer.diagnostics.MazewallEvents.CetOutcome(
+                armed = true,
+                detail = "shadow stack enabled and locked",
+            ),
+        )
     }
 
     private fun handleCetUnsupported(reason: String) {

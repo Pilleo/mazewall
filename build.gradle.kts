@@ -491,7 +491,9 @@ val installGitHooks by tasks.registering(Copy::class) {
 
 tasks.named("check") {
     dependsOn(installGitHooks)
-    dependsOn(":tools:orchestrator:checkBacklog")
+    findProject(":tools:orchestrator")?.let { orchestrator ->
+        dependsOn(orchestrator.tasks.named("checkBacklog"))
+    }
     dependsOn(tasks.named("refactorFirstReport"))
 }
 

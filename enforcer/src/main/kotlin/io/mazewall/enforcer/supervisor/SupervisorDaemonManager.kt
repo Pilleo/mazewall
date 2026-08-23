@@ -47,9 +47,21 @@ public class SupervisorDaemonManager(
     private var sharedDaemonContext: SupervisorContext? = null
 
     // Visible for testing: allows test suites to intercept unexpected exit without terminating the JVM
-    internal var onUnexpectedExit: (exitCode: Int) -> Unit = {
+    internal var onUnexpectedExit: (exitCode: Int) -> Unit = { exitCode ->
+        // Observability before the fail-closed halt (issue-20260823-172005). The halt itself is
+        // non-negotiable: stranded USER_NOTIF waiters cannot be resumed.
+        io.mazewall.enforcer.diagnostics.MazewallEvents.emit(
+            io.mazewall.enforcer.diagnostics.MazewallEvents.DaemonExited(
+                pid = daemonProcessPid(),
+                exitCode = exitCode,
+                lastLogLines = daemonLogLines.toList(),
+            ),
+        )
         Runtime.getRuntime().halt(1)
     }
+
+    private fun daemonProcessPid(): Long =
+        synchronized(daemonLock) { sharedDaemonContext?.daemonProcess?.pid() ?: -1L }
 
     public companion object {
         private const val SHUTDOWN_COMMAND_BYTE = 0x53.toByte() // 'S'

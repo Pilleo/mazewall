@@ -90,6 +90,12 @@ internal object InstallSelfVerifier {
         }
 
         verifyDeniedProbes(instructions, arch)
+        io.mazewall.enforcer.diagnostics.MazewallEvents.emit(
+            io.mazewall.enforcer.diagnostics.MazewallEvents.SelfVerificationResult(
+                passed = true,
+                detail = "program=${instructions.size} insns",
+            ),
+        )
     }
 
     private fun verifyDeniedProbes(instructions: List<BpfInstruction>, arch: Arch) {
@@ -102,6 +108,12 @@ internal object InstallSelfVerifier {
             )
             val actualErrno = (res as? LinuxNative.SyscallResult.Error)?.errno
             if (actualErrno != expectedErrno) {
+                io.mazewall.enforcer.diagnostics.MazewallEvents.emit(
+                    io.mazewall.enforcer.diagnostics.MazewallEvents.SelfVerificationResult(
+                        passed = false,
+                        detail = "nr=$nr expected=$expectedErrno actual=$actualErrno",
+                    ),
+                )
                 throw SelfVerificationException(
                     "Kernel verdict diverges from oracle for nr=$nr: " +
                         "expected errno=$expectedErrno, got result=$res",

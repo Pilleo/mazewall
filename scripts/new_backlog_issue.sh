@@ -30,4 +30,4 @@ else
   fi
 fi
 
-exec ./gradlew -q :tools:orchestrator:newBacklogIssue -PissueArgsFile="$ARGS_FILE"
+exec ./gradlew -q :tools:orchestrator:newBacklogIssue -PincludeOrchestrator=true -PissueArgsFile="$ARGS_FILE"

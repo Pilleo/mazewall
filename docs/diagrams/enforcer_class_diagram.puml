@@ -776,6 +776,20 @@ class "ContainmentViolationDetector" as io.mazewall.enforcer.diagnostics.Contain
   +boolean isContainmentViolation(Throwable)
   +Throwable findViolationCause(Throwable)
 }
+interface "DiagnosticEventListener" as io.mazewall.enforcer.diagnostics.DiagnosticEventListener {
+  + {abstract}void onEvent(Event)
+}
+class "MazewallEvents" as io.mazewall.enforcer.diagnostics.MazewallEvents {
+  + {static}MazewallEvents INSTANCE
+  __
+  +boolean getFailOnListenerError()
+  +void setFailOnListenerError(boolean)
+  +void register(DiagnosticEventListener)
+  +void unregister(DiagnosticEventListener)
+  +int registeredCount()
+  +void emit(Event)
+  +void clear()
+}
 class "ValidationKt" as io.mazewall.enforcer.diagnostics.ValidationKt {
   + {static}boolean isVirtualOrCarrierThread(Thread)
   + {static}void validateNotVirtual()
@@ -1911,6 +1925,8 @@ io.mazewall.enforcer.api.SandboxDispatcher --> io.mazewall.PolicyDefinition
 io.mazewall.enforcer.api.SandboxDispatcher --> io.mazewall.enforcer.api.SandboxDispatcher
 io.mazewall.enforcer.diagnostics.ContainmentViolationDetector --> io.mazewall.enforcer.diagnostics.ViolationMatcher
 io.mazewall.enforcer.diagnostics.ContainmentViolationDetector --> io.mazewall.enforcer.diagnostics.ContainmentViolationDetector
+io.mazewall.enforcer.diagnostics.MazewallEvents --> io.mazewall.enforcer.diagnostics.MazewallEvents
+io.mazewall.enforcer.diagnostics.MazewallEvents --> io.mazewall.enforcer.diagnostics.DiagnosticEventListener
 io.mazewall.enforcer.engine.FilterInstallationPlanner --> io.mazewall.enforcer.engine.FilterInstallationPlanner
 io.mazewall.enforcer.engine.JvmFloorPresets --> io.mazewall.enforcer.engine.JvmFloorPresets
 io.mazewall.enforcer.engine.JvmFloorWorkload --> io.mazewall.enforcer.engine.JvmFloorWorkload
