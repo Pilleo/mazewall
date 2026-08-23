@@ -1,7 +1,7 @@
 ---
 title: "\U0001F534 [REOPENED]: JVM Invariant Syscall Floor Implementation Fixes"
 severity: HIGH
-status: open
+status: in_progress
 priority: low
 dependencies:
 - issue-075

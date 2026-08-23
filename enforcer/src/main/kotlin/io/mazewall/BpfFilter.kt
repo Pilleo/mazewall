@@ -252,6 +252,20 @@ object BpfFilter {
                         ret(ifMatchedNative)
                     }
 
+                    is ArgCheck.EqualsAny32 -> {
+                        // Low-word-only comparison: see ArgCheck.EqualsAny32 KDoc.
+                        val allowLabel = nextLabel("${labelPrefix}_allow")
+                        check.allowedValues.forEachIndexed { valIdx, value ->
+                            val nextValLabel = nextLabel("${labelPrefix}_next_$valIdx")
+                            loadAbsolute(argOffsetLo)
+                            jumpIfEqual(value, jt = allowLabel, jf = nextValLabel)
+                            mark(nextValLabel)
+                        }
+                        ret(ifNotMatchedNative)
+                        mark(allowLabel)
+                        ret(ifMatchedNative)
+                    }
+
                     is ArgCheck.MaskEquals -> {
                         val maskHi = (check.mask ushr 32).toInt()
                         val expectedHi = (check.expected ushr 32).toInt()

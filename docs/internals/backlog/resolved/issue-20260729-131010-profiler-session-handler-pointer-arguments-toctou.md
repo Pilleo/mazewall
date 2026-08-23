@@ -30,4 +30,12 @@ Under highly concurrent execution, a sibling thread could mutate the memory poin
    - In `:enforcer`, production enforcement uses `SupervisedOpen` with `SECCOMP_IOCTL_NOTIF_ADDFD` (secure FD injection), which eliminates pointer TOCTOU vulnerabilities completely by opening the verified file descriptor inside the daemon and injecting it into the tracee table.
    - Document this threat model distinction and TOCTOU boundary clearly in `docs/internals/designs/profiler/profiler-design.md`.
 
-
+**Resolution (2026-08-23):** Decision items implemented/verified:
+1. `:profiler` retains FLAG_CONTINUE + process_vm_readv by design (offline diagnostic).
+2. Verified `:enforcer` production enforcement uses `SupervisedOpen` +
+   `SECCOMP_IOCTL_NOTIF_ADDFD` (handleInjectFd -> SECCOMP_IOCTL_NOTIF_ADDFD), eliminating
+   pointer TOCTOU for approved opens.
+3. Threat-model boundary documented in
+   `docs/internals/designs/profiler/profiler-design.md` (Zero-Crash Execution section): profiler
+   observations describe the *requested* syscall; concurrent mutation between read and CONTINUE
+   is accepted for diagnostics and explicitly out of scope for containment.

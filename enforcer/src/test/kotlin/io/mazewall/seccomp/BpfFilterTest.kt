@@ -171,9 +171,9 @@ class BpfFilterTest {
         for (i in filter.indices) {
             val f = filter[i]
             if (f.code == 0x15.toShort() && f.k == prctlNr) {
-                // Should load args[0] HI (offset 16 + 4 = 20)
+                // EqualsAny32 (int ABI): loads ONLY args[0] LO (offset 16); high word ignored
                 val ldArgs = filter[i + 1]
-                if (ldArgs.code == 0x20.toShort() && ldArgs.k == 20) {
+                if (ldArgs.code == 0x20.toShort() && ldArgs.k == 16) {
                     foundInspection = true
                 }
             }
@@ -516,9 +516,9 @@ class BpfFilterTest {
         for (i in filter.indices) {
             val f = filter[i]
             if (f.code == 0x15.toShort() && f.k == socketNr) {
-                // Should load arg[0] HI (offset 16 + 4 = 20)
+                // EqualsAny32 (int ABI): loads ONLY arg[0] LO (offset 16); high word ignored
                 val ldArgs = filter[i + 1]
-                if (ldArgs.code == 0x20.toShort() && ldArgs.k == 20) {
+                if (ldArgs.code == 0x20.toShort() && ldArgs.k == 16) {
                     foundSocketInspection = true
                     break
                 }
@@ -541,5 +541,41 @@ class BpfFilterTest {
 
         val aarch64Program = BpfFilter.build(Arch.AARCH64, io.mazewall.Policy.PURE_COMPUTE_UNSAFE.definition).instructions
         assertTrue(aarch64Program.none { it is BpfInstruction.Jmp && it.k == -1 }, "unmapped NRs must be filtered from jump tables")
+    }
+
+    @Test
+    fun `EqualsAny32 ignores high-word garbage on int arguments`() {
+        // issue-075 problem 3: int ABI args (prctl option, socket family) may carry garbage in
+        // the high 32 bits of the u64 seccomp_data slot; only the low word is meaningful.
+        val builder = BpfProgram.builder()
+            .checkArch(arch)
+            .loadSyscallNr()
+        val inspections = listOf(
+            SyscallInspection(
+                syscallNumber = arch.prctl,
+                argIndex = 0,
+                check = ArgCheck.EqualsAny32(listOf(15)),
+                ifMatched = SeccompAction.ACT_ALLOW,
+                ifNotMatched = SeccompAction.ACT_ERRNO(),
+            ),
+        )
+        BpfFilter.emitInspections(builder, inspections, profilingMode = false, handledNrs = mutableSetOf(arch.prctl))
+        val program = builder.ret(NativeConstants.SECCOMP_RET_ALLOW).build()
+        BpfStaticVerifier.verify(program)
+        val instructions = program.instructions
+
+        val optionWithGarbageHighWord = (0xDEADBEEFL shl 32) or 15L
+        val wrongOptionWithGarbageHighWord = (0xFEEDFACE shl 32) or 16L
+
+        assertEquals(
+            NativeConstants.SECCOMP_RET_ALLOW,
+            BpfSimulator.simulate(instructions, arch.prctl, arch.audit, longArrayOf(optionWithGarbageHighWord)),
+            "low-word match with garbage high word must be ALLOWED",
+        )
+        assertEquals(
+            NativeConstants.SECCOMP_RET_ERRNO or 1,
+            BpfSimulator.simulate(instructions, arch.prctl, arch.audit, longArrayOf(wrongOptionWithGarbageHighWord)),
+            "low-word mismatch must be denied regardless of high word",
+        )
     }
 }
