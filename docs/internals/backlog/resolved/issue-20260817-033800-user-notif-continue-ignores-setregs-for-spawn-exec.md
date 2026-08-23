@@ -50,3 +50,22 @@ section, or the rewrite mechanism has since been fixed. Required before resoluti
 (1) re-run the posix_spawn reproduction from the empirical notes against current code;
 (2) decide whether SecureExec remains x86_64-only permanently;
 (3) align this issue's decision section with whichever is true.
+
+
+**Resolution (2026-08-23) — decision IMPLEMENTED and hardened:** Verified shipped behavior:
+the parent validation listener REFUSES all register-rewrite requests
+(`SupervisorInstaller.completeParentExecRewrite` -> `sendExecRewriteAck(false)`), and the daemon
+therefore fails closed with EPERM for EVERY supervised execve/execveat on every architecture —
+matching this issue's decision exactly (`ProcessSpawnStacktraceTest` passes because denial +
+parent-stack attribution work, not because exec succeeds).
+
+Hardening added in this pass:
+1. REMOVED the latent TOCTOU fallback: when `TraceeReadOnlyNul.find()` finds no read-only NUL,
+   the daemon previously fell back to the tracee-WRITABLE original pathname pointer before
+   requesting the rewrite. It now denies EPERM and releases the injected fd instead.
+2. `handleSecureExecve` KDoc aligned with reality (rewrite requested, parent refuses, deny).
+3. Legacy unit test asserting the unsafe fallback+CONTINUE was rewritten to pin the fail-closed
+   semantics (ADDFD happens; NOTIF_SEND carries an error reply, never USER_NOTIF_FLAG_CONTINUE;
+   no process_vm_writev pathname mutation).
+Scaffolding (request/TraceeReadOnlyNul/completeParentExecRewrite) intentionally retained for a
+future kernel-supported replacement.

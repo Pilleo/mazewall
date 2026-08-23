@@ -40,3 +40,12 @@ section, or the rewrite mechanism has since been fixed. Required before resoluti
 (1) re-run the posix_spawn reproduction from the empirical notes against current code;
 (2) decide whether SecureExec remains x86_64-only permanently;
 (3) align this issue's decision section with whichever is true.
+
+
+**Resolution (2026-08-23):** Superseded/resolved per this issue's own architectural decision.
+Verified uniform fail-closed posture: `planExecRewrite` returns `UnsupportedArch` for every
+non-x86_64 tracee -> `handleSecureExecve` denies with EPERM; x86_64 also ends in EPERM because
+the parent refuses all rewrite requests (see resolution note on issue-20260817-033800).
+Execution containment on aarch64 relies on Tier 1 `NO_EXEC` + Landlock ABI v5
+`LANDLOCK_ACCESS_FS_EXECUTE`, exactly as decided. Additionally hardened: the AT_EMPTY_PATH
+staging pointer may no longer fall back to a tracee-writable pathname address.

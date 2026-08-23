@@ -492,12 +492,15 @@ internal class SupervisorSessionHandler(
     }
 
     /**
-     * Approves execve/execveat by opening the validated binary in the supervisor,
-     * injecting that fd into the tracee, and rewriting the in-flight syscall to
-     * execveat(injected_fd, "", argv, envp, AT_EMPTY_PATH).
+     * Supervised execve/execveat handling (issue-20260817-033800): opens the validated binary
+     * in the supervisor, injects it via SECCOMP_IOCTL_NOTIF_ADDFD, then REQUESTS a parent-side
+     * register rewrite to execveat(injected_fd, "", AT_EMPTY_PATH) over a read-only NUL.
      *
-     * USER_NOTIF CONTINUE on the original pathname is TOCTOU: a sibling can mutate
-     * the buffer after write-back. If open, ADDFD, or register rewrite fails, deny.
+     * The parent currently REFUSES all rewrite requests (completeParentExecRewrite ->
+     * issue-20260817-033800 pending kernel-supported replacement), so the effective behavior is
+     * FAIL-CLOSED EPERM for every supervised exec on every architecture, with parent stack-trace
+     * attribution preserved for the resulting violation. USER_NOTIF CONTINUE on the original
+     * pathname is never used: a sibling can mutate the buffer after write-back.
      */
     context(arena: NativeArena)
     private fun handleSecureExecve(
@@ -561,7 +564,17 @@ internal class SupervisorSessionHandler(
             val pathAddr = if (nr == traceeArch.execve) args[0] else args[1]
             val argv = if (nr == traceeArch.execve) args[1] else args[2]
             val envp = if (nr == traceeArch.execve) args[2] else args[3]
-            val emptyPathAddr = TraceeReadOnlyNul.find(tid) ?: pathAddr
+            // pathname for execveat(AT_EMPTY_PATH) MUST point at memory the tracee cannot
+            // overwrite (issue-20260817-033800): falling back to the original args[0]/args[1]
+            // pointer would resurrect the rename-after-approval TOCTOU this design exists to
+            // prevent. No read-only NUL -> deny (and release the injected fd).
+            val emptyPathAddr = TraceeReadOnlyNul.find(tid)
+            if (emptyPathAddr == null) {
+                logger.severe("[SUPERVISOR-DIAGNOSTIC] No read-only NUL byte found in tracee mappings; cannot stage a tamper-proof AT_EMPTY_PATH pathname. Denying.")
+                closeTraceeFd(tid, injectedFd)
+                sendSeccompError(id, NativeConstants.EPERM, resp)
+                return@use true
+            }
             val rewritten = requestParentRegisterRewrite(
                 tid,
                 injectedFd,

@@ -416,7 +416,9 @@ class SupervisorSessionHandlerTest {
                 assertEquals(io.mazewall.ffi.NativeConstants.SECCOMP_ADDFD_FLAG_SEND.toInt(), addfd.getFlags())
                 assertEquals(99, addfd.getSrcfd())
 
-                // 2. Test execve: open validated binary, ADDFD, rewrite to execveat(AT_EMPTY_PATH), CONTINUE
+                // 2. Test execve: ADDFD the validated binary, then FAIL CLOSED when no
+                // tamper-proof AT_EMPTY_PATH staging address exists (tracee-writable pathname
+                // pointers must never be resumed via CONTINUE — issue-20260817-033800).
                 lastIoctlRequest = null
                 lastIoctlArg = null
                 vmWritevCalled = false
@@ -426,8 +428,13 @@ class SupervisorSessionHandlerTest {
                 assertTrue(ioctlRequests.contains(io.mazewall.ffi.NativeConstants.SECCOMP_IOCTL_NOTIF_ADDFD))
                 assertEquals(io.mazewall.ffi.NativeConstants.SECCOMP_IOCTL_NOTIF_SEND, lastIoctlRequest)
                 val flags = lastIoctlArg!!.readInt(20)
-                assertEquals(io.mazewall.ffi.NativeConstants.SECCOMP_USER_NOTIF_FLAG_CONTINUE.toInt(), flags)
-                assertFalse(vmWritevCalled, "exec must not mutate the tracee pathname then CONTINUE")
+                assertEquals(
+                    0,
+                    flags,
+                    "exec must be denied (no CONTINUE) without a read-only AT_EMPTY_PATH stage",
+                )
+                assertFalse(vmWritevCalled, "exec must never mutate the tracee pathname")
+                assertEquals(42L, lastIoctlArg!!.readLong(0), "error reply must target the original notification id")
             }
         } finally {
             LinuxNative.resetToDefault()
