@@ -26,20 +26,30 @@ import java.util.concurrent.ConcurrentHashMap
  */
 internal object InstallSelfVerifier {
     /**
-     * Gate: verification runs ONLY when `-Dio.mazewall.selfVerify=true`.
+     * Gate (issue-20260823-172003 / issue-20260823-190000):
      *
-     * DEFAULT-OFF rationale (issue-20260823-172003): verification performs work AFTER containment
-     * is active, and under narrow allow-list floors (jvmFloor-style) even JDK bootstrap class
-     * lazy-loads can return corrupted bytes (observed: ClassFormatError magic=0xFFFFFFFF for
-     * java/util/logging/LogRecord during a Logger.info call inside verify). Until install-time
-     * eager-closure warming exists, enabling this on restrictive policies trades a silent kernel
-     * risk for a deterministic application breakage — an operator decision, not a default.
+     * - `-Dio.mazewall.selfVerify=false` opts out entirely.
+     * - `-Dio.mazewall.selfVerify=true` forces verification even under mock engines (unit tests).
+     * - DEFAULT (property unset): ON whenever the real engine is active, OFF for mocks — mock
+     *   verdicts are meaningless and would break fault-injection tests.
+     *
+     * Default-ON rationale: the original corruption blocker is closed — ALLOW_LIST DSL floors now
+     * seed `JvmFloorPresets.fullJvmFloor()` by construction (PREAD64 included), so bootstrap
+     * lazy-reads are reliable for preset users. For hand-rolled narrow floors, deterministic
+     * early failure (SelfVerificationException) is strictly better than the silent mid-read
+     * corruption this verifier exists to catch. Mock-engine installs never verify.
      */
     private const val ENABLED_PROPERTY = "io.mazewall.selfVerify"
 
     private val verifiedPrograms = ConcurrentHashMap<List<BpfInstruction>, Unit>()
 
-    fun isEnabled(): Boolean = System.getProperty(ENABLED_PROPERTY)?.lowercase() == "true"
+    fun isEnabled(): Boolean {
+        when (System.getProperty(ENABLED_PROPERTY)?.lowercase()) {
+            "false" -> return false
+            "true" -> return true
+        }
+        return LinuxNative.isRealEngineActive()
+    }
 
 
     /**

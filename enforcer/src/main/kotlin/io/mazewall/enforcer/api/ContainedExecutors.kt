@@ -93,7 +93,10 @@ object ContainedExecutors {
             io.mazewall.seccomp.InstallSelfVerifier::class.java,
             io.mazewall.seccomp.InstallSelfVerifier.SelfVerificationException::class.java,
             io.mazewall.seccomp.BpfSimulator::class.java,
-            io.mazewall.seccomp.SyscallProbeMatrix::class.java
+            io.mazewall.seccomp.SyscallProbeMatrix::class.java,
+            // Self-verification result emission touches the diagnostics SPI post-install.
+            io.mazewall.enforcer.diagnostics.MazewallEvents::class.java,
+            io.mazewall.enforcer.diagnostics.MazewallEvents.SelfVerificationResult::class.java
         )
         for (c in classes) {
             try {
