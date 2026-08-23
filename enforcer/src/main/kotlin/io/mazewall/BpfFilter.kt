@@ -38,6 +38,22 @@ object BpfFilter {
         policy: PolicyDefinition<*>,
         profilingMode: Boolean = false,
     ): BpfProgram<BpfStatus.Verified> {
+        if (policy.allowUnsafePrctl) {
+            // Loud acknowledgment at compile time (issue-20260726_011928_05): allowUnsafePrctl
+            // permits prctl options with pointer arguments, which are inherently TOCTOU-vulnerable
+            // to concurrent mutation by sibling threads after the BPF check.
+            logger.severe(
+                "[SECURITY] Policy enables allowUnsafePrctl: pointer-argument prctl options are " +
+                    "TOCTOU-vulnerable (sibling threads can mutate referenced memory between the " +
+                    "BPF check and kernel execution). Use only when the risk is accepted.",
+            )
+            io.mazewall.enforcer.diagnostics.MazewallEvents.emit(
+                io.mazewall.enforcer.diagnostics.MazewallEvents.FallbackEngaged(
+                    behaviorName = "ALLOW_UNSAFE_PRCTL",
+                    reason = "TOCTOU-vulnerable prctl options permitted by policy",
+                ),
+            )
+        }
         val unverified = buildFromActions(
             arch,
             policy.syscallActionNumbers(arch),

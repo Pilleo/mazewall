@@ -370,6 +370,26 @@ class BpfFilterTest {
         }
 
     @Test
+    fun `allowUnsafePrctl emits a loud security warning`() {
+        // issue-20260726_011928_05: compile-time acknowledgment for the TOCTOU-prone flag.
+        val records = mutableListOf<java.util.logging.LogRecord>()
+        val handler = object : java.util.logging.Handler() {
+            override fun publish(r: java.util.logging.LogRecord) { records += r }
+            override fun flush() {}
+            override fun close() {}
+        }
+        val root = java.util.logging.Logger.getLogger("")
+        root.addHandler(handler)
+        try {
+            val policy = Policy.builder().allowUnsafePrctl().build()
+            BpfFilter.build(arch, policy.definition)
+        } finally {
+            root.removeHandler(handler)
+        }
+        assertTrue(records.any { it.level == java.util.logging.Level.SEVERE && it.message.contains("allowUnsafePrctl") })
+    }
+
+    @Test
     fun `JA instructions encode skip count in k with zero jt and jf`() {
         // Regression: classic BPF JA jumps by K. Emitting the offset in jt (with k=0) makes the
         // filter fall through into the next RET block for every syscall.

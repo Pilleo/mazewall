@@ -2,7 +2,7 @@
 title: SupervisorSessionHandler TOCTOU vulnerability during string extraction for
   paths
 type: issue
-status: open
+status: resolved
 priority: high
 labels:
 - security
@@ -45,3 +45,14 @@ Instead, it should inject the file descriptor (e.g. by opening the file itself, 
 The memory states that Landlock provides race-free containment, so if `SupervisorSessionHandler` relies on Landlock for filesystem, it might be safe, but it's extracting the path for "JVM validation listener", which could be making decisions based on it.
 
 Ensure that the design docs explicitly warn about this, or enforce that JVM validation listener cannot override Landlock Denies, and only acts as an additional restrictor.
+
+**Resolution (2026-08-23, verified in code):** Mitigated by design for the highest-risk class.
+JVM-approved opens do NOT use `SECCOMP_USER_NOTIF_FLAG_CONTINUE`: `SupervisorNotificationMachine.
+evaluateJvm` routes Allow(Open)/InjectFd verdicts to `handleInjectFd`, which opens the *validated*
+path daemon-side (trusted privileges, realpath-resolved via BypassPaths/SupervisorFastPath) and
+installs it into the tracee with `SECCOMP_IOCTL_NOTIF_IOCTL_ADDFD`. The kernel therefore receives
+the exact validated fd — the tracee cannot swap the path after approval. Residual windows are
+daemon-side (realpath -> open) within trusted code, plus execve which uses SecureExec handling;
+the generic string-rename TOCTOU for raw CONTINUE paths applies only to non-open supervised
+facilities. Documentation pointer added; further hardening would require pinned-path kernel
+support and is tracked implicitly by the kernel-drift watch.

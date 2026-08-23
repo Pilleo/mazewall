@@ -1,7 +1,7 @@
 ---
 title: Unsafe prctl TOCTOU vulnerability documented but not properly prevented
 type: issue
-status: open
+status: resolved
 priority: medium
 labels:
 - security
@@ -28,3 +28,5 @@ While this vulnerability is documented in multiple places, the design should ens
 
 ## Recommendation
 Log a severe warning to standard out when `allowUnsafePrctl` is used during `CompiledSandbox` creation.
+
+**Resolution (2026-08-23):** Implemented the recommended loud acknowledgment: `BpfFilter.build` emits a SEVERE log (`[SECURITY] Policy enables allowUnsafePrctl...`) and a MazewallEvents `FallbackEngaged(ALLOW_UNSAFE_PRCTL)` event on every compilation of such a policy. Regression test `BpfFilterTest.allowUnsafePrctl emits a loud security warning` asserts the SEVERE record.
