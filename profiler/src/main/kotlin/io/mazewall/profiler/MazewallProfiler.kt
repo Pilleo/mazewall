@@ -1,5 +1,7 @@
 package io.mazewall.profiler
 
+import io.mazewall.BpfFilter
+import io.mazewall.core.Arch
 import io.mazewall.profiler.collector.CollectorDrain
 import io.mazewall.profiler.collector.EbpfCollector
 import io.mazewall.profiler.collector.ObservationMerger
@@ -136,6 +138,32 @@ public class MazewallProfiler private constructor(
                             drainComplete = false,
                             warnings = kept.warnings +
                                 "recorded eBPF log is not contemporaneous with this USER_NOTIF run",
+                        )
+                    }
+                }
+                // issue-20260821-113000: mutation syscalls invisible to USER_NOTIF must
+                // decertify coverage rather than silently pass.
+                .let { kept ->
+                    // Audit the installed DEFAULT floor (PURE_COMPUTE_UNSAFE compiled in
+                    // profiling mode). Iterative path additions do not alter the syscall set;
+                    // custom bases with narrower floors are the operator's responsibility and
+                    // will surface as untrapped here only if they also drop preset blocks.
+                    val program = io.mazewall.BpfFilter.build(
+                        Arch.current(),
+                        io.mazewall.Policy.PURE_COMPUTE_UNSAFE.definition,
+                        profilingMode = true,
+                    ).instructions
+                    val untrapped = io.mazewall.profiler.compiler.MutationTrapAudit.untrapped(
+                        program,
+                        Arch.current(),
+                    )
+                    if (untrapped.isEmpty()) {
+                        kept
+                    } else {
+                        kept.copy(
+                            complete = false,
+                            warnings = kept.warnings +
+                                "filesystem mutation syscalls were not traced: ${untrapped.joinToString()}",
                         )
                     }
                 }

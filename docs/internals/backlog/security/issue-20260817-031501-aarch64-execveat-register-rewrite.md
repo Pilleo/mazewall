@@ -30,3 +30,13 @@ Secure exec emulation on x86_64 evaluated `PTRACE_GETREGS`/`SETREGS`. On aarch64
 Deferred/Superseded by `issue-20260817-033800`. Dynamic register rewriting prior to seccomp `CONTINUE` is rejected by the Linux kernel on all architectures. Safe execution containment relies on Landlock LSM and Tier 1 process-wide baseline filters.
 
 
+**Reconciliation note (2026-08-23):** Shipped code contradicts this issue's architectural
+decision: `SupervisorSessionHandler.handleSecureExecve` actively implements ADDFD +
+register rewrite (`planExecRewrite`/`requestParentRegisterRewrite`, gated to x86_64; aarch64
+fail-closes EPERM), and `ProcessSpawnStacktraceTest.execve inherits parent stack trace...`
+PASSES on Linux x86_64 (kernel {kernel-version}).
+Either the ENOSYS finding was specific to the posix_spawn/vfork path noted in the empirical
+section, or the rewrite mechanism has since been fixed. Required before resolution:
+(1) re-run the posix_spawn reproduction from the empirical notes against current code;
+(2) decide whether SecureExec remains x86_64-only permanently;
+(3) align this issue's decision section with whichever is true.

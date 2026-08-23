@@ -40,3 +40,13 @@ Dynamic register rewriting via `PTRACE_SETREGS` before `SECCOMP_USER_NOTIF_FLAG_
 **Verification:** `ProcessBuilder("true")` under the supervisor fails closed (EPERM), and a concurrent mutation of the child's pathname buffer cannot change the executed file.
 
 
+**Reconciliation note (2026-08-23):** Shipped code contradicts this issue's architectural
+decision: `SupervisorSessionHandler.handleSecureExecve` actively implements ADDFD +
+register rewrite (`planExecRewrite`/`requestParentRegisterRewrite`, gated to x86_64; aarch64
+fail-closes EPERM), and `ProcessSpawnStacktraceTest.execve inherits parent stack trace...`
+PASSES on Linux x86_64 (kernel {kernel-version}).
+Either the ENOSYS finding was specific to the posix_spawn/vfork path noted in the empirical
+section, or the rewrite mechanism has since been fixed. Required before resolution:
+(1) re-run the posix_spawn reproduction from the empirical notes against current code;
+(2) decide whether SecureExec remains x86_64-only permanently;
+(3) align this issue's decision section with whichever is true.

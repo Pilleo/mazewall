@@ -25,6 +25,9 @@ public object PolicyPresets {
             .block(Syscall.LINK, Syscall.LINKAT, Syscall.UNLINK, Syscall.UNLINKAT)
             .block(Syscall.SYMLINK, Syscall.SYMLINKAT, Syscall.READLINK, Syscall.READLINKAT)
             .block(Syscall.MKDIR, Syscall.MKDIRAT, Syscall.RMDIR)
+            // File content mutations (issue-20260821-113000): creat/truncate bypass open-based
+            // traps; without these blocks USER_NOTIF profiling never observes them.
+            .block(Syscall.CREAT, Syscall.TRUNCATE, Syscall.FTRUNCATE)
             .block(Syscall.CHMOD, Syscall.FCHMOD, Syscall.FCHMODAT)
             .build()
 

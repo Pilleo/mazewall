@@ -526,4 +526,20 @@ class BpfFilterTest {
         }
         assertTrue(foundSocketInspection, "BpfFilter should contain the socket address family argument inspection")
     }
+
+    @Test
+    fun `PURE_COMPUTE_UNSAFE traps creat on amd64 and filters unmapped nr on aarch64`() {
+        // issue-20260821-113000: creat/truncate/ftruncate must be trapped so USER_NOTIF
+        // profiling observes filesystem mutations. CREAT is x86_64-only (85); aarch64 uses
+        // openat(O_CREAT), and BpfFilter filters unmapped NRs out of jump tables.
+        val amd64 = BpfFilter.build(Arch.AMD64, io.mazewall.Policy.PURE_COMPUTE_UNSAFE.definition).instructions
+        assertEquals(
+            NativeConstants.SECCOMP_RET_ERRNO or 1,
+            evalBpf(amd64, Syscall.CREAT.numberFor(Arch.AMD64)),
+            "creat(85) must be denied EPERM in PURE_COMPUTE_UNSAFE",
+        )
+
+        val aarch64Program = BpfFilter.build(Arch.AARCH64, io.mazewall.Policy.PURE_COMPUTE_UNSAFE.definition).instructions
+        assertTrue(aarch64Program.none { it is BpfInstruction.Jmp && it.k == -1 }, "unmapped NRs must be filtered from jump tables")
+    }
 }

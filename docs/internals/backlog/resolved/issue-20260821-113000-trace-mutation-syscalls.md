@@ -50,4 +50,15 @@ related_thread: 3823789292
 
 **Codex:** https://github.com/Pilleo/mazewall/pull/512#discussion_r3823789292
 
-
+**Resolution (2026-08-23):** All three Do-items implemented per the add_syscall checklist:
+1. `Syscall.CREAT` added; `Arch.creat` = 85 (x86_64) / -1 (aarch64, kernel only offers
+   openat(O_CREAT)); mapped in `FsSyscallMapper.numberForAttr` + dispatcher; completeness test
+   extended (`SyscallTest`).
+2. `PolicyPresets.PURE_COMPUTE_UNSAFE` now blocks `CREAT`, `TRUNCATE`, `FTRUNCATE` — so
+   profiling-mode conversion traps them for USER_NOTIF observation.
+3. New `profiler/compiler/MutationTrapAudit` simulates the installed floor's program and reports
+   mutation NRs that would NOT reach USER_NOTIF; wired into MazewallProfiler's USER_NOTIF
+   coverage path: any untrapped mutation syscall sets `coverage.complete = false` with a named
+   warning. Tests: BpfFilterTest (amd64 trap + aarch64 unmapped-NR filtering),
+   MutationTrapAuditTest (preset fully trapped; narrow floor flags creat/truncate; aarch64
+   unmapped excluded).

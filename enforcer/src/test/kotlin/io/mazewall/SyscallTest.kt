@@ -85,6 +85,7 @@ class SyscallTest {
 
     private fun getFsAttrMappings(arch: Arch) =
         mapOf(
+        Syscall.CREAT to arch.creat,
         Syscall.TRUNCATE to arch.truncate,
         Syscall.FTRUNCATE to arch.ftruncate,
         Syscall.GETCWD to arch.getcwd,
