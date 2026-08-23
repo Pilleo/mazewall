@@ -113,11 +113,19 @@ public class DenyListSpec internal constructor(
 public class AllowListSpec internal constructor(
     runtime: RuntimeProfile,
 ) {
+    /**
+     * ALLOW_LIST specs are seeded with the canonical JVM floor by construction
+     * (issue-20260823-190000 follow-up): a bare EPERM-default list without `pread64`/coordination
+     * syscalls corrupts lazy bootstrap classloads and deadlocks coordination on any real HotSpot
+     * workload. Operators add workload-specific allows on top; there is intentionally no API to
+     * remove floor members.
+     */
     private val inner: Policy.Builder<PolicyScope.ProcessWideSafe> =
         Policy
             .builder()
             .defaultAction(SeccompAction.ACT_ERRNO())
             .forRuntime(runtime)
+            .allow(*io.mazewall.enforcer.engine.JvmFloorPresets.fullJvmFloor())
 
     public val mode: PolicyMode = PolicyMode.ALLOW_LIST
 
