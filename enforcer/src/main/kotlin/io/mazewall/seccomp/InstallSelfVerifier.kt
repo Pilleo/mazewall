@@ -76,9 +76,15 @@ internal object InstallSelfVerifier {
      * @throws SelfVerificationException when kernel behavior diverges from the oracle, or when the
      *         post-install liveness probe fails.
      */
-    fun verify(program: BpfProgram<BpfStatus.Verified>, arch: Arch) {
+    fun verify(program: BpfProgram<BpfStatus.Verified>, arch: Arch, priorFilterDepth: Int = 0) {
         val instructions = program.instructions
         if (!isEnabled()) return
+        if (priorFilterDepth > 0) {
+            // Stacked filters: the kernel enforces the UNION of all programs, so a single-program
+            // oracle cannot predict verdicts (an earlier layer may deny what this layer allows).
+            // Union-aware simulation is future work (issue-20260824-011900).
+            return
+        }
         if (verifiedPrograms.putIfAbsent(instructions, Unit) != null) return
 
         val livenessNr = arch.getpid

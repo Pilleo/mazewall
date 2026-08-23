@@ -579,6 +579,7 @@ object ContainedExecutors {
             return session
         } else {
             val compiledSandbox = io.mazewall.PolicyCompilationCache.getOrCompile(toInstall, arch)
+            val priorFilterDepth = resolveCurrentState().filterDepth
             if (processWide) {
                 PureJavaBpfEngine.installOnProcess(compiledSandbox)
                 updateProcessState(newBlocks, newDefaultAction, toInstall)
@@ -590,7 +591,7 @@ object ContainedExecutors {
             // -Dio.mazewall.selfVerify=true. Asserts the kernel honors the oracle's predictions;
             // memoized per program identity. See InstallSelfVerifier gate KDoc for why the
             // default is off under narrow allow-list floors.
-            io.mazewall.seccomp.InstallSelfVerifier.verify(compiledSandbox.program, arch)
+            io.mazewall.seccomp.InstallSelfVerifier.verify(compiledSandbox.program, arch, priorFilterDepth)
             return AutoCloseable {}
         }
     }

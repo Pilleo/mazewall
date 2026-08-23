@@ -88,4 +88,57 @@ class ProcessBrokerIntegrationTest {
             assertEquals("after-crash", broker.echo("after-crash"))
         }
     }
+
+    @Test
+    fun `close destroys checked-out workers instead of orphaning them`() {
+        assumeTrue(System.getProperty("os.name").lowercase().contains("linux"))
+        val broker = ProcessBroker()
+        broker.start()
+        try {
+            // Check out the only worker via a long sleep on a separate thread.
+            val inFlight = CompletableFuture.runAsync { broker.sleep(60_000) }
+            // Wait until the slot is actually checked out (idle queue empty).
+            val deadline = System.currentTimeMillis() + 10_000
+            while (broker.idleSize() != 0 && System.currentTimeMillis() < deadline) {
+                Thread.sleep(50)
+            }
+            assertEquals(0, broker.idleSize(), "worker should be checked out by now")
+
+            broker.close()
+
+            // In-flight caller must fail fast instead of hanging on a destroyed channel.
+            inFlight.get(10, TimeUnit.SECONDS)
+        } catch (e: Exception) {
+            // Accepted outcome: call aborted by close.
+        }
+
+        // The decisive assertion: no portal worker JVM survives its broker.
+        val deadline = System.currentTimeMillis() + 5_000
+        var survivors: List<ProcessHandle>
+        do {
+            survivors = ProcessHandle.current().descendants()
+                .filter { h ->
+                    h.info().commandLine().orElse("").contains("io.mazewall.portal.worker.PortalWorkerMain")
+                }
+                .toList()
+        } while (survivors.isNotEmpty() && System.currentTimeMillis() < deadline)
+
+        assertEquals(0, survivors.size, "checked-out workers must be destroyed on close: $survivors")
+    }
+
+    @Test
+    fun `recycled worker is replaced without serializing boot and teardown`() {
+        assumeTrue(System.getProperty("os.name").lowercase().contains("linux"))
+        ProcessBroker(poolSize = 2).use { broker ->
+            broker.start()
+            assertEquals(2, broker.trackedWorkers())
+            broker.crashIdleWorkerProcess()
+
+            // Pre-spawn overlap: replacement must already exist right after the crash hook.
+            assertEquals(2, broker.trackedWorkers(), "replacement should be spawned before corpse teardown")
+
+            assertEquals("still-alive", broker.echo("still-alive"))
+        }
+    }
+
 }

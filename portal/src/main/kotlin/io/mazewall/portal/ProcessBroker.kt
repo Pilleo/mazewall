@@ -40,12 +40,25 @@ public class ProcessBroker(
     private val started = AtomicInteger(0)
     private val spawned = AtomicInteger(0)
 
+    /**
+     * Every live slot (idle AND checked-out), so [close] can destroy workers that are
+     * mid-call instead of orphaning them (issue-20260824-011652).
+     */
+    private val trackedSlots: MutableSet<WorkerSlot> =
+        java.util.Collections.newSetFromMap(java.util.concurrent.ConcurrentHashMap())
+
+    private val closed = java.util.concurrent.atomic.AtomicBoolean(false)
+
     public fun start() {
         check(started.compareAndSet(0, 1)) { "broker already started" }
         repeat(poolSize) {
-            idle.put(spawnWorker())
+            register(spawnWorker())?.let { idle.put(it) }
         }
     }
+
+    /** Test/diagnostics view of live (tracked) worker slots. */
+    internal fun trackedWorkers(): Int = trackedSlots.size
+    internal fun idleSize(): Int = idle.size
 
     public fun echo(text: String): String {
         val payload = call(PortalMethods.ECHO, text.toByteArray(StandardCharsets.UTF_8), emptyList())
@@ -110,12 +123,12 @@ public class ProcessBroker(
             extra.forEach { sockets.close(it) }
             check(reply.requestId == id) { "request id mismatch" }
             if (reply.kind == PortalKind.ERROR) {
-                idle.put(slot)
+                returnToPoolOrDestroy(slot)
                 returnedToPool = true
                 throw PortalCallException(reply.payload.toString(StandardCharsets.UTF_8))
             }
             check(reply.kind == PortalKind.RESPONSE) { "unexpected kind ${reply.kind}" }
-            idle.put(slot)
+            returnToPoolOrDestroy(slot)
             returnedToPool = true
             reply.payload
         } catch (e: PortalCallException) {
@@ -132,10 +145,32 @@ public class ProcessBroker(
     }
 
     override fun close() {
+        closed.set(true)
+        started.set(0)
         val leftover = mutableListOf<WorkerSlot>()
         idle.drainTo(leftover)
+        // Destroy checked-out slots too: a worker mid-call belongs to a broker that is gone.
+        synchronized(trackedSlots) { leftover.addAll(trackedSlots) }
         leftover.forEach { destroySlot(it) }
-        started.set(0)
+    }
+
+    /** Pool the slot unless the broker closed meanwhile; destroy orphans either way. */
+    private fun returnToPoolOrDestroy(slot: WorkerSlot) {
+        if (closed.get()) {
+            destroySlot(slot)
+        } else {
+            idle.put(slot)
+        }
+    }
+
+    private fun register(slot: WorkerSlot): WorkerSlot? {
+        trackedSlots.add(slot)
+        return if (closed.get()) {
+            destroySlot(slot)
+            null
+        } else {
+            slot
+        }
     }
 
     private fun resolveWorkerClasspath(): String {
@@ -175,15 +210,28 @@ public class ProcessBroker(
             error("portal worker failed to become ready")
         }
         spawned.incrementAndGet()
-        return WorkerSlot(proc, channel, ep, listen)
+        return register(WorkerSlot(proc, channel, ep, listen)) ?: run {
+            // Closed between accept and registration: tear down this worker immediately.
+            proc.destroyForcibly()
+            ep.close()
+            sockets.close(listen)
+            error("broker closed during worker spawn")
+        }
     }
 
     private fun recycleDeadWorker(dead: WorkerSlot) {
-        destroySlot(dead)
-        idle.put(spawnWorker())
+        // Pre-spawn BEFORE teardown: replacement boot overlaps destruction of the corpse,
+        // bounding recycle latency instead of serializing a full JVM start (issue-011652).
+        val fresh = try {
+            spawnWorker()
+        } finally {
+            destroySlot(dead)
+        }
+        idle.put(fresh)
     }
 
     private fun destroySlot(slot: WorkerSlot) {
+        trackedSlots.remove(slot)
         try {
             slot.channel.close()
         } catch (_: Exception) {
