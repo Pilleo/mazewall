@@ -28,7 +28,8 @@ that invites exactly the class of subtle bugs caught recently (JA encoding, ACK-
 `ProcFsInspector` (getTgid, getPpid) with handler delegation; SupervisorSessionHandlerTest green.
 Slice 2 landed — `SupervisorResponseWriter` extracted (continue/success/error marshalling behind a lazy per-handler instance; all 26 call sites keep their thin delegates).
 Slice 3 landed — `SupervisorFastPath` extracted (tracee path resolution via /proc + BypassPaths; ResolveAbsolutePathTest migrated off reflection onto the direct API).
-Remaining slices: NotificationReader (recv/poll EINTR loops), RouteEvaluator (SupervisedKind routing + fast-path decision policy — resolution already extracted). Each slice must be preceded
+Slice 4 landed — `NotificationReader` extracted (`awaitJvmResponse`: deadline-bounded poll with interrupt-aware EINTR backoff, returning revents+remaining budget; `recvNotification`: EINTR-retrying NOTIF_RECV). Handler keeps verdict/routing/shutdown decisions and the context-rich timeout logging.
+Remaining slices: RouteEvaluator (SupervisedKind routing + fast-path decision policy). Each slice must be preceded
 by golden-notification coverage per the plan below.
 
 **Needed:**

@@ -81,6 +81,8 @@ internal class SupervisorSessionHandler(
     private val socketManager: io.mazewall.core.SocketManager = io.mazewall.core.RealSocketManager
 ) : io.mazewall.platform.seccomp.daemon.SeccompNotifHandler {
 
+    private val reader = NotificationReader(engine, logger)
+
     context(arena: io.mazewall.ffi.memory.NativeArena)
     override fun processNotification(
         notif: io.mazewall.ffi.memory.ManagedSegment,
@@ -168,16 +170,9 @@ internal class SupervisorSessionHandler(
         val listenerRevents = pfd1.getRevents()
         if ((listenerRevents.toInt() and NativeConstants.POLLIN.toInt()) != 0) {
             notif.fill(0)
-            var recvRes: LinuxNative.SyscallResult<Long, *>
-            while (true) {
-                recvRes = engine.raw.ioctl(listenerFd, IoctlCommand.SECCOMP_IOCTL_NOTIF_RECV, notif.typed<IoctlPayload.SeccompNotif>())
-                if (recvRes is LinuxNative.SyscallResult.Error<*> && recvRes.errno == NativeConstants.EINTR) {
-                    continue
-                }
-                break
-            }
+            val received = reader.recvNotification(listenerFd, notif)
             var ok = false
-            recvRes.onSuccess {
+            if (received) {
                 ok = processNotification(notif, resp)
             }
             if (!ok) return LoopAction.Break
@@ -417,49 +412,13 @@ internal class SupervisorSessionHandler(
         pollFd.setEvents(NativeConstants.POLLIN)
 
         val startMs = System.currentTimeMillis()
-        val deadline = Deadline.afterMillis(POLL_TIMEOUT_MS.toLong())
-        var count = 0L
-        val pollFdManaged = pollFd.managed
-        var eintrCount = 0
-        while (deadline.remainingMillis() > 0) {
-            if (Thread.currentThread().isInterrupted) {
-                logger.warning("[SUPERVISOR-DIAGNOSTIC] JVM validation poll interrupted.")
-                break
-            }
-
-            val pollRes = engine.raw.poll(pollFdManaged, 1L, deadline.remainingMillis())
-
-            var gotEintr = false
-            count = pollRes.recover { errno, _ ->
-                if (errno == NativeConstants.EINTR) {
-                    gotEintr = true
-                    0L
-                } else {
-                    0L
-                }
-            }
-            if (pollRes is LinuxNative.SyscallResult.Success) {
-                count = pollRes.value
-                break
-            }
-            if (!gotEintr) {
-                break
-            }
-
-            eintrCount++
-            if (eintrCount > 1) {
-                if (eintrCount > 3) {
-                    try {
-                        Thread.sleep(1)
-                    } catch (e: InterruptedException) {
-                        Thread.currentThread().interrupt()
-                        break
-                    }
-                } else {
-                    Thread.yield()
-                }
-            }
-        }
+        val await = reader.awaitJvmResponse(socketFd, POLL_TIMEOUT_MS.toLong(), SLOW_VALIDATION_THRESHOLD_MS)
+        val count = await.revents
+        val deadline = Deadline.afterMillis(await.remainingMillis.toLong())
+        val framePollFd = PollFdSegment.of(arena.allocate(Layouts.POLLFD))
+        framePollFd.setFd(socketFd.value)
+        framePollFd.setEvents(NativeConstants.POLLIN)
+        val pollFdManaged = framePollFd.managed
         val durationMs = System.currentTimeMillis() - startMs
         if (durationMs > SLOW_VALIDATION_THRESHOLD_MS) {
             logger.warning("[SUPERVISOR-DIAGNOSTIC] JVM policy validation took ${durationMs}ms (syscall nr=$nr, path=$pathStr, id=$id). Possible deadlock or slow stack trace resolution.")
