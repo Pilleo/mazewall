@@ -956,6 +956,11 @@ class "SupervisorDaemonManager" as io.mazewall.enforcer.supervisor.SupervisorDae
   +void stop()
   + {static}SupervisorDaemonManager getInstance()
 }
+class "SupervisorFastPath" as io.mazewall.enforcer.supervisor.SupervisorFastPath {
+  + {static}SupervisorFastPath INSTANCE
+  __
+  +Path resolveAbsolutePath(int, int, String)
+}
 class "SupervisorInstaller" as io.mazewall.enforcer.supervisor.SupervisorInstaller {
   + {static}SupervisorInstaller INSTANCE
   __
@@ -1958,6 +1963,7 @@ io.mazewall.enforcer.supervisor.SupervisorDaemonManager --> io.mazewall.core.Soc
 io.mazewall.enforcer.supervisor.SupervisorDaemonManager --> io.mazewall.enforcer.supervisor.SupervisorContext
 io.mazewall.enforcer.supervisor.SupervisorDaemonManager --> io.mazewall.core.ProcessLauncher
 io.mazewall.enforcer.supervisor.SupervisorDaemonManager --> io.mazewall.enforcer.supervisor.SupervisorDaemonManager
+io.mazewall.enforcer.supervisor.SupervisorFastPath --> io.mazewall.enforcer.supervisor.SupervisorFastPath
 io.mazewall.enforcer.supervisor.SupervisorInstaller --> io.mazewall.enforcer.supervisor.SupervisorInstaller
 io.mazewall.enforcer.supervisor.SupervisorInstaller --> io.mazewall.core.Tid
 io.mazewall.enforcer.supervisor.SupervisorNotificationMachine --> io.mazewall.enforcer.supervisor.SupervisorNotificationMachine

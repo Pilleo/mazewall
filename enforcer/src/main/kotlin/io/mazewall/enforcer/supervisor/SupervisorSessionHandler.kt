@@ -220,7 +220,7 @@ internal class SupervisorSessionHandler(
                     var resolvedPath: java.nio.file.Path? = null
                     if (kind is SupervisedKind.Open && extracted.pathStr != null) {
                         try {
-                            resolvedPath = resolveAbsolutePath(pidVal, extracted.dirfd, extracted.pathStr)
+                            resolvedPath = SupervisorFastPath.resolveAbsolutePath(pidVal, extracted.dirfd, extracted.pathStr)
                             if (resolvedPath != null) {
                                 resolvedPathStr = resolvedPath.toAbsolutePath().toString()
                             }
@@ -327,39 +327,6 @@ internal class SupervisorSessionHandler(
 
     private fun resolveBypassPath(resolvedPath: java.nio.file.Path): java.nio.file.Path? {
         return resolvedPath.takeIf(BypassPaths::isBypassPath)
-    }
-
-    private fun resolveAbsolutePath(pid: Int, dirfd: Int, pathStr: String): java.nio.file.Path? {
-        val path = java.nio.file.Paths.get(pathStr)
-        if (path.isAbsolute) {
-            try {
-                return BypassPaths.toRealPathWithFallback(path)
-            } catch (e: java.nio.file.NoSuchFileException) {
-                return null
-            } catch (e: java.io.FileNotFoundException) {
-                return null
-            } catch (e: Exception) {
-                logger.severe { "Critical error during absolute path resolution for $pathStr: ${e.message}" }
-                throw e
-            }
-        }
-        try {
-            val baseDir = if (dirfd == AT_FDCWD) {
-                BypassPaths.toRealPathWithFallback(java.nio.file.Paths.get("/proc/$pid/cwd"))
-            } else {
-                BypassPaths.toRealPathWithFallback(java.nio.file.Paths.get("/proc/$pid/fd/$dirfd"))
-            }
-            return BypassPaths.toRealPathWithFallback(baseDir.resolve(path))
-        } catch (e: java.nio.file.NoSuchFileException) {
-            // /proc/<pid>/cwd or /proc/<pid>/fd/<dirfd> is gone. Do not invent a
-            // path under a daemon bypass root; fail closed and let the caller deny.
-            return null
-        } catch (e: java.io.FileNotFoundException) {
-            return null
-        } catch (e: Exception) {
-            logger.severe { "Critical error during baseDir or /proc resolution for pid=$pid dirfd=$dirfd path=$pathStr: ${e.message}" }
-            throw e
-        }
     }
 
     context(arena: NativeArena)

@@ -353,6 +353,18 @@ the JVM throws `NoClassDefFoundError`. `Policy.Builder.allowJvmClasspath()` read
 Always call `allowJvmClasspath()` when writing tests that activate Landlock on a
 thread that may still lazy-load test infrastructure classes.
 
+### ALLOW_LIST syscall floors: the bootstrap-read closure (`pread64`)
+
+For **seccomp** allow-list floors (distinct from the Landlock path rules above), lazy
+boot-class reads are served by *positional* reads on the modules image. A floor containing
+`READ`+`LSEEK` but missing `pread64` fails those reads mid-stream with `EPERM`, which the JVM
+surfaces as `ClassFormatError: Incompatible magic value <garbage>` — deterministic corruption,
+not a clean IOException (issue-20260823-190000; proven via AllowListTest 2/2 fail → 0/2 pass).
+
+Use `io.mazewall.enforcer.engine.JvmFloorPresets.fullJvmFloor()` (or at minimum
+`BOOTSTRAP_READ_CLOSURE`) instead of hand-rolled lists, and validate narrow floors once with
+`-Dio.mazewall.selfVerify=true` in CI. See `security-considerations.md §9.1`.
+
 ### Landlock TSYNC (ABI 8 / Linux 7.0+)
 
 Historically, Landlock rulesets were strictly thread-scoped and could not be applied retroactively to sibling threads. To lock down a multi-threaded JVM process on older kernels, a wrapper launcher (e.g., C or Rust) must apply the ruleset before invoking `execve` on the JVM.

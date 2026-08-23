@@ -31,24 +31,12 @@ class ResolveAbsolutePathTest {
 
     @Test
     fun `resolveAbsolutePath returns path even for non-existent absolute path`() {
-        val handler = SupervisorSessionHandler(
-            FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(-1),
-            FileDescriptor.unsafe<FileDescriptorRole.SeccompNotif>(-1)
-        )
-
-        val method = SupervisorSessionHandler::class.java.getDeclaredMethod(
-            "resolveAbsolutePath",
-            Int::class.javaPrimitiveType,
-            Int::class.javaPrimitiveType,
-            String::class.java
-        )
-        method.isAccessible = true
 
         val nonExistentPath = "/tmp/this/path/does/not/exist/at/all/12345"
 
         // FIXED BEHAVIOR: resolveAbsolutePath now returns a securely canonicalized non-null Path using toRealPathWithFallback,
         // resolving the existing parent hierarchy first to prevent directory traversal / symlink escapes.
-        val result = method.invoke(handler, 0, -100, nonExistentPath) as Path?
+        val result = SupervisorFastPath.resolveAbsolutePath(0, -100, nonExistentPath) as Path?
 
         assertNotNull(result)
         assertEquals(Paths.get(nonExistentPath).normalize(), result)
@@ -56,20 +44,8 @@ class ResolveAbsolutePathTest {
 
     @Test
     fun `resolveAbsolutePath returns path even for non-existent path in safeBypassPaths`() {
-        val handler = SupervisorSessionHandler(
-            FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(-1),
-            FileDescriptor.unsafe<FileDescriptorRole.SeccompNotif>(-1)
-        )
 
-        val method = SupervisorSessionHandler::class.java.getDeclaredMethod(
-            "resolveAbsolutePath",
-            Int::class.javaPrimitiveType,
-            Int::class.javaPrimitiveType,
-            String::class.java
-        )
-        method.isAccessible = true
-
-        val result = method.invoke(handler, 0, -100, "build/non-existent-file-12345") as Path?
+        val result = SupervisorFastPath.resolveAbsolutePath(0, -100, "build/non-existent-file-12345") as Path?
         assertNotNull(result)
         // With AT_FDCWD, the code queries baseDir = /proc/0/cwd, which points to the current working directory.
         // So the resolved path's prefix will be /proc/0/cwd/build/non-existent-file-12345.
@@ -83,20 +59,13 @@ class ResolveAbsolutePathTest {
             FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(-1),
             FileDescriptor.unsafe<FileDescriptorRole.SeccompNotif>(-1)
         )
-        val resolveMethod = SupervisorSessionHandler::class.java.getDeclaredMethod(
-            "resolveAbsolutePath",
-            Int::class.javaPrimitiveType,
-            Int::class.javaPrimitiveType,
-            String::class.java
-        )
-        resolveMethod.isAccessible = true
         val bypassMethod = SupervisorSessionHandler::class.java.getDeclaredMethod(
             "resolveBypassPath",
             Path::class.java
         )
         bypassMethod.isAccessible = true
 
-        val resolvedPath = resolveMethod.invoke(handler, 0, 999, "build/secret") as Path?
+        val resolvedPath = SupervisorFastPath.resolveAbsolutePath(0, 999, "build/secret") as Path?
 
         if (resolvedPath == null) {
             return
@@ -123,14 +92,8 @@ class ResolveAbsolutePathTest {
 
         try {
             val traceePid = tracee.inputReader().readLine().toInt()
-            val resolveMethod = SupervisorSessionHandler::class.java.getDeclaredMethod(
-                "resolveAbsolutePath",
-                Int::class.javaPrimitiveType,
-                Int::class.javaPrimitiveType,
-                String::class.java
-            )
-            resolveMethod.isAccessible = true
-            val resolvedPath = resolveMethod.invoke(handler, traceePid, 9, "build/secret") as Path
+            val resolvedPath =
+                SupervisorFastPath.resolveAbsolutePath(traceePid, 9, "build/secret") as Path
 
             val bypassMethod = SupervisorSessionHandler::class.java.getDeclaredMethod(
                 "resolveBypassPath",
