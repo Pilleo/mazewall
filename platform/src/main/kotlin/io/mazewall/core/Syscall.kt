@@ -22,6 +22,11 @@ enum class Syscall {
     ACCEPT4,
     SENDTO,
     SENDMSG,
+    RECVFROM,
+    GETSOCKOPT,
+    SETSOCKOPT,
+    GETSOCKNAME,
+    GETPEERNAME,
     SENDMMSG,
     RECVMMSG,
     OPEN,
@@ -142,7 +147,8 @@ internal object SyscallMapper {
             ->
                 ProcessSyscallMapper.numberFor(syscall, arch)
 
-            Syscall.CONNECT, Syscall.BIND, Syscall.LISTEN, Syscall.ACCEPT, Syscall.ACCEPT4, Syscall.SENDTO, Syscall.SENDMSG, Syscall.SENDMMSG, Syscall.RECVMMSG, Syscall.SOCKET ->
+            Syscall.CONNECT, Syscall.BIND, Syscall.LISTEN, Syscall.ACCEPT, Syscall.ACCEPT4, Syscall.SENDTO, Syscall.SENDMSG, Syscall.SENDMMSG, Syscall.RECVMMSG, Syscall.SOCKET,
+            Syscall.RECVFROM, Syscall.GETSOCKOPT, Syscall.SETSOCKOPT, Syscall.GETSOCKNAME, Syscall.GETPEERNAME ->
                 NetworkSyscallMapper.numberFor(syscall, arch)
 
             Syscall.OPEN, Syscall.OPENAT, Syscall.OPENAT2, Syscall.READ, Syscall.WRITE, Syscall.CLOSE, Syscall.FSTAT, Syscall.LSEEK,
@@ -233,6 +239,11 @@ internal object NetworkSyscallMapper {
             Syscall.ACCEPT4 -> arch.accept4
             Syscall.SENDTO -> arch.sendto
             Syscall.SENDMSG -> arch.sendmsg
+            Syscall.RECVFROM -> arch.recvfrom
+            Syscall.GETSOCKOPT -> arch.getsockopt
+            Syscall.SETSOCKOPT -> arch.setsockopt
+            Syscall.GETSOCKNAME -> arch.getsockname
+            Syscall.GETPEERNAME -> arch.getpeername
             Syscall.SENDMMSG -> arch.sendmmsg
             Syscall.RECVMMSG -> arch.recvmmsg
             Syscall.SOCKET -> arch.socket

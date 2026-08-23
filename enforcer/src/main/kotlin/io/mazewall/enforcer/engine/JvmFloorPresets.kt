@@ -51,8 +51,28 @@ public object JvmFloorPresets {
     )
 
     /**
+     * Socket-state syscalls the JVM networking stack (OIO + NIO) invokes on ANY existing socket,
+     * even when connect/bind are policy-managed: NIO checks non-blocking connect status via
+     * getsockopt, configures buffers/timeouts via setsockopt, resolves addresses via
+     * getsockname/getpeername, and datagram transfer uses recvfrom. Denying these aborts the JVM
+     * with SIGABRT (issue-075 problem 2 / jvm-syscall-floor-implementation-findings §1).
+     *
+     * NOT part of [fullJvmFloor] by default: connection initiation and data transfer remain
+     * policy-relevant for NO_NETWORK-style floors. Add this closure only to floors intended to
+     * permit socket usage.
+     */
+    public val NETWORK_STABILITY_FLOOR: Array<Syscall> = arrayOf(
+        Syscall.GETSOCKOPT,
+        Syscall.SETSOCKOPT,
+        Syscall.GETSOCKNAME,
+        Syscall.GETPEERNAME,
+        Syscall.RECVFROM,
+    )
+
+    /**
      * Convenience union: everything a permissive-toward-the-JVM ALLOW_LIST floor needs.
-     * Deliberately does NOT include exec/memfd/socket families.
+     * Deliberately does NOT include exec/memfd families; socket usage requires additionally
+     * allowing [NETWORK_STABILITY_FLOOR] plus the connect/bind/listen/accept/send family.
      */
     public fun fullJvmFloor(): Array<Syscall> =
         BOOTSTRAP_READ_CLOSURE + THREAD_COORDINATION_CLOSURE

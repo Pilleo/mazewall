@@ -167,6 +167,16 @@ Seccomp-BPF is blind to operations submitted via `io_uring` rings.
 *   **Deadlock Immunity:** Because the supervisor runs in a completely separate OS process, its JVM safepoints are physically isolated from the main JVM. It cannot cause a safepoint deadlock.
 *   **Zero-Crash Execution (`FLAG_CONTINUE`):** When a worker thread blocks on a syscall, the external supervisor reads the notification struct. If the syscall takes pointer arguments (like `openat` file paths), the supervisor inspects the worker's memory via `process_vm_readv()` and resolves absolute paths by inspecting `/proc/[pid]/fd/`. After logging the operation to a binary stream back to the JVM, the supervisor replies to the kernel with `SECCOMP_USER_NOTIF_FLAG_CONTINUE` (Linux 5.5+). This guarantees the kernel executes the syscall natively without requiring dangerous user-space emulation.
 
+> **TOCTOU boundary (issue-20260729-131010):** pointer arguments (path strings, sockaddr
+> buffers) are read from tracee memory *before* `FLAG_CONTINUE`, and sibling tracee threads can
+> mutate that memory in between — so a profiled observation describes what the thread *requested*,
+> which may differ from what the kernel ultimately consumes. This is ACCEPTED for `:profiler`:
+> profiling is an offline, developer-time diagnostic on trusted code, and switching to fd
+> injection would change JVM fd-allocation semantics mid-run. Production enforcement does NOT
+> have this gap: `:enforcer` routes approved opens through `SupervisedOpen` +
+> `SECCOMP_IOCTL_NOTIF_ADDFD`, injecting a daemon-opened validated fd into the tracee table so
+> the kernel consumes exactly the vetted file (pointer TOCTOU eliminated).
+
 ### Profiler Lifecycle & Memory Safety Invariants
 
 To ensure a stable and leak-free profiling experience, the `:profiler` module adheres to several architectural invariants:
