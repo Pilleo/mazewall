@@ -9,9 +9,10 @@ dependencies:
 component: "enforcer"
 target_modules:
   - ":portal"
+  - ":portal-worker"
 target_files:
   - "portal/src/main/kotlin/io/mazewall/portal/ProcessBroker.kt"
-  - "portal/src/main/kotlin/io/mazewall/portal/PortalWorkerMain.kt"
+  - "portal-worker/src/main/kotlin/io/mazewall/portal/worker/PortalWorkerMain.kt"
 effort: "medium"
 autonomy: "supervised"
 open_questions: false

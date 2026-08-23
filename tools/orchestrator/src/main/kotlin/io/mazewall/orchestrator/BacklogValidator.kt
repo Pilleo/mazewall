@@ -15,6 +15,7 @@ object BacklogValidator {
         ":profiler",
         ":portal",
         ":portal-codegen",
+        ":portal-worker",
         ":demos:cli-demo",
         ":demos:vulnerable-web-app",
         ":demos:agent-sandbox-demo",

@@ -58,6 +58,9 @@ tasks.test {
 dependencies {
     api(project(":platform"))
     implementation(project(":enforcer"))
+    // Portal-worker is not on the main compile classpath (broker isolation)
+    // but is included at runtime so spawned worker JVMs can load it from the same classpath
+    runtimeOnly(project(":portal-worker"))
     testImplementation(kotlin("test"))
     testImplementation(libs.junit.jupiter.api)
     testImplementation(libs.junit.jupiter.params)

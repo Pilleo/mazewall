@@ -13,7 +13,7 @@ keywords: ["process-portal", "broker", "worker", "SCM_RIGHTS", "codegen"]
 
 # Process Portal: Broker/Worker Isolation
 
-> **Status:** Designed. Platform spawn/`SCM_RIGHTS` extract exists. Hand-written `:portal` runtime (`ProcessBroker` pool + Unix RPC + broker→worker FDs) exists. `:portal-codegen` KotlinPoet plugin generates host stubs and worker dispatchers; `Portal.create` fails closed if the stub is missing.
+> **Status:** Designed. Platform spawn/`SCM_RIGHTS` extract exists. Hand-written `:portal` runtime (`ProcessBroker` pool + Unix RPC + broker→worker FDs) exists. `:portal-worker` module contains guest implementations. `:portal-codegen` KotlinPoet plugin generates host stubs and worker dispatchers; `Portal.create` fails closed if the stub is missing.
 >
 > This is an **application** portal (Chrome renderer model). It is not the **syscall** supervisor in [supervisor-proxy-design.md](supervisor-proxy-design.md) (`USER_NOTIF` + `SECCOMP_IOCTL_NOTIF_ADDFD`).
 
@@ -84,8 +84,9 @@ Do **not** overload `SandboxDispatcher` (in-process thread pools). New type, e.g
 |---|---|
 | `:platform` | Spawn, Unix endpoint, typed `SCM_RIGHTS` (done) |
 | `:enforcer` | Worker `installOnProcess` + presets |
-| `:portal` (new) | Pool, RPC framing, capability tokens |
-| `:portal-codegen` (new) | KotlinPoet host stub + worker dispatcher |
+| `:portal` | Pool, RPC framing, capability tokens, broker stubs |
+| `:portal-worker` | Guest implementations, worker dispatcher |
+| `:portal-codegen` | KotlinPoet host stub + worker dispatcher plugin |
 
 KotlinPoet is a **plugin** dependency. Ask before adding it; do not put it on `:enforcer`.
 
