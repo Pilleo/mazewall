@@ -41,7 +41,7 @@ public object ProcessPolicies {
     /**
      * Landlock allowlist of `java.home` and the current JVM classpath entries only.
      *
-     * Typed [PolicyScope.ThreadLocalOnly] because [Policy.Builder.allowJvmClasspath] is not
+     * Typed [PolicyScope.ThreadLocalOnly] because [PolicyBuilder.allowJvmClasspath] is not
      * process-wide-safe: without Landlock ABI v8 `LANDLOCK_RESTRICT_SELF_TSYNC`, existing
      * JVM helper threads are not retroactively restricted. Portal workers apply this on the
      * dispatch thread after Unix connect; later threads inherit the ruleset. Extra readable

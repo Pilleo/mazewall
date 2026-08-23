@@ -12,7 +12,8 @@ public enum class PolicyMode {
 
 /**
  * Capability-named deny-list / allow-list entry points. Raw `block`/`allow`/`unblock`
- * stay on [Policy.Builder] as the advanced API.
+ * stay on [PolicyBuilder] as the advanced definition-level API (see issue-20260823-171955
+ * for the facade/engine layering decision).
  */
 public object PolicyLists {
     @JvmStatic

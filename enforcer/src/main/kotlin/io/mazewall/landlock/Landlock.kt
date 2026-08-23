@@ -84,9 +84,9 @@ import java.util.logging.Logger
  * retroactive process-wide restriction breaks sibling thread transparency in multi-threaded JVMs
  * (GC, JIT, and test runners), `mazewall` disables it by default in standard enforcement.
  *
- * @see io.mazewall.Policy.Builder.allowFsRead
- * @see io.mazewall.Policy.Builder.allowFsWrite
- * @see io.mazewall.Policy.Builder.allowJvmClasspath
+ * @see io.mazewall.PolicyBuilder.allowFsRead
+ * @see io.mazewall.PolicyBuilder.allowFsWrite
+ * @see io.mazewall.PolicyBuilder.allowJvmClasspath
  * @see io.mazewall.enforcer.ContainedExecutors.wrap
  */
 object Landlock {

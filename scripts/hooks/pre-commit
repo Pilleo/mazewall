@@ -65,9 +65,14 @@ if [ -n "$CORE_FILES" ]; then
 fi
 
 # 3. Run host unit tests to verify no structural/logic breakages
+# Full log kept at /tmp/mazewall-precommit-test.log: intermittent failures have occurred that
+# leave no trace in result XMLs (issue-20260823-172001 watch item) — always capture the run.
 echo "==> Running host unit tests..."
-if ! ./gradlew test -x check --no-configuration-cache; then
-  echo "ERROR: Host unit tests failed. Commit aborted."
+if ! ./gradlew test -x check --no-configuration-cache > /tmp/mazewall-precommit-test.log 2>&1; then
+  echo "--- Failing tests ---"
+  grep -E "FAILED$|FAILED |e: " /tmp/mazewall-precommit-test.log | head -20 || true
+  echo "---------------------"
+  echo "ERROR: Host unit tests failed. Commit aborted. Full log: /tmp/mazewall-precommit-test.log"
   exit 1
 fi
 
