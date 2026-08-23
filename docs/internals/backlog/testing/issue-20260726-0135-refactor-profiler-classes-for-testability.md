@@ -25,3 +25,10 @@ autonomy: supervised
 2. Extract the socket handling and main loop from `ProfilerDaemon` into a testable interface that can run independently of `System.in`/`exitProcess`.
 3. Separate the Seccomp protocol handling logic in `ProfilerSessionHandler` from the direct FFM interactions, allowing deterministic verification of the ACK loop protocol.
 4. Implement the unit and integration tests necessary to increase the `:profiler` module coverage strictly above 80%, using parameterized tests and testing shared logic without mocking where possible.
+
+**Progress (2026-08-23):** Partially delivered:
+- `IterativeProfiler` extracted into pure state-machine + pluggable `IterativeTaskExecutor`
+  (DI seam for process spawning/installation); unit-tested without mocks for the state layer.
+- DiagnosticTriageRunner external-process capture is timeout-bounded and injectable-free.
+Remaining: `ProfilerDaemon` socket/main-loop extraction and
+`SupervisorDaemonManager.getInstance()` decoupling inside MazewallProfiler paths.

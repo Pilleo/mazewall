@@ -142,6 +142,14 @@ Security is a structural property. We use ArchUnit to ensure that memory-unsafe 
 - **Application:** Banning direct `java.lang.foreign` or `Unsafe` access outside of the `io.mazewall.ffi` package to prevent structural bypasses of our memory-safety model.
 - **Enforcement:** `ArchitectureTest.rawFfmTypesMustResideInFfiPackages` (enforcer) fails the build when any class outside `io.mazewall.ffi..` gains a dependency on `java.lang.foreign`.
 
+### E2. Engine-Aware Native Artifact Caching
+Any cache holding engine-produced native artifacts MUST key on `LinuxNative.engineIdentity`
+in addition to content: segments produced while a mock engine is active are garbage for the real
+engine and cause spurious kernel EINVALs when reused (`BpfNativeCache.NativeCacheKey`;
+issue-20260823-180500). Pure-JVM caches (e.g. `PolicyCompilationCache`) are exempt — but their
+keys must still be the *program-relevant projection* of inputs, never whole value objects with
+irrelevant fields (issue-20260823-171953: FS paths do not affect BPF output).
+
 ### F. FFM Package Placement (module split rationale)
 Raw FFM code is split across two modules by OWNERSHIP OF ABSTRACTION LEVEL, not arbitrarily:
 - **`:platform` `io.mazewall.ffi..`** owns generic, domain-independent ABI surface: `NativeConstants`,

@@ -324,6 +324,22 @@ We inspect the `prot` argument (the 3rd argument, `args[2]` in `seccomp_data`) o
 ### JVM Stability Protection (`clone`)
 We inspect the `flags` argument of `clone`. We allow `clone` only if it includes **both** `CLONE_THREAD` and `CLONE_VM` (indicating a new thread). Standard process forking (`fork`) and memory-sharing processes (`CLONE_VM` without `CLONE_THREAD`) are blocked. `clone3` is blocked with `ENOSYS` to force runtimes to fallback to the inspectable legacy `clone`.
 
+### Int-ABI Arguments: `EqualsAny32` (high-word garbage)
+Syscall arguments the kernel ABI defines as `int` (prctl *option*, socket *domain*) occupy a u64
+slot whose upper 32 bits are unspecified — register reuse can leave garbage there. Comparing the
+full 64-bit slot produces spurious denials. `ArgCheck.EqualsAny32` emits a low-word-only
+comparison chain (HI word never loaded) and is adopted by `UnsafePrctlInspector` (prctl option)
+and `SocketAddressFamilyInspector` (address family). Oracle support:
+`BpfSimulator.simulate(..., args)` injects synthetic argument vectors for tests.
+(issue-075 problem 3.)
+
+### Floor-Design Constraint: `jvmCriticalNrs` OVERRIDE Semantics
+`BpfFilter.emitLinearScan` force-ALLOWs every NR in `getJvmCriticalNrs(arch)`, **overriding
+explicit policy blocks**. Therefore only JVM-internal coordination primitives may join that set:
+anything policy-relevant (network I/O, exec, file writes) must NEVER be added — it would silently
+gut NO_NETWORK-style presets. Network stability syscalls deliberately live in
+`JvmFloorPresets.NETWORK_STABILITY_FLOOR` as operator opt-in instead (issue-075 problem 2).
+
 ---
 
 ## 9. HotSpot JVM Whitelist Risks (Safepoints & GC Deadlocks)

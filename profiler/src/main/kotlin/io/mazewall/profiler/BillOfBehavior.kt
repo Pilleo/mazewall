@@ -300,6 +300,16 @@ data class BillOfBehavior(
     }
 
     companion object {
+        /**
+         * Monoid identity for formal composition (issue-018): an empty SBoB that leaves any
+         * other profile unchanged under [plus].
+         */
+        @JvmField
+        public val EMPTY: BillOfBehavior = BillOfBehavior()
+
+        @JvmStatic
+        public fun empty(): BillOfBehavior = EMPTY
+
         fun fromFile(path: Path): BillOfBehavior {
             return fromJson(Files.readString(path))
         }

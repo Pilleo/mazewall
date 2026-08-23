@@ -131,6 +131,12 @@ Process forking (`fork`, `vfork`, or `clone` without `CLONE_THREAD`) hits `DENY`
 An agent who naively adds `Syscall.CLONE` to a policy's block list would bypass
 this inspection and deadlock the JVM at the next thread creation.
 
+### 3b. Int-ABI arguments — `EqualsAny32` low-word comparisons
+For `int`-defined arguments (prctl option, socket domain) use `ArgCheck.EqualsAny32`: emit
+LD_ABS of ONLY the args[i] LO word followed by per-value JEQ. The HI word of the u64 slot is
+unspecified garbage on int ABI and must never participate in the comparison (issue-075 p3).
+Adopted: UnsafePrctlInspector, SocketAddressFamilyInspector.
+
 ### 3c. `clone3` — always return `ENOSYS`
 
 `clone3` is blocked unconditionally with `ENOSYS` (not `EPERM`) to force libc to

@@ -809,6 +809,7 @@ class "JvmFloorPresets" as io.mazewall.enforcer.engine.JvmFloorPresets {
   __
   +Syscall[] getBOOTSTRAP_READ_CLOSURE()
   +Syscall[] getTHREAD_COORDINATION_CLOSURE()
+  +Syscall[] getNETWORK_STABILITY_FLOOR()
   +Syscall[] fullJvmFloor()
 }
 class "JvmFloorWorkload" as io.mazewall.enforcer.engine.JvmFloorWorkload {

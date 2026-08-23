@@ -11,6 +11,7 @@ class "BaselinePathProfile" as io.mazewall.profiler.BaselinePathProfile {
 }
 class "BillOfBehavior" as io.mazewall.profiler.BillOfBehavior {
   + {static}Companion Companion
+  + {static}BillOfBehavior EMPTY
   __
   +Set<String> getOpens()
   +Set<String> getFsWritePaths()
@@ -23,6 +24,7 @@ class "BillOfBehavior" as io.mazewall.profiler.BillOfBehavior {
   +BillOfBehavior filterPaths(BaselinePathProfile)
   +String toJson()
   +String toStackTracesJson()
+  + {static}BillOfBehavior empty()
 }
 class "BillOfBehaviorKt" as io.mazewall.profiler.BillOfBehaviorKt {
 }
@@ -216,6 +218,11 @@ class "BobCompiler" as io.mazewall.profiler.compiler.BobCompiler {
   __
   +BillOfBehavior compile(List<? extends TraceEvent>)
   +BillOfBehavior compileObservations(List<? extends ProfileObservation>)
+}
+class "MutationTrapAudit" as io.mazewall.profiler.compiler.MutationTrapAudit {
+  + {static}MutationTrapAudit INSTANCE
+  __
+  +List<String> untrapped(List<? extends BpfInstruction>, Arch)
 }
 class "StraceLogParser" as io.mazewall.profiler.compiler.StraceLogParser {
   + {static}StraceLogParser INSTANCE
@@ -524,6 +531,7 @@ class "DiagnosticTriageRunner" as io.mazewall.profiler.triage.DiagnosticTriageRu
   __
   + {static}void main(String[])
 }
+io.mazewall.profiler.BillOfBehavior --> io.mazewall.profiler.BillOfBehavior
 io.mazewall.profiler.BillOfBehavior --> io.mazewall.profiler.NetworkEndpoint
 io.mazewall.profiler.BillOfBehavior --> io.mazewall.profiler.engine.TraceEvent
 io.mazewall.profiler.EbpfCapability --> io.mazewall.profiler.EbpfCapability
@@ -561,6 +569,7 @@ io.mazewall.profiler.collector.StraceCollector .u.|> io.mazewall.profiler.collec
 io.mazewall.profiler.collector.StraceCollector --> io.mazewall.profiler.TraceableWorkload
 io.mazewall.profiler.collector.StraceCollector --> io.mazewall.profiler.ObservationSource
 io.mazewall.profiler.compiler.BobCompiler --> io.mazewall.profiler.compiler.BobCompiler
+io.mazewall.profiler.compiler.MutationTrapAudit --> io.mazewall.profiler.compiler.MutationTrapAudit
 io.mazewall.profiler.compiler.StraceLogParser --> io.mazewall.profiler.compiler.StraceLogParser
 io.mazewall.profiler.engine.PathNormalizerHelper --> io.mazewall.profiler.engine.PathNormalizerHelper
 io.mazewall.profiler.engine.ProfilerDaemon --> io.mazewall.profiler.engine.DaemonRunner
