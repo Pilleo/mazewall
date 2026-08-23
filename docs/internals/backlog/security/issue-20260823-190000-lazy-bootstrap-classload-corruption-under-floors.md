@@ -60,3 +60,9 @@ narrow floor is one missed syscall away from a corrupt-class crash instead of a 
 ## ❓ Open Questions
 1. Is the corrupted-read behavior a JDK robustness gap worth reporting upstream
    (ClassFormatError instead of IOE on failed jrt reads)?
+
+**Progress (2026-08-23, cont.):** `PolicyLists.allowList {}` now seeds
+`JvmFloorPresets.fullJvmFloor()` by construction (AllowListSpecFloorTest: floor seeded without
+operator effort, operator allows hold, unlisted denied, prctl keeps argument inspection, pread64
+present). Operators can no longer hand-roll a floor missing the bootstrap-read closure via the
+standard DSL. Remaining: flip `-Dio.mazewall.selfVerify` default to ON; upstream JDK report.
