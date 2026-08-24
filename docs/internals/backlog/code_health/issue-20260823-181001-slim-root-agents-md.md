@@ -13,6 +13,7 @@ target_files:
 effort: "medium"
 autonomy: "supervised"
 open_questions: false
+paperclip_issue_id: 8b969de4-34bb-41ad-a02d-1a6ad49a1f02
 ---
 
 # 🟡 [Severity: MEDIUM]: Slim root AGENTS.md to non-inferable commands, never-dos, and nested index

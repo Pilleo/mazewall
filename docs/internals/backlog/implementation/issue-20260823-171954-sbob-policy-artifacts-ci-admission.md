@@ -15,6 +15,7 @@ effort: "large"
 autonomy: "supervised"
 open_questions: true
 dependencies: []
+paperclip_issue_id: 128309fd-fbd7-4f86-a23a-ce293fc13186
 ---
 
 # 🟢 [Severity: ENHANCEMENT]: SBoB Policy Artifacts Workflow — Pinned, Signed, Versioned Policies for CI Admission

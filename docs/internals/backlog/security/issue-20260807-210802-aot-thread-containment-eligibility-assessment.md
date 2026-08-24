@@ -12,6 +12,7 @@ target_files:
 effort: "large"
 autonomy: "autonomous"
 open_questions: false
+paperclip_issue_id: 2bae9b54-90d9-49a0-b89a-598422d96acd
 ---
 
 # 🔵 [Severity: ENHANCEMENT]: Add AOT Reachability Assessment for Thread-Containment Eligibility

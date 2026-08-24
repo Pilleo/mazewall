@@ -14,6 +14,7 @@ autonomy: supervised
 solution_approved: false
 blast_radius: medium
 reversible: true
+paperclip_issue_id: 3892cc5a-d9f0-4008-9cf1-1f6428bbc0f9
 ---
 
 # 🔴 [Severity: HIGH]: Auto-Closing Linked GitHub Issues

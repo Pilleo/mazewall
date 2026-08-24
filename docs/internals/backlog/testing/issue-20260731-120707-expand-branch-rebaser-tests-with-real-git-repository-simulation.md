@@ -12,6 +12,7 @@ target_files:
 effort: "medium"
 autonomy: "autonomous"
 open_questions: false
+paperclip_issue_id: d6196b29-4d17-4989-9681-9fc6c0aa37cb
 ---
 
 # 🔶 [Severity: MEDIUM]: Expand BranchRebaser Tests with Real Git Repository Simulation

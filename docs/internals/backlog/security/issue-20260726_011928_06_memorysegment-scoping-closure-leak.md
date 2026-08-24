@@ -12,6 +12,7 @@ component: enforcer
 target_modules: [":enforcer"]
 target_files: ["io.mazewall.enforcer.supervisor.SupervisorSessionHandler.kt"]
 github_issue: 335
+paperclip_issue_id: 652de2fe-165a-48b6-8070-1ffa12aad3de
 ---
 
 # Issue: Arena MemorySegment leak during async response loop

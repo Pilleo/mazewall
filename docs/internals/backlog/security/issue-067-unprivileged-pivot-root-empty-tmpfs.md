@@ -10,6 +10,7 @@ target_modules:
 - :enforcer
 component: enforcer
 effort: medium
+paperclip_issue_id: 61cfd7d8-bbd4-41a4-a87d-5ee4b145cf1c
 ---
 
 # 🔵 [Severity: ENHANCEMENT]: Unprivileged Pivot Root (Empty `tmpfs`)

@@ -15,6 +15,7 @@ solution_approved: false
 blast_radius: medium
 reversible: true
 github_issue: 450
+paperclip_issue_id: 0c90c2e6-b17f-4f27-ae05-2be032390c00
 ---
 
 # 🔴 [Severity: HIGH]: Detect and Handle CLI Authentication Failures with Actionable Login Alerts

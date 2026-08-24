@@ -13,6 +13,7 @@ autonomy: "autonomous"
 open_questions: false
 dependencies:
   - "issue-20260823-171500"
+paperclip_issue_id: 4bc41dd5-b71d-4922-a12f-7e27553aeb2f
 ---
 
 # 🟡 [Severity: LOW]: Differential Fuzzing of ArgCheck Semantics vs Real Kernel

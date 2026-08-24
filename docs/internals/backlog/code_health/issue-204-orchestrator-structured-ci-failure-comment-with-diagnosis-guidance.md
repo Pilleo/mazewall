@@ -14,6 +14,7 @@ reversible: true
 autonomy: supervised
 solution_approved: false
 blast_radius: medium
+paperclip_issue_id: 19670fa8-ec5d-49b5-8759-f1a8e01eed9e
 ---
 
 # 🟡 [Severity: MEDIUM]: Orchestrator: Structured CI Failure Comment with Diagnosis Guidance for Jules

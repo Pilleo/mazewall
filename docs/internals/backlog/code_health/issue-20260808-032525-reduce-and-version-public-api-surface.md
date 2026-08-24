@@ -16,6 +16,7 @@ target_files:
 effort: "huge"
 autonomy: "supervised"
 open_questions: false
+paperclip_issue_id: 0cdcd683-c03d-41d2-ab47-b8e052ee09eb
 ---
 
 # 🟡 [Severity: MEDIUM]: Reduce and Version the Supported Public API Surface

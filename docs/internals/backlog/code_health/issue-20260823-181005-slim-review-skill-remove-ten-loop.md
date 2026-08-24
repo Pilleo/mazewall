@@ -13,6 +13,7 @@ target_files:
 effort: "small"
 autonomy: "supervised"
 open_questions: false
+paperclip_issue_id: e63aebc3-c305-401f-b1b2-5917ac8dbda1
 ---
 
 # 🟡 [Severity: MEDIUM]: Slim review skill: scoped diff review, drop 10-loop and no-summarize rules

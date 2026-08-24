@@ -11,6 +11,7 @@ target_modules:
 - :enforcer
 component: enforcer
 effort: medium
+paperclip_issue_id: 3b6587b1-8383-43f2-bbc7-891bf0b5ab59
 ---
 
 # 🟢 [WONTFIX]: `ContainedExecutors` Thread-Local State Persistence and Poisoning

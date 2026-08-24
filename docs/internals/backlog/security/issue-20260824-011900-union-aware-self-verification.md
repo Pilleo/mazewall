@@ -13,6 +13,7 @@ autonomy: "supervised"
 open_questions: false
 dependencies:
   - "issue-20260823-172003"
+paperclip_issue_id: 18533426-3694-4d49-aec1-38c2983e3cb1
 ---
 
 # 🟡 [Severity: LOW]: Union-Aware Self-Verification for Stacked Seccomp Filters

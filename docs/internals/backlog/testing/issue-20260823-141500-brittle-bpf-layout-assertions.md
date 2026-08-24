@@ -12,6 +12,7 @@ effort: "small"
 autonomy: "autonomous"
 open_questions: false
 dependencies: []
+paperclip_issue_id: e77bcf45-afbf-4f7b-a3e6-51feecc6a35f
 ---
 
 # 🟡 [Severity: LOW]: Brittle Instruction-Layout Assertions in BpfFilterTest (Adjacent-Pair Scans)

@@ -11,6 +11,7 @@ target_files:
   - "tools/orchestrator/src/main/kotlin/io/mazewall/orchestrator/BranchRebaser.kt"
 effort: "medium"
 autonomy: "supervised"
+paperclip_issue_id: 622ae00e-0318-48e7-b141-d85400b6c5df
 ---
 
 # 🔴 [Severity: HIGH]: Rescue Modified Backlog Markdown Files During Automated Git Branch Rescue to Prevent Progress Loss

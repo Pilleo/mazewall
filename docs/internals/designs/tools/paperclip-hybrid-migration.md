@@ -7,9 +7,26 @@
 ## 1. How to trigger the loop today
 
 ```bash
-# 1. Push open backlog issues into Paperclip (topological, one batch per run, idempotent):
-PAPERCLIP_API_KEY=local PAPERCLIP_COMPANY_ID=<uuid> \
-  kotlin -Xuse-fir-lt=false scripts/paperclip_backlog_sync.kts          # add --dry-run first
+# One command: ingest open backlog issues, then dispatch the next unblocked,
+# ingested issue to Jules (assign + status -> in_progress triggers the run):
+./scripts/run_paperclip_loop.sh              # add --dry-run to preview without changes
+
+# Approvals / notifications (separate daemon, when Telegram wiring is configured):
+python3 scripts/paperclip_telegram_bridge.py
+```
+
+`run_paperclip_loop.sh` env knobs: `PAPERCLIP_API_KEY` (default `local`),
+`PAPERCLIP_API_URL` (default `http://127.0.0.1:3100`),
+`PAPERCLIP_AGENT_ADAPTER` (default `jules` — matches the orchestrator's worker),
+`PAPERCLIP_MAX_DISPATCH` (default `1`). Dispatch only ever picks issues carrying
+the `<!-- mazewall:backlog-file=… -->` marker, so manual/board-native entries are
+never auto-dispatched.
+
+Underlying steps (what the wrapper automates):
+
+```bash
+# 1. Push open backlog issues into Paperclip (topological batch, idempotent):
+PAPERCLIP_API_KEY=local kotlin -Xuse-fir-lt=false scripts/paperclip_backlog_sync.kts [--dry-run]
 
 # 2. Assign an agent to an issue (this is the DISPATCH trigger):
 curl -X PATCH "http://127.0.0.1:3100/api/issues/<issue-id>" \
@@ -18,13 +35,30 @@ curl -X PATCH "http://127.0.0.1:3100/api/issues/<issue-id>" \
 curl -X PATCH "http://127.0.0.1:3100/api/issues/<issue-id>" ... -d '{"status":"in_progress"}'
 # -> Paperclip starts a Run automatically (invocationSource: "assignment"/"automation")
 
-# 3. Approvals / notifications (optional, when Telegram wiring is configured):
-python3 scripts/paperclip_telegram_bridge.py
-
-# 4. Resolution happens automatically when Paperclip marks done:
+# 3. Resolution happens automatically when Paperclip marks done:
 #    bridge sync_git_lifecycle() flips frontmatter to resolved/, moves file to
 #    docs/internals/backlog/resolved/, git-commits.
 ```
+
+### Jules agent configuration gotchas (2026-08-24)
+
+The board's Jules agent ("Async software developer", `8ec6f7dd…`) failed three
+times before its first real session; all three are config, not code:
+
+1. `adapterConfig.repository` missing → set it (`Pilleo/mazewall`). Without it the
+   adapter cannot derive the Jules source (`RepositorySchema.parse(undefined)`).
+2. `baseBranch` underivable → set `fast-master` (or wire provider metadata).
+3. API key binding: the shared secret record existed but was bound as
+   `adapterConfig["access.JULES_API_KEY"]`, which the core never materializes.
+   Working binding (PATCH `/api/agents/:id`): **both**
+   `adapterConfig.env.JULES_API_KEY = {type:"secret_ref", secretId, version:"latest"}`
+   and `runtimeConfig.env.JULES_API_KEY = <same ref>`. Note the secret record key
+   is `jules_api_key` while the adapter README asks for `jules-api-key`; the id-based
+   ref resolves regardless.
+
+With those set, dispatch reaches the live Jules API and parks in
+`scheduled_retry` / `jules_session_pending` at Jules' plan-approval gate
+(`planApprovalPolicy: required`) — approvals then flow through the bridge or board UI.
 
 Company id for `mazewall`: `8f4ef932-d769-43b2-981a-d273ed715162`
 (`GET /api/companies` auto-detects it too). Agent roster via

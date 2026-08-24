@@ -15,6 +15,7 @@ effort: "medium"
 autonomy: "autonomous"
 open_questions: false
 dependencies: []
+paperclip_issue_id: 448cac7b-35e9-46eb-9009-60323c3571cb
 ---
 
 # 🟠 [Severity: MEDIUM]: Gradle 9 Cross-Module Execution-Time Resolution — Canonical Pattern + Build-Script Lint

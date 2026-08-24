@@ -14,6 +14,7 @@ target_files:
 effort: "medium"
 autonomy: "supervised"
 open_questions: false
+paperclip_issue_id: 9f28f5dd-bc83-46b2-b12a-a5fe7a145756
 ---
 
 # 🟡 [Severity: MEDIUM]: Stop inlining BacklogParser; run Paperclip ingest as an orchestrator main

@@ -55,20 +55,7 @@ if [ "${GITHUB_ACTIONS:-false}" == "true" ] && [ -n "${RUNNER_TEMP}" ]; then
     )
 fi
 
-# Run gradlew inside container with portal test inclusion check
-# This ensures portal integration tests are always run, with graceful degradation
-# if the portal module is temporarily excluded from settings.gradle.kts
-podman run --rm --replace "${PODMAN_ARGS[@]}" mazewall-test-runner bash -c '
-set -e
-echo "==> Checking portal module availability..."
-PROJECTS_OUTPUT=$(./gradlew projects --no-configuration-cache 2>/dev/null)
-if echo "$PROJECTS_OUTPUT" | grep -q "^project \":portal" "; then
-  echo "==> Portal module found, including :portal:test :portal:integrationTest"
-  ./gradlew :portal:test :portal:integrationTest "$@" --no-daemon --stacktrace
-else
-  echo "WARNING: Portal module not available in settings.gradle.kts - skipping portal tests"
-  echo "         CI proceeding with available modules only."
-  echo "         Ensure all modules are included before merging."
-  ./gradlew "$@" --no-daemon --stacktrace
-fi
-'
+# Pass caller arguments straight through to Gradle. Module-inclusion policy
+# belongs to settings.gradle.kts: if a task targets an excluded project,
+# Gradle must fail loudly — never silently skip (fail-closed posture).
+podman run --rm --replace "${PODMAN_ARGS[@]}" mazewall-test-runner ./gradlew "$@" --no-daemon --stacktrace

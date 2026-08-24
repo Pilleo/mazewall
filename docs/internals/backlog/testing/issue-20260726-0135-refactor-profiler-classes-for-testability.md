@@ -14,6 +14,7 @@ target_files:
 - profiler/src/main/kotlin/io/mazewall/profiler/engine/ProfilerSessionHandler.kt
 effort: large
 autonomy: supervised
+paperclip_issue_id: 99dc4a0b-9da0-4572-bedc-47f2533e575c
 ---
 
 # 🔴 [Severity: MEDIUM]: Refactor Profiler core classes for testability and test them

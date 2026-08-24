@@ -13,6 +13,7 @@ target_files:
 effort: "small"
 autonomy: "autonomous"
 open_questions: false
+paperclip_issue_id: b057dbe8-bbbc-4161-b751-6f1b55cefe76
 ---
 
 # 🟡 [Severity: MEDIUM]: GitHub CLI Authentication Resilience and Fallback for Invalid GITHUB_TOKEN

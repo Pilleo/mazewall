@@ -12,6 +12,7 @@ target_files:
 effort: "small"
 autonomy: "autonomous"
 open_questions: false
+paperclip_issue_id: d0203511-ff8c-4109-999c-dd25eba4655e
 ---
 
 # 🟡 [Severity: MEDIUM]: Add platform/AGENTS.md for FFM layouts, Syscall.kt, and NativeEngine isolation

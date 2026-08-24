@@ -11,6 +11,7 @@ target_modules:
 - :enforcer
 component: enforcer
 effort: medium
+paperclip_issue_id: b92f1d8b-009c-4d82-a4c6-65509e0d0f78
 ---
 
 # 🔵 [Severity: ENHANCEMENT]: Compile-Time Feature Proof Tokens and Scope-Safe Policy Builders (Type-State Pattern)

@@ -12,6 +12,7 @@ target_files:
 - tools/orchestrator/src/main/kotlin/io/mazewall/orchestrator/GitHubCli.kt
 effort: medium
 autonomy: autonomous
+paperclip_issue_id: bd53f980-a8a2-4458-b10e-8c4f2a9aa81c
 ---
 
 # 🔴 [Severity: HIGH]: Isolate Orchestrator Git Operations from Main Working Directory using Temporary Worktrees

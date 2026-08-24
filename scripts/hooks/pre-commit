@@ -68,32 +68,17 @@ fi
 # Full log kept at /tmp/mazewall-precommit-test.log: intermittent failures have occurred that
 # leave no trace in result XMLs (issue-20260823-172001 watch item) — always capture the run.
 
-# Helper function to check if a Gradle module is available in the build
-check_module_available() {
-  local module=$1
-  ./gradlew projects --no-configuration-cache 2>/dev/null | grep -q "^project '$module' "
-}
-
-# Collect modules to test - start with :portal:integrationTest and :portal:test
+# Portal tests are part of the commit gate when :portal participates in the build.
+# Inclusion is read directly from settings.gradle.kts: probing via './gradlew projects'
+# would cost two full Gradle configuration passes per commit for statically known facts.
 TEST_TASKS=("test")
-PORTAL_TASKS=(":portal:integrationTest" ":portal:test")
-
-# Check each portal task's module availability
-SKIPPED_MODULES=()
-for task in "${PORTAL_TASKS[@]}"; do
-  module=$(echo "$task" | cut -d: -f1,2)
-  if check_module_available "$module"; then
-    TEST_TASKS+=("$task")
-  else
-    SKIPPED_MODULES+=("$module")
-  fi
-done
-
-# If portal modules are skipped, warn loudly
-if [ ${#SKIPPED_MODULES[@]} -gt 0 ]; then
-  echo "WARNING: Portal test modules skipped (not available in settings.gradle.kts): ${SKIPPED_MODULES[*]}"
-  echo "         Commit gate proceeding with available modules only."
-  echo "         Ensure all modules are included before merging."
+if grep -Eq '^[[:space:]]*include\(":portal"\)' settings.gradle.kts; then
+  TEST_TASKS+=(":portal:integrationTest" ":portal:test")
+else
+  # Explicit operator exclusion (like :tools:orchestrator) must stay visible,
+  # never silent: skipping the gate segment without notice is a bypass.
+  echo "!!! GATE DEGRADED: ':portal' is not included in settings.gradle.kts."
+  echo "!!! Committing WITHOUT :portal integration tests. Re-include before merging."
 fi
 
 echo "==> Running host unit tests and portal integration tests..."

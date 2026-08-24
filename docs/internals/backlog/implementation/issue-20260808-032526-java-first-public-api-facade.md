@@ -16,6 +16,7 @@ target_files:
 effort: "large"
 autonomy: "autonomous"
 open_questions: false
+paperclip_issue_id: fd1ea5f9-1634-471f-9f10-46792da11279
 ---
 
 # 🔵 [Severity: ENHANCEMENT]: Provide an Intentional Java Public API Facade

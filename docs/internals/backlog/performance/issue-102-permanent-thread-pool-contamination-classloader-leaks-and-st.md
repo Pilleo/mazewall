@@ -11,6 +11,7 @@ target_modules:
 - :enforcer
 component: enforcer
 effort: medium
+paperclip_issue_id: 9c85aff4-96c6-491a-8ea3-81918ef34d72
 ---
 
 # 🟢 [WONTFIX]: Permanent thread pool contamination, classloader leaks, and state pollution via un-cleared `ThreadLocal` variables

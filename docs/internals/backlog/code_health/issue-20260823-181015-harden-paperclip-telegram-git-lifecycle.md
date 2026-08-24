@@ -12,6 +12,7 @@ target_files:
 effort: "medium"
 autonomy: "supervised"
 open_questions: false
+paperclip_issue_id: 8c30c010-d4b2-434f-bd8e-e0b1c17a102d
 ---
 
 # 🔴 [Severity: HIGH]: Harden Paperclip Telegram done-hook: no rebase of the operator working tree
