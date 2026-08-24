@@ -67,6 +67,14 @@ data class PaperclipComment(
 )
 
 @Serializable
+data class PaperclipApproval(
+    val id: String,
+    val type: String? = null,
+    val status: String? = null,
+    val createdAt: String? = null,
+)
+
+@Serializable
 private data class CompanyRef(val id: String)
 
 @Serializable
@@ -77,6 +85,9 @@ private data class StatusRequest(val status: String)
 
 @Serializable
 private data class CommentRequest(val body: String)
+
+@Serializable
+private class EmptyRequest
 
 class PaperclipException(message: String, val statusCode: Int) : RuntimeException(message)
 
@@ -120,6 +131,14 @@ class PaperclipClient(
 
     fun startProgress(issueId: String) {
         patch("/api/issues/$issueId", StatusRequest("in_progress"))
+    }
+
+    fun listPendingApprovals(companyId: String): List<PaperclipApproval> =
+        json.decodeFromString(get("/api/companies/$companyId/approvals?status=pending"))
+
+    /** Bridge parity: empty-body POST; the board infers the decision from the path. */
+    fun decideApproval(approvalId: String, action: String) {
+        post("/api/approvals/$approvalId/$action", EmptyRequest())
     }
 
     private fun get(path: String): String = exchange(

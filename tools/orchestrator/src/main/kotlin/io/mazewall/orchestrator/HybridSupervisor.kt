@@ -18,6 +18,7 @@ class HybridSupervisor(
     private val router: ComponentRouter,
     private val ciWatch: CiWatch? = null,
     private val resolver: BacklogResolver? = null,
+    private val notifier: EventNotifier? = null,
     private val out: (String) -> Unit = ::println,
     private val err: (String) -> Unit = System.err::println,
     private val sleepMs: (Long) -> Unit = { Thread.sleep(it) },
@@ -28,6 +29,7 @@ class HybridSupervisor(
             .onFailure { err("listIssues failed: ${it.message}"); return 0 }
             .getOrThrow()
         ciWatch?.tick(issues)
+        notifier?.let { n -> runCatching { n.pollApprovals() }.onFailure { err("notifier: ${it.message}") } }
         for (done in issues.filter { it.status == "done" && it.fromMarkdownBacklog }) {
             runCatching { resolver?.resolveIfNeeded(done.identifier ?: done.id, done.description) }
                 .onFailure { err("resolve ${done.identifier}: ${it.message}") }
@@ -118,9 +120,31 @@ fun main(args: Array<String>) {
     val router = ComponentRouter(
         customRoutes = ComponentRouter.parseOverrides(HybridSupervisor.env("PAPERCLIP_COMPONENT_ROUTES")),
     )
-    val ciWatch = CiWatch(PaperclipIssueSignals(client), ProcessGhCheckSource())
     val resolver = BacklogResolver(repoRoot = java.nio.file.Path.of("").toAbsolutePath(), git = ProcessGitRunner)
-    val supervisor = HybridSupervisor(client, router, ciWatch, resolver)
+
+    val tgToken = HybridSupervisor.env("TELEGRAM_BOT_TOKEN")
+    val tgChat = HybridSupervisor.env("TELEGRAM_CHAT_ID")
+    var notifier: EventNotifier? = null
+    var notifyHook: (String) -> Unit = {}
+    if (tgToken != null && tgChat != null) {
+        val bot = TelegramBot(tgToken, tgChat)
+        bot.onPaperclipApproval = { action, approvalId, callbackQueryId, messageId ->
+            val outcome = runCatching { client.decideApproval(approvalId, action) }
+                .map { "Successfully ${action}d" }
+                .getOrElse { "${action} failed: ${it.message}" }
+            bot.answerCallbackWith(callbackQueryId, outcome)
+            messageId?.let { bot.clearReplyMarkup(it) }
+        }
+        notifier = EventNotifier(bot, client, HybridSupervisor.env("PAPERCLIP_COMPANY_ID") ?: client.resolveCompanyId())
+        notifyHook = { text -> bot.sendMessage(text) }
+    }
+
+    val supervisor = HybridSupervisor(
+        client, router,
+        ciWatch = CiWatch(PaperclipIssueSignals(client), ProcessGhCheckSource(), notify = notifyHook),
+        resolver = resolver,
+        notifier = notifier,
+    )
 
     if (dryRun) {
         val companyId = HybridSupervisor.env("PAPERCLIP_COMPANY_ID") ?: client.resolveCompanyId()
