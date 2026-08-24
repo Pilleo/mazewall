@@ -79,7 +79,7 @@ val integrationTest =
         // Worker classpath resolution happens at EXECUTION time (Gradle 9 forbids eager
         // configuration-time resolution), so the producer must be built explicitly or the
         // resolved path is missing worker classes -> ClassNotFoundException in the worker JVM.
-        dependsOn(":portal-worker:classes")
+        dependsOn(":portal-worker:jar")
         jvmArgumentProviders.add(portalWorkerCpArgProvider)
     }
 
@@ -91,7 +91,7 @@ tasks.test {
     useJUnitPlatform()
     jvmArgs("--enable-native-access=ALL-UNNAMED", "-Xmx256m")
     systemProperty("kotest.framework.classpath.scanning.config.disable", "true")
-    dependsOn(":portal-worker:classes")
+    dependsOn(":portal-worker:jar")
     jvmArgumentProviders.add(portalWorkerCpArgProvider)
 }
 

@@ -26,6 +26,8 @@ public class ProcessBroker(
     private val sockets: SocketManager = RealSocketManager,
     private val launcher: ProcessLauncher = RealProcessLauncher,
     private val workerClasspath: String = "",
+    /** Extra -D args for spawned worker JVMs (e.g. injectable idle deadline in tests). */
+    private val workerExtraJvmArgs: List<String> = emptyList(),
 ) : AutoCloseable {
     init {
         require(poolSize >= 1) { "poolSize must be >= 1" }
@@ -191,13 +193,19 @@ public class ProcessBroker(
                 maxHeap = "64m",
                 javaAgents = JavaAgentSelection.None,
                 classpath = resolveWorkerClasspath(),
+                extraJvmArgs = workerExtraJvmArgs,
             )
         val proc = JvmChildProcess.start(launcher, spec)
         val pump =
             JvmChildProcess.startStdoutPump(
                 proc,
                 "MAZEWALL_PORTAL_WORKER_READY",
-                { line -> System.err.println("[PORTAL-WORKER] $line") },
+                { line ->
+                    System.err.println("[PORTAL-WORKER] $line")
+                    runCatching {
+                        java.io.File("/tmp/portalworker_err.log").appendText(line + "\n")
+                    }
+                },
                 "portal-worker-stdout",
             )
         val peer = sockets.accept(listen)

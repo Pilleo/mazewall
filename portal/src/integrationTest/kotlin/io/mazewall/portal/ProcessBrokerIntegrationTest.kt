@@ -141,4 +141,21 @@ class ProcessBrokerIntegrationTest {
         }
     }
 
+
+
+    @Test
+    fun `worker survives multiple idle ticks and still serves calls`() {
+        assumeTrue(System.getProperty("os.name").lowercase().contains("linux"))
+        // Regression for the pooled-worker self-exit bug (011654): a 500ms receive deadline
+        // fires ~3 times during this sleep; the old break-on-timeout loop killed the worker.
+        val broker = ProcessBroker(
+            workerExtraJvmArgs = listOf("-Dio.mazewall.portal.worker.idleTimeoutMs=500"),
+        )
+        broker.use { b ->
+            b.start()
+            Thread.sleep(1_500)
+            assertEquals("after-idle", b.echo("after-idle"))
+            assertEquals(1, b.spawnedWorkers(), "idle ticks must not respawn workers")
+        }
+    }
 }
