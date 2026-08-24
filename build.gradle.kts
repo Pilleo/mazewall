@@ -71,6 +71,13 @@ allprojects {
         // Apply hang-prevention timeouts to every project's Test tasks, not just :test.
         systemProperty("junit.jupiter.execution.timeout.default", "2 m")
         systemProperty("junit.jupiter.execution.timeout.thread.mode.default", "SEPARATE_THREAD")
+        // Bypass NativePRNG's lazily-opened /dev/urandom fd: in the containerized CI the
+        // test JVM can inherit a closed stdio fd, the urandom fd lands on that slot, and
+        // Files.createTempDirectory (@TempDir) dies with "IOException: Bad file descriptor".
+        // With egd set at JVM start, Sun skips NativePRNG registration and SecureRandom
+        // opens its own stream per use. Must live inside allprojects: a root-level
+        // withType<Test>() never reaches :platform:test etc.
+        systemProperty("java.security.egd", "file:/dev/./urandom")
 
         val failedTestsOutputs = ConcurrentHashMap<String, StringBuilder>()
 
@@ -159,11 +166,6 @@ tasks.withType<Test>().configureEach {
     systemProperty("junit.jupiter.execution.timeout.default", "2 m")
     // Run timed tests on a separate thread so JUnit can interrupt hangs and report their stack trace.
     systemProperty("junit.jupiter.execution.timeout.thread.mode.default", "SEPARATE_THREAD")
-    // Bypass NativePRNG's lazily-opened /dev/urandom fd: in the containerized CI the
-    // test JVM can inherit a closed stdio fd, and the urandom fd lands on that slot
-    // ("IOException: Bad file descriptor" inside Files.createTempDirectory -> @TempDir).
-    // The egd property routes SecureRandom through an explicit per-read stream instead.
-    systemProperty("java.security.egd", "file:/dev/./urandom")
 
     testLogging {
         showExceptions = true
