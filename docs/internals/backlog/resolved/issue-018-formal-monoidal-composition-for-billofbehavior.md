@@ -1,7 +1,7 @@
 ---
 title: Formal Monoidal Composition for `BillOfBehavior`
 severity: ENHANCEMENT
-status: open
+status: "resolved"
 priority: low
 dependencies: []
 target_files:

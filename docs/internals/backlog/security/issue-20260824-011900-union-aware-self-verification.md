@@ -10,7 +10,7 @@ target_files:
   - "enforcer/src/main/kotlin/io/mazewall/seccomp/InstallSelfVerifier.kt"
 effort: "large"
 autonomy: "supervised"
-open_questions: false
+open_questions: true
 dependencies:
   - "issue-20260823-172003"
 paperclip_issue_id: 18533426-3694-4d49-aec1-38c2983e3cb1

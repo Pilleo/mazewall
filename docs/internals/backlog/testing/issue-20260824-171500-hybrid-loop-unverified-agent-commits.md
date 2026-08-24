@@ -3,7 +3,7 @@ title: "Vibe agent's commit-gate implementation broke CI entry point; claimed in
 severity: "HIGH"
 status: "open"
 priority: high
-component: "build"
+component: "testing"
 target_modules: [":enforcer"]
 target_files: ["scripts/hooks/pre-commit", "scripts/run_containerized_tests.sh", "scripts/paperclip_backlog_sync.kts"]
 open_questions: false

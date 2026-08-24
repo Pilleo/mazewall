@@ -1,7 +1,7 @@
 ---
 title: "Trace mutation syscalls before certifying USER_NOTIF coverage"
 severity: "HIGH"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "profiler"

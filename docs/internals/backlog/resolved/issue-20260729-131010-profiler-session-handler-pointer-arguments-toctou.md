@@ -1,7 +1,7 @@
 ---
 title: "Eliminate potential TOCTOU on pointer-based argument resolution inside ProfilerSessionHandler"
 severity: "HIGH"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "profiler"

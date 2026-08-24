@@ -7,7 +7,6 @@ component: "ci"
 target_modules:
   - ":portal"
   - ":platform"
-  - "build-logic"
 target_files:
   - "portal/build.gradle.kts"
   - "scripts"
