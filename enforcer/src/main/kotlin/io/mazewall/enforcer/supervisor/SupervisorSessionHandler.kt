@@ -946,7 +946,14 @@ internal class SupervisorSessionHandler(
         return io.mazewall.ffi.memory.SupervisorProcessMemoryReader.readBytes(tid, remoteAddr, len)
     }
 
-    private fun getTgid(tid: Int): Int = ProcFsInspector.getTgid(tid)
+    /**
+     * Resolves a tracee tid to its thread-group leader pid via /proc. Injectable
+     * so tests can supply synthetic tids without touching the live procfs (a
+     * tid like 1234 may be a real unrelated process on busy CI runners).
+     */
+    internal var tgidResolver: (Int) -> Int = ProcFsInspector::getTgid
+
+    private fun getTgid(tid: Int): Int = tgidResolver(tid)
 
     private fun closeTraceeFd(tid: Tid, traceeFd: Int) {
         if (traceeFd < 0) return

@@ -1003,6 +1003,8 @@ class "SupervisorSessionHandler" as io.mazewall.enforcer.supervisor.SupervisorSe
   __
   +NotifResult processNotification(NativeArena, ManagedSegment, ManagedSegment, FileDescriptor<SeccompNotif, ? extends Open>, FileDescriptor<UnixSocket, ? extends Open>)
   +LoopAction handleActiveListener(NativeArena, ManagedSegment, ManagedSegment, ManagedSegment)
+  +Function1<Integer, Integer> getTgidResolver()
+  +void setTgidResolver(Function1<? super Integer, Integer>)
 }
 class "SupervisorSessionHandlerKt" as io.mazewall.enforcer.supervisor.SupervisorSessionHandlerKt {
 }

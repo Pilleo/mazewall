@@ -1473,6 +1473,7 @@ class SupervisorSessionHandlerTest {
                 FileDescriptor.unsafe<FileDescriptorRole.SeccompNotif>(11),
                 engine = mockEngine
             )
+            handler.tgidResolver = { it }
 
             val openFileMethod = SupervisorSessionHandler::class.java.getDeclaredMethods().first {
                 it.name.startsWith("openFileInSupervisor") && !it.name.contains("$") && it.parameterCount == 6
