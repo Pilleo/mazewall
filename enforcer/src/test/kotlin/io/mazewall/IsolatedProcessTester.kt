@@ -27,6 +27,7 @@ object IsolatedProcessTester {
         val command = mutableListOf(
             javaBin,
             "-Xmx128m",
+            "-XX:+UnlockExperimentalVMOptions",
             "-XX:-EnableJVMCI",
             "-XX:-UseJVMCICompiler",
             "-cp",

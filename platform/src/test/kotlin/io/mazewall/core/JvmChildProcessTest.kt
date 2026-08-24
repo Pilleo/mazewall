@@ -25,6 +25,8 @@ class JvmChildProcessTest {
         assertTrue(cmd.contains("-Xmx32m"))
         assertTrue(cmd.contains("-XX:-EnableJVMCI"))
         assertTrue(cmd.contains("-XX:-UseJVMCICompiler"))
+        // Unlock must precede the flags it unlocks (experimental-option validation).
+        assertTrue(cmd.indexOf("-XX:+UnlockExperimentalVMOptions") in 0 until cmd.indexOf("-XX:-EnableJVMCI"))
         assertTrue(cmd.contains("-Dfoo=bar"))
         val cpIndex = cmd.indexOf("-cp")
         assertTrue(cpIndex >= 0)

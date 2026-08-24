@@ -56,6 +56,11 @@ public object JvmChildProcess {
         }
         args.add("-Xmx" + spec.maxHeap.removePrefix("-Xmx"))
         if (spec.disableJvmci) {
+            // UnlockExperimentalVMOptions must precede the flags it unlocks. On
+            // GraalVM-flavored JDKs these are product options and the unlock is a
+            // no-op; on standard OpenJDK builds (Temurin CI image) mentioning
+            // EnableJVMCI without prior unlock aborts JVM startup entirely.
+            args.add("-XX:+UnlockExperimentalVMOptions")
             args.add("-XX:-EnableJVMCI")
             args.add("-XX:-UseJVMCICompiler")
         }

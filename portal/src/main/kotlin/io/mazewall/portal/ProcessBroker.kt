@@ -196,6 +196,16 @@ public class ProcessBroker(
                 extraJvmArgs = workerExtraJvmArgs,
             )
         val proc = JvmChildProcess.start(launcher, spec)
+        // CI diagnosability: a worker that dies before connecting must surface its
+        // exit code immediately instead of leaving accept() blocked until the
+        // test-level timeout. Also echo the command line once per spawn.
+        proc.onExit().thenAccept {
+            if (it.exitValue() != 0) {
+                System.err.println(
+                    "[PORTAL-WORKER-EXIT] code=${it.exitValue()} cmd=${JvmChildProcess.commandLine(spec).joinToString(" ")}",
+                )
+            }
+        }.exceptionally { System.err.println("[PORTAL-WORKER-EXIT] onExit failed: ${it.message}"); null }
         val pump =
             JvmChildProcess.startStdoutPump(
                 proc,
