@@ -67,11 +67,41 @@ fi
 # 3. Run host unit tests to verify no structural/logic breakages
 # Full log kept at /tmp/mazewall-precommit-test.log: intermittent failures have occurred that
 # leave no trace in result XMLs (issue-20260823-172001 watch item) — always capture the run.
-echo "==> Running host unit tests..."
-if ! ./gradlew test -x check --no-configuration-cache > /tmp/mazewall-precommit-test.log 2>&1; then
+
+# Helper function to check if a Gradle module is available in the build
+check_module_available() {
+  local module=$1
+  ./gradlew projects --no-configuration-cache 2>/dev/null | grep -q "^project '$module' "
+}
+
+# Collect modules to test - start with :portal:integrationTest and :portal:test
+TEST_TASKS=("test")
+PORTAL_TASKS=(":portal:integrationTest" ":portal:test")
+
+# Check each portal task's module availability
+SKIPPED_MODULES=()
+for task in "${PORTAL_TASKS[@]}"; do
+  module=$(echo "$task" | cut -d: -f1,2)
+  if check_module_available "$module"; then
+    TEST_TASKS+=("$task")
+  else
+    SKIPPED_MODULES+=("$module")
+  fi
+done
+
+# If portal modules are skipped, warn loudly
+if [ ${#SKIPPED_MODULES[@]} -gt 0 ]; then
+  echo "WARNING: Portal test modules skipped (not available in settings.gradle.kts): ${SKIPPED_MODULES[*]}"
+  echo "         Commit gate proceeding with available modules only."
+  echo "         Ensure all modules are included before merging."
+fi
+
+echo "==> Running host unit tests and portal integration tests..."
+echo "==> Test tasks to run: ${TEST_TASKS[*]}"
+if ! ./gradlew "${TEST_TASKS[@]}" -x check --no-configuration-cache > /tmp/mazewall-precommit-test.log 2>&1; then
   echo "--- Failing tests ---"
   grep -E "FAILED$|FAILED |e: " /tmp/mazewall-precommit-test.log | head -20 || true
-  echo "---------------------"
+  echo "-------------------"
   echo "ERROR: Host unit tests failed. Commit aborted. Full log: /tmp/mazewall-precommit-test.log"
   exit 1
 fi
