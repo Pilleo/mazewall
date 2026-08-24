@@ -1,6 +1,15 @@
+---
+name: loop_driven_development
+description: >
+  Closed-loop Maker → Checker → Triager development for mazewall features and
+  bugfixes. Use when implementing a backlog issue, running TDD, or verifying
+  a change. Trigger on: implement, fix the issue, TDD, LDD, loop-driven,
+  maker checker, write the code, Jules task, Needed steps.
+---
+
 # Skill: Loop-Driven Development (LDD) for mazewall
 
-This skill instructs autonomous agents on how to execute closed-loop development loops (Maker -> Checker -> Triager) when implementing features or bugfixes in `mazewall`.
+This skill instructs autonomous agents on how to execute closed-loop development loops (Maker -> Checker -> Triager) when implementing features or bugfixes in `mazewall`. Jules: the backlog markdown **is** the spec — execute **Needed**, honor **Investigation** / **Side effects**, then this loop.
 
 ---
 

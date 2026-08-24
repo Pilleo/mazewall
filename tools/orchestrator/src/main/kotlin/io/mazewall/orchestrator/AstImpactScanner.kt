@@ -26,6 +26,33 @@ internal val IMPACT_NOISE = setOf(
     "java",
 )
 
+internal fun fileOutlines(repoRoot: File, files: List<String>, maxLinesPerFile: Int = 40): String {
+    return files.take(8).joinToString("\n\n") { path ->
+        val file = File(repoRoot, path)
+        val lines = if (!file.isFile) {
+            listOf("(missing)")
+        } else {
+            file.readLines()
+                .map { it.trimStart() }
+                .filter { t ->
+                    t.startsWith("class ") ||
+                        t.startsWith("object ") ||
+                        t.startsWith("interface ") ||
+                        t.startsWith("enum ") ||
+                        t.startsWith("fun ") ||
+                        t.startsWith("fun interface ")
+                }
+                .map { t ->
+                    val brace = t.indexOf('{')
+                    if (brace >= 0) t.take(brace).trimEnd() else t
+                }
+                .take(maxLinesPerFile)
+                .ifEmpty { listOf("(no class/fun signatures)") }
+        }
+        "### $path (outline)\n" + lines.joinToString("\n")
+    }
+}
+
 internal fun impactSymbols(request: IssueScaffoldRequest, files: List<String>): List<String> {
     val fromFiles = files.map { File(it).nameWithoutExtension.removeSuffix("Test") }
     return (request.symbols + fromFiles)

@@ -1,3 +1,11 @@
+---
+name: spec_driven_development
+description: >
+  Do not use by default. Kiro-style spec folders under .agents/specs/.
+  Use only when the operator explicitly asks for spec-driven / SDD / Kiro.
+  Trigger on: spec-driven, SDD, Kiro spec, write a spec folder.
+---
+
 # Skill: Spec-Driven Development (Kiro-Style)
 
 This skill directs agents to execute Kiro-style **Spec-Driven Development** (SDD) within the `mazewall` codebase.

@@ -40,7 +40,31 @@ Agents must not invent issue filenames. Generate a validator-clean file (UTC `is
 ./scripts/new_backlog_issue.sh --dry-run --title "Docs only" --file AGENTS.md --module :tools:orchestrator --component docs
 ```
 
-`--symbol` walks Kotlin sources for the declaration and `*Test`. A TTY adds `--interactive`. Agents: `--non-interactive`. Planning asks whether the change has side effects (`--side-effects` / `--no-side-effects`, or a prompt). If yes, a compact AST identifier scan (ast-grep via `scripts/sg.sh` when present, otherwise a source walk) lists external callers; weak ACP then writes where and how they may be affected into `## Side effects`. `--clarify` is ACP-only: weak author → verify → side-effect/AST investigation → weak investigation loop (open questions dug in code/docs/web; investigation points and important details are written into the issue) → leftover questions to strong ACP → independent strong final review. Missing or failing agents skip that step and still write the issue.
+`--symbol` walks Kotlin sources for the declaration and `*Test`. A TTY adds `--interactive`. Agents (including Jules, which has no ACP): `--non-interactive`. Every scaffold runs a deterministic AST identifier scan and host-closes factual file/symbol questions so the markdown is usable without `--clarify`. `--clarify` is optional ACP-only: weak author → factual investigate (max 1 round) → leftover factual questions to strong → strong review skipped on the cheap path (no kernel, no core lock, no `has_side_effects`, no remaining factual questions). Missing or failing ACP still writes the file.
+
+Work package (filled by the planner from disk/Codanna, not by hand):
+
+```bash
+./scripts/code_atlas.sh work-package PolicyCompilationCache
+```
+
+```json
+{
+  "edit": ["enforcer/.../PolicyCompilationCache.kt"],
+  "impact": ["other/files/that/call/it.kt"],
+  "test": ["./gradlew :enforcer:test --tests io.mazewall.FooTest"],
+  "exclusive": false,
+  "kernel_tests": false
+}
+```
+
+- **edit** — files to change  
+- **impact** — other files that use them (side effects)  
+- **test** — host unit tests (`*Test` paths)  
+- **exclusive** — touches Syscall/Policy/AGENTS.md/build files (no parallel sibling on those)  
+- **kernel_tests** — Landlock/seccomp/BPF/Syscall/Platform: needs `integrationTest`, not only host `test`  
+
+Requires `codanna` on PATH. The same values are written into issue YAML (`target_files`, `verify_cheap`, `core_lock`, `needs_kernel`) by `IssuePlanner`.
 
 `:tools:orchestrator` is not part of the default Gradle build. Pass `-PincludeOrchestrator=true` (the scaffold script already does) when you need its tasks.
 

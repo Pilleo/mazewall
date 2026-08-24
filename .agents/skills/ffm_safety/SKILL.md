@@ -1,3 +1,11 @@
+---
+name: ffm_safety
+description: >
+  FFM/off-heap memory safety checklist for mazewall (Arena, layouts, errno).
+  Use when changing native layouts, downcalls, or MemorySegment code.
+  Trigger on: FFM, Arena, MemorySegment, ValueLayout, off-heap, JNI, downcall.
+---
+
 # Skill: FFM Safety
 
 This skill provides a rigorous checklist for using the JDK Foreign Function & Memory (FFM) API safely and future-proofly in `mazewall`.

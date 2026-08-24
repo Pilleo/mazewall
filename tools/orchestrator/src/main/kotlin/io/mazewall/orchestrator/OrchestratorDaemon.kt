@@ -18,18 +18,22 @@ class CommandInterpreter(
                 }
                 Unit
             }
+
             is OrchestratorCommand.SendTelegramNotification -> {
                 env.sendNotification(command.message)
                 Unit
             }
+
             is OrchestratorCommand.SendApprovalRequest -> {
                 env.sendApprovalRequest(command.issueId, command.text)
                 Unit
             }
+
             is OrchestratorCommand.RingBell -> {
                 env.ringBell(command.times)
                 Unit
             }
+
             is OrchestratorCommand.CreateGitHubIssue -> {
                 val existingIssueNumber = env.gitHubClient.findExistingIssueNumber(command.issueId)
                 if (existingIssueNumber != null) {
@@ -39,13 +43,18 @@ class CommandInterpreter(
                     env.println("Creating GitHub issue for ${command.issueId}...")
                     val issueTitleForGit = "[${command.issueId}] ${command.title}"
                     val issueFileObj = File(command.file)
-                    val issueBody = if (issueFileObj.exists()) issueFileObj.readText() else ""
+                    val issueBody = if (issueFileObj.exists()) {
+                        IssuePlanner.planFile(issueFileObj, File(".").canonicalFile, write = true)
+                    } else {
+                        ""
+                    }
                     val enhancedBody = OrchestratorPrompts.taskPrompt(issueBody)
                     val newNumber = env.gitHubClient.createIssue(issueTitleForGit, enhancedBody, "jules")
                     env.println("Created GitHub issue #$newNumber")
                     newNumber
                 }
             }
+
             is OrchestratorCommand.WriteGitHubIssueToBacklog -> {
                 val nextIssue = env.parseAllIssues().firstOrNull { it.id == command.issueId }
                 if (nextIssue != null) {
@@ -53,6 +62,7 @@ class CommandInterpreter(
                 }
                 Unit
             }
+
             is OrchestratorCommand.AddLabel -> {
                 try {
                     env.gitHubClient.addLabel(command.issueNumber, command.label)
@@ -61,25 +71,33 @@ class CommandInterpreter(
                 }
                 Unit
             }
+
             is OrchestratorCommand.CommentOnPr -> {
                 env.gitHubClient.commentOnPr(command.prNumber, command.body)
                 Unit
             }
+
             is OrchestratorCommand.SendJulesMessage -> {
                 env.julesClient.sendSessionMessage(command.sessionId, command.message)
                 Unit
             }
+
             is OrchestratorCommand.TriggerJulesSession -> {
                 val nextIssue = env.parseAllIssues().firstOrNull { it.id == command.issueId }
                 if (nextIssue != null) {
                     val issueFileObj = nextIssue.file
-                    val issueBody = if (issueFileObj.exists()) issueFileObj.readText() else ""
+                    val issueBody = if (issueFileObj.exists()) {
+                        IssuePlanner.planFile(issueFileObj, File(".").canonicalFile, write = true)
+                    } else {
+                        ""
+                    }
                     val prompt = OrchestratorPrompts.taskPrompt(issueBody)
                     env.julesClient.triggerSession(env.gitHubClient.getRepoName(), command.issueId, prompt)
                 } else {
                     null
                 }
             }
+
             is OrchestratorCommand.MarkIssueAsResolved -> {
                 val nextIssue = env.parseAllIssues().firstOrNull { it.id == command.issueId }
                 if (nextIssue != null) {
@@ -87,6 +105,7 @@ class CommandInterpreter(
                 }
                 Unit
             }
+
             is OrchestratorCommand.RemoveGithubIssue -> {
                 val nextIssue = env.parseAllIssues().firstOrNull { it.id == command.issueId }
                 if (nextIssue != null) {
@@ -94,14 +113,17 @@ class CommandInterpreter(
                 }
                 Unit
             }
+
             is OrchestratorCommand.DeleteStateFile -> {
                 env.deleteStateFile()
                 Unit
             }
+
             is OrchestratorCommand.GenerateKnowledgeMap -> {
                 env.generateKnowledgeMap()
                 Unit
             }
+
             is OrchestratorCommand.ClearPrCache -> {
                 env.gitHubClient.clearPrCache(command.prNumber)
                 Unit
@@ -232,6 +254,9 @@ class OrchestratorDaemonRunner(
             if (!alreadyActive) {
                 val forcedIssue = allIssues.firstOrNull { it.id.equals(forcedTaskId, ignoreCase = true) }
                 if (forcedIssue != null && forcedIssue.status == "open") {
+                    if (forcedIssue.file.isFile) {
+                        IssuePlanner.planFile(forcedIssue.file, File(".").canonicalFile, write = true)
+                    }
                     env.println("🎯 Forcing specific task: ${forcedIssue.id} - ${forcedIssue.title}")
                     val slot = SlotContext(forcedIssue.id)
                     slot.currentIssueTitle = forcedIssue.title
@@ -254,7 +279,7 @@ class OrchestratorDaemonRunner(
             // Filter out issues that are already active or skipped
             val candidateIssues = allIssues.filter {
                 it.id !in context.skippedIds &&
-                context.activeSlots.none { slot -> slot.currentIssueId == it.id }
+                    context.activeSlots.none { slot -> slot.currentIssueId == it.id }
             }
 
             // Find an unblocked candidate using the DependencyGraph selection logic
@@ -278,8 +303,8 @@ class OrchestratorDaemonRunner(
                         activeIssues.none { active ->
                             val activeIsEmptyAndInterfering = (active.targetFiles.isEmpty() || active.targetModules.isEmpty()) && !active.isNonInterfering()
                             activeIsEmptyAndInterfering ||
-                            issue.targetFiles.any { it in active.targetFiles } ||
-                            issue.targetModules.any { it in active.targetModules }
+                                issue.targetFiles.any { it in active.targetFiles } ||
+                                issue.targetModules.any { it in active.targetModules }
                         }
                     }
                 }
@@ -300,6 +325,14 @@ class OrchestratorDaemonRunner(
                     continue // retry selection
                 }
                 break
+            }
+
+            val repoRoot = File(".").canonicalFile
+            val reviewish = nextIssue.id.contains("review-task") || nextIssue.isNonInterfering()
+            if (!reviewish && !IssuePlanner.ensureDispatchable(nextIssue.file, repoRoot)) {
+                env.println("⏭️ Skipping ${nextIssue.id}: still FILL or unnumbered Needed after plan")
+                context.skippedIds.add(nextIssue.id)
+                continue
             }
 
             env.println("\n🎯 Next prioritized task selected: ${nextIssue.id} - ${nextIssue.title} (Priority: ${nextIssue.priority})")
@@ -412,8 +445,14 @@ private class LoggingOutputStream(
 
     @Synchronized
     override fun close() {
-        try { original.close() } catch (_: Exception) {}
-        try { fileStream.close() } catch (_: Exception) {}
+        try {
+            original.close()
+        } catch (_: Exception) {
+        }
+        try {
+            fileStream.close()
+        } catch (_: Exception) {
+        }
     }
 }
 

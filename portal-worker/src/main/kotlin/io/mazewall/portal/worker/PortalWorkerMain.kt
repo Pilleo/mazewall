@@ -19,6 +19,7 @@ public object PortalWorkerMain {
 
     @JvmStatic
     public fun main(args: Array<String>) {
+        println("[DBG-W-START] args=" + args.joinToString())
         if (args.isEmpty()) {
             System.err.println("Usage: PortalWorkerMain <socket_path>")
             exitProcess(1)
@@ -39,12 +40,17 @@ public object PortalWorkerMain {
         val channel = PortalChannel(connected, sockets)
         // Idle workers must not exit on quiet periods: timeouts are an idle tick (continue),
         // while genuine socket death (ECONNRESET/POLLHUP from a dead broker) still breaks the
-        // loop and lets the worker exit cleanly.
+        // loop and lets the worker exit cleanly. The deadline is injectable so tests can prove
+        // idle-tick survival in milliseconds instead of minutes
+        // (issue-20260824-011654).
+        val idleTimeoutMs = System.getProperty("io.mazewall.portal.worker.idleTimeoutMs")
+            ?.toLongOrNull() ?: 30_000L
+        println("[DBG-W] idleTimeoutMs=$idleTimeoutMs")
         try {
             while (true) {
                 val (frame, fds) =
                     try {
-                        channel.receive()
+                        channel.receive(idleTimeoutMs)
                     } catch (_: io.mazewall.portal.PortalReadTimeoutException) {
                         continue
                     } catch (_: Exception) {

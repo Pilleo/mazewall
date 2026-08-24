@@ -1,11 +1,28 @@
 ---
 name: create_backlog_issue
-description: Standardized protocol for documenting newly discovered backlog issues, bugs, features, architectural gaps, or security/performance/testing findings in mazewall.
+description: >
+  Create a mazewall backlog issue with a valid timestamp id and planned impact.
+  Use when documenting a bug, feature, architectural gap, security finding, or
+  kernel/FFM nuance. Trigger on: new issue, backlog, file a bug, log a finding,
+  create_backlog_issue, new_backlog_issue, write an issue, discovered a bug.
 ---
 
 # Skill: Create Backlog Issue
 
-This skill provides a standardized protocol for documenting a newly discovered backlog issue, bug, feature request, architectural gap, or kernel-level nuance in `mazewall`.
+**Do not hand-name `issue-YYYYMMDD-HHMMSS-*.md`.** Run the scaffold. Jules has no ACP; the script still runs the deterministic planner (AST scan, host-close factual questions, host-fill Context/Needed if still FILL).
+
+```bash
+./scripts/new_backlog_issue.sh \
+  --non-interactive \
+  --title "Cap PolicyCompilationCache growth" \
+  --category code_health \
+  --severity MEDIUM \
+  --priority high \
+  --symbol PolicyCompilationCache \
+  --file enforcer/src/main/kotlin/io/mazewall/PolicyCompilationCache.kt
+```
+
+Then edit Context/Needed only if the host stub is too generic. Do not rename the file. `--clarify` is optional ACP.
 
 ## Protocol
 
@@ -48,7 +65,7 @@ Do **not** invent `issue-YYYYMMDD-HHMMSS-*.md` by hand. Run the scaffold so the 
 
 Then replace the `FILL:` sentences under **Context:** and **Needed:**. Do not rename the file. `--symbol` walks Kotlin sources for the type/function and its `*Test`. `--dry-run` prints markdown without writing.
 
-Humans on a TTY are prompted (open questions, `needs_kernel`, side effects, Context/Needed). Agents must pass `--non-interactive` (or no TTY) plus flags. Optional `--clarify` is ACP-only: weak author → verify → side-effect question → AST identifier scan (not a tree dump) → if side effects, weak investigates where/how → weak investigation loop (code/docs/web) documenting investigation points and important details → leftover questions to strong ACP → independent strong final review (weak applies fixes). `ISSUE_CLARIFY_ACP='agy --acp'`, `ISSUE_CLARIFY_STRONG_ACP` for a separate reviewer. Missing/failing ACP skips that step; the file is still written. `--side-effects` / `--no-side-effects` / `--side-effect TEXT` skip the prompt.
+Humans on a TTY are prompted (open questions, `needs_kernel`, side effects, Context/Needed). Agents must pass `--non-interactive` (or no TTY) plus flags. Jules and any worker **without ACP** still get a valid file: the scaffold always runs a deterministic AST identifier scan and host-closes factual file/symbol questions. `--clarify` is optional ACP-only: weak author → verify → side-effect question → AST identifier scan (not a tree dump) → if side effects, weak investigates where/how → weak investigation loop (code/docs/web) documenting investigation points and important details → leftover questions to strong ACP → independent strong final review (weak applies fixes). `ISSUE_CLARIFY_ACP='agy --acp'`, `ISSUE_CLARIFY_STRONG_ACP` for a separate reviewer. Missing/failing ACP skips that step; the file is still written. `--side-effects` / `--no-side-effects` / `--side-effect TEXT` skip the prompt.
 
 ### 3. Naming & File Placement
 Create a new markdown issue file under the appropriate category subdirectory in `docs/internals/backlog/{category}/`:

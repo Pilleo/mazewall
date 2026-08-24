@@ -535,6 +535,7 @@ class "JvmChildSpec" as io.mazewall.core.JvmChildSpec {
   +JavaAgentSelection getJavaAgents()
   +boolean getEnableNativeAccess()
   +boolean getDisableJvmci()
+  +String getClasspath()
 }
 class "MemoryAddress" as io.mazewall.core.MemoryAddress {
   +long getValue()
@@ -1811,7 +1812,7 @@ class "InstallSelfVerifier" as io.mazewall.seccomp.InstallSelfVerifier {
   +boolean isEnabled()
   +void warmup()
   +void reset()
-  +void verify(BpfProgram<Verified>, Arch)
+  +void verify(BpfProgram<Verified>, Arch, int)
   +List<Pair<Integer, Integer>> deniedProbeNrs(List<? extends BpfInstruction>, Arch, int)
   +boolean isArgInspected(List<? extends BpfInstruction>, int)
 }

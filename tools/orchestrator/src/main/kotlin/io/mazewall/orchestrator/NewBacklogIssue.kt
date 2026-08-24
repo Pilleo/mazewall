@@ -23,22 +23,33 @@ fun main(args: Array<String>) {
         }
         val generator = IssueTemplateGenerator(repoRoot = repoRoot)
         var result = generator.scaffold(request, write = false)
+        val hits = FilesystemImpactScanner(repoRoot).scan(
+            impactSymbols(result.request, result.files),
+            result.files,
+        )
+        val pkg = WorkPackage.fromHits(result.files, result.request.symbols, hits)
+        result = result.copy(
+            request = result.request.copy(needsKernel = result.request.needsKernel || pkg.kernelTests),
+            verifyCheap = pkg.test.ifEmpty { result.verifyCheap },
+            coreLock = result.coreLock || pkg.exclusive,
+        )
+        result = IssueClarifier.enrichWithoutAcp(result, repoRoot, hits)
+        result = IssueClarifier.hostFillPlaceholders(result, hits)
         if (parsed.clarify) {
             val (weak, strong) = ClarifyModels.resolve(repoRoot) { System.getenv(it) }
             val scratch = File(repoRoot, "build/issue-clarify-scratch").apply { mkdirs() }
-            result = IssueClarifier.tryClarify(
-                draft = result,
-                repoRoot = repoRoot,
-                scratchDir = scratch,
-                weak = weak,
-                strong = strong,
-            )
-        } else if (result.request.hasSideEffects == true) {
-            val hits = FilesystemImpactScanner(repoRoot).scan(
-                impactSymbols(result.request, result.files),
-                result.files,
-            )
-            result = IssueClarifier.withImpactHits(result, hits)
+            try {
+                result = IssueClarifier.tryClarify(
+                    draft = result,
+                    repoRoot = repoRoot,
+                    scratchDir = scratch,
+                    weak = weak,
+                    strong = strong,
+                )
+            } finally {
+                (weak as? AutoCloseable)?.close()
+                (strong as? AutoCloseable)?.close()
+            }
         }
         if (parsed.dryRun) {
             print(result.markdown)
@@ -94,13 +105,11 @@ Options:
   --side-effect TEXT          (repeatable; known impact line; implies --side-effects)
   --interactive               prompt for open questions / kernel / side effects / context
   --non-interactive           never prompt (default for agents / non-TTY)
-  --clarify                   ACP loop (never aborts the file):
-                              weak author → verify → ask/record side effects →
-                              AST identifier scan → weak impact investigation if yes →
-                              weak investigate open questions (code/docs/web) →
-                              leftover questions to strong → independent strong
-                              final review (weak applies fixes).
-                              ISSUE_CLARIFY_ACP='agy --acp'
+  --clarify                   optional ACP loop (never aborts the file).
+                              Without ACP (Jules): scan + host-close factuals still run.
+                              With ACP: weak author → factual investigate (1 round) →
+                              leftover factuals to strong → strong review unless cheap.
+                              ISSUE_CLARIFY_ACP='vibe-acp'
                               ISSUE_CLARIFY_STRONG_ACP='...' for a separate reviewer
   --dry-run                   print markdown, do not write
   --root DIR                  repository root (default: cwd)

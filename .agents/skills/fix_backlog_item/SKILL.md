@@ -1,8 +1,10 @@
 ---
 name: fix_backlog_item
 description: >
-  A structured, TDD-focused protocol and safety checklist for fixing backlog items
-  and resolving bug/test failures safely without introducing dirty hacks, warmups, or silent bypasses.
+  TDD protocol for fixing a mazewall backlog item without warmups, swallowed
+  EPERM, or test-only hacks. Use when implementing an open issue, applying
+  Needed steps, or fixing a failing test. Trigger on: fix backlog, implement
+  this issue, Jules, resolve issue, bugfix, failing test, Needed.
 ---
 
 # Skill: Fix Backlog Item & Safety Protocol

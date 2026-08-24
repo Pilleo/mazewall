@@ -1,6 +1,7 @@
 package io.mazewall.orchestrator
 
 object PathModules {
+    /** Single source of truth for work-package `core_lock_hit` and scheduler CORE locks. */
     val CORE_LOCK_SUFFIXES = listOf(
         "/Syscall.kt",
         "/Arch.kt",

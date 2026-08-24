@@ -31,6 +31,21 @@ class JvmChildProcessTest {
         assertEquals("io.mazewall.ExampleMain", cmd[cpIndex + 2])
         assertEquals("/tmp/sock", cmd.last())
         assertFalse(cmd.any { it.startsWith("-javaagent:") })
+        assertEquals(System.getProperty("java.class.path"), cmd[cpIndex + 1])
+    }
+
+    @Test
+    fun `commandLine uses curated classpath when provided`() {
+        val spec =
+            JvmChildSpec(
+                mainClass = "io.mazewall.ExampleMain",
+                javaAgents = JavaAgentSelection.None,
+                classpath = "/tmp/portal-worker.jar:/tmp/portal.jar",
+            )
+        val cmd = JvmChildProcess.commandLine(spec)
+        val cpIndex = cmd.indexOf("-cp")
+        assertEquals("/tmp/portal-worker.jar:/tmp/portal.jar", cmd[cpIndex + 1])
+        assertFalse(cmd[cpIndex + 1] == System.getProperty("java.class.path"))
     }
 
     @Test

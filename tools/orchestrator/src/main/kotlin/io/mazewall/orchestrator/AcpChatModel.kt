@@ -20,27 +20,68 @@ class AcpChatModel(
     private val processFactory: (List<String>) -> Process = { cmd ->
         ProcessBuilder(cmd).directory(workingDirectory).redirectErrorStream(false).start()
     },
-) : ChatModel {
+) : ChatModel, AutoCloseable {
+    private val lock = Any()
+    private var process: Process? = null
+    private var session: AcpJsonRpcSession? = null
+    private var sessionId: String? = null
+
     override fun complete(system: String, user: String): String {
-        val process = processFactory(command)
-        val future = java.util.concurrent.CompletableFuture.supplyAsync {
-            val writer = BufferedWriter(OutputStreamWriter(process.outputStream, StandardCharsets.UTF_8))
-            val reader = BufferedReader(InputStreamReader(process.inputStream, StandardCharsets.UTF_8))
-            val session = AcpJsonRpcSession(writer, reader, workingDirectory)
-            session.initialize()
-            val sessionId = session.newSession()
-            session.prompt(sessionId, "$system\n\n$user")
+        synchronized(lock) {
+            val sess = ensureSession()
+            val id = sessionId ?: error("ACP session missing sessionId")
+            val future = java.util.concurrent.CompletableFuture.supplyAsync {
+                sess.prompt(id, "$system\n\n$user")
+            }
+            return try {
+                future.get(timeoutMs, TimeUnit.MILLISECONDS)
+            } catch (e: java.util.concurrent.TimeoutException) {
+                closeQuietly()
+                throw IllegalStateException("ACP clarify timed out after ${timeoutMs}ms")
+            } catch (e: java.util.concurrent.ExecutionException) {
+                throw IllegalStateException(e.cause?.message ?: e.message, e.cause)
+            }
         }
-        return try {
+    }
+
+    override fun close() {
+        synchronized(lock) { closeQuietly() }
+    }
+
+    private fun ensureSession(): AcpJsonRpcSession {
+        val existing = session
+        val proc = process
+        if (existing != null && proc != null && proc.isAlive) return existing
+        closeQuietly()
+        val started = processFactory(command)
+        process = started
+        val writer = BufferedWriter(OutputStreamWriter(started.outputStream, StandardCharsets.UTF_8))
+        val reader = BufferedReader(InputStreamReader(started.inputStream, StandardCharsets.UTF_8))
+        val created = AcpJsonRpcSession(writer, reader, workingDirectory)
+        val future = java.util.concurrent.CompletableFuture.supplyAsync {
+            created.initialize()
+            created.newSession()
+        }
+        val id = try {
             future.get(timeoutMs, TimeUnit.MILLISECONDS)
         } catch (e: java.util.concurrent.TimeoutException) {
+            closeQuietly()
             throw IllegalStateException("ACP clarify timed out after ${timeoutMs}ms")
         } catch (e: java.util.concurrent.ExecutionException) {
+            closeQuietly()
             throw IllegalStateException(e.cause?.message ?: e.message, e.cause)
-        } finally {
-            process.destroyForcibly()
-            process.waitFor(2, TimeUnit.SECONDS)
         }
+        session = created
+        sessionId = id
+        return created
+    }
+
+    private fun closeQuietly() {
+        process?.destroyForcibly()
+        process?.waitFor(2, TimeUnit.SECONDS)
+        process = null
+        session = null
+        sessionId = null
     }
 
     companion object {
@@ -69,7 +110,22 @@ internal class AcpJsonRpcSession(
         val result = waitForResult(id)
         val sessionId = parseJsonStringField(result, "sessionId")
         require(sessionId.isNotBlank()) { "session/new returned no sessionId: $result" }
+        if (result.contains("\"id\":\"plan\"") || result.contains("\"id\": \"plan\"")) {
+            try {
+                setMode(sessionId, "plan")
+            } catch (_: Exception) {
+                // Mode is optional; vibe-acp advertises it, other agents may not.
+            }
+        }
         return sessionId
+    }
+
+    fun setMode(sessionId: String, modeId: String) {
+        val id = request(
+            "session/set_mode",
+            """{"sessionId":${jsonString(sessionId)},"modeId":${jsonString(modeId)}}""",
+        )
+        waitForResult(id)
     }
 
     fun prompt(sessionId: String, text: String): String {

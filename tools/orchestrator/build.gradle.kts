@@ -56,6 +56,19 @@ val newBacklogIssue by tasks.registering(JavaExec::class) {
     }
 }
 
+val workPackage by tasks.registering(JavaExec::class) {
+    group = "documentation"
+    description = "Emit work-package impact JSON (Codanna + CORE lock set)"
+    dependsOn(tasks.compileKotlin)
+    classpath = sourceSets.main.get().runtimeClasspath
+    mainClass.set("io.mazewall.orchestrator.WorkPackageKt")
+    workingDir = rootProject.projectDir
+    val argsFile = project.findProperty("workPackageArgsFile") as String?
+    if (!argsFile.isNullOrBlank()) {
+        args(file(argsFile).readLines().filter { it.isNotEmpty() })
+    }
+}
+
 val checkBacklog by tasks.registering(JavaExec::class) {
     group = "verification"
     description = "Validates backlog issue YAML frontmatters, required fields, and dependency references"

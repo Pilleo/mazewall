@@ -27,6 +27,12 @@ public data class JvmChildSpec(
     val javaAgents: JavaAgentSelection = JavaAgentSelection.All,
     val enableNativeAccess: Boolean = true,
     val disableJvmci: Boolean = true,
+    /**
+     * Child `-cp`. `null` copies this JVM's `java.class.path` (daemons).
+     * Portal workers must pass a curated classpath so guest classes are not
+     * taken from the broker runtime.
+     */
+    val classpath: String? = null,
 )
 
 @MazewallInternal
@@ -42,7 +48,7 @@ public data class ChildStdoutPump(
 public object JvmChildProcess {
     public fun commandLine(spec: JvmChildSpec): List<String> {
         val javaBin = System.getProperty("java.home") + "/bin/java"
-        val classpath = System.getProperty("java.class.path")
+        val classpath = spec.classpath ?: System.getProperty("java.class.path")
         val args = mutableListOf<String>()
         args.add(javaBin)
         if (spec.enableNativeAccess) {

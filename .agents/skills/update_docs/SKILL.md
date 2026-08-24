@@ -1,3 +1,11 @@
+---
+name: update_docs
+description: >
+  Keep mazewall design docs in sync after code changes. Use when a behavior,
+  threat model, or API change needs a docs update. Trigger on: update docs,
+  design doc drift, documentation, KDoc, containment-design.
+---
+
 # Skill: Update Documentation
 
 ## Protocol
