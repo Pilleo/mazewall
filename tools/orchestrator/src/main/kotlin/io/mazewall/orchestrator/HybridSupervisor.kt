@@ -16,12 +16,17 @@ import kotlin.system.exitProcess
 class HybridSupervisor(
     private val client: PaperclipClient,
     private val router: ComponentRouter,
+    private val ciWatch: CiWatch? = null,
     private val out: (String) -> Unit = ::println,
     private val err: (String) -> Unit = System.err::println,
     private val sleepMs: (Long) -> Unit = { Thread.sleep(it) },
 ) {
     fun tick(maxDispatch: Int): Int {
         // External failures degrade to a skipped tick, never a crash (orchestrator rule 4).
+        val issues = runCatching { client.listIssues(companyId) }
+            .onFailure { err("listIssues failed: ${it.message}"); return 0 }
+            .getOrThrow()
+        ciWatch?.tick(issues)
         val agents = runCatching { client.listAgents(companyId) }
             .onFailure { err("listAgents failed: ${it.message}"); return 0 }
             .getOrThrow()
@@ -31,10 +36,10 @@ class HybridSupervisor(
         var dispatched = 0
         while (dispatched < maxDispatch) {
             // Re-select after each assignment: the board changed under us.
-            val issues = runCatching { client.listIssues(companyId) }
+            val fresh = runCatching { client.listIssues(companyId) }
                 .onFailure { err("listIssues failed mid-tick: ${it.message}"); return dispatched }
                 .getOrThrow()
-            val candidate = DispatchSelector.select(issues) ?: break
+            val candidate = DispatchSelector.select(fresh) ?: break
 
             val component = router.componentOf(candidate.description)
             val urlKey = router.urlKeyFor(component)
@@ -108,7 +113,8 @@ fun main(args: Array<String>) {
     val router = ComponentRouter(
         customRoutes = ComponentRouter.parseOverrides(HybridSupervisor.env("PAPERCLIP_COMPONENT_ROUTES")),
     )
-    val supervisor = HybridSupervisor(client, router)
+    val ciWatch = CiWatch(PaperclipIssueSignals(client), ProcessGhCheckSource())
+    val supervisor = HybridSupervisor(client, router, ciWatch)
 
     if (dryRun) {
         val companyId = HybridSupervisor.env("PAPERCLIP_COMPANY_ID") ?: client.resolveCompanyId()

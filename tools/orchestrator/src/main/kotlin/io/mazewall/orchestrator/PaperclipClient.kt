@@ -110,14 +110,17 @@ class PaperclipClient(
     fun listComments(issueId: String): List<PaperclipComment> =
         json.decodeFromString(get("/api/issues/$issueId/comments"))
 
-    fun comment(issueId: String, body: String) =
+    fun comment(issueId: String, body: String) {
         post("/api/issues/$issueId/comments", CommentRequest(body))
+    }
 
-    fun assignAgent(issueId: String, agentId: String) =
+    fun assignAgent(issueId: String, agentId: String) {
         patch("/api/issues/$issueId", AssignRequest(agentId))
+    }
 
-    fun startProgress(issueId: String) =
+    fun startProgress(issueId: String) {
         patch("/api/issues/$issueId", StatusRequest("in_progress"))
+    }
 
     private fun get(path: String): String = exchange(
         HttpRequest.newBuilder().uri(URI.create("$baseUrl$path")).GET().build(),
