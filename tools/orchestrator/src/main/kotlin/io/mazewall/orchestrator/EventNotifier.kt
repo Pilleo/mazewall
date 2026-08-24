@@ -25,6 +25,11 @@ class EventNotifier(
 
     private var approvalWatermark: String? = props.getProperty(WATERMARK_KEY)
 
+    // Approvals without a parseable createdAt cannot ride the watermark; they are
+    // deduplicated in-process only. A restart may re-announce one - acceptable
+    // versus permanently silencing it (fail-loud over fail-silent).
+    private val announcedWithoutTimestamp = HashSet<String>()
+
     /** Polls pending approvals; sends a card for each newer than the watermark. */
     fun pollApprovals() {
         val pending = runCatching { client.listPendingApprovals(companyId) }
@@ -34,8 +39,11 @@ class EventNotifier(
         val watermark = approvalWatermark
         val fresh = pending.filter { approval ->
             val ts = approval.createdAt
-            (ts == null && watermark == null) ||
-                (ts != null && (watermark == null || ts > watermark))
+            when {
+                ts == null -> approval.id !in announcedWithoutTimestamp
+                watermark == null || ts > watermark -> true
+                else -> false
+            }
         }
         var lastDeliveredWatermark: String? = null
         // Ordered oldest-first; the watermark may only advance past approvals whose
@@ -52,7 +60,13 @@ class EventNotifier(
                 System.err.println("notifier: Telegram delivery failed; watermark not advanced")
                 break
             }
-            lastDeliveredWatermark = approval.createdAt ?: lastDeliveredWatermark
+            if (approval.createdAt == null) {
+                // No watermark coverage: remember in-process so later ticks in this
+                // run do not re-announce. Marked only after successful delivery.
+                announcedWithoutTimestamp.add(approval.id)
+            } else {
+                lastDeliveredWatermark = approval.createdAt
+            }
         }
         lastDeliveredWatermark?.let { newWatermark ->
             val watermark = approvalWatermark

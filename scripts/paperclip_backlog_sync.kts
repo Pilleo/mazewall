@@ -279,6 +279,27 @@ object DependencyGraph {
 }
 
 
+
+// Shared by create and --force maintenance: the board description is the sole
+// linkage+instruction carrier (API drops metadata), so any PATCH must carry the
+// FULL rebuilt body - never the marker alone.
+private fun buildBoardDescription(issue: BacklogIssue): String {
+    val relPath = issue.file.relativeToOrNull(File(".").absoluteFile)
+        ?.invariantSeparatorsPath ?: issue.file.invariantSeparatorsPath
+    return buildString {
+        append("<!-- mazewall:backlog-file=$relPath -->\n")
+        append("**Backlog file:** `$relPath`\n\n---\n\n")
+        if (!issue.context.isNullOrBlank()) {
+            append("**Context:**\n${issue.context}\n\n")
+        }
+        if (!issue.needed.isNullOrBlank()) {
+            append("**Needed:**\n${issue.needed}\n\n")
+        }
+        if (!issue.severity.isNullOrBlank()) append("**Severity:** ${issue.severity}\n")
+        if (!issue.component.isNullOrBlank()) append("**Component:** ${issue.component}\n")
+    }
+}
+
 // ============================================================================
 // HTTP + JSON helpers (no external dependencies; standalone kts)
 // ============================================================================
@@ -477,22 +498,7 @@ fun main(args: Array<String>) {
                 continue
             }
 
-            // Repo-relative when possible (marker consumed by the bridge); fall back
-            // to absolute for sandboxed/out-of-tree backlog dirs.
-            val relPath = issue.file.relativeToOrNull(File(".").absoluteFile)
-                ?.invariantSeparatorsPath ?: issue.file.invariantSeparatorsPath
-            val description = buildString {
-                append("<!-- mazewall:backlog-file=$relPath -->\n")
-                append("**Backlog file:** `$relPath`\n\n---\n\n")
-                if (!issue.context.isNullOrBlank()) {
-                    append("**Context:**\n${issue.context}\n\n")
-                }
-                if (!issue.needed.isNullOrBlank()) {
-                    append("**Needed:**\n${issue.needed}\n\n")
-                }
-                if (!issue.severity.isNullOrBlank()) append("**Severity:** ${issue.severity}\n")
-                if (!issue.component.isNullOrBlank()) append("**Component:** ${issue.component}\n")
-            }
+            val description = buildBoardDescription(issue)
 
             val payload = buildString {
                 append("{\"title\":\"${jsonEscape(issue.title)}\",")
@@ -535,11 +541,15 @@ fun main(args: Array<String>) {
         if (forceFlag && !dryRunFlag) {
             for (issue in backlogIssues) {
                 val pcId = paperclipIdByBacklogId[issue.id] ?: continue
-                val res = httpRequest(
-                    "PATCH", "$apiUrl/api/issues/$pcId", apiKey,
-                    "{\"description\":\"${jsonEscape("<!-- mazewall:backlog-file=" +
-                            issue.file.invariantSeparatorsPath + " -->")}\"}"
-                )
+                // Rebuild the complete body: marker + Context/Needed/Severity/Component,
+                // plus title/priority drift. A marker-only PATCH would erase the
+                // instructions and break component routing.
+                val payload = buildString {
+                    append("{\"title\":\"${jsonEscape(issue.title)}\",")
+                    append("\"description\":\"${jsonEscape(buildBoardDescription(issue))}\",")
+                    append("\"priority\":\"${issue.priority.name.lowercase()}\"}")
+                }
+                val res = httpRequest("PATCH", "$apiUrl/api/issues/$pcId", apiKey, payload)
                 println("[FORCE] PATCH ${issue.id} -> HTTP ${res.status}")
             }
         }

@@ -37,6 +37,12 @@ public object PortalWorkerMain {
         )
         println(READY)
         System.out.flush()
+        // Generated service dispatchers must be registered before the first request
+        // can arrive; entries come from -Dio.mazewall.portal.worker.dispatchers.
+        val registered = PortalDispatcherRegistry.bootstrapFromProperty(
+            System.getProperty("io.mazewall.portal.worker.dispatchers"),
+        )
+        if (registered > 0) println("[DBG-W] registered=$registered generated dispatcher(s)")
         val channel = PortalChannel(connected, sockets)
         // Idle workers must not exit on quiet periods: timeouts are an idle tick (continue),
         // while genuine socket death (ECONNRESET/POLLHUP from a dead broker) still breaks the
@@ -63,6 +69,21 @@ public object PortalWorkerMain {
                 try {
                     val result = PortalBuiltinDispatch.handle(frame.methodId, frame.payload, fds)
                     channel.send(PortalFrame(PortalKind.RESPONSE, frame.requestId, frame.methodId, result, 0))
+                } catch (e: IllegalArgumentException) {
+                    // Only the builtin "unknown method" signal falls through to the
+                    // generated dispatchers; real builtin failures stay errors.
+                    if (e.message?.startsWith("unknown method") != true) throw e
+                    val generated = PortalDispatcherRegistry.dispatchOrNull(
+                        frame.methodId,
+                        frame.payload,
+                        fds,
+                    )
+                    if (generated != null) {
+                        channel.send(PortalFrame(PortalKind.RESPONSE, frame.requestId, frame.methodId, generated, 0))
+                    } else {
+                        val msg = (e.message ?: e::class.java.simpleName).toByteArray(StandardCharsets.UTF_8)
+                        channel.send(PortalFrame(PortalKind.ERROR, frame.requestId, frame.methodId, msg, 0))
+                    }
                 } catch (e: Exception) {
                     val msg = (e.message ?: e::class.java.simpleName).toByteArray(StandardCharsets.UTF_8)
                     channel.send(PortalFrame(PortalKind.ERROR, frame.requestId, frame.methodId, msg, 0))

@@ -28,6 +28,18 @@ class PortalStubGeneratorTest {
     }
 
     @Test
+    fun `dispatcher exposes METHOD_IDS for worker registry bootstrap`() {
+        val files = PortalStubGenerator.generate(SampleGreeter::class.java)
+        val dispatcher = files.single { it.name == "SampleGreeterPortalDispatcher" }.toString()
+        assertTrue(dispatcher.contains("val METHOD_IDS: IntArray"), "registry bootstrap needs METHOD_IDS")
+        // Ids must stay outside the builtin range (PortalMethods 1..4).
+        val ids = Regex("intArrayOf\\(([^)]*)\\)").find(dispatcher)!!.groupValues[1]
+            .split(",").map { it.trim().toInt() }
+        assertTrue(ids.isNotEmpty())
+        assertTrue(ids.all { it >= 1000 }, "generated ids must not collide with builtins: $ids")
+    }
+
+    @Test
     fun `record components are allowed`() {
         val files = PortalStubGenerator.generate(SampleGeom::class.java)
         val stub = files.single { it.name == "SampleGeomPortalStub" }.toString()

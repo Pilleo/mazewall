@@ -192,10 +192,20 @@ public object PortalStubGenerator {
         }
         handle.addStatement("else -> error(%P)", "unknown portal method \$methodId")
         handle.endControlFlow()
+        val idsProperty =
+            PropertySpec
+                .builder(
+                    "METHOD_IDS",
+                    IntArray::class,
+                    KModifier.PUBLIC,
+                )
+                .initializer("intArrayOf(${ids.values.joinToString(", ")})")
+                .build()
         val type =
             TypeSpec
                 .objectBuilder(name)
                 .addModifiers(KModifier.PUBLIC)
+                .addProperty(idsProperty)
                 .addFunction(handle.build())
                 .build()
         return FileSpec.builder(pkg, name).addType(type).build()
