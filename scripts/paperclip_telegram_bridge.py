@@ -68,7 +68,25 @@ class TelegramBridge:
 
         metadata = issue.get("metadata", {}) or {}
         backlog_file = metadata.get("backlogFile")
-        
+
+        if not backlog_file:
+            # Paperclip drops `metadata` on POST/PATCH, so ingested issues carry
+            # their linkage in a description marker instead (see
+            # paperclip_backlog_sync.kts). This fallback is the primary path for
+            # markdown-backlog issues, not just a convenience.
+            m = re.search(r"mazewall:backlog-file=(\S+)", issue.get("description") or "")
+            if m:
+                backlog_file = m.group(1)
+
+        # A marker recorded relative to a different working tree (e.g. an agent
+        # pushed from a sandbox dir) can escape this repository. Re-anchor by
+        # basename inside the real backlog tree; never move files from outside.
+        if backlog_file and (not os.path.isfile(backlog_file) or
+                             os.path.relpath(os.path.realpath(backlog_file)).startswith("..")):
+            candidates = glob.glob(
+                f"docs/internals/backlog/**/{os.path.basename(backlog_file)}", recursive=True)
+            backlog_file = candidates[0] if candidates else None
+
         if not backlog_file:
             backlog_id = metadata.get("backlog_id")
             if backlog_id:
@@ -103,17 +121,20 @@ class TelegramBridge:
             
             # 4. Runs git pull --rebase, stages, and commits
             # 5. On merge conflict, aborts rebase and alerts Telegram.
-            subprocess.run(["git", "pull", "--rebase"], cwd=".", check=False)
-            
+            subprocess.run(["git", "pull", "--rebase", "--autostash"], cwd=".", check=False)
+
             git_status = subprocess.run(["git", "status", "--porcelain"], capture_output=True, text=True)
             if "UU" in git_status.stdout:
                 subprocess.run(["git", "rebase", "--abort"], cwd=".", check=False)
                 await self.send_message(f"🚨 <b>Merge Conflict!</b>\n\nFailed to sync Resolution lifecycle for {identifier}. Rebase aborted. Please reconcile manually.")
 
-                
+
                 return
-                
-            subprocess.run(["git", "add", backlog_file, dest], cwd=".", check=False)
+
+            # Stage the whole backlog tree: the source path no longer exists
+            # after the move, so `git add <old-path>` would fail with a
+            # pathspec error and silently stage nothing.
+            subprocess.run(["git", "add", "-A", resolved_dir], cwd=".", check=False)
             subprocess.run(["git", "commit", "-m", f"Resolve {identifier}"], cwd=".", check=False)
             logger.info(f"Successfully synced git lifecycle for {identifier}")
             
@@ -267,8 +288,26 @@ class TelegramBridge:
                 logger.error(f"Activity stream unhandled error: {e}")
                 await asyncio.sleep(5)
 
+    async def resolve_company_id(self):
+        # Same contract as paperclip_backlog_sync.kts / run_paperclip_loop.sh:
+        # explicit env wins, else auto-detect from the API.
+        import httpx as _httpx
+        async with _httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(
+                f"{self.api_url}/api/companies",
+                headers={"Authorization": f"Bearer {self.api_key}"},
+            )
+            resp.raise_for_status()
+            companies = resp.json()
+            if not companies:
+                raise RuntimeError("No Paperclip company found for bridge auto-detect")
+            self.company_id = companies[0]["id"]
+            logger.info(f"Auto-detected company id {self.company_id}")
+
     async def run(self):
         logger.info("Starting Paperclip Telegram Bridge...")
+        if not self.company_id:
+            await self.resolve_company_id()
         await asyncio.gather(
             self.poll_telegram(),
             self.stream_paperclip_activity()

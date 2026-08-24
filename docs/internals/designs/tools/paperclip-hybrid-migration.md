@@ -68,15 +68,27 @@ Company id for `mazewall`: `8f4ef932-d769-43b2-981a-d273ed715162`
 
 | Phase (plan.md) | State | Evidence |
 |---|---|---|
-| 1. Backlog ingest | **Real, this week** | `paperclip_backlog_sync.kts` POSTs issues + `blockedByIssueIds` in topo order, writes `paperclip_issue_id:` back into frontmatter, idempotent (second run = 0 creates). Live proof: MAZ-36 |
-| 2. Telegram bridge | **Implemented**, not running as daemon | SSE `/activity` + approval buttons + `/api/approvals/:id/:action` callbacks in `scripts/paperclip_telegram_bridge.py`; needs bot token + a supervisor unit |
-| 3. Resolution/git sync | **Implemented inside bridge** | `sync_git_lifecycle()` — frontmatter flip, move to `resolved/`, rebase+commit, conflict alert. Fallback for missing `metadata` reads `mazewall:backlog-file=` marker from description (Paperclip API does **not** persist `metadata`) |
-| Dispatch trigger | Discovered | Assignment alone does NOT dispatch; `status → in_progress` does. Runs appear under `GET /api/issues/:id/runs` with `invocationSource` |
-| Multi-model routing (Phase 4) | Manual | Roster exists (`GET /api/companies/:id/agents`); route by setting `assigneeAgentId` per issue — automate later from `component` frontmatter |
+| 1. Backlog ingest | **Real, live-verified** | `paperclip_backlog_sync.kts`: POST with `blockedByIssueIds` in topo order, idempotent via `paperclip_issue_id:` frontmatter write-back (second run = 0 creates), `--force` PATCH maintenance, description marker for bridge resolution fallback, company-id auto-detect. Full batch: 80 issues ingested 2026-08-24 |
+| 2. Telegram bridge | **Implemented + event-shape verified** | `sync_git_lifecycle()` resolution proven end-to-end live (probe issue → done → frontmatter flip → move to `resolved/` → git commit). Event handlers validated against the real `/activity` feed (`issue.updated` w/ `details.status`, `environment.lease_released`+failure). Company auto-detect added; marker-based file lookup with out-of-repo re-anchor. Telegram delivery itself still needs bot tokens to observe live |
+| 3. Resolution/git sync | **Migrated from orchestrator RESOLVE_TASK** | Orchestrator's local resolution state is retired for hybrid-loop issues; bridge commits directly (verified commit "Resolve …" by bridge) |
+| Dispatch trigger | Verified | Assignment alone does NOT dispatch; `status → in_progress` does. Runs appear under `GET /api/issues/:id/runs` with `invocationSource` |
+| Jules worker config | **Fixed & live** | Agent needed `adapterConfig.repository` + `baseBranch` and the API-key secret bound at `env.JULES_API_KEY` (both `adapterConfig.env` and `runtimeConfig.env`). Dispatch now reaches the Jules API; sessions park at plan-approval (`planApprovalPolicy: required`) with `scheduled_retry` polling — approvals flow through bridge/board UI |
+| Multi-model routing (Phase 4) | **Implemented** | plan.md routing table lives in `run_paperclip_loop.sh` (`agent_for_component`): enforcer/kernel/portal→antigravity, profiler/platform→grok impl-dev, docs/spec→founding engineer, default→jules. Resolved against live roster per tick |
 
 Known API quirks (do not rediscover): `metadata` is dropped on POST/PATCH — linkage must ride
 in the description marker `<!-- mazewall:backlog-file=… -->`; DELETE `/api/issues/:id` works;
-`--tests` filters that match nothing silently no-op on Gradle 9.
+`--tests` filters that match nothing silently no-op on Gradle 9; agent PATCH endpoint is
+`/api/agents/:id` (not under `/api/companies/:id`).
+
+### Orchestrator retirement state
+
+| Orchestrator piece | Verdict after verification |
+|---|---|
+| SELECT_TASK / slots / exclusivity | **Retired** — board owns scheduling (`backlog` + `blockedBy`) |
+| AWAIT_START_APPROVAL | Board approvals + bridge (Telegram pending tokens) |
+| AWAIT_JULES_START / AWAIT_PR_CREATION | jules adapter native |
+| CI_RUNNING watch, @jules review protocol, rebase/merge machinery | **Still orchestrator-unique** — no Paperclip equivalent; candidate for gh-aw later |
+| RESOLVE_TASK | **Retired** — bridge `sync_git_lifecycle()` verified live |
 
 ## 3. Migration mapping: orchestrator → hybrid
 
