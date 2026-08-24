@@ -159,6 +159,11 @@ tasks.withType<Test>().configureEach {
     systemProperty("junit.jupiter.execution.timeout.default", "2 m")
     // Run timed tests on a separate thread so JUnit can interrupt hangs and report their stack trace.
     systemProperty("junit.jupiter.execution.timeout.thread.mode.default", "SEPARATE_THREAD")
+    // Bypass NativePRNG's lazily-opened /dev/urandom fd: in the containerized CI the
+    // test JVM can inherit a closed stdio fd, and the urandom fd lands on that slot
+    // ("IOException: Bad file descriptor" inside Files.createTempDirectory -> @TempDir).
+    // The egd property routes SecureRandom through an explicit per-read stream instead.
+    systemProperty("java.security.egd", "file:/dev/./urandom")
 
     testLogging {
         showExceptions = true
