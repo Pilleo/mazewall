@@ -1,8 +1,55 @@
 # Paperclip Hybrid Loop — Operator Guide & Migration Path
 
-> Status (2026-08-24): **Loop verified end-to-end live** on MAZ-36 (ingest → assign →
-> auto-dispatch → agent run). This document answers: how to trigger the loop, what is
-> implemented, what stays unique in `tools/orchestrator`, and which tools help.
+> Status (2026-08-24, evening): **All loop logic is Kotlin** (`HybridSupervisor` in
+> `:tools:orchestrator`). The Python bridge is retired; `run_paperclip_loop.sh` is a
+> thin serialized launcher over ingest + supervisor tick.
+
+## 1. How to trigger the loop today
+
+```bash
+# One command = ingest + dispatch tick (routed by component, default worker Jules):
+./scripts/run_paperclip_loop.sh              # --dry-run previews without side effects
+
+# Long-running form (dispatch + CI watch + resolution + Telegram doorbell):
+PAPERCLIP_TICK_SECONDS=60 ./gradlew :tools:orchestrator:supervisor -PincludeOrchestrator=true --daemon
+
+# Supervisor knobs (env): PAPERCLIP_API_KEY/API_URL/COMPANY_ID,
+#   PAPERCLIP_AGENT_ADAPTER (default jules), PAPERCLIP_COMPONENT_ROUTES (comp=urlKey,…),
+#   PAPERCLIP_MAX_DISPATCH (default 1), PAPERCLIP_CI_STUCK_MINUTES (default 15),
+#   TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID (optional doorbell + approval buttons)
+```
+
+Dispatch only ever picks issues carrying the `<!-- mazewall:backlog-file=… -->`
+marker, so manual/board-native entries are never auto-dispatched. The supervisor is
+stateless by design: dedupe rides board comments (`<!-- mazewall-ci-fail:<sha> -->`),
+stuckness on check timestamps, resolution idempotency on `resolved/` existence. The
+only persisted value is the approval watermark in `.supervisor_state.properties`.
+
+### Phone access (operator setup)
+
+The board binds `127.0.0.1:3100`. For phone management expose it over your tailnet:
+`tailscale serve --bg 3100` (or a WireGuard peer + reverse proxy) — never a public
+listener. Approvals then work from the mobile PWA directly, or via the Telegram
+approval cards when bot tokens are configured.
+
+### systemd user units (suggested)
+
+```ini
+# ~/.config/systemd/user/mazewall-supervisor.service
+[Unit]
+Description=mazewall Paperclip hybrid supervisor
+[Service]
+WorkingDirectory=%h/Documents/code/java/jseccomp
+Environment=PAPERCLIP_API_KEY=local
+Environment=TELEGRAM_BOT_TOKEN=%h/secrets/tg-token   # if used
+ExecStart=/usr/bin/env bash -c './gradlew -q :tools:orchestrator:supervisor -PincludeOrchestrator=true --daemon'
+Restart=on-failure
+[Install]
+WantedBy=default.target
+```
+
+Known limitation: Telegram delivery paths are transport-seam-tested but not yet
+exercised against live bot API (no tokens configured at migration time).
 
 ## 1. How to trigger the loop today
 
@@ -90,22 +137,28 @@ in the description marker `<!-- mazewall:backlog-file=… -->`; DELETE `/api/iss
 | CI_RUNNING watch, @jules review protocol, rebase/merge machinery | **Still orchestrator-unique** — no Paperclip equivalent; candidate for gh-aw later |
 | RESOLVE_TASK | **Retired** — bridge `sync_git_lifecycle()` verified live |
 
-## 3. Migration mapping: orchestrator → hybrid
+## 3. Migration mapping: orchestrator → hybrid (final, 2026-08-24)
 
-| Orchestrator capability | Hybrid home | Action |
+| Orchestrator capability | Hybrid home | State |
 |---|---|---|
-| Backlog parsing/DAG (`BacklogParser`,`DependencyGraph`) | kts script (inlined today) | Migrate into a `:tools:orchestrator` main once the module rejoins settings (issue-181010); delete inlined copy |
-| Issue picking/scheduling (`selectAndStartTasks`, slots, module exclusivity) | Paperclip board + `blockedByIssueIds` | **Migrate now** — board owns scheduling |
-| ACP agent execution loop | Paperclip runs (adapters incl. `vibe`, `antigravity`, `codex_local`, `grok_local`, `jules`, `opencode_local`) | **Migrate now** |
-| Telegram notify/approve | bridge py | Keep (already migrated) |
-| Resolution/git lifecycle | bridge py | Keep |
-| PR creation/CI watch/review loop (`GitHubCli`, `ReviewIssueLauncher`) | Orchestrator-only | **Keep unique** — no Paperclip equivalent yet |
-| Rebase/conflict tooling, slot exclusivity barriers | Orchestrator-only | Keep until Paperclip worktrees mature |
-| `checkBacklog` validation | Gradle task (currently offline w/ tools excluded) | Restore module to settings ASAP |
+| Backlog parsing/DAG (`BacklogParser`,`DependencyGraph`) | `paperclip_backlog_sync.kts` (inlined copy) | ✅ Live; dedupe into one Kotlin main later (issue-181010) |
+| Issue picking/scheduling (`selectAndStartTasks`, slots) | Board `backlog`+`blockedBy`; `DispatchSelector` in supervisor | ✅ Verified (parity tests + live dispatches MAZ-39…) |
+| Component→agent routing (Phase-4 table) | `ComponentRouter` | ✅ Resolves against live roster |
+| ACP agent execution loop | Paperclip runs (jules/antigravity/vibe/grok/codex/… adapters) | ✅ Adapter-native |
+| Telegram notify/approve | `TelegramBot` + `EventNotifier` in supervisor (approval cards, callbacks, doorbell) | ✅ Code + seam tests; live delivery awaits bot tokens |
+| CI watch (`CiRunningState`) | `CiWatch`: rollup poll → tokened board comment + TG; **no agent-feedback comments** (Jules watches own PRs; adapter mirrors activities) | ✅ Stateless, 9 scenario tests; live PR path fires on first Jules PR |
+| Resolution/git lifecycle (`ResolveTaskState`) | `BacklogResolver` | ✅ Live: probe MAZ-117 resolved by commit fc7f87fd; idempotent vs MAZ-116 |
+| Rebase/conflict tooling, worktree slot barriers | Orchestrator-only until Paperclip worktrees mature | ⏸ Keep |
+| `@jules` PR review protocol / auto-merge gating | Deferred — observe real approved-review shapes first | ⏸ Keep orchestrator paths available |
+| `checkBacklog` validation | Gradle task (opt-in `-PincludeOrchestrator=true`) | ✅ Green |
 
-Net: the orchestrator shrinks to its genuinely unique core — **PR/CI lifecycle + review loop +
-conflict machinery**. Everything else (parsing, scheduling, execution, approvals, resolution) has
-a working hybrid home.
+Net: the running daemon is gone from the critical path. `OrchestratorDaemon.kt` and its
+state machine stay compiled/tested as reference and fallback — do not schedule it while
+the supervisor owns a component's lifecycle; retire code only after several quiet weeks.
+
+Paperclip **Routines** (cron → agent issue templates) are deliberately unused for
+deterministic gating; they are the right home for future fuzzy sweeps (stale-backlog
+triage, summary refresh).
 
 ## 4. Tools that actually help from here
 
