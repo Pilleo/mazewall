@@ -35,3 +35,9 @@ fast (~12s now that the classpath wiring works).
    modules (as during current refactors), the gate must degrade to a loud WARNING listing skipped
    modules instead of silently passing.
 
+**Completed via the hybrid loop (2026-08-24):** ingested as MAZ-36, executed by Vibe ACP
+Developer (`invocationSource: assignment`, run succeeded, 743KB log), native review pass,
+approved, resolved. Implementation landed as commit edcb6ca1: portal tasks in pre-commit with
+`check_module_available()` guards against module exclusion (loud WARNING on skip), plus
+run_containerized_tests.sh CI inclusion. First end-to-end proof of the Paperclip hybrid loop:
+ingest -> assign -> auto-dispatch -> implementation -> review -> approval -> markdown resolved.
