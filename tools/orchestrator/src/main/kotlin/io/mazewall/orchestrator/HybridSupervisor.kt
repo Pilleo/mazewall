@@ -18,6 +18,7 @@ class HybridSupervisor(
     private val router: ComponentRouter,
     private val ciWatch: CiWatch? = null,
     private val resolver: BacklogResolver? = null,
+    private val telegramBot: TelegramBot? = null,
     private val notifier: EventNotifier? = null,
     private val out: (String) -> Unit = ::println,
     private val err: (String) -> Unit = System.err::println,
@@ -28,6 +29,9 @@ class HybridSupervisor(
         val issues = runCatching { client.listIssues(companyId) }
             .onFailure { err("listIssues failed: ${it.message}"); return 0 }
             .getOrThrow()
+        // Drain pcapprove/pcreject callbacks; without this the approval buttons
+        // render but never fire (Codex P1, PR #513).
+        telegramBot?.pollUpdates()
         ciWatch?.tick(issues)
         notifier?.let { n -> runCatching { n.pollApprovals() }.onFailure { err("notifier: ${it.message}") } }
         for (done in issues.filter { it.status == "done" && it.fromMarkdownBacklog }) {
@@ -62,6 +66,16 @@ class HybridSupervisor(
                 client.startProgress(candidate.id)
             }.onFailure {
                 err("dispatch failed for ${candidate.identifier}: ${it.message}")
+                // Recovery: assignment without the in_progress transition strands the
+                // issue (selector requires unassigned). Roll the assignment back so a
+                // later tick can retry cleanly; best-effort only.
+                runCatching { client.unassignAgent(candidate.id) }
+                    .onFailure { rErr ->
+                        err(
+                            "RECOVERY FAILED for ${candidate.identifier}: still assigned+backlog. " +
+                                "Manual repair or board-side retry required (${rErr.message})",
+                        )
+                    }
                 return dispatched
             }
             out(
@@ -125,6 +139,7 @@ fun main(args: Array<String>) {
     val tgToken = HybridSupervisor.env("TELEGRAM_BOT_TOKEN")
     val tgChat = HybridSupervisor.env("TELEGRAM_CHAT_ID")
     var notifier: EventNotifier? = null
+    var telegramBot: TelegramBot? = null
     var notifyHook: (String) -> Unit = {}
     if (tgToken != null && tgChat != null) {
         val bot = TelegramBot(tgToken, tgChat)
@@ -136,6 +151,7 @@ fun main(args: Array<String>) {
             messageId?.let { bot.clearReplyMarkup(it) }
         }
         notifier = EventNotifier(bot, client, HybridSupervisor.env("PAPERCLIP_COMPANY_ID") ?: client.resolveCompanyId())
+        telegramBot = bot
         notifyHook = { text -> bot.sendMessage(text) }
     }
 
@@ -144,6 +160,7 @@ fun main(args: Array<String>) {
         ciWatch = CiWatch(PaperclipIssueSignals(client), ProcessGhCheckSource(), notify = notifyHook),
         resolver = resolver,
         notifier = notifier,
+        telegramBot = telegramBot,
     )
 
     if (dryRun) {

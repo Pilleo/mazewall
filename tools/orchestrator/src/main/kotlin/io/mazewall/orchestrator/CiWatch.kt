@@ -114,7 +114,7 @@ class CiWatch(
         val sha = snapshot.headSha.orEmpty().take(SHA_PREFIX)
         if (sha.isEmpty()) return
         val token = "$FAIL_TOKEN$sha"
-        if (hasCommentMarker(issue.id, token)) return
+        if (hasCommentMarker(issue.id, token) != false) return
         signals.comment(
             issue.id,
             "❌ CI failed on $sha — PR #${pr.number} (${pr.repo}).\n<!-- $token -->",
@@ -127,7 +127,7 @@ class CiWatch(
         val ageMs = nowMs() - startedAt.toEpochMilli()
         if (ageMs <= stuckMinutes * 60_000) return
         val token = "$STUCK_TOKEN${pr.number}"
-        if (hasCommentMarker(issue.id, token)) return
+        if (hasCommentMarker(issue.id, token) != false) return
         signals.comment(
             issue.id,
             "⏳ CI pending >$stuckMinutes min on PR #${pr.number} (${pr.repo}). Check the runner.\n<!-- $token -->",
@@ -135,10 +135,16 @@ class CiWatch(
         notify("⏳ CI stuck pending ${issue.identifier} (${pr.repo}#${pr.number})")
     }
 
-    private fun hasCommentMarker(issueId: String, needle: String): Boolean =
+    /**
+     * Tri-state: true = marker found, false = definitively absent, null = lookup
+     * failed. Callers must treat null as "skip this tick" - assuming absence on a
+     * read failure would re-post duplicate comments until reads recover
+     * (Codex P2, PR #513).
+     */
+    private fun hasCommentMarker(issueId: String, needle: String): Boolean? =
         runCatching { signals.comments(issueId) }
-            .getOrDefault(emptyList())
-            .any { it.body?.contains(needle) == true }
+            .map { comments -> comments.any { it.body?.contains(needle) == true } }
+            .getOrElse { null }
 
     private fun findPr(issue: PaperclipIssue): PrRef? {
         val candidates = runCatching { signals.workProducts(issue.id) }

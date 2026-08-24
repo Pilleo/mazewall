@@ -38,8 +38,13 @@ class BacklogResolver(
             source = findByBasename(root, source.name)
         }
         if (source == null || !source.exists()) {
-            // Either already resolved or the linkage is broken; never invent work.
-            err("resolve $identifier: backlog file not found for marker '$markerPath'")
+            // Quiet path: an already-resolved issue hits this on every tick. Only
+            // complain when the resolved copy does not exist either (broken link).
+            val basename = source?.name ?: markerPath.substringAfterLast('/')
+            val alreadyResolved = root.resolve(RESOLVED_DIR).resolve(basename).exists()
+            if (!alreadyResolved) {
+                err("resolve $identifier: backlog file not found for marker '$markerPath'")
+            }
             return false
         }
 
@@ -55,7 +60,10 @@ class BacklogResolver(
         val destination = resolvedDir.resolve(source.name)
         Files.move(source, destination, StandardCopyOption.REPLACE_EXISTING)
 
-        git.run(root, "add", "-A", RESOLVED_DIR)
+        // Stage the whole backlog tree: a pathspec limited to resolved/ misses the
+        // deletion of the original file, producing commits with both copies while
+        // leaving the worktree dirty (fresh checkout would re-ingest it).
+        git.run(root, "add", "-A", BACKLOG_DIR)
         val committed = git.run(root, "commit", "-m", "Resolve $identifier")
         if (!committed) {
             // Nothing staged (e.g. dry environment); the move itself already happened.

@@ -84,6 +84,9 @@ private data class AssignRequest(@SerialName("assigneeAgentId") val agentId: Str
 private data class StatusRequest(val status: String)
 
 @Serializable
+private data class UnassignRequest(@SerialName("assigneeAgentId") val agentId: String? = null)
+
+@Serializable
 private data class CommentRequest(val body: String)
 
 @Serializable
@@ -101,7 +104,9 @@ class PaperclipClient(
     private val apiKey: String,
     private val baseUrl: String = "http://127.0.0.1:3100",
 ) {
-    private val json = Json { ignoreUnknownKeys = true; explicitNulls = false }
+    // explicitNulls stays at its default (true): UnassignRequest must serialize an
+    // explicit "assigneeAgentId": null for PATCH-based dispatch rollback.
+    private val json = Json { ignoreUnknownKeys = true }
 
     fun resolveCompanyId(): String {
         val companies = json.decodeFromString<List<CompanyRef>>(get("/api/companies"))
@@ -133,6 +138,11 @@ class PaperclipClient(
         patch("/api/issues/$issueId", StatusRequest("in_progress"))
     }
 
+    /** Rolls back a partial dispatch (assigned but never transitioned). */
+    fun unassignAgent(issueId: String) {
+        patch("/api/issues/$issueId", UnassignRequest())
+    }
+
     fun listPendingApprovals(companyId: String): List<PaperclipApproval> =
         json.decodeFromString(get("/api/companies/$companyId/approvals?status=pending"))
 
@@ -142,7 +152,10 @@ class PaperclipClient(
     }
 
     private fun get(path: String): String = exchange(
-        HttpRequest.newBuilder().uri(URI.create("$baseUrl$path")).GET().build(),
+        HttpRequest.newBuilder()
+            .uri(URI.create("$baseUrl$path"))
+            .header("Authorization", "Bearer $apiKey")
+            .GET().build(),
     )
 
     private inline fun <reified T> post(path: String, payload: T) = sendWithBody(path, "POST", payload)
@@ -152,6 +165,7 @@ class PaperclipClient(
     private inline fun <reified T> sendWithBody(path: String, method: String, payload: T): String {
         val request = HttpRequest.newBuilder()
             .uri(URI.create("$baseUrl$path"))
+            .header("Authorization", "Bearer $apiKey")
             .header("Content-Type", "application/json")
             .method(method, HttpRequest.BodyPublishers.ofString(json.encodeToString(payload)))
             .build()

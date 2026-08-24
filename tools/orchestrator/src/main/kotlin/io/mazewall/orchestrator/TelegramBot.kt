@@ -183,11 +183,33 @@ class TelegramBot(
         post(url, json.encodeToString(SendMessageRequest.serializer(), payload))
     }
 
-    /** Board-approval card: buttons carry the Paperclip approval uuid. */
-    fun sendMessageWithPaperclipApproval(approvalId: String, text: String) {
+    /**
+     * Board-approval card: buttons carry the Paperclip approval uuid.
+     * @return true when Telegram accepted the message; callers persisting delivery
+     * state (EventNotifier watermark) must advance only on true.
+     */
+    fun sendMessageWithPaperclipApproval(approvalId: String, text: String): Boolean {
         val markup = paperclipApprovalMarkup(approvalId)
         val payload = SendMessageRequest(chat_id = chatId, text = text, reply_markup = markup)
-        post("https://api.telegram.org/bot$botToken/sendMessage", json.encodeToString(payload))
+        return postOk("https://api.telegram.org/bot$botToken/sendMessage", json.encodeToString(payload))
+    }
+
+    private fun postOk(url: String, jsonBody: String): Boolean {
+        val request = HttpRequest.newBuilder()
+            .uri(URI.create(url))
+            .header("Content-Type", "application/json")
+            .POST(HttpRequest.BodyPublishers.ofString(jsonBody))
+            .build()
+        return try {
+            val response = transport.send(request)
+            if (response.statusCode() !in 200..299) {
+                System.err.println("Telegram POST to $url returned ${response.statusCode()}: ${response.body()}")
+                false
+            } else true
+        } catch (e: Exception) {
+            System.err.println("HTTP POST to $url failed: ${e.message}")
+            false
+        }
     }
 
     /** Answers a callback with an outcome string (visible as a toast in the TG client). */

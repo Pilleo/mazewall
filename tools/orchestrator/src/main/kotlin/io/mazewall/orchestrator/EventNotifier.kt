@@ -37,17 +37,27 @@ class EventNotifier(
             (ts == null && watermark == null) ||
                 (ts != null && (watermark == null || ts > watermark))
         }
+        var lastDeliveredWatermark: String? = null
+        // Ordered oldest-first; the watermark may only advance past approvals whose
+        // cards Telegram actually accepted, so transient failures are retried next
+        // tick instead of being lost forever (Codex P2, PR #513).
         for (approval in fresh.sortedBy { it.createdAt.orEmpty() }) {
-            bot.sendMessageWithPaperclipApproval(
+            val delivered = bot.sendMessageWithPaperclipApproval(
                 approval.id,
                 "*Approval Requested*" +
                     (approval.type?.let { "\nType: $it" } ?: "") +
                     "\nOpen the board to inspect, or decide here.",
             )
+            if (!delivered) {
+                System.err.println("notifier: Telegram delivery failed; watermark not advanced")
+                break
+            }
+            lastDeliveredWatermark = approval.createdAt ?: lastDeliveredWatermark
         }
-        fresh.maxOfOrNull { it.createdAt.orEmpty() }?.let {
-            approvalWatermark = it
-            props.setProperty(WATERMARK_KEY, it)
+        lastDeliveredWatermark?.let { newWatermark ->
+            val watermark = approvalWatermark
+            approvalWatermark = if (watermark != null && watermark > newWatermark) watermark else newWatermark
+            props.setProperty(WATERMARK_KEY, approvalWatermark)
             save()
         }
     }

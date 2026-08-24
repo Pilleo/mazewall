@@ -85,7 +85,10 @@ internal object InstallSelfVerifier {
             // Union-aware simulation is future work (issue-20260824-011900).
             return
         }
-        if (verifiedPrograms.putIfAbsent(instructions, Unit) != null) return
+        // Memoize only after every check passes: a cached entry from a failed
+        // verification would turn all later installs of the same program into an
+        // unchecked path (fail-closed rule).
+        if (verifiedPrograms.containsKey(instructions)) return
 
         val livenessNr = arch.getpid
         val predictedLiveness = BpfSimulator.simulate(instructions, livenessNr, arch)
@@ -93,6 +96,7 @@ internal object InstallSelfVerifier {
             // The policy denies getpid: skip liveness (it would be a false failure), but still
             // verify the DENIED probes below, which do not depend on thread health.
             verifyDeniedProbes(instructions, arch)
+            markVerified(instructions)
             return
         }
 
@@ -106,12 +110,17 @@ internal object InstallSelfVerifier {
         }
 
         verifyDeniedProbes(instructions, arch)
+        markVerified(instructions)
         io.mazewall.enforcer.diagnostics.MazewallEvents.emit(
             io.mazewall.enforcer.diagnostics.MazewallEvents.SelfVerificationResult(
                 passed = true,
                 detail = "program=${instructions.size} insns",
             ),
         )
+    }
+
+    private fun markVerified(instructions: List<BpfInstruction>) {
+        verifiedPrograms.putIfAbsent(instructions, Unit)
     }
 
     private fun verifyDeniedProbes(instructions: List<BpfInstruction>, arch: Arch) {

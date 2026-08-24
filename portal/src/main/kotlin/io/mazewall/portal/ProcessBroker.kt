@@ -196,15 +196,26 @@ public class ProcessBroker(
                 extraJvmArgs = workerExtraJvmArgs,
             )
         val proc = JvmChildProcess.start(launcher, spec)
-        // CI diagnosability: a worker that dies before connecting must surface its
-        // exit code immediately instead of leaving accept() blocked until the
-        // test-level timeout. Also echo the command line once per spawn.
+        // CI diagnosability + hang prevention: a worker that dies before connecting
+        // must (a) surface its exit code and command line, and (b) break the
+        // blocking accept() below by closing the listener, so the cleanup path runs
+        // instead of hanging until an external timeout.
         proc.onExit().thenAccept {
             if (it.exitValue() != 0) {
                 System.err.println(
                     "[PORTAL-WORKER-EXIT] code=${it.exitValue()} cmd=${JvmChildProcess.commandLine(spec).joinToString(" ")}",
                 )
             }
+            // Wake order matters: close() alone does not interrupt a thread blocked
+            // in accept4 on the same fd. A dummy connect forces the accept to return
+            // (its peer is discarded by the !proc.isAlive guard below); closing the
+            // listener afterwards prevents any further accepts.
+            runCatching {
+                java.nio.channels.SocketChannel.open(
+                    java.net.UnixDomainSocketAddress.of(ep.path),
+                ).use { ch -> ch.write(java.nio.ByteBuffer.wrap(ByteArray(1))) }
+            }
+            runCatching { sockets.close(listen) }
         }.exceptionally { System.err.println("[PORTAL-WORKER-EXIT] onExit failed: ${it.message}"); null }
         val pump =
             JvmChildProcess.startStdoutPump(
@@ -218,7 +229,19 @@ public class ProcessBroker(
                 },
                 "portal-worker-stdout",
             )
-        val peer = sockets.accept(listen)
+        val peer = try {
+            sockets.accept(listen)
+        } catch (e: Exception) {
+            // Listener closed by the death watcher (or teardown racing accept).
+            runCatching { proc.destroyForcibly() }
+            ep.close()
+            throw IllegalStateException("portal worker died before connecting: ${e.message}", e)
+        }
+        if (!proc.isAlive) {
+            sockets.close(peer); sockets.close(listen); ep.close()
+            proc.destroyForcibly()
+            error("portal worker exited during handshake")
+        }
         val channel = PortalChannel(peer, sockets)
         if (!JvmChildProcess.awaitReady(pump, 30)) {
             sockets.close(peer)
