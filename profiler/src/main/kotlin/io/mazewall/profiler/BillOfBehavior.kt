@@ -43,6 +43,7 @@ data class BillOfBehavior(
      * Compiles this bill of behavior into a [io.mazewall.Policy] starting from [base].
      * Relative paths in the BoB are resolved against [baseCwd].
      */
+    @JvmOverloads
     fun toPolicy(
         base: Policy<*, Uncompiled> = Policy.PURE_COMPUTE_UNSAFE,
         baseCwd: Path? = null,
@@ -109,6 +110,7 @@ data class BillOfBehavior(
      * Emits a copy-pasteable Kotlin DSL snippet that reproduces the compiled policy.
      * Relative paths in the BoB are resolved against [baseCwd].
      */
+    @JvmOverloads
     fun toDsl(
         basePolicyName: String = "Policy.PURE_COMPUTE_UNSAFE",
         base: Policy<*, Uncompiled> = Policy.PURE_COMPUTE_UNSAFE,
@@ -310,10 +312,12 @@ data class BillOfBehavior(
         @JvmStatic
         public fun empty(): BillOfBehavior = EMPTY
 
+        @JvmStatic
         fun fromFile(path: Path): BillOfBehavior {
             return fromJson(Files.readString(path))
         }
 
+        @JvmStatic
         fun fromStream(stream: InputStream): BillOfBehavior {
             val content = stream.bufferedReader(StandardCharsets.UTF_8).use { it.readText() }
             return fromJson(content)
@@ -337,6 +341,7 @@ data class BillOfBehavior(
             return NetworkEndpoint(raw, null)
         }
 
+        @JvmStatic
         fun fromJson(json: String): BillOfBehavior {
             val dto = jsonSerializer.decodeFromString(BillOfBehaviorDto.serializer(), json)
 

@@ -16,6 +16,7 @@ jackson = "2.17.1"
 kotest = "5.8.1"
 plantuml = "2.4.1"
 kotlinpoet = "2.2.0"
+bcv = "0.17.0"
 
 [libraries]
 kotlinGradlePlugin = { module = "org.jetbrains.kotlin:kotlin-gradle-plugin", version.ref = "kotlin" }
@@ -37,7 +38,6 @@ slf4j-nop = { module = "org.slf4j:slf4j-nop", version = "2.0.13" }
 plantuml-core = { module = "net.sourceforge.plantuml:plantuml", version = "1.2023.13" }
 kotlinpoet = { module = "com.squareup:kotlinpoet", version.ref = "kotlinpoet" }
 
-
 [bundles]
 kotlinxEcosystem = ["kotlinxDatetime", "kotlinxSerialization", "kotlinxCoroutines"]
 testing = ["junit-jupiter-api", "junit-jupiter-params"]
@@ -51,4 +51,4 @@ spotbugs = { id = "com.github.spotbugs", version.ref = "spotbugs" }
 dependencyCheck = { id = "org.owasp.dependencycheck", version.ref = "dependencyCheck" }
 pitest = { id = "info.solidsoft.pitest", version.ref = "pitest" }
 plantuml = { id = "io.gitlab.plunts.plantuml", version.ref = "plantuml" }
-
+bcv = { id = "org.jetbrains.kotlinx.binary-compatibility-validator", version.ref = "bcv" }

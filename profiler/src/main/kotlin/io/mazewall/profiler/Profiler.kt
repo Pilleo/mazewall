@@ -1,7 +1,5 @@
 package io.mazewall.profiler
 
-import io.mazewall.core.threadLocal
-import io.mazewall.enforcer.diagnostics.validateNotVirtual
 import io.mazewall.LinuxNative
 import io.mazewall.Policy
 import io.mazewall.PolicyDefinition
@@ -10,9 +8,11 @@ import io.mazewall.Uncompiled
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
 import io.mazewall.core.Tid
+import io.mazewall.core.threadLocal
+import io.mazewall.enforcer.diagnostics.validateNotVirtual
 import io.mazewall.profiler.compiler.BobCompiler
-import io.mazewall.profiler.engine.TraceEvent
 import io.mazewall.profiler.engine.ProfilerInstaller
+import io.mazewall.profiler.engine.TraceEvent
 import io.mazewall.profiler.internal.ProfilerDaemonManager
 import io.mazewall.profiler.internal.ProfilerTraceListener
 import java.util.concurrent.Callable
@@ -54,6 +54,7 @@ object Profiler {
     /**
      * Profiles the given [block] and returns a [BillOfBehavior].
      */
+    @JvmStatic
     @JvmOverloads
     fun <T> profile(
         processWide: Boolean = false,
@@ -159,9 +160,32 @@ object Profiler {
     }
 
     /**
+     * Java-friendly overload for profiling a [Callable].
+     */
+    @JvmStatic
+    @JvmOverloads
+    fun <T> profile(
+        callable: Callable<T>,
+        processWide: Boolean = false,
+        captureStackTraces: Boolean = true,
+    ): ProfilingResult<T> = profile(processWide, captureStackTraces) { callable.call() }
+
+    /**
+     * Java-friendly overload for profiling a [Runnable].
+     */
+    @JvmStatic
+    @JvmOverloads
+    fun profile(
+        runnable: Runnable,
+        processWide: Boolean = false,
+        captureStackTraces: Boolean = true,
+    ): ProfilingResult<Unit> = profile(processWide, captureStackTraces) { runnable.run() }
+
+    /**
      * Wraps an [ExecutorService] to automatically profile all submitted tasks.
      * Use [ProfilerExecutorWrapper.recentLogs] to retrieve the captured behaviors.
      */
+    @JvmStatic
     fun wrap(
         delegate: ExecutorService,
         vararg policies: Policy<*, Uncompiled>,
@@ -170,12 +194,18 @@ object Profiler {
     /**
      * Wraps an [ExecutorService] to automatically profile all submitted tasks, with optional stacktrace capture.
      */
+    @JvmStatic
     fun wrap(
         delegate: ExecutorService,
         captureStackTraces: Boolean,
         vararg policies: Policy<*, Uncompiled>,
     ): ProfilerExecutorWrapper {
-        val policy = PolicyDefinition.combine(*policies.map { it.definition }.toTypedArray())
+        val policy =
+            if (policies.isEmpty()) {
+                PolicyPresets.PURE_COMPUTE_UNSAFE
+            } else {
+                PolicyDefinition.combine(*policies.map { it.definition }.toTypedArray())
+            }
         val context = daemonManagerProvider().getOrSpawnSharedDaemon()
         return ProfilerExecutorWrapper(delegate, policy, context, captureStackTraces)
     }
@@ -213,6 +243,7 @@ object Profiler {
     /**
      * Shuts down the shared profiler daemon and all active trace listeners.
      */
+    @JvmStatic
     fun shutdown() {
         synchronized(this) {
             listeners.forEach { it.passThrough() }

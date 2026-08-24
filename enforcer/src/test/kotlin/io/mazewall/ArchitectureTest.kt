@@ -421,7 +421,11 @@ class ArchitectureTest {
                         "JVMValidationListener" !in name &&
                         "JvmFloorWorkload" !in name &&
                         "Profiler" !in name &&
-                        "IterativeProfiler" !in name
+                        // Containment owns raw-pool construction; everything
+                        // else must go through ContainedExecutors factories.
+                        "ContainedExecutors" !in name &&
+                        name == "io.mazewall.Mazewall" ||
+                            name.startsWith("io.mazewall.Mazewall$")
                 }
             })
             .should()

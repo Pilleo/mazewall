@@ -26,7 +26,7 @@ class ProfilerArchitectureTest {
             .areAssignableTo(SyscallEvent::class.java)
             .should()
             .dependOnClassesThat()
-            .resideInAPackage("java.lang.foreign..")
+            .resideInAnyPackage("java.lang.foreign..", "io.mazewall.ffi.memory..")
             .because("To prevent memory segment lifetime leaks and native memory finalization GC overhead, all trace events must strictly hold and pass JVM heap-only data, never referencing FFM MemorySegment or internal native memory classes.")
             .check(allClasses)
     }

@@ -25,6 +25,9 @@ class "BillOfBehavior" as io.mazewall.profiler.BillOfBehavior {
   +String toJson()
   +String toStackTracesJson()
   + {static}BillOfBehavior empty()
+  + {static}BillOfBehavior fromFile(Path)
+  + {static}BillOfBehavior fromStream(InputStream)
+  + {static}BillOfBehavior fromJson(String)
 }
 class "BillOfBehaviorKt" as io.mazewall.profiler.BillOfBehaviorKt {
 }
@@ -128,7 +131,7 @@ class "Profiler" as io.mazewall.profiler.Profiler {
   +void setDaemonManagerProvider(Function0<ProfilerDaemonManager>)
   +ProfilerInstallerInterface getInstallerProvider()
   +void setInstallerProvider(ProfilerInstallerInterface)
-  +void shutdown()
+  + {static}void shutdown()
 }
 class "ProfilerAckPreload" as io.mazewall.profiler.ProfilerAckPreload {
   + {static}ProfilerAckPreload INSTANCE
@@ -152,6 +155,7 @@ class "ProfilingCoverage" as io.mazewall.profiler.ProfilingCoverage {
   +List<String> getWarnings()
   +ProfileEvidence evidence()
   +ProfilingCoverage retainStricterPathResolution(ProfilingCoverage)
+  + {static}ProfilingCoverage absent()
 }
 class "ProfilingResult" as io.mazewall.profiler.ProfilingResult<T> {
   +T getValue()

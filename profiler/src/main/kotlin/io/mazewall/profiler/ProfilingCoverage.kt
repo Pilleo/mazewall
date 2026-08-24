@@ -113,6 +113,7 @@ public data class ProfilingCoverage(
             return if (order.indexOf(b) > order.indexOf(a)) b else a
         }
         /** Used when [io.mazewall.profiler.BillOfBehavior.toPolicy] is called without coverage. */
+        @JvmStatic
         public fun absent(): ProfilingCoverage =
             ProfilingCoverage(
                 strategy = ProfileStrategy.USER_NOTIF,

@@ -213,6 +213,29 @@ object ContainedExecutors {
         return ContainedExecutorWrapper(delegate, combinedPolicy)
     }
 
+    private fun containedThreadFactory(tag: String, policy: Policy<*, Uncompiled>): java.util.concurrent.ThreadFactory {
+        val name = "mazewall-contained-$tag-${policy.definition.hashCode().toUInt().toString(16)}"
+        return java.util.concurrent.ThreadFactory { runnable ->
+            Thread(runnable).apply {
+                isDaemon = true
+                setName(name)
+            }
+        }
+    }
+
+    /** Daemon single-thread executor whose threads run under [policy] on wrap. */
+    fun newSingleThreadExecutor(policy: Policy<*, Uncompiled>): ExecutorService =
+        wrap(java.util.concurrent.Executors.newSingleThreadExecutor(containedThreadFactory("single", policy)), policy)
+
+    /** Daemon fixed pool whose threads run under [policy] on wrap. */
+    fun newFixedThreadPool(nThreads: Int, policy: Policy<*, Uncompiled>): ExecutorService =
+        wrap(java.util.concurrent.Executors.newFixedThreadPool(nThreads, containedThreadFactory("pool", policy)), policy)
+
+    /** Daemon cached pool whose threads run under [policy] on wrap. */
+    fun newCachedThreadPool(policy: Policy<*, Uncompiled>): ExecutorService =
+        wrap(java.util.concurrent.Executors.newCachedThreadPool(containedThreadFactory("cached", policy)), policy)
+
+
     fun wrap(
         delegate: ExecutorService,
         policy: Policy<*, Uncompiled>,

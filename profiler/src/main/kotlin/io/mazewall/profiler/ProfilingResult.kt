@@ -34,12 +34,14 @@ data class ProfilingResult<T>(
     ),
     val observations: List<ProfileObservation> = emptyList(),
 ) {
+    @JvmOverloads
     fun toPolicy(
         base: io.mazewall.Policy<*, io.mazewall.Uncompiled> = io.mazewall.Policy.PURE_COMPUTE_UNSAFE,
         baseCwd: java.nio.file.Path? = null,
         allowIncomplete: Boolean = false,
     ) = behavior.toPolicy(base, baseCwd, coverage, allowIncomplete)
 
+    @JvmOverloads
     fun toDsl(
         basePolicyName: String = "Policy.PURE_COMPUTE_UNSAFE",
         base: io.mazewall.Policy<*, io.mazewall.Uncompiled> = io.mazewall.Policy.PURE_COMPUTE_UNSAFE,

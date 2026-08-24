@@ -30,7 +30,9 @@ public value class SandboxedPath private constructor(public val value: String) {
          *                         Useful for unit tests and base presets.
          * @throws java.io.IOException if the path does not exist and [allowNonExistent] is false.
          */
+        @JvmName("of")
         @JvmStatic
+        @JvmOverloads
         public fun of(path: String, allowNonExistent: Boolean = false): SandboxedPath {
             val p = Paths.get(path).toAbsolutePath().normalize()
             if (!allowNonExistent && !java.nio.file.Files.exists(p, LinkOption.NOFOLLOW_LINKS)) {

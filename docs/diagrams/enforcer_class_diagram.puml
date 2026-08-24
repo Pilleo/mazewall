@@ -84,6 +84,9 @@ class "InstallationReceipt" as io.mazewall.InstallationReceipt {
   +FallbackBehavior getFallback()
   +boolean getLandlockApplied()
   +InstallationReceipt requireInstalled()
+  +boolean isInstalled()
+  +boolean isProcessWide()
+  +boolean isLandlockApplied()
 }
 class "InstallationRejectedException" as io.mazewall.InstallationRejectedException {
   +List<InstallationStage> getStages()
@@ -102,8 +105,41 @@ enum "InstallationStage" as io.mazewall.InstallationStage {
   LANDLOCK
   INTEL_CET
 }
-class "KernelFeatureMatrix" as io.mazewall.KernelFeatureMatrix {
+class "JavaPolicyBuilder" as io.mazewall.JavaPolicyBuilder {
   ..
+  + {static}Companion Companion
+  __
+  +JavaPolicyBuilder defaultAction(SeccompAction)
+  +JavaPolicyBuilder allow(Syscall[])
+  +JavaPolicyBuilder block(Syscall[])
+  +JavaPolicyBuilder unblock(Syscall[])
+  +JavaPolicyBuilder addAction(SeccompAction, Syscall[])
+  +JavaPolicyBuilder base(Policy<?, ?>)
+  +JavaPolicyBuilder allowFsRead(Path[])
+  +JavaPolicyBuilder allowFsRead(File[])
+  +JavaPolicyBuilder allowFsRead(String[])
+  +JavaPolicyBuilder allowFsWrite(Path[])
+  +JavaPolicyBuilder allowFsWrite(File[])
+  +JavaPolicyBuilder allowFsWrite(String[])
+  +JavaPolicyBuilder allowFsReadWrite(Path[])
+  +JavaPolicyBuilder allowFsReadWrite(File[])
+  +JavaPolicyBuilder allowFsReadWrite(String[])
+  +JavaPolicyBuilder allowJvmClasspath()
+  +JavaPolicyBuilder allowMmapExec(boolean)
+  +JavaPolicyBuilder allowMmapExec()
+  +JavaPolicyBuilder forRuntime(RuntimeProfile)
+  +JavaPolicyBuilder allowNonThreadClone()
+  +JavaPolicyBuilder allowUnsafePrctl()
+  +JavaPolicyBuilder lockIntelCet()
+  +JavaPolicyBuilder customViolationPhrase(String)
+  +JavaPolicyBuilder customViolationRegex(Pattern)
+  +JavaPolicyBuilder customViolationRegex(String)
+  +Policy<ThreadLocalOnly, Uncompiled> build()
+  +Policy<ProcessWideSafe, Uncompiled> buildProcessWide()
+  + {static}JavaPolicyBuilder create()
+  + {static}JavaPolicyBuilder create(RuntimeProfile)
+}
+class "KernelFeatureMatrix" as io.mazewall.KernelFeatureMatrix {
   + {static}Companion Companion
   __
   +boolean getSeccompSupported()
@@ -139,6 +175,46 @@ class "LinuxNativeKt" as io.mazewall.LinuxNativeKt {
   + {static}FileDescriptor<Generic, Open> asFd(Success)
   + {static}int asInt(SyscallResult)
   + {static}FileDescriptor<Generic, Open> getFdOrThrow(SyscallResult, String)
+}
+class "Mazewall" as io.mazewall.Mazewall {
+  + {static}Policy<ThreadLocalOnly, Uncompiled> PURE_COMPUTE
+  + {static}Policy<ProcessWideSafe, Uncompiled> PURE_COMPUTE_UNSAFE
+  + {static}Policy<ProcessWideSafe, Uncompiled> NO_EXEC
+  + {static}Policy<ProcessWideSafe, Uncompiled> NO_EXEC_HOTSPOT
+  + {static}Policy<ProcessWideSafe, Uncompiled> NO_EXEC_NATIVE_IMAGE
+  + {static}Policy<ProcessWideSafe, Uncompiled> NO_NETWORK
+  + {static}Policy<ProcessWideSafe, Uncompiled> NO_EXEC_NO_FS_WRITE
+  + {static}Policy<ProcessWideSafe, Uncompiled> DEFAULT_SAFE
+  __
+  + {static}Policy<ThreadLocalOnly, Uncompiled> pureCompute()
+  + {static}Policy<ProcessWideSafe, Uncompiled> pureComputeUnsafe()
+  + {static}Policy<ProcessWideSafe, Uncompiled> noExec()
+  + {static}Policy<ProcessWideSafe, Uncompiled> noExecHotspot()
+  + {static}Policy<ProcessWideSafe, Uncompiled> noExecNativeImage()
+  + {static}Policy<ProcessWideSafe, Uncompiled> noNetwork()
+  + {static}Policy<ProcessWideSafe, Uncompiled> noExecNoFsWrite()
+  + {static}Policy<ProcessWideSafe, Uncompiled> defaultSafe()
+  + {static}JavaPolicyBuilder builder()
+  + {static}JavaPolicyBuilder builder(RuntimeProfile)
+  + {static}JavaPolicyBuilder threadLocalBuilder()
+  + {static}JavaPolicyBuilder threadLocalBuilder(RuntimeProfile)
+  + {static}Policy<ThreadLocalOnly, Uncompiled> combineThreadLocal(Policy<? extends ThreadLocalOnly, ? extends Uncompiled>[])
+  + {static}InstallationReceipt installOnCurrentThread(Policy<?, ? extends Uncompiled>)
+  + {static}InstallationReceipt installOnCurrentThread(Policy<?, ? extends Uncompiled>, StacktraceScopingPolicy)
+  + {static}InstallationReceipt installOnCurrentThread(Policy<?, ? extends Uncompiled>[])
+  + {static}InstallationReceipt installOnProcess(Policy<? extends ProcessWideSafe, ? extends Uncompiled>)
+  + {static}InstallationReceipt installOnProcess(Policy<? extends ProcessWideSafe, ? extends Uncompiled>[])
+  + {static}InstallationAssessment assessOnCurrentThread(Policy<?, ? extends Uncompiled>)
+  + {static}InstallationAssessment assessOnProcess(Policy<? extends ProcessWideSafe, ? extends Uncompiled>)
+  + {static}T runContained(Policy<?, ?>, Callable<T>)
+  + {static}T runContained(Policy<?, ?>, Supplier<T>)
+  + {static}void runContained(Policy<?, ?>, Runnable)
+  + {static}ExecutorService wrapContainedExecutor(ExecutorService, Policy<?, ? extends Uncompiled>)
+  + {static}ExecutorService wrapExecutor(ExecutorService, Policy<?, ? extends Uncompiled>[])
+  + {static}ExecutorService wrap(ExecutorService, Policy<?, ? extends Uncompiled>[])
+  + {static}ExecutorService newContainedSingleThreadExecutor(Policy<?, ? extends Uncompiled>)
+  + {static}ExecutorService newContainedFixedThreadPool(int, Policy<?, ? extends Uncompiled>)
+  + {static}ExecutorService newContainedCachedThreadPool(Policy<?, ? extends Uncompiled>)
 }
 annotation "MazewallInternal" as io.mazewall.MazewallInternal {
 }
@@ -189,22 +265,22 @@ interface "NativeProcess" as io.mazewall.NativeProcess {
 class "Platform" as io.mazewall.Platform {
   + {static}Platform INSTANCE
   __
-  +KernelFeatureMatrix getFeatureMatrix()
-  +void setProvider(PlatformProvider)
-  +void resetToDefault()
-  +boolean isLinux()
-  +void validateLinux()
-  +boolean isSupported()
-  +void validateSupported()
+  + {static}KernelFeatureMatrix getFeatureMatrix()
+  + {static}void setProvider(PlatformProvider)
+  + {static}void resetToDefault()
+  + {static}boolean isLinux()
+  + {static}void validateLinux()
+  + {static}boolean isSupported()
+  + {static}void validateSupported()
   +boolean isArchitectureSupported()
-  +FallbackBehavior configuredFallback()
+  + {static}FallbackBehavior configuredFallback()
   +boolean isCetPlatformEligible()
   +boolean isKernelCetSupported()
   +Boolean isCpuCetSupportedOverride()
   +void setCpuCetSupportedOverride(Boolean)
-  +boolean isCpuCetSupported()
-  +long queryIntelCetStatus()
-  +Diagnostics diagnose()
+  + {static}boolean isCpuCetSupported()
+  + {static}long queryIntelCetStatus()
+  + {static}Diagnostics diagnose()
 }
 interface "PlatformProvider" as io.mazewall.PlatformProvider {
   + {abstract}String getOsName()
@@ -349,6 +425,8 @@ class "PolicyPresets" as io.mazewall.PolicyPresets {
   + {static}PolicyDefinition<ProcessWideSafe> NO_EXEC_HOTSPOT
   + {static}PolicyDefinition<ProcessWideSafe> NO_EXEC_NATIVE_IMAGE
   + {static}PolicyDefinition<ProcessWideSafe> NO_NETWORK
+  + {static}PolicyDefinition<ProcessWideSafe> NO_EXEC_NO_FS_WRITE
+  + {static}PolicyDefinition<ProcessWideSafe> DEFAULT_SAFE
   + {static}PolicyDefinition<ThreadLocalOnly> PURE_COMPUTE
 }
 interface "PolicyScope" as io.mazewall.PolicyScope {
@@ -651,6 +729,7 @@ class "SandboxedPath" as io.mazewall.core.SandboxedPath {
   + {static}boolean equals-impl(String, Object)
   + {static}boolean equals-impl0(String, String)
   + {static}String of(String, boolean)
+  + {static}String of(String)
 }
 class "SandboxedPathKt" as io.mazewall.core.SandboxedPathKt {
   + {static}boolean isUnder(Path, Path)
@@ -746,6 +825,9 @@ class "ContainedExecutors" as io.mazewall.enforcer.api.ContainedExecutors {
   +InstallationAssessment assessOnCurrentThread(Policy<?, ? extends Uncompiled>)
   +InstallationReceipt installOnProcess(Policy<? extends ProcessWideSafe, ? extends Uncompiled>[])
   +ExecutorService wrap(ExecutorService, Policy<?, ? extends Uncompiled>[])
+  +ExecutorService newSingleThreadExecutor(Policy<?, ? extends Uncompiled>)
+  +ExecutorService newFixedThreadPool(int, Policy<?, ? extends Uncompiled>)
+  +ExecutorService newCachedThreadPool(Policy<?, ? extends Uncompiled>)
   +ExecutorService wrap(ExecutorService, Policy<?, ? extends Uncompiled>, StacktraceScopingPolicy)
 }
 class "ContainmentViolationException" as io.mazewall.enforcer.api.ContainmentViolationException {
@@ -1895,9 +1977,11 @@ io.mazewall.InstallationAssessment --> io.mazewall.InstallationStage
 io.mazewall.InstallationAssessor --> io.mazewall.InstallationAssessor
 io.mazewall.InstallationReceipt --> io.mazewall.PolicyDefinition
 io.mazewall.InstallationRejectedException --> io.mazewall.InstallationStage
+io.mazewall.JavaPolicyBuilder --> io.mazewall.PolicyBuilder
 io.mazewall.LinuxNative .u.|> io.mazewall.NativeEngine
 io.mazewall.LinuxNative --> io.mazewall.NativeEngine
 io.mazewall.LinuxNative --> io.mazewall.LinuxNative
+io.mazewall.Mazewall --> io.mazewall.Policy
 io.mazewall.Platform --> io.mazewall.PlatformProvider
 io.mazewall.Platform --> io.mazewall.Platform
 io.mazewall.Platform --> io.mazewall.KernelFeatureMatrix

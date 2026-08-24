@@ -1,7 +1,7 @@
 ---
 title: Arena MemorySegment leak in JVMValidationListener during async response loop
 type: issue
-status: open
+status: resolved
 priority: high
 labels:
 - security
@@ -10,7 +10,7 @@ labels:
 - memory-leak
 component: enforcer
 target_modules: [":enforcer"]
-target_files: ["io.mazewall.enforcer.supervisor.SupervisorSessionHandler.kt"]
+target_files: ["enforcer/src/main/kotlin/io/mazewall/enforcer/supervisor/SupervisorSessionHandler.kt"]
 github_issue: 335
 paperclip_issue_id: 652de2fe-165a-48b6-8070-1ffa12aad3de
 ---

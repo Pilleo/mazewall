@@ -36,6 +36,7 @@ public object Platform {
     /**
      * Immutable matrix of supported Linux kernel features.
      */
+    @JvmStatic
     public val featureMatrix: KernelFeatureMatrix
         get() {
             val current = cachedMatrix
@@ -52,6 +53,7 @@ public object Platform {
     /**
      * Swaps the active platform provider. Used for testing and fault injection.
      */
+    @JvmStatic
     @Suppress("spotbugs:ST_WRITE_TO_STATIC_FROM_INSTANCE_METHOD")
     public fun setProvider(newProvider: PlatformProvider) {
         synchronized(this) {
@@ -64,6 +66,7 @@ public object Platform {
     /**
      * Restores the default RealPlatformProvider.
      */
+    @JvmStatic
     @Suppress("spotbugs:ST_WRITE_TO_STATIC_FROM_INSTANCE_METHOD")
     public fun resetToDefault() {
         synchronized(this) {
@@ -83,6 +86,7 @@ public object Platform {
     }
 
     /** True if the current operating system is Linux. */
+    @JvmStatic
     public val isLinux: Boolean get() = provider.getOsName().equals("Linux", ignoreCase = true)
 
     /**
@@ -90,6 +94,7 @@ public object Platform {
      *
      * This function uses a Kotlin contract to formalize this invariant.
      */
+    @JvmStatic
     @OptIn(ExperimentalContracts::class)
     public fun validateLinux() {
         contract {
@@ -103,6 +108,7 @@ public object Platform {
     /**
      * Returns true if the current platform supports seccomp filters.
      */
+    @JvmStatic
     public fun isSupported(): Boolean =
         isLinux &&
             provider.hasKernelSeccompSupport() &&
@@ -114,6 +120,7 @@ public object Platform {
      *
      * This function uses a Kotlin contract to formalize this invariant.
      */
+    @JvmStatic
     @OptIn(ExperimentalContracts::class)
     public fun validateSupported() {
         contract {
@@ -156,6 +163,7 @@ public object Platform {
     /**
      * Resolves the configured fallback behavior based on system properties or environment variables.
      */
+    @JvmStatic
     public fun configuredFallback(): FallbackBehavior {
         val prop =
             System.getProperty("io.mazewall.fallback")
@@ -219,6 +227,7 @@ public object Platform {
      * Checks if the CPU supports Intel CET Shadow Stack by delegating to the current
      * PlatformProvider.probeCetSupported().
      */
+    @JvmStatic
     public fun isCpuCetSupported(): Boolean {
         val override = isCpuCetSupportedOverride
         if (override != null) return override
@@ -235,8 +244,9 @@ public object Platform {
 
     /**
      * Queries the kernel for active Intel CET Shadow Stack status.
-     * Returns a bitmask of enabled options (e.g. 1 for ARCH_SHSTK_SHSTK), or 0 if unsupported/disabled/error.
+     * Returns a bitmask of enabled options (e.g. 1 for ARCH_SHSTK_SHSTK), or 0 if unsupported/disabled/error.\
      */
+    @JvmStatic
     public fun queryIntelCetStatus(): Long {
         if (!isCpuCetSupported()) return 0L
 
@@ -295,6 +305,7 @@ public object Platform {
     /**
      * Run diagnostics to check system capabilities and privilege/sandboxing status.
      */
+    @JvmStatic
     public fun diagnose(): Diagnostics {
         return Diagnostics(
             osName = provider.getOsName(),
