@@ -13,6 +13,7 @@ import org.junit.jupiter.api.parallel.Isolated
  * close(int) on a guessed number destroys unrelated JVM resources).
  */
 @Isolated
+@org.junit.jupiter.api.extension.ExtendWith(ForeignFdGuard::class)
 class FileDescriptorTest {
 
     companion object {

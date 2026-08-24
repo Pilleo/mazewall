@@ -12,6 +12,7 @@ import kotlin.test.*
  * the shared test JVM and has destroyed unrelated resources (e.g. the lazily
  * opened /dev/urandom fd), surfacing as EBADF in unrelated SecureRandom users.
  */
+@org.junit.jupiter.api.extension.ExtendWith(ForeignFdGuard::class)
 class FileDescriptorReproductionTest {
 
     companion object {

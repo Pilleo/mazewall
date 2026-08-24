@@ -265,6 +265,13 @@ public class FileDescriptor<out R : FileDescriptorRole, out S : FdState> interna
          * WARNING: This method will NOT revive retired file descriptors. For kernel-reused
          * integers from dup/accept/SCM_RIGHTS, use [adopt] or [replace] instead.
          *
+         * DANGER (2026-08-24 incident): a token minted around an integer you do not own
+         * is a loaded weapon. Calling [close] on it performs a real close(int) in this
+         * JVM and destroys whatever happens to hold that number (/dev/urandom seed fd,
+         * classloader jars, pipes), surfacing later as EBADF in unrelated code such as
+         * Files.createTempDirectory. Only pass integers obtained from an open this
+         * process owns; see platform test ForeignFdGuard for the enforcement guardrail.
+         *
          * @param value The raw Linux file descriptor integer.
          * @param arena Optional arena bound to this descriptor's native lifetime.
          * @return A type-safe [FileDescriptor] in the [FdState.Open] state.
@@ -290,6 +297,14 @@ public class FileDescriptor<out R : FileDescriptorRole, out S : FdState> interna
             return open<FileDescriptorRole.Generic>(value, arena, FileDescriptorRole.Generic) as FileDescriptor<R, FdState.Open>
         }
 
+        /**
+         * Claims an integer as a live Generic-role descriptor and registers it in the epoch.
+         *
+         * WARNING: [close] on the returned token is a REAL close(value). Only pass
+         * integers this process obtained from its own opens - never literals, /proc
+         * guesses, or numbers observed in other processes. Closing a foreign integer
+         * destroys whatever resource holds it (see DANGER note on [unsafe]).
+         */
         public fun generic(
             value: Int,
             arena: NativeArena? = null,
