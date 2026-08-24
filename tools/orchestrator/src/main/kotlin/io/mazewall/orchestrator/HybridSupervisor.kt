@@ -17,6 +17,7 @@ class HybridSupervisor(
     private val client: PaperclipClient,
     private val router: ComponentRouter,
     private val ciWatch: CiWatch? = null,
+    private val resolver: BacklogResolver? = null,
     private val out: (String) -> Unit = ::println,
     private val err: (String) -> Unit = System.err::println,
     private val sleepMs: (Long) -> Unit = { Thread.sleep(it) },
@@ -27,6 +28,10 @@ class HybridSupervisor(
             .onFailure { err("listIssues failed: ${it.message}"); return 0 }
             .getOrThrow()
         ciWatch?.tick(issues)
+        for (done in issues.filter { it.status == "done" && it.fromMarkdownBacklog }) {
+            runCatching { resolver?.resolveIfNeeded(done.identifier ?: done.id, done.description) }
+                .onFailure { err("resolve ${done.identifier}: ${it.message}") }
+        }
         val agents = runCatching { client.listAgents(companyId) }
             .onFailure { err("listAgents failed: ${it.message}"); return 0 }
             .getOrThrow()
@@ -114,7 +119,8 @@ fun main(args: Array<String>) {
         customRoutes = ComponentRouter.parseOverrides(HybridSupervisor.env("PAPERCLIP_COMPONENT_ROUTES")),
     )
     val ciWatch = CiWatch(PaperclipIssueSignals(client), ProcessGhCheckSource())
-    val supervisor = HybridSupervisor(client, router, ciWatch)
+    val resolver = BacklogResolver(repoRoot = java.nio.file.Path.of("").toAbsolutePath(), git = ProcessGitRunner)
+    val supervisor = HybridSupervisor(client, router, ciWatch, resolver)
 
     if (dryRun) {
         val companyId = HybridSupervisor.env("PAPERCLIP_COMPANY_ID") ?: client.resolveCompanyId()
