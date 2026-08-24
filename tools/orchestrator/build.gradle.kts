@@ -78,6 +78,19 @@ val checkBacklog by tasks.registering(JavaExec::class) {
     args = listOf(rootProject.projectDir.absolutePath)
 }
 
+val supervisor by tasks.registering(JavaExec::class) {
+    group = "paperclip"
+    description = "Hybrid loop supervisor tick (dispatch/routing; --dry-run previews, --daemon loops)"
+    dependsOn(tasks.compileKotlin)
+    classpath = sourceSets.main.get().runtimeClasspath
+    mainClass.set("io.mazewall.orchestrator.HybridSupervisorKt")
+    workingDir = rootProject.projectDir
+    val argsFile = project.findProperty("supervisorArgsFile") as String?
+    if (!argsFile.isNullOrBlank()) {
+        args(file(argsFile).readLines().filter { it.isNotEmpty() })
+    }
+}
+
 tasks.named("check") {
     dependsOn(checkBacklog)
 }
