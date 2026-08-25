@@ -92,6 +92,11 @@ class DispatchSelectorTest {
     }
 
     @Test
+    fun `policy constants are pinned`() {
+        assertEquals("testing", HybridSupervisor.CODEX_TESTING_BARRIER_COMPONENT)
+    }
+
+    @Test
     fun `grok and antigravity adapters are refused for loop work unless unlocked`() {
         assertEquals(
             setOf("antigravity", "grok_local"),

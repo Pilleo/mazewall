@@ -60,6 +60,20 @@ class HybridSupervisor(
                 err("no roster agent for component '$component' and no '${router.defaultAdapter}' fallback")
                 return dispatched
             }
+            // Operator policy (2026-08-25b): Codex never executes testing-component
+            // work (its verdicts gate merges; independence preserved by routing
+            // test-authoring to Vibe/Jules).
+            if (agent.adapterType == "codex_local" &&
+                component?.lowercase() == "testing" &&
+                env("PAPERCLIP_ALLOW_CODEX_TESTING")?.lowercase() != "true"
+            ) {
+                err(
+                    "REFUSED dispatch of ${candidate.identifier}: codex_local is barred " +
+                        "from testing-component work. Set PAPERCLIP_ALLOW_CODEX_TESTING=true " +
+                        "or route to vibe/jules.",
+                )
+                return dispatched
+            }
             // Operator policy (2026-08-25): experiments run on Vibe/Jules ONLY.
             // Grok and Antigravity are production-owned capacity; sending them
             // loop work is a hard failure unless explicitly unlocked via env.
@@ -113,6 +127,7 @@ class HybridSupervisor(
 
     companion object {
         val FORBIDDEN_EXPERIMENT_ADAPTERS = setOf("antigravity", "grok_local")
+        const val CODEX_TESTING_BARRIER_COMPONENT = "testing"
 
         fun env(key: String): String? = System.getenv(key)?.takeIf { it.isNotBlank() }
     }
