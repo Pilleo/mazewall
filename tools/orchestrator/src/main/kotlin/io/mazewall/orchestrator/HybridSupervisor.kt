@@ -24,7 +24,7 @@ class HybridSupervisor(
     private val err: (String) -> Unit = System.err::println,
     private val sleepMs: (Long) -> Unit = { Thread.sleep(it) },
 ) {
-    fun tick(maxDispatch: Int): Int {
+    fun tick(maxDispatch: Int, forceIdentifier: String? = null): Int {
         // External failures degrade to a skipped tick, never a crash (orchestrator rule 4).
         val issues = runCatching { client.listIssues(companyId) }
             .onFailure { err("listIssues failed: ${it.message}"); return 0 }
@@ -50,7 +50,7 @@ class HybridSupervisor(
             val fresh = runCatching { client.listIssues(companyId) }
                 .onFailure { err("listIssues failed mid-tick: ${it.message}"); return dispatched }
                 .getOrThrow()
-            val candidate = DispatchSelector.select(fresh) ?: break
+            val candidate = DispatchSelector.select(fresh, forceIdentifier) ?: break
 
             val component = router.componentOf(candidate.description)
             val urlKey = router.urlKeyFor(component)
@@ -167,7 +167,13 @@ fun main(args: Array<String>) {
         val companyId = HybridSupervisor.env("PAPERCLIP_COMPANY_ID") ?: client.resolveCompanyId()
         val byUrlKey = client.listAgents(companyId).associateBy { it.urlKey }
         val byAdapter = client.listAgents(companyId).associateBy { it.adapterType }
-        DispatchSelector.ordered(client.listIssues(companyId))
+        val scoped = client.listIssues(companyId).let { all ->
+            val force = HybridSupervisor.env("PAPERCLIP_FORCE_IDENTIFIER")
+            if (force.isNullOrBlank()) all else all.filter {
+                it.identifier.equals(force, ignoreCase = true)
+            }
+        }
+        DispatchSelector.ordered(scoped)
             .take(5)
             .forEach { issue ->
                 val component = router.componentOf(issue.description)
@@ -182,7 +188,10 @@ fun main(args: Array<String>) {
     if (daemon) {
         supervisor.runForever()
     } else {
-        val dispatched = supervisor.tick(HybridSupervisor.env("PAPERCLIP_MAX_DISPATCH")?.toIntOrNull() ?: 1)
+        val dispatched = supervisor.tick(
+            HybridSupervisor.env("PAPERCLIP_MAX_DISPATCH")?.toIntOrNull() ?: 1,
+            HybridSupervisor.env("PAPERCLIP_FORCE_IDENTIFIER"),
+        )
         println("Loop tick complete ($dispatched dispatched).")
     }
 }

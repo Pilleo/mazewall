@@ -92,6 +92,24 @@ class DispatchSelectorTest {
     }
 
     @Test
+    fun `forcing restricts to identifier but keeps every safety gate`() {
+        val issues = listOf(
+            issue("a", "MAZ-80", priority = "high", number = 80),
+            issue("b", "MAZ-81", number = 81), // low, marker present
+        )
+        assertEquals(
+            "MAZ-81",
+            DispatchSelector.select(issues, "MAZ-81")?.identifier,
+        )
+        assertEquals(null, DispatchSelector.select(issues, "MAZ-NONE")?.identifier)
+        val gated = issue(
+            "c", "MAZ-82", number = 82,
+            blockers = listOf(PaperclipBlocker("b", "in_review", "MAZ-79")),
+        )
+        assertEquals(null, DispatchSelector.select(listOf(gated), "MAZ-82")?.identifier)
+    }
+
+    @Test
     fun `unknown priority sorts as lowest`() {
         val chosen = DispatchSelector.select(
             listOf(
