@@ -8,9 +8,10 @@ run_round() {
     echo "===== $label ====="
     ./build/wp03_driver 1000000 &
     local driver=$!
-    sleep 0.15
+    sleep 0.05
+    echo "[tier-e] target maps: $(grep -m1 "$so" /proc/$driver/maps || echo NOT_MAPPED_YET)"
     ./build/wp03_loader --pid "$driver" --attach "$mode" \
-        --marker "./build/$so" --duration 8
+        --marker "/work/build/$so" --duration 8
     local rc=$?
     wait "$driver" 2>/dev/null
     echo "===== $label loader_rc=$rc ====="

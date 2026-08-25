@@ -8,6 +8,7 @@
 #include <bpf/bpf.h>
 #include <bpf/libbpf.h>
 #include <errno.h>
+#include <limits.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -16,6 +17,15 @@
 #include <unistd.h>
 
 static volatile sig_atomic_t g_stop;
+
+static int libbpf_printf_logger(enum libbpf_print_level level, const char *format,
+				va_list args)
+{
+	if (level == LIBBPF_DEBUG)
+		return 0;
+	vfprintf(stderr, format, args);
+	return 0;
+}
 
 static void on_signal(int sig)
 {
@@ -95,6 +105,19 @@ int main(int argc, char **argv)
 			"(use scripts/run_wp03.sh)\n");
 		return 1;
 	}
+
+	/* USDT attachment reconciles .note.stapsdt addresses against the
+	 * TARGET's /proc/<pid>/maps entries, which are absolute. Normalize so
+	 * path-form differences cannot silently park the probe off-map. */
+	char resolved_marker[PATH_MAX];
+	if (!realpath(marker_path, resolved_marker)) {
+		fprintf(stderr, "cannot resolve marker path %s: %s\n",
+			marker_path, strerror(errno));
+		return 1;
+	}
+	marker_path = resolved_marker;
+	if (getenv("TIER_E_DEBUG"))
+		libbpf_set_print(libbpf_printf_logger);
 
 	struct bpf_object *object =
 		bpf_object__open_file("build/context_probe.bpf.o", NULL);
