@@ -1,9 +1,11 @@
 # Tier E WP-04 Kotlin-phase runner image.
 #
-# Base: the house test-runner (Ubuntu 26.04 + JDK 25 at /opt/java/openjdk),
-# extended with the runtime libraries libtier_e_bpf.so needs. Built on demand
-# by scripts/run_wp04.sh.
-FROM localhost/mazewall-test-runner
+# Base: Eclipse Temurin JRE 25 (Ubuntu-based; java on PATH). Extended with the
+# runtime libraries libtier_e_bpf.so requires. Built on demand by
+# scripts/run_wp04.sh into whichever container backend executes the privileged
+# phase — deliberately no dependency on images that live only in another
+# engine's storage (rootless vs rootful stores are separate).
+FROM docker.io/library/eclipse-temurin:25-jre
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
