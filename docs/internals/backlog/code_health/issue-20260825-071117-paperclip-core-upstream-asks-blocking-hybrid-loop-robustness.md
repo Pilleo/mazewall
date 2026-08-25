@@ -31,4 +31,6 @@ stall during the MAZ-102 loop run (2026-08-25). Filed individually upstream as a
 3. **First-class no-changes-needed outcome**: agents concluding "already fixed" produce empty
    diffs; board needs a done-without-diff disposition instead of silent blocked states.
 4. **Interactions API discoverability**: request_confirmation shape + /accept endpoint were
+5. **Promoted runs must carry task context**: `scheduled_retry`/heartbeat-recovery promotion constructs run contexts WITHOUT task/paperclipIssue — adapters crash-loop before polling. Fixed adapter-side (PR #11); core fix tracked as jules-adapter #12.
+6. **Empty-diff completions open empty PRs**: Jules "docs-resolve" verdicts produce zero-change branches; board needs the no-changes outcome (item 3) and adapters should skip PR creation (jules-adapter #14).
    reverse-engineered from jules-adapter source; document in /llms.
