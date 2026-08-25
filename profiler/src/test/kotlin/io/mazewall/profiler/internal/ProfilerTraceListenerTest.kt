@@ -101,7 +101,8 @@ class ProfilerTraceListenerTest {
             listener.start(readyLatch)
 
             readyLatch.await(2, TimeUnit.SECONDS)
-            Thread.sleep(100) // allow worker thread finally block to execute
+            val workerTerminated = listener.workerTerminatedLatch.await(2, TimeUnit.SECONDS)
+            org.junit.jupiter.api.Assertions.assertTrue(workerTerminated, "Worker thread should terminate cleanly on EOF")
 
             // Verify worker thread has closed it exactly once
             assertEquals(1, closeCount.get())
@@ -180,18 +181,19 @@ class ProfilerTraceListenerTest {
                 pathCache = mutableMapOf()
             )
 
+            val eventCollectedLatch = CountDownLatch(1)
+            listener.onEventCollected = { eventCollectedLatch.countDown() }
+
             val readyLatch = CountDownLatch(1)
             listener.start(readyLatch)
             readyLatch.await(2, TimeUnit.SECONDS)
 
-            // Wait for the asynchronous collector thread to process the event
-            var elapsed = 0
-            while (accumulatedLogs.size < 1 && elapsed < 2000) {
-                Thread.sleep(10)
-                elapsed += 10
-            }
+            val collected = eventCollectedLatch.await(5, TimeUnit.SECONDS)
+            org.junit.jupiter.api.Assertions.assertTrue(collected, "Event should be collected by collector thread")
 
             listener.close()
+            val collectorTerminated = listener.collectorTerminatedLatch.await(2, TimeUnit.SECONDS)
+            org.junit.jupiter.api.Assertions.assertTrue(collectorTerminated, "Collector thread should terminate cleanly on close")
 
             assertEquals(1, accumulatedLogs.size)
             assertEquals("OPEN", accumulatedLogs[0].syscallName)

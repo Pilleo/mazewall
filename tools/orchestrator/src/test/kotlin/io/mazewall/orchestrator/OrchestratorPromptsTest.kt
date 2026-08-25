@@ -17,6 +17,10 @@ class OrchestratorPromptsTest {
         assertTrue(prompt.contains("JVM Coordination Invariants"))
         assertTrue(prompt.contains("FFM Safety"))
         assertTrue(prompt.contains("Loom Carrier Protection"))
+        assertTrue(prompt.contains(".agents/skills/fix_backlog_item/SKILL.md"))
+        assertTrue(prompt.contains(".agents/skills/loop_driven_development/SKILL.md"))
+        assertTrue(prompt.contains("./scripts/new_backlog_issue.sh"))
+        assertTrue(prompt.contains("Execute **Needed**"))
     }
 
     @Test

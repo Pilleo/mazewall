@@ -4,6 +4,10 @@ import java.io.File
 import java.io.InputStream
 import java.nio.file.Files
 import java.nio.file.Paths
+import java.util.concurrent.Callable
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.TimeoutException
 
 /**
  * DiagnosticTriageRunner collects local, domain-specific telemetry for mazewall failures.
@@ -50,16 +54,42 @@ object DiagnosticTriageRunner {
         println("==> Local diagnostic triage complete. Report written to: build/triage_report.json")
     }
 
+    /** Upper bound for any single external process capture; diagnostics must never hang the caller. */
+    private const val CAPTURE_TIMEOUT_SECONDS = 10L
+
+    /**
+     * Reads [process]'s stdout with a hard time bound. External targets (dmesg, jcmd against a busy
+     * Gradle daemon) can block indefinitely; a timed-out capture degrades to a diagnostic string
+     * instead of hanging report generation.
+     */
+    private fun readProcessOutputBounded(process: Process): String {
+        val executor = Executors.newSingleThreadExecutor { r -> Thread(r, "triage-capture").apply { isDaemon = true } }
+        return try {
+            val future = executor.submit(Callable { process.inputStream.bufferedReader().readText() })
+            try {
+                future.get(CAPTURE_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            } catch (e: TimeoutException) {
+                future.cancel(true)
+                process.destroyForcibly()
+                "Capture timed out after ${CAPTURE_TIMEOUT_SECONDS}s."
+            }
+        } finally {
+            executor.shutdownNow()
+        }
+    }
+
     private fun captureDmesg(): String {
         return try {
             val process = ProcessBuilder("dmesg").start()
-            process.inputStream.bufferedReader().useLines { lines ->
-                lines.filter { line ->
-                    line.contains("seccomp", ignoreCase = true) || 
-                    line.contains("landlock", ignoreCase = true) ||
-                    line.contains("audit", ignoreCase = true)
-                }.take(100).joinToString("\n")
-            }
+            readProcessOutputBounded(process)
+                .lineSequence()
+                .filter { line ->
+                    line.contains("seccomp", ignoreCase = true) ||
+                        line.contains("landlock", ignoreCase = true) ||
+                        line.contains("audit", ignoreCase = true)
+                }
+                .take(100)
+                .joinToString("\n")
         } catch (e: Exception) {
             "Unable to capture dmesg: ${e.message}"
         }
@@ -83,7 +113,7 @@ object DiagnosticTriageRunner {
             sb.append("=== JVM Thread Dump for PID $pid ===\n")
             try {
                 val process = ProcessBuilder("jcmd", pid.toString(), "Thread.print").start()
-                val output = process.inputStream.bufferedReader().use { it.readText() }
+                val output = readProcessOutputBounded(process)
                 sb.append(output)
             } catch (e: Exception) {
                 sb.append("Failed to capture thread dump for PID $pid: ${e.message}\n")

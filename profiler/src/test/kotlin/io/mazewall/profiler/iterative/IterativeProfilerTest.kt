@@ -176,6 +176,47 @@ class IterativeProfilerTest {
     }
 
     @Test
+    fun `test sibling directory with string-prefix name is granted read not write`() {
+        // Regression for issue-056: allowed=/base/dir must NOT match /base/dir-extra.
+        runPlatformTest {
+            val base = File("/tmp/iterative_sibling_base").absoluteFile
+            val allowedDir = File(base, "dir").absoluteFile
+            val sibling = File(base, "dir-extra").absoluteFile
+            allowedDir.mkdirs()
+            sibling.mkdirs()
+            val siblingFile = File(sibling, "f.txt")
+            siblingFile.writeText("content")
+
+            try {
+                val basePolicy =
+                    Policy
+                        .builder()
+                        .unblock(Syscall.OPEN, Syscall.OPENAT, Syscall.OPENAT2)
+                        .allowFsRead(allowedDir.absolutePath)
+                        .build()
+
+                val compiledPolicy =
+                    IterativeProfiler.profile(basePolicy) {
+                        siblingFile.readText()
+                    }
+
+                // The sibling path is a distinct component-wise prefix: it must receive READ,
+                // and the loop must converge instead of oscillating until maxRetries.
+                assertTrue(
+                    compiledPolicy.allowedFsReadPaths.any { it.value == siblingFile.absolutePath },
+                    "Sibling-path read must be granted as READ; reads=${compiledPolicy.allowedFsReadPaths}",
+                )
+                assertTrue(
+                    !compiledPolicy.allowedFsWritePaths.any { it.value == siblingFile.absolutePath },
+                    "Sibling-path read must not be misclassified as a write",
+                )
+            } finally {
+                base.deleteRecursively()
+            }
+        }
+    }
+
+    @Test
     fun `test iterative profiling retry limit exceeded`() {
         runPlatformTest {
             val basePolicy = Policy.PURE_COMPUTE_UNSAFE

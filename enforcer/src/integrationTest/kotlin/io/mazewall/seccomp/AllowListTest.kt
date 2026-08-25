@@ -14,34 +14,13 @@ import java.util.concurrent.Executors
 
 @NeedsFreshJvm
 class AllowListTest : BaseIntegrationTest() {
+    /**
+     * Canonical JVM floor from JvmFloorPresets (issue-20260823-190000): includes PREAD64 —
+     * bootstrap/jrt random-access class reads are positional; a floor missing PREAD64 corrupts
+     * lazy bootstrap classloads (ClassFormatError with garbage magic).
+     */
     private fun jvmFloor(): Array<Syscall> =
-        arrayOf(
-            Syscall.WRITE,
-            Syscall.EXIT,
-            Syscall.EXIT_GROUP,
-            Syscall.FUTEX,
-            Syscall.RT_SIGRETURN,
-            Syscall.SCHED_YIELD,
-            Syscall.MADVISE,
-            Syscall.MMAP,
-            Syscall.MPROTECT,
-            Syscall.MUNMAP,
-            Syscall.GETTID,
-            Syscall.GETPID,
-            Syscall.CLOCK_GETTIME,
-            Syscall.PRCTL,
-            Syscall.READ,
-            Syscall.FSTAT,
-            Syscall.LSEEK,
-            Syscall.CLOSE,
-            Syscall.BRK,
-            Syscall.FSTATAT,
-            Syscall.STATX,
-            Syscall.RT_SIGACTION,
-            Syscall.RT_SIGPROCMASK,
-            Syscall.GETRANDOM,
-            Syscall.FCNTL,
-        )
+        io.mazewall.enforcer.engine.JvmFloorPresets.fullJvmFloor()
 
     private fun preWarm() {
         // Force loading of classes and native symbols that PureJavaBpfEngine and
@@ -92,7 +71,7 @@ LinuxNative.raw.syscall(
                     val policy =
                         Policy
                             .builder()
-                            .defaultAction(io.mazewall.core.SeccompAction.ACT_ERRNO)
+                            .defaultAction(io.mazewall.core.SeccompAction.ACT_ERRNO())
                             .allow(*jvmFloor())
                             .build()
 
@@ -122,7 +101,7 @@ LinuxNative.raw.syscall(
                     val policy =
                         Policy
                             .builder()
-                            .defaultAction(io.mazewall.core.SeccompAction.ACT_ERRNO)
+                            .defaultAction(io.mazewall.core.SeccompAction.ACT_ERRNO())
                             .allow(*jvmFloor())
                             .build()
 

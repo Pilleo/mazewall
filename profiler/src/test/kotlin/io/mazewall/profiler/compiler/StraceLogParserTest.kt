@@ -150,4 +150,21 @@ class StraceLogParserTest {
         assertEquals("LINKAT", syscall.name)
         assertEquals(listOf("/source"), syscall.paths)
     }
+
+    @Test
+    fun `parseWithStats counts unfinished lines as dropped records and ignores non-syscall markers`() {
+        val log = """
+            +++ exited with 0 +++
+            --- SIGCHLD {si_signo=SIGCHLD} ---
+            12345 openat(AT_FDCWD, "/tmp/a", O_RDONLY) = 3
+            12345 openat(AT_FDCWD, "/tmp/b", O_RDONLY <unfinished ...>
+            12345 <... openat resumed> ) = 4
+            12345 invalid_syntax_without_parens
+        """.trimIndent()
+
+        val result = StraceLogParser.parseWithStats(log)
+        assertEquals(1, result.observations.size)
+        assertEquals(listOf("/tmp/a"), result.observations[0].paths)
+        assertEquals(2, result.droppedRecords)
+    }
 }

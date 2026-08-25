@@ -19,6 +19,16 @@ Adhere strictly to the following project invariants:
 
     fun taskPrompt(originalIssueBody: String): String {
         return """
+# Jules task (no ACP)
+
+This markdown **is** the plan. Execute **Needed** in order. Use **Investigation** and **Side effects** as the impact list. Do not invent a new issue id or rename the backlog file.
+
+Before editing Kotlin/Java, follow `.agents/skills/file_structure/SKILL.md`.
+Implement using `.agents/skills/fix_backlog_item/SKILL.md` and `.agents/skills/loop_driven_development/SKILL.md`.
+If you discover a *new* issue, run `./scripts/new_backlog_issue.sh` (see `.agents/skills/create_backlog_issue/SKILL.md`). Do not hand-name `issue-*.md`.
+
+---
+
 $originalIssueBody
 
 ---
@@ -28,11 +38,12 @@ $QUALITY_AND_SAFETY_GUIDELINES
     }
 
     fun reviewTaskIssueBody(additionalComments: String): String {
-        val commentsSection = if (additionalComments.isNotBlank() && additionalComments.lowercase() != "all" && additionalComments.lowercase() != "none" && additionalComments.lowercase() != "default") {
-            "\n\n**Additional Focus Instructions:**\n$additionalComments"
-        } else {
-            ""
-        }
+        val commentsSection =
+            if (additionalComments.isNotBlank() && additionalComments.lowercase() != "all" && additionalComments.lowercase() != "none" && additionalComments.lowercase() != "default") {
+                "\n\n**Additional Focus Instructions:**\n$additionalComments"
+            } else {
+                ""
+            }
         return """
 $REVIEW_SKILL_HEADER$commentsSection
 
@@ -51,7 +62,8 @@ $QUALITY_AND_SAFETY_GUIDELINES
                 }
                 append(pushWarning)
             }
-            append("""
+            append(
+                """
 
 
 @jules You are acting as a **code reviewer**, not an implementer, on PR #$prNumber (SHA: $shaPrefix).
@@ -91,7 +103,8 @@ Structure your comment as follows:
 `VERDICT: UNCERTAIN`
 
 ---
-⛔ Reminder: post your review as a **comment only**. Do NOT edit files or push commits. ⛔""")
+⛔ Reminder: post your review as a **comment only**. Do NOT edit files or push commits. ⛔"""
+            )
         }
     }
 }

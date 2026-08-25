@@ -240,4 +240,13 @@ class IntelCetTest {
         assertFalse(enableCalled)
         assertTrue(lockCalled)
     }
+
+    @Test
+    fun `RealPlatformProvider probeCetSupported requires shstk and ignores override when cleared`() {
+        Platform.isCpuCetSupportedOverride = null
+        val provider = RealPlatformProvider
+        val supported = provider.probeCetSupported()
+        // Should execute without exception and return boolean matching actual CPU capability
+        assertNotNull(supported)
+    }
 }

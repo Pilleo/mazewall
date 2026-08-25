@@ -15,6 +15,7 @@ solution_approved: true
 chosen_solution: "A"
 blast_radius: "low"
 reversible: true
+paperclip_issue_id: ad1a39f1-d8a5-484c-b19a-6df2425f7042
 ---
 
 # 🔵 [Severity: LOW]: Orchestrator: Close GitHub Issue Automatically on RESOLVE_TASK

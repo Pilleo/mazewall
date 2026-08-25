@@ -11,7 +11,9 @@ target_modules:
 target_files:
   - "tools/orchestrator/src/main/kotlin/io/mazewall/orchestrator/GitHubCli.kt"
 effort: "small"
-autonomy: "supervised"
+autonomy: "autonomous"
+open_questions: false
+paperclip_issue_id: b057dbe8-bbbc-4161-b751-6f1b55cefe76
 ---
 
 # 🟡 [Severity: MEDIUM]: GitHub CLI Authentication Resilience and Fallback for Invalid GITHUB_TOKEN
@@ -25,3 +27,9 @@ Per project rules, agents must not modify or filter `GITHUB_TOKEN` within codeba
 1. Enhance `RealGitHubClient.executeInDir` to catch `HTTP 401` authentication exceptions when executing `gh` CLI commands.
 2. If a `gh` execution fails with `HTTP 401: Bad credentials`, log a clear diagnostic warning to `stderr` indicating that the current environment token is invalid and prompt the operator to check `gh auth status`.
 3. Provide robust retry and error diagnostics in `GitHubCli.kt` so authentication errors trigger immediate operator notifications rather than infinite loop retries.
+
+**Architectural Decision:**
+1. **Operator Notification & Exit Strategy:** When `gh` fails with HTTP 401, the Orchestrator emits an actionable diagnostic message to `stderr` explaining how to refresh credentials via `gh auth login` / `gh auth status` and exits gracefully with exit code 2 to prevent rapid retry exhaustion.
+2. **Duplicate Consolidation:** Duplicate issue `issue-20260730-074830` has been consolidated into this canonical issue.
+
+

@@ -75,14 +75,24 @@ object NativeConstants {
     const val EINTR = 4
     const val EIO = 5
     const val EBADF = 9
+    const val EINVAL = 22
+    const val ELOOP = 40
     const val ENOPKG = 65
     const val EOPNOTSUPP = 95
     const val ENOSYS = 38
+    const val EFAULT = 14
+    const val ETIMEDOUT = 110
 
     // File options
     const val O_PATH = 0x01000000
     const val O_CLOEXEC = 0x00080000
     const val O_NOFOLLOW = 0x00020000
+    const val O_RDONLY = 0
+    const val O_DIRECTORY = 0x00010000
+
+    /** openat2(2) RESOLVE_BENEATH: path must stay under dirfd. */
+    const val RESOLVE_BENEATH = 0x08L
+    const val EXDEV = 18
     const val AT_FDCWD = -100
     const val AT_EMPTY_PATH = 0x1000
     const val F_DUPFD = 0

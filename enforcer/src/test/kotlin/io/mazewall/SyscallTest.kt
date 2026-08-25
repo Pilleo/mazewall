@@ -61,6 +61,11 @@ class SyscallTest {
         Syscall.ACCEPT4 to arch.accept4,
         Syscall.SENDTO to arch.sendto,
         Syscall.SENDMSG to arch.sendmsg,
+        Syscall.RECVFROM to arch.recvfrom,
+        Syscall.GETSOCKOPT to arch.getsockopt,
+        Syscall.SETSOCKOPT to arch.setsockopt,
+        Syscall.GETSOCKNAME to arch.getsockname,
+        Syscall.GETPEERNAME to arch.getpeername,
         Syscall.SENDMMSG to arch.sendmmsg,
         Syscall.RECVMMSG to arch.recvmmsg,
         Syscall.SOCKET to arch.socket,
@@ -85,6 +90,7 @@ class SyscallTest {
 
     private fun getFsAttrMappings(arch: Arch) =
         mapOf(
+        Syscall.CREAT to arch.creat,
         Syscall.TRUNCATE to arch.truncate,
         Syscall.FTRUNCATE to arch.ftruncate,
         Syscall.GETCWD to arch.getcwd,
@@ -148,6 +154,7 @@ class SyscallTest {
         Syscall.CHROOT to arch.chroot,
         Syscall.IOCTL to arch.ioctl,
         Syscall.PRCTL to arch.prctl,
+        Syscall.ARCH_PRCTL to arch.archPrctl,
         Syscall.RT_SIGACTION to arch.rt_sigaction,
         Syscall.RT_SIGPROCMASK to arch.rt_sigprocmask,
         Syscall.RT_SIGRETURN to arch.rt_sigreturn,

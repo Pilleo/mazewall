@@ -33,7 +33,10 @@ class ArchitectureTest {
             .callMethodWhere(object : DescribedPredicate<JavaMethodCall>("calls to LinuxNative implementation methods") {
                 override fun test(input: JavaMethodCall): Boolean {
                     return input.target.owner.isAssignableTo(LinuxNative::class.java) &&
-                        input.target.name !in listOf("getFileSystem", "getNetworking", "getProcess", "getMemory", "getRaw")
+                        input.target.name !in listOf(
+                        "getFileSystem", "getNetworking", "getProcess", "getMemory", "getRaw",
+                        "isRealEngineActive", // metadata-only probe (issue-20260823-172003), not an I/O bypass
+                    )
                 }
             })
             .because("direct calls to LinuxNative implementation bypass the testable NativeEngine abstraction")
@@ -41,8 +44,21 @@ class ArchitectureTest {
     }
 
     @ArchTest
-    fun rawSyscallOperationsMustOnlyBeUsedByAllowedPackages(allClasses: com.tngtech.archunit.core.domain.JavaClasses) {
+    fun rawFfmTypesMustResideInFfiPackages(allClasses: com.tngtech.archunit.core.domain.JavaClasses) {
+        // issue-20260823-172006: all raw java.lang.foreign usage must live in io.mazewall.ffi..
+        // (platform owns generic ABI/engine primitives; enforcer owns domain structures).
         noClasses()
+            .that()
+            .resideOutsideOfPackages("io.mazewall.ffi..")
+            .should()
+            .dependOnClassesThat()
+            .resideInAPackage("java.lang.foreign..")
+            .because("raw FFM access must be isolated to io.mazewall.ffi.. per architectural-map.md")
+            .check(allClasses)
+    }
+
+    @ArchTest
+    fun rawSyscallOperationsMustOnlyBeUsedByAllowedPackages(allClasses: com.tngtech.archunit.core.domain.JavaClasses) {        noClasses()
             .that()
             .resideOutsideOfPackages(
                 "io.mazewall.seccomp..",
@@ -194,6 +210,9 @@ class ArchitectureTest {
             .and()
             .areDeclaredInClassesThat()
             .haveSimpleNameNotStartingWith("ContainmentViolationDetector")
+            .and()
+            .areDeclaredInClassesThat()
+            .haveSimpleNameNotStartingWith("MazewallEvents")
             .and()
             .areDeclaredInClassesThat()
             .resideOutsideOfPackages(
@@ -393,6 +412,7 @@ class ArchitectureTest {
                     val name = input.name
                     return "SandboxDispatcher" !in name &&
                         "SupervisorDaemon" !in name &&
+                        "JvmChildProcess" !in name &&
                         "SeccompDaemonEngine" !in name &&
 
                         "SupervisorSession" !in name &&
@@ -401,7 +421,11 @@ class ArchitectureTest {
                         "JVMValidationListener" !in name &&
                         "JvmFloorWorkload" !in name &&
                         "Profiler" !in name &&
-                        "IterativeProfiler" !in name
+                        // Containment owns raw-pool construction; everything
+                        // else must go through ContainedExecutors factories.
+                        "ContainedExecutors" !in name &&
+                        name == "io.mazewall.Mazewall" ||
+                            name.startsWith("io.mazewall.Mazewall$")
                 }
             })
             .should()
@@ -523,6 +547,11 @@ class ArchitectureTest {
                 "io.mazewall.enforcer.supervisor.SupervisorRoute\$SecureExec",
                 "io.mazewall.enforcer.supervisor.SupervisorRoute\$Abort",
             ),
+            "io.mazewall.enforcer.supervisor.SupervisedOpen" to setOf(
+                "io.mazewall.enforcer.supervisor.SupervisedOpen\$Open",
+                "io.mazewall.enforcer.supervisor.SupervisedOpen\$OpenAt",
+                "io.mazewall.enforcer.supervisor.SupervisedOpen\$OpenAt2",
+            ),
         )
         for ((parent, kids) in expected) {
             val actual = allClasses
@@ -567,17 +596,19 @@ class ArchitectureTest {
                     val ownerName = input.target.owner.name
                     val methodName = input.target.name
                     val isUnsafeCall = (ownerName == "io.mazewall.core.FileDescriptor\$Companion" ||
-                            ownerName == "io.mazewall.core.FileDescriptor") &&
-                           (methodName == "unsafe" || methodName == "unsafe\$default")
-                    
+                        ownerName == "io.mazewall.core.FileDescriptor") &&
+                        (methodName == "unsafe" || methodName == "unsafe\$default")
+
                     // Exclude internal synthetic calls from Companion itself (unsafe$default -> unsafe)
                     val isCompanionInternalCall = input.origin.owner.name == "io.mazewall.core.FileDescriptor\$Companion"
-                    
+
                     return isUnsafeCall && !isCompanionInternalCall
                 }
             })
-            .because("Use role-specific factories (generic, unixSocket, ruleset, oPath, seccompNotif, pid) or adopt() for kernel-reused FDs. " +
-                    "unsafe() creates non-live tokens for retired FDs.")
+            .because(
+                "Use role-specific factories (generic, unixSocket, ruleset, oPath, seccompNotif, pid) or adopt() for kernel-reused FDs. " +
+                    "unsafe() creates non-live tokens for retired FDs."
+            )
             .check(allClasses)
     }
 }

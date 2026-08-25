@@ -324,6 +324,22 @@ We inspect the `prot` argument (the 3rd argument, `args[2]` in `seccomp_data`) o
 ### JVM Stability Protection (`clone`)
 We inspect the `flags` argument of `clone`. We allow `clone` only if it includes **both** `CLONE_THREAD` and `CLONE_VM` (indicating a new thread). Standard process forking (`fork`) and memory-sharing processes (`CLONE_VM` without `CLONE_THREAD`) are blocked. `clone3` is blocked with `ENOSYS` to force runtimes to fallback to the inspectable legacy `clone`.
 
+### Int-ABI Arguments: `EqualsAny32` (high-word garbage)
+Syscall arguments the kernel ABI defines as `int` (prctl *option*, socket *domain*) occupy a u64
+slot whose upper 32 bits are unspecified — register reuse can leave garbage there. Comparing the
+full 64-bit slot produces spurious denials. `ArgCheck.EqualsAny32` emits a low-word-only
+comparison chain (HI word never loaded) and is adopted by `UnsafePrctlInspector` (prctl option)
+and `SocketAddressFamilyInspector` (address family). Oracle support:
+`BpfSimulator.simulate(..., args)` injects synthetic argument vectors for tests.
+(issue-075 problem 3.)
+
+### Floor-Design Constraint: `jvmCriticalNrs` OVERRIDE Semantics
+`BpfFilter.emitLinearScan` force-ALLOWs every NR in `getJvmCriticalNrs(arch)`, **overriding
+explicit policy blocks**. Therefore only JVM-internal coordination primitives may join that set:
+anything policy-relevant (network I/O, exec, file writes) must NEVER be added — it would silently
+gut NO_NETWORK-style presets. Network stability syscalls deliberately live in
+`JvmFloorPresets.NETWORK_STABILITY_FLOOR` as operator opt-in instead (issue-075 problem 2).
+
 ---
 
 ## 9. HotSpot JVM Whitelist Risks (Safepoints & GC Deadlocks)
@@ -342,6 +358,26 @@ If a custom `mazewall` policy aggressively blocks any of these coordination sysc
 ### JVM Platform Comparison: JIT vs. AOT
 * **HotSpot JVM (JIT):** Requires a highly permissive system call floor. Because of dynamic compilation, runtime stack walking, and lazy classloading, application threads must leave synchronization, timing, and memory management syscalls unblocked to avoid deadlocks.
 * **GraalVM Native Image (AOT):** Enables a much stricter security floor. With no JIT thread, no dynamic classloading, and a highly streamlined runtime footprint, a native executable can run safely under policies that block timing, scheduling, and signal return syscalls that standard HotSpot would require.
+
+### 9.1 The Bootstrap-Read Closure: `pread64` Is Mandatory for Lazy Classloading
+
+Under ALLOW_LIST floors, **bootstrap class bytes are served by positional reads** (`pread64`) on
+the JDK modules image — `READ`+`LSEEK` alone are insufficient. A floor missing `pread64` causes
+mid-read `EPERM` on lazy loads of not-yet-touched boot classes, which the JDK surfaces as
+`ClassFormatError: Incompatible magic value <garbage>` (observed magics: `0xFFFFFFFF`, the ASCII
+text `java`) instead of a clean `IOException` — **deterministic corruption, not graceful failure**.
+
+Empirically proven (issue-20260823-190000): `AllowListTest` failed 2/2 runs with runtime
+self-verification enabled and passed 2/2 once `PREAD64` joined the floor; the verifier's
+post-install work merely *deterministically poked* an existing latent gap.
+
+**Rules for custom ALLOW_LIST floors:**
+1. Include the full bootstrap-read closure — use `JvmFloorPresets.BOOTSTRAP_READ_CLOSURE`
+   (or `fullJvmFloor()`) rather than hand-rolled lists.
+2. Validate narrow floors by running the workload with `-Dio.mazewall.selfVerify=true` at least
+   once in CI: post-install verification deterministically exercises lazy-load paths.
+3. Pre-touch known-required classes before containment when floors must stay minimal (see the
+   preload pattern in `ContainedExecutors.init`).
 
 ---
 

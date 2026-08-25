@@ -8,6 +8,7 @@ import io.mazewall.core.Syscall
 import io.mazewall.ffi.NativeConstants
 import org.junit.jupiter.api.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class BpfFilterTest {
@@ -55,7 +56,7 @@ class BpfFilterTest {
 
     @Test
     fun `ALLOW_LIST mode has RET DENY as default`() {
-        val policy = Policy.builder().defaultAction(io.mazewall.core.SeccompAction.ACT_ERRNO).build()
+        val policy = Policy.builder().defaultAction(io.mazewall.core.SeccompAction.ACT_ERRNO()).build()
         val filter = BpfFilter.build(arch, policy.definition).instructions
         val last = filter.last()
         assertEquals(0x06.toShort(), last.code)
@@ -67,31 +68,29 @@ class BpfFilterTest {
         val policy =
             Policy
                 .builder()
-                .defaultAction(io.mazewall.core.SeccompAction.ACT_ERRNO)
+                .defaultAction(io.mazewall.core.SeccompAction.ACT_ERRNO())
                 .allow(Syscall.READ)
                 .build()
         val filter = BpfFilter.build(arch, policy.definition).instructions
 
-        // Find JEQ read -> RET ALLOW
-        val readNr = Syscall.READ.numberFor(arch)
-        var found = false
-        for (i in filter.indices) {
-            val f = filter[i]
-            if (f.code == 0x15.toShort() && f.k == readNr) {
-                // jt=0 (match), next instruction should be RET ALLOW
-                val next = filter[i + 1]
-                if (next.code == 0x06.toShort() && next.k == NativeConstants.SECCOMP_RET_ALLOW) {
-                    found = true
-                    break
-                }
-            }
-        }
-        assertTrue(found, "Filter should return ALLOW for listed syscall in ALLOW_LIST mode")
+        // Simulate the filter for READ: an allow-list policy must return ALLOW (not fall through
+        // to the default errno action, and not match any other NR).
+        assertEquals(
+            NativeConstants.SECCOMP_RET_ALLOW,
+            evalBpf(filter, Syscall.READ.numberFor(arch)),
+            "Filter should return ALLOW for listed syscall in ALLOW_LIST mode",
+        )
+        // Guard against accidental nr==0 aliasing: a different syscall must get the default action.
+        assertEquals(
+            327681, // SECCOMP_RET_ERRNO | EPERM(1)
+            evalBpf(filter, Syscall.CONNECT.numberFor(arch)),
+            "Unlisted syscall must receive the default errno action",
+        )
     }
 
     @Test
     fun `clone3 always returns ENOSYS even in ALLOW_LIST`() {
-        val policy = Policy.builder().defaultAction(io.mazewall.core.SeccompAction.ACT_ERRNO).build()
+        val policy = Policy.builder().defaultAction(io.mazewall.core.SeccompAction.ACT_ERRNO()).build()
         val filter = BpfFilter.build(arch, policy.definition).instructions
 
         val clone3Nr = arch.clone3
@@ -172,9 +171,9 @@ class BpfFilterTest {
         for (i in filter.indices) {
             val f = filter[i]
             if (f.code == 0x15.toShort() && f.k == prctlNr) {
-                // Should load args[0] HI (offset 16 + 4 = 20)
+                // EqualsAny32 (int ABI): loads ONLY args[0] LO (offset 16); high word ignored
                 val ldArgs = filter[i + 1]
-                if (ldArgs.code == 0x20.toShort() && ldArgs.k == 20) {
+                if (ldArgs.code == 0x20.toShort() && ldArgs.k == 16) {
                     foundInspection = true
                 }
             }
@@ -190,14 +189,14 @@ class BpfFilterTest {
                 argIndex = 1,
                 check = ArgCheck.MaskEquals(0x04L, 0x00L),
                 ifMatched = SeccompAction.ACT_ALLOW,
-                ifNotMatched = SeccompAction.ACT_ERRNO,
+                ifNotMatched = SeccompAction.ACT_ERRNO(),
             ),
             SyscallInspection(
                 syscallNumber = 101,
                 argIndex = 2,
                 check = ArgCheck.MaskEquals(0x04L, 0x04L),
                 ifMatched = SeccompAction.ACT_ALLOW,
-                ifNotMatched = SeccompAction.ACT_ERRNO,
+                ifNotMatched = SeccompAction.ACT_ERRNO(),
             ),
         )
         val builder = BpfProgram.builder()
@@ -225,14 +224,14 @@ class BpfFilterTest {
                 argIndex = 0,
                 check = ArgCheck.EqualsAny(listOf(5L)),
                 ifMatched = SeccompAction.ACT_ALLOW,
-                ifNotMatched = SeccompAction.ACT_ERRNO,
+                ifNotMatched = SeccompAction.ACT_ERRNO(),
             ),
             SyscallInspection(
                 syscallNumber = 201,
                 argIndex = 0,
                 check = ArgCheck.EqualsAny(listOf(10L, 20L)),
                 ifMatched = SeccompAction.ACT_ALLOW,
-                ifNotMatched = SeccompAction.ACT_ERRNO,
+                ifNotMatched = SeccompAction.ACT_ERRNO(),
             ),
         )
         val builder = BpfProgram.builder()
@@ -263,7 +262,7 @@ class BpfFilterTest {
                 argIndex = 0,
                 check = ArgCheck.MaskEquals(maskVal, maskVal),
                 ifMatched = SeccompAction.ACT_ALLOW,
-                ifNotMatched = SeccompAction.ACT_ERRNO,
+                ifNotMatched = SeccompAction.ACT_ERRNO(),
             ),
         )
         val builder = BpfProgram.builder()
@@ -294,7 +293,7 @@ class BpfFilterTest {
                 argIndex = 0,
                 check = ArgCheck.EqualsAny(listOf(largeVal1, largeVal2)),
                 ifMatched = SeccompAction.ACT_ALLOW,
-                ifNotMatched = SeccompAction.ACT_ERRNO,
+                ifNotMatched = SeccompAction.ACT_ERRNO(),
             ),
         )
         val builder = BpfProgram.builder()
@@ -361,60 +360,51 @@ class BpfFilterTest {
         assertEquals(targetRetAction, sharedRetInst.k, "Shared RET instruction should return the blocked action")
     }
 
-    private fun evalBpf(instructions: List<BpfInstruction>, syscallNr: Int): Int {
-        var pc = 0
-        var accumulator = 0
-        while (pc < instructions.size) {
-            val inst = instructions[pc]
-            when (inst.code) {
-                0x20.toShort() -> { // BPF_LD_ABS
-                    if (inst.k == 0) { // SECCOMP_DATA_NR_OFFSET
-                        accumulator = syscallNr
-                    } else if (inst.k == 4) { // SECCOMP_DATA_ARCH_OFFSET
-                        accumulator = Arch.AUDIT_ARCH_X86_64
-                    } else {
-                        accumulator = 0
-                    }
-                    pc++
-                }
-                0x15.toShort() -> { // BPF_JEQ
-                    if (accumulator == inst.k) {
-                        pc += inst.jt.toInt() + 1
-                    } else {
-                        pc += inst.jf.toInt() + 1
-                    }
-                }
-                0x25.toShort() -> { // BPF_JGT
-                    val accUnsigned = accumulator.toLong() and 0xFFFFFFFFL
-                    val kUnsigned = inst.k.toLong() and 0xFFFFFFFFL
-                    if (accUnsigned > kUnsigned) {
-                        pc += inst.jt.toInt() + 1
-                    } else {
-                        pc += inst.jf.toInt() + 1
-                    }
-                }
-                0x45.toShort() -> { // BPF_JSET
-                    val accUnsigned = accumulator.toLong() and 0xFFFFFFFFL
-                    val kUnsigned = inst.k.toLong() and 0xFFFFFFFFL
-                    if ((accUnsigned and kUnsigned) != 0L) {
-                        pc += inst.jt.toInt() + 1
-                    } else {
-                        pc += inst.jf.toInt() + 1
-                    }
-                }
-                0x54.toShort() -> { // BPF_ALU_AND
-                    accumulator = accumulator and inst.k
-                    pc++
-                }
-                0x06.toShort() -> { // BPF_RET
-                    return inst.k
-                }
-                else -> {
-                    pc++
-                }
-            }
+    /**
+     * Delegates to the platform reference interpreter — the single semantic oracle shared by
+     * unit tests, differential kernel tests, and :profiler (issue-20260823-171500/172100).
+     */
+    private fun evalBpf(instructions: List<BpfInstruction>, syscallNr: Int): Int =
+        requireNotNull(BpfSimulator.simulate(instructions, syscallNr, arch)) {
+            "Compiled program fell through without RET for nr=$syscallNr"
         }
-        throw IllegalStateException("BPF program fell through without returning")
+
+    @Test
+    fun `allowUnsafePrctl emits a loud security warning`() {
+        // issue-20260726_011928_05: compile-time acknowledgment for the TOCTOU-prone flag.
+        val records = mutableListOf<java.util.logging.LogRecord>()
+        val handler = object : java.util.logging.Handler() {
+            override fun publish(r: java.util.logging.LogRecord) { records += r }
+            override fun flush() {}
+            override fun close() {}
+        }
+        val root = java.util.logging.Logger.getLogger("")
+        root.addHandler(handler)
+        try {
+            val policy = Policy.builder().allowUnsafePrctl().build()
+            BpfFilter.build(arch, policy.definition)
+        } finally {
+            root.removeHandler(handler)
+        }
+        assertTrue(records.any { it.level == java.util.logging.Level.SEVERE && it.message.contains("allowUnsafePrctl") })
+    }
+
+    @Test
+    fun `JA instructions encode skip count in k with zero jt and jf`() {
+        // Regression: classic BPF JA jumps by K. Emitting the offset in jt (with k=0) makes the
+        // filter fall through into the next RET block for every syscall.
+        val policy = Policy.builder()
+            .defaultAction(io.mazewall.core.SeccompAction.ACT_ALLOW)
+            .block(Syscall.CONNECT)
+            .build()
+        val filter = BpfFilter.build(arch, policy.definition).instructions
+        val jaInstructions = filter.filter { it.code == 0x05.toShort() }
+        assertTrue(jaInstructions.isNotEmpty(), "Expected at least one JA jump in a blacklist filter")
+        for (ja in jaInstructions) {
+            assertEquals(0.toShort(), ja.jt, "JA jt must be zero")
+            assertEquals(0.toShort(), ja.jf, "JA jf must be zero")
+            assertTrue(ja.k > 0, "JA must carry its forward skip count in k")
+        }
     }
 
     @Test
@@ -463,6 +453,14 @@ class BpfFilterTest {
             }
             if (rtSigreturnNr >= 0) {
                 assertTrue(criticalNrs.contains(rtSigreturnNr), "JVM critical NRs for $a must contain rt_sigreturn")
+            }
+
+            // arch_prctl must be whitelisted on every architecture that provides it (x86_64 only).
+            val archPrctlNr = Syscall.ARCH_PRCTL.numberFor(a)
+            if (archPrctlNr >= 0) {
+                assertTrue(criticalNrs.contains(archPrctlNr), "JVM critical NRs for $a must contain arch_prctl")
+            } else {
+                assertFalse(criticalNrs.contains(archPrctlNr), "$a does not provide arch_prctl; it must not appear")
             }
         }
     }
@@ -518,14 +516,66 @@ class BpfFilterTest {
         for (i in filter.indices) {
             val f = filter[i]
             if (f.code == 0x15.toShort() && f.k == socketNr) {
-                // Should load arg[0] HI (offset 16 + 4 = 20)
+                // EqualsAny32 (int ABI): loads ONLY arg[0] LO (offset 16); high word ignored
                 val ldArgs = filter[i + 1]
-                if (ldArgs.code == 0x20.toShort() && ldArgs.k == 20) {
+                if (ldArgs.code == 0x20.toShort() && ldArgs.k == 16) {
                     foundSocketInspection = true
                     break
                 }
             }
         }
         assertTrue(foundSocketInspection, "BpfFilter should contain the socket address family argument inspection")
+    }
+
+    @Test
+    fun `PURE_COMPUTE_UNSAFE traps creat on amd64 and filters unmapped nr on aarch64`() {
+        // issue-20260821-113000: creat/truncate/ftruncate must be trapped so USER_NOTIF
+        // profiling observes filesystem mutations. CREAT is x86_64-only (85); aarch64 uses
+        // openat(O_CREAT), and BpfFilter filters unmapped NRs out of jump tables.
+        val amd64 = BpfFilter.build(Arch.AMD64, io.mazewall.Policy.PURE_COMPUTE_UNSAFE.definition).instructions
+        assertEquals(
+            NativeConstants.SECCOMP_RET_ERRNO or 1,
+            evalBpf(amd64, Syscall.CREAT.numberFor(Arch.AMD64)),
+            "creat(85) must be denied EPERM in PURE_COMPUTE_UNSAFE",
+        )
+
+        val aarch64Program = BpfFilter.build(Arch.AARCH64, io.mazewall.Policy.PURE_COMPUTE_UNSAFE.definition).instructions
+        assertTrue(aarch64Program.none { it is BpfInstruction.Jmp && it.k == -1 }, "unmapped NRs must be filtered from jump tables")
+    }
+
+    @Test
+    fun `EqualsAny32 ignores high-word garbage on int arguments`() {
+        // issue-075 problem 3: int ABI args (prctl option, socket family) may carry garbage in
+        // the high 32 bits of the u64 seccomp_data slot; only the low word is meaningful.
+        val builder = BpfProgram.builder()
+            .checkArch(arch)
+            .loadSyscallNr()
+        val inspections = listOf(
+            SyscallInspection(
+                syscallNumber = arch.prctl,
+                argIndex = 0,
+                check = ArgCheck.EqualsAny32(listOf(15)),
+                ifMatched = SeccompAction.ACT_ALLOW,
+                ifNotMatched = SeccompAction.ACT_ERRNO(),
+            ),
+        )
+        BpfFilter.emitInspections(builder, inspections, profilingMode = false, handledNrs = mutableSetOf(arch.prctl))
+        val program = builder.ret(NativeConstants.SECCOMP_RET_ALLOW).build()
+        BpfStaticVerifier.verify(program)
+        val instructions = program.instructions
+
+        val optionWithGarbageHighWord = (0xDEADBEEFL shl 32) or 15L
+        val wrongOptionWithGarbageHighWord = (0xFEEDFACE shl 32) or 16L
+
+        assertEquals(
+            NativeConstants.SECCOMP_RET_ALLOW,
+            BpfSimulator.simulate(instructions, arch.prctl, arch.audit, longArrayOf(optionWithGarbageHighWord)),
+            "low-word match with garbage high word must be ALLOWED",
+        )
+        assertEquals(
+            NativeConstants.SECCOMP_RET_ERRNO or 1,
+            BpfSimulator.simulate(instructions, arch.prctl, arch.audit, longArrayOf(wrongOptionWithGarbageHighWord)),
+            "low-word mismatch must be denied regardless of high word",
+        )
     }
 }

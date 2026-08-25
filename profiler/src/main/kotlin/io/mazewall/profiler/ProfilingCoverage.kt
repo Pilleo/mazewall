@@ -45,6 +45,15 @@ public data class ProfileEnvironment(
 )
 
 /**
+ * Completeness as a type, not a free Boolean. [toPolicy]/[BillOfBehavior.toDsl]
+ * must switch on this; do not `copy(complete = true)` to skip evidence.
+ */
+public sealed interface ProfileEvidence {
+    public data object Complete : ProfileEvidence
+    public data class Incomplete(val reasons: List<String>) : ProfileEvidence
+}
+
+/**
  * Evidence about what a profile can honestly claim. Incomplete results must not
  * become enforcement policies unless the operator overrides.
  */
@@ -61,6 +70,15 @@ public data class ProfilingCoverage(
     val complete: Boolean,
     val warnings: List<String> = emptyList(),
 ) {
+    public fun evidence(): ProfileEvidence =
+        if (complete) {
+            ProfileEvidence.Complete
+        } else {
+            ProfileEvidence.Incomplete(
+                warnings.ifEmpty { listOf("profile is incomplete") },
+            )
+        }
+
     internal fun retainStricterPathResolution(prior: ProfilingCoverage): ProfilingCoverage {
         val kept = worsePath(pathResolution, prior.pathResolution)
         if (kept == pathResolution) return this
@@ -95,6 +113,7 @@ public data class ProfilingCoverage(
             return if (order.indexOf(b) > order.indexOf(a)) b else a
         }
         /** Used when [io.mazewall.profiler.BillOfBehavior.toPolicy] is called without coverage. */
+        @JvmStatic
         public fun absent(): ProfilingCoverage =
             ProfilingCoverage(
                 strategy = ProfileStrategy.USER_NOTIF,
@@ -155,8 +174,7 @@ public data class ProfilingCoverage(
             val uringOpenUninspected =
                 observations.any { obs ->
                     obs is ProfileObservation.IoUring &&
-                        obs.opcode.uppercase().contains("OPEN") &&
-                        !isUringMutation(obs.opcode)
+                        UringOp.parse(obs.opcode) is UringOp.Open
                 }
             if (uringOpenUninspected) {
                 warnings.add("io_uring open access mode was not observed")
@@ -166,12 +184,44 @@ public data class ProfilingCoverage(
             if (hybridUnproven) {
                 warnings.add("HYBRID_NO_URING without evidence that io_uring was disabled")
             }
-            val unparsedConnect =
-                observations.any { obs ->
+            val unparsedConnectCount =
+                observations.count { obs ->
                     obs is ProfileObservation.Syscall && obs.name.uppercase() == "CONNECT"
-                } && observations.none { it is ProfileObservation.Connect }
-            if (unparsedConnect) {
-                warnings.add("CONNECT was observed without a parsed destination")
+                }
+            val hasParsedConnect = observations.any { it is ProfileObservation.Connect }
+            if (unparsedConnectCount > 0) {
+                if (!hasParsedConnect) {
+                    warnings.add("CONNECT was observed without a parsed destination")
+                } else {
+                    warnings.add("$unparsedConnectCount CONNECT syscall(s) were observed without a parsed destination")
+                }
+            }
+            val unparsedConnect = unparsedConnectCount > 0
+            val unmappedSyscalls =
+                observations.filter { obs ->
+                    obs is ProfileObservation.Syscall &&
+                        io.mazewall.core.Syscall.tryParse(obs.name) == null
+                }
+            if (unmappedSyscalls.isNotEmpty()) {
+                val names =
+                    unmappedSyscalls
+                        .filterIsInstance<ProfileObservation.Syscall>()
+                        .map { it.name.uppercase() }
+                        .distinct()
+                warnings.add("unmapped syscall observations cannot be compiled: ${names.joinToString(",")}")
+            }
+            val unenforceableUringOps =
+                observations.filter { obs ->
+                    obs is ProfileObservation.IoUring &&
+                        FsEffect.ofUring(UringOp.parse(obs.opcode), obs.paths) is FsEffect.Unenforceable
+                }
+            if (unenforceableUringOps.isNotEmpty()) {
+                val opcodes =
+                    unenforceableUringOps
+                        .filterIsInstance<ProfileObservation.IoUring>()
+                        .map { it.opcode }
+                        .distinct()
+                warnings.add("unenforceable io_uring opcodes were observed: ${opcodes.joinToString(",")}")
             }
             val complete = drainComplete && droppedEvents == 0 &&
                 ioUring != IoUringVisibility.BLIND &&
@@ -182,7 +232,9 @@ public data class ProfilingCoverage(
                 !openat2Uninspected &&
                 !uringOpenUninspected &&
                 !hybridUnproven &&
-                !unparsedConnect
+                !unparsedConnect &&
+                unenforceableUringOps.isEmpty() &&
+                unmappedSyscalls.isEmpty()
             return ProfilingCoverage(
                 strategy = strategy,
                 strategyReason = strategyReason,
@@ -229,18 +281,7 @@ public data class ProfilingCoverage(
                 "ACCESS", "FACCESSAT", "FACCESSAT2", "STAT", "NEWFSTATAT", "FSTATAT",
                 "CREAT", "CHMOD", "FCHMODAT", "CHOWN", "LCHOWN", "FCHOWNAT",
                 "READLINK", "READLINKAT", "CHROOT", "UTIME", "UTIMES", "UTIMENSAT",
-                "FCHMOD", "FCHOWN", "FSTAT",
             )
-
-        private fun isUringMutation(opcode: String): Boolean {
-            val op = opcode.uppercase()
-            return op.contains("WRITE") ||
-                op.contains("UNLINK") ||
-                op.contains("RENAME") ||
-                op.contains("MKDIR") ||
-                op.contains("RMDIR") ||
-                op.contains("TRUNCATE")
-        }
 
         private fun expectedPathOperands(name: String): Int =
             when (name) {
@@ -248,16 +289,8 @@ public data class ProfilingCoverage(
                 else -> 1
             }
 
-        private fun isUringPathBearing(opcode: String): Boolean {
-            val op = opcode.uppercase()
-            return op.contains("OPEN") ||
-                op.contains("UNLINK") ||
-                op.contains("RENAME") ||
-                op.contains("WRITE") ||
-                op.contains("MKDIR") ||
-                op.contains("RMDIR") ||
-                op.contains("TRUNCATE")
-        }
+        private fun isUringPathBearing(opcode: String): Boolean =
+            UringOp.parse(opcode).isPathBearing()
 
         private const val TRUNCATION_THRESHOLD = 4096
 

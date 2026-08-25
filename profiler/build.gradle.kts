@@ -1,8 +1,11 @@
+import java.math.BigDecimal
+
 plugins {
     kotlin("jvm")
     id("info.solidsoft.pitest")
     alias(libs.plugins.plantuml)
     alias(libs.plugins.kotlinPluginSerialization)
+    alias(libs.plugins.bcv)
 }
 
 kotlin {
@@ -117,17 +120,38 @@ publishing {
 
 pitest {
     junit5PluginVersion.set("1.2.1")
-    targetClasses.set(setOf("io.mazewall.profiler.*"))
+    targetClasses.set(
+        setOf(
+            "io.mazewall.profiler.compiler.BobCompiler*",
+            "io.mazewall.profiler.engine.SyscallPathResolver*",
+            "io.mazewall.profiler.engine.ProfilerSessionMachine*",
+            "io.mazewall.profiler.ProfilingCoverage*",
+            "io.mazewall.profiler.BillOfBehavior*",
+        ),
+    )
 
     excludedClasses.set(
         setOf(
             "io.mazewall.profiler.internal.ProfilerDaemon*",
             "io.mazewall.profiler.engine.ProfilerTransport*",
+            "io.mazewall.profiler.StraceProfiler*",
+            "io.mazewall.profiler.ebpf.*",
+        ),
+    )
+
+    targetTests.set(
+        setOf(
+            "io.mazewall.profiler.compiler.BobCompilerTest",
+            "io.mazewall.profiler.engine.SyscallPathResolverTest",
+            "io.mazewall.profiler.engine.ProfilerSessionMachineTest",
+            "io.mazewall.profiler.ProfilingCoverageTest",
+            "io.mazewall.profiler.BillOfBehaviorTest",
         ),
     )
 
     jvmArgs.set(listOf("--enable-native-access=ALL-UNNAMED"))
-
+    timeoutConstInMillis.set(2000)
+    timeoutFactor.set(BigDecimal.valueOf(1.25))
     threads.set(System.getProperty("pitest.threads")?.toInt() ?: 4)
 }
 

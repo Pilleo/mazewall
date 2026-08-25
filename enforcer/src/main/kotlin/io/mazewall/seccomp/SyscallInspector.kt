@@ -90,7 +90,7 @@ internal class MmapExecInspector : SyscallInspector {
                     argIndex = 2, // PROT flag is usually the 3rd argument
                     check = ArgCheck.MaskEquals(PROT_EXEC, 0x00L),
                     ifMatched = context.resolveEffectiveAction(nr),
-                    ifNotMatched = SeccompAction.ACT_ERRNO,
+                    ifNotMatched = SeccompAction.ACT_ERRNO(),
                 )
             }
     }
@@ -154,15 +154,15 @@ internal class UnsafePrctlInspector : SyscallInspector {
             SyscallInspection(
                 syscallNumber = nr,
                 argIndex = 0, // prctl option is the 1st argument
-                check = ArgCheck.EqualsAny(SAFE_PRCTL_OPTIONS),
+                check = ArgCheck.EqualsAny32(SAFE_PRCTL_OPTIONS),
                 ifMatched = context.resolveEffectiveAction(nr),
-                ifNotMatched = SeccompAction.ACT_ERRNO,
+                ifNotMatched = SeccompAction.ACT_ERRNO(),
             )
         )
     }
 
     private companion object {
-        private val SAFE_PRCTL_OPTIONS = listOf(15L, 16L, 21L, 22L, 38L, 39L)
+        private val SAFE_PRCTL_OPTIONS = listOf(15, 16, 21, 22, 38, 39)
     }
 }
 
@@ -184,7 +184,7 @@ internal class SocketAddressFamilyInspector : SyscallInspector {
             SyscallInspection(
                 syscallNumber = socketNr,
                 argIndex = 0, // domain (Address Family) is the 1st argument
-                check = ArgCheck.EqualsAny(listOf(AF_UNIX)),
+                check = ArgCheck.EqualsAny32(listOf(AF_UNIX.toInt())),
                 ifMatched = SeccompAction.ACT_ALLOW, // Preserve local Unix Domain Sockets (AF_UNIX)
                 ifNotMatched = effectiveAction,
             )
@@ -192,6 +192,6 @@ internal class SocketAddressFamilyInspector : SyscallInspector {
     }
 
     private companion object {
-        private const val AF_UNIX = 1L
+        private const val AF_UNIX = 1
     }
 }

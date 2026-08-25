@@ -55,4 +55,7 @@ if [ "${GITHUB_ACTIONS:-false}" == "true" ] && [ -n "${RUNNER_TEMP}" ]; then
     )
 fi
 
+# Pass caller arguments straight through to Gradle. Module-inclusion policy
+# belongs to settings.gradle.kts: if a task targets an excluded project,
+# Gradle must fail loudly — never silently skip (fail-closed posture).
 podman run --rm --replace "${PODMAN_ARGS[@]}" mazewall-test-runner ./gradlew "$@" --no-daemon --stacktrace

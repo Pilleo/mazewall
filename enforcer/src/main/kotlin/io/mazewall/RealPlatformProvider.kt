@@ -20,18 +20,23 @@ internal object RealPlatformProvider : PlatformProvider {
     override fun getOsArch(): String = System.getProperty("os.arch") ?: "Unknown"
 
     override fun hasKernelSeccompSupport(): Boolean =
-        LinuxNative.process.prctl(PrctlCommand.GetSeccomp) is LinuxNative.SyscallResult.Success
+        if (!getOsName().equals("Linux", ignoreCase = true)) false
+        else LinuxNative.process.prctl(PrctlCommand.GetSeccomp) is LinuxNative.SyscallResult.Success
 
     override fun getSeccompMode(): SeccompMode = try {
-        val seccompVal = LinuxNative.process.prctl(PrctlCommand.GetSeccomp)
-        when (seccompVal) {
-            is LinuxNative.SyscallResult.Error -> SeccompMode.Error(seccompVal.errno)
-            is LinuxNative.SyscallResult.Success -> {
-                when (seccompVal.value) {
-                    0L -> SeccompMode.Disabled
-                    1L -> SeccompMode.Strict
-                    2L -> SeccompMode.Filter
-                    else -> SeccompMode.Error(-1)
+        if (!getOsName().equals("Linux", ignoreCase = true)) {
+            SeccompMode.Disabled
+        } else {
+            val seccompVal = LinuxNative.process.prctl(PrctlCommand.GetSeccomp)
+            when (seccompVal) {
+                is LinuxNative.SyscallResult.Error -> SeccompMode.Error(seccompVal.errno)
+                is LinuxNative.SyscallResult.Success -> {
+                    when (seccompVal.value) {
+                        0L -> SeccompMode.Disabled
+                        1L -> SeccompMode.Strict
+                        2L -> SeccompMode.Filter
+                        else -> SeccompMode.Error(-1)
+                    }
                 }
             }
         }
@@ -40,14 +45,19 @@ internal object RealPlatformProvider : PlatformProvider {
     }
 
     override fun checkSeccompSanity(): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
-        LinuxNative.process.prctl(PrctlCommand.SetSeccomp(-1L))
+        if (!getOsName().equals("Linux", ignoreCase = true)) LinuxNative.SyscallResult.Error(NativeConstants.ENOSYS, -1L)
+        else LinuxNative.process.prctl(PrctlCommand.SetSeccomp(-1L))
 
     override fun isNoNewPrivsEnabled(): Boolean = try {
-        val nnpVal = LinuxNative.process.prctl(PrctlCommand.GetNoNewPrivs)
-        if (nnpVal is LinuxNative.SyscallResult.Success) {
-            nnpVal.value == 1L
-        } else {
+        if (!getOsName().equals("Linux", ignoreCase = true)) {
             false
+        } else {
+            val nnpVal = LinuxNative.process.prctl(PrctlCommand.GetNoNewPrivs)
+            if (nnpVal is LinuxNative.SyscallResult.Success) {
+                nnpVal.value == 1L
+            } else {
+                false
+            }
         }
     } catch (e: IllegalStateException) {
         false
@@ -55,6 +65,7 @@ internal object RealPlatformProvider : PlatformProvider {
 
     @Suppress("MagicNumber")
     override fun getYamaPtraceScope(): YamaPtraceScope {
+        if (!getOsName().equals("Linux", ignoreCase = true)) return YamaPtraceScope.Unavailable
         val file = File(yamaPath)
         if (!file.exists()) return YamaPtraceScope.Unavailable
         return try {
@@ -75,7 +86,8 @@ internal object RealPlatformProvider : PlatformProvider {
     }
 
     override fun getLandlockAbiVersion(): Int = try {
-        io.mazewall.landlock.Landlock.getAbiVersion()
+        if (!getOsName().equals("Linux", ignoreCase = true)) 0
+        else io.mazewall.landlock.Landlock.getAbiVersion()
     } catch (e: UnsupportedOperationException) {
         0
     } catch (e: IllegalStateException) {
@@ -87,16 +99,16 @@ internal object RealPlatformProvider : PlatformProvider {
     override fun probeSeccompUserNotif(): Boolean = probeSeccompFlag(NativeConstants.SECCOMP_FILTER_FLAG_NEW_LISTENER)
 
     override fun probeCetSupported(): Boolean {
-        // Check CPU flags via /proc/cpuinfo for CET support (shstk or ibt)
+        if (!getOsName().equals("Linux", ignoreCase = true)) {
+            return Platform.isCpuCetSupportedOverride ?: false
+        }
+        // Check CPU flags via /proc/cpuinfo for CET Shadow Stack support (shstk)
         val cpuSupported = try {
             val file = java.io.File("/proc/cpuinfo")
             if (file.exists()) {
                 file.useLines { lines ->
                     lines.any { line ->
-                        line.startsWith("flags") && (
-                            line.contains("shstk", ignoreCase = true) ||
-                            line.contains("ibt", ignoreCase = true)
-                        )
+                        line.startsWith("flags") && line.split("\\s+".toRegex()).any { it.equals("shstk", ignoreCase = true) }
                     }
                 }
             } else {
@@ -120,7 +132,12 @@ internal object RealPlatformProvider : PlatformProvider {
      * tries to read the filter program. If it doesn't recognize the flag, it returns EINVAL.
      */
     private fun probeSeccompFlag(flag: Long): Boolean {
-        val arch = io.mazewall.core.Arch.current()
+        if (!getOsName().equals("Linux", ignoreCase = true)) return false
+        val arch = try {
+            io.mazewall.core.Arch.current()
+        } catch (e: UnsupportedOperationException) {
+            return false
+        }
         val res = LinuxNative.raw.syscall(
             arch.seccompSyscallNumber.toLong(),
             io.mazewall.core.NativeArg.LongArg(NativeConstants.SECCOMP_SET_MODE_FILTER.toLong()),
@@ -128,8 +145,7 @@ internal object RealPlatformProvider : PlatformProvider {
             io.mazewall.core.NativeArg.NullArg, // Trigger EFAULT on valid flags
         )
         // EFAULT (14) means the kernel recognized the flag and tried to read the NULL program.
-        @Suppress("MagicNumber")
-        return res is LinuxNative.SyscallResult.Error && res.errno == 14
+        return res is LinuxNative.SyscallResult.Error && res.errno == NativeConstants.EFAULT
     }
 
     override fun isContainer(): Boolean {

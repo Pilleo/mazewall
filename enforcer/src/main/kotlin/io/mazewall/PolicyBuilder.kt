@@ -53,7 +53,7 @@ public class PolicyBuilder<S : PolicyScope> internal constructor(
         return this
     }
 
-    public fun block(vararg syscalls: Syscall): PolicyBuilder<S> = addAction(SeccompAction.ACT_ERRNO, *syscalls)
+    public fun block(vararg syscalls: Syscall): PolicyBuilder<S> = addAction(SeccompAction.ACT_ERRNO(), *syscalls)
     public fun allow(vararg syscalls: Syscall): PolicyBuilder<S> = addAction(SeccompAction.ACT_ALLOW, *syscalls)
 
     /** Uncompiled-definition only. Installed kernel filters cannot grow. */
@@ -79,23 +79,20 @@ public class PolicyBuilder<S : PolicyScope> internal constructor(
     public fun allowFsRead(path: String): PolicyBuilder<PolicyScope.ThreadLocalOnly> =
         allowFsRead(SandboxedPath.of(path, allowNonExistent = true))
 
-    public fun allowFsRead(path: SandboxedPath): PolicyBuilder<PolicyScope.ThreadLocalOnly> {
-        allowedFsReadPaths.add(path)
-        @Suppress("UNCHECKED_CAST")
-        return this as PolicyBuilder<PolicyScope.ThreadLocalOnly>
-    }
+    public fun allowFsRead(path: SandboxedPath): PolicyBuilder<PolicyScope.ThreadLocalOnly> =
+        snapshotAsThreadLocal().apply { allowedFsReadPaths.add(path) }
 
     public fun allowJvmClasspath(): PolicyBuilder<PolicyScope.ThreadLocalOnly> {
         val javaHome = System.getProperty("java.home")
-        if (!javaHome.isNullOrEmpty()) {
-            allowFsRead(SandboxedPath.of(javaHome, allowNonExistent = true))
-        }
         val classPath = System.getProperty("java.class.path")
-        if (classPath != null) {
-            addClasspathEntries(classPath)
+        return snapshotAsThreadLocal().apply {
+            if (!javaHome.isNullOrEmpty()) {
+                allowedFsReadPaths.add(SandboxedPath.of(javaHome, allowNonExistent = true))
+            }
+            if (classPath != null) {
+                addClasspathEntries(classPath)
+            }
         }
-        @Suppress("UNCHECKED_CAST")
-        return this as PolicyBuilder<PolicyScope.ThreadLocalOnly>
     }
 
     private fun addClasspathEntries(classPath: String) {
@@ -110,7 +107,7 @@ public class PolicyBuilder<S : PolicyScope> internal constructor(
         if (file.exists()) {
             val p = if (file.isDirectory) file.absolutePath else file.absoluteFile.parent
             if (p != null) {
-                allowFsRead(SandboxedPath.of(p, allowNonExistent = true))
+                allowedFsReadPaths.add(SandboxedPath.of(p, allowNonExistent = true))
             }
         }
     }
@@ -118,11 +115,31 @@ public class PolicyBuilder<S : PolicyScope> internal constructor(
     public fun allowFsWrite(path: String): PolicyBuilder<PolicyScope.ThreadLocalOnly> =
         allowFsWrite(SandboxedPath.of(path, allowNonExistent = true))
 
-    public fun allowFsWrite(path: SandboxedPath): PolicyBuilder<PolicyScope.ThreadLocalOnly> {
-        allowedFsWritePaths.add(path)
-        @Suppress("UNCHECKED_CAST")
-        return this as PolicyBuilder<PolicyScope.ThreadLocalOnly>
-    }
+    public fun allowFsWrite(path: SandboxedPath): PolicyBuilder<PolicyScope.ThreadLocalOnly> =
+        snapshotAsThreadLocal().apply { allowedFsWritePaths.add(path) }
+
+    /**
+     * Creates an independent [PolicyBuilder] typed as [PolicyScope.ThreadLocalOnly], carrying a
+     * deep copy of this builder's state.
+     *
+     * Soundness contract (issue-20260823-135554): adding filesystem rules requires the
+     * thread-local scope. Promotion must therefore never mutate the receiver — a caller holding a
+     * `PolicyBuilder<ProcessWideSafe>` reference keeps building process-wide definitions whose
+     * content always matches their static type.
+     */
+    private fun snapshotAsThreadLocal(): PolicyBuilder<PolicyScope.ThreadLocalOnly> =
+        PolicyBuilder(
+            defaultAction = defaultAction,
+            syscallActions = syscallActions.toMutableMap(),
+            allowMmapExec = allowMmapExec,
+            allowNonThreadClone = allowNonThreadClone,
+            allowUnsafePrctl = allowUnsafePrctl,
+            lockIntelCet = lockIntelCet,
+            allowedFsReadPaths = allowedFsReadPaths.toMutableSet(),
+            allowedFsWritePaths = allowedFsWritePaths.toMutableSet(),
+            customViolationPhrases = customViolationPhrases.toMutableList(),
+            customViolationRegexes = customViolationRegexes.toMutableList(),
+        )
 
     /**
      * Advanced compatibility switch. Prefer [forRuntime] so the JIT vs W^X
@@ -186,7 +203,7 @@ public class PolicyBuilder<S : PolicyScope> internal constructor(
             val ioUringAllowed = ioUringAction == SeccompAction.ACT_ALLOW
 
             if ((openBlocked || openatBlocked) && ioUringAllowed) {
-                finalSyscalls[Syscall.IO_URING_SETUP] = SeccompAction.ACT_ERRNO
+                finalSyscalls[Syscall.IO_URING_SETUP] = SeccompAction.ACT_ERRNO()
             }
         }
         return PolicyDefinition<S>(

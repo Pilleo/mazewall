@@ -41,6 +41,12 @@ public sealed interface FileDescriptorRole {
 
     /** A pidfd from pidfd_open(2). */
     public data object Pid : FileDescriptorRole
+
+    /**
+     * A descriptor granted by a more-privileged process over `SCM_RIGHTS`
+     * (broker → worker). Not a seccomp listener.
+     */
+    public data object Granted : FileDescriptorRole
 }
 
 /**
@@ -52,6 +58,11 @@ internal object FdEpoch {
 
     private val table = ConcurrentHashMap<Int, AtomicReference<Slot>>()
 
+    /**
+     * Claims this integer as a still-owned live descriptor.
+     * If the slot is already live, returns that generation so aliases of the
+     * same resource share a token. Does not bump a leftover live slot.
+     */
     fun claimOpen(fd: Int): Long {
         if (fd < 0) return 0L
         val ref = table.computeIfAbsent(fd) { AtomicReference(Slot(0L, false)) }
@@ -65,6 +76,17 @@ internal object FdEpoch {
                 return next.generation
             }
         }
+    }
+
+    /**
+     * Kernel reused this integer for a newly minted descriptor
+     * (open, accept, dup, SCM_RIGHTS). Any leftover live generation is retired
+     * so tokens for the old resource cannot operate on the new one.
+     */
+    fun adoptKernelReuse(fd: Int): Long {
+        if (fd < 0) return 0L
+        forceRetire(fd)
+        return claimOpen(fd)
     }
 
     fun retire(fd: Int, generation: Long) {
@@ -238,18 +260,25 @@ public class FileDescriptor<out R : FileDescriptorRole, out S : FdState> interna
         /**
          * Unsafely creates a [FileDescriptor] from a raw integer.
          * Does NOT claim the FD in the epoch - for retired FDs, creates a non-live token.
-         * Prefer the role-specific factories ([generic], [unixSocket], [ruleset], [oPath], [seccompNotif]).
+         * Prefer the role-specific factories ([generic], [unixSocket], [ruleset], [oPath], [seccompNotif], [granted]).
          *
          * WARNING: This method will NOT revive retired file descriptors. For kernel-reused
          * integers from dup/accept/SCM_RIGHTS, use [adopt] or [replace] instead.
+         *
+         * DANGER (2026-08-24 incident): a token minted around an integer you do not own
+         * is a loaded weapon. Calling [close] on it performs a real close(int) in this
+         * JVM and destroys whatever happens to hold that number (/dev/urandom seed fd,
+         * classloader jars, pipes), surfacing later as EBADF in unrelated code such as
+         * Files.createTempDirectory. Only pass integers obtained from an open this
+         * process owns; see platform test ForeignFdGuard for the enforcement guardrail.
          *
          * @param value The raw Linux file descriptor integer.
          * @param arena Optional arena bound to this descriptor's native lifetime.
          * @return A type-safe [FileDescriptor] in the [FdState.Open] state.
          */
         @Deprecated(
-            message = "Use role-specific factories (generic, unixSocket, ruleset, oPath, seccompNotif, pid) or adopt() for kernel-reused FDs. " +
-                      "This method creates non-live tokens for retired FDs and should not be used in production code.",
+            message = "Use role-specific factories (generic, unixSocket, ruleset, oPath, seccompNotif, pid, granted) or adopt() for kernel-reused FDs. " +
+                "This method creates non-live tokens for retired FDs and should not be used in production code.",
             level = DeprecationLevel.WARNING
         )
         @Suppress("UNCHECKED_CAST")
@@ -268,6 +297,14 @@ public class FileDescriptor<out R : FileDescriptorRole, out S : FdState> interna
             return open<FileDescriptorRole.Generic>(value, arena, FileDescriptorRole.Generic) as FileDescriptor<R, FdState.Open>
         }
 
+        /**
+         * Claims an integer as a live Generic-role descriptor and registers it in the epoch.
+         *
+         * WARNING: [close] on the returned token is a REAL close(value). Only pass
+         * integers this process obtained from its own opens - never literals, /proc
+         * guesses, or numbers observed in other processes. Closing a foreign integer
+         * destroys whatever resource holds it (see DANGER note on [unsafe]).
+         */
         public fun generic(
             value: Int,
             arena: NativeArena? = null,
@@ -304,17 +341,31 @@ public class FileDescriptor<out R : FileDescriptorRole, out S : FdState> interna
         ): FileDescriptor<FileDescriptorRole.Pid, FdState.Open> =
             open(value, arena, FileDescriptorRole.Pid)
 
+        public fun granted(
+            value: Int,
+            arena: NativeArena? = null,
+        ): FileDescriptor<FileDescriptorRole.Granted, FdState.Open> =
+            open(value, arena, FileDescriptorRole.Granted)
+
         /**
          * Adopts a newly allocated kernel fd (open, accept, dup, SCM_RIGHTS).
-         * Always creates a new generation, even if [value] was previously retired.
-         * Leftover Open tokens from the old generation stay dead.
+         *
+         * Always installs a new generation: leftover [FdState.Open] tokens for this
+         * integer, including still-live slots the wrapper never retired, become
+         * dead. Ordinary [generic] / role factories keep the current generation
+         * when the slot is already live (same resource, same owner).
          */
         public fun <R : FileDescriptorRole> adopt(
             value: Int,
             role: R,
             arena: NativeArena? = null,
-        ): FileDescriptor<R, FdState.Open> =
-            open(value, arena, role)
+        ): FileDescriptor<R, FdState.Open> {
+            val closed = value < 0
+            val generation = if (closed) 0L else FdEpoch.adoptKernelReuse(value)
+            return FileDescriptor(
+                FdLifecycle(value, arena, generation, role, closed = closed),
+            )
+        }
 
         /**
          * Kernel replaced this integer (dup2, SECCOMP_ADDFD SETFD).
@@ -382,22 +433,6 @@ public fun NativeArg.ebadfUnlessLive(): LinuxNative.SyscallResult<Long, LinuxNat
     return if (this is NativeArg.FdArg) fd.ebadfUnlessLive() else null
 }
 
-public fun ebadfIfRetiredPollfds(
-    fds: ManagedSegment,
-    nfds: Long,
-): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled>? {
-    val stride = io.mazewall.ffi.Layouts.POLLFD_SIZE
-    var i = 0L
-    while (i < nfds) {
-        val fd = fds.readInt(i * stride + io.mazewall.ffi.Layouts.POLLFD_FD_OFFSET)
-        if (FdEpoch.isRetired(fd)) {
-            return LinuxNative.SyscallResult.Error(NativeConstants.EBADF, -1L)
-        }
-        i++
-    }
-    return null
-}
-
 public fun ebadfUnlessLive(vararg args: NativeArg): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled>? {
     for (arg in args) {
         val denied = arg.ebadfUnlessLive()
@@ -415,7 +450,7 @@ public fun LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhan
         (cmd == NativeConstants.F_DUPFD || cmd == NativeConstants.F_DUPFD_CLOEXEC) &&
         value >= 0L
     ) {
-        FdEpoch.claimOpen(value.toInt())
+        FdEpoch.adoptKernelReuse(value.toInt())
     }
     return this
 }

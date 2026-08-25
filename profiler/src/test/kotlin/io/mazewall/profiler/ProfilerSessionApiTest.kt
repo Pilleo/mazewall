@@ -9,6 +9,8 @@ import io.mazewall.profiler.engine.TraceEvent
 import org.junit.jupiter.api.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
+import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
 class ProfilerSessionApiTest {
@@ -117,6 +119,66 @@ class ProfilerSessionApiTest {
             environment = ProfileEnvironment("t", EbpfLoad.Available),
         )
         assertEquals(false, coverage.complete)
+        assertTrue(coverage.warnings.contains("io_uring open access mode was not observed"))
+    }
+
+    @Test
+    fun `descriptor-only fstat fchmod fchown do not fail path completeness`() {
+        val coverage = ProfilingCoverage.infer(
+            strategy = ProfileStrategy.USER_NOTIF,
+            strategyReason = "t",
+            processWide = false,
+            observations = listOf(
+                ProfileObservation.Syscall(
+                    ObservationCorrelation(1, Tid(1)),
+                    ObservationSource.STRACE,
+                    "FSTAT",
+                    paths = emptyList(),
+                ),
+                ProfileObservation.Syscall(
+                    ObservationCorrelation(2, Tid(1)),
+                    ObservationSource.STRACE,
+                    "FCHMOD",
+                    paths = emptyList(),
+                ),
+                ProfileObservation.Syscall(
+                    ObservationCorrelation(3, Tid(1)),
+                    ObservationSource.STRACE,
+                    "FCHOWN",
+                    paths = emptyList(),
+                ),
+            ),
+            stacks = StackAttribution.SKIPPED,
+            droppedEvents = 0,
+            drainComplete = true,
+            environment = ProfileEnvironment("t", EbpfLoad.Denied("x")),
+        )
+        assertEquals(PathResolutionQuality.NONE, coverage.pathResolution)
+        assertEquals(true, coverage.complete)
+    }
+
+    @Test
+    fun `unmapped syscall names make coverage incomplete`() {
+        val coverage = ProfilingCoverage.infer(
+            strategy = ProfileStrategy.USER_NOTIF,
+            strategyReason = "t",
+            processWide = false,
+            observations = listOf(
+                ProfileObservation.Syscall(
+                    ObservationCorrelation(1, Tid(1)),
+                    ObservationSource.STRACE,
+                    "RECVMSG",
+                    paths = emptyList(),
+                ),
+            ),
+            stacks = StackAttribution.SKIPPED,
+            droppedEvents = 0,
+            drainComplete = true,
+            environment = ProfileEnvironment("t", EbpfLoad.Denied("x")),
+        )
+        assertEquals(false, coverage.complete)
+        assertTrue(coverage.warnings.any { it.contains("unmapped syscall") && it.contains("RECVMSG") })
+        assertIs<ProfileEvidence.Incomplete>(coverage.evidence())
     }
 
     @Test
@@ -294,11 +356,16 @@ class ProfilerSessionApiTest {
 
     @Test
     fun `EBPF strategy fails closed even when capabilities look available`() {
+        var workloadEntered = false
         MazewallProfiler.open(ProfileOptions(strategy = ProfileStrategy.EBPF)).use { session ->
             val ex = assertFailsWith<IncompleteProfileException> {
-                session.profile { "nope" }
+                session.profile {
+                    workloadEntered = true
+                    "nope"
+                }
             }
             assertEquals(ProfileStrategy.EBPF, ex.coverage.strategy)
+            assertFalse(workloadEntered, "Workload must NOT be entered if collector fails to start")
         }
     }
 
@@ -335,7 +402,31 @@ class ProfilerSessionApiTest {
         assertEquals(setOf("IORING_OP_OPENAT"), bob.ioUringOps)
         assertEquals(setOf(NetworkEndpoint("::1", 443)), bob.connects)
         assertTrue(bob.opens.contains("/tmp/u"))
+        assertTrue(!bob.fsWritePaths.contains("/tmp/u"))
         assertTrue(bob.syscalls.contains(Syscall.CONNECT))
+        val link = BobCompiler.compileObservations(
+            listOf(
+                ProfileObservation.IoUring(
+                    corr,
+                    ObservationSource.EBPF,
+                    "IORING_OP_LINKAT",
+                    listOf("/tmp/old", "/tmp/new"),
+                ),
+            ),
+        )
+        assertTrue(link.fsWritePaths.contains("/tmp/old"))
+        assertTrue(link.fsWritePaths.contains("/tmp/new"))
+        val symlink = BobCompiler.compileObservations(
+            listOf(
+                ProfileObservation.IoUring(
+                    corr,
+                    ObservationSource.EBPF,
+                    "IORING_OP_SYMLINKAT",
+                    listOf("/tmp/target", "/tmp/link"),
+                ),
+            ),
+        )
+        assertTrue(symlink.fsWritePaths.contains("/tmp/target"))
         val merged = bob + BillOfBehavior(connects = setOf(NetworkEndpoint("10.0.0.1", 9)))
         assertEquals(2, merged.connects.size)
         val json = merged.toJson()
@@ -616,6 +707,55 @@ class ProfilerSessionApiTest {
             emptySet(),
         )
         assertTrue(fromBob.any { it is ProfileObservation.IoUring })
+    }
+
+    @Test
+    fun `unparsed CONNECT syscall alongside parsed Connect marks coverage incomplete`() {
+        val corr = ObservationCorrelation(1, Tid(1))
+        val mixedCoverage = ProfilingCoverage.infer(
+            strategy = ProfileStrategy.USER_NOTIF,
+            strategyReason = "test",
+            processWide = false,
+            observations = listOf(
+                ProfileObservation.Connect(corr, ObservationSource.USER_NOTIF, NetworkEndpoint("1.2.3.4", 80)),
+                ProfileObservation.Syscall(corr, ObservationSource.USER_NOTIF, "CONNECT"),
+            ),
+            stacks = StackAttribution.SKIPPED,
+            droppedEvents = 0,
+            drainComplete = true,
+            environment = ProfileEnvironment("test", EbpfLoad.Denied("test")),
+        )
+        assertFalse(mixedCoverage.complete, "A leftover unparsed CONNECT syscall must mark coverage incomplete")
+        assertTrue(mixedCoverage.warnings.any { it.contains("CONNECT") })
+
+        val onlyParsedCoverage = ProfilingCoverage.infer(
+            strategy = ProfileStrategy.USER_NOTIF,
+            strategyReason = "test",
+            processWide = false,
+            observations = listOf(
+                ProfileObservation.Connect(corr, ObservationSource.USER_NOTIF, NetworkEndpoint("1.2.3.4", 80)),
+            ),
+            stacks = StackAttribution.SKIPPED,
+            droppedEvents = 0,
+            drainComplete = true,
+            environment = ProfileEnvironment("test", EbpfLoad.Denied("test")),
+        )
+        assertTrue(onlyParsedCoverage.complete, "Fully parsed connects should be complete")
+
+        val onlyUnparsedCoverage = ProfilingCoverage.infer(
+            strategy = ProfileStrategy.USER_NOTIF,
+            strategyReason = "test",
+            processWide = false,
+            observations = listOf(
+                ProfileObservation.Syscall(corr, ObservationSource.USER_NOTIF, "CONNECT"),
+            ),
+            stacks = StackAttribution.SKIPPED,
+            droppedEvents = 0,
+            drainComplete = true,
+            environment = ProfileEnvironment("test", EbpfLoad.Denied("test")),
+        )
+        assertFalse(onlyUnparsedCoverage.complete)
+        assertTrue(onlyUnparsedCoverage.warnings.contains("CONNECT was observed without a parsed destination"))
     }
 
     private fun syntheticProbe(inInitNs: Boolean, capEff: Long, euid: Int): EbpfLoad {

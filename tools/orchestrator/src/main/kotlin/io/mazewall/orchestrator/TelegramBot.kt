@@ -30,7 +30,8 @@ data class TelegramMessage(
 @Serializable
 data class CallbackQuery(
     val id: String,
-    val data: String? = null
+    val data: String? = null,
+    val message: TelegramMessage? = null
 )
 
 @Serializable
@@ -57,6 +58,19 @@ data class AnswerCallbackQueryRequest(
     val callback_query_id: String
 )
 
+@Serializable
+data class AnswerCallbackTextRequest(
+    val callback_query_id: String,
+    val text: String
+)
+
+@Serializable
+data class EditMessageReplyMarkupRequest(
+    val chat_id: String,
+    val message_id: Long,
+    val reply_markup: ReplyMarkup? = null
+)
+
 class TelegramBot(
     private val botToken: String,
     private val chatId: String,
@@ -65,6 +79,13 @@ class TelegramBot(
     private val json = Json { ignoreUnknownKeys = true }
     private var lastUpdateId = 0L
     var onReviewRequested: ((focusComments: String) -> Unit)? = null
+
+    /**
+     * Paperclip approval buttons (supervisor mode): action is "approve"/"reject",
+     * approvalId the Paperclip approval uuid, callbackQueryId/messageId let the
+     * handler answer the query and clear the keyboard after the API call settles.
+     */
+    var onPaperclipApproval: ((action: String, approvalId: String, callbackQueryId: String, messageId: Long?) -> Unit)? = null
 
     init {
         // Run a fast getUpdates to find the current offset so we don't process historical alerts
@@ -111,6 +132,15 @@ class TelegramBot(
                             answerCallback(callbackQuery.id)
                             val issueId = data.removePrefix("skip:")
                             pendingApprovals[issueId] = false
+                        } else if (data.startsWith("pcapprove:") || data.startsWith("pcreject:")) {
+                            // Deferred answer: the handler answers with the API outcome.
+                            // Action normalized to the Paperclip API verb (approve/reject).
+                            onPaperclipApproval?.invoke(
+                                data.substringBefore(':').removePrefix("pc"),
+                                data.substringAfter(':'),
+                                callbackQuery.id,
+                                callbackQuery.message?.message_id,
+                            )
                         }
                     } else if (update.message?.text != null) {
                         val text = update.message.text.trim()
@@ -151,6 +181,57 @@ class TelegramBot(
         )
         val payload = SendMessageRequest(chat_id = chatId, text = text, reply_markup = markup)
         post(url, json.encodeToString(SendMessageRequest.serializer(), payload))
+    }
+
+    /**
+     * Board-approval card: buttons carry the Paperclip approval uuid.
+     * @return true when Telegram accepted the message; callers persisting delivery
+     * state (EventNotifier watermark) must advance only on true.
+     */
+    fun sendMessageWithPaperclipApproval(approvalId: String, text: String): Boolean {
+        val markup = paperclipApprovalMarkup(approvalId)
+        val payload = SendMessageRequest(chat_id = chatId, text = text, reply_markup = markup)
+        return postOk("https://api.telegram.org/bot$botToken/sendMessage", json.encodeToString(payload))
+    }
+
+    private fun postOk(url: String, jsonBody: String): Boolean {
+        val request = HttpRequest.newBuilder()
+            .uri(URI.create(url))
+            .header("Content-Type", "application/json")
+            .POST(HttpRequest.BodyPublishers.ofString(jsonBody))
+            .build()
+        return try {
+            val response = transport.send(request)
+            if (response.statusCode() !in 200..299) {
+                System.err.println("Telegram POST to $url returned ${response.statusCode()}: ${response.body()}")
+                false
+            } else true
+        } catch (e: Exception) {
+            System.err.println("HTTP POST to $url failed: ${e.message}")
+            false
+        }
+    }
+
+    /** Answers a callback with an outcome string (visible as a toast in the TG client). */
+    fun answerCallbackWith(callbackQueryId: String, text: String) {
+        val payload = AnswerCallbackTextRequest(callback_query_id = callbackQueryId, text = text)
+        post(
+            "https://api.telegram.org/bot$botToken/answerCallbackQuery",
+            json.encodeToString(AnswerCallbackTextRequest.serializer(), payload),
+        )
+    }
+
+    /** Clears inline buttons after a decision so stale cards cannot be re-fired. */
+    fun clearReplyMarkup(chatMessageId: Long) {
+        val payload = EditMessageReplyMarkupRequest(
+            chat_id = chatId,
+            message_id = chatMessageId,
+            reply_markup = null,
+        )
+        post(
+            "https://api.telegram.org/bot$botToken/editMessageReplyMarkup",
+            json.encodeToString(EditMessageReplyMarkupRequest.serializer(), payload),
+        )
     }
 
     fun checkApprovalNonBlocking(issueId: String): Boolean? {
@@ -239,3 +320,12 @@ class TelegramBot(
         }
     }
 }
+
+internal fun paperclipApprovalMarkup(approvalId: String): ReplyMarkup = ReplyMarkup(
+    inline_keyboard = listOf(
+        listOf(
+            InlineKeyboardButton(text = "✅ Approve", callback_data = "pcapprove:$approvalId"),
+            InlineKeyboardButton(text = "❌ Reject", callback_data = "pcreject:$approvalId"),
+        )
+    )
+)

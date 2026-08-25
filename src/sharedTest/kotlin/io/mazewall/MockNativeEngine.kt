@@ -3,7 +3,6 @@ package io.mazewall
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.claimDupIfNeeded
-import io.mazewall.core.ebadfIfRetiredPollfds
 import io.mazewall.core.ebadfUnlessDirfd
 import io.mazewall.core.ebadfUnlessLive
 import io.mazewall.core.ebadfUnlessMmapBacking
@@ -92,7 +91,7 @@ public open class MockNativeEngine(
         fds: ManagedSegment,
         nfds: Long,
         timeout: Int,
-    ) = ebadfIfRetiredPollfds(fds, nfds) ?: onPoll(fds, nfds, timeout)
+    ) = onPoll(fds, nfds, timeout)
 }
 
 public open class MockNativeFileSystem : NativeFileSystem {
@@ -101,20 +100,47 @@ public open class MockNativeFileSystem : NativeFileSystem {
     public var closeResult: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(0L)
     public var mmapResult: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(0L)
 
-    public var onOpen: (path: ManagedSegment, flags: io.mazewall.core.OpenFlags) -> LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = { _, _ -> openResult }
-    public var onOpenat: (dirfd: FileDescriptor<*, FdState.Open>, path: ManagedSegment, flags: io.mazewall.core.OpenFlags) -> LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = { _, _, _ -> openResult }
+    public var onOpen: ((path: ManagedSegment, flags: io.mazewall.core.OpenFlags, mode: Int) -> LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled>)? = null
+    public var onOpenat: ((dirfd: FileDescriptor<*, FdState.Open>, path: ManagedSegment, flags: io.mazewall.core.OpenFlags, mode: Int) -> LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled>)? = null
     public var onClose: (fd: FileDescriptor<*, FdState.Open>) -> LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = { closeResult }
 
     override fun open(
         path: ManagedSegment,
         flags: io.mazewall.core.OpenFlags,
-    ) = onOpen(path, flags)
+    ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
+        onOpen?.invoke(path, flags, 0) ?: openResult
+
+    override fun open(
+        path: ManagedSegment,
+        flags: io.mazewall.core.OpenFlags,
+        mode: Int,
+    ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
+        onOpen?.invoke(path, flags, mode) ?: open(path, flags)
 
     override fun openat(
         dirfd: FileDescriptor<*, FdState.Open>,
         path: ManagedSegment,
         flags: io.mazewall.core.OpenFlags,
-    ) = dirfd.ebadfUnlessDirfd() ?: onOpenat(dirfd, path, flags)
+    ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
+        dirfd.ebadfUnlessDirfd() ?: onOpenat?.invoke(dirfd, path, flags, 0) ?: openResult
+
+    public var onOpenat2: ((dirfd: FileDescriptor<*, FdState.Open>, path: ManagedSegment, how: ManagedSegment, size: Long) -> LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled>)? = null
+
+    override fun openat(
+        dirfd: FileDescriptor<*, FdState.Open>,
+        path: ManagedSegment,
+        flags: io.mazewall.core.OpenFlags,
+        mode: Int,
+    ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
+        dirfd.ebadfUnlessDirfd() ?: onOpenat?.invoke(dirfd, path, flags, mode) ?: openat(dirfd, path, flags)
+
+    override fun openat2(
+        dirfd: FileDescriptor<*, FdState.Open>,
+        path: ManagedSegment,
+        how: ManagedSegment,
+        size: Long,
+    ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
+        dirfd.ebadfUnlessDirfd() ?: onOpenat2?.invoke(dirfd, path, how, size) ?: openResult
 
     override fun readlink(
         path: ManagedSegment,

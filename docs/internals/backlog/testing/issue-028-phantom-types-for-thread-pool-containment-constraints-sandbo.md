@@ -10,6 +10,7 @@ target_modules:
 - :enforcer
 component: enforcer
 effort: medium
+paperclip_issue_id: 03861f5a-6351-4165-a4e6-e768e0dbc7d0
 ---
 
 # 🔵 [Severity: ENHANCEMENT]: Phantom Types for Thread Pool Containment Constraints (`SandboxedExecutor`)

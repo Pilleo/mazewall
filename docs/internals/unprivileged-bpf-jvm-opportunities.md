@@ -56,13 +56,14 @@ fcntl(mem_fd, F_ADD_SEALS, F_SEAL_WRITE | F_SEAL_SHRINK | F_SEAL_SEAL);
 
 ---
 
-## 4. Unprivileged User & Mount Namespaces (`CLONE_NEWUSER` + `CLONE_NEWNS`)
+## 4. User & Mount Namespaces (`CLONE_NEWUSER` + `CLONE_NEWNS`)
 
-### Mechanism
-On modern Linux distributions, an unprivileged process can create a new User Namespace via `unshare(CLONE_NEWUSER)`. Inside the new namespace, the process's effective UID maps to root (`UID 0`) within the scope of that namespace.
+### Mechanism & Prerequisites
+An unprivileged process can create a new User Namespace via `unshare(CLONE_NEWUSER)`. Inside the new namespace, the process's effective UID maps to root (`UID 0`) within the scope of that namespace.
+* **Prerequisites & Caveats:** Kernel sysctls (`kernel.unprivileged_userns_clone=0` on Debian/Ubuntu/RHEL) or container seccomp profiles may block unprivileged user namespace creation. Additionally, creating thread-local namespaces in multi-threaded JVM processes is rejected by the Linux kernel (`EINVAL` on `unshare(CLONE_NEWUSER)` when multi-threaded). Namespace isolation must occur at process startup or via helper subprocesses.
 
 ### JVM Backend Use Case
-* **Ephemeral In-Memory Filesystem Views:** Gaining unprivileged namespace capabilities allows creating isolated Mount Namespaces (`CLONE_NEWNS`) to mount clean, temporary `tmpfs` RAM-disks per request, isolating file operations from the host filesystem.
+* **Ephemeral In-Memory Filesystem Views:** Gaining user namespace capabilities in worker helper processes allows creating isolated Mount Namespaces (`CLONE_NEWNS`) to mount clean, temporary `tmpfs` RAM-disks per request, isolating file operations from the host filesystem.
 * **Isolated Network Namespaces (`CLONE_NEWNET`):** Create isolated network stacks per execution context for running embedded integration tests without binding host network ports.
 
 ---
@@ -70,7 +71,7 @@ On modern Linux distributions, an unprivileged process can create a new User Nam
 ## 5. Syscall Emulation & Virtual File Systems (`SECCOMP_RET_USER_NOTIF`)
 
 ### Mechanism
-Classic Seccomp allows unprivileged threads (configured with `PR_SET_NO_NEW_PRIVS`) to register filters with `SECCOMP_RET_USER_NOTIF`. Trapped system calls emit a notification descriptor (`SECCOMP_FILTER_FLAG_NEW_LISTENER`) handled in user space by a supervisor thread via `SECCOMP_IOCTL_NOTIF_RECV` and `SECCOMP_IOCTL_NOTIF_SEND`.
+Classic Seccomp allows unprivileged threads (configured with `PR_SET_NO_NEW_PRIVS`) to register filters with `SECCOMP_RET_USER_NOTIF`. Trapped system calls emit a notification descriptor (`SECCOMP_FILTER_FLAG_NEW_LISTENER`) handled in user space by an out-of-process supervisor daemon via `SECCOMP_IOCTL_NOTIF_RECV` and `SECCOMP_IOCTL_NOTIF_SEND`.
 
 ### JVM Backend Use Case
 * **Virtual File System (VFS) Simulation:** Intercept calls to paths like `/etc/config` or dynamic secret locations, synthesizing file read/write responses directly from JVM memory without physical disk IO.
@@ -84,17 +85,20 @@ Classic Seccomp allows unprivileged threads (configured with `PR_SET_NO_NEW_PRIV
 Process-level security invariants applied unprivileged via `prctl(2)`:
 
 * **`PR_SET_MDWE` (Memory Deny Write Execute):** Disallows creating executable memory pages (`PROT_EXEC`) or modifying existing writable pages into executable ones (`PROT_WRITE -> PROT_EXEC`).
-* **`PR_SET_DUMPABLE(0)`:** Prevents `ptrace` attachment and kernel core dumps for worker threads holding sensitive cryptographic keys or tokens in off-heap memory, preventing secret exposure during crashes.
+* **`PR_SET_DUMPABLE(0)`:** Sets `SUID_DUMP_DISABLE`, preventing `ptrace` attachment and kernel core dumps for worker processes holding sensitive cryptographic keys or tokens in memory.
+* **`PR_SET_PTRACER(0)`:** Clears any Yama exception and reverts to the system-wide Yama policy (`/proc/sys/kernel/yama/ptrace_scope`).
 
 ---
 
 ## Summary Matrix
 
-| Feature | Linux Kernel API | JVM Backend Advantage | Required Privilege |
+| Feature | Linux Kernel API | Scope & Invariant | Prerequisites / Caveats |
 | :--- | :--- | :--- | :--- |
-| **In-Kernel Packet Filter** | `setsockopt(..., SO_ATTACH_FILTER)` | Drops invalid socket frames before JVM heap/off-heap allocation. | Unprivileged |
-| **Network Egress/Bind Control** | `landlock_add_rule(NET_PORT)` | Kernel-enforced TCP port binding and egress connect limits per thread. | Unprivileged (`PR_SET_NO_NEW_PRIVS`) |
-| **Tamper-Proof Off-Heap Memory** | `memfd_create` + `F_ADD_SEALS` | Kernel-enforced write lock on off-heap memory buffers against ACE exploits. | Unprivileged |
-| **Ephemeral Filesystem Mounts** | `unshare(CLONE_NEWUSER \| CLONE_NEWNS)` | Ephemeral `tmpfs` RAM-disk views isolated per tenant/request. | Unprivileged |
-| **Virtual File System Emulation** | `SECCOMP_RET_USER_NOTIF` | Synthesizes dynamic file contents directly from JVM memory. | Unprivileged (`PR_SET_NO_NEW_PRIVS`) |
-| **Memory Page Hardening** | `prctl(PR_SET_MDWE)` | Prevents dynamic shellcode page generation in worker thread pools. | Unprivileged |
+| **In-Kernel Packet Filter** | `setsockopt(..., SO_ATTACH_FILTER)` | Drops invalid socket frames before JVM heap/off-heap allocation. | Unprivileged socket access |
+| **Network Egress/Bind Control** | `landlock_add_rule(NET_PORT)` | Kernel-enforced TCP port binding and egress connect limits per thread. | Unprivileged (`PR_SET_NO_NEW_PRIVS`, Kernel 6.7+) |
+| **Tamper-Proof Off-Heap Memory** | `memfd_create` + `F_ADD_SEALS` | Kernel-enforced write/shrink lock on specific memory file descriptor. | Specific mapping only; shared address space reads remain |
+| **Ephemeral Filesystem Mounts** | `unshare(CLONE_NEWUSER \| CLONE_NEWNS)` | Ephemeral `tmpfs` RAM-disk views isolated in worker subprocesses. | `unprivileged_userns_clone=1`; process-wide/helper only |
+| **Virtual File System Emulation** | `SECCOMP_RET_USER_NOTIF` | Synthesizes dynamic file contents via out-of-process supervisor. | Unprivileged (`PR_SET_NO_NEW_PRIVS`) |
+| **Memory Page Hardening** | `prctl(PR_SET_MDWE)` | Prevents dynamic shellcode page generation across process. | Unprivileged |
+| **Memory Dump Prevention** | `prctl(PR_SET_DUMPABLE, 0)` | Disables non-root ptrace attach and core dumps. | Whole process |
+

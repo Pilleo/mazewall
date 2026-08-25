@@ -2,6 +2,10 @@ package io.mazewall.profiler.internal
 
 import io.mazewall.LinuxNative
 import io.mazewall.NativeEngine
+import io.mazewall.core.JavaAgentSelection
+import io.mazewall.core.JvmChildProcess
+import io.mazewall.core.JvmChildSpec
+import io.mazewall.core.PrivateUnixEndpoint
 import io.mazewall.core.ProcessLauncher
 import io.mazewall.core.RealProcessLauncher
 import io.mazewall.core.RealSocketManager
@@ -12,7 +16,6 @@ import java.io.IOException
 import java.lang.foreign.Arena
 import java.lang.foreign.ValueLayout
 import java.nio.file.Path
-import java.nio.file.attribute.PosixFilePermissions
 import java.util.logging.Logger
 
 /**
@@ -54,9 +57,9 @@ public class ProfilerDaemonManager(
             val existing = sharedDaemonContext
             if (existing != null && existing.daemonProcess.isAlive) {
 
-engine.process.prctl(
-    io.mazewall.core.PrctlCommand.SetPtracer(existing.daemonProcess.pid())
-)
+                engine.process.prctl(
+                    io.mazewall.core.PrctlCommand.SetPtracer(existing.daemonProcess.pid())
+                )
 
                 return existing
             }
@@ -87,7 +90,7 @@ engine.process.prctl(
         } catch (e: SecurityException) {
             logger.log(java.util.logging.Level.WARNING, "Failed to remove shutdown hook", e)
         }
-        triggerDaemonShutdown(context.socketPath)
+        triggerDaemonShutdown(context.socketPath, context.daemonProcess)
         context.daemonProcess.destroyForcibly()
         context.daemonProcess.waitFor()
         try {
@@ -103,85 +106,46 @@ engine.process.prctl(
     }
 
     private fun spawnDaemon(): DaemonContext {
-        val daemonClassName = io.mazewall.profiler.engine.ProfilerDaemon::class.java.name
+        val endpoint =
+            PrivateUnixEndpoint.create(processLauncher, "mazewall-profiler-", "profiler.sock")
+        val socketDir = endpoint.dir
+        val socketPath = endpoint.path
 
-        val perms = PosixFilePermissions.fromString("rwx------")
-        var socketDir = processLauncher.createTempDirectory("mazewall-profiler-", PosixFilePermissions.asFileAttribute(perms))
-        var socketPath = socketDir.resolve("profiler.sock").toAbsolutePath().toString()
-
-        if (socketPath.toByteArray(java.nio.charset.StandardCharsets.UTF_8).size >= 108) {
-            try {
-                processLauncher.deleteIfExists(socketDir.resolve("profiler.sock"))
-                processLauncher.deleteIfExists(socketDir)
-            } catch (ignored: Exception) {}
-
-            val tmpDir = java.nio.file.Path.of("/tmp")
-            socketDir = processLauncher.createTempDirectory(tmpDir, "mazewall-profiler-", PosixFilePermissions.asFileAttribute(perms))
-            socketPath = socketDir.resolve("profiler.sock").toAbsolutePath().toString()
-
-            require(socketPath.toByteArray(java.nio.charset.StandardCharsets.UTF_8).size < 108) {
-                "Failed to generate a safe UNIX socket path (exceeds 107 bytes): $socketPath"
-            }
-        }
-
-        val javaBin = System.getProperty("java.home") + "/bin/java"
-        val classpath = System.getProperty("java.class.path")
-
-        val jvmArgs = java.lang.management.ManagementFactory
-            .getRuntimeMXBean()
-            .inputArguments
-        val jacocoAgent = jvmArgs.find { it.startsWith("-javaagent:") && it.contains("jacoco") }
-
-        val pbArgs = mutableListOf<String>()
-        pbArgs.add(javaBin)
-        pbArgs.add("--enable-native-access=ALL-UNNAMED")
-        pbArgs.add("-Xmx64m")
-        if (jacocoAgent != null) {
-            pbArgs.add(jacocoAgent)
-        }
-        pbArgs.add("-cp")
-        pbArgs.add(classpath)
-        pbArgs.add(daemonClassName)
-        pbArgs.add(socketPath)
-
+        val spec =
+            JvmChildSpec(
+                mainClass = io.mazewall.profiler.engine.ProfilerDaemon::class.java.name,
+                mainArgs = listOf(socketPath),
+                maxHeap = "64m",
+                javaAgents = JavaAgentSelection.JacocoOnly,
+            )
+        val pbArgs = JvmChildProcess.commandLine(spec)
         logger.info("Spawning ProfilerDaemon: ${pbArgs.joinToString(" ")}")
 
-        val daemonProcess = processLauncher.startProcess(pbArgs)
+        val daemonProcess = JvmChildProcess.start(processLauncher, spec)
         val daemonPid = daemonProcess.pid()
 
         val prctlRes =
-        engine.process.prctl(
-            io.mazewall.core.PrctlCommand.SetPtracer(daemonPid)
-        )
+            engine.process.prctl(
+                io.mazewall.core.PrctlCommand.SetPtracer(daemonPid)
+            )
 
         if (prctlRes is io.mazewall.LinuxNative.SyscallResult.Error) {
             logger.warning("prctl(PR_SET_PTRACER) failed with errno ${prctlRes.errno}. The daemon may not be able to read process memory if Yama ptrace_scope is restrictive.")
         }
 
-        val readyLatch = java.util.concurrent.CountDownLatch(1)
-
-        Thread {
-            try {
-                val reader = daemonProcess.inputStream.bufferedReader()
-                while (true) {
-                    val line = reader.readLine() ?: break
-                    if (line.contains(io.mazewall.profiler.engine.DAEMON_READY_SENTINEL)) {
-                        readyLatch.countDown()
-                    }
+        val pump =
+            JvmChildProcess.startStdoutPump(
+                process = daemonProcess,
+                readySentinel = io.mazewall.profiler.engine.DAEMON_READY_SENTINEL,
+                onLine = { line ->
                     System.err.println("[DAEMON] $line")
                     System.err.flush()
-                }
-            } catch (e: IOException) {
-                logger.log(java.util.logging.Level.FINE, "Daemon output reader stopped", e)
-            }
-        }.apply {
-            isDaemon = true
-            name = "profiler-daemon-output"
-        }.start()
+                },
+                threadName = "profiler-daemon-output",
+            )
 
-        // Wait for sentinel with 30s timeout
         @Suppress("MagicNumber")
-        val ready = readyLatch.await(30, java.util.concurrent.TimeUnit.SECONDS)
+        val ready = JvmChildProcess.awaitReady(pump, 30)
 
         if (!ready) {
             val alive = daemonProcess.isAlive
@@ -202,7 +166,7 @@ engine.process.prctl(
         return DaemonContext(socketPath, socketDir, daemonProcess, shutdownHook)
     }
 
-    private fun triggerDaemonShutdown(socketPath: String) {
+    private fun triggerDaemonShutdown(socketPath: String, process: Process) {
         try {
             Arena.ofConfined().use { arena ->
                 val fd = socketManager.connect(socketPath)
@@ -210,13 +174,22 @@ engine.process.prctl(
                     val cmd = arena.allocate(1)
                     cmd.set(ValueLayout.JAVA_BYTE, 0L, SHUTDOWN_COMMAND_BYTE)
                     engine.memory.write(fd, ConfinedSegment(cmd), 1)
-                    Thread.sleep(SHUTDOWN_WAIT_MS)
                 } finally {
                     socketManager.close(fd)
                 }
             }
         } catch (ignored: Exception) {
-            // Ignore
+            // Caller escalates via destroyForcibly().
+            return
+        }
+        // Bounded liveness poll instead of a fixed sleep (issue-20260823-172000).
+        val deadline = System.currentTimeMillis() + SHUTDOWN_WAIT_MS
+        try {
+            while (process.isAlive && System.currentTimeMillis() < deadline) {
+                Thread.sleep(10)
+            }
+        } catch (e: InterruptedException) {
+            Thread.currentThread().interrupt()
         }
     }
 }

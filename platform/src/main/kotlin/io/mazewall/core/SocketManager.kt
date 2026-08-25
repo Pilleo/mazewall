@@ -20,6 +20,16 @@ public interface SocketManager {
 
     public fun recvDescriptor(socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>): FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open>?
 
+    /**
+     * Receives an `SCM_RIGHTS` descriptor and adopts it under [role].
+     * Daemon handshake uses [FileDescriptorRole.SeccompNotif]; broker grants use [FileDescriptorRole.Granted].
+     */
+    public fun <R : FileDescriptorRole> recvDescriptor(
+        socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>,
+        role: R,
+    ): FileDescriptor<R, FdState.Open>? =
+        io.mazewall.ffi.networking.SupervisorSocketUtils.recvDescriptor(socketFd, role)
+
     public fun sendDescriptor(socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>, fdToSend: FileDescriptor<*, FdState.Open>): Boolean
 }
 
@@ -72,7 +82,14 @@ public object RealSocketManager : SocketManager {
     }
 
     override fun recvDescriptor(socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>): FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open>? {
-        return io.mazewall.ffi.networking.SupervisorSocketUtils.recvDescriptor(socketFd)
+        return recvDescriptor(socketFd, FileDescriptorRole.SeccompNotif)
+    }
+
+    override fun <R : FileDescriptorRole> recvDescriptor(
+        socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>,
+        role: R,
+    ): FileDescriptor<R, FdState.Open>? {
+        return io.mazewall.ffi.networking.SupervisorSocketUtils.recvDescriptor(socketFd, role)
     }
 
     override fun sendDescriptor(socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>, fdToSend: FileDescriptor<*, FdState.Open>): Boolean {

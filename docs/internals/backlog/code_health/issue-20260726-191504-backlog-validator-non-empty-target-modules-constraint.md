@@ -13,6 +13,7 @@ target_files:
 effort: small
 autonomy: autonomous
 github_issue: 351
+paperclip_issue_id: 88c393e7-8bff-44ca-b0fa-c684c838c800
 ---
 
 # 🔶 [Severity: MEDIUM]: Enforce Non-Empty Target Modules in Backlog Validator and Safe Empty Scheduler Fallback

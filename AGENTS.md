@@ -33,11 +33,19 @@ Whenever you discover a bug, architectural gap, kernel-level nuance, or security
 title: "Title of Issue"
 severity: "HIGH/MEDIUM/LOW/CRITICAL/ENHANCEMENT"
 status: "open"
+priority: high
+component: "enforcer"
+target_modules: [":enforcer"]
+target_files: ["enforcer/src/main/kotlin/io/mazewall/SomeFile.kt"]
+open_questions: false # Set to true if pending design/operator feedback
 ---
 
 # 🔴 [Severity: HIGH]: Title of Issue
 **Context:** [What you found and why it exists]
 **Needed:** [How to fix or prevent it]
+
+## ❓ Open Questions
+1. [Clarifying design questions, architectural options, or operator trade-offs (required when open_questions: true).]
 ```
 
 ---
@@ -163,6 +171,7 @@ Before modifying components, read the relevant design document:
 | Document | Covers |
 |---|---|
 | [designs/enforcer/containment-design.md](docs/internals/designs/enforcer/containment-design.md) | BPF scan loops, argument inspections, Landlock ordering, FFM layouts. |
+| [designs/enforcer/process-portal-design.md](docs/internals/designs/enforcer/process-portal-design.md) | Broker/worker process split, capability FDs, portal codegen. Distinct from the syscall supervisor. |
 | [designs/profiler/profiler-design.md](docs/internals/designs/profiler/profiler-design.md) | USER_NOTIF architecture, socket SCM_RIGHTS, ACK loop protocol. |
 | [designs/core/security-considerations.md](docs/internals/designs/core/security-considerations.md) | Full threat model, ACE escape caveats, K8s custom profiles, Yama scopes. |
 

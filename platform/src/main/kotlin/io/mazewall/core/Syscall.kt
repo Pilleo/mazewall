@@ -1,5 +1,7 @@
 package io.mazewall.core
 
+import java.util.Locale
+
 
 /**
  * High-level syscall identifiers. Each variant resolves to an architecture-specific
@@ -20,6 +22,11 @@ enum class Syscall {
     ACCEPT4,
     SENDTO,
     SENDMSG,
+    RECVFROM,
+    GETSOCKOPT,
+    SETSOCKOPT,
+    GETSOCKNAME,
+    GETPEERNAME,
     SENDMMSG,
     RECVMMSG,
     OPEN,
@@ -48,6 +55,7 @@ enum class Syscall {
     CHROOT,
     IOCTL,
     PRCTL,
+    ARCH_PRCTL,
     READ,
     WRITE,
     CLOSE,
@@ -106,6 +114,7 @@ enum class Syscall {
     STATX,
     FSYNC,
     FDATASYNC,
+    CREAT,
     TRUNCATE,
     FTRUNCATE,
     PAUSE,
@@ -114,6 +123,14 @@ enum class Syscall {
 
     /** Returns the syscall number for the given [arch], or -1 if not available. */
     fun numberFor(arch: Arch): Int = SyscallMapper.numberFor(this, arch)
+
+    public companion object {
+        /** Null if [name] is not a [Syscall] enum constant (e.g. CREAT, recvmsg). */
+        public fun tryParse(name: String): Syscall? {
+            val key = name.uppercase(Locale.US)
+            return entries.find { it.name == key }
+        }
+    }
 }
 
 /**
@@ -130,7 +147,8 @@ internal object SyscallMapper {
             ->
                 ProcessSyscallMapper.numberFor(syscall, arch)
 
-            Syscall.CONNECT, Syscall.BIND, Syscall.LISTEN, Syscall.ACCEPT, Syscall.ACCEPT4, Syscall.SENDTO, Syscall.SENDMSG, Syscall.SENDMMSG, Syscall.RECVMMSG, Syscall.SOCKET ->
+            Syscall.CONNECT, Syscall.BIND, Syscall.LISTEN, Syscall.ACCEPT, Syscall.ACCEPT4, Syscall.SENDTO, Syscall.SENDMSG, Syscall.SENDMMSG, Syscall.RECVMMSG, Syscall.SOCKET,
+            Syscall.RECVFROM, Syscall.GETSOCKOPT, Syscall.SETSOCKOPT, Syscall.GETSOCKNAME, Syscall.GETPEERNAME ->
                 NetworkSyscallMapper.numberFor(syscall, arch)
 
             Syscall.OPEN, Syscall.OPENAT, Syscall.OPENAT2, Syscall.READ, Syscall.WRITE, Syscall.CLOSE, Syscall.FSTAT, Syscall.LSEEK,
@@ -138,7 +156,7 @@ internal object SyscallMapper {
             ->
                 FsSyscallMapper.numberForBasic(syscall, arch)
 
-            Syscall.TRUNCATE, Syscall.FTRUNCATE, Syscall.GETCWD, Syscall.UMASK, Syscall.CHOWN, Syscall.LCHOWN, Syscall.FCHOWN, Syscall.FCHOWNAT,
+            Syscall.CREAT, Syscall.TRUNCATE, Syscall.FTRUNCATE, Syscall.GETCWD, Syscall.UMASK, Syscall.CHOWN, Syscall.LCHOWN, Syscall.FCHOWN, Syscall.FCHOWNAT,
             Syscall.UTIME, Syscall.UTIMES, Syscall.UTIMENSAT, Syscall.MKDIR, Syscall.MKDIRAT, Syscall.RMDIR,
             ->
                 FsSyscallMapper.numberForAttr(syscall, arch)
@@ -221,6 +239,11 @@ internal object NetworkSyscallMapper {
             Syscall.ACCEPT4 -> arch.accept4
             Syscall.SENDTO -> arch.sendto
             Syscall.SENDMSG -> arch.sendmsg
+            Syscall.RECVFROM -> arch.recvfrom
+            Syscall.GETSOCKOPT -> arch.getsockopt
+            Syscall.SETSOCKOPT -> arch.setsockopt
+            Syscall.GETSOCKNAME -> arch.getsockname
+            Syscall.GETPEERNAME -> arch.getpeername
             Syscall.SENDMMSG -> arch.sendmmsg
             Syscall.RECVMMSG -> arch.recvmmsg
             Syscall.SOCKET -> arch.socket
@@ -283,7 +306,7 @@ internal object FsSyscallMapper {
         arch: Arch,
     ): Int =
         when (syscall) {
-            Syscall.TRUNCATE, Syscall.FTRUNCATE, Syscall.GETCWD, Syscall.UMASK -> numberForAttrBasic(syscall, arch)
+            Syscall.CREAT, Syscall.TRUNCATE, Syscall.FTRUNCATE, Syscall.GETCWD, Syscall.UMASK -> numberForAttrBasic(syscall, arch)
             else -> numberForAttrAdvanced(syscall, arch)
         }
 
@@ -292,6 +315,7 @@ internal object FsSyscallMapper {
         arch: Arch,
     ): Int =
         when (syscall) {
+            Syscall.CREAT -> arch.creat
             Syscall.TRUNCATE -> arch.truncate
             Syscall.FTRUNCATE -> arch.ftruncate
             Syscall.GETCWD -> arch.getcwd
@@ -459,6 +483,7 @@ internal object OtherSyscallMapper {
             Syscall.CHROOT -> arch.chroot
             Syscall.IOCTL -> arch.ioctl
             Syscall.PRCTL -> arch.prctl
+            Syscall.ARCH_PRCTL -> arch.archPrctl
             Syscall.FUTEX -> arch.futex
             Syscall.SCHED_YIELD -> arch.sched_yield
             Syscall.GETRANDOM -> arch.getrandom

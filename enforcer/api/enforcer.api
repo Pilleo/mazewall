@@ -1,0 +1,1317 @@
+public final class io/mazewall/AllowListSpec {
+	public final fun advanced (Lkotlin/jvm/functions/Function1;)Lio/mazewall/AllowListSpec;
+	public final fun allow ([Lio/mazewall/core/Syscall;)Lio/mazewall/AllowListSpec;
+	public final fun denyNetwork ()Lio/mazewall/AllowListSpec;
+	public final fun denyProcessCreation ()Lio/mazewall/AllowListSpec;
+	public final fun getMode ()Lio/mazewall/PolicyMode;
+}
+
+public final class io/mazewall/BillOfBehaviorDto {
+	public static final field Companion Lio/mazewall/BillOfBehaviorDto$Companion;
+	public fun <init> ()V
+	public fun <init> (Ljava/util/Set;Ljava/util/Set;Ljava/util/Set;Ljava/util/Set;Ljava/util/Set;Ljava/util/Set;Ljava/util/List;)V
+	public synthetic fun <init> (Ljava/util/Set;Ljava/util/Set;Ljava/util/Set;Ljava/util/Set;Ljava/util/Set;Ljava/util/Set;Ljava/util/List;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun getConnects ()Ljava/util/Set;
+	public final fun getExecs ()Ljava/util/Set;
+	public final fun getFsWritePaths ()Ljava/util/Set;
+	public final fun getIoUringOps ()Ljava/util/Set;
+	public final fun getOpens ()Ljava/util/Set;
+	public final fun getStackProfile ()Ljava/util/List;
+	public final fun getSyscalls ()Ljava/util/Set;
+}
+
+public final synthetic class io/mazewall/BillOfBehaviorDto$$serializer : kotlinx/serialization/internal/GeneratedSerializer {
+	public static final field INSTANCE Lio/mazewall/BillOfBehaviorDto$$serializer;
+	public final fun childSerializers ()[Lkotlinx/serialization/KSerializer;
+	public final fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Lio/mazewall/BillOfBehaviorDto;
+	public synthetic fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ljava/lang/Object;
+	public final fun getDescriptor ()Lkotlinx/serialization/descriptors/SerialDescriptor;
+	public final fun serialize (Lkotlinx/serialization/encoding/Encoder;Lio/mazewall/BillOfBehaviorDto;)V
+	public synthetic fun serialize (Lkotlinx/serialization/encoding/Encoder;Ljava/lang/Object;)V
+	public fun typeParametersSerializers ()[Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/mazewall/BillOfBehaviorDto$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/mazewall/BpfFilter {
+	public static final field INSTANCE Lio/mazewall/BpfFilter;
+	public final fun build (Lio/mazewall/core/Arch;Lio/mazewall/PolicyDefinition;Z)Lio/mazewall/seccomp/BpfProgram;
+	public static synthetic fun build$default (Lio/mazewall/BpfFilter;Lio/mazewall/core/Arch;Lio/mazewall/PolicyDefinition;ZILjava/lang/Object;)Lio/mazewall/seccomp/BpfProgram;
+}
+
+public final class io/mazewall/CompiledSandbox {
+	public fun <init> (Lio/mazewall/PolicyDefinition;Lio/mazewall/seccomp/BpfProgram;)V
+	public final fun component1 ()Lio/mazewall/PolicyDefinition;
+	public final fun component2 ()Lio/mazewall/seccomp/BpfProgram;
+	public final fun copy (Lio/mazewall/PolicyDefinition;Lio/mazewall/seccomp/BpfProgram;)Lio/mazewall/CompiledSandbox;
+	public static synthetic fun copy$default (Lio/mazewall/CompiledSandbox;Lio/mazewall/PolicyDefinition;Lio/mazewall/seccomp/BpfProgram;ILjava/lang/Object;)Lio/mazewall/CompiledSandbox;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getCompiledFilters ()Ljava/util/List;
+	public final fun getDefinition ()Lio/mazewall/PolicyDefinition;
+	public final fun getProgram ()Lio/mazewall/seccomp/BpfProgram;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/mazewall/DenyListSpec {
+	public final fun advanced (Lkotlin/jvm/functions/Function1;)Lio/mazewall/DenyListSpec;
+	public final fun denyNetwork ()Lio/mazewall/DenyListSpec;
+	public final fun denyProcessCreation ()Lio/mazewall/DenyListSpec;
+	public final fun getMode ()Lio/mazewall/PolicyMode;
+	public final fun readOnly (Ljava/lang/String;)Lio/mazewall/DenyListSpec;
+	public final fun readOnly-3PFA_EI (Ljava/lang/String;)Lio/mazewall/DenyListSpec;
+}
+
+public final class io/mazewall/InstallationAssessment {
+	public fun <init> (Lio/mazewall/InstallationScope;ZLio/mazewall/Platform$FallbackBehavior;Lio/mazewall/PolicyArgumentRules;Lio/mazewall/PolicyMode;Ljava/util/List;Ljava/util/List;Ljava/util/List;ZIZZZZ)V
+	public final fun component1 ()Lio/mazewall/InstallationScope;
+	public final fun component10 ()I
+	public final fun component11 ()Z
+	public final fun component12 ()Z
+	public final fun component13 ()Z
+	public final fun component14 ()Z
+	public final fun component2 ()Z
+	public final fun component3 ()Lio/mazewall/Platform$FallbackBehavior;
+	public final fun component4 ()Lio/mazewall/PolicyArgumentRules;
+	public final fun component5 ()Lio/mazewall/PolicyMode;
+	public final fun component6 ()Ljava/util/List;
+	public final fun component7 ()Ljava/util/List;
+	public final fun component8 ()Ljava/util/List;
+	public final fun component9 ()Z
+	public final fun copy (Lio/mazewall/InstallationScope;ZLio/mazewall/Platform$FallbackBehavior;Lio/mazewall/PolicyArgumentRules;Lio/mazewall/PolicyMode;Ljava/util/List;Ljava/util/List;Ljava/util/List;ZIZZZZ)Lio/mazewall/InstallationAssessment;
+	public static synthetic fun copy$default (Lio/mazewall/InstallationAssessment;Lio/mazewall/InstallationScope;ZLio/mazewall/Platform$FallbackBehavior;Lio/mazewall/PolicyArgumentRules;Lio/mazewall/PolicyMode;Ljava/util/List;Ljava/util/List;Ljava/util/List;ZIZZZZILjava/lang/Object;)Lio/mazewall/InstallationAssessment;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getArgumentRules ()Lio/mazewall/PolicyArgumentRules;
+	public final fun getBlockedStages ()Ljava/util/List;
+	public final fun getBlockingReasons ()Ljava/util/List;
+	public final fun getFallback ()Lio/mazewall/Platform$FallbackBehavior;
+	public final fun getInstallable ()Z
+	public final fun getLandlockAbi ()I
+	public final fun getLandlockRequired ()Z
+	public final fun getMode ()Lio/mazewall/PolicyMode;
+	public final fun getScope ()Lio/mazewall/InstallationScope;
+	public final fun getSeccompSupported ()Z
+	public final fun getTsyncRequired ()Z
+	public final fun getUserNotifRequired ()Z
+	public final fun getVirtualThread ()Z
+	public final fun getWarnings ()Ljava/util/List;
+	public fun hashCode ()I
+	public final fun requireInstallable ()Lio/mazewall/InstallationAssessment;
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/mazewall/InstallationAssessor {
+	public static final field INSTANCE Lio/mazewall/InstallationAssessor;
+	public final fun assess (Lio/mazewall/PolicyDefinition;Z)Lio/mazewall/InstallationAssessment;
+}
+
+public final class io/mazewall/InstallationReceipt {
+	public fun <init> (ZLio/mazewall/PolicyDefinition;Ljava/lang/AutoCloseable;J)V
+	public fun <init> (ZLio/mazewall/PolicyDefinition;Ljava/lang/AutoCloseable;JZLio/mazewall/Platform$FallbackBehavior;Z)V
+	public synthetic fun <init> (ZLio/mazewall/PolicyDefinition;Ljava/lang/AutoCloseable;JZLio/mazewall/Platform$FallbackBehavior;ZILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Z
+	public final fun component2 ()Lio/mazewall/PolicyDefinition;
+	public final fun component3 ()Ljava/lang/AutoCloseable;
+	public final fun component4 ()J
+	public final fun component5 ()Z
+	public final fun component6 ()Lio/mazewall/Platform$FallbackBehavior;
+	public final fun component7 ()Z
+	public final fun copy (ZLio/mazewall/PolicyDefinition;Ljava/lang/AutoCloseable;JZLio/mazewall/Platform$FallbackBehavior;Z)Lio/mazewall/InstallationReceipt;
+	public static synthetic fun copy$default (Lio/mazewall/InstallationReceipt;ZLio/mazewall/PolicyDefinition;Ljava/lang/AutoCloseable;JZLio/mazewall/Platform$FallbackBehavior;ZILjava/lang/Object;)Lio/mazewall/InstallationReceipt;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getFallback ()Lio/mazewall/Platform$FallbackBehavior;
+	public final fun getInstalled ()Z
+	public final fun getLandlockApplied ()Z
+	public final fun getProcessWide ()Z
+	public final fun getRequestedPolicy ()Lio/mazewall/PolicyDefinition;
+	public final fun getSupervisorSession ()Ljava/lang/AutoCloseable;
+	public final fun getTimestampMillis ()J
+	public fun hashCode ()I
+	public final fun isInstalled ()Z
+	public final fun isLandlockApplied ()Z
+	public final fun isProcessWide ()Z
+	public final fun requireInstalled ()Lio/mazewall/InstallationReceipt;
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/mazewall/InstallationRejectedException : java/lang/IllegalStateException {
+	public fun <init> (Ljava/util/List;Ljava/util/List;)V
+	public final fun getReasons ()Ljava/util/List;
+	public final fun getStages ()Ljava/util/List;
+}
+
+public final class io/mazewall/InstallationScope : java/lang/Enum {
+	public static final field PROCESS Lio/mazewall/InstallationScope;
+	public static final field THREAD Lio/mazewall/InstallationScope;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lio/mazewall/InstallationScope;
+	public static fun values ()[Lio/mazewall/InstallationScope;
+}
+
+public final class io/mazewall/InstallationStage : java/lang/Enum {
+	public static final field INTEL_CET Lio/mazewall/InstallationStage;
+	public static final field LANDLOCK Lio/mazewall/InstallationStage;
+	public static final field PLATFORM Lio/mazewall/InstallationStage;
+	public static final field SECCOMP Lio/mazewall/InstallationStage;
+	public static final field TSYNC Lio/mazewall/InstallationStage;
+	public static final field USER_NOTIF Lio/mazewall/InstallationStage;
+	public static final field VIRTUAL_THREAD Lio/mazewall/InstallationStage;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lio/mazewall/InstallationStage;
+	public static fun values ()[Lio/mazewall/InstallationStage;
+}
+
+public final class io/mazewall/JavaPolicyBuilder {
+	public static final field Companion Lio/mazewall/JavaPolicyBuilder$Companion;
+	public fun <init> ()V
+	public fun <init> (Lio/mazewall/RuntimeProfile;)V
+	public synthetic fun <init> (Lio/mazewall/RuntimeProfile;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun addAction (Lio/mazewall/core/SeccompAction;[Lio/mazewall/core/Syscall;)Lio/mazewall/JavaPolicyBuilder;
+	public final fun allow ([Lio/mazewall/core/Syscall;)Lio/mazewall/JavaPolicyBuilder;
+	public final fun allowFsRead ([Ljava/io/File;)Lio/mazewall/JavaPolicyBuilder;
+	public final fun allowFsRead ([Ljava/lang/String;)Lio/mazewall/JavaPolicyBuilder;
+	public final fun allowFsRead ([Ljava/nio/file/Path;)Lio/mazewall/JavaPolicyBuilder;
+	public final fun allowFsReadWrite ([Ljava/io/File;)Lio/mazewall/JavaPolicyBuilder;
+	public final fun allowFsReadWrite ([Ljava/lang/String;)Lio/mazewall/JavaPolicyBuilder;
+	public final fun allowFsReadWrite ([Ljava/nio/file/Path;)Lio/mazewall/JavaPolicyBuilder;
+	public final fun allowFsWrite ([Ljava/io/File;)Lio/mazewall/JavaPolicyBuilder;
+	public final fun allowFsWrite ([Ljava/lang/String;)Lio/mazewall/JavaPolicyBuilder;
+	public final fun allowFsWrite ([Ljava/nio/file/Path;)Lio/mazewall/JavaPolicyBuilder;
+	public final fun allowJvmClasspath ()Lio/mazewall/JavaPolicyBuilder;
+	public final fun allowMmapExec ()Lio/mazewall/JavaPolicyBuilder;
+	public final fun allowMmapExec (Z)Lio/mazewall/JavaPolicyBuilder;
+	public final fun allowNonThreadClone ()Lio/mazewall/JavaPolicyBuilder;
+	public final fun allowUnsafePrctl ()Lio/mazewall/JavaPolicyBuilder;
+	public final fun base (Lio/mazewall/Policy;)Lio/mazewall/JavaPolicyBuilder;
+	public final fun block ([Lio/mazewall/core/Syscall;)Lio/mazewall/JavaPolicyBuilder;
+	public final fun build ()Lio/mazewall/Policy;
+	public final fun buildProcessWide ()Lio/mazewall/Policy;
+	public static final fun create ()Lio/mazewall/JavaPolicyBuilder;
+	public static final fun create (Lio/mazewall/RuntimeProfile;)Lio/mazewall/JavaPolicyBuilder;
+	public final fun customViolationPhrase (Ljava/lang/String;)Lio/mazewall/JavaPolicyBuilder;
+	public final fun customViolationRegex (Ljava/lang/String;)Lio/mazewall/JavaPolicyBuilder;
+	public final fun customViolationRegex (Ljava/util/regex/Pattern;)Lio/mazewall/JavaPolicyBuilder;
+	public final fun defaultAction (Lio/mazewall/core/SeccompAction;)Lio/mazewall/JavaPolicyBuilder;
+	public final fun forRuntime (Lio/mazewall/RuntimeProfile;)Lio/mazewall/JavaPolicyBuilder;
+	public final fun lockIntelCet ()Lio/mazewall/JavaPolicyBuilder;
+	public final fun unblock ([Lio/mazewall/core/Syscall;)Lio/mazewall/JavaPolicyBuilder;
+}
+
+public final class io/mazewall/JavaPolicyBuilder$Companion {
+	public final fun create ()Lio/mazewall/JavaPolicyBuilder;
+	public final fun create (Lio/mazewall/RuntimeProfile;)Lio/mazewall/JavaPolicyBuilder;
+}
+
+public final class io/mazewall/KernelFeatureMatrix {
+	public static final field Companion Lio/mazewall/KernelFeatureMatrix$Companion;
+	public fun <init> (ZZZIZ)V
+	public synthetic fun <init> (ZZZIZILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Z
+	public final fun component2 ()Z
+	public final fun component3 ()Z
+	public final fun component4 ()I
+	public final fun component5 ()Z
+	public final fun copy (ZZZIZ)Lio/mazewall/KernelFeatureMatrix;
+	public static synthetic fun copy$default (Lio/mazewall/KernelFeatureMatrix;ZZZIZILjava/lang/Object;)Lio/mazewall/KernelFeatureMatrix;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getCetSupported ()Z
+	public final fun getLandlockAbiVersion ()I
+	public final fun getLandlockSupported ()Z
+	public final fun getLandlockTsyncSupported ()Z
+	public final fun getSeccompSupported ()Z
+	public final fun getSeccompTsyncSupported ()Z
+	public final fun getSeccompUserNotifSupported ()Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/mazewall/KernelFeatureMatrix$Companion {
+}
+
+public final class io/mazewall/Mazewall {
+	public static final field DEFAULT_SAFE Lio/mazewall/Policy;
+	public static final field NO_EXEC Lio/mazewall/Policy;
+	public static final field NO_EXEC_HOTSPOT Lio/mazewall/Policy;
+	public static final field NO_EXEC_NATIVE_IMAGE Lio/mazewall/Policy;
+	public static final field NO_EXEC_NO_FS_WRITE Lio/mazewall/Policy;
+	public static final field NO_NETWORK Lio/mazewall/Policy;
+	public static final field PURE_COMPUTE Lio/mazewall/Policy;
+	public static final field PURE_COMPUTE_UNSAFE Lio/mazewall/Policy;
+	public static final fun assessOnCurrentThread (Lio/mazewall/Policy;)Lio/mazewall/InstallationAssessment;
+	public static final fun assessOnProcess (Lio/mazewall/Policy;)Lio/mazewall/InstallationAssessment;
+	public static final fun builder ()Lio/mazewall/JavaPolicyBuilder;
+	public static final fun builder (Lio/mazewall/RuntimeProfile;)Lio/mazewall/JavaPolicyBuilder;
+	public static final fun combine ([Lio/mazewall/Policy;)Lio/mazewall/Policy;
+	public static final fun combineProcessWide ([Lio/mazewall/Policy;)Lio/mazewall/Policy;
+	public static final fun combineThreadLocal ([Lio/mazewall/Policy;)Lio/mazewall/Policy;
+	public static final fun defaultSafe ()Lio/mazewall/Policy;
+	public static final fun installOnCurrentThread (Lio/mazewall/Policy;)Lio/mazewall/InstallationReceipt;
+	public static final fun installOnCurrentThread (Lio/mazewall/Policy;Lio/mazewall/enforcer/supervisor/StacktraceScopingPolicy;)Lio/mazewall/InstallationReceipt;
+	public static final fun installOnCurrentThread ([Lio/mazewall/Policy;)Lio/mazewall/InstallationReceipt;
+	public static final fun installOnProcess (Lio/mazewall/Policy;)Lio/mazewall/InstallationReceipt;
+	public static final fun installOnProcess ([Lio/mazewall/Policy;)Lio/mazewall/InstallationReceipt;
+	public static final fun newContainedCachedThreadPool (Lio/mazewall/Policy;)Ljava/util/concurrent/ExecutorService;
+	public static final fun newContainedFixedThreadPool (ILio/mazewall/Policy;)Ljava/util/concurrent/ExecutorService;
+	public static final fun newContainedSingleThreadExecutor (Lio/mazewall/Policy;)Ljava/util/concurrent/ExecutorService;
+	public static final fun noExec ()Lio/mazewall/Policy;
+	public static final fun noExecHotspot ()Lio/mazewall/Policy;
+	public static final fun noExecNativeImage ()Lio/mazewall/Policy;
+	public static final fun noExecNoFsWrite ()Lio/mazewall/Policy;
+	public static final fun noNetwork ()Lio/mazewall/Policy;
+	public static final fun pureCompute ()Lio/mazewall/Policy;
+	public static final fun pureComputeUnsafe ()Lio/mazewall/Policy;
+	public static final fun runContained (Lio/mazewall/Policy;Ljava/lang/Runnable;)V
+	public static final fun runContained (Lio/mazewall/Policy;Ljava/util/concurrent/Callable;)Ljava/lang/Object;
+	public static final fun runContained (Lio/mazewall/Policy;Ljava/util/function/Supplier;)Ljava/lang/Object;
+	public static final fun threadLocalBuilder ()Lio/mazewall/JavaPolicyBuilder;
+	public static final fun threadLocalBuilder (Lio/mazewall/RuntimeProfile;)Lio/mazewall/JavaPolicyBuilder;
+	public static final fun wrap (Ljava/util/concurrent/ExecutorService;[Lio/mazewall/Policy;)Ljava/util/concurrent/ExecutorService;
+	public static final fun wrapContainedExecutor (Ljava/util/concurrent/ExecutorService;Lio/mazewall/Policy;)Ljava/util/concurrent/ExecutorService;
+	public static final fun wrapExecutor (Ljava/util/concurrent/ExecutorService;[Lio/mazewall/Policy;)Ljava/util/concurrent/ExecutorService;
+}
+
+public final class io/mazewall/Platform {
+	public static final field INSTANCE Lio/mazewall/Platform;
+	public static final fun configuredFallback ()Lio/mazewall/Platform$FallbackBehavior;
+	public static final fun diagnose ()Lio/mazewall/Platform$Diagnostics;
+	public static final fun getFeatureMatrix ()Lio/mazewall/KernelFeatureMatrix;
+	public static final fun isCpuCetSupported ()Z
+	public static final fun isLinux ()Z
+	public static final fun isSupported ()Z
+	public static final fun queryIntelCetStatus ()J
+	public static final fun resetToDefault ()V
+	public static final fun setProvider (Lio/mazewall/PlatformProvider;)V
+	public static final fun validateLinux ()V
+	public static final fun validateSupported ()V
+}
+
+public final class io/mazewall/Platform$Diagnostics {
+	public fun <init> (Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;ZZZLio/mazewall/SeccompMode;Lio/mazewall/YamaPtraceScope;Lio/mazewall/KernelFeatureMatrix;Z)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component10 ()Z
+	public final fun component2 ()Ljava/lang/String;
+	public final fun component3 ()Ljava/lang/String;
+	public final fun component4 ()Z
+	public final fun component5 ()Z
+	public final fun component6 ()Z
+	public final fun component7 ()Lio/mazewall/SeccompMode;
+	public final fun component8 ()Lio/mazewall/YamaPtraceScope;
+	public final fun component9 ()Lio/mazewall/KernelFeatureMatrix;
+	public final fun copy (Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;ZZZLio/mazewall/SeccompMode;Lio/mazewall/YamaPtraceScope;Lio/mazewall/KernelFeatureMatrix;Z)Lio/mazewall/Platform$Diagnostics;
+	public static synthetic fun copy$default (Lio/mazewall/Platform$Diagnostics;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;ZZZLio/mazewall/SeccompMode;Lio/mazewall/YamaPtraceScope;Lio/mazewall/KernelFeatureMatrix;ZILjava/lang/Object;)Lio/mazewall/Platform$Diagnostics;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getFeatures ()Lio/mazewall/KernelFeatureMatrix;
+	public final fun getOsArch ()Ljava/lang/String;
+	public final fun getOsName ()Ljava/lang/String;
+	public final fun getOsVersion ()Ljava/lang/String;
+	public final fun getSeccompMode ()Lio/mazewall/SeccompMode;
+	public final fun getYamaPtraceScope ()Lio/mazewall/YamaPtraceScope;
+	public fun hashCode ()I
+	public final fun isArchitectureSupported ()Z
+	public final fun isContainer ()Z
+	public final fun isLinux ()Z
+	public final fun isNoNewPrivsEnabled ()Z
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/mazewall/Platform$FallbackBehavior : java/lang/Enum {
+	public static final field FAIL Lio/mazewall/Platform$FallbackBehavior;
+	public static final field SILENT_BYPASS Lio/mazewall/Platform$FallbackBehavior;
+	public static final field WARN_AND_BYPASS Lio/mazewall/Platform$FallbackBehavior;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lio/mazewall/Platform$FallbackBehavior;
+	public static fun values ()[Lio/mazewall/Platform$FallbackBehavior;
+}
+
+public abstract interface class io/mazewall/PlatformProvider {
+	public abstract fun checkSeccompSanity ()Lio/mazewall/LinuxNative$SyscallResult;
+	public abstract fun getLandlockAbiVersion ()I
+	public abstract fun getOsArch ()Ljava/lang/String;
+	public abstract fun getOsName ()Ljava/lang/String;
+	public abstract fun getOsVersion ()Ljava/lang/String;
+	public abstract fun getSeccompMode ()Lio/mazewall/SeccompMode;
+	public abstract fun getYamaPtraceScope ()Lio/mazewall/YamaPtraceScope;
+	public abstract fun hasKernelSeccompSupport ()Z
+	public abstract fun isContainer ()Z
+	public abstract fun isNoNewPrivsEnabled ()Z
+	public abstract fun probeCetSupported ()Z
+	public abstract fun probeSeccompTsync ()Z
+	public abstract fun probeSeccompUserNotif ()Z
+}
+
+public final class io/mazewall/Policy {
+	public static final field Companion Lio/mazewall/Policy$Companion;
+	public static final field NO_EXEC Lio/mazewall/Policy;
+	public static final field NO_EXEC_HOTSPOT Lio/mazewall/Policy;
+	public static final field NO_EXEC_NATIVE_IMAGE Lio/mazewall/Policy;
+	public static final field NO_NETWORK Lio/mazewall/Policy;
+	public static final field PURE_COMPUTE Lio/mazewall/Policy;
+	public static final field PURE_COMPUTE_UNSAFE Lio/mazewall/Policy;
+	public static final fun allowList ()Lio/mazewall/Policy;
+	public static final fun allowList (Lio/mazewall/RuntimeProfile;)Lio/mazewall/Policy;
+	public static final fun allowList (Lio/mazewall/RuntimeProfile;Lkotlin/jvm/functions/Function1;)Lio/mazewall/Policy;
+	public static final fun builder ()Lio/mazewall/Policy$Builder;
+	public static final fun combine ([Lio/mazewall/Policy;)Lio/mazewall/Policy;
+	public static final fun combineProcessWide ([Lio/mazewall/Policy;)Lio/mazewall/Policy;
+	public static final fun denyList ()Lio/mazewall/Policy;
+	public static final fun denyList (Lio/mazewall/RuntimeProfile;)Lio/mazewall/Policy;
+	public static final fun denyList (Lio/mazewall/RuntimeProfile;Lkotlin/jvm/functions/Function1;)Lio/mazewall/Policy;
+	public final fun getAllowMmapExec ()Z
+	public final fun getAllowNonThreadClone ()Z
+	public final fun getAllowUnsafePrctl ()Z
+	public final fun getAllowedFsReadPaths ()Ljava/util/Set;
+	public final fun getAllowedFsWritePaths ()Ljava/util/Set;
+	public final fun getArgumentRules ()Lio/mazewall/PolicyArgumentRules;
+	public final fun getCompiledFilters ()Ljava/util/List;
+	public final fun getCustomViolationPhrases ()Ljava/util/List;
+	public final fun getCustomViolationRegexes ()Ljava/util/List;
+	public final fun getDefaultAction ()Lio/mazewall/core/SeccompAction;
+	public final fun getDefinition ()Lio/mazewall/PolicyDefinition;
+	public final fun getMode ()Lio/mazewall/PolicyMode;
+	public final fun getSyscallActions ()Ljava/util/Map;
+	public final fun isSyscallAllowed (Lio/mazewall/core/Syscall;)Z
+	public static final fun restrictFurtherWith ([Lio/mazewall/Policy;)Lio/mazewall/Policy;
+	public final fun syscallActionNumbers (Lio/mazewall/core/Arch;)Ljava/util/Map;
+	public static final fun threadLocalBuilder ()Lio/mazewall/Policy$Builder;
+	public static final fun threadLocalDenyList ()Lio/mazewall/Policy;
+	public static final fun threadLocalDenyList (Lio/mazewall/RuntimeProfile;)Lio/mazewall/Policy;
+	public static final fun threadLocalDenyList (Lio/mazewall/RuntimeProfile;Lkotlin/jvm/functions/Function1;)Lio/mazewall/Policy;
+}
+
+public final class io/mazewall/Policy$Builder {
+	public final fun addAction (Lio/mazewall/core/SeccompAction;[Lio/mazewall/core/Syscall;)Lio/mazewall/Policy$Builder;
+	public final fun allow ([Lio/mazewall/core/Syscall;)Lio/mazewall/Policy$Builder;
+	public final fun allowFsRead (Ljava/lang/String;)Lio/mazewall/Policy$Builder;
+	public final fun allowFsRead-3PFA_EI (Ljava/lang/String;)Lio/mazewall/Policy$Builder;
+	public final fun allowFsWrite (Ljava/lang/String;)Lio/mazewall/Policy$Builder;
+	public final fun allowFsWrite-3PFA_EI (Ljava/lang/String;)Lio/mazewall/Policy$Builder;
+	public final fun allowJvmClasspath ()Lio/mazewall/Policy$Builder;
+	public final fun allowMmapExec ()Lio/mazewall/Policy$Builder;
+	public final fun allowNonThreadClone ()Lio/mazewall/Policy$Builder;
+	public final fun allowUnsafePrctl ()Lio/mazewall/Policy$Builder;
+	public final fun base (Lio/mazewall/Policy;)Lio/mazewall/Policy$Builder;
+	public final fun block ([Lio/mazewall/core/Syscall;)Lio/mazewall/Policy$Builder;
+	public final fun build ()Lio/mazewall/Policy;
+	public final fun customViolationPhrase (Ljava/lang/String;)Lio/mazewall/Policy$Builder;
+	public final fun customViolationRegex (Lkotlin/text/Regex;)Lio/mazewall/Policy$Builder;
+	public final fun defaultAction (Lio/mazewall/core/SeccompAction;)Lio/mazewall/Policy$Builder;
+	public final fun forRuntime (Lio/mazewall/RuntimeProfile;)Lio/mazewall/Policy$Builder;
+	public final fun lockIntelCet ()Lio/mazewall/Policy$Builder;
+	public final fun unblock ([Lio/mazewall/core/Syscall;)Lio/mazewall/Policy$Builder;
+}
+
+public final class io/mazewall/Policy$Companion {
+	public final fun allowList ()Lio/mazewall/Policy;
+	public final fun allowList (Lio/mazewall/RuntimeProfile;)Lio/mazewall/Policy;
+	public final fun allowList (Lio/mazewall/RuntimeProfile;Lkotlin/jvm/functions/Function1;)Lio/mazewall/Policy;
+	public static synthetic fun allowList$default (Lio/mazewall/Policy$Companion;Lio/mazewall/RuntimeProfile;Lkotlin/jvm/functions/Function1;ILjava/lang/Object;)Lio/mazewall/Policy;
+	public final fun builder ()Lio/mazewall/Policy$Builder;
+	public final fun combine ([Lio/mazewall/Policy;)Lio/mazewall/Policy;
+	public final fun combineProcessWide ([Lio/mazewall/Policy;)Lio/mazewall/Policy;
+	public final fun denyList ()Lio/mazewall/Policy;
+	public final fun denyList (Lio/mazewall/RuntimeProfile;)Lio/mazewall/Policy;
+	public final fun denyList (Lio/mazewall/RuntimeProfile;Lkotlin/jvm/functions/Function1;)Lio/mazewall/Policy;
+	public static synthetic fun denyList$default (Lio/mazewall/Policy$Companion;Lio/mazewall/RuntimeProfile;Lkotlin/jvm/functions/Function1;ILjava/lang/Object;)Lio/mazewall/Policy;
+	public final fun restrictFurtherWith ([Lio/mazewall/Policy;)Lio/mazewall/Policy;
+	public final fun threadLocalBuilder ()Lio/mazewall/Policy$Builder;
+	public final fun threadLocalDenyList ()Lio/mazewall/Policy;
+	public final fun threadLocalDenyList (Lio/mazewall/RuntimeProfile;)Lio/mazewall/Policy;
+	public final fun threadLocalDenyList (Lio/mazewall/RuntimeProfile;Lkotlin/jvm/functions/Function1;)Lio/mazewall/Policy;
+	public static synthetic fun threadLocalDenyList$default (Lio/mazewall/Policy$Companion;Lio/mazewall/RuntimeProfile;Lkotlin/jvm/functions/Function1;ILjava/lang/Object;)Lio/mazewall/Policy;
+}
+
+public final class io/mazewall/PolicyArgumentRules {
+	public static final field Companion Lio/mazewall/PolicyArgumentRules$Companion;
+	public fun <init> (ZZZ)V
+	public final fun component1 ()Z
+	public final fun component2 ()Z
+	public final fun component3 ()Z
+	public final fun copy (ZZZ)Lio/mazewall/PolicyArgumentRules;
+	public static synthetic fun copy$default (Lio/mazewall/PolicyArgumentRules;ZZZILjava/lang/Object;)Lio/mazewall/PolicyArgumentRules;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getAllowExecutableMappings ()Z
+	public final fun getInspectNonThreadClone ()Z
+	public final fun getInspectUnsafePrctl ()Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/mazewall/PolicyArgumentRules$Companion {
+	public final fun of (Lio/mazewall/PolicyDefinition;)Lio/mazewall/PolicyArgumentRules;
+}
+
+public final class io/mazewall/PolicyBuilder {
+	public fun <init> ()V
+	public final fun addAction (Lio/mazewall/core/SeccompAction;[Lio/mazewall/core/Syscall;)Lio/mazewall/PolicyBuilder;
+	public final fun allow ([Lio/mazewall/core/Syscall;)Lio/mazewall/PolicyBuilder;
+	public final fun allowFsRead (Ljava/lang/String;)Lio/mazewall/PolicyBuilder;
+	public final fun allowFsRead-3PFA_EI (Ljava/lang/String;)Lio/mazewall/PolicyBuilder;
+	public final fun allowFsWrite (Ljava/lang/String;)Lio/mazewall/PolicyBuilder;
+	public final fun allowFsWrite-3PFA_EI (Ljava/lang/String;)Lio/mazewall/PolicyBuilder;
+	public final fun allowJvmClasspath ()Lio/mazewall/PolicyBuilder;
+	public final fun allowMmapExec ()Lio/mazewall/PolicyBuilder;
+	public final fun allowNonThreadClone ()Lio/mazewall/PolicyBuilder;
+	public final fun allowUnsafePrctl ()Lio/mazewall/PolicyBuilder;
+	public final fun base (Lio/mazewall/PolicyDefinition;)Lio/mazewall/PolicyBuilder;
+	public final fun block ([Lio/mazewall/core/Syscall;)Lio/mazewall/PolicyBuilder;
+	public final fun build ()Lio/mazewall/PolicyDefinition;
+	public final fun customViolationPhrase (Ljava/lang/String;)Lio/mazewall/PolicyBuilder;
+	public final fun customViolationRegex (Lkotlin/text/Regex;)Lio/mazewall/PolicyBuilder;
+	public final fun defaultAction (Lio/mazewall/core/SeccompAction;)Lio/mazewall/PolicyBuilder;
+	public final fun forRuntime (Lio/mazewall/RuntimeProfile;)Lio/mazewall/PolicyBuilder;
+	public final fun lockIntelCet ()Lio/mazewall/PolicyBuilder;
+	public final fun unblock ([Lio/mazewall/core/Syscall;)Lio/mazewall/PolicyBuilder;
+}
+
+public final class io/mazewall/PolicyDefinition {
+	public static final field Companion Lio/mazewall/PolicyDefinition$Companion;
+	public fun <init> ()V
+	public fun <init> (Lio/mazewall/core/SeccompAction;Ljava/util/Map;ZZZZLjava/util/Set;Ljava/util/Set;ZLjava/util/List;Ljava/util/List;)V
+	public synthetic fun <init> (Lio/mazewall/core/SeccompAction;Ljava/util/Map;ZZZZLjava/util/Set;Ljava/util/Set;ZLjava/util/List;Ljava/util/List;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Lio/mazewall/core/SeccompAction;
+	public final fun component10 ()Ljava/util/List;
+	public final fun component11 ()Ljava/util/List;
+	public final fun component2 ()Ljava/util/Map;
+	public final fun component3 ()Z
+	public final fun component4 ()Z
+	public final fun component5 ()Z
+	public final fun component6 ()Z
+	public final fun component7 ()Ljava/util/Set;
+	public final fun component8 ()Ljava/util/Set;
+	public final fun copy (Lio/mazewall/core/SeccompAction;Ljava/util/Map;ZZZZLjava/util/Set;Ljava/util/Set;ZLjava/util/List;Ljava/util/List;)Lio/mazewall/PolicyDefinition;
+	public static synthetic fun copy$default (Lio/mazewall/PolicyDefinition;Lio/mazewall/core/SeccompAction;Ljava/util/Map;ZZZZLjava/util/Set;Ljava/util/Set;ZLjava/util/List;Ljava/util/List;ILjava/lang/Object;)Lio/mazewall/PolicyDefinition;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getAllowMmapExec ()Z
+	public final fun getAllowNonThreadClone ()Z
+	public final fun getAllowUnsafePrctl ()Z
+	public final fun getAllowedFsReadPaths ()Ljava/util/Set;
+	public final fun getAllowedFsWritePaths ()Ljava/util/Set;
+	public final fun getArgumentRules ()Lio/mazewall/PolicyArgumentRules;
+	public final fun getCustomViolationPhrases ()Ljava/util/List;
+	public final fun getCustomViolationRegexes ()Ljava/util/List;
+	public final fun getDefaultAction ()Lio/mazewall/core/SeccompAction;
+	public final fun getHasSupervisedSyscalls ()Z
+	public final fun getLockIntelCet ()Z
+	public final fun getSyscallActions ()Ljava/util/Map;
+	public fun hashCode ()I
+	public final fun isSyscallAllowed (Lio/mazewall/core/Syscall;)Z
+	public final fun syscallActionNumbers (Lio/mazewall/core/Arch;)Ljava/util/Map;
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/mazewall/PolicyDefinition$Companion {
+	public final fun combine ([Lio/mazewall/PolicyDefinition;)Lio/mazewall/PolicyDefinition;
+	public final fun intersection ([Lio/mazewall/PolicyDefinition;)Lio/mazewall/PolicyDefinition;
+}
+
+public final class io/mazewall/PolicyKt {
+	public static final fun install (Lio/mazewall/Policy;)Lio/mazewall/InstallationReceipt;
+	public static final fun plusProcessWide (Lio/mazewall/Policy;Lio/mazewall/Policy;)Lio/mazewall/Policy;
+	public static final fun plusThreadLocal (Lio/mazewall/Policy;Lio/mazewall/Policy;)Lio/mazewall/Policy;
+	public static final fun restrictFurtherWith (Lio/mazewall/Policy;Lio/mazewall/Policy;)Lio/mazewall/Policy;
+}
+
+public final class io/mazewall/PolicyLists {
+	public static final field INSTANCE Lio/mazewall/PolicyLists;
+	public static final fun allowList ()Lio/mazewall/Policy;
+	public static final fun allowList (Lio/mazewall/RuntimeProfile;)Lio/mazewall/Policy;
+	public static final fun allowList (Lio/mazewall/RuntimeProfile;Lkotlin/jvm/functions/Function1;)Lio/mazewall/Policy;
+	public static synthetic fun allowList$default (Lio/mazewall/RuntimeProfile;Lkotlin/jvm/functions/Function1;ILjava/lang/Object;)Lio/mazewall/Policy;
+	public static final fun denyList ()Lio/mazewall/Policy;
+	public static final fun denyList (Lio/mazewall/RuntimeProfile;)Lio/mazewall/Policy;
+	public static final fun denyList (Lio/mazewall/RuntimeProfile;Lkotlin/jvm/functions/Function1;)Lio/mazewall/Policy;
+	public static synthetic fun denyList$default (Lio/mazewall/RuntimeProfile;Lkotlin/jvm/functions/Function1;ILjava/lang/Object;)Lio/mazewall/Policy;
+	public static final fun threadLocalDenyList ()Lio/mazewall/Policy;
+	public static final fun threadLocalDenyList (Lio/mazewall/RuntimeProfile;)Lio/mazewall/Policy;
+	public static final fun threadLocalDenyList (Lio/mazewall/RuntimeProfile;Lkotlin/jvm/functions/Function1;)Lio/mazewall/Policy;
+	public static synthetic fun threadLocalDenyList$default (Lio/mazewall/RuntimeProfile;Lkotlin/jvm/functions/Function1;ILjava/lang/Object;)Lio/mazewall/Policy;
+}
+
+public final class io/mazewall/PolicyMode : java/lang/Enum {
+	public static final field ALLOW_LIST Lio/mazewall/PolicyMode;
+	public static final field DENY_LIST Lio/mazewall/PolicyMode;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lio/mazewall/PolicyMode;
+	public static fun values ()[Lio/mazewall/PolicyMode;
+}
+
+public final class io/mazewall/PolicyPresets {
+	public static final field DEFAULT_SAFE Lio/mazewall/PolicyDefinition;
+	public static final field INSTANCE Lio/mazewall/PolicyPresets;
+	public static final field NO_EXEC Lio/mazewall/PolicyDefinition;
+	public static final field NO_EXEC_HOTSPOT Lio/mazewall/PolicyDefinition;
+	public static final field NO_EXEC_NATIVE_IMAGE Lio/mazewall/PolicyDefinition;
+	public static final field NO_EXEC_NO_FS_WRITE Lio/mazewall/PolicyDefinition;
+	public static final field NO_NETWORK Lio/mazewall/PolicyDefinition;
+	public static final field PURE_COMPUTE Lio/mazewall/PolicyDefinition;
+	public static final field PURE_COMPUTE_UNSAFE Lio/mazewall/PolicyDefinition;
+}
+
+public abstract interface class io/mazewall/PolicyScope {
+}
+
+public abstract interface class io/mazewall/PolicyScope$ProcessWideSafe : io/mazewall/PolicyScope$ThreadLocalOnly {
+}
+
+public abstract interface class io/mazewall/PolicyScope$ThreadLocalOnly : io/mazewall/PolicyScope {
+}
+
+public abstract interface class io/mazewall/PolicyState {
+}
+
+public abstract interface class io/mazewall/PolicyState$Compiled : io/mazewall/PolicyState {
+}
+
+public abstract interface class io/mazewall/PolicyState$Uncompiled : io/mazewall/PolicyState {
+}
+
+public final class io/mazewall/ProcessPolicies {
+	public static final field INSTANCE Lio/mazewall/ProcessPolicies;
+	public static final fun denyNetwork (Lio/mazewall/RuntimeProfile;)Lio/mazewall/Policy;
+	public static final fun denyProcessCreation (Lio/mazewall/RuntimeProfile;)Lio/mazewall/Policy;
+	public static final fun workerFilesystem (Lio/mazewall/RuntimeProfile;)Lio/mazewall/Policy;
+}
+
+public final class io/mazewall/RuntimeProfile : java/lang/Enum {
+	public static final field HOTSPOT_JIT Lio/mazewall/RuntimeProfile;
+	public static final field NATIVE_IMAGE Lio/mazewall/RuntimeProfile;
+	public final fun getAllowsExecutableMappings ()Z
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lio/mazewall/RuntimeProfile;
+	public static fun values ()[Lio/mazewall/RuntimeProfile;
+}
+
+public final class io/mazewall/SbobParser {
+	public static final field INSTANCE Lio/mazewall/SbobParser;
+	public final fun parseJsonToPolicy (Ljava/lang/String;Lio/mazewall/Policy;Ljava/nio/file/Path;)Lio/mazewall/Policy;
+	public static synthetic fun parseJsonToPolicy$default (Lio/mazewall/SbobParser;Ljava/lang/String;Lio/mazewall/Policy;Ljava/nio/file/Path;ILjava/lang/Object;)Lio/mazewall/Policy;
+	public final fun parseToPolicy (Ljava/io/InputStream;Lio/mazewall/Policy;Ljava/nio/file/Path;)Lio/mazewall/Policy;
+	public final fun parseToPolicy (Ljava/nio/file/Path;Lio/mazewall/Policy;Ljava/nio/file/Path;)Lio/mazewall/Policy;
+	public static synthetic fun parseToPolicy$default (Lio/mazewall/SbobParser;Ljava/io/InputStream;Lio/mazewall/Policy;Ljava/nio/file/Path;ILjava/lang/Object;)Lio/mazewall/Policy;
+	public static synthetic fun parseToPolicy$default (Lio/mazewall/SbobParser;Ljava/nio/file/Path;Lio/mazewall/Policy;Ljava/nio/file/Path;ILjava/lang/Object;)Lio/mazewall/Policy;
+}
+
+public abstract interface class io/mazewall/SeccompMode {
+}
+
+public final class io/mazewall/SeccompMode$Disabled : io/mazewall/SeccompMode {
+	public static final field INSTANCE Lio/mazewall/SeccompMode$Disabled;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/mazewall/SeccompMode$Error : io/mazewall/SeccompMode {
+	public fun <init> (I)V
+	public final fun component1 ()I
+	public final fun copy (I)Lio/mazewall/SeccompMode$Error;
+	public static synthetic fun copy$default (Lio/mazewall/SeccompMode$Error;IILjava/lang/Object;)Lio/mazewall/SeccompMode$Error;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getErrno ()I
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/mazewall/SeccompMode$Filter : io/mazewall/SeccompMode {
+	public static final field INSTANCE Lio/mazewall/SeccompMode$Filter;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/mazewall/SeccompMode$Strict : io/mazewall/SeccompMode {
+	public static final field INSTANCE Lio/mazewall/SeccompMode$Strict;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/mazewall/StackFrameDto {
+	public static final field Companion Lio/mazewall/StackFrameDto$Companion;
+	public fun <init> (Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;I)V
+	public synthetic fun <init> (Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;IILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Ljava/lang/String;
+	public final fun component3 ()Ljava/lang/String;
+	public final fun component4 ()Ljava/lang/String;
+	public final fun component5 ()Ljava/lang/String;
+	public final fun component6 ()Ljava/lang/String;
+	public final fun component7 ()I
+	public final fun copy (Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;I)Lio/mazewall/StackFrameDto;
+	public static synthetic fun copy$default (Lio/mazewall/StackFrameDto;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;IILjava/lang/Object;)Lio/mazewall/StackFrameDto;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getClassLoader ()Ljava/lang/String;
+	public final fun getClassName ()Ljava/lang/String;
+	public final fun getFileName ()Ljava/lang/String;
+	public final fun getLineNumber ()I
+	public final fun getMethodName ()Ljava/lang/String;
+	public final fun getModule ()Ljava/lang/String;
+	public final fun getModuleVersion ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final synthetic class io/mazewall/StackFrameDto$$serializer : kotlinx/serialization/internal/GeneratedSerializer {
+	public static final field INSTANCE Lio/mazewall/StackFrameDto$$serializer;
+	public final fun childSerializers ()[Lkotlinx/serialization/KSerializer;
+	public final fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Lio/mazewall/StackFrameDto;
+	public synthetic fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ljava/lang/Object;
+	public final fun getDescriptor ()Lkotlinx/serialization/descriptors/SerialDescriptor;
+	public final fun serialize (Lkotlinx/serialization/encoding/Encoder;Lio/mazewall/StackFrameDto;)V
+	public synthetic fun serialize (Lkotlinx/serialization/encoding/Encoder;Ljava/lang/Object;)V
+	public fun typeParametersSerializers ()[Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/mazewall/StackFrameDto$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/mazewall/StackProfileEntryDto {
+	public static final field Companion Lio/mazewall/StackProfileEntryDto$Companion;
+	public fun <init> (Ljava/lang/String;Ljava/util/List;Ljava/util/List;Ljava/util/List;)V
+	public synthetic fun <init> (Ljava/lang/String;Ljava/util/List;Ljava/util/List;Ljava/util/List;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun getArgs ()Ljava/util/List;
+	public final fun getPaths ()Ljava/util/List;
+	public final fun getStackTrace ()Ljava/util/List;
+	public final fun getSyscall ()Ljava/lang/String;
+}
+
+public final synthetic class io/mazewall/StackProfileEntryDto$$serializer : kotlinx/serialization/internal/GeneratedSerializer {
+	public static final field INSTANCE Lio/mazewall/StackProfileEntryDto$$serializer;
+	public final fun childSerializers ()[Lkotlinx/serialization/KSerializer;
+	public final fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Lio/mazewall/StackProfileEntryDto;
+	public synthetic fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ljava/lang/Object;
+	public final fun getDescriptor ()Lkotlinx/serialization/descriptors/SerialDescriptor;
+	public final fun serialize (Lkotlinx/serialization/encoding/Encoder;Lio/mazewall/StackProfileEntryDto;)V
+	public synthetic fun serialize (Lkotlinx/serialization/encoding/Encoder;Ljava/lang/Object;)V
+	public fun typeParametersSerializers ()[Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/mazewall/StackProfileEntryDto$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/mazewall/UnsupportedKernelFeatureException : java/lang/UnsupportedOperationException {
+	public fun <init> (Ljava/lang/String;)V
+}
+
+public final class io/mazewall/UnsupportedPlatformException : java/lang/UnsupportedOperationException {
+	public fun <init> (Ljava/lang/String;)V
+}
+
+public abstract interface class io/mazewall/YamaPtraceScope {
+}
+
+public final class io/mazewall/YamaPtraceScope$AdminOnly : io/mazewall/YamaPtraceScope {
+	public static final field INSTANCE Lio/mazewall/YamaPtraceScope$AdminOnly;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/mazewall/YamaPtraceScope$Classic : io/mazewall/YamaPtraceScope {
+	public static final field INSTANCE Lio/mazewall/YamaPtraceScope$Classic;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/mazewall/YamaPtraceScope$Disabled : io/mazewall/YamaPtraceScope {
+	public static final field INSTANCE Lio/mazewall/YamaPtraceScope$Disabled;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/mazewall/YamaPtraceScope$Restricted : io/mazewall/YamaPtraceScope {
+	public static final field INSTANCE Lio/mazewall/YamaPtraceScope$Restricted;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/mazewall/YamaPtraceScope$Unavailable : io/mazewall/YamaPtraceScope {
+	public static final field INSTANCE Lio/mazewall/YamaPtraceScope$Unavailable;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/mazewall/YamaPtraceScope$Unknown : io/mazewall/YamaPtraceScope {
+	public fun <init> (I)V
+	public final fun component1 ()I
+	public final fun copy (I)Lio/mazewall/YamaPtraceScope$Unknown;
+	public static synthetic fun copy$default (Lio/mazewall/YamaPtraceScope$Unknown;IILjava/lang/Object;)Lio/mazewall/YamaPtraceScope$Unknown;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getRawValue ()I
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/mazewall/enforcer/ContainedExecutors {
+	public static final field INSTANCE Lio/mazewall/enforcer/ContainedExecutors;
+	public final fun installOnCurrentThread (Lio/mazewall/Policy;Lio/mazewall/enforcer/supervisor/StacktraceScopingPolicy;)V
+	public final fun installOnCurrentThread ([Lio/mazewall/Policy;)V
+	public final fun installOnProcess ([Lio/mazewall/Policy;)V
+	public final fun wrap (Ljava/util/concurrent/ExecutorService;Lio/mazewall/Policy;Lio/mazewall/enforcer/supervisor/StacktraceScopingPolicy;)Ljava/util/concurrent/ExecutorService;
+	public final fun wrap (Ljava/util/concurrent/ExecutorService;[Lio/mazewall/Policy;)Ljava/util/concurrent/ExecutorService;
+}
+
+public class io/mazewall/enforcer/ContainmentViolationException : java/lang/RuntimeException {
+	public fun <init> (Ljava/lang/String;Ljava/lang/Throwable;)V
+	public synthetic fun <init> (Ljava/lang/String;Ljava/lang/Throwable;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+}
+
+public final class io/mazewall/enforcer/SandboxDispatcher {
+	public static final field INSTANCE Lio/mazewall/enforcer/SandboxDispatcher;
+	public static final fun execute (Lio/mazewall/Policy;Ljava/util/concurrent/Callable;)Ljava/lang/Object;
+	public final fun executeBlock (Lio/mazewall/Policy;Lkotlin/jvm/functions/Function0;)Ljava/lang/Object;
+	public static final fun shutdownAll ()V
+}
+
+public final class io/mazewall/enforcer/api/ContainedExecutors {
+	public static final field INSTANCE Lio/mazewall/enforcer/api/ContainedExecutors;
+	public final fun assessOnCurrentThread (Lio/mazewall/Policy;)Lio/mazewall/InstallationAssessment;
+	public final fun assessOnProcess (Lio/mazewall/Policy;)Lio/mazewall/InstallationAssessment;
+	public final fun installOnCurrentThread (Lio/mazewall/Policy;Lio/mazewall/enforcer/supervisor/StacktraceScopingPolicy;)Lio/mazewall/InstallationReceipt;
+	public final synthetic fun installOnCurrentThread (Lio/mazewall/Policy;Lio/mazewall/enforcer/supervisor/StacktraceScopingPolicy;)V
+	public final fun installOnCurrentThread ([Lio/mazewall/Policy;)Lio/mazewall/InstallationReceipt;
+	public final synthetic fun installOnCurrentThread ([Lio/mazewall/Policy;)V
+	public final fun installOnProcess ([Lio/mazewall/Policy;)Lio/mazewall/InstallationReceipt;
+	public final synthetic fun installOnProcess ([Lio/mazewall/Policy;)V
+	public final fun newCachedThreadPool (Lio/mazewall/Policy;)Ljava/util/concurrent/ExecutorService;
+	public final fun newFixedThreadPool (ILio/mazewall/Policy;)Ljava/util/concurrent/ExecutorService;
+	public final fun newSingleThreadExecutor (Lio/mazewall/Policy;)Ljava/util/concurrent/ExecutorService;
+	public final fun wrap (Ljava/util/concurrent/ExecutorService;Lio/mazewall/Policy;Lio/mazewall/enforcer/supervisor/StacktraceScopingPolicy;)Ljava/util/concurrent/ExecutorService;
+	public final fun wrap (Ljava/util/concurrent/ExecutorService;[Lio/mazewall/Policy;)Ljava/util/concurrent/ExecutorService;
+}
+
+public final class io/mazewall/enforcer/api/ContainmentViolationException : io/mazewall/enforcer/ContainmentViolationException {
+	public fun <init> (Ljava/lang/String;Ljava/lang/Throwable;Ljava/lang/Integer;Ljava/lang/Integer;)V
+	public synthetic fun <init> (Ljava/lang/String;Ljava/lang/Throwable;Ljava/lang/Integer;Ljava/lang/Integer;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun getErrno ()Ljava/lang/Integer;
+	public final fun getSyscallNr ()Ljava/lang/Integer;
+}
+
+public final class io/mazewall/enforcer/api/SandboxDispatcher {
+	public static final field INSTANCE Lio/mazewall/enforcer/api/SandboxDispatcher;
+	public static final fun execute (Lio/mazewall/Policy;Ljava/util/concurrent/Callable;)Ljava/lang/Object;
+	public final fun executeBlock (Lio/mazewall/Policy;Lkotlin/jvm/functions/Function0;)Ljava/lang/Object;
+	public final fun getOrCreateElasticPool (Lio/mazewall/PolicyDefinition;)Ljava/util/concurrent/ExecutorService;
+	public static final fun shutdownAll ()V
+}
+
+public final class io/mazewall/enforcer/api/SandboxDispatcherCoroutinesKt {
+	public static final fun asDispatcher (Lio/mazewall/Policy;)Lkotlinx/coroutines/CoroutineDispatcher;
+	public static final fun executeSuspend (Lio/mazewall/enforcer/api/SandboxDispatcher;Lio/mazewall/Policy;Lkotlin/jvm/functions/Function1;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+}
+
+public final class io/mazewall/enforcer/diagnostics/ContainmentViolationDetector {
+	public static final field Companion Lio/mazewall/enforcer/diagnostics/ContainmentViolationDetector$Companion;
+	public fun <init> ()V
+	public fun <init> (Ljava/util/List;)V
+	public fun <init> (Ljava/util/List;Z)V
+	public fun <init> (Ljava/util/List;ZLjava/lang/ClassLoader;)V
+	public fun <init> (Ljava/util/List;ZLjava/lang/ClassLoader;Z)V
+	public fun <init> (Ljava/util/List;ZLjava/lang/ClassLoader;ZLjava/util/List;)V
+	public fun <init> (Ljava/util/List;ZLjava/lang/ClassLoader;ZLjava/util/List;Ljava/util/List;)V
+	public synthetic fun <init> (Ljava/util/List;ZLjava/lang/ClassLoader;ZLjava/util/List;Ljava/util/List;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun findViolationCause (Ljava/lang/Throwable;)Ljava/lang/Throwable;
+	public final fun findViolationRanges (Ljava/lang/String;)Lkotlin/sequences/Sequence;
+	public final fun getRegisteredPhrases ()Ljava/util/List;
+	public final fun getRegisteredRegexes ()Ljava/util/List;
+	public final fun isContainmentViolation (Ljava/lang/Throwable;)Z
+	public final fun registerMatcher (Lio/mazewall/enforcer/diagnostics/ViolationMatcher;)V
+	public final fun registerPhrase (Ljava/lang/String;)V
+	public final fun registerRegex (Lkotlin/text/Regex;)V
+	public final fun resetToDefaults ()V
+}
+
+public final class io/mazewall/enforcer/diagnostics/ContainmentViolationDetector$Companion {
+	public final fun findViolationCause (Ljava/lang/Throwable;)Ljava/lang/Throwable;
+	public final fun findViolationRanges (Ljava/lang/String;)Lkotlin/sequences/Sequence;
+	public final fun getDENIED_PHRASES ()[Ljava/lang/String;
+	public final fun getRegisteredPhrases ()Ljava/util/List;
+	public final fun getRegisteredRegexes ()Ljava/util/List;
+	public final fun isContainmentViolation (Ljava/lang/Throwable;)Z
+	public final fun registerMatcher (Lio/mazewall/enforcer/diagnostics/ViolationMatcher;)V
+	public final fun registerPhrase (Ljava/lang/String;)V
+	public final fun registerRegex (Lkotlin/text/Regex;)V
+	public final fun resetToDefaults ()V
+}
+
+public abstract interface class io/mazewall/enforcer/diagnostics/DiagnosticEventListener {
+	public abstract fun onEvent (Lio/mazewall/enforcer/diagnostics/MazewallEvents$Event;)V
+}
+
+public final class io/mazewall/enforcer/diagnostics/MazewallEvents {
+	public static final field INSTANCE Lio/mazewall/enforcer/diagnostics/MazewallEvents;
+	public final fun clear ()V
+	public final fun emit (Lio/mazewall/enforcer/diagnostics/MazewallEvents$Event;)V
+	public final fun getFailOnListenerError ()Z
+	public final fun register (Lio/mazewall/enforcer/diagnostics/DiagnosticEventListener;)V
+	public final fun registeredCount ()I
+	public final fun setFailOnListenerError (Z)V
+	public final fun unregister (Lio/mazewall/enforcer/diagnostics/DiagnosticEventListener;)V
+}
+
+public final class io/mazewall/enforcer/diagnostics/MazewallEvents$CetOutcome : io/mazewall/enforcer/diagnostics/MazewallEvents$Event {
+	public fun <init> (ZLjava/lang/String;)V
+	public final fun component1 ()Z
+	public final fun component2 ()Ljava/lang/String;
+	public final fun copy (ZLjava/lang/String;)Lio/mazewall/enforcer/diagnostics/MazewallEvents$CetOutcome;
+	public static synthetic fun copy$default (Lio/mazewall/enforcer/diagnostics/MazewallEvents$CetOutcome;ZLjava/lang/String;ILjava/lang/Object;)Lio/mazewall/enforcer/diagnostics/MazewallEvents$CetOutcome;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getArmed ()Z
+	public final fun getDetail ()Ljava/lang/String;
+	public fun getTimestampMillis ()J
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/mazewall/enforcer/diagnostics/MazewallEvents$DaemonExited : io/mazewall/enforcer/diagnostics/MazewallEvents$Event {
+	public fun <init> (JILjava/util/List;)V
+	public final fun component1 ()J
+	public final fun component2 ()I
+	public final fun component3 ()Ljava/util/List;
+	public final fun copy (JILjava/util/List;)Lio/mazewall/enforcer/diagnostics/MazewallEvents$DaemonExited;
+	public static synthetic fun copy$default (Lio/mazewall/enforcer/diagnostics/MazewallEvents$DaemonExited;JILjava/util/List;ILjava/lang/Object;)Lio/mazewall/enforcer/diagnostics/MazewallEvents$DaemonExited;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getExitCode ()I
+	public final fun getLastLogLines ()Ljava/util/List;
+	public final fun getPid ()J
+	public fun getTimestampMillis ()J
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public abstract interface class io/mazewall/enforcer/diagnostics/MazewallEvents$Event {
+	public abstract fun getTimestampMillis ()J
+}
+
+public final class io/mazewall/enforcer/diagnostics/MazewallEvents$FallbackEngaged : io/mazewall/enforcer/diagnostics/MazewallEvents$Event {
+	public fun <init> (Ljava/lang/String;Ljava/lang/String;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Ljava/lang/String;
+	public final fun copy (Ljava/lang/String;Ljava/lang/String;)Lio/mazewall/enforcer/diagnostics/MazewallEvents$FallbackEngaged;
+	public static synthetic fun copy$default (Lio/mazewall/enforcer/diagnostics/MazewallEvents$FallbackEngaged;Ljava/lang/String;Ljava/lang/String;ILjava/lang/Object;)Lio/mazewall/enforcer/diagnostics/MazewallEvents$FallbackEngaged;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getBehaviorName ()Ljava/lang/String;
+	public final fun getReason ()Ljava/lang/String;
+	public fun getTimestampMillis ()J
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/mazewall/enforcer/diagnostics/MazewallEvents$LandlockApplied : io/mazewall/enforcer/diagnostics/MazewallEvents$Event {
+	public fun <init> (ZI)V
+	public final fun component1 ()Z
+	public final fun component2 ()I
+	public final fun copy (ZI)Lio/mazewall/enforcer/diagnostics/MazewallEvents$LandlockApplied;
+	public static synthetic fun copy$default (Lio/mazewall/enforcer/diagnostics/MazewallEvents$LandlockApplied;ZIILjava/lang/Object;)Lio/mazewall/enforcer/diagnostics/MazewallEvents$LandlockApplied;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getAbiVersion ()I
+	public final fun getProcessWide ()Z
+	public fun getTimestampMillis ()J
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/mazewall/enforcer/diagnostics/MazewallEvents$SelfVerificationResult : io/mazewall/enforcer/diagnostics/MazewallEvents$Event {
+	public fun <init> (ZLjava/lang/String;)V
+	public final fun component1 ()Z
+	public final fun component2 ()Ljava/lang/String;
+	public final fun copy (ZLjava/lang/String;)Lio/mazewall/enforcer/diagnostics/MazewallEvents$SelfVerificationResult;
+	public static synthetic fun copy$default (Lio/mazewall/enforcer/diagnostics/MazewallEvents$SelfVerificationResult;ZLjava/lang/String;ILjava/lang/Object;)Lio/mazewall/enforcer/diagnostics/MazewallEvents$SelfVerificationResult;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getDetail ()Ljava/lang/String;
+	public final fun getPassed ()Z
+	public fun getTimestampMillis ()J
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/mazewall/enforcer/diagnostics/ValidationKt {
+	public static final fun isVirtualOrCarrierThread (Ljava/lang/Thread;)Z
+	public static synthetic fun isVirtualOrCarrierThread$default (Ljava/lang/Thread;ILjava/lang/Object;)Z
+	public static final fun validateLinuxAndNotVirtual ()V
+	public static final fun validateNotVirtual ()V
+}
+
+public abstract interface class io/mazewall/enforcer/diagnostics/ViolationMatcher {
+	public abstract fun matches (Ljava/lang/Throwable;)Z
+}
+
+public final class io/mazewall/enforcer/engine/JvmFloorPresets {
+	public static final field INSTANCE Lio/mazewall/enforcer/engine/JvmFloorPresets;
+	public final fun fullJvmFloor ()[Lio/mazewall/core/Syscall;
+	public final fun getBOOTSTRAP_READ_CLOSURE ()[Lio/mazewall/core/Syscall;
+	public final fun getNETWORK_STABILITY_FLOOR ()[Lio/mazewall/core/Syscall;
+	public final fun getTHREAD_COORDINATION_CLOSURE ()[Lio/mazewall/core/Syscall;
+}
+
+public final class io/mazewall/enforcer/engine/JvmFloorWorkload {
+	public static final field INSTANCE Lio/mazewall/enforcer/engine/JvmFloorWorkload;
+	public static final fun main ([Ljava/lang/String;)V
+	public final fun run ()V
+}
+
+public final class io/mazewall/enforcer/supervisor/BypassPaths {
+	public static final field INSTANCE Lio/mazewall/enforcer/supervisor/BypassPaths;
+	public final fun getSafeBypassPaths ()Ljava/util/List;
+	public final fun isBypassPath (Ljava/nio/file/Path;)Z
+	public final fun resolveForPolicy (Ljava/nio/file/Path;)Lio/mazewall/enforcer/supervisor/BypassPaths$PathResolution;
+	public final fun toRealPathWithFallback (Ljava/nio/file/Path;)Ljava/nio/file/Path;
+}
+
+public abstract interface class io/mazewall/enforcer/supervisor/BypassPaths$PathResolution {
+}
+
+public final class io/mazewall/enforcer/supervisor/BypassPaths$PathResolution$Missing : io/mazewall/enforcer/supervisor/BypassPaths$PathResolution {
+	public fun <init> (Ljava/nio/file/Path;)V
+	public final fun component1 ()Ljava/nio/file/Path;
+	public final fun copy (Ljava/nio/file/Path;)Lio/mazewall/enforcer/supervisor/BypassPaths$PathResolution$Missing;
+	public static synthetic fun copy$default (Lio/mazewall/enforcer/supervisor/BypassPaths$PathResolution$Missing;Ljava/nio/file/Path;ILjava/lang/Object;)Lio/mazewall/enforcer/supervisor/BypassPaths$PathResolution$Missing;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getNormalized ()Ljava/nio/file/Path;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/mazewall/enforcer/supervisor/BypassPaths$PathResolution$Resolved : io/mazewall/enforcer/supervisor/BypassPaths$PathResolution {
+	public fun <init> (Ljava/nio/file/Path;)V
+	public final fun component1 ()Ljava/nio/file/Path;
+	public final fun copy (Ljava/nio/file/Path;)Lio/mazewall/enforcer/supervisor/BypassPaths$PathResolution$Resolved;
+	public static synthetic fun copy$default (Lio/mazewall/enforcer/supervisor/BypassPaths$PathResolution$Resolved;Ljava/nio/file/Path;ILjava/lang/Object;)Lio/mazewall/enforcer/supervisor/BypassPaths$PathResolution$Resolved;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getPath ()Ljava/nio/file/Path;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/mazewall/enforcer/supervisor/BypassPaths$PathResolution$Unsafe : io/mazewall/enforcer/supervisor/BypassPaths$PathResolution {
+	public fun <init> (Ljava/lang/String;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun copy (Ljava/lang/String;)Lio/mazewall/enforcer/supervisor/BypassPaths$PathResolution$Unsafe;
+	public static synthetic fun copy$default (Lio/mazewall/enforcer/supervisor/BypassPaths$PathResolution$Unsafe;Ljava/lang/String;ILjava/lang/Object;)Lio/mazewall/enforcer/supervisor/BypassPaths$PathResolution$Unsafe;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getReason ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/mazewall/enforcer/supervisor/DefaultStacktraceScopingPolicy : io/mazewall/enforcer/supervisor/StacktraceScopingPolicy {
+	public static final field INSTANCE Lio/mazewall/enforcer/supervisor/DefaultStacktraceScopingPolicy;
+	public fun getHandlers ()Ljava/util/Map;
+}
+
+public final class io/mazewall/enforcer/supervisor/JvmStackInspector {
+	public static final field INSTANCE Lio/mazewall/enforcer/supervisor/JvmStackInspector;
+	public final fun inspect (ILjava/util/List;Ljava/lang/Thread;)Lio/mazewall/enforcer/supervisor/ScopingValidationState;
+}
+
+public abstract interface class io/mazewall/enforcer/supervisor/ScopingValidationState {
+}
+
+public final class io/mazewall/enforcer/supervisor/ScopingValidationState$SafeToValidate : io/mazewall/enforcer/supervisor/ScopingValidationState {
+	public synthetic fun <init> ([Ljava/lang/StackTraceElement;ILjava/util/List;Lkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun getArgsList ()Ljava/util/List;
+	public final fun getNr ()I
+	public final fun getRawStack ()[Ljava/lang/StackTraceElement;
+}
+
+public abstract interface class io/mazewall/enforcer/supervisor/StacktraceScopingPolicy {
+	public abstract fun getHandlers ()Ljava/util/Map;
+}
+
+public final class io/mazewall/enforcer/supervisor/SupervisorContext {
+	public fun <init> (Ljava/lang/String;Ljava/nio/file/Path;Ljava/lang/Process;Ljava/lang/Thread;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Ljava/nio/file/Path;
+	public final fun component3 ()Ljava/lang/Process;
+	public final fun component4 ()Ljava/lang/Thread;
+	public final fun copy (Ljava/lang/String;Ljava/nio/file/Path;Ljava/lang/Process;Ljava/lang/Thread;)Lio/mazewall/enforcer/supervisor/SupervisorContext;
+	public static synthetic fun copy$default (Lio/mazewall/enforcer/supervisor/SupervisorContext;Ljava/lang/String;Ljava/nio/file/Path;Ljava/lang/Process;Ljava/lang/Thread;ILjava/lang/Object;)Lio/mazewall/enforcer/supervisor/SupervisorContext;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getDaemonProcess ()Ljava/lang/Process;
+	public final fun getShutdownHook ()Ljava/lang/Thread;
+	public final fun getSocketDir ()Ljava/nio/file/Path;
+	public final fun getSocketPath ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/mazewall/enforcer/supervisor/SupervisorDaemon {
+	public static final field DAEMON_READY_SENTINEL Ljava/lang/String;
+	public static final field INSTANCE Lio/mazewall/enforcer/supervisor/SupervisorDaemon;
+	public static final fun main ([Ljava/lang/String;)V
+}
+
+public final class io/mazewall/enforcer/supervisor/SupervisorDaemonManager {
+	public static final field Companion Lio/mazewall/enforcer/supervisor/SupervisorDaemonManager$Companion;
+	public fun <init> ()V
+	public fun <init> (Lio/mazewall/NativeEngine;Lio/mazewall/core/SocketManager;Lio/mazewall/core/ProcessLauncher;)V
+	public synthetic fun <init> (Lio/mazewall/NativeEngine;Lio/mazewall/core/SocketManager;Lio/mazewall/core/ProcessLauncher;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun getDaemonLogLines ()Ljava/util/concurrent/ConcurrentLinkedQueue;
+	public static final fun getInstance ()Lio/mazewall/enforcer/supervisor/SupervisorDaemonManager;
+	public final fun getOrSpawnSharedDaemon ()Lio/mazewall/enforcer/supervisor/SupervisorContext;
+	public final fun stop ()V
+}
+
+public final class io/mazewall/enforcer/supervisor/SupervisorDaemonManager$Companion {
+	public final fun getInstance ()Lio/mazewall/enforcer/supervisor/SupervisorDaemonManager;
+}
+
+public final class io/mazewall/enforcer/supervisor/SupervisorInstaller {
+	public static final field INSTANCE Lio/mazewall/enforcer/supervisor/SupervisorInstaller;
+	public final fun installSupervisedFilterForThread (Lio/mazewall/PolicyDefinition;Lio/mazewall/enforcer/supervisor/StacktraceScopingPolicy;Lkotlin/jvm/functions/Function0;)Lio/mazewall/enforcer/supervisor/SupervisorSession;
+	public static synthetic fun installSupervisedFilterForThread$default (Lio/mazewall/enforcer/supervisor/SupervisorInstaller;Lio/mazewall/PolicyDefinition;Lio/mazewall/enforcer/supervisor/StacktraceScopingPolicy;Lkotlin/jvm/functions/Function0;ILjava/lang/Object;)Lio/mazewall/enforcer/supervisor/SupervisorSession;
+	public final fun registerThread-4e3CYpk (I)V
+	public final fun unregisterThread-4e3CYpk (I)V
+}
+
+public final class io/mazewall/enforcer/supervisor/SupervisorSession : java/lang/AutoCloseable {
+	public fun close ()V
+}
+
+public final class io/mazewall/enforcer/supervisor/ValidationLog {
+	public static final field INSTANCE Lio/mazewall/enforcer/supervisor/ValidationLog;
+	public final fun getLogs ()Ljava/util/concurrent/ConcurrentLinkedQueue;
+}
+
+public final class io/mazewall/ffi/memory/SupervisorProcessMemoryReader : io/mazewall/ffi/memory/TraceeMemoryReader {
+	public static final field INSTANCE Lio/mazewall/ffi/memory/SupervisorProcessMemoryReader;
+	public fun readBytes-gCIF07c (Lio/mazewall/ffi/memory/NativeArena;IJI)[B
+	public fun readString-gCIF07c (Lio/mazewall/ffi/memory/NativeArena;IJI)Ljava/lang/String;
+	public fun resolveLink-4I0HFv8 (Lio/mazewall/ffi/memory/NativeArena;ILjava/lang/String;)Ljava/lang/String;
+}
+
+public final class io/mazewall/ffi/memory/SupervisorProcessMemoryWriter {
+	public static final field INSTANCE Lio/mazewall/ffi/memory/SupervisorProcessMemoryWriter;
+	public final fun writeBytes-gCIF07c (Lio/mazewall/ffi/memory/NativeArena;IJ[B)Z
+}
+
+public final class io/mazewall/ffi/networking/NetworkOrderBuffer {
+	public static final synthetic fun box-impl (Ljava/lang/foreign/MemorySegment;)Lio/mazewall/ffi/networking/NetworkOrderBuffer;
+	public static fun constructor-impl (Ljava/lang/foreign/MemorySegment;)Ljava/lang/foreign/MemorySegment;
+	public fun equals (Ljava/lang/Object;)Z
+	public static fun equals-impl (Ljava/lang/foreign/MemorySegment;Ljava/lang/Object;)Z
+	public static final fun equals-impl0 (Ljava/lang/foreign/MemorySegment;Ljava/lang/foreign/MemorySegment;)Z
+	public final fun getSegment ()Ljava/lang/foreign/MemorySegment;
+	public fun hashCode ()I
+	public static fun hashCode-impl (Ljava/lang/foreign/MemorySegment;)I
+	public fun toString ()Ljava/lang/String;
+	public static fun toString-impl (Ljava/lang/foreign/MemorySegment;)Ljava/lang/String;
+	public final synthetic fun unbox-impl ()Ljava/lang/foreign/MemorySegment;
+	public static final fun writeByte-impl (Ljava/lang/foreign/MemorySegment;JB)V
+	public static final fun writeInt-impl (Ljava/lang/foreign/MemorySegment;JI)V
+	public static final fun writeIntUnaligned-impl (Ljava/lang/foreign/MemorySegment;JI)V
+	public static final fun writeLong-impl (Ljava/lang/foreign/MemorySegment;JJ)V
+	public static final fun writeLongUnaligned-impl (Ljava/lang/foreign/MemorySegment;JJ)V
+}
+
+public final class io/mazewall/ffi/networking/SupervisorSeccompNotifInstaller {
+	public static final field INSTANCE Lio/mazewall/ffi/networking/SupervisorSeccompNotifInstaller;
+	public final fun install (Ljava/lang/String;Lio/mazewall/seccomp/BpfProgram;ZLkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function2;Lkotlin/jvm/functions/Function0;Lkotlin/jvm/functions/Function2;)V
+	public static synthetic fun install$default (Lio/mazewall/ffi/networking/SupervisorSeccompNotifInstaller;Ljava/lang/String;Lio/mazewall/seccomp/BpfProgram;ZLkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function2;Lkotlin/jvm/functions/Function0;Lkotlin/jvm/functions/Function2;ILjava/lang/Object;)V
+}
+
+public final class io/mazewall/ffi/networking/SupervisorValidationChannel : java/lang/AutoCloseable {
+	public fun <init> (Lio/mazewall/core/FileDescriptor;)V
+	public fun close ()V
+	public final fun getInputStream ()Ljava/io/InputStream;
+	public final fun sendExecRewriteAck (Z)V
+	public final fun sendResponse (JBILjava/lang/String;)V
+	public static synthetic fun sendResponse$default (Lio/mazewall/ffi/networking/SupervisorValidationChannel;JBILjava/lang/String;ILjava/lang/Object;)V
+}
+
+public final class io/mazewall/landlock/Landlock {
+	public static final field INSTANCE Lio/mazewall/landlock/Landlock;
+	public static final field LANDLOCK_ACCESS_FS_EXECUTE J
+	public static final field LANDLOCK_ACCESS_FS_IOCTL_DEV J
+	public static final field LANDLOCK_ACCESS_FS_MAKE_BLOCK J
+	public static final field LANDLOCK_ACCESS_FS_MAKE_CHAR J
+	public static final field LANDLOCK_ACCESS_FS_MAKE_DIR J
+	public static final field LANDLOCK_ACCESS_FS_MAKE_FIFO J
+	public static final field LANDLOCK_ACCESS_FS_MAKE_REG J
+	public static final field LANDLOCK_ACCESS_FS_MAKE_SOCK J
+	public static final field LANDLOCK_ACCESS_FS_MAKE_SYM J
+	public static final field LANDLOCK_ACCESS_FS_READ_DIR J
+	public static final field LANDLOCK_ACCESS_FS_READ_FILE J
+	public static final field LANDLOCK_ACCESS_FS_REFER J
+	public static final field LANDLOCK_ACCESS_FS_REMOVE_DIR J
+	public static final field LANDLOCK_ACCESS_FS_REMOVE_FILE J
+	public static final field LANDLOCK_ACCESS_FS_TRUNCATE J
+	public static final field LANDLOCK_ACCESS_FS_WRITE_FILE J
+	public static final field LANDLOCK_ACCESS_NET_BIND_TCP J
+	public static final field LANDLOCK_ACCESS_NET_CONNECT_TCP J
+	public final fun applyRestrictiveBarrier ()V
+	public final fun applyRuleset (Lio/mazewall/PolicyDefinition;Z)V
+	public static synthetic fun applyRuleset$default (Lio/mazewall/landlock/Landlock;Lio/mazewall/PolicyDefinition;ZILjava/lang/Object;)V
+	public final fun getAbiVersion ()I
+	public final fun isSupported ()Z
+}
+
+public abstract interface class io/mazewall/landlock/LandlockApplyResult {
+	public fun isApplied ()Z
+	public fun orThrow ()V
+}
+
+public final class io/mazewall/landlock/LandlockApplyResult$Applied : io/mazewall/landlock/LandlockApplyResult {
+	public static final field INSTANCE Lio/mazewall/landlock/LandlockApplyResult$Applied;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun isApplied ()Z
+	public fun orThrow ()V
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/mazewall/landlock/LandlockApplyResult$Bypassed : io/mazewall/landlock/LandlockApplyResult {
+	public fun <init> (Ljava/lang/String;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun copy (Ljava/lang/String;)Lio/mazewall/landlock/LandlockApplyResult$Bypassed;
+	public static synthetic fun copy$default (Lio/mazewall/landlock/LandlockApplyResult$Bypassed;Ljava/lang/String;ILjava/lang/Object;)Lio/mazewall/landlock/LandlockApplyResult$Bypassed;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getReason ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun isApplied ()Z
+	public fun orThrow ()V
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/mazewall/landlock/LandlockApplyResult$DefaultImpls {
+	public static fun isApplied (Lio/mazewall/landlock/LandlockApplyResult;)Z
+	public static fun orThrow (Lio/mazewall/landlock/LandlockApplyResult;)V
+}
+
+public final class io/mazewall/landlock/LandlockApplyResult$Rejected : io/mazewall/landlock/LandlockApplyResult {
+	public fun <init> (Ljava/lang/String;Ljava/lang/Integer;Ljava/lang/Throwable;)V
+	public synthetic fun <init> (Ljava/lang/String;Ljava/lang/Integer;Ljava/lang/Throwable;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Ljava/lang/Integer;
+	public final fun component3 ()Ljava/lang/Throwable;
+	public final fun copy (Ljava/lang/String;Ljava/lang/Integer;Ljava/lang/Throwable;)Lio/mazewall/landlock/LandlockApplyResult$Rejected;
+	public static synthetic fun copy$default (Lio/mazewall/landlock/LandlockApplyResult$Rejected;Ljava/lang/String;Ljava/lang/Integer;Ljava/lang/Throwable;ILjava/lang/Object;)Lio/mazewall/landlock/LandlockApplyResult$Rejected;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getCause ()Ljava/lang/Throwable;
+	public final fun getErrno ()Ljava/lang/Integer;
+	public final fun getReason ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun isApplied ()Z
+	public fun orThrow ()V
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/mazewall/landlock/LandlockRuleset {
+	public final fun getFd ()Lio/mazewall/core/FileDescriptor;
+}
+
+public abstract interface class io/mazewall/landlock/RulesetState {
+}
+
+public abstract interface class io/mazewall/landlock/RulesetState$Building : io/mazewall/landlock/RulesetState {
+}
+
+public abstract interface class io/mazewall/landlock/RulesetState$Sealed : io/mazewall/landlock/RulesetState {
+}
+
+public final class io/mazewall/sbob/PathNormalizer {
+	public static final field INSTANCE Lio/mazewall/sbob/PathNormalizer;
+	public final fun normalizeAndPrune (Ljava/util/Set;Ljava/nio/file/Path;)Ljava/util/Set;
+}
+
+public final class io/mazewall/seccomp/BpfBuilder {
+	public final fun createLabel (Ljava/lang/String;)Lio/mazewall/seccomp/BpfLabel;
+	public static synthetic fun createLabel$default (Lio/mazewall/seccomp/BpfBuilder;Ljava/lang/String;ILjava/lang/Object;)Lio/mazewall/seccomp/BpfLabel;
+	public final fun nextLabel (Ljava/lang/String;)Lio/mazewall/seccomp/BpfLabel;
+}
+
+public final class io/mazewall/seccomp/BpfLabel {
+	public synthetic fun <init> (Ljava/lang/String;Ljava/lang/Object;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getName ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/mazewall/seccomp/BpfProgram {
+	public static final field Companion Lio/mazewall/seccomp/BpfProgram$Companion;
+	public fun <init> (Ljava/util/List;)V
+	public static final fun builder ()Lio/mazewall/seccomp/BpfBuilder;
+	public static final fun dsl (Lio/mazewall/core/Arch;Ljava/util/function/Function;)Lio/mazewall/seccomp/BpfProgram;
+	public final fun getInstructions ()Ljava/util/List;
+}
+
+public final class io/mazewall/seccomp/BpfProgram$Companion {
+	public final fun builder ()Lio/mazewall/seccomp/BpfBuilder;
+	public final fun dsl (Lio/mazewall/core/Arch;Ljava/util/function/Function;)Lio/mazewall/seccomp/BpfProgram;
+	public final fun dsl (Lio/mazewall/core/Arch;Lkotlin/jvm/functions/Function1;)Lio/mazewall/seccomp/BpfProgram;
+}
+
+public final class io/mazewall/seccomp/BpfProgramKt {
+	public static final fun allow (Lio/mazewall/seccomp/BpfBuilder;)Lio/mazewall/seccomp/BpfBuilder;
+	public static final fun and (Lio/mazewall/seccomp/BpfBuilder;I)Lio/mazewall/seccomp/BpfBuilder;
+	public static final fun build (Lio/mazewall/seccomp/BpfBuilder;)Lio/mazewall/seccomp/BpfProgram;
+	public static final fun checkArch (Lio/mazewall/seccomp/BpfBuilder;Lio/mazewall/core/Arch;)Lio/mazewall/seccomp/BpfBuilder;
+	public static final fun deny (Lio/mazewall/seccomp/BpfBuilder;I)Lio/mazewall/seccomp/BpfBuilder;
+	public static final fun expect (Lio/mazewall/seccomp/BpfBuilder;ILjava/util/function/Consumer;)Lio/mazewall/seccomp/BpfBuilder;
+	public static final fun expect (Lio/mazewall/seccomp/BpfBuilder;ILkotlin/jvm/functions/Function1;)Lio/mazewall/seccomp/BpfBuilder;
+	public static final fun expect (Lio/mazewall/seccomp/BpfBuilder;Lio/mazewall/core/Syscall;Lio/mazewall/core/Arch;Ljava/util/function/Consumer;)Lio/mazewall/seccomp/BpfBuilder;
+	public static final fun expect (Lio/mazewall/seccomp/BpfBuilder;Lio/mazewall/core/Syscall;Lio/mazewall/core/Arch;Lkotlin/jvm/functions/Function1;)Lio/mazewall/seccomp/BpfBuilder;
+	public static final fun jmp (Lio/mazewall/seccomp/BpfBuilder;Lio/mazewall/seccomp/BpfLabel;)Lio/mazewall/seccomp/BpfBuilder;
+	public static final fun jmpIfFalse (Lio/mazewall/seccomp/BpfBuilder;Lio/mazewall/seccomp/BpfLabel;)Lio/mazewall/seccomp/BpfBuilder;
+	public static final fun jmpIfTrue (Lio/mazewall/seccomp/BpfBuilder;Lio/mazewall/seccomp/BpfLabel;)Lio/mazewall/seccomp/BpfBuilder;
+	public static final fun jumpIfEqual (Lio/mazewall/seccomp/BpfBuilder;ILio/mazewall/seccomp/BpfLabel;Lio/mazewall/seccomp/BpfLabel;)Lio/mazewall/seccomp/BpfBuilder;
+	public static synthetic fun jumpIfEqual$default (Lio/mazewall/seccomp/BpfBuilder;ILio/mazewall/seccomp/BpfLabel;Lio/mazewall/seccomp/BpfLabel;ILjava/lang/Object;)Lio/mazewall/seccomp/BpfBuilder;
+	public static final fun jumpIfGreaterThan (Lio/mazewall/seccomp/BpfBuilder;ILio/mazewall/seccomp/BpfLabel;Lio/mazewall/seccomp/BpfLabel;)Lio/mazewall/seccomp/BpfBuilder;
+	public static synthetic fun jumpIfGreaterThan$default (Lio/mazewall/seccomp/BpfBuilder;ILio/mazewall/seccomp/BpfLabel;Lio/mazewall/seccomp/BpfLabel;ILjava/lang/Object;)Lio/mazewall/seccomp/BpfBuilder;
+	public static final fun jumpIfSet (Lio/mazewall/seccomp/BpfBuilder;ILio/mazewall/seccomp/BpfLabel;Lio/mazewall/seccomp/BpfLabel;)Lio/mazewall/seccomp/BpfBuilder;
+	public static synthetic fun jumpIfSet$default (Lio/mazewall/seccomp/BpfBuilder;ILio/mazewall/seccomp/BpfLabel;Lio/mazewall/seccomp/BpfLabel;ILjava/lang/Object;)Lio/mazewall/seccomp/BpfBuilder;
+	public static final fun jumpUnconditional (Lio/mazewall/seccomp/BpfBuilder;Lio/mazewall/seccomp/BpfLabel;)Lio/mazewall/seccomp/BpfBuilder;
+	public static final fun killThread (Lio/mazewall/seccomp/BpfBuilder;)Lio/mazewall/seccomp/BpfBuilder;
+	public static final fun loadAbsolute (Lio/mazewall/seccomp/BpfBuilder;I)Lio/mazewall/seccomp/BpfBuilder;
+	public static final fun loadSyscallNr (Lio/mazewall/seccomp/BpfBuilder;)Lio/mazewall/seccomp/BpfBuilder;
+	public static final fun mark (Lio/mazewall/seccomp/BpfBuilder;Lio/mazewall/seccomp/BpfLabel;)Lio/mazewall/seccomp/BpfBuilder;
+	public static final fun notifyUser (Lio/mazewall/seccomp/BpfBuilder;)Lio/mazewall/seccomp/BpfBuilder;
+	public static final fun ret (Lio/mazewall/seccomp/BpfBuilder;I)Lio/mazewall/seccomp/BpfBuilder;
+}
+
+public abstract interface class io/mazewall/seccomp/BpfState {
+}
+
+public abstract interface class io/mazewall/seccomp/BpfState$Active : io/mazewall/seccomp/BpfState {
+}
+
+public abstract interface class io/mazewall/seccomp/BpfState$ArchVerified : io/mazewall/seccomp/BpfState {
+}
+
+public abstract interface class io/mazewall/seccomp/BpfState$Terminated : io/mazewall/seccomp/BpfState {
+}
+
+public abstract interface class io/mazewall/seccomp/BpfState$Uninitialized : io/mazewall/seccomp/BpfState {
+}
+
+public final class io/mazewall/seccomp/BpfStaticVerifier {
+	public static final field INSTANCE Lio/mazewall/seccomp/BpfStaticVerifier;
+	public final fun verify (Lio/mazewall/seccomp/BpfProgram;)Lio/mazewall/seccomp/BpfProgram;
+}
+
+public abstract interface class io/mazewall/seccomp/BpfStatus {
+}
+
+public final class io/mazewall/seccomp/BpfStatus$Unverified : io/mazewall/seccomp/BpfStatus {
+	public static final field INSTANCE Lio/mazewall/seccomp/BpfStatus$Unverified;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/mazewall/seccomp/BpfStatus$Verified : io/mazewall/seccomp/BpfStatus {
+	public static final field INSTANCE Lio/mazewall/seccomp/BpfStatus$Verified;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+

@@ -14,6 +14,7 @@ autonomy: supervised
 solution_approved: false
 blast_radius: medium
 reversible: true
+paperclip_issue_id: a9c2b1d8-789c-48c0-bbf6-4c6c54d35613
 ---
 
 # 🔴 [Severity: HIGH]: `IterativeProfiler` Context Loss via thread creation

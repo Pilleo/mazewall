@@ -57,8 +57,10 @@ public data class PolicyDefinition<out S : PolicyScope>(
             val nr = syscall.numberFor(arch)
             if (nr >= 0) {
                 val current = result[nr]
-                if (current == null || action.priority > current.priority) {
+                if (current == null) {
                     result[nr] = action
+                } else {
+                    result[nr] = current.stricter(action)
                 }
             }
         }
@@ -73,7 +75,8 @@ public data class PolicyDefinition<out S : PolicyScope>(
         public fun <S : PolicyScope> combine(vararg policies: PolicyDefinition<out S>): PolicyDefinition<S> {
             require(policies.isNotEmpty()) { "At least one policy is required" }
 
-            val combinedDefaultAction = policies.maxByOrNull { it.defaultAction.priority }!!.defaultAction
+            val combinedDefaultAction =
+                policies.map { it.defaultAction }.reduce { a, b -> a.stricter(b) }
 
             val combinedSyscalls = mutableMapOf<Syscall, SeccompAction>()
             val allSyscalls = policies.flatMapTo(mutableSetOf()) { it.syscallActions.keys }
@@ -81,7 +84,7 @@ public data class PolicyDefinition<out S : PolicyScope>(
                 val effective =
                     policies
                         .map { it.syscallActions[syscall] ?: it.defaultAction }
-                        .maxBy { it.priority }
+                        .reduce { a, b -> a.stricter(b) }
                 combinedSyscalls[syscall] = effective
             }
 
@@ -124,7 +127,7 @@ public data class PolicyDefinition<out S : PolicyScope>(
             val openatBlocked = openatAction != SeccompAction.ACT_ALLOW
             val ioUringAllowed = ioUringAction == SeccompAction.ACT_ALLOW
             if ((openBlocked || openatBlocked) && ioUringAllowed) {
-                combinedSyscalls[Syscall.IO_URING_SETUP] = SeccompAction.ACT_ERRNO
+                combinedSyscalls[Syscall.IO_URING_SETUP] = SeccompAction.ACT_ERRNO()
             }
 
             @Suppress("UNCHECKED_CAST")

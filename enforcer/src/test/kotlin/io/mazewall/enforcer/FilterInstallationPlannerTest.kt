@@ -8,6 +8,7 @@ import io.mazewall.enforcer.engine.FilterInstallationPlanner
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
+import org.junit.jupiter.api.assertThrows
 import org.junit.jupiter.api.Test
 
 class FilterInstallationPlannerTest {
@@ -60,5 +61,38 @@ class FilterInstallationPlannerTest {
         assertTrue(plan.needsNewFilter, "Should install filter to escalate action severity")
         assertTrue(plan.newBlocks.containsKey(Syscall.EXECVE))
         assertEquals(SeccompAction.ACT_KILL_PROCESS, plan.newBlocks[Syscall.EXECVE])
+    }
+
+    @Test
+    fun `verifyFilterDepth does not throw for depth 0`() {
+        FilterInstallationPlanner.verifyFilterDepth(0)
+    }
+
+    @Test
+    fun `verifyFilterDepth does not throw for depth 31`() {
+        FilterInstallationPlanner.verifyFilterDepth(31)
+    }
+
+    @Test
+    fun `verifyFilterDepth throws for depth 32`() {
+        val exception = assertThrows<IllegalStateException> {
+            FilterInstallationPlanner.verifyFilterDepth(32)
+        }
+        assertTrue(
+            exception.message?.contains("32") == true,
+            "Exception message should mention 32, got: ${exception.message}"
+        )
+    }
+
+    @Test
+    fun `verifyFilterDepth throws for depth 33`() {
+        assertThrows<IllegalStateException> {
+            FilterInstallationPlanner.verifyFilterDepth(33)
+        }
+    }
+
+    @Test
+    fun `verifyFilterDepth does not throw for depth 11`() {
+        FilterInstallationPlanner.verifyFilterDepth(11)
     }
 }

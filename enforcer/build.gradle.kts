@@ -1,8 +1,11 @@
+import java.math.BigDecimal
+
 plugins {
     kotlin("jvm")
     id("info.solidsoft.pitest")
     alias(libs.plugins.plantuml)
     alias(libs.plugins.kotlinPluginSerialization)
+    alias(libs.plugins.bcv)
 }
 
 kotlin {
@@ -49,7 +52,67 @@ val integrationTestJvmArgs =
         "-Xms128m",
         "-Dfile.encoding=UTF-8",
         "-Dsun.jnu.encoding=UTF-8",
+    ) + (
+        if (System.getProperty("debug.disableSelfVerify") == "true") listOf("-Ddebug.disableSelfVerify=true")
+        else emptyList()
+    ) + (
+        if (System.getProperty("debug.enableSelfVerify") == "true") listOf("-Dio.mazewall.selfVerify=true")
+        else emptyList()
     )
+
+
+// issue-20260823-172001: CLI --tests filters that match only 'needs-fresh-jvm' classes fail on
+// :enforcer:integrationTest with "No tests found", silently hiding the correct task. Emit a
+// routing hint at CONFIGURATION time (Gradle 9 does not expose CLI patterns to Test tasks).
+val cliTestFilterArgs = gradle.startParameter.taskRequests
+    .flatMap { it.args }
+fun extractCliTestPatterns(args: List<String>): List<String> {
+    val out = mutableListOf<String>()
+    var i = 0
+    while (i < args.size) {
+        val a = args[i]
+        when {
+            a.startsWith("--tests=") -> out += a.substringAfter("=")
+            a == "--tests" && i + 1 < args.size -> { out += args[i + 1]; i++ }
+        }
+        i++
+    }
+    return out.map { it.trim('*', ' ') }.filter { it.isNotBlank() }
+}
+val cliTestPatterns = extractCliTestPatterns(cliTestFilterArgs)
+
+fun findMatchingTaggedClasses(patterns: List<String>, wantTag: Boolean): List<String> {
+    if (patterns.isEmpty()) return emptyList()
+    val hits = mutableListOf<String>()
+    sourceSets["integrationTest"].output.classesDirs.forEach { dir ->
+        if (!dir.isDirectory) return@forEach
+        dir.walkTopDown()
+            .filter { it.isFile && it.extension == "class" }
+            .filter { cls ->
+                val simple = cls.nameWithoutExtension.substringAfterLast('/')
+                patterns.any { pat -> simple.contains(pat.substringAfterLast('.'), ignoreCase = true) }
+            }
+            .forEach { cls ->
+                val bytes = String(cls.readBytes(), Charsets.ISO_8859_1)
+                val tagged = bytes.contains("NeedsFreshJvm")
+                if (tagged == wantTag) {
+                    hits += cls.nameWithoutExtension.substringAfterLast('/')
+                }
+            }
+    }
+    return hits.distinct()
+}
+
+if (cliTestPatterns.isNotEmpty()) {
+    val freshOnly = findMatchingTaggedClasses(cliTestPatterns, wantTag = true)
+    val plain = findMatchingTaggedClasses(cliTestPatterns, wantTag = false)
+    if (plain.isEmpty() && freshOnly.isNotEmpty()) {
+        logger.warn(
+            "[FILTER HINT] ${freshOnly.joinToString()} are tagged 'needs-fresh-jvm' and will NOT run on " +
+                ":enforcer:integrationTest. Use: ./gradlew :enforcer:integrationTestFreshJvm --tests <pattern>",
+        )
+    }
+}
 
 fun Test.configureIntegrationHarness() {
     group = "verification"
@@ -61,6 +124,8 @@ fun Test.configureIntegrationHarness() {
         showStandardStreams = true
     }
     dependsOn(compileVulnerableRop)
+    // issue-20260823-172001: routing hints are emitted at CONFIGURATION time (see
+    // cliTestPatterns logic above) because CLI --tests patterns are not visible here.
 }
 
 val integrationTest =
@@ -148,6 +213,8 @@ pitest {
             "io.mazewall.SbobParser*",
             "io.mazewall.enforcer.engine.FilterInstallationPlanner*",
             "io.mazewall.enforcer.PolicyCombining*",
+            "io.mazewall.enforcer.supervisor.SupervisorNotificationMachine*",
+            "io.mazewall.enforcer.state.ContainmentStateRegistry*",
         ),
     )
 
@@ -170,11 +237,14 @@ pitest {
             "io.mazewall.seccomp.BpfFilterTest",
             "io.mazewall.SbobParserTest",
             "io.mazewall.enforcer.FilterInstallationPlannerTest",
+            "io.mazewall.enforcer.supervisor.SupervisorNotificationMachineTest",
+            "io.mazewall.enforcer.ContainmentStateRegistryTest",
         ),
     )
 
     jvmArgs.set(listOf("--enable-native-access=ALL-UNNAMED"))
-
+    timeoutConstInMillis.set(2000)
+    timeoutFactor.set(BigDecimal.valueOf(1.25))
     threads.set(System.getProperty("pitest.threads")?.toInt() ?: 4)
 }
 

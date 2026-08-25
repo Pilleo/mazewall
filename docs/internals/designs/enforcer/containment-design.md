@@ -131,6 +131,12 @@ Process forking (`fork`, `vfork`, or `clone` without `CLONE_THREAD`) hits `DENY`
 An agent who naively adds `Syscall.CLONE` to a policy's block list would bypass
 this inspection and deadlock the JVM at the next thread creation.
 
+### 3b. Int-ABI arguments — `EqualsAny32` low-word comparisons
+For `int`-defined arguments (prctl option, socket domain) use `ArgCheck.EqualsAny32`: emit
+LD_ABS of ONLY the args[i] LO word followed by per-value JEQ. The HI word of the u64 slot is
+unspecified garbage on int ABI and must never participate in the comparison (issue-075 p3).
+Adopted: UnsafePrctlInspector, SocketAddressFamilyInspector.
+
 ### 3c. `clone3` — always return `ENOSYS`
 
 `clone3` is blocked unconditionally with `ENOSYS` (not `EPERM`) to force libc to
@@ -353,6 +359,18 @@ the JVM throws `NoClassDefFoundError`. `Policy.Builder.allowJvmClasspath()` read
 Always call `allowJvmClasspath()` when writing tests that activate Landlock on a
 thread that may still lazy-load test infrastructure classes.
 
+### ALLOW_LIST syscall floors: the bootstrap-read closure (`pread64`)
+
+For **seccomp** allow-list floors (distinct from the Landlock path rules above), lazy
+boot-class reads are served by *positional* reads on the modules image. A floor containing
+`READ`+`LSEEK` but missing `pread64` fails those reads mid-stream with `EPERM`, which the JVM
+surfaces as `ClassFormatError: Incompatible magic value <garbage>` — deterministic corruption,
+not a clean IOException (issue-20260823-190000; proven via AllowListTest 2/2 fail → 0/2 pass).
+
+Use `io.mazewall.enforcer.engine.JvmFloorPresets.fullJvmFloor()` (or at minimum
+`BOOTSTRAP_READ_CLOSURE`) instead of hand-rolled lists, and validate narrow floors once with
+`-Dio.mazewall.selfVerify=true` in CI. See `security-considerations.md §9.1`.
+
 ### Landlock TSYNC (ABI 8 / Linux 7.0+)
 
 Historically, Landlock rulesets were strictly thread-scoped and could not be applied retroactively to sibling threads. To lock down a multi-threaded JVM process on older kernels, a wrapper launcher (e.g., C or Rust) must apply the ruleset before invoking `execve` on the JVM.
@@ -506,3 +524,20 @@ This ensures process spawning validation is 100% secure, JVM-independent, and fr
 ---
 
 
+
+## Reversible JVM Tracking vs Irreversible Kernel/Daemon Effects
+
+The following table clarifies which effects in mazewall are reversible and which are permanent:
+
+| Effect | Reversible? | JVM tracking |
+|---|---|---|
+| Seccomp filter | No (thread/process lifetime) | `ContainerState.filterDepth` / actions — never clear after apply |
+| Landlock domain | No (nest inward only) | `landlockPolicy` — never rewind after apply |
+| Supervisor session / USER_NOTIF listener | Session closeable; filter stays | Closing session does **not** uninstall; later NOTIFY may get ENOSYS |
+| `InstallationReceipt` | Diagnostic only | `installed` is independent of `landlockApplied` |
+| `sanitizeThreadState` | Forbidden | Throws |
+
+**Related issues:**
+- WONTFIX: [issue-102-permanent-thread-pool-contamination-classloader-leaks-and-st](docs/internals/backlog/performance/issue-102-permanent-thread-pool-contamination-classloader-leaks-and-st.md)
+- WONTFIX: [issue-103-containedexecutors-thread-local-state-persistence-and-poison](docs/internals/backlog/performance/issue-103-containedexecutors-thread-local-state-persistence-and-poison.md)
+- [issue-20260821-113003-report-already-active-landlock](docs/internals/backlog/code_health/issue-20260821-113003-report-already-active-landlock.md)

@@ -202,4 +202,29 @@ class ContainedExecutorsCoverageTest {
             "Installing thread-scoped containment on a Virtual Thread must throw IllegalStateException, got: $virtualException"
         )
     }
+
+    @Test
+    fun `repeat install receipt reports active landlock when state already has landlock policy`() {
+        Platform.setProvider(
+            object : PlatformProvider by RealPlatformProvider {
+                override fun getOsName(): String = "Linux"
+                override fun hasKernelSeccompSupport(): Boolean = true
+                override fun checkSeccompSanity(): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
+                    LinuxNative.SyscallResult.Error(22, -1)
+            },
+        )
+        System.setProperty("io.mazewall.fallback", "WARN_AND_BYPASS")
+
+        val policyWithLandlock = Policy.builder().allowFsRead("/tmp").build()
+        ContainmentStateRegistry.threadState = ContainmentStateRegistry.threadState.withLandlockPolicy(policyWithLandlock.definition)
+
+        val receipt = ContainedExecutors.installOnCurrentThread(policyWithLandlock.definition)
+        assertTrue(receipt.landlockApplied, "Repeat install with unchanged Landlock policy must report landlockApplied=true")
+
+        // Policy with no Landlock on clean state must report landlockApplied=false
+        ContainmentStateRegistry.threadState = io.mazewall.enforcer.state.ContainerState()
+        val policyWithoutLandlock = Policy.builder().build()
+        val receiptClean = ContainedExecutors.installOnCurrentThread(policyWithoutLandlock.definition)
+        assertEquals(false, receiptClean.landlockApplied, "Policy without Landlock on clean state must report landlockApplied=false")
+    }
 }

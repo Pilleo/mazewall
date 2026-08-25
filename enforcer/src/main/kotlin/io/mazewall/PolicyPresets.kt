@@ -25,6 +25,9 @@ public object PolicyPresets {
             .block(Syscall.LINK, Syscall.LINKAT, Syscall.UNLINK, Syscall.UNLINKAT)
             .block(Syscall.SYMLINK, Syscall.SYMLINKAT, Syscall.READLINK, Syscall.READLINKAT)
             .block(Syscall.MKDIR, Syscall.MKDIRAT, Syscall.RMDIR)
+            // File content mutations (issue-20260821-113000): creat/truncate bypass open-based
+            // traps; without these blocks USER_NOTIF profiling never observes them.
+            .block(Syscall.CREAT, Syscall.TRUNCATE, Syscall.FTRUNCATE)
             .block(Syscall.CHMOD, Syscall.FCHMOD, Syscall.FCHMODAT)
             .build()
 
@@ -69,6 +72,43 @@ public object PolicyPresets {
         PolicyBuilder<PolicyScope.ProcessWideSafe>()
             .block(Syscall.CONNECT, Syscall.SENDTO, Syscall.SENDMSG, Syscall.SENDMMSG, Syscall.RECVMMSG, Syscall.SOCKET)
             .block(Syscall.BIND, Syscall.LISTEN, Syscall.ACCEPT, Syscall.ACCEPT4)
+            .build()
+
+    /**
+     * Process-wide Tier 1: [NO_EXEC] plus denial of filesystem *mutation* syscalls
+     * (rename/link/unlink/symlink, mkdir/rmdir, creat/truncate/ftruncate, chmod
+     * family). Reads stay allowed - use [PolicyBuilder.allowFsWrite] style scoping
+     * via a ThreadLocalOnly policy when writes are needed.
+     */
+    @JvmField
+    public val NO_EXEC_NO_FS_WRITE: PolicyDefinition<PolicyScope.ProcessWideSafe> =
+        PolicyBuilder<PolicyScope.ProcessWideSafe>()
+            .base(NO_EXEC)
+            .block(Syscall.RENAME, Syscall.RENAMEAT, Syscall.RENAMEAT2)
+            .block(Syscall.LINK, Syscall.LINKAT, Syscall.UNLINK, Syscall.UNLINKAT)
+            .block(Syscall.SYMLINK, Syscall.SYMLINKAT)
+            .block(Syscall.MKDIR, Syscall.MKDIRAT, Syscall.RMDIR)
+            .block(Syscall.CREAT, Syscall.TRUNCATE, Syscall.FTRUNCATE)
+            .block(Syscall.CHMOD, Syscall.FCHMOD, Syscall.FCHMODAT)
+            .build()
+
+    /**
+     * Recommended application baseline: JIT-safe no-exec ([NO_EXEC_HOTSPOT]) +
+     * [NO_NETWORK] + [NO_EXEC_NO_FS_WRITE] filesystem-mutation denials.
+     * Process-wide safe by construction.
+     */
+    @JvmField
+    public val DEFAULT_SAFE: PolicyDefinition<PolicyScope.ProcessWideSafe> =
+        PolicyBuilder<PolicyScope.ProcessWideSafe>()
+            .base(NO_EXEC_HOTSPOT)
+            .block(Syscall.CONNECT, Syscall.SENDTO, Syscall.SENDMSG, Syscall.SENDMMSG, Syscall.SOCKET)
+            .block(Syscall.BIND, Syscall.LISTEN, Syscall.ACCEPT, Syscall.ACCEPT4)
+            .block(Syscall.RENAME, Syscall.RENAMEAT, Syscall.RENAMEAT2)
+            .block(Syscall.LINK, Syscall.LINKAT, Syscall.UNLINK, Syscall.UNLINKAT)
+            .block(Syscall.SYMLINK, Syscall.SYMLINKAT)
+            .block(Syscall.MKDIR, Syscall.MKDIRAT, Syscall.RMDIR)
+            .block(Syscall.CREAT, Syscall.TRUNCATE, Syscall.FTRUNCATE)
+            .block(Syscall.CHMOD, Syscall.FCHMOD, Syscall.FCHMODAT)
             .build()
 
     /**

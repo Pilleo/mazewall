@@ -11,6 +11,7 @@ class "BaselinePathProfile" as io.mazewall.profiler.BaselinePathProfile {
 }
 class "BillOfBehavior" as io.mazewall.profiler.BillOfBehavior {
   + {static}Companion Companion
+  + {static}BillOfBehavior EMPTY
   __
   +Set<String> getOpens()
   +Set<String> getFsWritePaths()
@@ -23,6 +24,10 @@ class "BillOfBehavior" as io.mazewall.profiler.BillOfBehavior {
   +BillOfBehavior filterPaths(BaselinePathProfile)
   +String toJson()
   +String toStackTracesJson()
+  + {static}BillOfBehavior empty()
+  + {static}BillOfBehavior fromFile(Path)
+  + {static}BillOfBehavior fromStream(InputStream)
+  + {static}BillOfBehavior fromJson(String)
 }
 class "BillOfBehaviorKt" as io.mazewall.profiler.BillOfBehaviorKt {
 }
@@ -36,6 +41,11 @@ class "EbpfCapability" as io.mazewall.profiler.EbpfCapability {
   +Integer parseEuid(String)
 }
 interface "EbpfLoad" as io.mazewall.profiler.EbpfLoad {
+}
+interface "FsEffect" as io.mazewall.profiler.FsEffect {
+  + {static}Companion Companion
+  __
+  + {abstract}List<String> getPaths()
 }
 class "IncompleteProfileException" as io.mazewall.profiler.IncompleteProfileException {
   +ProfilingCoverage getCoverage()
@@ -88,6 +98,8 @@ class "ProfileEnvironment" as io.mazewall.profiler.ProfileEnvironment {
   +Integer getLandlockAbi()
   +Boolean getIoUringDisabled()
 }
+interface "ProfileEvidence" as io.mazewall.profiler.ProfileEvidence {
+}
 interface "ProfileObservation" as io.mazewall.profiler.ProfileObservation {
   ..
   + {static}Companion Companion
@@ -119,7 +131,7 @@ class "Profiler" as io.mazewall.profiler.Profiler {
   +void setDaemonManagerProvider(Function0<ProfilerDaemonManager>)
   +ProfilerInstallerInterface getInstallerProvider()
   +void setInstallerProvider(ProfilerInstallerInterface)
-  +void shutdown()
+  + {static}void shutdown()
 }
 class "ProfilerAckPreload" as io.mazewall.profiler.ProfilerAckPreload {
   + {static}ProfilerAckPreload INSTANCE
@@ -141,7 +153,9 @@ class "ProfilingCoverage" as io.mazewall.profiler.ProfilingCoverage {
   +ProfileEnvironment getEnvironment()
   +boolean getComplete()
   +List<String> getWarnings()
+  +ProfileEvidence evidence()
   +ProfilingCoverage retainStricterPathResolution(ProfilingCoverage)
+  + {static}ProfilingCoverage absent()
 }
 class "ProfilingResult" as io.mazewall.profiler.ProfilingResult<T> {
   +T getValue()
@@ -156,8 +170,14 @@ enum "StackAttribution" as io.mazewall.profiler.StackAttribution {
 }
 interface "TraceableWorkload" as io.mazewall.profiler.TraceableWorkload {
 }
-class "CollectorDrain" as io.mazewall.profiler.collector.CollectorDrain {
+interface "UringOp" as io.mazewall.profiler.UringOp {
+  ..
+  + {static}Companion Companion
   __
+  +boolean isPathBearing()
+  +boolean isFilesystemMutation()
+}
+class "CollectorDrain" as io.mazewall.profiler.collector.CollectorDrain {
   +List<ProfileObservation> getObservations()
   +int getDroppedEvents()
   +boolean getDrainComplete()
@@ -170,7 +190,6 @@ class "EbpfCollector" as io.mazewall.profiler.collector.EbpfCollector {
   +void close()
 }
 class "EbpfEventParser" as io.mazewall.profiler.collector.EbpfEventParser {
-  ..
   + {static}EbpfEventParser INSTANCE
   __
   +EbpfParseResult parse(String)
@@ -204,9 +223,15 @@ class "BobCompiler" as io.mazewall.profiler.compiler.BobCompiler {
   +BillOfBehavior compile(List<? extends TraceEvent>)
   +BillOfBehavior compileObservations(List<? extends ProfileObservation>)
 }
+class "MutationTrapAudit" as io.mazewall.profiler.compiler.MutationTrapAudit {
+  + {static}MutationTrapAudit INSTANCE
+  __
+  +List<String> untrapped(List<? extends BpfInstruction>, Arch)
+}
 class "StraceLogParser" as io.mazewall.profiler.compiler.StraceLogParser {
   + {static}StraceLogParser INSTANCE
   __
+  +StraceParseResult parseWithStats(String)
   +List<ProfileObservation> parse(String)
   +ProfileObservation parseLine(String)
 }
@@ -328,6 +353,7 @@ class "RealProfilerTransport" as io.mazewall.profiler.engine.RealProfilerTranspo
   +FileDescriptor<UnixSocket, Open> connect(String)
   +boolean sendDescriptor(FileDescriptor<UnixSocket, ? extends Open>, FileDescriptor<?, ? extends Open>)
   +FileDescriptor<SeccompNotif, Open> recvDescriptor(FileDescriptor<UnixSocket, ? extends Open>)
+  +FileDescriptor<R, Open> recvDescriptor(FileDescriptor<UnixSocket, ? extends Open>, R)
   +SyscallResult poll(MemorySegment, long, int)
   +SyscallResult read(FileDescriptor<?, ? extends Open>, MemorySegment, long)
   +SyscallResult write(FileDescriptor<?, ? extends Open>, MemorySegment, long)
@@ -375,7 +401,6 @@ class "SyscallEvent" as io.mazewall.profiler.engine.SyscallEvent<S extends Sysca
   +List<Long> getArgs()
   +List<String> getPaths()
   +List<String> getStackTrace()
-  +SyscallEvent<S> copy(int, String, List<Long>, List<String>, List<String>)
 }
 class "SyscallEventKt" as io.mazewall.profiler.engine.SyscallEventKt {
   + {static}SyscallEvent<Resolved> resolved(SyscallEvent<? extends Raw>, List<String>)
@@ -452,8 +477,13 @@ class "ProfilerTraceListener" as io.mazewall.profiler.internal.ProfilerTraceList
   +TraceEventQueue getEventQueue()
   +Channel<TraceEvent> getEventChannel()
   +Flow<TraceEvent> getEventFlow()
+  +CountDownLatch getWorkerTerminatedLatch()
+  +CountDownLatch getCollectorTerminatedLatch()
+  +Function1<TraceEvent, Unit> getOnEventCollected()
+  +void setOnEventCollected(Function1<? super TraceEvent, Unit>)
   +TraceListenerState getState()
   +boolean getDrainComplete()
+  +int getDroppedEvents()
   +void start(CountDownLatch)
   +void close()
   +void passThrough()
@@ -486,8 +516,10 @@ interface "IterativeTaskExecutor" as io.mazewall.profiler.iterative.IterativeTas
   + {abstract}Throwable executeTask(Policy<?, ? extends Uncompiled>, Runnable)
 }
 class "RealIterativeTaskExecutor" as io.mazewall.profiler.iterative.RealIterativeTaskExecutor {
-  + {static}RealIterativeTaskExecutor INSTANCE
+  + {static}Companion Companion
+  + {static}long DEFAULT_ITERATION_TIMEOUT_MS
   __
+  +long getIterationTimeoutMs()
   +Throwable executeTask(Policy<?, ? extends Uncompiled>, Runnable)
 }
 class "StraceProfiler" as io.mazewall.profiler.strace.StraceProfiler {
@@ -503,6 +535,7 @@ class "DiagnosticTriageRunner" as io.mazewall.profiler.triage.DiagnosticTriageRu
   __
   + {static}void main(String[])
 }
+io.mazewall.profiler.BillOfBehavior --> io.mazewall.profiler.BillOfBehavior
 io.mazewall.profiler.BillOfBehavior --> io.mazewall.profiler.NetworkEndpoint
 io.mazewall.profiler.BillOfBehavior --> io.mazewall.profiler.engine.TraceEvent
 io.mazewall.profiler.EbpfCapability --> io.mazewall.profiler.EbpfCapability
@@ -540,6 +573,7 @@ io.mazewall.profiler.collector.StraceCollector .u.|> io.mazewall.profiler.collec
 io.mazewall.profiler.collector.StraceCollector --> io.mazewall.profiler.TraceableWorkload
 io.mazewall.profiler.collector.StraceCollector --> io.mazewall.profiler.ObservationSource
 io.mazewall.profiler.compiler.BobCompiler --> io.mazewall.profiler.compiler.BobCompiler
+io.mazewall.profiler.compiler.MutationTrapAudit --> io.mazewall.profiler.compiler.MutationTrapAudit
 io.mazewall.profiler.compiler.StraceLogParser --> io.mazewall.profiler.compiler.StraceLogParser
 io.mazewall.profiler.engine.PathNormalizerHelper --> io.mazewall.profiler.engine.PathNormalizerHelper
 io.mazewall.profiler.engine.ProfilerDaemon --> io.mazewall.profiler.engine.DaemonRunner
@@ -593,7 +627,6 @@ io.mazewall.profiler.internal.TraceEventQueue --> io.mazewall.profiler.engine.Tr
 io.mazewall.profiler.iterative.IterativeProfiler --> io.mazewall.profiler.iterative.IterativeProfiler
 io.mazewall.profiler.iterative.IterativeProfiler --> io.mazewall.profiler.iterative.IterativeTaskExecutor
 io.mazewall.profiler.iterative.RealIterativeTaskExecutor .u.|> io.mazewall.profiler.iterative.IterativeTaskExecutor
-io.mazewall.profiler.iterative.RealIterativeTaskExecutor --> io.mazewall.profiler.iterative.RealIterativeTaskExecutor
 io.mazewall.profiler.strace.StraceProfiler --> io.mazewall.profiler.strace.StraceProfiler
 io.mazewall.profiler.strace.StraceWorkloadRunner --> io.mazewall.profiler.strace.StraceWorkloadRunner
 io.mazewall.profiler.triage.DiagnosticTriageRunner --> io.mazewall.profiler.triage.DiagnosticTriageRunner

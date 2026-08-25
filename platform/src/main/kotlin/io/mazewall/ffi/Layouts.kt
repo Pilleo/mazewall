@@ -238,4 +238,17 @@ object Layouts {
     const val SUPERVISOR_RESPONSE_PATH_OFFSET: Long = 20L
     const val SUPERVISOR_RESPONSE_PATH_CAP: Long = 4096L
     const val SUPERVISOR_RESPONSE_SIZE: Long = SUPERVISOR_RESPONSE_PATH_OFFSET + SUPERVISOR_RESPONSE_PATH_CAP
+
+    /**
+     * Corresponds to `struct open_how` in `<linux/openat2.h>`.
+     */
+    val OPEN_HOW: StructLayout = MemoryLayout.structLayout(
+        NATIVE_LONG.withName("flags"),
+        NATIVE_LONG.withName("mode"),
+        NATIVE_LONG.withName("resolve"),
+    )
+    val OPEN_HOW_FLAGS_OFFSET: Long = OPEN_HOW.byteOffset(MemoryLayout.PathElement.groupElement("flags"))
+    val OPEN_HOW_MODE_OFFSET: Long = OPEN_HOW.byteOffset(MemoryLayout.PathElement.groupElement("mode"))
+    val OPEN_HOW_RESOLVE_OFFSET: Long = OPEN_HOW.byteOffset(MemoryLayout.PathElement.groupElement("resolve"))
+    const val OPEN_HOW_SIZE: Long = 24L
 }

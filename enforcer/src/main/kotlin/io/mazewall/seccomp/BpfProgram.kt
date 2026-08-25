@@ -167,7 +167,7 @@ public fun BpfBuilder<BpfState.Active>.allow(): BpfBuilder<BpfState.Terminated> 
 
 /** Returns ACT_ERRNO with the given [errno]. */
 public fun BpfBuilder<BpfState.Active>.deny(errno: Int): BpfBuilder<BpfState.Terminated> {
-    return ret(SeccompAction.ACT_ERRNO.nativeCode or (errno and 0xFFFF))
+    return ret(NativeConstants.SECCOMP_RET_ERRNO or (errno and 0xFFFF))
 }
 
 /** Returns SECCOMP_RET_KILL_THREAD. */
@@ -332,11 +332,30 @@ public fun BpfBuilder<BpfState.Terminated>.build(): BpfProgram<BpfStatus.Unverif
             is BpfMacro.JumpIfEqual -> compileJump(BPF_JMP_JEQ, op.k, op.jt, op.jf, index, labelPositions)
             is BpfMacro.JumpIfSet -> compileJump(BPF_JMP_JSET, op.k, op.jt, op.jf, index, labelPositions)
             is BpfMacro.JumpIfGreaterThan -> compileJump(BPF_JMP_JGT, op.k, op.jt, op.jf, index, labelPositions)
+            // Classic BPF semantics: BPF_JMP|BPF_JA jumps by K (the 32-bit immediate), NOT by
+            // jt/jf like conditional jumps. Verified empirically against seccomp(2) on Linux:
+            // {JA, jt=1, k=0} falls through (poisoning every later RET), while {JA, k=offset}
+            // lands on the intended instruction.
+            // @ref: docs/internals/backlog/resolved/issue-20260823-140500-bpf-ja-segv-investigation.md
+            is BpfMacro.JumpUnconditional -> compileJaJump(op.target, index, labelPositions)
             is BpfMacro.Label -> throw IllegalStateException("Label found in filtered ops")
         }
     }
 
     return BpfProgram(bpfInstructions)
+}
+
+/**
+ * Emits an unconditional jump ([BPF_JMP_JA]) to [label].
+ *
+ * This exists so call sites never hand-write the `jumpIfEqual(0, jt = l, jf = l)` idiom, which is
+ * only correct while both targets are identical. Note that classic BPF encodes the JA skip count
+ * in [BpfInstruction.Jmp.k]; `jt`/`jf` must remain zero.
+ */
+public fun BpfBuilder<BpfState.Active>.jumpUnconditional(label: BpfLabel): BpfBuilder<BpfState.Active> {
+    requireIssued(label, "jumpUnconditional")
+    ops.add(BpfMacro.JumpUnconditional(label))
+    return this
 }
 
 private fun compileJump(
@@ -350,6 +369,16 @@ private fun compileJump(
     val jt = resolveLabel(jtLabel, currentIndex, labelPositions)
     val jf = resolveLabel(jfLabel, currentIndex, labelPositions)
     return BpfInstruction.Jmp(code, jt, jf, k)
+}
+
+private fun compileJaJump(
+    target: BpfLabel,
+    currentIndex: Int,
+    labelPositions: Map<BpfLabel, Int>,
+): BpfInstruction.Jmp {
+    val offset = resolveLabel(target, currentIndex, labelPositions)
+    // Classic BPF JA carries its skip count in K; jt/jf are unused and must be zero.
+    return BpfInstruction.Jmp(BPF_JMP_JA, 0, 0, offset.toInt())
 }
 
 private fun resolveLabel(
@@ -372,6 +401,7 @@ private const val BPF_RET: Short = 0x06
 private const val BPF_JMP_JEQ: Short = 0x15
 private const val BPF_JMP_JSET: Short = 0x45
 private const val BPF_JMP_JGT: Short = 0x25
+private const val BPF_JMP_JA: Short = 0x05
 
 /**
  * Intermediate symbolic representation of BPF instructions before label resolution.
@@ -381,6 +411,7 @@ internal sealed interface BpfMacro {
     data class JumpIfEqual(val k: Int, val jt: BpfLabel? = null, val jf: BpfLabel? = null) : BpfMacro
     data class JumpIfSet(val k: Int, val jt: BpfLabel? = null, val jf: BpfLabel? = null) : BpfMacro
     data class JumpIfGreaterThan(val k: Int, val jt: BpfLabel? = null, val jf: BpfLabel? = null) : BpfMacro
+    data class JumpUnconditional(val target: BpfLabel) : BpfMacro
     data class And(val k: Int) : BpfMacro
     data class Ret(val action: Int) : BpfMacro
     data class Label(val label: BpfLabel) : BpfMacro

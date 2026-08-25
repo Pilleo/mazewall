@@ -38,17 +38,18 @@ internal object PolicyTransformer {
 
         // SBoB parsing may result in Landlock rules, so we transition to ThreadLocalOnly
         @Suppress("UNCHECKED_CAST")
-        val builder = PolicyBuilder<PolicyScope.ThreadLocalOnly>().base(base as PolicyDefinition<PolicyScope.ThreadLocalOnly>)
+        var builder = PolicyBuilder<PolicyScope.ThreadLocalOnly>().base(base as PolicyDefinition<PolicyScope.ThreadLocalOnly>)
 
-        if (base.defaultAction == SeccompAction.ACT_ALLOW) {
+        builder = if (base.defaultAction == SeccompAction.ACT_ALLOW) {
             val toUnblock = mappedSyscalls.filter { base.syscallActions.containsKey(it) }
             builder.unblock(*toUnblock.toTypedArray())
         } else {
             builder.allow(*mappedSyscalls.toTypedArray())
         }
 
-        for (path in prunedReads) builder.allowFsRead(SandboxedPath.of(path, allowNonExistent = true))
-        for (path in prunedWrites) builder.allowFsWrite(SandboxedPath.of(path, allowNonExistent = true))
+        // allowFs* are copy-on-promotion: the returned thread-local builder must be kept.
+        for (path in prunedReads) builder = builder.allowFsRead(SandboxedPath.of(path, allowNonExistent = true))
+        for (path in prunedWrites) builder = builder.allowFsWrite(SandboxedPath.of(path, allowNonExistent = true))
 
         return builder.build()
     }

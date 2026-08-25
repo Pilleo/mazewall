@@ -36,6 +36,7 @@ public object Platform {
     /**
      * Immutable matrix of supported Linux kernel features.
      */
+    @JvmStatic
     public val featureMatrix: KernelFeatureMatrix
         get() {
             val current = cachedMatrix
@@ -52,6 +53,7 @@ public object Platform {
     /**
      * Swaps the active platform provider. Used for testing and fault injection.
      */
+    @JvmStatic
     @Suppress("spotbugs:ST_WRITE_TO_STATIC_FROM_INSTANCE_METHOD")
     public fun setProvider(newProvider: PlatformProvider) {
         synchronized(this) {
@@ -64,6 +66,7 @@ public object Platform {
     /**
      * Restores the default RealPlatformProvider.
      */
+    @JvmStatic
     @Suppress("spotbugs:ST_WRITE_TO_STATIC_FROM_INSTANCE_METHOD")
     public fun resetToDefault() {
         synchronized(this) {
@@ -82,9 +85,8 @@ public object Platform {
         SILENT_BYPASS, // run task uncontained, no warning
     }
 
-    private const val ERRNO_EINVAL = 22
-
     /** True if the current operating system is Linux. */
+    @JvmStatic
     public val isLinux: Boolean get() = provider.getOsName().equals("Linux", ignoreCase = true)
 
     /**
@@ -92,6 +94,7 @@ public object Platform {
      *
      * This function uses a Kotlin contract to formalize this invariant.
      */
+    @JvmStatic
     @OptIn(ExperimentalContracts::class)
     public fun validateLinux() {
         contract {
@@ -105,6 +108,7 @@ public object Platform {
     /**
      * Returns true if the current platform supports seccomp filters.
      */
+    @JvmStatic
     public fun isSupported(): Boolean =
         isLinux &&
             provider.hasKernelSeccompSupport() &&
@@ -116,6 +120,7 @@ public object Platform {
      *
      * This function uses a Kotlin contract to formalize this invariant.
      */
+    @JvmStatic
     @OptIn(ExperimentalContracts::class)
     public fun validateSupported() {
         contract {
@@ -132,7 +137,7 @@ public object Platform {
         // A healthy kernel should return -1 and set errno to EINVAL (22).
         // Some container environments or broken kernels might silently return 0 or a different error.
         val bogusCheck = provider.checkSeccompSanity()
-        val passed = bogusCheck is SyscallResult.Error && bogusCheck.errno == ERRNO_EINVAL
+        val passed = bogusCheck is SyscallResult.Error && bogusCheck.errno == NativeConstants.EINVAL
         if (!passed) {
             val (ret, errno) =
                 when (bogusCheck) {
@@ -158,6 +163,7 @@ public object Platform {
     /**
      * Resolves the configured fallback behavior based on system properties or environment variables.
      */
+    @JvmStatic
     public fun configuredFallback(): FallbackBehavior {
         val prop =
             System.getProperty("io.mazewall.fallback")
@@ -173,31 +179,55 @@ public object Platform {
         return FallbackBehavior.FAIL
     }
 
-    internal fun isKernelCetSupported(): Boolean {
-        if (!isLinux || !isArchitectureSupported()) return false
-        if (io.mazewall.core.Arch.current() != io.mazewall.core.Arch.AMD64) return false
+    /**
+     * True when the current OS/architecture is one where Intel CET arch_prctl operations are
+     * meaningful (Linux on x86_64). Single source of truth for the CET guard ladder.
+     */
+    internal val isCetPlatformEligible: Boolean
+        get() =
+            isLinux &&
+                try {
+                    io.mazewall.core.Arch.current() == io.mazewall.core.Arch.AMD64
+                } catch (e: UnsupportedOperationException) {
+                    false
+                }
+
+    /**
+     * Probes ARCH_SHSTK_STATUS via arch_prctl. Returns the raw status bitmask, or null when the
+     * kernel rejects the probe (unsupported/disabled) or the platform cannot host CET.
+     */
+    private fun probeShstkStatus(): Long? {
+        if (!isCetPlatformEligible) return null
         return try {
             NativeArena.ofConfined().use { arena ->
                 val statusSeg = arena.allocate(8)
                 val res = LinuxNative.process.archPrctl(NativeConstants.ARCH_SHSTK_STATUS, statusSeg)
-                res is SyscallResult.Success
+                if (res is SyscallResult.Success && res.value == 0L) {
+                    statusSeg.readLong(0)
+                } else {
+                    null
+                }
             }
         } catch (e: UnsupportedOperationException) {
-            false
+            null
         } catch (e: IllegalStateException) {
-            false
+            null
         }
     }
+
+    internal fun isKernelCetSupported(): Boolean = probeShstkStatus() != null
 
     @Volatile
     internal var isCpuCetSupportedOverride: Boolean? = null
 
+    @Volatile
     private var isCpuCetSupportedCached: Boolean? = null
 
     /**
      * Checks if the CPU supports Intel CET Shadow Stack by delegating to the current
      * PlatformProvider.probeCetSupported().
      */
+    @JvmStatic
     public fun isCpuCetSupported(): Boolean {
         val override = isCpuCetSupportedOverride
         if (override != null) return override
@@ -214,28 +244,13 @@ public object Platform {
 
     /**
      * Queries the kernel for active Intel CET Shadow Stack status.
-     * Returns a bitmask of enabled options (e.g. 1 for ARCH_SHSTK_SHSTK), or 0 if unsupported/disabled/error.
+     * Returns a bitmask of enabled options (e.g. 1 for ARCH_SHSTK_SHSTK), or 0 if unsupported/disabled/error.\
      */
+    @JvmStatic
     public fun queryIntelCetStatus(): Long {
-        if (!isLinux || !isArchitectureSupported()) return 0L
-        if (io.mazewall.core.Arch.current() != io.mazewall.core.Arch.AMD64) return 0L
         if (!isCpuCetSupported()) return 0L
 
-        return try {
-            NativeArena.ofConfined().use { arena ->
-                val statusSeg = arena.allocate(8)
-                val res = LinuxNative.process.archPrctl(NativeConstants.ARCH_SHSTK_STATUS, statusSeg)
-                if (res is SyscallResult.Success && res.value == 0L) {
-                    statusSeg.readLong(0)
-                } else {
-                    0L
-                }
-            }
-        } catch (e: UnsupportedOperationException) {
-            0L
-        } catch (e: IllegalStateException) {
-            0L
-        }
+        return probeShstkStatus() ?: 0L
     }
 
     /**
@@ -290,6 +305,7 @@ public object Platform {
     /**
      * Run diagnostics to check system capabilities and privilege/sandboxing status.
      */
+    @JvmStatic
     public fun diagnose(): Diagnostics {
         return Diagnostics(
             osName = provider.getOsName(),

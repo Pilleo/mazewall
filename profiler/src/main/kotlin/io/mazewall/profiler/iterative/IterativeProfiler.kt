@@ -19,7 +19,7 @@ import java.nio.file.AccessDeniedException
     replaceWith = ReplaceWith("MazewallProfiler.open(ProfileOptions(strategy = ProfileStrategy.HYBRID_NO_URING))", "io.mazewall.profiler.MazewallProfiler", "io.mazewall.profiler.ProfileOptions", "io.mazewall.profiler.ProfileStrategy"),
 )
 object IterativeProfiler {
-    public var taskExecutor: IterativeTaskExecutor = RealIterativeTaskExecutor
+    public var taskExecutor: IterativeTaskExecutor = RealIterativeTaskExecutor()
 
     private val customPhrases = java.util.concurrent.CopyOnWriteArrayList<String>()
     private val customRegexes = java.util.concurrent.CopyOnWriteArrayList<Regex>()
@@ -95,14 +95,16 @@ object IterativeProfiler {
         path: String,
     ): Policy<*, Uncompiled> {
         @Suppress("UNCHECKED_CAST")
-        val builder = Policy.threadLocalBuilder().base(currentPolicy as Policy<PolicyScope.ThreadLocalOnly, *>)
-        val p = java.nio.file.Paths.get(path)
+        var builder = Policy.threadLocalBuilder().base(currentPolicy as Policy<PolicyScope.ThreadLocalOnly, *>)
+        // Canonical component-wise containment (issue-20260823-135558): /base/dir must not match
+        // /base/dir-extra, and relative paths are never contained.
+        val p = java.nio.file.Paths.get(path).toAbsolutePath().normalize()
         val isCurrentlyReadAllowed = currentPolicy.allowedFsReadPaths.any {
-            val allowedPath = java.nio.file.Paths.get(it.value)
-            p.startsWith(allowedPath)
+            io.mazewall.core.isUnder(p, java.nio.file.Paths.get(it.value))
         }
 
-        if (isCurrentlyReadAllowed) {
+        // allowFs* are copy-on-promotion: keep the returned builder.
+        builder = if (isCurrentlyReadAllowed) {
             // If read is already allowed but we still got denied, it's a write attempt.
             builder.allowFsWrite(io.mazewall.core.SandboxedPath.of(path, allowNonExistent = true))
         } else {

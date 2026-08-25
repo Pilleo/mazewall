@@ -1,0 +1,95 @@
+#!/usr/bin/env bash
+# Git pre-commit hook to audit changes against mazewall security boundaries.
+# This prevents agent loops or rogue code modifications from bypassing seccomp/Landlock rules.
+#
+# Section 1 semantics (v2):
+#   A forbidden pattern is a VIOLATION only when the STAGED file contains MORE occurrences of the
+#   pattern than the file at HEAD (net-new usage). Refactors that keep the occurrence count equal
+#   or lower (e.g. replacing valueOf("X") with the equivalent enum reference X) are permitted.
+#   Operators may additionally sanction specific file+pattern pairs via
+#   .agents/security-audit-allowlist.txt (see that file for format); sanctioned violations produce
+#   a loud WARNING instead of a failure. The allowlist is operator-owned: do not edit it as part
+#   of agent-driven changes.
+
+set -euo pipefail
+
+echo "==> Auditing codebase changes for security exceptions and bypasses..."
+
+ALLOWLIST_FILE=".agents/security-audit-allowlist.txt"
+
+# 1. Check for unauthorized seccomp/bypass modifications in source files
+FORBIDDEN_PATTERNS=(
+  "FallbackBehavior.WARN_AND_BYPASS"
+  "seccomp_filter_flag"
+  "sun.misc.Unsafe"
+)
+
+CHANGED_FILES=$(git diff --cached --name-only --diff-filter=ACM | grep -E '\.(kt|java)$' || true)
+
+if [ -n "$CHANGED_FILES" ]; then
+  for file in $CHANGED_FILES; do
+    for pattern in "${FORBIDDEN_PATTERNS[@]}"; do
+      staged_count=$(git show ":$file" 2>/dev/null | grep -cE "$pattern" || true)
+      head_count=$(git show "HEAD:$file" 2>/dev/null | grep -cE "$pattern" || true)
+
+      if [ "$staged_count" -le "$head_count" ]; then
+        continue  # no net-new occurrences: refactor/removal, not an introduction
+      fi
+
+      # Net-new occurrences: fail, unless the operator explicitly allowlisted this pair.
+      if [ -f "$ALLOWLIST_FILE" ] && grep -vE '^\s*(#|$)' "$ALLOWLIST_FILE" \
+           | while IFS= read -r entry; do
+               entry_pattern="${entry%%::*}"
+               entry_glob="${entry#*::}"; entry_glob="${entry_glob%%::*}"
+               if [ "$entry_pattern" = "$pattern" ] && [[ "$file" == $entry_glob ]]; then
+                 echo "true"
+               fi
+             done | grep -q "true"; then
+        echo "WARNING: Sanctioned by $ALLOWLIST_FILE: '$pattern' net-new in $file."
+        echo "         Ensure this change was reviewed and approved by an operator."
+      else
+        echo "ERROR: Security violation in $file. Detected disallowed pattern: '$pattern'"
+        echo "Agents are not permitted to modify core fallback behaviors or use raw Unsafe memory directly."
+        echo "(Staged occurrences: $staged_count, HEAD occurrences: $head_count)"
+        exit 1
+      fi
+    done
+  done
+fi
+
+# 2. Check for modifications to the core filter engine
+CORE_FILES=$(git diff --cached --name-only | grep -E 'BpfFilter\.kt|LinuxNative\.kt' || true)
+if [ -n "$CORE_FILES" ]; then
+  echo "WARNING: Modifications to core security engine files detected: $CORE_FILES"
+  echo "Please ensure these changes are fully validated through './scripts/run_tests.sh'."
+fi
+
+# 3. Run host unit tests to verify no structural/logic breakages
+# Full log kept at /tmp/mazewall-precommit-test.log: intermittent failures have occurred that
+# leave no trace in result XMLs (issue-20260823-172001 watch item) — always capture the run.
+
+# Portal tests are part of the commit gate when :portal participates in the build.
+# Inclusion is read directly from settings.gradle.kts: probing via './gradlew projects'
+# would cost two full Gradle configuration passes per commit for statically known facts.
+TEST_TASKS=("test")
+if grep -Eq '^[[:space:]]*include\(":portal"\)' settings.gradle.kts; then
+  TEST_TASKS+=(":portal:integrationTest" ":portal:test")
+else
+  # Explicit operator exclusion (like :tools:orchestrator) must stay visible,
+  # never silent: skipping the gate segment without notice is a bypass.
+  echo "!!! GATE DEGRADED: ':portal' is not included in settings.gradle.kts."
+  echo "!!! Committing WITHOUT :portal integration tests. Re-include before merging."
+fi
+
+echo "==> Running host unit tests and portal integration tests..."
+echo "==> Test tasks to run: ${TEST_TASKS[*]}"
+if ! ./gradlew "${TEST_TASKS[@]}" -x check --no-configuration-cache > /tmp/mazewall-precommit-test.log 2>&1; then
+  echo "--- Failing tests ---"
+  grep -E "FAILED$|FAILED |e: " /tmp/mazewall-precommit-test.log | head -20 || true
+  echo "-------------------"
+  echo "ERROR: Host unit tests failed. Commit aborted. Full log: /tmp/mazewall-precommit-test.log"
+  exit 1
+fi
+
+echo "==> Security audit and unit tests passed successfully."
+exit 0

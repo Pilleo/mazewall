@@ -181,7 +181,7 @@ The Go research project **[glassbox-go](https://github.com/Pilleo/glassbox-go)**
 
 A similar strategy could work for sidecar isolation: a build plugin that generates type-safe client code for a highly restricted sidecar process, so that to the developer it looks like a normal library call — but under the hood the execution is serialized and offloaded to an isolated OS process.
 
-This tooling does not yet exist in production-ready form. It is the central engineering opportunity for the next phase of this work.
+The JVM process-portal design (pooled workers, data + broker→worker FDs, KotlinPoet later) is [process-portal-design.md](../internals/designs/enforcer/process-portal-design.md). Runtime (`ProcessBroker`, `:portal-worker` module) is implemented; KotlinPoet codegen is in `:portal-codegen`.
 
 ---
 

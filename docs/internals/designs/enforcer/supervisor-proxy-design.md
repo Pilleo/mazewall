@@ -3,6 +3,8 @@
 > [!IMPORTANT]
 > **Status:** Designed (Not Yet Implemented)
 > This document details the architectural design for a future enhancement. The Supervisor Proxy component does not yet exist in the codebase.
+>
+> This is the **syscall** broker (`USER_NOTIF` + `ADDFD`). Application-level broker/worker JVM split (generated RPC, capability FDs, process pools) is specified in [process-portal-design.md](process-portal-design.md). Do not merge the two.
 
 ## 1. Background & Motivation
 

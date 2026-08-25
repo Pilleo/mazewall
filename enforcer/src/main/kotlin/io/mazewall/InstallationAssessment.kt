@@ -60,7 +60,6 @@ public object InstallationAssessor {
         processWide: Boolean,
     ): InstallationAssessment {
         val scope = if (processWide) InstallationScope.PROCESS else InstallationScope.THREAD
-        val matrix = Platform.featureMatrix
         val virtual = Thread.currentThread().isVirtual
         val fallback = Platform.configuredFallback()
         val warnings = mutableListOf<String>()
@@ -75,6 +74,14 @@ public object InstallationAssessor {
             reasons.add("not Linux")
             stages.add(InstallationStage.PLATFORM)
         }
+
+        val matrix = if (Platform.isLinux) Platform.featureMatrix else KernelFeatureMatrix(
+            seccompSupported = false,
+            seccompTsyncSupported = false,
+            seccompUserNotifSupported = false,
+            landlockAbiVersion = 0,
+            cetSupported = false,
+        )
         if (!Platform.isSupported()) {
             reasons.add("seccomp is not available or sanity check failed")
             stages.add(InstallationStage.SECCOMP)
@@ -125,9 +132,7 @@ public object InstallationAssessor {
             fallback = fallback,
             argumentRules = policy.argumentRules,
             mode =
-                if (policy.defaultAction is io.mazewall.core.SeccompAction.ACT_ERRNO ||
-                    policy.defaultAction == io.mazewall.core.SeccompAction.ACT_ERRNO
-                ) {
+                if (policy.defaultAction is io.mazewall.core.SeccompAction.ACT_ERRNO) {
                     PolicyMode.ALLOW_LIST
                 } else {
                     PolicyMode.DENY_LIST

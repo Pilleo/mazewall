@@ -34,6 +34,12 @@ public sealed interface ManagedSegment {
         public val NULL: ManagedSegment = SharedSegment(MemorySegment.NULL)
 
         /**
+         * Wraps a raw native address and size into a ManagedSegment.
+         */
+        public fun ofAddress(address: Long, size: Long): ManagedSegment =
+            SharedSegment(MemorySegment.ofAddress(address).reinterpret(size))
+
+        /**
          * Copies a byte array into a managed segment.
          */
         public fun copy(src: ByteArray, srcOffset: Int, dest: ManagedSegment, destOffset: Long, size: Int) {

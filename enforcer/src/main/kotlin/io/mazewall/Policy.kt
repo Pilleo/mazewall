@@ -74,7 +74,7 @@ public class Policy<out S : PolicyScope, out State : PolicyState> internal const
      */
     public val mode: PolicyMode
         get() =
-            if (defaultAction is SeccompAction.ACT_ERRNO || defaultAction == SeccompAction.ACT_ERRNO) {
+            if (defaultAction is SeccompAction.ACT_ERRNO) {
                 PolicyMode.ALLOW_LIST
             } else {
                 PolicyMode.DENY_LIST
@@ -176,16 +176,26 @@ public class Policy<out S : PolicyScope, out State : PolicyState> internal const
          * Does not expand permissions already installed in the kernel.
          */
         @JvmStatic
-        public fun restrictFurtherWith(
-            vararg policies: Policy<PolicyScope.ProcessWideSafe, Uncompiled>,
-        ): Policy<PolicyScope.ProcessWideSafe, Uncompiled> = combine(*policies)
+        public fun <S : PolicyScope> restrictFurtherWith(
+            vararg policies: Policy<out S, Uncompiled>,
+        ): Policy<S, Uncompiled> {
+            val defs = policies.map { it.definition }.toTypedArray()
+            return Policy(PolicyDefinition.combine(*defs))
+        }
 
         @JvmStatic
         @JvmOverloads
         public fun denyList(
             runtime: RuntimeProfile = RuntimeProfile.HOTSPOT_JIT,
             configure: DenyListSpec.() -> Unit = {},
-        ): Policy<PolicyScope.ProcessWideSafe, Uncompiled> = PolicyLists.denyList(runtime, configure)
+        ): Policy<out PolicyScope, Uncompiled> = PolicyLists.denyList(runtime, configure)
+
+        @JvmStatic
+        @JvmOverloads
+        public fun threadLocalDenyList(
+            runtime: RuntimeProfile = RuntimeProfile.HOTSPOT_JIT,
+            configure: DenyListSpec.() -> Unit = {},
+        ): Policy<PolicyScope.ThreadLocalOnly, Uncompiled> = PolicyLists.threadLocalDenyList(runtime, configure)
 
         @JvmStatic
         @JvmOverloads
@@ -225,7 +235,7 @@ public class Policy<out S : PolicyScope, out State : PolicyState> internal const
             return this
         }
 
-        public fun block(vararg syscalls: Syscall): Builder<S> = addAction(SeccompAction.ACT_ERRNO, *syscalls)
+        public fun block(vararg syscalls: Syscall): Builder<S> = addAction(SeccompAction.ACT_ERRNO(), *syscalls)
         public fun allow(vararg syscalls: Syscall): Builder<S> = addAction(SeccompAction.ACT_ALLOW, *syscalls)
 
         /**
@@ -242,35 +252,23 @@ public class Policy<out S : PolicyScope, out State : PolicyState> internal const
             return this
         }
 
-        public fun allowFsRead(path: String): Builder<PolicyScope.ThreadLocalOnly> {
-            internalBuilder.allowFsRead(path)
-            @Suppress("UNCHECKED_CAST")
-            return this as Builder<PolicyScope.ThreadLocalOnly>
-        }
+        // Soundness note (issue-20260823-135554): FS-adding methods return a NEW wrapper around
+        // the copy-on-promoted internal builder. The receiver is never re-typed via unchecked
+        // casts, so aliasing cannot contradict a builder's declared scope.
+        public fun allowFsRead(path: String): Builder<PolicyScope.ThreadLocalOnly> =
+            Builder(internalBuilder.allowFsRead(path))
 
-        public fun allowFsRead(path: SandboxedPath): Builder<PolicyScope.ThreadLocalOnly> {
-            internalBuilder.allowFsRead(path)
-            @Suppress("UNCHECKED_CAST")
-            return this as Builder<PolicyScope.ThreadLocalOnly>
-        }
+        public fun allowFsRead(path: SandboxedPath): Builder<PolicyScope.ThreadLocalOnly> =
+            Builder(internalBuilder.allowFsRead(path))
 
-        public fun allowJvmClasspath(): Builder<PolicyScope.ThreadLocalOnly> {
-            internalBuilder.allowJvmClasspath()
-            @Suppress("UNCHECKED_CAST")
-            return this as Builder<PolicyScope.ThreadLocalOnly>
-        }
+        public fun allowJvmClasspath(): Builder<PolicyScope.ThreadLocalOnly> =
+            Builder(internalBuilder.allowJvmClasspath())
 
-        public fun allowFsWrite(path: String): Builder<PolicyScope.ThreadLocalOnly> {
-            internalBuilder.allowFsWrite(path)
-            @Suppress("UNCHECKED_CAST")
-            return this as Builder<PolicyScope.ThreadLocalOnly>
-        }
+        public fun allowFsWrite(path: String): Builder<PolicyScope.ThreadLocalOnly> =
+            Builder(internalBuilder.allowFsWrite(path))
 
-        public fun allowFsWrite(path: SandboxedPath): Builder<PolicyScope.ThreadLocalOnly> {
-            internalBuilder.allowFsWrite(path)
-            @Suppress("UNCHECKED_CAST")
-            return this as Builder<PolicyScope.ThreadLocalOnly>
-        }
+        public fun allowFsWrite(path: SandboxedPath): Builder<PolicyScope.ThreadLocalOnly> =
+            Builder(internalBuilder.allowFsWrite(path))
 
         /**
          * Advanced: allow `mmap`/`mprotect` `PROT_EXEC`. Prefer
@@ -344,9 +342,9 @@ public operator fun Policy<PolicyScope.ProcessWideSafe, Uncompiled>.plus(
 ): Policy<PolicyScope.ProcessWideSafe, Uncompiled> = Policy.restrictFurtherWith(this, other)
 
 /** Restrictive composition; same as [Policy.restrictFurtherWith]. */
-public fun Policy<PolicyScope.ProcessWideSafe, Uncompiled>.restrictFurtherWith(
-    other: Policy<PolicyScope.ProcessWideSafe, Uncompiled>,
-): Policy<PolicyScope.ProcessWideSafe, Uncompiled> = Policy.restrictFurtherWith(this, other)
+public fun <S : PolicyScope> Policy<S, Uncompiled>.restrictFurtherWith(
+    other: Policy<out S, Uncompiled>,
+): Policy<S, Uncompiled> = Policy.restrictFurtherWith(this, other)
 
 /**
  * Composes a policy with a thread-local policy.

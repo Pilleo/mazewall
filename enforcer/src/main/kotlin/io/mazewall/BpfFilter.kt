@@ -38,6 +38,22 @@ object BpfFilter {
         policy: PolicyDefinition<*>,
         profilingMode: Boolean = false,
     ): BpfProgram<BpfStatus.Verified> {
+        if (policy.allowUnsafePrctl) {
+            // Loud acknowledgment at compile time (issue-20260726_011928_05): allowUnsafePrctl
+            // permits prctl options with pointer arguments, which are inherently TOCTOU-vulnerable
+            // to concurrent mutation by sibling threads after the BPF check.
+            logger.severe(
+                "[SECURITY] Policy enables allowUnsafePrctl: pointer-argument prctl options are " +
+                    "TOCTOU-vulnerable (sibling threads can mutate referenced memory between the " +
+                    "BPF check and kernel execution). Use only when the risk is accepted.",
+            )
+            io.mazewall.enforcer.diagnostics.MazewallEvents.emit(
+                io.mazewall.enforcer.diagnostics.MazewallEvents.FallbackEngaged(
+                    behaviorName = "ALLOW_UNSAFE_PRCTL",
+                    reason = "TOCTOU-vulnerable prctl options permitted by policy",
+                ),
+            )
+        }
         val unverified = buildFromActions(
             arch,
             policy.syscallActionNumbers(arch),
@@ -75,11 +91,6 @@ object BpfFilter {
                 NativeConstants.SECCOMP_RET_USER_NOTIF
             } else {
                 (NativeConstants.SECCOMP_RET_ERRNO or (action.errno and 0xFFFF))
-            }
-            SeccompAction.ACT_ERRNO -> if (profilingMode) {
-                NativeConstants.SECCOMP_RET_USER_NOTIF
-            } else {
-                (NativeConstants.SECCOMP_RET_ERRNO or NativeConstants.EPERM)
             }
             is SeccompAction.ACT_TRACE -> {
                 (NativeConstants.SECCOMP_RET_TRACE or (action.traceId and 0xFFFF))
@@ -196,9 +207,8 @@ object BpfFilter {
             Syscall.MPROTECT.numberFor(arch),
             Syscall.PKEY_MPROTECT.numberFor(arch),
         )
-        if (arch == Arch.AMD64) {
-            nrs.add(158) // arch_prctl on x86_64
-        }
+        // arch_prctl exists on x86_64 only (resolves to -1 elsewhere, filtered below).
+        nrs.add(Syscall.ARCH_PRCTL.numberFor(arch))
         return nrs.filter { it >= 0 }.toSet()
     }
 
@@ -235,6 +245,20 @@ object BpfFilter {
                             mark(checkLoLabel)
                             loadAbsolute(argOffsetLo)
                             jumpIfEqual(lo, jt = allowLabel, jf = nextValLabel)
+                            mark(nextValLabel)
+                        }
+                        ret(ifNotMatchedNative)
+                        mark(allowLabel)
+                        ret(ifMatchedNative)
+                    }
+
+                    is ArgCheck.EqualsAny32 -> {
+                        // Low-word-only comparison: see ArgCheck.EqualsAny32 KDoc.
+                        val allowLabel = nextLabel("${labelPrefix}_allow")
+                        check.allowedValues.forEachIndexed { valIdx, value ->
+                            val nextValLabel = nextLabel("${labelPrefix}_next_$valIdx")
+                            loadAbsolute(argOffsetLo)
+                            jumpIfEqual(value, jt = allowLabel, jf = nextValLabel)
                             mark(nextValLabel)
                         }
                         ret(ifNotMatchedNative)
@@ -315,7 +339,7 @@ object BpfFilter {
 
             // Unconditional jump to skip RET blocks on fallthrough (not matched in BST)
             val doneLabel = builder.nextLabel("bst_done")
-            builder.jumpIfEqual(0, jt = doneLabel, jf = doneLabel)
+            builder.jumpUnconditional(doneLabel)
 
             for ((action, label) in actionLabels) {
                 builder.mark(label)
@@ -343,7 +367,7 @@ object BpfFilter {
                 }
 
                 // Unconditional jump to skip the RET instruction when no syscall in the chunk matched
-                builder.jumpIfEqual(0, jt = skipLabel, jf = skipLabel)
+                builder.jumpUnconditional(skipLabel)
 
                 builder.mark(actionLabel)
                 builder.ret(nativeAction)
@@ -383,7 +407,7 @@ object BpfFilter {
 
             // Left subtree
             emitBst(builder, actionsToEmit, low, mid - 1, actionLabels)
-            builder.jumpIfEqual(0, jt = nextLabel, jf = nextLabel)
+            builder.jumpUnconditional(nextLabel)
 
             // Right subtree
             builder.mark(rightLabel)
@@ -398,7 +422,7 @@ object BpfFilter {
             val rightLabel = builder.nextLabel("bst_right")
             val nextLabel = builder.nextLabel("bst_next")
             builder.jumpIfGreaterThan(midNr, jt = rightLabel)
-            builder.jumpIfEqual(0, jt = nextLabel, jf = nextLabel)
+            builder.jumpUnconditional(nextLabel)
 
             builder.mark(rightLabel)
             emitBst(builder, actionsToEmit, mid + 1, high, actionLabels)

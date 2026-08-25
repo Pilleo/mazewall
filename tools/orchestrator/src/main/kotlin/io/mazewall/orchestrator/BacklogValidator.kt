@@ -13,6 +13,9 @@ object BacklogValidator {
         ":platform",
         ":enforcer",
         ":profiler",
+        ":portal",
+        ":portal-codegen",
+        ":portal-worker",
         ":demos:cli-demo",
         ":demos:vulnerable-web-app",
         ":demos:agent-sandbox-demo",
@@ -67,6 +70,8 @@ object BacklogValidator {
 
             if (issue.status !in VALID_STATUSES) {
                 errors.add("${file.name}: Invalid status '${issue.status}'. Allowed: $VALID_STATUSES")
+            } else if (issue.status == "resolved") {
+                errors.add("${file.name}: Issue has status 'resolved' but is located in '${file.parentFile.name}' instead of the 'resolved' directory")
             }
 
             // Priority is parsed as high/medium/low; invalid tokens fail parseIssueFile.
@@ -93,11 +98,41 @@ object BacklogValidator {
                 errors.add("${file.name}: 'target_files' must contain at least one file path for ${issue.status} issues (got empty list)")
             }
 
+            // Validate open_questions consistency
+            val openQuestionsFrontmatterMatch = Regex("(?m)^open_questions:\\s*(.+)$").find(content)
+            if (openQuestionsFrontmatterMatch != null) {
+                val rawVal = openQuestionsFrontmatterMatch.groupValues[1].trim().removeSurrounding("\"").removeSurrounding("'")
+                if (rawVal != "true" && rawVal != "false" && !rawVal.startsWith("[") && rawVal.isNotBlank()) {
+                    errors.add("${file.name}: Invalid 'open_questions' value '$rawVal'. Allowed: true, false, or list")
+                }
+                if (rawVal == "true" && issue.openQuestions.isNullOrBlank()) {
+                    errors.add("${file.name}: Declares 'open_questions: true' in frontmatter but is missing a non-empty '## ❓ Open Questions' section in the body")
+                }
+                if (rawVal == "false" && !issue.openQuestions.isNullOrBlank()) {
+                    errors.add("${file.name}: Declares 'open_questions: false' in frontmatter but contains an 'Open Questions' section in the body")
+                }
+            } else if (!issue.openQuestions.isNullOrBlank()) {
+                errors.add("${file.name}: Contains an 'Open Questions' section in body but frontmatter is missing 'open_questions: true'")
+            }
+
             // Check dependencies existence
             for (dep in issue.dependencies) {
                 if (dep.isNotBlank() && dep !in knownIssueIds) {
                     errors.add("${file.name}: References non-existent dependency '$dep'")
                 }
+            }
+        }
+
+        // 3. Validate resolved files (ensure they have status 'resolved')
+        val resolvedFiles = backlogDir.walkTopDown()
+            .filter { it.isFile && it.name.startsWith("issue-") && it.name.endsWith(".md") }
+            .filter { it.absolutePath.contains("${File.separator}resolved${File.separator}") }
+            .toList()
+
+        for (file in resolvedFiles) {
+            val issue = BacklogParser.parseIssueFile(file)
+            if (issue != null && issue.status != "resolved") {
+                errors.add("${file.name}: Issue is in 'resolved' directory but has status '${issue.status}' (expected 'resolved')")
             }
         }
 

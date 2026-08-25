@@ -2,8 +2,10 @@ package io.mazewall.profiler.compiler
 
 import io.mazewall.core.Syscall
 import io.mazewall.profiler.BillOfBehavior
+import io.mazewall.profiler.FsEffect
 import io.mazewall.profiler.NetworkEndpoint
 import io.mazewall.profiler.ProfileObservation
+import io.mazewall.profiler.UringOp
 import io.mazewall.profiler.engine.TraceEvent
 import java.util.*
 
@@ -16,6 +18,7 @@ object BobCompiler {
     private const val O_RDWR = 2L
     private const val O_CREAT = 64L
     private const val O_TRUNC = 512L
+    private const val O_PATH = 0x01000000L
 
     /**
      * Parses the given semantic trace events and returns a [BillOfBehavior].
@@ -35,10 +38,10 @@ object BobCompiler {
             when (obs) {
                 is ProfileObservation.IoUring -> {
                     ioUringOps.add(obs.opcode)
-                    if (isUringMutation(obs.opcode)) {
-                        fsWritePaths.addAll(obs.paths)
-                    } else {
-                        opens.addAll(obs.paths)
+                    when (val effect = FsEffect.ofUring(UringOp.parse(obs.opcode), obs.paths)) {
+                        is FsEffect.Write -> fsWritePaths.addAll(effect.paths)
+                        is FsEffect.Read, is FsEffect.UnknownOpenMode -> opens.addAll(effect.paths)
+                        is FsEffect.Unenforceable -> { }
                     }
                 }
                 is ProfileObservation.Connect -> {
@@ -67,12 +70,15 @@ object BobCompiler {
         execs: MutableSet<String>,
     ) {
         val name = obs.name.uppercase(Locale.US)
-        runCatching { Syscall.valueOf(name) }.getOrNull()?.let { syscalls.add(it) }
+        Syscall.tryParse(name)?.let { syscalls.add(it) }
 
         when {
             name == "EXECVE" || name == "EXECVEAT" -> execs.addAll(obs.paths)
             name == "OPEN" || name == "OPENAT" || name == "OPENAT2" -> {
-                if (isOpenWrite(obs.openFlags ?: 0L)) {
+                val flags = obs.openFlags ?: 0L
+                if ((flags and O_PATH) != 0L) {
+                    // O_PATH descriptor only, does not grant file read or write access
+                } else if (isOpenWrite(flags)) {
                     fsWritePaths.addAll(obs.paths)
                 } else {
                     opens.addAll(obs.paths)
@@ -82,19 +88,6 @@ object BobCompiler {
             name == "SOCKET" || name == "CONNECT" || name == "MMAP" -> { }
             else -> opens.addAll(obs.paths)
         }
-    }
-
-    private fun isUringMutation(opcode: String): Boolean {
-        val op = opcode.uppercase(Locale.US)
-        return op.contains("WRITE") ||
-            op.contains("UNLINK") ||
-            op.contains("RENAME") ||
-            op.contains("MKDIR") ||
-            op.contains("RMDIR") ||
-            op.contains("FSYNC") ||
-            op.contains("SYNC") ||
-            op.contains("TRUNCATE") ||
-            op.contains("CLOSE") && op.contains("DIRECT")
     }
 
     private fun isFileSystemMutation(syscallName: String): Boolean =

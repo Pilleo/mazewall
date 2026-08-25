@@ -10,6 +10,7 @@ target_modules:
 - :enforcer
 component: enforcer
 effort: medium
+paperclip_issue_id: 171c7720-b504-4b48-b530-43431571e9d6
 ---
 
 # 🔵 [Severity: ENHANCEMENT]: Network Isolation via Namespaces (`CLONE_NEWNET`)

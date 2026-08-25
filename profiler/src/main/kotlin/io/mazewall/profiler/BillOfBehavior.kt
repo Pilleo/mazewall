@@ -43,6 +43,7 @@ data class BillOfBehavior(
      * Compiles this bill of behavior into a [io.mazewall.Policy] starting from [base].
      * Relative paths in the BoB are resolved against [baseCwd].
      */
+    @JvmOverloads
     fun toPolicy(
         base: Policy<*, Uncompiled> = Policy.PURE_COMPUTE_UNSAFE,
         baseCwd: Path? = null,
@@ -74,11 +75,23 @@ data class BillOfBehavior(
                 throw IncompleteProfileException(withExecs)
             }
         }
-        if (!evidence.complete && !allowIncomplete) {
-            throw IncompleteProfileException(evidence)
+        val unenforceableIoUring = ioUringOps.filter { op ->
+            FsEffect.ofUring(UringOp.parse(op), emptyList()) is FsEffect.Unenforceable
         }
+        if (unenforceableIoUring.isNotEmpty()) {
+            val withUring =
+                evidence.copy(
+                    complete = false,
+                    warnings = evidence.warnings +
+                        "io_uring opcodes were observed that cannot be enforced by Landlock: ${unenforceableIoUring.joinToString(",")}",
+                )
+            if (!allowIncomplete) {
+                throw IncompleteProfileException(withUring)
+            }
+        }
+        requireComplete(evidence, allowIncomplete)
         @Suppress("UNCHECKED_CAST")
-        val builder = Policy.threadLocalBuilder().base(base as Policy<PolicyScope.ThreadLocalOnly, *>)
+        var builder = Policy.threadLocalBuilder().base(base as Policy<PolicyScope.ThreadLocalOnly, *>)
         if (base.defaultAction == io.mazewall.core.SeccompAction.ACT_ALLOW) {
             val toUnblock = syscalls.filter { !base.isSyscallAllowed(it) }
             builder.unblock(*toUnblock.toTypedArray())
@@ -87,8 +100,9 @@ data class BillOfBehavior(
         }
         val pOpens = PathNormalizer.normalizeAndPrune(opens, baseCwd)
         val pWrites = PathNormalizer.normalizeAndPrune(fsWritePaths, baseCwd)
-        for (path in pOpens) builder.allowFsRead(io.mazewall.core.SandboxedPath.of(path, allowNonExistent = true))
-        for (path in pWrites) builder.allowFsWrite(io.mazewall.core.SandboxedPath.of(path, allowNonExistent = true))
+        // allowFs* are copy-on-promotion: the returned builder must be kept.
+        for (path in pOpens) builder = builder.allowFsRead(io.mazewall.core.SandboxedPath.of(path, allowNonExistent = true))
+        for (path in pWrites) builder = builder.allowFsWrite(io.mazewall.core.SandboxedPath.of(path, allowNonExistent = true))
         return builder.build()
     }
 
@@ -96,13 +110,15 @@ data class BillOfBehavior(
      * Emits a copy-pasteable Kotlin DSL snippet that reproduces the compiled policy.
      * Relative paths in the BoB are resolved against [baseCwd].
      */
+    @JvmOverloads
     fun toDsl(
         basePolicyName: String = "Policy.PURE_COMPUTE_UNSAFE",
         base: Policy<*, Uncompiled> = Policy.PURE_COMPUTE_UNSAFE,
         baseCwd: Path? = null,
+        coverage: ProfilingCoverage = ProfilingCoverage.absent(),
         allowIncomplete: Boolean = false,
     ): String {
-        // Gate: same as toPolicy() - fail closed on observed execs/connects unless explicitly allowed
+        requireComplete(coverage, allowIncomplete)
         if (connects.isNotEmpty() && !allowIncomplete) {
             throw IncompleteProfileException(
                 ProfilingCoverage.absent().copy(
@@ -118,6 +134,18 @@ data class BillOfBehavior(
                     complete = false,
                     warnings = listOf("exec destinations were observed but cannot be enforced; " +
                             "toDsl() only unblocks EXECVE")
+                )
+            )
+        }
+        val unenforceableIoUring = ioUringOps.filter { op ->
+            FsEffect.ofUring(UringOp.parse(op), emptyList()) is FsEffect.Unenforceable
+        }
+        if (unenforceableIoUring.isNotEmpty() && !allowIncomplete) {
+            throw IncompleteProfileException(
+                coverage.copy(
+                    complete = false,
+                    warnings = coverage.warnings +
+                        "io_uring opcodes were observed that cannot be enforced by Landlock: ${unenforceableIoUring.joinToString(",")}",
                 )
             )
         }
@@ -274,10 +302,22 @@ data class BillOfBehavior(
     }
 
     companion object {
+        /**
+         * Monoid identity for formal composition (issue-018): an empty SBoB that leaves any
+         * other profile unchanged under [plus].
+         */
+        @JvmField
+        public val EMPTY: BillOfBehavior = BillOfBehavior()
+
+        @JvmStatic
+        public fun empty(): BillOfBehavior = EMPTY
+
+        @JvmStatic
         fun fromFile(path: Path): BillOfBehavior {
             return fromJson(Files.readString(path))
         }
 
+        @JvmStatic
         fun fromStream(stream: InputStream): BillOfBehavior {
             val content = stream.bufferedReader(StandardCharsets.UTF_8).use { it.readText() }
             return fromJson(content)
@@ -301,6 +341,7 @@ data class BillOfBehavior(
             return NetworkEndpoint(raw, null)
         }
 
+        @JvmStatic
         fun fromJson(json: String): BillOfBehavior {
             val dto = jsonSerializer.decodeFromString(BillOfBehaviorDto.serializer(), json)
 
@@ -344,6 +385,17 @@ data class BillOfBehavior(
                 ioUringOps = dto.ioUringOps,
                 stackProfile = stackProfile,
             )
+        }
+    }
+}
+
+private fun requireComplete(coverage: ProfilingCoverage, allowIncomplete: Boolean) {
+    when (coverage.evidence()) {
+        is ProfileEvidence.Complete -> {}
+        is ProfileEvidence.Incomplete -> {
+            if (!allowIncomplete) {
+                throw IncompleteProfileException(coverage)
+            }
         }
     }
 }

@@ -5,8 +5,10 @@ import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
 import io.mazewall.core.SocketManager
 import org.junit.jupiter.api.Assertions.assertEquals
+import io.mazewall.core.ForeignFdGuard as FdGuardImport
 import org.junit.jupiter.api.Test
 
+@org.junit.jupiter.api.extension.ExtendWith(io.mazewall.core.ForeignFdGuard::class)
 class SeccompConnectionTest {
     @Test
     fun `closing active connection after socket ownership transfer closes only listener`() {

@@ -1,7 +1,5 @@
 package io.mazewall.profiler
 
-import io.mazewall.core.threadLocal
-import io.mazewall.enforcer.diagnostics.validateNotVirtual
 import io.mazewall.LinuxNative
 import io.mazewall.Policy
 import io.mazewall.PolicyDefinition
@@ -10,9 +8,11 @@ import io.mazewall.Uncompiled
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
 import io.mazewall.core.Tid
+import io.mazewall.core.threadLocal
+import io.mazewall.enforcer.diagnostics.validateNotVirtual
 import io.mazewall.profiler.compiler.BobCompiler
-import io.mazewall.profiler.engine.TraceEvent
 import io.mazewall.profiler.engine.ProfilerInstaller
+import io.mazewall.profiler.engine.TraceEvent
 import io.mazewall.profiler.internal.ProfilerDaemonManager
 import io.mazewall.profiler.internal.ProfilerTraceListener
 import java.util.concurrent.Callable
@@ -41,6 +41,9 @@ import java.util.logging.Logger
  * making it completely immune to pointer-dereferencing TOCTOU attacks.
  */
 object Profiler {
+    private const val WORKER_JOIN_TIMEOUT_MS = 60_000L
+    private const val GRACE_PERIOD_MS = 5_000L
+
     private val logger = Logger.getLogger(Profiler::class.java.name)
     private val listeners = CopyOnWriteArrayList<ProfilerTraceListener>()
     internal val threadRegistry = ConcurrentHashMap<Tid, Thread>()
@@ -51,6 +54,7 @@ object Profiler {
     /**
      * Profiles the given [block] and returns a [BillOfBehavior].
      */
+    @JvmStatic
     @JvmOverloads
     fun <T> profile(
         processWide: Boolean = false,
@@ -104,7 +108,16 @@ object Profiler {
             start()
         }
 
-        workerThread.join()
+        // Bounded join (issue-20260823-172000): a wedged reactor must not hang the profiler forever.
+        workerThread.join(WORKER_JOIN_TIMEOUT_MS)
+        if (workerThread.isAlive) {
+            workerThread.interrupt()
+            workerThread.join(GRACE_PERIOD_MS)
+            errorRef.get()?.let { throw it }
+            throw IllegalStateException(
+                "Profiler worker '${workerThread.name}' did not terminate within ${WORKER_JOIN_TIMEOUT_MS}ms"
+            )
+        }
 
         errorRef.get()?.let { throw it }
 
@@ -129,7 +142,7 @@ object Profiler {
         val bob = BobCompiler.compile(localLogs).copy(stackProfile = localStackProfile)
         val observations = localLogs.map { io.mazewall.profiler.ProfileObservation.fromTraceEvent(it) }
         val listener = sessionListener.get()
-        val dropped = listener?.eventQueue?.droppedCount?.toInt() ?: 0
+        val dropped = (listener?.eventQueue?.droppedCount?.toInt() ?: 0) + (listener?.droppedEvents ?: 0)
         val coverage = ProfilingCoverage.infer(
             strategy = ProfileStrategy.USER_NOTIF,
             strategyReason = "Profiler.profile USER_NOTIF session",
@@ -147,9 +160,32 @@ object Profiler {
     }
 
     /**
+     * Java-friendly overload for profiling a [Callable].
+     */
+    @JvmStatic
+    @JvmOverloads
+    fun <T> profile(
+        callable: Callable<T>,
+        processWide: Boolean = false,
+        captureStackTraces: Boolean = true,
+    ): ProfilingResult<T> = profile(processWide, captureStackTraces) { callable.call() }
+
+    /**
+     * Java-friendly overload for profiling a [Runnable].
+     */
+    @JvmStatic
+    @JvmOverloads
+    fun profile(
+        runnable: Runnable,
+        processWide: Boolean = false,
+        captureStackTraces: Boolean = true,
+    ): ProfilingResult<Unit> = profile(processWide, captureStackTraces) { runnable.run() }
+
+    /**
      * Wraps an [ExecutorService] to automatically profile all submitted tasks.
      * Use [ProfilerExecutorWrapper.recentLogs] to retrieve the captured behaviors.
      */
+    @JvmStatic
     fun wrap(
         delegate: ExecutorService,
         vararg policies: Policy<*, Uncompiled>,
@@ -158,12 +194,18 @@ object Profiler {
     /**
      * Wraps an [ExecutorService] to automatically profile all submitted tasks, with optional stacktrace capture.
      */
+    @JvmStatic
     fun wrap(
         delegate: ExecutorService,
         captureStackTraces: Boolean,
         vararg policies: Policy<*, Uncompiled>,
     ): ProfilerExecutorWrapper {
-        val policy = PolicyDefinition.combine(*policies.map { it.definition }.toTypedArray())
+        val policy =
+            if (policies.isEmpty()) {
+                PolicyPresets.PURE_COMPUTE_UNSAFE
+            } else {
+                PolicyDefinition.combine(*policies.map { it.definition }.toTypedArray())
+            }
         val context = daemonManagerProvider().getOrSpawnSharedDaemon()
         return ProfilerExecutorWrapper(delegate, policy, context, captureStackTraces)
     }
@@ -201,6 +243,7 @@ object Profiler {
     /**
      * Shuts down the shared profiler daemon and all active trace listeners.
      */
+    @JvmStatic
     fun shutdown() {
         synchronized(this) {
             listeners.forEach { it.passThrough() }

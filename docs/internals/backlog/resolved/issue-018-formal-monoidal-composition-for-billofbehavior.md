@@ -1,0 +1,28 @@
+---
+title: Formal Monoidal Composition for `BillOfBehavior`
+severity: ENHANCEMENT
+status: "resolved"
+priority: low
+dependencies: []
+target_files:
+- profiler/src/main/kotlin/io/mazewall/profiler/BillOfBehavior.kt
+target_modules:
+- :profiler
+component: profiler
+effort: medium
+---
+
+# 🔵 [Severity: ENHANCEMENT]: Formal Monoidal Composition for `BillOfBehavior`
+
+**Target:** `io.mazewall.profiler.BillOfBehavior`
+**Context:** `BillOfBehavior` has a manual `plus` operator, but it isn't formally modeled as a Monoid. Merging complex behavior profiles (e.g., merging a JVM floor with an application-specific trace) is a core operation for generating policies.
+**Needed:** Formally implement the Monoid pattern for `BillOfBehavior`.
+1. Define an `identity` (Empty SBoB).
+2. Ensure the `plus` operation is associative and correctly merges sets and maps (including deep merging of stack profiles).
+3. This allows using standard functional aggregators like `list.reduce(BillOfBehavior::plus)` or `list.fold(BillOfBehavior.empty, ...)` with algebraic certainty.
+
+**Resolution (2026-08-23):** Implemented: `BillOfBehavior.EMPTY` / `empty()` in the existing
+companion (Monoid identity), with the established `plus` as the composition op. Algebra pinned by
+`BillOfBehaviorMonoidTest`: left/right identity, fixed-sample associativity, and
+fold(empty, ::plus) == reduce(::plus) equivalence. `stackProfile` deep-merge (distinctBy trace
+frames) participates unchanged. Enables list.reduce/fold aggregation.

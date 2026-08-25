@@ -16,6 +16,8 @@ import io.mazewall.PolicyPresets
 import io.mazewall.Uncompiled
 import io.mazewall.compile
 import io.mazewall.core.SandboxedPath
+import io.mazewall.core.isUnderAny
+import io.mazewall.core.resolveReal
 import io.mazewall.core.SeccompAction
 import io.mazewall.core.Syscall
 import io.mazewall.enforcer.internal.ContainedExecutorWrapper
@@ -84,7 +86,17 @@ object ContainedExecutors {
             ContainmentViolationDetector::class.java,
             ContainmentViolationException::class.java,
             io.mazewall.Platform.FallbackBehavior::class.java,
-            io.mazewall.InstallationReceipt::class.java
+            io.mazewall.InstallationReceipt::class.java,
+            // Post-install self-verification must be resolvable BEFORE any restrictive filter
+            // exists: under a jvmFloor-style policy, reading build/classes/** afterwards is
+            // denied and manifests as NoClassDefFoundError (issue-20260823-172003).
+            io.mazewall.seccomp.InstallSelfVerifier::class.java,
+            io.mazewall.seccomp.InstallSelfVerifier.SelfVerificationException::class.java,
+            io.mazewall.seccomp.BpfSimulator::class.java,
+            io.mazewall.seccomp.SyscallProbeMatrix::class.java,
+            // Self-verification result emission touches the diagnostics SPI post-install.
+            io.mazewall.enforcer.diagnostics.MazewallEvents::class.java,
+            io.mazewall.enforcer.diagnostics.MazewallEvents.SelfVerificationResult::class.java
         )
         for (c in classes) {
             try {
@@ -92,6 +104,14 @@ object ContainedExecutors {
             } catch (e: Exception) {
                 System.err.println("WARNING: Failed to preload class ${c.name} for Seccomp: ${e.message}")
             }
+        }
+        // Warm the self-verification transitive closure (method-level, not just Class objects):
+        // lazy JVM/Kotlin machinery must be resolved BEFORE containment makes class reads
+        // unreliable (issue-20260823-172003).
+        try {
+            io.mazewall.seccomp.InstallSelfVerifier.warmup()
+        } catch (t: Throwable) {
+            System.err.println("WARNING: Self-verification warmup failed: $t")
         }
     }
 
@@ -193,6 +213,29 @@ object ContainedExecutors {
         return ContainedExecutorWrapper(delegate, combinedPolicy)
     }
 
+    private fun containedThreadFactory(tag: String, policy: Policy<*, Uncompiled>): java.util.concurrent.ThreadFactory {
+        val name = "mazewall-contained-$tag-${policy.definition.hashCode().toUInt().toString(16)}"
+        return java.util.concurrent.ThreadFactory { runnable ->
+            Thread(runnable).apply {
+                isDaemon = true
+                setName(name)
+            }
+        }
+    }
+
+    /** Daemon single-thread executor whose threads run under [policy] on wrap. */
+    fun newSingleThreadExecutor(policy: Policy<*, Uncompiled>): ExecutorService =
+        wrap(java.util.concurrent.Executors.newSingleThreadExecutor(containedThreadFactory("single", policy)), policy)
+
+    /** Daemon fixed pool whose threads run under [policy] on wrap. */
+    fun newFixedThreadPool(nThreads: Int, policy: Policy<*, Uncompiled>): ExecutorService =
+        wrap(java.util.concurrent.Executors.newFixedThreadPool(nThreads, containedThreadFactory("pool", policy)), policy)
+
+    /** Daemon cached pool whose threads run under [policy] on wrap. */
+    fun newCachedThreadPool(policy: Policy<*, Uncompiled>): ExecutorService =
+        wrap(java.util.concurrent.Executors.newCachedThreadPool(containedThreadFactory("cached", policy)), policy)
+
+
     fun wrap(
         delegate: ExecutorService,
         policy: Policy<*, Uncompiled>,
@@ -202,6 +245,29 @@ object ContainedExecutors {
     }
 
     @Suppress("TooGenericExceptionCaught", "noGenericExceptionCatchingInEnforcer")
+    /**
+     * Concurrency model (issue-20260823-135557 resolution):
+     *
+     * - [ContainmentStateRegistry.threadState] is a true ThreadLocal; only the current thread ever
+     *   reads or writes its own state. Therefore the gap between the Landlock critical section
+     *   ([applyLandlockIfNecessary]) and the Seccomp critical section ([installSeccompFilter]) —
+     *   both individually guarded by [processLock] — cannot be corrupted by concurrent
+     *   thread-scoped installs on other threads: their interleaved steps touch exclusively their
+     *   own ThreadLocal state.
+     * - Process-wide installs serialize fully per phase on the same lock. Two process-wide installs
+     *   may interleave phases (P1.landlock, P2.landlock, P2.seccomp, P1.seccomp), but both Landlock
+     *   self-restriction and TSYNC seccomp are monotonic-restrictive with union semantics, so the
+     *   final kernel state is order-independent; [io.mazewall.enforcer.state.ContainmentStateRegistry]
+     *   process state is updated atomically per phase.
+     * - Catch-block rollback restores only this thread's state from the pre-install snapshot,
+     *   which stays valid because no other thread can write it. The
+     *   `landlockSuccessfullyApplied` guard prevents reverting past irreversible Landlock changes.
+     * - Merging the two phases into one critical section was evaluated and rejected: Java monitors
+     *   are reentrant (no self-deadlock either way), and the worst-case lock-hold time is already
+     *   bounded by the supervised-filter handshake that runs inside the lock today. The daemon
+     *   spawn ([io.mazewall.enforcer.supervisor.SupervisorDaemonManager.getOrSpawnSharedDaemon])
+     *   deliberately happens before any locking.
+     */
     private fun installInternal(
         processWide: Boolean,
         policy: PolicyDefinition<*>,
@@ -248,7 +314,14 @@ object ContainedExecutors {
                         installed = false,
                     )
                 }
-                LandlockStep.UNCHANGED -> {}
+                LandlockStep.UNCHANGED -> {
+                    val activeState = if (processWide) {
+                        ContainmentStateRegistry.processState
+                    } else {
+                        ContainmentStateRegistry.threadState
+                    }
+                    landlockSuccessfullyApplied = activeState.landlockPolicy != null
+                }
             }
 
             return installSeccompFilter(processWide, augmentedPolicy, scopingPolicy, landlockSuccessfullyApplied)
@@ -267,7 +340,7 @@ object ContainedExecutors {
                         ContainmentStateRegistry.threadState
                     }).landlockPolicy != null
             if (fallback != Platform.FallbackBehavior.FAIL) {
-                if (fallback == Platform.FallbackBehavior.valueOf("WARN_AND_BYPASS")) {
+                if (fallback == Platform.FallbackBehavior.WARN_AND_BYPASS) {
                     if (landlockInForce) {
                         logger.warning(
                             "Seccomp installation failed after Landlock applied: ${t.message}. " +
@@ -358,7 +431,10 @@ object ContainedExecutors {
             val landlockPolicy = state.landlockPolicy
 
             if (landlockPolicy != null) {
-                // Assert that we are not trying to expand Landlock filesystem permissions on nested containment
+                // Assert that we are not trying to expand Landlock filesystem permissions on nested containment.
+                // Comparison is realpath-resolved on both sides: Landlock rules bind to dentries, so
+                // syntactically-distinct-but-physically-equal paths must compare equal, and any
+                // unresolvable operand fails the subset check conservatively (fail closed).
                 val readsSubset = isPathSubset(landlockPolicy.allowedFsReadPaths, policy.allowedFsReadPaths)
                 val writesSubset = isPathSubset(landlockPolicy.allowedFsWritePaths, policy.allowedFsWritePaths)
                 if (!readsSubset || !writesSubset) {
@@ -373,6 +449,12 @@ object ContainedExecutors {
             if (isDifferent) {
                 when (val applied = Landlock.tryApplyRuleset(policy, processWide)) {
                     is io.mazewall.landlock.LandlockApplyResult.Applied -> {
+                        io.mazewall.enforcer.diagnostics.MazewallEvents.emit(
+                            io.mazewall.enforcer.diagnostics.MazewallEvents.LandlockApplied(
+                                processWide = processWide,
+                                abiVersion = io.mazewall.landlock.Landlock.getAbiVersion(),
+                            ),
+                        )
                         if (processWide) {
                             ContainmentStateRegistry.updateProcessState { it.withLandlockPolicy(policy) }
                         } else {
@@ -397,17 +479,22 @@ object ContainedExecutors {
      */
     private fun needsLandlock(policy: PolicyDefinition<*>) = policy.enforceLandlock
 
+    /**
+     * True when every [childPaths] entry lies beneath some [parentPaths] entry.
+     *
+     * Uses the canonical [io.mazewall.core.isUnder] containment predicate with realpath resolution
+     * on both sides (see [io.mazewall.core.resolveReal]): Landlock binds rules to dentries, so a
+     * symlinked spelling of an already-allowed directory must compare equal, while an operand that
+     * cannot be resolved compares only by its syntactic value — two different spellings that fail
+     * resolution identically still match, and anything else is rejected (fail closed).
+     */
     private fun isPathSubset(
         parentPaths: Set<SandboxedPath>,
         childPaths: Set<SandboxedPath>,
     ): Boolean {
         if (childPaths.isEmpty()) return true
-        val parents = parentPaths.map { java.nio.file.Paths.get(it.value) }
-        return parents.isNotEmpty() &&
-            childPaths.all { childPath ->
-                val child = java.nio.file.Paths.get(childPath.value)
-                parents.any { parent -> child.startsWith(parent) }
-            }
+        val resolvedParents = parentPaths.map { it.resolveReal() }.toSet()
+        return childPaths.all { child -> child.resolveReal().isUnderAny(resolvedParents) }
     }
 
     private fun handleUnsupportedPlatform() {
@@ -416,15 +503,22 @@ object ContainedExecutors {
             Platform.FallbackBehavior.FAIL ->
                 throw UnsupportedOperationException("Platform does not support seccomp")
 
-            Platform.FallbackBehavior.WARN_AND_BYPASS ->
+            Platform.FallbackBehavior.WARN_AND_BYPASS -> {
                 logger.warning("Platform does not support seccomp. Code will run uncontained.")
+                io.mazewall.enforcer.diagnostics.MazewallEvents.emit(
+                    io.mazewall.enforcer.diagnostics.MazewallEvents.FallbackEngaged(
+                        behaviorName = fallback.name,
+                        reason = "Platform does not support seccomp",
+                    ),
+                )
+            }
 
             Platform.FallbackBehavior.SILENT_BYPASS -> {}
         }
     }
 
     private fun armIntelCet() {
-        if (!Platform.isLinux || !Platform.isArchitectureSupported() || io.mazewall.core.Arch.current() != io.mazewall.core.Arch.AMD64 || !Platform.featureMatrix.cetSupported) {
+        if (!Platform.isCetPlatformEligible || !Platform.featureMatrix.cetSupported) {
             handleCetUnsupported("Intel CET is requested but the current platform/architecture/CPU does not support it.")
             return
         }
@@ -468,6 +562,12 @@ object ContainedExecutors {
         }
 
         logger.info("Intel CET Shadow Stack successfully enabled and locked.")
+        io.mazewall.enforcer.diagnostics.MazewallEvents.emit(
+            io.mazewall.enforcer.diagnostics.MazewallEvents.CetOutcome(
+                armed = true,
+                detail = "shadow stack enabled and locked",
+            ),
+        )
     }
 
     private fun handleCetUnsupported(reason: String) {
@@ -502,6 +602,7 @@ object ContainedExecutors {
             return session
         } else {
             val compiledSandbox = io.mazewall.PolicyCompilationCache.getOrCompile(toInstall, arch)
+            val priorFilterDepth = resolveCurrentState().filterDepth
             if (processWide) {
                 PureJavaBpfEngine.installOnProcess(compiledSandbox)
                 updateProcessState(newBlocks, newDefaultAction, toInstall)
@@ -509,6 +610,11 @@ object ContainedExecutors {
                 PureJavaBpfEngine.install(compiledSandbox)
                 updateThreadState(newBlocks, newDefaultAction, toInstall)
             }
+            // Runtime self-verification (issue-20260823-172003): OPT-IN via
+            // -Dio.mazewall.selfVerify=true. Asserts the kernel honors the oracle's predictions;
+            // memoized per program identity. See InstallSelfVerifier gate KDoc for why the
+            // default is off under narrow allow-list floors.
+            io.mazewall.seccomp.InstallSelfVerifier.verify(compiledSandbox.program, arch, priorFilterDepth)
             return AutoCloseable {}
         }
     }

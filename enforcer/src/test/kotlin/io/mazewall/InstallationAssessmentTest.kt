@@ -139,4 +139,38 @@ class InstallationAssessmentTest {
         assertEquals(InstallationScope.PROCESS, assessment.scope)
         assessment.requireInstallable()
     }
+
+    @Test
+    fun `non-Linux platform short-circuits probes and reports PLATFORM blocked stage cleanly`() {
+        Platform.setProvider(
+            MockPlatformProvider().apply {
+                mockOsName = "Mac OS X"
+                mockKernelSeccompSupport = false
+                mockLandlockAbiVersion = 0
+            },
+        )
+        val assessment = InstallationAssessor.assess(
+            Policy.NO_EXEC_HOTSPOT.definition,
+            processWide = false,
+        )
+        assertFalse(assessment.installable)
+        assertTrue(assessment.blockedStages.contains(InstallationStage.PLATFORM))
+        assertTrue(assessment.blockingReasons.contains("not Linux"))
+    }
+
+    @Test
+    fun `lockIntelCet policy is blocked when CET is not supported`() {
+        Platform.setProvider(
+            MockPlatformProvider().apply {
+                mockOsName = "Linux"
+                mockKernelSeccompSupport = true
+                mockCetSupported = false
+            },
+        )
+        val policy = Policy.builder().lockIntelCet().build()
+        val assessment = InstallationAssessor.assess(policy.definition, processWide = false)
+        assertFalse(assessment.installable)
+        assertTrue(assessment.blockedStages.contains(InstallationStage.INTEL_CET))
+        assertTrue(assessment.blockingReasons.contains("lockIntelCet is true but Intel CET is not supported on this platform"))
+    }
 }

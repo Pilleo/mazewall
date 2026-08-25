@@ -4,23 +4,53 @@ import io.mazewall.core.Arch
 import io.mazewall.ffi.NativeConstants
 import io.mazewall.platform.seccomp.SupervisedKind
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.CsvSource
+import org.junit.jupiter.params.provider.MethodSource
 import java.nio.file.Path
+import java.util.stream.Stream
 
-class SupervisorNotificationMachineTest {
+internal class SupervisorNotificationMachineTest {
 
     private val arch = Arch.AMD64
 
+    companion object {
+        @JvmStatic
+        fun jvmVerdictTestCases(): Stream<Pair<JvmVerdict, Int>> = Stream.of(
+            Pair(JvmVerdict.Deny(NativeConstants.EPERM), NativeConstants.EPERM),
+            Pair(JvmVerdict.Deny(NativeConstants.EACCES), NativeConstants.EACCES),
+            Pair(JvmVerdict.Allow, 0),
+            Pair(JvmVerdict.InjectFd, 0),
+        )
+
+        data class ExecRewriteCase(
+            val name: String,
+            val arch: Arch,
+            val path: String?,
+            val expectedPlan: ExecRewritePlan,
+        ) {
+            override fun toString(): String = name
+        }
+
+        @JvmStatic
+        fun execRewriteCases(): Stream<ExecRewriteCase> = Stream.of(
+            ExecRewriteCase("unsupported on AARCH64", Arch.AARCH64, "/bin/true", ExecRewritePlan.UnsupportedArch),
+            ExecRewriteCase("missing path on AMD64", Arch.AMD64, null, ExecRewritePlan.MissingPath),
+            ExecRewriteCase("ready on AMD64 with path", Arch.AMD64, "/bin/true", ExecRewritePlan.Ready("/bin/true")),
+        )
+    }
+
     @Test
-    fun `unknown nr is abort never continue`() {
+    fun `custom supervised nr routes to AskJvm on fast path`() {
         val route = SupervisorNotificationMachine.evaluateFastPath(
             SupervisorNotificationMachine.classify(999_999, arch),
             resolvedPath = null,
             rawPath = null,
         )
-        val abort = route as SupervisorRoute.Abort
-        assertEquals(NativeConstants.EPERM, abort.errno)
+        assertEquals(SupervisorRoute.AskJvm, route)
     }
 
     @Test
@@ -44,55 +74,122 @@ class SupervisorNotificationMachineTest {
         assertEquals(SupervisorRoute.Continue, route)
     }
 
-    @Test
-    fun `exec allow becomes secure exec not raw continue`() {
-        val route = SupervisorNotificationMachine.evaluateJvm(SupervisedKind.Exec, JvmVerdict.Allow)
-        assertEquals(SupervisorRoute.SecureExec, route)
-        assertTrue(route !is SupervisorRoute.Continue)
-    }
-
-    @Test
-    fun `spawn allow continues without fd inject`() {
-        val route = SupervisorNotificationMachine.evaluateJvm(SupervisedKind.Spawn, JvmVerdict.Allow)
-        assertEquals(SupervisorRoute.Continue, route)
-    }
-
-    @Test
-    fun `open allow upgrades to inject fd`() {
-        val route = SupervisorNotificationMachine.evaluateJvm(SupervisedKind.Open, JvmVerdict.Allow)
-        assertEquals(SupervisorRoute.InjectFd, route)
+    @ParameterizedTest(name = "kind={0} verdict={1} -> {2}")
+    @CsvSource(
+        "Exec,    Allow,    SecureExec",
+        "Spawn,   Allow,    Continue",
+        "Open,    Allow,    InjectFd",
+        "Accept,  Allow,    InjectFd",
+        "Unknown, Allow,    Continue",
+    )
+    fun `test evaluateJvm routing table`(kindName: String, verdictType: String, expectedRouteType: String) {
+        val kind = when (kindName) {
+            "Open" -> SupervisedKind.Open
+            "Accept" -> SupervisedKind.Accept
+            "Connect" -> SupervisedKind.Connect
+            "Exec" -> SupervisedKind.Exec
+            "Spawn" -> SupervisedKind.Spawn
+            else -> SupervisedKind.Unknown
+        }
+        val verdict = when (verdictType) {
+            "Allow" -> JvmVerdict.Allow
+            "InjectFd" -> JvmVerdict.InjectFd
+            else -> JvmVerdict.Deny(NativeConstants.EPERM)
+        }
+        val route = SupervisorNotificationMachine.evaluateJvm(kind, verdict)
+        val actualRouteType = when (route) {
+            is SupervisorRoute.Continue -> "Continue"
+            is SupervisorRoute.SecureExec -> "SecureExec"
+            is SupervisorRoute.InjectFd -> "InjectFd"
+            is SupervisorRoute.Abort -> "Abort"
+            is SupervisorRoute.AskJvm -> "AskJvm"
+        }
+        assertEquals(expectedRouteType, actualRouteType)
     }
 
     @Test
     fun `unknown jvm decision code is null so handler fail-closes`() {
-        assertEquals(null, SupervisorNotificationMachine.parseJvmVerdict(99, 0))
+        assertNull(SupervisorNotificationMachine.parseJvmVerdict(99, 0))
+    }
+
+    @ParameterizedTest(name = "{0} round-trips wire format")
+    @MethodSource("jvmVerdictTestCases")
+    fun `jvm verdict wire codes round-trip`(testCase: Pair<JvmVerdict, Int>) {
+        val (verdict, errno) = testCase
+        assertEquals(verdict, SupervisorNotificationMachine.parseJvmVerdict(verdict.toWire(), errno))
+    }
+
+    @ParameterizedTest(name = "kind {0} maps to inject target {1}")
+    @CsvSource(
+        "Open, Open",
+        "Accept, Accept",
+        "Connect, Connect",
+        "Unknown, Unsupported",
+        "Exec, Unsupported",
+        "Spawn, Unsupported",
+    )
+    fun `inject target follows kind not raw nr`(kindName: String, expectedTargetName: String) {
+        val kind = when (kindName) {
+            "Open" -> SupervisedKind.Open
+            "Accept" -> SupervisedKind.Accept
+            "Connect" -> SupervisedKind.Connect
+            "Exec" -> SupervisedKind.Exec
+            "Spawn" -> SupervisedKind.Spawn
+            else -> SupervisedKind.Unknown
+        }
+        val target = injectTarget(kind)
+        val actualTargetName = when (target) {
+            is InjectTarget.Open -> "Open"
+            is InjectTarget.Accept -> "Accept"
+            is InjectTarget.Connect -> "Connect"
+            is InjectTarget.Unsupported -> "Unsupported"
+        }
+        assertEquals(expectedTargetName, actualTargetName)
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("execRewriteCases")
+    fun `exec rewrite planning tests`(testCase: ExecRewriteCase) {
+        assertEquals(testCase.expectedPlan, planExecRewrite(testCase.arch, testCase.path, null))
     }
 
     @Test
-    fun `jvm verdict wire codes round-trip`() {
-        val deny = JvmVerdict.Deny(NativeConstants.EPERM)
-        assertEquals(deny, SupervisorNotificationMachine.parseJvmVerdict(deny.toWire(), NativeConstants.EPERM))
-        assertEquals(JvmVerdict.Allow, SupervisorNotificationMachine.parseJvmVerdict(JvmVerdict.Allow.toWire(), 0))
-        assertEquals(JvmVerdict.InjectFd, SupervisorNotificationMachine.parseJvmVerdict(JvmVerdict.InjectFd.toWire(), 0))
-    }
-
-    @Test
-    fun `inject target follows kind not raw nr`() {
-        assertEquals(InjectTarget.Open, injectTarget(SupervisedKind.Open))
-        assertEquals(InjectTarget.Accept, injectTarget(SupervisedKind.Accept))
-        assertEquals(InjectTarget.Unsupported, injectTarget(SupervisedKind.Unknown))
-    }
-
-    @Test
-    fun `exec rewrite is unsupported off x86_64`() {
-        assertEquals(ExecRewritePlan.UnsupportedArch, planExecRewrite(Arch.AARCH64, "/bin/true", null))
-        assertEquals(ExecRewritePlan.MissingPath, planExecRewrite(Arch.AMD64, null, null))
-        assertEquals(ExecRewritePlan.Ready("/bin/true"), planExecRewrite(Arch.AMD64, "/bin/true", null))
-    }
-
-    @Test
-    fun `jvm allow on unknown kind aborts`() {
-        val route = SupervisorNotificationMachine.evaluateJvm(SupervisedKind.Unknown, JvmVerdict.Allow)
-        assertTrue(route is SupervisorRoute.Abort)
+    fun `compile-time exhaustive coverage of supervisor model types`() {
+        val kinds = listOf(
+            SupervisedKind.Open,
+            SupervisedKind.Accept,
+            SupervisedKind.Connect,
+            SupervisedKind.Exec,
+            SupervisedKind.Spawn,
+            SupervisedKind.Unknown,
+        )
+        for (kind in kinds) {
+            when (kind) {
+                SupervisedKind.Open -> Unit
+                SupervisedKind.Accept -> Unit
+                SupervisedKind.Connect -> Unit
+                SupervisedKind.Exec -> Unit
+                SupervisedKind.Spawn -> Unit
+                SupervisedKind.Unknown -> Unit
+            }
+        }
+        val verdicts = listOf(JvmVerdict.Allow, JvmVerdict.InjectFd, JvmVerdict.Deny(NativeConstants.EPERM))
+        for (verdict in verdicts) {
+            when (verdict) {
+                is JvmVerdict.Allow -> Unit
+                is JvmVerdict.InjectFd -> Unit
+                is JvmVerdict.Deny -> Unit
+            }
+            for (kind in kinds) {
+                val route = SupervisorNotificationMachine.evaluateJvm(kind, verdict)
+                when (route) {
+                    is SupervisorRoute.Continue -> Unit
+                    is SupervisorRoute.SecureExec -> Unit
+                    is SupervisorRoute.InjectFd -> Unit
+                    is SupervisorRoute.Abort -> Unit
+                    is SupervisorRoute.AskJvm -> Unit
+                }
+            }
+        }
     }
 }

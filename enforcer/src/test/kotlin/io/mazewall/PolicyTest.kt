@@ -80,7 +80,6 @@ class PolicyTest {
     }
 
 
-
     @Test
     fun `builder base() merges all flags`(@TempDir tempDir: java.nio.file.Path) {
         val rPath = tempDir.resolve("r").toFile().apply { createNewFile() }.absolutePath
@@ -238,7 +237,7 @@ class PolicyTest {
                 .allow(Syscall.READ)
                 .build()
         assertEquals(PolicyMode.ALLOW_LIST, customErrno.mode)
-        assertEquals(SeccompAction.ACT_ERRNO, allowListed.defaultAction)
+        assertEquals(SeccompAction.ACT_ERRNO(), allowListed.defaultAction)
         assertTrue(allowListed.isSyscallAllowed(Syscall.READ))
         assertFalse(allowListed.isSyscallAllowed(Syscall.CONNECT))
         assertFalse(allowListed.argumentRules.allowExecutableMappings)
@@ -257,6 +256,17 @@ class PolicyTest {
         val restricted = denyByDefault.restrictFurtherWith(explicitAllow)
         assertFalse(restricted.isSyscallAllowed(Syscall.CONNECT))
         assertTrue(restricted.isSyscallAllowed(Syscall.READ))
+    }
+
+    @Test
+    fun `denyList with readOnly produces thread-local policy with Landlock paths`() {
+        val policy = Policy.denyList(RuntimeProfile.HOTSPOT_JIT) {
+            denyProcessCreation()
+            readOnly("/tmp")
+        }
+        assertTrue(policy.enforceLandlock)
+        assertTrue(policy.allowedFsReadPaths.any { it.value == "/tmp" })
+        assertFalse(policy.isSyscallAllowed(Syscall.EXECVE))
     }
 
     @Test
@@ -374,6 +384,18 @@ class PolicyTest {
     }
 
     @Test
+    fun `ProcessPolicies workerFilesystem is Landlock classpath plus java home only`() {
+        val hotspot = ProcessPolicies.workerFilesystem(RuntimeProfile.HOTSPOT_JIT)
+        val native = ProcessPolicies.workerFilesystem(RuntimeProfile.NATIVE_IMAGE)
+        val javaHome = System.getProperty("java.home")
+        assertTrue(hotspot.enforceLandlock)
+        assertTrue(hotspot.allowedFsReadPaths.any { it.value == javaHome })
+        assertTrue(hotspot.allowedFsReadPaths.none { it.value == "/etc" || it.value == "/etc/passwd" })
+        assertTrue(hotspot.argumentRules.allowExecutableMappings)
+        assertFalse(native.argumentRules.allowExecutableMappings)
+    }
+
+    @Test
     fun `plus operator works and resolves types correctly`() {
         val p1 = Policy.NO_EXEC
         val p2 = Policy.NO_NETWORK
@@ -466,5 +488,86 @@ class PolicyTest {
     fun `enforceLandlock is false when no Landlock paths are specified`() {
         val emptyPolicy = Policy.builder().build()
         assertFalse(emptyPolicy.enforceLandlock, "enforceLandlock should be false when no Landlock paths are specified")
+    }
+
+    @Test
+    fun `combine prefers block companion ERRNO over TRACE regardless of order`() {
+        val deny =
+            Policy
+                .builder()
+                .block(Syscall.OPEN)
+                .build()
+        val trace =
+            Policy
+                .builder()
+                .addAction(SeccompAction.ACT_TRACE(1), Syscall.OPEN)
+                .build()
+
+        assertEquals(SeccompAction.ACT_ERRNO(), deny.syscallActions[Syscall.OPEN])
+        assertEquals(SeccompAction.ACT_ERRNO(), Policy.combine(deny, trace).syscallActions[Syscall.OPEN])
+        assertEquals(SeccompAction.ACT_ERRNO(), Policy.combine(trace, deny).syscallActions[Syscall.OPEN])
+        assertEquals(SeccompAction.ACT_ERRNO(), Policy.restrictFurtherWith(trace, deny).syscallActions[Syscall.OPEN])
+
+        val openNr = Syscall.OPEN.numberFor(Arch.current())
+        assertEquals(
+            SeccompAction.ACT_ERRNO(),
+            Policy.combine(trace, deny).syscallActionNumbers(Arch.current())[openNr],
+        )
+    }
+
+    @Test
+    fun `combine prefers ACT_ERRNO instance over TRACE for defaults`() {
+        val errnoDefault =
+            Policy
+                .builder()
+                .defaultAction(SeccompAction.ACT_ERRNO(io.mazewall.ffi.NativeConstants.EACCES))
+                .build()
+        val traceDefault =
+            Policy
+                .builder()
+                .defaultAction(SeccompAction.ACT_TRACE(1))
+                .build()
+
+        assertEquals(
+            SeccompAction.ACT_ERRNO(io.mazewall.ffi.NativeConstants.EACCES),
+            Policy.combine(errnoDefault, traceDefault).defaultAction,
+        )
+        assertEquals(
+            SeccompAction.ACT_ERRNO(io.mazewall.ffi.NativeConstants.EACCES),
+            Policy.combine(traceDefault, errnoDefault).defaultAction,
+        )
+    }
+
+    @Test
+    fun `fs promotion must not alias the original builder`(@TempDir tempDir: java.nio.file.Path) {
+        // Regression for issue-20260823-135554: the FS-adding methods used to re-type and mutate
+        // the SAME builder instance, so a ProcessWideSafe-typed reference could silently build a
+        // definition containing Landlock filesystem rules.
+        val rPath = tempDir.resolve("read").toString()
+        val base = Policy.builder()
+
+        base.allowFsRead(rPath)
+        base.allowJvmClasspath()
+
+        val untouched = base.build()
+        assertFalse(untouched.definition.allowedFsReadPaths.isNotEmpty(), "Original builder must not gain FS paths")
+        assertTrue(untouched.definition.allowedFsWritePaths.isEmpty())
+    }
+
+    @Test
+    fun `promoted builder carries fs state and stays thread-local typed`(@TempDir tempDir: java.nio.file.Path) {
+        val rPath = tempDir.resolve("r").toString()
+        val wPath = tempDir.resolve("w").toString()
+
+        val promoted: Policy<PolicyScope.ThreadLocalOnly, Uncompiled> =
+            Policy
+                .builder()
+                .defaultAction(SeccompAction.ACT_ALLOW)
+                .allowFsRead(rPath)
+                .allowFsWrite(wPath)
+                .build()
+
+        assertTrue(promoted.definition.allowedFsReadPaths.any { it.value == SandboxedPath.of(rPath, true).value })
+        assertTrue(promoted.definition.allowedFsWritePaths.any { it.value == SandboxedPath.of(wPath, true).value })
     }
 }

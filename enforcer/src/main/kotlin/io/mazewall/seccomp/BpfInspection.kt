@@ -22,6 +22,16 @@ internal sealed interface ArgCheck {
     data class EqualsAny(
         val allowedValues: List<Long>,
     ) : ArgCheck
+
+    /**
+     * Checks ONLY the low 32-bit word of the argument against one of the allowed values
+     * (issue-075 problem 3: "register garbage"). For syscall arguments that the kernel ABI
+     * defines as `int` (prctl option, socket family, ...), the upper half of the u64 slot is
+     * unspecified and may hold garbage; comparing it produces spurious denials.
+     */
+    data class EqualsAny32(
+        val allowedValues: List<Int>,
+    ) : ArgCheck
 }
 
 /**

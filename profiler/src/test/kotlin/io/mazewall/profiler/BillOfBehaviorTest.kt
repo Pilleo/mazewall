@@ -85,11 +85,11 @@ class BillOfBehaviorTest {
         val policy = bob.toPolicy(
             io.mazewall.Policy
                 .builder()
-                .defaultAction(io.mazewall.core.SeccompAction.ACT_ERRNO)
+                .defaultAction(io.mazewall.core.SeccompAction.ACT_ERRNO())
                 .build(),
             allowIncomplete = true,
         )
-        assertEquals(io.mazewall.core.SeccompAction.ACT_ERRNO, policy.defaultAction)
+        assertEquals(io.mazewall.core.SeccompAction.ACT_ERRNO(), policy.defaultAction)
 
         val policyDenyList = bob.toPolicy(allowIncomplete = true)
         assertEquals(io.mazewall.core.SeccompAction.ACT_ALLOW, policyDenyList.defaultAction)
@@ -107,7 +107,7 @@ class BillOfBehaviorTest {
             )
 
         // Deny-list base DSL
-        val dslDeny = bob.toDsl("Policy.PURE_COMPUTE_UNSAFE", io.mazewall.Policy.PURE_COMPUTE_UNSAFE)
+        val dslDeny = bob.toDsl("Policy.PURE_COMPUTE_UNSAFE", io.mazewall.Policy.PURE_COMPUTE_UNSAFE, allowIncomplete = true)
         assertTrue(dslDeny.contains("Policy.threadLocalBuilder()"))
         assertTrue(dslDeny.contains(".base(Policy.PURE_COMPUTE_UNSAFE)"))
         assertTrue(dslDeny.contains("Syscall.OPEN"))
@@ -118,9 +118,13 @@ class BillOfBehaviorTest {
         val allowBase =
             io.mazewall.Policy
                 .builder()
-                .defaultAction(io.mazewall.core.SeccompAction.ACT_ERRNO)
+                .defaultAction(io.mazewall.core.SeccompAction.ACT_ERRNO())
                 .build()
-        val dslAllow = bob.toDsl("Policy.builder().defaultAction(SeccompAction.ACT_ERRNO).build()", allowBase)
+        val dslAllow = bob.toDsl(
+            "Policy.builder().defaultAction(SeccompAction.ACT_ERRNO()).build()",
+            allowBase,
+            allowIncomplete = true,
+        )
         assertTrue(dslAllow.contains(".allow("))
         assertTrue(dslAllow.contains("Syscall.OPEN"))
     }
@@ -149,7 +153,7 @@ class BillOfBehaviorTest {
         assertEquals(setOf("/var/log"), policy.allowedFsWritePaths.map { it.value }.toSet())
 
         // Verifying the generated DSL is also pruned!
-        val dsl = bob.toDsl()
+        val dsl = bob.toDsl(allowIncomplete = true)
         assertTrue(dsl.contains(".allowFsRead(\"/home\")"))
         assertTrue(dsl.contains(".allowFsRead(\"/tmp\")"))
         assertFalse(dsl.contains(".allowFsRead(\"/home/leanid/.sdkman\")"))
@@ -175,6 +179,27 @@ class BillOfBehaviorTest {
         assertEquals(bob.fsWritePaths, parsed.fsWritePaths)
         assertEquals(bob.syscalls, parsed.syscalls)
         assertEquals(bob.execs, parsed.execs)
+    }
+
+    @Test
+    fun `test network endpoints JSON roundtrip with IPv6 and IPv4`() {
+        val bob = BillOfBehavior(
+            connects = setOf(
+                NetworkEndpoint("2001:db8::1", null),
+                NetworkEndpoint("2001:db8::1", 8080),
+                NetworkEndpoint("127.0.0.1", null),
+                NetworkEndpoint("127.0.0.1", 443),
+            ),
+        )
+
+        val json = bob.toJson()
+        val parsed = BillOfBehavior.fromJson(json)
+
+        assertEquals(bob.connects, parsed.connects)
+        assertTrue(parsed.connects.contains(NetworkEndpoint("2001:db8::1", null)))
+        assertTrue(parsed.connects.contains(NetworkEndpoint("2001:db8::1", 8080)))
+        assertTrue(parsed.connects.contains(NetworkEndpoint("127.0.0.1", null)))
+        assertTrue(parsed.connects.contains(NetworkEndpoint("127.0.0.1", 443)))
     }
 
     @Test
@@ -307,6 +332,44 @@ class BillOfBehaviorTest {
     }
 
     @Test
+    fun `toDsl without coverage evidence is incomplete`() {
+        val bob = BillOfBehavior(opens = setOf("/tmp/a"))
+        assertFailsWith<IncompleteProfileException> {
+            bob.toDsl()
+        }
+    }
+
+    @Test
+    fun `ProfilingResult toDsl requires complete coverage evidence unless allowIncomplete`() {
+        val coverageWithDroppedEvents = ProfilingCoverage(
+            strategy = ProfileStrategy.USER_NOTIF,
+            strategyReason = "test",
+            processWide = false,
+            ioUring = IoUringVisibility.OBSERVED,
+            pathResolution = PathResolutionQuality.RESOLVED,
+            stacks = StackAttribution.CAPTURED,
+            droppedEvents = 1,
+            drainComplete = true,
+            environment = ProfileEnvironment("6.1.0", EbpfLoad.Denied("test")),
+            complete = false,
+            warnings = listOf("dropped 1 events"),
+        )
+        val result = ProfilingResult(
+            value = 42,
+            behavior = BillOfBehavior(opens = setOf("/tmp/a")),
+            stackProfile = emptyMap(),
+            coverage = coverageWithDroppedEvents,
+        )
+
+        assertFailsWith<IncompleteProfileException> {
+            result.toDsl()
+        }
+
+        val dsl = result.toDsl(allowIncomplete = true)
+        assertTrue(dsl.contains(".allowFsRead(\"/tmp/a\")"))
+    }
+
+    @Test
     fun `toDsl should throw on observed execs without allowIncomplete`() {
         val bob = BillOfBehavior(execs = setOf("/usr/bin/bash"))
         assertFailsWith<IncompleteProfileException> {
@@ -359,5 +422,41 @@ class BillOfBehaviorTest {
         assertEquals(2, traces.size) // Only stack1 and stack3 should remain, stack2 is a duplicate of stack1
         assertEquals("Class1", traces[0][0].className)
         assertEquals("Class2", traces[1][0].className)
+    }
+
+    @Test
+    fun `toPolicy throws when coverage contains unmapped syscall observations without allowIncomplete`() {
+        val observations = listOf(
+            ProfileObservation.Syscall(
+                ObservationCorrelation(1, Tid(1)),
+                ObservationSource.STRACE,
+                "RECVMSG",
+                paths = emptyList(),
+            ),
+        )
+        val bob = io.mazewall.profiler.compiler.BobCompiler.compileObservations(observations)
+        assertFalse(bob.syscalls.contains(Syscall.OPEN))
+        assertTrue(bob.syscalls.isEmpty())
+
+        val coverage = ProfilingCoverage.infer(
+            strategy = ProfileStrategy.USER_NOTIF,
+            strategyReason = "t",
+            processWide = false,
+            observations = observations,
+            stacks = StackAttribution.SKIPPED,
+            droppedEvents = 0,
+            drainComplete = true,
+            environment = ProfileEnvironment("t", EbpfLoad.Denied("x")),
+        )
+        assertFalse(coverage.complete)
+        assertTrue(coverage.warnings.any { it.contains("unmapped syscall") && it.contains("RECVMSG") })
+
+        assertFailsWith<IncompleteProfileException> {
+            bob.toPolicy(coverage = coverage, allowIncomplete = false)
+        }
+
+        // With allowIncomplete = true, it compiles cleanly
+        val policy = bob.toPolicy(coverage = coverage, allowIncomplete = true)
+        assertTrue(policy.isSyscallAllowed(Syscall.READ))
     }
 }

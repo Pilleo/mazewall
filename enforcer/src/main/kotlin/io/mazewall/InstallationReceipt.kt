@@ -48,4 +48,8 @@ public data class InstallationReceipt(
         }
         return this
     }
+
+    public fun isInstalled(): Boolean = installed
+    public fun isProcessWide(): Boolean = processWide
+    public fun isLandlockApplied(): Boolean = landlockApplied
 }

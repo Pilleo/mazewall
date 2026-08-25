@@ -1,3 +1,11 @@
+---
+name: add_syscall
+description: >
+  Checklist for adding a Linux syscall to mazewall Policy, Arch, BpfFilter, and
+  profiler. Use when adding a syscall constant or BPF inspection. Trigger on:
+  add syscall, Syscall.kt, new syscall, IO_URING, numberFor.
+---
+
 # Skill: Add Syscall
 
 ## Checklist

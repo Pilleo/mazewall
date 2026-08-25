@@ -10,6 +10,7 @@ target_modules:
 - :enforcer
 component: enforcer
 effort: medium
+paperclip_issue_id: 43505363-5b0c-41e2-a82d-fcda2b1894e8
 ---
 
 # 🟡 [DEFERRED — Medium]: JVM Invariant Syscall Floor is Incomplete

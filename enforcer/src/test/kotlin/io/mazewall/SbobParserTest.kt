@@ -74,12 +74,12 @@ class SbobParserTest {
         val base =
             Policy
                 .builder()
-                .defaultAction(SeccompAction.ACT_ERRNO)
+                .defaultAction(SeccompAction.ACT_ERRNO())
                 .allow(Syscall.WRITE)
                 .build()
         val policy = SbobParser.parseJsonToPolicy(json, base)
 
-        assertEquals(SeccompAction.ACT_ERRNO, policy.defaultAction)
+        assertEquals(SeccompAction.ACT_ERRNO(), policy.defaultAction)
         assertTrue(policy.isSyscallAllowed(Syscall.OPEN))
         assertTrue(policy.isSyscallAllowed(Syscall.READ))
         assertTrue(policy.isSyscallAllowed(Syscall.WRITE))

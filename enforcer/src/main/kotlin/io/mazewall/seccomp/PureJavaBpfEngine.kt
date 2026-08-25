@@ -1,5 +1,6 @@
 package io.mazewall.seccomp
 
+import io.mazewall.BpfNativeCache
 import io.mazewall.enforcer.api.*
 import io.mazewall.enforcer.state.*
 import io.mazewall.enforcer.diagnostics.*

@@ -8,10 +8,10 @@ mkdir -p logs
 if [ "$1" == "--background" ]; then
     echo "🚀 Starting Orchestrator Daemon in background..."
     shift
-    nohup ./gradlew :tools:orchestrator:run "$@" > logs/orchestrator.log 2>&1 &
+    nohup ./gradlew :tools:orchestrator:run -PincludeOrchestrator=true "$@" > logs/orchestrator.log 2>&1 &
     echo "   Logs redirected to: logs/orchestrator.log"
     echo "   PID: $!"
 else
     echo "⚡ Starting Orchestrator Daemon in foreground..."
-    ./gradlew :tools:orchestrator:run "$@"
+    ./gradlew :tools:orchestrator:run -PincludeOrchestrator=true "$@"
 fi

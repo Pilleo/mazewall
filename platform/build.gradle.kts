@@ -1,5 +1,9 @@
+import java.math.BigDecimal
+
 plugins {
     kotlin("jvm")
+    id("info.solidsoft.pitest")
+    alias(libs.plugins.bcv)
 }
 
 kotlin {
@@ -69,4 +73,35 @@ publishing {
             from(components["java"])
         }
     }
+}
+
+pitest {
+    junit5PluginVersion.set("1.2.1")
+    targetClasses.set(
+        setOf(
+            "io.mazewall.core.SeccompAction*",
+            "io.mazewall.platform.daemon.UnixListenDaemonMachine*",
+            "io.mazewall.ffi.networking.SeccompConnectionMachine*",
+            "io.mazewall.core.PrctlCommand*",
+        ),
+    )
+    excludedClasses.set(
+        setOf(
+            "io.mazewall.ffi.nix.*",
+            "io.mazewall.ffi.linux.*",
+            "io.mazewall.MockNativeEngine*",
+        ),
+    )
+    targetTests.set(
+        setOf(
+            "io.mazewall.core.SeccompActionTest",
+            "io.mazewall.platform.daemon.UnixListenDaemonMachineTest",
+            "io.mazewall.ffi.networking.SeccompConnectionMachineTest",
+            "io.mazewall.core.PrctlCommandTest",
+        ),
+    )
+    jvmArgs.set(listOf("--enable-native-access=ALL-UNNAMED"))
+    timeoutConstInMillis.set(2000)
+    timeoutFactor.set(BigDecimal.valueOf(1.25))
+    threads.set(System.getProperty("pitest.threads")?.toInt() ?: 4)
 }

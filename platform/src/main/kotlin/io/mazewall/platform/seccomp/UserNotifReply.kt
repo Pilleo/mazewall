@@ -38,6 +38,14 @@ public object UserNotifReply {
         resp.writeInt(Layouts.SECCOMP_NOTIF_RESP_FLAGS_OFFSET, 0)
     }
 
+    public fun encodeSuccess(resp: ManagedSegment, id: Long, `val`: Long) {
+        resp.fill(0)
+        resp.writeLong(Layouts.SECCOMP_NOTIF_RESP_ID_OFFSET, id)
+        resp.writeLong(Layouts.SECCOMP_NOTIF_RESP_VAL_OFFSET, `val`)
+        resp.writeInt(Layouts.SECCOMP_NOTIF_RESP_ERROR_OFFSET, 0)
+        resp.writeInt(Layouts.SECCOMP_NOTIF_RESP_FLAGS_OFFSET, 0)
+    }
+
     public fun send(
         raw: RawSyscallOperations,
         listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open>,

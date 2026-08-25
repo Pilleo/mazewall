@@ -45,7 +45,7 @@ class BpfFilterCoverageTest {
         // Test with custom default action
         val errnoPolicy = Policy
             .builder()
-            .defaultAction(SeccompAction.ACT_ERRNO)
+            .defaultAction(SeccompAction.ACT_ERRNO())
             .build()
         val errnoFilters = BpfFilter.build(arch, errnoPolicy.definition)
         assertNotNull(errnoFilters)

@@ -42,6 +42,33 @@ tasks.named<JavaExec>("run") {
     }
 }
 
+val newBacklogIssue by tasks.registering(JavaExec::class) {
+    group = "documentation"
+    description = "Scaffold a validator-clean backlog issue (unique timestamp id, inferred files/modules)"
+    dependsOn(tasks.compileKotlin)
+    classpath = sourceSets.main.get().runtimeClasspath
+    mainClass.set("io.mazewall.orchestrator.NewBacklogIssueKt")
+    workingDir = rootProject.projectDir
+    standardInput = System.`in`
+    val argsFile = project.findProperty("issueArgsFile") as String?
+    if (!argsFile.isNullOrBlank()) {
+        args(file(argsFile).readLines().filter { it.isNotEmpty() })
+    }
+}
+
+val workPackage by tasks.registering(JavaExec::class) {
+    group = "documentation"
+    description = "Emit work-package impact JSON (Codanna + CORE lock set)"
+    dependsOn(tasks.compileKotlin)
+    classpath = sourceSets.main.get().runtimeClasspath
+    mainClass.set("io.mazewall.orchestrator.WorkPackageKt")
+    workingDir = rootProject.projectDir
+    val argsFile = project.findProperty("workPackageArgsFile") as String?
+    if (!argsFile.isNullOrBlank()) {
+        args(file(argsFile).readLines().filter { it.isNotEmpty() })
+    }
+}
+
 val checkBacklog by tasks.registering(JavaExec::class) {
     group = "verification"
     description = "Validates backlog issue YAML frontmatters, required fields, and dependency references"
@@ -49,6 +76,19 @@ val checkBacklog by tasks.registering(JavaExec::class) {
     classpath = sourceSets.main.get().runtimeClasspath
     mainClass.set("io.mazewall.orchestrator.BacklogValidatorKt")
     args = listOf(rootProject.projectDir.absolutePath)
+}
+
+val supervisor by tasks.registering(JavaExec::class) {
+    group = "paperclip"
+    description = "Hybrid loop supervisor tick (dispatch/routing; --dry-run previews, --daemon loops)"
+    dependsOn(tasks.compileKotlin)
+    classpath = sourceSets.main.get().runtimeClasspath
+    mainClass.set("io.mazewall.orchestrator.HybridSupervisorKt")
+    workingDir = rootProject.projectDir
+    val argsFile = project.findProperty("supervisorArgsFile") as String?
+    if (!argsFile.isNullOrBlank()) {
+        args(file(argsFile).readLines().filter { it.isNotEmpty() })
+    }
 }
 
 tasks.named("check") {

@@ -14,6 +14,7 @@ autonomy: supervised
 solution_approved: false
 blast_radius: medium
 reversible: true
+paperclip_issue_id: 410ea878-49dc-456f-90b8-c90a77e33e51
 ---
 
 # 🔴 [Severity: HIGH]: Graceful Fallback for AI Agent Failures

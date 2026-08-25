@@ -10,6 +10,7 @@ target_modules:
 - :profiler
 component: profiler
 effort: large
+paperclip_issue_id: af862e11-aa9f-4096-8411-d81606664980
 ---
 
 # 🔵 [Severity: ENHANCEMENT]: Refactor Profiler Daemon to use Coroutines (Structured Concurrency)

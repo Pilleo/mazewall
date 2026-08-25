@@ -2,19 +2,33 @@ package io.mazewall.enforcer
 
 import org.junit.jupiter.api.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertSame
-import io.mazewall.enforcer.api.ContainmentViolationException
+import kotlin.test.assertIs
+import kotlin.test.assertTrue
+import kotlin.test.fail
 
+@Suppress("DEPRECATION")
 class ContainmentViolationExceptionTest {
     @Test
-    fun `test constructors`() {
-        val cause = RuntimeException("orig")
-        val ex1 = ContainmentViolationException("msg", cause)
-        assertEquals("msg", ex1.message)
-        assertSame(cause, ex1.cause)
+    fun `thrown API exception is caught as historical package type`() {
+        val thrown =
+            io.mazewall.enforcer.api.ContainmentViolationException(
+                "contained",
+                IllegalStateException("cause"),
+            )
+        try {
+            throw thrown
+        } catch (caught: ContainmentViolationException) {
+            assertEquals("contained", caught.message)
+            assertIs<IllegalStateException>(caught.cause)
+            assertTrue(caught is io.mazewall.enforcer.api.ContainmentViolationException)
+            return
+        }
+        fail("historical catch type must match library throws of the API exception")
+    }
 
-        val ex2 = ContainmentViolationException("msg")
-        assertEquals("msg", ex2.message)
-        assertEquals(null, ex2.cause)
+    @Test
+    fun `historical constructors still exist`() {
+        val ex = ContainmentViolationException("old", null)
+        assertEquals("old", ex.message)
     }
 }

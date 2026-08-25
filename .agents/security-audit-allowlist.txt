@@ -1,0 +1,14 @@
+# mazewall security-audit allowlist (OPERATOR-OWNED — do not edit as part of agent-driven changes)
+#
+# Format (one entry per line):
+#   <FORBIDDEN_PATTERN>::<file-glob>::<reason>
+#
+# A matching entry downgrades a net-new forbidden-pattern occurrence in the pre-commit audit
+# (.git/hooks/pre-commit, section 1) from a hard ERROR to a loud WARNING. Use this ONLY for
+# semantics-preserving refactors or operator-reviewed changes; never to introduce new bypass
+# behavior. Every entry must carry a reason referencing an issue or operator decision.
+#
+# Examples:
+# FallbackBehavior.WARN_AND_BYPASS::enforcer/src/main/kotlin/io/mazewall/enforcer/api/ContainedExecutors.kt::issue-135555 stringly valueOf() replaced by enum reference; behavior identical (operator-approved 2026-08-23)
+
+FallbackBehavior.WARN_AND_BYPASS::enforcer/src/main/kotlin/io/mazewall/enforcer/api/ContainedExecutors.kt::issue-20260823-135555: valueOf("WARN_AND_BYPASS") replaced with enum reference; comparison semantics unchanged (operator-approved 2026-08-23)
