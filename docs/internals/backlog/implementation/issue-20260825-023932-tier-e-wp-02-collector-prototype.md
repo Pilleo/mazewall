@@ -61,6 +61,12 @@ whose host TID matches, tested inside a rootful container.
 
 ### Progress (2026-08-25)
 
+* **Kernel-phase acceptance PASSED** (operator-executed rootful run): single-target stream
+  `768959/768959 <nr>` with workload-consistent x86_64 numbers (257 openat, 56 clone,
+  13/14/15 rt_sig*, 1 write, 3 close, 33 dup2, 61 getdents64, 72 fcntl, 16 ioctl) — TGID
+  filter held, host TID identity correct end-to-end through ringbuf → userspace.
+* `--summary` mode added to the loader after the raw per-event stream proved too verbose for
+  operator handoff; future runs emit one aggregated line.
 * Sources landed: `bpf/syscall_collector.bpf.c` (raw_tp/sys_enter, TGID filter map, ringbuf,
   per-cpu drop counter), `collector/collector.c` (libbpf loader/reader, drop accounting,
   fail-closed non-root refusal — verified exit=1 as unprivileged user).

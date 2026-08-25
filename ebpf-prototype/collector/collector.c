@@ -18,6 +18,9 @@
 #include <unistd.h>
 
 static volatile sig_atomic_t g_stop;
+static int g_summary;
+static unsigned long long nr_counts[512];
+static unsigned long long nr_total;
 
 static void on_signal(int sig)
 {
@@ -54,8 +57,25 @@ static int on_event(void *ctx, void *data, size_t size)
 		int syscall_nr;
 	} __attribute__((packed)) * event = data;
 
+	if (g_summary) {
+		nr_total++;
+		if (event->syscall_nr >= 0 &&
+		    (unsigned)event->syscall_nr < sizeof(nr_counts) / sizeof(nr_counts[0]))
+			nr_counts[event->syscall_nr]++;
+		return 0;
+	}
 	printf("%u/%u %d\n", event->tgid, event->tid, event->syscall_nr);
 	return 0;
+}
+
+static void print_summary(void)
+{
+	fprintf(stderr, "[tier-e] events=%llu per-syscall:", nr_total);
+	for (unsigned nr = 0; nr < sizeof(nr_counts) / sizeof(nr_counts[0]); nr++) {
+		if (nr_counts[nr])
+			fprintf(stderr, " %llu*%u", nr_counts[nr], nr);
+	}
+	fprintf(stderr, "\n");
 }
 
 int main(int argc, char **argv)
@@ -68,9 +88,11 @@ int main(int argc, char **argv)
 			target_tgid = parse_long(argv[++i], "--pid");
 		} else if (strcmp(argv[i], "--duration") == 0 && i + 1 < argc) {
 			duration_s = (double)parse_long(argv[++i], "--duration");
+		} else if (strcmp(argv[i], "--summary") == 0) {
+			g_summary = 1;
 		} else {
 			fprintf(stderr,
-				"usage: tier_e_collector --pid <tgid> [--duration <seconds>]\n");
+				"usage: tier_e_collector --pid <tgid> [--duration <seconds>] [--summary]\n");
 			return 2;
 		}
 	}
@@ -144,6 +166,8 @@ int main(int argc, char **argv)
 			break;
 	}
 
+	if (g_summary)
+		print_summary();
 	key = 0;
 	int dropped_fd = bpf_object__find_map_fd_by_name(object, "dropped_events");
 	if (dropped_fd >= 0) {
