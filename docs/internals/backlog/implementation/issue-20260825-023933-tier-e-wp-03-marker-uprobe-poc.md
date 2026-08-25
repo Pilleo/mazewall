@@ -1,7 +1,7 @@
 ---
 title: "Tier E WP-03: Marker .so + uprobe + task-storage PoC (Gates G0/G1)"
 severity: "ENHANCEMENT"
-status: "open"
+status: "resolved"
 priority: high
 component: "ebpf-prototype"
 target_modules:
@@ -79,6 +79,20 @@ skip-if-unchanged guard impact. Record numbers as an addendum section in the des
 
 **PR is done when:** G0a and G0b pass repeatedly in CI-style runs and G1 numbers for both
 variants are recorded.
+
+### Resolution (2026-08-25) — RESOLVED
+
+* **G0a PASSED** across three operator runs (deterministic phase structure, both getpid and
+  clock_nanosleep attributed, silence after reset).
+* **G0b PASSED** after fixing the harness defect where the driver dlopen'd the plain library
+  during the USDT round; USDT attach now produces event patterns identical to G0a, and the
+  stapsdt-note presence check demonstrates wrong-binary detection.
+* **G1 recorded** — see design doc Appendix B: attached plain uprobe 1 324 ns/transition,
+  attached USDT 596 ns/transition (≈2.2× cheaper), detached baseline ≈3 ns both variants,
+  dropped=0 complete=true throughout. Skip-if-unchanged guard remains mandatory for hot
+  loops (WP-08).
+* Kernel: 7.1.4-xanmod1 x86_64, rootful container via `scripts/run_wp03.sh` /
+  `scripts/run_g1.sh`.
 
 ## Guardrails
 

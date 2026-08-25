@@ -413,3 +413,48 @@ io_uring submit/complete tracepoints
 This preserves the invariant split: *synchronous execution → task storage; asynchronous
 execution → request-keyed map*. Any such probe set is a separate future initiative gated on
 the same fail-unknown rules; nothing in this document commits Tier E v1 to it.
+
+## Appendix B. Gate Results (kernel 7.1.4-xanmod1 x86_64, rootful container, 2026-08-25)
+
+| Gate | Result | Evidence |
+|---|---|---|
+| G0a | PASSED (3 runs) | Deterministic pairing via plain symbol uprobe: phases 42×5 → 7×3, silence after reset |
+| G0b | PASSED | Identical event patterns through `usdt/…:mazewall:context_switch`; wrong-binary guard demonstrated (`stapsdt` notes present only in USDT artifact) |
+| G1 | RECORDED | 10 M transitions per configuration, single-line results |
+
+### B.1 G1 latency numbers
+
+| Configuration | ns / transition |
+|---|---|
+| Plain uprobe, detached | 3.0 |
+| Plain uprobe, attached | **1 324** |
+| USDT, detached | 3.3 |
+| USDT, attached | **596** |
+
+* Attached USDT is ≈2.2× cheaper than attached plain uprobe on this kernel — empirical
+  support for the §4.1.1 decision to make USDT the production ABI.
+* Both variants confirm the µs-class prediction (§11 risk 1). Enter+exit costs
+  ≈1.2–2.6 µs per scope: negligible for request-scale code with tens of scopes; material
+  for tight inner loops ⇒ the skip-if-unchanged guard (WP-08) and "scope at boundaries,
+  not inside loops" guidance are mandatory, not optional polish.
+* Ring-buffer saturation under benchmark load was not exercised (the timed loop performs
+  no syscalls; only 3 gate-wait events were observed, `dropped=0`). Drop-rate behavior
+  under concurrent syscall pressure is measured separately in WP-06.
+* Environment caveat: numbers are from one host/kernel; CI reruns on target kernels before
+  any external claim (no public commitments per WP-12 policy).
+
+### B.2 Harness notes
+
+* Bench process holds on a gate file after dlopen+warmup so attachment precedes timing;
+  first-run defect (attached rounds measuring detached cost due to loader flag rejection)
+  was caught by the sanity expectation "attached ≫ detached" and fixed.
+* The G0b silent-park failure (attach succeeding against a library the target had never
+  mapped) motivated the harness rule: hard-fail unless `/proc/<pid>/maps` shows the marker
+  library before attaching.
+
+Reviewed 2026-08-25. Source: blogs.oracle.com/linux/from-kernel-to-user-space-tracing;
+sample code: github.com/oracle-samples/linux-blog-sample-code (branch
+`kernel-to-userspace-tracing`). License of any borrowed snippet must be verified before use
+(reference-only by default).
+
+---
