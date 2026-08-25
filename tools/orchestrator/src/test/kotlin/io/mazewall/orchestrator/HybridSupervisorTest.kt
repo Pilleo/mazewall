@@ -92,15 +92,16 @@ class DispatchSelectorTest {
     }
 
     @Test
-    fun `policy constants are pinned`() {
-        assertEquals("testing", HybridSupervisor.CODEX_TESTING_BARRIER_COMPONENT)
+    fun `vibe and jules are the only approved loop workers`() {
+        assertEquals(setOf("jules", "vibe"), HybridSupervisor.ALLOWED_LOOP_ADAPTERS)
+        assertTrue(HybridSupervisor.extraLoopAdapters().isEmpty())
     }
 
     @Test
-    fun `grok and antigravity adapters are refused for loop work unless unlocked`() {
+    fun `extra loop adapters parse from env-style csv`() {
         assertEquals(
-            setOf("antigravity", "grok_local"),
-            HybridSupervisor.FORBIDDEN_EXPERIMENT_ADAPTERS,
+            setOf("opencode_local", "claude_local"),
+            HybridSupervisor.parseExtra(" opencode_local , claude_local ,, "),
         )
     }
 

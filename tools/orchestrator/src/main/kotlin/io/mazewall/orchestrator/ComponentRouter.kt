@@ -19,7 +19,8 @@ class ComponentRouter(
         description?.let { COMPONENT_RE.find(it)?.groupValues?.get(1) }
 
     companion object {
-        const val DEFAULT_ADAPTER = "jules"
+        /** Workhorse for unrouted components. Jules stays available but is not default. */
+        const val DEFAULT_ADAPTER = "vibe"
 
         /** Opt-in table (env): component -> roster urlKey. Empty = Jules for all. */
         val DEFAULT_ROUTES: Map<String, String> = emptyMap()

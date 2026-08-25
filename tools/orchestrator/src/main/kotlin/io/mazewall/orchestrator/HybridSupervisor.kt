@@ -25,6 +25,7 @@ class HybridSupervisor(
     private val sleepMs: (Long) -> Unit = { Thread.sleep(it) },
 ) {
     fun tick(maxDispatch: Int, forceIdentifier: String? = null): Int {
+        val allowedLoopAdapters = ALLOWED_LOOP_ADAPTERS + extraLoopAdapters()
         // External failures degrade to a skipped tick, never a crash (orchestrator rule 4).
         val issues = runCatching { client.listIssues(companyId) }
             .onFailure { err("listIssues failed: ${it.message}"); return 0 }
@@ -60,30 +61,15 @@ class HybridSupervisor(
                 err("no roster agent for component '$component' and no '${router.defaultAdapter}' fallback")
                 return dispatched
             }
-            // Operator policy (2026-08-25b): Codex never executes testing-component
-            // work (its verdicts gate merges; independence preserved by routing
-            // test-authoring to Vibe/Jules).
-            if (agent.adapterType == "codex_local" &&
-                component?.lowercase() == "testing" &&
-                env("PAPERCLIP_ALLOW_CODEX_TESTING")?.lowercase() != "true"
-            ) {
-                err(
-                    "REFUSED dispatch of ${candidate.identifier}: codex_local is barred " +
-                        "from testing-component work. Set PAPERCLIP_ALLOW_CODEX_TESTING=true " +
-                        "or route to vibe/jules.",
-                )
-                return dispatched
-            }
-            // Operator policy (2026-08-25): experiments run on Vibe/Jules ONLY.
-            // Grok and Antigravity are production-owned capacity; sending them
-            // loop work is a hard failure unless explicitly unlocked via env.
-            if (agent.adapterType in FORBIDDEN_EXPERIMENT_ADAPTERS &&
-                env("PAPERCLIP_ALLOW_GROK_ANTIGRAVITY")?.lowercase() != "true"
-            ) {
+            // Operator policy (2026-08-25, tightened): loop work runs on VIBE for all
+            // agents, with JULES as the single exception. Any other adapterType is
+            // refused unless explicitly unlocked via PAPERCLIP_EXTRA_LOOP_ADAPTERS.
+            if (agent.adapterType !in allowedLoopAdapters) {
                 err(
                     "REFUSED dispatch of ${candidate.identifier}: adapterType " +
-                        "'${agent.adapterType}' is reserved for production use. " +
-                        "Set PAPERCLIP_ALLOW_GROK_ANTIGRAVITY=true to override.",
+                        "'${agent.adapterType}' is not an approved experiment worker " +
+                        "(allowed: ${allowedLoopAdapters}). Unlock via " +
+                        "PAPERCLIP_EXTRA_LOOP_ADAPTERS=<type> if the operator permits.",
                 )
                 return dispatched
             }
@@ -126,10 +112,19 @@ class HybridSupervisor(
     private val companyId: String by lazy { env("PAPERCLIP_COMPANY_ID") ?: client.resolveCompanyId() }
 
     companion object {
-        val FORBIDDEN_EXPERIMENT_ADAPTERS = setOf("antigravity", "grok_local")
-        const val CODEX_TESTING_BARRIER_COMPONENT = "testing"
+        val ALLOWED_LOOP_ADAPTERS = setOf("vibe", "jules")
 
         fun env(key: String): String? = System.getenv(key)?.takeIf { it.isNotBlank() }
+
+        fun parseExtra(raw: String?): Set<String> =
+            raw.orEmpty()
+                ?.split(',')
+                ?.map { it.trim().lowercase() }
+                ?.filter { it.isNotEmpty() }
+                ?.toSet()
+                ?: emptySet()
+
+        fun extraLoopAdapters(): Set<String> = parseExtra(env("PAPERCLIP_EXTRA_LOOP_ADAPTERS"))
     }
 }
 
