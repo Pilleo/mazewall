@@ -385,12 +385,16 @@ public final class io/mazewall/profiler/ProfileStrategy : java/lang/Enum {
 public final class io/mazewall/profiler/Profiler {
 	public static final field INSTANCE Lio/mazewall/profiler/Profiler;
 	public static final fun profile (Ljava/lang/Runnable;)Lio/mazewall/profiler/ProfilingResult;
+	public static final fun profile (Ljava/lang/Runnable;Z)Lio/mazewall/profiler/ProfilingResult;
+	public static final fun profile (Ljava/lang/Runnable;ZZ)Lio/mazewall/profiler/ProfilingResult;
 	public static final fun profile (Ljava/util/concurrent/Callable;)Lio/mazewall/profiler/ProfilingResult;
+	public static final fun profile (Ljava/util/concurrent/Callable;Z)Lio/mazewall/profiler/ProfilingResult;
+	public static final fun profile (Ljava/util/concurrent/Callable;ZZ)Lio/mazewall/profiler/ProfilingResult;
 	public static final fun profile (Lkotlin/jvm/functions/Function0;)Lio/mazewall/profiler/ProfilingResult;
 	public static final fun profile (ZLkotlin/jvm/functions/Function0;)Lio/mazewall/profiler/ProfilingResult;
-	public static final fun profile (ZZLjava/lang/Runnable;)Lio/mazewall/profiler/ProfilingResult;
-	public static final fun profile (ZZLjava/util/concurrent/Callable;)Lio/mazewall/profiler/ProfilingResult;
 	public static final fun profile (ZZLkotlin/jvm/functions/Function0;)Lio/mazewall/profiler/ProfilingResult;
+	public static synthetic fun profile$default (Ljava/lang/Runnable;ZZILjava/lang/Object;)Lio/mazewall/profiler/ProfilingResult;
+	public static synthetic fun profile$default (Ljava/util/concurrent/Callable;ZZILjava/lang/Object;)Lio/mazewall/profiler/ProfilingResult;
 	public static synthetic fun profile$default (ZZLkotlin/jvm/functions/Function0;ILjava/lang/Object;)Lio/mazewall/profiler/ProfilingResult;
 	public static final fun shutdown ()V
 	public static final fun wrap (Ljava/util/concurrent/ExecutorService;Z[Lio/mazewall/Policy;)Lio/mazewall/profiler/Profiler$ProfilerExecutorWrapper;
@@ -422,6 +426,7 @@ public final class io/mazewall/profiler/ProfilingCoverage {
 	public static final field Companion Lio/mazewall/profiler/ProfilingCoverage$Companion;
 	public fun <init> (Lio/mazewall/profiler/ProfileStrategy;Ljava/lang/String;ZLio/mazewall/profiler/IoUringVisibility;Lio/mazewall/profiler/PathResolutionQuality;Lio/mazewall/profiler/StackAttribution;IZLio/mazewall/profiler/ProfileEnvironment;ZLjava/util/List;)V
 	public synthetic fun <init> (Lio/mazewall/profiler/ProfileStrategy;Ljava/lang/String;ZLio/mazewall/profiler/IoUringVisibility;Lio/mazewall/profiler/PathResolutionQuality;Lio/mazewall/profiler/StackAttribution;IZLio/mazewall/profiler/ProfileEnvironment;ZLjava/util/List;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public static final fun absent ()Lio/mazewall/profiler/ProfilingCoverage;
 	public final fun component1 ()Lio/mazewall/profiler/ProfileStrategy;
 	public final fun component10 ()Z
 	public final fun component11 ()Ljava/util/List;
@@ -494,6 +499,9 @@ public final class io/mazewall/profiler/StackAttribution : java/lang/Enum {
 	public static fun getEntries ()Lkotlin/enums/EnumEntries;
 	public static fun valueOf (Ljava/lang/String;)Lio/mazewall/profiler/StackAttribution;
 	public static fun values ()[Lio/mazewall/profiler/StackAttribution;
+}
+
+public abstract interface class io/mazewall/profiler/TraceableWorkload : java/lang/Runnable {
 }
 
 public abstract interface class io/mazewall/profiler/UringOp {

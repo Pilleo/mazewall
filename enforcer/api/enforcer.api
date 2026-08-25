@@ -231,9 +231,11 @@ public final class io/mazewall/KernelFeatureMatrix$Companion {
 }
 
 public final class io/mazewall/Mazewall {
+	public static final field DEFAULT_SAFE Lio/mazewall/Policy;
 	public static final field NO_EXEC Lio/mazewall/Policy;
 	public static final field NO_EXEC_HOTSPOT Lio/mazewall/Policy;
 	public static final field NO_EXEC_NATIVE_IMAGE Lio/mazewall/Policy;
+	public static final field NO_EXEC_NO_FS_WRITE Lio/mazewall/Policy;
 	public static final field NO_NETWORK Lio/mazewall/Policy;
 	public static final field PURE_COMPUTE Lio/mazewall/Policy;
 	public static final field PURE_COMPUTE_UNSAFE Lio/mazewall/Policy;
@@ -243,6 +245,8 @@ public final class io/mazewall/Mazewall {
 	public static final fun builder (Lio/mazewall/RuntimeProfile;)Lio/mazewall/JavaPolicyBuilder;
 	public static final fun combine ([Lio/mazewall/Policy;)Lio/mazewall/Policy;
 	public static final fun combineProcessWide ([Lio/mazewall/Policy;)Lio/mazewall/Policy;
+	public static final fun combineThreadLocal ([Lio/mazewall/Policy;)Lio/mazewall/Policy;
+	public static final fun defaultSafe ()Lio/mazewall/Policy;
 	public static final fun installOnCurrentThread (Lio/mazewall/Policy;)Lio/mazewall/InstallationReceipt;
 	public static final fun installOnCurrentThread (Lio/mazewall/Policy;Lio/mazewall/enforcer/supervisor/StacktraceScopingPolicy;)Lio/mazewall/InstallationReceipt;
 	public static final fun installOnCurrentThread ([Lio/mazewall/Policy;)Lio/mazewall/InstallationReceipt;
@@ -254,6 +258,7 @@ public final class io/mazewall/Mazewall {
 	public static final fun noExec ()Lio/mazewall/Policy;
 	public static final fun noExecHotspot ()Lio/mazewall/Policy;
 	public static final fun noExecNativeImage ()Lio/mazewall/Policy;
+	public static final fun noExecNoFsWrite ()Lio/mazewall/Policy;
 	public static final fun noNetwork ()Lio/mazewall/Policy;
 	public static final fun pureCompute ()Lio/mazewall/Policy;
 	public static final fun pureComputeUnsafe ()Lio/mazewall/Policy;
@@ -263,6 +268,7 @@ public final class io/mazewall/Mazewall {
 	public static final fun threadLocalBuilder ()Lio/mazewall/JavaPolicyBuilder;
 	public static final fun threadLocalBuilder (Lio/mazewall/RuntimeProfile;)Lio/mazewall/JavaPolicyBuilder;
 	public static final fun wrap (Ljava/util/concurrent/ExecutorService;[Lio/mazewall/Policy;)Ljava/util/concurrent/ExecutorService;
+	public static final fun wrapContainedExecutor (Ljava/util/concurrent/ExecutorService;Lio/mazewall/Policy;)Ljava/util/concurrent/ExecutorService;
 	public static final fun wrapExecutor (Ljava/util/concurrent/ExecutorService;[Lio/mazewall/Policy;)Ljava/util/concurrent/ExecutorService;
 }
 
@@ -532,10 +538,12 @@ public final class io/mazewall/PolicyMode : java/lang/Enum {
 }
 
 public final class io/mazewall/PolicyPresets {
+	public static final field DEFAULT_SAFE Lio/mazewall/PolicyDefinition;
 	public static final field INSTANCE Lio/mazewall/PolicyPresets;
 	public static final field NO_EXEC Lio/mazewall/PolicyDefinition;
 	public static final field NO_EXEC_HOTSPOT Lio/mazewall/PolicyDefinition;
 	public static final field NO_EXEC_NATIVE_IMAGE Lio/mazewall/PolicyDefinition;
+	public static final field NO_EXEC_NO_FS_WRITE Lio/mazewall/PolicyDefinition;
 	public static final field NO_NETWORK Lio/mazewall/PolicyDefinition;
 	public static final field PURE_COMPUTE Lio/mazewall/PolicyDefinition;
 	public static final field PURE_COMPUTE_UNSAFE Lio/mazewall/PolicyDefinition;
@@ -773,6 +781,9 @@ public final class io/mazewall/enforcer/api/ContainedExecutors {
 	public final synthetic fun installOnCurrentThread ([Lio/mazewall/Policy;)V
 	public final fun installOnProcess ([Lio/mazewall/Policy;)Lio/mazewall/InstallationReceipt;
 	public final synthetic fun installOnProcess ([Lio/mazewall/Policy;)V
+	public final fun newCachedThreadPool (Lio/mazewall/Policy;)Ljava/util/concurrent/ExecutorService;
+	public final fun newFixedThreadPool (ILio/mazewall/Policy;)Ljava/util/concurrent/ExecutorService;
+	public final fun newSingleThreadExecutor (Lio/mazewall/Policy;)Ljava/util/concurrent/ExecutorService;
 	public final fun wrap (Ljava/util/concurrent/ExecutorService;Lio/mazewall/Policy;Lio/mazewall/enforcer/supervisor/StacktraceScopingPolicy;)Ljava/util/concurrent/ExecutorService;
 	public final fun wrap (Ljava/util/concurrent/ExecutorService;[Lio/mazewall/Policy;)Ljava/util/concurrent/ExecutorService;
 }

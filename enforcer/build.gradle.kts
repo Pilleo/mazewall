@@ -5,6 +5,7 @@ plugins {
     id("info.solidsoft.pitest")
     alias(libs.plugins.plantuml)
     alias(libs.plugins.kotlinPluginSerialization)
+    alias(libs.plugins.bcv)
 }
 
 kotlin {

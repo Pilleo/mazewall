@@ -3,6 +3,7 @@ import java.math.BigDecimal
 plugins {
     kotlin("jvm")
     id("info.solidsoft.pitest")
+    alias(libs.plugins.bcv)
 }
 
 kotlin {
