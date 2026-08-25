@@ -38,6 +38,11 @@ public class TierEDaemon(
     @Volatile private var eventsSeen: ULong = 0UL
 
     public fun serve() {
+        Runtime.getRuntime().addShutdownHook(Thread {
+            // Best-effort cleanup: unlink socket, flush stdout.
+            runCatching { Files.deleteIfExists(Path.of(socketPath)) }
+            System.out.flush()
+        })
         if (!runningAsRoot()) {
             System.err.println("[wp04kt] refusing: requires initial-userns root")
             exitProcess(1)
@@ -88,8 +93,11 @@ public class TierEDaemon(
             }
             val epoch = epochCounter.incrementAndGet()
             thread(name = "tier-e-session-$epoch", isDaemon = true) {
-                sessionLoop(epoch, cfd)
-                sessionActive.set(false)
+                try {
+                    sessionLoop(epoch, cfd)
+                } finally {
+                    sessionActive.set(false)
+                }
             }
         }
         Files.deleteIfExists(Path.of(socketPath))
@@ -109,6 +117,7 @@ public class TierEDaemon(
         var ringThread: Thread? = null
         var boundHandle: Long = -1L
         var events = 0UL
+        val stopRing = AtomicBoolean(false) // per-session, NOT shared across epochs
 
         fun startRingPoller(handle: Long) {
             try {
@@ -245,8 +254,6 @@ public class TierEDaemon(
             )
         }
     }
-
-    private val stopRing = AtomicBoolean(false)
 
     private fun runningAsRoot(): Boolean =
         runCatching {
