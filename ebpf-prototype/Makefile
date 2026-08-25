@@ -23,6 +23,9 @@ MARKER_USDT_SO := $(BUILD)/libmazewall_context_usdt.so
 WP03_LOADER := $(BUILD)/wp03_loader
 WP03_DRIVER := $(BUILD)/wp03_driver
 WP03_BENCH := $(BUILD)/wp03_bench
+WP04_DAEMON := $(BUILD)/wp04_daemon
+WP04_CLIENT := $(BUILD)/wp04_client
+BPF_SHIM := $(BUILD)/libtier_e_bpf.so
 
 # Resolves <bpf/*.h> from install_headers output. The bpf-target compile needs
 # the host multiarch include for asm/types.h (clang drops the default path).
@@ -37,7 +40,7 @@ endif
 
 .PHONY: all clean
 
-all: $(BPF_O) $(COLLECTOR) $(CTX_BPF_O) $(MARKER_SO) $(MARKER_USDT_SO) $(WP03_LOADER) $(WP03_DRIVER) $(WP03_BENCH)
+all: $(BPF_O) $(COLLECTOR) $(CTX_BPF_O) $(MARKER_SO) $(MARKER_USDT_SO) $(WP03_LOADER) $(WP03_DRIVER) $(WP03_BENCH) $(WP04_DAEMON) $(WP04_CLIENT) $(BPF_SHIM)
 
 # libbpf 1.5.0 carries two const-qualifier nits that clang promotes via -Werror
 # (upstream gcc builds don't see them); EXTRA_CFLAGS is appended last and wins.
@@ -105,6 +108,21 @@ $(WP03_DRIVER): driver/wp03_driver.c
 $(WP03_BENCH): driver/wp03_bench.c
 	mkdir -p $(BUILD)
 	$(CC) -O2 -g -Wall driver/wp03_bench.c -ldl -o $@
+
+$(WP04_DAEMON): daemon/wp04_daemon.c $(LIBBPF_A)
+	mkdir -p $(BUILD)
+	$(CC) $(CFLAGS_COMMON) daemon/wp04_daemon.c \
+		$(LIBBPF_A) -lelf -lz -lpthread -o $@
+
+$(WP04_CLIENT): client/wp04_client.c
+	mkdir -p $(BUILD)
+	$(CC) -O2 -g -Wall client/wp04_client.c -o $@
+
+# Stateless libbpf seam consumed by the :tier-e-proto Kotlin module (FFM).
+$(BPF_SHIM): daemon/tier_e_bpf_shim.c $(LIBBPF_A)
+	mkdir -p $(BUILD)
+	$(CC) $(CFLAGS_COMMON) -fPIC -shared daemon/tier_e_bpf_shim.c \
+		$(LIBBPF_A) -lelf -lz -lpthread -o $@
 
 clean:
 	rm -rf $(BUILD)

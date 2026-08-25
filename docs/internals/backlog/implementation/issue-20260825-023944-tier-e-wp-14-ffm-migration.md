@@ -25,6 +25,16 @@ map set per epoch, daemon death ⇒ DEAD.
 
 Design reference: [tier-e-design.md §4.1.1, §4.5, §10](../../designs/profiler/tier-e-design.md).
 
+### Scope update (2026-08-25 pivot)
+
+The Kotlin control plane landed EARLY as `:tier-e-proto` (opt-in Gradle module) behind a
+stateless libbpf binding shim (`ebpf-prototype/daemon/tier_e_bpf_shim.c` — no policy
+logic). What REMAINS in this work package is exactly the shim's replacement:
+pure-syscall object loading (BTF from `.bpf.o`, PROG_LOAD), raw-tracepoint open,
+perf_event uprobe attach, ringbuf mmap consumption in `SyscallInvoker` terms, plus the
+Kotlin `.note.stapsdt` parser. The daemon FSM/protocol/trust code above the seam is
+already Kotlin and must not be re-implemented here.
+
 **Needed:**
 
 1. New `SyscallInvoker` downcalls per ffm_safety skill checklist:

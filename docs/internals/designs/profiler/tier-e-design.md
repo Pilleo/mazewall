@@ -134,7 +134,12 @@ Rationale (full review in Appendix A):
 
 Build-order contract (WP-03): **G0a** proves the plain exported-symbol uprobe end-to-end;
 **G0b** swaps attachment to `usdt/<path>:mazewall:context_switch` (libbpf ≥ 0.8) and must
-reproduce G0a byte-for-byte; **G1** benchmarks both variants. Dependency impact
+reproduce G0a byte-for-byte; **G1** benchmarks both variants.
+
+> **Sign-off (2026-08-25, operator):** the Kotlin control plane ships **uprobe-first**
+> under this clause's escape hatch — G0a/G0b parity is already recorded in Appendix B —
+> with the `.note.stapsdt` parser as a focused follow-up before USDT becomes the default
+> attach mode there. Dependency impact
 (ask-first rule): `systemtap-sdt-devel` (`sys/sdt.h`) enters the *prototype build toolchain*
 only; libbpf remains prototype-only. WP-14 must either parse `.note.stapsdt` itself or
 justify a plain-uprobe fallback with recorded parity evidence before shipping without libbpf.

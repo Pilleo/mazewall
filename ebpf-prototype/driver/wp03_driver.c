@@ -23,6 +23,7 @@ int main(int argc, char **argv)
 {
 	int wait_us = argc > 1 ? atoi(argv[1]) : 1000000;
 	const char *lib_path = argc > 2 ? argv[2] : "./build/libmazewall_context.so";
+	int cycles = argc > 3 ? atoi(argv[3]) : 1;
 
 	void *handle = dlopen(lib_path, RTLD_NOW);
 	if (!handle) {
@@ -37,21 +38,25 @@ int main(int argc, char **argv)
 
 	usleep((useconds_t)wait_us);
 
-	marker(42);
-	for (int i = 0; i < 5; i++) {
-		syscall(SYS_getpid);
-		usleep(20000);
+	for (int c = 0; c < cycles; c++) {
+		marker(42);
+		for (int i = 0; i < 5; i++) {
+			syscall(SYS_getpid);
+			usleep(20000);
+		}
+		marker(7);
+		for (int i = 0; i < 3; i++) {
+			syscall(SYS_getpid);
+			usleep(20000);
+		}
+		marker(0);
+		for (int i = 0; i < 3; i++) {
+			syscall(SYS_getpid);
+			usleep(20000);
+		}
+		if (c + 1 < cycles)
+			usleep(400000); /* inter-cycle gap for live re-attach tests */
 	}
-	marker(7);
-	for (int i = 0; i < 3; i++) {
-		syscall(SYS_getpid);
-		usleep(20000);
-	}
-	marker(0);
-	for (int i = 0; i < 3; i++) {
-		syscall(SYS_getpid);
-		usleep(20000);
-	}
-	fprintf(stderr, "driver: phases complete (pid=%d)\n", getpid());
+	fprintf(stderr, "driver: %d phase cycle(s) complete (pid=%d)\n", cycles, getpid());
 	return 0;
 }

@@ -24,6 +24,14 @@ unprivileged. Invariants 5–7 live here.
 
 Design reference: [tier-e-design.md §4.4–§4.5, §5](../../designs/profiler/tier-e-design.md).
 
+### Implementation note (2026-08-25 pivot)
+
+Operator decision: the durable control plane is **Kotlin**, not C. The half-written C
+daemon (`wp04_daemon.c`) is retained ONLY as a disposable protocol oracle for cross-
+checking the `:tier-e-proto` Kotlin daemon; both implement the identical wire contract.
+The C daemon is deleted before WP-05 begins so Gate G2 certifies the real
+implementation. USDT attach in Kotlin ships uprobe-first per §4.1.1 sign-off.
+
 **Needed:**
 
 1. Control socket `/run/mazewall/context.sock`:
