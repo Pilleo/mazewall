@@ -477,16 +477,37 @@ subprojects {
     }
 }
 
+// Resolves the hooks directory for both normal checkouts (.git is a directory) and
+// linked git worktrees (.git is a "gitdir:" pointer file whose target stores the common
+// directory in its `commondir` file). Hooks belong to the common dir in both cases.
+val gitHooksDir: File by lazy {
+    val dotGit = rootDir.resolve(".git")
+    if (dotGit.isDirectory) {
+        dotGit.resolve("hooks")
+    } else {
+        val worktreeGitDir = File(
+            dotGit.readText().trim().removePrefix("gitdir:").trim(),
+        )
+        val commonDirRef = worktreeGitDir.resolve("commondir").readText().trim()
+        val commonDir = if (File(commonDirRef).isAbsolute) {
+            File(commonDirRef)
+        } else {
+            worktreeGitDir.resolve(commonDirRef).canonicalFile
+        }
+        commonDir.resolve("hooks")
+    }
+}
+
 val installGitHooks by tasks.registering(Copy::class) {
     group = "git"
     description = "Installs the pre-commit audit and verification hook"
     from("$rootDir/scripts/git-audit-hook.sh") {
         rename { "pre-commit" }
     }
-    into(file("$rootDir/.git/hooks"))
-    val targetFile = file("$rootDir/.git/hooks/pre-commit")
+    into(gitHooksDir)
+    val hookFile = gitHooksDir.resolve("pre-commit")
     doLast {
-        targetFile.setExecutable(true)
+        hookFile.setExecutable(true)
     }
 }
 
@@ -502,17 +523,28 @@ tasks.named("check") {
 
 
 
+// RefactorFirst's underlying maven/jgit tooling cannot resolve linked git worktrees (.git
+// file), so the informational report is skipped there; normal checkouts are unaffected.
+// The worktree branch is decided at configuration time (plain file inspection); the 'mvn'
+// availability probe stays inside the execution-time onlyIf because Gradle forbids spawning
+// external processes during configuration.
+val refactorFirstPlainCheckout = rootDir.resolve(".git").isDirectory
+
 tasks.register<Exec>("refactorFirstReport") {
     group = "verification"
     description = "Generates a RefactorFirst HTML report using Maven"
-    onlyIf {
-        try {
-            ProcessBuilder("mvn", "-v").redirectError(ProcessBuilder.Redirect.DISCARD).start().waitFor() == 0
-        } catch (e: Exception) {
-            false
+    if (!refactorFirstPlainCheckout) {
+        description = "$description (skipped in linked git worktrees: unsupported by jgit)"
+        onlyIf { false }
+        commandLine("refactor-first-skipped")
+    } else {
+        onlyIf {
+            runCatching {
+                ProcessBuilder("mvn", "-v").redirectError(ProcessBuilder.Redirect.DISCARD).start().waitFor() == 0
+            }.getOrDefault(false)
         }
+        commandLine("mvn", "org.hjug.refactorfirst.plugin:refactor-first-maven-plugin:0.9.0:htmlReport")
     }
-    commandLine("mvn", "org.hjug.refactorfirst.plugin:refactor-first-maven-plugin:0.9.0:htmlReport")
 }
 
 // Wipes every module's JUnit XML/binary result directories (all test variants).

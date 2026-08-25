@@ -508,7 +508,14 @@ class "UnsupportedPlatformException" as io.mazewall.UnsupportedPlatformException
 }
 interface "YamaPtraceScope" as io.mazewall.YamaPtraceScope {
 }
+enum "AttributionKind" as io.mazewall.core.AttributionKind {
+  NONE
+  EXPLICIT_CONTEXT
+  AGENT_CONTEXT
+  USER_NOTIF_ORACLE
+}
 class "ChildStdoutPump" as io.mazewall.core.ChildStdoutPump {
+  __
   +CountDownLatch getReady()
   +Thread getThread()
 }
@@ -519,6 +526,21 @@ class "CloneFlags" as io.mazewall.core.CloneFlags {
   + {static}boolean equals-impl(long, Object)
   + {static}long constructor-impl(long)
   + {static}boolean equals-impl0(long, long)
+}
+class "ContextId" as io.mazewall.core.ContextId {
+  ..
+  + {static}Companion Companion
+  + {static}int WIRE_SIZE_BYTES
+  __
+  +int getValue()
+  + {static}boolean isUnknown-impl(int)
+  + {static}byte[] encode-impl(int)
+  + {static}void encodeInto-impl(int, byte[], int)
+  + {static}String toString-impl(int)
+  + {static}int hashCode-impl(int)
+  + {static}boolean equals-impl(int, Object)
+  + {static}int constructor-impl(int)
+  + {static}boolean equals-impl0(int, int)
 }
 class "Deadline" as io.mazewall.core.Deadline {
   + {static}Companion Companion

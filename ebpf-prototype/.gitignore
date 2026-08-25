@@ -1,0 +1,11 @@
+# Build artifacts
+*.o
+*.a
+*.so
+*.skel.h
+/bpf/*.bpf.o
+/daemon/daemon
+/client/client
+build/
+bin/
+test_output/

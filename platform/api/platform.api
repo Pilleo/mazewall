@@ -397,6 +397,16 @@ public final class io/mazewall/core/Arch$Companion {
 	public final fun getAMD64 ()Lio/mazewall/core/Arch;
 }
 
+public final class io/mazewall/core/AttributionKind : java/lang/Enum {
+	public static final field AGENT_CONTEXT Lio/mazewall/core/AttributionKind;
+	public static final field EXPLICIT_CONTEXT Lio/mazewall/core/AttributionKind;
+	public static final field NONE Lio/mazewall/core/AttributionKind;
+	public static final field USER_NOTIF_ORACLE Lio/mazewall/core/AttributionKind;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lio/mazewall/core/AttributionKind;
+	public static fun values ()[Lio/mazewall/core/AttributionKind;
+}
+
 public final class io/mazewall/core/ChildStdoutPump {
 	public fun <init> (Ljava/util/concurrent/CountDownLatch;Ljava/lang/Thread;)V
 	public final fun component1 ()Ljava/util/concurrent/CountDownLatch;
@@ -422,6 +432,32 @@ public final class io/mazewall/core/CloneFlags {
 	public fun toString ()Ljava/lang/String;
 	public static fun toString-impl (J)Ljava/lang/String;
 	public final synthetic fun unbox-impl ()J
+}
+
+public final class io/mazewall/core/ContextId {
+	public static final field Companion Lio/mazewall/core/ContextId$Companion;
+	public static final field WIRE_SIZE_BYTES I
+	public static final synthetic fun box-impl (I)Lio/mazewall/core/ContextId;
+	public static fun constructor-impl (I)I
+	public static final fun encode-impl (I)[B
+	public static final fun encodeInto-impl (I[BI)V
+	public static synthetic fun encodeInto-impl$default (I[BIILjava/lang/Object;)V
+	public fun equals (Ljava/lang/Object;)Z
+	public static fun equals-impl (ILjava/lang/Object;)Z
+	public static final fun equals-impl0 (II)Z
+	public final fun getValue-pVg5ArA ()I
+	public fun hashCode ()I
+	public static fun hashCode-impl (I)I
+	public static final fun isUnknown-impl (I)Z
+	public fun toString ()Ljava/lang/String;
+	public static fun toString-impl (I)Ljava/lang/String;
+	public final synthetic fun unbox-impl ()I
+}
+
+public final class io/mazewall/core/ContextId$Companion {
+	public final fun decodeFrom-mfrSHYE ([BI)I
+	public static synthetic fun decodeFrom-mfrSHYE$default (Lio/mazewall/core/ContextId$Companion;[BIILjava/lang/Object;)I
+	public final fun getUNKNOWN-4AcJh-w ()I
 }
 
 public final class io/mazewall/core/Deadline {
