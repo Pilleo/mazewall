@@ -71,7 +71,6 @@ public class TierEDaemon(
             val cfd = posix.accept(listenFd)
             if (cfd < 0 || stopRequested.get()) break
 
-            // Bound recv blocking so an idle client can't hold the slot forever.
             posix.setRecvTimeout(cfd, RECV_TIMEOUT_MS)
 
             val cred = posix.peerCredentials(cfd)
@@ -88,6 +87,7 @@ public class TierEDaemon(
                 }
                 is AcceptDecision.Reject -> {
                     posix.sendAll(cfd, decision.reply.toByteArray())
+                    runCatching { posix.recv(cfd, ByteArray(64)) }
                     posix.close(cfd)
                 }
             }
@@ -118,7 +118,6 @@ public class TierEDaemon(
                 val rbHandle = shimRef.ringNew(handle)
                 stopRing.set(false)
                 ringThread = thread(name = "tier-e-ring-$epoch", isDaemon = false) {
-                    System.err.println("[dbg-ring] started epoch=$epoch")
                     while (!stopRequested.get() && !stopRing.get()) {
                         try {
                             shimRef.ringPoll(rbHandle, 50)
@@ -144,22 +143,18 @@ public class TierEDaemon(
         }
 
         fun reply(text: String) {
-            if (!posix.sendAll(cfd, text.toByteArray())) {
-                throw java.io.IOException("send failed")
-            }
+            if (!posix.sendAll(cfd, text.toByteArray())) throw java.io.IOException("send failed")
         }
 
         System.err.println("[dbg-kt] epoch=$epoch accepted")
 
         val buffer = ByteArray(512)
         var buffered = 0
-
         try {
             while (!stopRequested.get()) {
                 val n = posix.recv(cfd, buffer, buffered, buffer.size - buffered)
                 if (n <= 0) break
                 buffered += n
-
                 var scanStart = 0
                 while (scanStart < buffered) {
                     var nl = -1
@@ -169,18 +164,18 @@ public class TierEDaemon(
                     if (nl < 0) break
                     val line = String(buffer, scanStart, nl - scanStart).trim()
                     scanStart = nl + 1
-
                     when (val parsed = parseControlCommand(line)) {
                         is Either.Right -> reply(parsed.value.render())
                         is Either.Left -> when (val cmd = parsed.value) {
                             is ControlCommand.Attach -> try {
                                 val r = engine.onAttach(cmd)
                                 reply(r.render())
-                                if (r.ok) startRingPoller(engine.activeHandle() ?: return)
+                                if (r.ok) engine.activeHandle()?.let { h ->
+                                    boundHandle = h
+                                    startRingPoller(h)
+                                }
                             } catch (t: Throwable) {
-                                System.err.println(
-                                    "[wp04kt] attach crash: ${t::class.simpleName}: ${t.message}",
-                                )
+                                System.err.println("[wp04kt] attach crash: ${t::class.simpleName}: ${t.message}")
                                 t.printStackTrace()
                                 engine.close()
                                 reply(ControlReply.err("ATTACH_CRASH ${t.message}").render())
@@ -190,17 +185,15 @@ public class TierEDaemon(
                             ControlCommand.Shutdown -> {
                                 reply(ControlReply.ok("BYE").render())
                                 stopRequested.set(true)
-                                // Close BOTH fds: listener wakes accept loop,
-                                // session fd wakes recv so finally block runs
-                                // (DEAD + NOISE_PROFILE printed before exit).
-                                posix.close(listenFd)
-                                posix.close(cfd)
+                                runCatching {
+                                    val w = posix.connectUnix(socketPath)
+                                    if (w >= 0) posix.close(w)
+                                }
                             }
                         }
                     }
                     if (stopRequested.get()) break
                 }
-
                 if (scanStart > 0) {
                     System.arraycopy(buffer, scanStart, buffer, 0, buffered - scanStart)
                     buffered -= scanStart
@@ -211,41 +204,33 @@ public class TierEDaemon(
                 }
             }
         } catch (_: java.io.IOException) {
-            // peer vanished mid-command: session dies (invariant 7)
+            // peer vanished mid-command
         } finally {
             teardownRing()
             engine.close()
             posix.close(cfd)
-            println("[dbg] finally: boundHandle=$boundHandle")
             val dropped = if (boundHandle >= 0) runCatching {
                 shim.droppedTotal(boundHandle).toLong()
             }.getOrDefault(-1L) else -1L
             if (boundHandle >= 0) {
-                val counts = runCatching { shim.unknownCounts(boundHandle) }.getOrNull()
+                val counts = runCatching { shim.readPerNr(boundHandle) }.getOrNull()
                 if (counts != null) {
-                    val top = counts.withIndex()
-                        .filter { it.value > 0 }
-                        .sortedByDescending { it.value }
-                        .take(10)
-                    // Write to a dedicated FILE (bypasses stdout buffering).
-                    Files.writeString(
-                        Path.of("/tmp/wp05_noise.txt"),
-                        top.joinToString("\n") { "${it.index} ${it.value}" } + "\n",
-                    )
-                    System.err.println(
-                        "[wp04kt] NOISE_PROFILE " +
-                            top.joinToString(" ") { "${it.index}:${it.value}" },
-                    )
+                    val unknownTop = counts.sliceArray(0 until 512)
+                        .withIndex().filter { it.value > 0 }
+                        .sortedByDescending { it.value }.take(10)
+                    System.err.println("[wp04kt] NOISE_PROFILE " +
+                        unknownTop.joinToString(" ") { "${it.index}:${it.value}" })
+                    val attributedTop = counts.sliceArray(512 until 1024)
+                        .withIndex().filter { it.value > 0 }
+                        .sortedByDescending { it.value }.take(10)
+                    System.err.println("[wp04kt] ATTRIBUTED_PROFILE " +
+                        attributedTop.joinToString(" ") { "${it.index}:${it.value}" })
                 }
             }
             System.err.println(
                 "[wp04kt] epoch=$epoch DEAD events=$eventCount dropped=$dropped",
             )
         }
-
-        // Suppress unused warnings for variables captured by closures above.
-        @Suppress("UNUSED_EXPRESSION") printEvents
-        @Suppress("UNUSED_EXPRESSION") shimRef
     }
 
     private companion object {
@@ -261,35 +246,29 @@ public class TierEDaemon(
 }
 
 public fun main(args: Array<String>) {
-    if (args.isNotEmpty() && args[0] == "--probe-stdin") {
-        ProbeMain.probeStdin(args)
-        return
-    }
-    if (args.isNotEmpty() && args[0] == "--probe-cmdfile") {
-        ProbeMain.probeCmdfile(args)
-        return
-    }
-    if (args.isNotEmpty() && args[0] == "--probe") {
-        ProbeMain.probeSingle(args)
-        return
-    }
-
-    var sock = "/run/mazewall/wp04kt.sock"
-    var shimPath = "build/libtier_e_bpf.so"
-    var objPath = "build/context_probe.bpf.o"
-    var verbose = false
-    var i = 0
-    while (i < args.size) {
-        when (args[i]) {
-            "--sock" -> { require(i + 1 < args.size); sock = args[i + 1]; i += 2 }
-            "--shim" -> { require(i + 1 < args.size); shimPath = args[i + 1]; i += 2 }
-            "--bpf" -> { require(i + 1 < args.size); objPath = args[i + 1]; i += 2 }
-            "--verbose" -> { verbose = true; i += 1 }
-            else -> {
-                System.err.println("usage: wp04kt [--sock p] [--shim so] [--bpf o] [--verbose]")
-                exitProcess(2)
+    when {
+        args.isNotEmpty() && args[0] == "--probe-stdin" -> ProbeMain.probeStdin(args)
+        args.isNotEmpty() && args[0] == "--probe-cmdfile" -> ProbeMain.probeCmdfile(args)
+        args.isNotEmpty() && args[0] == "--probe" -> ProbeMain.probeSingle(args)
+        else -> {
+            var sock = "/run/mazewall/wp04kt.sock"
+            var shimPath = "build/libtier_e_bpf.so"
+            var objPath = "build/context_probe.bpf.o"
+            var verbose = false
+            var i = 0
+            while (i < args.size) {
+                when (args[i]) {
+                    "--sock" -> { require(i + 1 < args.size); sock = args[i + 1]; i += 2 }
+                    "--shim" -> { require(i + 1 < args.size); shimPath = args[i + 1]; i += 2 }
+                    "--bpf" -> { require(i + 1 < args.size); objPath = args[i + 1]; i += 2 }
+                    "--verbose" -> { verbose = true; i += 1 }
+                    else -> {
+                        System.err.println("usage: wp04kt [--sock p] [--shim so] [--bpf o] [--verbose]")
+                        exitProcess(2)
+                    }
+                }
             }
+            TierEDaemon(sock, shimPath, objPath, printEvents = verbose).serve()
         }
     }
-    TierEDaemon(sock, shimPath, objPath, printEvents = verbose).serve()
 }

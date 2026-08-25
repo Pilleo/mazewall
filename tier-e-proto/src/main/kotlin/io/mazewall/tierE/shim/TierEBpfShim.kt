@@ -39,4 +39,7 @@ public interface TierEBpfShim {
 
     /** Reads per-syscall-nr UNKNOWN counters into a 512-element array. */
     public fun unknownCounts(handle: Long): LongArray
+
+    /** Reads [unknown(0..511) + attributed(512..1023)] per-syscall-nr counters. */
+    public fun readPerNr(handle: Long): LongArray
 }

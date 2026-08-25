@@ -88,6 +88,10 @@ public class LibbpfShim(
         "te_unknown_counts",
         FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.ADDRESS, ValueLayout.ADDRESS),
     )
+    private val hReadPerNr: MethodHandle = bind(
+        "te_read_per_nr",
+        FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.ADDRESS, ValueLayout.ADDRESS),
+    )
     private val hDestroy: MethodHandle = bind(
         "te_destroy",
         FunctionDescriptor.ofVoid(ValueLayout.ADDRESS),
@@ -144,6 +148,18 @@ public class LibbpfShim(
         val result = LongArray(512)
         for (i in 0 until 512) {
             result[i] = outSeg.get(ValueLayout.JAVA_LONG, i.toLong() * ValueLayout.JAVA_LONG.byteSize())
+        }
+        return result
+    }
+
+    /** Reads [unknown_by_nr(0..511), attributed_by_nr(512..1023)] counters. */
+    override fun readPerNr(handle: Long): LongArray {
+        val out = arena.allocate(1024L * ValueLayout.JAVA_LONG.byteSize())
+        val rc = hReadPerNr.invoke(MemorySegment.ofAddress(handle), out) as Int
+        if (rc != 0) throw ShimException("readPerNr", rc, lastError())
+        val result = LongArray(1024)
+        for (idx in 0 until 1024) {
+            result[idx] = out.get(ValueLayout.JAVA_LONG, idx.toLong() * ValueLayout.JAVA_LONG.byteSize())
         }
         return result
     }

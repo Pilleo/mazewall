@@ -74,6 +74,15 @@ struct {
 	__type(value, __u64);
 } unknown_by_nr SEC(".maps");
 
+/* Per-syscall-nr ATTRIBUTED counter: incremented when a syscall has a valid
+ * semantic context AND passes the TGID filter. */
+struct {
+	__uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
+	__uint(max_entries, 512);
+	__type(key, __u32);
+	__type(value, __u64);
+} attributed_by_nr SEC(".maps");
+
 SEC("uprobe")
 int BPF_UPROBE(tier_e_on_marker, unsigned int context_id)
 {
