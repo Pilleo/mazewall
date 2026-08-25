@@ -677,6 +677,12 @@ public final class io/mazewall/core/JvmChildSpec {
 	public fun toString ()Ljava/lang/String;
 }
 
+public final class io/mazewall/core/MazewallContext {
+	public static final field INSTANCE Lio/mazewall/core/MazewallContext;
+	public final fun current-4AcJh-w ()I
+	public final fun withContext--TEld-Q (ILkotlin/jvm/functions/Function0;)Ljava/lang/Object;
+}
+
 public final class io/mazewall/core/MemoryAddress {
 	public static final synthetic fun box-impl (J)Lio/mazewall/core/MemoryAddress;
 	public static fun constructor-impl (J)J
