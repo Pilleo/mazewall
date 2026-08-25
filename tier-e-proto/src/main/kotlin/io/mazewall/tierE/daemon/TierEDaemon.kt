@@ -216,6 +216,7 @@ public class TierEDaemon(
             teardownRing()
             engine.close()
             posix.close(cfd)
+            println("[dbg] finally: boundHandle=$boundHandle")
             val dropped = if (boundHandle >= 0) runCatching {
                 shim.droppedTotal(boundHandle).toLong()
             }.getOrDefault(-1L) else -1L
@@ -226,8 +227,13 @@ public class TierEDaemon(
                         .filter { it.value > 0 }
                         .sortedByDescending { it.value }
                         .take(10)
+                    // Write to a dedicated FILE (bypasses stdout buffering).
+                    Files.writeString(
+                        Path.of("/tmp/wp05_noise.txt"),
+                        top.joinToString("\n") { "${it.index} ${it.value}" } + "\n",
+                    )
                     System.err.println(
-                        "[wp04kt] epoch=$epoch NOISE_PROFILE " +
+                        "[wp04kt] NOISE_PROFILE " +
                             top.joinToString(" ") { "${it.index}:${it.value}" },
                     )
                 }
