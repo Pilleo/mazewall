@@ -204,6 +204,21 @@ int main(int argc, char **argv)
 	}
 
 	ring_buffer__free(ring);
+
+	int dropped_fd = bpf_object__find_map_fd_by_name(object, "dropped_events");
+	if (dropped_fd >= 0) {
+		int nr_cpus = libbpf_num_possible_cpus();
+		unsigned long long per_cpu[512] = {};
+		unsigned long long total = 0;
+		if (nr_cpus > 0 && nr_cpus <= 512 &&
+		    bpf_map_lookup_elem(dropped_fd, &key, per_cpu) == 0) {
+			for (int cpu = 0; cpu < nr_cpus; cpu++)
+				total += per_cpu[cpu];
+		}
+		fprintf(stderr, "[wp03] dropped=%llu complete=%s\n", total,
+			total == 0 ? "true" : "false");
+	}
+
 	bpf_link__destroy(marker_link);
 	bpf_link__destroy(enter_link);
 	bpf_object__close(object);

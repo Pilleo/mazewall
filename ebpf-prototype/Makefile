@@ -22,6 +22,7 @@ MARKER_SO := $(BUILD)/libmazewall_context.so
 MARKER_USDT_SO := $(BUILD)/libmazewall_context_usdt.so
 WP03_LOADER := $(BUILD)/wp03_loader
 WP03_DRIVER := $(BUILD)/wp03_driver
+WP03_BENCH := $(BUILD)/wp03_bench
 
 # Resolves <bpf/*.h> from install_headers output. The bpf-target compile needs
 # the host multiarch include for asm/types.h (clang drops the default path).
@@ -36,7 +37,7 @@ endif
 
 .PHONY: all clean
 
-all: $(BPF_O) $(COLLECTOR) $(CTX_BPF_O) $(MARKER_SO) $(MARKER_USDT_SO) $(WP03_LOADER) $(WP03_DRIVER)
+all: $(BPF_O) $(COLLECTOR) $(CTX_BPF_O) $(MARKER_SO) $(MARKER_USDT_SO) $(WP03_LOADER) $(WP03_DRIVER) $(WP03_BENCH)
 
 # libbpf 1.5.0 carries two const-qualifier nits that clang promotes via -Werror
 # (upstream gcc builds don't see them); EXTRA_CFLAGS is appended last and wins.
@@ -100,6 +101,10 @@ $(WP03_LOADER): driver/wp03_loader.c $(LIBBPF_A)
 $(WP03_DRIVER): driver/wp03_driver.c
 	mkdir -p $(BUILD)
 	$(CC) -O2 -g -Wall driver/wp03_driver.c -ldl -o $@
+
+$(WP03_BENCH): driver/wp03_bench.c
+	mkdir -p $(BUILD)
+	$(CC) -O2 -g -Wall driver/wp03_bench.c -ldl -o $@
 
 clean:
 	rm -rf $(BUILD)

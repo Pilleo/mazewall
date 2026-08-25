@@ -49,6 +49,13 @@ struct {
 	__type(value, __u32); /* target TGID */
 } target_tgid SEC(".maps");
 
+struct {
+	__uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
+	__uint(max_entries, 1);
+	__type(key, __u32);
+	__type(value, __u64);
+} dropped_events SEC(".maps");
+
 SEC("uprobe")
 int BPF_UPROBE(tier_e_on_marker, unsigned int context_id)
 {
@@ -94,8 +101,12 @@ int BPF_PROG(tier_e_sys_enter_ctx, struct pt_regs *regs, long id)
 
 	struct context_event *event =
 		bpf_ringbuf_reserve(&context_events, sizeof(*event), 0);
-	if (!event)
-		return 0; /* drop accounting arrives with WP-06 */
+	if (!event) {
+		__u64 one = 1;
+		__u32 drop_key = 0;
+		bpf_map_update_elem(&dropped_events, &drop_key, &one, BPF_ADD);
+		return 0;
+	}
 
 	event->ktime_ns = bpf_ktime_get_ns();
 	event->tgid = tgid;
