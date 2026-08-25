@@ -21,24 +21,8 @@ class ComponentRouter(
     companion object {
         const val DEFAULT_ADAPTER = "jules"
 
-        val DEFAULT_ROUTES: Map<String, String> = mapOf(
-            "enforcer" to "antigravity-acp-developer",
-            "kernel" to "antigravity-acp-developer",
-            "seccomp" to "antigravity-acp-developer",
-            "landlock" to "antigravity-acp-developer",
-            "ffm" to "antigravity-acp-developer",
-            "portal" to "antigravity-acp-developer",
-            "profiler" to "implementation-software-developer-grok",
-            "shell" to "implementation-software-developer-grok",
-            "podman" to "implementation-software-developer-grok",
-            "container" to "implementation-software-developer-grok",
-            "platform" to "implementation-software-developer-grok",
-            "docs" to "founding-systems-security-engineer",
-            "architecture" to "founding-systems-security-engineer",
-            "spec" to "founding-systems-security-engineer",
-            "design" to "founding-systems-security-engineer",
-        )
-
+        /** Opt-in table (env): component -> roster urlKey. Empty = Jules for all. */
+        val DEFAULT_ROUTES: Map<String, String> = emptyMap()
         private val COMPONENT_RE = Regex("""\*\*Component:\*\*\s*(\S+)""")
 
         /** Parses PAPERCLIP_COMPONENT_ROUTES entries of the form `component=urlKey`. */

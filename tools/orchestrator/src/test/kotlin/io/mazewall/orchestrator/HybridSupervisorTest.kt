@@ -126,32 +126,33 @@ class ComponentRouterTest {
     private val router = ComponentRouter()
 
     @Test
-    fun `routes plan-md component table to roster urlKeys`() {
-        assertEquals("antigravity-acp-developer", router.urlKeyFor("enforcer"))
-        assertEquals("antigravity-acp-developer", router.urlKeyFor("portal"))
-        assertEquals("implementation-software-developer-grok", router.urlKeyFor("profiler"))
-        assertEquals("implementation-software-developer-grok", router.urlKeyFor("platform"))
-        assertEquals("founding-systems-security-engineer", router.urlKeyFor("docs"))
-        assertEquals("founding-systems-security-engineer", router.urlKeyFor("architecture"))
+    fun `jules is the primary worker - no component routes by default`() {
+        // Operator directive 2026-08-25: every component falls back to the
+        // default adapter unless explicitly overridden via env.
+        for (component in listOf("enforcer", "portal", "profiler", "platform", "docs", "nonexistent")) {
+            assertNull(router.urlKeyFor(component), component)
+        }
     }
 
     @Test
-    fun `unknown or absent components return null for default-adapter fallback`() {
-        assertNull(router.urlKeyFor("nonexistent"))
-        assertNull(router.urlKeyFor(null))
-        assertNull(router.urlKeyFor(""))
+    fun `plan-md table re-enables per component via overrides`() {
+        val optIn = ComponentRouter(customRoutes = ComponentRouter.parseOverrides("enforcer=antigravity-acp-developer,docs=founding-systems-security-engineer"))
+        assertEquals("antigravity-acp-developer", optIn.urlKeyFor("enforcer"))
+        assertEquals("founding-systems-security-engineer", optIn.urlKeyFor("docs"))
+        assertEquals(null, optIn.urlKeyFor("profiler"), "unlisted components stay on Jules")
     }
 
     @Test
     fun `matching is case-insensitive and trimmed`() {
-        assertEquals("antigravity-acp-developer", router.urlKeyFor(" ENFORCER "))
+        val optIn = ComponentRouter(customRoutes = mapOf("kernel" to "antigravity-acp-developer"))
+        assertEquals("antigravity-acp-developer", optIn.urlKeyFor(" KERNEL "))
     }
 
     @Test
-    fun `custom overrides merge over defaults`() {
+    fun `custom overrides resolve independently of the now-empty default table`() {
         val custom = ComponentRouter(customRoutes = mapOf("tools" to "vibe-acp-developer"))
         assertEquals("vibe-acp-developer", custom.urlKeyFor("tools"))
-        assertEquals("antigravity-acp-developer", custom.urlKeyFor("enforcer"))
+        assertNull(custom.urlKeyFor("enforcer"), "no implicit table entries anymore")
     }
 
     @Test
