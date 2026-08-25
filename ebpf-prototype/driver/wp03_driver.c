@@ -22,9 +22,9 @@ typedef void (*marker_fn)(uint32_t);
 int main(int argc, char **argv)
 {
 	int wait_us = argc > 1 ? atoi(argv[1]) : 1000000;
-	(void)argc;
+	const char *lib_path = argc > 2 ? argv[2] : "./build/libmazewall_context.so";
 
-	void *handle = dlopen("./build/libmazewall_context.so", RTLD_NOW);
+	void *handle = dlopen(lib_path, RTLD_NOW);
 	if (!handle) {
 		fprintf(stderr, "driver: dlopen failed: %s\n", dlerror());
 		return 1;
