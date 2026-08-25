@@ -113,7 +113,9 @@ public class TierEDaemon(
         var events = 0UL
 
         fun startRingPoller(handle: Long) {
+            println("[dbg-ring] startRingPoller handle=$handle")
             val fd = shimRef.ringFd(handle)
+            println("[dbg-ring] fd=$fd")
             ringReader?.close()
             ringReader = RingbufReader(fd, ringDataLength) { event ->
                 events++
@@ -124,10 +126,16 @@ public class TierEDaemon(
             }
             stopRing.set(false)
             ringThread?.join(100)
-            ringThread = thread(name = "tier-e-ring-$epoch", isDaemon = true) {
+            ringThread = thread(name = "tier-e-ring-$epoch", isDaemon = false) {
+                System.err.println("[dbg-ring] thread entered")
+                var pollCount = 0
                 while (!stopRequested.get() && !stopRing.get()) {
                     try {
                         ringReader?.pollOnce()
+                        pollCount++
+                        if (pollCount == 1 || pollCount % 200 == 0) {
+                            System.err.println("[dbg-ring] poll iter=$pollCount")
+                        }
                     } catch (t: Throwable) {
                         System.err.println("[wp04kt] ring error: $t")
                         break
@@ -181,8 +189,8 @@ public class TierEDaemon(
                                     throw java.io.IOException("send failed")
                                 }
                                 if (r.ok) {
-                                    boundHandle = engine.activeHandle() ?: -1L
-                                    startRingPoller(boundHandle)
+                                    val h = engine.activeHandle()
+                                    if (h != null) startRingPoller(h)
                                 }
                             } catch (t: Throwable) {
                                 // Fail-closed diagnostics: control-plane defects
