@@ -36,4 +36,7 @@ public interface TierEBpfShim {
     public fun ringPoll(rbHandle: Long, timeoutMs: Int): Int
 
     public fun ringDestroy(rbHandle: Long)
+
+    /** Reads per-syscall-nr UNKNOWN counters into a 512-element array. */
+    public fun unknownCounts(handle: Long): LongArray
 }

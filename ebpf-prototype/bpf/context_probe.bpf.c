@@ -64,6 +64,16 @@ struct {
 	__type(value, __u64);
 } hit_counters SEC(".maps");
 
+/* Per-syscall-nr UNKNOWN counter: incremented when a syscall passes the
+ * TGID filter but has no semantic context (storage empty or zero).
+ * These events are NEVER emitted to the ring buffer (invariant 3). */
+struct {
+	__uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
+	__uint(max_entries, 512);
+	__type(key, __u32); /* syscall number */
+	__type(value, __u64);
+} unknown_by_nr SEC(".maps");
+
 SEC("uprobe")
 int BPF_UPROBE(tier_e_on_marker, unsigned int context_id)
 {
@@ -112,8 +122,14 @@ int BPF_PROG(tier_e_sys_enter_ctx, struct pt_regs *regs, long id)
 
 	struct task_struct *task = (struct task_struct *)bpf_get_current_task_btf();
 	__u32 *stored = bpf_task_storage_get(&context_storage, task, NULL, 0);
-	if (!stored || *stored == 0)
+	if (!stored || *stored == 0) {
+		__u32 nr_key = (__u32)id;
+		if (nr_key < 512) {
+			__u64 one_v = 1;
+			bpf_map_update_elem(&unknown_by_nr, &nr_key, &one_v, BPF_ADD);
+		}
 		return 0; /* UNKNOWN is data, not an event (invariant 3) */
+	}
 
 	struct context_event *event =
 		bpf_ringbuf_reserve(&context_events, sizeof(*event), 0);

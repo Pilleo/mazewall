@@ -189,10 +189,11 @@ public class TierEDaemon(
                             ControlCommand.Shutdown -> {
                                 reply(ControlReply.ok("BYE").render())
                                 stopRequested.set(true)
-                                try {
-                                    val w = posix.connectUnix(socketPath)
-                                    if (w >= 0) posix.close(w)
-                                } catch (_: Exception) { }
+                                // Close BOTH fds: listener wakes accept loop,
+                                // session fd wakes recv so finally block runs
+                                // (DEAD + NOISE_PROFILE printed before exit).
+                                posix.close(listenFd)
+                                posix.close(cfd)
                             }
                         }
                     }
@@ -217,6 +218,19 @@ public class TierEDaemon(
             val dropped = if (boundHandle >= 0) runCatching {
                 shim.droppedTotal(boundHandle).toLong()
             }.getOrDefault(-1L) else -1L
+            if (boundHandle >= 0) {
+                val counts = runCatching { shim.unknownCounts(boundHandle) }.getOrNull()
+                if (counts != null) {
+                    val top = counts.withIndex()
+                        .filter { it.value > 0 }
+                        .sortedByDescending { it.value }
+                        .take(10)
+                    System.err.println(
+                        "[wp04kt] epoch=$epoch NOISE_PROFILE " +
+                            top.joinToString(" ") { "${it.index}:${it.value}" },
+                    )
+                }
+            }
             System.err.println(
                 "[wp04kt] epoch=$epoch DEAD events=$eventCount dropped=$dropped",
             )

@@ -84,6 +84,10 @@ public class LibbpfShim(
         "te_ring_destroy",
         FunctionDescriptor.ofVoid(ValueLayout.ADDRESS),
     )
+    private val hUnknownCounts: MethodHandle = bind(
+        "te_unknown_counts",
+        FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.ADDRESS, ValueLayout.ADDRESS),
+    )
     private val hDestroy: MethodHandle = bind(
         "te_destroy",
         FunctionDescriptor.ofVoid(ValueLayout.ADDRESS),
@@ -131,6 +135,17 @@ public class LibbpfShim(
         val out = arena.allocate(ValueLayout.JAVA_LONG)
         rc("droppedTotal", hDroppedTotal.invoke(MemorySegment.ofAddress(handle), out) as Int)
         return out.get(ValueLayout.JAVA_LONG, 0).toULong()
+    }
+
+    override fun unknownCounts(handle: Long): LongArray {
+        val outSeg = arena.allocate(512L * ValueLayout.JAVA_LONG.byteSize())
+        val rc = hUnknownCounts.invoke(MemorySegment.ofAddress(handle), outSeg) as Int
+        if (rc != 0) throw ShimException("unknownCounts", rc, lastError())
+        val result = LongArray(512)
+        for (i in 0 until 512) {
+            result[i] = outSeg.get(ValueLayout.JAVA_LONG, i.toLong() * ValueLayout.JAVA_LONG.byteSize())
+        }
+        return result
     }
 
     override fun destroy(handle: Long) {

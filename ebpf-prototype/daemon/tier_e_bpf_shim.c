@@ -268,6 +268,35 @@ void te_ring_destroy(void *rb_handle)
 	free(rc);
 }
 
+int te_unknown_counts(void *handle, long *out)
+{
+	struct te_ctx *ctx = handle;
+	if (!ctx || !ctx->object)
+		return -EINVAL;
+	int nr_cpus = libbpf_num_possible_cpus();
+	if (nr_cpus <= 0 || nr_cpus > 512)
+		return -ERANGE;
+	__u32 ukey = 0;
+	int fd = bpf_object__find_map_fd_by_name(ctx->object, "unknown_by_nr");
+	if (fd < 0)
+		return -ENOENT;
+	unsigned long long *per = calloc(nr_cpus * 512, sizeof(unsigned long long));
+	if (!per)
+		return -ENOMEM;
+	if (bpf_map_lookup_elem(fd, &ukey, per)) {
+		free(per);
+		return -errno;
+	}
+	for (int nr = 0; nr < 512; nr++) {
+		unsigned long long total = 0;
+		for (int cpu = 0; cpu < nr_cpus; cpu++)
+			total += per[cpu * 512 + nr];
+		out[nr] = total;
+	}
+	free(per);
+	return 0;
+}
+
 void te_destroy(void *handle)
 {
 	struct te_ctx *ctx = handle;

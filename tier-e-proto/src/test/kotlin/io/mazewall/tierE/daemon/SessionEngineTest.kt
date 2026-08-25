@@ -46,6 +46,8 @@ internal class SessionEngineTest {
         override fun ringNew(handle: Long): Long = 0
         override fun ringPoll(rbHandle: Long, timeoutMs: Int): Int = 0
         override fun ringDestroy(rbHandle: Long) {}
+
+        override fun unknownCounts(handle: Long): LongArray = LongArray(512)
     }
 
     private val shim = FakeShim()
