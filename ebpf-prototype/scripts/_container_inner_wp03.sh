@@ -1,17 +1,25 @@
 #!/usr/bin/env bash
-# Inner container script for Tier E WP-03 Gate G0a.
+# Inner container script for Tier E WP-03 Gates G0a + G0b.
 # Expects /work mounted on ebpf-prototype/ with prebuilt artifacts.
 set -uo pipefail
 
-DRIVER_PID_FILE=/tmp/tier_e_wp03_driver.pid
+run_round() {
+    local label="$1" so="$2" mode="$3"
+    echo "===== $label ====="
+    ./build/wp03_driver 1000000 &
+    local driver=$!
+    sleep 0.15
+    ./build/wp03_loader --pid "$driver" --attach "$mode" \
+        --marker "./build/$so" --duration 8
+    local rc=$?
+    wait "$driver" 2>/dev/null
+    echo "===== $label loader_rc=$rc ====="
+}
 
-./build/wp03_driver 1000000 &
-DRIVER=$!
-echo "$DRIVER" > "$DRIVER_PID_FILE"
+# G0b precondition: the USDT variant must carry stapsdt ELF notes; the plain
+# variant must not (wrong-binary detection evidence).
+echo "[tier-e] usdt_so_stapsdt_hits=$(grep -ac stapsdt build/libmazewall_context_usdt.so)"
+echo "[tier-e] plain_so_stapsdt_hits=$(grep -ac stapsdt build/libmazewall_context.so)"
 
-sleep 0.15
-./build/wp03_loader --pid "$DRIVER" --marker ./build/libmazewall_context.so --duration 8
-LOADER_RC=$?
-
-wait "$DRIVER" 2>/dev/null
-exit "$LOADER_RC"
+run_round "G0a_plain_uprobe" libmazewall_context.so uprobe
+run_round "G0b_usdt"         libmazewall_context_usdt.so usdt

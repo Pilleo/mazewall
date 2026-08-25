@@ -10,15 +10,17 @@
  * by design (design doc §4.1). Missing/zero storage = UNKNOWN = no event.
  */
 
+#include <stdbool.h>
 #include <linux/bpf.h>
+/* Full pt_regs layout for PT_REGS_* access (pre-vmlinux.h prototype;
+ * CO-RE relocation is not required by this program). Must precede
+ * bpf_tracing.h / usdt.bpf.h. */
+#include <asm/ptrace.h>
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_tracing.h>
+#include <bpf/usdt.bpf.h>
 
 char LICENSE[] SEC("license") = "GPL";
-
-/* Full pt_regs layout for PT_REGS_PARM* access (pre-vmlinux.h prototype;
- * CO-RE relocation is not required by this program). */
-#include <asm/ptrace.h>
 
 struct context_event {
 	__u64 ktime_ns;
@@ -49,6 +51,21 @@ struct {
 
 SEC("uprobe")
 int BPF_UPROBE(tier_e_on_marker, unsigned int context_id)
+{
+	__u32 value = context_id;
+	struct task_struct *task = (struct task_struct *)bpf_get_current_task_btf();
+	__u32 *slot = bpf_task_storage_get(&context_storage, task, &value,
+					   BPF_LOCAL_STORAGE_GET_F_CREATE);
+	if (slot)
+		*slot = value;
+	return 0;
+}
+
+/* G0b variant: same storage write, attached semantically to
+ * mazewall:context_switch via the ELF .note.stapsdt descriptor instead of a
+ * raw symbol offset. Argument location is resolved by bpf_usdt machinery. */
+SEC("usdt")
+int BPF_USDT(tier_e_on_marker_usdt, unsigned int context_id)
 {
 	__u32 value = context_id;
 	struct task_struct *task = (struct task_struct *)bpf_get_current_task_btf();

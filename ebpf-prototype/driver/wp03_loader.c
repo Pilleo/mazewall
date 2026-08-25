@@ -63,6 +63,7 @@ int main(int argc, char **argv)
 	long target_tgid = 0;
 	double duration_s = 8.0;
 	const char *marker_path = "./build/libmazewall_context.so";
+	const char *attach_mode = "uprobe";
 
 	for (int i = 1; i < argc; i++) {
 		if (strcmp(argv[i], "--pid") == 0 && i + 1 < argc) {
@@ -71,11 +72,18 @@ int main(int argc, char **argv)
 			duration_s = (double)parse_long(argv[++i], "--duration");
 		} else if (strcmp(argv[i], "--marker") == 0 && i + 1 < argc) {
 			marker_path = argv[++i];
+		} else if (strcmp(argv[i], "--attach") == 0 && i + 1 < argc) {
+			attach_mode = argv[++i];
 		} else {
 			fprintf(stderr,
-				"usage: wp03_loader --pid <tgid> [--marker <so>] [--duration s]\n");
+				"usage: wp03_loader --pid <tgid> [--marker <so>] "
+				"[--attach uprobe|usdt] [--duration s]\n");
 			return 2;
 		}
+	}
+	if (strcmp(attach_mode, "uprobe") && strcmp(attach_mode, "usdt")) {
+		fprintf(stderr, "unknown --attach mode: %s\n", attach_mode);
+		return 2;
 	}
 	if (target_tgid <= 0) {
 		fprintf(stderr, "a positive --pid is mandatory\n");
@@ -121,14 +129,24 @@ int main(int argc, char **argv)
 
 	struct bpf_program *marker_prog =
 		bpf_object__find_program_by_name(object, "tier_e_on_marker");
-	LIBBPF_OPTS(bpf_uprobe_opts, uprobe_opts,
-		    .func_name = "mazewall_context_marker",
-		    .retprobe = false);
-	struct bpf_link *marker_link = bpf_program__attach_uprobe_opts(
-		marker_prog, (pid_t)target_tgid, marker_path, 0, &uprobe_opts);
+	struct bpf_link *marker_link = NULL;
+	if (strcmp(attach_mode, "usdt") == 0) {
+		marker_prog = bpf_object__find_program_by_name(object,
+							       "tier_e_on_marker_usdt");
+		marker_link = bpf_program__attach_usdt(marker_prog,
+						       (pid_t)target_tgid, marker_path,
+						       "mazewall", "context_switch",
+						       NULL);
+	} else {
+		LIBBPF_OPTS(bpf_uprobe_opts, uprobe_opts,
+			    .func_name = "mazewall_context_marker",
+			    .retprobe = false);
+		marker_link = bpf_program__attach_uprobe_opts(
+			marker_prog, (pid_t)target_tgid, marker_path, 0, &uprobe_opts);
+	}
 	if (!marker_link) {
-		fprintf(stderr, "failed to attach uprobe on %s:mazewall_context_marker: %s\n",
-			marker_path, strerror(errno));
+		fprintf(stderr, "failed to attach %s to %s: %s\n",
+			attach_mode, marker_path, strerror(errno));
 		bpf_link__destroy(enter_link);
 		bpf_object__close(object);
 		return 1;
@@ -148,7 +166,7 @@ int main(int argc, char **argv)
 	signal(SIGINT, on_signal);
 	signal(SIGTERM, on_signal);
 
-	fprintf(stderr, "[wp03] attached to tgid=%ld via %s\n", target_tgid, marker_path);
+	fprintf(stderr, "[wp03] tgid=%ld attach=%s marker=%s\n", target_tgid, attach_mode, marker_path);
 	const double deadline = now_monotonic_s() + duration_s;
 	while (!g_stop) {
 		int consumed = ring_buffer__poll(ring, 100);

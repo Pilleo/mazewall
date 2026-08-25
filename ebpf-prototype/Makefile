@@ -19,6 +19,7 @@ COLLECTOR := $(BUILD)/tier_e_collector
 CTX_BPF_C := bpf/context_probe.bpf.c
 CTX_BPF_O := $(BUILD)/context_probe.bpf.o
 MARKER_SO := $(BUILD)/libmazewall_context.so
+MARKER_USDT_SO := $(BUILD)/libmazewall_context_usdt.so
 WP03_LOADER := $(BUILD)/wp03_loader
 WP03_DRIVER := $(BUILD)/wp03_driver
 
@@ -35,7 +36,7 @@ endif
 
 .PHONY: all clean
 
-all: $(BPF_O) $(COLLECTOR) $(CTX_BPF_O) $(MARKER_SO) $(WP03_LOADER) $(WP03_DRIVER)
+all: $(BPF_O) $(COLLECTOR) $(CTX_BPF_O) $(MARKER_SO) $(MARKER_USDT_SO) $(WP03_LOADER) $(WP03_DRIVER)
 
 # libbpf 1.5.0 carries two const-qualifier nits that clang promotes via -Werror
 # (upstream gcc builds don't see them); EXTRA_CFLAGS is appended last and wins.
@@ -81,6 +82,14 @@ $(MARKER_SO): marker/mazewall_context.c
 	mkdir -p $(BUILD)
 	$(CC) -O2 -g -Wall -fPIC -shared \
 		-Wl,-soname,libmazewall_context.so \
+		marker/mazewall_context.c -o $@
+
+# G0b variant: exposes the mazewall:context_switch USDT probe in
+# .note.stapsdt (requires systemtap-sdt-dev at build time).
+$(MARKER_USDT_SO): marker/mazewall_context.c
+	mkdir -p $(BUILD)
+	$(CC) -O2 -g -Wall -fPIC -shared -DTIER_E_USDT \
+		-Wl,-soname,libmazewall_context_usdt.so \
 		marker/mazewall_context.c -o $@
 
 $(WP03_LOADER): driver/wp03_loader.c $(LIBBPF_A)
