@@ -114,10 +114,8 @@ public class TierEDaemon(
 
         fun startRingPoller(handle: Long) {
             println("[dbg-ring] startRingPoller handle=$handle")
-            val fd = shimRef.ringFd(handle)
-            println("[dbg-ring] fd=$fd")
             ringReader?.close()
-            ringReader = RingbufReader(fd, ringDataLength) { event ->
+            ringReader = RingbufReader(handle, ringDataLength) { event ->
                 events++
                 if (printEvents) {
                     println("E ${event.tid} ${event.syscallNr} ${event.contextId} ${event.ktimeNs}")

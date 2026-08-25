@@ -21,6 +21,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/mman.h>
 #include <unistd.h>
 
 struct te_ctx {
@@ -166,6 +167,35 @@ int te_dropped_total(void *handle, unsigned long long *out)
 		total += per_cpu[cpu];
 	*out = total;
 	return 0;
+}
+
+void *te_mmap_ring(void *handle, long *out_len)
+{
+	struct te_ctx *ctx = handle;
+	if (!ctx || !ctx->object) {
+		set_err("null ctx");
+		return NULL;
+	}
+	int fd = bpf_object__find_map_fd_by_name(ctx->object, "context_events");
+	if (fd < 0) {
+		set_err("no context_events fd");
+		return NULL;
+	}
+	long page = sysconf(_SC_PAGESIZE);
+	long data_len = 1L << 20; /* must match BPF max_entries */
+	long total = page + data_len;
+	void *addr = mmap(NULL, total, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+	if (addr == MAP_FAILED) {
+		set_err("mmap failed: errno=%d", errno);
+		return NULL;
+	}
+	*out_len = total;
+	return addr;
+}
+
+void te_munmap_ring(void *addr, long len)
+{
+	munmap(addr, (size_t)len);
 }
 
 void te_destroy(void *handle)
