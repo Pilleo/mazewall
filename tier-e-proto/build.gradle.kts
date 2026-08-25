@@ -1,5 +1,6 @@
 plugins {
     alias(libs.plugins.kotlin)
+    application
 }
 
 kotlin {
@@ -21,4 +22,8 @@ dependencies {
 
 tasks.withType<Test>().configureEach {
     useJUnitPlatform()
+}
+
+application {
+    mainClass.set("io.mazewall.tierE.daemon.TierEDaemonKt")
 }

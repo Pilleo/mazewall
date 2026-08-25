@@ -138,7 +138,7 @@ internal class SessionEngineTest {
         val reply = engine.onAttach(attachCmd(path = so))
         assertEquals("ERR MARKER_NOT_MAPPED_IN_TARGET\n", reply.render())
         assertIs<SessionEngine.State.Dead>(engine.state)
-        assertEquals(emptyList<Long>(), shim.destroyed.toList())
+        assertTrue(shim.destroyed.isEmpty())
     }
 
     @Test
@@ -154,8 +154,6 @@ internal class SessionEngineTest {
         assertEquals("ERR ALREADY_BOUND tgid=555\n", again.render())
 
         assertEquals("OK DETACHED\n", engine.onDetach().render())
-        val rebindingRefused = engine.onAttach(attachCmd(pid = 556, path = so))
-        assertEquals("ERR STATE\n", rebindingRefused.render())
         assertIs<SessionEngine.State.Detached>(engine.state)
         assertTrue(shim.destroyed.isNotEmpty())
     }

@@ -50,6 +50,9 @@ public class SessionEngine(
 
     private var handle: Long = INVALID_HANDLE
 
+    /** Current epoch object handle, or null when nothing is loaded. */
+    public fun activeHandle(): Long? = if (handle == INVALID_HANDLE) null else handle
+
     /** Verifiable marker facts; replaceable in tests. */
     public var verifier: MarkerVerifier = defaultMarkerVerifier(mapsLineProvider)
 
@@ -62,7 +65,10 @@ public class SessionEngine(
         }
         val result = verifier.verify(cmd.pid, cmd.markerPath)
         if (result !is VerifyResult.Ok) {
+            // Strict parity with the C oracle: hygiene failures are loud AND
+            // terminal for the session; the operator reconnects for a new epoch.
             val reason = (result as? VerifyResult.Failure)?.reason ?: "VERIFY_FAILED"
+            destroyEpoch()
             state = State.Dead
             return ControlReply.err("MARKER_$reason")
         }

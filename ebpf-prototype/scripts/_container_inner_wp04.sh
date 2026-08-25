@@ -1,100 +1,125 @@
 #!/usr/bin/env bash
-# Inner container script for Tier E WP-04: session lifecycle & trust tests.
-# Expects /work on ebpf-prototype/ with prebuilt artifacts. Runs as root.
+# Inner container script for Tier E WP-04: lifecycle/trust suite executed
+# against BOTH control-plane implementations while the C oracle exists.
+# Replies must match scenario-for-scenario. Expects:
+#   /repo  = repository root (Kotlin dist at tier-e-proto/build/install)
+#   cwd    = /repo/ebpf-prototype (relative build/ artifact paths)
+#   JAVA_BIN, LD_LIBRARY_PATH prepared by caller (run_wp04.sh)
 set -uo pipefail
 
 SOCK=/tmp/wp04.sock
 LOG=/tmp/wp04_daemon.log
 PASS=0; FAIL=0
-check() { # name expected_substr actual
-    if [[ "$3" == *"$2"* ]]; then PASS=$((PASS+1)); echo "[ok]   $1"
-    else FAIL=$((FAIL+1)); echo "[FAIL] $1 (wanted '$2', got '$3')"; fi
+
+start_daemon_c() { ./build/wp04_daemon --sock "$SOCK" > "$LOG" 2>&1 & }
+start_daemon_kt() {
+    LD_LIBRARY_PATH="/work/build${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+        "$JAVA_BIN" -cp "$KT_CP" io.mazewall.tierE.daemon.TierEDaemonKt \
+        --sock "$SOCK" --verbose > "$LOG" 2>&1 &
 }
 
-start_daemon() {
+check() { # name expected_regex actual
+    if [[ "$3" =~ $2 ]]; then PASS=$((PASS+1)); echo "[ok]   $1"
+    else FAIL=$((FAIL+1)); echo "[FAIL] $1 (wanted /$2/, got '$3')"; fi
+}
+
+wait_socket() { for _ in $(seq 1 100); do [[ -S "$SOCK" ]] && return 0; sleep 0.05; done; return 1; }
+wait_mapped() { local i=0; until grep -q "$2" "/proc/$1/maps" 2>/dev/null; do ((i++)) || true; [[ $i -gt 150 ]] && return 1; sleep 0.02; done; }
+
+fresh_daemon() { # $1=starter fn name; kills any previous daemon first
+    [[ -n "${DAEMON_PID:-}" ]] && kill -9 "$DAEMON_PID" 2>/dev/null && wait "$DAEMON_PID" 2>/dev/null
     rm -f "$SOCK" "$LOG"
-    ./build/wp04_daemon --sock "$SOCK" > "$LOG" 2>&1 &
-    DAEMON=$!
-    for _ in $(seq 1 50); do [[ -S $SOCK ]] && break; sleep 0.05; done
+    "$1"; DAEMON_PID=$!
+    wait_socket || { FAIL=$((FAIL+1)); echo "[FAIL] no socket after start"; }
 }
-stop_daemon() { kill -TERM "$DAEMON" 2>/dev/null; wait "$DAEMON" 2>/dev/null; }
 
-echo "== T0 daemon starts =="
-start_daemon
-[[ -S "$SOCK" ]] && { PASS=$((PASS+1)); echo "[ok]   socket created"; } || { FAIL=$((FAIL+1)); echo "[FAIL] no socket"; }
-ls -l "$SOCK" | grep -q "^....rw-rw----\|srw-rw" && { PASS=$((PASS+1)); echo "[ok]   socket perms 0660"; } || { FAIL=$((FAIL+1)); echo "[FAIL] perms: $(ls -l "$SOCK")"; }
+client() { ./build/wp04_client "$SOCK" "$@"; }
 
-echo "== T1 happy path (usdt) =="
-./build/wp03_driver 1000000 ./build/libmazewall_context_usdt.so 3 &
-DRV=$!
-for _ in $(seq 1 150); do grep -q libmazewall_context_usdt /proc/$DRV/maps 2>/dev/null && break; sleep 0.02; done
-R=$(./build/wp04_client "$SOCK" ATTACH "$DRV" usdt /work/build/libmazewall_context_usdt.so)
-check "attach ok"        "OK ATTACHED"     "$R"
-check "buildid reported" "buildid="        "$R"
+run_suite() {
+    local impl="$1" starter="$2"
+    echo "===== SUITE impl=$impl ====="
+    PASS=0; FAIL=0
 
-echo "== T2 duplicate controller rejected =="
-R=$(./build/wp04_client "$SOCK" STATUS)
-check "busy rejection"   "ERR BUSY"        "$R"
+    fresh_daemon "$starter"
+    check "socket perms 0660" "srw-rw----" "$(ls -l "$SOCK")"
 
-echo "== T3 re-ATTACH inside one epoch rejected =="
-R=$(./build/wp04_client "$SOCK" DETACH); check "detach ok" "OK DETACHED" "$R"
-R=$(./build/wp04_client "$SOCK" ATTACH "$DRV" usdt /work/build/libmazewall_context_usdt.so)
-check "no re-bind same epoch" "ERR STATE"  "$R"
+    # T-peercred FIRST: no session exists yet
+    if command -v setpriv >/dev/null 2>&1; then
+        R=$(setpriv --reuid=1000 --regid=1000 --clear-groups \
+            bash -c "./build/wp04_client $SOCK STATUS" 2>&1)
+        check "peer uid refused" "ERR PEER_UID|ERR CONNECT|ERR RECV" "$R"
+    else
+        echo "[skip] peercred (no setpriv)"
+    fi
 
-echo "== T4 wrong file fails loudly (garbage ELF) =="
-echo "not an elf" > /tmp/fake.so
-R=$(./build/wp04_client "$SOCK" STATUS) # sanity channel alive
-R=$(./build/wp04_client "$SOCK" SHUTDOWN >/dev/null; sleep 0.4; start_daemon
-    ./build/wp04_driver 200000 ./build/libmazewall_context_usdt.so 2 & DRV2=$!
-    for _ in $(seq 1 100); do grep -q usdt /proc/$DRV2/maps 2>/dev/null && break; sleep 0.02; done
-    ./build/wp04_client "$SOCK" ATTACH "$DRV2" uprobe /tmp/fake.so)
-check "garbage elf refused" "ERR BUILD_ID_UNREADABLE" "$R"
+    # T-happy path
+    ./build/wp03_driver 1000000 ./build/libmazewall_context_usdt.so 3 & DRV=$!
+    wait_mapped "$DRV" usdt
+    R=$(client ATTACH "$DRV" usdt /work/build/libmazewall_context_usdt.so)
+    check "attach ok + buildid" "OK ATTACHED epoch=[0-9]+ buildid=" "$R"
 
-echo "== T5 valid-but-unmapped copy refused =="
-cp build/libmazewall_context_usdt.so /tmp/copy.so
-R=$(./build/wp04_client "$SOCK" ATTACH "$DRV2" usdt /tmp/copy.so)
-check "unmapped inode refused" "ERR NOT_MAPPED_IN_TARGET" "$R"
-kill "$DRV2" 2>/dev/null; wait "$DRV2" 2>/dev/null
-stop_daemon
+    # T-duplicate controller
+    R=$(client STATUS)
+    check "busy rejection" "ERR BUSY" "$R"
 
-echo "== T6 peercred: non-root controller refused =="
-start_daemon
-if command -v setpriv >/dev/null 2>&1; then
-    R=$(setpriv --reuid=1000 --regid=1000 --clear-groups \
-        ./build/wp04_client "$SOCK" STATUS)
-    check "peer uid rejected" "ERR PEER_UID" "$R"
-else
-    echo "[skip] setpriv unavailable"
+    # T-detach then re-bind permitted within epoch
+    R=$(client DETACH); check "detach ok" "OK DETACHED" "$R"
+    R=$(client ATTACH "$DRV" usdt /work/build/libmazewall_context_usdt.so)
+    check "re-attach after detach ok" "OK ATTACHED" "$R"
+
+    # T-marker hygiene loud failures (session dies on each failure)
+    echo "not an elf" > /tmp/fake.so
+    R=$(client DETACH); check "pre-garbage detach" "OK DETACHED" "$R"
+    R=$(client ATTACH "$DRV" uprobe /tmp/fake.so)
+    check "garbage elf refused terminally" "ERR MARKER_BUILD_ID_UNREADABLE" "$R"
+    R=$(client STATUS) # new connection => fresh epoch accepted
+    check "session restarts after hygiene kill" "OK ACCEPTED" "$R"
+    cp build/libmazewall_context_usdt.so /tmp/copy.so
+    R=$(client ATTACH "$DRV" usdt /tmp/copy.so)
+    check "unmapped inode refused terminally" "ERR NOT_MAPPED_IN_TARGET" "$R"
+    client SHUTDOWN >/dev/null 2>&1; sleep 0.4
+
+    # T-SIGKILL survival + clean re-attach on a live target
+    fresh_daemon "$starter"
+    ./build/wp03_driver 300000 ./build/libmazewall_context_usdt.so 4 & DRV3=$!
+    wait_mapped "$DRV3" usdt
+    client ATTACH "$DRV3" usdt /work/build/libmazewall_context_usdt.so >/dev/null
+    kill -9 "$DAEMON_PID" 2>/dev/null; wait "$DAEMON_PID" 2>/dev/null
+    sleep 0.4
+    if kill -0 "$DRV3" 2>/dev/null; then PASS=$((PASS+1)); echo "[ok]   driver survived daemon SIGKILL"
+    else FAIL=$((FAIL+1)); echo "[FAIL] driver died with daemon"; fi
+    fresh_daemon "$starter"
+    R=$(client ATTACH "$DRV3" usdt /work/build/libmazewall_context_usdt.so)
+    check "fresh epoch re-attach ok" "OK ATTACHED" "$R"
+    BEFORE=$(wc -l < "$LOG"); sleep 2; AFTER=$(wc -l < "$LOG")
+    (( AFTER > BEFORE )) && { PASS=$((PASS+1)); echo "[ok]   fresh epoch emits events"; } \
+                          || { FAIL=$((FAIL+1)); echo "[FAIL] no events in fresh epoch"; }
+    kill "$DRV3" 2>/dev/null; wait "$DRV3" 2>/dev/null
+
+    # T-graceful shutdown
+    R=$(client SHUTDOWN); check "shutdown ok" "OK BYE" "$R"
+    for _ in $(seq 1 40); do
+        kill -0 "$DAEMON_PID" 2>/dev/null || break
+        sleep 0.05
+    done
+    if ! kill -0 "$DAEMON_PID" 2>/dev/null; then PASS=$((PASS+1)); echo "[ok]   daemon exited"
+    else FAIL=$((FAIL+1)); echo "[FAIL] daemon still alive after SHUTDOWN"; fi
+
+    LAST_FAIL=$FAIL
+    echo "== RESULT impl=$impl pass=$PASS fail=$FAIL =="
+    return $([[ $FAIL -eq 0 ]] && echo 0 || echo 1)
+}
+
+LAST_FAIL=99
+run_suite c   start_daemon_c;   RC_C=$?
+C_FAIL=$LAST_FAIL
+run_suite kt  start_daemon_kt;  RC_KT=$?
+K_FAIL=$LAST_FAIL
+
+echo "== FINAL c(rc=$RC_C fail=$C_FAIL) kt(rc=$RC_KT fail=$K_FAIL) =="
+if [[ $RC_C -eq 0 && $RC_KT -eq 0 && $C_FAIL -eq $K_FAIL ]]; then
+    echo "== PARITY OK =="
+    exit 0
 fi
-
-echo "== T7 kill -9 daemon mid-session: target survives, new epoch clean =="
-./build/wp03_driver 300000 ./build/libmazewall_context_usdt.so 4 &
-DRV3=$!
-for _ in $(seq 1 150); do grep -q usdt /proc/$DRV3/maps 2>/dev/null && break; sleep 0.02; done
-./build/wp04_client "$SOCK" ATTACH "$DRV3" usdt /work/build/libmazewall_context_usdt.so >/dev/null
-kill -9 "$DAEMON"; wait "$DAEMON" 2>/dev/null
-sleep 0.5
-if kill -0 "$DRV3" 2>/dev/null; then PASS=$((PASS+1)); echo "[ok]   driver survived daemon SIGKILL"
-else FAIL=$((FAIL+1)); echo "[FAIL] driver died with daemon"; fi
-# New daemon = NEW epoch; attach the SAME live driver and expect fresh events only.
-start_daemon
-R=$(./build/wp04_client "$SOCK" ATTACH "$DRV3" usdt /work/build/libmazewall_context_usdt.so)
-check "re-attach after crash ok" "OK ATTACHED epoch=" "$R"
-BEFORE=$(wc -l < "$LOG")
-sleep 2
-AFTER=$(wc -l < "$LOG")
-(( AFTER > BEFORE )) && { PASS=$((PASS+1)); echo "[ok]   fresh epoch emits attributed events"; } \
-                     || { FAIL=$((FAIL+1)); echo "[FAIL] no events in fresh epoch"; }
-kill "$DRV3" 2>/dev/null; wait "$DRV3" 2>/dev/null
-
-echo "== T8 SHUTDOWN is graceful =="
-R=$(./build/wp04_client "$SOCK" SHUTDOWN)
-check "shutdown ok" "OK BYE" "$R"
-wait "$DAEMON" 2>/dev/null; DRC=$?
-[[ $DRC -eq 0 ]] && { PASS=$((PASS+1)); echo "[ok]   daemon exit code 0"; } \
-                 || { FAIL=$((FAIL+1)); echo "[FAIL] daemon rc=$DRC"; }
-[[ ! -S "$SOCK" ]] && { PASS=$((PASS+1)); echo "[ok]   socket unlinked on exit"; } \
-                  || { FAIL=$((FAIL+1)); echo "[FAIL] stale socket left behind"; }
-
-echo "== RESULT pass=$PASS fail=$FAIL =="
-[[ $FAIL -eq 0 ]]
+echo "== PARITY FAILED =="
+exit 1

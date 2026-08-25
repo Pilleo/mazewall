@@ -1,0 +1,13 @@
+# Tier E WP-04 Kotlin-phase runner image.
+#
+# Base: the house test-runner (Ubuntu 26.04 + JDK 25 at /opt/java/openjdk),
+# extended with the runtime libraries libtier_e_bpf.so needs. Built on demand
+# by scripts/run_wp04.sh.
+FROM localhost/mazewall-test-runner
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        bash \
+        libelf1 \
+        zlib1g \
+    && rm -rf /var/lib/apt/lists/*
