@@ -59,6 +59,21 @@ ring-buffer drop counter increments under forced pressure (tiny ringbuf)
 **PR is done when:** a platform Java thread calling `gettid()` corresponds to the kernel stream
 whose host TID matches, tested inside a rootful container.
 
+### Progress (2026-08-25)
+
+* Sources landed: `bpf/syscall_collector.bpf.c` (raw_tp/sys_enter, TGID filter map, ringbuf,
+  per-cpu drop counter), `collector/collector.c` (libbpf loader/reader, drop accounting,
+  fail-closed non-root refusal — verified exit=1 as unprivileged user).
+* Vendored libbpf v1.5.0 (`vendor/libbpf`, pin recorded in `vendor/LIBBPF_PINNED_COMMIT`);
+  builds with clang via `make CC=clang` (two upstream `-Werror` nits downgraded locally).
+* Rootful execution path: `container/Containerfile` (debian trixie-slim + libelf1/zlib1g,
+  glibc ≥ collector's GLIBC_2.38 floor) + `scripts/run_collector.sh`. Backend auto-detection:
+  root ⇒ direct podman; rootful docker daemon ⇒ no sudo; rootless daemon ⇒ one `sudo podman`
+  invocation. See companion finding
+  [testing/issue-20260825-090500](../testing/issue-20260825-090500-rootless-podman-docker-socket-bpf-ceiling.md):
+  the dev host's docker.sock serves a ROOTLESS podman service, so the final kernel-side
+  acceptance run requires the operator's single sudo (or a rootful CI runner).
+
 ## Guardrails
 
 * Kernel floor 5.15. Guard scripts accordingly.
