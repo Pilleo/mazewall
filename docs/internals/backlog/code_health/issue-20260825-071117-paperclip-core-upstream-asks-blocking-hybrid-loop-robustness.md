@@ -14,6 +14,7 @@ core_lock: false
 effort: "medium"
 autonomy: "supervised"
 open_questions: false
+paperclip_issue_id: d4f168d1-7b48-49f1-a412-5503152c47f1
 ---
 
 # 🔴 [Severity: HIGH]: Paperclip core upstream asks blocking hybrid-loop robustness
