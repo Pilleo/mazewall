@@ -92,6 +92,7 @@ for _ in $(seq 1 40); do kill -0 "$DAEMON_PID" 2>/dev/null || break; sleep 0.05;
 "$JAVA_BIN" "${KT_FLAGS[@]}" -cp "$KT_CP" io.mazewall.tierE.stress.StressVerifierMainKt \
     --decl "$DECL" --log "$LOG"
 VRC=$?
+sleep 0.5
 echo "--- daemon log (full) ---"
 cat "$LOG"
 EC=$(grep -c "^E " "$LOG" || true)

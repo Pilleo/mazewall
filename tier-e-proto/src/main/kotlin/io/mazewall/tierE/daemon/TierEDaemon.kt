@@ -114,6 +114,7 @@ public class TierEDaemon(
 
         fun startRingPoller(handle: Long) {
             try {
+                boundHandle = handle
                 val rbHandle = shimRef.ringNew(handle)
                 stopRing.set(false)
                 ringThread = thread(name = "tier-e-ring-$epoch", isDaemon = false) {
