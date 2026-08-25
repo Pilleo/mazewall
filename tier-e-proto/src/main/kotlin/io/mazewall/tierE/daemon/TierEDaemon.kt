@@ -68,6 +68,7 @@ public class TierEDaemon(
 
         while (!stopRequested.get()) {
             val cfd = posix.accept(listenFd)
+            System.err.println("[dbg-kt] accept returned cfd=$cfd stop=${stopRequested.get()}")
             if (cfd < 0 || stopRequested.get()) break
             if (!sessionActive.compareAndSet(false, true)) {
                 posix.sendAll(cfd, ControlReply.err("BUSY").render().toByteArray())
@@ -108,6 +109,7 @@ public class TierEDaemon(
         }
         var ringThread: Thread? = null
         var ringReader: RingbufReader? = null
+        var boundHandle: Long = -1L
         var events = 0UL
 
         fun startRingPoller(handle: Long) {
@@ -116,7 +118,7 @@ public class TierEDaemon(
             ringReader = RingbufReader(fd, ringDataLength) { event ->
                 events++
                 if (printEvents) {
-                    println("${event.syscallNr} ctx=${event.contextId}")
+                    println("E ${event.tid} ${event.syscallNr} ${event.contextId} ${event.ktimeNs}")
                     System.out.flush()
                 }
             }
@@ -143,6 +145,7 @@ public class TierEDaemon(
             ringReader = null
         }
 
+        System.err.println("[dbg-kt] session thread entered epoch=$epoch")
         System.err.println("[wp04kt] epoch=$epoch accepted")
 
         val buffer = ByteArray(512)
@@ -177,7 +180,10 @@ public class TierEDaemon(
                                 if (!posix.sendAll(cfd, r.render().toByteArray())) {
                                     throw java.io.IOException("send failed")
                                 }
-                                if (r.ok) engine.activeHandle()?.let { startRingPoller(it) }
+                                if (r.ok) {
+                                    boundHandle = engine.activeHandle() ?: -1L
+                                    startRingPoller(boundHandle)
+                                }
                             } catch (t: Throwable) {
                                 // Fail-closed diagnostics: control-plane defects
                                 // surface to the operator, never kill the daemon.
@@ -234,9 +240,11 @@ public class TierEDaemon(
             engine.close()
             eventsSeen = events.toULong()
             posix.close(cfd)
+            val dropped = if (boundHandle >= 0) runCatching {
+                shim.droppedTotal(boundHandle).toLong()
+            }.getOrDefault(-1L) else -1L
             System.err.println(
-                "[wp04kt] epoch=$epoch DEAD (peer EOF) events=${eventsSeen} dropped=" +
-                    runCatching { shim.droppedTotal(0L).toString() }.getOrDefault("n/a"),
+                "[wp04kt] epoch=$epoch DEAD (peer EOF) events=${eventsSeen} dropped=$dropped",
             )
         }
     }
@@ -283,10 +291,22 @@ public fun main(args: Array<String>) {
         // Suite harness mode: long-lived connection driven by a command file.
         //   args: --probe-cmdfile <sock> <cmdfile> <outfile>
         // Appends one reply per command line; immune to fd-inheritance races.
+        // Connect retries for up to ~10 s: the daemon JVM may still be
+        // booting when this probe starts.
         val posix = PosixFfi()
-        val fd = posix.connectUnix(args[1])
+        var fd = -1
+        var waited = 0
+        while (fd < 0 && waited < 10_000) {
+            fd = posix.connectUnix(args[1])
+            if (fd < 0) {
+                println("WAIT")
+                System.out.flush()
+                Thread.sleep(100)
+                waited += 100
+            }
+        }
         if (fd < 0) {
-            println("ERR CONNECT")
+            println("ERR CONNECT_TIMEOUT")
             exitProcess(1)
         }
         val cmdFile = Path.of(args[2])

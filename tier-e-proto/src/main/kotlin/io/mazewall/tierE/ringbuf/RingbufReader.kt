@@ -33,6 +33,8 @@ public class RingbufReader(
         posix.mmapShared(dataLength, ringFd, PosixFfi.PROT_READ, offset = PAGE)
     private val mask: Long = dataLength - 1
     private var closed = false
+    private val dbg = System.getenv("TIER_E_RB_DEBUG") != null
+    private var dbgEmptyPolls = 0L
 
     /** Drains whatever is visible; returns number of attributed events handled. */
     public fun pollOnce(): Int {
@@ -40,6 +42,15 @@ public class RingbufReader(
         var handled = 0
         var consPos: Long = metaRw.get(LONG, CONS_POS_OFF)
         val prodPos: Long = metaRw.get(LONG, PROD_POS_OFF)
+        if (dbg && consPos >= prodPos) {
+            dbgEmptyPolls++
+            if (dbgEmptyPolls % 100 == 1L) {
+                val hdr = if (prodPos > consPos) dataRo.get(LONG, consPos and mask) else -1L
+                System.err.println(
+                    "[rbdbg] prod=$prodPos cons=$consPos hdr@$consPos=$hdr",
+                )
+            }
+        }
         while (consPos < prodPos) {
             val recOff = consPos and mask
             val header = dataRo.get(LONG, recOff)

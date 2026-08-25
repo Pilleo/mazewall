@@ -56,9 +56,20 @@ struct {
 	__type(value, __u64);
 } dropped_events SEC(".maps");
 
+/* 0 = uprobe marker entries, 1 = attributed sys_enter events */
+struct {
+	__uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
+	__uint(max_entries, 2);
+	__type(key, __u32);
+	__type(value, __u64);
+} hit_counters SEC(".maps");
+
 SEC("uprobe")
 int BPF_UPROBE(tier_e_on_marker, unsigned int context_id)
 {
+	__u32 hk0 = 0;
+	__u64 one = 1;
+	bpf_map_update_elem(&hit_counters, &hk0, &one, BPF_ADD);
 	__u32 value = context_id;
 	struct task_struct *task = (struct task_struct *)bpf_get_current_task_btf();
 	__u32 *slot = bpf_task_storage_get(&context_storage, task, &value,
@@ -93,6 +104,11 @@ int BPF_PROG(tier_e_sys_enter_ctx, struct pt_regs *regs, long id)
 	__u32 *target = bpf_map_lookup_elem(&target_tgid, &key);
 	if (!target || *target == 0 || *target != tgid)
 		return 0;
+	{
+		__u32 hk1 = 1;
+		__u64 one_v = 1;
+		bpf_map_update_elem(&hit_counters, &hk1, &one_v, BPF_ADD);
+	}
 
 	struct task_struct *task = (struct task_struct *)bpf_get_current_task_btf();
 	__u32 *stored = bpf_task_storage_get(&context_storage, task, NULL, 0);

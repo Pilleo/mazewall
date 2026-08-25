@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+echo "INNER_SELF=$0 bytes=$(wc -c < "$0") md5=$(md5sum "$0" | cut -c1-8)"
 # Inner container script for Tier E WP-04: lifecycle/trust suite against the
 # Kotlin control plane. A stdin-driven probe holds ONE connection per daemon
 # epoch; it is relaunched by fresh_daemon whenever the daemon restarts.

@@ -52,6 +52,10 @@ public class PosixFfi {
             ValueLayout.JAVA_INT, ValueLayout.ADDRESS, ValueLayout.JAVA_LONG, ValueLayout.JAVA_INT,
         ),
     )
+    private val hGetpid: MethodHandle = bind(
+        "getpid",
+        FunctionDescriptor.of(ValueLayout.JAVA_INT),
+    )
     private val hClose: MethodHandle = bind(
         "close",
         FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.JAVA_INT),
@@ -188,6 +192,10 @@ public class PosixFfi {
     }
 
     private fun errnoGuess(): Int = -1 // precise errno capture lands with WP-14
+
+    /** Triggers syscall getpid(39) — used by stress workers as an attributable
+     *  no-side-effect syscall. */
+    public fun getpid(): Int = hGetpid.invoke() as Int
 
     public fun close(fd: Int) {
         hClose.invoke(fd)

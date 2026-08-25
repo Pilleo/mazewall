@@ -215,6 +215,23 @@ int main(int argc, char **argv)
 	if (g_summary)
 		fprintf(stderr, "[wp03] events=%llu\n", event_total);
 
+	{
+		int hc_fd = bpf_object__find_map_fd_by_name(object, "hit_counters");
+		if (hc_fd >= 0) {
+			int nr_cpus = libbpf_num_possible_cpus();
+			unsigned long long per[1024] = {};
+			__u32 hk = 0;
+			if (nr_cpus > 0 && bpf_map_lookup_elem(hc_fd, &hk, per) == 0) {
+				unsigned long long up = 0, ev = 0;
+				for (int cpu = 0; cpu < nr_cpus; cpu++) {
+					up += per[cpu * 2];
+					ev += per[cpu * 2 + 1];
+				}
+				fprintf(stderr, "[wp03] uprobe_hits=%llu sysenter_hits=%llu\n", up, ev);
+			}
+		}
+	}
+
 	int dropped_fd = bpf_object__find_map_fd_by_name(object, "dropped_events");
 	if (dropped_fd >= 0) {
 		int nr_cpus = libbpf_num_possible_cpus();
