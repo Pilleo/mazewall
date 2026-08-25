@@ -60,6 +60,14 @@ public class PosixFfi {
         "getpid",
         FunctionDescriptor.of(ValueLayout.JAVA_INT),
     )
+    private val hSetsockopt: MethodHandle = bind(
+        "setsockopt",
+        FunctionDescriptor.of(
+            ValueLayout.JAVA_INT,
+            ValueLayout.JAVA_INT, ValueLayout.JAVA_INT, ValueLayout.JAVA_INT,
+            ValueLayout.ADDRESS, ValueLayout.ADDRESS,
+        ),
+    )
     private val hClose: MethodHandle = bind(
         "close",
         FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.JAVA_INT),
@@ -204,6 +212,16 @@ public class PosixFfi {
     /** Returns the Linux TID (kernel task id) of the calling thread.
      *  MUST be used instead of Thread.threadId() for BPF event correlation. */
     public fun gettid(): Int = hGettid.invoke() as Int
+
+    /** Sets SO_RCVTIMEO so blocking recv() returns -1/EAGAIN after [timeoutMs]. */
+    public fun setRecvTimeout(fd: Int, timeoutMs: Int) {
+        val tv = arena.allocate(16)
+        tv.set(ValueLayout.JAVA_LONG, 0, timeoutMs / 1000L)
+        tv.set(ValueLayout.JAVA_LONG, 8, (timeoutMs % 1000L) * 1_000L)
+        val lenPtr = arena.allocate(ValueLayout.JAVA_INT)
+        lenPtr.set(ValueLayout.JAVA_INT, 0, 16)
+        hSetsockopt.invoke(fd, 1 /* SOL_SOCKET */, 20 /* SO_RCVTIMEO */, tv, lenPtr)
+    }
 
     public fun close(fd: Int) {
         hClose.invoke(fd)

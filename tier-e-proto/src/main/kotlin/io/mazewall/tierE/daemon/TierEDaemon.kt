@@ -13,19 +13,19 @@ import kotlin.system.exitProcess
 /**
  * Tier E WP-04 control-plane daemon (Kotlin implementation).
  *
- * Wire contract identical to the C protocol oracle:
+ * Wire contract: strict request→reply.
  *   ATTACH <pid> <uprobe|usdt> <marker.so> | DETACH | STATUS | SHUTDOWN
- * Trust model per design doc §5: peercred uid==0, ONE session at a time
- * (additional controllers receive ERR BUSY immediately — the accept loop is
- * never blocked by an active session), marker hygiene via
- * [SessionEngine.DefaultMarkerVerifier], one fresh BPF object per epoch,
- * no pins, DEAD is terminal.
+ *
+ * Trust model per design doc §5:
+ * - peercred uid==0 (SO_PEERCRED)
+ * - one session at a time; additional controllers receive ERR BUSY immediately
+ * - marker hygiene via [SessionEngine.DefaultMarkerVerifier]
+ * - one fresh BPF object per epoch, no pins, DEAD is terminal
  */
 public class TierEDaemon(
     private val socketPath: String,
     private val shimPath: String,
     private val bpfObjectPath: String,
-    private val ringDataLength: Long = 1L shl 20,
     private val printEvents: Boolean = false,
 ) {
     private val posix = PosixFfi()
@@ -35,11 +35,9 @@ public class TierEDaemon(
     private val stopRequested = AtomicBoolean(false)
 
     @Volatile private var listenFd: Int = -1
-    @Volatile private var eventsSeen: ULong = 0UL
 
     public fun serve() {
         Runtime.getRuntime().addShutdownHook(Thread {
-            // Best-effort cleanup: unlink socket, flush stdout.
             runCatching { Files.deleteIfExists(Path.of(socketPath)) }
             System.out.flush()
         })
@@ -66,46 +64,40 @@ public class TierEDaemon(
                 Path.of(socketPath),
                 PosixFilePermissions.fromString("rw-rw----"),
             )
-        } catch (_: Exception) {
-        }
+        } catch (_: Exception) { }
         System.err.println("[wp04kt] listening on $socketPath")
 
         while (!stopRequested.get()) {
             val cfd = posix.accept(listenFd)
-            System.err.println("[dbg-kt] accept returned cfd=$cfd stop=${stopRequested.get()}")
             if (cfd < 0 || stopRequested.get()) break
-            if (!sessionActive.compareAndSet(false, true)) {
-                posix.sendAll(cfd, ControlReply.err("BUSY").render().toByteArray())
-                // Graceful reject: drain the peer's pending line so its write
-                // never races our close (RST would hide the ERR BUSY reply).
-                val drain = ByteArray(256)
-                runCatching { posix.recv(cfd, drain) }
-                posix.close(cfd)
-                continue
-            }
+
+            // Bound recv blocking so an idle client can't hold the slot forever.
+            posix.setRecvTimeout(cfd, RECV_TIMEOUT_MS)
+
             val cred = posix.peerCredentials(cfd)
-            if (cred == null || cred.uid != 0) {
-                posix.sendAll(cfd, "ERR PEER_UID ${cred?.uid ?: -1}\n".toByteArray())
-                val drain = ByteArray(64)
-                runCatching { posix.recv(cfd, drain) }
-                posix.close(cfd)
-                continue
-            }
-            val epoch = epochCounter.incrementAndGet()
-            thread(name = "tier-e-session-$epoch", isDaemon = true) {
-                try {
-                    sessionLoop(epoch, cfd)
-                } finally {
-                    sessionActive.set(false)
+            when (val decision = decideAccept(sessionActive.get(), cred)) {
+                is AcceptDecision.Accept -> {
+                    val epoch = epochCounter.incrementAndGet()
+                    thread(name = "tier-e-session-$epoch", isDaemon = true) {
+                        try {
+                            handleSession(epoch, cfd)
+                        } finally {
+                            sessionActive.set(false)
+                        }
+                    }
+                }
+                is AcceptDecision.Reject -> {
+                    posix.sendAll(cfd, decision.reply.toByteArray())
+                    posix.close(cfd)
                 }
             }
         }
+
         Files.deleteIfExists(Path.of(socketPath))
         System.err.println("[wp04kt] clean exit")
     }
 
-    /** One client connection = one session epoch. Runs on its own thread. */
-    private fun sessionLoop(epoch: Long, cfd: Int) {
+    private fun handleSession(epoch: Long, cfd: Int) {
         val shimRef = shim
         val engine = SessionEngine(epoch, shimRef, bpfObjectPath).also { eng ->
             eng.verifier = SessionEngine.defaultMarkerVerifier { pid ->
@@ -114,29 +106,28 @@ public class TierEDaemon(
                 }.getOrNull()
             }
         }
+        var boundHandle = -1L
+        var eventCount = 0
+
+        val stopRing = AtomicBoolean(false)
         var ringThread: Thread? = null
-        var boundHandle: Long = -1L
-        var events = 0UL
-        val stopRing = AtomicBoolean(false) // per-session, NOT shared across epochs
 
         fun startRingPoller(handle: Long) {
             try {
                 val rbHandle = shimRef.ringNew(handle)
                 stopRing.set(false)
-                ringThread?.join(100)
                 ringThread = thread(name = "tier-e-ring-$epoch", isDaemon = false) {
-                    System.err.println("[dbg-ring] thread started epoch=$epoch")
+                    System.err.println("[dbg-ring] started epoch=$epoch")
                     while (!stopRequested.get() && !stopRing.get()) {
                         try {
                             shimRef.ringPoll(rbHandle, 50)
                         } catch (t: Throwable) {
-                            System.err.println("[wp04kt] ring poll error: $t")
+                            System.err.println("[wp04kt] ring error: $t")
                             break
                         }
                         Thread.sleep(5)
                     }
                     shimRef.ringDestroy(rbHandle)
-                    System.err.println("[dbg-ring] thread ended")
                 }
             } catch (t: Throwable) {
                 System.err.println(
@@ -151,91 +142,69 @@ public class TierEDaemon(
             ringThread = null
         }
 
-        System.err.println("[dbg-kt] session thread entered epoch=$epoch")
-        System.err.println("[wp04kt] epoch=$epoch accepted")
+        fun reply(text: String) {
+            if (!posix.sendAll(cfd, text.toByteArray())) {
+                throw java.io.IOException("send failed")
+            }
+        }
+
+        System.err.println("[dbg-kt] epoch=$epoch accepted")
 
         val buffer = ByteArray(512)
         var buffered = 0
+
         try {
             while (!stopRequested.get()) {
                 val n = posix.recv(cfd, buffer, buffered, buffer.size - buffered)
                 if (n <= 0) break
                 buffered += n
+
                 var scanStart = 0
                 while (scanStart < buffered) {
                     var nl = -1
                     for (idx in scanStart until buffered) {
-                        if (buffer[idx] == '\n'.code.toByte()) {
-                            nl = idx
-                            break
-                        }
+                        if (buffer[idx] == '\n'.code.toByte()) { nl = idx; break }
                     }
                     if (nl < 0) break
                     val line = String(buffer, scanStart, nl - scanStart).trim()
                     scanStart = nl + 1
 
                     when (val parsed = parseControlCommand(line)) {
-                        is Either.Right -> {
-                            if (!posix.sendAll(cfd, parsed.value.render().toByteArray())) {
-                                throw java.io.IOException("send failed")
-                            }
-                        }
+                        is Either.Right -> reply(parsed.value.render())
                         is Either.Left -> when (val cmd = parsed.value) {
                             is ControlCommand.Attach -> try {
                                 val r = engine.onAttach(cmd)
-                                if (!posix.sendAll(cfd, r.render().toByteArray())) {
-                                    throw java.io.IOException("send failed")
-                                }
-                                if (r.ok) {
-                                    val h = engine.activeHandle()
-                                    if (h != null) startRingPoller(h)
-                                }
+                                reply(r.render())
+                                if (r.ok) startRingPoller(engine.activeHandle() ?: return)
                             } catch (t: Throwable) {
-                                // Fail-closed diagnostics: control-plane defects
-                                // surface to the operator, never kill the daemon.
                                 System.err.println(
                                     "[wp04kt] attach crash: ${t::class.simpleName}: ${t.message}",
                                 )
                                 t.printStackTrace()
                                 engine.close()
-                                posix.sendAll(
-                                    cfd,
-                                    ControlReply
-                                        .err(
-                                            "ATTACH_CRASH ${t::class.simpleName}: ${t.message}",
-                                        )
-                                        .render()
-                                        .toByteArray(),
-                                )
+                                reply(ControlReply.err("ATTACH_CRASH ${t.message}").render())
                             }
-                            ControlCommand.Detach ->
-                                if (!posix.sendAll(cfd, engine.onDetach().render().toByteArray())) {
-                                    throw java.io.IOException("send failed")
-                                }
-                            ControlCommand.Status ->
-                                if (!posix.sendAll(cfd, "OK ${engine.statusText()}\n".toByteArray())) {
-                                    throw java.io.IOException("send failed")
-                                }
+                            ControlCommand.Detach -> reply(engine.onDetach().render())
+                            ControlCommand.Status -> reply("OK ${engine.statusText()}\n")
                             ControlCommand.Shutdown -> {
-                                posix.sendAll(cfd, ControlReply.ok("BYE").render().toByteArray())
+                                reply(ControlReply.ok("BYE").render())
                                 stopRequested.set(true)
-                                // Closing the listener would NOT wake a thread
-                                // blocked in accept(); a local connect does.
-                                runCatching {
+                                try {
                                     val w = posix.connectUnix(socketPath)
                                     if (w >= 0) posix.close(w)
-                                }
+                                } catch (_: Exception) { }
                             }
                         }
                     }
                     if (stopRequested.get()) break
                 }
+
                 if (scanStart > 0) {
                     System.arraycopy(buffer, scanStart, buffer, 0, buffered - scanStart)
                     buffered -= scanStart
                 }
                 if (buffered == buffer.size) {
-                    posix.sendAll(cfd, ControlReply.err("COMMAND_TOO_LONG").render().toByteArray())
+                    reply(ControlReply.err("COMMAND_TOO_LONG").render())
                     break
                 }
             }
@@ -244,15 +213,22 @@ public class TierEDaemon(
         } finally {
             teardownRing()
             engine.close()
-            eventsSeen = events.toULong()
             posix.close(cfd)
             val dropped = if (boundHandle >= 0) runCatching {
                 shim.droppedTotal(boundHandle).toLong()
             }.getOrDefault(-1L) else -1L
             System.err.println(
-                "[wp04kt] epoch=$epoch DEAD (peer EOF) events=${eventsSeen} dropped=$dropped",
+                "[wp04kt] epoch=$epoch DEAD events=$eventCount dropped=$dropped",
             )
         }
+
+        // Suppress unused warnings for variables captured by closures above.
+        @Suppress("UNUSED_EXPRESSION") printEvents
+        @Suppress("UNUSED_EXPRESSION") shimRef
+    }
+
+    private companion object {
+        const val RECV_TIMEOUT_MS = 30_000
     }
 
     private fun runningAsRoot(): Boolean =
@@ -265,123 +241,34 @@ public class TierEDaemon(
 
 public fun main(args: Array<String>) {
     if (args.isNotEmpty() && args[0] == "--probe-stdin") {
-        // Suite harness mode: reads one command per stdin line, prints one
-        // reply per line. Single connection for the process lifetime.
-        val posix = PosixFfi()
-        val fd = posix.connectUnix(args[1])
-        if (fd < 0) {
-            println("ERR CONNECT")
-            exitProcess(1)
-        }
-        val buf = ByteArray(512)
-        while (true) {
-            val line = readLine() ?: break
-            if (line.isBlank()) continue
-            if (!posix.sendAll(fd, (line + "\n").toByteArray())) {
-                println("ERR SEND")
-                break
-            }
-            val n = posix.recv(fd, buf)
-            if (n <= 0) {
-                println("ERR RECV")
-                break
-            }
-            println(String(buf, 0, n).trimEnd('\n'))
-        }
-        posix.close(fd)
-        exitProcess(0)
+        ProbeMain.probeStdin(args)
+        return
     }
     if (args.isNotEmpty() && args[0] == "--probe-cmdfile") {
-        // Suite harness mode: long-lived connection driven by a command file.
-        //   args: --probe-cmdfile <sock> <cmdfile> <outfile>
-        // Appends one reply per command line; immune to fd-inheritance races.
-        // Connect retries for up to ~10 s: the daemon JVM may still be
-        // booting when this probe starts.
-        val posix = PosixFfi()
-        var fd = -1
-        var waited = 0
-        while (fd < 0 && waited < 10_000) {
-            fd = posix.connectUnix(args[1])
-            if (fd < 0) {
-                println("WAIT")
-                System.out.flush()
-                Thread.sleep(100)
-                waited += 100
-            }
-        }
-        if (fd < 0) {
-            println("ERR CONNECT_TIMEOUT")
-            exitProcess(1)
-        }
-        val cmdFile = Path.of(args[2])
-        val outFile = Path.of(args[3])
-        val buf = ByteArray(512)
-        var consumed = 0
-        while (true) {
-            val lines = runCatching {
-                if (Files.exists(cmdFile)) Files.readAllLines(cmdFile) else emptyList()
-            }.getOrDefault(emptyList())
-            while (consumed < lines.size) {
-                val line = lines[consumed++].trim()
-                if (line.isEmpty()) continue
-                if (!posix.sendAll(fd, (line + "\n").toByteArray())) {
-                    println("ERR SEND")
-                    exitProcess(1)
-                }
-                val n = posix.recv(fd, buf)
-                val reply = if (n <= 0) "ERR RECV" else String(buf, 0, n).trimEnd('\n')
-                Files.writeString(
-                    outFile,
-                    reply + "\n",
-                    java.nio.file.StandardOpenOption.CREATE,
-                    java.nio.file.StandardOpenOption.APPEND,
-                )
-                if (reply.startsWith("ERR RECV") || reply == "OK BYE") exitProcess(if (reply == "OK BYE") 0 else 1)
-            }
-            Thread.sleep(25)
-        }
+        ProbeMain.probeCmdfile(args)
+        return
     }
     if (args.isNotEmpty() && args[0] == "--probe") {
-        // Harness helper: single command over AF_UNIX, prints reply, rc=OK?0:1.
-        val posix = PosixFfi()
-        val fd = posix.connectUnix(args[1])
-        if (fd < 0) {
-            System.err.println("ERR CONNECT")
-            exitProcess(1)
-        }
-        val line = args.drop(2).joinToString(" ") + "\n"
-        check(posix.sendAll(fd, line.toByteArray())) { "send failed" }
-        val buf = ByteArray(512)
-        val n = posix.recv(fd, buf)
-        val reply = if (n <= 0) "ERR RECV" else String(buf, 0, n).trimEnd('\n')
-        println(reply)
-        posix.close(fd)
-        exitProcess(if (reply.startsWith("OK")) 0 else 1)
+        ProbeMain.probeSingle(args)
+        return
     }
+
     var sock = "/run/mazewall/wp04kt.sock"
     var shimPath = "build/libtier_e_bpf.so"
     var objPath = "build/context_probe.bpf.o"
-    var printEvents = false
-    var i = 0 // Kotlin main(args) has NO program-name element (unlike C argv)
+    var verbose = false
+    var i = 0
     while (i < args.size) {
         when (args[i]) {
-            "--sock" -> {
-                require(i + 1 < args.size); sock = args[i + 1]; i += 2
-            }
-            "--shim" -> {
-                require(i + 1 < args.size); shimPath = args[i + 1]; i += 2
-            }
-            "--bpf" -> {
-                require(i + 1 < args.size); objPath = args[i + 1]; i += 2
-            }
-            "--verbose" -> {
-                printEvents = true; i += 1
-            }
+            "--sock" -> { require(i + 1 < args.size); sock = args[i + 1]; i += 2 }
+            "--shim" -> { require(i + 1 < args.size); shimPath = args[i + 1]; i += 2 }
+            "--bpf" -> { require(i + 1 < args.size); objPath = args[i + 1]; i += 2 }
+            "--verbose" -> { verbose = true; i += 1 }
             else -> {
                 System.err.println("usage: wp04kt [--sock p] [--shim so] [--bpf o] [--verbose]")
                 exitProcess(2)
             }
         }
     }
-    TierEDaemon(sock, shimPath, objPath, printEvents = printEvents).serve()
+    TierEDaemon(sock, shimPath, objPath, printEvents = verbose).serve()
 }
