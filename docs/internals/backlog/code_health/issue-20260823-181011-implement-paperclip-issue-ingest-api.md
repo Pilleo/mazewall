@@ -27,7 +27,7 @@ Live Paperclip (`127.0.0.1:3100`, company `mazewall`) has 27 issues; the git bac
    - Resolve company id (`PAPERCLIP_COMPANY_ID` or `GET /api/companies`).
    - For each unblocked (or `--force` all open) markdown issue lacking `paperclip_issue_id`: `POST /api/companies/:id/issues` with title, description (full markdown body), priority mapping (`high`→`high`, etc.), metadata `{ backlogId, backlogFile, targetFiles, targetModules, component }`.
    - Map `dependencies: []` to Paperclip `blockedByIssueIds` when the dependency already has `paperclip_issue_id`; skip/queue if not yet synced (topological order).
-   - Write `paperclip_issue_id: "<uuid-or-MAZ-N>"` into YAML frontmatter (do not clobber other keys).
+   - Write `paperclip_issue_id: abec8d82-aa58-4915-a074-f961d8ab381b
 2. Idempotency: if frontmatter already has `paperclip_issue_id`, skip unless `--force` (then PATCH description/blockers, do not create duplicates).
 3. Auth: `Authorization: Bearer $PAPERCLIP_API_KEY`. Fail closed if key missing (already the script behavior). Never log the key.
 4. Tests with the existing fake `HttpTransport`: fixture backlog of 2 issues (A depends on B); assert POST order B then A; assert second run POSTs nothing; assert frontmatter updated. Do not hit the live 3100 instance from unit tests.

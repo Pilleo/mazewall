@@ -14,6 +14,7 @@ core_lock: false
 effort: "medium"
 autonomy: "supervised"
 open_questions: false
+paperclip_issue_id: c326a656-da01-4a95-83a6-1c31ba0a3e2d
 ---
 
 # 🔴 [Severity: HIGH]: FD token ownership: type-level Owned/Unowned split + audit ledger + literal-int sweep

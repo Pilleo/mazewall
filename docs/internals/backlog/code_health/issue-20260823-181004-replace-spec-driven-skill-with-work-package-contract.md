@@ -16,6 +16,7 @@ target_files:
 effort: "small"
 autonomy: "supervised"
 open_questions: false
+paperclip_issue_id: a5ac74da-9afa-44a5-8aa5-692fca127ebf
 ---
 
 # 🟡 [Severity: MEDIUM]: Replace spec-driven skill with a one-page work-package contract
