@@ -15,6 +15,7 @@ target_files:
 effort: "medium"
 autonomy: "supervised"
 open_questions: false
+paperclip_issue_id: de4f860d-ec1f-4f70-8be2-91548b2ccab7
 ---
 
 # 🟡 [Severity: MEDIUM]: One start-approval gate for hybrid Paperclip + orchestrator loop

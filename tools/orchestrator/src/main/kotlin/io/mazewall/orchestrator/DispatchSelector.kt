@@ -22,7 +22,19 @@ object DispatchSelector {
     fun ordered(issues: List<PaperclipIssue>): List<PaperclipIssue> =
         issues.filter(::isDispatchable).sortedWith(comparator)
 
-    fun select(issues: List<PaperclipIssue>): PaperclipIssue? = ordered(issues).firstOrNull()
+    /**
+     * Forced targeting (orchestrator FORCE_TASK parity): restricts the ordered
+     * candidates to [identifier] when provided. All safety gates (marker,
+     * terminal blockers, backlog status) still apply - forcing changes WHICH
+     * dispatchable issue runs, never WHETHER one may run.
+     */
+    fun select(issues: List<PaperclipIssue>, forceIdentifier: String?): PaperclipIssue? {
+        val scoped = if (forceIdentifier.isNullOrBlank()) issues
+        else issues.filter { it.identifier.equals(forceIdentifier, ignoreCase = true) }
+        return ordered(scoped).firstOrNull()
+    }
+
+    fun select(issues: List<PaperclipIssue>): PaperclipIssue? = select(issues, null)
 
     private val comparator =
         compareByDescending<PaperclipIssue> { PRIORITY_RANK[it.priority] ?: 0 }

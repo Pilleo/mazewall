@@ -16,6 +16,7 @@ effort: "small"
 autonomy: "supervised"
 open_questions: false
 has_side_effects: true
+paperclip_issue_id: 1658732d-f67c-492b-ac80-c91b0ecd9d81
 ---
 
 # 🟡 [Severity: MEDIUM]: Do not resolve markdown from Paperclip done without orchestrator ResolveTask

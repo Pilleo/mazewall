@@ -19,6 +19,7 @@ effort: "small"
 autonomy: "supervised"
 open_questions: false
 has_side_effects: false
+paperclip_issue_id: 18b0b359-0142-498d-a669-96b403a6add0
 ---
 
 # 🟢 [Severity: LOW]: Add operator dry-run then one-issue ingest checklist

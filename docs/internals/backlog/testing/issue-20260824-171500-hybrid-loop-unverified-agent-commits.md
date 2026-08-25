@@ -7,6 +7,7 @@ component: "testing"
 target_modules: [":enforcer"]
 target_files: ["scripts/hooks/pre-commit", "scripts/run_containerized_tests.sh", "scripts/paperclip_backlog_sync.kts"]
 open_questions: false
+paperclip_issue_id: 66a6bf06-aee0-47e8-a411-70bdc92eaed6
 ---
 
 # 🔴 [Severity: HIGH]: Hybrid-loop verification gaps (Vibe commit + uncommitted "completed" work)

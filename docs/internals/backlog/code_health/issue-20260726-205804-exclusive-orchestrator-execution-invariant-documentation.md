@@ -12,6 +12,7 @@ target_files:
 - AGENTS.md
 effort: small
 autonomy: autonomous
+paperclip_issue_id: b5581966-2cbc-4fde-9cc3-f00e0df47088
 ---
 
 # 🔴 [Severity: HIGH]: Document Single Control Plane Development Invariants in AGENTS.md

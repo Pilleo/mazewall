@@ -15,6 +15,7 @@ reversible: true
 autonomy: supervised
 solution_approved: false
 blast_radius: medium
+paperclip_issue_id: 7319785a-4237-44a2-8699-bcf5723da628
 ---
 
 # 🔴 [Severity: HIGH]: Orchestrator: Validate Issue Context and Needed Before GitHub Issue Creation

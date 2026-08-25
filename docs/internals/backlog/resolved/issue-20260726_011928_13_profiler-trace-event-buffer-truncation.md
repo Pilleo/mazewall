@@ -1,7 +1,7 @@
 ---
 title: TraceEvent buffer truncation on excessively long extracted string paths
 type: issue
-status: open
+status: "resolved"
 priority: low
 labels:
 - security

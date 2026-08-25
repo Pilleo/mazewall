@@ -17,6 +17,7 @@ autonomy: supervised
 solution_approved: false
 blast_radius: medium
 reversible: true
+paperclip_issue_id: 530cbe81-f122-418f-b95b-3b54820be9d3
 ---
 
 # 🟡 [Severity: MEDIUM]: Orchestrator: Auto-Merge PR on VERDICT: APPROVED When autonomy=autonomous and solution_approved=true

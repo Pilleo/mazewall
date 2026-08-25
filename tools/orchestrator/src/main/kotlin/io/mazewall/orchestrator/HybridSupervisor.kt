@@ -24,7 +24,8 @@ class HybridSupervisor(
     private val err: (String) -> Unit = System.err::println,
     private val sleepMs: (Long) -> Unit = { Thread.sleep(it) },
 ) {
-    fun tick(maxDispatch: Int): Int {
+    fun tick(maxDispatch: Int, forceIdentifier: String? = null): Int {
+        val allowedLoopAdapters = ALLOWED_LOOP_ADAPTERS + extraLoopAdapters()
         // External failures degrade to a skipped tick, never a crash (orchestrator rule 4).
         val issues = runCatching { client.listIssues(companyId) }
             .onFailure { err("listIssues failed: ${it.message}"); return 0 }
@@ -50,7 +51,7 @@ class HybridSupervisor(
             val fresh = runCatching { client.listIssues(companyId) }
                 .onFailure { err("listIssues failed mid-tick: ${it.message}"); return dispatched }
                 .getOrThrow()
-            val candidate = DispatchSelector.select(fresh) ?: break
+            val candidate = DispatchSelector.select(fresh, forceIdentifier) ?: break
 
             val component = router.componentOf(candidate.description)
             val urlKey = router.urlKeyFor(component)
@@ -58,6 +59,18 @@ class HybridSupervisor(
                 ?: agentsByAdapter[router.defaultAdapter]
             if (agent == null) {
                 err("no roster agent for component '$component' and no '${router.defaultAdapter}' fallback")
+                return dispatched
+            }
+            // Operator policy (2026-08-25, tightened): loop work runs on VIBE for all
+            // agents, with JULES as the single exception. Any other adapterType is
+            // refused unless explicitly unlocked via PAPERCLIP_EXTRA_LOOP_ADAPTERS.
+            if (agent.adapterType !in allowedLoopAdapters) {
+                err(
+                    "REFUSED dispatch of ${candidate.identifier}: adapterType " +
+                        "'${agent.adapterType}' is not an approved experiment worker " +
+                        "(allowed: ${allowedLoopAdapters}). Unlock via " +
+                        "PAPERCLIP_EXTRA_LOOP_ADAPTERS=<type> if the operator permits.",
+                )
                 return dispatched
             }
 
@@ -87,11 +100,32 @@ class HybridSupervisor(
         return dispatched
     }
 
-    fun runForever() {
+    /**
+     * Daemon loop with an optional dispatch budget. PAPERCLIP_MAX_TOTAL_DISPATCH
+     * bounds the TOTAL number of issues this daemon will ever dispatch - the
+     * runaway guard for unattended runs: without it, a 90-second tick drains the
+     * entire backlog into worker quotas overnight (observed 2026-08-25).
+     * The budget counts actual dispatches, not ticks; when exhausted the daemon
+     * keeps polling (ciWatch/resolution stay live) but dispatches nothing.
+     */
+    fun runForever(totalDispatchBudget: Int? = null) {
         val interval = env("PAPERCLIP_TICK_SECONDS")?.toLongOrNull() ?: 30L
         val max = env("PAPERCLIP_MAX_DISPATCH")?.toIntOrNull() ?: 1
+        var budgetLeft = totalDispatchBudget
         while (true) {
-            tick(max)
+            val dispatched =
+                if (budgetLeft != null && budgetLeft <= 0) {
+                    0
+                } else {
+                    val effectiveMax =
+                        if (budgetLeft != null) minOf(max, budgetLeft) else max
+                    val done = tick(effectiveMax)
+                    if (budgetLeft != null) budgetLeft -= done
+                    done
+                }
+            if (budgetLeft != null && budgetLeft == 0) {
+                out("Dispatch budget exhausted; ciWatch/resolution continue, dispatch disabled.")
+            }
             sleepMs(Duration.ofSeconds(interval).toMillis())
         }
     }
@@ -99,7 +133,19 @@ class HybridSupervisor(
     private val companyId: String by lazy { env("PAPERCLIP_COMPANY_ID") ?: client.resolveCompanyId() }
 
     companion object {
+        val ALLOWED_LOOP_ADAPTERS = setOf("vibe", "jules")
+
         fun env(key: String): String? = System.getenv(key)?.takeIf { it.isNotBlank() }
+
+        fun parseExtra(raw: String?): Set<String> =
+            raw.orEmpty()
+                ?.split(',')
+                ?.map { it.trim().lowercase() }
+                ?.filter { it.isNotEmpty() }
+                ?.toSet()
+                ?: emptySet()
+
+        fun extraLoopAdapters(): Set<String> = parseExtra(env("PAPERCLIP_EXTRA_LOOP_ADAPTERS"))
     }
 }
 
@@ -167,7 +213,13 @@ fun main(args: Array<String>) {
         val companyId = HybridSupervisor.env("PAPERCLIP_COMPANY_ID") ?: client.resolveCompanyId()
         val byUrlKey = client.listAgents(companyId).associateBy { it.urlKey }
         val byAdapter = client.listAgents(companyId).associateBy { it.adapterType }
-        DispatchSelector.ordered(client.listIssues(companyId))
+        val scoped = client.listIssues(companyId).let { all ->
+            val force = HybridSupervisor.env("PAPERCLIP_FORCE_IDENTIFIER")
+            if (force.isNullOrBlank()) all else all.filter {
+                it.identifier.equals(force, ignoreCase = true)
+            }
+        }
+        DispatchSelector.ordered(scoped)
             .take(5)
             .forEach { issue ->
                 val component = router.componentOf(issue.description)
@@ -180,9 +232,12 @@ fun main(args: Array<String>) {
     }
 
     if (daemon) {
-        supervisor.runForever()
+        supervisor.runForever(HybridSupervisor.env("PAPERCLIP_MAX_TOTAL_DISPATCH")?.toIntOrNull())
     } else {
-        val dispatched = supervisor.tick(HybridSupervisor.env("PAPERCLIP_MAX_DISPATCH")?.toIntOrNull() ?: 1)
+        val dispatched = supervisor.tick(
+            HybridSupervisor.env("PAPERCLIP_MAX_DISPATCH")?.toIntOrNull() ?: 1,
+            HybridSupervisor.env("PAPERCLIP_FORCE_IDENTIFIER"),
+        )
         println("Loop tick complete ($dispatched dispatched).")
     }
 }

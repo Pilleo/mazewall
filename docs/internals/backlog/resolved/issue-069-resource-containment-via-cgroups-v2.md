@@ -1,7 +1,7 @@
 ---
 title: Resource Containment via Cgroups v2
 severity: ENHANCEMENT
-status: open
+status: "resolved"
 priority: low
 dependencies: []
 target_files:
