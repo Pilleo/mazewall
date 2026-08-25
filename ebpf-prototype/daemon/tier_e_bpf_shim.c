@@ -297,8 +297,8 @@ int te_unknown_counts(void *handle, long *out)
 	return 0;
 }
 
-/* Reads both per-syscall-nr maps into a single output array:
- * out[0..511] = unknown counts, out[512..1023] = attributed counts. */
+/* Reads noise_by_nr percpu array (single key=0, value=u64[512] per cpu).
+ * Output: out[0..511] = UNKNOWN counts summed across cpus. */
 int te_read_per_nr(void *handle, long *out)
 {
 	struct te_ctx *ctx = handle;
@@ -308,30 +308,22 @@ int te_read_per_nr(void *handle, long *out)
 	if (nr_cpus <= 0 || nr_cpus > 512)
 		return -ERANGE;
 	__u32 key = 0;
+	int fd = bpf_object__find_map_fd_by_name(ctx->object, "noise_by_nr");
+	if (fd < 0)
+		return -ENOENT;
 	unsigned long long *per = calloc(nr_cpus * 512, sizeof(unsigned long long));
 	if (!per)
 		return -ENOMEM;
-
-	int un_fd = bpf_object__find_map_fd_by_name(ctx->object, "unknown_by_nr");
-	if (un_fd >= 0 && !bpf_map_lookup_elem(un_fd, &key, per)) {
-		for (int nr = 0; nr < 512; nr++) {
-			unsigned long long total = 0;
-			for (int cpu = 0; cpu < nr_cpus; cpu++)
-				total += per[cpu * 512 + nr];
-			out[nr] = total;
-		}
+	if (bpf_map_lookup_elem(fd, &key, per)) {
+		free(per);
+		return -errno;
 	}
-
-	int at_fd = bpf_object__find_map_fd_by_name(ctx->object, "attributed_by_nr");
-	if (at_fd >= 0 && !bpf_map_lookup_elem(at_fd, &key, per)) {
-		for (int nr = 0; nr < 512; nr++) {
-			unsigned long long total = 0;
-			for (int cpu = 0; cpu < nr_cpus; cpu++)
-				total += per[cpu * 512 + nr];
-			out[512 + nr] = total;
-		}
+	for (int nr = 0; nr < 512; nr++) {
+		unsigned long long total = 0;
+		for (int cpu = 0; cpu < nr_cpus; cpu++)
+			total += per[cpu * 512 + nr];
+		out[nr] = total;
 	}
-
 	free(per);
 	return 0;
 }

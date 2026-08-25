@@ -64,24 +64,14 @@ struct {
 	__type(value, __u64);
 } hit_counters SEC(".maps");
 
-/* Per-syscall-nr UNKNOWN counter: incremented when a syscall passes the
- * TGID filter but has no semantic context (storage empty or zero).
- * These events are NEVER emitted to the ring buffer (invariant 3). */
+/* Per-syscall-nr noise + attribution counters.
+ * Single-key percpu array: value is u64[512], indexed by syscall_nr. */
 struct {
 	__uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
-	__uint(max_entries, 512);
-	__type(key, __u32); /* syscall number */
-	__type(value, __u64);
-} unknown_by_nr SEC(".maps");
-
-/* Per-syscall-nr ATTRIBUTED counter: incremented when a syscall has a valid
- * semantic context AND passes the TGID filter. */
-struct {
-	__uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
-	__uint(max_entries, 512);
+	__uint(max_entries, 1);
 	__type(key, __u32);
-	__type(value, __u64);
-} attributed_by_nr SEC(".maps");
+	__type(value, __u64[512]);
+} noise_by_nr SEC(".maps");
 
 SEC("uprobe")
 int BPF_UPROBE(tier_e_on_marker, unsigned int context_id)
@@ -129,14 +119,14 @@ int BPF_PROG(tier_e_sys_enter_ctx, struct pt_regs *regs, long id)
 		bpf_map_update_elem(&hit_counters, &hk1, &one_v, BPF_ADD);
 	}
 
+	__u32 zero_key = 0;
+	__u64 (*noise_counts)[512] = bpf_map_lookup_elem(&noise_by_nr, &zero_key);
+
 	struct task_struct *task = (struct task_struct *)bpf_get_current_task_btf();
 	__u32 *stored = bpf_task_storage_get(&context_storage, task, NULL, 0);
 	if (!stored || *stored == 0) {
-		__u32 nr_key = (__u32)id;
-		if (nr_key < 512) {
-			__u64 one_v = 1;
-			bpf_map_update_elem(&unknown_by_nr, &nr_key, &one_v, BPF_ADD);
-		}
+		if (noise_counts && id >= 0 && id < 512)
+			(*noise_counts)[id]++;
 		return 0; /* UNKNOWN is data, not an event (invariant 3) */
 	}
 

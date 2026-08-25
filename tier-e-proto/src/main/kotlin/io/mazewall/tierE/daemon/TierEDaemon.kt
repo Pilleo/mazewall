@@ -77,7 +77,7 @@ public class TierEDaemon(
             when (val decision = decideAccept(sessionActive.get(), cred)) {
                 is AcceptDecision.Accept -> {
                     val epoch = epochCounter.incrementAndGet()
-                    thread(name = "tier-e-session-$epoch", isDaemon = true) {
+                    thread(name = "tier-e-session-$epoch", isDaemon = false) {
                         try {
                             handleSession(epoch, cfd)
                         } finally {
