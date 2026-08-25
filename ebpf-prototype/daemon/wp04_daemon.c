@@ -39,7 +39,6 @@
 #include <sys/sysmacros.h>
 #include <sys/types.h>
 #include <sys/un.h>
-#include <time.h>
 #include <unistd.h>
 
 #define SOCK_PATH_DEFAULT "/run/mazewall/wp04.sock"
@@ -73,13 +72,6 @@ static void on_signal(int sig)
 {
 	(void)sig;
 	g_stop = 1;
-}
-
-static double now_s(void)
-{
-	struct timespec ts;
-	clock_gettime(CLOCK_MONOTONIC, &ts);
-	return (double)ts.tv_sec + (double)ts.tv_nsec / 1e9;
 }
 
 static int reply(int fd, const char *fmt, ...)
@@ -361,7 +353,6 @@ static void end_session(struct session *s, const char *why)
 /* Handle one newline-terminated command from the connected peer. */
 static void handle_command(struct session *s, char *line)
 {
-	char cmd[32] = { 0 };
 	char mode[16] = { 0 };
 	char path[PATH_MAX] = { 0 };
 	long pid_arg = 0;
@@ -505,7 +496,8 @@ int main(int argc, char **argv)
 			s.state = ST_ACCEPTED;
 			s.quiet = s.quiet; /* preserved from argv */
 			s.verbose = s.verbose;
-			reply(cfd, "OK HELLO epoch=%lu\n", s.epoch);
+			/* No proactive greeting: the wire is strictly
+			 * request->reply so thin clients stay trivial. */
 			continue;
 		}
 

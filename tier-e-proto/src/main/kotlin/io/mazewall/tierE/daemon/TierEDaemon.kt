@@ -38,6 +38,16 @@ public class TierEDaemon(
         private set
 
     public fun serve() {
+        try {
+            serveInternal()
+        } catch (t: Throwable) {
+            System.err.println("[wp04kt] fatal: ${t.javaClass.simpleName}: ${t.message}")
+            t.printStackTrace()
+            exitProcess(1)
+        }
+    }
+
+    private fun serveInternal() {
         if (!runningAsRoot()) {
             System.err.println("[wp04kt] refusing: requires initial-userns root")
             exitProcess(1)
@@ -99,7 +109,7 @@ public class TierEDaemon(
                 }.getOrNull()
             }
         }
-        reply("OK HELLO epoch=$epoch\n")
+        // Strictly request->reply: no proactive greeting (parity with oracle).
         System.err.println("[wp04kt] epoch=$epoch accepted")
 
         val buffer = ByteArray(512)

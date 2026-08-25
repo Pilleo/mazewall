@@ -30,7 +30,10 @@ fresh_daemon() { # $1=starter fn name; kills any previous daemon first
     [[ -n "${DAEMON_PID:-}" ]] && kill -9 "$DAEMON_PID" 2>/dev/null && wait "$DAEMON_PID" 2>/dev/null
     rm -f "$SOCK" "$LOG"
     "$1"; DAEMON_PID=$!
-    wait_socket || { FAIL=$((FAIL+1)); echo "[FAIL] no socket after start"; }
+    if ! wait_socket; then
+        FAIL=$((FAIL+1)); echo "[FAIL] no socket after start"
+        echo "--- daemon log tail ($LOG) ---"; tail -20 "$LOG" 2>/dev/null || true
+    fi
 }
 
 client() { ./build/wp04_client "$SOCK" "$@"; }
@@ -81,7 +84,7 @@ run_suite() {
 
     # T-SIGKILL survival + clean re-attach on a live target
     fresh_daemon "$starter"
-    ./build/wp03_driver 300000 ./build/libmazewall_context_usdt.so 4 & DRV3=$!
+    ./build/wp03_driver 300000 ./build/libmazewall_context_usdt.so 8 & DRV3=$!
     wait_mapped "$DRV3" usdt
     client ATTACH "$DRV3" usdt /work/build/libmazewall_context_usdt.so >/dev/null
     kill -9 "$DAEMON_PID" 2>/dev/null; wait "$DAEMON_PID" 2>/dev/null
@@ -91,7 +94,7 @@ run_suite() {
     fresh_daemon "$starter"
     R=$(client ATTACH "$DRV3" usdt /work/build/libmazewall_context_usdt.so)
     check "fresh epoch re-attach ok" "OK ATTACHED" "$R"
-    BEFORE=$(wc -l < "$LOG"); sleep 2; AFTER=$(wc -l < "$LOG")
+    BEFORE=$(wc -l < "$LOG"); sleep 1; AFTER=$(wc -l < "$LOG")
     (( AFTER > BEFORE )) && { PASS=$((PASS+1)); echo "[ok]   fresh epoch emits events"; } \
                           || { FAIL=$((FAIL+1)); echo "[FAIL] no events in fresh epoch"; }
     kill "$DRV3" 2>/dev/null; wait "$DRV3" 2>/dev/null

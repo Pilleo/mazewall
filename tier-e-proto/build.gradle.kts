@@ -26,4 +26,5 @@ tasks.withType<Test>().configureEach {
 
 application {
     mainClass.set("io.mazewall.tierE.daemon.TierEDaemonKt")
+    applicationDefaultJvmArgs = listOf("--enable-native-access=ALL-UNNAMED")
 }
