@@ -198,6 +198,76 @@ void te_munmap_ring(void *addr, long len)
 	munmap(addr, (size_t)len);
 }
 
+/* Libbpf ring buffer consumer — uses PROVEN ring_buffer__new/poll API. */
+struct te_ring_ctx {
+	struct ring_buffer *rb;
+	int event_count;
+};
+
+static int te_on_event(void *tctx, void *data, size_t size)
+{
+	struct te_ring_ctx *rc = tctx;
+	const struct {
+		__u64 ktime_ns;
+		__u32 tgid;
+		__u32 tid;
+		__s32 syscall_nr;
+		__u32 context_id;
+	} __attribute__((packed)) * e = data;
+
+	if (size >= 24) {
+		rc->event_count++;
+		fprintf(stderr, "E %u %d %u %llu\n",
+			e->tid, e->syscall_nr, e->context_id,
+			(unsigned long long)e->ktime_ns);
+	}
+	return 0;
+}
+
+void *te_ring_new(void *handle)
+{
+	struct te_ctx *ctx = handle;
+	if (!ctx || !ctx->object) {
+		set_err("null ctx");
+		return NULL;
+	}
+	int fd = bpf_object__find_map_fd_by_name(ctx->object, "context_events");
+	if (fd < 0) {
+		set_err("no context_events fd: %d", fd);
+		return NULL;
+	}
+	struct te_ring_ctx *rc = calloc(1, sizeof(*rc));
+	if (!rc) {
+		set_err("oom");
+		return NULL;
+	}
+	rc->rb = ring_buffer__new(fd, te_on_event, rc, NULL);
+	if (!rc->rb) {
+		set_err("ring_buffer__new failed");
+		free(rc);
+		return NULL;
+	}
+	return rc;
+}
+
+int te_ring_poll(void *rb_handle, int timeout_ms)
+{
+	struct te_ring_ctx *rc = rb_handle;
+	if (!rc || !rc->rb)
+		return -EINVAL;
+	int r = ring_buffer__poll(rc->rb, timeout_ms);
+	return r < 0 ? r : rc->event_count;
+}
+
+void te_ring_destroy(void *rb_handle)
+{
+	struct te_ring_ctx *rc = rb_handle;
+	if (!rc)
+		return;
+	ring_buffer__free(rc->rb);
+	free(rc);
+}
+
 void te_destroy(void *handle)
 {
 	struct te_ctx *ctx = handle;

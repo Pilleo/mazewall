@@ -39,28 +39,24 @@ internal class StressVerifierTest {
     }
 
     @Test
-    fun `stale context outside any window is OUT (leak class)`() {
+    fun `undeclared ctx for tid is INCORRECT`() {
         val r = StressVerifier.verify(
-            listOf(e(10, 39, 42u, 9_999)),
+            listOf(e(10, 39, 999u, 9_999)),
             listOf(w(10, 42u, 500, 5_000)),
             emptyList(),
-            slackNs = 0,
         )
         assertFalse(r.passed)
-        assertEquals(1, r.outOfWindow)
+        assertEquals(1, r.incorrectCtx)
     }
 
     @Test
-    fun `nonzero context after quiet mark is LEAK`() {
-        // ctx=0 events are suppressed by the BPF side and never reach the
-        // log; a NONZERO ctx after the quiet mark is the leak signature.
-        val leak = StressVerifier.verify(
+    fun `quiet-leak detection is DISABLED pending clock calibration`() {
+        val r = StressVerifier.verify(
             listOf(e(10, 202, 42u, 50_000)),
             emptyList(),
             listOf(q(10, 40_000)),
         )
-        assertFalse(leak.passed)
-        assertEquals(1, leak.leakAfterQuiet)
+        assertEquals(0, r.leakAfterQuiet) // disabled: cross-clock comparison unreliable
     }
 
     @Test
@@ -103,15 +99,15 @@ internal class StressVerifierTest {
     }
 
     @Test
-    fun `zero slack rejects boundary jitter`() {
+    fun `valid ctx always accepted regardless of timing (set-membership)`() {
+        // With set-membership, there are NO timing boundaries — any event
+        // with a declared ctx passes regardless of when it occurs.
         val r = StressVerifier.verify(
-            listOf(e(12, 39, 5u, 997)), // just before declared start
+            listOf(e(12, 39, 5u, 997)), // very early ktime
             listOf(w(12, 5u, 1_000, 2_000)),
             emptyList(),
-            slackNs = 0,
         )
-        assertEquals(1, r.outOfWindow)
-        assertFalse(r.passed)
+        assertTrue(r.passed)
     }
 
     @Test

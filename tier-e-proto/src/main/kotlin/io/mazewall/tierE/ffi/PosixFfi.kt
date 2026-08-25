@@ -52,6 +52,10 @@ public class PosixFfi {
             ValueLayout.JAVA_INT, ValueLayout.ADDRESS, ValueLayout.JAVA_LONG, ValueLayout.JAVA_INT,
         ),
     )
+    private val hGettid: MethodHandle = bind(
+        "gettid",
+        FunctionDescriptor.of(ValueLayout.JAVA_INT),
+    )
     private val hGetpid: MethodHandle = bind(
         "getpid",
         FunctionDescriptor.of(ValueLayout.JAVA_INT),
@@ -196,6 +200,10 @@ public class PosixFfi {
     /** Triggers syscall getpid(39) — used by stress workers as an attributable
      *  no-side-effect syscall. */
     public fun getpid(): Int = hGetpid.invoke() as Int
+
+    /** Returns the Linux TID (kernel task id) of the calling thread.
+     *  MUST be used instead of Thread.threadId() for BPF event correlation. */
+    public fun gettid(): Int = hGettid.invoke() as Int
 
     public fun close(fd: Int) {
         hClose.invoke(fd)

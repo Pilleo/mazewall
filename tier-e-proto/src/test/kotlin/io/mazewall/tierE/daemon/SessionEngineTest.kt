@@ -42,6 +42,10 @@ internal class SessionEngineTest {
         override fun destroy(handle: Long) {
             destroyed += handle
         }
+
+        override fun ringNew(handle: Long): Long = 0
+        override fun ringPoll(rbHandle: Long, timeoutMs: Int): Int = 0
+        override fun ringDestroy(rbHandle: Long) {}
     }
 
     private val shim = FakeShim()

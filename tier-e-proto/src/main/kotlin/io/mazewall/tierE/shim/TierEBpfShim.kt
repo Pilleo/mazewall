@@ -28,4 +28,12 @@ public interface TierEBpfShim {
 
     /** Destroys links + object: the whole epoch dies with these FDs. */
     public fun destroy(handle: Long)
+
+    /** Creates a libbpf ring_buffer consumer for the attached epoch's events map. */
+    public fun ringNew(handle: Long): Long
+
+    /** Polls the ring buffer; returns cumulative event count on success. */
+    public fun ringPoll(rbHandle: Long, timeoutMs: Int): Int
+
+    public fun ringDestroy(rbHandle: Long)
 }

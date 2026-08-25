@@ -89,7 +89,7 @@ public object StressDriverMain {
             repeat(churnBatches) {
                 val t = Thread {
                     val ctx = nextCtx()
-                    val tid = Thread.currentThread().threadId()
+                    val tid = posix.gettid().toLong()
                     val w = scoped(marker, ctx, 3, tid)
                     synchronized(decls) { record("W $tid ${w.ctx} ${w.startNs} ${w.endNs}") }
                 }
@@ -102,7 +102,7 @@ public object StressDriverMain {
             val nestPool = Executors.newFixedThreadPool(nestThreads)
             repeat(nestThreads) {
                 nestPool.submit {
-                    val tid = Thread.currentThread().threadId()
+                    val tid = posix.gettid().toLong()
                     val outer = nextCtx()
                     marker.mark(outer)
                     val oStart = System.nanoTime() - SLACK
@@ -129,7 +129,7 @@ public object StressDriverMain {
             val pool = Executors.newFixedThreadPool(execPool)
             val failures = (0 until execTasks).map { idx ->
                 pool.submit<Unit> {
-                    val tid = Thread.currentThread().threadId()
+                    val tid = posix.gettid().toLong()
                     val ctx = nextCtx()
                     marker.mark(ctx)
                     val start = System.nanoTime() - SLACK

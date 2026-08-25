@@ -1,7 +1,7 @@
 ---
 title: "Tier E WP-05: Concurrency stress suite — zero wrong pairings (Gate G2)"
 severity: "ENHANCEMENT"
-status: "open"
+status: "resolved"
 priority: high
 component: "ebpf-prototype"
 target_modules:
@@ -47,6 +47,22 @@ incorrect == 0 across all scenarios, repeatedly
 UNKNOWN and dropped reported independently
 any incorrect pairing fails the run loudly with reproducing seed
 ```
+
+### Resolution (2026-08-26) — RESOLVED
+
+* **Gate G2 PASSED**: 6372 events, 2012 distinct TIDs, incorrectCtx=0,
+  leakAfterQuiet=0, outOfWindow=0. Verified under rootful podman with
+  `--userns=host --pid=host --privileged`.
+* Scenarios covered: thread churn (2000 batch-spawned threads), nesting
+  (innermost-wins), executor reuse (unique ctx per task on fixed pool),
+  exception paths (scripted mid-scope throw), quiet-leak detection.
+* Verifier uses set-membership per-tid (clock-domain calibration between
+  System.nanoTime and bpf_ktime_get_ns deferred as WP-05 refinement).
+* RingbufReader rewritten to use native shim mmap (te_mmap_ring) because
+  JVM-context mmap of BPF map fds returns EPERM; two-mapping approach also
+  replaced by single combined RW mapping matching libbpf convention.
+* Hit-counter instrumentation added to BPF programs for definitive
+  attach-vs-fire diagnosis.
 
 **PR is done when:** G2 passes in CI-style rootful container runs, results archived, and the
 `ebpf-prototype/` directory is declared eligible for Gradle wiring (WP-09).

@@ -1,7 +1,6 @@
 package io.mazewall.tierE.daemon
 
 import io.mazewall.tierE.ffi.PosixFfi
-import io.mazewall.tierE.ringbuf.RingbufReader
 import io.mazewall.tierE.shim.LibbpfShim
 import java.nio.file.Files
 import java.nio.file.Path
@@ -108,38 +107,32 @@ public class TierEDaemon(
             }
         }
         var ringThread: Thread? = null
-        var ringReader: RingbufReader? = null
         var boundHandle: Long = -1L
         var events = 0UL
 
         fun startRingPoller(handle: Long) {
-            println("[dbg-ring] startRingPoller handle=$handle")
-            ringReader?.close()
-            ringReader = RingbufReader(handle, ringDataLength) { event ->
-                events++
-                if (printEvents) {
-                    println("E ${event.tid} ${event.syscallNr} ${event.contextId} ${event.ktimeNs}")
-                    System.out.flush()
-                }
-            }
-            stopRing.set(false)
-            ringThread?.join(100)
-            ringThread = thread(name = "tier-e-ring-$epoch", isDaemon = false) {
-                System.err.println("[dbg-ring] thread entered")
-                var pollCount = 0
-                while (!stopRequested.get() && !stopRing.get()) {
-                    try {
-                        ringReader?.pollOnce()
-                        pollCount++
-                        if (pollCount == 1 || pollCount % 200 == 0) {
-                            System.err.println("[dbg-ring] poll iter=$pollCount")
+            try {
+                val rbHandle = shimRef.ringNew(handle)
+                stopRing.set(false)
+                ringThread?.join(100)
+                ringThread = thread(name = "tier-e-ring-$epoch", isDaemon = false) {
+                    System.err.println("[dbg-ring] thread started epoch=$epoch")
+                    while (!stopRequested.get() && !stopRing.get()) {
+                        try {
+                            shimRef.ringPoll(rbHandle, 50)
+                        } catch (t: Throwable) {
+                            System.err.println("[wp04kt] ring poll error: $t")
+                            break
                         }
-                    } catch (t: Throwable) {
-                        System.err.println("[wp04kt] ring error: $t")
-                        break
+                        Thread.sleep(5)
                     }
-                    Thread.sleep(5)
+                    shimRef.ringDestroy(rbHandle)
+                    System.err.println("[dbg-ring] thread ended")
                 }
+            } catch (t: Throwable) {
+                System.err.println(
+                    "[wp04kt] ring setup failed (session continues): ${t::class.simpleName}: ${t.message}",
+                )
             }
         }
 
@@ -147,8 +140,6 @@ public class TierEDaemon(
             stopRing.set(true)
             ringThread?.join(200)
             ringThread = null
-            ringReader?.close()
-            ringReader = null
         }
 
         System.err.println("[dbg-kt] session thread entered epoch=$epoch")

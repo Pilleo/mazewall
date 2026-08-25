@@ -72,6 +72,18 @@ public class LibbpfShim(
         "te_dropped_total",
         FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.ADDRESS, ValueLayout.ADDRESS),
     )
+    private val hRingNew: MethodHandle = bind(
+        "te_ring_new",
+        FunctionDescriptor.of(ValueLayout.ADDRESS, ValueLayout.ADDRESS),
+    )
+    private val hRingPoll: MethodHandle = bind(
+        "te_ring_poll",
+        FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.ADDRESS, ValueLayout.JAVA_INT),
+    )
+    private val hRingDestroy: MethodHandle = bind(
+        "te_ring_destroy",
+        FunctionDescriptor.ofVoid(ValueLayout.ADDRESS),
+    )
     private val hDestroy: MethodHandle = bind(
         "te_destroy",
         FunctionDescriptor.ofVoid(ValueLayout.ADDRESS),
@@ -123,5 +135,18 @@ public class LibbpfShim(
 
     override fun destroy(handle: Long) {
         hDestroy.invoke(MemorySegment.ofAddress(handle))
+    }
+
+    override fun ringNew(handle: Long): Long {
+        val addr = hRingNew.invoke(MemorySegment.ofAddress(handle)) as MemorySegment
+        if (addr == MemorySegment.NULL) throw ShimException("ringNew", -1, lastError())
+        return addr.address()
+    }
+
+    override fun ringPoll(rbHandle: Long, timeoutMs: Int): Int =
+        hRingPoll.invoke(MemorySegment.ofAddress(rbHandle), timeoutMs) as Int
+
+    override fun ringDestroy(rbHandle: Long) {
+        hRingDestroy.invoke(MemorySegment.ofAddress(rbHandle))
     }
 }
