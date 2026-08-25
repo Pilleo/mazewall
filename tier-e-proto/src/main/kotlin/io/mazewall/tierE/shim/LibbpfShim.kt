@@ -81,7 +81,7 @@ public class LibbpfShim(
 
     private fun lastError(): String {
         val ptr = hLastError.invoke() as MemorySegment
-        return if (ptr == MemorySegment.NULL) "" else ptr.getString(0)
+        return if (ptr == MemorySegment.NULL) "" else ptr.reinterpret(256).getString(0)
     }
 
     private fun rc(operation: String, code: Int) {

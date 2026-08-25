@@ -1,7 +1,7 @@
 ---
 title: "Tier E WP-04: Session lifecycle & trust protocol"
 severity: "ENHANCEMENT"
-status: "open"
+status: "resolved"
 priority: high
 component: "ebpf-prototype"
 target_modules:
@@ -31,6 +31,19 @@ daemon (`wp04_daemon.c`) is retained ONLY as a disposable protocol oracle for cr
 checking the `:tier-e-proto` Kotlin daemon; both implement the identical wire contract.
 The C daemon is deleted before WP-05 begins so Gate G2 certifies the real
 implementation. USDT attach in Kotlin ships uprobe-first per §4.1.1 sign-off.
+
+### Resolution (2026-08-25) — RESOLVED
+
+* Durable implementation is **Kotlin**: `:tier-e-proto` `TierEDaemon` (opt-in Gradle module)
+  with per-connection epoch FSM, SO_PEERCRED uid-0 gate, ERR BUSY single-session rule,
+  marker hygiene (realpath + inode-in-target-maps + NT_GNU_BUILD_ID) failing loud AND
+  terminally, graceful SHUTDOWN via accept-wakeup self-connect, no pins anywhere.
+* The C oracle validated the identical wire contract first (15/14-pass runs), then was
+  **deleted** per pivot decision; the suite is Kotlin-only and requires PARITY-free green
+  twice consecutively (achieved: 15/0 and 17/0).
+* Kernel discoveries journaled: ringbuf writable-mapping restriction (see
+  [testing/issue-20260825-191000-ringbuf-rw-data-mapping-eperm.md](../testing/issue-20260825-191000-ringbuf-rw-data-mapping-eperm.md))
+  and rootless-docker-socket env leak (testing/issue-20260825-090500).
 
 **Needed:**
 

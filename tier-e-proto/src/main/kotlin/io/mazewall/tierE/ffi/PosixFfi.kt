@@ -65,10 +65,18 @@ public class PosixFfi {
             ValueLayout.JAVA_INT, ValueLayout.JAVA_LONG,
         ),
     )
+    private val hErrnoLocation: MethodHandle = bind(
+        "__errno_location",
+        FunctionDescriptor.of(ValueLayout.ADDRESS),
+    )
     private val hMunmap: MethodHandle = bind(
         "munmap",
         FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.ADDRESS, ValueLayout.JAVA_LONG),
     )
+
+    /** Downcalls reject heap segments: all byte traffic stages here. */
+    private val nativeScratch: MemorySegment = arena.allocate(64L * 1024)
+    private val scratchSize: Long = 64L * 1024
 
     /** SOL_SOCKET=1, SO_PEERCRED=17 (Linux). Null when creds are missing. */
     public fun peerCredentials(fd: Int): Ucred? {
@@ -87,8 +95,12 @@ public class PosixFfi {
     public fun sendAll(fd: Int, bytes: ByteArray): Boolean {
         var sent = 0
         while (sent < bytes.size) {
-            val slice = MemorySegment.ofArray(bytes).asSlice(sent.toLong(), (bytes.size - sent).toLong())
-            val n = hSend.invoke(fd, slice, slice.byteSize(), MSG_NOSIGNAL) as Long
+            val chunk = minOf((bytes.size - sent).toLong(), scratchSize).toInt()
+            java.lang.foreign.MemorySegment.copy(
+                MemorySegment.ofArray(bytes), sent.toLong(),
+                nativeScratch, 0L, chunk.toLong(),
+            )
+            val n = hSend.invoke(fd, nativeScratch, chunk.toLong(), MSG_NOSIGNAL) as Long
             if (n <= 0L) return false
             sent += n.toInt()
         }
@@ -96,13 +108,22 @@ public class PosixFfi {
     }
 
     /** Reads up to [len] bytes at [offset]; returns count, 0 on EOF, negative -errno. */
-    public fun recv(fd: Int, into: ByteArray, offset: Int = 0, len: Int = into.size - offset): Int =
-        hRecv.invoke(
+    public fun recv(fd: Int, into: ByteArray, offset: Int = 0, len: Int = into.size - offset): Int {
+        val capped = minOf(len.toLong(), scratchSize).toInt()
+        val n = (hRecv.invoke(
             fd,
-            MemorySegment.ofArray(into).asSlice(offset.toLong(), len.toLong()),
-            len.toLong(),
+            nativeScratch,
+            capped.toLong(),
             0,
-        ) as Int
+        ) as Long).toInt()
+        if (n > 0) {
+            java.lang.foreign.MemorySegment.copy(
+                nativeScratch, 0L,
+                MemorySegment.ofArray(into), offset.toLong(), n.toLong(),
+            )
+        }
+        return n
+    }
 
     private val hSocket: MethodHandle = bind(
         "socket",
@@ -115,6 +136,10 @@ public class PosixFfi {
     private val hListen: MethodHandle = bind(
         "listen",
         FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.JAVA_INT, ValueLayout.JAVA_INT),
+    )
+    private val hConnect: MethodHandle = bind(
+        "connect",
+        FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.JAVA_INT, ValueLayout.ADDRESS, ValueLayout.JAVA_INT),
     )
     private val hAccept4: MethodHandle = bind(
         "accept4",
@@ -137,6 +162,25 @@ public class PosixFfi {
         return fd
     }
 
+    /** Connects and immediately closes — used to wake a blocked accept(). */
+    public fun connectUnix(path: String): Int {
+        val fd = hSocket.invoke(1, 1, 0) as Int
+        if (fd < 0) return fd
+        val addr = arena.allocate(110)
+        addr.set(ValueLayout.JAVA_SHORT, 0, 1)
+        val bytes = path.toByteArray(Charsets.US_ASCII)
+        require(bytes.size <= 106)
+        for (i in bytes.indices) addr.set(ValueLayout.JAVA_BYTE, 2L + i, bytes[i])
+        addr.set(ValueLayout.JAVA_BYTE, (2 + bytes.size).toLong(), 0)
+        val rc = hConnect.invoke(fd, addr, 110) as Int
+        return if (rc != 0) {
+            close(fd)
+            -currentErrno()
+        } else {
+            fd
+        }
+    }
+
     /** Blocking accept4(SOCK_CLOEXEC). Returns -EINTR-shaped negative on error. */
     public fun accept(lfd: Int): Int {
         val rc = hAccept4.invoke(lfd, MemorySegment.NULL, MemorySegment.NULL, 0x80000) as Int
@@ -149,19 +193,31 @@ public class PosixFfi {
         hClose.invoke(fd)
     }
 
-    /** PROT_READ|PROT_WRITE, MAP_SHARED. Returns MAP_FAILED (-1) as NULL+1? No:
-     *  returns the mapping or throws when the kernel maps failure to -1. */
-    public fun mmapShared(length: Long, fd: Int): MemorySegment {
-        val seg = hMmap.invoke(MemorySegment.NULL, length, 3, 1, fd, 0L) as MemorySegment
-        check(seg != MemorySegment.NULL && seg.address() != -1L) { "mmap failed" }
-        return seg
+    public fun currentErrno(): Int {
+        // Returned-pointer segments are zero-length; widen before reading.
+        val p = (hErrnoLocation.invoke() as MemorySegment).reinterpret(4)
+        return p.get(ValueLayout.JAVA_INT, 0)
+    }
+
+    /** MAP_SHARED with explicit prot/offset. Throws with errno on failure.
+     *  Returned-pointer segments are zero-length; widen to the mapping size. */
+    public fun mmapShared(length: Long, fd: Int, prot: Int = PROT_READ or PROT_WRITE, offset: Long = 0L): MemorySegment {
+        val seg = hMmap.invoke(MemorySegment.NULL, length, prot, 1, fd, offset) as MemorySegment
+        if (seg == MemorySegment.NULL || seg.address() == -1L) {
+            throw IllegalStateException(
+                "mmap failed: len=$length fd=$fd prot=$prot off=$offset errno=${currentErrno()}",
+            )
+        }
+        return seg.reinterpret(length)
+    }
+
+    public companion object {
+        public const val PROT_READ: Int = 1
+        public const val PROT_WRITE: Int = 2
+        private const val MSG_NOSIGNAL = 0x4000
     }
 
     public fun munmap(segment: MemorySegment, length: Long) {
         hMunmap.invoke(segment, length)
-    }
-
-    private companion object {
-        const val MSG_NOSIGNAL = 0x4000
     }
 }

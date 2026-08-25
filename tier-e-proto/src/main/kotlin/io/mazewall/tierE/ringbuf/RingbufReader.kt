@@ -26,10 +26,17 @@ public class RingbufReader(
         private const val RECORD_SIZE = 24
     }
 
-    private val mapping: MemorySegment = posix.mmapShared(PAGE + dataLength, ringFd)
-    private val dataOffset: Long = PAGE
+    // Kernel contract on current kernels: the meta page (incl. consumer_pos)
+    // is the ONLY writable mapping; the data area must be mapped READ-ONLY
+    // through the page-offset alias. Verified empirically (errno=EPERM for
+    // RW data) on kernel 7.1.4 — see WP-04 harness notes.
+    private val metaRw: MemorySegment = posix.mmapShared(PAGE, ringFd)
+    private val dataRo: MemorySegment = posix.mmapShared(dataLength, ringFd, posixProtRead(), PAGE)
+    private val dataOffset: Long = 0
     private val mask: Long = dataLength - 1
     private var closed = false
+
+    private fun posixProtRead(): Int = io.mazewall.tierE.ffi.PosixFfi.PROT_READ
 
     /** Drains whatever is visible; returns number of attributed events handled. */
     public fun pollOnce(): Int {
@@ -63,18 +70,23 @@ public class RingbufReader(
 
     override fun close() {
         if (!closed) {
-            posix.munmap(mapping, PAGE + dataLength)
+            posix.munmap(dataRo, dataLength)
+            posix.munmap(metaRw, PAGE)
             closed = true
         }
     }
 
     private fun copyWrapped(offset: Long, into: ByteArray) {
-        val first = minOf(into.size.toLong(), dataOffset + dataLength - offset).toInt()
-        MemorySegment.ofArray(into).asSlice(0, first.toLong())
-            .copyFrom(mapping.asSlice(offset, first.toLong()))
+        val first = minOf(into.size.toLong(), dataLength - offset).toInt()
+        java.lang.foreign.MemorySegment.copy(
+            dataRo, offset, java.lang.foreign.MemorySegment.ofArray(into), 0L, first.toLong(),
+        )
         if (first < into.size) {
-            MemorySegment.ofArray(into).asSlice(first.toLong(), (into.size - first).toLong())
-                .copyFrom(mapping.asSlice(dataOffset, (into.size - first).toLong()))
+            java.lang.foreign.MemorySegment.copy(
+                dataRo, 0L,
+                java.lang.foreign.MemorySegment.ofArray(into), first.toLong(),
+                (into.size - first).toLong(),
+            )
         }
     }
 
@@ -82,14 +94,14 @@ public class RingbufReader(
     // mapping, so native-endian long reads are safe on our supported arches.
     private val LONG = java.lang.foreign.ValueLayout.JAVA_LONG
 
-    private fun readU64(off: Long): Long = mapping.get(LONG, off)
+    private fun readU64(off: Long): Long = dataRo.get(LONG, off)
 
-    private fun readProd(): Long = mapping.get(LONG, 0)
+    private fun readProd(): Long = metaRw.get(LONG, 0)
 
-    private fun readCons(): Long = mapping.get(LONG, 8)
+    private fun readCons(): Long = metaRw.get(LONG, 8)
 
     private fun writeCons(value: Long) {
-        mapping.set(LONG, 8, value)
+        metaRw.set(LONG, 8, value)
     }
 
     private fun align8(v: Int): Int = (v + 7) and (Int.MAX_VALUE - 7)

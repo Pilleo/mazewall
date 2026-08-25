@@ -16,7 +16,7 @@ make -C "$EPROOT" CC="${CC_OVERRIDE:-clang}" -s
 IMAGE="localhost/tier-e-kt-runner"
 if ! "${BACKEND[@]}" image inspect "$IMAGE" >/dev/null 2>&1; then
     echo "[tier-e] building $IMAGE ..."
-    "${BACKEND[@]}" build --pull=missing -t "$IMAGE"         -f "$EPROOT/container/Containerfile.kt-runner" "$ROOT"
+    "${BACKEND[@]}" build -t "$IMAGE"         -f "$EPROOT/container/Containerfile.kt-runner" "$ROOT"
 fi
 
 echo "[tier-e] backend: ${BACKEND[*]}"

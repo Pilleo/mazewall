@@ -143,57 +143,50 @@ public class SessionEngine(
             }
             val attr = try {
                 @Suppress("UNCHECKED_CAST")
-                val map = Files.readAttributes(
+                Files.readAttributes(
                     real,
-                    "unix:size,ino,dev",
+                    "unix:ino",
                     java.nio.file.LinkOption.NOFOLLOW_LINKS,
                 ) as Map<String, Any>
-                map
             } catch (_: Exception) {
                 return@MarkerVerifier VerifyResult.Failure("STAT")
             }
             val inode = (attr["ino"] as? Number)?.toLong()
                 ?: return@MarkerVerifier VerifyResult.Failure("STAT")
-            val dev = (attr["dev"] as? Number)?.toLong()
-                ?: return@MarkerVerifier VerifyResult.Failure("STAT")
 
-            val lines = mapsLineProvider(pid)
-                ?: return@MarkerVerifier VerifyResult.Failure("PROC_MAPS")
-            val mapped = lines.any { line -> mapsEntryMatches(line, inode, dev) }
-            if (!mapped) return@MarkerVerifier VerifyResult.Failure("NOT_MAPPED_IN_TARGET")
-
+            // 1) ELF identity FIRST: a garbage file reports its own defect
+            //    even when never mapped by the target (C-oracle ordering).
             val bytes = try {
                 Files.readAllBytes(real)
             } catch (_: java.io.IOException) {
                 return@MarkerVerifier VerifyResult.Failure("READ")
             }
-            ElfBuildIdExtractor.extract(bytes)?.let { VerifyResult.Ok(real.toString(), it) }
-                ?: VerifyResult.Failure("BUILD_ID_UNREADABLE")
+            val buildId = ElfBuildIdExtractor.extract(bytes)
+                ?: return@MarkerVerifier VerifyResult.Failure("BUILD_ID_UNREADABLE")
+
+            // 2) Target-maps binding: exact file must be resident in tracee.
+            val lines = mapsLineProvider(pid)
+                ?: return@MarkerVerifier VerifyResult.Failure("PROC_MAPS")
+            val mapped = lines.any { line ->
+                val parts = line.trim().split(Regex("\\s+"))
+                parts.size >= 6 && parts[4].toLongOrNull() == inode &&
+                    parts[5] == real.toString()
+            }
+            if (!mapped) return@MarkerVerifier VerifyResult.Failure("NOT_MAPPED_IN_TARGET")
+
+            VerifyResult.Ok(real.toString(), buildId)
         }
 
-        /** Formats a raw dev_t the way /proc/<pid>/maps prints it ("MAJ:MIN"). */
-        internal fun mapsDevString(dev: Long): String {
-            val major = ((dev shr 8) and 0xFFF) or ((dev shr 32) and -0x1000L)
-            val minor = (dev and 0xFF) or ((dev shr 12) and -0x100L)
-            return "%02x:%02x".format(major, minor)
-        }
-
-        /** Matches one /proc/<pid>/maps line by pathname + inode + device. */
-        internal fun mapsEntryMatches(line: String, inode: Long, dev: Long): Boolean {
+        /** Matches one /proc/<pid>/maps line by exact pathname + inode.
+         *  Device fields are deliberately ignored: their encoding varies
+         *  across container engines/mount layers (observed 00:22 vs 0x31 for
+         *  the same file) and adds nothing once the path is pinned to the
+         *  target's own maps view. */
+        internal fun mapsEntryMatches(line: String, inode: Long, resolvedPath: String): Boolean {
             val parts = line.trim().split(Regex("\\s+"))
-            if (parts.size < 5) return false
-            val devPart = parts.getOrNull(3) ?: return false
-            val colon = devPart.indexOf(':')
-            if (colon <= 0) return false
-            val mappedMajor = devPart.substring(0, colon).toULongOrNull(16) ?: return false
-            val mappedMinor = devPart.substring(colon + 1).toULongOrNull(16) ?: return false
+            if (parts.size < 6) return false
             val mappedInode = parts[4].toLongOrNull() ?: return false
-            val pathPart = parts.getOrNull(5) ?: return false
-            // Linux new_encode_dev: major/minor printed from dev_t encoding.
-            val major = ((dev shr 8) and 0xFFF) or ((dev shr 32) and -0x1000L)
-            val minor = (dev and 0xFF) or ((dev shr 12) and -0x100L)
-            return pathPart.isNotEmpty() && mappedInode == inode &&
-                mappedMajor.toLong() == major && mappedMinor.toLong() == minor
+            return mappedInode == inode && parts[5] == resolvedPath
         }
     }
 }

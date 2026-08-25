@@ -44,7 +44,7 @@ fi
 IMAGE="localhost/tier-e-runner"
 if ! "${BACKEND[@]}" image inspect "$IMAGE" >/dev/null 2>&1; then
     echo "[tier-e] building $IMAGE in the selected backend's store ..."
-    "${BACKEND[@]}" build --pull=missing -t "$IMAGE" -f "$ROOT/container/Containerfile" "$ROOT"
+    "${BACKEND[@]}" build -t "$IMAGE" -f "$ROOT/container/Containerfile" "$ROOT"
 fi
 
 echo "[tier-e] backend: ${BACKEND[*]}"
