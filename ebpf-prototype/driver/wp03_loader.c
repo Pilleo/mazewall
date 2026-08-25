@@ -17,6 +17,8 @@
 #include <unistd.h>
 
 static volatile sig_atomic_t g_stop;
+static int g_summary;
+static unsigned long long event_total;
 
 static int libbpf_printf_logger(enum libbpf_print_level level, const char *format,
 				va_list args)
@@ -63,8 +65,11 @@ static int on_event(void *ctx, void *data, size_t size)
 		unsigned int context_id;
 	} __attribute__((packed)) * event = data;
 
-	printf("%d ctx=%u\n", event->syscall_nr, event->context_id);
-	fflush(stdout);
+	if (!g_summary) {
+		printf("%d ctx=%u\n", event->syscall_nr, event->context_id);
+		fflush(stdout);
+	}
+	event_total++;
 	return 0;
 }
 
@@ -84,10 +89,12 @@ int main(int argc, char **argv)
 			marker_path = argv[++i];
 		} else if (strcmp(argv[i], "--attach") == 0 && i + 1 < argc) {
 			attach_mode = argv[++i];
+		} else if (strcmp(argv[i], "--summary") == 0) {
+			g_summary = 1;
 		} else {
 			fprintf(stderr,
 				"usage: wp03_loader --pid <tgid> [--marker <so>] "
-				"[--attach uprobe|usdt] [--duration s]\n");
+				"[--attach uprobe|usdt] [--duration s] [--summary]\n");
 			return 2;
 		}
 	}
@@ -204,6 +211,9 @@ int main(int argc, char **argv)
 	}
 
 	ring_buffer__free(ring);
+
+	if (g_summary)
+		fprintf(stderr, "[wp03] events=%llu\n", event_total);
 
 	int dropped_fd = bpf_object__find_map_fd_by_name(object, "dropped_events");
 	if (dropped_fd >= 0) {
