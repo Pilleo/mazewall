@@ -8,9 +8,13 @@
 # and EbpfLoad in :profiler).
 #
 # Backend selection, in order:
-#   1. already root            -> podman/docker directly
+#   1. already root            -> podman directly
 #   2. rootful docker daemon   -> docker run (no sudo needed)
-#   3. otherwise               -> ONE `sudo podman run` (password prompt)
+#   3. otherwise               -> ONE `sudo podman` invocation
+#
+# NOTE: rootless and rootful podman keep SEPARATE image stores. The runner
+# image is therefore ensured against the SELECTED backend, never assumed from
+# another store.
 #
 # Usage: scripts/run_collector.sh [--duration N]
 set -euo pipefail
@@ -20,32 +24,38 @@ DURATION=5
 [[ "${1:-}" == "--duration" && -n "${2:-}" ]] && { DURATION="$2"; shift 2; }
 [[ $# -eq 0 ]] || { echo "usage: $0 [--duration N]" >&2; exit 2; }
 
-IMAGE="localhost/tier-e-runner"
-if ! podman image inspect "$IMAGE" >/dev/null 2>&1 && ! docker image inspect "$IMAGE" >/dev/null 2>&1; then
-    echo "Building $IMAGE ..."
-    podman build --pull=missing -t "$IMAGE" -f "$ROOT/container/Containerfile" "$ROOT"
-fi
-
-RUN_ARGS=(--rm --privileged --userns=host --pid=host --network=host
-          -e DURATION="$DURATION"
-          -v "$ROOT":/work -w /work
-          "$IMAGE"
-          bash /work/scripts/_container_inner.sh)
-
 if [[ "$(id -u)" -eq 0 ]]; then
-    exec podman run "${RUN_ARGS[@]}"
-fi
-
-# Is the docker-emulating daemon rootful? Rootless services map container-root
-# to a nonzero host uid (uid_map "0 <hostuid> 1"); rootful maps 0 -> 0 fully.
-if docker info >/dev/null 2>&1; then
-    probe="$(docker run --rm --userns=host "$IMAGE" cat /proc/self/uid_map | head -1 | awk '{print $1"/"$2}')"
+    BACKEND=(podman)
+elif docker info >/dev/null 2>&1; then
+    # Rootless services map container-root to a nonzero host uid
+    # (uid_map "0 <hostuid> 1"); rootful maps 0 -> 0 fully.
+    probe="$(docker run --rm localhost/tier-e-runner cat /proc/self/uid_map 2>/dev/null | head -1 | awk '{print $1"/"$2}' || true)"
     if [[ "$probe" == "0/0" ]]; then
         echo "[tier-e] using rootful docker daemon"
-        exec docker run "${RUN_ARGS[@]}"
+        BACKEND=(docker)
+    else
+        echo "[tier-e] docker daemon is ROOTLESS (uid_map ${probe:-unknown}): namespaced caps cannot load tracing BPF." >&2
+        BACKEND=(sudo podman)
     fi
-    echo "[tier-e] docker daemon is ROOTLESS (uid_map $probe): namespaced caps cannot load tracing BPF." >&2
+else
+    BACKEND=(sudo podman)
 fi
 
-echo "[tier-e] falling back to one 'sudo podman run' (privileged kernel phase requires initial-userns root)" >&2
-exec sudo podman run "${RUN_ARGS[@]}"
+IMAGE="localhost/tier-e-runner"
+if ! "${BACKEND[@]}" image inspect "$IMAGE" >/dev/null 2>&1; then
+    echo "[tier-e] building $IMAGE in the selected backend's store ..."
+    "${BACKEND[@]}" build --pull=missing -t "$IMAGE" -f "$ROOT/container/Containerfile" "$ROOT"
+fi
+
+echo "[tier-e] backend: ${BACKEND[*]}"
+exec "${BACKEND[@]}" run \
+    --rm \
+    --privileged \
+    --userns=host \
+    --pid=host \
+    --network=host \
+    -e DURATION="$DURATION" \
+    -v "$ROOT":/work \
+    -w /work \
+    "$IMAGE" \
+    bash /work/scripts/_container_inner.sh
