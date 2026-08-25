@@ -92,6 +92,14 @@ class DispatchSelectorTest {
     }
 
     @Test
+    fun `grok and antigravity adapters are refused for loop work unless unlocked`() {
+        assertEquals(
+            setOf("antigravity", "grok_local"),
+            HybridSupervisor.FORBIDDEN_EXPERIMENT_ADAPTERS,
+        )
+    }
+
+    @Test
     fun `forcing restricts to identifier but keeps every safety gate`() {
         val issues = listOf(
             issue("a", "MAZ-80", priority = "high", number = 80),

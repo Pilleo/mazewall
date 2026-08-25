@@ -60,6 +60,19 @@ class HybridSupervisor(
                 err("no roster agent for component '$component' and no '${router.defaultAdapter}' fallback")
                 return dispatched
             }
+            // Operator policy (2026-08-25): experiments run on Vibe/Jules ONLY.
+            // Grok and Antigravity are production-owned capacity; sending them
+            // loop work is a hard failure unless explicitly unlocked via env.
+            if (agent.adapterType in FORBIDDEN_EXPERIMENT_ADAPTERS &&
+                env("PAPERCLIP_ALLOW_GROK_ANTIGRAVITY")?.lowercase() != "true"
+            ) {
+                err(
+                    "REFUSED dispatch of ${candidate.identifier}: adapterType " +
+                        "'${agent.adapterType}' is reserved for production use. " +
+                        "Set PAPERCLIP_ALLOW_GROK_ANTIGRAVITY=true to override.",
+                )
+                return dispatched
+            }
 
             runCatching {
                 client.assignAgent(candidate.id, agent.id)
@@ -99,6 +112,8 @@ class HybridSupervisor(
     private val companyId: String by lazy { env("PAPERCLIP_COMPANY_ID") ?: client.resolveCompanyId() }
 
     companion object {
+        val FORBIDDEN_EXPERIMENT_ADAPTERS = setOf("antigravity", "grok_local")
+
         fun env(key: String): String? = System.getenv(key)?.takeIf { it.isNotBlank() }
     }
 }
