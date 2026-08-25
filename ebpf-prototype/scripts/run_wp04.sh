@@ -9,9 +9,10 @@ EPROOT="$ROOT/ebpf-prototype"
 source "$EPROOT/scripts/_backend.sh"
 _tier_e_detect_backend
 
-echo "[tier-e] host prebuilds: make + :tier-e-proto:installDist"
+echo "[tier-e] host prebuilds: make + boundary gate + :tier-e-proto check/installDist"
 make -C "$EPROOT" CC="${CC_OVERRIDE:-clang}" -s
-( cd "$ROOT" && ./gradlew -PincludeTierEProto=true :tier-e-proto:installDist -q )
+"$EPROOT/../tier-e-proto/check-boundaries.sh"
+( cd "$ROOT" && ./gradlew -PincludeTierEProto=true :tier-e-proto:check :tier-e-proto:installDist -q )
 
 IMAGE="localhost/tier-e-kt-runner"
 if ! "${BACKEND[@]}" image inspect "$IMAGE" >/dev/null 2>&1; then

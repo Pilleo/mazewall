@@ -6,7 +6,12 @@
 #   /repo  = repository root (Kotlin dist at tier-e-proto/build/install)
 #   cwd    = /repo/ebpf-prototype
 #   JAVA_BIN, KT_CP prepared by run_wp04.sh; native-access flag included.
-set -uxo pipefail
+set -uo pipefail
+SCRIPT_VERSION=v4-harness-lib
+
+EPROOT=/repo/ebpf-prototype
+# shellcheck source=lib/tier_e_harness.sh
+source "$EPROOT/scripts/lib/tier_e_harness.sh"
 
 SOCK=/tmp/wp04.sock
 LOG=/tmp/wp04_daemon.log
@@ -37,13 +42,9 @@ stop_probe() {
     PROBE=""
 }
 
-check() { # name expected_regex actual
-    if [[ "$3" =~ $2 ]]; then PASS=$((PASS+1)); echo "[ok]   $1"
-    else FAIL=$((FAIL+1)); echo "[FAIL] $1 (wanted /$2/, got '$3')"; fi
-}
-
-wait_socket() { for _ in $(seq 1 100); do [[ -S "$SOCK" ]] && return 0; sleep 0.05; done; return 1; }
-wait_mapped() { local i=0; until grep -q "$2" "/proc/$1/maps" 2>/dev/null; do ((i++)) || true; [[ $i -gt 150 ]] && return 1; sleep 0.02; done; }
+check() { te_check "$@"; }
+wait_socket() { te_wait_socket "$SOCK"; }
+wait_mapped() { te_wait_mapped "$1" usdt; }
 
 fresh_daemon() { # also restarts the probe: old connection died with daemon
     [[ -n "${DAEMON_PID:-}" ]] && kill -9 "$DAEMON_PID" 2>/dev/null && wait "$DAEMON_PID" 2>/dev/null
@@ -58,16 +59,15 @@ fresh_daemon() { # also restarts the probe: old connection died with daemon
     start_probe
 }
 
-probe_lines() { wc -l < "$PROBE_OUT"; }
 send_and_capture() { # appends command to cmdfile, waits for next reply line
-    local before after i
-    before=$(probe_lines)
+    local before after
+    before=$(wc -l < "$PROBE_OUT")
     printf '%s\n' "$1" >> "$CMDFILE"
-    for i in $(seq 1 100); do
-        after=$(probe_lines)
-        if (( after > before )); then break; fi
-        sleep 0.05
-    done
+    if ! te_wait_file_lines "$PROBE_OUT" $((before + 1)) 100; then
+        REPLY_LINE="ERR TIMEOUT"
+        return
+    fi
+    after=$(wc -l < "$PROBE_OUT")
     REPLY_LINE=$(tail -n $((after - before)) "$PROBE_OUT" | head -1)
 }
 

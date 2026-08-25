@@ -113,10 +113,10 @@ public class TierEDaemon(
         fun startRingPoller(handle: Long) {
             val fd = shimRef.ringFd(handle)
             ringReader?.close()
-            ringReader = RingbufReader(fd, ringDataLength) { nr, ctx ->
+            ringReader = RingbufReader(fd, ringDataLength) { event ->
                 events++
                 if (printEvents) {
-                    println("$nr ctx=$ctx")
+                    println("${event.syscallNr} ctx=${event.contextId}")
                     System.out.flush()
                 }
             }
