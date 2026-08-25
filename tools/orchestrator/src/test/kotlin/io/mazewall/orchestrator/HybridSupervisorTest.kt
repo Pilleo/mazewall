@@ -92,6 +92,11 @@ class DispatchSelectorTest {
     }
 
     @Test
+    fun `jules is the primary default adapter`() {
+        assertEquals("jules", ComponentRouter.DEFAULT_ADAPTER)
+    }
+
+    @Test
     fun `vibe and jules are the only approved loop workers`() {
         assertEquals(setOf("jules", "vibe"), HybridSupervisor.ALLOWED_LOOP_ADAPTERS)
         assertTrue(HybridSupervisor.extraLoopAdapters().isEmpty())
