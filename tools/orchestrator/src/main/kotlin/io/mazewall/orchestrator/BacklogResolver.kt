@@ -51,7 +51,9 @@ class BacklogResolver(
         val content = source.readText()
         val flipped = STATUS_RE.replaceFirst(content, "status: \"resolved\"")
         if (flipped == content) {
-            err("resolve $identifier: no open/in_progress status line in ${source.fileName}")
+            // Already resolved (basename re-anchor lands here for done issues whose
+            // board row outlives its markdown). Quiet by design: this fires every
+            // tick for every completed issue and is not an error.
             return false
         }
         source.writeText(flipped)

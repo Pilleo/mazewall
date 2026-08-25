@@ -100,11 +100,32 @@ class HybridSupervisor(
         return dispatched
     }
 
-    fun runForever() {
+    /**
+     * Daemon loop with an optional dispatch budget. PAPERCLIP_MAX_TOTAL_DISPATCH
+     * bounds the TOTAL number of issues this daemon will ever dispatch - the
+     * runaway guard for unattended runs: without it, a 90-second tick drains the
+     * entire backlog into worker quotas overnight (observed 2026-08-25).
+     * The budget counts actual dispatches, not ticks; when exhausted the daemon
+     * keeps polling (ciWatch/resolution stay live) but dispatches nothing.
+     */
+    fun runForever(totalDispatchBudget: Int? = null) {
         val interval = env("PAPERCLIP_TICK_SECONDS")?.toLongOrNull() ?: 30L
         val max = env("PAPERCLIP_MAX_DISPATCH")?.toIntOrNull() ?: 1
+        var budgetLeft = totalDispatchBudget
         while (true) {
-            tick(max)
+            val dispatched =
+                if (budgetLeft != null && budgetLeft <= 0) {
+                    0
+                } else {
+                    val effectiveMax =
+                        if (budgetLeft != null) minOf(max, budgetLeft) else max
+                    val done = tick(effectiveMax)
+                    if (budgetLeft != null) budgetLeft -= done
+                    done
+                }
+            if (budgetLeft != null && budgetLeft == 0) {
+                out("Dispatch budget exhausted; ciWatch/resolution continue, dispatch disabled.")
+            }
             sleepMs(Duration.ofSeconds(interval).toMillis())
         }
     }
@@ -211,7 +232,7 @@ fun main(args: Array<String>) {
     }
 
     if (daemon) {
-        supervisor.runForever()
+        supervisor.runForever(HybridSupervisor.env("PAPERCLIP_MAX_TOTAL_DISPATCH")?.toIntOrNull())
     } else {
         val dispatched = supervisor.tick(
             HybridSupervisor.env("PAPERCLIP_MAX_DISPATCH")?.toIntOrNull() ?: 1,
