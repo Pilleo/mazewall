@@ -14,6 +14,7 @@ LIBBPF_DEST := $(abspath build/libbpf)
 LIBBPF_A := $(LIBBPF_DEST)/libbpf.a
 
 BUILD := build
+BPF_C := bpf/syscall_collector.bpf.c
 BPF_O := $(BUILD)/syscall_collector.bpf.o
 COLLECTOR := $(BUILD)/tier_e_collector
 CTX_BPF_C := bpf/context_probe.bpf.c

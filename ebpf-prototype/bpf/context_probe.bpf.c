@@ -64,15 +64,6 @@ struct {
 	__type(value, __u64);
 } hit_counters SEC(".maps");
 
-/* Per-syscall-nr noise + attribution counters.
- * Single-key percpu array: value is u64[512], indexed by syscall_nr. */
-struct {
-	__uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
-	__uint(max_entries, 1);
-	__type(key, __u32);
-	__type(value, __u64[512]);
-} noise_by_nr SEC(".maps");
-
 SEC("uprobe")
 int BPF_UPROBE(tier_e_on_marker, unsigned int context_id)
 {
@@ -119,16 +110,10 @@ int BPF_PROG(tier_e_sys_enter_ctx, struct pt_regs *regs, long id)
 		bpf_map_update_elem(&hit_counters, &hk1, &one_v, BPF_ADD);
 	}
 
-	__u32 zero_key = 0;
-	__u64 (*noise_counts)[512] = bpf_map_lookup_elem(&noise_by_nr, &zero_key);
-
 	struct task_struct *task = (struct task_struct *)bpf_get_current_task_btf();
 	__u32 *stored = bpf_task_storage_get(&context_storage, task, NULL, 0);
-	if (!stored || *stored == 0) {
-		if (noise_counts && id >= 0 && id < 512)
-			(*noise_counts)[id]++;
+	if (!stored || *stored == 0)
 		return 0; /* UNKNOWN is data, not an event (invariant 3) */
-	}
 
 	struct context_event *event =
 		bpf_ringbuf_reserve(&context_events, sizeof(*event), 0);

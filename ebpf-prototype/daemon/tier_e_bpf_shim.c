@@ -297,34 +297,21 @@ int te_unknown_counts(void *handle, long *out)
 	return 0;
 }
 
-/* Reads noise_by_nr percpu array (single key=0, value=u64[512] per cpu).
- * Output: out[0..511] = UNKNOWN counts summed across cpus. */
 int te_read_per_nr(void *handle, long *out)
 {
 	struct te_ctx *ctx = handle;
 	if (!ctx || !ctx->object)
 		return -EINVAL;
-	int nr_cpus = libbpf_num_possible_cpus();
-	if (nr_cpus <= 0 || nr_cpus > 512)
-		return -ERANGE;
 	__u32 key = 0;
 	int fd = bpf_object__find_map_fd_by_name(ctx->object, "noise_by_nr");
 	if (fd < 0)
 		return -ENOENT;
-	unsigned long long *per = calloc(nr_cpus * 512, sizeof(unsigned long long));
-	if (!per)
-		return -ENOMEM;
-	if (bpf_map_lookup_elem(fd, &key, per)) {
-		free(per);
-		return -errno;
-	}
 	for (int nr = 0; nr < 512; nr++) {
-		unsigned long long total = 0;
-		for (int cpu = 0; cpu < nr_cpus; cpu++)
-			total += per[cpu * 512 + nr];
-		out[nr] = total;
+		unsigned long long val = 0;
+		__u32 k = (__u32)nr;
+		if (!bpf_map_lookup_elem(fd, &k, &val))
+			out[nr] = val;
 	}
-	free(per);
 	return 0;
 }
 

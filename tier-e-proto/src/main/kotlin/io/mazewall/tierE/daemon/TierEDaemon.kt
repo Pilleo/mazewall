@@ -213,7 +213,11 @@ public class TierEDaemon(
                 shim.droppedTotal(boundHandle).toLong()
             }.getOrDefault(-1L) else -1L
             if (boundHandle >= 0) {
-                val counts = runCatching { shim.readPerNr(boundHandle) }.getOrNull()
+                val countsResult = runCatching { shim.readPerNr(boundHandle) }
+                countsResult.onFailure {
+                    System.err.println("[wp04kt] readPerNr failed: ${it.message}")
+                }
+                val counts = countsResult.getOrNull()
                 if (counts != null) {
                     val unknownTop = counts.sliceArray(0 until 512)
                         .withIndex().filter { it.value > 0 }
