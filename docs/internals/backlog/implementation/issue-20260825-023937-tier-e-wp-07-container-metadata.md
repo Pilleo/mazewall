@@ -13,6 +13,7 @@ autonomy: "supervised"
 open_questions: false
 dependencies:
   - "issue-20260825-023935-tier-e-wp-05-concurrency-stress.md"
+paperclip_issue_id: 13e0f59f-e306-4392-b333-6293d9163881
 ---
 
 # 🟢 [Severity: ENHANCEMENT]: WP-07 — Container Metadata Association

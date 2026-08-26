@@ -13,6 +13,7 @@ autonomy: "supervised"
 open_questions: true
 dependencies:
   - "issue-20260825-023940-tier-e-wp-10-oracle-comparison.md"
+paperclip_issue_id: 1cacbd80-290e-4ffc-99b7-9aeabf47f847
 ---
 
 # 🟢 [Severity: ENHANCEMENT]: WP-11 — Limited Java Agent

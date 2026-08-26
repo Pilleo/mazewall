@@ -16,6 +16,7 @@ core_lock: false
 effort: "medium"
 autonomy: "supervised"
 open_questions: false
+paperclip_issue_id: bf0a54fe-9885-41de-8dc1-80097ff5b88f
 ---
 
 # 🟢 [Severity: LOW]: Deduplicate PendingSpawnRegistry TTL logic and use monotonic clock

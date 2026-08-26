@@ -16,6 +16,7 @@ core_lock: false
 effort: "medium"
 autonomy: "supervised"
 open_questions: false
+paperclip_issue_id: 8b5136d4-af65-44f5-8cf5-67d4dcba4d23
 ---
 
 # 🟡 [Severity: MEDIUM]: Unify Landlock descriptive state with type-state lifecycle in LandlockSession

@@ -15,12 +15,12 @@ USDT_SO=/repo/ebpf-prototype/build/libmazewall_context_usdt.so
 
 start_daemon_kt() {
     LD_LIBRARY_PATH="/repo/ebpf-prototype/build${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
-        "$JAVA_BIN" "${KT_FLAGS[@]}" -cp "$KT_CP" io.mazewall.tierE.daemon.TierEDaemonKt \
+        "$JAVA_BIN" "${KT_FLAGS[@]}" -cp "$KT_CP" io.mazewall.profiler.tierE.daemon.TierEKotlinDaemonKt \
         --sock "$SOCK" --verbose > "$LOG" 2>&1 &
 }
 start_probe() {
     rm -f "$PROBE_OUT" "$CMDFILE"
-    "$JAVA_BIN" "${KT_FLAGS[@]}" -cp "$KT_CP" io.mazewall.tierE.daemon.TierEDaemonKt \
+    "$JAVA_BIN" "${KT_FLAGS[@]}" -cp "$KT_CP" io.mazewall.profiler.tierE.daemon.TierEKotlinDaemonKt \
         --probe-cmdfile "$SOCK" "$CMDFILE" "$PROBE_OUT" >/dev/null 2>&1 &
     PROBE=$!
 }
@@ -62,7 +62,7 @@ echo "[dbg] dlog bytes: $(wc -c < "$LOG" 2>&1)"
 
 # Stress driver: real JVM platform threads + FFM marker downcalls.
 # Its initial-wait window gives us time to attach before the first scope.
-"$JAVA_BIN" "${KT_FLAGS[@]}" -cp "$KT_CP" io.mazewall.tierE.stress.StressDriverMain \
+"$JAVA_BIN" "${KT_FLAGS[@]}" -cp "$KT_CP" io.mazewall.profiler.tierE.stress.StressDriverMain \
     --marker-so "$USDT_SO" \
     --workers "$STRESS_WORKERS" --churn-batches "$STRESS_CHURN" \
     --nest-threads "$STRESS_NEST" --exec-pool "$STRESS_POOL" \
@@ -89,7 +89,7 @@ send_capture "DETACH"
 send_capture "SHUTDOWN"
 for _ in $(seq 1 40); do kill -0 "$DAEMON_PID" 2>/dev/null || break; sleep 0.05; done
 
-"$JAVA_BIN" "${KT_FLAGS[@]}" -cp "$KT_CP" io.mazewall.tierE.stress.StressVerifierMainKt \
+"$JAVA_BIN" "${KT_FLAGS[@]}" -cp "$KT_CP" io.mazewall.profiler.tierE.stress.StressVerifierMainKt \
     --decl "$DECL" --log "$LOG"
 VRC=$?
 sleep 0.5

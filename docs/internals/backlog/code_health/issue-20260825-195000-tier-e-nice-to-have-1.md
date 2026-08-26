@@ -12,6 +12,7 @@ effort: "small"
 autonomy: "supervised"
 open_questions: false
 dependencies: []
+paperclip_issue_id: 76990d1c-75d2-45ab-9b90-5eba93839905
 ---
 
 # 🟢 [Severity: LOW]: Extract --probe/--probe-stdin/--probe-cmdfile modes to ProbeMain.kt

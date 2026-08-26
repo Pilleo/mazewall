@@ -19,6 +19,7 @@ core_lock: false
 effort: "medium"
 autonomy: "supervised"
 open_questions: false
+paperclip_issue_id: 79e5ddef-5eff-4e73-b78c-4428afcd37ca
 ---
 
 # 🟡 [Severity: MEDIUM]: Make SupervisorDaemonManager daemon lifecycle an explicit state machine

@@ -12,6 +12,7 @@ effort: "small"
 autonomy: "supervised"
 open_questions: false
 dependencies: []
+paperclip_issue_id: 23ea3140-0b6b-4342-92d1-9df9708f785f
 ---
 
 # 🟢 [Severity: LOW]: Per-context event count metrics

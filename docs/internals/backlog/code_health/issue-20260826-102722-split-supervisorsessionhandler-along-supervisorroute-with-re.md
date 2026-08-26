@@ -19,6 +19,7 @@ core_lock: false
 effort: "medium"
 autonomy: "supervised"
 open_questions: false
+paperclip_issue_id: affc8200-a8b5-49dc-b5b6-5a5cb948f100
 ---
 
 # 🟡 [Severity: MEDIUM]: Split SupervisorSessionHandler along SupervisorRoute with request context types

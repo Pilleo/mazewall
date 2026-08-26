@@ -16,6 +16,7 @@ core_lock: false
 effort: "medium"
 autonomy: "supervised"
 open_questions: false
+paperclip_issue_id: de005944-bdcf-4571-8c4e-cd2c4350ee42
 ---
 
 # 🟡 [Severity: MEDIUM]: Move SeccompInstallationState ordering into the sealed hierarchy

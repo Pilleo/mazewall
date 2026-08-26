@@ -679,6 +679,21 @@ public final class io/mazewall/profiler/collector/EbpfParseResult {
 	public fun toString ()Ljava/lang/String;
 }
 
+public final class io/mazewall/profiler/collector/LiveEbpfCollector : io/mazewall/profiler/collector/ProfileCollector {
+	public static final field Companion Lio/mazewall/profiler/collector/LiveEbpfCollector$Companion;
+	public fun <init> ()V
+	public fun close ()V
+	public fun drain ()Lio/mazewall/profiler/collector/CollectorDrain;
+	public fun getSource ()Lio/mazewall/profiler/ObservationSource;
+	public final fun onDrop ()V
+	public final fun onEvent (IIIJJ)V
+	public fun start ()V
+}
+
+public final class io/mazewall/profiler/collector/LiveEbpfCollector$Companion {
+	public final fun syscallName (I)Ljava/lang/String;
+}
+
 public final class io/mazewall/profiler/collector/ObservationMerger {
 	public static final field INSTANCE Lio/mazewall/profiler/collector/ObservationMerger;
 	public final fun merge (Ljava/util/List;)Lio/mazewall/profiler/collector/CollectorDrain;
@@ -1155,6 +1170,218 @@ public final class io/mazewall/profiler/strace/StraceProfiler {
 public final class io/mazewall/profiler/strace/StraceWorkloadRunner {
 	public static final field INSTANCE Lio/mazewall/profiler/strace/StraceWorkloadRunner;
 	public static final fun main ([Ljava/lang/String;)V
+}
+
+public final class io/mazewall/profiler/tierE/collector/LiveEbpfCollector {
+	public fun <init> ()V
+	public final fun clear ()V
+	public final fun drain ()Ljava/util/List;
+	public final fun getDrainComplete ()Z
+	public final fun getDroppedCount ()I
+	public final fun record-BzPDsQc (JIIJ)V
+	public final fun recordDrop ()V
+}
+
+public final class io/mazewall/profiler/tierE/collector/LiveEbpfCollector$AttributedEvent {
+	public synthetic fun <init> (JIIJLkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()J
+	public final fun component2 ()I
+	public final fun component3-pVg5ArA ()I
+	public final fun component4 ()J
+	public final fun copy-BzPDsQc (JIIJ)Lio/mazewall/profiler/tierE/collector/LiveEbpfCollector$AttributedEvent;
+	public static synthetic fun copy-BzPDsQc$default (Lio/mazewall/profiler/tierE/collector/LiveEbpfCollector$AttributedEvent;JIIJILjava/lang/Object;)Lio/mazewall/profiler/tierE/collector/LiveEbpfCollector$AttributedEvent;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getContextId-pVg5ArA ()I
+	public final fun getKtimeNs ()J
+	public final fun getSyscallNr ()I
+	public final fun getTid ()J
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/mazewall/profiler/tierE/container/ContainerDetector {
+	public static final field INSTANCE Lio/mazewall/profiler/tierE/container/ContainerDetector;
+	public final fun detect (J)Lio/mazewall/profiler/tierE/container/ContainerDetector$ContainerInfo;
+	public final fun detect (Ljava/util/List;)Lio/mazewall/profiler/tierE/container/ContainerDetector$ContainerInfo;
+}
+
+public final class io/mazewall/profiler/tierE/container/ContainerDetector$ContainerInfo {
+	public fun <init> (Ljava/lang/String;Ljava/lang/String;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Ljava/lang/String;
+	public final fun copy (Ljava/lang/String;Ljava/lang/String;)Lio/mazewall/profiler/tierE/container/ContainerDetector$ContainerInfo;
+	public static synthetic fun copy$default (Lio/mazewall/profiler/tierE/container/ContainerDetector$ContainerInfo;Ljava/lang/String;Ljava/lang/String;ILjava/lang/Object;)Lio/mazewall/profiler/tierE/container/ContainerDetector$ContainerInfo;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getContainerId ()Ljava/lang/String;
+	public final fun getRuntime ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/mazewall/profiler/tierE/daemon/AttachMode : java/lang/Enum {
+	public static final field UPROBE Lio/mazewall/profiler/tierE/daemon/AttachMode;
+	public static final field USDT Lio/mazewall/profiler/tierE/daemon/AttachMode;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lio/mazewall/profiler/tierE/daemon/AttachMode;
+	public static fun values ()[Lio/mazewall/profiler/tierE/daemon/AttachMode;
+}
+
+public abstract interface class io/mazewall/profiler/tierE/daemon/ControlCommand {
+}
+
+public final class io/mazewall/profiler/tierE/daemon/ControlCommand$Attach : io/mazewall/profiler/tierE/daemon/ControlCommand {
+	public fun <init> (ILio/mazewall/profiler/tierE/daemon/AttachMode;Ljava/lang/String;)V
+	public final fun component1 ()I
+	public final fun component2 ()Lio/mazewall/profiler/tierE/daemon/AttachMode;
+	public final fun component3 ()Ljava/lang/String;
+	public final fun copy (ILio/mazewall/profiler/tierE/daemon/AttachMode;Ljava/lang/String;)Lio/mazewall/profiler/tierE/daemon/ControlCommand$Attach;
+	public static synthetic fun copy$default (Lio/mazewall/profiler/tierE/daemon/ControlCommand$Attach;ILio/mazewall/profiler/tierE/daemon/AttachMode;Ljava/lang/String;ILjava/lang/Object;)Lio/mazewall/profiler/tierE/daemon/ControlCommand$Attach;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getMarkerPath ()Ljava/lang/String;
+	public final fun getMode ()Lio/mazewall/profiler/tierE/daemon/AttachMode;
+	public final fun getPid ()I
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/mazewall/profiler/tierE/daemon/ControlCommand$Detach : io/mazewall/profiler/tierE/daemon/ControlCommand {
+	public static final field INSTANCE Lio/mazewall/profiler/tierE/daemon/ControlCommand$Detach;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/mazewall/profiler/tierE/daemon/ControlCommand$Shutdown : io/mazewall/profiler/tierE/daemon/ControlCommand {
+	public static final field INSTANCE Lio/mazewall/profiler/tierE/daemon/ControlCommand$Shutdown;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/mazewall/profiler/tierE/daemon/ControlCommand$Status : io/mazewall/profiler/tierE/daemon/ControlCommand {
+	public static final field INSTANCE Lio/mazewall/profiler/tierE/daemon/ControlCommand$Status;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/mazewall/profiler/tierE/daemon/ControlProtocolKt {
+	public static final fun parseControlCommand (Ljava/lang/String;)Lio/mazewall/profiler/tierE/daemon/Either;
+}
+
+public final class io/mazewall/profiler/tierE/daemon/ControlReply {
+	public static final field Companion Lio/mazewall/profiler/tierE/daemon/ControlReply$Companion;
+	public fun <init> (ZLjava/lang/String;)V
+	public final fun component1 ()Z
+	public final fun component2 ()Ljava/lang/String;
+	public final fun copy (ZLjava/lang/String;)Lio/mazewall/profiler/tierE/daemon/ControlReply;
+	public static synthetic fun copy$default (Lio/mazewall/profiler/tierE/daemon/ControlReply;ZLjava/lang/String;ILjava/lang/Object;)Lio/mazewall/profiler/tierE/daemon/ControlReply;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getOk ()Z
+	public final fun getText ()Ljava/lang/String;
+	public fun hashCode ()I
+	public final fun render ()Ljava/lang/String;
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/mazewall/profiler/tierE/daemon/ControlReply$Companion {
+	public final fun err (Ljava/lang/String;)Lio/mazewall/profiler/tierE/daemon/ControlReply;
+	public static synthetic fun err$default (Lio/mazewall/profiler/tierE/daemon/ControlReply$Companion;Ljava/lang/String;ILjava/lang/Object;)Lio/mazewall/profiler/tierE/daemon/ControlReply;
+	public final fun ok (Ljava/lang/String;)Lio/mazewall/profiler/tierE/daemon/ControlReply;
+	public static synthetic fun ok$default (Lio/mazewall/profiler/tierE/daemon/ControlReply$Companion;Ljava/lang/String;ILjava/lang/Object;)Lio/mazewall/profiler/tierE/daemon/ControlReply;
+}
+
+public abstract interface class io/mazewall/profiler/tierE/daemon/Either {
+}
+
+public final class io/mazewall/profiler/tierE/daemon/Either$Left : io/mazewall/profiler/tierE/daemon/Either {
+	public fun <init> (Ljava/lang/Object;)V
+	public final fun component1 ()Ljava/lang/Object;
+	public final fun copy (Ljava/lang/Object;)Lio/mazewall/profiler/tierE/daemon/Either$Left;
+	public static synthetic fun copy$default (Lio/mazewall/profiler/tierE/daemon/Either$Left;Ljava/lang/Object;ILjava/lang/Object;)Lio/mazewall/profiler/tierE/daemon/Either$Left;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getValue ()Ljava/lang/Object;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/mazewall/profiler/tierE/daemon/Either$Right : io/mazewall/profiler/tierE/daemon/Either {
+	public fun <init> (Ljava/lang/Object;)V
+	public final fun component1 ()Ljava/lang/Object;
+	public final fun copy (Ljava/lang/Object;)Lio/mazewall/profiler/tierE/daemon/Either$Right;
+	public static synthetic fun copy$default (Lio/mazewall/profiler/tierE/daemon/Either$Right;Ljava/lang/Object;ILjava/lang/Object;)Lio/mazewall/profiler/tierE/daemon/Either$Right;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getValue ()Ljava/lang/Object;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/mazewall/profiler/tierE/daemon/ElfBuildIdExtractor {
+	public static final field INSTANCE Lio/mazewall/profiler/tierE/daemon/ElfBuildIdExtractor;
+	public final fun extract ([B)Ljava/lang/String;
+}
+
+public final class io/mazewall/profiler/tierE/daemon/TierEKotlinDaemonKt {
+	public static final fun main ()V
+	public static synthetic fun main ([Ljava/lang/String;)V
+}
+
+public final class io/mazewall/profiler/tierE/engine/TierEbpfEngine : java/lang/AutoCloseable {
+	public static final field Companion Lio/mazewall/profiler/tierE/engine/TierEbpfEngine$Companion;
+	public static final field EVENT_SIZE I
+	public fun <init> (Lio/mazewall/RawSyscallOperations;)V
+	public fun close ()V
+	public final fun install (I)V
+	public final fun setContext (II)V
+}
+
+public final class io/mazewall/profiler/tierE/engine/TierEbpfEngine$Companion {
+}
+
+public final class io/mazewall/profiler/tierE/engine/TierEbpfEngine$Insn {
+	public fun <init> (IIISI)V
+	public synthetic fun <init> (IIISIILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()I
+	public final fun component2 ()I
+	public final fun component3 ()I
+	public final fun component4 ()S
+	public final fun component5 ()I
+	public final fun copy (IIISI)Lio/mazewall/profiler/tierE/engine/TierEbpfEngine$Insn;
+	public static synthetic fun copy$default (Lio/mazewall/profiler/tierE/engine/TierEbpfEngine$Insn;IIISIILjava/lang/Object;)Lio/mazewall/profiler/tierE/engine/TierEbpfEngine$Insn;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getCode ()I
+	public final fun getDst ()I
+	public final fun getImm ()I
+	public final fun getOff ()S
+	public final fun getSrc ()I
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/mazewall/profiler/tierE/ringbuf/ContextEvent {
+	public static final field Companion Lio/mazewall/profiler/tierE/ringbuf/ContextEvent$Companion;
+	public static final field SIZE_BYTES I
+	public synthetic fun <init> (JIIIILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1-s-VKNKU ()J
+	public final fun component2-pVg5ArA ()I
+	public final fun component3-pVg5ArA ()I
+	public final fun component4 ()I
+	public final fun component5-pVg5ArA ()I
+	public final fun copy-z9q1gFA (JIIII)Lio/mazewall/profiler/tierE/ringbuf/ContextEvent;
+	public static synthetic fun copy-z9q1gFA$default (Lio/mazewall/profiler/tierE/ringbuf/ContextEvent;JIIIIILjava/lang/Object;)Lio/mazewall/profiler/tierE/ringbuf/ContextEvent;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getContextId-pVg5ArA ()I
+	public final fun getKtimeNs-s-VKNKU ()J
+	public final fun getSyscallNr ()I
+	public final fun getTgid-pVg5ArA ()I
+	public final fun getTid-pVg5ArA ()I
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/mazewall/profiler/tierE/ringbuf/ContextEvent$Companion {
+	public final fun fromBytes ([B)Lio/mazewall/profiler/tierE/ringbuf/ContextEvent;
+	public final fun fromSegment (Ljava/lang/foreign/MemorySegment;J)Lio/mazewall/profiler/tierE/ringbuf/ContextEvent;
 }
 
 public final class io/mazewall/profiler/triage/DiagnosticTriageRunner {

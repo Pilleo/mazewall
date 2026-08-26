@@ -13,6 +13,7 @@ effort: "medium"
 autonomy: "supervised"
 open_questions: false
 dependencies: []
+paperclip_issue_id: 909f00d9-d975-40a9-a140-259ac042f942
 ---
 
 # 🟡 [Severity: MEDIUM]: R4 — tier-e-doctor environment preflight
