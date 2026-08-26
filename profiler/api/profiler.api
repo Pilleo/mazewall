@@ -329,18 +329,20 @@ public final class io/mazewall/profiler/ProfileObservation$IoUring : io/mazewall
 }
 
 public final class io/mazewall/profiler/ProfileObservation$Syscall : io/mazewall/profiler/ProfileObservation {
-	public fun <init> (Lio/mazewall/profiler/ObservationCorrelation;Lio/mazewall/profiler/ObservationSource;Ljava/lang/String;Ljava/util/List;Ljava/util/List;Ljava/lang/Long;)V
-	public synthetic fun <init> (Lio/mazewall/profiler/ObservationCorrelation;Lio/mazewall/profiler/ObservationSource;Ljava/lang/String;Ljava/util/List;Ljava/util/List;Ljava/lang/Long;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public fun <init> (Lio/mazewall/profiler/ObservationCorrelation;Lio/mazewall/profiler/ObservationSource;Ljava/lang/String;Ljava/util/List;Ljava/util/List;Ljava/lang/Long;Ljava/lang/Long;)V
+	public synthetic fun <init> (Lio/mazewall/profiler/ObservationCorrelation;Lio/mazewall/profiler/ObservationSource;Ljava/lang/String;Ljava/util/List;Ljava/util/List;Ljava/lang/Long;Ljava/lang/Long;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public final fun component1 ()Lio/mazewall/profiler/ObservationCorrelation;
 	public final fun component2 ()Lio/mazewall/profiler/ObservationSource;
 	public final fun component3 ()Ljava/lang/String;
 	public final fun component4 ()Ljava/util/List;
 	public final fun component5 ()Ljava/util/List;
 	public final fun component6 ()Ljava/lang/Long;
-	public final fun copy (Lio/mazewall/profiler/ObservationCorrelation;Lio/mazewall/profiler/ObservationSource;Ljava/lang/String;Ljava/util/List;Ljava/util/List;Ljava/lang/Long;)Lio/mazewall/profiler/ProfileObservation$Syscall;
-	public static synthetic fun copy$default (Lio/mazewall/profiler/ProfileObservation$Syscall;Lio/mazewall/profiler/ObservationCorrelation;Lio/mazewall/profiler/ObservationSource;Ljava/lang/String;Ljava/util/List;Ljava/util/List;Ljava/lang/Long;ILjava/lang/Object;)Lio/mazewall/profiler/ProfileObservation$Syscall;
+	public final fun component7 ()Ljava/lang/Long;
+	public final fun copy (Lio/mazewall/profiler/ObservationCorrelation;Lio/mazewall/profiler/ObservationSource;Ljava/lang/String;Ljava/util/List;Ljava/util/List;Ljava/lang/Long;Ljava/lang/Long;)Lio/mazewall/profiler/ProfileObservation$Syscall;
+	public static synthetic fun copy$default (Lio/mazewall/profiler/ProfileObservation$Syscall;Lio/mazewall/profiler/ObservationCorrelation;Lio/mazewall/profiler/ObservationSource;Ljava/lang/String;Ljava/util/List;Ljava/util/List;Ljava/lang/Long;Ljava/lang/Long;ILjava/lang/Object;)Lio/mazewall/profiler/ProfileObservation$Syscall;
 	public fun equals (Ljava/lang/Object;)Z
 	public final fun getArgs ()Ljava/util/List;
+	public final fun getContextId ()Ljava/lang/Long;
 	public fun getCorrelation ()Lio/mazewall/profiler/ObservationCorrelation;
 	public final fun getName ()Ljava/lang/String;
 	public final fun getOpenFlags ()Ljava/lang/Long;
