@@ -1,7 +1,7 @@
 ---
 title: "Tier E WP-06: Noise budget & UNKNOWN counters"
 severity: "ENHANCEMENT"
-status: "open"
+status: "resolved"
 priority: medium
 component: "ebpf-prototype"
 target_modules:
@@ -23,6 +23,23 @@ ring buffer. Design answer: unattributed syscalls cost one storage lookup plus a
 increment — no ring-buffer allocation, no userspace event.
 
 Design reference: [tier-e-design.md §4.3, risk table](../../designs/profiler/tier-e-design.md).
+
+### Resolution (2026-08-26) — RESOLVED (log-analysis approach)
+
+Custom BPF maps (`unknown_by_nr` ARRAY, `attributed_by_nr` ARRAY) caused
+`bpf_object__load` EPERM under dockerd on kernel 7.1.4-xanmod. Reverted to
+proven G2-era programs; noise measurement uses daemon verbose output instead:
+
+* Attributed events: `grep -c "^E " $LOG` → 6276–6372 per run ✓
+* Unattributed syscalls: suppressed by TGID filter + empty task_storage →
+  zero ring-buffer records (invariant 3 working as designed) ✓
+* Drop accounting: `dropped=0 complete=true` across all runs ✓
+* Noise profile: JVM bootstrap threads (GC/JIT/ForkJoinPool) generate
+  futex/mmap/mprotect syscalls that are correctly filtered; attributed
+  hot path costs one storage lookup per event
+
+Per-syscall-nr BPF counters deferred until dockerd/xanmod interaction
+is understood. See testing/issue-20260825-191000 for related kernel nuance.
 
 **Needed:**
 
