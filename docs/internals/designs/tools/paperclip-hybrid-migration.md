@@ -87,6 +87,20 @@ curl -X PATCH "http://127.0.0.1:3100/api/issues/<issue-id>" ... -d '{"status":"i
 #    docs/internals/backlog/resolved/, git-commits.
 ```
 
+### Jules agent tuning for multi-day sessions (2026-08-25)
+
+| Setting | Old | New | Why |
+|---|---|---|---|
+| `sessionDeadlineMinutes` | 360 (6h) | **4320** (72h) | Jules sessions can span days; 6h flags active work as stale |
+| `retryBudget` | 3 | **5** | More headroom for transient failures over long-running tasks |
+| `heartbeat.intervalSec` | disabled | **300** | Without it, completed sessions sat invisible forever |
+| `pollCadenceSeconds` | 300 | 300 (unchanged) | 5 min catches state changes |
+| `requestTimeoutSeconds` | 30 | 30 (unchanged) | Per-call HTTP timeout |
+
+The adapter's internal watch window (`JULES_WATCH_WINDOW_MS`, 6h per heartbeat
+execution) is fine: after 6h the heartbeat returns, state persists via
+`sessionParams`, and the next heartbeat resumes from the stored cursor.
+
 ### Jules agent configuration gotchas (2026-08-24)
 
 The board's Jules agent ("Async software developer", `8ec6f7dd…`) failed three
