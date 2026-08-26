@@ -1,0 +1,14 @@
+# Tier E prototype runner: minimal userspace for the privileged kernel phase.
+# Built on demand by scripts/run_collector.sh (mirrors the mazewall-test-runner
+# build-if-missing pattern used by scripts/run_containerized_tests.sh).
+#
+# debian:trixie ships glibc >= 2.40, satisfying the GLIBC_2.38 requirement of
+# collector binaries compiled on current developer hosts.
+FROM docker.io/library/debian:trixie-slim
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        bash \
+        libelf1 \
+        zlib1g \
+    && rm -rf /var/lib/apt/lists/*
