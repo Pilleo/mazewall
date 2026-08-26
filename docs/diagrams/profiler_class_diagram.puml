@@ -200,6 +200,16 @@ class "EbpfParseResult" as io.mazewall.profiler.collector.EbpfParseResult {
   +List<ProfileObservation> getObservations()
   +int getDroppedLines()
 }
+class "LiveEbpfCollector" as io.mazewall.profiler.collector.LiveEbpfCollector {
+  + {static}Companion Companion
+  __
+  +ObservationSource getSource()
+  +void onEvent(int, int, int, long, long)
+  +void onDrop()
+  +void start()
+  +CollectorDrain drain()
+  +void close()
+}
 class "ObservationMerger" as io.mazewall.profiler.collector.ObservationMerger {
   + {static}ObservationMerger INSTANCE
   __
@@ -776,6 +786,8 @@ io.mazewall.profiler.collector.EbpfCollector --> io.mazewall.profiler.Observatio
 io.mazewall.profiler.collector.EbpfCollector --> io.mazewall.profiler.EbpfLoad
 io.mazewall.profiler.collector.EbpfEventParser --> io.mazewall.profiler.collector.EbpfEventParser
 io.mazewall.profiler.collector.EbpfParseResult --> io.mazewall.profiler.ProfileObservation
+io.mazewall.profiler.collector.LiveEbpfCollector .u.|> io.mazewall.profiler.collector.ProfileCollector
+io.mazewall.profiler.collector.LiveEbpfCollector --> io.mazewall.profiler.ObservationSource
 io.mazewall.profiler.collector.ObservationMerger --> io.mazewall.profiler.collector.ObservationMerger
 io.mazewall.profiler.collector.StraceCollector .u.|> io.mazewall.profiler.collector.ProfileCollector
 io.mazewall.profiler.collector.StraceCollector --> io.mazewall.profiler.TraceableWorkload
