@@ -38,6 +38,10 @@ class HybridSupervisor(
         for (done in issues.filter { it.status == "done" && it.fromMarkdownBacklog }) {
             runCatching { resolver?.resolveIfNeeded(done.identifier ?: done.id, done.description) }
                 .onFailure { err("resolve ${done.identifier}: ${it.message}") }
+                .onSuccess {
+                    out("✅ ${done.identifier} resolved: ${(done.title ?: "").take(60)}")
+                    notifier?.notify("✅ Resolved: ${done.identifier} — ${(done.title ?: "").take(60)}")
+                }
         }
         val agents = runCatching { client.listAgents(companyId) }
             .onFailure { err("listAgents failed: ${it.message}"); return 0 }

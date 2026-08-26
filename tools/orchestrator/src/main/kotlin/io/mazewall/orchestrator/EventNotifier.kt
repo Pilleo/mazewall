@@ -76,6 +76,11 @@ class EventNotifier(
         }
     }
 
+    /** Sends a Telegram notification about a lifecycle event. Best-effort. */
+    fun notify(text: String) {
+        bot.sendMessage(text)
+    }
+
     private fun save() {
         stateFile.toFile().outputStream().use { props.store(it, "HybridSupervisor state") }
     }
