@@ -1332,6 +1332,7 @@ public final class io/mazewall/profiler/tierE/engine/TierEbpfEngine : java/lang/
 	public fun <init> (Lio/mazewall/RawSyscallOperations;)V
 	public fun close ()V
 	public final fun install (I)V
+	public final fun readAttrCounts ()[J
 	public final fun setContext (II)V
 }
 
@@ -1382,6 +1383,10 @@ public final class io/mazewall/profiler/tierE/ringbuf/ContextEvent {
 public final class io/mazewall/profiler/tierE/ringbuf/ContextEvent$Companion {
 	public final fun fromBytes ([B)Lio/mazewall/profiler/tierE/ringbuf/ContextEvent;
 	public final fun fromSegment (Ljava/lang/foreign/MemorySegment;J)Lio/mazewall/profiler/tierE/ringbuf/ContextEvent;
+}
+
+public final class io/mazewall/profiler/tierE/stress/StressDriverMainKt {
+	public static final fun main ([Ljava/lang/String;)V
 }
 
 public final class io/mazewall/profiler/triage/DiagnosticTriageRunner {

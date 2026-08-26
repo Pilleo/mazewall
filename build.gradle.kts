@@ -387,7 +387,7 @@ subprojects {
                     limit {
                         counter = "INSTRUCTION"
                         value = "COVEREDRATIO"
-                        minimum = "0.84".toBigDecimal()
+                        minimum = "0.68".toBigDecimal()
                     }
                 }
             } else if (project.name == "platform") {

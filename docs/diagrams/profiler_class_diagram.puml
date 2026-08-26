@@ -587,6 +587,7 @@ class "TierEbpfEngine" as io.mazewall.profiler.tierE.engine.TierEbpfEngine {
   + {static}int EVENT_SIZE
   __
   +void install(int)
+  +long[] readAttrCounts()
   +void setContext(int, int)
   +void close()
   +List<Insn> buildProgram()
@@ -602,6 +603,9 @@ class "ContextEvent" as io.mazewall.profiler.tierE.ringbuf.ContextEvent {
   +int getSyscallNr()
   +int getContextId()
   +ContextEvent copy(long, int, int, int, int)
+}
+class "StressDriverMainKt" as io.mazewall.profiler.tierE.stress.StressDriverMainKt {
+  + {static}void main(String[])
 }
 class "DiagnosticTriageRunner" as io.mazewall.profiler.triage.DiagnosticTriageRunner {
   + {static}DiagnosticTriageRunner INSTANCE
