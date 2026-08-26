@@ -34,12 +34,8 @@ public object ContainerDetector {
     }
 
     public fun detect(lines: List<String>): ContainerInfo? {
-        println("[dbg-detector] called with ${lines.size} lines")
         for (line in lines) {
-            println("[dbg-detector] line='$line'")
-            println("[dbg-cd] line='$line'")
             val idMatch = CONTAINER_ID.find(line) ?: continue
-            println("[dbg-cd] idMatch=${idMatch.value}")
             val id = idMatch.value
             val runtime = RUNTIME_HINTS.firstOrNull { hint ->
                 line.contains(hint.first, ignoreCase = true)
