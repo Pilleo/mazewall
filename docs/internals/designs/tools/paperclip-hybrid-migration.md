@@ -87,6 +87,49 @@ curl -X PATCH "http://127.0.0.1:3100/api/issues/<issue-id>" ... -d '{"status":"i
 #    docs/internals/backlog/resolved/, git-commits.
 ```
 
+## Paperclip native capabilities audit (2026-08-25)
+
+Systematic exploration of the Paperclip API surface revealed several features
+we haven't tapped yet:
+
+### Already available (use now)
+
+| Feature | What it does | Our usage |
+|---|---|---|
+| Routines | Cron-scheduled agent work with issue templates | Both built-in routines paused; can create custom ones for stale-backlog triage |
+| Interactions API | Full lifecycle: plan approvals, completion confirmations, feedback requests | ✅ Used by adapter + supervisor |
+| Work-products | PR links, artifacts attached to issues with status tracking | ✅ Used by adapter |
+| Recovery actions | Auto-escalation: stranded sessions get owner reassignment | ✅ Native |
+| Secrets management | Versioned secret records with access events | ✅ Configured for jules-api-key |
+| Skills system | 7 installed incl. paperclip-board skill | Available but not leveraged by supervisor |
+
+### Experimental — disabled by default
+
+| Feature | What it would give us | Recommendation |
+|---|---|---|
+| `enablePipelines` | Multi-stage workflow engine: stage approvers, on-enter automations, carry-over policies | Future: could formalize review→merge→done transitions |
+| `enableTaskWatchdogs` | Watchdog agents that detect stalled work and restore live paths | Evaluate: could replace ciWatch stuck detection |
+| `enableIsolatedWorkspaces` | Per-agent git worktrees | Would prevent concurrent agent collisions |
+| `enableIssuePlanDecompositions` | Auto-decompose issues into subtasks | Useful for large architecture tasks |
+
+### Not relevant for mazewall
+
+Cases, ConferenceRoomChat, SmokeLab, StatusCards — team-collab features.
+
+### Jules agent tuning for multi-day sessions (2026-08-25)
+
+| Setting | Old | New | Why |
+|---|---|---|---|
+| `sessionDeadlineMinutes` | 360 (6h) | **4320** (72h) | Jules sessions can span days; 6h flags active work as stale |
+| `retryBudget` | 3 | **5** | More headroom for transient failures over long-running tasks |
+| `heartbeat.intervalSec` | disabled | **300** | Without it, completed sessions sat invisible forever |
+| `pollCadenceSeconds` | 300 | 300 (unchanged) | 5 min catches state changes |
+| `requestTimeoutSeconds` | 30 | 30 (unchanged) | Per-call HTTP timeout |
+
+The adapter's internal watch window (`JULES_WATCH_WINDOW_MS`, 6h per heartbeat
+execution) is fine: after 6h the heartbeat returns, state persists via
+`sessionParams`, and the next heartbeat resumes from the stored cursor.
+
 ### Jules agent configuration gotchas (2026-08-24)
 
 The board's Jules agent ("Async software developer", `8ec6f7dd…`) failed three

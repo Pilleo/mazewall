@@ -38,6 +38,10 @@ class HybridSupervisor(
         for (done in issues.filter { it.status == "done" && it.fromMarkdownBacklog }) {
             runCatching { resolver?.resolveIfNeeded(done.identifier ?: done.id, done.description) }
                 .onFailure { err("resolve ${done.identifier}: ${it.message}") }
+                .onSuccess {
+                    out("✅ ${done.identifier} resolved: ${(done.title ?: "").take(60)}")
+                    notifier?.notify("✅ Resolved: ${done.identifier} — ${(done.title ?: "").take(60)}")
+                }
         }
         val agents = runCatching { client.listAgents(companyId) }
             .onFailure { err("listAgents failed: ${it.message}"); return 0 }
@@ -135,7 +139,9 @@ class HybridSupervisor(
     companion object {
         val ALLOWED_LOOP_ADAPTERS = setOf("vibe", "jules")
 
-        fun env(key: String): String? = System.getenv(key)?.takeIf { it.isNotBlank() }
+        fun env(key: String): String? =
+            System.getenv(key)?.takeIf { it.isNotBlank() }
+                ?: System.getProperty(key)?.takeIf { it.isNotBlank() }
 
         fun parseExtra(raw: String?): Set<String> =
             raw.orEmpty()
@@ -150,6 +156,21 @@ class HybridSupervisor(
 }
 
 fun main(args: Array<String>) {
+    // Load .ENV file (same convention as OrchestratorDaemon): key=value pairs
+    // become system properties so env("...") picks them up. Real environment
+    // variables always win over .ENV values.
+    val envFile = java.io.File(".ENV")
+    if (envFile.exists()) {
+        envFile.readLines().forEach { line ->
+            val trimmed = line.trim()
+            if (trimmed.isNotEmpty() && !trimmed.startsWith("#") && trimmed.contains("=")) {
+                val key = trimmed.substringBefore("=").trim()
+                val value = trimmed.substringAfter("=").trim().removeSurrounding("\"").removeSurrounding("'")
+                if (System.getenv(key) == null) System.setProperty(key, value)
+            }
+        }
+    }
+
     var dryRun = false
     var daemon = false
     for (arg in args) {

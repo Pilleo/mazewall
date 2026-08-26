@@ -33,6 +33,8 @@ public sealed interface ProfileObservation {
         val args: List<Long> = emptyList(),
         override val paths: List<String> = emptyList(),
         val openFlags: Long? = null,
+        /** Tier E semantic context; null for unattributed observations. */
+        val contextId: Long? = null,
     ) : ProfileObservation
 
     public data class IoUring(

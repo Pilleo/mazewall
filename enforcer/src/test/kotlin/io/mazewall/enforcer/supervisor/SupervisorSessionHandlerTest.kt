@@ -323,9 +323,11 @@ class SupervisorSessionHandlerTest {
         }
 
         val mockFileSystem = object : io.mazewall.MockNativeFileSystem() {
-            override fun open(
+            override fun openat2(
+                dirfd: FileDescriptor<*, FdState.Open>,
                 path: io.mazewall.ffi.memory.ManagedSegment,
-                flags: io.mazewall.core.OpenFlags,
+                how: io.mazewall.ffi.memory.ManagedSegment,
+                size: Long,
             ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
                 return LinuxNative.SyscallResult.Success(99L) // Mock opened FD
             }
@@ -1351,11 +1353,15 @@ class SupervisorSessionHandlerTest {
         var capturedPath: String? = null
 
         val mockFileSystem = object : io.mazewall.MockNativeFileSystem() {
-            override fun open(
+            override fun openat2(
+                dirfd: FileDescriptor<*, FdState.Open>,
                 path: io.mazewall.ffi.memory.ManagedSegment,
-                flags: io.mazewall.core.OpenFlags,
+                how: io.mazewall.ffi.memory.ManagedSegment,
+                size: Long,
             ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
-                openCalledWithAtFdcwd = true
+                if (dirfd.value == FileDescriptor.AT_FDCWD.value) {
+                    openCalledWithAtFdcwd = true
+                }
                 val bytes = ByteArray(4096)
                 var i = 0
                 while (i < bytes.size) {
@@ -1364,15 +1370,10 @@ class SupervisorSessionHandlerTest {
                     bytes[i] = b
                     i++
                 }
-                capturedPath = String(bytes, 0, i, java.nio.charset.StandardCharsets.UTF_8)
-                return LinuxNative.SyscallResult.Success(99L)
-            }
-
-            override fun openat(
-                dirfd: FileDescriptor<*, FdState.Open>,
-                path: io.mazewall.ffi.memory.ManagedSegment,
-                flags: io.mazewall.core.OpenFlags,
-            ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                val p = String(bytes, 0, i, java.nio.charset.StandardCharsets.UTF_8)
+                if (p != "/") {
+                    capturedPath = p
+                }
                 return LinuxNative.SyscallResult.Success(99L)
             }
         }
@@ -1431,10 +1432,11 @@ class SupervisorSessionHandlerTest {
         val closed = mutableSetOf<Int>()
 
         val mockFileSystem = object : io.mazewall.MockNativeFileSystem() {
-            override fun openat(
+            override fun openat2(
                 dirfd: FileDescriptor<*, FdState.Open>,
                 path: io.mazewall.ffi.memory.ManagedSegment,
-                flags: io.mazewall.core.OpenFlags,
+                how: io.mazewall.ffi.memory.ManagedSegment,
+                size: Long,
             ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
                 openatDirfd = dirfd.value
                 return LinuxNative.SyscallResult.Success(99L)
@@ -2088,13 +2090,23 @@ class SupervisorSessionHandlerTest {
         }
 
         val mockFileSystem = object : io.mazewall.MockNativeFileSystem() {
-            override fun open(
+            override fun openat2(
+                dirfd: FileDescriptor<*, FdState.Open>,
                 path: io.mazewall.ffi.memory.ManagedSegment,
-                flags: io.mazewall.core.OpenFlags,
-                mode: Int,
+                how: io.mazewall.ffi.memory.ManagedSegment,
+                size: Long,
             ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
-                receivedFlags = flags.value
-                receivedMode = mode
+                val p = ByteArray(10)
+                var i = 0
+                while (i < 10) {
+                    if (path.readByte(i.toLong()) == 0.toByte()) break
+                    i++
+                }
+                if (i == 1 && path.readByte(0) == '/'.code.toByte()) {
+                    return LinuxNative.SyscallResult.Success(99L)
+                }
+                receivedFlags = how.readLong(0).toInt()
+                receivedMode = how.readLong(8).toInt()
                 return LinuxNative.SyscallResult.Success(99L)
             }
         }
@@ -2470,7 +2482,7 @@ class SupervisorSessionHandlerTest {
 
                 assertEquals(0L, capturedFlags, "openat2 must decode flags from struct open_how, not the pointer 0x2000")
                 assertEquals(0x1A4L, capturedMode, "openat2 must decode mode from struct open_how")
-                assertEquals(1L, capturedResolve, "openat2 must decode resolve from struct open_how")
+                assertEquals(9L, capturedResolve, "openat2 must decode resolve from struct open_how")
                 assertEquals(io.mazewall.ffi.NativeConstants.SECCOMP_ADDFD_FLAG_SEND.toInt(), addfdFlags, "Must use SECCOMP_ADDFD_FLAG_SEND")
             }
         } finally {

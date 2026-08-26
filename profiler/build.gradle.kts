@@ -2,6 +2,7 @@ import java.math.BigDecimal
 
 plugins {
     kotlin("jvm")
+    application
     id("info.solidsoft.pitest")
     alias(libs.plugins.plantuml)
     alias(libs.plugins.kotlinPluginSerialization)
@@ -10,6 +11,17 @@ plugins {
 
 kotlin {
     jvmToolchain(25)
+}
+
+application {
+    mainClass.set("io.mazewall.profiler.tierE.daemon.TierEDaemonKt")
+    applicationName = "tier-e-daemon"
+    applicationDefaultJvmArgs =
+        listOf(
+            "--enable-native-access=ALL-UNNAMED",
+            "-Dfile.encoding=UTF-8",
+            "-Dsun.jnu.encoding=UTF-8",
+        )
 }
 
 sourceSets {

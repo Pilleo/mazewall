@@ -200,6 +200,16 @@ class "EbpfParseResult" as io.mazewall.profiler.collector.EbpfParseResult {
   +List<ProfileObservation> getObservations()
   +int getDroppedLines()
 }
+class "LiveEbpfCollector" as io.mazewall.profiler.collector.LiveEbpfCollector {
+  + {static}Companion Companion
+  __
+  +ObservationSource getSource()
+  +void onEvent(int, int, int, long, long)
+  +void onDrop()
+  +void start()
+  +CollectorDrain drain()
+  +void close()
+}
 class "ObservationMerger" as io.mazewall.profiler.collector.ObservationMerger {
   + {static}ObservationMerger INSTANCE
   __
@@ -530,6 +540,73 @@ class "StraceWorkloadRunner" as io.mazewall.profiler.strace.StraceWorkloadRunner
   __
   + {static}void main(String[])
 }
+class "LiveEbpfCollector" as io.mazewall.profiler.tierE.collector.LiveEbpfCollector {
+  +int getDroppedCount()
+  +boolean getDrainComplete()
+  +void record(long, int, int, long)
+  +void recordDrop()
+  +List<AttributedEvent> drain()
+  +void clear()
+}
+class "ContainerDetector" as io.mazewall.profiler.tierE.container.ContainerDetector {
+  + {static}ContainerDetector INSTANCE
+  __
+  +ContainerInfo detect(long)
+  +ContainerInfo detect(List<String>)
+}
+enum "AttachMode" as io.mazewall.profiler.tierE.daemon.AttachMode {
+  UPROBE
+  USDT
+}
+interface "ControlCommand" as io.mazewall.profiler.tierE.daemon.ControlCommand {
+}
+class "ControlProtocolKt" as io.mazewall.profiler.tierE.daemon.ControlProtocolKt {
+  __
+  + {static}Either<ControlCommand, ControlReply> parseControlCommand(String)
+}
+class "ControlReply" as io.mazewall.profiler.tierE.daemon.ControlReply {
+  ..
+  + {static}Companion Companion
+  __
+  +boolean getOk()
+  +String getText()
+  +String render()
+}
+interface "Either" as io.mazewall.profiler.tierE.daemon.Either<L, R> {
+}
+class "ElfBuildIdExtractor" as io.mazewall.profiler.tierE.daemon.ElfBuildIdExtractor {
+  + {static}ElfBuildIdExtractor INSTANCE
+  __
+  +String extract(byte[])
+}
+class "TierEKotlinDaemonKt" as io.mazewall.profiler.tierE.daemon.TierEKotlinDaemonKt {
+  + {static}void main()
+}
+class "TierEbpfEngine" as io.mazewall.profiler.tierE.engine.TierEbpfEngine {
+  + {static}Companion Companion
+  + {static}int EVENT_SIZE
+  __
+  +void install(int)
+  +long[] readAttrCounts()
+  +void setContext(int, int)
+  +void close()
+  +List<Insn> buildProgram()
+  +long pack(Insn)
+}
+class "ContextEvent" as io.mazewall.profiler.tierE.ringbuf.ContextEvent {
+  + {static}Companion Companion
+  + {static}int SIZE_BYTES
+  __
+  +long getKtimeNs()
+  +int getTgid()
+  +int getTid()
+  +int getSyscallNr()
+  +int getContextId()
+  +ContextEvent copy(long, int, int, int, int)
+}
+class "StressDriverMainKt" as io.mazewall.profiler.tierE.stress.StressDriverMainKt {
+  + {static}void main(String[])
+}
 class "DiagnosticTriageRunner" as io.mazewall.profiler.triage.DiagnosticTriageRunner {
   + {static}DiagnosticTriageRunner INSTANCE
   __
@@ -568,6 +645,8 @@ io.mazewall.profiler.collector.EbpfCollector --> io.mazewall.profiler.Observatio
 io.mazewall.profiler.collector.EbpfCollector --> io.mazewall.profiler.EbpfLoad
 io.mazewall.profiler.collector.EbpfEventParser --> io.mazewall.profiler.collector.EbpfEventParser
 io.mazewall.profiler.collector.EbpfParseResult --> io.mazewall.profiler.ProfileObservation
+io.mazewall.profiler.collector.LiveEbpfCollector .u.|> io.mazewall.profiler.collector.ProfileCollector
+io.mazewall.profiler.collector.LiveEbpfCollector --> io.mazewall.profiler.ObservationSource
 io.mazewall.profiler.collector.ObservationMerger --> io.mazewall.profiler.collector.ObservationMerger
 io.mazewall.profiler.collector.StraceCollector .u.|> io.mazewall.profiler.collector.ProfileCollector
 io.mazewall.profiler.collector.StraceCollector --> io.mazewall.profiler.TraceableWorkload
@@ -629,5 +708,7 @@ io.mazewall.profiler.iterative.IterativeProfiler --> io.mazewall.profiler.iterat
 io.mazewall.profiler.iterative.RealIterativeTaskExecutor .u.|> io.mazewall.profiler.iterative.IterativeTaskExecutor
 io.mazewall.profiler.strace.StraceProfiler --> io.mazewall.profiler.strace.StraceProfiler
 io.mazewall.profiler.strace.StraceWorkloadRunner --> io.mazewall.profiler.strace.StraceWorkloadRunner
+io.mazewall.profiler.tierE.container.ContainerDetector --> io.mazewall.profiler.tierE.container.ContainerDetector
+io.mazewall.profiler.tierE.daemon.ElfBuildIdExtractor --> io.mazewall.profiler.tierE.daemon.ElfBuildIdExtractor
 io.mazewall.profiler.triage.DiagnosticTriageRunner --> io.mazewall.profiler.triage.DiagnosticTriageRunner
 @enduml

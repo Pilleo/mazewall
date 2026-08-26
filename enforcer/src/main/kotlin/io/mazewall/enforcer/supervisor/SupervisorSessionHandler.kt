@@ -242,7 +242,7 @@ internal class SupervisorSessionHandler(
                     }
 
                     logger.info { "[SUPERVISOR-DEBUG] Forwarding request to JVM validation listener" }
-                    val success = sendRequestToJvm(id, pidVal, archVal, ppid, nr, args, resolvedPathStr, extracted.sockaddrBytes)
+                    val success = sendRequestToJvm(id, pidVal, archVal, ppid, nr, args, extracted.pathStr, extracted.sockaddrBytes)
                     if (!success) {
                         logger.severe { "[SUPERVISOR-DEBUG] Failed to send request to JVM" }
                         return false
@@ -252,7 +252,7 @@ internal class SupervisorSessionHandler(
                         id,
                         nr,
                         args,
-                        resolvedPathStr,
+                        extracted.pathStr,
                         extracted.sockaddrBytes,
                         extracted.openHow,
                         resp,
@@ -767,39 +767,68 @@ internal class SupervisorSessionHandler(
         req: SupervisedOpen,
         tid: Tid,
     ): Int {
+        val howSeg = arena.allocate(Layouts.OPEN_HOW_SIZE)
+
+        val flags = when(req) {
+            is SupervisedOpen.Open -> req.flags.value.toLong()
+            is SupervisedOpen.OpenAt -> req.flags.value.toLong()
+            is SupervisedOpen.OpenAt2 -> req.how.flags.value.toLong()
+        }
+        val mode = when(req) {
+            is SupervisedOpen.Open -> req.mode.toLong()
+            is SupervisedOpen.OpenAt -> req.mode.toLong()
+            is SupervisedOpen.OpenAt2 -> req.how.mode
+        }
+        val resolve = when(req) {
+            is SupervisedOpen.OpenAt2 -> req.how.resolve or NativeConstants.RESOLVE_BENEATH.toLong()
+            else -> 0L
+        }
+
+        howSeg.writeLong(Layouts.OPEN_HOW_FLAGS_OFFSET, flags)
+        howSeg.writeLong(Layouts.OPEN_HOW_MODE_OFFSET, mode)
+        howSeg.writeLong(Layouts.OPEN_HOW_RESOLVE_OFFSET, resolve)
+
+        val (isAbsolute, traceeDirfd) = when(req) {
+            is SupervisedOpen.Open -> true to FileDescriptor.AT_FDCWD.value
+            is SupervisedOpen.OpenAt -> req.path.startsWith("/") to req.dirfd
+            is SupervisedOpen.OpenAt2 -> req.path.startsWith("/") to req.dirfd
+        }
+
         val pathSeg = arena.allocateFrom(req.path)
-        return when (req) {
-            is SupervisedOpen.Open ->
-                signedErrno(engine.fileSystem.open(pathSeg, req.flags, req.mode))
-            is SupervisedOpen.OpenAt -> {
-                if (req.dirfd == AT_FDCWD || req.path.startsWith("/")) {
-                    signedErrno(engine.fileSystem.open(pathSeg, req.flags, req.mode))
-                } else {
-                    openatRelativeToTraceeDirfd(tid, req.dirfd, pathSeg, req.flags.value, req.mode)
-                }
-            }
-            is SupervisedOpen.OpenAt2 -> {
-                val howSeg = arena.allocate(Layouts.OPEN_HOW_SIZE)
-                howSeg.writeLong(Layouts.OPEN_HOW_FLAGS_OFFSET, req.how.flags.value.toLong())
-                howSeg.writeLong(Layouts.OPEN_HOW_MODE_OFFSET, req.how.mode)
-                howSeg.writeLong(Layouts.OPEN_HOW_RESOLVE_OFFSET, req.how.resolve)
 
-                if (req.dirfd == AT_FDCWD || req.path.startsWith("/")) {
-                    signedErrno(engine.fileSystem.openat2(FileDescriptor.AT_FDCWD, pathSeg, howSeg, Layouts.OPEN_HOW_SIZE))
-                } else {
-                    openat2RelativeToTraceeDirfd(tid, req.dirfd, pathSeg, howSeg)
-                }
+        if (isAbsolute || traceeDirfd == FileDescriptor.AT_FDCWD.value) {
+            return signedErrno(
+                engine.fileSystem.openat2(
+                    FileDescriptor.AT_FDCWD,
+                    pathSeg,
+                    howSeg,
+                    Layouts.OPEN_HOW_SIZE
+                )
+            )
+        } else {
+            val importedFd = importTraceeFd(tid, traceeDirfd)
+            if (importedFd < 0) return importedFd
+            return SafeLocalFd(importedFd).use { importedSafe ->
+                signedErrno(engine.fileSystem.openat2(importedSafe.handle, pathSeg, howSeg, Layouts.OPEN_HOW_SIZE))
             }
         }
     }
 
-    context(arena: NativeArena)
-    private fun openat2RelativeToTraceeDirfd(
-        tid: Tid,
-        traceeDirfd: Int,
-        pathSeg: ManagedSegment,
-        howSeg: ManagedSegment,
-    ): Int {
+    private fun importTraceeFd(tid: Tid, traceeDirfd: Int): Int {
+        if (traceeDirfd == FileDescriptor.AT_FDCWD.value) {
+            val cwdPath = "/proc/${getTgid(tid.value)}/cwd"
+            val fd = NativeArena.ofConfined().use { arena ->
+                engine.fileSystem.open(
+                    arena.allocateFrom(cwdPath),
+                    io.mazewall.core.OpenFlags(NativeConstants.O_PATH or NativeConstants.O_DIRECTORY),
+                    0
+                )
+            }
+            if (fd is LinuxNative.SyscallResult.Success) {
+                return fd.value.toInt()
+            }
+            return -(fd as LinuxNative.SyscallResult.Error).errno
+        }
         val tgid = getTgid(tid.value)
         val pidfdRes = engine.process.pidfdOpen(tgid, 0)
         val pidfdVal = when (pidfdRes) {
@@ -809,45 +838,9 @@ internal class SupervisorSessionHandler(
         return SafeLocalFd(pidfdVal).use { pidfdSafe ->
             val pidfd = FileDescriptor.pid(pidfdSafe.fd)
             val importedRes = engine.process.pidfdGetFd(pidfd, traceeDirfd, 0)
-            val importedVal = when (importedRes) {
+            when (importedRes) {
                 is LinuxNative.SyscallResult.Success -> importedRes.value.toInt()
-                is LinuxNative.SyscallResult.Error -> return@use -importedRes.errno
-            }
-            SafeLocalFd(importedVal).use { importedSafe ->
-                val imported = FileDescriptor.oPath(importedSafe.fd)
-                signedErrno(engine.fileSystem.openat2(imported, pathSeg, howSeg, Layouts.OPEN_HOW_SIZE))
-            }
-        }
-    }
-
-    /**
-     * Imports [traceeDirfd] into this process with pidfd_getfd(2), then openat(2).
-     * Never treats the tracee's integer as a local file descriptor.
-     */
-    context(arena: NativeArena)
-    private fun openatRelativeToTraceeDirfd(
-        tid: Tid,
-        traceeDirfd: Int,
-        pathSeg: ManagedSegment,
-        flags: Int,
-        mode: Int = 0,
-    ): Int {
-        val tgid = getTgid(tid.value)
-        val pidfdRes = engine.process.pidfdOpen(tgid, 0)
-        val pidfdVal = when (pidfdRes) {
-            is LinuxNative.SyscallResult.Success -> pidfdRes.value.toInt()
-            is LinuxNative.SyscallResult.Error -> return -pidfdRes.errno
-        }
-        return SafeLocalFd(pidfdVal).use { pidfdSafe ->
-            val pidfd = FileDescriptor.pid(pidfdSafe.fd)
-            val importedRes = engine.process.pidfdGetFd(pidfd, traceeDirfd, 0)
-            val importedVal = when (importedRes) {
-                is LinuxNative.SyscallResult.Success -> importedRes.value.toInt()
-                is LinuxNative.SyscallResult.Error -> return@use -importedRes.errno
-            }
-            SafeLocalFd(importedVal).use { importedSafe ->
-                val imported = FileDescriptor.oPath(importedSafe.fd)
-                signedErrno(engine.fileSystem.openat(imported, pathSeg, io.mazewall.core.OpenFlags(flags), mode))
+                is LinuxNative.SyscallResult.Error -> -importedRes.errno
             }
         }
     }

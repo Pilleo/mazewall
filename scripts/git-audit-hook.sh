@@ -41,5 +41,11 @@ if ! ./gradlew test -x check --no-configuration-cache; then
   exit 1
 fi
 
+# 4. Keep Codanna code atlas index fresh and free of stale duplicates
+if command -v codanna >/dev/null 2>&1; then
+  echo "==> Refreshing Codanna code atlas index..."
+  codanna index --force --no-progress >/dev/null 2>&1 || true
+fi
+
 echo "==> Security audit and unit tests passed successfully."
 exit 0
