@@ -530,6 +530,214 @@ class "StraceWorkloadRunner" as io.mazewall.profiler.strace.StraceWorkloadRunner
   __
   + {static}void main(String[])
 }
+class "LiveEbpfCollector" as io.mazewall.profiler.tierE.collector.LiveEbpfCollector {
+  +int getDroppedCount()
+  +boolean getDrainComplete()
+  +void record(long, int, int, long)
+  +void recordDrop()
+  +List<AttributedEvent> drain()
+  +void clear()
+}
+class "ContainerDetector" as io.mazewall.profiler.tierE.container.ContainerDetector {
+  + {static}ContainerDetector INSTANCE
+  __
+  +ContainerInfo detect(long)
+  +ContainerInfo detect(List<String>)
+}
+interface "AcceptDecision" as io.mazewall.profiler.tierE.daemon.AcceptDecision {
+}
+class "AcceptPolicyKt" as io.mazewall.profiler.tierE.daemon.AcceptPolicyKt {
+  + {static}AcceptDecision decideAccept(boolean, Ucred)
+}
+enum "AttachMode" as io.mazewall.profiler.tierE.daemon.AttachMode {
+  UPROBE
+  USDT
+}
+interface "ControlCommand" as io.mazewall.profiler.tierE.daemon.ControlCommand {
+}
+class "ControlProtocolKt" as io.mazewall.profiler.tierE.daemon.ControlProtocolKt {
+  __
+  + {static}Either<ControlCommand, ControlReply> parseControlCommand(String)
+}
+class "ControlReply" as io.mazewall.profiler.tierE.daemon.ControlReply {
+  ..
+  + {static}Companion Companion
+  __
+  +boolean getOk()
+  +String getText()
+  +String render()
+}
+interface "Either" as io.mazewall.profiler.tierE.daemon.Either<L, R> {
+}
+class "ElfBuildIdExtractor" as io.mazewall.profiler.tierE.daemon.ElfBuildIdExtractor {
+  + {static}ElfBuildIdExtractor INSTANCE
+  __
+  +String extract(byte[])
+}
+interface "MarkerVerifier" as io.mazewall.profiler.tierE.daemon.MarkerVerifier {
+  + {abstract}VerifyResult verify(int, String)
+}
+class "ProbeMain" as io.mazewall.profiler.tierE.daemon.ProbeMain {
+  + {static}ProbeMain INSTANCE
+  __
+  +void probeStdin(String[])
+  +void probeCmdfile(String[])
+  +void probeSingle(String[])
+}
+class "SessionEngine" as io.mazewall.profiler.tierE.daemon.SessionEngine {
+  + {static}Companion Companion
+  __
+  +long getEpoch()
+  +State getState()
+  +Long activeHandle()
+  +MarkerVerifier getVerifier()
+  +void setVerifier(MarkerVerifier)
+  +ControlReply onAttach(Attach)
+  +ControlReply onDetach()
+  +String statusText()
+  +void close()
+}
+class "SessionResource" as io.mazewall.profiler.tierE.daemon.SessionResource {
+  +long getEpoch()
+  +int getCfd()
+  +SessionEngine getEngine()
+  +void setPrintEvents(boolean)
+  +void bindAndPoll(long)
+  +void incrementEvents()
+  +void close()
+}
+class "TierEDaemon" as io.mazewall.profiler.tierE.daemon.TierEDaemon {
+  + {static}int RECV_TIMEOUT_MS
+  __
+  +void serve()
+}
+class "TierEDaemonKt" as io.mazewall.profiler.tierE.daemon.TierEDaemonKt {
+  + {static}void main(String[])
+}
+interface "VerifyResult" as io.mazewall.profiler.tierE.daemon.VerifyResult {
+}
+class "MarkerBinder" as io.mazewall.profiler.tierE.ffi.MarkerBinder {
+  +void mark(int)
+  +void close()
+}
+class "PosixFfi" as io.mazewall.profiler.tierE.ffi.PosixFfi {
+  + {static}Companion Companion
+  + {static}int PROT_READ
+  + {static}int PROT_WRITE
+  __
+  +Ucred peerCredentials(int)
+  +boolean sendAll(int, byte[])
+  +int recv(int, byte[], int, int)
+  +int listenUnix(String)
+  +int connectUnix(String)
+  +int accept(int)
+  +int getpid()
+  +int gettid()
+  +void setRecvTimeout(int, int)
+  +void close(int)
+  +int currentErrno()
+  +MemorySegment mmapShared(long, int, int, long)
+  +void munmap(MemorySegment, long)
+}
+class "Ucred" as io.mazewall.profiler.tierE.ffi.Ucred {
+  +int getPid()
+  +int getUid()
+  +int getGid()
+}
+class "ContextEvent" as io.mazewall.profiler.tierE.ringbuf.ContextEvent {
+  + {static}Companion Companion
+  + {static}int SIZE_BYTES
+  __
+  +long getKtimeNs()
+  +int getTgid()
+  +int getTid()
+  +int getSyscallNr()
+  +int getContextId()
+  +ContextEvent copy(long, int, int, int, int)
+}
+class "RingbufReader" as io.mazewall.profiler.tierE.ringbuf.RingbufReader {
+  + {static}Companion Companion
+  + {static}long PROD_POS_OFF
+  + {static}long CONS_POS_OFF
+  + {static}long HEADER_SIZE
+  + {static}long PAGE
+  + {static}long BUSY_BIT
+  + {static}long DISCARD_BIT
+  + {static}long LEN_MASK
+  __
+  +int pollOnce()
+  +void close()
+}
+class "LibbpfShim" as io.mazewall.profiler.tierE.shim.LibbpfShim {
+  +long loadObject(String)
+  +void setTargetTgid(long, int)
+  +void attachSysEnter(long)
+  +void attachMarkerUprobe(long, int, String)
+  +void attachMarkerUsdt(long, int, String)
+  +int ringFd(long)
+  +long droppedTotal(long)
+  +long[] unknownCounts(long)
+  +long[] readPerNr(long)
+  +void destroy(long)
+  +long ringNew(long)
+  +int ringPoll(long, int)
+  +void ringDestroy(long)
+}
+class "ShimException" as io.mazewall.profiler.tierE.shim.ShimException {
+  +String getOperation()
+  +int getErrorCode()
+}
+interface "TierEBpfShim" as io.mazewall.profiler.tierE.shim.TierEBpfShim {
+  + {abstract}long loadObject(String)
+  + {abstract}void setTargetTgid(long, int)
+  + {abstract}void attachSysEnter(long)
+  + {abstract}void attachMarkerUprobe(long, int, String)
+  + {abstract}void attachMarkerUsdt(long, int, String)
+  + {abstract}int ringFd(long)
+  + {abstract}long droppedTotal(long)
+  + {abstract}void destroy(long)
+  + {abstract}long ringNew(long)
+  + {abstract}int ringPoll(long, int)
+  + {abstract}void ringDestroy(long)
+  + {abstract}long[] unknownCounts(long)
+  + {abstract}long[] readPerNr(long)
+}
+class "Event" as io.mazewall.profiler.tierE.stress.Event {
+  +long getTid()
+  +int getSyscallNr()
+  +int getContextId()
+  +long getKtimeNs()
+  +Event copy(long, int, int, long)
+}
+class "QuietMark" as io.mazewall.profiler.tierE.stress.QuietMark {
+  +long getTid()
+  +long getStartNs()
+}
+class "StressDriverMain" as io.mazewall.profiler.tierE.stress.StressDriverMain {
+  + {static}StressDriverMain INSTANCE
+  + {static}long SLACK
+  __
+  + {static}void main(String[])
+}
+class "StressVerifier" as io.mazewall.profiler.tierE.stress.StressVerifier {
+  + {static}StressVerifier INSTANCE
+  + {static}long DEFAULT_SLACK_NS
+  __
+  +List<Event> parseEvents(List<String>)
+  +Pair<List<Window>, List<QuietMark>> parseDecls(List<String>)
+  +Report verify(Path, Path)
+  +Report verify(List<Event>, List<Window>, List<QuietMark>, long)
+}
+class "StressVerifierMainKt" as io.mazewall.profiler.tierE.stress.StressVerifierMainKt {
+  + {static}void main(String[])
+}
+class "Window" as io.mazewall.profiler.tierE.stress.Window {
+  +long getTid()
+  +int getCtx()
+  +long getStartNs()
+  +long getEndNs()
+  +Window copy(long, int, long, long)
+}
 class "DiagnosticTriageRunner" as io.mazewall.profiler.triage.DiagnosticTriageRunner {
   + {static}DiagnosticTriageRunner INSTANCE
   __
@@ -629,5 +837,21 @@ io.mazewall.profiler.iterative.IterativeProfiler --> io.mazewall.profiler.iterat
 io.mazewall.profiler.iterative.RealIterativeTaskExecutor .u.|> io.mazewall.profiler.iterative.IterativeTaskExecutor
 io.mazewall.profiler.strace.StraceProfiler --> io.mazewall.profiler.strace.StraceProfiler
 io.mazewall.profiler.strace.StraceWorkloadRunner --> io.mazewall.profiler.strace.StraceWorkloadRunner
+io.mazewall.profiler.tierE.container.ContainerDetector --> io.mazewall.profiler.tierE.container.ContainerDetector
+io.mazewall.profiler.tierE.daemon.ElfBuildIdExtractor --> io.mazewall.profiler.tierE.daemon.ElfBuildIdExtractor
+io.mazewall.profiler.tierE.daemon.ProbeMain --> io.mazewall.profiler.tierE.daemon.ProbeMain
+io.mazewall.profiler.tierE.daemon.SessionEngine --> io.mazewall.profiler.tierE.shim.TierEBpfShim
+io.mazewall.profiler.tierE.daemon.SessionEngine --> io.mazewall.profiler.tierE.daemon.MarkerVerifier
+io.mazewall.profiler.tierE.daemon.SessionResource --> io.mazewall.profiler.tierE.ffi.PosixFfi
+io.mazewall.profiler.tierE.daemon.SessionResource --> io.mazewall.profiler.tierE.daemon.SessionEngine
+io.mazewall.profiler.tierE.daemon.SessionResource --> io.mazewall.profiler.tierE.shim.TierEBpfShim
+io.mazewall.profiler.tierE.daemon.TierEDaemon --> io.mazewall.profiler.tierE.ffi.PosixFfi
+io.mazewall.profiler.tierE.daemon.TierEDaemon --> io.mazewall.profiler.tierE.shim.LibbpfShim
+io.mazewall.profiler.tierE.ringbuf.RingbufReader --> io.mazewall.profiler.tierE.ffi.PosixFfi
+io.mazewall.profiler.tierE.ringbuf.RingbufReader --> io.mazewall.profiler.tierE.ringbuf.ContextEvent
+io.mazewall.profiler.tierE.shim.LibbpfShim .u.|> io.mazewall.profiler.tierE.shim.TierEBpfShim
+io.mazewall.profiler.tierE.stress.StressDriverMain --> io.mazewall.profiler.tierE.ffi.PosixFfi
+io.mazewall.profiler.tierE.stress.StressDriverMain --> io.mazewall.profiler.tierE.stress.StressDriverMain
+io.mazewall.profiler.tierE.stress.StressVerifier --> io.mazewall.profiler.tierE.stress.StressVerifier
 io.mazewall.profiler.triage.DiagnosticTriageRunner --> io.mazewall.profiler.triage.DiagnosticTriageRunner
 @enduml
