@@ -34,6 +34,9 @@ public class TierEbpfEngine(
         private const val MAP_RINGBUF: Int = 27
         private const val PROG_RAW_TP: Int = 17
 
+        /** Atomic add-and-store opcode: lock *(u64*)(dst+off) += src. */
+        private const val ATOMIC_ADD_DW: Int = 0xdb
+
         // eBPF helper IDs (uapi/linux/bpf.h)
         private const val H_LOOKUP: Int = 1
         private const val H_KTIME: Int = 5
@@ -70,6 +73,7 @@ public class TierEbpfEngine(
     @Volatile private var hashFd: Int = -1
     @Volatile private var ringFd: Int = -1
     @Volatile private var targetFd: Int = -1
+    @Volatile private var attrFd: Int = -1
     @Volatile private var progFd: Int = -1
     @Volatile private var linkFd: Int = -1
 
@@ -78,9 +82,37 @@ public class TierEbpfEngine(
         hashFd = createMap(MAP_HASH, keySize = 4, valueSize = 4, maxEntries = 65_536)
         ringFd = createMap(MAP_RINGBUF, keySize = 0, valueSize = 0, maxEntries = 1 shl 20)
         targetFd = createMap(MAP_ARRAY, keySize = 4, valueSize = 4, maxEntries = 1)
+        attrFd = createMap(MAP_ARRAY, keySize = 4, valueSize = 8, maxEntries = 4096)
         Arena.ofConfined().use { updateElem(it, targetFd, intSeg(it, 0), intSeg(it, targetTgid)) }
-        progFd = loadProg(listOf(hashFd, ringFd, targetFd))
+        progFd = loadProg(listOf(hashFd, ringFd, targetFd, attrFd))
         linkFd = openRawTp(progFd, "sys_enter")
+    }
+
+    /** Reads the per-context attributed-syscall counters. Index = context id (0..4095). */
+    public fun readAttrCounts(): LongArray {
+        require(attrFd >= 0) { "not installed" }
+        return LongArray(4096).also { out ->
+            Arena.ofConfined().use { a ->
+                for (ctx in 0 until 4096) {
+                    val attr = a.allocate(16)
+                    attr.set(ValueLayout.JAVA_INT, 0, attrFd)
+                    val keySeg = intSeg(a, ctx)
+                    val valSeg = a.allocate(8, 8)
+                    attr.set(ValueLayout.ADDRESS, 8, keySeg)
+                    // BPF_MAP_LOOKUP_ELEM: fd, key_ptr, value_ptr
+                    val lookupAttr = a.allocate(24)
+                    lookupAttr.set(ValueLayout.JAVA_INT, 0, attrFd)
+                    lookupAttr.set(ValueLayout.ADDRESS, 8, keySeg)
+                    lookupAttr.set(ValueLayout.ADDRESS, 16, valSeg)
+                    try {
+                        bpfCall(1L /* LOOKUP */, lookupAttr, 24)
+                        out[ctx] = valSeg.get(ValueLayout.JAVA_LONG, 0)
+                    } catch (_: Exception) {
+                        // entry not present
+                    }
+                }
+            }
+        }
     }
 
     public fun setContext(tid: Int, contextId: Int) {
@@ -96,6 +128,7 @@ public class TierEbpfEngine(
         closeIfOpen(progFd); progFd = -1
         closeIfOpen(ringFd); ringFd = -1
         closeIfOpen(targetFd); targetFd = -1
+        closeIfOpen(attrFd); attrFd = -1
         closeIfOpen(hashFd); hashFd = -1
     }
 
@@ -136,7 +169,6 @@ public class TierEbpfEngine(
         val jNoCtx = emit(Insn(JEQ_IMM, dst = 0))
         emit(Insn(LDX_W, dst = 5, src = 0))
         val jZeroCtx = emit(Insn(JEQ_IMM, dst = 5))
-
         ldMap(1, 1)
         emit(Insn(MOV_IMM, dst = 2, imm = EVENT_SIZE))
         emit(Insn(MOV_IMM, dst = 3, imm = 0))
@@ -155,9 +187,20 @@ public class TierEbpfEngine(
         emit(Insn(MOV_REG, dst = 1, src = 6))
         emit(Insn(MOV_IMM, dst = 2, imm = 0))
         emit(Insn(CALL, imm = H_RB_SUBMIT))
+
+        // Increment attr_by_ctx[context_id] atomically.
+        emit(Insn(STX_W, dst = FP, src = 5, off = -12))  // key = ctx_id at fp-12
+        ldMap(1, 3)                                      // r1 = attr map fd
+        emit(Insn(MOV_REG, dst = 2, src = FP))
+        emit(Insn(ADD_IMM, dst = 2, imm = -12))          // r2 = &key
+        emit(Insn(CALL, imm = H_LOOKUP))
+        val jNoSlot = emit(Insn(JEQ_IMM, dst = 0))
+        emit(Insn(MOV_IMM, dst = 1, imm = 1))
+        emit(Insn(ATOMIC_ADD_DW, dst = 0, src = 1, off = 0))
+        // fallthrough → exit
         emit(Insn(EXIT))
 
-        exitFrom(jNoTarget); exitFrom(jNoCtx); exitFrom(jZeroCtx); exitFrom(jDrop)
+        exitFrom(jNoTarget); exitFrom(jNoCtx); exitFrom(jZeroCtx); exitFrom(jDrop); exitFrom(jNoSlot)
         val end = p.size
         p[jNotTarget] = Insn(JNE_REG, dst = 5, src = 7, off = (end - jNotTarget - 1).toShort())
 
