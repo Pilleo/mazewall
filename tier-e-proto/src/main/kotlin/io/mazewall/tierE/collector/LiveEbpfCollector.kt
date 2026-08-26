@@ -1,6 +1,6 @@
 package io.mazewall.tierE.collector
 
-import java.util.concurrent.CopyOnWriteArrayList
+
 
 /**
  * Tier E attributed syscall event collector.
@@ -12,7 +12,7 @@ import java.util.concurrent.CopyOnWriteArrayList
  * Drop accounting: [droppedCount] tracks ring-buffer losses.
  */
 public class LiveEbpfCollector {
-    private val events = CopyOnWriteArrayList<AttributedEvent>()
+    private val events = java.util.concurrent.CopyOnWriteArrayList<AttributedEvent>()
     @Volatile public var droppedCount: Int = 0; private set
     @Volatile public var drainComplete: Boolean = true; private set
 
