@@ -41,6 +41,18 @@ proven G2-era programs; noise measurement uses daemon verbose output instead:
 Per-syscall-nr BPF counters deferred until dockerd/xanmod interaction
 is understood. See testing/issue-20260825-191000 for related kernel nuance.
 
+### Resolution (2026-08-26) — RESOLVED (log-analysis + G2 evidence)
+
+Noise suppression verified working by G2 gate runs:
+* Attributed events: 6276–6372 per run, all correct ✓
+* Unattributed syscalls: suppressed at BPF level (TGID filter + task_storage check)
+* Zero noise lines in daemon verbose output ✓
+* Drop accounting: dropped=0 complete=true across runs ✓
+
+Per-syscall-nr BPF counters deferred: adding custom ARRAY maps caused bpf_object__load
+EPERM under dockerd on kernel 7.1.4-xanmod (see testing/issue-20260825-191000).
+Noise profile available via log analysis of daemon verbose output.
+
 **Needed:**
 
 1. In `sys_enter` handler: missing/zero context ⇒ increment per-syscall-nr UNKNOWN counter
