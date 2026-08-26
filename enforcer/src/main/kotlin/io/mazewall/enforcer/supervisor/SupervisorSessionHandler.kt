@@ -767,7 +767,6 @@ internal class SupervisorSessionHandler(
         req: SupervisedOpen,
         tid: Tid,
     ): Int {
-        val pathSeg = arena.allocateFrom(req.path)
         val howSeg = arena.allocate(Layouts.OPEN_HOW_SIZE)
 
         val flags = when(req) {
@@ -782,7 +781,7 @@ internal class SupervisorSessionHandler(
         }
         val resolve = when(req) {
             is SupervisedOpen.OpenAt2 -> req.how.resolve or NativeConstants.RESOLVE_BENEATH.toLong()
-            else -> NativeConstants.RESOLVE_BENEATH.toLong()
+            else -> 0L
         }
 
         howSeg.writeLong(Layouts.OPEN_HOW_FLAGS_OFFSET, flags)
@@ -795,35 +794,22 @@ internal class SupervisorSessionHandler(
             is SupervisedOpen.OpenAt2 -> req.path.startsWith("/") to req.dirfd
         }
 
+        val pathSeg = arena.allocateFrom(req.path)
+
         if (isAbsolute || traceeDirfd == FileDescriptor.AT_FDCWD.value) {
-            val baseFd = if (isAbsolute) FileDescriptor.generic(importTraceeFd(tid, FileDescriptor.AT_FDCWD.value)) else FileDescriptor.AT_FDCWD
-            if (isAbsolute && baseFd.value < 0) return baseFd.value
-
-            val rootBase = if (isAbsolute) {
-               val rootPathSeg = arena.allocateFrom("/")
-               val rootHowSeg = arena.allocate(Layouts.OPEN_HOW_SIZE)
-               rootHowSeg.writeLong(Layouts.OPEN_HOW_FLAGS_OFFSET, NativeConstants.O_PATH.toLong() or NativeConstants.O_DIRECTORY.toLong())
-               rootHowSeg.writeLong(Layouts.OPEN_HOW_MODE_OFFSET, 0L)
-               rootHowSeg.writeLong(Layouts.OPEN_HOW_RESOLVE_OFFSET, 0L)
-               val rootFd = engine.fileSystem.openat2(FileDescriptor.AT_FDCWD, rootPathSeg, rootHowSeg, Layouts.OPEN_HOW_SIZE)
-               if (rootFd is LinuxNative.SyscallResult.Error) return -rootFd.errno
-               val rf = (rootFd as LinuxNative.SyscallResult.Success).value.toInt()
-               FileDescriptor.generic(rf)
-            } else {
-               FileDescriptor.AT_FDCWD
-            }
-
-            try {
-                return signedErrno(engine.fileSystem.openat2(rootBase, pathSeg, howSeg, Layouts.OPEN_HOW_SIZE))
-            } finally {
-                if (isAbsolute) engine.fileSystem.close(rootBase)
-            }
+            return signedErrno(
+                engine.fileSystem.openat2(
+                    FileDescriptor.AT_FDCWD,
+                    pathSeg,
+                    howSeg,
+                    Layouts.OPEN_HOW_SIZE
+                )
+            )
         } else {
             val importedFd = importTraceeFd(tid, traceeDirfd)
             if (importedFd < 0) return importedFd
             return SafeLocalFd(importedFd).use { importedSafe ->
-                val imported = FileDescriptor.oPath(importedSafe.fd)
-                signedErrno(engine.fileSystem.openat2(imported, pathSeg, howSeg, Layouts.OPEN_HOW_SIZE))
+                signedErrno(engine.fileSystem.openat2(importedSafe.handle, pathSeg, howSeg, Layouts.OPEN_HOW_SIZE))
             }
         }
     }
@@ -831,7 +817,13 @@ internal class SupervisorSessionHandler(
     private fun importTraceeFd(tid: Tid, traceeDirfd: Int): Int {
         if (traceeDirfd == FileDescriptor.AT_FDCWD.value) {
             val cwdPath = "/proc/${getTgid(tid.value)}/cwd"
-            val fd = engine.fileSystem.open(NativeArena.ofConfined().use { it.allocateFrom(cwdPath) }, io.mazewall.core.OpenFlags(NativeConstants.O_PATH or NativeConstants.O_DIRECTORY), 0)
+            val fd = NativeArena.ofConfined().use { arena ->
+                engine.fileSystem.open(
+                    arena.allocateFrom(cwdPath),
+                    io.mazewall.core.OpenFlags(NativeConstants.O_PATH or NativeConstants.O_DIRECTORY),
+                    0
+                )
+            }
             if (fd is LinuxNative.SyscallResult.Success) {
                 return fd.value.toInt()
             }
