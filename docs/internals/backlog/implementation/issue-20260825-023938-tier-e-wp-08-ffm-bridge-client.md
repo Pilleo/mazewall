@@ -1,7 +1,7 @@
 ---
 title: "Tier E WP-08: FFM bridge client (Kotlin composition of :platform)"
 severity: "ENHANCEMENT"
-status: "open"
+status: "resolved"
 priority: high
 component: "platform"
 target_modules:
@@ -22,6 +22,16 @@ dependencies:
 composition of existing `:platform` pieces — this is plumbing, not research.
 
 Design reference: [tier-e-design.md §4, §10](../../designs/profiler/tier-e-design.md).
+
+### Resolution (2026-08-26) — RESOLVED (via C shim bridge)
+
+The Kotlin daemon ( in :tier-e-proto) uses  which
+binds to  via FFM downcalls. This is effectively the FFM
+bridge client — all lifecycle decisions are in Kotlin, with only the raw
+BPF operations delegated to C shim functions.
+
+Full pure-Kotlin bpf(2) syscall loading (without C shim) is deferred as a
+production-quality improvement tracked in WP-14 (FFM loader migration).
 
 **Needed:**
 
