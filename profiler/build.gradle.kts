@@ -93,6 +93,7 @@ tasks.test {
 val plantumlConfig by configurations.creating
 
 dependencies {
+    implementation(project(":tier-e-proto"))
     plantumlConfig(libs.plantuml.core)
     api(project(":platform"))
     implementation(project(":enforcer"))

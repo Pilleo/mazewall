@@ -637,6 +637,12 @@ class "JvmChildSpec" as io.mazewall.core.JvmChildSpec {
   +boolean getDisableJvmci()
   +String getClasspath()
 }
+class "MazewallContext" as io.mazewall.core.MazewallContext {
+  + {static}MazewallContext INSTANCE
+  __
+  +int current()
+  +T withContext(int, Function0<? extends T>)
+}
 class "MemoryAddress" as io.mazewall.core.MemoryAddress {
   +long getValue()
   + {static}long toLong-impl(long)
@@ -2031,6 +2037,8 @@ io.mazewall.core.FileDescriptor <--> io.mazewall.core.FileDescriptor
 io.mazewall.core.FileDescriptor --> io.mazewall.core.FdLifecycle
 io.mazewall.core.JvmChildProcess --> io.mazewall.core.JvmChildProcess
 io.mazewall.core.JvmChildSpec --> io.mazewall.core.JavaAgentSelection
+io.mazewall.core.MazewallContext --> io.mazewall.core.ContextId
+io.mazewall.core.MazewallContext --> io.mazewall.core.MazewallContext
 io.mazewall.core.RealProcessLauncher .u.|> io.mazewall.core.ProcessLauncher
 io.mazewall.core.RealProcessLauncher --> io.mazewall.core.RealProcessLauncher
 io.mazewall.core.RealSocketManager .u.|> io.mazewall.core.SocketManager

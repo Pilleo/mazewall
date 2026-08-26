@@ -42,14 +42,7 @@ include(":portal-worker")
 include(":demos:cli-demo")
 include(":demos:vulnerable-web-app")
 include(":demos:agent-sandbox-demo")
-// :tier-e-proto stays out of the default build while Tier E is unwired
-// (ebpf-prototype/AGENTS.md). Opt in for Tier E control-plane work:
-//   ./gradlew :tier-e-proto:test -PincludeTierEProto=true
-val includeTierEProto =
-    providers.gradleProperty("includeTierEProto").orNull == "true"
-if (includeTierEProto) {
-    include(":tier-e-proto")
-}
+include(":tier-e-proto")
 
 // :tools:orchestrator stays out of the default build so in-flight work there
 // cannot fail ./gradlew build. Opt in:
