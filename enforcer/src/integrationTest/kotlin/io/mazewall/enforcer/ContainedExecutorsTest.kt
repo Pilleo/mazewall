@@ -182,7 +182,13 @@ class ContainedExecutorsTest : BaseIntegrationTest() {
         val executor = Executors.newSingleThreadExecutor()
         val safeExecutor = ContainedExecutors.wrap(executor, Policy.NO_EXEC)
         val future = safeExecutor.submit(java.util.concurrent.Callable { "success" })
-        assertEquals("success", future.get())
+
+        val ex = assertFailsWith<ExecutionException> {
+            future.get()
+        }
+        assertTrue(ex.cause is UnsupportedOperationException)
+        assertTrue(ex.cause?.message?.contains("does not support") == true)
+
         executor.shutdown()
     }
 

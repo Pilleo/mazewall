@@ -13,6 +13,7 @@ class SbobUnicodeTest {
             java.nio.file.Paths.get("/opt/caf\u00e9")
         } catch (e: java.nio.file.InvalidPathException) {
             assumeTrue(false, "System filesystem encoding does not support non-ASCII characters")
+            return
         }
 
         // /opt/café in JSON with unicode escape
