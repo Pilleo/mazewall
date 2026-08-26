@@ -9,6 +9,35 @@ import java.util.regex.Pattern
 
 /**
  * Fluent builder designed for idiomatic Java usage to configure and build [Policy] instances.
+ *
+ * <h3>Ownership and Immutability</h3>
+ * Each builder method returns the same [JavaPolicyBuilder] instance for method chaining, allowing
+ * fluent configuration. However, filesystem rule methods (allowFsRead, allowFsWrite, allowFsReadWrite)
+ * internally create new builder instances to handle scope promotion. Callers should use the returned
+ * instance to preserve filesystem rules.
+ *
+ * <h3>Thread-Local vs Process-Wide</h3>
+ * By default, this builder creates thread-local policies. To create a process-wide policy, use
+ * [buildProcessWide]. Note that process-wide policies cannot have filesystem rules (Landlock)
+ * as Landlock must be applied before seccomp, and seccomp process-wide installation would block the
+ * Landlock system calls. Attempting to call [buildProcessWide] with filesystem rules will throw
+ * an [IllegalStateException].
+ *
+ * <h3>Fail-Closed Defaults</h3>
+ * The builder starts with a default action of [SeccompAction.ACT_ERRNO] (returning EPERM for blocked syscalls).
+ * This can be changed using [defaultAction]. The fail-closed philosophy ensures that any syscall not
+ * explicitly allowed will be blocked.
+ *
+ * <h3>Usage Example</h3>
+ * <pre>{@code
+ * Policy<PolicyScope.ThreadLocalOnly, Uncompiled> policy = Mazewall.threadLocalBuilder()
+ *     .base(Mazewall.pureCompute())
+ *     .allow(Syscall.READ, Syscall.WRITE)
+ *     .allowFsRead("/tmp", "/var/tmp")
+ *     .allowFsWrite("/tmp/scratch")
+ *     .customViolationPhrase("Access Denied")
+ *     .build();
+ * }</pre>
  */
 public class JavaPolicyBuilder(
     runtime: RuntimeProfile? = null,
@@ -168,10 +197,32 @@ public class JavaPolicyBuilder(
         return this
     }
 
+    /**
+     * Builds a thread-local policy from the current configuration.
+     *
+     * <p>The returned policy can be installed on individual threads using
+     * [Mazewall.installOnCurrentThread].
+     *
+     * @return A thread-local policy ready for installation
+     */
     public fun build(): Policy<PolicyScope.ThreadLocalOnly, Uncompiled> {
         return Policy(builder.build())
     }
 
+    /**
+     * Builds a process-wide policy from the current configuration.
+     *
+     * <p><b>Critical:</b> Process-wide policies <b>cannot have filesystem rules (Landlock)</b>.
+     * Landlock must be applied before seccomp, and a process-wide seccomp filter would block
+     * the Landlock system calls. If this builder has any filesystem rules configured,
+     * this method will throw an [IllegalStateException].
+     *
+     * <p>The returned policy can be installed process-wide using [Mazewall.installOnProcess].
+     * Once installed, it affects all current and future threads in the process and cannot be removed.
+     *
+     * @return A process-wide policy ready for installation
+     * @throws IllegalStateException if the builder has filesystem rules configured
+     */
     public fun buildProcessWide(): Policy<PolicyScope.ProcessWideSafe, Uncompiled> {
         val definition = builder.build()
         if (definition.enforceLandlock) {
