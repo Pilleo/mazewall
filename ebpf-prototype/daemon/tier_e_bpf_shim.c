@@ -297,20 +297,23 @@ int te_unknown_counts(void *handle, long *out)
 	return 0;
 }
 
+/* Reads per-syscall-nr counters from per_nr_counters ARRAY map.
+ * out[0..511] = UNKNOWN counts, out[512..1023] = ATTRIBUTED counts. */
 int te_read_per_nr(void *handle, long *out)
 {
 	struct te_ctx *ctx = handle;
 	if (!ctx || !ctx->object)
 		return -EINVAL;
-	__u32 key = 0;
-	int fd = bpf_object__find_map_fd_by_name(ctx->object, "noise_by_nr");
+	int fd = bpf_object__find_map_fd_by_name(ctx->object, "per_nr_counters");
 	if (fd < 0)
 		return -ENOENT;
-	for (int nr = 0; nr < 512; nr++) {
+	for (int idx = 0; idx < 1024; idx++) {
+		__u32 k = (__u32)idx;
 		unsigned long long val = 0;
-		__u32 k = (__u32)nr;
 		if (!bpf_map_lookup_elem(fd, &k, &val))
-			out[nr] = val;
+			out[idx] = val;
+		else
+			out[idx] = 0;
 	}
 	return 0;
 }

@@ -207,29 +207,26 @@ public class TierEDaemon(
             // peer vanished mid-command
         } finally {
             teardownRing()
-            engine.close()
-            posix.close(cfd)
+            // Read counters BEFORE destroying BPF object (maps die with it).
             val dropped = if (boundHandle >= 0) runCatching {
                 shim.droppedTotal(boundHandle).toLong()
             }.getOrDefault(-1L) else -1L
+            var counts: LongArray? = null
             if (boundHandle >= 0) {
-                val countsResult = runCatching { shim.readPerNr(boundHandle) }
-                countsResult.onFailure {
-                    System.err.println("[wp04kt] readPerNr failed: ${it.message}")
-                }
-                val counts = countsResult.getOrNull()
-                if (counts != null) {
-                    val unknownTop = counts.sliceArray(0 until 512)
-                        .withIndex().filter { it.value > 0 }
-                        .sortedByDescending { it.value }.take(10)
-                    System.err.println("[wp04kt] NOISE_PROFILE " +
-                        unknownTop.joinToString(" ") { "${it.index}:${it.value}" })
-                    val attributedTop = counts.sliceArray(512 until 1024)
-                        .withIndex().filter { it.value > 0 }
-                        .sortedByDescending { it.value }.take(10)
-                    System.err.println("[wp04kt] ATTRIBUTED_PROFILE " +
-                        attributedTop.joinToString(" ") { "${it.index}:${it.value}" })
-                }
+                counts = runCatching { shim.readPerNr(boundHandle) }.getOrNull()
+            }
+            engine.close()
+            if (counts != null) {
+                val unknownTop = counts.sliceArray(0 until 512)
+                    .withIndex().filter { it.value > 0 }
+                    .sortedByDescending { it.value }.take(10)
+                System.err.println("[wp04kt] NOISE_PROFILE " +
+                    unknownTop.joinToString(" ") { "${it.index}:${it.value}" })
+                val attributedTop = counts.sliceArray(512 until 1024)
+                    .withIndex().filter { it.value > 0 }
+                    .sortedByDescending { it.value }.take(10)
+                System.err.println("[wp04kt] ATTRIBUTED_PROFILE " +
+                    attributedTop.joinToString(" ") { "${it.index}:${it.value}" })
             }
             System.err.println(
                 "[wp04kt] epoch=$epoch DEAD events=$eventCount dropped=$dropped",

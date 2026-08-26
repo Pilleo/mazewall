@@ -64,6 +64,16 @@ struct {
 	__type(value, __u64);
 } hit_counters SEC(".maps");
 
+/* Per-syscall-nr counters.
+ * Keys 0-511 = UNKNOWN counts, keys 512-1023 = ATTRIBUTED counts.
+ * Regular ARRAY + atomic add: contention acceptable for diagnostics. */
+struct {
+	__uint(type, BPF_MAP_TYPE_ARRAY);
+	__uint(max_entries, 1024);
+	__type(key, __u32);
+	__type(value, __u64);
+} per_nr_counters SEC(".maps");
+
 SEC("uprobe")
 int BPF_UPROBE(tier_e_on_marker, unsigned int context_id)
 {
@@ -112,6 +122,17 @@ int BPF_PROG(tier_e_sys_enter_ctx, struct pt_regs *regs, long id)
 
 	struct task_struct *task = (struct task_struct *)bpf_get_current_task_btf();
 	__u32 *stored = bpf_task_storage_get(&context_storage, task, NULL, 0);
+	{
+		/* Per-syscall-nr counter: attributed or unknown */
+		__u32 nr_idx = (id >= 0 && id < 512)
+			? (__u32)id
+			: 511;
+		if (!stored || *stored == 0)
+			nr_idx += 512; /* unknown section */
+		__u64 *ctr = bpf_map_lookup_elem(&per_nr_counters, &nr_idx);
+		if (ctr)
+			__sync_fetch_and_add(ctr, 1);
+	}
 	if (!stored || *stored == 0)
 		return 0; /* UNKNOWN is data, not an event (invariant 3) */
 
