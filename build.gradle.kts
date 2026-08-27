@@ -157,26 +157,26 @@ dependencies {
     testImplementation(kotlin("test"))
 }
 
-    sourceSets {
-        val sharedTest by creating {
-            kotlin.srcDir("src/sharedTest/kotlin")
-            resources.srcDir("src/sharedTest/resources")
-        }
+sourceSets {
+    val sharedTest by creating {
+        kotlin.srcDir("src/sharedTest/kotlin")
+        resources.srcDir("src/sharedTest/resources")
     }
+}
 
-    tasks.named<ProcessResources>("processSharedTestResources") {
-        duplicatesStrategy = DuplicatesStrategy.INCLUDE
-    }
+tasks.named<ProcessResources>("processSharedTestResources") {
+    duplicatesStrategy = DuplicatesStrategy.INCLUDE
+}
 
 tasks.matching { it.name.startsWith("spotbugsTest") || it.name.startsWith("spotbugsIntegrationTest") || it.name.startsWith("spotbugsSharedTest") }.configureEach {
     enabled = false
 }
-    dependencies {
-        "sharedTestImplementation"(project(":enforcer"))
-        "sharedTestImplementation"(project(":platform"))
-        "sharedTestImplementation"(libs.junit.jupiter.api)
-        "sharedTestImplementation"("org.junit.platform:junit-platform-launcher:1.10.2")
-    }
+dependencies {
+    "sharedTestImplementation"(project(":enforcer"))
+    "sharedTestImplementation"(project(":platform"))
+    "sharedTestImplementation"(libs.junit.jupiter.api)
+    "sharedTestImplementation"("org.junit.platform:junit-platform-launcher:1.10.2")
+}
 
 tasks.withType<Test>().configureEach {
     useJUnitPlatform()
