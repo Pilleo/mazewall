@@ -150,6 +150,9 @@ allprojects {
     }
 }
 
+tasks.matching { it.name.startsWith("spotbugsTest") || it.name.startsWith("spotbugsIntegrationTest") || it.name.startsWith("spotbugsSharedTest") }.configureEach {
+    enabled = false
+}
 dependencies {
     testImplementation(kotlin("test"))
 }
@@ -165,6 +168,9 @@ dependencies {
         duplicatesStrategy = DuplicatesStrategy.INCLUDE
     }
 
+tasks.matching { it.name.startsWith("spotbugsTest") || it.name.startsWith("spotbugsIntegrationTest") || it.name.startsWith("spotbugsSharedTest") }.configureEach {
+    enabled = false
+}
     dependencies {
         "sharedTestImplementation"(project(":enforcer"))
         "sharedTestImplementation"(project(":platform"))
@@ -277,10 +283,10 @@ subprojects {
         maxHeapSize.set("1g")
     }
 
-    tasks.matching { it.name.startsWith("spotbugsTest") || it.name.startsWith("spotbugsIntegrationTest") || it.name.startsWith("spotbugsSharedTest") }.configureEach {
-        enabled = false
-    }
 
+tasks.matching { it.name.startsWith("spotbugsTest") || it.name.startsWith("spotbugsIntegrationTest") || it.name.startsWith("spotbugsSharedTest") }.configureEach {
+    enabled = false
+}
     dependencies {
         "spotbugsPlugins"(
             rootProject.extensions
