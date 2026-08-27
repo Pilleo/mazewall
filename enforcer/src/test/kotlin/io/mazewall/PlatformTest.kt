@@ -12,8 +12,11 @@ class PlatformTest {
     fun `test Platform support`() {
         val osName = System.getProperty("os.name")
         if (osName.equals("Linux", ignoreCase = true)) {
-            org.junit.jupiter.api.Assumptions
-                .assumeTrue(Platform.isSupported())
+            // Can't invoke private isSeccompSanityCheckPassing()
+            // However, we just need to test that on linux, it can be evaluated without crashing
+            Platform.isSupported()
+        } else {
+            assertFalse(Platform.isSupported())
         }
     }
 

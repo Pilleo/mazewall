@@ -102,6 +102,7 @@ dependencies {
     testImplementation(kotlin("test"))
     testImplementation(libs.junit.jupiter.api)
     testImplementation(libs.junit.jupiter.params)
+    testImplementation(rootProject.sourceSets["sharedTest"].output)
     testImplementation(libs.kotest.assertions)
     testRuntimeOnly(libs.junit.jupiter.engine)
     testRuntimeOnly(libs.slf4j.nop)

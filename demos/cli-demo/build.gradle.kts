@@ -21,6 +21,7 @@ dependencies {
     testImplementation(libs.junit.jupiter)
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
     testImplementation(kotlin("test"))
+    testImplementation(rootProject.sourceSets["sharedTest"].output)
 }
 
 tasks.withType<Test> {

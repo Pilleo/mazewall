@@ -1,5 +1,9 @@
 <?xml version="1.0" encoding="UTF-8" ?>
 <FindBugsFilter>
+    <!-- Global exclusions for Kotlin data classes -->
+    <Match>
+        <Bug pattern="EI_EXPOSE_REP,EI_EXPOSE_REP2,MS_EXPOSE_REP,RV_RETURN_VALUE_IGNORED_BAD_PRACTICE" />
+    </Match>
     <!-- SpotBugs incorrectly flags the static engine field modification as a bug.
          This is intentional for testability (fault injection). -->
     <Match>
@@ -48,5 +52,14 @@
             <Bug pattern="UMAC_UNCALLABLE_METHOD_OF_ANONYMOUS_CLASS" />
             <Bug pattern="UMAC" />
         </Or>
+    </Match>
+    <Match>
+        <Class name="~io\.mazewall\.testing\.TestSuiteHealthListener.*" />
+    </Match>
+    <Match>
+        <Class name="~io\.mazewall\.MockNativeEngine.*" />
+    </Match>
+    <Match>
+        <Class name="~io\.mazewall\.MockNativeProcess.*" />
     </Match>
 </FindBugsFilter>

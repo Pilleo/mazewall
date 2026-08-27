@@ -1,7 +1,7 @@
 ---
 title: "Implement test suite health listener and skip accounting"
 severity: "LOW"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "testing"

@@ -11,6 +11,9 @@ import io.mazewall.ffi.NativeConstants
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertTrue
+import io.mazewall.MockProcess
+import io.mazewall.MockProcessLauncher
+import io.mazewall.MockSocketManager
 import io.mazewall.enforcer.state.ContainerState
 import io.mazewall.enforcer.state.ContainmentStateRegistry
 import io.mazewall.seccomp.SeccompInstallationState
@@ -34,76 +37,6 @@ class SupervisorDaemonManagerTest {
         ContainmentStateRegistry.threadState = ContainerState()
     }
 
-    class MockProcess(
-        private val pid: Long,
-        private val stdout: String = "",
-        private val exitVal: Int = 0,
-        @Volatile private var alive: Boolean = true
-    ) : Process() {
-        override fun destroy() {}
-        override fun exitValue(): Int = exitVal
-        override fun waitFor(): Int = exitVal
-        override fun getOutputStream(): java.io.OutputStream = java.io.ByteArrayOutputStream()
-        override fun getInputStream(): InputStream = ByteArrayInputStream(stdout.toByteArray())
-        override fun getErrorStream(): InputStream = ByteArrayInputStream(byteArrayOf())
-        override fun pid(): Long = pid
-        override fun isAlive(): Boolean = alive
-
-        fun setAlive(value: Boolean) {
-            alive = value
-        }
-    }
-
-    open class MockProcessLauncher : ProcessLauncher {
-        var startProcessCalled = false
-        var lastArgs: List<String>? = null
-        var mockProcess: Process = MockProcess(9999L)
-        val shutdownHooks = mutableListOf<Thread>()
-
-        override fun startProcess(args: List<String>, redirectErrorStream: Boolean): Process {
-            startProcessCalled = true
-            lastArgs = args
-            return mockProcess
-        }
-
-        override fun addShutdownHook(hook: Thread) {
-            shutdownHooks.add(hook)
-        }
-
-        override fun removeShutdownHook(hook: Thread) {
-            shutdownHooks.remove(hook)
-        }
-
-        override fun createTempDirectory(prefix: String, vararg attrs: FileAttribute<*>): Path {
-            return java.nio.file.Paths.get("/tmp/mock-dir")
-        }
-
-        override fun createTempDirectory(dir: Path, prefix: String, vararg attrs: FileAttribute<*>): Path {
-            return java.nio.file.Paths.get("/tmp/fallback-mock-dir")
-        }
-
-        override fun deleteIfExists(path: Path): Boolean = true
-        override fun exists(path: Path): Boolean = true
-    }
-
-    class MockSocketManager : SocketManager {
-        var connectCalled = false
-        var lastConnectPath: String? = null
-        var closeCalledCount = AtomicInteger(0)
-
-        override fun createUnixServer(socketPath: String): FileDescriptor<FileDescriptorRole.UnixSocket, io.mazewall.core.FdState.Open> = FileDescriptor.unsafe(10)
-        override fun accept(serverFd: FileDescriptor<FileDescriptorRole.UnixSocket, io.mazewall.core.FdState.Open>): FileDescriptor<FileDescriptorRole.UnixSocket, io.mazewall.core.FdState.Open> = FileDescriptor.unsafe(11)
-        override fun connect(socketPath: String): FileDescriptor<FileDescriptorRole.UnixSocket, io.mazewall.core.FdState.Open> {
-            connectCalled = true
-            lastConnectPath = socketPath
-            return FileDescriptor.unsafe(12)
-        }
-        override fun close(fd: FileDescriptor<*, io.mazewall.core.FdState.Open>) {
-            closeCalledCount.incrementAndGet()
-        }
-        override fun recvDescriptor(socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, io.mazewall.core.FdState.Open>): FileDescriptor<FileDescriptorRole.SeccompNotif, io.mazewall.core.FdState.Open>? = null
-        override fun sendDescriptor(socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, io.mazewall.core.FdState.Open>, fdToSend: FileDescriptor<*, io.mazewall.core.FdState.Open>): Boolean = true
-    }
 
     @Test
     fun `spawn is allowed when only an outer OCI seccomp profile is present`() {
