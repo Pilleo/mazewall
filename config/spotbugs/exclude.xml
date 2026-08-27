@@ -49,4 +49,13 @@
             <Bug pattern="UMAC" />
         </Or>
     </Match>
+    <Match>
+        <Class name="~io\.mazewall\.testing\.TestSuiteHealthListener.*" />
+    </Match>
+    <Match>
+        <Class name="~io\.mazewall\.MockNativeEngine.*" />
+    </Match>
+    <Match>
+        <Class name="~io\.mazewall\.MockNativeProcess.*" />
+    </Match>
 </FindBugsFilter>

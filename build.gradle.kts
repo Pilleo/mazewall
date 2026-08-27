@@ -154,6 +154,24 @@ dependencies {
     testImplementation(kotlin("test"))
 }
 
+    sourceSets {
+        val sharedTest by creating {
+            kotlin.srcDir("src/sharedTest/kotlin")
+            resources.srcDir("src/sharedTest/resources")
+        }
+    }
+
+    tasks.named<ProcessResources>("processSharedTestResources") {
+        duplicatesStrategy = DuplicatesStrategy.INCLUDE
+    }
+
+    dependencies {
+        "sharedTestImplementation"(project(":enforcer"))
+        "sharedTestImplementation"(project(":platform"))
+        "sharedTestImplementation"(libs.junit.jupiter.api)
+        "sharedTestImplementation"("org.junit.platform:junit-platform-launcher:1.10.2")
+    }
+
 tasks.withType<Test>().configureEach {
     useJUnitPlatform()
     // Configure global timeout to prevent infinite test hangs (generous for testcontainers pulls)
@@ -259,7 +277,7 @@ subprojects {
         maxHeapSize.set("1g")
     }
 
-    tasks.matching { it.name.startsWith("spotbugsTest") || it.name.startsWith("spotbugsIntegrationTest") }.configureEach {
+    tasks.matching { it.name.startsWith("spotbugsTest") || it.name.startsWith("spotbugsIntegrationTest") || it.name.startsWith("spotbugsSharedTest") }.configureEach {
         enabled = false
     }
 
@@ -271,6 +289,8 @@ subprojects {
                 .findLibrary("findsecbugs")
                 .get(),
         )
+        "testImplementation"(rootProject.sourceSets["sharedTest"].output)
+        "testRuntimeOnly"(rootProject.sourceSets["sharedTest"].output)
     }
 
     extensions.configure<JacocoPluginExtension> {
@@ -285,6 +305,9 @@ subprojects {
 
     tasks.withType<Test>().configureEach {
         systemProperty("io.mazewall.test", "true")
+        if (project.hasProperty("io.mazewall.strictTestTier")) {
+            systemProperty("io.mazewall.strictTestTier", project.property("io.mazewall.strictTestTier") as String)
+        }
     }
 
     val jacocoExcludes =
