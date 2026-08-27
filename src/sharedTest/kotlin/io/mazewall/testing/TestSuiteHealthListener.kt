@@ -5,7 +5,6 @@ import org.junit.platform.launcher.LauncherSession
 import org.junit.platform.launcher.LauncherSessionListener
 import org.junit.platform.launcher.TestExecutionListener
 import org.junit.platform.launcher.TestIdentifier
-import org.junit.platform.launcher.TestPlan
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
@@ -20,18 +19,33 @@ class TestSuiteHealthListener : LauncherSessionListener {
         val failed = AtomicInteger(0)
     }
 
+    private fun getClassName(testIdentifier: TestIdentifier): String {
+        return if (testIdentifier.isContainer) {
+            val legacyName = testIdentifier.legacyReportingName
+            if (legacyName != null && legacyName.isNotBlank() && legacyName != "null") legacyName else "Unknown"
+        } else {
+            val uniqueId = testIdentifier.uniqueId
+            val classMatch = Regex("\\[class:([^\\]]+)\\]").find(uniqueId)
+            classMatch?.groupValues?.get(1) ?: "Unknown"
+        }
+    }
+
     override fun launcherSessionOpened(session: LauncherSession) {
         session.launcher.registerTestExecutionListeners(object : TestExecutionListener {
             override fun executionSkipped(testIdentifier: TestIdentifier, reason: String?) {
-                if (testIdentifier.isTest) {
-                    val className = testIdentifier.parentId.orElse("Unknown")
+                // Track skipped for both tests and containers (class-level skip)
+                val className = getClassName(testIdentifier)
+                // Filter out non-class containers (like engine or root nodes)
+                if (className != "Unknown" && className != testIdentifier.uniqueId && !className.contains("engine:")) {
                     classStats.getOrPut(className) { Stats() }.skipped.incrementAndGet()
+                } else if (testIdentifier.isTest) {
+                     classStats.getOrPut(className) { Stats() }.skipped.incrementAndGet()
                 }
             }
 
             override fun executionFinished(testIdentifier: TestIdentifier, testExecutionResult: TestExecutionResult) {
                 if (testIdentifier.isTest) {
-                    val className = testIdentifier.parentId.orElse("Unknown")
+                    val className = getClassName(testIdentifier)
                     val stats = classStats.getOrPut(className) { Stats() }
                     stats.executed.incrementAndGet()
                     when (testExecutionResult.status) {
@@ -65,7 +79,7 @@ class TestSuiteHealthListener : LauncherSessionListener {
             totalFailed += failed
 
             println(String.format("Class: %-50s | Executed: %3d | Skipped: %3d | Aborted(Assumptions): %3d | Failed: %3d",
-                className.substringAfterLast("."), executed, skipped, aborted, failed))
+                className, executed, skipped, aborted, failed))
 
             jsonLines.add("""    "$className": { "executed": $executed, "skipped": $skipped, "aborted": $aborted, "failed": $failed }""")
         }
