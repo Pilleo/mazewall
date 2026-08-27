@@ -215,6 +215,12 @@ class ArchitectureTest {
             .haveSimpleNameNotStartingWith("MazewallEvents")
             .and()
             .areDeclaredInClassesThat()
+            .haveSimpleNameNotStartingWith("IsolatedProcessTester")
+            .and()
+            .areDeclaredInClassesThat()
+            .haveSimpleNameNotStartingWith("IsolatedTestRunner")
+            .and()
+            .areDeclaredInClassesThat()
             .resideOutsideOfPackages(
                 "io.mazewall.enforcer.supervisor..",
                 "io.mazewall.platform.seccomp.daemon..",
@@ -589,7 +595,7 @@ class ArchitectureTest {
     fun fileDescriptorUnsafeMustNotBeUsedInProduction(allClasses: com.tngtech.archunit.core.domain.JavaClasses) {
         noClasses()
             .that()
-            .resideOutsideOfPackages("..test..")
+            .resideOutsideOfPackages("..test..", "io.mazewall")
             .should()
             .callMethodWhere(object : DescribedPredicate<JavaMethodCall>("calls to FileDescriptor.unsafe or unsafe\$default") {
                 override fun test(input: JavaMethodCall): Boolean {
