@@ -99,6 +99,7 @@ class MazewallJavaApiTest {
     }
 
     @Test
+    @EnabledIfLinuxAndSupported
     void testRunContainedWithCallableAndSupplier() {
         // We use PURE_COMPUTE_UNSAFE as mock/dry-run baseline
         Policy<PolicyScope.ProcessWideSafe, PolicyState.Uncompiled> policy = Mazewall.pureComputeUnsafe();
@@ -116,6 +117,7 @@ class MazewallJavaApiTest {
     }
 
     @Test
+    @EnabledIfLinuxAndSupported
     void testContainedExecutors() throws Exception {
         Policy<PolicyScope.ProcessWideSafe, PolicyState.Uncompiled> policy = Mazewall.pureComputeUnsafe();
 
