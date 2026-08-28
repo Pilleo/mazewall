@@ -9,7 +9,7 @@ import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import kotlin.test.*
 
-class LinuxNativeCoverageTest {
+class LinuxNativeTest {
     @AfterEach
     fun tearDown() {
         LinuxNative.resetToDefault()

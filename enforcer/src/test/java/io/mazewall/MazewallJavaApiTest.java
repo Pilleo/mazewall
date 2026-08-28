@@ -4,6 +4,7 @@ import io.mazewall.core.SandboxedPath;
 import io.mazewall.core.SeccompAction;
 import io.mazewall.core.Syscall;
 import org.junit.jupiter.api.Test;
+import io.mazewall.EnabledIfLinuxAndSupported;
 
 import java.io.File;
 import java.nio.file.Path;
@@ -19,6 +20,7 @@ import static org.junit.jupiter.api.Assertions.*;
 class MazewallJavaApiTest {
 
     @Test
+    @EnabledIfLinuxAndSupported
     void testPresetsAccess() {
         assertNotNull(Mazewall.PURE_COMPUTE);
         assertNotNull(Mazewall.PURE_COMPUTE_UNSAFE);
@@ -37,6 +39,7 @@ class MazewallJavaApiTest {
     }
 
     @Test
+    @EnabledIfLinuxAndSupported
     void testJavaPolicyBuilderThreadLocal() {
         Policy<PolicyScope.ThreadLocalOnly, PolicyState.Uncompiled> policy = Mazewall.threadLocalBuilder()
                 .base(Mazewall.pureCompute())
@@ -66,6 +69,7 @@ class MazewallJavaApiTest {
     }
 
     @Test
+    @EnabledIfLinuxAndSupported
     void testJavaPolicyBuilderProcessWide() {
         Policy<PolicyScope.ProcessWideSafe, PolicyState.Uncompiled> processPolicy = Mazewall.builder()
                 .base(Mazewall.pureComputeUnsafe())
@@ -79,12 +83,14 @@ class MazewallJavaApiTest {
     }
 
     @Test
+    @EnabledIfLinuxAndSupported
     void testProcessWideDisallowsFsRules() {
         JavaPolicyBuilder builder = Mazewall.builder().allowFsRead("/tmp");
         assertThrows(IllegalStateException.class, builder::buildProcessWide);
     }
 
     @Test
+    @EnabledIfLinuxAndSupported
     void testCombinePolicies() {
         Policy<PolicyScope.ThreadLocalOnly, PolicyState.Uncompiled> p1 = Mazewall.threadLocalBuilder()
                 .allow(Syscall.READ)
@@ -99,6 +105,7 @@ class MazewallJavaApiTest {
     }
 
     @Test
+    @EnabledIfLinuxAndSupported
     void testRunContainedWithCallableAndSupplier() {
         // We use PURE_COMPUTE_UNSAFE as mock/dry-run baseline
         Policy<PolicyScope.ProcessWideSafe, PolicyState.Uncompiled> policy = Mazewall.pureComputeUnsafe();
@@ -116,6 +123,7 @@ class MazewallJavaApiTest {
     }
 
     @Test
+    @EnabledIfLinuxAndSupported
     void testContainedExecutors() throws Exception {
         Policy<PolicyScope.ProcessWideSafe, PolicyState.Uncompiled> policy = Mazewall.pureComputeUnsafe();
 
@@ -154,6 +162,7 @@ class MazewallJavaApiTest {
     }
 
     @Test
+    @EnabledIfLinuxAndSupported
     void testInstallationReceiptAccessors() {
         InstallationReceipt receipt = new InstallationReceipt(
                 true,

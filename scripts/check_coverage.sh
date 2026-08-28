@@ -61,7 +61,7 @@ ENFORCER_XML="enforcer/build/reports/jacoco/test/jacocoTestReport.xml"
 if [ -f "$ENFORCER_XML" ]; then
     echo "Module: :enforcer"
     check_threshold "Landlock" "$(get_coverage "$ENFORCER_XML" "class" "io/mazewall/landlock/Landlock")" "65.0"
-    check_threshold "LinuxNative" "$(get_coverage "$ENFORCER_XML" "class" "io/mazewall/LinuxNative")" "78.0"
+
     # Core classes (Policy as proxy)
     check_threshold "Core (Policy)" "$(get_coverage "$ENFORCER_XML" "class" "io/mazewall/Policy")" "80.0"
 else
@@ -80,3 +80,14 @@ else
 fi
 
 echo "--------------------------------------------------"
+
+# --- Platform ---
+PLATFORM_XML="platform/build/reports/jacoco/test/jacocoTestReport.xml"
+if [ -f "$PLATFORM_XML" ]; then
+    echo "Module: :platform"
+    check_threshold "LinuxNative" "$(get_coverage "$PLATFORM_XML" "class" "io/mazewall/LinuxNative")" "78.0"
+else
+    echo "❌ Platform report missing: $PLATFORM_XML"
+fi
+
+echo ""

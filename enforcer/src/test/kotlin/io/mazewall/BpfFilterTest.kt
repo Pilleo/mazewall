@@ -5,7 +5,7 @@ import io.mazewall.core.SeccompAction
 import org.junit.jupiter.api.Test
 import kotlin.test.assertNotNull
 
-class BpfFilterCoverageTest {
+class BpfFilterTest {
     @Test
     fun `test BpfFilter build branches`() {
         val arch = Arch.AMD64

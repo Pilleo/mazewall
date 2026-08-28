@@ -11,7 +11,7 @@ import io.mazewall.enforcer.api.SandboxDispatcher
 import kotlin.test.assertNotNull
 
 @Suppress("DEPRECATION")
-class SandboxDispatcherCoverageTest {
+class SandboxDispatcherTest {
 
     @AfterEach
     fun tearDown() {

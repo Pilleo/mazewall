@@ -9,7 +9,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
-class BpfBuilderCoverageTest {
+class BpfBuilderTest {
 
     @Test
     fun `test jumpIfEqual with labels`() {
