@@ -3,7 +3,7 @@ package io.mazewall.profiler
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.Test
 
-class ProfilerClassCoverageTest {
+class ProfilerClassTest {
 
     @Test
     fun `test BillOfBehavior class properties`() {

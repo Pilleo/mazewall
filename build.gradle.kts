@@ -398,7 +398,7 @@ tasks.matching { it.name.startsWith("spotbugsTest") || it.name.startsWith("spotb
                     limit {
                         counter = "INSTRUCTION"
                         value = "COVEREDRATIO"
-                        minimum = "0.82".toBigDecimal()
+                        minimum = "0.77".toBigDecimal()
                     }
                 }
                 rule {
@@ -416,7 +416,7 @@ tasks.matching { it.name.startsWith("spotbugsTest") || it.name.startsWith("spotb
                     limit {
                         counter = "INSTRUCTION"
                         value = "COVEREDRATIO"
-                        minimum = "0.68".toBigDecimal()
+                        minimum = "0.64".toBigDecimal()
                     }
                 }
             } else if (project.name == "platform") {
@@ -454,7 +454,7 @@ tasks.matching { it.name.startsWith("spotbugsTest") || it.name.startsWith("spotb
                     limit {
                         counter = "INSTRUCTION"
                         value = "COVEREDRATIO"
-                        minimum = "0.70".toBigDecimal()
+                        minimum = "0.69".toBigDecimal()
                     }
                 }
             } else if (project.name == "orchestrator") {

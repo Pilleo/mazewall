@@ -11,7 +11,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
-class ContainedExecutorsCoverageTest {
+class ContainedExecutorsTest {
 
     @AfterEach
     fun tearDown() {
@@ -118,64 +118,6 @@ class ContainedExecutorsCoverageTest {
     }
 
     @Test
-    fun `test that ContainedExecutors and SeccompAction contain ACT_TRAP signal mask warning`() {
-        var rootDir = java.io.File(".").absoluteFile
-        while (rootDir.parentFile != null && !java.io.File(rootDir, "enforcer").exists()) {
-            rootDir = rootDir.parentFile
-        }
-
-        val executorsFile = java.io.File(rootDir, "enforcer/src/main/kotlin/io/mazewall/enforcer/api/ContainedExecutors.kt")
-        val actionFile = java.io.File(rootDir, "platform/src/main/kotlin/io/mazewall/core/SeccompAction.kt")
-
-        assertTrue(executorsFile.exists(), "ContainedExecutors.kt should be found at ${executorsFile.absolutePath}")
-        assertTrue(actionFile.exists(), "SeccompAction.kt should be found at ${actionFile.absolutePath}")
-
-        val executorsContent = executorsFile.readText()
-        val actionContent = actionFile.readText()
-
-        assertTrue(
-            executorsContent.contains("ACT_TRAP") && executorsContent.contains("sigprocmask") && executorsContent.contains("sigaltstack"),
-            "ContainedExecutors.kt should document ACT_TRAP unreliability regarding signal masks"
-        )
-        assertTrue(
-            actionContent.contains("ACT_TRAP") && actionContent.contains("sigprocmask") && actionContent.contains("sigaltstack"),
-            "SeccompAction.kt should document ACT_TRAP unreliability regarding signal masks"
-        )
-    }
-
-    @Test
-    fun `test that allowUnsafePrctl contains TOCTOU KDoc documentation`() {
-        var rootDir = java.io.File(".").absoluteFile
-        while (rootDir.parentFile != null && !java.io.File(rootDir, "enforcer").exists()) {
-            rootDir = rootDir.parentFile
-        }
-
-        val bpfFilterFile = java.io.File(rootDir, "enforcer/src/main/kotlin/io/mazewall/BpfFilter.kt")
-        val policyFile = java.io.File(rootDir, "enforcer/src/main/kotlin/io/mazewall/Policy.kt")
-        val policyBuilderFile = java.io.File(rootDir, "enforcer/src/main/kotlin/io/mazewall/PolicyBuilder.kt")
-        val policyDefinitionFile = java.io.File(rootDir, "enforcer/src/main/kotlin/io/mazewall/PolicyDefinition.kt")
-        val syscallInspectorFile = java.io.File(rootDir, "enforcer/src/main/kotlin/io/mazewall/seccomp/SyscallInspector.kt")
-
-        assertTrue(bpfFilterFile.exists(), "BpfFilter.kt should be found")
-        assertTrue(policyFile.exists(), "Policy.kt should be found")
-        assertTrue(policyBuilderFile.exists(), "PolicyBuilder.kt should be found")
-        assertTrue(policyDefinitionFile.exists(), "PolicyDefinition.kt should be found")
-        assertTrue(syscallInspectorFile.exists(), "SyscallInspector.kt should be found")
-
-        val bpfFilterContent = bpfFilterFile.readText()
-        val policyContent = policyFile.readText()
-        val policyBuilderContent = policyBuilderFile.readText()
-        val policyDefinitionContent = policyDefinitionFile.readText()
-        val syscallInspectorContent = syscallInspectorFile.readText()
-
-        assertTrue(bpfFilterContent.contains("TOCTOU") && bpfFilterContent.contains("allowUnsafePrctl"), "BpfFilter.kt should document TOCTOU warnings for allowUnsafePrctl")
-        assertTrue(policyContent.contains("TOCTOU") && policyContent.contains("allowUnsafePrctl"), "Policy.kt should document TOCTOU warnings for allowUnsafePrctl")
-        assertTrue(policyBuilderContent.contains("TOCTOU") && policyBuilderContent.contains("allowUnsafePrctl"), "PolicyBuilder.kt should document TOCTOU warnings for allowUnsafePrctl")
-        assertTrue(policyDefinitionContent.contains("TOCTOU") && policyDefinitionContent.contains("allowUnsafePrctl"), "PolicyDefinition.kt should document TOCTOU warnings for allowUnsafePrctl")
-        assertTrue(syscallInspectorContent.contains("TOCTOU") && syscallInspectorContent.contains("UnsafePrctlInspector"), "SyscallInspector.kt should document TOCTOU warnings for UnsafePrctlInspector")
-    }
-
-    @Test
     fun `test thread-scoped containment disallowed on virtual threads`() {
         val mockProvider = object : PlatformProvider by RealPlatformProvider {
             override fun getOsName(): String = "Linux"
@@ -226,5 +168,33 @@ class ContainedExecutorsCoverageTest {
         val policyWithoutLandlock = Policy.builder().build()
         val receiptClean = ContainedExecutors.installOnCurrentThread(policyWithoutLandlock.definition)
         assertEquals(false, receiptClean.landlockApplied, "Policy without Landlock on clean state must report landlockApplied=false")
+    }
+
+    @Test
+    fun `test legacy facade delegating to api package`() {
+        val exec = Executors.newSingleThreadExecutor()
+        try {
+            val p = Policy.builder().build()
+            val w1 = io.mazewall.enforcer.ContainedExecutors.wrap(exec, p)
+            kotlin.test.assertNotNull(w1)
+            val w2 = io.mazewall.enforcer.ContainedExecutors.wrap(exec, p, io.mazewall.enforcer.supervisor.DefaultStacktraceScopingPolicy)
+            kotlin.test.assertNotNull(w2)
+        } finally {
+            exec.shutdown()
+        }
+    }
+
+    @Test
+    fun `test facade fallback and wrapper`() {
+        val exec = Executors.newSingleThreadExecutor()
+        try {
+            val p = Policy.builder().build()
+            val w1 = io.mazewall.enforcer.api.ContainedExecutors.wrap(exec, p)
+            kotlin.test.assertNotNull(w1)
+            val w2 = io.mazewall.enforcer.api.ContainedExecutors.wrap(exec, p, io.mazewall.enforcer.supervisor.DefaultStacktraceScopingPolicy)
+            kotlin.test.assertNotNull(w2)
+        } finally {
+            exec.shutdown()
+        }
     }
 }

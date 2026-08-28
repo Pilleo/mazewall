@@ -20,7 +20,7 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
 import kotlin.test.*
 
-class LandlockCoverageTest {
+class LandlockTest {
     @AfterEach
     fun tearDown() {
         LinuxNative.resetToDefault()

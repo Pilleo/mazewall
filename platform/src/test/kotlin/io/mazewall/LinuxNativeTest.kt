@@ -9,7 +9,7 @@ import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import kotlin.test.*
 
-class LinuxNativeCoverageTest {
+class LinuxNativeTest {
     @AfterEach
     fun tearDown() {
         LinuxNative.resetToDefault()
@@ -115,7 +115,6 @@ class LinuxNativeCoverageTest {
 
 
     @Test
-    @EnabledIfLinuxAndSupported
     fun `test newSockFProg manual packing`() = nativeScope {
         val filters = listOf(
             BpfInstruction.Jmp(0x01, 2, 3, 0x12345678),
@@ -160,5 +159,96 @@ class LinuxNativeCoverageTest {
         assertEquals(50L, LinuxNative.networking.recv(fd, seg, 8L, 0).getOrThrow("test"))
 
         assertEquals(1234, LinuxNative.process.gettid().value)
+    }
+
+    @Test
+    fun `test process getters and constants`() {
+        val mock = MockNativeEngine()
+        LinuxNative.setEngine(mock)
+        assertEquals(1234, LinuxNative.process.gettid().value)
+    }
+
+    @Test
+    fun `test LinuxNative isRealEngineActive`() {
+        val mock = MockNativeEngine()
+        LinuxNative.setEngine(mock)
+        assertFalse(LinuxNative.isRealEngineActive())
+        LinuxNative.resetToDefault()
+        assertTrue(LinuxNative.isRealEngineActive())
+    }
+
+    @Test
+    fun `test SyscallResult extensions`() {
+        val success = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(100L)
+        val error = LinuxNative.SyscallResult.Error<LinuxNative.SyscallHandledState.Unhandled>(1, 200L)
+
+        assertTrue(success.isSuccess())
+        assertFalse(success.isFailure())
+        assertFalse(error.isSuccess())
+        assertTrue(error.isFailure())
+
+        assertEquals(100L, success.asLong())
+        assertEquals(100, success.asInt())
+
+        val fd = success.asFd()
+        assertEquals(100, fd.value)
+
+        var mapCalled = false
+        success.map {
+            mapCalled = true
+            it * 2
+        }
+        assertTrue(mapCalled)
+
+        var flatMapCalled = false
+        success.flatMap {
+            flatMapCalled = true
+            LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(it * 2)
+        }
+        assertTrue(flatMapCalled)
+
+        var onSuccessCalled = false
+        success.onSuccess { onSuccessCalled = true }
+        assertTrue(onSuccessCalled)
+
+        var onFailureCalled = false
+        error.onFailure { _, _ -> onFailureCalled = true }
+        assertTrue(onFailureCalled)
+
+        var recoverCalled = false
+        val recovered = error.recover { _, _ ->
+            recoverCalled = true
+            100L
+        }
+        assertTrue(recoverCalled)
+        assertEquals(100L, recovered)
+    }
+
+    @Test
+    fun `test RealNativeFileSystem additional coverage`() = nativeScope {
+        LinuxNative.resetToDefault()
+        val fs = io.mazewall.ffi.internal.RealNativeFileSystem
+        val seg = allocate(8)
+        val fd = FileDescriptor.unsafe<FileDescriptorRole.Generic>(1)
+
+        val mmapRes = fs.mmap(
+            addr = 0L,
+            length = 4096L,
+            prot = io.mazewall.core.MmapProt(3), // PROT_READ | PROT_WRITE
+            flags = io.mazewall.core.MmapFlags(33), // MAP_SHARED | MAP_ANONYMOUS
+            fd = fd,
+            offset = 0L
+        )
+
+        assertNotNull(mmapRes)
+    }
+
+    @Test
+    fun `test RealNativeProcess additional coverage`() = nativeScope {
+        LinuxNative.resetToDefault()
+        val proc = io.mazewall.ffi.internal.RealNativeProcess
+
+        val pidfdRes = proc.pidfdOpen(1, 0)
+        assertNotNull(pidfdRes)
     }
 }

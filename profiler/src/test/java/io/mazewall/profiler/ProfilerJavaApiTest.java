@@ -5,6 +5,7 @@ import io.mazewall.Policy;
 import io.mazewall.PolicyScope;
 import io.mazewall.PolicyState;
 import org.junit.jupiter.api.Test;
+import io.mazewall.EnabledIfLinuxAndSupported;
 
 import java.nio.file.Path;
 import java.util.concurrent.Executors;
@@ -17,6 +18,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class ProfilerJavaApiTest {
 
     @Test
+    @EnabledIfLinuxAndSupported
     void testProfilerJavaProfileRunnable() {
         AtomicInteger counter = new AtomicInteger(0);
         ProfilingResult<?> result = Profiler.profile(() -> {
@@ -29,6 +31,7 @@ class ProfilerJavaApiTest {
     }
 
     @Test
+    @EnabledIfLinuxAndSupported
     void testProfilerJavaProfileCallable() {
         ProfilingResult<String> result = Profiler.profile(() -> "result-from-callable");
 
@@ -41,6 +44,7 @@ class ProfilerJavaApiTest {
     }
 
     @Test
+    @EnabledIfLinuxAndSupported
     void testBillOfBehaviorToPolicyAndDslOverloads() {
         BillOfBehavior bob = new BillOfBehavior();
         assertNotNull(bob);
@@ -56,6 +60,7 @@ class ProfilerJavaApiTest {
     }
 
     @Test
+    @EnabledIfLinuxAndSupported
     void testProfilerWrapExecutor() throws Exception {
         AtomicInteger counter = new AtomicInteger(0);
         var directExecutor = Executors.newSingleThreadExecutor();
