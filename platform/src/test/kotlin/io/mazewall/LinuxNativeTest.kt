@@ -8,7 +8,6 @@ import io.mazewall.seccomp.BpfInstruction
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import kotlin.test.*
-import io.mazewall.ffi.internal.RealNativeFileSystem
 
 class LinuxNativeTest {
     @AfterEach
@@ -228,7 +227,7 @@ class LinuxNativeTest {
     @Test
     fun `test RealNativeFileSystem additional coverage`() = nativeScope {
         LinuxNative.resetToDefault()
-        val fs = RealNativeFileSystem
+        val fs = io.mazewall.ffi.internal.RealNativeFileSystem
         val seg = allocate(8)
         val fd = FileDescriptor.unsafe<FileDescriptorRole.Generic>(1)
 
@@ -242,5 +241,14 @@ class LinuxNativeTest {
         )
 
         assertNotNull(mmapRes)
+    }
+
+    @Test
+    fun `test RealNativeProcess additional coverage`() = nativeScope {
+        LinuxNative.resetToDefault()
+        val proc = io.mazewall.ffi.internal.RealNativeProcess
+
+        val pidfdRes = proc.pidfdOpen(1, 0)
+        assertNotNull(pidfdRes)
     }
 }

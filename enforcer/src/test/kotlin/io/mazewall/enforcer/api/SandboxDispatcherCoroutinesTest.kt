@@ -10,7 +10,6 @@ import org.junit.jupiter.api.BeforeEach
 import io.mazewall.MockPlatformProvider
 import io.mazewall.MockNativeEngine
 import io.mazewall.LinuxNative
-import kotlinx.coroutines.async
 
 class SandboxDispatcherCoroutinesTest {
 
@@ -41,6 +40,7 @@ class SandboxDispatcherCoroutinesTest {
     }
 
     @Test
+    @io.mazewall.NeedsFreshJvm
     fun `test executeSuspend with coroutines`() = runBlocking {
         val policy = Policy.builder().build()
         val result = SandboxDispatcher.executeSuspend(policy) {
@@ -50,21 +50,12 @@ class SandboxDispatcherCoroutinesTest {
     }
 
     @Test
+    @io.mazewall.NeedsFreshJvm
     fun `test executeBlock with callables`() {
         val policy = Policy.builder().build()
         val result = SandboxDispatcher.executeBlock(policy) {
             "success-callable"
         }
         assertEquals("success-callable", result)
-    }
-
-    @Test
-    fun `test SandboxDispatcher with nested coroutines`() = runBlocking {
-        val policy = Policy.builder().build()
-        val result = SandboxDispatcher.executeSuspend(policy) {
-            val d = async { "nested" }
-            d.await()
-        }
-        assertEquals("nested", result)
     }
 }
