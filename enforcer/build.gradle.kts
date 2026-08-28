@@ -234,7 +234,7 @@ pitest {
     targetTests.set(
         setOf(
             "io.mazewall.PolicyTest",
-            "io.mazewall.seccomp.BpfFilterTest",
+            "io.mazewall.BpfFilterTest",
             "io.mazewall.SbobParserTest",
             "io.mazewall.enforcer.FilterInstallationPlannerTest",
             "io.mazewall.enforcer.supervisor.SupervisorNotificationMachineTest",
