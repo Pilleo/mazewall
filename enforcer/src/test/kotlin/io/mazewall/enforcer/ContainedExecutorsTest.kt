@@ -169,4 +169,32 @@ class ContainedExecutorsTest {
         val receiptClean = ContainedExecutors.installOnCurrentThread(policyWithoutLandlock.definition)
         assertEquals(false, receiptClean.landlockApplied, "Policy without Landlock on clean state must report landlockApplied=false")
     }
+
+    @Test
+    fun `test legacy facade delegating to api package`() {
+        val exec = Executors.newSingleThreadExecutor()
+        try {
+            val p = Policy.builder().build()
+            val w1 = io.mazewall.enforcer.ContainedExecutors.wrap(exec, p)
+            kotlin.test.assertNotNull(w1)
+            val w2 = io.mazewall.enforcer.ContainedExecutors.wrap(exec, p, io.mazewall.enforcer.supervisor.DefaultStacktraceScopingPolicy)
+            kotlin.test.assertNotNull(w2)
+        } finally {
+            exec.shutdown()
+        }
+    }
+
+    @Test
+    fun `test facade fallback and wrapper`() {
+        val exec = Executors.newSingleThreadExecutor()
+        try {
+            val p = Policy.builder().build()
+            val w1 = io.mazewall.enforcer.api.ContainedExecutors.wrap(exec, p)
+            kotlin.test.assertNotNull(w1)
+            val w2 = io.mazewall.enforcer.api.ContainedExecutors.wrap(exec, p, io.mazewall.enforcer.supervisor.DefaultStacktraceScopingPolicy)
+            kotlin.test.assertNotNull(w2)
+        } finally {
+            exec.shutdown()
+        }
+    }
 }
