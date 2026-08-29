@@ -1676,8 +1676,11 @@ public final class io/mazewall/ffi/NativeConstants {
 	public static final field EPERM I
 	public static final field ETIMEDOUT I
 	public static final field EXDEV I
+	public static final field FD_CLOEXEC I
 	public static final field F_DUPFD I
 	public static final field F_DUPFD_CLOEXEC I
+	public static final field F_GETFD I
+	public static final field F_SETFD I
 	public static final field INSTANCE Lio/mazewall/ffi/NativeConstants;
 	public static final field LANDLOCK_ADD_RULE_NR J
 	public static final field LANDLOCK_CREATE_RULESET_NR J

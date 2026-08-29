@@ -98,6 +98,11 @@ object NativeConstants {
     const val F_DUPFD = 0
     const val F_DUPFD_CLOEXEC = 1030
 
+    // fcntl(2) commands
+    const val F_GETFD = 1
+    const val F_SETFD = 2
+    const val FD_CLOEXEC = 1
+
     // ptrace(2) on x86_64 (fail closed on other arches)
     const val SYS_PTRACE_X86_64 = 101L
     const val SYS_WAIT4_X86_64 = 61L

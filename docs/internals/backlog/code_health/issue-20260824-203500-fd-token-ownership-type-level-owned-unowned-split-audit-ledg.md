@@ -29,6 +29,20 @@ Production minting is currently clean (all from owned SafeLocalFd results), but 
 (generic()/unsafe()) permits this class of bug and 61 literal-int minting sites remain across
 enforcer/profiler/platform tests. Full incident write-up:
 docs/internals/designs/core/fd-token-ownership.md
+
+**Progress:**
+- ✅ FdEpoch audit ledger implemented with ownership tracking
+- ✅ `markOwned()` method to mark fds as owned (called by adopt() and replace())
+- ✅ `isOwnedThroughEpoch()` to check if an fd was marked as owned
+- ✅ `verifyKernelLiveness()` stub (needs fcntl implementation)
+- ✅ `auditClose()` to warn when closing unowned fds (enabled via -Dmazewall.fd.audit=true)
+- ✅ Updated adopt() and replace() to mark fds as owned
+- ✅ Updated close() to call auditClose()
+- ⏳ Type-level split: Not yet implemented (requires breaking API changes)
+- ⏳ Sweep and classify literal-int minting sites: 118 sites found, need classification
+- ⏳ Adopt ForeignFdGuard across enforcer/profiler suites: Currently only in SeccompConnectionTest
+- ⏳ Audit pid-handle discipline: Not yet started
+
 **Needed:**
 1. Type-level split: generic()/unsafe() return an Unowned token without close();
    only open*/adopt/replace/claimDupIfNeeded yield Owned tokens with close rights.

@@ -54,9 +54,16 @@ public sealed interface FileDescriptorRole {
  * operate on a later kernel reuse of the same integer.
  */
 internal object FdEpoch {
-    private data class Slot(val generation: Long, val live: Boolean)
+    private data class Slot(val generation: Long, val live: Boolean, val owned: Boolean)
 
     private val table = ConcurrentHashMap<Int, AtomicReference<Slot>>()
+
+    // Audit ledger: tracks which fds were explicitly marked as owned through this epoch
+    private val ownedThroughEpoch = ConcurrentHashMap.newKeySet<Int>()
+
+    /** Returns true if audit mode is enabled via -Dmazewall.fd.audit=true */
+    private fun isAuditEnabled(): Boolean =
+        System.getProperty("mazewall.fd.audit")?.lowercase() == "true"
 
     /**
      * Claims this integer as a still-owned live descriptor.
@@ -65,13 +72,13 @@ internal object FdEpoch {
      */
     fun claimOpen(fd: Int): Long {
         if (fd < 0) return 0L
-        val ref = table.computeIfAbsent(fd) { AtomicReference(Slot(0L, false)) }
+        val ref = table.computeIfAbsent(fd) { AtomicReference(Slot(0L, false, false)) }
         while (true) {
             val cur = ref.get()
             if (cur.live) {
                 return cur.generation
             }
-            val next = Slot(cur.generation + 1L, true)
+            val next = Slot(cur.generation + 1L, true, false)
             if (ref.compareAndSet(cur, next)) {
                 return next.generation
             }
@@ -97,7 +104,7 @@ internal object FdEpoch {
             if (!cur.live || cur.generation != generation) {
                 return
             }
-            if (ref.compareAndSet(cur, Slot(generation, false))) {
+            if (ref.compareAndSet(cur, Slot(generation, false, cur.owned))) {
                 return
             }
         }
@@ -128,10 +135,80 @@ internal object FdEpoch {
             if (!cur.live) {
                 return
             }
-            if (ref.compareAndSet(cur, Slot(cur.generation, false))) {
+            if (ref.compareAndSet(cur, Slot(cur.generation, false, cur.owned))) {
                 return
             }
         }
+    }
+
+    /**
+     * Marks an fd as owned (opened by this process via adopt).
+     */
+    fun markOwned(fd: Int) {
+        if (fd >= 0) {
+            val ref = table[fd] ?: return
+            while (true) {
+                val cur = ref.get()
+                if (cur.owned) return
+                if (ref.compareAndSet(cur, Slot(cur.generation, cur.live, true))) {
+                    ownedThroughEpoch.add(fd)
+                    return
+                }
+            }
+        }
+    }
+
+    /**
+     * Returns true if this fd was explicitly marked as owned through this epoch.
+     */
+    fun isOwnedThroughEpoch(fd: Int): Boolean {
+        return ownedThroughEpoch.contains(fd)
+    }
+
+    /**
+     * Verifies via fcntl(F_GETFD) that the target still exists.
+     * Returns true if the fd is valid according to the kernel.
+     * 
+     * Note: This method currently returns true for all non-negative fds.
+     * Future implementation should use fcntl(F_GETFD) for proper verification.
+     */
+    fun verifyKernelLiveness(fd: Int): Boolean {
+        // TODO: Implement proper kernel liveness check using fcntl(F_GETFD)
+        // For now, we just check if the fd is non-negative
+        return fd >= 0
+    }
+
+    /**
+     * Audit ledger check: verifies and logs before close.
+     * In audit mode (-Dmazewall.fd.audit=true), warns if closing an fd that
+     * was never marked as owned through the epoch.
+     *
+     * Returns true if the close should proceed.
+     */
+    fun auditClose(fd: Int, generation: Long): Boolean {
+        if (!isAuditEnabled()) return true
+
+        val wasOwned = isOwnedThroughEpoch(fd)
+        val isLive = isLive(fd, generation)
+
+        if (!wasOwned && isLive) {
+            System.err.println(
+                "[FdEpoch Audit] WARNING: closing fd=$fd that was never marked as owned through this epoch. " +
+                "This may be a foreign descriptor. Token was likely created via generic()/unsafe() " +
+                "instead of adopt(). Set -Dmazewall.fd.audit=true to see this warning."
+            )
+            // In audit mode, we still allow the close but log it
+            // In strict mode (future), we could deny it
+        }
+
+        if (!isLive && !wasOwned) {
+            System.err.println(
+                "[FdEpoch Audit] WARNING: attempting to close fd=$fd that is neither live in epoch nor owned through epoch. " +
+                "This is likely a bug - a token minted around a foreign integer."
+            )
+        }
+
+        return true
     }
 }
 
@@ -362,6 +439,9 @@ public class FileDescriptor<out R : FileDescriptorRole, out S : FdState> interna
         ): FileDescriptor<R, FdState.Open> {
             val closed = value < 0
             val generation = if (closed) 0L else FdEpoch.adoptKernelReuse(value)
+            if (value >= 0) {
+                FdEpoch.markOwned(value)
+            }
             return FileDescriptor(
                 FdLifecycle(value, arena, generation, role, closed = closed),
             )
@@ -380,7 +460,11 @@ public class FileDescriptor<out R : FileDescriptorRole, out S : FdState> interna
                 FdEpoch.forceRetire(value)
             }
             // Claim a new generation for the replaced FD
-            return open<FileDescriptorRole.Generic>(value, arena, FileDescriptorRole.Generic) as FileDescriptor<R, FdState.Open>
+            val result = open<FileDescriptorRole.Generic>(value, arena, FileDescriptorRole.Generic) as FileDescriptor<R, FdState.Open>
+            if (value >= 0) {
+                FdEpoch.markOwned(value)
+            }
+            return result
         }
 
         @Suppress("UNCHECKED_CAST")
@@ -462,10 +546,14 @@ public fun LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhan
  * [FileDescriptor] of state [FdState.Closed] to provide compile-time safety against
  * use-after-close errors.
  *
+ * When audit mode is enabled (-Dmazewall.fd.audit=true), this method will warn
+ * if closing a descriptor that was not marked as owned (created via [adopt] or [replace]).
+ *
  * @return A new [FileDescriptor] instance with the same value but [FdState.Closed] state.
  */
 public fun <R : FileDescriptorRole, S : FdState.Open> FileDescriptor<R, S>.close(): FileDescriptor<R, FdState.Closed> {
     if (value >= 0 && !isClosedType()) {
+        FdEpoch.auditClose(value, generation)
         @Suppress("UNCHECKED_CAST")
         LinuxNative.fileSystem.close(this as FileDescriptor<*, FdState.Open>)
         arena?.close()
