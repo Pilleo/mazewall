@@ -99,6 +99,20 @@ public sealed interface SeccompAction {
         override val nativeCode: Int = NativeConstants.SECCOMP_RET_ALLOW
     }
 
+    /**
+     * Returns the kernel return code for this action.
+     * For [ACT_ERRNO], this encodes the errno in the lower 16 bits:
+     * `SECCOMP_RET_ERRNO | (errno & 0xFFFF)`.
+     * For other actions, returns [nativeCode] directly.
+     *
+     * This is used for union-aware self-verification (issue-20260824-011900).
+     */
+    public fun toKernelReturnCode(): Int =
+        when (this) {
+            is ACT_ERRNO -> nativeCode or (errno and 0xFFFF)
+            else -> nativeCode
+        }
+
     public companion object {
         public fun stricterOf(a: SeccompAction, b: SeccompAction): SeccompAction = a.stricter(b)
     }

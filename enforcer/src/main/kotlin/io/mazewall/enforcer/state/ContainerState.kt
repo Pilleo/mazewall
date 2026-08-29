@@ -7,6 +7,7 @@ import io.mazewall.enforcer.engine.*
 import io.mazewall.enforcer.*
 
 import io.mazewall.PolicyDefinition
+import io.mazewall.core.Arch
 import io.mazewall.core.SandboxedPath
 import io.mazewall.core.SeccompAction
 import io.mazewall.core.Syscall
@@ -30,6 +31,24 @@ internal data class ContainerState(
     fun isSyscallAllowed(syscall: Syscall): Boolean {
         val action = syscallActions[syscall] ?: defaultAction
         return action == SeccompAction.ACT_ALLOW
+    }
+
+    /**
+     * Returns the effective [SeccompAction] for a given syscall number on the specified [arch].
+     * This method is used for union-aware self-verification (issue-20260824-011900).
+     *
+     * It performs a reverse lookup by iterating through all [Syscall] enum values and finding
+     * the one whose syscall number matches [nr] for the given [arch]. If found, returns the
+     * corresponding action from [syscallActions] or [defaultAction]. If not found (e.g.,
+     * synthetic syscall numbers), returns [defaultAction].
+     */
+    fun getEffectiveAction(nr: Int, arch: Arch): SeccompAction {
+        for (syscall in Syscall.entries) {
+            if (syscall.numberFor(arch) == nr) {
+                return syscallActions[syscall] ?: defaultAction
+            }
+        }
+        return defaultAction
     }
 
     fun withNewSeccompPolicy(
