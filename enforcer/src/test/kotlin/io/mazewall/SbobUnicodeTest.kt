@@ -12,7 +12,7 @@ class SbobUnicodeTest {
         try {
             java.nio.file.Paths.get("/opt/caf\u00e9")
         } catch (e: java.nio.file.InvalidPathException) {
-            assumeTrue(false, "System filesystem encoding does not support non-ASCII characters")
+            assumeTrue(false, "System filesystem encoding does not support non-ASCII characters: ${e.message}")
             return
         }
 

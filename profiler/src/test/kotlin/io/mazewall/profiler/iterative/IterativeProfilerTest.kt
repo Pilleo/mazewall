@@ -17,7 +17,7 @@ class IterativeProfilerTest {
         try {
             block()
         } catch (e: UnsupportedKernelFeatureException) {
-            assumeTrue(false, "Landlock is not supported on this kernel: ${e.message}")
+            assumeTrue(false) { "Landlock is not supported on this kernel: ${e.message}" }
         }
     }
 

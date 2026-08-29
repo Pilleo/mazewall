@@ -1,7 +1,7 @@
 ---
 title: "Fix broken tests and behavioral assertions in test suite"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "testing"

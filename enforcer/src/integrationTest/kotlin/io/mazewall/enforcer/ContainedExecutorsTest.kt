@@ -18,6 +18,7 @@ import kotlin.test.assertTrue
 import io.mazewall.enforcer.api.ContainedExecutors
 import io.mazewall.enforcer.api.ContainmentViolationException
 import io.mazewall.enforcer.diagnostics.ContainmentViolationDetector
+import org.junit.jupiter.api.Assumptions.assumeFalse
 
 @NeedsFreshJvm
 class ContainedExecutorsTest : BaseIntegrationTest() {
@@ -177,7 +178,7 @@ class ContainedExecutorsTest : BaseIntegrationTest() {
     @Test
     fun `test graceful degradation fallback`() {
         val osName = System.getProperty("os.name")
-        if (osName.equals("Linux", ignoreCase = true)) return
+        assumeFalse(osName.equals("Linux", ignoreCase = true), "Test is for non-Linux platforms only")
 
         val executor = Executors.newSingleThreadExecutor()
         val safeExecutor = ContainedExecutors.wrap(executor, Policy.NO_EXEC)

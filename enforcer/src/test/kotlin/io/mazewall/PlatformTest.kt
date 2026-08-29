@@ -14,7 +14,7 @@ class PlatformTest {
         if (osName.equals("Linux", ignoreCase = true)) {
             // Can't invoke private isSeccompSanityCheckPassing()
             // However, we just need to test that on linux, it can be evaluated without crashing
-            Platform.isSupported()
+            assertTrue(Platform.isSupported(), "Platform should be supported on Linux")
         } else {
             assertFalse(Platform.isSupported())
         }
