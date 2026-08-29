@@ -464,6 +464,34 @@ data class PendingApprovalState(
             return this
         }
 
+        // Validate issue context and needed fields before processing (MAZ-118 / MAZ-700)
+        val issueFileObj = File(issueFile)
+        val parsedIssue = if (issueFileObj.exists()) {
+            BacklogParser.parseIssueFile(issueFileObj)
+        } else {
+            null
+        }
+
+        if (parsedIssue != null) {
+            // Check for missing required fields: context and needed
+            if (parsedIssue.context.isNullOrBlank() || parsedIssue.needed.isNullOrBlank()) {
+                val msg = "⚠️ Task $issueId is missing required Context or Needed sections. " +
+                          "Fix the backlog file and retry. Skipping for now."
+                env.errPrintln(msg)
+                env.sendNotification(msg)
+                context.skippedIds.add(issueId)
+                context.activeSlots.remove(slot)
+                return SelectTaskState
+            }
+
+            // Check for warnings: unknown component or LOW priority
+            if (parsedIssue.component == "unknown" || parsedIssue.priority == BacklogPriority.LOW) {
+                val warningMsg = "⚠️ Task $issueId has ${if (parsedIssue.component == "unknown") "unknown component" else ""}${if (parsedIssue.component == "unknown" && parsedIssue.priority == BacklogPriority.LOW) " and " else if (parsedIssue.priority == BacklogPriority.LOW) "LOW priority" else ""}. Proceeding with caution."
+                env.errPrintln(warningMsg)
+                env.sendNotification(warningMsg)
+            }
+        }
+
         val event = if (githubIssueNumber != null) {
             if (env.gitHubClient.isIssueClosed(githubIssueNumber)) {
                 OrchestratorEvent.IssueClosedDetected(githubIssueNumber)
