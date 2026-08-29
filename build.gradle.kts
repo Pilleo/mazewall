@@ -344,6 +344,12 @@ tasks.matching { it.name.startsWith("spotbugsTest") || it.name.startsWith("spotb
         mustRunAfter(rootProject.tasks.named("test"))
         dependsOn(tasks.withType<Test>())
         mustRunAfter(tasks.withType<Test>())
+        // Explicit dependencies to satisfy Gradle 9 validation
+        // The JacocoReport task uses classDirectories which includes outputs from classes and processResources
+        dependsOn(tasks.named("classes"))
+        tasks.findByName("processResources")?.let { processResources ->
+            dependsOn(processResources)
+        }
         executionData.setFrom(fileTree(project.layout.buildDirectory.dir("jacoco")).include("*.exec"))
         classDirectories.setFrom(
             files(
@@ -365,6 +371,11 @@ tasks.matching { it.name.startsWith("spotbugsTest") || it.name.startsWith("spotb
         mustRunAfter(rootProject.tasks.named("test"))
         dependsOn(tasks.withType<org.gradle.testing.jacoco.tasks.JacocoReport>())
         mustRunAfter(tasks.withType<org.gradle.testing.jacoco.tasks.JacocoReport>())
+        // Explicit dependencies to satisfy Gradle 9 validation
+        dependsOn(tasks.named("classes"))
+        tasks.findByName("processResources")?.let { processResources ->
+            dependsOn(processResources)
+        }
         if (project.name == "platform") {
             // LinuxNative and the shared FFM/seccomp types live in :platform, but the
             // historical 78% LinuxNative gate is produced by :enforcer unit + integration
