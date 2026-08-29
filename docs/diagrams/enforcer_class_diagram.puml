@@ -774,6 +774,7 @@ interface "SeccompAction" as io.mazewall.core.SeccompAction {
   + {abstract}int getNativeCode()
   +int restrictivenessRank()
   +SeccompAction stricter(SeccompAction)
+  +int toKernelReturnCode()
 }
 class "SocketIo" as io.mazewall.core.SocketIo {
   + {static}SocketIo INSTANCE
@@ -958,6 +959,7 @@ class "ContainerState" as io.mazewall.enforcer.state.ContainerState {
   +boolean getAllowsNonThreadClone()
   +boolean getAllowsUnsafePrctl()
   +boolean isSyscallAllowed(Syscall)
+  +SeccompAction getEffectiveAction(int, Arch)
   +ContainerState withNewSeccompPolicy(PolicyDefinition<?>, Map<Syscall, ? extends SeccompAction>, SeccompAction)
   +ContainerState withLandlockPolicy(PolicyDefinition<?>)
   +ContainerState withEngineState(SeccompInstallationState)

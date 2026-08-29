@@ -1219,6 +1219,7 @@ public abstract interface class io/mazewall/core/SeccompAction {
 	public abstract fun getPriority ()I
 	public fun restrictivenessRank ()I
 	public fun stricter (Lio/mazewall/core/SeccompAction;)Lio/mazewall/core/SeccompAction;
+	public fun toKernelReturnCode ()I
 }
 
 public final class io/mazewall/core/SeccompAction$ACT_ALLOW : io/mazewall/core/SeccompAction {
@@ -1229,6 +1230,7 @@ public final class io/mazewall/core/SeccompAction$ACT_ALLOW : io/mazewall/core/S
 	public fun hashCode ()I
 	public fun restrictivenessRank ()I
 	public fun stricter (Lio/mazewall/core/SeccompAction;)Lio/mazewall/core/SeccompAction;
+	public fun toKernelReturnCode ()I
 	public fun toString ()Ljava/lang/String;
 }
 
@@ -1246,6 +1248,7 @@ public final class io/mazewall/core/SeccompAction$ACT_ERRNO : io/mazewall/core/S
 	public fun hashCode ()I
 	public fun restrictivenessRank ()I
 	public fun stricter (Lio/mazewall/core/SeccompAction;)Lio/mazewall/core/SeccompAction;
+	public fun toKernelReturnCode ()I
 	public fun toString ()Ljava/lang/String;
 }
 
@@ -1257,6 +1260,7 @@ public final class io/mazewall/core/SeccompAction$ACT_KILL_PROCESS : io/mazewall
 	public fun hashCode ()I
 	public fun restrictivenessRank ()I
 	public fun stricter (Lio/mazewall/core/SeccompAction;)Lio/mazewall/core/SeccompAction;
+	public fun toKernelReturnCode ()I
 	public fun toString ()Ljava/lang/String;
 }
 
@@ -1268,6 +1272,7 @@ public final class io/mazewall/core/SeccompAction$ACT_KILL_THREAD : io/mazewall/
 	public fun hashCode ()I
 	public fun restrictivenessRank ()I
 	public fun stricter (Lio/mazewall/core/SeccompAction;)Lio/mazewall/core/SeccompAction;
+	public fun toKernelReturnCode ()I
 	public fun toString ()Ljava/lang/String;
 }
 
@@ -1279,6 +1284,7 @@ public final class io/mazewall/core/SeccompAction$ACT_LOG : io/mazewall/core/Sec
 	public fun hashCode ()I
 	public fun restrictivenessRank ()I
 	public fun stricter (Lio/mazewall/core/SeccompAction;)Lio/mazewall/core/SeccompAction;
+	public fun toKernelReturnCode ()I
 	public fun toString ()Ljava/lang/String;
 }
 
@@ -1290,6 +1296,7 @@ public final class io/mazewall/core/SeccompAction$ACT_NOTIFY : io/mazewall/core/
 	public fun hashCode ()I
 	public fun restrictivenessRank ()I
 	public fun stricter (Lio/mazewall/core/SeccompAction;)Lio/mazewall/core/SeccompAction;
+	public fun toKernelReturnCode ()I
 	public fun toString ()Ljava/lang/String;
 }
 
@@ -1305,6 +1312,7 @@ public final class io/mazewall/core/SeccompAction$ACT_TRACE : io/mazewall/core/S
 	public fun hashCode ()I
 	public fun restrictivenessRank ()I
 	public fun stricter (Lio/mazewall/core/SeccompAction;)Lio/mazewall/core/SeccompAction;
+	public fun toKernelReturnCode ()I
 	public fun toString ()Ljava/lang/String;
 }
 
@@ -1316,6 +1324,7 @@ public final class io/mazewall/core/SeccompAction$ACT_TRAP : io/mazewall/core/Se
 	public fun hashCode ()I
 	public fun restrictivenessRank ()I
 	public fun stricter (Lio/mazewall/core/SeccompAction;)Lio/mazewall/core/SeccompAction;
+	public fun toKernelReturnCode ()I
 	public fun toString ()Ljava/lang/String;
 }
 
@@ -1326,6 +1335,7 @@ public final class io/mazewall/core/SeccompAction$Companion {
 public final class io/mazewall/core/SeccompAction$DefaultImpls {
 	public static fun restrictivenessRank (Lio/mazewall/core/SeccompAction;)I
 	public static fun stricter (Lio/mazewall/core/SeccompAction;Lio/mazewall/core/SeccompAction;)Lio/mazewall/core/SeccompAction;
+	public static fun toKernelReturnCode (Lio/mazewall/core/SeccompAction;)I
 }
 
 public final class io/mazewall/core/SocketIo {
