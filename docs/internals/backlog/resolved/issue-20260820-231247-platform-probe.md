@@ -11,6 +11,8 @@ target_files:
   - "enforcer/src/main/kotlin/io/mazewall/InstallationAssessment.kt"
 effort: "small"
 autonomy: "autonomous"
+paperclip_issue_id: 95433e28-9f2f-4df3-a2ab-d2a2e27dfd11
+paperclip_identifier: MAZ-506
 ---
 
 # Check the Platform Before Probing Linux Kernel Features

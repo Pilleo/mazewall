@@ -17,11 +17,41 @@ data class BacklogIssue(
     val needed: String? = null,
     val targetFiles: List<String> = emptyList(),
     val targetModules: List<String> = emptyList(),
+    val targetSymbols: List<String> = emptyList(),
+    val hasSideEffects: Boolean = true,
     val openQuestions: String? = null,
     val hasOpenQuestions: Boolean = false
 ) {
     fun isNonInterfering(): Boolean {
         return component == "docs" || component == "ci" || id.contains("review-task")
+    }
+
+    /**
+     * Checks if this issue conflicts with [other].
+     * If both issues explicitly specify disjoint target_symbols and have no side effects,
+     * they do not conflict even if they share target_files or target_modules.
+     */
+    fun conflictsWith(other: BacklogIssue): Boolean {
+        if (this.isNonInterfering() || other.isNonInterfering()) return false
+
+        // Empty targets conservative global lock
+        val thisEmpty = this.targetFiles.isEmpty() || this.targetModules.isEmpty()
+        val otherEmpty = other.targetFiles.isEmpty() || other.targetModules.isEmpty()
+        if (thisEmpty || otherEmpty) return true
+
+        // Method / Symbol Granularity:
+        // If both have explicit symbols, no side effects, and disjoint symbol sets -> no conflict
+        if (this.targetSymbols.isNotEmpty() && other.targetSymbols.isNotEmpty() &&
+            !this.hasSideEffects && !other.hasSideEffects
+        ) {
+            val sharedSymbols = this.targetSymbols.intersect(other.targetSymbols.toSet())
+            return sharedSymbols.isNotEmpty()
+        }
+
+        val hasSharedModules = this.targetModules.any { it in other.targetModules }
+        val hasSharedFiles = this.targetFiles.any { it in other.targetFiles }
+
+        return hasSharedModules || hasSharedFiles
     }
 }
 
@@ -61,6 +91,11 @@ object BacklogParser {
             val targetModulesRaw = frontmatter["target_modules"] ?: ""
             val targetModules = parseList(targetModulesRaw, content)
 
+            val targetSymbolsRaw = frontmatter["target_symbols"] ?: ""
+            val targetSymbols = parseList(targetSymbolsRaw, content)
+
+            val hasSideEffects = frontmatter["has_side_effects"]?.equals("false", ignoreCase = true) != true
+
             val id = frontmatter["id"]?.removeSurrounding("\"")?.removeSurrounding("'") ?: run {
                 val nameWithoutExt = file.name.removeSuffix(".md")
                 val parts = nameWithoutExt.split("-")
@@ -86,6 +121,7 @@ object BacklogParser {
             return BacklogIssue(
                 file, id, title, priority, status, dependencies, githubIssue,
                 severity, component, effort, context, needed, targetFiles, targetModules,
+                targetSymbols, hasSideEffects,
                 openQuestions, hasOpenQuestions
             )
         } catch (e: Exception) {

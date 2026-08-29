@@ -3,6 +3,8 @@ title: "Leverage Kotlin Contracts for Static Analysis"
 severity: "RESOLVED"
 status: "resolved"
 priority: medium
+paperclip_issue_id: 09d7e255-abfb-452f-8fba-b4087c99955b
+paperclip_identifier: MAZ-221
 ---
 
 # ✅ [RESOLVED]: Leverage Kotlin Contracts for Static Analysis

@@ -11,6 +11,8 @@ solution_approved: false
 blast_radius: "medium"
 reversible: true
 github_issue: 205
+paperclip_issue_id: 8e33effd-c500-46bb-867e-b858f9bdb4cd
+paperclip_identifier: MAZ-295
 ---
 
 # 🔴 [Severity: HIGH]: `SeccompInstallationState` Partial Failure Leaves Thread Unprivileged but Uncontained

@@ -13,6 +13,8 @@ target_modules:
 target_files:
 - enforcer/src/main/kotlin/io/mazewall/enforcer/supervisor/SupervisorDaemonEngine.kt
 github_issue: 376
+paperclip_issue_id: b9db79b0-329b-42e5-b615-bfa626db6776
+paperclip_identifier: MAZ-395
 ---
 
 # Issue: `SupervisorDaemonEngine` fails to clean up sockets on interrupted or failed loop

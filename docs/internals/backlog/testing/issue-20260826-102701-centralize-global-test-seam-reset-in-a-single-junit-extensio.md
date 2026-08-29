@@ -19,7 +19,8 @@ core_lock: true
 effort: "medium"
 autonomy: "supervised"
 open_questions: false
-paperclip_issue_id: 386d15bd-b168-459b-bc81-b2cebf76e774
+paperclip_issue_id: f18ebbc0-79e2-481e-8d19-7e282815d713
+paperclip_identifier: MAZ-768
 ---
 
 # 🟡 [Severity: MEDIUM]: Centralize global test-seam reset in a single JUnit extension

@@ -7,6 +7,8 @@ dependencies: []
 component: "enforcer"
 effort: "small"
 github_issue: 71
+paperclip_issue_id: 36af9aa6-b566-4bb6-926f-29e549f36a84
+paperclip_identifier: MAZ-264
 ---
 
 # 🔴 [Severity: MEDIUM]: Potential Race Condition in Async IO Thread Shutdown

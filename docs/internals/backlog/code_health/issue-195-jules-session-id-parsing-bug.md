@@ -15,7 +15,8 @@ solution_approved: false
 blast_radius: medium
 reversible: true
 github_issue: 455
-paperclip_issue_id: f483dd74-95ac-4ed4-a57f-269394a5e3b7
+paperclip_issue_id: 3ab9c026-274c-4f4e-a107-0b6e9012597a
+paperclip_identifier: MAZ-632
 ---
 
 # 🔴 [Severity: HIGH]: Fix Jules Session ID Parsing Bug

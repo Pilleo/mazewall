@@ -15,6 +15,8 @@ effort: "medium"
 autonomy: "supervised"
 open_questions: false
 dependencies: []
+paperclip_issue_id: 110a7d81-132a-4140-9e6d-e09b4d293839
+paperclip_identifier: MAZ-600
 ---
 
 # 🟡 [Severity: LOW]: Kernel-Drift Watch
@@ -45,4 +47,3 @@ filing a labeled drift issue on change. Findings feed the knowledge-map flow per
    `linux/landlock.h`, `linux/io_uring.h`) against a committed snapshot and opens an orchestrator
    issue on drift.
 3. Wire findings into the existing knowledge-map flow so each decision links to source files.
-

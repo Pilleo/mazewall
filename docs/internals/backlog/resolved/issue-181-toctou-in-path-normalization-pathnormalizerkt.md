@@ -11,6 +11,8 @@ solution_approved: false
 blast_radius: "medium"
 reversible: true
 github_issue: 120
+paperclip_issue_id: 67c20988-83e8-41b5-8e82-398443dd946b
+paperclip_identifier: MAZ-356
 ---
 
 # 🔴 [Severity: MEDIUM]: TOCTOU in Path Normalization `PathNormalizer.kt`

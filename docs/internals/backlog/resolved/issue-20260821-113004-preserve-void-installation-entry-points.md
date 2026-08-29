@@ -13,6 +13,8 @@ effort: "small"
 autonomy: "autonomous"
 related_pr: 512
 related_thread: 3825290321
+paperclip_issue_id: 0a952399-a331-452a-9179-616387268177
+paperclip_identifier: MAZ-557
 ---
 
 # 🔴 [Severity: HIGH]: Preserve the void installation entry points for existing binaries

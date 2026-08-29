@@ -11,6 +11,8 @@ solution_approved: false
 blast_radius: "medium"
 reversible: true
 github_issue: 128
+paperclip_issue_id: d568b593-00c2-4721-96b4-fb9e84b2203c
+paperclip_identifier: MAZ-352
 ---
 
 # 🔴 [Severity: HIGH]: Missing ArchUnit test for FFM architecture boundary violations

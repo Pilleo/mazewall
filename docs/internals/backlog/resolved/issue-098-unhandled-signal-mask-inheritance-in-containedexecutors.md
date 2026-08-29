@@ -11,6 +11,8 @@ solution_approved: false
 blast_radius: "medium"
 reversible: true
 github_issue: 215
+paperclip_issue_id: 59e14631-3a57-435e-9732-6f88d5691686
+paperclip_identifier: MAZ-277
 ---
 
 # 🔴 [Severity: MEDIUM]: Unhandled Signal Mask Inheritance in `ContainedExecutors`

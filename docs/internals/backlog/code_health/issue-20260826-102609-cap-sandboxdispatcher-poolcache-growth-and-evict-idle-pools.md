@@ -17,7 +17,8 @@ core_lock: false
 effort: "medium"
 autonomy: "supervised"
 open_questions: false
-paperclip_issue_id: a4964d06-8e24-4383-a684-7a0e65606bb3
+paperclip_issue_id: ad31d593-71c6-4897-b75f-13ee216688ab
+paperclip_identifier: MAZ-683
 ---
 
 # 🔴 [Severity: HIGH]: Cap SandboxDispatcher poolCache growth and evict idle pools

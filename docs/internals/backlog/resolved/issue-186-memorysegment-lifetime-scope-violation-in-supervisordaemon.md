@@ -11,6 +11,8 @@ solution_approved: false
 blast_radius: "medium"
 reversible: true
 github_issue: 118
+paperclip_issue_id: 48f76399-e391-4edd-9a16-96a6b81f4c67
+paperclip_identifier: MAZ-361
 ---
 
 # 🔴 [Severity: HIGH]: MemorySegment Lifetime/Scope Violation in SupervisorSessionHandler

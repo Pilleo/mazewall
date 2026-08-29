@@ -6,6 +6,8 @@ priority: high
 dependencies: []
 component: "orchestrator"
 effort: "small"
+paperclip_issue_id: d4afadda-4e66-4583-8508-1053ff18bf47
+paperclip_identifier: MAZ-376
 ---
 
 # 🔴 [Severity: HIGH]: Implement Token-Efficient PR Review via Diff Injection

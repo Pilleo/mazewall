@@ -14,7 +14,8 @@ autonomy: supervised
 solution_approved: false
 blast_radius: medium
 reversible: true
-paperclip_issue_id: 3892cc5a-d9f0-4008-9cf1-1f6428bbc0f9
+paperclip_issue_id: 623a486d-ebea-412e-8115-0cb8a6c8450e
+paperclip_identifier: MAZ-634
 ---
 
 # 🔴 [Severity: HIGH]: Auto-Closing Linked GitHub Issues

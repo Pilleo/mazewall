@@ -354,7 +354,7 @@ fun httpRequest(
 // ============================================================================
 
 val DEFAULT_API_URL = "http://127.0.0.1:3100"
-val DEFAULT_BACKLOG_DIR = "docs/internals/backlog"
+val DEFAULT_BACKLOG_DIR = if (File("docs/internals/backlog").exists()) "docs/internals/backlog" else "../docs/internals/backlog"
 val DEFAULT_LOCKFILE = "/tmp/paperclip_backlog_sync.lock"
 val DEFAULT_LOCK_TIMEOUT_SECONDS = 30L
 
@@ -362,7 +362,7 @@ fun main(args: Array<String>) {
     println("Paperclip Backlog DAG Ingester")
     println("Note: This script requires Kotlin 1.x or use: kotlin -Xuse-fir-lt=false")
     println()
-    
+
     // Get configuration from environment
     val apiKey = System.getenv("PAPERCLIP_API_KEY") ?: run {
         System.err.println("ERROR: PAPERCLIP_API_KEY environment variable is required")
@@ -439,7 +439,7 @@ fun main(args: Array<String>) {
 
     try {
         println("Lock acquired, starting sync...")
-        
+
         // 1. Parse all backlog issues
         val backlogIssues = BacklogParser.parseAllIssues(backlogDir)
         println("Found ${backlogIssues.size} backlog issues")

@@ -233,6 +233,7 @@ internal class AcpJsonRpcSession(
 
 internal object AcpCommandResolver {
     private val PRESETS = listOf(
+        listOf("vibe-acp"),
         listOf("agy", "--acp"),
         listOf("vibe", "--acp"),
         listOf("hermes", "acp"),
@@ -273,7 +274,10 @@ internal object AcpCommandResolver {
 }
 
 internal fun extractUpdateText(params: String): String? {
-    val content = jsonObjectAfterKey(params, "content") ?: params
+    val update = jsonObjectAfterKey(params, "update") ?: params
+    val updateType = optionalJsonStringField(update, "sessionUpdate")
+    if (updateType == "agent_thought_chunk" || updateType == "usage_update") return null
+    val content = jsonObjectAfterKey(update, "content") ?: update
     return optionalJsonStringField(content, "text")
 }
 
@@ -283,7 +287,7 @@ internal fun extractStopText(result: String): String {
 
 internal fun optionalJsonStringField(raw: String, key: String): String? {
     return try {
-        parseJsonStringField(raw, key).takeIf { it.isNotBlank() }
+        parseJsonStringField(raw, key).takeIf { it.isNotEmpty() }
     } catch (_: IllegalArgumentException) {
         null
     }
@@ -313,12 +317,28 @@ internal fun jsonObjectAfterKey(raw: String, key: String): String? {
     val close = if (open == '{') '}' else ']'
     var depth = 0
     val start = i
+    var inString = false
+    var escape = false
     while (i < raw.length) {
         val c = raw[i]
-        if (c == open) depth++
-        if (c == close) {
-            depth--
-            if (depth == 0) return raw.substring(start, i + 1)
+        if (inString) {
+            if (escape) {
+                escape = false
+            } else if (c == '\\') {
+                escape = true
+            } else if (c == '"') {
+                inString = false
+            }
+            i++
+            continue
+        }
+        when (c) {
+            '"' -> inString = true
+            open -> depth++
+            close -> {
+                depth--
+                if (depth == 0) return raw.substring(start, i + 1)
+            }
         }
         i++
     }

@@ -14,7 +14,8 @@ autonomy: supervised
 solution_approved: false
 blast_radius: medium
 reversible: true
-paperclip_issue_id: ed04514d-8e2d-416b-bc2b-5f5c8b39e24f
+paperclip_issue_id: de1073c6-6664-46f5-a85a-2b145f7c0bb9
+paperclip_identifier: MAZ-745
 ---
 
 # 🔴 [Severity: LOW]: Memory Alignment verification for `Layouts.kt` FFM Structures

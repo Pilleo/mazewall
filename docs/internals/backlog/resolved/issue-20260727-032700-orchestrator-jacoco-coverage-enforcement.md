@@ -13,6 +13,8 @@ target_files:
 effort: "large"
 autonomy: "supervised"
 github_issue: 359
+paperclip_issue_id: 4d7c4bc0-86d2-4988-9694-bada0bdeb6e7
+paperclip_identifier: MAZ-398
 ---
 
 # 🔴 [Severity: HIGH]: Configure Jacoco Coverage Enforcement (80%) for :tools:orchestrator

@@ -3,6 +3,8 @@ title: "Gradle Configuration Cache Path Collision in CI"
 severity: "MEDIUM"
 status: "resolved"
 priority: medium
+paperclip_issue_id: 06efb073-133b-429e-844d-135588cf0e4c
+paperclip_identifier: MAZ-365
 ---
 
 # 🟡 [Severity: MEDIUM]: Gradle Configuration Cache Path Collision in CI

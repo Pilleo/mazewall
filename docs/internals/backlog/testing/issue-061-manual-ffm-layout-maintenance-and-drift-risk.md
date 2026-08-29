@@ -10,7 +10,8 @@ target_modules:
 - :enforcer
 component: enforcer
 effort: large
-paperclip_issue_id: a337894e-5cd4-421e-af4a-d147e34f23e7
+paperclip_issue_id: 3b0b69cd-e97c-4733-b450-d07ea09f0046
+paperclip_identifier: MAZ-755
 ---
 
 # 🟡 [Severity: LOW]: Manual FFM Layout Maintenance and Drift Risk

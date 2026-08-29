@@ -16,6 +16,8 @@ target_files:
   - "demos/cli-demo/src/main/kotlin/demo/ProfileAndEnforceDemo.kt"
 effort: "small"
 autonomy: "autonomous"
+paperclip_issue_id: 1ec73e08-9d6b-448a-bbef-16f8ab5848f7
+paperclip_identifier: MAZ-488
 ---
 
 # 🟡 [Severity: MEDIUM]: toDsl fail-closed gate is not reflected in docs, demos, or coverage.complete

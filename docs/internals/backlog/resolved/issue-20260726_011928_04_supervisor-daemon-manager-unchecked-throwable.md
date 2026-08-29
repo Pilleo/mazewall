@@ -13,6 +13,8 @@ component: enforcer
 target_modules: [":enforcer"]
 target_files: ["enforcer/src/main/kotlin/io/mazewall/enforcer/supervisor/SupervisorDaemonManager.kt"]
 github_issue: 342
+paperclip_issue_id: 67409f51-3d1f-4012-9bc1-f0cc60a19b26
+paperclip_identifier: MAZ-391
 ---
 
 # Issue: `SupervisorDaemonManager` silently ignores process death or `Throwable`s

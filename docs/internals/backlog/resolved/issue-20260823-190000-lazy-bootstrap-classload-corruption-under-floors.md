@@ -12,6 +12,8 @@ effort: "large"
 autonomy: "supervised"
 open_questions: true
 dependencies: []
+paperclip_issue_id: a4483e15-3ee4-4179-8487-7e1d83131d4e
+paperclip_identifier: MAZ-617
 ---
 
 # 🔴 [Severity: HIGH]: Lazy Bootstrap Classloads Under Narrow Allow-List Floors Return Corrupted Bytes

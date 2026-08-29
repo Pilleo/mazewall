@@ -25,6 +25,8 @@ effort: "small"
 autonomy: "supervised"
 open_questions: false
 has_side_effects: true
+paperclip_issue_id: c7adb536-19b4-4058-9221-09ecc99bb39d
+paperclip_identifier: MAZ-615
 ---
 
 # 🟡 [Severity: MEDIUM]: Investigate only factual questions and skip cheap strong review

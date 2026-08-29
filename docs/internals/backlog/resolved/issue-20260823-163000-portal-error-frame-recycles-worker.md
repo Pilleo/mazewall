@@ -13,6 +13,8 @@ target_files:
 effort: "small"
 autonomy: "supervised"
 open_questions: false
+paperclip_issue_id: d255eda4-704b-40b4-9709-0b3fb59c2293
+paperclip_identifier: MAZ-590
 ---
 
 # 🟠 [Severity: MEDIUM]: Portal ERROR frames recycle the worker process

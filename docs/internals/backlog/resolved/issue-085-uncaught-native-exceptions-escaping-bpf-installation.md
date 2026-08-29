@@ -7,6 +7,8 @@ dependencies: []
 component: "seccomp"
 effort: "small"
 github_issue: 73
+paperclip_issue_id: 68ffe8d9-5d9d-4bee-817c-c4b15dcb4de3
+paperclip_identifier: MAZ-265
 ---
 
 # 🔴 [Severity: MEDIUM]: Uncaught Native Exceptions Escaping BPF Installation

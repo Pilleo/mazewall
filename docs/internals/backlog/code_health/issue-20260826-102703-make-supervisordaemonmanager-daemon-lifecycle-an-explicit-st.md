@@ -20,6 +20,7 @@ effort: "medium"
 autonomy: "supervised"
 open_questions: false
 paperclip_issue_id: 79e5ddef-5eff-4e73-b78c-4428afcd37ca
+paperclip_identifier: MAZ-151
 ---
 
 # 🟡 [Severity: MEDIUM]: Make SupervisorDaemonManager daemon lifecycle an explicit state machine

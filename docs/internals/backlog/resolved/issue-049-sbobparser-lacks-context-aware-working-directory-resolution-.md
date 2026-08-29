@@ -6,6 +6,8 @@ priority: high
 dependencies: []
 component: "unknown"
 effort: "medium"
+paperclip_issue_id: 7706314e-2328-4b1b-b529-a4958fcc0110
+paperclip_identifier: MAZ-240
 ---
 
 # 🔴 [Severity: MEDIUM]: `SbobParser` lacks Context-Aware Working Directory resolution for Relative Paths

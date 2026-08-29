@@ -12,6 +12,8 @@ target_files:
 effort: "medium"
 autonomy: "autonomous"
 github_issue: 433
+paperclip_issue_id: 75125f10-96e9-4c87-bf49-29bc87faa001
+paperclip_identifier: MAZ-420
 ---
 
 # 🔴 [Severity: HIGH]: Fix Confused Deputy and Incorrect FD Context during openat / openat2 Emulation in Supervisor

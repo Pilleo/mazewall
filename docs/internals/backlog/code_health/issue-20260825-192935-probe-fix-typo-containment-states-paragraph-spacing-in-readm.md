@@ -14,7 +14,8 @@ core_lock: false
 effort: "medium"
 autonomy: "supervised"
 open_questions: false
-paperclip_issue_id: ff0aa315-66d0-4096-8269-f370835eb77c
+paperclip_issue_id: 9a34ffe2-38c9-4497-b8ec-e7c4522d46a5
+paperclip_identifier: MAZ-675
 ---
 
 # 🟢 [Severity: LOW]: PROBE: Fix typo 'containment states' paragraph spacing in README quick-start

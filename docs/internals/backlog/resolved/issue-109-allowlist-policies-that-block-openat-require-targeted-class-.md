@@ -3,6 +3,8 @@ title: "ALLOW_LIST policies that block `openat` require targeted class pre-loadi
 severity: "RESOLVED"
 status: "resolved"
 priority: medium
+paperclip_issue_id: 48eadca4-40ed-4a9f-bf1a-a9a6815e3c44
+paperclip_identifier: MAZ-286
 ---
 
 # ✅ [RESOLVED]: ALLOW_LIST policies that block `openat` require targeted class pre-loading

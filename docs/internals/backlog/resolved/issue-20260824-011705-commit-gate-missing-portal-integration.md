@@ -15,6 +15,8 @@ effort: "small"
 autonomy: "autonomous"
 open_questions: false
 dependencies: []
+paperclip_issue_id: f3c053ab-c573-4510-82b2-20da299b4e7a
+paperclip_identifier: MAZ-732
 ---
 
 # 🟡 [Severity: LOW]: Commit Gate Does Not Cover `:portal` Integration Tests

@@ -12,6 +12,8 @@ target_files:
   - "profiler/src/test/kotlin/io/mazewall/profiler/engine/SyscallEventTest.kt"
 effort: "small"
 autonomy: "autonomous"
+paperclip_issue_id: 56bc8445-ea5c-4045-800d-5f8b00bb42e6
+paperclip_identifier: MAZ-461
 ---
 
 # 🟠 [Severity: MEDIUM]: Defensively copy SyscallEvent list inputs

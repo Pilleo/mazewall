@@ -11,6 +11,8 @@ solution_approved: false
 blast_radius: "medium"
 reversible: true
 github_issue: 86
+paperclip_issue_id: 4a4cf899-82b9-48b1-9b6a-de0478bba50f
+paperclip_identifier: MAZ-290
 ---
 
 # 🔴 [Severity: MEDIUM]: Loom Carrier Poisoning Bypass in `PureJavaBpfEngine`

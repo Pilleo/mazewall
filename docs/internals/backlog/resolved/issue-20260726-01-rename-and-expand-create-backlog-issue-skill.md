@@ -12,6 +12,8 @@ target_files:
   - "AGENTS.md"
 effort: "small"
 autonomy: "autonomous"
+paperclip_issue_id: 75a03fef-a301-4386-a921-4a5942c01555
+paperclip_identifier: MAZ-380
 ---
 
 # 🔴 [Severity: MEDIUM]: Rename `report_security_issue` Skill to `create_backlog_issue` and Expand Schema Protocol

@@ -14,7 +14,8 @@ core_lock: false
 effort: "medium"
 autonomy: "supervised"
 open_questions: false
-paperclip_issue_id: c326a656-da01-4a95-83a6-1c31ba0a3e2d
+paperclip_issue_id: 7ff336eb-80d5-49db-b91e-930a6e68508d
+paperclip_identifier: MAZ-673
 ---
 
 # 🔴 [Severity: HIGH]: FD token ownership: type-level Owned/Unowned split + audit ledger + literal-int sweep

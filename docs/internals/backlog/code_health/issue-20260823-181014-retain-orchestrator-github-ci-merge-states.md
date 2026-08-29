@@ -14,7 +14,8 @@ target_files:
 effort: "small"
 autonomy: "autonomous"
 open_questions: false
-paperclip_issue_id: 67ed1c2e-bec1-4d0b-9373-c52258d9e0a0
+paperclip_issue_id: 300e829b-7251-4caf-8d4f-53a243677b26
+paperclip_identifier: MAZ-663
 ---
 
 # 🟡 [Severity: MEDIUM]: Keep orchestrator GitHub/CI/PR/merge states until a dispatcher replacement exists

@@ -3,6 +3,8 @@ title: "Unhandled `SYS_ACCEPT` in SupervisorSessionHandler"
 severity: "HIGH"
 status: "resolved"
 priority: high
+paperclip_issue_id: b3587e72-9e14-4469-88b1-f4ebb6df0234
+paperclip_identifier: MAZ-359
 ---
 
 # 🔴 [Severity: HIGH]: Unhandled `SYS_ACCEPT` in SupervisorSessionHandler

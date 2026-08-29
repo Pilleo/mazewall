@@ -14,6 +14,8 @@ autonomy: "supervised"
 open_questions: false
 dependencies:
   - "issue-20260825-023933-tier-e-wp-03-marker-uprobe-poc.md"
+paperclip_issue_id: 6382b536-fc7c-4d81-9669-ab57088a55f6
+paperclip_identifier: MAZ-201
 ---
 
 # 🟢 [Severity: ENHANCEMENT]: WP-04 — Session Lifecycle & Trust Protocol

@@ -11,6 +11,8 @@ solution_approved: true
 blast_radius: "medium"
 reversible: true
 github_issue: 173
+paperclip_issue_id: db9d0047-809e-43e0-a04c-68268351abe0
+paperclip_identifier: MAZ-314
 ---
 
 # 🔴 [Severity: MEDIUM]: Unhandled Signal Interruptions (`EINTR`) during `seccomp` Filter Installation

@@ -16,7 +16,8 @@ target_files:
 effort: "small"
 autonomy: "autonomous"
 open_questions: false
-paperclip_issue_id: dbeef095-7b29-4b0c-990e-a225be14b781
+paperclip_issue_id: cba05e79-534a-4335-8cf9-8ba0f4ec72db
+paperclip_identifier: MAZ-659
 ---
 
 # 🟢 [Severity: LOW]: Add nested AGENTS.md for portal, portal-codegen, and portal-worker

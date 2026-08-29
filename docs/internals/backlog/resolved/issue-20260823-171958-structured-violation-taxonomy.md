@@ -13,6 +13,8 @@ effort: "medium"
 autonomy: "supervised"
 open_questions: false
 dependencies: []
+paperclip_issue_id: 6e2f8fad-8e0a-4cec-bce7-002bf99b4438
+paperclip_identifier: MAZ-596
 ---
 
 # 🟠 [Severity: MEDIUM]: Structured Containment-Violation Taxonomy Replacing Message Regexes
@@ -39,4 +41,3 @@ produces both false negatives (unlisted locale) and false-positive risk, and can
    detector last; document the precedence in KDoc.
 5. Tests: JDK-locale matrix for the legacy path; structured path asserted without any string
    matching.
-

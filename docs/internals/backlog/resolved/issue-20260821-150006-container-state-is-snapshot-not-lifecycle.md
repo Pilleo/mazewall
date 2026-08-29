@@ -11,6 +11,8 @@ target_files:
   - "enforcer/src/test/kotlin/io/mazewall/ContainerStateArchitectureTest.kt"
 effort: "small"
 autonomy: "autonomous"
+paperclip_issue_id: d2ff511c-2d89-4f52-9acc-977c1d0cbca6
+paperclip_identifier: MAZ-572
 ---
 
 # 🟡 [Severity: MEDIUM]: ArchUnit: ContainerState must remain a non-subtype snapshot type

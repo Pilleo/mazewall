@@ -14,6 +14,8 @@ effort: "medium"
 autonomy: "supervised"
 related_pr: 512
 related_thread: 3819861587
+paperclip_issue_id: fffb9c5e-c2c4-44cf-b882-59782f0fe823
+paperclip_identifier: MAZ-534
 ---
 
 # 🔴 [Severity: HIGH]: Keep the validation deadline while reading the full frame

@@ -15,6 +15,8 @@ effort: "medium"
 autonomy: "autonomous"
 open_questions: false
 dependencies: []
+paperclip_issue_id: 7cde84ef-e13e-4398-9d76-39f1bee8b258
+paperclip_identifier: MAZ-619
 ---
 
 # 🟠 [Severity: MEDIUM]: Portal Worker Idle-Tick and Call-Timeout Coverage With Injected Short Deadlines
@@ -48,4 +50,3 @@ was never in their dependency graph, so fresh worker sources silently never ship
    timed-out call produces `PortalCallException` whose cause chain contains
    `PortalReadTimeoutException`, distinguishing deadline expiry from other IO errors.
 4. Keep default production behavior unchanged (30s).
-

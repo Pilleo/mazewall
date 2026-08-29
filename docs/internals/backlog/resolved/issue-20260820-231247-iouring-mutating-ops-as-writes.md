@@ -12,6 +12,8 @@ target_files:
   - "profiler/src/main/kotlin/io/mazewall/profiler/ProfileObservation.kt"
 effort: "medium"
 autonomy: "autonomous"
+paperclip_issue_id: 65c7ce1e-ad89-41ab-b523-d498b6ca3569
+paperclip_identifier: MAZ-503
 ---
 
 # Classify Mutating io_uring Operations as Writes

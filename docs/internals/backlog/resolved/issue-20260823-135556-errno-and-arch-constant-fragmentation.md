@@ -14,6 +14,8 @@ effort: "small"
 autonomy: "autonomous"
 open_questions: false
 dependencies: []
+paperclip_issue_id: e7423912-809b-4aeb-9281-3e10948272a1
+paperclip_identifier: MAZ-584
 ---
 
 # 🟡 [Severity: LOW]: Errno Constant Fragmentation and Non-Exhaustive Arch Guards
@@ -40,4 +42,3 @@ dependencies: []
    `val supportsArchPrctl: Boolean`) and use them instead of scattered `== Arch.AMD64` checks.
 4. Add unit tests asserting `getJvmCriticalNrs` for every `Arch.entries` value contains arch_prctl on
    architectures that provide it.
-

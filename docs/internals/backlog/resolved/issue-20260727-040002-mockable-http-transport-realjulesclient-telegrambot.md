@@ -8,6 +8,8 @@ component: "orchestrator"
 target_modules: [":tools:orchestrator"]
 target_files: ["tools/orchestrator/src/main/kotlin/io/mazewall/orchestrator/JulesCli.kt", "tools/orchestrator/src/main/kotlin/io/mazewall/orchestrator/TelegramBot.kt"]
 github_issue: 364
+paperclip_issue_id: de98a669-4b2f-4140-86b7-4b5fd79f13e8
+paperclip_identifier: MAZ-400
 ---
 
 # 🔴 [Severity: HIGH]: Mockable HTTP transport abstraction for RealJulesClient and TelegramBot

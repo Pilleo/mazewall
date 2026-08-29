@@ -13,6 +13,8 @@ effort: "small"
 autonomy: "autonomous"
 related_pr: 512
 related_thread: 3825912180
+paperclip_issue_id: 56db67af-c762-4911-af63-dccdc713f998
+paperclip_identifier: MAZ-562
 ---
 
 # 🟡 [Severity: MEDIUM]: Do not grant file reads for O_PATH observations

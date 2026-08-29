@@ -17,6 +17,8 @@ target_files:
 effort: "large"
 autonomy: "autonomous"
 open_questions: false
+paperclip_issue_id: b94cafef-08c1-4641-9525-13da895c6713
+paperclip_identifier: MAZ-705
 ---
 
 # 🔵 [Severity: ENHANCEMENT]: Provide an Intentional Java Public API Facade

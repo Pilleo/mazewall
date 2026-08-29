@@ -11,6 +11,8 @@ target_files:
   - "enforcer/src/main/kotlin/io/mazewall/enforcer/api/ContainedExecutors.kt"
 effort: "small"
 autonomy: "autonomous"
+paperclip_issue_id: 64791ae3-ca1c-4741-bbd7-d7302bc61fa3
+paperclip_identifier: MAZ-505
 ---
 
 # Report Already-Active Landlock in Repeat-Install Receipts

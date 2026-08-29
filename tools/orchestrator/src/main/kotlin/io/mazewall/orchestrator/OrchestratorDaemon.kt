@@ -296,17 +296,7 @@ class OrchestratorDaemonRunner(
                 if (activeIssues.isEmpty()) {
                     true
                 } else {
-                    val issueIsEmptyAndInterfering = (issue.targetFiles.isEmpty() || issue.targetModules.isEmpty()) && !issue.isNonInterfering()
-                    if (issueIsEmptyAndInterfering) {
-                        false
-                    } else {
-                        activeIssues.none { active ->
-                            val activeIsEmptyAndInterfering = (active.targetFiles.isEmpty() || active.targetModules.isEmpty()) && !active.isNonInterfering()
-                            activeIsEmptyAndInterfering ||
-                                issue.targetFiles.any { it in active.targetFiles } ||
-                                issue.targetModules.any { it in active.targetModules }
-                        }
-                    }
+                    activeIssues.none { active -> active.conflictsWith(issue) }
                 }
             }
 

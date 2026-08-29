@@ -7,6 +7,8 @@ dependencies: []
 component: "enforcer"
 effort: "small"
 github_issue: 261
+paperclip_issue_id: c0220922-04bb-479e-8473-c500d06a3e88
+paperclip_identifier: MAZ-321
 ---
 
 # 🔴 [Severity: CRITICAL]: TOCTOU / Pointer Re-targeting via `sockaddrBytes` Mutation during Connect Validation

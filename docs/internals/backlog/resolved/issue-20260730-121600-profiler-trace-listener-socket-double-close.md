@@ -12,6 +12,8 @@ target_files:
 effort: "small"
 autonomy: "autonomous"
 github_issue: 438
+paperclip_issue_id: f561b048-2a3d-4e84-8e4c-55a5b1e25993
+paperclip_identifier: MAZ-432
 ---
 
 # 🔴 [Severity: HIGH]: ProfilerTraceListener socket double-close mitigation and idempotency

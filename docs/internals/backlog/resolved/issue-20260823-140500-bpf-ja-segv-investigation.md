@@ -13,6 +13,8 @@ effort: "small"
 autonomy: "autonomous"
 open_questions: false
 dependencies: []
+paperclip_issue_id: 81933c58-c328-4a1f-aa9b-bc694d8b46f1
+paperclip_identifier: MAZ-588
 ---
 
 # 🔴 [Severity: HIGH]: BPF_JA Misencoded — Classic BPF JA Jumps by K, Not jt (SIGSEGV Root Cause)

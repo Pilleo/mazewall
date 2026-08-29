@@ -10,7 +10,8 @@ target_modules:
 - :enforcer
 component: enforcer
 effort: medium
-paperclip_issue_id: 171c7720-b504-4b48-b530-43431571e9d6
+paperclip_issue_id: d90f455b-bf80-4130-90bb-b45b71e86b20
+paperclip_identifier: MAZ-744
 ---
 
 # 🔵 [Severity: ENHANCEMENT]: Network Isolation via Namespaces (`CLONE_NEWNET`)

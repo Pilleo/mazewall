@@ -16,6 +16,8 @@ target_files:
 effort: "medium"
 autonomy: "supervised"
 open_questions: false
+paperclip_issue_id: 09e584da-e9b6-4f9f-98b0-bea62fcaad43
+paperclip_identifier: MAZ-578
 ---
 
 # 🔵 [Severity: ENHANCEMENT]: Process portal: pooled workers with crash/restart and call timeouts

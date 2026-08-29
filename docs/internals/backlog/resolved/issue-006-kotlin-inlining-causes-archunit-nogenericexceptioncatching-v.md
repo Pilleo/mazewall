@@ -7,6 +7,8 @@ dependencies: []
 component: "enforcer"
 effort: "medium"
 github_issue: 48
+paperclip_issue_id: 80775581-6b02-4082-b9e5-75b5818a8642
+paperclip_identifier: MAZ-211
 ---
 
 # 🔴 [Severity: MEDIUM]: Kotlin Inlining Causes ArchUnit noGenericExceptionCatching Violation

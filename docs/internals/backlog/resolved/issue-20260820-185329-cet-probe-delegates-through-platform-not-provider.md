@@ -14,6 +14,8 @@ target_files:
   - "enforcer/src/main/kotlin/io/mazewall/InstallationAssessment.kt"
 effort: "small"
 autonomy: "autonomous"
+paperclip_issue_id: 17606734-1798-4c5b-906b-bc427f2cfd8f
+paperclip_identifier: MAZ-486
 ---
 
 # 🟡 [Severity: MEDIUM]: CET support is probed twice: provider matrix vs Platform.isCpuCetSupported

@@ -11,6 +11,8 @@ target_files:
   - "profiler/src/main/kotlin/io/mazewall/profiler/internal/ProfilerTraceListener.kt"
 effort: "medium"
 autonomy: "autonomous"
+paperclip_issue_id: f977a53f-2e43-46f6-95b1-b5a9fd947a8a
+paperclip_identifier: MAZ-408
 ---
 
 # 🔴 [Severity: HIGH]: Refactor Profiler Trace Listener to Use Bounded Channel Capacity and Backpressure Strategy

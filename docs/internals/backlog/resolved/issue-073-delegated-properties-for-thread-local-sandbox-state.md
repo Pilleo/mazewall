@@ -7,6 +7,8 @@ dependencies: []
 component: "enforcer"
 effort: "medium"
 github_issue: 305
+paperclip_issue_id: de231d3b-1c3d-4a3d-a3e7-d694c83952b7
+paperclip_identifier: MAZ-257
 ---
 
 # 🔵 [Severity: ENHANCEMENT]: Delegated Properties for Thread-Local Sandbox State

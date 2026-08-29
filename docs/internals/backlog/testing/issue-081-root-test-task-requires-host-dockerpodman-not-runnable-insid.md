@@ -11,7 +11,8 @@ target_modules:
 - :enforcer
 component: testing
 effort: medium
-paperclip_issue_id: 6b0e0e41-1615-4e5c-aafb-e4b0ec57071b
+paperclip_issue_id: f68edec4-a567-4cd6-9c1b-105219b97da2
+paperclip_identifier: MAZ-758
 ---
 
 # 📝 [NOTE]: Root `:test` task requires host Docker/Podman, not runnable inside dev container

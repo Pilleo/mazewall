@@ -11,6 +11,8 @@ solution_approved: false
 blast_radius: "medium"
 reversible: true
 github_issue: 219
+paperclip_issue_id: 71c21e50-eaa0-4789-a484-b263f0f3bd16
+paperclip_identifier: MAZ-275
 ---
 
 # 🔴 [Severity: MEDIUM]: Missing BPF Instruction Limit Validation in `newSockFProg`

@@ -10,6 +10,8 @@ autonomy: "supervised"
 solution_approved: true
 blast_radius: "medium"
 reversible: true
+paperclip_issue_id: b8071fa9-a80d-4fee-9c62-4a57150810e4
+paperclip_identifier: MAZ-305
 ---
 
 # 🔴 [Severity: MEDIUM]: TOCTOU in `USER_NOTIF` Argument Dereferencing

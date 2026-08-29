@@ -10,7 +10,8 @@ target_modules:
 - :enforcer
 component: enforcer
 effort: medium
-paperclip_issue_id: e517daef-a632-45fa-b3c5-a6122881e3fa
+paperclip_issue_id: 84ecff78-bc1c-4034-a84c-336db331dac3
+paperclip_identifier: MAZ-757
 ---
 
 # 🔴 [Severity: MEDIUM]: Unhandled `TSYNC` edge cases during JIT classloading

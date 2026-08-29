@@ -8,6 +8,8 @@ component: "enforcer"
 effort: "large"
 target_modules: [":enforcer"]
 target_files: ["enforcer/src/main/kotlin/io/mazewall/NativeEngine.kt"]
+paperclip_issue_id: e2a76e37-a3ac-458f-aebd-c2e2b88d168f
+paperclip_identifier: MAZ-230
 ---
 
 # 🔴 [Severity: MEDIUM]: Residual Interface Segregation Violation (ISP) in `NativeEngine`

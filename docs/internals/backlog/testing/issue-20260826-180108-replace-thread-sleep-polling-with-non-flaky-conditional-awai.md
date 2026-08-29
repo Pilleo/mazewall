@@ -19,6 +19,8 @@ effort: "small"
 autonomy: "autonomous"
 open_questions: false
 has_side_effects: false
+paperclip_issue_id: f5585683-7e1b-4df2-a077-00955d40fac3
+paperclip_identifier: MAZ-771
 ---
 
 # 🟢 [Severity: LOW]: Replace Thread.sleep polling with non-flaky conditional awaits in tests

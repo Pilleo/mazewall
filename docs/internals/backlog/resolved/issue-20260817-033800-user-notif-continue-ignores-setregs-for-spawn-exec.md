@@ -13,6 +13,8 @@ target_files:
 effort: "large"
 autonomy: "supervised"
 open_questions: false
+paperclip_issue_id: c3b92c49-910d-4187-8fe0-cf312c2e31fc
+paperclip_identifier: MAZ-482
 ---
 
 # 🔴 [Severity: HIGH]: USER_NOTIF CONTINUE may not honor ptrace SETREGS on posix_spawn exec

@@ -7,7 +7,8 @@ dependencies: []
 component: "orchestrator"
 target_modules: [":tools:orchestrator"]
 target_files: ["tools/orchestrator/src/main/kotlin/io/mazewall/orchestrator/GitHubCli.kt"]
-paperclip_issue_id: 3ef926ac-5e48-4bbf-9b1c-8d3b0dea1919
+paperclip_issue_id: 87b9ca52-c6f7-43ed-946c-1237ce9ef60b
+paperclip_identifier: MAZ-650
 ---
 
 # 🔴 [Severity: HIGH]: Interface decoupling for ProcessBuilder execution in RealGitHubClient

@@ -1,7 +1,7 @@
 ---
 title: "Orchestrator: Close GitHub Issue Automatically on RESOLVE_TASK"
 severity: "LOW"
-status: "open"
+status: "resolved"
 priority: medium
 dependencies: []
 component: "orchestrator"
@@ -15,7 +15,8 @@ solution_approved: true
 chosen_solution: "A"
 blast_radius: "low"
 reversible: true
-paperclip_issue_id: ad1a39f1-d8a5-484c-b19a-6df2425f7042
+paperclip_issue_id: b252b1e8-d2e4-4b46-b4bd-74e9d081eda2
+paperclip_identifier: MAZ-737
 ---
 
 # 🔵 [Severity: LOW]: Orchestrator: Close GitHub Issue Automatically on RESOLVE_TASK

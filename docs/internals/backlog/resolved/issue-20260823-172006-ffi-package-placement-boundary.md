@@ -14,6 +14,8 @@ effort: "small"
 autonomy: "autonomous"
 open_questions: false
 dependencies: []
+paperclip_issue_id: 242700ff-5c29-4797-aee7-770415ebafd8
+paperclip_identifier: MAZ-603
 ---
 
 # 🟡 [Severity: LOW]: FFM Package Placement Boundary
@@ -36,4 +38,3 @@ any package).
 2. Add ArchUnit rules: (a) classes touching `java.lang.foreign.*` must reside in `io.mazewall.ffi..`;
    (b) `io.mazewall.ffi..` in :enforcer must not be accessed from :platform (module direction).
 3. Fix any current violations the rules surface (move or justify-and-whitelist explicitly).
-

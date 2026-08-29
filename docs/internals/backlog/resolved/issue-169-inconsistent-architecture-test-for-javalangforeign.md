@@ -10,6 +10,8 @@ autonomy: "supervised"
 solution_approved: false
 blast_radius: "medium"
 reversible: true
+paperclip_issue_id: 4dd3454e-e56a-419f-bda0-94b9e474a338
+paperclip_identifier: MAZ-344
 ---
 
 # 🔴 [Severity: LOW]: Inconsistent Architecture Test for `java.lang.foreign`

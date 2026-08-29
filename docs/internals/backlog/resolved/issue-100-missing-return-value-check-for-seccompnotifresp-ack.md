@@ -11,6 +11,8 @@ solution_approved: false
 blast_radius: "medium"
 reversible: true
 github_issue: 211
+paperclip_issue_id: b48af5c1-87a0-4f0d-a014-3879eab0ffbc
+paperclip_identifier: MAZ-279
 ---
 
 # 🔴 [Severity: MEDIUM]: Missing Return Value Check for `SECCOMP_NOTIF_RESP` ACK

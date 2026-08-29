@@ -12,6 +12,8 @@ target_files:
   - "enforcer/src/main/kotlin/io/mazewall/enforcer/internal/ContainedExecutorWrapper.kt"
 effort: "large"
 autonomy: "supervised"
+paperclip_issue_id: b8cca97a-f26f-4985-abd8-a03284119dcf
+paperclip_identifier: MAZ-629
 ---
 
 # ⚪ [Severity: ENHANCEMENT, deferred]: Make Contained Executors Own Dedicated Worker Threads

@@ -14,7 +14,8 @@ effort: "medium"
 autonomy: "autonomous"
 open_questions: false
 dependencies: []
-paperclip_issue_id: 448cac7b-35e9-46eb-9009-60323c3571cb
+paperclip_issue_id: b18b76c9-f56d-40bf-8407-d32a4ad71ba2
+paperclip_identifier: MAZ-672
 ---
 
 # 🟠 [Severity: MEDIUM]: Gradle 9 Cross-Module Execution-Time Resolution — Canonical Pattern + Build-Script Lint
@@ -48,4 +49,3 @@ classpath bug) — generated Kotlin must be verified for interpolation.
 4. Note for AI agents: Kotlin snippets produced via shell heredocs must escape `$` correctly AND
    be greppable afterwards (`grep -F '${'` over written files) to catch non-interpolating
    templates.
-

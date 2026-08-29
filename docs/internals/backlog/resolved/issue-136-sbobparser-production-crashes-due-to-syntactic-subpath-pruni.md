@@ -11,6 +11,8 @@ solution_approved: false
 blast_radius: "medium"
 reversible: true
 github_issue: 177
+paperclip_issue_id: 67c129ff-dbd4-4c0c-87e0-eb3a3a8442ce
+paperclip_identifier: MAZ-312
 ---
 
 # 🔴 [Severity: HIGH]: `SbobParser` Production Crashes due to Syntactic Subpath Pruning of Unresolved/Symlinked Paths

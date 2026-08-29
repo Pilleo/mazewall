@@ -13,6 +13,8 @@ effort: "small"
 autonomy: "autonomous"
 related_pr: 512
 related_thread: PRRC_kwDOScnnEM7kBdT
+paperclip_issue_id: 25510737-41b5-43ef-b358-b18aee68c469
+paperclip_identifier: MAZ-490
 ---
 
 # 🟠 [Severity: MEDIUM]: Downgrade read-only deny lists to thread-local scope

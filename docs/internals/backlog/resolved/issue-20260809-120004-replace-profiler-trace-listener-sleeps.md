@@ -12,6 +12,8 @@ target_files:
   - "profiler/src/main/kotlin/io/mazewall/profiler/internal/ProfilerTraceListener.kt"
 effort: "small"
 autonomy: "supervised"
+paperclip_issue_id: 3709ef9a-098d-4b7c-9d79-78d5d2f12719
+paperclip_identifier: MAZ-462
 ---
 
 # 🟢 [Severity: LOW]: Replace timing sleeps in ProfilerTraceListenerTest with deterministic synchronization

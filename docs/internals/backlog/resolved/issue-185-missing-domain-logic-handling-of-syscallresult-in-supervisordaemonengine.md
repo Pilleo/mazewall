@@ -7,6 +7,8 @@ dependencies: []
 component: "enforcer"
 effort: "medium"
 github_issue: 92
+paperclip_issue_id: 474fbbfd-2036-4f3d-a697-011eb2e9b476
+paperclip_identifier: MAZ-360
 ---
 
 # 🔴 [Severity: MEDIUM]: Missing domain logic handling of SyscallResult in SupervisorDaemonEngine

@@ -3,6 +3,8 @@ title: "ProfilerTraceListener Lacks Deterministic Lifecycle (AutoCloseable)"
 severity: "RESOLVED"
 status: "resolved"
 priority: medium
+paperclip_issue_id: 52724f69-ee7d-4a55-a6c4-a7e9fbee8af1
+paperclip_identifier: MAZ-228
 ---
 
 # ✅ [RESOLVED]: ProfilerTraceListener Lacks Deterministic Lifecycle (AutoCloseable)

@@ -14,6 +14,8 @@ effort: "medium"
 autonomy: "autonomous"
 related_pr: 512
 related_thread: PRRC_kwDOScnnEM6H6V
+paperclip_issue_id: a0d472b8-bc94-4cb9-8186-0dfa13c9ce44
+paperclip_identifier: MAZ-524
 ---
 
 # 🔴 [Severity: HIGH]: Preserve explicit open denials during restrictive composition

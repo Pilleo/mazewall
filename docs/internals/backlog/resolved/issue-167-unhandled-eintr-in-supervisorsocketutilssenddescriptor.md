@@ -3,6 +3,8 @@ title: "Unhandled EINTR in `SupervisorSocketUtils.sendDescriptor`"
 severity: "RESOLVED"
 status: "resolved"
 priority: medium
+paperclip_issue_id: a388e2f4-49dc-44b0-984d-d3547d173ef2
+paperclip_identifier: MAZ-342
 ---
 
 # ✅ [RESOLVED]: Unhandled EINTR in `SupervisorSocketUtils.sendDescriptor`

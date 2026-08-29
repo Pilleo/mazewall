@@ -16,7 +16,8 @@ core_lock: false
 effort: "medium"
 autonomy: "supervised"
 open_questions: false
-paperclip_issue_id: de005944-bdcf-4571-8c4e-cd2c4350ee42
+paperclip_issue_id: 46152b99-72f4-4779-acae-a9e6b42acef6
+paperclip_identifier: MAZ-681
 ---
 
 # 🟡 [Severity: MEDIUM]: Move SeccompInstallationState ordering into the sealed hierarchy

@@ -13,6 +13,8 @@ effort: "small"
 autonomy: "autonomous"
 related_pr: 512
 related_thread: PRRT_kwDOScnnEM6a5aQ2
+paperclip_issue_id: 48d07f71-fa0b-4120-b6a5-c53dd4e97b20
+paperclip_identifier: MAZ-514
 ---
 
 # 🔴 [Severity: P1]: Start the eBPF collector before invoking the workload

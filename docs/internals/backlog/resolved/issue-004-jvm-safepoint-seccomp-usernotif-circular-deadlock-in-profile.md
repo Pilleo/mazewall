@@ -3,6 +3,8 @@ title: "JVM Safepoint / seccomp USER_NOTIF Circular Deadlock in `ProfilerTraceLi
 severity: "RESOLVED"
 status: "resolved"
 priority: medium
+paperclip_issue_id: 9f314463-65dd-44a0-b7c8-9e0277676e0f
+paperclip_identifier: MAZ-209
 ---
 
 # ✅ [RESOLVED]: JVM Safepoint / seccomp USER_NOTIF Circular Deadlock in `ProfilerTraceListener`

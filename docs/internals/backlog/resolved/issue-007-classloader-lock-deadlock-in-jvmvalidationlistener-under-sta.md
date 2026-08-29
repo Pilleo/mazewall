@@ -3,6 +3,8 @@ title: "Classloader Lock Deadlock in `JVMValidationListener` under `StacktraceSc
 severity: "RESOLVED"
 status: "resolved"
 priority: medium
+paperclip_issue_id: 968518a1-e9b5-4ae5-ab50-b4880cce8a2d
+paperclip_identifier: MAZ-212
 ---
 
 # ✅ [RESOLVED]: Classloader Lock Deadlock in `JVMValidationListener` under `StacktraceScopingPolicy`

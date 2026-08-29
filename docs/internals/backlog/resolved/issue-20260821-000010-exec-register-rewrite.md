@@ -14,6 +14,8 @@ effort: "medium"
 autonomy: "autonomous"
 related_pr: 512
 related_thread: PRRC_kwDOScnnEM7iSmJE
+paperclip_issue_id: 13768c6a-8009-426e-9f2c-47945daeae9a
+paperclip_identifier: MAZ-522
 ---
 
 # 🔴 [Severity: HIGH]: Exec register rewrite must actually modify tracee registers

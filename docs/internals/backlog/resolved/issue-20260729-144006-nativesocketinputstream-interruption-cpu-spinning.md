@@ -12,6 +12,8 @@ target_files:
 effort: "medium"
 autonomy: "autonomous"
 github_issue: 442
+paperclip_issue_id: 0013eb2e-c575-4448-81e4-927693e2709e
+paperclip_identifier: MAZ-417
 ---
 
 # 🔴 [Severity: HIGH]: Prevent CPU spinning and infinite loops on EINTR inside NativeSocketInputStream during thread interruption

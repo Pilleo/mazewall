@@ -11,7 +11,8 @@ target_files:
 effort: medium
 dependencies: []
 github_issue: 360
-paperclip_issue_id: dfce59da-eb1a-4982-88b6-2f27fb80d5cf
+paperclip_issue_id: a6976467-361a-4914-b9d4-8cc9bf23f5b4
+paperclip_identifier: MAZ-761
 ---
 
 # 🔵 [Severity: ENHANCEMENT]: Hardware-Aware CI Test Suite and Graceful Fallback Assertions for Intel CET

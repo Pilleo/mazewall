@@ -13,6 +13,8 @@ effort: "small"
 autonomy: "autonomous"
 related_pr: 512
 related_thread: 3797199306
+paperclip_issue_id: c9d0f0ef-f509-47ae-9e9c-de85fab5458e
+paperclip_identifier: MAZ-536
 ---
 
 # 🟡 [Severity: MEDIUM]: Preserve portless IPv6 endpoints during JSON round trips

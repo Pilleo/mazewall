@@ -13,6 +13,8 @@ autonomy: "supervised"
 open_questions: false
 dependencies:
   - "issue-20260825-023934-tier-e-wp-04-lifecycle-trust.md"
+paperclip_issue_id: d07c5f04-9295-44c2-a99c-9ed15e80c527
+paperclip_identifier: MAZ-202
 ---
 
 # 🟢 [Severity: ENHANCEMENT]: WP-05 — Concurrency Stress Suite (G2)

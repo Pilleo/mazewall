@@ -13,6 +13,8 @@ effort: "small"
 autonomy: "autonomous"
 related_pr: 512
 related_thread: 3796525664
+paperclip_issue_id: 3c1f0a53-be4c-435c-b919-362fea977b15
+paperclip_identifier: MAZ-537
 ---
 
 # 🟡 [Severity: MEDIUM]: Preserve whitespace in recorded eBPF field values

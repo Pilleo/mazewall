@@ -11,6 +11,8 @@ solution_approved: false
 blast_radius: "medium"
 reversible: true
 github_issue: 122
+paperclip_issue_id: 3337d4fa-fe1c-4297-b003-c516bf85d847
+paperclip_identifier: MAZ-355
 ---
 
 # 🔴 [Severity: MEDIUM]: Uncaught exceptions in `ContainedExecutorWrapper.kt` during filter installation

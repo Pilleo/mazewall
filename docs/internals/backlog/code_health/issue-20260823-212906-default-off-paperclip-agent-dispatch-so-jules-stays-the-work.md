@@ -19,7 +19,8 @@ effort: "small"
 autonomy: "supervised"
 open_questions: false
 has_side_effects: true
-paperclip_issue_id: 745dd4b0-c496-4fcd-a26b-bce4381dff91
+paperclip_issue_id: 4dca00f6-5e22-4ca5-ae6c-7cb65eb3aa57
+paperclip_identifier: MAZ-669
 ---
 
 # 🟡 [Severity: MEDIUM]: Default-off Paperclip agent dispatch so Jules stays the worker

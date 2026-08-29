@@ -12,6 +12,8 @@ target_files:
   - "profiler/src/main/kotlin/io/mazewall/profiler/ProfileObservation.kt"
 effort: "small"
 autonomy: "autonomous"
+paperclip_issue_id: 7850a4ba-f15a-4d8e-a1ae-378e962b9a2a
+paperclip_identifier: MAZ-504
 ---
 
 # Preserve Portless IPv6 Endpoints During JSON Round Trips

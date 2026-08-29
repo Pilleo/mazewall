@@ -9,6 +9,8 @@ target_modules: [\":enforcer\"]
 component: "enforcer"
 effort: "medium"
 github_issue: 309
+paperclip_issue_id: 971f5743-6cc2-4ff4-bd66-8e7c86fc8b60
+paperclip_identifier: MAZ-215
 ---
 
 # 🔵 [Severity: ENHANCEMENT]: Strongly Typed Syscall Flags and Native Argument Definitions

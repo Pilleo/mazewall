@@ -13,6 +13,8 @@ effort: "small"
 autonomy: "autonomous"
 related_pr: 512
 related_thread: 3819324208
+paperclip_issue_id: 262cee55-70e4-4367-826f-6531a273db9c
+paperclip_identifier: MAZ-538
 ---
 
 # 🟡 [Severity: MEDIUM]: Reject process-wide Landlock when TSYNC is unavailable

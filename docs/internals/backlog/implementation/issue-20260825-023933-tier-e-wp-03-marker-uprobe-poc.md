@@ -14,6 +14,8 @@ autonomy: "supervised"
 open_questions: false
 dependencies:
   - "issue-20260825-023932-tier-e-wp-02-collector-prototype.md"
+paperclip_issue_id: 67fc8015-ed6b-4768-ae77-eb3e08493911
+paperclip_identifier: MAZ-200
 ---
 
 # 🟢 [Severity: ENHANCEMENT]: WP-03 — Marker + Uprobe + Task-Storage PoC (G0/G1)

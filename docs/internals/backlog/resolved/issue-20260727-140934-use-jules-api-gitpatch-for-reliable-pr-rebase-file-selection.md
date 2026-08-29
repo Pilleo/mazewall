@@ -14,6 +14,8 @@ target_files:
   - "tools/orchestrator/src/test/kotlin/io/mazewall/orchestrator/StateHandlerTest.kt"
 effort: "small"
 autonomy: "supervised"
+paperclip_issue_id: c6dc259b-aa5f-4ad7-8eb5-b04320e2f0a4
+paperclip_identifier: MAZ-402
 ---
 
 # 🔴 [Severity: HIGH]: Replace rebaseBranch() with git merge

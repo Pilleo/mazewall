@@ -17,6 +17,8 @@ target_files:
   - "profiler/src/main/kotlin/io/mazewall/profiler/engine/ProfilerMemoryReader.kt"
 effort: "medium"
 autonomy: "autonomous"
+paperclip_issue_id: 0ff0c039-48eb-4d89-b74f-5e1effc0906f
+paperclip_identifier: MAZ-463
 ---
 
 # 🟡 [Severity: MEDIUM]: Unify Seccomp Daemon Reactor Engine and Tracee Memory Reader in :platform

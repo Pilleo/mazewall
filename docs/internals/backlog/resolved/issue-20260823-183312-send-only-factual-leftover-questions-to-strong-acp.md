@@ -21,6 +21,8 @@ effort: "small"
 autonomy: "supervised"
 open_questions: false
 has_side_effects: true
+paperclip_issue_id: 5926e540-4976-466c-bcd6-b14d722b108d
+paperclip_identifier: MAZ-611
 ---
 
 # 🟡 [Severity: MEDIUM]: Send only factual leftover questions to strong ACP

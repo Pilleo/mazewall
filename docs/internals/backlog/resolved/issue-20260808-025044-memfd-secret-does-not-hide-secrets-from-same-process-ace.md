@@ -12,6 +12,8 @@ target_files:
   - "docs/internals/unprivileged-bpf-jvm-opportunities.md"
 effort: "small"
 autonomy: "autonomous"
+paperclip_issue_id: 36a744a4-c4bd-4deb-8117-83d2ed9beb2a
+paperclip_identifier: MAZ-452
 ---
 
 # 🔴 [Severity: HIGH]: memfd_secret Does Not Hide Memory from Same-Process Native ACE

@@ -27,6 +27,8 @@ effort: "medium"
 autonomy: "autonomous"
 open_questions: false
 has_side_effects: false
+paperclip_issue_id: 7179eb8e-f54f-4600-a8fe-cd47c6d05e60
+paperclip_identifier: MAZ-189
 ---
 
 # 🟡 [Severity: MEDIUM]: Purge coverage theater tests and strengthen assertion coverage

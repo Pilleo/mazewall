@@ -11,6 +11,8 @@ solution_approved: false
 blast_radius: "medium"
 reversible: true
 github_issue: 239
+paperclip_issue_id: 2bcb8f91-d9dd-429a-adb3-5a318cf30b3f
+paperclip_identifier: MAZ-260
 ---
 
 # 🔴 [Severity: MEDIUM]: `Landlock` getAccessMask missing ABI 4 Support (Net Capabilities)

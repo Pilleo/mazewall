@@ -12,6 +12,8 @@ target_files:
   - "enforcer/src/test/kotlin/dummy/violator/DummyCoroutineAckViolator.kt"
 effort: "small"
 autonomy: "autonomous"
+paperclip_issue_id: a5eafdde-46e8-405c-9f37-0d3ddec67446
+paperclip_identifier: MAZ-570
 ---
 
 # 🔴 [Severity: HIGH]: ArchUnit: ban kotlinx.coroutines on enforcer supervisor/seccomp/landlock/state

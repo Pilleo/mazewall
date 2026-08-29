@@ -1,7 +1,7 @@
 ---
 title: "Expand BranchRebaser Tests with Real Git Repository Simulation"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "orchestrator"
@@ -12,7 +12,8 @@ target_files:
 effort: "medium"
 autonomy: "autonomous"
 open_questions: false
-paperclip_issue_id: d6196b29-4d17-4989-9681-9fc6c0aa37cb
+paperclip_issue_id: 0a67cb80-adbe-4a7a-834f-b27b66b3cad6
+paperclip_identifier: MAZ-726
 ---
 
 # 🔶 [Severity: MEDIUM]: Expand BranchRebaser Tests with Real Git Repository Simulation
@@ -38,5 +39,3 @@ The `BranchRebaser` component manages automated branch rebases, self-healing mer
 - Validate that conflict counts and conflicted file lists returned by the rebase match actual files in conflict exactly.
 - Verify that a self-healed branch correctly reverts modifications to disallowed files.
 - Run `./gradlew :tools:orchestrator:test` to guarantee full verification.
-
-

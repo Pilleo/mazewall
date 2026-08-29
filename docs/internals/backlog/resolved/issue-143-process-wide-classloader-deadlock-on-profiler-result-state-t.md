@@ -14,6 +14,8 @@ autonomy: supervised
 solution_approved: false
 blast_radius: medium
 reversible: true
+paperclip_issue_id: c9d753e6-4385-4e00-94c9-8b091057538e
+paperclip_identifier: MAZ-319
 ---
 
 # 🔴 [Severity: HIGH]: Process-Wide Classloader Deadlock on Profiler Result / State Types

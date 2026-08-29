@@ -10,6 +10,8 @@ autonomy: "supervised"
 solution_approved: true
 blast_radius: "medium"
 reversible: true
+paperclip_issue_id: 5e127822-8d5b-4826-9706-b36ffb107582
+paperclip_identifier: MAZ-477
 ---
 
 # 🔴 [Severity: HIGH]: Defer profiler shutdown until the pending notification is continued

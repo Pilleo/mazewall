@@ -7,6 +7,8 @@ dependencies: []
 component: "unknown"
 effort: "medium"
 github_issue: 46
+paperclip_issue_id: fae495a1-db43-466e-bb12-6f52276200a3
+paperclip_identifier: MAZ-210
 ---
 
 # 🔴 [Severity: HIGH]: In-Process Stacktrace Analysis ClassLoader Deadlock in Supervisor

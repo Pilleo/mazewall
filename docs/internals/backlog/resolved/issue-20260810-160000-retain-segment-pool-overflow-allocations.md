@@ -12,6 +12,8 @@ target_files:
   - "platform/src/test/kotlin/io/mazewall/ffi/memory/SegmentPoolTest.kt"
 effort: "small"
 autonomy: "autonomous"
+paperclip_issue_id: 307ecd45-512d-46e7-bb1f-e092693d0f97
+paperclip_identifier: MAZ-471
 ---
 
 # 🟡 [Severity: MEDIUM]: Retain SegmentPool Overflow Allocations

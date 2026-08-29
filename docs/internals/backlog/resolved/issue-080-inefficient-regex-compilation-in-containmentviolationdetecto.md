@@ -7,6 +7,8 @@ dependencies: []
 component: "enforcer"
 effort: "large"
 github_issue: 69
+paperclip_issue_id: 518b5969-4a1b-4d21-9c98-a29e4063f9a2
+paperclip_identifier: MAZ-262
 ---
 
 # 🔴 [Severity: LOW]: Inefficient Regex Compilation in `ContainmentViolationDetector`

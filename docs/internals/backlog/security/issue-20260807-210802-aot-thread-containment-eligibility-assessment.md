@@ -12,7 +12,8 @@ target_files:
 effort: "large"
 autonomy: "autonomous"
 open_questions: false
-paperclip_issue_id: 2bae9b54-90d9-49a0-b89a-598422d96acd
+paperclip_issue_id: 868f07a7-dae3-4f48-9a19-490b6116638a
+paperclip_identifier: MAZ-748
 ---
 
 # 🔵 [Severity: ENHANCEMENT]: Add AOT Reachability Assessment for Thread-Containment Eligibility
@@ -24,5 +25,3 @@ paperclip_issue_id: 2bae9b54-90d9-49a0-b89a-598422d96acd
 **Architectural Decision:**
 1. **Tooling & Task Integration:** Implement as a dedicated Gradle task `:enforcer:assessAotEligibility` that inspects GraalVM reachability configuration (`reachability-metadata.json`, `reflect-config.json`, `jni-config.json`) and scans application bytecode call-graphs.
 2. **Schema & Report Format:** Output a structured `ThreadContainmentAssessment.json` reporting `DATA_ONLY_THREAD_ELIGIBLE` or `REJECTED`, logging all reachability violations and observed native boundaries.
-
-

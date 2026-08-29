@@ -11,6 +11,8 @@ target_files:
   - "enforcer/src/main/kotlin/io/mazewall/enforcer/supervisor/BypassPaths.kt"
 effort: "medium"
 autonomy: "autonomous"
+paperclip_issue_id: ed501643-7992-4b64-acbf-c330047de5e5
+paperclip_identifier: MAZ-476
 ---
 
 # ✅ [RESOLVED]: Sealed Class Exhaustiveness for Path Resolution

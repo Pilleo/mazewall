@@ -12,7 +12,8 @@ target_modules:
 - :enforcer
 target_files:
 - enforcer/src/main/kotlin/io/mazewall/enforcer/supervisor/SupervisorDaemonEngine.kt
-paperclip_issue_id: a82db2e1-bd9d-43cb-afb4-5296daff447e
+paperclip_issue_id: 2e08d111-e188-45f4-8697-2c79a98f98a0
+paperclip_identifier: MAZ-746
 ---
 
 # Issue: `SupervisorDaemonEngine` fails to close listener FDs on exception

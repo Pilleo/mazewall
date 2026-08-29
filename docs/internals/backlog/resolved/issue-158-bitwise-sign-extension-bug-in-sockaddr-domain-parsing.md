@@ -3,6 +3,8 @@ title: "Bitwise Sign-Extension Bug in `sockaddr` Domain Parsing"
 severity: "HIGH"
 status: "resolved"
 priority: high
+paperclip_issue_id: 1bd35209-a637-4799-b655-e34a064510b9
+paperclip_identifier: MAZ-334
 ---
 
 # 🔴 [Severity: MEDIUM]: Bitwise Sign-Extension Bug in `sockaddr` Domain Parsing

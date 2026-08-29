@@ -12,7 +12,8 @@ target_files:
 - tools/orchestrator/src/main/kotlin/io/mazewall/orchestrator/OrchestratorStates.kt
 effort: medium
 autonomy: autonomous
-paperclip_issue_id: 0cfd9b9a-9ab5-4e89-a8fa-a701b4ddb05a
+paperclip_issue_id: 7c730963-e185-41cc-8407-5b3fab7e31aa
+paperclip_identifier: MAZ-638
 ---
 
 # 🔴 [Severity: HIGH]: Dynamic Post-Push Target File Tracking in Orchestrator Active Slots

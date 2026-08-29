@@ -12,6 +12,8 @@ effort: "small"
 autonomy: "autonomous"
 open_questions: false
 dependencies: []
+paperclip_issue_id: 5b8792f2-9647-4f1d-af3d-46449e86cff4
+paperclip_identifier: MAZ-589
 ---
 
 # 🟠 [Severity: MEDIUM]: DiagnosticTriageRunner.captureThreadDump Blocks Indefinitely on Busy JVM Targets
@@ -34,4 +36,3 @@ and no bound on how many targets are probed. `captureDmesg()` has the same unbou
 3. Apply the same bounded pattern to `captureDmesg()`.
 4. Verification: `./gradlew :profiler:test --tests '*DiagnosticTriageRunnerTest*'` must pass within
    its assertion timeout even while a Gradle build is running concurrently.
-

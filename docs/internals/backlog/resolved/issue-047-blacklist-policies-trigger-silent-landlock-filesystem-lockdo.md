@@ -3,6 +3,8 @@ title: "Blacklist policies trigger silent Landlock filesystem lockdown due to `i
 severity: "RESOLVED"
 status: "resolved"
 priority: medium
+paperclip_issue_id: 1c84589d-8a97-4fb5-8293-de5fcdfe223f
+paperclip_identifier: MAZ-238
 ---
 
 # ✅ [RESOLVED]: Blacklist policies trigger silent Landlock filesystem lockdown due to `io_uring` check

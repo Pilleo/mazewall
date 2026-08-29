@@ -7,6 +7,8 @@ dependencies: []
 component: "orchestrator"
 effort: "medium"
 github_issue: 60
+paperclip_issue_id: db67f461-01d7-4d1e-9490-1910f4868ea4
+paperclip_identifier: MAZ-377
 ---
 
 # 🔴 [Severity: HIGH]: Orchestrator State Machine Refactor

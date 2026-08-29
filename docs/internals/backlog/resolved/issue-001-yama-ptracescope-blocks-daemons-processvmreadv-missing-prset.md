@@ -6,6 +6,8 @@ priority: high
 dependencies: []
 component: "unknown"
 effort: "medium"
+paperclip_issue_id: 306b1793-d946-4575-9c49-2fb260c21eda
+paperclip_identifier: MAZ-206
 ---
 
 # 🔴 [Severity: HIGH]: Yama `ptrace_scope` Blocks Daemon's `process_vm_readv` (Missing `PR_SET_PTRACER`)

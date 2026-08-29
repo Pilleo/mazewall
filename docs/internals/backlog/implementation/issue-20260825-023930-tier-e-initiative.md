@@ -15,7 +15,8 @@ effort: "xlarge"
 autonomy: "supervised"
 open_questions: false
 dependencies: []
-paperclip_issue_id: fc92dc4a-7a22-4527-afdf-79a5b0ac4af9
+paperclip_issue_id: 522fa278-e6c0-46e9-93f6-d1ae7692af1b
+paperclip_identifier: MAZ-708
 ---
 
 # 🟢 [Severity: ENHANCEMENT]: Tier E Initiative — eBPF Semantic Enrichment

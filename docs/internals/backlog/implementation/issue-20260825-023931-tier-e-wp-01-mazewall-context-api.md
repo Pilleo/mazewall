@@ -14,7 +14,8 @@ autonomy: "supervised"
 open_questions: true
 dependencies:
   - "issue-20260825-023930-tier-e-initiative.md"
-paperclip_issue_id: 6e81476f-d704-48bc-b3ca-639bd44c5f40
+paperclip_issue_id: 0d169705-13fe-48ce-aebb-e538abce2dc5
+paperclip_identifier: MAZ-709
 ---
 
 # 🟢 [Severity: ENHANCEMENT]: WP-01 — In-memory MazewallContext API

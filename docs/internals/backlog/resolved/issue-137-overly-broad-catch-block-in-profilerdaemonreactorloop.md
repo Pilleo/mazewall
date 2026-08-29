@@ -10,6 +10,8 @@ autonomy: "supervised"
 solution_approved: true
 blast_radius: "medium"
 reversible: true
+paperclip_issue_id: 82b9d5ab-25ae-4cd0-913f-43e996b90294
+paperclip_identifier: MAZ-313
 ---
 
 # 🔴 [Severity: LOW]: Overly Broad Catch Block in `ProfilerDaemon.reactorLoop`

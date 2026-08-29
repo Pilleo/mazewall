@@ -11,6 +11,8 @@ target_files:
   - "tools/orchestrator/src/main/kotlin/io/mazewall/orchestrator/OrchestratorDaemon.kt"
 effort: "medium"
 autonomy: "autonomous"
+paperclip_issue_id: 23bff758-f4ee-4062-9d12-13c3da588475
+paperclip_identifier: MAZ-425
 ---
 
 # 🔴 [Severity: HIGH]: Relax Scheduler Serialization to Prevent Empty Target Lists from Acting as Global Blocking Locks

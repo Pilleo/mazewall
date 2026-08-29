@@ -13,6 +13,8 @@ target_files:
 effort: "medium"
 autonomy: "autonomous"
 github_issue: 460
+paperclip_issue_id: fd42894c-cd5b-4005-9d08-77933af71c8d
+paperclip_identifier: MAZ-436
 ---
 
 # 🔴 [Severity: HIGH]: Refactor Orchestrator States with Command/Event Pattern for Side-Effect Isolation

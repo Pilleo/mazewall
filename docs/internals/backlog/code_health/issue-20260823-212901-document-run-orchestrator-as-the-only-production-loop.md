@@ -18,7 +18,8 @@ effort: "small"
 autonomy: "supervised"
 open_questions: false
 has_side_effects: false
-paperclip_issue_id: 3ccee6cc-9b64-462d-8f86-732326c6feb9
+paperclip_issue_id: ee3655fd-43ed-44af-a339-e466f23ecc90
+paperclip_identifier: MAZ-668
 ---
 
 # 🟡 [Severity: MEDIUM]: Document run_orchestrator as the only production loop

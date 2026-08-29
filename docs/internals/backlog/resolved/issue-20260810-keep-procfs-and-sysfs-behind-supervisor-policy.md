@@ -12,6 +12,8 @@ target_files:
   - "enforcer/src/test/kotlin/io/mazewall/enforcer/supervisor/ResolveAbsolutePathTest.kt"
 effort: "small"
 autonomy: "autonomous"
+paperclip_issue_id: fe265fc2-56cb-44fe-b786-de1439224acd
+paperclip_identifier: MAZ-478
 ---
 
 # 🔴 [Severity: HIGH]: Keep procfs and sysfs behind supervisor policy

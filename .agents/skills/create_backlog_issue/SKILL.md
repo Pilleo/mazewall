@@ -110,8 +110,9 @@ open_questions: false # Set to true if pending design/operator feedback
 
 ### 4. Target Module & File Declarations for Multi-Task Parallel Scheduling
 - Always declare **`target_modules`** (e.g. `[":enforcer"]`, `[":profiler"]`, `[":tools:orchestrator"]`).
-- Declare **`target_files`** whenever specific files to be modified are known.
-- The Orchestrator uses these fields to schedule non-conflicting tasks concurrently without git merge collisions or Gradle lock contention.
+- Declare **`target_files`** and specific **`target_symbols`** whenever specific files or methods to be modified are known.
+- When `target_symbols` are disjoint and `has_side_effects: false`, the Orchestrator allows concurrent dispatch on the same file without conflict.
+- **Inspect Vibe Findings:** When picking up a task generated or clarified by Vibe, always review the **`## ❓ Open Questions`**, **`## Investigation`**, and **`## Important details`** sections before implementing to incorporate prior architectural findings.
 
 ### 5. Safety Invariants
 - **Fail Closed:** Ensure any recommended security fix follows the "Fail Closed" doctrine.

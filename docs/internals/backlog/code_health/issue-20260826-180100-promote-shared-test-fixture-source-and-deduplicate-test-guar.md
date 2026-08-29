@@ -1,7 +1,7 @@
 ---
 title: "Promote shared test fixture source and deduplicate test guards and fakes"
 severity: "LOW"
-status: "open"
+status: "done"
 priority: high
 dependencies:
   - "issue-20260826-180041"
@@ -21,9 +21,20 @@ effort: "medium"
 autonomy: "autonomous"
 open_questions: false
 has_side_effects: false
+paperclip_issue_id: 87dc4c4b-d205-4def-89da-bc5f73770bf2
+review_status: "approved_with_minor_fix"
+review_date: "2026-08-27"
+reviewer: "Mistral Vibe Agent (d159bcf4-4a01-4fd8-9007-bad4aababfeb)"
+review_commit: "d99444d5f78e45cc3d9bf577690d81b6377b1079"
+completion_date: "2026-08-27"
+completed_by: "Vibe ACP Developer (d159bcf4-4a01-4fd8-9007-bad4aababfeb)"
+pr_url: "https://github.com/Pilleo/mazewall/pull/523"
+pr_merged_commit: "5c7d5c44 Merge pull request #523 from Pilleo/fix/shared-test-fixtures-1676116149387728033"
+paperclip_identifier: MAZ-178
 ---
 
-# 🟢 [Severity: LOW]: Promote shared test fixture source and deduplicate test guards and fakes
+# ✅ [Severity: LOW]: Promote shared test fixture source and deduplicate test guards and fakes
+**Status:** DONE - Completed via PR #523 (merged 2026-08-27)
 
 **Context:**
 Test fixtures, assumption guards, and mocks are currently copy-pasted across multiple submodules and test suites:

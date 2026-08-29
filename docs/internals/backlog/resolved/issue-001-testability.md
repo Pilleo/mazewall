@@ -4,6 +4,8 @@ scope: "all"
 status: "resolved"
 priority: high
 severity: "HIGH"
+paperclip_issue_id: 2e09cbc3-cd23-4522-88fa-26907b792d13
+paperclip_identifier: MAZ-205
 ---
 
 ### Context

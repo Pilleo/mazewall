@@ -13,6 +13,8 @@ effort: "medium"
 autonomy: "autonomous"
 related_pr: 512
 related_thread: PRRC_kwDOScnnEM7kBdY
+paperclip_issue_id: a00e0e99-e2bd-400d-b8f9-dc44589bbdde
+paperclip_identifier: MAZ-495
 ---
 
 # 🟠 [Severity: MEDIUM]: Drain child output while waiting for strace

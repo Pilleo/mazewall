@@ -29,7 +29,8 @@ When fixing bugs or resolving failing tests, you must avoid introducing fragile 
 
 ### 1. Research & Analysis
 *   **Locate the Backlog Entry:** Find the target file in `docs/internals/backlog/` (e.g. `docs/internals/backlog/security/issue-XXX-name.md`, or under `performance/`, `testing/`, `code_health/`).
-*   **Locate Code Targets:** Identify the target files and symbols. Use `grep_search` to find all relevant call sites.
+*   **Review and Resolve Vibe Questions/Findings First:** Inspect `## ❓ Open Questions` and `## Investigation` populated by Vibe/ACP. **You must actively investigate and answer these questions yourself first** by checking codebase symbols, design docs (`docs/internals/designs/`), and kernel invariants. Only escalate to a conversational prompt with the operator if a question represents a genuine, unresolvable operator policy choice.
+*   **Locate Code Targets:** Identify the target files and symbols. Use `grep_search` or `codanna` to find all relevant call sites.
 *   **Verify State:** Confirm if the issue is still present in the current codebase.
 
 ### 2. TDD Reproduction (Mandatory)

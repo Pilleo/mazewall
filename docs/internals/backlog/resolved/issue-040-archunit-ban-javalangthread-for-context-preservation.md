@@ -11,6 +11,8 @@ solution_approved: false
 blast_radius: "medium"
 reversible: true
 github_issue: 245
+paperclip_issue_id: dc7f85f9-90ca-43b1-8b3f-a9b1c86c0d8a
+paperclip_identifier: MAZ-234
 ---
 
 # 🔴 [Severity: MEDIUM]: ArchUnit: Ban `java.lang.Thread` for Context Preservation

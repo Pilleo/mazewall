@@ -35,8 +35,16 @@ fun main(args: Array<String>) {
         )
         result = IssueClarifier.enrichWithoutAcp(result, repoRoot, hits)
         result = IssueClarifier.hostFillPlaceholders(result, hits)
-        if (parsed.clarify) {
-            val (weak, strong) = ClarifyModels.resolve(repoRoot) { System.getenv(it) }
+        var clarify = parsed.clarify
+        val (weak, strong) = if (!parsed.noClarify) {
+            ClarifyModels.resolve(repoRoot) { System.getenv(it) }
+        } else {
+            null to null
+        }
+        if (weak != null && !parsed.noClarify) {
+            clarify = true
+        }
+        if (clarify && weak != null) {
             val scratch = File(repoRoot, "build/issue-clarify-scratch").apply { mkdirs() }
             try {
                 result = IssueClarifier.tryClarify(
@@ -74,6 +82,7 @@ internal data class ParsedCli(
     val interactive: Boolean = false,
     val nonInteractive: Boolean = false,
     val clarify: Boolean = false,
+    val noClarify: Boolean = false,
     val openQuestionsSpecified: Boolean? = null,
     val needsKernelSpecified: Boolean = false,
     val sideEffectsSpecified: Boolean? = null,
@@ -131,6 +140,7 @@ Agents: pass flags, no TTY. Humans: TTY auto-adds --interactive unless --non-int
         var interactive = false
         var nonInteractive = false
         var clarify = false
+        var noClarify = false
         var openQuestionsSpecified: Boolean? = null
         var sideEffectsSpecified: Boolean? = null
         var hasSideEffects: Boolean? = null
@@ -191,6 +201,7 @@ Agents: pass flags, no TTY. Humans: TTY auto-adds --interactive unless --non-int
                 "--interactive" -> interactive = true
                 "--non-interactive" -> nonInteractive = true
                 "--clarify" -> clarify = true
+                "--no-clarify" -> noClarify = true
                 "--dry-run" -> dryRun = true
                 "--root" -> root = args.getOrNull(++i) ?: root
                 "-h", "--help" -> throw IllegalArgumentException("help")
@@ -224,6 +235,7 @@ Agents: pass flags, no TTY. Humans: TTY auto-adds --interactive unless --non-int
             interactive = interactive,
             nonInteractive = nonInteractive,
             clarify = clarify,
+            noClarify = noClarify,
             openQuestionsSpecified = openQuestionsSpecified,
             needsKernelSpecified = needsKernelSpecified,
             sideEffectsSpecified = sideEffectsSpecified,

@@ -1,7 +1,7 @@
 ---
 title: "Replace spec-driven skill with a one-page work-package contract"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: high
 dependencies:
   - issue-20260823-181001
@@ -16,7 +16,8 @@ target_files:
 effort: "small"
 autonomy: "supervised"
 open_questions: false
-paperclip_issue_id: a5ac74da-9afa-44a5-8aa5-692fca127ebf
+paperclip_issue_id: c2b484f1-b144-42fc-a8ad-ee49bf210ed0
+paperclip_identifier: MAZ-728
 ---
 
 # 🟡 [Severity: MEDIUM]: Replace spec-driven skill with a one-page work-package contract

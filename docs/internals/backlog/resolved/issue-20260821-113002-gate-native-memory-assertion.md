@@ -13,6 +13,8 @@ effort: "small"
 autonomy: "autonomous"
 related_pr: 512
 related_thread: 3819751052
+paperclip_issue_id: 99db6c25-da7f-4725-9863-1ab4743029a8
+paperclip_identifier: MAZ-543
 ---
 
 # 🟡 [Severity: MEDIUM]: Gate the native-memory assertion on actual availability

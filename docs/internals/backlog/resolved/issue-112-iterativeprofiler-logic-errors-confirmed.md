@@ -14,6 +14,8 @@ autonomy: supervised
 solution_approved: false
 blast_radius: medium
 reversible: true
+paperclip_issue_id: 9c3b848a-2934-4c79-8799-5f2a7db30891
+paperclip_identifier: MAZ-289
 ---
 
 # 🔴 [Severity: HIGH]: `IterativeProfiler` Logic Errors (Confirmed)

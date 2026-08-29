@@ -12,7 +12,8 @@ target_files:
 effort: "small"
 autonomy: "autonomous"
 github_issue: 344
-paperclip_issue_id: 33530216-60de-44c3-a620-05e632bd9e7a
+paperclip_issue_id: 76dcb3e3-93a7-4425-b317-4eb66b7509e8
+paperclip_identifier: MAZ-642
 ---
 
 # 🔴 [Severity: HIGH]: Fix Custom Frontmatter Parser Colon-Splitting Logic Bug

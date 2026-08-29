@@ -11,6 +11,8 @@ target_files:
   - "enforcer/src/test/kotlin/io/mazewall/enforcer/FilterInstallationPlannerTest.kt"
 effort: "small"
 autonomy: "autonomous"
+paperclip_issue_id: 2b029444-d1c4-48ef-addb-e307ce5a441b
+paperclip_identifier: MAZ-568
 ---
 
 # 🟡 [Severity: MEDIUM]: Unit-test FilterInstallationPlanner.verifyFilterDepth fail-closed budget

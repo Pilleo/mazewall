@@ -1,7 +1,7 @@
 ---
 title: "Implement real Paperclip issue ingest from the markdown DAG"
 severity: "HIGH"
-status: "open"
+status: "resolved"
 priority: high
 dependencies:
   - issue-20260823-181010
@@ -15,6 +15,8 @@ target_files:
 effort: "medium"
 autonomy: "supervised"
 open_questions: false
+paperclip_issue_id: 88f8e5ca-189b-4226-ab23-d15a25f1c92e
+paperclip_identifier: MAZ-731
 ---
 
 # 🔴 [Severity: HIGH]: Implement real Paperclip issue ingest from the markdown DAG

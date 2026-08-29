@@ -11,6 +11,8 @@ target_files:
   - "enforcer/src/main/kotlin/io/mazewall/ffi/networking/SupervisorSocketInputStream.kt"
 effort: "medium"
 autonomy: "autonomous"
+paperclip_issue_id: baa650a0-9323-4f33-9d7c-a9f97c1e599e
+paperclip_identifier: MAZ-422
 ---
 
 # 🔴 [Severity: HIGH]: Prevent High CPU Spinning in SupervisorSocketInputStream on Interruption

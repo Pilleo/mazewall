@@ -15,7 +15,8 @@ reversible: true
 autonomy: supervised
 solution_approved: false
 blast_radius: medium
-paperclip_issue_id: dbacd336-ac9f-478e-9033-5648ec29595d
+paperclip_issue_id: 2dc60d75-e386-40be-a92e-e3d00ca903dd
+paperclip_identifier: MAZ-702
 ---
 
 # 🟡 [Severity: MEDIUM]: Orchestrator: Add Failure Context to Jules Retry and Completed-Without-PR Comments

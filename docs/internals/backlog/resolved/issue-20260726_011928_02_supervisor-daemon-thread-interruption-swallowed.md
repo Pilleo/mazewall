@@ -14,6 +14,8 @@ target_modules:
 - :enforcer
 target_files:
 - enforcer/src/main/kotlin/io/mazewall/enforcer/supervisor/SupervisorSessionHandler.kt
+paperclip_issue_id: 6f08c6bf-2967-46f8-b0a4-eeba060334ea
+paperclip_identifier: MAZ-389
 ---
 
 # Issue: `SupervisorSessionHandler` Loop Swallows Thread Interruption

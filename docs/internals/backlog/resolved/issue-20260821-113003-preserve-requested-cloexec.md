@@ -13,6 +13,8 @@ effort: "small"
 autonomy: "autonomous"
 related_pr: 512
 related_thread: 3819861583
+paperclip_issue_id: b28b028f-e379-4186-a628-274d6934e549
+paperclip_identifier: MAZ-552
 ---
 
 # 🟡 [Severity: MEDIUM]: Preserve requested close-on-exec state on injected FDs

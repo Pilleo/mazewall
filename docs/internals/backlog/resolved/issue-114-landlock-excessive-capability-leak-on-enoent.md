@@ -7,6 +7,8 @@ dependencies: []
 component: "enforcer"
 effort: "medium"
 github_issue: 255
+paperclip_issue_id: 7ef08183-95d4-4916-8369-d20b4cb352f7
+paperclip_identifier: MAZ-291
 ---
 
 # 🟡 [Severity: LOW]: Landlock Excessive Capability Leak on `ENOENT`

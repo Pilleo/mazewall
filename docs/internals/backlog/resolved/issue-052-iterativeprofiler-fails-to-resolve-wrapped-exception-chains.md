@@ -3,6 +3,8 @@ title: "`IterativeProfiler` fails to resolve wrapped exception chains"
 severity: "RESOLVED"
 status: "resolved"
 priority: medium
+paperclip_issue_id: add9ef52-5c2e-4bf7-9342-c96cdb75ba40
+paperclip_identifier: MAZ-243
 ---
 
 # ✅ [RESOLVED]: `IterativeProfiler` fails to resolve wrapped exception chains

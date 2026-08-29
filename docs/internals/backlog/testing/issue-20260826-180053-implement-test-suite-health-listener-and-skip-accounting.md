@@ -17,6 +17,8 @@ effort: "small"
 autonomy: "autonomous"
 open_questions: false
 has_side_effects: false
+paperclip_issue_id: fff3079c-5c51-41d4-953d-40e57277779b
+paperclip_identifier: MAZ-770
 ---
 
 # 🟢 [Severity: LOW]: Implement test suite health listener and skip accounting

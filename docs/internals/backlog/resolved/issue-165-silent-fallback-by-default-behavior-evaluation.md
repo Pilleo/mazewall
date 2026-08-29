@@ -11,6 +11,8 @@ solution_approved: false
 blast_radius: "medium"
 reversible: true
 github_issue: 151
+paperclip_issue_id: 46dd602b-ff09-4431-8d85-db8ea8d48fd4
+paperclip_identifier: MAZ-340
 ---
 
 # 🔴 [Severity: LOW]: Silent Fallback by default behavior evaluation

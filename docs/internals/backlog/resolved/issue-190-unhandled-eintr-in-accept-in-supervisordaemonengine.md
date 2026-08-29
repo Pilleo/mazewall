@@ -7,6 +7,8 @@ dependencies: []
 component: "unknown"
 effort: "medium"
 github_issue: 251
+paperclip_issue_id: a864b04a-4ba9-4cbe-bb09-e89a88945267
+paperclip_identifier: MAZ-367
 ---
 
 # 🔴 [Severity: MEDIUM]: Unhandled EINTR in accept in SupervisorDaemonEngine

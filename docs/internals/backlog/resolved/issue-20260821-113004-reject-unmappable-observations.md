@@ -14,6 +14,8 @@ effort: "small"
 autonomy: "autonomous"
 related_pr: 512
 related_thread: 3825912173
+paperclip_issue_id: adf20c30-32db-46d1-98ee-1446c8a3fc3c
+paperclip_identifier: MAZ-558
 ---
 
 # 🟡 [Severity: MEDIUM]: Reject observations that cannot map to a syscall

@@ -11,6 +11,8 @@ solution_approved: false
 blast_radius: "medium"
 reversible: true
 github_issue: 213
+paperclip_issue_id: 5c0ce86b-f133-41ec-9e4c-3b604290d781
+paperclip_identifier: MAZ-278
 ---
 
 # 🔴 [Severity: MEDIUM]: TOCTOU in `USER_NOTIF` Argument Dereferencing

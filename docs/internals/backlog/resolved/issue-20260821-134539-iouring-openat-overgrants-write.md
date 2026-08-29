@@ -13,6 +13,8 @@ target_files:
   - "profiler/src/test/kotlin/io/mazewall/profiler/ProfilerSessionApiTest.kt"
 effort: "small"
 autonomy: "autonomous"
+paperclip_issue_id: 8b63cf39-0e52-421f-b11d-4e356d40c341
+paperclip_identifier: MAZ-566
 ---
 
 # 🟡 [Severity: MEDIUM]: Unknown io_uring OPENAT modes are compiled as Landlock writes

@@ -7,7 +7,8 @@ component: "tools"
 target_modules: [":tools"]
 target_files: ["scripts/paperclip_telegram_bridge.py"]
 open_questions: false
-paperclip_issue_id: 9091da7d-0669-46ac-be14-78e6a36f0991
+paperclip_issue_id: 403efd69-d0b3-44f4-9401-12b8385f121c
+paperclip_identifier: MAZ-733
 ---
 
 # 🟡 [Severity: LOW]: Paperclip Bridge Resolution Lifecycle Probe

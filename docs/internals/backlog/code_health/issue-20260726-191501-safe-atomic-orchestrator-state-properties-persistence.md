@@ -11,7 +11,8 @@ target_files:
 - tools/orchestrator/src/main/kotlin/io/mazewall/orchestrator/OrchestratorDaemon.kt
 effort: small
 autonomy: autonomous
-paperclip_issue_id: 9dfca5fb-adf3-414d-932c-7b4a821c81ba
+paperclip_issue_id: 626d431b-13c3-4800-8f9d-6c075ba845d6
+paperclip_identifier: MAZ-640
 ---
 
 # 🔴 [Severity: HIGH]: Implement Atomic Write-Ahead Pattern for Orchestrator State File Persistence

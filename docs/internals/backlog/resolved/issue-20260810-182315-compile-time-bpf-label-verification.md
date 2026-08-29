@@ -12,6 +12,8 @@ target_files:
   - "enforcer/src/main/kotlin/io/mazewall/seccomp/BpfProgram.kt"
 effort: "medium"
 autonomy: "autonomous"
+paperclip_issue_id: dd0ceb98-dc24-45cd-8196-0b121f1b1cc8
+paperclip_identifier: MAZ-473
 ---
 
 # 🟢 [Severity: ENHANCEMENT]: Compile-Time BPF Label Verification (Type-Safe AST)

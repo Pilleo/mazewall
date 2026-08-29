@@ -15,6 +15,8 @@ effort: "small"
 autonomy: "supervised"
 related_pr: 512
 related_thread: PRRT_kwDOScnnEM6a5aRR
+paperclip_issue_id: be77c8e9-db10-4cea-95d0-de788e8c0d45
+paperclip_identifier: MAZ-528
 ---
 
 # 🔴 [Severity: HIGH]: Forward creation mode when emulating open calls

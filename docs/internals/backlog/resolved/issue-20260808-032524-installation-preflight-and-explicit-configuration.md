@@ -15,6 +15,8 @@ target_files:
   - "enforcer/src/main/kotlin/io/mazewall/enforcer/ContainedExecutors.kt"
 effort: "large"
 autonomy: "supervised"
+paperclip_issue_id: a49b174f-daf8-4444-a03b-5031cea0916d
+paperclip_identifier: MAZ-457
 ---
 
 # 🟡 [Severity: MEDIUM]: Add Installation Preflight, Effective Configuration and Typed Results

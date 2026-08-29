@@ -10,7 +10,8 @@ target_modules:
 - :enforcer
 component: testing
 effort: medium
-paperclip_issue_id: 678d981b-2ac8-4211-87de-077bd2587308
+paperclip_issue_id: 56e91c1f-4df7-4576-a99c-4b91c4f2668a
+paperclip_identifier: MAZ-759
 ---
 
 # 🟡 [Severity: LOW]: KtLint parser fails on Kotlin 2.x named context parameters syntax

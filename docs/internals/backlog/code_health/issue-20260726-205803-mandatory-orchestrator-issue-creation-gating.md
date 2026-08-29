@@ -13,7 +13,8 @@ target_files:
 - tools/orchestrator/src/main/kotlin/io/mazewall/orchestrator/ReviewIssueLauncher.kt
 effort: small
 autonomy: autonomous
-paperclip_issue_id: e2d5ace3-9641-4fc5-9ec9-189f5aaf5d92
+paperclip_issue_id: 525cb896-a71d-4e27-9ba7-bb087d93fa6d
+paperclip_identifier: MAZ-646
 ---
 
 # 🔴 [Severity: HIGH]: Enforce Mandatory Schema Gating and Skill Header Injection in Issue Creation API

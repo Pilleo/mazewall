@@ -11,6 +11,8 @@ target_files:
   - "enforcer/src/test/kotlin/io/mazewall/PolicyBuilderContractTest.kt"
 effort: "small"
 autonomy: "autonomous"
+paperclip_issue_id: a720ebad-e5a1-4129-89ad-e321fed83ef6
+paperclip_identifier: MAZ-573
 ---
 
 # 🟢 [Severity: LOW]: Lock PolicyBuilder Java fluent contract (same instance, snapshot on build)

@@ -15,7 +15,8 @@ reversible: true
 autonomy: supervised
 solution_approved: false
 blast_radius: medium
-paperclip_issue_id: 7319785a-4237-44a2-8699-bcf5723da628
+paperclip_issue_id: 56f9c06e-0095-4e17-bd22-f79ee31fdaf4
+paperclip_identifier: MAZ-700
 ---
 
 # 🔴 [Severity: HIGH]: Orchestrator: Validate Issue Context and Needed Before GitHub Issue Creation

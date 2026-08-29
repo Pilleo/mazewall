@@ -13,6 +13,8 @@ effort: "medium"
 autonomy: "supervised"
 open_questions: false
 dependencies: []
+paperclip_issue_id: 9621e818-99e4-4ab2-959d-373ce51ea6bf
+paperclip_identifier: MAZ-602
 ---
 
 # 🟡 [Severity: LOW]: Operator Observability — Structured Diagnostics Events
@@ -43,4 +45,3 @@ whitelists MazewallEvents with justification. Tests: MazewallEventsTest.
 2. Emit at existing decision points (the `onUnexpectedExit` hook already exists — generalize it).
 3. JUL adapters remain the default sink so current behavior is unchanged.
 4. Document a recipe: wiring events into Micrometer/OTel in the presentation docs.
-

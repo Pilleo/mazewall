@@ -11,7 +11,8 @@ target_files:
 - tools/orchestrator/src/main/kotlin/io/mazewall/orchestrator/OrchestratorDaemon.kt
 effort: medium
 autonomy: autonomous
-paperclip_issue_id: 2d838890-6373-4c7a-84ad-e6460ed6b829
+paperclip_issue_id: 50e5bfe2-9379-4925-9c01-72f1d7ac68e3
+paperclip_identifier: MAZ-644
 ---
 
 # 🔴 [Severity: HIGH]: Implement Serial PR Merge Queue in Orchestrator to Prevent Rebase Races

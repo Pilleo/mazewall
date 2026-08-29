@@ -11,6 +11,8 @@ target_files:
   - "profiler/src/main/kotlin/io/mazewall/profiler/engine/ProfilerDaemonEngine.kt"
 effort: "medium"
 autonomy: "autonomous"
+paperclip_issue_id: d53e61b8-f828-4fdd-926b-eb98b0506562
+paperclip_identifier: MAZ-405
 ---
 
 # 🔴 [Severity: HIGH]: ProfilerDaemonEngine client socket leak on thread spawning failure

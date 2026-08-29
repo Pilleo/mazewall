@@ -11,6 +11,8 @@ solution_approved: false
 blast_radius: "medium"
 reversible: true
 github_issue: 165
+paperclip_issue_id: 53a8aaa6-955f-47f5-9667-0b44d3db4a1c
+paperclip_identifier: MAZ-323
 ---
 
 # 🔴 [Severity: MEDIUM]: Unhandled Signal Interruptions (`EINTR`) during Supervisor Initialization

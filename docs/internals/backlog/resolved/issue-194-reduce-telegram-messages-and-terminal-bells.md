@@ -7,6 +7,8 @@ dependencies: []
 component: "orchestrator"
 effort: "small"
 github_issue: 58
+paperclip_issue_id: 404ec3fc-2089-4215-bc5f-fa200727b769
+paperclip_identifier: MAZ-373
 ---
 
 # 🔴 [Severity: HIGH]: Reduce Telegram Notification and Terminal Bell Spam on Status Changes

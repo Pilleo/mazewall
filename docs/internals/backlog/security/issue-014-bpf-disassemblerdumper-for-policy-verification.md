@@ -10,7 +10,8 @@ target_modules:
 - :enforcer
 component: enforcer
 effort: medium
-paperclip_issue_id: 56f0a90c-de41-4b86-9fcf-1348cfc77cc4
+paperclip_issue_id: 67981b0f-2df4-4e81-8ee2-9cacc7df2008
+paperclip_identifier: MAZ-739
 ---
 
 # 🔵 [Severity: ENHANCEMENT]: BPF Disassembler/Dumper for Policy Verification

@@ -13,6 +13,8 @@ effort: "small"
 autonomy: "autonomous"
 open_questions: false
 dependencies: []
+paperclip_issue_id: d07d0985-e6b5-4010-beb0-6055ed14b828
+paperclip_identifier: MAZ-605
 ---
 
 # 🔴 [Severity: HIGH]: BpfNativeCache Poisoned Across Engine Swaps — Mock Segments Reused by Real Engine
@@ -35,4 +37,3 @@ invisible in isolation.
    NativeEngine-trait rule; the root package is outside that boundary.
 3. Verified: pair-run flake eliminated (6/6 clean runs, previously 3/6 failing); full
    `./gradlew build` green including ArchitectureTest.
-

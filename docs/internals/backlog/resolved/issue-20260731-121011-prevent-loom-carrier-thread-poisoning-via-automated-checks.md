@@ -12,6 +12,8 @@ target_files:
 effort: "medium"
 autonomy: "autonomous"
 github_issue: 458
+paperclip_issue_id: d525e723-dc94-493d-b3f1-aa300e19480b
+paperclip_identifier: MAZ-444
 ---
 
 # 🔴 [Severity: HIGH]: Prevent Loom Carrier Thread Poisoning Via Automated Checks

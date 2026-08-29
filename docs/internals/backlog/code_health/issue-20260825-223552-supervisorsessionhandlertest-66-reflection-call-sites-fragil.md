@@ -16,7 +16,8 @@ core_lock: false
 effort: "medium"
 autonomy: "supervised"
 open_questions: false
-paperclip_issue_id: 98434886-fb6c-454a-b09c-63aaa89a52c4
+paperclip_issue_id: 4e7791ef-ee9c-45a1-b163-25f78728514a
+paperclip_identifier: MAZ-680
 ---
 
 # 🔴 [Severity: HIGH]: SupervisorSessionHandlerTest: 66 reflection call sites ? fragile, breaks silently on signature changes

@@ -11,6 +11,8 @@ solution_approved: false
 blast_radius: "low"
 reversible: true
 github_issue: 105
+paperclip_issue_id: f6edf8cf-c481-4bc9-affc-b0879b0b7df2
+paperclip_identifier: MAZ-374
 ---
 
 # 🔴 [Severity: HIGH]: Global/ThreadLocal ErrnoSegment Optimization

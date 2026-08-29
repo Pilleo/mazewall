@@ -6,6 +6,8 @@ priority: high
 dependencies: []
 component: "unknown"
 effort: "small"
+paperclip_issue_id: 4b42486c-2782-4bdf-b19d-e480987dcb75
+paperclip_identifier: MAZ-249
 ---
 
 # 🔴 [Severity: MEDIUM]: `SbobParser` Syntactic Pruning Inaccuracy

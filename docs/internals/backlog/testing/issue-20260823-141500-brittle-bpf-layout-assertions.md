@@ -12,7 +12,8 @@ effort: "small"
 autonomy: "autonomous"
 open_questions: false
 dependencies: []
-paperclip_issue_id: e77bcf45-afbf-4f7b-a3e6-51feecc6a35f
+paperclip_issue_id: f089d42d-0c7b-4c49-a4b0-da4a73cf36f8
+paperclip_identifier: MAZ-762
 ---
 
 # 🟡 [Severity: LOW]: Brittle Instruction-Layout Assertions in BpfFilterTest (Adjacent-Pair Scans)
@@ -32,4 +33,3 @@ to use the `evalBPF` simulator; other tests may share the pattern.
    extracting it to a test fixture so integration tests can reuse it.
 3. Optional: add golden-stream regression snapshots only where layout itself is the contract (e.g.
    BST shape tests), clearly labeled as such.
-

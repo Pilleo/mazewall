@@ -7,6 +7,8 @@ dependencies: []
 component: "enforcer"
 effort: "medium"
 github_issue: 267
+paperclip_issue_id: ed099c3c-1c65-471f-8ef4-d282e9c534c0
+paperclip_identifier: MAZ-303
 ---
 
 # 🔴 [Severity: MEDIUM]: Unhandled Signal Mask Inheritance in `ContainedExecutors`

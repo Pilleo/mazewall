@@ -236,9 +236,8 @@ class IssueTemplateGenerator(
                 if (!request.reviewVerdict.isNullOrBlank()) {
                     appendLine("review_verdict: ${request.reviewVerdict}")
                 }
-                if (request.hasSideEffects != null) {
-                    appendLine("has_side_effects: ${request.hasSideEffects}")
-                }
+                val hasSideEffects = request.hasSideEffects ?: true
+                appendLine("has_side_effects: $hasSideEffects")
                 appendLine("---")
                 appendLine()
                 appendLine("# $badge [Severity: $severity]: ${request.title.trim()}")

@@ -16,6 +16,8 @@ target_files:
 effort: "large"
 autonomy: "supervised"
 open_questions: false
+paperclip_issue_id: 4c12e67e-f7c0-4869-9b84-9c040bd09db7
+paperclip_identifier: MAZ-580
 ---
 
 # 🔵 [Severity: ENHANCEMENT]: Process portal: KotlinPoet host stub and worker dispatcher

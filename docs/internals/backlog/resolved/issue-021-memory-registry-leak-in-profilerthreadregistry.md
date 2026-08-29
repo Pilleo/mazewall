@@ -3,6 +3,8 @@ title: "Memory Registry Leak in `Profiler.threadRegistry`"
 severity: "RESOLVED"
 status: "resolved"
 priority: medium
+paperclip_issue_id: 0ef7da7e-8312-4d05-a1dc-771366bdc62d
+paperclip_identifier: MAZ-219
 ---
 
 # ✅ [RESOLVED]: Memory Registry Leak in `Profiler.threadRegistry`

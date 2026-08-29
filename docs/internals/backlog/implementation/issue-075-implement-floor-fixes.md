@@ -11,7 +11,10 @@ target_modules:
 - :enforcer
 component: enforcer
 effort: medium
+paperclip_issue_id: 3fb3b2dc-1c11-44bc-a6c2-9bbcb535b693
+paperclip_identifier: MAZ-199
 ---
+
 ### Context
 Initial attempt to expand the JVM invariant syscall floor (PR #98) identified several critical mapping and stability issues. The JVM requires a much larger set of syscalls for modern features (Loom, ZGC) and networking. Additionally, 64-bit register garbage causes BPF inspection failures.
 

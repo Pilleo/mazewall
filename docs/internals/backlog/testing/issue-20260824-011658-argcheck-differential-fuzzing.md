@@ -13,7 +13,8 @@ autonomy: "autonomous"
 open_questions: false
 dependencies:
   - "issue-20260823-171500"
-paperclip_issue_id: 4bc41dd5-b71d-4922-a12f-7e27553aeb2f
+paperclip_issue_id: 24417e50-c5f6-4be0-a6de-66b42bf044dd
+paperclip_identifier: MAZ-763
 ---
 
 # 🟡 [Severity: LOW]: Differential Fuzzing of ArgCheck Semantics vs Real Kernel
@@ -34,4 +35,3 @@ through both the simulator and the samples if they share a wrong assumption.
    thread per issue-20260823-172000 rules; skip KILL_* groups).
 3. Seed printed on failure for reproduction; fixed default seed list checked in.
 4. Wire into the existing `SeccompDifferentialVerdictTest` infrastructure rather than a new task.
-

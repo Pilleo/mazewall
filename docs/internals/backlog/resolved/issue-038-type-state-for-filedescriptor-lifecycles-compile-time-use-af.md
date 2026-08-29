@@ -11,6 +11,8 @@ target_modules:
 - :platform
 component: platform
 effort: medium
+paperclip_issue_id: 975f7f7a-3836-446c-9a74-a86933017abc
+paperclip_identifier: MAZ-232
 ---
 
 # ✅ [RESOLVED]: Type-State for `FileDescriptor` Lifecycles (Compile-Time Use-After-Close Safety)

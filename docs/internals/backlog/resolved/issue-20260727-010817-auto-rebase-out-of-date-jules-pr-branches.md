@@ -13,6 +13,8 @@ target_files:
 effort: "medium"
 autonomy: "supervised"
 github_issue: 348
+paperclip_issue_id: 416c38dc-124b-4ffd-8ab5-1a9ae4a65e3e
+paperclip_identifier: MAZ-396
 ---
 
 # 🔴 [Severity: HIGH]: Automated Rebase and Conflict Resolution for Out-of-Date Jules PR Branches in Orchestrator

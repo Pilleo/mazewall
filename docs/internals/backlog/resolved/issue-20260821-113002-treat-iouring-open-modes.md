@@ -15,6 +15,8 @@ effort: "small"
 autonomy: "autonomous"
 related_pr: 512
 related_thread: 3819590960
+paperclip_issue_id: b807b9ab-f195-4e65-b9d2-2de4b2bfc5cc
+paperclip_identifier: MAZ-547
 ---
 
 # 🟡 [Severity: MEDIUM]: Treat io_uring open modes as unresolved

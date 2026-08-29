@@ -11,6 +11,8 @@ solution_approved: false
 blast_radius: "medium"
 reversible: true
 github_issue: 145
+paperclip_issue_id: 8af58920-66b6-440b-baf8-1263c6cef29f
+paperclip_identifier: MAZ-348
 ---
 
 # 🔴 [Severity: MEDIUM]: Unhandled Signal Interruptions (`EINTR`) in socket IO

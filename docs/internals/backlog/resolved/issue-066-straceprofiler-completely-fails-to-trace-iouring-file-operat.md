@@ -10,6 +10,8 @@ target_modules:
 - :profiler
 component: profiler
 effort: medium
+paperclip_issue_id: 30999ede-adb4-4334-9b6c-142e14640223
+paperclip_identifier: MAZ-255
 ---
 
 # 🔴 [Severity: CRITICAL]: StraceProfiler completely fails to trace `io_uring` file operations natively

@@ -13,6 +13,8 @@ effort: "small"
 autonomy: "autonomous"
 related_pr: 512
 related_thread: 3819751067
+paperclip_issue_id: 8f018ea1-c49d-4539-a174-6aaf9df35e55
+paperclip_identifier: MAZ-551
 ---
 
 # 🟡 [Severity: MEDIUM]: Open executable targets without requiring read permission

@@ -9,6 +9,8 @@ target_modules: [\":enforcer\"]
 component: "enforcer"
 effort: "medium"
 github_issue: 318
+paperclip_issue_id: 5caca19b-f1bf-4edb-97c6-c54f2bb59b6e
+paperclip_identifier: MAZ-208
 ---
 
 # 🔵 [Severity: ENHANCEMENT]: Socket Address Family Filtering for Network Isolation Evasion Prevention

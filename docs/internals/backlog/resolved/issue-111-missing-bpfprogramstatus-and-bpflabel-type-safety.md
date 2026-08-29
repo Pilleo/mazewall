@@ -7,6 +7,8 @@ dependencies: []
 component: "enforcer"
 effort: "medium"
 github_issue: 75
+paperclip_issue_id: d64d1af9-af63-4c97-88d5-55a7f640be13
+paperclip_identifier: MAZ-288
 ---
 
 # 🔴 [Severity: MEDIUM]: Missing `BpfProgram<Status>` and `BpfLabel` Type-Safety

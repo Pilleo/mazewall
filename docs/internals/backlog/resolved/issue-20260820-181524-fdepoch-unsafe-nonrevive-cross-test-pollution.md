@@ -14,6 +14,8 @@ target_files:
   - "platform/src/test/kotlin/io/mazewall/core/FileDescriptorTest.kt"
 effort: "medium"
 autonomy: "supervised"
+paperclip_issue_id: 7bd98bd3-4630-4146-8d77-85ff2b46c971
+paperclip_identifier: MAZ-485
 ---
 
 # 🟡 [Severity: MEDIUM]: FileDescriptor.unsafe non-revival plus process-wide FdEpoch can poison sibling tests

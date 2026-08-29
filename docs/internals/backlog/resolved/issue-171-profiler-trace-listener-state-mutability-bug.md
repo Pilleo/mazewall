@@ -3,6 +3,8 @@ title: "Profiler Trace Listener State Mutability Bug"
 severity: "RESOLVED"
 status: "resolved"
 priority: medium
+paperclip_issue_id: fa247ded-d452-4de9-a093-35a4e27a06a8
+paperclip_identifier: MAZ-346
 ---
 
 # ✅ [RESOLVED]: Profiler Trace Listener State Mutability Bug

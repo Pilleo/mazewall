@@ -14,6 +14,8 @@ open_questions: false
 dependencies:
   - "issue-20260825-023936-tier-e-wp-06-noise-budget.md"
   - "issue-20260825-023937-tier-e-wp-07-container-metadata.md"
+paperclip_issue_id: d6f2bfa6-0371-4f8f-922e-ab21b2c766e1
+paperclip_identifier: MAZ-204
 ---
 
 # 🟢 [Severity: ENHANCEMENT]: WP-08 — FFM Bridge Client

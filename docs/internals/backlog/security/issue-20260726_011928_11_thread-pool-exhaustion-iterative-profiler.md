@@ -12,7 +12,8 @@ target_modules:
 - :enforcer
 target_files:
 - profiler/src/main/kotlin/io/mazewall/profiler/iterative/IterativeProfiler.kt
-paperclip_issue_id: db7d4adf-7e2a-4eb5-9126-38c6b3542be7
+paperclip_issue_id: f8e6dc57-9f78-4d90-96c9-ecfe6f4d1c4b
+paperclip_identifier: MAZ-747
 ---
 
 # Issue: `IterativeProfiler` Thread Exhaustion

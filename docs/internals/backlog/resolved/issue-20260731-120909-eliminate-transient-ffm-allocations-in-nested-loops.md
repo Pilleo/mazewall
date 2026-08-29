@@ -13,6 +13,8 @@ target_files:
 effort: "medium"
 autonomy: "autonomous"
 github_issue: 448
+paperclip_issue_id: 04888177-1345-4363-b4de-c5460d0bfc74
+paperclip_identifier: MAZ-443
 ---
 
 # 🔶 [Severity: MEDIUM]: Eliminate Transient FFM Allocations and Memory Leaks in Nested Loops

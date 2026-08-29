@@ -3,6 +3,8 @@ title: "Trace Listener misleads developers by capturing the Main Thread stack tr
 severity: "RESOLVED"
 status: "resolved"
 priority: medium
+paperclip_issue_id: 94f9abe5-52ce-45f1-bbcc-1ffc80ee0980
+paperclip_identifier: MAZ-241
 ---
 
 # ✅ [RESOLVED]: Trace Listener misleads developers by capturing the Main Thread stack trace for unmapped child threads

@@ -13,6 +13,8 @@ effort: "medium"
 autonomy: "supervised"
 related_pr: 512
 related_thread: PRRT_kwDOScnnEM6a9Pyp
+paperclip_issue_id: b3176a64-a53b-4223-9fc1-5e2747407122
+paperclip_identifier: MAZ-516
 ---
 
 # 🔴 [Severity: HIGH]: Wait for the event consumer before certifying the drain

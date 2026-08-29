@@ -269,6 +269,84 @@ class ParallelTaskSchedulerTest {
     }
 
     @Test
+    fun testMethodGranularityDisjointSymbolsCanRunConcurrently() {
+        val env = MockOrchestratorEnvironment()
+        val runner = OrchestratorDaemonRunner(env, File(tempDir, ".state.methodlocks.properties"))
+
+        // Active issue in Enforcer.kt targeting symbol 'methodA' without side effects
+        val activeIssue = BacklogIssue(
+            file = File(tempDir, "issue-method-a.md"),
+            id = "issue-method-a",
+            title = "Task Method A",
+            priority = BacklogPriority.HIGH,
+            status = "open",
+            dependencies = emptyList(),
+            targetFiles = listOf("Enforcer.kt"),
+            targetModules = listOf(":enforcer"),
+            targetSymbols = listOf("methodA"),
+            hasSideEffects = false
+        )
+
+        // Candidate 1: same file Enforcer.kt, disjoint symbol 'methodB', no side effects -> should start concurrently
+        val disjointCandidate = BacklogIssue(
+            file = File(tempDir, "issue-method-b.md"),
+            id = "issue-method-b",
+            title = "Task Method B",
+            priority = BacklogPriority.HIGH,
+            status = "open",
+            dependencies = emptyList(),
+            targetFiles = listOf("Enforcer.kt"),
+            targetModules = listOf(":enforcer"),
+            targetSymbols = listOf("methodB"),
+            hasSideEffects = false
+        )
+
+        // Candidate 2: same file Enforcer.kt, overlapping symbol 'methodA', no side effects -> should be blocked
+        val overlappingCandidate = BacklogIssue(
+            file = File(tempDir, "issue-method-a-overlap.md"),
+            id = "issue-method-a-overlap",
+            title = "Task Method A Overlap",
+            priority = BacklogPriority.MEDIUM,
+            status = "open",
+            dependencies = emptyList(),
+            targetFiles = listOf("Enforcer.kt"),
+            targetModules = listOf(":enforcer"),
+            targetSymbols = listOf("methodA"),
+            hasSideEffects = false
+        )
+
+        // Candidate 3: same file Enforcer.kt, disjoint symbol 'methodC', but HAS side effects -> should be blocked
+        val sideEffectsCandidate = BacklogIssue(
+            file = File(tempDir, "issue-method-c.md"),
+            id = "issue-method-c",
+            title = "Task Method C with Side Effects",
+            priority = BacklogPriority.MEDIUM,
+            status = "open",
+            dependencies = emptyList(),
+            targetFiles = listOf("Enforcer.kt"),
+            targetModules = listOf(":enforcer"),
+            targetSymbols = listOf("methodC"),
+            hasSideEffects = true
+        )
+
+        env.issues.addAll(listOf(activeIssue, disjointCandidate, overlappingCandidate, sideEffectsCandidate))
+
+        val slotActive = SlotContext("issue-method-a").apply {
+            currentIssueTitle = "Task Method A"
+            currentIssueFile = activeIssue.file.path
+            state = PendingApprovalState("issue-method-a", "Task Method A", activeIssue.file.path)
+        }
+        runner.context.activeSlots.add(slotActive)
+
+        runner.selectAndStartTasks()
+
+        val activeIds = runner.context.activeSlots.map { it.currentIssueId }.toSet()
+        assertTrue(activeIds.contains("issue-method-b"), "Disjoint symbol candidate without side effects should run concurrently")
+        assertFalse(activeIds.contains("issue-method-a-overlap"), "Overlapping symbol candidate should be blocked")
+        assertFalse(activeIds.contains("issue-method-c"), "Candidate with side effects on the same file should be blocked")
+    }
+
+    @Test
     fun testSerializationOfMultipleSlots() {
         val context = OrchestratorContext()
 

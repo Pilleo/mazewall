@@ -7,6 +7,8 @@ dependencies: []
 component: "ffi"
 effort: "medium"
 github_issue: 282
+paperclip_issue_id: f056fe73-9208-4b9e-93bd-25919036cddc
+paperclip_identifier: MAZ-223
 ---
 
 # 🔵 [Severity: ENHANCEMENT]: Strongly-Typed Generics for `ioctl` Commands (`IoctlCommand<Req, Res>`)

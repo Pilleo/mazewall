@@ -17,6 +17,8 @@ autonomy: "autonomous"
 open_questions: false
 related_pr: 512
 related_thread: 3823789292
+paperclip_issue_id: 7a3fff99-82a2-4562-8178-a0e2405e85c7
+paperclip_identifier: MAZ-533
 ---
 
 # 🔴 [Severity: HIGH]: Trace mutation syscalls before certifying USER_NOTIF coverage

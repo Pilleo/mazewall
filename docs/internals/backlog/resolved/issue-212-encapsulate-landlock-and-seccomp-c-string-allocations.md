@@ -11,6 +11,8 @@ solution_approved: false
 blast_radius: "medium"
 reversible: true
 github_issue: 137
+paperclip_issue_id: 6a9544fd-245b-42f4-8f49-9677b1b247e7
+paperclip_identifier: MAZ-626
 ---
 
 # 🔴 [Severity: HIGH]: Encapsulate Landlock and Seccomp C-String & Struct Allocations

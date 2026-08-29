@@ -9,7 +9,10 @@ target_files: []
 effort: "medium"
 dependencies: []
 github_issue: 393
+paperclip_issue_id: f0b5cadd-5dc6-45a7-ae2e-b230ba8ea1a0
+paperclip_identifier: MAZ-412
 ---
+
 Please review profiler module using .agents/skills/review/SKILL.md skill. Create issues using skill .agents/skills/create_backlog_issue/SKILL.md
 
 **Additional Focus Instructions:**
@@ -28,4 +31,3 @@ Adhere strictly to the following project invariants:
 4. **FFM Safety**: Ensure correct layout alignments, arena lifecycles, and off-heap memory safety. Use `JAVA_LONG` correctly and avoid its misuse on 32-bit fields.
 5. **Loom Carrier Protection**: Prevent virtual thread carrier thread poisoning. Never apply seccomp filters that restrict the underlying OS carrier thread in a way that affects other virtual threads.
 6. **Pull latest master**: You are working in a team of other agents, so master is updated all the time. Before submitting your work always pull in latest origin master, and push only after that.
-

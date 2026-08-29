@@ -16,7 +16,8 @@ target_files:
 effort: "huge"
 autonomy: "supervised"
 open_questions: false
-paperclip_issue_id: 0cdcd683-c03d-41d2-ab47-b8e052ee09eb
+paperclip_issue_id: e83846e1-dbe4-41ff-b23a-f6814256ef56
+paperclip_identifier: MAZ-656
 ---
 
 # 🟡 [Severity: MEDIUM]: Reduce and Version the Supported Public API Surface
@@ -28,5 +29,3 @@ paperclip_issue_id: 0cdcd683-c03d-41d2-ab47-b8e052ee09eb
 **Architectural Decision:**
 1. **Tooling:** Adopt `org.jetbrains.kotlinx.binary-compatibility-validator` (BCV) on `:enforcer`, `:profiler`, and `:platform` to track `.api` declarations and prevent unintentional surface expansion.
 2. **Explicit API Mode:** Enable `explicitApi()` mode in Kotlin compilation tasks for production modules to force explicit visibility qualifiers (`public` vs `internal`), preventing accidental leakage of internal FFM wrappers or helper functions.
-
-

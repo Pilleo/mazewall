@@ -13,6 +13,8 @@ effort: "small"
 autonomy: "autonomous"
 related_pr: 512
 related_thread: 3819982841
+paperclip_issue_id: 604e15bb-5847-481c-8161-9d26180d22e2
+paperclip_identifier: MAZ-526
 ---
 
 # 🔴 [Severity: HIGH]: Constrain recorded exec destinations during policy compilation

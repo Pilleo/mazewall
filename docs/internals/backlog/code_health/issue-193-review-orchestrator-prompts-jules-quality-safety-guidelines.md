@@ -15,7 +15,8 @@ autonomy: supervised
 solution_approved: false
 blast_radius: medium
 reversible: true
-paperclip_issue_id: 461cdf24-7833-4995-9e96-67d68bc10deb
+paperclip_issue_id: b13d7db8-7f84-4429-98c1-b7ff4dd125e3
+paperclip_identifier: MAZ-631
 ---
 
 # 🔴 [Severity: HIGH]: Review and Enhance Orchestrator Prompts for Jules to Enforce Quality and Safety Guidelines

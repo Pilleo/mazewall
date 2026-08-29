@@ -13,6 +13,8 @@ effort: "medium"
 autonomy: "autonomous"
 related_pr: 512
 related_thread: PRRC_kwDOScnnEM7kBdR
+paperclip_issue_id: d248e6ff-2b10-4b8b-8eca-b4bad87165c7
+paperclip_identifier: MAZ-493
 ---
 
 # 🟡 [Severity: LOW]: Do not reject reused live descriptors during poll

@@ -12,6 +12,8 @@ target_files:
   - "tools/orchestrator/build.gradle.kts"
 effort: "medium"
 autonomy: "autonomous"
+paperclip_issue_id: ab47088f-0717-44d7-95e6-71f425e20fd8
+paperclip_identifier: MAZ-382
 ---
 
 # 🔴 [Severity: HIGH]: Implement Automated Backlog Schema Validation Script & Gradle Build Barrier

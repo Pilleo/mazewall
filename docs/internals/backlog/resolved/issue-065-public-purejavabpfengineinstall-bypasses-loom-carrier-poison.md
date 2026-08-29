@@ -3,6 +3,8 @@ title: "Public `PureJavaBpfEngine.install` bypasses Loom Carrier Poisoning safeg
 severity: "RESOLVED"
 status: "resolved"
 priority: medium
+paperclip_issue_id: 060f1c9d-bf84-47bd-befe-6f47a1a8290b
+paperclip_identifier: MAZ-254
 ---
 
 # ✅ [RESOLVED]: Public `PureJavaBpfEngine.install` bypasses Loom Carrier Poisoning safeguards and JIT warmups

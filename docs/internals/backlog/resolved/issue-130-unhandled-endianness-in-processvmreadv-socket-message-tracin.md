@@ -11,6 +11,8 @@ solution_approved: false
 blast_radius: "medium"
 reversible: true
 github_issue: 187
+paperclip_issue_id: 57609aa2-1a38-4e5d-bfed-8063c69b9961
+paperclip_identifier: MAZ-306
 ---
 
 # 🔴 [Severity: MEDIUM]: Unhandled Endianness in `process_vm_readv` Socket Message Tracing

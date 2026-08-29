@@ -11,6 +11,8 @@ solution_approved: false
 blast_radius: "medium"
 reversible: true
 github_issue: 227
+paperclip_issue_id: 3920015b-8eb6-4023-be21-6201a0ad3867
+paperclip_identifier: MAZ-270
 ---
 
 # 🔴 [Severity: MEDIUM]: Unhandled `O_PATH` Omission on Landlock Fallback Directories

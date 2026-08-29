@@ -25,6 +25,8 @@ effort: "medium"
 autonomy: "supervised"
 open_questions: false
 has_side_effects: true
+paperclip_issue_id: 9a067515-130e-459e-87b1-721bc106efc8
+paperclip_identifier: MAZ-612
 ---
 
 # 🟡 [Severity: MEDIUM]: Model IssueClarifier loop as sealed ClarifyStage

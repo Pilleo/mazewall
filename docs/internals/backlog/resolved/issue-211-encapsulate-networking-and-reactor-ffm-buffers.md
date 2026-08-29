@@ -11,6 +11,8 @@ solution_approved: false
 blast_radius: "medium"
 reversible: true
 github_issue: 139
+paperclip_issue_id: c34e953b-f7bb-4b2e-9d16-fd5fe7f76e32
+paperclip_identifier: MAZ-625
 ---
 
 # 🔴 [Severity: HIGH]: Encapsulate Networking Streams and Daemon Reactor Buffers in io.mazewall.ffi

@@ -14,6 +14,8 @@ effort: "small"
 autonomy: "autonomous"
 related_pr: 512
 related_thread: 3825290323
+paperclip_issue_id: c7d25994-6352-4c34-8026-9aaf6e529c50
+paperclip_identifier: MAZ-555
 ---
 
 # 🟡 [Severity: MEDIUM]: Give ERRNO precedence over TRACE during intersection

@@ -11,6 +11,8 @@ target_files:
   - "enforcer/src/test/kotlin/io/mazewall/ArchitectureTest.kt"
 effort: "small"
 autonomy: "autonomous"
+paperclip_issue_id: 0c48e56e-c186-4219-8a11-f0914b3204b3
+paperclip_identifier: MAZ-483
 ---
 
 # 🟡 [Severity: MEDIUM]: ArchUnit FileDescriptor.unsafe production ban does not match Companion calls

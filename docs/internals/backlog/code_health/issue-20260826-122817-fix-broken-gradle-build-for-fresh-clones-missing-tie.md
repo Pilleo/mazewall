@@ -15,7 +15,8 @@ core_lock: false
 effort: "small"
 autonomy: "supervised"
 open_questions: false
-paperclip_issue_id: dcffe68a-4d59-49d5-be2d-d96dd19d20aa
+paperclip_issue_id: 00f802ba-be70-420e-966e-9988a16622f4
+paperclip_identifier: MAZ-686
 ---
 
 # 🟢 [Severity: LOW]: Fix broken Gradle build for fresh clones: missing tier-e-proto directory

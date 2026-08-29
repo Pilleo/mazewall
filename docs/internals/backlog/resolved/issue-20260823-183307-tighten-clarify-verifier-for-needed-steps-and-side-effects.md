@@ -20,6 +20,8 @@ effort: "small"
 autonomy: "supervised"
 open_questions: false
 has_side_effects: true
+paperclip_issue_id: 6251a32d-282c-4800-902e-96b6f147de13
+paperclip_identifier: MAZ-610
 ---
 
 # 🟡 [Severity: MEDIUM]: Tighten clarify verifier for needed steps and side effects

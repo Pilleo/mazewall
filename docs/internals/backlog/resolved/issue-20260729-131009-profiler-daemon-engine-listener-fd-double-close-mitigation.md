@@ -11,6 +11,8 @@ target_files:
   - "profiler/src/main/kotlin/io/mazewall/profiler/engine/ProfilerDaemonEngine.kt"
 effort: "medium"
 autonomy: "autonomous"
+paperclip_issue_id: c889f29d-cd05-40af-937b-f5d7ba471b3e
+paperclip_identifier: MAZ-409
 ---
 
 # 🔴 [Severity: HIGH]: ProfilerDaemonEngine seccomp listener FD double-close mitigation

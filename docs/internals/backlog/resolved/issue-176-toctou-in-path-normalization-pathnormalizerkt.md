@@ -10,6 +10,8 @@ autonomy: "supervised"
 solution_approved: true
 blast_radius: "medium"
 reversible: true
+paperclip_issue_id: 031b34e7-3bef-4942-8db1-715770a78ce2
+paperclip_identifier: MAZ-351
 ---
 
 # ✅ [RESOLVED]: TOCTOU in Path Normalization `PathNormalizer.kt`

@@ -11,6 +11,8 @@ solution_approved: false
 blast_radius: "medium"
 reversible: true
 github_issue: 199
+paperclip_issue_id: 51759205-4c75-4793-8c79-7981d2fe0902
+paperclip_identifier: MAZ-299
 ---
 
 # 🔴 [Severity: PERFORMANCE]: Inefficient ThreadLocal usage in `ThreadStateRegistry`

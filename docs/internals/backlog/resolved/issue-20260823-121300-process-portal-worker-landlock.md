@@ -16,6 +16,8 @@ target_files:
 effort: "medium"
 autonomy: "supervised"
 open_questions: false
+paperclip_issue_id: 44865208-c5a7-4fa3-88b8-9838296e205e
+paperclip_identifier: MAZ-579
 ---
 
 # 🔵 [Severity: ENHANCEMENT]: Process portal: Landlock on the worker with JVM classpath

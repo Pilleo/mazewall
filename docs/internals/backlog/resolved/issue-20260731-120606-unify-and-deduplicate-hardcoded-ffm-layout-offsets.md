@@ -13,6 +13,8 @@ target_files:
   - "enforcer/src/main/kotlin/io/mazewall/enforcer/supervisor/SupervisorSessionHandler.kt"
 effort: "medium"
 autonomy: "autonomous"
+paperclip_issue_id: b06d252d-3871-4943-a4fc-5bfcdae839f3
+paperclip_identifier: MAZ-441
 ---
 
 # 🔴 [Severity: HIGH]: Unify and Deduplicate Hardcoded FFM Layout Offsets Across Profiler and Enforcer

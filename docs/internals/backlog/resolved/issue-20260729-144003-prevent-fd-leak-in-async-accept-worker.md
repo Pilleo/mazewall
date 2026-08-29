@@ -12,6 +12,8 @@ target_files:
 effort: "medium"
 autonomy: "autonomous"
 github_issue: 439
+paperclip_issue_id: 5769f4e3-f21d-485b-9d35-bb2a1236901e
+paperclip_identifier: MAZ-415
 ---
 
 # 🔴 [Severity: HIGH]: Prevent file descriptor and local socket leaks in Supervisor's async accept worker thread under failure conditions

@@ -14,7 +14,8 @@ target_files:
 effort: "small"
 autonomy: "autonomous"
 open_questions: false
-paperclip_issue_id: 96dbcce1-8434-4602-a787-338b1c29c7dd
+paperclip_issue_id: de7ea09f-220e-4394-babf-59efd1fc419f
+paperclip_identifier: MAZ-660
 ---
 
 # 🟡 [Severity: MEDIUM]: Make loop-driven Checker use cheap module tests; OCI only when needs_kernel

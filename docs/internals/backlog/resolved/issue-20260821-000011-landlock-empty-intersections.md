@@ -14,6 +14,8 @@ effort: "medium"
 autonomy: "autonomous"
 related_pr: 512
 related_thread: PRRC_kwDOScnnEM6H6P
+paperclip_issue_id: 715fcbcc-3eb8-460c-acba-4f19ef9470ce
+paperclip_identifier: MAZ-523
 ---
 
 # 🔴 [Severity: HIGH]: Apply Landlock for empty restrictive intersections

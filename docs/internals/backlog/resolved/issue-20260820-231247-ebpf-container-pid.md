@@ -11,6 +11,8 @@ target_files:
   - "profiler/src/main/kotlin/io/mazewall/profiler/EbpfLoad.kt"
 effort: "medium"
 autonomy: "autonomous"
+paperclip_issue_id: f9fe17fd-2fd9-4605-b65b-e79833607eba
+paperclip_identifier: MAZ-500
 ---
 
 # Do Not Use Container PID 1 to Identify the Initial User Namespace

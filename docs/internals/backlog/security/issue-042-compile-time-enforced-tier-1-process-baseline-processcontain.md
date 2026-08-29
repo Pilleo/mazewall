@@ -10,6 +10,8 @@ target_modules:
 - :enforcer
 component: enforcer
 effort: medium
+paperclip_issue_id: 7340dcbe-30c4-4d8a-b096-9512b7f65746
+paperclip_identifier: MAZ-628
 ---
 
 # ⚪ [Severity: ENHANCEMENT, deferred]: Compile-Time Enforced Tier 1 Process Baseline (`ProcessContainmentToken`)

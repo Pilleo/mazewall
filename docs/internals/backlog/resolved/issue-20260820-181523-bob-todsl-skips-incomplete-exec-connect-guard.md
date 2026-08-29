@@ -12,6 +12,8 @@ target_files:
   - "profiler/src/test/kotlin/io/mazewall/profiler/BillOfBehaviorTest.kt"
 effort: "small"
 autonomy: "autonomous"
+paperclip_issue_id: faa4d205-04d3-429c-9a84-b642b311d959
+paperclip_identifier: MAZ-484
 ---
 
 # 🟡 [Severity: MEDIUM]: BillOfBehavior.toDsl does not refuse observed exec/connect destinations

@@ -3,6 +3,8 @@ title: "ArchUnit: Strict Isolation of FFM (`java.lang.foreign`) Boundaries"
 severity: "RESOLVED"
 status: "resolved"
 priority: medium
+paperclip_issue_id: d5bf23ee-ca50-4979-9398-1b97fc93b557
+paperclip_identifier: MAZ-222
 ---
 
 # ✅ [RESOLVED]: ArchUnit: Strict Isolation of FFM (`java.lang.foreign`) Boundaries

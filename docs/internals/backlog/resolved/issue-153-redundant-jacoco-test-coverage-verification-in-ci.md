@@ -3,6 +3,8 @@ title: "Redundant JaCoCo Test Coverage Verification in CI"
 severity: "RESOLVED"
 status: "resolved"
 priority: medium
+paperclip_issue_id: df53f615-a971-491f-ac7e-79bb11bdade2
+paperclip_identifier: MAZ-329
 ---
 
 # ✅ [RESOLVED]: Redundant JaCoCo Test Coverage Verification in CI

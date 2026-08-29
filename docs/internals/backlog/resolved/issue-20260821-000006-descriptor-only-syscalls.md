@@ -14,6 +14,8 @@ effort: "small"
 autonomy: "autonomous"
 related_pr: 512
 related_thread: PRRT_kwDOScnnEM6a-1F2
+paperclip_issue_id: 17d120e3-cb4a-403a-933b-468c4c41e145
+paperclip_identifier: MAZ-519
 ---
 
 # 🟡 [Severity: MEDIUM]: Exclude descriptor-only calls from path completeness

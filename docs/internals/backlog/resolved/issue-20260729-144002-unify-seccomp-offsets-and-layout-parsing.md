@@ -14,6 +14,8 @@ target_files:
   - "profiler/src/main/kotlin/io/mazewall/profiler/engine/ProfilerConstants.kt"
 effort: "medium"
 autonomy: "autonomous"
+paperclip_issue_id: d966413b-10ed-4fd0-9ee7-6ad0e4c403ce
+paperclip_identifier: MAZ-414
 ---
 
 # 🔴 [Severity: HIGH]: Unify hardcoded Seccomp notification offsets in Profiler and Supervisor via centralized FFM Layouts

@@ -22,6 +22,8 @@ effort: "medium"
 autonomy: "supervised"
 open_questions: false
 has_side_effects: true
+paperclip_issue_id: de40a709-0841-4739-a78d-1ae60b31d0b2
+paperclip_identifier: MAZ-608
 ---
 
 # 🟡 [Severity: MEDIUM]: Scan impact and outlines before first ACP author

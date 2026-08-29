@@ -11,6 +11,8 @@ solution_approved: false
 blast_radius: "medium"
 reversible: true
 github_issue: 197
+paperclip_issue_id: cd893290-aabd-4bbc-92f8-9fc0a63d0e7a
+paperclip_identifier: MAZ-300
 ---
 
 # 🔴 [Severity: MEDIUM]: Missing Support for `O_PATH` and `O_CLOEXEC` in `Landlock` fallback

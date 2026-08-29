@@ -14,6 +14,8 @@ effort: "small"
 autonomy: "autonomous"
 related_pr: 512
 related_thread: 3797199301
+paperclip_issue_id: 32c07853-03cb-4488-97a3-845184d2a6c3
+paperclip_identifier: MAZ-535
 ---
 
 # 🟡 [Severity: MEDIUM]: Classify mutating io_uring operations as writes

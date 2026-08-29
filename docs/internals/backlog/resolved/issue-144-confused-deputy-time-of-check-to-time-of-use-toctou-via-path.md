@@ -7,6 +7,8 @@ dependencies: []
 component: "enforcer"
 effort: "small"
 github_issue: 263
+paperclip_issue_id: 36ee5ac4-764e-41f7-86e9-5110f34fa31a
+paperclip_identifier: MAZ-320
 ---
 
 # 🔴 [Severity: CRITICAL]: Confused Deputy / Time-of-Check to Time-of-Use (TOCTOU) via Path Modification

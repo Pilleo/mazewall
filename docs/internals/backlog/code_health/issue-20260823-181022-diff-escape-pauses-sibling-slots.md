@@ -16,7 +16,8 @@ target_files:
 effort: "medium"
 autonomy: "supervised"
 open_questions: false
-paperclip_issue_id: 53df39c0-4489-4c39-bbf0-b646b3ce9563
+paperclip_issue_id: 3a27cda7-eca7-411f-936d-0a455370eeff
+paperclip_identifier: MAZ-666
 ---
 
 # 🔴 [Severity: HIGH]: Pause sibling slots when a PR diff escapes declared target_files

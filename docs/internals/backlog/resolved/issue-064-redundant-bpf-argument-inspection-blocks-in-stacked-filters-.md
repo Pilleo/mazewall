@@ -3,6 +3,8 @@ title: "Redundant BPF Argument Inspection Blocks in Stacked Filters cause perfor
 severity: "RESOLVED"
 status: "resolved"
 priority: medium
+paperclip_issue_id: afc8e01c-d31a-4502-ae0d-895ffc386de4
+paperclip_identifier: MAZ-253
 ---
 
 # ✅ [RESOLVED]: Redundant BPF Argument Inspection Blocks in Stacked Filters cause performance and size bloat

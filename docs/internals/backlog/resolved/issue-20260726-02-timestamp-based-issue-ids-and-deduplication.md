@@ -12,6 +12,8 @@ target_files:
   - "tools/orchestrator/src/main/kotlin/io/mazewall/orchestrator/OrchestratorStates.kt"
 effort: "medium"
 autonomy: "autonomous"
+paperclip_issue_id: 4feb6626-7e81-4c26-98fb-9fd5f71bf719
+paperclip_identifier: MAZ-381
 ---
 
 # 🔴 [Severity: HIGH]: Transition Orchestrator & Backlog Parser to Timestamp-Based Issue IDs

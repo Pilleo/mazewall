@@ -13,6 +13,8 @@ target_files:
   - "tools/orchestrator/src/main/kotlin/io/mazewall/orchestrator/OrchestratorStates.kt"
 effort: "small"
 autonomy: "autonomous"
+paperclip_issue_id: 4c8dde86-7c13-4231-b7b9-d11447e3e3cf
+paperclip_identifier: MAZ-472
 ---
 
 # 🟡 [Severity: MEDIUM]: Ensure superseded label before creating a generation

@@ -11,6 +11,8 @@ target_files:
   - "profiler/src/test/kotlin/io/mazewall/profiler/engine/TraceEventTest.kt"
 effort: "small"
 autonomy: "autonomous"
+paperclip_issue_id: 456f59dd-822b-407a-9aa3-bbdad389c6b9
+paperclip_identifier: MAZ-460
 ---
 
 # 🟢 [Severity: LOW]: Correct PID to TID in TraceEvent test descriptions

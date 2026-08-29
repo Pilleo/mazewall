@@ -14,6 +14,8 @@ target_files:
   - "enforcer/src/main/kotlin/io/mazewall/PolicyDefinition.kt"
 effort: "large"
 autonomy: "supervised"
+paperclip_issue_id: 73698b01-a0e6-4497-b681-1bd60461f329
+paperclip_identifier: MAZ-456
 ---
 
 # 🟡 [Severity: MEDIUM]: Make Policy Mode and Composition Semantics Explicit

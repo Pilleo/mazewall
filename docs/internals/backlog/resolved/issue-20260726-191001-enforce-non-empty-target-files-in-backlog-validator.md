@@ -12,6 +12,8 @@ target_files:
 - tools/orchestrator/src/main/kotlin/io/mazewall/orchestrator/BacklogValidator.kt
 effort: small
 autonomy: autonomous
+paperclip_issue_id: c05222c1-34b5-41fb-8fb5-2abc8bfdc2d7
+paperclip_identifier: MAZ-386
 ---
 
 # 🔴 [Severity: HIGH]: Enforce Mandatory target_files in Backlog Validator for Conflict-Free Parallel Scheduling

@@ -1,7 +1,7 @@
 ---
 title: "Slim review skill: scoped diff review, drop 10-loop and no-summarize rules"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "docs"
@@ -13,7 +13,8 @@ target_files:
 effort: "small"
 autonomy: "supervised"
 open_questions: false
-paperclip_issue_id: e63aebc3-c305-401f-b1b2-5917ac8dbda1
+paperclip_issue_id: 592ad414-5648-458b-b15b-67ee98071e6a
+paperclip_identifier: MAZ-729
 ---
 
 # 🟡 [Severity: MEDIUM]: Slim review skill: scoped diff review, drop 10-loop and no-summarize rules

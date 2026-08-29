@@ -1,7 +1,7 @@
 ---
 title: "Stop inlining BacklogParser; run Paperclip ingest as an orchestrator main"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "orchestrator"
@@ -14,7 +14,8 @@ target_files:
 effort: "medium"
 autonomy: "supervised"
 open_questions: false
-paperclip_issue_id: 9f28f5dd-bc83-46b2-b12a-a5fe7a145756
+paperclip_issue_id: 16ad1548-eb03-483b-9389-c30c98991b00
+paperclip_identifier: MAZ-730
 ---
 
 # 🟡 [Severity: MEDIUM]: Stop inlining BacklogParser; run Paperclip ingest as an orchestrator main

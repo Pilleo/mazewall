@@ -13,6 +13,8 @@ effort: "small"
 autonomy: "autonomous"
 related_pr: 512
 related_thread: 3797199300
+paperclip_issue_id: 710171cb-9284-4b5b-bdcf-e19852feab27
+paperclip_identifier: MAZ-541
 ---
 
 # 🟡 [Severity: MEDIUM]: Keep worker-installing tests in fresh JVMs

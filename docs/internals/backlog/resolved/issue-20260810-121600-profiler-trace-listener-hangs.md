@@ -13,6 +13,8 @@ target_files:
   - "platform/src/main/kotlin/io/mazewall/platform/seccomp/daemon/SeccompDaemonEngine.kt"
 effort: "small"
 autonomy: "autonomous"
+paperclip_issue_id: 85261ed7-e31c-41f1-a53b-647304a48815
+paperclip_identifier: MAZ-466
 ---
 
 # 🔴 [Severity: HIGH]: ProfilerTraceListener Hangs Due to ACK Buffer Size Mismatch

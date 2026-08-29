@@ -14,6 +14,8 @@ effort: "small"
 autonomy: "autonomous"
 open_questions: false
 dependencies: []
+paperclip_issue_id: 46621706-63c9-468c-920b-db88f8e1600b
+paperclip_identifier: MAZ-597
 ---
 
 # 🟡 [Severity: LOW]: Bound All Blocking Waits
@@ -37,4 +39,3 @@ dependencies: []
    ignored.
 3. Sweep for remaining unbounded joins/waits in enforcer/profiler mains (`grep -rn "\.join()"`,
    `sleep(`) and either bound or justify each with a comment referencing this issue.
-

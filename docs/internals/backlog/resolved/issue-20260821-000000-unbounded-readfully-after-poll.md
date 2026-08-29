@@ -13,6 +13,8 @@ effort: "small"
 autonomy: "autonomous"
 related_pr: 512
 related_thread: PRRT_kwDOScnnEM6avSh2
+paperclip_issue_id: 4c2ec728-235a-43f2-8472-c3513a8fdccc
+paperclip_identifier: MAZ-513
 ---
 
 # 🔴 [Severity: P1]: Unbounded readFully after poll deadline

@@ -13,6 +13,8 @@ autonomy: "supervised"
 open_questions: false
 dependencies:
   - "issue-20260825-023935-tier-e-wp-05-concurrency-stress.md"
+paperclip_issue_id: 5aed1ac5-673b-4a66-8085-2ea9630301cc
+paperclip_identifier: MAZ-203
 ---
 
 # 🟢 [Severity: ENHANCEMENT]: WP-06 — Noise Budget & UNKNOWN Counters

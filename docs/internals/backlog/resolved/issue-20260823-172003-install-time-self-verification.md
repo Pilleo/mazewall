@@ -14,6 +14,8 @@ autonomy: "supervised"
 open_questions: false
 dependencies:
   - "issue-20260823-171500"
+paperclip_issue_id: acdb5a4d-19b2-4fab-a90d-1ada338828e8
+paperclip_identifier: MAZ-601
 ---
 
 # 🟠 [Severity: MEDIUM]: Install-Time Self-Verification Using BpfSimulator Probe Matrix
@@ -55,4 +57,3 @@ warms the verifier's transitive closure (method-level, not just Class.forName).
 3. Gate behind opt-in constant/system property defaulting ON for debug/classifier builds; measure
    overhead (< ~1ms; it is a handful of syscalls) before enabling everywhere.
 4. Reuse `SyscallProbeMatrix` from :platform so test-time and run-time verification cannot diverge.
-

@@ -11,6 +11,8 @@ target_files:
   - "profiler/src/main/kotlin/io/mazewall/profiler/collector/StraceCollector.kt"
 effort: "medium"
 autonomy: "autonomous"
+paperclip_issue_id: 5b6bab6e-147b-4672-ac42-17d5e6ef3596
+paperclip_identifier: MAZ-509
 ---
 
 # Drain Child Output While Waiting for Strace

@@ -7,6 +7,8 @@ dependencies: []
 component: "enforcer"
 effort: "small"
 github_issue: 94
+paperclip_issue_id: 40f712c5-d92f-4f29-af2f-ac4e69a2f4cb
+paperclip_identifier: MAZ-259
 ---
 
 # 🔴 [Severity: MEDIUM]: `ContainmentDesignSpec` test fails on systems without Landlock support

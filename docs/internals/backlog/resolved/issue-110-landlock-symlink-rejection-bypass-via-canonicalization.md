@@ -3,6 +3,8 @@ title: "Landlock Symlink Rejection Bypass via Canonicalization"
 severity: "RESOLVED"
 status: "resolved"
 priority: medium
+paperclip_issue_id: ab50fdcd-1d7f-4c70-ad21-b39871f6f3b5
+paperclip_identifier: MAZ-287
 ---
 
 # ✅ [RESOLVED]: Landlock Symlink Rejection Bypass via Canonicalization

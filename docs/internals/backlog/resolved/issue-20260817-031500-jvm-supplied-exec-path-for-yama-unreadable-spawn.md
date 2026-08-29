@@ -15,6 +15,8 @@ target_files:
   - "enforcer/src/main/kotlin/io/mazewall/enforcer/supervisor/PendingSpawnRegistry.kt"
 effort: "medium"
 autonomy: "supervised"
+paperclip_issue_id: 41b727c6-dfac-4016-905a-6476835d1762
+paperclip_identifier: MAZ-480
 ---
 
 # ✅ [RESOLVED]: Send JVM-known exec path in supervisor allow response

@@ -3,6 +3,8 @@ title: "Generic Type Safety for `MemorySegment` Payloads"
 severity: "RESOLVED"
 status: "resolved"
 priority: medium
+paperclip_issue_id: 5288f031-d346-43c3-aa05-629a7fc57112
+paperclip_identifier: MAZ-233
 ---
 
 # ✅ [RESOLVED]: Generic Type Safety for `MemorySegment` Payloads

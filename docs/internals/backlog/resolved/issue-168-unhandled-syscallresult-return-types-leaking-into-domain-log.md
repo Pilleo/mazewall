@@ -3,6 +3,8 @@ title: "Unhandled `SyscallResult` return types leaking into domain logic"
 severity: "RESOLVED"
 status: "resolved"
 priority: medium
+paperclip_issue_id: 33ab95a6-2078-4c13-9a38-fb9cc4615ba8
+paperclip_identifier: MAZ-343
 ---
 
 # ✅ [RESOLVED]: Unhandled `SyscallResult` return types leaking into domain logic

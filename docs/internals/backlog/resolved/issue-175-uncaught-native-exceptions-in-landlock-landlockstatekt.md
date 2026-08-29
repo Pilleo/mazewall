@@ -11,6 +11,8 @@ solution_approved: false
 blast_radius: "medium"
 reversible: true
 github_issue: 141
+paperclip_issue_id: 9309be2e-c2ef-43c9-867b-270559bd0bb5
+paperclip_identifier: MAZ-350
 ---
 
 # 🔴 [Severity: MEDIUM]: Uncaught Native Exceptions in Landlock `LandlockState.kt`

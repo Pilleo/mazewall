@@ -7,6 +7,8 @@ dependencies: []
 component: "testing"
 effort: "small"
 github_issue: 56
+paperclip_issue_id: 77f6d990-c497-4c70-bf70-00ba99504031
+paperclip_identifier: MAZ-370
 ---
 
 # 🔴 [Severity: HIGH]: Silent Test Logging with Vocal Output on Failure

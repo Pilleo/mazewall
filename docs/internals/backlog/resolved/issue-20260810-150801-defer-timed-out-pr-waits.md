@@ -12,6 +12,8 @@ target_files:
   - "tools/orchestrator/src/main/kotlin/io/mazewall/orchestrator/BacklogParser.kt"
 effort: "small"
 autonomy: "autonomous"
+paperclip_issue_id: 50440383-b6c7-44fe-9092-5629e3cd5ef8
+paperclip_identifier: MAZ-470
 ---
 
 # 🟡 [Severity: MEDIUM]: Defer Timed-Out PR Waits

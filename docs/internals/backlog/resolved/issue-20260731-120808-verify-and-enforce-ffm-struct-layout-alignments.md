@@ -12,6 +12,8 @@ target_files:
   - "enforcer/src/main/kotlin/io/mazewall/ffi/LayoutValidator.kt"
 effort: "medium"
 autonomy: "autonomous"
+paperclip_issue_id: 94dd7d39-4b3a-4898-8bcd-1bd6e70d41ef
+paperclip_identifier: MAZ-442
 ---
 
 # 🔴 [Severity: HIGH]: Verify and Enforce FFM Struct Layout Alignments Against Native C ABIs

@@ -11,6 +11,8 @@ solution_approved: false
 blast_radius: "medium"
 reversible: true
 github_issue: 241
+paperclip_issue_id: 48fa8a7e-8ac1-4b74-8a63-23c114d08d0a
+paperclip_identifier: MAZ-252
 ---
 
 # 🔴 [Severity: MEDIUM]: Excessive container privileges and deprecated Audit architecture in compose.yml files

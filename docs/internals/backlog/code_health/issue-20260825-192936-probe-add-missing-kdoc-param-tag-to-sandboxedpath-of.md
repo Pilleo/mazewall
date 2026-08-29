@@ -14,7 +14,8 @@ core_lock: false
 effort: "medium"
 autonomy: "supervised"
 open_questions: false
-paperclip_issue_id: 54e7152c-973d-48ff-b01a-957ec826c295
+paperclip_issue_id: bb8f902c-fcc7-474b-8bb6-fa94b6a7024d
+paperclip_identifier: MAZ-676
 ---
 
 # 🟢 [Severity: LOW]: PROBE: Add missing KDoc @param tag to SandboxedPath.of

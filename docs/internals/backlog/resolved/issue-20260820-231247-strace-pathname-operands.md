@@ -11,6 +11,8 @@ target_files:
   - "profiler/src/main/kotlin/io/mazewall/profiler/compiler/StraceLogParser.kt"
 effort: "medium"
 autonomy: "autonomous"
+paperclip_issue_id: 5a0775cb-a83c-44f8-b327-068111e475b4
+paperclip_identifier: MAZ-510
 ---
 
 # Extract Only Syscall Pathname Operands from Strace

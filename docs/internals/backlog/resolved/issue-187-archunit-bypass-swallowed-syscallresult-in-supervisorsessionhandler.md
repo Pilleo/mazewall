@@ -11,6 +11,8 @@ solution_approved: false
 blast_radius: "medium"
 reversible: true
 github_issue: 116
+paperclip_issue_id: 9b27d12d-3e89-4664-88e3-371684b177a6
+paperclip_identifier: MAZ-362
 ---
 
 # 🔴 [Severity: HIGH]: ArchUnit Bypass: Swallowed SyscallResult in SupervisorSessionHandler

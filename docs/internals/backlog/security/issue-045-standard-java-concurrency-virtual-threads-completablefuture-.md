@@ -11,7 +11,8 @@ target_modules:
 - :enforcer
 component: enforcer
 effort: small
-paperclip_issue_id: b2881031-dedd-4ce5-ab35-309e5b8d0504
+paperclip_issue_id: 97963b19-08f2-4c73-ba16-206841867047
+paperclip_identifier: MAZ-741
 ---
 
 # 🔴 [Severity: CRITICAL]: Standard Java Concurrency (`Virtual Threads`, `CompletableFuture`) trivially bypasses Thread-Scoped (Tier 2) containment without ACE

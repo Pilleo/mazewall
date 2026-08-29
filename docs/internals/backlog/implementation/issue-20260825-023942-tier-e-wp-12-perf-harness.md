@@ -13,7 +13,8 @@ autonomy: "supervised"
 open_questions: false
 dependencies:
   - "issue-20260825-023941-tier-e-wp-11-java-agent.md"
-paperclip_issue_id: 1ffbe691-556c-407c-b7ec-bd3f86b96c76
+paperclip_issue_id: 7a9605df-8fe1-47f8-ace0-fecaad326e69
+paperclip_identifier: MAZ-713
 ---
 
 # 🟢 [Severity: ENHANCEMENT]: WP-12 — Performance Harness

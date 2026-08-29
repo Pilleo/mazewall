@@ -13,6 +13,8 @@ target_files:
   - "profiler/src/main/kotlin/io/mazewall/profiler/ProfilerSessionHandler.kt"
 effort: "large"
 autonomy: "supervised"
+paperclip_issue_id: 13f7abf4-5cbf-4dcf-a91e-856e1a1938f8
+paperclip_identifier: MAZ-450
 ---
 
 # 🔴 [Severity: HIGH]: Profiler Design Contradicts the Implemented Synchronous ACK Protocol

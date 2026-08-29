@@ -13,6 +13,8 @@ effort: "small"
 autonomy: "supervised"
 related_pr: 512
 related_thread: 3825912176
+paperclip_issue_id: 98e096cf-c064-45b0-9709-84aa4c280ae8
+paperclip_identifier: MAZ-559
 ---
 
 # 🟡 [Severity: MEDIUM]: Advance the generation when adopting a new descriptor
