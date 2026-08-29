@@ -25,34 +25,54 @@ class PureJavaBpfEngineDowncallTest {
     @Test
     @EnabledOnOs(org.junit.jupiter.api.condition.OS.LINUX)
     fun setNoNewPrivsDowncallCompilesOnX86_64() {
-        val currentArch = Arch.current()
-        assertEquals(Arch.AUDIT_ARCH_X86_64, currentArch.audit)
+        val savedOsArch = System.getProperty("os.arch")
+        try {
+            System.setProperty("os.arch", "x86_64")
+            val currentArch = Arch.current()
+            assertEquals(Arch.AUDIT_ARCH_X86_64, currentArch.audit)
 
-        val mockProcess = MockNativeProcess()
-        var prctlCalled = false
-        var prctlCommand: PrctlCommand? = null
+            val mockProcess = MockNativeProcess()
+            var prctlCalled = false
+            var prctlCommand: PrctlCommand? = null
 
-        mockProcess.onPrctl = { command ->
-            prctlCalled = true
-            prctlCommand = command
-            LinuxNative.SyscallResult.Success(0L)
+            mockProcess.onPrctl = { command ->
+                prctlCalled = true
+                prctlCommand = command
+                LinuxNative.SyscallResult.Success(0L)
+            }
+
+            val mockEngine = MockNativeEngine(process = mockProcess)
+            LinuxNative.setEngine(mockEngine)
+
+            PureJavaBpfEngine.setNoNewPrivs()
+
+            assertTrue(prctlCalled)
+            assertTrue(prctlCommand is PrctlCommand.SetNoNewPrivs)
+            val setNoNewPrivsCmd = prctlCommand as PrctlCommand.SetNoNewPrivs
+            assertTrue(setNoNewPrivsCmd.enabled)
+        } finally {
+            if (savedOsArch != null) {
+                System.setProperty("os.arch", savedOsArch)
+            } else {
+                System.clearProperty("os.arch")
+            }
         }
-
-        val mockEngine = MockNativeEngine(process = mockProcess)
-        LinuxNative.setEngine(mockEngine)
-
-        PureJavaBpfEngine.setNoNewPrivs()
-
-        assertTrue(prctlCalled)
-        assertTrue(prctlCommand is PrctlCommand.SetNoNewPrivs)
-        val setNoNewPrivsCmd = prctlCommand as PrctlCommand.SetNoNewPrivs
-        assertTrue(setNoNewPrivsCmd.enabled)
     }
 
     @Test
     fun prctlDowncallDescriptorConfiguredForX86_64() {
-        val currentArch = Arch.current()
-        assertTrue(currentArch.prctl > 0)
+        val savedOsArch = System.getProperty("os.arch")
+        try {
+            System.setProperty("os.arch", "x86_64")
+            val currentArch = Arch.current()
+            assertTrue(currentArch.prctl > 0)
+        } finally {
+            if (savedOsArch != null) {
+                System.setProperty("os.arch", savedOsArch)
+            } else {
+                System.clearProperty("os.arch")
+            }
+        }
     }
 
     @Test

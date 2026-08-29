@@ -354,7 +354,7 @@ data class Arch(
                 seccompSyscallNumber = 277,
             )
 
-        fun current(osArch: String = System.getProperty("os.arch")): Arch =
+        fun current(osArch: String = System.getProperty("os.arch") ?: ""): Arch =
             when (osArch) {
                 "amd64", "x86_64" -> AMD64
                 "aarch64", "arm64" -> AARCH64

@@ -29,9 +29,11 @@ When fixing bugs or resolving failing tests, you must avoid introducing fragile 
 
 ### 1. Research & Analysis
 *   **Locate the Backlog Entry:** Find the target file in `docs/internals/backlog/` (e.g. `docs/internals/backlog/security/issue-XXX-name.md`, or under `performance/`, `testing/`, `code_health/`).
-*   **Review and Resolve Vibe Questions/Findings First:** Inspect `## ❓ Open Questions` and `## Investigation` populated by Vibe/ACP. **You must actively investigate and answer these questions yourself first** by checking codebase symbols, design docs (`docs/internals/designs/`), and kernel invariants. Only escalate to a conversational prompt with the operator if a question represents a genuine, unresolvable operator policy choice.
-*   **Locate Code Targets:** Identify the target files and symbols. Use `grep_search` or `codanna` to find all relevant call sites.
-*   **Verify State:** Confirm if the issue is still present in the current codebase.
+*   **Review and Resolve Clarification Questions First:** Inspect `## ❓ Open Questions` and `## Investigation`. **You must actively investigate and answer these questions yourself first** by checking codebase symbols, design docs (`docs/internals/designs/`), and kernel invariants. Only escalate if a question represents a genuine, unresolvable operator policy choice.
+*   **Locate Code Targets:** Identify the target files and symbols. Use `codanna` or `ast-grep` to find all relevant call sites.
+*   **Pre-Implementation Refactoring Gate:** If legacy code surrounding the target is convoluted or tightly coupled:
+    - *"Make the change easy first, then make the easy change."*
+    - Refactor and extract clean seams first before modifying business logic.
 
 ### 2. TDD Reproduction (Mandatory)
 *   **Identify Test Target:** Locate the corresponding test class or create a new test case (e.g. `ReproductionTest.kt`).
@@ -41,11 +43,11 @@ When fixing bugs or resolving failing tests, you must avoid introducing fragile 
 ### 3. Implementation (Root-Cause Fix)
 *   **Surgical root-cause fix:** Apply the minimal code change required to resolve the issue while adhering to all project safety invariants (see root `AGENTS.md`).
 *   **JVM Coordination Safeguards:** If the crash is due to a blocked JVM coordination system call (like `mmap` or `mprotect` during classloading/GC), add it to `getJvmCriticalNrs(arch)` in [BpfFilter.kt](file:///home/leanid/Documents/code/java/jseccomp/enforcer/src/main/kotlin/io/mazewall/BpfFilter.kt).
+*   **Causal Failure Window Inspection:** When debugging CI errors, always capture the **full causal failure window** (including 20 lines of prelude context, failing assertions, and complete nested `Caused by:` exception chains up to 80 lines).
 *   **Verify Success:** Run the reproduction test again; it must now pass.
 *   **Regression Check:** Run the full project check (`./gradlew check`) to verify clean compilation, static analysis, and that no tests are broken.
 
 ### 4. Finalization & Logging
-*   **Update Backlog File:** Set `status: "resolved"` in the issue file's YAML frontmatter (e.g. `docs/internals/backlog/security/issue-XXX-name.md`).
-*   **Update README:** Move the entry from "Open Issues" to the "Resolved Issues (Archive)" section in [backlog/README.md](file:///home/leanid/Documents/code/java/jseccomp/docs/internals/backlog/README.md) (updating the link path to point to `resolved/issue-XXX-name.md`).
-*   **Move File to Resolved:** Move the resolved issue file from its category folder to `docs/internals/backlog/resolved/`.
-*   **Clean Up:** Remove any temporary reproduction tests unless they provide long-term regression value.
+*   **Update Backlog File:** Set `status: "resolved"` in the issue file's YAML frontmatter.
+*   **Update README:** Move the entry from "Open Issues" to the "Resolved Issues (Archive)" section in [backlog/README.md](file:///home/leanid/Documents/code/java/jseccomp/docs/internals/backlog/README.md).
+*   **Move File to Resolved:** Move the resolved issue file to `docs/internals/backlog/resolved/`.
