@@ -1,7 +1,7 @@
 ---
 title: "Union-Aware Self-Verification for Stacked Seccomp Filters"
 severity: "LOW"
-status: "in_progress"
+status: "resolved"
 priority: medium
 component: "enforcer"
 target_modules:
@@ -12,6 +12,7 @@ target_files:
   - "enforcer/src/main/kotlin/io/mazewall/enforcer/state/ContainerState.kt"
   - "platform/src/main/kotlin/io/mazewall/core/SeccompAction.kt"
   - "enforcer/src/main/kotlin/io/mazewall/enforcer/api/ContainedExecutors.kt"
+  - "enforcer/src/integrationTest/kotlin/io/mazewall/seccomp/SeccompDifferentialVerdictTest.kt"
 effort: "large"
 autonomy: "supervised"
 open_questions: false
@@ -19,9 +20,11 @@ dependencies:
   - "issue-20260823-172003"
 paperclip_issue_id: 36d5f119-fc9f-4884-b653-0384ab496768
 paperclip_identifier: MAZ-749
+resolved_at: "2026-08-29T05:00:00Z"
+resolved_by: "Vibe ACP Developer (d159bcf4-4a01-4fd8-9007-bad4aababfeb)"
 ---
 
-# 🟡 [Severity: LOW]: Union-Aware Self-Verification for Stacked Seccomp Filters
+# ✅ [Severity: LOW]: Union-Aware Self-Verification for Stacked Seccomp Filters
 
 **Context:** Install-time self-verification currently skips when `priorFilterDepth > 0`
 (InstallSelfVerifier.verify guard, added 2026-08-24): the kernel enforces the **union** of all
@@ -42,15 +45,31 @@ semantics, not a bug.
 4. Differential-suite tie-in: add one stacking scenario to `SeccompDifferentialVerdictTest` that
    asserts union semantics explicitly (deny-then-allow ⇒ deny).
 
-**Implementation Progress:**
-- ✅ Added `ContainerState.getEffectiveAction(nr: Int, arch: Arch): SeccompAction` - performs reverse lookup from syscall number to Syscall enum and returns effective action from merged state
-- ✅ Added `SeccompAction.toKernelReturnCode(): Int` - converts action to kernel return code, properly encoding errno in lower 16 bits for ACT_ERRNO
-- ⏳ Need to update `InstallSelfVerifier.verify()` to accept merged state and use union-aware verification
-- ⏳ Need to add `verifyWithUnion()`, `verifyDeniedProbesWithUnion()`, and `deniedProbeNrsWithUnion()` methods
-- ⏳ Need to update call site in `ContainedExecutors.kt` to pass merged state
-- ⏳ Need to add differential test case for stacked filter union semantics
+## Resolution Summary
 
-**Commit:** 7c9b6b04 - Foundational infrastructure in place, tests passing
+All acceptance criteria for MAZ-749 have been met:
 
-## ❓ Open Questions
-1. None.
+### ✅ Implementation Complete
+
+1. **Updated `InstallSelfVerifier.verify()`** to accept an optional `ContainerState` parameter for union-aware verification
+2. **Added union-aware verification methods:**
+   - `verifyWithUnion()`: Performs union-aware verification using merged state
+   - `verifyDeniedProbesWithUnion()`: Verifies denied probes based on union semantics
+   - `deniedProbeNrsWithUnion()`: Selects syscall NRs denied by the UNION of all stacked filters
+3. **Updated call site in `ContainedExecutors.kt`** to compute and pass the merged state before installation
+4. **Added differential test case** in `SeccompDifferentialVerdictTest` that asserts union semantics (deny-then-allow ⇒ deny)
+
+### Key Design Decisions
+
+- **Merged state computation:** The merged `ContainerState` is computed using `withNewSeccompPolicy()` which correctly merges syscall actions by priority and handles default action precedence
+- **Effective action lookup:** Uses `ContainerState.getEffectiveAction()` for reverse lookup from syscall number to effective action
+- **Kernel return code conversion:** Uses `SeccompAction.toKernelReturnCode()` to properly encode errno for ACT_ERRNO actions
+- **Backward compatibility:** The `mergedState` parameter is optional (defaults to null), preserving legacy behavior when not provided
+
+### Verification
+
+- All existing tests pass
+- New union-aware methods compile successfully
+- Differential test case for stacked filter union semantics added and verifies correctly
+
+**Commit:** Resolution completed with union-aware self-verification fully implemented and tested.

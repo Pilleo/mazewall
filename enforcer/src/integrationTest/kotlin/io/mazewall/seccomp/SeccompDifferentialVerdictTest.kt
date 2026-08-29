@@ -200,4 +200,39 @@ class SeccompDifferentialVerdictTest : BaseIntegrationTest() {
             .build()
         return policy.compile(arch).compiledFilters
     }
+
+    @Test
+    fun `stacked filters union semantics - deny-then-allow results in deny`() {
+        // Test union-aware self-verification (issue-20260824-011900).
+        // When multiple filters are stacked, the kernel enforces the UNION of all filters.
+        // This means: deny-then-allow ⇒ deny (the most restrictive action wins).
+        
+        val victimNr = Syscall.CONNECT.numberFor(arch)
+        
+        // First layer: deny CONNECT
+        val firstPolicy = Policy.builder()
+            .defaultAction(SeccompAction.ACT_ALLOW)
+            .block(Syscall.CONNECT)
+            .build()
+        
+        ContainedExecutors.installOnCurrentThread(firstPolicy)
+        
+        // Verify first layer denies CONNECT
+        assertTrue(kernelDenied(victimNr), "First layer must deny CONNECT")
+        
+        // Second layer: allow CONNECT (but this should be overridden by first layer's deny)
+        val secondPolicy = Policy.builder()
+            .defaultAction(SeccompAction.ACT_ALLOW)
+            .allow(Syscall.CONNECT)
+            .build()
+        
+        ContainedExecutors.installOnCurrentThread(secondPolicy)
+        
+        // Union semantics: CONNECT must STILL be denied because first layer denied it
+        // The union takes the most restrictive action (deny > allow)
+        assertTrue(kernelDenied(victimNr), "Union of stacked filters must deny CONNECT (deny-then-allow ⇒ deny)")
+        
+        // Liveness: getpid must still work (both layers allow it)
+        assertTrue(ProcessHandle.current().pid() > 0)
+    }
 }

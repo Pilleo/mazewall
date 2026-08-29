@@ -602,7 +602,16 @@ object ContainedExecutors {
             return session
         } else {
             val compiledSandbox = io.mazewall.PolicyCompilationCache.getOrCompile(toInstall, arch)
-            val priorFilterDepth = resolveCurrentState().filterDepth
+            val currentState = resolveCurrentState()
+            val priorFilterDepth = currentState.filterDepth
+            
+            // Compute merged state for union-aware self-verification (issue-20260824-011900)
+            val mergedState = if (processWide) {
+                currentState.withNewSeccompPolicy(toInstall, newBlocks, newDefaultAction)
+            } else {
+                currentState.withNewSeccompPolicy(toInstall, newBlocks, newDefaultAction)
+            }
+            
             if (processWide) {
                 PureJavaBpfEngine.installOnProcess(compiledSandbox)
                 updateProcessState(newBlocks, newDefaultAction, toInstall)
@@ -614,7 +623,13 @@ object ContainedExecutors {
             // -Dio.mazewall.selfVerify=true. Asserts the kernel honors the oracle's predictions;
             // memoized per program identity. See InstallSelfVerifier gate KDoc for why the
             // default is off under narrow allow-list floors.
-            io.mazewall.seccomp.InstallSelfVerifier.verify(compiledSandbox.program, arch, priorFilterDepth)
+            // Union-aware verification (issue-20260824-011900): passes merged state for stacked filters
+            io.mazewall.seccomp.InstallSelfVerifier.verify(
+                compiledSandbox.program, 
+                arch, 
+                priorFilterDepth,
+                mergedState
+            )
             return AutoCloseable {}
         }
     }
