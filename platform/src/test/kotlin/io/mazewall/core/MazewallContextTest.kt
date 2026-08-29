@@ -78,6 +78,38 @@ internal class MazewallContextTest {
     }
 
     @Test
+    fun `skip-if-unchanged path leaves observable state identical to normal path`() {
+        // Fast path: when current() == context, no state mutation should occur
+        // but observable behavior must be identical
+        MazewallContext.withContext(pdfParse) {
+            assertEquals(pdfParse, MazewallContext.current())
+            // Re-entering the same context should use fast path
+            val result = MazewallContext.withContext(pdfParse) {
+                assertEquals(pdfParse, MazewallContext.current())
+                "fast-path-result"
+            }
+            assertEquals("fast-path-result", result)
+            // Context should still be pdfParse after fast path
+            assertEquals(pdfParse, MazewallContext.current())
+        }
+        assertEquals(ContextId.UNKNOWN, MazewallContext.current())
+    }
+
+    @Test
+    fun `skip-if-unchanged fast path preserves exception behavior`() {
+        MazewallContext.withContext(pdfParse) {
+            val thrown = assertThrows(ScopeException::class.java) {
+                MazewallContext.withContext(pdfParse) {
+                    throw ScopeException("fast-path-exception")
+                }
+            }
+            assertEquals("fast-path-exception", thrown.message)
+            // Context should still be pdfParse after exception in fast path
+            assertEquals(pdfParse, MazewallContext.current())
+        }
+    }
+
+    @Test
     fun `two platform threads never observe each other's context`() {
         val entered = CountDownLatch(2)
         val release = CountDownLatch(1)
