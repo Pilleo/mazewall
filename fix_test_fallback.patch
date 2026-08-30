@@ -1,0 +1,11 @@
+<<<<<<< SEARCH
+    @Test
+    fun `tasks correctly execute and assert their distinct path policies`() {
+        SandboxDispatcher.shutdownAll()
+=======
+    @Test
+    fun `tasks correctly execute and assert their distinct path policies`() {
+        // Enforce Landlock fallback manually if the kernel doesn't support Landlock or test runner doesn't have privileges
+        System.setProperty("io.mazewall.fallback", "WARN_AND_BYPASS")
+        SandboxDispatcher.shutdownAll()
+>>>>>>> REPLACE

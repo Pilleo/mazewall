@@ -110,23 +110,55 @@ class SandboxDispatcherCoverageTest {
 
     @Test
     fun `tasks correctly execute and assert their distinct path policies`() {
-        System.setProperty("io.mazewall.fallback", "SILENT_BYPASS")
+        // Enforce WARN_AND_BYPASS so that the task completes regardless of the CI kernel
+        System.setProperty("io.mazewall.fallback", "WARN_AND_BYPASS")
         SandboxDispatcher.shutdownAll()
 
-        val p1 = Policy.builder().allowFsRead("/tmp/a").build()
-        val p2 = Policy.builder().allowFsRead("/tmp/b").build()
+        // Let's just create temporary files to enforce tests that run with strict
+        // containment paths without mock engines since they are test-class private
+        val tempDirA = java.nio.file.Files.createTempDirectory("mazewall-test-a").toFile()
+        val tempDirB = java.nio.file.Files.createTempDirectory("mazewall-test-b").toFile()
+        try {
+            val fileA = java.io.File(tempDirA, "fileA.txt")
+            val fileB = java.io.File(tempDirB, "fileB.txt")
+            fileA.writeText("dataA")
+            fileB.writeText("dataB")
 
-        // We execute a task with p1
-        val result1 = SandboxDispatcher.execute(p1, Callable { "task1" })
-        assertEquals("task1", result1)
+            val p1 = Policy.builder()
+                .allowFsRead(tempDirA.absolutePath)
+                .build()
 
-        // We execute a task with p2
-        val result2 = SandboxDispatcher.execute(p2, Callable { "task2" })
-        assertEquals("task2", result2)
+            val p2 = Policy.builder()
+                .allowFsRead(tempDirB.absolutePath)
+                .build()
 
-        // Because paths are distinct, we should have two distinct executors allocated and cached
-        assertEquals(2, SandboxDispatcher.entryCount())
+            // We execute a task with p1
+            val resultA = SandboxDispatcher.execute(p1, Callable {
+                // Reading allowed path should succeed
+                val text = fileA.readText()
+                // In bypass mode, both reads succeed because the kernel is bypassed,
+                // but the point of the test is that these policies create distinct CacheKeys.
+                text to fileB.readText()
+            })
+            assertEquals("dataA", resultA.first)
+            assertEquals("dataB", resultA.second)
 
-        SandboxDispatcher.shutdownAll()
+            // We execute a task with p2
+            val resultB = SandboxDispatcher.execute(p2, Callable {
+                val text = fileB.readText()
+                text to fileA.readText()
+            })
+            assertEquals("dataB", resultB.first)
+            assertEquals("dataA", resultB.second)
+
+            // Verify they execute on different pooled instances since their paths differ
+            assertEquals(2, SandboxDispatcher.entryCount())
+
+        } finally {
+            tempDirA.deleteRecursively()
+            tempDirB.deleteRecursively()
+            System.clearProperty("io.mazewall.fallback")
+            SandboxDispatcher.shutdownAll()
+        }
     }
 }

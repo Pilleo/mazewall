@@ -1,0 +1,24 @@
+<<<<<<< SEARCH
+    @Test
+    fun `tasks correctly execute and assert their distinct path policies`() {
+        SandboxDispatcher.shutdownAll()
+=======
+    @Test
+    fun `tasks correctly execute and assert their distinct path policies`() {
+        val observedFlags = mutableListOf<Pair<String, Int>>()
+        val mockFallback = io.mazewall.landlock.SupportedLandlockMock(
+            fileSystem = object : io.mazewall.MockNativeFileSystem() {
+                override fun open(
+                    path: io.mazewall.core.ManagedSegment,
+                    flags: io.mazewall.core.OpenFlags,
+                ): io.mazewall.ffi.internal.LinuxNative.SyscallResult<Long, io.mazewall.ffi.internal.LinuxNative.SyscallHandledState.Unhandled> {
+                    val pathStr = path.readString(0L)
+                    observedFlags.add(pathStr to flags.value)
+                    return io.mazewall.ffi.internal.LinuxNative.SyscallResult.Success<Long, io.mazewall.ffi.internal.LinuxNative.SyscallHandledState.Unhandled>(100)
+                }
+            }
+        )
+        io.mazewall.ffi.internal.LinuxNative.setEngine(mockFallback)
+
+        SandboxDispatcher.shutdownAll()
+>>>>>>> REPLACE
