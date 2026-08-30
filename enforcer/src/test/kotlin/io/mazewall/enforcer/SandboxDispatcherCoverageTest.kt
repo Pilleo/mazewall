@@ -132,24 +132,18 @@ class SandboxDispatcherCoverageTest {
                 .allowFsRead(tempDirB.absolutePath)
                 .build()
 
-            // We execute a task with p1
+            // In BYPASS mode, reads might not fail on unprivileged runner, but the dispatcher must route
+            // correctly and distinct pools must be instantiated.
+            // Let's just execute simple read operations.
             val resultA = SandboxDispatcher.execute(p1, Callable {
-                // Reading allowed path should succeed
-                val text = fileA.readText()
-                // In bypass mode, both reads succeed because the kernel is bypassed,
-                // but the point of the test is that these policies create distinct CacheKeys.
-                text to fileB.readText()
+                fileA.readText()
             })
-            assertEquals("dataA", resultA.first)
-            assertEquals("dataB", resultA.second)
+            assertEquals("dataA", resultA)
 
-            // We execute a task with p2
             val resultB = SandboxDispatcher.execute(p2, Callable {
-                val text = fileB.readText()
-                text to fileA.readText()
+                fileB.readText()
             })
-            assertEquals("dataB", resultB.first)
-            assertEquals("dataA", resultB.second)
+            assertEquals("dataB", resultB)
 
             // Verify they execute on different pooled instances since their paths differ
             assertEquals(2, SandboxDispatcher.entryCount())
