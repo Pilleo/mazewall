@@ -24,9 +24,46 @@ import java.util.concurrent.Executors
  */
 object SandboxDispatcher {
 
-    // Cache mapping a distinct Policy definition to its dedicated thread pool.
-    // PolicyDefinition is a data class, so it works perfectly as a map key.
-    private val poolCache = ConcurrentHashMap<PolicyDefinition<*>, ExecutorService>()
+    /**
+     * INVARIANT (issue-20260826-102609): the cache key is the PROGRAM-RELEVANT PROJECTION of a
+     * [PolicyDefinition] — default action, syscall actions, and arg-inspection flags. Landlock
+     * filesystem paths must NOT participate. This mirrors the invariant in `PolicyCompilationCache`.
+     */
+    private data class CacheKey(
+        val defaultAction: io.mazewall.core.SeccompAction,
+        val syscallActions: Map<io.mazewall.core.Syscall, io.mazewall.core.SeccompAction>,
+        val allowMmapExec: Boolean,
+        val allowNonThreadClone: Boolean,
+        val allowUnsafePrctl: Boolean,
+        val lockIntelCet: Boolean
+    ) {
+        constructor(definition: PolicyDefinition<*>) : this(
+            definition.defaultAction,
+            definition.syscallActions,
+            definition.allowMmapExec,
+            definition.allowNonThreadClone,
+            definition.allowUnsafePrctl,
+            definition.lockIntelCet
+        )
+    }
+
+    /** Belt-and-braces cap for the dispatcher cache. */
+    private const val MAX_ENTRIES = 32
+
+    /**
+     * Cache mapping a distinct Policy projection to its dedicated thread pool.
+     * Executor threads are permanently contained and therefore pooled forever by design;
+     * eviction only happens under cap pressure or shutdownAll().
+     */
+    private val poolCache = object : java.util.LinkedHashMap<CacheKey, ExecutorService>(16, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<CacheKey, ExecutorService>): Boolean {
+            if (size > MAX_ENTRIES) {
+                eldest.value.shutdown()
+                return true
+            }
+            return false
+        }
+    }
 
     /**
      * Executes the given [block] on a thread pool perfectly constrained by the [policy].
@@ -54,29 +91,42 @@ object SandboxDispatcher {
      */
     @PublishedApi
     internal fun getOrCreateElasticPool(definition: PolicyDefinition<*>): ExecutorService {
-        return poolCache.computeIfAbsent(definition) { def ->
+        val key = CacheKey(definition)
+        synchronized(poolCache) {
+            val existing = poolCache[key]
+            if (existing != null) return existing
+
             // Use a cached thread pool to allow elastic scaling for blocking I/O workloads,
             // similar to Dispatchers.IO. Threads idle for 60 seconds are terminated.
             val rawPool = Executors.newCachedThreadPool { runnable ->
                 val thread = Thread(runnable)
                 thread.isDaemon = true
-                thread.name = "mazewall-sandbox-${def.hashCode().toUInt().toString(16)}"
+                thread.name = "mazewall-sandbox-${definition.hashCode().toUInt().toString(16)}"
                 thread
             }
             
             // Wrap the raw pool to ensure the policy is applied to every thread created by it.
             // ContainedExecutors.wrap normally takes vararg Policy<*, Uncompiled>.
             // We use the internal installOnCurrentThread to wrap execution directly.
-            io.mazewall.enforcer.internal.ContainedExecutorWrapper(rawPool, def)
+            val wrapped = io.mazewall.enforcer.internal.ContainedExecutorWrapper(rawPool, definition)
+            poolCache[key] = wrapped
+            return wrapped
         }
     }
+
+    /**
+     * Retrieves the current number of cached executors. Used for testing.
+     */
+    internal fun entryCount(): Int = synchronized(poolCache) { poolCache.size }
 
     /**
      * Shuts down all cached executors. Useful for application graceful shutdown.
      */
     @JvmStatic
     fun shutdownAll() {
-        poolCache.values.forEach { it.shutdown() }
-        poolCache.clear()
+        synchronized(poolCache) {
+            poolCache.values.forEach { it.shutdown() }
+            poolCache.clear()
+        }
     }
 }

@@ -100,56 +100,66 @@ class MazewallJavaApiTest {
 
     @Test
     void testRunContainedWithCallableAndSupplier() {
-        // We use PURE_COMPUTE_UNSAFE as mock/dry-run baseline
-        Policy<PolicyScope.ProcessWideSafe, PolicyState.Uncompiled> policy = Mazewall.pureComputeUnsafe();
+        System.setProperty("io.mazewall.fallback", "SILENT_BYPASS");
+        try {
+            // We use PURE_COMPUTE_UNSAFE as mock/dry-run baseline
+            Policy<PolicyScope.ProcessWideSafe, PolicyState.Uncompiled> policy = Mazewall.pureComputeUnsafe();
 
-        String callableResult = Mazewall.runContained(policy, (Callable<String>) () -> "successCallable");
-        assertEquals("successCallable", callableResult);
+            String callableResult = Mazewall.runContained(policy, (Callable<String>) () -> "successCallable");
+            assertEquals("successCallable", callableResult);
 
-        String supplierResult =
-                Mazewall.runContained(policy, (java.util.function.Supplier<String>) () -> "successSupplier");
-        assertEquals("successSupplier", supplierResult);
+            String supplierResult =
+                    Mazewall.runContained(policy, (java.util.function.Supplier<String>) () -> "successSupplier");
+            assertEquals("successSupplier", supplierResult);
 
-        AtomicInteger runCount = new AtomicInteger(0);
-        Mazewall.runContained(policy, (Runnable) runCount::incrementAndGet);
-        assertEquals(1, runCount.get());
+            AtomicInteger runCount = new AtomicInteger(0);
+            Mazewall.runContained(policy, (Runnable) runCount::incrementAndGet);
+            assertEquals(1, runCount.get());
+        } finally {
+            System.clearProperty("io.mazewall.fallback");
+        }
     }
 
     @Test
     void testContainedExecutors() throws Exception {
-        Policy<PolicyScope.ProcessWideSafe, PolicyState.Uncompiled> policy = Mazewall.pureComputeUnsafe();
-
-        ExecutorService singleThreadExecutor = Mazewall.newContainedSingleThreadExecutor(policy);
+        System.setProperty("io.mazewall.fallback", "SILENT_BYPASS");
         try {
-            Future<Integer> future = singleThreadExecutor.submit(() -> 42);
-            assertEquals(42, future.get());
-        } finally {
-            singleThreadExecutor.shutdown();
-        }
+            Policy<PolicyScope.ProcessWideSafe, PolicyState.Uncompiled> policy = Mazewall.pureComputeUnsafe();
 
-        ExecutorService fixedPool = Mazewall.newContainedFixedThreadPool(2, policy);
-        try {
-            Future<String> future = fixedPool.submit(() -> "fixed");
-            assertEquals("fixed", future.get());
-        } finally {
-            fixedPool.shutdown();
-        }
+            ExecutorService singleThreadExecutor = Mazewall.newContainedSingleThreadExecutor(policy);
+            try {
+                Future<Integer> future = singleThreadExecutor.submit(() -> 42);
+                assertEquals(42, future.get());
+            } finally {
+                singleThreadExecutor.shutdown();
+            }
 
-        ExecutorService cachedPool = Mazewall.newContainedCachedThreadPool(policy);
-        try {
-            Future<String> future = cachedPool.submit(() -> "cached");
-            assertEquals("cached", future.get());
-        } finally {
-            cachedPool.shutdown();
-        }
+            ExecutorService fixedPool = Mazewall.newContainedFixedThreadPool(2, policy);
+            try {
+                Future<String> future = fixedPool.submit(() -> "fixed");
+                assertEquals("fixed", future.get());
+            } finally {
+                fixedPool.shutdown();
+            }
 
-        ExecutorService custom = Executors.newSingleThreadExecutor();
-        try {
-            ExecutorService wrapped = Mazewall.wrapContainedExecutor(custom, policy);
-            Future<String> future = wrapped.submit(() -> "wrapped");
-            assertEquals("wrapped", future.get());
+            ExecutorService cachedPool = Mazewall.newContainedCachedThreadPool(policy);
+            try {
+                Future<String> future = cachedPool.submit(() -> "cached");
+                assertEquals("cached", future.get());
+            } finally {
+                cachedPool.shutdown();
+            }
+
+            ExecutorService custom = Executors.newSingleThreadExecutor();
+            try {
+                ExecutorService wrapped = Mazewall.wrapContainedExecutor(custom, policy);
+                Future<String> future = wrapped.submit(() -> "wrapped");
+                assertEquals("wrapped", future.get());
+            } finally {
+                custom.shutdown();
+            }
         } finally {
-            custom.shutdown();
+            System.clearProperty("io.mazewall.fallback");
         }
     }
 
