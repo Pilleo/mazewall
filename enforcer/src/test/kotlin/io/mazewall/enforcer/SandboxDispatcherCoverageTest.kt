@@ -90,7 +90,7 @@ class SandboxDispatcherCoverageTest {
     }
 
     @Test
-    fun `cache keys ignore landlock paths to prevent leaks`() {
+    fun `cache keys include landlock paths to maintain distinct execution isolation`() {
         System.setProperty("io.mazewall.fallback", "SILENT_BYPASS")
         SandboxDispatcher.shutdownAll()
 
@@ -103,8 +103,30 @@ class SandboxDispatcherCoverageTest {
         SandboxDispatcher.getOrCreateElasticPool(p2.definition)
         SandboxDispatcher.getOrCreateElasticPool(p3.definition)
 
-        // All should map to the same CacheKey, so only 1 entry should exist
-        assertEquals(1, SandboxDispatcher.entryCount())
+        // Executor Cache must include Landlock paths, so we expect 3 distinct entries.
+        assertEquals(3, SandboxDispatcher.entryCount())
+        SandboxDispatcher.shutdownAll()
+    }
+
+    @Test
+    fun `tasks correctly execute and assert their distinct path policies`() {
+        System.setProperty("io.mazewall.fallback", "SILENT_BYPASS")
+        SandboxDispatcher.shutdownAll()
+
+        val p1 = Policy.builder().allowFsRead("/tmp/a").build()
+        val p2 = Policy.builder().allowFsRead("/tmp/b").build()
+
+        // We execute a task with p1
+        val result1 = SandboxDispatcher.execute(p1, Callable { "task1" })
+        assertEquals("task1", result1)
+
+        // We execute a task with p2
+        val result2 = SandboxDispatcher.execute(p2, Callable { "task2" })
+        assertEquals("task2", result2)
+
+        // Because paths are distinct, we should have two distinct executors allocated and cached
+        assertEquals(2, SandboxDispatcher.entryCount())
+
         SandboxDispatcher.shutdownAll()
     }
 }

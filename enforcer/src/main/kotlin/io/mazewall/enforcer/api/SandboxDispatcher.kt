@@ -25,9 +25,12 @@ import java.util.concurrent.Executors
 object SandboxDispatcher {
 
     /**
-     * INVARIANT (issue-20260826-102609): the cache key is the PROGRAM-RELEVANT PROJECTION of a
-     * [PolicyDefinition] — default action, syscall actions, and arg-inspection flags. Landlock
-     * filesystem paths must NOT participate. This mirrors the invariant in `PolicyCompilationCache`.
+     * Cache key for the sandbox dispatcher pools.
+     * While BPF compilation cache correctly ignores Landlock paths (since paths do not change
+     * the compiled syscall filter instructions), the *Executor Cache* must include Landlock paths
+     * in its identity because `ContainedExecutorWrapper` is initialized once per pool with a specific
+     * `PolicyDefinition`. Reusing an executor for a different path policy would incorrectly enforce
+     * the initial Landlock paths on subsequent tasks.
      */
     private data class CacheKey(
         val defaultAction: io.mazewall.core.SeccompAction,
@@ -36,6 +39,9 @@ object SandboxDispatcher {
         val allowNonThreadClone: Boolean,
         val allowUnsafePrctl: Boolean,
         val lockIntelCet: Boolean,
+        val allowedFsReadPaths: Set<io.mazewall.core.SandboxedPath>,
+        val allowedFsWritePaths: Set<io.mazewall.core.SandboxedPath>,
+        val enforceLandlock: Boolean,
         val arch: io.mazewall.core.Arch
     ) {
         constructor(definition: PolicyDefinition<*>, arch: io.mazewall.core.Arch) : this(
@@ -45,6 +51,9 @@ object SandboxDispatcher {
             definition.allowNonThreadClone,
             definition.allowUnsafePrctl,
             definition.lockIntelCet,
+            definition.allowedFsReadPaths,
+            definition.allowedFsWritePaths,
+            definition.enforceLandlock,
             arch
         )
     }
