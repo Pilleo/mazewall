@@ -99,6 +99,7 @@ class MazewallJavaApiTest {
     }
 
     @Test
+    @EnabledIfLinuxAndSupported
     void testRunContainedWithCallableAndSupplier() {
         System.setProperty("io.mazewall.fallback", "SILENT_BYPASS");
         try {
@@ -121,6 +122,7 @@ class MazewallJavaApiTest {
     }
 
     @Test
+    @EnabledIfLinuxAndSupported
     void testContainedExecutors() throws Exception {
         System.setProperty("io.mazewall.fallback", "SILENT_BYPASS");
         try {
