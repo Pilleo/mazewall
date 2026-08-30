@@ -60,26 +60,11 @@ class SandboxDispatcherCoverageTest {
         val evictedPools = mutableListOf<java.util.concurrent.ExecutorService>()
 
         for (i in 0 until overCap) {
-            // Create a distinct policy by having a different projection (e.g., different allowMmapExec flag if we could,
-            // but we'll use a different syscall action to ensure a distinct CacheKey projection).
             val policy = Policy.builder().apply {
                 if (i % 2 == 0) {
                     allowMmapExec()
                 }
-                // We'll map different trace IDs to a syscall to ensure a distinct CacheKey projection.
-                // Policy.Builder.block expects a Syscall and optionally a SeccompAction,
-                // however block(Syscall) defaults to ERRNO. To set trace, we'll configure a specific action
-                // if there is a method for it, or use defaultAction if possible. Wait, PolicyBuilder.block accepts
-                // vararg pairs maybe? Wait, no, block(syscall) or block(syscall, action).
-                // But wait, there is no block(syscall, action) natively? Let's check the API.
-                // Wait, ACT_TRACE is valid. Let's just use `block(Syscall, SeccompAction)` if it exists.
-                // Ah, the error is: `Argument type mismatch: actual type is 'SeccompAction.ACT_TRACE', but 'Syscall' was expected.`
-                // This means `block` takes vararg `Syscall`?
-                // Let's use `defaultAction(io.mazewall.core.SeccompAction.ACT_TRACE(i))` if available,
-                // or just `policyDefinition` manipulation if we can't.
-                // Let's look at `allow` or `block`.
             }.build().let { p ->
-                // Alternatively, directly copy the definition if we can't use builder for arbitrary actions.
                 io.mazewall.Policy<io.mazewall.PolicyScope, io.mazewall.PolicyState.Uncompiled>(
                     definition = p.definition.copy(defaultAction = io.mazewall.core.SeccompAction.ACT_TRACE(i))
                 )

@@ -35,15 +35,17 @@ object SandboxDispatcher {
         val allowMmapExec: Boolean,
         val allowNonThreadClone: Boolean,
         val allowUnsafePrctl: Boolean,
-        val lockIntelCet: Boolean
+        val lockIntelCet: Boolean,
+        val arch: io.mazewall.core.Arch
     ) {
-        constructor(definition: PolicyDefinition<*>) : this(
+        constructor(definition: PolicyDefinition<*>, arch: io.mazewall.core.Arch) : this(
             definition.defaultAction,
             definition.syscallActions,
             definition.allowMmapExec,
             definition.allowNonThreadClone,
             definition.allowUnsafePrctl,
-            definition.lockIntelCet
+            definition.lockIntelCet,
+            arch
         )
     }
 
@@ -91,7 +93,7 @@ object SandboxDispatcher {
      */
     @PublishedApi
     internal fun getOrCreateElasticPool(definition: PolicyDefinition<*>): ExecutorService {
-        val key = CacheKey(definition)
+        val key = CacheKey(definition, io.mazewall.core.Arch.current())
         synchronized(poolCache) {
             val existing = poolCache[key]
             if (existing != null) return existing
