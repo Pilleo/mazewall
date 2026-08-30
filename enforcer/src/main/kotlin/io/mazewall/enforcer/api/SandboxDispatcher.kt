@@ -8,6 +8,9 @@ import io.mazewall.enforcer.*
 
 import io.mazewall.Policy
 import io.mazewall.PolicyDefinition
+import io.mazewall.core.Arch
+import io.mazewall.core.SeccompAction
+import io.mazewall.core.Syscall
 import java.util.concurrent.Callable
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ExecutorService
@@ -17,16 +20,54 @@ import java.util.concurrent.Executors
  * A functional router that executes blocks of code inside policy-specific sandboxes.
  *
  * It automatically caches and reuses [ExecutorService] instances based on the exact
- * [PolicyDefinition]. This prevents thread-explosion while ensuring strict containment.
+ * PROGRAM-RELEVANT PROJECTION of a [PolicyDefinition] (default action, syscall actions,
+ * and arg-inspection flags). This invariant mirrors `PolicyCompilationCache.CacheKey`.
+ * Landlock filesystem paths must NOT participate, as they do not influence which *threads*
+ * must exist.
+ *
+ * Executor threads are permanently contained and therefore pooled forever by design.
+ * Eviction only happens under cap pressure (bounded LRU eviction) or when [shutdownAll]
+ * is invoked. This prevents thread-explosion while ensuring strict containment.
  *
  * For coroutine support (e.g., `executeSuspend`), ensure `kotlinx-coroutines-core`
  * is on your classpath and use the extensions in `io.mazewall.enforcer.SandboxDispatcherCoroutines`.
  */
 object SandboxDispatcher {
 
-    // Cache mapping a distinct Policy definition to its dedicated thread pool.
-    // PolicyDefinition is a data class, so it works perfectly as a map key.
-    private val poolCache = ConcurrentHashMap<PolicyDefinition<*>, ExecutorService>()
+    private data class CacheKey(
+        val defaultAction: SeccompAction,
+        val syscallActions: Map<Syscall, SeccompAction>,
+        val allowMmapExec: Boolean,
+        val allowNonThreadClone: Boolean,
+        val allowUnsafePrctl: Boolean,
+        val lockIntelCet: Boolean,
+        val arch: Arch,
+    ) {
+        constructor(definition: PolicyDefinition<*>, arch: Arch) : this(
+            definition.defaultAction,
+            definition.syscallActions,
+            definition.allowMmapExec,
+            definition.allowNonThreadClone,
+            definition.allowUnsafePrctl,
+            definition.lockIntelCet,
+            arch,
+        )
+    }
+
+    private const val MAX_ENTRIES = 32
+
+    // Bounded LRU cache mapping a program-relevant projection to its dedicated thread pool.
+    private val poolCache = java.util.Collections.synchronizedMap(
+        object : java.util.LinkedHashMap<CacheKey, ExecutorService>(16, 0.75f, true) {
+            override fun removeEldestEntry(eldest: MutableMap.MutableEntry<CacheKey, ExecutorService>): Boolean {
+                if (size > MAX_ENTRIES) {
+                    eldest.value.shutdown()
+                    return true
+                }
+                return false
+            }
+        }
+    )
 
     /**
      * Executes the given [block] on a thread pool perfectly constrained by the [policy].
@@ -54,20 +95,23 @@ object SandboxDispatcher {
      */
     @PublishedApi
     internal fun getOrCreateElasticPool(definition: PolicyDefinition<*>): ExecutorService {
-        return poolCache.computeIfAbsent(definition) { def ->
-            // Use a cached thread pool to allow elastic scaling for blocking I/O workloads,
-            // similar to Dispatchers.IO. Threads idle for 60 seconds are terminated.
-            val rawPool = Executors.newCachedThreadPool { runnable ->
-                val thread = Thread(runnable)
-                thread.isDaemon = true
-                thread.name = "mazewall-sandbox-${def.hashCode().toUInt().toString(16)}"
-                thread
+        val key = CacheKey(definition, Arch.current())
+        synchronized(poolCache) {
+            return poolCache.getOrPut(key) {
+                // Use a cached thread pool to allow elastic scaling for blocking I/O workloads,
+                // similar to Dispatchers.IO. Threads idle for 60 seconds are terminated.
+                val rawPool = Executors.newCachedThreadPool { runnable ->
+                    val thread = Thread(runnable)
+                    thread.isDaemon = true
+                    thread.name = "mazewall-sandbox-${key.hashCode().toUInt().toString(16)}"
+                    thread
+                }
+
+                // Wrap the raw pool to ensure the policy is applied to every thread created by it.
+                // ContainedExecutors.wrap normally takes vararg Policy<*, Uncompiled>.
+                // We use the internal installOnCurrentThread to wrap execution directly.
+                io.mazewall.enforcer.internal.ContainedExecutorWrapper(rawPool, definition)
             }
-            
-            // Wrap the raw pool to ensure the policy is applied to every thread created by it.
-            // ContainedExecutors.wrap normally takes vararg Policy<*, Uncompiled>.
-            // We use the internal installOnCurrentThread to wrap execution directly.
-            io.mazewall.enforcer.internal.ContainedExecutorWrapper(rawPool, def)
         }
     }
 
@@ -76,7 +120,17 @@ object SandboxDispatcher {
      */
     @JvmStatic
     fun shutdownAll() {
-        poolCache.values.forEach { it.shutdown() }
-        poolCache.clear()
+        synchronized(poolCache) {
+            poolCache.values.forEach { it.shutdown() }
+            poolCache.clear()
+        }
+    }
+
+    // Internal accessor for testing
+    @PublishedApi
+    internal fun getPoolCacheSize(): Int {
+        synchronized(poolCache) {
+            return poolCache.size
+        }
     }
 }
