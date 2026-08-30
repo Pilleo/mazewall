@@ -1,0 +1,33 @@
+<<<<<<< SEARCH
+        // Use Mock engine to track that rulesets apply different paths correctly
+        val observedPaths = mutableSetOf<String>()
+        val mockFallback = io.mazewall.landlock.SupportedLandlockMock(
+            fileSystem = object : io.mazewall.MockNativeFileSystem() {
+                override fun open(
+                    path: io.mazewall.core.ManagedSegment,
+                    flags: io.mazewall.core.OpenFlags,
+                ): io.mazewall.ffi.internal.LinuxNative.SyscallResult<Long, io.mazewall.ffi.internal.LinuxNative.SyscallHandledState.Unhandled> {
+                    val pathStr = path.readString(0L)
+                    observedPaths.add(pathStr)
+                    return io.mazewall.ffi.internal.LinuxNative.SyscallResult.Error<io.mazewall.ffi.internal.LinuxNative.SyscallHandledState.Unhandled>(2, -1)
+                }
+            }
+        )
+        io.mazewall.ffi.internal.LinuxNative.setEngine(mockFallback)
+=======
+        // Use Mock engine to track that rulesets apply different paths correctly
+        val observedPaths = mutableSetOf<String>()
+        val mockFallback = io.mazewall.SupportedLandlockMock(
+            fileSystem = object : io.mazewall.MockNativeFileSystem() {
+                override fun open(
+                    path: io.mazewall.ffi.memory.ManagedSegment,
+                    flags: io.mazewall.core.OpenFlags,
+                ): io.mazewall.ffi.internal.LinuxNative.SyscallResult<Long, io.mazewall.ffi.internal.LinuxNative.SyscallHandledState.Unhandled> {
+                    val pathStr = path.readString(0L)
+                    observedPaths.add(pathStr)
+                    return io.mazewall.ffi.internal.LinuxNative.SyscallResult.Error<io.mazewall.ffi.internal.LinuxNative.SyscallHandledState.Unhandled>(2, -1)
+                }
+            }
+        )
+        io.mazewall.ffi.internal.LinuxNative.setEngine(mockFallback)
+>>>>>>> REPLACE

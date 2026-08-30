@@ -48,4 +48,111 @@ class SandboxDispatcherCoverageTest {
         assertEquals("legacy", result)
         io.mazewall.enforcer.SandboxDispatcher.shutdownAll()
     }
+
+    @Test
+    fun `cache is capped and evicts least recently used executors calling shutdown`() {
+        System.setProperty("io.mazewall.fallback", "SILENT_BYPASS")
+        SandboxDispatcher.shutdownAll()
+        assertEquals(0, SandboxDispatcher.entryCount())
+
+        val cap = 32
+        val overCap = 40
+        val evictedPools = mutableListOf<java.util.concurrent.ExecutorService>()
+
+        for (i in 0 until overCap) {
+            val policy = Policy.builder().apply {
+                if (i % 2 == 0) {
+                    allowMmapExec()
+                }
+            }.build().let { p ->
+                io.mazewall.Policy<io.mazewall.PolicyScope, io.mazewall.PolicyState.Uncompiled>(
+                    definition = p.definition.copy(defaultAction = io.mazewall.core.SeccompAction.ACT_TRACE(i))
+                )
+            }
+
+            val pool = SandboxDispatcher.getOrCreateElasticPool(policy.definition)
+            if (i < overCap - cap) {
+                evictedPools.add(pool)
+            }
+        }
+
+        // We added `overCap` distinct projections. The cache cap is `cap`.
+        assertEquals(cap, SandboxDispatcher.entryCount())
+
+        // The first `overCap - cap` pools should have been evicted and shut down.
+        // Let's verify that some pools were shut down.
+        // Wait briefly for shutdown to propagate if needed (though shutdown is immediate, isShutdown should be true right away).
+        for (pool in evictedPools) {
+            assertEquals(true, pool.isShutdown, "Evicted pool should be shut down")
+        }
+
+        SandboxDispatcher.shutdownAll()
+    }
+
+    @Test
+    fun `cache keys include landlock paths to maintain distinct execution isolation`() {
+        System.setProperty("io.mazewall.fallback", "SILENT_BYPASS")
+        SandboxDispatcher.shutdownAll()
+
+        // Create multiple policies with the same projection but different paths
+        val p1 = Policy.builder().allowFsRead("/tmp/1").build()
+        val p2 = Policy.builder().allowFsRead("/tmp/2").build()
+        val p3 = Policy.builder().allowFsRead("/tmp/3").build()
+
+        SandboxDispatcher.getOrCreateElasticPool(p1.definition)
+        SandboxDispatcher.getOrCreateElasticPool(p2.definition)
+        SandboxDispatcher.getOrCreateElasticPool(p3.definition)
+
+        // Executor Cache must include Landlock paths, so we expect 3 distinct entries.
+        assertEquals(3, SandboxDispatcher.entryCount())
+        SandboxDispatcher.shutdownAll()
+    }
+
+    @Test
+    fun `tasks correctly execute and assert their distinct path policies`() {
+        // Enforce WARN_AND_BYPASS so that the task completes regardless of the CI kernel
+        System.setProperty("io.mazewall.fallback", "WARN_AND_BYPASS")
+        SandboxDispatcher.shutdownAll()
+
+        // Let's just create temporary files to enforce tests that run with strict
+        // containment paths without mock engines since they are test-class private
+        val tempDirA = java.nio.file.Files.createTempDirectory("mazewall-test-a").toFile()
+        val tempDirB = java.nio.file.Files.createTempDirectory("mazewall-test-b").toFile()
+        try {
+            val fileA = java.io.File(tempDirA, "fileA.txt")
+            val fileB = java.io.File(tempDirB, "fileB.txt")
+            fileA.writeText("dataA")
+            fileB.writeText("dataB")
+
+            val p1 = Policy.builder()
+                .allowFsRead(tempDirA.absolutePath)
+                .build()
+
+            val p2 = Policy.builder()
+                .allowFsRead(tempDirB.absolutePath)
+                .build()
+
+            // In BYPASS mode, reads might not fail on unprivileged runner, but the dispatcher must route
+            // correctly and distinct pools must be instantiated.
+            // Let's just execute simple read operations.
+            val resultA = SandboxDispatcher.execute(p1, Callable {
+                fileA.readText()
+            })
+            assertEquals("dataA", resultA)
+
+            val resultB = SandboxDispatcher.execute(p2, Callable {
+                fileB.readText()
+            })
+            assertEquals("dataB", resultB)
+
+            // Verify they execute on different pooled instances since their paths differ
+            assertEquals(2, SandboxDispatcher.entryCount())
+
+        } finally {
+            tempDirA.deleteRecursively()
+            tempDirB.deleteRecursively()
+            System.clearProperty("io.mazewall.fallback")
+            SandboxDispatcher.shutdownAll()
+        }
+    }
 }

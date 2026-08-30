@@ -1,0 +1,25 @@
+<<<<<<< SEARCH
+            // Policy 1 allows reading fileA but denies everything else
+            val p1 = Policy.builder()
+                .base(io.mazewall.Mazewall.pureCompute())
+                .allowFsRead(tempDirA.absolutePath)
+                .build()
+
+            // Policy 2 allows reading fileB but denies everything else
+            val p2 = Policy.builder()
+                .base(io.mazewall.Mazewall.pureCompute())
+                .allowFsRead(tempDirB.absolutePath)
+                .build()
+=======
+            // Policy 1 allows reading fileA but denies everything else
+            val p1 = Policy.builder()
+                .base(io.mazewall.PolicyPresets.PURE_COMPUTE)
+                .allowFsRead(tempDirA.absolutePath)
+                .build()
+
+            // Policy 2 allows reading fileB but denies everything else
+            val p2 = Policy.builder()
+                .base(io.mazewall.PolicyPresets.PURE_COMPUTE)
+                .allowFsRead(tempDirB.absolutePath)
+                .build()
+>>>>>>> REPLACE
