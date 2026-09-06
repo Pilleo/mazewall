@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+#
+# adkw: Agent DevKit Wrapper (mirrors gradlew / mvnw pattern)
+#
+# Resolves ADK runtime from local user cache (~/.adk/dists/...),
+# building or fetching the distribution if not present, and executes
+# the ADK entry point with all arguments passed directly.
+#
+
+set -euo pipefail
+
+APP_NAME="adk"
+APP_BASE_NAME="$(basename "$0")"
+ADK_USER_HOME="${ADK_USER_HOME:-$HOME/.adk}"
+WRAPPER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Locate wrapper properties if present, otherwise default to local development source
+WRAPPER_PROPERTIES="${WRAPPER_DIR}/adk-wrapper.properties"
+DIST_VERSION="0.1.0"
+REPO_SOURCE="${ADK_SOURCE_REPO:-$HOME/Documents/code/java/agent-devkit}"
+
+if [ -f "$WRAPPER_PROPERTIES" ]; then
+    VERSION_PROP="$(grep "^distributionVersion=" "$WRAPPER_PROPERTIES" | cut -d= -f2 || true)"
+    if [ -n "$VERSION_PROP" ]; then
+        DIST_VERSION="$VERSION_PROP"
+    fi
+fi
+
+DIST_DIR="${ADK_USER_HOME}/dists/adk-${DIST_VERSION}"
+DIST_BIN="${DIST_DIR}/bin/agent-devkit"
+
+# Auto-provision distribution if missing or stale
+if [ ! -x "$DIST_BIN" ]; then
+    echo "==> [adkw] Initializing adk ${DIST_VERSION} in ${DIST_DIR}..." >&2
+    mkdir -p "${ADK_USER_HOME}/dists"
+    
+    if [ -d "$REPO_SOURCE" ]; then
+        (
+            cd "$REPO_SOURCE"
+            ./gradlew installDist -q
+        )
+        rm -rf "$DIST_DIR"
+        cp -r "${REPO_SOURCE}/build/install/agent-devkit" "$DIST_DIR"
+    else
+        echo "Error: Cannot resolve adk distribution source at ${REPO_SOURCE}." >&2
+        exit 1
+    fi
+fi
+
+exec "$DIST_BIN" "$@"

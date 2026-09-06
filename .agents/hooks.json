@@ -1,0 +1,30 @@
+{
+  "agent-context-sync": {
+    "PreInvocation": [
+      {
+        "type": "command",
+        "command": "./scripts/pre_invocation_sync.py",
+        "timeout": 5
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "replace_file_content|multi_replace_file_content|write_to_file",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "./scripts/compiler_guard.py",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "type": "command",
+        "command": "./scripts/auto_memory_capture.py",
+        "timeout": 15
+      }
+    ]
+  }
+}

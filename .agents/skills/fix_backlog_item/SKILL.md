@@ -28,6 +28,8 @@ When fixing bugs or resolving failing tests, you must avoid introducing fragile 
 ## 🛡️ Resolution Protocol
 
 ### 1. Research & Analysis
+*   **Step 0: Memory Recall Gate (Mandatory):** Before reading source files or attempting reproduction, call `call_mcp_tool("agentmemory", "memory_recall", {"query": "<issue_topic>"})` or `memory_smart_search`. Load known kernel gotchas, FFM downcall rules, or past bug fixes directly into working context to prevent re-deriving known facts.
+*   **Blast-Radius Invariant Scan:** Run `./scripts/code_atlas.sh blast-radius <TargetSymbol>` for target symbols/classes. This traces Codanna's dependency impact tree and injects known anti-patterns and invariants across all transitive downstream callers before making edits.
 *   **Locate the Backlog Entry:** Find the target file in `docs/internals/backlog/` (e.g. `docs/internals/backlog/security/issue-XXX-name.md`, or under `performance/`, `testing/`, `code_health/`).
 *   **Review and Resolve Clarification Questions First:** Inspect `## ❓ Open Questions` and `## Investigation`. **You must actively investigate and answer these questions yourself first** by checking codebase symbols, design docs (`docs/internals/designs/`), and kernel invariants. Only escalate if a question represents a genuine, unresolvable operator policy choice.
 *   **Locate Code Targets:** Identify the target files and symbols. Use `codanna` or `ast-grep` to find all relevant call sites.
@@ -47,7 +49,9 @@ When fixing bugs or resolving failing tests, you must avoid introducing fragile 
 *   **Verify Success:** Run the reproduction test again; it must now pass.
 *   **Regression Check:** Run the full project check (`./gradlew check`) to verify clean compilation, static analysis, and that no tests are broken.
 
-### 4. Finalization & Logging
+### 4. Finalization, History Cleanup & Logging
+*   **Clean History via git-absorb:** If minor tweaks, formatting, or compiler fixes were added after initial commits, stage the adjustments (`git add -u`) and run `git absorb --and-rebase` to automatically fold them into their respective parent commits without leaving messy trial-and-error commit churn.
 *   **Update Backlog File:** Set `status: "resolved"` in the issue file's YAML frontmatter.
 *   **Update README:** Move the entry from "Open Issues" to the "Resolved Issues (Archive)" section in [backlog/README.md](file:///home/leanid/Documents/code/java/jseccomp/docs/internals/backlog/README.md).
 *   **Move File to Resolved:** Move the resolved issue file to `docs/internals/backlog/resolved/`.
+*   **Persist Durable Finding to Memory:** Call `call_mcp_tool("agentmemory", "memory_save", {"content": "..."})` with a 1-2 sentence summary of the bug, its root cause, and the invariant that prevents regression.

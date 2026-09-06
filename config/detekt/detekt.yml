@@ -617,8 +617,10 @@ style:
               value: "TODO:"
         allowedPatterns: ""
     ForbiddenImport:
-        active: false
-        forbiddenImports: []
+        active: true
+        forbiddenImports:
+            - reason: "Reflection-based testing is fragile. Use direct method calls or internal visibility instead."
+              value: "java.lang.reflect.*"
         allowedImports: []
     ForbiddenMethodCall:
         active: false

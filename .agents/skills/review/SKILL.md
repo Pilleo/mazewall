@@ -23,6 +23,7 @@ When conducting a Pull Request review on a branch with Green CI:
    - Review only the compact PR diff (`git diff origin/master...HEAD`) and declared AST target symbols.
    - Do NOT dump full source files into context; focus strictly on modified symbols and invariants.
 2. **Review Invariants Enforced:**
+   - **Check Known Memory Invariants:** Run `call_mcp_tool("agentmemory", "memory_recall", {"query": "<feature_topic>"})` to verify the PR does not violate previously established architectural rules or reintroduce known bugs.
    - **Zero Silent Bypasses:** Reject any silent swallows of `EPERM`/`EACCES` or downgrade of failed containment.
    - **FFM & Memory Safety:** Verify strict `ValueLayout` structure alignments, `Arena` confinement scopes, and no raw pointer leaks.
    - **True Test Assertions:** Verify tests enforce kernel containment without warmups, sleep hacks, or test-only swallows.
@@ -30,6 +31,7 @@ When conducting a Pull Request review on a branch with Green CI:
 3. **Direct GitHub PR Comments:**
    - If there are questions, concerns, or change requests, post them directly to the **GitHub PR thread** (`gh pr comment <prNumber> --body "..."`).
    - If clean, post an approval recommendation (`✅ **Automated Code Review Verdict: APPROVED**`).
+   - If new architectural precedents were established by the PR, call `memory_save` to record them in `agentmemory`.
 
 ---
 

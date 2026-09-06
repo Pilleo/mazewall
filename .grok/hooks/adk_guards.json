@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "replace_file_content|multi_replace_file_content|write_to_file|Write|Edit|edit|write|file_write|patch",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "./scripts/adkw guard \"{file}\"",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}

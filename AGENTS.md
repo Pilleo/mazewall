@@ -20,6 +20,9 @@ As an AI agent pair-programming on this project, you are assisting in transition
 *   Never use `JAVA_LONG` for 32-bit `sock_filter` fields.
 *   **Never modify, filter, or handle the `GITHUB_TOKEN` environment variable in the codebase.** Managing or modifying GitHub CLI credentials or environment variables is strictly the operator's responsibility.
 *   **Never call `view_file` on a `.kt` or `.java` file without first running `codanna retrieve describe <ClassName>` or `kotlin scripts/file_structure.main.kts <path_to_file>` to inspect its outline.** The only exception is if you have already outlined this specific file in the CURRENT turn.
+*   **Never begin research, bug-fixing, or architecture changes without calling `memory_recall` or `memory_smart_search` on the task topic.** Stored decisions, gotchas, and invariants must be checked first before querying the filesystem or asking the operator.
+*   **Always check transitive blast-radius memory before modifying core symbols:** When planning or implementing changes to public or cross-module symbols, run `./scripts/code_atlas.sh blast-radius <SymbolName>` to surface invariants, past deadlocks, and anti-patterns across downstream callers.
+*   **Always persist durable findings to memory:** When you discover a subtle kernel nuance, fix a recurring bug, or establish a project convention, call `memory_save` to record it in `agentmemory`.
 
 ---
 
@@ -200,6 +203,8 @@ You may run more granular checks in the process, but build must be always green 
 
 To optimize context token consumption and perform precise codebase navigation:
 
+*   **Agent Memory (`agentmemory` + BGE-M3):** Call `call_mcp_tool("agentmemory", "memory_recall", {"query": "..."})` or `memory_smart_search` before broad filesystem searches. It returns compact, pre-computed architectural decisions and invariants in < 500 tokens using dense BGE-M3 vector embeddings.
+*   **Blast-Radius Memory Injection (`scripts/code_atlas.sh blast-radius <Symbol>`):** Combines Codanna's AST impact dependency graph with `agentmemory`. Run this to trace downstream callers up to depth 3 and surface all historical bugs, kernel deadlocks, and anti-patterns across the entire blast radius before writing code.
 *   **Codanna (Symbol Lookup & Call Graphs):** Use the helper wrapper `./scripts/code_atlas.sh`, or raw `codanna retrieve` / `codanna mcp` directly. It is completely CLI-only/one-shot; no background daemon server needs to be running. Refer to [.agents/skills/file_structure/SKILL.md](file:///.agents/skills/file_structure/SKILL.md) for detail usage.
 *   **Searching for Symbols:** Use `codanna mcp find_symbol <Name>` instead of `grep_search` for class/function definitions. Use `codanna mcp find_callers <Name>` instead of `grep_search` for call-site discovery. Do not use `grep_search` as your primary navigation tool for symbols.
 *   **ast-grep (Structural Code Search):** Use the repository wrapper `./scripts/sg.sh` for syntax-aware pattern searches and refactoring. Refer to [.agents/skills/ast_grep/SKILL.md](file:///.agents/skills/ast_grep/SKILL.md) for detail usage.
@@ -223,3 +228,12 @@ The `.agents/skills/` directory contains reusable, step-by-step workflows for co
 | `update_docs` | Keeping design docs in sync after code changes |
 | `file_structure` | Inspecting any file's outline/structure before reading its full content |
 
+
+
+## 🛠️ Agent DevKit (ADK) Universal Tooling & Hard Boundaries
+
+- **Never call \`view_file\` without inspecting AST structure first:** Use \`codanna retrieve describe <Class>\` or the \`file_structure\` skill before reading full files.
+- **Always check blast-radius memory before modifying core symbols:** Run \`./scripts/adkw blast-radius <SymbolName>\` to surface invariants and past regressions across downstream callers.
+- **Deterministic compilation guard:** Run \`./scripts/adkw guard <file>\` to verify syntax and typecheck before committing.
+- **Scaffold new backlog issues cleanly:** Run \`./scripts/adkw new-issue --title "<title>" [options]\`.
+- **Verify backlog integrity:** Run \`./scripts/adkw check-backlog\` before marking work completed.

@@ -106,3 +106,8 @@ target/
 ### Compiled Binaries ###
 *.so
 /.codex/config.toml
+
+### Agent Intelligence Caches ###
+.codegraph/
+.graphify/
+

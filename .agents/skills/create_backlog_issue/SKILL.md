@@ -19,7 +19,9 @@ description: >
   --severity MEDIUM \
   --priority high \
   --symbol PolicyCompilationCache \
-  --file enforcer/src/main/kotlin/io/mazewall/PolicyCompilationCache.kt
+  --file enforcer/src/main/kotlin/io/mazewall/PolicyCompilationCache.kt \
+  --decompose \
+  --json
 ```
 
 ---
@@ -46,7 +48,11 @@ Assign **`high`** to changes that multiply developer velocity, safety, and auton
 ### 2. Task Granularity & Autonomous Splitting Gate
 **Every issue MUST be tightly scoped and atomic:**
 - **Single Responsibility:** An issue must cover one specific refactoring, bug fix, or feature capability. Do NOT create monolithic catch-all issues.
-- **Decomposition Mandate:** If an issue touches multiple sub-components, requires changing more than ~3-5 distinct files, or spans multiple architectural layers (e.g. FFM layout changes + API redesign + profiler integration), **split it into multiple smaller, ordered issues** (`issue-*-part-1.md`, `issue-*-part-2.md`).
+- **Decomposition Mandate via Codanna:** If an issue touches multiple sub-components, requires changing more than ~3-5 distinct files, or spans multiple architectural layers (e.g. FFM layout changes + API redesign + profiler integration), **run the automated work package decomposer**:
+  ```bash
+  ./scripts/decompose_work_package.py <Symbol1> [Symbol2] ...
+  ```
+  This analyzes the exact call graph and blast radius across `:platform`, `:enforcer`, `:portal`, and `:profiler`, producing an ordered, multi-stage DAG.
 - **Dependency Chaining:** Use the `dependencies: ["MAZ-XXX"]` frontmatter field to define precise execution order across decomposed issues so the DAG scheduler executes them safely in sequence.
 
 ---

@@ -21,8 +21,12 @@ object IssueInterview {
         askOpenQuestions: Boolean,
         askKernel: Boolean,
         askSideEffects: Boolean = false,
+        stages: List<WorkPackageStage> = emptyList(),
     ): IssueScaffoldRequest {
         var next = request
+        if (stages.size > 1) {
+            println(WorkPackage.formatAsciiDag(stages))
+        }
         if (askKernel) {
             val answer = prompt.ask("Need kernel/seccomp/Landlock integration tests (needs_kernel)", "n")
             next = next.copy(needsKernel = isYes(answer))

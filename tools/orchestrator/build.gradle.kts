@@ -69,6 +69,19 @@ val workPackage by tasks.registering(JavaExec::class) {
     }
 }
 
+val blastRadiusMemory by tasks.registering(JavaExec::class) {
+    group = "documentation"
+    description = "Trace Codanna AST impact and correlate with agentmemory invariants"
+    dependsOn(tasks.compileKotlin)
+    classpath = sourceSets.main.get().runtimeClasspath
+    mainClass.set("io.mazewall.orchestrator.BlastRadiusMemoryScannerKt")
+    workingDir = rootProject.projectDir
+    val argsFile = project.findProperty("blastRadiusArgsFile") as String?
+    if (!argsFile.isNullOrBlank()) {
+        args(file(argsFile).readLines().filter { it.isNotEmpty() })
+    }
+}
+
 val checkBacklog by tasks.registering(JavaExec::class) {
     group = "verification"
     description = "Validates backlog issue YAML frontmatters, required fields, and dependency references"

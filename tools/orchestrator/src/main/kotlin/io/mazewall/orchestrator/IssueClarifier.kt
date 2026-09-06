@@ -589,7 +589,7 @@ object IssueClarifier {
         return draft.request.copy(reviewVerdict = normalized, reviewComments = comments)
     }
 
-    private fun reRender(draft: IssueScaffoldResult, request: IssueScaffoldRequest): String {
+    internal fun reRender(draft: IssueScaffoldResult, request: IssueScaffoldRequest): String {
         return IssueTemplateGenerator.render(
             idInstant = draft.instant,
             slug = draft.slug,

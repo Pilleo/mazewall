@@ -233,7 +233,7 @@ max_context_size = 100000
 
 [semantic_search]
 # Semantic search for natural language code queries
-enabled = false
+enabled = true
 
 # Model to use for embeddings
 # Note: Changing models requires re-indexing (codanna index --force)
@@ -255,9 +255,9 @@ threshold = 0.6
 # Remote embedding server (optional, replaces local fastembed)
 # Supports OpenAI, Ollama, vLLM, Infinity, or any OpenAI-compatible endpoint.
 # Uncomment and configure to use a remote server instead of local models.
-# remote_url = "http://localhost:11434"  # server base URL
-# remote_model = "nomic-embed-text"     # model name to send
-# remote_dim = 768                       # output dimension
+remote_url = "https://proxy.gonkabroker.com/v1"  # server base URL
+remote_model = "BAAI/bge-m3"     # model name to send
+remote_dim = 1024                       # output dimension
 # API key: set CODANNA_EMBED_API_KEY environment variable (not stored in config)
 # Override any field with env vars: CODANNA_EMBED_URL, CODANNA_EMBED_MODEL, CODANNA_EMBED_DIM
 embedding_threads = 3
@@ -369,7 +369,7 @@ project = "codanna"
 [documents]
 # Document embedding for RAG (Retrieval-Augmented Generation)
 # Index markdown and text files for semantic search
-enabled = false
+enabled = true
 
 
 [documents.defaults]
@@ -406,3 +406,7 @@ highlight = true
 # [documents.collections.my-docs]
 # paths = ["docs/"]
 # patterns = ["**/*.md"]
+
+[documents.collections.backlog]
+paths = ["docs/internals/backlog/"]
+patterns = ["**/*.md"]
