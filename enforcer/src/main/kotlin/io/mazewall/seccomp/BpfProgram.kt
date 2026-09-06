@@ -57,6 +57,15 @@ public class BpfLabel private constructor(
 public class BpfProgram<out S : BpfStatus>(
     public val instructions: List<BpfInstruction>,
 ) {
+    /**
+     * Renders the compiled classic-BPF instruction stream as indexed mnemonics for diagnostics.
+     * Unknown opcodes are retained as raw fields so the output never misrepresents a filter.
+     */
+    public fun disassemble(): String =
+        instructions.mapIndexed { index, instruction ->
+            "${index.toString().padStart(4, '0')}: ${instruction.disassemblyMnemonic()}"
+        }.joinToString("\n")
+
     public companion object {
         @JvmStatic
         public fun builder(): BpfBuilder<BpfState.Uninitialized> = BpfBuilder(mutableListOf())
@@ -92,6 +101,27 @@ public class BpfProgram<out S : BpfStatus>(
                 .build()
     }
 }
+
+private fun BpfInstruction.disassemblyMnemonic(): String =
+    when (this) {
+        is BpfInstruction.Ld ->
+            if (code == BPF_LD_ABS) "ld [$k]" else rawDisassembly()
+        is BpfInstruction.Alu ->
+            if (code == BPF_ALU_AND) "and #0x${k.toUInt().toString(16)}" else rawDisassembly()
+        is BpfInstruction.Ret ->
+            if (code == BPF_RET) "ret #0x${k.toUInt().toString(16)}" else rawDisassembly()
+        is BpfInstruction.Jmp ->
+            when (code) {
+                BPF_JMP_JEQ -> "jeq #$k, +$jt, +$jf"
+                BPF_JMP_JSET -> "jset #$k, +$jt, +$jf"
+                BPF_JMP_JGT -> "jgt #$k, +$jt, +$jf"
+                BPF_JMP_JA -> "ja +$k"
+                else -> rawDisassembly()
+            }
+    }
+
+private fun BpfInstruction.rawDisassembly(): String =
+    "raw(code=0x${code.toInt().and(0xffff).toString(16)}, jt=$jt, jf=$jf, k=0x${k.toUInt().toString(16)})"
 
 /**
  * Represents the type-safe compile-time states of a [BpfBuilder].
