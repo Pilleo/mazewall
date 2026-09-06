@@ -29,11 +29,15 @@ public class ProcessBroker(
     private val sockets: SocketManager = RealSocketManager,
     private val launcher: ProcessLauncher = RealProcessLauncher,
     private val workerClasspath: String = "",
+    private val workerMaxHeap: String = "64m",
+    private val startupTimeoutSeconds: Long = 30,
     /** Extra -D args for spawned worker JVMs (e.g. injectable idle deadline in tests). */
     private val workerExtraJvmArgs: List<String> = emptyList(),
 ) : PortalClient, AutoCloseable {
     init {
         require(poolSize >= 1) { "poolSize must be >= 1" }
+        require(workerMaxHeap.isNotBlank()) { "portal worker max heap is required" }
+        require(startupTimeoutSeconds >= 1) { "portal worker startup timeout must be positive" }
     }
 
     public companion object {
@@ -187,7 +191,7 @@ public class ProcessBroker(
             JvmChildSpec(
                 mainClass = "io.mazewall.portal.worker.PortalWorkerMain",
                 mainArgs = listOf(ep.path),
-                maxHeap = "64m",
+                maxHeap = workerMaxHeap,
                 javaAgents = JavaAgentSelection.None,
                 classpath = resolveWorkerClasspath(),
                 extraJvmArgs = workerExtraJvmArgs,
@@ -240,7 +244,7 @@ public class ProcessBroker(
             error("portal worker exited during handshake")
         }
         val channel = PortalChannel(peer, sockets)
-        if (!JvmChildProcess.awaitReady(pump, 30)) {
+        if (!JvmChildProcess.awaitReady(pump, startupTimeoutSeconds)) {
             sockets.close(peer)
             sockets.close(listen)
             proc.destroyForcibly()

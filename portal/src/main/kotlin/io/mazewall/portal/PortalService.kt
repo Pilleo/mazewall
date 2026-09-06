@@ -8,7 +8,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 public data class PortalWorkerConfig(
     val classpath: List<Path>,
     val implementationClassName: String,
-    val concurrency: Int = 1,
+    val concurrency: Int = 4,
     val callTimeout: Duration = Duration.ofSeconds(30),
     val startupTimeout: Duration = Duration.ofSeconds(30),
     val maxHeap: String = "64m",

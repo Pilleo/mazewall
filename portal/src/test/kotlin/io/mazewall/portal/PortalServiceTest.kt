@@ -24,6 +24,16 @@ class PortalServiceTest {
     }
 
     @Test
+    fun `worker configuration defaults to four concurrent worker threads`() {
+        val config = PortalWorkerConfig(
+            classpath = listOf(Path.of("worker.jar")),
+            implementationClassName = "example.Worker",
+        )
+
+        assertEquals(4, config.concurrency)
+    }
+
+    @Test
     fun `worker configuration rejects nonpositive concurrency`() {
         assertFailsWith<IllegalArgumentException> {
             PortalWorkerConfig(
