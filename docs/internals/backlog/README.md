@@ -1,6 +1,6 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 96 | *Total Resolved Issues:* 487
+*Total Active Issues:* 95 | *Total Resolved Issues:* 488
 
 | Issue | Title | Priority | Component |
 |---|---|---|---|
@@ -46,7 +46,6 @@
 | [issue-20260825-195000-tier-e-nice-to-have-3](issue-20260825-195000-tier-e-nice-to-have-3.md) | Add per-context event count metrics to daemon | low | tier-e |
 | [issue-20260825-223552-supervisorsessionhandlertest-66-reflection-call-sites-fragil](issue-20260825-223552-supervisorsessionhandlertest-66-reflection-call-sites-fragil.md) | SupervisorSessionHandlerTest: 66 reflection call sites ? fragile, breaks silently on signature changes | high | testing |
 | [issue-20260826-102607-unify-landlock-descriptive-state-with-type-state-lifecycle-i](issue-20260826-102607-unify-landlock-descriptive-state-with-type-state-lifecycle-i.md) | Unify Landlock descriptive state with type-state lifecycle in LandlockSession | high | enforcer |
-| [issue-20260826-102703-make-supervisordaemonmanager-daemon-lifecycle-an-explicit-st](issue-20260826-102703-make-supervisordaemonmanager-daemon-lifecycle-an-explicit-st.md) | Make SupervisorDaemonManager daemon lifecycle an explicit state machine | medium | enforcer |
 | [issue-20260826-102722-split-supervisorsessionhandler-along-supervisorroute-with-re](issue-20260826-102722-split-supervisorsessionhandler-along-supervisorroute-with-re.md) | Split SupervisorSessionHandler along SupervisorRoute with request context types | medium | enforcer |
 | [issue-20260826-180103-purge-coverage-theater-tests-and-strengthen-assertion-covera](issue-20260826-180103-purge-coverage-theater-tests-and-strengthen-assertion-covera.md) | Purge coverage theater tests and strengthen assertion coverage | high | testing |
 | [issue-20260827-104508-add-target-based-conflict-checking-to-hybridsupervisor](issue-20260827-104508-add-target-based-conflict-checking-to-hybridsupervisor.md) | Add target-based conflict checking to HybridSupervisor | high | orchestrator |

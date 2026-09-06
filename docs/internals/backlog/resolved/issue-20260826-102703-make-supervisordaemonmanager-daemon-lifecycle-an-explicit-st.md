@@ -1,7 +1,7 @@
 ---
 title: "Make SupervisorDaemonManager daemon lifecycle an explicit state machine"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: medium
 dependencies: []
 component: "enforcer"
@@ -33,6 +33,8 @@ paperclip_identifier: MAZ-151
 2. Replace lazy `isAlive` probing with explicit transition: when `isAlive` is observed false, transition to `Defunct` once (emit `MazewallEvents.DaemonExited` there), then respawn from `Defunct` — making re-spawn behavior reviewable and idempotent.
 3. Move the `prctl(PR_SET_PTRACER)` refresh out of the lookup getter into the spawn/respawn path (or an explicitly named `ensurePtracerAuthorized()`), so the happy path has no hidden syscalls.
 4. Unit-test with injected fake `ProcessLauncher`: crash-then-respawn transitions emit exactly one `DaemonExited` event; `stop()` from each of the three states is a no-op or safe shutdown.
+
+**Resolution (2026-09-06):** Replaced the nullable daemon context with an internal `NotStarted` / `Running` / `Defunct` state model. Dead-process detection now transitions through one guarded `markDefunct()` path, which emits diagnostics once and invokes the fail-closed handler. The default handler still halts the JVM; the test seam permits observing Defunct-to-respawn behavior without weakening production containment failure handling.
 
 ---
 

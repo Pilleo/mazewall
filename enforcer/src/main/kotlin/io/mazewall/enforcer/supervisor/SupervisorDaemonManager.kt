@@ -44,24 +44,28 @@ public class SupervisorDaemonManager(
 ) {
     private val logger = Logger.getLogger(SupervisorDaemonManager::class.java.name)
     private val daemonLock = Any()
-    private var sharedDaemonContext: SupervisorContext? = null
+    private sealed interface DaemonHandle {
+        data object NotStarted : DaemonHandle
+        data class Running(val context: SupervisorContext) : DaemonHandle
+        data class Defunct(val context: SupervisorContext) : DaemonHandle
+    }
+
+    private var daemonHandle: DaemonHandle = DaemonHandle.NotStarted
 
     // Visible for testing: allows test suites to intercept unexpected exit without terminating the JVM
     internal var onUnexpectedExit: (exitCode: Int) -> Unit = { exitCode ->
-        // Observability before the fail-closed halt (issue-20260823-172005). The halt itself is
-        // non-negotiable: stranded USER_NOTIF waiters cannot be resumed.
-        io.mazewall.enforcer.diagnostics.MazewallEvents.emit(
-            io.mazewall.enforcer.diagnostics.MazewallEvents.DaemonExited(
-                pid = daemonProcessPid(),
-                exitCode = exitCode,
-                lastLogLines = daemonLogLines.toList(),
-            ),
-        )
+        // The halt itself is non-negotiable: stranded USER_NOTIF waiters cannot be resumed.
         Runtime.getRuntime().halt(1)
     }
 
     private fun daemonProcessPid(): Long =
-        synchronized(daemonLock) { sharedDaemonContext?.daemonProcess?.pid() ?: -1L }
+        synchronized(daemonLock) {
+            when (val handle = daemonHandle) {
+                DaemonHandle.NotStarted -> -1L
+                is DaemonHandle.Running -> handle.context.daemonProcess.pid()
+                is DaemonHandle.Defunct -> handle.context.daemonProcess.pid()
+            }
+        }
 
     public companion object {
         private const val SHUTDOWN_COMMAND_BYTE = 0x53.toByte() // 'S'
@@ -80,16 +84,15 @@ public class SupervisorDaemonManager(
      */
     public fun getOrSpawnSharedDaemon(): SupervisorContext {
         synchronized(daemonLock) {
-            val existing = sharedDaemonContext
-            if (existing != null && existing.daemonProcess.isAlive) {
-                engine.process.prctl(
-                    io.mazewall.core.PrctlCommand.SetPtracer(existing.daemonProcess.pid())
-                )
-                return existing
+            when (val handle = daemonHandle) {
+                is DaemonHandle.Running -> {
+                    if (handle.context.daemonProcess.isAlive) return handle.context
+                    markDefunct(handle.context, handle.context.daemonProcess.exitValue())
+                }
+                is DaemonHandle.Defunct -> cleanupDaemon(handle.context)
+                DaemonHandle.NotStarted -> Unit
             }
-            val newContext = spawnDaemon()
-            sharedDaemonContext = newContext
-            return newContext
+            return spawnDaemon()
         }
     }
 
@@ -98,11 +101,31 @@ public class SupervisorDaemonManager(
      */
     public fun stop() {
         synchronized(daemonLock) {
-            sharedDaemonContext?.let {
-                cleanupDaemon(it)
-                sharedDaemonContext = null
+            when (val handle = daemonHandle) {
+                is DaemonHandle.Running -> cleanupDaemon(handle.context)
+                is DaemonHandle.Defunct -> cleanupDaemon(handle.context)
+                DaemonHandle.NotStarted -> Unit
             }
+            daemonHandle = DaemonHandle.NotStarted
         }
+    }
+
+    /** Marks the current daemon dead exactly once, emits diagnostics, then applies the fail-closed policy. */
+    private fun markDefunct(context: SupervisorContext, exitCode: Int) {
+        val current = daemonHandle
+        if (current !is DaemonHandle.Running || current.context.daemonProcess != context.daemonProcess) return
+        daemonHandle = DaemonHandle.Defunct(context)
+        logger.severe("SupervisorDaemon (PID=${context.daemonProcess.pid()}) exited unexpectedly with exit code $exitCode!")
+        logger.severe("Last daemon log lines:")
+        daemonLogLines.forEach { line -> logger.severe("[SUPERVISOR-DAEMON-CRASH-LOG] $line") }
+        io.mazewall.enforcer.diagnostics.MazewallEvents.emit(
+            io.mazewall.enforcer.diagnostics.MazewallEvents.DaemonExited(
+                pid = context.daemonProcess.pid(),
+                exitCode = exitCode,
+                lastLogLines = daemonLogLines.toList(),
+            ),
+        )
+        onUnexpectedExit(exitCode)
     }
 
     private fun cleanupDaemon(context: SupervisorContext) {
@@ -173,8 +196,14 @@ public class SupervisorDaemonManager(
 
         val shutdownHook = Thread {
             synchronized(daemonLock) {
-                if (sharedDaemonContext?.daemonProcess == daemonProcess) {
-                    sharedDaemonContext = null
+                when (val handle = daemonHandle) {
+                    is DaemonHandle.Running -> if (handle.context.daemonProcess == daemonProcess) {
+                        daemonHandle = DaemonHandle.NotStarted
+                    }
+                    is DaemonHandle.Defunct -> if (handle.context.daemonProcess == daemonProcess) {
+                        daemonHandle = DaemonHandle.NotStarted
+                    }
+                    DaemonHandle.NotStarted -> Unit
                 }
             }
             daemonProcess.destroyForcibly()
@@ -182,7 +211,7 @@ public class SupervisorDaemonManager(
         processLauncher.addShutdownHook(shutdownHook)
 
         val context = SupervisorContext(socketPath, socketDir, daemonProcess, shutdownHook)
-        sharedDaemonContext = context
+        daemonHandle = DaemonHandle.Running(context)
 
         val pump =
             JvmChildProcess.startStdoutPump(
@@ -196,20 +225,15 @@ public class SupervisorDaemonManager(
                 threadName = "supervisor-daemon-output",
                 onStreamClosed = {
                     synchronized(daemonLock) {
-                        val currentContext = sharedDaemonContext
-                        if (currentContext != null && currentContext.daemonProcess == daemonProcess) {
+                        val currentHandle = daemonHandle
+                        if (currentHandle is DaemonHandle.Running && currentHandle.context.daemonProcess == daemonProcess) {
                             if (!daemonProcess.isAlive) {
                                 val exitCode = try {
                                     daemonProcess.exitValue()
                                 } catch (_: Exception) {
                                     -1
                                 }
-                                logger.severe("SupervisorDaemon (PID=${daemonProcess.pid()}) exited unexpectedly with exit code $exitCode!")
-                                logger.severe("Last daemon log lines:")
-                                daemonLogLines.forEach { line ->
-                                    logger.severe("[SUPERVISOR-DAEMON-CRASH-LOG] $line")
-                                }
-                                onUnexpectedExit(exitCode)
+                                markDefunct(currentHandle.context, exitCode)
                             }
                         }
                     }

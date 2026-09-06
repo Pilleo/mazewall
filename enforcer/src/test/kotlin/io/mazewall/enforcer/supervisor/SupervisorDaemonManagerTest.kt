@@ -147,6 +147,35 @@ class SupervisorDaemonManagerTest {
     }
 
     @Test
+    fun `dead daemon transitions once and is replaced on the next lookup`() {
+        val mockEngine = MockNativeEngine()
+        val first = MockProcess(9999L, SupervisorDaemon.DAEMON_READY_SENTINEL + "\n")
+        val second = MockProcess(10000L, SupervisorDaemon.DAEMON_READY_SENTINEL + "\n")
+        val mockLauncher = object : MockProcessLauncher(first) {
+            var starts = 0
+
+            override fun startProcess(args: List<String>, redirectErrorStream: Boolean): Process {
+                starts++
+                return super.startProcess(args, redirectErrorStream)
+            }
+        }
+        val manager = SupervisorDaemonManager(mockEngine, MockSocketManager(), mockLauncher)
+        val exits = AtomicInteger(0)
+        manager.onUnexpectedExit = { exits.incrementAndGet() }
+
+        val initial = manager.getOrSpawnSharedDaemon()
+        first.setAlive(false)
+        mockLauncher.mockProcess = second
+
+        val replacement = manager.getOrSpawnSharedDaemon()
+
+        assertEquals(9999L, initial.daemonProcess.pid())
+        assertEquals(10000L, replacement.daemonProcess.pid())
+        assertEquals(2, mockLauncher.starts)
+        assertEquals(1, exits.get(), "a dead daemon must transition to Defunct exactly once")
+    }
+
+    @Test
     fun `spawnDaemon falls back to short temp directory when default socket path is too long`() {
         val mockEngine = MockNativeEngine()
         val mockLauncher = object : MockProcessLauncher() {
