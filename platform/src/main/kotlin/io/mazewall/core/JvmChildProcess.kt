@@ -116,6 +116,12 @@ public object JvmChildProcess {
         timeoutSeconds: Long,
     ): Boolean = pump.ready.await(timeoutSeconds, TimeUnit.SECONDS)
 
+    /** Waits for the child ready sentinel without rounding a deadline up to seconds. */
+    public fun awaitReadyMillis(
+        pump: ChildStdoutPump,
+        timeoutMillis: Long,
+    ): Boolean = pump.ready.await(timeoutMillis, TimeUnit.MILLISECONDS)
+
     public fun stripInheritedJvmOptions(env: MutableMap<String, String>) {
         INHERITED_JVM_OPTION_KEYS.forEach { env.remove(it) }
     }

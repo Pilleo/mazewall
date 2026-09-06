@@ -172,7 +172,7 @@ public class ProcessBroker(
         if (closed.get()) {
             destroySlot(slot)
         } else {
-            idle.put(slot)
+            slot.offerToPool { idle.offer(slot) }
         }
     }
 
@@ -244,6 +244,7 @@ public class ProcessBroker(
             accepted.get(remainingMillis, TimeUnit.MILLISECONDS)
         } catch (_: java.util.concurrent.TimeoutException) {
             sockets.close(listen)
+            accepted.whenComplete { latePeer, _ -> if (latePeer != null) sockets.close(latePeer) }
             proc.destroyForcibly()
             ep.close()
             error("portal worker timed out before connecting")
@@ -259,8 +260,8 @@ public class ProcessBroker(
             error("portal worker exited during handshake")
         }
         val channel = PortalChannel(peer, sockets)
-        val readySeconds = TimeUnit.NANOSECONDS.toSeconds(startupDeadlineNanos - System.nanoTime()).coerceAtLeast(1)
-        if (!JvmChildProcess.awaitReady(pump, readySeconds)) {
+        val readyMillis = TimeUnit.NANOSECONDS.toMillis(startupDeadlineNanos - System.nanoTime())
+        if (readyMillis <= 0 || !JvmChildProcess.awaitReadyMillis(pump, readyMillis)) {
             sockets.close(peer)
             sockets.close(listen)
             proc.destroyForcibly()
@@ -321,12 +322,19 @@ public class ProcessBroker(
         private val pending = ConcurrentHashMap<Int, CompletableFuture<PortalFrame>>()
         private val writeLock = Any()
         private val failed = AtomicBoolean(false)
+        private val stateLock = Any()
 
         fun fail(cause: Throwable): Boolean {
-            if (!failed.compareAndSet(false, true)) return false
-            pending.values.forEach { it.completeExceptionally(cause) }
-            pending.clear()
-            return true
+            synchronized(stateLock) {
+                if (!failed.compareAndSet(false, true)) return false
+                pending.values.forEach { it.completeExceptionally(cause) }
+                pending.clear()
+                return true
+            }
+        }
+
+        fun offerToPool(offer: () -> Boolean): Boolean = synchronized(stateLock) {
+            !failed.get() && offer()
         }
 
         fun startReader() {
@@ -347,16 +355,18 @@ public class ProcessBroker(
         }
 
         fun submit(id: Int, frame: PortalFrame, fds: List<FileDescriptor<*, FdState.Open>>): CompletableFuture<PortalFrame> {
-            check(!failed.get()) { "portal worker connection is unavailable" }
-            val reply = CompletableFuture<PortalFrame>()
-            check(pending.putIfAbsent(id, reply) == null)
-            try {
-                synchronized(writeLock) { channel.send(frame, fds) }
-            } catch (failure: Exception) {
-                pending.remove(id)
-                reply.completeExceptionally(failure)
+            synchronized(stateLock) {
+                check(!failed.get()) { "portal worker connection is unavailable" }
+                val reply = CompletableFuture<PortalFrame>()
+                check(pending.putIfAbsent(id, reply) == null)
+                try {
+                    synchronized(writeLock) { channel.send(frame, fds) }
+                } catch (failure: Exception) {
+                    pending.remove(id)
+                    reply.completeExceptionally(failure)
+                }
+                return reply
             }
-            return reply
         }
     }
 }

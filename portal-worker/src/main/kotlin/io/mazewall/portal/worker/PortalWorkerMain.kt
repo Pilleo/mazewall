@@ -3,6 +3,7 @@ package io.mazewall.portal.worker
 import io.mazewall.ProcessPolicies
 import io.mazewall.RuntimeProfile
 import io.mazewall.core.RealSocketManager
+import io.mazewall.core.close
 import io.mazewall.enforcer.api.ContainedExecutors
 import io.mazewall.portal.PortalChannel
 import io.mazewall.portal.PortalFrame
@@ -82,7 +83,7 @@ public object PortalWorkerMain {
                         break
                     }
                 if (frame.kind != PortalKind.REQUEST) {
-                    fds.forEach { sockets.close(it) }
+                    fds.forEach { it.close() }
                     continue
                 }
                 try {
@@ -111,11 +112,11 @@ public object PortalWorkerMain {
                             channel.send(PortalFrame(PortalKind.ERROR, frame.requestId, frame.methodId, msg, 0))
                         }
                     } finally {
-                        fds.forEach { sockets.close(it) }
+                        fds.forEach { it.close() }
                     }
                     }
                 } catch (_: RejectedExecutionException) {
-                    fds.forEach { sockets.close(it) }
+                    fds.forEach { it.close() }
                     synchronized(channel) {
                         channel.send(
                             PortalFrame(PortalKind.ERROR, frame.requestId, frame.methodId, "worker request queue is full".toByteArray(StandardCharsets.UTF_8), 0),
