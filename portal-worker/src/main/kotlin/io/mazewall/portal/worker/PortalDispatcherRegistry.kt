@@ -29,7 +29,9 @@ public object PortalDispatcherRegistry {
     private val handlers = ConcurrentHashMap<Int, Handler>()
 
     public fun register(ids: IntArray, handler: Handler) {
-        for (id in ids) handlers[id] = handler
+        for (id in ids) {
+            require(handlers.putIfAbsent(id, handler) == null) { "duplicate portal method id $id" }
+        }
     }
 
     /** Attempts registered dispatch; null when no handler claims [methodId]. */
@@ -83,10 +85,11 @@ public object PortalDispatcherRegistry {
 
         // One closure per id keeps the invoked methodId exact without re-parsing.
         for (id in methodIds) {
-            handlers[id] = { mid, payload, granted ->
+            val handler: Handler = { mid, payload, granted ->
                 val capabilities = granted.map(Capability::readFd)
                 handle.invoke(dispatcherObject, impl, mid, payload, capabilities) as ByteArray
             }
+            require(handlers.putIfAbsent(id, handler) == null) { "duplicate portal method id $id" }
         }
     }
 }

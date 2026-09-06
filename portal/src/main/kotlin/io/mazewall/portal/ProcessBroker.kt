@@ -79,10 +79,19 @@ public class ProcessBroker(
         methodId: Int,
         payload: ByteArray,
         vararg granted: Capability.ReadFd,
-    ): ByteArray = call(methodId, payload, granted.map { it.transferForPortalCall() })
+    ): ByteArray {
+        val transferred = mutableListOf<FileDescriptor<FileDescriptorRole.Granted, FdState.Open>>()
+        try {
+            granted.forEach { transferred += it.transferForPortalCall() }
+            return call(methodId, payload, transferred)
+        } catch (failure: Throwable) {
+            transferred.forEach { it.close() }
+            throw failure
+        }
+    }
 
     public fun checksum(fd: Capability.ReadFd): Int {
-        val payload = call(PortalMethods.CHECKSUM, ByteArray(0), listOf(fd.fd))
+        val payload = invoke(PortalMethods.CHECKSUM, ByteArray(0), fd)
         require(payload.size == 4) { "checksum must be 4 bytes" }
         return ((payload[0].toInt() and 0xff) shl 24) or
             ((payload[1].toInt() and 0xff) shl 16) or
@@ -143,10 +152,7 @@ public class ProcessBroker(
         } catch (e: PortalCallException) {
             throw e
         } catch (e: Exception) {
-            if (slot.fail(e)) {
-                idle.remove(slot)
-                recycleDeadWorker(slot)
-            }
+            failConnection(slot, e)
             throw PortalCallException("portal RPC failed", e)
         }
     }
@@ -189,6 +195,7 @@ public class ProcessBroker(
     }
 
     private fun spawnWorker(): WorkerSlot {
+        val startupDeadlineNanos = System.nanoTime() + TimeUnit.SECONDS.toNanos(startupTimeoutSeconds)
         val ep = PrivateUnixEndpoint.create(launcher, "mazewall-portal-", "portal.sock")
         val listen = sockets.createUnixServer(ep.path)
         val spec =
@@ -228,14 +235,18 @@ public class ProcessBroker(
                 "MAZEWALL_PORTAL_WORKER_READY",
                 { line ->
                     System.err.println("[PORTAL-WORKER] $line")
-                    runCatching {
-                        java.io.File("/tmp/portalworker_err.log").appendText(line + "\n")
-                    }
                 },
                 "portal-worker-stdout",
             )
+        val remainingMillis = TimeUnit.NANOSECONDS.toMillis(startupDeadlineNanos - System.nanoTime()).coerceAtLeast(1)
+        val accepted = CompletableFuture.supplyAsync { sockets.accept(listen) }
         val peer = try {
-            sockets.accept(listen)
+            accepted.get(remainingMillis, TimeUnit.MILLISECONDS)
+        } catch (_: java.util.concurrent.TimeoutException) {
+            sockets.close(listen)
+            proc.destroyForcibly()
+            ep.close()
+            error("portal worker timed out before connecting")
         } catch (e: Exception) {
             // Listener closed by the death watcher (or teardown racing accept).
             runCatching { proc.destroyForcibly() }
@@ -248,7 +259,8 @@ public class ProcessBroker(
             error("portal worker exited during handshake")
         }
         val channel = PortalChannel(peer, sockets)
-        if (!JvmChildProcess.awaitReady(pump, startupTimeoutSeconds)) {
+        val readySeconds = TimeUnit.NANOSECONDS.toSeconds(startupDeadlineNanos - System.nanoTime()).coerceAtLeast(1)
+        if (!JvmChildProcess.awaitReady(pump, readySeconds)) {
             sockets.close(peer)
             sockets.close(listen)
             proc.destroyForcibly()
@@ -265,7 +277,13 @@ public class ProcessBroker(
         }
     }
 
-    private fun recycleDeadWorker(dead: WorkerSlot) {
+    private fun failConnection(dead: WorkerSlot, cause: Throwable) {
+        if (!dead.fail(cause)) return
+        idle.remove(dead)
+        if (closed.get()) {
+            destroySlot(dead)
+            return
+        }
         // Pre-spawn BEFORE teardown: replacement boot overlaps destruction of the corpse,
         // bounding recycle latency instead of serializing a full JVM start (issue-011652).
         val fresh = try {
@@ -273,7 +291,7 @@ public class ProcessBroker(
         } finally {
             destroySlot(dead)
         }
-        idle.put(fresh)
+        if (!closed.get()) idle.put(fresh) else destroySlot(fresh)
     }
 
     private fun destroySlot(slot: WorkerSlot) {
@@ -293,7 +311,7 @@ public class ProcessBroker(
         }
     }
 
-    private class WorkerSlot(
+    private inner class WorkerSlot(
         val process: Process,
         val channel: PortalChannel,
         val endpoint: PrivateUnixEndpoint,
@@ -313,20 +331,23 @@ public class ProcessBroker(
 
         fun startReader() {
             Thread.ofPlatform().name("portal-response-reader").start {
-                try {
-                    while (true) {
+                while (true) {
+                    try {
                         val (frame, fds) = channel.receive()
                         fds.forEach { sockets.close(it) }
                         pending.remove(frame.requestId)?.complete(frame)
+                    } catch (_: PortalReadTimeoutException) {
+                        continue
+                    } catch (failure: Exception) {
+                        failConnection(this@WorkerSlot, failure)
+                        break
                     }
-                } catch (failure: Exception) {
-                    pending.values.forEach { it.completeExceptionally(failure) }
-                    pending.clear()
                 }
             }
         }
 
         fun submit(id: Int, frame: PortalFrame, fds: List<FileDescriptor<*, FdState.Open>>): CompletableFuture<PortalFrame> {
+            check(!failed.get()) { "portal worker connection is unavailable" }
             val reply = CompletableFuture<PortalFrame>()
             check(pending.putIfAbsent(id, reply) == null)
             try {
