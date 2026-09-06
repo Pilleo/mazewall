@@ -1,43 +1,135 @@
-# Code Issues Backlog
+# Mazewall Backlog Index
 
-This directory contains modularized backlog items for architectural and security findings. Keeping issues separated improves context efficiency for both developers and AI coding agents.
+*Total Active Issues:* 125 | *Total Resolved Issues:* 458
 
-## Auto-Generated Issue Registries
-
-Individual issue files (`issue-*.md`) created under this directory are automatically scanned, parsed, and registered in the project's architectural maps. Instead of manually maintaining indexes here, consult the dynamically generated knowledge maps:
-
-*   **[Enforcer Module Knowledge Map](../maps/enforcer_map.md)** — Maps design documents, source files, and open issues for the `:enforcer` module.
-*   **[Profiler Module Knowledge Map](../maps/profiler_map.md)** — Maps design documents, source files, and open issues for the `:profiler` module.
-
-## Registering a New Issue
-
-To log a new bug, architectural gap, kernel-level nuance, or security vulnerability, simply create a new markdown file under the appropriate subdirectory:
-
-*   `docs/internals/backlog/security/` for security/vulnerability findings
-*   `docs/internals/backlog/performance/` for performance findings
-*   `docs/internals/backlog/testing/` for testing findings
-*   `docs/internals/backlog/code_health/` for other code/architectural health improvements
-
-Ensure your file starts with YAML frontmatter containing `title`, `severity`, `status`, and `priority` (`high`, `medium`, or `low` — not 0–10):
-
-```markdown
----
-title: "Title of Issue"
-severity: "HIGH/MEDIUM/LOW/CRITICAL/ENHANCEMENT"
-status: "open"
-priority: high
-component: "enforcer"
-target_modules: [":enforcer"]
-target_files: ["enforcer/src/main/kotlin/io/mazewall/SomeFile.kt"]
-open_questions: false # Set to true if pending design/operator feedback
----
-
-# 🔴 [Severity: HIGH]: Title of Issue
-**Context:** ...
-**Needed:** ...
-
-## ❓ Open Questions
-1. [Clarifying design questions, architectural options, or operator trade-offs (required when open_questions: true).]
-```
-
-Once the file is saved, run `./gradlew check` or `./gradlew build` to verify the backlog issue formatting.
+| Issue | Title | Priority | Component |
+|---|---|---|---|
+| [MAZ-19-productivity-review](MAZ-19-productivity-review.md) | MAZ-19: Productivity Review for MAZ-18 | high | paperclip-management |
+| [issue-20260905-130408-implement-blast-radius-memory-injection-linking-codanna-impa](implementation/issue-20260905-130408-implement-blast-radius-memory-injection-linking-codanna-impa.md) | Implement blast-radius memory injection linking Codanna impact symbols to agentmemory | high | testing |
+| [issue-20260905-130500-implement-automated-tombstoning-and-stale-memory-pruning-via](code_health/issue-20260905-130500-implement-automated-tombstoning-and-stale-memory-pruning-via.md) | Implement automated tombstoning and stale memory pruning via Codanna AST verification | medium | testing |
+| [issue-20260905-130530-align-codanna-document-indexing-and-agentmemory-semantic-rec](implementation/issue-20260905-130530-align-codanna-document-indexing-and-agentmemory-semantic-rec.md) | Align Codanna document indexing and agentmemory semantic recall on BGE-M3 vector space | medium | testing |
+| [issue-20260905-114558-add-eintr-progressive-backoff-and-eof-validation-to-supervis](code_health/issue-20260905-114558-add-eintr-progressive-backoff-and-eof-validation-to-supervis.md) | Add EINTR progressive backoff and EOF validation to SupervisorSocketInputStream | high | enforcer |
+| [issue-019-refactor-profiler-daemon-to-use-coroutines-structured-concur](issue-019-refactor-profiler-daemon-to-use-coroutines-structured-concur.md) | Refactor Profiler Daemon to use Coroutines (Structured Concurrency) | low | profiler |
+| [issue-193-review-orchestrator-prompts-jules-quality-safety-guidelines](issue-193-review-orchestrator-prompts-jules-quality-safety-guidelines.md) | Review and Enhance Orchestrator Prompts for Jules to Enforce Quality and Safety | high | orchestrator |
+| [issue-195-jules-session-id-parsing-bug](issue-195-jules-session-id-parsing-bug.md) | Fix Jules Session ID Parsing Bug | high | orchestrator |
+| [issue-197-graceful-fallback-for-ai-agent-failures](issue-197-graceful-fallback-for-ai-agent-failures.md) | Graceful Fallback for AI Agent Failures | high | orchestrator |
+| [issue-198-auto-closing-linked-github-issues](issue-198-auto-closing-linked-github-issues.md) | Auto-Closing Linked GitHub Issues | high | orchestrator |
+| [issue-202-handle-cli-authentication-failures](issue-202-handle-cli-authentication-failures.md) | Detect and Handle CLI Authentication Failures with Actionable Login Alerts | high | orchestrator |
+| [issue-202-orchestrator-build-github-issue-body-dynamically-with-project-preamble](issue-202-orchestrator-build-github-issue-body-dynamically-with-project-preamble.md) | Orchestrator: Build GitHub Issue Body Dynamically with Project Preamble | high | orchestrator |
+| [issue-20260726-191002-subsystem-locking-and-core-file-locks-in-dependency-graph](issue-20260726-191002-subsystem-locking-and-core-file-locks-in-dependency-graph.md) | Implement Subsystem Domain Locking and Core File Exclusive Execution in Dependency | high | orchestrator |
+| [issue-20260726-191003-dynamic-post-push-target-file-tracking-in-orchestrator](issue-20260726-191003-dynamic-post-push-target-file-tracking-in-orchestrator.md) | Dynamic Post-Push Target File Tracking in Orchestrator Active Slots | high | orchestrator |
+| [issue-20260726-191004-integrate-mergiraf-ast-merge-driver-into-repository](issue-20260726-191004-integrate-mergiraf-ast-merge-driver-into-repository.md) | Integrate Mergiraf AST Syntax-Aware Git Merge Driver into Repository Configuration | high | ci |
+| [issue-20260726-191501-safe-atomic-orchestrator-state-properties-persistence](issue-20260726-191501-safe-atomic-orchestrator-state-properties-persistence.md) | Implement Atomic Write-Ahead Pattern for Orchestrator State File Persistence | high | orchestrator |
+| [issue-20260726-191502-isolated-worktree-git-rebase-orchestrator-daemon](issue-20260726-191502-isolated-worktree-git-rebase-orchestrator-daemon.md) | Isolate Orchestrator Git Operations from Main Working Directory using Temporary | high | orchestrator |
+| [issue-20260726-191503-frontmatter-parser-colon-splitting-logic-truncation](issue-20260726-191503-frontmatter-parser-colon-splitting-logic-truncation.md) | Fix Custom Frontmatter Parser Colon-Splitting Logic Bug | high | orchestrator |
+| [issue-20260726-191504-backlog-validator-non-empty-target-modules-constraint](issue-20260726-191504-backlog-validator-non-empty-target-modules-constraint.md) | Enforce Non-Empty Target Modules in Backlog Validator and Safe Empty Scheduler | high | orchestrator |
+| [issue-20260726-205801-orchestrator-serial-merge-queue](issue-20260726-205801-orchestrator-serial-merge-queue.md) | Implement Serial PR Merge Queue in Orchestrator to Prevent Rebase Races | high | orchestrator |
+| [issue-20260726-205802-orchestrator-working-tree-sanitization-barrier](issue-20260726-205802-orchestrator-working-tree-sanitization-barrier.md) | Implement Pre-Commit Working Tree Sanitization Barrier in Orchestrator Tasks | high | orchestrator |
+| [issue-20260726-205803-mandatory-orchestrator-issue-creation-gating](issue-20260726-205803-mandatory-orchestrator-issue-creation-gating.md) | Enforce Mandatory Schema Gating and Skill Header Injection in Issue Creation | high | orchestrator |
+| [issue-20260726-205804-exclusive-orchestrator-execution-invariant-documentation](issue-20260726-205804-exclusive-orchestrator-execution-invariant-documentation.md) | Document Single Control Plane Development Invariants in AGENTS.md | high | docs |
+| [issue-20260727-021302-github-cli-token-fallback-and-auth-resilience](issue-20260727-021302-github-cli-token-fallback-and-auth-resilience.md) | GitHub CLI Authentication Resilience and Fallback for Invalid GITHUB_TOKEN | high | orchestrator |
+| [issue-20260727-025903-orchestrator-closed-pr-detection-and-slot-reset](issue-20260727-025903-orchestrator-closed-pr-detection-and-slot-reset.md) | Detect Closed Pull Requests and Suppress Conflict Alarm Spam in Orchestrator | high | orchestrator |
+| [issue-20260727-040001-interface-decoupling-processbuilder-realgithubclient](issue-20260727-040001-interface-decoupling-processbuilder-realgithubclient.md) | Interface decoupling for ProcessBuilder execution in RealGitHubClient | medium | orchestrator |
+| [issue-20260727-102502-jules-ci-failure-prompt-rebase-instruction](issue-20260727-102502-jules-ci-failure-prompt-rebase-instruction.md) | Add Mandatory Origin Master Rebase Prompt Instructions in Jules Retry and Feedback Prompts | high | orchestrator |
+| [issue-20260729-131005-atomic-state-persistence-orchestrator-properties-write](issue-20260729-131005-atomic-state-persistence-orchestrator-properties-write.md) | Atomic Properties State File Writing in Orchestrator to Prevent Corruption | high | orchestrator |
+| [issue-20260729-131006-orchestrator-branch-sanitization-merging-barrier](issue-20260729-131006-orchestrator-branch-sanitization-merging-barrier.md) | Introduce Branch Sanitization and Checkout Checks in Orchestrator Merging Logic | high | orchestrator |
+| [issue-20260729-131008-integrate-refactorfirst-architectural-metric-analysis](issue-20260729-131008-integrate-refactorfirst-architectural-metric-analysis.md) | Integrate RefactorFirst Gradle Plugin to Prioritize Architectural Cleanups | high | ci |
+| [issue-20260729-215004-orchestrator-clean-merge-self-healing-sanitization](issue-20260729-215004-orchestrator-clean-merge-self-healing-sanitization.md) | Implement Self-Healing Working Tree Sanitization on Successful Merge Paths in BranchRebaser | high | orchestrator |
+| [issue-20260808-032525-reduce-and-version-public-api-surface](issue-20260808-032525-reduce-and-version-public-api-surface.md) | Reduce and Version the Supported Public API Surface | high | enforcer |
+| [issue-20260823-181001-slim-root-agents-md](issue-20260823-181001-slim-root-agents-md.md) | Slim root AGENTS.md to non-inferable commands, never-dos, and nested index | high | docs |
+| [issue-20260823-181002-add-platform-agents-md](issue-20260823-181002-add-platform-agents-md.md) | Add platform/AGENTS.md for FFM layouts, Syscall.kt, and NativeEngine isolation | high | platform |
+| [issue-20260823-181003-add-portal-family-agents-md](issue-20260823-181003-add-portal-family-agents-md.md) | Add nested AGENTS.md for portal, portal-codegen, and portal-worker | medium | docs |
+| [issue-20260823-181006-cheap-first-verification-in-ldd-skill](issue-20260823-181006-cheap-first-verification-in-ldd-skill.md) | Make loop-driven Checker use cheap module tests; OCI only when needs_kernel | high | docs |
+| [issue-20260823-181012-single-start-approval-gate-hybrid](issue-20260823-181012-single-start-approval-gate-hybrid.md) | One start-approval gate for hybrid Paperclip + orchestrator loop | high | orchestrator |
+| [issue-20260823-181013-isolate-paperclip-agent-worktrees](issue-20260823-181013-isolate-paperclip-agent-worktrees.md) | Do not run Paperclip coding agents on the shared jseccomp working tree | high | orchestrator |
+| [issue-20260823-181014-retain-orchestrator-github-ci-merge-states](issue-20260823-181014-retain-orchestrator-github-ci-merge-states.md) | Keep orchestrator GitHub/CI/PR/merge states until a dispatcher replacement exists | high | orchestrator |
+| [issue-20260823-181015-harden-paperclip-telegram-git-lifecycle](issue-20260823-181015-harden-paperclip-telegram-git-lifecycle.md) | Harden Paperclip Telegram done-hook: no rebase of the operator working tree | high | orchestrator |
+| [issue-20260823-181020-add-target-symbols-and-verify-cheap-frontmatter](issue-20260823-181020-add-target-symbols-and-verify-cheap-frontmatter.md) | Extend backlog frontmatter with target_symbols and verify.cheap | high | orchestrator |
+| [issue-20260823-181022-diff-escape-pauses-sibling-slots](issue-20260823-181022-diff-escape-pauses-sibling-slots.md) | Pause sibling slots when a PR diff escapes declared target_files | high | orchestrator |
+| [issue-20260823-181023-keep-module-level-exclusive-scheduling](issue-20260823-181023-keep-module-level-exclusive-scheduling.md) | Keep module-level exclusive scheduling; CORE file locks only, no intra-module parallel | high | orchestrator |
+| [issue-20260823-212901-document-run-orchestrator-as-the-only-production-loop](issue-20260823-212901-document-run-orchestrator-as-the-only-production-loop.md) | Document run_orchestrator as the only production loop | high | orchestrator |
+| [issue-20260823-212906-default-off-paperclip-agent-dispatch-so-jules-stays-the-work](issue-20260823-212906-default-off-paperclip-agent-dispatch-so-jules-stays-the-work.md) | Default-off Paperclip agent dispatch so Jules stays the worker | high | orchestrator |
+| [issue-20260823-212912-do-not-resolve-markdown-from-paperclip-done-without-orchestr](issue-20260823-212912-do-not-resolve-markdown-from-paperclip-done-without-orchestr.md) | Do not resolve markdown from Paperclip done without orchestrator ResolveTask | high | orchestrator |
+| [issue-20260823-212917-add-operator-dry-run-then-one-issue-ingest-checklist](issue-20260823-212917-add-operator-dry-run-then-one-issue-ingest-checklist.md) | Add operator dry-run then one-issue ingest checklist | high | orchestrator |
+| [issue-20260824-011701-gradle9-cross-module-resolution-pattern-and-lint](issue-20260824-011701-gradle9-cross-module-resolution-pattern-and-lint.md) | Gradle 9 Cross-Module Execution-Time Resolution: Canonical Pattern + Build-Script Lint | high | ci |
+| [issue-20260824-203500-fd-token-ownership-type-level-owned-unowned-split-audit-ledg](issue-20260824-203500-fd-token-ownership-type-level-owned-unowned-split-audit-ledg.md) | FD token ownership: type-level Owned/Unowned split + audit ledger + literal-int sweep | high | platform |
+| [issue-20260825-071117-paperclip-core-upstream-asks-blocking-hybrid-loop-robustness](issue-20260825-071117-paperclip-core-upstream-asks-blocking-hybrid-loop-robustness.md) | Paperclip core upstream asks blocking hybrid-loop robustness | high | orchestrator |
+| [issue-20260825-192935-probe-fix-typo-containment-states-paragraph-spacing-in-readm](issue-20260825-192935-probe-fix-typo-containment-states-paragraph-spacing-in-readm.md) | PROBE: Fix typo 'containment states' paragraph spacing in README quick-start | high | docs |
+| [issue-20260825-192936-probe-add-missing-kdoc-param-tag-to-sandboxedpath-of](issue-20260825-192936-probe-add-missing-kdoc-param-tag-to-sandboxedpath-of.md) | PROBE: Add missing KDoc @param tag to SandboxedPath.of | high | docs |
+| [issue-20260825-195000-tier-e-nice-to-have-1](issue-20260825-195000-tier-e-nice-to-have-1.md) | Extract probe harness modes from TierEDaemon.kt main() | low | tier-e |
+| [issue-20260825-195000-tier-e-nice-to-have-2](issue-20260825-195000-tier-e-nice-to-have-2.md) | Add SO_RCVTIMEO to daemon session socket (bounded recv blocking) | low | tier-e |
+| [issue-20260825-195000-tier-e-nice-to-have-3](issue-20260825-195000-tier-e-nice-to-have-3.md) | Add per-context event count metrics to daemon | low | tier-e |
+| [issue-20260825-223552-supervisorsessionhandlertest-66-reflection-call-sites-fragil](issue-20260825-223552-supervisorsessionhandlertest-66-reflection-call-sites-fragil.md) | SupervisorSessionHandlerTest: 66 reflection call sites ? fragile, breaks silently on signature changes | high | testing |
+| [issue-20260826-102539-move-seccompinstallationstate-ordering-into-the-sealed-hiera](issue-20260826-102539-move-seccompinstallationstate-ordering-into-the-sealed-hiera.md) | Move SeccompInstallationState ordering into the sealed hierarchy | high | enforcer |
+| [issue-20260826-102607-unify-landlock-descriptive-state-with-type-state-lifecycle-i](issue-20260826-102607-unify-landlock-descriptive-state-with-type-state-lifecycle-i.md) | Unify Landlock descriptive state with type-state lifecycle in LandlockSession | high | enforcer |
+| [issue-20260826-102609-cap-sandboxdispatcher-poolcache-growth-and-evict-idle-pools](issue-20260826-102609-cap-sandboxdispatcher-poolcache-growth-and-evict-idle-pools.md) | Cap SandboxDispatcher poolCache growth and evict idle pools | high | enforcer |
+| [issue-20260826-102703-make-supervisordaemonmanager-daemon-lifecycle-an-explicit-st](issue-20260826-102703-make-supervisordaemonmanager-daemon-lifecycle-an-explicit-st.md) | Make SupervisorDaemonManager daemon lifecycle an explicit state machine | medium | enforcer |
+| [issue-20260826-102705-deduplicate-pendingspawnregistry-ttl-logic-and-use-monotonic](issue-20260826-102705-deduplicate-pendingspawnregistry-ttl-logic-and-use-monotonic.md) | Deduplicate PendingSpawnRegistry TTL logic and use monotonic clock | low | enforcer |
+| [issue-20260826-102722-split-supervisorsessionhandler-along-supervisorroute-with-re](issue-20260826-102722-split-supervisorsessionhandler-along-supervisorroute-with-re.md) | Split SupervisorSessionHandler along SupervisorRoute with request context types | medium | enforcer |
+| [issue-20260826-122817-fix-broken-gradle-build-for-fresh-clones-missing-tie](issue-20260826-122817-fix-broken-gradle-build-for-fresh-clones-missing-tie.md) | Fix broken Gradle build for fresh clones: missing tier-e-proto directory | high | ci |
+| [issue-20260826-180103-purge-coverage-theater-tests-and-strengthen-assertion-covera](issue-20260826-180103-purge-coverage-theater-tests-and-strengthen-assertion-covera.md) | Purge coverage theater tests and strengthen assertion coverage | high | testing |
+| [issue-20260827-104508-add-target-based-conflict-checking-to-hybridsupervisor](issue-20260827-104508-add-target-based-conflict-checking-to-hybridsupervisor.md) | Add target-based conflict checking to HybridSupervisor | high | orchestrator |
+| [issue-20260827-104830-precompile-new-backlog-issue-into-standalone-jvm-cli](issue-20260827-104830-precompile-new-backlog-issue-into-standalone-jvm-cli.md) | Precompile new_backlog_issue into standalone JVM CLI | medium | orchestrator |
+| [issue-20260827-110130-wire-codanna-into-symbollocator-as-an-optional-accelerant](issue-20260827-110130-wire-codanna-into-symbollocator-as-an-optional-accelerant.md) | Wire Codanna into SymbolLocator as an optional accelerant | medium | orchestrator |
+| [issue-20260827-113131-implement-stalledrunreclaimer-in-hybridsupervisor-for-timeou](issue-20260827-113131-implement-stalledrunreclaimer-in-hybridsupervisor-for-timeou.md) | Implement StalledRunReclaimer in HybridSupervisor for timeout recovery | high | orchestrator |
+| [issue-20260827-113239-add-capability-based-routing-for-kernel-and-offline-tasks-in](issue-20260827-113239-add-capability-based-routing-for-kernel-and-offline-tasks-in.md) | Add capability-based routing for kernel and offline tasks in ComponentRouter | medium | orchestrator |
+| [issue-20260827-113352-add-interactive-telegram-clarification-prompts-for-open-oper](issue-20260827-113352-add-interactive-telegram-clarification-prompts-for-open-oper.md) | Add interactive Telegram clarification prompts for open operator questions in HybridSupervisor | medium | orchestrator |
+| [issue-20260827-120200-implement-paperclip-issue-tree-holds-for-runtime-resource-co](issue-20260827-120200-implement-paperclip-issue-tree-holds-for-runtime-resource-co.md) | Implement Paperclip Issue Tree Holds for runtime resource conflict locking in HybridSupervisor | high | orchestrator |
+| [issue-20260827-120347-implement-agent-wakeup-queue-triggering-in-hybridsupervisor](issue-20260827-120347-implement-agent-wakeup-queue-triggering-in-hybridsupervisor.md) | Implement Agent Wakeup Queue triggering in HybridSupervisor on issue unblock | medium | orchestrator |
+| [issue-20260827-120530-implement-git-worktree-lease-isolation-for-local-and-cloud-w](issue-20260827-120530-implement-git-worktree-lease-isolation-for-local-and-cloud-w.md) | Implement Git Worktree lease isolation for local and cloud worker dispatch | high | orchestrator |
+| [issue-203-orchestrator-validate-issue-context-and-needed-before-github-issue-creation](issue-203-orchestrator-validate-issue-context-and-needed-before-github-issue-creation.md) | Orchestrator: Validate Issue Context and Needed Before GitHub Issue Creation | high | orchestrator |
+| [issue-204-orchestrator-structured-ci-failure-comment-with-diagnosis-guidance](issue-204-orchestrator-structured-ci-failure-comment-with-diagnosis-guidance.md) | Orchestrator: Structured CI Failure Comment with Diagnosis Guidance for Jules | high | orchestrator |
+| [issue-205-orchestrator-add-failure-context-to-jules-retry-comments](issue-205-orchestrator-add-failure-context-to-jules-retry-comments.md) | Orchestrator: Add Failure Context to Jules Retry and Completed-Without-PR | high | orchestrator |
+| [issue-208-orchestrator-auto-merge-pr-on-verdict-approved-when-autonomous](issue-208-orchestrator-auto-merge-pr-on-verdict-approved-when-autonomous.md) | Orchestrator: Auto-Merge PR on VERDICT: APPROVED When autonomy=autonomous | medium | orchestrator |
+| [issue-075-implement-floor-fixes](issue-075-implement-floor-fixes.md) | \U0001F534 [REOPENED]: JVM Invariant Syscall Floor Implementation Fixes | low | enforcer |
+| [issue-20260823-171954-sbob-policy-artifacts-ci-admission](issue-20260823-171954-sbob-policy-artifacts-ci-admission.md) | SBoB Policy Artifacts Workflow: Pinned, Signed, Versioned Policies for CI Admission | medium | enforcer |
+| [issue-20260823-172004-additional-architecture-coverage](issue-20260823-172004-additional-architecture-coverage.md) | Additional Architecture Coverage: s390x, ppc64le, riscv64 | low | enforcer |
+| [issue-20260825-023930-tier-e-initiative](issue-20260825-023930-tier-e-initiative.md) | Tier E Initiative: eBPF Semantic Enrichment (uprobe + task storage) | high | profiler |
+| [issue-20260825-023932-tier-e-wp-02-collector-prototype](issue-20260825-023932-tier-e-wp-02-collector-prototype.md) | Tier E WP-02: Standalone C eBPF syscall collector prototype | high | ebpf-prototype |
+| [issue-20260825-023937-tier-e-wp-07-container-metadata](issue-20260825-023937-tier-e-wp-07-container-metadata.md) | Tier E WP-07: Container metadata association | medium | ebpf-prototype |
+| [issue-20260825-023939-tier-e-wp-09-live-collector](issue-20260825-023939-tier-e-wp-09-live-collector.md) | Tier E WP-09: LiveEbpfCollector integration into :profiler | high | profiler |
+| [issue-20260825-023940-tier-e-wp-10-oracle-comparison](issue-20260825-023940-tier-e-wp-10-oracle-comparison.md) | Tier E WP-10: Oracle comparison suite (Gate G3) | high | profiler |
+| [issue-20260825-023941-tier-e-wp-11-java-agent](issue-20260825-023941-tier-e-wp-11-java-agent.md) | Tier E WP-11: Limited Java agent for automatic boundary scopes | medium | profiler |
+| [issue-20260825-023942-tier-e-wp-12-perf-harness](issue-20260825-023942-tier-e-wp-12-perf-harness.md) | Tier E WP-12: Performance harness (Spring demo service, modes A-D) | medium | profiler |
+| [issue-20260825-023943-tier-e-wp-13-sampling-enrichment](issue-20260825-023943-tier-e-wp-13-sampling-enrichment.md) | Tier E WP-13: Sampling enrichment policy (never sample context propagation) | medium | profiler |
+| [issue-20260825-023944-tier-e-wp-14-ffm-migration](issue-20260825-023944-tier-e-wp-14-ffm-migration.md) | Tier E WP-14: FFM loader/control-plane migration (libbpf-free runtime) | medium | platform |
+| [issue-20260825-023945-tier-e-wp-15-kubescape-poc](issue-20260825-023945-tier-e-wp-15-kubescape-poc.md) | Tier E WP-15: Kubescape node-agent integration PoC | low | profiler |
+| [issue-20260825-193100-tier-e-r4-doctor-preflight](issue-20260825-193100-tier-e-r4-doctor-preflight.md) | Tier E R4: tier-e-doctor environment preflight | high | ebpf-prototype |
+| [issue-059-iterativeprofiler-context-loss-via-thread-creation](issue-059-iterativeprofiler-context-loss-via-thread-creation.md) | `IterativeProfiler` Context Loss via thread creation | high | profiler |
+| [issue-075-jvm-invariant-syscall-floor-is-incomplete](issue-075-jvm-invariant-syscall-floor-is-incomplete.md) | \U0001F7E1 [DEFERRED \u2014 Medium]: JVM Invariant Syscall Floor is Incomplete | medium | enforcer |
+| [issue-102-permanent-thread-pool-contamination-classloader-leaks-and-st](issue-102-permanent-thread-pool-contamination-classloader-leaks-and-st.md) | \U0001F7E2 [WONTFIX]: Permanent thread pool contamination, classloader leaks,\ | medium | enforcer |
+| [issue-103-containedexecutors-thread-local-state-persistence-and-poison](issue-103-containedexecutors-thread-local-state-persistence-and-poison.md) | \U0001F7E2 [WONTFIX]: `ContainedExecutors` Thread-Local State Persistence\ | medium | enforcer |
+| [issue-20260726_011928_12_jvm-floor-workload-thread-leak](issue-20260726_011928_12_jvm-floor-workload-thread-leak.md) | JvmFloorWorkload OS Thread leak due to infinite retry loop on exception | medium | enforcer |
+| [issue-010-compile-time-feature-proof-tokens-and-scope-safe-policy-buil](issue-010-compile-time-feature-proof-tokens-and-scope-safe-policy-buil.md) | Compile-Time Feature Proof Tokens and Scope-Safe Policy Builders (Type-State | low | enforcer |
+| [issue-014-bpf-disassemblerdumper-for-policy-verification](issue-014-bpf-disassemblerdumper-for-policy-verification.md) | BPF Disassembler/Dumper for Policy Verification | low | enforcer |
+| [issue-029-proof-of-progress-state-machine-for-landlock-discovery-disco](issue-029-proof-of-progress-state-machine-for-landlock-discovery-disco.md) | Proof-of-Progress State Machine for Landlock Discovery (`DiscoveryTask<Status>`) | low | profiler |
+| [issue-042-compile-time-enforced-tier-1-process-baseline-processcontain](issue-042-compile-time-enforced-tier-1-process-baseline-processcontain.md) | Compile-Time Enforced Tier 1 Process Baseline (`ProcessContainmentToken`) | low | enforcer |
+| [issue-045-standard-java-concurrency-virtual-threads-completablefuture-](issue-045-standard-java-concurrency-virtual-threads-completablefuture-.md) | Standard Java Concurrency (`Virtual Threads`, `CompletableFuture`) trivially | medium | enforcer |
+| [issue-067-unprivileged-pivot-root-empty-tmpfs](issue-067-unprivileged-pivot-root-empty-tmpfs.md) | Unprivileged Pivot Root (Empty `tmpfs`) | low | enforcer |
+| [issue-068-supervisor-proxy-pattern-fd-injection-stacktrace-scoping](issue-068-supervisor-proxy-pattern-fd-injection-stacktrace-scoping.md) | Supervisor Proxy Pattern (FD Injection) & Stacktrace Scoping | low | enforcer |
+| [issue-070-network-isolation-via-namespaces-clonenewnet](issue-070-network-isolation-via-namespaces-clonenewnet.md) | Network Isolation via Namespaces (`CLONE_NEWNET`) | low | enforcer |
+| [issue-162-memory-alignment-verification-for-layoutskt-ffm-structures](issue-162-memory-alignment-verification-for-layoutskt-ffm-structures.md) | Memory Alignment verification for `Layouts.kt` FFM Structures | high | enforcer |
+| [issue-20260726_011928_08_supervisor-proxy-fd-leak-on-socket-close](issue-20260726_011928_08_supervisor-proxy-fd-leak-on-socket-close.md) | SupervisorDaemonEngine fd leak when handleActiveListener throws | medium | enforcer |
+| [issue-20260726_011928_11_thread-pool-exhaustion-iterative-profiler](issue-20260726_011928_11_thread-pool-exhaustion-iterative-profiler.md) | IterativeProfiler can exhaust thread pools on recursive containerization limits | medium | enforcer |
+| [issue-20260807-210802-aot-thread-containment-eligibility-assessment](issue-20260807-210802-aot-thread-containment-eligibility-assessment.md) | Add AOT Reachability Assessment for Thread-Containment Eligibility | medium | enforcer |
+| [issue-20260808-032520-owned-contained-executor-lifecycle](issue-20260808-032520-owned-contained-executor-lifecycle.md) | Make Contained Executors Own Dedicated Worker Threads | low | enforcer |
+| [issue-012-algebraic-policy-composition-semigroupmonoid](issue-012-algebraic-policy-composition-semigroupmonoid.md) | Algebraic Policy Composition (Semigroup/Monoid) | low | enforcer |
+| [issue-013-manual-ffm-layout-maintenance-and-abi-drift-risk](issue-013-manual-ffm-layout-maintenance-and-abi-drift-risk.md) | Manual FFM Layout Maintenance and ABI Drift Risk | low | enforcer |
+| [issue-028-phantom-types-for-thread-pool-containment-constraints-sandbo](issue-028-phantom-types-for-thread-pool-containment-constraints-sandbo.md) | Phantom Types for Thread Pool Containment Constraints (`SandboxedExecutor`) | low | enforcer |
+| [issue-030-architectural-dip-dependency-inversion-violations-in-native-](issue-030-architectural-dip-dependency-inversion-violations-in-native-.md) | Architectural DIP (Dependency Inversion) Violations in Native Scopes | low | enforcer |
+| [issue-043-phantom-types-for-context-aware-capability-tokens](issue-043-phantom-types-for-context-aware-capability-tokens.md) | Phantom Types for Context-Aware Capability Tokens | low | enforcer |
+| [issue-061-manual-ffm-layout-maintenance-and-drift-risk](issue-061-manual-ffm-layout-maintenance-and-drift-risk.md) | Manual FFM Layout Maintenance and Drift Risk | medium | enforcer |
+| [issue-071-introduce-context-parameters-for-memory-and-engine-scopes](issue-071-introduce-context-parameters-for-memory-and-engine-scopes.md) | Introduce Context Parameters for Memory and Engine Scopes | low | enforcer |
+| [issue-079-unhandled-tsync-edge-cases-during-jit-classloading](issue-079-unhandled-tsync-edge-cases-during-jit-classloading.md) | Unhandled `TSYNC` edge cases during JIT classloading | medium | enforcer |
+| [issue-081-root-test-task-requires-host-dockerpodman-not-runnable-insid](issue-081-root-test-task-requires-host-dockerpodman-not-runnable-insid.md) | \U0001F4DD [NOTE]: Root `:test` task requires host Docker/Podman, not runnable\ | medium | testing |
+| [issue-082-ktlint-parser-fails-on-kotlin-2x-named-context-parameters-sy](issue-082-ktlint-parser-fails-on-kotlin-2x-named-context-parameters-sy.md) | KtLint parser fails on Kotlin 2.x named context parameters syntax | medium | testing |
+| [issue-20260726-0135-refactor-profiler-classes-for-testability](issue-20260726-0135-refactor-profiler-classes-for-testability.md) | Refactor Profiler core classes for testability and test them | high | profiler |
+| [issue-20260726-024700-hardware-aware-ci-test-suite-and-fallback-assertions-for-intel-cet](issue-20260726-024700-hardware-aware-ci-test-suite-and-fallback-assertions-for-intel-cet.md) | Hardware-Aware CI Test Suite and Graceful Fallback Assertions for Intel CET | medium | enforcer |
+| [issue-20260823-141500-brittle-bpf-layout-assertions](issue-20260823-141500-brittle-bpf-layout-assertions.md) | Brittle Instruction-Layout Assertions in BpfFilterTest (Adjacent-Pair Scans) | medium | enforcer |
+| [issue-20260824-011658-argcheck-differential-fuzzing](issue-20260824-011658-argcheck-differential-fuzzing.md) | Differential Fuzzing of ArgCheck Semantics vs Real Kernel (EqualsAny32/MaskEquals) | medium | testing |
+| [issue-20260824-171500-hybrid-loop-unverified-agent-commits](issue-20260824-171500-hybrid-loop-unverified-agent-commits.md) | Vibe agent's commit-gate implementation broke CI entry point; claimed ingest work was never committed | high | testing |
+| [issue-20260825-090500-rootless-podman-docker-socket-bpf-ceiling](issue-20260825-090500-rootless-podman-docker-socket-bpf-ceiling.md) | Dev-host container daemon is rootless podman; Tier E kernel phases need init-userns root | medium | ebpf-prototype |
+| [issue-20260825-191000-ringbuf-rw-data-mapping-eperm](issue-20260825-191000-ringbuf-rw-data-mapping-eperm.md) | BPF ringbuf data area cannot be mapped writable on current kernels | medium | tier-e |
+| [issue-20260825-193000-tier-e-r3-golden-protocol-conformance](issue-20260825-193000-tier-e-r3-golden-protocol-conformance.md) | Tier E R3: golden-file protocol conformance suite | medium | tier-e |
+| [issue-20260826-102701-centralize-global-test-seam-reset-in-a-single-junit-extensio](issue-20260826-102701-centralize-global-test-seam-reset-in-a-single-junit-extensio.md) | Centralize global test-seam reset in a single JUnit extension | high | enforcer |
+| [issue-20260826-180108-replace-thread-sleep-polling-with-non-flaky-conditional-awai](issue-20260826-180108-replace-thread-sleep-polling-with-non-flaky-conditional-awai.md) | Replace Thread.sleep polling with non-flaky conditional awaits in tests | high | testing |

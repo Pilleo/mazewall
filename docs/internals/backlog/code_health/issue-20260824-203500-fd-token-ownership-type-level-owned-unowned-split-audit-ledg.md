@@ -38,10 +38,14 @@ docs/internals/designs/core/fd-token-ownership.md
 - ✅ `auditClose()` to warn when closing unowned fds (enabled via -Dmazewall.fd.audit=true)
 - ✅ Updated adopt() and replace() to mark fds as owned
 - ✅ Updated close() to call auditClose()
-- ⏳ Type-level split: Not yet implemented (requires breaking API changes)
-- ⏳ Sweep and classify literal-int minting sites: 118 sites found, need classification
+- ✅ Type-level split: Implemented FdOwnership enum (Owned/Unowned) with ownership property on FileDescriptor
+- ✅ Updated close() to enforce ownership and throw IllegalStateException for Unowned descriptors
+- ✅ Updated all factory methods: unsafe()/generic()/role-specific return Unowned, adopt()/replace() return Owned
+- ✅ Kept SupervisorSessionHandler.kt internal visibility changes for testability
+- ⏳ Sweep and classify literal-int minting sites: Started fixing SupervisorSessionHandlerTest, many more files remain
 - ⏳ Adopt ForeignFdGuard across enforcer/profiler suites: Currently only in SeccompConnectionTest
 - ⏳ Audit pid-handle discipline: Not yet started
+- ⏳ Fix remaining test files to use replace() for invented integers
 
 **Needed:**
 1. Type-level split: generic()/unsafe() return an Unowned token without close();

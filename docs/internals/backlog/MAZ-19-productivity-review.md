@@ -10,7 +10,9 @@ effort: "low"
 autonomy: "autonomous"
 open_questions: false
 has_side_effects: false
-paperclip_issue_id: "MAZ-19"
+paperclip_issue_id: "57d75783-f599-4732-aee6-d43b6b942e24"
+
+paperclip_identifier: "MAZ-812"
 ---
 
 # Productivity Review: MAZ-18 Backlog Review Task
