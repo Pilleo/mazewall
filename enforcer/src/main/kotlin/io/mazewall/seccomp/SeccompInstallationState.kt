@@ -17,10 +17,18 @@ import io.mazewall.ffi.memory.ManagedSegment
 
 /**
  * States representing the progress of a Seccomp program installation.
+ *
+ * Strength order: Uninitialized (0) < Failed (1) < FilterBuilt (2) <
+ * PrivilegesLocked (3) < SystemCallApplied/FallbackPrctlApplied (4) < Verified (5).
+ * State merges retain the stronger state; the equal applied states retain the first operand.
  */
 internal sealed interface SeccompInstallationState {
+    val rank: Int
+
     /** The Seccomp installation process has not started. */
     data object Uninitialized : SeccompInstallationState {
+        override val rank: Int = 0
+
         fun buildFilter(arena: NativeArena, sandbox: CompiledSandbox<*>): FilterBuilt {
             val filters = sandbox.compiledFilters
             val prog = with(arena) { LinuxNative.memory.newSockFProg(filters) }
@@ -32,6 +40,8 @@ internal sealed interface SeccompInstallationState {
     data class FilterBuilt(
         val program: ManagedSegment,
     ) : SeccompInstallationState {
+        override val rank: Int = 2
+
         fun lockPrivileges(): PrivilegesLocked {
             validateLinuxAndNotVirtual()
             PureJavaBpfEngine.setNoNewPrivs()
@@ -43,6 +53,8 @@ internal sealed interface SeccompInstallationState {
     data class PrivilegesLocked(
         val program: ManagedSegment,
     ) : SeccompInstallationState {
+        override val rank: Int = 3
+
         fun applyFilter(arch: Arch, useTsync: Boolean): FilterApplied {
             return PureJavaBpfEngine.installFilter(arch, program, useTsync)
         }
@@ -57,18 +69,26 @@ internal sealed interface SeccompInstallationState {
     }
 
     /** The Seccomp filter was successfully applied via the modern `seccomp(2)` syscall. */
-    data object SystemCallApplied : FilterApplied
+    data object SystemCallApplied : FilterApplied {
+        override val rank: Int = 4
+    }
 
     /** The Seccomp filter was successfully applied via the fallback `prctl(2)` command. */
-    data object FallbackPrctlApplied : FilterApplied
+    data object FallbackPrctlApplied : FilterApplied {
+        override val rank: Int = 4
+    }
 
     /** The Seccomp installation was verified successfully. */
-    data object Verified : SeccompInstallationState
+    data object Verified : SeccompInstallationState {
+        override val rank: Int = 5
+    }
 
     /** The installation process failed at a specific step. */
     data class Failed(
         val step: String,
         val errno: Int,
         val error: Throwable,
-    ) : SeccompInstallationState
+    ) : SeccompInstallationState {
+        override val rank: Int = 1
+    }
 }

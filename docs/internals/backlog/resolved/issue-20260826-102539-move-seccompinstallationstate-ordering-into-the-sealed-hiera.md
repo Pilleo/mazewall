@@ -1,7 +1,7 @@
 ---
 title: "Move SeccompInstallationState ordering into the sealed hierarchy"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "enforcer"

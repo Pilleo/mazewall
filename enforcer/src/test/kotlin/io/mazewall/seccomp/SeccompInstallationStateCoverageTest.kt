@@ -1,10 +1,26 @@
 package io.mazewall.seccomp
 
 import org.junit.jupiter.api.Test
+import io.mazewall.ffi.memory.ManagedSegment
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 class SeccompInstallationStateCoverageTest {
+
+    @Test
+    fun `installation states define the complete merge strength order`() {
+        val states = listOf(
+            SeccompInstallationState.Uninitialized,
+            SeccompInstallationState.Failed("step", 1, RuntimeException("err")),
+            SeccompInstallationState.FilterBuilt(ManagedSegment.NULL),
+            SeccompInstallationState.PrivilegesLocked(ManagedSegment.NULL),
+            SeccompInstallationState.SystemCallApplied,
+            SeccompInstallationState.FallbackPrctlApplied,
+            SeccompInstallationState.Verified,
+        )
+
+        assertEquals(listOf(0, 1, 2, 3, 4, 4, 5), states.map(SeccompInstallationState::rank))
+    }
 
     @Test
     fun `test SeccompInstallationState toString and properties`() {

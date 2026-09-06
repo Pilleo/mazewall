@@ -120,23 +120,7 @@ internal object ContainmentStateRegistry {
     private fun mergeEngineStates(
         ts: SeccompInstallationState,
         ps: SeccompInstallationState
-    ): SeccompInstallationState {
-        val tsRank = stateRank(ts)
-        val psRank = stateRank(ps)
-        return if (tsRank >= psRank) ts else ps
-    }
-
-    private fun stateRank(state: SeccompInstallationState): Int {
-        return when (state) {
-            is SeccompInstallationState.Uninitialized -> 0
-            is SeccompInstallationState.Failed -> 1
-            is SeccompInstallationState.FilterBuilt -> 2
-            is SeccompInstallationState.PrivilegesLocked -> 3
-            is SeccompInstallationState.SystemCallApplied -> 4
-            is SeccompInstallationState.FallbackPrctlApplied -> 4
-            is SeccompInstallationState.Verified -> 5
-        }
-    }
+    ): SeccompInstallationState = listOf(ts, ps).maxBy(SeccompInstallationState::rank)
 
     /**
      * Explicitly disables state sanitization.

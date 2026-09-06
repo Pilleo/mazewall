@@ -1,6 +1,6 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 108 | *Total Resolved Issues:* 475
+*Total Active Issues:* 107 | *Total Resolved Issues:* 476
 
 | Issue | Title | Priority | Component |
 |---|---|---|---|
@@ -54,7 +54,6 @@
 | [issue-20260825-195000-tier-e-nice-to-have-2](issue-20260825-195000-tier-e-nice-to-have-2.md) | Add SO_RCVTIMEO to daemon session socket (bounded recv blocking) | low | tier-e |
 | [issue-20260825-195000-tier-e-nice-to-have-3](issue-20260825-195000-tier-e-nice-to-have-3.md) | Add per-context event count metrics to daemon | low | tier-e |
 | [issue-20260825-223552-supervisorsessionhandlertest-66-reflection-call-sites-fragil](issue-20260825-223552-supervisorsessionhandlertest-66-reflection-call-sites-fragil.md) | SupervisorSessionHandlerTest: 66 reflection call sites ? fragile, breaks silently on signature changes | high | testing |
-| [issue-20260826-102539-move-seccompinstallationstate-ordering-into-the-sealed-hiera](issue-20260826-102539-move-seccompinstallationstate-ordering-into-the-sealed-hiera.md) | Move SeccompInstallationState ordering into the sealed hierarchy | high | enforcer |
 | [issue-20260826-102607-unify-landlock-descriptive-state-with-type-state-lifecycle-i](issue-20260826-102607-unify-landlock-descriptive-state-with-type-state-lifecycle-i.md) | Unify Landlock descriptive state with type-state lifecycle in LandlockSession | high | enforcer |
 | [issue-20260826-102609-cap-sandboxdispatcher-poolcache-growth-and-evict-idle-pools](issue-20260826-102609-cap-sandboxdispatcher-poolcache-growth-and-evict-idle-pools.md) | Cap SandboxDispatcher poolCache growth and evict idle pools | high | enforcer |
 | [issue-20260826-102703-make-supervisordaemonmanager-daemon-lifecycle-an-explicit-st](issue-20260826-102703-make-supervisordaemonmanager-daemon-lifecycle-an-explicit-st.md) | Make SupervisorDaemonManager daemon lifecycle an explicit state machine | medium | enforcer |
