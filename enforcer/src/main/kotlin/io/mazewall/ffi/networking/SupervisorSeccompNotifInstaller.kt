@@ -102,7 +102,7 @@ public object SupervisorSeccompNotifInstaller {
                     // Wait until the listener is fully initialized and ready
                     readyLatch.await()
                 } catch (t: Throwable) {
-                    FileDescriptor.unixSocket(socketFd).close()
+                    FileDescriptor.adopt(socketFd, FileDescriptorRole.UnixSocket).close()
                     throw t
                 }
 
@@ -139,7 +139,7 @@ public object SupervisorSeccompNotifInstaller {
                 }
             }
 
-            listenerFdVal.set(FileDescriptor.seccompNotif(rawFd))
+            listenerFdVal.set(FileDescriptor.adopt(rawFd, FileDescriptorRole.SeccompNotif))
             onFilterApplied()
             installLatch.countDown() // Release the coordinator to connect & send descriptor
 

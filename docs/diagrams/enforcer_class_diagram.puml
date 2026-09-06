@@ -576,14 +576,21 @@ class "FdEpoch" as io.mazewall.core.FdEpoch {
   +boolean isLive(int, long)
   +boolean isRetired(int)
   +void forceRetire(int)
+  +void markOwned(int)
+  +boolean isOwnedThroughEpoch(int)
+  +boolean verifyKernelLiveness(int)
+  +boolean auditClose(int, long)
 }
 class "FdLifecycle" as io.mazewall.core.FdLifecycle {
   +int getValue()
   +NativeArena getArena()
   +long getGeneration()
   +FileDescriptorRole getRole()
+  +FdOwnership getOwnership()
   +boolean getClosed()
   +void setClosed(boolean)
+}
+interface "FdOwnership" as io.mazewall.core.FdOwnership {
 }
 interface "FdState" as io.mazewall.core.FdState {
 }
@@ -594,6 +601,7 @@ class "FileDescriptor" as io.mazewall.core.FileDescriptor<R extends FileDescript
   +NativeArena getArena()
   +long getGeneration()
   +FileDescriptorRole getRole()
+  +FdOwnership getOwnership()
   +boolean isValid()
   +boolean isInvalid()
   +boolean isLiveForIo()
@@ -1115,8 +1123,20 @@ class "SupervisorSessionHandler" as io.mazewall.enforcer.supervisor.SupervisorSe
   __
   +NotifResult processNotification(NativeArena, ManagedSegment, ManagedSegment, FileDescriptor<SeccompNotif, ? extends Open>, FileDescriptor<UnixSocket, ? extends Open>)
   +LoopAction handleActiveListener(NativeArena, ManagedSegment, ManagedSegment, ManagedSegment)
+  +boolean processNotification(ManagedSegment, ManagedSegment)
+  +Path resolveBypassPath(Path)
+  +boolean sendRequestToJvm(NativeArena, long, int, int, int, int, long[], String, byte[])
+  +boolean readAndHandleJvmResponse(NativeArena, long, int, long[], String, byte[], ManagedSegment, int, Arch)
+  +boolean readAndHandleJvmResponse(NativeArena, long, int, long[], String, byte[], OpenHow, ManagedSegment, int, Arch)
+  +boolean handleInjectFd(NativeArena, long, int, long[], String, byte[], ManagedSegment, int, Arch)
+  +boolean handleInjectFd(NativeArena, long, int, long[], String, byte[], OpenHow, ManagedSegment, int, Arch)
+  +int openFileInSupervisor(NativeArena, int, long[], String, Arch, int)
+  +int openFileInSupervisor(NativeArena, int, long[], String, Arch, int, OpenHow)
+  +int openFileInSupervisor(NativeArena, SupervisedOpen, int)
+  +int connectSocketInSupervisor(NativeArena, byte[])
   +Function1<Integer, Integer> getTgidResolver()
   +void setTgidResolver(Function1<? super Integer, Integer>)
+  +void handleAcceptAsync(long, int, long[], int, Arch)
 }
 class "SupervisorSessionHandlerKt" as io.mazewall.enforcer.supervisor.SupervisorSessionHandlerKt {
 }
@@ -1926,7 +1946,8 @@ class "InstallSelfVerifier" as io.mazewall.seccomp.InstallSelfVerifier {
   +boolean isEnabled()
   +void warmup()
   +void reset()
-  +void verify(BpfProgram<Verified>, Arch, int)
+  +void verify(BpfProgram<Verified>, Arch, int, ContainerState)
+  +List<Pair<Integer, Integer>> deniedProbeNrsWithUnion(List<? extends BpfInstruction>, Arch, ContainerState, int)
   +List<Pair<Integer, Integer>> deniedProbeNrs(List<? extends BpfInstruction>, Arch, int)
   +boolean isArgInspected(List<? extends BpfInstruction>, int)
 }
@@ -2033,6 +2054,7 @@ io.mazewall.SbobParser --> io.mazewall.SbobParser
 io.mazewall.StackProfileEntryDto --> io.mazewall.StackFrameDto
 io.mazewall.core.ErrnoMapping --> io.mazewall.core.ErrnoMapping
 io.mazewall.core.FdEpoch --> io.mazewall.core.FdEpoch
+io.mazewall.core.FdLifecycle --> io.mazewall.core.FdOwnership
 io.mazewall.core.FdLifecycle --> io.mazewall.ffi.memory.NativeArena
 io.mazewall.core.FdLifecycle --> io.mazewall.core.FileDescriptorRole
 io.mazewall.core.FileDescriptor <--> io.mazewall.core.FileDescriptor

@@ -503,6 +503,23 @@ public final class io/mazewall/core/ErrnoMapping {
 	public final fun getSymbolicName (I)Ljava/lang/String;
 }
 
+public abstract interface class io/mazewall/core/FdOwnership {
+}
+
+public final class io/mazewall/core/FdOwnership$Owned : io/mazewall/core/FdOwnership {
+	public static final field INSTANCE Lio/mazewall/core/FdOwnership$Owned;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/mazewall/core/FdOwnership$Unowned : io/mazewall/core/FdOwnership {
+	public static final field INSTANCE Lio/mazewall/core/FdOwnership$Unowned;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
 public abstract interface class io/mazewall/core/FdState {
 }
 
@@ -516,6 +533,7 @@ public final class io/mazewall/core/FileDescriptor {
 	public static final field Companion Lio/mazewall/core/FileDescriptor$Companion;
 	public fun equals (Ljava/lang/Object;)Z
 	public final fun getArena ()Lio/mazewall/ffi/memory/NativeArena;
+	public final fun getOwnership ()Lio/mazewall/core/FdOwnership;
 	public final fun getValue ()I
 	public fun hashCode ()I
 	public final fun isInvalid ()Z

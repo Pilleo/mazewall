@@ -87,16 +87,11 @@ class SupervisorSessionHandlerTest {
             LinuxNative.setEngine(mockEngine)
 
             val handler = SupervisorSessionHandler(
-                FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(10),
-                FileDescriptor.unsafe<FileDescriptorRole.SeccompNotif>(11),
+                FileDescriptor.replace<FileDescriptorRole.UnixSocket>(10),
+                FileDescriptor.replace<FileDescriptorRole.SeccompNotif>(11),
                 engine = mockEngine,
                 socketManager = mockSocketManager
             )
-
-            val method = SupervisorSessionHandler::class.java.getDeclaredMethods().first {
-                it.name.startsWith("readAndHandleJvmResponse") && !it.name.contains("$") && it.parameterCount == 9
-            }
-            method.isAccessible = true
 
             val arch = io.mazewall.core.Arch.current()
 
@@ -104,28 +99,19 @@ class SupervisorSessionHandlerTest {
                 val dummyResp = arena.allocate(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_RESP)
                 val pathStr = "/bin/echo"
 
-                val paramTypes = method.parameterTypes
-                val argsToPass = arrayOfNulls<Any>(paramTypes.size)
-                argsToPass[0] = arena
-                argsToPass[1] = 42L
-                argsToPass[2] = arch.open
-                argsToPass[3] = LongArray(6)
-                argsToPass[4] = pathStr
-                argsToPass[5] = null
-                argsToPass[6] = dummyResp
-                for (i in paramTypes.indices) {
-                    val type = paramTypes[i]
-                    if (type.name.contains("Tid")) {
-                        argsToPass[i] = io.mazewall.core.Tid(999)
-                    } else if (type.name.contains("Pid")) {
-                        argsToPass[i] = io.mazewall.core.Pid(999)
-                    } else if (i == 7 && (type == Int::class.javaPrimitiveType || type == java.lang.Integer::class.java)) {
-                        argsToPass[i] = 999
-                    }
+                val result = with(arena) {
+                    handler.readAndHandleJvmResponse(
+                        42L,
+                        arch.open,
+                        LongArray(6),
+                        pathStr,
+                        null,
+                        null,
+                        dummyResp,
+                        io.mazewall.core.Tid(999),
+                        arch
+                    )
                 }
-                argsToPass[8] = arch
-
-                val result = method.invoke(handler, *argsToPass) as Boolean
                 assertEquals(false, result)
                 assertEquals(true, socketClosed, "Should close the supervisor socket when the validation frame stalls")
             }
@@ -175,16 +161,11 @@ class SupervisorSessionHandlerTest {
             LinuxNative.setEngine(mockEngine)
 
             val handler = SupervisorSessionHandler(
-                FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(10),
-                FileDescriptor.unsafe<FileDescriptorRole.SeccompNotif>(11),
+                FileDescriptor.replace<FileDescriptorRole.UnixSocket>(10),
+                FileDescriptor.replace<FileDescriptorRole.SeccompNotif>(11),
                 engine = mockEngine,
                 socketManager = mockSocketManager
             )
-
-            val method = SupervisorSessionHandler::class.java.getDeclaredMethods().first {
-                it.name.startsWith("readAndHandleJvmResponse") && !it.name.contains("$") && it.parameterCount == 9
-            }
-            method.isAccessible = true
 
             val arch = io.mazewall.core.Arch.current()
 
@@ -192,28 +173,19 @@ class SupervisorSessionHandlerTest {
                 val dummyResp = arena.allocate(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_RESP)
                 val pathStr = "/bin/echo"
 
-                val paramTypes = method.parameterTypes
-                val argsToPass = arrayOfNulls<Any>(paramTypes.size)
-                argsToPass[0] = arena
-                argsToPass[1] = 42L
-                argsToPass[2] = arch.open
-                argsToPass[3] = LongArray(6)
-                argsToPass[4] = pathStr
-                argsToPass[5] = null
-                argsToPass[6] = dummyResp
-                for (i in paramTypes.indices) {
-                    val type = paramTypes[i]
-                    if (type.name.contains("Tid")) {
-                        argsToPass[i] = io.mazewall.core.Tid(999)
-                    } else if (type.name.contains("Pid")) {
-                        argsToPass[i] = io.mazewall.core.Pid(999)
-                    } else if (i == 7 && (type == Int::class.javaPrimitiveType || type == java.lang.Integer::class.java)) {
-                        argsToPass[i] = 999
-                    }
+                val result = with(arena) {
+                    handler.readAndHandleJvmResponse(
+                        42L,
+                        arch.open,
+                        LongArray(6),
+                        pathStr,
+                        null,
+                        null,
+                        dummyResp,
+                        io.mazewall.core.Tid(999),
+                        arch
+                    )
                 }
-                argsToPass[8] = arch
-
-                val result = method.invoke(handler, *argsToPass) as Boolean
                 assertEquals(false, result)
                 assertEquals(true, socketClosed, "Should close the supervisor socket on timeout")
             }
@@ -249,23 +221,20 @@ class SupervisorSessionHandlerTest {
             FileDescriptor.unsafe<FileDescriptorRole.SeccompNotif>(-1)
         )
 
-        val method = SupervisorSessionHandler::class.java.getDeclaredMethod(
-            "connectSocketInSupervisor",
-            io.mazewall.ffi.memory.NativeArena::class.java,
-            ByteArray::class.java
-        )
-        method.isAccessible = true
-
         io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
             // Test normal domain (AF_INET = 2) -> little endian: [2, 0]
             val normalBytes = byteArrayOf(2, 0)
-            method.invoke(handler, arena, normalBytes)
+            val result1 = with(arena) {
+                handler.connectSocketInSupervisor(normalBytes)
+            }
             assertEquals(2, capturedDomain)
 
             // Test domain >= 128 (e.g. 128) -> little-endian bytes: [0x80, 0]
             // 0x80 is 128. As a signed byte it is -128.
             val highDomainBytes = byteArrayOf(0x80.toByte(), 0)
-            method.invoke(handler, arena, highDomainBytes)
+            val result2 = with(arena) {
+                handler.connectSocketInSupervisor(highDomainBytes)
+            }
             assertEquals(128, capturedDomain)
         }
     }
@@ -365,14 +334,9 @@ class SupervisorSessionHandlerTest {
 
             // Instantiate handler with dummy file descriptors
             val handler = SupervisorSessionHandler(
-                FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(10),
-                FileDescriptor.unsafe<FileDescriptorRole.SeccompNotif>(11)
+                FileDescriptor.replace<FileDescriptorRole.UnixSocket>(10),
+                FileDescriptor.replace<FileDescriptorRole.SeccompNotif>(11)
             )
-
-            val method = SupervisorSessionHandler::class.java.getDeclaredMethods().first {
-                it.name.startsWith("readAndHandleJvmResponse") && !it.name.contains("$") && it.parameterCount == 9
-            }
-            method.isAccessible = true
 
             val arch = io.mazewall.core.Arch.current()
 
@@ -380,37 +344,15 @@ class SupervisorSessionHandlerTest {
                 val dummyResp = arena.allocate(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_RESP)
                 val pathStr = "/bin/echo"
 
-                val invokeReadAndHandleJvmResponse = { nr: Int, argsArray: LongArray ->
-                    val paramTypes = method.parameterTypes
-                    val argsToPass = arrayOfNulls<Any>(paramTypes.size)
-                    argsToPass[0] = arena
-                    argsToPass[1] = 42L
-                    argsToPass[2] = nr
-                    argsToPass[3] = argsArray
-                    argsToPass[4] = pathStr
-                    argsToPass[5] = null
-                    argsToPass[6] = dummyResp
-                    for (i in paramTypes.indices) {
-                        val type = paramTypes[i]
-                        if (type.name.contains("Tid")) {
-                            argsToPass[i] = io.mazewall.core.Tid(999)
-                        } else if (type.name.contains("Pid")) {
-                            argsToPass[i] = io.mazewall.core.Pid(999)
-                        } else if (i == 7 && (type == Int::class.javaPrimitiveType || type == java.lang.Integer::class.java)) {
-                            argsToPass[i] = 999
-                        }
-                    }
-                    argsToPass[8] = arch
-                    method.invoke(handler, *argsToPass)
-                }
-
                 // 1. Test open (should be upgraded to ADDFD/emulation, and call SECCOMP_IOCTL_NOTIF_ADDFD)
                 lastIoctlRequest = null
                 lastIoctlArg = null
                 val argsOpen = LongArray(6)
                 argsOpen[0] = 0x12345678L
 
-                invokeReadAndHandleJvmResponse(arch.open, argsOpen)
+                with(arena) {
+                    handler.readAndHandleJvmResponse(42L, arch.open, argsOpen, pathStr, null, null, dummyResp, io.mazewall.core.Tid(999), arch)
+                }
 
                 assertEquals(io.mazewall.ffi.NativeConstants.SECCOMP_IOCTL_NOTIF_ADDFD, lastIoctlRequest)
                 val addfd = io.mazewall.ffi.memory.SeccompNotifAddFdSegment.of(lastIoctlArg!!)
@@ -425,7 +367,9 @@ class SupervisorSessionHandlerTest {
                 lastIoctlArg = null
                 vmWritevCalled = false
                 ioctlRequests.clear()
-                invokeReadAndHandleJvmResponse(arch.execve, argsOpen)
+                with(arena) {
+                    handler.readAndHandleJvmResponse(42L, arch.execve, argsOpen, pathStr, null, null, dummyResp, io.mazewall.core.Tid(999), arch)
+                }
 
                 assertTrue(ioctlRequests.contains(io.mazewall.ffi.NativeConstants.SECCOMP_IOCTL_NOTIF_ADDFD))
                 assertEquals(io.mazewall.ffi.NativeConstants.SECCOMP_IOCTL_NOTIF_SEND, lastIoctlRequest)
@@ -513,8 +457,8 @@ class SupervisorSessionHandlerTest {
             LinuxNative.setEngine(mockEngine)
 
             val handler = SupervisorSessionHandler(
-                FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(10),
-                FileDescriptor.unsafe<FileDescriptorRole.SeccompNotif>(11),
+                FileDescriptor.replace<FileDescriptorRole.UnixSocket>(10),
+                FileDescriptor.replace<FileDescriptorRole.SeccompNotif>(11),
                 engine = mockEngine
             )
 
@@ -598,15 +542,10 @@ class SupervisorSessionHandlerTest {
             LinuxNative.setEngine(mockEngine)
 
             val handler = SupervisorSessionHandler(
-                FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(10),
-                FileDescriptor.unsafe<FileDescriptorRole.SeccompNotif>(11),
+                FileDescriptor.replace<FileDescriptorRole.UnixSocket>(10),
+                FileDescriptor.replace<FileDescriptorRole.SeccompNotif>(11),
                 engine = mockEngine
             )
-
-            val method = SupervisorSessionHandler::class.java.getDeclaredMethods().first {
-                it.name.startsWith("readAndHandleJvmResponse") && !it.name.contains("$") && it.parameterCount == 9
-            }
-            method.isAccessible = true
 
             val arch = io.mazewall.core.Arch.current()
 
@@ -614,28 +553,9 @@ class SupervisorSessionHandlerTest {
                 val dummyResp = arena.allocate(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_RESP)
                 val pathStr = "/bin/echo"
 
-                val paramTypes = method.parameterTypes
-                val argsToPass = arrayOfNulls<Any>(paramTypes.size)
-                argsToPass[0] = arena
-                argsToPass[1] = 42L
-                argsToPass[2] = arch.execve
-                argsToPass[3] = LongArray(6)
-                argsToPass[4] = pathStr
-                argsToPass[5] = null
-                argsToPass[6] = dummyResp
-                for (i in paramTypes.indices) {
-                    val type = paramTypes[i]
-                    if (type.name.contains("Tid")) {
-                        argsToPass[i] = io.mazewall.core.Tid(999)
-                    } else if (type.name.contains("Pid")) {
-                        argsToPass[i] = io.mazewall.core.Pid(999)
-                    } else if (i == 7 && (type == Int::class.javaPrimitiveType || type == java.lang.Integer::class.java)) {
-                        argsToPass[i] = 999
-                    }
+                val result = with(arena) {
+                    handler.readAndHandleJvmResponse(42L, arch.execve, LongArray(6), pathStr, null, null, dummyResp, io.mazewall.core.Tid(999), arch)
                 }
-                argsToPass[8] = arch
-
-                val result = method.invoke(handler, *argsToPass) as Boolean
                 assertEquals(true, result)
                 assertTrue(readCalls >= 2, "Should retry read on EINTR")
                 assertEquals(2, ioctlCalls, "Should retry ioctl on EINTR")
@@ -668,30 +588,15 @@ class SupervisorSessionHandlerTest {
             LinuxNative.setEngine(mockEngine)
 
             val handler = SupervisorSessionHandler(
-                FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(10),
-                FileDescriptor.unsafe<FileDescriptorRole.SeccompNotif>(11),
+                FileDescriptor.replace<FileDescriptorRole.UnixSocket>(10),
+                FileDescriptor.replace<FileDescriptorRole.SeccompNotif>(11),
                 engine = mockEngine
             )
 
-            val method = SupervisorSessionHandler::class.java.getDeclaredMethods().first {
-                it.name.startsWith("sendRequestToJvm") && !it.name.contains("$") && it.parameterCount == 9
-            }
-            method.isAccessible = true
-
             io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
-                val paramTypes = method.parameterTypes
-                val argsToPass = arrayOfNulls<Any>(paramTypes.size)
-                argsToPass[0] = arena
-                argsToPass[1] = 42L  // id
-                argsToPass[2] = 999  // pid
-                argsToPass[3] = 1    // arch
-                argsToPass[4] = 888  // ppid
-                argsToPass[5] = 2    // nr
-                argsToPass[6] = LongArray(6) // args
-                argsToPass[7] = "/some/path" // pathStr
-                argsToPass[8] = null  // sockaddrBytes
-
-                val result = method.invoke(handler, *argsToPass) as Boolean
+                val result = with(arena) {
+                    handler.sendRequestToJvm(42L, 999, 1, 888, 2, LongArray(6), "/some/path", null)
+                }
                 assertEquals(true, result)
                 assertEquals(2, writeCalls, "Should retry write on EINTR")
             }
@@ -750,15 +655,10 @@ class SupervisorSessionHandlerTest {
             LinuxNative.setEngine(mockEngine)
 
             val handler = SupervisorSessionHandler(
-                FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(10),
-                FileDescriptor.unsafe<FileDescriptorRole.SeccompNotif>(11),
+                FileDescriptor.replace<FileDescriptorRole.UnixSocket>(10),
+                FileDescriptor.replace<FileDescriptorRole.SeccompNotif>(11),
                 engine = mockEngine
             )
-
-            val method = SupervisorSessionHandler::class.java.getDeclaredMethods().first {
-                it.name.startsWith("readAndHandleJvmResponse") && !it.name.contains("$") && it.parameterCount == 9
-            }
-            method.isAccessible = true
 
             val arch = io.mazewall.core.Arch.current()
 
@@ -766,28 +666,9 @@ class SupervisorSessionHandlerTest {
                 val dummyResp = arena.allocate(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_RESP)
                 val pathStr = "/bin/echo"
 
-                val paramTypes = method.parameterTypes
-                val argsToPass = arrayOfNulls<Any>(paramTypes.size)
-                argsToPass[0] = arena
-                argsToPass[1] = 42L
-                argsToPass[2] = arch.execve
-                argsToPass[3] = LongArray(6)
-                argsToPass[4] = pathStr
-                argsToPass[5] = null
-                argsToPass[6] = dummyResp
-                for (i in paramTypes.indices) {
-                    val type = paramTypes[i]
-                    if (type.name.contains("Tid")) {
-                        argsToPass[i] = io.mazewall.core.Tid(999)
-                    } else if (type.name.contains("Pid")) {
-                        argsToPass[i] = io.mazewall.core.Pid(999)
-                    } else if (i == 7 && (type == Int::class.javaPrimitiveType || type == java.lang.Integer::class.java)) {
-                        argsToPass[i] = 999
-                    }
+                val result = with(arena) {
+                    handler.readAndHandleJvmResponse(42L, arch.execve, LongArray(6), pathStr, null, null, dummyResp, io.mazewall.core.Tid(999), arch)
                 }
-                argsToPass[8] = arch
-
-                val result = method.invoke(handler, *argsToPass) as Boolean
                 assertEquals(true, result)
                 assertEquals(7, pollCalls, "Should retry poll on EINTR until success, then poll again for the frame read")
             }
@@ -826,15 +707,10 @@ class SupervisorSessionHandlerTest {
             LinuxNative.setEngine(mockEngine)
 
             val handler = SupervisorSessionHandler(
-                FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(10),
-                FileDescriptor.unsafe<FileDescriptorRole.SeccompNotif>(11),
+                FileDescriptor.replace<FileDescriptorRole.UnixSocket>(10),
+                FileDescriptor.replace<FileDescriptorRole.SeccompNotif>(11),
                 engine = mockEngine
             )
-
-            val method = SupervisorSessionHandler::class.java.getDeclaredMethods().first {
-                it.name.startsWith("readAndHandleJvmResponse") && !it.name.contains("$") && it.parameterCount == 9
-            }
-            method.isAccessible = true
 
             val arch = io.mazewall.core.Arch.current()
 
@@ -842,31 +718,12 @@ class SupervisorSessionHandlerTest {
                 val dummyResp = arena.allocate(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_RESP)
                 val pathStr = "/bin/echo"
 
-                val paramTypes = method.parameterTypes
-                val argsToPass = arrayOfNulls<Any>(paramTypes.size)
-                argsToPass[0] = arena
-                argsToPass[1] = 42L
-                argsToPass[2] = arch.execve
-                argsToPass[3] = LongArray(6)
-                argsToPass[4] = pathStr
-                argsToPass[5] = null
-                argsToPass[6] = dummyResp
-                for (i in paramTypes.indices) {
-                    val type = paramTypes[i]
-                    if (type.name.contains("Tid")) {
-                        argsToPass[i] = io.mazewall.core.Tid(999)
-                    } else if (type.name.contains("Pid")) {
-                        argsToPass[i] = io.mazewall.core.Pid(999)
-                    } else if (i == 7 && (type == Int::class.javaPrimitiveType || type == java.lang.Integer::class.java)) {
-                        argsToPass[i] = 999
-                    }
-                }
-                argsToPass[8] = arch
-
                 // Ensure thread is not currently interrupted
                 Thread.interrupted()
 
-                val result = method.invoke(handler, *argsToPass) as Boolean
+                val result = with(arena) {
+                    handler.readAndHandleJvmResponse(42L, arch.execve, LongArray(6), pathStr, null, null, dummyResp, io.mazewall.core.Tid(999), arch)
+                }
                 assertEquals(false, result)
                 assertEquals(1, pollCalls, "Should terminate loop immediately after interruption")
                 assertEquals(true, Thread.currentThread().isInterrupted, "Thread interrupt status should be preserved")
@@ -902,15 +759,10 @@ class SupervisorSessionHandlerTest {
             LinuxNative.setEngine(mockEngine)
 
             val handler = SupervisorSessionHandler(
-                FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(10),
-                FileDescriptor.unsafe<FileDescriptorRole.SeccompNotif>(11),
+                FileDescriptor.replace<FileDescriptorRole.UnixSocket>(10),
+                FileDescriptor.replace<FileDescriptorRole.SeccompNotif>(11),
                 engine = mockEngine
             )
-
-            val handleInjectFdMethod = SupervisorSessionHandler::class.java.getDeclaredMethods().first {
-                it.name.startsWith("handleInjectFd") && !it.name.contains("$") && it.parameterCount == 9
-            }
-            handleInjectFdMethod.isAccessible = true
 
             val arch = io.mazewall.core.Arch.current()
 
@@ -929,18 +781,9 @@ class SupervisorSessionHandlerTest {
                         null
                     }
 
-                    val result = handleInjectFdMethod.invoke(
-                        handler,
-                        arena, // context receiver
-                        12345L, // id
-                        syscall, // nr
-                        LongArray(6), // args
-                        "/bin/echo", // pathStr
-                        sockaddrBytes, // sockaddrBytes
-                        dummyResp, // resp
-                        999, // tid (compiled as primitive Int)
-                        arch // traceeArch
-                    ) as Boolean
+                    val result = with(arena) {
+                        handler.handleInjectFd(12345L, syscall, LongArray(6), "/bin/echo", sockaddrBytes, dummyResp, io.mazewall.core.Tid(999), arch)
+                    }
 
                     assertEquals(true, result, "handleInjectFd should return true for pointer-based syscalls")
                     assertEquals(true, ioctlCalled, "ioctl should be called for pointer-based syscalls")
@@ -952,18 +795,9 @@ class SupervisorSessionHandlerTest {
 
                 ioctlCalled = false
                 capturedRequest = null
-                val openat2Denied = handleInjectFdMethod.invoke(
-                    handler,
-                    arena,
-                    12345L,
-                    arch.openat2,
-                    LongArray(6),
-                    "/bin/echo",
-                    null,
-                    dummyResp,
-                    999,
-                    arch,
-                ) as Boolean
+                val openat2Denied = with(arena) {
+                    handler.handleInjectFd(12345L, arch.openat2, LongArray(6), "/bin/echo", null, dummyResp, io.mazewall.core.Tid(999), arch)
+                }
                 assertEquals(true, openat2Denied)
                 assertEquals(true, ioctlCalled)
                 assertEquals(io.mazewall.ffi.NativeConstants.SECCOMP_IOCTL_NOTIF_SEND, capturedRequest)
@@ -998,15 +832,10 @@ class SupervisorSessionHandlerTest {
             LinuxNative.setEngine(mockEngine)
 
             val handler = SupervisorSessionHandler(
-                FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(10),
-                FileDescriptor.unsafe<FileDescriptorRole.SeccompNotif>(11),
+                FileDescriptor.replace<FileDescriptorRole.UnixSocket>(10),
+                FileDescriptor.replace<FileDescriptorRole.SeccompNotif>(11),
                 engine = mockEngine
             )
-
-            val handleInjectFdMethod = SupervisorSessionHandler::class.java.getDeclaredMethods().first {
-                it.name.startsWith("handleInjectFd") && !it.name.contains("$") && it.parameterCount == 9
-            }
-            handleInjectFdMethod.isAccessible = true
 
             val arch = io.mazewall.core.Arch.current()
 
@@ -1019,18 +848,9 @@ class SupervisorSessionHandlerTest {
                     capturedRequest = null
                     capturedArg = null
 
-                    val result = handleInjectFdMethod.invoke(
-                        handler,
-                        arena, // context receiver
-                        12345L, // id
-                        syscall, // nr
-                        LongArray(6), // args
-                        null, // pathStr is null
-                        null, // sockaddrBytes is null
-                        dummyResp, // resp
-                        999, // tid (compiled as primitive Int)
-                        arch // traceeArch
-                    ) as Boolean
+                    val result = with(arena) {
+                        handler.handleInjectFd(12345L, syscall, LongArray(6), null, null, dummyResp, io.mazewall.core.Tid(999), arch)
+                    }
 
                     assertEquals(true, result, "handleInjectFd should return true after fail-closed deny")
                     assertEquals(true, ioctlCalled, "ioctl should be called to send seccomp response")
@@ -1082,46 +902,14 @@ class SupervisorSessionHandlerTest {
             LinuxNative.setEngine(mockEngine)
 
             val handler = SupervisorSessionHandler(
-                FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(10),
-                FileDescriptor.unsafe<FileDescriptorRole.SeccompNotif>(11),
+                FileDescriptor.replace<FileDescriptorRole.UnixSocket>(10),
+                FileDescriptor.replace<FileDescriptorRole.SeccompNotif>(11),
                 engine = mockEngine
             )
 
-            val handleAcceptAsyncMethod = SupervisorSessionHandler::class.java.getDeclaredMethods().first {
-                it.name.startsWith("handleAcceptAsync") && !it.name.contains("$") && it.parameterCount == 5
-            }
-            handleAcceptAsyncMethod.isAccessible = true
-
             val arch = io.mazewall.core.Arch.current()
 
-            val paramTypes = handleAcceptAsyncMethod.parameterTypes
-            val argsToPass = arrayOfNulls<Any>(paramTypes.size)
-            for (i in paramTypes.indices) {
-                val type = paramTypes[i]
-                when {
-                    type == Long::class.javaPrimitiveType || type == java.lang.Long::class.java -> {
-                        argsToPass[i] = 12345L
-                    }
-                    type == Int::class.javaPrimitiveType || type == java.lang.Integer::class.java -> {
-                        if (i == 1) {
-                            argsToPass[i] = arch.accept
-                        } else {
-                            argsToPass[i] = 999
-                        }
-                    }
-                    type == LongArray::class.java -> {
-                        argsToPass[i] = LongArray(6) { 55L }
-                    }
-                    type.name.contains("Tid") -> {
-                        argsToPass[i] = io.mazewall.core.Tid(999)
-                    }
-                    type.name.contains("Arch") -> {
-                        argsToPass[i] = arch
-                    }
-                }
-            }
-
-            handleAcceptAsyncMethod.invoke(handler, *argsToPass)
+            handler.handleAcceptAsync(12345L, arch.accept, LongArray(6) { 55L }, io.mazewall.core.Tid(999), arch)
 
             // Since it runs in a daemon thread, let's wait a bit for it to run and finish.
             var attempts = 0
@@ -1186,46 +974,14 @@ class SupervisorSessionHandlerTest {
             LinuxNative.setEngine(mockEngine)
 
             val handler = SupervisorSessionHandler(
-                FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(10),
-                FileDescriptor.unsafe<FileDescriptorRole.SeccompNotif>(11),
+                FileDescriptor.replace<FileDescriptorRole.UnixSocket>(10),
+                FileDescriptor.replace<FileDescriptorRole.SeccompNotif>(11),
                 engine = mockEngine
             )
 
-            val handleAcceptAsyncMethod = SupervisorSessionHandler::class.java.getDeclaredMethods().first {
-                it.name.startsWith("handleAcceptAsync") && !it.name.contains("$") && it.parameterCount == 5
-            }
-            handleAcceptAsyncMethod.isAccessible = true
-
             val arch = io.mazewall.core.Arch.current()
 
-            val paramTypes = handleAcceptAsyncMethod.parameterTypes
-            val argsToPass = arrayOfNulls<Any>(paramTypes.size)
-            for (i in paramTypes.indices) {
-                val type = paramTypes[i]
-                when {
-                    type == Long::class.javaPrimitiveType || type == java.lang.Long::class.java -> {
-                        argsToPass[i] = 12345L
-                    }
-                    type == Int::class.javaPrimitiveType || type == java.lang.Integer::class.java -> {
-                        if (i == 1) {
-                            argsToPass[i] = arch.accept
-                        } else {
-                            argsToPass[i] = 999
-                        }
-                    }
-                    type == LongArray::class.java -> {
-                        argsToPass[i] = LongArray(6) { 55L }
-                    }
-                    type.name.contains("Tid") -> {
-                        argsToPass[i] = io.mazewall.core.Tid(999)
-                    }
-                    type.name.contains("Arch") -> {
-                        argsToPass[i] = arch
-                    }
-                }
-            }
-
-            handleAcceptAsyncMethod.invoke(handler, *argsToPass)
+            handler.handleAcceptAsync(12345L, arch.accept, LongArray(6) { 55L }, io.mazewall.core.Tid(999), arch)
 
             // Wait for daemon thread
             var attempts = 0
@@ -1290,46 +1046,14 @@ class SupervisorSessionHandlerTest {
             LinuxNative.setEngine(mockEngine)
 
             val handler = SupervisorSessionHandler(
-                FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(10),
-                FileDescriptor.unsafe<FileDescriptorRole.SeccompNotif>(11),
+                FileDescriptor.replace<FileDescriptorRole.UnixSocket>(10),
+                FileDescriptor.replace<FileDescriptorRole.SeccompNotif>(11),
                 engine = mockEngine
             )
 
-            val handleAcceptAsyncMethod = SupervisorSessionHandler::class.java.getDeclaredMethods().first {
-                it.name.startsWith("handleAcceptAsync") && !it.name.contains("$") && it.parameterCount == 5
-            }
-            handleAcceptAsyncMethod.isAccessible = true
-
             val arch = io.mazewall.core.Arch.current()
 
-            val paramTypes = handleAcceptAsyncMethod.parameterTypes
-            val argsToPass = arrayOfNulls<Any>(paramTypes.size)
-            for (i in paramTypes.indices) {
-                val type = paramTypes[i]
-                when {
-                    type == Long::class.javaPrimitiveType || type == java.lang.Long::class.java -> {
-                        argsToPass[i] = 12345L
-                    }
-                    type == Int::class.javaPrimitiveType || type == java.lang.Integer::class.java -> {
-                        if (i == 1) {
-                            argsToPass[i] = arch.accept
-                        } else {
-                            argsToPass[i] = 999
-                        }
-                    }
-                    type == LongArray::class.java -> {
-                        argsToPass[i] = LongArray(6) { 55L }
-                    }
-                    type.name.contains("Tid") -> {
-                        argsToPass[i] = io.mazewall.core.Tid(999)
-                    }
-                    type.name.contains("Arch") -> {
-                        argsToPass[i] = arch
-                    }
-                }
-            }
-
-            handleAcceptAsyncMethod.invoke(handler, *argsToPass)
+            handler.handleAcceptAsync(12345L, arch.accept, LongArray(6) { 55L }, io.mazewall.core.Tid(999), arch)
 
             // Wait for daemon thread
             var attempts = 0
@@ -1384,15 +1108,10 @@ class SupervisorSessionHandlerTest {
             LinuxNative.setEngine(mockEngine)
 
             val handler = SupervisorSessionHandler(
-                FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(10),
-                FileDescriptor.unsafe<FileDescriptorRole.SeccompNotif>(11),
+                FileDescriptor.replace<FileDescriptorRole.UnixSocket>(10),
+                FileDescriptor.replace<FileDescriptorRole.SeccompNotif>(11),
                 engine = mockEngine
             )
-
-            val openFileMethod = SupervisorSessionHandler::class.java.getDeclaredMethods().first {
-                it.name.startsWith("openFileInSupervisor") && !it.name.contains("$") && it.parameterCount == 6
-            }
-            openFileMethod.isAccessible = true
 
             val arch = io.mazewall.core.Arch.current()
 
@@ -1404,15 +1123,9 @@ class SupervisorSessionHandlerTest {
                 // Since we resolved the relative path (e.g. relative_file.txt) in processNotification,
                 // the path passed to openFileInSupervisor starts with "/" (meaning absolute resolved path)
                 val resolvedPath = "/tmp/resolved_relative_file.txt"
-                val result = openFileMethod.invoke(
-                    handler,
-                    arena,
-                    arch.openat,
-                    args,
-                    resolvedPath,
-                    arch,
-                    1,
-                ) as Int
+                val result = with(arena) {
+                    handler.openFileInSupervisor(arch.openat, args, resolvedPath, arch, io.mazewall.core.Tid(1))
+                }
 
                 assertEquals(99, result)
                 assertEquals(true, openCalledWithAtFdcwd, "Should have used open with AT_FDCWD for absolute resolved path")
@@ -1471,16 +1184,11 @@ class SupervisorSessionHandlerTest {
             LinuxNative.setEngine(mockEngine)
 
             val handler = SupervisorSessionHandler(
-                FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(10),
-                FileDescriptor.unsafe<FileDescriptorRole.SeccompNotif>(11),
+                FileDescriptor.replace<FileDescriptorRole.UnixSocket>(10),
+                FileDescriptor.replace<FileDescriptorRole.SeccompNotif>(11),
                 engine = mockEngine
             )
             handler.tgidResolver = { it }
-
-            val openFileMethod = SupervisorSessionHandler::class.java.getDeclaredMethods().first {
-                it.name.startsWith("openFileInSupervisor") && !it.name.contains("$") && it.parameterCount == 6
-            }
-            openFileMethod.isAccessible = true
 
             val arch = io.mazewall.core.Arch.current()
 
@@ -1489,15 +1197,9 @@ class SupervisorSessionHandlerTest {
                 args[0] = 5L
                 args[2] = 0L
 
-                val result = openFileMethod.invoke(
-                    handler,
-                    arena,
-                    arch.openat,
-                    args,
-                    "relative.txt",
-                    arch,
-                    1234,
-                ) as Int
+                val result = with(arena) {
+                    handler.openFileInSupervisor(arch.openat, args, "relative.txt", arch, io.mazewall.core.Tid(1234))
+                }
 
                 assertEquals(99, result)
                 assertEquals(1234, pidfdOpenPid)
@@ -1547,30 +1249,19 @@ class SupervisorSessionHandlerTest {
             LinuxNative.setEngine(mockEngine)
 
             val handler = SupervisorSessionHandler(
-                FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(10),
-                FileDescriptor.unsafe<FileDescriptorRole.SeccompNotif>(11),
+                FileDescriptor.replace<FileDescriptorRole.UnixSocket>(10),
+                FileDescriptor.replace<FileDescriptorRole.SeccompNotif>(11),
                 engine = mockEngine
             )
-
-            val openFileMethod = SupervisorSessionHandler::class.java.getDeclaredMethods().first {
-                it.name.startsWith("openFileInSupervisor") && !it.name.contains("$") && it.parameterCount == 6
-            }
-            openFileMethod.isAccessible = true
 
             val arch = io.mazewall.core.Arch.current()
 
             io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
                 val args = LongArray(6)
                 args[0] = 5L
-                val result = openFileMethod.invoke(
-                    handler,
-                    arena,
-                    arch.openat,
-                    args,
-                    "relative.txt",
-                    arch,
-                    1234,
-                ) as Int
+                val result = with(arena) {
+                    handler.openFileInSupervisor(arch.openat, args, "relative.txt", arch, io.mazewall.core.Tid(1234))
+                }
 
                 assertEquals(-io.mazewall.ffi.NativeConstants.EBADF, result)
                 assertFalse(openatCalled)
@@ -1654,14 +1345,9 @@ class SupervisorSessionHandlerTest {
 
             // Instantiate handler with dummy file descriptors
             val handler = SupervisorSessionHandler(
-                FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(10),
-                FileDescriptor.unsafe<FileDescriptorRole.SeccompNotif>(11)
+                FileDescriptor.replace<FileDescriptorRole.UnixSocket>(10),
+                FileDescriptor.replace<FileDescriptorRole.SeccompNotif>(11)
             )
-
-            val method = SupervisorSessionHandler::class.java.getDeclaredMethods().first {
-                it.name.startsWith("readAndHandleJvmResponse") && !it.name.contains("$") && it.parameterCount == 9
-            }
-            method.isAccessible = true
 
             val arch = io.mazewall.core.Arch.current()
 
@@ -1669,28 +1355,9 @@ class SupervisorSessionHandlerTest {
                 val dummyResp = arena.allocate(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_RESP)
                 val pathStr = "/bin/echo"
 
-                val paramTypes = method.parameterTypes
-                val argsToPass = arrayOfNulls<Any>(paramTypes.size)
-                argsToPass[0] = arena
-                argsToPass[1] = 42L
-                argsToPass[2] = arch.execve
-                argsToPass[3] = LongArray(6).apply { this[0] = 0x12345678L }
-                argsToPass[4] = pathStr
-                argsToPass[5] = null
-                argsToPass[6] = dummyResp
-                for (i in paramTypes.indices) {
-                    val type = paramTypes[i]
-                    if (type.name.contains("Tid")) {
-                        argsToPass[i] = io.mazewall.core.Tid(999)
-                    } else if (type.name.contains("Pid")) {
-                        argsToPass[i] = io.mazewall.core.Pid(999)
-                    } else if (i == 7 && (type == Int::class.javaPrimitiveType || type == java.lang.Integer::class.java)) {
-                        argsToPass[i] = 999
-                    }
+                val result = with(arena) {
+                    handler.readAndHandleJvmResponse(42L, arch.execve, LongArray(6).apply { this[0] = 0x12345678L }, pathStr, null, null, dummyResp, io.mazewall.core.Tid(999), arch)
                 }
-                argsToPass[8] = arch
-
-                val result = method.invoke(handler, *argsToPass) as Boolean
 
                 assertEquals(true, result, "Should return true to continue processing notification loop")
                 assertFalse(vmWritevCalled, "must not rewrite the original exec pathname in tracee memory")
@@ -1766,41 +1433,18 @@ class SupervisorSessionHandlerTest {
             LinuxNative.setEngine(mockEngine)
 
             val handler = SupervisorSessionHandler(
-                FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(10),
-                FileDescriptor.unsafe<FileDescriptorRole.SeccompNotif>(11)
+                FileDescriptor.replace<FileDescriptorRole.UnixSocket>(10),
+                FileDescriptor.replace<FileDescriptorRole.SeccompNotif>(11)
             )
-
-            val method = SupervisorSessionHandler::class.java.getDeclaredMethods().first {
-                it.name.startsWith("readAndHandleJvmResponse") && !it.name.contains("$") && it.parameterCount == 9
-            }
-            method.isAccessible = true
 
             val arch = io.mazewall.core.Arch.current()
 
             io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
                 val dummyResp = arena.allocate(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_RESP)
-                val paramTypes = method.parameterTypes
-                val argsToPass = arrayOfNulls<Any>(paramTypes.size)
-                argsToPass[0] = arena
-                argsToPass[1] = 42L
-                argsToPass[2] = arch.execve
-                argsToPass[3] = LongArray(6).apply { this[0] = 0x12345678L }
-                argsToPass[4] = null
-                argsToPass[5] = null
-                argsToPass[6] = dummyResp
-                for (i in paramTypes.indices) {
-                    val type = paramTypes[i]
-                    if (type.name.contains("Tid")) {
-                        argsToPass[i] = io.mazewall.core.Tid(999)
-                    } else if (type.name.contains("Pid")) {
-                        argsToPass[i] = io.mazewall.core.Pid(999)
-                    } else if (i == 7 && (type == Int::class.javaPrimitiveType || type == java.lang.Integer::class.java)) {
-                        argsToPass[i] = 999
-                    }
-                }
-                argsToPass[8] = arch
 
-                val result = method.invoke(handler, *argsToPass) as Boolean
+                val result = with(arena) {
+                    handler.readAndHandleJvmResponse(42L, arch.execve, LongArray(6).apply { this[0] = 0x12345678L }, null, null, null, dummyResp, io.mazewall.core.Tid(999), arch)
+                }
 
                 assertEquals(true, result)
                 assertEquals(false, vmWritevCalled)
@@ -1894,35 +1538,16 @@ class SupervisorSessionHandlerTest {
         try {
             LinuxNative.setEngine(mockEngine)
             val handler = SupervisorSessionHandler(
-                FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(10),
-                FileDescriptor.unsafe<FileDescriptorRole.SeccompNotif>(11),
+                FileDescriptor.replace<FileDescriptorRole.UnixSocket>(10),
+                FileDescriptor.replace<FileDescriptorRole.SeccompNotif>(11),
             )
-            val method = SupervisorSessionHandler::class.java.getDeclaredMethods().first {
-                it.name.startsWith("readAndHandleJvmResponse") && !it.name.contains("$") && it.parameterCount == 9
-            }
-            method.isAccessible = true
             val arch = io.mazewall.core.Arch.current()
             io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
                 val dummyResp = arena.allocate(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_RESP)
-                val paramTypes = method.parameterTypes
-                val argsToPass = arrayOfNulls<Any>(paramTypes.size)
-                argsToPass[0] = arena
-                argsToPass[1] = 42L
-                argsToPass[2] = arch.execve
-                argsToPass[3] = LongArray(6)
-                argsToPass[4] = null
-                argsToPass[5] = null
-                argsToPass[6] = dummyResp
-                for (i in paramTypes.indices) {
-                    val type = paramTypes[i]
-                    if (type.name.contains("Tid")) {
-                        argsToPass[i] = io.mazewall.core.Tid(999)
-                    } else if (i == 7 && (type == Int::class.javaPrimitiveType || type == java.lang.Integer::class.java)) {
-                        argsToPass[i] = 999
-                    }
+
+                val result = with(arena) {
+                    handler.readAndHandleJvmResponse(42L, arch.execve, LongArray(6), null, null, null, dummyResp, io.mazewall.core.Tid(999), arch)
                 }
-                argsToPass[8] = arch
-                val result = method.invoke(handler, *argsToPass) as Boolean
                 assertEquals(true, result)
                 assertEquals("/usr/bin/true", openedPath)
                 assertTrue(ioctlRequests.contains(io.mazewall.ffi.NativeConstants.SECCOMP_IOCTL_NOTIF_ADDFD))
@@ -1982,18 +1607,10 @@ class SupervisorSessionHandlerTest {
         LinuxNative.setEngine(mockEngine)
         try {
             val handler = SupervisorSessionHandler(
-                FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(10),
-                FileDescriptor.unsafe<FileDescriptorRole.SeccompNotif>(11),
+                FileDescriptor.replace<FileDescriptorRole.UnixSocket>(10),
+                FileDescriptor.replace<FileDescriptorRole.SeccompNotif>(11),
                 engine = mockEngine,
             )
-
-            val processNotificationMethod = SupervisorSessionHandler::class.java
-                .getDeclaredMethod(
-                    "processNotification",
-                    io.mazewall.ffi.memory.ManagedSegment::class.java,
-                    io.mazewall.ffi.memory.ManagedSegment::class.java,
-                )
-            processNotificationMethod.isAccessible = true
 
             io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
                 val notif = arena.allocate(io.mazewall.ffi.Layouts.SECCOMP_NOTIF)
@@ -2007,22 +1624,16 @@ class SupervisorSessionHandlerTest {
                 notif.writeInt(8L, 1) // NOTIF_PID_OFF = 8
 
                 val thrownException = org.junit.jupiter.api.Assertions.assertThrows(
-                    java.lang.reflect.InvocationTargetException::class.java,
+                    OutOfMemoryError::class.java,
                 ) {
-                    processNotificationMethod.invoke(handler, notif, resp)
+                    handler.processNotification(notif, resp)
                 }
 
-                // The root cause must be the OutOfMemoryError, not wrapped in a RuntimeException
-                // (which would indicate the old Throwable catch had re-thrown it or suppressed it)
-                val rootCause = thrownException.cause
-                assertEquals(
-                    OutOfMemoryError::class.java, rootCause?.javaClass,
-                    "Fatal JVM errors must propagate out of processNotification unchanged, " +
-                        "not be swallowed by catch (e: Exception)",
-                )
                 assertEquals(
                     "Simulated heap exhaustion inside processNotification",
-                    rootCause?.message,
+                    thrownException.message,
+                    "Fatal JVM errors must propagate out of processNotification unchanged, " +
+                        "not be swallowed by catch (e: Exception)",
                 )
             }
         } finally {
@@ -2137,8 +1748,8 @@ class SupervisorSessionHandlerTest {
             LinuxNative.setEngine(mockEngine)
 
             val handler = SupervisorSessionHandler(
-                FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(10),
-                FileDescriptor.unsafe<FileDescriptorRole.SeccompNotif>(11),
+                FileDescriptor.replace<FileDescriptorRole.UnixSocket>(10),
+                FileDescriptor.replace<FileDescriptorRole.SeccompNotif>(11),
                 engine = mockEngine,
             )
 
@@ -2154,13 +1765,7 @@ class SupervisorSessionHandlerTest {
                 notif.writeLong(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_ARGS_OFFSET + 8L, (oCreat or oWronly).toLong()) // args[1] flags
                 notif.writeLong(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_ARGS_OFFSET + 16L, 0x1A0L) // args[2] mode 0640
 
-                val processNotificationMethod = SupervisorSessionHandler::class.java.getDeclaredMethod(
-                    "processNotification",
-                    io.mazewall.ffi.memory.ManagedSegment::class.java,
-                    io.mazewall.ffi.memory.ManagedSegment::class.java,
-                )
-                processNotificationMethod.isAccessible = true
-                processNotificationMethod.invoke(handler, notif, resp)
+                handler.processNotification(notif, resp)
 
                 assertEquals(oCreat or oWronly, receivedFlags)
                 assertEquals(0x1A0, receivedMode, "Native open must receive the exact creation mode forwarded from args[2]")
@@ -2297,8 +1902,8 @@ class SupervisorSessionHandlerTest {
             LinuxNative.setEngine(mockEngine)
 
             val handler = SupervisorSessionHandler(
-                FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(10),
-                FileDescriptor.unsafe<FileDescriptorRole.SeccompNotif>(11),
+                FileDescriptor.replace<FileDescriptorRole.UnixSocket>(10),
+                FileDescriptor.replace<FileDescriptorRole.SeccompNotif>(11),
                 engine = mockEngine,
             )
 
@@ -2314,13 +1919,7 @@ class SupervisorSessionHandlerTest {
                 notif.writeLong(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_ARGS_OFFSET + 8L, 0x2000L) // args[1] argv
                 notif.writeLong(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_ARGS_OFFSET + 16L, 0x3000L) // args[2] envp
 
-                val processNotificationMethod = SupervisorSessionHandler::class.java.getDeclaredMethod(
-                    "processNotification",
-                    io.mazewall.ffi.memory.ManagedSegment::class.java,
-                    io.mazewall.ffi.memory.ManagedSegment::class.java,
-                )
-                processNotificationMethod.isAccessible = true
-                processNotificationMethod.invoke(handler, notif, resp)
+                handler.processNotification(notif, resp)
 
                 assertEquals(99, targetFdRequestedForClose, "Must close injected tracee fd 99 when rewrite fails")
                 assertTrue(closedFds.contains(88), "Must close local fd 88")
@@ -2454,8 +2053,8 @@ class SupervisorSessionHandlerTest {
             LinuxNative.setEngine(mockEngine)
 
             val handler = SupervisorSessionHandler(
-                FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(10),
-                FileDescriptor.unsafe<FileDescriptorRole.SeccompNotif>(11),
+                FileDescriptor.replace<FileDescriptorRole.UnixSocket>(10),
+                FileDescriptor.replace<FileDescriptorRole.SeccompNotif>(11),
                 engine = mockEngine,
             )
 
@@ -2472,13 +2071,7 @@ class SupervisorSessionHandlerTest {
                 notif.writeLong(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_ARGS_OFFSET + 16L, 0x2000L) // args[2] struct open_how pointer
                 notif.writeLong(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_ARGS_OFFSET + 24L, 24L) // args[3] size
 
-                val processNotificationMethod = SupervisorSessionHandler::class.java.getDeclaredMethod(
-                    "processNotification",
-                    io.mazewall.ffi.memory.ManagedSegment::class.java,
-                    io.mazewall.ffi.memory.ManagedSegment::class.java,
-                )
-                processNotificationMethod.isAccessible = true
-                processNotificationMethod.invoke(handler, notif, resp)
+                handler.processNotification(notif, resp)
 
                 assertEquals(0L, capturedFlags, "openat2 must decode flags from struct open_how, not the pointer 0x2000")
                 assertEquals(0x1A4L, capturedMode, "openat2 must decode mode from struct open_how")

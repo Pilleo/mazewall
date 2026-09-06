@@ -52,7 +52,7 @@ public object BypassPaths {
         }
     }
 
-    public fun toRealPathWithFallback(path: Path): Path {
+    internal fun toRealPathWithFallback(path: Path): Path {
         val abs = path.toAbsolutePath().normalize()
         var current = abs
         val nonExistentParts = mutableListOf<String>()

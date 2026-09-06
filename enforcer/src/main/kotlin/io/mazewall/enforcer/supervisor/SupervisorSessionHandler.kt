@@ -182,7 +182,7 @@ internal class SupervisorSessionHandler(
     }
 
     @Suppress("SwallowedException")
-    private fun processNotification(notif: ManagedSegment, resp: ManagedSegment): Boolean {
+    internal fun processNotification(notif: ManagedSegment, resp: ManagedSegment): Boolean {
         return NativeArena.ofConfined().use { notificationArena ->
             with(notificationArena) {
                 val parsed = io.mazewall.platform.seccomp.SeccompNotifications.read(notif)
@@ -320,13 +320,13 @@ internal class SupervisorSessionHandler(
         return SyscallArguments(pathStr, sockaddrBytes, dirfd, openHow)
     }
 
-    private fun resolveBypassPath(resolvedPath: java.nio.file.Path): java.nio.file.Path? {
+    internal fun resolveBypassPath(resolvedPath: java.nio.file.Path): java.nio.file.Path? {
         return resolvedPath.takeIf(BypassPaths::isBypassPath)
     }
 
     context(arena: NativeArena)
     @Suppress("LongParameterList")
-    private fun sendRequestToJvm(
+    internal fun sendRequestToJvm(
         id: Long,
         pidVal: Int,
         archVal: Int,
@@ -383,7 +383,7 @@ internal class SupervisorSessionHandler(
 
     context(arena: NativeArena)
     @Suppress("LongParameterList")
-    private fun readAndHandleJvmResponse(
+    internal fun readAndHandleJvmResponse(
         id: Long,
         nr: Int,
         args: LongArray,
@@ -396,7 +396,7 @@ internal class SupervisorSessionHandler(
 
     context(arena: NativeArena)
     @Suppress("LongParameterList")
-    private fun readAndHandleJvmResponse(
+    internal fun readAndHandleJvmResponse(
         id: Long,
         nr: Int,
         args: LongArray,
@@ -632,7 +632,7 @@ internal class SupervisorSessionHandler(
 
     context(arena: NativeArena)
     @Suppress("LongParameterList")
-    private fun handleInjectFd(
+    internal fun handleInjectFd(
         id: Long,
         nr: Int,
         args: LongArray,
@@ -645,7 +645,7 @@ internal class SupervisorSessionHandler(
 
     context(arena: NativeArena)
     @Suppress("LongParameterList")
-    private fun handleInjectFd(
+    internal fun handleInjectFd(
         id: Long,
         nr: Int,
         args: LongArray,
@@ -741,7 +741,7 @@ internal class SupervisorSessionHandler(
     }
 
     context(arena: NativeArena)
-    private fun openFileInSupervisor(
+    internal fun openFileInSupervisor(
         nr: Int,
         args: LongArray,
         pathStr: String,
@@ -750,7 +750,7 @@ internal class SupervisorSessionHandler(
     ): Int = openFileInSupervisor(nr, args, pathStr, arch, tid, null)
 
     context(arena: NativeArena)
-    private fun openFileInSupervisor(
+    internal fun openFileInSupervisor(
         nr: Int,
         args: LongArray,
         pathStr: String,
@@ -763,7 +763,7 @@ internal class SupervisorSessionHandler(
     }
 
     context(arena: NativeArena)
-    private fun openFileInSupervisor(
+    internal fun openFileInSupervisor(
         req: SupervisedOpen,
         tid: Tid,
     ): Int {
@@ -853,7 +853,7 @@ internal class SupervisorSessionHandler(
     }
 
     context(arena: NativeArena)
-    private fun connectSocketInSupervisor(sockaddrBytes: ByteArray): Int {
+    internal fun connectSocketInSupervisor(sockaddrBytes: ByteArray): Int {
         val domain = if (sockaddrBytes.size >= 2) {
             (sockaddrBytes[0].toInt() and 0xFF) or ((sockaddrBytes[1].toInt() and 0xFF) shl 8)
         } else {
@@ -977,7 +977,7 @@ internal class SupervisorSessionHandler(
 
     private fun getPpid(pid: Int): Int = ProcFsInspector.getPpid(pid)
 
-    private fun handleAcceptAsync(
+    internal fun handleAcceptAsync(
         id: Long,
         nr: Int,
         args: LongArray,

@@ -338,7 +338,7 @@ object Landlock {
         val fdResult = openPath(path, io.mazewall.core.OpenFlags(NativeConstants.O_PATH or NativeConstants.O_CLOEXEC))
 
         fdResult.onSuccess { value ->
-            FileDescriptor.oPath(value.toInt()).use { pathFd ->
+            FileDescriptor.adopt(value.toInt(), FileDescriptorRole.OPath).use { pathFd ->
                 when (val addRes = addRuleToRuleset(ruleset, pathFd, allowedAccess)) {
                     is AddRuleResult.Success -> {}
                     is AddRuleResult.Error -> {
@@ -383,7 +383,7 @@ object Landlock {
             }
         }
 
-        FileDescriptor.oPath(fdResult).use { pathFd ->
+        FileDescriptor.adopt(fdResult, FileDescriptorRole.OPath).use { pathFd ->
             val finalAccess = calculateFinalAccess(allowedAccess, isFallback, resolvedPath)
             addRuleToRulesetAndVerify(ruleset, pathFd, finalAccess, resolvedPath)
         }
@@ -651,7 +651,7 @@ object Landlock {
     ): LandlockFdOutcome {
         return when (res) {
             is LinuxNative.SyscallResult.Success ->
-                LandlockFdOutcome.Ok(FileDescriptor.ruleset(res.value.toInt()))
+                LandlockFdOutcome.Ok(FileDescriptor.adopt(res.value.toInt(), FileDescriptorRole.Ruleset))
             is LinuxNative.SyscallResult.Error -> LandlockFdOutcome.Err(res.errno, res.rawValue)
         }
     }

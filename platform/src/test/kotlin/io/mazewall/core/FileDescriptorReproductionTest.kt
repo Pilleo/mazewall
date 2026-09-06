@@ -29,7 +29,7 @@ class FileDescriptorReproductionTest {
 
     @Test
     fun `file descriptor is strictly immutable and returns closed type`() = withArena {
-        val fd = FileDescriptor.unsafe<FileDescriptorRole.Generic>(realFd())
+        val fd = FileDescriptor.adopt(realFd(), FileDescriptorRole.Generic)
         val value = fd.value
 
         @Suppress("CAST_NEVER_SUCCEEDS", "USELESS_CAST")
@@ -48,7 +48,7 @@ class FileDescriptorReproductionTest {
     @Test
     fun `leftover Open token cannot reach the kernel after close or reuse`() = withArena {
         val first = realFd()
-        val leftover = FileDescriptor.generic(first)
+        val leftover = FileDescriptor.adopt(first, FileDescriptorRole.Generic)
         leftover.close()
 
         val denied = leftover.ebadfUnlessLive()
@@ -59,7 +59,7 @@ class FileDescriptorReproductionTest {
         // The kernel hands back the just-closed lowest integer; adopting it proves
         // generation separation between the leftover token and the new owner.
         val reusedInt = realFd()
-        val reused = FileDescriptor.generic(reusedInt)
+        val reused = FileDescriptor.adopt(reusedInt, FileDescriptorRole.Generic)
         assertTrue(reused.isLiveForIo())
         assertFalse(leftover.isLiveForIo())
         assertNull(reused.ebadfUnlessLive())

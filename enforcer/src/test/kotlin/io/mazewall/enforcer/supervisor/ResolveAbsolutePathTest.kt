@@ -59,18 +59,13 @@ class ResolveAbsolutePathTest {
             FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(-1),
             FileDescriptor.unsafe<FileDescriptorRole.SeccompNotif>(-1)
         )
-        val bypassMethod = SupervisorSessionHandler::class.java.getDeclaredMethod(
-            "resolveBypassPath",
-            Path::class.java
-        )
-        bypassMethod.isAccessible = true
 
         val resolvedPath = SupervisorFastPath.resolveAbsolutePath(0, 999, "build/secret") as Path?
 
         if (resolvedPath == null) {
             return
         }
-        val bypass = bypassMethod.invoke(handler, resolvedPath) as Path?
+        val bypass = handler.resolveBypassPath(resolvedPath)
         assertNull(bypass)
         assertFalse(BypassPaths.safeBypassPaths.any { root ->
             resolvedPath.normalize().startsWith(root.normalize())
@@ -95,15 +90,10 @@ class ResolveAbsolutePathTest {
             val resolvedPath =
                 SupervisorFastPath.resolveAbsolutePath(traceePid, 9, "build/secret") as Path
 
-            val bypassMethod = SupervisorSessionHandler::class.java.getDeclaredMethod(
-                "resolveBypassPath",
-                Path::class.java
-            )
-            bypassMethod.isAccessible = true
 
             // "build" is beneath the daemon working directory and is normally bypassed. It must not
             // bypass when the tracee asks openat() to resolve that same relative spelling under fd 9.
-            val result = bypassMethod.invoke(handler, resolvedPath) as Path?
+            val result = handler.resolveBypassPath(resolvedPath)
 
             assertNull(result)
         } finally {
@@ -120,12 +110,7 @@ class ResolveAbsolutePathTest {
         val parentDir = tempFile.parent
         val nonExistentChild = parentDir.resolve("non-existent-child-abc-123")
 
-        val companionClass = Class.forName("io.mazewall.enforcer.supervisor.BypassPaths")
-        val companionInstance = BypassPaths
-        val method = companionClass.getDeclaredMethod("toRealPathWithFallback", Path::class.java)
-        method.isAccessible = true
-
-        val result = method.invoke(companionInstance, nonExistentChild) as Path
+                val result = BypassPaths.toRealPathWithFallback(nonExistentChild)
 
         assertNotNull(result)
         assertEquals(nonExistentChild.toAbsolutePath().normalize(), result)
@@ -135,12 +120,7 @@ class ResolveAbsolutePathTest {
 
     @Test
     fun `toRealPathWithFallback propagates critical exceptions like FileSystemLoopException`() {
-        val companionClass = Class.forName("io.mazewall.enforcer.supervisor.BypassPaths")
-        val companionInstance = BypassPaths
-        val method = companionClass.getDeclaredMethod("toRealPathWithFallback", Path::class.java)
-        method.isAccessible = true
-
-        // Create a symlink loop
+                // Create a symlink loop
         val tempDir = Files.createTempDirectory("symlink-loop-test")
         val linkA = tempDir.resolve("linkA")
         val linkB = tempDir.resolve("linkB")
@@ -149,10 +129,11 @@ class ResolveAbsolutePathTest {
             Files.createSymbolicLink(linkA, linkB)
             Files.createSymbolicLink(linkB, linkA)
 
-            val exception = assertThrows<java.lang.reflect.InvocationTargetException> {
-                method.invoke(companionInstance, linkA)
+            val exception = assertThrows<java.nio.file.FileSystemException> {
+                BypassPaths.toRealPathWithFallback(linkA)
             }
-            assertTrue(exception.cause is FileSystemLoopException || exception.cause is java.io.IOException)
+            // Some JDKs throw FileSystemLoopException, others throw FileSystemException
+            // Both are acceptable
         } finally {
             Files.deleteIfExists(linkA)
             Files.deleteIfExists(linkB)

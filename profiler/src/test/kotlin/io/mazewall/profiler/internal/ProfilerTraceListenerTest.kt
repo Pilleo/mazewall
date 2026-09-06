@@ -47,7 +47,7 @@ class ProfilerTraceListenerTest {
 
         LinuxNative.setEngine(mock)
         try {
-            val socketFd = FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(300)
+            val socketFd = FileDescriptor.adopt(300, FileDescriptorRole.UnixSocket)
             val listener = ProfilerTraceListener(
                 socketFd = socketFd,
                 accumulatedLogs = mutableListOf(),
@@ -89,7 +89,7 @@ class ProfilerTraceListenerTest {
 
         LinuxNative.setEngine(mock)
         try {
-            val socketFd = FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(301)
+            val socketFd = FileDescriptor.adopt(301, FileDescriptorRole.UnixSocket)
             val listener = ProfilerTraceListener(
                 socketFd = socketFd,
                 accumulatedLogs = mutableListOf(),
@@ -173,7 +173,7 @@ class ProfilerTraceListenerTest {
 
         LinuxNative.setEngine(mock)
         try {
-            val socketFd = FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(302)
+            val socketFd = FileDescriptor.adopt(302, FileDescriptorRole.UnixSocket)
             val listener = ProfilerTraceListener(
                 socketFd = socketFd,
                 accumulatedLogs = accumulatedLogs,
@@ -218,7 +218,7 @@ class ProfilerTraceListenerTest {
 
         LinuxNative.setEngine(mock)
         try {
-            val socketFd = FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(303)
+            val socketFd = FileDescriptor.adopt(303, FileDescriptorRole.UnixSocket)
             val listener = ProfilerTraceListener(
                 socketFd = socketFd,
                 accumulatedLogs = mutableListOf(),
@@ -258,7 +258,7 @@ class ProfilerTraceListenerTest {
 
         LinuxNative.setEngine(mock)
         try {
-            val socketFd = FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(304)
+            val socketFd = FileDescriptor.adopt(304, FileDescriptorRole.UnixSocket)
             val listener = ProfilerTraceListener(
                 socketFd = socketFd,
                 accumulatedLogs = mutableListOf(),

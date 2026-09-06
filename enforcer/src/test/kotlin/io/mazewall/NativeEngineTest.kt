@@ -107,7 +107,7 @@ class NativeEngineTest {
 
     @Test
     fun `poll delegates to engine without rejecting retired fd integer`() {
-        val fd = FileDescriptor.generic(97)
+        val fd = FileDescriptor.adopt(97, FileDescriptorRole.Generic)
         fd.close()
         val mock = MockNativeEngine()
         var polled = false
