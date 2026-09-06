@@ -200,7 +200,8 @@ internal class LandlockSession(
 
     private fun handleProcessWideUnsupported() {
         val fallback = Platform.configuredFallback()
-        val msg = "Process-wide Landlock (TSYNC) requires Linux 7.0+ (ABI v8). This kernel supports ABI v${Platform.featureMatrix.landlockAbiVersion}."
+        val msg = "Process-wide Landlock requires ABI v8 with LANDLOCK_RESTRICT_SELF_TSYNC. " +
+            "This kernel supports ABI v${Platform.featureMatrix.landlockAbiVersion}."
         if (fallback == Platform.FallbackBehavior.FAIL) {
             throw UnsupportedKernelFeatureException(msg)
         } else if (fallback == Platform.FallbackBehavior.WARN_AND_BYPASS) {

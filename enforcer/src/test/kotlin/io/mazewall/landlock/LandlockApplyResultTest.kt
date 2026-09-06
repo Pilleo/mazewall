@@ -18,6 +18,7 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
 import java.nio.file.Path
 import kotlin.test.assertFailsWith
+import kotlin.test.assertContains
 import kotlin.test.assertIs
 
 class LandlockApplyResultTest {
@@ -110,6 +111,19 @@ class LandlockApplyResultTest {
                 Policy.builder().allowFsRead(dir.toString()).build().definition,
             )
         }
+    }
+
+    @Test
+    fun `process-wide rejection identifies the required Landlock ABI capability`() {
+        System.setProperty("io.mazewall.fallback", "FAIL")
+        Platform.setProvider(MockPlatformProvider().apply { mockLandlockAbiVersion = 5 })
+
+        val result = LandlockSession(Policy.PURE_COMPUTE_UNSAFE.definition, processWide = true).tryApplyRuleset()
+        val rejected = assertIs<LandlockApplyResult.Rejected>(result)
+
+        assertContains(rejected.reason, "ABI v8")
+        assertContains(rejected.reason, "LANDLOCK_RESTRICT_SELF_TSYNC")
+        assertTrue(!rejected.reason.contains("Linux 7.0"))
     }
 
     @Test
