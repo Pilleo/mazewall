@@ -1,6 +1,6 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 95 | *Total Resolved Issues:* 488
+*Total Active Issues:* 94 | *Total Resolved Issues:* 489
 
 | Issue | Title | Priority | Component |
 |---|---|---|---|
@@ -102,4 +102,3 @@
 | [issue-20260825-191000-ringbuf-rw-data-mapping-eperm](issue-20260825-191000-ringbuf-rw-data-mapping-eperm.md) | BPF ringbuf data area cannot be mapped writable on current kernels | medium | tier-e |
 | [issue-20260825-193000-tier-e-r3-golden-protocol-conformance](issue-20260825-193000-tier-e-r3-golden-protocol-conformance.md) | Tier E R3: golden-file protocol conformance suite | medium | tier-e |
 | [issue-20260826-102701-centralize-global-test-seam-reset-in-a-single-junit-extensio](issue-20260826-102701-centralize-global-test-seam-reset-in-a-single-junit-extensio.md) | Centralize global test-seam reset in a single JUnit extension | high | enforcer |
-| [issue-20260826-180108-replace-thread-sleep-polling-with-non-flaky-conditional-awai](issue-20260826-180108-replace-thread-sleep-polling-with-non-flaky-conditional-awai.md) | Replace Thread.sleep polling with non-flaky conditional awaits in tests | high | testing |

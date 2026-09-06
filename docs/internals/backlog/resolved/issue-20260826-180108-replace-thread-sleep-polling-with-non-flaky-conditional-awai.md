@@ -1,18 +1,18 @@
 ---
 title: "Replace Thread.sleep polling with non-flaky conditional awaits in tests"
 severity: "LOW"
-status: "open"
+status: "resolved"
 priority: high
 dependencies:
   - "issue-20260826-180100"
 component: "testing"
 target_modules:
   - ":enforcer"
-  - ":profiler"
 target_files:
-  - "enforcer/src/test/kotlin/io/mazewall/ContainedExecutorsTest.kt"
+  - "enforcer/src/test/kotlin/io/mazewall/enforcer/supervisor/SupervisorDaemonEngineTest.kt"
+  - "enforcer/src/test/kotlin/io/mazewall/enforcer/supervisor/SupervisorSessionHandlerTest.kt"
 verify_cheap:
-  - "./gradlew :enforcer:test --tests io.mazewall.ContainedExecutorsTest"
+  - "./gradlew :enforcer:test --tests io.mazewall.enforcer.supervisor.SupervisorDaemonEngineTest --tests io.mazewall.enforcer.supervisor.SupervisorSessionHandlerTest"
 needs_kernel: false
 core_lock: false
 effort: "small"
@@ -33,6 +33,14 @@ We need to replace straightforward `Thread.sleep` polling with non-flaky conditi
 1. Identify `Thread.sleep(...)` polling patterns in `enforcer/src/test/kotlin/io/mazewall/ContainedExecutorsTest.kt` and daemon integration/unit tests.
 2. Replace with bounded predicate polling (awaitility-style conditional spin/sleep loop with fast interval and explicit timeout) using standard Java/Kotlin concurrency primitives (CountDownLatch, CompletableFuture, or custom await helper in `src/sharedTest`).
 3. Verify test speed and determinism via `./gradlew test`.
+
+**Resolution (2026-09-06):** The named `ContainedExecutorsTest` had already been removed.
+The remaining asynchronous cleanup assertions were in the supervisor test suite. Their fixed
+`Thread.sleep` and retry loops now await `CountDownLatch` instances decremented only when the
+expected descriptors close. The latch establishes visibility before each assertion and reports a
+clear timeout rather than silently continuing after an arbitrary delay. The mock poll timeout in
+the consecutive-connection test remains intentionally timed to model a real poll timeout, not
+test synchronization.
 
 **Verification:** `./gradlew :tools:orchestrator:checkBacklog` plus the `verify_cheap` commands above (if any).
 

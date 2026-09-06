@@ -22,6 +22,8 @@ import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 
 class SupervisorSessionHandlerTest {
 
@@ -867,11 +869,14 @@ class SupervisorSessionHandlerTest {
     @Test
     fun `handleAcceptAsync cleans up resources on failures`() {
         val closedFds = mutableSetOf<Int>()
+        val expectedCloses = CountDownLatch(1)
 
         val mockEngine = object : MockNativeEngine() {
             override val fileSystem = object : io.mazewall.MockNativeFileSystem() {
                 override fun close(fd: FileDescriptor<*, FdState.Open>): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
-                    closedFds.add(fd.value)
+                    if (closedFds.add(fd.value) && fd.value == 100) {
+                        expectedCloses.countDown()
+                    }
                     return LinuxNative.SyscallResult.Success(0L)
                 }
             }
@@ -911,12 +916,7 @@ class SupervisorSessionHandlerTest {
 
             handler.handleAcceptAsync(12345L, arch.accept, LongArray(6) { 55L }, io.mazewall.core.Tid(999), arch)
 
-            // Since it runs in a daemon thread, let's wait a bit for it to run and finish.
-            var attempts = 0
-            while (attempts < 20 && !closedFds.contains(100)) {
-                Thread.sleep(50)
-                attempts++
-            }
+            assertTrue(expectedCloses.await(1, TimeUnit.SECONDS), "pidfd should be closed")
 
             // Verify that the opened pidfd (100) was successfully closed even after pidfd_getfd failure!
             assertEquals(true, closedFds.contains(100), "pidfd should have been closed")
@@ -928,11 +928,14 @@ class SupervisorSessionHandlerTest {
     @Test
     fun `handleAcceptAsync cleans up resources on accept4 failure`() {
         val closedFds = mutableSetOf<Int>()
+        val expectedCloses = CountDownLatch(2)
 
         val mockEngine = object : MockNativeEngine() {
             override val fileSystem = object : io.mazewall.MockNativeFileSystem() {
                 override fun close(fd: FileDescriptor<*, FdState.Open>): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
-                    closedFds.add(fd.value)
+                    if (closedFds.add(fd.value) && fd.value in setOf(100, 200)) {
+                        expectedCloses.countDown()
+                    }
                     return LinuxNative.SyscallResult.Success(0L)
                 }
             }
@@ -983,12 +986,7 @@ class SupervisorSessionHandlerTest {
 
             handler.handleAcceptAsync(12345L, arch.accept, LongArray(6) { 55L }, io.mazewall.core.Tid(999), arch)
 
-            // Wait for daemon thread
-            var attempts = 0
-            while (attempts < 20 && (!closedFds.contains(100) || !closedFds.contains(200))) {
-                Thread.sleep(50)
-                attempts++
-            }
+            assertTrue(expectedCloses.await(1, TimeUnit.SECONDS), "pidfd and duplicated descriptor should close")
 
             // Verify both pidfd and dupFd are closed
             assertEquals(true, closedFds.contains(100), "pidfd (100) should have been closed")
@@ -1001,11 +999,14 @@ class SupervisorSessionHandlerTest {
     @Test
     fun `handleAcceptAsync cleans up resources on success`() {
         val closedFds = mutableSetOf<Int>()
+        val expectedCloses = CountDownLatch(3)
 
         val mockEngine = object : MockNativeEngine() {
             override val fileSystem = object : io.mazewall.MockNativeFileSystem() {
                 override fun close(fd: FileDescriptor<*, FdState.Open>): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
-                    closedFds.add(fd.value)
+                    if (closedFds.add(fd.value) && fd.value in setOf(100, 200, 300)) {
+                        expectedCloses.countDown()
+                    }
                     return LinuxNative.SyscallResult.Success(0L)
                 }
             }
@@ -1055,12 +1056,7 @@ class SupervisorSessionHandlerTest {
 
             handler.handleAcceptAsync(12345L, arch.accept, LongArray(6) { 55L }, io.mazewall.core.Tid(999), arch)
 
-            // Wait for daemon thread
-            var attempts = 0
-            while (attempts < 20 && (!closedFds.contains(100) || !closedFds.contains(200) || !closedFds.contains(300))) {
-                Thread.sleep(50)
-                attempts++
-            }
+            assertTrue(expectedCloses.await(1, TimeUnit.SECONDS), "all acquired descriptors should close")
 
             // Verify all descriptors are closed
             assertEquals(true, closedFds.contains(100), "pidfd (100) should have been closed")

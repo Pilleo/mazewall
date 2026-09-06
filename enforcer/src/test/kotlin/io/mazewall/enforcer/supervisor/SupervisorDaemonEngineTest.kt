@@ -220,8 +220,16 @@ class SupervisorDaemonEngineTest {
     @Test
     fun `run closes client sockets and active listeners on exception or break`() {
         val mockEngine = MockNativeEngine()
+        val expectedCloses = CountDownLatch(2)
 
-        val mockSocket = object : TestSocketManager(5) {}
+        val mockSocket = object : TestSocketManager(5) {
+            override fun close(fd: FileDescriptor<*, FdState.Open>) {
+                super.close(fd)
+                if (fd.value == 5 || fd.value == 12) {
+                    expectedCloses.countDown()
+                }
+            }
+        }
 
         // Mock accept4: first call accepts client FD 12, subsequent calls return EINTR
         var acceptCount = 0
@@ -255,8 +263,7 @@ class SupervisorDaemonEngineTest {
             assertEquals("Simulated loop interrupt", e.message)
         }
 
-        // Wait for the connectionExecutor thread to finish its work
-        Thread.sleep(500)
+        assertTrue(expectedCloses.await(1, TimeUnit.SECONDS), "Server and client sockets should close")
 
         assertTrue(mockSocket.closedFds.contains(5), "Server socket 5 should be closed")
         assertTrue(mockSocket.closedFds.contains(12), "Client socket 12 should be closed")
