@@ -79,12 +79,14 @@ public class LandlockRuleset<out S : RulesetState> internal constructor(
  * Compiler-enforced type-state lifecycle for Landlock sandboxing.
  */
 internal sealed interface LandlockLifecycle {
+    val diagnosticState: LandlockState
     /** Ruleset FD created, ready to add classpath and user rules. */
     class RulesetCreated(
         val ruleset: LandlockRuleset<RulesetState.Building>,
         val abi: Int,
         val policy: PolicyDefinition<*>?,
     ) : LandlockLifecycle {
+        override val diagnosticState: LandlockState = LandlockState.ConfiguringRuleset(ruleset.fd, abi)
         fun addRules(arena: NativeArena): RulesAdded {
             val allFsRead = Landlock.LANDLOCK_ACCESS_FS_READ_FILE or Landlock.LANDLOCK_ACCESS_FS_READ_DIR
             val classpathFlags = allFsRead or Landlock.LANDLOCK_ACCESS_FS_EXECUTE
@@ -102,6 +104,7 @@ internal sealed interface LandlockLifecycle {
     class RulesAdded(
         val ruleset: LandlockRuleset<RulesetState.Building>,
     ) : LandlockLifecycle {
+        override val diagnosticState: LandlockState = LandlockState.Enforcing(ruleset.fd)
         fun restrictSelf(processWide: Boolean = false): Restricted {
             Landlock.enforceRuleset(ruleset, processWide)
             return Restricted
@@ -109,7 +112,9 @@ internal sealed interface LandlockLifecycle {
     }
 
     /** Ruleset successfully enforced and thread restricted. */
-    data object Restricted : LandlockLifecycle
+    data object Restricted : LandlockLifecycle {
+        override val diagnosticState: LandlockState = LandlockState.Applied
+    }
 }
 
 internal class LandlockSession(
@@ -172,10 +177,10 @@ internal class LandlockSession(
                         created.fd.use { rulesetFd ->
                             val ruleset = LandlockRuleset<RulesetState.Building>(rulesetFd)
                             val lifecycle = LandlockLifecycle.RulesetCreated(ruleset, abi, policy)
-                            state = LandlockState.ConfiguringRuleset(rulesetFd, abi)
+                            state = lifecycle.diagnosticState
 
                             val added = lifecycle.addRules(arena)
-                            state = LandlockState.Enforcing(rulesetFd)
+                            state = added.diagnosticState
                             when (val restricted = Landlock.tryEnforceRuleset(ruleset, processWide)) {
                                 is LandlockRestrictOutcome.Err -> {
                                     val outcome = Landlock.classifyLandlockErrno(
@@ -186,7 +191,7 @@ internal class LandlockSession(
                                     return outcome
                                 }
                                 is LandlockRestrictOutcome.Ok -> {
-                                    state = LandlockState.Applied
+                                    state = LandlockLifecycle.Restricted.diagnosticState
                                 }
                             }
                         }
