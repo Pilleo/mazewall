@@ -1,6 +1,6 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 125 | *Total Resolved Issues:* 458
+*Total Active Issues:* 124 | *Total Resolved Issues:* 459
 
 | Issue | Title | Priority | Component |
 |---|---|---|---|
@@ -8,7 +8,6 @@
 | [issue-20260905-130408-implement-blast-radius-memory-injection-linking-codanna-impa](implementation/issue-20260905-130408-implement-blast-radius-memory-injection-linking-codanna-impa.md) | Implement blast-radius memory injection linking Codanna impact symbols to agentmemory | high | testing |
 | [issue-20260905-130500-implement-automated-tombstoning-and-stale-memory-pruning-via](code_health/issue-20260905-130500-implement-automated-tombstoning-and-stale-memory-pruning-via.md) | Implement automated tombstoning and stale memory pruning via Codanna AST verification | medium | testing |
 | [issue-20260905-130530-align-codanna-document-indexing-and-agentmemory-semantic-rec](implementation/issue-20260905-130530-align-codanna-document-indexing-and-agentmemory-semantic-rec.md) | Align Codanna document indexing and agentmemory semantic recall on BGE-M3 vector space | medium | testing |
-| [issue-20260905-114558-add-eintr-progressive-backoff-and-eof-validation-to-supervis](code_health/issue-20260905-114558-add-eintr-progressive-backoff-and-eof-validation-to-supervis.md) | Add EINTR progressive backoff and EOF validation to SupervisorSocketInputStream | high | enforcer |
 | [issue-019-refactor-profiler-daemon-to-use-coroutines-structured-concur](issue-019-refactor-profiler-daemon-to-use-coroutines-structured-concur.md) | Refactor Profiler Daemon to use Coroutines (Structured Concurrency) | low | profiler |
 | [issue-193-review-orchestrator-prompts-jules-quality-safety-guidelines](issue-193-review-orchestrator-prompts-jules-quality-safety-guidelines.md) | Review and Enhance Orchestrator Prompts for Jules to Enforce Quality and Safety | high | orchestrator |
 | [issue-195-jules-session-id-parsing-bug](issue-195-jules-session-id-parsing-bug.md) | Fix Jules Session ID Parsing Bug | high | orchestrator |

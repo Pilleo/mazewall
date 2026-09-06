@@ -1,6 +1,8 @@
 package io.mazewall.ffi.networking
 
 import io.mazewall.LinuxNative
+import io.mazewall.MockNativeEngine
+import io.mazewall.MockNativeFileSystem
 import io.mazewall.core.FileDescriptorRole
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FdState
@@ -10,10 +12,32 @@ import java.io.InterruptedIOException
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
+import java.util.concurrent.atomic.AtomicInteger
 
 import io.mazewall.ffi.memory.readInt
 
 class SupervisorSocketInputStreamTest {
+
+    @Test
+    fun `close does not close the externally managed socket`() {
+        val closeCount = AtomicInteger(0)
+        LinuxNative.setEngine(
+            MockNativeEngine(
+                fileSystem = object : MockNativeFileSystem() {
+                    override fun close(fd: FileDescriptor<*, FdState.Open>) =
+                        LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(closeCount.incrementAndGet().toLong())
+                },
+            ),
+        )
+        try {
+            io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
+                SupervisorSocketInputStream(FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(99), arena).close()
+            }
+            assertEquals(0, closeCount.get())
+        } finally {
+            LinuxNative.resetToDefault()
+        }
+    }
 
     @Test
     fun `read loop aborts immediately when thread is interrupted`() {
@@ -49,7 +73,8 @@ class SupervisorSocketInputStreamTest {
         val exception = exceptionRef.get()
         assertNotNull(exception, "Expected an exception to be thrown")
         assertTrue(exception is InterruptedIOException, "Expected InterruptedIOException, got ${exception?.javaClass}")
-        assertEquals("Thread interrupted while reading from Supervisor socket", exception?.message)
+        assertTrue(exception?.message?.contains("Thread [") == true)
+        assertTrue(exception?.message?.contains("supervisor socket read") == true)
         
         LinuxNative.fileSystem.close(readFd)
         LinuxNative.fileSystem.close(writeFd)
@@ -90,7 +115,8 @@ class SupervisorSocketInputStreamTest {
         val exception = exceptionRef.get()
         assertNotNull(exception, "Expected an exception to be thrown")
         assertTrue(exception is InterruptedIOException, "Expected InterruptedIOException, got ${exception?.javaClass}")
-        assertEquals("Thread interrupted while reading from Supervisor socket", exception?.message)
+        assertTrue(exception?.message?.contains("Thread [") == true)
+        assertTrue(exception?.message?.contains("supervisor socket bulk read") == true)
         
         LinuxNative.fileSystem.close(readFd)
         LinuxNative.fileSystem.close(writeFd)

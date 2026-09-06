@@ -1,7 +1,7 @@
 ---
 title: "Add EINTR progressive backoff and EOF validation to SupervisorSocketInputStream"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "enforcer"

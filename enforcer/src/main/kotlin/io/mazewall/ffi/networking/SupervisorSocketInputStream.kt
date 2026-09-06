@@ -13,6 +13,7 @@ import io.mazewall.ffi.memory.ManagedSegment
 import io.mazewall.ffi.memory.NativeArena
 import io.mazewall.ffi.memory.readByte
 import java.io.InputStream
+import java.io.InterruptedIOException
 
 internal class SupervisorSocketInputStream(
     private val socketFd: FileDescriptor<*, FdState.Open>,
@@ -27,10 +28,26 @@ internal class SupervisorSocketInputStream(
         private const val EINTR = 4
     }
 
+    private fun handleBackoff(eintrCount: Int) {
+        if (eintrCount <= 1) return
+        if (eintrCount > 3) {
+            try {
+                Thread.sleep(1)
+            } catch (e: InterruptedException) {
+                Thread.currentThread().interrupt()
+                throw InterruptedIOException("Thread [${Thread.currentThread().name}] interrupted during EINTR backoff sleep")
+            }
+        } else {
+            Thread.yield()
+        }
+    }
+
     override fun read(): Int {
+        var eintrCount = 0
         while (true) {
             if (Thread.currentThread().isInterrupted) {
-                throw java.io.InterruptedIOException("Thread interrupted while reading from Supervisor socket")
+                Thread.currentThread().interrupt()
+                throw InterruptedIOException("Thread [${Thread.currentThread().name}] interrupted during supervisor socket read")
             }
             val res = LinuxNative.memory.read(socketFd, readBuf, 1)
             when (res) {
@@ -40,7 +57,8 @@ internal class SupervisorSocketInputStream(
                 }
                 is LinuxNative.SyscallResult.Error -> {
                     if (res.errno == EINTR) {
-                        Thread.yield()
+                        eintrCount++
+                        handleBackoff(eintrCount)
                         continue
                     }
                     return -1
@@ -52,11 +70,11 @@ internal class SupervisorSocketInputStream(
     override fun read(b: ByteArray, off: Int, len: Int): Int {
         if (len == 0) return 0
         val count = Math.min(len.toLong(), BUFFER_SIZE.toLong())
-        var result = -1
-        var done = false
-        while (!done) {
+        var eintrCount = 0
+        while (true) {
             if (Thread.currentThread().isInterrupted) {
-                throw java.io.InterruptedIOException("Thread interrupted while reading from Supervisor socket")
+                Thread.currentThread().interrupt()
+                throw InterruptedIOException("Thread [${Thread.currentThread().name}] interrupted during supervisor socket bulk read")
             }
             val res = LinuxNative.memory.read(socketFd, multiBuf, count)
             when (res) {
@@ -64,23 +82,20 @@ internal class SupervisorSocketInputStream(
                     if (res.value > 0) {
                         val actualLen = res.value.toInt()
                         ManagedSegment.copy(multiBuf, 0L, b, off, actualLen)
-                        result = actualLen
+                        return actualLen
                     }
-                    done = true
+                    return -1
                 }
                 is LinuxNative.SyscallResult.Error -> {
-                    if (res.errno != EINTR) {
-                        done = true
-                    } else {
-                        Thread.yield()
-                    }
+                    if (res.errno != EINTR) return -1
+                    eintrCount++
+                    handleBackoff(eintrCount)
                 }
             }
         }
-        return result
     }
 
     override fun close() {
-        LinuxNative.fileSystem.close(socketFd)
+        // The supervisor session owns the socket descriptor and performs its lifecycle cleanup.
     }
 }
