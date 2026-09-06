@@ -2,6 +2,7 @@ package io.mazewall.portal
 
 import io.mazewall.LinuxNative
 import io.mazewall.core.Deadline
+import io.mazewall.core.FdOwnership
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
@@ -22,14 +23,16 @@ import java.nio.file.Path
 
 /** Thrown when a portal read deadline expires. Distinct from fatal socket errors so idle
  *  workers can keep polling (issue: pooled-worker 30s self-exit). */
-public class PortalReadTimeoutException :
-    java.io.IOException("portal read timed out")
+public class PortalReadTimeoutException : java.io.IOException("portal read timed out")
 
 public class PortalChannel(
-    private val socket: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>,
+    private val socket: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
     private val sockets: SocketManager = RealSocketManager,
 ) : AutoCloseable {
-    fun send(frame: PortalFrame, fds: List<FileDescriptor<*, FdState.Open>> = emptyList()) {
+    fun send(
+        frame: PortalFrame,
+        fds: List<FileDescriptor<*, FdState.Open, FdOwnership.Owned>> = emptyList(),
+    ) {
         require(fds.size == frame.fdCount) { "fd list ${fds.size} != header ${frame.fdCount}" }
         writeBytes(frame.headerBytes())
         if (frame.payload.isNotEmpty()) {
@@ -40,11 +43,11 @@ public class PortalChannel(
         }
     }
 
-    fun receive(timeoutMs: Long = 30_000L): Pair<PortalFrame, List<FileDescriptor<FileDescriptorRole.Granted, FdState.Open>>> {
+    fun receive(timeoutMs: Long = 30_000L): Pair<PortalFrame, List<FileDescriptor<FileDescriptorRole.Granted, FdState.Open, FdOwnership.Owned>>> {
         val headerBytes = readBytes(PortalFrame.HEADER_SIZE, timeoutMs)
         val header = PortalFrame.parseHeader(headerBytes)
         val payload = if (header.payloadLen == 0) ByteArray(0) else readBytes(header.payloadLen, timeoutMs)
-        val fds = ArrayList<FileDescriptor<FileDescriptorRole.Granted, FdState.Open>>(header.fdCount)
+        val fds = ArrayList<FileDescriptor<FileDescriptorRole.Granted, FdState.Open, FdOwnership.Owned>>(header.fdCount)
         repeat(header.fdCount) {
             val granted =
                 sockets.recvDescriptor(socket, FileDescriptorRole.Granted)
@@ -69,7 +72,10 @@ public class PortalChannel(
         }
     }
 
-    private fun readBytes(len: Int, timeoutMs: Long): ByteArray {
+    private fun readBytes(
+        len: Int,
+        timeoutMs: Long,
+    ): ByteArray {
         NativeArena.ofConfined().use { arena ->
             val buf = arena.allocate(len.toLong())
             val deadline = Deadline.afterMillis(timeoutMs)
@@ -99,7 +105,10 @@ public class PortalChannel(
     }
 }
 
-internal fun openGrantedRead(rootDir: Path, relative: String): Capability.ReadFd {
+internal fun openGrantedRead(
+    rootDir: Path,
+    relative: String,
+): Capability.ReadFd {
     require(relative.isNotEmpty()) { "relative path required" }
     require(!relative.startsWith("/")) { "absolute paths are not granted; pass a path relative to root" }
     require('\u0000' !in relative) { "NUL in path" }

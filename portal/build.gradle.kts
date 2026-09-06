@@ -43,12 +43,13 @@ val portalWorkerCpFiles: FileCollection = portalWorkerClasspath
  * Carries the worker classpath as a JVM arg; @Classpath gives implicit producer deps and
  * CC-compatible fingerprinting. Resolution happens at execution time.
  */
-abstract class PortalWorkerClasspathArgProvider @javax.inject.Inject constructor(
-    @get:Classpath private val workerCp: FileCollection,
-) : CommandLineArgumentProvider {
-    override fun asArguments(): Iterable<String> =
-        listOf("-Dio.mazewall.portal.worker.classpath=" + workerCp.asPath)
-}
+abstract class PortalWorkerClasspathArgProvider
+    @javax.inject.Inject
+    constructor(
+        @get:Classpath private val workerCp: FileCollection,
+    ) : CommandLineArgumentProvider {
+        override fun asArguments(): Iterable<String> = listOf("-Dio.mazewall.portal.worker.classpath=" + workerCp.asPath)
+    }
 
 val portalWorkerCpArgProvider =
     objects.newInstance(PortalWorkerClasspathArgProvider::class.java, portalWorkerCpFiles)
@@ -110,4 +111,3 @@ dependencies {
     integrationTestImplementation(libs.junit.jupiter.api)
     integrationTestRuntimeOnly(libs.junit.jupiter.engine)
 }
-

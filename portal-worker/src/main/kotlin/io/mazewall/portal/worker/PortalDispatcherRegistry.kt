@@ -1,5 +1,6 @@
 package io.mazewall.portal.worker
 
+import io.mazewall.core.FdOwnership
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
@@ -22,12 +23,15 @@ public object PortalDispatcherRegistry {
         (
             methodId: Int,
             payload: ByteArray,
-            granted: List<FileDescriptor<FileDescriptorRole.Granted, FdState.Open>>,
+            granted: List<FileDescriptor<FileDescriptorRole.Granted, FdState.Open, FdOwnership>>,
         ) -> ByteArray
 
     private val handlers = ConcurrentHashMap<Int, Handler>()
 
-    public fun register(ids: IntArray, handler: Handler) {
+    public fun register(
+        ids: IntArray,
+        handler: Handler,
+    ) {
         for (id in ids) handlers[id] = handler
     }
 
@@ -35,7 +39,7 @@ public object PortalDispatcherRegistry {
     public fun dispatchOrNull(
         methodId: Int,
         payload: ByteArray,
-        granted: List<FileDescriptor<FileDescriptorRole.Granted, FdState.Open>>,
+        granted: List<FileDescriptor<FileDescriptorRole.Granted, FdState.Open, FdOwnership>>,
     ): ByteArray? = handlers[methodId]?.invoke(methodId, payload, granted)
 
     /**

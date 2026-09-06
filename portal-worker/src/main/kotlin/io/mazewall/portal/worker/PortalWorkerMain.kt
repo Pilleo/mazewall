@@ -49,7 +49,8 @@ public object PortalWorkerMain {
         // loop and lets the worker exit cleanly. The deadline is injectable so tests can prove
         // idle-tick survival in milliseconds instead of minutes
         // (issue-20260824-011654).
-        val idleTimeoutMs = System.getProperty("io.mazewall.portal.worker.idleTimeoutMs")
+        val idleTimeoutMs = System
+            .getProperty("io.mazewall.portal.worker.idleTimeoutMs")
             ?.toLongOrNull() ?: 30_000L
         println("[DBG-W] idleTimeoutMs=$idleTimeoutMs")
         try {

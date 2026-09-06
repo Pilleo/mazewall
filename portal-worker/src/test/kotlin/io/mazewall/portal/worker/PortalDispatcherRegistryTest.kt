@@ -1,5 +1,6 @@
 package io.mazewall.portal.worker
 
+import io.mazewall.core.FdOwnership
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
@@ -13,7 +14,6 @@ import kotlin.test.assertNull
  * worker can answer PortalKind.ERROR.
  */
 class PortalDispatcherRegistryTest {
-
     /** Mimics the shape KotlinPoet emits for `<Service>PortalDispatcher`. */
     private object EchoServicePortalDispatcher {
         val METHOD_IDS: IntArray = intArrayOf(1000)
@@ -22,8 +22,9 @@ class PortalDispatcherRegistryTest {
             impl: EchoService,
             methodId: Int,
             payload: ByteArray,
-            granted: List<FileDescriptor<FileDescriptorRole.Granted, FdState.Open>>,
-        ): ByteArray = when (methodId) {
+            granted: List<FileDescriptor<FileDescriptorRole.Granted, FdState.Open, FdOwnership>>,
+        ): ByteArray =
+            when (methodId) {
             1000 -> ((impl as EchoServiceImpl).tag + ":" + payload.decodeToString()).toByteArray()
             else -> error("unknown portal method $methodId")
         }
@@ -31,12 +32,14 @@ class PortalDispatcherRegistryTest {
 
     interface EchoService
 
-    private class EchoServiceImpl(tag: String) : EchoService {
+    private class EchoServiceImpl(
+        tag: String,
+    ) : EchoService {
         val tag: String = tag
         constructor() : this("impl")
     }
 
-    private fun grantedFds(): List<FileDescriptor<FileDescriptorRole.Granted, FdState.Open>> = emptyList()
+    private fun grantedFds(): List<FileDescriptor<FileDescriptorRole.Granted, FdState.Open, FdOwnership>> = emptyList()
 
     @Test
     fun `generated id routes through registry with bound impl`() {

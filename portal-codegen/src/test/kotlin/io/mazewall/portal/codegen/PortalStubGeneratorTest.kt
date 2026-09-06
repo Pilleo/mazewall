@@ -33,8 +33,11 @@ class PortalStubGeneratorTest {
         val dispatcher = files.single { it.name == "SampleGreeterPortalDispatcher" }.toString()
         assertTrue(dispatcher.contains("val METHOD_IDS: IntArray"), "registry bootstrap needs METHOD_IDS")
         // Ids must stay outside the builtin range (PortalMethods 1..4).
-        val ids = Regex("intArrayOf\\(([^)]*)\\)").find(dispatcher)!!.groupValues[1]
-            .split(",").map { it.trim().toInt() }
+        val ids = Regex("intArrayOf\\(([^)]*)\\)")
+            .find(dispatcher)!!
+            .groupValues[1]
+            .split(",")
+            .map { it.trim().toInt() }
         assertTrue(ids.isNotEmpty())
         assertTrue(ids.all { it >= 1000 }, "generated ids must not collide with builtins: $ids")
     }
@@ -75,11 +78,23 @@ class PortalStubGeneratorTest {
 
     @Test
     fun `write splits stub and dispatcher into different directories`() {
-        val stubDir = kotlin.io.path.createTempDirectory("portal-stubs").toFile()
-        val dispatcherDir = kotlin.io.path.createTempDirectory("portal-dispatchers").toFile()
+        val stubDir = kotlin.io.path
+            .createTempDirectory("portal-stubs")
+            .toFile()
+        val dispatcherDir = kotlin.io.path
+            .createTempDirectory("portal-dispatchers")
+            .toFile()
         PortalStubGenerator.write(SampleGreeter::class.java, stubDir, dispatcherDir)
-        val stubFiles = stubDir.walkTopDown().filter { it.isFile }.map { it.name }.toList()
-        val dispatcherFiles = dispatcherDir.walkTopDown().filter { it.isFile }.map { it.name }.toList()
+        val stubFiles = stubDir
+            .walkTopDown()
+            .filter { it.isFile }
+            .map { it.name }
+            .toList()
+        val dispatcherFiles = dispatcherDir
+            .walkTopDown()
+            .filter { it.isFile }
+            .map { it.name }
+            .toList()
         assertTrue(stubFiles.any { it.contains("PortalStub") }, stubFiles.toString())
         assertTrue(dispatcherFiles.any { it.contains("PortalDispatcher") }, dispatcherFiles.toString())
         assertTrue(stubFiles.none { it.contains("PortalDispatcher") }, stubFiles.toString())

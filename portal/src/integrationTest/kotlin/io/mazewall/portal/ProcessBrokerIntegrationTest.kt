@@ -14,7 +14,13 @@ class ProcessBrokerIntegrationTest {
     @Test
     fun `granted-fd checksum works and worker cannot open host passwd`() {
         assumeTrue(System.getProperty("os.name").lowercase().contains("linux"))
-        assumeTrue(java.nio.file.Files.exists(java.nio.file.Path.of("/etc/passwd")))
+        assumeTrue(
+            java.nio.file.Files
+            .exists(
+                java.nio.file.Path
+                .of("/etc/passwd"),
+            ),
+        )
         val payload = Files.createTempFile("mazewall-portal-", ".bin")
         Files.write(payload, byteArrayOf(1, 2, 3, 4, 5))
         ProcessBroker().use { broker ->
@@ -25,7 +31,8 @@ class ProcessBrokerIntegrationTest {
             assertEquals(expected, broker.checksum(granted))
             val ex = assertThrows(PortalCallException::class.java) { broker.tryOpenHostPasswd() }
             val msg = ex.message ?: ""
-            val strerror13 = io.mazewall.ffi.memory.getSystemStrerror(13)
+            val strerror13 = io.mazewall.ffi.memory
+                .getSystemStrerror(13)
             val matchesLocale = strerror13 != null && msg.contains(strerror13, ignoreCase = true)
             assertTrue(
                 msg.contains("Permission denied", ignoreCase = true) ||
@@ -116,11 +123,16 @@ class ProcessBrokerIntegrationTest {
         val deadline = System.currentTimeMillis() + 5_000
         var survivors: List<ProcessHandle>
         do {
-            survivors = ProcessHandle.current().descendants()
+            survivors = ProcessHandle
+                .current()
+                .descendants()
                 .filter { h ->
-                    h.info().commandLine().orElse("").contains("io.mazewall.portal.worker.PortalWorkerMain")
-                }
-                .toList()
+                    h
+                        .info()
+                        .commandLine()
+                        .orElse("")
+                        .contains("io.mazewall.portal.worker.PortalWorkerMain")
+                }.toList()
         } while (survivors.isNotEmpty() && System.currentTimeMillis() < deadline)
 
         assertEquals(0, survivors.size, "checked-out workers must be destroyed on close: $survivors")
@@ -140,8 +152,6 @@ class ProcessBrokerIntegrationTest {
             assertEquals("still-alive", broker.echo("still-alive"))
         }
     }
-
-
 
     @Test
     fun `worker survives multiple idle ticks and still serves calls`() {

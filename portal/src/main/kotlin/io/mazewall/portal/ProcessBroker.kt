@@ -1,5 +1,6 @@
 package io.mazewall.portal
 
+import io.mazewall.core.FdOwnership
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
@@ -49,7 +50,8 @@ public class ProcessBroker(
     private val trackedSlots: MutableSet<WorkerSlot> =
         java.util.Collections.newSetFromMap(java.util.concurrent.ConcurrentHashMap())
 
-    private val closed = java.util.concurrent.atomic.AtomicBoolean(false)
+    private val closed = java.util.concurrent.atomic
+        .AtomicBoolean(false)
 
     public fun start() {
         check(started.compareAndSet(0, 1)) { "broker already started" }
@@ -60,6 +62,7 @@ public class ProcessBroker(
 
     /** Test/diagnostics view of live (tracked) worker slots. */
     internal fun trackedWorkers(): Int = trackedSlots.size
+
     internal fun idleSize(): Int = idle.size
 
     public fun echo(text: String): String {
@@ -82,8 +85,10 @@ public class ProcessBroker(
             (payload[3].toInt() and 0xff)
     }
 
-    public fun openReadOnly(rootDir: java.nio.file.Path, relative: String): Capability.ReadFd =
-        openGrantedRead(rootDir, relative)
+    public fun openReadOnly(
+        rootDir: java.nio.file.Path,
+        relative: String,
+    ): Capability.ReadFd = openGrantedRead(rootDir, relative)
 
     internal fun sleep(millis: Int) {
         val buf = ByteArray(4)
@@ -111,7 +116,7 @@ public class ProcessBroker(
     internal fun call(
         methodId: Int,
         payload: ByteArray,
-        fds: List<FileDescriptor<*, FdState.Open>>,
+        fds: List<FileDescriptor<*, FdState.Open, FdOwnership.Owned>>,
     ): ByteArray {
         check(started.get() == 1) { "broker not started" }
         val slot =
@@ -200,7 +205,9 @@ public class ProcessBroker(
         // must (a) surface its exit code and command line, and (b) break the
         // blocking accept() below by closing the listener, so the cleanup path runs
         // instead of hanging until an external timeout.
-        proc.onExit().thenAccept {
+        proc
+            .onExit()
+            .thenAccept {
             if (it.exitValue() != 0) {
                 System.err.println(
                     "[PORTAL-WORKER-EXIT] code=${it.exitValue()} cmd=${JvmChildProcess.commandLine(spec).joinToString(" ")}",
@@ -211,12 +218,16 @@ public class ProcessBroker(
             // (its peer is discarded by the !proc.isAlive guard below); closing the
             // listener afterwards prevents any further accepts.
             runCatching {
-                java.nio.channels.SocketChannel.open(
+                java.nio.channels.SocketChannel
+                    .open(
                     java.net.UnixDomainSocketAddress.of(ep.path),
                 ).use { ch -> ch.write(java.nio.ByteBuffer.wrap(ByteArray(1))) }
             }
             runCatching { sockets.close(listen) }
-        }.exceptionally { System.err.println("[PORTAL-WORKER-EXIT] onExit failed: ${it.message}"); null }
+        }.exceptionally {
+            System.err.println("[PORTAL-WORKER-EXIT] onExit failed: ${it.message}")
+            null
+        }
         val pump =
             JvmChildProcess.startStdoutPump(
                 proc,
@@ -238,7 +249,9 @@ public class ProcessBroker(
             throw IllegalStateException("portal worker died before connecting: ${e.message}", e)
         }
         if (!proc.isAlive) {
-            sockets.close(peer); sockets.close(listen); ep.close()
+            sockets.close(peer)
+            sockets.close(listen)
+            ep.close()
             proc.destroyForcibly()
             error("portal worker exited during handshake")
         }
@@ -292,6 +305,6 @@ public class ProcessBroker(
         val process: Process,
         val channel: PortalChannel,
         val endpoint: PrivateUnixEndpoint,
-        val server: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>,
+        val server: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
     )
 }

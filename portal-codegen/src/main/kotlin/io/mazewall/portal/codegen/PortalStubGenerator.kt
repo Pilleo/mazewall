@@ -198,8 +198,7 @@ public object PortalStubGenerator {
                     "METHOD_IDS",
                     IntArray::class,
                     KModifier.PUBLIC,
-                )
-                .initializer("intArrayOf(${ids.values.joinToString(", ")})")
+                ).initializer("intArrayOf(${ids.values.joinToString(", ")})")
                 .build()
         val type =
             TypeSpec
