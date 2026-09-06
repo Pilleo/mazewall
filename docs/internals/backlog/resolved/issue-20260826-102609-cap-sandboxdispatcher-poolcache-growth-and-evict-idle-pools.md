@@ -1,7 +1,7 @@
 ---
 title: "Cap SandboxDispatcher poolCache growth and evict idle pools"
 severity: "HIGH"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "enforcer"
@@ -27,11 +27,13 @@ paperclip_identifier: MAZ-683
 `SandboxDispatcher.poolCache` (`enforcer/api/SandboxDispatcher.kt:29`) is an unbounded `ConcurrentHashMap<PolicyDefinition<*>, ExecutorService>` keyed by the *full* definition. Callers that build policies dynamically (e.g. per-request FS paths via `allowFsRead(...)`) create one cached-thread-pool entry per distinct definition; entries are never evicted until the process-wide `shutdownAll()`. Each entry holds daemon worker threads whose seccomp filters are permanent (thread-local containment cannot be undone), so leaked pools also leak contained OS threads. This contradicts the KDoc promise ("prevents thread-explosion") and repeats the exact bug class already fixed for BPF compilation by issue-20260823-171953 (cache key must be the program-relevant projection of a policy, not the whole definition). Note `PolicyDefinition.equals` includes Landlock paths which do not influence which *threads* must exist — only the syscall projection matters for pooling.
 
 **Needed:**
-1. Key the cache on the program-relevant projection (default action, syscall actions, arg-inspection flags, arch) — mirror the `PolicyCompilationCache.CacheKey` approach and reference that invariant in KDoc.
-2. Bound the cache (small fixed cap, e.g. 32 entries) with LRU-style eviction that calls `shutdown()` on evicted executors before dropping them.
+1. Keep the cache keyed by the full policy definition. Unlike BPF compilation, a dispatcher worker installs the whole policy, including irreversible Landlock restrictions; projecting away filesystem paths would reuse a worker with the wrong containment history.
+2. Bound the cache (32 entries) with LRU-style eviction that calls `shutdown()` on evicted executors before dropping them.
 3. Document explicitly in KDoc that executor threads are permanently contained and therefore pooled forever by design; eviction only happens under cap pressure or `shutdownAll()`.
 4. Add a unit test: installing N > cap distinct dynamic policies results in at most `cap` live executors (assert via internal accessor), and evicted pools report `isShutdown`.
 5. Run `./gradlew :enforcer:test`.
+
+**Resolution (2026-09-06):** Implemented a synchronized, access-ordered 32-entry cache. Eviction shuts down the eldest executor before removal, and a unit test proves the cap and shutdown behavior. The initially proposed BPF-only key was rejected because it would be unsafe for permanently contained Landlock worker threads.
 
 ---
 

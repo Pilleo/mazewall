@@ -9,6 +9,7 @@ import java.util.concurrent.Callable
 import kotlin.test.assertEquals
 import io.mazewall.enforcer.api.SandboxDispatcher
 import kotlin.test.assertNotNull
+import kotlin.test.assertTrue
 
 @Suppress("DEPRECATION")
 class SandboxDispatcherCoverageTest {
@@ -38,6 +39,22 @@ class SandboxDispatcherCoverageTest {
     fun testShutdownAll() {
         SandboxDispatcher.getOrCreateElasticPool(Policy.builder().build().definition)
         SandboxDispatcher.shutdownAll()
+    }
+
+    @Test
+    fun `evicts least recently used pools above the fixed cache cap`() {
+        val firstPool = SandboxDispatcher.getOrCreateElasticPool(
+            Policy.builder().customViolationPhrase("policy-0").build().definition,
+        )
+
+        repeat(SandboxDispatcher.MAX_CACHED_POOLS) { index ->
+            SandboxDispatcher.getOrCreateElasticPool(
+                Policy.builder().customViolationPhrase("policy-${index + 1}").build().definition,
+            )
+        }
+
+        assertEquals(SandboxDispatcher.MAX_CACHED_POOLS, SandboxDispatcher.cachedPoolsForTest().size)
+        assertTrue(firstPool.isShutdown, "the least recently used pool must be shut down before eviction")
     }
 
     @Test

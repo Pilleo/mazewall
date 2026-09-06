@@ -9,24 +9,39 @@ import io.mazewall.enforcer.*
 import io.mazewall.Policy
 import io.mazewall.PolicyDefinition
 import java.util.concurrent.Callable
-import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 
 /**
  * A functional router that executes blocks of code inside policy-specific sandboxes.
  *
- * It automatically caches and reuses [ExecutorService] instances based on the exact
- * [PolicyDefinition]. This prevents thread-explosion while ensuring strict containment.
+ * It caches a bounded number of [ExecutorService] instances based on the exact
+ * [PolicyDefinition]. The full definition is intentional: executor threads permanently acquire
+ * both Seccomp and Landlock restrictions, so policies with different filesystem rules cannot
+ * safely share a worker pool. Least-recently-used pools are shut down when the cache is full.
  *
  * For coroutine support (e.g., `executeSuspend`), ensure `kotlinx-coroutines-core`
  * is on your classpath and use the extensions in `io.mazewall.enforcer.SandboxDispatcherCoroutines`.
  */
 object SandboxDispatcher {
 
-    // Cache mapping a distinct Policy definition to its dedicated thread pool.
-    // PolicyDefinition is a data class, so it works perfectly as a map key.
-    private val poolCache = ConcurrentHashMap<PolicyDefinition<*>, ExecutorService>()
+    internal const val MAX_CACHED_POOLS: Int = 32
+
+    /**
+     * Access-ordered cache guarded by itself. Shutting down an evicted pool prevents permanently
+     * contained daemon threads from accumulating when callers construct dynamic policies.
+     */
+    private val poolCache = object : LinkedHashMap<PolicyDefinition<*>, ExecutorService>(
+        MAX_CACHED_POOLS,
+        0.75f,
+        true,
+    ) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<PolicyDefinition<*>, ExecutorService>): Boolean {
+            val shouldEvict = size > MAX_CACHED_POOLS
+            if (shouldEvict) eldest.value.shutdown()
+            return shouldEvict
+        }
+    }
 
     /**
      * Executes the given [block] on a thread pool perfectly constrained by the [policy].
@@ -54,7 +69,17 @@ object SandboxDispatcher {
      */
     @PublishedApi
     internal fun getOrCreateElasticPool(definition: PolicyDefinition<*>): ExecutorService {
-        return poolCache.computeIfAbsent(definition) { def ->
+        synchronized(poolCache) {
+            poolCache[definition]?.let { return it }
+            val pool = createElasticPool(definition)
+            poolCache[definition] = pool
+            return pool
+        }
+    }
+
+    private fun createElasticPool(definition: PolicyDefinition<*>): ExecutorService {
+        return run {
+            val def = definition
             // Use a cached thread pool to allow elastic scaling for blocking I/O workloads,
             // similar to Dispatchers.IO. Threads idle for 60 seconds are terminated.
             val rawPool = Executors.newCachedThreadPool { runnable ->
@@ -71,12 +96,16 @@ object SandboxDispatcher {
         }
     }
 
+    internal fun cachedPoolsForTest(): List<ExecutorService> = synchronized(poolCache) { poolCache.values.toList() }
+
     /**
      * Shuts down all cached executors. Useful for application graceful shutdown.
      */
     @JvmStatic
     fun shutdownAll() {
-        poolCache.values.forEach { it.shutdown() }
-        poolCache.clear()
+        synchronized(poolCache) {
+            poolCache.values.forEach { it.shutdown() }
+            poolCache.clear()
+        }
     }
 }
