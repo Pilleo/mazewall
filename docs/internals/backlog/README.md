@@ -1,6 +1,6 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 113 | *Total Resolved Issues:* 470
+*Total Active Issues:* 110 | *Total Resolved Issues:* 473
 
 | Issue | Title | Priority | Component |
 |---|---|---|---|
@@ -36,9 +36,6 @@
 | [issue-20260729-215004-orchestrator-clean-merge-self-healing-sanitization](issue-20260729-215004-orchestrator-clean-merge-self-healing-sanitization.md) | Implement Self-Healing Working Tree Sanitization on Successful Merge Paths in BranchRebaser | high | orchestrator |
 | [issue-20260808-032525-reduce-and-version-public-api-surface](issue-20260808-032525-reduce-and-version-public-api-surface.md) | Reduce and Version the Supported Public API Surface | high | enforcer |
 | [issue-20260823-181001-slim-root-agents-md](issue-20260823-181001-slim-root-agents-md.md) | Slim root AGENTS.md to non-inferable commands, never-dos, and nested index | high | docs |
-| [issue-20260823-181002-add-platform-agents-md](issue-20260823-181002-add-platform-agents-md.md) | Add platform/AGENTS.md for FFM layouts, Syscall.kt, and NativeEngine isolation | high | platform |
-| [issue-20260823-181003-add-portal-family-agents-md](issue-20260823-181003-add-portal-family-agents-md.md) | Add nested AGENTS.md for portal, portal-codegen, and portal-worker | medium | docs |
-| [issue-20260823-181006-cheap-first-verification-in-ldd-skill](issue-20260823-181006-cheap-first-verification-in-ldd-skill.md) | Make loop-driven Checker use cheap module tests; OCI only when needs_kernel | high | docs |
 | [issue-20260823-181012-single-start-approval-gate-hybrid](issue-20260823-181012-single-start-approval-gate-hybrid.md) | One start-approval gate for hybrid Paperclip + orchestrator loop | high | orchestrator |
 | [issue-20260823-181013-isolate-paperclip-agent-worktrees](issue-20260823-181013-isolate-paperclip-agent-worktrees.md) | Do not run Paperclip coding agents on the shared jseccomp working tree | high | orchestrator |
 | [issue-20260823-181014-retain-orchestrator-github-ci-merge-states](issue-20260823-181014-retain-orchestrator-github-ci-merge-states.md) | Keep orchestrator GitHub/CI/PR/merge states until a dispatcher replacement exists | high | orchestrator |

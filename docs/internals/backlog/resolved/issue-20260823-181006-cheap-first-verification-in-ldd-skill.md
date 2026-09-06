@@ -1,7 +1,7 @@
 ---
 title: "Make loop-driven Checker use cheap module tests; OCI only when needs_kernel"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "docs"

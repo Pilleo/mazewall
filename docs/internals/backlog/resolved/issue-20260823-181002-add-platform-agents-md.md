@@ -1,7 +1,7 @@
 ---
 title: "Add platform/AGENTS.md for FFM layouts, Syscall.kt, and NativeEngine isolation"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "platform"

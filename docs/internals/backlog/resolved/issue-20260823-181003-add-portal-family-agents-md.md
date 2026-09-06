@@ -1,7 +1,7 @@
 ---
 title: "Add nested AGENTS.md for portal, portal-codegen, and portal-worker"
 severity: "LOW"
-status: "open"
+status: "resolved"
 priority: medium
 dependencies: []
 component: "docs"
