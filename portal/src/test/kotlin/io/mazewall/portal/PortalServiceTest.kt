@@ -7,6 +7,8 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 
 class PortalServiceTest {
+    interface MissingGeneratedService
+
     private class TestClient : PortalClient, AutoCloseable {
         var closes: Int = 0
 
@@ -41,6 +43,17 @@ class PortalServiceTest {
 
         service.close()
         service.close()
+
+        assertEquals(1, client.closes)
+    }
+
+    @Test
+    fun `start closes the worker client when generated stub loading fails`() {
+        val client = TestClient()
+
+        assertFailsWith<PortalCallException> {
+            Portal.start(MissingGeneratedService::class.java) { client }
+        }
 
         assertEquals(1, client.closes)
     }
