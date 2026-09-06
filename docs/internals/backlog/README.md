@@ -1,6 +1,6 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 90 | *Total Resolved Issues:* 493
+*Total Active Issues:* 89 | *Total Resolved Issues:* 494
 
 | Issue | Title | Priority | Component |
 |---|---|---|---|
@@ -76,7 +76,6 @@
 | [issue-059-iterativeprofiler-context-loss-via-thread-creation](issue-059-iterativeprofiler-context-loss-via-thread-creation.md) | `IterativeProfiler` Context Loss via thread creation | high | profiler |
 | [issue-075-jvm-invariant-syscall-floor-is-incomplete](issue-075-jvm-invariant-syscall-floor-is-incomplete.md) | \U0001F7E1 [DEFERRED \u2014 Medium]: JVM Invariant Syscall Floor is Incomplete | medium | enforcer |
 | [issue-010-compile-time-feature-proof-tokens-and-scope-safe-policy-buil](issue-010-compile-time-feature-proof-tokens-and-scope-safe-policy-buil.md) | Compile-Time Feature Proof Tokens and Scope-Safe Policy Builders (Type-State | low | enforcer |
-| [issue-014-bpf-disassemblerdumper-for-policy-verification](issue-014-bpf-disassemblerdumper-for-policy-verification.md) | BPF Disassembler/Dumper for Policy Verification | low | enforcer |
 | [issue-029-proof-of-progress-state-machine-for-landlock-discovery-disco](issue-029-proof-of-progress-state-machine-for-landlock-discovery-disco.md) | Proof-of-Progress State Machine for Landlock Discovery (`DiscoveryTask<Status>`) | low | profiler |
 | [issue-042-compile-time-enforced-tier-1-process-baseline-processcontain](issue-042-compile-time-enforced-tier-1-process-baseline-processcontain.md) | Compile-Time Enforced Tier 1 Process Baseline (`ProcessContainmentToken`) | low | enforcer |
 | [issue-067-unprivileged-pivot-root-empty-tmpfs](issue-067-unprivileged-pivot-root-empty-tmpfs.md) | Unprivileged Pivot Root (Empty `tmpfs`) | low | enforcer |

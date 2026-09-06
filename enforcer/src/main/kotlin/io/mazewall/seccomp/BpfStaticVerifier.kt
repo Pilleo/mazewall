@@ -48,7 +48,7 @@ public object BpfStaticVerifier {
                 is BpfInstruction.Ld, is BpfInstruction.Alu -> {
                     val nextIdx = idx + 1
                     if (nextIdx < 0 || nextIdx >= instructions.size) {
-                        throw IllegalArgumentException("BPF verification failed: instruction index $nextIdx is out of bounds")
+                        verificationFailure(program, "instruction index $nextIdx is out of bounds")
                     }
                     if (!visited[nextIdx]) {
                         visited[nextIdx] = true
@@ -57,20 +57,20 @@ public object BpfStaticVerifier {
                 }
                 is BpfInstruction.Jmp -> {
                     if (ins.jt < 0) {
-                        throw IllegalArgumentException("BPF verification failed: negative jt offset is not allowed: ${ins.jt}")
+                        verificationFailure(program, "negative jt offset is not allowed: ${ins.jt}")
                     }
                     if (ins.jf < 0) {
-                        throw IllegalArgumentException("BPF verification failed: negative jf offset is not allowed: ${ins.jf}")
+                        verificationFailure(program, "negative jf offset is not allowed: ${ins.jf}")
                     }
 
                     val jtTarget = idx + 1 + ins.jt.toInt()
                     val jfTarget = idx + 1 + ins.jf.toInt()
 
                     if (jtTarget < 0 || jtTarget >= instructions.size) {
-                        throw IllegalArgumentException("BPF verification failed: instruction index $jtTarget is out of bounds")
+                        verificationFailure(program, "instruction index $jtTarget is out of bounds")
                     }
                     if (jfTarget < 0 || jfTarget >= instructions.size) {
-                        throw IllegalArgumentException("BPF verification failed: instruction index $jfTarget is out of bounds")
+                        verificationFailure(program, "instruction index $jfTarget is out of bounds")
                     }
 
                     if (!visited[jtTarget]) {
@@ -88,4 +88,8 @@ public object BpfStaticVerifier {
         // Return a new instance representing the verified state
         return BpfProgram(instructions)
     }
+}
+
+private fun verificationFailure(program: BpfProgram<BpfStatus.Unverified>, detail: String): Nothing {
+    throw IllegalArgumentException("BPF verification failed: $detail\nBPF program:\n${program.disassemble()}")
 }

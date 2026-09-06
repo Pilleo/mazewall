@@ -1,7 +1,7 @@
 ---
 title: BPF Disassembler/Dumper for Policy Verification
 severity: ENHANCEMENT
-status: open
+status: resolved
 priority: low
 dependencies: []
 target_files:

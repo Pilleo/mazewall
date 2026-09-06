@@ -112,9 +112,9 @@ private fun BpfInstruction.disassemblyMnemonic(): String =
             if (code == BPF_RET) "ret #0x${k.toUInt().toString(16)}" else rawDisassembly()
         is BpfInstruction.Jmp ->
             when (code) {
-                BPF_JMP_JEQ -> "jeq #$k, +$jt, +$jf"
-                BPF_JMP_JSET -> "jset #$k, +$jt, +$jf"
-                BPF_JMP_JGT -> "jgt #$k, +$jt, +$jf"
+                BPF_JMP_JEQ -> "jeq #$k, ${jt.relativeOffset()}, ${jf.relativeOffset()}"
+                BPF_JMP_JSET -> "jset #$k, ${jt.relativeOffset()}, ${jf.relativeOffset()}"
+                BPF_JMP_JGT -> "jgt #$k, ${jt.relativeOffset()}, ${jf.relativeOffset()}"
                 BPF_JMP_JA -> "ja +$k"
                 else -> rawDisassembly()
             }
@@ -122,6 +122,8 @@ private fun BpfInstruction.disassemblyMnemonic(): String =
 
 private fun BpfInstruction.rawDisassembly(): String =
     "raw(code=0x${code.toInt().and(0xffff).toString(16)}, jt=$jt, jf=$jf, k=0x${k.toUInt().toString(16)})"
+
+private fun Short.relativeOffset(): String = if (this >= 0) "+$this" else toString()
 
 /**
  * Represents the type-safe compile-time states of a [BpfBuilder].

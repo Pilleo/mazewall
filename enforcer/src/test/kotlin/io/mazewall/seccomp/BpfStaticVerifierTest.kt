@@ -65,7 +65,15 @@ class BpfStaticVerifierTest {
         val exception = assertFailsWith<IllegalArgumentException> {
             BpfStaticVerifier.verify(badProgram)
         }
-        assertEquals("BPF verification failed: instruction index 6 is out of bounds", exception.message)
+        assertEquals(
+            """
+            BPF verification failed: instruction index 6 is out of bounds
+            BPF program:
+            0000: jeq #0, +5, +0
+            0001: ret #0x0
+            """.trimIndent(),
+            exception.message,
+        )
     }
 
     @Test
@@ -78,7 +86,14 @@ class BpfStaticVerifierTest {
         val exception = assertFailsWith<IllegalArgumentException> {
             BpfStaticVerifier.verify(badProgram)
         }
-        assertEquals("BPF verification failed: instruction index 1 is out of bounds", exception.message)
+        assertEquals(
+            """
+            BPF verification failed: instruction index 1 is out of bounds
+            BPF program:
+            0000: ld [0]
+            """.trimIndent(),
+            exception.message,
+        )
     }
 
     @Test
@@ -98,7 +113,15 @@ class BpfStaticVerifierTest {
         val exception = assertFailsWith<IllegalArgumentException> {
             BpfStaticVerifier.verify(badProgram)
         }
-        assertEquals("BPF verification failed: negative jt offset is not allowed: -1", exception.message)
+        assertEquals(
+            """
+            BPF verification failed: negative jt offset is not allowed: -1
+            BPF program:
+            0000: jeq #0, -1, +0
+            0001: ret #0x0
+            """.trimIndent(),
+            exception.message,
+        )
     }
 
     @Test
@@ -118,6 +141,14 @@ class BpfStaticVerifierTest {
         val exception = assertFailsWith<IllegalArgumentException> {
             BpfStaticVerifier.verify(badProgram)
         }
-        assertEquals("BPF verification failed: negative jf offset is not allowed: -1", exception.message)
+        assertEquals(
+            """
+            BPF verification failed: negative jf offset is not allowed: -1
+            BPF program:
+            0000: jeq #0, +0, -1
+            0001: ret #0x0
+            """.trimIndent(),
+            exception.message,
+        )
     }
 }
