@@ -5,32 +5,40 @@ import io.mazewall.profiler.engine.TraceEvent
 import org.junit.jupiter.api.Test
 import java.util.concurrent.Executors
 import java.util.concurrent.ConcurrentHashMap
-import kotlin.test.assertFailsWith
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicReference
 import kotlin.test.assertEquals
+import kotlin.test.assertIs
+import kotlin.test.assertTrue
 
 class ProfilerCoverageTest {
 
     @Test
-    fun testProfileThrowsInVirtualThread() {
+    fun `profile rejects virtual threads`() {
+        val failure = AtomicReference<Throwable?>()
         val thread = Thread.ofVirtual().unstarted {
             try {
-                Profiler.profile { "fail" }
-            } catch (e: IllegalStateException) {
-                // Expected
+                Profiler.profile { "unexpected" }
+            } catch (t: Throwable) {
+                failure.set(t)
             }
         }
         thread.start()
         thread.join()
+        assertIs<IllegalStateException>(failure.get())
     }
 
     @Test
-    fun testWrapExecutor() {
+    fun `wrapped executor executes submitted tasks`() {
         val executor = Executors.newSingleThreadExecutor()
         try {
             val wrapped = Profiler.wrap(executor, Policy.builder().build())
-            wrapped.execute { println("hello") }
-            wrapped.submit { println("hello") }
-            wrapped.submit(java.util.concurrent.Callable { "hello" })
+            val executed = CountDownLatch(3)
+            wrapped.execute { executed.countDown() }
+            wrapped.submit { executed.countDown() }.get(5, TimeUnit.SECONDS)
+            wrapped.submit(java.util.concurrent.Callable { executed.countDown() }).get(5, TimeUnit.SECONDS)
+            assertTrue(executed.await(5, TimeUnit.SECONDS))
             wrapped.shutdown()
         } finally {
             executor.shutdown()

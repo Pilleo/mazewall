@@ -2,17 +2,19 @@ package io.mazewall.seccomp
 
 import io.mazewall.core.Arch
 import io.mazewall.core.Syscall
+import io.mazewall.seccomp.BpfInstruction.Jmp
 import org.junit.jupiter.api.Test
 import java.util.function.Consumer
 import java.util.function.Function
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
 class BpfBuilderCoverageTest {
 
     @Test
-    fun `test jumpIfEqual with labels`() {
+    fun `jumpIfEqual resolves both forward label offsets`() {
         val builder = BpfProgram.builder()
             .checkArch(Arch.AMD64)
             .loadSyscallNr()
@@ -22,9 +24,13 @@ class BpfBuilderCoverageTest {
 
         builder.jumpIfEqual(10, jt = label1, jf = label2)
         builder.mark(label1)
-        val terminated = builder.ret(0x7fff0000)
-        // Note: we can't easily mark label2 here because builder has transitioned to Terminated
-        // But we can test the build process.
+        builder.loadAbsolute(0)
+        builder.mark(label2)
+        val program = builder.ret(0x7fff0000).build()
+
+        val jump = assertIs<Jmp>(program.instructions[4])
+        assertEquals(0, jump.jt)
+        assertEquals(1, jump.jf)
     }
 
     @Test

@@ -85,32 +85,31 @@ class LinuxNativeCoverageTest {
     }
 
     @Test
-    fun `test toLong branches`() {
-        // We use LinuxNative methods to test the actual implementation of toLong() in RealNativeEngine
-        // null branch
-        LinuxNative.raw.syscall(
-            -1,
+    fun `raw syscall delegates null and memory arguments to configured engine`() = nativeScope {
+        val observed = mutableListOf<io.mazewall.core.NativeArg>()
+        val mock = MockNativeEngine().apply {
+            onSyscall = { _, a1, a2, _, _, _, _ ->
+                observed += a1
+                observed += a2
+                LinuxNative.SyscallResult.Success(17L)
+            }
+        }
+        LinuxNative.setEngine(mock)
+
+        val segment = allocate(8)
+        val result = LinuxNative.raw.syscall(
+            123,
             io.mazewall.core.NativeArg.NullArg,
-            io.mazewall.core.NativeArg.NullArg,
-            io.mazewall.core.NativeArg.NullArg,
-            io.mazewall.core.NativeArg.NullArg,
-            io.mazewall.core.NativeArg.NullArg,
-            io.mazewall.core.NativeArg.NullArg
+            io.mazewall.core.NativeArg.MemoryArg(segment),
+            io.mazewall.core.NativeArg.IntArg(1),
+            io.mazewall.core.NativeArg.IntArg(2),
+            io.mazewall.core.NativeArg.IntArg(3),
+            io.mazewall.core.NativeArg.IntArg(4),
         )
 
-        // MemorySegment branch
-        nativeScope {
-            val seg = allocate(8)
-            LinuxNative.raw.syscall(
-                -1,
-                io.mazewall.core.NativeArg.MemoryArg(seg),
-                io.mazewall.core.NativeArg.IntArg(1),
-                io.mazewall.core.NativeArg.IntArg(2),
-                io.mazewall.core.NativeArg.IntArg(3),
-                io.mazewall.core.NativeArg.IntArg(4),
-                io.mazewall.core.NativeArg.IntArg(5)
-            )
-        }
+        assertEquals(17L, result.getOrThrow("delegated syscall"))
+        assertEquals(io.mazewall.core.NativeArg.NullArg, observed[0])
+        assertEquals(io.mazewall.core.NativeArg.MemoryArg(segment), observed[1])
     }
 
 
