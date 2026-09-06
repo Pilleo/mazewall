@@ -78,7 +78,7 @@ public class ProcessBroker(
         methodId: Int,
         payload: ByteArray,
         vararg granted: Capability.ReadFd,
-    ): ByteArray = call(methodId, payload, granted.map { it.fd })
+    ): ByteArray = call(methodId, payload, granted.map { it.transferForPortalCall() })
 
     public fun checksum(fd: Capability.ReadFd): Int {
         val payload = call(PortalMethods.CHECKSUM, ByteArray(0), listOf(fd.fd))
