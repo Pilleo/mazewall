@@ -23,7 +23,6 @@ public object PortalWorkerMain {
 
     @JvmStatic
     public fun main(args: Array<String>) {
-        println("[DBG-W-START] args=" + args.joinToString())
         if (args.isEmpty()) {
             System.err.println("Usage: PortalWorkerMain <socket_path>")
             exitProcess(1)
