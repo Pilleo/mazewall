@@ -28,7 +28,7 @@ public class ProcessBroker(
     private val workerClasspath: String = "",
     /** Extra -D args for spawned worker JVMs (e.g. injectable idle deadline in tests). */
     private val workerExtraJvmArgs: List<String> = emptyList(),
-) : AutoCloseable {
+) : PortalClient, AutoCloseable {
     init {
         require(poolSize >= 1) { "poolSize must be >= 1" }
     }
@@ -67,7 +67,7 @@ public class ProcessBroker(
         return payload.toString(StandardCharsets.UTF_8)
     }
 
-    public fun invoke(
+    override fun invoke(
         methodId: Int,
         payload: ByteArray,
         vararg granted: Capability.ReadFd,

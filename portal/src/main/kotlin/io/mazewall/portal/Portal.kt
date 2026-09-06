@@ -8,7 +8,7 @@ public object Portal {
     @JvmStatic
     public fun <T : Any> create(
         type: Class<T>,
-        broker: ProcessBroker,
+        client: PortalClient,
     ): T {
         val stubName = type.name + "PortalStub"
         val stubClass =
@@ -29,14 +29,14 @@ public object Portal {
         }
         val ctor =
             try {
-                stubClass.getConstructor(ProcessBroker::class.java)
+                stubClass.getConstructor(PortalClient::class.java)
             } catch (e: NoSuchMethodException) {
                 throw PortalCallException(
-                    "Generated stub $stubName must have a constructor(ProcessBroker)",
+                    "Generated stub $stubName must have a constructor(PortalClient)",
                     e,
                 )
             }
         @Suppress("UNCHECKED_CAST")
-        return ctor.newInstance(broker) as T
+        return ctor.newInstance(client) as T
     }
 }

@@ -3,6 +3,7 @@ package io.mazewall.portal.worker
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
+import io.mazewall.portal.Capability
 import java.util.concurrent.ConcurrentHashMap
 
 /**
@@ -82,7 +83,8 @@ public object PortalDispatcherRegistry {
         // One closure per id keeps the invoked methodId exact without re-parsing.
         for (id in methodIds) {
             handlers[id] = { mid, payload, granted ->
-                handle.invoke(dispatcherObject, impl, mid, payload, granted) as ByteArray
+                val capabilities = granted.map(Capability::readFd)
+                handle.invoke(dispatcherObject, impl, mid, payload, capabilities) as ByteArray
             }
         }
     }

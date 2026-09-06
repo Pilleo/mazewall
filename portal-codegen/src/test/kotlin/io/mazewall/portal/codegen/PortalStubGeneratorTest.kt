@@ -18,8 +18,9 @@ class PortalStubGeneratorTest {
         val stub = files.single { it.name == "SampleGreeterPortalStub" }.toString()
         val dispatcher = files.single { it.name == "SampleGreeterPortalDispatcher" }.toString()
         assertTrue(stub.contains("SampleGreeterPortalStub"))
-        assertTrue(stub.contains("ProcessBroker"))
-        assertTrue(stub.contains("broker.invoke"))
+        assertTrue(stub.contains("PortalClient"))
+        assertFalse(stub.contains("ProcessBroker"))
+        assertTrue(stub.contains("client.invoke"))
         assertTrue(stub.contains("PortalCodec.encodeString"))
         assertFalse(stub.contains("Impl("))
         assertTrue(dispatcher.contains("SampleGreeterPortalDispatcher"))
@@ -51,7 +52,7 @@ class PortalStubGeneratorTest {
     fun `ReadFd is attached not serialized`() {
         val files = PortalStubGenerator.generate(SampleFd::class.java)
         val stub = files.single { it.name == "SampleFdPortalStub" }.toString()
-        assertTrue(stub.contains("broker.invoke"))
+        assertTrue(stub.contains("client.invoke"))
         assertFalse(stub.contains("encodeString(fd)"))
     }
 
