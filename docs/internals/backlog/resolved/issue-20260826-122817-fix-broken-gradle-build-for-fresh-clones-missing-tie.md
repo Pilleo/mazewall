@@ -1,7 +1,7 @@
 ---
 title: "Fix broken Gradle build for fresh clones: missing tier-e-proto directory"
 severity: "LOW"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "ci"

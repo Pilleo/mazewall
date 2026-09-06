@@ -4,6 +4,7 @@
 
 | Issue | Title | Priority | Component |
 |---|---|---|---|
+| [issue-20260906-012035-align-orchestrator-backlog-validation-with-active-](issue-20260906-012035-align-orchestrator-backlog-validation-with-active-.md) | Align orchestrator backlog validation with active Tier-E metadata | high | orchestrator |
 | [MAZ-19-productivity-review](MAZ-19-productivity-review.md) | MAZ-19: Productivity Review for MAZ-18 | high | paperclip-management |
 | [issue-20260905-130408-implement-blast-radius-memory-injection-linking-codanna-impa](implementation/issue-20260905-130408-implement-blast-radius-memory-injection-linking-codanna-impa.md) | Implement blast-radius memory injection linking Codanna impact symbols to agentmemory | high | testing |
 | [issue-20260905-130500-implement-automated-tombstoning-and-stale-memory-pruning-via](code_health/issue-20260905-130500-implement-automated-tombstoning-and-stale-memory-pruning-via.md) | Implement automated tombstoning and stale memory pruning via Codanna AST verification | medium | testing |
@@ -60,7 +61,6 @@
 | [issue-20260826-102703-make-supervisordaemonmanager-daemon-lifecycle-an-explicit-st](issue-20260826-102703-make-supervisordaemonmanager-daemon-lifecycle-an-explicit-st.md) | Make SupervisorDaemonManager daemon lifecycle an explicit state machine | medium | enforcer |
 | [issue-20260826-102705-deduplicate-pendingspawnregistry-ttl-logic-and-use-monotonic](issue-20260826-102705-deduplicate-pendingspawnregistry-ttl-logic-and-use-monotonic.md) | Deduplicate PendingSpawnRegistry TTL logic and use monotonic clock | low | enforcer |
 | [issue-20260826-102722-split-supervisorsessionhandler-along-supervisorroute-with-re](issue-20260826-102722-split-supervisorsessionhandler-along-supervisorroute-with-re.md) | Split SupervisorSessionHandler along SupervisorRoute with request context types | medium | enforcer |
-| [issue-20260826-122817-fix-broken-gradle-build-for-fresh-clones-missing-tie](issue-20260826-122817-fix-broken-gradle-build-for-fresh-clones-missing-tie.md) | Fix broken Gradle build for fresh clones: missing tier-e-proto directory | high | ci |
 | [issue-20260826-180103-purge-coverage-theater-tests-and-strengthen-assertion-covera](issue-20260826-180103-purge-coverage-theater-tests-and-strengthen-assertion-covera.md) | Purge coverage theater tests and strengthen assertion coverage | high | testing |
 | [issue-20260827-104508-add-target-based-conflict-checking-to-hybridsupervisor](issue-20260827-104508-add-target-based-conflict-checking-to-hybridsupervisor.md) | Add target-based conflict checking to HybridSupervisor | high | orchestrator |
 | [issue-20260827-104830-precompile-new-backlog-issue-into-standalone-jvm-cli](issue-20260827-104830-precompile-new-backlog-issue-into-standalone-jvm-cli.md) | Precompile new_backlog_issue into standalone JVM CLI | medium | orchestrator |
