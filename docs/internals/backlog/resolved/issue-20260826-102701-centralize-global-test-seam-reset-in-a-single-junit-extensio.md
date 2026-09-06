@@ -1,7 +1,7 @@
 ---
 title: "Centralize global test-seam reset in a single JUnit extension"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "enforcer"
@@ -9,12 +9,14 @@ target_modules:
   - ":enforcer"
 target_files:
   - "enforcer/src/main/kotlin/io/mazewall/Platform.kt"
-  - "enforcer/src/test/kotlin/io/mazewall/PlatformTest.kt"
+  - "enforcer/src/test/kotlin/io/mazewall/testing/GlobalTestState.kt"
+  - "enforcer/src/test/kotlin/io/mazewall/testing/ResetGlobalsExtension.kt"
+  - "enforcer/src/test/kotlin/io/mazewall/testing/GlobalTestStateExtensionTest.kt"
 target_symbols:
   - "Platform"
 verify_cheap:
-  - "./gradlew :enforcer:test --tests io.mazewall.PlatformTest"
-needs_kernel: true
+  - "./gradlew :enforcer:test --tests io.mazewall.testing.GlobalTestStateExtensionTest"
+needs_kernel: false
 core_lock: true
 effort: "medium"
 autonomy: "supervised"
@@ -34,6 +36,15 @@ Test-mutable global state is scattered across production singletons, each with i
 3. Migrate tests incrementally: first add the extension as a safety net (idempotent), then delete redundant per-test resets where they duplicate it.
 4. Add an ArchUnit or lint rule failing when production code gains a new mutable `internal var` on an `object` without a corresponding entry in `GlobalTestState`.
 5. Verify with `./gradlew :enforcer:test` run twice: once normally, once with randomized method order (`junit.jupiter.testmethod.order.default=random`) to prove order independence.
+
+**Resolution (2026-09-06):** `ResetGlobalsExtension` is auto-detected for the enforcer test
+runtime and calls `GlobalTestState.resetAll()` after each test. It resets the native-engine and
+platform test overrides, native/policy caches, self-verification memoization, and diagnostics
+listeners/mode. `Platform.resetToDefault()` now also clears the CET override. The reset
+intentionally excludes `ContainmentStateRegistry`: its values model irreversible kernel filters,
+and clearing them would desynchronize JVM bookkeeping from seccomp/Landlock state. A two-test
+regression reproduces the pre-fix leak and proves cleanup. The full enforcer suite passed both
+normally and under a forced randomized method-order run.
 
 ---
 

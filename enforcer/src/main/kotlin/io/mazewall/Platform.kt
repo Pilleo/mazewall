@@ -72,6 +72,7 @@ public object Platform {
         synchronized(this) {
             provider = RealPlatformProvider
             cachedMatrix = null
+            isCpuCetSupportedOverride = null
             isCpuCetSupportedCached = null
         }
     }
