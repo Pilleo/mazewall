@@ -11,6 +11,7 @@ import io.mazewall.core.PrctlCommand
 import io.mazewall.ffi.NativeConstants
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.parallel.Isolated
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
@@ -20,6 +21,7 @@ import kotlin.test.assertTrue
  * Tests that PureJavaBpfEngine correctly performs BPF downcall compilation
  * on X86_64 architecture using downcalls.
  */
+@Isolated
 class PureJavaBpfEngineX86DowncallTest {
 
     private var savedOsArch: String? = null

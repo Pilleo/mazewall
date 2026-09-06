@@ -8,12 +8,14 @@ import io.mazewall.core.PrctlCommand
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.condition.EnabledOnOs
+import org.junit.jupiter.api.parallel.Isolated
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 /**
  * E2E Test: Support X86 and ARM64 BPF Downcall Compilation
  */
+@Isolated
 class PureJavaBpfEngineDowncallTest {
 
     @AfterEach
