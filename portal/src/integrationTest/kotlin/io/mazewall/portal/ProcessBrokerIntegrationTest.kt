@@ -6,11 +6,38 @@ import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Assumptions.assumeTrue
 import org.junit.jupiter.api.Test
 import java.nio.file.Files
+import java.nio.file.Path
+import java.io.File
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.TimeUnit
 import java.util.zip.Adler32
 
 class ProcessBrokerIntegrationTest {
+    @Test
+    fun `managed generated-shape service runs in the worker process`() {
+        assumeTrue(System.getProperty("os.name").lowercase().contains("linux"))
+        val workerClasspath =
+            (System.getProperty(ProcessBroker.WORKER_CLASSPATH_PROPERTY) + File.pathSeparator +
+                System.getProperty("java.class.path"))
+                .split(File.pathSeparator)
+                .filter { it.isNotBlank() }
+                .distinct()
+                .map(Path::of)
+        Portal.start(
+            GeneratedServiceFixture::class.java,
+            PortalWorkerConfig(
+                classpath = workerClasspath,
+                implementationClassName = GeneratedServiceFixtureImpl::class.java.name,
+                concurrency = 2,
+            ),
+        ).use { service ->
+            val a = CompletableFuture.supplyAsync { service.api.echo("alpha") }
+            val b = CompletableFuture.supplyAsync { service.api.echo("beta") }
+            assertEquals("guest:alpha", a.get(20, TimeUnit.SECONDS))
+            assertEquals("guest:beta", b.get(20, TimeUnit.SECONDS))
+        }
+    }
+
     @Test
     fun `granted-fd checksum works and worker cannot open host passwd`() {
         assumeTrue(System.getProperty("os.name").lowercase().contains("linux"))
