@@ -2,7 +2,7 @@
 title: SupervisorDaemonEngine fd leak when handleActiveListener throws
 severity: MEDIUM
 type: issue
-status: open
+status: resolved
 priority: medium
 labels:
 - security
