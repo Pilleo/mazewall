@@ -17,6 +17,7 @@ import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Owns a pool of portal worker JVMs and Unix RPC sockets.
@@ -132,12 +133,12 @@ public class ProcessBroker(
             check(reply.kind == PortalKind.RESPONSE) { "unexpected kind ${reply.kind}" }
             reply.payload
         } catch (e: PortalCallException) {
-            idle.remove(slot)
-            recycleDeadWorker(slot)
             throw e
         } catch (e: Exception) {
-            idle.remove(slot)
-            recycleDeadWorker(slot)
+            if (slot.fail(e)) {
+                idle.remove(slot)
+                recycleDeadWorker(slot)
+            }
             throw PortalCallException("portal RPC failed", e)
         }
     }
@@ -293,6 +294,14 @@ public class ProcessBroker(
     ) {
         private val pending = ConcurrentHashMap<Int, CompletableFuture<PortalFrame>>()
         private val writeLock = Any()
+        private val failed = AtomicBoolean(false)
+
+        fun fail(cause: Throwable): Boolean {
+            if (!failed.compareAndSet(false, true)) return false
+            pending.values.forEach { it.completeExceptionally(cause) }
+            pending.clear()
+            return true
+        }
 
         fun startReader() {
             Thread.ofPlatform().name("portal-response-reader").start {

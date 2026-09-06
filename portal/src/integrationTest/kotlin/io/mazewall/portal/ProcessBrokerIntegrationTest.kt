@@ -94,6 +94,20 @@ class ProcessBrokerIntegrationTest {
     }
 
     @Test
+    fun `one timeout fails every request on its worker and creates one replacement`() {
+        assumeTrue(System.getProperty("os.name").lowercase().contains("linux"))
+        ProcessBroker(poolSize = 1, callTimeoutMs = 500).use { broker ->
+            broker.start()
+            val a = CompletableFuture.supplyAsync { runCatching { broker.sleep(10_000) } }
+            val b = CompletableFuture.supplyAsync { runCatching { broker.sleep(10_000) } }
+            assertTrue(a.get(5, TimeUnit.SECONDS).isFailure)
+            assertTrue(b.get(5, TimeUnit.SECONDS).isFailure)
+            assertEquals(2, broker.spawnedWorkers(), "one failed connection gets one replacement")
+            assertEquals("after-shared-timeout", broker.echo("after-shared-timeout"))
+        }
+    }
+
+    @Test
     fun `crashed worker is replaced and later call succeeds`() {
         assumeTrue(System.getProperty("os.name").lowercase().contains("linux"))
         ProcessBroker(poolSize = 1).use { broker ->
