@@ -1,6 +1,6 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 116 | *Total Resolved Issues:* 467
+*Total Active Issues:* 115 | *Total Resolved Issues:* 468
 
 | Issue | Title | Priority | Component |
 |---|---|---|---|
@@ -80,7 +80,6 @@
 | [issue-204-orchestrator-structured-ci-failure-comment-with-diagnosis-guidance](issue-204-orchestrator-structured-ci-failure-comment-with-diagnosis-guidance.md) | Orchestrator: Structured CI Failure Comment with Diagnosis Guidance for Jules | high | orchestrator |
 | [issue-205-orchestrator-add-failure-context-to-jules-retry-comments](issue-205-orchestrator-add-failure-context-to-jules-retry-comments.md) | Orchestrator: Add Failure Context to Jules Retry and Completed-Without-PR | high | orchestrator |
 | [issue-208-orchestrator-auto-merge-pr-on-verdict-approved-when-autonomous](issue-208-orchestrator-auto-merge-pr-on-verdict-approved-when-autonomous.md) | Orchestrator: Auto-Merge PR on VERDICT: APPROVED When autonomy=autonomous | medium | orchestrator |
-| [issue-075-implement-floor-fixes](issue-075-implement-floor-fixes.md) | \U0001F534 [REOPENED]: JVM Invariant Syscall Floor Implementation Fixes | low | enforcer |
 | [issue-20260823-171954-sbob-policy-artifacts-ci-admission](issue-20260823-171954-sbob-policy-artifacts-ci-admission.md) | SBoB Policy Artifacts Workflow: Pinned, Signed, Versioned Policies for CI Admission | medium | enforcer |
 | [issue-20260823-172004-additional-architecture-coverage](issue-20260823-172004-additional-architecture-coverage.md) | Additional Architecture Coverage: s390x, ppc64le, riscv64 | low | enforcer |
 | [issue-20260825-023930-tier-e-initiative](issue-20260825-023930-tier-e-initiative.md) | Tier E Initiative: eBPF Semantic Enrichment (uprobe + task storage) | high | profiler |

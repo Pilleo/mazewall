@@ -25,6 +25,7 @@ import kotlin.test.assertTrue
 class PureJavaBpfEngineX86DowncallTest {
 
     private var savedOsArch: String? = null
+    private var osArchOverridden = false
 
     @AfterEach
     fun tearDown() {
@@ -32,12 +33,15 @@ class PureJavaBpfEngineX86DowncallTest {
         PureJavaBpfEngine.clearCache()
         io.mazewall.PolicyCompilationCache.clear()
         // Restore the original os.arch property
-        if (savedOsArch != null) {
-            System.setProperty("os.arch", savedOsArch)
-        } else {
-            System.clearProperty("os.arch")
+        if (osArchOverridden) {
+            if (savedOsArch != null) {
+                System.setProperty("os.arch", savedOsArch)
+            } else {
+                System.clearProperty("os.arch")
+            }
         }
         savedOsArch = null
+        osArchOverridden = false
     }
 
     @Test
@@ -51,6 +55,7 @@ class PureJavaBpfEngineX86DowncallTest {
     @Test
     fun `test X86_64 BPF downcall compilation succeeds`() {
         savedOsArch = System.getProperty("os.arch")
+        osArchOverridden = true
         try {
             // Set system property to simulate X86_64 architecture
             System.setProperty("os.arch", "x86_64")
@@ -87,6 +92,7 @@ class PureJavaBpfEngineX86DowncallTest {
     @Test
     fun `test X86_64 BPF downcall with prctl fallback`() {
         savedOsArch = System.getProperty("os.arch")
+        osArchOverridden = true
         try {
             System.setProperty("os.arch", "x86_64")
             
@@ -127,6 +133,7 @@ class PureJavaBpfEngineX86DowncallTest {
     @Test
     fun `test setNoNewPrivs downcall compilation on X86_64`() {
         savedOsArch = System.getProperty("os.arch")
+        osArchOverridden = true
         try {
             System.setProperty("os.arch", "x86_64")
             

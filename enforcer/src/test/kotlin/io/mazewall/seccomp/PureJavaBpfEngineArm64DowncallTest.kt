@@ -24,6 +24,7 @@ import kotlin.test.assertTrue
 class PureJavaBpfEngineArm64DowncallTest {
 
     private var savedOsArch: String? = null
+    private var osArchOverridden = false
 
     @AfterEach
     fun tearDown() {
@@ -31,12 +32,15 @@ class PureJavaBpfEngineArm64DowncallTest {
         PureJavaBpfEngine.clearCache()
         io.mazewall.PolicyCompilationCache.clear()
         // Restore the original os.arch property
-        if (savedOsArch != null) {
-            System.setProperty("os.arch", savedOsArch)
-        } else {
-            System.clearProperty("os.arch")
+        if (osArchOverridden) {
+            if (savedOsArch != null) {
+                System.setProperty("os.arch", savedOsArch)
+            } else {
+                System.clearProperty("os.arch")
+            }
         }
         savedOsArch = null
+        osArchOverridden = false
     }
 
     @Test
@@ -50,6 +54,7 @@ class PureJavaBpfEngineArm64DowncallTest {
     @Test
     fun `test ARM64 BPF downcall compilation succeeds`() {
         savedOsArch = System.getProperty("os.arch")
+        osArchOverridden = true
         try {
             // Set system property to simulate ARM64 architecture
             System.setProperty("os.arch", "arm64")
@@ -86,6 +91,7 @@ class PureJavaBpfEngineArm64DowncallTest {
     @Test
     fun `test ARM64 BPF downcall with prctl fallback`() {
         savedOsArch = System.getProperty("os.arch")
+        osArchOverridden = true
         try {
             System.setProperty("os.arch", "arm64")
             
