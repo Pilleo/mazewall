@@ -9,7 +9,6 @@ plugins {
     alias(libs.plugins.spotbugs)
     alias(libs.plugins.dependencyCheck)
     alias(libs.plugins.pitest) apply false
-    alias(libs.plugins.bcv) apply false
     id("jacoco")
     id("base")
 }

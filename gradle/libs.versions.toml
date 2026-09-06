@@ -16,7 +16,6 @@ jackson = "2.17.1"
 kotest = "5.8.1"
 plantuml = "2.4.1"
 kotlinpoet = "2.2.0"
-bcv = "0.17.0"
 
 [libraries]
 kotlinGradlePlugin = { module = "org.jetbrains.kotlin:kotlin-gradle-plugin", version.ref = "kotlin" }
@@ -51,4 +50,3 @@ spotbugs = { id = "com.github.spotbugs", version.ref = "spotbugs" }
 dependencyCheck = { id = "org.owasp.dependencycheck", version.ref = "dependencyCheck" }
 pitest = { id = "info.solidsoft.pitest", version.ref = "pitest" }
 plantuml = { id = "io.gitlab.plunts.plantuml", version.ref = "plantuml" }
-bcv = { id = "org.jetbrains.kotlinx.binary-compatibility-validator", version.ref = "bcv" }
