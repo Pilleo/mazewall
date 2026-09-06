@@ -1,6 +1,5 @@
 package io.mazewall.core
 
-
 /**
  * Type-safe wrapper for system call numbers.
  */
@@ -28,7 +27,9 @@ value class Errno(
  * or when targeting a process virtual memory address space.
  */
 @JvmInline
-public value class Pid(val value: Int) {
+public value class Pid(
+    val value: Int,
+) {
     override fun toString(): String = "pid($value)"
 }
 
@@ -41,7 +42,9 @@ public value class Pid(val value: Int) {
  * address space), this type distinguishes the semantic intent.
  */
 @JvmInline
-public value class Tid(val value: Int) {
+public value class Tid(
+    val value: Int,
+) {
     override fun toString(): String = "tid($value)"
 }
 
@@ -49,7 +52,9 @@ public value class Tid(val value: Int) {
  * Type-safe wrapper for user IDs.
  */
 @JvmInline
-public value class Uid(val value: Int) {
+public value class Uid(
+    val value: Int,
+) {
     override fun toString(): String = "uid($value)"
 }
 
@@ -57,7 +62,9 @@ public value class Uid(val value: Int) {
  * Type-safe wrapper for native memory addresses.
  */
 @JvmInline
-public value class MemoryAddress(val value: Long) {
+public value class MemoryAddress(
+    val value: Long,
+) {
     public fun toLong(): Long = value
 
     @Suppress("MagicNumber")
@@ -68,7 +75,9 @@ public value class MemoryAddress(val value: Long) {
  * Type-safe wrapper for open system call flags (e.g., O_RDONLY, O_CLOEXEC).
  */
 @JvmInline
-public value class OpenFlags(public val value: Int) {
+public value class OpenFlags(
+    public val value: Int,
+) {
     public companion object {
         public val RDONLY: OpenFlags = OpenFlags(0)
     }
@@ -83,16 +92,16 @@ public value class OpenFlags(public val value: Int) {
  * hardcoded CLOEXEC. Exec inject is [forExec].
  */
 @JvmInline
-public value class NewFdFlags(public val value: Int) {
+public value class NewFdFlags(
+    public val value: Int,
+) {
     public companion object {
         public val NONE: NewFdFlags = NewFdFlags(0)
         public val CLOEXEC: NewFdFlags = NewFdFlags(io.mazewall.ffi.NativeConstants.O_CLOEXEC)
 
-        public fun forOpen(flags: OpenFlags): NewFdFlags =
-            if (flags.has(io.mazewall.ffi.NativeConstants.O_CLOEXEC)) CLOEXEC else NONE
+        public fun forOpen(flags: OpenFlags): NewFdFlags = if (flags.has(io.mazewall.ffi.NativeConstants.O_CLOEXEC)) CLOEXEC else NONE
 
-        public fun forAccept(sockFlags: Int): NewFdFlags =
-            if ((sockFlags and io.mazewall.ffi.NativeConstants.SOCK_CLOEXEC) != 0) CLOEXEC else NONE
+        public fun forAccept(sockFlags: Int): NewFdFlags = if ((sockFlags and io.mazewall.ffi.NativeConstants.SOCK_CLOEXEC) != 0) CLOEXEC else NONE
 
         public fun forExec(): NewFdFlags = CLOEXEC
     }
@@ -104,7 +113,9 @@ public value class NewFdFlags(public val value: Int) {
  * Type-safe wrapper for mmap memory protection flags (e.g., PROT_READ, PROT_WRITE).
  */
 @JvmInline
-public value class MmapProt(public val value: Int) {
+public value class MmapProt(
+    public val value: Int,
+) {
     override fun toString(): String = "mmapProt($value)"
 }
 
@@ -112,7 +123,9 @@ public value class MmapProt(public val value: Int) {
  * Type-safe wrapper for mmap mapping flags (e.g., MAP_SHARED, MAP_PRIVATE).
  */
 @JvmInline
-public value class MmapFlags(public val value: Int) {
+public value class MmapFlags(
+    public val value: Int,
+) {
     override fun toString(): String = "mmapFlags($value)"
 }
 
@@ -120,7 +133,9 @@ public value class MmapFlags(public val value: Int) {
  * Type-safe wrapper for clone flags (e.g., CLONE_VM, CLONE_THREAD).
  */
 @JvmInline
-public value class CloneFlags(public val value: Long) {
+public value class CloneFlags(
+    public val value: Long,
+) {
     override fun toString(): String = "cloneFlags($value)"
 }
 
@@ -129,7 +144,9 @@ public value class CloneFlags(public val value: Long) {
  * [remainingMillis] is 0 when expired so poll/read loops fail closed instead of blocking.
  */
 @JvmInline
-public value class Deadline(public val nanoTime: Long) {
+public value class Deadline(
+    public val nanoTime: Long,
+) {
     public fun remainingMillis(nowNanoTime: Long = System.nanoTime()): Int {
         val remainingNs = nanoTime - nowNanoTime
         if (remainingNs <= 0L) return 0
@@ -140,7 +157,10 @@ public value class Deadline(public val nanoTime: Long) {
     public fun isExpired(nowNanoTime: Long = System.nanoTime()): Boolean = nowNanoTime >= nanoTime
 
     public companion object {
-        public fun afterMillis(ms: Long, nowNanoTime: Long = System.nanoTime()): Deadline {
+        public fun afterMillis(
+            ms: Long,
+            nowNanoTime: Long = System.nanoTime(),
+        ): Deadline {
             require(ms >= 0L) { "deadline duration must be non-negative" }
             return Deadline(nowNanoTime + ms * 1_000_000L)
         }

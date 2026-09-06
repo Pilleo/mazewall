@@ -1,11 +1,11 @@
 package io.mazewall.core
 
-import java.nio.file.Files
-import java.nio.file.Path
 import org.junit.jupiter.api.extension.AfterEachCallback
 import org.junit.jupiter.api.extension.BeforeEachCallback
 import org.junit.jupiter.api.extension.ExtensionContext
 import org.junit.jupiter.api.extension.ExtensionContext.Namespace
+import java.nio.file.Files
+import java.nio.file.Path
 
 /**
  * Fails any test that closes a file descriptor which already existed before the
@@ -25,8 +25,9 @@ import org.junit.jupiter.api.extension.ExtensionContext.Namespace
  * Disable temporarily with -Dmazewall.fdguard=off (diagnostics only - never to
  * make a failing test pass).
  */
-class ForeignFdGuard : BeforeEachCallback, AfterEachCallback {
-
+class ForeignFdGuard :
+    BeforeEachCallback,
+    AfterEachCallback {
     override fun beforeEach(context: ExtensionContext) {
         if (isDisabled()) return
         context.getStore(NAMESPACE).put(FD_KEY, currentFds())
@@ -52,20 +53,24 @@ class ForeignFdGuard : BeforeEachCallback, AfterEachCallback {
         }
     }
 
-    private data class FdInfo(val id: Int, val target: String)
+    private data class FdInfo(
+        val id: Int,
+        val target: String,
+    )
 
     private fun currentFds(): Set<FdInfo> =
         Files.list(Path.of("/proc/self/fd")).use { stream ->
-            stream.map { p ->
+            stream
+                .map { p ->
                 val id = p.fileName.toString().toInt()
                 val target = runCatching { Files.readSymbolicLink(p).toString() }
                     .fold({ it }, { _ -> "unreadable" })
                 FdInfo(id, target)
-            }.toList().toSet()
+            }.toList()
+                .toSet()
         }
 
-    private fun isDisabled(): Boolean =
-        System.getProperty("mazewall.fdguard")?.lowercase() == "off"
+    private fun isDisabled(): Boolean = System.getProperty("mazewall.fdguard")?.lowercase() == "off"
 
     companion object {
         private val NAMESPACE = Namespace.create(ForeignFdGuard::class.java)

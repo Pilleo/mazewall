@@ -37,7 +37,6 @@ package io.mazewall.core
  * client (WP-08); this type is intentionally pure-JVM until that gate.
  */
 public object MazewallContext {
-
     private val current: ThreadLocal<ContextId> = ThreadLocal.withInitial { ContextId.UNKNOWN }
 
     /**

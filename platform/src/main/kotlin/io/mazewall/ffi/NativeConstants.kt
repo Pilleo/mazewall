@@ -1,6 +1,5 @@
 package io.mazewall.ffi
 
-
 /**
  * Centralized registry for all Linux kernel constants and system call numbers.
  */

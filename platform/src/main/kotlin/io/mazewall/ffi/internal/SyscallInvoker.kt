@@ -1,6 +1,5 @@
 package io.mazewall.ffi.internal
 
-
 import io.mazewall.LinuxNative
 import io.mazewall.core.Tid
 import io.mazewall.ffi.memory.ErrnoSegment
@@ -257,9 +256,7 @@ internal object SyscallInvoker {
         return RealNativeHelper.result(ret, capturedState.getErrno())
     }
 
-    fun gettid(
-        handle: MethodHandle,
-    ): Tid {
+    fun gettid(handle: MethodHandle): Tid {
         val capturedState = ErrnoSegment.getThreadLocal()
         return Tid(handle.invokeExact(capturedState.segment) as Int)
     }

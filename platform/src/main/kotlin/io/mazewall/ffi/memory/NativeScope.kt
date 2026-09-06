@@ -1,6 +1,5 @@
 package io.mazewall.ffi.memory
 
-
 import kotlin.contracts.ExperimentalContracts
 import kotlin.contracts.InvocationKind
 import kotlin.contracts.contract

@@ -20,16 +20,28 @@ public open class MockPlatformProvider : PlatformProvider {
     public var mockContainer: Boolean = false
 
     override fun getOsName(): String = mockOsName
+
     override fun getOsVersion(): String = mockOsVersion
+
     override fun getOsArch(): String = mockOsArch
+
     override fun hasKernelSeccompSupport(): Boolean = mockKernelSeccompSupport
+
     override fun getSeccompMode(): SeccompMode = mockSeccompMode
+
     override fun checkSeccompSanity(): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = mockSeccompSanityCheckResult
+
     override fun isNoNewPrivsEnabled(): Boolean = mockNoNewPrivsEnabled
+
     override fun getYamaPtraceScope(): YamaPtraceScope = mockYamaPtraceScope
+
     override fun getLandlockAbiVersion(): Int = mockLandlockAbiVersion
+
     override fun probeSeccompTsync(): Boolean = mockSeccompTsyncSupported
+
     override fun probeSeccompUserNotif(): Boolean = mockSeccompUserNotifSupported
+
     override fun probeCetSupported(): Boolean = mockCetSupported
+
     override fun isContainer(): Boolean = mockContainer
 }

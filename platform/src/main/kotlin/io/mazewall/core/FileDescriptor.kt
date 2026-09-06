@@ -1,6 +1,5 @@
 package io.mazewall.core
 
-
 import io.mazewall.LinuxNative
 import io.mazewall.ffi.NativeConstants
 import io.mazewall.ffi.memory.ManagedSegment
@@ -71,7 +70,11 @@ public sealed interface FdOwnership {
  * operate on a later kernel reuse of the same integer.
  */
 internal object FdEpoch {
-    private data class Slot(val generation: Long, val live: Boolean, val owned: Boolean)
+    private data class Slot(
+        val generation: Long,
+        val live: Boolean,
+        val owned: Boolean,
+    )
 
     private val table = ConcurrentHashMap<Int, AtomicReference<Slot>>()
 
@@ -79,8 +82,7 @@ internal object FdEpoch {
     private val ownedThroughEpoch = ConcurrentHashMap.newKeySet<Int>()
 
     /** Returns true if audit mode is enabled via -Dmazewall.fd.audit=true */
-    private fun isAuditEnabled(): Boolean =
-        System.getProperty("mazewall.fd.audit")?.lowercase() == "true"
+    private fun isAuditEnabled(): Boolean = System.getProperty("mazewall.fd.audit")?.lowercase() == "true"
 
     /**
      * Claims this integer as a still-owned live descriptor.
@@ -113,7 +115,10 @@ internal object FdEpoch {
         return claimOpen(fd)
     }
 
-    fun retire(fd: Int, generation: Long) {
+    fun retire(
+        fd: Int,
+        generation: Long,
+    ) {
         if (fd < 0) return
         val ref = table[fd] ?: return
         while (true) {
@@ -127,7 +132,10 @@ internal object FdEpoch {
         }
     }
 
-    fun isLive(fd: Int, generation: Long): Boolean {
+    fun isLive(
+        fd: Int,
+        generation: Long,
+    ): Boolean {
         if (fd < 0) return false
         val cur = table[fd]?.get() ?: return false
         return cur.live && cur.generation == generation
@@ -185,15 +193,9 @@ internal object FdEpoch {
     /**
      * Verifies via fcntl(F_GETFD) that the target still exists.
      * Returns true if the fd is valid according to the kernel.
-     * 
-     * Note: This method currently returns true for all non-negative fds.
-     * Future implementation should use fcntl(F_GETFD) for proper verification.
+     *
      */
-    fun verifyKernelLiveness(fd: Int): Boolean {
-        // TODO: Implement proper kernel liveness check using fcntl(F_GETFD)
-        // For now, we just check if the fd is non-negative
-        return fd >= 0
-    }
+    fun verifyKernelLiveness(fd: Int): Boolean = LinuxNative.isDescriptorLive(fd)
 
     /**
      * Audit ledger check: verifies and logs before close.
@@ -202,7 +204,10 @@ internal object FdEpoch {
      *
      * Returns true if the close should proceed.
      */
-    fun auditClose(fd: Int, generation: Long): Boolean {
+    fun auditClose(
+        fd: Int,
+        generation: Long,
+    ): Boolean {
         if (!isAuditEnabled()) return true
 
         val wasOwned = isOwnedThroughEpoch(fd)
@@ -212,7 +217,7 @@ internal object FdEpoch {
             System.err.println(
                 "[FdEpoch Audit] WARNING: closing fd=$fd that was never marked as owned through this epoch. " +
                 "This may be a foreign descriptor. Token was likely created via generic()/unsafe() " +
-                "instead of adopt(). Set -Dmazewall.fd.audit=true to see this warning."
+                "instead of adopt(). Set -Dmazewall.fd.audit=true to see this warning.",
             )
             // In audit mode, we still allow the close but log it
             // In strict mode (future), we could deny it
@@ -221,7 +226,7 @@ internal object FdEpoch {
         if (!isLive && !wasOwned) {
             System.err.println(
                 "[FdEpoch Audit] WARNING: attempting to close fd=$fd that is neither live in epoch nor owned through epoch. " +
-                "This is likely a bug - a token minted around a foreign integer."
+                "This is likely a bug - a token minted around a foreign integer.",
             )
         }
 
@@ -264,7 +269,7 @@ internal class FdLifecycle(
  * @property value The raw integer file descriptor.
  * @property arena An optional [NativeArena] that owns the native memory lifetime of this descriptor.
  */
-public class FileDescriptor<out R : FileDescriptorRole, out S : FdState> internal constructor(
+public class FileDescriptor<out R : FileDescriptorRole, out S : FdState, out O : FdOwnership> internal constructor(
     private val lifecycle: FdLifecycle,
 ) {
     public val value: Int get() = lifecycle.value
@@ -293,8 +298,7 @@ public class FileDescriptor<out R : FileDescriptorRole, out S : FdState> interna
     public fun isLiveForIo(): Boolean = isValid
 
     /** [AT_FDCWD] or a live directory descriptor. */
-    public fun isUsableAsDirfd(): Boolean =
-        value == NativeConstants.AT_FDCWD || isLiveForIo()
+    public fun isUsableAsDirfd(): Boolean = value == NativeConstants.AT_FDCWD || isLiveForIo()
 
     /** Negative fd (anonymous mmap) or a live backing file. */
     public fun isUsableAsMmapBacking(): Boolean = value < 0 || isLiveForIo()
@@ -320,7 +324,7 @@ public class FileDescriptor<out R : FileDescriptorRole, out S : FdState> interna
 
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
-        if (other !is FileDescriptor<*, *>) return false
+        if (other !is FileDescriptor<*, *, *>) return false
         return value == other.value && generation == other.generation
     }
 
@@ -332,15 +336,15 @@ public class FileDescriptor<out R : FileDescriptorRole, out S : FdState> interna
          * Uses Nothing role to be compatible with all specific FD roles.
          */
         @Suppress("UNCHECKED_CAST")
-        public val INVALID: FileDescriptor<Nothing, FdState.Closed> =
-            FileDescriptor<FileDescriptorRole.Generic, FdState.Closed>(
+        public val INVALID: FileDescriptor<Nothing, FdState.Closed, FdOwnership.Unowned> =
+            FileDescriptor<FileDescriptorRole.Generic, FdState.Closed, FdOwnership.Unowned>(
                 FdLifecycle(-1, null, generation = 0L, role = FileDescriptorRole.Generic, ownership = FdOwnership.Unowned, closed = true),
-            ) as FileDescriptor<Nothing, FdState.Closed>
+            ) as FileDescriptor<Nothing, FdState.Closed, FdOwnership.Unowned>
 
         /**
          * Sentinel for openat(2) [NativeConstants.AT_FDCWD]. Not a live kernel fd.
          */
-        public val AT_FDCWD: FileDescriptor<FileDescriptorRole.OPath, FdState.Open> =
+        public val AT_FDCWD: FileDescriptor<FileDescriptorRole.OPath, FdState.Open, FdOwnership.Unowned> =
             FileDescriptor(
                 FdLifecycle(NativeConstants.AT_FDCWD, null, generation = 0L, role = FileDescriptorRole.OPath, ownership = FdOwnership.Unowned, closed = false),
             )
@@ -348,7 +352,7 @@ public class FileDescriptor<out R : FileDescriptorRole, out S : FdState> interna
         /**
          * Sentinel for anonymous mmap(2) (`fd = -1`). Not a live kernel fd.
          */
-        public val ANON: FileDescriptor<FileDescriptorRole.Generic, FdState.Open> =
+        public val ANON: FileDescriptor<FileDescriptorRole.Generic, FdState.Open, FdOwnership.Unowned> =
             FileDescriptor(
                 FdLifecycle(-1, null, generation = 0L, role = FileDescriptorRole.Generic, ownership = FdOwnership.Unowned, closed = true),
             )
@@ -375,22 +379,22 @@ public class FileDescriptor<out R : FileDescriptorRole, out S : FdState> interna
         @Deprecated(
             message = "Use role-specific factories (generic, unixSocket, ruleset, oPath, seccompNotif, pid, granted) or adopt() for kernel-reused FDs. " +
                 "This method creates non-live tokens for retired FDs and should not be used in production code.",
-            level = DeprecationLevel.WARNING
+            level = DeprecationLevel.WARNING,
         )
         @Suppress("UNCHECKED_CAST")
         public fun <R : FileDescriptorRole> unsafe(
             value: Int,
             arena: NativeArena? = null,
-        ): FileDescriptor<R, FdState.Open> {
+        ): FileDescriptor<R, FdState.Open, FdOwnership.Unowned> {
             if (value >= 0 && FdEpoch.isRetired(value)) {
                 // Retired FD: mint a non-live token (generation 0, closed)
                 // This prevents leftover Open tokens from operating on reused integers
-                return FileDescriptor<FileDescriptorRole.Generic, FdState.Open>(
+                return FileDescriptor<FileDescriptorRole.Generic, FdState.Open, FdOwnership.Unowned>(
                     FdLifecycle(value, arena, 0L, FileDescriptorRole.Generic, ownership = FdOwnership.Unowned, closed = true),
-                ) as FileDescriptor<R, FdState.Open>
+                ) as FileDescriptor<R, FdState.Open, FdOwnership.Unowned>
             }
             // Non-retired or negative: delegate to open which will claim a new generation
-            return open<FileDescriptorRole.Generic>(value, arena, FileDescriptorRole.Generic, FdOwnership.Unowned) as FileDescriptor<R, FdState.Open>
+            return open<FileDescriptorRole.Generic, FdOwnership.Unowned>(value, arena, FileDescriptorRole.Generic, FdOwnership.Unowned) as FileDescriptor<R, FdState.Open, FdOwnership.Unowned>
         }
 
         /**
@@ -405,44 +409,37 @@ public class FileDescriptor<out R : FileDescriptorRole, out S : FdState> interna
         public fun generic(
             value: Int,
             arena: NativeArena? = null,
-        ): FileDescriptor<FileDescriptorRole.Generic, FdState.Open> =
-            open(value, arena, FileDescriptorRole.Generic, FdOwnership.Unowned)
+        ): FileDescriptor<FileDescriptorRole.Generic, FdState.Open, FdOwnership.Unowned> = open(value, arena, FileDescriptorRole.Generic, FdOwnership.Unowned)
 
         public fun unixSocket(
             value: Int,
             arena: NativeArena? = null,
-        ): FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open> =
-            open(value, arena, FileDescriptorRole.UnixSocket, FdOwnership.Unowned)
+        ): FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Unowned> = open(value, arena, FileDescriptorRole.UnixSocket, FdOwnership.Unowned)
 
         public fun ruleset(
             value: Int,
             arena: NativeArena? = null,
-        ): FileDescriptor<FileDescriptorRole.Ruleset, FdState.Open> =
-            open(value, arena, FileDescriptorRole.Ruleset, FdOwnership.Unowned)
+        ): FileDescriptor<FileDescriptorRole.Ruleset, FdState.Open, FdOwnership.Unowned> = open(value, arena, FileDescriptorRole.Ruleset, FdOwnership.Unowned)
 
         public fun oPath(
             value: Int,
             arena: NativeArena? = null,
-        ): FileDescriptor<FileDescriptorRole.OPath, FdState.Open> =
-            open(value, arena, FileDescriptorRole.OPath, FdOwnership.Unowned)
+        ): FileDescriptor<FileDescriptorRole.OPath, FdState.Open, FdOwnership.Unowned> = open(value, arena, FileDescriptorRole.OPath, FdOwnership.Unowned)
 
         public fun seccompNotif(
             value: Int,
             arena: NativeArena? = null,
-        ): FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open> =
-            open(value, arena, FileDescriptorRole.SeccompNotif, FdOwnership.Unowned)
+        ): FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open, FdOwnership.Unowned> = open(value, arena, FileDescriptorRole.SeccompNotif, FdOwnership.Unowned)
 
         public fun pid(
             value: Int,
             arena: NativeArena? = null,
-        ): FileDescriptor<FileDescriptorRole.Pid, FdState.Open> =
-            open(value, arena, FileDescriptorRole.Pid, FdOwnership.Unowned)
+        ): FileDescriptor<FileDescriptorRole.Pid, FdState.Open, FdOwnership.Unowned> = open(value, arena, FileDescriptorRole.Pid, FdOwnership.Unowned)
 
         public fun granted(
             value: Int,
             arena: NativeArena? = null,
-        ): FileDescriptor<FileDescriptorRole.Granted, FdState.Open> =
-            open(value, arena, FileDescriptorRole.Granted, FdOwnership.Unowned)
+        ): FileDescriptor<FileDescriptorRole.Granted, FdState.Open, FdOwnership.Unowned> = open(value, arena, FileDescriptorRole.Granted, FdOwnership.Unowned)
 
         /**
          * Adopts a newly allocated kernel fd (open, accept, dup, SCM_RIGHTS).
@@ -456,7 +453,7 @@ public class FileDescriptor<out R : FileDescriptorRole, out S : FdState> interna
             value: Int,
             role: R,
             arena: NativeArena? = null,
-        ): FileDescriptor<R, FdState.Open> {
+        ): FileDescriptor<R, FdState.Open, FdOwnership.Owned> {
             val closed = value < 0
             val generation = if (closed) 0L else FdEpoch.adoptKernelReuse(value)
             if (value >= 0) {
@@ -475,12 +472,12 @@ public class FileDescriptor<out R : FileDescriptorRole, out S : FdState> interna
         public fun <R : FileDescriptorRole> replace(
             value: Int,
             arena: NativeArena? = null,
-        ): FileDescriptor<R, FdState.Open> {
+        ): FileDescriptor<R, FdState.Open, FdOwnership.Owned> {
             if (value >= 0) {
                 FdEpoch.forceRetire(value)
             }
             // Claim a new generation for the replaced FD
-            val result = open<FileDescriptorRole.Generic>(value, arena, FileDescriptorRole.Generic, FdOwnership.Owned) as FileDescriptor<R, FdState.Open>
+            val result = open<FileDescriptorRole.Generic, FdOwnership.Owned>(value, arena, FileDescriptorRole.Generic, FdOwnership.Owned) as FileDescriptor<R, FdState.Open, FdOwnership.Owned>
             if (value >= 0) {
                 FdEpoch.markOwned(value)
             }
@@ -488,12 +485,12 @@ public class FileDescriptor<out R : FileDescriptorRole, out S : FdState> interna
         }
 
         @Suppress("UNCHECKED_CAST")
-        private fun <R : FileDescriptorRole> open(
+        private fun <R : FileDescriptorRole, O : FdOwnership> open(
             value: Int,
             arena: NativeArena?,
             role: FileDescriptorRole,
-            ownership: FdOwnership = FdOwnership.Unowned,
-        ): FileDescriptor<R, FdState.Open> {
+            ownership: O,
+        ): FileDescriptor<R, FdState.Open, O> {
             val closed = value < 0
             val generation = if (closed) 0L else FdEpoch.claimOpen(value)
             return FileDescriptor(
@@ -501,9 +498,7 @@ public class FileDescriptor<out R : FileDescriptorRole, out S : FdState> interna
             )
         }
 
-        internal fun <R : FileDescriptorRole> closedView(
-            source: FileDescriptor<R, *>,
-        ): FileDescriptor<R, FdState.Closed> {
+        internal fun <R : FileDescriptorRole, O : FdOwnership> closedView(source: FileDescriptor<R, *, O>): FileDescriptor<R, FdState.Closed, O> {
             source.markClosed()
             return FileDescriptor(source.lifecycle)
         }
@@ -513,21 +508,21 @@ public class FileDescriptor<out R : FileDescriptorRole, out S : FdState> interna
 /**
  * Fail-closed result for NativeEngine I/O when this token is not the live generation.
  */
-public fun FileDescriptor<*, *>.ebadfUnlessLive(): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled>? {
+public fun FileDescriptor<*, *, FdOwnership>.ebadfUnlessLive(): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled>? {
     if (isLiveForIo()) {
         return null
     }
     return LinuxNative.SyscallResult.Error(NativeConstants.EBADF, -1L)
 }
 
-public fun FileDescriptor<*, *>.ebadfUnlessDirfd(): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled>? {
+public fun FileDescriptor<*, *, FdOwnership>.ebadfUnlessDirfd(): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled>? {
     if (isUsableAsDirfd()) {
         return null
     }
     return LinuxNative.SyscallResult.Error(NativeConstants.EBADF, -1L)
 }
 
-public fun FileDescriptor<*, *>.ebadfUnlessMmapBacking(): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled>? {
+public fun FileDescriptor<*, *, FdOwnership>.ebadfUnlessMmapBacking(): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled>? {
     if (isUsableAsMmapBacking()) {
         return null
     }
@@ -548,9 +543,7 @@ public fun ebadfUnlessLive(vararg args: NativeArg): LinuxNative.SyscallResult<Lo
     return null
 }
 
-public fun LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled>.claimDupIfNeeded(
-    cmd: Int,
-): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+public fun LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled>.claimDupIfNeeded(cmd: Int): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
     if (this is LinuxNative.SyscallResult.Success &&
         (cmd == NativeConstants.F_DUPFD || cmd == NativeConstants.F_DUPFD_CLOEXEC) &&
         value >= 0L
@@ -577,18 +570,11 @@ public fun LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhan
  * @return A new [FileDescriptor] instance with the same value but [FdState.Closed] state.
  * @throws IllegalStateException if this descriptor is Unowned.
  */
-public fun <R : FileDescriptorRole, S : FdState.Open> FileDescriptor<R, S>.close(): FileDescriptor<R, FdState.Closed> {
+public fun <R : FileDescriptorRole, S : FdState.Open> FileDescriptor<R, S, FdOwnership.Owned>.close(): FileDescriptor<R, FdState.Closed, FdOwnership.Owned> {
     if (value >= 0 && !isClosedType()) {
-        // Enforce ownership at runtime
-        if (ownership == FdOwnership.Unowned) {
-            throw IllegalStateException(
-                "Cannot close unowned FileDescriptor(fd=$value, role=$role). " +
-                "Only descriptors created via adopt(), replace(), or claimDupIfNeeded() are owned."
-            )
-        }
         FdEpoch.auditClose(value, generation)
         @Suppress("UNCHECKED_CAST")
-        LinuxNative.fileSystem.close(this as FileDescriptor<*, FdState.Open>)
+        LinuxNative.fileSystem.close(this as FileDescriptor<*, FdState.Open, FdOwnership.Owned>)
         arena?.close()
     }
     return FileDescriptor.closedView(this)
@@ -598,7 +584,7 @@ public fun <R : FileDescriptorRole, S : FdState.Open> FileDescriptor<R, S>.close
  * Executes the given [block] with this file descriptor and then closes it correctly,
  * even if an exception is thrown.
  */
-public inline fun <R : FileDescriptorRole, S : FdState.Open, T> FileDescriptor<R, S>.use(block: (FileDescriptor<R, S>) -> T): T {
+public inline fun <R : FileDescriptorRole, S : FdState.Open, T> FileDescriptor<R, S, FdOwnership.Owned>.use(block: (FileDescriptor<R, S, FdOwnership.Owned>) -> T): T {
     try {
         return block(this)
     } finally {

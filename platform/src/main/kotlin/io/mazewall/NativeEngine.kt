@@ -1,5 +1,7 @@
 package io.mazewall
 
+import io.mazewall.core.FdOwnership
+
 
 import io.mazewall.LinuxNative.SyscallResult
 import io.mazewall.LinuxNative.SyscallHandledState
@@ -53,7 +55,7 @@ public interface RawSyscallOperations {
     ): SyscallResult<Long, SyscallHandledState.Unhandled>
 
     fun <Req, Res> ioctl(
-        fd: FileDescriptor<*, FdState.Open>,
+        fd: FileDescriptor<*, FdState.Open, FdOwnership>,
         command: IoctlCommand<Req, Res>,
         arg: Req,
     ): SyscallResult<Long, SyscallHandledState.Unhandled> {
@@ -66,19 +68,19 @@ public interface RawSyscallOperations {
     }
 
     fun ioctl(
-        fd: FileDescriptor<*, FdState.Open>,
+        fd: FileDescriptor<*, FdState.Open, FdOwnership>,
         request: Long,
         arg: ManagedSegment,
     ): SyscallResult<Long, SyscallHandledState.Unhandled>
 
     fun ioctl(
-        fd: FileDescriptor<*, FdState.Open>,
+        fd: FileDescriptor<*, FdState.Open, FdOwnership>,
         request: Long,
         arg: Long,
     ): SyscallResult<Long, SyscallHandledState.Unhandled>
 
     fun fcntl(
-        fd: FileDescriptor<*, FdState.Open>,
+        fd: FileDescriptor<*, FdState.Open, FdOwnership>,
         cmd: Int,
         arg: Long,
     ): SyscallResult<Long, SyscallHandledState.Unhandled>
@@ -103,20 +105,20 @@ public interface NativeFileSystem {
     ): SyscallResult<Long, SyscallHandledState.Unhandled>
 
     fun openat(
-        dirfd: FileDescriptor<*, FdState.Open>,
+        dirfd: FileDescriptor<*, FdState.Open, FdOwnership>,
         path: ManagedSegment,
         flags: io.mazewall.core.OpenFlags,
     ): SyscallResult<Long, SyscallHandledState.Unhandled> = openat(dirfd, path, flags, 0)
 
     fun openat(
-        dirfd: FileDescriptor<*, FdState.Open>,
+        dirfd: FileDescriptor<*, FdState.Open, FdOwnership>,
         path: ManagedSegment,
         flags: io.mazewall.core.OpenFlags,
         mode: Int,
     ): SyscallResult<Long, SyscallHandledState.Unhandled>
 
     fun openat2(
-        dirfd: FileDescriptor<*, FdState.Open>,
+        dirfd: FileDescriptor<*, FdState.Open, FdOwnership>,
         path: ManagedSegment,
         how: ManagedSegment,
         size: Long = 24L,
@@ -134,11 +136,11 @@ public interface NativeFileSystem {
         length: Long,
         prot: io.mazewall.core.MmapProt,
         flags: io.mazewall.core.MmapFlags,
-        fd: FileDescriptor<*, FdState.Open>,
+        fd: FileDescriptor<*, FdState.Open, FdOwnership>,
         offset: Long,
     ): SyscallResult<Long, SyscallHandledState.Unhandled>
 
-    fun close(fd: FileDescriptor<*, FdState.Open>): SyscallResult<Long, SyscallHandledState.Unhandled>
+    fun close(fd: FileDescriptor<*, FdState.Open, FdOwnership.Owned>): SyscallResult<Long, SyscallHandledState.Unhandled>
 }
 
 public interface NativeNetworking {
@@ -156,49 +158,49 @@ public interface NativeNetworking {
     ): SyscallResult<Long, SyscallHandledState.Unhandled>
 
     fun bind(
-        sockfd: FileDescriptor<*, FdState.Open>,
+        sockfd: FileDescriptor<*, FdState.Open, FdOwnership>,
         addr: ManagedSegment,
         addrlen: Int,
     ): SyscallResult<Long, SyscallHandledState.Unhandled>
 
     fun listen(
-        sockfd: FileDescriptor<*, FdState.Open>,
+        sockfd: FileDescriptor<*, FdState.Open, FdOwnership>,
         backlog: Int,
     ): SyscallResult<Long, SyscallHandledState.Unhandled>
 
     fun accept(
-        sockfd: FileDescriptor<*, FdState.Open>,
+        sockfd: FileDescriptor<*, FdState.Open, FdOwnership>,
         addr: ManagedSegment,
         addrlen: ManagedSegment,
     ): SyscallResult<Long, SyscallHandledState.Unhandled>
 
     fun accept4(
-        sockfd: FileDescriptor<*, FdState.Open>,
+        sockfd: FileDescriptor<*, FdState.Open, FdOwnership>,
         addr: ManagedSegment,
         addrlen: ManagedSegment,
         flags: Int,
     ): SyscallResult<Long, SyscallHandledState.Unhandled>
 
     fun connect(
-        sockfd: FileDescriptor<*, FdState.Open>,
+        sockfd: FileDescriptor<*, FdState.Open, FdOwnership>,
         addr: ManagedSegment,
         addrlen: Int,
     ): SyscallResult<Long, SyscallHandledState.Unhandled>
 
     fun sendmsg(
-        sockfd: FileDescriptor<*, FdState.Open>,
+        sockfd: FileDescriptor<*, FdState.Open, FdOwnership>,
         msg: ManagedSegment,
         flags: Int,
     ): SyscallResult<Long, SyscallHandledState.Unhandled>
 
     fun recvmsg(
-        sockfd: FileDescriptor<*, FdState.Open>,
+        sockfd: FileDescriptor<*, FdState.Open, FdOwnership>,
         msg: ManagedSegment,
         flags: Int,
     ): SyscallResult<Long, SyscallHandledState.Unhandled>
 
     fun recv(
-        sockfd: FileDescriptor<*, FdState.Open>,
+        sockfd: FileDescriptor<*, FdState.Open, FdOwnership>,
         buf: ManagedSegment,
         len: Long,
         flags: Int,
@@ -216,7 +218,7 @@ public interface NativeProcess {
     ): SyscallResult<Long, SyscallHandledState.Unhandled>
 
     fun pidfdGetFd(
-        pidfd: FileDescriptor<*, FdState.Open>,
+        pidfd: FileDescriptor<*, FdState.Open, FdOwnership>,
         targetFd: Int,
         flags: Int,
     ): SyscallResult<Long, SyscallHandledState.Unhandled>
@@ -246,13 +248,13 @@ public interface NativeMemory {
     ): SyscallResult<Long, SyscallHandledState.Unhandled>
 
     fun read(
-        fd: FileDescriptor<*, FdState.Open>,
+        fd: FileDescriptor<*, FdState.Open, FdOwnership>,
         buf: ManagedSegment,
         count: Long,
     ): SyscallResult<Long, SyscallHandledState.Unhandled>
 
     fun write(
-        fd: FileDescriptor<*, FdState.Open>,
+        fd: FileDescriptor<*, FdState.Open, FdOwnership>,
         buf: ManagedSegment,
         count: Long,
     ): SyscallResult<Long, SyscallHandledState.Unhandled>

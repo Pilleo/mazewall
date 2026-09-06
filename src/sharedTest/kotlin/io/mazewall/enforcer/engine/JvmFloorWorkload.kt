@@ -1,11 +1,9 @@
 package io.mazewall.enforcer.engine
 
-import io.mazewall.enforcer.api.*
-import io.mazewall.enforcer.state.*
-import io.mazewall.enforcer.diagnostics.*
-import io.mazewall.enforcer.engine.*
 import io.mazewall.enforcer.*
-
+import io.mazewall.enforcer.api.*
+import io.mazewall.enforcer.diagnostics.*
+import io.mazewall.enforcer.state.*
 import java.io.InterruptedIOException
 import java.net.SocketTimeoutException
 import java.util.concurrent.Callable
@@ -96,7 +94,8 @@ object JvmFloorWorkload {
         val executor = Executors.newVirtualThreadPerTaskExecutor()
         try {
             val tasks = (1..LOOM_TASK_COUNT).map { id ->
-                executor.submit(Callable {
+                executor.submit(
+                    Callable {
                     if (Thread.currentThread().isInterrupted) {
                         return@Callable 0
                     }
@@ -108,7 +107,8 @@ object JvmFloorWorkload {
                         Thread.currentThread().interrupt() // restore status
                         0
                     }
-                })
+                },
+                )
             }
             for (task in tasks) {
                 if (Thread.currentThread().isInterrupted) {

@@ -1,9 +1,12 @@
 package io.mazewall
 
+import io.mazewall.core.FdOwnership
+
 
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptorRole
+import io.mazewall.ffi.NativeConstants
 import io.mazewall.ffi.internal.RealNativeEngine
 import kotlin.contracts.ExperimentalContracts
 import kotlin.contracts.InvocationKind
@@ -56,6 +59,15 @@ public object LinuxNative : NativeEngine {
     override val process: NativeProcess get() = engine.process
     override val memory: NativeMemory get() = engine.memory
     override val raw: RawSyscallOperations get() = engine.raw
+
+    /** Kernel-backed liveness probe kept behind the native facade. */
+    internal fun isDescriptorLive(fd: Int): Boolean =
+        fd >= 0 &&
+        raw.fcntl(
+            FileDescriptor.generic(fd),
+            NativeConstants.F_GETFD,
+            0L,
+        ) is SyscallResult.Success
 
     /**
      * Marker interface for system call handling states.
@@ -209,7 +221,7 @@ public fun LinuxNative.SyscallResult.Success<Long, *>.asLong(): Long = value
 /**
  * Returns the success value as a [FileDescriptor] of [FileDescriptorRole.Generic].
  */
-public fun LinuxNative.SyscallResult.Success<Long, *>.asFd(): FileDescriptor<FileDescriptorRole.Generic, FdState.Open> =
+public fun LinuxNative.SyscallResult.Success<Long, *>.asFd(): FileDescriptor<FileDescriptorRole.Generic, FdState.Open, FdOwnership.Owned> =
     FileDescriptor.adopt(value.toInt(), FileDescriptorRole.Generic)
 
 /**
@@ -224,7 +236,7 @@ public fun LinuxNative.SyscallResult<Long, *>.asInt(): Int =
 /**
  * Returns the success value as a [FileDescriptor] of [FileDescriptorRole.Generic] or throws.
  */
-public fun LinuxNative.SyscallResult<Long, *>.getFdOrThrow(context: String): FileDescriptor<FileDescriptorRole.Generic, FdState.Open> =
+public fun LinuxNative.SyscallResult<Long, *>.getFdOrThrow(context: String): FileDescriptor<FileDescriptorRole.Generic, FdState.Open, FdOwnership.Owned> =
     when (this) {
         is LinuxNative.SyscallResult.Success -> FileDescriptor.adopt(value.toInt(), FileDescriptorRole.Generic)
         is LinuxNative.SyscallResult.Error -> throwErrno(context)

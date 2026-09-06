@@ -2,7 +2,6 @@ package io.mazewall.core
 
 import java.util.Locale
 
-
 /**
  * High-level syscall identifiers. Each variant resolves to an architecture-specific
  * syscall number via [Arch]. Syscalls unavailable on a given architecture (e.g. [OPEN]
@@ -148,7 +147,8 @@ internal object SyscallMapper {
                 ProcessSyscallMapper.numberFor(syscall, arch)
 
             Syscall.CONNECT, Syscall.BIND, Syscall.LISTEN, Syscall.ACCEPT, Syscall.ACCEPT4, Syscall.SENDTO, Syscall.SENDMSG, Syscall.SENDMMSG, Syscall.RECVMMSG, Syscall.SOCKET,
-            Syscall.RECVFROM, Syscall.GETSOCKOPT, Syscall.SETSOCKOPT, Syscall.GETSOCKNAME, Syscall.GETPEERNAME ->
+            Syscall.RECVFROM, Syscall.GETSOCKOPT, Syscall.SETSOCKOPT, Syscall.GETSOCKNAME, Syscall.GETPEERNAME,
+            ->
                 NetworkSyscallMapper.numberFor(syscall, arch)
 
             Syscall.OPEN, Syscall.OPENAT, Syscall.OPENAT2, Syscall.READ, Syscall.WRITE, Syscall.CLOSE, Syscall.FSTAT, Syscall.LSEEK,

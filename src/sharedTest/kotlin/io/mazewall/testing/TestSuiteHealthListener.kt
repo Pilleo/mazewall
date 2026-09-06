@@ -32,7 +32,10 @@ class TestSuiteHealthListener : LauncherSessionListener {
 
     override fun launcherSessionOpened(session: LauncherSession) {
         session.launcher.registerTestExecutionListeners(object : TestExecutionListener {
-            override fun executionSkipped(testIdentifier: TestIdentifier, reason: String?) {
+            override fun executionSkipped(
+                testIdentifier: TestIdentifier,
+                reason: String?,
+            ) {
                 // Track skipped for both tests and containers (class-level skip)
                 val className = getClassName(testIdentifier)
                 // Filter out non-class containers (like engine or root nodes)
@@ -43,7 +46,10 @@ class TestSuiteHealthListener : LauncherSessionListener {
                 }
             }
 
-            override fun executionFinished(testIdentifier: TestIdentifier, testExecutionResult: TestExecutionResult) {
+            override fun executionFinished(
+                testIdentifier: TestIdentifier,
+                testExecutionResult: TestExecutionResult,
+            ) {
                 if (testIdentifier.isTest) {
                     val className = getClassName(testIdentifier)
                     val stats = classStats.getOrPut(className) { Stats() }
@@ -78,14 +84,30 @@ class TestSuiteHealthListener : LauncherSessionListener {
             totalAborted += aborted
             totalFailed += failed
 
-            println(String.format("Class: %-50s | Executed: %3d | Skipped: %3d | Aborted(Assumptions): %3d | Failed: %3d",
-                className, executed, skipped, aborted, failed))
+            println(
+                String.format(
+                    "Class: %-50s | Executed: %3d | Skipped: %3d | Aborted(Assumptions): %3d | Failed: %3d",
+                className,
+                    executed,
+                    skipped,
+                    aborted,
+                    failed,
+                ),
+            )
 
             jsonLines.add("""    "$className": { "executed": $executed, "skipped": $skipped, "aborted": $aborted, "failed": $failed }""")
         }
         println("--------------------------------")
-        println(String.format("Total: %-50s | Executed: %3d | Skipped: %3d | Aborted(Assumptions): %3d | Failed: %3d",
-            "", totalExecuted, totalSkipped, totalAborted, totalFailed))
+        println(
+            String.format(
+                "Total: %-50s | Executed: %3d | Skipped: %3d | Aborted(Assumptions): %3d | Failed: %3d",
+            "",
+                totalExecuted,
+                totalSkipped,
+                totalAborted,
+                totalFailed,
+            ),
+        )
         println("================================\n")
 
         val reportDir = File("build/reports")

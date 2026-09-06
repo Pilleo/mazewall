@@ -17,29 +17,25 @@ import java.nio.charset.StandardCharsets
  * Shared utility for reading memory and resolving paths from remote processes/threads using process_vm_readv and readlink.
  */
 public interface TraceeMemoryReader {
-    context(arena: NativeArena)
-    public fun readString(
+    context(arena: NativeArena) public fun readString(
         tid: Tid,
         remoteAddr: Long,
         maxLen: Int = 4096,
     ): String?
 
-    context(arena: NativeArena)
-    public fun readBytes(
+    context(arena: NativeArena) public fun readBytes(
         tid: Tid,
         remoteAddr: Long,
         len: Int,
     ): ByteArray?
 
-    context(arena: NativeArena)
-    public fun resolveLink(
+    context(arena: NativeArena) public fun resolveLink(
         tid: Tid,
         link: String,
     ): String?
 
     public companion object Real : TraceeMemoryReader {
-        context(arena: NativeArena)
-        override fun readString(
+        context(arena: NativeArena) override fun readString(
             tid: Tid,
             remoteAddr: Long,
             maxLen: Int,
@@ -58,14 +54,13 @@ public interface TraceeMemoryReader {
             if (!hasNullTerminator) {
                 val preview = bytes.take(64).joinToString("") { "%02X".format(it) }
                 throw IllegalStateException(
-                    "Remote string from TID ${tid.value} at address 0x${remoteAddr.toString(16)} lacks null terminator within $maxLen bytes. Read: $len bytes. Hex preview: $preview"
+                    "Remote string from TID ${tid.value} at address 0x${remoteAddr.toString(16)} lacks null terminator within $maxLen bytes. Read: $len bytes. Hex preview: $preview",
                 )
             }
             return String(bytes, 0, len, StandardCharsets.UTF_8)
         }
 
-        context(arena: NativeArena)
-        override fun readBytes(
+        context(arena: NativeArena) override fun readBytes(
             tid: Tid,
             remoteAddr: Long,
             len: Int,
@@ -96,7 +91,7 @@ public interface TraceeMemoryReader {
             } else {
                 if (res is LinuxNative.SyscallResult.Error && res.errno == NativeConstants.EPERM) {
                     throw IllegalStateException(
-                        "Permission denied reading memory from TID ${tid.value} at address 0x${remoteAddr.toString(16)}"
+                        "Permission denied reading memory from TID ${tid.value} at address 0x${remoteAddr.toString(16)}",
                     )
                 } else {
                     null
@@ -106,8 +101,7 @@ public interface TraceeMemoryReader {
 
         private const val PATH_MAX_VAL = 4096L
 
-        context(arena: NativeArena)
-        override fun resolveLink(
+        context(arena: NativeArena) override fun resolveLink(
             tid: Tid,
             link: String,
         ): String? {

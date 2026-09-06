@@ -1,6 +1,7 @@
 package io.mazewall.ffi.networking
 
 import io.mazewall.core.FileDescriptor
+import io.mazewall.core.FileDescriptorRole
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -11,10 +12,9 @@ import java.util.stream.Stream
 import kotlin.reflect.KClass
 
 internal class SeccompConnectionMachineTest {
-
     companion object {
-        private val socket = FileDescriptor.unixSocket(10)
-        private val listener = FileDescriptor.seccompNotif(20)
+        private val socket = FileDescriptor.replace<FileDescriptorRole.UnixSocket>(10)
+        private val listener = FileDescriptor.replace<FileDescriptorRole.SeccompNotif>(20)
         private val accepted = SeccompConnection.Accepted(socket)
         private val attached = accepted.attachFd(listener)
         private val active = attached.handshakeComplete()
@@ -31,7 +31,8 @@ internal class SeccompConnectionMachineTest {
         }
 
         @JvmStatic
-        fun connectionTransitions(): Stream<ConnectionTestCase> = Stream.of(
+        fun connectionTransitions(): Stream<ConnectionTestCase> =
+            Stream.of(
             ConnectionTestCase(
                 name = "accepted plus listener becomes fd-attached",
                 initialConnection = accepted,

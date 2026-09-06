@@ -90,9 +90,11 @@ public object BpfSimulator {
     }
 
     /** Convenience overload resolving the audit token from [arch]. */
-    public fun simulate(program: List<BpfInstruction>, syscallNr: Int, arch: Arch): Int? =
-        simulate(program, syscallNr, arch.audit)
-
+    public fun simulate(
+        program: List<BpfInstruction>,
+        syscallNr: Int,
+        arch: Arch,
+    ): Int? = simulate(program, syscallNr, arch.audit)
 
     public const val SECCOMP_DATA_ARGS_OFFSET: Int = 16
 }
@@ -103,7 +105,10 @@ public object BpfSimulator {
  * verdict-mapping tests so both modules probe identical NRs.
  */
 public object SyscallProbeMatrix {
-    public data class Probe(val nr: Int, val label: String)
+    public data class Probe(
+        val nr: Int,
+        val label: String,
+    )
 
     /** Beyond any real syscall number on supported architectures: guaranteed-unmatched probes. */
     public const val SYNTHETIC_MID_NR: Int = 999
@@ -119,7 +124,8 @@ public object SyscallProbeMatrix {
     public fun structural(
         arch: Arch,
         excludedNrs: Set<Int> = emptySet(),
-    ): List<Probe> = buildList {
+    ): List<Probe> =
+        buildList {
         add(Probe(0, "nr-zero-edge"))
         add(Probe(arch.getpid, "low-real"))
         add(Probe(SYNTHETIC_MID_NR, "synthetic-mid"))
@@ -128,6 +134,8 @@ public object SyscallProbeMatrix {
     }.filter { it.nr !in excludedNrs }
 
     /** Probes for every syscall explicitly named by the policy (matched decisions). */
-    public fun matched(arch: Arch, nrs: Collection<Int>): List<Probe> =
-        nrs.filter { it >= 0 }.map { Probe(it, "policy-nr-$it") }
+    public fun matched(
+        arch: Arch,
+        nrs: Collection<Int>,
+    ): List<Probe> = nrs.filter { it >= 0 }.map { Probe(it, "policy-nr-$it") }
 }

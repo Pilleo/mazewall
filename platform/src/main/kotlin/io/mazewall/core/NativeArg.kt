@@ -1,6 +1,5 @@
 package io.mazewall.core
 
-
 import io.mazewall.LinuxNative
 import io.mazewall.ffi.memory.ManagedSegment
 
@@ -15,22 +14,30 @@ public sealed interface NativeArg {
     public val asLong: Long
 
     @JvmInline
-    public value class LongArg(public val value: Long) : NativeArg {
+    public value class LongArg(
+        public val value: Long,
+    ) : NativeArg {
         override val asLong: Long get() = value
     }
 
     @JvmInline
-    public value class IntArg(public val value: Int) : NativeArg {
+    public value class IntArg(
+        public val value: Int,
+    ) : NativeArg {
         override val asLong: Long get() = value.toLong()
     }
 
     @JvmInline
-    public value class MemoryArg(public val value: ManagedSegment) : NativeArg {
+    public value class MemoryArg(
+        public val value: ManagedSegment,
+    ) : NativeArg {
         override val asLong: Long get() = value.address()
     }
 
     @JvmInline
-    public value class FdArg(public val fd: FileDescriptor<*, FdState.Open>) : NativeArg {
+    public value class FdArg(
+        public val fd: FileDescriptor<*, FdState.Open, FdOwnership>,
+    ) : NativeArg {
         override val asLong: Long
             get() {
                 check(fd.isLiveForIo()) {
@@ -41,37 +48,51 @@ public sealed interface NativeArg {
     }
 
     @JvmInline
-    public value class PidArg(public val pid: Pid) : NativeArg {
+    public value class PidArg(
+        public val pid: Pid,
+    ) : NativeArg {
         override val asLong: Long get() = pid.value.toLong()
     }
 
     @JvmInline
-    public value class UidArg(public val uid: Uid) : NativeArg {
+    public value class UidArg(
+        public val uid: Uid,
+    ) : NativeArg {
         override val asLong: Long get() = uid.value.toLong()
     }
 
     @JvmInline
-    public value class AddrArg(public val addr: MemoryAddress) : NativeArg {
+    public value class AddrArg(
+        public val addr: MemoryAddress,
+    ) : NativeArg {
         override val asLong: Long get() = addr.value
     }
 
     @JvmInline
-    public value class OpenFlagsArg(public val flags: OpenFlags) : NativeArg {
+    public value class OpenFlagsArg(
+        public val flags: OpenFlags,
+    ) : NativeArg {
         override val asLong: Long get() = flags.value.toLong()
     }
 
     @JvmInline
-    public value class MmapProtArg(public val prot: MmapProt) : NativeArg {
+    public value class MmapProtArg(
+        public val prot: MmapProt,
+    ) : NativeArg {
         override val asLong: Long get() = prot.value.toLong()
     }
 
     @JvmInline
-    public value class MmapFlagsArg(public val flags: MmapFlags) : NativeArg {
+    public value class MmapFlagsArg(
+        public val flags: MmapFlags,
+    ) : NativeArg {
         override val asLong: Long get() = flags.value.toLong()
     }
 
     @JvmInline
-    public value class CloneFlagsArg(public val flags: CloneFlags) : NativeArg {
+    public value class CloneFlagsArg(
+        public val flags: CloneFlags,
+    ) : NativeArg {
         override val asLong: Long get() = flags.value
     }
 

@@ -1,5 +1,7 @@
 package io.mazewall
 
+import io.mazewall.core.FdOwnership
+
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.claimDupIfNeeded
@@ -34,7 +36,7 @@ public open class MockNativeEngine(
     public var pollResult: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(0L)
 
     public var onSyscall: (nr: Long, a1: io.mazewall.core.NativeArg, a2: io.mazewall.core.NativeArg, a3: io.mazewall.core.NativeArg, a4: io.mazewall.core.NativeArg, a5: io.mazewall.core.NativeArg, a6: io.mazewall.core.NativeArg) -> LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = { _, _, _, _, _, _, _ -> syscallResult }
-    public var onIoctl: (fd: FileDescriptor<*, FdState.Open>, request: Long, arg: ManagedSegment) -> LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = { _, _, _ -> ioctlResult }
+    public var onIoctl: (fd: FileDescriptor<*, FdState.Open, FdOwnership>, request: Long, arg: ManagedSegment) -> LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = { _, _, _ -> ioctlResult }
     public var onPoll: (fds: ManagedSegment, nfds: Long, timeout: Int) -> LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = { _, _, _ -> pollResult }
 
     override fun syscall(
@@ -57,7 +59,7 @@ public open class MockNativeEngine(
         ?: onSyscall(nr, a1, a2, a3, a4, io.mazewall.core.NativeArg.LongArg(0L), io.mazewall.core.NativeArg.LongArg(0L))
 
     override fun <Req, Res> ioctl(
-        fd: FileDescriptor<*, FdState.Open>,
+        fd: FileDescriptor<*, FdState.Open, FdOwnership>,
         command: IoctlCommand<Req, Res>,
         arg: Req,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
@@ -70,19 +72,19 @@ public open class MockNativeEngine(
     }
 
     override fun ioctl(
-        fd: FileDescriptor<*, FdState.Open>,
+        fd: FileDescriptor<*, FdState.Open, FdOwnership>,
         request: Long,
         arg: ManagedSegment,
     ) = fd.ebadfUnlessLive() ?: onIoctl(fd, request, arg)
 
     override fun ioctl(
-        fd: FileDescriptor<*, FdState.Open>,
+        fd: FileDescriptor<*, FdState.Open, FdOwnership>,
         request: Long,
         arg: Long,
     ) = fd.ebadfUnlessLive() ?: onIoctl(fd, request, ManagedSegment.NULL) // Simplified for long args
 
     override fun fcntl(
-        fd: FileDescriptor<*, FdState.Open>,
+        fd: FileDescriptor<*, FdState.Open, FdOwnership>,
         cmd: Int,
         arg: Long,
     ) = fd.ebadfUnlessLive() ?: fcntlResult.claimDupIfNeeded(cmd)
@@ -101,8 +103,8 @@ public open class MockNativeFileSystem : NativeFileSystem {
     public var mmapResult: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(0L)
 
     public var onOpen: ((path: ManagedSegment, flags: io.mazewall.core.OpenFlags, mode: Int) -> LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled>)? = null
-    public var onOpenat: ((dirfd: FileDescriptor<*, FdState.Open>, path: ManagedSegment, flags: io.mazewall.core.OpenFlags, mode: Int) -> LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled>)? = null
-    public var onClose: (fd: FileDescriptor<*, FdState.Open>) -> LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = { closeResult }
+    public var onOpenat: ((dirfd: FileDescriptor<*, FdState.Open, FdOwnership>, path: ManagedSegment, flags: io.mazewall.core.OpenFlags, mode: Int) -> LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled>)? = null
+    public var onClose: (fd: FileDescriptor<*, FdState.Open, FdOwnership>) -> LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = { closeResult }
 
     override fun open(
         path: ManagedSegment,
@@ -118,16 +120,16 @@ public open class MockNativeFileSystem : NativeFileSystem {
         onOpen?.invoke(path, flags, mode) ?: open(path, flags)
 
     override fun openat(
-        dirfd: FileDescriptor<*, FdState.Open>,
+        dirfd: FileDescriptor<*, FdState.Open, FdOwnership>,
         path: ManagedSegment,
         flags: io.mazewall.core.OpenFlags,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
         dirfd.ebadfUnlessDirfd() ?: onOpenat?.invoke(dirfd, path, flags, 0) ?: openResult
 
-    public var onOpenat2: ((dirfd: FileDescriptor<*, FdState.Open>, path: ManagedSegment, how: ManagedSegment, size: Long) -> LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled>)? = null
+    public var onOpenat2: ((dirfd: FileDescriptor<*, FdState.Open, FdOwnership>, path: ManagedSegment, how: ManagedSegment, size: Long) -> LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled>)? = null
 
     override fun openat(
-        dirfd: FileDescriptor<*, FdState.Open>,
+        dirfd: FileDescriptor<*, FdState.Open, FdOwnership>,
         path: ManagedSegment,
         flags: io.mazewall.core.OpenFlags,
         mode: Int,
@@ -135,7 +137,7 @@ public open class MockNativeFileSystem : NativeFileSystem {
         dirfd.ebadfUnlessDirfd() ?: onOpenat?.invoke(dirfd, path, flags, mode) ?: openat(dirfd, path, flags)
 
     override fun openat2(
-        dirfd: FileDescriptor<*, FdState.Open>,
+        dirfd: FileDescriptor<*, FdState.Open, FdOwnership>,
         path: ManagedSegment,
         how: ManagedSegment,
         size: Long,
@@ -153,11 +155,11 @@ public open class MockNativeFileSystem : NativeFileSystem {
         length: Long,
         prot: io.mazewall.core.MmapProt,
         flags: io.mazewall.core.MmapFlags,
-        fd: FileDescriptor<*, FdState.Open>,
+        fd: FileDescriptor<*, FdState.Open, FdOwnership>,
         offset: Long,
     ) = fd.ebadfUnlessMmapBacking() ?: mmapResult
 
-    override fun close(fd: FileDescriptor<*, FdState.Open>) =
+    override fun close(fd: FileDescriptor<*, FdState.Open, FdOwnership.Owned>) =
         fd.ebadfUnlessLive() ?: run {
             fd.retireForClose()
             onClose(fd)
@@ -176,11 +178,11 @@ public open class MockNativeNetworking : NativeNetworking {
     public var recvResult: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(0L)
 
     public var onSocket: (domain: Int, type: Int, protocol: Int) -> LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = { _, _, _ -> socketResult }
-    public var onConnect: (sockfd: FileDescriptor<*, FdState.Open>, addr: ManagedSegment, addrlen: Int) -> LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = { _, _, _ -> connectResult }
-    public var onAccept: (sockfd: FileDescriptor<*, FdState.Open>, addr: ManagedSegment, addrlen: ManagedSegment) -> LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = { _, _, _ -> acceptResult }
-    public var onAccept4: (sockfd: FileDescriptor<*, FdState.Open>, addr: ManagedSegment, addrlen: ManagedSegment, flags: Int) -> LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = { _, _, _, _ -> acceptResult }
-    public var onBind: (sockfd: FileDescriptor<*, FdState.Open>, addr: ManagedSegment, addrlen: Int) -> LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = { _, _, _ -> bindResult }
-    public var onListen: (sockfd: FileDescriptor<*, FdState.Open>, backlog: Int) -> LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = { _, _ -> listenResult }
+    public var onConnect: (sockfd: FileDescriptor<*, FdState.Open, FdOwnership>, addr: ManagedSegment, addrlen: Int) -> LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = { _, _, _ -> connectResult }
+    public var onAccept: (sockfd: FileDescriptor<*, FdState.Open, FdOwnership>, addr: ManagedSegment, addrlen: ManagedSegment) -> LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = { _, _, _ -> acceptResult }
+    public var onAccept4: (sockfd: FileDescriptor<*, FdState.Open, FdOwnership>, addr: ManagedSegment, addrlen: ManagedSegment, flags: Int) -> LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = { _, _, _, _ -> acceptResult }
+    public var onBind: (sockfd: FileDescriptor<*, FdState.Open, FdOwnership>, addr: ManagedSegment, addrlen: Int) -> LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = { _, _, _ -> bindResult }
+    public var onListen: (sockfd: FileDescriptor<*, FdState.Open, FdOwnership>, backlog: Int) -> LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = { _, _ -> listenResult }
 
     override fun socketpair(
         domain: Int,
@@ -196,49 +198,49 @@ public open class MockNativeNetworking : NativeNetworking {
     ) = onSocket(domain, type, protocol)
 
     override fun bind(
-        sockfd: FileDescriptor<*, FdState.Open>,
+        sockfd: FileDescriptor<*, FdState.Open, FdOwnership>,
         addr: ManagedSegment,
         addrlen: Int,
     ) = sockfd.ebadfUnlessLive() ?: onBind(sockfd, addr, addrlen)
 
     override fun listen(
-        sockfd: FileDescriptor<*, FdState.Open>,
+        sockfd: FileDescriptor<*, FdState.Open, FdOwnership>,
         backlog: Int,
     ) = sockfd.ebadfUnlessLive() ?: onListen(sockfd, backlog)
 
     override fun accept(
-        sockfd: FileDescriptor<*, FdState.Open>,
+        sockfd: FileDescriptor<*, FdState.Open, FdOwnership>,
         addr: ManagedSegment,
         addrlen: ManagedSegment,
     ) = sockfd.ebadfUnlessLive() ?: onAccept(sockfd, addr, addrlen)
 
     override fun accept4(
-        sockfd: FileDescriptor<*, FdState.Open>,
+        sockfd: FileDescriptor<*, FdState.Open, FdOwnership>,
         addr: ManagedSegment,
         addrlen: ManagedSegment,
         flags: Int,
     ) = sockfd.ebadfUnlessLive() ?: onAccept4(sockfd, addr, addrlen, flags)
 
     override fun connect(
-        sockfd: FileDescriptor<*, FdState.Open>,
+        sockfd: FileDescriptor<*, FdState.Open, FdOwnership>,
         addr: ManagedSegment,
         addrlen: Int,
     ) = sockfd.ebadfUnlessLive() ?: onConnect(sockfd, addr, addrlen)
 
     override fun sendmsg(
-        sockfd: FileDescriptor<*, FdState.Open>,
+        sockfd: FileDescriptor<*, FdState.Open, FdOwnership>,
         msg: ManagedSegment,
         flags: Int,
     ) = sockfd.ebadfUnlessLive() ?: sendmsgResult
 
     override fun recvmsg(
-        sockfd: FileDescriptor<*, FdState.Open>,
+        sockfd: FileDescriptor<*, FdState.Open, FdOwnership>,
         msg: ManagedSegment,
         flags: Int,
     ) = sockfd.ebadfUnlessLive() ?: recvmsgResult
 
     override fun recv(
-        sockfd: FileDescriptor<*, FdState.Open>,
+        sockfd: FileDescriptor<*, FdState.Open, FdOwnership>,
         buf: ManagedSegment,
         len: Long,
         flags: Int,
@@ -255,7 +257,7 @@ public open class MockNativeProcess : NativeProcess {
         prctlResult
     }
     public var onPidfdOpen: (pid: Int, flags: Int) -> LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = { _, _ -> LinuxNative.SyscallResult.Success(0L) }
-    public var onPidfdGetFd: (pidfd: FileDescriptor<*, FdState.Open>, targetFd: Int, flags: Int) -> LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = { _, _, _ -> LinuxNative.SyscallResult.Success(0L) }
+    public var onPidfdGetFd: (pidfd: FileDescriptor<*, FdState.Open, FdOwnership>, targetFd: Int, flags: Int) -> LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = { _, _, _ -> LinuxNative.SyscallResult.Success(0L) }
 
     public var archPrctlLongResult: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success(0L)
     public var archPrctlAddrResult: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success(0L)
@@ -276,7 +278,7 @@ public open class MockNativeProcess : NativeProcess {
     ) = onPidfdOpen(pid, flags)
 
     override fun pidfdGetFd(
-        pidfd: FileDescriptor<*, FdState.Open>,
+        pidfd: FileDescriptor<*, FdState.Open, FdOwnership>,
         targetFd: Int,
         flags: Int,
     ) = pidfd.ebadfUnlessLive() ?: onPidfdGetFd(pidfd, targetFd, flags)
@@ -300,8 +302,8 @@ public open class MockNativeMemory : NativeMemory {
     public var readResult: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(0L)
     public var writeResult: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(0L)
 
-    public var onRead: (fd: FileDescriptor<*, FdState.Open>, buf: ManagedSegment, count: Long) -> LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = { _, _, _ -> readResult }
-    public var onWrite: (fd: FileDescriptor<*, FdState.Open>, buf: ManagedSegment, count: Long) -> LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = { _, _, _ -> writeResult }
+    public var onRead: (fd: FileDescriptor<*, FdState.Open, FdOwnership>, buf: ManagedSegment, count: Long) -> LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = { _, _, _ -> readResult }
+    public var onWrite: (fd: FileDescriptor<*, FdState.Open, FdOwnership>, buf: ManagedSegment, count: Long) -> LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = { _, _, _ -> writeResult }
 
     override fun processVmReadv(
         pid: io.mazewall.core.Pid,
@@ -322,13 +324,13 @@ public open class MockNativeMemory : NativeMemory {
     ) = processVmWritevResult
 
     override fun read(
-        fd: FileDescriptor<*, FdState.Open>,
+        fd: FileDescriptor<*, FdState.Open, FdOwnership>,
         buf: ManagedSegment,
         count: Long,
     ) = fd.ebadfUnlessLive() ?: onRead(fd, buf, count)
 
     override fun write(
-        fd: FileDescriptor<*, FdState.Open>,
+        fd: FileDescriptor<*, FdState.Open, FdOwnership>,
         buf: ManagedSegment,
         count: Long,
     ) = fd.ebadfUnlessLive() ?: onWrite(fd, buf, count)

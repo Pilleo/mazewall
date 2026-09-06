@@ -9,7 +9,6 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class SandboxedPathContainmentTest {
-
     @Test
     fun `isUnder accepts equal and nested paths`() {
         val parent = SandboxedPath.of("/srv/data", allowNonExistent = true)
@@ -44,7 +43,9 @@ class SandboxedPathContainmentTest {
     }
 
     @Test
-    fun `coveredBy requires every child under some parent`(@TempDir tempDir: java.nio.file.Path) {
+    fun `coveredBy requires every child under some parent`(
+        @TempDir tempDir: java.nio.file.Path,
+    ) {
         val parents = setOf(
             Sandbled(tempDir, "reads"),
             Sandbled(tempDir, "writes"),
@@ -54,7 +55,9 @@ class SandboxedPathContainmentTest {
     }
 
     @Test
-    fun `realpath comparison collapses symlinks`(@TempDir tempDir: java.nio.file.Path) {
+    fun `realpath comparison collapses symlinks`(
+        @TempDir tempDir: java.nio.file.Path,
+    ) {
         val real = Files.createDirectories(tempDir.resolve("real"))
         val link = tempDir.resolve("link")
         try {
@@ -68,6 +71,8 @@ class SandboxedPathContainmentTest {
         assertTrue(SandboxedPath.of(link.resolve("f").toString(), true).resolveReal() isUnder viaReal)
     }
 
-    private fun Sandbled(base: java.nio.file.Path, name: String): SandboxedPath =
-        SandboxedPath.of(base.resolve(name).toString(), allowNonExistent = true)
+    private fun Sandbled(
+        base: java.nio.file.Path,
+        name: String,
+    ): SandboxedPath = SandboxedPath.of(base.resolve(name).toString(), allowNonExistent = true)
 }

@@ -1,5 +1,6 @@
 package io.mazewall.platform.daemon
 
+import io.mazewall.core.FdOwnership
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
@@ -14,20 +15,20 @@ import java.util.concurrent.atomic.AtomicReference
 public sealed interface UnixListenDaemonState {
     public object Uninitialized : UnixListenDaemonState {
         public fun listening(
-            serverFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>,
+            serverFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
             socketPath: String,
         ): Listening = Listening(serverFd, socketPath)
     }
 
     public data class Listening(
-        val serverFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>,
+        val serverFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
         val socketPath: String,
     ) : UnixListenDaemonState {
         public fun active(): Active = Active(serverFd, socketPath)
     }
 
     public data class Active(
-        val serverFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>,
+        val serverFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
         val socketPath: String,
     ) : UnixListenDaemonState
 
@@ -38,31 +39,35 @@ public sealed interface UnixListenDaemonState {
 
 internal sealed interface UnixListenDaemonEvent {
     public data class Bound(
-        val serverFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>,
+        val serverFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
         val socketPath: String,
     ) : UnixListenDaemonEvent
 
     public data object ReadyAnnounced : UnixListenDaemonEvent
 
-    public data class ShutdownRequested(val source: String) : UnixListenDaemonEvent
+    public data class ShutdownRequested(
+        val source: String,
+    ) : UnixListenDaemonEvent
 
     public data class AcceptLoopFinished(
-        val serverFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>? = null,
+        val serverFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>? = null,
     ) : UnixListenDaemonEvent
 }
 
 internal sealed interface UnixListenDaemonEffect {
     public data class LogListening(
         val socketPath: String,
-        val serverFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>,
+        val serverFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
     ) : UnixListenDaemonEffect
 
     public data object PublishReady : UnixListenDaemonEffect
 
-    public data class LogShutdown(val source: String) : UnixListenDaemonEffect
+    public data class LogShutdown(
+        val source: String,
+    ) : UnixListenDaemonEffect
 
     public data class CloseServer(
-        val serverFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>,
+        val serverFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
     ) : UnixListenDaemonEffect
 
     public data object ClearConnectionTables : UnixListenDaemonEffect
@@ -172,9 +177,7 @@ internal object UnixListenDaemonMachine {
         }
     }
 
-    private fun terminate(
-        serverFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>?,
-    ): UnixListenDaemonTransition {
+    private fun terminate(serverFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>?): UnixListenDaemonTransition {
         val effects = buildList {
             if (serverFd != null) {
                 add(UnixListenDaemonEffect.CloseServer(serverFd))
@@ -185,6 +188,5 @@ internal object UnixListenDaemonMachine {
         return UnixListenDaemonTransition(UnixListenDaemonState.Terminated, effects)
     }
 
-    private fun stay(state: UnixListenDaemonState): UnixListenDaemonTransition =
-        UnixListenDaemonTransition(state, emptyList())
+    private fun stay(state: UnixListenDaemonState): UnixListenDaemonTransition = UnixListenDaemonTransition(state, emptyList())
 }

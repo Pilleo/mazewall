@@ -8,7 +8,6 @@ import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
 internal class ContextIdTest {
-
     @Test
     fun `unknown sentinel is zero`() {
         assertEquals(0u, ContextId.UNKNOWN.value)

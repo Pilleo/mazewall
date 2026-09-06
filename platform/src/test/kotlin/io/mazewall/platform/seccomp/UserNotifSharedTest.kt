@@ -12,7 +12,6 @@ import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
 
 class UserNotifSharedTest {
-
     @Test
     fun `encodeContinue writes CONTINUE flag and zero error`() {
         NativeArena.ofConfined().use { arena ->

@@ -4,7 +4,6 @@ import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
 
 internal class AttributionKindTest {
-
     @Test
     fun `exact kind set is stable - wire consumers depend on it`() {
         val names = AttributionKind.entries.map { it.name }

@@ -2,6 +2,7 @@ package io.mazewall.platform.seccomp.daemon
 
 import io.mazewall.LinuxNative
 import io.mazewall.NativeEngine
+import io.mazewall.core.FdOwnership
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
@@ -29,8 +30,8 @@ import java.util.concurrent.atomic.AtomicBoolean
  * Unified reactor handler for active seccomp user notifications and UNIX domain control sockets.
  */
 public class SeccompSessionHandler(
-    private val socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>,
-    private val listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open>,
+    private val socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
+    private val listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open, FdOwnership.Owned>,
     private val notifHandler: SeccompNotifHandler,
     private val onShutdown: (String) -> Unit = {},
     private val onSocketClosed: () -> Unit = {},
@@ -55,18 +56,17 @@ public class SeccompSessionHandler(
         }
         try {
             SegmentPool.SECCOMP_NOTIF_POOL.release(notif)
-        } catch (_: Throwable) {}
+        } catch (_: Throwable) {
+            }
         try {
             SegmentPool.SECCOMP_NOTIF_RESP_POOL.release(resp)
-        } catch (_: Throwable) {}
+        } catch (_: Throwable) {
+            }
         sessionArena.close()
     }
 
     @Suppress("ReturnCount")
-    context(arena: NativeArena)
-    public fun handleActiveListener(
-        pollFds: ManagedSegment,
-    ): LoopAction {
+    context(arena: NativeArena) public fun handleActiveListener(pollFds: ManagedSegment): LoopAction {
         if (isTerminated) {
             return LoopAction.Break
         }
@@ -93,7 +93,7 @@ public class SeccompSessionHandler(
                 recvRes = engine.raw.ioctl(
                     listenerFd,
                     IoctlCommand.SECCOMP_IOCTL_NOTIF_RECV,
-                    notif.typed<IoctlPayload.SeccompNotif>()
+                    notif.typed<IoctlPayload.SeccompNotif>(),
                 )
                 if (recvRes is LinuxNative.SyscallResult.Error<*> && recvRes.errno == NativeConstants.EINTR) {
                     continue
@@ -142,7 +142,10 @@ public class SeccompSessionHandler(
         return LoopAction.Continue
     }
 
-    private fun handleShutdownRequest(ackBuf: ManagedSegment, pollFds: ManagedSegment): Boolean {
+    private fun handleShutdownRequest(
+        ackBuf: ManagedSegment,
+        pollFds: ManagedSegment,
+    ): Boolean {
         var res: LinuxNative.SyscallResult<Long, *>
         while (true) {
             res = engine.memory.read(socketFd, ackBuf, 1L)
@@ -186,9 +189,14 @@ public class SeccompSessionHandler(
         onSocketClosed()
     }
 
-    private fun sendSeccompContinue(id: Long, resp: ManagedSegment) {
-        io.mazewall.platform.seccomp.UserNotifReply.encodeContinue(resp, id)
-        io.mazewall.platform.seccomp.UserNotifReply.send(engine.raw, listenerFd, resp)
+    private fun sendSeccompContinue(
+        id: Long,
+        resp: ManagedSegment,
+    ) {
+        io.mazewall.platform.seccomp.UserNotifReply
+            .encodeContinue(resp, id)
+        io.mazewall.platform.seccomp.UserNotifReply
+            .send(engine.raw, listenerFd, resp)
     }
 
     public companion object {

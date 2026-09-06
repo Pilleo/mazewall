@@ -1,12 +1,13 @@
 package io.mazewall.ffi.networking
 
+import io.mazewall.core.FdOwnership
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
 
 internal sealed interface SeccompConnectionEvent {
     public data class ListenerReceived(
-        val listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open>,
+        val listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open, FdOwnership.Owned>,
     ) : SeccompConnectionEvent
 
     public data object RecvFailed : SeccompConnectionEvent
@@ -24,7 +25,7 @@ internal sealed interface SeccompConnectionEvent {
 
 internal sealed interface SeccompConnectionEffect {
     public data class RegisterListener(
-        val listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open>,
+        val listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open, FdOwnership.Owned>,
     ) : SeccompConnectionEffect
 
     public data object LogAck : SeccompConnectionEffect

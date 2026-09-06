@@ -1,6 +1,5 @@
 package io.mazewall.ffi.memory
 
-
 import io.mazewall.ffi.Layouts
 import java.lang.foreign.MemoryLayout
 import java.util.concurrent.ConcurrentHashMap
@@ -14,7 +13,7 @@ public class SegmentPool private constructor(
     private val layout: MemoryLayout?,
     public val byteSize: Long,
     private val poolSize: Int,
-    private val arena: NativeArena
+    private val arena: NativeArena,
 ) {
     private val queue = ConcurrentLinkedQueue<ManagedSegment>()
     private val checkedOut = ConcurrentHashMap.newKeySet<Long>()
@@ -22,13 +21,13 @@ public class SegmentPool private constructor(
     public constructor(
         layout: MemoryLayout,
         poolSize: Int = 16,
-        arena: NativeArena = NativeArena.ofShared()
+        arena: NativeArena = NativeArena.ofShared(),
     ) : this(layout, layout.byteSize(), poolSize, arena)
 
     public constructor(
         byteSize: Long,
         poolSize: Int = 16,
-        arena: NativeArena = NativeArena.ofShared()
+        arena: NativeArena = NativeArena.ofShared(),
     ) : this(null, byteSize, poolSize, arena)
 
     init {

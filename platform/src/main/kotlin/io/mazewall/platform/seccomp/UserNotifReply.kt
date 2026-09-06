@@ -1,8 +1,9 @@
 package io.mazewall.platform.seccomp
 
-import io.mazewall.MazewallInternal
 import io.mazewall.LinuxNative
+import io.mazewall.MazewallInternal
 import io.mazewall.RawSyscallOperations
+import io.mazewall.core.FdOwnership
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
@@ -12,14 +13,17 @@ import io.mazewall.ffi.Layouts
 import io.mazewall.ffi.NativeConstants
 import io.mazewall.ffi.memory.ManagedSegment
 import io.mazewall.ffi.memory.fill
-import io.mazewall.ffi.typed
 import io.mazewall.ffi.memory.writeInt
 import io.mazewall.ffi.memory.writeLong
+import io.mazewall.ffi.typed
 
 /** Shared USER_NOTIF reply layout used by supervisor, profiler, and the daemon reactor. */
 @MazewallInternal
 public object UserNotifReply {
-    public fun encodeContinue(resp: ManagedSegment, id: Long) {
+    public fun encodeContinue(
+        resp: ManagedSegment,
+        id: Long,
+    ) {
         resp.fill(0)
         resp.writeLong(Layouts.SECCOMP_NOTIF_RESP_ID_OFFSET, id)
         resp.writeLong(Layouts.SECCOMP_NOTIF_RESP_VAL_OFFSET, 0L)
@@ -30,7 +34,11 @@ public object UserNotifReply {
         )
     }
 
-    public fun encodeError(resp: ManagedSegment, id: Long, errorNr: Int) {
+    public fun encodeError(
+        resp: ManagedSegment,
+        id: Long,
+        errorNr: Int,
+    ) {
         resp.fill(0)
         resp.writeLong(Layouts.SECCOMP_NOTIF_RESP_ID_OFFSET, id)
         resp.writeLong(Layouts.SECCOMP_NOTIF_RESP_VAL_OFFSET, -1L)
@@ -38,7 +46,11 @@ public object UserNotifReply {
         resp.writeInt(Layouts.SECCOMP_NOTIF_RESP_FLAGS_OFFSET, 0)
     }
 
-    public fun encodeSuccess(resp: ManagedSegment, id: Long, `val`: Long) {
+    public fun encodeSuccess(
+        resp: ManagedSegment,
+        id: Long,
+        `val`: Long,
+    ) {
         resp.fill(0)
         resp.writeLong(Layouts.SECCOMP_NOTIF_RESP_ID_OFFSET, id)
         resp.writeLong(Layouts.SECCOMP_NOTIF_RESP_VAL_OFFSET, `val`)
@@ -48,7 +60,7 @@ public object UserNotifReply {
 
     public fun send(
         raw: RawSyscallOperations,
-        listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open>,
+        listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open, FdOwnership>,
         resp: ManagedSegment,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
         while (true) {

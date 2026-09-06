@@ -14,21 +14,19 @@ import kotlin.test.*
  */
 @org.junit.jupiter.api.extension.ExtendWith(ForeignFdGuard::class)
 class FileDescriptorReproductionTest {
-
     companion object {
-        context(arena: NativeArena)
-        private fun realFd(): Int =
+        context(arena: NativeArena) private fun realFd(): Int =
             when (val res = openPath("/dev/null", OpenFlags.RDONLY)) {
                 is LinuxNative.SyscallResult.Success -> res.value.toInt()
                 else -> error("open(/dev/null) failed: $res")
             }
 
-        private fun <T> withArena(block: NativeArena.() -> T): T =
-            NativeArena.ofConfined().use(block)
+        private fun <T> withArena(block: NativeArena.() -> T): T = NativeArena.ofConfined().use(block)
     }
 
     @Test
-    fun `file descriptor is strictly immutable and returns closed type`() = withArena {
+    fun `file descriptor is strictly immutable and returns closed type`() =
+        withArena {
         val fd = FileDescriptor.adopt(realFd(), FileDescriptorRole.Generic)
         val value = fd.value
 
@@ -42,11 +40,12 @@ class FileDescriptorReproductionTest {
         assertFalse(closedFd.isValid)
 
         @Suppress("USELESS_CAST")
-        assertTrue(closedFd is FileDescriptor<*, FdState.Closed>)
+        assertTrue(closedFd is FileDescriptor<*, FdState.Closed, FdOwnership>)
     }
 
     @Test
-    fun `leftover Open token cannot reach the kernel after close or reuse`() = withArena {
+    fun `leftover Open token cannot reach the kernel after close or reuse`() =
+        withArena {
         val first = realFd()
         val leftover = FileDescriptor.adopt(first, FileDescriptorRole.Generic)
         leftover.close()

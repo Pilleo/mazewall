@@ -11,10 +11,10 @@ import java.util.stream.Stream
 import kotlin.test.assertIs
 
 internal class SeccompActionTest {
-
     companion object {
         @JvmStatic
-        fun actionRankings(): Stream<Arguments> = Stream.of(
+        fun actionRankings(): Stream<Arguments> =
+            Stream.of(
             Arguments.of(SeccompAction.ACT_KILL_PROCESS, 70, 7),
             Arguments.of(SeccompAction.ACT_KILL_THREAD, 60, 6),
             Arguments.of(SeccompAction.ACT_TRAP, 50, 5),
@@ -26,7 +26,8 @@ internal class SeccompActionTest {
         )
 
         @JvmStatic
-        fun stricterPairs(): Stream<Arguments> = Stream.of(
+        fun stricterPairs(): Stream<Arguments> =
+            Stream.of(
             Arguments.of(SeccompAction.ACT_KILL_PROCESS, SeccompAction.ACT_ALLOW, SeccompAction.ACT_KILL_PROCESS),
             Arguments.of(SeccompAction.ACT_ALLOW, SeccompAction.ACT_KILL_PROCESS, SeccompAction.ACT_KILL_PROCESS),
             Arguments.of(SeccompAction.ACT_KILL_PROCESS, SeccompAction.ACT_KILL_THREAD, SeccompAction.ACT_KILL_PROCESS),

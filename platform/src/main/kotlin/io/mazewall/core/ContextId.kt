@@ -41,7 +41,10 @@ public value class ContextId(
      * @throws IllegalArgumentException when [dst] has fewer than [WIRE_SIZE_BYTES] bytes
      *   available from [offset].
      */
-    public fun encodeInto(dst: ByteArray, offset: Int = 0) {
+    public fun encodeInto(
+        dst: ByteArray,
+        offset: Int = 0,
+    ) {
         require(offset >= 0 && dst.size - offset >= WIRE_SIZE_BYTES) {
             "buffer too small for ${WIRE_SIZE_BYTES}-byte context id: size=${dst.size}, offset=$offset"
         }
@@ -76,7 +79,10 @@ public value class ContextId(
          * @throws IllegalArgumentException when fewer than [WIRE_SIZE_BYTES] bytes are
          *   available in [src] from [offset].
          */
-        public fun decodeFrom(src: ByteArray, offset: Int = 0): ContextId {
+        public fun decodeFrom(
+            src: ByteArray,
+            offset: Int = 0,
+        ): ContextId {
             require(offset >= 0 && src.size - offset >= WIRE_SIZE_BYTES) {
                 "buffer too small for ${WIRE_SIZE_BYTES}-byte context id: size=${src.size}, offset=$offset"
             }

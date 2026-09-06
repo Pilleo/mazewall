@@ -1,6 +1,5 @@
 package io.mazewall.ffi
 
-
 import java.lang.foreign.MemoryLayout
 import java.lang.foreign.StructLayout
 
@@ -84,9 +83,10 @@ object LayoutValidator {
             assertOffset("revents", 6)
         }
 
-        validateLayout(Layouts.LANDLOCK_RULESET_ATTR, expectedSize = 16, expectedAlignment = 8) {
+        validateLayout(Layouts.LANDLOCK_RULESET_ATTR, expectedSize = 24, expectedAlignment = 8) {
             assertOffset("handled_access_fs", 0)
             assertOffset("handled_access_net", 8)
+            assertOffset("scoped", 16)
         }
 
         validateLayout(Layouts.LANDLOCK_PATH_BENEATH_ATTR, expectedSize = 12, expectedAlignment = 1) {
@@ -116,9 +116,14 @@ object LayoutValidator {
         LayoutValidationScope(layout).block()
     }
 
-    internal class LayoutValidationScope(private val layout: StructLayout) {
+    internal class LayoutValidationScope(
+        private val layout: StructLayout,
+    ) {
         @Suppress("TooGenericExceptionCaught")
-        fun assertOffset(fieldName: String, expectedOffset: Long) {
+        fun assertOffset(
+            fieldName: String,
+            expectedOffset: Long,
+        ) {
             val actualOffset = try {
                 layout.byteOffset(MemoryLayout.PathElement.groupElement(fieldName))
             } catch (e: Exception) {

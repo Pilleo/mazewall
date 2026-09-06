@@ -1,15 +1,14 @@
 package io.mazewall.core
 
-import java.util.concurrent.CountDownLatch
-import java.util.concurrent.atomic.AtomicReference
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.atomic.AtomicReference
 
 internal class MazewallContextTest {
-
     private val http = ContextId(1u)
     private val pdfParse = ContextId(2u)
     private val yamlParse = ContextId(3u)
@@ -209,5 +208,7 @@ internal class MazewallContextTest {
         assertEquals(ContextId.UNKNOWN, MazewallContext.current())
     }
 
-    private class ScopeException(message: String) : RuntimeException(message)
+    private class ScopeException(
+        message: String,
+    ) : RuntimeException(message)
 }

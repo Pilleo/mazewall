@@ -7,14 +7,22 @@ import io.mazewall.core.Arch
 @MazewallInternal
 public sealed interface SupervisedKind {
     public data object Open : SupervisedKind
+
     public data object Connect : SupervisedKind
+
     public data object Accept : SupervisedKind
+
     public data object Exec : SupervisedKind
+
     public data object Spawn : SupervisedKind
+
     public data object Unknown : SupervisedKind
 
     public companion object {
-        public fun classify(nr: Int, arch: Arch): SupervisedKind {
+        public fun classify(
+            nr: Int,
+            arch: Arch,
+        ): SupervisedKind {
             if (nr < 0) return Unknown
             return when (nr) {
                 arch.open, arch.openat, arch.openat2 -> Open
