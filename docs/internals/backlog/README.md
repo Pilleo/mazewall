@@ -1,6 +1,6 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 122 | *Total Resolved Issues:* 461
+*Total Active Issues:* 121 | *Total Resolved Issues:* 462
 
 | Issue | Title | Priority | Component |
 |---|---|---|---|
@@ -107,7 +107,6 @@
 | [issue-068-supervisor-proxy-pattern-fd-injection-stacktrace-scoping](issue-068-supervisor-proxy-pattern-fd-injection-stacktrace-scoping.md) | Supervisor Proxy Pattern (FD Injection) & Stacktrace Scoping | low | enforcer |
 | [issue-070-network-isolation-via-namespaces-clonenewnet](issue-070-network-isolation-via-namespaces-clonenewnet.md) | Network Isolation via Namespaces (`CLONE_NEWNET`) | low | enforcer |
 | [issue-162-memory-alignment-verification-for-layoutskt-ffm-structures](issue-162-memory-alignment-verification-for-layoutskt-ffm-structures.md) | Memory Alignment verification for `Layouts.kt` FFM Structures | high | enforcer |
-| [issue-20260726_011928_11_thread-pool-exhaustion-iterative-profiler](issue-20260726_011928_11_thread-pool-exhaustion-iterative-profiler.md) | IterativeProfiler can exhaust thread pools on recursive containerization limits | medium | enforcer |
 | [issue-20260807-210802-aot-thread-containment-eligibility-assessment](issue-20260807-210802-aot-thread-containment-eligibility-assessment.md) | Add AOT Reachability Assessment for Thread-Containment Eligibility | medium | enforcer |
 | [issue-20260808-032520-owned-contained-executor-lifecycle](issue-20260808-032520-owned-contained-executor-lifecycle.md) | Make Contained Executors Own Dedicated Worker Threads | low | enforcer |
 | [issue-012-algebraic-policy-composition-semigroupmonoid](issue-012-algebraic-policy-composition-semigroupmonoid.md) | Algebraic Policy Composition (Semigroup/Monoid) | low | enforcer |
