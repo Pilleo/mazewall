@@ -88,6 +88,7 @@ internal class SupervisorSessionHandler(
         override fun abortNotification(id: Long, errno: Int, response: ManagedSegment) =
             sendSeccompError(id, errno, response)
     })
+    private val routeDispatcher = SupervisorRouteDispatcher(terminalRoutes)
 
     context(arena: io.mazewall.ffi.memory.NativeArena)
     override fun processNotification(
@@ -436,24 +437,13 @@ internal class SupervisorSessionHandler(
                 sendSeccompError(id, NativeConstants.EPERM, resp)
                 return false
             }
-            return when (val route = SupervisorNotificationMachine.evaluateJvm(kind, verdict)) {
-                is SupervisorRoute.Abort -> {
-                    terminalRoutes.execute(route, context)
-                    true
-                }
-                is SupervisorRoute.Continue -> {
-                    terminalRoutes.execute(route, context)
-                    true
-                }
-                is SupervisorRoute.InjectFd ->
-                    handleInjectFd(context)
-                is SupervisorRoute.SecureExec ->
-                    handleSecureExecve(context, jvmPath)
-                is SupervisorRoute.AskJvm -> {
-                    sendSeccompError(id, NativeConstants.EPERM, resp)
-                    false
-                }
-            }
+            return routeDispatcher.execute(
+                SupervisorNotificationMachine.evaluateJvm(kind, verdict),
+                context,
+                jvmPath,
+                injectFd = { handleInjectFd(it) },
+                secureExec = { routeContext, path -> handleSecureExecve(routeContext, path) },
+            )
         } else {
             sendSeccompError(id, NativeConstants.EPERM, resp)
             return false

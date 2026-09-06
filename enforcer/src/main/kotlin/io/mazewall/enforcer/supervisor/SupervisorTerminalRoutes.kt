@@ -27,4 +27,9 @@ internal class SupervisorTerminalRoutes(
         is SupervisorRoute.SecureExec,
         -> null
     }
+
+    fun abort(context: SupervisorRouteContext, errno: Int): Boolean {
+        sender.abortNotification(context.request.id, errno, context.response)
+        return false
+    }
 }
