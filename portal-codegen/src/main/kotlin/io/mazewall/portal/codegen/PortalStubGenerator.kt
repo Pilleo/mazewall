@@ -17,7 +17,7 @@ import java.io.File
 import java.lang.reflect.Method
 
 public object PortalStubGenerator {
-    private val portalClient = ClassName("io.mazewall.portal", "PortalClient")
+    private val processBroker = ClassName("io.mazewall.portal", "ProcessBroker")
     private val portalCodec = ClassName("io.mazewall.portal", "PortalCodec")
     private val capability = ClassName("io.mazewall.portal", "Capability")
     private val readFd = capability.nestedClass("ReadFd")
@@ -67,7 +67,7 @@ public object PortalStubGenerator {
     ): FileSpec {
         val pkg = service.packageName
         val stubName = service.simpleName + "PortalStub"
-        val ctorParam = ParameterSpec.builder("client", portalClient).build()
+        val ctorParam = ParameterSpec.builder("broker", processBroker).build()
         val type =
             TypeSpec
                 .classBuilder(stubName)
@@ -77,8 +77,8 @@ public object PortalStubGenerator {
                     FunSpec.constructorBuilder().addParameter(ctorParam).build(),
                 ).addProperty(
                     PropertySpec
-                        .builder("client", portalClient)
-                        .initializer("client")
+                        .builder("broker", processBroker)
+                        .initializer("broker")
                         .addModifiers(KModifier.PRIVATE)
                         .build(),
                 )
@@ -124,9 +124,9 @@ public object PortalStubGenerator {
         spec.addStatement("val payload = %L", payloadExpr)
         val invoke =
             if (granted.isEmpty()) {
-                CodeBlock.of("client.invoke(%L, payload)", id)
+                CodeBlock.of("broker.invoke(%L, payload)", id)
             } else {
-                CodeBlock.of("client.invoke(%L, payload, %L)", id, granted.joinToString(", "))
+                CodeBlock.of("broker.invoke(%L, payload, %L)", id, granted.joinToString(", "))
             }
         val ret = BoundaryTypes.kindOf(method.returnType)
         if (ret is BoundaryTypes.Kind.UnitT) {

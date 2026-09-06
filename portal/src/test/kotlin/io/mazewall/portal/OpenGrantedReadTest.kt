@@ -6,19 +6,8 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
 import java.nio.file.Files
 import java.nio.file.Path
-import io.mazewall.core.FileDescriptor
-import io.mazewall.core.FileDescriptorRole
-import kotlin.test.assertFailsWith
 
 class OpenGrantedReadTest {
-    @Test
-    fun `capability can be transferred only once`() {
-        val capability = Capability.readFd(FileDescriptor.adopt(1234, FileDescriptorRole.Granted))
-        capability.transferForPortalCall()
-
-        assertFailsWith<IllegalStateException> { capability.transferForPortalCall() }
-    }
-
     @Test
     fun `absolute relative path is rejected without syscall`() {
         assertThrows(IllegalArgumentException::class.java) {

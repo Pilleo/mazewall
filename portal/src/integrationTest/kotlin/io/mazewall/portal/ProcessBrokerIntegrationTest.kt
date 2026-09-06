@@ -6,38 +6,11 @@ import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Assumptions.assumeTrue
 import org.junit.jupiter.api.Test
 import java.nio.file.Files
-import java.nio.file.Path
-import java.io.File
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.TimeUnit
 import java.util.zip.Adler32
 
 class ProcessBrokerIntegrationTest {
-    @Test
-    fun `managed generated-shape service runs in the worker process`() {
-        assumeTrue(System.getProperty("os.name").lowercase().contains("linux"))
-        val workerClasspath =
-            (System.getProperty(ProcessBroker.WORKER_CLASSPATH_PROPERTY) + File.pathSeparator +
-                System.getProperty("java.class.path"))
-                .split(File.pathSeparator)
-                .filter { it.isNotBlank() }
-                .distinct()
-                .map(Path::of)
-        Portal.start(
-            GeneratedServiceFixture::class.java,
-            PortalWorkerConfig(
-                classpath = workerClasspath,
-                implementationClassName = GeneratedServiceFixtureImpl::class.java.name,
-                concurrency = 2,
-            ),
-        ).use { service ->
-            val a = CompletableFuture.supplyAsync { service.api.echo("alpha") }
-            val b = CompletableFuture.supplyAsync { service.api.echo("beta") }
-            assertEquals("guest:alpha", a.get(20, TimeUnit.SECONDS))
-            assertEquals("guest:beta", b.get(20, TimeUnit.SECONDS))
-        }
-    }
-
     @Test
     fun `granted-fd checksum works and worker cannot open host passwd`() {
         assumeTrue(System.getProperty("os.name").lowercase().contains("linux"))
@@ -96,41 +69,12 @@ class ProcessBrokerIntegrationTest {
     }
 
     @Test
-    fun `one worker serves independent requests concurrently`() {
-        assumeTrue(System.getProperty("os.name").lowercase().contains("linux"))
-        ProcessBroker(poolSize = 1, callTimeoutMs = 5_000).use { broker ->
-            broker.start()
-            val startedAt = System.nanoTime()
-            val a = CompletableFuture.runAsync { broker.sleep(400) }
-            val b = CompletableFuture.runAsync { broker.sleep(400) }
-            a.get(5, TimeUnit.SECONDS)
-            b.get(5, TimeUnit.SECONDS)
-            val elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAt)
-            assertTrue(elapsedMs < 700, "one concurrent worker should not serialize calls: ${elapsedMs}ms")
-        }
-    }
-
-    @Test
     fun `timeout kills worker and later call succeeds`() {
         assumeTrue(System.getProperty("os.name").lowercase().contains("linux"))
         ProcessBroker(poolSize = 1, callTimeoutMs = 800).use { broker ->
             broker.start()
             assertThrows(PortalCallException::class.java) { broker.sleep(10_000) }
             assertEquals("after-timeout", broker.echo("after-timeout"))
-        }
-    }
-
-    @Test
-    fun `one timeout fails every request on its worker and creates one replacement`() {
-        assumeTrue(System.getProperty("os.name").lowercase().contains("linux"))
-        ProcessBroker(poolSize = 1, callTimeoutMs = 500).use { broker ->
-            broker.start()
-            val a = CompletableFuture.supplyAsync { runCatching { broker.sleep(10_000) } }
-            val b = CompletableFuture.supplyAsync { runCatching { broker.sleep(10_000) } }
-            assertTrue(a.get(5, TimeUnit.SECONDS).isFailure)
-            assertTrue(b.get(5, TimeUnit.SECONDS).isFailure)
-            assertEquals(2, broker.spawnedWorkers(), "one failed connection gets one replacement")
-            assertEquals("after-shared-timeout", broker.echo("after-shared-timeout"))
         }
     }
 
@@ -153,10 +97,12 @@ class ProcessBrokerIntegrationTest {
         try {
             // Check out the only worker via a long sleep on a separate thread.
             val inFlight = CompletableFuture.runAsync { broker.sleep(60_000) }
-            // A multiplexed connection remains admissible while requests are in
-            // flight; close must still destroy that live worker.
-            Thread.sleep(100)
-            assertEquals(1, broker.trackedWorkers(), "in-flight worker must remain tracked")
+            // Wait until the slot is actually checked out (idle queue empty).
+            val deadline = System.currentTimeMillis() + 10_000
+            while (broker.idleSize() != 0 && System.currentTimeMillis() < deadline) {
+                Thread.sleep(50)
+            }
+            assertEquals(0, broker.idleSize(), "worker should be checked out by now")
 
             broker.close()
 

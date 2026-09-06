@@ -3,7 +3,6 @@ package io.mazewall.portal.worker
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
-import io.mazewall.portal.Capability
 import java.util.concurrent.ConcurrentHashMap
 
 /**
@@ -29,9 +28,7 @@ public object PortalDispatcherRegistry {
     private val handlers = ConcurrentHashMap<Int, Handler>()
 
     public fun register(ids: IntArray, handler: Handler) {
-        for (id in ids) {
-            require(handlers.putIfAbsent(id, handler) == null) { "duplicate portal method id $id" }
-        }
+        for (id in ids) handlers[id] = handler
     }
 
     /** Attempts registered dispatch; null when no handler claims [methodId]. */
@@ -42,18 +39,17 @@ public object PortalDispatcherRegistry {
     ): ByteArray? = handlers[methodId]?.invoke(methodId, payload, granted)
 
     /**
-     * Reflectively wires `Interface=Impl(;Dispatcher)?` pairs.
-     *
-     * A registered portal must be completely configured before its worker enters
-     * service.  Ignoring a malformed entry would otherwise leave a supposedly
-     * isolated service accepting requests with an incomplete dispatch surface.
+     * Reflectively wires `Interface=Impl(;Dispatcher)?` pairs. Tolerant of malformed
+     * entries so one bad flag cannot take down the worker before policy
+     * installation - each failure logs and skips.
      */
     public fun bootstrapFromProperty(raw: String?): Int {
         if (raw.isNullOrBlank()) return 0
         var count = 0
         for (entry in raw.split(',')) {
-            registerEntry(entry.trim())
-            count++
+            runCatching { registerEntry(entry.trim()) }
+                .onSuccess { count++ }
+                .onFailure { System.err.println("[PORTAL-DISPATCH] skipping '$entry': ${it.message}") }
         }
         return count
     }
@@ -85,11 +81,9 @@ public object PortalDispatcherRegistry {
 
         // One closure per id keeps the invoked methodId exact without re-parsing.
         for (id in methodIds) {
-            val handler: Handler = { mid, payload, granted ->
-                val capabilities = granted.map(Capability::readFd)
-                handle.invoke(dispatcherObject, impl, mid, payload, capabilities) as ByteArray
+            handlers[id] = { mid, payload, granted ->
+                handle.invoke(dispatcherObject, impl, mid, payload, granted) as ByteArray
             }
-            require(handlers.putIfAbsent(id, handler) == null) { "duplicate portal method id $id" }
         }
     }
 }

@@ -44,7 +44,7 @@ internal object PortalBuiltinDispatch {
                 error("worker opened /etc/passwd")
             }
 
-            else -> throw IllegalArgumentException("unknown method $methodId")
+            else -> error("unknown method $methodId")
         }
 
     private fun checksum(fd: FileDescriptor<FileDescriptorRole.Granted, FdState.Open>): ByteArray {
