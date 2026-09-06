@@ -52,6 +52,12 @@ Worker first lines after IPC connect:
 2. `ContainedExecutors.installOnProcess(denyProcessCreation + denyNetwork)` (process-wide seccomp).
 3. Reflectively register generated dispatchers and only then print the ready sentinel. A malformed declaration aborts startup; it is never skipped.
 
+Before step 2, the startup thread prestarts the configured bounded platform-thread
+executor. Those threads inherit the startup thread's Landlock restriction; no
+worker threads may be created after Seccomp denies `clone`. One reader owns the
+socket framing and submits requests to the executor; response-frame writes are
+serialized on that same connection.
+
 `read`/`write` on inherited FDs remain legal; see [security-considerations.md](../core/security-considerations.md).
 
 ## IPC and FDs

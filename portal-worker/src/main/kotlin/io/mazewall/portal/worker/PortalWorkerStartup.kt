@@ -10,10 +10,12 @@ package io.mazewall.portal.worker
 internal object PortalWorkerStartup {
     fun prepare(
         installFilesystem: () -> Unit,
+        createWorkerThreads: () -> Unit,
         installProcessContainment: () -> Unit,
         bootstrapDispatchers: () -> Int,
     ): Int {
         installFilesystem()
+        createWorkerThreads()
         installProcessContainment()
         return bootstrapDispatchers()
     }

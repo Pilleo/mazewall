@@ -5,12 +5,13 @@ import kotlin.test.assertEquals
 
 class PortalWorkerStartupTest {
     @Test
-    fun `startup installs filesystem before process containment and dispatch`() {
+    fun `startup creates restricted worker threads before process containment`() {
         val events = mutableListOf<String>()
 
         val registered =
             PortalWorkerStartup.prepare(
                 installFilesystem = { events += "filesystem" },
+                createWorkerThreads = { events += "workers" },
                 installProcessContainment = { events += "process" },
                 bootstrapDispatchers = {
                     events += "dispatchers"
@@ -19,6 +20,6 @@ class PortalWorkerStartupTest {
             )
 
         assertEquals(1, registered)
-        assertEquals(listOf("filesystem", "process", "dispatchers"), events)
+        assertEquals(listOf("filesystem", "workers", "process", "dispatchers"), events)
     }
 }

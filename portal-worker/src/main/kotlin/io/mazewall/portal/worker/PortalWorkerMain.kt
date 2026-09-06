@@ -8,6 +8,9 @@ import io.mazewall.portal.PortalChannel
 import io.mazewall.portal.PortalFrame
 import io.mazewall.portal.PortalKind
 import java.nio.charset.StandardCharsets
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
+import java.util.concurrent.ThreadPoolExecutor
 import kotlin.system.exitProcess
 
 /**
@@ -29,11 +32,21 @@ public object PortalWorkerMain {
         // Landlock is ThreadLocalOnly in the type system (no TSYNC on helper threads).
         // It must precede Seccomp.  Dispatcher construction may execute guest
         // constructors, so it occurs only after process containment is installed.
+        val workerConcurrency = System.getProperty("io.mazewall.portal.worker.concurrency")
+            ?.toIntOrNull() ?: 4
+        require(workerConcurrency >= 1) { "portal worker concurrency must be >= 1" }
+        lateinit var requestExecutor: ExecutorService
         val registered = PortalWorkerStartup.prepare(
             installFilesystem = {
                 ContainedExecutors.installOnCurrentThread(
                     ProcessPolicies.workerFilesystem(RuntimeProfile.HOTSPOT_JIT),
                 )
+            },
+            createWorkerThreads = {
+                // Threads inherit this startup thread's Landlock restriction. They
+                // must exist before process Seccomp denies subsequent clone calls.
+                requestExecutor = Executors.newFixedThreadPool(workerConcurrency)
+                (requestExecutor as ThreadPoolExecutor).prestartAllCoreThreads()
             },
             installProcessContainment = {
                 ContainedExecutors.installOnProcess(
@@ -73,32 +86,37 @@ public object PortalWorkerMain {
                     fds.forEach { sockets.close(it) }
                     continue
                 }
-                try {
-                    val result = PortalBuiltinDispatch.handle(frame.methodId, frame.payload, fds)
-                    channel.send(PortalFrame(PortalKind.RESPONSE, frame.requestId, frame.methodId, result, 0))
-                } catch (e: IllegalArgumentException) {
-                    // Only the builtin "unknown method" signal falls through to the
-                    // generated dispatchers; real builtin failures stay errors.
-                    if (e.message?.startsWith("unknown method") != true) throw e
-                    val generated = PortalDispatcherRegistry.dispatchOrNull(
-                        frame.methodId,
-                        frame.payload,
-                        fds,
-                    )
-                    if (generated != null) {
-                        channel.send(PortalFrame(PortalKind.RESPONSE, frame.requestId, frame.methodId, generated, 0))
-                    } else {
+                requestExecutor.execute {
+                    try {
+                        val result = PortalBuiltinDispatch.handle(frame.methodId, frame.payload, fds)
+                        synchronized(channel) {
+                            channel.send(PortalFrame(PortalKind.RESPONSE, frame.requestId, frame.methodId, result, 0))
+                        }
+                    } catch (e: IllegalArgumentException) {
+                        // Only the builtin "unknown method" signal falls through to the
+                        // generated dispatchers; real builtin failures stay errors.
+                        if (e.message?.startsWith("unknown method") != true) throw e
+                        val generated = PortalDispatcherRegistry.dispatchOrNull(frame.methodId, frame.payload, fds)
+                        synchronized(channel) {
+                            if (generated != null) {
+                                channel.send(PortalFrame(PortalKind.RESPONSE, frame.requestId, frame.methodId, generated, 0))
+                            } else {
+                                val msg = (e.message ?: e::class.java.simpleName).toByteArray(StandardCharsets.UTF_8)
+                                channel.send(PortalFrame(PortalKind.ERROR, frame.requestId, frame.methodId, msg, 0))
+                            }
+                        }
+                    } catch (e: Exception) {
                         val msg = (e.message ?: e::class.java.simpleName).toByteArray(StandardCharsets.UTF_8)
-                        channel.send(PortalFrame(PortalKind.ERROR, frame.requestId, frame.methodId, msg, 0))
+                        synchronized(channel) {
+                            channel.send(PortalFrame(PortalKind.ERROR, frame.requestId, frame.methodId, msg, 0))
+                        }
+                    } finally {
+                        fds.forEach { sockets.close(it) }
                     }
-                } catch (e: Exception) {
-                    val msg = (e.message ?: e::class.java.simpleName).toByteArray(StandardCharsets.UTF_8)
-                    channel.send(PortalFrame(PortalKind.ERROR, frame.requestId, frame.methodId, msg, 0))
-                } finally {
-                    fds.forEach { sockets.close(it) }
                 }
             }
         } finally {
+            requestExecutor.shutdownNow()
             channel.close()
         }
     }
