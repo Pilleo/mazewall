@@ -3,7 +3,10 @@ package io.mazewall.orchestrator
 import java.io.File
 
 fun interface ChatModel {
-    fun complete(system: String, user: String): String
+    fun complete(
+        system: String,
+        user: String,
+    ): String
 }
 
 internal enum class QuestionKind { FACTUAL, OPERATOR }
@@ -43,6 +46,7 @@ object IssueClarifier {
         impactScanner: ImpactScanner = FilesystemImpactScanner(repoRoot),
     ): IssueScaffoldResult {
         var current = draft
+
         fun commit(request: IssueScaffoldRequest): IssueScaffoldResult {
             val files = (current.files + request.explicitFiles).distinct()
             val next = current.copy(request = request, files = files)
@@ -95,7 +99,9 @@ object IssueClarifier {
                             ),
                         )
                         val errors = IssueMarkdownVerifier.readyForReview(dug.markdown, scratchDir)
-                        current = if (errors.isEmpty()) dug else {
+                        current = if (errors.isEmpty()) {
+                            dug
+                        } else {
                             warn(
                                 "clarify: weak side-effect investigation failed verification: ${errors.joinToString("; ")}",
                             )
@@ -229,7 +235,10 @@ object IssueClarifier {
         return current
     }
 
-    fun withImpactHits(draft: IssueScaffoldResult, hits: List<ImpactHit>): IssueScaffoldResult {
+    fun withImpactHits(
+        draft: IssueScaffoldResult,
+        hits: List<ImpactHit>,
+    ): IssueScaffoldResult {
         val lines = hits.map { it.render() }
         val point = if (hits.isEmpty()) {
             "AST identifier scan: 0 hits outside origin files"
@@ -278,7 +287,10 @@ object IssueClarifier {
         return current.copy(markdown = reRender(current, request))
     }
 
-    fun hostFillPlaceholders(draft: IssueScaffoldResult, hits: List<ImpactHit>): IssueScaffoldResult {
+    fun hostFillPlaceholders(
+        draft: IssueScaffoldResult,
+        hits: List<ImpactHit>,
+    ): IssueScaffoldResult {
         var req = draft.request
         var changed = false
         if (isIssuePlaceholder(req.contextBody)) {
@@ -301,7 +313,10 @@ object IssueClarifier {
         return next.copy(markdown = reRender(next, req))
     }
 
-    internal fun hostNeededSteps(draft: IssueScaffoldResult, hits: List<ImpactHit>): String {
+    internal fun hostNeededSteps(
+        draft: IssueScaffoldResult,
+        hits: List<ImpactHit>,
+    ): String {
         val steps = mutableListOf<String>()
         var n = 1
         for (file in draft.files) {
@@ -309,7 +324,9 @@ object IssueClarifier {
             n++
         }
         for (caller in hits.map { it.file }.distinct()) {
-            val sample = hits.filter { it.file == caller }.take(2)
+            val sample = hits
+                .filter { it.file == caller }
+                .take(2)
                 .joinToString { "${it.symbol}:${it.line}" }
             steps += "$n. Update caller `$caller` ($sample)."
             n++
@@ -346,14 +363,18 @@ object IssueClarifier {
         """.trimIndent()
     }
 
-    private fun parseIssuePayload(raw: String, base: IssueScaffoldRequest): IssueScaffoldRequest {
+    private fun parseIssuePayload(
+        raw: String,
+        base: IssueScaffoldRequest,
+    ): IssueScaffoldRequest {
         val context = parseJsonStringField(raw, "context")
         val needed = try {
             parseJsonStringField(raw, "needed")
         } catch (_: Exception) {
             val list = parseStringList(raw, "needed")
             require(list.isNotEmpty()) { "ACP returned empty needed list" }
-            list.mapIndexed { idx, step ->
+            list
+                .mapIndexed { idx, step ->
                 if (step.trim().matches(Regex("""^\d+\..*"""))) step.trim() else "${idx + 1}. ${step.trim()}"
             }.joinToString("\n")
         }
@@ -374,12 +395,18 @@ object IssueClarifier {
             neededBody = needed,
             openQuestionItems = parseStringList(raw, "open_questions"),
             investigationPoints = (base.investigationPoints + parseStringList(raw, "investigation_points"))
-                .map { it.trim() }.filter { it.isNotEmpty() }.distinct(),
+                .map { it.trim() }
+                .filter { it.isNotEmpty() }
+                .distinct(),
             importantDetails = (base.importantDetails + parseStringList(raw, "important_details"))
-                .map { it.trim() }.filter { it.isNotEmpty() }.distinct(),
+                .map { it.trim() }
+                .filter { it.isNotEmpty() }
+                .distinct(),
             hasSideEffects = hasSideEffects,
             sideEffectImpacts = (base.sideEffectImpacts + parseStringList(raw, "side_effects"))
-                .map { it.trim() }.filter { it.isNotEmpty() }.distinct(),
+                .map { it.trim() }
+                .filter { it.isNotEmpty() }
+                .distinct(),
         )
     }
 
@@ -458,7 +485,10 @@ object IssueClarifier {
         )
     }
 
-    private fun issueSection(draft: IssueScaffoldResult, includeFullIssue: Boolean): String =
+    private fun issueSection(
+        draft: IssueScaffoldResult,
+        includeFullIssue: Boolean,
+    ): String =
         if (includeFullIssue) {
             "Issue:\n${draft.markdown}"
         } else {
@@ -499,7 +529,10 @@ object IssueClarifier {
         return parseIssuePayload(raw, draft.request.copy(hasSideEffects = true))
     }
 
-    private fun answerLeftoversWithStrong(draft: IssueScaffoldResult, strong: ChatModel): IssueScaffoldRequest {
+    private fun answerLeftoversWithStrong(
+        draft: IssueScaffoldResult,
+        strong: ChatModel,
+    ): IssueScaffoldRequest {
         val questions = draft.request.openQuestionItems.joinToString("\n") { "- $it" }
         val raw = strong.complete(
             "You only answer leftover questions a weaker pass could not resolve. Output JSON only.",
@@ -519,7 +552,10 @@ object IssueClarifier {
         return parseIssuePayload(raw, draft.request)
     }
 
-    private fun leftoversAndReviewWithStrong(draft: IssueScaffoldResult, strong: ChatModel): IssueScaffoldRequest {
+    private fun leftoversAndReviewWithStrong(
+        draft: IssueScaffoldResult,
+        strong: ChatModel,
+    ): IssueScaffoldRequest {
         val questions = draft.request.openQuestionItems.joinToString("\n") { "- $it" }
         val raw = strong.complete(
             "You answer leftover factual questions and independently review the issue. Output JSON only.",
@@ -568,7 +604,10 @@ object IssueClarifier {
         return parseIssuePayload(raw, draft.request.copy(reviewComments = emptyList(), reviewVerdict = null))
     }
 
-    private fun reviewWithStrong(draft: IssueScaffoldResult, strong: ChatModel): IssueScaffoldRequest {
+    private fun reviewWithStrong(
+        draft: IssueScaffoldResult,
+        strong: ChatModel,
+    ): IssueScaffoldRequest {
         val raw = strong.complete(
             "You are an independent final reviewer. You did not write this issue. Output JSON only.",
             """
@@ -589,7 +628,10 @@ object IssueClarifier {
         return draft.request.copy(reviewVerdict = normalized, reviewComments = comments)
     }
 
-    internal fun reRender(draft: IssueScaffoldResult, request: IssueScaffoldRequest): String {
+    internal fun reRender(
+        draft: IssueScaffoldResult,
+        request: IssueScaffoldRequest,
+    ): String {
         return IssueTemplateGenerator.render(
             idInstant = draft.instant,
             slug = draft.slug,
@@ -606,7 +648,10 @@ object IssueMarkdownVerifier {
     private val NUMBERED_STEP = Regex("""(?m)^\s*1[.\)]""")
     private val HAS_SIDE_EFFECTS = Regex("""has_side_effects:\s*(true|false)""")
 
-    fun structural(markdown: String, scratchDir: File): List<String> {
+    fun structural(
+        markdown: String,
+        scratchDir: File,
+    ): List<String> {
         val issue = parse(markdown, scratchDir) ?: return listOf("unparseable markdown")
         val errors = mutableListOf<String>()
         if (issue.title.isBlank()) errors += "missing title"
@@ -616,7 +661,10 @@ object IssueMarkdownVerifier {
         return errors
     }
 
-    fun readyForReview(markdown: String, scratchDir: File): List<String> {
+    fun readyForReview(
+        markdown: String,
+        scratchDir: File,
+    ): List<String> {
         val errors = structural(markdown, scratchDir).toMutableList()
         val issue = parse(markdown, scratchDir) ?: return errors
         if (isIssuePlaceholder(issue.context)) errors += "context still FILL"
@@ -638,7 +686,10 @@ object IssueMarkdownVerifier {
         return errors
     }
 
-    private fun parse(markdown: String, scratchDir: File): BacklogIssue? {
+    private fun parse(
+        markdown: String,
+        scratchDir: File,
+    ): BacklogIssue? {
         scratchDir.mkdirs()
         val file = File(scratchDir, "issue-20200101-000001-verify.md")
         file.writeText(markdown)
@@ -669,7 +720,11 @@ internal fun parseJsonObject(raw: String): String {
     // Strip markdown code fences if present (e.g. ```json ... ```)
     val cleaned = if (raw.contains("```")) {
         val fencePattern = Regex("""```(?:json)?\s*([\s\S]*?)```""")
-        fencePattern.find(raw)?.groupValues?.get(1)?.trim() ?: raw
+        fencePattern
+            .find(raw)
+            ?.groupValues
+            ?.get(1)
+            ?.trim() ?: raw
     } else {
         raw
     }
@@ -716,7 +771,10 @@ internal fun parseJsonObject(raw: String): String {
     return cleaned.substring(lastStart, lastEnd + 1)
 }
 
-internal fun parseStringList(raw: String, key: String): List<String> {
+internal fun parseStringList(
+    raw: String,
+    key: String,
+): List<String> {
     val obj = parseJsonObject(raw)
     val keyMarker = "\"$key\""
     val keyAt = obj.indexOf(keyMarker)
@@ -743,7 +801,10 @@ internal object ClarifyModels {
     }
 }
 
-internal fun parseJsonBooleanField(raw: String, key: String): Boolean? {
+internal fun parseJsonBooleanField(
+    raw: String,
+    key: String,
+): Boolean? {
     val obj = parseJsonObject(raw)
     val keyMarker = "\"$key\""
     val keyAt = obj.indexOf(keyMarker)
@@ -759,7 +820,10 @@ internal fun parseJsonBooleanField(raw: String, key: String): Boolean? {
     }
 }
 
-internal fun parseJsonStringField(raw: String, key: String): String {
+internal fun parseJsonStringField(
+    raw: String,
+    key: String,
+): String {
     val obj = parseJsonObject(raw)
     val keyMarker = "\"$key\""
     val keyAt = obj.indexOf(keyMarker)

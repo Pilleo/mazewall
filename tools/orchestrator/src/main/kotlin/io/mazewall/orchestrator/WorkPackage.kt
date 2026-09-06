@@ -34,7 +34,8 @@ data class WorkPackage(
             callers: List<WorkPackageCaller> = emptyList(),
         ): WorkPackage {
             val edit = files.map { PathModules.normalize(it) }.filter { it.isNotBlank() }.distinct()
-            val impact = callers.map { PathModules.normalize(it.file) }
+            val impact = callers
+                .map { PathModules.normalize(it.file) }
                 .filter { it.isNotBlank() && it !in edit }
                 .distinct()
             val allFiles = (edit + impact).distinct()
@@ -79,7 +80,8 @@ data class WorkPackage(
                     var found = runCodanna(listOf("mcp", "find_callers", token))
                     var parsedCallers = CodannaOutput.parseCallers(found)
                     if (parsedCallers.isEmpty()) {
-                        val ids = CodannaOutput.parseSymbolIds(described)
+                        val ids = CodannaOutput
+                            .parseSymbolIds(described)
                             .ifEmpty { CodannaOutput.parseSymbolIds(found) }
                             .take(4)
                         for (id in ids) {
@@ -97,7 +99,8 @@ data class WorkPackage(
             files: List<String>,
             symbols: List<String>,
             hits: List<ImpactHit>,
-        ): WorkPackage = assemble(
+        ): WorkPackage =
+            assemble(
             files = files,
             symbols = symbols,
             callers = hits.map { WorkPackageCaller(it.symbol, it.file) },
@@ -159,7 +162,8 @@ data class WorkPackage(
             return stages
         }
 
-        fun formatAsciiDag(stages: List<WorkPackageStage>): String = buildString {
+        fun formatAsciiDag(stages: List<WorkPackageStage>): String =
+            buildString {
             appendLine("┌─────────────────────────────────────────────────────────────┐")
             appendLine("│ 📦 Work Package Blast Radius & DAG Decomposition            │")
             appendLine("├─────────────────────────────────────────────────────────────┤")
@@ -176,7 +180,8 @@ data class WorkPackage(
             append("└─────────────────────────────────────────────────────────────┘")
         }
 
-        fun formatMermaidDag(stages: List<WorkPackageStage>): String = buildString {
+        fun formatMermaidDag(stages: List<WorkPackageStage>): String =
+            buildString {
             appendLine("```mermaid")
             appendLine("graph TD")
             for (s in stages) {
@@ -205,24 +210,29 @@ internal object CodannaOutput {
     private val SYMBOL_ID = Regex("""symbol_id:(\d+)""")
 
     fun parseSymbolIds(output: String): List<String> =
-        SYMBOL_ID.findAll(output).map { it.groupValues[1] }.distinct().toList()
+        SYMBOL_ID
+        .findAll(output)
+        .map { it.groupValues[1] }
+        .distinct()
+        .toList()
 
     fun parseFiles(output: String): List<String> {
-        return AT_FILE.findAll(output)
+        return AT_FILE
+            .findAll(output)
             .map { PathModules.normalize(it.groupValues[1]) }
             .distinct()
             .toList()
     }
 
     fun parseCallers(output: String): List<WorkPackageCaller> {
-        return CALLER.findAll(output)
+        return CALLER
+            .findAll(output)
             .map { match ->
                 WorkPackageCaller(
                     symbol = match.groupValues[1],
                     file = PathModules.normalize(match.groupValues[2]),
                 )
-            }
-            .distinct()
+            }.distinct()
             .toList()
     }
 }

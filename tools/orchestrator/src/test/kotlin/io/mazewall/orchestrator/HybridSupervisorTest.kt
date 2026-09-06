@@ -12,7 +12,6 @@ import kotlin.test.assertTrue
  * marker-gated, unassigned, terminal blockers only; priority desc, number asc.
  */
 class DispatchSelectorTest {
-
     private fun issue(
         id: String,
         identifier: String,
@@ -60,7 +59,9 @@ class DispatchSelectorTest {
     @Test
     fun `ignores issues without the markdown provenance marker`() {
         val manual = issue(
-            "m", "MAZ-26", number = 26,
+            "m",
+            "MAZ-26",
+            number = 26,
             description = "manual board entry, no marker",
         )
         assertTrue(DispatchSelector.ordered(listOf(manual)).isEmpty())
@@ -77,12 +78,16 @@ class DispatchSelectorTest {
     @Test
     fun `open blockers gate dispatch`() {
         val gated = issue(
-            "g", "MAZ-60", number = 60,
+            "g",
+            "MAZ-60",
+            number = 60,
             blockers = listOf(PaperclipBlocker("b1", "in_review", "MAZ-59")),
         )
         assertFalse(DispatchSelector.isDispatchable(gated))
         val released = issue(
-            "g2", "MAZ-61", number = 61,
+            "g2",
+            "MAZ-61",
+            number = 61,
             blockers = listOf(
                 PaperclipBlocker("b1", "done", "MAZ-59"),
                 PaperclipBlocker("b2", "cancelled", "MAZ-58"),
@@ -122,7 +127,9 @@ class DispatchSelectorTest {
         )
         assertEquals(null, DispatchSelector.select(issues, "MAZ-NONE")?.identifier)
         val gated = issue(
-            "c", "MAZ-82", number = 82,
+            "c",
+            "MAZ-82",
+            number = 82,
             blockers = listOf(PaperclipBlocker("b", "in_review", "MAZ-79")),
         )
         assertEquals(null, DispatchSelector.select(listOf(gated), "MAZ-82")?.identifier)
@@ -141,7 +148,6 @@ class DispatchSelectorTest {
 }
 
 class ComponentRouterTest {
-
     private val router = ComponentRouter()
 
     @Test

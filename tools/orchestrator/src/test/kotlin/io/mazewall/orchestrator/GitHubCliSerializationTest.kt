@@ -1,12 +1,11 @@
 package io.mazewall.orchestrator
 
+import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.json.Json
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
-import kotlin.test.assertNull
 import kotlin.test.assertTrue
-import kotlinx.serialization.json.Json
-import kotlinx.serialization.decodeFromString
 
 class GitHubCliSerializationTest {
     private val json = Json { ignoreUnknownKeys = true }
@@ -203,7 +202,7 @@ class GitHubCliSerializationTest {
             progressUpdated = progressUpdated,
             artifacts = listOf(artifact),
             sessionFailed = sessionFailed,
-            userMessaged = userMessaged
+            userMessaged = userMessaged,
         )
 
         val listResponse = ListActivitiesResponse(listOf(activity), "token")
@@ -215,10 +214,24 @@ class GitHubCliSerializationTest {
         assertEquals(1, parsedList.activities.size)
         val parsedActivity = parsedList.activities[0]
         assertEquals("act-1", parsedActivity.name)
-        assertEquals("step-1", parsedActivity.planGenerated?.plan?.steps?.get(0)?.id)
+        assertEquals(
+            "step-1",
+            parsedActivity.planGenerated
+            ?.plan
+            ?.steps
+            ?.get(0)
+            ?.id,
+        )
         assertEquals("plan-1", parsedActivity.planApproved?.planId)
         assertEquals("desc", parsedActivity.progressUpdated?.description)
-        assertEquals("patch", parsedActivity.artifacts?.get(0)?.changeSet?.gitPatch?.unidiffPatch)
+        assertEquals(
+            "patch",
+            parsedActivity.artifacts
+            ?.get(0)
+            ?.changeSet
+            ?.gitPatch
+            ?.unidiffPatch,
+        )
         assertEquals("reason", parsedActivity.sessionFailed?.reason)
         assertEquals("msg", parsedActivity.userMessaged?.userMessage)
         assertEquals("token", parsedList.nextPageToken)

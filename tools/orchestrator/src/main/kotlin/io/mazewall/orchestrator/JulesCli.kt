@@ -1,19 +1,18 @@
 package io.mazewall.orchestrator
 
-import java.net.URI
-import java.net.http.HttpClient
-import java.net.http.HttpRequest
-import java.net.http.HttpResponse
-import java.time.Duration
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
+import java.net.URI
+import java.net.http.HttpClient
+import java.net.http.HttpRequest
+import java.time.Duration
 
 data class JulesSession(
     val id: String,
     val description: String,
     val repo: String,
-    val status: String
+    val status: String,
 )
 
 // ─── Request payloads ────────────────────────────────────────────────────────
@@ -22,18 +21,18 @@ data class JulesSession(
 internal data class CreateSessionRequest(
     val prompt: String,
     val sourceContext: SourceContext,
-    val title: String
+    val title: String,
 )
 
 @Serializable
 internal data class SourceContext(
     val source: String,
-    val githubRepoContext: GithubRepoContext
+    val githubRepoContext: GithubRepoContext,
 )
 
 @Serializable
 internal data class GithubRepoContext(
-    val startingBranch: String
+    val startingBranch: String,
 )
 
 // ─── Sessions list response ───────────────────────────────────────────────────
@@ -42,12 +41,12 @@ internal data class GithubRepoContext(
 internal data class SessionResponse(
     val name: String,
     val title: String? = null,
-    val state: String? = null
+    val state: String? = null,
 )
 
 @Serializable
 internal data class ListSessionsResponse(
-    val sessions: List<SessionResponse> = emptyList()
+    val sessions: List<SessionResponse> = emptyList(),
 )
 
 // ─── Typed activity payload types ─────────────────────────────────────────────
@@ -57,47 +56,57 @@ internal data class PlanStep(
     val id: String = "",
     val title: String = "",
     val description: String = "",
-    val index: Int = 0
+    val index: Int = 0,
 )
 
 @Serializable
 internal data class Plan(
     val id: String = "",
-    val steps: List<PlanStep> = emptyList()
+    val steps: List<PlanStep> = emptyList(),
 )
 
 @Serializable
-internal data class PlanGeneratedPayload(val plan: Plan = Plan())
+internal data class PlanGeneratedPayload(
+    val plan: Plan = Plan(),
+)
 
 @Serializable
-internal data class PlanApprovedPayload(val planId: String = "")
+internal data class PlanApprovedPayload(
+    val planId: String = "",
+)
 
 @Serializable
 internal data class ProgressUpdatedPayload(
     val title: String = "",
-    val description: String = ""
+    val description: String = "",
 )
 
 @Serializable
 internal data class GitPatch(
     val unidiffPatch: String = "",
-    val baseCommitId: String = ""
+    val baseCommitId: String = "",
 )
 
 @Serializable
 internal data class ChangeSet(
     val source: String = "",
-    val gitPatch: GitPatch = GitPatch()
+    val gitPatch: GitPatch = GitPatch(),
 )
 
 @Serializable
-internal data class Artifact(val changeSet: ChangeSet = ChangeSet())
+internal data class Artifact(
+    val changeSet: ChangeSet = ChangeSet(),
+)
 
 @Serializable
-internal data class SessionFailedPayload(val reason: String = "")
+internal data class SessionFailedPayload(
+    val reason: String = "",
+)
 
 @Serializable
-internal data class UserMessagedPayload(val userMessage: String = "")
+internal data class UserMessagedPayload(
+    val userMessage: String = "",
+)
 
 // ─── Activity ─────────────────────────────────────────────────────────────────
 
@@ -114,13 +123,13 @@ internal data class Activity(
     // sessionCompleted is an empty JSON object {}; JsonElement allows it without a custom class
     val sessionCompleted: JsonElement? = null,
     val sessionFailed: SessionFailedPayload? = null,
-    val userMessaged: UserMessagedPayload? = null
+    val userMessaged: UserMessagedPayload? = null,
 )
 
 @Serializable
 internal data class ListActivitiesResponse(
     val activities: List<Activity> = emptyList(),
-    val nextPageToken: String? = null
+    val nextPageToken: String? = null,
 )
 
 // ─── JulesCli ─────────────────────────────────────────────────────────────────
@@ -128,10 +137,11 @@ internal data class ListActivitiesResponse(
 class RealJulesClient(
     private val config: OrchestratorConfig,
     private val transport: HttpTransport = RealHttpTransport(
-        HttpClient.newBuilder()
+        HttpClient
+            .newBuilder()
             .connectTimeout(Duration.ofSeconds(10))
-            .build()
-    )
+            .build(),
+    ),
 ) : JulesClient {
     private val json = Json { ignoreUnknownKeys = true }
 
@@ -139,7 +149,7 @@ class RealJulesClient(
         get() = System.getenv("JULES_API_KEY")
             ?: System.getProperty("JULES_API_KEY")
             ?: throw IllegalStateException(
-                "JULES_API_KEY is not configured. Please define it in your .ENV file (e.g. JULES_API_KEY=AIzaSy...)."
+                "JULES_API_KEY is not configured. Please define it in your .ENV file (e.g. JULES_API_KEY=AIzaSy...).",
             )
 
     // ── Private helpers ──────────────────────────────────────────────────────
@@ -164,7 +174,8 @@ class RealJulesClient(
         do {
             val uriStr = "https://jules.googleapis.com/v1alpha/$sessionPath/activities?pageSize=300" +
                     (if (pageToken != null) "&pageToken=$pageToken" else "")
-            val request = HttpRequest.newBuilder()
+            val request = HttpRequest
+                .newBuilder()
                 .uri(URI.create(uriStr))
                 .header("X-Goog-Api-Key", apiKey)
                 .GET()
@@ -241,8 +252,11 @@ class RealJulesClient(
         }
     }
 
-
-    override fun triggerSession(repo: String, issueId: String, prompt: String): JulesSession {
+    override fun triggerSession(
+        repo: String,
+        issueId: String,
+        prompt: String,
+    ): JulesSession {
         val sessionDescription = "[$issueId] ${prompt.take(150)}"
         println("🚀 Triggering remote Jules session for issue $issueId via REST API...")
 
@@ -250,14 +264,15 @@ class RealJulesClient(
             prompt = prompt,
             sourceContext = SourceContext(
                 source = "sources/github/$repo",
-                githubRepoContext = GithubRepoContext(startingBranch = "master")
+                githubRepoContext = GithubRepoContext(startingBranch = "master"),
             ),
-            title = sessionDescription
+            title = sessionDescription,
         )
 
         val requestBody = json.encodeToString(CreateSessionRequest.serializer(), requestPayload)
 
-        val request = HttpRequest.newBuilder()
+        val request = HttpRequest
+            .newBuilder()
             .uri(URI.create("https://jules.googleapis.com/v1alpha/sessions"))
             .header("Content-Type", "application/json")
             .header("X-Goog-Api-Key", apiKey)
@@ -275,7 +290,7 @@ class RealJulesClient(
                 id = session.name.substringAfterLast("/"),
                 description = session.title ?: sessionDescription,
                 repo = repo,
-                status = session.state ?: "PENDING"
+                status = session.state ?: "PENDING",
             )
         } catch (e: Exception) {
             System.err.println("  [Jules API] Error triggering session: ${e.message}")
@@ -283,7 +298,10 @@ class RealJulesClient(
         }
     }
 
-    override fun sendSessionMessage(sessionId: String, prompt: String) {
+    override fun sendSessionMessage(
+        sessionId: String,
+        prompt: String,
+    ) {
         val rawId = sessionId.trim()
         if (rawId.isBlank() || rawId == "dummy-session-id" || rawId.startsWith("dummy")) {
             println("  [Jules API] Skipping message to dummy/invalid session ID ($sessionId)")
@@ -295,7 +313,8 @@ class RealJulesClient(
         val requestBody = json.encodeToString(requestPayload)
         val sessionPath = sanitizeSessionPath(sessionId)
 
-        val request = HttpRequest.newBuilder()
+        val request = HttpRequest
+            .newBuilder()
             .uri(URI.create("https://jules.googleapis.com/v1alpha/$sessionPath:sendMessage"))
             .header("Content-Type", "application/json")
             .header("X-Goog-Api-Key", apiKey)
@@ -325,7 +344,8 @@ class RealJulesClient(
 
     /** Lists active remote Jules sessions by querying the REST API. */
     override fun listSessions(): List<JulesSession> {
-        val request = HttpRequest.newBuilder()
+        val request = HttpRequest
+            .newBuilder()
             .uri(URI.create("https://jules.googleapis.com/v1alpha/sessions"))
             .header("X-Goog-Api-Key", apiKey)
             .GET()
@@ -344,7 +364,7 @@ class RealJulesClient(
                         id = id,
                         description = session.title ?: "",
                         repo = "",
-                        status = session.state ?: ""
+                        status = session.state ?: "",
                     )
                 } else {
                     null
@@ -362,26 +382,41 @@ class RealJulesClient(
 
             // Find the latest activity that contains artifacts with a gitPatch
             val patchActivity = activities.lastOrNull { activity ->
-                activity.artifacts?.any { it.changeSet.gitPatch.unidiffPatch.isNotBlank() } == true
+                activity.artifacts?.any {
+                    it.changeSet.gitPatch.unidiffPatch
+                    .isNotBlank()
+                } == true
             }
 
-            return patchActivity?.artifacts
-                ?.firstOrNull { it.changeSet.gitPatch.unidiffPatch.isNotBlank() }
-                ?.changeSet?.gitPatch?.unidiffPatch
+            return patchActivity
+                ?.artifacts
+                ?.firstOrNull {
+                    it.changeSet.gitPatch.unidiffPatch
+                    .isNotBlank()
+                }?.changeSet
+                ?.gitPatch
+                ?.unidiffPatch
         } catch (e: Exception) {
             System.err.println("Failed to fetch session patch for $sessionId: ${e.message}")
             return null
         }
     }
 
-    override fun createSessionWithContext(repo: String, issueId: String, githubIssueNumber: String, previousPrUrl: String, previousBranch: String, originalTaskDescription: String): JulesSession {
+    override fun createSessionWithContext(
+        repo: String,
+        issueId: String,
+        githubIssueNumber: String,
+        previousPrUrl: String,
+        previousBranch: String,
+        originalTaskDescription: String,
+    ): JulesSession {
         val prompt = """
             🚨 **Merge Conflict Detected - Starting New Generation**
 
             This is a continuation of a previous task that encountered a merge conflict against the master branch.
             Your task is to re-implement the original changes cleanly on top of the current master branch.
 
-            **Original Task ([${issueId}] Issue #$githubIssueNumber):**
+            **Original Task ([$issueId] Issue #$githubIssueNumber):**
             $originalTaskDescription
 
             **Previous Generation PR:** $previousPrUrl
@@ -397,14 +432,15 @@ class RealJulesClient(
             prompt = prompt,
             sourceContext = SourceContext(
                 source = "sources/github/$repo",
-                githubRepoContext = GithubRepoContext(startingBranch = "master")
+                githubRepoContext = GithubRepoContext(startingBranch = "master"),
             ),
-            title = sessionDescription
+            title = sessionDescription,
         )
 
         val requestBody = json.encodeToString(CreateSessionRequest.serializer(), requestPayload)
 
-        val request = HttpRequest.newBuilder()
+        val request = HttpRequest
+            .newBuilder()
             .uri(URI.create("https://jules.googleapis.com/v1alpha/sessions"))
             .header("Content-Type", "application/json")
             .header("X-Goog-Api-Key", apiKey)
@@ -423,7 +459,7 @@ class RealJulesClient(
                 id = id,
                 description = sessionResponse.title ?: "",
                 repo = repo,
-                status = sessionResponse.state ?: "PENDING"
+                status = sessionResponse.state ?: "PENDING",
             )
         } catch (e: Exception) {
             System.err.println("  [Jules API] Error triggering session with context: ${e.message}")

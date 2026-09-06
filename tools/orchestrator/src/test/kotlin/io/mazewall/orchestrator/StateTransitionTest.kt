@@ -4,7 +4,6 @@ import java.io.File
 import kotlin.test.*
 
 class StateTransitionTest {
-
     @Test
     fun `test select task transitions to pending approval`() {
         val slot = SlotContext("issue-1")

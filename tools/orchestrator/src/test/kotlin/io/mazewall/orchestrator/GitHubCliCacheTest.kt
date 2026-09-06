@@ -3,10 +3,6 @@ package io.mazewall.orchestrator
 import kotlin.test.*
 
 class GitHubCliCacheTest {
-
-
-
-
     @Test
     fun testRetryUtils() {
         var calls = 0
@@ -35,7 +31,7 @@ class GitHubCliCacheTest {
             number = 361,
             title = "Profiler Audit Report",
             headRefName = "jules-335703985290049335-770d54e0",
-            body = "Fixes #358\n*PR created by Jules for task [335703985290049335](https://jules.google.com/task/335703985290049335)*"
+            body = "Fixes #358\n*PR created by Jules for task [335703985290049335](https://jules.google.com/task/335703985290049335)*",
         )
 
         // Clean session ID extraction from URL
@@ -54,7 +50,7 @@ class GitHubCliCacheTest {
             number = 320,
             title = "Socket Address Family Filtering",
             headRefName = "socket-address-family-filtering-2569796096437137191",
-            body = "Implements address family checks.\nFixes #318"
+            body = "Implements address family checks.\nFixes #318",
         )
 
         assertTrue(client.isPrMatching(pr, "318", "issue-318", null))

@@ -13,8 +13,7 @@ object PathModules {
         "/settings.gradle.kts",
     )
 
-    fun normalize(path: String): String =
-        path.replace('\\', '/').removePrefix("./").trimStart('/')
+    fun normalize(path: String): String = path.replace('\\', '/').removePrefix("./").trimStart('/')
 
     fun moduleFor(path: String): String? {
         val n = normalize(path)
@@ -41,7 +40,8 @@ object PathModules {
         return CORE_LOCK_SUFFIXES.any { n.endsWith(it) }
     }
 
-    fun componentFor(module: String): String = when (module) {
+    fun componentFor(module: String): String =
+        when (module) {
         ":enforcer" -> "enforcer"
         ":profiler" -> "profiler"
         ":platform" -> "platform"
@@ -57,7 +57,8 @@ object PathModules {
         val marker = "/kotlin/"
         val idx = n.indexOf(marker)
         if (idx < 0) return null
-        val fqcn = n.substring(idx + marker.length)
+        val fqcn = n
+            .substring(idx + marker.length)
             .removeSuffix(".kt")
             .removeSuffix(".java")
             .replace('/', '.')

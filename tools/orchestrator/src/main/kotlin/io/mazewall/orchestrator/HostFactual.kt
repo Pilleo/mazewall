@@ -43,7 +43,11 @@ internal object HostFactual {
         return null
     }
 
-    private fun resolveFile(token: String, repoRoot: File, files: List<String>): String? {
+    private fun resolveFile(
+        token: String,
+        repoRoot: File,
+        files: List<String>,
+    ): String? {
         val n = PathModules.normalize(token)
         val byPath = files.firstOrNull { it == n || it.endsWith("/$n") || File(it).name == File(n).name }
         if (byPath != null) return byPath

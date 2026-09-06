@@ -2,7 +2,9 @@ package io.mazewall.orchestrator
 
 import java.util.Properties
 
-class SlotContext(var currentIssueId: String) {
+class SlotContext(
+    var currentIssueId: String,
+) {
     var state: OrchestratorState = SelectTaskState
     var currentIssueTitle: String? = null
     var currentIssueFile: String? = null
@@ -35,7 +37,10 @@ class SlotContext(var currentIssueId: String) {
     var failedRebaseHeadSha: String? = null
     var lastSanitizedRebaseSha: String? = null
 
-    fun load(props: Properties, prefix: String) {
+    fun load(
+        props: Properties,
+        prefix: String,
+    ) {
         currentIssueTitle = props.getProperty("$prefix.currentIssueTitle").takeIf { !it.isNullOrEmpty() }
         currentIssueFile = props.getProperty("$prefix.currentIssueFile").takeIf { !it.isNullOrEmpty() }
         githubIssueNumber = props.getProperty("$prefix.githubIssueNumber").takeIf { !it.isNullOrEmpty() }
@@ -70,7 +75,10 @@ class SlotContext(var currentIssueId: String) {
         lastSanitizedRebaseSha = props.getProperty("$prefix.lastSanitizedRebaseSha").takeIf { !it.isNullOrEmpty() }
     }
 
-    fun save(props: Properties, prefix: String) {
+    fun save(
+        props: Properties,
+        prefix: String,
+    ) {
         props.setProperty("$prefix.state", state.name)
         props.setProperty("$prefix.currentIssueId", currentIssueId)
         currentIssueTitle?.let { props.setProperty("$prefix.currentIssueTitle", it) }

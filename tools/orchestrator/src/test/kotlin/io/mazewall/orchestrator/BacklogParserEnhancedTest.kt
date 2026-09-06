@@ -4,7 +4,6 @@ import java.io.File
 import kotlin.test.*
 
 class BacklogParserEnhancedTest {
-
     private var tempDir: File = File("")
 
     @BeforeTest
@@ -22,7 +21,8 @@ class BacklogParserEnhancedTest {
     @Test
     fun testParseIssueFileWithNewFields() {
         val file = File(tempDir, "issue-201-test-enhanced.md")
-        file.writeText("""
+        file.writeText(
+            """
             ---
             title: "Enhance Task Approval Telegram Message with Full Context"
             severity: "HIGH"
@@ -40,7 +40,8 @@ class BacklogParserEnhancedTest {
 
             **Needed:**
             Modify the Telegram approval request message formatting to extract and include the full context of the backlog issue.
-        """.trimIndent())
+        """.trimIndent(),
+        )
 
         val issue = BacklogParser.parseIssueFile(file)
         assertNotNull(issue)
@@ -68,7 +69,7 @@ class BacklogParserEnhancedTest {
             component: "orchestrator"
             effort: "small"
             ---
-            """.trimIndent()
+            """.trimIndent(),
         )
         val issue = assertNotNull(BacklogParser.parseIssueFile(file))
 
@@ -91,7 +92,7 @@ class BacklogParserEnhancedTest {
             component: "orchestrator"
             effort: "small"
             ---
-            """.trimIndent()
+            """.trimIndent(),
         )
         val issue = assertNotNull(BacklogParser.parseIssueFile(file))
 
@@ -103,7 +104,8 @@ class BacklogParserEnhancedTest {
     @Test
     fun testExtractSectionWithDifferentMarkers() {
         val file = File(tempDir, "issue-999-markers.md")
-        file.writeText("""
+        file.writeText(
+            """
             ---
             title: "Marker Test"
             priority: medium
@@ -116,7 +118,8 @@ class BacklogParserEnhancedTest {
 
             ## Another Section
             Something else.
-        """.trimIndent())
+        """.trimIndent(),
+        )
 
         val issue = BacklogParser.parseIssueFile(file)
         assertNotNull(issue)
@@ -127,7 +130,8 @@ class BacklogParserEnhancedTest {
     @Test
     fun testExtractSectionWithBoldText() {
         val file = File(tempDir, "issue-999-bold.md")
-        file.writeText("""
+        file.writeText(
+            """
             ---
             title: "Bold Test"
             priority: medium
@@ -138,7 +142,8 @@ class BacklogParserEnhancedTest {
 
             **Needed:**
             Finish the **task** please.
-        """.trimIndent())
+        """.trimIndent(),
+        )
 
         val issue = BacklogParser.parseIssueFile(file)
         assertNotNull(issue)
@@ -159,7 +164,7 @@ class BacklogParserEnhancedTest {
             effort = "big",
             component = "core",
             context = "A".repeat(3000),
-            needed = "B".repeat(2000)
+            needed = "B".repeat(2000),
         )
 
         val text = """
@@ -185,7 +190,8 @@ class BacklogParserEnhancedTest {
     @Test
     fun testTimestampBasedIssueIdParsing() {
         val file = File(tempDir, "issue-20260726-02-timestamp-based-issue-ids.md")
-        file.writeText("""
+        file.writeText(
+            """
             ---
             title: "Transition Orchestrator to Timestamp-Based Issue IDs"
             severity: "HIGH"
@@ -199,7 +205,8 @@ class BacklogParserEnhancedTest {
 
             **Context:** Test context
             **Needed:** Test needed
-        """.trimIndent())
+        """.trimIndent(),
+        )
 
         val issue = BacklogParser.parseIssueFile(file)
         assertNotNull(issue)
@@ -210,7 +217,8 @@ class BacklogParserEnhancedTest {
     @Test
     fun testParseIssueFileWithColonInMultilineValueExposesSplittingBug() {
         val file = File(tempDir, "issue-20260726-999-colon-multiline.md")
-        file.writeText("""
+        file.writeText(
+            """
             ---
             title:
               Review Task: Profiler Module & Security Audit
@@ -218,36 +226,46 @@ class BacklogParserEnhancedTest {
             status: "open"
             ---
             # Description
-        """.trimIndent())
+        """.trimIndent(),
+        )
 
         val issue = BacklogParser.parseIssueFile(file)
         assertNotNull(issue)
-        assertEquals("Review Task: Profiler Module & Security Audit", issue.title,
-            "The multiline title containing a colon should be correctly parsed.")
+        assertEquals(
+            "Review Task: Profiler Module & Security Audit",
+            issue.title,
+            "The multiline title containing a colon should be correctly parsed.",
+        )
     }
 
     @Test
     fun testParseIssueFileWithColonInQuotedValue() {
         val file = File(tempDir, "issue-20260726-998-colon-quoted.md")
-        file.writeText("""
+        file.writeText(
+            """
             ---
             title: "Review Task: Profiler Module & Security Audit"
             priority: medium
             status: "open"
             ---
             # Description
-        """.trimIndent())
+        """.trimIndent(),
+        )
 
         val issue = BacklogParser.parseIssueFile(file)
         assertNotNull(issue)
-        assertEquals("Review Task: Profiler Module & Security Audit", issue.title,
-            "Quoted value with a colon should be parsed completely without truncation.")
+        assertEquals(
+            "Review Task: Profiler Module & Security Audit",
+            issue.title,
+            "Quoted value with a colon should be parsed completely without truncation.",
+        )
     }
 
     @Test
     fun testParseListWithMultiline() {
         val file = File(tempDir, "issue-multiline-list.md")
-        file.writeText("""
+        file.writeText(
+            """
             ---
             title: "Multiline List Test"
             priority: medium
@@ -257,7 +275,8 @@ class BacklogParserEnhancedTest {
               - "file2.txt"
             ---
             # Description
-        """.trimIndent())
+        """.trimIndent(),
+        )
 
         val issue = BacklogParser.parseIssueFile(file)
         assertNotNull(issue)
@@ -269,7 +288,8 @@ class BacklogParserEnhancedTest {
     @Test
     fun testParseListWithNestedAndEscapedQuotes() {
         val file = File(tempDir, "issue-quotes-list.md")
-        file.writeText("""
+        file.writeText(
+            """
             ---
             title: "Quotes List Test"
             priority: medium
@@ -277,7 +297,8 @@ class BacklogParserEnhancedTest {
             target_files: ["\"file1.txt\"", "'file2.txt'", "\'file3.txt\'"]
             ---
             # Description
-        """.trimIndent())
+        """.trimIndent(),
+        )
 
         val issue = BacklogParser.parseIssueFile(file)
         assertNotNull(issue)
@@ -290,14 +311,16 @@ class BacklogParserEnhancedTest {
     @Test
     fun testParseIssueFileWithMissingRequiredPriority() {
         val file = File(tempDir, "issue-invalid-priority.md")
-        file.writeText("""
+        file.writeText(
+            """
             ---
             title: "Invalid Priority"
             priority: "not-an-integer"
             status: "open"
             ---
             # Description
-        """.trimIndent())
+        """.trimIndent(),
+        )
 
         val issue = BacklogParser.parseIssueFile(file)
         assertNull(issue) // should catch IllegalArgumentException and print error, returning null
@@ -313,14 +336,16 @@ class BacklogParserEnhancedTest {
     @Test
     fun testWriteAndRemoveGithubIssue() {
         val file = File(tempDir, "issue-123.md")
-        file.writeText("""
+        file.writeText(
+            """
             ---
             title: "Issue 123"
             priority: medium
             status: "open"
             ---
             # Description
-        """.trimIndent())
+        """.trimIndent(),
+        )
 
         val issue = BacklogParser.parseIssueFile(file)
         assertNotNull(issue)
@@ -341,14 +366,16 @@ class BacklogParserEnhancedTest {
     @Test
     fun testMarkIssueAsResolved() {
         val file = File(tempDir, "issue-123-resolve.md")
-        file.writeText("""
+        file.writeText(
+            """
             ---
             title: "Resolve Test"
             priority: medium
             status: "open"
             ---
             # Description
-        """.trimIndent())
+        """.trimIndent(),
+        )
 
         val issue = BacklogParser.parseIssueFile(file)
         assertNotNull(issue)
@@ -368,14 +395,16 @@ class BacklogParserEnhancedTest {
     @Test
     fun testExtractSectionMissingSection() {
         val file = File(tempDir, "issue-no-section.md")
-        file.writeText("""
+        file.writeText(
+            """
             ---
             title: "No Section"
             priority: medium
             status: "open"
             ---
             # Description
-        """.trimIndent())
+        """.trimIndent(),
+        )
 
         val issue = BacklogParser.parseIssueFile(file)
         assertNotNull(issue)

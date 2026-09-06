@@ -13,7 +13,8 @@ class EventNotifier(
     private val client: PaperclipClient,
     private val companyId: String,
     private val stateFile: java.nio.file.Path =
-        java.nio.file.Path.of(".supervisor_state.properties"),
+        java.nio.file.Path
+            .of(".supervisor_state.properties"),
 ) {
     private val props = Properties()
 

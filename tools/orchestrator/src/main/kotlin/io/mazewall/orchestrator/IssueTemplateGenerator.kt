@@ -49,10 +49,12 @@ class IssueTemplateGenerator(
     private val clock: () -> Instant = Instant::now,
     private val symbolLocator: SymbolLocator = FilesystemSymbolLocator(repoRoot),
 ) {
-    fun write(request: IssueScaffoldRequest): File =
-        scaffold(request, write = true).file
+    fun write(request: IssueScaffoldRequest): File = scaffold(request, write = true).file
 
-    fun scaffold(request: IssueScaffoldRequest, write: Boolean): IssueScaffoldResult {
+    fun scaffold(
+        request: IssueScaffoldRequest,
+        write: Boolean,
+    ): IssueScaffoldResult {
         val title = request.title.trim()
         require(title.isNotEmpty()) { "title must not be blank" }
         require(request.severity in VALID_SEVERITIES) {
@@ -131,7 +133,10 @@ class IssueTemplateGenerator(
         )
     }
 
-    private fun allocateFile(category: String, slug: String): Pair<ZonedDateTime, File> {
+    private fun allocateFile(
+        category: String,
+        slug: String,
+    ): Pair<ZonedDateTime, File> {
         var instant = clock().atZone(ZoneOffset.UTC)
         repeat(120) {
             val name = "issue-${instant.format(ID)}-$slug.md"
@@ -144,13 +149,15 @@ class IssueTemplateGenerator(
 
     private fun knownIssueIds(): Set<String> {
         if (!backlogRoot.exists()) return emptySet()
-        return backlogRoot.walkTopDown()
+        return backlogRoot
+            .walkTopDown()
             .filter { it.isFile && it.name.startsWith("issue-") && it.name.endsWith(".md") }
             .mapNotNull { BacklogParser.parseIssueFile(it)?.id }
             .toSet()
     }
 
-    private fun placeholderFileFor(module: String): String = when (module) {
+    private fun placeholderFileFor(module: String): String =
+        when (module) {
         ":enforcer" -> "enforcer/src/main/kotlin/io/mazewall/Policy.kt"
         ":profiler" -> "profiler/src/main/kotlin/io/mazewall/profiler/Profiler.kt"
         ":platform" -> "platform/src/main/kotlin/io/mazewall/core/Syscall.kt"
@@ -169,10 +176,20 @@ class IssueTemplateGenerator(
         private val VALID_SEVERITIES = setOf("CRITICAL", "HIGH", "MEDIUM", "LOW", "ENHANCEMENT")
         private val VALID_PRIORITIES = setOf("high", "medium", "low")
         private val VALID_CATEGORIES = setOf(
-            "code_health", "security", "performance", "testing", "implementation",
+            "code_health",
+            "security",
+            "performance",
+            "testing",
+            "implementation",
         )
         private val VALID_COMPONENTS = setOf(
-            "enforcer", "profiler", "orchestrator", "docs", "ci", "testing", "platform",
+            "enforcer",
+            "profiler",
+            "orchestrator",
+            "docs",
+            "ci",
+            "testing",
+            "platform",
         )
         private val VALID_MODULES = setOf(
             ":platform",
@@ -188,7 +205,8 @@ class IssueTemplateGenerator(
         )
 
         fun slugify(title: String): String {
-            val slug = title.lowercase()
+            val slug = title
+                .lowercase()
                 .replace(Regex("[^a-z0-9]+"), "-")
                 .trim('-')
                 .take(60)
@@ -293,10 +311,12 @@ class IssueTemplateGenerator(
             }
         }
 
-        private fun escapeYaml(value: String): String =
-            value.replace("\\", "\\\\").replace("\"", "\\\"")
+        private fun escapeYaml(value: String): String = value.replace("\\", "\\\\").replace("\"", "\\\"")
 
-        private fun StringBuilder.appendYamlList(key: String, items: List<String>) {
+        private fun StringBuilder.appendYamlList(
+            key: String,
+            items: List<String>,
+        ) {
             if (items.isEmpty()) {
                 appendLine("$key: []")
             } else {

@@ -1,11 +1,17 @@
 package io.mazewall.orchestrator
 
 fun interface LinePrompt {
-    fun ask(question: String, default: String?): String
+    fun ask(
+        question: String,
+        default: String?,
+    ): String
 }
 
 class ConsoleLinePrompt : LinePrompt {
-    override fun ask(question: String, default: String?): String {
+    override fun ask(
+        question: String,
+        default: String?,
+    ): String {
         val suffix = if (default != null) " [$default]" else ""
         print("$question$suffix: ")
         System.out.flush()

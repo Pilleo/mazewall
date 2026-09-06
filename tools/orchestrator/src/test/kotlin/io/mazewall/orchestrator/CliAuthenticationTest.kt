@@ -5,7 +5,6 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 
 class CliAuthenticationTest {
-
     @Test
     fun `detects GitHub CLI auth failures correctly`() {
         val command = arrayOf("gh", "pr", "view")

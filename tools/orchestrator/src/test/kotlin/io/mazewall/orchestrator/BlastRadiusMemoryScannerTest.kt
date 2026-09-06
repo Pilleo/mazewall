@@ -7,7 +7,6 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 class BlastRadiusMemoryScannerTest {
-
     @Test
     fun `extractImpactSymbols parses Codanna impact JSON output`() {
         val sampleJson = """
@@ -40,9 +39,12 @@ class BlastRadiusMemoryScannerTest {
     }
 
     @Test
-    fun `queryAgentMemory finds matching memories by symbol and deduplicates`(@TempDir tempDir: File) {
+    fun `queryAgentMemory finds matching memories by symbol and deduplicates`(
+        @TempDir tempDir: File,
+    ) {
         val memoryFile = File(tempDir, "standalone.json").apply {
-            writeText("""
+            writeText(
+                """
             {
               "mem:memories": {
                 "mem_1": {
@@ -65,7 +67,8 @@ class BlastRadiusMemoryScannerTest {
                 }
               }
             }
-            """.trimIndent())
+            """.trimIndent(),
+            )
         }
 
         val symbols = listOf("connectWithRetry", "SupervisorSocketInputStream")

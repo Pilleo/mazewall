@@ -20,13 +20,17 @@ class AcpChatModel(
     private val processFactory: (List<String>) -> Process = { cmd ->
         ProcessBuilder(cmd).directory(workingDirectory).redirectErrorStream(false).start()
     },
-) : ChatModel, AutoCloseable {
+) : ChatModel,
+    AutoCloseable {
     private val lock = Any()
     private var process: Process? = null
     private var session: AcpJsonRpcSession? = null
     private var sessionId: String? = null
 
-    override fun complete(system: String, user: String): String {
+    override fun complete(
+        system: String,
+        user: String,
+    ): String {
         synchronized(lock) {
             val sess = ensureSession()
             val id = sessionId ?: error("ACP session missing sessionId")
@@ -120,7 +124,10 @@ internal class AcpJsonRpcSession(
         return sessionId
     }
 
-    fun setMode(sessionId: String, modeId: String) {
+    fun setMode(
+        sessionId: String,
+        modeId: String,
+    ) {
         val id = request(
             "session/set_mode",
             """{"sessionId":${jsonString(sessionId)},"modeId":${jsonString(modeId)}}""",
@@ -128,7 +135,10 @@ internal class AcpJsonRpcSession(
         waitForResult(id)
     }
 
-    fun prompt(sessionId: String, text: String): String {
+    fun prompt(
+        sessionId: String,
+        text: String,
+    ): String {
         val id = request(
             "session/prompt",
             """{"sessionId":${jsonString(sessionId)},"prompt":[{"type":"text","text":${jsonString(text)}}]}""",
@@ -145,13 +155,19 @@ internal class AcpJsonRpcSession(
         return combined
     }
 
-    private fun request(method: String, params: String): Int {
+    private fun request(
+        method: String,
+        params: String,
+    ): Int {
         val id = nextId.getAndIncrement()
         write("""{"jsonrpc":"2.0","id":$id,"method":${jsonString(method)},"params":$params}""")
         return id
     }
 
-    private fun notify(method: String, params: String) {
+    private fun notify(
+        method: String,
+        params: String,
+    ) {
         write("""{"jsonrpc":"2.0","method":${jsonString(method)},"params":$params}""")
     }
 
@@ -172,10 +188,13 @@ internal class AcpJsonRpcSession(
             if (!trimmed.startsWith("{")) continue
             val method = optionalJsonStringField(trimmed, "method")
             val id = optionalJsonIntField(trimmed, "id")
-            if (id != null && method != null &&
-                (method.startsWith("fs/") ||
+            if (id != null &&
+                method != null &&
+                (
+                    method.startsWith("fs/") ||
                     method.startsWith("terminal/") ||
-                    method == "session/request_permission")
+                    method == "session/request_permission"
+                )
             ) {
                 handleClientRequest(id, method, trimmed)
                 continue
@@ -194,7 +213,11 @@ internal class AcpJsonRpcSession(
         }
     }
 
-    private fun handleClientRequest(id: Int, method: String, raw: String) {
+    private fun handleClientRequest(
+        id: Int,
+        method: String,
+        raw: String,
+    ) {
         when (method) {
             "session/request_permission" -> write(
                 """{"jsonrpc":"2.0","id":$id,"result":{"outcome":{"outcome":"selected","optionId":"allow-once"}}}""",
@@ -224,7 +247,12 @@ internal class AcpJsonRpcSession(
     private fun readAllowed(path: String?): String? {
         if (path.isNullOrBlank()) return null
         val root = workingDirectory.canonicalFile.toPath()
-        val resolved = workingDirectory.toPath().resolve(path).normalize().toFile().canonicalFile
+        val resolved = workingDirectory
+            .toPath()
+            .resolve(path)
+            .normalize()
+            .toFile()
+            .canonicalFile
         if (!resolved.toPath().startsWith(root)) return null
         if (!resolved.isFile) return null
         return resolved.readText().take(8000)
@@ -285,7 +313,10 @@ internal fun extractStopText(result: String): String {
     return optionalJsonStringField(result, "text").orEmpty()
 }
 
-internal fun optionalJsonStringField(raw: String, key: String): String? {
+internal fun optionalJsonStringField(
+    raw: String,
+    key: String,
+): String? {
     return try {
         parseJsonStringField(raw, key).takeIf { it.isNotEmpty() }
     } catch (_: IllegalArgumentException) {
@@ -293,7 +324,10 @@ internal fun optionalJsonStringField(raw: String, key: String): String? {
     }
 }
 
-internal fun optionalJsonIntField(raw: String, key: String): Int? {
+internal fun optionalJsonIntField(
+    raw: String,
+    key: String,
+): Int? {
     val marker = "\"$key\""
     val at = raw.indexOf(marker)
     if (at < 0) return null
@@ -303,7 +337,10 @@ internal fun optionalJsonIntField(raw: String, key: String): Int? {
     return digits.toIntOrNull()
 }
 
-internal fun jsonObjectAfterKey(raw: String, key: String): String? {
+internal fun jsonObjectAfterKey(
+    raw: String,
+    key: String,
+): String? {
     val marker = "\"$key\""
     val at = raw.indexOf(marker)
     if (at < 0) return null

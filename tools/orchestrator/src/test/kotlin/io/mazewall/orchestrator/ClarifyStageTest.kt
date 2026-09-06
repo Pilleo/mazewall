@@ -93,7 +93,8 @@ class ClarifyStageTest {
         assertFalse(cheap.copy(coreLock = true).let { ClarifyPolicy.skipStrongReview(it) })
         assertFalse(cheap.copy(hasSideEffects = true).let { ClarifyPolicy.skipStrongReview(it) })
         assertFalse(
-            cheap.copy(questions = listOf("Does Landlock ABI v4 exist on CI?"))
+            cheap
+                .copy(questions = listOf("Does Landlock ABI v4 exist on CI?"))
                 .let { ClarifyPolicy.skipStrongReview(it) },
         )
     }

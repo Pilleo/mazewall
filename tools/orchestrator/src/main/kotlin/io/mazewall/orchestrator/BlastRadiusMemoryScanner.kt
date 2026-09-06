@@ -39,7 +39,6 @@ data class BlastRadiusReport(
 }
 
 object BlastRadiusMemoryScanner {
-
     private val json = Json { ignoreUnknownKeys = true }
 
     fun scan(
@@ -130,7 +129,8 @@ object BlastRadiusMemoryScanner {
         }
     }
 
-    fun formatMarkdownReport(report: BlastRadiusReport): String = buildString {
+    fun formatMarkdownReport(report: BlastRadiusReport): String =
+        buildString {
         appendLine("### 🔍 Blast Radius Impact Memory: `${report.rootSymbol}`")
         appendLine()
         appendLine("**Impacted Symbols (${report.impactedSymbols.size}):**")
@@ -149,7 +149,10 @@ object BlastRadiusMemoryScanner {
         }
     }
 
-    private fun defaultRunCodanna(cmd: List<String>, repoRoot: File): String {
+    private fun defaultRunCodanna(
+        cmd: List<String>,
+        repoRoot: File,
+    ): String {
         return try {
             val process = ProcessBuilder(listOf("codanna") + cmd)
                 .directory(repoRoot)

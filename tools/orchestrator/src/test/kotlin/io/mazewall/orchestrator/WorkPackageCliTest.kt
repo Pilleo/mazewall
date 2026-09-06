@@ -7,7 +7,6 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class WorkPackageCliTest {
-
     @Test
     fun syscallPathIsExclusiveAndNeedsKernelTests() {
         val pkg = WorkPackage.assemble(
@@ -56,7 +55,8 @@ class WorkPackageCliTest {
 
     @Test
     fun jsonUsesPlainKeys() {
-        val json = WorkPackage.assemble(
+        val json = WorkPackage
+            .assemble(
             files = listOf("platform/src/main/kotlin/io/mazewall/core/Syscall.kt"),
         ).toJson()
         assertContains(json, "\"edit\"")
@@ -142,10 +142,12 @@ class WorkPackageCliTest {
     fun testCliDecomposeAndJsonFlags() {
         val parsed = IssueCli.parse(
             arrayOf(
-                "--title", "Add Syscall X",
+                "--title",
+                "Add Syscall X",
                 "--decompose",
                 "--json",
-                "--file", "platform/src/main/kotlin/io/mazewall/core/Syscall.kt",
+                "--file",
+                "platform/src/main/kotlin/io/mazewall/core/Syscall.kt",
             ),
         )
         assertTrue(parsed.decompose)

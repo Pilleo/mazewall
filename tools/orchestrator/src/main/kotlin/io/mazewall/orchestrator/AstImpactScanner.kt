@@ -13,7 +13,10 @@ data class ImpactHit(
 }
 
 fun interface ImpactScanner {
-    fun scan(symbols: List<String>, originFiles: Collection<String>): List<ImpactHit>
+    fun scan(
+        symbols: List<String>,
+        originFiles: Collection<String>,
+    ): List<ImpactHit>
 }
 
 internal val IMPACT_NOISE = setOf(
@@ -26,13 +29,18 @@ internal val IMPACT_NOISE = setOf(
     "java",
 )
 
-internal fun fileOutlines(repoRoot: File, files: List<String>, maxLinesPerFile: Int = 40): String {
+internal fun fileOutlines(
+    repoRoot: File,
+    files: List<String>,
+    maxLinesPerFile: Int = 40,
+): String {
     return files.take(8).joinToString("\n\n") { path ->
         val file = File(repoRoot, path)
         val lines = if (!file.isFile) {
             listOf("(missing)")
         } else {
-            file.readLines()
+            file
+                .readLines()
                 .map { it.trimStart() }
                 .filter { t ->
                     t.startsWith("class ") ||
@@ -41,19 +49,20 @@ internal fun fileOutlines(repoRoot: File, files: List<String>, maxLinesPerFile: 
                         t.startsWith("enum ") ||
                         t.startsWith("fun ") ||
                         t.startsWith("fun interface ")
-                }
-                .map { t ->
+                }.map { t ->
                     val brace = t.indexOf('{')
                     if (brace >= 0) t.take(brace).trimEnd() else t
-                }
-                .take(maxLinesPerFile)
+                }.take(maxLinesPerFile)
                 .ifEmpty { listOf("(no class/fun signatures)") }
         }
         "### $path (outline)\n" + lines.joinToString("\n")
     }
 }
 
-internal fun impactSymbols(request: IssueScaffoldRequest, files: List<String>): List<String> {
+internal fun impactSymbols(
+    request: IssueScaffoldRequest,
+    files: List<String>,
+): List<String> {
     val fromFiles = files.map { File(it).nameWithoutExtension.removeSuffix("Test") }
     return (request.symbols + fromFiles)
         .map { it.trim() }
@@ -61,8 +70,7 @@ internal fun impactSymbols(request: IssueScaffoldRequest, files: List<String>): 
             name.length >= 2 &&
                 name[0].isLetter() &&
                 name !in IMPACT_NOISE
-        }
-        .distinct()
+        }.distinct()
 }
 
 /**
@@ -88,7 +96,10 @@ class FilesystemImpactScanner(
         "demos",
     )
 
-    override fun scan(symbols: List<String>, originFiles: Collection<String>): List<ImpactHit> {
+    override fun scan(
+        symbols: List<String>,
+        originFiles: Collection<String>,
+    ): List<ImpactHit> {
         val origins = originFiles.map { PathModules.normalize(it) }.toSet()
         val found = LinkedHashSet<ImpactHit>()
         for (symbol in symbols) {
@@ -120,7 +131,10 @@ class FilesystemImpactScanner(
         }
     }
 
-    private fun parseSgOutput(output: String, symbol: String): List<ImpactHit>? {
+    private fun parseSgOutput(
+        output: String,
+        symbol: String,
+    ): List<ImpactHit>? {
         if (output.contains("ast-grep binary not found")) return null
         val hits = mutableListOf<ImpactHit>()
         val linePattern = Regex("""^(.+):(\d+):\d+:(.*)$""")
@@ -140,11 +154,16 @@ class FilesystemImpactScanner(
         for (rootName in searchRoots) {
             val root = File(repoRoot, rootName)
             if (!root.exists()) continue
-            root.walkTopDown()
+            root
+                .walkTopDown()
                 .onEnter { dir -> dir.name !in skipDirs }
                 .filter { it.isFile && (it.extension == "kt" || it.extension == "java") }
                 .forEach { file ->
-                    val relative = repoRoot.toPath().relativize(file.toPath()).toString().replace('\\', '/')
+                    val relative = repoRoot
+                        .toPath()
+                        .relativize(file.toPath())
+                        .toString()
+                        .replace('\\', '/')
                     file.readLines().forEachIndexed { index, line ->
                         if (hits.size >= maxHits) return hits
                         val trimmed = line.trimStart()

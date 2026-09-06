@@ -20,7 +20,11 @@ public enum class BacklogPriority {
 
     public companion object {
         public fun parse(raw: String?): BacklogPriority {
-            val token = raw?.removeSurrounding("\"")?.removeSurrounding("'")?.trim()?.uppercase()
+            val token = raw
+                ?.removeSurrounding("\"")
+                ?.removeSurrounding("'")
+                ?.trim()
+                ?.uppercase()
             return when (token) {
                 "HIGH" -> HIGH
                 "MEDIUM" -> MEDIUM

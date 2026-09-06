@@ -12,7 +12,11 @@ import java.time.format.DateTimeFormatter
 object IssuePlanner {
     private val ID_INSTANT = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss")
 
-    fun planFile(file: File, repoRoot: File, write: Boolean = true): String {
+    fun planFile(
+        file: File,
+        repoRoot: File,
+        write: Boolean = true,
+    ): String {
         if (!file.isFile) return ""
         val raw = file.readText()
         if (!raw.contains("**Context:**") || !raw.contains("**Needed:**")) return raw
@@ -51,21 +55,28 @@ object IssuePlanner {
         return planned.markdown
     }
 
-    fun ensureDispatchable(file: File, repoRoot: File): Boolean {
+    fun ensureDispatchable(
+        file: File,
+        repoRoot: File,
+    ): Boolean {
         if (!file.isFile) return true
         val planned = planFile(file, repoRoot, write = true)
         if (planned.contains("FILL:")) return false
         return Regex("""(?m)^\s*1[.\)]""").containsMatchIn(planned)
     }
 
-    internal fun requestFrom(issue: BacklogIssue, raw: String): IssueScaffoldRequest {
+    internal fun requestFrom(
+        issue: BacklogIssue,
+        raw: String,
+    ): IssueScaffoldRequest {
         val symbols = yamlStringList(raw, "target_symbols")
         val hasSide = when {
             Regex("""has_side_effects:\s*true""").containsMatchIn(raw) -> true
             Regex("""has_side_effects:\s*false""").containsMatchIn(raw) -> false
             else -> null
         }
-        val openQs = issue.openQuestions.orEmpty()
+        val openQs = issue.openQuestions
+            .orEmpty()
             .lineSequence()
             .map { it.replace(Regex("""^\s*\d+\.\s*"""), "").trim() }
             .filter { it.isNotEmpty() }
@@ -100,12 +111,21 @@ object IssuePlanner {
         }
     }
 
-    private fun yamlStringList(raw: String, key: String): List<String> {
+    private fun yamlStringList(
+        raw: String,
+        key: String,
+    ): List<String> {
         val block = Regex("""^$key:\s*\n((?:[ \t]+- .+\n?)+)""", RegexOption.MULTILINE).find(raw)
             ?: return emptyList()
-        return block.groupValues[1].lineSequence()
-            .map { it.trim().removePrefix("-").trim().removeSurrounding("\"") }
-            .filter { it.isNotEmpty() }
+        return block.groupValues[1]
+            .lineSequence()
+            .map {
+                it
+                .trim()
+                .removePrefix("-")
+                .trim()
+                .removeSurrounding("\"")
+            }.filter { it.isNotEmpty() }
             .toList()
     }
 
@@ -116,7 +136,8 @@ object IssuePlanner {
         return try {
             LocalDateTime.parse(stamp, ID_INSTANT).atZone(ZoneOffset.UTC)
         } catch (_: Exception) {
-            java.time.Instant.EPOCH.atZone(ZoneOffset.UTC)
+            java.time.Instant.EPOCH
+                .atZone(ZoneOffset.UTC)
         }
     }
 }

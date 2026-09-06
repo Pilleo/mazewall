@@ -13,7 +13,6 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class IssueTemplateGeneratorTest {
-
     private lateinit var tempDir: File
 
     @BeforeTest
@@ -238,9 +237,12 @@ class IssueTemplateGeneratorTest {
     fun cliParseKeepsQuotedTitlePiecesAsSeparateFlags() {
         val parsed = IssueCli.parse(
             arrayOf(
-                "--title", "Cap cache",
-                "--file", "enforcer/a.kt",
-                "--symbol", "PolicyCompilationCache",
+                "--title",
+                "Cap cache",
+                "--file",
+                "enforcer/a.kt",
+                "--symbol",
+                "PolicyCompilationCache",
                 "--dry-run",
             ),
         )
@@ -310,10 +312,13 @@ class IssueTemplateGeneratorTest {
     fun cliSideEffectFlagsAreNonInteractive() {
         val parsed = IssueCli.parse(
             arrayOf(
-                "--title", "Cap cache",
-                "--file", "enforcer/a.kt",
+                "--title",
+                "Cap cache",
+                "--file",
+                "enforcer/a.kt",
                 "--side-effects",
-                "--side-effect", "profiler Cache.put",
+                "--side-effect",
+                "profiler Cache.put",
                 "--non-interactive",
             ),
         )
@@ -786,7 +791,12 @@ class IssueTemplateGeneratorTest {
     @Test
     fun readyForReviewRejectsEllipsisAndUnnumberedNeeded() {
         val scratch = File(tempDir, "scratch-verify")
-        fun md(context: String, needed: String, side: String? = "false"): String {
+
+        fun md(
+            context: String,
+            needed: String,
+            side: String? = "false",
+        ): String {
             val sideYaml = if (side == null) "" else "has_side_effects: $side\n"
             return """
 ---
@@ -814,7 +824,8 @@ $needed
         assertTrue(IssueMarkdownVerifier.readyForReview(md("map grows", "cap it"), scratch).any { it.contains("numbered") })
         assertTrue(IssueMarkdownVerifier.readyForReview(md("map grows", "1. Cap.", side = null), scratch).any { it.contains("has_side_effects") })
         assertTrue(
-            IssueMarkdownVerifier.readyForReview(md("map grows", "1. Cap.", side = "true"), scratch)
+            IssueMarkdownVerifier
+                .readyForReview(md("map grows", "1. Cap.", side = "true"), scratch)
                 .any { it.contains("side effects") },
         )
         assertTrue(IssueMarkdownVerifier.readyForReview(md("map grows", "1. Cap.", side = "false"), scratch).isEmpty())
@@ -1019,13 +1030,24 @@ $needed
                 factoryCalls++
                 object : Process() {
                     override fun getOutputStream() = clientToAgent
+
                     override fun getInputStream() = clientIn
+
                     override fun getErrorStream() = java.io.ByteArrayInputStream(ByteArray(0))
+
                     override fun waitFor(): Int = 0
-                    override fun waitFor(timeout: Long, unit: java.util.concurrent.TimeUnit): Boolean = true
+
+                    override fun waitFor(
+                        timeout: Long,
+                        unit: java.util.concurrent.TimeUnit,
+                    ): Boolean = true
+
                     override fun exitValue(): Int = 0
+
                     override fun destroy() {}
+
                     override fun destroyForcibly(): Process = this
+
                     override fun isAlive(): Boolean = true
                 }
             },
@@ -1109,9 +1131,12 @@ $needed
     fun cliOpenQuestionFlagsAreNonInteractive() {
         val parsed = IssueCli.parse(
             arrayOf(
-                "--title", "Cap cache",
-                "--file", "enforcer/a.kt",
-                "--open-question", "LRU?",
+                "--title",
+                "Cap cache",
+                "--file",
+                "enforcer/a.kt",
+                "--open-question",
+                "LRU?",
                 "--non-interactive",
             ),
         )

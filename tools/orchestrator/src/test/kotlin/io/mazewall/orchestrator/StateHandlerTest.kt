@@ -1,11 +1,11 @@
 package io.mazewall.orchestrator
 
-import java.io.File
-import java.util.concurrent.TimeUnit
-import kotlin.test.*
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.MethodSource
+import java.io.File
+import java.util.concurrent.TimeUnit
 import kotlin.reflect.KClass
+import kotlin.test.*
 
 class MockOrchestratorEnvironment : OrchestratorEnvironment {
     override val config = OrchestratorConfig()
@@ -40,84 +40,198 @@ class MockOrchestratorEnvironment : OrchestratorEnvironment {
     var clearPrCacheCount = 0
     val ensuredLabels = mutableListOf<String>()
 
-    override fun println(message: Any?) { printlns.add(message.toString()) }
+    override fun println(message: Any?) {
+        printlns.add(message.toString())
+    }
+
     override fun print(message: Any?) {}
+
     override fun errPrintln(message: Any?) {}
-    override fun sleep(duration: Long, unit: TimeUnit) { sleepCount++ }
-    override fun ringBell(times: Int) { bellRungCount += times }
+
+    override fun sleep(
+        duration: Long,
+        unit: TimeUnit,
+    ) {
+        sleepCount++
+    }
+
+    override fun ringBell(times: Int) {
+        bellRungCount += times
+    }
+
     override fun readLine(): String? = if (approved) "y" else "n"
+
     override fun getEnvOrNull(key: String): String? = null
 
-    override fun sendNotification(message: String) { notifications.add(message) }
-    override fun requestApproval(issueId: String, text: String): Boolean = approved
-    override fun sendApprovalRequest(issueId: String, text: String) { notifications.add(text) }
-    override fun checkApprovalNonBlocking(issueId: String): Boolean? = approved
-    override fun pollTelegramUpdates(context: OrchestratorContext) {}
+    override fun sendNotification(message: String) {
+        notifications.add(message)
+    }
 
+    override fun requestApproval(
+        issueId: String,
+        text: String,
+    ): Boolean = approved
+
+    override fun sendApprovalRequest(
+        issueId: String,
+        text: String,
+    ) {
+        notifications.add(text)
+    }
+
+    override fun checkApprovalNonBlocking(issueId: String): Boolean? = approved
+
+    override fun pollTelegramUpdates(context: OrchestratorContext) {}
 
     var hasUnableToCompleteActivity: Boolean = false
 
-
     override val gitHubClient = object : GitHubClient {
         override fun getPrMergeStatus(prNumber: String): PrMergeStatus = prMergeStatus
+
         override fun findExistingIssueNumber(issueId: String): String? = existingIssueNumber
-        override fun createIssue(title: String, body: String, label: String): String = createdIssueNumber
+
+        override fun createIssue(
+            title: String,
+            body: String,
+            label: String,
+        ): String = createdIssueNumber
+
         override fun getRepoName(): String = "mock/repo"
-        override fun addLabel(issueNumber: String, label: String) {}
-        override fun ensureLabelExists(label: String) { ensuredLabels.add(label) }
-        override fun labelPr(prNumber: String, label: String) {}
+
+        override fun addLabel(
+            issueNumber: String,
+            label: String,
+        ) {}
+
+        override fun ensureLabelExists(label: String) {
+            ensuredLabels.add(label)
+        }
+
+        override fun labelPr(
+            prNumber: String,
+            label: String,
+        ) {}
+
         override fun isIssueClosed(issueNumber: String): Boolean = issueClosed
+
         override fun isPrClosed(prNumber: String): Boolean = prClosed
-        override fun findLinkedPR(issueNumber: String, issueId: String, julesSessionId: String?): String? = linkedPrNumber
+
+        override fun findLinkedPR(
+            issueNumber: String,
+            issueId: String,
+            julesSessionId: String?,
+        ): String? = linkedPrNumber
+
         override fun isPrMerged(prNumber: String): Boolean = prMerged
+
         override fun getPrHeadSha(prNumber: String): String = prHeadSha
+
         override fun checkBuildStatus(prNumber: String): String = buildStatus
+
         override fun getPrComments(prNumber: String): List<GitHubComment> = prComments
-        override fun commentOnPr(prNumber: String, body: String) { commentedPrs.add(prNumber to body) }
-        override fun commentOnIssue(issueNumber: String, body: String) {
+
+        override fun commentOnPr(
+            prNumber: String,
+            body: String,
+        ) {
+            commentedPrs.add(prNumber to body)
+        }
+
+        override fun commentOnIssue(
+            issueNumber: String,
+            body: String,
+        ) {
             commentOnIssueException?.let { throw it }
             commentedIssues.add(issueNumber to body)
         }
+
         override fun getPrDiff(prNumber: String): String = "mock diff"
+
         override fun getFailedBuildLogs(prNumber: String): String = "mock failed logs"
+
         override fun getPrUrl(prNumber: String): String = "mock url"
-        override fun isCommitEmpty(prNumber: String, shaOld: String, shaNew: String): Boolean = isCommitEmptyResult
-        override fun clearPrCache(prNumber: String) { clearPrCacheCount++ }
+
+        override fun isCommitEmpty(
+            prNumber: String,
+            shaOld: String,
+            shaNew: String,
+        ): Boolean = isCommitEmptyResult
+
+        override fun clearPrCache(prNumber: String) {
+            clearPrCacheCount++
+        }
     }
 
     override val julesClient = object : JulesClient {
         override fun getActiveSession(issueId: String): JulesSession? = julesSession
+
         override fun getSessionStatusFromActivities(sessionId: String): String? = julesSession?.status
+
         override fun hasUnableToCompleteActivity(sessionId: String): Boolean = hasUnableToCompleteActivity
-        override fun triggerSession(repo: String, issueId: String, prompt: String): JulesSession {
+
+        override fun triggerSession(
+            repo: String,
+            issueId: String,
+            prompt: String,
+        ): JulesSession {
             triggeredJulesSessions++
             return JulesSession("created-session", "desc", repo, "PENDING")
         }
-        override fun createSessionWithContext(repo: String, issueId: String, githubIssueNumber: String, previousPrUrl: String, previousBranch: String, originalTaskDescription: String): JulesSession {
+
+        override fun createSessionWithContext(
+            repo: String,
+            issueId: String,
+            githubIssueNumber: String,
+            previousPrUrl: String,
+            previousBranch: String,
+            originalTaskDescription: String,
+        ): JulesSession {
             val session = JulesSession("s-context-${createdGenerationSessions.size + 1}", "desc", repo, "PENDING")
             createdGenerationSessions.add(session.id)
             return session
         }
-        override fun sendSessionMessage(sessionId: String, prompt: String) { sentJulesMessages.add(sessionId to prompt) }
+
+        override fun sendSessionMessage(
+            sessionId: String,
+            prompt: String,
+        ) {
+            sentJulesMessages.add(sessionId to prompt)
+        }
+
         override fun listSessions(): List<JulesSession> = emptyList()
 
         override fun getSessionPatch(sessionId: String): String? {
             return null
         }
-
     }
 
     override fun parseAllIssues(): List<BacklogIssue> = issues
-    override fun writeGithubIssue(issue: BacklogIssue, number: Int) {}
+
+    override fun writeGithubIssue(
+        issue: BacklogIssue,
+        number: Int,
+    ) {}
+
     override fun removeGithubIssue(issue: BacklogIssue) {}
-    override fun markIssueAsResolved(issue: BacklogIssue) { resolvedIssues.add(issue) }
-    override fun markIssueAsDeferred(issue: BacklogIssue) { deferredIssues.add(issue) }
-    override fun deleteStateFile() { stateFileDeleted = true }
-    override fun generateKnowledgeMap() { mapsRegenerated = true }
+
+    override fun markIssueAsResolved(issue: BacklogIssue) {
+        resolvedIssues.add(issue)
+    }
+
+    override fun markIssueAsDeferred(issue: BacklogIssue) {
+        deferredIssues.add(issue)
+    }
+
+    override fun deleteStateFile() {
+        stateFileDeleted = true
+    }
+
+    override fun generateKnowledgeMap() {
+        mapsRegenerated = true
+    }
 }
 
 class StateHandlerTest {
-
     @Test
     fun testSelectTaskTransitionsToPendingApproval() {
         val env = MockOrchestratorEnvironment()
@@ -505,9 +619,6 @@ class StateHandlerTest {
         assertTrue(env.commentedPrs.isEmpty(), "No correction comment should be sent for non-empty commits")
     }
 
-
-
-
     @Test
     fun testAwaitingPrIssueClosedResolvesTask() {
         val env = MockOrchestratorEnvironment()
@@ -589,7 +700,10 @@ class StateHandlerTest {
     @Test
     fun testCreateGenerationTransitionsEvenIfIssueCommentFails() {
         val env = MockOrchestratorEnvironment()
-        val issueFile = kotlin.io.path.createTempFile().toFile().apply { writeText("Task") }
+        val issueFile = kotlin.io.path
+            .createTempFile()
+            .toFile()
+            .apply { writeText("Task") }
         env.issues.add(BacklogIssue(issueFile, "issue-1", "Title", BacklogPriority.LOW, "open", emptyList()))
         env.commentOnIssueException = RuntimeException("GitHub comment failed")
         val context = OrchestratorContext().apply {
@@ -615,7 +729,10 @@ class StateHandlerTest {
     @Test
     fun testCreateGenerationEnsuresSupersededLabelBeforeUse() {
         val env = MockOrchestratorEnvironment()
-        val issueFile = kotlin.io.path.createTempFile().toFile().apply { writeText("Task") }
+        val issueFile = kotlin.io.path
+            .createTempFile()
+            .toFile()
+            .apply { writeText("Task") }
         env.issues.add(BacklogIssue(issueFile, "issue-1", "Title", BacklogPriority.LOW, "open", emptyList()))
         val context = OrchestratorContext().apply {
             currentIssueId = "issue-1"
@@ -1077,14 +1194,19 @@ class StateHandlerTest {
 
     @Test
     fun testMergeMasterIntoBranchReconstruction() {
-        val tempDir = java.nio.file.Files.createTempDirectory("test-git-merge").toFile()
+        val tempDir = java.nio.file.Files
+            .createTempDirectory("test-git-merge")
+            .toFile()
         try {
             fun runGit(vararg command: String): String {
                 val pb = ProcessBuilder(*command)
                 pb.directory(tempDir)
                 pb.redirectErrorStream(true)
                 val process = pb.start()
-                val output = process.inputStream.bufferedReader().readText().trim()
+                val output = process.inputStream
+                    .bufferedReader()
+                    .readText()
+                    .trim()
                 process.waitFor()
                 if (process.exitValue() != 0) {
                     throw RuntimeException("Command '${command.joinToString(" ")}' failed with exit code ${process.exitValue()}: $output")
@@ -1092,12 +1214,18 @@ class StateHandlerTest {
                 return output
             }
 
-            fun runGitInDir(dir: File, vararg command: String): String {
+            fun runGitInDir(
+                dir: File,
+                vararg command: String,
+            ): String {
                 val pb = ProcessBuilder(*command)
                 pb.directory(dir)
                 pb.redirectErrorStream(true)
                 val process = pb.start()
-                val output = process.inputStream.bufferedReader().readText().trim()
+                val output = process.inputStream
+                    .bufferedReader()
+                    .readText()
+                    .trim()
                 process.waitFor()
                 if (process.exitValue() != 0) {
                     throw RuntimeException("Command '${command.joinToString(" ")}' failed in ${dir.name} with exit code ${process.exitValue()}: $output")
@@ -1111,7 +1239,8 @@ class StateHandlerTest {
             runGit("git", "config", "user.email", "test@example.com")
             try {
                 runGit("git", "checkout", "-b", "master")
-            } catch (_: Exception) {}
+            } catch (_: Exception) {
+                }
 
             // 2. Create initial file on master and commit
             val initialFile = File(tempDir, "initial.txt")
@@ -1164,14 +1293,19 @@ class StateHandlerTest {
 
     @Test
     fun testMergeMasterIntoBranchConflictReconstruction() {
-        val tempDir = java.nio.file.Files.createTempDirectory("test-git-merge-conflict").toFile()
+        val tempDir = java.nio.file.Files
+            .createTempDirectory("test-git-merge-conflict")
+            .toFile()
         try {
             fun runGit(vararg command: String): String {
                 val pb = ProcessBuilder(*command)
                 pb.directory(tempDir)
                 pb.redirectErrorStream(true)
                 val process = pb.start()
-                val output = process.inputStream.bufferedReader().readText().trim()
+                val output = process.inputStream
+                    .bufferedReader()
+                    .readText()
+                    .trim()
                 process.waitFor()
                 if (process.exitValue() != 0) {
                     throw RuntimeException("Command '${command.joinToString(" ")}' failed with exit code ${process.exitValue()}: $output")
@@ -1179,12 +1313,18 @@ class StateHandlerTest {
                 return output
             }
 
-            fun runGitInDir(dir: File, vararg command: String): String {
+            fun runGitInDir(
+                dir: File,
+                vararg command: String,
+            ): String {
                 val pb = ProcessBuilder(*command)
                 pb.directory(dir)
                 pb.redirectErrorStream(true)
                 val process = pb.start()
-                val output = process.inputStream.bufferedReader().readText().trim()
+                val output = process.inputStream
+                    .bufferedReader()
+                    .readText()
+                    .trim()
                 process.waitFor()
                 return output
             }
@@ -1195,7 +1335,8 @@ class StateHandlerTest {
             runGit("git", "config", "user.email", "test@example.com")
             try {
                 runGit("git", "checkout", "-b", "master")
-            } catch (_: Exception) {}
+            } catch (_: Exception) {
+                }
 
             // Create initial file on master
             val initialFile = File(tempDir, "initial.txt")
@@ -1225,7 +1366,10 @@ class StateHandlerTest {
             pbMerge.directory(worktreeDir)
             pbMerge.redirectErrorStream(true)
             val processMerge = pbMerge.start()
-            val outputMerge = processMerge.inputStream.bufferedReader().readText().trim()
+            val outputMerge = processMerge.inputStream
+                .bufferedReader()
+                .readText()
+                .trim()
             processMerge.waitFor()
 
             // It should exit with non-zero code due to merge conflict
@@ -1244,14 +1388,19 @@ class StateHandlerTest {
 
     @Test
     fun testMergeMasterIntoBranchAlreadyUpToDateReconstruction() {
-        val tempDir = java.nio.file.Files.createTempDirectory("test-git-merge-up-to-date").toFile()
+        val tempDir = java.nio.file.Files
+            .createTempDirectory("test-git-merge-up-to-date")
+            .toFile()
         try {
             fun runGit(vararg command: String): String {
                 val pb = ProcessBuilder(*command)
                 pb.directory(tempDir)
                 pb.redirectErrorStream(true)
                 val process = pb.start()
-                val output = process.inputStream.bufferedReader().readText().trim()
+                val output = process.inputStream
+                    .bufferedReader()
+                    .readText()
+                    .trim()
                 process.waitFor()
                 if (process.exitValue() != 0) {
                     throw RuntimeException("Command '${command.joinToString(" ")}' failed with exit code ${process.exitValue()}: $output")
@@ -1259,12 +1408,18 @@ class StateHandlerTest {
                 return output
             }
 
-            fun runGitInDir(dir: File, vararg command: String): String {
+            fun runGitInDir(
+                dir: File,
+                vararg command: String,
+            ): String {
                 val pb = ProcessBuilder(*command)
                 pb.directory(dir)
                 pb.redirectErrorStream(true)
                 val process = pb.start()
-                val output = process.inputStream.bufferedReader().readText().trim()
+                val output = process.inputStream
+                    .bufferedReader()
+                    .readText()
+                    .trim()
                 process.waitFor()
                 if (process.exitValue() != 0) {
                     throw RuntimeException("Command '${command.joinToString(" ")}' failed in ${dir.name} with exit code ${process.exitValue()}: $output")
@@ -1278,7 +1433,8 @@ class StateHandlerTest {
             runGit("git", "config", "user.email", "test@example.com")
             try {
                 runGit("git", "checkout", "-b", "master")
-            } catch (_: Exception) {}
+            } catch (_: Exception) {
+                }
 
             // Create initial file on master
             val initialFile = File(tempDir, "initial.txt")
@@ -1369,14 +1525,19 @@ class StateHandlerTest {
 
     @Test
     fun testMergeMasterIntoBranchUnrelatedHistoriesRescue() {
-        val tempDir = java.nio.file.Files.createTempDirectory("test-git-unrelated-rescue").toFile()
+        val tempDir = java.nio.file.Files
+            .createTempDirectory("test-git-unrelated-rescue")
+            .toFile()
         try {
             fun runGit(vararg command: String): String {
                 val pb = ProcessBuilder(*command)
                 pb.directory(tempDir)
                 pb.redirectErrorStream(true)
                 val process = pb.start()
-                val output = process.inputStream.bufferedReader().readText().trim()
+                val output = process.inputStream
+                    .bufferedReader()
+                    .readText()
+                    .trim()
                 process.waitFor()
                 if (process.exitValue() != 0) {
                     throw RuntimeException("Command '${command.joinToString(" ")}' failed with exit code ${process.exitValue()}: $output")
@@ -1384,12 +1545,18 @@ class StateHandlerTest {
                 return output
             }
 
-            fun runGitInDir(dir: java.io.File, vararg command: String): String {
+            fun runGitInDir(
+                dir: java.io.File,
+                vararg command: String,
+            ): String {
                 val pb = ProcessBuilder(*command)
                 pb.directory(dir)
                 pb.redirectErrorStream(true)
                 val process = pb.start()
-                val output = process.inputStream.bufferedReader().readText().trim()
+                val output = process.inputStream
+                    .bufferedReader()
+                    .readText()
+                    .trim()
                 process.waitFor()
                 if (process.exitValue() != 0) {
                     if (command.contains("merge") && output.contains("unrelated histories")) {
@@ -1406,7 +1573,8 @@ class StateHandlerTest {
             runGit("git", "config", "user.email", "test@example.com")
             try {
                 runGit("git", "checkout", "-b", "master")
-            } catch (_: Exception) {}
+            } catch (_: Exception) {
+                }
 
             // Create initial files on master
             val allowedFile = java.io.File(tempDir, "allowed.txt")
@@ -1441,11 +1609,16 @@ class StateHandlerTest {
                     thrown = true
 
                     // 1. Abort
-                    try { runGitInDir(worktreeDir, "git", "merge", "--abort") } catch (_: Exception) {}
+                    try {
+                        runGitInDir(worktreeDir, "git", "merge", "--abort")
+                    } catch (_: Exception) {
+                        }
 
                     // 2. Diff against origin/master to find everything that differs
                     val allDifferentFiles = runGitInDir(worktreeDir, "git", "diff", "--name-only", "master", "jules-branch")
-                        .lines().map { it.trim() }.filter { it.isNotEmpty() }
+                        .lines()
+                        .map { it.trim() }
+                        .filter { it.isNotEmpty() }
 
                     // 3. Reset hard to master
                     runGitInDir(worktreeDir, "git", "reset", "--hard", "master")
@@ -1454,7 +1627,8 @@ class StateHandlerTest {
 
                     for (file in allDifferentFiles) {
                         val normalizedFile = file.replace('\\', '/').trim()
-                        val isAllowed = normalizedFile.startsWith("docs/internals/backlog/") || targetFiles.any { target ->
+                        val isAllowed = normalizedFile.startsWith("docs/internals/backlog/") ||
+                            targetFiles.any { target ->
                             val normalizedTarget = target.replace('\\', '/').trim().removePrefix(":")
                             if (normalizedFile == normalizedTarget || normalizedFile.endsWith("/$normalizedTarget")) return@any true
                             false
@@ -1462,7 +1636,8 @@ class StateHandlerTest {
 
                         if (isAllowed) {
                             val exists = runGitInDir(worktreeDir, "git", "ls-tree", "-r", "jules-branch", "--name-only")
-                                .lines().any { it.trim() == file }
+                                .lines()
+                                .any { it.trim() == file }
                             if (exists) {
                                 runGitInDir(worktreeDir, "git", "checkout", "jules-branch", "--", file)
                                 runGitInDir(worktreeDir, "git", "add", file)
@@ -1504,14 +1679,19 @@ class StateHandlerTest {
 
     @Test
     fun testMergeMasterIntoBranchSelfHealingReconstruction() {
-        val tempDir = java.nio.file.Files.createTempDirectory("test-git-self-healing").toFile()
+        val tempDir = java.nio.file.Files
+            .createTempDirectory("test-git-self-healing")
+            .toFile()
         try {
             fun runGit(vararg command: String): String {
                 val pb = ProcessBuilder(*command)
                 pb.directory(tempDir)
                 pb.redirectErrorStream(true)
                 val process = pb.start()
-                val output = process.inputStream.bufferedReader().readText().trim()
+                val output = process.inputStream
+                    .bufferedReader()
+                    .readText()
+                    .trim()
                 process.waitFor()
                 if (process.exitValue() != 0) {
                     throw RuntimeException("Command '${command.joinToString(" ")}' failed with exit code ${process.exitValue()}: $output")
@@ -1519,12 +1699,18 @@ class StateHandlerTest {
                 return output
             }
 
-            fun runGitInDir(dir: File, vararg command: String): String {
+            fun runGitInDir(
+                dir: File,
+                vararg command: String,
+            ): String {
                 val pb = ProcessBuilder(*command)
                 pb.directory(dir)
                 pb.redirectErrorStream(true)
                 val process = pb.start()
-                val output = process.inputStream.bufferedReader().readText().trim()
+                val output = process.inputStream
+                    .bufferedReader()
+                    .readText()
+                    .trim()
                 process.waitFor()
                 if (process.exitValue() != 0) {
                     throw RuntimeException("Command '${command.joinToString(" ")}' failed in ${dir.name} with exit code ${process.exitValue()}: $output")
@@ -1538,7 +1724,8 @@ class StateHandlerTest {
             runGit("git", "config", "user.email", "test@example.com")
             try {
                 runGit("git", "checkout", "-b", "master")
-            } catch (_: Exception) {}
+            } catch (_: Exception) {
+                }
 
             // Create initial files on master
             val allowedFile = File(tempDir, "allowed.txt")
@@ -1585,7 +1772,8 @@ class StateHandlerTest {
             for (file in differentFiles) {
                 // Check if file is allowed (mimicking isFileAllowed)
                 val normalizedFile = file.replace('\\', '/').trim()
-                val isAllowed = normalizedFile.startsWith("docs/internals/backlog/") || targetFiles.any { target ->
+                val isAllowed = normalizedFile.startsWith("docs/internals/backlog/") ||
+                    targetFiles.any { target ->
                     val normalizedTarget = target.replace('\\', '/').trim().removePrefix(":")
                     if (normalizedFile == normalizedTarget || normalizedFile.endsWith("/$normalizedTarget")) return@any true
                     if (normalizedTarget.contains("/src/main/")) {
@@ -1643,7 +1831,7 @@ class StateHandlerTest {
         val prHeadSha: String = "sha123",
         val prMergeStatus: PrMergeStatus = PrMergeStatus("MERGEABLE", 0),
         val julesSessionStatus: String = "Completed",
-        val expectedStateClass: KClass<out OrchestratorState>
+        val expectedStateClass: KClass<out OrchestratorState>,
     ) {
         override fun toString(): String = description
     }
@@ -1674,58 +1862,59 @@ class StateHandlerTest {
         assertEquals(
             case.expectedStateClass,
             nextState::class,
-            "Failed transition for case: ${case.description}"
+            "Failed transition for case: ${case.description}",
         )
     }
 
     companion object {
         @JvmStatic
-        fun transitionMatrixCases(): List<TransitionTestCase> = listOf(
+        fun transitionMatrixCases(): List<TransitionTestCase> =
+            listOf(
             TransitionTestCase(
                 description = "CI_RUNNING -> AWAITING_REVIEW under successful build",
                 initialState = CiRunningState("issue-1", "123", "s1", "pr-1"),
                 buildStatus = "SUCCESS",
-                expectedStateClass = AwaitingReviewState::class
+                expectedStateClass = AwaitingReviewState::class,
             ),
             TransitionTestCase(
                 description = "CI_RUNNING -> CI_RUNNING under pending build with rebase checks",
                 initialState = CiRunningState("issue-1", "123", "s1", "pr-1"),
                 buildStatus = "PENDING",
                 prMergeStatus = PrMergeStatus("MERGEABLE", 5),
-                expectedStateClass = CreateGenerationState::class
+                expectedStateClass = CreateGenerationState::class,
             ),
             TransitionTestCase(
                 description = "AWAITING_REVIEW -> CI_RUNNING when Jules pushes non-empty code commit",
                 initialState = AwaitingReviewState("issue-1", "123", "s1", "pr-1", "sha123"),
                 prHeadSha = "sha456",
                 isCommitEmptyResult = false,
-                expectedStateClass = CiRunningState::class
+                expectedStateClass = CiRunningState::class,
             ),
             TransitionTestCase(
                 description = "AWAITING_REVIEW -> AWAITING_MERGE when Jules pushes an empty commit",
                 initialState = AwaitingReviewState("issue-1", "123", "s1", "pr-1", "sha123"),
                 prHeadSha = "sha456",
                 isCommitEmptyResult = true,
-                expectedStateClass = AwaitingMergeState::class
+                expectedStateClass = AwaitingMergeState::class,
             ),
             TransitionTestCase(
                 description = "PENDING_APPROVAL -> SELECT_TASK on abrupt GitHub issue closure",
                 initialState = PendingApprovalState("issue-1", "Title", "test.md", "123"),
                 issueClosed = true,
-                expectedStateClass = SelectTaskState::class
+                expectedStateClass = SelectTaskState::class,
             ),
             TransitionTestCase(
                 description = "AWAITING_JULES_START -> SELECT_TASK on abrupt GitHub issue closure",
                 initialState = AwaitingJulesStartState("issue-1", "123"),
                 issueClosed = true,
-                expectedStateClass = SelectTaskState::class
+                expectedStateClass = SelectTaskState::class,
             ),
             TransitionTestCase(
                 description = "AWAITING_PR -> SELECT_TASK on abrupt GitHub issue closure",
                 initialState = AwaitingPrState("issue-1", "123", "s1"),
                 issueClosed = true,
-                expectedStateClass = SelectTaskState::class
-            )
+                expectedStateClass = SelectTaskState::class,
+            ),
         )
     }
 }

@@ -27,7 +27,9 @@ fun main(args: Array<String>) {
                     val out = process.inputStream.bufferedReader().readText()
                     process.waitFor()
                     out
-                } catch (_: Exception) { "" }
+                } catch (_: Exception) {
+                    ""
+                }
             }
             pkg.impact.map { file ->
                 WorkPackageCaller(symbol = File(file).nameWithoutExtension, file = file)

@@ -1,11 +1,11 @@
 package io.mazewall.orchestrator
 
-import java.net.URI
-import java.net.http.HttpRequest
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import java.net.URI
+import java.net.http.HttpRequest
 
 /**
  * Board-side state we rely on, verified against the live Paperclip API (2026-08-24):
@@ -75,24 +75,37 @@ data class PaperclipApproval(
 )
 
 @Serializable
-private data class CompanyRef(val id: String)
+private data class CompanyRef(
+    val id: String,
+)
 
 @Serializable
-private data class AssignRequest(@SerialName("assigneeAgentId") val agentId: String)
+private data class AssignRequest(
+    @SerialName("assigneeAgentId") val agentId: String,
+)
 
 @Serializable
-private data class StatusRequest(val status: String)
+private data class StatusRequest(
+    val status: String,
+)
 
 @Serializable
-private data class UnassignRequest(@SerialName("assigneeAgentId") val agentId: String? = null)
+private data class UnassignRequest(
+    @SerialName("assigneeAgentId") val agentId: String? = null,
+)
 
 @Serializable
-private data class CommentRequest(val body: String)
+private data class CommentRequest(
+    val body: String,
+)
 
 @Serializable
 private class EmptyRequest
 
-class PaperclipException(message: String, val statusCode: Int) : RuntimeException(message)
+class PaperclipException(
+    message: String,
+    val statusCode: Int,
+) : RuntimeException(message)
 
 /**
  * Thin HTTP client for the Paperclip control plane. All calls are synchronous and
@@ -114,23 +127,25 @@ class PaperclipClient(
             ?: throw PaperclipException("No Paperclip company found", 200)
     }
 
-    fun listAgents(companyId: String): List<PaperclipAgent> =
-        json.decodeFromString(get("/api/companies/$companyId/agents"))
+    fun listAgents(companyId: String): List<PaperclipAgent> = json.decodeFromString(get("/api/companies/$companyId/agents"))
 
-    fun listIssues(companyId: String): List<PaperclipIssue> =
-        json.decodeFromString(get("/api/companies/$companyId/issues"))
+    fun listIssues(companyId: String): List<PaperclipIssue> = json.decodeFromString(get("/api/companies/$companyId/issues"))
 
-    fun listWorkProducts(issueId: String): List<PaperclipWorkProduct> =
-        json.decodeFromString(get("/api/issues/$issueId/work-products"))
+    fun listWorkProducts(issueId: String): List<PaperclipWorkProduct> = json.decodeFromString(get("/api/issues/$issueId/work-products"))
 
-    fun listComments(issueId: String): List<PaperclipComment> =
-        json.decodeFromString(get("/api/issues/$issueId/comments"))
+    fun listComments(issueId: String): List<PaperclipComment> = json.decodeFromString(get("/api/issues/$issueId/comments"))
 
-    fun comment(issueId: String, body: String) {
+    fun comment(
+        issueId: String,
+        body: String,
+    ) {
         post("/api/issues/$issueId/comments", CommentRequest(body))
     }
 
-    fun assignAgent(issueId: String, agentId: String) {
+    fun assignAgent(
+        issueId: String,
+        agentId: String,
+    ) {
         patch("/api/issues/$issueId", AssignRequest(agentId))
     }
 
@@ -143,27 +158,43 @@ class PaperclipClient(
         patch("/api/issues/$issueId", UnassignRequest())
     }
 
-    fun listPendingApprovals(companyId: String): List<PaperclipApproval> =
-        json.decodeFromString(get("/api/companies/$companyId/approvals?status=pending"))
+    fun listPendingApprovals(companyId: String): List<PaperclipApproval> = json.decodeFromString(get("/api/companies/$companyId/approvals?status=pending"))
 
     /** Bridge parity: empty-body POST; the board infers the decision from the path. */
-    fun decideApproval(approvalId: String, action: String) {
+    fun decideApproval(
+        approvalId: String,
+        action: String,
+    ) {
         post("/api/approvals/$approvalId/$action", EmptyRequest())
     }
 
-    private fun get(path: String): String = exchange(
-        HttpRequest.newBuilder()
+    private fun get(path: String): String =
+        exchange(
+        HttpRequest
+            .newBuilder()
             .uri(URI.create("$baseUrl$path"))
             .header("Authorization", "Bearer $apiKey")
-            .GET().build(),
+            .GET()
+            .build(),
     )
 
-    private inline fun <reified T> post(path: String, payload: T) = sendWithBody(path, "POST", payload)
+    private inline fun <reified T> post(
+        path: String,
+        payload: T,
+    ) = sendWithBody(path, "POST", payload)
 
-    private inline fun <reified T> patch(path: String, payload: T) = sendWithBody(path, "PATCH", payload)
+    private inline fun <reified T> patch(
+        path: String,
+        payload: T,
+    ) = sendWithBody(path, "PATCH", payload)
 
-    private inline fun <reified T> sendWithBody(path: String, method: String, payload: T): String {
-        val request = HttpRequest.newBuilder()
+    private inline fun <reified T> sendWithBody(
+        path: String,
+        method: String,
+        payload: T,
+    ): String {
+        val request = HttpRequest
+            .newBuilder()
             .uri(URI.create("$baseUrl$path"))
             .header("Authorization", "Bearer $apiKey")
             .header("Content-Type", "application/json")

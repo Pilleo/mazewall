@@ -1,9 +1,9 @@
 package io.mazewall.orchestrator
 
-import java.time.Instant
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import java.time.Instant
 
 /**
  * CI attention for hybrid-loop PRs. The agent feedback loop is NOT our job:
@@ -15,7 +15,10 @@ import kotlinx.serialization.json.Json
  * Deliberately stateless: dedupe derives from existing board comments, stuckness
  * from check start timestamps. Restarts cannot re-alert.
  */
-data class PrRef(val repo: String, val number: Int)
+data class PrRef(
+    val repo: String,
+    val number: Int,
+)
 
 @Serializable
 data class GhCheck(
@@ -36,14 +39,18 @@ data class GhSnapshot(
         if (checks.isEmpty()) return "NONE"
         val completed = checks.filter { it.status == "COMPLETED" }
         if (completed.any { it.conclusion == "FAILURE" }) return "FAILURE"
-        if (completed.isNotEmpty() && completed.size == checks.size &&
+        if (completed.isNotEmpty() &&
+            completed.size == checks.size &&
             completed.all { it.conclusion == "SUCCESS" }
-        ) return "SUCCESS"
+        ) {
+            return "SUCCESS"
+        }
         return "PENDING"
     }
 
     fun oldestPendingStartedAt(): Instant? =
-        checks.filter { it.status != "COMPLETED" || it.conclusion == null }
+        checks
+            .filter { it.status != "COMPLETED" || it.conclusion == null }
             .mapNotNull { it.startedAt }
             .mapNotNull { runCatching { Instant.parse(it) }.getOrNull() }
             .minOrNull()
@@ -51,17 +58,29 @@ data class GhSnapshot(
 
 /** Seam over the gh CLI; tests substitute canned snapshots. */
 interface GhCheckSource {
-    fun fetch(repo: String, prNumber: Int): GhSnapshot?
+    fun fetch(
+        repo: String,
+        prNumber: Int,
+    ): GhSnapshot?
 }
 
 class ProcessGhCheckSource : GhCheckSource {
     private val json = Json { ignoreUnknownKeys = true }
 
-    override fun fetch(repo: String, prNumber: Int): GhSnapshot? {
+    override fun fetch(
+        repo: String,
+        prNumber: Int,
+    ): GhSnapshot? {
         return runCatching {
             val process = ProcessBuilder(
-                "gh", "pr", "view", prNumber.toString(),
-                "-R", repo, "--json", "statusCheckRollup,headRefOid",
+                "gh",
+                "pr",
+                "view",
+                prNumber.toString(),
+                "-R",
+                repo,
+                "--json",
+                "statusCheckRollup,headRefOid",
             ).start()
             val stdout = process.inputStream.bufferedReader().readText()
             val ok = process.waitFor() == 0
@@ -69,18 +88,31 @@ class ProcessGhCheckSource : GhCheckSource {
             json.decodeFromString<GhSnapshot>(stdout)
         }.getOrNull()
     }
-}/** Narrow seam over board interactions CiWatch needs; fakes substitute in tests. */
+}
+
+/** Narrow seam over board interactions CiWatch needs; fakes substitute in tests. */
 interface IssueSignals {
     fun comments(issueId: String): List<PaperclipComment>
-    fun comment(issueId: String, body: String)
+
+    fun comment(
+        issueId: String,
+        body: String,
+    )
+
     fun workProducts(issueId: String): List<PaperclipWorkProduct>
 }
 
-class PaperclipIssueSignals(private val client: PaperclipClient) : IssueSignals {
+class PaperclipIssueSignals(
+    private val client: PaperclipClient,
+) : IssueSignals {
     override fun comments(issueId: String): List<PaperclipComment> = client.listComments(issueId)
-    override fun comment(issueId: String, body: String) = client.comment(issueId, body)
-    override fun workProducts(issueId: String): List<PaperclipWorkProduct> =
-        client.listWorkProducts(issueId)
+
+    override fun comment(
+        issueId: String,
+        body: String,
+    ) = client.comment(issueId, body)
+
+    override fun workProducts(issueId: String): List<PaperclipWorkProduct> = client.listWorkProducts(issueId)
 }
 
 class CiWatch(
@@ -110,7 +142,11 @@ class CiWatch(
         }
     }
 
-    private fun signalFailure(issue: PaperclipIssue, pr: PrRef, snapshot: GhSnapshot) {
+    private fun signalFailure(
+        issue: PaperclipIssue,
+        pr: PrRef,
+        snapshot: GhSnapshot,
+    ) {
         val sha = snapshot.headSha.orEmpty().take(SHA_PREFIX)
         if (sha.isEmpty()) return
         val token = "$FAIL_TOKEN$sha"
@@ -122,7 +158,11 @@ class CiWatch(
         notify("❌ CI failed ${issue.identifier} on $sha (${pr.repo}#${pr.number})")
     }
 
-    private fun signalStuck(issue: PaperclipIssue, pr: PrRef, snapshot: GhSnapshot) {
+    private fun signalStuck(
+        issue: PaperclipIssue,
+        pr: PrRef,
+        snapshot: GhSnapshot,
+    ) {
         val startedAt = snapshot.oldestPendingStartedAt() ?: return
         val ageMs = nowMs() - startedAt.toEpochMilli()
         if (ageMs <= stuckMinutes * 60_000) return
@@ -141,7 +181,10 @@ class CiWatch(
      * read failure would re-post duplicate comments until reads recover
      * (Codex P2, PR #513).
      */
-    private fun hasCommentMarker(issueId: String, needle: String): Boolean? =
+    private fun hasCommentMarker(
+        issueId: String,
+        needle: String,
+    ): Boolean? =
         runCatching { signals.comments(issueId) }
             .map { comments -> comments.any { it.body?.contains(needle) == true } }
             .getOrElse { null }

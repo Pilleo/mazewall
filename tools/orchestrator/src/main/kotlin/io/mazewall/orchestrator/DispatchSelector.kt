@@ -9,7 +9,6 @@ package io.mazewall.orchestrator
  * - highest priority wins, lowest issueNumber breaks ties.
  */
 object DispatchSelector {
-
     private val PRIORITY_RANK = mapOf("high" to 2, "medium" to 1, "low" to 0)
 
     fun isDispatchable(issue: PaperclipIssue): Boolean =
@@ -19,8 +18,7 @@ object DispatchSelector {
             issue.blockedBy.all { it.status == "done" || it.status == "cancelled" }
 
     /** All dispatchable issues in deterministic execution order (priority desc, number asc). */
-    fun ordered(issues: List<PaperclipIssue>): List<PaperclipIssue> =
-        issues.filter(::isDispatchable).sortedWith(comparator)
+    fun ordered(issues: List<PaperclipIssue>): List<PaperclipIssue> = issues.filter(::isDispatchable).sortedWith(comparator)
 
     /**
      * Forced targeting (orchestrator FORCE_TASK parity): restricts the ordered
@@ -28,9 +26,15 @@ object DispatchSelector {
      * terminal blockers, backlog status) still apply - forcing changes WHICH
      * dispatchable issue runs, never WHETHER one may run.
      */
-    fun select(issues: List<PaperclipIssue>, forceIdentifier: String?): PaperclipIssue? {
-        val scoped = if (forceIdentifier.isNullOrBlank()) issues
-        else issues.filter { it.identifier.equals(forceIdentifier, ignoreCase = true) }
+    fun select(
+        issues: List<PaperclipIssue>,
+        forceIdentifier: String?,
+    ): PaperclipIssue? {
+        val scoped = if (forceIdentifier.isNullOrBlank()) {
+            issues
+        } else {
+            issues.filter { it.identifier.equals(forceIdentifier, ignoreCase = true) }
+        }
         return ordered(scoped).firstOrNull()
     }
 

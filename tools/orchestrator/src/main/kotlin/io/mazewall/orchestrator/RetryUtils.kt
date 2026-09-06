@@ -5,7 +5,7 @@ object RetryUtils {
         maxRetries: Int = 3,
         initialDelayMs: Long = 1000,
         logError: ((String) -> Unit)? = null,
-        block: () -> T
+        block: () -> T,
     ): T {
         var lastException: Exception? = null
         var currentDelay = initialDelayMs

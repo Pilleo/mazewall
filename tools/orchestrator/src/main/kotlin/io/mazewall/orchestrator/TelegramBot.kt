@@ -1,48 +1,47 @@
 package io.mazewall.orchestrator
 
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
 import java.net.URI
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
-import java.net.http.HttpResponse
-import kotlinx.serialization.Serializable
-import kotlinx.serialization.json.Json
 
 @Serializable
 data class TelegramResponse<T>(
     val ok: Boolean,
     val result: T? = null,
-    val description: String? = null
+    val description: String? = null,
 )
 
 @Serializable
 data class TelegramUpdate(
     val update_id: Long,
     val message: TelegramMessage? = null,
-    val callback_query: CallbackQuery? = null
+    val callback_query: CallbackQuery? = null,
 )
 
 @Serializable
 data class TelegramMessage(
     val message_id: Long,
-    val text: String? = null
+    val text: String? = null,
 )
 
 @Serializable
 data class CallbackQuery(
     val id: String,
     val data: String? = null,
-    val message: TelegramMessage? = null
+    val message: TelegramMessage? = null,
 )
 
 @Serializable
 data class InlineKeyboardButton(
     val text: String,
-    val callback_data: String
+    val callback_data: String,
 )
 
 @Serializable
 data class ReplyMarkup(
-    val inline_keyboard: List<List<InlineKeyboardButton>>
+    val inline_keyboard: List<List<InlineKeyboardButton>>,
 )
 
 @Serializable
@@ -50,31 +49,31 @@ data class SendMessageRequest(
     val chat_id: String,
     val text: String,
     val parse_mode: String = "Markdown",
-    val reply_markup: ReplyMarkup? = null
+    val reply_markup: ReplyMarkup? = null,
 )
 
 @Serializable
 data class AnswerCallbackQueryRequest(
-    val callback_query_id: String
+    val callback_query_id: String,
 )
 
 @Serializable
 data class AnswerCallbackTextRequest(
     val callback_query_id: String,
-    val text: String
+    val text: String,
 )
 
 @Serializable
 data class EditMessageReplyMarkupRequest(
     val chat_id: String,
     val message_id: Long,
-    val reply_markup: ReplyMarkup? = null
+    val reply_markup: ReplyMarkup? = null,
 )
 
 class TelegramBot(
     private val botToken: String,
     private val chatId: String,
-    private val transport: HttpTransport = RealHttpTransport(HttpClient.newHttpClient())
+    private val transport: HttpTransport = RealHttpTransport(HttpClient.newHttpClient()),
 ) {
     private val json = Json { ignoreUnknownKeys = true }
     private var lastUpdateId = 0L
@@ -151,33 +150,42 @@ class TelegramBot(
                     }
                 }
             }
-        } catch (_: Exception) {}
+        } catch (_: Exception) {
+            }
     }
 
-    fun sendMessage(text: String, includeReviewButton: Boolean = false) {
+    fun sendMessage(
+        text: String,
+        includeReviewButton: Boolean = false,
+    ) {
         val url = "https://api.telegram.org/bot$botToken/sendMessage"
         val markup = if (includeReviewButton) {
             ReplyMarkup(
                 inline_keyboard = listOf(
-                    listOf(InlineKeyboardButton(text = "🔍 Review", callback_data = "review"))
-                )
+                    listOf(InlineKeyboardButton(text = "🔍 Review", callback_data = "review")),
+                ),
             )
-        } else null
+        } else {
+            null
+        }
 
         val payload = SendMessageRequest(chat_id = chatId, text = text, reply_markup = markup)
         post(url, json.encodeToString(SendMessageRequest.serializer(), payload))
     }
 
-    fun sendMessageWithApprovalMarkup(issueId: String, text: String) {
+    fun sendMessageWithApprovalMarkup(
+        issueId: String,
+        text: String,
+    ) {
         val url = "https://api.telegram.org/bot$botToken/sendMessage"
         val markup = ReplyMarkup(
             inline_keyboard = listOf(
                 listOf(
                     InlineKeyboardButton(text = "✅ Approve", callback_data = "approve:$issueId"),
                     InlineKeyboardButton(text = "⏭️ Skip", callback_data = "skip:$issueId"),
-                    InlineKeyboardButton(text = "🔍 Review", callback_data = "review:$issueId")
-                )
-            )
+                    InlineKeyboardButton(text = "🔍 Review", callback_data = "review:$issueId"),
+                ),
+            ),
         )
         val payload = SendMessageRequest(chat_id = chatId, text = text, reply_markup = markup)
         post(url, json.encodeToString(SendMessageRequest.serializer(), payload))
@@ -188,14 +196,21 @@ class TelegramBot(
      * @return true when Telegram accepted the message; callers persisting delivery
      * state (EventNotifier watermark) must advance only on true.
      */
-    fun sendMessageWithPaperclipApproval(approvalId: String, text: String): Boolean {
+    fun sendMessageWithPaperclipApproval(
+        approvalId: String,
+        text: String,
+    ): Boolean {
         val markup = paperclipApprovalMarkup(approvalId)
         val payload = SendMessageRequest(chat_id = chatId, text = text, reply_markup = markup)
         return postOk("https://api.telegram.org/bot$botToken/sendMessage", json.encodeToString(payload))
     }
 
-    private fun postOk(url: String, jsonBody: String): Boolean {
-        val request = HttpRequest.newBuilder()
+    private fun postOk(
+        url: String,
+        jsonBody: String,
+    ): Boolean {
+        val request = HttpRequest
+            .newBuilder()
             .uri(URI.create(url))
             .header("Content-Type", "application/json")
             .POST(HttpRequest.BodyPublishers.ofString(jsonBody))
@@ -205,7 +220,9 @@ class TelegramBot(
             if (response.statusCode() !in 200..299) {
                 System.err.println("Telegram POST to $url returned ${response.statusCode()}: ${response.body()}")
                 false
-            } else true
+            } else {
+                true
+            }
         } catch (e: Exception) {
             System.err.println("HTTP POST to $url failed: ${e.message}")
             false
@@ -213,7 +230,10 @@ class TelegramBot(
     }
 
     /** Answers a callback with an outcome string (visible as a toast in the TG client). */
-    fun answerCallbackWith(callbackQueryId: String, text: String) {
+    fun answerCallbackWith(
+        callbackQueryId: String,
+        text: String,
+    ) {
         val payload = AnswerCallbackTextRequest(callback_query_id = callbackQueryId, text = text)
         post(
             "https://api.telegram.org/bot$botToken/answerCallbackQuery",
@@ -288,8 +308,12 @@ class TelegramBot(
         post(url, json.encodeToString(AnswerCallbackQueryRequest.serializer(), payload))
     }
 
-    private fun post(url: String, jsonBody: String): String? {
-        val request = HttpRequest.newBuilder()
+    private fun post(
+        url: String,
+        jsonBody: String,
+    ): String? {
+        val request = HttpRequest
+            .newBuilder()
             .uri(URI.create(url))
             .header("Content-Type", "application/json")
             .POST(HttpRequest.BodyPublishers.ofString(jsonBody))
@@ -307,7 +331,8 @@ class TelegramBot(
     }
 
     private fun get(url: String): String? {
-        val request = HttpRequest.newBuilder()
+        val request = HttpRequest
+            .newBuilder()
             .uri(URI.create(url))
             .GET()
             .build()
@@ -321,11 +346,12 @@ class TelegramBot(
     }
 }
 
-internal fun paperclipApprovalMarkup(approvalId: String): ReplyMarkup = ReplyMarkup(
+internal fun paperclipApprovalMarkup(approvalId: String): ReplyMarkup =
+    ReplyMarkup(
     inline_keyboard = listOf(
         listOf(
             InlineKeyboardButton(text = "✅ Approve", callback_data = "pcapprove:$approvalId"),
             InlineKeyboardButton(text = "❌ Reject", callback_data = "pcreject:$approvalId"),
-        )
-    )
+        ),
+    ),
 )
