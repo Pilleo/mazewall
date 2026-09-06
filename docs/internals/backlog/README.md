@@ -1,6 +1,6 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 117 | *Total Resolved Issues:* 466
+*Total Active Issues:* 116 | *Total Resolved Issues:* 467
 
 | Issue | Title | Priority | Component |
 |---|---|---|---|
@@ -113,7 +113,6 @@
 | [issue-043-phantom-types-for-context-aware-capability-tokens](issue-043-phantom-types-for-context-aware-capability-tokens.md) | Phantom Types for Context-Aware Capability Tokens | low | enforcer |
 | [issue-061-manual-ffm-layout-maintenance-and-drift-risk](issue-061-manual-ffm-layout-maintenance-and-drift-risk.md) | Manual FFM Layout Maintenance and Drift Risk | medium | enforcer |
 | [issue-071-introduce-context-parameters-for-memory-and-engine-scopes](issue-071-introduce-context-parameters-for-memory-and-engine-scopes.md) | Introduce Context Parameters for Memory and Engine Scopes | low | enforcer |
-| [issue-081-root-test-task-requires-host-dockerpodman-not-runnable-insid](issue-081-root-test-task-requires-host-dockerpodman-not-runnable-insid.md) | \U0001F4DD [NOTE]: Root `:test` task requires host Docker/Podman, not runnable\ | medium | testing |
 | [issue-082-ktlint-parser-fails-on-kotlin-2x-named-context-parameters-sy](issue-082-ktlint-parser-fails-on-kotlin-2x-named-context-parameters-sy.md) | KtLint parser fails on Kotlin 2.x named context parameters syntax | medium | testing |
 | [issue-20260726-0135-refactor-profiler-classes-for-testability](issue-20260726-0135-refactor-profiler-classes-for-testability.md) | Refactor Profiler core classes for testability and test them | high | profiler |
 | [issue-20260726-024700-hardware-aware-ci-test-suite-and-fallback-assertions-for-intel-cet](issue-20260726-024700-hardware-aware-ci-test-suite-and-fallback-assertions-for-intel-cet.md) | Hardware-Aware CI Test Suite and Graceful Fallback Assertions for Intel CET | medium | enforcer |

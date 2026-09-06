@@ -2,7 +2,7 @@
 title: "\U0001F4DD [NOTE]: Root `:test` task requires host Docker/Podman, not runnable\
   \ inside dev container"
 severity: MEDIUM
-status: open
+status: resolved
 priority: medium
 dependencies: []
 target_files:
