@@ -1,6 +1,6 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 109 | *Total Resolved Issues:* 474
+*Total Active Issues:* 108 | *Total Resolved Issues:* 475
 
 | Issue | Title | Priority | Component |
 |---|---|---|---|
@@ -36,7 +36,6 @@
 | [issue-20260729-131008-integrate-refactorfirst-architectural-metric-analysis](issue-20260729-131008-integrate-refactorfirst-architectural-metric-analysis.md) | Integrate RefactorFirst Gradle Plugin to Prioritize Architectural Cleanups | high | ci |
 | [issue-20260729-215004-orchestrator-clean-merge-self-healing-sanitization](issue-20260729-215004-orchestrator-clean-merge-self-healing-sanitization.md) | Implement Self-Healing Working Tree Sanitization on Successful Merge Paths in BranchRebaser | high | orchestrator |
 | [issue-20260808-032525-reduce-and-version-public-api-surface](issue-20260808-032525-reduce-and-version-public-api-surface.md) | Reduce and Version the Supported Public API Surface | high | enforcer |
-| [issue-20260823-181001-slim-root-agents-md](issue-20260823-181001-slim-root-agents-md.md) | Slim root AGENTS.md to non-inferable commands, never-dos, and nested index | high | docs |
 | [issue-20260823-181012-single-start-approval-gate-hybrid](issue-20260823-181012-single-start-approval-gate-hybrid.md) | One start-approval gate for hybrid Paperclip + orchestrator loop | high | orchestrator |
 | [issue-20260823-181013-isolate-paperclip-agent-worktrees](issue-20260823-181013-isolate-paperclip-agent-worktrees.md) | Do not run Paperclip coding agents on the shared jseccomp working tree | high | orchestrator |
 | [issue-20260823-181014-retain-orchestrator-github-ci-merge-states](issue-20260823-181014-retain-orchestrator-github-ci-merge-states.md) | Keep orchestrator GitHub/CI/PR/merge states until a dispatcher replacement exists | high | orchestrator |

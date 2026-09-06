@@ -1,10 +1,8 @@
 ---
 name: file_structure
 description: >
-  MANDATORY first step before reading any Kotlin, Java, or config file.
-  Use BEFORE any task that involves: fixing bugs, reviewing code, refactoring,
-  reading a class, understanding an interface, investigating an issue, or
-  navigating unfamiliar code. Do NOT call view_file on .kt/.java first.
+  Inspect the structure of unfamiliar or large Kotlin, Java, configuration, and
+  documentation files before reading them in full.
   Trigger on: any code navigation, reading source files, code review, bug investigation,
   inspect file, outline, what does X contain, view api, file structure,
   what is in this file, show me the structure of, what methods/functions does X have.
@@ -14,12 +12,10 @@ description: >
 
 ## Purpose
 
-Before reading any file in full with `view_file`, always outline its structure first.
-This dramatically reduces token usage and prevents "lost in the middle" context drift.
+Outline unfamiliar modules and files of roughly 400 lines or more before reading them in full.
+For short files or files already outlined in the current turn, proceed directly to the relevant content.
 
-> [!IMPORTANT]
-> **This MUST be your first step when approaching any source file, config file, or design document.**
-> Only call `view_file` after the outline tells you which section or function you actually need.
+Use an outline when it will reduce navigation cost or clarify an unfamiliar API surface. It is a recommendation, not a mandatory pre-read gate.
 
 ## Command & Tools
 
@@ -85,4 +81,5 @@ kotlin scripts/file_structure.main.kts .github/workflows/ci.yml
 ## When to Skip
 
 - You have already outlined this specific file in the CURRENT turn (not just the session).
-- The file has fewer than 30 lines as confirmed by a previous listing.
+- The file is short enough that an outline would not improve navigation.
+- You already know the relevant section and can read it narrowly.

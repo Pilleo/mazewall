@@ -1,239 +1,81 @@
-# Guidelines for AI Coding Agents in mazewall
+# mazewall agent guide
 
-Welcome, AI Agent. This repository contains **mazewall**, a kernel-enforced, thread-scoped and process-wide sandboxing library for JVM applications using Linux **Seccomp-BPF** and **Landlock LSM** via the JDK **Foreign Function & Memory (FFM) API**.
+mazewall is a Linux JVM sandboxing library built on Seccomp-BPF, Landlock, and the JDK Foreign Function & Memory API. It targets JDK 25 idioms and supports JDK 22 or later.
 
-As an AI agent pair-programming on this project, you are assisting in transitioning this project from a Proof of Concept (PoC) to a production-grade library. The minimum supported JDK is **22** (FFM API finalization); the codebase targets **Java 25 idioms** where applicable. Because this is a security-critical project that directly interfaces with the Linux kernel and manipulates JVM threads, you must adhere strictly to the following rules, constraints, and engineering philosophies.
+## Security invariants
 
----
+- Fail closed. Never swallow, downgrade, or silently bypass `EPERM` or `EACCES`; fallback behavior is opt-in only.
+- Never block JVM coordination syscalls. The complete list and argument constraints are in [enforcer/AGENTS.md](enforcer/AGENTS.md).
+- Never install seccomp from a virtual thread; it permanently contaminates its carrier. See [enforcer/AGENTS.md](enforcer/AGENTS.md).
+- Never combine `SECCOMP_FILTER_FLAG_TSYNC` with `SECCOMP_FILTER_FLAG_NEW_LISTENER`.
+- Never use `JAVA_LONG` for a 32-bit C `int` or `sock_filter` field.
+- Never modify, filter, or handle `GITHUB_TOKEN`; credential management is the operator's responsibility.
+- Do not make breaking API changes, add dependencies, or change the core BPF linear-scan design without explicit approval.
+- Thread-scoped containment is not a complete ACE boundary. Preserve the process-wide Tier 1 baseline and document exact limitations.
 
-## 🚧 Hard Boundaries
+## Module boundaries
 
-**⚠️ Ask First:**
-*   Adding new dependencies.
-*   Making breaking API changes.
-*   Modifying the core BPF linear scan architecture.
+Read the nearest module instructions before changing code:
 
-**🚫 Never Do:**
-*   Never catch `EPERM` or `EACCES` exceptions without rethrowing or crashing (No silent bypasses).
-*   Never block JVM coordination syscalls (refer to the detailed list in [enforcer/AGENTS.md](enforcer/AGENTS.md#1-never-block-jvm-coordination-system-calls)).
-*   Never combine `SECCOMP_FILTER_FLAG_TSYNC` and `SECCOMP_FILTER_FLAG_NEW_LISTENER`.
-*   Never use `JAVA_LONG` for 32-bit `sock_filter` fields.
-*   **Never modify, filter, or handle the `GITHUB_TOKEN` environment variable in the codebase.** Managing or modifying GitHub CLI credentials or environment variables is strictly the operator's responsibility.
-*   **Never call `view_file` on a `.kt` or `.java` file without first running `codanna retrieve describe <ClassName>` or `kotlin scripts/file_structure.main.kts <path_to_file>` to inspect its outline.** The only exception is if you have already outlined this specific file in the CURRENT turn.
-*   **Never begin research, bug-fixing, or architecture changes without calling `memory_recall` or `memory_smart_search` on the task topic.** Stored decisions, gotchas, and invariants must be checked first before querying the filesystem or asking the operator.
-*   **Always check transitive blast-radius memory before modifying core symbols:** When planning or implementing changes to public or cross-module symbols, run `./scripts/code_atlas.sh blast-radius <SymbolName>` to surface invariants, past deadlocks, and anti-patterns across downstream callers.
-*   **Always persist durable findings to memory:** When you discover a subtle kernel nuance, fix a recurring bug, or establish a project convention, call `memory_save` to record it in `agentmemory`.
+- [platform/AGENTS.md](platform/AGENTS.md): FFM layouts, syscall metadata, native-engine isolation.
+- [enforcer/AGENTS.md](enforcer/AGENTS.md): containment, JVM floor, Loom, Landlock, and native safety.
+- [profiler/AGENTS.md](profiler/AGENTS.md): USER_NOTIF, ptrace/Yama, and profiler protocol.
+- [portal/AGENTS.md](portal/AGENTS.md), [portal-codegen/AGENTS.md](portal-codegen/AGENTS.md), and [portal-worker/AGENTS.md](portal-worker/AGENTS.md): broker/worker process isolation.
+- [tools/orchestrator/AGENTS.md](tools/orchestrator/AGENTS.md): orchestration and backlog tooling.
 
----
+Skills live in `.agents/skills/` and are loaded by their trigger; do not inline their procedures here. Follow `.agents/CODE_QUALITY.md` for design and code-quality standards.
 
-## 📓 Code Issues & Discoveries Journal
+## Native and lifecycle discipline
 
-Whenever you discover a bug, architectural gap, kernel-level nuance, or security vulnerability, you MUST log it by creating a new markdown file in the [backlog directory](docs/internals/backlog/) (e.g. `issue-182-some-bug.md`) and registering it in [docs/internals/backlog/README.md](docs/internals/backlog/README.md). Do not leave critical insights buried in chat history.
+- Keep FFM layouts and downcalls behind `NativeEngine`/`io.mazewall.ffi`; use confined arenas and capture `errno` immediately after a native call.
+- Landlock setup precedes Seccomp installation. Preserve that order.
+- A file descriptor must be owned before it is closed. Do not mint a closeable token around an invented integer.
+- Do not turn kernel, permission, or containment failures into warnings unless the operator explicitly chose that fallback.
 
-**Format for new issue files (include YAML frontmatter):**
-```markdown
----
-title: "Title of Issue"
-severity: "HIGH/MEDIUM/LOW/CRITICAL/ENHANCEMENT"
-status: "open"
-priority: high
-component: "enforcer"
-target_modules: [":enforcer"]
-target_files: ["enforcer/src/main/kotlin/io/mazewall/SomeFile.kt"]
-open_questions: false # Set to true if pending design/operator feedback
----
+## Documentation and worktree safety
 
-# 🔴 [Severity: HIGH]: Title of Issue
-**Context:** [What you found and why it exists]
-**Needed:** [How to fix or prevent it]
+- Read the relevant design document before changing behavior, threat model, native layout, or protocol semantics.
+- Keep design documentation and public guidance accurate when behavior changes; archive a backlog item only with evidence.
+- Treat existing uncommitted work as user-owned. Stage only files belonging to the current change.
+- Before conflict resolution or branch updates, inspect `git status` and preserve unrelated work with a recoverable stash when needed.
 
-## ❓ Open Questions
-1. [Clarifying design questions, architectural options, or operator trade-offs (required when open_questions: true).]
+## Verification
+
+Use focused host tests while iterating:
+
+```bash
+./gradlew :<module>:compileKotlin
+./gradlew :<module>:test --tests <TestClass>
+./gradlew :<module>:test
 ```
 
----
+Run kernel verification only when the work installs or changes Seccomp, Landlock, or USER_NOTIF behavior:
 
-## 📝 Presentation & Output Format
+```bash
+./gradlew integrationTest
+./gradlew integrationTestFreshJvm
+./scripts/run_tests.sh
+```
 
-When presenting a fix or creating a PR, use the following format:
-*   **🚨 Severity:** [CRITICAL / HIGH / MEDIUM / LOW / ENHANCEMENT]
-*   **💡 Issue:** [Description of the vulnerability or bug]
-*   **🎯 Impact:** [What happens if triggered, e.g., JVM Deadlock, logic error]
-*   **🔧 Fix:** [How it is resolved]
-*   **✅ Verification:** [How the fix was tested]
+Run the merge gate once after focused checks pass:
 
----
+```bash
+./gradlew build
+```
 
-## 🔄 Iterative Development & Testing
+## Code intelligence and backlog
 
-*   **Step-by-Step Execution:** Do not attempt massive refactors in a single pass. Make changes iteratively and surgically.
-*   **Source File Inspection (API Outline):** Before reading the full contents of any source file, you MUST inspect its API surface or symbols first to save context tokens. You may use:
-    - **Codanna** (`codanna retrieve describe <SymbolName>` or MCP tools) for semantic JVM code symbols, class declarations, and cross-references.
-    - The native Kotlin script (`kotlin scripts/file_structure.main.kts <path_to_file>`) for outlining a specific file structure on disk (such as Markdown documents, YAML configs, or files containing multiple classes).
-*   **Constant Verification:** Test after **each** logical step using the Testcontainers suite (`./gradlew test`). The codebase must remain buildable and tests must pass at every intermediate stage.
+- Prefer Codanna for symbols and callers, `./scripts/code_atlas.sh blast-radius <Symbol>` before changing public or cross-module symbols, and `./scripts/sg.sh` for structural search.
+- Use a file outline first for unknown or large files; it is recommended, not a pre-read gate for short or already-understood files.
+- Record discovered bugs, security gaps, and kernel nuances as a backlog issue using `./scripts/adkw new-issue`; keep `docs/internals/backlog/README.md` in sync.
+- Before a merge or rebase, inspect `git status` and preserve unrelated work. Never use destructive resets or checkouts to discard user changes.
 
----
+## Useful commands
 
-## 1. Core Engineering Philosophy & Tone
+```bash
+./scripts/adkw check-backlog
+./scripts/lint.sh
+./scripts/check_coverage.sh
+```
 
-### Zero Hype, Absolute Certainty
-*   **No Marketing or Speculative Language:** Avoid promotional, flashy, or hand-wavy descriptions. This library operates at the kernel-user space boundary where errors lead to fatal JVM deadlocks or JVM bypasses.
-*   **Rigorous Decision Making:** Every choice must be double and triple checked. A single missed detail can result in catastrophic failure (JVM deadlocks, kernel instability, silent security bypasses).
-*   **Honest Limitations:** Every security boundary must be documented with its exact threat model, caveats, and failure modes. If you are not 100% sure about a kernel behavior, JVM internal mechanism, or system call side-effect:
-    1.  **Do not guess or assume.**
-    2.  Search the codebase, `designs/core/security-considerations.md`, `designs/profiler/profiler-design.md`, `designs/enforcer/containment-design.md`, and Linux manual pages — in that order. These files contain hard-won, project-specific kernel behavior discoveries that man pages do not cover.
-    3.  Flag the uncertainty explicitly in comments and discuss it with the developer.
-*   **Documentation Split:**
-    *   **`/presentation`:** Addressed to general Backend/Software Engineers. Conceptually accessible; no BPF jump tables.
-    *   **Core code, KDocs, & design docs:** Highly rigorous. Exact syscall numbers, FFM memory layouts, kernel invariants.
-*   **Mandatory Documentation of Findings:** Any new architectural finding, kernel behavior discovery, or security nuance *must* be documented immediately in the appropriate Markdown file. Do not leave critical insights in conversation histories.
-
-### Code Maintainability & Craftsmanship Invariants
-All code must adhere strictly to the centralized [mazewall Code Quality & Craftsmanship Standards](.agents/CODE_QUALITY.md). Read and follow it for rules regarding SOLID design, type verification, immutability/FP, AOT friendliness, logical modularity, and debuggability.
-
----
-
-## 2. Strict Protection Against Unsafe Fallback / Bypass Scenarios
-
-> [!WARNING]
-> **CRITICAL SECURITY INSTRUCTION:** AI agents historically tend to implement "fail-safe" or "silent bypass" fallback behavior to make code "just work." **This is strictly unacceptable in a security library.**
-
-*   **Never Implement Silent Bypasses:** Do not catch exceptions silently or downgrade a failed seccomp/Landlock installation to a warning-and-bypass unless that fallback is explicitly configured by the operator.
-*   **Fail Closed by Default:** The **default `FallbackBehavior` is `FAIL`** (see `Platform.configuredFallback()` — it returns `FallbackBehavior.FAIL` unless the operator explicitly overrides via `-Dio.mazewall.fallback=WARN_AND_BYPASS` or `IO_MAZEWALL_FALLBACK=WARN_AND_BYPASS`). This is intentional and must not be changed.
-*   **No Unconsulted Fallbacks:** Do not write automatic recovery loops or mock environments (like simulating a syscall return value via register manipulation) without explicit operator consent, even if the immediate effect appears safe.
-
----
-
-## 3. Directory Structure & Technical Delegations
-
-`mazewall` is split into two specialized subprojects. Detailed engineering safety rules, FFM design conventions, and architectural bounds are documented in the respective **child `AGENTS.md` files**:
-
-### A. The `:enforcer` Module (Core Sandbox Engine)
-Responsible for production-grade sandboxing using Linux Seccomp-BPF and Landlock LSM through the JDK Foreign Function & Memory (FFM) API.
-*   **Key Source Files:** `Policy.kt`, `BpfFilter.kt`, `PureJavaBpfEngine.kt`, `Landlock.kt`, `ContainedExecutors.kt`, `LinuxNative.kt`, `Platform.kt`.
-*   **Engineering Rules:**
-    > [IMPORTANT]
-    > Before making any changes inside `/enforcer`, you **must** read and adhere to the strict guidelines in **[enforcer/AGENTS.md](enforcer/AGENTS.md)**.
-    >
-    > It covers preventing Loom Virtual Thread carrier poisoning, native FFM layout alignments, and raw syscall constraint designs.
-
-### B. The `:profiler` Module (Developer Diagnostic Suite)
-Responsible for unprivileged system call profiling and Landlock path discovery using BPF `USER_NOTIF` sockets, progressive testing, and descendant `strace` parsing.
-*   **Key Source Files:** `Profiler.kt`, `ProfilerDaemon.kt`, `IterativeProfiler.kt`, `StraceProfiler.kt`, `BobCompiler.kt`, `BillOfBehavior.kt`.
-*   **Engineering Rules:**
-    > [IMPORTANT]
-    > Before making any changes inside `/profiler`, you **must** read and adhere to the strict guidelines in **[profiler/AGENTS.md](profiler/AGENTS.md)**.
-    >
-    > It covers the critical out-of-process `USER_NOTIF` ACK loop deadlock prevention, Yama `ptrace_scope` configurations, and `strace` log parsing.
-
----
-
-## 4. Shared-Memory ACE Escape Caveat (The Core Threat Model)
-
-Thread-scoped seccomp is **not** an absolute security boundary against an attacker with Arbitrary Code Execution (ACE) on the sandboxed thread. Because all JVM threads share the same address space and heap, a native memory corruption exploit (e.g., via buffer overflow or FFM `Unsafe` pointer manipulation) on a contained thread can corrupt memory on unrestricted sibling or helper threads to achieve escape.
-
-*   **Mandatory Baseline:** Tier 1 (process-wide `NO_EXEC` baseline, via `ContainedExecutors.installOnProcess`) is an absolute architectural backstop, not an optional recommendation. Stacking thread-scoped Tier 2 containment on top mitigates the blast radius of data-oriented attacks (SSRF, XXE, SQLi), but must never be presented alone as a complete security boundary. Refer to [designs/core/security-considerations.md](docs/internals/designs/core/security-considerations.md) for the complete threat matrix.
-*   **Namespaces & cgroups Roadmap (Tier 1 Expansion):** Process-wide Mount/Network/PID namespaces and cgroups v2 limits are planned on the roadmap to reinforce the Tier 1 baseline at process initialization, ensuring escapes from memory corruption remain contained inside the process boundaries. Thread-local namespaces are explicitly rejected due to JVM coordination conflicts.
-
----
-
-## 5. Testing and Verification Guidelines
-
-*   **Prioritize TDD (Test-Driven Development):** Whenever possible, follow a TDD workflow.
-    *   **For Bug Fixes:** You MUST empirically reproduce the reported issue by writing a failing test case before applying any code changes.
-    *   **For New Features:** Define the expected behavior with tests before implementing the logic.
-*   **Testing is Mandatory:** Any bugfix, behavioral change, or new parameter **must** be accompanied by an automated test.
-*   **Running Tests:** Always run using the nested-seccomp OCI profile via the provided Podman orchestration scripts. This ensures the correct kernel capabilities and seccomp filters are applied:
-    - `./gradlew test` — Runs host-side unit tests only (fast, no kernel interaction).
-    - `./gradlew integrationTest` — Kernel tests that do **not** install on the JUnit worker (`forkEvery = 0`).
-    - `./gradlew integrationTestFreshJvm` — Tests tagged `@NeedsFreshJvm` (`forkEvery = 1`).
-    - `./scripts/run_tests.sh` — Runs the full integration test suite inside a container.
-    - `./scripts/run_vulnerable_app_demo.sh` — Executes the end-to-end CVE exploitation demo.
-    - `./scripts/check_coverage.sh` — Verifies Jacoco thresholds.
-    - `./scripts/lint.sh` — Runs static analysis (Detekt, SpotBugs, ktlint).
-    ```bash
-    ./scripts/run_tests.sh
-    ```
-*   **Module Check Tasks:** Verify your changes specifically pass module checks:
-    *   `:enforcer:check` (Landlock >= 65%, LinuxNative >= 78%, core classes >= 80% Jacoco instruction coverage)
-    *   `:profiler:check` (Profiler >= 60% Jacoco instruction coverage)
-
----
-
-## 6. Native Engine Traits & Fault Injection
-
-To maintain high testability, `mazewall` avoids direct static calls to native JNI/FFM methods. Instead, core components interact with the `NativeEngine` trait interfaces.
-For detailed implementation examples and test usage of the `MockNativeEngine` pattern, refer to the documentation in [enforcer/AGENTS.md](enforcer/AGENTS.md#7-native-engine-decoupling-for-testability).
-
----
-
-## 7. Key Design Documents
-
-Before modifying components, read the relevant design document:
-
-| Document | Covers |
-|---|---|
-| [designs/enforcer/containment-design.md](docs/internals/designs/enforcer/containment-design.md) | BPF scan loops, argument inspections, Landlock ordering, FFM layouts. |
-| [designs/enforcer/process-portal-design.md](docs/internals/designs/enforcer/process-portal-design.md) | Broker/worker process split, capability FDs, portal codegen. Distinct from the syscall supervisor. |
-| [designs/profiler/profiler-design.md](docs/internals/designs/profiler/profiler-design.md) | USER_NOTIF architecture, socket SCM_RIGHTS, ACK loop protocol. |
-| [designs/core/security-considerations.md](docs/internals/designs/core/security-considerations.md) | Full threat model, ACE escape caveats, K8s custom profiles, Yama scopes. |
-
-## 8. Cross-Module Change Protocol
-If a change touches both `:enforcer` and `:profiler`:
-1. Complete and verify `:enforcer` changes first.
-2. Run `:enforcer:check` before starting `:profiler` work.
-3. Update `Syscall.kt` and `Arch.kt` in `:enforcer` before referencing the new enum in profiler.
-
-### 8.1 Git Conflict Resolution Protocol (Working Tree Safety)
-Whenever updating a working branch or resolving git conflicts between `origin/master` and a feature/Jules branch:
-1. **Isolate Local Uncommitted Work First:** Run `git status`. If uncommitted changes exist (modified, staged, or untracked files), run `git stash push --include-untracked -m "WIP before conflict resolution"` before running any `git checkout`, `git pull`, `git merge`, or `git rebase`.
-2. **Surgical Logic Resolution:** Resolve conflict markers by inspecting symbol outlines (`codanna` / `file_structure.main.kts`). Preserve both features/overloads without dropping incoming interface methods.
-3. **Mandatory Multi-Stage Verification:** Before committing a conflict resolution, run:
-   - `./gradlew compileKotlin :tools:orchestrator:compileKotlin`
-   - `./gradlew test :tools:orchestrator:test`
-   - `./gradlew :tools:orchestrator:checkBacklog`
-   - `./.git/hooks/pre-commit`
-4. **Restore Stash:** Stage specific resolved files, complete commit, and run `git stash pop` to safely restore local uncommitted work.
-
-## 9. Task verification protocol
-After any code changes, run `./gradlew build` to verify the final changes.
-You may run more granular checks in the process, but build must be always green before you submit the results.
-
-## 10. Codebase Intelligence & Search Tools
-
-To optimize context token consumption and perform precise codebase navigation:
-
-*   **Agent Memory (`agentmemory` + BGE-M3):** Call `call_mcp_tool("agentmemory", "memory_recall", {"query": "..."})` or `memory_smart_search` before broad filesystem searches. It returns compact, pre-computed architectural decisions and invariants in < 500 tokens using dense BGE-M3 vector embeddings.
-*   **Blast-Radius Memory Injection (`scripts/code_atlas.sh blast-radius <Symbol>`):** Combines Codanna's AST impact dependency graph with `agentmemory`. Run this to trace downstream callers up to depth 3 and surface all historical bugs, kernel deadlocks, and anti-patterns across the entire blast radius before writing code.
-*   **Codanna (Symbol Lookup & Call Graphs):** Use the helper wrapper `./scripts/code_atlas.sh`, or raw `codanna retrieve` / `codanna mcp` directly. It is completely CLI-only/one-shot; no background daemon server needs to be running. Refer to [.agents/skills/file_structure/SKILL.md](file:///.agents/skills/file_structure/SKILL.md) for detail usage.
-*   **Searching for Symbols:** Use `codanna mcp find_symbol <Name>` instead of `grep_search` for class/function definitions. Use `codanna mcp find_callers <Name>` instead of `grep_search` for call-site discovery. Do not use `grep_search` as your primary navigation tool for symbols.
-*   **ast-grep (Structural Code Search):** Use the repository wrapper `./scripts/sg.sh` for syntax-aware pattern searches and refactoring. Refer to [.agents/skills/ast_grep/SKILL.md](file:///.agents/skills/ast_grep/SKILL.md) for detail usage.
-
----
-
-## 11. Available Agent Skills
-
-The `.agents/skills/` directory contains reusable, step-by-step workflows for common tasks. Use these skills proactively when they match the task at hand — they encode hard-won lessons specific to this codebase.
-
-| Skill directory | Use when... |
-|---|---|
-| `add_syscall` | Adding a new syscall constant to `Policy`, `BpfFilter`, or the profiler |
-| `ast_grep` | Performing structural, syntax-aware search and replace on source code |
-| `ffm_safety` | Making any FFM/off-heap memory changes (layouts, arenas, downcalls) |
-| `fix_backlog_item` | Fixing bugs/backlog items cleanly without warmups, swallows, or hacks |
-| `loop_driven_development` | Iterative red-green-refactor TDD cycle for new features |
-| `create_backlog_issue` | Documenting a new bug, feature, architectural gap, or security/performance finding |
-| `review` | Code review of a patch, PR, or proposed design |
-| `spec_driven_development` | Building a feature from a written spec document |
-| `update_docs` | Keeping design docs in sync after code changes |
-| `file_structure` | Inspecting any file's outline/structure before reading its full content |
-
-
-
-## 🛠️ Agent DevKit (ADK) Universal Tooling & Hard Boundaries
-
-- **Never call \`view_file\` without inspecting AST structure first:** Use \`codanna retrieve describe <Class>\` or the \`file_structure\` skill before reading full files.
-- **Always check blast-radius memory before modifying core symbols:** Run \`./scripts/adkw blast-radius <SymbolName>\` to surface invariants and past regressions across downstream callers.
-- **Deterministic compilation guard:** Run \`./scripts/adkw guard <file>\` to verify syntax and typecheck before committing.
-- **Scaffold new backlog issues cleanly:** Run \`./scripts/adkw new-issue --title "<title>" [options]\`.
-- **Verify backlog integrity:** Run \`./scripts/adkw check-backlog\` before marking work completed.
+Use `./scripts/adkw guard <file>` as a fast syntax/type check before committing a changed Kotlin file.

@@ -1,7 +1,7 @@
 ---
 title: "Slim root AGENTS.md to non-inferable commands, never-dos, and nested index"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "docs"
