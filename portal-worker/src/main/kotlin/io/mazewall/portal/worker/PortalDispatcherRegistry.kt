@@ -40,17 +40,18 @@ public object PortalDispatcherRegistry {
     ): ByteArray? = handlers[methodId]?.invoke(methodId, payload, granted)
 
     /**
-     * Reflectively wires `Interface=Impl(;Dispatcher)?` pairs. Tolerant of malformed
-     * entries so one bad flag cannot take down the worker before policy
-     * installation - each failure logs and skips.
+     * Reflectively wires `Interface=Impl(;Dispatcher)?` pairs.
+     *
+     * A registered portal must be completely configured before its worker enters
+     * service.  Ignoring a malformed entry would otherwise leave a supposedly
+     * isolated service accepting requests with an incomplete dispatch surface.
      */
     public fun bootstrapFromProperty(raw: String?): Int {
         if (raw.isNullOrBlank()) return 0
         var count = 0
         for (entry in raw.split(',')) {
-            runCatching { registerEntry(entry.trim()) }
-                .onSuccess { count++ }
-                .onFailure { System.err.println("[PORTAL-DISPATCH] skipping '$entry': ${it.message}") }
+            registerEntry(entry.trim())
+            count++
         }
         return count
     }

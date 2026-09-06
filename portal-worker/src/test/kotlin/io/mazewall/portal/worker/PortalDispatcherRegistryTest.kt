@@ -108,12 +108,9 @@ class PortalDispatcherRegistryTest {
     }
 
     @Test
-    fun `malformed bootstrap entries are skipped without poisoning later ones`() {
-        val count = PortalDispatcherRegistry.bootstrapFromProperty(
-            "garbage-without-equals,${EchoService::class.java.name}=no.such.Impl," +
-                "${EchoService::class.java.name}=${EchoServiceImpl::class.java.name};" +
-                EchoServicePortalDispatcher::class.java.name,
-        )
-        assertEquals(1, count)
+    fun `malformed bootstrap entry fails closed`() {
+        assertFailsWith<IllegalArgumentException> {
+            PortalDispatcherRegistry.bootstrapFromProperty("garbage-without-equals")
+        }
     }
 }
