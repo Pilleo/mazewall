@@ -1,6 +1,6 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 106 | *Total Resolved Issues:* 477
+*Total Active Issues:* 105 | *Total Resolved Issues:* 478
 
 | Issue | Title | Priority | Component |
 |---|---|---|---|
@@ -26,7 +26,6 @@
 | [issue-20260726-205801-orchestrator-serial-merge-queue](issue-20260726-205801-orchestrator-serial-merge-queue.md) | Implement Serial PR Merge Queue in Orchestrator to Prevent Rebase Races | high | orchestrator |
 | [issue-20260726-205802-orchestrator-working-tree-sanitization-barrier](issue-20260726-205802-orchestrator-working-tree-sanitization-barrier.md) | Implement Pre-Commit Working Tree Sanitization Barrier in Orchestrator Tasks | high | orchestrator |
 | [issue-20260726-205803-mandatory-orchestrator-issue-creation-gating](issue-20260726-205803-mandatory-orchestrator-issue-creation-gating.md) | Enforce Mandatory Schema Gating and Skill Header Injection in Issue Creation | high | orchestrator |
-| [issue-20260726-205804-exclusive-orchestrator-execution-invariant-documentation](issue-20260726-205804-exclusive-orchestrator-execution-invariant-documentation.md) | Document Single Control Plane Development Invariants in AGENTS.md | high | docs |
 | [issue-20260727-021302-github-cli-token-fallback-and-auth-resilience](issue-20260727-021302-github-cli-token-fallback-and-auth-resilience.md) | GitHub CLI Authentication Resilience and Fallback for Invalid GITHUB_TOKEN | high | orchestrator |
 | [issue-20260727-025903-orchestrator-closed-pr-detection-and-slot-reset](issue-20260727-025903-orchestrator-closed-pr-detection-and-slot-reset.md) | Detect Closed Pull Requests and Suppress Conflict Alarm Spam in Orchestrator | high | orchestrator |
 | [issue-20260727-040001-interface-decoupling-processbuilder-realgithubclient](issue-20260727-040001-interface-decoupling-processbuilder-realgithubclient.md) | Interface decoupling for ProcessBuilder execution in RealGitHubClient | medium | orchestrator |

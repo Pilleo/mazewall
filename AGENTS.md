@@ -39,6 +39,13 @@ Skills live in `.agents/skills/` and are loaded by their trigger; do not inline 
 - Treat existing uncommitted work as user-owned. Stage only files belonging to the current change.
 - Before conflict resolution or branch updates, inspect `git status` and preserve unrelated work with a recoverable stash when needed.
 
+## Single control plane
+
+- Do not push directly to the default branch. Work enters through a scoped backlog item and the orchestrator-managed review path.
+- Preserve serial PR merge handling and reject a task diff that escapes its declared scope.
+- Do not let Paperclip or another agent mutate the same worktree as an active orchestrator worker; assignment is an explicit operator action.
+- Operators use the orchestrator CLI/Telegram approval flow for starts and merges. See `tools/orchestrator/README.md` for commands.
+
 ## Verification
 
 Use focused host tests while iterating:
