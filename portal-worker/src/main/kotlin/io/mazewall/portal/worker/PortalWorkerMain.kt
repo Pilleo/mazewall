@@ -26,23 +26,30 @@ public object PortalWorkerMain {
         }
         val sockets = RealSocketManager
         val connected = sockets.connect(args[0])
-        ContainedExecutors.installOnProcess(
-            ProcessPolicies.denyProcessCreation(RuntimeProfile.HOTSPOT_JIT),
-            ProcessPolicies.denyNetwork(RuntimeProfile.HOTSPOT_JIT),
-        )
         // Landlock is ThreadLocalOnly in the type system (no TSYNC on helper threads).
-        // Apply it on the dispatch thread after connect; fail closed if unsupported.
-        ContainedExecutors.installOnCurrentThread(
-            ProcessPolicies.workerFilesystem(RuntimeProfile.HOTSPOT_JIT),
-        )
-        println(READY)
-        System.out.flush()
-        // Generated service dispatchers must be registered before the first request
-        // can arrive; entries come from -Dio.mazewall.portal.worker.dispatchers.
-        val registered = PortalDispatcherRegistry.bootstrapFromProperty(
-            System.getProperty("io.mazewall.portal.worker.dispatchers"),
+        // It must precede Seccomp.  Dispatcher construction may execute guest
+        // constructors, so it occurs only after process containment is installed.
+        val registered = PortalWorkerStartup.prepare(
+            installFilesystem = {
+                ContainedExecutors.installOnCurrentThread(
+                    ProcessPolicies.workerFilesystem(RuntimeProfile.HOTSPOT_JIT),
+                )
+            },
+            installProcessContainment = {
+                ContainedExecutors.installOnProcess(
+                    ProcessPolicies.denyProcessCreation(RuntimeProfile.HOTSPOT_JIT),
+                    ProcessPolicies.denyNetwork(RuntimeProfile.HOTSPOT_JIT),
+                )
+            },
+            bootstrapDispatchers = {
+                PortalDispatcherRegistry.bootstrapFromProperty(
+                    System.getProperty("io.mazewall.portal.worker.dispatchers"),
+                )
+            },
         )
         if (registered > 0) println("[DBG-W] registered=$registered generated dispatcher(s)")
+        println(READY)
+        System.out.flush()
         val channel = PortalChannel(connected, sockets)
         // Idle workers must not exit on quiet periods: timeouts are an idle tick (continue),
         // while genuine socket death (ECONNRESET/POLLHUP from a dead broker) still breaks the
