@@ -1,7 +1,7 @@
 ---
 title: "Deduplicate PendingSpawnRegistry TTL logic and use monotonic clock"
 severity: "LOW"
-status: "open"
+status: "resolved"
 priority: low
 dependencies: []
 component: "enforcer"

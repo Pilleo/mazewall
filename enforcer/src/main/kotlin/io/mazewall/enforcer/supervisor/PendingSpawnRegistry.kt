@@ -17,27 +17,33 @@ import java.util.concurrent.ConcurrentHashMap
  * process when it subsequently calls execve.
  */
 internal object PendingSpawnRegistry {
+    private const val AUTHORIZATION_TTL_NANOS = 10_000_000_000L
+
     private val registry = ConcurrentHashMap<Tid, PendingSpawn>()
 
-    private class PendingSpawn(val stackTrace: List<StackTraceElement>, val timestamp: Long)
+    private class PendingSpawn(
+        val stackTrace: List<StackTraceElement>,
+        private val registeredAtNanos: Long,
+    ) {
+        fun isExpired(nowNanos: Long): Boolean = nowNanos - registeredAtNanos > AUTHORIZATION_TTL_NANOS
+    }
 
     /**
      * Registers the authorized stack trace for a parent thread currently spawning a process.
      */
-    fun register(parentTid: Tid, stackTrace: List<StackTraceElement>) {
-        val now = System.currentTimeMillis()
+    fun register(parentTid: Tid, stackTrace: List<StackTraceElement>, nowNanos: Long = System.nanoTime()) {
+        val now = nowNanos
         registry[parentTid] = PendingSpawn(stackTrace, now)
-        // Clean up expired entries (older than 10 seconds to be very safe)
-        registry.entries.removeIf { now - it.value.timestamp > 10000 }
+        registry.entries.removeIf { it.value.isExpired(now) }
     }
 
     /**
      * Retrieves the authorized stack trace for a given parent TID.
      */
-    fun get(parentTid: Tid): List<StackTraceElement>? {
+    fun get(parentTid: Tid, nowNanos: Long = System.nanoTime()): List<StackTraceElement>? {
         val entry = registry[parentTid] ?: return null
-        if (System.currentTimeMillis() - entry.timestamp > 10000) {
-            registry.remove(parentTid)
+        if (entry.isExpired(nowNanos)) {
+            registry.remove(parentTid, entry)
             return null
         }
         return entry.stackTrace
